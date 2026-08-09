@@ -449,6 +449,69 @@ def test_env_survives_the_hop_on_every_platform(monkeypatch, tmp_path):
         assert any(c.endswith("env") or c == "env" for c in cmd), (platform, cmd)
 
 
+# --- the checkpointable launch (item 13) -------------------------------------
+#
+# On Windows, Start boots the guest as root under PAD_PIVOT=1 - the only shape
+# criu can checkpoint, so the only shape the playfield's Save/Load state
+# buttons work in.  watch.sh drops the helpers back to the desktop user, whose
+# home rides along explicitly because root's own HOME is the wrong rootfs.
+
+def _home(monkeypatch, value):
+    """Pin wsl_home()'s answer - the probe itself needs a live WSL."""
+    monkeypatch.setattr(emulate_tab, "_WSL_HOME", [value, True])
+
+
+def test_windows_start_is_the_checkpointable_launch(monkeypatch, tmp_path):
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    _home(monkeypatch, "/home/somebody")
+    cmd = emulate_tab.watch_cmd(120, ["PAD_CARD=/mnt/c/x.raw"])
+    assert cmd[:3] == ["wsl.exe", "-u", "root"]
+    assert "PAD_PIVOT=1" in cmd
+    assert "HOME=/home/somebody" in cmd
+    # The caller's env still survives the hop, same rule as rig_cmd's.
+    assert "PAD_CARD=/mnt/c/x.raw" in cmd
+    assert cmd[-1] == "120"
+    assert not any("\\" in c for c in cmd), cmd
+
+
+def test_a_failed_home_probe_degrades_to_the_ordinary_launch(monkeypatch,
+                                                             tmp_path):
+    """No save states rather than a root run pointed at /root/spike2root."""
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    _home(monkeypatch, None)
+    cmd = emulate_tab.watch_cmd(120, [])
+    assert cmd[:2] == ["wsl.exe", "-e"]
+    assert "-u" not in cmd and "PAD_PIVOT=1" not in cmd
+
+
+def test_other_platforms_keep_their_launch(monkeypatch, tmp_path):
+    """The pivot boot is a WSL arrangement; macOS's container and a Linux
+    desktop keep the launch they had."""
+    for platform in ("linux", "darwin"):
+        monkeypatch.setattr(emulate_tab.sys, "platform", platform)
+        monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+        _home(monkeypatch, "/home/somebody")
+        cmd = emulate_tab.watch_cmd(30, [])
+        assert "wsl.exe" not in cmd, (platform, cmd)
+        assert "PAD_PIVOT=1" not in cmd, (platform, cmd)
+
+
+def test_stop_kills_as_root_on_windows(monkeypatch, tmp_path):
+    """A PAD_PIVOT guest is a root process: the ordinary user's pkill reports
+    success and kills nothing.  Root's kill reaches both kinds of run."""
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    _home(monkeypatch, "/home/somebody")
+    cmd = emulate_tab.kill_cmd()
+    assert cmd[:3] == ["wsl.exe", "-u", "root"]
+    assert any(c.endswith("killgame.sh") for c in cmd)
+    _home(monkeypatch, None)
+    cmd = emulate_tab.kill_cmd()
+    assert cmd[:2] == ["wsl.exe", "-e"], cmd
+
+
 def test_the_container_entry_point_ships_with_the_rig():
     """rig_cmd names it on macOS, so its absence would be a macOS-only failure
     that nobody developing on Windows or Linux would ever see."""
@@ -578,6 +641,124 @@ def test_start_on_a_mac_without_docker_launches_nothing(tmp_path, monkeypatch):
         # non-main thread needs a running mainloop, which this fixture has not
         # got.  Asserting it here would test the fixture, not the panel.
         assert not panel._starting
+    finally:
+        root.destroy()
+
+
+def test_start_builds_the_launch_off_the_ui_thread(tmp_path, monkeypatch):
+    """watch_cmd() asks WSL for the desktop user's home (wsl_home: two
+    wsl.exe probes), and the first wsl.exe after a Windows reboot boots the
+    whole WSL VM — tens of seconds.  start() used to build the command on
+    the main thread, which was the window frozen solid for that boot
+    (David, 2026-08-09, read it as a crashed app).  The boot is simulated
+    with an Event rather than a reboot."""
+    import threading as _th
+    import time
+    img = tmp_path / "godzilla_pro-1_15_0.Release.8G.sdcard.raw"
+    img.write_bytes(bytes(16))
+    root, panel = _panel(tmp_path)
+    panel._on_destroy(None)              # silence the status poll
+    boot = _th.Event()                   # a cold WSL boot, in miniature
+    built = {}
+
+    def cold_watch_cmd(minutes, env):
+        built["thread"] = _th.current_thread()
+        boot.wait(10)
+        return ["watch.sh-stand-in"]
+
+    launched = []
+    monkeypatch.setattr(emulate_tab, "watch_cmd", cold_watch_cmd)
+    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
+    # Pinned so a macOS runner's Start worker does not go asking a real
+    # Docker before it ever reaches watch_cmd.
+    monkeypatch.setattr(emulate_tab, "docker_state", lambda: "ok")
+    monkeypatch.setattr(
+        emulate_tab.subprocess, "Popen",
+        lambda *a, **kw: launched.append(a[0]) or
+        SimpleNamespace(stdout=iter(()), wait=lambda timeout=None: 0))
+    try:
+        panel._src_path.set(str(img))
+        panel.start()        # must come back with the "boot" still running
+        assert not launched, "start() sat through the WSL boot on the UI thread"
+        boot.set()
+        deadline = time.time() + 5
+        while not launched and time.time() < deadline:
+            time.sleep(0.01)
+        assert launched and launched[0] == ["watch.sh-stand-in"]
+        assert built["thread"] is not _th.main_thread(), \
+            "the launch command was built on the UI thread"
+    finally:
+        boot.set()
+        root.destroy()
+
+
+def test_a_cold_wsl_says_so_instead_of_freezing(tmp_path, monkeypatch):
+    """The build-time setup probe is one wsl.exe call, and after a Windows
+    reboot that call boots the whole WSL VM.  The tab used to show a dash
+    and say nothing for the duration; now it names the wait and its bound.
+    A warm probe answers inside one drain pass, so the line never flashes
+    on an ordinary start."""
+    import threading as _th
+    import time
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    boot = _th.Event()
+    monkeypatch.setattr(emulate_tab, "setup_state",
+                        lambda: (boot.wait(10), None)[1])
+    root, panel = _panel(tmp_path)
+    # AFTER the build (so the tab came up normally): keep the 2 s status poll
+    # from reaching a real wsl.exe once the gate opens, and from writing over
+    # the state row this test is reading.
+    monkeypatch.setattr(emulate_tab, "rig_available", lambda: False)
+    try:
+        deadline = time.time() + 5
+        while ("take a minute" not in panel._hint.cget("text")
+               and time.time() < deadline):
+            root.update()
+            time.sleep(0.02)
+        assert "Starting WSL" in panel._vals["state"].cget("text")
+        assert "take a minute" in panel._hint.cget("text")
+        # And nothing has claimed "Not running" over it: the poll is gated
+        # behind this very probe.
+        boot.set()
+        deadline = time.time() + 5
+        while ("take a minute" in panel._hint.cget("text")
+               and time.time() < deadline):
+            root.update()
+            time.sleep(0.02)
+        assert "take a minute" not in panel._hint.cget("text")
+        assert panel._vals["state"].cget("text") == "—"
+    finally:
+        boot.set()
+        root.destroy()
+
+
+def test_polls_do_not_stack_behind_a_booting_wsl(tmp_path, monkeypatch):
+    """Each status poll is a wsl.exe worker with a 20 s timeout.  While the
+    setup probe is still out (= WSL may be booting), a poll every 2 s just
+    queues more of them behind the boot, and the first one back would time
+    out empty and write "Not running" over the honest "Starting WSL" line -
+    a claim about a machine nobody has seen yet."""
+    import time
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    root, panel = _panel(tmp_path)
+    ran = []
+    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
+    monkeypatch.setattr(
+        emulate_tab.subprocess, "run",
+        lambda *a, **kw: ran.append(a[0]) or
+        SimpleNamespace(stdout=b"", returncode=0))
+    try:
+        panel._setup_busy = True
+        panel._poll()
+        time.sleep(0.2)
+        root.update()
+        assert not ran, "a status poll went out while WSL was still booting"
+        panel._setup_busy = False
+        panel._poll()
+        deadline = time.time() + 5
+        while not ran and time.time() < deadline:
+            time.sleep(0.01)
+        assert any("status.sh" in " ".join(map(str, c)) for c in ran)
     finally:
         root.destroy()
 

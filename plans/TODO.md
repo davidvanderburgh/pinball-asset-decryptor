@@ -776,6 +776,28 @@ These have each been violated at least once and each cost a run or a window:
       audio and video and everything."** D stays D2: nothing is left to
       DISCOVER, but the mid-ball acceptance read and the card-run confirm
       each still need a run, which is the D2 line.)*
+      **★★ REVERTED, THEN RE-LANDED 2026-08-09 — the app-launch flow in (1)
+      below was PULLED from main in v0.120.1** (v0.120.0 shipped a startup
+      freeze; the GUI went back to v0.119.7, so the Emulate-tab
+      checkpointable launch, `kill_cmd()` and the cold-WSL thaw were all off
+      main while this entry still said "live-verified"; the playfield
+      Save/Load buttons stayed but reported "not checkpointable"). The
+      freeze was then root-caused ELSEWHERE — v0.120.2 log-pane line COUNT,
+      v0.120.3 NUL-flood line LENGTH — so the revert's reason was gone, and
+      David asked for it back: "we don't have the app freeze issue anymore.
+      let's turn it back on for me to try it out." **Re-landed on item/13 by
+      reverting both reverts** (44a133e GUI, 74d9339 README) and merging
+      against v0.120.2-6. Two conflict resolutions worth recording: BOTH
+      attribute blocks kept (`_poll_busy` AND `_setup_ticks`/
+      `_setup_said_boot` — the post-revert async poll and the re-landed
+      cold-WSL machinery coexist), and `_restart_wsl` keeps v0.120.5's
+      `pre_kill` structure but calls **`kill_cmd()`** — v0.120.5 was written
+      on the reverted file, so its pre-kill was the user-level killgame that
+      a ROOT guest ignores. 251 tests green in the worktree, including
+      `test_log_pane_freeze` + `test_emulate_poll_storm` (the freeze fixes'
+      own regressions — proof the merge kept them) and the re-added
+      `test_tab_switch_disk_freeze`. Awaiting David's hands on the shipped
+      build.
       **No live run. The windowed session's 25-min backstop fired and
       teardown was CONFIRMED: alive.sh printed TOTAL 0 after it, including
       the restored guest (a pidns init — SIGKILL teardown held) and the

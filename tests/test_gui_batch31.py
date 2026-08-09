@@ -144,8 +144,23 @@ class _FakeLabel:
         return self.text
 
 
+class _ImmediateRoot:
+    """`after` runs the callback right away — these tests are about the
+    banner's decisions, not Tk's timer wheel."""
+
+    def after(self, _delay, fn=None, *args):
+        if fn is not None:
+            fn(*args)
+
+
 class _BannerHost:
-    """Just the surface _refresh/_dismiss_stale_source_banner touch."""
+    """Just the surface _refresh/_dismiss_stale_source_banner touch.
+
+    The refresh is ASYNC now — the staleness probe stats the source image,
+    which can live on OneDrive/NAS, so the real method moved it to a worker
+    (a frozen post-reboot tab switch, 2026-08-09).  The host joins the probe
+    before returning so every assertion below still reads the settled
+    answer, exactly as it did when the method was synchronous."""
 
     def __init__(self, assets_dir):
         self.write_assets_var = _Var(assets_dir)
@@ -153,8 +168,20 @@ class _BannerHost:
         self._stale_source_banner_text = _FakeLabel()
         self._stale_source_dismissed = None
         self._top_bar = None
+        self.root = _ImmediateRoot()
 
-    refresh = W._refresh_stale_source_banner
+    def _apply_stale_source_banner(self, *a):
+        try:
+            return W._apply_stale_source_banner(self, *a)
+        finally:
+            self._applied.set()
+
+    def refresh(self):
+        import threading as _th
+        self._applied = _th.Event()
+        W._refresh_stale_source_banner(self)
+        assert self._applied.wait(5), "the staleness probe never answered"
+
     dismiss = W._dismiss_stale_source_banner
 
 

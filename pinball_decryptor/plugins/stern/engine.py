@@ -3079,13 +3079,25 @@ def _changed_radium_images(assets_dir, baseline, extra_changed=(), scope=None):
     drops the occurrences of a narrowed atlas that live outside its chosen
     scenes — those scenes keep their stock bytes because every occurrence
     starts out identical, so simply not patching them IS leaving them stock.
-    An output absent from *scope* keeps the all-occurrences default."""
+    An output absent from *scope* keeps the all-occurrences default.
+
+    A scope narrows GLYPH edits only.  Replacing the atlas PNG itself on the
+    Images tab is the ordinary all-occurrences image replace, and it has to
+    stay that way even when the Fonts window happens to have narrowed the same
+    atlas earlier: the scope file is written as a SIDE EFFECT of an import
+    removing an outline companion, so a user who never opened the scope control
+    can own one without knowing.  A tester hit exactly that — he replaced 13
+    outline atlases with an empty 512x512 PNG, and 900 of their 913 on-card
+    occurrences were silently dropped by scopes an earlier import had left
+    behind, so his machine kept the old outlines on every screen but one."""
     from ...core.checksums import md5_file
     tex_dir = os.path.join(assets_dir, *_TEXTURE_DIR)
     manifest = os.path.join(tex_dir, _RADIUM_IMAGE_MANIFEST)
     if not os.path.isfile(manifest):
         return []
     out = []
+    png_edited = {}          # output -> the PNG itself differs from stock
+    #                          (memoised: one atlas has 200+ rows here)
     with open(manifest, "r", encoding="utf-8") as f:
         for line in f:
             line = line.rstrip("\r\n")
@@ -3106,7 +3118,11 @@ def _changed_radium_images(assets_dir, baseline, extra_changed=(), scope=None):
                 continue
             allowed = (scope or {}).get(output)
             if allowed is not None and radium_path not in allowed:
-                continue                       # narrowed to other scenes
+                if output not in png_edited:
+                    png_edited[output] = _atlas_png_changed(
+                        staged, baseline, output)
+                if not png_edited[output]:
+                    continue                   # narrowed to other scenes
             if output not in extra_changed:
                 base = baseline.get("images/" + output)
                 try:
@@ -3142,9 +3158,20 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
                                    extra_changed=set(glyph_atlases),
                                    scope=scope)
     if scope:
-        kept = {o for (o, *_r) in edits}
+        per_output = {}
+        for (o, *_r) in edits:
+            per_output[o] = per_output.get(o, 0) + 1
+        kept = set(per_output)
         for output, cards in sorted(scope.items()):
-            if output in kept:
+            if output in kept and per_output[output] > len(cards):
+                # The atlas PNG itself was replaced, so the scope does not
+                # apply — say so, because a user who DID mean to narrow this
+                # font would otherwise find the border gone everywhere.
+                log("Font atlas %s was replaced outright, so all %d of its "
+                    "scene(s) take it — the %d-scene limit set in the Fonts "
+                    "window applies to glyph edits only."
+                    % (output, per_output[output], len(cards)), "info")
+            elif output in kept:
                 log("Font atlas %s is limited to %d scene(s); its other "
                     "scenes keep the stock font." % (output, len(cards)),
                     "info")

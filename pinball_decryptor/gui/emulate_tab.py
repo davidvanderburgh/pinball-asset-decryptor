@@ -29,10 +29,18 @@ Three things about it are worth knowing before changing anything here:
   rig on this machine, which is internal state no user can create or reason
   about.
 
-* **It runs as the normal WSL user, not root.**  ``core.executor`` invokes
-  ``wsl -u root``; the rig's scripts assume ``/home/david`` and a user-owned
-  X11/PulseAudio session, so root would break WSLg and the audio path.  That is
-  why this module calls ``wsl.exe`` directly instead of reusing the executor.
+* **The LAUNCH is root on Windows now, and that is item 13's doing.**  This
+  module's original rule was "normal WSL user, never root - root breaks WSLg
+  and the audio path", and that stopped being true when ``watch.sh`` learned
+  the drop dance: a ``PAD_PIVOT=1`` root launch boots the GUEST as root (the
+  only shape criu can checkpoint, so the only shape the playfield's
+  Save/Load state buttons work in) and drops every helper back to the desktop
+  user, whose WSLg and audio session they need.  ``watch_cmd()`` owns the
+  launch, ``kill_cmd()`` the teardown (a root guest needs a root kill), and
+  ``wsl_home()`` the one fact both need beyond ``rig_cmd()``.  Helpers,
+  status polls and everything else still run as the normal user, which is
+  still why this module calls ``wsl.exe`` directly instead of reusing the
+  executor.
 
 * **Stopping must be verified, never assumed.**  An orphaned guest spins at
   ~140% CPU forever and ignores polite signals, so Stop runs the rig's own
@@ -276,6 +284,100 @@ def rig_cmd_root(script, *args):
             "%s/%s" % (_wsl_path(rig_dir()), script)] + [str(a) for a in args]
 
 
+#: wsl_home()'s cache: [value, probed].  One probe per app run is plenty - the
+#: answer changes when the user reinstalls their distro, not between clicks.
+_WSL_HOME = [None, False]
+
+
+def wsl_home():
+    """The default WSL user's home ('/home/david'), asked of WSL itself.
+
+    The checkpointable launch below runs ``wsl -u root``, whose own HOME is
+    /root - the wrong rootfs, the wrong logs, the wrong everything - so the
+    desktop user's home is passed in explicitly, and this is where it comes
+    from.  NO shell variables anywhere in the probe: ``wsl.exe`` re-parses its
+    argument line and ``$HOME`` expands to empty on that second pass (the JJP
+    executor learned that the hard way), so it is ``whoami`` + ``getent``,
+    which carry no ``$`` at all.  None when anything fails, and the callers
+    fall back to the ordinary user launch.
+
+    NEVER ON THE UI THREAD.  The first wsl.exe after a Windows reboot boots
+    the whole WSL VM, so this probe's real worst case is not its 30 s
+    timeouts, it is that boot - call it (and watch_cmd/kill_cmd, which call
+    it) from a worker.  shutdown_sync is the one deliberate exception: app
+    quit blocks by design, and it only runs while a run is up - so WSL is
+    warm and the probe answers fast even when it is not already cached.
+    """
+    if _WSL_HOME[1]:
+        return _WSL_HOME[0]
+    _WSL_HOME[1] = True
+    try:
+        u = subprocess.run(["wsl.exe", "-e", "whoami"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           timeout=30, creationflags=_CREATE_FLAGS)
+        user = u.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
+        if user and user != "root":
+            p = subprocess.run(["wsl.exe", "-e", "getent", "passwd", user],
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL,
+                               timeout=30, creationflags=_CREATE_FLAGS)
+            row = p.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
+            parts = row.split(":")
+            if len(parts) >= 6 and parts[5].startswith("/"):
+                _WSL_HOME[0] = parts[5]
+    except Exception:                                   # noqa: BLE001
+        _WSL_HOME[0] = None
+    return _WSL_HOME[0]
+
+
+def watch_cmd(minutes, env):
+    """The Start Emulator launch - and on Windows it is the CHECKPOINTABLE
+    one (item 13): ``wsl -u root`` with ``PAD_PIVOT=1`` and the desktop
+    user's HOME.
+
+    This module's old rule was "never root - it breaks WSLg and audio", and
+    that stopped being true when watch.sh learned the drop dance: a root
+    launch boots the GUEST as root (which is what lets criu checkpoint it -
+    an unprivileged userns forces setgroups off and restore dies there) and
+    drops every helper back to the desktop user, whose WSLg and audio
+    session they need.  Verified live across save -> load -> repeat load.
+    Without the pivot boot, the playfield's Save state button can only ever
+    answer "this run is not checkpointable", which is exactly what David's
+    first real press got.
+
+    Falls back to the ordinary user launch when the home probe fails, so a
+    broken probe degrades to what this tab always did - no save states,
+    everything else identical - rather than to a root run pointed at
+    /root/spike2root.
+    """
+    if sys.platform == "win32":
+        home = wsl_home()
+        if home:
+            return (["wsl.exe", "-u", "root", "-e", "env",
+                     "HOME=" + home, "PAD_PIVOT=1"] + list(env)
+                    + ["bash", "%s/watch.sh" % _wsl_path(rig_dir()),
+                       str(minutes)])
+    return rig_cmd("watch.sh", minutes, env=env)
+
+
+def kill_cmd():
+    """killgame.sh, as ROOT on Windows, because the guest may be root's.
+
+    A PAD_PIVOT guest is a root process; the ordinary user's pkill reports
+    success and kills nothing (the same lie the restored-guest teardown told
+    once already), while root's kill reaches both kinds.  The desktop HOME
+    rides along so padpath resolves the right rootfs.  Everywhere else, and
+    when the home probe fails, the ordinary call - which is right for the
+    runs it can see.
+    """
+    if sys.platform == "win32":
+        home = wsl_home()
+        if home:
+            return ["wsl.exe", "-u", "root", "-e", "env", "HOME=" + home,
+                    "bash", "%s/killgame.sh" % _wsl_path(rig_dir())]
+    return rig_cmd("killgame.sh")
+
+
 #: What the emulator needs BEYOND the rig itself, in the order a run meets
 #: them: probe key (from setupcheck.sh) -> package, and what it is for.
 #:
@@ -324,6 +426,20 @@ _SETUP_TOOLS = (
 #: WSL - the timeout is entirely for a COLD one, where `wsl.exe` has to boot
 #: the distro first.
 _SETUP_PROBE_S = 90
+
+#: How many drain passes (250 ms each) the setup probe gets before the tab
+#: says WSL itself is booting.  A warm WSL answers inside one pass, so the
+#: message never flashes on an ordinary start; a cold one - the first wsl.exe
+#: after a Windows reboot boots the whole VM - takes tens of seconds, and a
+#: tab that says nothing for that long reads as a broken app.  David read it
+#: exactly that way on 2026-08-09.
+_WSL_BOOT_TICKS = 4
+
+#: What the tab says while that boot runs.  It names the wait AND its bound,
+#: because "Starting WSL…" alone invites force-quitting at the 30 s mark.
+_WSL_BOOT_TEXT = ("Starting WSL — the first start after a Windows reboot can "
+                  "take a minute. The app stays usable, and this finishes on "
+                  "its own.")
 
 
 def setup_state():
@@ -693,6 +809,11 @@ class EmulatePanel:
         #: A status poll's wsl.exe is in flight — see _poll.  Written only on
         #: the main thread, so it cannot be raced by the worker it gates.
         self._poll_busy = False
+        #: Drain passes the current setup probe has been out for, and whether
+        #: the "Starting WSL" line went up because of it (so only the writer
+        #: takes it down - the hint label has other owners).
+        self._setup_ticks = 0
+        self._setup_said_boot = False
 
     def _timer(self):
         """The widget every ``after`` job on this panel is hung off.
@@ -1049,6 +1170,7 @@ class EmulatePanel:
         if self._setup_busy or sys.platform == "darwin":
             return
         self._setup_busy = True
+        self._setup_ticks = 0
 
         def run():
             try:
@@ -1060,15 +1182,46 @@ class EmulatePanel:
         self._setup_drain()
 
     def _setup_drain(self):
-        """Main-loop side of _setup_check."""
+        """Main-loop side of _setup_check.
+
+        ALSO THE HONEST MOUTH FOR A COLD WSL.  The probe is one wsl.exe call,
+        and the first wsl.exe after a Windows reboot boots the whole WSL VM -
+        tens of seconds, sometimes minutes, during which this tab used to show
+        a dash and say nothing.  David restarted Windows on 2026-08-09, opened
+        PAD, and read that silence as a broken app.  A probe still out after
+        _WSL_BOOT_TICKS passes can only mean that boot (a warm WSL answers
+        inside one), so that is when the tab says so - and the sayer takes its
+        own line down again, because the status poll is gated behind this very
+        probe (see _poll) and will not overwrite it.
+        """
         if self._stopped:
             return
         if self._setup_busy:
+            self._setup_ticks += 1
+            if (self._setup_ticks == _WSL_BOOT_TICKS
+                    and sys.platform == "win32"):
+                self._setup_said_boot = True
+                self._set("state", "Starting WSL…")
+                try:
+                    self._hint.configure(text=_WSL_BOOT_TEXT)
+                except (tk.TclError, AttributeError):
+                    pass
+                self._log("[emulate] starting WSL — the first start after a "
+                          "Windows reboot can take a minute")
             try:
                 self._timer().after(250, self._setup_drain)
             except tk.TclError:
                 self._stopped = True
             return
+        if self._setup_said_boot:
+            # Back to the built state, not to "Not running": nothing has
+            # looked at the rig yet, and the first real poll is 2 s away.
+            self._setup_said_boot = False
+            self._set("state", "—")
+            try:
+                self._hint.configure(text="")
+            except (tk.TclError, AttributeError):
+                pass
         if self._setup_result is not None:
             self._setup_apply(self._setup_result)
             self._setup_result = None
@@ -1312,8 +1465,6 @@ class EmulatePanel:
             env.append("PAD_AUDIO=0")
         if not self._auto_var.get():
             env.append("PAD_AUTO_ATTRACT=0")
-        cmd = rig_cmd("watch.sh", self.BACKSTOP_MIN, env=env)
-        self._log("[emulate] %s" % " ".join(cmd))
 
         def run():
             # DOCKER IS CHECKED HERE, in the worker, so a slow probe cannot
@@ -1342,6 +1493,14 @@ class EmulatePanel:
                     finally:
                         self._starting = False
                     return
+            # THE COMMAND IS BUILT IN HERE, not before the thread.  On
+            # Windows watch_cmd() asks WSL for the desktop user's home
+            # (wsl_home: two wsl.exe probes, 30 s timeout each), and the
+            # first wsl.exe after a Windows reboot boots the whole WSL VM.
+            # Built on the main thread, that was the window frozen solid for
+            # the boot - David hit it on 2026-08-09 and read it as a crash.
+            cmd = watch_cmd(self.BACKSTOP_MIN, env)
+            self._log("[emulate] %s" % " ".join(cmd))
             try:
                 self._proc = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -1382,7 +1541,7 @@ class EmulatePanel:
             needs_restart = False
             try:
                 out = subprocess.run(
-                    rig_cmd("killgame.sh"),
+                    kill_cmd(),
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     timeout=60, creationflags=_CREATE_FLAGS)
                 for line in out.stdout.decode("utf-8", "replace").splitlines():
@@ -1510,7 +1669,7 @@ class EmulatePanel:
         def run():
             try:
                 if pre_kill:
-                    subprocess.run(rig_cmd("killgame.sh"),
+                    subprocess.run(kill_cmd(),
                                    stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT,
                                    timeout=60, creationflags=_CREATE_FLAGS)
@@ -1551,7 +1710,7 @@ class EmulatePanel:
         self._stopped = True             # no more polls into a dying Tk
         try:
             subprocess.run(
-                rig_cmd("killgame.sh"),
+                kill_cmd(),
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 timeout=25, creationflags=_CREATE_FLAGS)
         except Exception:                               # noqa: BLE001
@@ -1595,6 +1754,15 @@ class EmulatePanel:
             if self._docker is not None:
                 self._schedule_poll()
                 return
+        # AND NOT THROUGH A BOOTING WSL EITHER.  While the setup probe is
+        # still out, wsl.exe may be booting the whole VM (the first call
+        # after a Windows reboot does exactly that).  Each poll through it
+        # would stack another 20 s worker behind the boot, and the first one
+        # back would time out empty and write "Not running" over the
+        # "Starting WSL" line - a claim about a machine nobody has seen yet.
+        if self._setup_busy:
+            self._schedule_poll()
+            return
         if not rig_available():
             self._schedule_poll()
             return

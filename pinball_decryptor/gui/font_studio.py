@@ -61,6 +61,7 @@ class FontStudioWindow:
         self._ttf_paths = {}     # font key -> last chosen ttf
         self._scene_paths = []   # listbox row -> radium card path (scope)
         self._companions = {}    # body font key -> its outline companion font
+        self._copy_of = {}       # font key -> (nth, total) rows of a typeface
         self._undo = []          # [(label, {abs path: bytes or None})]
         self._undo_dir = assets_dir   # the folder that history belongs to
         self._tints = None       # font key -> {rgb: lines}, read on demand
@@ -354,25 +355,39 @@ class FontStudioWindow:
             "new letters. Either way \"Revert font\" puts it back.",
             lambda: getattr(self.app, "_current_theme", "light"))
 
-        # ---- apply to every size of the typeface --------------------------
-        # The same typeface is baked at many sizes and each is its own font
-        # here: TMNT lists Stern_CCZoinks 94 times and Stern_Impact 94 times.
-        # A tester "replaced the font wherever i found it" and still saw stock
-        # letters in places — nobody is doing 94 imports by hand.
-        arow = self._arow = ttk.Frame(imp)
-        arow.pack(fill=tk.X, padx=8, pady=(2, 0))
+        # The tint note and the outline row are packed on demand and have to
+        # land ABOVE the rest of the import frame; ``pack(before=…)`` needs a
+        # sibling to sit in front of, and this is it.
+        self._imp_tail = ttk.Frame(imp)
+        self._imp_tail.pack(fill=tk.X, pady=(0, 6))
+
+        # ---- what an action reaches, and the actions themselves ------------
+        # The same typeface is baked into a SEPARATE atlas per size and per
+        # scene, and every atlas is its own row here: TMNT lists Stern_CCZoinks
+        # 94 times, and Godzilla lists HelveticaNeueBlack three times at the
+        # same 102px with the same 113 letters — rows nothing on screen can
+        # tell apart, each covering different scenes.  So "the font" is
+        # normally several rows, which is why this tick lives OUTSIDE the
+        # import frame: Blank and Revert have to reach them all too, or a
+        # restyle leaves the old letters (and the old outline) on whichever
+        # scenes belong to the copies the user didn't happen to click.
+        arow = self._arow = ttk.Frame(right)
+        arow.pack(fill=tk.X, pady=(4, 0))
         self._all_sizes_var = tk.BooleanVar(value=True)
         self._all_sizes_cb = ttk.Checkbutton(
             arow, text="", variable=self._all_sizes_var)
         self._all_sizes_cb.pack(side=tk.LEFT)
         _Tooltip(self._all_sizes_cb,
-                 "Fits the same font file into every size of this typeface, "
-                 "each at its own auto-fitted size. Leave it off to restyle "
-                 "only the size selected on the left.",
+                 "Apply, Blank font and Revert font all land on every copy of "
+                 "this typeface, not just the row selected on the left — an "
+                 "import is re-fitted to each copy's own slots.\n\nA typeface "
+                 "is baked once per size AND once per scene, so it fills "
+                 "several rows here that can look identical. Leave this off "
+                 "to change only the selected row.",
                  lambda: getattr(self.app, "_current_theme", "light"))
 
-        brow = self._brow = ttk.Frame(imp)
-        brow.pack(fill=tk.X, padx=8, pady=(4, 8))
+        brow = self._brow = ttk.Frame(right)
+        brow.pack(fill=tk.X, pady=(4, 2))
         self._apply_btn = ttk.Button(brow, text="Apply to this font",
                                      command=self._apply, state="disabled")
         self._apply_btn.pack(side=tk.LEFT)
@@ -490,6 +505,23 @@ class FontStudioWindow:
                     fr.scenes_for_font(self.assets_dir, fo))
             except Exception:
                 self._scene_counts[fo["key"]] = 0
+        # Which rows are copies of each other.  A typeface is baked into its
+        # own atlas per size AND per scene, so a card lists the same name/size/
+        # letter count several times over with nothing on screen to tell the
+        # rows apart — Godzilla shows HelveticaNeueBlack 102px 113 letters
+        # three times.  A user checking "did my change reach this font?" then
+        # reads one row's scene list, doesn't find the scene he is looking at,
+        # and concludes the scene enumeration is broken.
+        self._copy_of = {}
+        runs, totals = {}, {}
+        for fo in self._fonts:
+            k = ((fo["name"] or "").strip().lower(), fo["px"])
+            totals[k] = totals.get(k, 0) + 1
+        for fo in self._fonts:
+            k = ((fo["name"] or "").strip().lower(), fo["px"])
+            if totals[k] > 1:
+                runs[k] = runs.get(k, 0) + 1
+                self._copy_of[fo["key"]] = (runs[k], totals[k])
         if not self._fonts:
             self._hint.configure(
                 text="No game fonts found in this project folder. Run "
@@ -499,6 +531,17 @@ class FontStudioWindow:
             n_old = sum(1 for fo in self._fonts if not fo["has_metrics"])
             msg = ("%d game font(s) in %s." %
                    (len(self._fonts), self.assets_dir))
+            # rows in a duplicate group, less one "original" per group
+            n_copies = len(self._copy_of) - len(
+                {(fo["name"] or "").strip().lower() + "|%d" % fo["px"]
+                 for fo in self._fonts if fo["key"] in self._copy_of})
+            if n_copies:
+                msg += (" %d of them are further copies of a font already "
+                        "listed (marked \"copy 2 of 3\" and so on): a "
+                        "typeface is baked once per size AND once per scene, "
+                        "so \"the font\" is usually several rows here. The "
+                        "tick by the buttons changes them all at once."
+                        % n_copies)
             if n_old:
                 msg += (" This extract predates exact font metrics — "
                         "previews use approximate spacing. Re-extract to "
@@ -527,6 +570,12 @@ class FontStudioWindow:
                 marks.append("tiny")
             if self._companions.get(fo["key"]) is not None:
                 marks.append("+outline")
+            # ...and, since rows of one typeface are otherwise identical, WHICH
+            # of them this is.  Without it the list looked like it was showing
+            # the same font several times by mistake.
+            nth = self._copy_of.get(fo["key"])
+            if nth:
+                marks.append("copy %d of %d" % nth)
             size = "%dpx%s" % (fo["px"],
                                (" · " + " ".join(marks)) if marks else "")
             tree.insert("", tk.END, iid=fo["key"], text=label,
@@ -659,10 +708,10 @@ class FontStudioWindow:
                       % black if black else ""))
             fg = th["warning"] if black else th["gray"]
         self._tint_lbl.configure(text=msg, foreground=fg)
-        # ...above the buttons: packed in call order it lands under them and
-        # runs off the bottom of the window.
+        # ...above the frame's tail: packed in call order it lands under
+        # everything and runs off the bottom of the window.
         self._tint_lbl.pack(anchor=tk.W, fill=tk.X, padx=8, pady=(2, 0),
-                            before=self._arow)
+                            before=self._imp_tail)
 
     # -- outline companion ------------------------------------------------
 
@@ -687,7 +736,7 @@ class FontStudioWindow:
                      % (comp["name"] or comp["key"], comp["px"]),
                 foreground=th["warning"])
             self._comp_row.pack(fill=tk.X, padx=8, pady=(2, 0),
-                                before=self._arow)
+                                before=self._imp_tail)
             self._comp_ctrl.pack(fill=tk.X, pady=(3, 0))
             return
         base = fr.outline_base(font.get("name"))
@@ -699,7 +748,7 @@ class FontStudioWindow:
                      "border itself." % (base, base),
                 foreground=th["gray"])
             self._comp_row.pack(fill=tk.X, padx=8, pady=(2, 0),
-                                before=self._arow)
+                                before=self._imp_tail)
             return
         loose = self._loose_outlines.get((font.get("name") or "").strip())
         if loose:
@@ -712,7 +761,7 @@ class FontStudioWindow:
                                  for f in loose[:3]),
                 foreground=th["gray"])
             self._comp_row.pack(fill=tk.X, padx=8, pady=(2, 0),
-                                before=self._arow)
+                                before=self._imp_tail)
 
     # -- scope (which scenes an edit lands in) ---------------------------
 
@@ -1084,8 +1133,9 @@ class FontStudioWindow:
             text="Undid %s — %d letter file(s) put back." % (label, n))
 
     def _same_typeface(self, font):
-        """The OTHER entries of this typeface — the same name at other sizes,
-        each its own glyph table with its own slots."""
+        """The OTHER rows that are this same typeface — the same name baked
+        into another atlas, each its own glyph table with its own slots and its
+        own scenes."""
         name = (font.get("name") or "").strip()
         if not name:
             return []
@@ -1093,17 +1143,46 @@ class FontStudioWindow:
                 if f["key"] != font["key"]
                 and (f.get("name") or "").strip() == name]
 
+    def _reach(self, font):
+        """The other rows an action lands on besides *font*: every copy of the
+        typeface while the tick is on, nothing while it is off.
+
+        One place, because Apply, Blank font and Revert font all have to agree
+        about what "this font" means — Blank reaching one row while Apply
+        reached 94 is what left a restyled game with the old outline still on
+        the scenes belonging to the rows nobody clicked."""
+        if font is None:
+            return []
+        try:
+            on = bool(self._all_sizes_var.get())
+        except tk.TclError:
+            on = False
+        return self._same_typeface(font) if on else []
+
     def _sync_all_sizes(self, font):
-        """Label the all-sizes tick with the real count, and hide it for a
-        typeface that only exists once."""
+        """Label the all-copies tick with the real count, and hide it for a
+        typeface that only exists once.
+
+        It does NOT say "sizes": a typeface is baked once per size AND once per
+        scene, so its other rows are frequently the SAME size (Godzilla lists
+        HelveticaNeueBlack three times at 102px, covering different scenes).
+        Calling those "other sizes" invited exactly the wrong conclusion — that
+        a user who only wants one size can safely untick it."""
         sibs = self._same_typeface(font) if font is not None else []
         if not sibs:
             self._all_sizes_cb.pack_forget()
             return
+        same = sum(1 for f in sibs if f["px"] == font["px"])
+        if same == len(sibs):
+            what = "same size, other scenes"
+        elif same:
+            what = "other sizes and other scenes"
+        else:
+            what = "its other sizes"
         self._all_sizes_cb.configure(
-            text="Also apply to the other %d size%s of \"%s\""
-                 % (len(sibs), "" if len(sibs) == 1 else "s",
-                    font.get("name") or font["key"]))
+            text="Also change the other %d cop%s of \"%s\" (%s)"
+                 % (len(sibs), "y" if len(sibs) == 1 else "ies",
+                    font.get("name") or font["key"], what))
         self._all_sizes_cb.pack(side=tk.LEFT)
 
     def _apply(self):
@@ -1149,8 +1228,7 @@ class FontStudioWindow:
                 % (fo["name"] or fo["key"], fo["px"], fr.MIN_RESTYLE_PX),
                 parent=self.win):
             return
-        sibs_planned = (self._same_typeface(fo)
-                        if self._all_sizes_var.get() else [])
+        sibs_planned = self._reach(fo)
         self._push_undo(
             "the %s \"%s\"" % ("recolour of" if recolor else "import into",
                                fo["name"] or fo["key"]),
@@ -1160,9 +1238,9 @@ class FontStudioWindow:
         comp = self._companion(fo)
         del self._pending[fo["key"]]
 
-        # …and the same font file into every other size of this typeface, each
+        # …and the same font file into every other copy of this typeface, each
         # fitted to its own slots.  Without this a restyle only reaches the one
-        # size that happened to be selected.
+        # row that happened to be selected.
         sibs = sibs_planned
         n_sib = n_failed = 0
         errors = []
@@ -1172,7 +1250,7 @@ class FontStudioWindow:
             try:
                 for i, sib in enumerate(sibs):
                     self._status.configure(
-                        text="%s size %d of %d…"
+                        text="%s copy %d of %d…"
                              % ("Repainting" if recolor else
                                 "Fitting \"%s\" into" % os.path.basename(ttf),
                                 i + 1, len(sibs)))
@@ -1226,15 +1304,17 @@ class FontStudioWindow:
             msg += ("; its outline font \"%s\" was left as it is"
                     % (comp["name"] or comp["key"]))
         if n_sib:
-            msg += ("; %d more size(s) of \"%s\" %s too"
-                    % (n_sib, fo["name"] or fo["key"],
+            msg += ("; %d more cop%s of \"%s\" %s too"
+                    % (n_sib, "y" if n_sib == 1 else "ies",
+                       fo["name"] or fo["key"],
                        "were repainted" if recolor else "took the same font"))
             if self._scope_var.get() == "some":
                 msg += (" (those keep their own scene choice, which is every "
                         "scene unless you narrow them)")
         if n_failed:
-            msg += ("; %d size(s) could not take this font and were left "
-                    "alone" % n_failed)
+            msg += ("; %d cop%s could not take this font and %s left "
+                    "alone" % (n_failed, "y" if n_failed == 1 else "ies",
+                               "was" if n_failed == 1 else "were"))
         self._status.configure(
             text=msg + " — build on the Write tab to put them on the card.")
 
@@ -1294,7 +1374,14 @@ class FontStudioWindow:
         letters, this leaves the font in place with empty ones.  It is how an
         outline or shadow font is removed, and it honours the scene scope
         chosen on the left — blanking is card-wide otherwise, which is how
-        a tester lost borders on screens he had never opened."""
+        a tester lost borders on screens he had never opened.
+
+        It also follows the all-copies tick.  A typeface fills one row per
+        atlas here, so an outline font a user "found in the list and blanked"
+        was one of several identical-looking rows and the border stayed on
+        every scene the other rows cover — a tester went through the whole list
+        blanking outlines and still found 512x512 atlases with the old outline
+        in them, on scenes his font's own scene list never mentioned."""
         fo = self._current_font()
         if fo is None:
             return
@@ -1306,18 +1393,28 @@ class FontStudioWindow:
                 text="Pick the scenes to blank it in first, or switch to "
                      "\"Change in all of them\".")
             return
+        sibs = self._reach(fo)
         where = ("the %d scene(s) selected on the left" % n_sel if some
                  else "all %d scene(s) using it" % len(self._scene_paths))
+        extra = ("" if not sibs else
+                 "\n\nThe other %d cop%s of this typeface in the list "
+                 "(%d more scene(s)) are blanked too, so no scene is left "
+                 "drawing it."
+                 % (len(sibs), "y" if len(sibs) == 1 else "ies",
+                    self._sibling_scene_count(sibs)))
         if not messagebox.askyesno(
                 "Blank font",
                 "Erase every letter of \"%s\" (%dpx) so it draws nothing, in "
-                "%s?\n\nThe scene still draws this font — it just has nothing "
-                "to draw, which is how an outline or shadow is removed. "
+                "%s?%s\n\nThe scene still draws this font — it just has "
+                "nothing to draw, which is how an outline or shadow is "
+                "removed. "
                 "\"Revert font\" restores Stern's letters, and \"Undo\" steps "
                 "back to whatever was there a moment ago."
-                % (fo["name"] or fo["key"], fo["px"], where), parent=self.win):
+                % (fo["name"] or fo["key"], fo["px"], where, extra),
+                parent=self.win):
             return
-        self._push_undo("blanking \"%s\"" % (fo["name"] or fo["key"]), [fo])
+        self._push_undo("blanking \"%s\"" % (fo["name"] or fo["key"]),
+                        [fo] + sibs)
         try:
             n = fr.clear_font(fo)
         except Exception as e:
@@ -1325,22 +1422,57 @@ class FontStudioWindow:
                                  "Couldn't blank this font:\n\n%s" % e,
                                  parent=self.win)
             return
+        n_sib = 0
+        for sib in sibs:
+            try:
+                n += fr.clear_font(sib)
+            except Exception:
+                continue        # one unwritable copy must not abandon the rest
+            self._pending.pop(sib["key"], None)
+            n_sib += 1
         self._pending.pop(fo["key"], None)
         self._sync_show_combo()
         self._schedule_render()
         self._notify_changed()
+        msg = ("%d letter(s) blanked in %s" % (n, where))
+        if n_sib:
+            msg += ("; %d more cop%s of \"%s\" blanked too, each in its own "
+                    "scenes" % (n_sib, "y" if n_sib == 1 else "ies",
+                                fo["name"] or fo["key"]))
         self._status.configure(
-            text="%d letter(s) blanked in %s — build on the Write tab to put "
-                 "it on the card." % (n, where))
+            text=msg + " — build on the Write tab to put it on the card.")
+
+    def _sibling_scene_count(self, sibs):
+        """How many scenes the other copies of a typeface add, for a dialog to
+        say before it acts on them."""
+        from ..plugins.stern import fontrender as fr
+        seen = set()
+        for f in sibs:
+            try:
+                seen.update(fr.scenes_for_font(self.assets_dir, f))
+            except Exception:
+                continue
+        return len(seen)
 
     def _revert(self):
         fo = self._current_font()
         if fo is None:
             return
         comp = self._companion(fo)
-        extra = ("\n\nIts outline font \"%s\" is restored too, so a border "
+        # Reverting has to reach exactly as far as blanking did, or the way
+        # back from "blank every copy" is 94 clicks (or a re-extract).
+        sibs = self._reach(fo)
+        comps = [c for c in ([comp] + [self._companion(s) for s in sibs])
+                 if c is not None]
+        extra = ("\n\nIts outline font%s (%s) %s restored too, so a border "
                  "this window removed comes back."
-                 % (comp["name"] or comp["key"])) if comp is not None else ""
+                 % ("" if len(comps) == 1 else "s",
+                    ", ".join(sorted({c["name"] or c["key"] for c in comps})),
+                    "is" if len(comps) == 1 else "are")) if comps else ""
+        if sibs:
+            extra += ("\n\nThe other %d cop%s of this typeface in the list "
+                      "go back to stock as well."
+                      % (len(sibs), "y" if len(sibs) == 1 else "ies"))
         if not messagebox.askyesno(
                 "Revert font",
                 "Restore every letter of \"%s\" from its atlas image?\n\n"
@@ -1350,18 +1482,26 @@ class FontStudioWindow:
             return
         from ..plugins.stern import fontrender as fr
         self._push_undo("reverting \"%s\"" % (fo["name"] or fo["key"]),
-                        [fo, comp])
+                        [fo] + sibs + comps)
         n = fr.revert_slices(self.assets_dir, fo)
         # Apply can blank the companion, so Revert has to be able to undo
         # that too — otherwise the only way back is a full re-extract, which
         # would take the user's other work with it.
-        if comp is not None:
-            n += fr.revert_slices(self.assets_dir, comp)
+        for f in sibs + comps:
+            try:
+                n += fr.revert_slices(self.assets_dir, f)
+            except Exception:
+                continue
+            self._pending.pop(f["key"], None)
         self._pending.pop(fo["key"], None)
         self._sync_show_combo()
         self._schedule_render()
         self._notify_changed()
-        self._status.configure(text="%d letter(s) restored." % n)
+        self._status.configure(
+            text="%d letter(s) restored%s."
+                 % (n, (" across all %d copies of \"%s\""
+                        % (len(sibs) + 1, fo["name"] or fo["key"]))
+                    if sibs else ""))
 
     def _revert_all(self):
         """Put every font in the project back to stock.

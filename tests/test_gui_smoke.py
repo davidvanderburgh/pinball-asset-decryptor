@@ -3746,9 +3746,13 @@ def test_font_studio_applies_to_every_size_of_a_typeface(app, tmp_path,
     fs._tree.selection_set("body")
     fs._on_select()
 
-    # the tick names the real count and is hidden for a one-off typeface
+    # the tick names the real count and is hidden for a one-off typeface.  It
+    # says "copies", not "sizes": a typeface is baked once per size AND once
+    # per scene, so its other rows are often the same size (Godzilla lists
+    # HelveticaNeueBlack three times at 102px) and "sizes" told a user who
+    # wanted one size that he could safely untick it.
     assert fs._same_typeface(fs._current_font())[0]["key"] == "body2"
-    assert "other 1 size" in fs._all_sizes_cb.cget("text")
+    assert "other 1 copy" in fs._all_sizes_cb.cget("text")
     assert fs._all_sizes_cb.winfo_manager() != ""
 
     sib = fs._by_key["body2"]
@@ -3759,7 +3763,7 @@ def test_font_studio_applies_to_every_size_of_a_typeface(app, tmp_path,
     fs._apply()
     after = open(sib["glyphs"][0x41]["abs"], "rb").read()
     assert after != before, "the other size should have been restyled too"
-    assert "1 more size" in fs._status.cget("text")
+    assert "1 more copy" in fs._status.cget("text")
 
     # Revert all puts the whole project back, which is how you start over
     monkeypatch.setattr(fs_mod.messagebox, "askyesno", lambda *a, **k: True)
@@ -3767,6 +3771,111 @@ def test_font_studio_applies_to_every_size_of_a_typeface(app, tmp_path,
     assert "restored to stock" in fs._status.cget("text")
     a = np.asarray(Image.open(sib["glyphs"][0x41]["abs"]).convert("RGBA"))
     assert a.shape[:2] == (sib["glyphs"][0x41]["h"], sib["glyphs"][0x41]["w"])
+
+    fs._close()
+    app.root.update()
+
+
+def test_font_studio_blank_reaches_every_copy_of_a_typeface(app, tmp_path,
+                                                            monkeypatch):
+    """Blanking an outline font has to reach every ROW of that typeface.
+
+    A typeface is baked into its own atlas per size AND per scene, so it fills
+    several rows here that nothing on screen tells apart (Godzilla lists
+    HelveticaNeueBlack three times at 102px, 113 letters, 5 scenes — different
+    scenes each).  Blank used to erase exactly the row that was selected, so a
+    tester who "went through the font list and blanked the outlines" still had
+    the old outline on every scene the other rows cover, and read the font's
+    short scene list as proof the scenes weren't being enumerated."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    import numpy as np
+    from PIL import Image
+    from tests.test_stern_fontrender import _make_outline_extract
+    from pinball_decryptor.gui import font_studio as fs_mod
+
+    _make_outline_extract(tmp_path)
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_font_studio()
+    fs = w._font_studio
+
+    # "ok" and "far" are the same outline typeface in different scenes
+    fs._tree.selection_set("ok")
+    fs._on_select()
+    assert [f["key"] for f in fs._same_typeface(fs._current_font())] == ["far"]
+    # ...and the list finally says so, instead of showing two identical rows
+    assert "copy 1 of 2" in fs._tree.item("ok", "values")[0]
+    assert "copy 2 of 2" in fs._tree.item("far", "values")[0]
+    assert "further copies of a font already listed" in fs._hint.cget("text")
+
+    def ink(key):
+        fo = fs._by_key[key]
+        a = np.asarray(Image.open(fo["glyphs"][0x41]["abs"]).convert("RGBA"))
+        return int(a[..., 3].max())
+
+    assert ink("ok") > 0 and ink("far") > 0
+    monkeypatch.setattr(fs_mod.messagebox, "askyesno", lambda *a, **k: True)
+    fs._blank()
+    assert ink("ok") == 0
+    assert ink("far") == 0, "the other copy still draws the old outline"
+    assert "1 more copy" in fs._status.cget("text")
+
+    # ...and one Undo brings both back — reaching further must not make the
+    # step back smaller
+    fs._undo_last()
+    assert ink("ok") > 0 and ink("far") > 0
+
+    # with the tick off it is the selected row only, which is the old behaviour
+    # and still the way to blank an outline out of one place
+    fs._all_sizes_var.set(False)
+    fs._blank()
+    assert ink("ok") == 0
+    assert ink("far") > 0
+
+    fs._close()
+    app.root.update()
+
+
+def test_font_studio_revert_reaches_as_far_as_the_blank_did(app, tmp_path,
+                                                            monkeypatch):
+    """Revert follows the same tick as Blank and Apply.  Anything else means
+    "blank every copy" is one click and the way back is 94."""
+    pytest = __import__("pytest")
+    pytest.importorskip("numpy")
+    pytest.importorskip("PIL")
+    import numpy as np
+    from PIL import Image
+    from tests.test_stern_fontrender import _make_outline_extract
+    from pinball_decryptor.gui import font_studio as fs_mod
+
+    _make_outline_extract(tmp_path)
+    # the fixture's atlases are empty, and revert re-cuts the letters FROM the
+    # atlas — give the two outline copies something to come back to
+    tex = tmp_path / "images" / "scene_textures"
+    for aid in ("0002", "0004"):
+        Image.fromarray(np.full((32, 32, 4), 255, np.uint8), "RGBA").save(
+            str(tex / ("radimg_T_8x8_0000%s.png" % aid)))
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_font_studio()
+    fs = w._font_studio
+    fs._tree.selection_set("ok")
+    fs._on_select()
+
+    def ink(key):
+        fo = fs._by_key[key]
+        a = np.asarray(Image.open(fo["glyphs"][0x41]["abs"]).convert("RGBA"))
+        return int(a[..., 3].max())
+
+    monkeypatch.setattr(fs_mod.messagebox, "askyesno", lambda *a, **k: True)
+    fs._blank()
+    assert ink("ok") == 0 and ink("far") == 0
+    fs._revert()
+    assert ink("ok") > 0
+    assert ink("far") > 0, "the copy blanked with it has to come back with it"
+    assert "all 2 copies" in fs._status.cget("text")
 
     fs._close()
     app.root.update()

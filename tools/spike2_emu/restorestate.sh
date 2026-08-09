@@ -123,6 +123,14 @@ if [ "${PAD_VID_RESTART:-1}" = 1 ] \
     if [ -n "$VID_PID" ]; then
         VID_UID=$(ps -o uid= -p "$VID_PID" 2>/dev/null | tr -d ' ')
         [ -n "$VID_UID" ] && VID_USER=$(getent passwd "$VID_UID" | cut -d: -f1)
+        # A CARD run's video host reads clips off the card mount, not the
+        # rootfs games tree, and only PAD_VID_ROOT says so (watch.sh sets it
+        # at launch). Take it from the dying host itself so the resume restart
+        # serves from the same tree - without this a card run resumes against
+        # <rootfs>/games/<title>, which is empty, and every serve is
+        # "cannot open".
+        VID_ROOT_ENV=$(tr '\0' '\n' < "/proc/$VID_PID/environ" 2>/dev/null \
+                       | sed -n 's/^PAD_VID_ROOT=//p' | head -1)
     fi
     VID_RESTART=1
     echo "[restore] stopping the video host (user ${VID_USER:-root}) to rewind its ring"
@@ -140,6 +148,33 @@ while read -r kind a b c; do
         [ "$src" = '@PTY@' ]  && src=$NEWPTY
         [ "$src" = '@CARD@' ] && { echo "[restore] a card mount is needed but re-mounting the card is not automated yet"; exit 1; }
         REST_EXT+=(--external "mnt[$a]:$src")
+        ;;
+    card)
+        # a=key b=guest mountpoint c=the card's HOST path as savestate saw it.
+        # USE THE LIVE MOUNT: cardmount setsids fuse2fs, so in a windowed
+        # session the card outlives the guest being swapped, and the recorded
+        # path is still exactly the fs the dumped mapping came from. Verified,
+        # not assumed - a stale path would silently bind an empty directory
+        # and the restored game's files would stop existing halfway through.
+        # A cold load (card unmounted, e.g. after a reboot) stays manual:
+        # cardmount.sh the image first, then retry.
+        src=$c
+        CARD_OK=""
+        if [ "$src" != '@CARD@' ] && [ -d "$src" ]; then
+            case "$(findmnt -no FSTYPE --target "$src" 2>/dev/null)" in
+                fuse*) CARD_OK=1 ;;
+            esac
+        fi
+        if [ -z "$CARD_OK" ]; then
+            echo "[restore] the card mount behind $b is gone ($src)."
+            echo "[restore] mount it and retry:  cardmount.sh <the card image>"
+            exit 1
+        fi
+        REST_EXT+=(--external "mnt[$a]:$src")
+        # nsclean must NOT strip the card out of the restore's namespace, or
+        # criu cannot resolve the external it was just handed (the ladder's
+        # rung E kept its card mount for the same reason).
+        CARD_KEEP=$(findmnt -no TARGET --target "$src" 2>/dev/null)
         ;;
     tty)
         # a=old fd number  b=tty[key]  c=old slave path. The NEW slave carries
@@ -196,9 +231,14 @@ done < "$DDIR/restore.env"
 # /proc and a re-bind of the rootfs for --root. See criuladder.sh for the full
 # story of why each of these is here.
 NSCLEAN=$DDIR/nsclean.sh
+# The card's mountpoint (when a card external was recorded above) joins the
+# keep list, expanded NOW into the generated script - everything else here is
+# escaped to expand inside nsclean instead.
+KEEPCOND=""
+[ -n "${CARD_KEEP:-}" ] && KEEPCOND=" && \$5 != \"$CARD_KEEP\""
 cat > "$NSCLEAN" <<EOF
 mount --make-rprivate /
-awk '\$5 != "/" && \$5 != "/proc" && \$5 != "/dev" && \$5 != "/dev/pts" { print \$5 }' \
+awk '\$5 != "/" && \$5 != "/proc" && \$5 != "/dev" && \$5 != "/dev/pts"$KEEPCOND { print \$5 }' \
     /proc/self/mountinfo | sort -r | while read -r mp; do umount -l "\$mp" 2>/dev/null; done
 umount -l /proc 2>/dev/null
 mount -t proc proc /proc
@@ -317,7 +357,9 @@ if [ "$VID_RESTART" = 1 ]; then
     # backgrounded INSIDE a bash -c: that bash exits at once, runuser reaps
     # it and returns, and the setsid'd host belongs to nobody the teardown
     # can reach.
-    VCMD="setsid env PAD_ROOT='$R' PAD_GAME='$VGAME' PAD_VID_RESUME=1 \
+    VROOT_ARG=""
+    [ -n "${VID_ROOT_ENV:-}" ] && VROOT_ARG="PAD_VID_ROOT='$VID_ROOT_ENV' "
+    VCMD="setsid env PAD_ROOT='$R' PAD_GAME='$VGAME' ${VROOT_ARG}PAD_VID_RESUME=1 \
 python3 '$RIG/padvidhost.py' '$VID_RING' >> '$VLOG' 2>&1 </dev/null &"
     if [ -n "$VID_USER" ] && [ "$VID_USER" != root ]; then
         runuser -u "$VID_USER" -- bash -c "$VCMD"

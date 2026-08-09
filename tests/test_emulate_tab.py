@@ -431,6 +431,69 @@ def test_env_survives_the_hop_on_every_platform(monkeypatch, tmp_path):
         assert any(c.endswith("env") or c == "env" for c in cmd), (platform, cmd)
 
 
+# --- the checkpointable launch (item 13) -------------------------------------
+#
+# On Windows, Start boots the guest as root under PAD_PIVOT=1 - the only shape
+# criu can checkpoint, so the only shape the playfield's Save/Load state
+# buttons work in.  watch.sh drops the helpers back to the desktop user, whose
+# home rides along explicitly because root's own HOME is the wrong rootfs.
+
+def _home(monkeypatch, value):
+    """Pin wsl_home()'s answer - the probe itself needs a live WSL."""
+    monkeypatch.setattr(emulate_tab, "_WSL_HOME", [value, True])
+
+
+def test_windows_start_is_the_checkpointable_launch(monkeypatch, tmp_path):
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    _home(monkeypatch, "/home/somebody")
+    cmd = emulate_tab.watch_cmd(120, ["PAD_CARD=/mnt/c/x.raw"])
+    assert cmd[:3] == ["wsl.exe", "-u", "root"]
+    assert "PAD_PIVOT=1" in cmd
+    assert "HOME=/home/somebody" in cmd
+    # The caller's env still survives the hop, same rule as rig_cmd's.
+    assert "PAD_CARD=/mnt/c/x.raw" in cmd
+    assert cmd[-1] == "120"
+    assert not any("\\" in c for c in cmd), cmd
+
+
+def test_a_failed_home_probe_degrades_to_the_ordinary_launch(monkeypatch,
+                                                             tmp_path):
+    """No save states rather than a root run pointed at /root/spike2root."""
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    _home(monkeypatch, None)
+    cmd = emulate_tab.watch_cmd(120, [])
+    assert cmd[:2] == ["wsl.exe", "-e"]
+    assert "-u" not in cmd and "PAD_PIVOT=1" not in cmd
+
+
+def test_other_platforms_keep_their_launch(monkeypatch, tmp_path):
+    """The pivot boot is a WSL arrangement; macOS's container and a Linux
+    desktop keep the launch they had."""
+    for platform in ("linux", "darwin"):
+        monkeypatch.setattr(emulate_tab.sys, "platform", platform)
+        monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+        _home(monkeypatch, "/home/somebody")
+        cmd = emulate_tab.watch_cmd(30, [])
+        assert "wsl.exe" not in cmd, (platform, cmd)
+        assert "PAD_PIVOT=1" not in cmd, (platform, cmd)
+
+
+def test_stop_kills_as_root_on_windows(monkeypatch, tmp_path):
+    """A PAD_PIVOT guest is a root process: the ordinary user's pkill reports
+    success and kills nothing.  Root's kill reaches both kinds of run."""
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    _home(monkeypatch, "/home/somebody")
+    cmd = emulate_tab.kill_cmd()
+    assert cmd[:3] == ["wsl.exe", "-u", "root"]
+    assert any(c.endswith("killgame.sh") for c in cmd)
+    _home(monkeypatch, None)
+    cmd = emulate_tab.kill_cmd()
+    assert cmd[:2] == ["wsl.exe", "-e"], cmd
+
+
 def test_the_container_entry_point_ships_with_the_rig():
     """rig_cmd names it on macOS, so its absence would be a macOS-only failure
     that nobody developing on Windows or Linux would ever see."""

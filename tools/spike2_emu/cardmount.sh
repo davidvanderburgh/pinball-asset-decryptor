@@ -29,6 +29,19 @@ export LD_LIBRARY_PATH="$PREFIX/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
 
 die() { echo "[card] $*" >&2; exit 1; }
 
+# HAND FILES BACK when this runs as root (a PAD_PIVOT session - item 13).
+# Everything here lives under the DESKTOP USER's home ($HOME is set to theirs
+# by the launcher), and a root-owned stamp/cache/log in their directory is the
+# same trap watch.sh already fixes for its logs: the next ordinary run cannot
+# overwrite it. No-op for a normal user run.
+give_back() {
+    [ "$(id -u)" = 0 ] || return 0
+    local o
+    o=$(stat -c %U "$HOME" 2>/dev/null)
+    [ -n "$o" ] && [ "$o" != root ] && chown "$o" "$@" 2>/dev/null
+    return 0
+}
+
 # LOCAL IMAGE CACHE - why card boots were slow, and why the SECOND one is not.
 #
 # The card images live on the Windows D: drive, so every cold read goes
@@ -63,6 +76,7 @@ cache_pick() {
         echo "$copy"; return
     fi
     mkdir -p "$CACHE"
+    give_back "$CACHE"
     # One copier at a time per label. The pid file is the lock; a stale one
     # (machine rebooted mid-copy) is detected by the pid being gone.
     local pidf="$CACHE/$label.pid"
@@ -88,6 +102,14 @@ cache_pick() {
             if dd if="$img" of="$copy.partial" bs=4M conv=sparse status=none; then
                 mv "$copy.partial" "$copy"
                 stat -c "%n %s %Y" "$img" > "$stamp"
+                # A root (PAD_PIVOT) run hands the finished copy back to the
+                # desktop user, same as give_back() - inlined because this
+                # runs detached, long after the parent script has exited.
+                if [ "$(id -u)" = 0 ]; then
+                    o=$(stat -c %U "$HOME" 2>/dev/null)
+                    [ -n "$o" ] && [ "$o" != root ] && \
+                        chown "$o" "$copy" "$stamp" 2>/dev/null
+                fi
                 echo "[card] local cache of $(basename "$img") complete"
             else
                 rm -f "$copy.partial"
@@ -97,6 +119,7 @@ cache_pick() {
         ' _ "$img" "$copy" "$stamp" "$pidf" \
             </dev/null >> "$CACHE/$label.log" 2>&1 &
         echo $! > "$pidf"
+        give_back "$pidf" "$CACHE/$label.log"
     fi
     echo "$img"
 }
@@ -174,9 +197,15 @@ fi
 # is still a mountpoint with nothing behind it and every read returns an error
 # instead of a file - which is indistinguishable from a working mount until
 # something tries to read. Clear it before deciding anything else.
+# THE SAME TEST ALSO CATCHES A MOUNT THIS USER MAY NOT READ: FUSE denies every
+# user but the mounter by default - root included - so a root (PAD_PIVOT) run
+# finding the desktop user's old plain-`ro` mount reads it as "stale" and
+# remounts it below, with allow_other this time, which is exactly the right
+# outcome. The message covers both.
 if [ -d "$MNT" ] && mountpoint -q "$MNT" 2>/dev/null && ! ls "$MNT" >/dev/null 2>&1; then
-    echo "[card] stale mount at $MNT (its fuse2fs is gone) - clearing"
+    echo "[card] mount at $MNT is unreadable (fuse2fs gone, or another user's) - remounting"
     fusermount -u "$MNT" 2>/dev/null || fusermount3 -u "$MNT" 2>/dev/null
+    umount -l "$MNT" 2>/dev/null
 fi
 
 # Already mounted and healthy? Then say so and stop - remounting a live card
@@ -200,6 +229,16 @@ OFF=$(games_offset "$SRC")
 mkdir -p "$MNT" || die "cannot create $MNT"
 
 echo "[card] mounting $(basename "$SRC") p3 at offset $OFF (read only)"
+# A ROOT MOUNT MUST CARRY allow_other, and only root may add it freely: FUSE
+# denies everyone but the mounting user by default, and a PAD_PIVOT session
+# (item 13) is root mounting a card that DAVID's helpers then read - the
+# video host opens clips straight off this mount, and without allow_other
+# every one of those opens is EACCES and the screen is black with no error
+# anywhere. An ordinary user run keeps the plain options: user_allow_other
+# is not on in /etc/fuse.conf and does not need to be.
+MOPTS="ro,offset=$OFF"
+[ "$(id -u)" = 0 ] && MOPTS="$MOPTS,allow_other"
+give_back "$CARDS" "$MNT"
 # setsid, AND THAT IS THE WHOLE POINT OF IT. fuse2fs keeps running for as long
 # as the mount exists, so it must NOT be in the caller's process group:
 # watch.sh tears a run down by killing process groups, and that killed the
@@ -207,7 +246,7 @@ echo "[card] mounting $(basename "$SRC") p3 at offset $OFF (read only)"
 # kind - the game boots, loads a few assets, then sits at "Startup In
 # Progress" forever, because its files stopped existing halfway through. There
 # is no error anywhere; every read simply fails.
-setsid "$FUSE2FS" -o ro,offset="$OFF" "$SRC" "$MNT" >/dev/null 2>&1 \
+setsid "$FUSE2FS" -o "$MOPTS" "$SRC" "$MNT" >/dev/null 2>&1 \
     || die "fuse2fs refused $(basename "$SRC")"
 # setsid returns as soon as the daemon has forked, so wait for the mount to
 # actually appear rather than racing the first read of it.

@@ -73,8 +73,26 @@ while IFS= read -r line; do
         echo "mnt $key $mp @PTY@" >> "$DDIR/restore.env"
         ;;
     fuse|fuseblk)
+        # THE CARD - record WHERE IT LIVES ON THE HOST, not a placeholder.
+        # The guest line's major:minor names the fuse fs; the same fs appears
+        # in OUR mountinfo at its host mountpoint, and the guest line's root
+        # field (the bind's subdir, e.g. /godzilla_pro) completes the path.
+        # restorestate can then reattach to the LIVE mount - in a windowed
+        # session the card mount SURVIVES the guest swap (cardmount setsids
+        # fuse2fs so no teardown reaches it), so a load needs no re-mount
+        # machinery at all. @CARD@ only when the host lookup fails, and the
+        # old restorestate error for it still stands.
+        majmin=$(awk '{print $3}' <<<"$line")
+        fsroot=$(awk '{print $4}' <<<"$line")
+        hostmnt=$(awk -v mm="$majmin" '$3==mm {print $5; exit}' /proc/self/mountinfo)
+        if [ -n "$hostmnt" ]; then
+            src=$hostmnt
+            [ "$fsroot" != "/" ] && src="$hostmnt$fsroot"
+            echo "card $key $mp $src" >> "$DDIR/restore.env"
+        else
+            echo "card $key $mp @CARD@" >> "$DDIR/restore.env"
+        fi
         DUMP_EXT+=(--external "mnt[$mp]:$key")
-        echo "mnt $key $mp @CARD@" >> "$DDIR/restore.env"
         ;;
     esac
 done < "/proc/$PID/mountinfo"

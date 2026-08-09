@@ -1063,29 +1063,36 @@ These have each been violated at least once and each cost a run or a window:
       **Resume — the windowed flow is DONE and David-accepted; what is left
       is making the APP's own flow reach it, none of it an unknown
       mechanism:**
-      **(1) ★ THE APP'S EMULATE TAB DOES NOT LAUNCH A CHECKPOINTABLE RUN,
-      and David hit exactly this on his first real button press (2026-08-09
-      08:12): "[savegame] FAILED".** His pasted log shows the launch:
-      `wsl.exe -e env … PAD_CARD=… watch.sh 120` — no `-u root`, no
-      `PAD_PIVOT=1`, so the guest is an ordinary chroot run criu refuses.
-      Every session this feature was verified in was launched by hand with
-      `wsl -u root … PAD_PIVOT=1`. The fix is in the APP's emulate command
-      builder (it logs itself as `[emulate] wsl.exe -e env …`): launch
-      `-u root` with `HOME=/home/<user>` and `PAD_PIVOT=1` — watch.sh
-      already handles the rest (root guest, helpers dropped to the desktop
-      user, log chown-back). savegame.sh now DETECTS the chroot case
+      **(1) ★ BUILT, tests green, AWAITING ONE LIVE CARD RUN: the app's
+      Emulate tab now launches the CHECKPOINTABLE boot** (David authorized
+      the chunk 2026-08-09 after his first button press hit
+      "[savegame] FAILED" — his log showed `wsl.exe -e env …`, no root, no
+      pivot). `watch_cmd()` in emulate_tab.py launches `wsl -u root` with
+      `PAD_PIVOT=1` and the desktop user's HOME (probed via
+      whoami+getent — NO `$` through wsl.exe's re-parse); `kill_cmd()` makes
+      every killgame call root (a root guest ignores the user's pkill); a
+      failed home probe degrades to the old user launch. 5 new launch tests
+      + 72 app smokes green. savegame.sh also DETECTS the chroot case
       (`readlink /proc/PID/root` != "/") and puts the reason on the status
-      bar instead of a bare FAILED; the playfield's status picker also
-      prefers a line that says something over one that just says FAILED.
-      **(2) a CARD run** needs `@CARD@` wired through restorestate — and the
-      app flow makes this load-bearing, because the Emulate tab ALWAYS runs
-      from a card (`PAD_CARD=…`). The cheap 90% case: in a live windowed
-      session the fuse2fs card mount SURVIVES the guest swap (it is
-      setsid'd), so savestate can record the fuse mount's actual host source
-      path instead of the bare `@CARD@` placeholder, and restorestate can
-      use it whenever that path is still a live fuse mount — no re-mount
-      machinery at all. Cold loads (card unmounted) stay manual. A
-      PAD_GAME_DIR bind is also still unclassified by savestate.
+      bar; the playfield's status picker prefers a line that says something
+      over a bare FAILED.
+      **(2) ★ BUILT, same live run pending: card-run save/load.** savestate
+      records the card's actual HOST path (guest mountinfo major:minor
+      matched against /proc/self/mountinfo, plus the bind's fs-root subdir)
+      as a new `card` restore.env kind; restorestate verifies the path is
+      STILL a live fuse mount (findmnt) — cardmount setsids fuse2fs so the
+      mount survives the guest swap — keeps it out of nsclean's strip list
+      (rung E's lesson), and errors legibly on a cold load. THREE traps
+      found at the desk and fixed with it: **a root-made FUSE mount is
+      invisible to david's helpers** (FUSE default denies all other users —
+      cardmount now mounts with `allow_other` when root, and its
+      unreadable-mount check remounts a plain user mount a root run
+      inherits); **the resume video host lost PAD_VID_ROOT** (card clips
+      live on the card, not the rootfs — restorestate now reads it from the
+      dying host's environ and passes it through); **root runs left
+      root-owned files in cardcache/** (give_back() chowns them to the HOME
+      owner, same fix watch.sh's logs got). A PAD_GAME_DIR (folder-run)
+      bind is still unclassified by savestate.
       **(3) the formal acceptance read: save mid-BALL, restore, confirm
       ball, score and mode with `shot.py`, play 60 s, alive 0.** David has
       accepted the feature live (attract + play, audio + video), so this is

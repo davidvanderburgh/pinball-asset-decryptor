@@ -841,6 +841,53 @@ These have each been violated at least once and each cost a run or a window:
       trace of a mid-emit restore, not a fault; a fourth identical core
       would falsify this mechanism too. Crash logs preserved:
       `~/crashlogs/{padglhost,gameout,padvid}_relandcrash_1910.log`.
+      **★★★ AND IT WAS FALSIFIED THE SAME EVENING — David's retry crashed
+      WITH the ring fix live (verified: the deployed lib is byte-identical
+      to the fixed build for all mapped bytes), and the REAL mechanism is
+      now PROVEN by prediction → reproduction → fix → survival:**
+      **THE CRASH IS DELETED VERTEX BUFFERS, NOT THE RING.** The 19:24 core
+      gave `dispatch(op=43 PADGL_DRAWARRAYS, len=12)` with Mesa memcpy'ing
+      88 bytes from address 0x8. glDeleteBuffers on a buffer referenced by
+      the bound VAO ZEROES that attachment, and the attribute's recorded
+      byte OFFSET (8) silently becomes a CLIENT pointer. Leave-running
+      save → the pre-kill guest crosses a scene TEARDOWN (ball drain, mode
+      end) and deletes the scene's VBOs → load → the restored guest draws
+      its save-time scene → Mesa reads client address 8 → padglhost SIGSEGV
+      ~1 s after the load. Explains every fact: all four cores (David's
+      88 B = 11 verts × 8; my repro's 760 B = 95 × 8, same libgallium
+      frame), the busy-scene bias, the calm-load survivals, the silent
+      resync guard.
+      **REPRODUCED ON DEMAND (first time ever off David's machine):**
+      start game → play → save → POKE 58 (outlane drain, forcing the
+      ball-end scene teardown) → load → renderer dead, same core. This is
+      the item's repro recipe now.
+      **THE FIX, live-validated: PADGL_DELBUF defers.** padglhost parks
+      deleted host buffer objects in a 4096-entry FIFO graveyard instead
+      of freeing them — the VAO attachment and its DATA stay alive, so a
+      post-restore draw is CORRECT, not just non-fatal (~KB per VBO, few
+      MB worst case). glbridge's resv_base absolute-publish stays too —
+      real window, just not this crash.
+      **VALIDATED, one session, fixed renderer: FOUR restores survived** —
+      (A) the exact crash recipe save→drain→load, (B) a second-generation
+      save of a restored guest → drain → load, (C) save mid-ball →
+      targets+drain → load → IMMEDIATE second load. Renderer 60 fps /
+      30 NEW/s after every restore, ZERO fatal signals in its log,
+      teardown to alive 0 (card umount needed root: plain
+      `umount <cardmnt>`; `cardmount.sh --umount` wants the image arg).
+      **Two rig-discipline lessons paid for tonight:** my buildbridge ran
+      while David's own retry run was live (his crash report arrived
+      mid-turn; he retried while I was still building) and the install
+      clobbered the mapped lib — killed his run-1 guest at 19:23:31 and
+      left the lib tail-truncated (18804 of 18832 bytes; section headers
+      only, runtime-harmless, which is why run-2 played fine). alive.sh
+      goes IMMEDIATELY before any build, not at turn start. And
+      `wsl -u root` + `Select-Object` PS quoting ate `$?`/`$()` twice —
+      bash probes go in script files.
+      **NOT crash-related, seen once tonight: `[padvid] ch0 resume: the
+      guest has not consumed for 3 s - standing the channel down` after a
+      drain-load** — the shipped stand-down doing its job; fresh serves
+      followed. The guest vid_thread question from the earlier Resume
+      stands.
       **No live run. The windowed session's 25-min backstop fired and
       teardown was CONFIRMED: alive.sh printed TOTAL 0 after it, including
       the restored guest (a pidns init — SIGKILL teardown held) and the

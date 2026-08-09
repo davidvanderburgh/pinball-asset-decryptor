@@ -139,6 +139,12 @@ static void load_gl(void)
 #define MAXUNI  32
 static unsigned map_tex[MAXNAME], map_buf[MAXNAME], map_obj[MAXNAME];
 static unsigned map_vao[1024], map_fbo[256];
+/* Graveyard for DELBUF - deleted host buffer objects are parked here instead
+ * of freed, because immediate deletion breaks restored save states (see the
+ * PADGL_DELBUF case).  FIFO; slot reuse frees the oldest occupant. */
+#define GRAVE_N 4096
+static unsigned grave_buf[GRAVE_N];
+static unsigned grave_head;
 static int  uni_loc[MAXPROG][MAXUNI];
 static char uni_name[MAXPROG][MAXUNI][40];
 static int  attr_loc[MAXPROG][PADGL_ATTR_PER_PROG];
@@ -1900,8 +1906,28 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         break;
 
     case PADGL_GENBUF:          if (u[0] < MAXNAME) p_glGenBuffers(1, &map_buf[u[0]]); break;
-    case PADGL_DELBUF:          if (u[0] < MAXNAME && map_buf[u[0]])
-                                    { p_glDeleteBuffers(1, &map_buf[u[0]]); map_buf[u[0]] = 0; } break;
+    case PADGL_DELBUF:
+        /* DEFERRED, never immediate, because of save states.  glDeleteBuffers
+         * on a buffer referenced by the bound VAO zeroes that attachment, and
+         * the attribute's recorded byte OFFSET silently becomes a CLIENT
+         * pointer.  A restored guest resumes drawing the SAVE-time scene; if
+         * the pre-kill guest crossed a scene teardown after the save (a ball
+         * drain was the reproduction), the scene's VBOs were deleted here and
+         * the restored guest's first DrawArrays made Mesa memcpy vertex data
+         * from client address == the offset (0x8, 88 bytes) - the padglhost
+         * SIGSEGV crash, three identical cores.  Parking the object in a
+         * bounded graveyard keeps the VAO attachment and its data alive, so a
+         * post-restore draw is CORRECT, not just non-fatal.  ~KB per VBO, so
+         * the graveyard is a few MB at worst; the oldest is freed when the
+         * ring wraps, long after any restore could still want it. */
+        if (u[0] < MAXNAME && map_buf[u[0]]) {
+            if (grave_buf[grave_head])
+                p_glDeleteBuffers(1, &grave_buf[grave_head]);
+            grave_buf[grave_head] = map_buf[u[0]];
+            grave_head = (grave_head + 1) % GRAVE_N;
+            map_buf[u[0]] = 0;
+        }
+        break;
     case PADGL_BINDBUF:         p_glBindBuffer(u[0], u[1] < MAXNAME ? map_buf[u[1]] : 0); break;
     case PADGL_BUFDATA:
         if (dbg) {

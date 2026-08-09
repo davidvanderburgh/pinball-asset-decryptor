@@ -110,6 +110,22 @@ TTY_EXT=()
 for fd in /proc/$PID/fd/*; do
     tgt=$(readlink "$fd" 2>/dev/null) || continue
     case "$tgt" in
+    *'(deleted)'*)
+        # A DEAD PTY MAKES AN UNLOADABLE SAVE - refuse now, loudly, rather
+        # than hand back a slot that fails at restore ("tty: Corrupted
+        # master peer", David's second load 2026-08-09). The pty dies when
+        # its nodebus exits; nodebus.py holds the pty for the session's
+        # life now, so this only fires on a session from before that fix.
+        case "$tgt" in
+        /dev/pts/*)
+            echo "[save] REFUSED: the game's node-bus tty is dead ($tgt) -"
+            echo "[save] a save of it could never be loaded. This session"
+            echo "[save] predates the nodebus hold fix; restart it and save"
+            echo "[save] again."
+            exit 1
+            ;;
+        esac
+        ;;
     /dev/pts/*|*ttymxc1*)
         key=$(python3 -c 'import os,sys;s=os.stat(sys.argv[1]);print("%x:%x"%(s.st_rdev,s.st_dev))' "$fd" 2>/dev/null) || continue
         n=${fd##*/}

@@ -22,6 +22,41 @@ R=$ROOT
 [ -x "$CRIU" ] || { echo "restorestate: no criu at $CRIU"; exit 2; }
 [ -f "$DDIR/restore.env" ] || { echo "restorestate: no restore.env in $DDIR"; exit 1; }
 
+# --- PRE-FLIGHT: refuse a doomed slot BEFORE anything is killed ----------
+# A restore that fails after PAD_RESTORE_KILL has already killed the guest
+# takes the WHOLE SESSION with it - watch.sh sees no guest, tears down, and
+# the windows close on a game that was fine a second ago. That has happened
+# twice now (the stale-pidfile load, then David's dead-tty load), so every
+# check that can be made against the SLOT alone runs here, first.
+card_live() {
+    [ "$1" != '@CARD@' ] && [ -d "$1" ] || return 1
+    case "$(findmnt -no FSTYPE --target "$1" 2>/dev/null)" in
+        fuse*) return 0 ;;
+    esac
+    return 1
+}
+# A tty external recorded as "(deleted)" is a save of a DEAD pty - the old
+# nodebus had exited and taken the pty with it before the save was made.
+# criu dumps that without complaint and then dies restoring it ("tty:
+# Corrupted master peer"). Nothing can load such a slot; say so and leave
+# the running game alone. (nodebus.py holds its pty now, so new sessions
+# do not produce these - this catches slots from before the fix.)
+if grep -q '^tty .*(deleted)' "$DDIR/restore.env"; then
+    echo "[restore] this save cannot be loaded: it was taken while the game's"
+    echo "[restore] node-bus tty was dead (its pty had been deleted - a save"
+    echo "[restore] made after a load, on a session from before the nodebus"
+    echo "[restore] hold fix). Save again on a current session."
+    exit 1
+fi
+while read -r kind a b c; do
+    [ "$kind" = card ] || continue
+    if ! card_live "$c"; then
+        echo "[restore] the card mount behind $b is gone ($c)."
+        echo "[restore] mount it and retry:  cardmount.sh <the card image>"
+        exit 1
+    fi
+done < "$DDIR/restore.env"
+
 # A guest already running would collide on the restored pids; refuse unless
 # told to clear it (killgame is the rig's own teardown).
 if pgrep -x game >/dev/null; then
@@ -71,17 +106,22 @@ if grep -q '@PTY@' "$DDIR/restore.env"; then
         # cannot set the tty owner on restore ("Can't setup uid ... Operation
         # not permitted"). PAD_NB_USER names that user when the restore runs as
         # root for a guest that ran as someone else (the legacy david case).
+        # Detached the same way the video host restart is (bash -c '... &'),
+        # and for the same measured reason: a plain background child dies
+        # with the wsl.exe session that ran loadgame - SIGHUP - and now that
+        # nodebus HOLDS its pty instead of exiting on EOF, that HUP was the
+        # one thing still killing it and deleting the guest's tty.
+        NBCMD="setsid env PAD_NODEBUS_DIR='$R/dump' \
+python3 '$RIG/nodebus.py' >/dev/null 2>&1 </dev/null &"
         if [ "$(id -u)" = 0 ] && [ -n "${PAD_NB_USER:-}" ]; then
-            runuser -u "$PAD_NB_USER" -- env PAD_NODEBUS_DIR="$R/dump" \
-                python3 "$RIG/nodebus.py" >/dev/null 2>&1 &
+            runuser -u "$PAD_NB_USER" -- bash -c "$NBCMD"
         else
-            python3 "$RIG/nodebus.py" >/dev/null 2>&1 &
+            bash -c "$NBCMD"
         fi
-        NBPID=$!
         for _ in $(seq 1 50); do [ -s "$R/dump/nodebus.path" ] && break; sleep 0.1; done
         NEWPTY=$(cat "$R/dump/nodebus.path" 2>/dev/null)
         [ -e "$NEWPTY" ] || { echo "[restore] node bus did not come up"; exit 1; }
-        echo "[restore] node bus pty: $NEWPTY (pid $NBPID)"
+        echo "[restore] node bus pty: $NEWPTY (pid $(pgrep -nf 'nodebus\.py'))"
     fi
 fi
 
@@ -153,21 +193,14 @@ while read -r kind a b c; do
         # a=key b=guest mountpoint c=the card's HOST path as savestate saw it.
         # USE THE LIVE MOUNT: cardmount setsids fuse2fs, so in a windowed
         # session the card outlives the guest being swapped, and the recorded
-        # path is still exactly the fs the dumped mapping came from. Verified,
-        # not assumed - a stale path would silently bind an empty directory
-        # and the restored game's files would stop existing halfway through.
+        # path is still exactly the fs the dumped mapping came from. Already
+        # VERIFIED by the pre-flight above (card_live, before the guest was
+        # killed); re-checked here only because the kill takes real seconds.
         # A cold load (card unmounted, e.g. after a reboot) stays manual:
         # cardmount.sh the image first, then retry.
         src=$c
-        CARD_OK=""
-        if [ "$src" != '@CARD@' ] && [ -d "$src" ]; then
-            case "$(findmnt -no FSTYPE --target "$src" 2>/dev/null)" in
-                fuse*) CARD_OK=1 ;;
-            esac
-        fi
-        if [ -z "$CARD_OK" ]; then
-            echo "[restore] the card mount behind $b is gone ($src)."
-            echo "[restore] mount it and retry:  cardmount.sh <the card image>"
+        if ! card_live "$src"; then
+            echo "[restore] the card mount behind $b VANISHED mid-restore ($src)"
             exit 1
         fi
         REST_EXT+=(--external "mnt[$a]:$src")

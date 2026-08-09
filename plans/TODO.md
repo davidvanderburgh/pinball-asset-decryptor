@@ -858,6 +858,40 @@ These have each been violated at least once and each cost a run or a window:
       and left it frozen. The gate is now "is padglhost up" (the definition
       of windowed), with the helper user taken from the renderer when no
       host exists.
+      **★★ SAVE→LOAD NOW CHAINS INDEFINITELY — the dead-tty bug, David's
+      "load state failed" (2026-08-09 09:07), is fixed and verified over
+      THREE chained cycles on one card session.** His slot recorded
+      `tty 49 … /dev/pts/26 (deleted)`: a SECOND-generation save (a save of
+      an already-restored guest) taken while the guest's node-bus tty was
+      DEAD — nodebus EOF-exited whenever its slave count dipped, so every
+      load left the restored guest on a masterless, deleted pty; criu dumps
+      a dead tty without complaint and dies restoring it ("tty: Corrupted
+      master peer"). THE FIX, three parts, all live-verified: **nodebus.py
+      HOLDS its pty for the session's life** (EIO/EOF → sleep-and-continue,
+      never exit; proven in isolation with a close/reopen and live across
+      loads 2 and 3 printing "reusing the running node bus pty" — the reuse
+      branch's first firings ever); **restorestate's nodebus restart is
+      setsid'd HUP-proof** like the video host's (a plain background child
+      died with loadgame's wsl session); **savestate REFUSES to create an
+      unloadable save** (a "(deleted)" tty target aborts with the reason)
+      and **restorestate pre-flights the slot BEFORE killing the guest**
+      (dead-tty and gone-card-mount slots are refused while the game is
+      still running — a failed restore after the kill costs the whole
+      session, paid twice already). After cycle 3: 60 fps, 30.0 NEW/s,
+      alive 0 (the card mount needs `cardmount.sh --umount` with the
+      desktop HOME after a killgame teardown — watch.sh's own backstop
+      teardown unmounts it itself).
+      **Two instrument traps from this pass, recorded so nobody repays
+      them:** `kill -0` as the wrong user reads EPERM as "dead" (a healthy
+      root nodebus was reported DIED for 30 minutes); and PowerShell's
+      `Select-Object -First N` CANCELS the upstream pipeline — it killed
+      wsl.exe mid-loadgame, which killed a restore mid-flight and tore a
+      session down. Use -Last or capture to a variable.
+      **Residual curiosity, not blocking: the BOOT-time nodebus still died
+      during the first load of its session** (cause unfound; its log is
+      clobbered by each successor — `open(LOG_FILE, "w")`). The steady
+      state self-heals: every load leaves a setsid'd holder the next load
+      reuses, so only the first load of a session pays the START branch.
       **A FOURTH, found by alive.sh across both sessions' teardowns:
       watch.sh had NO kill pattern for `padrelay.py`** — in a PAD_PIVOT
       session the runuser wrapping breaks the AUDPG group kill that catches
@@ -865,8 +899,9 @@ These have each been violated at least once and each cost a run or a window:
       identically twice (2/2 pivot load-sessions; ordinary runs get it via
       group ancestry). One pattern kill added beside playaudio's; killing
       the relay closes the socket and takes the Windows player with it.
-      Fix is committed but its teardown has not run yet — the NEXT windowed
-      session's alive.sh 0 is the confirmation.
+      **CONFIRMED 2026-08-09: the first pivot teardown carrying the fix
+      (David's app-launched card session, two loads in it) came down to
+      alive.sh TOTAL 0, audio player included.**
       **★★★ THE REAL GAME SAVES AND RESTORES, headless, closed loop, twice
       (alive.sh 0 after each, the ~509 MB dumps reclaimed).** `savetest_real.sh`
       (committed): boot godzilla_pro under `PAD_PIVOT=1` → `savestate.sh`

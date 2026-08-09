@@ -42,6 +42,7 @@ def main() -> None:
     t0 = time.time()
     total = 0
     last_flush = t0
+    quiet = False
     while True:
         ready, _, _ = select.select([master], [], [], 1.0)
         now = time.time()
@@ -49,9 +50,35 @@ def main() -> None:
             try:
                 data = os.read(master, 4096)
             except OSError:
-                break
+                # NO SLAVE IS OPEN - and that is NOT the end any more. This
+                # used to `break`, and that exit is what made save states
+                # one-shot (item 13): a load kills the guest, the slave count
+                # hits zero, this process exited, the pty was DELETED - and
+                # the restored guest then held a dead tty for the rest of the
+                # session. The NEXT save dutifully dumped that dead tty
+                # ("tty 49 ... /dev/pts/26 (deleted)" in its restore.env) and
+                # its restore died on "tty: Corrupted master peer" - David's
+                # second load, 2026-08-09. criu can dump a dead tty; nothing
+                # can restore one. So HOLD the pty: a masterless read returns
+                # EIO and select marks it readable forever, hence the sleep
+                # rather than a hot loop. The guest's reopen, or criu's
+                # inherit-fd on the next restore, revives the traffic.
+                # Teardown still reaps this process by pattern (watch.sh,
+                # killgame.sh, alive.sh all know nodebus.py).
+                if not quiet:
+                    log.write(f"{now - t0:8.3f} -- no slave open; holding the pty\n")
+                    quiet = True
+                time.sleep(0.2)
+                continue
             if not data:
-                break
+                if not quiet:
+                    log.write(f"{now - t0:8.3f} -- EOF from the slave side; holding the pty\n")
+                    quiet = True
+                time.sleep(0.2)
+                continue
+            if quiet:
+                log.write(f"{now - t0:8.3f} -- a slave reopened; traffic resumes\n")
+                quiet = False
             total += len(data)
             log.write(f"{now - t0:8.3f} TX {len(data):4d} {data.hex()}\n")
             # Replying with a deliberately short frame makes the game report

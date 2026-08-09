@@ -255,6 +255,20 @@ def test_detected_game_caption_drives_title_bar(app):
     assert "Led Zeppelin" not in app.root.title()
 
 
+def test_checkout_badge_in_title_bar(app):
+    """A window running an item worktree (the /next chooser flow) carries
+    the checkout badge in the title bar, alongside the usual caption —
+    two open copies must be tellable apart.  The fixture app runs under
+    pytest so its badge is None; set it as the picker flow would."""
+    app._checkout_badge = "item/27 — Any Spike 2 title should load"
+    app._on_detected_game_change("Led Zeppelin v1.22 LE")
+    assert "[item/27 — Any Spike 2 title should load]" in app.root.title()
+    assert "Led Zeppelin v1.22 LE" in app.root.title()
+    app._checkout_badge = None
+    app._refresh_title()
+    assert "item/27" not in app.root.title()
+
+
 def test_badge_row_hidden_until_it_carries_text(app, manufacturers_by_key):
     """Batch 20: the Extract detect-badge row packs only while it carries a
     warning ("Not recognised…" etc.); the happy path keeps it hidden (the

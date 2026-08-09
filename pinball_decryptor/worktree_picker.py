@@ -140,6 +140,32 @@ def _describe(path, branch):
     return label
 
 
+def checkout_badge(root=None):
+    """`item/27 — <queue title>` for the checkout this package runs from.
+
+    None on main/master, detached HEAD, or anywhere git can't answer
+    (every installed copy) — the places where a marker would be noise.
+    The App shows it in the title bar so a window running a picked
+    worktree is identifiable at a glance next to a main-checkout window.
+    """
+    if root is None:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=root)
+    branch = branch.strip() if branch else ""
+    if not branch or branch in ("main", "master", "HEAD"):
+        return None
+    title = None
+    try:
+        with open(os.path.join(root, "plans", "TODO.md"),
+                  encoding="utf-8", errors="replace") as fh:
+            title = item_title(fh.read(), branch)
+    except OSError:
+        pass
+    if title:
+        return branch + " — " + _shorten(title, 48)
+    return branch
+
+
 def _launch(path):
     """Start the chosen checkout's app with this same interpreter."""
     env = dict(os.environ)

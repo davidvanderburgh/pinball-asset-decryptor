@@ -125,6 +125,16 @@ class App:
         # its construction restores saved paths, whose traces can fire the
         # detected-game callback immediately.
         self._detected_caption = None
+        # Dev-only checkout marker: a window running an item/<N> worktree
+        # (the /next chooser flow) names it in the title bar, so two open
+        # copies can be told apart.  None on main and on every installed
+        # copy.  Suppressed under pytest — which checkout the suite runs
+        # in must not change what the tests see.
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            self._checkout_badge = None
+        else:
+            from .worktree_picker import checkout_badge
+            self._checkout_badge = checkout_badge()
 
         self._settings = self._load_settings_file()
         saved_theme = self._settings.get("theme")
@@ -3839,12 +3849,15 @@ class App:
             self._refresh_title()
 
     def _refresh_title(self):
-        """Compose the title bar: app + version, then EITHER the loaded
+        """Compose the title bar: app + version, the dev checkout badge if
+        the running checkout is an item worktree, then EITHER the loaded
         project's name OR the detected game (batch 21 — like most apps, a
         saved/loaded project names the window; the Stern official caption is
         the default only until a project exists.  Batch 20 put the detected
         game here; batch 19 the project)."""
         title = f"{APP_NAME} v{__version__}"
+        if self._checkout_badge:
+            title += "  [%s]" % self._checkout_badge
         path = self._project_path
         if path:
             title += " — %s" % (os.path.basename(path.rstrip("\\/")) or path)

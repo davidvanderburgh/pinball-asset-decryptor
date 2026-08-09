@@ -123,6 +123,32 @@ def test_item_title_against_real_todo():
         assert "\n" not in title and "  " not in title
 
 
+def test_checkout_badge(tmp_path, monkeypatch):
+    plans = tmp_path / "plans"
+    plans.mkdir()
+    (plans / "TODO.md").write_text(
+        "- [ ] **27. Any Spike 2 title should load, show a switch layout, "
+        "and start a\n      game. Today only Godzilla does.** `S1 D3`\n",
+        encoding="utf-8")
+    answers = {}
+    monkeypatch.setattr(
+        wp, "_git", lambda args, cwd, timeout=10: answers.get(tuple(args)))
+
+    # Main checkout, master, detached HEAD, no git: all badge-less.
+    for quiet in ("main\n", "master\n", "HEAD\n", None):
+        answers[("rev-parse", "--abbrev-ref", "HEAD")] = quiet
+        assert wp.checkout_badge(str(tmp_path)) is None
+
+    # An item worktree names the branch AND the queue item.
+    answers[("rev-parse", "--abbrev-ref", "HEAD")] = "item/27\n"
+    badge = wp.checkout_badge(str(tmp_path))
+    assert badge.startswith("item/27 — Any Spike 2 title should load")
+
+    # A non-item branch still names itself, without a title.
+    answers[("rev-parse", "--abbrev-ref", "HEAD")] = "american-pinball\n"
+    assert wp.checkout_badge(str(tmp_path)) == "american-pinball"
+
+
 def test_shorten():
     assert wp._shorten("short") == "short"
     long = "x" * 100

@@ -2196,6 +2196,31 @@ int main(int argc, char **argv)
         while (!stop_now) {
             padgl_cmd c;
             unsigned long long head = hdr->head, tail = hdr->tail;
+            /* A PRODUCER THAT MOVED BACKWARD IS A RESTORED GUEST, NOT DATA
+             * (item 13). head/tail are free-running counters, and a
+             * save-state load brings back a guest whose memory holds the
+             * SAVE-time head - it resumes writing from there, so head drops
+             * below tail and the unsigned `head - tail` below becomes a huge
+             * number. This loop then parsed STALE RING BYTES as commands,
+             * and one of them handed Mesa a vertex pointer of 8: memcpy from
+             * address 8, SIGSEGV, the window closed, and watch.sh took the
+             * whole session down. Twice, both on David's loads (2026-08-09
+             * 09:23 and 09:30, cores in wsl-crashes/) - his sessions had a
+             * clip mid-flight at the save, so the counters always diverged;
+             * calm-attract verification loads kept them aligned and never
+             * saw it. Resync by adopting the producer's position: commands
+             * the OLD guest wrote past the save were already executed
+             * (harmless extra draws), and the restored guest writes fresh
+             * ones from `head`. The second clause catches the same fault
+             * from the other side - a gap wider than the ring cannot be
+             * produced legitimately either. */
+            if (head < tail || head - tail > (unsigned long long)ring_bytes) {
+                fprintf(stderr, "[padglhost] ring counters rewound (head=%llu"
+                        " tail=%llu) - resyncing to a restored guest\n",
+                        head, tail);
+                hdr->tail = head;
+                continue;
+            }
             /* Pump X while idle too, so the window stays responsive (and can
              * still be closed) even if the guest stops feeding the ring. */
             /* Idle back-off. A flat usleep(200) is 5000 wakeups a second for as

@@ -894,6 +894,25 @@ These have each been violated at least once and each cost a run or a window:
       actively serving, renderer alive with zero fatal signals in its log,
       30.0 NEW/s after each, nodebus reused on cycle 2, alive 0 after
       teardown.
+      **★ OPEN — THE ONE FAULT STILL ONLY DAVID CAN REPRODUCE: his loads
+      kill padglhost with SIGSEGV; five of my loads across three shapes
+      (calm attract, ch1 big-clip mid-flight, a STARTED GAME with a plunged
+      ball) survive with zero divergence.** BOTH his crashes are CAPTURED —
+      `C:\Users\david\AppData\Local\Temp\wsl-crashes\wsl-crash-*padglhost-11.dmp`
+      — and the backtrace is identical: **Mesa (libgallium) memcpy from
+      SOURCE ADDRESS 0x8, length 0x58, called from padglhost main()** — an
+      88-byte copy from a near-NULL pointer, i.e. a dispatched GL command
+      carrying a garbage data reference, NOT a pixel upload (frame = 1.5 MB).
+      Last logged act both times: "video upload 1360x768 from ch1 slot0
+      (ch1 serving, write_idx=4)". **Defensive guard SHIPPED and rebuilt
+      into padglhost:** head < tail (or a gap wider than the ring) is a
+      RESTORED GUEST, not data — resync tail := head and log "ring counters
+      rewound" instead of parsing stale bytes. The guard never fired in my
+      five loads, so the guest shim evidently reads the shared head fresh
+      (no divergence on this machine) and the true trigger on David's box
+      is still unidentified. **The next crash is decisive either way: the
+      new core + presence/absence of the resync line in padglhost.log
+      splits the hypothesis space in half.**
       **Two instrument traps from this pass, recorded so nobody repays
       them:** `kill -0` as the wrong user reads EPERM as "dead" (a healthy
       root nodebus was reported DIED for 30 minutes); and PowerShell's

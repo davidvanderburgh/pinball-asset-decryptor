@@ -9,5 +9,9 @@ import sys
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from pinball_decryptor.app import App
-    App().run()
+    # Dev-only: when /next item worktrees exist, offer to run one of them
+    # instead of this checkout (no-op everywhere else — see worktree_picker).
+    from pinball_decryptor.worktree_picker import dev_pick_checkout
+    if dev_pick_checkout():
+        from pinball_decryptor.app import App
+        App().run()

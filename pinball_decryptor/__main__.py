@@ -10,5 +10,9 @@ if __name__ == "__main__":
         from .core.elevated_flash import run_helper_main
         sys.exit(run_helper_main(sys.argv))
 
-    from .app import App
-    App().run()
+    # Dev-only: when /next item worktrees exist, offer to run one of them
+    # instead of this checkout (no-op everywhere else — see worktree_picker).
+    from .worktree_picker import dev_pick_checkout
+    if dev_pick_checkout():
+        from .app import App
+        App().run()

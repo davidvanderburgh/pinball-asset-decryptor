@@ -1,0 +1,215 @@
+"""Dev-only checkout chooser: pick which git worktree the GUI runs from.
+
+The desktop icon always points at the MAIN checkout, but /next item work
+happens in sibling worktrees (../pinball-asset-decryptor-wt/item-<N>), and
+testing an item means running THAT checkout's code.  So when other
+worktrees exist at launch, a small chooser appears first; picking one
+relaunches this same interpreter with the worktree as cwd (`-m` puts cwd
+on sys.path, so the worktree's package is the one imported).  With no
+worktrees — every installed copy, and a dev tree with nothing in
+progress — the chooser never appears and startup is unchanged.
+
+The chooser must never be able to brick a launch: any git failure, parse
+failure, or Tk failure falls through to "just run this checkout".
+"""
+
+import os
+import re
+import subprocess
+import sys
+
+# Set in the child's environment when a worktree is picked, so the child
+# (whose checkout ALSO sees every worktree — `git worktree list` output is
+# shared) doesn't ask again.
+ENV_PICKED = "PAD_WORKTREE_PICKED"
+
+_CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
+
+def _git(args, cwd, timeout=10):
+    """stdout of `git <args>` run quietly in cwd, or None on any failure."""
+    try:
+        proc = subprocess.run(
+            ["git"] + args, cwd=cwd, capture_output=True, text=True,
+            timeout=timeout, creationflags=_CREATE_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
+def parse_worktree_list(porcelain):
+    """`git worktree list --porcelain` -> [(path, branch_or_None)].
+
+    Blocks are blank-line separated; a detached worktree has no branch
+    line and a bare entry has no path we care about.
+    """
+    entries = []
+    path = branch = None
+    for line in porcelain.splitlines() + [""]:
+        if line.startswith("worktree "):
+            path, branch = line[len("worktree "):], None
+        elif line.startswith("branch refs/heads/"):
+            branch = line[len("branch refs/heads/"):]
+        elif not line.strip():
+            if path:
+                entries.append((path, branch))
+            path = branch = None
+    return entries
+
+
+def _sort_key(entry):
+    """item/<N> worktrees first in numeric order, then everything else.
+
+    Item numbers aren't purely numeric (1b, 1d are real items), so the
+    numeric part ranks and the suffix breaks ties.
+    """
+    _path, branch = entry
+    m = re.fullmatch(r"item/(\d+)([a-z]?)", branch or "")
+    if m:
+        return (0, int(m.group(1)), m.group(2))
+    return (1, 0, branch or _path)
+
+
+def discover_other_checkouts(root):
+    """Worktrees of root's repo that are runnable copies of the app.
+
+    Excludes root itself, session-internal worktrees under a `.claude`
+    directory, and any worktree missing the package entry point.
+    """
+    out = _git(["worktree", "list", "--porcelain"], cwd=root)
+    if not out:
+        return []
+    root_key = os.path.normcase(os.path.normpath(root))
+    found = []
+    for path, branch in parse_worktree_list(out):
+        p = os.path.normpath(path)
+        if os.path.normcase(p) == root_key:
+            continue
+        if (os.sep + ".claude" + os.sep) in p:
+            continue
+        if not os.path.isfile(
+                os.path.join(p, "pinball_decryptor", "__main__.py")):
+            continue
+        found.append((p, branch))
+    return sorted(found, key=_sort_key)
+
+
+def item_title(todo_text, branch):
+    """The queue item's title for an item/<N> branch, from plans/TODO.md.
+
+    Queue lines look like `- [ ] **33. Save-state slots need visibility.**
+    `S2 D3`` — the number is the anchor, the bold run is the title."""
+    m = re.fullmatch(r"item/(\w+)", branch or "")
+    if not m:
+        return None
+    hit = re.search(
+        r"\*\*" + re.escape(m.group(1)) + r"\.\s*(.+?)\*\*", todo_text)
+    if not hit:
+        return None
+    return hit.group(1).strip().rstrip(".")
+
+
+def _describe(path, branch):
+    """One chooser row: branch, item title if findable, dirty marker."""
+    label = branch or os.path.basename(path)
+    title = None
+    try:
+        with open(os.path.join(path, "plans", "TODO.md"),
+                  encoding="utf-8", errors="replace") as fh:
+            title = item_title(fh.read(), branch)
+    except OSError:
+        pass
+    if title:
+        label += "  —  " + title
+    status = _git(["status", "--porcelain"], cwd=path)
+    if status and status.strip():
+        label += "   ● uncommitted"
+    return label
+
+
+def _launch(path):
+    """Start the chosen checkout's app with this same interpreter."""
+    env = dict(os.environ)
+    env[ENV_PICKED] = "1"
+    subprocess.Popen([sys.executable, "-m", "pinball_decryptor"],
+                     cwd=path, env=env)
+
+
+def _ask(root, others):
+    """Tk chooser.  Returns the chosen checkout path, or None for cancel."""
+    import tkinter as tk
+
+    branch = (_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=root)
+              or "main").strip()
+    rows = [(root, branch + "  —  this checkout")]
+    rows += [(p, _describe(p, b)) for p, b in others]
+
+    win = tk.Tk()
+    win.title("Pinball Asset Decryptor — dev")
+    win.resizable(False, False)
+    win.attributes("-topmost", True)
+
+    tk.Label(win, text="Item worktrees exist. Run the app from which checkout?",
+             anchor="w", padx=12, pady=8).pack(fill="x")
+    lb = tk.Listbox(win, height=len(rows), activestyle="dotbox",
+                    width=max(28, max(len(t) for _, t in rows) + 2))
+    for _, text in rows:
+        lb.insert("end", text)
+    lb.selection_set(0)
+    lb.pack(fill="both", expand=True, padx=12)
+
+    chosen = []
+
+    def go(_event=None):
+        sel = lb.curselection()
+        if sel:
+            chosen.append(rows[sel[0]][0])
+            win.destroy()
+
+    def cancel(_event=None):
+        win.destroy()
+
+    btns = tk.Frame(win, padx=12, pady=10)
+    btns.pack(fill="x")
+    tk.Button(btns, text="Launch", width=10, default="active",
+              command=go).pack(side="right")
+    tk.Button(btns, text="Cancel", width=10,
+              command=cancel).pack(side="right", padx=(0, 8))
+
+    lb.bind("<Double-Button-1>", go)
+    win.bind("<Return>", go)
+    win.bind("<Escape>", cancel)
+    win.protocol("WM_DELETE_WINDOW", cancel)
+
+    win.update_idletasks()
+    x = (win.winfo_screenwidth() - win.winfo_reqwidth()) // 2
+    y = (win.winfo_screenheight() - win.winfo_reqheight()) // 3
+    win.geometry("+%d+%d" % (x, y))
+    lb.focus_set()
+    win.mainloop()
+    return chosen[0] if chosen else None
+
+
+def dev_pick_checkout():
+    """Entry-point hook.  True = continue into the app in THIS checkout;
+    False = the caller should exit (a worktree's app was launched instead,
+    or the chooser was cancelled)."""
+    if os.environ.get(ENV_PICKED):
+        return True
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    others = discover_other_checkouts(root)
+    if not others:
+        return True
+    try:
+        choice = _ask(root, others)
+    except Exception:
+        return True  # a broken chooser must never block the app
+    if choice is None:
+        return False
+    if os.path.normcase(os.path.normpath(choice)) == \
+            os.path.normcase(os.path.normpath(root)):
+        return True
+    _launch(choice)
+    return False

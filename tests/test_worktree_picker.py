@@ -1,0 +1,145 @@
+"""Worktree chooser logic — parsing, discovery filters, and the no-op
+guarantees that keep it invisible outside a dev tree with worktrees."""
+
+import os
+
+from pinball_decryptor import worktree_picker as wp
+
+
+SAMPLE = """\
+worktree C:/Users/david/Documents/development/pinball-asset-decryptor
+HEAD d085f81aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+branch refs/heads/main
+
+worktree C:/Users/david/Documents/development/pinball-asset-decryptor-wt/item-33
+HEAD 1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+branch refs/heads/item/33
+
+worktree C:/Users/david/Documents/development/pinball-asset-decryptor/.claude/worktrees/nice-austin
+HEAD 712bfa5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+branch refs/heads/claude/nice-austin-2fa8d1
+
+worktree C:/somewhere/detached-copy
+HEAD 2222222aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+detached
+"""
+
+
+def test_parse_worktree_list():
+    entries = wp.parse_worktree_list(SAMPLE)
+    assert entries == [
+        ("C:/Users/david/Documents/development/pinball-asset-decryptor",
+         "main"),
+        ("C:/Users/david/Documents/development/pinball-asset-decryptor-wt/item-33",
+         "item/33"),
+        ("C:/Users/david/Documents/development/pinball-asset-decryptor/.claude/worktrees/nice-austin",
+         "claude/nice-austin-2fa8d1"),
+        ("C:/somewhere/detached-copy", None),
+    ]
+
+
+def test_parse_worktree_list_no_trailing_blank():
+    entries = wp.parse_worktree_list(
+        "worktree /a/b\nHEAD 123\nbranch refs/heads/item/7")
+    assert entries == [("/a/b", "item/7")]
+
+
+def _make_checkout(base, name):
+    p = base / name / "pinball_decryptor"
+    p.mkdir(parents=True)
+    (p / "__main__.py").write_text("")
+    return str(base / name)
+
+
+def test_discover_filters_and_sorts(tmp_path, monkeypatch):
+    root = _make_checkout(tmp_path, "repo")
+    wt9 = _make_checkout(tmp_path, "wt/item-9")
+    wt1b = _make_checkout(tmp_path, "wt/item-1b")
+    wt33 = _make_checkout(tmp_path, "wt/item-33")
+    # A worktree whose directory lost the entry point is not runnable.
+    broken = str(tmp_path / "wt" / "item-4")
+    os.makedirs(broken)
+    # Session-internal worktrees are noise, not run targets.
+    claude = _make_checkout(tmp_path, os.path.join("repo", ".claude", "worktrees", "x"))
+
+    porcelain = ""
+    for path, branch in [
+            (root, "main"), (wt33, "item/33"), (broken, "item/4"),
+            (claude, "claude/x"), (wt9, "item/9"), (wt1b, "item/1b")]:
+        porcelain += "worktree %s\nHEAD 0\nbranch refs/heads/%s\n\n" % (
+            path, branch)
+    monkeypatch.setattr(wp, "_git", lambda args, cwd, timeout=10: porcelain)
+
+    found = wp.discover_other_checkouts(root)
+    assert [b for _, b in found] == ["item/1b", "item/9", "item/33"]
+
+
+def test_discover_git_failure_is_empty(monkeypatch):
+    monkeypatch.setattr(wp, "_git", lambda args, cwd, timeout=10: None)
+    assert wp.discover_other_checkouts("C:/anywhere") == []
+
+
+def test_item_title():
+    todo = (
+        "- [ ] **33. Save-state slots need visibility.** `S2 D3`\n"
+        "- [ ] **1b. LED fade decode.** `S2 D2`\n")
+    assert wp.item_title(todo, "item/33") == "Save-state slots need visibility"
+    assert wp.item_title(todo, "item/1b") == "LED fade decode"
+    assert wp.item_title(todo, "item/99") is None
+    assert wp.item_title(todo, "main") is None
+    assert wp.item_title(todo, None) is None
+
+
+def test_pick_noop_when_child(monkeypatch):
+    monkeypatch.setenv(wp.ENV_PICKED, "1")
+    # Discovery must not even run — a child re-asking is the recursion bug.
+    monkeypatch.setattr(wp, "discover_other_checkouts",
+                        lambda root: (_ for _ in ()).throw(AssertionError))
+    assert wp.dev_pick_checkout() is True
+
+
+def test_pick_noop_when_no_worktrees(monkeypatch):
+    monkeypatch.delenv(wp.ENV_PICKED, raising=False)
+    monkeypatch.setattr(wp, "discover_other_checkouts", lambda root: [])
+    assert wp.dev_pick_checkout() is True
+
+
+def test_pick_broken_chooser_still_launches(monkeypatch):
+    monkeypatch.delenv(wp.ENV_PICKED, raising=False)
+    monkeypatch.setattr(wp, "discover_other_checkouts",
+                        lambda root: [("/wt/item-9", "item/9")])
+    def boom(root, others):
+        raise RuntimeError("no display")
+    monkeypatch.setattr(wp, "_ask", boom)
+    assert wp.dev_pick_checkout() is True
+
+
+def test_pick_worktree_launches_child(monkeypatch):
+    monkeypatch.delenv(wp.ENV_PICKED, raising=False)
+    monkeypatch.setattr(wp, "discover_other_checkouts",
+                        lambda root: [("/wt/item-9", "item/9")])
+    monkeypatch.setattr(wp, "_ask", lambda root, others: "/wt/item-9")
+    launched = []
+    monkeypatch.setattr(wp, "_launch", launched.append)
+    assert wp.dev_pick_checkout() is False
+    assert launched == ["/wt/item-9"]
+
+
+def test_pick_cancel_launches_nothing(monkeypatch):
+    monkeypatch.delenv(wp.ENV_PICKED, raising=False)
+    monkeypatch.setattr(wp, "discover_other_checkouts",
+                        lambda root: [("/wt/item-9", "item/9")])
+    monkeypatch.setattr(wp, "_ask", lambda root, others: None)
+    launched = []
+    monkeypatch.setattr(wp, "_launch", launched.append)
+    assert wp.dev_pick_checkout() is False
+    assert launched == []
+
+
+def test_pick_this_checkout_continues(monkeypatch):
+    monkeypatch.delenv(wp.ENV_PICKED, raising=False)
+    root = os.path.dirname(os.path.dirname(os.path.abspath(wp.__file__)))
+    monkeypatch.setattr(wp, "discover_other_checkouts",
+                        lambda r: [("/wt/item-9", "item/9")])
+    monkeypatch.setattr(wp, "_ask", lambda r, others: root)
+    assert wp.dev_pick_checkout() is True

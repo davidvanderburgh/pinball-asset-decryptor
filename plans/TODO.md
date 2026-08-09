@@ -1542,6 +1542,40 @@ These have each been violated at least once and each cost a run or a window:
       but the UI half wants a windowed session to verify, which is what keeps
       it off D1.
 
+- [ ] **34. Booting the same card from a different path re-copies the whole
+      image, so "first run only" slowness comes back.** `S3 D2`
+      **Observed 2026-08-09 (David's godzilla_pro session):** "Startup In
+      Progress" for ~3 min — first frame at 177 s against the ~15 s a cached
+      boot takes — with input laggy while the copy competed with the boot's own
+      9p reads, and the placeholder-looking attract screens that follow a boot
+      nobody advances confused the whole session.
+      **ESTABLISHED AT THE DESK, from the source:** `cardmount.sh`
+      `cache_pick()` validates the local copy against a stamp of
+      `stat -c "%n %s %Y"` — the PATH is part of the identity. David has the
+      byte-identical card (size 7861174272, mtime Jul 28 12:45:11) at three
+      paths — a D: shortcut target, repo `images/Stern/spike2/`, and the
+      OneDrive Desktop — and every path switch invalidates the stamp and
+      re-runs the full 7.3 GB dd while the game boots off the un-cached 9p
+      mount. `~/cardcache/godzilla_pro-1_15_0_spike2.log` carries EIGHT
+      "local cache complete" lines, and the stamp was watched flipping
+      repo → Desktop within 13 minutes on 2026-08-09.
+      **Fix:** compare size+mtime only (fields 2-3 of the stamp), keeping
+      invalidation for a genuinely new build — a re-exported card gets a new
+      size/mtime and still re-copies. **The trade, and say it in the commit:**
+      two DIFFERENT cards sharing a label AND coincidentally identical
+      size+mtime would wrongly share a cache — vanishingly unlikely for card
+      images, but it is a real narrowing of the identity.
+      **Acceptance:** boot one card from two different paths back to back; the
+      second boot logs `using local cache` and starts no copier; then touch the
+      image's mtime and confirm that boot DOES re-copy. State the
+      boot-to-first-picture time of the second boot.
+      — S3: nothing is broken and the workaround is total (launch from one
+      consistent path); what it costs is a ~3 min boot and a confusing session
+      whenever paths alternate. D2: the change is a few characters in one
+      comparison, established from the source above; the acceptance needs one
+      confirming session of two boots plus the negative case, which is what
+      keeps it off D1.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

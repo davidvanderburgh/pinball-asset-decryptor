@@ -733,6 +733,14 @@ def serve(m, c, path, w, h, native, gen, old_read):
                 pass
 
 
+#: How long a RESUMED serve waits on a guest that is not draining the ring
+#: before it stands the channel down. See the stall check in resume_serve.
+#: Long enough that an ordinary hitch (a busy guest, a slow frame) is not
+#: mistaken for a dead stream thread; short enough that a wedged channel is
+#: measured in seconds rather than the rest of the session.
+RESUME_STALL_S = 3.0
+
+
 def resume_serve(m, c):
     """Continue the serve a save-state restore interrupted. (item 13)
 
@@ -834,11 +842,35 @@ def resume_serve(m, c):
             skip -= 1
         log("ch%d resume: skipped to frame %d in %.0f ms"
             % (c, produced, (time.monotonic() - t0) * 1000.0))
+        # A RESUMED CHANNEL THE GUEST NEVER DRAINS MUST BE GIVEN UP, NOT HELD.
+        # Measured 2026-08-09: after a load the guest's own stream thread does
+        # not always come back, so read_idx stops moving; this loop then sat on
+        # a full ring forever with playing=1, and the channel was wedged for
+        # the rest of the session - the window kept drawing, video stayed at
+        # 0.0 NEW/s, and nothing could ever take the channel because it still
+        # looked busy. Standing down frees it: the next location change gets a
+        # normal fresh serve, which is the path that works. Bounded wait, not a
+        # retry loop, because a guest that has not read a frame in seconds is
+        # not about to.
+        stall_since = None
+        last_read = get(m, c, "read_idx")
         while True:
             if gone(""):
                 return
             while produced - min(get(m, c, "read_idx"), produced) >= SLOTS - 1:
                 if gone("while throttled"):
+                    return
+                now_read = get(m, c, "read_idx")
+                if now_read != last_read:
+                    last_read, stall_since = now_read, None
+                elif stall_since is None:
+                    stall_since = time.monotonic()
+                elif time.monotonic() - stall_since > RESUME_STALL_S:
+                    log("ch%d resume: the guest has not consumed for %.0f s "
+                        "(read_idx %d, wrote %d) - standing the channel down "
+                        "so a fresh request can have it"
+                        % (c, RESUME_STALL_S, now_read, produced))
+                    put(m, c, "playing", 0)
                     return
                 time.sleep(0.002)
             got = read_frame()

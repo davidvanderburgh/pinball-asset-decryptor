@@ -894,6 +894,35 @@ These have each been violated at least once and each cost a run or a window:
       actively serving, renderer alive with zero fatal signals in its log,
       30.0 NEW/s after each, nodebus reused on cycle 2, alive 0 after
       teardown.
+      **★★ 2026-08-09 AFTERNOON — THE RENDERER CRASH DID NOT RECUR, and the
+      remaining video fault is now located EXACTLY.** Two loads through the
+      new `savetest.cmd` launcher: guest restored and rendering both times,
+      **padglhost alive with ZERO fatal signals in its log** (the resync
+      guard is in the rebuilt binary), teardown clean. So the crash David hit
+      three times is either fixed by the guard or still unprovoked here —
+      his next load is the tiebreak, and the guard logs a line if it fires.
+      **WHAT IS STILL BROKEN, and it is NOT the host: after a load the
+      GUEST'S OWN VIDEO STREAM THREAD DOES NOT COME BACK.** The ring says it
+      outright — `write_idx 129, read_idx 126, playing 1, eos 0`: a gap of
+      exactly SLOTS-1, i.e. the host filled the ring and the guest never took
+      another frame. The guest's MAIN loop is fine (it keeps requesting
+      clips — fresh serves at 38 s, 46 s, 54 s) and its GL drawing is fine
+      (51.8 fps eglshim, renderer 59.6 fps); only the thread that drains the
+      video ring and hands frames to the game is gone, so `vid 0.0 NEW/s`
+      forever. That is why "restart the video host" was never going to be
+      enough — every earlier theory was about the HOST side of a ring whose
+      GUEST side is what died.
+      **Shipped with that finding: the resumed serve now STANDS THE CHANNEL
+      DOWN** after `RESUME_STALL_S` (3 s) of a guest that is not draining,
+      instead of holding a full ring with `playing=1` forever and wedging the
+      channel for the rest of the session. Verified live: the stand-down line
+      printed at 3.12 s and fresh serves resumed immediately after it.
+      **Resume for the next pass:** find out why the guest's `vid_thread`
+      does not survive the restore — criu restores its threads (19-20 of
+      them, counted), so the question is whether the thread is restored but
+      parked in a syscall it cannot come back from, or exited during the
+      dump. `gstvid.c`'s stream loop is the code; the ring counters above are
+      the instrument, and they are decisive in one read.
       **★ OPEN — THE ONE FAULT STILL ONLY DAVID CAN REPRODUCE: his loads
       kill padglhost with SIGSEGV; five of my loads across three shapes
       (calm attract, ch1 big-clip mid-flight, a STARTED GAME with a plunged

@@ -245,8 +245,21 @@ while read -r kind a b c; do
         # SAVE-time gen/write_idx. Rewind it to the stash so the resumed
         # host and the restored guest agree (see the video-host block above).
         if [ "$VID_RESTART" = 1 ] && [ "$R$a" = "$VID_RING" ] && [ -f "$DDIR/rings/$b" ]; then
-            cp -f "$DDIR/rings/$b" "$R$a"
-            echo "[restore] rewound the video ring to the save"
+            # IN PLACE, NEVER TRUNCATING. cp -f truncates the file to zero
+            # and rewrites all 95 MB - and PADGLHOST HAS THIS RING MMAPPED
+            # the whole time (its mapping across the load is the design; the
+            # surviving text after a restore is that mapping working).
+            # Touching a mapped page past EOF during cp's truncate window is
+            # a fatal signal, and it is a race decided by whether a clip is
+            # actively on screen: three verification loads won it, David's
+            # first real load lost it - padglhost died mid "video upload
+            # from ch1 slot0", "Segmentation fault (core dumped)" as the
+            # last line of its log, and the renderer's death took the whole
+            # session down (2026-08-09 09:23). dd conv=notrunc keeps the
+            # inode full-size throughout; a reader can see torn bytes for
+            # one tick, which the renderer tolerates, unlike a lost page.
+            dd if="$DDIR/rings/$b" of="$R$a" bs=4M conv=notrunc status=none
+            echo "[restore] rewound the video ring to the save (in place)"
         elif [ ! -f "$R$a" ] && [ -f "$DDIR/rings/$b" ]; then
             mkdir -p "$(dirname "$R$a")"
             cp -f "$DDIR/rings/$b" "$R$a"

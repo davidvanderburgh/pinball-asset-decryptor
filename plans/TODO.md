@@ -881,6 +881,19 @@ These have each been violated at least once and each cost a run or a window:
       alive 0 (the card mount needs `cardmount.sh --umount` with the
       desktop HOME after a killgame teardown — watch.sh's own backstop
       teardown unmounts it itself).
+      **★ AND THE LAST CRASH: the ring rewind was TRUNCATING a file the
+      RENDERER had mmapped.** David's next load (09:23) killed padglhost —
+      "Segmentation fault (core dumped)" as the last line of its log, mid
+      "video upload from ch1 slot0" — because `cp -f` truncates the 95 MB
+      padvid ring to zero before rewriting it, and a mapped page past EOF
+      is a fatal signal. A RACE: three verification loads won it, David's
+      load (big clip actively on screen = ring pages touched at 30/s) lost
+      it. Fix: `dd conv=notrunc` rewinds the ring IN PLACE, so the mapping
+      never sees a shrunken file; a torn byte for one tick is tolerated,
+      a lost page is not. Verified: two more save→load cycles with video
+      actively serving, renderer alive with zero fatal signals in its log,
+      30.0 NEW/s after each, nodebus reused on cycle 2, alive 0 after
+      teardown.
       **Two instrument traps from this pass, recorded so nobody repays
       them:** `kill -0` as the wrong user reads EPERM as "dead" (a healthy
       root nodebus was reported DIED for 30 minutes); and PowerShell's

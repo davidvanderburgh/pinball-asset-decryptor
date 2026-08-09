@@ -1515,6 +1515,33 @@ These have each been violated at least once and each cost a run or a window:
       look, and all three instruments exist and are validated — the unknown is
       which stage of the present path pays, not how to see it.
 
+- [ ] **33. Save-state slots are invisible: nothing shows what exists or what
+      it costs.** `S3 D2` **★ DAVID, 2026-08-09: "maybe our save states are not
+      being pruned?... we should have clear visibility of what kind of space
+      they're taking up."** Asked while chasing that day's startup freeze, which
+      turned out to be unrelated (v0.120.3, a poisoned log line) — but the
+      visibility gap he tripped over is real: the only way to see slots today
+      is `du -sh` inside WSL.
+      **Measured 2026-08-09:** slots live in `<rootfs>/saves/<slot>` (criu
+      dumps, `savegame.sh:48`); on this machine `/home/david/spike2root/saves`
+      = quicksave 511 MB + wtest 475 MB = 985 MB. **Pruning is NOT broken and
+      is not the job** — `savegame.sh` `rm -rf`s a slot before each re-dump, so
+      growth is bounded per slot name; what is missing is the LIST. The GUI
+      half rides on item 13's StateOps mixin (both playfield views' Save/Load
+      buttons), and any slot browser must respect restorestate.sh's pre-flight
+      rules (a dead-tty or gone-card slot is refusable, and saying WHY in the
+      list would save a failed load).
+      **Related cleanup found the same day, David to confirm before anyone
+      deletes:** `/home/david/wtest.log` is 13 GB of watch.sh test debris;
+      `~/cardcache` is 43 GB and is EXPECTED (per-title tables), keep it.
+      **Acceptance:** wherever Save/Load already lives (playfield bar and/or
+      Emulate tab), the user can see every slot with its size and save time
+      plus a total, and can delete a slot from there; the numbers match `du`
+      on the same moment. — S3: a `du` in WSL answers it today, nothing is
+      broken. D2: the mechanism is fully known (list a directory, stat, rm),
+      but the UI half wants a windowed session to verify, which is what keeps
+      it off D1.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

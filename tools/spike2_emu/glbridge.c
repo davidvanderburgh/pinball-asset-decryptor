@@ -86,6 +86,20 @@ static int bridge_init(void)
     return 1;
 }
 
+/* Head value reserve() captured for the command now being emitted.  emit()
+ * publishes head as resv_base + need — an ABSOLUTE store, never `+=` on the
+ * live header.  A leave-running save can freeze the guest INSIDE emit()
+ * (between reserve and publish) while the not-yet-killed guest plays on and
+ * advances the shared head; a `+=` after restore then publishes `need` bytes
+ * at the LIVE head while the payload sits at the save-time offset, and the
+ * host dispatches lap-old ring bytes as a command — the Mesa
+ * memcpy-from-near-NULL padglhost crash.  The absolute store makes a
+ * mid-emit restore step head BACKWARD to the guest's true position instead,
+ * which is exactly the state padglhost's rewound-counters guard resyncs on
+ * (one command dropped, renderer lives).  Single producer, one emitting
+ * thread, so outside that restore window this is identical to `+=`. */
+static unsigned long long resv_base;
+
 /* Reserve n bytes, waiting for the host to drain if the ring is full. */
 static unsigned char *reserve(unsigned int n, unsigned int *at)
 {
@@ -101,7 +115,8 @@ static unsigned char *reserve(unsigned int n, unsigned int *at)
         if (++spins > 200000) { bridge_dead = 1; say("[bridge] host stalled; giving up\n"); return 0; }
         usleep(50);
     }
-    *at = (unsigned int)(hdr->head % ring_bytes);
+    resv_base = head;
+    *at = (unsigned int)(resv_base % ring_bytes);
     return ring;
 }
 
@@ -128,7 +143,7 @@ static void emit(unsigned int op, const void *a, unsigned int alen,
     off = (off + (unsigned int)sizeof c) % ring_bytes;
     if (alen) { ring_put(off, a, alen); off = (off + alen) % ring_bytes; }
     if (blen) { ring_put(off, b, blen); }
-    hdr->head += need;
+    hdr->head = resv_base + need;      /* absolute, not += — see resv_base */
 }
 
 static void emit_u(unsigned int op, const unsigned int *v, unsigned int count)

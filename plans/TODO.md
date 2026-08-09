@@ -796,8 +796,51 @@ These have each been violated at least once and each cost a run or a window:
       a ROOT guest ignores. 251 tests green in the worktree, including
       `test_log_pane_freeze` + `test_emulate_poll_storm` (the freeze fixes'
       own regressions — proof the merge kept them) and the re-added
-      `test_tab_switch_disk_freeze`. Awaiting David's hands on the shipped
-      build.
+      `test_tab_switch_disk_freeze`. Merged to main (`bc96678`). **Release
+      HELD, deliberately: David validates from main FIRST** — his 2026-08-09
+      rule, now written into `/next`'s SKILL.md ("Releasing"): a pass never
+      releases without his explicit yes, and trying the build IS the
+      validation, so it comes before the release, not from it.
+      **★★★ AND HIS FIRST VALIDATION TRY REPRODUCED HIS CRASH (2026-08-09
+      19:10) — the third core was decisive exactly as this item predicted,
+      and the fault is now located AT THE INSTRUCTION.** Save during the
+      big ch1 clip, load, padglhost SIGSEGV ~1 s after the restore's
+      log-replay burst; teardown clean, alive 0. The core
+      (`wsl-crash-1786317041-…padglhost-11.dmp`): **identical signature**
+      (memcpy src=0x8 len=0x58 inside libgallium, return address =
+      `main+6507`, the instruction after `call dispatch` in the padgl ring
+      loop) and **NO "ring counters rewound" line — the guard never fired,
+      which kills the stale-counters-parse theory outright.**
+      **THE MECHANISM, read from `glbridge.c` and consistent with every
+      observed fact:** `emit()` writes its payload at an offset `reserve()`
+      captured from the head, but publishes with `hdr->head += need` — a
+      load-add-store of the LIVE shared head. A leave-running save can
+      freeze the guest INSIDE emit() (most likely precisely when a busy
+      scene emits ~30 commands/frame — the condition all three of David's
+      crashes share and the five calm surviving loads lacked); the
+      not-yet-killed guest then advances head for the 10-20 s David keeps
+      playing, and the restored guest completes its write at the SAVE-time
+      offset while `+=` publishes `need` bytes at the LIVE head. The host
+      parses lap-old ring bytes as a command — garbage data pointer, an
+      88-byte memcpy from near NULL — and head only ever moved forward, so
+      the guard stays silent. Race odds scale with GL traffic, which is why
+      only David's busy-scene loads lost it.
+      **FIX SHIPPED (this commit): `resv_base` in glbridge.c.** reserve()
+      captures the head it reserved at; emit() publishes
+      `hdr->head = resv_base + need` — ABSOLUTE, not `+=`. Identical
+      semantics in normal single-producer operation; a mid-emit restore now
+      steps head BACKWARD to the guest's true position, which is exactly
+      the state padglhost's rewound-counters guard resyncs on: one command
+      dropped, renderer lives. Built into the shared rootfs
+      (`buildbridge.sh --guest`, encoder 18832 bytes) — **both checkouts
+      share that build, so main had to carry this commit before any retry
+      from main, or ensurebuild would hash-mismatch and rebuild the OLD
+      encoder back in.**
+      **Verification left: David's next save/load under a busy clip.** A
+      `ring counters rewound` line in padglhost.log is now the EXPECTED
+      trace of a mid-emit restore, not a fault; a fourth identical core
+      would falsify this mechanism too. Crash logs preserved:
+      `~/crashlogs/{padglhost,gameout,padvid}_relandcrash_1910.log`.
       **No live run. The windowed session's 25-min backstop fired and
       teardown was CONFIRMED: alive.sh printed TOTAL 0 after it, including
       the restored guest (a pidns init — SIGKILL teardown held) and the

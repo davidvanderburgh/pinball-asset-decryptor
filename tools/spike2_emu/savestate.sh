@@ -72,8 +72,13 @@ while IFS= read -r line; do
         DUMP_EXT+=(--external "mnt[$mp]:$key")
         echo "mnt $key $mp @PTY@" >> "$DDIR/restore.env"
         ;;
-    fuse|fuseblk)
+    fuse*)
         # THE CARD - record WHERE IT LIVES ON THE HOST, not a placeholder.
+        # `fuse*`, NOT `fuse|fuseblk`: fuse2fs registers as `fuse.ext4`, which
+        # the exact match missed - found on the FIRST real card save ever run
+        # (2026-08-09, David's button): no external was recorded and criu died
+        # "607:./games/godzilla_pro doesn't have a proper root mount". Every
+        # earlier save was an extracted-tree run with no fuse mount to see.
         # The guest line's major:minor names the fuse fs; the same fs appears
         # in OUR mountinfo at its host mountpoint, and the guest line's root
         # field (the bind's subdir, e.g. /godzilla_pro) completes the path.

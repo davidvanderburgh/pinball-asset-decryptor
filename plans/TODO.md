@@ -1063,20 +1063,27 @@ These have each been violated at least once and each cost a run or a window:
       **Resume — the windowed flow is DONE and David-accepted; what is left
       is making the APP's own flow reach it, none of it an unknown
       mechanism:**
-      **(1) ★ BUILT, tests green, AWAITING ONE LIVE CARD RUN: the app's
-      Emulate tab now launches the CHECKPOINTABLE boot** (David authorized
-      the chunk 2026-08-09 after his first button press hit
-      "[savegame] FAILED" — his log showed `wsl.exe -e env …`, no root, no
-      pivot). `watch_cmd()` in emulate_tab.py launches `wsl -u root` with
-      `PAD_PIVOT=1` and the desktop user's HOME (probed via
+      **(1) ★★ LIVE-VERIFIED ON DAVID'S OWN SESSION 2026-08-09 ~09:20: the
+      app's Emulate tab launches the CHECKPOINTABLE boot and a card run
+      saves, loads, and resumes its video.** David restarted the app, hit
+      Start Emulator (his log: `wsl.exe -u root -e env HOME=/home/david
+      PAD_PIVOT=1 … watch.sh 120`, "running the guest as root, helpers as
+      david"), and the sequence ran on that session: save → load → renderer
+      30.0 NEW/s, video host as david with PAD_VID_ROOT on the card, guest
+      up. `watch_cmd()` in emulate_tab.py owns the launch (home probed via
       whoami+getent — NO `$` through wsl.exe's re-parse); `kill_cmd()` makes
       every killgame call root (a root guest ignores the user's pkill); a
-      failed home probe degrades to the old user launch. 5 new launch tests
-      + 72 app smokes green. savegame.sh also DETECTS the chroot case
+      failed home probe degrades to the old user launch. 5 launch tests +
+      72 app smokes green. savegame.sh also DETECTS the chroot case
       (`readlink /proc/PID/root` != "/") and puts the reason on the status
       bar; the playfield's status picker prefers a line that says something
       over a bare FAILED.
-      **(2) ★ BUILT, same live run pending: card-run save/load.** savestate
+      **THE ONE FAULT THE LIVE RUN FOUND, fixed in place: fuse2fs registers
+      as `fuse.ext4`, and savestate's `fuse|fuseblk` case never matched it**
+      — no card external was recorded and criu died "doesn't have a proper
+      root mount". Uncatchable earlier: no card save had ever run (passes
+      five and six were extracted-tree). The case is `fuse*)` now.
+      **(2) ★★ same verification: card-run save/load.** savestate
       records the card's actual HOST path (guest mountinfo major:minor
       matched against /proc/self/mountinfo, plus the bind's fs-root subdir)
       as a new `card` restore.env kind; restorestate verifies the path is

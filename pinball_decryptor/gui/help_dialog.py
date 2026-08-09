@@ -765,7 +765,9 @@ HELP_CONTENT = {
          "the emulator's windows live inside that one Screen Sharing desktop: "
          "click a window once to give it the keyboard, and drag windows by "
          "their title bars to arrange them. Stop kills every part of it and "
-         "then verifies nothing survived."),
+         "then verifies nothing survived — and if leftovers are stuck where "
+         "nothing inside WSL can clear them, Stop says so and offers the "
+         "WSL restart that does."),
         ("It runs the card you pick here, not the Input box",
          "This is the one tab that ignores the Input box: point it at a card "
          "image of its own. That image is mounted READ ONLY and run in place — "
@@ -887,7 +889,9 @@ HELP_CONTENT = {
          "game, and restarting WSL is the cure for each. It closes "
          "everything running in WSL, not just the emulator, so it asks "
          "first and stays greyed out while a run is up — stop the game, "
-         "then use it. Nothing on disk is lost."),
+         "then use it. Nothing on disk is lost. (A stop that cannot finish "
+         "cleanly offers this same restart by itself, so you rarely need "
+         "to come here for that.)"),
     ],
     "Compare": [
         ("What it does",

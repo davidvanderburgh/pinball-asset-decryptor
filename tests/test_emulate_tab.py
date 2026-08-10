@@ -515,6 +515,22 @@ def test_other_platforms_keep_their_launch(monkeypatch, tmp_path):
         assert "PAD_PIVOT=1" not in cmd, (platform, cmd)
 
 
+def test_launch_from_slot_loads_as_root_with_the_desktop_home(monkeypatch,
+                                                              tmp_path):
+    """The tab's Launch button restores a slot: root (criu), the desktop
+    HOME (padpath's rootfs), and PAD_RESTORE_KILL so the booted guest is
+    replaced by the restored one."""
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    _home(monkeypatch, "/home/somebody")
+    cmd = emulate_tab.load_cmd("slot3")
+    assert cmd[:3] == ["wsl.exe", "-u", "root"]
+    assert "HOME=/home/somebody" in cmd
+    assert "PAD_RESTORE_KILL=1" in cmd
+    assert any(c.endswith("loadgame.sh") for c in cmd)
+    assert cmd[-1] == "slot3"
+
+
 def test_stop_kills_as_root_on_windows(monkeypatch, tmp_path):
     """A PAD_PIVOT guest is a root process: the ordinary user's pkill reports
     success and kills nothing.  Root's kill reaches both kinds of run."""

@@ -1506,3 +1506,82 @@ def test_card_game_is_case_insensitive_and_strips_quotes():
 def test_card_game_answers_none_rather_than_guessing():
     assert _tab_with_card("")._card_game() is None
     assert _tab_with_card(r"C:\x\NoVersionShape.raw")._card_game() is None
+
+
+# ---------------------------------------------------------------------------
+# "Reset windows" (item 37, David 2026-08-10: "button on emulate tab to reset
+# window positions of emulator to default (in case they are off-screen somehow
+# or messed up from multi-monitor setups)").
+#
+# The rig-side half lives in winreset.sh and is tested by running it; what is
+# testable here is the half the app owns - the Windows-side playfield state,
+# where the playfield really is a Windows process and no script inside WSL can
+# reach its home - plus the gate, because a reset under a live run is written
+# straight back by padglhost and would report a success that never happened.
+# ---------------------------------------------------------------------------
+
+def _pf_state(monkeypatch, tmp_path, text):
+    p = tmp_path / ".pad_playfield.json"
+    if text is None:
+        if p.exists():
+            p.unlink()
+    else:
+        p.write_text(text)
+    monkeypatch.setattr(emulate_tab.EmulatePanel, "PF_STATE", str(p))
+    return p
+
+
+def test_forget_playfield_pos_takes_only_that_key(monkeypatch, tmp_path):
+    """Other playfield state survives: taking the whole file would be a
+    second, silent reset nobody asked for."""
+    import json as _json
+    p = _pf_state(monkeypatch, tmp_path,
+                  '{"playfield_pos": [-1800, 300], "keep_me": 7}')
+    msg = emulate_tab.EmulatePanel._forget_playfield_pos()
+    assert msg and "-1800" in msg
+    assert _json.loads(p.read_text()) == {"keep_me": 7}
+
+
+def test_forget_playfield_pos_is_quiet_when_there_is_nothing_to_forget(
+        monkeypatch, tmp_path):
+    """Absent key, absent file and junk all answer None rather than raising -
+    the button runs on machines that have never opened a playfield."""
+    _pf_state(monkeypatch, tmp_path, '{"keep_me": 7}')
+    assert emulate_tab.EmulatePanel._forget_playfield_pos() is None
+    _pf_state(monkeypatch, tmp_path, None)
+    assert emulate_tab.EmulatePanel._forget_playfield_pos() is None
+    _pf_state(monkeypatch, tmp_path, "not json at all")
+    assert emulate_tab.EmulatePanel._forget_playfield_pos() is None
+
+
+def test_forget_playfield_pos_leaves_a_non_dict_alone(monkeypatch, tmp_path):
+    """Valid JSON that is not an object is still not ours to rewrite."""
+    p = _pf_state(monkeypatch, tmp_path, '[1, 2, 3]')
+    assert emulate_tab.EmulatePanel._forget_playfield_pos() is None
+    assert p.read_text() == '[1, 2, 3]'
+
+
+def test_reset_windows_button_is_on_the_tab(tmp_path):
+    """Every platform, unlike the two buttons beside it: a second monitor
+    going away is not a Windows-only event."""
+    root, panel = _panel(tmp_path)
+    try:
+        assert panel._winreset_btn.cget("text") == "Reset windows"
+        assert panel._winreset_btn.winfo_manager() == "pack"
+    finally:
+        root.destroy()
+
+
+def test_reset_windows_greys_out_while_a_run_is_up(monkeypatch, tmp_path):
+    """The gate, and it is the whole reason the button is not always live:
+    padglhost re-saves the geometry as the windows move and again at close, so
+    a reset during a run is undone by the run itself."""
+    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
+    root, panel = _panel(tmp_path)
+    try:
+        panel._apply({"state": "running", "running": "1", "procs": "5"})
+        assert str(panel._winreset_btn.cget("state")) == "disabled"
+        panel._apply({"state": "off", "running": "0", "procs": "0"})
+        assert str(panel._winreset_btn.cget("state")) == "normal"
+    finally:
+        root.destroy()

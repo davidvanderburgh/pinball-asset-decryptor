@@ -1161,10 +1161,58 @@ These have each been violated at least once and each cost a run or a window:
       keeps it off D1.
 
 - [ ] **37. A button on the Emulate tab that puts the emulator windows back to
-      their default positions.** `S3 D2`
+      their default positions.** `S3 D1` ← IN PROGRESS, **85%** *(**D2 → D1,
+      2026-08-10:** built, and the mechanism is verified end to end on a live
+      run. What is left is David pressing the actual button and dragging a
+      window — no run to design, no instrument to build.)*
       **★ DAVID, 2026-08-10: "button on emulate tab to reset window positions of
       emulator to default (in case they are off-screen somehow or messed up from
       multi-monitor setups)."**
+      **★★ BUILT AND MEASURED ON A LIVE RUN, 2026-08-10.** `winreset.sh` (new)
+      drops the `game` and `legend` lines from the rig's `~/.pad_windows`;
+      **Reset windows** on the Emulate tab runs it and then clears
+      `playfield_pos` from the Windows-side `~/.pad_playfield.json` itself.
+      **THE SPLIT IS A PROPERTY OF THE MACHINE, NOT A CHOICE, and it is the one
+      thing worth carrying forward:** under WSL there is no Tk in the distro at
+      all, so watch.sh launches playfield.py as a **Windows** process through
+      interop and its `~` is the Windows profile — a home no script inside WSL
+      can see. On a Linux desktop and in the macOS container the playfield is a
+      local Tk process and its state file is rig-side, which is why
+      `winreset.sh` clears it too and the app's half then finds nothing. Exactly
+      one side acts per platform and neither has to know which.
+      **THE ACCEPTANCE'S POISON TEST, RUN ON THE REAL FILES:** `game -4000 -2400
+      3900 2900` / `legend -3800 -2380` / `playfield_pos [-2600, -1400]`, every
+      one of them off a 3840x2160 desktop, then reset, then a 5-min godzilla_pro
+      run from this worktree. Three readings, and they are the finding:
+      • **`[padglhost] window opened 1360x768`** — the default (`PAD_GL_W/H`),
+      where the run before the reset opened 1445x827. The silly size is gone.
+      • **`restore converged after 1 check(s)` with ZERO `restore try` lines** —
+      nothing remembered was replayed, which is what a cleared file is supposed
+      to look like (`game_settled = !game_want_pos`, `padglhost.c:1494`).
+      • **all three windows on the desktop**, read with `GetWindowRect`: game at
+      the top-left corner, playfield 507,167, Controls 1344,-32 (the -32 is the
+      RAIL frame's 32 px shadow margin, so the visible corner is on screen).
+      `zorder.py` saw all three and self-tested OK.
+      **WHAT THE BUTTON DOES WITH A RUN UP: it refuses, and says why.** Greyed
+      by the status poll, re-checked on the click (an info box: stop the
+      emulator first), and **winreset.sh carries the same gate off its own
+      `alive.sh --procs`** so a command-line caller is refused too — the rule
+      lives in one place and the GUI copy is early UX, not the authority.
+      `--procs` and not the `--total` this item suggested: alive.sh's own header
+      calls `--procs` the "is a run up" answer, the difference being idle card
+      mounts, and a stranded fuse2fs mount cannot write `~/.pad_windows`.
+      **WHAT IS NOT DONE, and it is why the box is open:** (a) nobody has
+      pressed the actual button — everything it runs is verified, and the tests
+      cover the button's presence and its gate, but the two message boxes and
+      the click itself are the untested strip; (b) **DRAGGING**, which is what
+      the banned `SetWindowPos` fix broke and cannot be scripted (SendInput into
+      a WSLg window is UIPI-blocked, items 7 and 12). Nothing here touches
+      window movement — it deletes a file — but that is an argument, not the
+      test.
+      **Resume:** press **Reset windows** on the Emulate tab with the emulator
+      down, start a run, and check the game window comes up at 1360x768 on the
+      desktop; then drag both windows, restart, and confirm item 5's restore
+      still puts them back.
       **ESTABLISHED AT THE DESK, from the source, and it says the escape hatch
       genuinely does not exist: the remembered position is restored with NO
       on-screen check.** padglhost reads `~/.pad_windows` (`winpos_get`,

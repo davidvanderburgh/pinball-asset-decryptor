@@ -49,6 +49,7 @@ Three things about it are worth knowing before changing anything here:
   reason.
 """
 
+import json
 import os
 import pathlib
 import re
@@ -812,6 +813,11 @@ class EmulatePanel:
         self._starting = False
         self._stopping = False
         self._resetting = False
+        #: A "Reset windows" run is in flight.  Its own flag rather than
+        #: _resetting: that one greys the WSL restart and is cleared by a
+        #: worker that can take two minutes, and the two must not unstick
+        #: each other's button.
+        self._winresetting = False
         self._poll_job = None
         self._stopped = False
         # NO game-log path is chosen here, on purpose. The GUI runs on the
@@ -942,6 +948,14 @@ class EmulatePanel:
         if sys.platform == "win32":
             self._fixaud_btn.pack(side=tk.LEFT, padx=(6, 0))
 
+        # The escape hatch for a window that cannot be dragged back (item 37).
+        # EVERY platform, unlike the two buttons around it: the remembered
+        # geometry is restored with no on-screen check wherever the rig runs,
+        # and a second monitor that goes away is not a Windows-only event.
+        self._winreset_btn = ttk.Button(btns, text="Reset windows",
+                                        command=self._window_reset, width=15)
+        self._winreset_btn.pack(side=tk.LEFT, padx=(6, 0))
+
         # MACOS ONLY, for exactly the reason "Restart WSL…" is Windows only:
         # Docker is that platform's WSL.  The emulator is a Linux program, macOS
         # has no Linux, and a container is how it gets one - so a Mac without
@@ -1024,6 +1038,7 @@ class EmulatePanel:
         if not rig_available():
             self._run_btn.configure(state=tk.DISABLED)
             self._fixaud_btn.configure(state=tk.DISABLED)
+            self._winreset_btn.configure(state=tk.DISABLED)
             # SAY WHERE IT ACTUALLY IS. This used to read "it is not part of
             # this repository", which was wrong and sent people looking for a
             # separate download: the rig IS in the repository, at
@@ -2117,6 +2132,125 @@ class EmulatePanel:
         self._restart_wsl("rebuilding the audio path and window link",
                           pre_kill=True)
 
+    #: playfield.py's own state file, by the same rule playfield.py builds it
+    #: (``~/.pad_playfield.json``).  Named here rather than imported because
+    #: that module is a rig script the app never loads - it runs as its own
+    #: process, on the other side of an interop hop.
+    PF_STATE = os.path.join(os.path.expanduser("~"), ".pad_playfield.json")
+
+    @classmethod
+    def _forget_playfield_pos(cls):
+        """Drop ``playfield_pos`` from the WINDOWS-side playfield state.
+
+        THE HALF winreset.sh CANNOT REACH, and the split is a property of the
+        machine rather than a choice.  Under WSL there is no Tk inside the
+        distro at all, so watch.sh launches playfield.py as a *Windows*
+        process through interop - its ``~`` is the Windows profile, a home no
+        script running inside WSL can see.  On a Linux desktop and in the
+        macOS container the playfield is a local Tk process instead, its state
+        file sits in the rig's own home, and winreset.sh clears it there; this
+        then finds a file that does not exist and does nothing.  So exactly
+        one side acts on each platform, and neither has to know which.
+
+        Only that one key: the file holds other playfield state, and taking it
+        all would be a second reset nobody asked for.  Returns a line for the
+        log, or None when there was nothing to forget.
+        """
+        try:
+            with open(cls.PF_STATE) as f:
+                st = json.load(f)
+        except Exception:                                   # noqa: BLE001
+            return None      # absent, unreadable, or not JSON: leave it alone
+        if not isinstance(st, dict):
+            return None
+        pos = st.pop("playfield_pos", None)
+        if pos is None:
+            return None
+        try:
+            with open(cls.PF_STATE, "w") as f:
+                json.dump(st, f, indent=1)
+        except Exception as exc:                            # noqa: BLE001
+            return "could not rewrite %s: %s" % (cls.PF_STATE, exc)
+        return "forgot the playfield window position %s" % (pos,)
+
+    def _window_reset(self):
+        """Put the emulator windows back where a first-ever run would open them.
+
+        THE FAULT IT EXISTS FOR: the remembered geometry is restored with no
+        on-screen check anywhere.  padglhost XMoveWindows the game and legend
+        windows to whatever ``~/.pad_windows`` says and CREATES the game window
+        at the saved size, and playfield.py's own guard measures against the
+        PRIMARY monitor, so a legitimate second-screen position is thrown away
+        while a genuinely off-every-monitor one is not.  Either way a window
+        that lands outside the desktop cannot be dragged back, and before this
+        button the only cure was knowing ``~/.pad_windows`` existed and editing
+        it inside WSL.
+
+        REFUSES WHILE A RUN IS UP, and that is not timidity - it is the only
+        honest answer.  padglhost re-saves the geometry as the windows move and
+        again when it closes, so a reset now is written straight back at the
+        end of this run; the button would report success and the next start
+        would come up in the same wrong place.  Moving a LIVE run's windows is
+        a different job that this cannot do at all: it can only be done from
+        inside X, per the standing non-negotiable, and padglhost has no channel
+        to ask it through.  winreset.sh carries the same gate off its own
+        reading of ``alive.sh --procs``, so a command-line caller is refused
+        too and the rule lives in one place; this one is early UX, not the
+        authority.
+        """
+        if self._winresetting or self._starting or self._stopping:
+            return
+        if not rig_available():
+            return
+        if self._last_up:
+            messagebox.showinfo(
+                "Reset windows",
+                "Stop the emulator first.\n\n"
+                "The emulator saves where its windows are as you move them, "
+                "and again when it closes — so resetting now would be undone "
+                "at the end of this run.")
+            return
+        if not messagebox.askyesno(
+                "Reset windows",
+                "Forget where the emulator windows were?\n\n"
+                "The next time you start the emulator, the game window, the "
+                "Controls window and the virtual playfield all open at their "
+                "default position and size.\n\n"
+                "Use this when a window has ended up off the screen — after "
+                "unplugging a second monitor, for example — and cannot be "
+                "dragged back.\n\n"
+                "Nothing else is affected: no save state, no setting, and no "
+                "running game.\n\n"
+                "Reset the window positions now?"):
+            return
+
+        self._winresetting = True
+        self._winreset_btn.configure(state=tk.DISABLED)
+
+        def run():
+            try:
+                out = subprocess.run(rig_cmd("winreset.sh"),
+                                     stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT,
+                                     timeout=120, creationflags=_CREATE_FLAGS)
+                for line in out.stdout.decode("utf-8", "replace").splitlines():
+                    if line.strip():
+                        self._log("[emulate] " + line.strip())
+                # The Windows-side half, after the rig-side one: if the script
+                # refused (a run came up between the poll and the click) this
+                # would otherwise clear the playfield's position on its own and
+                # leave the two files disagreeing about what was reset.
+                if out.returncode == 0:
+                    msg = self._forget_playfield_pos()
+                    if msg:
+                        self._log("[emulate] " + msg)
+            except Exception as exc:                        # noqa: BLE001
+                self._log("[emulate] reset windows failed: %s" % exc)
+            finally:
+                self._winresetting = False
+
+        threading.Thread(target=run, daemon=True).start()
+
     def _restart_wsl(self, why, pre_kill=False):
         """The one `wsl --shutdown` worker, shared by the two doors that reach
         it: the "Restart WSL…" button (pre_kill=True - a terminal-started run
@@ -2383,6 +2517,14 @@ class EmulatePanel:
             # run is up or mid-transition: the honest order is stop, then reset.
             self._fixaud_btn.configure(
                 state=tk.DISABLED if (up or busy or self._resetting
+                                      or not rig_available()) else tk.NORMAL)
+            # Same gate, same reason stated a different way: the emulator
+            # writes its window geometry back as it runs, so a reset while it
+            # is up is a lie rather than a no-op.  _window_reset re-checks on
+            # the click and winreset.sh checks again inside the rig, because a
+            # run can come up in the two seconds between polls.
+            self._winreset_btn.configure(
+                state=tk.DISABLED if (up or busy or self._winresetting
                                       or not rig_available()) else tk.NORMAL)
             # Start-time options: they follow the Start button, because that is
             # the only moment they are read.

@@ -1160,57 +1160,6 @@ These have each been violated at least once and each cost a run or a window:
       confirming session of two boots plus the negative case, which is what
       keeps it off D1.
 
-- [ ] **37. A button on the Emulate tab that puts the emulator windows back to
-      their default positions.** `S3 D2`
-      **★ DAVID, 2026-08-10: "button on emulate tab to reset window positions of
-      emulator to default (in case they are off-screen somehow or messed up from
-      multi-monitor setups)."**
-      **ESTABLISHED AT THE DESK, from the source, and it says the escape hatch
-      genuinely does not exist: the remembered position is restored with NO
-      on-screen check.** padglhost reads `~/.pad_windows` (`winpos_get`,
-      `padglhost.c:912`) and `XMoveWindow`s the game and legend windows there —
-      there is no `DisplayWidth`/bounds test anywhere in that file — and it
-      CREATES the game window at the saved `w h` as well (item 32 uses exactly
-      that as its repro), so a stale SIZE comes back too. `playfield.py` is the
-      only one of the three that guards itself (`_onscreen`,
-      `playfield.py:1821`, over `~/.pad_playfield.json` key `playfield_pos`) —
-      **and it measures against the PRIMARY monitor** (`winfo_screenwidth`), so
-      a legitimate second-monitor position is thrown away as off-screen. Two
-      different multi-monitor faults, one button.
-      **The reset is therefore three keys across two filesystems:** the `game`
-      and `legend` lines in WSL's `~/.pad_windows` (position AND size), and
-      `playfield_pos` in Windows' `~/.pad_playfield.json`.
-      `~/.pad_windows_win.json` (`padwinpos.py`) is a passive RECORDER nothing
-      restores from — leave it, or say why not.
-      **THE TRAP, read off the source, and it decides what the button does: a
-      reset while a run is live is undone by the run itself.** padglhost
-      re-saves on ConfigureNotify and again at close once `restore_state == 2`
-      (`winpos_save_all`, `:1437` / `:1455` / `:1528`), so clearing the file
-      under a live run just writes the off-screen coordinates straight back.
-      Either gate the button on `alive.sh --total`, or say in the button's own
-      text that it lands at the next start.
-      **OUT OF SCOPE unless you state otherwise: moving the windows of a LIVE
-      run.** That can only be done from inside X (`XMoveWindow`), per the
-      standing non-negotiable at the top of this file — `SetWindowPos` froze
-      David's windows once — and padglhost has no trigger channel for it.
-      **Where it goes:** the Emulate tab's button row (`emulate_tab.py:905`,
-      beside "Restart WSL…"); the app already shells rig scripts through
-      `rig_cmd` / `rig_cmd_root` (`emulate_tab.py:258`) if the WSL-side half is
-      done with a script rather than a `\\wsl.localhost` write.
-      **Acceptance:** poison it on purpose — write an off-screen x,y (and a
-      silly `w h`) into `~/.pad_windows` for `game` and `legend`, and an
-      off-screen `playfield_pos` — press the button, start a run, and all three
-      windows open where a first-ever run puts them with the game window back at
-      its default size. State what the button does when a run IS live. Then
-      confirm dragging and the item 5 restore (`19e1b85`) still work on the run
-      after that, because that is what the banned fix broke.
-      — S3: nothing is broken about playing, but the workaround is invisible —
-      you have to know `~/.pad_windows` exists and edit it inside WSL, and a
-      window that is fully off every monitor cannot be dragged back. D2: the
-      mechanism is entirely known from the source above (rewrite two files), but
-      the live-run clobber has to be handled and seeing it work needs a windowed
-      session, which is what keeps it off D1.
-
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.
@@ -1356,6 +1305,76 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **37. A button on the Emulate tab that puts the emulator windows back to
+      their default positions.** DONE 2026-08-10, `cd1a6ca`. **Reset windows**,
+      beside "Restart WSL…", on every platform — unlike the two buttons around
+      it, because a second monitor going away is not a Windows-only event.
+      **What it clears:** the `game` and `legend` lines of the rig's
+      `~/.pad_windows` (position AND size), and `playfield_pos` in
+      `~/.pad_playfield.json`. Deleting the line IS the reset, read off the
+      source rather than chosen: with no line, `win_open()` leaves the size at
+      `fb_w/fb_h` (`PAD_GL_W/H`, 1360x768 from watch.sh) and the delayed restore
+      marks itself settled at once (`game_settled = !game_want_pos`,
+      `padglhost.c:1494`), so no `XMoveWindow` is issued and the compositor's own
+      placement stands. There is no default POSITION to write — WSLg ignores the
+      one asked for at create time.
+      **★ WHY IT IS TWO HALVES, and it is a property of the machine, not a
+      choice — the thing worth carrying forward.** Under WSL there is no Tk
+      inside the distro at all, so watch.sh launches `playfield.py` as a
+      **Windows** process through interop and its `~` is the Windows profile, a
+      home no script running inside WSL can see. On a Linux desktop and in the
+      macOS container the playfield is a local Tk process and its state file is
+      rig-side, which is why `winreset.sh` clears that one too and the app's
+      half then finds nothing. Exactly one side acts per platform and neither
+      has to know which.
+      **WITH A RUN UP IT REFUSES, three deep, and the authority is the script.**
+      padglhost re-saves the geometry as the windows move and again at close, so
+      a reset under a live run is written straight back — the button would
+      report a success that never happened. `winreset.sh` reads
+      `alive.sh --procs` itself and refuses (exit 1), so a command-line caller
+      is refused too; the poll's grey-out and the click's info box are early UX.
+      **`--procs`, not the `--total` the item suggested:** alive.sh's own header
+      calls `--procs` the "is a run up" answer, the difference being idle card
+      mounts, and a stranded fuse2fs mount cannot write `~/.pad_windows`.
+      Verified against a REAL live rig: 18 processes, refused, nothing changed.
+      **MEASURED, with the acceptance's own poison** — `game -4000 -2400 3900
+      2900`, `legend -3800 -2380`, `playfield_pos [-2600, -1400]`, all off a
+      3840x2160 desktop — then reset, then a godzilla_pro run from the worktree:
+      • `[padglhost] window opened 1360x768`, the default; the run before the
+      reset opened 1445x827, so the silly size is genuinely gone.
+      • `restore converged after 1 check(s)` with **ZERO `restore try` lines**,
+      which is exactly what a cleared file looks like.
+      • all three windows on the desktop by `GetWindowRect` — game at the
+      top-left corner, playfield 507,167, Controls 1344,-32 (that -32 is the
+      RAIL frame's 32 px shadow margin, so the visible corner is on screen).
+      `zorder.py` saw all three and self-tested OK.
+      **ITEM 5'S RESTORE STILL WORKS — measured, not argued, on a second run**
+      with a deliberately different remembered geometry (`game 400 300 1200
+      700`): `window opened 1200x700`, `restore try 1: game at 406,327 want
+      400,300 -> aim 394,273`, `restore converged after 2 check(s)`, and the
+      windows landed at 400,300 and 1700,400. So a reset clears what was
+      remembered once; it does not stop the rig remembering.
+      **NOT TESTED, stated rather than glossed: DRAGGING** — the acceptance
+      asked for it because that is what the banned `SetWindowPos` fix broke, and
+      SendInput into a WSLg window is UIPI-blocked (items 7 and 12), so it needs
+      hands. Nothing here touches window movement; it deletes two keys from two
+      config files. The closest available evidence is the run above, where the
+      restore machine moved a window and converged. **Nor has a MOUSE pressed
+      the button** — the reset was fired through the widget itself
+      (`_winreset_btn.invoke()`, which is Tk running the button's own command)
+      against the real files, with the confirm dialog stubbed to Yes, so what is
+      untested is the two message boxes rendering and the click landing.
+      **Left alone on purpose:** `~/.pad_windows_win.json`. `padwinpos.py` writes
+      it and NOTHING restores from it — the Windows-side mover was withdrawn
+      because `SetWindowPos` on a RAIL window made both windows undraggable — so
+      clearing it would destroy a diagnosis record and reset nothing.
+      **Tests:** five in `test_emulate_tab.py` (the playfield-JSON half keeps
+      other keys, is quiet on absent/junk/non-dict, the button is present and
+      packed, and it greys while a run is up); 231 passed across
+      `test_emulate_tab.py`, `test_gui_smoke.py` and `test_emulate_poll_storm.py`.
+      The rig-side half is tested by running it, not by the suite — it shells to
+      WSL, and this repo's suite stays fast synthetic fixtures only.
 
 - [x] **22. Start Emulator leaves the game window BEHIND the app.** DONE
       2026-08-10, `6f3a907` (branch `91ffa1d`..`6f3a907`). **Closed on David's

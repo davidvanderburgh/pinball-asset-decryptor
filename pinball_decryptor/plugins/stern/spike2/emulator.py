@@ -412,6 +412,7 @@ class Spike2Emu:
         self._mapped = set()
         self.st = {"R": 0, "k": 0}
         self._slot_cache = {}   # (scale, chan) -> resolved codec entry (generic)
+        self._slot_recipe = {}  # chan -> (row_delta, sub_slot) that won last
         # (lo, hi) of the master-directory record array, set by the chain that
         # is replaying it; bounds the record write-back (see _record_write_addr).
         self._md_range = (0, 0)
@@ -1334,6 +1335,25 @@ class Spike2Emu:
     # observed build (slots 0/2 and 1/3 alias the two real codecs).
     _PROBE_SLOTS = (0, 1, 2, 3)
 
+    # Dispatch ROWS to search, as a delta on the sound's own scale row, in order.
+    # The old code searched only the sound's own row, which is not where every
+    # build keeps the entry.  Mapped by brute-forcing the whole table against
+    # real sounds (rows that decode to band-limited audio, per scale S):
+    #
+    #   Godzilla Pro 1.15   mono S (odd sub-slots)    stereo S      (even)
+    #   Star Wars LE 1.30   mono S-1, S (odd)         stereo S-1, S (even)
+    #   Venom LE 1.07       mono S-1, S (even)        stereo S-1    (odd)
+    #
+    # Venom keeps NO stereo entry in the sound's own row, so every one of its
+    # 1374 stereo sounds decoded to white noise -- 34.5% of the card, the whole
+    # stereo half of it (PAD-52).  Row S-1 rescues them, and searching the own
+    # row FIRST keeps every card that already worked on exactly the entry it
+    # already used, at exactly the cost it already paid (pass 1 stops at the
+    # first clearly-audio candidate).  Row S-1 of scale 0 sits before DISPATCH,
+    # which is still inside the firmware image and is where Venom really keeps
+    # scale 0's stereo codec, so the row index is deliberately not clamped at 0.
+    _PROBE_ROWS = (0, -1)
+
     # The WRONG codec for a sound (a mono codec fed a stereo body, or vice
     # versa) decodes to near-white noise at roughly a third of full scale --
     # measured stable across every build at specflat ~0.85 / rms ~12.4k
@@ -1405,16 +1425,12 @@ class Spike2Emu:
         key = (p["scale"], p["chan"])
         if key in self._slot_cache:
             return self._slot_cache[key]
-        mu = self.mu
-        cands = []
-        for slot in self._PROBE_SLOTS:
-            fnv = _u32(bytes(mu.mem_read(
-                self.DISPATCH + p["scale"] * 0x40 + slot * 4, 4)))
-            if fnv and self._backing_off(fnv) is not None and fnv not in cands:
-                cands.append(fnv)
+        cands = self._slot_candidates(p)
+        where = {fnv: place for fnv, place in cands}
+        order = [fnv for fnv, _place in cands]
         # Pass 1: a short window resolves loud sounds immediately.
         best = None
-        for fnv in cands:
+        for fnv in order:
             m = self._slot_metrics(p, fnv, 0.6)
             if m is not None and m[0] < 0.45:
                 best = fnv
@@ -1423,7 +1439,7 @@ class Spike2Emu:
         # intro.  Re-probe longer, reject the loud-noise codec, take lowest sf.
         if best is None:
             scored = []
-            for fnv in cands:
+            for fnv in order:
                 m = self._slot_metrics(p, fnv, 3.5)
                 if m is not None:
                     scored.append((fnv, m[0], m[1]))
@@ -1432,8 +1448,44 @@ class Spike2Emu:
             pool = survivors if survivors else [(f, sf) for f, sf, _ in scored]
             if pool:
                 best = pick_slot(pool, self._SLOT_TIE)
+        if best is not None:
+            # Where this build keeps a channel's codec is a property of the
+            # BUILD, not of the scale, so the winning (row delta, sub-slot) is
+            # tried first for every later scale of the same channel count.  That
+            # keeps the widened search a one-off: without it, a build like Venom
+            # would re-walk every candidate for all 32 of its stereo scales.
+            self._slot_recipe[p["chan"]] = where.get(best)
         self._slot_cache[key] = best
         return best
+
+    def _slot_candidates(self, p):
+        """``[(fn_va, (row_delta, sub_slot)), ...]`` to probe for this sound,
+        most-likely first and de-duplicated by function pointer.
+
+        Order is what keeps this cheap: any recipe already learned for this
+        channel count leads, then the sound's own dispatch row, then the rows in
+        :data:`_PROBE_ROWS`.  A card whose entry is where it has always been is
+        therefore resolved by the very first probe, exactly as before."""
+        scale = p["scale"]
+        places = []
+        hint = self._slot_recipe.get(p["chan"])
+        if hint is not None:
+            places.append(hint)
+        for d in self._PROBE_ROWS:
+            for s in self._PROBE_SLOTS:
+                if (d, s) != hint:
+                    places.append((d, s))
+        out, seen = [], set()
+        for d, s in places:
+            addr = self.DISPATCH + (scale + d) * 0x40 + s * 4
+            try:
+                fnv = _u32(bytes(self.mu.mem_read(addr, 4)))
+            except UcError:
+                continue          # a row off the end of the mapped table
+            if fnv and fnv not in seen and self._backing_off(fnv) is not None:
+                seen.add(fnv)
+                out.append((fnv, (d, s)))
+        return out
 
     def _backing_off(self, va):
         """File offset of a firmware vaddr (None if not in a load segment) —

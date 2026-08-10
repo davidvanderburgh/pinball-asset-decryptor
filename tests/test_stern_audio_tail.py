@@ -33,6 +33,12 @@ CARDS = {
     # from the served alloc size (_md_record_count) -- the build family behind
     # a field report of "Deriving codec parameters" hanging indefinitely.
     "deadpool_116": "deadpool_pro-1_16_0.Release.8G.sdcard.raw",
+    # LE 1.07.0: the first observed build that keeps NO stereo codec entry in
+    # the sound's own dispatch row -- its stereo entries sit one row below (see
+    # Spike2Emu._PROBE_ROWS).  Every one of its 1374 stereo sounds decoded to
+    # stationary noise, 34.5% of the card, so the dead-decode sample below is
+    # the guard that would have caught it.
+    "venom_107": "venom_le-1_07_0.Release.8G.sdcard.raw",
 }
 
 
@@ -683,6 +689,23 @@ def test_decode_length_and_tail_roundtrip(title):
     # short-and-encodable sound near the FRONT.  Sample the whole catalog.
     dead = [p["idx"] for p in _spread(rows, 16)
             if _decodes_dead(emu, p, np)]
+
+    # (4) And it must be audio on BOTH channel counts.  The check above samples
+    # the catalog as a whole, so a failure confined to one channel hides inside
+    # its threshold: Venom LE 1.07 decoded every one of its 1374 stereo sounds
+    # to noise -- its entire stereo half, 34.5% of the card -- yet showed only
+    # 2 dead in 16 there, exactly the tolerance.  Sampled PER CHANNEL it is 8 of
+    # 8 stereo dead against 0 of 8 mono, which is unmissable.  A channel's codec
+    # entry is not always in the sound's own dispatch row (Spike2Emu._PROBE_ROWS)
+    # and a build that moves it takes the whole channel down at once.
+    per_chan = {}
+    for chan in (1, 2):
+        sub = [r for r in rows if r["chan"] == chan]
+        if len(sub) < 8:
+            continue           # too few to sample meaningfully
+        samp = _spread(sub, 8)
+        per_chan[chan] = ([p["idx"] for p in samp if _decodes_dead(emu, p, np)],
+                          len(samp))
     emu.close()
     assert len(dead) <= 2, (
         "%s: %d of 16 sounds sampled across the catalog decode to stationary "
@@ -690,6 +713,13 @@ def test_decode_length_and_tail_roundtrip(title):
         "not early is the chain-replay corruption signature; check that the "
         "record write-back stays inside the master-directory array."
         % (title, len(dead), dead))
+    for chan, (bad, n) in sorted(per_chan.items()):
+        assert len(bad) <= 1, (
+            "%s: %d of %d %s sounds decode to stationary noise (idx %s). A "
+            "whole channel going dead is the signature of the codec entry not "
+            "being in the sound's own dispatch row -- widen Spike2Emu._PROBE_ROWS "
+            "or check the resolved entry for chan=%d."
+            % (title, len(bad), n, "mono" if chan == 1 else "stereo", bad, chan))
     assert checked >= 1, "%s: no codec-0 sound found to test" % title
 
 

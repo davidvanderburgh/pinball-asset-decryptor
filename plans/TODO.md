@@ -324,14 +324,43 @@ These have each been violated at least once and each cost a run or a window:
       number was thrown away. **Measure this from the WINDOWS side**, the way
       David's own recording was made; `shotwin.py` already finds the window by
       title and is the place to start.
-      **Resume, in order:** (1) fix `gs_past_alerts` so autoattract works on a
-      title that plays clips during Tech Alerts — without making a stray press
-      walk into the service menu. (2) The flicker: widen the burst-seek absorber
-      to the `(head)` supersede case (the rig already logs "absorbing it" for
-      the same-clip re-arm on ch1 and does not catch this), and score it with a
-      WINDOWS-side capture against David's clip as the labelled example — before
-      36 of 63, this run 19 of 38. (3) A Jaws run to get a ball into play, which
-      is the last thing the box needs.
+      **★★ BOTH DESK FIXES LANDED 2026-08-10 (`d6a15ca`, `e371366`), NEITHER
+      LIVE-VERIFIED YET.**
+      **(1) gs_past_alerts IS REDEFINED: "past Tech Alerts" = THE ATTRACT
+      LIGHT SHOW IS RUNNING.** Measured on the full godzilla boot trace
+      (led_trace_1d.log): the whole alerts wait carried 2 lamp-class frames
+      (strip-board boot config) vs ~3800 in 80 s of attract, first attract
+      lamp frame 300 ms after the press that took. hwshim prints `[led] light
+      show running` once at the 10th lamp-class command to ANY node (before
+      the insert gate — that gate is Godzilla's numbering); gamestate.sh greps
+      it; filesrc joins the discredited-test graveyard with the star_wars
+      measurement that killed it. abrun.ps1's duplicate filesrc copy also
+      moved. Validated offline: the preserved star_wars alerts log reads
+      techalerts (the old test said attract over it); +[led] line reads
+      attract.
+      **(2) THE FLICKER MECHANISM IS NAMED AND THE ABSORB IS BUILT: the EOS
+      reflex rewinds the OUTGOING clip even when the decoder's own loop flag
+      is 0** (ch0 loop=1 loops cleanly; ch2 loop=0 alternates 26/23.asset —
+      the 12 s cadence — and the reflex serves 2-3 head frames of the old
+      clip before the location change lands 30-130 ms later). gstvid.c
+      absorbs a same-path re-arm within 250 ms of a loop=0 EOS on both
+      reflex paths (prepare + seek); a real re-arm settles the debt;
+      pad_vid_play honours a deferred rewind if no location change ever
+      comes. Stated limit: a title looping a loop=0 clip by BARE seek would
+      freeze that channel — none observed does; the absorb log line is the
+      tell.
+      **Resume, in order:** (1) star_wars_le run — card path MUST be the
+      stamped one (the cache is path-keyed):
+      `/mnt/c/.../pinball-asset-decryptor/images/Stern/spike2/star_wars_le-1_30_0.Release.8G.sdcard.raw`.
+      autoattract must PRESS this time; `[led] light show running` must
+      appear only AFTER the press; flicker scored by ch2 `(head)` supersedes
+      (before: 36/63 and 19/38, expect ~0) + `absorbing it` lines at scene
+      steps + `screenrec.py` record/analyze from WINDOWS (WSL x11grab reads
+      black — known false negative). (2) jaws_le run: a ball must reach play
+      (plunge.py resolves TROUGH=65..60 by name, desk-verified); oracle is
+      the game's own screen. Doubles as the autoattract regression control.
+      (3) Shim rebuilt at the desk twice (`built ok`); ensurebuild agrees at
+      next start.
       **NO RUN IS LIVE. The rig is CLEAN — `alive.sh` = 0, zero zombies, zero
       card mounts**, confirmed after the star_wars_le run reached its 8 min
       backstop and tore itself down.

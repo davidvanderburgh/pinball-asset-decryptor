@@ -74,6 +74,60 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **37. A run can strand its windows, and then EVERY later run is
+      INVISIBLE — the game plays perfectly with no window, and every
+      instrument in the rig says it is healthy.** `S2 D3`
+      **Found 2026-08-10 during item 22's pass, with `zorder.py`, `shotwin.py`
+      and `alive.sh`. Established, in order:**
+      **(1) A run left two windows behind after a clean teardown.** The run was
+      `watch.sh` on a title with no extracted game ELF, so the guest never
+      started; teardown printed `TOTAL STILL RUNNING : 0  (clean)` and
+      `star_wars_le - Stern Spike 2 emulator (Ubuntu)` plus `Controls - Spike 2
+      emulator (Ubuntu)` stayed on the desktop as msrdc RAIL proxies. They are
+      REAL windows, not leaked handles: `shotwin.py` grabbed one — PrintWindow
+      1, 4.1% non-black — an empty black window with a working title bar and
+      close button. **They ignore `WM_CLOSE`**, which makes sense: there is no
+      X client left to receive `WM_DELETE_WINDOW`.
+      **(2) The NEXT run then had no game window at all.** `padglhost` logged
+      `window opened 1445x827 on DISPLAY=:0` and rendered **13997 frames in
+      239.6 s (58.4 fps avg), swap 3.83 ms/f** — a flawless render loop — while
+      `zorder.py --all` showed that no such window existed anywhere on the
+      desktop. The guest played, video was handed over at 30.0/s, audio ran,
+      `alive.sh` counted a full healthy run. The picture simply was not there
+      and **nothing anywhere said so**.
+      **(3) `wsl --shutdown` cleared it completely** and the next run's windows
+      appeared normally, above the app, first time.
+      **NOT ESTABLISHED — do not build on it: WHICH run wedged it, and whether
+      the zombie is cause or symptom.** After run (2), `alive.sh` reported
+      `zombies (cannot be killed, only reaped): 1` for the guest, held by a WSL
+      interop Relay, and named `wsl --shutdown` as the only cure — but the
+      windows were ALREADY stranded before that, at a moment when `alive.sh`
+      had printed a clean 0. So the zombie is a second symptom at best.
+      **Why this is worth more than it looks:** every oracle this rig owns
+      reports healthy. Renderer fps, guest video rate, `alive.sh`, the run log
+      — all normal. The one thing wrong is that there is no picture, and the
+      rig cannot currently tell.
+      **The cheapest first job is DETECTION, not a cure**, and the rig is
+      already on the right side of the boundary to do it: `watch.sh` starts the
+      playfield through Windows interop, so it can run `zorder.py` a few
+      seconds after `window opened` and say "the game window never appeared on
+      the desktop — `wsl --shutdown`" instead of leaving it to be discovered.
+      **Second, unexplained and possibly the same wedge:** while stranded, an X
+      client printed `your 131072x1 screen size is bogus. expect trouble`, and
+      that line landed INSIDE `alive.sh`'s output, eating the
+      `guest (comm=game)` label off its first line. `alive.sh` is the rig's only
+      definition of clean, so a stray writer corrupting its first row is its own
+      small bug.
+      **Acceptance:** force the repro (a run on a title with no game ELF, then a
+      normal run) and have the rig SAY the picture is missing rather than let it
+      be discovered; then state whether the strand still happens once teardown
+      is fixed, and on how many repeats.
+      — S2: play itself is not broken and one command cures it, so it is not
+      S1; what it costs is that the emulator can be silently unusable and every
+      other item's runs are measured through it. Arguable as S1 for anyone who
+      does not know the trick. D3: it needs a run, it reproduces on demand, and
+      all three instruments already exist.
+
 - [ ] **36. Saving a state on star_wars kills the donor run ~10 s later.**
       `S1 D4`
       **★ DAVID, 2026-08-10 ~13:00: "i tried to save and load on star wars
@@ -799,7 +853,80 @@ These have each been violated at least once and each cost a run or a window:
       matches the saved one within item 16's stated tolerance. Both keys appear
       in the Controls legend.
 
-- [ ] **22. Start Emulator leaves the game window BEHIND the app.** `S3 D3`
+- [ ] **22. Start Emulator leaves the game window BEHIND the app.** `S3 D2`
+      ← IN PROGRESS, **85%** *(**D3 → D2, 2026-08-10:** the z-order instrument
+      exists and is validated, the fault is MEASURED rather than guessed, and
+      the fix is written and verified on a live run. What is left is one drag
+      test that needs David's hands.)*
+      **★★ THE FAULT IS READ, NOT EYEBALLED — the first real z-order of a live
+      run. `zorder.py`, godzilla_pro, with the PAD app foreground, which is the
+      state you are in the instant you press Start Emulator:**
+      ```
+      rank 2  PLAYFIELD  godzilla_pro - virtual playfield       NEW
+      rank 3  CONTROLS   Controls - Spike 2 emulator            NEW
+      rank 4  APP        Pinball Asset Decryptor                old
+      rank 5  GAME       godzilla_pro - Stern Spike 2 emulator  NEW
+      ```
+      The game window lands **exactly one slot below the app** — NOT at the
+      bottom; chrome and the rest sit under it at 6+. So the shape is not "the
+      game window is ignored", it is "the game window was refused the top and
+      inserted directly beneath whatever held it".
+      **★★ THIS ITEM'S OWN GUESS IS DEAD, and it was the whole theory.** It
+      supposed the two windows are "mapped at different TIMES", the game
+      waiting for the guest's first frame ~15 s in. From the source:
+      `win_open()` (`padglhost.c:1241`) maps the game at `:1293` and then calls
+      `legend_open()`, which maps the legend at `:1181` — **the same function,
+      microseconds apart, game FIRST** — and `win_open()` is called at
+      `padglhost.c:3328`, at the top of `main` BEFORE `eglGetDisplay`, not on
+      the first frame. Both windows exist before EGL is initialised at all.
+      What actually differs is only ORDER: Windows refuses to stack a window
+      shown without activation above the ACTIVE one, so the first window in
+      loses and the second rides in above.
+      **THE INSTRUMENT, which is the acceptance's "read the real z-order"
+      half: `tools/spike2_emu/zorder.py`.** One reading by default, `--watch N`
+      for a line per change, `--all` for every window. Three things in it are
+      load-bearing, each because the obvious version lies:
+      • **the walk is `GetTopWindow` + `GW_HWNDNEXT`, not `EnumWindows`** —
+      this item's text claimed EnumWindows is z-ordered, and in practice it is,
+      but its documentation promises only an enumeration. Both are run and a
+      disagreement is printed rather than quietly resolved.
+      • **a self-test on every reading** — `GetForegroundWindow` is independent
+      ground truth and must be the top non-TOPMOST row. Separately validated by
+      launching a window and watching every pre-existing row shift down one.
+      • **`--baseline FILE` marks NEW vs old**, without which a stranded window
+      from an earlier run is silently scored as this run's answer. That is not
+      hypothetical: it happened twice in this pass — see the new item 37.
+      Cloaked windows are dropped, and `WS_EX_TOPMOST` is reported because a
+      topmost proxy would mean "raise the others" could never be the fix.
+      **THE FIX, built and verified: `win_raise_all()` in `padglhost.c`** —
+      `XRaiseWindow` on both windows **from inside X**, never `SetWindowPos`
+      (the standing non-negotiable), called at the END of the delayed position
+      restore for the same reason the restore itself is delayed: the compositor
+      places new RAIL toplevels by its own policy first, and anything done
+      before that settles is undone by it. Restack only, **no
+      `XSetInputFocus`** — David asked for the windows to come out on top, not
+      for the keyboard to be taken away from whatever he was typing into.
+      `PAD_GL_RAISE=0` A/Bs it with no rebuild.
+      **Verified on a live run, the same recipe that reproduced the fault:**
+      `all 3 emulator window(s) above the app (app rank 6)` — CONTROLS 2,
+      GAME 3, PLAYFIELD 4. And the position restore still converges with the
+      raise in: `restore try 1: game at 89,81 want 83,54 -> aim 77,27`, then
+      `restore converged after 2 check(s)`, then `raised both windows`.
+      **NOT VERIFIED, and it is the one thing keeping the box open: DRAGGING.**
+      That is exactly what the banned `SetWindowPos` fix broke, so it is this
+      acceptance's real question — and it cannot be scripted, because SendInput
+      into a WSLg window is UIPI-blocked (items 7 and 12). It needs David's
+      hands. The restore converging is evidence the RAIL mirror is healthy, but
+      it runs BEFORE the raise, so it does not answer this.
+      **Also not verified: the actual Start Emulator BUTTON.** The runs were
+      started from the command line with the app put in the foreground first,
+      which is the same condition the button creates (it only spawns
+      `watch.sh`), but it is not the same click.
+      **Resume:** David drags both windows and restarts a run. If they still
+      drag and the position restore still lands, check the box. If dragging
+      broke, `PAD_GL_RAISE=0` is the instant revert with no rebuild, and the
+      fix moves to the third option this item already lists — have the APP stop
+      holding the top after the button press.
       **Observed 2026-08-06 (David):** pressing Start Emulator in the app's
       Emulate tab should bring **all** the emulator windows out over the PAD
       application. The **game window comes up behind the app**, while the
@@ -1223,6 +1350,24 @@ These have each been violated at least once and each cost a run or a window:
   and item 31 must not lose: in GAMEPLAY the choppiness followed the game's
   render loop, so item 11's fixes plausibly cover that half; in ATTRACT it did
   NOT — that loop held 60.1 fps while the LEDs still looked choppy.
+
+- **`watch.sh` with no `PAD_GAME` currently cannot start, and the error does not
+  say why.** `GAME` falls back to `readlink games/game`, and that symlink is left
+  pointing at whatever ran last — after item 36's star_wars card session it reads
+  `star_wars_le/game`, and `~/spike2root/games/star_wars_le` **does not exist at
+  all**, because a `PAD_CARD` title runs with no extraction (item 28). A bare
+  `watch.sh` therefore dies with `[run] no game ELF at
+  .../games/star_wars_le/game` and lists the extracted titles, which reads like
+  the rootfs is broken rather than like a stale symlink. Seen 2026-08-10.
+  Either point the fallback at a title that exists, or say "the last run was a
+  card run; pass PAD_GAME".
+
+- **A `PAD_PIVOT` (root) run leaves root-owned files in `dump/` that later user
+  runs cannot write.** Seen 2026-08-10 after item 36's save-state session:
+  `watch.sh` printed `dump/boot.id: Permission denied` twice at the start of
+  every subsequent ordinary run. Harmless so far — the run continues — but it is
+  a root/user split in a directory both launches write, and boot.id is what
+  identifies a boot.
 
 - **`plunge.py game` can leave the machine UNABLE to start a game, and it looks
   like the rig is broken.** `game` is coin → start → plunge, and the plunge

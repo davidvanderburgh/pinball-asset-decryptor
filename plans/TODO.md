@@ -332,12 +332,17 @@ These have each been violated at least once and each cost a run or a window:
       WINDOWS-side capture against David's clip as the labelled example — before
       36 of 63, this run 19 of 38. (3) A Jaws run to get a ball into play, which
       is the last thing the box needs.
-      **A RUN MAY STILL BE LIVE** — star_wars_le, 8 min backstop, left up
-      deliberately because David was watching it. Check `alive.sh` before
-      starting anything. **Earlier in the pass the rig accumulated a `[game]`
-      zombie plus a pinned fuse2fs mount per run** (`alive.sh` = 4 after two);
-      WSL was restarted between then and now, which cleared them, and
-      `wsl --shutdown` from Windows remains the only cure when it recurs.
+      **NO RUN IS LIVE. The rig is CLEAN — `alive.sh` = 0, zero zombies, zero
+      card mounts**, confirmed after the star_wars_le run reached its 8 min
+      backstop and tore itself down.
+      **★ AND THAT IS A LEAD FOR THE STOP WEDGE, free, from three runs this
+      pass.** The two runs that left a `[game]` zombie pinning a fuse2fs mount
+      (`alive.sh` = 2 then 4) were BOTH torn down by `killgame.sh` part-way
+      through. The one that ended on its own **wall-clock backstop cleaned up
+      perfectly**. So the wedge correlates with the killgame teardown path and
+      not with running at all — which is testable cheaply (run twice, stop one
+      each way) and is worth knowing before anyone pays for `wsl --shutdown`
+      again. Not proven: three runs is a correlation, not a mechanism.
 
 - [ ] **23. The game exits by itself mid-play.** `S1 D2` *(**D4 → D2,
       2026-08-06 evening, off item 11's runs:** a SECOND fault shape now has

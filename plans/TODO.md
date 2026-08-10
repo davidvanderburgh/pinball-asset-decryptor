@@ -963,6 +963,31 @@ These have each been violated at least once and each cost a run or a window:
       NEW/s; switches respond; a same-session re-load through the
       rewind path scored 2.6% with zero skips (no regression); zero
       draw skips, zero crashes; teardown to alive TOTAL 0.
+      **★ SLOTS ARE PACKED NOW (2026-08-10, this commit): a save costs
+      ~5% of what it did.** David asked "any way to compact or reduce
+      the size"; measured first on the real jgame slot: 1.23 GB raw ->
+      64 MB at zstd -3 in 2 s (59% of guest RAM pages are zeros, the
+      ring stashes are mostly stale bytes, the GL journal is texture
+      pixels - everything crushes; decompress <1 s). savegame.sh now
+      tars+zstds the slot AFTER the thaw (off the freeze window; the
+      save feels identical; PAD_SAVE_NOPACK=1 skips; no zstd = raw with
+      a loud note), keeping slot.meta PLAIN beside slot.tar.zst so
+      slots.sh and loadgame list without unpacking. loadgame.sh unpacks
+      a packed slot into a /var/tmp staging dir (mktemp; NOT /tmp -
+      the tmpfs trap; ~1 s), points restorestate at the stage, and the
+      EXIT trap removes it on every path; raw (old) slots pass through
+      untouched. slots.sh grew `pack <slot>` for pre-packing-era slots.
+      Slot names are path-guarded in loadgame too now. VALIDATED live:
+      a fresh save packed itself to 36 MB; a staged load of it restored
+      (journal replayed, guest alive, video 60 Hz cadence, 0 skips,
+      staging cleaned); a pre-packed old slot loaded the same way; the
+      saves dir went 4.0 GB -> 1.38 GB with only David's quicksave +
+      wtest left raw (his call, the manager can delete or `slots.sh
+      pack` them). Tooltip + help now say 50-150 MB per slot and that
+      a save briefly needs ~1.5 GB free while it packs. Cross-slot
+      dedup and criu incremental chains were CONSIDERED AND REJECTED:
+      they make slots depend on each other (delete one, corrupt
+      another) for savings that no longer matter at 64 MB a slot.
       **★ THE OPT-IN GUI SHIPPED (2026-08-10, this commit), David's
       spec verbatim: a toggle, a cost tooltip, 10 nameable slots, and
       a manager.** "Enable save states" lives on the Emulate tab,

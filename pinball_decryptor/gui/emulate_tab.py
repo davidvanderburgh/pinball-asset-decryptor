@@ -779,7 +779,7 @@ class EmulatePanel:
     POLL_IDLE_MS = 10000
 
     def __init__(self, parent, log=None, card_var=None, savestates_var=None,
-                 theme_fn=None):
+                 theme_fn=None, badge_fn=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
         # The card path lives in a variable the WINDOW owns (when given one):
@@ -792,6 +792,11 @@ class EmulatePanel:
         # panel testable on its own, same as the card path's.
         self._states_var = savestates_var
         self._theme_fn = theme_fn or (lambda: "dark")
+        #: The window's round ⓘ badge factory (``MainWindow._make_round_icon``),
+        #: passed in rather than reached for: this panel is built standalone in
+        #: tests, and scene_browser's ``_info`` sets the precedent of degrading
+        #: to a plain label when the app is not there.
+        self._badge_fn = badge_fn
         #: status.sh's saves_mtime the last time the slot list was read.
         #: The list refreshes itself whenever the token moves.
         self._saves_token = None
@@ -1405,10 +1410,15 @@ class EmulatePanel:
             pass
         self._setup_check()
 
-    #: The cost, spelled out where the choice is made.  This is the tooltip
-    #: David asked for: the feature is OFF by default because every slot is
-    #: real disk and every save is a real freeze, and nobody should pay
-    #: either without having been told.
+    #: The cost, spelled out beside the section it belongs to.
+    #:
+    #: IT WAS A CHECKBOX UNTIL 2026-08-10, and David removed it: "remove the
+    #: checkbox for 'enable save state' and just keep the tooltip, but put it
+    #: on the save states title with a blue (i) button to the right of it like
+    #: we normally do."  So the feature is simply ON, and this text stopped
+    #: being a warning attached to a choice and became a description of what
+    #: the section does — the cost is still stated, because a save really does
+    #: freeze the game for a few seconds and every slot really is disk.
     _STATES_TIP = (
         "Save states snapshot the WHOLE running game so you can jump back "
         "to that exact moment later - including in a future session, or "
@@ -1420,9 +1430,9 @@ class EmulatePanel:
         "• saving freezes the game and its sound for a few seconds "
         "while the snapshot is written\n"
         "• slots stay on disk until deleted below\n\n"
-        "Takes effect at the next Start. While enabled, the virtual "
-        "playfield window shows Save/Load state controls with 10 nameable "
-        "slots.")
+        "The virtual playfield window carries the Save/Load state controls "
+        "for these 10 slots, and Launch above starts the emulator straight "
+        "into one.")
 
     #: The Launch button's honest timeline — from cold, the boot comes
     #: first and the save takes over only once the game is up.
@@ -1434,30 +1444,55 @@ class EmulatePanel:
         "emulator is already running, the slot loads into it right away — "
         "a load takes about 10–15 seconds either way.")
 
-    def _build_states(self, frame, pad):
-        """The save-states section: the opt-in toggle and the slot manager.
+    def _states_badge(self, parent):
+        """The app's round blue ⓘ badge, or a plain marker without the app.
 
-        The MANAGER works with the toggle off, deliberately - turning the
-        feature off is exactly when someone wants to reclaim the disk its
-        slots are holding."""
-        box = ttk.LabelFrame(frame, text="Save states")
+        Same shape as scene_browser's ``_info``: the badge is the window's
+        (``_make_round_icon``), and a panel built on its own - every test in
+        tests/test_emulate_tab.py - degrades to a label that still carries the
+        tooltip. Clicking shows the tip too, because on a short hover or a
+        touch screen a badge that does nothing reads as broken.
+        """
+        if self._badge_fn is None:
+            lbl = ttk.Label(parent, text="(i)", foreground="#2f80ed")
+            _Tooltip(lbl, self._STATES_TIP, self._theme_fn, place="side")
+            return lbl
+        badge = self._badge_fn(parent, "i", "#2f80ed", "#5296f2",
+                               self._STATES_TIP, lambda: None, size=18,
+                               font=("Georgia", 10, "bold italic"),
+                               tooltip_place="side")
+        badge.bind("<Button-1>", lambda _e: badge.icon_tip.show(), add="+")
+        return badge
+
+    def _build_states(self, frame, pad):
+        """The save-states section: the slot manager, and what it costs.
+
+        NO ENABLE CHECKBOX, since 2026-08-10 (David: "remove the checkbox for
+        'enable save state' and just keep the tooltip, but put it on the save
+        states title with a blue (i) button to the right of it").  Save states
+        are simply on: every Start uses the checkpointable (root, PAD_PIVOT)
+        launch shape, which is the only shape criu can dump, and the cost the
+        checkbox used to guard is now stated on the ⓘ beside the title.
+
+        The title is a `labelwidget` rather than `text=` for exactly that
+        reason - a LabelFrame's own title is drawn text with nowhere to put a
+        button, so the title becomes a small frame holding the words and the
+        badge."""
+        head = ttk.Frame(frame)
+        ttk.Label(head, text="Save states").pack(side=tk.LEFT)
+        self._states_badge(head).pack(side=tk.LEFT, padx=(6, 0))
+        box = ttk.LabelFrame(frame, labelwidget=head)
         box.pack(fill=tk.X, **pad)
 
-        row = ttk.Frame(box)
-        row.pack(fill=tk.X, padx=8, pady=(4, 2))
+        # The var stays - the window persists it with the project - and is
+        # simply held true now, so anything that reads it (or restores an old
+        # project that saved it false) agrees with what the launch does.
         if self._states_var is None:
-            self._states_var = tk.BooleanVar(value=False)
-        self._states_chk = ttk.Checkbutton(
-            row, text="Enable save states", variable=self._states_var)
-        self._states_chk.pack(side=tk.LEFT)
-        # The tip rides an info marker BESIDE the control rather than the
-        # checkbox itself - widgets.py's own rule: anything hover-explained
-        # that you also have to operate wants the tip out of the way.
-        info = ttk.Label(row, text="(?)", foreground="#888")
-        info.pack(side=tk.LEFT, padx=(6, 0))
-        _Tooltip(info, self._STATES_TIP, self._theme_fn, place="side")
-        _Tooltip(self._states_chk, self._STATES_TIP, self._theme_fn,
-                 place="side")
+            self._states_var = tk.BooleanVar(value=True)
+        try:
+            self._states_var.set(True)
+        except tk.TclError:
+            pass
 
         wrap = ttk.Frame(box)
         wrap.pack(fill=tk.X, padx=8, pady=(2, 2))
@@ -1932,12 +1967,12 @@ class EmulatePanel:
             env.append("PAD_AUDIO=0")
         if not self._auto_var.get():
             env.append("PAD_AUTO_ATTRACT=0")
-        # Read HERE, on the Tk thread, like the tickboxes above - the worker
-        # below must not touch Tk variables. The toggle picks the launch
-        # shape: checkpointable (root, PAD_PIVOT) only when states are on -
-        # and a pending launch-from-slot forces it, because loading a save
-        # NEEDS the checkpointable shape whatever the toggle says.
-        states = bool(self._states_var.get()) or self._launch_slot is not None
+        # ALWAYS THE CHECKPOINTABLE SHAPE (root, PAD_PIVOT) since the enable
+        # checkbox was removed on 2026-08-10. It used to be the toggle's
+        # answer, with a pending launch-from-slot forcing it anyway because
+        # loading a save NEEDS this shape; with no toggle there is nothing
+        # left to ask.
+        states = True
 
         def run():
             # DOCKER IS CHECKED HERE, in the worker, so a slow probe cannot
@@ -2531,7 +2566,6 @@ class EmulatePanel:
             opts = tk.DISABLED if (up or busy) else tk.NORMAL
             self._audio_chk.configure(state=opts)
             self._auto_chk.configure(state=opts)
-            self._states_chk.configure(state=opts)
         except tk.TclError:
             pass        # the tab went away between the poll and its result
 

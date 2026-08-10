@@ -12487,16 +12487,19 @@ class MainWindow:
         # project anchor and restore it on project load, exactly like the
         # Extract/Write path fields.
         self.emulate_card_var = tk.StringVar()
-        # The save-states opt-in rides the same rail (item 13): default OFF —
-        # every slot is real disk and every save is a real freeze, so the
-        # choice is the user's, remembered per project.
-        self.emulate_savestates_var = tk.BooleanVar(value=False)
+        # The save-states variable rides the same rail (item 13).  It was an
+        # opt-in with a checkbox until 2026-08-10, when David removed the
+        # checkbox — the feature is simply on now, and the panel holds this
+        # true so a project anchor saved under the old default does not turn
+        # it back off.
+        self.emulate_savestates_var = tk.BooleanVar(value=True)
         self._emulate_panel = EmulatePanel(
             self._tab_emulate,
             log=self.append_log,
             card_var=self.emulate_card_var,
             savestates_var=self.emulate_savestates_var,
-            theme_fn=lambda: self._current_theme)
+            theme_fn=lambda: self._current_theme,
+            badge_fn=self._make_round_icon)
         self._emulate_panel.build(self._tab_emulate)
 
     def emulate_shutdown(self):

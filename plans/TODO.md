@@ -74,11 +74,48 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **36. Saving a state on star_wars kills the donor run ~10 s later.**
+      `S1 D4`
+      **★ DAVID, 2026-08-10 ~13:00: "i tried to save and load on star wars
+      and it crashed."** The evidence, mined the same minute
+      (`c:/tmp/item27/gzwatch_sw_savecrash.log`): **THE SAVE SUCCEEDED** —
+      slot3 `star_wars_le "sw game play"` packed, 63 MB, stamped at the
+      checkpoint freeze (every channel's `worst gap` ~900 ms at 13:00:08 is
+      the criu dump). **THE LOAD NEVER RAN** — no restore artifacts in
+      slot3, no `[emulate] loading` line, no `dump/reloading` flag raised;
+      what David called the crash of "save and load" is the GUEST EXITING
+      BY ITSELF ~10 s after the dump resumed, CLEANLY: gzwatch ends at a
+      healthy 49.9 fps with no segv block, no signal, no exit path — item
+      23's first shape (the clean exit), now with its strongest correlate
+      yet: **a leave-running criu dump 10 s earlier, on the title with four
+      video channels and two EGL surfaces mid-clip-churn at the freeze.**
+      Godzilla survives the identical dump (item 13 verified end-to-end,
+      plus David's own sessions). Suspect space: the game's own watchdog
+      tripping on the ~0.9 s world-stop (SW may time boards/audio tighter),
+      or a frozen-mid-flight video/EGL thread resuming into an invariant SW
+      exercises and Godzilla does not.
+      **The first job is item 23's instrument, verbatim:** the shim logs
+      WHY the guest went down (atexit, main-returned, signal taken) —
+      without it a repeat teaches nothing, which is the D4 line. Then: save
+      during calm attract vs during churn (the dump landed mid-scene-step
+      here), 3 repeats each; and whether slot3 LAUNCHES clean from the
+      manager (if yes, the damage is "save costs the live run", not "save
+      is broken", and S drops to S2).
+      **Do not conflate with item 23's other shapes** — this one has a
+      PROVOCATION (the dump), theirs are spontaneous. Report against the
+      signature.
+      — S1 provisionally: the feature's whole point is saving mid-play, and
+      saving mid-play ends the play. D4: needs the exit instrument built
+      and validated, plus provoked repeats on two titles.
+
 - [ ] **23. The game exits by itself mid-play.** `S1 D2` *(**D4 → D2,
       2026-08-06 evening, off item 11's runs:** a SECOND fault shape now has
       a signature, a call site, a disassembly, a minutes-scale repro AND a
       designed fix — see the starred block below. The original signatureless
-      exit remains as described.)*
+      exit remains as described.)* *(**2026-08-10: item 36 is a fourth,
+      PROVOKED sighting of the clean-exit shape** — a leave-running criu
+      dump preceded it by 10 s on star_wars; the exit-reason instrument this
+      item's acceptance (a) demands is now blocking BOTH items.)*
       **★★★ THE ORIGINAL SIGNATURELESS EXIT NOW HAS A NAMED PRECURSOR, and
       this entry's claim that "nothing anywhere records WHY the process went
       down" is CORRECTED. David's log, 2026-08-06 21:33, godzilla_pro,

@@ -3851,6 +3851,107 @@ static int sw_scan_enabled(void)
 static const unsigned char sw_rest_ids[] = { 33, 66, 67, 68, 69, 70, 71 };
 static int sw_rest_on;   /* the set is wanted at all (PAD_SW_REST != 0) */
 
+/* ★ ITEM 27: THE REST SET'S TROUGH IDS ARE PER TITLE, and this table was the
+ * FOURTH copy of Godzilla's numbers to be found holding a wrong switch (after
+ * plunge.py, padglhost's binds[], and nodecensus's case). It is also the one
+ * that mattered most: the game decides during BOOT whether its ball devices
+ * have their balls - before padglhost's window exists, which is the exact
+ * window sw_rest_pending() covers - so on jaws_le the trough device was told
+ * Godzilla's 66..71 were closed (its TROUGH JAM plus five phantoms) while its
+ * real trough 60..65 read empty. The device model bakes there: a trough
+ * filled correctly LATER changes nothing, Start finds a ball-less (and
+ * jam-flagged) trough device and is refused without so much as a ball
+ * search - measured 2026-08-10, CREDITS 1 on the game's own screen, Start
+ * delivered on its own scan, no eject, no LOCATING PINBALLS.
+ *
+ * Resolution is by NAME from the derived table the guest can already see at
+ * /dump/tables/$PAD_GAME/switch_list.txt (mktables writes it before the
+ * guest starts; /dump is bound into the pivot). The door stays 33 - a
+ * platform switch, identical on every title measured. No file, or no
+ * PAD_GAME, keeps the compiled Godzilla ids: exactly the old behaviour. */
+extern long read(int, void *, unsigned long);   /* self-interposed; unknown
+                                                 * fds pass through, same as
+                                                 * open/close in the LED
+                                                 * block (declared there too,
+                                                 * which is below this use) */
+extern int open(const char *, int, int);
+extern int close(int);
+static unsigned char sw_rest_set[8];
+static unsigned sw_rest_n;
+
+static void sw_rest_resolve(void)
+{
+    static char buf[16384];
+    static int done;
+    const char *game;
+    char path[256];
+    long n;
+    int fd, got = 0;
+    unsigned i;
+    char *p, *e;
+
+    if (done) return;
+    done = 1;
+    for (i = 0; i < sizeof sw_rest_ids; i++) sw_rest_set[i] = sw_rest_ids[i];
+    sw_rest_n = sizeof sw_rest_ids;
+
+    game = getenv("PAD_GAME");
+    if (!game || !*game) return;
+    snprintf(path, sizeof path, "/dump/tables/%s/switch_list.txt", game);
+    fd = open(path, 0 /*O_RDONLY*/, 0);
+    if (fd < 0) return;
+    n = read(fd, buf, sizeof buf - 1);
+    close(fd);
+    if (n <= 0) return;
+    buf[n] = 0;
+
+    /* Lines are `id num node bit NAME...`; find TROUGH 1..6 by name, case-
+     * insensitively, taking the id from the front of that line. */
+    sw_rest_n = 1;                                /* keep the door at 33 */
+    for (p = buf; *p; p = e) {
+        unsigned id = 0, t;
+        char *q = p;
+        for (e = p; *e && *e != '\n'; e++) ;
+        if (*e) e++;
+        if (*q == '#') continue;
+        while (*q >= '0' && *q <= '9') id = id * 10 + (unsigned)(*q++ - '0');
+        if (!id || id >= sizeof sw_active) continue;
+        for (; q < e - 8; q++) {
+            if ((q[0] == 'T' || q[0] == 't') &&
+                (q[1] == 'R' || q[1] == 'r') &&
+                (q[2] == 'O' || q[2] == 'o') &&
+                (q[3] == 'U' || q[3] == 'u') &&
+                (q[4] == 'G' || q[4] == 'g') &&
+                (q[5] == 'H' || q[5] == 'h') && q[6] == ' ' &&
+                q[7] >= '1' && q[7] <= '6' &&
+                (q[8] == '\n' || q[8] == '\r' || q[8] == 0 || q[8] == ' ')) {
+                t = (unsigned)(q[7] - '0');
+                if (sw_rest_n < sizeof sw_rest_set && t) {
+                    sw_rest_set[sw_rest_n++] = (unsigned char)id;
+                    got++;
+                }
+                break;
+            }
+        }
+    }
+    if (got) {
+        char m[128];
+        int  o = 0;
+        o = snprintf(m, sizeof m, "[swrest] trough resolved for %s:", game);
+        for (i = 1; i < sw_rest_n && o < (int)sizeof m - 8; i++)
+            o += snprintf(m + o, sizeof m - (unsigned)o, " %u", sw_rest_set[i]);
+        snprintf(m + o, sizeof m - (unsigned)o, "\n");
+        logmsg(m);
+    } else {
+        /* a list with no TROUGH rows: keep Godzilla's, but say so */
+        for (i = 0; i < sizeof sw_rest_ids; i++)
+            sw_rest_set[i] = sw_rest_ids[i];
+        sw_rest_n = sizeof sw_rest_ids;
+        logmsg("[swrest] no TROUGH rows in the switch list; "
+               "rest set stays Godzilla's\n");
+    }
+}
+
 static void sw_hold_init(void)
 {
     static int done;
@@ -3858,12 +3959,13 @@ static void sw_hold_init(void)
     unsigned i;
     if (done) return;
     done = 1;
+    sw_rest_resolve();
     p = getenv("PAD_SW_REST");
     sw_rest_on = !(p && *p == '0');
     if (!(p && *p == '0') && !getenv("PAD_SW_SHM")) {
-        for (i = 0; i < sizeof sw_rest_ids; i++)
-            sw_active[sw_rest_ids[i]] = 1;
-        logmsg("[swrest] machine at rest: coin door shut, 6 balls in trough\n");
+        for (i = 0; i < sw_rest_n; i++)
+            sw_active[sw_rest_set[i]] = 1;
+        logmsg("[swrest] machine at rest: coin door shut, balls in trough\n");
     }
     p = getenv("PAD_SW_HOLD");
     while (p && *p) {
@@ -4417,8 +4519,9 @@ static int sw_rest_pending(unsigned id)
         said = 1;
         logmsg("[swrest] host has not published yet - holding the machine at rest\n");
     }
-    for (i = 0; i < sizeof sw_rest_ids; i++)
-        if (sw_rest_ids[i] == id) return 1;
+    sw_rest_resolve();                 /* item 27: per-title trough ids */
+    for (i = 0; i < sw_rest_n; i++)
+        if (sw_rest_set[i] == id) return 1;
     return 0;
 }
 

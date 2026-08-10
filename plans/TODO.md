@@ -94,19 +94,42 @@ These have each been violated at least once and each cost a run or a window:
       tripping on the ~0.9 s world-stop (SW may time boards/audio tighter),
       or a frozen-mid-flight video/EGL thread resuming into an invariant SW
       exercises and Godzilla does not.
-      **The first job is item 23's instrument, verbatim:** the shim logs
-      WHY the guest went down (atexit, main-returned, signal taken) —
-      without it a repeat teaches nothing, which is the D4 line. Then: save
-      during calm attract vs during churn (the dump landed mid-scene-step
-      here), 3 repeats each; and whether slot3 LAUNCHES clean from the
-      manager (if yes, the damage is "save costs the live run", not "save
-      is broken", and S drops to S2).
-      **Do not conflate with item 23's other shapes** — this one has a
-      PROVOCATION (the dump), theirs are spontaneous. Report against the
-      signature.
-      — S1 provisionally: the feature's whole point is saving mid-play, and
-      saving mid-play ends the play. D4: needs the exit instrument built
-      and validated, plus provoked repeats on two titles.
+      **★★ THE LOAD HALF IS DIAGNOSED TO ONE CRIU LINE, 2026-08-10 13:08 —
+      David tried Launch-into-slot3 and the restore failed BEFORE any guest
+      ran:**
+      ```
+      criu/mount-v2.c:628: Can't stat mountpoint
+        /tmp/.criu.mntns.*/mnt-0000000427/star_wars_le: No such file or dir
+      cr-restore.c:2320: Restoring FAILED.   [loadgame] FAILED
+      ```
+      criu's mnt-v2 replay stages the guest's mount tree (`Bind
+      mnt-421/games to mnt-427`, card mount 430 accepted as external) and
+      then needs `games/star_wars_le` to EXIST as a directory to place the
+      card bind on — it does not. **WHY GODZILLA LOADS AND STAR_WARS DOES
+      NOT: `~/spike2root/games/godzilla_pro` is a POPULATED, PERSISTENT
+      directory** (extracted long ago), so the mountpoint always stats;
+      a PAD_CARD title runs with NO extraction (item 28's design) and its
+      `/games/<title>` mountpoint exists only transiently inside the pivot
+      namespace run_game.sh assembles at boot. **Suspect fix: pre-create
+      the `games/<title>` mountpoint somewhere criu's staging can see it**
+      — either run_game mkdirs it in the persistent rootfs games/ (cheap,
+      matches why godzilla works; note `~/spike2root/games/star_wars_le`
+      EXISTS but apparently not in the mount criu stages — verify which fs
+      mnt-421 resolves to from the dump's mountpoints img before choosing),
+      or loadgame/restorestate mkdir it just before `criu restore`. Full
+      log: the 13:08 app pane (David's paste, in the transcript) +
+      `c:/tmp/item27/gzwatch_sw_savecrash.log` for the save-side twin.
+      **The SAVE-side death (the original sighting) is a SEPARATE fault**
+      and still needs item 23's exit instrument: save succeeded, guest died
+      cleanly 10 s later. Do not let the load fix close the item alone —
+      acceptance is BOTH: (a) a star_wars save leaves the donor run alive
+      (state how many repeats), and (b) Launch-into-slot restores a
+      PAD_CARD title to a playing game on its own screen, cross-checked
+      still working on godzilla.
+      — S1: the feature's whole point is saving mid-play; saving kills the
+      play and loading fails outright on card-run titles. D4 → D3 for the
+      load half (one criu line, suspect fix in hand, needs runs); the save
+      half keeps D4 until the exit instrument exists.
 
 - [ ] **23. The game exits by itself mid-play.** `S1 D2` *(**D4 → D2,
       2026-08-06 evening, off item 11's runs:** a SECOND fault shape now has

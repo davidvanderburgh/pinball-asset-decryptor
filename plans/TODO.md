@@ -332,9 +332,22 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **21. Ball handling, and clear feedback about how many balls are in
       play.** `S2 D4` ← IN PROGRESS
-      **★★ HALF (a) IS BUILT AND VERIFIED OFFLINE, 2026-08-10, `d759f2d` on
-      `item/21`. What is left of (a) is one live run; (b) is untouched and
-      still needs item 3.**
+      **★★ HALF (a) IS DONE — built, verified offline AND on a live game,
+      2026-08-10, `d759f2d` on `item/21`. (b), the ball MODEL, is untouched
+      and still needs item 3, which is the only reason the box is open.**
+      **Live, godzilla_pro, ~4 min run:** at rest the panel read
+      `trough 6/6  0 in play  1 = eject end` with six balls and six green
+      trough dots, and `swshow.py` at the same moment printed
+      `6 of 6 [71,70,69,68,67,66]`. After `plunge.py plunge` the panel read
+      `trough 5/6  1 in play` with position SIX hollow — **the far end, not
+      the eject end, which is the item 20 class of bug this display exists to
+      make visible** — and swshow printed `5 of 6 [71,70,69,68,67]`. The
+      picture and the merged row agree. Long form + screenshots' findings:
+      handoff, REMAINING item 21.
+      **NOT ESTABLISHED, and it is (b)'s whole problem: the game's own trough
+      eject does not move a ball here.** `plunge.py coin` + `start` left the
+      trough at 6 of 6; the count moved only when `plunge.py plunge` opened
+      TROUGH 6 itself.
       **Shipped:** `trough.py` owns which switches the trough is and in what
       ORDER, matched by NAME (`TROUGH 1`..`TROUGH 6`, case-insensitive) —
       the same rule `padglhost.c`'s `binds_resolve()` already uses for its
@@ -366,10 +379,19 @@ These have each been violated at least once and each cost a run or a window:
       Two faults the offline check caught before a run could: silver dots are
       invisible on a white line drawing (green now), and a complement
       denominator read `trough 4/4` beside two visibly empty positions.
-      **Resume:** run the game and screenshot the panel against `swshow.py`
-      at the same moment, including a shot with a ball removed — that is
-      (a)'s written acceptance and the only part of it left. Then (b), which
-      needs item 3's trough-eject coil index.
+      **Resume: (b) only, and item 3 is upstream of it.** Get the
+      trough-eject coil index (item 3 has 2, 3, 4, 7, 8 labelled; the eject is
+      one of the unlabelled 0, 1, 5, 6), then build the ball model on top of
+      the display this pass shipped — the panel is already the instrument for
+      watching it work. David's hands are still the oracle for (a): he has not
+      seen it yet.
+      **The run left a zombie**, the known WSL interop shape: `killgame.sh`
+      killed 17, then `alive.sh` reported 1 — the guest as a `Zl` held by a
+      WSL interop Relay, curable only by `wsl --shutdown` from Windows, which
+      was NOT run because unrelated WSL sessions were up. Starting the run
+      with `Start-Process wsl … watch.sh` is what puts the relay in the parent
+      chain. The same teardown reproduced item 38's second finding: `your
+      131072x1 screen size is bogus` printed INTO `alive.sh`'s first line.
       **★ DAVID, 2026-08-06: "we will need some sophisticated
       ball handling and clear feedback about how many balls are in play. for
       example, during multiball, many balls are in play. having clear feedback

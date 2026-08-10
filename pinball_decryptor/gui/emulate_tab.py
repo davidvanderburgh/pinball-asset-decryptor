@@ -827,6 +827,11 @@ class EmulatePanel:
         #: A status poll's wsl.exe is in flight — see _poll.  Written only on
         #: the main thread, so it cannot be raced by the worker it gates.
         self._poll_busy = False
+        #: Whether ANY status poll has come back yet.  Until one has, the
+        #: poll retries on a short timer instead of the 10 s idle cadence —
+        #: the first answer is what fills the save-state list, and a user
+        #: looks at that list the moment the app opens.  See _schedule_poll.
+        self._polled_once = False
         #: Drain passes the current setup probe has been out for, and whether
         #: the "Starting WSL" line went up because of it (so only the writer
         #: takes it down - the hint label has other owners).
@@ -2000,10 +2005,22 @@ class EmulatePanel:
         if self._stopped:
             return
         if ms is None:
-            # A run in progress is worth watching closely; an idle rig is
-            # not worth a wsl.exe every two seconds for the whole time the
-            # app is open.  See POLL_IDLE_MS.
-            ms = self.POLL_MS if self._last_up else self.POLL_IDLE_MS
+            if not self._polled_once:
+                # The FIRST answer is what fills the save-state list (the
+                # saves_mtime token), and a user looks at that list the
+                # moment the app opens — "when i load the app, the save
+                # states are empty until i refresh" (tester, 2026-08-10).
+                # The 10 s idle cadence made that true for ~11 s per
+                # launch.  Until one poll has come back, retry on a short
+                # TIMER — the deferral branches in _poll spawn nothing, so
+                # this costs Tk ticks, not wsl.exe processes, and the one
+                # real spawn happens right behind the setup probe.
+                ms = 700
+            else:
+                # A run in progress is worth watching closely; an idle rig
+                # is not worth a wsl.exe every two seconds for the whole
+                # time the app is open.  See POLL_IDLE_MS.
+                ms = self.POLL_MS if self._last_up else self.POLL_IDLE_MS
         try:
             self._poll_job = self._timer().after(ms, self._poll)
         except tk.TclError:
@@ -2028,6 +2045,9 @@ class EmulatePanel:
             # probe has not answered yet", which is not the same as "no", so it
             # still polls.
             if self._docker is not None:
+                # macOS with no Docker: nothing will answer, so settle to
+                # the idle cadence rather than fast-retrying forever.
+                self._polled_once = True
                 self._schedule_poll()
                 return
         # AND NOT THROUGH A BOOTING WSL EITHER.  While the setup probe is
@@ -2040,6 +2060,9 @@ class EmulatePanel:
             self._schedule_poll()
             return
         if not rig_available():
+            # No rig on this machine: there is nothing a fast first poll
+            # could fetch, so settle to the idle cadence.
+            self._polled_once = True
             self._schedule_poll()
             return
         # ★ ONE STATUS POLL AT A TIME, AND NONE WHILE THE SETUP PROBE IS OUT.
@@ -2085,6 +2108,9 @@ class EmulatePanel:
 
             def apply_and_release():
                 self._poll_busy = False
+                # One poll has answered (even emptily): the fast first-poll
+                # retry has done its job, drop to the normal cadence.
+                self._polled_once = True
                 self._apply(info)
 
             try:

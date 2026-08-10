@@ -47,6 +47,9 @@ class PollHarness:
         self._setup_busy = False
         self._last_up = False
         self._docker = "ok"
+        #: Steady state for the cadence tests; the fast-first-poll test
+        #: flips it off itself.
+        self._polled_once = True
         self.spawns = 0
         self.timer = FakeTimer()
 
@@ -114,3 +117,29 @@ def test_an_idle_rig_is_polled_slowly_and_a_live_one_quickly(harness):
     harness._schedule_poll()
     assert harness.timer.scheduled[-1][0] == EmulatePanel.POLL_MS
     assert EmulatePanel.POLL_IDLE_MS > EmulatePanel.POLL_MS
+
+
+def test_the_first_poll_is_fast_then_settles(harness):
+    """The first status answer is what fills the save-state list, and a
+    user looks at that list the moment the app opens (tester, 2026-08-10:
+    "when i load the app, the save states are empty until i refresh" - the
+    10 s idle cadence made that true for ~11 s per launch).  Until one poll
+    has answered, the retry is a short TIMER; the deferral branches spawn
+    nothing, so the storm rule holds; and the first answer settles it back
+    to the slow idle cadence."""
+    harness._polled_once = False
+    harness._schedule_poll()
+    first = harness.timer.scheduled[-1][0]
+    assert first < EmulatePanel.POLL_MS, (
+        "the first poll waits %d ms - the slot list sits empty that long "
+        "after every app start" % first)
+    # Deferred behind the setup probe: fast retries, still ZERO spawns.
+    harness._setup_busy = True
+    for _ in range(5):
+        harness._poll()
+    assert harness.spawns == 0
+    # One answered poll drops it to the slow idle cadence.
+    harness._setup_busy = False
+    harness._polled_once = True
+    harness._schedule_poll()
+    assert harness.timer.scheduled[-1][0] == EmulatePanel.POLL_IDLE_MS

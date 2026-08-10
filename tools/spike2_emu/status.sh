@@ -43,6 +43,16 @@ n() { local c; c=$(pgrep -c "$@" 2>/dev/null); echo "${c:-0}"; }
 echo "procs=$procs"
 echo "log=$LOG"
 
+# When the saves last changed. The app's slot list refreshes itself the
+# moment this token moves - a playfield save, a CLI pack or delete - instead
+# of a human pressing Refresh (tester, 2026-08-10: "it should be event
+# based"). Max over the saves DIR mtime (savegame.sh rm -rf's and mkdir's
+# slots inside it, so saves and deletes move it) and every slot.meta (a
+# label rename touches only that file). Absent when nothing is saved yet.
+sm=$(stat -c %Y "$PAD_ROOT/saves" "$PAD_ROOT"/saves/*/slot.meta 2>/dev/null \
+     | sort -n | tail -1)
+[ -n "$sm" ] && echo "saves_mtime=$sm"
+
 if [ -z "$pid" ]; then
     echo "running=0"
     echo "state=off"

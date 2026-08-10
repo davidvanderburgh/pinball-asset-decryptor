@@ -963,12 +963,36 @@ These have each been violated at least once and each cost a run or a window:
       NEW/s; switches respond; a same-session re-load through the
       rewind path scored 2.6% with zero skips (no regression); zero
       draw skips, zero crashes; teardown to alive TOTAL 0.
-      **Still open, minor: (b) mid-clip video does not resume
-      mid-clip** — the RESUME serve stands down after 3 s ("guest has
-      not consumed", pre-existing) and video returns at the NEXT clip
-      request — seconds in attract, a scene-change in game; the
-      journaled TEXDIRECT frame covers the gap with the save-time
-      frame instead of black.
+      **★ MID-CLIP VIDEO RESUME FIXED (2026-08-10, this commit): the
+      save now dumps --leave-stopped and takes the ring stash + GL
+      journal INSIDE the freeze, then SIGCONTs.** The stand-down was a
+      counter deadlock born of stash timing: the old order stashed the
+      rings BEFORE the dump, so the padvid counters trailed criu's
+      freeze by its startup (~3-15 frames at 30 fps); the restored
+      guest's stream thread — its `consumed` count on its own stack
+      (gstvid.c:673), restored at the freeze value — waited for frames
+      PAST the stashed write_idx while resume_serve (which starts at
+      the stashed write_idx) waited for the guest to drain frames it
+      had already consumed; 3 s later the host stood the channel down.
+      Freeze-exact stashes end it: the resume starts at exactly the
+      frame the guest wants next. VALIDATED both shapes: save mid-clip
+      in attract → same-session load AND cross-session load each show
+      "RESUME mid-clip at frame 57 of 240 → skipped in ~75 ms →
+      resume: EOS after 240 frames" — the guest consumed the clip's
+      remaining 183 frames straight through, the game's own loop
+      re-requested, first frame consumed in ~40 ms, 29.9 NEW/s at
+      perfect 2-swap cadence, zero stand-downs, zero skips. SIGCONT on
+      the pidns init thaws the tree cleanly (verified /proc state +
+      resumed fps/video within seconds; a failed dump CONTs on its
+      error path so it can never leave the game frozen). Bonus
+      exactness: the GL journal and padsw stash now describe the
+      checkpointed instant precisely (the old superset/trailing drift
+      documented in earlier passes is gone). The honest cost, in the
+      script header: the game is visibly frozen and audio underruns
+      for the stash + journal beat (~2-4 s) on top of the dump's own
+      freeze — a save was never free; it is now exact. PAD_SAVE_STOP=1
+      now ends the guest via SIGKILL after the stash (same outcome as
+      the old criu-default kill).
       **THE DESIGN LIMIT the asset-swap question exposes, answered
       2026-08-09 night:** PAD's own writes are SIZE-NEUTRAL, so a rebuilt
       card does not shift file offsets and a restored guest's open fds

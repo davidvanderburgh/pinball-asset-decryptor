@@ -873,23 +873,82 @@ These have each been violated at least once and each cost a run or a window:
       version compared through it and mis-warned on a same-session
       load); restorestate reads the live guest's copy the same way and
       prints an honest cross-session NOTE.
-      **THE PICTURE-ORACLE GAP, open:** shotwin.py's PrintWindow returned
-      0 on every grab tonight (RAIL refusal; the windows may have been
-      minimized), and the X side has no xwd/convert. **Next pass: a
-      native glReadPixels dump in padglhost on a request-file flag** —
-      the standing picture oracle the acceptance read needs. Until it
-      exists, "renders look correct" is unverified beyond skip-count 0
-      and David's eyes.
-      **CROSS-SESSION FULL GRAPHICS = the GL WORLD JOURNAL, the next
-      real piece:** padglhost retains per-object defining data (texture
-      level-0 pixels with subimages applied + params, buffer bytes with
-      subdata applied, shader sources + program links + uniform values,
-      per-VAO attrib configs WITH their buffer names, global state),
-      serializes it to the slot on a savestate request flag, and replays
-      it through its own dispatch when a load lands in a fresh session.
-      Order matters only at replay (buffers before attribs); TEXDIRECT
-      video textures are excluded (the video host re-streams them).
-      Estimate: one focused pass, ~400-700 lines of C plus script wiring.
+      **★★★ THE GL WORLD JOURNAL IS BUILT AND E2E-VALIDATED (this
+      commit, 2026-08-09 night) — cross-session loads render FULLY.**
+      padglhost shadows every state-defining wire command (jgl_note,
+      content-compacted: BUFSUBDATA/TEXSUBIMAGE applied into shadow
+      copies, latest uniform per (prog,slot)), serializes the world AS
+      PADGL WIRE COMMANDS on a request file (savestate.sh touches
+      dump/glstate.req AFTER the criu dump → glstate.bin → the slot; the
+      post-dump order makes the journal a SUPERSET of the checkpoint —
+      requested before it, freeze-window uploads would be missing from
+      every restore of the slot, forever), and replays it through its
+      own dispatch on load (restorestate.sh stages glreplay.bin + .req
+      with the guest dead, BEFORE criu restore; two-phase ack: the
+      renderer CLAIMS the req before the reset+replay, writes
+      glreplay.ok after, so a timeout can tell never-looked from
+      mid-replay). Replay = jgl_reset_world (delete every host object,
+      maps, graveyards, dispatch shadows, journal itself) then dispatch
+      of the file — which rebuilds name maps, draw-guard masks and
+      min-filter shadows exactly as a live guest would, and repopulates
+      the journal so a second-generation save carries the full world.
+      TEXDIRECT pixels excluded; the last VIDSHM header IS journaled so
+      a load shows the save-time video frame (the padvid rewind makes
+      the offset resolve). Startup unlinks stale request files.
+      **A 20-agent adversarial review before the rig run confirmed 16
+      real defects in the first draft — all fixed, three of note:**
+      (1) the ring-head preset I designed was WRONG — glbridge's
+      reserve() re-reads hdr->head fresh per command, so a cleanly
+      frozen guest adopts drained counters with zero loss and the
+      preset bought nothing, while a guest frozen INSIDE emit()
+      republishes its later head absolutely and the preset would have
+      defeated the rewind resync (stale-parse hang/crash). DELETED; the
+      drain loop also now rejects impossible headers (op>=MAX or
+      len>ring) with a resync — converts any residual stale parse into
+      the documented one-command-drop recovery. (2) replay order:
+      MIN_FILTER is emitted BEFORE level uploads and dispatch's FORCED
+      completeness params are journaled too (jgl_force_param), or a
+      replay reconstructs different wrap modes than live (CLAMP vs the
+      REPEAT a tiling texture relies on). (3) the journal file is the
+      first UNTRUSTED producer dispatch ever had — per-record validation
+      (jgl_rec_ok min-len table + subtraction-form count checks), 64-bit
+      framing math, honest -1 on truncation (no ok-file → the script's
+      honest NOTE).
+      **E2E, three sessions, two slots, four loads, ZERO crashes, ZERO
+      skipped draws (the pre-journal cross-session baseline was ~2100
+      skips/s forever):** attract slot jtest (journal 54M, 38 tex/45
+      buf/22 shaders/11 progs/3 vaos serialized in 47 ms; replayed 636
+      commands in 85-92 ms, GL err 0) loaded same-session AND
+      cross-session, picture complete both ways (98.3% non-black vs
+      98.1% at save). In-game slot jgame (69M, second-generation save of
+      a restored guest): same-session load G1-vs-G2 = 2.8% pixels
+      differ (near-identical, score/mode progress exact: 2,335,990,
+      BRIDGE 11/20, TANKS 1/10); cross-session load = the same complete
+      game picture, video back at 30.0 NEW/s / perfect 2-swap cadence /
+      0 holds, game responds to switches. A fresh GAME was also started
+      and played ON a cross-session-restored guest.
+      **THE PICTURE ORACLE EXISTS: dump/glshot.req → padglhost
+      glReadPixels of the guest screen FBO → dump/glshot.png** (write
+      at frame boundary; the idle site defers mid-frame unless the
+      guest has been quiet ~1 s). PrintWindow/RAIL never worked; this
+      is the standing acceptance instrument, used for every claim
+      above. Compare tool: scratchpad pngcmp.py pattern (stdlib PNG
+      read, non-black % + mean diff).
+      **STILL OPEN, the two wrinkles in David's cross-session flow:**
+      (a) the 48V DISABLED coin-door banner on every cross-session load
+      (pre-existing — his 20:47 pre-journal log had it): switch 33 is a
+      HELD level and a fresh session's padsw ring says door open; the
+      restored guest sees it. `plunge.py reset` (which holds 33 shut)
+      clears it, and a fresh game then starts fine. Likely fix = padsw
+      ring rewind from the slot stash at load, the same shape as the
+      padvid rewind — but sw_publish's interaction (does it republish
+      ALL switches from key state, re-opening the door on the next
+      keypress?) needs its own careful pass. (b) mid-clip video does
+      not resume mid-clip: the RESUME serve stands down after 3 s
+      ("guest has not consumed", pre-existing) and video returns at the
+      NEXT clip request — seconds in attract, scene-change in game; the
+      journaled TEXDIRECT frame covers the gap with the save-time frame
+      instead of black.
       **THE DESIGN LIMIT the asset-swap question exposes, answered
       2026-08-09 night:** PAD's own writes are SIZE-NEUTRAL, so a rebuilt
       card does not shift file offsets and a restored guest's open fds

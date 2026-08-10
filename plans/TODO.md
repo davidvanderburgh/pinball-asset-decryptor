@@ -74,8 +74,11 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **27. Any Spike 2 title should load, show a switch layout, and start a
-      game. Today only Godzilla does.** `S1 D2` ← IN PROGRESS, 70%
+- [ ] **27. Any Spike 2 title should load, show a switch layout, start a game,
+      and play with correct video. Today only Godzilla does.** `S1 D2` ←
+      IN PROGRESS, 85% *(**scope widened 2026-08-10 on David's instruction:**
+      "the video flickering on some games falls under this item. let's address
+      it here." Item 35 is absorbed into this one.)*
       **★ DAVID, 2026-08-06: "i'm trying to load Jaws right now and I'm not
       getting the virtual switch playfield at all. and starting a game doesn't
       seem to work. it got past the initial service screen, but said node 2
@@ -204,14 +207,77 @@ These have each been violated at least once and each cost a run or a window:
       is Jaws**, so there is no second title on this disk where a run could show
       a difference. A run is still worth doing on john_wick_le when one is cheap,
       as a regression control rather than a discovery.
-      **Resume:** the node half needs nothing. To close the box, get a ball into
-      play on a non-Godzilla title — which needs item 29's switch names first, or
-      a way to identify the trough that does not go through the name. **Rig state
-      after this pass: NOT CLEAN.** A `[game]` zombie held by a WSL interop relay
-      survives, pinning one fuse2fs mount (`alive.sh` = 2). It cannot be cleared
-      from inside WSL; `wsl --shutdown` from Windows is the only cure and was
-      left for David rather than taken, since it kills every WSL process on the
-      machine.
+      **★★★ SAME DAY, SECOND HALF, `6d19946`: THE SWITCH NAMES ARE CRACKED, SO
+      THE BLOCKER ABOVE IS GONE. David: "we need to dig deeper on searching
+      switch namings since they are in the game code somewhere."** They are, and
+      the way in is NOT the reader that returns `?`.
+      **The names are in the DEVICE TABLE**, as plain strings in the ELF, for
+      every playfield switch. What it lacks is the switch id.
+      **Item 29 ruled out joining on the NUMBER and was right; the join is on
+      ORDER.** `index` is a sequential position within a board and `bit` has
+      gaps, but both are the SAME PHYSICAL ORDER, so within one node the k-th by
+      index is the k-th by bit. The titles disagree about the value in exactly
+      the way that kills a naive version — **jaws_le has index == bit, godzilla
+      does not** — so `swnames.py` DISCOVERS the shift per node and REQUIRES it
+      to place every device record on a real bit. A node where no shift does
+      that is refused and left `?`. **That guard is load-bearing: john_wick_le's
+      node 2 fails it and is refused, which is why the score is zero wrong.**
+      **VALIDATED BEFORE USE, by blanking the names on the two titles that HAVE
+      them and refilling from the binary: godzilla_pro 86 correct / 0 wrong / 1
+      `?` of 87, john_wick_le 102 / 0 / 3 of 105. 188 of 192, not one wrong.**
+      jaws_le, which has no ground truth at all, fills 105 of 108.
+      **The platform half: nodes 0/1/4 are Spike 2 hardware** (CPU board,
+      cabinet, QR scanner) and carry no connector, so no device record names
+      them — but their (node, bit) layout is IDENTICAL on all three titles
+      measured, 2017 to 2024 (star_wars_le 1.30.0, godzilla_pro, john_wick_le),
+      45 switches each. `PLATFORM` is a fallback LABEL, explicitly not the
+      title's own word: node 1 bit 2 is "Action Button" on Godzilla and
+      "LOCKDOWN BUTTON" on Star Wars, one button that games rename.
+      **`plunge.py` now resolves by NAME, which is the actual unblock:**
+      godzilla SHOOTER=62 JAM=72 TROUGH=(71..66) against jaws SHOOTER=56 JAM=66
+      **TROUGH=(65,64,63,62,61,60)**. START=36 and COIN=39 match on both because
+      they are platform switches — which is exactly why coin and start already
+      worked on Jaws while nothing else did.
+      **STILL UNCONFIRMED ON A RUN: that a ball reaches play on Jaws.** The
+      table, the resolver and the ids are desk-verified end to end; nobody has
+      played it. That is the one thing left for the box.
+      **★★ THE VIDEO FLICKER IS MEASURED AND FOLDED IN HERE, on David's
+      instruction ("the video flickering on some games falls under this item").
+      Item 35 is therefore absorbed — do not work it separately.**
+      **MECHANISM, with numbers, from a star_wars_le run: a clip is re-served
+      two or three times in a burst at its loop point, showing 2-3 frames of the
+      clip HEAD each time.** Per channel over one ~4 min attract run:
+      `ch0 serving=48 superseded=0`, `ch1 serving=13 superseded=4`,
+      **`ch2 serving=63 superseded=36`** — and **36 of 36 of ch2's early-ended
+      serves died in under 5 frames**. The cadence is dead regular at **12.0 s**
+      (padvid t=193.31, 205.29, 217.30, 229.32, 241.33), and each event is
+      `serving -> superseded (head) after 2 frames -> serving -> superseded
+      (head) after 3 frames -> serving`, all inside ~40 ms. `worst gap` on ch2
+      reaches 96/85/83 ms against a steady 33 ms elsewhere.
+      **NOT a title-specific split, which is worth saying because the report
+      was "some games":** the jaws_le run has the same signature at a lower
+      rate (ch0 serving=13 superseded=6, 4 short serves). So it is degree, not
+      kind — Star Wars is ~6x worse.
+      **The rig already has an absorber for this shape and it is not catching
+      it:** the same run logs `[vid] ch1 state re-arm of the clip it is already
+      playing (delivered 30); absorbing it` and `ch1 absorbed 1 burst seeks`.
+      So the fix is likely to be widening that absorber to the `(head)`
+      supersede case rather than new plumbing. **Not attempted yet.**
+      **NOT the same as item 11**, which explicitly ruled OUT the clip loop
+      boundary for its ~7 s stutter; this one IS at the loop boundary.
+      **Also learned, and it corrects item 29's title list: star_wars_le HAS
+      real switch names** (104 of them, `QR SCANNER STATUS READY`, `TROUGH 6`…)
+      **but NO device table at all** (0 records). Jaws is the mirror image. So
+      the two name sources are independent and a title can be missing either.
+      **Resume, in order:** (1) `wsl --shutdown`, then a Jaws run to get a ball
+      into play — that closes the box. (2) Widen the burst-seek absorber to the
+      `(head)` supersede and re-measure ch2's supersede count on star_wars_le;
+      the before number is 36 of 63. **Rig state after this pass: NOT CLEAN, and
+      it accumulates one leftover per run** — two `[game]` zombies held by WSL
+      interop relays, each pinning a fuse2fs mount (`alive.sh` = 4 after two
+      runs). They cannot be cleared from inside WSL; `wsl --shutdown` from
+      Windows is the only cure and was left for David rather than taken, since
+      it kills every WSL process on the machine.
 
 - [ ] **23. The game exits by itself mid-play.** `S1 D2` *(**D4 → D2,
       2026-08-06 evening, off item 11's runs:** a SECOND fault shape now has
@@ -1775,13 +1841,30 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **29. Switch names come back as `?` on most titles, so the schematic
       playfield is a list of numbers and switch positions cannot be joined.**
-      `S1 D4` *(**S2 → S1, 2026-08-10, on evidence from item 27's Jaws run:**
-      this does not only cost READING the layout, it BLOCKS PLAY. Jaws's 108
-      switches are all `?`, so nothing can find its trough — `plunge.py` and
-      `swinit.py` hard-code Godzilla's ids 66..71 — and the game therefore sits
-      on LOCATING PINBALLS forever however many balls the rig thinks it put
-      back. "I cannot get a ball into play" is the S1 line, and it is now
-      measured rather than argued. Item 27 is blocked on this.)*
+      `S2 D3` **← 75%, and the USER-FACING half is DONE.** *(**S2 → S1 → back to
+      S2 within one day, 2026-08-10, and both moves were on evidence.** Up: the
+      Jaws run showed `?` names BLOCK PLAY, because nothing could find the
+      trough and the game sat on LOCATING PINBALLS. Down: item 27's `6d19946`
+      then supplied the names from the title's own device table, so nothing is
+      blocked any more. D4 → D3: the instrument this item said had to be built
+      first is no longer on the critical path.)*
+      **★★ WHAT IS ALREADY SOLVED, in item 27, do not redo it: `swnames.py`
+      fills the names WITHOUT fixing the reader** — the device table carries a
+      name for every playfield switch, and the join is on ORDER within a node
+      (not the number, which this item correctly ruled out). Validated by
+      blanking and refilling the two titles that have real names: **godzilla_pro
+      86/0 wrong, john_wick_le 102/0 wrong; jaws_le fills 105 of 108.** The
+      schematic therefore shows real names, and because `switch_xy` joins on the
+      NAME, the positions this item's part (b) asked for should now join too —
+      **unverified, and it is the cheapest thing left to check.**
+      **WHAT REMAINS IS THE READER ITSELF**, which is still wrong and is why 3
+      switches per title stay `?`: they are the virtual/extra switches with no
+      device record (Jaws's bits 61-63 on node 9). Fixing `msg_row`/`MSG_LANG`
+      would name those and anything else that goes through the message table.
+      **Corrected by item 27's runs: star_wars_le is NOT in the failing set — it
+      has 104 real names and NO device table**, the mirror image of Jaws. So the
+      two name sources are independent, and this item's title census should be
+      re-read with that in mind.
       **MEASURED 2026-08-06 across four card runs, and the split is clean:**
       Led Zeppelin LE 1.22.0 **96 of 96 rows `?`**, Elvira's HoH 1.13.0 **109 of
       109 `?`**, Jaws LE 1.02.0 **108 of 108 `?`** — and **John Wick LE 1.01.0

@@ -177,6 +177,28 @@ def _accept_masterdir_malloc(cap, dst, n):
     return True
 
 
+def pick_slot(pool, tie):
+    """The codec entry to use out of ``pool`` = ``[(fn_va, specflat), ...]`` in
+    dispatch-slot order: the FIRST one scoring within *tie* of the best.
+
+    Ranking purely by specflat is unstable, because the pool routinely holds the
+    same codec twice.  Sub-slots 0/2 (stereo) and 1/3 (mono) reach one codec by
+    two entries that decode the same stream -- one of them starting a body word
+    earlier -- so their scores differ only by measurement jitter (<=6e-5
+    measured), and ``min`` hands the decision to that jitter.  Since the pool is
+    built in dispatch order and the wrong codec never scores within *tie*
+    (>=0.0993 away measured), taking the first qualifying entry resolves an
+    equivalent pair the same way every time, on the lower sub-slot the validated
+    build itself uses.  Returns None for an empty pool."""
+    if not pool:
+        return None
+    floor = min(sf for _fn, sf in pool)
+    for fn, sf in pool:
+        if sf <= floor + tie:
+            return fn
+    return pool[0][0]
+
+
 PROGRESS_UPDATES = 200
 
 
@@ -1326,6 +1348,14 @@ class Spike2Emu:
     _NOISE_SF = 0.70
     _NOISE_RMS = 7000.0
 
+    # Two of the four probed sub-slots are the SAME codec reached a second way:
+    # they decode the same stream, one of them starting a body word earlier.
+    # Measured over 200 sounds of Star Wars LE 1.30, their specflat scores differ
+    # by at most 6e-5 (median 0), while the genuinely wrong codec sits at least
+    # 0.0993 away (median 0.63).  So a tie window this wide always ties the
+    # equivalent pair and never ties the wrong codec -- see _resolve_entry.
+    _SLOT_TIE = 0.02
+
     def _slot_metrics(self, p, fnv, secs):
         """``(specflat, rms)`` of decoding ``p`` with codec ``fnv`` over the
         first ``secs`` -- or None if it doesn't decode.  Stereo takes the WORSE
@@ -1354,11 +1384,24 @@ class Spike2Emu:
         Two passes.  Pass 1 (cheap, 0.6s): take the first slot that's clearly
         audio (specflat < 0.45) -- the common case, loud sounds resolve
         instantly.  Pass 2 (only if none was clearly audio -- a quiet/silent
-        intro): re-probe over a longer window and pick the lowest-specflat slot
-        that ISN'T the wrong loud-noise codec (see :data:`_NOISE_RMS`), so a
-        correct-but-quiet slot beats the noise codec instead of losing to it.
-        The noise rejection makes resolution robust no matter which sound first
-        seeds a given (scale, chan) -- even a short, silent one."""
+        intro): re-probe over a longer window, drop the wrong loud-noise codec
+        (see :data:`_NOISE_RMS`) so a correct-but-quiet slot beats it instead of
+        losing to it, then take the FIRST remaining slot in dispatch order among
+        those scoring within :data:`_SLOT_TIE` of the best.
+
+        That last tie-break is what makes the result reproducible.  Slots 0/2
+        and 1/3 are the same codec reached two ways -- same audio, one of them
+        emitting the layout predecessor's body word first -- so ranking them by
+        raw specflat let a difference of ~1e-5 decide, and the winner flipped
+        with whichever sound happened to seed the key.  Extract fans the catalog
+        across worker processes that each cache their own (scale, chan) map, so
+        the same card could decode a scale one way in one run and the other way
+        in the next: every sound of that scale gained a lone full-scale sample
+        at the head of its WAV (Star Wars LE 1.30 idx0088: 11326 of 21452 full
+        scale, in front of an otherwise silent head) and shifted by one sample.
+        Taking the lowest qualifying sub-slot instead is both stable and the
+        convention the validated build follows in :meth:`codec_fns` (stereo sub
+        0, mono sub 1), which is where 98.5% of sounds already landed."""
         key = (p["scale"], p["chan"])
         if key in self._slot_cache:
             return self._slot_cache[key]
@@ -1388,7 +1431,7 @@ class Spike2Emu:
                          if not (sf > self._NOISE_SF and rms > self._NOISE_RMS)]
             pool = survivors if survivors else [(f, sf) for f, sf, _ in scored]
             if pool:
-                best = min(pool, key=lambda t: t[1])[0]
+                best = pick_slot(pool, self._SLOT_TIE)
         self._slot_cache[key] = best
         return best
 

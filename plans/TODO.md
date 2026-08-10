@@ -331,7 +331,46 @@ These have each been violated at least once and each cost a run or a window:
       learned nothing, which is the D4 definition.
 
 - [ ] **21. Ball handling, and clear feedback about how many balls are in
-      play.** `S2 D4` **★ DAVID, 2026-08-06: "we will need some sophisticated
+      play.** `S2 D4` ← IN PROGRESS
+      **★★ HALF (a) IS BUILT AND VERIFIED OFFLINE, 2026-08-10, `d759f2d` on
+      `item/21`. What is left of (a) is one live run; (b) is untouched and
+      still needs item 3.**
+      **Shipped:** `trough.py` owns which switches the trough is and in what
+      ORDER, matched by NAME (`TROUGH 1`..`TROUGH 6`, case-insensitive) —
+      the same rule `padglhost.c`'s `binds_resolve()` already uses for its
+      window-open trough latch, so the thing that latches the balls on and
+      the thing that draws them cannot disagree. `playfield.py` widened the
+      coin-door read into ONE read of the whole merged array at 10 Hz
+      (`PAD_PF_SW_HZ`) and now draws a trough panel — six balls, numbered in
+      trough order, "trough 5/6   1 in play   1 = eject end" — plus a live
+      state dot on EVERY switch marker, in both the artwork and schematic
+      views. `swshow.py` derives the same trough from the same module.
+      **Established, with numbers:** ids are per title (Godzilla 71..66,
+      Jaws 65..60, John Wick 75..70) and swshow printed Godzilla's against
+      Jaws until this pass — five playfield switches and TROUGH JAM. Every
+      switch list on this disk carries the trough at node 8, bits 37..32,
+      position 1 on the highest bit, which is what the `?`-name titles
+      (item 29) fall back on, labelled `(positions assumed)`.
+      **Ruled out — filling the switch RING to show state.** It would have
+      changed the hit test everywhere a switch and a coil share a spot: item
+      24 measured that the centre of RIGHT SCOOP lands on the COIL marker
+      and `coilact.py` depends on it. State markers are drawn but never put
+      into `self.info`, which is the only thing `_hit()` returns, so clicking
+      is untouched. A test asserts it.
+      **Verified offline** against a padsw block written by hand
+      (`PAD_SW_FILE`, which playfield.py now honours as padsw.py always
+      has): at rest reads `trough 6/6  0 in play`; clearing `mrg[66]` alone
+      empties position SIX at the far end and reads `trough 5/6  1 in play`;
+      led_zeppelin_le shows the assumed strip with dots beside exactly ids
+      73..76; swshow on the same block says `5 of 6 [71,70,69,68,67]`.
+      Two faults the offline check caught before a run could: silver dots are
+      invisible on a white line drawing (green now), and a complement
+      denominator read `trough 4/4` beside two visibly empty positions.
+      **Resume:** run the game and screenshot the panel against `swshow.py`
+      at the same moment, including a shot with a ball removed — that is
+      (a)'s written acceptance and the only part of it left. Then (b), which
+      needs item 3's trough-eject coil index.
+      **★ DAVID, 2026-08-06: "we will need some sophisticated
       ball handling and clear feedback about how many balls are in play. for
       example, during multiball, many balls are in play. having clear feedback
       in the 'controls' or 'virtual playfield' window is very helpful (show

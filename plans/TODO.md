@@ -841,6 +841,72 @@ These have each been violated at least once and each cost a run or a window:
       trace of a mid-emit restore, not a fault; a fourth identical core
       would falsify this mechanism too. Crash logs preserved:
       `~/crashlogs/{padglhost,gameout,padvid}_relandcrash_1910.log`.
+      **★★★ THE SCOPE VERDICT, DAVID 2026-08-09 evening, three messages
+      quoted so the next pass builds the right thing:** *"i need you to
+      test e2e the flow i'm doing... it cannot crash"*; *"you need to
+      check that the scene and game video renders look correct too...
+      missing data"*; *"we shouldn't have cross-session issues at all.
+      that's the whole point of save states. most of them will be cross
+      session for users to gauge how specific modes or events look with
+      alternate assets."* Cross-session load is the PRIMARY case, the
+      oracle is the PICTURE, and the asset-swap loop must be quick.
+      **LANDED AND VALIDATED THE SAME NIGHT (fixed renderer, three e2e
+      runs, all inputs by script through the same spawns the app uses):**
+      • **The crash class is DEAD in both shapes.** The DELBUF graveyard
+      plus a DRAW GUARD: per-VAO tracking of enabled-vs-buffer-backed
+      attribs + the element binding; a draw that would hand Mesa a client
+      pointer is SKIPPED and counted (`[padglhost] draw skipped`). Run A:
+      fresh boot → cross-session load of a two-sessions-old save →
+      renderer + guest alive 45+ s, zero segv, ~2100 poisoned draws/s
+      absorbed. Normal play: ZERO skips through boot + attract, so the
+      guard has no false positives. Plus the four same-session restores
+      of the earlier gauntlet.
+      • **DELTEX graveyard (256, textures are MB-scale) and BOTH
+      graveyards now KEEP the guest-name mapping** — entries are
+      (name, object), wrap-free scrubs the map only if the name was not
+      re-genned — so a restored guest's stale re-binds resolve to live
+      objects and a same-session load should render COMPLETE, textures
+      included. Built and compiled; NOT yet pixel-verified (gap below).
+      • **boot.id session identity.** watch.sh stamps `dump/boot.id`;
+      savestate copies it into the slot THROUGH `/proc/PID/root` (trap
+      recorded: padpath's `$ROOT` is wrong under root's HOME — the first
+      version compared through it and mis-warned on a same-session
+      load); restorestate reads the live guest's copy the same way and
+      prints an honest cross-session NOTE.
+      **THE PICTURE-ORACLE GAP, open:** shotwin.py's PrintWindow returned
+      0 on every grab tonight (RAIL refusal; the windows may have been
+      minimized), and the X side has no xwd/convert. **Next pass: a
+      native glReadPixels dump in padglhost on a request-file flag** —
+      the standing picture oracle the acceptance read needs. Until it
+      exists, "renders look correct" is unverified beyond skip-count 0
+      and David's eyes.
+      **CROSS-SESSION FULL GRAPHICS = the GL WORLD JOURNAL, the next
+      real piece:** padglhost retains per-object defining data (texture
+      level-0 pixels with subimages applied + params, buffer bytes with
+      subdata applied, shader sources + program links + uniform values,
+      per-VAO attrib configs WITH their buffer names, global state),
+      serializes it to the slot on a savestate request flag, and replays
+      it through its own dispatch when a load lands in a fresh session.
+      Order matters only at replay (buffers before attribs); TEXDIRECT
+      video textures are excluded (the video host re-streams them).
+      Estimate: one focused pass, ~400-700 lines of C plus script wiring.
+      **THE DESIGN LIMIT the asset-swap question exposes, answered
+      2026-08-09 night:** PAD's own writes are SIZE-NEUTRAL, so a rebuilt
+      card does not shift file offsets and a restored guest's open fds
+      stay coherent — save → swap assets → load is SOUND for STREAMED
+      assets: **videos** (padvidhost re-reads the card per clip, so the
+      saved mode plays the NEW clips — the exact want) and on-demand
+      audio. But **scene ART built before the save is BAKED into guest
+      memory** — a loaded state shows the OLD art until the game rebuilds
+      that scene, and the journal cannot change that (it replays
+      save-time pixels by design). For image comparison the honest tools
+      are the scene-texture previews or a fresh boot; save states cover
+      the video/audio half. Also in the loop: a rebuilt card re-copies
+      the 7.3 GB cache — item 34 is part of "quick to gauge".
+      **Rig note:** the last teardown left ONE leftover alive.sh counts —
+      a zombie `game` held by a WSL interop relay (the v0.120.5 class);
+      only `wsl --shutdown` clears it (David's call), a new run is
+      unaffected, TOTAL reads 1 until then.
       **★★★ AND IT WAS FALSIFIED THE SAME EVENING — David's retry crashed
       WITH the ring fix live (verified: the deployed lib is byte-identical
       to the fixed build for all mapped bytes), and the REAL mechanism is

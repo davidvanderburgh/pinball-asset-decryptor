@@ -1149,6 +1149,57 @@ These have each been violated at least once and each cost a run or a window:
       confirming session of two boots plus the negative case, which is what
       keeps it off D1.
 
+- [ ] **37. A button on the Emulate tab that puts the emulator windows back to
+      their default positions.** `S3 D2`
+      **★ DAVID, 2026-08-10: "button on emulate tab to reset window positions of
+      emulator to default (in case they are off-screen somehow or messed up from
+      multi-monitor setups)."**
+      **ESTABLISHED AT THE DESK, from the source, and it says the escape hatch
+      genuinely does not exist: the remembered position is restored with NO
+      on-screen check.** padglhost reads `~/.pad_windows` (`winpos_get`,
+      `padglhost.c:912`) and `XMoveWindow`s the game and legend windows there —
+      there is no `DisplayWidth`/bounds test anywhere in that file — and it
+      CREATES the game window at the saved `w h` as well (item 32 uses exactly
+      that as its repro), so a stale SIZE comes back too. `playfield.py` is the
+      only one of the three that guards itself (`_onscreen`,
+      `playfield.py:1821`, over `~/.pad_playfield.json` key `playfield_pos`) —
+      **and it measures against the PRIMARY monitor** (`winfo_screenwidth`), so
+      a legitimate second-monitor position is thrown away as off-screen. Two
+      different multi-monitor faults, one button.
+      **The reset is therefore three keys across two filesystems:** the `game`
+      and `legend` lines in WSL's `~/.pad_windows` (position AND size), and
+      `playfield_pos` in Windows' `~/.pad_playfield.json`.
+      `~/.pad_windows_win.json` (`padwinpos.py`) is a passive RECORDER nothing
+      restores from — leave it, or say why not.
+      **THE TRAP, read off the source, and it decides what the button does: a
+      reset while a run is live is undone by the run itself.** padglhost
+      re-saves on ConfigureNotify and again at close once `restore_state == 2`
+      (`winpos_save_all`, `:1437` / `:1455` / `:1528`), so clearing the file
+      under a live run just writes the off-screen coordinates straight back.
+      Either gate the button on `alive.sh --total`, or say in the button's own
+      text that it lands at the next start.
+      **OUT OF SCOPE unless you state otherwise: moving the windows of a LIVE
+      run.** That can only be done from inside X (`XMoveWindow`), per the
+      standing non-negotiable at the top of this file — `SetWindowPos` froze
+      David's windows once — and padglhost has no trigger channel for it.
+      **Where it goes:** the Emulate tab's button row (`emulate_tab.py:905`,
+      beside "Restart WSL…"); the app already shells rig scripts through
+      `rig_cmd` / `rig_cmd_root` (`emulate_tab.py:258`) if the WSL-side half is
+      done with a script rather than a `\\wsl.localhost` write.
+      **Acceptance:** poison it on purpose — write an off-screen x,y (and a
+      silly `w h`) into `~/.pad_windows` for `game` and `legend`, and an
+      off-screen `playfield_pos` — press the button, start a run, and all three
+      windows open where a first-ever run puts them with the game window back at
+      its default size. State what the button does when a run IS live. Then
+      confirm dragging and the item 5 restore (`19e1b85`) still work on the run
+      after that, because that is what the banned fix broke.
+      — S3: nothing is broken about playing, but the workaround is invisible —
+      you have to know `~/.pad_windows` exists and edit it inside WSL, and a
+      window that is fully off every monitor cannot be dragged back. D2: the
+      mechanism is entirely known from the source above (rewrite two files), but
+      the live-run clobber has to be handled and seeing it work needs a windowed
+      session, which is what keeps it off D1.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

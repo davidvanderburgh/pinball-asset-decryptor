@@ -24,6 +24,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gameinfo
+import swnames
 
 LINE = re.compile(
     r"\[sw\] id=(\d+)\s+num=(\d+)\s+node=(\d+)\s+bit=(\d+)\s+"
@@ -79,6 +80,17 @@ def main():
               "PAD_SW_DUMP=1, or let sw_find_table() find it (it dumps on find)."
               % sys.argv[1])
         return 2
+
+    # FILL THE `?` NAMES, because on most titles that is ALL of them. The shim
+    # reads names through a per-title message-table address that resolves wrong
+    # on Jaws, Led Zeppelin and Elvira (item 29), and a switch list of numbers
+    # is not just unreadable - it stopped a game starting, because every ball
+    # tool looked the trough up by name and fell back to Godzilla's ids.
+    # swnames.py gets them from the title's own device table instead and refuses
+    # rather than guesses; see its header for the validation.
+    rows, report = swnames.fill(rows, game)
+    for line in report:
+        print("  %s" % line)
 
     named = sum(1 for r in rows if r[4] != "?")
     nodes = sorted({r[2] for r in rows})

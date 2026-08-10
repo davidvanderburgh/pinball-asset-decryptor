@@ -40,6 +40,7 @@ press put the ball straight back in the trough.
 import sys
 import time
 
+import gameinfo
 import padsw
 
 padsw.set_source('l')   # who the [sw] log says moved a switch;
@@ -52,10 +53,55 @@ MAGIC = padsw.MAGIC
 #: module-level names because coilact.py uses them.
 OFF_GEN, OFF_HELD, OFF_MRG = padsw.OFF_SCR_GEN, padsw.OFF_SCR_HELD, padsw.OFF_MRG
 
-START, SHOOTER, TROUGH_JAM = 36, 62, 72
-COIN = 39                                # Left Coin, the "5" key in the legend
-TROUGH = (71, 70, 69, 68, 67, 66)        # Trough 1..6; 1 is nearest the eject
-REST = (33,) + TROUGH                    # coin door shut, six balls loaded
+#: GODZILLA PRO'S IDS, AND FOR A LONG TIME EVERY TITLE'S, WHICH IS WHY NO OTHER
+#: TITLE COULD START A GAME. These ids are per title: Jaws's trough is 60..65
+#: where Godzilla's is 66..71. Writing them down meant `reset` cheerfully
+#: reported "six balls in the trough" while closing six switches Jaws does not
+#: watch, and the game ball-searched for ever on LOCATING PINBALLS. They stay
+#: here as the FALLBACK for a title whose switch list cannot be read at all.
+_GZ = dict(start=36, shooter=62, jam=72, coin=39, door=33,
+           trough=(71, 70, 69, 68, 67, 66))
+
+#: What each one is CALLED. The name is the portable identifier - the id is not -
+#: and swnames.py now fills these in even on a title whose own dump says `?`.
+_WANT = dict(start="START BUTTON", shooter="SHOOTER LANE", jam="TROUGH JAM",
+             coin="LEFT COIN", door="COIN DOOR POWER INTERLOCK")
+#: Trough 1 is nearest the eject; see do_plunge() for why the END matters.
+_TROUGH_NAMES = ["TROUGH %d" % n for n in range(1, 7)]
+
+
+def _resolve():
+    """Look the ids up in THIS title's switch list, falling back to Godzilla's.
+
+    Silent on failure on purpose: a missing table must not stop a Godzilla run
+    working the way it always has, and every caller here prints what it did.
+    """
+    ids = dict(_GZ)
+    try:
+        path = gameinfo.table("switch_list.txt")
+        by_name = {}
+        for line in open(path):
+            if line.startswith("#"):
+                continue
+            f = line.split(None, 4)
+            if len(f) >= 5:
+                by_name[f[4].strip().upper()] = int(f[0])
+    except (OSError, TypeError):
+        return ids
+    for key, name in _WANT.items():
+        if name in by_name:
+            ids[key] = by_name[name]
+    got = [by_name[n] for n in _TROUGH_NAMES if n in by_name]
+    if len(got) == 6:
+        ids["trough"] = tuple(got)
+    return ids
+
+
+_IDS = _resolve()
+START, SHOOTER, TROUGH_JAM = _IDS["start"], _IDS["shooter"], _IDS["jam"]
+COIN = _IDS["coin"]                      # Left Coin, the "5" key in the legend
+TROUGH = _IDS["trough"]                  # Trough 1..6; 1 is nearest the eject
+REST = (_IDS["door"],) + TROUGH          # coin door shut, six balls loaded
 
 #: Long enough for the game's own ball-search and switch debounce to see each
 #: step as a separate event rather than one glitch.

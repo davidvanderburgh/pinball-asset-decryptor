@@ -96,8 +96,30 @@ delete)
     rm -rf "${SAVES:?}/$SLOT"
     echo "slots: deleted '$SLOT'"
     ;;
+pack)
+    # Compress a RAW slot in place (new saves pack themselves; this is for
+    # slots from before packing existed). Same tar|zstd shape as savegame.sh,
+    # slot.meta kept plain beside the pack.
+    SLOT=${2:?usage: slots.sh pack <slot>}
+    ok_name "$SLOT" || { echo "slots: bad slot name '$SLOT'"; exit 2; }
+    is_slot "$SLOT" || { echo "slots: no such slot '$SLOT'"; exit 1; }
+    [ -f "$SAVES/$SLOT/slot.tar.zst" ] \
+        && { echo "slots: '$SLOT' is already packed"; exit 0; }
+    command -v zstd >/dev/null 2>&1 || { echo "slots: no zstd"; exit 1; }
+    PACK=$SAVES/.pack.$SLOT.$$
+    if tar -C "$SAVES/$SLOT" -cf - --exclude='./slot.meta' . 2>/dev/null \
+            | zstd -3 -T0 -q -f -o "$PACK"; then
+        find "$SAVES/$SLOT" -mindepth 1 ! -name slot.meta -delete
+        mv "$PACK" "$SAVES/$SLOT/slot.tar.zst"
+        echo "slots: packed '$SLOT' to $(du -h "$SAVES/$SLOT/slot.tar.zst" | cut -f1)"
+    else
+        rm -f "$PACK"
+        echo "slots: packing '$SLOT' failed - the slot is unchanged"
+        exit 1
+    fi
+    ;;
 *)
-    echo "usage: slots.sh list | label <slot> <text...> | delete <slot>"
+    echo "usage: slots.sh list | label <slot> <text...> | delete <slot> | pack <slot>"
     exit 2
     ;;
 esac

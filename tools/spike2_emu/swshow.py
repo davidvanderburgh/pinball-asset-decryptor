@@ -24,14 +24,18 @@ shim never having seen it. That pair is the whole diagnosis for item 20.
 Reads only. It never writes the block, so it is safe to run against a live game
 and against a run somebody else started.
 """
+import os
 import sys
 
+import gameinfo
 import padsw
+import trough
 
-#: The machine-at-rest set, which is what this is nearly always pointed at:
-#: six trough balls nearest-the-eject first, the shooter lane, the coin door,
-#: the trough jam opto and Start.
-DEFAULT = (71, 70, 69, 68, 67, 66, 62, 72, 33, 36)
+#: The machine-at-rest set for GODZILLA, which is what this was written
+#: against: six trough balls nearest-the-eject first, the shooter lane, the
+#: coin door, the trough jam opto and Start. Used only when the title's own
+#: switch list cannot be read - see at_rest().
+GZ_DEFAULT = (71, 70, 69, 68, 67, 66, 62, 72, 33, 36)
 
 NAMES = {
     71: "Trough 1 (eject end)", 70: "Trough 2", 69: "Trough 3",
@@ -41,6 +45,42 @@ NAMES = {
 }
 
 
+def at_rest():
+    """(ids, names, trough_ids) - the machine-at-rest set for the LIVE title.
+
+    THE IDS ARE PER TITLE AND THIS TOOL IS THE CROSS-CHECK, which is exactly
+    why it must not keep Godzilla's. The playfield window draws the trough
+    from the title's own switch list (trough.py); printing 71..66 against
+    Jaws - whose trough is 65..60 - would have the two disagreeing about
+    WHICH SWITCHES they are discussing, and that disagreement reads as a
+    fault in the window. Same module, same rule, one trough.
+    """
+    game = gameinfo.active(None)
+    tdir = gameinfo.table_dir(game) if game else None
+    rows = (trough.load_list(os.path.join(tdir, "switch_list.txt"))
+            if tdir else [])
+    positions, _how = trough.find(rows)
+    if not positions:
+        return list(GZ_DEFAULT), dict(NAMES), [71, 70, 69, 68, 67, 66]
+    names, ids = dict(NAMES), []
+    for P in positions:
+        ids.append(P["id"])
+        end = (" (eject end)" if P["pos"] == 1 else
+               " (far end)" if P is positions[-1] else "")
+        names[P["id"]] = "%s%s" % (P["name"] or "Trough %d" % P["pos"], end)
+    trough_ids = list(ids)
+    # The rest of the at-rest set, by name where the list carries one.
+    for want, label in (("SHOOTER LANE", "Shooter Lane"),
+                        ("TROUGH JAM", "Trough Jam")):
+        for r in rows:
+            if (r.get("name") or "").upper().strip() == want:
+                ids.append(r["id"])
+                names[r["id"]] = label
+                break
+    ids += [33, 36]              # the coin door and Start are cabinet ids
+    return ids, names, trough_ids
+
+
 def main():
     args = [a for a in sys.argv[1:]]
     label = ""
@@ -48,7 +88,8 @@ def main():
         i = args.index("--label")
         label = args[i + 1] if i + 1 < len(args) else ""
         del args[i:i + 2]
-    ids = [int(a) for a in args] or list(DEFAULT)
+    default_ids, names, trough_ids = at_rest()
+    ids = [int(a) for a in args] or default_ids
 
     m = padsw.open_block()
     if m is None:
@@ -66,11 +107,13 @@ def main():
     for sw in ids:
         print("[swshow] %3d %4d %4d %4d  %s"
               % (sw, m[padsw.OFF_HELD + sw], m[padsw.OFF_SCR_HELD + sw],
-                 m[padsw.OFF_MRG + sw], NAMES.get(sw, "")))
-    trough = [s for s in (71, 70, 69, 68, 67, 66) if m[padsw.OFF_MRG + s]]
-    if set(ids) >= {71, 66}:
-        print("[swshow] balls the GAME sees in the trough: %d %s"
-              % (len(trough), trough))
+                 m[padsw.OFF_MRG + sw], names.get(sw, "")))
+    home = [s for s in trough_ids if m[padsw.OFF_MRG + s]]
+    if trough_ids and set(ids) >= set(trough_ids):
+        # In trough ORDER, eject end first - the same order the playfield
+        # window draws, so the two can be read against each other directly.
+        print("[swshow] balls the GAME sees in the trough: %d of %d %s"
+              % (len(home), len(trough_ids), home))
     m.close()
     return 0
 

@@ -74,7 +74,7 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **37. A run can strand its windows, and then EVERY later run is
+- [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
       instrument in the rig says it is healthy.** `S2 D3`
       **Found 2026-08-10 during item 22's pass, with `zorder.py`, `shotwin.py`
@@ -853,172 +853,6 @@ These have each been violated at least once and each cost a run or a window:
       matches the saved one within item 16's stated tolerance. Both keys appear
       in the Controls legend.
 
-- [ ] **22. Start Emulator leaves the game window BEHIND the app.** `S3 D2`
-      ← IN PROGRESS, **90%** *(**D3 → D1, 2026-08-10:** instrument built and
-      validated, fault measured, fix shipped and confirmed by a single-variable
-      A/B. What is left is David pressing the button and dragging a window —
-      no run to design, no instrument to build.)*
-      **★★ THE FAULT IS READ, NOT EYEBALLED — the first real z-order of a live
-      run. `zorder.py`, godzilla_pro, with the PAD app foreground, which is the
-      state you are in the instant you press Start Emulator:**
-      ```
-      rank 2  PLAYFIELD  godzilla_pro - virtual playfield       NEW
-      rank 3  CONTROLS   Controls - Spike 2 emulator            NEW
-      rank 4  APP        Pinball Asset Decryptor                old
-      rank 5  GAME       godzilla_pro - Stern Spike 2 emulator  NEW
-      ```
-      The game window lands **exactly one slot below the app** — NOT at the
-      bottom; chrome and the rest sit under it at 6+. So the shape is not "the
-      game window is ignored", it is "the game window was refused the top and
-      inserted directly beneath whatever held it".
-      **★★ THIS ITEM'S OWN GUESS IS DEAD, and it was the whole theory.** It
-      supposed the two windows are "mapped at different TIMES", the game
-      waiting for the guest's first frame ~15 s in. From the source:
-      `win_open()` (`padglhost.c:1241`) maps the game at `:1293` and then calls
-      `legend_open()`, which maps the legend at `:1181` — **the same function,
-      microseconds apart, game FIRST** — and `win_open()` is called at
-      `padglhost.c:3328`, at the top of `main` BEFORE `eglGetDisplay`, not on
-      the first frame. Both windows exist before EGL is initialised at all.
-      What actually differs is only ORDER: Windows refuses to stack a window
-      shown without activation above the ACTIVE one, so the first window in
-      loses and the second rides in above.
-      **THE INSTRUMENT, which is the acceptance's "read the real z-order"
-      half: `tools/spike2_emu/zorder.py`.** One reading by default, `--watch N`
-      for a line per change, `--all` for every window. Three things in it are
-      load-bearing, each because the obvious version lies:
-      • **the walk is `GetTopWindow` + `GW_HWNDNEXT`, not `EnumWindows`** —
-      this item's text claimed EnumWindows is z-ordered, and in practice it is,
-      but its documentation promises only an enumeration. Both are run and a
-      disagreement is printed rather than quietly resolved.
-      • **a self-test on every reading** — `GetForegroundWindow` is independent
-      ground truth and must be the top non-TOPMOST row. Separately validated by
-      launching a window and watching every pre-existing row shift down one.
-      • **`--baseline FILE` marks NEW vs old**, without which a stranded window
-      from an earlier run is silently scored as this run's answer. That is not
-      hypothetical: it happened twice in this pass — see the new item 37.
-      Cloaked windows are dropped, and `WS_EX_TOPMOST` is reported because a
-      topmost proxy would mean "raise the others" could never be the fix.
-      **★★★ FIXED, AND SETTLED BY A SINGLE-VARIABLE A/B. `XRaiseWindow` from
-      inside X works, but ONLY as a retrying schedule** — `win_raise_all()`
-      fires once when the position restore settles and then again at 8, 16, 24,
-      32, 40, 50, 60, 75 and 90 s. Both runs used the identical recipe with the
-      other window activated **less than a second** before the launch, which is
-      the harshest case and the one a real Start Emulator press creates:
-      ```
-      PAD_GL_RAISE=0   game window BELOW the other window, unchanged over 115 s
-      PAD_GL_RAISE=1   game window ABOVE it from 8 s, stable over 115 s
-      ```
-      **On by default; `PAD_GL_RAISE=0` reverts with no rebuild.**
-      **★ TWO THINGS RULED OUT ON THE WAY, so nobody re-tests them.**
-      **(i) `eglSwapBuffers` is NOT re-asserting the stacking every frame.** It
-      was the leading suspect, because suppressing presents entirely
-      (`PAD_GL_WIN_EVERY` huge) let a raise stick where it otherwise had not —
-      but the winning run has a raise landing with swaps at full rate and the
-      order then holding for two minutes. The earlier reading was the raise
-      being blocked, not the swap undoing it.
-      **(ii) A raise at the FIRST present (~0 s, before the compositor has
-      placed the window) is worse than useless.** The build carrying one is the
-      build whose 4-deep retry schedule failed; removing it is what made the
-      schedule work. Do not add an "as early as possible" raise back.
-      **★★ STILL TRUE, WITH NUMBERS: A SINGLE `XRaiseWindow` DOES NOT FIX IT.**
-      `win_raise_all()` is built and shipped on this branch (`PAD_GL_RAISE=0`
-      disables it, no rebuild), raising legend then game, restack only with no
-      `XSetInputFocus`. It does not fix the fault:
-      • **one raise, at the end of the position restore (~3.5 s): NO.** David
-      ran it live and sent a screenshot — the app on top of the game window,
-      with `raised both windows above the desktop` sitting in the log of that
-      very run.
-      • **four more raises at 8, 16, 24 and 30 s: ALSO NO.** The game window
-      sat at rank 4, one slot below a plain foreground Notepad, and the
-      ordering did not change once across 75 s of watching.
-      **★★ THE FALSE PASS, and it is the methodology lesson worth more than the
-      result: an early run of this fix "PASSED" and the pass was an artefact of
-      HOW STALE the other window's activation was.** With the other window
-      activated ~40 s before the run, the raise lands and all three emulator
-      windows end up above it; with it activated ~10 s before the run, the
-      raise is refused and the game window goes one slot below — every time.
-      David's case is always the fresh one, because he presses Start Emulator
-      IN the app. **So any future test of this item MUST activate the other
-      window immediately before starting the run**, or it will report a fix
-      that is not there. That is how this pass briefly believed it was done.
-      **★ AND THE FOREGROUND-RIGHTS EXPLANATION IS DEAD TOO, which is the most
-      useful thing learned:** in the last run the **Controls window held the
-      FOREGROUND** (rank 1) while the game window could not get above Notepad
-      (rank 4) — **and both windows belong to the same msrdc process**. So this
-      is not "the emulator's process is not allowed to come forward". Something
-      is specific to the GAME window.
-      **WHAT THE FAILED ATTEMPTS BOUGHT, and it is the shape of the fault:
-      there is a period after user input during which the emulator's window
-      simply cannot come to the front, and a raise inside it is spent.** After
-      that period lapses, a raise both lands AND STICKS — the swaps do not
-      undo it. Retrying across the boot is what carries one into the other, and
-      it is why the schedule and not the raise is the fix.
-      **The third option this item has always listed — have the APP stop
-      holding the top — was NOT needed and is not implemented.** It stays on
-      the page as the fallback if the schedule ever proves flaky, and it is
-      still the option that touches no emulator window.
-      **Still untested, and it stays on the list: DRAGGING** — what the banned
-      `SetWindowPos` fix broke. It cannot be scripted (SendInput into a WSLg
-      window is UIPI-blocked, items 7 and 12) and needs David's hands. Nothing
-      shipped here has been shown to break it, and the position restore still
-      converges with the raise in.
-      **Resume — two things, both needing David's hands, and then the box
-      closes.** (a) Press **Start Emulator** and look: the game window should
-      come out over the app within ~10 s. The measured runs were launched from
-      the command line with a stand-in window activated in their place, which
-      is the same condition the button creates, but it is not the same click.
-      (b) **DRAG both windows and restart a run** — that is what the banned
-      `SetWindowPos` fix broke, it is this acceptance's real question, and it
-      cannot be scripted (SendInput into a WSLg window is UIPI-blocked, items 7
-      and 12). Nothing seen here breaks it and the position restore still
-      converges with the raise in, but that is evidence rather than the test.
-      **If either fails, `PAD_GL_RAISE=0` reverts with no rebuild** and the
-      fallback is the app-yields option above.
-      **And keep the test recipe:** activate the other window IMMEDIATELY
-      before the run, or the reading lies — that is what produced this pass's
-      false pass.
-      **Observed 2026-08-06 (David):** pressing Start Emulator in the app's
-      Emulate tab should bring **all** the emulator windows out over the PAD
-      application. The **game window comes up behind the app**, while the
-      **Controls window comes up above it**. A run opens three top-level
-      Windows windows, and `shotwin.py` sees all three by title:
-      `godzilla_pro - Stern Spike 2 emulator (Ubuntu)` and
-      `Controls - Spike 2 emulator` (both X11 out of `padglhost.c`, RAIL-proxied
-      by msrdc.exe) and `godzilla_pro - virtual playfield` (`playfield.py`, an
-      ordinary Windows Tk process started through interop by `watch.sh`).
-      **The asymmetry is the clue and it is worth keeping as observed rather
-      than diagnosed:** the two that disagree come from the SAME process and are
-      mapped the same way, `XMapWindow` at `padglhost.c:989` (legend) and in
-      `win_open()` at `:1048`, with `legend_open(scr)` called from `:1121`.
-      **GUESS, not established:** they are mapped at different TIMES — the game
-      window waits for the guest's first frame, ~15 s into the boot, by which
-      point the app has been clicked and holds the top, while the legend is
-      created inside the same `win_open()` path. Nobody has read the actual
-      z-order, so this is a hunch and must not be treated as a finding.
-      **★ THE OBVIOUS FIX IS BANNED HERE, and this is why the item says so up
-      front. `SetWindowPos` on an emulator window is a standing non-negotiable**
-      (top of this file): it froze David's windows once, and the handoff records
-      a programmatic `SetWindowPos` growing the frame while the picture stayed
-      1360x768 in the corner, because a RAIL proxy and the X client then
-      disagree about the window. `SetForegroundWindow` is the same shape.
-      So the raise has to come **from inside X** (`XRaiseWindow` on padglhost's
-      own two windows, the same rule item 5 landed on for MOVING them), and the
-      playfield is our own Tk process so Tk's own `lift()` is native there and
-      is not the RAIL trap. **A third option needs no window manipulation at
-      all and may be the right one:** have the APP stop holding the top after
-      the button press, rather than having three other windows fight it.
-      **Acceptance:** press Start Emulator and, once the game window appears,
-      all three emulator windows are above the app with no clicking — verified
-      by reading the real z-order, not by eye. `shotwin.py` already enumerates
-      the windows by title; `EnumWindows` returns them IN z-order, so the
-      instrument is a few lines on top of what exists. State whether dragging
-      and the window-position restore (item 5, `19e1b85`) still work afterwards,
-      because that is exactly what the banned fix broke.
-      — S3: nothing is broken and the workaround is one click. D3: it needs a
-      run and it should show every time, the instrument is a small extension of
-      `shotwin.py`, but the cheap fix is forbidden and the safe one crosses the
-      X/Windows boundary.
-
 - [ ] **26. Right-click-hold a switch to RIP IT, for spinners.** `S3 D4`
       **★ DAVID, 2026-08-06: "for switches, let's also add a right click hold
       function that 'rips the spinner' as long as the click is held."**
@@ -1471,6 +1305,53 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **22. Start Emulator leaves the game window BEHIND the app.** DONE
+      2026-08-10, `6f3a907` (branch `91ffa1d`..`6f3a907`). **Closed on David's
+      own Start Emulator press: "ok, looks like it is resolved now".**
+      **The fix is `win_raise_all()` in `padglhost.c`:** `XRaiseWindow` on both
+      windows **from inside X** (never `SetWindowPos` — the standing
+      non-negotiable), restack only with no `XSetInputFocus`, and crucially as
+      a **RETRYING SCHEDULE** — once when the position restore settles, then at
+      8, 16, 24, 32, 40, 50, 60, 75 and 90 s. `PAD_GL_RAISE=0` reverts with no
+      rebuild.
+      **THE SCHEDULE IS THE FIX, NOT THE RAISE.** A single raise does nothing —
+      David caught that build himself, a screenshot of the app on top of the
+      game window from a run whose log carried `raised both windows above the
+      desktop` — and a 4-deep schedule out to 30 s also failed. What that
+      bought is the shape of the fault: **there is a period after user input
+      during which the emulator's window cannot come to the front, and a raise
+      inside it is spent. After it lapses a raise lands AND STICKS.**
+      **Settled by a single-variable A/B**, both runs with the other window
+      activated **under a second** before launch (what a real button press
+      creates): `PAD_GL_RAISE=0` → game window BELOW, unchanged over 115 s;
+      `PAD_GL_RAISE=1` → ABOVE from 8 s, stable over 115 s. Re-confirmed on
+      shipped defaults with no override: PLAYFIELD 1, CONTROLS 2, GAME 3.
+      **New instrument, `tools/spike2_emu/zorder.py`**, which is the half of
+      the acceptance that asked for the order to be READ and not eyeballed:
+      walks `GetTopWindow` + `GW_HWNDNEXT` (the documented z-order) rather than
+      `EnumWindows` (which only promises an enumeration) and prints any
+      disagreement; self-tests every reading against `GetForegroundWindow`;
+      `--baseline` marks NEW against windows stranded by an earlier run;
+      `--watch N` prints a line per change.
+      **RULED OUT, do not re-test.** (i) This item's own theory, that the two
+      windows are mapped at different TIMES with the game waiting for the first
+      frame — they are mapped microseconds apart in the same function, before
+      EGL is initialised. (ii) `eglSwapBuffers` re-asserting the stacking every
+      frame — suppressing presents let a raise stick where it had not, which is
+      what pointed at it, but the winning run has a raise landing with swaps at
+      full rate and holding for two minutes. (iii) A raise at the FIRST present
+      (~0 s, before the compositor has placed the window) — the build carrying
+      one is the build whose retries failed. (iv) Any foreground-RIGHTS story:
+      the legend held the FOREGROUND while the game window could not beat a
+      plain Notepad, and both belong to the same msrdc process.
+      **THE METHODOLOGY LESSON, which cost this pass two wrong conclusions and
+      is why it is written here: a test MUST activate the other window
+      IMMEDIATELY before the run.** With a ~40 s stale activation the fault
+      does not reproduce at all, and a broken fix reads as working — that is
+      exactly how this pass twice believed it was finished.
+      **Split out: item 38** (a run stranding its windows, after which every
+      later run is invisible).
 
 - [x] **27. Any Spike 2 title should load, show a switch layout, start a game,
       and play with correct video.** DONE 2026-08-10, `332ed6a` (11 commits,

@@ -104,6 +104,12 @@ static void (*p_glFinish)(void);
 static unsigned (*p_glGetError)(void);
 static void (*p_glGetIntegerv)(unsigned,int*);
 static void (*p_glGetVertexAttribiv)(unsigned,unsigned,int*);
+/* Only the GL world journal's reset uses these four - live dispatch never
+ * deletes shaders/programs/VAOs/FBOs (and defers buffer/texture deletes). */
+static void (*p_glDeleteShader)(unsigned);
+static void (*p_glDeleteProgram)(unsigned);
+static void (*p_glDeleteVertexArrays)(int,const unsigned*);
+static void (*p_glDeleteFramebuffers)(int,const unsigned*);
 
 static void load_gl(void)
 {
@@ -130,6 +136,8 @@ static void load_gl(void)
     LOAD(glDrawArrays); LOAD(glDrawElements); LOAD(glReadPixels);
     LOAD(glFinish); LOAD(glGetError); LOAD(glGetIntegerv);
     LOAD(glGetVertexAttribiv); LOAD(glGetAttribLocation);
+    LOAD(glDeleteShader); LOAD(glDeleteProgram);
+    LOAD(glDeleteVertexArrays); LOAD(glDeleteFramebuffers);
 #undef LOAD
 }
 
@@ -1559,6 +1567,871 @@ static void write_png(const char *path, const unsigned char *rgba, int w, int h)
     fclose(f); free(z); free(raw);
 }
 
+/* ==== THE GL WORLD JOURNAL (item 13: cross-session save states) ==========
+ *
+ * A criu checkpoint restores the GUEST, but the GL world the guest spent its
+ * session uploading - textures, buffers, shaders, VAOs - lives HERE, and dies
+ * with the session.  A same-session load finds it resident (the graveyards
+ * keep even deleted names alive); a CROSS-session load finds a renderer that
+ * has never heard of any of it, and the picture is the draw guard skipping
+ * ~2100 draws/s until the game happens to rebuild each scene.  Save states
+ * exist to compare alternate assets across sessions, so that gap is the
+ * feature.
+ *
+ * So the renderer keeps a journal: the defining payload of every live object,
+ * maintained as commands stream through dispatch() (jgl_note).  On request
+ * (dump/glstate.req, from savestate.sh) it serialises that world - AS PADGL
+ * WIRE COMMANDS, the one format this process already executes - into
+ * dump/glstate.bin, which savestate.sh copies into the slot.  On a load,
+ * restorestate.sh stages the slot's journal as dump/glreplay.bin and touches
+ * dump/glreplay.req while the guest is dead; the reply resets this world to
+ * nothing and feeds the journal back through dispatch(), which rebuilds the
+ * name maps, the draw-guard masks and the min-filter shadows exactly as a
+ * live guest would have.  The request file may carry the save-time ring head;
+ * after the replay the ring counters are preset to it, so the rewind resync
+ * never has to guess and no restored command is dropped.
+ *
+ * NOT journaled: video pixels (PADGL_TEXDIRECT re-streams within a frame of
+ * resume - only the texture object and its params are kept), and clears/
+ * draws/swaps (transient).  Content is compacted, not logged: BUFSUBDATA and
+ * TEXSUBIMAGE are applied into shadow copies, and uniforms keep the LATEST
+ * value per (program, slot), so a buffer streamed for an hour costs one
+ * buffer.  Deletes are IGNORED here on purpose, mirroring the graveyards: a
+ * restored guest may still reference the name.
+ */
+#define JLEVELS 12
+#define JPARAMS 12
+#define JOVER   8
+#define JATT    4
+#define JBAL    8
+struct jlevel {
+    unsigned char *data;      /* pixels; for compressed, the WHOLE payload  */
+    unsigned len;
+    unsigned meta[7];         /* TEXIMAGE's leading u32s, verbatim          */
+    unsigned char have, compressed;
+};
+struct jtex {
+    unsigned char exists, isvid, over_lost, par_n, over_n, vd_have;
+    struct jlevel lv[JLEVELS];
+    unsigned par_pn[JPARAMS], par_v[JPARAMS];
+    unsigned char *over[JOVER];   /* raw TEXSUBIMAGE fallbacks (rare)       */
+    unsigned over_len[JOVER];
+    unsigned vdh[6];              /* last VIDSHM TEXDIRECT header: replayed  */
+};                                /* so a load shows the save-time frame     */
+struct jbuf {
+    unsigned char exists;
+    unsigned usage, size;
+    unsigned char *data;      /* current content; 0 = allocated, no upload  */
+};
+struct jvattr {
+    unsigned char have, on;
+    unsigned buf;             /* guest ARRAY_BUFFER name at spec time       */
+    unsigned pl[6];           /* the VERTEXATTRIB payload, verbatim         */
+};
+struct jvao {
+    unsigned char exists;
+    unsigned elem;            /* guest ELEMENT_ARRAY name, 0 = none         */
+    struct jvattr at[16];
+};
+struct jprog {
+    unsigned char linked, att_n, bal_n;
+    unsigned att[JATT];
+    unsigned char bal[JBAL][72];  /* raw BINDATTRIBLOC payloads             */
+    unsigned bal_len[JBAL];
+};
+struct jfbo {
+    unsigned char exists, have[4];
+    unsigned pl[4][5];        /* raw FBOTEX payloads by attachment slot     */
+};
+struct jglob { unsigned char have; unsigned op, len; unsigned char pl[16]; };
+
+static struct jtex  jtex[MAXNAME];
+static struct jbuf  jbuf[MAXNAME];
+static unsigned char jobj_kind[MAXNAME];        /* 1 = shader, 2 = program  */
+static unsigned     jshader_type[MAXNAME];
+static struct jprog jprog[MAXPROG];
+static struct { unsigned char have; unsigned len; unsigned char pl[76]; }
+                    juni_v[MAXPROG][MAXUNI];
+static struct jvao  jvao[1024];
+static struct jfbo  jfbo[256];
+static struct jglob jg_view, jg_scis, jg_ccol, jg_blend, jg_beq;
+static struct { unsigned cap; unsigned char on, used; } jcap[24];
+static unsigned junit_tex[16];
+static unsigned char junit_have[16];
+/* jgl keeps its OWN binding trackers rather than borrowing dispatch's:
+ * jgl_note runs before the switch, so dispatch's shadows are one command
+ * stale at that point, and self-contained is one less coupling anyway. */
+static unsigned jcur_unit, jcur_tex, jcur_vao, jcur_abuf, jcur_fbo, jcur_prog;
+static unsigned char jcur_prog_have;
+static char jdir[512];                          /* the ring's directory     */
+
+static void dispatch(unsigned op, const unsigned char *pl, unsigned len);
+
+/* Bytes per pixel of an uncompressed (format, type) pair, 0 = don't know. */
+static unsigned jbpp(unsigned fmt, unsigned type)
+{
+    if (type == 0x8363u || type == 0x8033u || type == 0x8034u) return 2;
+    if (type != 0x1401u) return 0;
+    switch (fmt) {
+    case 0x1908u: return 4;                        /* RGBA                  */
+    case 0x1907u: return 3;                        /* RGB                   */
+    case 0x190Au: return 2;                        /* LUMINANCE_ALPHA       */
+    case 0x1906u: case 0x1909u: return 1;          /* ALPHA / LUMINANCE     */
+    }
+    return 0;
+}
+
+static void jtex_reset(struct jtex *t)
+{
+    int i;
+    for (i = 0; i < JLEVELS; i++) free(t->lv[i].data);
+    for (i = 0; i < t->over_n; i++) free(t->over[i]);
+    memset(t, 0, sizeof *t);
+}
+static void jbuf_reset(struct jbuf *b) { free(b->data); memset(b, 0, sizeof *b); }
+
+static void jtex_param_set(struct jtex *t, unsigned pn, unsigned v)
+{
+    int i;
+    t->exists = 1;
+    for (i = 0; i < t->par_n; i++)
+        if (t->par_pn[i] == pn) { t->par_v[i] = v; return; }
+    if (t->par_n < JPARAMS) { t->par_pn[t->par_n] = pn;
+                              t->par_v[t->par_n] = v; t->par_n++; }
+}
+
+/* Called by dispatch where it FORCES a texture parameter itself (the
+ * completeness defaults and the mipmap demote).  Those are direct GL calls,
+ * invisible to jgl_note's wire recording - but they are part of the world,
+ * and a replay that omits them reconstructs different sampling state than
+ * the live session had (the wrap modes were the tell: live, the default
+ * block is suppressed by a game-set MIN_FILTER arriving before the upload;
+ * on replay the recorded params used to arrive AFTER, the block fired, and
+ * CLAMP_TO_EDGE replaced the GL_REPEAT the game relied on). */
+static void jgl_force_param(unsigned name, unsigned pn, unsigned v)
+{
+    if (name && name < MAXNAME) jtex_param_set(&jtex[name], pn, v);
+}
+
+static void jgl_note(unsigned op, const unsigned char *pl, unsigned len)
+{
+    const unsigned *u = (const unsigned *)pl;
+    switch (op) {
+    case PADGL_VIEWPORT:
+        if (len <= 16) { jg_view.have = 1; jg_view.op = op; jg_view.len = len;
+                         memcpy(jg_view.pl, pl, len); }
+        break;
+    case PADGL_SCISSOR:
+        if (len <= 16) { jg_scis.have = 1; jg_scis.op = op; jg_scis.len = len;
+                         memcpy(jg_scis.pl, pl, len); }
+        break;
+    case PADGL_CLEARCOLOR:
+        if (len <= 16) { jg_ccol.have = 1; jg_ccol.op = op; jg_ccol.len = len;
+                         memcpy(jg_ccol.pl, pl, len); }
+        break;
+    case PADGL_BLENDFUNC: case PADGL_BLENDFUNCSEP:
+        if (len <= 16) { jg_blend.have = 1; jg_blend.op = op; jg_blend.len = len;
+                         memcpy(jg_blend.pl, pl, len); }
+        break;
+    case PADGL_BLENDEQ: case PADGL_BLENDEQSEP:
+        if (len <= 16) { jg_beq.have = 1; jg_beq.op = op; jg_beq.len = len;
+                         memcpy(jg_beq.pl, pl, len); }
+        break;
+    case PADGL_ENABLE: case PADGL_DISABLE: {
+        int i; unsigned char on = (op == PADGL_ENABLE);
+        for (i = 0; i < 24; i++) {
+            if (!jcap[i].used) { jcap[i].used = 1; jcap[i].cap = u[0];
+                                 jcap[i].on = on; break; }
+            if (jcap[i].cap == u[0]) { jcap[i].on = on; break; }
+        }
+        break;
+    }
+    case PADGL_ACTIVETEX:
+        if (u[0] >= 0x84C0u && u[0] < 0x84D0u) jcur_unit = u[0] - 0x84C0u;
+        break;
+    case PADGL_BINDTEX:
+        jcur_tex = u[1];
+        if (jcur_unit < 16) { junit_tex[jcur_unit] = u[1];
+                              junit_have[jcur_unit] = 1; }
+        break;
+    case PADGL_GENTEX:
+        if (u[0] < MAXNAME) { jtex_reset(&jtex[u[0]]); jtex[u[0]].exists = 1; }
+        break;
+    case PADGL_TEXPARAM:
+        if (jcur_tex == 0 || jcur_tex >= MAXNAME || len < 12) break;
+        jtex_param_set(&jtex[jcur_tex], u[1], u[2]);
+        break;
+    case PADGL_TEXIMAGE: {
+        struct jtex *t; struct jlevel *L; unsigned lvl, n; int i;
+        if (jcur_tex == 0 || jcur_tex >= MAXNAME || len < 28) break;
+        lvl = u[0]; n = u[6];
+        if (lvl >= JLEVELS) break;
+        t = &jtex[jcur_tex]; t->exists = 1;
+        if (t->isvid) break;             /* a video texture stays one       */
+        L = &t->lv[lvl];
+        free(L->data); memset(L, 0, sizeof *L);
+        /* n <= len - 28, never len >= 28 + n: the sum wraps for a corrupt
+         * count near UINT_MAX and the guard would pass (same below). */
+        if (n && n <= len - 28) {
+            L->data = malloc(n);
+            if (L->data) { memcpy(L->data, pl + 28, n); L->len = n; }
+        }
+        memcpy(L->meta, u, 28);
+        L->have = 1;
+        /* A fresh base image invalidates the fallback subimages (in
+         * practice they only ever target the level being replaced). */
+        for (i = 0; i < t->over_n; i++) free(t->over[i]);
+        t->over_n = 0; t->over_lost = 0;
+        break;
+    }
+    case PADGL_TEXSUBIMAGE: {
+        struct jtex *t; struct jlevel *L = 0;
+        unsigned lvl, x, y, w, h, n, sb, db = 0, dw = 0, dh = 0, r;
+        if (jcur_tex == 0 || jcur_tex >= MAXNAME || len < 32) break;
+        t = &jtex[jcur_tex];
+        if (t->isvid) break;
+        lvl = u[0]; x = u[1]; y = u[2]; w = u[3]; h = u[4]; n = u[7];
+        if (lvl < JLEVELS) L = &t->lv[lvl];
+        sb = jbpp(u[5], u[6]);
+        if (L && L->have && !L->compressed) {
+            db = jbpp(L->meta[4], L->meta[5]);
+            dw = L->meta[2]; dh = L->meta[3];
+        }
+        if (L && L->data && sb && sb == db
+            && x <= dw && w <= dw - x && y <= dh && h <= dh - y
+            && (unsigned long)w * h * sb <= n && n <= len - 32
+            /* the DESTINATION allocation must really hold dw*dh texels -
+             * meta dims and L->len agree for every wire-produced record,
+             * but a corrupt journal can disagree and this row loop is the
+             * one heap WRITE in the parse path */
+            && (unsigned long)dw * dh * db <= L->len) {
+            for (r = 0; r < h; r++)
+                memcpy(L->data + ((unsigned long)(y + r) * dw + x) * db,
+                       pl + 32 + (unsigned long)r * w * sb,
+                       (unsigned long)w * sb);
+        } else if (t->over_n < JOVER) {
+            unsigned char *c = malloc(len);
+            if (c) { memcpy(c, pl, len);
+                     t->over[t->over_n] = c;
+                     t->over_len[t->over_n] = len; t->over_n++; }
+        } else if (!t->over_lost) {
+            t->over_lost = 1;
+            fprintf(stderr, "[padglhost] journal: texture %u has more "
+                    "unappliable subimages than fit - its journaled pixels "
+                    "may be stale\n", jcur_tex);
+        }
+        break;
+    }
+    case PADGL_TEXCOMPRESSED: {
+        struct jtex *t; struct jlevel *L; unsigned lvl;
+        if (jcur_tex == 0 || jcur_tex >= MAXNAME || len < 20) break;
+        lvl = u[0];
+        if (lvl >= JLEVELS) break;
+        t = &jtex[jcur_tex]; t->exists = 1;
+        if (t->isvid) break;
+        L = &t->lv[lvl];
+        free(L->data); memset(L, 0, sizeof *L);
+        L->data = malloc(len);
+        if (L->data) { memcpy(L->data, pl, len); L->len = len;
+                       L->have = 1; L->compressed = 1; }
+        break;
+    }
+    case PADGL_TEXDIRECT: {
+        struct jtex *t; int i;
+        if (jcur_tex == 0 || jcur_tex >= MAXNAME) break;
+        t = &jtex[jcur_tex]; t->exists = 1;
+        if (!t->isvid) {
+            t->isvid = 1;      /* frames re-stream; drop any stored pixels  */
+            for (i = 0; i < JLEVELS; i++) {
+                free(t->lv[i].data);
+                memset(&t->lv[i], 0, sizeof t->lv[i]);
+            }
+            for (i = 0; i < t->over_n; i++) free(t->over[i]);
+            t->over_n = 0;
+        }
+        /* Keep the LAST ring-referencing header.  Serialized, it makes a
+         * load show the save-time video frame immediately instead of black
+         * until the next upload - restorestate rewinds the padvid ring to
+         * the save before the replay, so the offset resolves correctly. */
+        if (len >= 24 && u[3] == PADGL_SRC_VIDSHM) {
+            memcpy(t->vdh, u, 24);
+            t->vd_have = 1;
+        }
+        break;
+    }
+    case PADGL_GENBUF:
+        if (u[0] < MAXNAME) { jbuf_reset(&jbuf[u[0]]); jbuf[u[0]].exists = 1; }
+        break;
+    case PADGL_BINDBUF:
+        if (u[0] == 0x8892u) jcur_abuf = u[1];
+        else if (u[0] == 0x8893u && jcur_vao < 1024) jvao[jcur_vao].elem = u[1];
+        break;
+    case PADGL_BUFDATA: case PADGL_BUFSUBDATA: {
+        unsigned name = u[0] == 0x8892u ? jcur_abuf
+                      : u[0] == 0x8893u && jcur_vao < 1024 ? jvao[jcur_vao].elem
+                      : 0;
+        struct jbuf *b;
+        if (!name || name >= MAXNAME || len < 12) break;
+        b = &jbuf[name];
+        if (op == PADGL_BUFDATA) {
+            if (u[2] > (64u << 20)) break;   /* real VBOs are KB; a corrupt
+                                              * size must not become a 4 GB
+                                              * shadow allocation */
+            b->exists = 1;
+            free(b->data); b->data = 0;
+            b->usage = u[1]; b->size = u[2];
+            if (u[2] && u[2] <= len - 12) {
+                b->data = malloc(u[2]);
+                if (b->data) memcpy(b->data, pl + 12, u[2]);
+            }
+        } else {
+            if (!b->exists || u[1] > b->size || u[2] > b->size - u[1]
+                || u[2] > len - 12) break;
+            if (!b->data) { b->data = calloc(1, b->size); if (!b->data) break; }
+            memcpy(b->data + u[1], pl + 12, u[2]);
+        }
+        break;
+    }
+    case PADGL_GENVAO:
+        if (u[0] < 1024) { memset(&jvao[u[0]], 0, sizeof jvao[0]);
+                           jvao[u[0]].exists = 1; }
+        break;
+    case PADGL_BINDVAO:
+        jcur_vao = u[0] < 1024 ? u[0] : 0;
+        break;
+    case PADGL_VERTEXATTRIB: {
+        int idx = attr_resolve(u[0]);
+        if (idx >= 0 && idx < 16 && jcur_vao < 1024 && len >= 24) {
+            struct jvattr *a = &jvao[jcur_vao].at[idx];
+            unsigned char on = a->on;      /* enable state survives respec  */
+            memcpy(a->pl, u, 24);
+            a->buf = jcur_abuf; a->have = 1; a->on = on;
+        }
+        break;
+    }
+    case PADGL_ENABLEATTRIB: case PADGL_DISABLEATTRIB: {
+        int idx = attr_resolve(u[0]);
+        if (idx >= 0 && idx < 16 && jcur_vao < 1024)
+            jvao[jcur_vao].at[idx].on = (op == PADGL_ENABLEATTRIB);
+        break;
+    }
+    case PADGL_CREATESHADER:
+        if (u[0] < MAXNAME) { jobj_kind[u[0]] = 1; jshader_type[u[0]] = u[1]; }
+        break;
+    case PADGL_CREATEPROGRAM:
+        if (u[0] < MAXNAME) {
+            jobj_kind[u[0]] = 2;
+            if (u[0] < MAXPROG) {
+                memset(&jprog[u[0]], 0, sizeof jprog[0]);
+                memset(juni_v[u[0]], 0, sizeof juni_v[0]);
+            }
+        }
+        break;
+    case PADGL_ATTACHSHADER:
+        if (u[0] < MAXPROG && jprog[u[0]].att_n < JATT)
+            jprog[u[0]].att[jprog[u[0]].att_n++] = u[1];
+        break;
+    case PADGL_BINDATTRIBLOC:
+        if (u[0] < MAXPROG && jprog[u[0]].bal_n < JBAL && len <= 72) {
+            struct jprog *p = &jprog[u[0]];
+            memcpy(p->bal[p->bal_n], pl, len);
+            p->bal_len[p->bal_n] = len; p->bal_n++;
+        }
+        break;
+    case PADGL_LINKPROGRAM:
+        if (u[0] < MAXPROG) jprog[u[0]].linked = 1;
+        break;
+    case PADGL_USEPROGRAM:
+        jcur_prog = u[0]; jcur_prog_have = 1;
+        break;
+    case PADGL_UNIFORM:
+        if (u[0] < MAXPROG && u[1] < MAXUNI && len <= 76) {
+            juni_v[u[0]][u[1]].have = 1;
+            juni_v[u[0]][u[1]].len = len;
+            memcpy(juni_v[u[0]][u[1]].pl, pl, len);
+        }
+        break;
+    case PADGL_GENFBO:
+        if (u[0] < 256) { memset(&jfbo[u[0]], 0, sizeof jfbo[0]);
+                          jfbo[u[0]].exists = 1; }
+        break;
+    case PADGL_BINDFBO:
+        jcur_fbo = u[1] < 256 ? u[1] : 0;
+        break;
+    case PADGL_FBOTEX: {
+        int s = u[1] == 0x8CE0u ? 0 : u[1] == 0x8D00u ? 1
+              : u[1] == 0x8D20u ? 2 : 3;
+        if (jcur_fbo < 256 && len >= 20) {
+            memcpy(jfbo[jcur_fbo].pl[s], u, 20);
+            jfbo[jcur_fbo].have[s] = 1;
+        }
+        break;
+    }
+    default: break;                 /* draws, clears, swaps: transient      */
+    }
+}
+
+/* One wire record: [op][len][payload], padded to 8 like the ring. */
+static void jput(FILE *f, unsigned op, const void *a, unsigned alen,
+                 const void *b, unsigned blen)
+{
+    static const unsigned char zpad[8];
+    padgl_cmd c; unsigned pad;
+    c.op = op; c.len = alen + blen;
+    fwrite(&c, 1, sizeof c, f);
+    if (alen) fwrite(a, 1, alen, f);
+    if (blen) fwrite(b, 1, blen, f);
+    pad = (8u - (c.len & 7u)) & 7u;
+    if (pad) fwrite(zpad, 1, pad, f);
+}
+
+/* Serialize the journal in dependency order: shaders, programs (whose
+ * REGATTRIB/REGUNIFORM make VERTEXATTRIB tokens and UNIFORM slots resolve),
+ * buffers, textures, VAOs (rebinding each attribute's recorded buffer, which
+ * is what rebuilds the draw-guard masks on replay), FBOs, uniform values
+ * (each program USEd first - the wire relies on current-program), then the
+ * global tail: latest viewport/scissor/clear/blend, cap states, per-unit
+ * texture bindings, and the current bindings the guest's shadows assume. */
+static int jgl_serialize(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+    unsigned i, k, hdr4[4] = { 0x314c4a50u /* "PJL1" */, 0, 0, 0 };
+    unsigned ns = 0, np = 0, nb = 0, nt = 0, nv = 0, nf = 0, nphigh = 0;
+    unsigned long tbytes = 0, bbytes = 0;
+    double t0 = now_s();
+    if (!f) return -1;
+    fwrite(hdr4, 1, 16, f);
+    for (i = 0; i < MAXNAME; i++)
+        if (jobj_kind[i] == 1 && shader_src[i] && shader_len[i]) {
+            unsigned m[2];
+            m[0] = i; m[1] = jshader_type[i];
+            jput(f, PADGL_CREATESHADER, m, 8, 0, 0);
+            m[1] = (unsigned)shader_len[i];
+            jput(f, PADGL_SHADERSOURCE, m, 8, shader_src[i], m[1]);
+            jput(f, PADGL_COMPILESHADER, m, 4, 0, 0);
+            ns++;
+        }
+    for (i = 0; i < MAXPROG; i++)
+        if (jobj_kind[i] == 2) {
+            struct jprog *p = &jprog[i];
+            unsigned m[2]; m[0] = i;
+            jput(f, PADGL_CREATEPROGRAM, m, 4, 0, 0);
+            for (k = 0; k < p->att_n; k++) {
+                m[1] = p->att[k];
+                jput(f, PADGL_ATTACHSHADER, m, 8, 0, 0);
+            }
+            for (k = 0; k < p->bal_n; k++)
+                jput(f, PADGL_BINDATTRIBLOC, p->bal[k], p->bal_len[k], 0, 0);
+            if (p->linked) {
+                jput(f, PADGL_LINKPROGRAM, m, 4, 0, 0);
+                for (k = 0; k < PADGL_ATTR_PER_PROG; k++)
+                    if (attr_name[i][k][0]) {
+                        m[1] = k;
+                        jput(f, PADGL_REGATTRIB, m, 8, attr_name[i][k],
+                             (unsigned)strlen(attr_name[i][k]));
+                    }
+                for (k = 0; k < MAXUNI; k++)
+                    if (uni_name[i][k][0]) {
+                        m[1] = k;
+                        jput(f, PADGL_REGUNIFORM, m, 8, uni_name[i][k],
+                             (unsigned)strlen(uni_name[i][k]));
+                    }
+            }
+            np++;
+        }
+    for (i = MAXPROG; i < MAXNAME; i++) if (jobj_kind[i] == 2) nphigh++;
+    if (nphigh)
+        fprintf(stderr, "[padglhost] journal: %u programs named >= %u NOT "
+                "journaled\n", nphigh, MAXPROG);
+    for (i = 1; i < MAXNAME; i++)
+        if (jbuf[i].exists) {
+            unsigned m[3];
+            m[0] = i;
+            jput(f, PADGL_GENBUF, m, 4, 0, 0);
+            if (jbuf[i].size) {
+                m[0] = 0x8892u; m[1] = i;
+                jput(f, PADGL_BINDBUF, m, 8, 0, 0);
+                m[0] = 0x8892u; m[1] = jbuf[i].usage; m[2] = jbuf[i].size;
+                jput(f, PADGL_BUFDATA, m, 12, jbuf[i].data,
+                     jbuf[i].data ? jbuf[i].size : 0);
+                if (jbuf[i].data) bbytes += jbuf[i].size;
+            }
+            nb++;
+        }
+    for (i = 1; i < MAXNAME; i++)
+        if (jtex[i].exists) {
+            struct jtex *t = &jtex[i];
+            unsigned m[2];
+            m[0] = i;
+            jput(f, PADGL_GENTEX, m, 4, 0, 0);
+            m[0] = 0x0DE1u; m[1] = i;
+            jput(f, PADGL_BINDTEX, m, 8, 0, 0);
+            /* MIN_FILTER FIRST, before any level upload.  dispatch's
+             * TEXIMAGE case forces completeness defaults (incl. CLAMP
+             * wraps) when a level 0 arrives with no MIN_FILTER on record;
+             * live, a game-set MIN_FILTER arriving before the upload
+             * suppresses that.  The journal records the forced values too
+             * (jgl_force_param), so whichever way the live session got its
+             * MIN_FILTER, replaying it first reproduces the suppression
+             * and the remaining params then land exactly as live. */
+            for (k = 0; k < t->par_n; k++)
+                if (t->par_pn[k] == 0x2801u) {
+                    unsigned q[3];
+                    q[0] = 0x0DE1u; q[1] = t->par_pn[k]; q[2] = t->par_v[k];
+                    jput(f, PADGL_TEXPARAM, q, 12, 0, 0);
+                    break;
+                }
+            if (!t->isvid) {
+                for (k = 0; k < JLEVELS; k++) {
+                    struct jlevel *L = &t->lv[k];
+                    if (!L->have) continue;
+                    if (L->compressed) {
+                        jput(f, PADGL_TEXCOMPRESSED, L->data, L->len, 0, 0);
+                        tbytes += L->len;
+                    } else {
+                        unsigned mm[7];
+                        memcpy(mm, L->meta, 28);
+                        if (!L->data) mm[6] = 0;   /* honest: no pixels held */
+                        jput(f, PADGL_TEXIMAGE, mm, 28, L->data,
+                             L->data ? mm[6] : 0);
+                        tbytes += L->data ? mm[6] : 0;
+                    }
+                }
+                for (k = 0; k < t->over_n; k++)
+                    jput(f, PADGL_TEXSUBIMAGE, t->over[k], t->over_len[k], 0, 0);
+            }
+            for (k = 0; k < t->par_n; k++) {
+                unsigned q[3];
+                q[0] = 0x0DE1u; q[1] = t->par_pn[k]; q[2] = t->par_v[k];
+                jput(f, PADGL_TEXPARAM, q, 12, 0, 0);
+            }
+            if (t->isvid && t->vd_have)
+                jput(f, PADGL_TEXDIRECT, t->vdh, 24, 0, 0);
+            nt++;
+        }
+    for (i = 0; i < 1024; i++) {
+        struct jvao *v = &jvao[i];
+        unsigned m[2]; int any = v->exists || v->elem;
+        for (k = 0; k < 16; k++) if (v->at[k].have) any = 1;
+        if (!any) continue;
+        if (i && v->exists) { m[0] = i; jput(f, PADGL_GENVAO, m, 4, 0, 0); }
+        m[0] = i; jput(f, PADGL_BINDVAO, m, 4, 0, 0);
+        for (k = 0; k < 16; k++) {
+            struct jvattr *a = &v->at[k];
+            /* An attribute whose buffer this journal does not hold is left
+             * unspecified AND unenabled: the draw guard then lets the draw
+             * through with the attribute disabled (a constant), instead of
+             * skipping every draw of the VAO forever. */
+            if (!a->have || !a->buf || a->buf >= MAXNAME
+                || !jbuf[a->buf].exists) continue;
+            m[0] = 0x8892u; m[1] = a->buf;
+            jput(f, PADGL_BINDBUF, m, 8, 0, 0);
+            jput(f, PADGL_VERTEXATTRIB, a->pl, 24, 0, 0);
+            if (a->on) jput(f, PADGL_ENABLEATTRIB, &a->pl[0], 4, 0, 0);
+        }
+        if (v->elem && v->elem < MAXNAME && jbuf[v->elem].exists) {
+            m[0] = 0x8893u; m[1] = v->elem;
+            jput(f, PADGL_BINDBUF, m, 8, 0, 0);
+        }
+        nv++;
+    }
+    for (i = 1; i < 256; i++)
+        if (jfbo[i].exists) {
+            unsigned m[2]; int s;
+            m[0] = i; jput(f, PADGL_GENFBO, m, 4, 0, 0);
+            m[0] = 0x8D40u; m[1] = i;
+            jput(f, PADGL_BINDFBO, m, 8, 0, 0);
+            for (s = 0; s < 4; s++)
+                if (jfbo[i].have[s])
+                    jput(f, PADGL_FBOTEX, jfbo[i].pl[s], 20, 0, 0);
+            nf++;
+        }
+    for (i = 0; i < MAXPROG; i++) {
+        unsigned m[1]; int any = 0;
+        if (jobj_kind[i] != 2 || !jprog[i].linked) continue;
+        for (k = 0; k < MAXUNI; k++) if (juni_v[i][k].have) { any = 1; break; }
+        if (!any) continue;
+        m[0] = i; jput(f, PADGL_USEPROGRAM, m, 4, 0, 0);
+        for (k = 0; k < MAXUNI; k++)
+            if (juni_v[i][k].have)
+                jput(f, PADGL_UNIFORM, juni_v[i][k].pl, juni_v[i][k].len, 0, 0);
+    }
+    if (jg_view.have)  jput(f, jg_view.op,  jg_view.pl,  jg_view.len,  0, 0);
+    if (jg_scis.have)  jput(f, jg_scis.op,  jg_scis.pl,  jg_scis.len,  0, 0);
+    if (jg_ccol.have)  jput(f, jg_ccol.op,  jg_ccol.pl,  jg_ccol.len,  0, 0);
+    if (jg_blend.have) jput(f, jg_blend.op, jg_blend.pl, jg_blend.len, 0, 0);
+    if (jg_beq.have)   jput(f, jg_beq.op,   jg_beq.pl,   jg_beq.len,   0, 0);
+    for (i = 0; i < 24; i++)
+        if (jcap[i].used) {
+            unsigned m[1]; m[0] = jcap[i].cap;
+            jput(f, jcap[i].on ? PADGL_ENABLE : PADGL_DISABLE, m, 4, 0, 0);
+        }
+    for (i = 0; i < 16; i++)
+        if (junit_have[i]) {
+            unsigned m[2];
+            m[0] = 0x84C0u + i;
+            jput(f, PADGL_ACTIVETEX, m, 4, 0, 0);
+            m[0] = 0x0DE1u; m[1] = junit_tex[i];
+            jput(f, PADGL_BINDTEX, m, 8, 0, 0);
+        }
+    {
+        unsigned m[2];
+        m[0] = 0x84C0u + jcur_unit;
+        jput(f, PADGL_ACTIVETEX, m, 4, 0, 0);
+        if (jcur_prog_have) { m[0] = jcur_prog;
+                              jput(f, PADGL_USEPROGRAM, m, 4, 0, 0); }
+        m[0] = jcur_vao; jput(f, PADGL_BINDVAO, m, 4, 0, 0);
+        m[0] = 0x8892u; m[1] = jcur_abuf;
+        jput(f, PADGL_BINDBUF, m, 8, 0, 0);
+        m[0] = 0x8D40u; m[1] = jcur_fbo;
+        jput(f, PADGL_BINDFBO, m, 8, 0, 0);
+    }
+    i = ferror(f) ? 1u : 0u;
+    fclose(f);
+    fprintf(stderr, "[padglhost] GL world journal: %u tex (%.1f MB), %u buf "
+            "(%.1f MB), %u shaders, %u programs, %u vaos, %u fbos in %.0f ms%s\n",
+            nt, tbytes / 1048576.0, nb, bbytes / 1048576.0, ns, np, nv, nf,
+            (now_s() - t0) * 1000.0, i ? " - WRITE FAILED" : "");
+    return i ? -1 : 0;
+}
+
+/* Tear the whole world down to process-start state: every host object, every
+ * name map, the graveyards, dispatch's shadows AND the journal itself (the
+ * replay rebuilds it through jgl_note, so a later save from the restored
+ * session carries a full journal again).  The screen FBO is the one survivor
+ * - it is the host's, not the guest's. */
+static void jgl_reset_world(void)
+{
+    unsigned i;
+    for (i = 0; i < GRAVE_N; i++)
+        if (grave_buf_obj[i]) p_glDeleteBuffers(1, &grave_buf_obj[i]);
+    for (i = 0; i < TGRAVE_N; i++)
+        if (grave_tex_obj[i]) p_glDeleteTextures(1, &grave_tex_obj[i]);
+    memset(grave_buf_name, 0, sizeof grave_buf_name);
+    memset(grave_buf_obj, 0, sizeof grave_buf_obj); grave_head = 0;
+    memset(grave_tex_name, 0, sizeof grave_tex_name);
+    memset(grave_tex_obj, 0, sizeof grave_tex_obj); tgrave_head = 0;
+    for (i = 0; i < MAXNAME; i++) {
+        /* Deleting an already-deleted (graveyarded) object again is a GL
+         * no-op, so the overlap with the graveyards above is harmless. */
+        if (map_tex[i]) { p_glDeleteTextures(1, &map_tex[i]); map_tex[i] = 0; }
+        if (map_buf[i]) { p_glDeleteBuffers(1, &map_buf[i]); map_buf[i] = 0; }
+        if (map_obj[i]) {
+            if (jobj_kind[i] == 1) p_glDeleteShader(map_obj[i]);
+            else if (jobj_kind[i] == 2) p_glDeleteProgram(map_obj[i]);
+            map_obj[i] = 0;
+        }
+        free(shader_src[i]); shader_src[i] = 0; shader_len[i] = 0;
+        jtex_reset(&jtex[i]); jbuf_reset(&jbuf[i]);
+    }
+    for (i = 0; i < 1024; i++)
+        if (map_vao[i]) { p_glDeleteVertexArrays(1, &map_vao[i]); map_vao[i] = 0; }
+    for (i = 1; i < 256; i++)
+        if (map_fbo[i]) { p_glDeleteFramebuffers(1, &map_fbo[i]); map_fbo[i] = 0; }
+    map_fbo[0] = fbo_screen; map_vao[0] = 0;
+    memset(vao_on, 0, sizeof vao_on);
+    memset(vao_backed, 0, sizeof vao_backed);
+    memset(vao_elem, 0, sizeof vao_elem);
+    cur_vao_g = 0; cur_array_buf = 0;
+    memset(min_filter_val, 0, sizeof min_filter_val);
+    cur_tex_unit_binding = 0;
+    memset(uni_loc, 0, sizeof uni_loc); memset(uni_name, 0, sizeof uni_name);
+    memset(attr_loc, 0, sizeof attr_loc); memset(attr_name, 0, sizeof attr_name);
+    memset(jobj_kind, 0, sizeof jobj_kind);
+    memset(jshader_type, 0, sizeof jshader_type);
+    memset(jprog, 0, sizeof jprog); memset(juni_v, 0, sizeof juni_v);
+    memset(jvao, 0, sizeof jvao); memset(jfbo, 0, sizeof jfbo);
+    memset(&jg_view, 0, sizeof jg_view); memset(&jg_scis, 0, sizeof jg_scis);
+    memset(&jg_ccol, 0, sizeof jg_ccol); memset(&jg_blend, 0, sizeof jg_blend);
+    memset(&jg_beq, 0, sizeof jg_beq);
+    memset(jcap, 0, sizeof jcap);
+    memset(junit_tex, 0, sizeof junit_tex);
+    memset(junit_have, 0, sizeof junit_have);
+    jcur_unit = jcur_tex = jcur_vao = jcur_abuf = jcur_fbo = jcur_prog = 0;
+    jcur_prog_have = 0;
+    p_glBindVertexArray(0);
+    p_glBindBuffer(0x8892u, 0); p_glBindBuffer(0x8893u, 0);
+    p_glUseProgram(0);
+    p_glActiveTexture(0x84C0u);
+    p_glBindTexture(0x0DE1u, 0);
+    p_glBindFramebuffer(0x8D40u, fbo_screen);
+}
+
+/* Replay-side record validation.  The live ring's producer is trusted
+ * (glbridge always emits self-consistent lengths), but a journal FILE can be
+ * truncated or corrupted, and dispatch's handlers read embedded counts
+ * without cross-checking them against len.  Every count check SUBTRACTS from
+ * len (the minimum is established first), so nothing here can wrap. */
+static int jgl_rec_ok(unsigned op, const unsigned char *pl, unsigned len)
+{
+    static const unsigned char need[PADGL_OP_MAX] = {
+        [PADGL_VIEWPORT] = 16, [PADGL_CLEARCOLOR] = 16, [PADGL_CLEAR] = 4,
+        [PADGL_ENABLE] = 4, [PADGL_DISABLE] = 4, [PADGL_BLENDFUNC] = 8,
+        [PADGL_BLENDFUNCSEP] = 16, [PADGL_BLENDEQ] = 4, [PADGL_BLENDEQSEP] = 8,
+        [PADGL_SCISSOR] = 16,
+        [PADGL_GENTEX] = 4, [PADGL_BINDTEX] = 8, [PADGL_ACTIVETEX] = 4,
+        [PADGL_TEXIMAGE] = 28, [PADGL_TEXSUBIMAGE] = 32,
+        [PADGL_TEXCOMPRESSED] = 20, [PADGL_TEXPARAM] = 12, [PADGL_DELTEX] = 4,
+        [PADGL_GENBUF] = 4, [PADGL_BINDBUF] = 8, [PADGL_BUFDATA] = 12,
+        [PADGL_BUFSUBDATA] = 12, [PADGL_DELBUF] = 4,
+        [PADGL_GENVAO] = 4, [PADGL_BINDVAO] = 4, [PADGL_VERTEXATTRIB] = 24,
+        [PADGL_ENABLEATTRIB] = 4, [PADGL_DISABLEATTRIB] = 4,
+        [PADGL_CREATESHADER] = 8, [PADGL_SHADERSOURCE] = 8,
+        [PADGL_COMPILESHADER] = 4, [PADGL_CREATEPROGRAM] = 4,
+        [PADGL_ATTACHSHADER] = 8, [PADGL_BINDATTRIBLOC] = 8,
+        [PADGL_LINKPROGRAM] = 4, [PADGL_USEPROGRAM] = 4,
+        [PADGL_UNIFORM] = 12, [PADGL_REGUNIFORM] = 8,
+        [PADGL_GENFBO] = 4, [PADGL_BINDFBO] = 8, [PADGL_FBOTEX] = 20,
+        [PADGL_DRAWARRAYS] = 12, [PADGL_DRAWELEMENTS] = 16,
+        [PADGL_REGATTRIB] = 8, [PADGL_TEXDIRECT] = 24,
+    };
+    const unsigned *u = (const unsigned *)pl;
+    if (op >= PADGL_OP_MAX || len < need[op]) return 0;
+    switch (op) {
+    case PADGL_TEXIMAGE:      return u[6] <= len - 28;
+    case PADGL_TEXSUBIMAGE:   return u[7] <= len - 32;
+    case PADGL_TEXCOMPRESSED: return u[4] <= len - 20;
+    case PADGL_BUFDATA:       return len == 12 || u[2] <= len - 12;
+    case PADGL_BUFSUBDATA:    return u[2] <= len - 12;
+    case PADGL_SHADERSOURCE:  return u[1] <= len - 8;
+    case PADGL_TEXDIRECT:     return u[3] != PADGL_SRC_INLINE
+                                  || u[5] <= len - 24;
+    case PADGL_UNIFORM: {
+        static const unsigned char ksz[] = { 4, 8, 12, 16, 4, 16, 64 };
+        return u[2] <= PADGL_UM4FV && (unsigned)ksz[u[2]] <= len - 12;
+    }
+    }
+    return 1;
+}
+
+static int jgl_replay(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    unsigned char *buf; long n; unsigned long off = 16; long nrec = 0;
+    unsigned magic; int err = 0;
+    double t0 = now_s();
+    if (!f) {
+        fprintf(stderr, "[padglhost] journal replay: cannot open %s\n", path);
+        return -1;
+    }
+    fseek(f, 0, SEEK_END); n = ftell(f); fseek(f, 0, SEEK_SET);
+    buf = n >= 16 ? malloc((size_t)n) : 0;
+    if (!buf || fread(buf, 1, (size_t)n, f) != (size_t)n) {
+        fclose(f); free(buf);
+        fprintf(stderr, "[padglhost] journal replay: cannot read %s\n", path);
+        return -1;
+    }
+    fclose(f);
+    memcpy(&magic, buf, 4);
+    if (magic != 0x314c4a50u) {
+        free(buf);
+        fprintf(stderr, "[padglhost] journal replay: bad magic in %s - "
+                "refusing, the world is untouched\n", path);
+        return -1;
+    }
+    jgl_reset_world();
+    while (off + 8 <= (unsigned long)n) {
+        padgl_cmd c; unsigned long need;
+        memcpy(&c, buf + off, 8);
+        /* widen BEFORE the add: a garbled len near UINT_MAX wraps the
+         * 32-bit sum to <= 8 and would slip past the bounds check */
+        need = 8ul + (((unsigned long)c.len + 7ul) & ~7ul);
+        if (c.op >= PADGL_OP_MAX || off + need > (unsigned long)n
+            || !jgl_rec_ok(c.op, buf + off + 8, c.len)) {
+            fprintf(stderr, "[padglhost] journal replay: truncated/garbled "
+                    "at byte %lu - stopping, the world is PARTIAL\n", off);
+            err = 1;
+            break;
+        }
+        if (c.op != PADGL_SWAP && c.op != PADGL_DRAWARRAYS
+            && c.op != PADGL_DRAWELEMENTS)
+            dispatch(c.op, buf + off + 8, c.len);
+        off += need; nrec++;
+    }
+    free(buf);
+    fprintf(stderr, "[padglhost] GL world journal replayed: %ld commands in "
+            "%.0f ms - the save's scene world is resident (err 0x%x)\n",
+            nrec, (now_s() - t0) * 1000.0, p_glGetError());
+    return err ? -1 : 0;
+}
+
+/* Whether a frame is half-built (any command since the last SWAP).  The
+ * idle-site screenshot uses it: "ring drained" is not "frame boundary" -
+ * the emulated guest interleaves game logic between GL calls, so the ring
+ * is briefly empty mid-frame and a shot taken there is a partial picture. */
+static unsigned char jgl_in_frame;
+
+/* The request files, polled beside the ring.  `idle` means the ring is
+ * drained.  A REPLAY is only honoured then, because restorestate.sh issues
+ * it with the guest DEAD (the drain finishes first by construction), and a
+ * reset mid-stream of a LIVE guest would tear the world out from under it.
+ * `quiet` means the ring has been idle a long while (a dead or parked
+ * guest) - the one case a mid-frame flag must not block the shot forever.
+ *
+ * NO ring-counter preset happens here, deliberately.  An earlier version
+ * preset head/tail to the save-time head so the restored guest's first
+ * commands could not be dropped - but glbridge's reserve() re-reads
+ * hdr->head fresh on every command, so a guest frozen OUTSIDE emit()
+ * simply adopts the drained counters with zero loss and the preset bought
+ * nothing; while a guest frozen INSIDE emit() republishes its own
+ * (later) head absolutely, which lands AHEAD of any preset and silently
+ * defeats the rewound-counters resync - the renderer then parses stale
+ * ring bytes as commands, the exact crash class item 13 buried.  Leaving
+ * the counters alone keeps both cases on the documented recovery. */
+static void jgl_poll(int idle, int quiet)
+{
+    char req[560], out[560], tmp[560];
+    if (!jdir[0]) return;
+    snprintf(req, sizeof req, "%s/glshot.req", jdir);
+    if (access(req, F_OK) == 0 && (!idle || !jgl_in_frame || quiet)) {
+        /* The picture oracle: the guest screen FBO, on demand, as PNG.
+         * PrintWindow and every X-side grabber failed against WSLg RAIL
+         * windows; reading the pixels HERE is the one place they must
+         * exist.  Save and restore the FBO binding - the guest's own
+         * binding must survive the shot. */
+        unsigned char *px = malloc((size_t)fb_w * fb_h * 4);
+        int prev = 0;
+        if (px) {
+            p_glGetIntegerv(0x8CA6, &prev);
+            snprintf(out, sizeof out, "%s/glshot.png", jdir);
+            p_glBindFramebuffer(0x8D40u, fbo_screen);
+            p_glFinish();
+            p_glReadPixels(0, 0, fb_w, fb_h, 0x1908, 0x1401, px);
+            p_glBindFramebuffer(0x8D40u, (unsigned)prev);
+            write_png(out, px, fb_w, fb_h);
+            free(px);
+            fprintf(stderr, "[padglhost] wrote %s (on request)\n", out);
+        }
+        unlink(req);
+    }
+    snprintf(req, sizeof req, "%s/glstate.req", jdir);
+    if (access(req, F_OK) == 0) {
+        snprintf(tmp, sizeof tmp, "%s/glstate.bin.tmp", jdir);
+        snprintf(out, sizeof out, "%s/glstate.bin", jdir);
+        if (jgl_serialize(tmp) == 0) rename(tmp, out);
+        else unlink(tmp);
+        unlink(req);
+    }
+    if (!idle) return;
+    snprintf(req, sizeof req, "%s/glreplay.req", jdir);
+    if (access(req, F_OK) == 0) {
+        int ok;
+        /* CLAIM the request before the slow work: the req vanishing tells
+         * restorestate.sh "the renderer has it", and the ok-file tells it
+         * "the world is rebuilt".  Two signals, so its timeout can tell a
+         * renderer that never looked from one that is mid-replay - the
+         * latter must be WAITED for, not raced by criu restore. */
+        unlink(req);
+        snprintf(out, sizeof out, "%s/glreplay.bin", jdir);
+        ok = jgl_replay(out) == 0;
+        if (ok) {
+            snprintf(tmp, sizeof tmp, "%s/glreplay.ok", jdir);
+            { FILE *okf = fopen(tmp, "w"); if (okf) fclose(okf); }
+        }
+        unlink(out);
+    }
+}
+
 static void present(void)
 {
     frames_done++;
@@ -1656,6 +2529,11 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
     const unsigned *u = (const unsigned *)pl;
     const float *fv = (const float *)pl;
     if (op < PADGL_OP_MAX) op_count[op]++;
+    /* The GL world journal shadows every state-defining command - including
+     * replayed ones, which is how a replay repopulates the journal so the
+     * NEXT save from a restored session still carries the full world. */
+    jgl_note(op, pl, len);
+    jgl_in_frame = (op != PADGL_SWAP);
     /* PADGL_DEBUG=3: log every op of one whole frame, in order. State probes
      * answer "is X right"; only the sequence answers "what actually happens". */
     if (dbg == 3 && frames_done >= seq_from && frames_done < seq_to) {
@@ -1716,7 +2594,10 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         }
     }
     switch (op) {
-    case PADGL_SWAP:            present(); hdr->frame_ack++; break;
+    case PADGL_SWAP:            present(); hdr->frame_ack++;
+                                /* frame boundary: a journal request answered
+                                 * here is a frame-consistent snapshot */
+                                jgl_poll(0, 0); break;
     case PADGL_VIEWPORT:        p_glViewport((int)u[0],(int)u[1],(int)u[2],(int)u[3]); break;
     case PADGL_SCISSOR:         p_glScissor((int)u[0],(int)u[1],(int)u[2],(int)u[3]); break;
     case PADGL_CLEARCOLOR:
@@ -1788,6 +2669,12 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
             p_glTexParameteri(0x0DE1, 0x2800, 0x2601);   /* MAG_FILTER LINEAR */
             p_glTexParameteri(0x0DE1, 0x2802, 0x812F);   /* WRAP_S CLAMP_TO_EDGE */
             p_glTexParameteri(0x0DE1, 0x2803, 0x812F);   /* WRAP_T CLAMP_TO_EDGE */
+            /* journal the forced values too - direct GL calls are invisible
+             * to jgl_note, and a replay must land on the same final state */
+            jgl_force_param(cur_tex_unit_binding, 0x2801, 0x2601);
+            jgl_force_param(cur_tex_unit_binding, 0x2800, 0x2601);
+            jgl_force_param(cur_tex_unit_binding, 0x2802, 0x812F);
+            jgl_force_param(cur_tex_unit_binding, 0x2803, 0x812F);
         }
         break;
     case PADGL_TEXDIRECT: {
@@ -1913,9 +2800,14 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                 p_glTexParameteri(0x0DE1, 0x2800, 0x2601);   /* MAG LINEAR       */
                 p_glTexParameteri(0x0DE1, 0x2802, 0x812F);   /* WRAP_S CLAMP     */
                 p_glTexParameteri(0x0DE1, 0x2803, 0x812F);   /* WRAP_T CLAMP     */
+                jgl_force_param(cur_tex_unit_binding, 0x2801, 0x2601);
+                jgl_force_param(cur_tex_unit_binding, 0x2800, 0x2601);
+                jgl_force_param(cur_tex_unit_binding, 0x2802, 0x812F);
+                jgl_force_param(cur_tex_unit_binding, 0x2803, 0x812F);
             } else if (mf >= 0x2700 && mf <= 0x2703 && !vid_nomipfix) {
                 static unsigned said;
                 p_glTexParameteri(0x0DE1, 0x2801, 0x2601);
+                jgl_force_param(cur_tex_unit_binding, 0x2801, 0x2601);
                 if (said != mf) {
                     said = mf;
                     fprintf(stderr, "[padglhost] video texture asked for "
@@ -2039,7 +2931,14 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         break;
     }
 
-    case PADGL_CREATESHADER:    if (u[0] < MAXNAME) map_obj[u[0]] = p_glCreateShader(u[1]); break;
+    case PADGL_CREATESHADER:    if (u[0] < MAXNAME) {
+                                    map_obj[u[0]] = p_glCreateShader(u[1]);
+                                    /* a NEW shader object starts with empty
+                                     * source; without this a re-created name
+                                     * APPENDS to the old one's text (bites
+                                     * on journal replay, latent before) */
+                                    shader_len[u[0]] = 0;
+                                } break;
     case PADGL_CREATEPROGRAM:   if (u[0] < MAXNAME) map_obj[u[0]] = p_glCreateProgram(); break;
     case PADGL_SHADERSOURCE: {
         unsigned g = u[0], n = u[1];
@@ -2301,6 +3200,42 @@ int main(int argc, char **argv)
     map_fbo[0] = fbo_screen;
     map_vao[0] = 0;
 
+    /* The journal + oracle request files live beside the ring, whichever
+     * directory that is - for the rig, $ROOT/dump, the same one the scripts
+     * reach through the guest's /proc/PID/root. */
+    {
+        const char *sl = strrchr(path, '/');
+        if (!sl) {
+            snprintf(jdir, sizeof jdir, ".");
+        } else if (sl == path) {
+            snprintf(jdir, sizeof jdir, "/");
+        } else if ((size_t)(sl - path) < sizeof jdir - 1) {
+            memcpy(jdir, path, (size_t)(sl - path));
+            jdir[sl - path] = 0;
+        } else {
+            /* LOUD, and disabled - a silent fall-back to "." would strand
+             * the request protocol in whatever directory we started in
+             * while the scripts wait on $ROOT/dump forever. */
+            fprintf(stderr, "[padglhost] ring directory is too long for the "
+                    "journal request files - journal and shot DISABLED\n");
+            jdir[0] = 0;
+        }
+        if (jdir[0]) {
+            /* Request files from an ABORTED save/load of a previous session
+             * (script killed mid-wait, wsl --shutdown) would otherwise be
+             * honoured by THIS session's first idle poll - replaying a dead
+             * slot's whole world before the game even boots. */
+            static const char *stale[] = { "glstate.req", "glstate.bin",
+                "glstate.bin.tmp", "glreplay.req", "glreplay.bin",
+                "glreplay.ok", "glshot.req" };
+            char p[560]; unsigned si;
+            for (si = 0; si < sizeof stale / sizeof stale[0]; si++) {
+                snprintf(p, sizeof p, "%s/%s", jdir, stale[si]);
+                unlink(p);
+            }
+        }
+    }
+
     hdr->host_ready = 1;
     fprintf(stderr, "[padglhost] ready, waiting for the game\n");
 
@@ -2347,10 +3282,28 @@ int main(int argc, char **argv)
              * while there is work, so throughput is untouched. */
             if (head - tail < sizeof c) {
                 win_pump();
+                /* the drained-ring poll is the only one that honours a
+                 * REPLAY request - see jgl_poll for why.  ~1 s of silence
+                 * counts as `quiet` (a dead or parked guest). */
+                jgl_poll(1, idle_polls > 500);
                 usleep(++idle_polls > 16 ? 2000 : 200);
                 continue;
             }
             ring_get(tail, &c, sizeof c);
+            /* A header that CANNOT be real is stale or foreign ring bytes
+             * being parsed at the wrong phase (a restored guest's absolute
+             * head-publish landing somewhere unexpected).  Without this, a
+             * garbage len bigger than the ring makes the length check below
+             * true FOREVER - the drain spins, the guest's reserve() times
+             * out, bridge dead, window frozen.  Resync to the producer: the
+             * same one-command-drop recovery as the rewind case above. */
+            if (c.op >= PADGL_OP_MAX || c.len > ring_bytes) {
+                fprintf(stderr, "[padglhost] impossible command header "
+                        "(op=%u len=%u) at tail=%llu - resyncing to the "
+                        "producer's head\n", c.op, c.len, tail);
+                hdr->tail = head;
+                continue;
+            }
             if (head - tail < sizeof c + ((c.len + 7u) & ~7u)) { usleep(200); continue; }
             idle_polls = 0;
             if (c.len) ring_get(tail + sizeof c, payload, c.len);

@@ -201,5 +201,41 @@ if [ "$RC" != 0 ] || grep -aq 'Dumping FAILED' "$DDIR/dump.log"; then
     grep -aE 'Error' "$DDIR/dump.log" | tail -12 | sed 's/^/    /'
     exit 1
 fi
+# --- the GL world journal (cross-session loads) --------------------------
+# The checkpoint restores the GUEST; the renderer's GL world - every texture,
+# buffer, shader and VAO the guest has uploaded - lives in padglhost and dies
+# with the session. Ask the renderer to serialise that world into the slot so
+# a cross-session load can rebuild it, instead of the draw guard skipping
+# ~2100 draws/s until the game rebuilds each scene by itself. Paths go
+# through the guest's own root, like boot.id above.
+#
+# AFTER the dump, deliberately. Requested before it, anything the guest
+# uploads between the serialize answer and criu's freeze is in the
+# checkpoint but NOT in the journal - invisible elements baked into the
+# slot forever, because the restored guest believes it already sent them.
+# Requested here, the journal is a SUPERSET of the checkpoint: it also
+# carries the few frames the guest ran while criu wrote images. Extra
+# objects are harmless residents (the guest re-gens names when it creates
+# them), and a texture whose content moved on in that window shows the
+# slightly-newer pixels until the game's next upload - a bounded cosmetic
+# drift, against unfixable missing artwork the other way round.
+GD="/proc/$PID/root/dump"
+if pgrep -x padglhost >/dev/null; then
+    rm -f "$GD/glstate.bin"
+    : > "$GD/glstate.req"
+    for _ in $(seq 1 100); do [ -e "$GD/glstate.req" ] || break; sleep 0.1; done
+    if [ -s "$GD/glstate.bin" ]; then
+        cp -f "$GD/glstate.bin" "$DDIR/glstate.bin"
+        echo "[save] GL world journal: $(du -h "$DDIR/glstate.bin" | cut -f1) in the slot"
+    else
+        rm -f "$GD/glstate.req"
+        echo "[save] NOTE: the renderer produced no GL journal within 10 s; a"
+        echo "[save] cross-session load of this slot will rebuild artwork only"
+        echo "[save] as the game rebuilds scenes (an older padglhost build?)"
+    fi
+else
+    echo "[save] no renderer running - no GL journal in this slot"
+fi
+
 echo "[save] ok - $(ls "$DDIR"/*.img 2>/dev/null | wc -l) images, $(du -sh "$DDIR" | cut -f1)"
 echo "[save] restore.env:"; sed 's/^/    /' "$DDIR/restore.env"

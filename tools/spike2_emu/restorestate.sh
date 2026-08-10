@@ -276,6 +276,62 @@ while read -r kind a b c; do
     esac
 done < "$DDIR/restore.env"
 
+# --- the GL world journal: hand the renderer the save's world ------------
+# Runs with the guest DEAD (killed above) and BEFORE criu brings the new one
+# back, so the replay races nothing: the renderer drains the dead guest's
+# leftover ring bytes, goes idle, sees the request, resets its GL world and
+# feeds the slot's journal back through its own dispatch - names, draw-guard
+# masks and min-filters rebuilt exactly as a live guest would have built
+# them. Same-session loads replay too: the journal also rolls back content
+# the game overwrote AFTER the save, which the graveyards alone cannot.
+# The ring counters are deliberately NOT touched - the restored guest's
+# reserve() adopts whatever they say, and a guest checkpointed mid-emit is
+# healed by the renderer's rewind resync, same as before the journal.
+#
+# TWO-PHASE ack. The renderer CLAIMS the request (unlinks the req) before
+# the multi-second reset+replay, then writes glreplay.ok when the world is
+# rebuilt. Phase 1 waits for the claim; still unclaimed after 15 s means
+# the renderer never looked (wedged, or an old build) - clean up and carry
+# on, the draw guard keeps the load safe. Phase 2, once claimed, WAITS for
+# the finish: proceeding under an in-flight replay would let the world
+# reset race the restored guest. A finished replay always removes
+# glreplay.bin, so bin-gone-without-ok means it refused the file.
+GLREPLAY=0
+if [ -s "$DDIR/glstate.bin" ] && pgrep -x padglhost >/dev/null; then
+    rm -f "$R/dump/glreplay.ok"
+    cp -f "$DDIR/glstate.bin" "$R/dump/glreplay.bin"
+    : > "$R/dump/glreplay.req"
+    CLAIMED=0
+    for _ in $(seq 1 150); do
+        [ -e "$R/dump/glreplay.req" ] || { CLAIMED=1; break; }
+        sleep 0.1
+    done
+    if [ "$CLAIMED" = 1 ]; then
+        for _ in $(seq 1 300); do
+            [ -e "$R/dump/glreplay.ok" ] && break
+            [ -e "$R/dump/glreplay.bin" ] || break
+            sleep 0.1
+        done
+    fi
+    if [ -e "$R/dump/glreplay.ok" ]; then
+        GLREPLAY=1
+        rm -f "$R/dump/glreplay.ok"
+        echo "[restore] the renderer rebuilt the save's GL world from the journal"
+    else
+        rm -f "$R/dump/glreplay.req" "$R/dump/glreplay.bin" "$R/dump/glreplay.ok"
+        if [ "$CLAIMED" = 1 ]; then
+            echo "[restore] NOTE: the renderer took the GL journal but did not"
+            echo "[restore] finish replaying it; artwork may be partial until"
+            echo "[restore] the game rebuilds scenes"
+        else
+            echo "[restore] NOTE: the renderer did not take the GL journal (15 s);"
+            echo "[restore] artwork will rebuild only as the game rebuilds scenes"
+        fi
+    fi
+elif [ ! -s "$DDIR/glstate.bin" ]; then
+    echo "[restore] this slot carries no GL journal (saved by an older build)"
+fi
+
 # --- the nsclean the restore runs inside ---------------------------------
 # criu's compat mount engine umounts a copy of ITS namespace, and WSL's
 # init-namespace mounts refuse a plain umount (EINVAL). So run the restore in a
@@ -390,18 +446,20 @@ else
     echo "[restore] restore reported ok but the guest is not alive"; exit 1
 fi
 
-# Same-session or cross-session?  The renderer only holds the GL world the
-# guest built THIS session; a save from an earlier session resumes fine (the
-# draw guard keeps the renderer alive) but its artwork exists only as new
-# scenes are built, so the picture is incomplete until the game rebuilds
-# them.  Say so - a user who was not told assumes the load half worked.
+# What should the picture look like?  With the journal replayed, complete:
+# the renderer holds the save's whole GL world whatever session it came
+# from.  Without it (old slot, old renderer, or the replay timed out), a
+# cross-session load resumes fine - the draw guard keeps the renderer alive
+# - but artwork exists only as new scenes are built.  Say which one this
+# was; a user who was not told assumes the load half worked.
 SLOT_BOOT=$(cat "$DDIR/boot.id" 2>/dev/null)
-if [ -z "$SLOT_BOOT" ] || [ -z "$LIVE_BOOT" ] || [ "$SLOT_BOOT" != "$LIVE_BOOT" ]; then
-    echo "[restore] NOTE: this save is from an EARLIER session. Game state,"
-    echo "[restore] audio and video resume; the scene artwork rebuilds only"
-    echo "[restore] as the game builds new scenes, so the picture can be"
-    echo "[restore] incomplete for a while. A save made this session loads"
-    echo "[restore] with full graphics."
+if [ "$GLREPLAY" = 1 ]; then
+    echo "[restore] scene artwork restored from the save's GL journal"
+elif [ -z "$SLOT_BOOT" ] || [ -z "$LIVE_BOOT" ] || [ "$SLOT_BOOT" != "$LIVE_BOOT" ]; then
+    echo "[restore] NOTE: this save is from an EARLIER session and carries no"
+    echo "[restore] replayable GL journal. Game state, audio and video resume;"
+    echo "[restore] the scene artwork rebuilds only as the game builds new"
+    echo "[restore] scenes, so the picture can be incomplete for a while."
 fi
 
 # --- restart the video host in RESUME mode (see the stop block above) -----

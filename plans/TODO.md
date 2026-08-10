@@ -75,13 +75,12 @@ These have each been violated at least once and each cost a run or a window:
 ## Queue
 
 - [ ] **27. Any Spike 2 title should load, show a switch layout, start a game,
-      and play with correct video. Today only Godzilla does.** `S1 D2` ←
-      IN PROGRESS, 75% ▼ *(**down from 85%, and honestly so:** the scope grew to
-      include video, and the flicker then turned out to be a SECOND fault that
-      is still live after the Tech Alerts one was fixed — plus autoattract not
-      pressing on Star Wars is a new blocker this pass found. The node half
-      completed at the same time, so work went in; the item is further from done
-      than it looked an hour ago.)* *(**scope widened 2026-08-10 on David's instruction:**
+      and play with correct video. Today only Godzilla does.** `S1 D3` ←
+      IN PROGRESS, 80% ▲ *(**D2 → D3, 2026-08-10 midday:** two fixes
+      live-verified and the queue's two named blockers are gone, but the
+      remaining two faults are each a run-plus-mechanism job — the black-frame
+      flicker's drawer is unidentified, and the Jaws start-refusal needs the
+      padglhost per-title latch fix plus a confirming run.)* *(**scope widened 2026-08-10 on David's instruction:**
       "the video flickering on some games falls under this item. let's address
       it here." Item 35 is absorbed into this one.)*
       **★ DAVID, 2026-08-06: "i'm trying to load Jaws right now and I'm not
@@ -349,18 +348,64 @@ These have each been violated at least once and each cost a run or a window:
       comes. Stated limit: a title looping a loop=0 clip by BARE seek would
       freeze that channel — none observed does; the absorb log line is the
       tell.
-      **Resume, in order:** (1) star_wars_le run — card path MUST be the
-      stamped one (the cache is path-keyed):
-      `/mnt/c/.../pinball-asset-decryptor/images/Stern/spike2/star_wars_le-1_30_0.Release.8G.sdcard.raw`.
-      autoattract must PRESS this time; `[led] light show running` must
-      appear only AFTER the press; flicker scored by ch2 `(head)` supersedes
-      (before: 36/63 and 19/38, expect ~0) + `absorbing it` lines at scene
-      steps + `screenrec.py` record/analyze from WINDOWS (WSL x11grab reads
-      black — known false negative). (2) jaws_le run: a ball must reach play
-      (plunge.py resolves TROUGH=65..60 by name, desk-verified); oracle is
-      the game's own screen. Doubles as the autoattract regression control.
-      (3) Shim rebuilt at the desk twice (`built ok`); ensurebuild agrees at
-      next start.
+      **★★★ BOTH FIXES ARE LIVE-VERIFIED, 2026-08-10 midday (`d6a15ca`,
+      `e371366`, runs on star_wars and jaws×2):**
+      **(1) gs_past_alerts WORKS ON THE TITLE THAT BROKE ITS PREDECESSOR.**
+      star_wars: autoattract pressed (twice, first didn't take — same as
+      Godzilla), `[led] light show running` 943 ms after the successful
+      press and never before it, attract reached with zero human input.
+      Jaws twice more (1.7 s and ~2 s after the press). The "3 presses"
+      count when 2 hit the wire is the `-e $SW` guard burning an iteration
+      — cosmetic, not fixed.
+      **(2) THE EOS-REFLEX ABSORB KILLS THE LOOP-BOUNDARY BURSTS: ch2 went
+      36-of-63 serves superseded to 1-of-31** (78 absorbs, both reflex
+      paths), delivery flat 30.0/s worst-gap 33 ms. **The defer-honour
+      fired 20× on star_wars — the bare-replay case is real**, watch it.
+      **★★ BUT THE VISIBLE FLICKER IS A THIRD ARTIFACT AND IT PERSISTS:
+      BLACK FRAMES, DRAWN.** Windows capture (75 s, screenrec.py): **32.8%
+      of frames black, 236 runs of median 2 frames (67 ms), evenly spread**
+      — same signature as David's original recording, independent of what
+      is on screen (alerts then, attract now). NOT delivery (every counter
+      clean), NOT presentation drops (padglhost drew 60 fps steadily).
+      **New instrument `swap content` in padglhost** (per-swap: which
+      channels' video was uploaded since the last swap + any-draw): Jaws
+      baseline is CLEAN (`0x60 1x60 no-draw 0/120` — benign 30-on-60
+      alternation, texture persists). Star_wars has NOT run the counter
+      yet — its earlier run predates it; its upload pattern differed (90
+      uploads/s, 60 NEW/s from 30/s channels).
+      **★★ THE JAWS BALL IS NOT IN PLAY, AND THE BLOCK MOVED SOMEWHERE
+      NEW: THE GAME IGNORES START.** plunge.py resolves Jaws's real ids
+      (trough 65..60 — `reset` closes them, ball-out opens the far end
+      correctly); coin and Start closures were all DELIVERED on the game's
+      own scan (`[swlatch] id=36 ... held 1`, three times); the screen
+      showed **CREDITS 1**; Start consumed nothing, started nothing, and
+      this run logged ZERO `LOCATING PINBALLS` (the morning run got that
+      far with an EMPTY trough). **THE LEAD, and it is this item's disease
+      again: padglhost's window-open latch closes GODZILLA's ids 66..71 —
+      on Jaws that is TROUGH JAM plus five phantom playfield switches, held
+      closed all run.** A machine with a jam indicated refuses to serve.
+      `binds[]` (arrow keys = 60/59) and swshow.py's name column are the
+      same hard-coded table. Coins also credited oddly (5 quarters showed
+      3/4 at one point) — count again after the latch fix before calling
+      it separate.
+      **★ THE buildgl.sh TRAP COST TWO FULL RUNS, fixed `61ca659`:**
+      buildgl.sh installs the RASTER backend over the bridge's
+      libGLESv2.so.2 and updates no stamp — glraster's pad_gl_proc returns
+      0 for everything, the VIV procs resolve NO-OP, padglhost receives
+      nothing, black window, every stamp fresh. ensurebuild now checks the
+      installed backend exports glTexDirectVIV and rebuilds the bridge;
+      buildgl.sh warns loudly. Never pipe-truncate a build command either.
+      **Resume, in order:** (1) fix padglhost's window-open latch (and
+      binds[]) to resolve ids per title the way plunge.py does — or stop
+      latching the trough and leave it to `plunge.py reset`; then a Jaws
+      run: coin, start, and the oracle is BALL 1 / a score on the game's
+      own screen. (2) a short star_wars run for the `swap content`
+      counter's numbers — if masks alternate between channel sets, the
+      game interleaves two scene compositions at 60 Hz and the dark one is
+      the flicker; if a mask-0-with-draws band matches the black cadence
+      (~3/s runs of 2), it composes video-less frames. (3) swshow.py
+      prints Godzilla names on every title — same per-title table, fix in
+      passing.
       **NO RUN IS LIVE. The rig is CLEAN — `alive.sh` = 0, zero zombies, zero
       card mounts**, confirmed after the star_wars_le run reached its 8 min
       backstop and tore itself down.

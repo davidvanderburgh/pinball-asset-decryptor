@@ -934,21 +934,41 @@ These have each been violated at least once and each cost a run or a window:
       is the standing acceptance instrument, used for every claim
       above. Compare tool: scratchpad pngcmp.py pattern (stdlib PNG
       read, non-black % + mean diff).
-      **STILL OPEN, the two wrinkles in David's cross-session flow:**
-      (a) the 48V DISABLED coin-door banner on every cross-session load
-      (pre-existing — his 20:47 pre-journal log had it): switch 33 is a
-      HELD level and a fresh session's padsw ring says door open; the
-      restored guest sees it. `plunge.py reset` (which holds 33 shut)
-      clears it, and a fresh game then starts fine. Likely fix = padsw
-      ring rewind from the slot stash at load, the same shape as the
-      padvid rewind — but sw_publish's interaction (does it republish
-      ALL switches from key state, re-opening the door on the next
-      keypress?) needs its own careful pass. (b) mid-clip video does
-      not resume mid-clip: the RESUME serve stands down after 3 s
-      ("guest has not consumed", pre-existing) and video returns at the
-      NEXT clip request — seconds in attract, scene-change in game; the
-      journaled TEXDIRECT frame covers the gap with the save-time frame
-      instead of black.
+      **★ THE 48V BANNER IS FIXED (2026-08-10, this commit): the padsw
+      ring rewinds from the slot stash on every load,** the same
+      in-place dd shape as the padvid rewind. The MECHANISM, read out
+      of padsw.h rather than guessed: the shim merges held[] (keyboard)
+      and scr_held[] (scripts) by LAST EDGE WINS PER ID against edge
+      memory that lives in GUEST memory — which the checkpoint
+      restores. watch.sh deletes dump/padsw at session start, so a
+      fresh session's script region is ALL ZERO, while the save's
+      session had plunge.py holding the coin door (33) and trough
+      (66-72) there: the restored guest diffs its save-time memory
+      against the fresh ring and sees a phantom RELEASE edge on every
+      script-held switch — the door "opens" (the banner), trough balls
+      "leave" (a ball-accounting time bomb nobody had tied to this),
+      and tap_gen/guest_t0_ms mismatch the same way. The rewind
+      restores the whole 4 KB block — both regions, all generations —
+      to exactly what the restored guest's memory is consistent with,
+      so NO edge fires. The sw_publish clobber question ANSWERED in
+      code and then by test: it rewrites ONLY held[], rebuilt from the
+      window-open latches (door closed, balls in trough — the values
+      the save carried), and a session booted with PAD_SW_KEYSIM=1000
+      republishing every second for 20 s after a cross-session load
+      kept the banner gone. VALIDATED session D: fresh boot, NO reset
+      run (the trigger condition), cross-session load of jgame → no
+      banner, picture 2.8% from the save-time reference — the SAME
+      number the same-session pair scores, so cross-session load now
+      EQUALS same-session load on the picture oracle; video 28.5
+      NEW/s; switches respond; a same-session re-load through the
+      rewind path scored 2.6% with zero skips (no regression); zero
+      draw skips, zero crashes; teardown to alive TOTAL 0.
+      **Still open, minor: (b) mid-clip video does not resume
+      mid-clip** — the RESUME serve stands down after 3 s ("guest has
+      not consumed", pre-existing) and video returns at the NEXT clip
+      request — seconds in attract, a scene-change in game; the
+      journaled TEXDIRECT frame covers the gap with the save-time
+      frame instead of black.
       **THE DESIGN LIMIT the asset-swap question exposes, answered
       2026-08-09 night:** PAD's own writes are SIZE-NEUTRAL, so a rebuilt
       card does not shift file offsets and a restored guest's open fds

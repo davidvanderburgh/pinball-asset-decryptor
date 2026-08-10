@@ -246,12 +246,33 @@ while read -r kind a b c; do
         # watch.sh's teardown deletes dump/padled by design. Put back ONLY what
         # is missing: a live session's ring is newer than this snapshot and
         # clobbering it would throw away the state the helpers are using.
-        # THE ONE EXCEPTION IS THE VIDEO RING when its host is being
-        # restarted: its "newer" state belongs to the guest that was just
-        # killed, while the restored guest's stream threads expect the
-        # SAVE-time gen/write_idx. Rewind it to the stash so the resumed
-        # host and the restored guest agree (see the video-host block above).
-        if [ "$VID_RESTART" = 1 ] && [ "$R$a" = "$VID_RING" ] && [ -f "$DDIR/rings/$b" ]; then
+        # TWO EXCEPTIONS. The VIDEO RING when its host is being restarted:
+        # its "newer" state belongs to the guest that was just killed, while
+        # the restored guest's stream threads expect the SAVE-time
+        # gen/write_idx. Rewind it to the stash so the resumed host and the
+        # restored guest agree (see the video-host block above).
+        # And the SWITCH RING, always. The shim merges held[]/scr_held[] by
+        # LAST EDGE WINS PER ID against edge memory that lives in GUEST
+        # memory - which the checkpoint restores. A fresh session's
+        # dump/padsw is a NEW ZEROED FILE (watch.sh deletes it at session
+        # start), so its script region is empty - and the save's session had
+        # plunge.py/swpoke holding the coin door (33) and trough (66-72)
+        # there. The restored guest compares its save-time memory against
+        # the fresh ring and sees a phantom RELEASE EDGE on every one of
+        # them: the door "opens" (the 48V DISABLED banner over every
+        # cross-session load - the tester's first report, reproduced with
+        # the picture oracle 2026-08-09) and trough balls "leave". tap_gen
+        # and guest_t0_ms mismatch the same way. Rewinding the whole 4 KB
+        # block to the stash restores exactly the state the restored guest's
+        # memory is consistent with, so NO edge fires. padglhost's later
+        # sw_publish rewrites only held[] (its own region, never the
+        # scripts'), rebuilt from its window-open latches - door closed,
+        # balls in trough - the same values the save carried, so the next
+        # key event moves nothing either.
+        if [ "$R$a" = "$R/dump/padsw" ] && [ -f "$R$a" ] && [ -f "$DDIR/rings/$b" ]; then
+            dd if="$DDIR/rings/$b" of="$R$a" bs=4k conv=notrunc status=none
+            echo "[restore] rewound the switch state to the save (in place)"
+        elif [ "$VID_RESTART" = 1 ] && [ "$R$a" = "$VID_RING" ] && [ -f "$DDIR/rings/$b" ]; then
             # IN PLACE, NEVER TRUNCATING. cp -f truncates the file to zero
             # and rewrites all 95 MB - and PADGLHOST HAS THIS RING MMAPPED
             # the whole time (its mapping across the load is the design; the

@@ -76,7 +76,12 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **27. Any Spike 2 title should load, show a switch layout, start a game,
       and play with correct video. Today only Godzilla does.** `S1 D2` ←
-      IN PROGRESS, 85% *(**scope widened 2026-08-10 on David's instruction:**
+      IN PROGRESS, 75% ▼ *(**down from 85%, and honestly so:** the scope grew to
+      include video, and the flicker then turned out to be a SECOND fault that
+      is still live after the Tech Alerts one was fixed — plus autoattract not
+      pressing on Star Wars is a new blocker this pass found. The node half
+      completed at the same time, so work went in; the item is further from done
+      than it looked an hour ago.)* *(**scope widened 2026-08-10 on David's instruction:**
       "the video flickering on some games falls under this item. let's address
       it here." Item 35 is absorbed into this one.)*
       **★ DAVID, 2026-08-06: "i'm trying to load Jaws right now and I'm not

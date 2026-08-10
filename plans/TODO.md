@@ -1923,6 +1923,60 @@ These have each been violated at least once and each cost a run or a window:
       confirming session of two boots plus the negative case, which is what
       keeps it off D1.
 
+- [ ] **35. Star Wars and Venom load and play, but the video flickers a lot.**
+      `S2 D3`
+      **★ DAVID, 2026-08-10: "for star wars and venom the game loads, but the
+      video flickers a lot."** Reported while item 27 was being worked, so it is
+      a fresh sighting with nothing measured yet — do not treat anything below
+      as established beyond the two desk facts, which are marked as such.
+      **DESK FACT 1, and it decides whether a pass can start: Star Wars is on
+      this disk and Venom is NOT.** `~/cardcache` holds
+      `star_wars_le-1_30_0.raw`; there is no Venom card anywhere on the machine.
+      So Star Wars is reproducible today and Venom needs David's card before it
+      can be looked at at all. **State which of the two you tested** — "the video
+      flickers" on two titles may be one fault or two, and this rig has already
+      been bitten by merging distinct faults under one description (item 23
+      holds THREE exits and says so).
+      **DESK FACT 2, probably NOT the cause but worth knowing before it is
+      rediscovered: `star_wars_le` is one of the titles whose DEVICE TABLE does
+      not read at all** — `nodecensus.py` gets 0 records from its binary, as do
+      `led_zeppelin_le` and `turtles_pro` (item 27, `3c95b49`). That is the same
+      reader gap as item 29's `?` switch names. It affects the playfield window
+      and the node census, and there is **no known path from it to video**, so it
+      is recorded to save a pass rediscovering it, not offered as a theory.
+      **THE INSTRUMENTS ALL EXIST, WHICH IS THE D3.** Three video faults have
+      already been closed on this rig and each left its measurement behind:
+      item 15 (every clip played the SAME video — channel assignment order),
+      item 6 (scene video noise in the TV inset — a three-pipeline burst inside
+      130 ms) and item 11 (the ~7 s stutter). `padvidhost.py` logs `[padvid]
+      chN serving WxH N frames ... <asset>` per clip serve, and item 32 names
+      the three rate oracles that separate guest from host: `[eglshim] N frames
+      in M ms` is the GUEST's rate, `padglhost`'s `fps` line is the HOST's, and
+      `swap_us` says how long `eglSwapBuffers` blocks.
+      **FIRST JOB IS TO SAY WHAT "FLICKERS" IS, because the three closed faults
+      above all looked like "the video is wrong" from the chair and were three
+      different mechanisms.** Candidates worth separating on the first run, and
+      the logs above distinguish them without a new instrument: frames arriving
+      and being dropped (host fps healthy, guest fps not), the same clip being
+      re-served repeatedly (repeated `[padvid] serving` lines for one asset),
+      channel takeover (two channels fighting for one slot — item 15's shape),
+      or a present-path cost (item 32's territory, and note David's desktop is
+      4K/120Hz on the NVIDIA card while Mesa may be on the AMD iGPU).
+      **Acceptance:** name the mechanism with a number against it, and say which
+      title(s) it was measured on. A fix means the flicker is gone by David's
+      eyes on the title he reported — his eyes are the oracle here, as they were
+      for item 1d's fade curves — with the run's own rates stated before and
+      after.
+      — S2 because both titles LOAD and play, so nobody is blocked outright,
+      which is the S1 line; what it costs is that the video is visibly wrong
+      while you play, on two titles. Arguable as S1 on "the game visibly
+      misbehaves while you are playing it", and if a pass finds it makes a title
+      unplayable, promote it and say so. D3: it needs a run, David reports it
+      happening "a lot" so it should show up when you look, and every instrument
+      needed already exists and is validated — the unknown is which mechanism,
+      not how to see it. **D4 for Venom specifically until a card exists**, since
+      a pass could otherwise end having learned nothing about half the report.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

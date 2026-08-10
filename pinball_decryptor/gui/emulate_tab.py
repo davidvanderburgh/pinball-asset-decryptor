@@ -1518,7 +1518,11 @@ class EmulatePanel:
             return None
         if not path:
             return None
-        m = re.match(r"([a-z0-9_]+?)-\d", os.path.basename(path).lower())
+        # Both separators by hand: the path may have been written into the
+        # project settings on the other OS, and POSIX basename() does not
+        # split on backslashes (CI caught exactly that).
+        base = path.replace("\\", "/").rsplit("/", 1)[-1]
+        m = re.match(r"([a-z0-9_]+?)-\d", base.lower())
         return m.group(1) if m else None
 
     def _slots_refresh(self):

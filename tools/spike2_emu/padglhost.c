@@ -631,6 +631,7 @@ extern unsigned long XWhitePixel(XDisplay *, int);
 extern unsigned long XLoadFont(XDisplay *, const char *);
 extern int XSetFont(XDisplay *, XGC, unsigned long);
 extern int XMoveWindow(XDisplay *, unsigned long, int, int);
+extern int XRaiseWindow(XDisplay *, unsigned long);
 extern int XGetGeometry(XDisplay *, unsigned long, unsigned long *, int *, int *,
                         unsigned *, unsigned *, unsigned *, unsigned *);
 extern int XTranslateCoordinates(XDisplay *, unsigned long, unsigned long,
@@ -1352,6 +1353,101 @@ static void win_init_gl(void)
 
 /* X events. Closing the window sets stop_now, which is the same clean stop the
  * SIGINT handler uses, so the shutdown path is shared and already proven. */
+/* ---- ITEM 22: bring both windows out over whatever was on top -------------
+ *
+ * MEASURED 2026-08-10 with tools/spike2_emu/zorder.py, on a live godzilla_pro
+ * run with the PAD app foreground - which is the state you are in the instant
+ * you press Start Emulator:
+ *
+ *     rank 2  PLAYFIELD  godzilla_pro - virtual playfield
+ *     rank 3  CONTROLS   Controls - Spike 2 emulator
+ *     rank 4  APP        Pinball Asset Decryptor
+ *     rank 5  GAME       godzilla_pro - Stern Spike 2 emulator
+ *
+ * The game window lands ONE SLOT BELOW whatever held the top when it was
+ * created; the Controls window, created microseconds later in the same
+ * win_open(), lands above it. That is David's report exactly, and the item's
+ * own guess about the cause was wrong: they are NOT mapped at different times
+ * and the game window does NOT wait for the guest's first frame - win_open()
+ * runs before eglGetDisplay and maps both. What differs is only that Windows
+ * refuses to stack a window shown without activation above the ACTIVE one, so
+ * the first window in loses and the second rides in on the proxy that is by
+ * then already allowed up.
+ *
+ * RAISED FROM INSIDE X, never with SetWindowPos. A Windows-side raise on a
+ * RAIL proxy is the same move that broke dragging (see the delayed-move
+ * comment below) and is a standing non-negotiable in plans/TODO.md.
+ * XRaiseWindow asks the compositor, so both sides of the mirror agree - the
+ * same reason the position restore moves from here rather than from Windows.
+ *
+ * Called once, at the END of the position restore rather than at map time, for
+ * the reason the restore itself is delayed: the compositor does its own
+ * placement first, and anything done before that has settled is undone by it.
+ *
+ * RESTACK ONLY - no XSetInputFocus. Raising is what David asked for ("bring
+ * all the emulator windows out over the PAD application"); stealing the
+ * keyboard as well is not, and a run that grabs focus back mid-boot would be a
+ * worse bug than the one being fixed. Game raised LAST so it ends on top: it
+ * is the one you look at.
+ *
+ * CALLED REPEATEDLY, ON A SCHEDULE, and the reason is measured rather than
+ * defensive. A single raise at the end of the position restore (~3.5 s after
+ * mapping) is NOT enough - David's own run carried `raised both windows` in
+ * the log with the game window still behind the app.
+ *
+ * WHAT DECIDES IT IS HOW RECENTLY THE OTHER WINDOW WAS ACTIVATED, measured
+ * with zorder.py 2026-08-10:
+ *   - foreground window activated ~40 s before the run: the raise LANDS, all
+ *     three emulator windows end up above it.
+ *   - foreground window activated ~10 s before the run: the raise is REFUSED
+ *     for the game window, which sits exactly one slot below it - the same
+ *     place it lands at creation, and the same shape as the original fault.
+ * The second case is David's: he presses Start Emulator, so the app has just
+ * been activated. An early raise is spent against a fresh activation; a later
+ * one is not. Retrying across the boot is what converts one into the other,
+ * and it costs nothing because the whole schedule is over before the game has
+ * a picture.
+ *
+ * DO NOT "fix" this with SetForegroundWindow. It is the same banned class as
+ * SetWindowPos, it would be refused by the same lock, and the documented
+ * remedy for that (attaching to the foreground thread's input queue) is
+ * exactly the kind of behind-the-compositor's-back move that broke dragging.
+ *
+ * ---- THE A/B THAT SETTLED IT --------------------------------------------
+ *
+ * Measured with tools/spike2_emu/zorder.py. Identical recipe in both runs,
+ * with the other window activated LESS THAN A SECOND before the launch - the
+ * harshest case, and the one a real Start Emulator press creates - and exactly
+ * one variable changed:
+ *
+ *   PAD_GL_RAISE=0   game window BELOW the other window, unchanged over 115 s
+ *   PAD_GL_RAISE=1   game window ABOVE it from 8 s, stable over 115 s
+ *
+ * Two things were ruled out on the way and are worth not re-testing.
+ *
+ * eglSwapBuffers was suspected of re-asserting the stacking every frame,
+ * because suppressing presents altogether (PAD_GL_WIN_EVERY huge) let a raise
+ * stick where it otherwise had not. That is NOT the story: the run above has a
+ * raise landing with swaps at full rate and the order then holding for two
+ * minutes.
+ *
+ * And a raise issued at the FIRST present - ~0 s, before the compositor has
+ * placed the window - is worse than useless. The build that carried one is the
+ * build whose retries failed; removing it is what made the schedule work. Do
+ * not add an "as early as possible" raise back.
+ *
+ * PAD_GL_RAISE=0 turns it off, so the A/B still costs no rebuild. */
+static void win_raise_all(const char *why)
+{
+    const char *e = getenv("PAD_GL_RAISE");
+    if (e && e[0] == '0') return;
+    if (legend_win) XRaiseWindow(xdpy, legend_win);
+    XRaiseWindow(xdpy, xwin);
+    XFlush(xdpy);
+    fprintf(stderr, "[padglhost] raised both windows above the desktop - %s "
+                    "(item 22; PAD_GL_RAISE=0 to skip)\n", why);
+}
+
 static void win_pump(void)
 {
     /* sizeof(XEvent) is 192 on this LP64 build; 256 bytes is a safe
@@ -1435,6 +1531,27 @@ static void win_pump(void)
                     game_settled && legend_settled ? "converged" : "GAVE UP",
                     restore_tries);
             winpos_save_all();
+            /* item 22, the first of several - see win_raise_all(). This one is
+             * early and on its own it LOSES against a freshly activated app;
+             * the retries below are what make it stick. */
+            win_raise_all("position restore settled");
+        }
+    }
+
+    /* ITEM 22: retry the raise across the boot. The schedule is deliberately
+     * over by 30 s, which is before the game has a picture on any run measured
+     * here (~15-20 s to the first picture, and the raise wants to have won by
+     * then), and deliberately not endless - a run that re-raised itself for
+     * ever would fight a user who has clicked away on purpose, which is a
+     * worse bug than the one being fixed. */
+    {
+        static const double retry_at[] = { 8.0, 16.0, 24.0, 32.0, 40.0,
+                                           50.0, 60.0, 75.0, 90.0 };
+        static unsigned retry_n;
+        if (retry_n < sizeof retry_at / sizeof retry_at[0] &&
+            now_s() - win_mapped_s > retry_at[retry_n]) {
+            retry_n++;
+            win_raise_all("boot retry");
         }
     }
 

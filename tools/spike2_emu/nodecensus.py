@@ -164,25 +164,76 @@ def readable(counts):
     return any(n in counts for n in PLAYFIELD_NODES)
 
 
-def silent_nodes(counts):
+def switch_nodes(game=None, table_path=None):
+    """{node: switch count} from the title's switch_list.txt, or {}.
+
+    THE SECOND-BEST EVIDENCE, and it exists because the best evidence is
+    missing on real titles. star_wars_le, led_zeppelin_le and turtles_pro yield
+    ZERO device records, so the census above declines and they keep the fault -
+    and David's 2026-08-10 recording is what that costs: Star Wars sitting on
+    `Check Node Board 2 : Not Registered`, flickering, unplayable, because the
+    safe direction left it exactly as broken as before.
+
+    The switch list is available where the device table is not: it comes from
+    the shim's own dump of the running game's table, so it needs a previous run
+    of the title but no address and no parsing of the binary.
+    """
+    path = table_path or gameinfo.table("switch_list.txt", game)
+    out = collections.Counter()
+    try:
+        with open(path) as f:
+            for line in f:
+                if line.startswith("#"):
+                    continue
+                fields = line.split(None, 4)
+                if len(fields) >= 4:
+                    out[int(fields[2])] += 1
+    except (OSError, TypeError, ValueError):
+        return {}
+    return dict(out)
+
+
+def silent_nodes(counts, swnodes=None):
     """The nodes the shim should NOT answer for, and why, as (list, reason).
 
-    Returns an empty list whenever the census cannot support the claim, which
-    is the safe direction: an extra board answering is a Tech Alert you can see
-    and then explain, where a silenced board that exists is devices that vanish.
+    Two sources, and the weaker one is used ONLY when the stronger is absent.
+    Returns an empty list whenever neither can support the claim, which is the
+    safe direction: an extra board answering is a Tech Alert you can see and
+    then explain, where a silenced board that exists is devices that vanish.
     """
-    if not readable(counts):
-        return [], ("the device table did not read (no connector names board "
-                    "%s), so nothing is silenced"
+    if readable(counts):
+        absent = [n for n in CANDIDATES if n not in counts]
+        if not absent:
+            return [], ("every candidate board is populated (%s), so nothing "
+                        "is silenced" % ", ".join(
+                            "node %d: %d devices" % (n, counts[n]["total"])
+                            for n in CANDIDATES))
+        return absent, ("no device names a connector on %s, and this title's "
+                        "own config is what decides the board's registered bit"
+                        % ", ".join("node %d" % n for n in absent))
+
+    # FALLBACK: the switch list. WEAKER, AND HERE IS EXACTLY HOW IT COULD BE
+    # WRONG, so that nobody has to rediscover it - john_wick_le's node 2 carries
+    # 288 LEDs and NOT ONE SWITCH. On that title this test would say "absent"
+    # and cost 288 devices. It is safe only because john_wick_le's device table
+    # READS, so this branch is never reached for it; the risk that remains is a
+    # title with an unreadable device table AND a switch-free populated node 2.
+    # No such title is known. It is written down rather than guarded against
+    # because there is nothing left to test it with.
+    swnodes = swnodes or {}
+    if not any(n in swnodes for n in PLAYFIELD_NODES):
+        return [], ("neither the device table nor a switch list could be read "
+                    "(no board %s in either), so nothing is silenced"
                     % " or ".join(str(n) for n in PLAYFIELD_NODES))
-    absent = [n for n in CANDIDATES if n not in counts]
+    absent = [n for n in CANDIDATES if n not in swnodes]
     if not absent:
-        return [], ("every candidate board is populated (%s), so nothing is "
-                    "silenced" % ", ".join(
-                        "node %d: %d devices" % (n, counts[n]["total"])
-                        for n in CANDIDATES))
-    return absent, ("no device names a connector on %s, and this title's own "
-                    "config is what decides the board's registered bit"
+        return [], ("the device table did not read; the switch list puts %s, "
+                    "so nothing is silenced" % ", ".join(
+                        "%d switches on node %d" % (swnodes[n], n)
+                        for n in CANDIDATES if n in swnodes))
+    return absent, ("the device table did not read, so this is off the SWITCH "
+                    "LIST alone, which has no switch on %s - weaker evidence, "
+                    "see nodecensus.silent_nodes()"
                     % ", ".join("node %d" % n for n in absent))
 
 
@@ -191,6 +242,8 @@ def main():
     ap.add_argument("--game", help="title name; default is the active one")
     ap.add_argument("--elf", help="the game binary, for a title that is not "
                                   "extracted and has no run published yet")
+    ap.add_argument("--switches", help="switch_list.txt, for the fallback when "
+                                       "the device table cannot be read")
     ap.add_argument("--silent", action="store_true",
                     help="print only the PAD_NB_SILENT value (may be empty)")
     a = ap.parse_args()
@@ -198,15 +251,15 @@ def main():
     try:
         counts, unattributed, total = census(a.game, a.elf)
     except (OSError, SystemExit) as e:
-        # A census that cannot run must not stop a run starting. Silencing
-        # nothing is what watch.sh did for every title before this file existed.
-        if a.silent:
-            print("")
-            return 0
-        print("nodecensus: %s" % e, file=sys.stderr)
-        return 1
+        # A census that cannot run must not stop a run starting, and it must
+        # still get to the switch-list fallback: the titles whose binary cannot
+        # be parsed are exactly the ones that need it.
+        counts, unattributed, total = {}, {}, 0
+        if not a.silent:
+            print("no device table: %s" % e, file=sys.stderr)
 
-    nodes, why = silent_nodes(counts)
+    sw = switch_nodes(a.game, a.switches)
+    nodes, why = silent_nodes(counts, sw)
 
     if a.silent:
         print(",".join(str(n) for n in nodes))
@@ -226,6 +279,9 @@ def main():
             "grp%d?" % grp, c["switch"], c["coil"], c["led"], c["total"],
             c["named"], c["total"]))
     print()
+    if sw:
+        print("switch list: %s" % " ".join(
+            "node %d: %d" % (n, c) for n, c in sorted(sw.items())))
     print("table read: %s" % ("yes" if readable(counts) else "NO"))
     if unattributed:
         print("unnamed boards: %d group(s), %d devices - real devices whose "

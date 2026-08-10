@@ -177,7 +177,17 @@ export PAD_GAME="$GAME"
 if [ -n "${CARD_PATH:-}" ]; then GAME_ELF="$CARD_PATH/game"
 elif [ -n "${PAD_GAME_DIR:-}" ]; then GAME_ELF="${PAD_GAME_DIR%/}/game"
 else GAME_ELF="$ROOT/games/$GAME/game"; fi
-NB_SILENT_DEFAULT=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" --silent 2>/dev/null)
+#
+# THE SWITCH LIST IS PASSED TOO, as the fallback for a title whose device table
+# cannot be parsed at all. star_wars_le is why: it yields ZERO device records,
+# so the census declined and the title kept the fault - David's 2026-08-10
+# recording is Star Wars sitting on `Check Node Board 2 : Not Registered`,
+# flickering, unplayable. The switch list comes from the shim's own dump on a
+# previous run of the title, so it needs no address and no binary parsing.
+# nodecensus.silent_nodes() documents exactly how this weaker evidence could be
+# wrong and why no known title trips it.
+NB_SILENT_DEFAULT=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
+    --switches "$PAD_TABLES/$GAME/switch_list.txt" --silent 2>/dev/null)
 export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 # WHY, in the run's own log. The item that asked for this asked for the evidence
 # as well as the decision, and a silenced board is invisible by construction -

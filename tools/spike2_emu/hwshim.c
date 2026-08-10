@@ -5376,6 +5376,38 @@ static void led_publish(const unsigned char *p, int n)
     if (n < 5 || !(p[0] & 0x80)) return;
     node = p[0] & 0x3f;
     cmd  = p[2];
+
+    /* THE ATTRACT LIGHT SHOW, announced once, because it is the "past Tech
+     * Alerts" signal gamestate.sh reads (item 27). The old test - "a clip
+     * opened" (filesrc) - was broken by star_wars_le, which serves clips WHILE
+     * sitting on the Tech Alerts screen; its attract clip set is a superset of
+     * its alerts clip set, so nothing on the video side can see the state.
+     * What CAN see it is the game's own output to the boards: on the full
+     * godzilla_pro boot trace (led_trace_1d.log), the whole Tech Alerts period
+     * carried exactly 2 lamp-class frames (strip-board boot config, one a4
+     * each to nodes 12 and 14) against ~3800 in the first 80 s of attract,
+     * and the first attract lamp frame landed 300 ms after the Service Back
+     * press that took. The threshold of 10 absorbs boot config with a wide
+     * margin; attract crosses it in well under a second.
+     *
+     * Counted on ANY node, BEFORE the insert-node gate, on purpose: the gate
+     * is Godzilla's node numbering, and a title whose insert boards sit
+     * elsewhere (the group->node mapping shifts per title - see nodecensus.py)
+     * must still trip this line. One line per run; gamestate.sh greps it. */
+    if (cmd == 0x97 || cmd == 0xa2 || cmd == 0xa3 || cmd == 0xa4 ||
+        cmd == 0xa5 || cmd == 0xa6 || cmd == 0xb4 || cmd == 0xb5) {
+        static int lamps;
+        if (lamps >= 0 && ++lamps >= 10) {
+            char m[96];
+            snprintf(m, sizeof m,
+                     "[led] light show running: %d lamp commands "
+                     "(last node=%u cmd=%02x, %lu ms)\n",
+                     lamps, node, cmd, pad_ms());
+            logmsg(m);
+            lamps = -1;                       /* announce once */
+        }
+    }
+
     if (!led_insert_node(node)) return;
 
     /* The boot enumeration: remember which indices this board really has.

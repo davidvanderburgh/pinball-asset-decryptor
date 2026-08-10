@@ -121,19 +121,22 @@ $proc = Start-Process wsl -ArgumentList $wslArgs -PassThru -WindowStyle Hidden `
                           -RedirectStandardOutput $runLog -RedirectStandardError "$runLog.err"
 
 # --- 5. wait for ATTRACT, not for a timer ------------------------------------
-# gamestate.sh is the single definition of "past Tech Alerts": the game has
-# opened a real clip, i.e. a filesrc has been made. Counting factory_make calls
-# is the DISCREDITED test - it measured a video bug that has since been fixed.
+# gamestate.sh is the single definition of "past Tech Alerts": the attract
+# light show is running - the shim prints `[led] light show running` once, at
+# the 10th lamp-class command. The clip-based test (filesrc) joined the
+# DISCREDITED list on 2026-08-10: star_wars_le serves clips while sitting ON
+# the Tech Alerts screen, so it read "attract" over a screen full of alerts.
 Say "waiting for attract mode"
 $reached = $false
 $t0 = Get-Date
 while (((Get-Date) - $t0).TotalSeconds -lt $AttractWaitSecs) {
     Start-Sleep -Seconds 5
     if ($proc.HasExited) { Say "the run exited before reaching attract"; break }
-    # Plain 'filesrc', deliberately: the exact pattern gamestate.sh uses has a
-    # quote in it, and a quote crossing PowerShell -> wsl.exe -> bash is how the
-    # first version of this wait silently matched nothing for 200 seconds.
-    $n = (wsl -e grep -ac filesrc ~/gzwatch.log)
+    # A three-word pattern with no quote characters in it, deliberately: the
+    # exact bracketed pattern gamestate.sh uses needs escaping, and a quote
+    # crossing PowerShell -> wsl.exe -> bash is how the first version of this
+    # wait silently matched nothing for 200 seconds.
+    $n = (wsl -e grep -ac "light show running" ~/gzwatch.log)
     if ([int]$n -ge 1) {
         $reached = $true
         Say ("reached attract after {0:N0}s" -f ((Get-Date) - $t0).TotalSeconds)

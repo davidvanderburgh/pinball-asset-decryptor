@@ -153,6 +153,17 @@ struct stream {
     unsigned prep_streak;
     char prep_path[PADVID_PATH_MAX];
     unsigned seek_absorbed;     /* redundant rewinds swallowed; see pad_vid_seek */
+    /* ★ ITEM 27, the loop-boundary flicker. Set when this stream posts EOS:
+     * the decoder's own loop flag (byte +4, the one vid_dump_decoder prints)
+     * and the time. A re-arm of the SAME path arriving inside the EOS-reflex
+     * window on a stream whose decoder said loop=0 is the game rewinding a
+     * clip it is about to REPLACE - the location change lands ~30-130 ms
+     * later - and serving it paints 2-3 frames of the outgoing clip's HEAD
+     * over every scene step. eos_defer remembers an absorbed reflex so a
+     * bare set_state(PLAYING) with no re-arm can still honour it. */
+    unsigned long eos_us;       /* when EOS was posted; 0 = not at EOS       */
+    unsigned char eos_loop;     /* decoder loop flag at that moment          */
+    unsigned char eos_defer;    /* an EOS-reflex rewind was absorbed         */
     unsigned long handoff_worst, handoff_total;   /* item 11: does it block? */
     /* item 11's PRE-ARM: the host was told to start decoding this path at
      * note_location() time, under this generation, and prepare() should
@@ -228,6 +239,13 @@ static struct stream *last_created;
 static const char *prepare_why = "state";
 
 #define PREPARE_STORM_N 8
+
+/* item 27: how long after an EOS post a same-path re-arm still counts as the
+ * game's EOS reflex. Measured spread on the star_wars_le scene steps: the
+ * rewind lands ~1 ms after EOS and the trailing state re-arm inside ~130 ms,
+ * against a shortest observed clip period of 5.6 SECONDS - three orders of
+ * magnitude of daylight. */
+#define EOS_REFLEX_US 250000
 
 static int str_eq(const char *a, const char *b)
 {
@@ -632,6 +650,9 @@ static int stream_buf(struct stream *s)
 
 static void post_eos(void *pipeline);
 long long pad_vid_duration_ns(void *pipeline);
+int pad_vid_seek(void *pipeline, long long pos_ns);   /* item 27: play() may
+                                 * honour a deferred EOS rewind, and seek is
+                                 * defined below play in this file */
 
 static void vid_dump_decoder(struct stream *s, const char *when)
 {
@@ -693,6 +714,18 @@ static void *vid_thread(void *arg)
                      "(pos=dur=%u ms)\n", chan_of(s), consumed,
                      (unsigned)(s->pos_ns / 1000000ll));
                 vid_dump_decoder(s, "at EOS");
+                /* item 27: remember the decoder's own loop answer, so the
+                 * EOS-reflex absorb in prepare()/seek() can tell a loop
+                 * rewind (wanted) from the rewind of a clip the game is
+                 * about to replace (the loop-boundary flicker). No decoder
+                 * pointer reads as loop=1, the direction that absorbs
+                 * nothing. */
+                {
+                    const unsigned char *b = (const unsigned char *)s->decoder;
+                    s->eos_loop = b ? b[4] : 1;
+                    s->eos_us = vid_us();
+                    if (!s->eos_us) s->eos_us = 1;   /* 0 means "not at EOS" */
+                }
                 /* STAND DOWN BEFORE POSTING, not after. The handler runs on
                  * the game's main loop and it answers EOS by seeking straight
                  * back to 0, which arrives about a millisecond later. If this
@@ -953,6 +986,29 @@ int pad_vid_prepare(void *pipeline)
         s->seek_absorbed = 0;
     }
 
+    /* ★ ITEM 27, THE LOOP-BOUNDARY FLICKER, state-path half. At EOS the game
+     * re-arms the outgoing pipeline whether or not it means to loop it; when
+     * the decoder's own loop flag said 0, what follows is a LOCATION CHANGE
+     * (~30-130 ms later, measured on the star_wars_le scene steps), and
+     * serving this re-arm paints 2-3 frames of the outgoing clip's head over
+     * every transition - the flicker David reported on Star Wars and Venom.
+     * Absorb it: the imminent location change re-arms cleanly, once. A
+     * loop=1 EOS rewind (ch0's 5.6 s loop) never enters here. eos_defer is
+     * the safety net: if a title replays a loop=0 clip with a bare
+     * set_state(PLAYING) and no location change, pad_vid_play() honours the
+     * deferred rewind instead of playing a dead channel. */
+    if (!s->playing && s->eos_us && s->eos_loop == 0
+        && str_eq(s->prep_path, s->location)) {
+        long since = (long)(vid_us() - s->eos_us);
+        if (since >= 0 && since < EOS_REFLEX_US) {
+            s->eos_defer = 1;
+            VLOG("[vid] ch%d EOS-reflex re-arm of a non-looping clip "
+                 "(%ld us after EOS, caller=%s); absorbing it\n",
+                 chan_of(s), since, prepare_why);
+            return 1;
+        }
+    }
+
     /* item 11's runaway detector - see "WHY a channel is being re-armed". */
     if (str_eq(s->prep_path, s->location) && s->delivered <= 1) {
         s->prep_streak++;
@@ -985,6 +1041,14 @@ int pad_vid_prepare(void *pipeline)
      * still declined, which is what the flag was for. The orphaned thread
      * exits on run_id/req_gen and touches nothing on its way out. */
     s->playing = 0;
+
+    /* item 27: a real re-arm settles any deferred EOS-reflex rewind - the
+     * location change this absorb predicted has arrived (or something else
+     * legitimately took the stream over). Clear the window too, so a late
+     * same-path re-arm cannot be mistaken for the reflex of an EOS that is
+     * no longer current. */
+    s->eos_defer = 0;
+    s->eos_us = 0;
 
     /* RESET THE POSITION HERE, not just in pad_vid_play().
      *
@@ -1325,6 +1389,23 @@ void pad_vid_play(void *pipeline)
     unsigned long th;
     int rc;
     if (!s || !s->ready || s->playing || !vshm) return;
+
+    /* item 27: the safety net for the EOS-reflex absorb. If the game asks to
+     * PLAY a stream whose reflex rewind was absorbed and nothing has re-armed
+     * it since (no location change arrived - the absorb's prediction was
+     * wrong), honour the rewind now: a full stop/prepare/play through
+     * pad_vid_seek, which cannot re-absorb because the EOS window is cleared
+     * first. Without this, play() would start a streaming thread over a
+     * channel the host was never asked to serve, and it would replay the
+     * stale ring. */
+    if (s->eos_defer) {
+        s->eos_defer = 0;
+        s->eos_us = 0;
+        VLOG("[vid] ch%d play on a deferred EOS rewind; honouring it now\n",
+             chan_of(s));
+        pad_vid_seek(pipeline, 0);
+        return;
+    }
     s->pos_ns = 0;
     /* Cleared HERE and not at the top of vid_thread: prepare() reads it to
      * decide whether the previous run got anywhere, and the thread starts
@@ -1412,6 +1493,24 @@ int pad_vid_seek(void *pipeline, long long pos_ns)
      * A normal loop-at-EOS seek arrives with playing==0 (the thread stands
      * down BEFORE posting EOS) and re-arms as before; a location change
      * fails the path check and re-arms as before. */
+
+    /* ★ ITEM 27, THE LOOP-BOUNDARY FLICKER, rewind half - the twin of the
+     * absorb in pad_vid_prepare(), see the long comment there. A loop-at-EOS
+     * seek on a stream whose decoder said loop=0 is the game rewinding a clip
+     * it is about to REPLACE; serving it is the 2-3 head frames David sees at
+     * every scene step. The loop=1 EOS seek (the real loop) falls through to
+     * the re-arm exactly as before. */
+    if (!s->playing && s->eos_us && s->eos_loop == 0
+        && str_eq(s->prep_path, s->location)) {
+        long since = (long)(vid_us() - s->eos_us);
+        if (since >= 0 && since < EOS_REFLEX_US) {
+            s->eos_defer = 1;
+            s->pos_ns = 0;
+            VLOG("[vid] ch%d EOS-reflex rewind of a non-looping clip "
+                 "(%ld us after EOS); absorbing it\n", chan_of(s), since);
+            return 1;
+        }
+    }
     {
         unsigned long now = vid_us();
         long since = (long)(now - s->last_seek_us);

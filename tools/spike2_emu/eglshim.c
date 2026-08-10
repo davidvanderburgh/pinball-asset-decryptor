@@ -12,6 +12,7 @@ extern unsigned long strlen(const char *);
 extern int gettimeofday(void *, void *);
 extern int nanosleep(const void *, void *);
 extern int snprintf(char *, unsigned long, const char *, ...);
+extern char *getenv(const char *);
 
 /* provided by libGLESv2.so.2 (glraster.c) */
 extern void pad_present(void);
@@ -52,8 +53,56 @@ int eglChooseConfig(void *dpy, const int *attr, void *cfgs, int n, int *num)
 void *eglCreateContext(void *dpy, void *cfg, void *share, const int *attr)
 { (void)dpy; (void)cfg; (void)share; (void)attr; return (void *)0x3001; }
 
+/* ★ ITEM 27, THE STAR WARS FLICKER: THE GAME HAS MORE THAN ONE SURFACE, AND
+ * THIS FILE USED TO COLLAPSE THEM INTO ONE SWAP CHAIN.
+ *
+ * Every eglCreateWindowSurface returned the same 0x4001 and every
+ * eglSwapBuffers presented, so a title that renders TWO scene compositions -
+ * star_wars_le draws one scene with ch1's clip and another with ch2's, on
+ * alternating swaps, measured by padglhost's swap-content mask as a perfect
+ * `2x60 4x60 no-draw 0/120` - had both presented to the one window at 60 Hz.
+ * On the screen that is two different pictures interleaving: the "flickering
+ * a lot" David reported on Star Wars, and during Tech Alerts (second scene
+ * dark) it read as the alerts screen alternating with black, 32.8% black
+ * frames in a 75 s capture. Godzilla and Jaws create one surface and never
+ * flickered - `0x60 1x60`, the benign 30-on-60 alternation.
+ *
+ * So surfaces carry IDENTITY now, chained from the display the game asked
+ * for: fbGetDisplayByIndex(index) -> display handle 0x6000|index ->
+ * fbCreateWindow -> window handle 0x7000|index -> eglCreateWindowSurface ->
+ * surface handle 0x4000|slot, with the slot's display recorded. Only the
+ * PRIMARY surface presents: the first one created on display 0 (the backbox
+ * LCD on every Spike 2 cabinet), or the first created if none says display
+ * 0. PAD_EGL_PRIMARY=<slot> overrides for A/B - if the wrong scene survives
+ * on some title, flip it without a rebuild.
+ *
+ * The suppressed surface's DRAWS still stream to the renderer - only its
+ * present is swallowed. That is safe because every scene render begins with
+ * its own full-screen background (today's per-swap captures are complete
+ * single-scene pictures, never blends), so the primary's draw pass fully
+ * overwrites the secondary's leftovers in the framebuffer before the
+ * primary swap presents. */
+#define PAD_MAX_SURF 8
+static int surf_disp[PAD_MAX_SURF + 1];   /* slot -> display index        */
+static int surf_n;                        /* surfaces created so far      */
+static int primary_slot;                  /* the one that presents; 0 = TBD */
+
 void *eglCreateWindowSurface(void *dpy, void *cfg, void *win, const int *attr)
-{ (void)dpy; (void)cfg; (void)win; (void)attr; return (void *)0x4001; }
+{
+    unsigned long w = (unsigned long)win;
+    int disp = 0, slot;
+    char b[96];
+    (void)dpy; (void)cfg; (void)attr;
+    if ((w & ~0xfful) == 0x7000ul) disp = (int)(w & 0xff);
+    if (surf_n < PAD_MAX_SURF) surf_n++;
+    slot = surf_n;
+    surf_disp[slot] = disp;
+    if (!primary_slot && disp == 0) primary_slot = slot;
+    snprintf(b, sizeof b, "[eglshim] surface %d on display %d%s\n",
+             slot, disp, primary_slot == slot ? " (primary)" : "");
+    say(b);
+    return (void *)(0x4000ul | (unsigned)slot);
+}
 
 int eglMakeCurrent(void *dpy, void *draw, void *read, void *ctx)
 { (void)dpy; (void)draw; (void)read; (void)ctx; return 1; }
@@ -73,11 +122,39 @@ static unsigned long long now_us(void)
 int eglSwapBuffers(void *dpy, void *surf)
 {
     static unsigned long long next_us;
+    static int policy_said, suppressed;
     unsigned long long now = now_us();
     const unsigned long long frame_us = 16667;   /* 60 Hz */
-    (void)dpy; (void)surf;
+    unsigned long s = (unsigned long)surf;
+    int slot = ((s & ~0xfful) == 0x4000ul) ? (int)(s & 0xff) : 0;
+    int present = 1;
+    (void)dpy;
 
-    pad_present();
+    /* item 27: with two or more surfaces, only the primary presents - see
+     * the long comment at eglCreateWindowSurface. A slot of 0 is a handle
+     * this file did not make (or made before the identity scheme); present
+     * it, which is the old behaviour and the safe direction. The pacing
+     * below runs for EVERY swap either way: the game's own render loop is
+     * what is being throttled, whichever scene it just drew. */
+    if (surf_n >= 2 && slot) {
+        int prim = primary_slot ? primary_slot : 1;
+        {
+            const char *e = getenv("PAD_EGL_PRIMARY");
+            if (e && *e >= '1' && *e <= '8') prim = *e - '0';
+        }
+        present = (slot == prim);
+        if (!policy_said) {
+            char b[112];
+            policy_said = 1;
+            snprintf(b, sizeof b, "[eglshim] %d surfaces: presenting only "
+                     "surface %d, suppressing the other(s)\n", surf_n, prim);
+            say(b);
+        }
+        if (!present && ++suppressed == 1)
+            say("[eglshim] first suppressed swap (counted, not presented)\n");
+    }
+    if (present)
+        pad_present();
 
     /* Achieved frame rate, so the cost of rasterising in emulated ARM is a
      * measured number rather than an impression. Compare a run against one
@@ -167,7 +244,18 @@ void *eglGetProcAddress(const char *name)
 }
 
 /* ---- Vivante fbdev platform helpers the game calls directly ---- */
-void *fbGetDisplayByIndex(int index) { (void)index; return (void *)0x6001; }
+/* item 27: the display INDEX is the start of the surface-identity chain -
+ * see eglCreateWindowSurface. Index 0 is the backbox LCD on every Spike 2
+ * cabinet; a title that asks for more is building a second render target,
+ * and which one it is survives into the window and surface handles. */
+void *fbGetDisplayByIndex(int index)
+{
+    char b[64];
+    snprintf(b, sizeof b, "[eglshim] fbGetDisplayByIndex(%d)\n", index);
+    say(b);
+    if (index < 0 || index > 0xff) index = 0xff;
+    return (void *)(0x6000ul | (unsigned)index);
+}
 
 void fbGetDisplayGeometry(void *dpy, int *width, int *height)
 {
@@ -177,4 +265,9 @@ void fbGetDisplayGeometry(void *dpy, int *width, int *height)
 }
 
 void *fbCreateWindow(void *dpy, int x, int y, int w, int h)
-{ (void)dpy; (void)x; (void)y; (void)w; (void)h; return (void *)0x7001; }
+{
+    unsigned long d = (unsigned long)dpy;
+    int disp = ((d & ~0xfful) == 0x6000ul) ? (int)(d & 0xff) : 0;
+    (void)x; (void)y; (void)w; (void)h;
+    return (void *)(0x7000ul | (unsigned)disp);
+}

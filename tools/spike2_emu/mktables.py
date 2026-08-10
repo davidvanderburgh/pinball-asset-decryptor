@@ -224,46 +224,56 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
     # --- the switch table, which is the only part that needs a run -------
     sw_list = os.path.join(tdir, "switch_list.txt")
     sw_xy = os.path.join(tdir, "switch_xy.txt")
-    have = os.path.exists(sw_list) and (recs is None or os.path.exists(sw_xy))
-    if have and not force:
+    if os.path.exists(sw_list) and not force:
         say("  switches     (cached)")
-        return made
+    else:
+        if log_path and not switch_dump_complete(log_path):
+            wait_for_switches(log_path, wait_s,
+                              say=lambda m: say("  switches     %s" % m))
+        if not log_path or not switch_dump_complete(log_path):
+            say("  switches     no switch dump yet - clickable switches will "
+                "appear on the next run of this title")
+            return made
+        live_rows = swtable.read(log_path)
+        if not live_rows:
+            say("  switches     the dump is there but held no rows")
+            return made
+        _write(sw_list, swtable.text(game, live_rows))
+        made["switch_list.txt"] = sw_list
+        say("  switches     %d in the game's own table" % len(live_rows))
 
-    if log_path and not switch_dump_complete(log_path):
-        wait_for_switches(log_path, wait_s, say=lambda m: say("  switches     %s" % m))
-    if not log_path or not switch_dump_complete(log_path):
-        say("  switches     no switch dump yet - clickable switches will appear "
-            "on the next run of this title")
-        return made
-
-    live_rows = swtable.read(log_path)
-    if not live_rows:
-        say("  switches     the dump is there but held no rows")
-        return made
-    _write(sw_list, swtable.text(game, live_rows))
-    made["switch_list.txt"] = sw_list
-    say("  switches     %d in the game's own table" % len(live_rows))
-
-    if recs is None and os.path.exists(dev_dest):
-        # device_xy was cached, so the records were never parsed this run and
-        # the join below needs them. Cheaper than it looks and only on the run
-        # that first sees a switch dump.
-        try:
-            recs = devicexy.build(game)
-        except (OSError, SystemExit):
-            recs = None
-    if recs:
-        joined = switchxy.join(swtable.by_name(live_rows), recs)
-        if joined:
-            _write(sw_xy, switchxy.text(game, joined))
-            made["switch_xy.txt"] = sw_xy
-            say("  positions    %d switches placed on the artwork" % len(joined))
-        else:
-            # Real and worth saying out loud: it means the two tables share no
-            # names, which is a title whose device table names things
-            # differently, not an empty run.
-            say("  positions    NONE of the %d switches matched a device-table "
-                "name" % len(live_rows))
+    # --- positions, which NO LONGER need a run (item 27) -----------------
+    #
+    # This join used to run off the live dump's names, inside the branch
+    # above - two bugs in one place. First, a title whose switch_list was
+    # cached before switch_xy existed took the (cached) early-return forever,
+    # so the join never ran again and the playfield drew coils and no
+    # switches (Jaws, David, 2026-08-10: "why aren't the switch locations on
+    # the virtual playfield?"). Second, the LIVE names are msg_row()'s, which
+    # answer `?` on every title whose message-table address resolves wrong -
+    # jaws, led_zeppelin, elvira - which is precisely why swnames.py fills
+    # switch_list.txt from the DEVICE table instead. So join from the on-disk
+    # list swnames has already named, and no run is involved at all.
+    if (force or not os.path.exists(sw_xy)) and os.path.exists(sw_list):
+        if recs is None and os.path.exists(dev_dest):
+            try:
+                recs = devicexy.build(game)
+            except (OSError, SystemExit):
+                recs = None
+        if recs:
+            names = switchxy.read_list(sw_list)
+            joined = switchxy.join(names, recs)
+            if joined:
+                _write(sw_xy, switchxy.text(game, joined))
+                made["switch_xy.txt"] = sw_xy
+                say("  positions    %d switches placed on the artwork"
+                    % len(joined))
+            else:
+                # Real and worth saying out loud: it means the two tables
+                # share no names - a title whose device table names things
+                # differently, or a list that is still all `?`.
+                say("  positions    NONE of the %d named switches matched a "
+                    "device-table name" % len(names))
     return made
 
 

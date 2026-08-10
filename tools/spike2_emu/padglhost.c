@@ -208,6 +208,21 @@ static unsigned vid_last_off = 0xffffffffu;
 /* item 11: where padglhost's per-frame time goes. */
 static double conv_us, swap_us;
 static long vid_last_frame, vid_swaphist[6];
+/* ★ ITEM 27, the star_wars black flicker: WHAT EACH SWAP ACTUALLY CARRIED.
+ * The Windows-side capture measured 32.8% BLACK frames (236 runs, median 2
+ * frames, evenly spread) while every delivery counter read clean and this
+ * process drew a flat 60 fps - so the black is being DRAWN, and the question
+ * is what the game put in each frame. Per swap: which padvid channels had a
+ * video texture uploaded since the previous swap (a bitmask), and whether any
+ * draw call happened at all. If the masks ALTERNATE between two channel sets,
+ * the game is interleaving two scene compositions into one surface at 60 Hz,
+ * and the darker scene is the flicker; if no-draw swaps dominate, it is
+ * clear+swap. One histogram splits the theories in one run. */
+static long swap_content_hist[16];       /* video-channel bitmask, ch0..ch3 */
+static long swap_content_hi;             /* any channel >= 4 saw an upload  */
+static long swap_nodraw, swap_total;
+static unsigned swap_vidmask;            /* since the last SWAP */
+static int swap_draws;
 static int gl_tick;             /* PAD_GL_TICK=1: draw the per-swap counter */
 static double now_s(void);
 static const char *dump_dir;
@@ -669,6 +684,18 @@ struct keybind {
     short         ids[7];   /* 0-terminated list of switch ids */
     int           toggle;   /* 1 = latching, for things you hold for minutes */
     int           live;     /* 0 = playfield; a SECTION MARKER, not "inert" */
+    /* ★ ITEM 27: candidate NAMES for this row in the title's own switch
+     * list, tried in order; the compiled ids are GODZILLA PRO's and stand
+     * only as the fallback for a rig with no derived tables. NULL want[0]
+     * marks a PLATFORM switch (service buttons, start, coin, tilt, door),
+     * whose (node,bit) layout measured identical on every title from 2017
+     * to 2024 - those ids are never re-resolved. binds_resolve() fills the
+     * rest from PAD_TABLES/PAD_GAME/switch_list.txt; a row whose name is
+     * not on this title goes DEAD (ids[0]=0, legend shows n/a) rather than
+     * firing a wrong switch - David's arrows on star_wars were pressing a
+     * FORC(E) DROP TARGET, because Godzilla's 60 is that title's id for
+     * it. */
+    const char   *want[4];
 };
 
 /* Ids are the game own switch ids, straight out of its table (PAD_SW_MAP).
@@ -684,36 +711,159 @@ struct keybind {
  * PROVEN WORKING 2026-08-05, by the game's own advertised behaviour rather than
  * by a log: attract says HOLD BOTH FLIPPER BUTTONS FOR MENU, and holding 59 and
  * 60 (both PLAYFIELD switches, both `live = 0` here) opened CHOOSE YOUR MODE OF
- * PLAY and closed it again on release. Screenshot-verified both ways. */
+ * PLAY and closed it again on release. Screenshot-verified both ways.
+ *
+ * The candidate names below are MEASURED, not guessed - the four derived
+ * switch lists on this disk agree on "LEFT/RIGHT FLIPPER BUTTON", "SHOOTER
+ * LANE", "TROUGH 1..6", the slingshots and the outlanes (case varies, the
+ * match is case-insensitive), and differ exactly where the extra candidates
+ * say: skill shot is "Skill Shot 1" on john_wick, the left spinner is "Left
+ * Spinner Opto" there and plain "SPINNER" on star_wars. */
 static struct keybind binds[] = {
-    { 0xff0d, "Enter",  "Service Select",      { 25, 0 }, 0, 1 },
-    { 0xff8d, "KP Ent", "Service Select",      { 25, 0 }, 0, 1 },
-    { 0x003d, "=",      "Service Plus",        { 26, 0 }, 0, 1 },
-    { 0x002d, "-",      "Service Minus",       { 27, 0 }, 0, 1 },
-    { 0xff08, "Bksp",   "Service Back",        { 28, 0 }, 0, 1 },
-    { 0xff1b, "Esc",    "Service Back",        { 28, 0 }, 0, 1 },
-    { 0x0031, "1",      "Start Button",        { 36, 0 }, 0, 1 },
-    { 0x0035, "5",      "Left Coin",           { 39, 0 }, 0, 1 },
-    { 0x0020, "Space",  "Action Button",       { 34, 0 }, 0, 1 },
-    { 0x0074, "T",      "Tilt Pendulum",       { 38, 0 }, 0, 1 },
-    { 0x0063, "C",      "Coin Door Closed",    { 33, 0 }, 1, 1 },
-    { 0xff51, "Left",   "Left Flipper",        { 60, 0 }, 0, 0 },
-    { 0xff53, "Right",  "Right Flipper",       { 59, 0 }, 0, 0 },
-    { 0xff52, "Up",     "Upper Left Flipper",  { 61, 0 }, 0, 0 },
-    { 0x0066, "F",      "Shooter Lane",        { 62, 0 }, 0, 0 },
-    { 0x0071, "Q",      "Skill Shot",          { 46, 0 }, 0, 0 },
-    { 0x0077, "W",      "Left Spinner",        { 47, 0 }, 0, 0 },
-    { 0x0065, "E",      "Pop Bumper",          { 49, 0 }, 0, 0 },
-    { 0x0072, "R",      "Godzilla Target",     { 76, 0 }, 0, 0 },
-    { 0x0061, "A",      "Left Slingshot",      { 64, 0 }, 0, 0 },
-    { 0x0073, "S",      "Right Slingshot",     { 63, 0 }, 0, 0 },
-    { 0x0064, "D",      "Right Scoop",         { 53, 0 }, 0, 0 },
-    { 0x007a, "Z",      "Left Outlane",        { 55, 0 }, 0, 0 },
-    { 0x0078, "X",      "Right Outlane",       { 58, 0 }, 0, 0 },
-    { 0x0067, "G",      "Right Spinner",       { 84, 0 }, 0, 0 },
-    { 0x0062, "B",      "6 balls in trough",   { 66, 67, 68, 69, 70, 71, 0 }, 1, 0 },
+    { 0xff0d, "Enter",  "Service Select",      { 25, 0 }, 0, 1, { 0 } },
+    { 0xff8d, "KP Ent", "Service Select",      { 25, 0 }, 0, 1, { 0 } },
+    { 0x003d, "=",      "Service Plus",        { 26, 0 }, 0, 1, { 0 } },
+    { 0x002d, "-",      "Service Minus",       { 27, 0 }, 0, 1, { 0 } },
+    { 0xff08, "Bksp",   "Service Back",        { 28, 0 }, 0, 1, { 0 } },
+    { 0xff1b, "Esc",    "Service Back",        { 28, 0 }, 0, 1, { 0 } },
+    { 0x0031, "1",      "Start Button",        { 36, 0 }, 0, 1, { 0 } },
+    { 0x0035, "5",      "Left Coin",           { 39, 0 }, 0, 1, { 0 } },
+    { 0x0020, "Space",  "Action Button",       { 34, 0 }, 0, 1, { 0 } },
+    { 0x0074, "T",      "Tilt Pendulum",       { 38, 0 }, 0, 1, { 0 } },
+    { 0x0063, "C",      "Coin Door Closed",    { 33, 0 }, 1, 1, { 0 } },
+    { 0xff51, "Left",   "Left Flipper",        { 60, 0 }, 0, 0,
+      { "LEFT FLIPPER BUTTON", "LEFT FLIPPER", 0 } },
+    { 0xff53, "Right",  "Right Flipper",       { 59, 0 }, 0, 0,
+      { "RIGHT FLIPPER BUTTON", "RIGHT FLIPPER", 0 } },
+    { 0xff52, "Up",     "Upper Left Flipper",  { 61, 0 }, 0, 0,
+      { "UP LEFT FLIPPER BUTTON", "UPPER LEFT FLIPPER BUTTON", 0 } },
+    { 0x0066, "F",      "Shooter Lane",        { 62, 0 }, 0, 0,
+      { "SHOOTER LANE", 0 } },
+    { 0x0071, "Q",      "Skill Shot",          { 46, 0 }, 0, 0,
+      { "SKILL SHOT", "SKILL SHOT 1", 0 } },
+    { 0x0077, "W",      "Left Spinner",        { 47, 0 }, 0, 0,
+      { "LEFT SPINNER", "LEFT SPINNER OPTO", "SPINNER", 0 } },
+    { 0x0065, "E",      "Pop Bumper",          { 49, 0 }, 0, 0,
+      { "POP BUMPER", 0 } },
+    { 0x0072, "R",      "Godzilla Target",     { 76, 0 }, 0, 0,
+      { "GODZILLA TARGET", 0 } },
+    { 0x0061, "A",      "Left Slingshot",      { 64, 0 }, 0, 0,
+      { "LEFT SLINGSHOT", 0 } },
+    { 0x0073, "S",      "Right Slingshot",     { 63, 0 }, 0, 0,
+      { "RIGHT SLINGSHOT", 0 } },
+    { 0x0064, "D",      "Right Scoop",         { 53, 0 }, 0, 0,
+      { "RIGHT SCOOP", 0 } },
+    { 0x007a, "Z",      "Left Outlane",        { 55, 0 }, 0, 0,
+      { "LEFT OUTLANE", 0 } },
+    { 0x0078, "X",      "Right Outlane",       { 58, 0 }, 0, 0,
+      { "RIGHT OUTLANE", 0 } },
+    { 0x0067, "G",      "Right Spinner",       { 84, 0 }, 0, 0,
+      { "RIGHT SPINNER", 0 } },
+    { 0x0062, "B",      "6 balls in trough",   { 66, 67, 68, 69, 70, 71, 0 }, 1, 0,
+      { "TROUGH 1", 0 } },   /* special-cased: fills TROUGH 1..6 */
 };
 #define NBINDS ((int)(sizeof binds / sizeof binds[0]))
+
+/* ★ ITEM 27: RESOLVE THE BINDS FROM THE TITLE'S OWN SWITCH LIST, the same
+ * unblock plunge.py got (`6d19946`): the NAME is the portable identifier,
+ * the id is not. Godzilla's 60/59 are its flipper buttons; star_wars puts
+ * LEFT FLIPPER BUTTON at 59, RIGHT at 58, and a drop target at 60 - so the
+ * arrow keys "seemed mapped to something else" because they were. This also
+ * fixes the window-open latch for free: the 'B' trough row is resolved here
+ * and key_latch simply latches whatever it now holds, so Jaws stops getting
+ * six phantom closures on TROUGH JAM and five playfield switches (its trough
+ * is 60..65, not Godzilla's 66..71).
+ *
+ * The list is $PAD_TABLES/$PAD_GAME/switch_list.txt, derived from the card
+ * by mktables at run start; both variables ride the environment watch.sh
+ * already passes. No file, or no rig env, means the compiled Godzilla ids
+ * stand - the behaviour every run had before this function existed. */
+static void binds_resolve(void)
+{
+    const char *tab = getenv("PAD_TABLES"), *game = getenv("PAD_GAME");
+    char path[512], line[256];
+    static short sw_id[192];
+    static char  sw_nm[192][44];
+    FILE *f;
+    int n = 0, i, c, k;
+
+    if (!tab || !*tab || !game || !*game) return;
+    snprintf(path, sizeof path, "%s/%s/switch_list.txt", tab, game);
+    f = fopen(path, "r");
+    if (!f) {
+        fprintf(stderr, "[padglhost] no switch list at %s; "
+                        "key binds stay Godzilla's\n", path);
+        return;
+    }
+    while (n < (int)(sizeof sw_id / sizeof sw_id[0]) &&
+           fgets(line, sizeof line, f)) {
+        /* `id num node bit name...`; the name is the rest of the line. */
+        char *p = line;
+        long id;
+        int  fld;
+        if (line[0] == '#') continue;
+        id = strtol(p, &p, 10);
+        if (id <= 0 || id >= PADSW_MAX_ID) continue;
+        for (fld = 0; fld < 3; fld++) strtol(p, &p, 10);
+        while (*p == ' ' || *p == '\t') p++;
+        for (k = 0; p[k] && p[k] != '\n' && p[k] != '\r' &&
+                    k < (int)sizeof sw_nm[0] - 1; k++)
+            sw_nm[n][k] = (char)(p[k] >= 'a' && p[k] <= 'z' ? p[k] - 32 : p[k]);
+        while (k > 0 && sw_nm[n][k - 1] == ' ') k--;   /* trailing pad */
+        sw_nm[n][k] = 0;
+        if (!k) continue;
+        sw_id[n] = (short)id;
+        n++;
+    }
+    fclose(f);
+    if (!n) {
+        fprintf(stderr, "[padglhost] %s parsed to nothing; "
+                        "key binds stay Godzilla's\n", path);
+        return;
+    }
+
+    for (i = 0; i < NBINDS; i++) {
+        if (!binds[i].want[0]) continue;               /* platform row */
+        if (binds[i].want[0][0] == 'T' && binds[i].ids[1]) {
+            /* the trough latch: TROUGH 1..6, each found by its own name */
+            char tn[12];
+            int t, got = 0;
+            for (t = 1; t <= 6; t++) {
+                snprintf(tn, sizeof tn, "TROUGH %d", t);
+                for (k = 0; k < n; k++)
+                    if (!strcmp(sw_nm[k], tn)) {
+                        binds[i].ids[got++] = sw_id[k];
+                        break;
+                    }
+            }
+            binds[i].ids[got] = 0;
+            fprintf(stderr, "[padglhost] bind %s -> %d trough switch(es)\n",
+                    binds[i].what, got);
+            continue;
+        }
+        {
+            short old = binds[i].ids[0];
+            int hit = 0;
+            for (c = 0; c < 4 && binds[i].want[c] && !hit; c++)
+                for (k = 0; k < n; k++)
+                    if (!strcmp(sw_nm[k], binds[i].want[c])) {
+                        binds[i].ids[0] = sw_id[k];
+                        binds[i].ids[1] = 0;
+                        if (sw_id[k] != old)
+                            fprintf(stderr, "[padglhost] bind %s -> %d "
+                                    "\"%s\" (was %d)\n", binds[i].what,
+                                    sw_id[k], sw_nm[k], old);
+                        hit = 1;
+                        break;
+                    }
+            if (!hit) {
+                binds[i].ids[0] = 0;
+                fprintf(stderr, "[padglhost] bind %s: not on %s; key dead\n",
+                        binds[i].what, game);
+            }
+        }
+    }
+}
 
 static struct padsw_shm *swshm;
 static unsigned char key_down[NBINDS];      /* momentary keys currently held */
@@ -1060,6 +1210,7 @@ static void legend_draw(int scr)
                         "PLAYFIELD - live, may stick:", 28);
         }
         n = snprintf(line, sizeof line, "%-7s %s%s", binds[i].key, binds[i].what,
+                     (binds[i].want[0] && !binds[i].ids[0]) ? "  (n/a)" :
                      binds[i].toggle ? (on ? "  [ON]" : "  [off]") : "");
         if (n > (int)sizeof line - 1) n = (int)sizeof line - 1;
         if (on) {
@@ -2595,6 +2746,12 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
     }
     switch (op) {
     case PADGL_SWAP:            present(); hdr->frame_ack++;
+                                /* item 27: what did this frame carry? */
+                                swap_total++;
+                                swap_content_hist[swap_vidmask & 15]++;
+                                if (swap_vidmask >> 4) swap_content_hi++;
+                                if (!swap_draws) swap_nodraw++;
+                                swap_vidmask = 0; swap_draws = 0;
                                 /* frame boundary: a journal request answered
                                  * here is a frame-consistent snapshot */
                                 jgl_poll(0, 0); break;
@@ -2689,6 +2846,13 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
          * one, which is a different fault from the host not producing one.
          * Reported per second beside the fps line. */
         vid_uploads++;
+        /* item 27: note which channel this frame's video came from, for the
+         * per-swap content mask. The offset names the channel by construction
+         * (the guest addresses frames by distance from the ring base). */
+        if (src == PADGL_SRC_VIDSHM) {
+            unsigned swch = u[4] / (PADVID_SLOTS * PADVID_SLOT_BYTES);
+            swap_vidmask |= 1u << (swch > 31 ? 31 : swch);
+        }
         if (src == PADGL_SRC_VIDSHM && u[4] != vid_last_off) {
             /* ★ SWAPS PER VIDEO FRAME - the hold, measured where it is SEEN.
              * The renderer swaps 60/s and video arrives 30/s, so every video
@@ -3052,6 +3216,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                         "ahead of its scene rebuild\n", draws_skipped);
             break;
         }
+        swap_draws++;                            /* item 27: this frame drew */
         p_glDrawArrays(u[0],(int)u[1],(int)u[2]); break;
     case PADGL_DRAWELEMENTS:
         if ((vao_on[cur_vao_g] & (unsigned short)~vao_backed[cur_vao_g])
@@ -3062,6 +3227,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                         "ahead of its scene rebuild\n", draws_skipped);
             break;
         }
+        swap_draws++;                            /* item 27: this frame drew */
         p_glDrawElements(u[0],(int)u[1],u[2],
                          (const void *)(unsigned long)u[3]); break;
     case PADGL_NOP:             break;
@@ -3149,6 +3315,11 @@ int main(int argc, char **argv)
     hdr->magic = PADGL_MAGIC; hdr->version = PADGL_VERSION;
     hdr->ring_bytes = ring_bytes;
     hdr->fb_w = (unsigned)fb_w; hdr->fb_h = (unsigned)fb_h;
+
+    /* item 27: resolve the key binds from the title's own switch list BEFORE
+     * the windows exist - the legend draws from binds[] and the window-open
+     * latch closes whatever the 'B' row holds. */
+    binds_resolve();
 
     /* Open the window FIRST: the EGL display should be the X display it lives
      * on, and the surface below has to be a window surface rather than the
@@ -3332,6 +3503,26 @@ int main(int argc, char **argv)
                             vid_swaphist[1], vid_swaphist[2], vid_swaphist[3],
                             vid_swaphist[4], vid_swaphist[5], h / dt);
                     memset(vid_swaphist, 0, sizeof vid_swaphist);
+                }
+                /* item 27: the per-swap content masks - see the declaration.
+                 * Printed as maskxcount, mask bit N = video from channel N;
+                 * mask 0 with draws is a frame composed without any video. */
+                if (swap_total) {
+                    char sc[200]; int sp = 0, mi;
+                    sp += snprintf(sc + sp, sizeof sc - (unsigned)sp,
+                                   "[padglhost] swap content:");
+                    for (mi = 0; mi < 16; mi++)
+                        if (swap_content_hist[mi] && sp < (int)sizeof sc - 24)
+                            sp += snprintf(sc + sp, sizeof sc - (unsigned)sp,
+                                           " %xx%ld", mi, swap_content_hist[mi]);
+                    if (swap_content_hi && sp < (int)sizeof sc - 24)
+                        sp += snprintf(sc + sp, sizeof sc - (unsigned)sp,
+                                       " hix%ld", swap_content_hi);
+                    snprintf(sc + sp, sizeof sc - (unsigned)sp,
+                             "  no-draw %ld/%ld\n", swap_nodraw, swap_total);
+                    fputs(sc, stderr);
+                    memset(swap_content_hist, 0, sizeof swap_content_hist);
+                    swap_content_hi = swap_nodraw = swap_total = 0;
                 }
                 if (dbg) dump_op_histogram();
                 last_frames = frames_done; last_report = now_s();

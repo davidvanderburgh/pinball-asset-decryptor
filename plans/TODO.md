@@ -74,61 +74,6 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **27. Any Spike 2 title should load, show a switch layout, and start a
-      game. Today only Godzilla does.** `S1 D3`
-      **★ DAVID, 2026-08-06: "i'm trying to load Jaws right now and I'm not
-      getting the virtual switch playfield at all. and starting a game doesn't
-      seem to work. it got past the initial service screen, but said node 2
-      wasn't registered... i should be able to load and play any spike 2 game
-      and see a switch layout."** Log: `jaws_le-1_02_0.Release.16G.sdcard.raw`,
-      21:36, boots fine, video runs a clean 30 fps for minutes.
-      **BOTH HALVES ARE THE SAME SHAPE — a per-title table with only Godzilla
-      filled in — and both were found at the desk from the source, not guessed.**
-      **(a) THE PLAYFIELD IS SKIPPED, SILENTLY.** `watch.sh:446` gates the
-      window on `[ -d "$S/games/$GAME" ]`, and `games/` holds exactly
-      `godzilla_pro` and `turtles_pro`. `jaws_le` is not there, so the window
-      never starts and **the log says nothing at all** — the Godzilla run
-      prints `[watch] virtual playfield window opening`, the Jaws run has no
-      such line. The silence is its own small bug: a skip nobody is told about.
-      **THE DATA TO FIX IT IS ALREADY IN DAVID'S PASTED LOG.** The shim dumped
-      the whole table — `[sw] --- switches: count=109 entry[]=0x00a2a1b8` and
-      108 rows of `id/num/node/bit/flags` — and `swtable.py <run.log> <title>`
-      turns exactly those lines into `games/<title>/switch_list.txt`, which is
-      what `playfield.py`'s Schematic view draws when a title has no artwork.
-      So half (a) is desk work on a log that already exists.
-      **(b) NODE 2, AND THE RIG PREDICTED THIS EXACT OUTCOME.** `watch.sh:132`
-      is a `case "$GAME"` setting `NB_SILENT_DEFAULT=2` for
-      `godzilla_pro|godzilla_le` and `""` for everything else, and the Jaws
-      cfg block has no `PAD_NB_SILENT` line where Godzilla's has one. Its own
-      comment says: *"A title not listed here silences NOTHING, which is the
-      safe direction: an extra board answering is a Tech Alert you can see and
-      then add here."* That Tech Alert is what David saw.
-      **The mechanism is fully written down at `hwshim.c:5776-5801`** — the
-      shim answers for all 64 addresses, so an absent board looks present;
-      slot 2 is the one board whose registered bit is `board[+144] != 0`, so a
-      manufactured node 2 can never be suppressed.
-      **THE TRAP, and it is why this is not a one-line guess:** the same
-      comment warns that *silencing a board that IS populated loses its devices
-      with no message at all*. The authoritative test is the game's own config
-      table (`board[+144]` = `max(entry[+30])+1` over `*(0x700b2c)`), NOT the
-      switch dump. **Weak supporting evidence only:** Jaws's 108 switches sit
-      on nodes 0, 1, 4, 8 and 9 and none on node 2 — suggestive, but switches
-      are not the only devices, so do not set the variable off that alone.
-      **Acceptance, and state both halves separately.** (a) starting Jaws opens
-      a playfield window showing its switch layout, and a title with no table
-      says so in the log instead of skipping in silence. (b) Jaws clears Tech
-      Alerts without a node complaint and a game actually starts — the oracle
-      is the game's own screen, and say which nodes you silenced and what
-      evidence chose them. Then repeat on one further title to show the fix is
-      per-title data and not a second special case.
-      — S1, and it is arguable: Godzilla plays fine, so nobody is blocked
-      outright, but on the title David actually loaded he cannot start a game,
-      and "I cannot play" is the S1 line. Knock it to S2 if you read the
-      working Godzilla as meaning play is not broken. D3: needs a run to
-      confirm, the fault shows every time, and the instruments (the shim's
-      switch dump, `swtable.py`, the Tech Alert screen) all exist — half (a) is
-      nearly D1 and can land alone.
-
 - [ ] **23. The game exits by itself mid-play.** `S1 D2` *(**D4 → D2,
       2026-08-06 evening, off item 11's runs:** a SECOND fault shape now has
       a signature, a call site, a disassembly, a minutes-scale repro AND a
@@ -889,7 +834,30 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **29. Switch names come back as `?` on most titles, so the schematic
       playfield is a list of numbers and switch positions cannot be joined.**
-      `S2 D4`
+      `S2 D3` **← 75%, and the USER-FACING half is DONE.** *(**S2 → S1 → back to
+      S2 within one day, 2026-08-10, and both moves were on evidence.** Up: the
+      Jaws run showed `?` names BLOCK PLAY, because nothing could find the
+      trough and the game sat on LOCATING PINBALLS. Down: item 27's `6d19946`
+      then supplied the names from the title's own device table, so nothing is
+      blocked any more. D4 → D3: the instrument this item said had to be built
+      first is no longer on the critical path.)*
+      **★★ WHAT IS ALREADY SOLVED, in item 27, do not redo it: `swnames.py`
+      fills the names WITHOUT fixing the reader** — the device table carries a
+      name for every playfield switch, and the join is on ORDER within a node
+      (not the number, which this item correctly ruled out). Validated by
+      blanking and refilling the two titles that have real names: **godzilla_pro
+      86/0 wrong, john_wick_le 102/0 wrong; jaws_le fills 105 of 108.** The
+      schematic therefore shows real names, and because `switch_xy` joins on the
+      NAME, the positions this item's part (b) asked for should now join too —
+      **unverified, and it is the cheapest thing left to check.**
+      **WHAT REMAINS IS THE READER ITSELF**, which is still wrong and is why 3
+      switches per title stay `?`: they are the virtual/extra switches with no
+      device record (Jaws's bits 61-63 on node 9). Fixing `msg_row`/`MSG_LANG`
+      would name those and anything else that goes through the message table.
+      **Corrected by item 27's runs: star_wars_le is NOT in the failing set — it
+      has 104 real names and NO device table**, the mirror image of Jaws. So the
+      two name sources are independent, and this item's title census should be
+      re-read with that in mind.
       **MEASURED 2026-08-06 across four card runs, and the split is clean:**
       Led Zeppelin LE 1.22.0 **96 of 96 rows `?`**, Elvira's HoH 1.13.0 **109 of
       109 `?`**, Jaws LE 1.02.0 **108 of 108 `?`** — and **John Wick LE 1.01.0
@@ -1121,69 +1089,6 @@ These have each been violated at least once and each cost a run or a window:
       confirming session of two boots plus the negative case, which is what
       keeps it off D1.
 
-- [x] **35. Star Wars and Venom load and play, but the video flickers a lot.**
-      **ABSORBED INTO ITEM 27 on 2026-08-10**, David's instruction the same day
-      it was filed: *"the video flickering on some games falls under this item.
-      let's address it here."* It was open for about an hour. **Do not work it
-      here — item 27 carries the scope AND the measurement** (a clip re-served
-      2-3 times at its loop point showing 2-3 head frames each time; star_wars_le
-      ch2 superseded 36 of 63 serves on a 12.0 s cadence, jaws_le the same
-      signature at ~1/6 the rate). Closed as a duplicate rather than deleted so
-      the queue count stays honest and the reasoning is findable. Original text
-      below.
-      `S2 D3`
-      **★ DAVID, 2026-08-10: "for star wars and venom the game loads, but the
-      video flickers a lot."** Reported while item 27 was being worked, so it is
-      a fresh sighting with nothing measured yet — do not treat anything below
-      as established beyond the two desk facts, which are marked as such.
-      **DESK FACT 1, and it decides whether a pass can start: Star Wars is on
-      this disk and Venom is NOT.** `~/cardcache` holds
-      `star_wars_le-1_30_0.raw`; there is no Venom card anywhere on the machine.
-      So Star Wars is reproducible today and Venom needs David's card before it
-      can be looked at at all. **State which of the two you tested** — "the video
-      flickers" on two titles may be one fault or two, and this rig has already
-      been bitten by merging distinct faults under one description (item 23
-      holds THREE exits and says so).
-      **DESK FACT 2, probably NOT the cause but worth knowing before it is
-      rediscovered: `star_wars_le` is one of the titles whose DEVICE TABLE does
-      not read at all** — `nodecensus.py` gets 0 records from its binary, as do
-      `led_zeppelin_le` and `turtles_pro` (item 27, `3c95b49`). That is the same
-      reader gap as item 29's `?` switch names. It affects the playfield window
-      and the node census, and there is **no known path from it to video**, so it
-      is recorded to save a pass rediscovering it, not offered as a theory.
-      **THE INSTRUMENTS ALL EXIST, WHICH IS THE D3.** Three video faults have
-      already been closed on this rig and each left its measurement behind:
-      item 15 (every clip played the SAME video — channel assignment order),
-      item 6 (scene video noise in the TV inset — a three-pipeline burst inside
-      130 ms) and item 11 (the ~7 s stutter). `padvidhost.py` logs `[padvid]
-      chN serving WxH N frames ... <asset>` per clip serve, and item 32 names
-      the three rate oracles that separate guest from host: `[eglshim] N frames
-      in M ms` is the GUEST's rate, `padglhost`'s `fps` line is the HOST's, and
-      `swap_us` says how long `eglSwapBuffers` blocks.
-      **FIRST JOB IS TO SAY WHAT "FLICKERS" IS, because the three closed faults
-      above all looked like "the video is wrong" from the chair and were three
-      different mechanisms.** Candidates worth separating on the first run, and
-      the logs above distinguish them without a new instrument: frames arriving
-      and being dropped (host fps healthy, guest fps not), the same clip being
-      re-served repeatedly (repeated `[padvid] serving` lines for one asset),
-      channel takeover (two channels fighting for one slot — item 15's shape),
-      or a present-path cost (item 32's territory, and note David's desktop is
-      4K/120Hz on the NVIDIA card while Mesa may be on the AMD iGPU).
-      **Acceptance:** name the mechanism with a number against it, and say which
-      title(s) it was measured on. A fix means the flicker is gone by David's
-      eyes on the title he reported — his eyes are the oracle here, as they were
-      for item 1d's fade curves — with the run's own rates stated before and
-      after.
-      — S2 because both titles LOAD and play, so nobody is blocked outright,
-      which is the S1 line; what it costs is that the video is visibly wrong
-      while you play, on two titles. Arguable as S1 on "the game visibly
-      misbehaves while you are playing it", and if a pass finds it makes a title
-      unplayable, promote it and say so. D3: it needs a run, David reports it
-      happening "a lot" so it should show up when you look, and every instrument
-      needed already exists and is validated — the unknown is which mechanism,
-      not how to see it. **D4 for Venom specifically until a card exists**, since
-      a pass could otherwise end having learned nothing about half the report.
-
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.
@@ -1311,6 +1216,33 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **27. Any Spike 2 title should load, show a switch layout, start a game,
+      and play with correct video.** DONE 2026-08-10, `332ed6a` (11 commits,
+      `3c95b49`..`332ed6a`), item 35 absorbed. **The whole item was one
+      disease five times over: a per-title fact hard-coded to Godzilla Pro.**
+      The node census derives silenced boards from the title's own tables
+      (device table, switch-list fallback); switch NAMES fill from the device
+      table by discovered per-node order-shift (188/192 refill, zero wrong);
+      switch POSITIONS join list x device table on the name with no run
+      involved (jaws 58 placed, john_wick 57/57, godzilla 41/41 self-test);
+      padglhost's key binds and window-open latch resolve by name per title
+      (star_wars flippers, David: "flippers work now"); the shim's boot-time
+      machine-at-rest set resolves its trough per title - THE Jaws
+      start-refusal, because the game decides at boot whether its ball
+      devices have balls. The video flicker was two EGL surfaces (backbox +
+      star_wars's real playfield LCD) collapsed into one swap chain -
+      presenting only the primary ended it (32.8% black frames -> 5.0%
+      content fades, luma churn 9.71 -> 0.59, David: "the flickering is gone
+      i can confirm"). Verified on the game's own screens: star_wars attract
+      + flippers by David's hands; jaws PLAYER 1 game started, 58 switch
+      markers + 60 inserts + 14 coils live on its artwork. The light-show
+      RATE signal (30 lamp cmds / 3 s) is gamestate's "past Tech Alerts";
+      autoattract GAP 45 s. Long form: handoff REMAINING item 27 (three
+      dated sections). Leads left behind: playfield-LCD feed as a second
+      window (/add candidate); swshow.py still prints Godzilla names
+      (cosmetic); one new item-23 segv signature preserved
+      (gzwatch_swverify_segv.log).
 
 - [x] **13. Save and load save states.** DONE 2026-08-10, shipped in
       **v0.121.0** — the opt-in GUI (toggle + cost tooltip), ten named

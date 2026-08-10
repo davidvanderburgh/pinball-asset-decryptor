@@ -36,6 +36,32 @@ def read_live(path):
     return out
 
 
+def read_list(path):
+    """{NAME: (id, node, bit)} from an on-disk switch_list.txt.
+
+    The run-free source (item 27): swnames.py fills the list's names from the
+    device table in the binary, so a cached list carries real names on titles
+    whose LIVE dump answers `?` for every row (jaws, led_zeppelin, elvira -
+    their message-table address resolves wrong, which is the whole reason
+    swnames exists). Rows still named `?` are skipped rather than joined."""
+    out = {}
+    for line in open(path):
+        if line.startswith("#"):
+            continue
+        p = line.split()
+        if len(p) < 5:
+            continue
+        try:
+            sid, node, bit = int(p[0]), int(p[2]), int(p[3])
+        except ValueError:
+            continue
+        name = " ".join(p[4:]).strip()
+        if not name or name == "?":
+            continue
+        out[name.upper()] = (sid, node, bit)
+    return out
+
+
 def join(live, recs):
     """[(id, node, bit, record)] for every switch with BOTH an id and a position.
 

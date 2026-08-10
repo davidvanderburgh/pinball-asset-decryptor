@@ -150,23 +150,65 @@ fi
 GAME=${GAME:-godzilla_pro}
 export PAD_GAME="$GAME"
 
-# UNPOPULATED NODES ARE PER TITLE, so this is a lookup and not a constant.
-# Node 2 is not populated on a Godzilla Pro: the game's own static config table
-# assigns it no devices of any kind (board[+144] and its kind-1 counterpart are
-# both 0, against 69/460/276 on the other ws2812node boards). The shim otherwise
-# answers for all 64 addresses, which makes an absent board look present, and
-# slot 2 is the one board whose "registered" bit is board[+144] != 0 - so a
+# UNPOPULATED NODES ARE PER TITLE, AND ARE NOW DERIVED FROM THE TITLE.
+# The shim answers all 64 node addresses, so an absent board looks present, and
+# slot 2 is the one board whose "registered" bit is board[+144] != 0 - a
 # manufactured node 2 can never be suppressed and sits on Tech Alerts forever.
 # Staying silent for it is the accurate behaviour, not a workaround.
 #
-# A title not listed here silences NOTHING, which is the safe direction: an
-# extra board answering is a Tech Alert you can see and then add here, whereas
-# silencing a board that IS populated loses its devices with no message at all.
-case "$GAME" in
-    godzilla_pro|godzilla_le) NB_SILENT_DEFAULT=2 ;;
-    *)                        NB_SILENT_DEFAULT="" ;;
-esac
+# THIS USED TO BE `case "$GAME"` WITH ONE ENTRY (godzilla_pro|godzilla_le -> 2),
+# so Godzilla cleared its Tech Alerts and every other title sat on one. That is
+# what David hit on Jaws: "it got past the initial service screen, but said node
+# 2 wasn't registered". The list was never Godzilla-specific in principle - it
+# was just the only title anyone had measured - and the answer is in every
+# title's own binary, so nodecensus.py reads it there. Same shape as mktables.py:
+# derived from the title, nothing committed, nothing to add per title.
+#
+# It is asked with an EXPLICIT binary path because this runs BEFORE the game
+# starts, so `dump/title` does not exist yet and gameinfo would fall back to the
+# empty `games/<title>` stub that a card run bind-mounts over later.
+#
+# A title whose device table cannot be read silences NOTHING, which is the safe
+# direction and is exactly what every non-Godzilla title did before: an extra
+# board answering is a Tech Alert you can see, whereas silencing a board that IS
+# populated loses its devices with no message at all. John Wick LE is the live
+# example - it names connector 2a on 288 records, so its node 2 is real and a
+# blanket "silence 2" would have cost it 288 devices while looking like a fix.
+if [ -n "${CARD_PATH:-}" ]; then GAME_ELF="$CARD_PATH/game"
+elif [ -n "${PAD_GAME_DIR:-}" ]; then GAME_ELF="${PAD_GAME_DIR%/}/game"
+else GAME_ELF="$ROOT/games/$GAME/game"; fi
+#
+# THE SWITCH LIST IS PASSED TOO, as the fallback for a title whose device table
+# cannot be parsed at all. star_wars_le is why: it yields ZERO device records,
+# so the census declined and the title kept the fault - David's 2026-08-10
+# recording is Star Wars sitting on `Check Node Board 2 : Not Registered`,
+# flickering, unplayable. The switch list comes from the shim's own dump on a
+# previous run of the title, so it needs no address and no binary parsing.
+# nodecensus.silent_nodes() documents exactly how this weaker evidence could be
+# wrong and why no known title trips it.
+NB_SILENT_DEFAULT=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
+    --switches "$PAD_TABLES/$GAME/switch_list.txt" --silent 2>/dev/null)
 export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
+# WHY, in the run's own log. The item that asked for this asked for the evidence
+# as well as the decision, and a silenced board is invisible by construction -
+# if it is ever wrong, this line is the only place that will say so.
+#
+# THE REASON IS ASKED FOR RATHER THAN ASSERTED. The first version of this line
+# said "$GAME's own device table names no board there" whatever the evidence
+# was, and printed exactly that for star_wars_le - whose device table does not
+# read at all, and whose answer came from the switch list. A log line that
+# names the wrong source is worse than one that names none, because the whole
+# point of printing it is that a silenced board is otherwise invisible.
+NB_WHY=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
+    --switches "$PAD_TABLES/$GAME/switch_list.txt" 2>/dev/null \
+    | sed -n 's/^because: //p')
+if [ -n "${PAD_NB_SILENT:-}" ]; then
+    echo "[watch] node census: silencing node(s) $PAD_NB_SILENT on $GAME -" \
+         "${NB_WHY:-reason unavailable}"
+else
+    echo "[watch] node census: silencing nothing on $GAME -" \
+         "${NB_WHY:-reason unavailable}"
+fi
 
 # ---- WHAT THIS RUN ACTUALLY IS, in the run's own log ----------------------
 #

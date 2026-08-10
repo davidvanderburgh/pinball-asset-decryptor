@@ -285,6 +285,20 @@ pad_ensure_bridge() {
         # padgl.h is on both source lists, so a protocol change lands here as
         # well as on the host - the two are never allowed to move apart.
         why="is older than its source"
+    elif ! grep -aq glTexDirectVIV "$guest" 2>/dev/null; then
+        # THE STAMP CAN BE FRESH AND THE FILE STILL BE THE WRONG BACKEND.
+        # buildgl.sh - the pre-bridge raster builder, still useful for
+        # debugging the software rasteriser - writes glraster.c over this
+        # exact file and updates NO stamp, so every check above passes while
+        # the installed pad_gl_proc returns 0 for every name: eglGetProcAddress
+        # answers "NO-OP (not implemented)" for the VIV upload procs, the
+        # window bridge never attaches, and the game plays into a black
+        # window with every other counter healthy. Measured 2026-08-10: two
+        # full Jaws runs lost to exactly this before anything named it. The
+        # bridge encoder EXPORTS glTexDirectVIV, so its name must appear in
+        # the file; the raster build has no such string. grep -a because the
+        # file is binary and this must not depend on nm being installed.
+        why="is the raster backend, not the bridge (buildgl.sh installs over it)"
     else
         return 0
     fi

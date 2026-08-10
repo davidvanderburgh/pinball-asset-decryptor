@@ -1121,7 +1121,16 @@ These have each been violated at least once and each cost a run or a window:
       confirming session of two boots plus the negative case, which is what
       keeps it off D1.
 
-- [ ] **35. Star Wars and Venom load and play, but the video flickers a lot.**
+- [x] **35. Star Wars and Venom load and play, but the video flickers a lot.**
+      **ABSORBED INTO ITEM 27 on 2026-08-10**, David's instruction the same day
+      it was filed: *"the video flickering on some games falls under this item.
+      let's address it here."* It was open for about an hour. **Do not work it
+      here — item 27 carries the scope AND the measurement** (a clip re-served
+      2-3 times at its loop point showing 2-3 head frames each time; star_wars_le
+      ch2 superseded 36 of 63 serves on a 12.0 s cadence, jaws_le the same
+      signature at ~1/6 the rate). Closed as a duplicate rather than deleted so
+      the queue count stays honest and the reasoning is findable. Original text
+      below.
       `S2 D3`
       **★ DAVID, 2026-08-10: "for star wars and venom the game loads, but the
       video flickers a lot."** Reported while item 27 was being worked, so it is

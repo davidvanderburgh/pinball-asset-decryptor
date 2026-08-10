@@ -854,10 +854,10 @@ These have each been violated at least once and each cost a run or a window:
       in the Controls legend.
 
 - [ ] **22. Start Emulator leaves the game window BEHIND the app.** `S3 D2`
-      ← IN PROGRESS, **55%** *(**stays D3, 2026-08-10:** the instrument exists
-      and is validated and the fault is MEASURED rather than guessed, which is
-      real progress — but the obvious fix is now RULED OUT WITH NUMBERS, so
-      what is left still needs a mechanism, and it still needs runs.)*
+      ← IN PROGRESS, **90%** *(**D3 → D1, 2026-08-10:** instrument built and
+      validated, fault measured, fix shipped and confirmed by a single-variable
+      A/B. What is left is David pressing the button and dragging a window —
+      no run to design, no instrument to build.)*
       **★★ THE FAULT IS READ, NOT EYEBALLED — the first real z-order of a live
       run. `zorder.py`, godzilla_pro, with the PAD app foreground, which is the
       state you are in the instant you press Start Emulator:**
@@ -898,8 +898,29 @@ These have each been violated at least once and each cost a run or a window:
       hypothetical: it happened twice in this pass — see the new item 37.
       Cloaked windows are dropped, and `WS_EX_TOPMOST` is reported because a
       topmost proxy would mean "raise the others" could never be the fix.
-      **★★ RULED OUT, WITH NUMBERS, AND IT WAS THIS ITEM'S OWN RECOMMENDED
-      FIX: `XRaiseWindow` FROM INSIDE X DOES NOT WORK ON THE GAME WINDOW.**
+      **★★★ FIXED, AND SETTLED BY A SINGLE-VARIABLE A/B. `XRaiseWindow` from
+      inside X works, but ONLY as a retrying schedule** — `win_raise_all()`
+      fires once when the position restore settles and then again at 8, 16, 24,
+      32, 40, 50, 60, 75 and 90 s. Both runs used the identical recipe with the
+      other window activated **less than a second** before the launch, which is
+      the harshest case and the one a real Start Emulator press creates:
+      ```
+      PAD_GL_RAISE=0   game window BELOW the other window, unchanged over 115 s
+      PAD_GL_RAISE=1   game window ABOVE it from 8 s, stable over 115 s
+      ```
+      **On by default; `PAD_GL_RAISE=0` reverts with no rebuild.**
+      **★ TWO THINGS RULED OUT ON THE WAY, so nobody re-tests them.**
+      **(i) `eglSwapBuffers` is NOT re-asserting the stacking every frame.** It
+      was the leading suspect, because suppressing presents entirely
+      (`PAD_GL_WIN_EVERY` huge) let a raise stick where it otherwise had not —
+      but the winning run has a raise landing with swaps at full rate and the
+      order then holding for two minutes. The earlier reading was the raise
+      being blocked, not the swap undoing it.
+      **(ii) A raise at the FIRST present (~0 s, before the compositor has
+      placed the window) is worse than useless.** The build carrying one is the
+      build whose 4-deep retry schedule failed; removing it is what made the
+      schedule work. Do not add an "as early as possible" raise back.
+      **★★ STILL TRUE, WITH NUMBERS: A SINGLE `XRaiseWindow` DOES NOT FIX IT.**
       `win_raise_all()` is built and shipped on this branch (`PAD_GL_RAISE=0`
       disables it, no rebuild), raising legend then game, restack only with no
       `XSetInputFocus`. It does not fix the fault:
@@ -926,48 +947,36 @@ These have each been violated at least once and each cost a run or a window:
       (rank 4) — **and both windows belong to the same msrdc process**. So this
       is not "the emulator's process is not allowed to come forward". Something
       is specific to the GAME window.
-      **★★★ THE MECHANISM, ESTABLISHED BY A CONTROLLED A/B — `eglSwapBuffers`
-      RE-ASSERTS THE GAME WINDOW'S STACKING, so a raise survives about one
-      frame.** The game window is the only one with an EGL surface and it
-      swaps 60 times a second; the legend never presents at all, which is the
-      whole difference between them. Same run recipe, same freshly activated
-      stand-in, one variable changed:
-      ```
-      swaps ON                          GAME rank 4, BELOW the other window
-      swaps OFF (PAD_GL_WIN_EVERY=1e6)  GAME rank 3, ABOVE it
-      ```
-      **And that single fact explains every reading this item has, including
-      the false pass.** What the swap re-plays each frame is the stacking the
-      window was given AT CREATION. Created on top (stale activation) → the
-      swaps keep it on top all run. Created one slot down (fresh activation,
-      i.e. David pressing Start Emulator) → the swaps keep putting it back
-      there, and no number of raises can win.
-      **SO THE FIX BELONGS AT CREATION TIME, and the third option this item
-      has listed from the start is now the only live one: have the APP stop
-      holding the top**, so that when padglhost creates its window there is no
-      freshly activated window above it. It is our own Tk process, so `lower()`
-      is native there and is not the RAIL trap; it needs no emulator-window
-      manipulation at all, which is why it was always the safest of the three.
-      **`win_raise_all()` is therefore OFF BY DEFAULT** (`PAD_GL_RAISE=1` opts
-      back in). It is kept because it is the evidence, and because it is the
-      only lever left if the creation-time route fails.
+      **WHAT THE FAILED ATTEMPTS BOUGHT, and it is the shape of the fault:
+      there is a period after user input during which the emulator's window
+      simply cannot come to the front, and a raise inside it is spent.** After
+      that period lapses, a raise both lands AND STICKS — the swaps do not
+      undo it. Retrying across the boot is what carries one into the other, and
+      it is why the schedule and not the raise is the fix.
+      **The third option this item has always listed — have the APP stop
+      holding the top — was NOT needed and is not implemented.** It stays on
+      the page as the fallback if the schedule ever proves flaky, and it is
+      still the option that touches no emulator window.
       **Still untested, and it stays on the list: DRAGGING** — what the banned
       `SetWindowPos` fix broke. It cannot be scripted (SendInput into a WSLg
       window is UIPI-blocked, items 7 and 12) and needs David's hands. Nothing
       shipped here has been shown to break it, and the position restore still
       converges with the raise in.
-      **Resume:** make the app yield the top around the Start Emulator press —
-      in `emulate_tab.py`, at the point it spawns `watch.sh` — and re-measure
-      with `zorder.py`. **The test recipe is fixed by the false pass above:
-      activate the app IMMEDIATELY before the run**, or the reading lies.
-      Acceptance is unchanged: all three windows above the app once the game
-      window appears, read from `zorder.py` and not by eye, plus David
-      confirming dragging and the item 5 position restore still work.
-      **Careful with the obvious cheap version:** `lower()` the instant the
-      button is pressed and the user loses the Status/Log pane they are
-      watching for the next 15 s of boot. Yielding without hiding — dropping
-      the app just below the emulator windows, or yielding only when padglhost
-      is about to create its window — is the version worth building.
+      **Resume — two things, both needing David's hands, and then the box
+      closes.** (a) Press **Start Emulator** and look: the game window should
+      come out over the app within ~10 s. The measured runs were launched from
+      the command line with a stand-in window activated in their place, which
+      is the same condition the button creates, but it is not the same click.
+      (b) **DRAG both windows and restart a run** — that is what the banned
+      `SetWindowPos` fix broke, it is this acceptance's real question, and it
+      cannot be scripted (SendInput into a WSLg window is UIPI-blocked, items 7
+      and 12). Nothing seen here breaks it and the position restore still
+      converges with the raise in, but that is evidence rather than the test.
+      **If either fails, `PAD_GL_RAISE=0` reverts with no rebuild** and the
+      fallback is the app-yields option above.
+      **And keep the test recipe:** activate the other window IMMEDIATELY
+      before the run, or the reading lies — that is what produced this pass's
+      false pass.
       **Observed 2026-08-06 (David):** pressing Start Emulator in the app's
       Emulate tab should bring **all** the emulator windows out over the PAD
       application. The **game window comes up behind the app**, while the

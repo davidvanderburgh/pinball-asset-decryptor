@@ -1413,31 +1413,34 @@ static void win_init_gl(void)
  * remedy for that (attaching to the foreground thread's input queue) is
  * exactly the kind of behind-the-compositor's-back move that broke dragging.
  *
- * ---- AND IT STILL DOES NOT WORK, SO IT IS OFF BY DEFAULT. -----------------
+ * ---- THE A/B THAT SETTLED IT --------------------------------------------
  *
- * The retries were measured too, and they lose: four raises at 8/16/24/30 s
- * left the game window one slot below a freshly activated Notepad for 75 s
- * without the order changing once. What that bought was the MECHANISM, from a
- * controlled A/B with everything else identical:
+ * Measured with tools/spike2_emu/zorder.py. Identical recipe in both runs,
+ * with the other window activated LESS THAN A SECOND before the launch - the
+ * harshest case, and the one a real Start Emulator press creates - and exactly
+ * one variable changed:
  *
- *   swaps ON,  fresh activation:  GAME below the other window   (rank 4)
- *   swaps OFF (PAD_GL_WIN_EVERY huge), same activation:
- *                                 GAME above it                 (rank 3)
+ *   PAD_GL_RAISE=0   game window BELOW the other window, unchanged over 115 s
+ *   PAD_GL_RAISE=1   game window ABOVE it from 8 s, stable over 115 s
  *
- * So `eglSwapBuffers` on this window RE-ASSERTS its stacking, and a raise
- * survives about one frame. That also explains why a raise appears to work
- * when the other window's activation is stale: the window was then CREATED on
- * top, and the swaps re-assert being on top. The stacking that gets re-played
- * every frame is the one the window was given at creation, so the fix belongs
- * at creation time - which means the app not holding the top when padglhost
- * starts - and not in a raise.
+ * Two things were ruled out on the way and are worth not re-testing.
  *
- * Kept because it is the evidence, and because it is the only lever that
- * exists if the creation-time route fails. PAD_GL_RAISE=1 enables it. */
+ * eglSwapBuffers was suspected of re-asserting the stacking every frame,
+ * because suppressing presents altogether (PAD_GL_WIN_EVERY huge) let a raise
+ * stick where it otherwise had not. That is NOT the story: the run above has a
+ * raise landing with swaps at full rate and the order then holding for two
+ * minutes.
+ *
+ * And a raise issued at the FIRST present - ~0 s, before the compositor has
+ * placed the window - is worse than useless. The build that carried one is the
+ * build whose retries failed; removing it is what made the schedule work. Do
+ * not add an "as early as possible" raise back.
+ *
+ * PAD_GL_RAISE=0 turns it off, so the A/B still costs no rebuild. */
 static void win_raise_all(const char *why)
 {
     const char *e = getenv("PAD_GL_RAISE");
-    if (!(e && e[0] == '1')) return;   /* ruled out; opt in to experiment */
+    if (e && e[0] == '0') return;
     if (legend_win) XRaiseWindow(xdpy, legend_win);
     XRaiseWindow(xdpy, xwin);
     XFlush(xdpy);
@@ -1542,7 +1545,8 @@ static void win_pump(void)
      * ever would fight a user who has clicked away on purpose, which is a
      * worse bug than the one being fixed. */
     {
-        static const double retry_at[] = { 8.0, 16.0, 24.0, 30.0 };
+        static const double retry_at[] = { 8.0, 16.0, 24.0, 32.0, 40.0,
+                                           50.0, 60.0, 75.0, 90.0 };
         static unsigned retry_n;
         if (retry_n < sizeof retry_at / sizeof retry_at[0] &&
             now_s() - win_mapped_s > retry_at[retry_n]) {

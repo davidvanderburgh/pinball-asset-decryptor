@@ -1,12 +1,14 @@
 #!/bin/bash
 # Save the running game to a named slot - and KEEP PLAYING. (item 13)
 #
-#   wsl -u root -e bash savegame.sh [slot]
+#   wsl -u root -e bash savegame.sh [slot] [label]
 #
 # Needs root (criu does). The game must have been started with PAD_PIVOT=1 (a
 # chroot guest cannot be checkpointed). Default slot is "quicksave". The game
 # is left RUNNING - saving does not interrupt play - so pair this with
-# loadgame.sh to jump back later.
+# loadgame.sh to jump back later. The optional LABEL is a human name for the
+# slot; it travels IN the slot (slot.meta), so it survives sessions, machines
+# and whoever lists it (slots.sh, the playfield picker, the app's manager).
 #
 # Slots live in <rootfs>/saves/<slot>, and the rootfs is read from the running
 # guest's own environment, so you never have to tell it where anything is.
@@ -14,7 +16,16 @@
 set -u
 RIG=$(cd "$(dirname "$0")" && pwd)
 SLOT=${1:-quicksave}
+LABEL=${2:-}
 CRIU=${CRIU:-/var/tmp/criubuild/criu/criu/criu}
+
+# The slot name becomes `rm -rf $ROOT/saves/$SLOT` below, and a GUI feeds it
+# now - so it is a filename, never a path. Reject anything else loudly.
+case "$SLOT" in
+    ""|*[!A-Za-z0-9_.-]*|.|..)
+        echo "[savegame] bad slot name '$SLOT' - letters, digits, _ . - only"
+        exit 2 ;;
+esac
 
 [ "$(id -u)" = 0 ] || { echo "savegame: needs root. Use: wsl -u root -e bash $0 [slot]"; exit 2; }
 PID=$(pgrep -x game | head -1)
@@ -59,6 +70,8 @@ CRIU="$CRIU" bash "$RIG/savestate.sh" "$DIR" "$PID" || { echo "[savegame] FAILED
     echo "root=$ROOT"
     echo "game=$GAME"
     echo "logsize=$(stat -c %s "$ROOT/dump/game.out" 2>/dev/null || echo 0)"
+    # One line, so slot.meta stays a key=value file whatever the label says.
+    [ -n "$LABEL" ] && echo "label=$(printf '%s' "$LABEL" | tr '\n\r' '  ')"
 } > "$DIR/slot.meta"
 
 echo "[savegame] saved to slot '$SLOT'. Keep playing; loadgame.sh $SLOT jumps back here."

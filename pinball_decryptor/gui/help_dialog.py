@@ -838,11 +838,24 @@ HELP_CONTENT = {
          "running, so any Spike 2 game gets one. The switches are the one "
          "part that needs the game to be up: it publishes its switch list a "
          "minute or so into a run, and they appear on the playfield as soon "
-         "as it does, without restarting anything. Save state and Load "
-         "state buttons live on this window too (Windows): a save "
-         "checkpoints the entire running game and a load brings it straight "
-         "back, mid-game included. A run that is not in a shape that can be "
-         "saved says why on the button instead of failing quietly."),
+         "as it does, without restarting anything."),
+        ("Save states (opt in)",
+         "Tick “Enable save states” before Start and the playfield window "
+         "gains a slot picker with Save state and Load state buttons "
+         "(Windows). A save checkpoints the ENTIRE running game into the "
+         "slot you picked — you can name it — and a load brings that exact "
+         "moment straight back, mid-game included, even in a later session "
+         "or after you have replaced assets on the card (streamed video and "
+         "audio play the new versions; artwork already on screen at the "
+         "save keeps its saved look until the game redraws that scene). "
+         "It is off by default because it is not free: each slot holds "
+         "about 0.7–1.5 GB on the WSL disk, and each save freezes the game "
+         "and its sound for a few seconds while the snapshot is written. "
+         "The list on the tab shows every slot with its name, game, size "
+         "and date; Rename and Delete manage them, and the line under the "
+         "list totals what they hold against the disk's free space. Slots "
+         "only ever load into the same game and firmware version they were "
+         "saved from."),
         ("Install Docker… (macOS only)",
          "The emulator is a Linux program, and a container is how a Mac runs "
          "one — so Docker is to macOS what WSL is to Windows here. This "

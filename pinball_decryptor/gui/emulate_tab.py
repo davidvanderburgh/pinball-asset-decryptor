@@ -54,8 +54,11 @@ import pathlib
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import messagebox, ttk
+
+from .widgets import _Tooltip
 
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
@@ -330,10 +333,16 @@ def wsl_home():
     return _WSL_HOME[0]
 
 
-def watch_cmd(minutes, env):
-    """The Start Emulator launch - and on Windows it is the CHECKPOINTABLE
-    one (item 13): ``wsl -u root`` with ``PAD_PIVOT=1`` and the desktop
-    user's HOME.
+def watch_cmd(minutes, env, savestates=True):
+    """The Start Emulator launch - and on Windows, when save states are
+    enabled, it is the CHECKPOINTABLE one (item 13): ``wsl -u root`` with
+    ``PAD_PIVOT=1`` and the desktop user's HOME.
+
+    ``savestates=False`` is the tab's opt-out (the default in the UI): the
+    plain user launch, the shape this tab always had before item 13.  It
+    cannot be checkpointed, and watch.sh therefore starts the playfield
+    without its Save/Load state controls - a run with no save states shows
+    no buttons that could only ever refuse.
 
     This module's old rule was "never root - it breaks WSLg and audio", and
     that stopped being true when watch.sh learned the drop dance: a root
@@ -350,7 +359,7 @@ def watch_cmd(minutes, env):
     everything else identical - rather than to a root run pointed at
     /root/spike2root.
     """
-    if sys.platform == "win32":
+    if savestates and sys.platform == "win32":
         home = wsl_home()
         if home:
             return (["wsl.exe", "-u", "root", "-e", "env",
@@ -752,7 +761,8 @@ class EmulatePanel:
     #: terminal, by a few seconds.
     POLL_IDLE_MS = 10000
 
-    def __init__(self, parent, log=None, card_var=None):
+    def __init__(self, parent, log=None, card_var=None, savestates_var=None,
+                 theme_fn=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
         # The card path lives in a variable the WINDOW owns (when given one):
@@ -760,6 +770,11 @@ class EmulatePanel:
         # project loads, exactly like the Extract/Write path fields. The
         # fallback keeps the panel testable on its own.
         self._card_var = card_var
+        # Same window-owned pattern for the save-states opt-in (item 13):
+        # default OFF, persisted with the project. The fallback var keeps the
+        # panel testable on its own, same as the card path's.
+        self._states_var = savestates_var
+        self._theme_fn = theme_fn or (lambda: "dark")
         self._proc = None            # the watch.sh child, while we own one
         #: Whether the last status poll saw anything running. Read by
         #: shutdown_sync() on app quit: a terminal-started run shows up here
@@ -934,6 +949,8 @@ class EmulatePanel:
         self._auto_chk = ttk.Checkbutton(btns, text="Skip to attract mode",
                                          variable=self._auto_var)
         self._auto_chk.pack(side=tk.LEFT, padx=(12, 0))
+
+        self._build_states(frame, pad)
 
         grid = ttk.LabelFrame(frame, text="Status")
         grid.pack(fill=tk.X, **pad)
@@ -1344,6 +1361,253 @@ class EmulatePanel:
             pass
         self._setup_check()
 
+    #: The cost, spelled out where the choice is made.  This is the tooltip
+    #: David asked for: the feature is OFF by default because every slot is
+    #: real disk and every save is a real freeze, and nobody should pay
+    #: either without having been told.
+    _STATES_TIP = (
+        "Save states snapshot the WHOLE running game so you can jump back "
+        "to that exact moment later - including in a future session, or "
+        "after replacing assets, to compare how a mode looks.\n\n"
+        "The cost:\n"
+        "• each slot stores about 0.7-1.5 GB on the WSL disk\n"
+        "• saving freezes the game and its sound for a few seconds "
+        "while the snapshot is written\n"
+        "• slots stay on disk until deleted below\n\n"
+        "Takes effect at the next Start. While enabled, the virtual "
+        "playfield window shows Save/Load state controls with 10 nameable "
+        "slots.")
+
+    def _build_states(self, frame, pad):
+        """The save-states section: the opt-in toggle and the slot manager.
+
+        The MANAGER works with the toggle off, deliberately - turning the
+        feature off is exactly when someone wants to reclaim the disk its
+        slots are holding."""
+        box = ttk.LabelFrame(frame, text="Save states")
+        box.pack(fill=tk.X, **pad)
+
+        row = ttk.Frame(box)
+        row.pack(fill=tk.X, padx=8, pady=(4, 2))
+        if self._states_var is None:
+            self._states_var = tk.BooleanVar(value=False)
+        self._states_chk = ttk.Checkbutton(
+            row, text="Enable save states", variable=self._states_var)
+        self._states_chk.pack(side=tk.LEFT)
+        # The tip rides an info marker BESIDE the control rather than the
+        # checkbox itself - widgets.py's own rule: anything hover-explained
+        # that you also have to operate wants the tip out of the way.
+        info = ttk.Label(row, text="(?)", foreground="#888")
+        info.pack(side=tk.LEFT, padx=(6, 0))
+        _Tooltip(info, self._STATES_TIP, self._theme_fn, place="side")
+        _Tooltip(self._states_chk, self._STATES_TIP, self._theme_fn,
+                 place="side")
+
+        wrap = ttk.Frame(box)
+        wrap.pack(fill=tk.X, padx=8, pady=(2, 2))
+        cols = ("slot", "name", "game", "size", "saved")
+        self._slots_tree = ttk.Treeview(wrap, columns=cols, show="headings",
+                                        height=4, selectmode="browse")
+        for col, head, width, anchor in (
+                ("slot", "Slot", 90, tk.W), ("name", "Name", 220, tk.W),
+                ("game", "Game", 150, tk.W), ("size", "Size", 80, tk.E),
+                ("saved", "Saved", 120, tk.W)):
+            self._slots_tree.heading(col, text=head)
+            self._slots_tree.column(col, width=width, anchor=anchor,
+                                    stretch=(col == "name"))
+        self._slots_tree.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        side = ttk.Frame(wrap)
+        side.pack(side=tk.LEFT, fill=tk.Y, padx=(6, 0))
+        self._slots_btns = []
+        for text, cmd in (("Refresh", self._slots_refresh),
+                          ("Rename…", self._slot_rename),
+                          ("Delete", self._slot_delete)):
+            b = ttk.Button(side, text=text, width=10, command=cmd)
+            b.pack(fill=tk.X, pady=1)
+            self._slots_btns.append(b)
+
+        # NO refresh at build, deliberately: listing the slots is a root
+        # wsl.exe spawn, and the first wsl.exe after a Windows reboot boots
+        # the whole VM - the exact freeze class the status poller's idle
+        # rules exist to avoid. The list loads when the user asks.
+        self._slots_sum = ttk.Label(box, foreground="#888",
+                                    text="Press Refresh to list the slots.")
+        self._slots_sum.pack(anchor=tk.W, padx=8, pady=(0, 6))
+
+        if sys.platform != "win32":
+            # slots.sh needs root, which only WSL gives for free; on other
+            # platforms the manager would be buttons that can only fail.
+            for b in self._slots_btns:
+                b.configure(state=tk.DISABLED)
+            self._slots_sum.configure(
+                text="Slot management is available on Windows (WSL).")
+
+    @staticmethod
+    def _human(n):
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            return "?"
+        if n >= 1 << 30:
+            return "%.1f GB" % (n / float(1 << 30))
+        if n >= 1 << 20:
+            return "%d MB" % (n // (1 << 20))
+        return "%d KB" % max(1, n // (1 << 10))
+
+    def _slots_refresh(self):
+        """Re-read the slots as root, off the Tk thread, and repaint."""
+        if sys.platform != "win32":
+            return
+        cmd = rig_cmd_root("slots.sh", "list")
+
+        def run():
+            rows, total, free = [], None, None
+            try:
+                r = subprocess.run(cmd, capture_output=True, timeout=30,
+                                   creationflags=_CREATE_FLAGS)
+                for ln in (r.stdout or b"").decode("utf8",
+                                                   "replace").splitlines():
+                    p = ln.split("|")
+                    if p[0] == "slot" and len(p) >= 6:
+                        rows.append(p[1:6])
+                    elif p[0] == "total" and len(p) > 1:
+                        total = int(p[1] or 0)
+                    elif p[0] == "free" and len(p) > 1:
+                        free = int(p[1] or 0)
+            except Exception:                               # noqa: BLE001
+                pass
+
+            def apply():
+                try:
+                    tree = self._slots_tree
+                    tree.delete(*tree.get_children())
+                    for name, size, game, label, mtime in rows:
+                        try:
+                            when = time.strftime(
+                                "%b %d %H:%M", time.localtime(int(mtime)))
+                        except (ValueError, OverflowError):
+                            when = "?"
+                        tree.insert("", tk.END, iid=name, values=(
+                            name, label or "", game, self._human(size), when))
+                    if total is None:
+                        self._slots_sum.configure(
+                            text="Could not read the slots - is WSL up?")
+                    else:
+                        self._slots_sum.configure(
+                            text="%d slot%s · total %s · free on the WSL "
+                                 "disk: %s" % (
+                                     len(rows), "" if len(rows) == 1 else "s",
+                                     self._human(total), self._human(free)))
+                except tk.TclError:
+                    pass          # tab torn down while the list was loading
+            try:
+                self._slots_tree.after(0, apply)
+            except (tk.TclError, RuntimeError):
+                pass          # tab (or the whole interp) is gone
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _slot_selected(self):
+        try:
+            sel = self._slots_tree.selection()
+        except tk.TclError:
+            return None
+        return sel[0] if sel else None
+
+    def _slot_rename(self):
+        slot = self._slot_selected()
+        if not slot:
+            self._slots_sum.configure(text="Pick a slot to rename first.")
+            return
+        top = self._slots_tree.winfo_toplevel()
+        dlg = tk.Toplevel(top)
+        dlg.title("Rename slot")
+        dlg.transient(top)
+        dlg.resizable(False, False)
+        ttk.Label(dlg, text="Name for '%s':" % slot).pack(
+            fill=tk.X, padx=10, pady=(10, 2))
+        cur = ""
+        try:
+            cur = self._slots_tree.item(slot, "values")[1]
+        except (tk.TclError, IndexError):
+            pass
+        var = tk.StringVar(value=cur)
+        ent = ttk.Entry(dlg, textvariable=var, width=34)
+        ent.pack(padx=10, pady=2)
+        rowf = ttk.Frame(dlg)
+        rowf.pack(pady=(6, 10))
+
+        def go(_e=None):
+            # The label crosses wsl.exe's re-parse into bash argv, and
+            # wsl.exe expands $ and backticks even in -e argv (the executor
+            # lesson) - so those characters simply never leave the dialog.
+            ok = ("abcdefghijklmnopqrstuvwxyz"
+                  "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _.()!-")
+            label = "".join(ch for ch in var.get() if ch in ok).strip()[:40]
+            dlg.destroy()
+            self._slot_cmd(["label", slot] + ([label] if label else []))
+
+        ttk.Button(rowf, text="Rename", width=10, command=go).pack(
+            side=tk.LEFT, padx=4)
+        ttk.Button(rowf, text="Cancel", width=10, command=dlg.destroy).pack(
+            side=tk.LEFT, padx=4)
+        ent.bind("<Return>", go)
+        dlg.bind("<Escape>", lambda _e: dlg.destroy())
+        ent.focus_set()
+        dlg.update_idletasks()
+        dlg.geometry("+%d+%d" % (
+            top.winfo_rootx() + 240, top.winfo_rooty() + 240))
+        dlg.grab_set()
+
+    def _slot_delete(self):
+        slot = self._slot_selected()
+        if not slot:
+            self._slots_sum.configure(text="Pick a slot to delete first.")
+            return
+        size = ""
+        try:
+            size = " (%s)" % self._slots_tree.item(slot, "values")[3]
+        except (tk.TclError, IndexError):
+            pass
+        if not messagebox.askyesno(
+                "Delete save state",
+                "Delete slot '%s'%s?\n\nThe saved game in it is gone for "
+                "good." % (slot, size),
+                parent=self._slots_tree.winfo_toplevel()):
+            return
+        self._slot_cmd(["delete", slot])
+
+    def _slot_cmd(self, args):
+        """Run one slots.sh action off the Tk thread, then refresh."""
+        cmd = rig_cmd_root("slots.sh", *args)
+        for b in self._slots_btns:
+            b.configure(state=tk.DISABLED)
+
+        def run():
+            out = ""
+            try:
+                r = subprocess.run(cmd, capture_output=True, timeout=60,
+                                   creationflags=_CREATE_FLAGS)
+                out = (r.stdout or b"").decode("utf8", "replace").strip()
+            except Exception:                               # noqa: BLE001
+                out = "slots.sh did not run"
+            if out:
+                self._log("[emulate] %s" % out.splitlines()[-1])
+
+            def apply():
+                try:
+                    for b in self._slots_btns:
+                        b.configure(state=tk.NORMAL)
+                except tk.TclError:
+                    return
+                self._slots_refresh()
+            try:
+                self._slots_tree.after(0, apply)
+            except (tk.TclError, RuntimeError):
+                pass          # tab (or the whole interp) is gone
+
+        threading.Thread(target=run, daemon=True).start()
+
     def _build_source(self, frame, pad):
         """The card image to run.  One box and a Browse button.
 
@@ -1465,6 +1729,10 @@ class EmulatePanel:
             env.append("PAD_AUDIO=0")
         if not self._auto_var.get():
             env.append("PAD_AUTO_ATTRACT=0")
+        # Read HERE, on the Tk thread, like the tickboxes above - the worker
+        # below must not touch Tk variables. The toggle picks the launch
+        # shape: checkpointable (root, PAD_PIVOT) only when states are on.
+        states = bool(self._states_var.get())
 
         def run():
             # DOCKER IS CHECKED HERE, in the worker, so a slow probe cannot
@@ -1499,7 +1767,7 @@ class EmulatePanel:
             # first wsl.exe after a Windows reboot boots the whole WSL VM.
             # Built on the main thread, that was the window frozen solid for
             # the boot - David hit it on 2026-08-09 and read it as a crash.
-            cmd = watch_cmd(self.BACKSTOP_MIN, env)
+            cmd = watch_cmd(self.BACKSTOP_MIN, env, savestates=states)
             self._log("[emulate] %s" % " ".join(cmd))
             try:
                 self._proc = subprocess.Popen(
@@ -1884,6 +2152,7 @@ class EmulatePanel:
             opts = tk.DISABLED if (up or busy) else tk.NORMAL
             self._audio_chk.configure(state=opts)
             self._auto_chk.configure(state=opts)
+            self._states_chk.configure(state=opts)
         except tk.TclError:
             pass        # the tab went away between the poll and its result
 

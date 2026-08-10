@@ -834,16 +834,28 @@ class StateOps:
     _LABEL_OK = ("abcdefghijklmnopqrstuvwxyz"
                  "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _.()!-")
 
-    def _build_state_widgets(self, parent):
-        """The slot picker and the two buttons, for a view to place."""
+    def _build_state_widgets(self, parent, compact=False):
+        """The slot picker and the two buttons, for a view to place.
+
+        ``compact`` is the artwork view's shape: its cluster shares the
+        bottom edge with Start/Plunge/Reset, and the full-width version
+        CROWDED them into each other on a scaled-down window (tester
+        screenshot, 2026-08-10). Short labels and a narrower picker keep
+        the two clusters apart; the slot names still read in full in the
+        picker's dropdown, and the picker right beside Save/Load is what
+        keeps the short labels unambiguous. The Schematic bar has the
+        room, so it keeps the full labels."""
         self._slot_labels = {}
-        self._slot_box = ttk.Combobox(parent, width=17, state="readonly",
+        self._slot_box = ttk.Combobox(parent, width=12 if compact else 17,
+                                      state="readonly",
                                       values=self._slot_values())
         self._slot_box.current(0)
+        save_txt, load_txt, bw = (("Save", "Load", 6) if compact
+                                  else ("Save state", "Load state", 11))
         self._state_btns = [
-            tk.Button(parent, text="Save state", width=11,
+            tk.Button(parent, text=save_txt, width=bw,
                       command=self._save_clicked),
-            tk.Button(parent, text="Load state", width=11,
+            tk.Button(parent, text=load_txt, width=bw,
                       command=self._load_clicked),
         ]
         self._slots_refresh()
@@ -1345,7 +1357,7 @@ class Field(StateOps):
         self._state_btns = []
         if SAVESTATES:
             x = self.ACT_PAD
-            for wdg in self._build_state_widgets(self.cv):
+            for wdg in self._build_state_widgets(self.cv, compact=True):
                 self.cv.create_window(x, y, anchor="sw", window=wdg)
                 x += wdg.winfo_reqwidth() + self.ACT_GAP
 

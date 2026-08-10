@@ -775,6 +775,9 @@ class EmulatePanel:
         # panel testable on its own, same as the card path's.
         self._states_var = savestates_var
         self._theme_fn = theme_fn or (lambda: "dark")
+        #: status.sh's saves_mtime the last time the slot list was read.
+        #: The list refreshes itself whenever the token moves.
+        self._saves_token = None
         self._proc = None            # the watch.sh child, while we own one
         #: Whether the last status poll saw anything running. Read by
         #: shutdown_sync() on app quit: a terminal-started run shows up here
@@ -1431,9 +1434,12 @@ class EmulatePanel:
         # NO refresh at build, deliberately: listing the slots is a root
         # wsl.exe spawn, and the first wsl.exe after a Windows reboot boots
         # the whole VM - the exact freeze class the status poller's idle
-        # rules exist to avoid. The list loads when the user asks.
+        # rules exist to avoid. The list populates itself from the first
+        # status poll instead (the saves_mtime token in _apply), and after
+        # that refreshes whenever a save/pack/delete moves the token.
         self._slots_sum = ttk.Label(box, foreground="#888",
-                                    text="Press Refresh to list the slots.")
+                                    text="The slots appear with the next "
+                                         "status poll.")
         self._slots_sum.pack(anchor=tk.W, padx=8, pady=(0, 6))
 
         if sys.platform != "win32":
@@ -2115,6 +2121,18 @@ class EmulatePanel:
             else:
                 for k in ("cpu", "host", "audio"):
                     self._set(k, "—")
+
+            # Event-based slot list (tester: "i shouldn't have to press
+            # Refresh... it should be event based"): status.sh publishes
+            # when the saves last changed, and the list re-reads itself
+            # whenever the token moves - a playfield save, a CLI pack or
+            # delete - and on the FIRST sighting, which is what populates
+            # the list at startup without a spawn of its own (the status
+            # poll that carried the token already paid for one).
+            tok = info.get("saves_mtime")
+            if tok is not None and tok != self._saves_token:
+                self._saves_token = tok
+                self._slots_refresh()
 
             busy = self._starting or self._stopping
             up = info.get("running") == "1" or procs != "0"

@@ -1408,6 +1408,16 @@ class EmulatePanel:
         "playfield window shows Save/Load state controls with 10 nameable "
         "slots.")
 
+    #: The Launch button's honest timeline — from cold, the boot comes
+    #: first and the save takes over only once the game is up.
+    _LAUNCH_TIP = (
+        "Starts the emulator straight into the selected slot.\n\n"
+        "From cold, the emulator has to boot first: the game comes up on "
+        "screen and runs for a little while (roughly half a minute with "
+        "everything warm) before the save state takes over. If the "
+        "emulator is already running, the slot loads into it right away — "
+        "a load takes about 10–15 seconds either way.")
+
     def _build_states(self, frame, pad):
         """The save-states section: the opt-in toggle and the slot manager.
 
@@ -1456,6 +1466,10 @@ class EmulatePanel:
             b = ttk.Button(side, text=text, width=10, command=cmd)
             b.pack(fill=tk.X, pady=1)
             self._slots_btns.append(b)
+        # Side placement, same rule as the toggle's tip: a tip UNDER a
+        # control you are about to click covers what you are aiming at.
+        _Tooltip(self._slots_btns[0], self._LAUNCH_TIP, self._theme_fn,
+                 place="side")
 
         # NO refresh at build, deliberately: listing the slots is a root
         # wsl.exe spawn, and the first wsl.exe after a Windows reboot boots

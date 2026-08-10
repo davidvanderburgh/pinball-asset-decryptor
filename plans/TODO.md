@@ -432,12 +432,24 @@ These have each been violated at least once and each cost a run or a window:
       **Follow-up worth its own /add: the suppressed surface IS the
       playfield LCD's live feed** (hyperspace loop etc.), still decoded —
       it could render inside the virtual playfield window.
-      **Resume:** (1) fix padglhost's window-open latch (and binds[]) to
-      resolve ids per title the way plunge.py does — or stop latching the
-      trough and leave it to `plunge.py reset`; then a Jaws run: coin,
-      start, oracle is BALL 1 / a score on the game's own screen. (2)
-      swshow.py prints Godzilla names on every title — same per-title
-      table, fix in passing.
+      **★★ THE BINDS ARE RESOLVED PER TITLE (`7c28ebd`), David's report
+      being the third head of the latch disease: on star_wars his left
+      arrow (Godzilla's 60) was hitting a FORC(E) DROP TARGET — LEFT
+      FLIPPER BUTTON is 59 there, RIGHT is 58.** `binds_resolve()` in
+      padglhost reads `$PAD_TABLES/$PAD_GAME/switch_list.txt` and
+      re-points every non-platform row by NAME (candidates measured across
+      all four derived lists); a name not on the title makes the key DEAD
+      with (n/a) in the legend, never a wrong switch; the trough row
+      resolves TROUGH 1..6 individually so the window-open latch closes
+      the right six on every title — the Jaws start-refusal fix rides
+      along. Verified at star_wars launch: Left→59, Right→58, spinner→46,
+      outlanes→51/54, six Godzilla-only keys dead, trough 6/6. Hands-on
+      oracle is attract's own HOLD BOTH FLIPPER BUTTONS FOR MENU.
+      **Resume:** (1) the Jaws confirming run: coin, start — with the
+      phantom latch gone the game should serve; oracle is BALL 1 / a score
+      on its own screen. (2) swshow.py prints Godzilla names on every
+      title — same per-title table, fix in passing. (3) David's hands on
+      the star_wars flippers, this session if he is at the keys.
       **NO RUN IS LIVE. The rig is CLEAN — `alive.sh` = 0, zero zombies, zero
       card mounts**, confirmed after the star_wars_le run reached its 8 min
       backstop and tore itself down.

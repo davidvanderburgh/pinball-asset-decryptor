@@ -192,12 +192,22 @@ export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 # WHY, in the run's own log. The item that asked for this asked for the evidence
 # as well as the decision, and a silenced board is invisible by construction -
 # if it is ever wrong, this line is the only place that will say so.
+#
+# THE REASON IS ASKED FOR RATHER THAN ASSERTED. The first version of this line
+# said "$GAME's own device table names no board there" whatever the evidence
+# was, and printed exactly that for star_wars_le - whose device table does not
+# read at all, and whose answer came from the switch list. A log line that
+# names the wrong source is worse than one that names none, because the whole
+# point of printing it is that a silenced board is otherwise invisible.
+NB_WHY=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
+    --switches "$PAD_TABLES/$GAME/switch_list.txt" 2>/dev/null \
+    | sed -n 's/^because: //p')
 if [ -n "${PAD_NB_SILENT:-}" ]; then
-    echo "[watch] node census: silencing node(s) $PAD_NB_SILENT - $GAME's own" \
-         "device table names no board there"
+    echo "[watch] node census: silencing node(s) $PAD_NB_SILENT on $GAME -" \
+         "${NB_WHY:-reason unavailable}"
 else
-    echo "[watch] node census: silencing nothing (every candidate board is" \
-         "populated, or $GAME's device table did not read)"
+    echo "[watch] node census: silencing nothing on $GAME -" \
+         "${NB_WHY:-reason unavailable}"
 fi
 
 # ---- WHAT THIS RUN ACTUALLY IS, in the run's own log ----------------------

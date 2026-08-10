@@ -269,15 +269,70 @@ These have each been violated at least once and each cost a run or a window:
       real switch names** (104 of them, `QR SCANNER STATUS READY`, `TROUGH 6`…)
       **but NO device table at all** (0 records). Jaws is the mirror image. So
       the two name sources are independent and a title can be missing either.
-      **Resume, in order:** (1) `wsl --shutdown`, then a Jaws run to get a ball
-      into play — that closes the box. (2) Widen the burst-seek absorber to the
-      `(head)` supersede and re-measure ch2's supersede count on star_wars_le;
-      the before number is 36 of 63. **Rig state after this pass: NOT CLEAN, and
-      it accumulates one leftover per run** — two `[game]` zombies held by WSL
-      interop relays, each pinning a fuse2fs mount (`alive.sh` = 4 after two
-      runs). They cannot be cleared from inside WSL; `wsl --shutdown` from
-      Windows is the only cure and was left for David rather than taken, since
-      it kills every WSL process on the machine.
+      **★★★ DAVID'S RECORDING (`Recording 2026-08-10 095446.mp4`, 7 s, 210
+      frames) CORRECTED THE DIAGNOSIS, AND IT WAS NOT A VIDEO FAULT AT ALL.**
+      What he called Star Wars flickering is the **TECH ALERTS SCREEN
+      alternating with black** — 31 whole-picture changes in 7 s, scene score
+      ~13.8 each, gaps 66-594 ms. The screen names the fault itself:
+      `Check Node Board 2 : Not Registered`, plus 14 and 7 Not Responding and
+      10/13 Version Mismatch. **That is the same node-2 fault, and this rig's
+      own caution left it in place:** star_wars_le yields ZERO device records,
+      so the census declined and silenced nothing.
+      **FIXED AND VERIFIED ON THE GAME'S OWN SCREEN, `31b9cfb`.** The census
+      falls back to the SWITCH LIST when the device table will not parse. After
+      it, Star Wars shows **three alerts instead of six — node 2 Not Registered
+      is gone, and so are 14 and 7** — and one Service Back press takes it to
+      **attract mode, PLAYER 1, CREDITS 0, correct video**
+      (`c:/tmp/item27/sw_after.png`, `sw_pressed.png`).
+      **The fallback's known risk is written into `silent_nodes()`:**
+      john_wick_le's node 2 has 288 LEDs and NOT ONE SWITCH, so this test would
+      call it absent — safe only because that title's device table reads and the
+      branch is never taken. All seven titles now answer: godzilla/jaws silence
+      2 on the device table, john_wick silences nothing, and
+      star_wars/led_zeppelin/elvira3/turtles silence 2 off the switch list.
+      **★★ SECOND BUG, FOUND BY THE SAME RUN AND NOT YET FIXED: THE RIG THINKS
+      STAR WARS IS PAST TECH ALERTS WHEN IT IS SITTING ON THEM.**
+      `gs_past_alerts()` tests for `factory_make("filesrc")`, and star_wars_le
+      serves clips WHILE on the Tech Alerts screen, so `gs_state` returned
+      `attract` and `autoattract.sh` logged **"already past Tech Alerts; nothing
+      to do"** and never pressed. **The game therefore sits there for ever
+      unless a human presses Service Back** — which is exactly what David was
+      looking at. This is the same class of fault `gamestate.sh` was created to
+      abolish (two answers to "where is the game", one wrong), resurfacing on a
+      title it was never tested against. **Do not just make autoattract press
+      anyway: a press that lands after the game HAS left the alerts walks into
+      the service menu, which is documented in autoattract.sh's own header.**
+      **★ THE FLICKER ITSELF IS NOT FIXED. DAVID, WATCHING ATTRACT MODE AFTER
+      ALL OF THE ABOVE: "it's still flickering quickly though."** So it is a
+      SECOND fault, independent of the Tech Alerts screen, and the Tech Alerts
+      recording measured the wrong one. The live lead is unchanged: on this run
+      **ch2 superseded 19 of 38 serves, 30 serves died under 5 frames**, and the
+      shape is a burst at each clip END — `ffmpeg ended -> serving -> superseded
+      (head) after 2 frames -> serving -> superseded (head) after 3 -> serving`,
+      all inside ~60 ms, repeating every ~12 s (padvid t = 136.48, 148.48,
+      156.52, 168.54, 180.54).
+      **RULED OUT AS AN INSTRUMENT, and it cost a false negative: `ffmpeg
+      -f x11grab -i :0` inside WSL.** It records the X root and comes back
+      **entirely black** — a 6 s grab scored ZERO picture changes against 31 in
+      David's own 7 s clip, which would have read as "fixed". The frames were
+      checked before the number was believed, per this rig's own rule, and the
+      number was thrown away. **Measure this from the WINDOWS side**, the way
+      David's own recording was made; `shotwin.py` already finds the window by
+      title and is the place to start.
+      **Resume, in order:** (1) fix `gs_past_alerts` so autoattract works on a
+      title that plays clips during Tech Alerts — without making a stray press
+      walk into the service menu. (2) The flicker: widen the burst-seek absorber
+      to the `(head)` supersede case (the rig already logs "absorbing it" for
+      the same-clip re-arm on ch1 and does not catch this), and score it with a
+      WINDOWS-side capture against David's clip as the labelled example — before
+      36 of 63, this run 19 of 38. (3) A Jaws run to get a ball into play, which
+      is the last thing the box needs.
+      **A RUN MAY STILL BE LIVE** — star_wars_le, 8 min backstop, left up
+      deliberately because David was watching it. Check `alive.sh` before
+      starting anything. **Earlier in the pass the rig accumulated a `[game]`
+      zombie plus a pinned fuse2fs mount per run** (`alive.sh` = 4 after two);
+      WSL was restarted between then and now, which cleared them, and
+      `wsl --shutdown` from Windows remains the only cure when it recurs.
 
 - [ ] **23. The game exits by itself mid-play.** `S1 D2` *(**D4 → D2,
       2026-08-06 evening, off item 11's runs:** a SECOND fault shape now has

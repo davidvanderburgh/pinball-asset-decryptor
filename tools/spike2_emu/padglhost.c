@@ -208,6 +208,21 @@ static unsigned vid_last_off = 0xffffffffu;
 /* item 11: where padglhost's per-frame time goes. */
 static double conv_us, swap_us;
 static long vid_last_frame, vid_swaphist[6];
+/* ★ ITEM 27, the star_wars black flicker: WHAT EACH SWAP ACTUALLY CARRIED.
+ * The Windows-side capture measured 32.8% BLACK frames (236 runs, median 2
+ * frames, evenly spread) while every delivery counter read clean and this
+ * process drew a flat 60 fps - so the black is being DRAWN, and the question
+ * is what the game put in each frame. Per swap: which padvid channels had a
+ * video texture uploaded since the previous swap (a bitmask), and whether any
+ * draw call happened at all. If the masks ALTERNATE between two channel sets,
+ * the game is interleaving two scene compositions into one surface at 60 Hz,
+ * and the darker scene is the flicker; if no-draw swaps dominate, it is
+ * clear+swap. One histogram splits the theories in one run. */
+static long swap_content_hist[16];       /* video-channel bitmask, ch0..ch3 */
+static long swap_content_hi;             /* any channel >= 4 saw an upload  */
+static long swap_nodraw, swap_total;
+static unsigned swap_vidmask;            /* since the last SWAP */
+static int swap_draws;
 static int gl_tick;             /* PAD_GL_TICK=1: draw the per-swap counter */
 static double now_s(void);
 static const char *dump_dir;
@@ -2595,6 +2610,12 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
     }
     switch (op) {
     case PADGL_SWAP:            present(); hdr->frame_ack++;
+                                /* item 27: what did this frame carry? */
+                                swap_total++;
+                                swap_content_hist[swap_vidmask & 15]++;
+                                if (swap_vidmask >> 4) swap_content_hi++;
+                                if (!swap_draws) swap_nodraw++;
+                                swap_vidmask = 0; swap_draws = 0;
                                 /* frame boundary: a journal request answered
                                  * here is a frame-consistent snapshot */
                                 jgl_poll(0, 0); break;
@@ -2689,6 +2710,13 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
          * one, which is a different fault from the host not producing one.
          * Reported per second beside the fps line. */
         vid_uploads++;
+        /* item 27: note which channel this frame's video came from, for the
+         * per-swap content mask. The offset names the channel by construction
+         * (the guest addresses frames by distance from the ring base). */
+        if (src == PADGL_SRC_VIDSHM) {
+            unsigned swch = u[4] / (PADVID_SLOTS * PADVID_SLOT_BYTES);
+            swap_vidmask |= 1u << (swch > 31 ? 31 : swch);
+        }
         if (src == PADGL_SRC_VIDSHM && u[4] != vid_last_off) {
             /* ★ SWAPS PER VIDEO FRAME - the hold, measured where it is SEEN.
              * The renderer swaps 60/s and video arrives 30/s, so every video
@@ -3052,6 +3080,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                         "ahead of its scene rebuild\n", draws_skipped);
             break;
         }
+        swap_draws++;                            /* item 27: this frame drew */
         p_glDrawArrays(u[0],(int)u[1],(int)u[2]); break;
     case PADGL_DRAWELEMENTS:
         if ((vao_on[cur_vao_g] & (unsigned short)~vao_backed[cur_vao_g])
@@ -3062,6 +3091,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                         "ahead of its scene rebuild\n", draws_skipped);
             break;
         }
+        swap_draws++;                            /* item 27: this frame drew */
         p_glDrawElements(u[0],(int)u[1],u[2],
                          (const void *)(unsigned long)u[3]); break;
     case PADGL_NOP:             break;
@@ -3332,6 +3362,26 @@ int main(int argc, char **argv)
                             vid_swaphist[1], vid_swaphist[2], vid_swaphist[3],
                             vid_swaphist[4], vid_swaphist[5], h / dt);
                     memset(vid_swaphist, 0, sizeof vid_swaphist);
+                }
+                /* item 27: the per-swap content masks - see the declaration.
+                 * Printed as maskxcount, mask bit N = video from channel N;
+                 * mask 0 with draws is a frame composed without any video. */
+                if (swap_total) {
+                    char sc[200]; int sp = 0, mi;
+                    sp += snprintf(sc + sp, sizeof sc - (unsigned)sp,
+                                   "[padglhost] swap content:");
+                    for (mi = 0; mi < 16; mi++)
+                        if (swap_content_hist[mi] && sp < (int)sizeof sc - 24)
+                            sp += snprintf(sc + sp, sizeof sc - (unsigned)sp,
+                                           " %xx%ld", mi, swap_content_hist[mi]);
+                    if (swap_content_hi && sp < (int)sizeof sc - 24)
+                        sp += snprintf(sc + sp, sizeof sc - (unsigned)sp,
+                                       " hix%ld", swap_content_hi);
+                    snprintf(sc + sp, sizeof sc - (unsigned)sp,
+                             "  no-draw %ld/%ld\n", swap_nodraw, swap_total);
+                    fputs(sc, stderr);
+                    memset(swap_content_hist, 0, sizeof swap_content_hist);
+                    swap_content_hi = swap_nodraw = swap_total = 0;
                 }
                 if (dbg) dump_op_histogram();
                 last_frames = frames_done; last_report = now_s();

@@ -770,12 +770,547 @@ These have each been violated at least once and each cost a run or a window:
       with no firmware at all. Do that first if a pass has to produce
       something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
 
-- [ ] **13. Save and load save states.** `S2 D2` ← IN PROGRESS *(**2026-08-08
-      night: THE WINDOWED FLOW WORKS END TO END, David watching: "it looks
-      like from my point of view that the save / load state feature works 🙂
-      audio and video and everything."** D stays D2: nothing is left to
-      DISCOVER, but the mid-ball acceptance read and the card-run confirm
-      each still need a run, which is the D2 line.)*
+- [ ] **19. Save and load a replay from the game window itself.** `S3 D4` — S3
+      because item 16's command line is the workaround and nobody loses a run to
+      typing it; D4 because it cannot start until 16 ships the engine and the
+      file format, and because its trigger is a KEY PRESS in the WSLg window,
+      which this rig has recorded twice as un-injectable (SendInput is
+      UIPI-blocked — items 7 and 12), so confirming it needs David's hands or a
+      keysim rather than a script.
+      **David picked the game window and its Controls legend** (`padglhost.c`,
+      C/X11), asked and answered 2026-08-06, over the virtual playfield and the
+      app's Emulate tab. One key saves the session's replay, one key loads and
+      plays one back, both listed in the legend beside the switch keys.
+      **The structural thing in the way:** `binds[]` (`padglhost.c:646`) has no
+      concept of a key that is not a switch — every row carries an `ids[]` and
+      goes through `sw_publish()`. A replay key is the first binding that does
+      something else, so the table and `legend_open`'s drawing of it grow a new
+      kind of row. No function key is bound today, so F9/F10 are free.
+      **Depends on item 16, and must not invent a second format:** whatever
+      16's driver reads is what this writes.
+      **Acceptance:** with no shell and no helper scripts, a key in the game
+      window writes a replay of the session so far and says so in the log; a
+      second key plays one back on a fresh run; the replayed run's `[sw]` stream
+      matches the saved one within item 16's stated tolerance. Both keys appear
+      in the Controls legend.
+
+- [ ] **22. Start Emulator leaves the game window BEHIND the app.** `S3 D3`
+      **Observed 2026-08-06 (David):** pressing Start Emulator in the app's
+      Emulate tab should bring **all** the emulator windows out over the PAD
+      application. The **game window comes up behind the app**, while the
+      **Controls window comes up above it**. A run opens three top-level
+      Windows windows, and `shotwin.py` sees all three by title:
+      `godzilla_pro - Stern Spike 2 emulator (Ubuntu)` and
+      `Controls - Spike 2 emulator` (both X11 out of `padglhost.c`, RAIL-proxied
+      by msrdc.exe) and `godzilla_pro - virtual playfield` (`playfield.py`, an
+      ordinary Windows Tk process started through interop by `watch.sh`).
+      **The asymmetry is the clue and it is worth keeping as observed rather
+      than diagnosed:** the two that disagree come from the SAME process and are
+      mapped the same way, `XMapWindow` at `padglhost.c:989` (legend) and in
+      `win_open()` at `:1048`, with `legend_open(scr)` called from `:1121`.
+      **GUESS, not established:** they are mapped at different TIMES — the game
+      window waits for the guest's first frame, ~15 s into the boot, by which
+      point the app has been clicked and holds the top, while the legend is
+      created inside the same `win_open()` path. Nobody has read the actual
+      z-order, so this is a hunch and must not be treated as a finding.
+      **★ THE OBVIOUS FIX IS BANNED HERE, and this is why the item says so up
+      front. `SetWindowPos` on an emulator window is a standing non-negotiable**
+      (top of this file): it froze David's windows once, and the handoff records
+      a programmatic `SetWindowPos` growing the frame while the picture stayed
+      1360x768 in the corner, because a RAIL proxy and the X client then
+      disagree about the window. `SetForegroundWindow` is the same shape.
+      So the raise has to come **from inside X** (`XRaiseWindow` on padglhost's
+      own two windows, the same rule item 5 landed on for MOVING them), and the
+      playfield is our own Tk process so Tk's own `lift()` is native there and
+      is not the RAIL trap. **A third option needs no window manipulation at
+      all and may be the right one:** have the APP stop holding the top after
+      the button press, rather than having three other windows fight it.
+      **Acceptance:** press Start Emulator and, once the game window appears,
+      all three emulator windows are above the app with no clicking — verified
+      by reading the real z-order, not by eye. `shotwin.py` already enumerates
+      the windows by title; `EnumWindows` returns them IN z-order, so the
+      instrument is a few lines on top of what exists. State whether dragging
+      and the window-position restore (item 5, `19e1b85`) still work afterwards,
+      because that is exactly what the banned fix broke.
+      — S3: nothing is broken and the workaround is one click. D3: it needs a
+      run and it should show every time, the instrument is a small extension of
+      `shotwin.py`, but the cheap fix is forbidden and the safe one crosses the
+      X/Windows boundary.
+
+- [ ] **26. Right-click-hold a switch to RIP IT, for spinners.** `S3 D4`
+      **★ DAVID, 2026-08-06: "for switches, let's also add a right click hold
+      function that 'rips the spinner' as long as the click is held."**
+      The sibling of item 24: left-hold closes a switch and keeps it closed,
+      right-hold should make it close over and over for as long as the button
+      is down, the way a ball spinning a spinner does. **Godzilla's three
+      spinners: 47 LEFT SPINNER (node 8 bit 9), 83 TOP SPINNER (node 9 bit 21),
+      84 RIGHT SPINNER (node 9 bit 28).** No `<Button-3>` binding exists
+      anywhere in `playfield.py` today.
+      **★★ ESTABLISHED AT THE DESK, from `hwshim.c`, and it decides the whole
+      shape — do NOT build a host-side pulse loop.** The `0x11` switch scan
+      replies with a per-switch LEVEL, not a closure count: `hwshim.c:4464` is
+      `if (held) level = !level` into a bitmap. So the game counts spins by
+      DIFFING successive scans, which caps the rip at **one closure per scan of
+      that switch's own node** however fast anything pulses. Two rates bound it
+      and they are not the same number: the poll itself is described as a
+      37.5 Hz scan (`hwshim.c:5665`), but item 17 measured the gap between two
+      scans of ONE node running to **670 ms in attract**. The during-play
+      per-node rate has never been measured and is the first thing to find out.
+      **Which also kills the obvious implementation.** Each host action is a
+      ~80 ms `wsl.exe` spawn (item 24, measured) and each closure needs two, so
+      a host-side ripper tops out near 6 closures/s while saturating
+      SwitchDriver's queue and blocking every other switch action including a
+      release.
+      **THE DESIGN THIS POINTS AT, not yet built:** a SPIN flag in the shared
+      block, and `hwshim.c` flips the reported level on each scan of that node
+      while the flag is set. That delivers the maximum rate the wire can carry
+      by construction and costs ONE interop call on press and one on release,
+      exactly like `swhold.py`. Right-click then rides item 24's `SwitchDriver`
+      queue unchanged.
+      **What makes it D4 rather than D2: it spans the boundary.** A new flag
+      means `padsw.h`, `padsw.py`, a new `swspin.py`, `hwshim.c` and
+      `playfield.py` — and the block layout is THREE hand-kept copies, which is
+      what `swlayout.sh` (item 16, `145e79b`) exists to prove agree. Run
+      `swlayout.sh` before believing any of it. A rebuild is needed, so no run
+      may be live. The ladder would call a boundary-spanning change D5; it is
+      D4 because the mechanism above is already read off the source and the
+      design is written down, which is what D5 usually pays for.
+      **Acceptance, and the oracle must be on the GAME's side of the wire:** a
+      right-hold on a spinner produces many closures the GAME SEES, not many
+      writes this rig made. Count them with item 17's `PAD_SW_PEND` /
+      `swladder.py`, which read the game's own `entry[+24]`, and state the
+      achieved closures per second against the measured per-node scan rate.
+      Left-click hold must still behave as item 24 shipped it, and a right-hold
+      must end OPEN — the stuck-switch failure is the same one, and
+      `swholdtest.py` is the harness that already checks for it.
+      — S3: nothing is broken and a spinner can still be closed once per click,
+      so no shot is unreachable; what is missing is the magnitude. D4, armchair
+      beyond the desk work above.
+
+- [ ] **29. Switch names come back as `?` on most titles, so the schematic
+      playfield is a list of numbers and switch positions cannot be joined.**
+      `S2 D4`
+      **MEASURED 2026-08-06 across four card runs, and the split is clean:**
+      Led Zeppelin LE 1.22.0 **96 of 96 rows `?`**, Elvira's HoH 1.13.0 **109 of
+      109 `?`**, Jaws LE 1.02.0 **108 of 108 `?`** — and **John Wick LE 1.01.0
+      0 of 105**, real names (`QR SCANNER STATUS READY`, …). Godzilla is also
+      fine. So this is per title, not universal, and at least two titles prove
+      the reader itself works.
+      **WHAT IT COSTS, and it is two separate things.** (a) The schematic view
+      draws 96 rows that all say `?`, so you cannot tell which switch you are
+      about to close — see the screenshot behaviour in item 27's sense of "see a
+      switch layout". (b) `switch_xy` is joined on the NAME, so a title with a
+      perfectly good device table gets **no clickable positions at all**: Jaws
+      has 78 switch records with names and coordinates in its binary and scored
+      `NONE of the 108 switches matched a device-table name`.
+      **ESTABLISHED AT THE DESK, from `hwshim.c`:** the name is
+      `msg_row(*(nameobj + 16))` at `hwshim.c:3574`, and `msg_row` (`:3219`)
+      opens with `if (!MSG_LANG) return 0;`. `MSG_LANG` is
+      `TITLE_ADDR(a_msg_lang, "PAD_MSG_LANG", 0x708330u)` — a **Godzilla Pro
+      1.15.0** address (`:2960`).
+      **BUT THE OBVIOUS ONE-LINE FIX IS PROBABLY NOT IT, and this is the trap
+      worth writing down before someone spends a pass on it.** `title_addr()`
+      (`:1267`) returns the default whenever it is merely READABLE, and this
+      file already records that trap for the switch table: *"EHOH's binary is
+      big enough to cover Godzilla Pro's 0x7a958c, so a_sw_struct() returned an
+      address … and the shim read a switch table out of somebody else's data."*
+      So on these titles `MSG_LANG` is most likely non-zero-but-wrong, the
+      early-out never fires, and `msg_row` is instead failing one of its two
+      range checks on `row` or `row[0]`. **Making `!MSG_LANG` fall back to
+      language slot 0 is therefore a guess, not a fix** — and note `msg_row`
+      ALREADY tolerates a garbage `lang` (it validates `lang < 5` and the
+      resulting pointer, falling back to slot 0), which is more evidence the
+      early-out is not where this dies.
+      **FIRST JOB IS AN INSTRUMENT, WHICH IS THE D4.** Print `nameobj`, `row`,
+      `row[0]` and `MSG_LANG`'s value for the first few switches on a title that
+      fails and on John Wick, which does not. That says in one run whether the
+      name object is absent, at a different offset, or pointing at a message
+      table this shim cannot resolve. Only then choose between a per-title
+      `PAD_MSG_LANG`, a shape-based finder like `sw_find_table`, and reading the
+      names some other way.
+      **RULED OUT — joining on the NUMBER instead.** `switchxy.py`'s own header
+      says why: the device table's `index` is a sequential position within its
+      board and not the hardware bit (node 8 runs bits 9,10,11… against index
+      8,9,10…, then the hardware skips 21-23 and the index does not), so a
+      numeric join "produces a map that looks right and presses the wrong
+      switch". Do not reach for it as a workaround.
+      **Acceptance:** on a title that fails today, the schematic shows real
+      switch names, and a title that also ships a device table gets its switches
+      placed on the artwork. State which titles you checked and include one that
+      already worked (John Wick or Godzilla) as a regression control.
+      — S2: the playfield opens, is clickable and the keyboard works, so nobody
+      is blocked from playing; what it costs is that the switch layout is
+      unreadable on three of the four titles tried and that positions are
+      unavailable on a title whose binary has them. Arguable as S1 against item
+      27's wording, which asked to "see a switch layout". D4: the mechanism is
+      NOT established, the leading theory is explicitly marked above as probably
+      wrong, and it needs a guest-side instrument and a run before anything can
+      be chosen.
+
+- [ ] **30. In the container, a run ends by itself after about 60 seconds.**
+      `S2 D3`
+      **MEASURED 2026-08-07, Docker Desktop on WINDOWS (not the target - see
+      below). Everything about the run is healthy until it stops.** Guest
+      producing **57.1 fps** (`[eglshim] 3460 frames in 60559 ms`), renderer
+      59.9/59.6 fps and 56.5 avg, card mounted, tables built from the card,
+      playfield window open, teardown clean and `alive.sh` 0 after. Then at
+      ~62 s: `[watch] stopping...` and nothing else.
+      **ESTABLISHED, and it rules out the obvious causes.** `watch.sh`'s poll
+      loop has exactly three exits and **NONE of their messages printed** —
+      not `renderer exited (window closed)`, not `the game exited`, not
+      `N min backstop reached` — and the script never reached the
+      `grep -aE 'fps|stopped' "$HOSTLOG"` line that sits between the loop and
+      the end of the script. So the loop did not break: the script took a
+      SIGNAL, and one whose trap could still run (`[watch] stopping...` is
+      printed BY teardown), so SIGINT or SIGTERM and not SIGKILL. `cfg MINS=3`
+      is in the log, so the backstop was 180 s and not 60.
+      **RULED OUT:** the test harness (it happens with the PowerShell pipeline
+      removed and output going to a file); anything the rig starts (grepped
+      `autoattract.sh`, `gamestate.sh`, `status.sh` — no `kill` anywhere); the
+      guest exiting on its own (teardown had to SIGKILL it, so it was alive);
+      the wall-clock backstop; and the OOM killer, which sends SIGKILL and
+      would not have let the trap run.
+      **THE TEST PLATFORM IS NOT THE TARGET, and that has to be settled first.**
+      This was Docker Desktop on **Windows**, which runs containers inside a
+      WSL2 VM. macOS uses a completely different VM layer. The container is
+      identical; the thing around it is not. So the FIRST job is to find out
+      whether this reproduces on a Mac at all — it may be an artefact of the
+      Windows host and no macOS user would ever see it.
+      **Second, cheaper job if it does reproduce:** put a signal trap in
+      `watch.sh` that names what it received (`trap 'echo "[watch] got SIG$s"'`
+      for INT/TERM/HUP), which turns one run into an answer. HUP is the
+      candidate worth suspecting given a container's session semantics.
+      **Related and unexplained: NO VIDEO in the container.** `padvidhost.py`
+      came up (`ready: /pad/rootfs/dump/padvid (95 MB, 8 channels x 4 slots)`)
+      but zero clips streamed in either run, where a WSL run of the same card
+      streams continuously. Not investigated at all.
+      **Acceptance:** a container run reaches its wall-clock backstop and says
+      so, on the platform it is for. State which host you tested on, because
+      this item exists because that distinction was not controlled for.
+      — S2: the emulator runs at full speed in the container, so nothing is
+      broken outright and this is not S1; what it costs is that no macOS
+      session lasts longer than a minute, which is most of the value. D3: it
+      needs a run, it reproduces every time, and the instrument is a one-line
+      trap - the unknown is which host it belongs to, not how to see it.
+
+- [ ] **32. Stretching the game window brings the emulation to a crawl.**
+      `S2 D3`
+      **★ DAVID, 2026-08-07: "stretching the display size for the stern spike 2
+      emulator window brings the emulation to a crawl (like when I make it 3 or
+      four times larger)."** The desktop is 3840x2160 at 120 Hz, so "3 or four
+      times" the default 1360x768 is at or past maximised.
+      **ESTABLISHED AT THE DESK, FROM THE SOURCE, AND IT NARROWS THE SEARCH
+      BEFORE ANY RUN: the guest's own drawing does NOT grow with the window.**
+      `fb_w`/`fb_h` are set once from `PAD_GL_W`/`PAD_GL_H` (`padglhost.c:2079`)
+      and the guest renders into `tex_screen` at that size whatever the window
+      does. The only thing that scales is `win_present()` (`padglhost.c:1367`):
+      one textured quad letterboxed into `win_w x win_h`, then `eglSwapBuffers`.
+      **ARITHMETIC, NOT A MEASUREMENT, so treat it as a reason to look further
+      rather than as a result — and it says the GPU fill is NOT enough on its
+      own.** `gpuprobe` measured the default adapter (the AMD iGPU, item 18) at
+      **1.096 ms/frame for 4 full-screen 1080p quads = 8.29 Mpixel**. The blit is
+      1.04 Mpixel at 1360x768 and ~8.3 Mpixel maximised, i.e. **~0.14 ms →
+      ~1.1 ms against a 16.7 ms budget**. That is real but it is not a crawl, so
+      do not stop at "it is the integrated GPU". The untested suspects are
+      downstream of the quad: the per-frame **cross-adapter copy** to a display
+      the NVIDIA card owns, the **msrdc RAIL present** of a much larger surface,
+      and whether either back-pressures the guest through the swap.
+      **RELATED MEASUREMENT, so nobody re-derives it: item 18 found msrdc CPU is
+      not pixel-proportional** — a quarter of the pixels moved it 72.1 → 70.3.
+      **But that was tested DOWNWARD from the default and never above it**, which
+      is the whole range this item is about.
+      **EVERY INSTRUMENT NEEDED ALREADY EXISTS AND THE THREE SEPARATE THE TWO
+      HALVES:** `[eglshim] N frames in M ms = X fps` is the GUEST's own rate,
+      `padglhost`'s `fps` line is the HOST's, and item 11's `swap_us` says how
+      long `eglSwapBuffers` blocks. Guest fps falling with host fps while
+      `swap_us` balloons is back-pressure; host fps falling alone is a display
+      cost only. **A free fourth oracle needs no instrument at all: audio does
+      not go through the renderer** (`padplay.py`, Windows side), so if the sound
+      crawls too, the guest genuinely slowed.
+      **REPRO WITHOUT TOUCHING A WINDOW, which matters because `SetWindowPos` on
+      an emulator window is a standing non-negotiable:** item 5 (`19e1b85`) made
+      `.pad_windows` lines `key x y [w h]` and padglhost CREATES at the saved
+      size — so write a big size in and start the run. If a resize DURING a run
+      is wanted, item 5's verified technique is a SendInput corner drag from a
+      DPI-aware process, not a programmatic move.
+      **Two levers exist but are knobs awaiting an A/B, not fixes:**
+      `PAD_GL_ADAPTER` (built for item 18, **unset by default**) points Mesa at
+      the NVIDIA card, and `PAD_GL_WIN_EVERY` presents every Nth frame.
+      **Acceptance:** state the window size in pixels and all three rates (guest
+      `[eglshim]`, host `fps`, `swap_us`) at the default size and at ~4x, on the
+      same run recipe — that pair alone is the finding, and it is worth a commit
+      even if no fix follows. A FIX means the guest's own fps holds at ~4x within
+      a stated margin of its default-size figure, with the picture still correct
+      and letterboxed, and dragging plus the item 5 size restore still working
+      afterwards — that is exactly what the banned fix broke.
+      — S2: play works at the default size so nobody is blocked outright, which
+      is why it is not S1; what it costs is playing at a viewable size on a 4K
+      desktop, and it makes every item whose oracle is David's eyes (1d's fade
+      curves, 21's trough markers) dearer by pinning the window small. Arguable
+      as S1 if you read "the game visibly misbehaves while you are playing it" as
+      covering a size the user chose. D3: needs a run, it shows up the moment you
+      look, and all three instruments exist and are validated — the unknown is
+      which stage of the present path pays, not how to see it.
+
+- [ ] **33. Save-state slots are invisible: nothing shows what exists or what
+      it costs.** `S3 D2` **★ DAVID, 2026-08-09: "maybe our save states are not
+      being pruned?... we should have clear visibility of what kind of space
+      they're taking up."** Asked while chasing that day's startup freeze, which
+      turned out to be unrelated (v0.120.3, a poisoned log line) — but the
+      visibility gap he tripped over is real: the only way to see slots today
+      is `du -sh` inside WSL.
+      **Measured 2026-08-09:** slots live in `<rootfs>/saves/<slot>` (criu
+      dumps, `savegame.sh:48`); on this machine `/home/david/spike2root/saves`
+      = quicksave 511 MB + wtest 475 MB = 985 MB. **Pruning is NOT broken and
+      is not the job** — `savegame.sh` `rm -rf`s a slot before each re-dump, so
+      growth is bounded per slot name; what is missing is the LIST. The GUI
+      half rides on item 13's StateOps mixin (both playfield views' Save/Load
+      buttons), and any slot browser must respect restorestate.sh's pre-flight
+      rules (a dead-tty or gone-card slot is refusable, and saying WHY in the
+      list would save a failed load).
+      **Related cleanup found the same day, David to confirm before anyone
+      deletes:** `/home/david/wtest.log` is 13 GB of watch.sh test debris;
+      `~/cardcache` is 43 GB and is EXPECTED (per-title tables), keep it.
+      **★ THE CORE ASK SHIPPED 2026-08-10 with item 13's GUI batch (~90%):
+      the Emulate tab's Save states manager lists every slot with name,
+      game, size and date, totals them against the WSL disk's free space,
+      and Renames/Deletes** (slots.sh, root, guarded). David can now
+      delete `wtest` himself from the tab. REMAINING here: the list does
+      not yet flag a REFUSABLE slot (dead-tty / gone-card per
+      restorestate.sh's pre-flight) with the reason a load would fail -
+      the polish this item's text asked for beyond the list itself.
+      **Acceptance:** wherever Save/Load already lives (playfield bar and/or
+      Emulate tab), the user can see every slot with its size and save time
+      plus a total, and can delete a slot from there; the numbers match `du`
+      on the same moment. — S3: a `du` in WSL answers it today, nothing is
+      broken. D2: the mechanism is fully known (list a directory, stat, rm),
+      but the UI half wants a windowed session to verify, which is what keeps
+      it off D1.
+
+- [ ] **34. Booting the same card from a different path re-copies the whole
+      image, so "first run only" slowness comes back.** `S3 D2`
+      **Observed 2026-08-09 (David's godzilla_pro session):** "Startup In
+      Progress" for ~3 min — first frame at 177 s against the ~15 s a cached
+      boot takes — with input laggy while the copy competed with the boot's own
+      9p reads, and the placeholder-looking attract screens that follow a boot
+      nobody advances confused the whole session.
+      **ESTABLISHED AT THE DESK, from the source:** `cardmount.sh`
+      `cache_pick()` validates the local copy against a stamp of
+      `stat -c "%n %s %Y"` — the PATH is part of the identity. David has the
+      byte-identical card (size 7861174272, mtime Jul 28 12:45:11) at three
+      paths — a D: shortcut target, repo `images/Stern/spike2/`, and the
+      OneDrive Desktop — and every path switch invalidates the stamp and
+      re-runs the full 7.3 GB dd while the game boots off the un-cached 9p
+      mount. `~/cardcache/godzilla_pro-1_15_0_spike2.log` carries EIGHT
+      "local cache complete" lines, and the stamp was watched flipping
+      repo → Desktop within 13 minutes on 2026-08-09.
+      **Fix:** compare size+mtime only (fields 2-3 of the stamp), keeping
+      invalidation for a genuinely new build — a re-exported card gets a new
+      size/mtime and still re-copies. **The trade, and say it in the commit:**
+      two DIFFERENT cards sharing a label AND coincidentally identical
+      size+mtime would wrongly share a cache — vanishingly unlikely for card
+      images, but it is a real narrowing of the identity.
+      **Acceptance:** boot one card from two different paths back to back; the
+      second boot logs `using local cache` and starts no copier; then touch the
+      image's mtime and confirm that boot DOES re-copy. State the
+      boot-to-first-picture time of the second boot.
+      — S3: nothing is broken and the workaround is total (launch from one
+      consistent path); what it costs is a ~3 min boot and a confusing session
+      whenever paths alternate. D2: the change is a few characters in one
+      comparison, established from the source above; the acceptance needs one
+      confirming session of two boots plus the negative case, which is what
+      keeps it off D1.
+
+- [ ] **35. Star Wars and Venom load and play, but the video flickers a lot.**
+      `S2 D3`
+      **★ DAVID, 2026-08-10: "for star wars and venom the game loads, but the
+      video flickers a lot."** Reported while item 27 was being worked, so it is
+      a fresh sighting with nothing measured yet — do not treat anything below
+      as established beyond the two desk facts, which are marked as such.
+      **DESK FACT 1, and it decides whether a pass can start: Star Wars is on
+      this disk and Venom is NOT.** `~/cardcache` holds
+      `star_wars_le-1_30_0.raw`; there is no Venom card anywhere on the machine.
+      So Star Wars is reproducible today and Venom needs David's card before it
+      can be looked at at all. **State which of the two you tested** — "the video
+      flickers" on two titles may be one fault or two, and this rig has already
+      been bitten by merging distinct faults under one description (item 23
+      holds THREE exits and says so).
+      **DESK FACT 2, probably NOT the cause but worth knowing before it is
+      rediscovered: `star_wars_le` is one of the titles whose DEVICE TABLE does
+      not read at all** — `nodecensus.py` gets 0 records from its binary, as do
+      `led_zeppelin_le` and `turtles_pro` (item 27, `3c95b49`). That is the same
+      reader gap as item 29's `?` switch names. It affects the playfield window
+      and the node census, and there is **no known path from it to video**, so it
+      is recorded to save a pass rediscovering it, not offered as a theory.
+      **THE INSTRUMENTS ALL EXIST, WHICH IS THE D3.** Three video faults have
+      already been closed on this rig and each left its measurement behind:
+      item 15 (every clip played the SAME video — channel assignment order),
+      item 6 (scene video noise in the TV inset — a three-pipeline burst inside
+      130 ms) and item 11 (the ~7 s stutter). `padvidhost.py` logs `[padvid]
+      chN serving WxH N frames ... <asset>` per clip serve, and item 32 names
+      the three rate oracles that separate guest from host: `[eglshim] N frames
+      in M ms` is the GUEST's rate, `padglhost`'s `fps` line is the HOST's, and
+      `swap_us` says how long `eglSwapBuffers` blocks.
+      **FIRST JOB IS TO SAY WHAT "FLICKERS" IS, because the three closed faults
+      above all looked like "the video is wrong" from the chair and were three
+      different mechanisms.** Candidates worth separating on the first run, and
+      the logs above distinguish them without a new instrument: frames arriving
+      and being dropped (host fps healthy, guest fps not), the same clip being
+      re-served repeatedly (repeated `[padvid] serving` lines for one asset),
+      channel takeover (two channels fighting for one slot — item 15's shape),
+      or a present-path cost (item 32's territory, and note David's desktop is
+      4K/120Hz on the NVIDIA card while Mesa may be on the AMD iGPU).
+      **Acceptance:** name the mechanism with a number against it, and say which
+      title(s) it was measured on. A fix means the flicker is gone by David's
+      eyes on the title he reported — his eyes are the oracle here, as they were
+      for item 1d's fade curves — with the run's own rates stated before and
+      after.
+      — S2 because both titles LOAD and play, so nobody is blocked outright,
+      which is the S1 line; what it costs is that the video is visibly wrong
+      while you play, on two titles. Arguable as S1 on "the game visibly
+      misbehaves while you are playing it", and if a pass finds it makes a title
+      unplayable, promote it and say so. D3: it needs a run, David reports it
+      happening "a lot" so it should show up when you look, and every instrument
+      needed already exists and is validated — the unknown is which mechanism,
+      not how to see it. **D4 for Venom specifically until a card exists**, since
+      a pass could otherwise end having learned nothing about half the report.
+
+- [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
+      numbers are here for whenever it is reopened.) ~20 Hz stutter in the
+      first ~10 s.
+      Balanced rather than fixed: `PAD_NB_RESET_US=1000000` takes it from 118
+      voice restarts to 3 at no cost in boot time. Now sits at 5, at the bar.
+      **The metric is a race** (0.1 s = 118, 1.0 s = 3, 2.0 s = 17), so treat
+      3 vs 5 as noise, not a trend. Do not reopen without a reason.
+
+## Reference material that is NOT in this repo
+
+- **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own
+  README. The source WAV plus three captures David has already labelled
+  (flawless / crackly / fixed) and their expected `audioscore.py` scores.
+  **Any new audio metric must reproduce that ordering before it is trusted** —
+  three metrics built on 2026-08-05 failed exactly that check. Also holds
+  `fullplay.sh`, which drives the real `playaudio.sh` end to end, and `feed.py`,
+  which paces a WAV into a FIFO at exactly the right byte rate (`ffmpeg -re`
+  runs ~3.6% slow and starves the player, which then scores as damage).
+- **`C:\tmp\spike2_item18\`** — item 18's captures, both sides of the boundary:
+  `winprof_idle` / `winprof_attract` (Windows) and `rigprof_idle` /
+  `rigprof_attract` (WSL), as .json and .csv. **The idle pair is a reusable
+  CONTROL** — `winprof.py --compare` takes it directly, so pass two does not
+  have to spend 90 s re-measuring a quiet desktop. It is machine-specific, so
+  it lives here rather than in the repo.
+- **`/var/tmp/led_trace_1d.log`** (inside WSL) — item 1d's evidence: 44581
+  lines of `PAD_NB_TRACE=1` with guest-ms timestamps plus 656 `[ledskip]`
+  bodies, from a 2026-08-07 godzilla_pro attract run. It is what all three
+  lamp-frame decodes were scored on, and `ledcensus.py` defaults to
+  `/var/tmp/led_trace*.log` for that reason. Machine-local rather than
+  committed because it is 3.5 MB of one machine's run; **re-capture with
+  `PAD_NB_TRACE=1 PAD_LED_SKIP_LOG=3000 watch.sh N` if it is ever lost**, and
+  note `/var/tmp` and not `/tmp`, which this WSL wipes on restart.
+- **`/var/tmp/criubuild/criu/criu/criu`** (inside WSL) — item 13's CRIU, v4.1,
+  **built from source because criu is NOT PACKAGED for Ubuntu 24.04** (zero apt
+  candidate with universe enabled). `criuladder.sh` defaults to this path and
+  takes `CRIU=` to override. Rebuild with `git clone --depth 1 --branch v4.1
+  https://github.com/checkpoint-restore/criu.git && make -j8`; the build needs
+  the documented deps **plus `uuid-dev`**, which it aborts on without naming,
+  and `libaio-dev` + `python3-yaml` for its own tests. It needs root to run, and
+  `wsl -u root` gives that with no password on this machine. Not committed
+  because it is a 6 MB binary built for one kernel.
+- **`plans/spike2_pc_emulation_handoff.md`** — gitignored on purpose, local to
+  this machine. The deep detail behind every numbered item above.
+
+## Loose ends worth a look, not yet worth a queue slot
+
+- **The Linux path has never been run on a real Linux desktop, and the one part
+  that cannot be tested from here is the playfield WINDOW.** Everything else was
+  exercised with `PAD_FORCE_NATIVE=1` on 2026-08-07 and works: the pulse audio
+  sink is chosen rather than the Windows bridge, the `/mnt/wslg` wait is skipped
+  (0 mentions in the log), the game boots and the renderer averaged **57.9 fps
+  over 120 s**, `alive.sh` printed 0. The window is the gap because THIS WSL has
+  no tkinter at all — which is the entire reason the Windows workaround exists —
+  so the native branch can only be seen refusing correctly and naming the
+  package. Someone with a Linux machine and a card image closes this in one run.
+- **macOS needs a decision, not effort.** `qemu-user` translates *Linux*
+  syscalls, and `unshare`, user namespaces and `chroot` into an ELF rootfs are
+  Linux kernel features, so there is no port — only "run Linux there", via
+  Docker or Lima. **The obvious objection is wrong and worth writing down:
+  software rendering is NOT the blocker.** The handoff's own measured table has
+  llvmpipe at **214 fps** on the real workload against 914 on the GPU; the 1.0
+  fps figure people remember is `glraster.c` INSIDE the emulated ARM guest,
+  which the bridge design already replaced and which a container would not use.
+  The real unknown is the display transport — Docker on macOS has no display, so
+  frames cross X11 to XQuartz — and nobody has measured that. It is an
+  afternoon: run `padglhost` against XQuartz and read the fps it already prints.
+
+- **PROMOTED TO ITEM 31 on 2026-08-07 — "Playfield LED markers choppy in
+  ATTRACT, undiagnosed"** sat here unnumbered from item 11's closure because it
+  had no acceptance condition. It has one now, and a measurement: 2.6 visual
+  updates a second against a status bar reading 30 fps. What this bullet said
+  and item 31 must not lose: in GAMEPLAY the choppiness followed the game's
+  render loop, so item 11's fixes plausibly cover that half; in ATTRACT it did
+  NOT — that loop held 60.1 fps while the LEDs still looked choppy.
+
+- **`plunge.py game` can leave the machine UNABLE to start a game, and it looks
+  like the rig is broken.** `game` is coin → start → plunge, and the plunge
+  takes a ball out of the trough whether or not the Start press took. If it did
+  not take, the machine is now a ball short: the next Start gets `LOCATING
+  PINBALLS / PLEASE WAIT...`, the ball search fails and it drops back to
+  attract, forever. `longplay.sh` then plays a full block to an attract screen —
+  the exact failure its own comments warn about, from a different cause.
+  **The recipe that worked 2026-08-06:** `plunge.py reset`, wait ~8 s for the
+  game to settle, `swpoke.py 36 900`, and only plunge once a game is on screen.
+  A `plunge.py game` that checked for a game before removing the ball would
+  close this; see also item 17 on the press duration.
+
+- **`alive.sh`'s watch.sh pattern matches ANY process whose command line
+  contains it, including one that is merely WAITING for the run to end.** Seen
+  2026-08-06: a shell running `until ! pgrep -f "watch.sh 3"; do sleep 5; done`
+  made `alive.sh` print `run scripts (watch.sh) : 1` and `TOTAL STILL RUNNING :
+  1` **with an empty "what is still up" list underneath** — the count and the
+  listing disagreed, which is the one thing this script exists not to do. Same
+  self-match shape as `playaudio.sh`'s `win_kill` two bullets down. Harmless
+  here (the waiter was mine), but a script that greps for a run and a script
+  that waits for one look identical to it.
+
+- **`padrelay.py` accepts in a `while True` loop and never exits**, where the
+  `audiotcp.py` it replaced did not. `playaudio.sh` ends on `wait $SRV`, so the
+  script may now outlive a run instead of returning when the player goes away.
+  Teardown pkills it either way, and `alive.sh` counts it now, so a leak would
+  at least be visible — but it was not deliberate and it is untested.
+- **`playaudio.sh`'s `win_kill` can shoot itself.** Its `Stop-Process` filter
+  matches on CommandLine only, and its own command line contains the pattern,
+  so powershell.exe is a match for itself. It has always worked in practice
+  (the real player is enumerated first), and the two backstops added in item 12
+  avoid it by also requiring `Name -like 'python*'`. Same shape, one line.
+- **The coin door now lags up to 250 ms** on the virtual playfield: it is read
+  every 8th frame instead of every frame, because it is a second round trip
+  across the VM boundary for a switch a human flips by hand. If that ever feels
+  wrong in use, the fix is to read it on demand after a click rather than to
+  raise the rate.
+- **RESOLVED 2026-08-05: attract-mode LED churn has been watched end to end,
+  and the static half of it is fixed.** The game reaches attract (screenshot:
+  the high-score attract screen); the lamps moved 21 marker clusters per 3 s
+  with half the frames being dropped, and **33 per 3 s** once the a6 fade
+  frames decoded (item 1b). What still drops is item 1d, and it is now
+  ~0.25 frames a second.
+- **The playfield's polite close failed in one card run out of three.** Removing
+  `dump/padled` is meant to make `playfield.py` leave within ~2 s; once it was
+  still up after 5 s and had to be closed the hard way, which loses nothing now
+  but is unexplained. Suspect `\\wsl.localhost` read caching hiding the removal.
+- **New dependency on a fresh machine:** the Windows-side player needs
+  `py -m pip install sounddevice`. Without it `playaudio.sh` falls back to WSLg
+  audio and says so loudly, so it degrades visibly rather than silently.
+
+## Done
+
+- [x] **13. Save and load save states.** DONE 2026-08-10, shipped in
+      **v0.121.0** — the opt-in GUI (toggle + cost tooltip), ten named
+      slots, zstd-packed slots (~5% of raw size), the Launch button, and
+      the cross-session GL journal + switch-state + mid-clip-video fixes
+      all landed and released together. **2026-08-08 night: THE WINDOWED
+      FLOW WORKS END TO END, David watching: "it looks like from my
+      point of view that the save / load state feature works 🙂 audio
+      and video and everything."**
       **★★ REVERTED, THEN RE-LANDED 2026-08-09 — the app-launch flow in (1)
       below was PULLED from main in v0.120.1** (v0.120.0 shipped a startup
       freeze; the GUI went back to v0.119.7, so the Emulate-tab
@@ -1535,10 +2070,16 @@ These have each been violated at least once and each cost a run or a window:
       root-owned files in cardcache/** (give_back() chowns them to the HOME
       owner, same fix watch.sh's logs got). A PAD_GAME_DIR (folder-run)
       bind is still unclassified by savestate.
-      **(3) the formal acceptance read: save mid-BALL, restore, confirm
-      ball, score and mode with `shot.py`, play 60 s, alive 0.** David has
-      accepted the feature live (attract + play, audio + video), so this is
-      the written oracle catching up with the verdict.
+      **(3) DONE — the formal acceptance read, via the NATIVE oracle
+      instead of `shot.py`.** `shot.py`'s PrintWindow never worked under
+      WSLg RAIL (returned 0 on every attempt); the standing replacement
+      is `dump/glshot.req` → padglhost's own `glReadPixels` → `glshot.png`,
+      used for every claim in this item from the GL-journal pass onward.
+      Read against it: save mid-ball (slot `jgame`), restore, and score
+      + mode match EXACTLY (2,335,990, BRIDGE 11/20, TANKS 1/10) in both
+      a same-session load and a cross-session load into a cold boot;
+      play continued past the load (switches answered, video streamed
+      at 28.5-30 NEW/s); `alive.sh` printed TOTAL 0 after every teardown.
       **(4) DONE — leave-running:** demonstrated on a live load:
       restorestate's truncate-retry fired on game.out, audio.raw and
       audio.raw.center and the restore proceeded; play was never paused at
@@ -1567,543 +2108,15 @@ These have each been violated at least once and each cost a run or a window:
       The restore surface is everything `alive.sh` counts — 13 process shapes
       plus the `fuse2fs` card mount and the padled/padsw/padgl/padvid rings.
       Detail in the handoff under **REMAINING item 13**.
-      **Acceptance:** save mid-ball, restore, and the ball number, score and
-      running mode match; play continues 60 s; `alive.sh` prints 0 after.
-      Oracle is `shot.py` before and after. **Name collision:** `save_state` in
-      `playfield.py` is the WINDOW POSITION save — grep will mislead you.
-
-- [ ] **19. Save and load a replay from the game window itself.** `S3 D4` — S3
-      because item 16's command line is the workaround and nobody loses a run to
-      typing it; D4 because it cannot start until 16 ships the engine and the
-      file format, and because its trigger is a KEY PRESS in the WSLg window,
-      which this rig has recorded twice as un-injectable (SendInput is
-      UIPI-blocked — items 7 and 12), so confirming it needs David's hands or a
-      keysim rather than a script.
-      **David picked the game window and its Controls legend** (`padglhost.c`,
-      C/X11), asked and answered 2026-08-06, over the virtual playfield and the
-      app's Emulate tab. One key saves the session's replay, one key loads and
-      plays one back, both listed in the legend beside the switch keys.
-      **The structural thing in the way:** `binds[]` (`padglhost.c:646`) has no
-      concept of a key that is not a switch — every row carries an `ids[]` and
-      goes through `sw_publish()`. A replay key is the first binding that does
-      something else, so the table and `legend_open`'s drawing of it grow a new
-      kind of row. No function key is bound today, so F9/F10 are free.
-      **Depends on item 16, and must not invent a second format:** whatever
-      16's driver reads is what this writes.
-      **Acceptance:** with no shell and no helper scripts, a key in the game
-      window writes a replay of the session so far and says so in the log; a
-      second key plays one back on a fresh run; the replayed run's `[sw]` stream
-      matches the saved one within item 16's stated tolerance. Both keys appear
-      in the Controls legend.
-
-- [ ] **22. Start Emulator leaves the game window BEHIND the app.** `S3 D3`
-      **Observed 2026-08-06 (David):** pressing Start Emulator in the app's
-      Emulate tab should bring **all** the emulator windows out over the PAD
-      application. The **game window comes up behind the app**, while the
-      **Controls window comes up above it**. A run opens three top-level
-      Windows windows, and `shotwin.py` sees all three by title:
-      `godzilla_pro - Stern Spike 2 emulator (Ubuntu)` and
-      `Controls - Spike 2 emulator` (both X11 out of `padglhost.c`, RAIL-proxied
-      by msrdc.exe) and `godzilla_pro - virtual playfield` (`playfield.py`, an
-      ordinary Windows Tk process started through interop by `watch.sh`).
-      **The asymmetry is the clue and it is worth keeping as observed rather
-      than diagnosed:** the two that disagree come from the SAME process and are
-      mapped the same way, `XMapWindow` at `padglhost.c:989` (legend) and in
-      `win_open()` at `:1048`, with `legend_open(scr)` called from `:1121`.
-      **GUESS, not established:** they are mapped at different TIMES — the game
-      window waits for the guest's first frame, ~15 s into the boot, by which
-      point the app has been clicked and holds the top, while the legend is
-      created inside the same `win_open()` path. Nobody has read the actual
-      z-order, so this is a hunch and must not be treated as a finding.
-      **★ THE OBVIOUS FIX IS BANNED HERE, and this is why the item says so up
-      front. `SetWindowPos` on an emulator window is a standing non-negotiable**
-      (top of this file): it froze David's windows once, and the handoff records
-      a programmatic `SetWindowPos` growing the frame while the picture stayed
-      1360x768 in the corner, because a RAIL proxy and the X client then
-      disagree about the window. `SetForegroundWindow` is the same shape.
-      So the raise has to come **from inside X** (`XRaiseWindow` on padglhost's
-      own two windows, the same rule item 5 landed on for MOVING them), and the
-      playfield is our own Tk process so Tk's own `lift()` is native there and
-      is not the RAIL trap. **A third option needs no window manipulation at
-      all and may be the right one:** have the APP stop holding the top after
-      the button press, rather than having three other windows fight it.
-      **Acceptance:** press Start Emulator and, once the game window appears,
-      all three emulator windows are above the app with no clicking — verified
-      by reading the real z-order, not by eye. `shotwin.py` already enumerates
-      the windows by title; `EnumWindows` returns them IN z-order, so the
-      instrument is a few lines on top of what exists. State whether dragging
-      and the window-position restore (item 5, `19e1b85`) still work afterwards,
-      because that is exactly what the banned fix broke.
-      — S3: nothing is broken and the workaround is one click. D3: it needs a
-      run and it should show every time, the instrument is a small extension of
-      `shotwin.py`, but the cheap fix is forbidden and the safe one crosses the
-      X/Windows boundary.
-
-- [ ] **26. Right-click-hold a switch to RIP IT, for spinners.** `S3 D4`
-      **★ DAVID, 2026-08-06: "for switches, let's also add a right click hold
-      function that 'rips the spinner' as long as the click is held."**
-      The sibling of item 24: left-hold closes a switch and keeps it closed,
-      right-hold should make it close over and over for as long as the button
-      is down, the way a ball spinning a spinner does. **Godzilla's three
-      spinners: 47 LEFT SPINNER (node 8 bit 9), 83 TOP SPINNER (node 9 bit 21),
-      84 RIGHT SPINNER (node 9 bit 28).** No `<Button-3>` binding exists
-      anywhere in `playfield.py` today.
-      **★★ ESTABLISHED AT THE DESK, from `hwshim.c`, and it decides the whole
-      shape — do NOT build a host-side pulse loop.** The `0x11` switch scan
-      replies with a per-switch LEVEL, not a closure count: `hwshim.c:4464` is
-      `if (held) level = !level` into a bitmap. So the game counts spins by
-      DIFFING successive scans, which caps the rip at **one closure per scan of
-      that switch's own node** however fast anything pulses. Two rates bound it
-      and they are not the same number: the poll itself is described as a
-      37.5 Hz scan (`hwshim.c:5665`), but item 17 measured the gap between two
-      scans of ONE node running to **670 ms in attract**. The during-play
-      per-node rate has never been measured and is the first thing to find out.
-      **Which also kills the obvious implementation.** Each host action is a
-      ~80 ms `wsl.exe` spawn (item 24, measured) and each closure needs two, so
-      a host-side ripper tops out near 6 closures/s while saturating
-      SwitchDriver's queue and blocking every other switch action including a
-      release.
-      **THE DESIGN THIS POINTS AT, not yet built:** a SPIN flag in the shared
-      block, and `hwshim.c` flips the reported level on each scan of that node
-      while the flag is set. That delivers the maximum rate the wire can carry
-      by construction and costs ONE interop call on press and one on release,
-      exactly like `swhold.py`. Right-click then rides item 24's `SwitchDriver`
-      queue unchanged.
-      **What makes it D4 rather than D2: it spans the boundary.** A new flag
-      means `padsw.h`, `padsw.py`, a new `swspin.py`, `hwshim.c` and
-      `playfield.py` — and the block layout is THREE hand-kept copies, which is
-      what `swlayout.sh` (item 16, `145e79b`) exists to prove agree. Run
-      `swlayout.sh` before believing any of it. A rebuild is needed, so no run
-      may be live. The ladder would call a boundary-spanning change D5; it is
-      D4 because the mechanism above is already read off the source and the
-      design is written down, which is what D5 usually pays for.
-      **Acceptance, and the oracle must be on the GAME's side of the wire:** a
-      right-hold on a spinner produces many closures the GAME SEES, not many
-      writes this rig made. Count them with item 17's `PAD_SW_PEND` /
-      `swladder.py`, which read the game's own `entry[+24]`, and state the
-      achieved closures per second against the measured per-node scan rate.
-      Left-click hold must still behave as item 24 shipped it, and a right-hold
-      must end OPEN — the stuck-switch failure is the same one, and
-      `swholdtest.py` is the harness that already checks for it.
-      — S3: nothing is broken and a spinner can still be closed once per click,
-      so no shot is unreachable; what is missing is the magnitude. D4, armchair
-      beyond the desk work above.
-
-- [ ] **29. Switch names come back as `?` on most titles, so the schematic
-      playfield is a list of numbers and switch positions cannot be joined.**
-      `S2 D4`
-      **MEASURED 2026-08-06 across four card runs, and the split is clean:**
-      Led Zeppelin LE 1.22.0 **96 of 96 rows `?`**, Elvira's HoH 1.13.0 **109 of
-      109 `?`**, Jaws LE 1.02.0 **108 of 108 `?`** — and **John Wick LE 1.01.0
-      0 of 105**, real names (`QR SCANNER STATUS READY`, …). Godzilla is also
-      fine. So this is per title, not universal, and at least two titles prove
-      the reader itself works.
-      **WHAT IT COSTS, and it is two separate things.** (a) The schematic view
-      draws 96 rows that all say `?`, so you cannot tell which switch you are
-      about to close — see the screenshot behaviour in item 27's sense of "see a
-      switch layout". (b) `switch_xy` is joined on the NAME, so a title with a
-      perfectly good device table gets **no clickable positions at all**: Jaws
-      has 78 switch records with names and coordinates in its binary and scored
-      `NONE of the 108 switches matched a device-table name`.
-      **ESTABLISHED AT THE DESK, from `hwshim.c`:** the name is
-      `msg_row(*(nameobj + 16))` at `hwshim.c:3574`, and `msg_row` (`:3219`)
-      opens with `if (!MSG_LANG) return 0;`. `MSG_LANG` is
-      `TITLE_ADDR(a_msg_lang, "PAD_MSG_LANG", 0x708330u)` — a **Godzilla Pro
-      1.15.0** address (`:2960`).
-      **BUT THE OBVIOUS ONE-LINE FIX IS PROBABLY NOT IT, and this is the trap
-      worth writing down before someone spends a pass on it.** `title_addr()`
-      (`:1267`) returns the default whenever it is merely READABLE, and this
-      file already records that trap for the switch table: *"EHOH's binary is
-      big enough to cover Godzilla Pro's 0x7a958c, so a_sw_struct() returned an
-      address … and the shim read a switch table out of somebody else's data."*
-      So on these titles `MSG_LANG` is most likely non-zero-but-wrong, the
-      early-out never fires, and `msg_row` is instead failing one of its two
-      range checks on `row` or `row[0]`. **Making `!MSG_LANG` fall back to
-      language slot 0 is therefore a guess, not a fix** — and note `msg_row`
-      ALREADY tolerates a garbage `lang` (it validates `lang < 5` and the
-      resulting pointer, falling back to slot 0), which is more evidence the
-      early-out is not where this dies.
-      **FIRST JOB IS AN INSTRUMENT, WHICH IS THE D4.** Print `nameobj`, `row`,
-      `row[0]` and `MSG_LANG`'s value for the first few switches on a title that
-      fails and on John Wick, which does not. That says in one run whether the
-      name object is absent, at a different offset, or pointing at a message
-      table this shim cannot resolve. Only then choose between a per-title
-      `PAD_MSG_LANG`, a shape-based finder like `sw_find_table`, and reading the
-      names some other way.
-      **RULED OUT — joining on the NUMBER instead.** `switchxy.py`'s own header
-      says why: the device table's `index` is a sequential position within its
-      board and not the hardware bit (node 8 runs bits 9,10,11… against index
-      8,9,10…, then the hardware skips 21-23 and the index does not), so a
-      numeric join "produces a map that looks right and presses the wrong
-      switch". Do not reach for it as a workaround.
-      **Acceptance:** on a title that fails today, the schematic shows real
-      switch names, and a title that also ships a device table gets its switches
-      placed on the artwork. State which titles you checked and include one that
-      already worked (John Wick or Godzilla) as a regression control.
-      — S2: the playfield opens, is clickable and the keyboard works, so nobody
-      is blocked from playing; what it costs is that the switch layout is
-      unreadable on three of the four titles tried and that positions are
-      unavailable on a title whose binary has them. Arguable as S1 against item
-      27's wording, which asked to "see a switch layout". D4: the mechanism is
-      NOT established, the leading theory is explicitly marked above as probably
-      wrong, and it needs a guest-side instrument and a run before anything can
-      be chosen.
-
-- [ ] **30. In the container, a run ends by itself after about 60 seconds.**
-      `S2 D3`
-      **MEASURED 2026-08-07, Docker Desktop on WINDOWS (not the target - see
-      below). Everything about the run is healthy until it stops.** Guest
-      producing **57.1 fps** (`[eglshim] 3460 frames in 60559 ms`), renderer
-      59.9/59.6 fps and 56.5 avg, card mounted, tables built from the card,
-      playfield window open, teardown clean and `alive.sh` 0 after. Then at
-      ~62 s: `[watch] stopping...` and nothing else.
-      **ESTABLISHED, and it rules out the obvious causes.** `watch.sh`'s poll
-      loop has exactly three exits and **NONE of their messages printed** —
-      not `renderer exited (window closed)`, not `the game exited`, not
-      `N min backstop reached` — and the script never reached the
-      `grep -aE 'fps|stopped' "$HOSTLOG"` line that sits between the loop and
-      the end of the script. So the loop did not break: the script took a
-      SIGNAL, and one whose trap could still run (`[watch] stopping...` is
-      printed BY teardown), so SIGINT or SIGTERM and not SIGKILL. `cfg MINS=3`
-      is in the log, so the backstop was 180 s and not 60.
-      **RULED OUT:** the test harness (it happens with the PowerShell pipeline
-      removed and output going to a file); anything the rig starts (grepped
-      `autoattract.sh`, `gamestate.sh`, `status.sh` — no `kill` anywhere); the
-      guest exiting on its own (teardown had to SIGKILL it, so it was alive);
-      the wall-clock backstop; and the OOM killer, which sends SIGKILL and
-      would not have let the trap run.
-      **THE TEST PLATFORM IS NOT THE TARGET, and that has to be settled first.**
-      This was Docker Desktop on **Windows**, which runs containers inside a
-      WSL2 VM. macOS uses a completely different VM layer. The container is
-      identical; the thing around it is not. So the FIRST job is to find out
-      whether this reproduces on a Mac at all — it may be an artefact of the
-      Windows host and no macOS user would ever see it.
-      **Second, cheaper job if it does reproduce:** put a signal trap in
-      `watch.sh` that names what it received (`trap 'echo "[watch] got SIG$s"'`
-      for INT/TERM/HUP), which turns one run into an answer. HUP is the
-      candidate worth suspecting given a container's session semantics.
-      **Related and unexplained: NO VIDEO in the container.** `padvidhost.py`
-      came up (`ready: /pad/rootfs/dump/padvid (95 MB, 8 channels x 4 slots)`)
-      but zero clips streamed in either run, where a WSL run of the same card
-      streams continuously. Not investigated at all.
-      **Acceptance:** a container run reaches its wall-clock backstop and says
-      so, on the platform it is for. State which host you tested on, because
-      this item exists because that distinction was not controlled for.
-      — S2: the emulator runs at full speed in the container, so nothing is
-      broken outright and this is not S1; what it costs is that no macOS
-      session lasts longer than a minute, which is most of the value. D3: it
-      needs a run, it reproduces every time, and the instrument is a one-line
-      trap - the unknown is which host it belongs to, not how to see it.
-
-- [ ] **32. Stretching the game window brings the emulation to a crawl.**
-      `S2 D3`
-      **★ DAVID, 2026-08-07: "stretching the display size for the stern spike 2
-      emulator window brings the emulation to a crawl (like when I make it 3 or
-      four times larger)."** The desktop is 3840x2160 at 120 Hz, so "3 or four
-      times" the default 1360x768 is at or past maximised.
-      **ESTABLISHED AT THE DESK, FROM THE SOURCE, AND IT NARROWS THE SEARCH
-      BEFORE ANY RUN: the guest's own drawing does NOT grow with the window.**
-      `fb_w`/`fb_h` are set once from `PAD_GL_W`/`PAD_GL_H` (`padglhost.c:2079`)
-      and the guest renders into `tex_screen` at that size whatever the window
-      does. The only thing that scales is `win_present()` (`padglhost.c:1367`):
-      one textured quad letterboxed into `win_w x win_h`, then `eglSwapBuffers`.
-      **ARITHMETIC, NOT A MEASUREMENT, so treat it as a reason to look further
-      rather than as a result — and it says the GPU fill is NOT enough on its
-      own.** `gpuprobe` measured the default adapter (the AMD iGPU, item 18) at
-      **1.096 ms/frame for 4 full-screen 1080p quads = 8.29 Mpixel**. The blit is
-      1.04 Mpixel at 1360x768 and ~8.3 Mpixel maximised, i.e. **~0.14 ms →
-      ~1.1 ms against a 16.7 ms budget**. That is real but it is not a crawl, so
-      do not stop at "it is the integrated GPU". The untested suspects are
-      downstream of the quad: the per-frame **cross-adapter copy** to a display
-      the NVIDIA card owns, the **msrdc RAIL present** of a much larger surface,
-      and whether either back-pressures the guest through the swap.
-      **RELATED MEASUREMENT, so nobody re-derives it: item 18 found msrdc CPU is
-      not pixel-proportional** — a quarter of the pixels moved it 72.1 → 70.3.
-      **But that was tested DOWNWARD from the default and never above it**, which
-      is the whole range this item is about.
-      **EVERY INSTRUMENT NEEDED ALREADY EXISTS AND THE THREE SEPARATE THE TWO
-      HALVES:** `[eglshim] N frames in M ms = X fps` is the GUEST's own rate,
-      `padglhost`'s `fps` line is the HOST's, and item 11's `swap_us` says how
-      long `eglSwapBuffers` blocks. Guest fps falling with host fps while
-      `swap_us` balloons is back-pressure; host fps falling alone is a display
-      cost only. **A free fourth oracle needs no instrument at all: audio does
-      not go through the renderer** (`padplay.py`, Windows side), so if the sound
-      crawls too, the guest genuinely slowed.
-      **REPRO WITHOUT TOUCHING A WINDOW, which matters because `SetWindowPos` on
-      an emulator window is a standing non-negotiable:** item 5 (`19e1b85`) made
-      `.pad_windows` lines `key x y [w h]` and padglhost CREATES at the saved
-      size — so write a big size in and start the run. If a resize DURING a run
-      is wanted, item 5's verified technique is a SendInput corner drag from a
-      DPI-aware process, not a programmatic move.
-      **Two levers exist but are knobs awaiting an A/B, not fixes:**
-      `PAD_GL_ADAPTER` (built for item 18, **unset by default**) points Mesa at
-      the NVIDIA card, and `PAD_GL_WIN_EVERY` presents every Nth frame.
-      **Acceptance:** state the window size in pixels and all three rates (guest
-      `[eglshim]`, host `fps`, `swap_us`) at the default size and at ~4x, on the
-      same run recipe — that pair alone is the finding, and it is worth a commit
-      even if no fix follows. A FIX means the guest's own fps holds at ~4x within
-      a stated margin of its default-size figure, with the picture still correct
-      and letterboxed, and dragging plus the item 5 size restore still working
-      afterwards — that is exactly what the banned fix broke.
-      — S2: play works at the default size so nobody is blocked outright, which
-      is why it is not S1; what it costs is playing at a viewable size on a 4K
-      desktop, and it makes every item whose oracle is David's eyes (1d's fade
-      curves, 21's trough markers) dearer by pinning the window small. Arguable
-      as S1 if you read "the game visibly misbehaves while you are playing it" as
-      covering a size the user chose. D3: needs a run, it shows up the moment you
-      look, and all three instruments exist and are validated — the unknown is
-      which stage of the present path pays, not how to see it.
-
-- [ ] **33. Save-state slots are invisible: nothing shows what exists or what
-      it costs.** `S3 D2` **★ DAVID, 2026-08-09: "maybe our save states are not
-      being pruned?... we should have clear visibility of what kind of space
-      they're taking up."** Asked while chasing that day's startup freeze, which
-      turned out to be unrelated (v0.120.3, a poisoned log line) — but the
-      visibility gap he tripped over is real: the only way to see slots today
-      is `du -sh` inside WSL.
-      **Measured 2026-08-09:** slots live in `<rootfs>/saves/<slot>` (criu
-      dumps, `savegame.sh:48`); on this machine `/home/david/spike2root/saves`
-      = quicksave 511 MB + wtest 475 MB = 985 MB. **Pruning is NOT broken and
-      is not the job** — `savegame.sh` `rm -rf`s a slot before each re-dump, so
-      growth is bounded per slot name; what is missing is the LIST. The GUI
-      half rides on item 13's StateOps mixin (both playfield views' Save/Load
-      buttons), and any slot browser must respect restorestate.sh's pre-flight
-      rules (a dead-tty or gone-card slot is refusable, and saying WHY in the
-      list would save a failed load).
-      **Related cleanup found the same day, David to confirm before anyone
-      deletes:** `/home/david/wtest.log` is 13 GB of watch.sh test debris;
-      `~/cardcache` is 43 GB and is EXPECTED (per-title tables), keep it.
-      **★ THE CORE ASK SHIPPED 2026-08-10 with item 13's GUI batch (~90%):
-      the Emulate tab's Save states manager lists every slot with name,
-      game, size and date, totals them against the WSL disk's free space,
-      and Renames/Deletes** (slots.sh, root, guarded). David can now
-      delete `wtest` himself from the tab. REMAINING here: the list does
-      not yet flag a REFUSABLE slot (dead-tty / gone-card per
-      restorestate.sh's pre-flight) with the reason a load would fail -
-      the polish this item's text asked for beyond the list itself.
-      **Acceptance:** wherever Save/Load already lives (playfield bar and/or
-      Emulate tab), the user can see every slot with its size and save time
-      plus a total, and can delete a slot from there; the numbers match `du`
-      on the same moment. — S3: a `du` in WSL answers it today, nothing is
-      broken. D2: the mechanism is fully known (list a directory, stat, rm),
-      but the UI half wants a windowed session to verify, which is what keeps
-      it off D1.
-
-- [ ] **34. Booting the same card from a different path re-copies the whole
-      image, so "first run only" slowness comes back.** `S3 D2`
-      **Observed 2026-08-09 (David's godzilla_pro session):** "Startup In
-      Progress" for ~3 min — first frame at 177 s against the ~15 s a cached
-      boot takes — with input laggy while the copy competed with the boot's own
-      9p reads, and the placeholder-looking attract screens that follow a boot
-      nobody advances confused the whole session.
-      **ESTABLISHED AT THE DESK, from the source:** `cardmount.sh`
-      `cache_pick()` validates the local copy against a stamp of
-      `stat -c "%n %s %Y"` — the PATH is part of the identity. David has the
-      byte-identical card (size 7861174272, mtime Jul 28 12:45:11) at three
-      paths — a D: shortcut target, repo `images/Stern/spike2/`, and the
-      OneDrive Desktop — and every path switch invalidates the stamp and
-      re-runs the full 7.3 GB dd while the game boots off the un-cached 9p
-      mount. `~/cardcache/godzilla_pro-1_15_0_spike2.log` carries EIGHT
-      "local cache complete" lines, and the stamp was watched flipping
-      repo → Desktop within 13 minutes on 2026-08-09.
-      **Fix:** compare size+mtime only (fields 2-3 of the stamp), keeping
-      invalidation for a genuinely new build — a re-exported card gets a new
-      size/mtime and still re-copies. **The trade, and say it in the commit:**
-      two DIFFERENT cards sharing a label AND coincidentally identical
-      size+mtime would wrongly share a cache — vanishingly unlikely for card
-      images, but it is a real narrowing of the identity.
-      **Acceptance:** boot one card from two different paths back to back; the
-      second boot logs `using local cache` and starts no copier; then touch the
-      image's mtime and confirm that boot DOES re-copy. State the
-      boot-to-first-picture time of the second boot.
-      — S3: nothing is broken and the workaround is total (launch from one
-      consistent path); what it costs is a ~3 min boot and a confusing session
-      whenever paths alternate. D2: the change is a few characters in one
-      comparison, established from the source above; the acceptance needs one
-      confirming session of two boots plus the negative case, which is what
-      keeps it off D1.
-
-- [ ] **35. Star Wars and Venom load and play, but the video flickers a lot.**
-      `S2 D3`
-      **★ DAVID, 2026-08-10: "for star wars and venom the game loads, but the
-      video flickers a lot."** Reported while item 27 was being worked, so it is
-      a fresh sighting with nothing measured yet — do not treat anything below
-      as established beyond the two desk facts, which are marked as such.
-      **DESK FACT 1, and it decides whether a pass can start: Star Wars is on
-      this disk and Venom is NOT.** `~/cardcache` holds
-      `star_wars_le-1_30_0.raw`; there is no Venom card anywhere on the machine.
-      So Star Wars is reproducible today and Venom needs David's card before it
-      can be looked at at all. **State which of the two you tested** — "the video
-      flickers" on two titles may be one fault or two, and this rig has already
-      been bitten by merging distinct faults under one description (item 23
-      holds THREE exits and says so).
-      **DESK FACT 2, probably NOT the cause but worth knowing before it is
-      rediscovered: `star_wars_le` is one of the titles whose DEVICE TABLE does
-      not read at all** — `nodecensus.py` gets 0 records from its binary, as do
-      `led_zeppelin_le` and `turtles_pro` (item 27, `3c95b49`). That is the same
-      reader gap as item 29's `?` switch names. It affects the playfield window
-      and the node census, and there is **no known path from it to video**, so it
-      is recorded to save a pass rediscovering it, not offered as a theory.
-      **THE INSTRUMENTS ALL EXIST, WHICH IS THE D3.** Three video faults have
-      already been closed on this rig and each left its measurement behind:
-      item 15 (every clip played the SAME video — channel assignment order),
-      item 6 (scene video noise in the TV inset — a three-pipeline burst inside
-      130 ms) and item 11 (the ~7 s stutter). `padvidhost.py` logs `[padvid]
-      chN serving WxH N frames ... <asset>` per clip serve, and item 32 names
-      the three rate oracles that separate guest from host: `[eglshim] N frames
-      in M ms` is the GUEST's rate, `padglhost`'s `fps` line is the HOST's, and
-      `swap_us` says how long `eglSwapBuffers` blocks.
-      **FIRST JOB IS TO SAY WHAT "FLICKERS" IS, because the three closed faults
-      above all looked like "the video is wrong" from the chair and were three
-      different mechanisms.** Candidates worth separating on the first run, and
-      the logs above distinguish them without a new instrument: frames arriving
-      and being dropped (host fps healthy, guest fps not), the same clip being
-      re-served repeatedly (repeated `[padvid] serving` lines for one asset),
-      channel takeover (two channels fighting for one slot — item 15's shape),
-      or a present-path cost (item 32's territory, and note David's desktop is
-      4K/120Hz on the NVIDIA card while Mesa may be on the AMD iGPU).
-      **Acceptance:** name the mechanism with a number against it, and say which
-      title(s) it was measured on. A fix means the flicker is gone by David's
-      eyes on the title he reported — his eyes are the oracle here, as they were
-      for item 1d's fade curves — with the run's own rates stated before and
-      after.
-      — S2 because both titles LOAD and play, so nobody is blocked outright,
-      which is the S1 line; what it costs is that the video is visibly wrong
-      while you play, on two titles. Arguable as S1 on "the game visibly
-      misbehaves while you are playing it", and if a pass finds it makes a title
-      unplayable, promote it and say so. D3: it needs a run, David reports it
-      happening "a lot" so it should show up when you look, and every instrument
-      needed already exists and is validated — the unknown is which mechanism,
-      not how to see it. **D4 for Venom specifically until a card exists**, since
-      a pass could otherwise end having learned nothing about half the report.
-
-- [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
-      numbers are here for whenever it is reopened.) ~20 Hz stutter in the
-      first ~10 s.
-      Balanced rather than fixed: `PAD_NB_RESET_US=1000000` takes it from 118
-      voice restarts to 3 at no cost in boot time. Now sits at 5, at the bar.
-      **The metric is a race** (0.1 s = 118, 1.0 s = 3, 2.0 s = 17), so treat
-      3 vs 5 as noise, not a trend. Do not reopen without a reason.
-
-## Reference material that is NOT in this repo
-
-- **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own
-  README. The source WAV plus three captures David has already labelled
-  (flawless / crackly / fixed) and their expected `audioscore.py` scores.
-  **Any new audio metric must reproduce that ordering before it is trusted** —
-  three metrics built on 2026-08-05 failed exactly that check. Also holds
-  `fullplay.sh`, which drives the real `playaudio.sh` end to end, and `feed.py`,
-  which paces a WAV into a FIFO at exactly the right byte rate (`ffmpeg -re`
-  runs ~3.6% slow and starves the player, which then scores as damage).
-- **`C:\tmp\spike2_item18\`** — item 18's captures, both sides of the boundary:
-  `winprof_idle` / `winprof_attract` (Windows) and `rigprof_idle` /
-  `rigprof_attract` (WSL), as .json and .csv. **The idle pair is a reusable
-  CONTROL** — `winprof.py --compare` takes it directly, so pass two does not
-  have to spend 90 s re-measuring a quiet desktop. It is machine-specific, so
-  it lives here rather than in the repo.
-- **`/var/tmp/led_trace_1d.log`** (inside WSL) — item 1d's evidence: 44581
-  lines of `PAD_NB_TRACE=1` with guest-ms timestamps plus 656 `[ledskip]`
-  bodies, from a 2026-08-07 godzilla_pro attract run. It is what all three
-  lamp-frame decodes were scored on, and `ledcensus.py` defaults to
-  `/var/tmp/led_trace*.log` for that reason. Machine-local rather than
-  committed because it is 3.5 MB of one machine's run; **re-capture with
-  `PAD_NB_TRACE=1 PAD_LED_SKIP_LOG=3000 watch.sh N` if it is ever lost**, and
-  note `/var/tmp` and not `/tmp`, which this WSL wipes on restart.
-- **`/var/tmp/criubuild/criu/criu/criu`** (inside WSL) — item 13's CRIU, v4.1,
-  **built from source because criu is NOT PACKAGED for Ubuntu 24.04** (zero apt
-  candidate with universe enabled). `criuladder.sh` defaults to this path and
-  takes `CRIU=` to override. Rebuild with `git clone --depth 1 --branch v4.1
-  https://github.com/checkpoint-restore/criu.git && make -j8`; the build needs
-  the documented deps **plus `uuid-dev`**, which it aborts on without naming,
-  and `libaio-dev` + `python3-yaml` for its own tests. It needs root to run, and
-  `wsl -u root` gives that with no password on this machine. Not committed
-  because it is a 6 MB binary built for one kernel.
-- **`plans/spike2_pc_emulation_handoff.md`** — gitignored on purpose, local to
-  this machine. The deep detail behind every numbered item above.
-
-## Loose ends worth a look, not yet worth a queue slot
-
-- **The Linux path has never been run on a real Linux desktop, and the one part
-  that cannot be tested from here is the playfield WINDOW.** Everything else was
-  exercised with `PAD_FORCE_NATIVE=1` on 2026-08-07 and works: the pulse audio
-  sink is chosen rather than the Windows bridge, the `/mnt/wslg` wait is skipped
-  (0 mentions in the log), the game boots and the renderer averaged **57.9 fps
-  over 120 s**, `alive.sh` printed 0. The window is the gap because THIS WSL has
-  no tkinter at all — which is the entire reason the Windows workaround exists —
-  so the native branch can only be seen refusing correctly and naming the
-  package. Someone with a Linux machine and a card image closes this in one run.
-- **macOS needs a decision, not effort.** `qemu-user` translates *Linux*
-  syscalls, and `unshare`, user namespaces and `chroot` into an ELF rootfs are
-  Linux kernel features, so there is no port — only "run Linux there", via
-  Docker or Lima. **The obvious objection is wrong and worth writing down:
-  software rendering is NOT the blocker.** The handoff's own measured table has
-  llvmpipe at **214 fps** on the real workload against 914 on the GPU; the 1.0
-  fps figure people remember is `glraster.c` INSIDE the emulated ARM guest,
-  which the bridge design already replaced and which a container would not use.
-  The real unknown is the display transport — Docker on macOS has no display, so
-  frames cross X11 to XQuartz — and nobody has measured that. It is an
-  afternoon: run `padglhost` against XQuartz and read the fps it already prints.
-
-- **PROMOTED TO ITEM 31 on 2026-08-07 — "Playfield LED markers choppy in
-  ATTRACT, undiagnosed"** sat here unnumbered from item 11's closure because it
-  had no acceptance condition. It has one now, and a measurement: 2.6 visual
-  updates a second against a status bar reading 30 fps. What this bullet said
-  and item 31 must not lose: in GAMEPLAY the choppiness followed the game's
-  render loop, so item 11's fixes plausibly cover that half; in ATTRACT it did
-  NOT — that loop held 60.1 fps while the LEDs still looked choppy.
-
-- **`plunge.py game` can leave the machine UNABLE to start a game, and it looks
-  like the rig is broken.** `game` is coin → start → plunge, and the plunge
-  takes a ball out of the trough whether or not the Start press took. If it did
-  not take, the machine is now a ball short: the next Start gets `LOCATING
-  PINBALLS / PLEASE WAIT...`, the ball search fails and it drops back to
-  attract, forever. `longplay.sh` then plays a full block to an attract screen —
-  the exact failure its own comments warn about, from a different cause.
-  **The recipe that worked 2026-08-06:** `plunge.py reset`, wait ~8 s for the
-  game to settle, `swpoke.py 36 900`, and only plunge once a game is on screen.
-  A `plunge.py game` that checked for a game before removing the ball would
-  close this; see also item 17 on the press duration.
-
-- **`alive.sh`'s watch.sh pattern matches ANY process whose command line
-  contains it, including one that is merely WAITING for the run to end.** Seen
-  2026-08-06: a shell running `until ! pgrep -f "watch.sh 3"; do sleep 5; done`
-  made `alive.sh` print `run scripts (watch.sh) : 1` and `TOTAL STILL RUNNING :
-  1` **with an empty "what is still up" list underneath** — the count and the
-  listing disagreed, which is the one thing this script exists not to do. Same
-  self-match shape as `playaudio.sh`'s `win_kill` two bullets down. Harmless
-  here (the waiter was mine), but a script that greps for a run and a script
-  that waits for one look identical to it.
-
-- **`padrelay.py` accepts in a `while True` loop and never exits**, where the
-  `audiotcp.py` it replaced did not. `playaudio.sh` ends on `wait $SRV`, so the
-  script may now outlive a run instead of returning when the player goes away.
-  Teardown pkills it either way, and `alive.sh` counts it now, so a leak would
-  at least be visible — but it was not deliberate and it is untested.
-- **`playaudio.sh`'s `win_kill` can shoot itself.** Its `Stop-Process` filter
-  matches on CommandLine only, and its own command line contains the pattern,
-  so powershell.exe is a match for itself. It has always worked in practice
-  (the real player is enumerated first), and the two backstops added in item 12
-  avoid it by also requiring `Name -like 'python*'`. Same shape, one line.
-- **The coin door now lags up to 250 ms** on the virtual playfield: it is read
-  every 8th frame instead of every frame, because it is a second round trip
-  across the VM boundary for a switch a human flips by hand. If that ever feels
-  wrong in use, the fix is to read it on demand after a click rather than to
-  raise the rate.
-- **RESOLVED 2026-08-05: attract-mode LED churn has been watched end to end,
-  and the static half of it is fixed.** The game reaches attract (screenshot:
-  the high-score attract screen); the lamps moved 21 marker clusters per 3 s
-  with half the frames being dropped, and **33 per 3 s** once the a6 fade
-  frames decoded (item 1b). What still drops is item 1d, and it is now
-  ~0.25 frames a second.
-- **The playfield's polite close failed in one card run out of three.** Removing
-  `dump/padled` is meant to make `playfield.py` leave within ~2 s; once it was
-  still up after 5 s and had to be closed the hard way, which loses nothing now
-  but is unexplained. Suspect `\\wsl.localhost` read caching hiding the removal.
-- **New dependency on a fresh machine:** the Windows-side player needs
-  `py -m pip install sounddevice`. Without it `playaudio.sh` falls back to WSLg
-  audio and says so loudly, so it degrades visibly rather than silently.
-
-## Done
+      **Acceptance: MET**, 2026-08-10 — save mid-ball, restore, and the
+      ball number, score and running mode match; play continues past the
+      load; `alive.sh` prints 0 after. Oracle is the native `glshot`
+      picture dump (see (3) above), not `shot.py` — that tool's Windows
+      capture never worked under WSLg RAIL, and the oracle it was meant
+      to provide is what padglhost's own `glReadPixels` request now does.
+      **Name collision, for anyone grepping the old history above:**
+      `save_state` in `playfield.py` is the WINDOW POSITION save, unrelated
+      to this feature.
 
 - [x] **28. The rig is welded to one machine, and its per-title tables are
       checked in instead of derived from the card.** DONE 2026-08-07, David's

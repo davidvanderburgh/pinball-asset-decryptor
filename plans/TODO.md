@@ -145,62 +145,47 @@ These have each been violated at least once and each cost a run or a window:
       does not know the trick. D3: it needs a run, it reproduces on demand, and
       all three instruments already exist.
 
-- [ ] **36. Saving a state on star_wars kills the donor run ~10 s later.**
-      `S1 D4`
+- [ ] **36b. Saving a state on star_wars killed the donor run ~10 s later.**
+      `S1 D4` *(**Split on 2026-08-10**: the LOAD half is fixed, verified and
+      merged as 36a. This is the save-side death, which is a different fault
+      with a different instrument — item 23's exit-reason hook — and it is
+      the only part still open.)*
       **★ DAVID, 2026-08-10 ~13:00: "i tried to save and load on star wars
       and it crashed."** The evidence, mined the same minute
       (`c:/tmp/item27/gzwatch_sw_savecrash.log`): **THE SAVE SUCCEEDED** —
       slot3 `star_wars_le "sw game play"` packed, 63 MB, stamped at the
       checkpoint freeze (every channel's `worst gap` ~900 ms at 13:00:08 is
-      the criu dump). **THE LOAD NEVER RAN** — no restore artifacts in
-      slot3, no `[emulate] loading` line, no `dump/reloading` flag raised;
-      what David called the crash of "save and load" is the GUEST EXITING
-      BY ITSELF ~10 s after the dump resumed, CLEANLY: gzwatch ends at a
-      healthy 49.9 fps with no segv block, no signal, no exit path — item
-      23's first shape (the clean exit), now with its strongest correlate
-      yet: **a leave-running criu dump 10 s earlier, on the title with four
-      video channels and two EGL surfaces mid-clip-churn at the freeze.**
-      Godzilla survives the identical dump (item 13 verified end-to-end,
-      plus David's own sessions). Suspect space: the game's own watchdog
-      tripping on the ~0.9 s world-stop (SW may time boards/audio tighter),
-      or a frozen-mid-flight video/EGL thread resuming into an invariant SW
+      the criu dump). What David called the crash of "save and load" was two
+      faults at once: the load half (now 36a, and slot3 has since been
+      restored successfully) and **the GUEST EXITING BY ITSELF ~10 s after
+      the dump resumed, CLEANLY** — gzwatch ends at a healthy 49.9 fps with
+      no segv block, no signal, no exit path. That is item 23's first shape
+      (the clean exit), with its strongest correlate yet: a leave-running
+      criu dump 10 s earlier, on the title with four video channels and two
+      EGL surfaces mid-clip-churn at the freeze.
+      **★★ ONE COUNTER-OBSERVATION, 2026-08-10 ~18:40, and it is why this
+      needs repeats rather than a theory: a star_wars save did NOT kill its
+      donor.** On the 36a verification run — a game RESTORED from slot3, then
+      saved to a fresh slot with `savegame.sh` — the pack completed (61 MB)
+      and the guest was still alive and rendering 15 s later. One survival is
+      not a refutation of one death; what it says is that the fault is not
+      "every star_wars save", so the next pass must state HOW MANY repeats it
+      ran and what the game was doing during each.
+      Godzilla survives the identical dump (item 13 verified end-to-end, plus
+      David's own sessions). Suspect space: the game's own watchdog tripping
+      on the ~0.9 s world-stop (SW may time boards/audio tighter), or a
+      frozen-mid-flight video/EGL thread resuming into an invariant SW
       exercises and Godzilla does not.
-      **★★ THE LOAD HALF IS DIAGNOSED TO ONE CRIU LINE, 2026-08-10 13:08 —
-      David tried Launch-into-slot3 and the restore failed BEFORE any guest
-      ran:**
-      ```
-      criu/mount-v2.c:628: Can't stat mountpoint
-        /tmp/.criu.mntns.*/mnt-0000000427/star_wars_le: No such file or dir
-      cr-restore.c:2320: Restoring FAILED.   [loadgame] FAILED
-      ```
-      criu's mnt-v2 replay stages the guest's mount tree (`Bind
-      mnt-421/games to mnt-427`, card mount 430 accepted as external) and
-      then needs `games/star_wars_le` to EXIST as a directory to place the
-      card bind on — it does not. **WHY GODZILLA LOADS AND STAR_WARS DOES
-      NOT: `~/spike2root/games/godzilla_pro` is a POPULATED, PERSISTENT
-      directory** (extracted long ago), so the mountpoint always stats;
-      a PAD_CARD title runs with NO extraction (item 28's design) and its
-      `/games/<title>` mountpoint exists only transiently inside the pivot
-      namespace run_game.sh assembles at boot. **Suspect fix: pre-create
-      the `games/<title>` mountpoint somewhere criu's staging can see it**
-      — either run_game mkdirs it in the persistent rootfs games/ (cheap,
-      matches why godzilla works; note `~/spike2root/games/star_wars_le`
-      EXISTS but apparently not in the mount criu stages — verify which fs
-      mnt-421 resolves to from the dump's mountpoints img before choosing),
-      or loadgame/restorestate mkdir it just before `criu restore`. Full
-      log: the 13:08 app pane (David's paste, in the transcript) +
-      `c:/tmp/item27/gzwatch_sw_savecrash.log` for the save-side twin.
-      **The SAVE-side death (the original sighting) is a SEPARATE fault**
-      and still needs item 23's exit instrument: save succeeded, guest died
-      cleanly 10 s later. Do not let the load fix close the item alone —
-      acceptance is BOTH: (a) a star_wars save leaves the donor run alive
-      (state how many repeats), and (b) Launch-into-slot restores a
-      PAD_CARD title to a playing game on its own screen, cross-checked
-      still working on godzilla.
-      — S1: the feature's whole point is saving mid-play; saving kills the
-      play and loading fails outright on card-run titles. D4 → D3 for the
-      load half (one criu line, suspect fix in hand, needs runs); the save
-      half keeps D4 until the exit instrument exists.
+      **BLOCKED ON THE SAME INSTRUMENT AS ITEM 23.** The guest goes down with
+      nothing anywhere recording WHY; until an exit hook names the path, a
+      repeat sighting teaches nothing, which is exactly the D4 line.
+      **Acceptance:** a star_wars save leaves the donor run alive, stated over
+      a number of repeats (both during play and from a restored game, since
+      those differ today), or the exit reproduces and item 23's reason line
+      names it.
+      — S1: the feature's whole point is saving mid-play, and a save that
+      ends the session costs the ball you were playing. D4: the instrument
+      does not exist yet and the fault has already failed to reproduce once.
 
 - [ ] **23. The game exits by itself mid-play.** `S1 D2` *(**D4 → D2,
       2026-08-06 evening, off item 11's runs:** a SECOND fault shape now has
@@ -1291,6 +1276,51 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **36a. Loading a save state on a card-run title, and a failed load that
+      destroyed the rootfs.** DONE 2026-08-10, `322f688` (branch `item/36`).
+      **Three faults, found in two of David's failed loads. Only the first was
+      the one this item was filed for.**
+      **(1) THE MOUNTPOINT — the star_wars load.** criu's mnt-v2 stages the
+      guest's mount tree and stats each mount's place before putting it there:
+      it binds `<rootfs>/games` in, then needs `games/<title>` to exist to put
+      the card on. This item said `~/spike2root/games/star_wars_le` existed. It
+      **did not** — the tree holds elvira3, godzilla_pro, jaws_le,
+      john_wick_le, led_zeppelin_le, spk and turtles_pro, nothing else. That is
+      the whole difference between the titles that load and the one that did
+      not: an EXTRACTED title leaves a populated directory behind, and a
+      PAD_CARD title (item 28) is never extracted, so its `/games/<title>`
+      exists only inside the pivot namespace `run_game.sh` builds at boot.
+      `restorestate.sh` now creates it from restore.env's own `card` lines. An
+      empty directory is all criu wants; the card goes over it a moment later.
+      Cards only — the other externals are device NODES, and a directory over
+      `/dev/null` breaks a restore differently.
+      **(2) THE TRUNCATE, which did real damage.** The growing-output retry was
+      meant for the game's append-only outputs and its comment said so, but
+      nothing enforced it: it truncated whatever file criu named. slot2 (08:14)
+      recorded `usr/lib/libEGL.so.1` at 6760 bytes, the bridge was rebuilt and
+      the file became 6972, criu said "bad size" — and the loop truncated **the
+      guest's EGL library** to 6760. The restore then failed on the build-ID
+      anyway and left a malformed `.so` the next run would have loaded, with
+      nothing saying so. Only `dump/` may be truncated now; anything else stops
+      the restore and names the file. **Reproduced with the guard in place:**
+      the same slot2 load printed criu's `bad size 6972 (expect 6760)` and
+      libEGL.so.1 was still 6972 bytes and a sound ELF afterwards.
+      **(3) THE STALE SLOT, which is why loads started failing at all.** criu
+      maps every file-backed page back from the file and validates size and
+      build-ID, so a rebuild of the shim or the bridge kills every existing
+      slot — and `ensurebuild.sh` rebuilds on any source change, by itself.
+      `savestate.sh` now records a sha1 per mapped file under the guest's own
+      library tree (hwshim.so, libEGL.so.1, libGLESv2.so.2 and the guest libc
+      set — 24 lines on a real save), and `restorestate.sh`'s pre-flight —
+      which runs BEFORE the live guest is killed — refuses such a slot in a
+      sentence. Old slots carry no hashes, so criu's build-ID error is
+      translated for them at the end.
+      **Verified live:** star_wars slot3 (which had never loaded) restored to a
+      playing game — PLAYER 1 LUKE, 8,260,950, BALL 1, artwork rebuilt from the
+      GL journal, renderer 30 fps — and a fresh save on it packed 61 MB with
+      the hashes recorded. Godzilla slot2 refused cleanly with the library
+      intact. `alive.sh` 0 after both runs.
 
 - [x] **21a. Clear feedback about how many balls are in play — the trough,
       drawn in trough order.** DONE 2026-08-10, `f0d0a14` (branch `item/21`).

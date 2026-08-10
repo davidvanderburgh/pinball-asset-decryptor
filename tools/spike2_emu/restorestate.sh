@@ -57,6 +57,37 @@ while read -r kind a b c; do
     fi
 done < "$DDIR/restore.env"
 
+# THE GUEST'S OWN LIBRARIES MUST STILL BE THE ONES THE SAVE WAS TAKEN
+# AGAINST, and this check exists because the alternative is a wall of criu
+# and a broken rootfs. criu validates every file-backed mapping by size and
+# build-ID; rebuild the shim or the GL bridge - which `ensurebuild.sh` does
+# by itself whenever a source changes - and EVERY existing slot silently
+# stops loading. That is what happened on 2026-08-10: three slots saved at
+# 07:52, 08:14 and 13:00 all died at 14:31 when the bridge was rebuilt, and
+# the first anyone knew was `File usr/lib/libEGL.so.1 has bad build-ID`
+# after the live guest had already been killed for the restore.
+#
+# Slots from before this check carry no `lib` lines and are simply not
+# checked here - they still fail, but the FAILURE now explains itself (see
+# the bad build-ID translation at the end of this script).
+LIB_STALE=""
+while read -r kind sum path; do
+    [ "$kind" = lib ] || continue
+    [ -f "$R$path" ] || { LIB_STALE="$path (missing now)"; break; }
+    now=$(sha1sum "$R$path" 2>/dev/null | cut -d' ' -f1)
+    [ "$now" = "$sum" ] || { LIB_STALE="$path"; break; }
+done < "$DDIR/restore.env"
+if [ -n "$LIB_STALE" ]; then
+    echo "[restore] this save cannot be loaded on this build: the guest file"
+    echo "[restore]   $LIB_STALE"
+    echo "[restore] has changed since the save was taken (a rebuild of the shim"
+    echo "[restore] or the GL bridge does this - ensurebuild.sh rebuilds on any"
+    echo "[restore] source change). criu maps that file back by size and"
+    echo "[restore] build-ID, so no slot from before the rebuild can load."
+    echo "[restore] Save again on this build. The running game is untouched."
+    exit 1
+fi
+
 # This session's identity, read from the LIVE guest before it is killed -
 # through its own root, because padpath's $ROOT is wrong under root's $HOME.
 # Compared against the slot's copy at the end for the cross-session note.
@@ -376,6 +407,32 @@ mount --bind "$R" "$R"
 exec "\$@"
 EOF
 
+# --- the mountpoints criu will place the externals on --------------------
+# criu's mnt-v2 engine stages the guest's mount tree in /tmp/.criu.mntns.XXX
+# and needs each mount's PARENT DIRECTORY to exist before it can place it:
+# it binds <rootfs>/games in, then stats <that>/<title> for the card, and a
+# missing directory is a hard failure -
+#   Error (criu/mount-v2.c:628): Can't stat mountpoint .../mnt-.../star_wars_le
+# WHY IT ONLY HAPPENS ON SOME TITLES, which is what made it look like a
+# star_wars bug: an EXTRACTED title has a real, populated <rootfs>/games/<t>
+# directory left over from the extraction, so the stat always succeeds. A
+# PAD_CARD title (item 28) is never extracted - its /games/<title> exists
+# only inside the pivot namespace run_game.sh builds at boot, and is gone
+# the moment that namespace is - so at restore time there is nothing to put
+# the card on. `games/godzilla_pro` exists on this disk; `games/star_wars_le`
+# does not, and that is the whole difference.
+# An empty directory is all criu wants: it is a MOUNTPOINT, and the card is
+# mounted over it a moment later.
+# CARDS ONLY, deliberately: the other externals are device NODES (/dev/null
+# and friends bound in by run_game.sh) and mkdir -p on one of those would
+# put a DIRECTORY where criu expects a file.
+while read -r kind a b c; do
+    [ "$kind" = card ] || continue
+    case "$b" in /*) ;; *) continue ;; esac
+    [ -d "$R$b" ] && continue
+    mkdir -p "$R$b" && echo "[restore] created the mountpoint $b for the card"
+done < "$DDIR/restore.env"
+
 # fd 9 = the new pty slave, for --inherit-fd; rides plain fd inheritance
 # through unshare/bash into criu.
 if [ -n "$TTYFD" ]; then
@@ -440,6 +497,30 @@ for _attempt in 1 2 3 4 5 6; do
     fixed=0
     while read -r path want; do
         [ -f "$R/$path" ] || continue
+        # ONLY THE RIG'S OWN OUTPUT STREAMS MAY BE TRUNCATED, and this list is
+        # the difference between a harmless fixup and destroying the rootfs.
+        # Truncating an append-only log back to the size criu recorded costs
+        # nothing - the guest just keeps appending. Truncating a PROGRAM does
+        # exactly what it says: on 2026-08-10 a slot saved at 08:14 recorded
+        # `usr/lib/libEGL.so.1` at 6760 bytes; the bridge was rebuilt at 14:31
+        # and the file became 6972; criu said "bad size"; this loop truncated
+        # THE GUEST'S EGL LIBRARY to 6760 and retried. The restore then failed
+        # anyway (bad build-ID) and left a malformed .so behind that the next
+        # run would have loaded, with nothing anywhere saying so.
+        # A size mismatch outside dump/ is never a growing output - it means
+        # the slot does not match this build - so it stops the restore here
+        # and says which file, instead of "fixing" it.
+        case "$path" in
+        dump/*) ;;
+        *)
+            echo "[restore] STOPPING: criu says $path is the wrong size for"
+            echo "[restore] this slot ($want expected). That file is not one of"
+            echo "[restore] the game's output streams, so it will NOT be"
+            echo "[restore] truncated - it means this slot was saved against a"
+            echo "[restore] different build. Save again on this build."
+            break 2
+            ;;
+        esac
         truncate -s "$want" "$R/$path" && {
             echo "[restore] $path grew since the save; truncated to $want"; fixed=1; }
     done < <(grep -aoE 'File [^ ]+ has bad size [0-9]+ \(expect [0-9]+\)' "$DDIR/restore.log" \
@@ -450,6 +531,29 @@ done
 
 if [ "$RC" != 0 ] || grep -aq 'Restoring FAILED' "$DDIR/restore.log"; then
     echo "[restore] FAILED (exit $RC):"
+    # TRANSLATE THE TWO FAILURES THAT ARE NOT BUGS, because criu states them
+    # as a build-ID or a mountpoint and the user is holding a save button.
+    # Old slots carry no `lib` lines for the pre-flight above to check, so
+    # this is where they get their sentence.
+    if grep -aq 'has bad build-ID' "$DDIR/restore.log"; then
+        echo "[restore] ---"
+        echo "[restore] This slot was saved against a DIFFERENT BUILD of the"
+        echo "[restore] guest's libraries: criu maps each one back by size and"
+        echo "[restore] build-ID, and one of them has been rebuilt since"
+        echo "[restore] ($(grep -ao 'File [^ ]* has bad build-ID' "$DDIR/restore.log" \
+                           | head -1 | sed 's/^File //; s/ has bad build-ID//'))."
+        echo "[restore] Any rebuild of the shim or the GL bridge does this to"
+        echo "[restore] every existing slot. Save again on this build."
+        echo "[restore] ---"
+    fi
+    if grep -aq "Can't stat mountpoint" "$DDIR/restore.log"; then
+        echo "[restore] ---"
+        echo "[restore] criu could not find a mountpoint to place this save's"
+        echo "[restore] card mount on. This script creates them from"
+        echo "[restore] restore.env before restoring, so a slot that still hits"
+        echo "[restore] this was saved with a mount restore.env does not name."
+        echo "[restore] ---"
+    fi
     # Two views, because they miss different things: criu's own error lines,
     # then the raw tail - a BUG/abort/pie message does not say "Error", and a
     # windowed load once failed with NOTHING captured because only the Error

@@ -109,6 +109,33 @@ while IFS= read -r line; do
     esac
 done < "/proc/$PID/mountinfo"
 
+# --- WHICH BUILD OF OUR OWN LIBRARIES THIS SAVE IS TIED TO ---------------
+# criu maps every file-backed page back FROM THE FILE and validates it by
+# size and build-ID, so a slot is loadable only while the libraries the
+# guest had mapped are byte-for-byte the ones it had. Rebuild the shim or
+# the GL bridge - which ensurebuild.sh does on its own, on any source
+# change - and every existing slot is dead. Recording the hashes here is
+# what lets restorestate refuse such a slot in its PRE-FLIGHT, with a
+# sentence, instead of criu discovering it after the live guest has already
+# been killed for the restore.
+# 2026-08-10 is why this exists: three slots (07:52, 08:14, 13:00) all died
+# to a 14:31 bridge rebuild, the first sign was `File usr/lib/libEGL.so.1
+# has bad build-ID`, and the failed restore then TRUNCATED that library in
+# the rootfs trying to satisfy the size criu wanted.
+#
+# ONLY THE LIBRARY TREE WE BUILD INTO, and through the guest's own root the
+# way the ring stash below does - $ROOT is padpath's guess from $HOME and
+# this script runs as root. The game binary and the title's assets come off
+# the card, are far larger, and cannot change without the card image
+# changing; hashing them would read tens of MB through fuse on every save
+# to answer a question nobody is asking.
+awk '$6 ~ /^\/(usr\/)?(local\/)?lib/ {print $6}' "/proc/$PID/maps" 2>/dev/null \
+  | sort -u | while read -r gp; do
+    [ -f "/proc/$PID/root$gp" ] || continue
+    sum=$(sha1sum "/proc/$PID/root$gp" 2>/dev/null | cut -d' ' -f1)
+    [ -n "$sum" ] && echo "lib $sum $gp" >> "$DDIR/restore.env"
+done
+
 # --- the tty fd the guest holds (the node bus) ---------------------------
 # criu's tty[] key is hex st_rdev:st_dev of the tty file; take the RAW numbers
 # from stat via python (stat(1)'s %t:%T is major:minor, not the raw rdev criu

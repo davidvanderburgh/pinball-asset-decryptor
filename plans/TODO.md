@@ -75,12 +75,13 @@ These have each been violated at least once and each cost a run or a window:
 ## Queue
 
 - [ ] **27. Any Spike 2 title should load, show a switch layout, start a game,
-      and play with correct video. Today only Godzilla does.** `S1 D3` ←
-      IN PROGRESS, 80% ▲ *(**D2 → D3, 2026-08-10 midday:** two fixes
-      live-verified and the queue's two named blockers are gone, but the
-      remaining two faults are each a run-plus-mechanism job — the black-frame
-      flicker's drawer is unidentified, and the Jaws start-refusal needs the
-      padglhost per-title latch fix plus a confirming run.)* *(**scope widened 2026-08-10 on David's instruction:**
+      and play with correct video. Today only Godzilla does.** `S1 D2` ←
+      IN PROGRESS, 90% ▲ *(**D3 → D2, 2026-08-10 afternoon: THE FLICKER IS
+      RESOLVED, David's own eyes confirming ("the flickering is gone i can
+      confirm")** — the mechanism was two EGL surfaces collapsed into one
+      swap chain, see below. What is left is one mechanism-known fix (the
+      padglhost per-title latch behind the Jaws start-refusal) plus its
+      confirming run.)* *(**scope widened 2026-08-10 on David's instruction:**
       "the video flickering on some games falls under this item. let's address
       it here." Item 35 is absorbed into this one.)*
       **★ DAVID, 2026-08-06: "i'm trying to load Jaws right now and I'm not
@@ -395,17 +396,48 @@ These have each been violated at least once and each cost a run or a window:
       nothing, black window, every stamp fresh. ensurebuild now checks the
       installed backend exports glTexDirectVIV and rebuilds the bridge;
       buildgl.sh warns loudly. Never pipe-truncate a build command either.
-      **Resume, in order:** (1) fix padglhost's window-open latch (and
-      binds[]) to resolve ids per title the way plunge.py does — or stop
-      latching the trough and leave it to `plunge.py reset`; then a Jaws
-      run: coin, start, and the oracle is BALL 1 / a score on the game's
-      own screen. (2) a short star_wars run for the `swap content`
-      counter's numbers — if masks alternate between channel sets, the
-      game interleaves two scene compositions at 60 Hz and the dark one is
-      the flicker; if a mask-0-with-draws band matches the black cadence
-      (~3/s runs of 2), it composes video-less frames. (3) swshow.py
-      prints Godzilla names on every title — same per-title table, fix in
-      passing.
+      **★★★ THE FLICKER: RESOLVED 2026-08-10 afternoon (`f6df373` +
+      `eafd637`), DAVID CONFIRMING LIVE: "the flickering is gone i can
+      confirm."** The swap-content masks named the mechanism in one
+      reading: `2x60 4x60 no-draw 0/120` — the game renders TWO scene
+      compositions on alternating swaps, because **star_wars has a real
+      second display (the playfield LCD — ch2 opened at its native
+      480x272) and eglshim collapsed both EGL surfaces into one swap
+      chain** (every eglCreateWindowSurface returned 0x4001, every swap
+      presented). Two pictures interleaving at 60 Hz = the flicker; with
+      the second scene dark (Tech Alerts) it read as
+      alerts-alternating-with-black. **Fix: surfaces carry identity**
+      (display handle → window handle → surface slot, logged at creation)
+      **and only the primary presents** (first surface on display 0;
+      `PAD_EGL_PRIMARY=<slot>` overrides). Suppressed draws still stream —
+      safe, every scene render opens with its own full-screen background.
+      **Scored, same classifier both sides: 32.8% black frames in 236
+      two-frame runs → 5.0% in 4 runs of ~28 frames (real content fades);
+      mean frame-to-frame luma churn 9.71 → 0.59.** Presents went from 60/s
+      of alternating scenes to 30/s of one scene (`swap content: 6x60`,
+      single mask family). Captures: `c:/tmp/item27/sw_final.mkv` vs
+      `sw_after_fix.mkv`.
+      **Fallout fixed on the way (`eafd637`): the light-show signal is a
+      RATE now** — 30 lamp commands inside 3 s, because a stray retry
+      walked into the SERVICE MENU whose entry blip tripped the bare
+      10-count (one lost run, the constant-luma "capture" discarded); and
+      **autoattract GAP 20 → 45 s**, because on star_wars the show starts
+      943 ms to 8+ s after the press that takes, and a 20 s gap fired the
+      retry into that splash window. Verified together on the final run:
+      one wire press, no menu, declared in genuine attract.
+      **★ One segv sighting for item 23's collection, did NOT repeat (1 of
+      3 runs):** star_wars boot +30 s, `[throw] do_stack_unwind_exception_t`
+      then `pc=libc+0x76d24 lr=libc+0x4079c r0=0xfffffff8 fault=0x0` — NEW
+      signature, log preserved `c:/tmp/item27/gzwatch_swverify_segv.log`.
+      **Follow-up worth its own /add: the suppressed surface IS the
+      playfield LCD's live feed** (hyperspace loop etc.), still decoded —
+      it could render inside the virtual playfield window.
+      **Resume:** (1) fix padglhost's window-open latch (and binds[]) to
+      resolve ids per title the way plunge.py does — or stop latching the
+      trough and leave it to `plunge.py reset`; then a Jaws run: coin,
+      start, oracle is BALL 1 / a score on the game's own screen. (2)
+      swshow.py prints Godzilla names on every title — same per-title
+      table, fix in passing.
       **NO RUN IS LIVE. The rig is CLEAN — `alive.sh` = 0, zero zombies, zero
       card mounts**, confirmed after the star_wars_le run reached its 8 min
       backstop and tore itself down.

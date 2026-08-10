@@ -120,6 +120,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+from tkinter import ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coilact
@@ -151,6 +152,13 @@ if not GAME:
     sys.exit("playfield.py: no title - pass one, or set PAD_GAME.\n"
              "  pythonw playfield.py godzilla_pro")
 TDIR = gameinfo.table_dir(GAME)
+
+#: Whether the Save/Load state controls exist at all. watch.sh passes
+#: --savestates only when the boot is checkpointable (PAD_PIVOT) - the app's
+#: Emulate tab owns the user-facing toggle and boots the matching shape - so
+#: a window without the flag draws NO state controls, instead of buttons
+#: whose only possible answer is "this run is not checkpointable".
+SAVESTATES = "--savestates" in sys.argv[2:]
 
 # BUILD WHAT IS MISSING RATHER THAN DRAWING A SCHEMATIC BECAUSE NOBODY RAN A
 # SCRIPT. The artwork, the insert map and the coil positions are all derivable
@@ -494,7 +502,7 @@ def wsl_run(script, *args):
     return r
 
 
-def state_run(script, slot="quicksave"):
+def state_run(script, slot="quicksave", label=None):
     """Run savegame.sh / loadgame.sh, the item 13 save-state wrappers.
 
     NOT wsl_run, for two reasons that are both load-bearing: these are bash
@@ -510,13 +518,14 @@ def state_run(script, slot="quicksave"):
     NAME COLLISION, again: save_state() in this file is the WINDOW POSITION
     save. Everything in this feature says `state_run`/`run_state` instead.
     """
+    extra = [label] if label else []
     if sys.platform == "win32":
-        cmd = ["wsl.exe", "-u", "root", "-e", "bash",
-               "%s/%s" % (WSL_DIR, script), slot]
+        cmd = (["wsl.exe", "-u", "root", "-e", "bash",
+                "%s/%s" % (WSL_DIR, script), slot] + extra)
     else:
         # The native-Linux path: run it plainly; without root the script's own
         # "needs root" line lands in the status bar, which is the honest hint.
-        cmd = ["bash", os.path.join(HERE, script), slot]
+        cmd = ["bash", os.path.join(HERE, script), slot] + extra
     try:
         return subprocess.run(cmd, capture_output=True, timeout=240,
                               creationflags=_CREATE_NO_WINDOW)
@@ -777,14 +786,161 @@ class Tip:
             self.shown = False
 
 
+def state_slots():
+    """slots.sh list, parsed: {slot_dir: label} for every EXISTING slot.
+
+    Root for the same reason state_run is - savegame.sh writes slots as
+    root, so reading their metadata and sizes needs it too. Best-effort:
+    a wedged WSL returns {} and the picker just shows every slot as empty,
+    which a save into it corrects."""
+    if sys.platform == "win32":
+        cmd = ["wsl.exe", "-u", "root", "-e", "bash",
+               "%s/slots.sh" % WSL_DIR, "list"]
+    else:
+        cmd = ["bash", os.path.join(HERE, "slots.sh"), "list"]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=30,
+                           creationflags=_CREATE_NO_WINDOW)
+    except Exception:                                       # noqa: BLE001
+        return {}
+    out = {}
+    for ln in (r.stdout or b"").decode("utf8", "replace").splitlines():
+        p = ln.split("|")
+        if len(p) >= 6 and p[0] == "slot":
+            out[p[1]] = p[4]
+    return out
+
+
 class StateOps:
     """Save state / Load state (item 13), shared by BOTH views - a title with
     no artwork still saves and loads, because savegame.sh/loadgame.sh know
-    nothing about drawings. Each view creates its own `self._state_btns` in
-    its own layout (Field: canvas buttons bottom-left; Schematic: the top
-    bar) and wires `_state_status()` into its own tick's status writes."""
+    nothing about drawings. Each view calls `_build_state_widgets()` and
+    places the returned picker + buttons in its own layout (Field: canvas
+    windows bottom-left; Schematic: the top bar) and wires `_state_status()`
+    into its own tick's status writes. Nothing is built at all when the boot
+    is not checkpointable (module flag SAVESTATES).
 
-    def run_state(self, script):
+    TEN SLOTS, NAMED. The picker lists slot1..slot10 with each slot's label
+    (or "(empty)"); Save asks for a name first and passes it to savegame.sh,
+    which stores it IN the slot - so names survive sessions and machines and
+    the app's own slot manager shows the same truth."""
+
+    SLOT_IDS = ["slot%d" % i for i in range(1, 11)]
+
+    #: What a label may contain. The label crosses wsl.exe's re-parse on its
+    #: way into bash argv, and wsl.exe expands $ and backticks even in -e
+    #: argv (the executor lesson this repo already paid for) - so the dialog
+    #: simply never lets those characters exist.
+    _LABEL_OK = ("abcdefghijklmnopqrstuvwxyz"
+                 "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _.()!-")
+
+    def _build_state_widgets(self, parent):
+        """The slot picker and the two buttons, for a view to place."""
+        self._slot_labels = {}
+        self._slot_box = ttk.Combobox(parent, width=17, state="readonly",
+                                      values=self._slot_values())
+        self._slot_box.current(0)
+        self._state_btns = [
+            tk.Button(parent, text="Save state", width=11,
+                      command=self._save_clicked),
+            tk.Button(parent, text="Load state", width=11,
+                      command=self._load_clicked),
+        ]
+        self._slots_refresh()
+        return [self._slot_box] + self._state_btns
+
+    def _slot_values(self):
+        vals = []
+        for i, sid in enumerate(self.SLOT_IDS):
+            label = getattr(self, "_slot_labels", {}).get(sid)
+            if label is None:
+                vals.append("%d · (empty)" % (i + 1))
+            else:
+                vals.append("%d · %s" % (i + 1, label or "unnamed"))
+        return vals
+
+    def _current_slot(self):
+        try:
+            return self.SLOT_IDS[self._slot_box.current()]
+        except (ValueError, IndexError, tk.TclError):
+            return self.SLOT_IDS[0]
+
+    def _slots_refresh(self, pick_first_empty=False):
+        """Re-read the slots off the rig, on a worker thread."""
+        def work():
+            info = state_slots()
+
+            def apply():
+                try:
+                    keep = self._slot_box.current()
+                    self._slot_labels = {s: info[s] for s in info}
+                    self._slot_box.configure(values=self._slot_values())
+                    if pick_first_empty:
+                        empty = [i for i, sid in enumerate(self.SLOT_IDS)
+                                 if sid not in self._slot_labels]
+                        self._slot_box.current(empty[0] if empty else 0)
+                    elif 0 <= keep < len(self.SLOT_IDS):
+                        self._slot_box.current(keep)
+                except tk.TclError:
+                    pass          # window torn down while we were reading
+            # The slot box's after(), NOT self.cv's: Schematic builds its bar
+            # (and these widgets) before its canvas exists, and the worker
+            # can finish inside that gap.
+            try:
+                self._slot_box.after(0, apply)
+            except (tk.TclError, RuntimeError):
+                pass          # window (or the whole interp) is gone
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _save_clicked(self):
+        """Ask for a name, then save. The dialog is the naming surface David
+        asked for; empty keeps the slot unnamed, Escape/Cancel aborts."""
+        slot = self._current_slot()
+        top = self.cv.winfo_toplevel()
+        dlg = tk.Toplevel(top)
+        dlg.title("Save state")
+        dlg.transient(top)
+        dlg.resizable(False, False)
+        n = self.SLOT_IDS.index(slot) + 1
+        tk.Label(dlg, text="Save to slot %d - name (optional):" % n,
+                 anchor="w").pack(fill="x", padx=10, pady=(10, 2))
+        var = tk.StringVar(value=self._slot_labels.get(slot) or "")
+        ent = tk.Entry(dlg, textvariable=var, width=34)
+        ent.pack(padx=10, pady=2)
+        row = tk.Frame(dlg)
+        row.pack(pady=(6, 10))
+
+        def go(_e=None):
+            label = "".join(ch for ch in var.get() if ch in self._LABEL_OK)
+            label = label.strip()[:40]
+            dlg.destroy()
+            self.run_state("savegame.sh", slot, label or None)
+
+        tk.Button(row, text="Save", width=9, command=go).pack(side="left",
+                                                              padx=4)
+        tk.Button(row, text="Cancel", width=9,
+                  command=dlg.destroy).pack(side="left", padx=4)
+        ent.bind("<Return>", go)
+        dlg.bind("<Escape>", lambda _e: dlg.destroy())
+        ent.focus_set()
+        # Centre over the parent - a dialog at 0,0 on a big desktop is lost.
+        dlg.update_idletasks()
+        dlg.geometry("+%d+%d" % (
+            top.winfo_rootx() + (top.winfo_width() - dlg.winfo_reqwidth()) // 2,
+            top.winfo_rooty() + 120))
+        dlg.grab_set()
+
+    def _load_clicked(self):
+        slot = self._current_slot()
+        if slot not in getattr(self, "_slot_labels", {}):
+            n = self.SLOT_IDS.index(slot) + 1
+            self._state_msg = ("slot %d is empty - nothing to load" % n,
+                               time.monotonic() + 5.0)
+            return
+        self.run_state("loadgame.sh", slot)
+
+    def run_state(self, script, slot, label=None):
         """One at a time, off the Tk thread.
 
         The spawn takes seconds (a save dumps ~500 MB; a load is a criu
@@ -803,7 +959,7 @@ class StateOps:
         self._state_msg = ("%s state..." % verb, None)
 
         def work():
-            r = state_run(script)
+            r = state_run(script, slot, label)
 
             def done():
                 self._state_busy = False
@@ -832,6 +988,9 @@ class StateOps:
                     text = (saying or tagged or lines
                             or ["%s: no output" % script])[-1]
                 self._state_msg = (text, time.monotonic() + 8.0)
+                # The picker's labels just changed (a save filled or renamed
+                # a slot); show the new truth without a manual refresh.
+                self._slots_refresh()
 
             self.cv.after(0, done)
 
@@ -1182,16 +1341,13 @@ class Field(StateOps):
         # back to the save, which is not a neighbour "Plunge" wants. One row
         # still clears the lowest marker for the same reason the right cluster
         # does (RIGHT FLIPPER BUTTON at y=656; see the docstring above).
+        # Only on a checkpointable boot: no flag, no controls at all.
         self._state_btns = []
-        for label, script in (("Save state", "savegame.sh"),
-                              ("Load state", "loadgame.sh")):
-            self._state_btns.append(
-                tk.Button(self.cv, text=label, width=11,
-                          command=lambda s=script: self.run_state(s)))
-        x = self.ACT_PAD
-        for b in self._state_btns:
-            self.cv.create_window(x, y, anchor="sw", window=b)
-            x += b.winfo_reqwidth() + self.ACT_GAP
+        if SAVESTATES:
+            x = self.ACT_PAD
+            for wdg in self._build_state_widgets(self.cv):
+                self.cv.create_window(x, y, anchor="sw", window=wdg)
+                x += wdg.winfo_reqwidth() + self.ACT_GAP
 
     def run_plunge(self, what):
         self.drv.run_script("plunge.py", what)
@@ -1689,18 +1845,16 @@ class Schematic(StateOps):
                       % (GAME, len(switches)),
                  bg="#111", fg="#bbb", font=("Consolas", 9)).pack(side="left",
                                                                   padx=4, pady=4)
-        # Save/Load state on the bar's right (item 13, same pair as the
-        # artwork view's bottom-left cluster): a title with no artwork still
-        # saves and loads - the wrappers know nothing about drawings. Packed
-        # side="right", so LOAD goes first to end up rightmost and the pair
-        # reads Save | Load left-to-right, matching the artwork view.
+        # Save/Load state on the bar's right (item 13, same cluster as the
+        # artwork view's bottom-left): a title with no artwork still saves
+        # and loads - the wrappers know nothing about drawings. Packed
+        # side="right" in REVERSE so the cluster reads picker | Save | Load
+        # left-to-right, matching the artwork view. Only on a checkpointable
+        # boot (module flag SAVESTATES) - no flag, no controls.
         self._state_btns = []
-        for label, script in (("Load state", "loadgame.sh"),
-                              ("Save state", "savegame.sh")):
-            b = tk.Button(bar, text=label, width=11,
-                          command=lambda s=script: self.run_state(s))
-            b.pack(side="right", padx=(0, 4), pady=2)
-            self._state_btns.append(b)
+        if SAVESTATES:
+            for wdg in reversed(self._build_state_widgets(bar)):
+                wdg.pack(side="right", padx=(0, 4), pady=2)
 
         by_node = {}
         for sw in switches:

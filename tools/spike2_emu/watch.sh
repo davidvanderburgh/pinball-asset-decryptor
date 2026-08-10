@@ -667,10 +667,18 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     # rig does not have. Under WSL the window therefore runs as a WINDOWS
     # process reached through interop, which is why it needs a translated path,
     # WSLENV to carry anything at all, and pythonw.exe rather than python.exe.
+    # Whether the playfield shows its Save/Load state controls. The app's
+    # Emulate tab owns the user-facing toggle: toggle ON boots PAD_PIVOT=1
+    # (the only checkpointable shape), so "pivot boot" IS the enable signal
+    # and a hand-run PAD_PIVOT session keeps its buttons with no extra flag.
+    # It rides the COMMAND LINE because the Windows-side window only sees
+    # WSLENV-listed variables, and an argv is one less thing to keep in step.
+    PF_STATES=""
+    if [ "${PAD_SAVESTATES:-${PAD_PIVOT:-0}}" = 1 ]; then PF_STATES="--savestates"; fi
     if [ "$IS_WSL" = 0 ]; then
         PF_PY=${PAD_PF_PYTHON:-python3}
         if "$PF_PY" -c 'import tkinter' >/dev/null 2>&1; then
-            setsid_as_user "$PF_PY" "$RIG/playfield.py" "$GAME" </dev/null >/dev/null 2>&1 &
+            setsid_as_user "$PF_PY" "$RIG/playfield.py" "$GAME" $PF_STATES </dev/null >/dev/null 2>&1 &
             echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
         else
             # Say what to install rather than just what is missing: on Debian
@@ -710,7 +718,7 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
         [ -n "${PAD_PF_FADE_MS:-}" ] && \
             export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_FADE_MS"
         if command -v "$PF_PY" >/dev/null 2>&1; then
-            setsid_as_user "$PF_PY" "$PF_WIN" "$GAME" </dev/null >/dev/null 2>&1 &
+            setsid_as_user "$PF_PY" "$PF_WIN" "$GAME" $PF_STATES </dev/null >/dev/null 2>&1 &
             echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
         else
             echo "[watch] no Windows interop; run playfield.py yourself:" >&2

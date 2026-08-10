@@ -486,6 +486,23 @@ def test_a_failed_home_probe_degrades_to_the_ordinary_launch(monkeypatch,
     assert "-u" not in cmd and "PAD_PIVOT=1" not in cmd
 
 
+def test_savestates_off_is_the_ordinary_launch(monkeypatch, tmp_path):
+    """The tab's opt-out - and the DEFAULT: with the toggle off, even a
+    machine whose home probe would succeed boots the plain user launch, not
+    root and not PAD_PIVOT, so a run costs nothing it did not cost before
+    item 13.  watch.sh then starts the playfield without its Save/Load
+    state controls (no --savestates), so nothing on screen can only refuse."""
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    _home(monkeypatch, "/home/somebody")
+    cmd = emulate_tab.watch_cmd(120, ["PAD_CARD=/mnt/c/x.raw"],
+                                savestates=False)
+    assert cmd[:2] == ["wsl.exe", "-e"]
+    assert "-u" not in cmd and "PAD_PIVOT=1" not in cmd
+    # The caller's env still survives the hop, same rule as rig_cmd's.
+    assert "PAD_CARD=/mnt/c/x.raw" in cmd
+
+
 def test_other_platforms_keep_their_launch(monkeypatch, tmp_path):
     """The pivot boot is a WSL arrangement; macOS's container and a Linux
     desktop keep the launch they had."""
@@ -661,7 +678,7 @@ def test_start_builds_the_launch_off_the_ui_thread(tmp_path, monkeypatch):
     boot = _th.Event()                   # a cold WSL boot, in miniature
     built = {}
 
-    def cold_watch_cmd(minutes, env):
+    def cold_watch_cmd(minutes, env, savestates=True):
         built["thread"] = _th.current_thread()
         boot.wait(10)
         return ["watch.sh-stand-in"]

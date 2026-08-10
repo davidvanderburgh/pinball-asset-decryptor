@@ -348,12 +348,17 @@ class App:
             from .core import project_file
             folder = self._project_path
             card_var = getattr(self.window, "emulate_card_var", None)
+            states_var = getattr(self.window, "emulate_savestates_var", None)
             if folder and card_var is not None \
                     and project_file.has_anchor(folder):
                 card = card_var.get().strip()
+                states = bool(states_var.get()) if states_var is not None \
+                    else False
                 data = project_file.load_anchor(folder)
-                if (data.get("emulate_card") or "") != card:
-                    project_file.update_anchor(folder, emulate_card=card)
+                if (data.get("emulate_card") or "") != card or \
+                        bool(data.get("emulate_savestates")) != states:
+                    project_file.update_anchor(folder, emulate_card=card,
+                                               emulate_savestates=states)
         except Exception:
             pass
         self._save_settings()
@@ -469,23 +474,29 @@ class App:
         Best-effort throughout — an unreadable or half-written anchor on a NAS
         must leave the field empty, never fail the startup that asked for it."""
         card_var = getattr(self.window, "emulate_card_var", None)
+        states_var = getattr(self.window, "emulate_savestates_var", None)
         if card_var is None:
             return
         card = ""
+        states = False
         if project_folder:
             from .core import project_file
             try:
-                card = str(project_file.load_anchor(project_folder)
-                           .get("emulate_card") or "")
+                data = project_file.load_anchor(project_folder)
+                card = str(data.get("emulate_card") or "")
+                states = bool(data.get("emulate_savestates"))
             except (OSError, ValueError):
                 card = ""
         else:
             card = str(self._settings.get("emulate_card") or "")
+            states = bool(self._settings.get("emulate_savestates"))
         # Same mapped-drive treatment as every other restored path: a card
         # saved as "W:\..." in a normal session stops resolving under an
         # elevated relaunch, so restore its UNC equivalent instead.
         from .core.admin import resolve_mapped_drive as _rmd
         card_var.set(_rmd(card) if card else "")
+        if states_var is not None:
+            states_var.set(states)
 
     # ------------------------------------------------------------------
     # Prerequisite checking
@@ -3498,6 +3509,12 @@ class App:
                 self._settings["emulate_card"] = card_var.get().strip()
             except tk.TclError:
                 pass
+        states_var = getattr(self.window, "emulate_savestates_var", None)
+        if states_var is not None:
+            try:
+                self._settings["emulate_savestates"] = bool(states_var.get())
+            except tk.TclError:
+                pass
         # Remember the window size + position for next launch.  Skip odd/tiny
         # geometries (e.g. the 1x1 pre-dialog footprint) so we never persist a
         # window the user can't see.
@@ -3567,6 +3584,8 @@ class App:
         opts = self.window.get_extract_options()
         card_var = getattr(self.window, "emulate_card_var", None)
         emulate_card = card_var.get().strip() if card_var else ""
+        states_var = getattr(self.window, "emulate_savestates_var", None)
+        emulate_savestates = bool(states_var.get()) if states_var else False
         try:
             if project_file.has_anchor(folder):
                 project_file.update_anchor(
@@ -3577,6 +3596,7 @@ class App:
                     write_filename=write_filename,
                     extract_options=opts,
                     emulate_card=emulate_card,
+                    emulate_savestates=emulate_savestates,
                     saved_with=__version__)
             else:
                 # First anchor for this folder.  Compat rule: a custom Build
@@ -3600,7 +3620,8 @@ class App:
                     # save() writes explicit fields over *extra*, so a field
                     # only this app version knows rides in extra and format-2
                     # readers ignore it.
-                    extra={"emulate_card": emulate_card})
+                    extra={"emulate_card": emulate_card,
+                           "emulate_savestates": emulate_savestates})
                 self.window.append_log(
                     "This folder is now a project — picking it again "
                     "restores this whole setup.", "info")
@@ -3701,6 +3722,11 @@ class App:
         card_var = getattr(self.window, "emulate_card_var", None)
         if card_var is not None:
             card_var.set(_rmd(str(data.get("emulate_card") or "")))
+        # And its save-states opt-in (item 13) - same rule, set even when
+        # absent, so this project's OFF is not the last project's ON.
+        states_var = getattr(self.window, "emulate_savestates_var", None)
+        if states_var is not None:
+            states_var.set(bool(data.get("emulate_savestates")))
         self._registry_touch(folder)
         self._set_loaded_project(folder)
         self._save_settings()

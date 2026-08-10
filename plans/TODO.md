@@ -963,6 +963,39 @@ These have each been violated at least once and each cost a run or a window:
       NEW/s; switches respond; a same-session re-load through the
       rewind path scored 2.6% with zero skips (no regression); zero
       draw skips, zero crashes; teardown to alive TOTAL 0.
+      **★ THE OPT-IN GUI SHIPPED (2026-08-10, this commit), David's
+      spec verbatim: a toggle, a cost tooltip, 10 nameable slots, and
+      a manager.** "Enable save states" lives on the Emulate tab,
+      DEFAULT OFF, persisted with the project (anchor `emulate_savestates`,
+      the exact rail emulate_card rides: quit-time anchor write, global
+      settings fallback, project save/open, startup restore). The toggle
+      picks the LAUNCH SHAPE: on = the checkpointable root/PAD_PIVOT
+      boot; off = the plain user launch this tab always had, and
+      watch.sh then starts the playfield WITHOUT its state controls
+      (--savestates argv, defaulting on for any PAD_PIVOT boot so
+      hand-run rig sessions keep their buttons). The tooltip (widgets'
+      _Tooltip, side-placed per its own combobox rule) names the cost:
+      0.7-1.5 GB per slot, a multi-second freeze per save, slots stay
+      until deleted. The playfield's Save/Load buttons grew a 10-slot
+      picker (slot1..slot10, labels shown, "(empty)" otherwise); Save
+      opens a small name dialog and passes the label to savegame.sh,
+      which stores it IN slot.meta so names travel with the slot. The
+      tab's manager (works with the toggle OFF, deliberately - turning
+      the feature off is when you reclaim disk) lists every slot with
+      name/game/size/date via the new slots.sh (root; list|label|delete,
+      name-whitelisted, only-real-slots guarded), with Rename/Delete/
+      Refresh and a totals line against WSL free space. NO wsl spawn at
+      tab build (the cold-VM freeze class): the list loads on demand.
+      Labels are sanitised to a safe charset because wsl.exe expands $
+      and backticks even in -e argv (the executor lesson). savegame.sh
+      also rejects path-shaped slot names now - a GUI feeds the arg
+      that reaches rm -rf. VALIDATED: 93 emulate tests + 75 app smokes
+      green (new test: toggle-off = the ordinary launch); slots.sh
+      list/label round-trip with spaced labels through the real wsl
+      argv path; a pivot boot brought the playfield up WITH the picker
+      (process alive through attract) and `savegame.sh slot1 "picker
+      test save"` saved 705 MB with the label listed back. THIS ALSO
+      DELIVERS ITEM 33's core ask (the list + the space visibility).
       **★ MID-CLIP VIDEO RESUME FIXED (2026-08-10, this commit): the
       save now dumps --leave-stopped and takes the ring stash + GL
       journal INSIDE the freeze, then SIGCONTs.** The stand-down was a
@@ -1815,6 +1848,14 @@ These have each been violated at least once and each cost a run or a window:
       **Related cleanup found the same day, David to confirm before anyone
       deletes:** `/home/david/wtest.log` is 13 GB of watch.sh test debris;
       `~/cardcache` is 43 GB and is EXPECTED (per-title tables), keep it.
+      **★ THE CORE ASK SHIPPED 2026-08-10 with item 13's GUI batch (~90%):
+      the Emulate tab's Save states manager lists every slot with name,
+      game, size and date, totals them against the WSL disk's free space,
+      and Renames/Deletes** (slots.sh, root, guarded). David can now
+      delete `wtest` himself from the tab. REMAINING here: the list does
+      not yet flag a REFUSABLE slot (dead-tty / gone-card per
+      restorestate.sh's pre-flight) with the reason a load would fail -
+      the polish this item's text asked for beyond the list itself.
       **Acceptance:** wherever Save/Load already lives (playfield bar and/or
       Emulate tab), the user can see every slot with its size and save time
       plus a total, and can delete a slot from there; the numbers match `du`

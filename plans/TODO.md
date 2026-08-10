@@ -75,7 +75,7 @@ These have each been violated at least once and each cost a run or a window:
 ## Queue
 
 - [ ] **27. Any Spike 2 title should load, show a switch layout, and start a
-      game. Today only Godzilla does.** `S1 D3`
+      game. Today only Godzilla does.** `S1 D2` ← IN PROGRESS, 70%
       **★ DAVID, 2026-08-06: "i'm trying to load Jaws right now and I'm not
       getting the virtual switch playfield at all. and starting a game doesn't
       seem to work. it got past the initial service screen, but said node 2
@@ -128,6 +128,90 @@ These have each been violated at least once and each cost a run or a window:
       confirm, the fault shows every time, and the instruments (the shim's
       switch dump, `swtable.py`, the Tech Alert screen) all exist — half (a) is
       nearly D1 and can land alone.
+      **★★ 2026-08-10, 70%, `3c95b49`. (a) WAS ALREADY DONE and this entry was
+      stale; (b)'s NODE FAULT IS FIXED AND LIVE-VERIFIED ON JAWS. What is left
+      is not this item's to fix — it is BLOCKED ON ITEM 29.** `D3 → D2`: the
+      mechanism is fully cracked and shipped, and what remains is one confirming
+      run once 29 unblocks it.
+      **(a) CLOSED, by item 28 rather than by this pass.** The gate this entry
+      describes (`[ -d "$S/games/$GAME" ]`) is gone; mktables.py builds the
+      tables from the card and says what it did. **Verified live this pass:**
+      Jaws opened its own playfield window with its own artwork, 65 inserts (18
+      lit), switch markers and live LED data at 0.7 Hz.
+      **(b) THE NODE-2 TECH ALERT IS FIXED.** `watch.sh`'s `case "$GAME"` is
+      replaced by `nodecensus.py`, which derives the unpopulated boards from the
+      TITLE'S OWN device table — same shape as mktables: derived, nothing
+      committed, nothing to add per title. watch.sh logs the decision and the
+      evidence either way, because a silenced board is invisible by
+      construction.
+      **Live on Jaws, 2026-08-10:** `[watch] node census: silencing node(s) 2 -
+      jaws_le's own device table names no board there`, then **past Tech Alerts
+      after 3 Service Back presses**, guest at 36-49 fps, a coin accepted
+      (**CREDITS 1 3/4** on its own screen) and Start answered with **LOCATING
+      PINBALLS / PLEASE WAIT** — the game's own start sequence. Screenshots:
+      `c:/tmp/item27/jaws_attract.png`, `jaws_game.png`, `jaws_start.png`.
+      **★ THE FINDING, AND IT KILLS THE OBVIOUS IDENTIFICATION: `group + 2` IS
+      NOT THE NODE.** devicexy's header states "group N is node N+2"; that is
+      Godzilla Pro's mapping, not a law — godzilla_pro's group 6 carries
+      connectors 8a/8b/8c while **jaws_le's group 7 does**. +2 on one title, +1
+      on the next. The CONNECTOR STRING names the board and is the oracle. This
+      is also why three of the four board[+144] figures quoted above could not be
+      reproduced at the nodes they are attributed to: the strip boards (the
+      toppers, on "CN4" or on no connector at all) are not numbered by this
+      scheme, and nodecensus leaves them unattributed rather than guessing.
+      **★★ AND WHY IT HAD TO BE PER TITLE, WITH A LIVE COUNTER-EXAMPLE:
+      john_wick_le names connector 2a on 288 of its 503 records — its node 2 is
+      REAL AND FULL.** A blanket "silence 2" would have cost that title 288
+      devices while looking like a fix. That is exactly the trap this entry
+      warned about, and it is no longer hypothetical.
+      **Validated before any run, against the two titles whose right answer was
+      already known and neither of them from this code:** godzilla_pro derives
+      `2` (reproducing the measured hard-coded case) and john_wick_le derives
+      nothing (matching it already working). Item 3's coil map is a third
+      independent check — Godzilla's records under 8a/8b/8c hold exactly 9
+      coils against 1 under 9a/9b/9c, which is item 3's node 8 = indices 0..8,
+      node 9 = one coil.
+      **★★★ WHAT BLOCKS THE BOX: A GAME CANNOT GET A BALL INTO PLAY ON JAWS,
+      AND THE CAUSE IS ITEM 29, NOT THIS ITEM.** Jaws's `switch_list.txt` has
+      **108 switches all named `?`**, so nothing in the rig can find its trough:
+      `plunge.py` and `swinit.py` hard-code Godzilla's ids 66..71 (Trough 6..1),
+      which on Jaws are some other switches entirely. `plunge.py reset` reports
+      "six balls in the trough" and the game still sits on LOCATING PINBALLS
+      forever, because the switches it watches were never closed. **So item 29
+      is now a BLOCKER for PLAYING any `?` title, not only for reading its
+      layout** — worth re-reading 29's severity in that light.
+      **Also seen on Jaws and NOT investigated, recorded so it is not
+      rediscovered: `[dev] --- ball devices: count=3812626537 ---`.** A 3.8
+      billion count is the shim's ball-device locator landing on the wrong
+      address for this title — the same `title_addr` class as item 29's
+      MSG_LANG, and plausibly the same root cause.
+      **Not this item's, found by its run: `~/spike2root/dump/boot.id` and
+      `game.out` are ROOT-OWNED** from an earlier PAD_PIVOT session, so an
+      ordinary run prints `boot.id: Permission denied` twice and writes no
+      session id. That is item 13's save-state identity; it did not stop the run.
+      **RULED OUT, do not re-derive:** silencing every node the census cannot
+      see. The census only names boards that carry a connector (124 of Godzilla's
+      575 records), so "not in the census" is not "not present" — and the strip
+      boards would be silenced by it. Only node 2 is a candidate, because
+      hwshim.c's 0x39d554 makes slot 2 the one board whose registered bit is
+      `board[+144] != 0`.
+      **The second-title confirmation the acceptance asks for was argued at the
+      desk rather than run, and here is the argument to check:** for EVERY title
+      but Godzilla the old `case` produced "" (silence nothing), and the new
+      derivation also produces "" for john_wick_le, star_wars_le,
+      led_zeppelin_le, elvira3 and turtles_pro. It produces `2` for Godzilla,
+      identical to the old case. **The only title whose behaviour changes at all
+      is Jaws**, so there is no second title on this disk where a run could show
+      a difference. A run is still worth doing on john_wick_le when one is cheap,
+      as a regression control rather than a discovery.
+      **Resume:** the node half needs nothing. To close the box, get a ball into
+      play on a non-Godzilla title — which needs item 29's switch names first, or
+      a way to identify the trough that does not go through the name. **Rig state
+      after this pass: NOT CLEAN.** A `[game]` zombie held by a WSL interop relay
+      survives, pinning one fuse2fs mount (`alive.sh` = 2). It cannot be cleared
+      from inside WSL; `wsl --shutdown` from Windows is the only cure and was
+      left for David rather than taken, since it kills every WSL process on the
+      machine.
 
 - [ ] **23. The game exits by itself mid-play.** `S1 D2` *(**D4 → D2,
       2026-08-06 evening, off item 11's runs:** a SECOND fault shape now has
@@ -1691,7 +1775,13 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **29. Switch names come back as `?` on most titles, so the schematic
       playfield is a list of numbers and switch positions cannot be joined.**
-      `S2 D4`
+      `S1 D4` *(**S2 → S1, 2026-08-10, on evidence from item 27's Jaws run:**
+      this does not only cost READING the layout, it BLOCKS PLAY. Jaws's 108
+      switches are all `?`, so nothing can find its trough — `plunge.py` and
+      `swinit.py` hard-code Godzilla's ids 66..71 — and the game therefore sits
+      on LOCATING PINBALLS forever however many balls the rig thinks it put
+      back. "I cannot get a ball into play" is the S1 line, and it is now
+      measured rather than argued. Item 27 is blocked on this.)*
       **MEASURED 2026-08-06 across four card runs, and the split is clean:**
       Led Zeppelin LE 1.22.0 **96 of 96 rows `?`**, Elvira's HoH 1.13.0 **109 of
       109 `?`**, Jaws LE 1.02.0 **108 of 108 `?`** — and **John Wick LE 1.01.0

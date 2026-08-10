@@ -774,6 +774,22 @@ HELP_CONTENT = {
          "then verifies nothing survived — and if leftovers are stuck where "
          "nothing inside WSL can clear them, Stop says so and offers the "
          "WSL restart that does."),
+        ("Reset windows",
+         "Puts the emulator's windows back where they started. The rig "
+         "remembers where you last dragged each one and restores it on the "
+         "next run with no check that the spot is still on screen — so a "
+         "window moved to a second monitor that is later unplugged comes back "
+         "somewhere you cannot reach it, and there is nothing to drag. This is "
+         "the way back. It works on every platform and whether or not a game "
+         "is running."),
+        ("The game window should come up in front",
+         "It comes out over this app by itself, along with the Controls and "
+         "virtual playfield windows — you should not have to go looking for "
+         "it. It can take a few seconds after the window first appears, "
+         "because Windows will not let a program put a window in front of the "
+         "one you just clicked, and the rig has to keep asking until it is "
+         "allowed. If it ever stays behind, Reset windows above is the "
+         "shortcut back to it."),
         ("It runs the card you pick here, not the Input box",
          "This is the one tab that ignores the Input box: point it at a card "
          "image of its own. That image is mounted READ ONLY and run in place — "

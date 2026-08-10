@@ -749,6 +749,16 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    works without anything being added to this repository first. A title
    that ships no playfield drawing (many don't) gets a clickable
    schematic of its switch list instead.
+   The emulator's windows **come out in front of this app** when a run
+   starts, rather than opening behind it — Windows won't let a program
+   jump in front of the window you just clicked, so the rig keeps asking
+   until it's allowed, which can take a few seconds. And a **Reset
+   windows** button puts them all back to their default positions if one
+   ever ends up somewhere you can't drag it back from: the rig remembers
+   where you last left each window and restores it with no check that the
+   spot is still on screen, so a window parked on a second monitor that
+   is later unplugged comes back out of reach. It works on every
+   platform, running or not.
    **Save states**, opt-in on the tab and off by default — a tooltip
    spells out the cost before you turn it on. Tick it and the virtual
    playfield window grows Save state / Load state buttons with ten

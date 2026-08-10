@@ -128,6 +128,7 @@ import gameinfo
 import mktables
 import padpath
 import padsw
+import trough
 
 HERE = padpath.RIG
 
@@ -242,7 +243,15 @@ def coarse_timers():
 #: two writers have an array each (padsw.py / padsw.h). Reading the keyboard's
 #: half would miss a door opened with swhold.py, which is exactly how the door
 #: gets opened from a script.
-SW_PATH = os.path.join(padpath.dump() or "", "padsw")
+#:
+#: PAD_SW_FILE WINS WHEN IT IS SET, exactly as padsw.py honours it: it is that
+#: module's own escape hatch, "the only way to check any of this without a
+#: running game", and this window is the thing most worth checking that way -
+#: a block written by hand with known bytes in it turns the trough display
+#: into something that can be judged against a reference instead of against a
+#: memory of what the last run looked like. The rig never sets it.
+SW_PATH = (os.environ.get("PAD_SW_FILE")
+           or os.path.join(padpath.dump() or "", "padsw"))
 PADSW_MAGIC = padsw.MAGIC
 SW_HELD, SW_COIN_DOOR = padsw.OFF_MRG, 33
 
@@ -324,10 +333,22 @@ FADE_UNIT_MS = float(os.environ.get("PAD_PF_FADE_UNIT_MS", "12"))
 #: frame and has no reason to run at 30 Hz.
 POLL_MS = 50
 
-#: Read the coin door every Nth tick instead of every tick. It is a whole extra
-#: round trip across the VM boundary (3.35 ms, measured) for a switch a human
-#: flips by hand; 4 Hz is still faster than anyone can act on the answer.
-DOOR_EVERY = max(1, int(TARGET_FPS / 4))
+#: Read the switch block every Nth tick instead of every tick. It is a whole
+#: extra round trip across the VM boundary (3.35 ms, measured) on top of the
+#: LED read, so it is paced rather than run at the frame rate.
+#:
+#: ONE READ ANSWERS EVERY SWITCH, which is why this went from 4 Hz to 10 when
+#: the trough display landed. The block is 808 bytes and a 9p round trip costs
+#: what it costs regardless of how much of it is asked for (measured for the
+#: coin door: 3.35 ms for 72 bytes, the same as the LED read's 1908) - so
+#: reading the whole merged array for 256 switches costs exactly what reading
+#: one byte for the coin door used to. 4 Hz was chosen for a switch a human
+#: flips by hand twice an hour; a ball leaving the trough is not that, and at
+#: 4 Hz a drain would show up a quarter of a second late. 10 Hz is 6 more
+#: round trips a second than before - about 20 ms in every 1000 - and it is
+#: what the two numbers in the status bar are measured against.
+SW_HZ = float(os.environ.get("PAD_PF_SW_HZ", "10"))
+SW_EVERY = max(1, int(round(TARGET_FPS / max(1.0, SW_HZ))))
 
 #: Close with the run: once the emulator has been SEEN, this many consecutive
 #: failed polls of the LED block means the run has been torn down (watch.sh
@@ -740,15 +761,11 @@ def load_switch_list():
     graphical device test mode with a playfield drawing and an XY record per
     device, and TMNT 1.59 ships neither - no images/Test directory, and the word
     "playfield" appears in its binary only in adjustment help text.
+
+    THE PARSE ITSELF IS IN trough.py, because swshow.py needs the same file and
+    cannot import this module (no tkinter inside WSL). One parser, two callers.
     """
-    out = []
-    for p in _rows(os.path.join(TDIR, "switch_list.txt"), 5):
-        try:
-            out.append(dict(id=int(p[0]), num=int(p[1]), node=int(p[2]),
-                            bit=int(p[3]), name=" ".join(p[4:])))
-        except ValueError:
-            continue
-    return out
+    return trough.load_list(os.path.join(TDIR, "switch_list.txt"))
 
 
 class Tip:
@@ -784,6 +801,239 @@ class Tip:
         if self.shown:
             self.win.withdraw()
             self.shown = False
+
+
+def read_merged():
+    """The whole merged switch array - what the GAME is being handed - or None.
+
+    ONE read, 256 answers. This replaces the single-byte coin-door read that
+    used to happen here, and it costs the same: the expensive part is the 9p
+    round trip, not the bytes (3.35 ms either way, measured 2026-08-05).
+
+    THE FALLBACK TO THE KEYBOARD'S HALF IS DELIBERATE and is the coin door's
+    old rule generalised. The merged array is written by the GUEST, so it is
+    all zeros until the game is up and scanning switches - and all zeros reads
+    as "coin door open, no balls anywhere", which is a window being wrong
+    rather than a window being early. Until the shim has published once
+    (mrg_gen still 0), the keyboard's array is the only truth there is, and it
+    already carries padglhost's window-open latch: the door and a full trough.
+    """
+    try:
+        with open(SW_PATH, "rb") as f:
+            d = f.read(padsw.SIZE)
+    except OSError:
+        return None
+    if len(d) < padsw.SIZE or struct.unpack_from("<I", d, 0)[0] != PADSW_MAGIC:
+        return None
+    off = (padsw.OFF_MRG if struct.unpack_from("<I", d, padsw.OFF_MRG_GEN)[0]
+           else padsw.OFF_HELD)
+    return d[off:off + padsw.MAX_ID]
+
+
+class SwitchWatch:
+    """The live switch state both views share: one paced read, then answers.
+
+    Kept out of the views because the artwork window and the schematic ask the
+    same three questions of the same bytes - is the coin door open, is this
+    switch made, where are the balls - and the rig has been bitten twice by
+    two readers of one fact drifting apart (alive.sh vs killgame.sh,
+    autoattract.sh vs status.sh). One class, two callers.
+    """
+
+    def __init__(self, rows, every=None):
+        self.mrg = None
+        self.door = False
+        self.balls = trough.Balls()
+        self.positions, self.how = [], None
+        self.set_rows(rows)
+        # TICKS, NOT MILLISECONDS, because the two views run different loops:
+        # the artwork window paces itself at TARGET_FPS and the schematic at
+        # POLL_MS. Each passes the count that makes SW_HZ come out right for
+        # its own loop, so "10 Hz" means 10 Hz in both windows.
+        self.every = max(1, int(every or SW_EVERY))
+        self._n = 1                 # tick countdown; first tick reads
+
+    def set_rows(self, rows):
+        """(Re-)identify the trough from a switch table.
+
+        Called again when the table arrives mid-run: the game builds its
+        switch list on the heap, so a first run of a title has no table for
+        the first minute (Field._pick_up_switches), and a trough that could
+        not be identified at window open usually can be a minute later.
+        """
+        self.positions, self.how = trough.find(rows)
+        return bool(self.positions)
+
+    def poll(self):
+        """Re-read on the pacing above; True when this tick actually read."""
+        self._n -= 1
+        if self._n > 0:
+            return False
+        self._n = self.every
+        self.mrg = read_merged()
+        self.door = bool(self.mrg) and not self.mrg[SW_COIN_DOOR]
+        self.balls.update(self.closed())
+        return True
+
+    def closed(self):
+        """[bool] per trough position, in trough order."""
+        return trough.closed(self.mrg, self.positions)
+
+    def is_made(self, sw_id):
+        """True/False for one switch, or None when nothing has been read."""
+        if self.mrg is None or not 0 <= sw_id < len(self.mrg):
+            return None
+        return bool(self.mrg[sw_id])
+
+
+class TroughPanel:
+    """Six ball positions in trough order, drawn straight onto a canvas.
+
+    THE NUMBERS UNDER THE BALLS ARE THE POINT, not decoration. The question
+    David is asking - "are the trough switches correctly closed or open" - is
+    about WHICH position is empty, because item 20 was a wrong-end bug that a
+    count could never have shown. Position 1 is the eject end and is drawn
+    first, so the row reads left to right in the direction a ball travels, and
+    the caption says which end is which in words as well.
+
+    NOTHING HERE GOES INTO `info`, and that is a promise about clicking rather
+    than a detail. `Field._hit()` walks find_overlapping and returns the
+    topmost item that is IN `self.info`; these items are not, so they are
+    skipped exactly as the artwork image and the action buttons are. Item 24
+    measured that a click at the centre of RIGHT SCOOP lands on the COIL
+    marker rather than the switch, and coilact.py depends on it - a panel that
+    joined the hit test could quietly change which device a click reaches.
+    """
+
+    R = 7                 # ball radius, screen px
+    GAP = 5               # between balls
+    PAD = 5               # inside the panel's own background
+    #: Room under the balls for the position numbers. 9 clipped their
+    #: descenders against the panel edge (offline check, 2026-08-10) - the
+    #: numbers are the part that makes the ORDER checkable, so they get room.
+    NUM_H = 12
+
+    def __init__(self, cv, positions, how, x, y, anchor="sw"):
+        self.cv = cv
+        self.positions = positions
+        self.how = how
+        self.items = []
+        self.balls = []
+        self.drawn = []
+        step = 2 * self.R + self.GAP
+        w = self.PAD * 2 + step * len(positions) - self.GAP + 2
+        h = self.PAD * 2 + 2 * self.R + self.NUM_H
+        x0 = x if "w" in anchor else x - w
+        y0 = y - h if "s" in anchor else y
+        self.bg = cv.create_rectangle(x0, y0, x0 + w, y0 + h,
+                                      fill="#101010", outline="#3a3a3a")
+        self.items.append(self.bg)
+        cy = y0 + self.PAD + self.R
+        for i, P in enumerate(positions):
+            cx = x0 + self.PAD + self.R + i * step
+            b = cv.create_oval(cx - self.R, cy - self.R, cx + self.R,
+                               cy + self.R, fill="", outline="#666",
+                               width=1)
+            self.balls.append(b)
+            self.drawn.append(None)
+            self.items.append(b)
+            self.items.append(cv.create_text(
+                cx, y0 + h - self.PAD, anchor="s", fill="#8a8a8a",
+                font=("Consolas", 7), text=str(P["pos"])))
+        # The caption sits to the RIGHT of the balls rather than above them:
+        # this panel is pinned to the bottom of the artwork and a line above
+        # the balls would be the line closest to the playfield markers.
+        self.label = cv.create_text(x0 + w + 6, cy, anchor="w", fill="#ddd",
+                                    font=("Consolas", 8), text="")
+        self.items.append(self.label)
+        self._box = (x0, y0, x0 + w, y0 + h)
+        self._text = None
+
+    #: A ball is silver and unmistakably solid; an empty position is a hollow
+    #: ring, not a dark ball, so "no ball here" cannot read as "a ball I drew
+    #: badly". The colours are the only two states this panel has.
+    BALL = ("#d8d8d8", "#ffffff")          # fill, outline - occupied
+    EMPTY = ("", "#555555")                # fill, outline - open
+
+    def update(self, flags, text):
+        for i, on in enumerate(flags[:len(self.balls)]):
+            if self.drawn[i] == on:
+                continue
+            self.drawn[i] = on
+            fill, outline = self.BALL if on else self.EMPTY
+            self.cv.itemconfig(self.balls[i], fill=fill, outline=outline)
+        if text != self._text:
+            self._text = text
+            self.cv.itemconfig(self.label, text=text)
+            # THE BACKGROUND GROWS TO COVER THE WORDS. This panel is drawn on
+            # top of a WHITE line drawing, and grey text straight onto it is
+            # unreadable - which is exactly how the first version came out
+            # (offline check, 2026-08-10). The width is not known until Tk has
+            # laid the text out, so it is asked for afterwards rather than
+            # guessed at, and the rect was created first so it stays behind.
+            b = self.cv.bbox(self.label)
+            x0, y0, x1, y1 = self._box
+            if b:
+                x1 = max(x1, b[2] + 5)
+            self.cv.coords(self.bg, x0, y0, x1, y1)
+
+    def destroy(self):
+        for i in self.items:
+            self.cv.delete(i)
+        self.items, self.balls, self.drawn = [], [], []
+
+
+#: A made switch, drawn in the middle of its ring (artwork) or beside its row
+#: (schematic).
+#:
+#: GREEN AND NOT THE PANEL'S SILVER, which was the first try and was invisible:
+#: this artwork is a white line drawing, and a silver dot on it cannot be seen
+#: at all (caught in the offline check, 2026-08-10, before it reached a run).
+#: The panel keeps silver because it draws its balls on its own dark
+#: background. Green also stays clear of the two colours already in use on the
+#: picture - the coil marker's red and its magenta fire flash - and of the
+#: orange insert ramp, so a made switch cannot be mistaken for a fired coil.
+SW_MADE = "#00c853"
+
+
+def poll_switches(view):
+    """The paced switch read and everything that hangs off it, for both views.
+
+    ONE FUNCTION RATHER THAN A METHOD ON EACH, because the artwork window and
+    the schematic keep the same four things (`sw`, `sw_dots`, `_dot_drawn`,
+    `trough_panel`) and this rig's standing rule is that two readers of one
+    fact drift. Returns True when this tick actually read the block.
+
+    Every draw is change-gated: a still machine costs the read and no canvas
+    work at all.
+    """
+    if not view.sw.poll():
+        return False
+    for dot, sw_id in view.sw_dots:
+        made = view.sw.is_made(sw_id)
+        if view._dot_drawn.get(dot) == made:
+            continue
+        view._dot_drawn[dot] = made
+        view.cv.itemconfig(dot, fill=SW_MADE if made else "")
+    if view.trough_panel is not None:
+        view.trough_panel.update(view.sw.closed(), trough_text(view.sw))
+    return True
+
+
+def trough_text(watch):
+    """The line beside a trough panel: the count, the balls out, which end.
+
+    WHICH END IS SAID IN WORDS because the numbers alone do not settle it for
+    someone who has not read item 20, and that item was precisely a wrong-end
+    bug. "assumed" is said out loud for the same kind of reason: it IS a guess
+    (trough.py's fallback shape), and the titles it fires on are the ones
+    whose switch names are all `?`, where a wrong drawing has nothing on
+    screen to contradict it.
+    """
+    if not watch.positions:
+        return ""
+    txt = "%s   1 = eject end" % watch.balls.text()
+    return txt if watch.how == "named" else txt + "   (positions assumed)"
 
 
 def state_slots():
@@ -1077,7 +1327,6 @@ class Field(StateOps):
         self.coil_drawn = {}    # (node, index) -> last hot/cold drawn
         self.fps = 0.0          # measured, EWMA, shown in the status bar
         self._t_last = None
-        self._door, self._door_n = False, 1
         self._read_ms = 0.0     # last tick's transport cost, for PAD_PF_LOG
         self._redrawn = 0       # fixtures actually reconfigured since the log
         self._log_t, self._log_n = time.perf_counter(), 0
@@ -1141,6 +1390,18 @@ class Field(StateOps):
             self.coil_items[(C["node"], C["index"])] = i
             self.info[i] = dict(kind="coil", d=C)
 
+        # LIVE SWITCH STATE, all of it off one read (item 21). The dots inside
+        # the switch rings, the trough panel and the coin-door warning are
+        # three readings of the same 256 bytes.
+        self.sw_dots, self._dot_drawn = [], {}
+        self.trough_panel, self._panel_at = None, (self.ACT_PAD, 0)
+        self.sw = SwitchWatch(self.switches)
+        if not self.sw.positions:
+            # The artwork table only carries switches that have a POSITION,
+            # and a trough lives under the playfield - Godzilla places all six
+            # and another title need not. The full switch list is the same
+            # data without the coordinates, so ask it before giving up.
+            self.sw.set_rows(load_switch_list())
         self._add_switches(self.switches)
         # When to look for a switch table that did not exist when this window
         # opened. See _pick_up_switches().
@@ -1162,12 +1423,32 @@ class Field(StateOps):
         self.tick()
 
     def _add_switches(self, rows):
-        """Draw a clickable marker for each switch, above everything else."""
+        """Draw a clickable marker for each switch, above everything else.
+
+        TWO ITEMS PER SWITCH, AND ONLY THE RING IS CLICKABLE. The ring is the
+        hit target and carries the hold highlight; the dot inside it is live
+        state off the merged array, and it is NOT put into `self.info`.
+        That is what keeps this generalisation free: `_hit()` returns the
+        topmost item that is in `info`, so a filled dot cannot become the
+        thing a click lands on. Filling the RING instead would have changed
+        the hit test everywhere a switch and a coil share a spot - item 24
+        measured that the centre of RIGHT SCOOP lands on the coil, and
+        coilact.py depends on it.
+
+        DRAWING ALL OF THEM COSTS WHAT DRAWING SIX WOULD. The item asked for
+        the trough; the merged array arrives in one read for all 256 ids, so
+        every other switch is free transport and only its own itemconfig -
+        and a window that shows which switches the game currently has made is
+        the honest version of the one that showed none of them.
+        """
         for S in rows:
             x, y, r = S["x"] * self.scale, S["y"] * self.scale, 6
             i = self.cv.create_oval(x - r, y - r, x + r, y + r,
                                     outline="#2a8cff", width=2)
             self.info[i] = dict(kind="switch", d=S)
+            dot = self.cv.create_oval(x - 3, y - 3, x + 3, y + 3,
+                                      fill="", outline="")
+            self.sw_dots.append((dot, S["id"]))
 
     def _pick_up_switches(self):
         """Take the switch table if it arrives while this window is open.
@@ -1189,7 +1470,13 @@ class Field(StateOps):
         if not rows:
             return
         self.switches = rows
+        # The trough is worth re-asking for at the same moment: a first run of
+        # a title opens this window before the game has published its switch
+        # table, so "no trough" at window open is usually just "not yet".
+        if not self.sw.positions and not self.sw.set_rows(rows):
+            self.sw.set_rows(load_switch_list())
         self._add_switches(rows)
+        self._make_trough_panel()
 
     def _sample(self, x, y):
         """The artwork's colour under a marker, averaged over its footprint.
@@ -1355,11 +1642,30 @@ class Field(StateOps):
         # does (RIGHT FLIPPER BUTTON at y=656; see the docstring above).
         # Only on a checkpointable boot: no flag, no controls at all.
         self._state_btns = []
+        row_h = max([b.winfo_reqheight() for b in self._acts] or [0])
         if SAVESTATES:
             x = self.ACT_PAD
             for wdg in self._build_state_widgets(self.cv, compact=True):
                 self.cv.create_window(x, y, anchor="sw", window=wdg)
                 x += wdg.winfo_reqwidth() + self.ACT_GAP
+                row_h = max(row_h, wdg.winfo_reqheight())
+
+        # THE TROUGH PANEL GOES ABOVE THE BOTTOM ROW, not into it: that row is
+        # already two clusters wide (state controls left, game actions right)
+        # and on a scaled-down window they have crowded each other once
+        # already. Above them it is clear of both at every scale, and it is
+        # still down at the apron end of the artwork, which is where the real
+        # trough is - the physical position and the readable position agree.
+        self._panel_at = (self.ACT_PAD, y - row_h - self.ACT_GAP)
+        self._make_trough_panel()
+
+    def _make_trough_panel(self):
+        """Build the panel once the trough is known. Idempotent."""
+        if self.trough_panel is not None or not self.sw.positions:
+            return
+        x, y = self._panel_at
+        self.trough_panel = TroughPanel(self.cv, self.sw.positions,
+                                        self.sw.how, x, y, anchor="sw")
 
     def run_plunge(self, what):
         self.drv.run_script("plunge.py", what)
@@ -1378,35 +1684,15 @@ class Field(StateOps):
     def door_open(self):
         """True when the coin door is open, so 48V is off and coils are dead.
 
-        CACHED, and re-read only every DOOR_EVERY ticks. This is a SECOND
-        round trip across the VM boundary, and it used to happen on every
-        tick - at 60 fps that is 120 crossings a second for a switch a human
-        toggles by hand perhaps twice an hour. Measured: 3.35 ms, the same as
-        the LED read, because a 9p round trip costs what it costs regardless
-        of the 72 bytes it carries.
-
-        The merged array is the right source and it is written by the GUEST, so
-        it is empty until the game is up and reading switches. An empty merge
-        would read as "door open" and put a 48V warning on a window that is
-        simply early, so fall back to the keyboard's half until the guest has
-        published once. Which half answered is not worth showing; being wrong
-        for the first few seconds of every run would have been.
+        NO READ OF ITS OWN ANY MORE. This used to be the only reason this
+        window touched the switch block, on its own cadence and reading a
+        single byte; the trough display needs the same block at a higher rate,
+        and a 9p round trip costs what it costs regardless of how many bytes
+        it carries (3.35 ms either way, measured). So the door is now one
+        answer out of SwitchWatch's one read - see read_merged() for why the
+        keyboard's half stands in until the guest has published.
         """
-        self._door_n -= 1
-        if self._door_n > 0:
-            return self._door
-        self._door_n = DOOR_EVERY
-        try:
-            with open(SW_PATH, "rb") as f:
-                d = f.read(SW_HELD + 64)
-        except OSError:
-            return False
-        if len(d) < SW_HELD + 64 or struct.unpack_from("<I", d, 0)[0] != PADSW_MAGIC:
-            return False
-        off = (SW_HELD if struct.unpack_from("<I", d, padsw.OFF_MRG_GEN)[0]
-               else padsw.OFF_HELD)
-        self._door = not d[off + SW_COIN_DOOR]
-        return self._door
+        return self.sw.door
 
     def _take_fades(self, d, now):
         """Consume new fade-ring entries into channel envelopes. Returns how
@@ -1677,6 +1963,11 @@ class Field(StateOps):
         self._t_last = t0
         self._pick_up_switches()
 
+        # ONE PACED READ OF THE SWITCH BLOCK feeds three things: the dot in
+        # every switch ring, the trough panel, and the coin-door warning that
+        # used to do this read on its own.
+        poll_switches(self)
+
         t_read = time.perf_counter()
         d = self.read_leds()
         self._read_ms = (time.perf_counter() - t_read) * 1000.0
@@ -1733,6 +2024,12 @@ class Field(StateOps):
             # way. Shown only once any have been dropped, so a clean run stays
             # uncluttered.
             drops = ", %d dropped" % skipped if skipped else ""
+            # SAY SO WHEN THERE IS NO TROUGH TO DRAW. A missing panel with
+            # nothing to explain it reads as a window that forgot, and the
+            # titles it happens on are the `?`-name ones (item 29) where the
+            # user most needs to know the rig cannot find the balls.
+            if not self.sw.positions:
+                coils += "   no trough switches identified"
             # BOTH RATES ARE ON SCREEN, and which is which is spelled out. The
             # loop is not the picture: see the module docstring, and item 31,
             # which is this window reading 30 fps over a 2.83 s freeze. The
@@ -1868,6 +2165,25 @@ class Schematic(StateOps):
             for wdg in reversed(self._build_state_widgets(bar)):
                 wdg.pack(side="right", padx=(0, 4), pady=2)
 
+        # THE TROUGH GETS ITS OWN STRIP HERE, not a corner of the switch grid.
+        # The grid is columns of text that already fill the window and the
+        # panel would land on top of a node's rows; a strip of its own cannot
+        # collide with anything, and this view is the one that runs on the
+        # `?`-name titles (item 29), where seeing that the trough is empty is
+        # the difference between "the game is broken" and "the game cannot
+        # find its balls".
+        self.sw_dots, self._dot_drawn = [], {}
+        self.sw = SwitchWatch(switches,
+                              every=round(1000.0 / POLL_MS / max(1.0, SW_HZ)))
+        self.trough_panel = None
+        if self.sw.positions:
+            strip = tk.Frame(root, bg="#111")
+            strip.pack(fill="x")
+            pcv = tk.Canvas(strip, height=38, bg="#111", highlightthickness=0)
+            pcv.pack(fill="x", padx=4, pady=(0, 3))
+            self.trough_panel = TroughPanel(pcv, self.sw.positions, self.sw.how,
+                                            2, 2, anchor="nw")
+
         by_node = {}
         for sw in switches:
             by_node.setdefault(sw["node"], []).append(sw)
@@ -1892,6 +2208,12 @@ class Schematic(StateOps):
                     x, y, anchor="w", fill="#d8d8d8", font=("Consolas", 9),
                     text="%3d  %-28s" % (sw["id"], sw["name"][:28]))
                 self.info[i] = dict(kind="switch", d=sw)
+                # The live-state dot beside the row, drawn OUTSIDE the text and
+                # not registered in `info` - the same rule as the artwork
+                # view's dots, so it can never become what a click lands on.
+                dot = self.cv.create_oval(x - 9, y - 3, x - 3, y + 3,
+                                          fill="", outline="")
+                self.sw_dots.append((dot, sw["id"]))
 
         # width=1 for the same reason as Field's bar: the text must never be
         # what sizes the window.
@@ -1955,6 +2277,9 @@ class Schematic(StateOps):
             save_state(self.root)           # see Field.tick: this is the COMMON close
             self.root.destroy()             # the run ended; leave with it
             return
+        # The same paced read the artwork view does: the dot beside each row
+        # and the trough strip both come off it.
+        poll_switches(self)
         state_msg = self._state_status()
         if not d or struct.unpack_from("<I", d, 0)[0] != PADLED_MAGIC:
             self.status.config(text=state_msg
@@ -1963,10 +2288,12 @@ class Schematic(StateOps):
             self.status.config(
                 text=state_msg
                      or " emulator up   %d LED writes decoded   %d coils addressed"
-                        "   (no positions for this title: see swtable.py)"
+                        "   %s   (no positions for this title: see swtable.py)"
                         % (struct.unpack_from("<I", d, 12)[0],
                            struct.unpack_from("<I", d, COIL_GEN_OFF + 4)[0]
-                           if len(d) >= PADLED_READ else 0))
+                           if len(d) >= PADLED_READ else 0,
+                           self.sw.balls.text() if self.sw.positions
+                           else "no trough switches identified"))
         self.root.after(POLL_MS, self.tick)
 
 

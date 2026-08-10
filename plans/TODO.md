@@ -330,83 +330,52 @@ These have each been violated at least once and each cost a run or a window:
       and because a single sighting is not a repro — a pass can end having
       learned nothing, which is the D4 definition.
 
-- [ ] **21. Ball handling, and clear feedback about how many balls are in
-      play.** `S2 D4` **★ DAVID, 2026-08-06: "we will need some sophisticated
-      ball handling and clear feedback about how many balls are in play. for
-      example, during multiball, many balls are in play. having clear feedback
-      in the 'controls' or 'virtual playfield' window is very helpful (show
-      images of pinballs loaded in the trough for example)."**
-      — S2 because single-ball play works, so nobody loses a ball to this; what
-      it costs is every run that wants multiball, and it is a capability nothing
-      else can work around. D4 for the item as a whole, but **the two halves are
-      very different prices and the cheap one lands alone** — say which you did.
-      **(a) THE FEEDBACK HALF IS D2 DESK WORK.** Both windows David named
-      already exist and both already have what they need: `playfield.py`
-      (Windows/Tk) reads `mrg[]` over 9p and `padglhost.c`'s Controls legend is
-      drawn in X11 beside the switch keys.
-      **CORRECTED 2026-08-06 by item 24: this entry said playfield.py "reads
-      `mrg[]` every frame and already draws switch state". It does not.** It
-      reads mrg for the COIN DOOR ALONE and every 8th tick at that
-      (`DOOR_EVERY`); no switch marker is drawn from live state, and `tick()`
-      touches only inserts and coils. So the trough display is a new reader and
-      a new drawing path, not a re-colour of something already on screen.
-      **Also from item 24, and it will bite this item: THE COIL MARKER SITS ON
-      TOP OF THE SWITCH MARKER.** `_hit()` at the centre of RIGHT SCOOP returns
-      the coil — the switch oval is not even in `find_overlapping` there,
-      because it is drawn as an unfilled outline. Any per-switch drawing or
-      interaction this item adds must not assume a click lands on the switch.
-      The trough is ids 71..66 = TROUGH 1..6 and `swshow.py` (`e1e9cb3`)
-      already counts and prints it. Six ball images and a "N balls in play"
-      line is drawing, not discovery.
-      **★ DAVID, 2026-08-06, and it SHARPENS (a) rather than adding to it:
-      "i want to see visual indication of trough switches being correctly
-      closed or open (probably part of our todo item that shows balls in play
-      feedback)."** He is right that it belongs here. What it changes is the
-      acceptance: a COUNT is not enough. Each of the six must read closed or
-      open individually, **drawn in trough order — 71 TROUGH 1 the eject end
-      through 66 TROUGH 6 the far end** — because the question he is asking is
-      whether the state is CORRECT, and correctness for a trough is about
-      WHICH position is empty, not how many are.
-      **Why that ordering is the whole point, from this queue's own history:**
-      item 20 was exactly a wrong-end bug — `plunge.py` opened TROUGH 1, the
-      eject end, where a ball leaving can only ever open TROUGH 6 — and it took
-      reading the guest's `[sw]` stream to see it (`-71l` gave the game
-      `[70,69,68,67,66]`, `-66l` gave `[71,70,69,68,67]`). Six markers in
-      trough order would have shown that by eye in one glance. This display is
-      therefore a diagnostic for the ball model in (b), not only a comfort.
-      **Read `mrg[]`, not `scr_held[]`** — what the GAME IS HANDED, per
-      padsw.py's own rule, and confirmed as the right oracle by item 24.
-      **Generalisation worth taking, but say if you do:** mrg is ONE read for
-      all 256 ids, so drawing live state on every switch marker costs the same
-      transport as drawing it on six. The trough is what David asked for; doing
-      all of them is nearly free and makes the whole window honest.
-      **(b) THE HANDLING HALF IS THE D4, and it needs item 3.** There is no ball
-      MODEL anywhere in this rig — `plunge.py` opens one trough switch and works
-      the shooter lane, and nothing tracks where a ball is, notices a drain, or
-      feeds a second ball when the game asks for one. Multiball is the game
-      firing the trough eject repeatedly and expecting balls to arrive; nothing
-      answers. **Item 3 is upstream:** the fire frame is decoded (`cmd 0x40`,
-      one coil by index) but the trough-eject index is NOT among the five that
-      item 3 confirmed — it identified 2, 3, 4, 7, 8 from a ball search, and the
-      eject is one of the unlabelled 0, 1, 5, 6. Without it the rig cannot tell
-      "the game just asked for a ball" from any other coil, and the auto-feed
-      has to be driven blind on a timer.
+- [ ] **21b. Ball HANDLING: a ball model, so multiball works.** `S2 D4`
+      *(**Split out of item 21 on 2026-08-10**, when the FEEDBACK half closed
+      as 21a. The item always said the two halves were different prices and
+      that the cheap one lands alone; this is the dear one, and it is the
+      whole of what is left.)*
+      **★ DAVID, 2026-08-06: "we will need some sophisticated ball handling
+      and clear feedback about how many balls are in play. for example, during
+      multiball, many balls are in play."** The feedback clause is 21a, done
+      and on main. This is the ball handling.
+      **THERE IS NO BALL MODEL ANYWHERE IN THIS RIG.** `plunge.py` opens one
+      trough switch and works the shooter lane; nothing tracks where a ball
+      is, notices a drain, or feeds a second ball when the game asks for one.
+      Multiball is the game firing the trough eject repeatedly and expecting
+      balls to arrive; nothing answers.
+      **MEASURED 2026-08-10 during 21a's run, and it is this item's whole
+      problem in one line: the game's own trough eject does not move a ball
+      here.** `plunge.py coin` then `plunge.py start` left the trough reading
+      6 of 6 on both the panel and `swshow.py`; the count moved only when
+      `plunge.py plunge` opened TROUGH 6 itself. So every ball this rig has
+      ever "played" was moved by a script pretending, and nothing closes the
+      loop between the coil the game fires and the switch that should answer.
+      **ITEM 3 IS UPSTREAM.** The fire frame is decoded (`cmd 0x40`, one coil
+      by index) but the trough-eject index is NOT among the five item 3
+      confirmed — it labelled 2, 3, 4, 7, 8 off a ball search, and the eject
+      is one of the unlabelled 0, 1, 5, 6. Without it the rig cannot tell "the
+      game just asked for a ball" from any other coil, and an auto-feed has to
+      be driven blind on a timer.
       **What item 20 established that this can build on** (`e1e9cb3`): the
-      trough is a STACK with a known direction — 71 TROUGH 1 is the eject end
-      (it sits at x=254 beside TROUGH JAM), 66 TROUGH 6 is the far end, balls
-      are taken from the far end and a returning ball fills the far end first.
-      So "eject a ball" and "a ball drains" are both one switch on a known end,
-      and the model is a count plus that rule.
-      **Acceptance:** state both halves separately. (a) with a game running, the
-      playfield window shows the six trough positions **individually closed or
-      open, in trough order**, filling and emptying as the count changes, and
-      says how many balls are in play; screenshot it, and include a shot with a
-      ball REMOVED so the empty position is visibly at the far end and not the
-      eject end. The cross-check is `swshow.py` on the same moment: the picture
-      and the `mrg` row must agree.
-      (b) a multiball starts with more than one ball genuinely in play — the
-      oracle is the game's own display, not the rig's model of itself, because a
-      model that feeds itself will always agree with itself.
+      trough is a STACK with a known direction — TROUGH 1 is the eject end (it
+      sits beside TROUGH JAM), TROUGH 6 is the far end, balls are taken from
+      the far end and a returning ball fills the far end first. So "eject a
+      ball" and "a ball drains" are both one switch on a known end, and the
+      model is a count plus that rule.
+      **21a shipped the instrument for watching this work**, and that was
+      deliberate: the panel draws the six positions in trough order off
+      `mrg[]`, so a model that ejects from the wrong end is visible by eye in
+      one glance rather than by reading a `[sw]` stream. `trough.py` already
+      answers "which switches, in what order" for any title.
+      **Acceptance:** a multiball starts with more than one ball genuinely in
+      play — the oracle is the game's own display, not the rig's model of
+      itself, because a model that feeds itself will always agree with itself.
+      — S2: single-ball play works, so nobody loses a ball to this; what it
+      costs is every run that wants multiball, and it is a capability nothing
+      else can work around. D4: it needs several runs, it needs a game played
+      into a multiball, and its first dependency (the eject coil index) is
+      itself an unfinished item.
 
 - [ ] **17. Keyboard switch input needs holding longer than a keystroke, and
       does not repeat.** `S1 D3` ← IN PROGRESS *(**D4 → D3 on 2026-08-06:** the
@@ -1305,6 +1274,36 @@ These have each been violated at least once and each cost a run or a window:
   audio and says so loudly, so it degrades visibly rather than silently.
 
 ## Done
+
+- [x] **21a. Clear feedback about how many balls are in play — the trough,
+      drawn in trough order.** DONE 2026-08-10, `f0d0a14` (branch `item/21`).
+      **The FEEDBACK half of the old item 21; the HANDLING half is now 21b and
+      is still open.** `trough.py` owns which switches the trough is and in
+      what order, matched by NAME (`TROUGH 1`..`TROUGH 6`) — the rule
+      `padglhost.c`'s `binds_resolve()` already uses, so what latches six balls
+      at window open and what draws them cannot disagree; ids are per title
+      (Godzilla 71..66, Jaws 65..60, John Wick 75..70) and the `?`-name titles
+      (item 29) fall back on the node 8 / bit 37..32 shape, labelled
+      `(positions assumed)` on screen. `playfield.py` widened its coin-door
+      read into ONE read of the whole merged array at 10 Hz
+      (`PAD_PF_SW_HZ`) — a 9p round trip costs the same for 808 bytes as for
+      one — and draws a six-ball panel with the position numbers under it plus
+      a live state dot on EVERY switch marker, in both the artwork and
+      schematic views. `swshow.py` derives the same trough from the same
+      module; it had been printing Godzilla's ids against Jaws.
+      **Live on godzilla_pro:** at rest `trough 6/6  0 in play  1 = eject
+      end`, swshow `6 of 6 [71,70,69,68,67,66]`; after a plunge `trough 5/6
+      1 in play` with position SIX hollow — the far end, which is the item 20
+      class of bug this display exists to make visible — swshow `5 of 6
+      [71,70,69,68,67]`.
+      **Ruled out: filling the switch RING to show state**, which would have
+      changed the hit test everywhere a switch and a coil share a spot (item
+      24: the centre of RIGHT SCOOP lands on the COIL, and `coilact.py`
+      depends on it). State markers never enter `self.info`, and a test
+      asserts it. Two faults the offline `PAD_SW_FILE` check caught before a
+      run could: silver dots are invisible on white artwork (green now), and a
+      learned-complement denominator printed `trough 4/4` beside two visibly
+      empty positions.
 
 - [x] **37. A button on the Emulate tab that puts the emulator windows back to
       their default positions.** DONE 2026-08-10, `cd1a6ca`. **Reset windows**,

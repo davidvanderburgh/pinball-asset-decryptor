@@ -57,6 +57,13 @@ while read -r kind a b c; do
     fi
 done < "$DDIR/restore.env"
 
+# This session's identity, read from the LIVE guest before it is killed -
+# through its own root, because padpath's $ROOT is wrong under root's $HOME.
+# Compared against the slot's copy at the end for the cross-session note.
+LIVE_BOOT=""
+LIVEPID=$(pgrep -x game | head -1)
+[ -n "$LIVEPID" ] && LIVE_BOOT=$(cat "/proc/$LIVEPID/root/dump/boot.id" 2>/dev/null)
+
 # A guest already running would collide on the restored pids; refuse unless
 # told to clear it (killgame is the rig's own teardown).
 if pgrep -x game >/dev/null; then
@@ -381,6 +388,20 @@ if [ -n "$NEWPID" ] && kill -0 "$NEWPID" 2>/dev/null; then
     echo "[restore] ok - guest restored, pid $NEWPID"
 else
     echo "[restore] restore reported ok but the guest is not alive"; exit 1
+fi
+
+# Same-session or cross-session?  The renderer only holds the GL world the
+# guest built THIS session; a save from an earlier session resumes fine (the
+# draw guard keeps the renderer alive) but its artwork exists only as new
+# scenes are built, so the picture is incomplete until the game rebuilds
+# them.  Say so - a user who was not told assumes the load half worked.
+SLOT_BOOT=$(cat "$DDIR/boot.id" 2>/dev/null)
+if [ -z "$SLOT_BOOT" ] || [ -z "$LIVE_BOOT" ] || [ "$SLOT_BOOT" != "$LIVE_BOOT" ]; then
+    echo "[restore] NOTE: this save is from an EARLIER session. Game state,"
+    echo "[restore] audio and video resume; the scene artwork rebuilds only"
+    echo "[restore] as the game builds new scenes, so the picture can be"
+    echo "[restore] incomplete for a while. A save made this session loads"
+    echo "[restore] with full graphics."
 fi
 
 # --- restart the video host in RESUME mode (see the stop block above) -----

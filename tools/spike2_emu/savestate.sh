@@ -39,6 +39,10 @@ echo "[save] guest pid $PID, root $(readlink /proc/$PID/root 2>/dev/null)"
 
 mkdir -p "$DDIR"
 : > "$DDIR/restore.env"
+# The session identity, for restorestate's same-vs-cross-session warning.
+# Through the guest's own root, like the ring stash below - $ROOT here is
+# padpath's guess from $HOME, and this script runs as root ($HOME=/root).
+cp -f "/proc/$PID/root/dump/boot.id" "$DDIR/boot.id" 2>/dev/null || true
 
 # --- externals from the guest's real mounts ------------------------------
 # A mount needs --external when its backing is OUTSIDE the checkpoint. The

@@ -139,12 +139,32 @@ static void load_gl(void)
 #define MAXUNI  32
 static unsigned map_tex[MAXNAME], map_buf[MAXNAME], map_obj[MAXNAME];
 static unsigned map_vao[1024], map_fbo[256];
-/* Graveyard for DELBUF - deleted host buffer objects are parked here instead
- * of freed, because immediate deletion breaks restored save states (see the
- * PADGL_DELBUF case).  FIFO; slot reuse frees the oldest occupant. */
-#define GRAVE_N 4096
-static unsigned grave_buf[GRAVE_N];
-static unsigned grave_head;
+/* Graveyards for DELBUF and DELTEX - deleted host objects are PARKED, not
+ * freed, and the guest-name mapping is KEPT, because immediate deletion
+ * breaks restored save states two ways (see the PADGL_DELBUF case): the
+ * bound VAO's attachment zeroes (the SIGSEGV), and a restored guest's
+ * re-bind of a torn-down name lands on 0 - black textures and skipped
+ * draws, the "incomplete scenes" a tester saw after a load.  Each entry is
+ * (guest name, host object); when the FIFO wraps, the oldest is truly
+ * deleted and its map entry scrubbed only if the guest has not re-genned
+ * the name meanwhile.  Buffers are KB-scale so 4096 ride; textures are
+ * MB-scale so 256 - a couple of scene teardowns' worth, which is the whole
+ * window a restore can reach back into. */
+#define GRAVE_N  4096
+#define TGRAVE_N 256
+static unsigned grave_buf_name[GRAVE_N], grave_buf_obj[GRAVE_N], grave_head;
+static unsigned grave_tex_name[TGRAVE_N], grave_tex_obj[TGRAVE_N], tgrave_head;
+/* Draw-guard state - see PADGL_DRAWARRAYS.  Per VAO: which attribs are
+ * enabled, which were specified with a real ARRAY_BUFFER bound, and whether
+ * an element buffer is attached.  A draw whose enabled attribs are not all
+ * buffer-backed would make GL read CLIENT memory at the recorded offset
+ * (the restored-guest SIGSEGV, worst on a cross-session load where none of
+ * the guest's buffer names exist yet), so dispatch skips it instead. */
+static unsigned cur_vao_g;                 /* guest name of the bound VAO   */
+static unsigned cur_array_buf;             /* host object bound to 0x8892   */
+static unsigned short vao_on[1024], vao_backed[1024];
+static unsigned char  vao_elem[1024];
+static unsigned draws_skipped;
 static int  uni_loc[MAXPROG][MAXUNI];
 static char uni_name[MAXPROG][MAXUNI][40];
 static int  attr_loc[MAXPROG][PADGL_ATTR_PER_PROG];
@@ -1716,8 +1736,18 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
     case PADGL_BLENDEQSEP:      p_glBlendEquationSeparate(u[0],u[1]); break;
 
     case PADGL_GENTEX:          if (u[0] < MAXNAME) p_glGenTextures(1, &map_tex[u[0]]); break;
-    case PADGL_DELTEX:          if (u[0] < MAXNAME && map_tex[u[0]])
-                                    { p_glDeleteTextures(1, &map_tex[u[0]]); map_tex[u[0]] = 0; } break;
+    case PADGL_DELTEX:          /* deferred, name kept - see the graveyards */
+        if (u[0] < MAXNAME && map_tex[u[0]]) {
+            unsigned on = grave_tex_name[tgrave_head], oo = grave_tex_obj[tgrave_head];
+            if (oo) {
+                if (on < MAXNAME && map_tex[on] == oo) map_tex[on] = 0;
+                p_glDeleteTextures(1, &oo);
+            }
+            grave_tex_name[tgrave_head] = u[0];
+            grave_tex_obj[tgrave_head]  = map_tex[u[0]];
+            tgrave_head = (tgrave_head + 1) % TGRAVE_N;
+        }
+        break;
     case PADGL_BINDTEX:
         cur_tex_unit_binding = u[1];
         p_glBindTexture(u[0], u[1] < MAXNAME ? map_tex[u[1]] : 0);
@@ -1921,14 +1951,24 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
          * the graveyard is a few MB at worst; the oldest is freed when the
          * ring wraps, long after any restore could still want it. */
         if (u[0] < MAXNAME && map_buf[u[0]]) {
-            if (grave_buf[grave_head])
-                p_glDeleteBuffers(1, &grave_buf[grave_head]);
-            grave_buf[grave_head] = map_buf[u[0]];
+            unsigned on = grave_buf_name[grave_head], oo = grave_buf_obj[grave_head];
+            if (oo) {
+                if (on < MAXNAME && map_buf[on] == oo) map_buf[on] = 0;
+                p_glDeleteBuffers(1, &oo);
+            }
+            grave_buf_name[grave_head] = u[0];
+            grave_buf_obj[grave_head]  = map_buf[u[0]];
             grave_head = (grave_head + 1) % GRAVE_N;
-            map_buf[u[0]] = 0;
+            /* map_buf[u[0]] deliberately KEPT - a restored guest's stale
+             * re-bind of this name must still find the object. */
         }
         break;
-    case PADGL_BINDBUF:         p_glBindBuffer(u[0], u[1] < MAXNAME ? map_buf[u[1]] : 0); break;
+    case PADGL_BINDBUF: {
+        unsigned host = u[1] < MAXNAME ? map_buf[u[1]] : 0;
+        if (u[0] == 0x8892)      cur_array_buf = host;              /* ARRAY_BUFFER */
+        else if (u[0] == 0x8893) vao_elem[cur_vao_g] = host ? 1 : 0; /* ELEMENT_ARRAY */
+        p_glBindBuffer(u[0], host); break;
+    }
     case PADGL_BUFDATA:
         if (dbg) {
             static int shown;
@@ -1945,23 +1985,46 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
     case PADGL_BUFSUBDATA:      p_glBufferSubData(u[0], (long)u[1], (long)u[2],
                                                   len > 12 ? pl + 12 : 0); break;
 
-    case PADGL_GENVAO:          if (u[0] < 1024) p_glGenVertexArrays(1, &map_vao[u[0]]); break;
-    case PADGL_BINDVAO:         p_glBindVertexArray(u[0] < 1024 ? map_vao[u[0]] : 0); break;
+    case PADGL_GENVAO:          if (u[0] < 1024) {
+                                    p_glGenVertexArrays(1, &map_vao[u[0]]);
+                                    vao_on[u[0]] = vao_backed[u[0]] = 0;
+                                    vao_elem[u[0]] = 0;
+                                } break;
+    case PADGL_BINDVAO:         cur_vao_g = u[0] < 1024 ? u[0] : 0;
+                                p_glBindVertexArray(u[0] < 1024 ? map_vao[u[0]] : 0); break;
     case PADGL_VERTEXATTRIB: {
         int idx = attr_resolve(u[0]);
-        if (idx >= 0)
+        if (idx >= 0) {
+            /* Record whether this attribute has a REAL buffer behind it.  A
+             * VertexAttribPointer with ARRAY_BUFFER 0 records u[5] as a
+             * CLIENT-memory pointer, and a later draw makes Mesa memcpy
+             * vertex data from that address - the restored-guest crash.  A
+             * cross-session load hits it hardest: the restored guest binds
+             * buffer names this renderer never created, so map_buf[] is 0
+             * and the bind lands on 0. */
+            if (idx < 16) {
+                if (cur_array_buf) vao_backed[cur_vao_g] |=  (unsigned short)(1u << idx);
+                else               vao_backed[cur_vao_g] &= (unsigned short)~(1u << idx);
+            }
             p_glVertexAttribPointer((unsigned)idx,(int)u[1],u[2],(unsigned char)u[3],
                                     (int)u[4],(const void *)(unsigned long)u[5]);
+        }
         break;
     }
     case PADGL_ENABLEATTRIB: {
         int idx = attr_resolve(u[0]);
-        if (idx >= 0) p_glEnableVertexAttribArray((unsigned)idx);
+        if (idx >= 0) {
+            if (idx < 16) vao_on[cur_vao_g] |= (unsigned short)(1u << idx);
+            p_glEnableVertexAttribArray((unsigned)idx);
+        }
         break;
     }
     case PADGL_DISABLEATTRIB: {
         int idx = attr_resolve(u[0]);
-        if (idx >= 0) p_glDisableVertexAttribArray((unsigned)idx);
+        if (idx >= 0) {
+            if (idx < 16) vao_on[cur_vao_g] &= (unsigned short)~(1u << idx);
+            p_glDisableVertexAttribArray((unsigned)idx);
+        }
         break;
     }
     case PADGL_REGATTRIB: {
@@ -2073,9 +2136,35 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         p_glFramebufferTexture2D(u[0],u[1],u[2], u[3] < MAXNAME ? map_tex[u[3]] : 0,(int)u[4]);
         break;
 
-    case PADGL_DRAWARRAYS:      p_glDrawArrays(u[0],(int)u[1],(int)u[2]); break;
-    case PADGL_DRAWELEMENTS:    p_glDrawElements(u[0],(int)u[1],u[2],
-                                                 (const void *)(unsigned long)u[3]); break;
+    /* THE DRAW GUARD.  If any ENABLED attribute of the bound VAO was
+     * specified without a backing buffer, GL would read vertex data from
+     * CLIENT memory at the recorded offset (~NULL) and padglhost dies in a
+     * Mesa memcpy - four identical cores from restored save states.  Such a
+     * draw is one frame of one element of a guest that is ahead of its
+     * scene rebuild; skipping it costs nothing visible and the game's own
+     * per-frame binds and next scene build heal the state.  DRAWELEMENTS
+     * additionally needs an element buffer, or its offset is a client
+     * pointer too. */
+    case PADGL_DRAWARRAYS:
+        if (vao_on[cur_vao_g] & (unsigned short)~vao_backed[cur_vao_g]) {
+            if (++draws_skipped == 1 || draws_skipped % 500 == 0)
+                fprintf(stderr, "[padglhost] draw skipped: enabled attribute "
+                        "with no backing buffer (x%u) - a restored guest "
+                        "ahead of its scene rebuild\n", draws_skipped);
+            break;
+        }
+        p_glDrawArrays(u[0],(int)u[1],(int)u[2]); break;
+    case PADGL_DRAWELEMENTS:
+        if ((vao_on[cur_vao_g] & (unsigned short)~vao_backed[cur_vao_g])
+                || !vao_elem[cur_vao_g]) {
+            if (++draws_skipped == 1 || draws_skipped % 500 == 0)
+                fprintf(stderr, "[padglhost] draw skipped: enabled attribute "
+                        "with no backing buffer (x%u) - a restored guest "
+                        "ahead of its scene rebuild\n", draws_skipped);
+            break;
+        }
+        p_glDrawElements(u[0],(int)u[1],u[2],
+                         (const void *)(unsigned long)u[3]); break;
     case PADGL_NOP:             break;
     default:
         if (++unknown_ops < 8)

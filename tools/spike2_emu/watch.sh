@@ -432,6 +432,13 @@ rm -f "$RING_HOST" "$SW_HOST"
 # One page, zeroed: the shim stamps the magic once it maps it.
 rm -f "$LED_HOST"
 dd if=/dev/zero of="$LED_HOST" bs=4096 count=1 status=none
+# This session's identity. savestate copies it into the slot; restorestate
+# compares to tell a SAME-SESSION load (renderer already holds the guest's GL
+# world) from a CROSS-SESSION one (it holds none of it - the game plays but
+# its artwork rebuilds only as new scenes are built, so the picture is
+# incomplete until then). The warning it prints is the honest label for that.
+cat /proc/sys/kernel/random/uuid > "$ROOT/dump/boot.id" 2>/dev/null || \
+    date +%s%N > "$ROOT/dump/boot.id"
 # The rings must belong to the DESKTOP user: the helpers that read and write
 # them (padglhost, the playfield over \\wsl.localhost, padvidhost) run as that
 # user, and a root-owned padled is exactly what made the playfield report

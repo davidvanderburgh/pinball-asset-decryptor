@@ -76,7 +76,10 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
-      instrument in the rig says it is healthy.** `S2 D3`
+      instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**
+      the strand was reproduced on a second occasion — item 21a's run, torn
+      down with `killgame.sh` — and the WINDOW half now has a cheap, verified
+      cure that does not shut the VM. See (4).)*
       **Found 2026-08-10 during item 22's pass, with `zorder.py`, `shotwin.py`
       and `alive.sh`. Established, in order:**
       **(1) A run left two windows behind after a clean teardown.** The run was
@@ -97,6 +100,20 @@ These have each been violated at least once and each cost a run or a window:
       and **nothing anywhere said so**.
       **(3) `wsl --shutdown` cleared it completely** and the next run's windows
       appeared normally, above the app, first time.
+      **★★ (4) THE WINDOW HALF HAS A MUCH CHEAPER CURE, established 2026-08-10
+      on a live strand (David: "these windows are frozen open and i can't close
+      them"). KILL msrdc.exe.** Both stranded windows were owned by ONE
+      `msrdc.exe` — `zorder.py --all` named it, pid and all — which is WSLg's
+      RDP client and not a Linux process at all. `Stop-Process` on it dropped
+      both windows in about three seconds, WSLg restarted itself as a fresh
+      msrdc pid on its own, **no Linux process died** (two idle `-bash`
+      sessions survived) and `zorder.py` then printed `VERDICT: no emulator
+      window found`. So `wsl --shutdown` is NOT required to unstick the
+      windows; it is required only to reap the interop zombie, which is a
+      different fault with a different cost. **Which means the cure this item
+      should build is: detect (below), then offer the msrdc kill first and the
+      VM shutdown only for the zombie.** Anything that shuts the whole VM to
+      clear a window is charging a user their entire WSL session for a repaint.
       **NOT ESTABLISHED — do not build on it: WHICH run wedged it, and whether
       the zombie is cause or symptom.** After run (2), `alive.sh` reported
       `zombies (cannot be killed, only reaped): 1` for the guest, held by a WSL

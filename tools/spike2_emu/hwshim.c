@@ -5396,15 +5396,35 @@ static void led_publish(const unsigned char *p, int n)
      * must still trip this line. One line per run; gamestate.sh greps it. */
     if (cmd == 0x97 || cmd == 0xa2 || cmd == 0xa3 || cmd == 0xa4 ||
         cmd == 0xa5 || cmd == 0xa6 || cmd == 0xb4 || cmd == 0xb5) {
-        static int lamps;
-        if (lamps >= 0 && ++lamps >= 10) {
-            char m[96];
-            snprintf(m, sizeof m,
-                     "[led] light show running: %d lamp commands "
-                     "(last node=%u cmd=%02x, %lu ms)\n",
-                     lamps, node, cmd, pad_ms());
-            logmsg(m);
-            lamps = -1;                       /* announce once */
+        /* RATE-QUALIFIED, not a bare count. The first version announced at
+         * the 10th lamp command ever, and star_wars_le promptly showed why
+         * that is wrong: a press that walks into the SERVICE MENU emits a
+         * small lamp burst on entry, the 10-count tripped on it, autoattract
+         * declared "past Tech Alerts" over a parked menu, and the run was
+         * lost (2026-08-10, the surface-fix verification run). The attract
+         * show is not a count, it is a RATE - ~40 commands/s sustained on
+         * both titles measured - so the declaration now needs 30 lamp
+         * commands inside 3 seconds: attract crosses that inside the first
+         * second, Godzilla's whole alerts wait had 2 commands total, and a
+         * menu-entry blip would need to sustain 10/s for 3 s to fake it. */
+        static unsigned long t30[30];         /* time of the (n-30)th command */
+        static unsigned nlamps;
+        static int announced;
+        if (!announced) {
+            unsigned long now = pad_ms();
+            unsigned slot = nlamps % 30;
+            if (nlamps >= 30 && now - t30[slot] <= 3000) {
+                char m[112];
+                snprintf(m, sizeof m,
+                         "[led] light show running: 30 lamp commands in "
+                         "%lu ms (last node=%u cmd=%02x, %lu ms)\n",
+                         now - t30[slot], node, cmd, now);
+                logmsg(m);
+                announced = 1;
+            } else {
+                t30[slot] = now;
+                nlamps++;
+            }
         }
     }
 

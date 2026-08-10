@@ -52,15 +52,17 @@ gs_count() {
 gs_booted() { [ "$(gs_count 'gst\] factory_make' "$1")" -ge 3 ]; }
 
 # PAST TECH ALERTS = THE ATTRACT LIGHT SHOW IS RUNNING. The shim prints
-# `[led] light show running` ONCE, the 10th lamp-class command (97/a2..a6/
-# b4/b5) the game sends to any board. Measured on the full godzilla_pro boot
-# trace: the whole Tech Alerts wait carried 2 such frames (strip-board boot
-# config) against ~3800 in 80 s of attract, and the first attract lamp frame
-# followed the successful Service Back press by 300 ms. Unlike every video-side
-# proxy this is the game's own OUTPUT deciding to run the show, and it is
-# title-independent - no node numbering, no clip identity. This is the test
-# that agrees with a screenshot of the screen, on the title that killed test 2.
-# (Emitter: led_publish() in hwshim.c, before its insert-node gate.)
+# `[led] light show running` ONCE, when 30 lamp-class commands (97/a2..a6/
+# b4/b5, any board) land inside 3 seconds - a RATE, not a count, because a
+# stray press entering the service menu emits a small lamp burst and a bare
+# 10-count tripped on exactly that (star_wars, 2026-08-10). Measured on the
+# full godzilla_pro boot trace: the whole Tech Alerts wait carried 2 such
+# frames (strip-board boot config) against ~40/s sustained in attract, so
+# attract declares within its first second and nothing else can. Unlike every
+# video-side proxy this is the game's own OUTPUT deciding to run the show, and
+# it is title-independent - no node numbering, no clip identity. This is the
+# test that agrees with a screenshot of the screen, on the title that killed
+# test 2. (Emitter: led_publish() in hwshim.c, before its insert-node gate.)
 gs_past_alerts() { [ "$(gs_count '\[led\] light show running' "$1")" -ge 1 ]; }
 
 # One word for the whole state, for anything that just wants to print it.

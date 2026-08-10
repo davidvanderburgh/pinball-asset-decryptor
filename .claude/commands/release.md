@@ -179,6 +179,61 @@ loop.
    ```
    No PR — user pushes directly to main always.  (Memory: `feedback_no_prs.md`.)
 
+7a. **Clean up any item worktrees this release fully absorbed.**  `/next`
+    leaves each in-progress queue item on its own branch/worktree at
+    `../pinball-asset-decryptor-wt/item-<N>` (see `/next`'s SKILL.md,
+    "The worktree") until the item is judged closed — and because a
+    branch can be merged into main several times across several passes
+    before anyone makes that call, a release can easily ship a branch's
+    content while its worktree still sits there, stale, on disk.
+
+    Do only the SAFE, MECHANICAL half here.  **Never decide FOR the user
+    whether a queue item is actually finished** — that is a judgment
+    call about whether every open thread in the item's `plans/TODO.md`
+    entry is really closed, and it belongs to whoever notices it (as
+    David did live, 2026-08-10: "we should clean up this worktree too as
+    part of the release process" — asked, and answered, after his own
+    review of the shipped feature). **This step never edits
+    `plans/TODO.md` and never moves an item to Done on its own.**  What
+    it DOES do is git-level tidiness: a worktree whose every commit
+    already lives on main and holds nothing uncommitted is safe to
+    remove regardless of the item's real-world status, because removing
+    it loses nothing — the branch can always be recreated with `git
+    worktree add -b item/<N> ... main` if work resumes.
+
+    For each `git worktree list` entry under `../pinball-asset-decryptor-wt/`:
+    ```bash
+    git merge-base --is-ancestor item/<N> main && echo MERGED
+    git -C ../pinball-asset-decryptor-wt/item-<N> status --short
+    ```
+    - **Not an ancestor of main** (the branch still has commits main
+      doesn't) → leave it alone entirely.  This release didn't ship
+      everything on it.
+    - **An ancestor of main, but the worktree has uncommitted changes**
+      → leave it alone and NAME it in the report ("item/<N>'s worktree
+      has uncommitted work — not touched").  Never discard someone's
+      edits to make a release tidy.
+    - **An ancestor of main AND clean** → safe to remove, nothing is
+      lost (every commit on the branch already lives on main):
+      ```bash
+      git worktree remove ../pinball-asset-decryptor-wt/item-<N>
+      git branch -d item/<N>
+      git push origin --delete item/<N>
+      ```
+      `git worktree remove` can fail with a Windows file-lock error
+      (`Permission denied` / `Device or resource busy`) even when
+      everything above checked out — something (an editor, a terminal,
+      an Explorer window) still has a handle open in the directory.  Git
+      still unregisters the worktree from `git worktree list` even when
+      the directory itself can't be deleted, so the git-level state is
+      already clean; a leftover empty directory is cosmetic.  Report it
+      plainly ("the folder is empty but wouldn't delete — something has
+      it open") and move on — never force-close an unknown process to
+      win a directory delete.
+
+    Mention what happened (cleaned up / left alone and why / nothing to
+    do) in the interim report below.
+
 7b. **Start a background watch on CI — the tag still gates on green,
     but nobody waits in the foreground.**
 
@@ -392,6 +447,8 @@ after the push in step 7b (this is where the user walks away):
 - Confirmation the release commit is pushed, which CI run is being
   watched in the background, and what happens next without them
   ("will tag, draft, and publish when CI is green — no action needed").
+- Any item worktree(s) cleaned up in step 7a — or, if none qualified,
+  say so in one clause rather than silently skipping it.
 
 **Final report** — printed in the background-notified turn where the
 WINDOWS asset lands (step 9b watcher 2), together with the

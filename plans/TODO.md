@@ -854,10 +854,10 @@ These have each been violated at least once and each cost a run or a window:
       in the Controls legend.
 
 - [ ] **22. Start Emulator leaves the game window BEHIND the app.** `S3 D2`
-      ← IN PROGRESS, **85%** *(**D3 → D2, 2026-08-10:** the z-order instrument
-      exists and is validated, the fault is MEASURED rather than guessed, and
-      the fix is written and verified on a live run. What is left is one drag
-      test that needs David's hands.)*
+      ← IN PROGRESS, **55%** *(**stays D3, 2026-08-10:** the instrument exists
+      and is validated and the fault is MEASURED rather than guessed, which is
+      real progress — but the obvious fix is now RULED OUT WITH NUMBERS, so
+      what is left still needs a mechanism, and it still needs runs.)*
       **★★ THE FAULT IS READ, NOT EYEBALLED — the first real z-order of a live
       run. `zorder.py`, godzilla_pro, with the PAD app foreground, which is the
       state you are in the instant you press Start Emulator:**
@@ -898,35 +898,76 @@ These have each been violated at least once and each cost a run or a window:
       hypothetical: it happened twice in this pass — see the new item 37.
       Cloaked windows are dropped, and `WS_EX_TOPMOST` is reported because a
       topmost proxy would mean "raise the others" could never be the fix.
-      **THE FIX, built and verified: `win_raise_all()` in `padglhost.c`** —
-      `XRaiseWindow` on both windows **from inside X**, never `SetWindowPos`
-      (the standing non-negotiable), called at the END of the delayed position
-      restore for the same reason the restore itself is delayed: the compositor
-      places new RAIL toplevels by its own policy first, and anything done
-      before that settles is undone by it. Restack only, **no
-      `XSetInputFocus`** — David asked for the windows to come out on top, not
-      for the keyboard to be taken away from whatever he was typing into.
-      `PAD_GL_RAISE=0` A/Bs it with no rebuild.
-      **Verified on a live run, the same recipe that reproduced the fault:**
-      `all 3 emulator window(s) above the app (app rank 6)` — CONTROLS 2,
-      GAME 3, PLAYFIELD 4. And the position restore still converges with the
-      raise in: `restore try 1: game at 89,81 want 83,54 -> aim 77,27`, then
-      `restore converged after 2 check(s)`, then `raised both windows`.
-      **NOT VERIFIED, and it is the one thing keeping the box open: DRAGGING.**
-      That is exactly what the banned `SetWindowPos` fix broke, so it is this
-      acceptance's real question — and it cannot be scripted, because SendInput
-      into a WSLg window is UIPI-blocked (items 7 and 12). It needs David's
-      hands. The restore converging is evidence the RAIL mirror is healthy, but
-      it runs BEFORE the raise, so it does not answer this.
-      **Also not verified: the actual Start Emulator BUTTON.** The runs were
-      started from the command line with the app put in the foreground first,
-      which is the same condition the button creates (it only spawns
-      `watch.sh`), but it is not the same click.
-      **Resume:** David drags both windows and restarts a run. If they still
-      drag and the position restore still lands, check the box. If dragging
-      broke, `PAD_GL_RAISE=0` is the instant revert with no rebuild, and the
-      fix moves to the third option this item already lists — have the APP stop
-      holding the top after the button press.
+      **★★ RULED OUT, WITH NUMBERS, AND IT WAS THIS ITEM'S OWN RECOMMENDED
+      FIX: `XRaiseWindow` FROM INSIDE X DOES NOT WORK ON THE GAME WINDOW.**
+      `win_raise_all()` is built and shipped on this branch (`PAD_GL_RAISE=0`
+      disables it, no rebuild), raising legend then game, restack only with no
+      `XSetInputFocus`. It does not fix the fault:
+      • **one raise, at the end of the position restore (~3.5 s): NO.** David
+      ran it live and sent a screenshot — the app on top of the game window,
+      with `raised both windows above the desktop` sitting in the log of that
+      very run.
+      • **four more raises at 8, 16, 24 and 30 s: ALSO NO.** The game window
+      sat at rank 4, one slot below a plain foreground Notepad, and the
+      ordering did not change once across 75 s of watching.
+      **★★ THE FALSE PASS, and it is the methodology lesson worth more than the
+      result: an early run of this fix "PASSED" and the pass was an artefact of
+      HOW STALE the other window's activation was.** With the other window
+      activated ~40 s before the run, the raise lands and all three emulator
+      windows end up above it; with it activated ~10 s before the run, the
+      raise is refused and the game window goes one slot below — every time.
+      David's case is always the fresh one, because he presses Start Emulator
+      IN the app. **So any future test of this item MUST activate the other
+      window immediately before starting the run**, or it will report a fix
+      that is not there. That is how this pass briefly believed it was done.
+      **★ AND THE FOREGROUND-RIGHTS EXPLANATION IS DEAD TOO, which is the most
+      useful thing learned:** in the last run the **Controls window held the
+      FOREGROUND** (rank 1) while the game window could not get above Notepad
+      (rank 4) — **and both windows belong to the same msrdc process**. So this
+      is not "the emulator's process is not allowed to come forward". Something
+      is specific to the GAME window.
+      **★★★ THE MECHANISM, ESTABLISHED BY A CONTROLLED A/B — `eglSwapBuffers`
+      RE-ASSERTS THE GAME WINDOW'S STACKING, so a raise survives about one
+      frame.** The game window is the only one with an EGL surface and it
+      swaps 60 times a second; the legend never presents at all, which is the
+      whole difference between them. Same run recipe, same freshly activated
+      stand-in, one variable changed:
+      ```
+      swaps ON                          GAME rank 4, BELOW the other window
+      swaps OFF (PAD_GL_WIN_EVERY=1e6)  GAME rank 3, ABOVE it
+      ```
+      **And that single fact explains every reading this item has, including
+      the false pass.** What the swap re-plays each frame is the stacking the
+      window was given AT CREATION. Created on top (stale activation) → the
+      swaps keep it on top all run. Created one slot down (fresh activation,
+      i.e. David pressing Start Emulator) → the swaps keep putting it back
+      there, and no number of raises can win.
+      **SO THE FIX BELONGS AT CREATION TIME, and the third option this item
+      has listed from the start is now the only live one: have the APP stop
+      holding the top**, so that when padglhost creates its window there is no
+      freshly activated window above it. It is our own Tk process, so `lower()`
+      is native there and is not the RAIL trap; it needs no emulator-window
+      manipulation at all, which is why it was always the safest of the three.
+      **`win_raise_all()` is therefore OFF BY DEFAULT** (`PAD_GL_RAISE=1` opts
+      back in). It is kept because it is the evidence, and because it is the
+      only lever left if the creation-time route fails.
+      **Still untested, and it stays on the list: DRAGGING** — what the banned
+      `SetWindowPos` fix broke. It cannot be scripted (SendInput into a WSLg
+      window is UIPI-blocked, items 7 and 12) and needs David's hands. Nothing
+      shipped here has been shown to break it, and the position restore still
+      converges with the raise in.
+      **Resume:** make the app yield the top around the Start Emulator press —
+      in `emulate_tab.py`, at the point it spawns `watch.sh` — and re-measure
+      with `zorder.py`. **The test recipe is fixed by the false pass above:
+      activate the app IMMEDIATELY before the run**, or the reading lies.
+      Acceptance is unchanged: all three windows above the app once the game
+      window appears, read from `zorder.py` and not by eye, plus David
+      confirming dragging and the item 5 position restore still work.
+      **Careful with the obvious cheap version:** `lower()` the instant the
+      button is pressed and the user loses the Status/Log pane they are
+      watching for the next 15 s of boot. Yielding without hiding — dropping
+      the app just below the emulator windows, or yielding only when padglhost
+      is about to create its window — is the version worth building.
       **Observed 2026-08-06 (David):** pressing Start Emulator in the app's
       Emulate tab should bring **all** the emulator windows out over the PAD
       application. The **game window comes up behind the app**, while the

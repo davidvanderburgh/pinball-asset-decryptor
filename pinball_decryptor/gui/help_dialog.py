@@ -854,10 +854,12 @@ HELP_CONTENT = {
          "and each save freezes the game and its sound for a few seconds "
          "while the snapshot is written. "
          "The list on the tab shows every slot with its name, game, size "
-         "and date; Rename and Delete manage them, and the line under the "
-         "list totals what they hold against the disk's free space. Slots "
-         "only ever load into the same game and firmware version they were "
-         "saved from."),
+         "and date, and keeps itself current as saves happen; Rename and "
+         "Delete manage them, and the line under the list totals what they "
+         "hold against the disk's free space. Launch starts the emulator "
+         "and drops straight into the selected slot — or, with a run "
+         "already up, loads it into that run. Slots only ever load into "
+         "the same game and firmware version they were saved from."),
         ("Install Docker… (macOS only)",
          "The emulator is a Linux program, and a container is how a Mac runs "
          "one — so Docker is to macOS what WSL is to Windows here. This "

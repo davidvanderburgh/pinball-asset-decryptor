@@ -387,6 +387,21 @@ def kill_cmd():
     return rig_cmd("killgame.sh")
 
 
+def load_cmd(slot):
+    """loadgame.sh as ROOT with the desktop HOME — the same shape as
+    kill_cmd, for the same reasons: a save-state load is a criu restore of
+    a root guest, and padpath must resolve the desktop user's rootfs.
+    PAD_RESTORE_KILL clears whatever guest is running (the restored one
+    takes its place)."""
+    if sys.platform == "win32":
+        home = wsl_home()
+        if home:
+            return ["wsl.exe", "-u", "root", "-e", "env", "HOME=" + home,
+                    "PAD_RESTORE_KILL=1", "bash",
+                    "%s/loadgame.sh" % _wsl_path(rig_dir()), str(slot)]
+    return rig_cmd("loadgame.sh", slot, env=("PAD_RESTORE_KILL=1",))
+
+
 #: What the emulator needs BEYOND the rig itself, in the order a run meets
 #: them: probe key (from setupcheck.sh) -> package, and what it is for.
 #:
@@ -778,6 +793,11 @@ class EmulatePanel:
         #: status.sh's saves_mtime the last time the slot list was read.
         #: The list refreshes itself whenever the token moves.
         self._saves_token = None
+        #: A slot waiting to be loaded once the boot the Launch button
+        #: started comes up — _apply fires it when running=1.  And whether
+        #: a load is in flight right now (one at a time, like the poll).
+        self._launch_slot = None
+        self._loading = False
         self._proc = None            # the watch.sh child, while we own one
         #: Whether the last status poll saw anything running. Read by
         #: shutdown_sync() on app quit: a terminal-started run shows up here
@@ -1429,7 +1449,8 @@ class EmulatePanel:
         side = ttk.Frame(wrap)
         side.pack(side=tk.LEFT, fill=tk.Y, padx=(6, 0))
         self._slots_btns = []
-        for text, cmd in (("Refresh", self._slots_refresh),
+        for text, cmd in (("Launch", self._slot_launch),
+                          ("Refresh", self._slots_refresh),
                           ("Rename…", self._slot_rename),
                           ("Delete", self._slot_delete)):
             b = ttk.Button(side, text=text, width=10, command=cmd)
@@ -1517,6 +1538,63 @@ class EmulatePanel:
                 self._slots_tree.after(0, apply)
             except (tk.TclError, RuntimeError):
                 pass          # tab (or the whole interp) is gone
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _slot_launch(self):
+        """Start the emulator INTO the selected slot — or, with a run
+        already up, load the slot into it.  The button the tester asked
+        for: "it would be great to be able to launch from a savestate
+        from here"."""
+        slot = self._slot_selected()
+        if not slot:
+            self._slots_sum.configure(text="Pick a slot to launch first.")
+            return
+        if self._loading or self._starting or self._stopping:
+            return
+        if self._last_up:
+            self._slot_load(slot)
+            return
+        # Not running: boot the checkpointable shape and let the status
+        # poll fire the load once the guest is up (_apply watches
+        # _launch_slot).  Launching FROM a save opts this run into save
+        # states by definition, whatever the toggle says.
+        self._launch_slot = slot
+        self._log("[emulate] will load slot '%s' once the game is up" % slot)
+        self.start()
+        if not self._starting:       # start refused (bad card path, busy)
+            self._launch_slot = None
+
+    def _slot_load(self, slot):
+        """Run loadgame.sh off the Tk thread and put its story in the log."""
+        if self._stopping:
+            return
+        self._loading = True
+        self._set("state", "Loading save…")
+        self._log("[emulate] loading slot '%s'" % slot)
+        cmd = load_cmd(slot)
+
+        def run():
+            try:
+                r = subprocess.run(cmd, capture_output=True, timeout=240,
+                                   creationflags=_CREATE_FLAGS)
+                lines = [ln.strip() for ln in
+                         (r.stdout or b"").decode("utf8",
+                                                  "replace").splitlines()
+                         + (r.stderr or b"").decode("utf8",
+                                                    "replace").splitlines()
+                         if ln.strip()]
+            except Exception:                               # noqa: BLE001
+                lines = ["loadgame.sh did not run"]
+            for ln in lines[-12:]:
+                self._log("[emulate] " + ln)
+
+            def done():
+                self._loading = False
+            try:
+                self._timer().after(0, done)
+            except (tk.TclError, RuntimeError):
+                self._loading = False
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1744,8 +1822,10 @@ class EmulatePanel:
             env.append("PAD_AUTO_ATTRACT=0")
         # Read HERE, on the Tk thread, like the tickboxes above - the worker
         # below must not touch Tk variables. The toggle picks the launch
-        # shape: checkpointable (root, PAD_PIVOT) only when states are on.
-        states = bool(self._states_var.get())
+        # shape: checkpointable (root, PAD_PIVOT) only when states are on -
+        # and a pending launch-from-slot forces it, because loading a save
+        # NEEDS the checkpointable shape whatever the toggle says.
+        states = bool(self._states_var.get()) or self._launch_slot is not None
 
         def run():
             # DOCKER IS CHECKED HERE, in the worker, so a slow probe cannot
@@ -1815,6 +1895,9 @@ class EmulatePanel:
         if self._stopping:
             return
         self._stopping = True
+        # A manual stop cancels any launch-from-slot still waiting for the
+        # boot — the load must not fire into the NEXT run the user starts.
+        self._launch_slot = None
         self._run_label(True, True)
         self._set("state", "Stopping…")
 
@@ -2159,6 +2242,17 @@ class EmulatePanel:
             if tok is not None and tok != self._saves_token:
                 self._saves_token = tok
                 self._slots_refresh()
+
+            # A pending launch-from-slot: Launch was pressed with the
+            # emulator down, and the boot it started is now up — fire the
+            # load ONCE, after a short settle so the freshly-started
+            # helpers (node bus, video host, card mount) finish coming up.
+            # Killing a guest that is milliseconds old would race
+            # run_game's own bring-up.
+            if (self._launch_slot and not self._loading
+                    and info.get("running") == "1"):
+                slot, self._launch_slot = self._launch_slot, None
+                self._timer().after(4000, lambda: self._slot_load(slot))
 
             busy = self._starting or self._stopping
             up = info.get("running") == "1" or procs != "0"

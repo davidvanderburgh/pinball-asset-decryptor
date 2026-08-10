@@ -749,12 +749,25 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    works without anything being added to this repository first. A title
    that ships no playfield drawing (many don't) gets a clickable
    schematic of its switch list instead.
-   **Save state / Load state** buttons on the playfield window
-   checkpoint the whole running game — game binary, node bus, video,
-   sound — and bring it straight back later, mid-game included
-   (Windows: the app's Start boots the guest in the one shape that can
-   be checkpointed, and drops every helper back to your own desktop
-   session so the window and the sound still work). A run that cannot
+   **Save states**, opt-in on the tab and off by default — a tooltip
+   spells out the cost before you turn it on. Tick it and the virtual
+   playfield window grows Save state / Load state buttons with ten
+   named slots, and the Emulate tab grows a slot manager listing every
+   slot's name, game, size and save time, updating itself the moment
+   anything changes — no manual refresh. A save checkpoints the whole
+   running game — game binary, GPU state, video, sound, switch memory
+   — and a load brings it straight back, mid-game included, even in a
+   different session or after the card's assets have been swapped
+   (streamed video and audio play the new versions; artwork already on
+   screen at the save keeps its saved look until the game redraws it).
+   Slots are compressed to roughly a twentieth of their raw size, so
+   ten of them cost tens of megabytes rather than gigabytes; a save
+   briefly needs headroom on disk while it packs. A **Launch** button
+   on the manager starts the emulator straight into a chosen slot, or
+   drops the slot into a game that's already running. (Windows: turning
+   save states on boots the guest in the one shape that can be
+   checkpointed, and drops every helper back to your own desktop
+   session so the window and the sound still work.) A run that cannot
    be saved says why on the button instead of failing quietly.
    Runs on Linux, and on Windows through WSL2. The rig ships with the
    app, in `tools/spike2_emu`, and the prerequisites installer pulls in

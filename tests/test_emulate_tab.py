@@ -1472,3 +1472,37 @@ def test_the_tab_and_the_run_agree_on_what_a_usable_compiler_is():
     assert "_pad_binfmt_arm" in check
     assert "_pad_binfmt_advice" in check
     assert "binfmt_misc/qemu-arm" not in check, "that is a second detector"
+
+
+# ---------------------------------------------------------------------------
+# Per-game save-state scoping (item 33 territory, David 2026-08-10: "you
+# can't load a venom save state for john wick"). The title is derived from
+# the picked card's filename the same way the rig names its card cache:
+# everything up to the first dash-digit of the basename.
+# ---------------------------------------------------------------------------
+
+def _tab_with_card(path):
+    tab = object.__new__(emulate_tab.EmulatePanel)
+    tab._src_path = SimpleNamespace(get=lambda: path)
+    return tab
+
+
+def test_card_game_derives_the_title_from_the_filename():
+    t = _tab_with_card(r"D:\imgs\star_wars_le-1_30_0.Release.8G.sdcard.raw")
+    assert t._card_game() == "star_wars_le"
+
+
+def test_card_game_survives_suffixed_and_upscaled_names():
+    t = _tab_with_card(
+        r"C:\x\turtles_pro-1_59_0.1987-upscaled.8G.sdcard.raw")
+    assert t._card_game() == "turtles_pro"
+
+
+def test_card_game_is_case_insensitive_and_strips_quotes():
+    t = _tab_with_card('  "d:\y\GODZILLA_PRO-1_15_0_spike2.raw"  ')
+    assert t._card_game() == "godzilla_pro"
+
+
+def test_card_game_answers_none_rather_than_guessing():
+    assert _tab_with_card("")._card_game() is None
+    assert _tab_with_card(r"C:\x\NoVersionShape.raw")._card_game() is None

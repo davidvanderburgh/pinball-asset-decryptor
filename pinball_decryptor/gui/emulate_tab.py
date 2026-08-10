@@ -51,6 +51,7 @@ Three things about it are worth knowing before changing anything here:
 
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import threading
@@ -1502,6 +1503,24 @@ class EmulatePanel:
             return "%d MB" % (n // (1 << 20))
         return "%d KB" % max(1, n // (1 << 10))
 
+    def _card_game(self):
+        """The title the picked card image runs, or None without a pick.
+
+        Derived from the filename the same way the rig names its card cache:
+        everything up to the first `-<digit>` of the basename
+        (``star_wars_le-1_30_0.Release.8G.sdcard.raw`` → ``star_wars_le``).
+        Titles never contain a dash-digit; versions always start with one.
+        A filename that fits no such shape scopes nothing rather than
+        guessing wrong."""
+        try:
+            path = self._src_path.get().strip().strip('"')
+        except (AttributeError, tk.TclError):
+            return None
+        if not path:
+            return None
+        m = re.match(r"([a-z0-9_]+?)-\d", os.path.basename(path).lower())
+        return m.group(1) if m else None
+
     def _slots_refresh(self):
         """Re-read the slots as root, off the Tk thread, and repaint."""
         if sys.platform != "win32":
@@ -1526,34 +1545,69 @@ class EmulatePanel:
                 pass
 
             def apply():
-                try:
-                    tree = self._slots_tree
-                    tree.delete(*tree.get_children())
-                    for name, size, game, label, mtime in rows:
-                        try:
-                            when = time.strftime(
-                                "%b %d %H:%M", time.localtime(int(mtime)))
-                        except (ValueError, OverflowError):
-                            when = "?"
-                        tree.insert("", tk.END, iid=name, values=(
-                            name, label or "", game, self._human(size), when))
-                    if total is None:
-                        self._slots_sum.configure(
-                            text="Could not read the slots - is WSL up?")
-                    else:
-                        self._slots_sum.configure(
-                            text="%d slot%s · total %s · free on the WSL "
-                                 "disk: %s" % (
-                                     len(rows), "" if len(rows) == 1 else "s",
-                                     self._human(total), self._human(free)))
-                except tk.TclError:
-                    pass          # tab torn down while the list was loading
+                self._slots_rows = rows
+                self._slots_total = total
+                self._slots_free = free
+                self._slots_paint()
             try:
                 self._slots_tree.after(0, apply)
             except (tk.TclError, RuntimeError):
                 pass          # tab (or the whole interp) is gone
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _slots_paint(self):
+        """Repaint the slot list from the cached rows, SCOPED TO THE PICKED
+        CARD'S TITLE.
+
+        David, 2026-08-10: "when switching games, the save state manager
+        should change to be per game (you can't load a venom save state for
+        john wick)" — a state is a memory image of one title's game binary,
+        so a slot for another title is never loadable from here.  With no
+        card picked there is nothing to scope to and every slot shows; the
+        footer keeps the ALL-slots total either way, because the disk cost
+        (item 33's reason to exist) does not care which card is picked.
+        Pure repaint from the cache: switching cards never spawns wsl.exe."""
+        rows = getattr(self, "_slots_rows", None)
+        if rows is None:
+            return                      # nothing listed yet; first poll will
+        game_now = self._card_game()
+        try:
+            tree = self._slots_tree
+            tree.delete(*tree.get_children())
+            shown = hidden = 0
+            for name, size, game, label, mtime in rows:
+                if game_now and game and game != game_now:
+                    hidden += 1
+                    continue
+                shown += 1
+                try:
+                    when = time.strftime(
+                        "%b %d %H:%M", time.localtime(int(mtime)))
+                except (ValueError, OverflowError):
+                    when = "?"
+                tree.insert("", tk.END, iid=name, values=(
+                    name, label or "", game, self._human(size), when))
+            if self._slots_total is None:
+                self._slots_sum.configure(
+                    text="Could not read the slots - is WSL up?")
+            else:
+                bits = []
+                if game_now:
+                    bits.append("%d slot%s for %s" % (
+                        shown, "" if shown == 1 else "s", game_now))
+                    if hidden:
+                        bits.append("%d for other game%s hidden" % (
+                            hidden, "" if hidden == 1 else "s"))
+                else:
+                    bits.append("%d slot%s" % (
+                        shown, "" if shown == 1 else "s"))
+                bits.append("all slots %s" % self._human(self._slots_total))
+                bits.append("free on the WSL disk: %s"
+                            % self._human(self._slots_free))
+                self._slots_sum.configure(text=" · ".join(bits))
+        except tk.TclError:
+            pass              # tab torn down while the list was loading
 
     def _slot_launch(self):
         """Start the emulator INTO the selected slot — or, with a run
@@ -1563,6 +1617,21 @@ class EmulatePanel:
         slot = self._slot_selected()
         if not slot:
             self._slots_sum.configure(text="Pick a slot to launch first.")
+            return
+        # A state is a memory image of ONE title's game binary; loading it
+        # under another title's card hands the guest a foreign image. The
+        # list is already scoped to the picked card, so this guard only
+        # fires when no card is picked (the list shows everything) or the
+        # slot predates the game column - and then it must speak, not guess.
+        try:
+            slot_game = str(self._slots_tree.item(slot)["values"][2] or "")
+        except (tk.TclError, LookupError, TypeError):
+            slot_game = ""
+        game_now = self._card_game()
+        if slot_game and game_now and slot_game != game_now:
+            self._slots_sum.configure(
+                text="That save is for %s - pick that title's card first."
+                     % slot_game)
             return
         if self._loading or self._starting or self._stopping:
             return
@@ -1735,6 +1804,16 @@ class EmulatePanel:
         box.pack(fill=tk.X, **pad)
         self._src_path = self._card_var if self._card_var is not None \
             else tk.StringVar()
+        # Switching cards re-scopes the save-state list to the new title
+        # (client-side repaint from the cache — no wsl.exe involved). The
+        # guard: the states box may build after this one, or the trace may
+        # fire during teardown.
+        try:
+            self._src_path.trace_add(
+                "write", lambda *_a: self._slots_paint()
+                if hasattr(self, "_slots_tree") else None)
+        except (AttributeError, tk.TclError):
+            pass
         row = ttk.Frame(box)
         row.pack(fill=tk.X, padx=8, pady=6)
         self._src_entry = ttk.Entry(row, textvariable=self._src_path)

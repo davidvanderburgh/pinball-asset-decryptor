@@ -5,9 +5,12 @@
 #
 # Needs root (criu does). The guest MUST have been booted with PAD_PIVOT=1 -
 # a chroot guest cannot be checkpointed at all (criuladder.sh proved it: "The
-# root task has another root than mntns"). By default the guest KEEPS RUNNING
-# after the dump (--leave-running), so saving does not interrupt play; pass
-# PAD_SAVE_STOP=1 to stop it instead.
+# root task has another root than mntns"). The guest keeps playing after the
+# save, but it is FROZEN for the dump plus the ring stash plus the GL journal
+# (a few seconds, --leave-stopped then SIGCONT) - the stashes must describe
+# exactly the checkpointed instant, and the price is a visible hitch and an
+# audio underrun during the save. Pass PAD_SAVE_STOP=1 to end the guest
+# instead of thawing it.
 #
 # It reads the guest's ACTUAL /proc/PID/mountinfo and generates one --external
 # per mount criu cannot resolve alone - every /dev bind and any fuse (card)
@@ -170,15 +173,43 @@ done < <(for fd in /proc/$PID/fd/*; do
              case "$t" in /*) printf '%s\n' "$t" ;; esac
          done | sort -u)
 
-# --- the rig's shared rings ----------------------------------------------
+# --- dump, with the tree LEFT FROZEN -------------------------------------
+# --leave-stopped, not --leave-running, and everything that follows runs
+# INSIDE the freeze - that ordering is the mid-clip video fix. The ring
+# stash used to be taken BEFORE the dump, so its counters trailed the
+# freeze by criu's startup (~3-15 video frames at 30 fps): the restored
+# guest's stream thread - its `consumed` count restored on its own stack
+# (gstvid.c) - waited for frames PAST the stashed write_idx, while the
+# resumed host (padvidhost resume_serve, which starts at the STASHED
+# write_idx) waited for the guest to drain frames it had already consumed.
+# Deadlock; after 3 s the host stood the channel down and video only came
+# back at the next clip request. Stashing while frozen makes every counter
+# and every slot byte describe exactly the checkpointed instant, so the
+# resumed serve begins at precisely the frame the guest wants next. The GL
+# journal gains the same exactness (no superset drift), and so does the
+# switch ring. The honest cost: the game is visibly frozen and the audio
+# underruns for the stash + journal beat on top of the dump's own freeze.
+echo "[save] externals:${DUMP_EXT[*]+ ${DUMP_EXT[*]}}${TTY_EXT[*]+ ${TTY_EXT[*]}}"
+"$CRIU" dump -t "$PID" -D "$DDIR" -v4 -o dump.log --leave-stopped \
+    ${DUMP_EXT[@]+"${DUMP_EXT[@]}"} ${TTY_EXT[@]+"${TTY_EXT[@]}"}
+RC=$?
+if [ "$RC" != 0 ] || grep -aq 'Dumping FAILED' "$DDIR/dump.log"; then
+    echo "[save] FAILED (exit $RC):"
+    grep -aE 'Error' "$DDIR/dump.log" | tail -12 | sed 's/^/    /'
+    # A failed dump must not leave the game frozen on screen.
+    kill -CONT "$PID" 2>/dev/null
+    exit 1
+fi
+
+# --- the rig's shared rings (guest frozen: freeze-exact) ------------------
 # The guest maps dump/padled, dump/padgl, dump/padsw (and padvid) MAP_SHARED.
-# criu re-opens such a mapping FROM THE FILE at restore, so the file must exist
-# then - and its CONTENT is the ring state, which is NOT in the checkpoint.
-# watch.sh's teardown DELETES dump/padled on purpose (it is the playfield's
-# liveness signal), so a load after any teardown found it gone:
+# criu re-opens such a mapping FROM THE FILE at restore, so the file must
+# exist then - and its CONTENT is the ring state, which is NOT in the
+# checkpoint. watch.sh's teardown DELETES dump/padled on purpose (it is the
+# playfield's liveness signal), so a load after any teardown found it gone:
 #   "Can't open file dump/padled on restore: No such file or directory"
-# So stash every mapped ring in the slot; restorestate puts back any that have
-# gone missing, content and all.
+# Stash every mapped ring in the slot; restorestate puts back what is
+# missing and rewinds padvid + padsw from these.
 mkdir -p "$DDIR/rings"
 while read -r p; do
     case "$p" in /dump/*) ;; *) continue ;; esac
@@ -189,36 +220,15 @@ while read -r p; do
         && echo "ring $p $stash" >> "$DDIR/restore.env"
 done < <(awk '$2 ~ /s/ && $4 !~ /^00:00/ {print $6}' "/proc/$PID/maps" 2>/dev/null | sort -u)
 
-# --- dump ----------------------------------------------------------------
-LEAVE=--leave-running
-[ "${PAD_SAVE_STOP:-0}" = 1 ] && LEAVE=
-echo "[save] externals:${DUMP_EXT[*]+ ${DUMP_EXT[*]}}${TTY_EXT[*]+ ${TTY_EXT[*]}}"
-"$CRIU" dump -t "$PID" -D "$DDIR" -v4 -o dump.log $LEAVE \
-    ${DUMP_EXT[@]+"${DUMP_EXT[@]}"} ${TTY_EXT[@]+"${TTY_EXT[@]}"}
-RC=$?
-if [ "$RC" != 0 ] || grep -aq 'Dumping FAILED' "$DDIR/dump.log"; then
-    echo "[save] FAILED (exit $RC):"
-    grep -aE 'Error' "$DDIR/dump.log" | tail -12 | sed 's/^/    /'
-    exit 1
-fi
-# --- the GL world journal (cross-session loads) --------------------------
+# --- the GL world journal (guest frozen: freeze-exact) --------------------
 # The checkpoint restores the GUEST; the renderer's GL world - every texture,
 # buffer, shader and VAO the guest has uploaded - lives in padglhost and dies
 # with the session. Ask the renderer to serialise that world into the slot so
 # a cross-session load can rebuild it, instead of the draw guard skipping
 # ~2100 draws/s until the game rebuilds each scene by itself. Paths go
-# through the guest's own root, like boot.id above.
-#
-# AFTER the dump, deliberately. Requested before it, anything the guest
-# uploads between the serialize answer and criu's freeze is in the
-# checkpoint but NOT in the journal - invisible elements baked into the
-# slot forever, because the restored guest believes it already sent them.
-# Requested here, the journal is a SUPERSET of the checkpoint: it also
-# carries the few frames the guest ran while criu wrote images. Extra
-# objects are harmless residents (the guest re-gens names when it creates
-# them), and a texture whose content moved on in that window shows the
-# slightly-newer pixels until the game's next upload - a bounded cosmetic
-# drift, against unfixable missing artwork the other way round.
+# through the guest's own root, like boot.id above. With the guest frozen
+# the renderer has long drained the ring, so the request is answered from
+# its idle poll and the journal matches the checkpoint exactly.
 GD="/proc/$PID/root/dump"
 if pgrep -x padglhost >/dev/null; then
     rm -f "$GD/glstate.bin"
@@ -235,6 +245,25 @@ if pgrep -x padglhost >/dev/null; then
     fi
 else
     echo "[save] no renderer running - no GL journal in this slot"
+fi
+
+# --- thaw (or stop) -------------------------------------------------------
+if [ "${PAD_SAVE_STOP:-0}" = 1 ]; then
+    kill -9 "$PID" 2>/dev/null
+    echo "[save] guest ended (PAD_SAVE_STOP=1)"
+else
+    kill -CONT "$PID" 2>/dev/null
+    for _ in 1 2 3 4 5; do
+        st=$(awk '{print $3}' "/proc/$PID/stat" 2>/dev/null)
+        [ "$st" != T ] && break
+        kill -CONT "$PID" 2>/dev/null
+        sleep 0.2
+    done
+    st=$(awk '{print $3}' "/proc/$PID/stat" 2>/dev/null)
+    if [ "$st" = T ]; then
+        echo "[save] WARNING: the guest is still stopped after SIGCONT - the"
+        echo "[save] game will look frozen; kill -CONT $PID by hand"
+    fi
 fi
 
 echo "[save] ok - $(ls "$DDIR"/*.img 2>/dev/null | wc -l) images, $(du -sh "$DDIR" | cut -f1)"

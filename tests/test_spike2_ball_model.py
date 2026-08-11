@@ -300,6 +300,91 @@ def test_the_first_sight_of_a_counter_seeds_it_and_feeds_nothing(monkeypatch,
     assert f.fired(d, None) is False
 
 
+# --- the clickable trough dots --------------------------------------------
+
+def _panel(on_ball):
+    """A real TroughPanel on an invisible Tk root, or a skip.
+
+    REAL Tk, not a stub, because what is under test is a BINDING: `tag_bind`
+    on a canvas item with a "break" return. A fake canvas would happily record
+    a bind that Tk itself would never deliver, which is the one thing this
+    needs to know.
+    """
+    tk = pytest.importorskip("tkinter")
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:                          # no display / no Tcl
+        pytest.skip("Tk unavailable: %s" % exc)
+    root.attributes("-alpha", 0)
+    import playfield
+    cv = tk.Canvas(root, width=300, height=60)
+    cv.pack()
+    positions = [dict(pos=i + 1, id=71 - i, name="Trough %d" % (i + 1))
+                 for i in range(6)]
+    panel = playfield.TroughPanel(cv, positions, "named", 4, 4, anchor="nw",
+                                  on_ball=on_ball)
+    root.update()
+    return root, panel
+
+
+def test_clicking_a_ball_takes_one_out_and_an_empty_slot_brings_one_home():
+    """David, 2026-08-11, mid-multiball: "how do i drain a ball?"
+
+    Pressing the trough SWITCH cannot do it - item 24's hold is momentary and
+    a ball is a latched closure - so the six dots are the control.
+    """
+    said = []
+    root, panel = _panel(said.append)
+    try:
+        panel.update([True, True, True, False, False, False], "x")
+        panel._click(0)                       # a ball -> one fewer
+        panel._click(2)                       # a deeper ball -> still one fewer
+        panel._click(4)                       # an empty slot -> one more
+        assert said == ["take", "take", "drain"]
+    finally:
+        root.destroy()
+
+
+def test_the_click_is_bound_to_the_dot_and_stops_there():
+    """It must not reach the window's hit test - see TroughPanel's docstring.
+
+    Two separate promises: the binding exists ON the item (so the panel does
+    not need to be in `info`, which item 24 measured matters), and the handler
+    returns "break" (so the canvas-level press handler never runs).
+    """
+    said = []
+    root, panel = _panel(said.append)
+    try:
+        assert panel.cv.tag_bind(panel.balls[0], "<Button-1>")
+        panel.update([True] * 6, "x")
+        assert panel._click(0) == "break"
+    finally:
+        root.destroy()
+
+
+def test_a_panel_with_no_callback_is_not_clickable_at_all():
+    """The schematic view builds one before its driver exists in some paths;
+    a panel with nothing to call must simply not bind."""
+    root, panel = _panel(None)
+    try:
+        assert not panel.cv.tag_bind(panel.balls[0], "<Button-1>")
+    finally:
+        root.destroy()
+
+
+def test_the_caption_says_the_dots_are_clickable():
+    """Six small dots on a status strip do not look like buttons, and the
+    thing a user reaches for instead is the trough switch, which cannot work."""
+    import playfield
+    import trough as tmod
+    w = playfield.SwitchWatch.__new__(playfield.SwitchWatch)
+    w.positions = [dict(pos=1, id=71, name="Trough 1")]
+    w.how = "named"
+    w.balls = tmod.Balls()
+    w.balls.update([True])
+    assert "click a ball" in playfield.trough_text(w)
+
+
 def test_the_feeder_writes_a_source_letter_that_padsw_h_documents():
     """Every writer says who it is, or the [sw] log cannot attribute an edge.
 

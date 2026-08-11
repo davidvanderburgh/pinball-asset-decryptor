@@ -897,6 +897,32 @@ class TroughPanel:
     measured that a click at the centre of RIGHT SCOOP lands on the COIL
     marker rather than the switch, and coilact.py depends on it - a panel that
     joined the hit test could quietly change which device a click reaches.
+
+    ★ THE BALLS ARE CLICKABLE, and that is why the promise above still holds:
+    the binding is a per-ITEM `tag_bind` that returns "break", not a place in
+    `info`, so the window's own hit test is untouched and a click on a ball
+    never reaches it.
+
+    WHY A CLICK HERE AND NOT ON THE TROUGH SWITCH ITSELF. David, 2026-08-11,
+    mid-Mechagodzilla-Multiball: "how do i drain a ball? pressing one of the
+    trough switches doesn't drain the ball. is there a way to just click on
+    the ball indicators to add or remove it". Pressing the switch cannot work
+    and never could: item 24's press-and-hold is MOMENTARY - it opens again on
+    release - and a ball in a trough holds its switch closed for as long as it
+    sits there. So a press is a ball that arrives and leaves, which the game
+    correctly ignores. A ball is a LATCHED closure, and these six dots are the
+    only place in the window that means "a ball is here" rather than "a switch
+    is being pressed".
+
+    THE STACK DECIDES WHICH SWITCH MOVES, NOT WHICH DOT WAS CLICKED, and that
+    is deliberate rather than a shortcut. A trough is a ramp: balls sit
+    contiguously from the eject end, so the only two things that can physically
+    happen are "one more" and "one fewer". Clicking the third dot of four
+    therefore removes a ball from the FAR end - the hole appears at position 4,
+    which is exactly the geometry item 20 was a bug in and exactly what this
+    panel was built to show. Honouring the clicked position instead would put
+    a gap in the middle of the stack, which is a state no machine can be in
+    and which ballmodel.Trough.anomaly() would then report as a fault.
     """
 
     R = 7                 # ball radius, screen px
@@ -907,10 +933,11 @@ class TroughPanel:
     #: numbers are the part that makes the ORDER checkable, so they get room.
     NUM_H = 12
 
-    def __init__(self, cv, positions, how, x, y, anchor="sw"):
+    def __init__(self, cv, positions, how, x, y, anchor="sw", on_ball=None):
         self.cv = cv
         self.positions = positions
         self.how = how
+        self.on_ball = on_ball
         self.items = []
         self.balls = []
         self.drawn = []
@@ -931,9 +958,22 @@ class TroughPanel:
             self.balls.append(b)
             self.drawn.append(None)
             self.items.append(b)
-            self.items.append(cv.create_text(
-                cx, y0 + h - self.PAD, anchor="s", fill="#8a8a8a",
-                font=("Consolas", 7), text=str(P["pos"])))
+            num = cv.create_text(cx, y0 + h - self.PAD, anchor="s",
+                                 fill="#8a8a8a", font=("Consolas", 7),
+                                 text=str(P["pos"]))
+            self.items.append(num)
+            if on_ball is not None:
+                # The NUMBER is bound too, not just the ball. These dots are 7
+                # px across and the digit under one is as much of a target as
+                # the dot is; a control that only works if you hit the circle
+                # reads as an intermittent control.
+                for it in (b, num):
+                    cv.tag_bind(it, "<Button-1>",
+                                lambda e, i=i: self._click(i))
+                    cv.tag_bind(it, "<Enter>",
+                                lambda e: cv.configure(cursor="hand2"))
+                    cv.tag_bind(it, "<Leave>",
+                                lambda e: cv.configure(cursor=""))
         # The caption sits to the RIGHT of the balls rather than above them:
         # this panel is pinned to the bottom of the artwork and a line above
         # the balls would be the line closest to the playfield markers.
@@ -948,6 +988,18 @@ class TroughPanel:
     #: badly". The colours are the only two states this panel has.
     BALL = ("#d8d8d8", "#ffffff")          # fill, outline - occupied
     EMPTY = ("", "#555555")                # fill, outline - open
+
+    def _click(self, i):
+        """A dot was clicked: one ball more, or one ball fewer.
+
+        Reads the state this panel last DREW rather than asking anything, so
+        the decision is the one the user could see when they clicked. Returns
+        "break" so the click stops here and the window's hit test never runs -
+        see the class docstring's promise about `info`.
+        """
+        occupied = bool(self.drawn[i]) if i < len(self.drawn) else False
+        self.on_ball("take" if occupied else "drain")
+        return "break"
 
     def update(self, flags, text):
         for i, on in enumerate(flags[:len(self.balls)]):
@@ -1026,7 +1078,12 @@ def trough_text(watch):
     """
     if not watch.positions:
         return ""
-    txt = "%s   1 = eject end" % watch.balls.text()
+    # "click a ball" is on the line because the control is INVISIBLE otherwise:
+    # six small dots on a status strip do not look like buttons, and the thing
+    # a user reaches for instead is the trough switch on the artwork, which
+    # cannot work (a press is momentary; a ball is latched). David went looking
+    # for exactly that during a multiball on 2026-08-11.
+    txt = "%s   1 = eject end   click a ball: out / in" % watch.balls.text()
     return txt if watch.how == "named" else txt + "   (positions assumed)"
 
 
@@ -1659,7 +1716,8 @@ class Field(StateOps):
             return
         x, y = self._panel_at
         self.trough_panel = TroughPanel(self.cv, self.sw.positions,
-                                        self.sw.how, x, y, anchor="sw")
+                                        self.sw.how, x, y, anchor="sw",
+                                        on_ball=self.run_plunge)
 
     def run_plunge(self, what):
         self.drv.run_script("plunge.py", what)
@@ -2175,8 +2233,9 @@ class Schematic(StateOps):
             strip.pack(fill="x")
             pcv = tk.Canvas(strip, height=38, bg="#111", highlightthickness=0)
             pcv.pack(fill="x", padx=4, pady=(0, 3))
-            self.trough_panel = TroughPanel(pcv, self.sw.positions, self.sw.how,
-                                            2, 2, anchor="nw")
+            self.trough_panel = TroughPanel(
+                pcv, self.sw.positions, self.sw.how, 2, 2, anchor="nw",
+                on_ball=lambda what: self.drv.run_script("plunge.py", what))
 
         by_node = {}
         for sw in switches:

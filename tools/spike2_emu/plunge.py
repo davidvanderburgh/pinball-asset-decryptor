@@ -20,6 +20,13 @@ plunge tells:
   drain   a ball in play comes home: the lowest-numbered OPEN trough position
           closes. The other half of a plunge, and the only way a multiball
           can end, because nothing here simulates a playfield.
+  take    one ball OUT of the trough and nowhere else - the trough half of a
+          plunge with no shooter lane and no launch.
+
+`drain` and `take` are what the six ball dots on the virtual playfield's
+trough panel call when you click one. Pressing the trough SWITCH cannot do
+this and never could: a press is momentary and a ball in a trough holds its
+switch closed for as long as it sits there.
   reset   put six balls back in the trough and shut the coin door - the
           machine-at-rest set, same as swinit.py.
 
@@ -209,6 +216,27 @@ def do_plunge(m):
     return 0
 
 
+def do_take(m):
+    """One ball out of the trough and nowhere else. The panel click's verb.
+
+    NOT `plunge`: that is the whole story a plunge tells - trough, shooter
+    lane, launch - and it takes about two seconds. This is the trough half
+    alone, because the six dots on the trough panel mean "where the balls
+    are" and clicking one is a statement about the trough, not a request to
+    play a ball. Where the ball then IS, is up to whoever clicked; the game
+    is told only what a real machine's switches would tell it.
+    """
+    padsw.take(m, TROUGH)
+    plan = ballmodel.plan_eject(_model(), _mrg(m), None)
+    if plan.refused:
+        print(plan.refused)
+        return 1
+    for step in plan.steps:
+        _set(m, step[1], step[2])
+        print(step[3])
+    return 0
+
+
 def do_drain(m):
     """A ball in play drains home. The other half of a plunge, and new.
 
@@ -273,6 +301,8 @@ def main():
         do_reset(m)
     elif what == "drain":
         rc = do_drain(m)
+    elif what == "take":
+        rc = do_take(m)
     else:
         rc = do_plunge(m)
     m.close()

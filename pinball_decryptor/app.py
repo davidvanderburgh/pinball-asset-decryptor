@@ -4060,7 +4060,8 @@ class App:
                         overrides[name] = max(e["min"], min(e["max"], int(v)))
                 if overrides:
                     n, _ref = c.write_adjustment_defaults(
-                        part, path, table, overrides)
+                        part, path, table, overrides,
+                        log=self.window.append_log)
                     self.window.append_log(
                         "Applied Default Settings preset \"%s\" (%d setting(s)) "
                         "to the built image." % (active, n), "success")
@@ -4153,7 +4154,8 @@ class App:
                     n, _ref = c.write_adjustment_defaults(
                         part, path, table, overrides,
                         high_scores=hstd, name_overrides=name_overrides,
-                        menu_last_id=menu_last_id, menu_plan=menu_plan)
+                        menu_last_id=menu_last_id, menu_plan=menu_plan,
+                        log=self.window.append_log)
                     if n:
                         self.window.append_log(
                             "Applied %d staged default setting(s) to the built "

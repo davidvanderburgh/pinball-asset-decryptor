@@ -10709,6 +10709,7 @@ class MainWindow:
 
         def _work():
             try:
+                from ..plugins.stern import factory_volume
                 from ..plugins.stern.explorer import CardImage
                 from ..plugins.stern.adjustments import all_rows, curated_rows
                 from ..plugins.stern.menu_visibility import (statuses,
@@ -10731,7 +10732,17 @@ class MainWindow:
                     plan = widen_plan(table)
                 except Exception:
                     plan = None
-                rows = curated_rows(table, menu)
+                # The volume a machine actually starts at is a byte of its own,
+                # not the (inert) compiled default — see
+                # plugins.stern.factory_volume.  Looked up here, on the worker,
+                # so the Master Volume row can show the number the operator
+                # will see; a build it can't be read from just keeps the
+                # compiled default.
+                try:
+                    master_volume = factory_volume.find(table)
+                except Exception:
+                    master_volume = None
+                rows = curated_rows(table, menu, master_volume=master_volume)
                 try:
                     every = all_rows(table, menu)
                 except Exception:

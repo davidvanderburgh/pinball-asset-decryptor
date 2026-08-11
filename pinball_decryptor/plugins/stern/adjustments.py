@@ -26,6 +26,9 @@ sidx refresh live in :mod:`.explorer`.
 import re
 import struct
 
+from .factory_volume import ADJUSTMENT as MASTER_VOLUME
+from .factory_volume import MAX_VOLUME as MAX_MASTER_VOLUME
+
 _AD_RE = re.compile(rb"AD_[A-Z0-9_]{2,80}\x00")
 OFF_DEFAULT, OFF_MIN, OFF_MAX, OFF_STEP = 0x04, 0x08, 0x0c, 0x10
 # Later in the same descriptor: the operator menu's own caption for this
@@ -37,11 +40,13 @@ OFF_MENU_LABEL, OFF_MENU_HELP = 0x18, 0x20
 # Values are shown in the firmware's own internal units.  We previously
 # assumed the master volume displayed as internal/4 (a 0-16 menu scale), but
 # a tester's hardware test (LZ LE 1.22, 2026-07-20) disproved it: his
-# machine's Guided Setup shows raw values (default 30 on a raw scale) that
-# don't come from this compiled default at all, so the display transform —
-# and whether the default even reaches the operator's volume on wizard
-# titles — is title-dependent and unconfirmed.  Until that's properly RE'd,
-# no scale is applied anywhere and the volume row's help says so.  The
+# machine's Guided Setup showed 30 on a raw scale.  That 30 is now RE'd (see
+# :mod:`.factory_volume`): the firmware's volume getter rejects anything over
+# 63, Stern's compiled default is 64 on every card checked, so the shipped
+# default never applies and the game falls back to a built-in byte of its own
+# — which a factory reset writes straight in as well.  So no scale is applied
+# anywhere, the row is capped at 63, and :func:`curated_rows` shows that
+# built-in number as the card's value when the caller has looked it up.  The
 # per-row ``scale`` plumbing stays (presets store internal units through it).
 
 # Enum value -> label for the enum settings we expose.  The stored value is an
@@ -275,9 +280,12 @@ CURATED = [
     ("AD_BALL_SAVE_TIME", "Ball Save Time", "number", "", 1, GROUP_GAME),
     ("AD_TILT_WARNINGS", "Tilt Warnings", "number", "", 1, GROUP_GAME),
     ("AD_SOUND_MASTER_VOLUME_SETTING", "Master Volume", "number",
-     "Default master volume, in the firmware's own 0-64 units. UNVERIFIED "
-     "on real machines: titles with a first-boot setup wizard (Guided "
-     "Setup) pick their own volume and may ignore this default.", 1,
+     "The volume the machine comes up at on a fresh card or after a factory "
+     "reset, in the firmware's own units (0-63 — the machine ignores "
+     "anything higher, which is why Stern's own 64 never applies and the "
+     "game falls back to a built-in number of its own). A machine that has "
+     "already been set up keeps the volume it has: Stern stores the operator "
+     "settings on the board, not on the card.", 1,
      GROUP_SOUND),
     # The two attenuation trims a tester asked for (batch 23).  They sit in
     # the game's own adjustments rather than the standard/general ones, and
@@ -338,9 +346,20 @@ CURATED = [
      "Seconds the login prompt stays up.", 1, GROUP_INSIDER),
     ("AD_NET_PLAY_AGAIN_TIMER", "Insider Play Again Timer", "number",
      "Seconds the play-again prompt stays up.", 1, GROUP_INSIDER),
+    # The wording is NOT on the card.  This setting only decides whether the
+    # message is shown; the text is typed on the machine (Utilities -> custom
+    # message), exactly as the firmware's own help for it says, and lives in
+    # the board's memory with the rest of the operator settings.  The Replace
+    # Text tab does carry a matching string, but it is the PROMPT on that
+    # data-entry screen ("Enter a custom message to be displayed in the game's
+    # attract mode.") -- a tester edited it, quite reasonably, and found his
+    # machine's message still blank.
     ("AD_CUSTOM_MESSAGE", "Custom Message", "toggle",
-     "Show the game's custom attract message. The wording itself is an "
-     "on-screen string — edit it on the Replace Text tab.", 1, GROUP_INSIDER),
+     "Show the game's custom attract message. The wording is typed on the "
+     "machine itself, under Utilities — it is kept on the board, so there is "
+     "nothing on the card to set it from. (The similar-looking line on the "
+     "Replace Text tab is the on-screen prompt for that data-entry screen, "
+     "not the message.)", 1, GROUP_INSIDER),
     # High-score defaults (feedback batch 22).  These are the scores the
     # machine seeds its high-score table with on a fresh flash / factory
     # reset.  The initials and player names that go with them live in their
@@ -610,7 +629,7 @@ def all_rows(table, statuses=None):
     return rows
 
 
-def curated_rows(table, statuses=None):
+def curated_rows(table, statuses=None, master_volume=None):
     """One row per curated setting this build exposes, in DISPLAY units.
 
     Each row: ``{name, label, kind, help, default, min, max, step, scale,
@@ -629,6 +648,13 @@ def curated_rows(table, statuses=None):
     or this build's menu couldn't be read.  Pass ``statuses(table)`` to get
     it; it is advisory only and never changes which rows are offered.
 
+    *master_volume* is this build's built-in master volume from
+    :func:`.factory_volume.find` — pass it and the Master Volume row reports
+    THAT as the card's value, capped at the 63 the firmware accepts, because
+    it, not the compiled default, is the volume the machine starts at.
+    Without it the row falls back to the compiled default, which every card
+    ships as an inert 64.
+
     The curated list comes first, then this build's per-mode champion
     thresholds (title-specific, matched generically — see
     :func:`champion_rows`)."""
@@ -643,13 +669,16 @@ def curated_rows(table, statuses=None):
         labels = _labels_for(name, e)
         k = "toggle" if (e["min"] == 0 and e["max"] == 1) else \
             ("enum" if labels else kind)
+        default, hi = e["default"] // scale, e["max"] // scale
+        if name == MASTER_VOLUME and master_volume is not None:
+            default, hi = int(master_volume["value"]), MAX_MASTER_VOLUME
         rows.append({
             "name": name, "label": label, "kind": k, "help": help_,
             "scale": scale, "labels": labels, "group": group,
             "status": (statuses or {}).get(table.by_name[name]),
-            "default": e["default"] // scale,
+            "default": default,
             "min": e["min"] // scale,
-            "max": e["max"] // scale,
+            "max": hi,
             # A step of 0 (or one that the scale doesn't divide) would make a
             # spinbox useless — fall back to 1.
             "step": max(1, e["step"] // scale) if e["step"] else 1,

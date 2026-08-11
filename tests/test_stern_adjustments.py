@@ -17,9 +17,13 @@ BASE = 0x10000
 ELEM = 44
 
 
-def make_elf(specs, node=b"SYS\x00"):
+def make_elf(specs, node=b"SYS\x00", code=None):
     """specs = [(name, default, min, max), ...] -> ELF bytes.  One PT_LOAD maps
-    file offset f to vaddr BASE+f, so va(f)=f+BASE."""
+    file offset f to vaddr BASE+f, so va(f)=f+BASE.
+
+    *code* is an optional ``f(code_va) -> bytes`` appended after the tables —
+    the hook the factory-volume tests use to plant a machine-code shape at an
+    address they can compute."""
     # Layout: [52 hdr][32 phdr][strings][names[]][descriptors][node][record]
     body = bytearray()
 
@@ -35,7 +39,10 @@ def make_elf(specs, node=b"SYS\x00"):
         blob += name.encode() + b"\x00"
     node_rel = len(blob)
     blob += node
-    # names[] array
+    # names[] array — word-aligned, as a real ELF's is: the decoder scans it
+    # as u32s, so a spec list whose strings happen to end mid-word would
+    # otherwise hide the array from it.
+    blob += b"\x00" * (-len(blob) % 4)
     names_off = strings_off + len(blob)
     names_arr = b"".join(struct.pack("<I", v) for v in name_va)
     # descriptors
@@ -58,6 +65,10 @@ def make_elf(specs, node=b"SYS\x00"):
     payload += names_arr
     payload += desc
     payload += record
+    if code is not None:
+        pad = -len(payload) % 4                 # ARM words must stay aligned
+        payload += b"\x00" * pad
+        payload += code(va(hdr_len + len(payload)))
     total = hdr_len + len(payload)
 
     eh = bytearray(52)

@@ -1105,73 +1105,110 @@ These have each been violated at least once and each cost a run or a window:
       fault should reproduce on every load, but confirming it needs one windowed
       session with a save and a load.
 
-- [ ] **41. On turtles_pro (TMNT), the guest HARD-CRASHES (qemu signal 11)
-      during ordinary interaction — seen on service-menu entry AND on selecting
-      a character.** `S2 D4`
-      **TWO SIGHTINGS, 2026-08-11, same title, same signature-less qemu
-      signal-11, DIFFERENT triggers — folded into one item because neither
-      captured a signature, so whether it is one fault reached two ways or two
-      faults cannot yet be told apart. It splits the day a `[segv] pc=` shows
-      two different faults.** Run recipe both times:
-      turtles_pro-1_59_0.1987-upscaled card, WSL, `PAD_PIVOT=1`,
-      `PAD_AUDIO_DUMP=30`, watch.sh from the item-39 worktree.
-      **(A) SERVICE MENUS. ★ DAVID: "tmnt locked up when trying to go into some
-      of the service menus."** Booted clean, played ~45 s, then
-      **`qemu: uncaught target signal 11 (Segmentation fault) - core dumped`**
-      at 10:48:43 while the service buttons were walked — `[sw]` on switches
-      25/28 (SERVICE SELECT / SERVICE BACK), `[cabchg]` low nibble stepping
-      0f→0e→0d→0b→07. Capture: `C:\tmp\item41_turtles_service_menu_segv.log`.
-      **(B) CHARACTER SELECT — the sharper, deterministic trigger. ★ DAVID:
-      "i'm getting a seg fault when i tried to select a character."** Booted
-      clean, played ~90 s, David pressed START (switch 36, suffix `k` =
-      keyboard), reached character select, cycled with the FLIPPER buttons
-      (switch 64 RIGHT FLIPPER `k`/`p`, switch 34 LOCKDOWN `p` — TMNT picks a
-      turtle with the flippers), and the guest segfaulted at 11:11:32, ~1 s
-      after the last flipper/lockdown press. Capture:
-      `C:\tmp\item41_turtles_character_select_segv.log`. **This one is a
-      concrete in-game action anyone can repeat — press Start on turtles, cycle
-      turtles with the flippers — where (A) is only "some" menus.**
-      **THE SAME NODE-BUS PRECURSOR IN BOTH, and it is probably NOT the cause:**
-      an `ExchangeData: read failed (received 0, expected length=…)` printed
-      early in each run (10:48:07/10:48:20; 11:10:24/11:10:28) — the node bus
-      (`nodebus.py`) losing a read, the line item 23 recorded as "the node bus
-      going away behind them." In (B) it printed **~70 s before** the crash, so
-      treat it as a symptom of turtles' bus timing, not a trigger.
-      **NEITHER CAPTURED A SIGNATURE, and that is the first job, same as 36b.**
-      Both logs end on the bare qemu line — no `[segv] pc=…` header, no pc/lr/
-      fault — so this cannot yet be matched to any of item 23's three shapes.
-      **Item 23 (the whole "game exits by itself" crash class) was DROPPED
-      2026-08-11**; its block in the Dropped section still carries those three
-      godzilla_pro signatures (pthread NULL-mutex churn segv
-      `pc=libpthread+0x8858`; game-code NULL deref `pc=0x51ef7c`; and the
-      signatureless clean thread-return) — read it before starting. **What makes
-      THIS worth a slot where 23 was dropped:** a different title (turtles_pro),
-      and a DETERMINISTIC user-action trigger (character select) that none of
-      item 23's shapes had.
-      **First job (desk + one run): preserve the signature.** watch.sh's exit
-      tail prints only the LAST lines of the crash block, so the `[segv] pc=`
-      header scrolls off — make it grep and keep the header on exit (36b needs
-      the identical fix; do it once). Then run trigger (B) — start a game, cycle
-      characters with the flippers — since it is the repeatable one, and read
-      the preserved pc against (A)'s and against item 23's three.
-      **NOT ESTABLISHED — do not build on any of it:** whether (A) and (B) are
-      the same fault; whether either is one of item 23's signatures or a fourth;
-      whether the `ExchangeData` failure matters; and how reliably (B) repeats
-      (one sighting each). No signature on either.
-      **Acceptance:** on turtles_pro, both starting a game + selecting a
-      character with the flippers AND entering the service menus leave the run
-      alive, stated over a number of repeats — OR the fault reproduces and the
-      newly preserved `[segv] pc=` names it (say whether A and B share a pc, and
-      whether either matches one of item 23's three). Oracle is the guest
-      surviving on its own display plus the preserved crash header.
-      — S2 for now: single-ball play runs (each crash came after ~45-90 s of
-      healthy play), so not "cannot boot"; what it costs is that the run DIES on
-      these interactions and takes the whole session with it. **PROMOTE TO S1 if
-      the next pass confirms character select reliably crashes** — that is the
-      start-a-game path on turtles, so a reliable crash there IS "cannot play
-      turtles." D4: the mechanism is an uncaptured qemu signal-11 with no pc yet
-      and the first job is the same instrument 36b lacks — but trigger (B) is a
-      strong lead to a reliable on-demand repro, which would drop it to D3.
+
+- [ ] **43. In the turtles service menus the picture goes HALF HEIGHT and the
+      scene text stops drawing.** `S2 D3`
+      *(**Filed as 42 and renumbered to 43 on 2026-08-11 before merging**: David
+      took 42 for the save-state portability item on main the same afternoon,
+      and this branch had not landed yet. Numbers are stable IDs and are never
+      reused, so the one that reached main first keeps it. Any note elsewhere
+      calling this "item 42" means this item.)*
+      **★ DAVID, 2026-08-11, watching item 41's run: "there was no crash, but
+      the screen looked very weird in its last state. no scene data and video
+      was half height centered vertically."**
+      **CAPTURED, and there is a LABELLED PAIR — the same run, minutes apart,
+      so the difference is the state and not the setup:**
+      `C:\tmp\item41\turtles_attract_normal.png` — attract/game start, video
+      fills the window AND the scene text draws (`PLAYER 1`, `00`, `CREDITS 3
+      1/4` all present). `C:\tmp\item41\turtles_service_halfheight.png` — after
+      a 15-press walk into the service menus: the video occupies a horizontal
+      band roughly half the window height, centred vertically with black above
+      and below, and **no menu text at all** — just the Stern Pinball logo
+      backdrop. Two defects at once, and they may or may not be one fault.
+      **HOW IT WAS REACHED, exactly:** turtles_pro-1_59_0.1987-upscaled card,
+      `PAD_PIVOT=1`, watch.sh from the item-41 worktree; `plunge.py coin`,
+      `plunge.py start`, a ball plunged and drained, then `swpoke.py` on
+      switches 25/26/27/28 (SERVICE SELECT/PLUS/MINUS/BACK) fifteen times. It
+      should reproduce from a cold run without the ball part.
+      **★ MEASURED ON A LIVE RUN, 2026-08-11 (David's, while it was up), and it
+      rules out the whole "something is failing" family:** ZERO Radium errors,
+      ZERO GL errors (`[readback] glGetError=0` and every other counter 0), the
+      guest rendering steadily at **52.9 fps**, and the renderer compositing at
+      60 fps with `30.0 NEW/s` of video. Nothing is erroring. Whatever is wrong
+      is a GEOMETRY or LAYOUT decision, not a failure.
+      **The band is EXACTLY HALF the framebuffer height and vertically
+      centred** — content occupies ~384 of the 768 lines, black above and below.
+      An arbitrary letterbox would not land on a round half.
+      **TWO video channels are serving at once on this screen** — ch0
+      `bc0792d8…/45a4e8c6…/scene.assets/2.asset/14.asset` (899 frames) and ch1
+      `60ed7e50…/scene.assets/2.asset/22.asset` (759) — where ordinary attract
+      used ch0 alone. **`60ed7e50…` is a SHARED Stern bundle, not turtles': the
+      same hash serves clips on godzilla_pro** (see item 41's godzilla log), so
+      this backdrop is Stern's common LCD asset set and the screen is likely a
+      common one rather than a TMNT screen.
+      **★★ FIVE THINGS ESTABLISHED 2026-08-11, 40% — the fault is now boxed
+      into the VIDEO COMPOSITING PATH and everything else is eliminated.**
+      **(1) THE SERVICE MENU'S FIRST PAGE RENDERS PERFECTLY** — "TMNT PRO /
+      SERVICE MENU", the version table, "Press 'Select' to continue", the QR
+      code, all sharp and full height (`C:\tmp\item41\menu_page1_good.png`). So
+      menu text on turtles is not broken as such. **It is a DEEPER page that
+      breaks**, reached by pressing Select on from there.
+      **(2) IT IS NOT A VIEWPORT OR SCISSOR.** New instrument this pass,
+      `PAD_GL_VPLOG=1` in `glbridge.c`, prints every CHANGE of `glViewport` /
+      `glScissor`. Across a whole run — boot, attract, working menu page and
+      broken page — **the guest sets exactly ONE viewport: `0,0 1360x768`**, and
+      scissor is only ever "off" (`-8192,-7424 16384x16384`) or full size.
+      Nothing is being clipped and the guest never asks for a short surface, so
+      the half-height band is drawn GEOMETRY, not a clipped full-size draw.
+      **(3) IT IS NOT THE SOURCE MATERIAL.** All three clips involved probe as
+      natively **1360x768** (`ffprobe`: 341.asset 1779 frames, 22.asset 759,
+      14.asset 899). Not half-height banners being drawn correctly.
+      **(4) THE GL/TEXT LAYER IS HEALTHY.** With `PAD_VID=0` the same session
+      draws its text full height and correctly placed on black. So whatever is
+      wrong is not the scene/text renderer.
+      **(5) THE ONE THING UNIQUE TO THE BROKEN SCREEN: it runs TWO video
+      channels at once** (ch0 `…/2.asset/14.asset` and ch1 `…/2.asset/341.asset`
+      or `/22.asset`), where attract and the working menu page use ch0 alone.
+      **So the next pass starts at the two-channel composite path**, not at the
+      scene renderer and not at the geometry the game asks for.
+      **★ RULED OUT WITH A RUN, do not repeat: `PAD_GL_W=1920 PAD_GL_H=1080`.**
+      The idea was that `glbridge.c:173-174` defaults to the real LCD size and
+      `watch.sh` overrides to 1360x768, so a menu laid out for 1080 might
+      misplace itself. **It is the other way round: the game lays out at a FIXED
+      1360x768** — at 1920x1080 the whole UI shrinks into the top-left of the
+      surface with the backdrop oversized around it, and David's verdict on
+      seeing it was "that breaks the regular screens". watch.sh's 1360x768 is
+      correct and must stay.
+      **★ ALSO RULED OUT: a stale build.** `ensurebuild` had been refusing to
+      rebuild the guest GL bridge (see the loose end about it continuing anyway),
+      so the first suspicion was guest/host protocol drift across `padgl.h`.
+      Both halves were rebuilt together (13:54:24 and :25) and **the fault still
+      reproduces**, so it is a real fault and not a build artefact.
+      **NOT ESTABLISHED, and do not assume either half:** whether the missing
+      text and the half-height video are one fault or two; whether the band is
+      the menu's own video mode being letterboxed wrongly by `win_present()`
+      (`padglhost.c:1367` scales one quad into `win_w x win_h`) or the guest
+      genuinely drawing a shorter surface; and whether this is turtles-only.
+      **The cheap first checks, none needing a new instrument:** compare
+      against godzilla_pro in the same menu (one run, and it says at once
+      whether this is the title or the menu); and read `[eglshim]`/`[vid]` for
+      the surface size while the band is on screen, since a guest drawing
+      1360x384 and a host letterboxing 1360x768 are different faults with the
+      same picture.
+      **Relevant, unconfirmed as related:** turtles' device table does not read
+      (`watch.sh` says so at boot — "the device table did not read, so this is
+      off the SWITCH LIST alone"), which is item 29's territory. Scene text and
+      device tables are different stores, so treat any link as a guess.
+      **Acceptance:** the service menus on turtles draw their text, at full
+      picture height, stated with a screenshot against the attract-mode one
+      above — and say whether godzilla behaves the same, since that decides
+      whether this is a title fault or a menu fault.
+      — S2: nothing crashes and play is unaffected, so not S1; what it costs is
+      that the service menus are UNREADABLE on this title, and those menus are
+      the oracle item 3 (Coil Test) and item 1d (LED Tests) both depend on, and
+      the place item 41's other trigger lives. D3: it needs a run, it was
+      visible the moment anyone looked, every instrument already exists, and
+      the godzilla comparison is one more run rather than a new tool.
 
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
@@ -1622,6 +1659,49 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **41. turtles_pro hard-crashed (qemu signal 11) on service menus and on
+      character select — and the crash was OURS.** DONE 2026-08-11, `e5a99fc`
+      (branch `item/41`, `6e44780`..`bd6b1f4`). **Verified in DAVID'S OWN RUN:**
+      the shim rebuilt with the fix, he drove the repro that had killed it
+      twice, and the log shows the dump firing on schedule and DECLINING four
+      times instead of faulting.
+      **THE FAULT.** `audio_dump()` (`hwshim.c:4941`) walked a linked list at
+      **Godzilla Pro 1.15.0's fixed addresses** — the voice table at `0x7b90c0`,
+      the queue pool at `0x7b8990+0x100` — dereferencing `*(node + 8)` with no
+      check on `node`. On turtles those addresses are perfectly READABLE, they
+      are simply another title's data, so every guard passed and the walk
+      followed garbage pointers. The app passes `PAD_AUDIO_DUMP=30` on every run
+      and `audio_maybe_dump()` fires from `ioctl()` on the first audio ioctl
+      after each 30 s window — which is why it presented as "go to that screen
+      and press a flipper": the flipper made a sound, the sound was an ioctl,
+      and the ioctl walked a stranger's list. Nothing about the screen mattered,
+      which is why scripted pokes missed it for a whole pass.
+      **THE FIX, two parts.** The real one is a TITLE gate (`a_sw_struct()`, the
+      rig's existing "is this the title those addresses came from" test, which
+      the crash output itself proved answers correctly here). The
+      unreadable-node check is the belt to its braces: a list can be torn
+      mid-walk on the right title too, and a diagnostic that kills the run it is
+      diagnosing is worse than no diagnostic.
+      **WHY IT TOOK TWO DAYS TO SEE — the crash reporter could never fire.**
+      Three independent causes, all fixed. (a) It was only ever installed by
+      INTERPOSING the game's own `sigaction(11)`, and turtles never calls it,
+      which is exactly what qemu's word "uncaught" means. It installs from a
+      constructor now, in a HEADER mode that reports and then hands the fault
+      onward unchanged (`PAD_SEGV_HEADER=0` disables). (b) `watch.sh`'s event
+      filter grepped `/SEGV|Segmentation|FATAL/` case-SENSITIVELY, so
+      `[segv] pc=` could never reach the app pane. (c) `real_open` is resolved
+      lazily, so a guest faulting before it opened anything called a NULL
+      pointer INSIDE the signal handler and lost the report. **`PAD_SEGV_REPORT`
+      was NEVER the missing piece** — `run_game.sh:299,315` has always set it.
+      **`tools/spike2_emu/segvtest.sh`** proves the reporter on a labelled
+      example in two seconds with NO emulator run: four cases, two of them
+      controls. It earned its keep immediately — the first version of the fix
+      was not additive (it silently ate a guest's own handler) and only the
+      reporter-off control showed it.
+      **Left open as item 43:** the half-height menu screen the crash happened
+      on. Same location, different fault. (Filed as 42 during the pass and
+      renumbered before the merge — 42 went to the save-state portability item.)
 
 - [x] **39. Consolidate the two switch windows into one, to the right of the
       playfield — and make the no-artwork view fit on a screen.** DONE

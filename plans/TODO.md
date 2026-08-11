@@ -76,9 +76,18 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **42. Save states cannot work on ANY machine but this one, and a WSL
       with interop switched off can never open its own playfield window.**
-      `S2 D2` *(**~70%, 2026-08-11:** both fixes are written and unit-tested on
-      branch `item/42`; what is left is the real verification — a criu build
-      from clean, and a run with the interop branch actually taken.)*
+      `S2 D2` *(**~90%, 2026-08-11:** both fixes are written and unit-tested on
+      branch `item/42`. **The criu half is verified end to end**: `getcriu.sh`
+      run inside `unshare -m` with tmpfs over BOTH `/var/tmp/criubuild` and
+      `/usr/local/bin`, i.e. exactly a machine that has never had criu — clone
+      v4.1, `make criu`, `criu check` "Looks good.", install, `result=ok`, and
+      the host left untouched. Reuse of the source tree takes 4 s, an
+      already-present criu exits `result=present`, non-root refuses. **The
+      interop half is verified on the app side**: the real token opened a real
+      `godzilla_pro - virtual playfield` window through `_open_playfield`, and
+      `_close_playfield` killed it. What is LEFT is one live run with
+      `PAD_PF_PYTHON=nosuchthing` set, which forces watch.sh down the
+      interop-off branch on a machine whose interop works.)*
       **Two PAD-53 follow-ups, same class: the emulator quietly assumes this
       developer's machine.**
       **(1) criu is a hand-built binary at `/var/tmp/criubuild/criu/criu/criu`,

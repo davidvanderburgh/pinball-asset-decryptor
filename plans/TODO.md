@@ -1076,7 +1076,13 @@ These have each been violated at least once and each cost a run or a window:
 
 
 - [ ] **43. In the turtles service menus the picture goes HALF HEIGHT and the
-      scene text stops drawing.** `S2 D3`
+      scene text stops drawing.** `S2 D3` ← IN PROGRESS *(**55%, 2026-08-11:**
+      the desk half is done — squash not crop, the ratio is 4:1 not "half",
+      `win_present()` and a wrong reported video size are both ruled out, and
+      one earlier "established" claim is withdrawn as taken on the wrong
+      screen. The instrument that answers what is left is built and committed
+      but has never seen a run. Branch `item/43`, clean and pushed; no run
+      left up.)*
       *(**Filed as 42 and renumbered to 43 on 2026-08-11 before merging**: David
       took 42 for the save-state portability item on main the same afternoon,
       and this branch had not landed yet. Numbers are stable IDs and are never
@@ -1105,9 +1111,10 @@ These have each been violated at least once and each cost a run or a window:
       guest rendering steadily at **52.9 fps**, and the renderer compositing at
       60 fps with `30.0 NEW/s` of video. Nothing is erroring. Whatever is wrong
       is a GEOMETRY or LAYOUT decision, not a failure.
-      **The band is EXACTLY HALF the framebuffer height and vertically
-      centred** — content occupies ~384 of the 768 lines, black above and below.
-      An arbitrary letterbox would not land on a round half.
+      ▼ **The band is NOT half the height — it is EXACTLY 4:1, and that is a
+      far sharper clue than "half" ever was.** The "~384 of 768 lines" recorded
+      here was an eyeball; measured, it is 340. See (6) below, which corrects
+      it.
       **TWO video channels are serving at once on this screen** — ch0
       `bc0792d8…/45a4e8c6…/scene.assets/2.asset/14.asset` (899 frames) and ch1
       `60ed7e50…/scene.assets/2.asset/22.asset` (759) — where ordinary attract
@@ -1135,6 +1142,14 @@ These have each been violated at least once and each cost a run or a window:
       **(4) THE GL/TEXT LAYER IS HEALTHY.** With `PAD_VID=0` the same session
       draws its text full height and correctly placed on black. So whatever is
       wrong is not the scene/text renderer.
+      ▼ **WITHDRAWN 2026-08-11 — THIS CONTROL WAS TAKEN ON THE WRONG SCREEN and
+      proves nothing about the fault.** `C:\tmp\item41\menu_novid_text_ok.png`
+      is the ATTRACT / ball-start screen — `PLAYER 1`, `00`, `1/1.00 3/2.00`,
+      `CREDITS 6 1/4` — **not the broken menu page**. That text was never in
+      doubt; the attract screen draws its text with video ON too. So nothing
+      here says the text layer survives on the page that breaks, and "one fault
+      or two" is fully open, not half-answered. A PAD_VID=0 control is still
+      worth taking — ON THE BROKEN PAGE.
       **(5) THE ONE THING UNIQUE TO THE BROKEN SCREEN: it runs TWO video
       channels at once** (ch0 `…/2.asset/14.asset` and ch1 `…/2.asset/341.asset`
       or `/22.asset`), where attract and the working menu page use ch0 alone.
@@ -1153,21 +1168,89 @@ These have each been violated at least once and each cost a run or a window:
       so the first suspicion was guest/host protocol drift across `padgl.h`.
       Both halves were rebuilt together (13:54:24 and :25) and **the fault still
       reproduces**, so it is a real fault and not a build artefact.
-      **NOT ESTABLISHED, and do not assume either half:** whether the missing
-      text and the half-height video are one fault or two; whether the band is
-      the menu's own video mode being letterboxed wrongly by `win_present()`
-      (`padglhost.c:1367` scales one quad into `win_w x win_h`) or the guest
-      genuinely drawing a shorter surface; and whether this is turtles-only.
-      **The cheap first checks, none needing a new instrument:** compare
-      against godzilla_pro in the same menu (one run, and it says at once
-      whether this is the title or the menu); and read `[eglshim]`/`[vid]` for
-      the surface size while the band is on screen, since a guest drawing
-      1360x384 and a host letterboxing 1360x768 are different faults with the
-      same picture.
+      **★★★ (6) MEASURED AT THE DESK 2026-08-11, NO RUN, off the captured
+      screenshots — and it kills the crop reading, fixes the ratio, and clears
+      `win_present()`. 55%.** All of it is reproducible with
+      `tools/spike2_emu/bandmeasure.py`, committed with this.
+      **(a) IT IS A VERTICAL SQUASH OF THE WHOLE FRAME, NOT A CROP, and the
+      pair proves it because BOTH IMAGES ARE THE SAME CLIP.** `menu_page1_good`
+      carries the same scrolling tiled Stern-logo backdrop at full size that
+      `menu_deep_broken` carries in the band, so the tile geometry is a ruler
+      that does not care which frame was caught. **Horizontal scale, which is
+      the CONTROL because the band is full width: 1.006.** **Vertical scale of
+      the artwork, from the tile PITCH: 0.451** (399.5 rows → 180.0), against a
+      **band fraction of 0.444** (816 rows → 362). Those two agreeing is a
+      squash; a crop needs the vertical scale to come back **1.0**, and it is
+      0.451. The whole frame is in the band, compressed.
+      **Two ways this measurement was wrong before it was right, both now in
+      the script's header so nobody repays them: counting TILE ROWS fails** (the
+      ball and the white outline split one logo's red into two runs, so the
+      good image reads 4 tiles and the band 3 — the first version of the script
+      called this squash a CROP on exactly that), **and TILE HEIGHT fails**
+      (top and bottom tiles are cut by the picture edge, and a cut tile is short
+      for a reason unrelated to scale). Tile PITCH survives both.
+      **(b) THE RATIO IS EXACTLY 4:1.** Band = screen rows 292..653 (sharp
+      edges both sides) inside a content area of rows 64..880; the window was
+      `1445x827` (its own log line), so the 1360x768 framebuffer letterboxes to
+      816 screen rows. Back-projected, **the band is framebuffer rows ~215..554
+      — height 340 of 768, centred to within a pixel** — and **1360/340 =
+      4.007**. Both broken captures give byte-identical band rows, so it is a
+      stable state and not a caught transition.
+      **(c) `win_present()` IS RULED OUT, by arithmetic, with no run** — one of
+      the two questions this item listed as NOT ESTABLISHED. It draws ONE
+      textured quad of the WHOLE framebuffer (`padglhost.c:1367`), so it cannot
+      put a band INSIDE the picture; and the measured content area matches the
+      full framebuffer exactly, with the band centred within it. **The band is
+      drawn on the GUEST's side of the ring.**
+      **(d) A WRONG REPORTED VIDEO SIZE IS RULED OUT, from the run log already
+      on disk** (`/var/tmp/item42_vplog2.log`) — so the two-channel lead does
+      NOT act through the size the game was told. Both channels report
+      `1360x768`; each got its caps on ITS OWN pad (`[vid] ch0 caps 1360x768 ->
+      its own pad`, and the same for ch1); the loud `last_created` fallback in
+      `pad_vid_caps_for_pad()` — the one that hands the game another stream's
+      width, which is what item 6's stripes were — **never fired**; and there is
+      no `** WRONG-SIZE VIDEO UPLOAD **`. The game was told the truth about both
+      clips.
+      **WHAT THAT LEAVES, and it is now a two-way question with an instrument
+      built for it:** a full-surface quad becomes a 4:1 band either because the
+      VERTICES shrank or because a TRANSFORM squashed them. Nothing in the rig
+      could see either.
+      **★★ BUILT THIS PASS, and it is host-side only so no guest rebuild:
+      `PAD_GL_DRAWLOG=1` in `padglhost.c`.** It prints, per draw and DEDUPED on
+      (program, fbo, vertex count, rounded box): the bounding box of the
+      position attribute, plus the bound program's mat4 / vec4 uniforms — so
+      the two cases above print differently instead of identically. It needed no
+      new plumbing: the vertex data, the attribute layout and the latest uniform
+      values are all already mirrored for the save-state journal (`jvao`,
+      `jbuf`, `juni_v`); this only reads them. Indexed draws resolve through the
+      VAO's mirrored element buffer, so an indexed quad reports the box a direct
+      one would. `PAD_GL_DRAWLOG_MAX` caps the output (default 200).
+      **NOT YET VALIDATED ON A LABELLED EXAMPLE — and the validation is built
+      into the experiment rather than assumed:** the attract backdrop and the
+      GOOD menu page must read a FULL-SURFACE box, and the broken page must read
+      a 4:1 one. If the good page and the broken page print the same box, the
+      squash is in a uniform and the instrument says so on the next line; if
+      neither prints, it is blind and must be fixed before it judges anything.
+      **STILL NOT ESTABLISHED, and do not assume either:** whether the missing
+      text and the squashed video are one fault or two (see the withdrawal under
+      (4) — the control that appeared to answer this was taken on the wrong
+      screen); and whether this is turtles-only.
+      **The cheap check that still needs no new instrument:** compare against
+      godzilla_pro in the same menu — one run, and it says at once whether this
+      is the title or the menu.
       **Relevant, unconfirmed as related:** turtles' device table does not read
       (`watch.sh` says so at boot — "the device table did not read, so this is
       off the SWITCH LIST alone"), which is item 29's territory. Scene text and
       device tables are different stores, so treat any link as a guess.
+      **Resume:** run turtles_pro FROM THIS BRANCH with `PAD_GL_DRAWLOG=1`,
+      walk to the service menu (`plunge.py coin`, `plunge.py start`, then
+      `swpoke.py` 25/26/27/28 as recorded above) and read the `[gl] draw` lines
+      at three moments: attract, the GOOD first menu page, and the broken deeper
+      page. The good page validates the instrument (it must read a full-surface
+      box); the broken page is the answer — a box with `h/w` near 0.25 means the
+      VERTICES carry the band, a full box with a `sy` near 0.44 on a mat4 means
+      a TRANSFORM does. Take a `PAD_VID=0` shot OF THE BROKEN PAGE in the same
+      run, since that control has still never been taken there.
       **Acceptance:** the service menus on turtles draw their text, at full
       picture height, stated with a screenshot against the attract-mode one
       above — and say whether godzilla behaves the same, since that decides

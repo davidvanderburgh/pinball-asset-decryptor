@@ -2846,6 +2846,185 @@ static void dump_op_histogram(void)
     vid_geom_dump();
 }
 
+/* PAD_GL_DRAWLOG=1 - what rectangle the game actually DREW.
+ *
+ * Item 43: a turtles service-menu page draws its backdrop video in a
+ * full-width band of 1360x340 on a 1360x768 surface - EXACTLY 4:1, centred to
+ * within a pixel - with the menu text missing. Item 42's PAD_GL_VPLOG settled
+ * that the guest sets ONE viewport, 0,0 1360x768, and only ever scissors
+ * "off", so nothing is CLIPPING the picture and the band has to be drawn
+ * geometry. vp_say cannot go further by construction: a viewport says where
+ * drawing is ALLOWED to land and says nothing about where it went.
+ *
+ * The band is also not this renderer's letterbox. win_present() draws one quad
+ * of the whole framebuffer, so it cannot produce a band INSIDE the picture -
+ * and the measured band sits centred within a content area that matches the
+ * full framebuffer exactly. Whatever makes it is on the guest's side of the
+ * ring, which is what this prints.
+ *
+ * Two ways a full-surface quad becomes a band, and they need telling apart:
+ * the VERTICES shrank, or a TRANSFORM squashed them. So this prints both - the
+ * bounding box of the position attribute, and the bound program's mat4/vec4
+ * uniforms, which is where a 2D scale or offset is passed. A quad that reads
+ * -1..1 in y under a uniform with sy 0.44 is a different bug from one whose
+ * vertices arrive at +-0.44 already.
+ *
+ * It costs no new plumbing: the vertex data, the attribute layout and the
+ * latest uniform values are all mirrored already, for the save-state journal
+ * (jvao / jbuf / juni_v). This only reads them.
+ *
+ * DEDUPED on (program, fbo, count, rounded box) for vp_say's reason - these
+ * are per-frame calls, and an undeduped log at 50 fps buries the run in its
+ * own noise. A screen that starts drawing a band says so in one new line.
+ * PAD_GL_DRAWLOG_MAX caps the lines outright (default 200).
+ */
+static int drawlog = -1;
+static int drawlog_said, drawlog_cap = 200;
+static struct { unsigned prog, count, fbo; int bx[4]; } dl_seen[96];
+static int dl_seen_n;
+
+static float dl_f(const unsigned char *p)
+{
+    float f;
+    memcpy(&f, p, sizeof f);      /* the mirror is malloc'd, offsets are the
+                                   * guest's: do not assume alignment */
+    return f;
+}
+
+/* Name of the attribute bound to location `loc` in guest program `g`, if the
+ * guest registered one by name. "" is normal, not a fault: a shader that fixed
+ * its locations with a layout qualifier never sends a REGATTRIB. */
+static const char *dl_attr_name(unsigned g, int loc)
+{
+    int k;
+    if (g >= MAXPROG) return "";
+    for (k = 0; k < PADGL_ATTR_PER_PROG; k++)
+        if (attr_loc[g][k] == loc && attr_name[g][k][0]) return attr_name[g][k];
+    return "";
+}
+
+/* idx_data == 0 is DRAWARRAYS (vertex i is first+i); otherwise the indices are
+ * read from the mirrored element buffer, so an indexed quad reports the same
+ * box a direct one would. */
+static void draw_say(unsigned count, unsigned first,
+                     const unsigned char *idx_data, unsigned idx_size,
+                     unsigned idx_type, unsigned idx_off)
+{
+    const struct jvattr *a = 0;
+    const struct jbuf *b;
+    unsigned stride, off, i, n, comps, isz;
+    int loc = -1, k, j;
+    float x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+    int box[4];
+    const char *nm;
+
+    if (drawlog < 0) {
+        const char *e = getenv("PAD_GL_DRAWLOG");
+        drawlog = e && e[0] != '0';
+        if ((e = getenv("PAD_GL_DRAWLOG_MAX")) && atoi(e) > 0)
+            drawlog_cap = atoi(e);
+    }
+    if (!drawlog || drawlog_said >= drawlog_cap || jcur_vao >= 1024) return;
+
+    /* The position attribute is the lowest ENABLED float attribute with a
+     * mirrored buffer behind it. Lowest rather than location 0 on purpose: a
+     * shader that fixed its own locations need not put position at 0. */
+    for (k = 0; k < 16; k++) {
+        const struct jvattr *c = &jvao[jcur_vao].at[k];
+        if (!c->have || !c->on) continue;
+        if (c->pl[2] != 0x1406u) continue;          /* GL_FLOAT only         */
+        if (c->pl[1] < 2) continue;                 /* need an x and a y     */
+        if (c->buf >= MAXNAME || !jbuf[c->buf].data) continue;
+        a = c; loc = k; break;
+    }
+    if (!a) return;
+
+    b = &jbuf[a->buf];
+    comps  = a->pl[1];
+    stride = a->pl[4] ? a->pl[4] : comps * 4u;
+    off    = a->pl[5];
+    isz    = idx_type == 0x1401u ? 1u : idx_type == 0x1405u ? 4u : 2u;
+    n = count > 4096u ? 4096u : count;
+    if (!n) return;
+
+    for (i = 0; i < n; i++) {
+        unsigned vert, o;
+        float x, y;
+        if (idx_data) {
+            unsigned io = idx_off + isz * i;
+            if (io + isz > idx_size) return;        /* short: say nothing    */
+            if (isz == 1) vert = idx_data[io];
+            else if (isz == 2) { unsigned short s;
+                                 memcpy(&s, idx_data + io, 2); vert = s; }
+            else { unsigned v; memcpy(&v, idx_data + io, 4); vert = v; }
+        } else {
+            vert = first + i;
+        }
+        o = off + stride * vert;
+        if (o + 8u > b->size) return;               /* short: say nothing    */
+        x = dl_f(b->data + o);
+        y = dl_f(b->data + o + 4);
+        if (!i) {
+            x0 = x1 = x;
+            y0 = y1 = y;
+        } else {
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+            if (y < y0) y0 = y;
+            if (y > y1) y1 = y;
+        }
+    }
+
+    box[0] = (int)(x0 * 100.f); box[1] = (int)(y0 * 100.f);
+    box[2] = (int)(x1 * 100.f); box[3] = (int)(y1 * 100.f);
+    for (j = 0; j < dl_seen_n; j++)
+        if (dl_seen[j].prog == jcur_prog && dl_seen[j].count == count
+                && dl_seen[j].fbo == jcur_fbo
+                && dl_seen[j].bx[0] == box[0] && dl_seen[j].bx[1] == box[1]
+                && dl_seen[j].bx[2] == box[2] && dl_seen[j].bx[3] == box[3])
+            return;
+    if (dl_seen_n < (int)(sizeof dl_seen / sizeof dl_seen[0])) {
+        dl_seen[dl_seen_n].prog  = jcur_prog;
+        dl_seen[dl_seen_n].count = count;
+        dl_seen[dl_seen_n].fbo   = jcur_fbo;
+        memcpy(dl_seen[dl_seen_n].bx, box, sizeof box);
+        dl_seen_n++;
+    }
+    drawlog_said++;
+
+    nm = dl_attr_name(jcur_prog, loc);
+    fprintf(stderr, "[gl] draw prog=%u fbo=%u n=%u %s attr%d%s%s "
+                    "x %.3f..%.3f y %.3f..%.3f  (w %.3f h %.3f  h/w %.4f)"
+                    "  frame %ld\n",
+            jcur_prog, jcur_fbo, count, idx_data ? "elem" : "arr", loc,
+            nm[0] ? " " : "", nm, x0, x1, y0, y1,
+            x1 - x0, y1 - y0,
+            (x1 - x0) != 0.f ? (y1 - y0) / (x1 - x0) : 0.f, frames_done);
+
+    /* The transform half. Without it a squashed quad and a squashing matrix
+     * print the same first line, which is the whole distinction this exists
+     * to make. */
+    if (jcur_prog < MAXPROG) {
+        unsigned s;
+        for (s = 0; s < MAXUNI; s++) {
+            const unsigned char *p = juni_v[jcur_prog][s].pl;
+            unsigned kind, ln = juni_v[jcur_prog][s].len;
+            if (!juni_v[jcur_prog][s].have || ln < 12) continue;
+            kind = ((const unsigned *)p)[2];
+            if (kind == PADGL_UM4FV && ln >= 12 + 64)
+                fprintf(stderr, "[gl]      u '%s' mat4  sx %.4f sy %.4f  "
+                                "tx %.4f ty %.4f\n",
+                        uni_name[jcur_prog][s], dl_f(p + 12),
+                        dl_f(p + 12 + 5 * 4), dl_f(p + 12 + 12 * 4),
+                        dl_f(p + 12 + 13 * 4));
+            else if ((kind == PADGL_U4F || kind == PADGL_U4FV) && ln >= 12 + 16)
+                fprintf(stderr, "[gl]      u '%s' vec4  %.4f %.4f %.4f %.4f\n",
+                        uni_name[jcur_prog][s], dl_f(p + 12), dl_f(p + 16),
+                        dl_f(p + 20), dl_f(p + 24));
+        }
+    }
+}
+
 static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
 {
     const unsigned *u = (const unsigned *)pl;
@@ -3388,6 +3567,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
             break;
         }
         swap_draws++;                            /* item 27: this frame drew */
+        draw_say(u[2], u[1], 0, 0, 0, 0);        /* item 43                  */
         p_glDrawArrays(u[0],(int)u[1],(int)u[2]); break;
     case PADGL_DRAWELEMENTS:
         if ((vao_on[cur_vao_g] & (unsigned short)~vao_backed[cur_vao_g])
@@ -3399,6 +3579,13 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
             break;
         }
         swap_draws++;                            /* item 27: this frame drew */
+        {   /* item 43: the indices come from the mirrored element buffer the
+             * journal keeps for this VAO, so an indexed quad reports the same
+             * box a direct one would. */
+            unsigned e = jcur_vao < 1024 ? jvao[jcur_vao].elem : 0;
+            if (e && e < MAXNAME && jbuf[e].data)
+                draw_say(u[1], 0, jbuf[e].data, jbuf[e].size, u[2], u[3]);
+        }
         p_glDrawElements(u[0],(int)u[1],u[2],
                          (const void *)(unsigned long)u[3]); break;
     case PADGL_NOP:             break;

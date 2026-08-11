@@ -74,6 +74,91 @@ def test_discover_filters_and_sorts(tmp_path, monkeypatch):
     assert [b for _, b in found] == ["item/1b", "item/9", "item/33"]
 
 
+def test_discover_orders_by_recency(tmp_path, monkeypatch):
+    root = _make_checkout(tmp_path, "repo")
+    wt9 = _make_checkout(tmp_path, "wt/item-9")
+    wt33 = _make_checkout(tmp_path, "wt/item-33")
+
+    porcelain = ""
+    for path, branch in [(root, "main"), (wt9, "item/9"), (wt33, "item/33")]:
+        porcelain += "worktree %s\nHEAD 0\nbranch refs/heads/%s\n\n" % (
+            path, branch)
+    monkeypatch.setattr(wp, "_git", lambda args, cwd, timeout=10: porcelain)
+    # item/33 is the lower item number by the old sort, but item/9 was
+    # touched an hour ago and item/33 last week.
+    monkeypatch.setattr(wp, "touched_at",
+                        {wt9: 5000.0, wt33: 1000.0}.get)
+
+    assert [b for _, b in wp.discover_other_checkouts(root)] == [
+        "item/9", "item/33"]
+
+
+def test_dirty_paths():
+    status = (
+        " M pinball_decryptor/app.py\n"
+        "?? plans/notes.md\n"
+        "R  old/name.py -> new/name.py\n"
+        ' M "spaced name.py"\n')
+    assert wp.dirty_paths(status) == [
+        "pinball_decryptor/app.py", "plans/notes.md", "new/name.py",
+        "spaced name.py"]
+
+
+def test_touched_at_uses_newest_of_commit_and_edits(tmp_path, monkeypatch):
+    checkout = tmp_path / "wt"
+    (checkout / "plans").mkdir(parents=True)
+    edited = checkout / "plans" / "TODO.md"
+    edited.write_text("x", encoding="utf-8")
+    os.utime(edited, (9_000.0, 9_000.0))
+    monkeypatch.setattr(wp, "_STATUS_CACHE", {})
+    monkeypatch.setattr(wp, "_COMMIT_CACHE", {})
+    answers = {("log", "-1", "--format=%ct%n%s"): "1000\nold commit\n",
+               ("status", "--porcelain"): " M plans/TODO.md\n M gone.py\n"}
+    monkeypatch.setattr(
+        wp, "_git", lambda args, cwd, timeout=10: answers.get(tuple(args)))
+
+    # The uncommitted edit is newer than HEAD, and a listed-but-missing
+    # file is skipped rather than fatal.
+    assert wp.touched_at(str(checkout)) == 9_000.0
+
+    # With nothing dirty, HEAD's commit time stands on its own.
+    monkeypatch.setattr(wp, "_STATUS_CACHE", {})
+    monkeypatch.setattr(wp, "_COMMIT_CACHE", {})
+    answers[("status", "--porcelain")] = ""
+    assert wp.touched_at(str(checkout)) == 1000.0
+
+
+def test_touched_at_no_git_is_zero(tmp_path, monkeypatch):
+    monkeypatch.setattr(wp, "_STATUS_CACHE", {})
+    monkeypatch.setattr(wp, "_COMMIT_CACHE", {})
+    monkeypatch.setattr(wp, "_git", lambda args, cwd, timeout=10: None)
+    assert wp.touched_at(str(tmp_path)) == 0.0
+
+
+def test_chooser_rows_main_sorts_by_recency(monkeypatch):
+    monkeypatch.setattr(
+        wp, "_git",
+        lambda args, cwd, timeout=10: "main\n" if args[0] == "rev-parse"
+        else None)
+    monkeypatch.setattr(wp, "_describe", lambda path, branch: branch)
+    others = [("/wt/item-9", "item/9"), ("/wt/item-33", "item/33")]
+
+    # Worked in a worktree last: it leads, main falls below it.
+    monkeypatch.setattr(wp, "touched_at",
+                        {"/root": 100.0, "/wt/item-9": 300.0,
+                         "/wt/item-33": 200.0}.get)
+    rows = wp.chooser_rows("/root", others)
+    assert [p for p, _ in rows] == ["/wt/item-9", "/wt/item-33", "/root"]
+    assert rows[-1][1] == "main  —  this checkout"
+
+    # Worked in main last: main leads again.
+    monkeypatch.setattr(wp, "touched_at",
+                        {"/root": 900.0, "/wt/item-9": 300.0,
+                         "/wt/item-33": 200.0}.get)
+    rows = wp.chooser_rows("/root", others)
+    assert [p for p, _ in rows] == ["/root", "/wt/item-9", "/wt/item-33"]
+
+
 def test_discover_git_failure_is_empty(monkeypatch):
     monkeypatch.setattr(wp, "_git", lambda args, cwd, timeout=10: None)
     assert wp.discover_other_checkouts("C:/anywhere") == []

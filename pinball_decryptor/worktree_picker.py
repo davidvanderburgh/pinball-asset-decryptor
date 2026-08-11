@@ -9,6 +9,10 @@ on sys.path, so the worktree's package is the one imported).  With no
 worktrees — every installed copy, and a dev tree with nothing in
 progress — the chooser never appears and startup is unchanged.
 
+Rows are ordered most-recently-touched first (main included) and the top
+row is pre-selected, so the usual launch — Enter on the checkout you were
+just working in — needs no aiming.
+
 The chooser must never be able to brick a launch: any git failure, parse
 failure, or Tk failure falls through to "just run this checkout".
 """
@@ -24,6 +28,16 @@ import sys
 ENV_PICKED = "PAD_WORKTREE_PICKED"
 
 _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
+# `git status` is the slowest thing the chooser does on a big checkout,
+# and both the recency sort and the row label want it, so each checkout
+# is asked once per launch.
+_STATUS_CACHE = {}
+_COMMIT_CACHE = {}
+
+# Dirty files are stat'd for their mtime; a checkout mid-rebuild can have
+# thousands, and the newest is nearly always in the first handful.
+_DIRTY_STAT_LIMIT = 200
 
 
 def _git(args, cwd, timeout=10):
@@ -59,17 +73,76 @@ def parse_worktree_list(porcelain):
     return entries
 
 
+def _status(path):
+    """`git status --porcelain` for a checkout ("" if git can't answer)."""
+    if path not in _STATUS_CACHE:
+        _STATUS_CACHE[path] = _git(["status", "--porcelain"], cwd=path) or ""
+    return _STATUS_CACHE[path]
+
+
+def _last_commit(path):
+    """(commit epoch seconds, subject) of HEAD — (0.0, None) if unknown."""
+    if path not in _COMMIT_CACHE:
+        out = _git(["log", "-1", "--format=%ct%n%s"], cwd=path) or ""
+        stamp, _, subject = out.partition("\n")
+        stamp = stamp.strip()
+        _COMMIT_CACHE[path] = (float(stamp) if stamp.isdigit() else 0.0,
+                               subject.strip() or None)
+    return _COMMIT_CACHE[path]
+
+
+def dirty_paths(status):
+    """Repo-relative paths named by `git status --porcelain` output.
+
+    Lines are `XY <path>`; a rename reads `old -> new` (the new name is
+    the one on disk) and a path with odd characters comes back quoted.
+    """
+    paths = []
+    for line in status.splitlines():
+        rel = line[3:].strip()
+        if " -> " in rel:
+            rel = rel.split(" -> ")[-1]
+        rel = rel.strip('"')
+        if rel:
+            paths.append(rel)
+    return paths
+
+
+def touched_at(path):
+    """When a checkout was last worked in, as epoch seconds (0.0 = never).
+
+    HEAD's commit time is the floor, but a worktree with edits in it was
+    touched more recently than its last commit — and that is exactly the
+    one to offer first — so the dirty files git just listed are stat'd
+    too.
+    """
+    stamps = [_last_commit(path)[0]]
+    for rel in dirty_paths(_status(path))[:_DIRTY_STAT_LIMIT]:
+        try:
+            stamps.append(os.path.getmtime(os.path.join(path, rel)))
+        except OSError:
+            pass  # deleted, or a quoted path we didn't unescape
+    return max(stamps)
+
+
 def _sort_key(entry):
     """item/<N> worktrees first in numeric order, then everything else.
 
     Item numbers aren't purely numeric (1b, 1d are real items), so the
-    numeric part ranks and the suffix breaks ties.
+    numeric part ranks and the suffix breaks ties.  This only settles
+    checkouts that look equally recent (a fresh `git worktree add` before
+    any work lands in it) — recency comes first.
     """
     _path, branch = entry
     m = re.fullmatch(r"item/(\d+)([a-z]?)", branch or "")
     if m:
         return (0, int(m.group(1)), m.group(2))
     return (1, 0, branch or _path)
+
+
+def _recency_key(entry):
+    """Most recently touched first, item order as the tiebreak."""
+    return (-touched_at(entry[0]),) + _sort_key(entry)
 
 
 def discover_other_checkouts(root):
@@ -93,7 +166,7 @@ def discover_other_checkouts(root):
                 os.path.join(p, "pinball_decryptor", "__main__.py")):
             continue
         found.append((p, branch))
-    return sorted(found, key=_sort_key)
+    return sorted(found, key=_recency_key)
 
 
 def item_title(todo_text, branch):
@@ -130,14 +203,26 @@ def _describe(path, branch):
     if not title:
         # Never leave a bare branch number — the last commit subject is
         # the next best reminder of what the worktree is about.
-        subject = _git(["log", "-1", "--format=%s"], cwd=path)
-        title = subject.strip() if subject else None
+        title = _last_commit(path)[1]
     if title:
         label += "  —  " + _shorten(title)
-    status = _git(["status", "--porcelain"], cwd=path)
-    if status and status.strip():
+    if _status(path).strip():
         label += "   ● uncommitted"
     return label
+
+
+def chooser_rows(root, others):
+    """[(path, label)] for the chooser, most recently touched first.
+
+    `others` already arrives recency-ordered from discovery, so only the
+    root row needs placing among them; sorting is stable, so checkouts
+    that look equally recent keep that order.
+    """
+    branch = (_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=root)
+              or "main").strip()
+    rows = [(root, branch + "  —  this checkout")]
+    rows += [(p, _describe(p, b)) for p, b in others]
+    return sorted(rows, key=lambda row: -touched_at(row[0]))
 
 
 def checkout_badge(root=None):
@@ -178,10 +263,7 @@ def _ask(root, others):
     """Tk chooser.  Returns the chosen checkout path, or None for cancel."""
     import tkinter as tk
 
-    branch = (_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=root)
-              or "main").strip()
-    rows = [(root, branch + "  —  this checkout")]
-    rows += [(p, _describe(p, b)) for p, b in others]
+    rows = chooser_rows(root, others)
 
     win = tk.Tk()
     win.title("Pinball Asset Decryptor — dev")
@@ -194,7 +276,11 @@ def _ask(root, others):
                     width=max(28, max(len(t) for _, t in rows) + 2))
     for _, text in rows:
         lb.insert("end", text)
+    # Top row = most recently touched: selected, active (the dotbox that
+    # arrow keys move from), and in view, so Enter launches it.
     lb.selection_set(0)
+    lb.activate(0)
+    lb.see(0)
     lb.pack(fill="both", expand=True, padx=12)
 
     chosen = []

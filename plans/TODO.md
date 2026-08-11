@@ -113,8 +113,9 @@ These have each been violated at least once and each cost a run or a window:
       wonders:** it is a second keyboard target on purpose (`XSelectInput` takes
       KeyPress/KeyRelease on it too, `padglhost.c:1178-1180`, "so whichever of
       the two has focus can drive the game"); item 37's `winreset.sh` clears a
-      `legend` line in `~/.pad_windows`; and item 19 plans to put its replay
-      keys "in the Controls legend", so its acceptance moves with this.
+      `legend` line in `~/.pad_windows`; and item 19 planned to put its replay
+      keys "in the Controls legend" — **19 was DROPPED 2026-08-11, so that third
+      constraint is gone** and this item no longer has to keep room for it.
       **THE OVERFLOW HALF IS ESTABLISHED AT THE DESK, and it is worse than
       "large".** `Schematic.__init__` sizes itself `w = COL_W * len(cols)` at
       **COL_W = 300 per node column with NO cap**, and `h = ROW_H*tall + 8`
@@ -263,161 +264,23 @@ These have each been violated at least once and each cost a run or a window:
       on the ~0.9 s world-stop (SW may time boards/audio tighter), or a
       frozen-mid-flight video/EGL thread resuming into an invariant SW
       exercises and Godzilla does not.
-      **BLOCKED ON THE SAME INSTRUMENT AS ITEM 23.** The guest goes down with
-      nothing anywhere recording WHY; until an exit hook names the path, a
-      repeat sighting teaches nothing, which is exactly the D4 line.
+      **BLOCKED ON AN INSTRUMENT THAT IS NOW THIS ITEM'S OWN FIRST JOB.** The
+      guest goes down with nothing anywhere recording WHY; until an exit hook
+      names the path, a repeat sighting teaches nothing, which is exactly the D4
+      line. **This used to be item 23's job. ITEM 23 WAS DROPPED 2026-08-11 at
+      David's ask, so nothing else will build it** — see the Dropped section
+      below, which still carries the three measured exit signatures and is worth
+      reading before starting here. What it needs: an `atexit` hook in the shim
+      that says whether `main` returned and what signal it took, and `watch.sh`
+      grepping the `[segv] pc=` header on exit so the app pane keeps the
+      signature instead of the VPU noise.
       **Acceptance:** a star_wars save leaves the donor run alive, stated over
       a number of repeats (both during play and from a restored game, since
-      those differ today), or the exit reproduces and item 23's reason line
-      names it.
+      those differ today), or the exit reproduces and the new reason line names
+      it.
       — S1: the feature's whole point is saving mid-play, and a save that
       ends the session costs the ball you were playing. D4: the instrument
       does not exist yet and the fault has already failed to reproduce once.
-
-- [ ] **23. The game exits by itself mid-play.** `S1 D2` *(**D4 → D2,
-      2026-08-06 evening, off item 11's runs:** a SECOND fault shape now has
-      a signature, a call site, a disassembly, a minutes-scale repro AND a
-      designed fix — see the starred block below. The original signatureless
-      exit remains as described.)* *(**2026-08-10: item 36 is a fourth,
-      PROVOKED sighting of the clean-exit shape** — a leave-running criu
-      dump preceded it by 10 s on star_wars; the exit-reason instrument this
-      item's acceptance (a) demands is now blocking BOTH items.)*
-      **★★★ THE ORIGINAL SIGNATURELESS EXIT NOW HAS A NAMED PRECURSOR, and
-      this entry's claim that "nothing anywhere records WHY the process went
-      down" is CORRECTED. David's log, 2026-08-06 21:33, godzilla_pro,
-      727 s (~12 min) into a run he was playing** (keyboard `k` and playfield
-      `f` edges throughout). The last three video lines before the exit:
-      ```
-      [padvid 727.43] ch0 serving 1360x768 457 frames ... 2.asset/102.asset
-      [vid] ch0 could not start the streaming thread
-      [padvid 727.43] ch0 guest stopped mid-read after 0 frames
-      ```
-      then `[watch] the game exited` 10 s later, with **NO segv block** — the
-      tail is the usual VPU firmware noise. So this is the FIRST shape (the
-      clean exit), not the pthread churn segv and not the game-code NULL
-      deref, and it now has a line naming a guest-side resource failure.
-      **ESTABLISHED AT THE DESK, from the source, not guessed:** that message
-      is `gstvid.c:1277`, printed when the `pthread_create` at `gstvid.c:1274`
-      FAILS — the guest shim could not make a thread. And **`gstvid.c`
-      contains no `pthread_detach` and no `pthread_join` anywhere** (grep: one
-      `pthread_create`, zero of either). Every `vid_thread` is therefore
-      created JOINABLE and never reaped, so each one holds its descriptor and
-      its stack for the life of the process, and `pad_vid_play` makes one per
-      clip serve.
-      **ARITHMETIC, NOT A MEASUREMENT, so treat it as the reason to go and
-      look rather than as a result:** a 32-bit ARM guest has ~3 GB of user
-      address space and the default thread stack reserves 8 MB, so a few
-      hundred leaked threads exhaust it. This one 727 s run shows well over a
-      hundred serve/play cycles. That fits an exit that arrives after minutes
-      of play and never at boot.
-      **The candidate fix is one line** — detach the thread (or create it
-      detached) at `gstvid.c:1274`. It is a shim change, so it needs a rebuild
-      and no run may be live. **Do NOT let it stand as proven by the absence
-      of a repeat:** the acceptance below wants a stated number of minutes.
-      **NOT ESTABLISHED: that thread exhaustion is what ended THIS process.**
-      The failure line and the exit are 10 s apart and nothing links them yet;
-      `pad_vid_play` LOGS the failure and returns, so the shim itself does not
-      die of it. What to measure first, and it needs no run: count live
-      threads in the guest over a long session (`/proc/<pid>/status` Threads),
-      and confirm it climbs with clip serves rather than sitting flat.
-      **THIS EXPLAINS ONE SHAPE ONLY.** It cannot be the pthread NULL-mutex
-      churn segv (that one faults, this one exits clean) and it cannot be the
-      game-code NULL deref. Report against the signature, never against "the
-      crash".
-      **The renderer was healthy to the last line again:** 60.0 / 59.9 /
-      60.4 fps with 30.0 NEW/s, and `alive.sh` printed 0 after teardown.
-      **★★ ESTABLISHED BY ITEM 11'S RUNS (2026-08-06 evening): a
-      REPRODUCIBLE churn-provoked SEGV, distinct from the original clean
-      exit — do not merge them.** Five sightings in one evening (runs 2, 3,
-      8, 9, 10 of item 11's pass), all during `longplay.sh` scene churn,
-      three of them ~15 s in; runs with only 2 min of churn sometimes
-      survive, so it is probabilistic with exposure. **Byte-identical every
-      time: `pc=libpthread+0x8858` = pthread_mutex_lock, `lr=0x4db77c`,
-      `r0=0x48`, `fault=0x0`.** The disassembly at the call site:
-      `4db76c: add sl, r1, #72` → `pthread_mutex_lock(r1+0x48)` **with r1
-      == NULL** — the game locks a queue object's mutex without a null
-      check, something tears the object down under churn.
-      **THE DESIGNED FIX, not yet built: the game CHECKS the lock's return
-      value** (`4db780: bne 4db8fc` — a real error path). The shim is
-      LD_PRELOADed, so interpose `pthread_mutex_lock`: argument below one
-      page ⇒ return EINVAL instead of faulting. The game then takes its own
-      error branch instead of dying. Verify by running the longplay-churn
-      repro to survival, several times.
-      **The instrument half of this item's acceptance is DEMONSTRATED** —
-      the segv handler printed pc/lr/map/stack on every sighting; that is
-      how all of the above was learned. The ORIGINAL sighting had ZERO segv
-      output, so the clean-exit shape (threads asked to return, below) is a
-      DIFFERENT path and still needs its exit-reason hook.
-      **Crash logs preserved:**
-      `~/crashlogs/gzpad_item11_run{8,9,10_control}.log` (run 10 = the
-      control: cache off, same crash).
-      **Repro recipe:** watch.sh 4 + the verified game recipe + longplay
-      2 min; expect the exit within ~15 s of churn about half the time —
-      run twice before calling anything fixed.
-      **★ A THIRD SHAPE, CONFIRMED REPEATING 2026-08-06 20:02:38** (the
-      end of David's own play session — the same run that reported item
-      11's tearing — ~23.6 min in, renderer healthy to the last line at
-      60 fps / 30 NEW/s, teardown clean). The app pane caught only the
-      stack TAIL and the next run truncated gzpad.log before it could be
-      preserved — but the five captured stack values are BYTE-IDENTICAL
-      to `~/crashlogs/gz_item11_fix2.log` (stack[1]=0x4bb464,
-      [5]=0x3cab40, [7]=0x230000, [13]=0x4ec8e4, [17]=0x254d14), whose
-      COMPLETE block is preserved: **`pc=0x51ef7c` = game text +
-      0x516f7c, `lr=0x6a48c`, `r0=0x0`, `fault=0x0` — a NULL deref in
-      GAME code, NOT the pthread shape, so the designed EINVAL interpose
-      would not catch this one.** Two sightings now, both 2026-08-06
-      (the fix2 run, then this). Item 23 therefore holds THREE distinct
-      exits — the clean thread-return, the pthread NULL-mutex churn
-      segv, and this game-code NULL deref — and a fix for one is not a
-      fix for the others; report against the signature, never against
-      "the crash".
-      **Instrument gap, noted not fixed (a run was live at the time):
-      watch.sh's exit tail prints only the LAST lines of the segv block,
-      so the pc/lr header scrolls off before the app pane sees it — it
-      should grep the `[segv] pc=` header on exit so the pane always
-      carries the signature.
-      **Observed 2026-08-06 (David), one sighting:** *"emulator just crashed
-      when i clicked out into Claude"* — a game in progress, ~181 s into the
-      run, and the guest process was gone. Logs preserved before the next run
-      could overwrite them: `/home/david/crashlogs/gzpad_crash_1406.log` (7744
-      lines), plus `padglhost_crash_1406.log` and `padvid_crash_1406.log`.
-      **ESTABLISHED, and it changes what to look for: there is NO crash
-      signature anywhere in the log.** Zero `SEGV`, zero `Segmentation`, zero
-      `FATAL`, zero `Radium Error`, zero abort or assert. What the log ends with
-      instead is the game's OWN shutdown: `[thread] #3 RETURNED body=0x4efef0`
-      then `[thread] #2 RETURNED body=0x447440`, and those two were created at
-      log lines 69-81, i.e. at the very start of the boot — the longest-lived
-      threads in the process, returning last. Then `ExchangeData: read failed`
-      (the node bus going away behind them) and the process was gone.
-      **From outside, "the game exited by itself" is what a Spike machine
-      REBOOTING looks like**, and on a real machine something restarts it. Do
-      not go hunting a memory fault; go and find out what asks those threads to
-      return.
-      **The renderer was healthy the whole time and is NOT implicated:**
-      `padglhost` averaged 53.3 fps over 182.9 s, was still drawing at the end,
-      and only stopped when `watch.sh` tore it down after the guest had gone.
-      **NOT ESTABLISHED — that clicking away caused it.** That is one sighting
-      and the only evidence is that the two coincided. Against it: `padglhost`'s
-      log shows nothing at all around the exit, and the last switch edge was at
-      171507 ms, **ten seconds before** the guest went — so no focus-driven
-      switch storm reached the merge. Do not build a focus theory before the
-      instrument below exists.
-      **THE FIRST JOB IS AN INSTRUMENT, WHICH IS WHY THIS IS D4 AND NOT D2.**
-      Nothing anywhere records WHY the process went down — `watch.sh` prints
-      "the game exited" and tails five lines of VPU firmware noise, which is the
-      guest's ordinary complaint about having no hardware decoder and says
-      nothing. The shim should log the exit path: an `atexit` hook, whether
-      `main` returned, and any signal it took. Until that exists a repeat
-      sighting teaches nothing, which is exactly the D4 line.
-      **Acceptance:** state it in two parts. (a) The instrument: any exit of the
-      guest prints a reason line naming the path, demonstrated by provoking one
-      deliberately. (b) Then, and only then, the fault: a game survives
-      clicking away and back repeatedly (state how many times), or the exit
-      reproduces and the reason line names it.
-      — S1 because the game dying mid-ball is the thing you are playing WITH,
-      not something you play around. D4 because the instrument does not exist,
-      and because a single sighting is not a repro — a pass can end having
-      learned nothing, which is the D4 definition.
 
 - [ ] **21b. Ball HANDLING: a ball model, so multiball works.** `S2 D3`
       ← IN PROGRESS *(**Split out of item 21 on 2026-08-10**, when the
@@ -724,120 +587,6 @@ These have each been violated at least once and each cost a run or a window:
       times, plus David's hands, since this fault is defined by how it feels.
       **The script half of that is now met: 10 ms, 72/72.**
 
-- [ ] **16. Log replay mode: re-run a session's switch inputs from its log.**
-      `S2 D4` ← IN PROGRESS — S2 because play works without it; what it costs is
-      every other item's runs. D4 because the parse and the driver are desk work
-      on a primitive that is already
-      validated, but confirming it takes runs, the log needs a new field first
-      (a guest-side change and a rebuild), and the comparator does not exist yet.
-      **★ DAVID, 2026-08-06: "in order for the replay to be effective we need the
-      performance issue worked out completely... if there is any slowdown or
-      stutter or lag then the replay will not work effectively." He is right,
-      and it decides the CLOCK the replay runs on.**
-      This rig has already proven the point in miniature: `padsw.h` records that
-      a menu press expressed in MILLISECONDS is a lottery — on the Main Menu
-      120 ms and 200 ms moved the cursor 0 rows, 250 ms moved 1 or 2, 300 ms
-      moved 3 — because what decides it is how many SPI transfers land inside the
-      hold. That is why `tap_reads` counts TRANSFERS. **A replay scheduled in ms
-      inherits that lottery for every edge, not just the menu ones.**
-      **And the guest clock does NOT fix it, which is the trap worth writing
-      down before someone builds on it.** `pad_ms()` is CLOCK_MONOTONIC, so the
-      guest's millisecond is wall time; `guest_t0_ms` removes drift between the
-      driver and the guest as two PROCESSES, and does nothing about the guest
-      falling behind the wall. The lag-tolerant unit is the same one item 17
-      already found: **the guest's own SPI transfer count**, which advances with
-      the game rather than with the clock. Offer both, default to transfers, and
-      state which was used in the diff.
-      **So items 18 and 11 are upstream of this one**, and 18 is S2 from today
-      for that reason.
-      **Established this pass, offline, from logs already on disk:**
-      • `gz_item15.log` is 1611 edges over 591 s and is **almost entirely
-      scripted** — 4 edges are autoattract's switch 28, the rest are longplay.sh
-      pokes at ~90 ms plus plunge.py's coin/start/plunge. A replay of it replays
-      a random walk, which makes it a fine test vehicle and a poor demo.
-      • the two-way keyboard/script split does NOT give provenance:
-      **autoattract.sh presses Service Back through `swpoke.py`**, so the rig's
-      own boot press is a script edge like any other.
-      **RULED OUT / CORRECTED — this item's own text was wrong:** it claimed
-      "the launch line is logged verbatim with `PAD_CARD=`". It is not. **watch.sh
-      never echoes its own configuration**, and `PAD_CARD` appears in zero recent
-      run logs. The config gap is real and is a second thing to close, not a
-      thing already done.
-      **★ THE INSTRUMENT HALF IS DONE AND CONFIRMED ON A LIVE RUN**
-      (`gz_item16.log`, 3 min attract, `alive.sh` 0 after). Every `[sw]` edge now
-      carries the letter of whoever moved it:
-      • `[sw] 21191 ms +28a` — autoattract's Service Back, tagged `a`, which is
-      the exact case the keyboard/script split could NOT resolve;
-      • `[sw] 160692 ms +59r` — a direct writer under `PAD_SW_SRC=r`;
-      • `kbd_src` read `w` live — padglhost's window-open latch, distinct from a
-      key press.
-      **The clock is exact, measured on four edges: asked at guest_ms 105099 →
-      logged 105100 (1 ms), 105251 → 105251, 160692 → 160692, 160844 → 160844
-      (0 ms).** A host script can schedule against the guest's own millisecond
-      with no log to tail.
-      **RULED OUT — the "second gap" this item listed is a non-issue, and it was
-      verified rather than argued.** The window-open latch (`[cabchg] 0 ms
-      ff0f0f...`) produces NO `[sw]` line at all, because `sw_shm_edges()` primes
-      its `prev[]` before the latch lands. A replay driven from `[sw]` therefore
-      cannot re-apply it. Nothing to skip; do not build a skip for it.
-      **AND THE RUN FOUND A BUG THE OFFLINE TESTS COULD NOT.** `PAD_SW_SRC` was
-      only read inside `padsw.set_source()`, so anything importing `padsw`
-      directly — a `python3 -c`, and the replay driver that does not exist yet —
-      was tagged `?` however carefully its caller set the variable. The offline
-      test missed it because it went through `swpoke.py`, which does call
-      `set_source`. Read at import now. Both readings are in the run's log, which
-      is a usable before/after: `moved by [?r]`.
-      **Also shipped:** `[watch] cfg` lines (argv, game, minutes, and every set
-      `PAD_*` — the run above recorded `PAD_NB_SILENT=2`, which changes what the
-      run IS), and `swlayout.sh`, which proves the three hand-kept copies of the
-      switch block agree and was validated by breaking an offset on purpose in
-      both directions.
-      **Committed:** `145e79b` (provenance + clock + cfg + swlayout),
-      `52e3703` (the live confirmation and the PAD_SW_SRC fix).
-      **Resume:** write `swreplay.py` and the comparator — but decide the CLOCK
-      first, per the star above, and that decision wants item 18's profile.
-      Everything the driver needs to READ now exists and is confirmed.
-      **The want:** point the rig at a previous run's log and have it re-deliver
-      that run's switch inputs at the same offsets, so getting back to a fault
-      does not mean re-doing coin/start/plunge and a hundred flipper presses by
-      hand. **The sample log is already MOSTLY enough**, which is the useful
-      finding: `[sw] 24141 ms +28` / `-28` is the whole input stream (signed
-      switch id on the guest ms clock), the launch line is logged verbatim with
-      `PAD_CARD=` and the `watch.sh 120` backstop so the configuration replays
-      too, and the zero point is derivable (run start 08:21:25 wall against
-      `[sw] 24141 ms` at 08:21:49).
-      **The one gap worth enriching is PROVENANCE.** `[sw]` does not say whether
-      an edge came from the keyboard, from a script (`swpoke.py` / `swhold.py` /
-      `plunge.py`), or from the rig pressing Service Back itself under
-      `PAD_AUTO_ATTRACT`. Replaying all of them re-injects what the next run will
-      generate again, so auto-advance would be doubled. **Item 7 already built
-      the structure that knows the answer** — padsw has three regions with one
-      writer each (keyboard / scripts / merged) — so emitting the region in the
-      `[sw]` line closes it. Emitter is `sw_shm_edges()` in
-      `tools/spike2_emu/hwshim.c` (item 8).
-      **Second gap:** the window-open latch. `[cabchg] 3016 ms ff0f0f0000000000
-      (was 0000000000000000)` is padglhost latching the coin door and six trough
-      balls when the window opens; a replay must not re-apply those.
-      **Injection is solved and measured:** item 7 got a 3000 ms ask delivered as
-      3003 ms, so the driver is "parse the log, call the existing pokers".
-      **Be honest about "exactly", because the acceptance test depends on it:
-      input replay is not run replay.** The guest is a real ARM binary under
-      qemu-user, and the two video faults this rig has already fixed both turned
-      on timing — item 6 (now DONE) on a three-pipeline burst inside 130 ms,
-      item 15 (now DONE) on channel assignment order. The same inputs will NOT
-      give the same run, and a replay cannot make a rare taunt fire. What it buys
-      is the manual labour, not determinism. **That both are closed does not
-      weaken the point** — they are cited as proof that this guest's behaviour
-      depends on timing the replay cannot reproduce, and being fixed does not
-      make them less timing-dependent.
-      **Acceptance:** a captured log replays with no keyboard use; the new run's
-      own `[sw]` lines diffed against the source log show every edge re-delivered
-      within a stated tolerance (measure it and state it, do not assume); and the
-      run reaches a game where the source log reached one.
-      **Related: item 13** is the checkpoint/restore route to a nearby goal and
-      is blocked on CRIU; this is the input-replay route and needs no checkpoint.
-      They may partly substitute for each other — do not build both blind.
-
 - [ ] **3. The coil map.** `S3 D3` — S3: nothing is broken, this is a map that
       is half confirmed. D3 — one run; the instrument exists and is validated,
       but the Coil Test menu has not been reached yet so the navigation is
@@ -1031,30 +780,6 @@ These have each been violated at least once and each cost a run or a window:
       `PAD_PF_FADE_UNIT_MS` and says whether the ramp is linear or gamma'd,
       with no firmware at all. Do that first if a pass has to produce
       something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
-
-- [ ] **19. Save and load a replay from the game window itself.** `S3 D4` — S3
-      because item 16's command line is the workaround and nobody loses a run to
-      typing it; D4 because it cannot start until 16 ships the engine and the
-      file format, and because its trigger is a KEY PRESS in the WSLg window,
-      which this rig has recorded twice as un-injectable (SendInput is
-      UIPI-blocked — items 7 and 12), so confirming it needs David's hands or a
-      keysim rather than a script.
-      **David picked the game window and its Controls legend** (`padglhost.c`,
-      C/X11), asked and answered 2026-08-06, over the virtual playfield and the
-      app's Emulate tab. One key saves the session's replay, one key loads and
-      plays one back, both listed in the legend beside the switch keys.
-      **The structural thing in the way:** `binds[]` (`padglhost.c:646`) has no
-      concept of a key that is not a switch — every row carries an `ids[]` and
-      goes through `sw_publish()`. A replay key is the first binding that does
-      something else, so the table and `legend_open`'s drawing of it grow a new
-      kind of row. No function key is bound today, so F9/F10 are free.
-      **Depends on item 16, and must not invent a second format:** whatever
-      16's driver reads is what this writes.
-      **Acceptance:** with no shell and no helper scripts, a key in the game
-      window writes a replay of the session so far and says so in the log; a
-      second key plays one back on a fresh run; the replayed run's `[sw]` stream
-      matches the saved one within item 16's stated tolerance. Both keys appear
-      in the Controls legend.
 
 - [ ] **26. Right-click-hold a switch to RIP IT, for spinners.** `S3 D4`
       **★ DAVID, 2026-08-06: "for switches, let's also add a right click hold
@@ -1561,6 +1286,310 @@ These have each been violated at least once and each cost a run or a window:
 - **New dependency on a fresh machine:** the Windows-side player needs
   `py -m pip install sounddevice`. Without it `playaudio.sh` falls back to WSLg
   audio and says so loudly, so it degrades visibly rather than silently.
+
+## Dropped — off the queue, not fixed
+
+**Removed 2026-08-11 at David's ask** — *"we can remove item 16 and 23"* —
+with **19** going too, because its only route was 16's replay engine and it
+cannot be started without one. `/next` does not offer anything in this
+section, and nothing here counts toward the done percentage.
+
+**The numbers stay retired: 16, 19 and 23 are never reused**, and
+`plans/spike2_pc_emulation_handoff.md` still keys its `REMAINING item N`
+headings on them.
+
+**Each entry is kept WHOLE rather than summarised, on purpose.** Item 23
+carries three distinct measured exit signatures — a byte-identical
+pthread NULL-mutex segv with its disassembly and call site, a game-code NULL
+deref, and the clean thread-return — plus a repro recipe and preserved crash
+logs; item 16 carries shipped work (`145e79b`, `52e3703`) and several
+expensive ruled-out results. None of that lives anywhere else in the repo:
+the handoff that would otherwise hold it is gitignored and local to this
+machine. **Reopening one means moving its block back up to the Queue, not
+rewriting it.**
+
+- **DROPPED 2026-08-11.** **23. The game exits by itself mid-play.** `S1 D2` *(**D4 → D2,
+      2026-08-06 evening, off item 11's runs:** a SECOND fault shape now has
+      a signature, a call site, a disassembly, a minutes-scale repro AND a
+      designed fix — see the starred block below. The original signatureless
+      exit remains as described.)* *(**2026-08-10: item 36 is a fourth,
+      PROVOKED sighting of the clean-exit shape** — a leave-running criu
+      dump preceded it by 10 s on star_wars; the exit-reason instrument this
+      item's acceptance (a) demands is now blocking BOTH items.)*
+      **★★★ THE ORIGINAL SIGNATURELESS EXIT NOW HAS A NAMED PRECURSOR, and
+      this entry's claim that "nothing anywhere records WHY the process went
+      down" is CORRECTED. David's log, 2026-08-06 21:33, godzilla_pro,
+      727 s (~12 min) into a run he was playing** (keyboard `k` and playfield
+      `f` edges throughout). The last three video lines before the exit:
+      ```
+      [padvid 727.43] ch0 serving 1360x768 457 frames ... 2.asset/102.asset
+      [vid] ch0 could not start the streaming thread
+      [padvid 727.43] ch0 guest stopped mid-read after 0 frames
+      ```
+      then `[watch] the game exited` 10 s later, with **NO segv block** — the
+      tail is the usual VPU firmware noise. So this is the FIRST shape (the
+      clean exit), not the pthread churn segv and not the game-code NULL
+      deref, and it now has a line naming a guest-side resource failure.
+      **ESTABLISHED AT THE DESK, from the source, not guessed:** that message
+      is `gstvid.c:1277`, printed when the `pthread_create` at `gstvid.c:1274`
+      FAILS — the guest shim could not make a thread. And **`gstvid.c`
+      contains no `pthread_detach` and no `pthread_join` anywhere** (grep: one
+      `pthread_create`, zero of either). Every `vid_thread` is therefore
+      created JOINABLE and never reaped, so each one holds its descriptor and
+      its stack for the life of the process, and `pad_vid_play` makes one per
+      clip serve.
+      **ARITHMETIC, NOT A MEASUREMENT, so treat it as the reason to go and
+      look rather than as a result:** a 32-bit ARM guest has ~3 GB of user
+      address space and the default thread stack reserves 8 MB, so a few
+      hundred leaked threads exhaust it. This one 727 s run shows well over a
+      hundred serve/play cycles. That fits an exit that arrives after minutes
+      of play and never at boot.
+      **The candidate fix is one line** — detach the thread (or create it
+      detached) at `gstvid.c:1274`. It is a shim change, so it needs a rebuild
+      and no run may be live. **Do NOT let it stand as proven by the absence
+      of a repeat:** the acceptance below wants a stated number of minutes.
+      **NOT ESTABLISHED: that thread exhaustion is what ended THIS process.**
+      The failure line and the exit are 10 s apart and nothing links them yet;
+      `pad_vid_play` LOGS the failure and returns, so the shim itself does not
+      die of it. What to measure first, and it needs no run: count live
+      threads in the guest over a long session (`/proc/<pid>/status` Threads),
+      and confirm it climbs with clip serves rather than sitting flat.
+      **THIS EXPLAINS ONE SHAPE ONLY.** It cannot be the pthread NULL-mutex
+      churn segv (that one faults, this one exits clean) and it cannot be the
+      game-code NULL deref. Report against the signature, never against "the
+      crash".
+      **The renderer was healthy to the last line again:** 60.0 / 59.9 /
+      60.4 fps with 30.0 NEW/s, and `alive.sh` printed 0 after teardown.
+      **★★ ESTABLISHED BY ITEM 11'S RUNS (2026-08-06 evening): a
+      REPRODUCIBLE churn-provoked SEGV, distinct from the original clean
+      exit — do not merge them.** Five sightings in one evening (runs 2, 3,
+      8, 9, 10 of item 11's pass), all during `longplay.sh` scene churn,
+      three of them ~15 s in; runs with only 2 min of churn sometimes
+      survive, so it is probabilistic with exposure. **Byte-identical every
+      time: `pc=libpthread+0x8858` = pthread_mutex_lock, `lr=0x4db77c`,
+      `r0=0x48`, `fault=0x0`.** The disassembly at the call site:
+      `4db76c: add sl, r1, #72` → `pthread_mutex_lock(r1+0x48)` **with r1
+      == NULL** — the game locks a queue object's mutex without a null
+      check, something tears the object down under churn.
+      **THE DESIGNED FIX, not yet built: the game CHECKS the lock's return
+      value** (`4db780: bne 4db8fc` — a real error path). The shim is
+      LD_PRELOADed, so interpose `pthread_mutex_lock`: argument below one
+      page ⇒ return EINVAL instead of faulting. The game then takes its own
+      error branch instead of dying. Verify by running the longplay-churn
+      repro to survival, several times.
+      **The instrument half of this item's acceptance is DEMONSTRATED** —
+      the segv handler printed pc/lr/map/stack on every sighting; that is
+      how all of the above was learned. The ORIGINAL sighting had ZERO segv
+      output, so the clean-exit shape (threads asked to return, below) is a
+      DIFFERENT path and still needs its exit-reason hook.
+      **Crash logs preserved:**
+      `~/crashlogs/gzpad_item11_run{8,9,10_control}.log` (run 10 = the
+      control: cache off, same crash).
+      **Repro recipe:** watch.sh 4 + the verified game recipe + longplay
+      2 min; expect the exit within ~15 s of churn about half the time —
+      run twice before calling anything fixed.
+      **★ A THIRD SHAPE, CONFIRMED REPEATING 2026-08-06 20:02:38** (the
+      end of David's own play session — the same run that reported item
+      11's tearing — ~23.6 min in, renderer healthy to the last line at
+      60 fps / 30 NEW/s, teardown clean). The app pane caught only the
+      stack TAIL and the next run truncated gzpad.log before it could be
+      preserved — but the five captured stack values are BYTE-IDENTICAL
+      to `~/crashlogs/gz_item11_fix2.log` (stack[1]=0x4bb464,
+      [5]=0x3cab40, [7]=0x230000, [13]=0x4ec8e4, [17]=0x254d14), whose
+      COMPLETE block is preserved: **`pc=0x51ef7c` = game text +
+      0x516f7c, `lr=0x6a48c`, `r0=0x0`, `fault=0x0` — a NULL deref in
+      GAME code, NOT the pthread shape, so the designed EINVAL interpose
+      would not catch this one.** Two sightings now, both 2026-08-06
+      (the fix2 run, then this). Item 23 therefore holds THREE distinct
+      exits — the clean thread-return, the pthread NULL-mutex churn
+      segv, and this game-code NULL deref — and a fix for one is not a
+      fix for the others; report against the signature, never against
+      "the crash".
+      **Instrument gap, noted not fixed (a run was live at the time):
+      watch.sh's exit tail prints only the LAST lines of the segv block,
+      so the pc/lr header scrolls off before the app pane sees it — it
+      should grep the `[segv] pc=` header on exit so the pane always
+      carries the signature.
+      **Observed 2026-08-06 (David), one sighting:** *"emulator just crashed
+      when i clicked out into Claude"* — a game in progress, ~181 s into the
+      run, and the guest process was gone. Logs preserved before the next run
+      could overwrite them: `/home/david/crashlogs/gzpad_crash_1406.log` (7744
+      lines), plus `padglhost_crash_1406.log` and `padvid_crash_1406.log`.
+      **ESTABLISHED, and it changes what to look for: there is NO crash
+      signature anywhere in the log.** Zero `SEGV`, zero `Segmentation`, zero
+      `FATAL`, zero `Radium Error`, zero abort or assert. What the log ends with
+      instead is the game's OWN shutdown: `[thread] #3 RETURNED body=0x4efef0`
+      then `[thread] #2 RETURNED body=0x447440`, and those two were created at
+      log lines 69-81, i.e. at the very start of the boot — the longest-lived
+      threads in the process, returning last. Then `ExchangeData: read failed`
+      (the node bus going away behind them) and the process was gone.
+      **From outside, "the game exited by itself" is what a Spike machine
+      REBOOTING looks like**, and on a real machine something restarts it. Do
+      not go hunting a memory fault; go and find out what asks those threads to
+      return.
+      **The renderer was healthy the whole time and is NOT implicated:**
+      `padglhost` averaged 53.3 fps over 182.9 s, was still drawing at the end,
+      and only stopped when `watch.sh` tore it down after the guest had gone.
+      **NOT ESTABLISHED — that clicking away caused it.** That is one sighting
+      and the only evidence is that the two coincided. Against it: `padglhost`'s
+      log shows nothing at all around the exit, and the last switch edge was at
+      171507 ms, **ten seconds before** the guest went — so no focus-driven
+      switch storm reached the merge. Do not build a focus theory before the
+      instrument below exists.
+      **THE FIRST JOB IS AN INSTRUMENT, WHICH IS WHY THIS IS D4 AND NOT D2.**
+      Nothing anywhere records WHY the process went down — `watch.sh` prints
+      "the game exited" and tails five lines of VPU firmware noise, which is the
+      guest's ordinary complaint about having no hardware decoder and says
+      nothing. The shim should log the exit path: an `atexit` hook, whether
+      `main` returned, and any signal it took. Until that exists a repeat
+      sighting teaches nothing, which is exactly the D4 line.
+      **Acceptance:** state it in two parts. (a) The instrument: any exit of the
+      guest prints a reason line naming the path, demonstrated by provoking one
+      deliberately. (b) Then, and only then, the fault: a game survives
+      clicking away and back repeatedly (state how many times), or the exit
+      reproduces and the reason line names it.
+      — S1 because the game dying mid-ball is the thing you are playing WITH,
+      not something you play around. D4 because the instrument does not exist,
+      and because a single sighting is not a repro — a pass can end having
+      learned nothing, which is the D4 definition.
+
+- **DROPPED 2026-08-11.** **16. Log replay mode: re-run a session's switch inputs from its log.**
+      `S2 D4` ← IN PROGRESS — S2 because play works without it; what it costs is
+      every other item's runs. D4 because the parse and the driver are desk work
+      on a primitive that is already
+      validated, but confirming it takes runs, the log needs a new field first
+      (a guest-side change and a rebuild), and the comparator does not exist yet.
+      **★ DAVID, 2026-08-06: "in order for the replay to be effective we need the
+      performance issue worked out completely... if there is any slowdown or
+      stutter or lag then the replay will not work effectively." He is right,
+      and it decides the CLOCK the replay runs on.**
+      This rig has already proven the point in miniature: `padsw.h` records that
+      a menu press expressed in MILLISECONDS is a lottery — on the Main Menu
+      120 ms and 200 ms moved the cursor 0 rows, 250 ms moved 1 or 2, 300 ms
+      moved 3 — because what decides it is how many SPI transfers land inside the
+      hold. That is why `tap_reads` counts TRANSFERS. **A replay scheduled in ms
+      inherits that lottery for every edge, not just the menu ones.**
+      **And the guest clock does NOT fix it, which is the trap worth writing
+      down before someone builds on it.** `pad_ms()` is CLOCK_MONOTONIC, so the
+      guest's millisecond is wall time; `guest_t0_ms` removes drift between the
+      driver and the guest as two PROCESSES, and does nothing about the guest
+      falling behind the wall. The lag-tolerant unit is the same one item 17
+      already found: **the guest's own SPI transfer count**, which advances with
+      the game rather than with the clock. Offer both, default to transfers, and
+      state which was used in the diff.
+      **So items 18 and 11 are upstream of this one**, and 18 is S2 from today
+      for that reason.
+      **Established this pass, offline, from logs already on disk:**
+      • `gz_item15.log` is 1611 edges over 591 s and is **almost entirely
+      scripted** — 4 edges are autoattract's switch 28, the rest are longplay.sh
+      pokes at ~90 ms plus plunge.py's coin/start/plunge. A replay of it replays
+      a random walk, which makes it a fine test vehicle and a poor demo.
+      • the two-way keyboard/script split does NOT give provenance:
+      **autoattract.sh presses Service Back through `swpoke.py`**, so the rig's
+      own boot press is a script edge like any other.
+      **RULED OUT / CORRECTED — this item's own text was wrong:** it claimed
+      "the launch line is logged verbatim with `PAD_CARD=`". It is not. **watch.sh
+      never echoes its own configuration**, and `PAD_CARD` appears in zero recent
+      run logs. The config gap is real and is a second thing to close, not a
+      thing already done.
+      **★ THE INSTRUMENT HALF IS DONE AND CONFIRMED ON A LIVE RUN**
+      (`gz_item16.log`, 3 min attract, `alive.sh` 0 after). Every `[sw]` edge now
+      carries the letter of whoever moved it:
+      • `[sw] 21191 ms +28a` — autoattract's Service Back, tagged `a`, which is
+      the exact case the keyboard/script split could NOT resolve;
+      • `[sw] 160692 ms +59r` — a direct writer under `PAD_SW_SRC=r`;
+      • `kbd_src` read `w` live — padglhost's window-open latch, distinct from a
+      key press.
+      **The clock is exact, measured on four edges: asked at guest_ms 105099 →
+      logged 105100 (1 ms), 105251 → 105251, 160692 → 160692, 160844 → 160844
+      (0 ms).** A host script can schedule against the guest's own millisecond
+      with no log to tail.
+      **RULED OUT — the "second gap" this item listed is a non-issue, and it was
+      verified rather than argued.** The window-open latch (`[cabchg] 0 ms
+      ff0f0f...`) produces NO `[sw]` line at all, because `sw_shm_edges()` primes
+      its `prev[]` before the latch lands. A replay driven from `[sw]` therefore
+      cannot re-apply it. Nothing to skip; do not build a skip for it.
+      **AND THE RUN FOUND A BUG THE OFFLINE TESTS COULD NOT.** `PAD_SW_SRC` was
+      only read inside `padsw.set_source()`, so anything importing `padsw`
+      directly — a `python3 -c`, and the replay driver that does not exist yet —
+      was tagged `?` however carefully its caller set the variable. The offline
+      test missed it because it went through `swpoke.py`, which does call
+      `set_source`. Read at import now. Both readings are in the run's log, which
+      is a usable before/after: `moved by [?r]`.
+      **Also shipped:** `[watch] cfg` lines (argv, game, minutes, and every set
+      `PAD_*` — the run above recorded `PAD_NB_SILENT=2`, which changes what the
+      run IS), and `swlayout.sh`, which proves the three hand-kept copies of the
+      switch block agree and was validated by breaking an offset on purpose in
+      both directions.
+      **Committed:** `145e79b` (provenance + clock + cfg + swlayout),
+      `52e3703` (the live confirmation and the PAD_SW_SRC fix).
+      **Resume:** write `swreplay.py` and the comparator — but decide the CLOCK
+      first, per the star above, and that decision wants item 18's profile.
+      Everything the driver needs to READ now exists and is confirmed.
+      **The want:** point the rig at a previous run's log and have it re-deliver
+      that run's switch inputs at the same offsets, so getting back to a fault
+      does not mean re-doing coin/start/plunge and a hundred flipper presses by
+      hand. **The sample log is already MOSTLY enough**, which is the useful
+      finding: `[sw] 24141 ms +28` / `-28` is the whole input stream (signed
+      switch id on the guest ms clock), the launch line is logged verbatim with
+      `PAD_CARD=` and the `watch.sh 120` backstop so the configuration replays
+      too, and the zero point is derivable (run start 08:21:25 wall against
+      `[sw] 24141 ms` at 08:21:49).
+      **The one gap worth enriching is PROVENANCE.** `[sw]` does not say whether
+      an edge came from the keyboard, from a script (`swpoke.py` / `swhold.py` /
+      `plunge.py`), or from the rig pressing Service Back itself under
+      `PAD_AUTO_ATTRACT`. Replaying all of them re-injects what the next run will
+      generate again, so auto-advance would be doubled. **Item 7 already built
+      the structure that knows the answer** — padsw has three regions with one
+      writer each (keyboard / scripts / merged) — so emitting the region in the
+      `[sw]` line closes it. Emitter is `sw_shm_edges()` in
+      `tools/spike2_emu/hwshim.c` (item 8).
+      **Second gap:** the window-open latch. `[cabchg] 3016 ms ff0f0f0000000000
+      (was 0000000000000000)` is padglhost latching the coin door and six trough
+      balls when the window opens; a replay must not re-apply those.
+      **Injection is solved and measured:** item 7 got a 3000 ms ask delivered as
+      3003 ms, so the driver is "parse the log, call the existing pokers".
+      **Be honest about "exactly", because the acceptance test depends on it:
+      input replay is not run replay.** The guest is a real ARM binary under
+      qemu-user, and the two video faults this rig has already fixed both turned
+      on timing — item 6 (now DONE) on a three-pipeline burst inside 130 ms,
+      item 15 (now DONE) on channel assignment order. The same inputs will NOT
+      give the same run, and a replay cannot make a rare taunt fire. What it buys
+      is the manual labour, not determinism. **That both are closed does not
+      weaken the point** — they are cited as proof that this guest's behaviour
+      depends on timing the replay cannot reproduce, and being fixed does not
+      make them less timing-dependent.
+      **Acceptance:** a captured log replays with no keyboard use; the new run's
+      own `[sw]` lines diffed against the source log show every edge re-delivered
+      within a stated tolerance (measure it and state it, do not assume); and the
+      run reaches a game where the source log reached one.
+      **Related: item 13** is the checkpoint/restore route to a nearby goal and
+      is blocked on CRIU; this is the input-replay route and needs no checkpoint.
+      They may partly substitute for each other — do not build both blind.
+
+- **DROPPED 2026-08-11.** **19. Save and load a replay from the game window itself.** `S3 D4` — S3
+      because item 16's command line is the workaround and nobody loses a run to
+      typing it; D4 because it cannot start until 16 ships the engine and the
+      file format, and because its trigger is a KEY PRESS in the WSLg window,
+      which this rig has recorded twice as un-injectable (SendInput is
+      UIPI-blocked — items 7 and 12), so confirming it needs David's hands or a
+      keysim rather than a script.
+      **David picked the game window and its Controls legend** (`padglhost.c`,
+      C/X11), asked and answered 2026-08-06, over the virtual playfield and the
+      app's Emulate tab. One key saves the session's replay, one key loads and
+      plays one back, both listed in the legend beside the switch keys.
+      **The structural thing in the way:** `binds[]` (`padglhost.c:646`) has no
+      concept of a key that is not a switch — every row carries an `ids[]` and
+      goes through `sw_publish()`. A replay key is the first binding that does
+      something else, so the table and `legend_open`'s drawing of it grow a new
+      kind of row. No function key is bound today, so F9/F10 are free.
+      **Depends on item 16, and must not invent a second format:** whatever
+      16's driver reads is what this writes.
+      **Acceptance:** with no shell and no helper scripts, a key in the game
+      window writes a replay of the session so far and says so in the log; a
+      second key plays one back on a fresh run; the replayed run's `[sw]` stream
+      matches the saved one within item 16's stated tolerance. Both keys appear
+      in the Controls legend.
 
 ## Done
 

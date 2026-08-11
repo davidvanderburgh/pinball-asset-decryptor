@@ -1117,11 +1117,38 @@ These have each been violated at least once and each cost a run or a window:
       command line — exit 15, two walks lost); the rest-state writer forces
       the door SHUT once at guest start, so one early swhold is overwritten
       (the PAD_DOOR_OPEN loop re-asserts through boot).
-      **Resume:** David tries `PAD_DOOR_OPEN=1` on a turtles run and says
-      whether the boot-time-door ritual is acceptable (mid-session door-open
-      cannot work — the choice is latched at init). If yes, close; wishlist
-      candidates: an Emulate-tab "Service mode" checkbox for the env, and
-      auto-detecting 4.28-family titles from the card's VERSION data.
+      ▼ **DAVID'S FIRST TRY (2026-08-11 18:07, the app's ordinary launch)
+      FOUND A HOLE, fixed in `f473ad6` but NOT yet run-verified:** the fresh
+      padsw block is all zeros, the door's resting CLOSED only reaches the
+      merged array when something writes an EDGE (the playfield window stamps
+      it when it comes up), and the gate read the boot window's zeros as
+      "door open" — all 8 channels refused during an ordinary boot and the
+      Tech Alerts / splash lost their tiled-logo video backdrop. The rule
+      now: **an id nobody has ever edged has no known state** (`sw_edged[]`,
+      `pad_sw_level` = -1 until a first edge), and the gate blocks only on an
+      explicit, edge-established 0. `PAD_DOOR_OPEN` stamps CLOSED once then
+      holds OPEN so the 1→0 edge is a fact before the video manager latches.
+      His door-open click at 42 s also confirmed the latch again: post-init
+      door-open cannot flip the menu to dots.
+      **Also corrected, with stock frames pulled off the godzilla card:
+      `60ed7e50…` is NOT a shared Stern bundle** (item 41's claim) — the
+      directory name is a stable system-bundle ID whose CONTENT is per-title
+      (godzilla's copy is Godzilla movie footage; the upscaled turtles card's
+      is 1987 cartoon). And the RED brushed pages David asked about are
+      godzilla's System 4.31 style — turtles' 4.28 splash has always been
+      the dark tiled-logo look.
+      **Resume — two runs, neither taken because David's own session was
+      live:** (1) ordinary boot, NO door env — the backdrops must be back
+      (zero "refused" lines, tiled logo behind Tech Alerts/splash);
+      (2) `PAD_DOOR_OPEN=1` boot — the dot menu must still appear. Then
+      David tries the ritual from a terminal (the app cannot pass the env
+      yet):
+      `wsl -u root -e env HOME=/home/david PAD_PIVOT=1 PAD_DOOR_OPEN=1
+      PAD_CARD=<card> bash <worktree>/tools/spike2_emu/watch.sh 120`
+      and says whether it is acceptable (mid-session door-open cannot work —
+      the choice is latched at init). If yes, close; wishlist: an
+      Emulate-tab "Service mode" checkbox, and auto-detecting 4.28-family
+      titles from the card's VERSION data.
       *(**Filed as 42 and renumbered to 43 on 2026-08-11 before merging**: David
       took 42 for the save-state portability item on main the same afternoon,
       and this branch had not landed yet. Numbers are stable IDs and are never

@@ -74,6 +74,37 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **42. Save states cannot work on ANY machine but this one, and a WSL
+      with interop switched off can never open its own playfield window.**
+      `S2 D2` *(**~70%, 2026-08-11:** both fixes are written and unit-tested on
+      branch `item/42`; what is left is the real verification — a criu build
+      from clean, and a run with the interop branch actually taken.)*
+      **Two PAD-53 follow-ups, same class: the emulator quietly assumes this
+      developer's machine.**
+      **(1) criu is a hand-built binary at `/var/tmp/criubuild/criu/criu/criu`,
+      hard-coded as the default in EIGHT rig scripts**, and `apt-cache policy
+      criu` on Ubuntu 24.04 prints an EMPTY version table — no Ubuntu publishes
+      criu at all. So v0.126.0's save states could not work for a single other
+      user even after PAD-53 added `busybox-static`: they get the
+      checkpointable boot, the Save and Load buttons, and `savestate: no criu
+      at /var/tmp/criubuild/...`, a directory they have never had. Fetching
+      another release's `.deb` is NOT the way out and does not need re-testing —
+      criu links against libprotobuf-c, libnl-3, libnet, libbsd and libuuid,
+      which is exactly the dependency chain `setupfix.sh`'s `_fetch_foreign`
+      refuses to drag in.
+      **(2) A tester's WSL has `[interop] enabled=false`, so his Linux cannot
+      execute a Windows binary** — and the virtual playfield IS a Windows
+      binary, because this WSL has no Tk. His window can never open itself;
+      `watch.sh` prints a command for him to type before every run. Interop is
+      LINUX → WINDOWS only: `wsl.exe` still works, so everything the window
+      does once it is up (padled reads, `swpoke.py`, `wslpath`) is unaffected —
+      **only the launch cannot cross, and PAD is already standing on the other
+      side.**
+      **Acceptance:** on a machine with no criu, "Set up emulator…" builds one
+      and a save/load round trip works afterwards; on a machine with interop
+      off, pressing Start opens the playfield window with no user action. And
+      neither notice ever tells a working PC that it cannot emulate.
+
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
       instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**

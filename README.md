@@ -818,12 +818,16 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    `busybox-static` is the odd one out in the other direction: it is
    what *save states* need, not what the emulator needs. The
    checkpointable boot swaps its root for the guest's and then has to
-   let go of yours, which takes a native static program inside the guest
-   root — and no machine has one by default. A run that can't find it
-   starts anyway, in the boot shape the rig has always used, and says in
-   one line that save states are off and which package turns them on;
-   the tab says the same thing before you press Start, without claiming
-   the PC can't emulate, because it can.
+   let go of yours, which takes two native programs inside the guest
+   root — a static shell and a `pivot_root` — and no machine has them
+   by default. The one package carries both, so there is still only one
+   thing to install. A run that can't find them starts anyway, in the
+   boot shape the rig has always used, and so does a run whose swap is
+   refused after it has begun; either way one line says save states are
+   off and which package turns them on, and the playfield leaves its
+   Save and Load buttons out of that run rather than offering a slot it
+   cannot fill. The tab says the same thing before you press Start,
+   without claiming the PC can't emulate, because it can.
    The tab checks for those before
    you press anything, instead of leaving the run to hit them one
    failure at a time: on a machine that already has them there is

@@ -62,6 +62,12 @@ LOG=${LOG:-$HOME/gzwatch.log}
 # truncation stays where it always was, at the game start itself.
 : >> "$LOG" || { echo "[watch] LOG=$LOG is not writable here - nothing would start. Fix or unset LOG." >&2; exit 1; }
 HOSTLOG=$HOME/padglhost.log
+# The virtual playfield's own log, on the same rule as autoattract's and the
+# ball feeder's: a helper that is started in the background writes somewhere a
+# human can read afterwards. This one was the exception - both its streams went
+# to /dev/null - and that is why "the playfield window never appeared" has never
+# had an answer in any log on any machine (2026-08-11, james_bond_pro).
+PFLOG=$HOME/padplayfield.log
 RING_HOST=$ROOT/dump/padgl
 RING_GUEST=/dump/padgl
 # The keyboard channel. Same host-path/guest-path split as the GL ring: the
@@ -345,6 +351,12 @@ as_user() {
 setsid_as_user() {
     if [ "$DROP" = 1 ]; then runuser -u "$PAD_USER" -- setsid "$@"; else setsid "$@"; fi
 }
+# IS THE PLAYFIELD PROCESS THERE? One definition, because there are now five
+# places that ask - four in teardown and the post-start check - and this rig's
+# standing rule is that two copies of one fact eventually disagree. `/init` is
+# the WSL side of a Windows pythonw.exe reached through interop; `python3` is
+# the same window on a Linux desktop, where it is an ordinary local process.
+pf_up() { pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null; }
 if [ "$DROP" = 1 ]; then
     echo "[watch] running the guest as root, helpers as $PAD_USER"
     # Hand the log files back, or the NEXT ordinary run cannot truncate them:
@@ -352,7 +364,8 @@ if [ "$DROP" = 1 ]; then
     # user's own home refuses it. That would break plain watch.sh runs after a
     # single PAD_PIVOT one, which is a nasty thing to leave behind.
     for f in "$LOG" "$HOSTLOG" "$HOME/padvid.log" "$HOME/padauto.log" \
-             "$HOME/padball.log" "$HOME/padaudio.log" "$HOME/padtables.log"; do
+             "$HOME/padball.log" "$HOME/padaudio.log" "$HOME/padtables.log" \
+             "$PFLOG"; do
         [ -e "$f" ] || : > "$f" 2>/dev/null
         chown "$PAD_USER" "$f" 2>/dev/null
     done
@@ -474,13 +487,12 @@ teardown() {
     # place. Removing the LED block is what closes that window (it polls for
     # it), and the app holds the process handle for the case where it does
     # not. Whoever owns the launch owns the teardown.
-    if [ "${PF_WINLAUNCH:-0}" != 1 ] &&
-       pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null; then
+    if [ "${PF_WINLAUNCH:-0}" != 1 ] && pf_up; then
         for _ in $(seq 1 10); do
             sleep 0.5
-            pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null || break
+            pf_up || break
         done
-        if pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null; then
+        if pf_up; then
             echo "[watch] the playfield did not close itself; closing it the hard way"
             # `Name -like 'python*'` excludes THIS query: its own command line
             # contains the pattern string, so a CommandLine-only filter kills
@@ -818,7 +830,9 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     if [ "$IS_WSL" = 0 ]; then
         PF_PY=${PAD_PF_PYTHON:-python3}
         if "$PF_PY" -c 'import tkinter' >/dev/null 2>&1; then
-            setsid_as_user "$PF_PY" "$RIG/playfield.py" "$GAME" $PF_STATES </dev/null >/dev/null 2>&1 &
+            : > "$PFLOG" 2>/dev/null
+            setsid_as_user "$PF_PY" "$RIG/playfield.py" "$GAME" $PF_STATES </dev/null >>"$PFLOG" 2>&1 &
+            PF_LAUNCHED=1
             echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
         else
             # Say what to install rather than just what is missing: on Debian
@@ -858,7 +872,12 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
         [ -n "${PAD_PF_FADE_MS:-}" ] && \
             export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_FADE_MS"
         if command -v "$PF_PY" >/dev/null 2>&1; then
-            setsid_as_user "$PF_PY" "$PF_WIN" "$GAME" $PF_STATES </dev/null >/dev/null 2>&1 &
+            # TRUNCATE, then append: one run's log, not every run's. The window
+            # is a Windows process here and its traceback would otherwise go
+            # nowhere at all - pythonw.exe has no console to print one to.
+            : > "$PFLOG" 2>/dev/null
+            setsid_as_user "$PF_PY" "$PF_WIN" "$GAME" $PF_STATES </dev/null >>"$PFLOG" 2>&1 &
+            PF_LAUNCHED=1
             echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
         else
             # ---- ASK THE APP TO OPEN IT, because it is a Windows process too.
@@ -927,6 +946,36 @@ if ! pad_guest_up; then
     echo "[watch] the game never started. Last lines of its log:" >&2
     tail -20 "$LOG" >&2
     exit 1
+fi
+
+# DID THE PLAYFIELD WINDOW STAY UP? Asked HERE, and it is the whole of the
+# answer to "starting Bond Pro was missing the keys window and playfield"
+# (2026-08-11) - a report that arrived with a full run log in which not one
+# line was about the playfield, because there was nothing anywhere to write
+# one. The launch above is `... &` with both streams thrown away, so a window
+# that died on its first line and a window the user closed looked identical,
+# and the key list lives in that window since item 39 retired the Controls
+# one: no window, no keys, no explanation.
+#
+# HERE, rather than at the launch, for two reasons. The guest is up, so the
+# seconds this took are seconds the window had to fail in; and it costs no
+# sleep of its own, which the launch site could not have avoided.
+#
+# NOT when PAD opened the window (PF_WINLAUNCH): that one has no WSL-side
+# process to find and the app reports its own failures - the same asymmetry
+# teardown documents at length. NOT when nothing was launched either.
+if [ "${PF_LAUNCHED:-0}" = 1 ] && ! pf_up; then
+    echo "[watch] the playfield window is not running - it started and stopped."
+    if [ -s "$PFLOG" ]; then
+        echo "[watch]   what it said (full log: $PFLOG):"
+        tail -8 "$PFLOG" | sed 's/^/[watch]   /'
+    else
+        # An empty log is itself the finding: the interpreter never got as far
+        # as running the script, so the fault is the LAUNCH, not the window.
+        echo "[watch]   ...and wrote nothing, so $PF_PY never ran it. Open it"
+        echo "[watch]   by hand to see why: $PF_PY <rig>/playfield.py $GAME"
+    fi
+    echo "[watch]   the game itself is unaffected."
 fi
 
 # Carry the game from Tech Alerts to attract mode without a human. It is a

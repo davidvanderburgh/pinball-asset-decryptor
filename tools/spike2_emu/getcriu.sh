@@ -146,6 +146,65 @@ if [ ! -d "$SRC/.git" ]; then
     fi
 fi
 
+# ---- 2a. the one patch this pinned tree needs on a 2026 compiler ----------
+#
+# THE SAME SHAPE AS v0.119.1's hwshim fault, in someone else's source tree:
+# the user's compiler is newer than the one this pin was proven with, and it
+# answers a question differently. Reported 2026-08-11 from a fresh WSL install,
+# where the build stopped on the FIRST file of criu's parasite:
+#
+#   criu/include/linux/rseq.h:33:1: error: conflicting redefinition of enum
+#                                          'enum rseq_flags'
+#   criu/include/linux/rseq.h:39:1: error: ... 'enum rseq_cs_flags_bit'
+#   criu/include/linux/rseq.h:45:1: error: ... 'enum rseq_cs_flags'
+#
+# WHY, and the log names it precisely. criu carries a spare copy of the four
+# rseq enums for C libraries too old to have them, and defines it only when
+# CONFIG_HAS_NO_LIBC_RSEQ_DEFS is set. That flag is decided by COMPILING a
+# probe (scripts/feature-tests.mak): the probe declares `enum rseq_cpu_id_state`
+# after including <sys/rseq.h>, and if that compile FAILS the libc evidently
+# has the definitions already. glibc has had them since 2.35.
+#
+# GCC 15 defaults to -std=gnu23, and C23 allows a tag to be redefined when the
+# two definitions agree - which the probe's does, exactly. So the probe now
+# COMPILES on a machine whose libc has the enums, criu concludes they are
+# missing, and its spare copy lands on top of the real one. THE FINGERPRINT IS
+# IN WHICH THREE FAILED: `enum rseq_cpu_id_state` on line 29 is the one enum
+# the probe declares and the one that did NOT error - it is the redefinition
+# that compiler accepts. The other three it does not.
+#
+# THE FIX IS UPSTREAM'S OWN, one release old: criu v4.2.1 (2026-07-20) renames
+# the probe's enumerators so the redefinition can never agree with the libc's
+# and the probe fails, as it must, on every machine that already has them.
+# v4.1, v4.1.1 and v4.2 all carry the original. Applied HERE rather than by
+# moving the pin, because v4.1 is the tag criuladder.sh's seven rungs and
+# `criu check` were proven against and a save-state ladder is not something to
+# re-prove from a build script. Drop this block whenever the pin moves to
+# v4.2.1 or later - the `grep` below already leaves such a tree alone.
+#
+# IT COSTS A REBUILD, AND THAT IS THE POINT: criu's generated config header
+# depends on scripts/feature-tests.mak, so a tree that was already built with
+# the wrong answer regenerates it and recompiles rather than reusing objects
+# built around a definition that is not there.
+FEATURES=$SRC/scripts/feature-tests.mak
+if [ -f "$FEATURES" ] && ! grep -q RSEQ_CPU_CRIU_TEST "$FEATURES"; then
+    # Confined to the one probe by the address range: those enumerator names
+    # are criu's own elsewhere in the tree and mean something there.
+    sed -i '/^define FEATURE_TEST_NO_LIBC_RSEQ_DEFS$/,/^endef$/{
+                s/RSEQ_CPU_ID_UNINITIALIZED/RSEQ_CPU_CRIU_TEST/
+                s/RSEQ_CPU_ID_REGISTRATION_FAILED/RSEQ_CPU_CRIU_TEST2/
+            }' "$FEATURES" 2>/dev/null
+    if grep -q RSEQ_CPU_CRIU_TEST "$FEATURES"; then
+        echo "patched criu's rseq probe (v4.2.1's fix): a C23 compiler answers"
+        echo "the original wrongly and the build stops in parasite.c"
+    else
+        # Never silent, and never fatal: an unpatched tree still builds
+        # perfectly on every compiler older than this, which is most of them.
+        echo "could not patch criu's rseq probe - this tree does not have the"
+        echo "probe where it was; building it as it came"
+    fi
+fi
+
 # ---- 3. build it ----------------------------------------------------------
 #
 # `make criu`, NOT `make`. The default target is `all: criu lib crit

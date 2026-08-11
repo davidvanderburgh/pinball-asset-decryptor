@@ -1870,6 +1870,42 @@ def test_pad_closes_the_window_it_opened(tmp_path):
         root.destroy()
 
 
+def test_a_playfield_that_stops_leaves_something_to_read():
+    """The ORDINARY launch, which is watch.sh's own and not this tab's.
+
+    Reported 2026-08-11: "starting Bond Pro was missing the keys window and
+    playfield", with a full run log in which not one line was about the
+    playfield.  It could not be: the launch was `... >/dev/null 2>&1 &`, so a
+    window that died on its first line and a window the user closed produced
+    exactly the same evidence, which is none.  Since item 39 retired the
+    Controls window into that window's key panel, it takes the key list with
+    it - which is why the report names two windows and not one.
+    """
+    body = "\n".join(ln for ln in _rig_text("watch.sh").splitlines()
+                     if not ln.lstrip().startswith("#"))
+    # Both launches - the Linux desktop's local Tk process and WSL's Windows
+    # one through interop - write where a human can read it afterwards, the
+    # same rule autoattract.sh and ballfeed.py have always followed.
+    for launch in ('"$RIG/playfield.py" "$GAME" $PF_STATES',
+                   '"$PF_WIN" "$GAME" $PF_STATES'):
+        lines = [ln for ln in body.splitlines() if launch in ln]
+        assert len(lines) == 1, "watch.sh no longer launches it this way"
+        assert '>>"$PFLOG" 2>&1' in lines[0], (
+            "the playfield's own output goes nowhere again")
+        assert ">/dev/null 2>&1 &" not in lines[0]
+    # ...and the run ASKS, once, whether it stayed up. Only for a window the
+    # RUN launched: the one PAD opens has no process on that side to find,
+    # and the app reports its own failures.
+    assert body.count("PF_LAUNCHED=1") == 2, "one per launch, and only there"
+    assert '[ "${PF_LAUNCHED:-0}" = 1 ] && ! pf_up' in body
+    assert body.index('[ "${PF_LAUNCHED:-0}" = 1 ]') > body.index("PF_LAUNCHED=1"), (
+        "the check has to come after the launch it is about")
+    # An empty log is a different fault from a traceback - the interpreter
+    # never ran the script at all - and is worth its own sentence.
+    check = body[body.index('[ "${PF_LAUNCHED:-0}" = 1 ]'):]
+    assert '-s "$PFLOG"' in check and "never ran it" in check
+
+
 # ----------------------------------------------------------------------
 # ...AND THE OTHER HALF OF A SAVE STATE, WHICH APT CANNOT SUPPLY.
 #

@@ -280,3 +280,33 @@ def test_the_builder_pins_a_version_and_proves_the_result():
     # Built with `make criu`, not `make`: the default target drags in the
     # Python bindings, crit and a GPU plugin, none of which this rig uses.
     assert "criu 2>&1" in text and "make -j" in text
+
+
+def test_the_pinned_tree_is_patched_for_a_c23_compiler_before_it_is_built():
+    """criu decides whether to define the rseq enums itself by COMPILING a
+    probe that redefines one of them.  GCC 15 defaults to -std=gnu23, where an
+    agreeing redefinition is legal, so the probe compiles on a glibc that has
+    the enums already, criu adds a second copy, and the build dies in
+    parasite.c (reported 2026-08-11).  Upstream renamed the probe's
+    enumerators in v4.2.1; the pin stays at the tag the save-state ladder was
+    proven against and takes that one change."""
+    text = src("getcriu.sh")
+    assert "RSEQ_CPU_CRIU_TEST" in text, (
+        "nothing corrects the probe, so a C23 default compiler still gets "
+        "'conflicting redefinition of enum' in criu/pie/parasite.o")
+    assert "feature-tests.mak" in text
+    assert line_of(text, "RSEQ_CPU_CRIU_TEST") < line_of(text, "make -j"), (
+        "the probe has to be corrected before make reads its answer - the "
+        "generated config header is what carries it into every object")
+    # Applied to whatever the source step left behind, so the CLONE and the
+    # REUSE path both get it; a tree already carrying upstream's fix is left
+    # alone rather than patched twice.
+    assert line_of(text, "RSEQ_CPU_CRIU_TEST") > line_of(text, "git clone --depth 1")
+    assert "! grep -q RSEQ_CPU_CRIU_TEST" in text, (
+        "without the guard this rewrites the tree on every run, and a v4.2.1 "
+        "pin would be patched on top of its own fix")
+    # And it can never stop a build that would have worked: every compiler
+    # older than this answers the original probe correctly.
+    block = text[text.index("FEATURES=$SRC"):]
+    block = block[:block.index("\n# ---- 3.")]
+    assert "exit" not in block, "a probe that cannot be patched is not fatal"

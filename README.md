@@ -772,11 +772,13 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    spot is still on screen, so a window parked on a second monitor that
    is later unplugged comes back out of reach. It works on every
    platform, running or not.
-   **Save states**, opt-in on the tab and off by default — a tooltip
-   spells out the cost before you turn it on. Tick it and the virtual
-   playfield window grows Save state / Load state buttons with ten
-   named slots, and the Emulate tab grows a slot manager listing every
-   slot's name, game, size and save time, updating itself the moment
+   **Save states**, on by default — every Start boots the guest in the
+   one shape that can be checkpointed, so there is nothing to tick, and
+   the ⓘ beside the section title spells out what a save costs. The
+   virtual playfield window carries Save state / Load state buttons
+   with ten named slots per game, and the Emulate tab carries a slot
+   manager listing every slot's name, game, size and save time,
+   updating itself the moment
    anything changes — no manual refresh. A save checkpoints the whole
    running game — game binary, GPU state, video, sound, switch memory
    — and a load brings it straight back, mid-game included, even in a
@@ -787,11 +789,14 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    ten of them cost tens of megabytes rather than gigabytes; a save
    briefly needs headroom on disk while it packs. A **Launch** button
    on the manager starts the emulator straight into a chosen slot, or
-   drops the slot into a game that's already running. (Windows: turning
-   save states on boots the guest in the one shape that can be
-   checkpointed, and drops every helper back to your own desktop
-   session so the window and the sound still work.) A run that cannot
-   be saved says why on the button instead of failing quietly.
+   drops the slot into a game that's already running. (Windows: that
+   boot runs the guest as root and drops every helper back to your own
+   desktop session so the window and the sound still work. It is the
+   one thing here that needs `busybox-static`, and a machine without
+   the package starts the ordinary way instead — every title runs, one
+   log line says save states are off and which package turns them on.)
+   A run that cannot be saved says why on the button instead of failing
+   quietly.
    Runs on Linux, and on Windows through WSL2. The rig ships with the
    app, in `tools/spike2_emu`, and the prerequisites installer pulls in
    what it needs (`qemu-user-static`, an ARM cross-compiler, `gcc` +

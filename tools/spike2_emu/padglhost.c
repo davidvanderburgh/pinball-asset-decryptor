@@ -233,6 +233,13 @@ static int  dbg;
  * only ever showed the steady state; the splash lives in the first few frames,
  * so the window has to be movable to compare the two. */
 static long seq_from = 60, seq_to = 62;
+/* item 43: the interesting frame is one the run reaches MINUTES in, after a
+ * menu walk whose frame number nobody can predict at launch - the env window
+ * above cannot aim at it. Touching /tmp/padgl_dumpseq (checked once per SWAP,
+ * one access() per frame) arms a one-frame op-by-op dump of the NEXT frame,
+ * live, whatever PADGL_DEBUG said at start. The trigger file is unlinked as
+ * it is consumed so each touch dumps exactly one frame. */
+static int seq_trigger_armed;
 static unsigned cur_tex_unit_binding;
 /* The MIN_FILTER the GAME set on each texture, 0 when it never set one.
  *
@@ -2757,6 +2764,17 @@ static void jgl_poll(int idle, int quiet)
 static void present(void)
 {
     frames_done++;
+    /* item 43: the live sequence-dump trigger - see seq_trigger_armed. One
+     * access() per frame; the touch aims the PADGL_DEBUG=3 window at the NEXT
+     * frame, whatever the env said at start. */
+    if (access("/tmp/padgl_dumpseq", F_OK) == 0) {
+        unlink("/tmp/padgl_dumpseq");
+        seq_from = frames_done + 1;
+        seq_to = frames_done + 2;
+        seq_trigger_armed = 1;
+        fprintf(stderr, "[padglhost] sequence dump armed for frame %ld\n",
+                seq_from);
+    }
     /* Straight after the frame counter and BEFORE every early return below.
      * The dump path bails out on !dump_dir, on dump_every and on dump_max, so
      * anything placed further down would render only every Nth frame and then
@@ -3036,8 +3054,11 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
     jgl_note(op, pl, len);
     jgl_in_frame = (op != PADGL_SWAP);
     /* PADGL_DEBUG=3: log every op of one whole frame, in order. State probes
-     * answer "is X right"; only the sequence answers "what actually happens". */
-    if (dbg == 3 && frames_done >= seq_from && frames_done < seq_to) {
+     * answer "is X right"; only the sequence answers "what actually happens".
+     * seq_trigger_armed is item 43's live trigger - same dump, aimed at run
+     * time by touching /tmp/padgl_dumpseq instead of at launch by env. */
+    if ((dbg == 3 || seq_trigger_armed)
+            && frames_done >= seq_from && frames_done < seq_to) {
         static const char *n[PADGL_OP_MAX] = {0};
         if (!n[PADGL_SWAP]) {
             n[PADGL_SWAP]="SWAP"; n[PADGL_CLEAR]="CLEAR"; n[PADGL_CLEARCOLOR]="CLEARCOLOR";

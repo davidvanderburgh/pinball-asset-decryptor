@@ -960,6 +960,30 @@ if [ "${PAD_BALL_FEED:-1}" != 0 ]; then
     echo "[watch] (PAD_BALL_FEED=0 to move balls by hand with plunge.py)."
 fi
 
+# PAD_DOOR_OPEN=1 - boot with the coin door held OPEN, for servicing (item 43).
+# The System 4.28 titles (turtles et al) latch their video-vs-DMD choice at
+# init, so entering the service menu with video working shows the backdrop
+# video where the whole dot menu should be. The shim refuses video while the
+# door is open (see gstvid.c's door gate), and with the door open FROM BOOT
+# the game initialises video-less and every service page renders its complete
+# dot menu - verified against David's photo of a real machine. One early
+# swhold is not enough: the rest-state writer forces the door shut once at
+# guest start and the merge is last-edge-wins, so this loop re-asserts through
+# the boot window. Close the door (click switch 33, or swhold.py 33 1) to
+# bring video back for play.
+if [ "${PAD_DOOR_OPEN:-0}" = 1 ]; then
+    (
+        for _i in $(seq 1 30); do
+            [ -f "$ROOT/dump/padsw" ] && \
+                setsid_as_user python3 "$S/swhold.py" 33 0 >/dev/null 2>&1
+            sleep 2
+        done
+    ) &
+    echo "[watch] coin door held OPEN through boot (PAD_DOOR_OPEN=1):"
+    echo "[watch] service menus will render; close the door (swhold.py 33 1)"
+    echo "[watch] for video."
+fi
+
 # KEY EVENTS, on THIS script's stdout. The app's Emulate tab drains watch.sh's
 # output into its log pane, and a terminal run shows the same thing - so the
 # one place worth publishing "what is the run doing" is right here. The

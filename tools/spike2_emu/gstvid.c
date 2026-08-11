@@ -49,6 +49,7 @@ extern int close(int);
 extern void *mmap(void *, unsigned long, int, int, int, long);
 extern int usleep(unsigned);
 extern void pad_say(const char *);
+extern int pad_sw_level(unsigned);      /* hwshim.c - item 43's door gate */
 extern int pthread_create(unsigned long *, void *, void *(*)(void *), void *);
 extern int clock_gettime(int, unsigned long *);
 
@@ -164,6 +165,36 @@ struct stream {
     unsigned long eos_us;       /* when EOS was posted; 0 = not at EOS       */
     unsigned char eos_loop;     /* decoder loop flag at that moment          */
     unsigned char eos_defer;    /* an EOS-reflex rewind was absorbed         */
+    unsigned char gst_state;    /* the GAME's own last set_state on this
+                                 * pipeline: 1 NULL, 3 PAUSED, 4 PLAYING
+                                 * (0 = never set, reported as NULL). This is
+                                 * what gst_element_get_state answers - it
+                                 * used to answer an unconditional PLAYING,
+                                 * and item 43 was the bill: the service
+                                 * menu polls its backdrop pipeline to choose
+                                 * between the DMD dot surface and video for
+                                 * the LCD texture, the stub's lie said video
+                                 * was flowing on a torn-down pipeline, and
+                                 * the menu drew video instead of itself. */
+    unsigned char paused;       /* the GAME's last set_state was PAUSED. A
+                                 * real PAUSED pipeline delivers NO new frames
+                                 * to its sink; item 11's absorb keeps the
+                                 * streaming thread alive across a same-clip
+                                 * re-arm (correctly - killing it is the
+                                 * jump-back) but used to keep it DELIVERING
+                                 * too, which is how a paused backdrop overwrote
+                                 * the service menu's DMD texture at 30/s
+                                 * (item 43). The thread now holds while this
+                                 * is set and resumes on PLAYING. */
+    unsigned char torn_down;    /* the GAME set_state(NULL/READY) on this
+                                 * pipeline and nothing has re-armed it since.
+                                 * Distinct from playing==0, which the EOS
+                                 * stand-down also produces - item 43 was the
+                                 * cost of conflating them: the hidden attract
+                                 * scene's loop-seek resurrected a pipeline
+                                 * the game had torn down at service-menu
+                                 * entry, and the resurrected stream's frames
+                                 * overwrote the DMD menu texture at 30/s. */
     unsigned long handoff_worst, handoff_total;   /* item 11: does it block? */
     /* item 11's PRE-ARM: the host was told to start decoding this path at
      * note_location() time, under this generation, and prepare() should
@@ -674,6 +705,43 @@ static unsigned long vid_us(void)
     return t[0] * 1000000ul + t[1] / 1000ul;
 }
 
+/* ★ ITEM 43: NO VIDEO WHILE THE COIN DOOR IS OPEN. The System 4.28 service
+ * menu picks the LCD's source per page: video when its pipeline works, its
+ * own complete DMD dot menu when it does not - PAD_VID=0 proved the dot path
+ * renders every icon and caption, and David's photo of a real machine's
+ * diagnostics screen confirmed the dot menu IS the correct picture. With
+ * video working the page chooses video and the menu is never drawn; on real
+ * hardware the menu owns the screen through a path this rig does not
+ * reproduce (three real-semantics fixes - truthful get_state, PAUSED holding
+ * delivery, teardown refusing seeks, ASYNC preroll - all verified live and
+ * none flipped the choice). The door is the honest gate: service menus on a
+ * real machine happen with the coin door open, play happens with it shut.
+ *
+ * TWO halves, both needed and each proven insufficient alone on a live run:
+ * prepare() refuses NEW arms (the menu's own rebuilds fail, so the page
+ * falls back to its dot mode), and vid_thread holds DELIVERY on streams
+ * already playing (an armed channel the menu ADOPTS never passes through
+ * prepare, and one such stream kept painting the band after ch0-ch2 were
+ * refused). Closing the door releases both.
+ *
+ * PAD_VID_DOOR=0 disables the gate; PAD_VID_DOOR_ID overrides the switch id
+ * (33 is the COIN DOOR INTERLOCK on every Spike 2 table tried; open reads
+ * merged level 0). */
+static int vid_door_blocked(void)
+{
+    static int gate = -1, door_id = 33;
+    if (gate < 0) {
+        const char *e = getenv("PAD_VID_DOOR");
+        gate = !(e && e[0] == '0');
+        if ((e = getenv("PAD_VID_DOOR_ID")) && e[0]) {
+            int v = 0;
+            while (*e >= '0' && *e <= '9') v = v * 10 + (*e++ - '0');
+            if (v > 0 && v < 256) door_id = v;
+        }
+    }
+    return gate && !pad_sw_level((unsigned)door_id);
+}
+
 static void *vid_thread(void *arg)
 {
     struct stream *s = (struct stream *)arg;
@@ -699,7 +767,23 @@ static void *vid_thread(void *arg)
     VLOG("[vid] ch%d streaming %ux%u at %u/%u fps (%u us/frame)\n",
          chan_of(s), c->width, c->height, c->fps_num, c->fps_den, delay);
     while (s->run_id == my_run && s->playing && c->playing) {
-        unsigned produced = c->write_idx;
+        unsigned produced;
+        /* item 43: REAL PAUSED SEMANTICS. While the game's last set_state is
+         * PAUSED, hold - consume nothing, hand nothing over. The thread stays
+         * alive (item 11's absorb is the reason it exists across a re-arm) but
+         * a paused pipeline that keeps delivering is how the service menu's
+         * DMD texture got overwritten by a backdrop the game had paused.
+         * t_epoch re-anchors on resume, or the catch-up pacing below would
+         * deliver the whole pause as one burst. (Real preroll hands ONE buffer
+         * at PAUSED; nothing here has ever needed it - fresh clips only start
+         * their thread at PLAYING - so the hold is total.) */
+        if (s->paused) { t_epoch = 0; usleep(5000); continue; }
+        /* item 43's other half: the door. An adopted stream never passes
+         * through prepare(), so the arm-side refusal alone left one channel
+         * painting the menu band. Held, not killed: closing the door resumes
+         * the clip where it paused. */
+        if (vid_door_blocked()) { t_epoch = 0; usleep(20000); continue; }
+        produced = c->write_idx;
         if (consumed >= produced) {
             if (c->eos) {
                 /* Looping is the game's business: it seeks or rebuilds. Stop
@@ -922,7 +1006,10 @@ static void *vid_thread(void *arg)
          * accumulates. A thread that falls behind simply does not sleep
          * until it has caught up - no spiral, and clips still end at the
          * same total duration. */
-        if (!t_epoch) t_epoch = vid_us();
+        /* Anchored so target(consumed) == now - identical to the plain
+         * vid_us() at frame 0, and the form that also re-anchors correctly
+         * after item 43's pause hold, where consumed is mid-clip. */
+        if (!t_epoch) t_epoch = vid_us() - (unsigned long)consumed * delay;
         {
             unsigned long target = t_epoch + (unsigned long)consumed * delay;
             long ahead = (long)(target - vid_us());
@@ -951,6 +1038,24 @@ int pad_vid_prepare(void *pipeline)
     if (!vshm || !s->location[0]) return 0;
     if (!stream_buf(s)) return 0;
     c = &vshm->ch[hw_of(s)];
+
+    if (vid_door_blocked()) {
+        static unsigned char said[PADVID_CHANNELS];
+        int ch = chan_of(s);
+        if (ch >= 0 && ch < PADVID_CHANNELS && !said[ch]) {
+            said[ch] = 1;
+            VLOG("[vid] ch%d video refused while the coin door is open - "
+                 "service menus render their own surface (item 43, "
+                 "PAD_VID_DOOR=0 to disable)\n", ch);
+        }
+        return 0;
+    }
+
+    /* item 43: the game re-arming this pipeline - whatever else this call
+     * decides - means it is alive again. Cleared BEFORE the absorbs so the
+     * EOS-reflex defer they can set is honoured by the seek that follows it
+     * rather than refused by the torn-down gate. */
+    s->torn_down = 0;
 
     /* ★ ITEM 11, THE STATE-PATH HALF: A RE-ARM OF A CLIP THAT IS STILL
      * PLAYING THE SAME FILE IS ABSORBED, exactly like the rewind absorb in
@@ -1257,6 +1362,10 @@ void *pad_vid_caps_for_pad(void *pad)
 {
     int i, ready = 0;
     struct stream *fb = 0;
+    /* item 43: door open = the pipeline looks dead, caps included - the same
+     * answer PAD_VID=0 gives, which is the proven trigger for the service
+     * menu's dot fallback. */
+    if (vid_door_blocked()) return 0;
     for (i = 0; i < PADVID_CHANNELS; i++) {
         if (!streams[i].ready) continue;
         ready++;
@@ -1388,6 +1497,11 @@ void pad_vid_play(void *pipeline)
     struct stream *s = find_pipeline(pipeline);
     unsigned long th;
     int rc;
+    /* item 43: PLAYING ends a pause hold - BEFORE the early return below,
+     * which is exactly the absorbed-re-arm case this flag exists for (the
+     * thread is alive and holding, s->playing is still 1). gst_state tracks
+     * the ask itself for get_state's answer. */
+    if (s) { s->paused = 0; s->gst_state = 4; }
     if (!s || !s->ready || s->playing || !vshm) return;
 
     /* item 27: the safety net for the EOS-reflex absorb. If the game asks to
@@ -1440,6 +1554,47 @@ void pad_vid_stop(void *pipeline)
     if (vshm) vshm->ch[hw_of(s)].playing = 0;
 }
 
+/* The GAME's set_state(NULL/READY) - a teardown, not a pause. Only gststub
+ * calls this; the internal stops (seek's stop-before-re-arm, supersedes) stay
+ * pad_vid_stop, because they are immediately followed by an arm and mean the
+ * opposite of "this pipeline is dead". See torn_down in struct stream. */
+void pad_vid_teardown(void *pipeline)
+{
+    struct stream *s = find_pipeline(pipeline);
+    pad_vid_stop(pipeline);
+    if (s) { s->torn_down = 1; s->paused = 0; s->gst_state = 1; }
+}
+
+/* The GAME's set_state(PAUSED), noted AFTER prepare() has answered - see the
+ * paused field. gststub owns the call so the flag tracks exactly what the
+ * game asked, not what the absorb machinery decided to do about it. */
+void pad_vid_note_paused(void *pipeline)
+{
+    struct stream *s = find_pipeline(pipeline);
+    if (!s) return;
+    if (!s->paused && s->playing)
+        VLOG("[vid] ch%d PAUSED by the game mid-play; holding delivery "
+             "(item 43)\n", chan_of(s));
+    s->paused = 1;
+    s->gst_state = 3;
+}
+
+/* What gst_element_get_state answers for our pipelines: the game's own last
+ * set_state, not the unconditional PLAYING the stub used to claim - see
+ * gst_state in struct stream for the fault the lie caused. A pipeline the
+ * game never set is reported NULL, which is what a fresh GstPipeline is. */
+int pad_vid_last_state(void *pipeline)
+{
+    struct stream *s = find_pipeline(pipeline);
+    /* item 43: with the coin door open every pipeline reads NULL, whatever
+     * the game last asked - the page-build check that picks video-vs-dots
+     * consults this, and a held delivery alone leaves the page drawing its
+     * stale last frame. The scoped lie is the door gate's third half. */
+    if (vid_door_blocked()) return 1;
+    if (!s || !s->gst_state) return 1;
+    return s->gst_state;
+}
+
 /* LOOPING. The game does not rebuild a pipeline per repeat: its bus handler
  * answers EOS with gst_element_seek(pipeline, rate, TIME, FLUSH, SET, 0, NONE,
  * -1) and expects playback to carry on from the start. That seek used to fall
@@ -1453,6 +1608,30 @@ int pad_vid_seek(void *pipeline, long long pos_ns)
 {
     struct stream *s = find_pipeline(pipeline);
     if (!s || !s->ready || !vshm || !s->location[0]) return 0;
+
+    /* ★ ITEM 43: A SEEK ON A TORN-DOWN PIPELINE IS REFUSED, exactly as real
+     * GStreamer refuses a seek on a NULL-state pipeline. The turtles (System
+     * 4.28) service menu tears its backdrop videos down on entry and draws a
+     * 128x32 DMD surface into the same LCD texture; the hidden attract
+     * scene's EOS-loop seek then arrives on the torn-down pipeline, and
+     * serving it - stop/prepare/play, which is how every seek was answered -
+     * resurrected the stream. The resurrected frames overwrote the DMD menu
+     * texture 30 times a second: the whole menu was drawn and never seen.
+     * On real hardware that seek fails and the menu keeps the texture, which
+     * is why no real machine ever showed this. A set_state(PAUSED/PLAYING)
+     * from the game re-arms through prepare() and clears the flag, so a
+     * pipeline the game genuinely revives still plays. */
+    if (s->torn_down) {
+        static unsigned char said[PADVID_CHANNELS];
+        if (chan_of(s) >= 0 && chan_of(s) < PADVID_CHANNELS
+                && !said[chan_of(s)]) {
+            said[chan_of(s)] = 1;
+            VLOG("[vid] ch%d seek on a torn-down pipeline; refusing it "
+                 "(real gst would too)\n", chan_of(s));
+        }
+        return 0;
+    }
+
     if (pos_ns != 0)
         VLOG("[vid] ch%d seek to %u ms requested; only rewind is supported, "
              "restarting from 0\n", chan_of(s), (unsigned)(pos_ns / 1000000ll));

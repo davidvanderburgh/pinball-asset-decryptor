@@ -1076,13 +1076,52 @@ These have each been violated at least once and each cost a run or a window:
 
 
 - [ ] **43. In the turtles service menus the picture goes HALF HEIGHT and the
-      scene text stops drawing.** `S2 D3` ← IN PROGRESS *(**70%, 2026-08-11:**
-      **ANSWERED — the band is the GAME's own geometry** (`model` sy 340, ty
-      214, on a unit quad, under a correct 1360x768 projection), so the whole
-      emulator-side rendering path is eliminated and the video half is not a
-      fault at all. The page simply draws no scene and no UI. What is left is
-      WHY, which is now on the game's side and probably downstream of item 29.
-      Branch `item/43`, clean and pushed; no run left up, `alive.sh` 0.)*
+      scene text stops drawing.** `S2 D3` ← IN PROGRESS *(**90%, 2026-08-11
+      evening: SOLVED AND VERIFIED — the menus render, matching David's photo
+      of a real machine. Awaiting David's own hands on the ergonomics before
+      the box closes.** Branch `item/43`, clean and pushed; no run left up,
+      `alive.sh` 0.)*
+      **★★★ THE RESOLUTION, so nobody re-reads the archaeology below to use
+      the fix: `PAD_DOOR_OPEN=1` on a watch.sh run boots with the coin door
+      held open, and every service page on turtles renders its complete
+      DMD-dot menu — icons, captions, submenus, all navigable**
+      (`C:\tmp\item43\t_BOOTDOOR3.png` = the main menu identical to David's
+      real-machine photo; `t_BOOTDOOR4_diag.png` = the Diagnostics submenu,
+      which is the page items 3 and 1d need). Close the door (`swhold.py 33
+      1`, or click switch 33 on the playfield) and full-screen video comes
+      back by itself (`t_doorclose.png`). Godzilla's 4.31 menus are
+      unaffected by the gate (`gz_regression.png`, one page deeper than any
+      earlier capture).
+      **THE MECHANISM, in three lines:** the System 4.28 menu renders a
+      128x32 DMD surface (1024x256 RGBA, TexDirect) into the SAME LCD texture
+      the video path writes, scaled x10.625 to the 1360x340 band — the band
+      IS the DMD. The game picks ONE source for that texture — video if its
+      pipelines look alive, dots if not — and LATCHES the choice at init, so
+      only a door-open BOOT gets dot menus. Our gst stub answered get_state =
+      PLAYING unconditionally forever, so video always looked alive.
+      **SHIPPED IN THE SHIM (all live-verified, no regression on turtles or
+      godzilla attract/play):** (a) `gst_element_get_state` answers the
+      game's own last set_state instead of the lie; (b) PAUSED holds frame
+      delivery (real semantics — the absorb used to keep delivering);
+      (c) set_state(NULL/READY) marks a pipeline torn down and a loop-seek on
+      it is REFUSED, as real GStreamer refuses; (d) set_state(PAUSED) returns
+      ASYNC not SUCCESS, as a real decoder must; (e) THE DOOR GATE
+      (`PAD_VID_DOOR=0` to disable): while the coin door reads open, new
+      video arms are refused, running deliveries hold, and state/caps read
+      dead — the exact environment PAD_VID=0 proved triggers the game's own
+      dot fallback. (a)-(d) are correct emulation regardless of the menu;
+      each was proven insufficient alone for the menu, which is what
+      established the init-latch and forced (e)+boot.
+      **Paid for and written down: `pkill -f autoattract.sh` from an inline
+      `bash -c` kills the CALLING SHELL** (the pattern matches its own
+      command line — exit 15, two walks lost); the rest-state writer forces
+      the door SHUT once at guest start, so one early swhold is overwritten
+      (the PAD_DOOR_OPEN loop re-asserts through boot).
+      **Resume:** David tries `PAD_DOOR_OPEN=1` on a turtles run and says
+      whether the boot-time-door ritual is acceptable (mid-session door-open
+      cannot work — the choice is latched at init). If yes, close; wishlist
+      candidates: an Emulate-tab "Service mode" checkbox for the env, and
+      auto-detecting 4.28-family titles from the card's VERSION data.
       *(**Filed as 42 and renumbered to 43 on 2026-08-11 before merging**: David
       took 42 for the save-state portability item on main the same afternoon,
       and this branch had not landed yet. Numbers are stable IDs and are never

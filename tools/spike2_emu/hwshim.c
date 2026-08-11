@@ -4564,6 +4564,14 @@ static int sw_shm_held(unsigned id)
     return sw_mrg[id] != 0;
 }
 
+/* item 43: gstvid.c (same .so, separate translation unit) asks about the coin
+ * door to decide whether video pipelines may start - see the door gate in
+ * pad_vid_prepare. The merged level, same answer the game gets. */
+int pad_sw_level(unsigned id)
+{
+    return sw_shm_held(id);
+}
+
 /* [sw] - every EDGE in the MERGED switch state, logged at the point the shim
  * consumes it. This is the switch-input instrument the rig lacked: a click on
  * the virtual playfield, a plunge.py sequence and a keyboard flipper all funnel

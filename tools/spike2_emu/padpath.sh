@@ -414,6 +414,133 @@ pad_glhost_hash()  { pad_src_hash "${1:-$RIG}" $PAD_GLHOST_SRCS; }
 pad_glguest_hash() { pad_src_hash "${1:-$RIG}" $PAD_GLGUEST_SRCS; }
 if pad_is_wsl; then IS_WSL=1; else IS_WSL=0; fi
 
+# ---- IS THERE A DISPLAY TO PUT THE GAME WINDOW ON? -----------------------
+#
+# `[ -n "$DISPLAY" ]` WAS THE WHOLE TEST, AND IT IS NOT THE QUESTION. WSLg sets
+# DISPLAY when the distro starts and never takes it back, so the variable says
+# only that this WSL was BUILT with a GUI - not that a client can reach the
+# server today. A machine where it cannot gets the one failure this rig is
+# worst at: the renderer stays headless, and everything else works. The guest
+# boots, the LEDs decode, the sound plays and the virtual playfield says
+# "emulator up" - with NO PICTURE ANYWHERE and no line anyone would read,
+# because padglhost's own explanation goes to ~/padglhost.log and stops there.
+# That is a user's report on 2026-08-11, and it is the ffmpeg fault (PAD-49)
+# wearing different clothes: a run that succeeds all the way to nothing.
+#
+# WHERE A LOCAL DISPLAY ACTUALLY IS. `:N` and `unix:N` mean the UNIX socket
+# /tmp/.X11-unix/XN, which is what libX11 opens - so its absence is not a hint,
+# it is the answer. A DISPLAY with a HOSTNAME in it is TCP to somewhere this
+# rig knows nothing about (VcXsrv, X410, a Linux box across the room), and the
+# only honest verdict there is silence.
+#
+# AND THE ONE WAY IT GOES MISSING ON WSL, which is why `masked` is a state of
+# its own rather than a kind of "no". WSLg's socket lives in its own tmpfs and
+# WSL bind-mounts it into the distro; measured here 2026-08-11:
+#
+#     $ findmnt /tmp/.X11-unix
+#     none[/.X11-unix]  /tmp/.X11-unix  tmpfs  ro,relatime
+#     $ stat -c%n /mnt/wslg/.X11-unix/X0 /tmp/.X11-unix/X0
+#     /mnt/wslg/.X11-unix/X0
+#     /tmp/.X11-unix/X0            <- the SAME socket, in two places
+#
+# Anything that mounts a fresh /tmp over that bind hides it - systemd's
+# tmp.mount is the common one, and this rig already knows systemd-in-WSL is
+# ordinary (setupcheck.sh reports it as `wslconf`). Reproduced exactly, with
+# the real renderer, in a private mount namespace:
+#
+#     # unshare -m bash -c 'mount -t tmpfs tmpfs /tmp; padglhost /tmp/ring'
+#     [padglhost] PAD_GL_WINDOW=1 but XOpenDisplay failed (DISPLAY=:0);
+#                 staying headless
+#     # ...and after `mount --bind /mnt/wslg/.X11-unix /tmp/.X11-unix`
+#     [padglhost] window opened 1445x827 on DISPLAY=:0
+#
+# So the socket is still THERE, one directory away, and putting it back is a
+# bind mount - which the app's own launch can do, because it runs as root.
+#: Overridable so the states above can be tested without a WSL, an X server or
+#: a mount: the tests point both at directories under tmp_path.
+PAD_X11_DIR=${PAD_X11_DIR:-/tmp/.X11-unix}
+PAD_WSLG_X11_DIR=${PAD_WSLG_X11_DIR:-/mnt/wslg/.X11-unix}
+export PAD_X11_DIR PAD_WSLG_X11_DIR
+
+# The socket file $DISPLAY names, for a LOCAL display only. Non-zero for a
+# hostname (TCP) or an unparseable value, so every caller's "I have nothing to
+# say about this machine" branch is the same one.
+pad_x_socket() {
+    local d=${DISPLAY:-} host num
+    [ -n "$d" ] || return 1
+    host=${d%%:*}
+    num=${d#*:}; num=${num%%.*}
+    case $host in ""|unix) ;; *) return 1 ;; esac
+    case $num in ''|*[!0-9]*) return 1 ;; esac
+    printf '%s/X%s\n' "$PAD_X11_DIR" "$num"
+}
+
+# What this machine's display IS, in one word:
+#
+#   none      DISPLAY is unset. No GUI at all.
+#   remote    DISPLAY names a host. Not ours to judge - say nothing.
+#   ok        the local socket is there.
+#   masked    it is not there, and WSLg's copy of it IS - repairable.
+#   nosocket  it is not there and there is nothing to put back.
+#
+# `-e` rather than `-S` deliberately: what matters is whether libX11 finds
+# something at that path, a non-socket sitting there is a broken machine by any
+# reading, and a test can create a file where it cannot create a socket.
+pad_display_state() {
+    local sock
+    [ -n "${DISPLAY:-}" ] || { echo none; return 0; }
+    sock=$(pad_x_socket) || { echo remote; return 0; }
+    [ -e "$sock" ] && { echo ok; return 0; }
+    [ -e "$PAD_WSLG_X11_DIR/${sock##*/}" ] && { echo masked; return 0; }
+    echo nosocket
+}
+
+# The command that puts a masked socket back, printed for a user who is not
+# root and run by us when we are. ONE STRING, so what is advised and what is
+# done cannot drift.
+pad_display_fix_cmd() {
+    printf 'mount --bind %s %s\n' "$PAD_WSLG_X11_DIR" "$PAD_X11_DIR"
+}
+
+# WHAT THE RENDERER DID WITH ITS WINDOW, out of the renderer's own log - the
+# only place that knows, and a place nothing showed the user until this ticket.
+# padglhost prints exactly one of:
+#
+#     [padglhost] window opened 1445x827 on DISPLAY=:0
+#     [padglhost] PAD_GL_WINDOW=1 but XOpenDisplay failed (...); staying headless
+#     [padglhost] eglCreateWindowSurface failed 0x...; falling back to headless
+#
+# A HEADLESS LINE WINS OVER AN "OPENED" ONE, and that ordering is the whole
+# reason this is a function rather than a grep. The window is created and
+# mapped BEFORE the EGL surface is asked for, so the third case above prints
+# BOTH lines, "opened" first - and that run has a window sitting on the desktop
+# that can never show a picture. Reading the first match would call it a
+# healthy run.
+pad_window_line() {
+    local log=${1:-} head
+    [ -n "$log" ] && [ -r "$log" ] || return 1
+    head=$(grep -a -m1 headless "$log" 2>/dev/null)
+    if [ -n "$head" ]; then printf '%s\n' "$head"; return 0; fi
+    head=$(grep -a -m1 'window opened' "$log" 2>/dev/null)
+    [ -n "$head" ] || return 1
+    printf '%s\n' "$head"
+}
+
+# Do it. Root only, and only when there is genuinely something to bind: this
+# mount ADDS the socket WSL itself put there, so it cannot take anything away,
+# but a bind over a directory that already works would still be a change made
+# for no reason. Verifies by asking pad_display_state again rather than by
+# trusting mount's exit code.
+pad_display_repair() {
+    local sock
+    [ "$(pad_display_state)" = masked ] || return 1
+    [ "$(id -u)" = 0 ] || return 1
+    sock=$(pad_x_socket) || return 1
+    mkdir -p "$PAD_X11_DIR" 2>/dev/null
+    mount --bind "$PAD_WSLG_X11_DIR" "$PAD_X11_DIR" 2>/dev/null || return 1
+    [ "$(pad_display_state)" = ok ]
+}
+
 # WSLENV is how any of this reaches a Windows process, and it is the only way:
 # nothing in this environment crosses interop unless it is named there. `/p`
 # asks WSL to translate the value from a WSL path to a Windows one, so the

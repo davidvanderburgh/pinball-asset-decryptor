@@ -531,10 +531,59 @@ teardown() {
 trap 'teardown; exit 130' INT TERM
 trap 'teardown' EXIT
 
-if [ -z "${DISPLAY:-}" ]; then
-    echo "[watch] DISPLAY is unset - WSLg is not available, so there is no window to open." >&2
-    exit 1
-fi
+# ★ IS THERE A DISPLAY, AND CAN A CLIENT REACH IT? See pad_display_state in
+# padpath.sh for what each word means and how the `masked` one happens. This
+# used to be `[ -z "$DISPLAY" ]`, which passes on every WSLg machine whether or
+# not the socket it names still exists - and the machine where it does not is
+# the one that gets a run with no picture and no complaint.
+#
+# REPAIR BEFORE REFUSE, AND REFUSE BEFORE RUN. The renderer is started a few
+# hundred lines below and everything after it takes ~15 s to boot; finding out
+# there is no window then, from a Mesa message inside another log, is what this
+# is here to stop.
+case $(pad_display_state) in
+    ok|remote) ;;
+    none)
+        echo "[watch] DISPLAY is unset - WSLg is not available, so there is no window to open." >&2
+        echo "[watch]   On WSL that usually means GUI apps are switched off:" >&2
+        echo "[watch]   check for guiApplications=false in %USERPROFILE%\\.wslconfig," >&2
+        echo "[watch]   then 'wsl --shutdown' and start the emulator again." >&2
+        exit 1 ;;
+    masked)
+        # WSLg's socket is where WSL put it and something has mounted over the
+        # copy libX11 opens. As root (the app's own launch) put it back and get
+        # on with the run; otherwise print the one command that fixes it.
+        if pad_display_repair; then
+            echo "[watch] the X socket at $PAD_X11_DIR was hidden by another" \
+                 "mount - WSLg's own copy is bound back over it for this" \
+                 "session, so the game window can open."
+        else
+            echo "[watch] there is an X server, and this distro cannot see it:" >&2
+            echo "[watch]   $DISPLAY resolves to $(pad_x_socket), which does not" >&2
+            echo "[watch]   exist, while WSLg's own copy of it does. Something" >&2
+            echo "[watch]   (systemd's /tmp is the usual one) is mounted over it." >&2
+            echo "[watch]   Fix it for this session with:" >&2
+            echo "[watch]     sudo $(pad_display_fix_cmd)" >&2
+            exit 1
+        fi ;;
+    *)
+        # nosocket. On WSL that is conclusive - a local DISPLAY is that socket
+        # and nothing else - so stop and say so rather than boot a guest nobody
+        # can see. On a Linux desktop the same reading is only PROBABLE (an X
+        # server can be started in ways this rig has never met), and refusing a
+        # machine that works is the worse mistake, so there it is a warning.
+        echo "[watch] DISPLAY is $DISPLAY and there is no X server at" \
+             "$(pad_x_socket)." >&2
+        echo "[watch]   Nothing can open a window here: the game would run" \
+             "with no picture at all." >&2
+        if [ "$IS_WSL" = 1 ]; then
+            echo "[watch]   'wsl --shutdown' and start the emulator again is" \
+                 "the usual cure." >&2
+            exit 1
+        fi
+        echo "[watch]   Continuing anyway - this is a Linux desktop, and its" \
+             "X server may live somewhere this rig has not met." >&2 ;;
+esac
 
 # Disk guard. A single long run writes an unbounded trace log - one earlier
 # session left 188 GB of them and took the WSL disk to 98% full, which is the
@@ -666,7 +715,8 @@ if [ "${PAD_VID:-1}" != 0 ]; then
     fi
 fi
 
-echo "[watch] starting renderer (window opens when the game's first frame arrives)"
+echo "[watch] starting renderer (it opens the game window; the picture arrives"
+echo "[watch] with the guest's first frame, ~15 s later)"
 # PAD_GL_LEGEND passes through UNSET (item 39): the Controls window is
 # retired - the playfield's key panel carries its content - and padglhost
 # only opens it on an explicit =1, so a caller who wants the old window
@@ -690,6 +740,64 @@ if ! pgrep -x padglhost >/dev/null; then
     exit 1
 fi
 grep -aE 'window opened|GL |ring |ready' "$HOSTLOG" | head -4
+
+# ★ DID THE WINDOW OPEN? SAY SO, HERE, IN THIS SCRIPT'S OWN OUTPUT.
+#
+# The renderer answers this itself and always has - "window opened WxH on
+# DISPLAY=..." or one of two headless lines - but it answers into $HOSTLOG,
+# which nobody reads and which the app's event feed did not forward. So the
+# state a user reported on 2026-08-11 (playfield up, "emulator up", NO GAME
+# WINDOW) looked from out here exactly like a healthy run, all the way to the
+# end of it.
+#
+# THE TWO OUTCOMES ARE DIFFERENT PROBLEMS AND WANT DIFFERENT SENTENCES, which
+# is the whole reason this is a verdict rather than another warning:
+#
+#   * headless - there is no window, and padglhost's own line says why. Nothing
+#     out here has to guess.
+#   * opened - the window EXISTS. If the desktop shows none, then what is
+#     missing is WSLg's mirror of it, not the window, and that is one restart
+#     away. Nothing inside this Linux can see the Windows desktop, so this is
+#     the furthest the rig can honestly go - and it is far enough to point at
+#     the right cure instead of at the emulator.
+#
+# The renderer creates the ring BEFORE it opens the window, so the wait above
+# can be over a fraction of a second early; poll rather than assume, and take
+# whichever line lands first. NEVER FATAL: a headless run still boots the
+# guest, plays sound and answers the playfield, and taking that away over a
+# window would be a worse trade than saying so plainly.
+GLWIN=""
+for i in $(seq 1 30); do
+    GLWIN=$(pad_window_line "$HOSTLOG") && break
+    sleep 0.1
+done
+# ...THEN ASK ONCE MORE, because the surface failure lands a few milliseconds
+# AFTER the window is mapped (pad_window_line's own comment has the ordering).
+# The log only grows, so the second answer is the better one whenever there is
+# one at all.
+sleep 0.3
+GLLATE=$(pad_window_line "$HOSTLOG") && GLWIN=$GLLATE
+case "$GLWIN" in
+    *"window opened"*)
+        echo "[watch] game window ${GLWIN#*window }"
+        echo "[watch]   (no game window on the desktop? Then it is WSLg's"
+        echo "[watch]   mirror that is missing, not the window: Stop, then"
+        echo "[watch]   'Restart WSL...' on the Emulate tab.)" ;;
+    *headless*)
+        echo "[watch] THE RENDERER HAS NO WINDOW, so this run will show no" \
+             "picture at all." >&2
+        echo "[watch]   $GLWIN" >&2
+        echo "[watch]   The game itself still boots, the sound still plays and" >&2
+        echo "[watch]   the virtual playfield still works - which is why this" >&2
+        echo "[watch]   is worth saying out loud rather than leaving to look" >&2
+        echo "[watch]   like a black screen." >&2
+        echo "[watch]   DISPLAY=${DISPLAY:-(unset)}, display state:" \
+             "$(pad_display_state)" >&2
+        echo "[watch]   'wsl --shutdown' and start again is the usual cure." >&2 ;;
+    *)
+        echo "[watch] the renderer has not said whether its window opened;" \
+             "see $HOSTLOG" >&2 ;;
+esac
 
 echo "[watch] starting $GAME (boot to the first picture takes ~15 s)"
 # PAD_PIVOT=1 boots a checkpointable guest (item 13). run_game.sh does the work;
@@ -994,6 +1102,14 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         /\[play\]/               { print "[event] " $0; fflush(); next }
         /\[padglhost\] (window opened|video block|ring |UNKNOWN)/ \
                                  { print "[event] " $0; fflush(); next }
+        # ...AND WHEN THERE IS NO WINDOW, WHICH IS THE ONE THAT WAS MISSING.
+        # padglhost degrades to headless rather than dying (a broken X server
+        # must not end a run that is otherwise fine), so its two explanations -
+        # "XOpenDisplay failed ...; staying headless" and "eglCreateWindowSurface
+        # failed ...; falling back to headless" - were the only record of a run
+        # with no picture, in a log the app never showed. Matched anywhere in
+        # the line because both put the word at the END of it.
+        /\[padglhost\] .*headless/ { print "[event] " $0; fflush(); next }
         /\[vid\]|\[card\]/       { print "[event] " $0; fflush(); next }
         /\[sw\] |\[tap\] |\[cabchg\]/ { print "[event] " $0; fflush(); next }
         # THE CRASH SIGNATURE needs its own pattern: the shim prints

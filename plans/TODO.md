@@ -1076,7 +1076,62 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **41. On turtles_pro (TMNT), the guest HARD-CRASHES (qemu signal 11)
       during ordinary interaction — seen on service-menu entry AND on selecting
-      a character.** `S2 D4`
+      a character.** `S2 D4` ← IN PROGRESS *(**40%, 2026-08-11:** the item's
+      stated first job — preserve a signature — is DONE and PROVEN on a
+      labelled example. The crash itself did not reproduce, so it is not
+      diagnosed and nothing is fixed.)*
+      **★★ ESTABLISHED THIS PASS: the reporter could never have fired on these
+      crashes, for three independent reasons, all now fixed (`6e44780`,
+      `b834f2b`, branch `item/41`).**
+      **(1) It was only ever installed by INTERPOSING the game's own
+      `sigaction(11)`** — so a title that never registers a handler got no
+      reporter at all, which is precisely what qemu's word "**uncaught**"
+      means. It installs from a constructor now.
+      **CORRECTION, so nobody repeats the wrong reasoning: `PAD_SEGV_REPORT=1`
+      was NEVER the missing piece.** `run_game.sh:299,315` sets it on every run
+      and always has. The first commit message said watch.sh never sets it;
+      that is wrong. FULL mode was armed the whole time and still produced
+      nothing, because nothing installed the handler.
+      **(2) `watch.sh`'s event filter greps `/SEGV|Segmentation|FATAL/`, which
+      is case-SENSITIVE**, so `[segv] pc=` could not reach the app pane even
+      when printed. The one line naming where a crash happened was the one line
+      that could not be seen.
+      **(3) `real_open` is resolved LAZILY** by `init()`, on the first
+      interposed call, so a guest that faults before opening anything called a
+      NULL pointer inside the signal handler — a nested fault that kills the
+      process with the report half written. The game opens files constantly, so
+      this never showed there; the crash it would have eaten is the EARLY one.
+      **★★ PROVEN, not asserted: `tools/spike2_emu/segvtest.sh`** faults a
+      guest deliberately under the same qemu-user + LD_PRELOAD arrangement the
+      game runs in. Two seconds, NO emulator run needed. Four cases, two of
+      them controls, all passing: no-handler (the turtles shape) now prints
+      `[segv] pc=` plus the faulting mapping by name and still dies with qemu's
+      uncaught message; a guest with its own handler is reported AND still
+      recovers, matching the reporter-off control exactly. **Run it after any
+      change to the segv path.**
+      **THE CONTROL EARNED ITS KEEP AND THAT IS WORTH KNOWING: the first
+      version of the fix was NOT additive** — it printed the signature and then
+      silently ate the guest's own handler. The case on its own looked healthy;
+      only the reporter-off control showed the difference. That is bug (3)
+      above, found because the control existed.
+      **NOT REPRODUCED, and this is the honest state of the fault itself.** A
+      full run on the turtles card drove BOTH triggers by script and the guest
+      never crashed: a game started (PLAYER 1 on the game's own display), the
+      right flipper poked 4× and LOCKDOWN 2× — David's exact sequence, all
+      confirmed as `[sw]` edges the game saw — then a 15-press walk through the
+      service menus. ~20 minutes, no fault. So the trigger is NOT simply
+      "press these switches": David reached it by NAVIGATING on screen, which
+      needs seeing the menu and choosing entries, and a scripted poke cannot
+      pick a menu it cannot read.
+      **Resume:** the instrument is ready and needs no more desk work — the
+      next crash names itself. Cheapest next step is for DAVID to hit it again
+      on a run from this branch (or from main once merged) and read the
+      `[segv] pc=` off the pane; failing that, drive the menus with the screen
+      in view rather than blind. Do NOT rebuild the reporter first; run
+      `segvtest.sh` if unsure it still works.
+      **Evidence:** `C:\tmp\item41_turtles_service_menu_segv.log`,
+      `C:\tmp\item41_turtles_character_select_segv.log`,
+      `C:\tmp\item41\` (screenshots).
       **TWO SIGHTINGS, 2026-08-11, same title, same signature-less qemu
       signal-11, DIFFERENT triggers — folded into one item because neither
       captured a signature, so whether it is one fault reached two ways or two
@@ -1141,6 +1196,51 @@ These have each been violated at least once and each cost a run or a window:
       turtles." D4: the mechanism is an uncaptured qemu signal-11 with no pc yet
       and the first job is the same instrument 36b lacks — but trigger (B) is a
       strong lead to a reliable on-demand repro, which would drop it to D3.
+
+- [ ] **42. In the turtles service menus the picture goes HALF HEIGHT and the
+      scene text stops drawing.** `S2 D3`
+      **★ DAVID, 2026-08-11, watching item 41's run: "there was no crash, but
+      the screen looked very weird in its last state. no scene data and video
+      was half height centered vertically."**
+      **CAPTURED, and there is a LABELLED PAIR — the same run, minutes apart,
+      so the difference is the state and not the setup:**
+      `C:\tmp\item41\turtles_attract_normal.png` — attract/game start, video
+      fills the window AND the scene text draws (`PLAYER 1`, `00`, `CREDITS 3
+      1/4` all present). `C:\tmp\item41\turtles_service_halfheight.png` — after
+      a 15-press walk into the service menus: the video occupies a horizontal
+      band roughly half the window height, centred vertically with black above
+      and below, and **no menu text at all** — just the Stern Pinball logo
+      backdrop. Two defects at once, and they may or may not be one fault.
+      **HOW IT WAS REACHED, exactly:** turtles_pro-1_59_0.1987-upscaled card,
+      `PAD_PIVOT=1`, watch.sh from the item-41 worktree; `plunge.py coin`,
+      `plunge.py start`, a ball plunged and drained, then `swpoke.py` on
+      switches 25/26/27/28 (SERVICE SELECT/PLUS/MINUS/BACK) fifteen times. It
+      should reproduce from a cold run without the ball part.
+      **NOT ESTABLISHED, and do not assume either half:** whether the missing
+      text and the half-height video are one fault or two; whether the band is
+      the menu's own video mode being letterboxed wrongly by `win_present()`
+      (`padglhost.c:1367` scales one quad into `win_w x win_h`) or the guest
+      genuinely drawing a shorter surface; and whether this is turtles-only.
+      **The cheap first checks, none needing a new instrument:** compare
+      against godzilla_pro in the same menu (one run, and it says at once
+      whether this is the title or the menu); and read `[eglshim]`/`[vid]` for
+      the surface size while the band is on screen, since a guest drawing
+      1360x384 and a host letterboxing 1360x768 are different faults with the
+      same picture.
+      **Relevant, unconfirmed as related:** turtles' device table does not read
+      (`watch.sh` says so at boot — "the device table did not read, so this is
+      off the SWITCH LIST alone"), which is item 29's territory. Scene text and
+      device tables are different stores, so treat any link as a guess.
+      **Acceptance:** the service menus on turtles draw their text, at full
+      picture height, stated with a screenshot against the attract-mode one
+      above — and say whether godzilla behaves the same, since that decides
+      whether this is a title fault or a menu fault.
+      — S2: nothing crashes and play is unaffected, so not S1; what it costs is
+      that the service menus are UNREADABLE on this title, and those menus are
+      the oracle item 3 (Coil Test) and item 1d (LED Tests) both depend on, and
+      the place item 41's other trigger lives. D3: it needs a run, it was
+      visible the moment anyone looked, every instrument already exists, and
+      the godzilla comparison is one more run rather than a new tool.
 
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the

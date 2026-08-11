@@ -173,6 +173,31 @@ synthetic closes do NOT work as a test either: `WM_CLOSE` and `SC_CLOSE` posted
 to a RAIL window from Windows are both ignored, the same UIPI class as the
 `SendInput` and PrtScn blocks documented elsewhere.
 
+### When the game window never appears
+
+The playfield window opens, it says *emulator up*, the guest really is running,
+and there is no game window. **The run says which of the two it is**, on its own
+output, so read that line first:
+
+- `[watch] game window opened 1445x827 on DISPLAY=:0` — the window EXISTS.
+  Nothing inside Linux can see the Windows desktop, so if none is showing there,
+  what is missing is WSLg's mirror of it and not the window: **Restart WSL…**.
+- `[watch] THE RENDERER HAS NO WINDOW` — padglhost went headless and its own
+  line says why. The run continues (the guest boots, the sound plays, the
+  playfield answers) and shows no picture at all.
+
+`DISPLAY` being SET is not the same as an X server being reachable: WSLg sets it
+when the distro starts and never takes it back. `pad_display_state` (padpath.sh)
+is the real question, and `masked` is the one worth knowing about — WSLg's socket
+lives in its own tmpfs and WSL bind-mounts it to `/tmp/.X11-unix`, so anything
+that mounts a fresh `/tmp` over that bind (systemd's `tmp.mount`) hides it from
+libX11 while leaving it in `/mnt/wslg/.X11-unix`. watch.sh binds it back when it
+is root, which the app's own launch is; by hand it is
+
+```bash
+sudo mount --bind /mnt/wslg/.X11-unix /tmp/.X11-unix
+```
+
 ## The coin door interlock, which explains a whole class of "it does nothing"
 
 The emulated machine keeps the real one's interlock and it is not optional:

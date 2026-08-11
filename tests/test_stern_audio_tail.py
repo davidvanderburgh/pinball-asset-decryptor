@@ -1580,11 +1580,13 @@ class _CaveRig:
     FIRST_OFF = 0x800
     WIN_LO, WIN_HI = 0x1000, 0x1200
 
-    def __init__(self):
+    def __init__(self, cave_va=None):
         import struct as _s
 
         from pinball_decryptor.plugins.stern import engine as E
         self.uc = pytest.importorskip("unicorn")
+        if cave_va is not None:                         # out of branch reach
+            self.CAVE = cave_va
         self.ret = self.FN + 12
         prologue = _s.pack("<III", *E._CAVE_SIG)
         ncode = E._CAVE_NCODE
@@ -1593,6 +1595,7 @@ class _CaveRig:
         self.sig_va = self.CAVE + 50 * 4
         self.stock_va = self.table_va + 2 * 12          # one window + sentinel
         self.sig = bytes(range(0x11, 0x21))             # distinctive, not a run
+        self.entry = E._cave_entry_patch(self.FN, self.CAVE)
 
         cave = bytearray(E._asm_derive_redirect_cave(
             prologue, lambda va: va - self.FN, self.FN, self.ret, self.CAVE,
@@ -1602,8 +1605,11 @@ class _CaveRig:
                  + _s.pack("<III", 0, 0, 0))
         self.blob = bytes(cave) + table + b"\x5a" * 0x200   # stock window copy
 
-    def run(self, r1, r2):
-        """Execute the cave once; return ``(final_r1, basevar)``."""
+    def run(self, r1, r2, via_fn=False):
+        """Execute the cave once; return ``(final_r1, basevar)``.
+
+        ``via_fn`` starts at the patched window-read function instead of the
+        cave, so the entry patch is executed too."""
         import struct as _s
 
         from unicorn import UC_ARCH_ARM, UC_MODE_ARM, Uc
@@ -1615,6 +1621,7 @@ class _CaveRig:
                            (self.STACK, 0x10000)):
             mu.mem_map(base, size)
         mu.mem_write(self.CAVE, self.blob)
+        mu.mem_write(self.FN, self.entry)
         # The "image": the calibration signature sits at FIRST_OFF, and the
         # window carries card bytes that must NOT be what the derive ends up
         # reading once the redirect fires.
@@ -1624,7 +1631,7 @@ class _CaveRig:
         mu.reg_write(UC_ARM_REG_SP, self.STACK + 0x8000)
         mu.reg_write(UC_ARM_REG_R1, r1)
         mu.reg_write(UC_ARM_REG_R2, r2)
-        mu.emu_start(self.CAVE, self.ret)
+        mu.emu_start(self.FN if via_fn else self.CAVE, self.ret)
         basevar = _s.unpack("<I", mu.mem_read(self.basevar_va, 4))[0]
         return mu.reg_read(UC_ARM_REG_R1), basevar
 
@@ -1764,6 +1771,60 @@ def test_cave_recalibrates_if_the_image_moves():
     assert call(alt + rig.WIN_LO) == rig.stock_va
 
 
+def test_cave_out_of_branch_reach_is_entered_and_returned_from():
+    """A cave more than 32 MB from the window-read function, at the instruction
+    level: in through the veneer at fn, out through the absolute return.
+
+    Both hops used to be plain ARM branches, whose 24-bit offset is masked
+    rather than checked, so a far cave would have jumped to a wrapped address
+    instead of failing.  Placement refused to go that far, which is what capped
+    a blip-free build at whatever fits the title's text/data gap (PAD-56)."""
+    import struct as _s
+
+    from pinball_decryptor.plugins.stern import engine as E
+    near, far = _CaveRig(), _CaveRig(cave_va=0x4000000)
+    assert abs(far.CAVE - (far.FN + 8)) >= E._CAVE_MAX_BRANCH
+
+    # In: the near cave keeps the plain branch, the far one gets the veneer.
+    assert len(near.entry) == 4
+    assert far.entry == _s.pack("<II", 0xE51FF004, far.CAVE)
+    # Out: `b ret` while it reaches, `ldr pc,=ret` when it doesn't.
+    assert _s.unpack_from("<I", near.blob, 44 * 4)[0] >> 24 == 0xEA
+    assert _s.unpack_from("<I", far.blob, 44 * 4)[0] == 0xE59FF000 | 32
+    assert _s.unpack_from("<I", far.blob, 54 * 4)[0] == far.ret
+
+    # And it all runs: entered at the function's own address, the far cave
+    # calibrates, redirects a window into its stock copy and returns to fn+12.
+    r1, base = far.run(far.IMG + far.FIRST_OFF, 0x200, via_fn=True)
+    assert base == far.IMG, hex(base)
+    assert r1 == far.IMG + far.FIRST_OFF
+
+    # BASEVAR lives in the cave's own memory, so the calibrating call and the
+    # reads it serves have to share one emulator, as they do in one game process.
+    from unicorn import UC_ARCH_ARM, UC_MODE_ARM, Uc
+    from unicorn.arm_const import UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_SP
+    mu = Uc(UC_ARCH_ARM, UC_MODE_ARM)
+    for base_, size in ((far.FN, 0x1000), (far.CAVE, 0x2000),
+                        (far.IMG, 0x4000), (far.STACK, 0x10000)):
+        mu.mem_map(base_, size)
+    mu.mem_write(far.CAVE, far.blob)
+    mu.mem_write(far.FN, far.entry)
+    mu.mem_write(far.IMG + far.FIRST_OFF, far.sig)
+    mu.reg_write(UC_ARM_REG_SP, far.STACK + 0x8000)
+
+    def call(r1_, r2=0x200):
+        mu.reg_write(UC_ARM_REG_R1, r1_)
+        mu.reg_write(UC_ARM_REG_R2, r2)
+        mu.emu_start(far.FN, far.ret)
+        return mu.reg_read(UC_ARM_REG_R1)
+
+    call(far.IMG + far.FIRST_OFF)
+    assert _s.unpack("<I", mu.mem_read(far.basevar_va, 4))[0] == far.IMG
+    assert call(far.IMG + far.WIN_LO) == far.stock_va
+    assert call(far.IMG + far.WIN_LO + 0x40) == far.stock_va + 0x40
+    assert call(far.IMG + far.WIN_HI) == far.IMG + far.WIN_HI
+
+
 def test_card_bytes_at_overlays_the_replacement(tmp_path):
     """The calibration signature has to be the CARD's bytes: the read it
     identifies happens after the replaced bodies are on the card, so a signature
@@ -1780,9 +1841,12 @@ def test_card_bytes_at_overlays_the_replacement(tmp_path):
     assert got == bytes(range(0x38, 0x40)) + b"\xff" * 8
 
 
-def _fake_elf(gap=0x8000, with_gnu_stack=True, nload=2):
+def _fake_elf(gap=0x8000, with_gnu_stack=True, nload=2, data_memsz=0x800):
     """Minimal 32-bit LE ARM ET_EXEC with two PT_LOADs separated by *gap* bytes
-    of unclaimed VA, plus the advisory PT_GNU_STACK the cave repurposes."""
+    of unclaimed VA, plus the advisory PT_GNU_STACK the cave repurposes.
+
+    ``data_memsz`` sets how far the data segment reaches, which is what decides
+    whether the free space above it is within branch reach of the text."""
     PAGE = 0x1000
     phnum = nload + (1 if with_gnu_stack else 0)
     phoff, phent = 0x34, 32
@@ -1798,7 +1862,7 @@ def _fake_elf(gap=0x8000, with_gnu_stack=True, nload=2):
     struct.pack_into("<H", raw, 0x2a, phent)
     struct.pack_into("<H", raw, 0x2c, phnum)
     entries = [(1, 0, text_va, text_sz, text_sz, 5),
-               (1, 0x3000, data_va, 0x400, 0x800, 6)][:nload]
+               (1, 0x3000, data_va, 0x400, data_memsz, 6)][:nload]
     if with_gnu_stack:
         entries.append((0x6474E551, 0, 0, 0, 0, 7))
     for i, (t, off, va, fz, mz, fl) in enumerate(entries):
@@ -1853,10 +1917,40 @@ def test_append_cave_segment_refuses_when_it_cannot_place_safely():
     with pytest.raises(RuntimeError, match="PT_GNU_STACK"):
         E._append_cave_segment(raw, 1195, fn=0x9000)
 
-    # Out of ARM branch reach of the window-read function (+/-32 MB).
+    # Nothing unclaimed is big enough anywhere.
     raw, _te, _dv = _fake_elf()
-    with pytest.raises(RuntimeError, match="branch reach"):
-        E._append_cave_segment(raw, 1195, fn=0x8000000)
+    with pytest.raises(RuntimeError, match="fits a"):
+        E._append_cave_segment(raw, 33 << 20, fn=0x9000)
+
+
+def test_append_cave_segment_reaches_past_a_branch_when_the_near_gap_is_small():
+    """A cave too big for the free space in branch reach is placed out of reach
+    rather than refused, and the near gap still wins when the cave fits it.
+
+    The cave carries ~1 KB of stock window copies per replaced sound, so a
+    title whose text/data gap is small has a low ceiling on how many sounds a
+    blip-free build can cover -- 28 KB and ~27 sounds on Led Zeppelin LE 1.22,
+    whose only other free region starts 64 MB up.  Refusing that placement is
+    what silently dropped a 201-sound build back to the standard build
+    (PAD-56)."""
+    from pinball_decryptor.plugins.stern import engine as E
+
+    # One page of gap, then a data segment reaching well past a single branch.
+    raw, text_end, data_va = _fake_elf(gap=0x1000, data_memsz=0x4000000)
+    near_va, _off, _gap = E._append_cave_segment(bytearray(raw), 0xf00, fn=0x9000)
+    assert text_end <= near_va < data_va, hex(near_va)
+    assert len(E._cave_entry_patch(0x9000, near_va)) == 4      # a plain branch
+
+    far_va, append_off, _gap = E._append_cave_segment(raw, 0x8000, fn=0x9000)
+    assert far_va >= data_va + 0x4000000, hex(far_va)
+    assert abs(far_va - 0x9008) >= E._CAVE_MAX_BRANCH
+    assert far_va % 0x1000 == append_off % 0x1000               # loader congruence
+    assert len(raw) >= append_off + 0x8000
+
+    # The entry patch becomes the absolute veneer, and it stays in ARM state.
+    entry = E._cave_entry_patch(0x9000, far_va)
+    assert entry == struct.pack("<II", 0xE51FF004, far_va)
+    assert far_va % 4 == 0
 
 
 def test_sidx_record_writes_carry_the_new_size():

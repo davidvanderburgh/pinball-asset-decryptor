@@ -784,9 +784,33 @@ static void *vid_thread(void *arg)
         if (s->paused) { t_epoch = 0; usleep(5000); continue; }
         /* item 43's other half: the door. An adopted stream never passes
          * through prepare(), so the arm-side refusal alone left one channel
-         * painting the menu band. Held, not killed: closing the door resumes
-         * the clip where it paused. */
-        if (vid_door_blocked()) { t_epoch = 0; usleep(20000); continue; }
+         * painting the menu band.
+         *
+         * ▼ END the stream like a clip finishing - do NOT hold. The first
+         * version held (usleep loop), and David's hands found the cost in
+         * seconds: "the game just gets really slow and laggy the second we
+         * open the coin door". The game's sinks run sync=1 and its consumers
+         * WAIT on the next buffer; a held channel makes that wait time out
+         * every frame on every playing channel at once. EOS instead runs the
+         * game's own end-of-clip path; the loop-seek that follows is refused
+         * by the door gate, so the pipeline rests until the door shuts and a
+         * scene change rebuilds it. */
+        if (vid_door_blocked()) {
+            if (s->run_id != my_run) return 0;
+            s->pos_ns = pad_vid_duration_ns(s->pipeline);
+            VLOG("[vid] ch%d door opened mid-clip after %u frames; posting EOS "
+                 "(item 43)\n", chan_of(s), consumed);
+            {
+                const unsigned char *b = (const unsigned char *)s->decoder;
+                s->eos_loop = b ? b[4] : 1;
+                s->eos_us = vid_us();
+                if (!s->eos_us) s->eos_us = 1;
+            }
+            s->playing = 0;
+            c->playing = 0;
+            post_eos(s->pipeline);
+            return 0;
+        }
         produced = c->write_idx;
         if (consumed >= produced) {
             if (c->eos) {

@@ -1137,18 +1137,32 @@ These have each been violated at least once and each cost a run or a window:
       is 1987 cartoon). And the RED brushed pages David asked about are
       godzilla's System 4.31 style — turtles' 4.28 splash has always been
       the dark tiled-logo look.
-      **Resume — two runs, neither taken because David's own session was
-      live:** (1) ordinary boot, NO door env — the backdrops must be back
-      (zero "refused" lines, tiled logo behind Tech Alerts/splash);
-      (2) `PAD_DOOR_OPEN=1` boot — the dot menu must still appear. Then
-      David tries the ritual from a terminal (the app cannot pass the env
-      yet):
-      `wsl -u root -e env HOME=/home/david PAD_PIVOT=1 PAD_DOOR_OPEN=1
-      PAD_CARD=<card> bash <worktree>/tools/spike2_emu/watch.sh 120`
-      and says whether it is acceptable (mid-session door-open cannot work —
-      the choice is latched at init). If yes, close; wishlist: an
-      Emulate-tab "Service mode" checkbox, and auto-detecting 4.28-family
-      titles from the card's VERSION data.
+      **★ DAVID'S SECOND TRY (18:47) VERIFIED THE BOOT FIX** — zero spurious
+      refusals, backdrops served from 17 s — **and found the next fault: "the
+      game just gets really slow and laggy the second we open the coin
+      door."** The door hold was the cost: the game's sinks run `sync=1` and
+      its consumers WAIT for the next buffer, so every held channel stalled
+      the game's loop on a timeout per frame. ▼ Changed (uncommitted-build,
+      committed-source): door-open now posts **EOS** on each playing stream —
+      the game's own end-of-clip path runs, the follow-up loop-seek is
+      refused, the pipeline rests. No waits.
+      **THE BAR DAVID SET, and the item does not close under it until met:
+      "it should seamlessly transition to the green screen like it does on
+      the real pinball machine" — MID-SESSION door-open must work.** The
+      init-latch observation (three runs) says the game does not re-evaluate
+      video-vs-dots after boot; whether that holds once door-open KILLS the
+      pipelines via EOS (a dead object, not a failed re-arm) is exactly what
+      the next run must answer.
+      **Resume — runs, in order, when the rig is free:** (1) ordinary boot,
+      no door env: backdrops still fine, zero refusals; (2) boot normal,
+      then open the door MID-SESSION (playfield click on 33), walk to the
+      menu: is it green now, and is the lag gone? (3) if still video:
+      `PAD_DOOR_OPEN=1` boot must still give the green menu (the known-good
+      path). The gap between (2) and (3), if it remains, is the init-latch,
+      and closing it means finding what the game consults at page-build —
+      PAD_GST_TRACE around the mid-session menu entry is the instrument.
+      Wishlist: Emulate-tab "Service mode" checkbox; auto-detect 4.28
+      titles.
       *(**Filed as 42 and renumbered to 43 on 2026-08-11 before merging**: David
       took 42 for the save-state portability item on main the same afternoon,
       and this branch had not landed yet. Numbers are stable IDs and are never

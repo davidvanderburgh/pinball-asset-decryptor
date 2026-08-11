@@ -153,9 +153,12 @@ HELP_CONTENT = {
          "box filters by name — with auto-naming on, that includes the "
          "transcribed call-out text and matched song titles. The Type "
          "dropdown (shown when the folder classifies) filters to one kind "
-         "of audio: Music (song/bank tracks plus anything at least 20 "
-         "seconds long — some pins store songs as Sound-Test-named "
-         "sequences), Sound FX (named by the game's own Sound Test menu), "
+         "of audio: Music (the song and bank tracks — and on a game whose "
+         "own naming identifies no music at all, anything at least 20 "
+         "seconds long instead, because some pins store their songs as "
+         "Sound-Test-named sequences; a slot promoted that way reads Music "
+         "in the Type column too, so the column and the filter always "
+         "agree), Sound FX (named by the game's own Sound Test menu), "
          "Callouts (speech — needs Auto-name call-outs to have run), or "
          "Other. The Show dropdown narrows the list by change state: "
          "Changed = the slots you've replaced or that already differ from "
@@ -719,7 +722,10 @@ HELP_CONTENT = {
          "firmware but never listed. This isn't guesswork — the app reads the "
          "menu's own pages out of the game binary and works out what they "
          "can't reach. A build whose menu can't be read says so and flags "
-         "nothing rather than guessing."),
+         "nothing rather than guessing. Click a column header to sort the "
+         "list, again to reverse it, and a third time to put it back in the "
+         "firmware's own order; the value columns sort as numbers rather "
+         "than as the text in the cell."),
         ("Changing a setting the form doesn't draw",
          "Double-click any row in that list to set its default, including the "
          "Debug ones. It stages and logs exactly like the form above, and the "

@@ -297,6 +297,11 @@ def test_the_global_is_written_on_every_settings_save(tmp_path, monkeypatch):
         _current_mfr=None,
         _settings=settings,
         root=SimpleNamespace(winfo_geometry=lambda: "1x1"),
+        # The save also records the window state; a 1x1 footprint is below
+        # the "don't persist a window you can't see" floor, so nothing but
+        # the maximized flag comes out of it here.
+        _window_is_maximized=lambda: False,
+        _last_normal_geometry=None,
         window=SimpleNamespace(
             _current_theme="dark",
             _last_browse_dirs=None,

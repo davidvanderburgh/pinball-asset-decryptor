@@ -20,8 +20,9 @@ import pytest
 from pinball_decryptor.gui import emulate_tab
 
 from pinball_decryptor.gui.emulate_tab import (DEFAULT_RIG_DIR, parse_status,
-                                               rig_cmd_root, setup_notice,
-                                               setup_ok, setup_state,
+                                               rig_cmd_root, setup_extras,
+                                               setup_notice, setup_ok,
+                                               setup_settled, setup_state,
                                                setup_summary, state_text,
                                                _NEEDS_WSL_RESTART, _wsl_path)
 
@@ -1008,6 +1009,94 @@ def test_a_rig_that_never_heard_of_the_decoder_accuses_nobody():
     assert setup_notice(older, can_fix=True) == ""
 
 
+# ----------------------------------------------------------------------
+# AND THE ONE THAT IS NOT ABOUT STARTING AT ALL (PAD-53).
+#
+# v0.126.0 made every Start a checkpointable (PAD_PIVOT) boot so the save-state
+# controls could simply be on.  That boot needs a native static busybox, which
+# no machine has by default and which was on no prerequisite list anywhere -
+# and run_game.sh's answer to a pivot it cannot do was to stop.  A user on
+# 2026-08-11 ran star_wars_le and iron_maiden_pro, both of which had worked
+# before, and got no window at all:
+#
+#     [run] PAD_PIVOT needs a STATIC busybox at /bin/busybox
+#     [watch] the game never started.
+#
+# watch.sh now withdraws the request and boots the ordinary way, so the cost is
+# the FEATURE.  Which is why this package is not in _SETUP_TOOLS: a machine
+# missing it runs the emulator perfectly, and "this PC cannot run the emulator"
+# in front of it would be the same false accusation every other rule here
+# guards against.
+# ----------------------------------------------------------------------
+
+def test_the_save_state_package_does_not_stop_the_emulator():
+    facts = _facts(busybox="0")
+    assert setup_ok(facts), "a missing extra must not read as a dead emulator"
+    assert not setup_settled(facts), "...but there IS something to say"
+    assert [pkg for pkg, _ in setup_extras(facts)] == ["busybox-static"]
+    # It is not in the list that decides whether a run can start.
+    assert setup_summary(facts)[0] == []
+
+
+def test_the_notice_leads_with_the_emulator_working():
+    """The headline is the difference between a true notice and a false one:
+    this machine runs every title, and telling its owner it cannot is how a
+    correct warning turns into a wrong one."""
+    text = setup_notice(_facts(busybox="0"), can_fix=True)
+    assert "cannot run the emulator" not in text
+    assert "The emulator runs on this PC" in text
+    assert "Save states need" in text
+    assert "busybox-static" in text
+    # ...and it must not invent a second fault to explain itself with.
+    assert "32-bit ARM" not in text
+
+
+def test_the_button_offers_to_install_the_save_state_package():
+    """The button lives UNDER this notice.  Hiding the notice on a machine
+    that only misses an extra would have left nothing to press, and the
+    package invisible."""
+    text = setup_notice(_facts(busybox="0"), can_fix=True)
+    assert "installs those in WSL" in text
+    steps = emulate_tab.setup_fix_steps(_facts(busybox="0"))
+    assert any("busybox-static" in s for s in steps), (
+        "the consent list must name what the button is about to install")
+
+
+def test_linux_asks_for_it_at_the_command_line_like_everything_else():
+    text = setup_notice(_facts(busybox="0", iswsl="1"), can_fix=False)
+    assert "sudo apt install busybox-static" in text
+
+
+def test_a_linux_desktop_is_not_told_about_a_windows_only_shape():
+    """watch_cmd asks for the checkpointable boot on Windows and nowhere else,
+    so a Linux Start never wants a static busybox - and a package a machine's
+    runs would never use is not a prerequisite of that machine."""
+    facts = _facts(busybox="0", iswsl="0", wslconf="1")
+    assert setup_extras(facts) == []
+    assert setup_settled(facts)
+    assert setup_notice(facts, can_fix=False) == ""
+
+
+def test_a_rig_that_never_heard_of_the_save_state_package_accuses_nobody():
+    """An older setupcheck.sh emits no `busybox` line at all - the same
+    direction every other fact here takes."""
+    assert setup_extras(_facts()) == []
+    assert setup_settled(_facts())
+    assert setup_notice(_facts(), can_fix=True) == ""
+
+
+def test_an_uninstallable_extra_does_not_ask_for_a_new_linux():
+    """"Replace your distro" is the answer to an emulator that cannot run.
+    Answering a switched-off feature with it would be wildly out of
+    proportion - and the machine saying so runs every title today."""
+    facts = _facts(busybox="0", nocand="busybox-static", universe="1",
+                   indexed="1")
+    text = setup_notice(facts, can_fix=True)
+    assert "wsl --install" not in text
+    assert "save states stay off" in text
+    assert "titles start and run exactly as they do now" in text
+
+
 def test_the_run_says_it_once_when_the_decoder_is_missing_anyway():
     """THE BACKSTOP, for a run started outside this tab.
 
@@ -1117,7 +1206,10 @@ def test_the_repair_installs_exactly_the_packages_the_tab_names():
     a space, and this is the seam where those two have to mean the same."""
     check = _rig_text("setupcheck.sh").replace(",", " ")
     fix = _rig_text("setupfix.sh")
-    for key, pkg, _why in emulate_tab._SETUP_TOOLS:
+    # The optional ones are installed by the same button off the same `need`
+    # list, so they are held to the same seam.
+    for key, pkg, _why in (emulate_tab._SETUP_TOOLS
+                           + emulate_tab._SETUP_OPTIONAL):
         assert 'sudo' not in pkg
         assert pkg in check, "%s (%s) is explained but never installed" % (
             pkg, key)

@@ -210,6 +210,37 @@ else
          "${NB_WHY:-reason unavailable}"
 fi
 
+# ---- A CHECKPOINTABLE BOOT IS AN EXTRA, NOT A CONDITION OF STARTING -------
+#
+# THE FAULT THIS FIXES, reported 2026-08-11 against star_wars_le and
+# iron_maiden_pro, both of which had run on that machine before:
+#
+#     [run] PAD_PIVOT needs a STATIC busybox at /bin/busybox
+#     [watch] the game never started.
+#
+# Since v0.126.0 the app asks for PAD_PIVOT=1 on EVERY start, because that is
+# the only shape criu can dump and the save-state controls are simply on. The
+# pivot needs one thing an ordinary boot does not (pad_static_busybox, and see
+# there for why), that thing is a package no machine has by default, and it
+# was on NO prerequisite list - so the release that added save states took the
+# emulator away from everyone who did not happen to have busybox-static.
+#
+# run_game.sh's answer to a pivot it cannot do is `exit 1`, which is right for
+# a run that ASKED for one by hand. Here it is wrong: the boot this rig has
+# always done still works perfectly, and losing an extra must not cost the
+# whole run. So the request is withdrawn, out loud, and the run continues in
+# the shape it had before item 13 existed. Withdrawn HERE, before the cfg dump
+# below and before anything reads PAD_PIVOT, so the log names the shape that
+# actually ran and the playfield does not offer Save/Load buttons that could
+# only fail (see PF_STATES).
+if [ -n "${PAD_PIVOT:-}" ] && ! pad_static_busybox; then
+    echo "[watch] no static busybox here, so this run cannot be checkpointed:"
+    echo "[watch]   save states are off. To turn them on:"
+    echo "[watch]   sudo apt install busybox-static     (then start again)"
+    echo "[watch] starting WITHOUT them - nothing else about the run changes."
+    unset PAD_PIVOT
+fi
+
 # ---- WHAT THIS RUN ACTUALLY IS, in the run's own log ----------------------
 #
 # REMAINING item 16 (replay a session from its log) was filed believing this

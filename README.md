@@ -795,7 +795,8 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    Runs on Linux, and on Windows through WSL2. The rig ships with the
    app, in `tools/spike2_emu`, and the prerequisites installer pulls in
    what it needs (`qemu-user-static`, an ARM cross-compiler, `gcc` +
-   `libc6-dev`, `e2fsprogs`, `fuse3`, `ffmpeg`, `python3-tk`). Two
+   `libc6-dev`, `e2fsprogs`, `fuse3`, `ffmpeg`, `python3-tk`,
+   `busybox-static`). Two
    compilers, because two different things get built: the hardware shim
    is ARM and the renderer that draws the picture is a native binary for
    your own PC, so having one of them says nothing about having the
@@ -809,6 +810,15 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    window and hold 60 fps, and play black and silent. The run now
    checks for it before it starts and says so in one line naming the
    package, instead of leaving it to arrive as a decode error per clip.
+   `busybox-static` is the odd one out in the other direction: it is
+   what *save states* need, not what the emulator needs. The
+   checkpointable boot swaps its root for the guest's and then has to
+   let go of yours, which takes a native static program inside the guest
+   root — and no machine has one by default. A run that can't find it
+   starts anyway, in the boot shape the rig has always used, and says in
+   one line that save states are off and which package turns them on;
+   the tab says the same thing before you press Start, without claiming
+   the PC can't emulate, because it can.
    The tab checks for those before
    you press anything, instead of leaving the run to hit them one
    failure at a time: on a machine that already has them there is

@@ -447,6 +447,33 @@ _SETUP_TOOLS = (
      "decodes the game's video and sound, which it cannot decode itself"),
 )
 
+#: WHAT A FEATURE NEEDS, WHICH IS NOT WHAT THE EMULATOR NEEDS.  Same shape as
+#: _SETUP_TOOLS and probed by the same setupcheck.sh loop, but kept apart
+#: because missing one of these does not stop a run - and a notice that says
+#: "this PC cannot run the emulator" over a machine that runs it perfectly is
+#: the same wrong-accusation fault this file guards against everywhere else.
+#:
+#: THE FAULT THAT PUT IT HERE.  v0.126.0 made every Start a checkpointable
+#: (PAD_PIVOT) boot so the save-state controls could simply be on.  That boot
+#: needs a native static busybox, no machine has one by default, it was on no
+#: prerequisite list at all - and run_game.sh's answer to a pivot it cannot do
+#: was to stop.  So the release that added save states took the WHOLE emulator
+#: away from anyone without busybox-static, which is how a user reported it on
+#: 2026-08-11: two titles that had run before, no window, and
+#:
+#:     [run] PAD_PIVOT needs a STATIC busybox at /bin/busybox
+#:     [watch] the game never started.
+#:
+#: watch.sh now withdraws the request and runs the ordinary boot instead, so
+#: the cost is the feature.  This list is how the user gets told that BEFORE
+#: the save slots turn out to do nothing, and how “Set up emulator…” is given
+#: something to install.
+_SETUP_OPTIONAL = (
+    ("busybox", "busybox-static",
+     "save states: the guest is booted in the one shape that can be frozen "
+     "and reloaded, and that shape needs a static busybox"),
+)
+
 #: How long to give the setup probe.  It is five `command -v`s, one small
 #: compile and a read of /proc, so it answers in well under a second on a warm
 #: WSL - the timeout is entirely for a COLD one, where `wsl.exe` has to boot
@@ -511,6 +538,25 @@ def setup_summary(facts):
     return missing, facts.get("binfmt", "1")
 
 
+def setup_extras(facts):
+    """The missing packages that cost a FEATURE rather than the emulator.
+
+    Absent facts accuse nobody, the same as everywhere else here: an older rig
+    emits no ``busybox`` line, and silence is not a missing package.
+
+    ASKED ONLY WHERE THE FEATURE IS.  ``watch_cmd`` requests the checkpointable
+    boot on Windows and nowhere else, so a Linux desktop's Start never wants a
+    static busybox at all - and a notice about a package that machine's runs
+    would never use is the same wrong accusation as any other.  Decided from
+    the rig's own ``iswsl`` fact rather than from sys.platform, so the answer
+    is about the machine the run happens on.
+    """
+    if not facts or facts.get("iswsl") == "0":
+        return []
+    return [(pkg, why) for key, pkg, why in _SETUP_OPTIONAL
+            if facts.get(key) == "0"]
+
+
 def setup_unavailable(facts):
     """The missing packages apt cannot install on this machine at all.
 
@@ -569,7 +615,10 @@ def setup_fixable(facts):
     if not unavailable:
         return True             # nothing left that cannot be got somehow
     missing, binfmt = setup_summary(facts)
-    if any(pkg not in unavailable for pkg, _ in missing):
+    # Extras count here: the button installs them too, so a machine whose only
+    # installable package is a save-state one still has something to press.
+    if any(pkg not in unavailable
+           for pkg, _ in missing + setup_extras(facts)):
         return True             # some of them still install
     # Nothing installable left.  Switching a handler that is merely off back
     # on is the one repair that needs no package.
@@ -580,6 +629,18 @@ def setup_ok(facts):
     """Can this machine emulate?  Unknown counts as yes - see setup_state."""
     missing, binfmt = setup_summary(facts)
     return not missing and binfmt == "1"
+
+
+def setup_settled(facts):
+    """Is there NOTHING left to say about this machine?
+
+    Different from setup_ok, and the difference is the whole of _SETUP_OPTIONAL:
+    a PC can run the emulator (setup_ok) and still be missing what its save
+    states need.  The tab shows its notice on this, so that "runs, but the save
+    slots will not" is a thing it can say - and stays silent on the machine
+    that has everything, which is what it did before.
+    """
+    return setup_ok(facts) and not setup_extras(facts)
 
 
 def setup_fix_steps(facts):
@@ -593,6 +654,11 @@ def setup_fix_steps(facts):
     """
     facts = facts or {}
     missing, binfmt = setup_summary(facts)
+    # THE BUTTON INSTALLS THE EXTRAS TOO, so the consent list has to name them:
+    # setupfix.sh installs whatever setupcheck.sh reports as `need`, which is
+    # every probe that came back 0 - this list is what the user agreed to, and
+    # it may not be shorter than what is about to happen.
+    missing = missing + setup_extras(facts)
     unavailable = setup_unavailable(facts)
     fetch = [p for p in unavailable if p in setup_fetchable(facts)]
     steps = []
@@ -640,11 +706,23 @@ def setup_notice(facts, can_fix):
     which names the shell and not the missing thing, arrives after Start has
     said "Starting…", and is the one of the rig's four guest-exec faults that
     it cannot repair by itself (the other three it fixes without asking).
+
+    AND IT HAS A SECOND, QUIETER JOB: a machine can run the emulator and still
+    be missing what SAVE STATES need (_SETUP_OPTIONAL).  That gets its own
+    headline, because telling someone whose emulator works that his PC cannot
+    run it is how a correct notice becomes a false one.
     """
-    if setup_ok(facts):
+    if setup_settled(facts):
         return ""
     missing, binfmt = setup_summary(facts)
-    parts = ["This PC cannot run the emulator yet."]
+    extras = setup_extras(facts)
+    if setup_ok(facts):
+        # Everything the RUN needs is here; what is missing costs a feature.
+        # Lead with the good news, because the alternative wording has just
+        # told a working machine that it is broken.
+        parts = ["The emulator runs on this PC. Save states do not yet."]
+    else:
+        parts = ["This PC cannot run the emulator yet."]
     if binfmt == "0":
         parts.append(
             "This machine has no handler registered for 32-bit ARM programs, "
@@ -656,6 +734,13 @@ def setup_notice(facts, can_fix):
     if missing:
         parts.append("Missing:\n" + "\n".join(
             "     •  %s — %s" % (pkg, why) for pkg, why in missing))
+    # LISTED APART FROM THE ONES ABOVE, and it has to be: those stop a run and
+    # this one does not.  A run started without it boots normally and simply
+    # cannot be frozen (watch.sh says the same thing in the log), so the line
+    # says what it costs rather than filing it under "missing".
+    if extras:
+        parts.append("Save states need:\n" + "\n".join(
+            "     •  %s — %s" % (pkg, why) for pkg, why in extras))
     # NOT INSTALLABLE IS NOT THE SAME AS MISSING, and saying only the first is
     # what sent a tester to press a button that could never work: the tab
     # named qemu-user-static, he pressed “Set up emulator…”, and apt answered
@@ -693,15 +778,25 @@ def setup_notice(facts, can_fix):
     if can_fix and not setup_fixable(facts):
         # The button is hidden in this state (see _setup_apply), so this is
         # the whole of what the user has to go on.
-        parts.append(
-            "“Set up emulator…” cannot get past this — there is nothing left "
-            "for it to install. PAD uses whichever distro WSL calls the "
-            "default, so a distro that does carry %s, made the default, is "
-            "the way through. In a Windows terminal:\n"
-            "     wsl --install -d %s\n"
-            "     wsl --set-default %s"
-            % (", ".join(unavailable) or "the packages",
-               KNOWN_GOOD_DISTRO, KNOWN_GOOD_DISTRO))
+        if setup_ok(facts):
+            # ...and when the emulator itself is fine, "replace your Linux" is
+            # a wildly out-of-proportion answer to a feature that is off.  Say
+            # what is lost, and leave the working machine alone.
+            parts.append(
+                "“Set up emulator…” cannot get %s from this distro, so save "
+                "states stay off. Everything else about the emulator is "
+                "unaffected — titles start and run exactly as they do now."
+                % (", ".join(unavailable) or "that"))
+        else:
+            parts.append(
+                "“Set up emulator…” cannot get past this — there is nothing "
+                "left for it to install. PAD uses whichever distro WSL calls "
+                "the default, so a distro that does carry %s, made the "
+                "default, is the way through. In a Windows terminal:\n"
+                "     wsl --install -d %s\n"
+                "     wsl --set-default %s"
+                % (", ".join(unavailable) or "the packages",
+                   KNOWN_GOOD_DISTRO, KNOWN_GOOD_DISTRO))
     elif can_fix:
         # ONLY THE PARTS IT IS ACTUALLY GOING TO DO.  Every earlier
         # prerequisite failed on machines whose handler was unregistered too,
@@ -714,7 +809,7 @@ def setup_notice(facts, can_fix):
         does = []
         if facts.get("universe") == "0":
             does.append("turns universe back on")
-        if missing:
+        if missing or extras:
             does.append("installs those in WSL")
         if binfmt == "0":
             does.append("registers the handler for 32-bit ARM programs")
@@ -745,7 +840,7 @@ def setup_notice(facts, can_fix):
         # a b` is all or nothing, so one such name in the list is an apt
         # command that installs none of the others.  That is the fault PAD-41
         # fixed in the rig, and it was still here in the advice the rig prints.
-        askable = [p for p, _ in missing
+        askable = [p for p, _ in missing + extras
                    if facts.get("universe") == "0" or p not in unavailable]
         if askable:
             cmds.append("sudo apt install " + " ".join(askable))
@@ -1295,10 +1390,15 @@ class EmulatePanel:
 
     def _setup_apply(self, facts):
         """Put the answer on the tab, or take it away when there is nothing to
-        say.  A machine that is ready carries no notice and no button."""
+        say.  A machine that is ready carries no notice and no button.
+
+        Ready is setup_settled, not setup_ok: a PC that runs the emulator and
+        cannot save it still has something to be told, and hiding the notice
+        there is how the save-state package would have stayed invisible - the
+        button that installs it lives under exactly this notice."""
         self._setup = facts
         try:
-            if setup_ok(facts):
+            if setup_settled(facts):
                 self._setup_btn.pack_forget()
                 self._setup_msg.pack_forget()
                 return

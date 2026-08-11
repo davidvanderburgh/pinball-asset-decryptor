@@ -139,6 +139,19 @@ These have each been violated at least once and each cost a run or a window:
       screenshot's. Typing feel (flipper latency through the pipe) is his
       hands' call too — the pipe is warm and a held key measured 1907/2000
       ms, but feel is the oracle item 17 says it is.
+      **★ ROUND 3, DAVID (2026-08-11, running turtles_pro from the card):
+      "the save state slots are not consistent with the game like they
+      should be." FIXED, and it was worse than labels:** the playfield's
+      picker parsed `slots.sh list` dropping the GAME field, so on turtles
+      it offered "1 - mech multiball" (a godzilla save) and "3 - sw game
+      play" (star_wars) as its own — and a Save into one would have
+      OVERWRITTEN another title's save. Now the game rides the parse,
+      foreign slots read "N · [godzilla_pro]" (listed, not hidden — hidden
+      would render "(empty)", which is the overwrite trap again), and
+      Save/Load refuse them with a status line pointing at the app's
+      Emulate tab. Same authority as the app's own filter: the game field
+      in slot.meta. Verified offline against the REAL slot set: turtles'
+      picker shows "1 · [godzilla_pro]".
       **Resume:** David plays with the playfield focused (flippers, service
       cluster, door toggle, a ball click); fix what his eyes and hands
       catch; then close — merge to main per the worktree rule.

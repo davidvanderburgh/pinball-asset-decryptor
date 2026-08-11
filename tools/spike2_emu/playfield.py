@@ -928,6 +928,10 @@ class TroughPanel:
     R = 7                 # ball radius, screen px
     GAP = 5               # between balls
     PAD = 5               # inside the panel's own background
+    #: The panel's own background, named because the per-ball hit pads have to
+    #: be filled with EXACTLY it to stay invisible - two hard-coded copies of a
+    #: colour is how a hit target becomes a visible grey square on one view.
+    BG = "#101010"
     #: Room under the balls for the position numbers. 9 clipped their
     #: descenders against the panel edge (offline check, 2026-08-10) - the
     #: numbers are the part that makes the ORDER checkable, so they get room.
@@ -947,11 +951,28 @@ class TroughPanel:
         x0 = x if "w" in anchor else x - w
         y0 = y - h if "s" in anchor else y
         self.bg = cv.create_rectangle(x0, y0, x0 + w, y0 + h,
-                                      fill="#101010", outline="#3a3a3a")
+                                      fill=self.BG, outline="#3a3a3a")
         self.items.append(self.bg)
         cy = y0 + self.PAD + self.R
         for i, P in enumerate(positions):
             cx = x0 + self.PAD + self.R + i * step
+            # ★ THE HIT TARGET IS THE WHOLE CELL, AND IT IS ITS OWN ITEM.
+            # David, 2026-08-11: "when hovering over the circles, it's not
+            # always indicating that i can click on it." The cause is a Tk
+            # rule rather than a mis-binding: an item with `fill=""` is
+            # hittable ONLY ON ITS OUTLINE, and an EMPTY position is drawn
+            # hollow - so a ball with a ball in it was a 14 px disc and an
+            # empty one was a 1 px ring. Exactly "not always".
+            #
+            # Filling the empty ones would fix the hover and lose the thing
+            # the panel is for (hollow reads as no ball). So the target is a
+            # rectangle covering the ball AND its number, filled with the
+            # panel's own background so it is invisible, drawn BEFORE them so
+            # it stays underneath. The cell is ~19x26 px instead of a ring.
+            pad = cv.create_rectangle(cx - step / 2.0 + 1, y0 + 1,
+                                      cx + step / 2.0 - 1, y0 + h - 1,
+                                      fill=self.BG, outline="")
+            self.items.append(pad)
             b = cv.create_oval(cx - self.R, cy - self.R, cx + self.R,
                                cy + self.R, fill="", outline="#666",
                                width=1)
@@ -963,11 +984,11 @@ class TroughPanel:
                                  text=str(P["pos"]))
             self.items.append(num)
             if on_ball is not None:
-                # The NUMBER is bound too, not just the ball. These dots are 7
-                # px across and the digit under one is as much of a target as
-                # the dot is; a control that only works if you hit the circle
-                # reads as an intermittent control.
-                for it in (b, num):
+                # All three, because Enter/Leave fire per ITEM: crossing from
+                # the pad onto the ball is a Leave and an Enter, and binding
+                # only the pad would drop the cursor the moment the pointer
+                # reached the thing it was aiming at.
+                for it in (pad, b, num):
                     cv.tag_bind(it, "<Button-1>",
                                 lambda e, i=i: self._click(i))
                     cv.tag_bind(it, "<Enter>",

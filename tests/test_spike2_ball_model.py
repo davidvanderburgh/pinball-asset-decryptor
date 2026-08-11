@@ -362,6 +362,47 @@ def test_the_click_is_bound_to_the_dot_and_stops_there():
         root.destroy()
 
 
+def test_an_EMPTY_dot_is_clickable_across_its_whole_cell_not_just_its_ring():
+    """David, 2026-08-11: "when hovering over the circles, it's not always
+    indicating that i can click on it."
+
+    The cause is a Tk rule, not a mis-binding: an item drawn with `fill=""` is
+    hittable ONLY ON ITS OUTLINE, and an empty trough position is drawn
+    hollow - so an occupied dot was a 14 px disc and an empty one a 1 px ring.
+
+    THIS GENERATES A REAL POINTER EVENT rather than calling `_click`, because
+    that Tk rule is the thing under test and a direct call cannot see it:
+    `event_generate` with coordinates goes through the canvas's own hit
+    testing, exactly as a mouse does. Before the per-cell hit pad, a click at
+    the centre of an EMPTY dot reached nothing at all.
+    """
+    said = []
+    root, panel = _panel(said.append)
+    try:
+        panel.update([False] * 6, "x")           # every position hollow
+        root.update()
+        x0, y0, x1, y1 = panel.cv.coords(panel.balls[2])
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2    # dead centre of the ring
+        panel.cv.event_generate("<Button-1>", x=int(cx), y=int(cy))
+        root.update()
+        assert said == ["drain"], "a click in the middle of a hollow dot"
+        # And the corner of the cell, which is not on the circle at all.
+        panel.cv.event_generate("<Button-1>", x=int(cx + 8), y=int(cy + 9))
+        root.update()
+        assert said == ["drain", "drain"], "a click on the cell, off the dot"
+    finally:
+        root.destroy()
+
+
+def test_the_hit_pad_is_invisible_against_the_panel():
+    """It is a filled rectangle over a dark panel; the two colours are one
+    constant precisely so a hit target cannot become a visible grey square."""
+    import playfield
+    src = open(os.path.join(RIG, "playfield.py"), encoding="utf8").read()
+    assert 'fill=self.BG, outline=""' in src
+    assert playfield.TroughPanel.BG == "#101010"
+
+
 def test_a_panel_with_no_callback_is_not_clickable_at_all():
     """The schematic view builds one before its driver exists in some paths;
     a panel with nothing to call must simply not bind."""

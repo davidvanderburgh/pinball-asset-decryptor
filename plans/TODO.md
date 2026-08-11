@@ -463,6 +463,27 @@ These have each been violated at least once and each cost a run or a window:
       `tag_bind` returning `"break"`, NOT via `info`, so item 24's hit-test
       promise holds. Tested with real Tk, not a stub canvas: the thing under
       test is a binding.
+      **★★ (9) DAVID USED IT: "ok it's working well", 2026-08-11, plus two
+      faults he found by using it, both now fixed.**
+      **(a) "when hovering over the circles, it's not always indicating that i
+      can click on it."** A Tk rule, not a mis-binding, and "always" is the
+      clue: an item drawn with `fill=""` is hittable ONLY ON ITS OUTLINE, so a
+      filled ball was a 14 px disc and an EMPTY position — hollow on purpose —
+      was a 1 px ring. **Validated on a labelled example first** (two ovals,
+      one hollow one filled, a generated click at each centre: only the filled
+      one fired, and the hollow one only on its outline). Fixed with a
+      per-position hit pad the colour of the panel, covering ball AND number,
+      so the target is the whole cell. The regression test generates a REAL
+      pointer event, because a direct call cannot see the rule under test.
+      **(b) "plunge should not be auto-ejecting a ball either (it should just
+      get the ball out of the shooter lane)."** Correct, and it is a
+      consequence of this item: `plunge` predates anything that could feed a
+      ball, so it had to fabricate the whole story or there was nothing to
+      plunge. Now `plunge` launches the lane and only that, `serve` is the old
+      behaviour for a feeder-off run, and the TROUGH coil marker plays `serve`
+      (that marker IS the eject). The same fabrication was in coilact's AUTO
+      PLUNGER and is gone. No fallback when the lane is empty — serving a ball
+      "to be helpful" is the exact thing being removed.
       **Resume:** play a game into a multiball with a run FROM THIS BRANCH and
       read `~/padball.log` beside the screen — the acceptance is 2+ balls in
       play on the GAME's display, served by the feeder, and the log will say

@@ -14,9 +14,13 @@ plunge tells:
   start   pulse the Start button (36). The game then fires the trough eject
           itself, so run `plunge` a moment later to give it the ball. On its
           own this does NOT start a game unless there are credits.
-  plunge  the three steps above. The switch it OPENS is the one at the FAR end
-          of the trough, not the eject end - ballmodel.py has the ramp rule,
-          and what opening the wrong end did to the game (item 20).
+  plunge  launch whatever is in the shooter lane, and NOTHING else. It does
+          not eject a ball - ballfeed.py does that, when the game asks.
+  serve   what `plunge` used to be: eject a ball, land it in the lane, launch
+          it. For a run with the feeder off, and it is what the TROUGH coil
+          marker plays. The switch it OPENS is the one at the FAR end of the
+          trough, not the eject end - ballmodel.py has the ramp rule, and what
+          opening the wrong end did to the game (item 20).
   drain   a ball in play comes home: the lowest-numbered OPEN trough position
           closes. The other half of a plunge, and the only way a multiball
           can end, because nothing here simulates a playfield.
@@ -195,11 +199,53 @@ def _mrg(m):
 
 
 def do_plunge(m):
+    """Launch what is in the shooter lane. THAT IS ALL IT DOES NOW.
+
+    ★ DAVID, 2026-08-11: "plunge should not be auto-ejecting a ball either
+    (it should just get the ball out of the shooter lane)." He is right, and
+    the reason it ever did more is that it predates anything that could feed a
+    ball: with nothing answering the game's trough eject, a plunge had to
+    fabricate the whole story - take a ball out of the trough, put it in the
+    lane, then launch it - or there was no ball to plunge. ballfeed.py answers
+    the eject now, so by the time a human reaches for Plunge the ball is
+    already sitting in the lane, and ejecting another one is a SECOND ball the
+    game did not ask for.
+
+    NO FALLBACK WHEN THE LANE IS EMPTY, deliberately. Quietly serving a ball
+    "to be helpful" is exactly the auto-eject being removed here, and it would
+    be at its worst in the case that looks most like a mistake. `serve` is the
+    old behaviour and is still one word away.
+    """
+    padsw.take(m, (SHOOTER,))
+    plan = ballmodel.plan_launch(SHOOTER, _held(m, SHOOTER))
+    if plan.refused:
+        print("%s - `plunge.py serve` ejects one and launches it" % plan.refused)
+        return 1
+    for sw, val in plan.switches():
+        _set(m, sw, val)
+    print("shooter lane opened (ball launched)")
+    return 0
+
+
+def do_serve(m):
+    """The whole story a plunge used to tell: eject, arrive, launch.
+
+    This is what `plunge` was before 2026-08-11, kept under its own name
+    because a run with the feeder OFF (PAD_BALL_FEED=0) still needs one thing
+    that can put a ball into play from nothing. It is also what the TROUGH
+    coil marker on the virtual playfield plays, which is the honest mapping:
+    that marker IS the trough eject, and a trough eject puts a ball in the
+    shooter lane.
+    """
     padsw.take(m, TROUGH + (SHOOTER,))
     plan = ballmodel.plan_eject(_model(), _mrg(m), SHOOTER, _held(m, SHOOTER),
                                 STEP_S)
     if plan.refused:
-        print("%s - run `plunge.py reset` first" % plan.refused)
+        print(plan.refused)
+        if "empty" in plan.refused:
+            print("  `plunge.py reset` puts six balls back")
+        else:
+            print("  `plunge.py plunge` launches the one already there")
         return 1
     for step in plan.steps:
         if step[0] == "wait":
@@ -207,9 +253,6 @@ def do_plunge(m):
             continue
         _set(m, step[1], step[2])
         print(step[3])
-    # The ball then WAITS in the lane, and the launch is its own step: on a
-    # real machine the player decides when, and now that ballfeed.py answers
-    # the game's auto plunger there are two other things that may do it first.
     time.sleep(LANE_S)
     _set(m, SHOOTER, 0)
     print("shooter lane opened (ball launched)")
@@ -292,17 +335,25 @@ def main():
         do_coin(m, int(sys.argv[2]) if len(sys.argv) > 2 else 1)
     elif what == "game":
         # The whole "put a ball into play" story, in the order that works.
+        # SERVE, not plunge: `game` has to work whether or not ballfeed.py is
+        # running, and with the feeder off nothing else would have put a ball
+        # in the lane. With it on, the feeder gets there first and serve's own
+        # eject is refused with "a ball is already in the shooter lane" - a
+        # logged refusal rather than a second ball, which is the whole reason
+        # that refusal exists.
         do_coin(m)
         time.sleep(1.5)
         do_start(m)
         time.sleep(5)
-        rc = do_plunge(m)
+        rc = do_serve(m)
     elif what == "reset":
         do_reset(m)
     elif what == "drain":
         rc = do_drain(m)
     elif what == "take":
         rc = do_take(m)
+    elif what == "serve":
+        rc = do_serve(m)
     else:
         rc = do_plunge(m)
     m.close()

@@ -194,6 +194,35 @@ def main():
 
     p.terminate()
     p.wait(timeout=5)
+
+    # ---- plunge must NOT eject, 2026-08-11 ---------------------------------
+    # David: "plunge should not be auto-ejecting a ball either (it should just
+    # get the ball out of the shooter lane)." With the feeder stopped, these
+    # run against the same fake machine and check the verbs apart from it.
+    def run(verb):
+        r = subprocess.run([sys.executable, os.path.join(HERE, "plunge.py"),
+                            verb], env=env, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, text=True)
+        return r.stdout.strip()
+
+    run("reset")
+    time.sleep(0.3)
+    check("reset puts every ball home", shim.count(ids), len(ids))
+    out_txt = run("plunge")
+    time.sleep(0.3)
+    check("plunge with an EMPTY lane ejects nothing", shim.count(ids),
+          len(ids))
+    check("...and says why instead", "shooter lane" in out_txt, True)
+    run("serve")
+    time.sleep(0.3)
+    check("serve DOES eject one and launch it", shim.count(ids), len(ids) - 1)
+    check("serve left the lane empty", shim.merged(lane) if lane else 0, 0)
+    run("take")
+    time.sleep(0.3)
+    check("take removes a ball without touching the lane",
+          shim.count(ids), len(ids) - 2)
+    check("take left the lane alone", shim.merged(lane) if lane else 0, 0)
+
     shim.stop = True
     print("\n--- ballfeed.py said ---")
     for line in out:

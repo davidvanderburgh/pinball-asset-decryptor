@@ -332,11 +332,62 @@ These have each been violated at least once and each cost a run or a window:
       and because a single sighting is not a repro — a pass can end having
       learned nothing, which is the D4 definition.
 
-- [ ] **21b. Ball HANDLING: a ball model, so multiball works.** `S2 D4`
-      *(**Split out of item 21 on 2026-08-10**, when the FEEDBACK half closed
-      as 21a. The item always said the two halves were different prices and
-      that the cheap one lands alone; this is the dear one, and it is the
-      whole of what is left.)*
+- [ ] **21b. Ball HANDLING: a ball model, so multiball works.** `S2 D3`
+      ← IN PROGRESS *(**Split out of item 21 on 2026-08-10**, when the
+      FEEDBACK half closed as 21a. The item always said the two halves were
+      different prices and that the cheap one lands alone; this is the dear
+      one, and it is the whole of what is left.)* *(**D4 → D3, 2026-08-10
+      evening:** the eject coil index is no longer unknown, the model and the
+      feeder are built and pass an end-to-end offline harness on two titles,
+      and what is left needs a run rather than a new instrument.)*
+      **★★ BUILT THIS PASS, branch `item/21b`, and the loop is CLOSED offline.
+      Established:**
+      **(1) THE TROUGH-EJECT COIL INDEX WAS ALWAYS READABLE AT THE DESK, and
+      this item's "item 3 is upstream" blocker below is wrong.** The device
+      table names every coil against the (group, index) the fire frame
+      carries: godzilla_pro `TROUGH` = group 6 index 1 = **node 8 index 1**;
+      jaws_le = group 7 index 1 = **node 9 index 1**, so nothing may hard-code
+      the node. **The mapping is confirmed 5 positive and 4 negative against
+      item 3's own labelled ball search** — it fired 2, 3, 4, 7, 8, which the
+      table names RIGHT/LEFT SLINGSHOT, AUTO PLUNGER, POP BUMPER, RIGHT SCOOP,
+      and did NOT fire 0, 1, 5, 6, which it names RIGHT FLIPPER, TROUGH, LEFT
+      FLIPPER, UP LEFT FLIP. A ball search fires exactly the first set and
+      exactly not the second. No run was needed for any of it.
+      **(2) `ballmodel.py` — the ramp rule in one place.** With k balls home
+      positions 1..k are made, so an eject opens the HIGHEST made position and
+      a return closes the LOWEST open one. `plunge.py` now goes through it
+      instead of carrying its own `reversed()`, which is the fact item 20 was
+      a bug in. It also reports a trough that is not a contiguous stack.
+      **(3) `ballfeed.py` — the thing that answers the game.** Watches the
+      padled coil counter at 50 Hz INSIDE WSL (a host-side loop is capped near
+      6 actions/s by the ~80 ms wsl.exe spawn, item 24/26) and drives the
+      trough and shooter-lane switches under source letter `b`. It never
+      remembers a request: the game's own retry is the queue, which is what
+      folds a retry burst into one ball. `watch.sh` starts it, `alive.sh` and
+      `killgame.sh` count and kill it (same day, per the non-negotiable).
+      **(4) `plunge.py drain`** — nothing simulates a playfield, so a drain
+      cannot be an event and is now an action. Without it a multiball could
+      start and never end.
+      **(5) Verified offline end-to-end, `ballfeedtest.py`, on the REAL tables
+      of TWO titles** (godzilla_pro node 8, jaws_le node 9): a coil-counter
+      bump takes a ball out of the FAR end, lands it in the shooter lane,
+      refuses a retry inside the minimum gap, launches on the auto plunger,
+      feeds three balls for a multiball, and refuses an empty trough rather
+      than going negative. The harness found a real bug (refusals de-duped
+      against one slot flooded the log by alternating) before a run paid for
+      it. 37 unit tests beside it.
+      **The one guessed number: `PAD_BALL_MIN_GAP_MS` (600).** A retry burst
+      and a multiball feed are the same coil at different spacings and only a
+      measured multiball can say where the line is. It logs every refusal it
+      makes on that number, so it is visible rather than silently deciding how
+      many balls a multiball gets.
+      **NOT ESTABLISHED — nothing here has met a running game.** No live run
+      this pass.
+      **Resume:** start a run and check the loop on the game's own display —
+      `plunge.py coin` then `plunge.py start` ALONE (no `plunge.py plunge`)
+      must reach BALL 1 with the ball fed by the game's eject, and
+      `~/padball.log` says what the feeder decided. Then play into a multiball
+      for the real acceptance below, and state the repeats.
       **★ DAVID, 2026-08-06: "we will need some sophisticated ball handling
       and clear feedback about how many balls are in play. for example, during
       multiball, many balls are in play."** The feedback clause is 21a, done
@@ -353,12 +404,13 @@ These have each been violated at least once and each cost a run or a window:
       `plunge.py plunge` opened TROUGH 6 itself. So every ball this rig has
       ever "played" was moved by a script pretending, and nothing closes the
       loop between the coil the game fires and the switch that should answer.
-      **ITEM 3 IS UPSTREAM.** The fire frame is decoded (`cmd 0x40`, one coil
-      by index) but the trough-eject index is NOT among the five item 3
-      confirmed — it labelled 2, 3, 4, 7, 8 off a ball search, and the eject
-      is one of the unlabelled 0, 1, 5, 6. Without it the rig cannot tell "the
-      game just asked for a ball" from any other coil, and an auto-feed has to
-      be driven blind on a timer.
+      **~~ITEM 3 IS UPSTREAM~~ — WRONG, and resolved above on 2026-08-10.**
+      This said the trough-eject index was one of the unlabelled 0, 1, 5, 6
+      and that an auto-feed would have to be driven blind on a timer. The
+      device table names it outright and item 3's ball search confirms the
+      mapping both ways; see (1). Kept rather than deleted because "the
+      unlabelled coils are unknown" is the belief that made this item D4, and
+      the thing that dissolved it was reading a table the rig already builds.
       **What item 20 established that this can build on** (`e1e9cb3`): the
       trough is a STACK with a known direction — TROUGH 1 is the eject end (it
       sits beside TROUGH JAM), TROUGH 6 is the far end, balls are taken from

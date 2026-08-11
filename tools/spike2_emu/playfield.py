@@ -124,6 +124,7 @@ from tkinter import ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coilact
+import coilmap
 import gameinfo
 import mktables
 import padpath
@@ -263,7 +264,7 @@ WSL_DIR = padpath.to_wsl(padpath.RIG)
 #: Offsets into padled.h's block. Hard-coded because Python cannot include the
 #: header; the header lists them next to the struct and says APPEND ONLY, so a
 #: version-1 shim and a version-2 reader still agree on everything below `coil`.
-PADLED_MAGIC = 0x44454C50
+PADLED_MAGIC = coilmap.PADLED_MAGIC
 #: `decoded` (12) is LED writes that landed. `skipped` (16) is frames that
 #: LOOKED like indexed LED writes and did not fit any shape the shim decodes -
 #: padled.h has counted it since version 1 and nothing has ever read it. It is
@@ -272,9 +273,13 @@ PADLED_MAGIC = 0x44454C50
 #: window could never answer about itself.
 LED_DECODED_OFF, LED_SKIPPED_OFF = 12, 16
 LED_HDR, LED_IDX = 20, 96
-COIL_OFF, COIL_N = 1556, 16          # wrapping fire counter per (node, index)
-LVL_OFF = COIL_OFF + 16 * COIL_N     # last drive byte
-COIL_GEN_OFF = LVL_OFF + 16 * COIL_N
+#: The coil half of the block is coilmap.py's, because ballfeed.py (item 21b)
+#: needed the same numbers from inside WSL, where this file cannot be imported
+#: at all - it needs tkinter and this WSL has none. Four copies of an offset
+#: is how the rig's two worst drifts started.
+COIL_OFF, COIL_N = coilmap.COIL_OFF, coilmap.COIL_N
+LVL_OFF = coilmap.LVL_OFF            # last drive byte
+COIL_GEN_OFF = coilmap.GEN_OFF
 #: Version 3, the fade ring (padled.h): head counter then 96 entries of
 #: (u32 guest ms, node, start, end, from, to, rise, fall, pad).
 FADE_HEAD_OFF = COIL_GEN_OFF + 8
@@ -723,34 +728,23 @@ def blend(rgb, bg, alpha):
 
 
 #: Device-table group -> node on the bus, the same lookup ledio.py verified
-#: against the boot enumeration. Used here to turn a coil's (group, index) into
-#: the (node, index) the shim publishes fires under.
-GROUP_NODE = {4: 0, 5: 1, 6: 8, 7: 9}
+#: against the boot enumeration. coilmap.py owns it now; the alias stays so
+#: nothing that reads this module has to know that.
+GROUP_NODE = coilmap.GROUP_NODE
 
 
 def load_coils():
-    """device_xy.txt: class NAME... x y w h grp index conn image
+    """The playfield's coils, parsed by coilmap.py.
 
-    THE CONNECTOR COLUMN IS EMPTY FOR EVERY COIL, which is how this read `h` as
-    the group and the group as the index for a whole release - every coil
-    tooltip said "group 20 index 6". devicexy.py now writes "-" so the field
-    count is uniform, and the assert below refuses to trust a row that does not
-    land on a board the enumeration knows, rather than drawing a confident lie.
+    THE PARSE MOVED because ballfeed.py needs the same rows on the other side
+    of the VM boundary and cannot import this file. What it does has not
+    changed and coilmap.py keeps the reason it is written the way it is: the
+    connector column is empty for every coil, so counting fields from the LEFT
+    read `h` as the group for a whole release and every coil tooltip said
+    "group 20 index 6".
     """
-    out = []
-    for p in _rows(os.path.join(TDIR, "device_xy.txt"), 10):
-        if p[0] != "coil" or p[-1] != "playfield":
-            continue
-        try:
-            # Eight fields follow the name: x y w h grp index conn image.
-            group, index = int(p[-4]), int(p[-3])
-            c = dict(name=" ".join(p[1:-8]), x=int(p[-8]), y=int(p[-7]),
-                     group=group, index=index,
-                     node=GROUP_NODE.get(group) if index < COIL_N else None)
-        except ValueError:
-            continue
-        out.append(c)
-    return out
+    return [c for c in coilmap.load(os.path.join(TDIR, "device_xy.txt"))
+            if c.get("image") == "playfield"]
 
 
 def load_switch_list():

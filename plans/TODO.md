@@ -1076,13 +1076,13 @@ These have each been violated at least once and each cost a run or a window:
 
 
 - [ ] **43. In the turtles service menus the picture goes HALF HEIGHT and the
-      scene text stops drawing.** `S2 D3` ← IN PROGRESS *(**55%, 2026-08-11:**
-      the desk half is done — squash not crop, the ratio is 4:1 not "half",
-      `win_present()` and a wrong reported video size are both ruled out, and
-      one earlier "established" claim is withdrawn as taken on the wrong
-      screen. The instrument that answers what is left is built and committed
-      but has never seen a run. Branch `item/43`, clean and pushed; no run
-      left up.)*
+      scene text stops drawing.** `S2 D3` ← IN PROGRESS *(**70%, 2026-08-11:**
+      **ANSWERED — the band is the GAME's own geometry** (`model` sy 340, ty
+      214, on a unit quad, under a correct 1360x768 projection), so the whole
+      emulator-side rendering path is eliminated and the video half is not a
+      fault at all. The page simply draws no scene and no UI. What is left is
+      WHY, which is now on the game's side and probably downstream of item 29.
+      Branch `item/43`, clean and pushed; no run left up, `alive.sh` 0.)*
       *(**Filed as 42 and renumbered to 43 on 2026-08-11 before merging**: David
       took 42 for the save-state portability item on main the same afternoon,
       and this branch had not landed yet. Numbers are stable IDs and are never
@@ -1225,12 +1225,80 @@ These have each been violated at least once and each cost a run or a window:
       `jbuf`, `juni_v`); this only reads them. Indexed draws resolve through the
       VAO's mirrored element buffer, so an indexed quad reports the box a direct
       one would. `PAD_GL_DRAWLOG_MAX` caps the output (default 200).
-      **NOT YET VALIDATED ON A LABELLED EXAMPLE — and the validation is built
-      into the experiment rather than assumed:** the attract backdrop and the
-      GOOD menu page must read a FULL-SURFACE box, and the broken page must read
-      a 4:1 one. If the good page and the broken page print the same box, the
-      squash is in a uniform and the instrument says so on the next line; if
-      neither prints, it is blind and must be fixed before it judges anything.
+      **★★★ (7) RUN 2026-08-11, AND IT IS ANSWERED: THE BAND IS THE GAME'S OWN
+      GEOMETRY. NOTHING IN THIS RIG SQUASHES ANYTHING.** The whole
+      emulator-side rendering path is eliminated. On the broken page the video
+      is drawn as a **UNIT QUAD** (`x 0.000..1.000 y 0.000..1.000`, 6 verts) and
+      the GAME's own uniforms place it:
+      ```
+      [gl] draw prog=27 fbo=0 n=6 arr attr0 x 0.000..1.000 y 0.000..1.000
+      [gl]      u 'projection' mat4  sx 0.0015 sy -0.0026  tx -1.0000 ty 1.0000
+      [gl]      u 'model'      mat4  sx 1360.0000 sy 340.0000  tx 0.0000 ty 214.0000
+      ```
+      `projection` is a correct pixel→NDC ortho for 1360x768 (2/1360 = 0.001471,
+      −2/768 = −0.002604). **`model` says sy 340 and ty 214** — and the desk
+      measurement in (6), taken off a screenshot days earlier and with no
+      access to any of this, predicted a band 340 tall at y≈214. **They agree to
+      the pixel.** The game asked for a 1360x340 rect at y=214 and got exactly
+      that. There is no rendering bug to fix in the band.
+      **AND THE VALIDATION HELD, on the labelled pair this item already had:**
+      attract and the GOOD service-menu splash both draw their backdrop
+      **full-surface** — `prog=33 n=4 x 0.000..1360.000 y 0.000..768.000`,
+      uniforms `viewprojMat` + `modelMat` IDENTITY. So the instrument reads a
+      full surface where the picture is right and a band where it is wrong,
+      which is what makes the band reading worth anything.
+      **★ THE STRUCTURAL CLUE, and it is where the next pass should start: the
+      two are DIFFERENT RENDERERS.** The good backdrop is `prog=33` in PIXEL
+      coordinates through `viewprojMat`/`modelMat`/`colorTransform*` — the SCENE
+      renderer. The broken page's banner is `prog=27`, a unit quad through
+      `projection`/`model`/`spriteColor` — a SPRITE renderer. The UI/text is a
+      third, `prog=28`, indexed draws with a named `Position` attribute through
+      `ProjMtx`. **So on the broken page the game is not drawing its scene at
+      all**; a sprite layer draws one 4:1 banner and that is the entire frame.
+      **So "one fault or two" resolves to ONE, and the video half is not a fault
+      at all:** the page draws no scene and no UI, and the band is simply the
+      only thing that does draw.
+      **WHAT IS NOW UNKNOWN — and it moved to the GAME's side of the wire:**
+      WHY the page has no content. **The leading theory is that it is downstream
+      of item 29**, and it is cheap to test: turtles' **device table does not
+      read** (watch.sh says so at boot), and a service-menu page whose list is
+      built from device data would come up empty exactly like this. If that is
+      it, item 43 closes when 29 does.
+      **★ THE REPRO IS ONE PRESS, NOT FIFTEEN, which makes the next run cheap:**
+      Tech Alerts → **SERVICE BACK** → the service-menu splash ("Press 'Select'
+      to continue", the known-good page) → **SERVICE SELECT** → the broken page.
+      No coin, no ball, no 15-press walk.
+      **★ AND IT IS RECOVERABLE, not a wedge:** SERVICE BACK from the broken
+      page returns to attract, full size, text correct
+      (`C:\tmp\item43\state5_after_back.png`). Captures this run:
+      `state2.png` good splash, `state4.png` the band, `state5_after_back.png`
+      the recovery.
+      **THREE INSTRUMENT TRAPS THIS RUN PAID FOR, so nobody repays them:**
+      **(a) `padglhost`'s stderr goes to `~/padglhost.log`, NOT the run log.**
+      watch.sh greps exactly four lines of it into the run output, so
+      `PAD_GL_DRAWLOG` and `PAD_GL_VPLOG` output is INVISIBLE there and reads as
+      "the instrument never fired". Same family as item 1d's ghost-file trap.
+      **(b) `swpoke.py --tap <id>` DOES NOT MOVE THE SERVICE MENU.** It prints
+      `TAP id=25 for 1 transfer(s)` and bumps `tap_gen`, so it looks like it
+      worked, and **no `[sw]` edge ever appears**. A timed press does:
+      `swpoke.py 25 500` produced `+25p` / `-25p` and advanced the page. That is
+      item 17's measurement showing up in practice — a menu needs ~250-300 ms,
+      not one SPI transfer. Three presses were lost to this, and worse, the
+      Tech-Alerts transition they appeared to cause was actually
+      **autoattract's** own Back at 197651 ms.
+      **(c) `autoattract.sh` fights menu navigation** — it presses SERVICE BACK
+      every ~45 s until the game leaves Tech Alerts, undoing every Select. Stop
+      it (`pkill -f autoattract.sh`) before driving menus by hand.
+      **★ NOTED, NOT THE CAUSE: the window title carries `[WARN:COPY MODE]`.**
+      Nothing in this repo writes it (`shotwin.py` only READS titles), so it is
+      WSLg/msrdc's own marker, and the same run logged
+      `libEGL warning: DRI3 error: Could not get DRI3 device` — a non-shared,
+      copy-based present path. **It cannot be this item's cause**: it describes
+      how the finished 1360x768 frame reaches the desktop, and the band is
+      chosen long before that, by the game's own `model` matrix. Worth a look
+      for **item 32** (stretching the window crawls), where a per-frame
+      full-surface copy is exactly the kind of cost that would scale with
+      window size.
       **STILL NOT ESTABLISHED, and do not assume either:** whether the missing
       text and the squashed video are one fault or two (see the withdrawal under
       (4) — the control that appeared to answer this was taken on the wrong
@@ -1242,15 +1310,16 @@ These have each been violated at least once and each cost a run or a window:
       (`watch.sh` says so at boot — "the device table did not read, so this is
       off the SWITCH LIST alone"), which is item 29's territory. Scene text and
       device tables are different stores, so treat any link as a guess.
-      **Resume:** run turtles_pro FROM THIS BRANCH with `PAD_GL_DRAWLOG=1`,
-      walk to the service menu (`plunge.py coin`, `plunge.py start`, then
-      `swpoke.py` 25/26/27/28 as recorded above) and read the `[gl] draw` lines
-      at three moments: attract, the GOOD first menu page, and the broken deeper
-      page. The good page validates the instrument (it must read a full-surface
-      box); the broken page is the answer — a box with `h/w` near 0.25 means the
-      VERTICES carry the band, a full box with a `sy` near 0.44 on a mat4 means
-      a TRANSFORM does. Take a `PAD_VID=0` shot OF THE BROKEN PAGE in the same
-      run, since that control has still never been taken there.
+      **Resume — the emulator side is DONE; what is left is why the page has no
+      content.** One run, and the repro is two button presses (above):
+      **(1)** reach the broken page on **godzilla_pro**, whose device table DOES
+      read. If godzilla's equivalent page draws its menu, that plus turtles'
+      unreadable device table makes this item downstream of **item 29** and it
+      closes when 29 does. **(2)** In the same run take the `PAD_VID=0` control
+      **on the broken page** — never yet done there — which says whether the UI
+      layer draws anything at all behind the banner, or genuinely nothing.
+      Start from `~/padglhost.log`, not the run log, and drive the menu with
+      timed presses (`swpoke.py 25 500`), not `--tap`.
       **Acceptance:** the service menus on turtles draw their text, at full
       picture height, stated with a screenshot against the attract-mode one
       above — and say whether godzilla behaves the same, since that decides

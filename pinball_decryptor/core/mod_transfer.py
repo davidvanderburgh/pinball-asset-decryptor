@@ -6,7 +6,8 @@ and :mod:`text_manifest`):
 
 * ``.staged_changes.json`` — the Replace-Audio/Video/Image assignments
   (``rel_path -> external replacement file``) plus the per-slot audio Loop/Keep
-  flags and the trim toggles.
+  flags, the trim toggles, and the Defaults tab's staged settings / high-score
+  slots.
 * ``text/strings.tsv`` — the on-screen-text edits, keyed by the *original*
   string.
 
@@ -67,7 +68,16 @@ _ASSIGN_KEYS = ("audio", "video", "image")
 # Per-audio-slot flag maps that must follow a remapped audio key.
 _AUDIO_FLAG_KEYS = ("audio_loop", "audio_keep")
 # Toggle values copied verbatim (not per-slot).
-_TOGGLE_KEYS = ("audio_trim", "video_trim", "video_no_conversion")
+_TOGGLE_KEYS = ("audio_trim", "video_trim", "video_no_conversion",
+                "menu_expose_through")
+# Staged Defaults-tab edits.  These need no reconciliation at all: they are
+# keyed by the firmware's own ``AD_`` names and high-score slot labels, which
+# are the same words on a new version and on the other model of the same title
+# (a tester building a Pro edition of his Prem/LE work), and the build-time
+# apply already skips a name the target image doesn't carry and pulls every
+# value into that image's own range.  Merged per key so an edit already made
+# on the target wins.
+_MERGE_KEYS = ("settings", "high_scores")
 
 _HEAD = 256 * 1024
 _TAIL = 64 * 1024
@@ -845,6 +855,7 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
          "text":  {matched, dropped},
          "group_tags": {matched, dropped},
          "toggles": {key: value, ...},
+         "defaults": {key: {name: value, ...}, ...},
          "totals": {"transfer": int, "flagged": int, "dropped": int}}
 
     *saved* / *src_text_rows* override the source folder's sidecar / text
@@ -874,9 +885,13 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
         "text": {"matched": t_matched, "dropped": t_dropped},
         "group_tags": {"matched": g_matched, "dropped": g_dropped},
         "toggles": {k: saved[k] for k in _TOGGLE_KEYS if k in saved},
+        "defaults": {k: dict(saved[k]) for k in _MERGE_KEYS
+                     if isinstance(saved.get(k), dict) and saved[k]},
     }
+    n_defaults = sum(len(v) for v in plan["defaults"].values())
     transfer = (len(a_matched) + len(a_remapped) + len(v_matched)
-                + len(i_matched) + len(t_matched) + len(g_matched))
+                + len(i_matched) + len(t_matched) + len(g_matched)
+                + n_defaults)
     flagged = len(a_flagged)
     dropped = (len(a_dropped) + len(v_dropped) + len(i_dropped)
                + len(t_dropped) + len(g_dropped))
@@ -892,8 +907,8 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
     targets the same slot/string.  ``include_flagged`` also applies the audio
     entries whose index was reused (off by default — those are the risky ones).
     ``src_saved`` overrides the source sidecar (pairs with ``plan_transfer``'s
-    ``saved``).  Returns ``{"audio", "video", "image", "text", "group_tags"}``
-    counts actually written."""
+    ``saved``).  Returns ``{"audio", "video", "image", "text", "group_tags",
+    "defaults"}`` counts actually written."""
     if src_saved is None:
         src_saved = staged_changes.load(source_dir)
     tgt = staged_changes.load(target_dir)
@@ -953,6 +968,18 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
     for k, v in plan.get("toggles", {}).items():
         tgt.setdefault(k, v)
 
+    # Staged Defaults-tab edits, merged per setting / per high-score slot so
+    # anything already set on the target extract stays as the user left it.
+    n_defaults = 0
+    for k, vals in (plan.get("defaults") or {}).items():
+        merged = dict(tgt.get(k) or {})
+        for name, v in vals.items():
+            if name not in merged:
+                merged[name] = v
+                n_defaults += 1
+        if merged:
+            tgt[k] = merged
+
     staged_changes.save(target_dir, tgt)
 
     # Text: fill matching originals in the target manifest.
@@ -969,4 +996,4 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
 
     return {"audio": n_audio, "video": len(plan["video"]["matched"]),
             "image": len(plan["image"]["matched"]), "text": n_text,
-            "group_tags": n_tags}
+            "group_tags": n_tags, "defaults": n_defaults}

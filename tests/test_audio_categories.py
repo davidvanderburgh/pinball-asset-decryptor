@@ -85,8 +85,8 @@ def test_name_duration_seconds():
 
 def test_matches_filter_duration_aware_music():
     """David's LZ 1.22.0 extract: no music banks, the songs are cat-0
-    sounds the Sound Test names "SE FX SEQ ..." — the Music filter must
-    surface them by length, and they stay under Sound FX too."""
+    sounds the Sound Test names "SE FX SEQ ..." — with no other way to tell
+    music apart, the Music filter surfaces them by length."""
     long_sfx = (AC.SFX, 505.0)          # "SE FX SEQ BALL SAVE LIT", 8:24
     short_sfx = (AC.SFX, 0.074)         # spinner blip
     long_bare = (AC.OTHER, 61.8)        # bare idx0089, 1:01.795
@@ -94,8 +94,11 @@ def test_matches_filter_duration_aware_music():
     long_callout = (AC.CALLOUTS, 25.0)  # long speech is never music
 
     assert AC.matches_filter(*long_sfx, AC.MUSIC)
-    assert AC.matches_filter(*long_sfx, AC.SFX)       # both views
+    # ...and it is Music in ONE place only: a promoted row reads "Music" in
+    # the Type column, so it must not also answer the Sound FX filter.
+    assert not AC.matches_filter(*long_sfx, AC.SFX)
     assert not AC.matches_filter(*short_sfx, AC.MUSIC)
+    assert AC.matches_filter(*short_sfx, AC.SFX)
     assert AC.matches_filter(*long_bare, AC.MUSIC)
     assert not AC.matches_filter(*long_bare, AC.OTHER)  # left the junk pile
     assert AC.matches_filter(*short_bare, AC.OTHER)
@@ -105,6 +108,36 @@ def test_matches_filter_duration_aware_music():
     assert AC.matches_filter(AC.MUSIC, None, AC.MUSIC)
     # No filter = everything.
     assert AC.matches_filter(AC.OTHER, 0, None)
+
+
+def test_length_fallback_is_off_once_a_folder_names_its_music():
+    """a tester's Led Zeppelin project, 2026-08-11: the Type column said
+    "Sound FX" on a 1:01 crowd-cheer while the Type filter said Music, and he
+    reported the filter as broken.  A folder that identifies music of its own
+    is trusted, and length stops overriding what a slot says it is."""
+    assert AC.needs_length_fallback({"a": AC.SFX, "b": AC.OTHER})
+    assert AC.needs_length_fallback({}) is True
+    assert not AC.needs_length_fallback({"a": AC.SFX, "b": AC.MUSIC})
+
+    cheering = (AC.SFX, 61.795)         # idx0510 - Cheering.wav
+    assert AC.matches_filter(*cheering, AC.MUSIC, length_fallback=True)
+    assert not AC.matches_filter(*cheering, AC.MUSIC, length_fallback=False)
+    assert AC.matches_filter(*cheering, AC.SFX, length_fallback=False)
+    # A long bare slot stays in Other rather than being called music.
+    assert AC.matches_filter(AC.OTHER, 61.8, AC.OTHER, length_fallback=False)
+    # The named music itself is unaffected either way.
+    assert AC.matches_filter(AC.MUSIC, 45.0, AC.MUSIC, length_fallback=False)
+
+
+def test_effective_category_is_one_answer_for_column_and_filter():
+    """The Type column and the Type filter read the same function, so a
+    filtered list can never hold a row labelled something else."""
+    assert AC.effective_category(AC.SFX, 61.8, True) == AC.MUSIC
+    assert AC.effective_category(AC.SFX, 61.8, False) == AC.SFX
+    assert AC.effective_category(AC.CALLOUTS, 61.8, True) == AC.CALLOUTS
+    assert AC.effective_category(AC.OTHER, 5.0, True) == AC.OTHER
+    assert AC.effective_category(AC.MUSIC, None, True) == AC.MUSIC
+    assert AC.effective_category(None, 0, True) == AC.OTHER
 
 
 def test_renamed_slot_keeps_remembered_category(tmp_path, monkeypatch):

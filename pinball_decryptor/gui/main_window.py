@@ -1446,6 +1446,10 @@ class MainWindow:
         # toggles.
         self.audio_change_filter_var = tk.StringVar(value="All")
         self._audio_categories = {}      # rel_path -> music/sfx/callouts/other
+        # Folder-wide: nothing here classifies as music, so the Music filter
+        # falls back to play length (see core.audio_categories).  Recomputed
+        # by _refresh_audio_type_filter on every scan / category change.
+        self._audio_music_by_length = True
         # Click-header sort state: (column_id, descending).  Defaults to the
         # name column ascending — matches the old "Name" dropdown default.
         self._audio_sort = ("#0", False)
@@ -3289,13 +3293,14 @@ class MainWindow:
             "<<ComboboxSelected>>", lambda _e: self._refresh_audio_list())
         _Tooltip(
             self._audio_type_combo,
-            "Show only one kind of audio. Music = the game's song/bank "
-            "tracks plus anything at least 20 seconds long (some pins store "
-            "their songs as Sound-Test-named sequences, so a long \"SE FX\" "
-            "track shows under both Music and Sound FX). Sound FX = effects "
-            "named by the game's own Sound Test menu. Callouts = spoken "
-            "lines found by Auto-name call-outs. Other = the rest — short "
-            "unnamed effects.",
+            "Show only one kind of audio — every row matches the Type "
+            "column, so a filtered list only ever holds that Type. Music = "
+            "the game's song/bank tracks. Sound FX = effects named by the "
+            "game's own Sound Test menu. Callouts = spoken lines found by "
+            "Auto-name call-outs. Other = the rest — short unnamed effects. "
+            "On a game that identifies no music at all (some pins store "
+            "their songs as Sound-Test-named sequences), anything 20 seconds "
+            "or longer counts as Music instead, and the Type column says so.",
             lambda: self._current_theme)
         # "Group duplicates" — created here, packed per-manufacturer next to
         # the sort hint (apply_manufacturer, CGC only).
@@ -4110,16 +4115,29 @@ class MainWindow:
             return True
         return tree.identify_region(event.x, event.y) in ("tree", "cell")
 
-    def _sort_click(self, state_attr, col, default_desc, refresh_fn):
+    def _sort_click(self, state_attr, col, default_desc, refresh_fn,
+                    cycle_to_natural=False):
         """Header-click handler: toggle direction when already sorting by
         *col*, otherwise switch to *col* at its default direction, then
-        re-sort + rebuild via *refresh_fn*."""
+        re-sort + rebuild via *refresh_fn*.
+
+        *cycle_to_natural* adds a third click that clears the sort (column
+        ``None``) — for tables whose unsorted order carries information the
+        user can't get back any other way (the firmware's own setting
+        order)."""
         cur = getattr(self, state_attr, None)
-        desc = (not cur[1]) if (cur and cur[0] == col) else default_desc
-        setattr(self, state_attr, (col, desc))
+        if cur and cur[0] == col:
+            if cycle_to_natural and cur[1] != default_desc:
+                nxt = (None, False)
+            else:
+                nxt = (col, not cur[1])
+        else:
+            nxt = (col, default_desc)
+        setattr(self, state_attr, nxt)
         refresh_fn()
 
-    def _wire_sort_headings(self, tree, config, state_attr, refresh_fn):
+    def _wire_sort_headings(self, tree, config, state_attr, refresh_fn,
+                            cycle_to_natural=False):
         """Attach a click-to-sort command to each header in *config*
         (list of ``(col_id, base_text, default_desc)``).  Only the command is
         set — the heading's existing text/anchor is left intact; the ▲/▼
@@ -4128,7 +4146,8 @@ class MainWindow:
             tree.heading(
                 col_id,
                 command=lambda c=col_id, d=default_desc:
-                    self._sort_click(state_attr, c, d, refresh_fn))
+                    self._sort_click(state_attr, c, d, refresh_fn,
+                                     cycle_to_natural))
 
     @staticmethod
     def _show_sort_arrows(tree, config, active):
@@ -4154,6 +4173,14 @@ class MainWindow:
         frame = getattr(self, "_audio_type_frame", None)
         if frame is None:
             return
+        # Folder-wide: does the Music filter have to fall back to play length
+        # because nothing here classifies as music on its own?  Recomputed
+        # here because every path that changes a category (scan, rename)
+        # already comes through — and a rename that makes a slot Music turns
+        # the fallback off for the rest of the folder.
+        from ..core import audio_categories as _ac
+        self._audio_music_by_length = _ac.needs_length_fallback(
+            self._audio_categories)
         useful = any(c != "other" for c in self._audio_categories.values())
         if useful and not frame.winfo_ismapped():
             frame.pack(side=tk.LEFT, before=self._audio_change_filter_frame)
@@ -4175,8 +4202,10 @@ class MainWindow:
         _CAT_DISP = {"music": "Music", "sfx": "Sound FX",
                      "callouts": "Callouts"}
 
-        def _cat_disp(rel):
-            return _CAT_DISP.get(self._audio_categories.get(rel), "Other")
+        def _cat_disp(s):
+            """The Type cell — the SAME verdict _passes filters on, so a row
+            can never sit in a Music-filtered list reading "Sound FX"."""
+            return _CAT_DISP.get(_cat_key(s), "Other")
         # Keep the groups the user expanded open across a rebuild (assigning,
         # filtering and sorting all funnel through here).
         open_groups = set()
@@ -4195,6 +4224,18 @@ class MainWindow:
         from ..core import audio_categories as _ac
         change_ok = self._change_filter_pred("audio")
 
+        by_length = bool(getattr(self, "_audio_music_by_length", True))
+
+        def _cat_key(s):
+            """This slot's bucket: its category, or music-by-length when the
+            folder names no music at all (audio_categories)."""
+            # Duration from the probed header, else instantly from a
+            # Length-prefix name — the length fallback needs one or the other.
+            dur = s.duration or _ac.name_duration_seconds(
+                os.path.basename(s.rel_path)) or 0.0
+            return _ac.effective_category(
+                cats.get(s.rel_path, "other"), dur, by_length)
+
         def _passes(s):
             if query and query not in s.rel_path.lower():
                 return False
@@ -4202,12 +4243,7 @@ class MainWindow:
                 return False
             if type_key is None:
                 return True
-            # Duration from the probed header, else instantly from a
-            # Length-prefix name — the Music filter is duration-aware.
-            dur = s.duration or _ac.name_duration_seconds(
-                os.path.basename(s.rel_path)) or 0.0
-            return _ac.matches_filter(
-                cats.get(s.rel_path, "other"), dur, type_key)
+            return _cat_key(s) == type_key
 
         slots = [s for s in self._audio_slots if _passes(s)]
         col, desc = self._audio_sort
@@ -4234,7 +4270,7 @@ class MainWindow:
                 return (1 if self._audio_keep_full_flags.get(s.rel_path)
                         else 0,)
             if col == "type":
-                return (_cat_disp(s.rel_path), s.rel_path.lower())
+                return (_cat_disp(s), s.rel_path.lower())
             return (s.rel_path.lower(),)  # "#0" name/path
 
         self._show_sort_arrows(tree, self._audio_sort_cfg, self._audio_sort)
@@ -4267,7 +4303,7 @@ class MainWindow:
             tree.insert(parent, tk.END, iid=s.rel_path, text=s.rel_path,
                         values=(s.duration_str(), s.format_summary(),
                                 rep_disp, loop_disp, keep_disp,
-                                _cat_disp(s.rel_path)),
+                                _cat_disp(s)),
                         tags=(tag,) if tag else ())
 
         grouped = (bool(self.audio_group_dups_var.get())
@@ -4344,8 +4380,11 @@ class MainWindow:
                             "to transcribe and name the speech files.")
                 elif not query and type_key == "music":
                     hint = ("No music identified in this folder — no music "
-                            "banks, no track 20 seconds or longer, and no "
-                            "Auto-name music results.")
+                            "banks and no Auto-name music results.")
+                    if by_length:
+                        hint = ("No music identified in this folder — no "
+                                "music banks, no track 20 seconds or longer, "
+                                "and no Auto-name music results.")
                 elif not query and type_key is None:
                     # An empty change-state view is an answer, not a dead end:
                     # "nothing left to do" and "nothing done yet" both read as
@@ -4962,6 +5001,20 @@ class MainWindow:
         self.remember_browse_dir("audio_csv", path)
         cat_names = {"music": "Music", "sfx": "Sound FX",
                      "callouts": "Callouts"}
+        # Same bucket the Type column shows, length fallback and all — an
+        # exported row must say what the screen said.
+        from ..core import audio_categories as _ac
+        by_length = bool(getattr(self, "_audio_music_by_length", True))
+
+        def _cat_text(s):
+            dur = s.duration or _ac.name_duration_seconds(
+                os.path.basename(s.rel_path)) or 0.0
+            return cat_names.get(
+                _ac.effective_category(
+                    self._audio_categories.get(s.rel_path, "other"),
+                    dur, by_length),
+                "Other")
+
         try:
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
                 w = csv.writer(f)
@@ -4973,8 +5026,7 @@ class MainWindow:
                     rep = self._audio_assignments.get(rel, "")
                     w.writerow([
                         rel, s.duration_str(), s.format_summary(),
-                        cat_names.get(self._audio_categories.get(rel),
-                                      "Other"),
+                        _cat_text(s),
                         rep,
                         "yes" if rel in self._audio_changed_on_disk else "",
                         "yes" if self._audio_loop_flags.get(rel) else "",
@@ -10428,7 +10480,9 @@ class MainWindow:
                  "Every adjustment the firmware carries, with the caption the "
                  "machine itself prints. Double-click one to set the default "
                  "it ships with — including the ones the machine's menus "
-                 "never show.",
+                 "never show. Click a column header to sort by it (values "
+                 "sort as numbers, biggest first); click the same header a "
+                 "third time for the firmware's own order back.",
                  lambda: self._current_theme)
         self._settings_hidden_only = tk.BooleanVar(value=False)
         self._settings_hidden_cb = ttk.Checkbutton(
@@ -10474,6 +10528,20 @@ class MainWindow:
                                        stretch=False)
         self._settings_all_tree.bind("<Double-1>", self._settings_all_edit)
         self._settings_all_tree.bind("<Return>", self._settings_all_edit)
+        # (column_id, descending); None = the firmware's own order, which is
+        # what the list opens on.
+        self._settings_all_sort = (None, False)
+        # Click-to-sort, like every other table in the app — a tester was
+        # hunting the setting with the largest value and had to read 342 rows
+        # to find it (2026-08-11).  A third click on the active column drops
+        # back to the firmware's own order, which is the only way to get the
+        # machine's grouping (all the sound settings together, and so on)
+        # back once you've sorted away from it.
+        self._wire_sort_headings(self._settings_all_tree,
+                                 self._SETTINGS_ALL_SORT_CFG,
+                                 "_settings_all_sort",
+                                 self._settings_fill_all_tree,
+                                 cycle_to_natural=True)
         avs = ttk.Scrollbar(tbody, orient="vertical",
                             command=self._settings_all_tree.yview)
         self._settings_all_tree.configure(yscrollcommand=avs.set)
@@ -10795,6 +10863,42 @@ class MainWindow:
             return "%d - %s" % (v, r["labels"][v])
         return self._settings_fmt_num(v)
 
+    # Sortable headers for the all-settings list: (column, base text, first
+    # click descending?).  "On card" and "New default" open on descending —
+    # the reason to sort a value column is to bring the extreme to the top.
+    _SETTINGS_ALL_SORT_CFG = (
+        ("#0", "Setting", False),
+        ("value", "On card", True),
+        ("new", "New default", False),
+        ("range", "Range", False),
+        ("status", "Menu", False),
+    )
+
+    def _settings_all_sort_key(self, col, pending):
+        """Sort key for one all-settings row under column *col*.
+
+        Values sort as NUMBERS, not as the text in the cell: the cell may
+        read "On", "English" or "2,000,000", and the point of sorting a value
+        column is to find the largest or smallest one."""
+        def key(r):
+            if col == "value":
+                return (r["default"], r["label"].lower())
+            if col == "new":
+                new = pending.get(r["name"])
+                # Staged rows on top, biggest first — an empty cell has no
+                # value to compare, and "what have I changed" is the question
+                # this column answers.
+                if new is None or new == r["default"]:
+                    return (1, 0, r["label"].lower())
+                return (0, -new, r["label"].lower())
+            if col == "range":
+                return (r["min"], r["max"], r["label"].lower())
+            if col == "status":
+                return (self._SETTINGS_STATUS_TEXT.get(r.get("status"), ""),
+                        r["label"].lower())
+            return (r["label"].lower(), r["id"])     # "#0" the caption
+        return key
+
     def _settings_fill_all_tree(self):
         """(Re)populate the all-settings list from the last load."""
         tree = self._settings_all_tree
@@ -10814,7 +10918,14 @@ class MainWindow:
         only_hidden = bool(self._settings_hidden_only.get())
         pending = self._settings_pending()
         shown = 0
-        for r in rows:
+        col, desc = self._settings_all_sort
+        self._show_sort_arrows(tree, self._SETTINGS_ALL_SORT_CFG,
+                               self._settings_all_sort)
+        display = list(rows)
+        if col is not None:
+            display.sort(key=self._settings_all_sort_key(col, pending),
+                         reverse=desc)
+        for r in display:
             st = r.get("status")
             if only_hidden and st in ("", None):
                 continue

@@ -24,12 +24,12 @@ import re
 
 MUSIC, SFX, CALLOUTS, OTHER = "music", "sfx", "callouts", "other"
 
-# The Music filter is duration-aware on top of the name/CSV categories: any
-# track at least this long is music to a listener, whatever the game calls
-# it.  Led Zeppelin proved the need — it has NO music banks; its mode songs
-# are ordinary cat-0 sounds the Sound Test names "SE FX SEQ ..." (David's
-# 1.22.0 extract: every song classified sfx, the Music filter showed
-# nothing).  Same threshold the transcribe/music-ID pipelines use.
+# The Music filter can fall back to duration on top of the name/CSV
+# categories: any track at least this long is music to a listener, whatever
+# the game calls it.  Led Zeppelin proved the need — it has NO music banks;
+# its mode songs are ordinary cat-0 sounds the Sound Test names "SE FX SEQ
+# ..." (David's 1.22.0 extract: every song classified sfx, the Music filter
+# showed nothing).  Same threshold the transcribe/music-ID pipelines use.
 MUSIC_MIN_SECONDS = 20.0
 
 _DUR_PREFIX_RE = re.compile(r"^(\d+)m(\d+)s(\d+) - ", re.IGNORECASE)
@@ -47,23 +47,44 @@ def name_duration_seconds(basename):
     return int(m.group(1)) * 60 + int(m.group(2)) + int(m.group(3)) / 1000.0
 
 
-def matches_filter(category, duration, type_key):
-    """Does a slot with *category* and play *duration* (seconds, 0/None when
-    unknown) belong under the Type filter *type_key*?
+def needs_length_fallback(categories):
+    """True when a folder's own naming can't identify music at all, so the
+    Music filter has to fall back to play length (see
+    :func:`effective_category`).
 
-    Music is category OR length: long tracks count even when the game's own
-    Sound Test calls them effects (a Led Zeppelin song is "SE FX ZEPPELIN
-    AWARD" to the game), so a long SFX shows under both Music and Sound FX.
-    Speech never lands in Music, and long tracks leave Other so the leftover
-    bucket stays short unnamed effects."""
+    One folder-wide decision, not a per-slot one.  A folder that classifies
+    even one slot as music (a music bank, a "music - " label, an AcoustID
+    title) can be trusted to say which tracks are music, and the length rule
+    is then pure damage: it drags long effects into Music under a Type column
+    that still reads "Sound FX" — a tester photographed exactly that, a 1:01
+    "Cheering" SFX sitting in a Music-filtered list (2026-08-11)."""
+    return not any(c == MUSIC for c in (categories or {}).values())
+
+
+def effective_category(category, duration, length_fallback=True):
+    """The single bucket a slot files under — what the Type COLUMN shows and
+    what the Type FILTER matches, so the two can never disagree.
+
+    Normally that is just *category*.  Only when the folder gives the filter
+    nothing to work with (*length_fallback*, see :func:`needs_length_fallback`)
+    does play *duration* promote a long non-speech slot to music: Led
+    Zeppelin's songs are cat-0 sounds its own Sound Test calls "SE FX SEQ ...",
+    and without this its Music filter is empty.  Promoted rows read "Music" in
+    the Type column too — the promotion is the folder's best answer to "what
+    is this", not a filter-only special case."""
+    if (length_fallback and category != CALLOUTS
+            and (duration or 0) >= MUSIC_MIN_SECONDS):
+        return MUSIC
+    return category or OTHER
+
+
+def matches_filter(category, duration, type_key, length_fallback=True):
+    """Does a slot with *category* and play *duration* (seconds, 0/None when
+    unknown) belong under the Type filter *type_key*?  No filter = every
+    slot."""
     if not type_key:
         return True
-    long_enough = (duration or 0) >= MUSIC_MIN_SECONDS
-    if type_key == MUSIC:
-        return category == MUSIC or (category != CALLOUTS and long_enough)
-    if type_key == OTHER:
-        return category == OTHER and not long_enough
-    return category == type_key
+    return effective_category(category, duration, length_fallback) == type_key
 
 
 def _load_callouts(assets_dir):

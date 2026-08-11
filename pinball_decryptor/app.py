@@ -289,8 +289,12 @@ class App:
         # Restore the user's last window size + position over MainWindow's
         # default (a tester: the app "does not remember my preferred sizing
         # and position").  Clamped to the current screen so a geometry saved on
-        # a since-disconnected monitor can't open off-screen.
+        # a since-disconnected monitor can't open off-screen.  The last
+        # un-maximized geometry, tracked live, is what gets saved — see
+        # _on_root_configure.
+        self._last_normal_geometry = None
         self._restore_window_geometry()
+        self.root.bind("<Configure>", self._on_root_configure, add="+")
 
         # Start where the user left off: most users work one machine at a
         # time, so the saved last_manufacturer opens directly (the header's
@@ -309,6 +313,7 @@ class App:
         # default-size empty frame flashing into its saved position.
         self.root.update_idletasks()
         self.root.deiconify()
+        self._restore_window_maximized()
 
         self._poll_queue()
 
@@ -3459,12 +3464,64 @@ class App:
             pass
         return {}
 
+    def _window_is_maximized(self):
+        """True when the window is maximized right now.
+
+        Tk exposes that two different ways: ``wm state`` is "zoomed" on
+        Windows and macOS, while on X11 a maximized window still reports
+        "normal" and only the ``-zoomed`` attribute knows."""
+        try:
+            if self.root.state() == "zoomed":
+                return True
+        except tk.TclError:
+            return False
+        try:
+            return bool(self.root.attributes("-zoomed"))
+        except tk.TclError:
+            return False
+
+    def _maximize_window(self):
+        """Maximize the window, whichever mechanism this platform's Tk has."""
+        try:
+            self.root.state("zoomed")
+            return True
+        except tk.TclError:
+            pass
+        try:
+            self.root.attributes("-zoomed", True)
+            return True
+        except tk.TclError:
+            return False
+
+    def _on_root_configure(self, event):
+        """Track the window's UN-maximized size + position.
+
+        ``winfo_geometry()`` on a maximized window returns the maximized
+        rectangle, so saving it as the plain geometry would restore a
+        screen-sized ordinary window the next time the user un-maximizes.
+        Only geometry seen while the window is normal is remembered; the
+        maximized state itself is a separate saved flag."""
+        if event.widget is not self.root:
+            return
+        try:
+            if not self._window_is_maximized():
+                self._last_normal_geometry = self.root.winfo_geometry()
+        except tk.TclError:
+            pass
+
     def _restore_window_geometry(self):
         """Re-apply the saved window geometry ("WxH+X+Y"), clamped to the
-        current screen.  No-op when there's no saved geometry (first launch)."""
+        current screen.  No-op when there's no saved geometry (first launch).
+
+        The saved maximized state is applied separately, after the window is
+        revealed (see ``_restore_window_maximized``) — zooming a window that
+        is still withdrawn is not something every platform's Tk agrees on."""
         geo = self._settings.get("window_geometry")
         if not isinstance(geo, str):
             return
+        # Seed the normal-geometry tracker so a session that never leaves the
+        # maximized state still writes back a sane un-maximized size.
+        self._last_normal_geometry = geo
         m = re.fullmatch(r"\s*(\d+)x(\d+)([+-]\d+)([+-]\d+)\s*", geo)
         if not m:
             return
@@ -3485,6 +3542,19 @@ class App:
             self.root.geometry("%dx%d+%d+%d" % (w, h, x, y))
         except tk.TclError:
             pass
+
+    def _restore_window_maximized(self):
+        """Re-maximize the window when that's how the user left it.
+
+        Size and position alone don't restore a maximized window: it comes
+        back as an ordinary window that merely happens to be screen-sized,
+        which is what an auto-update restart handed a tester back every time
+        ("I always have my app maximized. After it updates it does not put it
+        back to maximize", 2026-08-11).  Called after ``deiconify()`` so the
+        zoom lands on a mapped window."""
+        if not self._settings.get("window_maximized"):
+            return
+        self._maximize_window()
 
     def _save_settings(self):
         if self._current_mfr is not None:
@@ -3515,14 +3585,21 @@ class App:
                 self._settings["emulate_savestates"] = bool(states_var.get())
             except tk.TclError:
                 pass
-        # Remember the window size + position for next launch.  Skip odd/tiny
-        # geometries (e.g. the 1x1 pre-dialog footprint) so we never persist a
-        # window the user can't see.
+        # Remember the window size + position for next launch, and whether it
+        # was maximized — a maximized window has to come back maximized, not
+        # as a loose window of the same size (a tester, after every auto
+        # update).  While maximized the geometry to keep is the last NORMAL
+        # one seen (_on_root_configure), not the maximized rectangle.  Skip
+        # odd/tiny geometries (e.g. the 1x1 pre-dialog footprint) so we never
+        # persist a window the user can't see.
         try:
-            geo = self.root.winfo_geometry()
-            gm = re.match(r"(\d+)x(\d+)", geo)
+            maximized = self._window_is_maximized()
+            geo = (self._last_normal_geometry if maximized
+                   else self.root.winfo_geometry())
+            gm = re.match(r"(\d+)x(\d+)", geo or "")
             if gm and int(gm.group(1)) >= 400 and int(gm.group(2)) >= 400:
                 self._settings["window_geometry"] = geo
+            self._settings["window_maximized"] = bool(maximized)
         except tk.TclError:
             pass
         try:

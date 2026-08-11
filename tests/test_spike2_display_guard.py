@@ -57,7 +57,16 @@ def line_of(text, needle):
 #: EVERYTHING RELATIVE, AND THE SCRIPT ON DISK: the same rule test_spike2_emu_
 #: build.py records - on Windows `bash` is as likely to be WSL's launcher as
 #: Git's, and that one sees a C:\... path as a name with no directories in it.
+#: AND DISPLAY SET INSIDE THE SCRIPT, for the same reason one line further on:
+#: a WSL `bash` starts a distro whose environment is its own, and nothing from
+#: this process crosses that boundary unless WSLENV names it - while WSLg has
+#: already set DISPLAY=:0 in there.  Passing it in `env` therefore worked under
+#: Git's bash and was silently ignored under WSL's, where every case became the
+#: `:0` one: three of these tests asked about a display they had not set and the
+#: `unix:` / `:0.0` spellings were never exercised at all.  Every other input
+#: here already arrives as a line of the script; this is now one too.
 _DRIVER = """#!/bin/bash
+%s
 RIG=$(pwd); export RIG
 PATH=$RIG/bin:$PATH; export PATH
 PAD_HOME=$RIG; export PAD_HOME
@@ -109,7 +118,11 @@ def _drive(tmp_path, display, local=(), wslg=(), root=False, mount_works=False,
         # padpath.sh asks `id -u` at source time as well, and PAD_HOME above is
         # already set, so answering 0 to everything is safe here.
         scripts.append(("bin/id", "#!/bin/sh\necho 0\n"))
-    scripts.append(("driver.sh", _DRIVER))
+    if display is None:
+        setdisplay = "unset DISPLAY"
+    else:
+        setdisplay = "DISPLAY='%s'; export DISPLAY" % display
+    scripts.append(("driver.sh", _DRIVER % setdisplay))
     for name, text in scripts:
         path = rig / name
         with open(str(path), "w", encoding="utf-8", newline="\n") as fh:
@@ -117,10 +130,6 @@ def _drive(tmp_path, display, local=(), wslg=(), root=False, mount_works=False,
         os.chmod(str(path), 0o755)
     env = dict(os.environ)
     env["RIG"] = str(rig)
-    if display is None:
-        env.pop("DISPLAY", None)
-    else:
-        env["DISPLAY"] = display
     out = subprocess.run([BASH, "driver.sh"], cwd=str(rig), env=env,
                          capture_output=True, text=True)
     facts = {}

@@ -848,6 +848,28 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    window used to be impossible to open on such a machine. The run now
    asks PAD to open it — PAD is already a Windows program with the right
    Python — and PAD closes it again when the run stops.
+   A run that comes up with **no game window at all** now says which of
+   the two possible things happened, where before both looked the same:
+   the playfield opens, the log says the emulator is up, the guest really
+   is running, and there is no picture. When the window does exist the
+   run names it — `game window opened 1920x1080 on DISPLAY=:0` — and a
+   desktop showing nothing after that line is missing WSLg's mirror of
+   the window rather than the window, so the cure is *Restart WSL…*,
+   which nothing inside Linux can work out for you because nothing
+   inside Linux can see the Windows desktop. When the renderer went
+   without a window instead, a block says so loudly and quotes the
+   renderer's own reason, and the run carries on rather than dying — the
+   guest boots, the sound plays, the playfield answers, and only the
+   picture is missing. The commonest cause is checked for before the
+   renderer starts, because `DISPLAY` being *set* is not the same as an X
+   server being reachable: WSLg sets it when the distro starts and never
+   takes it back, so anything that mounts a fresh `/tmp` over WSL's own
+   bind mount — systemd's `tmp.mount` does exactly this — hides the
+   socket from the renderer while leaving it in `/mnt/wslg/.X11-unix`.
+   The run binds it back when it is root, which the app's own launch is,
+   and when it can't it stops with the one `sudo mount --bind` command
+   that fixes the machine instead of spending a whole run drawing
+   nothing.
    The tab checks for those before
    you press anything, instead of leaving the run to hit them one
    failure at a time: on a machine that already has them there is

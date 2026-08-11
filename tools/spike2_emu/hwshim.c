@@ -4408,6 +4408,11 @@ static void sw_shm_init(void)
 static unsigned char sw_kbd_prev[256];
 static unsigned char sw_scr_prev[256];
 static unsigned char sw_mrg[256];
+/* item 43: which ids have EVER seen a real edge through the merge. A fresh
+ * block is all zeros and zeros carry no meaning - the door gate misread that
+ * window as "door open" and refused every backdrop pipeline of an ordinary
+ * boot. An id with no edge yet has NO known state. */
+static unsigned char sw_edged[256];
 
 /* ---- THE ONE-SCAN LATCH. REMAINING item 17, and the whole of it. -----------
  *
@@ -4499,6 +4504,7 @@ static void sw_shm_merge(void)
         if (want != sw_mrg[n]) {
             sw_mrg[n] = want;
             sw_src[n] = src ? src : '?';
+            sw_edged[n] = 1;                       /* item 43: state now known */
             moved = 1;
             /* The latch bookkeeping lives HERE because this is the only place
              * the merged answer moves, and the merged answer is what the game
@@ -4566,10 +4572,21 @@ static int sw_shm_held(unsigned id)
 
 /* item 43: gstvid.c (same .so, separate translation unit) asks about the coin
  * door to decide whether video pipelines may start - see the door gate in
- * pad_vid_prepare. The merged level, same answer the game gets. */
+ * pad_vid_prepare. The merged level, same answer the game gets - EXCEPT that
+ * an id nobody has ever edged answers -1, "no known state", NOT 0. The block
+ * starts as all zeros and those zeros carry no meaning; the gate's first
+ * version read the boot window's zeros as "door open" and refused every
+ * backdrop pipeline of a perfectly ordinary run - David's first try lost the
+ * Tech Alerts / splash backgrounds to exactly this. The playfield window
+ * stamps the door CLOSED (an edge) when it comes up, so a normal session
+ * reaches a known 1 shortly after boot; PAD_DOOR_OPEN forces a 1->0 edge
+ * before the game's video manager initialises. */
 int pad_sw_level(unsigned id)
 {
-    return sw_shm_held(id);
+    if (id >= 256 || !sw_shm || sw_shm->magic != PADSW_MAGIC) return -1;
+    sw_shm_merge();
+    if (!sw_edged[id]) return -1;
+    return sw_mrg[id] != 0;
 }
 
 /* [sw] - every EDGE in the MERGED switch state, logged at the point the shim

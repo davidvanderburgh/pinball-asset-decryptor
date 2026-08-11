@@ -973,9 +973,21 @@ fi
 # bring video back for play.
 if [ "${PAD_DOOR_OPEN:-0}" = 1 ]; then
     (
+        # The gate only trusts an EDGE-established door state (see
+        # pad_sw_level), so stamp CLOSED once and then hold OPEN - the 1->0
+        # transition is what makes "open" a known fact rather than a fresh
+        # block's meaningless zeros. Re-asserted through the boot window
+        # because the writers are last-edge-wins and the playfield stamps
+        # its own rest state when it comes up.
+        first=1
         for _i in $(seq 1 30); do
-            [ -f "$ROOT/dump/padsw" ] && \
+            if [ -f "$ROOT/dump/padsw" ]; then
+                if [ -n "$first" ]; then
+                    setsid_as_user python3 "$S/swhold.py" 33 1 >/dev/null 2>&1
+                    first=
+                fi
                 setsid_as_user python3 "$S/swhold.py" 33 0 >/dev/null 2>&1
+            fi
             sleep 2
         done
     ) &

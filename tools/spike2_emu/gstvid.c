@@ -739,7 +739,11 @@ static int vid_door_blocked(void)
             if (v > 0 && v < 256) door_id = v;
         }
     }
-    return gate && !pad_sw_level((unsigned)door_id);
+    /* Blocks ONLY on an explicit, edge-established open (level 0). -1 means
+     * nobody has ever moved the door switch, and an unknown door must never
+     * cost a pipeline - the first version of this gate read a fresh block's
+     * zeros as "open" and stripped the backdrops off an ordinary boot. */
+    return gate && pad_sw_level((unsigned)door_id) == 0;
 }
 
 static void *vid_thread(void *arg)

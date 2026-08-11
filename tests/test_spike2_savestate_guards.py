@@ -108,3 +108,60 @@ def test_both_criu_failures_get_a_sentence_the_user_can_act_on():
     assert "has bad build-ID" in text
     assert "Save again on this build." in text
     assert "Can't stat mountpoint" in text
+
+
+# ----------------------------------------------------------------------
+# THE PRICE OF A CHECKPOINTABLE BOOT MUST BE THE FEATURE, NOT THE RUN.
+#
+# v0.126.0 made every Start a PAD_PIVOT boot, because that is the only shape
+# criu can dump.  That boot needs a native static busybox to umount the old
+# root after the pivot, no machine has one by default, it was on no
+# prerequisite list, and run_game.sh answers a pivot it cannot do with
+# `exit 1`.  So the release that turned save states on took the emulator away
+# from everyone without busybox-static.  A user reported it on 2026-08-11
+# against star_wars_le and iron_maiden_pro - two titles that had run on that
+# machine before:
+#
+#     [run] PAD_PIVOT needs a STATIC busybox at /bin/busybox
+#     [watch] the game never started.
+# ----------------------------------------------------------------------
+
+def test_a_run_that_cannot_be_checkpointed_still_runs():
+    """watch.sh withdraws the pivot request; it does not pass it on and let
+    run_game.sh stop the run."""
+    text = src("watch.sh")
+    assert "! pad_static_busybox" in text, (
+        "watch.sh no longer checks whether a pivot is possible")
+    gate = line_of(text, "! pad_static_busybox")
+    assert "unset PAD_PIVOT" in text, (
+        "the request has to be withdrawn, or run_game.sh still exits 1")
+    # BEFORE anything reads it: the cfg dump has to name the shape that really
+    # ran, and PF_STATES must not offer save buttons this run cannot honour.
+    assert gate < line_of(text, "[watch] cfg argv="), \
+        "the log would name a pivot boot that did not happen"
+    assert gate < line_of(text, 'PAD_SAVESTATES:-${PAD_PIVOT:-0}'), \
+        "the playfield would show Save/Load buttons that can only fail"
+    assert gate < line_of(text, 'PAD_PIVOT="${PAD_PIVOT:-}"'), \
+        "run_game.sh would still be asked for a pivot it cannot do"
+
+
+def test_the_withdrawal_says_what_it_costs_and_how_to_undo_it():
+    """A silent fallback is a save-state feature that quietly disappeared."""
+    text = src("watch.sh")
+    block = text[text.index("! pad_static_busybox"):]
+    block = block[:block.index("unset PAD_PIVOT")]
+    assert "save states are off" in block
+    assert "apt install busybox-static" in block
+
+
+def test_one_definition_of_what_a_pivot_needs():
+    """run_game.sh does the pivot, watch.sh decides whether to ask for one and
+    setupcheck.sh predicts the answer before Start is pressed.  Two copies of
+    the test is how the tab clears a machine the run then refuses - this rig's
+    oldest rule."""
+    assert "pad_static_busybox()" in src("padpath.sh")
+    for script in ("run_game.sh", "watch.sh", "setupcheck.sh"):
+        text = src(script)
+        assert "pad_static_busybox" in text, script
+        assert "ldd /bin/busybox" not in text, (
+            "%s is re-implementing the test instead of calling it" % script)

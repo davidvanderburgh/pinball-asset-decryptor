@@ -143,7 +143,12 @@ VID=$(n -f 'padvidhost\.py')
 # shape as a leaked longplay.sh and just as hard to read from the game's side.
 # It exits by itself when dump/padled goes away; a nonzero count here means
 # that check failed.
-HELP=$(( $(n -f 'autoattract\.sh') + $(n -f "^tail -q -n 0 -F "$HOME/padvid"\.log") \
+# $PAD_HOME and not $HOME on the feed pattern - see padpath.sh. Run as root
+# (which is how the app asks) $HOME is /root and this counted zero feeds however
+# many were running. It mattered less here than in killgame.sh, which used the
+# same wrong path to KILL, but a counter that reads 0 because it looked in the
+# wrong place is the exact failure this script exists to not have.
+HELP=$(( $(n -f 'autoattract\.sh') + $(n -f "^tail -q -n 0 -F $PAD_HOME/padvid\.log") \
          + $(n -f '^tail -F .*dump/game\.out') + $(n -f 'ballfeed[.]py') \
          + $(n -f '^bash [^ ]*longplay\.sh') + $(n -f 'mktables[.]py') ))
 
@@ -257,7 +262,7 @@ if [ "$TOTAL" -ne 0 ]; then
   ps -eo pid,pcpu,etime,comm,args --sort=-pcpu \
     | grep -E 'arm-binfmt|qemu-arm-static|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py|padvidhost\.py|autoattract\.sh|longplay\.sh|playfield\.py|mktables\.py|watch\.sh|run_game\.sh|unshare -|fuse2fs|game\.out' \
     | grep -v grep | head -12
-  mountpoint -q "$HOME/card" 2>/dev/null
+  mountpoint -q "$PAD_HOME/card" 2>/dev/null
   mount 2>/dev/null | grep 'fuse.ext4' | sed 's/^/  mount: /'
 fi
 

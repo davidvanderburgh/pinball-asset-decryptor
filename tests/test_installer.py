@@ -520,7 +520,8 @@ def test_both_installers_offer_every_emulator_package_the_tab_names():
     Derived from the tab, so a sixth prerequisite cannot go stale here the way
     the fifth did.  libc6-dev is part of it for the reason the JJP entry
     already records: gcc only *recommends* the headers."""
-    from pinball_decryptor.gui.emulate_tab import _SETUP_TOOLS
+    from pinball_decryptor.gui.emulate_tab import (_SETUP_OPTIONAL,
+                                                   _SETUP_TOOLS)
     ps1 = PS1.read_text(encoding="utf-8", errors="replace")
     linux = (INSTALLER / "install_prerequisites_linux.sh").read_text(
         encoding="utf-8", errors="replace")
@@ -535,7 +536,10 @@ def test_both_installers_offer_every_emulator_package_the_tab_names():
     linux_stern = [ln for ln in linux_pkgs.splitlines()
                    if ln.strip().startswith("[6]=")]
     assert linux_stern, "install_prerequisites_linux.sh lost its Stern package list"
-    for _key, pkg, _why in _SETUP_TOOLS:
+    # _SETUP_OPTIONAL too: busybox-static costs the save states rather than the
+    # run, but the installer is still where a user who never opens the tab gets
+    # it - and that omission is exactly what made v0.126.0 refuse to start.
+    for _key, pkg, _why in _SETUP_TOOLS + _SETUP_OPTIONAL:
         for name in pkg.split():
             assert name in ps1_stern, (
                 f"install_prerequisites.ps1's Stern entry never installs "

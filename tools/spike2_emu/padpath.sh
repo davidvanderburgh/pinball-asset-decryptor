@@ -20,7 +20,54 @@
 RIG=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
 export RIG
 
-: "${PAD_ROOT:=$HOME/spike2root}"
+# WHOSE rig is this? $HOME IS NOT THE ANSWER WHEN RUNNING AS ROOT, and that is
+# not an edge case - it is how the app starts and stops every run
+# (`wsl.exe -u root ...`). As root $HOME is /root, where this rig has never
+# lived, so every path and every pkill pattern built from $HOME silently points
+# at a directory that does not exist. Nothing errors; the globs just match
+# nothing and the patterns just match nothing.
+#
+# THAT COST AN HOUR ON 2026-08-11. killgame.sh globs "$HOME/card/"*/ to unmount
+# the card and matches "^tail ... $HOME/padvid\.log" to kill the event feed.
+# Run as root both became /root/..., so the card was never unmounted and the
+# tail never killed - while alive.sh, counting the same things by other
+# patterns, correctly reported them still up. The teardown then printed
+# PAD_STOP_NEEDS_WSL_RESTART, which reads as "this needs a VM restart" and
+# invites someone to kill fuse2fs by hand - and killing the fuse daemon instead
+# of unmounting leaves the kernel holding a mount with no userspace behind it,
+# so the NEXT run dies at "Transport endpoint is not connected" before it can
+# even create its mountpoint. One wrong $HOME, three failures deep.
+#
+# So: resolve the rig's home ONCE, here, and let every script use it. An
+# explicit PAD_HOME always wins; after that the order below applies.
+#
+# ROOT IS ELEVATION, NOT OWNERSHIP, and that is the rule that makes this work.
+# The rig belongs to a human's home; root is only how the scripts get the caps
+# to mount and chroot. So when $HOME is /root we do NOT trust it - not even if
+# /root/spike2root exists, because it usually does: any earlier root-without-
+# HOME run leaves a half-built one there, and this machine has exactly that
+# from 2026-08-08. Picking it would be the same silent-wrong-path bug in a new
+# costume, and worse, because it would look like a real rig.
+_pad_hasrig() { [ -d "$1/spike2root" ] || [ -d "$1/card" ]; }
+if [ -z "${PAD_HOME:-}" ]; then
+    if [ "$(id -u)" != 0 ] && _pad_hasrig "$HOME"; then
+        PAD_HOME=$HOME                       # ordinary user: their own rig
+    elif [ -n "${SUDO_USER:-}" ] && _pad_hasrig "/home/$SUDO_USER"; then
+        PAD_HOME=/home/$SUDO_USER            # sudo names the human; believe it
+    else
+        for _h in /home/*/; do               # the one /home/* that has a rig
+            if _pad_hasrig "${_h%/}"; then PAD_HOME=${_h%/}; break; fi
+        done
+        unset _h
+    fi
+    # Nothing found: fall back to $HOME. On a fresh machine that is where a rig
+    # should be built; as root with no user rig it is at least honest about
+    # where it looked.
+    : "${PAD_HOME:=$HOME}"
+fi
+export PAD_HOME
+
+: "${PAD_ROOT:=$PAD_HOME/spike2root}"
 export PAD_ROOT
 ROOT=$PAD_ROOT
 
@@ -70,6 +117,28 @@ pad_is_wsl() {
 pad_guest_up() {
     pgrep -x game >/dev/null 2>&1 && return 0
     pgrep -f 'arm-binfmt|qemu-arm' >/dev/null 2>&1
+}
+
+# ---- WHAT A CHECKPOINTABLE BOOT NEEDS AND AN ORDINARY ONE DOES NOT --------
+#
+# PAD_PIVOT=1 (item 13, save states) gives the guest its own root with
+# pivot_root instead of chroot, because criu cannot dump a chroot'd task. The
+# host tree is then dropped with one lazy umount - and the program that does
+# that umount runs AFTER the pivot, with the host tree already gone, so it has
+# to be a NATIVE STATIC binary sitting inside the rootfs. The rootfs's own
+# busybox is ARM and would need the qemu we are about to exec into, so it
+# cannot do it. `busybox-static` puts a native one at /bin/busybox; noble's
+# busybox-initramfs is DYNAMIC and is not a substitute.
+#
+# ONE DEFINITION, because three places ask the same question: run_game.sh does
+# the pivot, watch.sh decides whether to ask for one, and setupcheck.sh
+# predicts the answer for the Emulate tab before Start is pressed. Two copies
+# of this is exactly how the tab clears a machine that the run then refuses -
+# the rule this rig keeps writing down (alive.sh and killgame.sh disagreeing
+# about what a running rig is has already cost a session).
+pad_static_busybox() {
+    head -c4 /bin/busybox 2>/dev/null | grep -q ELF || return 1
+    ! ldd /bin/busybox 2>&1 | grep -q '=>'
 }
 
 # ---- WHAT THE HARDWARE SHIM IS BUILT FROM, IN ONE PLACE ------------------

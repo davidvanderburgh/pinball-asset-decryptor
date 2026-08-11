@@ -30,6 +30,12 @@
 #   nativecc                   1 = this machine can compile and link a NATIVE
 #                              program, which is a different question from
 #                              whether gcc is on PATH - see _pad_cc_works
+#   busybox                    1 = there is a native STATIC busybox, which is
+#                              what a checkpointable (save-state) boot needs
+#                              and an ordinary one does not - see
+#                              pad_static_busybox. Its absence costs SAVE
+#                              STATES, not the emulator, so the tab reports it
+#                              apart from the six above
 #   need                       the packages that would supply the missing
 #                              ones, in apt's spelling
 #   indexed                    1 = apt has index metadata to answer questions
@@ -107,12 +113,23 @@ _have() {
 #: no pulseaudio client tools at all). The Mac container has installed it since
 #: the day it was written - docker/Dockerfile, "the host-side H.264 decode the
 #: guest cannot do itself" - and the WSL side was simply never asked.
+#: AND THE ONE THAT IS NOT ABOUT STARTING AT ALL. Every line above is a
+#: condition of running the game; this one is a condition of SAVING it. The
+#: app asks for a checkpointable boot on every start (item 13), that boot
+#: needs a native static busybox, and the package carrying it was on no list
+#: anywhere - so v0.126.0 refused to start any title on a machine without it
+#: (reported 2026-08-11). watch.sh now drops the request and runs anyway, so
+#: what this fact costs is the save-state controls; it is reported here all
+#: the same, because the alternative is a user finding out from a log line
+#: mid-run - which is the thing this whole script exists to prevent. The tab
+#: keeps it out of "this PC cannot run the emulator" for the same reason.
 PAD_SETUP_TOOLS="qemu:qemu-arm-static:qemu-user-static:1
 armgcc:arm-linux-gnueabihf-gcc:gcc-arm-linux-gnueabihf:0
 nativecc:@_pad_cc_works:gcc,libc6-dev:0
 debugfs:debugfs:e2fsprogs:0
 fuse:fusermount3:fuse3:0
-ffmpeg:ffmpeg:ffmpeg:0"
+ffmpeg:ffmpeg:ffmpeg:0
+busybox:@pad_static_busybox:busybox-static:0"
 
 need= _xrel_ok=
 for _t in $PAD_SETUP_TOOLS; do

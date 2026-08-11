@@ -207,11 +207,43 @@ void pad_present(void)
 #define U(...) do { unsigned int _v[] = { __VA_ARGS__ }; \
                     emit_u(op_, _v, sizeof _v / 4u); } while (0)
 
+/* PAD_GL_VPLOG=1 - say what rectangle the GUEST asked to draw into.
+ *
+ * Item 42: a menu came up with the picture in a band exactly half the
+ * framebuffer height, vertically centred, and no menu text - with ZERO GL
+ * errors, zero Radium errors, and the guest rendering happily at 52.9 fps.
+ * Nothing was failing, so the only question is who chose that rectangle: the
+ * game, or us placing its output. Both viewport and scissor are forwarded to
+ * the host and NEITHER SIDE PRINTED THEM, so those two answers were
+ * indistinguishable from outside the process.
+ *
+ * DEDUPED, because these are per-frame calls and an undeduped log at 50 fps
+ * buries the run in its own noise. Only a CHANGE prints - which is exactly the
+ * interesting event, since a screen that switches to a half-height viewport
+ * says so in one line and then stays quiet.
+ */
+static int vplog = -1;
+static void vp_say(const char *what, int x, int y, int w, int h)
+{
+    static int lx[2], ly[2], lw[2], lh[2], seen[2];
+    int i = what[0] == 'v' ? 0 : 1;
+    char b[120];
+    if (vplog < 0) vplog = envint("PAD_GL_VPLOG", 0);
+    if (!vplog) return;
+    if (seen[i] && lx[i] == x && ly[i] == y && lw[i] == w && lh[i] == h) return;
+    lx[i] = x; ly[i] = y; lw[i] = w; lh[i] = h; seen[i] = 1;
+    snprintf(b, sizeof b, "[gl] %s %d,%d %dx%d   (fb %dx%d, frame %d)\n",
+             what, x, y, w, h, fb_w, fb_h, frame_no);
+    say(b);
+}
+
 int glViewport(int x, int y, int w, int h)
-{ const unsigned int op_ = PADGL_VIEWPORT; U((unsigned)x,(unsigned)y,(unsigned)w,(unsigned)h); return 0; }
+{ const unsigned int op_ = PADGL_VIEWPORT; vp_say("viewport", x, y, w, h);
+  U((unsigned)x,(unsigned)y,(unsigned)w,(unsigned)h); return 0; }
 
 int glScissor(int x, int y, int w, int h)
-{ const unsigned int op_ = PADGL_SCISSOR; U((unsigned)x,(unsigned)y,(unsigned)w,(unsigned)h); return 0; }
+{ const unsigned int op_ = PADGL_SCISSOR; vp_say("scissor ", x, y, w, h);
+  U((unsigned)x,(unsigned)y,(unsigned)w,(unsigned)h); return 0; }
 
 int glClearColor(float r, float g, float b, float a)
 { float v[4]; v[0]=r; v[1]=g; v[2]=b; v[3]=a; emit(PADGL_CLEARCOLOR, v, 16, 0, 0); return 0; }

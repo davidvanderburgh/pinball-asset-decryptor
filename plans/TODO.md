@@ -1232,21 +1232,44 @@ These have each been violated at least once and each cost a run or a window:
       same hash serves clips on godzilla_pro** (see item 41's godzilla log), so
       this backdrop is Stern's common LCD asset set and the screen is likely a
       common one rather than a TMNT screen.
-      **★ THE LEAD WORTH TAKING FIRST, and it is a one-variable experiment:
-      `glbridge.c:173-174` defaults the guest framebuffer to `PAD_GL_W=1920`,
-      `PAD_GL_H=1080` — the real Spike 2 LCD — and `watch.sh` overrides it to
-      1360x768** (matching the video clips, which are all 1360x768). If the
-      game lays its menus out against the native 1080-high display, a 768-high
-      surface is exactly the kind of thing that puts a menu somewhere other than
-      where it belongs. **Run once with `PAD_GL_W=1920 PAD_GL_H=1080` and look
-      at the same screen.** If it draws, the answer is that cheap; if it does
-      not, the size is eliminated for the cost of one run.
-      **The instrument this needs and does NOT have: nothing logs `glViewport`
-      or `glScissor`.** `glbridge.c:210,213` forward both to the host
-      (`PADGL_VIEWPORT`, `PADGL_SCISSOR` at `padglhost.c:2929-2930`) and neither
-      side prints them, so "the guest asked for a half-height viewport" and "the
-      host placed a full-height surface wrongly" are indistinguishable from
-      outside. One logged line per call settles it.
+      **★★ FIVE THINGS ESTABLISHED 2026-08-11, 40% — the fault is now boxed
+      into the VIDEO COMPOSITING PATH and everything else is eliminated.**
+      **(1) THE SERVICE MENU'S FIRST PAGE RENDERS PERFECTLY** — "TMNT PRO /
+      SERVICE MENU", the version table, "Press 'Select' to continue", the QR
+      code, all sharp and full height (`C:\tmp\item41\menu_page1_good.png`). So
+      menu text on turtles is not broken as such. **It is a DEEPER page that
+      breaks**, reached by pressing Select on from there.
+      **(2) IT IS NOT A VIEWPORT OR SCISSOR.** New instrument this pass,
+      `PAD_GL_VPLOG=1` in `glbridge.c`, prints every CHANGE of `glViewport` /
+      `glScissor`. Across a whole run — boot, attract, working menu page and
+      broken page — **the guest sets exactly ONE viewport: `0,0 1360x768`**, and
+      scissor is only ever "off" (`-8192,-7424 16384x16384`) or full size.
+      Nothing is being clipped and the guest never asks for a short surface, so
+      the half-height band is drawn GEOMETRY, not a clipped full-size draw.
+      **(3) IT IS NOT THE SOURCE MATERIAL.** All three clips involved probe as
+      natively **1360x768** (`ffprobe`: 341.asset 1779 frames, 22.asset 759,
+      14.asset 899). Not half-height banners being drawn correctly.
+      **(4) THE GL/TEXT LAYER IS HEALTHY.** With `PAD_VID=0` the same session
+      draws its text full height and correctly placed on black. So whatever is
+      wrong is not the scene/text renderer.
+      **(5) THE ONE THING UNIQUE TO THE BROKEN SCREEN: it runs TWO video
+      channels at once** (ch0 `…/2.asset/14.asset` and ch1 `…/2.asset/341.asset`
+      or `/22.asset`), where attract and the working menu page use ch0 alone.
+      **So the next pass starts at the two-channel composite path**, not at the
+      scene renderer and not at the geometry the game asks for.
+      **★ RULED OUT WITH A RUN, do not repeat: `PAD_GL_W=1920 PAD_GL_H=1080`.**
+      The idea was that `glbridge.c:173-174` defaults to the real LCD size and
+      `watch.sh` overrides to 1360x768, so a menu laid out for 1080 might
+      misplace itself. **It is the other way round: the game lays out at a FIXED
+      1360x768** — at 1920x1080 the whole UI shrinks into the top-left of the
+      surface with the backdrop oversized around it, and David's verdict on
+      seeing it was "that breaks the regular screens". watch.sh's 1360x768 is
+      correct and must stay.
+      **★ ALSO RULED OUT: a stale build.** `ensurebuild` had been refusing to
+      rebuild the guest GL bridge (see the loose end about it continuing anyway),
+      so the first suspicion was guest/host protocol drift across `padgl.h`.
+      Both halves were rebuilt together (13:54:24 and :25) and **the fault still
+      reproduces**, so it is a real fault and not a build artefact.
       **NOT ESTABLISHED, and do not assume either half:** whether the missing
       text and the half-height video are one fault or two; whether the band is
       the menu's own video mode being letterboxed wrongly by `win_present()`

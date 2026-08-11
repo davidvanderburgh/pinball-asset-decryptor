@@ -439,10 +439,36 @@ These have each been violated at least once and each cost a run or a window:
       a 0-score ball). Everything the feed mechanism does for ball two of a
       multiball it has now done three times for one ball, but that is an
       argument, not the oracle this item asked for.
-      **Resume:** play a game into a multiball with a run up and read
-      `~/padball.log` beside the screen — the acceptance is 2+ balls in play
-      on the GAME's display, and the log will say how many ejects it answered
-      and whether `PAD_BALL_MIN_GAP_MS` ever refused one. State the repeats.
+      **★★ (7) DAVID REACHED A MULTIBALL BY HAND, 2026-08-11 — MECHAGODZILLA
+      MULTIBALL, `trough 3/6   3 in play` on 21a's panel — and it does NOT
+      close this item, because it was FED BY HAND.** His run was the app's,
+      i.e. main's watch.sh, which has no `ballfeed.py`; the `[sw] +67f/-67f`
+      lines in his log are virtual-playfield clicks. So the game will start a
+      multiball and the panel counts it correctly, which is worth knowing —
+      but the acceptance is a multiball the FEEDER served, and that still
+      needs a run from this branch.
+      **★★ (8) AND IT EXPOSED A REAL GAP, now fixed: nothing in the window
+      could put a ball back.** David: *"how do i drain a ball? pressing one of
+      the trough switches doesn't drain the ball. is there a way to just click
+      on the ball indicators to add or remove it to the playfield?"* Pressing
+      the switch cannot work and never could — item 24's press-and-hold is
+      MOMENTARY and a ball in a trough holds its switch closed for as long as
+      it sits there, so a press is a ball that arrives and leaves. The only
+      latching control in the window was `Reset balls`, which makes six.
+      **The six dots are the control now:** click an occupied one for
+      `plunge.py take` (one ball out), an empty one for `plunge.py drain` (one
+      ball home). The STACK decides which switch moves, not which dot was
+      clicked — clicking the third of four opens the far end, which is item
+      20's geometry and what the panel exists to show. Bound with a per-item
+      `tag_bind` returning `"break"`, NOT via `info`, so item 24's hit-test
+      promise holds. Tested with real Tk, not a stub canvas: the thing under
+      test is a binding.
+      **Resume:** play a game into a multiball with a run FROM THIS BRANCH and
+      read `~/padball.log` beside the screen — the acceptance is 2+ balls in
+      play on the GAME's display, served by the feeder, and the log will say
+      how many ejects it answered and whether `PAD_BALL_MIN_GAP_MS` ever
+      refused one. State the repeats. Nothing of this pass is on main, so
+      David's own sessions do not have the feeder or the clickable dots.
       **★ DAVID, 2026-08-06: "we will need some sophisticated ball handling
       and clear feedback about how many balls are in play. for example, during
       multiball, many balls are in play."** The feedback clause is 21a, done

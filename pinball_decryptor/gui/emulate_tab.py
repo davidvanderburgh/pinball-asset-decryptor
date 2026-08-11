@@ -1641,8 +1641,13 @@ class EmulatePanel:
                         "%b %d %H:%M", time.localtime(int(mtime)))
                 except (ValueError, OverflowError):
                     when = "?"
+                # The iid stays the FULL reference (game/slotN - what
+                # slots.sh and loadgame.sh take, item 39's per-game layout);
+                # the Slot column shows the bare name, because the Game
+                # column already says whose it is.
                 tree.insert("", tk.END, iid=name, values=(
-                    name, label or "", game, self._human(size), when))
+                    name.rsplit("/", 1)[-1], label or "", game,
+                    self._human(size), when))
             if self._slots_total is None:
                 self._slots_sum.configure(
                     text="Could not read the slots - is WSL up?")

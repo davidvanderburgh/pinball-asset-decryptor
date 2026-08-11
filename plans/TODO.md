@@ -152,9 +152,34 @@ These have each been violated at least once and each cost a run or a window:
       Emulate tab. Same authority as the app's own filter: the game field
       in slot.meta. Verified offline against the REAL slot set: turtles'
       picker shows "1 · [godzilla_pro]".
+      **★ ROUND 4, DAVID (2026-08-11): "i thought we had 10 slots per
+      game?" They were 10 GLOBAL slots every game shared — item 13 built
+      them flat and the app merely filtered the view. NOW THEY ARE PER
+      GAME:** `saves/<game>/<slot>`, and slots.sh MIGRATES the flat layout
+      on sight (same filesystem, mv = rename — ran against the real disk:
+      all 4 slots landed under godzilla_pro/ and star_wars_le/ with labels
+      intact, including the non-numbered `wt36test`). savegame.sh saves
+      under the running guest's game and removes a stale legacy twin;
+      loadgame.sh takes bare `slotN` (game = the running guest's, which is
+      what every existing caller means) or explicit `game/slotN`, and a
+      bare name can no longer resolve to another title's save. slots.sh
+      label/delete/pack take `game/slotN` (legacy bare still honoured);
+      delete prunes an emptied game dir. status.sh's saves_mtime token
+      watches both depths so the app's event refresh survives the layout.
+      The playfield picker filters to GAME — ten slots means THIS title's
+      ten — and round 3's foreign-slot marking/guard came back out with the
+      shared namespace that made it necessary. The app's table keeps the
+      qualified name as the row id (what slots.sh takes) and shows the bare
+      name in the Slot column. Verified: label/delete round-trip on a
+      scratch per-game slot; godzilla's picker shows its two labels,
+      turtles' shows ten empties. NOT yet verified: a live save+load in the
+      new layout (needs a run; the restore machinery itself is untouched —
+      only the directory the wrappers resolve moved).
       **Resume:** David plays with the playfield focused (flippers, service
-      cluster, door toggle, a ball click); fix what his eyes and hands
-      catch; then close — merge to main per the worktree rule.
+      cluster, door toggle, a ball click), saves and loads a slot on a card
+      run (the first live save/load in the per-game layout); fix what his
+      eyes and hands catch; then close — merge to main per the worktree
+      rule.
       **★ DAVID, 2026-08-10: "i want to consolidate the two switch windows for
       the emulator. there are too many windows. i do like the feedback and
       interface of the small switch window, having a tight and compact view is

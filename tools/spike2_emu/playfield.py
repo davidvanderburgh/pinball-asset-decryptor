@@ -1648,20 +1648,22 @@ def attach_key_panel(view):
 
 
 def state_slots():
-    """slots.sh list, parsed: {slot_dir: (game, label)} for EXISTING slots.
+    """slots.sh list, parsed: {slot: label} for THIS GAME's existing slots.
 
     Root for the same reason state_run is - savegame.sh writes slots as
     root, so reading their metadata and sizes needs it too. Best-effort:
     a wedged WSL returns {} and the picker just shows every slot as empty,
     which a save into it corrects.
 
-    THE GAME RIDES ALONG (item 39, David: "the save state slots are not
-    consistent with the game like they should be"). The slot namespace is
-    global - slot1 can hold a godzilla save while turtles is running - and
-    this parser used to drop the game field, so the picker offered every
-    game's slots as this game's and a Save would have OVERWRITTEN another
-    title's save. The app's own slot table already filters on the same
-    slot.meta fact; now both surfaces read it."""
+    ★ ITEM 39, in two steps. David first caught the picker offering OTHER
+    games' saves as this game's (the parse dropped the game field - a Save
+    would have overwritten another title's slot), then asked the real
+    question: "i thought we had 10 slots per game?" Slots are now stored
+    per game (saves/<game>/<slot>, slots.sh migrates the old flat layout on
+    sight), so this filters to GAME and the ten slots the picker shows are
+    genuinely this title's ten. The keys stay bare slot names because that
+    is what savegame.sh/loadgame.sh take - they resolve the game from the
+    running guest themselves."""
     if sys.platform == "win32":
         cmd = ["wsl.exe", "-u", "root", "-e", "bash",
                "%s/slots.sh" % WSL_DIR, "list"]
@@ -1675,8 +1677,8 @@ def state_slots():
     out = {}
     for ln in (r.stdout or b"").decode("utf8", "replace").splitlines():
         p = ln.split("|")
-        if len(p) >= 6 and p[0] == "slot":
-            out[p[1]] = (p[3], p[4])
+        if len(p) >= 6 and p[0] == "slot" and p[3] == GAME:
+            out[p[1].rsplit("/", 1)[-1]] = p[4]
     return out
 
 
@@ -1731,20 +1733,16 @@ class StateOps:
         return [self._slot_box] + self._state_btns
 
     def _slot_values(self):
-        """One line per slot: this game's slots by name, another game's
-        slots visibly foreign. Foreign slots stay LISTED - hiding them (the
-        app's table does) would render them "(empty)" here, and a save into
-        an "empty" slot that is not would destroy another title's save. The
-        guard that refuses to touch them is _slot_game_guard()."""
+        """One line per slot. Every slot listed is THIS game's now (slots
+        are stored per game and state_slots filters), so ten slots means
+        ten of this title's slots - the "1 · [godzilla_pro]" foreign-slot
+        marking this method briefly carried is gone with the shared
+        namespace that made it necessary."""
         vals = []
         for i, sid in enumerate(self.SLOT_IDS):
-            entry = getattr(self, "_slot_labels", {}).get(sid)
-            if entry is None:
+            label = getattr(self, "_slot_labels", {}).get(sid)
+            if label is None:
                 vals.append("%d · (empty)" % (i + 1))
-                continue
-            game, label = entry
-            if game and game != GAME:
-                vals.append("%d · [%s]" % (i + 1, game))
             else:
                 vals.append("%d · %s" % (i + 1, label or "unnamed"))
         return vals
@@ -1754,22 +1752,6 @@ class StateOps:
             return self.SLOT_IDS[self._slot_box.current()]
         except (ValueError, IndexError, tk.TclError):
             return self.SLOT_IDS[0]
-
-    def _slot_game_guard(self, slot):
-        """None when the slot may be touched from THIS game, else the
-        refusal line for the status bar. Same rule as the app's slot table
-        (it hides other games' slots); the authority for both is the game
-        field slots.sh reads out of slot.meta."""
-        entry = getattr(self, "_slot_labels", {}).get(slot)
-        if entry is None:
-            return None
-        game = entry[0]
-        if game and game != GAME:
-            n = self.SLOT_IDS.index(slot) + 1
-            return ("slot %d holds a %s save - pick another slot "
-                    "(manage cross-game slots in the app's Emulate tab)"
-                    % (n, game))
-        return None
 
     def _slots_refresh(self, pick_first_empty=False):
         """Re-read the slots off the rig, on a worker thread."""
@@ -1803,10 +1785,6 @@ class StateOps:
         """Ask for a name, then save. The dialog is the naming surface David
         asked for; empty keeps the slot unnamed, Escape/Cancel aborts."""
         slot = self._current_slot()
-        refuse = self._slot_game_guard(slot)
-        if refuse:
-            self._state_msg = (refuse, time.monotonic() + 6.0)
-            return
         top = self.cv.winfo_toplevel()
         dlg = tk.Toplevel(top)
         dlg.title("Save state")
@@ -1815,8 +1793,7 @@ class StateOps:
         n = self.SLOT_IDS.index(slot) + 1
         tk.Label(dlg, text="Save to slot %d - name (optional):" % n,
                  anchor="w").pack(fill="x", padx=10, pady=(10, 2))
-        entry = self._slot_labels.get(slot)
-        var = tk.StringVar(value=(entry[1] if entry else "") or "")
+        var = tk.StringVar(value=self._slot_labels.get(slot) or "")
         ent = tk.Entry(dlg, textvariable=var, width=34)
         ent.pack(padx=10, pady=2)
         row = tk.Frame(dlg)
@@ -1848,10 +1825,6 @@ class StateOps:
             n = self.SLOT_IDS.index(slot) + 1
             self._state_msg = ("slot %d is empty - nothing to load" % n,
                                time.monotonic() + 5.0)
-            return
-        refuse = self._slot_game_guard(slot)
-        if refuse:
-            self._state_msg = (refuse, time.monotonic() + 6.0)
             return
         self.run_state("loadgame.sh", slot)
 

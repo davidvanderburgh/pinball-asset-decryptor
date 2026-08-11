@@ -56,8 +56,18 @@ ROOT=$(envval PAD_ROOT)
 GAME=$(envval PAD_GAME)
 [ -n "$ROOT" ] || { echo "savegame: the guest has no PAD_ROOT - was it started with PAD_PIVOT=1?"; exit 1; }
 
-DIR=$ROOT/saves/$SLOT
+# ★ ITEM 39: PER GAME - saves/<game>/<slot>, so every title has its own ten
+# slots and turtles' slot 1 can never overwrite godzilla's. A LEGACY bare
+# slot of this same game under this name is removed: slots.sh migrates those
+# on sight, but a save landing between migrations must not leave a stale
+# twin at the old path for the next list to resurrect.
+[ -n "$GAME" ] || { echo "savegame: the guest has no PAD_GAME"; exit 1; }
+DIR=$ROOT/saves/$GAME/$SLOT
 rm -rf "$DIR"; mkdir -p "$DIR"
+if [ -f "$ROOT/saves/$SLOT/slot.meta" ] && \
+   [ "$(sed -n 's/^game=//p' "$ROOT/saves/$SLOT/slot.meta" | head -1)" = "$GAME" ]; then
+    rm -rf "${ROOT:?}/saves/$SLOT"
+fi
 
 echo "[savegame] slot '$SLOT'  <-  $GAME (pid $PID)"
 CRIU="$CRIU" bash "$RIG/savestate.sh" "$DIR" "$PID" || { echo "[savegame] FAILED"; exit 1; }

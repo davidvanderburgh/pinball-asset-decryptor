@@ -130,9 +130,9 @@ def test_a_run_that_cannot_be_checkpointed_still_runs():
     """watch.sh withdraws the pivot request; it does not pass it on and let
     run_game.sh stop the run."""
     text = src("watch.sh")
-    assert "pad_static_busybox" in text, (
+    assert "! pad_can_pivot" in text, (
         "watch.sh no longer checks whether a pivot is possible")
-    gate = line_of(text, "PIVOT_WHY=")
+    gate = line_of(text, "! pad_can_pivot")
     assert "unset PAD_PIVOT" in text, (
         "the request has to be withdrawn, or run_game.sh still exits 1")
     # BEFORE anything reads it: the cfg dump has to name the shape that really
@@ -148,27 +148,35 @@ def test_a_run_that_cannot_be_checkpointed_still_runs():
 def test_the_withdrawal_says_what_it_costs_and_how_to_undo_it():
     """A silent fallback is a save-state feature that quietly disappeared."""
     text = src("watch.sh")
-    block = text[text.index("PIVOT_WHY="):]
+    block = text[text.index("! pad_can_pivot"):]
     block = block[:block.index("unset PAD_PIVOT")]
     assert "save states are off" in block
     assert "apt install busybox-static" in block
-    # ...and the OTHER half, which has a different answer: no Ubuntu packages
-    # criu, so "apt install criu" would be advice that cannot work anywhere.
+    # Both boot-shape halves have their own sentence: naming busybox-static at
+    # a machine that already has it is telling someone to install what they
+    # have.
+    assert "no pivot_root" in block
+    assert "util-linux" in block
+    # ...and the THIRD program, which has a different answer again: no Ubuntu
+    # packages criu, so "apt install criu" would be advice that cannot work
+    # anywhere.
     assert "getcriu.sh" in block
     assert "apt install criu" not in text
 
 
-def test_both_halves_of_a_save_state_are_checked_not_just_the_boot_shape():
-    """PAD-53 made a missing busybox cost only the feature - and a machine
-    that then installed busybox-static STILL had no save states, because criu
-    was a hard-coded path to one developer's build.  A pivot boot with no criu
-    behind it offers Save and Load buttons that can only fail."""
-    text = src("watch.sh")
-    block = text[text.index("PIVOT_WHY="):text.index("unset PAD_PIVOT")]
-    assert "pad_static_busybox" in block
-    assert "pad_criu" in block, (
-        "the pivot is withdrawn for a missing busybox but not for a missing "
-        "criu, which is the other half of the same feature")
+def test_all_three_thirds_of_a_save_state_are_gated_not_just_the_boot_shape():
+    """PAD-53 made a missing busybox cost only the feature; PAD-54 added
+    pivot_root when installing that package STILL left a run refusing; and a
+    pivot boot with no criu behind it offers Save and Load buttons that can
+    only fail.  The gate is ONE call asking about all three, so no pair of
+    fixes can leave the third hole open again."""
+    pad = src("padpath.sh")
+    gate = pad[pad.index("pad_can_pivot()"):]
+    gate = gate[:gate.index("}")]
+    assert "pad_pivot_programs" in gate
+    assert "pad_criu" in gate, (
+        "the pivot is withdrawn for a missing boot shape but not for a "
+        "missing criu, which is the other half of the same feature")
 
 
 def test_one_definition_of_what_a_pivot_needs():
@@ -177,9 +185,10 @@ def test_one_definition_of_what_a_pivot_needs():
     the test is how the tab clears a machine the run then refuses - this rig's
     oldest rule."""
     assert "pad_static_busybox()" in src("padpath.sh")
+    assert "pad_pivot_root_cmd()" in src("padpath.sh")
     for script in ("run_game.sh", "watch.sh", "setupcheck.sh"):
         text = src(script)
-        assert "pad_static_busybox" in text, script
+        assert "pad_static_busybox" in text or "pad_can_pivot" in text, script
         assert "ldd /bin/busybox" not in text, (
             "%s is re-implementing the test instead of calling it" % script)
 

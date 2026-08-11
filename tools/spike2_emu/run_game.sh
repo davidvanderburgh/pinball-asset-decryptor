@@ -159,6 +159,21 @@ if [ -n "$PIVOT" ]; then
         echo "[run] PAD_PIVOT needs a STATIC busybox at /bin/busybox (apt install busybox-static)" >&2
         exit 1
     fi
+    # ...AND THE PROGRAM THAT DOES THE PIVOT, which this script used to spell
+    # as a bare `pivot_root` and never checked for. A machine without it on
+    # PATH answers with `bash: pivot_root: command not found` and the run is
+    # over - reported 2026-08-11, one release after the busybox fault above and
+    # by the same user. pad_pivot_root_cmd knows the three places it can come
+    # from (see padpath.sh); the same rules apply to this test as to that one,
+    # so watch.sh asks before it requests a pivot and getting here anyway means
+    # the pivot was asked for by hand.
+    if ! PIVOTROOT=$(pad_pivot_root_cmd); then
+        echo "[run] PAD_PIVOT needs pivot_root and this machine has none:" >&2
+        echo "[run]   not on PATH, not at /usr/sbin/pivot_root, and the" >&2
+        echo "[run]   busybox here has no pivot_root applet." >&2
+        echo "[run]   apt install busybox-static     (then start again)" >&2
+        exit 1
+    fi
     # ★ comm MUST stay "game". The whole rig identifies the guest by comm=game
     # (alive.sh, watch.sh teardown, savestate.sh, status.sh) - it is the ONE
     # stable name across platforms. Under binfmt the kernel takes comm from the
@@ -209,12 +224,18 @@ SETSID=""
 # differ by the pivot and by nothing else.
 USERNS="-r"
 [ "$(id -u)" = 0 ] && USERNS=""
-unshare $USERNS -m -p -f $SETSID bash -s "$R" "$NODEBUS_PTY" "$GAME" "$CARD_SRC" "$PIVOT" <<'INNER'
+unshare $USERNS -m -p -f $SETSID bash -s "$R" "$NODEBUS_PTY" "$GAME" "$CARD_SRC" "$PIVOT" \
+        "${PIVOTROOT:-}" <<'INNER'
 R="$1"
 NODEBUS_PTY="$2"
 GAME="$3"
 CARD_SRC="$4"
 PIVOT="$5"
+# The pivot_root command this machine actually has, resolved OUTSIDE by
+# pad_pivot_root_cmd. Passed in rather than looked up here because the lookup
+# belongs to the one function that defines it, and because a namespace is a bad
+# place to discover a missing program.
+PIVOTROOT="$6"
 # pivot_root needs the new root to BE a mount, and everything mounted below then
 # rides the pivot, so the self-bind of $R must come FIRST - before proc/sys/tmp.
 # Guarded, so the chroot path is untouched.
@@ -307,22 +328,38 @@ if [ -n "$PIVOT" ]; then
     #     inherited from watch.sh and propagated to the guest, same as binfmt.
     for fd in $(seq 3 63); do eval "exec $fd>&-" 2>/dev/null; done
     mkdir -p oldroot
-    pivot_root . oldroot || { echo "[run] pivot_root failed" >&2; exit 1; }
-    cd /
-    /busybox umount -l /oldroot
-    cd "/games/$GAME" || exit 1
-    export LD_PRELOAD=/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=1
-    # stdio has to point INSIDE the container. The caller's stdout is a file on
-    # a host mount ($HOME/gzwatch.log for watch.sh), and that mount leaves the
-    # namespace with the pivot - criu then refuses fd 1 ("Can't lookup mount for
-    # fd=1"). Reopen all three onto the rootfs's own mounts AFTER the pivot, so
-    # every fd belongs to a mount that stays. The host reads the same bytes at
-    # $ROOT/dump/game.out, so nothing is lost - but a PAD_PIVOT run's log is
-    # THERE, not on the caller's stdout, which watch.sh must follow when it
-    # learns to launch pivot runs.
-    # /.padqemu/game IS qemu (see the copy above) - named so comm stays "game";
-    # /games/$GAME/game is the real ELF it runs.
-    exec /.padqemu/game ./game </dev/null >/dump/game.out 2>&1
+    # A PIVOT THAT FAILS COSTS THE FEATURE, NOT THE RUN. This line used to
+    # `exit 1`, and everything above it - the namespace, every mount, the card -
+    # was already built and correct: the ordinary chroot boot at the foot of
+    # this script would have run perfectly from here. Losing it too is the fault
+    # this rig has now been told about twice in two releases, and the second
+    # time the missing program was one no gate could have named in advance. So
+    # the answer to a pivot that will not happen is the boot we have always
+    # done, said out loud. Save states are what it costs, and only for this run.
+    if $PIVOTROOT . oldroot; then
+        cd /
+        /busybox umount -l /oldroot
+        cd "/games/$GAME" || exit 1
+        export LD_PRELOAD=/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=1
+        # stdio has to point INSIDE the container. The caller's stdout is a file
+        # on a host mount ($HOME/gzwatch.log for watch.sh), and that mount leaves
+        # the namespace with the pivot - criu then refuses fd 1 ("Can't lookup
+        # mount for fd=1"). Reopen all three onto the rootfs's own mounts AFTER
+        # the pivot, so every fd belongs to a mount that stays. The host reads
+        # the same bytes at $ROOT/dump/game.out, so nothing is lost - but a
+        # PAD_PIVOT run's log is THERE, not on the caller's stdout, which
+        # watch.sh must follow when it learns to launch pivot runs.
+        # /.padqemu/game IS qemu (see the copy above) - named so comm stays
+        # "game"; /games/$GAME/game is the real ELF it runs.
+        exec /.padqemu/game ./game </dev/null >/dump/game.out 2>&1
+    fi
+    # Nothing was consumed by the attempt: the mounts are still the ones the
+    # chroot below wants, the cwd is still the rootfs, and the empty oldroot
+    # goes rather than being left inside it looking like part of the guest.
+    rmdir oldroot 2>/dev/null
+    echo "[run] pivot_root failed, so this run cannot be checkpointed:" >&2
+    echo "[run]   save states are off. Starting the ordinary way -" >&2
+    echo "[run]   nothing else about the run changes." >&2
 fi
 # LD_PRELOAD is applied to the game alone: the busybox tools in this rootfs do
 # not link libdl and fail to start with the shim forced on them.

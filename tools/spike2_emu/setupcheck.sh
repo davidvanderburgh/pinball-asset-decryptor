@@ -30,12 +30,12 @@
 #   nativecc                   1 = this machine can compile and link a NATIVE
 #                              program, which is a different question from
 #                              whether gcc is on PATH - see _pad_cc_works
-#   busybox                    1 = there is a native STATIC busybox, which is
-#                              what a checkpointable (save-state) boot needs
-#                              and an ordinary one does not - see
-#                              pad_static_busybox. Its absence costs SAVE
-#                              STATES, not the emulator, so the tab reports it
-#                              apart from the six above
+#   busybox                    1 = this machine can boot the checkpointable
+#                              (save-state) shape, which an ordinary run does
+#                              not need: a native STATIC busybox AND a
+#                              pivot_root to run - see pad_can_pivot. Its
+#                              absence costs SAVE STATES, not the emulator, so
+#                              the tab reports it apart from the six above
 #   criu                       1 = there is a criu to freeze the guest with.
 #                              NOT A PACKAGE ON ANY UBUNTU - it is built from
 #                              source by getcriu.sh, which is why its `-`
@@ -127,6 +127,14 @@ _have() {
 #: the same, because the alternative is a user finding out from a log line
 #: mid-run - which is the thing this whole script exists to prevent. The tab
 #: keeps it out of "this PC cannot run the emulator" for the same reason.
+#: AND IT ASKS ABOUT THE WHOLE BOOT, NOT ONE PACKAGE OF IT. This line used to
+#: be pad_static_busybox, and the user above installed exactly what it named,
+#: came back the next day, and lost the emulator to the OTHER program that
+#: shape needs - `pivot_root: command not found`, one release later. A gate
+#: that clears a machine the run then refuses is this file's whole subject, so
+#: the question is now pad_can_pivot: both halves, one answer. busybox-static
+#: stays the package, because it carries a pivot_root applet as well as the
+#: static binary and so repairs either half (see pad_pivot_root_cmd).
 #: AND THE ONE APT CANNOT SUPPLY AT ALL, which is why the package field is `-`.
 #: criu is the program that does the freezing, and NO Ubuntu publishes it -
 #: `apt-cache policy criu` prints an empty version table on 24.04. Putting a
@@ -140,7 +148,7 @@ nativecc:@_pad_cc_works:gcc,libc6-dev:0
 debugfs:debugfs:e2fsprogs:0
 fuse:fusermount3:fuse3:0
 ffmpeg:ffmpeg:ffmpeg:0
-busybox:@pad_static_busybox:busybox-static:0
+busybox:@pad_pivot_programs:busybox-static:0
 criu:@pad_criu:-:0"
 
 need= _xrel_ok=

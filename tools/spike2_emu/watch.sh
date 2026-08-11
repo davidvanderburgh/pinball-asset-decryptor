@@ -234,34 +234,44 @@ fi
 # actually ran and the playfield does not offer Save/Load buttons that could
 # only fail (see PF_STATES).
 #
-# TWO THINGS ARE MISSABLE, NOT ONE, and the second was worse than the first.
-# The pivot is only half of a save state: criu is the program that does the
-# freezing, and NO UBUNTU PUBLISHES IT - `apt-cache policy criu` prints an
-# empty version table on 24.04. Every save-state script defaulted to one
-# developer's hand-built copy under /var/tmp, so a user who installed
-# busybox-static got the checkpointable boot, the Save and Load buttons, and
-# a failure naming a directory he had never heard of. Both halves are asked
-# about here, and the message names whichever is actually missing - getcriu.sh
-# is the answer to one and apt is the answer to the other, so a message that
-# guessed would send half the users to the wrong place.
-if [ -n "${PAD_PIVOT:-}" ]; then
-    PIVOT_WHY=
-    pad_static_busybox || PIVOT_WHY="busybox"
-    pad_criu >/dev/null || PIVOT_WHY="${PIVOT_WHY:+$PIVOT_WHY,}criu"
-    if [ -n "$PIVOT_WHY" ]; then
-        echo "[watch] this run cannot be checkpointed, so save states are off:"
-        case $PIVOT_WHY in *busybox*)
-            echo "[watch]   there is no static busybox, which the boot shape needs"
-            echo "[watch]   sudo apt install busybox-static" ;;
-        esac
-        case $PIVOT_WHY in *criu*)
-            echo "[watch]   there is no criu, which is what freezes the game."
-            echo "[watch]   No Ubuntu packages it, so it is built once, from source:"
-            echo "[watch]   wsl -u root -e bash $RIG/getcriu.sh" ;;
-        esac
-        echo "[watch] starting WITHOUT them - nothing else about the run changes."
-        unset PAD_PIVOT
+# THREE PROGRAMS ARE MISSABLE, NOT ONE, and each was found by a different
+# user report in the same week. busybox-static (PAD-53) and pivot_root
+# (PAD-54) are what the BOOT SHAPE needs; criu is what the boot shape is FOR -
+# no Ubuntu publishes it at all, so every save-state script used to default to
+# one developer's hand-built copy under /var/tmp. Miss any one and the Save and
+# Load buttons appear over something that cannot work.
+#
+# pad_can_pivot() asks all three (padpath.sh). Which one is missing only
+# decides what this SAYS, because the outcome is the same either way: run
+# without save states, everything else untouched. Withdrawing is the safe
+# direction - PAD-53 and PAD-54 are both the opposite fault, a gate that
+# CLEARED a machine the run then refused, and that is what took a user's
+# emulator away.
+#
+# THE REPAIR DIFFERS PER CAUSE, which is the whole reason this names them
+# separately: apt fixes two of them and cannot fix the third, so a message that
+# guessed would send a third of the users to a package that does not exist.
+if [ -n "${PAD_PIVOT:-}" ] && ! pad_can_pivot; then
+    echo "[watch] this run cannot be checkpointed, so save states are off:"
+    if ! pad_static_busybox; then
+        # busybox-static carries a pivot_root applet as well as the static
+        # binary, so it repairs BOTH boot-shape halves at once.
+        echo "[watch]   no static busybox here, which the boot shape needs"
+        echo "[watch]   sudo apt install busybox-static"
+    elif ! pad_pivot_root_cmd >/dev/null 2>&1; then
+        # busybox IS installed and its applet was not found either, so telling
+        # someone to install what they have is worse than saying nothing:
+        # /usr/sbin/pivot_root comes from util-linux.
+        echo "[watch]   this machine has no pivot_root"
+        echo "[watch]   sudo apt install --reinstall util-linux"
     fi
+    if ! pad_criu >/dev/null 2>&1; then
+        echo "[watch]   there is no criu, which is what freezes the game."
+        echo "[watch]   No Ubuntu packages it, so it is built once, from source:"
+        echo "[watch]   wsl -u root -e bash $RIG/getcriu.sh"
+    fi
+    echo "[watch] starting WITHOUT them - nothing else about the run changes."
+    unset PAD_PIVOT
 fi
 
 # ---- WHAT THIS RUN ACTUALLY IS, in the run's own log ----------------------
@@ -791,8 +801,20 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     # and a hand-run PAD_PIVOT session keeps its buttons with no extra flag.
     # It rides the COMMAND LINE because the Windows-side window only sees
     # WSLENV-listed variables, and an argv is one less thing to keep in step.
+    #
+    # ...AND WHAT THE RUN TURNED OUT TO BE BEATS WHAT IT WAS ASKED TO BE. The
+    # gate above withdraws a pivot this machine cannot do, but run_game.sh can
+    # still be refused by the kernel at the pivot itself - and it now answers
+    # that by booting the ordinary way rather than by dying. That run is up,
+    # correct and NOT checkpointable, and this line is written after the guest
+    # has started, so the log already says so if it happened. Buttons that can
+    # only fail are the thing this flag exists to prevent; asking the log costs
+    # one grep and covers the case no pre-flight can.
     PF_STATES=""
-    if [ "${PAD_SAVESTATES:-${PAD_PIVOT:-0}}" = 1 ]; then PF_STATES="--savestates"; fi
+    if [ "${PAD_SAVESTATES:-${PAD_PIVOT:-0}}" = 1 ] &&
+       ! grep -q '^\[run\] pivot_root failed' "$LOG" 2>/dev/null; then
+        PF_STATES="--savestates"
+    fi
     if [ "$IS_WSL" = 0 ]; then
         PF_PY=${PAD_PF_PYTHON:-python3}
         if "$PF_PY" -c 'import tkinter' >/dev/null 2>&1; then

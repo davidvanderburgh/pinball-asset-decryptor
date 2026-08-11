@@ -476,14 +476,24 @@ These have each been violated at least once and each cost a run or a window:
       so the target is the whole cell. The regression test generates a REAL
       pointer event, because a direct call cannot see the rule under test.
       **(b) "plunge should not be auto-ejecting a ball either (it should just
-      get the ball out of the shooter lane)."** Correct, and it is a
-      consequence of this item: `plunge` predates anything that could feed a
-      ball, so it had to fabricate the whole story or there was nothing to
-      plunge. Now `plunge` launches the lane and only that, `serve` is the old
-      behaviour for a feeder-off run, and the TROUGH coil marker plays `serve`
-      (that marker IS the eject). The same fabrication was in coilact's AUTO
-      PLUNGER and is gone. No fallback when the lane is empty — serving a ball
-      "to be helpful" is the exact thing being removed.
+      get the ball out of the shooter lane)"** — and then, on the build that
+      took that literally, **"it doesn't seem to be doing anything now. at ball
+      start, plunge should: eject a ball into the shooter lane closing the
+      shooter lane switch, then moments later it opens the shooter lane
+      switch."** ▼ **The middle version was a regression and is worth
+      recording as one:** the complaint was never "never eject", it was
+      ejecting a SECOND ball when one was already in the lane — which only
+      became possible because ballfeed.py now puts one there. Reading it as
+      unconditional turned Plunge into a no-op on the most ordinary press
+      there is: ball start, empty lane, no feeder (which is every run started
+      from a checkout without `ballfeed.py`, i.e. most runs today).
+      **`plunge` is conditional now** — lane occupied, launch it and eject
+      nothing; lane empty, serve — which is what the real control does.
+      `serve` stays as the unconditional form and is what the TROUGH coil
+      marker plays, since that marker IS the eject. coilact's AUTO PLUNGER no
+      longer fabricates an arrival into an empty lane.
+      **The harness checks BOTH directions**, because the one-sided version
+      looked correct in isolation; neither check alone is the requirement.
       **Resume:** play a game into a multiball with a run FROM THIS BRANCH and
       read `~/padball.log` beside the screen — the acceptance is 2+ balls in
       play on the GAME's display, served by the feeder, and the log will say

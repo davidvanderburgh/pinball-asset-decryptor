@@ -103,6 +103,22 @@ class Wire:
         self.m[o] = (self.m[o] + 1) & 0xFF
 
 
+def plunge_lane_ball(shim, lane):
+    """Put a ball in the shooter lane the way the FEEDER would have.
+
+    Written into the script region and published, not straight into mrg[]:
+    the fake shim copies one to the other, so going round it would set up a
+    state the real merge could never produce and the next thing to write a
+    switch would stomp.
+    """
+    if lane is None:
+        return
+    shim.m[padsw.OFF_SCR_HELD + lane] = 1
+    struct.pack_into("<I", shim.m, padsw.OFF_SCR_GEN,
+                     struct.unpack_from("<I", shim.m, padsw.OFF_SCR_GEN)[0] + 1)
+    time.sleep(0.1)
+
+
 def main():
     game = sys.argv[1] if len(sys.argv) > 1 else "godzilla_pro"
     tables = os.path.join(padpath.tables() or "", game)
@@ -195,10 +211,15 @@ def main():
     p.terminate()
     p.wait(timeout=5)
 
-    # ---- plunge must NOT eject, 2026-08-11 ---------------------------------
-    # David: "plunge should not be auto-ejecting a ball either (it should just
-    # get the ball out of the shooter lane)." With the feeder stopped, these
-    # run against the same fake machine and check the verbs apart from it.
+    # ---- what plunge does, both ways, 2026-08-11 ---------------------------
+    # David asked for two things that read as opposites and are not: a plunge
+    # must NOT eject a second ball when one is already in the lane, and at
+    # ball start with an EMPTY lane it must do the whole thing - eject, close
+    # the lane switch, then moments later open it. Both are checked here
+    # because the version that only did the first looked correct in isolation
+    # and turned the Plunge button into a no-op on the most ordinary press
+    # there is. With the feeder stopped, these run against the same fake
+    # machine and check the verbs apart from it.
     def run(verb):
         r = subprocess.run([sys.executable, os.path.join(HERE, "plunge.py"),
                             verb], env=env, stdout=subprocess.PIPE,
@@ -210,17 +231,35 @@ def main():
     check("reset puts every ball home", shim.count(ids), len(ids))
     out_txt = run("plunge")
     time.sleep(0.3)
-    check("plunge with an EMPTY lane ejects nothing", shim.count(ids),
-          len(ids))
-    check("...and says why instead", "shooter lane" in out_txt, True)
+    check("plunge with an EMPTY lane serves one (ball start)",
+          shim.count(ids), len(ids) - 1)
+    check("...closing the lane switch and then opening it",
+          ("closed" in out_txt and "launched" in out_txt), True)
+    check("...and it left the lane open", shim.merged(lane) if lane else 0, 0)
+
+    # A ball already waiting: the feeder's state. Plunge must launch it and
+    # NOT take a second one out of the trough.
+    before = shim.count(ids)
+    plunge_lane_ball(shim, lane)
+    out_txt = run("plunge")
+    time.sleep(0.3)
+    check("plunge with a ball ALREADY in the lane ejects nothing",
+          shim.count(ids), before)
+    check("...and launched the one that was there",
+          shim.merged(lane) if lane else 0, 0)
+
     run("serve")
     time.sleep(0.3)
-    check("serve DOES eject one and launch it", shim.count(ids), len(ids) - 1)
+    check("serve DOES eject one and launch it", shim.count(ids), before - 1)
     check("serve left the lane empty", shim.merged(lane) if lane else 0, 0)
+    # Relative, not absolute: these run in sequence and an absolute count has
+    # to be re-derived every time a step is inserted above, which is exactly
+    # how a check stops meaning what its sentence says.
+    before = shim.count(ids)
     run("take")
     time.sleep(0.3)
     check("take removes a ball without touching the lane",
-          shim.count(ids), len(ids) - 2)
+          shim.count(ids), before - 1)
     check("take left the lane alone", shim.merged(lane) if lane else 0, 0)
 
     shim.stop = True

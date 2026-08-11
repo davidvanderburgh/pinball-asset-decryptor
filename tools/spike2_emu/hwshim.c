@@ -4897,9 +4897,33 @@ static void audio_dump(void)
              pad_pcm_backlog_ms(), pad_pcm_buffer_ms(), pad_pcm_fifo_ms());
     logmsg(b);
 
-    /* THE VOICE TABLE IS GODZILLA PRO 1.15.0's, at a fixed address. Another
-     * title has its own somewhere else, or none this rig has found, so check
-     * before walking rather than after crashing. */
+    /* ★ EVERYTHING BELOW IS GODZILLA PRO 1.15.0's, AT FIXED ADDRESSES, AND THE
+     * TITLE IS THE ONLY HONEST TEST FOR IT. This block already said "check
+     * before walking rather than after crashing" and then checked the wrong
+     * thing: aud_readable() asks whether an address can be READ, not whether
+     * it holds what we think. On turtles_pro 0x7b90c0 and the queue pool are
+     * perfectly readable - they are simply another title's data - so every
+     * guard passed and the walk below dereferenced whatever happened to be
+     * there.
+     *
+     * THAT IS ITEM 41'S CRASH, and it was OURS, not the game's. David's
+     * captured signature: pc=hwshim.so+0x8e72, which is the `*(node + 8)` in
+     * the pool-list walk further down. The app passes PAD_AUDIO_DUMP=30 on
+     * every run, so this fires from ioctl() on the first audio ioctl after
+     * each 30 s window - which is why it looked like "press a flipper on that
+     * screen and it dies": the flipper makes a sound, the sound is an ioctl,
+     * and the ioctl walked a stranger's linked list.
+     *
+     * a_sw_struct() is the rig's existing test for "this is the title those
+     * addresses came from" - the segv handler uses it for exactly this reason,
+     * and David's crash output proves it answers correctly here ("loader-gate
+     * addresses are Godzilla Pro's; not reported for this title"). */
+    if (!a_sw_struct()) {
+        logmsg("[aud] mixer/pool dump skipped: those addresses are Godzilla"
+               " Pro's and this is not that title\n");
+        return;
+    }
+
     for (n = 0; n < 8 && aud_readable(0x7b90c0UL); n++) {
         unsigned char *v = (unsigned char *)(0x7b90c0UL + n * 64);
         unsigned long *vw = (unsigned long *)v;
@@ -4938,7 +4962,23 @@ static void audio_dump(void)
             unsigned long node = *(unsigned long *)head;
             int cnt = 0;
             while (node && node != head && cnt < 64) {
-                unsigned long q = *(unsigned long *)(node + 8);
+                unsigned long q;
+                /* NODE ITSELF MUST BE READABLE BEFORE IT IS DEREFERENCED. This
+                 * loop guarded `q` and not `node`, so the very first
+                 * *(node + 8) faulted on a garbage list pointer - item 41's
+                 * crash, at this instruction. The title gate above is the real
+                 * fix; this is the belt to its braces, because a list can be
+                 * torn mid-walk on the RIGHT title too, and a diagnostic that
+                 * can kill the run it is diagnosing is worse than no
+                 * diagnostic. */
+                if (!aud_readable(node)) {
+                    snprintf(b, sizeof b,
+                             "[aud] pool list +%02x: stopping at unreadable node"
+                             " 0x%lx after %d\n", off[k], node, cnt);
+                    logmsg(b);
+                    break;
+                }
+                q = *(unsigned long *)(node + 8);
                 if (cnt < 4 && aud_readable(q)) {
                     unsigned long *qq = (unsigned long *)q;
                     snprintf(b, sizeof b,

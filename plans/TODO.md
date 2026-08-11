@@ -1199,6 +1199,61 @@ These have each been violated at least once and each cost a run or a window:
       confirming session of two boots plus the negative case, which is what
       keeps it off D1.
 
+- [ ] **40. After a save-state LOAD the playfield's LEDs never come back, and
+      the window says "no emulator" over a run that is plainly alive.** `S2 D2`
+      **★ DAVID, 2026-08-11: "load state doesn't seem to get the LEDs loaded up
+      on the virtual playfield and it says that there is 'no emulator' but there
+      is."** godzilla_pro card run, `PAD_PIVOT=1`, the load asked for before the
+      game was up (`08:46:07 will load slot 'slot1' once the game is up`) and
+      taken at `08:46:23 [loadgame] restored slot 'slot1'`. The restore itself
+      went well — switch ring rewound, video ring rewound, GL journal replayed,
+      video host resumed — and the game kept playing: `[sw]` edges and 30 fps
+      video for the next four minutes. The playfield window kept its SWITCH half
+      too (blue/red markers live, trough 3/6, 3 in play in David's screenshot),
+      so `dump/` is readable and this is `dump/padled` alone.
+      **ESTABLISHED AT THE DESK, from the source — but NOT yet confirmed to be
+      what happened in this run, so treat the last step as the guess it is:**
+      (i) `watch.sh:475` `rm -f $LED_HOST` then `dd if=/dev/zero … bs=4096
+      count=1` — **every session start replaces `dump/padled` with a 4096-byte
+      ZERO file**; (ii) `hwshim.c:5385 led_map()` is a `static int tried`
+      one-shot and stamps `magic`/`version` exactly once, at the first LED frame
+      it decodes (`:5401`) — a criu-restored guest already has the mapping, so
+      it never stamps again; (iii) `restorestate.sh:274-326` rewinds `padsw`
+      ALWAYS and `padvid` when its host restarts, and every other ring —
+      **`padled` included — only if it is MISSING** (`:322`), which watch.sh
+      guarantees it never is. (iv) The guess: the restored guest therefore goes
+      on writing `val[]`/`gen` into a header that still reads `00 00 00 00`, and
+      `playfield.py:1674 read_leds()` returns None on that magic test, which is
+      the one and only source of both "no emulator (dump/padled not readable)"
+      (`:1987`, `:2286`) and the dark playfield. Same shape as the padsw
+      phantom-edge fault 36a fixed: a fresh session's zeroed ring under a guest
+      whose memory belongs to another session.
+      **THE OTHER CANDIDATE, and it is the cheaper check, so do it first:**
+      ownership. This was a root (`PAD_PIVOT=1`) run and a root-owned `padled`
+      is exactly what makes the window say "not readable" (`watch.sh:261`,
+      `:487`), and the loose end about root-owned `dump/` files is open. **One
+      command after a failed load settles which:** `ls -l ~/spike2root/dump/
+      padled` and `xxd -l 8` it — root owner means ownership, `00000000` in the
+      first four bytes means the header.
+      **If it is the header, the fix has two shapes and the cheap one needs no
+      rebuild:** rewind `dump/padled` from the slot's stash in place like padsw
+      (host-side, `restorestate.sh`), or make `led_map()` re-stamp. Do not reach
+      for the shim change first — a rebuild kills every existing save slot (36a
+      (3)), so it would cost the very slot the test needs.
+      **Acceptance:** save a slot, start a FRESH run, load it, and the LED half
+      paints again with the bar reading `emulator up … LED writes decoded`
+      rather than "no emulator" — state the owner and first four bytes of
+      `dump/padled` after the load, and say whether a SAME-session load behaves
+      differently from a cross-session one, since only the fresh session zeroes
+      the ring.
+      — S2: the game plays and the switch half of the window still works, so it
+      is not S1; what it costs is that after any load the LED picture is dead
+      for the rest of the run, so every item that wants lamps (1d, 31) cannot
+      use a save state to get to its scene, and the window actively lies about
+      the rig being down. D2: the mechanism is read off the source above and the
+      fault should reproduce on every load, but confirming it needs one windowed
+      session with a save and a load.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

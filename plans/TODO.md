@@ -75,7 +75,46 @@ These have each been violated at least once and each cost a run or a window:
 ## Queue
 
 - [ ] **39. Consolidate the two switch windows into one, to the right of the
-      playfield — and make the no-artwork view fit on a screen.** `S2 D3`
+      playfield — and make the no-artwork view fit on a screen.** `S2 D2`
+      ← IN PROGRESS *(**~85%, 2026-08-11, branch `item/39`** — built, offline-
+      and live-verified; what is left is David's eyes and hands. D3 → D2: the
+      rebuild happened, both views work live, nothing left needs a new
+      instrument.)*
+      **★ SCOPE GREW MID-PASS, DAVID (2026-08-11), all three built:** "we
+      should move the ball controls to the right panel as well. and let's
+      make the service buttons interactive" (with the coin-door cluster photo
+      as the reference — green BACK, red -/+, black SELECT), and "we should
+      also have an 'open / close coin door' button".
+      **Established / shipped on the branch (`32913f1`, `1e6a13e`):**
+      • The Controls window no longer opens (PAD_GL_LEGEND=1 reverts, no
+      rebuild); `binds_export()` writes `dump/padbinds` (tmp+rename) after
+      `binds_resolve()`, `keybinds.py` parses, so which key does what still
+      has ONE home in the C table. watch.sh clears the file at start — a
+      stale one is another title's ids.
+      • The playfield gains a right-docked panel: keys (highlight = the
+      MERGED array, not key_down — the row lights when the GAME can see the
+      press, whoever made it), clickable service cluster + coin-door toggle
+      (through the artwork markers' own SwitchDriver), and the trough moved
+      in (label_below caption). Old corner/strip trough stays as the
+      fallback when padbinds is absent.
+      • Schematic reflowed: node headers inline, columns cut to the screen's
+      real height, measured column width, horizontal-scroll backstop —
+      star_wars_le went ~2100 px wide with unreachable clipped rows to ~800
+      including the panel, every row on screen.
+      **Live-verified (godzilla_pro, 4 min, alive 0 after):** `zorder.py`
+      counted GAME + PLAYFIELD and NO Controls; `swhold.py 60 1` lit the
+      Left Flipper row inverse with its green dot — the end-to-end path the
+      old legend could not see (it read key_down, this reads what the guest
+      merged). Door [ON] and trough 6/6 came off the window-open latch.
+      **NOT verified, stated:** a live star_wars_le run (no card image on
+      this machine; its schematic was verified offline against the title's
+      REAL derived tables, and the live read path is shared code proven on
+      godzilla). Mouse clicks on the service buttons / door / balls-in-panel
+      — the write path is the live-proven driver, but no hand has clicked
+      them. David's "clean and elegant" bar is his call, not a screenshot's.
+      **Resume:** David looks at both views and clicks the service cluster,
+      the door toggle and a ball; fix what his eyes catch; then close — merge
+      to main per the worktree rule.
       **★ DAVID, 2026-08-10: "i want to consolidate the two switch windows for
       the emulator. there are too many windows. i do like the feedback and
       interface of the small switch window, having a tight and compact view is

@@ -877,6 +877,13 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
                                  { print "[event] " $0; fflush(); next }
         /\[vid\]|\[card\]/       { print "[event] " $0; fflush(); next }
         /\[sw\] |\[tap\] |\[cabchg\]/ { print "[event] " $0; fflush(); next }
+        # THE CRASH SIGNATURE needs its own pattern: the shim prints
+        # "[segv] pc=..." in LOWER CASE and the /SEGV/ rule below is
+        # case-sensitive, so the one line naming where a crash happened was
+        # the one line that could not reach the app pane. Item 41 lost two
+        # turtles_pro crashes to that gap - the pane showed qemu s bare
+        # "uncaught target signal 11" and nothing that said where.
+        /\[segv\]/               { print "[event] " $0; fflush(); next }
         /SEGV|Segmentation|FATAL/{ print "[event] " $0; fflush(); next }
     ' &
     EVTPG=$!

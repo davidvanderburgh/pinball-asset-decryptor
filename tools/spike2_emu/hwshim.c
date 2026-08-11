@@ -1429,25 +1429,64 @@ static void map_null_page(void)
  * The game installs its own SIGSEGV handler that returns, so a null deref
  * turns into an endless fault loop with nothing to show for it. Taking the
  * handler over reports the faulting PC once and stops.
+ *
+ * TWO MODES, because those are two different jobs (item 41, 2026-08-11):
+ *
+ *   HEADER mode (on by default) reports and gets out of the way. It prints
+ *   pc/lr/r0/fault and the /proc/self/maps line containing the pc, then hands
+ *   the fault onward exactly as it would have gone without us - to the game's
+ *   own handler if it registered one, otherwise to SIG_DFL. So it changes
+ *   NOTHING about how a run lives or dies; it only means the death has a
+ *   signature. Turn it off with PAD_SEGV_HEADER=0.
+ *
+ *   FULL mode (PAD_SEGV_REPORT=1) is the old behaviour: take the handler over
+ *   completely, dump the mixer/loader/event state below, and _exit(99).
+ *
+ * WHY HEADER MODE HAD TO EXIST. Everything below only ever ran when the GAME
+ * called sigaction(11) - we installed ours by interposing that call. Item 41's
+ * two turtles_pro crashes died with `qemu: uncaught target signal 11`, which is
+ * qemu-user saying the guest had NO handler registered, so the interpose never
+ * fired and the most informative crash reporter in the rig sat unused through
+ * the exact fault it was built for. A reporter that depends on the faulting
+ * program asking for it is not a reporter. This one installs itself from a
+ * constructor.
  */
 extern void _exit(int);
 extern char *getenv(const char *);
 
-/* Off by default: with the game's own handler left in place the faulting
- * thread spins but the others keep running, which is what you want when
- * watching whether a later stage recovers. */
+static int (*real_sigaction)(int, const void *, void *);
+
+/* FULL mode: take the handler over and dump everything. Off by default,
+ * because with the game's own handler left in place the faulting thread spins
+ * but the others keep running, which is what you want when watching whether a
+ * later stage recovers - and because the dump below reads Godzilla Pro's
+ * addresses. */
 static int getenv_pad(void)
 {
     char *p = getenv("PAD_SEGV_REPORT");
     return p && p[0] == '1';
 }
 
-static void segv_handler(int sig, void *info, void *ucv)
+/* HEADER mode: report and delegate. On unless explicitly disabled. */
+static int segv_header_on(void)
 {
-    unsigned long *uc = ucv;
+    char *p = getenv("PAD_SEGV_HEADER");
+    return !(p && p[0] == '0');
+}
+
+/* What the game asked for, recorded rather than installed once we hold the
+ * signal. sa_handler/sa_sigaction share slot 0 of struct sigaction on ARM
+ * Linux; slot 132 is sa_flags, and SA_SIGINFO (4) says which shape it is. */
+static void *game_segv_fn;
+static int   game_segv_flags;
+static int   segv_reports;      /* header prints, capped - see below */
+
+/* The universal half: true on any title, invents nothing. Kept separate from
+ * the dump below so that a title this shim has never seen still gets the one
+ * thing every crash report needs - where it faulted. */
+static void segv_print_header(unsigned long *uc)
+{
     char b[200];
-    (void)sig; (void)info;
-    if (!uc) { logmsg("[segv] no context\n"); _exit(99); }
 
     snprintf(b, sizeof b, "[segv] pc=0x%lx lr=0x%lx r0=0x%lx fault=0x%lx\n",
              uc[23], uc[22], uc[8], uc[25]);
@@ -1499,6 +1538,74 @@ static void segv_handler(int sig, void *info, void *ucv)
             }
         }
     }
+}
+
+/* HEADER mode's handler: print, then put the fault back where it was going.
+ *
+ * "Where it was going" is the whole point - this must not change whether a run
+ * survives, only whether its death is legible. Two cases:
+ *   - the game registered a handler: call it, with its own calling convention,
+ *     and let its semantics (including returning, and therefore looping) stand;
+ *   - it did not: restore SIG_DFL and return, so the faulting instruction
+ *     re-executes and the process dies exactly as it does today, with qemu
+ *     printing `uncaught target signal 11` - now preceded by our line.
+ *
+ * The print is CAPPED. A game handler that returns re-faults immediately and
+ * forever; item 23 measured that shape as a hang. Three reports name the fault
+ * without turning a hang into a gigabyte of log.
+ */
+static void segv_header_handler(int sig, void *info, void *ucv)
+{
+    unsigned long *uc = ucv;
+
+    if (uc && segv_reports < 3) {
+        segv_reports++;
+        segv_print_header(uc);
+        if (segv_reports == 3)
+            logmsg("[segv] (further faults will not be reported)\n");
+    }
+
+    if (game_segv_fn) {
+        if (game_segv_flags & 4)        /* SA_SIGINFO: three-argument form */
+            ((void (*)(int, void *, void *))game_segv_fn)(sig, info, ucv);
+        else
+            ((void (*)(int))game_segv_fn)(sig);
+        return;
+    }
+
+    /* Nobody else wants it: die the way we would have died anyway. */
+    if (real_sigaction) {
+        unsigned char dfl[160];
+        int i;
+        for (i = 0; i < 160; i++) dfl[i] = 0;   /* sa_handler = SIG_DFL (0) */
+        real_sigaction(11, dfl, 0);
+    }
+}
+
+__attribute__((constructor))
+static void segv_install(void)
+{
+    unsigned char mine[160];
+    int i;
+
+    if (!segv_header_on()) return;
+    if (!real_sigaction) real_sigaction = dlsym(RTLD_NEXT, "sigaction");
+    if (!real_sigaction) return;
+
+    for (i = 0; i < 160; i++) mine[i] = 0;
+    *(void **)mine = (void *)segv_header_handler;
+    *(int *)(mine + 132) = 4;              /* SA_SIGINFO */
+    real_sigaction(11, mine, 0);
+}
+
+static void segv_handler(int sig, void *info, void *ucv)
+{
+    unsigned long *uc = ucv;
+    char b[200];
+    (void)sig; (void)info;
+    if (!uc) { logmsg("[segv] no context\n"); _exit(99); }
+
+    segv_print_header(uc);
 
     /* The scene loader thread (0x447440) does no work at all unless the gate
      * byte at 0x7e1a10 is set, and the boot step waits on 0x7e1974. The shim
@@ -1736,8 +1843,6 @@ static void segv_handler(int sig, void *info, void *ucv)
     _exit(99);
 }
 
-static int (*real_sigaction)(int, const void *, void *);
-
 int shim_sigaction(int sig, const void *act, void *old) __asm__("sigaction");
 int shim_sigaction(int sig, const void *act, void *old)
 {
@@ -1750,6 +1855,23 @@ int shim_sigaction(int sig, const void *act, void *old)
         *(int *)(mine + 132) = 4;          /* SA_SIGINFO */
         return real_sigaction(sig, mine, old);
     }
+    /* HEADER mode holds SIGSEGV, so the game's own registration is RECORDED
+     * rather than installed - otherwise it would overwrite our handler and we
+     * would be back to reporting nothing. It still runs, from ours; see
+     * segv_header_handler. Reporting an old handler the game never installed
+     * would be a lie, so `old` gets what we are holding on its behalf. */
+    if (sig == 11 && act && segv_header_on()) {
+        if (old) {
+            unsigned char *o = old;
+            int i;
+            for (i = 0; i < 160; i++) o[i] = 0;
+            *(void **)o = game_segv_fn;
+            *(int *)(o + 132) = game_segv_flags;
+        }
+        game_segv_fn    = *(void **)act;
+        game_segv_flags = *(const int *)((const unsigned char *)act + 132);
+        return 0;
+    }
     return real_sigaction(sig, act, old);
 }
 
@@ -1758,7 +1880,19 @@ void *shim_signal(int sig, void *h)
 {
     static void *(*real_signal)(int, void *);
     if (!real_signal) real_signal = dlsym(RTLD_NEXT, "signal");
-    if (sig == 11) { shim_sigaction(11, 0, 0); return 0; }
+    if (sig == 11) {
+        /* NOTE, found while building item 41's reporter: this path used to
+         * DROP h on the floor - it called sigaction(11, NULL, NULL), which
+         * installs nothing, so a game that registers its SIGSEGV handler via
+         * signal() rather than sigaction() ended up with no handler at all.
+         * That is one way a fault becomes qemu's `uncaught target signal 11`
+         * with nothing logged. Record it now so header mode can delegate to
+         * it, exactly as the sigaction path does. */
+        void *prev = game_segv_fn;
+        if (h && segv_header_on()) { game_segv_fn = h; game_segv_flags = 0; }
+        else                       { shim_sigaction(11, 0, 0); }
+        return prev;
+    }
     return real_signal(sig, h);
 }
 

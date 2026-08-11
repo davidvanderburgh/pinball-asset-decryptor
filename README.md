@@ -836,7 +836,11 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    and is named as a build rather than an install before it starts. It
    is checked against your own kernel (`criu check`) before it is
    installed, because a criu that can't freeze anything would only turn
-   the warning off and leave the buttons just as dead.
+   the warning off and leave the buttons just as dead. That build now
+   carries criu's own later fix for one of its feature probes, which a
+   2026 compiler answers backwards — without it the build stops with
+   `conflicting redefinition of enum` on a brand-new Linux install, and
+   with it the same source builds on old and new compilers alike.
    One more machine shape works without being told about now: WSL can be
    configured so Linux can't start a Windows program at all
    (`[interop] enabled=false`), and the virtual playfield *is* a Windows

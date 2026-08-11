@@ -1074,128 +1074,6 @@ These have each been violated at least once and each cost a run or a window:
       fault should reproduce on every load, but confirming it needs one windowed
       session with a save and a load.
 
-- [ ] **41. On turtles_pro (TMNT), the guest HARD-CRASHES (qemu signal 11)
-      during ordinary interaction — seen on service-menu entry AND on selecting
-      a character.** `S2 D4` ← IN PROGRESS *(**40%, 2026-08-11:** the item's
-      stated first job — preserve a signature — is DONE and PROVEN on a
-      labelled example. The crash itself did not reproduce, so it is not
-      diagnosed and nothing is fixed.)*
-      **★★ ESTABLISHED THIS PASS: the reporter could never have fired on these
-      crashes, for three independent reasons, all now fixed (`6e44780`,
-      `b834f2b`, branch `item/41`).**
-      **(1) It was only ever installed by INTERPOSING the game's own
-      `sigaction(11)`** — so a title that never registers a handler got no
-      reporter at all, which is precisely what qemu's word "**uncaught**"
-      means. It installs from a constructor now.
-      **CORRECTION, so nobody repeats the wrong reasoning: `PAD_SEGV_REPORT=1`
-      was NEVER the missing piece.** `run_game.sh:299,315` sets it on every run
-      and always has. The first commit message said watch.sh never sets it;
-      that is wrong. FULL mode was armed the whole time and still produced
-      nothing, because nothing installed the handler.
-      **(2) `watch.sh`'s event filter greps `/SEGV|Segmentation|FATAL/`, which
-      is case-SENSITIVE**, so `[segv] pc=` could not reach the app pane even
-      when printed. The one line naming where a crash happened was the one line
-      that could not be seen.
-      **(3) `real_open` is resolved LAZILY** by `init()`, on the first
-      interposed call, so a guest that faults before opening anything called a
-      NULL pointer inside the signal handler — a nested fault that kills the
-      process with the report half written. The game opens files constantly, so
-      this never showed there; the crash it would have eaten is the EARLY one.
-      **★★ PROVEN, not asserted: `tools/spike2_emu/segvtest.sh`** faults a
-      guest deliberately under the same qemu-user + LD_PRELOAD arrangement the
-      game runs in. Two seconds, NO emulator run needed. Four cases, two of
-      them controls, all passing: no-handler (the turtles shape) now prints
-      `[segv] pc=` plus the faulting mapping by name and still dies with qemu's
-      uncaught message; a guest with its own handler is reported AND still
-      recovers, matching the reporter-off control exactly. **Run it after any
-      change to the segv path.**
-      **THE CONTROL EARNED ITS KEEP AND THAT IS WORTH KNOWING: the first
-      version of the fix was NOT additive** — it printed the signature and then
-      silently ate the guest's own handler. The case on its own looked healthy;
-      only the reporter-off control showed the difference. That is bug (3)
-      above, found because the control existed.
-      **NOT REPRODUCED, and this is the honest state of the fault itself.** A
-      full run on the turtles card drove BOTH triggers by script and the guest
-      never crashed: a game started (PLAYER 1 on the game's own display), the
-      right flipper poked 4× and LOCKDOWN 2× — David's exact sequence, all
-      confirmed as `[sw]` edges the game saw — then a 15-press walk through the
-      service menus. ~20 minutes, no fault. So the trigger is NOT simply
-      "press these switches": David reached it by NAVIGATING on screen, which
-      needs seeing the menu and choosing entries, and a scripted poke cannot
-      pick a menu it cannot read.
-      **Resume:** the instrument is ready and needs no more desk work — the
-      next crash names itself. Cheapest next step is for DAVID to hit it again
-      on a run from this branch (or from main once merged) and read the
-      `[segv] pc=` off the pane; failing that, drive the menus with the screen
-      in view rather than blind. Do NOT rebuild the reporter first; run
-      `segvtest.sh` if unsure it still works.
-      **Evidence:** `C:\tmp\item41_turtles_service_menu_segv.log`,
-      `C:\tmp\item41_turtles_character_select_segv.log`,
-      `C:\tmp\item41\` (screenshots).
-      **TWO SIGHTINGS, 2026-08-11, same title, same signature-less qemu
-      signal-11, DIFFERENT triggers — folded into one item because neither
-      captured a signature, so whether it is one fault reached two ways or two
-      faults cannot yet be told apart. It splits the day a `[segv] pc=` shows
-      two different faults.** Run recipe both times:
-      turtles_pro-1_59_0.1987-upscaled card, WSL, `PAD_PIVOT=1`,
-      `PAD_AUDIO_DUMP=30`, watch.sh from the item-39 worktree.
-      **(A) SERVICE MENUS. ★ DAVID: "tmnt locked up when trying to go into some
-      of the service menus."** Booted clean, played ~45 s, then
-      **`qemu: uncaught target signal 11 (Segmentation fault) - core dumped`**
-      at 10:48:43 while the service buttons were walked — `[sw]` on switches
-      25/28 (SERVICE SELECT / SERVICE BACK), `[cabchg]` low nibble stepping
-      0f→0e→0d→0b→07. Capture: `C:\tmp\item41_turtles_service_menu_segv.log`.
-      **(B) CHARACTER SELECT — the sharper, deterministic trigger. ★ DAVID:
-      "i'm getting a seg fault when i tried to select a character."** Booted
-      clean, played ~90 s, David pressed START (switch 36, suffix `k` =
-      keyboard), reached character select, cycled with the FLIPPER buttons
-      (switch 64 RIGHT FLIPPER `k`/`p`, switch 34 LOCKDOWN `p` — TMNT picks a
-      turtle with the flippers), and the guest segfaulted at 11:11:32, ~1 s
-      after the last flipper/lockdown press. Capture:
-      `C:\tmp\item41_turtles_character_select_segv.log`. **This one is a
-      concrete in-game action anyone can repeat — press Start on turtles, cycle
-      turtles with the flippers — where (A) is only "some" menus.**
-      **THE SAME NODE-BUS PRECURSOR IN BOTH, and it is probably NOT the cause:**
-      an `ExchangeData: read failed (received 0, expected length=…)` printed
-      early in each run (10:48:07/10:48:20; 11:10:24/11:10:28) — the node bus
-      (`nodebus.py`) losing a read, the line item 23 recorded as "the node bus
-      going away behind them." In (B) it printed **~70 s before** the crash, so
-      treat it as a symptom of turtles' bus timing, not a trigger.
-      **NEITHER CAPTURED A SIGNATURE, and that is the first job, same as 36b.**
-      Both logs end on the bare qemu line — no `[segv] pc=…` header, no pc/lr/
-      fault — so this cannot yet be matched to any of item 23's three shapes.
-      **Item 23 (the whole "game exits by itself" crash class) was DROPPED
-      2026-08-11**; its block in the Dropped section still carries those three
-      godzilla_pro signatures (pthread NULL-mutex churn segv
-      `pc=libpthread+0x8858`; game-code NULL deref `pc=0x51ef7c`; and the
-      signatureless clean thread-return) — read it before starting. **What makes
-      THIS worth a slot where 23 was dropped:** a different title (turtles_pro),
-      and a DETERMINISTIC user-action trigger (character select) that none of
-      item 23's shapes had.
-      **First job (desk + one run): preserve the signature.** watch.sh's exit
-      tail prints only the LAST lines of the crash block, so the `[segv] pc=`
-      header scrolls off — make it grep and keep the header on exit (36b needs
-      the identical fix; do it once). Then run trigger (B) — start a game, cycle
-      characters with the flippers — since it is the repeatable one, and read
-      the preserved pc against (A)'s and against item 23's three.
-      **NOT ESTABLISHED — do not build on any of it:** whether (A) and (B) are
-      the same fault; whether either is one of item 23's signatures or a fourth;
-      whether the `ExchangeData` failure matters; and how reliably (B) repeats
-      (one sighting each). No signature on either.
-      **Acceptance:** on turtles_pro, both starting a game + selecting a
-      character with the flippers AND entering the service menus leave the run
-      alive, stated over a number of repeats — OR the fault reproduces and the
-      newly preserved `[segv] pc=` names it (say whether A and B share a pc, and
-      whether either matches one of item 23's three). Oracle is the guest
-      surviving on its own display plus the preserved crash header.
-      — S2 for now: single-ball play runs (each crash came after ~45-90 s of
-      healthy play), so not "cannot boot"; what it costs is that the run DIES on
-      these interactions and takes the whole session with it. **PROMOTE TO S1 if
-      the next pass confirms character select reliably crashes** — that is the
-      start-a-game path on turtles, so a reliable crash there IS "cannot play
-      turtles." D4: the mechanism is an uncaptured qemu signal-11 with no pc yet
-      and the first job is the same instrument 36b lacks — but trigger (B) is a
-      strong lead to a reliable on-demand repro, which would drop it to D3.
 
 - [ ] **42. In the turtles service menus the picture goes HALF HEIGHT and the
       scene text stops drawing.** `S2 D3`
@@ -1745,6 +1623,48 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **41. turtles_pro hard-crashed (qemu signal 11) on service menus and on
+      character select — and the crash was OURS.** DONE 2026-08-11, `e5a99fc`
+      (branch `item/41`, `6e44780`..`bd6b1f4`). **Verified in DAVID'S OWN RUN:**
+      the shim rebuilt with the fix, he drove the repro that had killed it
+      twice, and the log shows the dump firing on schedule and DECLINING four
+      times instead of faulting.
+      **THE FAULT.** `audio_dump()` (`hwshim.c:4941`) walked a linked list at
+      **Godzilla Pro 1.15.0's fixed addresses** — the voice table at `0x7b90c0`,
+      the queue pool at `0x7b8990+0x100` — dereferencing `*(node + 8)` with no
+      check on `node`. On turtles those addresses are perfectly READABLE, they
+      are simply another title's data, so every guard passed and the walk
+      followed garbage pointers. The app passes `PAD_AUDIO_DUMP=30` on every run
+      and `audio_maybe_dump()` fires from `ioctl()` on the first audio ioctl
+      after each 30 s window — which is why it presented as "go to that screen
+      and press a flipper": the flipper made a sound, the sound was an ioctl,
+      and the ioctl walked a stranger's list. Nothing about the screen mattered,
+      which is why scripted pokes missed it for a whole pass.
+      **THE FIX, two parts.** The real one is a TITLE gate (`a_sw_struct()`, the
+      rig's existing "is this the title those addresses came from" test, which
+      the crash output itself proved answers correctly here). The
+      unreadable-node check is the belt to its braces: a list can be torn
+      mid-walk on the right title too, and a diagnostic that kills the run it is
+      diagnosing is worse than no diagnostic.
+      **WHY IT TOOK TWO DAYS TO SEE — the crash reporter could never fire.**
+      Three independent causes, all fixed. (a) It was only ever installed by
+      INTERPOSING the game's own `sigaction(11)`, and turtles never calls it,
+      which is exactly what qemu's word "uncaught" means. It installs from a
+      constructor now, in a HEADER mode that reports and then hands the fault
+      onward unchanged (`PAD_SEGV_HEADER=0` disables). (b) `watch.sh`'s event
+      filter grepped `/SEGV|Segmentation|FATAL/` case-SENSITIVELY, so
+      `[segv] pc=` could never reach the app pane. (c) `real_open` is resolved
+      lazily, so a guest faulting before it opened anything called a NULL
+      pointer INSIDE the signal handler and lost the report. **`PAD_SEGV_REPORT`
+      was NEVER the missing piece** — `run_game.sh:299,315` has always set it.
+      **`tools/spike2_emu/segvtest.sh`** proves the reporter on a labelled
+      example in two seconds with NO emulator run: four cases, two of them
+      controls. It earned its keep immediately — the first version of the fix
+      was not additive (it silently ate a guest's own handler) and only the
+      reporter-off control showed it.
+      **Left open as item 42:** the half-height menu screen the crash happened
+      on. Same location, different fault.
 
 - [x] **39. Consolidate the two switch windows into one, to the right of the
       playfield — and make the no-artwork view fit on a screen.** DONE

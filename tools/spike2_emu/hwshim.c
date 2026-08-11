@@ -1499,7 +1499,21 @@ static void segv_print_header(unsigned long *uc)
      * because this runs from a signal handler. */
     {
         long (*rd)(int, void *, unsigned long) = dlsym(RTLD_NEXT, "read");
-        int fd = real_open("/proc/self/maps", 0 /*O_RDONLY*/, 0);
+        int fd;
+        /* real_open is resolved LAZILY, by init(), on the first interposed
+         * call. A guest that faults before it has opened anything therefore
+         * reaches here with real_open still NULL - and calling it would fault
+         * INSIDE the signal handler, killing the process with the report half
+         * written. That is not hypothetical: it is what the offline segv test
+         * did, and it cost the delegation step below. The game opens files
+         * constantly so it never showed up there, which is exactly why an
+         * early crash is the one that would have lost its report. */
+        if (!real_open) init();
+        if (!real_open) {
+            logmsg("[segv] (no maps: open not resolved yet)\n");
+            rd = 0;
+        }
+        fd = real_open ? real_open("/proc/self/maps", 0 /*O_RDONLY*/, 0) : -1;
         if (fd >= 0 && rd) {
             static char m[16384];
             long got, off = 0;
@@ -1566,12 +1580,17 @@ static void segv_header_handler(int sig, void *info, void *ucv)
     }
 
     if (game_segv_fn) {
+        char d[80];
+        snprintf(d, sizeof d, "[segv] delegating to guest handler %p flags=0x%x\n",
+                 game_segv_fn, game_segv_flags);
+        logmsg(d);
         if (game_segv_flags & 4)        /* SA_SIGINFO: three-argument form */
             ((void (*)(int, void *, void *))game_segv_fn)(sig, info, ucv);
         else
             ((void (*)(int))game_segv_fn)(sig);
         return;
     }
+    logmsg("[segv] no guest handler recorded; falling through to SIG_DFL\n");
 
     /* Nobody else wants it: die the way we would have died anyway. */
     if (real_sigaction) {

@@ -36,6 +36,10 @@
 #                              pad_static_busybox. Its absence costs SAVE
 #                              STATES, not the emulator, so the tab reports it
 #                              apart from the six above
+#   criu                       1 = there is a criu to freeze the guest with.
+#                              NOT A PACKAGE ON ANY UBUNTU - it is built from
+#                              source by getcriu.sh, which is why its `-`
+#                              package field keeps it out of `need` below
 #   need                       the packages that would supply the missing
 #                              ones, in apt's spelling
 #   indexed                    1 = apt has index metadata to answer questions
@@ -123,13 +127,21 @@ _have() {
 #: the same, because the alternative is a user finding out from a log line
 #: mid-run - which is the thing this whole script exists to prevent. The tab
 #: keeps it out of "this PC cannot run the emulator" for the same reason.
+#: AND THE ONE APT CANNOT SUPPLY AT ALL, which is why the package field is `-`.
+#: criu is the program that does the freezing, and NO Ubuntu publishes it -
+#: `apt-cache policy criu` prints an empty version table on 24.04. Putting a
+#: name there would hand `apt-get install` a package that cannot resolve and
+#: turn one missing extra into "could not install", i.e. a machine told its
+#: emulator setup failed when the emulator is fine. getcriu.sh builds it from
+#: source instead, and setupfix.sh calls that when this fact is 0.
 PAD_SETUP_TOOLS="qemu:qemu-arm-static:qemu-user-static:1
 armgcc:arm-linux-gnueabihf-gcc:gcc-arm-linux-gnueabihf:0
 nativecc:@_pad_cc_works:gcc,libc6-dev:0
 debugfs:debugfs:e2fsprogs:0
 fuse:fusermount3:fuse3:0
 ffmpeg:ffmpeg:ffmpeg:0
-busybox:@pad_static_busybox:busybox-static:0"
+busybox:@pad_static_busybox:busybox-static:0
+criu:@pad_criu:-:0"
 
 need= _xrel_ok=
 for _t in $PAD_SETUP_TOOLS; do
@@ -141,6 +153,10 @@ for _t in $PAD_SETUP_TOOLS; do
     # entry below it.
     _ok=$(_have "$_tool")
     echo "$_key=$_ok"
+    # `-` is "no package can supply this", and it must not reach `need`:
+    # setupfix.sh installs that list verbatim, and a name apt has never heard
+    # of fails the whole install for the packages beside it.
+    [ "$_pkg" = "-" ] && continue
     [ "$_xrel" = 1 ] && _xrel_ok="$_xrel_ok $_pkg"
     [ "$_ok" = 1 ] || need="$need $_pkg"
 done

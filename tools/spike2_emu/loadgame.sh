@@ -10,7 +10,11 @@
 set -u
 RIG=$(cd "$(dirname "$0")" && pwd)
 SLOT=${1:-quicksave}
-CRIU=${CRIU:-/var/tmp/criubuild/criu/criu/criu}
+# A SUBSHELL, because padpath.sh sets ROOT and this script's ROOT comes from
+# the RUNNING GUEST's own environment first (see below) - sourcing it here
+# would quietly overrule that. All that is wanted is the one definition of
+# where criu is.
+CRIU=${CRIU:-$(. "$RIG/padpath.sh"; pad_criu)}
 
 # Filenames, never paths - same rule as savegame.sh, same GUI feeding it.
 # ★ ITEM 39: slots are per game (saves/<game>/<slot>), and the argument may

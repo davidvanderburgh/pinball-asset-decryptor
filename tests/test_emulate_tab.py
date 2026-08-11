@@ -1207,13 +1207,24 @@ def test_the_repair_installs_exactly_the_packages_the_tab_names():
     check = _rig_text("setupcheck.sh").replace(",", " ")
     fix = _rig_text("setupfix.sh")
     # The optional ones are installed by the same button off the same `need`
-    # list, so they are held to the same seam.
-    for key, pkg, _why in (emulate_tab._SETUP_TOOLS
-                           + emulate_tab._SETUP_OPTIONAL):
+    # list, so they are held to the same seam - EXCEPT the ones apt cannot
+    # supply at all, which is what the fourth field says.  criu is on no
+    # Ubuntu, so its seam is with getcriu.sh instead, and its package field in
+    # setupcheck.sh is `-` precisely so it never reaches `need`.
+    rows = ([t + ("apt",) for t in emulate_tab._SETUP_TOOLS]
+            + list(emulate_tab._SETUP_OPTIONAL))
+    for key, pkg, _why, how in rows:
         assert 'sudo' not in pkg
-        assert pkg in check, "%s (%s) is explained but never installed" % (
-            pkg, key)
         assert "%s:" % key in check
+        if how == "apt":
+            assert pkg in check, "%s (%s) is explained but never installed" % (
+                pkg, key)
+        else:
+            assert "%s:@" % key in check and ":-:" in check, (
+                "%s must not be handed to apt-get, which has no such package"
+                % pkg)
+            assert "getcriu.sh" in fix, (
+                "%s is explained but nothing gets it" % pkg)
     assert '_get "$facts" need' in fix
 
 
@@ -1677,3 +1688,250 @@ def test_reset_windows_greys_out_while_a_run_is_up(monkeypatch, tmp_path):
         assert str(panel._winreset_btn.cget("state")) == "normal"
     finally:
         root.destroy()
+
+
+# ----------------------------------------------------------------------
+# THE MACHINE WHOSE WSL CANNOT START A WINDOWS PROGRAM.
+#
+# The virtual playfield is a Windows process, because this WSL has no Tk of
+# any kind, and watch.sh launches it through interop.  A user's distro has
+# `[interop] enabled=false` in /etc/wsl.conf, so his window could never open
+# itself and the rig's only answer was a command to type before every run.
+#
+# Interop is LINUX -> WINDOWS.  Windows -> Linux (`wsl.exe`) is unaffected by
+# that switch, so everything the window DOES once it is up still works - only
+# the launch cannot cross.  PAD is already on the far side, so the run asks
+# and PAD opens it.
+# ----------------------------------------------------------------------
+
+_LAUNCH = (r"PAD_PLAYFIELD_WINDOWS_LAUNCH game=godzilla_pro savestates=1 "
+           r"root=\\wsl.localhost\Ubuntu\home\david\spike2root "
+           r"tables=\\wsl.localhost\Ubuntu\home\david\spike2root\dump\tables")
+
+
+def test_the_launch_token_carries_the_title_and_both_paths():
+    got = emulate_tab.playfield_launch(_LAUNCH)
+    assert got["game"] == "godzilla_pro"
+    assert got["savestates"] == "1"
+    # The paths are the pair WSLENV's /p would have translated during the
+    # interop exec that is not happening - already in Windows form, and
+    # entitled to contain a space, which is why the split is on the KEYS.
+    assert got["root"] == r"\\wsl.localhost\Ubuntu\home\david\spike2root"
+    assert got["tables"].endswith(r"\dump\tables")
+
+
+def test_the_token_is_found_inside_the_log_line_it_arrives_on():
+    """It is read off watch.sh's stdout, which the tab has already prefixed
+    for its log pane."""
+    assert emulate_tab.playfield_launch("[emulate] " + _LAUNCH)["game"] \
+        == "godzilla_pro"
+
+
+def test_a_path_with_a_space_survives_the_parse():
+    got = emulate_tab.playfield_launch(
+        r"PAD_PLAYFIELD_WINDOWS_LAUNCH game=jaws_pro savestates=0 "
+        r"root=\\wsl.localhost\Ubuntu\home\d v\spike2root tables=")
+    assert got["root"].endswith(r"\home\d v\spike2root")
+    assert got["savestates"] == "0"
+
+
+def test_an_ordinary_log_line_is_not_a_launch_request():
+    """Every line of the run's output goes through this."""
+    for line in ("[watch] virtual playfield window opening",
+                 "[watch] the game never started.", "", "state=attract"):
+        assert emulate_tab.playfield_launch(line) is None
+    # ...and neither is the token with nothing to launch.
+    assert emulate_tab.playfield_launch(
+        "PAD_PLAYFIELD_WINDOWS_LAUNCH savestates=1") is None
+
+
+def test_the_interpreter_is_never_the_frozen_app_itself(monkeypatch):
+    """sys.executable is the answer on the Windows build (the app runs on the
+    Python bundled beside it) and a TRAP in a frozen one, where it is PAD.exe
+    - handing that a script path starts a second copy of PAD."""
+    monkeypatch.setattr(emulate_tab.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(emulate_tab.sys, "executable",
+                        r"C:\Program Files\PAD\PAD.exe")
+    monkeypatch.setattr(emulate_tab.os.path, "isfile", lambda p: True)
+    monkeypatch.setattr(emulate_tab.shutil, "which", lambda n: None)
+    got = emulate_tab.windows_python()
+    assert got and got.lower().endswith("pythonw.exe"), got
+    assert "PAD.exe" not in got
+
+
+def test_the_interpreter_prefers_the_windowed_twin_of_the_running_one(
+        monkeypatch):
+    """python.exe would put a black console beside the playfield."""
+    monkeypatch.setattr(emulate_tab.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(emulate_tab.sys, "executable", r"C:\Py\python.exe")
+    monkeypatch.setattr(emulate_tab.os.path, "isfile", lambda p: True)
+    assert emulate_tab.windows_python() == r"C:\Py\pythonw.exe"
+
+
+def test_no_interpreter_at_all_is_said_rather_than_guessed(monkeypatch):
+    """A wrong guess here launches something that is not Python."""
+    monkeypatch.setattr(emulate_tab.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(emulate_tab.sys, "executable", "")
+    monkeypatch.setattr(emulate_tab.os.path, "isfile", lambda p: False)
+    monkeypatch.setattr(emulate_tab.shutil, "which", lambda n: None)
+    assert emulate_tab.windows_python() is None
+
+
+class _FakeProc:
+    """Just enough Popen for the playfield handling: alive until killed."""
+
+    def __init__(self):
+        self.waited = None
+        self.killed = False
+
+    def poll(self):
+        return None
+
+    def wait(self, timeout=None):
+        self.waited = timeout
+        raise RuntimeError("still open")
+
+    def kill(self):
+        self.killed = True
+
+
+def test_the_run_that_asks_gets_a_playfield_window(monkeypatch, tmp_path):
+    """End to end through the panel: the token in the log stream becomes one
+    Popen of playfield.py, with the title, the save-state flag and both paths
+    the run worked out."""
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_tab, "windows_python", lambda: r"C:\py\pw.exe")
+    seen = {}
+
+    def _popen(cmd, env=None, **kw):
+        seen["cmd"], seen["env"] = cmd, env
+        return _FakeProc()
+
+    monkeypatch.setattr(emulate_tab.subprocess, "Popen", _popen)
+    root, panel = _panel(tmp_path)
+    try:
+        panel._open_playfield(emulate_tab.playfield_launch(_LAUNCH))
+        assert seen["cmd"][0] == r"C:\py\pw.exe"
+        assert seen["cmd"][1].endswith("playfield.py")
+        assert seen["cmd"][2] == "godzilla_pro"
+        assert seen["cmd"][3] == "--savestates"
+        assert seen["env"]["PAD_ROOT"].startswith("\\\\wsl.localhost")
+        assert seen["env"]["PAD_TABLES"].endswith("\\dump\\tables")
+        # ONE window, not one per line of output.
+        seen.clear()
+        panel._open_playfield(emulate_tab.playfield_launch(_LAUNCH))
+        assert not seen
+    finally:
+        root.destroy()
+
+
+def test_a_run_without_save_states_gets_no_save_buttons(monkeypatch, tmp_path):
+    """PF_STATES is watch.sh's answer, not this side's guess - a run whose
+    pivot was withdrawn must not show buttons that can only fail."""
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_tab, "windows_python", lambda: r"C:\py\pw.exe")
+    seen = {}
+
+    def _popen(cmd, env=None, **kw):
+        seen["cmd"] = cmd
+        return _FakeProc()
+
+    monkeypatch.setattr(emulate_tab.subprocess, "Popen", _popen)
+    root, panel = _panel(tmp_path)
+    try:
+        panel._open_playfield(emulate_tab.playfield_launch(
+            "PAD_PLAYFIELD_WINDOWS_LAUNCH game=jaws_pro savestates=0"))
+        assert "--savestates" not in seen["cmd"]
+    finally:
+        root.destroy()
+
+
+def test_pad_closes_the_window_it_opened(tmp_path):
+    """Whoever owns the launch owns the teardown: the rig's forced close is a
+    powershell.exe call, which is the interop this machine does not have."""
+    root, panel = _panel(tmp_path)
+    try:
+        proc = _FakeProc()
+        panel._pf_proc = proc
+        panel._close_playfield()
+        # The polite exit gets its chance first - that is what saves the
+        # window position - and only then is it closed here.
+        assert proc.waited and proc.killed
+        assert panel._pf_proc is None
+        # And nothing to close is not an error: the ordinary machine's window
+        # is watch.sh's child and never passes through here.
+        panel._close_playfield()
+    finally:
+        root.destroy()
+
+
+# ----------------------------------------------------------------------
+# ...AND THE OTHER HALF OF A SAVE STATE, WHICH APT CANNOT SUPPLY.
+#
+# PAD-53 made a missing busybox-static cost the feature instead of the run.
+# A machine that then installed busybox-static STILL had no save states:
+# criu was a hard-coded /var/tmp/criubuild/... in eight rig scripts, and no
+# Ubuntu publishes criu at all (`apt-cache policy criu` -> empty version
+# table).  It is built from source instead, and the tab has to say so without
+# ever handing that name to apt.
+# ----------------------------------------------------------------------
+
+_CRIU_FACTS = {"iswsl": "1", "qemu": "1", "armgcc": "1", "nativecc": "1",
+               "debugfs": "1", "fuse": "1", "ffmpeg": "1", "busybox": "1",
+               "criu": "0", "binfmt": "1", "universe": "1", "nocand": ""}
+
+
+def test_a_machine_missing_only_criu_still_runs_the_emulator():
+    """The notice must not tell a working PC that it cannot emulate."""
+    assert setup_ok(_CRIU_FACTS)
+    assert not setup_settled(_CRIU_FACTS)
+    notice = setup_notice(_CRIU_FACTS, can_fix=True)
+    assert notice.startswith("The emulator runs on this PC.")
+    assert "criu" in notice
+
+
+def test_criu_is_never_offered_as_a_package_to_install():
+    """No Ubuntu publishes it: `apt install criu` cannot work anywhere, and
+    naming it beside a real package fails that one too."""
+    steps = emulate_tab.setup_fix_steps(_CRIU_FACTS)
+    assert steps and all("Install in WSL:  criu" not in s for s in steps)
+    assert any("Build criu from source" in s for s in steps), steps
+    # The consent has to say what a build costs - it is minutes and a
+    # download, not an apt install.
+    build = [s for s in steps if "Build criu" in s][0]
+    assert "GitHub" in build and "minutes" in build
+
+
+def test_the_button_stays_for_a_machine_whose_only_gap_is_criu():
+    """It can build it, so there is something to press."""
+    assert emulate_tab.setup_fixable(_CRIU_FACTS)
+    assert "Set up emulator" in setup_notice(_CRIU_FACTS, can_fix=True)
+
+
+def test_both_save_state_pieces_are_named_when_both_are_missing():
+    facts = dict(_CRIU_FACTS, busybox="0")
+    extras = [p for p, _ in setup_extras(facts)]
+    assert extras == ["busybox-static", "criu"]
+    steps = emulate_tab.setup_fix_steps(facts)
+    assert any(s.startswith("Install in WSL:") and "busybox-static" in s
+               for s in steps)
+    assert any("Build criu" in s for s in steps)
+
+
+def test_printed_advice_never_names_a_package_that_does_not_exist():
+    """`sudo apt install criu` is advice that cannot work on any Ubuntu."""
+    facts = dict(_CRIU_FACTS, ffmpeg="0", busybox="0")
+    notice = setup_notice(facts, can_fix=False)
+    assert "apt install criu" not in notice
+    assert "apt install ffmpeg busybox-static" in notice
+    assert "getcriu.sh" in notice
+
+
+def test_a_rig_that_never_heard_of_criu_accuses_nobody():
+    """An older rig emits no `criu` line, and silence is not a missing
+    program - the same rule every other fact here follows."""
+    facts = dict(_CRIU_FACTS)
+    del facts["criu"]
+    assert setup_extras(facts) == []
+    assert emulate_tab.setup_built(facts) == []
+    assert setup_settled(facts)

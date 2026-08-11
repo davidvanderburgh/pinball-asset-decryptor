@@ -382,7 +382,39 @@ if [ "$(_get "$facts" iswsl)" = 1 ] && [ "$(_get "$facts" wslconf)" = 0 ]; then
     fi
 fi
 
-# ---- 4. and PROVE it, rather than reporting the steps that were taken -----
+# ---- 4. what SAVE STATES need, which apt cannot supply ---------------------
+#
+# busybox-static came out of `need` above with the rest, because apt has it.
+# criu did not, because NO UBUNTU PUBLISHES CRIU - `apt-cache policy criu`
+# prints an empty version table on 24.04 - so it is built from source, once,
+# by getcriu.sh. Named in the app's consent dialog before any of this runs.
+#
+# IT CANNOT FAIL THE SETUP, and that is deliberate. Everything above is a
+# condition of the emulator RUNNING; this is a condition of saving. A machine
+# whose criu build fails still emulates perfectly, and telling its owner that
+# "setup did not finish" over a feature would be the same wrong accusation
+# this whole file keeps guarding against. So the outcome is reported on its
+# own line and the verdict below ignores it.
+criu_result=skipped
+if [ "$(_get "$facts" criu)" = 0 ]; then
+    echo ""
+    echo "save states also need criu, which no Ubuntu publishes - building it:"
+    # ITS `result=` IS RENAMED, not passed through: the app reads `result=` as
+    # THE verdict of this script, and a nested one is a second script quietly
+    # answering for this one. `sed -u` because the build streams for minutes
+    # and a block-buffered pipe would deliver it in silent 4 KB lumps, which
+    # is exactly what a hang looks like from the log pane.
+    if ( set -o pipefail
+         bash "$RIG/getcriu.sh" 2>&1 | sed -u 's/^result=/getcriu=/' ); then
+        criu_result=ok
+    else
+        criu_result=failed
+    fi
+    facts=$(_facts)
+fi
+echo "extras_criu=$criu_result"
+
+# ---- 5. and PROVE it, rather than reporting the steps that were taken -----
 #
 # `need`, NOT A LIST OF FACT KEYS. This block used to name the four probes one
 # per line, which made it the THIRD copy of a list this file's own header says

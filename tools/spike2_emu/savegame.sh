@@ -17,7 +17,10 @@ set -u
 RIG=$(cd "$(dirname "$0")" && pwd)
 SLOT=${1:-quicksave}
 LABEL=${2:-}
-CRIU=${CRIU:-/var/tmp/criubuild/criu/criu/criu}
+# A SUBSHELL, for savestate.sh's sake: this script hands it an explicit
+# PAD_ROOT read from the guest, and sourcing padpath here would export a
+# GUESSED one over it. Only pad_criu is wanted.
+CRIU=${CRIU:-$(. "$RIG/padpath.sh"; pad_criu)}
 
 # The slot name becomes `rm -rf $ROOT/saves/$SLOT` below, and a GUI feeds it
 # now - so it is a filename, never a path. Reject anything else loudly.

@@ -539,7 +539,20 @@ def test_both_installers_offer_every_emulator_package_the_tab_names():
     # _SETUP_OPTIONAL too: busybox-static costs the save states rather than the
     # run, but the installer is still where a user who never opens the tab gets
     # it - and that omission is exactly what made v0.126.0 refuse to start.
-    for _key, pkg, _why in _SETUP_TOOLS + _SETUP_OPTIONAL:
+    #
+    # EXCEPT WHAT APT CANNOT SUPPLY, which is the fourth field's whole job.
+    # criu is on NO Ubuntu (`apt-cache policy criu` -> empty version table), so
+    # it can only be built from source; putting that name in an installer's
+    # package list would fail the whole apt-get and take the packages beside it
+    # down with it.  getcriu.sh is where that one comes from, and the Emulate
+    # tab's "Set up emulator..." is what runs it.
+    rows = ([t + ("apt",) for t in _SETUP_TOOLS] + list(_SETUP_OPTIONAL))
+    for _key, pkg, _why, how in rows:
+        if how != "apt":
+            assert pkg not in ps1_stern and pkg not in linux_stern[0], (
+                f"{pkg} is in an installer's apt list, and no Ubuntu "
+                f"publishes it - that install can only fail")
+            continue
         for name in pkg.split():
             assert name in ps1_stern, (
                 f"install_prerequisites.ps1's Stern entry never installs "

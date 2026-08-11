@@ -53,6 +53,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -116,6 +117,80 @@ _GAVEUP_HINT = ("Auto-advance pressed Service Back several times and the "
 #: (which reads nonzero procs as a live run it must not interrupt).  A user
 #: met exactly that on 2026-08-09, with the answer sitting in the log pane.
 _NEEDS_WSL_RESTART = "PAD_STOP_NEEDS_WSL_RESTART"
+
+#: The token watch.sh prints when it cannot open the virtual playfield window
+#: itself, with everything needed to open it from here.
+#:
+#: THE MACHINE THAT NEEDS IT.  The playfield is a WINDOWS process — this WSL
+#: has no Tk of any kind — so watch.sh launches it through interop, and a user
+#: reported on 2026-08-11 that his never appeared.  His ``/etc/wsl.conf`` has
+#: ``[interop] enabled=false``, so his Linux cannot execute a Windows binary
+#: at all: the window could not open itself, and the rig's only answer was to
+#: print a command for him to type before every run.
+#:
+#: AND THE ASYMMETRY THAT FIXES IT.  Interop is LINUX → WINDOWS.  Windows →
+#: Linux (``wsl.exe``) is untouched by that switch, so everything the window
+#: does once it is up — reading ``dump/padled``, running ``swpoke.py``, asking
+#: ``wslpath`` — keeps working.  Only the LAUNCH cannot cross.  PAD is already
+#: standing on the far side: it is a Windows process running a Python with
+#: tkinter (it is drawing its own window with it), so it opens the playfield
+#: and watch.sh gets on with the run.
+_PLAYFIELD_LAUNCH = "PAD_PLAYFIELD_WINDOWS_LAUNCH"
+
+
+def playfield_launch(line):
+    """Parse a ``_PLAYFIELD_LAUNCH`` line into its fields, or None.
+
+    ``key=value`` pairs, split on the KEYS rather than on whitespace: two of
+    the values are paths (``\\\\wsl.localhost\\…``), and a path is entitled to
+    contain a space even though this rig's own never has.
+
+    Pure, and separate from the launching, so the format can be tested without
+    a WSL, a Tk root or a game.
+    """
+    if not line or _PLAYFIELD_LAUNCH not in line:
+        return None
+    rest = line.split(_PLAYFIELD_LAUNCH, 1)[1].strip()
+    out = {}
+    for part in re.split(r"\s+(?=[a-z_]+=)", rest):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            out[k.strip()] = v.strip()
+    return out if out.get("game") else None
+
+
+def windows_python():
+    """The interpreter to run ``playfield.py`` with, on Windows.
+
+    ``sys.executable`` IS THE ANSWER AND IS ALSO A TRAP, so it is not used
+    bare.  The Windows app runs on the Python bundled beside it
+    (``{app}\\python\\pythonw.exe`` — launcher.vbs starts it that way), and
+    that interpreter has tkinter and Pillow, which is exactly what the
+    playfield needs.  But in a FROZEN build ``sys.executable`` is the app's own
+    .exe, and handing it a script path would start a second copy of PAD.
+
+    So: prefer the windowed twin of whatever is running us (no console window
+    beside the playfield), accept the running interpreter itself, and only
+    then look for a Python on PATH.  None when there is nothing to run it
+    with, and the caller says so rather than launching something wrong.
+    """
+    cands = []
+    exe = sys.executable or ""
+    if exe and not getattr(sys, "frozen", False):
+        base = os.path.dirname(exe)
+        cands += [os.path.join(base, "pythonw.exe"), exe]
+    elif exe:
+        # Frozen: the bundled interpreter sits in `python\` beside the app.
+        cands.append(os.path.join(os.path.dirname(exe), "python",
+                                  "pythonw.exe"))
+    for name in ("pythonw.exe", "python.exe"):
+        found = shutil.which(name)
+        if found:
+            cands.append(found)
+    for c in cands:
+        if c and os.path.isfile(c):
+            return c
+    return None
 
 
 def rig_dir():
@@ -468,10 +543,29 @@ _SETUP_TOOLS = (
 #: the cost is the feature.  This list is how the user gets told that BEFORE
 #: the save slots turn out to do nothing, and how “Set up emulator…” is given
 #: something to install.
+#: THE FOURTH FIELD IS HOW IT IS GOT, and it exists because the second of
+#: these cannot be got the way the first is.  ``apt`` means what it says;
+#: ``build`` means no Ubuntu publishes the thing at all and getcriu.sh
+#: compiles it from source.  Without the distinction the consent dialog says
+#: "Install in WSL: criu", which is a promise apt cannot keep: ``apt-cache
+#: policy criu`` on 24.04 prints an EMPTY version table, and naming it on an
+#: install line would fail the packages beside it too.
+#:
+#: THE FAULT THAT PUT CRIU HERE is the busybox one, one layer down. PAD-53
+#: made a missing busybox-static cost only the feature - but a machine that
+#: then installed busybox-static STILL had no save states, because criu was a
+#: hard-coded ``/var/tmp/criubuild/criu/criu/criu`` in eight rig scripts: one
+#: developer's hand-built binary, on one machine. Everyone else got the
+#: checkpointable boot, the Save and Load buttons, and a failure naming a
+#: directory they had never heard of. Both halves are probed now, and both
+#: are obtainable.
 _SETUP_OPTIONAL = (
     ("busybox", "busybox-static",
      "save states: the guest is booted in the one shape that can be frozen "
-     "and reloaded, and that shape needs a static busybox"),
+     "and reloaded, and that shape needs a static busybox", "apt"),
+    ("criu", "criu",
+     "save states: this is the program that freezes the running game and "
+     "thaws it again, and no Ubuntu publishes it — PAD builds it", "build"),
 )
 
 #: How long to give the setup probe.  It is five `command -v`s, one small
@@ -553,8 +647,24 @@ def setup_extras(facts):
     """
     if not facts or facts.get("iswsl") == "0":
         return []
-    return [(pkg, why) for key, pkg, why in _SETUP_OPTIONAL
+    return [(pkg, why) for key, pkg, why, _how in _SETUP_OPTIONAL
             if facts.get(key) == "0"]
+
+
+def setup_built(facts):
+    """Of those, the ones apt cannot supply at all — PAD compiles them.
+
+    Split out because the two are different acts and the consent dialog has to
+    say which is which: ``apt-get install busybox-static`` is seconds and a
+    package, ``getcriu.sh`` is a source download and a three-minute build.
+    Folding the second into "Install in WSL: …" would make that dialog a
+    consent to something it did not describe — and would name a package
+    ``apt-get install`` cannot resolve, which fails the packages beside it.
+    """
+    if not facts or facts.get("iswsl") == "0":
+        return []
+    return [(pkg, why) for key, pkg, why, how in _SETUP_OPTIONAL
+            if how == "build" and facts.get(key) == "0"]
 
 
 def setup_unavailable(facts):
@@ -673,9 +783,23 @@ def setup_fix_steps(facts):
     # The ordinary install covers everything EXCEPT what has to be fetched:
     # naming a package on both lines reads as installing it twice, and one of
     # the two descriptions of how would be wrong.
-    ordinary = [pkg for pkg, _ in missing if pkg not in fetch]
+    built = [pkg for pkg, _ in setup_built(facts)]
+    ordinary = [pkg for pkg, _ in missing
+                if pkg not in fetch and pkg not in built]
     if ordinary:
         steps.append("Install in WSL:  " + "  ".join(ordinary))
+    # ...AND THE ONE APT HAS NEVER HEARD OF.  No Ubuntu publishes criu, so
+    # this step is a source download and a compile, not an install — a
+    # different act, a different length (minutes, not seconds), and a
+    # different thing to agree to.  It is named with everything it touches
+    # for the same reason the rest of this list is.
+    if built:
+        steps.append(
+            "Build %s from source in WSL — no Ubuntu publishes it. This "
+            "installs the build tools, downloads the source from GitHub, "
+            "compiles it (a few minutes) and puts the result in "
+            "/usr/local/bin. Save states need it; nothing else does."
+            % ", ".join(built))
     # NAMED SEPARATELY because it is a different act from `apt install`: the
     # package comes out of ANOTHER Ubuntu's archive.  Folding that into the
     # line above would make this dialog a consent to something it did not say.
@@ -807,10 +931,17 @@ def setup_notice(facts, can_fix):
         # consent and is already exact - this sentence is its summary and has
         # to be exact the same way.
         does = []
+        built = setup_built(facts)
         if facts.get("universe") == "0":
             does.append("turns universe back on")
-        if missing or extras:
+        # NOT EVERYTHING LISTED ABOVE IS AN INSTALL.  criu is a source build,
+        # and "installs those" over a list whose only entry is criu describes
+        # something that is not going to happen - apt has no such package.
+        if missing or [e for e in extras if e not in built]:
             does.append("installs those in WSL")
+        if built:
+            does.append("builds %s from source (a few minutes)"
+                        % ", ".join(p for p, _ in built))
         if binfmt == "0":
             does.append("registers the handler for 32-bit ARM programs")
         elif binfmt == "disabled":
@@ -840,10 +971,17 @@ def setup_notice(facts, can_fix):
         # a b` is all or nothing, so one such name in the list is an apt
         # command that installs none of the others.  That is the fault PAD-41
         # fixed in the rig, and it was still here in the advice the rig prints.
+        # ...and neither must a package that DOES NOT EXIST.  criu is on no
+        # Ubuntu at all, so `apt install criu` cannot work anywhere; it gets
+        # the command that does work, on its own line.
+        built_names = [p for p, _ in setup_built(facts)]
         askable = [p for p, _ in missing + extras
-                   if facts.get("universe") == "0" or p not in unavailable]
+                   if p not in built_names
+                   and (facts.get("universe") == "0" or p not in unavailable)]
         if askable:
             cmds.append("sudo apt install " + " ".join(askable))
+        if built_names:
+            cmds.append("sudo bash %s" % os.path.join(rig_dir(), "getcriu.sh"))
         if binfmt != "1":
             cmds.append(facts.get("advice", "sudo apt install qemu-user-static"))
         if cmds:
@@ -901,6 +1039,13 @@ class EmulatePanel:
         self._launch_slot = None
         self._loading = False
         self._proc = None            # the watch.sh child, while we own one
+        #: The virtual playfield window, ON THE MACHINES WHERE PAD HAS TO OPEN
+        #: IT ITSELF (see _open_playfield).  Normally watch.sh launches it
+        #: through WSL interop and this stays None; when interop is off it
+        #: cannot, and then PAD owns the process — which means PAD closes it,
+        #: because the rig's forced close is a powershell.exe call and that is
+        #: interop too.
+        self._pf_proc = None
         #: Whether the last status poll saw anything running. Read by
         #: shutdown_sync() on app quit: a terminal-started run shows up here
         #: too, and quitting PAD must take the emulator down either way.
@@ -1458,6 +1603,13 @@ class EmulatePanel:
         def run():
             result = ""
             restart = False
+            # The save-state build reports SEPARATELY from the setup's own
+            # verdict, because it is a feature and the rest is the emulator:
+            # setupfix.sh returns result=ok for a machine that emulates
+            # perfectly and could not build criu, and that machine must not be
+            # told its setup failed - nor be left thinking its Save buttons
+            # will now work.  One line each way.
+            criu = ""
             try:
                 # Popen and drain, not run(): apt on a cold index takes long
                 # enough that a silent minute reads as a hang, and the log pane
@@ -1469,6 +1621,8 @@ class EmulatePanel:
                     line = raw.decode("utf-8", "replace").rstrip()
                     if line.startswith("result="):
                         result = line.split("=", 1)[1]
+                    elif line.startswith("extras_criu="):
+                        criu = line.split("=", 1)[1]
                     elif line == "needs_restart=1":
                         restart = True
                     if line:
@@ -1494,6 +1648,13 @@ class EmulatePanel:
             else:
                 self._log("[emulate] setup did not finish — the emulator will "
                           "probably still fail to start.")
+            if criu == "ok":
+                self._log("[emulate] criu was built and installed, so save "
+                          "states work from the next title you start.")
+            elif criu == "failed":
+                self._log("[emulate] criu could not be built — see above. "
+                          "Everything else is set up: titles start and run, "
+                          "and only the Save/Load state buttons stay off.")
             self._setup_fixing = False
             # Re-probe rather than assume it worked: the notice must reflect
             # the machine, not the fact that a button was pressed.
@@ -2132,15 +2293,104 @@ class EmulatePanel:
             try:
                 # Drain so the pipe cannot fill and block the rig; the rig keeps
                 # its own log, this is only for PAD's log pane.
-                for line in self._proc.stdout:
-                    self._log("[emulate] " + line.decode("utf-8", "replace")
-                              .rstrip())
+                for raw in self._proc.stdout:
+                    line = raw.decode("utf-8", "replace").rstrip()
+                    self._log("[emulate] " + line)
+                    # ...and one line in it is addressed to US: the run cannot
+                    # start a Windows program on this machine and is asking
+                    # PAD to open the playfield window.  Done on THIS thread,
+                    # which is the drain thread and not the UI one — it is a
+                    # Popen, and the interpreter it starts may take a moment
+                    # to appear.
+                    fields = playfield_launch(line)
+                    if fields:
+                        self._open_playfield(fields)
             except Exception:                           # noqa: BLE001
                 pass                                    # pipe closed under us
             finally:
                 self._proc = None
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _open_playfield(self, fields):
+        """Open the virtual playfield window, because the run cannot.
+
+        See ``_PLAYFIELD_LAUNCH`` for why a machine ends up here: WSL interop
+        switched off (or no ``pythonw.exe`` on the distro's PATH), which stops
+        Linux starting a Windows program and stops nothing else.
+
+        THE PATHS COME FROM THE RUN, ALREADY TRANSLATED.  ``playfield.py`` can
+        work them out for itself — padpath.py asks ``wslpath`` — but watch.sh
+        knows them for certain, including a rootfs the user moved with
+        PAD_ROOT, and it costs two ~200 ms round trips not to be told.  This is
+        the same pair WSLENV's ``/p`` would have carried across the interop
+        exec that is not happening.
+
+        Failures are logged, never raised: this runs on the thread draining
+        watch.sh's output, and a run whose playfield could not open is a run
+        with a game window, sound and everything else — it is not a reason to
+        stop reading the log.
+        """
+        if sys.platform != "win32":
+            return
+        # ALIVE, not merely remembered.  A run that ended on its own (the game
+        # window closed) leaves the handle behind while the window itself has
+        # already gone — playfield.py closes when the LED block disappears —
+        # and reading that stale handle as "one is already open" is a second
+        # Start with no playfield at all.
+        if self._pf_proc is not None and self._pf_proc.poll() is None:
+            return
+        py = windows_python()
+        if not py:
+            self._log("[emulate] the run asked PAD to open the playfield "
+                      "window, and there is no Python here to open it with. "
+                      "The game itself is unaffected.")
+            return
+        script = os.path.join(rig_dir(), "playfield.py")
+        cmd = [py, script, fields["game"]]
+        if fields.get("savestates") == "1":
+            cmd.append("--savestates")
+        env = dict(os.environ)
+        for key, name in (("root", "PAD_ROOT"), ("tables", "PAD_TABLES")):
+            if fields.get(key):
+                env[name] = fields[key]
+        try:
+            self._pf_proc = subprocess.Popen(cmd, env=env,
+                                             creationflags=_CREATE_FLAGS)
+            self._log("[emulate] opened the virtual playfield window here — "
+                      "this WSL cannot start Windows programs itself.")
+        except Exception as exc:                            # noqa: BLE001
+            self._pf_proc = None
+            self._log("[emulate] could not open the playfield window: %s" % exc)
+
+    def _close_playfield(self, grace=8):
+        """Close a playfield window PAD opened, once the run is down.
+
+        ONLY ONE PAD OPENED.  The ordinary window is watch.sh's child through
+        interop and watch.sh tears it down; this is the other case, where the
+        rig's forced close (a ``powershell.exe`` call) is itself interop and
+        therefore the one thing that machine cannot do.  Whoever owns the
+        launch owns the teardown.
+
+        THE POLITE EXIT GETS ITS CHANCE FIRST, and it is worth having: the
+        window saves its position on the way out, and it goes by itself as
+        soon as the run's LED block disappears (playfield.py's ``emu_gone``,
+        ~2 s).  Killing it at once would lose that on every single stop.
+        ``grace`` is shorter on app quit, where this blocks the main thread
+        and the LED block has already gone.
+        """
+        proc, self._pf_proc = self._pf_proc, None
+        if proc is None:
+            return
+        try:
+            proc.wait(timeout=grace)
+        except Exception:                                   # noqa: BLE001
+            try:
+                proc.kill()
+                self._log("[emulate] the playfield window did not close "
+                          "itself; closed it here.")
+            except Exception:                               # noqa: BLE001
+                pass
 
     def stop(self):
         """Kill everything and VERIFY.  Never assume: the rig's own killgame.sh
@@ -2179,6 +2429,10 @@ class EmulatePanel:
                         proc.kill()
                     except Exception:                   # noqa: BLE001
                         pass
+            # AFTER the rig's own teardown, never before: removing the LED
+            # block is what tells the window to close itself, and that exit is
+            # the one that saves its position.  Only ever a window PAD opened.
+            self._close_playfield()
             self._stopping = False
             # killgame.sh says the survivors are beyond anything inside WSL.
             # Offer the Windows-side cure ON THE MAIN THREAD - this is a
@@ -2438,10 +2692,18 @@ class EmulatePanel:
         started").  killgame.sh SIGKILLs all five processes and removes the
         LED block, which is the playfield window's signal to close itself;
         the game window dies with padglhost.
+
+        ...EXCEPT ON THE ONE MACHINE WHERE THAT SIGNAL IS ALL THERE IS.  When
+        PAD opened the playfield itself (interop off — see _open_playfield),
+        the rig's forced close cannot run, so this closes it here.  Quitting
+        PAD leaving a playfield window on the desktop is exactly the orphan
+        this method exists to prevent.
         """
         if not (self._proc is not None or self._last_up):
+            self._close_playfield(grace=3)
             return
         if not rig_available():
+            self._close_playfield(grace=3)
             return
         self._stopped = True             # no more polls into a dying Tk
         try:
@@ -2451,6 +2713,7 @@ class EmulatePanel:
                 timeout=25, creationflags=_CREATE_FLAGS)
         except Exception:                               # noqa: BLE001
             pass                     # quitting anyway; best effort by design
+        self._close_playfield(grace=3)
 
     # ------------------------------------------------------------------
     # status polling

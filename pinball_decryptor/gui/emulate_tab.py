@@ -50,6 +50,7 @@ Three things about it are worth knowing before changing anything here:
 """
 
 import json
+import ntpath
 import os
 import pathlib
 import re
@@ -174,15 +175,21 @@ def windows_python():
     then look for a Python on PATH.  None when there is nothing to run it
     with, and the caller says so rather than launching something wrong.
     """
+    # ntpath, NOT os.path, for the path arithmetic: this function reasons
+    # about WINDOWS paths by contract (its one caller returns early off
+    # Windows), and os.path is posixpath on the Linux and macOS CI runners,
+    # where dirname(r"C:\Py\python.exe") is "" because a backslash is not a
+    # separator there.  On Windows ntpath IS os.path, so this changes nothing
+    # where the code runs and unbreaks the test everywhere it is tested.
     cands = []
     exe = sys.executable or ""
     if exe and not getattr(sys, "frozen", False):
-        base = os.path.dirname(exe)
-        cands += [os.path.join(base, "pythonw.exe"), exe]
+        base = ntpath.dirname(exe)
+        cands += [ntpath.join(base, "pythonw.exe"), exe]
     elif exe:
         # Frozen: the bundled interpreter sits in `python\` beside the app.
-        cands.append(os.path.join(os.path.dirname(exe), "python",
-                                  "pythonw.exe"))
+        cands.append(ntpath.join(ntpath.dirname(exe), "python",
+                                 "pythonw.exe"))
     for name in ("pythonw.exe", "python.exe"):
         found = shutil.which(name)
         if found:

@@ -5941,6 +5941,26 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
 # Shipping 3 and 4 now would buy a little correctness and cost the only clean
 # A/B available, which is the mistake v0.102.5 made -- plausible fixes to a
 # fault nobody had localised, reported as the answer.
+#
+# THE LED ZEPPELIN TEST COULD NOT HAPPEN, and until PAD-56 nobody knew why.  The
+# cave carries a stock copy of every window it redirects -- ~1 KB per replaced
+# sound -- and it had to land within a single ARM branch of the window-read
+# function.  On Led Zeppelin LE 1.22 the only free region in reach is the 28 KB
+# text/data gap, i.e. a ceiling of about 27 sounds; the other free region starts
+# 64 MB up.  So every real build silently placed nothing and fell back: a tester
+# replacing 201 sounds got the box saying NOT applied, a 210876-byte cave and no
+# room, and heard the scrap on 179 of them (PAD-56, v0.119.7, reproduced offline
+# against his own firmware).  The ceiling, not the checkbox, is why this feature
+# has one machine's worth of evidence.
+#
+# The hops are now long where they have to be (an `ldr pc,[pc,#-4]` veneer in,
+# an `ldr pc,=ret` back out) and placement still PREFERS an in-reach region, so
+# a build that placed before places at the same VA behind the same branch and
+# the A/B above survives intact.  What is new is that a full-size Led Zeppelin
+# build now lands on the synthetic region above the top PT_LOAD -- the same
+# top-of-heap placement as Bond, and 52 pages of it rather than one.  That is
+# the placement lead below, so if the first LZ report is a boot loop, read it as
+# evidence about the placement and not about the title.
 # --------------------------------------------------------------------------
 # The window-read function's 3-instruction prologue -- push {r4-r8,sb,sl,fp,lr} /
 # sub sp,sp,#0x16c / add sb,r1,#0x40 -- uniquely identifies it on every Spike 2
@@ -6030,7 +6050,7 @@ def _locate_window_read_fn(raw):
 
 
 _CAVE_SIG_WORDS = 4              # 16 bytes of card content that identify FIRST_OFF
-_CAVE_NCODE = 54                 # code + literals + BASEVAR + signature, in words
+_CAVE_NCODE = 55                 # code + literals + BASEVAR + signature, in words
 
 
 def _asm_derive_redirect_cave(raw, va2off, fn, ret, cave_va, table_va,
@@ -6096,7 +6116,13 @@ def _asm_derive_redirect_cave(raw, va2off, fn, ret, cave_va, table_va,
 
     The cave replicates the function's 3-word prologue (push / sub sp / add sb
     -- all position-independent) and returns to *ret*.  ``game_real`` is ET_EXEC,
-    so the absolute VAs baked as literals are HW-valid."""
+    so the absolute VAs baked as literals are HW-valid.
+
+    The hop BACK to *ret* is a plain ARM ``b`` while the cave is within +/-32 MB
+    of it, and an absolute ``ldr pc,=ret`` when it isn't.  ``br`` masks its
+    offset to 24 bits, so a cave placed further out would otherwise return to a
+    wrapped address rather than fail -- and a cave that far out is now normal
+    (see :func:`_append_cave_segment`)."""
     def w(x):
         return struct.pack("<I", x & 0xffffffff)
 
@@ -6110,10 +6136,16 @@ def _asm_derive_redirect_cave(raw, va2off, fn, ret, cave_va, table_va,
         return cave_va + i * 4
     LIT_BASE, LIT_SIG, LIT_FIRST, LIT_TABLE = (iva(45), iva(46), iva(47),
                                                iva(48))
+    LIT_RET = iva(54)
 
     def ldrpc(rt, frm, lit):
         return w(0xE59F0000 | (rt << 12) | (lit - (frm + 8)))
     DONE, NOLATCH, HAVE_BASE, SCAN = iva(43), iva(26), iva(30), iva(32)
+    # Return hop: relative while it reaches, absolute (via LIT_RET) when the
+    # cave is out of branch range of the function it came from.
+    goback = (br(0xE, iva(44), ret)
+              if abs(ret - (iva(44) + 8)) < _CAVE_MAX_BRANCH
+              else ldrpc(15, iva(44), LIT_RET))
     words = [
         w(W_push), w(W_subsp),                  # 0,1  replicated prologue
         w(0xE3520C02),                          # 2  cmp r2,#0x200 (calibration candidate?)
@@ -6148,10 +6180,11 @@ def _asm_derive_redirect_cave(raw, va2off, fn, ret, cave_va, table_va,
         w(0xE1580006), br(0x2, iva(40), SCAN),  # 39 cmp r8,r6 ; 40 bhs scan
         w(0xE0488005), w(0xE0871008),           # 41 sub r8,r8,r5 ; 42 add r1,r7,r8
         w(W_addsb),                             # 43 done: add sb,r1,#0x40
-        br(0xE, iva(44), ret),                  # 44 b ret (fn+12)
+        goback,                                 # 44 b ret / ldr pc,=ret (fn+12)
         w(basevar_va), w(sig_va), w(first_off), w(table_va),  # 45-48 literals
         w(0),                                   # 49 BASEVAR (writable, init 0)
         w(0), w(0), w(0), w(0),                 # 50-53 SIG (filled by the caller)
+        w(ret),                                 # 54 RET literal (long return)
     ]
     assert len(words) == _CAVE_NCODE, len(words)
     return b"".join(words)
@@ -6301,9 +6334,12 @@ def _append_cave_segment(raw, need, fn):
     Dropping it is benign here: it already requested an executable stack, and
     its absence leaves the loader on that same default.
 
-    Returns ``(cave_va, append_off, gap_bytes)``.  Raises ``RuntimeError`` (so
-    the caller falls back to the standard build) if there's no repurposable
-    header or no free address space within ARM branch reach of *fn*.
+    Returns ``(cave_va, append_off, gap_bytes)``.  Placement prefers free space
+    within ARM branch reach of *fn* and settles for anything that fits when the
+    near regions are too small -- the caller reads ``cave_va`` back and emits a
+    long hop for that case.  Raises ``RuntimeError`` (so the caller falls back
+    to the standard build) if there's no repurposable header, or no free address
+    space large enough anywhere.
 
     AUDITED against all 37 vendor firmwares while chasing the James Bond boot
     loop (PAD-11), and the ELF geometry this produces came back clean, so don't
@@ -6354,21 +6390,25 @@ def _append_cave_segment(raw, need, fn):
         if hi > lo:
             frees.append((lo, hi))
 
-    # The fn <-> cave hops are single ARM branches (+/-32 MB), so the cave has
-    # to land within reach of the window-read function.
+    # Prefer a region within a single ARM branch (+/-32 MB) of the window-read
+    # function, which is the only kind of region caves were placed in before --
+    # a build that placed then still places identically, same VA, same entry
+    # instruction.  Falling back to a region out of branch reach costs only the
+    # two long hops (see _asm_derive_redirect_cave and the caller's entry
+    # patch), and it is what makes a real-sized build possible at all: the cave
+    # carries a stock copy of every redirected window, ~1 KB per replaced sound,
+    # so Led Zeppelin LE 1.22's 28 KB text/data gap holds about 27 sounds and
+    # its only other free region is 64 MB up.  PAD-56 replaced 201 sounds, blip-
+    # free silently fell back to the standard build, and every one of those
+    # sounds kept the scrap the option exists to remove.
     want = (need + PAGE - 1) & ~(PAGE - 1)
-    pick = None
-    for lo, hi in frees:
-        if hi - lo < want:      # the mapping covers the padded extent, not just need
-            continue
-        if abs(lo - (fn + 8)) >= _CAVE_MAX_BRANCH:
-            continue
-        pick = (lo, hi)
-        break
+    fits = [(lo, hi) for lo, hi in frees if hi - lo >= want]  # padded extent
+    near = [f for f in fits if abs(f[0] - (fn + 8)) < _CAVE_MAX_BRANCH]
+    pick = near[0] if near else (fits[0] if fits else None)
     if pick is None:
         raise RuntimeError(
-            "no unclaimed address space within branch reach of the window-read "
-            "function fits a %d-byte cave -- using the standard build." % need)
+            "no unclaimed address space fits a %d-byte cave -- using the "
+            "standard build." % need)
     cave_va, gap_hi = pick
     gap = gap_hi - cave_va
 
@@ -6402,6 +6442,22 @@ def _append_cave_segment(raw, need, fn):
     return cave_va, append_off, gap
 
 
+def _cave_entry_patch(fn, cave_va):
+    """The instruction bytes that send the window-read function at *fn* into the
+    cave at *cave_va*: 4 bytes (a plain ARM branch) while the cave is within
+    +/-32 MB, 8 bytes (the ET_EXEC veneer ``ldr pc,[pc,#-4]`` plus the absolute
+    target) when it isn't.
+
+    The veneer costs the word at fn+4, which is free to spend: the cave
+    replicates all three prologue words and resumes at fn+12, so nothing
+    executes fn+4 again.  ``cave_va`` is page-aligned, so the loaded address has
+    bit 0 clear and the core stays in ARM state."""
+    if abs(cave_va - (fn + 8)) < _CAVE_MAX_BRANCH:
+        return struct.pack("<I", (0xE << 28) | (0xA << 24)
+                           | (((cave_va - (fn + 8)) >> 2) & 0xFFFFFF))
+    return struct.pack("<II", 0xE51FF004, cave_va)
+
+
 def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
                                 out_dir, progress=None, extra_fw_writes=None):
     """Build the blip-free firmware cave for the replaced sounds in *patches*
@@ -6421,7 +6477,7 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
 
     Raises ``RuntimeError`` (caught by the caller, which then falls back to the
     standard restore build) if the window-read function can't be located, the
-    consumed-window map is missing, there's no free address space in branch reach
+    consumed-window map is missing, no unclaimed address space is large enough
     for the cave, the firmware has no repurposable program header, or the located
     function turns out not to be the window reader."""
     from .spike2.elf import parse_elf
@@ -6518,10 +6574,10 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
     assert len(blob) == needed, (len(blob), needed)
     raw[append_off:append_off + len(blob)] = blob
 
-    # Branch the window-read function into the cave.
-    raw[va2off(fn):va2off(fn) + 4] = struct.pack(
-        "<I", (0xE << 28) | (0xA << 24)
-        | (((cave_va - (fn + 8)) >> 2) & 0xFFFFFF))
+    # Jump the window-read function into the cave (after the prologue words were
+    # read out of it, above).
+    entry = _cave_entry_patch(fn, cave_va)
+    raw[va2off(fn):va2off(fn) + len(entry)] = entry
 
     # Anything else this Write would have patched into the firmware has to go
     # into the SAME image: the whole file is copied onto the card in one go, so
@@ -6536,9 +6592,12 @@ def _build_derive_redirect_cave(gr_path, img_path, patches, np, log,
     log("Blip-free cave built: %d window(s) across %d replaced sound(s) "
         "redirected to stock; fn=0x%x FIRST_OFF=0x%x; cave@0x%x in its own "
         "%d-byte segment (file+0x%x), placed in %d bytes of unclaimed address "
-        "space; game_real %d -> %d bytes."
+        "space %s; game_real %d -> %d bytes."
         % (len(windows), len(patches), fn, first_off, cave_va, len(blob),
-           append_off, gap, os.path.getsize(gr_path), len(raw)), "success")
+           append_off, gap,
+           "in branch reach" if len(entry) == 4 else
+           "reached by an absolute jump",
+           os.path.getsize(gr_path), len(raw)), "success")
     return patched_gr, len(raw)
 
 

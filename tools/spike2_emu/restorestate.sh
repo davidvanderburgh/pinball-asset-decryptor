@@ -14,12 +14,18 @@
 
 set -u
 DDIR=${1:?usage: restorestate.sh <dumpdir>}
-CRIU=${CRIU:-/var/tmp/criubuild/criu/criu/criu}
 . "$(dirname "$0")/padpath.sh"
+# Asked of pad_criu, never written down - see savestate.sh's copy of this note.
+CRIU=${CRIU:-$(pad_criu)}
 R=$ROOT
 
 [ "$(id -u)" = 0 ] || { echo "restorestate: needs root. Use: wsl -u root -e bash $0 ..."; exit 2; }
-[ -x "$CRIU" ] || { echo "restorestate: no criu at $CRIU"; exit 2; }
+[ -x "$CRIU" ] || {
+    echo "restorestate: this machine has no criu, and Ubuntu does not package one."
+    echo "restorestate:   wsl -u root -e bash $RIG/getcriu.sh   (builds it, once)"
+    echo "[restore] no criu here - save states need it; getcriu.sh builds one"
+    exit 2
+}
 [ -f "$DDIR/restore.env" ] || { echo "restorestate: no restore.env in $DDIR"; exit 1; }
 
 # --- PRE-FLIGHT: refuse a doomed slot BEFORE anything is killed ----------

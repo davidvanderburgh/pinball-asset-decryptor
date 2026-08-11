@@ -46,7 +46,10 @@
 
 set -u
 WORK=/var/tmp/criuladder
-CRIU=${CRIU:-/var/tmp/criubuild/criu/criu/criu}
+# Sourced in a SUBSHELL purely to borrow pad_criu: this script deliberately
+# owns its own paths (it predates the rig's rootfs and must not inherit one),
+# so the point is the ONE definition of where criu is, not padpath's variables.
+CRIU=${CRIU:-$(. "$(dirname "$0")/padpath.sh"; pad_criu)}
 # fuse2fs is NOT packaged here either - it is the hand-extracted binary
 # cardmount.sh uses, under david's home, runnable by root with the same
 # LD_LIBRARY_PATH trick cardmount.sh itself uses.
@@ -54,7 +57,7 @@ FUSE2FS=${FUSE2FS:-/home/david/local/usr/bin/fuse2fs}
 FUSELIB=/home/david/local/lib/x86_64-linux-gnu
 
 [ "$(id -u)" = 0 ] || { echo "criuladder: needs root (criu does). Use: wsl -u root -e bash $0"; exit 2; }
-[ -x "$CRIU" ] || { echo "criuladder: no criu at $CRIU - build it first, or set CRIU="; exit 2; }
+[ -x "$CRIU" ] || { echo "criuladder: no criu here - build one with 'wsl -u root -e bash $(dirname "$0")/getcriu.sh', or set CRIU="; exit 2; }
 
 # Which rungs to run. No argument = all of them. The control is not optional.
 RUNGS=${*:-A B C D E F G}

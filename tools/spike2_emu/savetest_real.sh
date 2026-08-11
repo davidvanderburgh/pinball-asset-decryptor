@@ -26,7 +26,7 @@ set -u
 RIG=$(cd "$(dirname "$0")" && pwd)
 . "$RIG/padpath.sh"
 GAME=${1:-godzilla_pro}
-CRIU=${CRIU:-/var/tmp/criubuild/criu/criu/criu}
+CRIU=${CRIU:-$(pad_criu)}
 WORK=/var/tmp/savetest_real
 DUMP=$WORK/dump
 

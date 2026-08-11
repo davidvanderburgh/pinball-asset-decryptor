@@ -17,8 +17,8 @@
 # to /data/count so continuity can be judged the ladder's way.
 
 set -u
-CRIU=${CRIU:-/var/tmp/criubuild/criu/criu/criu}
 . "$(dirname "$0")/padpath.sh"
+CRIU=${CRIU:-$(pad_criu)}
 R=$ROOT
 WORK=/var/tmp/savetest
 DUMP=$WORK/dump

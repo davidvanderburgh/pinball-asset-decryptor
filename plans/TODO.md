@@ -74,37 +74,6 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **42. Save states cannot work on ANY machine but this one, and a WSL
-      with interop switched off can never open its own playfield window.**
-      `S2 D2` *(**~70%, 2026-08-11:** both fixes are written and unit-tested on
-      branch `item/42`; what is left is the real verification — a criu build
-      from clean, and a run with the interop branch actually taken.)*
-      **Two PAD-53 follow-ups, same class: the emulator quietly assumes this
-      developer's machine.**
-      **(1) criu is a hand-built binary at `/var/tmp/criubuild/criu/criu/criu`,
-      hard-coded as the default in EIGHT rig scripts**, and `apt-cache policy
-      criu` on Ubuntu 24.04 prints an EMPTY version table — no Ubuntu publishes
-      criu at all. So v0.126.0's save states could not work for a single other
-      user even after PAD-53 added `busybox-static`: they get the
-      checkpointable boot, the Save and Load buttons, and `savestate: no criu
-      at /var/tmp/criubuild/...`, a directory they have never had. Fetching
-      another release's `.deb` is NOT the way out and does not need re-testing —
-      criu links against libprotobuf-c, libnl-3, libnet, libbsd and libuuid,
-      which is exactly the dependency chain `setupfix.sh`'s `_fetch_foreign`
-      refuses to drag in.
-      **(2) A tester's WSL has `[interop] enabled=false`, so his Linux cannot
-      execute a Windows binary** — and the virtual playfield IS a Windows
-      binary, because this WSL has no Tk. His window can never open itself;
-      `watch.sh` prints a command for him to type before every run. Interop is
-      LINUX → WINDOWS only: `wsl.exe` still works, so everything the window
-      does once it is up (padled reads, `swpoke.py`, `wslpath`) is unaffected —
-      **only the launch cannot cross, and PAD is already standing on the other
-      side.**
-      **Acceptance:** on a machine with no criu, "Set up emulator…" builds one
-      and a save/load round trip works afterwards; on a machine with interop
-      off, pressing Start opens the playfield window with no user action. And
-      neither notice ever tells a working PC that it cannot emulate.
-
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
       instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**
@@ -1702,6 +1671,59 @@ rewriting it.**
       **Left open as item 43:** the half-height menu screen the crash happened
       on. Same location, different fault. (Filed as 42 during the pass and
       renumbered before the merge — 42 went to the save-state portability item.)
+
+- [x] **42. Save states could not work on ANY machine but this one, and a WSL
+      with interop switched off could never open its own playfield window.**
+      DONE 2026-08-11, `4700a88` (branch `item/42`). **Both halves are one
+      fault wearing two hats: the emulator quietly assuming this developer's
+      machine.**
+      **(1) criu was a hand-built binary at `/var/tmp/criubuild/criu/criu/criu`,
+      hard-coded as the default in EIGHT rig scripts**, and `apt-cache policy
+      criu` on Ubuntu 24.04 prints an EMPTY version table - no Ubuntu publishes
+      criu at all. So v0.126.0's save states could not have worked for a single
+      other user even after PAD-53 added `busybox-static`: they would get the
+      checkpointable boot, the Save and Load buttons, and `savestate: no criu at
+      /var/tmp/criubuild/...`, naming a directory they have never had.
+      `pad_criu()` in padpath.sh is now the one place that knows where criu is
+      (`/usr/local/bin`, then PATH - Debian does package it - then the developer
+      build, which keeps working); `getcriu.sh` builds the pinned v4.1 the save
+      ladder was proven against and runs `criu check` BEFORE installing, since a
+      criu that cannot dump would only silence the warning and leave the buttons
+      dead. **Ruled out, do not retry: fetching another release's `.deb`** -
+      criu links against libprotobuf-c, libnl-3, libnet, libbsd and libuuid,
+      exactly the dependency chain `setupfix.sh`'s `_fetch_foreign` refuses to
+      drag in.
+      **(2) A tester's WSL has `[interop] enabled=false`, so his Linux cannot
+      execute a Windows binary** - and the playfield window IS one, because this
+      WSL has no Tk. **The asymmetry is what makes a fix possible:** interop is
+      LINUX -> WINDOWS, so `wsl.exe` still works and everything the window does
+      once it is up (padled reads, `swpoke.py`, `wslpath`) is unaffected. Only
+      the LAUNCH cannot cross - and PAD is already standing on the other side.
+      watch.sh now prints a token carrying the title, the save-state flag and
+      both paths ALREADY TRANSLATED (the `/p` step WSLENV would have done during
+      the interop exec that is not happening), and PAD opens the window. PAD
+      also CLOSES what PAD opened, because the rig's forced close is itself a
+      `powershell.exe` call, i.e. the same interop that machine lacks.
+      **VERIFIED IN THREE PARTS, because no single test could reach all of it.**
+      The criu half end to end inside `unshare -m` with tmpfs over BOTH
+      `/var/tmp/criubuild` and `/usr/local/bin` - genuinely a machine that has
+      never had criu: clone v4.1, `make criu`, `criu check` "Looks good.",
+      install, `result=ok`, host untouched; reuse takes 4 s, an already-present
+      criu exits `result=present`, non-root refuses. The watch.sh half with
+      `PAD_PF_PYTHON=nosuchthing` on a live turtles run: the token printed with
+      `game=turtles_pro savestates=1` and BOTH paths really translated to
+      `\wsl.localhost\Ubuntu\...` - not the empty strings a silent `pad_win`
+      failure would leave - and the run did NOT also try to launch a window
+      itself. **Then the CHAIN, which neither pass had joined:** that real token,
+      parsed and handed to the app's real `_open_playfield`, started
+      `pythonw.exe playfield.py turtles_pro --savestates` against the live
+      guest, and the real `_close_playfield` closed it. That seam - what
+      watch.sh WRITES against what the app PARSES - is the one that would
+      otherwise have shown up first on the tester's machine.
+      **STILL TESTER-PENDING, and the release notes say so:** a genuinely
+      interop-off WSL and a machine with no criu exist on a tester's setup, not
+      here. Everything above is the closest proxy this machine can offer.
+      Tests: 180 + 132 GUI smoke.
 
 - [x] **39. Consolidate the two switch windows into one, to the right of the
       playfield — and make the no-artwork view fit on a screen.** DONE

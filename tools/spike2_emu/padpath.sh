@@ -141,6 +141,36 @@ pad_static_busybox() {
     ! ldd /bin/busybox 2>&1 | grep -q '=>'
 }
 
+# ---- ...AND THE PROGRAM THAT ACTUALLY DOES THE FREEZING --------------------
+#
+# criu dumps the guest and restores it (savestate.sh / restorestate.sh). A
+# pivot boot with no criu behind it is a boot shape nobody can use.
+#
+# IT IS NOT AN APT INSTALL, and that is the whole reason this function exists.
+# Ubuntu 24.04 publishes NO criu at all - `apt-cache policy criu` prints an
+# empty version table, not a package with no candidate - so every script here
+# defaulted to /var/tmp/criubuild/criu/criu/criu, which is one developer's
+# hand-built v4.1 on one machine. Eight scripts carried that literal, so save
+# states could not work for any other user even with busybox-static: the boot
+# was checkpointable, the playfield offered Save and Load, and the press
+# answered "no criu at /var/tmp/criubuild/..." - a path that user had never
+# heard of. getcriu.sh is how a machine gets one; this is how every script
+# finds whichever one is there.
+#
+# ORDER, AND EACH ENTRY IS A DIFFERENT MACHINE: /usr/local/bin is where
+# getcriu.sh installs the build, PATH is a distro that packages criu (Debian
+# does), and the /var/tmp path is the developer build that predates all of
+# this and must keep working. $CRIU still wins everywhere - callers ask for
+# ${CRIU:-$(pad_criu)}, so an explicit one is never second-guessed.
+pad_criu() {
+    local c
+    for c in /usr/local/bin/criu "$(command -v criu 2>/dev/null)" \
+             /var/tmp/criubuild/criu/criu/criu; do
+        [ -n "$c" ] && [ -x "$c" ] && { printf '%s\n' "$c"; return 0; }
+    done
+    return 1
+}
+
 # ---- WHAT THE HARDWARE SHIM IS BUILT FROM, IN ONE PLACE ------------------
 #
 # build.sh compiles this list and stamps its digest beside the .so; watch.sh

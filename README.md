@@ -792,9 +792,9 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    drops the slot into a game that's already running. (Windows: that
    boot runs the guest as root and drops every helper back to your own
    desktop session so the window and the sound still work. It is the
-   one thing here that needs `busybox-static`, and a machine without
-   the package starts the ordinary way instead — every title runs, one
-   log line says save states are off and which package turns them on.)
+   one thing here that needs `busybox-static` and `criu`, and a machine
+   without either starts the ordinary way instead — every title runs,
+   one log line says save states are off and how to turn them on.)
    A run that cannot be saved says why on the button instead of failing
    quietly.
    Runs on Linux, and on Windows through WSL2. The rig ships with the
@@ -824,6 +824,22 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    one line that save states are off and which package turns them on;
    the tab says the same thing before you press Start, without claiming
    the PC can't emulate, because it can.
+   Save states need one more thing, and it is the only prerequisite here
+   that is not a package at all: **`criu`**, the program that actually
+   freezes the running game and thaws it again. No Ubuntu publishes it —
+   `apt-cache policy criu` answers with an empty table — so *"Set up
+   emulator…"* builds it from source, once, which takes a few minutes
+   and is named as a build rather than an install before it starts. It
+   is checked against your own kernel (`criu check`) before it is
+   installed, because a criu that can't freeze anything would only turn
+   the warning off and leave the buttons just as dead.
+   One more machine shape works without being told about now: WSL can be
+   configured so Linux can't start a Windows program at all
+   (`[interop] enabled=false`), and the virtual playfield *is* a Windows
+   program on Windows, because WSL has no GUI toolkit for it. That
+   window used to be impossible to open on such a machine. The run now
+   asks PAD to open it — PAD is already a Windows program with the right
+   Python — and PAD closes it again when the run stops.
    The tab checks for those before
    you press anything, instead of leaving the run to hit them one
    failure at a time: on a machine that already has them there is

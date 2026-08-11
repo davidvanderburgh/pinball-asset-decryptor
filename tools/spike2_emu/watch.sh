@@ -233,12 +233,35 @@ fi
 # below and before anything reads PAD_PIVOT, so the log names the shape that
 # actually ran and the playfield does not offer Save/Load buttons that could
 # only fail (see PF_STATES).
-if [ -n "${PAD_PIVOT:-}" ] && ! pad_static_busybox; then
-    echo "[watch] no static busybox here, so this run cannot be checkpointed:"
-    echo "[watch]   save states are off. To turn them on:"
-    echo "[watch]   sudo apt install busybox-static     (then start again)"
-    echo "[watch] starting WITHOUT them - nothing else about the run changes."
-    unset PAD_PIVOT
+#
+# TWO THINGS ARE MISSABLE, NOT ONE, and the second was worse than the first.
+# The pivot is only half of a save state: criu is the program that does the
+# freezing, and NO UBUNTU PUBLISHES IT - `apt-cache policy criu` prints an
+# empty version table on 24.04. Every save-state script defaulted to one
+# developer's hand-built copy under /var/tmp, so a user who installed
+# busybox-static got the checkpointable boot, the Save and Load buttons, and
+# a failure naming a directory he had never heard of. Both halves are asked
+# about here, and the message names whichever is actually missing - getcriu.sh
+# is the answer to one and apt is the answer to the other, so a message that
+# guessed would send half the users to the wrong place.
+if [ -n "${PAD_PIVOT:-}" ]; then
+    PIVOT_WHY=
+    pad_static_busybox || PIVOT_WHY="busybox"
+    pad_criu >/dev/null || PIVOT_WHY="${PIVOT_WHY:+$PIVOT_WHY,}criu"
+    if [ -n "$PIVOT_WHY" ]; then
+        echo "[watch] this run cannot be checkpointed, so save states are off:"
+        case $PIVOT_WHY in *busybox*)
+            echo "[watch]   there is no static busybox, which the boot shape needs"
+            echo "[watch]   sudo apt install busybox-static" ;;
+        esac
+        case $PIVOT_WHY in *criu*)
+            echo "[watch]   there is no criu, which is what freezes the game."
+            echo "[watch]   No Ubuntu packages it, so it is built once, from source:"
+            echo "[watch]   wsl -u root -e bash $RIG/getcriu.sh" ;;
+        esac
+        echo "[watch] starting WITHOUT them - nothing else about the run changes."
+        unset PAD_PIVOT
+    fi
 fi
 
 # ---- WHAT THIS RUN ACTUALLY IS, in the run's own log ----------------------
@@ -432,7 +455,17 @@ teardown() {
     # GONE_POLLS window) because it is worth having: the polite exit is what
     # saves the window position, and it is what usually happens. It failed in
     # one card run out of three, so this path is not theoretical.
-    if pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null; then
+    #
+    # ...AND WHEN PAD OPENED THE WINDOW, NONE OF THIS APPLIES AND MUST NOT BE
+    # "FIXED" TO. A window the app launched (PF_WINLAUNCH, above) has no
+    # WSL-side stub to find, so the pgrep is correctly false - and the forced
+    # path below is a powershell.exe call, which is INTEROP, i.e. the very
+    # thing that was missing and sent the launch to the app in the first
+    # place. Removing the LED block is what closes that window (it polls for
+    # it), and the app holds the process handle for the case where it does
+    # not. Whoever owns the launch owns the teardown.
+    if [ "${PF_WINLAUNCH:-0}" != 1 ] &&
+       pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null; then
         for _ in $(seq 1 10); do
             sleep 0.5
             pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null || break
@@ -806,8 +839,41 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
             setsid_as_user "$PF_PY" "$PF_WIN" "$GAME" $PF_STATES </dev/null >/dev/null 2>&1 &
             echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
         else
-            echo "[watch] no Windows interop; run playfield.py yourself:" >&2
-            echo "[watch]   pythonw tools\\spike2_emu\\playfield.py $GAME" >&2
+            # ---- ASK THE APP TO OPEN IT, because it is a Windows process too.
+            #
+            # THE FAULT: a user's WSL has interop switched off (/etc/wsl.conf,
+            # [interop] enabled=false), so this distro cannot execute a Windows
+            # binary at all - and the playfield window is a Windows binary,
+            # because this WSL has no Tk. His window could never open itself,
+            # and all the rig could do was print a command for him to type
+            # before every single run.
+            #
+            # THE ASYMMETRY THAT MAKES THIS WORK, and it is the whole point:
+            # interop is LINUX -> WINDOWS. Windows -> Linux (`wsl.exe`) is
+            # unaffected, so everything the window does once it is up - reading
+            # dump/padled, running swpoke.py, asking wslpath - still works. It
+            # is only the LAUNCH that cannot cross, and PAD is already standing
+            # on the other side: it is a Windows process, running a Python that
+            # has tkinter (it is drawing its own window with it). So the run
+            # asks, and the app spawns it. Same for a machine whose interop is
+            # fine but has no pythonw.exe on PATH - the branch is the same and
+            # so is the answer.
+            #
+            # THE PATHS GO WITH IT, ALREADY TRANSLATED. The window needs the
+            # rootfs and the tables directory in Windows form; WSLENV's `/p`
+            # normally does that during the interop exec, which is precisely
+            # the step not happening here. wslpath is an ordinary Linux binary
+            # in the distro, so it answers with interop off.
+            PF_WINLAUNCH=1
+            echo "PAD_PLAYFIELD_WINDOWS_LAUNCH game=$GAME" \
+                 "savestates=$([ -n "$PF_STATES" ] && echo 1 || echo 0)" \
+                 "root=$(pad_win "$ROOT" 2>/dev/null)" \
+                 "tables=$(pad_win "$TABLES" 2>/dev/null)"
+            echo "[watch] this WSL cannot start a Windows program (interop is"
+            echo "[watch]   off, or pythonw.exe is not on its PATH), so PAD has"
+            echo "[watch]   been asked to open the playfield window instead."
+            echo "[watch]   Running watch.sh by hand? Open it yourself with:"
+            echo "[watch]   pythonw tools\\spike2_emu\\playfield.py $GAME"
         fi
     fi
 fi

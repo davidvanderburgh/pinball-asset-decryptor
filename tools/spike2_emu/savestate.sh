@@ -25,11 +25,23 @@
 set -u
 DDIR=${1:?usage: savestate.sh <dumpdir> [pid]}
 ARGPID=${2:-}
-CRIU=${CRIU:-/var/tmp/criubuild/criu/criu/criu}
 . "$(dirname "$0")/padpath.sh"
+# WHERE criu IS, asked rather than written down. The literal that stood here
+# named one developer's hand-built binary under /var/tmp, in eight scripts at
+# once - see pad_criu, and getcriu.sh for how a machine gets one at all.
+CRIU=${CRIU:-$(pad_criu)}
 
 [ "$(id -u)" = 0 ] || { echo "savestate: needs root. Use: wsl -u root -e bash $0 ..."; exit 2; }
-[ -x "$CRIU" ] || { echo "savestate: no criu at $CRIU"; exit 2; }
+# NO PATH IN THE MESSAGE WHEN THERE IS NO PATH. This used to print "no criu
+# at $CRIU" against a hard-coded /var/tmp/criubuild/... that only one machine
+# has ever had, so a user's failed save named a directory he had never heard
+# of and could not create. What he needs is the one command that gets him one.
+[ -x "$CRIU" ] || {
+    echo "savestate: this machine has no criu, and Ubuntu does not package one."
+    echo "savestate:   wsl -u root -e bash $RIG/getcriu.sh    (builds it, once)"
+    echo "[savestate] no criu here - save states need it; getcriu.sh builds one"
+    exit 2
+}
 
 # comm=game is the rig's definition of the guest (alive.sh uses it). The
 # pivoted guest is qemu running the game in-process, comm set to "game" by the

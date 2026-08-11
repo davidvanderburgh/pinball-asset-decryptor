@@ -1216,6 +1216,37 @@ These have each been violated at least once and each cost a run or a window:
       `plunge.py start`, a ball plunged and drained, then `swpoke.py` on
       switches 25/26/27/28 (SERVICE SELECT/PLUS/MINUS/BACK) fifteen times. It
       should reproduce from a cold run without the ball part.
+      **★ MEASURED ON A LIVE RUN, 2026-08-11 (David's, while it was up), and it
+      rules out the whole "something is failing" family:** ZERO Radium errors,
+      ZERO GL errors (`[readback] glGetError=0` and every other counter 0), the
+      guest rendering steadily at **52.9 fps**, and the renderer compositing at
+      60 fps with `30.0 NEW/s` of video. Nothing is erroring. Whatever is wrong
+      is a GEOMETRY or LAYOUT decision, not a failure.
+      **The band is EXACTLY HALF the framebuffer height and vertically
+      centred** — content occupies ~384 of the 768 lines, black above and below.
+      An arbitrary letterbox would not land on a round half.
+      **TWO video channels are serving at once on this screen** — ch0
+      `bc0792d8…/45a4e8c6…/scene.assets/2.asset/14.asset` (899 frames) and ch1
+      `60ed7e50…/scene.assets/2.asset/22.asset` (759) — where ordinary attract
+      used ch0 alone. **`60ed7e50…` is a SHARED Stern bundle, not turtles': the
+      same hash serves clips on godzilla_pro** (see item 41's godzilla log), so
+      this backdrop is Stern's common LCD asset set and the screen is likely a
+      common one rather than a TMNT screen.
+      **★ THE LEAD WORTH TAKING FIRST, and it is a one-variable experiment:
+      `glbridge.c:173-174` defaults the guest framebuffer to `PAD_GL_W=1920`,
+      `PAD_GL_H=1080` — the real Spike 2 LCD — and `watch.sh` overrides it to
+      1360x768** (matching the video clips, which are all 1360x768). If the
+      game lays its menus out against the native 1080-high display, a 768-high
+      surface is exactly the kind of thing that puts a menu somewhere other than
+      where it belongs. **Run once with `PAD_GL_W=1920 PAD_GL_H=1080` and look
+      at the same screen.** If it draws, the answer is that cheap; if it does
+      not, the size is eliminated for the cost of one run.
+      **The instrument this needs and does NOT have: nothing logs `glViewport`
+      or `glScissor`.** `glbridge.c:210,213` forward both to the host
+      (`PADGL_VIEWPORT`, `PADGL_SCISSOR` at `padglhost.c:2929-2930`) and neither
+      side prints them, so "the guest asked for a half-height viewport" and "the
+      host placed a full-height surface wrongly" are indistinguishable from
+      outside. One logged line per call settles it.
       **NOT ESTABLISHED, and do not assume either half:** whether the missing
       text and the half-height video are one fault or two; whether the band is
       the menu's own video mode being letterboxed wrongly by `win_present()`

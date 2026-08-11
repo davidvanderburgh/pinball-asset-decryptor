@@ -473,6 +473,11 @@ if [ "${FREE_G:-999}" -lt 10 ]; then
 fi
 
 rm -f "$RING_HOST" "$SW_HOST"
+# The key-bind export too (item 39): padglhost rewrites it once it is up, and
+# a stale one from the LAST title would hand the playfield's key panel another
+# game's switch ids for the seconds in between. Absent is the state the panel
+# expects and polls through; wrong is the state nothing would notice.
+rm -f "$ROOT/dump/padbinds"
 # The guest opens the LED block O_RDWR and will NOT create it, so make it here.
 # One page, zeroed: the shim stamps the magic once it maps it.
 rm -f "$LED_HOST"
@@ -588,8 +593,12 @@ if [ "${PAD_VID:-1}" != 0 ]; then
 fi
 
 echo "[watch] starting renderer (window opens when the game's first frame arrives)"
+# PAD_GL_LEGEND passes through UNSET (item 39): the Controls window is
+# retired - the playfield's key panel carries its content - and padglhost
+# only opens it on an explicit =1, so a caller who wants the old window
+# back exports that and nothing here overrides them.
 setsid_as_user env PAD_GL_WINDOW=1 PAD_GL_DUMP="${PAD_GL_DUMP:-}" \
-           PAD_SW_SHM="$SW_HOST" PAD_GL_LEGEND="${PAD_GL_LEGEND:-1}" \
+           PAD_SW_SHM="$SW_HOST" PAD_GL_LEGEND="${PAD_GL_LEGEND:-}" \
            PAD_VID_SHM="${VID_FOR_GL:-}" \
            "$PAD_GLHOST_BIN" "$RING_HOST" > "$HOSTLOG" 2>&1 &
 # PADGL_DEBUG / PADGL_SEQ_* are NOT listed here on purpose: `env A=B cmd` keeps
@@ -874,8 +883,8 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
 fi
 
 echo "[watch] running. CLOSE THE WINDOW to stop (or press Ctrl-C here)."
-echo "[watch] CLICK a window to give it keyboard focus, then use the keys in"
-echo "[watch] the Controls window: arrows = flippers, Enter/-/= = service."
+echo "[watch] CLICK the game window for keyboard play: arrows = flippers,"
+echo "[watch] Enter/-/= = service. The playfield window lists every key."
 [ "$MINS" != 0 ] && echo "[watch] backstop: will stop by itself after $MINS min."
 
 # Poll instead of `wait`: we must react to EITHER end dying, and to the wall

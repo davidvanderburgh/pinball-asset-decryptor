@@ -288,13 +288,14 @@ if [ "$DROP" = 1 ]; then
     # user's own home refuses it. That would break plain watch.sh runs after a
     # single PAD_PIVOT one, which is a nasty thing to leave behind.
     for f in "$LOG" "$HOSTLOG" "$HOME/padvid.log" "$HOME/padauto.log" \
-             "$HOME/padaudio.log" "$HOME/padtables.log"; do
+             "$HOME/padball.log" "$HOME/padaudio.log" "$HOME/padtables.log"; do
         [ -e "$f" ] || : > "$f" 2>/dev/null
         chown "$PAD_USER" "$f" 2>/dev/null
     done
 fi
 
 HOSTPG=""; GAMEPG=""; AUDPG=""; AUTOPG=""; VIDPG=""; EVTPG=""; TBLPG=""
+BALLPG=""
 # PAD_PIVOT run only: the guest logs to $ROOT/dump/game.out (its stdout points
 # inside the container - see run_game.sh), so a tail folds that back into $LOG
 # and every existing reader (autoattract, the [sw]/[segv] greps, gamestate)
@@ -339,6 +340,8 @@ teardown() {
     pkill -9 -f 'padvidhost.py' 2>/dev/null
     [ -n "$AUTOPG" ] && kill -9 -"$AUTOPG" 2>/dev/null
     pkill -9 -f 'autoattract.sh' 2>/dev/null
+    [ -n "$BALLPG" ] && kill -9 -"$BALLPG" 2>/dev/null
+    pkill -9 -f 'ballfeed[.]py' 2>/dev/null
     # longplay.sh is started BESIDE a run rather than by it, so it has no pgid
     # here - but a leaked one keeps poking ramp optos, and it would do that
     # into the NEXT run. It watches the guest and exits on its own; this is the
@@ -807,6 +810,26 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
     AUTOPG=$!
     echo "[watch] auto-advance on: it will press Service Back until the game"
     echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
+fi
+
+# THE BALL FEEDER (item 21b). The game fires its trough eject coil and waits
+# for a trough switch to change; until this existed nothing answered, so a
+# ball only ever moved when a human ran plunge.py and multiball could not
+# happen at all. It watches dump/padled's coil counter and drives the trough
+# and shooter-lane switches, so it is the one helper that moves BALLS rather
+# than pressing buttons - PAD_BALL_FEED=0 turns it off and hands that back to
+# plunge.py.
+#
+# ITS OWN LOG, like autoattract's, and NOT $LOG. $LOG is the guest's, this
+# script truncates it and three readers grep it (the [sw] and [segv] tails,
+# gamestate.sh); item 38's second finding is a stray writer landing inside
+# alive.sh's output and eating a label off its first line, which is the same
+# class of thing. `[ball]` lines go to ~/padball.log and stay legible.
+if [ "${PAD_BALL_FEED:-1}" != 0 ]; then
+    setsid_as_user python3 "$S/ballfeed.py" > "$HOME/padball.log" 2>&1 &
+    BALLPG=$!
+    echo "[watch] ball feed on: the game's own trough eject will be answered"
+    echo "[watch] (PAD_BALL_FEED=0 to move balls by hand with plunge.py)."
 fi
 
 # KEY EVENTS, on THIS script's stdout. The app's Emulate tab drains watch.sh's

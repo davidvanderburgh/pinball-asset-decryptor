@@ -137,8 +137,14 @@ VID=$(n -f 'padvidhost\.py')
 # The PAD_PIVOT game-log tail is counted here too. A pivot run's guest logs to
 # $ROOT/dump/game.out and watch.sh folds it into $LOG with `tail -F`; an
 # orphaned one holds the file forever, the same shape as the event-feed tail.
+# ballfeed.py (item 21b) is counted from the day it was written, which is this
+# script's standing rule. It answers the game's trough eject by driving switch
+# ids, so a leaked one would take balls out of the NEXT run's trough - the same
+# shape as a leaked longplay.sh and just as hard to read from the game's side.
+# It exits by itself when dump/padled goes away; a nonzero count here means
+# that check failed.
 HELP=$(( $(n -f 'autoattract\.sh') + $(n -f "^tail -q -n 0 -F "$HOME/padvid"\.log") \
-         + $(n -f '^tail -F .*dump/game\.out') \
+         + $(n -f '^tail -F .*dump/game\.out') + $(n -f 'ballfeed[.]py') \
          + $(n -f '^bash [^ ]*longplay\.sh') + $(n -f 'mktables[.]py') ))
 
 # ★ WINDOWS-INTEROP STUBS - the class that leaked seven deep unseen.

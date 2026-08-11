@@ -124,6 +124,7 @@ from tkinter import ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coilact
+import coilmap
 import gameinfo
 import mktables
 import padpath
@@ -263,7 +264,7 @@ WSL_DIR = padpath.to_wsl(padpath.RIG)
 #: Offsets into padled.h's block. Hard-coded because Python cannot include the
 #: header; the header lists them next to the struct and says APPEND ONLY, so a
 #: version-1 shim and a version-2 reader still agree on everything below `coil`.
-PADLED_MAGIC = 0x44454C50
+PADLED_MAGIC = coilmap.PADLED_MAGIC
 #: `decoded` (12) is LED writes that landed. `skipped` (16) is frames that
 #: LOOKED like indexed LED writes and did not fit any shape the shim decodes -
 #: padled.h has counted it since version 1 and nothing has ever read it. It is
@@ -272,9 +273,13 @@ PADLED_MAGIC = 0x44454C50
 #: window could never answer about itself.
 LED_DECODED_OFF, LED_SKIPPED_OFF = 12, 16
 LED_HDR, LED_IDX = 20, 96
-COIL_OFF, COIL_N = 1556, 16          # wrapping fire counter per (node, index)
-LVL_OFF = COIL_OFF + 16 * COIL_N     # last drive byte
-COIL_GEN_OFF = LVL_OFF + 16 * COIL_N
+#: The coil half of the block is coilmap.py's, because ballfeed.py (item 21b)
+#: needed the same numbers from inside WSL, where this file cannot be imported
+#: at all - it needs tkinter and this WSL has none. Four copies of an offset
+#: is how the rig's two worst drifts started.
+COIL_OFF, COIL_N = coilmap.COIL_OFF, coilmap.COIL_N
+LVL_OFF = coilmap.LVL_OFF            # last drive byte
+COIL_GEN_OFF = coilmap.GEN_OFF
 #: Version 3, the fade ring (padled.h): head counter then 96 entries of
 #: (u32 guest ms, node, start, end, from, to, rise, fall, pad).
 FADE_HEAD_OFF = COIL_GEN_OFF + 8
@@ -723,34 +728,23 @@ def blend(rgb, bg, alpha):
 
 
 #: Device-table group -> node on the bus, the same lookup ledio.py verified
-#: against the boot enumeration. Used here to turn a coil's (group, index) into
-#: the (node, index) the shim publishes fires under.
-GROUP_NODE = {4: 0, 5: 1, 6: 8, 7: 9}
+#: against the boot enumeration. coilmap.py owns it now; the alias stays so
+#: nothing that reads this module has to know that.
+GROUP_NODE = coilmap.GROUP_NODE
 
 
 def load_coils():
-    """device_xy.txt: class NAME... x y w h grp index conn image
+    """The playfield's coils, parsed by coilmap.py.
 
-    THE CONNECTOR COLUMN IS EMPTY FOR EVERY COIL, which is how this read `h` as
-    the group and the group as the index for a whole release - every coil
-    tooltip said "group 20 index 6". devicexy.py now writes "-" so the field
-    count is uniform, and the assert below refuses to trust a row that does not
-    land on a board the enumeration knows, rather than drawing a confident lie.
+    THE PARSE MOVED because ballfeed.py needs the same rows on the other side
+    of the VM boundary and cannot import this file. What it does has not
+    changed and coilmap.py keeps the reason it is written the way it is: the
+    connector column is empty for every coil, so counting fields from the LEFT
+    read `h` as the group for a whole release and every coil tooltip said
+    "group 20 index 6".
     """
-    out = []
-    for p in _rows(os.path.join(TDIR, "device_xy.txt"), 10):
-        if p[0] != "coil" or p[-1] != "playfield":
-            continue
-        try:
-            # Eight fields follow the name: x y w h grp index conn image.
-            group, index = int(p[-4]), int(p[-3])
-            c = dict(name=" ".join(p[1:-8]), x=int(p[-8]), y=int(p[-7]),
-                     group=group, index=index,
-                     node=GROUP_NODE.get(group) if index < COIL_N else None)
-        except ValueError:
-            continue
-        out.append(c)
-    return out
+    return [c for c in coilmap.load(os.path.join(TDIR, "device_xy.txt"))
+            if c.get("image") == "playfield"]
 
 
 def load_switch_list():
@@ -903,20 +897,51 @@ class TroughPanel:
     measured that a click at the centre of RIGHT SCOOP lands on the COIL
     marker rather than the switch, and coilact.py depends on it - a panel that
     joined the hit test could quietly change which device a click reaches.
+
+    ★ THE BALLS ARE CLICKABLE, and that is why the promise above still holds:
+    the binding is a per-ITEM `tag_bind` that returns "break", not a place in
+    `info`, so the window's own hit test is untouched and a click on a ball
+    never reaches it.
+
+    WHY A CLICK HERE AND NOT ON THE TROUGH SWITCH ITSELF. David, 2026-08-11,
+    mid-Mechagodzilla-Multiball: "how do i drain a ball? pressing one of the
+    trough switches doesn't drain the ball. is there a way to just click on
+    the ball indicators to add or remove it". Pressing the switch cannot work
+    and never could: item 24's press-and-hold is MOMENTARY - it opens again on
+    release - and a ball in a trough holds its switch closed for as long as it
+    sits there. So a press is a ball that arrives and leaves, which the game
+    correctly ignores. A ball is a LATCHED closure, and these six dots are the
+    only place in the window that means "a ball is here" rather than "a switch
+    is being pressed".
+
+    THE STACK DECIDES WHICH SWITCH MOVES, NOT WHICH DOT WAS CLICKED, and that
+    is deliberate rather than a shortcut. A trough is a ramp: balls sit
+    contiguously from the eject end, so the only two things that can physically
+    happen are "one more" and "one fewer". Clicking the third dot of four
+    therefore removes a ball from the FAR end - the hole appears at position 4,
+    which is exactly the geometry item 20 was a bug in and exactly what this
+    panel was built to show. Honouring the clicked position instead would put
+    a gap in the middle of the stack, which is a state no machine can be in
+    and which ballmodel.Trough.anomaly() would then report as a fault.
     """
 
     R = 7                 # ball radius, screen px
     GAP = 5               # between balls
     PAD = 5               # inside the panel's own background
+    #: The panel's own background, named because the per-ball hit pads have to
+    #: be filled with EXACTLY it to stay invisible - two hard-coded copies of a
+    #: colour is how a hit target becomes a visible grey square on one view.
+    BG = "#101010"
     #: Room under the balls for the position numbers. 9 clipped their
     #: descenders against the panel edge (offline check, 2026-08-10) - the
     #: numbers are the part that makes the ORDER checkable, so they get room.
     NUM_H = 12
 
-    def __init__(self, cv, positions, how, x, y, anchor="sw"):
+    def __init__(self, cv, positions, how, x, y, anchor="sw", on_ball=None):
         self.cv = cv
         self.positions = positions
         self.how = how
+        self.on_ball = on_ball
         self.items = []
         self.balls = []
         self.drawn = []
@@ -926,20 +951,50 @@ class TroughPanel:
         x0 = x if "w" in anchor else x - w
         y0 = y - h if "s" in anchor else y
         self.bg = cv.create_rectangle(x0, y0, x0 + w, y0 + h,
-                                      fill="#101010", outline="#3a3a3a")
+                                      fill=self.BG, outline="#3a3a3a")
         self.items.append(self.bg)
         cy = y0 + self.PAD + self.R
         for i, P in enumerate(positions):
             cx = x0 + self.PAD + self.R + i * step
+            # ★ THE HIT TARGET IS THE WHOLE CELL, AND IT IS ITS OWN ITEM.
+            # David, 2026-08-11: "when hovering over the circles, it's not
+            # always indicating that i can click on it." The cause is a Tk
+            # rule rather than a mis-binding: an item with `fill=""` is
+            # hittable ONLY ON ITS OUTLINE, and an EMPTY position is drawn
+            # hollow - so a ball with a ball in it was a 14 px disc and an
+            # empty one was a 1 px ring. Exactly "not always".
+            #
+            # Filling the empty ones would fix the hover and lose the thing
+            # the panel is for (hollow reads as no ball). So the target is a
+            # rectangle covering the ball AND its number, filled with the
+            # panel's own background so it is invisible, drawn BEFORE them so
+            # it stays underneath. The cell is ~19x26 px instead of a ring.
+            pad = cv.create_rectangle(cx - step / 2.0 + 1, y0 + 1,
+                                      cx + step / 2.0 - 1, y0 + h - 1,
+                                      fill=self.BG, outline="")
+            self.items.append(pad)
             b = cv.create_oval(cx - self.R, cy - self.R, cx + self.R,
                                cy + self.R, fill="", outline="#666",
                                width=1)
             self.balls.append(b)
             self.drawn.append(None)
             self.items.append(b)
-            self.items.append(cv.create_text(
-                cx, y0 + h - self.PAD, anchor="s", fill="#8a8a8a",
-                font=("Consolas", 7), text=str(P["pos"])))
+            num = cv.create_text(cx, y0 + h - self.PAD, anchor="s",
+                                 fill="#8a8a8a", font=("Consolas", 7),
+                                 text=str(P["pos"]))
+            self.items.append(num)
+            if on_ball is not None:
+                # All three, because Enter/Leave fire per ITEM: crossing from
+                # the pad onto the ball is a Leave and an Enter, and binding
+                # only the pad would drop the cursor the moment the pointer
+                # reached the thing it was aiming at.
+                for it in (pad, b, num):
+                    cv.tag_bind(it, "<Button-1>",
+                                lambda e, i=i: self._click(i))
+                    cv.tag_bind(it, "<Enter>",
+                                lambda e: cv.configure(cursor="hand2"))
+                    cv.tag_bind(it, "<Leave>",
+                                lambda e: cv.configure(cursor=""))
         # The caption sits to the RIGHT of the balls rather than above them:
         # this panel is pinned to the bottom of the artwork and a line above
         # the balls would be the line closest to the playfield markers.
@@ -954,6 +1009,18 @@ class TroughPanel:
     #: badly". The colours are the only two states this panel has.
     BALL = ("#d8d8d8", "#ffffff")          # fill, outline - occupied
     EMPTY = ("", "#555555")                # fill, outline - open
+
+    def _click(self, i):
+        """A dot was clicked: one ball more, or one ball fewer.
+
+        Reads the state this panel last DREW rather than asking anything, so
+        the decision is the one the user could see when they clicked. Returns
+        "break" so the click stops here and the window's hit test never runs -
+        see the class docstring's promise about `info`.
+        """
+        occupied = bool(self.drawn[i]) if i < len(self.drawn) else False
+        self.on_ball("take" if occupied else "drain")
+        return "break"
 
     def update(self, flags, text):
         for i, on in enumerate(flags[:len(self.balls)]):
@@ -1032,7 +1099,12 @@ def trough_text(watch):
     """
     if not watch.positions:
         return ""
-    txt = "%s   1 = eject end" % watch.balls.text()
+    # "click a ball" is on the line because the control is INVISIBLE otherwise:
+    # six small dots on a status strip do not look like buttons, and the thing
+    # a user reaches for instead is the trough switch on the artwork, which
+    # cannot work (a press is momentary; a ball is latched). David went looking
+    # for exactly that during a multiball on 2026-08-11.
+    txt = "%s   1 = eject end   click a ball: out / in" % watch.balls.text()
     return txt if watch.how == "named" else txt + "   (positions assumed)"
 
 
@@ -1665,7 +1737,8 @@ class Field(StateOps):
             return
         x, y = self._panel_at
         self.trough_panel = TroughPanel(self.cv, self.sw.positions,
-                                        self.sw.how, x, y, anchor="sw")
+                                        self.sw.how, x, y, anchor="sw",
+                                        on_ball=self.run_plunge)
 
     def run_plunge(self, what):
         self.drv.run_script("plunge.py", what)
@@ -2181,8 +2254,9 @@ class Schematic(StateOps):
             strip.pack(fill="x")
             pcv = tk.Canvas(strip, height=38, bg="#111", highlightthickness=0)
             pcv.pack(fill="x", padx=4, pady=(0, 3))
-            self.trough_panel = TroughPanel(pcv, self.sw.positions, self.sw.how,
-                                            2, 2, anchor="nw")
+            self.trough_panel = TroughPanel(
+                pcv, self.sw.positions, self.sw.how, 2, 2, anchor="nw",
+                on_ball=lambda what: self.drv.run_script("plunge.py", what))
 
         by_node = {}
         for sw in switches:

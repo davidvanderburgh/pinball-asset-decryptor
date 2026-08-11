@@ -42,6 +42,11 @@ pkill -9 -f 'arm-binfmt|qemu-arm'
 pkill -9 -x padglhost
 pkill -9 -f nodebus.py
 pkill -9 -f 'autoattract.sh'
+# The ball feeder (item 21b). It exits on its own when dump/padled goes away,
+# but that file is removed further down this script, so leaving it to notice
+# would mean a few seconds of a helper still driving trough switches after a
+# stop was asked for. alive.sh counts it.
+pkill -9 -f 'ballfeed[.]py'
 # The background table builder watch.sh starts on a title that already
 # has artwork. It waits in a poll loop for the guest's switch table, so
 # it outlives a run that ends first. alive.sh counts it.

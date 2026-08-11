@@ -54,13 +54,15 @@ import collections
 import re
 import sys
 
+import coilmap
 import devicexy
 
 LINE = re.compile(r"\[coil\] node (\d+) cmd ([0-9a-f]{2}) ([0-9a-f]+)")
 STAMP = re.compile(r"\[(\d+\.\d+)\]")
 
 #: Device-table group -> node, the lookup ledio.py verified against the wire.
-GROUP_NODE = {4: 0, 5: 1, 6: 8, 7: 9}
+#: coilmap.py owns it; this alias keeps the name that the text above uses.
+GROUP_NODE = coilmap.GROUP_NODE
 
 COIL_CMD = 0x40
 COIL_LEN = 14

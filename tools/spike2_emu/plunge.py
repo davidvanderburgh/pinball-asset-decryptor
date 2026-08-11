@@ -14,11 +14,32 @@ plunge tells:
   start   pulse the Start button (36). The game then fires the trough eject
           itself, so run `plunge` a moment later to give it the ball. On its
           own this does NOT start a game unless there are credits.
-  plunge  the three steps above. The switch it OPENS is the one at the FAR end
-          of the trough, not the eject end - see do_plunge() for why, and for
-          what opening the wrong end did to the game.
+  plunge  launch the ball in the shooter lane. If the lane is EMPTY it serves
+          one first (below), so at ball start it does the whole thing; if a
+          ball is already waiting - which is what ballfeed.py leaves - it only
+          launches, and never ejects a second ball the game did not ask for.
+  serve   eject a ball, land it in the lane, launch it, always. What the
+          TROUGH coil marker plays, because that marker IS the eject. The
+          switch it OPENS is the one at the FAR end of the trough, not the
+          eject end - ballmodel.py has the ramp rule, and what opening the
+          wrong end did to the game (item 20).
+  drain   a ball in play comes home: the lowest-numbered OPEN trough position
+          closes. The other half of a plunge, and the only way a multiball
+          can end, because nothing here simulates a playfield.
+  take    one ball OUT of the trough and nowhere else - the trough half of a
+          plunge with no shooter lane and no launch.
+
+`drain` and `take` are what the six ball dots on the virtual playfield's
+trough panel call when you click one. Pressing the trough SWITCH cannot do
+this and never could: a press is momentary and a ball in a trough holds its
+switch closed for as long as it sits there.
   reset   put six balls back in the trough and shut the coin door - the
           machine-at-rest set, same as swinit.py.
+
+ballfeed.py NOW DOES THE FIRST OF THESE BY ITSELF when a run is up: it watches
+the game's own trough eject coil and answers it, which is what makes multiball
+possible. This script stays the hand-driven way to move a ball, and both go
+through ballmodel.py so they cannot disagree about which switch moves.
 
 TROUGH SWITCHES ARE LATCHED, NOT PULSED, which is the whole reason this is a
 script and not three swpoke calls: a ball sitting in the trough holds its switch
@@ -40,6 +61,7 @@ press put the ball straight back in the trough.
 import sys
 import time
 
+import ballmodel
 import gameinfo
 import padsw
 
@@ -160,42 +182,131 @@ def do_start(m):
               " `plunge.py coin` first - see do_coin().")
 
 
+def _model():
+    """This title's trough as ballmodel sees it - positions in trough order.
+
+    WHICH END A BALL LEAVES FROM IS NOW STATED IN ONE PLACE, and it used to be
+    stated here, in a comment, in a `reversed()`. That is the fact item 20 was
+    a bug in, ballfeed.py needs the same answer forty times a second, and the
+    rig's standing rule is that a fact with two homes drifts rather than
+    breaks. ballmodel.Trough carries the ramp rule; the long form of WHY the
+    far end is the one that opens is in its docstring.
+    """
+    return ballmodel.Trough([dict(pos=i + 1, id=s, name="TROUGH %d" % (i + 1))
+                             for i, s in enumerate(TROUGH)])
+
+
+def _mrg(m):
+    return m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
+
+
 def do_plunge(m):
+    """Launch the ball in the shooter lane, serving one first if it is empty.
+
+    ★ DAVID SAID TWO THINGS ON 2026-08-11 AND THEY ARE NOT IN CONFLICT; the
+    version between them was, and it is worth writing down because the middle
+    version looked like it was doing what he asked.
+
+    First: "plunge should not be auto-ejecting a ball either (it should just
+    get the ball out of the shooter lane)." Then, on the build that took that
+    literally: "the plunge button isn't quite working as expected. it doesn't
+    seem to be doing anything now. at ball start, plunge should: eject a ball
+    into the shooter lane closing the shooter lane switch, then moments later
+    it opens the shooter lane switch."
+
+    The complaint was never "never eject". It was that a plunge with a ball
+    ALREADY in the lane ejected a SECOND one - a ball the game never asked for,
+    which is easy to do now that ballfeed.py answers the game's own eject.
+    Making it unconditional the other way turned Plunge into a button that
+    does nothing on the most ordinary press there is: ball start, empty lane,
+    no feeder running (a run from a checkout without ballfeed.py never has one
+    in the lane, and that is most runs today).
+
+    So it is conditional, which is also what the real button does: a plunger
+    launches the ball that is there, and at ball start the machine has just
+    put one there.
+    """
+    if _held(m, SHOOTER):
+        padsw.take(m, (SHOOTER,))
+        for sw, val in ballmodel.plan_launch(SHOOTER, True).switches():
+            _set(m, sw, val)
+        print("shooter lane opened (ball launched)")
+        return 0
+    return do_serve(m)
+
+
+def do_serve(m):
+    """The whole story a plunge used to tell: eject, arrive, launch.
+
+    This is what `plunge` was before 2026-08-11, kept under its own name
+    because a run with the feeder OFF (PAD_BALL_FEED=0) still needs one thing
+    that can put a ball into play from nothing. It is also what the TROUGH
+    coil marker on the virtual playfield plays, which is the honest mapping:
+    that marker IS the trough eject, and a trough eject puts a ball in the
+    shooter lane.
+    """
     padsw.take(m, TROUGH + (SHOOTER,))
-    # THE BALL THAT LEAVES IS AT THE EJECT END; THE SWITCH THAT OPENS IS AT THE
-    # FAR END. Those are different switches, and this script had it backwards
-    # from the day it was written - it opened TROUGH 1, the ball nearest the
-    # eject, which is the one place a hole cannot appear.
-    #
-    # A trough is a ramp. The eject kicks out the ball sitting on Trough 1, and
-    # the five behind it ROLL DOWN one position - so afterwards Trough 1..5 are
-    # still made and Trough 6, the far end, is the one that opens. Every ball
-    # taken out opens the next switch back up the ramp, and a returning ball
-    # fills the same end first, which is why `reversed` is right for both.
-    #
-    # Established 2026-08-06 from the game's OWN device table rather than from
-    # a guess about the mechanism (games/godzilla_pro/switch_xy.txt): TROUGH 1
-    # (71) sits at x=254 beside TROUGH JAM (72) at x=254, and a jam switch is by
-    # definition at the eject; TROUGH 6 (66) is at x=210, the far end. David
-    # reported the wanted state independently and in the same terms - "the last
-    # trough switch should be OFF and the other five ON".
-    #
-    # WHAT THE OLD ORDER DID TO THE GAME, which is item 20: it presented a hole
-    # at the eject with a ball still behind it. The game has nothing to eject,
-    # so a plunge never really took a ball out of play, and a few minutes later
-    # it ended the game believing no ball was in play.
-    ball = next((s for s in reversed(TROUGH) if _held(m, s)), None)
-    if ball is None:
-        print("no ball in the trough - run `plunge.py reset` first")
+    plan = ballmodel.plan_eject(_model(), _mrg(m), SHOOTER, _held(m, SHOOTER),
+                                STEP_S)
+    if plan.refused:
+        print(plan.refused)
+        if "empty" in plan.refused:
+            print("  `plunge.py reset` puts six balls back")
+        else:
+            print("  `plunge.py plunge` launches the one already there")
         return 1
-    _set(m, ball, 0)
-    print("trough switch %d opened (ball out)" % ball)
-    time.sleep(STEP_S)
-    _set(m, SHOOTER, 1)
-    print("shooter lane closed (ball waiting)")
+    for step in plan.steps:
+        if step[0] == "wait":
+            time.sleep(step[1])
+            continue
+        _set(m, step[1], step[2])
+        print(step[3])
     time.sleep(LANE_S)
     _set(m, SHOOTER, 0)
     print("shooter lane opened (ball launched)")
+    return 0
+
+
+def do_take(m):
+    """One ball out of the trough and nowhere else. The panel click's verb.
+
+    NOT `plunge`: that is the whole story a plunge tells - trough, shooter
+    lane, launch - and it takes about two seconds. This is the trough half
+    alone, because the six dots on the trough panel mean "where the balls
+    are" and clicking one is a statement about the trough, not a request to
+    play a ball. Where the ball then IS, is up to whoever clicked; the game
+    is told only what a real machine's switches would tell it.
+    """
+    padsw.take(m, TROUGH)
+    plan = ballmodel.plan_eject(_model(), _mrg(m), None)
+    if plan.refused:
+        print(plan.refused)
+        return 1
+    for step in plan.steps:
+        _set(m, step[1], step[2])
+        print(step[3])
+    return 0
+
+
+def do_drain(m):
+    """A ball in play drains home. The other half of a plunge, and new.
+
+    NOTHING SIMULATES THE PLAYFIELD, so a ball that has left the shooter lane
+    is in play until something says otherwise - and until this existed nothing
+    could say otherwise, so a multiball could start and never end and the
+    game's ball counter would walk away from the trough's. The switch that
+    closes is the LOWEST-numbered OPEN position: a returning ball rolls to the
+    back of the stack, which is the same ramp rule as the eject read the other
+    way round.
+    """
+    padsw.take(m, TROUGH)
+    plan = ballmodel.plan_drain(_model(), _mrg(m))
+    if plan.refused:
+        print(plan.refused)
+        return 1
+    for step in plan.steps:
+        _set(m, step[1], step[2])
+        print(step[3])
     return 0
 
 
@@ -232,6 +343,10 @@ def main():
         do_coin(m, int(sys.argv[2]) if len(sys.argv) > 2 else 1)
     elif what == "game":
         # The whole "put a ball into play" story, in the order that works.
+        # PLUNGE, which is conditional: with the feeder off it serves a ball,
+        # and with the feeder on it finds the fed one already in the lane and
+        # only launches it. Either way `game` ends with one ball in play,
+        # which is the whole point of the verb.
         do_coin(m)
         time.sleep(1.5)
         do_start(m)
@@ -239,6 +354,12 @@ def main():
         rc = do_plunge(m)
     elif what == "reset":
         do_reset(m)
+    elif what == "drain":
+        rc = do_drain(m)
+    elif what == "take":
+        rc = do_take(m)
+    elif what == "serve":
+        rc = do_serve(m)
     else:
         rc = do_plunge(m)
     m.close()

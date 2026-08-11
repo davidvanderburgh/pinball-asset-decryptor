@@ -41,6 +41,8 @@ padsw.set_source('c')   # who the [sw] log says moved a switch;
 #: played: "pulse" a momentary switch, "ball" hand off to plunge.py, "lane" the
 #: shooter-lane launch below.
 ACTIONS = {
+    # `serve`, not `plunge`: this marker IS the trough eject, and since
+    # 2026-08-11 `plunge` only launches what is already in the lane.
     "TROUGH":          ("ball",  None, "ejects a ball into the shooter lane"),
     "AUTO PLUNGER":    ("lane",  62,   "launches the ball out of the shooter lane"),
     "LEFT SLINGSHOT":  ("pulse", 64,   "presses Left Slingshot (64), which fires it"),
@@ -83,22 +85,24 @@ def hold_switch(name):
 
 
 def _lane(m):
-    """The auto plunger. If a ball is already waiting in the shooter lane it
-    just leaves; otherwise play the whole arrival-and-launch so the click does
-    something visible either way.
+    """The auto plunger: launch what is in the shooter lane, and only that.
+
+    IT USED TO FABRICATE A BALL when the lane was empty - arrival, then launch
+    - so the click "did something visible either way". That was written when
+    nothing in this rig could put a ball anywhere, and it is the same fault
+    David named in `plunge` on 2026-08-11: a control that invents a ball nobody
+    asked for. A real auto plunger fires into an empty lane too and nothing
+    happens, so saying so is both honest and what the coil does.
 
     `_held` is the MERGED state - what the game is being handed - and not this
     script's own half of the switch block. Asking our own half would answer
     "did a script put a ball there", which is a different question and gets the
     wrong answer whenever the keyboard's F key was the one that did it."""
-    if plunge._held(m, plunge.SHOOTER):
-        plunge._set(m, plunge.SHOOTER, 0)
-        print("shooter lane opened (ball launched)")
+    if not plunge._held(m, plunge.SHOOTER):
+        print("nothing in the shooter lane - the TROUGH coil serves one")
         return
-    plunge._set(m, plunge.SHOOTER, 1)
-    time.sleep(0.4)
     plunge._set(m, plunge.SHOOTER, 0)
-    print("ball into the shooter lane and away")
+    print("shooter lane opened (ball launched)")
 
 
 def fire(name):
@@ -109,7 +113,7 @@ def fire(name):
     kind, sw, _ = a
     if kind == "ball":
         return subprocess.call([sys.executable,
-                                os.path.join(HERE, "plunge.py"), "plunge"])
+                                os.path.join(HERE, "plunge.py"), "serve"])
     m = plunge._open()
     if m is None:
         return 1

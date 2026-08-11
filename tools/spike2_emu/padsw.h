@@ -117,6 +117,7 @@ struct padsw_shm {
      *   l  plunge.py                 c  coilact.py
      *   i  swinit.py                 f  a virtual-playfield click
      *   g  longplay.sh's gameplay    r  swreplay.py re-delivering a log
+     *   b  ballfeed.py, answering the game's own trough eject
      *   ?  nobody said
      *
      * THE ONE HONEST LIMIT: the shim attributes per MERGE, not per write. Two

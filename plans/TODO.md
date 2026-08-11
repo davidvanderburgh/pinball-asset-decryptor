@@ -1153,16 +1153,35 @@ These have each been violated at least once and each cost a run or a window:
       video-vs-dots after boot; whether that holds once door-open KILLS the
       pipelines via EOS (a dead object, not a failed re-arm) is exactly what
       the next run must answer.
-      **Resume — runs, in order, when the rig is free:** (1) ordinary boot,
-      no door env: backdrops still fine, zero refusals; (2) boot normal,
-      then open the door MID-SESSION (playfield click on 33), walk to the
-      menu: is it green now, and is the lag gone? (3) if still video:
-      `PAD_DOOR_OPEN=1` boot must still give the green menu (the known-good
-      path). The gap between (2) and (3), if it remains, is the init-latch,
-      and closing it means finding what the game consults at page-build —
-      PAD_GST_TRACE around the mid-session menu entry is the instrument.
-      Wishlist: Emulate-tab "Service mode" checkbox; auto-detect 4.28
-      titles.
+      ▼ **THIRD FIELD FAILURE (19:07): the mid-clip EOS FROZE the game** —
+      "opening the coin door freezes the screen." The EOS put the game into
+      "EOS'd but un-rewindable while PLAYING" (its loop-rewind refused) and
+      it has no path out. With the earlier lag this makes the lesson twice
+      over: **a real door-open kills 48V and never the decoder, so ANY
+      intervention on a LIVE stream manufactures a state real hardware
+      cannot produce.** Fixed in `db4b83a`: the gate acts only at real
+      edges — new arms refused, natural clip-end rewinds refused, running
+      streams never held, never killed, answering true state/caps until they
+      end on their own (the dead-pipeline lies scoped to `!playing`).
+      **STATE OF THE FEATURE, honestly:** mid-session door-open is now SAFE
+      (no lag, no freeze — backdrops play out within ~30 s and rest) but NOT
+      seamless; the green menu still needs the `PAD_DOOR_OPEN=1` boot, which
+      remains verified end-to-end. David's bar is the real machine's
+      seamless mid-session transition, and that is the item's open half.
+      **THE SHARPEST LEAD FOR SEAMLESS, untested: the spike_menu handoff.**
+      `/usr/local/spike/spike_menu/` in the rootfs is a complete separate
+      menu PROGRAM (a 2 MB `game` ELF + 5.7 MB `image.bin`; "GO TO
+      DIAGNOSTICS MENU" lives in BOTH binaries). A real machine may hand the
+      display to that program at door-open instead of negotiating its video
+      down — which would explain the seamlessness AND why nothing video-side
+      ever flips the choice mid-session. First probe: does the main game ever
+      TRY to exec it here (execve is invisible to PAD_OPEN_LOG — trace qemu
+      or hook execve in the shim), and does running it BY HAND against the
+      rig's display produce the menu?
+      **Resume — when the rig is free:** (1) verify `db4b83a`: ordinary boot
+      clean, mid-session door-open lag- and freeze-free, `PAD_DOOR_OPEN=1`
+      boot still green; (2) the spike_menu exec probe above. Wishlist:
+      Emulate-tab "Service mode" checkbox; auto-detect 4.28 titles.
       *(**Filed as 42 and renumbered to 43 on 2026-08-11 before merging**: David
       took 42 for the save-state portability item on main the same afternoon,
       and this branch had not landed yet. Numbers are stable IDs and are never

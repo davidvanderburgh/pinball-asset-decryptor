@@ -57,6 +57,36 @@ def parse(lines):
     return out
 
 
+#: The display names binds_export() writes -> Tk keysym names, for the
+#: playfield's own key bindings (item 39: keys work with the playfield
+#: focused, not only the game window). The DISPLAY name is the contract the
+#: C table exports; this is presentation-side, so a wrong entry here shows
+#: up as one dead key in one window, never as a wrong switch.
+_TK_KEYSYMS = {
+    "Enter": ("Return",),
+    "KP Ent": ("KP_Enter",),
+    "Bksp": ("BackSpace",),
+    "Esc": ("Escape",),
+    "Space": ("space",),
+    "=": ("equal",),
+    "-": ("minus",),
+}
+
+
+def tk_keysyms(key):
+    """The Tk keysym names one exported key label binds to.
+
+    Letters bind BOTH cases - Tk keysyms are case-sensitive ('t' and 'T' are
+    different events) and a caps-lock or a held shift must not disable the
+    tilt key. Arrows and digits are already valid keysym names as written.
+    """
+    if key in _TK_KEYSYMS:
+        return list(_TK_KEYSYMS[key])
+    if len(key) == 1 and key.isalpha():
+        return [key.lower(), key.upper()]
+    return [key]
+
+
 def load(path):
     """parse() over a padbinds file, or [] - absent is the normal state until
     the renderer has started, so it is not an error, and the caller polls."""

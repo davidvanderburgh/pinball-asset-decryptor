@@ -1156,11 +1156,12 @@ class KeyPanel:
     when the game can see the press, whoever made it: a key, a click on the
     artwork, or a script. Item 17 exists because those two answers differ.
 
-    KEYS DO NOT WORK IN THIS WINDOW, and the header says so. The legend was a
-    second X keyboard target; this is a Windows Tk process whose write path
-    is an ~80 ms wsl.exe spawn per action (see the module docstring) - fine
-    for a mouse hold, hopeless for a flipper key. The game window is the key
-    target now, and saying that here is what stops it being discovered.
+    KEYS WORK IN THIS WINDOW TOO (KeyInput + SwitchPipe): the same exported
+    rows that draw this panel bind the window's keys, and the edges ride a
+    persistent WSL helper instead of the ~80 ms-per-action spawn path, so a
+    flipper key is playable from here. The game window keeps its own X
+    keyboard exactly as before; the guest merges the two writers by last
+    edge, which is the machinery item 7 built.
 
     ★ THE SERVICE BUTTONS ARE CLICKABLE, drawn as the coin-door cluster on the
     real machine (David's reference photo: green BACK, red -/+, black SELECT,
@@ -1171,6 +1172,15 @@ class KeyPanel:
     a second table. And the COIN DOOR is a click toggle, because on the real
     machine the door is a thing that stays where you put it: open kills 48V
     (the game says so on its own screen), close restores it.
+
+    ★ ONE CONTROL PER ACTION, NOT A ROW AND A BUTTON (David: "we need to
+    consolidate the keyboard inputs and the button inputs for the service
+    buttons since it looks weird to have them duplicated. maybe put the
+    keyboard inputs on or around the buttons somehow?"). The four service
+    binds, the door and the trough latch do NOT appear in the key list; their
+    key labels sit ON their widgets instead - under each service button, on
+    the door bar, beside the BALLS header - in the same blue every other key
+    wears, so the key column and the widgets read as one system.
 
     THE BALL CONTROLS LIVE HERE TOO (David: "move the ball controls to the
     right panel as well") - add_trough() puts the six clickable ball positions
@@ -1189,22 +1199,44 @@ class KeyPanel:
     BG, KEY_FG, LAB_FG, DIM = "#111", "#7ecbff", "#d8d8d8", "#555"
     HIT_BG, HIT_FG = "#e8e8e8", "#000"
 
+    #: The binds that are drawn as WIDGETS rather than list rows - the
+    #: consolidation above. Labels, because that is the identity the export
+    #: carries; the C table never renames its platform rows.
+    SVC_ORDER = ("Service Back", "Service Minus", "Service Plus",
+                 "Service Select")
+    DOOR_LABEL = "Coin Door Closed"
+
     def __init__(self, parent, rows, drv):
-        self.rows = rows
         self.drv = drv
         f9 = tkfont.Font(family="Consolas", size=9)
         f9b = tkfont.Font(family="Consolas", size=9, weight="bold")
         f8 = tkfont.Font(family="Consolas", size=8)
         self._f8, self._f9, self._f9b = f8, f9, f9b
-        keyw = max([f9b.measure("/".join(r["keys"])) for r in rows] + [30])
-        labw = max([f9.measure(r["label"]) for r in rows] + [30])
+        self._svc_rows = {r["label"]: r for r in rows
+                          if r["label"] in self.SVC_ORDER and r["ids"]}
+        self._door_row = next((r for r in rows
+                               if r["label"] == self.DOOR_LABEL and r["ids"]),
+                              None)
+        self._trough_row = next((r for r in rows
+                                 if r["toggle"] and len(r["ids"]) > 1), None)
+        widget_rows = (set(map(id, self._svc_rows.values()))
+                       | {id(self._door_row), id(self._trough_row)})
+        self.rows = [r for r in rows if id(r) not in widget_rows]
+        keyw = max([f9b.measure("/".join(r["keys"])) for r in self.rows] + [30])
+        labw = max([f9.measure(r["label"]) for r in self.rows] + [30])
         sufw = f9.measure("[off]")
         w = self.PAD + 10 + keyw + 10 + labw + 8 + sufw + self.PAD
+        # The service cluster needs room for a key label under each button
+        # ("Enter/KP Ent" is the widest); the list must not be what caps it.
+        if self._svc_rows:
+            need = max(f8.measure("/".join(r["keys"])) + 14
+                       for r in self._svc_rows.values())
+            w = max(w, 2 * self.PAD + 4 * max(need, 66))
         self._w = w
         # Two section headers at most (cabinet first in the file, playfield
         # after), a title line and a hint line under the rows.
-        nhdr = len(set(r["cabinet"] for r in rows))
-        h = 30 + nhdr * (self.ROW_H + 6) + len(rows) * self.ROW_H + 26
+        nhdr = len(set(r["cabinet"] for r in self.rows))
+        h = 30 + nhdr * (self.ROW_H + 6) + len(self.rows) * self.ROW_H + 26
         self.cv = tk.Canvas(parent, width=w, height=h, bg=self.BG,
                             highlightthickness=0)
         self._items, self._drawn = [], []
@@ -1217,10 +1249,10 @@ class KeyPanel:
         self.cv.create_text(self.PAD, y, anchor="w", fill=self.KEY_FG,
                             font=f9b, text="KEYBOARD")
         self.cv.create_text(x_suf, y, anchor="e", fill="#777", font=f8,
-                            text="press keys in the game window")
+                            text="works here and in the game window")
         y += 8
         section = None
-        for r in rows:
+        for r in self.rows:
             if r["cabinet"] != section:
                 section = r["cabinet"]
                 y += 8
@@ -1246,20 +1278,19 @@ class KeyPanel:
             self._drawn.append(None)
             y += self.ROW_H
         self.cv.create_text(self.PAD, y + 10, anchor="w", fill="#777", font=f8,
-                            text="B and C latch; green dot = switch made")
+                            text="green dot = switch made")
         y += 24
 
         # ---- THE SERVICE CLUSTER, drawn as the real coin-door panel -------
-        # Ids by LABEL from the exported rows - the platform rows never
-        # re-resolve (measured identical 2017-2024), but taking them from the
-        # export keeps this renderer free of a second table all the same.
-        ids = {r["label"]: r["ids"][0] for r in rows if r["ids"]}
+        # ONE control per action: each button wears its own key label in the
+        # key column's blue, and these binds are NOT in the list above.
         self._svc_held = None
+        self._svc_btns = []            # (oval, switch id, base ring colour)
         svc = [("Service Back", "BACK", "", "#1f9d4e", "#0d5c2a", "#dff5e6"),
                ("Service Minus", "< -", "-", "#d43535", "#7a1717", "#ffffff"),
                ("Service Plus", "+ >", "+", "#d43535", "#7a1717", "#ffffff"),
                ("Service Select", "SELECT", "", "#1c1c1c", "#777", "#d8d8d8")]
-        if all(lbl in ids for lbl, _, _, _, _, _ in svc):
+        if len(self._svc_rows) == 4:
             y += 12
             self.cv.create_text(self.PAD, y, anchor="w", fill="#8a8a8a",
                                 font=f8, text="SERVICE  -  click and hold")
@@ -1267,6 +1298,7 @@ class KeyPanel:
             step = (w - 2 * self.PAD) // 4
             r = 14
             for k, (lbl, sub, glyph, fill, ring, subfg) in enumerate(svc):
+                row = self._svc_rows[lbl]
                 cx = self.PAD + step // 2 + k * step
                 btn = self.cv.create_oval(cx - r, y - r, cx + r, y + r,
                                           fill=fill, outline=ring, width=3)
@@ -1274,19 +1306,23 @@ class KeyPanel:
                                           text=glyph)
                 cap = self.cv.create_text(cx, y + r + 10, fill=subfg, font=f8,
                                           text=sub)
-                for it in (btn, gly, cap):
+                keys = self.cv.create_text(cx, y + r + 22, fill=self.KEY_FG,
+                                           font=f8,
+                                           text="/".join(row["keys"]))
+                for it in (btn, gly, cap, keys):
                     self.cv.tag_bind(it, "<ButtonPress-1>",
-                                     lambda e, s=ids[lbl], b=btn:
+                                     lambda e, s=row["ids"][0], b=btn:
                                      self._svc_press(s, b))
                     self.cv.tag_bind(it, "<ButtonRelease-1>",
                                      lambda e: self._svc_release())
-            y += r + 22
+                self._svc_btns.append((btn, row["ids"][0], ring))
+            y += r + 34
             self.cv.create_text(self.PAD, y, anchor="w", fill="#777", font=f8,
                                 text="press SELECT for the service menu")
             y += 8
 
         # ---- THE COIN DOOR, a toggle because the real door STAYS ----------
-        self._door_id = ids.get("Coin Door Closed")
+        self._door_id = self._door_row["ids"][0] if self._door_row else None
         self.door_btn = self.door_txt = None
         self._door_drawn = None
         if self._door_id:
@@ -1294,16 +1330,20 @@ class KeyPanel:
             self.door_btn = self.cv.create_rectangle(
                 self.PAD - 4, y, w - self.PAD + 4, y + 26,
                 fill="#1a2e1a", outline="#2e7d32", width=1)
+            door_key = self.cv.create_text(
+                self.PAD + 6, y + 13, anchor="w", fill=self.KEY_FG, font=f9b,
+                text="/".join(self._door_row["keys"]))
             self.door_txt = self.cv.create_text(
-                w // 2, y + 13, fill="#d8d8d8", font=f9,
+                w // 2 + 6, y + 13, fill="#d8d8d8", font=f9,
                 text="COIN DOOR  closed - 48V on")
-            for it in (self.door_btn, self.door_txt):
+            for it in (self.door_btn, self.door_txt, door_key):
                 self.cv.tag_bind(it, "<Button-1>", lambda e: self._door_click())
             y += 30
 
         self._y = y
         self.cv.config(height=y + 12)
         self._last_sw = None
+        self._svc_drawn = [None] * len(self._svc_btns)
 
     # ---- the service buttons: press-and-hold through the same driver ------
     def _svc_press(self, sw_id, btn):
@@ -1345,6 +1385,13 @@ class KeyPanel:
         y = self._y + 14
         self.cv.create_text(self.PAD, y, anchor="w", fill="#8a8a8a",
                             font=self._f8, text="BALLS")
+        if self._trough_row is not None:
+            # The trough latch's key, worn here instead of a list row - the
+            # same consolidation as the service buttons and the door.
+            self.cv.create_text(self.PAD + 44, y, anchor="w",
+                                fill=self.KEY_FG, font=self._f8,
+                                text="/".join(self._trough_row["keys"])
+                                     + " = all six in / out")
         y += 10
         t = TroughPanel(self.cv, positions, how, self.PAD - 4, y, anchor="nw",
                         on_ball=on_ball, label_below=True,
@@ -1360,6 +1407,14 @@ class KeyPanel:
         comparison and nothing else - the same change-gate as everything on
         this window."""
         self._last_sw = sw
+        # The service buttons wear their made-state as a gold ring - the rows
+        # that used to carry it are gone from the list, so the button is now
+        # the one place that answers "did the game see that press".
+        for k, (btn, sid, ring) in enumerate(self._svc_btns):
+            made = bool(sw.is_made(sid))
+            if self._svc_drawn[k] != made:
+                self._svc_drawn[k] = made
+                self.cv.itemconfig(btn, outline="#ffd400" if made else ring)
         if self._door_id is not None:
             closed = bool(sw.is_made(self._door_id))
             if self._door_drawn != closed:
@@ -1402,6 +1457,161 @@ class KeyPanel:
                                fill=self.HIT_FG if on else self.DIM)
 
 
+class SwitchPipe:
+    """ONE persistent WSL helper for keyboard edges, instead of a spawn each.
+
+    The proven SwitchDriver path costs an ~80-200 ms wsl.exe spawn per action
+    (item 24 measured it), which is why this window never took keyboard input:
+    a flipper through that is unplayable. swkeys.py holds the block open and
+    reads "<id> <level>" lines, so a key edge costs a pipe write. The helper
+    releases everything it still holds on EOF - the same stuck-switch guard
+    as everywhere else - and a dead pipe fails the edge back to the caller,
+    who falls back to the spawn path rather than eating the press.
+    """
+
+    def __init__(self):
+        self._p = None
+        self._failed = 0
+
+    def _ensure(self):
+        if self._p is not None and self._p.poll() is None:
+            return True
+        if self._failed >= 2:          # spawn broken twice: stop trying
+            return False
+        try:
+            if sys.platform == "win32":
+                cmd = ["wsl.exe", "-e", "python3", "%s/swkeys.py" % WSL_DIR]
+            else:
+                cmd = ["python3", os.path.join(HERE, "swkeys.py")]
+            self._p = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                       stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL,
+                                       creationflags=_CREATE_NO_WINDOW)
+            return True
+        except Exception:                                   # noqa: BLE001
+            self._failed += 1
+            self._p = None
+            return False
+
+    def set(self, sw, val):
+        """True when the edge went down the pipe; False = use the fallback."""
+        if not self._ensure():
+            return False
+        try:
+            self._p.stdin.write(b"%d %d\n" % (sw, val))
+            self._p.stdin.flush()
+            return True
+        except Exception:                                   # noqa: BLE001
+            self._failed += 1
+            self._p = None
+            return False
+
+    def close(self):
+        try:
+            if self._p is not None and self._p.poll() is None:
+                self._p.stdin.close()                # EOF = helper releases all
+        except Exception:                                   # noqa: BLE001
+            pass
+
+
+class KeyInput:
+    """Keyboard play with THIS window focused.
+
+    ★ ITEM 39, DAVID: "the keyboard inputs are not working unless the
+    emulator window is focused. it should work with the virtual playfield
+    focused." The bindings come from the SAME exported rows the panel draws -
+    one table, two windows that honour it - and the edges ride SwitchPipe,
+    with the per-action spawn as the fallback.
+
+    TWO TRAPS THIS ALREADY KNOWS ABOUT:
+    * X auto-repeat arrives as Release-then-Press at the same instant, which
+      naively makes a held flipper flutter (padglhost swallows the pair with
+      XPeekEvent). Windows Tk repeats differ - repeated KeyPress, one real
+      KeyRelease - but the container runs this window under X, so a release
+      is committed only after a few ms with no matching press: the same
+      swallow, spelled in `after`.
+    * A key typed into a real text widget (the save-slot picker) must not
+      fire a flipper - the handler drops events whose focus widget takes
+      text input.
+    """
+
+    #: How long a release waits for the press that would mark it auto-repeat.
+    REPEAT_MS = 10
+
+    def __init__(self, view, rows):
+        self.view = view
+        self.pipe = SwitchPipe()
+        self.map = {}
+        for r in rows:
+            if r["na"] or not r["ids"]:
+                continue
+            for k in r["keys"]:
+                for sym in keybinds.tk_keysyms(k):
+                    self.map[sym] = r
+        self.down = set()
+        self._pending = {}             # keysym -> after id, releases in flight
+        # Pre-warm the helper: spawned lazily, the FIRST press of a session
+        # pays the ~90-200 ms wsl.exe start (measured live: a 2000 ms hold
+        # reached the guest as 1907 ms, the whole shortfall on the press
+        # side). Spawning now moves that cost to window open, where nobody
+        # is holding a flipper.
+        self.pipe._ensure()
+        view.root.bind("<KeyPress>", self._on_down)
+        view.root.bind("<KeyRelease>", self._on_up)
+
+    def _row(self, ev):
+        try:
+            if ev.widget.winfo_class() in ("Entry", "TEntry", "TCombobox",
+                                           "Text", "Spinbox", "TSpinbox"):
+                return None
+        except Exception:                                   # noqa: BLE001
+            pass
+        return self.map.get(ev.keysym)
+
+    def _on_down(self, ev):
+        r = self._row(ev)
+        if r is None:
+            return
+        pend = self._pending.pop(ev.keysym, None)
+        if pend is not None:
+            self.view.root.after_cancel(pend)   # auto-repeat pair: still held
+            return
+        if ev.keysym in self.down:
+            return                              # Windows-style repeat
+        self.down.add(ev.keysym)
+        if r["toggle"]:
+            # The toggle flips off the MERGED state - the same rule as the
+            # door button: the state acted on is the one on screen.
+            target = 0 if all(bool(self.view.sw.is_made(s))
+                              for s in r["ids"]) else 1
+            for s in r["ids"]:
+                self._set(s, target)
+        else:
+            self._set(r["ids"][0], 1)
+
+    def _on_up(self, ev):
+        r = self._row(ev)
+        if r is None or r["toggle"]:
+            self.down.discard(ev.keysym)
+            return
+        if ev.keysym in self._pending:
+            return
+        self._pending[ev.keysym] = self.view.root.after(
+            self.REPEAT_MS, lambda: self._commit_up(ev.keysym, r))
+
+    def _commit_up(self, keysym, r):
+        self._pending.pop(keysym, None)
+        self.down.discard(keysym)
+        self._set(r["ids"][0], 0)
+
+    def _set(self, sw, val):
+        if not self.pipe.set(sw, val):
+            (self.view.drv.press if val else self.view.drv.release)(sw)
+
+    def close(self):
+        self.pipe.close()
+
+
 def attach_key_panel(view):
     """The panel, packed to the right of the view's canvas, or None.
 
@@ -1431,6 +1641,9 @@ def attach_key_panel(view):
     if view.sw.positions:
         view.trough_panel = panel.add_trough(view.sw.positions, view.sw.how,
                                              view.run_plunge)
+    # The keyboard arrives with the rows (item 39): the same table that drew
+    # the panel binds this window's keys, so the two can never disagree.
+    view.keys = KeyInput(view, rows)
     return panel
 
 
@@ -1723,7 +1936,7 @@ class Field(StateOps):
         # ★ ITEM 39: the key panel attaches AFTER SwitchDriver exists, below -
         # its service buttons and door toggle press through the same driver
         # the artwork markers use.
-        self.key_panel = None
+        self.key_panel, self.keys = None, None
 
         self.info = {}          # canvas item -> dict describing it
         self.fixtures = group_fixtures(self.leds)
@@ -2686,7 +2899,7 @@ class Schematic(StateOps):
             self._hbar.configure(command=self.cv.xview)
         self.cv.pack(side="left", fill="both", expand=True)
         # ★ ITEM 39: the key panel attaches after SwitchDriver exists, below.
-        self.key_panel = None
+        self.key_panel, self.keys = None, None
 
         self.info = {}
         for ci, entries_col in enumerate(cols):
@@ -2871,9 +3084,12 @@ def main():
         # OPEN ANYTHING STILL HELD BEFORE THE PROCESS GOES. Closing the window
         # mid-hold otherwise leaves scr_held[] made, and nothing on this side
         # exists any more to clear it - the game would see a stuck switch for
-        # the rest of the run.
+        # the rest of the run. The keyboard pipe's close is its EOF, and the
+        # helper releases its own held set on the other side (swkeys.py).
         if view is not None:
             view.drv.release_all()
+            if getattr(view, "keys", None) is not None:
+                view.keys.close()
         save_state(root)
         root.destroy()
 

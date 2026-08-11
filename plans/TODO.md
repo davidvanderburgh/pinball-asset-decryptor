@@ -106,15 +106,42 @@ These have each been violated at least once and each cost a run or a window:
       Left Flipper row inverse with its green dot — the end-to-end path the
       old legend could not see (it read key_down, this reads what the guest
       merged). Door [ON] and trough 6/6 came off the window-open latch.
+      **★ ROUND 2, DAVID (2026-08-11, on the built panel), both built:**
+      "the keyboard inputs are not working unless the emulator window is
+      focused. it should work with the virtual playfield focused. and we
+      need to consolidate the keyboard inputs and the button inputs for the
+      service buttons since it looks weird to have them duplicated. maybe
+      put the keyboard inputs on or around the buttons somehow?"
+      • **Keyboard with the playfield focused, LIVE-PROVEN end-to-end:**
+      `swkeys.py` is a stdin-driven switch holder (swhold.py in a loop, same
+      padsw discipline, releases everything on EOF); `SwitchPipe` keeps ONE
+      of them for the session so a key edge costs a pipe write, not the
+      ~80-200 ms per-action spawn; `KeyInput` binds the SAME exported rows.
+      Proof: SendInput of a 2000 ms Left-arrow into the FOCUSED playfield
+      (a plain Windows window — UIPI does not apply, unlike the WSLg game
+      window) reached the guest as `[sw] +60p` … `-60p`, 1907 ms — tag `p`
+      is the new path naming itself. The 93 ms shortfall was the lazy first
+      spawn; the helper now pre-warms at window open. Auto-repeat is
+      swallowed by a 10 ms deferred release (the X pair trap, for the
+      container where this window runs under X).
+      • **One control per action:** the four service binds, the door and the
+      trough latch left the key list; their key labels sit ON their widgets
+      (Bksp/Esc under BACK, Enter/KP Ent under SELECT, C on the door bar,
+      B beside BALLS) in the key column's blue. Made-state became a gold
+      ring on the button itself.
       **NOT verified, stated:** a live star_wars_le run (no card image on
       this machine; its schematic was verified offline against the title's
       REAL derived tables, and the live read path is shared code proven on
       godzilla). Mouse clicks on the service buttons / door / balls-in-panel
-      — the write path is the live-proven driver, but no hand has clicked
-      them. David's "clean and elegant" bar is his call, not a screenshot's.
-      **Resume:** David looks at both views and clicks the service cluster,
-      the door toggle and a ball; fix what his eyes catch; then close — merge
-      to main per the worktree rule.
+      — the write path is the live-proven driver and the keyboard injection
+      above exercised the window's event plumbing, but no hand has clicked
+      the buttons. David's "clean and elegant" bar is his call, not a
+      screenshot's. Typing feel (flipper latency through the pipe) is his
+      hands' call too — the pipe is warm and a held key measured 1907/2000
+      ms, but feel is the oracle item 17 says it is.
+      **Resume:** David plays with the playfield focused (flippers, service
+      cluster, door toggle, a ball click); fix what his eyes and hands
+      catch; then close — merge to main per the worktree rule.
       **★ DAVID, 2026-08-10: "i want to consolidate the two switch windows for
       the emulator. there are too many windows. i do like the feedback and
       interface of the small switch window, having a tight and compact view is

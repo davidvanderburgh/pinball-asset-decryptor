@@ -100,3 +100,23 @@ def test_load_reads_a_real_file(keybinds, tmp_path):
     p.write_text("\n".join(SAMPLE) + "\n", encoding="utf8")
     rows = keybinds.load(str(p))
     assert [r["label"] for r in rows][:2] == ["Service Select", "Service Back"]
+
+
+def test_tk_keysyms_for_every_exported_display_name(keybinds):
+    """The display names the C table exports all map to real Tk keysyms -
+    the playfield binds by these, so a missed one is a dead key there."""
+    assert keybinds.tk_keysyms("Enter") == ["Return"]
+    assert keybinds.tk_keysyms("KP Ent") == ["KP_Enter"]
+    assert keybinds.tk_keysyms("Bksp") == ["BackSpace"]
+    assert keybinds.tk_keysyms("Esc") == ["Escape"]
+    assert keybinds.tk_keysyms("Space") == ["space"]
+    assert keybinds.tk_keysyms("=") == ["equal"]
+    assert keybinds.tk_keysyms("-") == ["minus"]
+    assert keybinds.tk_keysyms("Left") == ["Left"]
+    assert keybinds.tk_keysyms("1") == ["1"]
+
+
+def test_tk_keysyms_letters_bind_both_cases(keybinds):
+    """Tk keysyms are case-sensitive; caps-lock must not disable tilt."""
+    assert keybinds.tk_keysyms("T") == ["t", "T"]
+    assert keybinds.tk_keysyms("b") == ["b", "B"]

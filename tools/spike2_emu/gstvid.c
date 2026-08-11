@@ -782,35 +782,18 @@ static void *vid_thread(void *arg)
          * at PAUSED; nothing here has ever needed it - fresh clips only start
          * their thread at PLAYING - so the hold is total.) */
         if (s->paused) { t_epoch = 0; usleep(5000); continue; }
-        /* item 43's other half: the door. An adopted stream never passes
-         * through prepare(), so the arm-side refusal alone left one channel
-         * painting the menu band.
-         *
-         * ▼ END the stream like a clip finishing - do NOT hold. The first
-         * version held (usleep loop), and David's hands found the cost in
-         * seconds: "the game just gets really slow and laggy the second we
-         * open the coin door". The game's sinks run sync=1 and its consumers
-         * WAIT on the next buffer; a held channel makes that wait time out
-         * every frame on every playing channel at once. EOS instead runs the
-         * game's own end-of-clip path; the loop-seek that follows is refused
-         * by the door gate, so the pipeline rests until the door shuts and a
-         * scene change rebuilds it. */
-        if (vid_door_blocked()) {
-            if (s->run_id != my_run) return 0;
-            s->pos_ns = pad_vid_duration_ns(s->pipeline);
-            VLOG("[vid] ch%d door opened mid-clip after %u frames; posting EOS "
-                 "(item 43)\n", chan_of(s), consumed);
-            {
-                const unsigned char *b = (const unsigned char *)s->decoder;
-                s->eos_loop = b ? b[4] : 1;
-                s->eos_us = vid_us();
-                if (!s->eos_us) s->eos_us = 1;
-            }
-            s->playing = 0;
-            c->playing = 0;
-            post_eos(s->pipeline);
-            return 0;
-        }
+        /* item 43: NOTE THE ABSENCE of a door check here, and keep it absent.
+         * Both attempts to act on a RUNNING stream at door-open failed in
+         * David's hands within minutes: a HOLD stalled the game's sync=1
+         * consumers into a timeout per frame per channel ("really slow and
+         * laggy the second we open the coin door"), and a mid-clip EOS froze
+         * the game outright - its loop-rewind was then refused and it has no
+         * path out of "EOS'd but un-rewindable while PLAYING", a state real
+         * hardware cannot produce (a real door-open kills 48V, never the
+         * decoder). The gate acts only where real machines have edges: NEW
+         * arms are refused in prepare(), and a clip that ends NATURALLY while
+         * the door is open dies there because its rewind is refused. Running
+         * clips always play out. */
         produced = c->write_idx;
         if (consumed >= produced) {
             if (c->eos) {
@@ -1390,10 +1373,18 @@ void *pad_vid_caps_for_pad(void *pad)
 {
     int i, ready = 0;
     struct stream *fb = 0;
-    /* item 43: door open = the pipeline looks dead, caps included - the same
-     * answer PAD_VID=0 gives, which is the proven trigger for the service
-     * menu's dot fallback. */
-    if (vid_door_blocked()) return 0;
+    /* item 43: door open = a pipeline that is not delivering looks dead,
+     * caps included - the same answer PAD_VID=0 gives, which is the proven
+     * trigger for the service menu's dot fallback. The pad-owner check runs
+     * first so a LIVE stream still answers its own caps; only the fallback
+     * path (a fresh pipeline being built) reads dead. */
+    if (vid_door_blocked()) {
+        for (i = 0; i < PADVID_CHANNELS; i++)
+            if (streams[i].ready && streams[i].playing
+                    && pad && streams[i].sinkpad == pad)
+                return (void *)streams[i].fake_caps;
+        return 0;
+    }
     for (i = 0; i < PADVID_CHANNELS; i++) {
         if (!streams[i].ready) continue;
         ready++;
@@ -1614,11 +1605,13 @@ void pad_vid_note_paused(void *pipeline)
 int pad_vid_last_state(void *pipeline)
 {
     struct stream *s = find_pipeline(pipeline);
-    /* item 43: with the coin door open every pipeline reads NULL, whatever
+    /* item 43: with the coin door open a DEAD pipeline reads NULL whatever
      * the game last asked - the page-build check that picks video-vs-dots
-     * consults this, and a held delivery alone leaves the page drawing its
-     * stale last frame. The scoped lie is the door gate's third half. */
-    if (vid_door_blocked()) return 1;
+     * consults this. Scoped to !playing on purpose: contradicting the state
+     * of a stream that is STILL DELIVERING is how the freeze and the lag
+     * were made (see vid_thread's door note); a live stream answers the
+     * truth until it ends on its own. */
+    if (vid_door_blocked() && (!s || !s->playing)) return 1;
     if (!s || !s->gst_state) return 1;
     return s->gst_state;
 }

@@ -130,9 +130,9 @@ def test_a_run_that_cannot_be_checkpointed_still_runs():
     """watch.sh withdraws the pivot request; it does not pass it on and let
     run_game.sh stop the run."""
     text = src("watch.sh")
-    assert "! pad_static_busybox" in text, (
+    assert "! pad_can_pivot" in text, (
         "watch.sh no longer checks whether a pivot is possible")
-    gate = line_of(text, "! pad_static_busybox")
+    gate = line_of(text, "! pad_can_pivot")
     assert "unset PAD_PIVOT" in text, (
         "the request has to be withdrawn, or run_game.sh still exits 1")
     # BEFORE anything reads it: the cfg dump has to name the shape that really
@@ -148,10 +148,14 @@ def test_a_run_that_cannot_be_checkpointed_still_runs():
 def test_the_withdrawal_says_what_it_costs_and_how_to_undo_it():
     """A silent fallback is a save-state feature that quietly disappeared."""
     text = src("watch.sh")
-    block = text[text.index("! pad_static_busybox"):]
+    block = text[text.index("! pad_can_pivot"):]
     block = block[:block.index("unset PAD_PIVOT")]
     assert "save states are off" in block
     assert "apt install busybox-static" in block
+    # Both halves have their own sentence: naming busybox-static at a machine
+    # that already has it is telling someone to install what they have.
+    assert "no pivot_root" in block
+    assert "util-linux" in block
 
 
 def test_one_definition_of_what_a_pivot_needs():
@@ -160,8 +164,97 @@ def test_one_definition_of_what_a_pivot_needs():
     the test is how the tab clears a machine the run then refuses - this rig's
     oldest rule."""
     assert "pad_static_busybox()" in src("padpath.sh")
+    assert "pad_pivot_root_cmd()" in src("padpath.sh")
     for script in ("run_game.sh", "watch.sh", "setupcheck.sh"):
         text = src(script)
-        assert "pad_static_busybox" in text, script
+        assert "pad_static_busybox" in text or "pad_can_pivot" in text, script
         assert "ldd /bin/busybox" not in text, (
             "%s is re-implementing the test instead of calling it" % script)
+        assert not re.search(r"^\s*command -v pivot_root", text, re.M), (
+            "%s is looking for pivot_root itself instead of calling it" % script)
+
+
+# ----------------------------------------------------------------------
+# ...AND THE SAME PRICE AGAIN, ONE RELEASE LATER, IN A DIFFERENT PROGRAM.
+#
+# The same user then installed busybox-static - the package v0.126.1's own
+# notice had just asked him for - and the next run died two lines further into
+# the pivot (2026-08-11):
+#
+#     [run] PAD_PIVOT: checkpointable boot (pivot_root, explicit qemu)
+#     bash: line 98: pivot_root: command not found
+#     [run] pivot_root failed
+#     [watch] the game never started.
+#
+# So the repair the app offered is what took his emulator away, because the
+# gate tested ONE of the two programs a pivot needs.  Three rules come out of
+# it: what a pivot needs is a LIST and the gate asks about all of it
+# (pad_can_pivot); the pivot runs whatever THIS machine has rather than one
+# spelling of it (pad_pivot_root_cmd); and a pivot that fails anyway costs the
+# feature, not the run.
+# ----------------------------------------------------------------------
+
+def test_what_a_pivot_needs_is_asked_as_one_question():
+    """Both halves, one call - so no caller can accidentally ask half of it
+    again."""
+    text = src("padpath.sh")
+    assert "pad_can_pivot()" in text
+    body = text[text.index("pad_can_pivot()"):]
+    body = body[:body.index("}")]
+    assert "pad_static_busybox" in body, "the umount half is not being asked"
+    assert "pad_pivot_root_cmd" in body, "the pivot half is not being asked"
+
+
+def test_the_pivot_is_done_by_the_command_this_machine_actually_has():
+    """A bare `pivot_root` is a PATH lookup, and the report is what a PATH
+    without /usr/sbin - or a machine without the binary - does with one."""
+    text = src("run_game.sh")
+    assert not re.search(r"^\s*pivot_root \. oldroot", text, re.M), (
+        "the pivot is a bare PATH lookup again")
+    assert "$PIVOTROOT . oldroot" in text
+    assert "pad_pivot_root_cmd" in text, (
+        "run_game.sh must ask the shared resolver, not spell it itself")
+
+
+def test_the_resolver_hands_back_nothing_it_has_not_confirmed_runnable():
+    """As root - and every PAD_PIVOT run is root - `command -v` returns a path
+    for a file that cannot be executed at all.  Measured 2026-08-11: with a
+    character device in /usr/sbin/pivot_root's place it printed the path and
+    returned 0, while running it said Permission denied.  A resolver that
+    trusts that answer is `command not found` again, one directory deeper."""
+    text = src("padpath.sh")
+    body = text[text.index("pad_pivot_root_cmd()"):]
+    body = body[:body.index("pad_can_pivot()")]
+    assert '[ -f "$p" ] && [ -x "$p" ]' in body, (
+        "a PATH hit is being trusted without confirming it can be run")
+    assert "--list" in body, (
+        "the busybox applet has to be confirmed by running busybox")
+
+
+def test_a_pivot_that_fails_anyway_still_starts_the_game():
+    """Everything above the pivot - the namespace, every mount, the card - is
+    already built and correct, and the chroot boot this rig has always done
+    would run perfectly from there.  `exit 1` threw all of it away."""
+    text = src("run_game.sh")
+    assert 'pivot_root failed" >&2; exit 1' not in text, (
+        "a failed pivot is taking the whole run down again")
+    fail = line_of(text, "[run] pivot_root failed")
+    assert fail < line_of(text, 'exec chroot "$R" /bin/sh -c'), (
+        "the failure must fall through to the ordinary boot")
+    block = text[text.index("[run] pivot_root failed"):]
+    block = block[:block.index("exec chroot")]
+    assert "save states are off" in block, (
+        "a silent fallback is a save-state feature that vanished")
+
+
+def test_the_save_buttons_follow_the_boot_that_happened():
+    """A run that fell back is up, correct and NOT checkpointable, and the
+    playfield must not offer Save/Load for it - the same rule the pre-flight
+    gate keeps, applied to the one case no pre-flight can predict."""
+    text = src("watch.sh")
+    block = text[text.index('PF_STATES=""'):]
+    block = block[:block.index('PF_STATES="--savestates"')]
+    assert "pivot_root failed" in block, (
+        "the flag is set from what the run was ASKED to be")
+    # It can only be read from the log if the guest has already been launched.
+    assert line_of(text, 'bash "$RIG/run_game.sh"') < line_of(text, 'PF_STATES=""')

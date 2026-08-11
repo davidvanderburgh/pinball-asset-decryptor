@@ -961,16 +961,14 @@ if [ "${PAD_BALL_FEED:-1}" != 0 ]; then
 fi
 
 # PAD_DOOR_OPEN=1 - boot with the coin door held OPEN, for servicing (item 43).
-# The System 4.28 titles (turtles et al) latch their video-vs-DMD choice at
-# init, so entering the service menu with video working shows the backdrop
-# video where the whole dot menu should be. The shim refuses video while the
-# door is open (see gstvid.c's door gate), and with the door open FROM BOOT
-# the game initialises video-less and every service page renders its complete
-# dot menu - verified against David's photo of a real machine. One early
-# swhold is not enough: the rest-state writer forces the door shut once at
-# guest start and the merge is last-edge-wins, so this loop re-asserts through
-# the boot window. Close the door (click switch 33, or swhold.py 33 1) to
-# bring video back for play.
+# This is a convenience, not a rendering fix any more: the video-side door
+# gate is GONE (see gstvid.c's tombstone - the service pages pick their DMD
+# dot mode on their own in the ASYNC preroll window, and they NEED their
+# backdrop video working). Holding the door open from boot just means the
+# service buttons are unlocked the moment the game is up. One early swhold is
+# not enough: the rest-state writer forces the door shut once at guest start
+# and the merge is last-edge-wins, so this loop re-asserts through the boot
+# window. Close the door (click switch 33, or swhold.py 33 1) when done.
 if [ "${PAD_DOOR_OPEN:-0}" = 1 ]; then
     (
         # The gate only trusts an EDGE-established door state (see
@@ -992,8 +990,8 @@ if [ "${PAD_DOOR_OPEN:-0}" = 1 ]; then
         done
     ) &
     echo "[watch] coin door held OPEN through boot (PAD_DOOR_OPEN=1):"
-    echo "[watch] service menus will render; close the door (swhold.py 33 1)"
-    echo "[watch] for video."
+    echo "[watch] service buttons unlocked; close the door (swhold.py 33 1)"
+    echo "[watch] when done."
 fi
 
 # KEY EVENTS, on THIS script's stdout. The app's Emulate tab drains watch.sh's

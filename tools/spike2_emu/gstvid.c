@@ -49,7 +49,6 @@ extern int close(int);
 extern void *mmap(void *, unsigned long, int, int, int, long);
 extern int usleep(unsigned);
 extern void pad_say(const char *);
-extern int pad_sw_level(unsigned);      /* hwshim.c - item 43's door gate */
 extern int pthread_create(unsigned long *, void *, void *(*)(void *), void *);
 extern int clock_gettime(int, unsigned long *);
 
@@ -705,46 +704,19 @@ static unsigned long vid_us(void)
     return t[0] * 1000000ul + t[1] / 1000ul;
 }
 
-/* ★ ITEM 43: NO VIDEO WHILE THE COIN DOOR IS OPEN. The System 4.28 service
- * menu picks the LCD's source per page: video when its pipeline works, its
- * own complete DMD dot menu when it does not - PAD_VID=0 proved the dot path
- * renders every icon and caption, and David's photo of a real machine's
- * diagnostics screen confirmed the dot menu IS the correct picture. With
- * video working the page chooses video and the menu is never drawn; on real
- * hardware the menu owns the screen through a path this rig does not
- * reproduce (three real-semantics fixes - truthful get_state, PAUSED holding
- * delivery, teardown refusing seeks, ASYNC preroll - all verified live and
- * none flipped the choice). The door is the honest gate: service menus on a
- * real machine happen with the coin door open, play happens with it shut.
- *
- * TWO halves, both needed and each proven insufficient alone on a live run:
- * prepare() refuses NEW arms (the menu's own rebuilds fail, so the page
- * falls back to its dot mode), and vid_thread holds DELIVERY on streams
- * already playing (an armed channel the menu ADOPTS never passes through
- * prepare, and one such stream kept painting the band after ch0-ch2 were
- * refused). Closing the door releases both.
- *
- * PAD_VID_DOOR=0 disables the gate; PAD_VID_DOOR_ID overrides the switch id
- * (33 is the COIN DOOR INTERLOCK on every Spike 2 table tried; open reads
- * merged level 0). */
-static int vid_door_blocked(void)
-{
-    static int gate = -1, door_id = 33;
-    if (gate < 0) {
-        const char *e = getenv("PAD_VID_DOOR");
-        gate = !(e && e[0] == '0');
-        if ((e = getenv("PAD_VID_DOOR_ID")) && e[0]) {
-            int v = 0;
-            while (*e >= '0' && *e <= '9') v = v * 10 + (*e++ - '0');
-            if (v > 0 && v < 256) door_id = v;
-        }
-    }
-    /* Blocks ONLY on an explicit, edge-established open (level 0). -1 means
-     * nobody has ever moved the door switch, and an unknown door must never
-     * cost a pipeline - the first version of this gate read a fresh block's
-     * zeros as "open" and stripped the backdrops off an ordinary boot. */
-    return gate && pad_sw_level((unsigned)door_id) == 0;
-}
+/* ★ ITEM 43: THERE IS NO COIN-DOOR VIDEO GATE ANY MORE. One lived here for
+ * four days (PAD_VID_DOOR, switch 33) refusing pipeline arms while the door
+ * was open, on the theory that dead video is what flips the service menu to
+ * its DMD dot mode. The theory was upside down: the page picks dots on its
+ * own, at page build, inside the ASYNC preroll window (gststub's PAUSED
+ * answer) - and then plays its backdrop video UNDERNEATH the dots. The menu
+ * NEEDS its video. The gate turned the menu's own backdrop arm into a
+ * set_state FAILURE - a state a healthy real pipeline cannot produce - and
+ * the page build hung on it: dark stale frame, no text, no dots, watched
+ * live on 2026-08-11. Its earlier drafts cost three field failures (boot
+ * backdrops stripped, mid-clip hold = lag, mid-clip EOS = freeze).
+ * The door is game logic's business; video answers the truth and nothing
+ * else. */
 
 static void *vid_thread(void *arg)
 {
@@ -790,10 +762,8 @@ static void *vid_thread(void *arg)
          * the game outright - its loop-rewind was then refused and it has no
          * path out of "EOS'd but un-rewindable while PLAYING", a state real
          * hardware cannot produce (a real door-open kills 48V, never the
-         * decoder). The gate acts only where real machines have edges: NEW
-         * arms are refused in prepare(), and a clip that ends NATURALLY while
-         * the door is open dies there because its rewind is refused. Running
-         * clips always play out. */
+         * decoder). The whole gate is gone now (see the tombstone above
+         * vid_thread) - video answers the truth whatever the door does. */
         produced = c->write_idx;
         if (consumed >= produced) {
             if (c->eos) {
@@ -1049,18 +1019,6 @@ int pad_vid_prepare(void *pipeline)
     if (!vshm || !s->location[0]) return 0;
     if (!stream_buf(s)) return 0;
     c = &vshm->ch[hw_of(s)];
-
-    if (vid_door_blocked()) {
-        static unsigned char said[PADVID_CHANNELS];
-        int ch = chan_of(s);
-        if (ch >= 0 && ch < PADVID_CHANNELS && !said[ch]) {
-            said[ch] = 1;
-            VLOG("[vid] ch%d video refused while the coin door is open - "
-                 "service menus render their own surface (item 43, "
-                 "PAD_VID_DOOR=0 to disable)\n", ch);
-        }
-        return 0;
-    }
 
     /* item 43: the game re-arming this pipeline - whatever else this call
      * decides - means it is alive again. Cleared BEFORE the absorbs so the
@@ -1373,18 +1331,6 @@ void *pad_vid_caps_for_pad(void *pad)
 {
     int i, ready = 0;
     struct stream *fb = 0;
-    /* item 43: door open = a pipeline that is not delivering looks dead,
-     * caps included - the same answer PAD_VID=0 gives, which is the proven
-     * trigger for the service menu's dot fallback. The pad-owner check runs
-     * first so a LIVE stream still answers its own caps; only the fallback
-     * path (a fresh pipeline being built) reads dead. */
-    if (vid_door_blocked()) {
-        for (i = 0; i < PADVID_CHANNELS; i++)
-            if (streams[i].ready && streams[i].playing
-                    && pad && streams[i].sinkpad == pad)
-                return (void *)streams[i].fake_caps;
-        return 0;
-    }
     for (i = 0; i < PADVID_CHANNELS; i++) {
         if (!streams[i].ready) continue;
         ready++;
@@ -1519,8 +1465,13 @@ void pad_vid_play(void *pipeline)
     /* item 43: PLAYING ends a pause hold - BEFORE the early return below,
      * which is exactly the absorbed-re-arm case this flag exists for (the
      * thread is alive and holding, s->playing is still 1). gst_state tracks
-     * the ask itself for get_state's answer. */
-    if (s) { s->paused = 0; s->gst_state = 4; }
+     * the ask for get_state's answer, but only on a stream that CAN serve:
+     * stamping 4 on one whose prepare() failed is how the door-gate wedge
+     * told the service page its dead backdrop was flowing. */
+    if (s) {
+        s->paused = 0;
+        if (s->ready) s->gst_state = 4;
+    }
     if (!s || !s->ready || s->playing || !vshm) return;
 
     /* item 27: the safety net for the EOS-reflex absorb. If the game asks to
@@ -1605,13 +1556,6 @@ void pad_vid_note_paused(void *pipeline)
 int pad_vid_last_state(void *pipeline)
 {
     struct stream *s = find_pipeline(pipeline);
-    /* item 43: with the coin door open a DEAD pipeline reads NULL whatever
-     * the game last asked - the page-build check that picks video-vs-dots
-     * consults this. Scoped to !playing on purpose: contradicting the state
-     * of a stream that is STILL DELIVERING is how the freeze and the lag
-     * were made (see vid_thread's door note); a live stream answers the
-     * truth until it ends on its own. */
-    if (vid_door_blocked() && (!s || !s->playing)) return 1;
     if (!s || !s->gst_state) return 1;
     return s->gst_state;
 }

@@ -3054,6 +3054,24 @@ def raise_existing():
 
 def main():
     if raise_existing():
+        # SAY SO, because from the outside this is a launch that started and
+        # stopped with no window to show for it, and that is exactly what a
+        # crash looks like. watch.sh keeps the launch's output now
+        # (padplayfield.log) and reports a playfield that did not stay up, so
+        # this line is the difference between "your window is the one already
+        # on screen" and an unexplained failure.
+        #
+        # AND IT IS THE ONLY WAY TO SEE THE STRANDED-WINDOW CASE AT ALL (queue
+        # item 38): a wedged WSLg window keeps its title bar long after there
+        # is anything behind it, so FindWindowW answers about a window nobody
+        # can see and this returns True for a desktop that shows nothing.
+        # print() is a no-op under pythonw.exe with no redirection, and writes
+        # to the run's log when watch.sh launched it.
+        print("playfield: a window called %r already exists, so it was raised "
+              "instead of a second one being opened. If nothing came to the "
+              "front, that window is a leftover from an earlier run that WSL "
+              "can no longer draw - Stop offers the WSL restart that clears "
+              "one." % WINDOW_TITLE)
         return
     root = tk.Tk()
     root.title(WINDOW_TITLE)

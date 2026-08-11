@@ -20,7 +20,54 @@
 RIG=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
 export RIG
 
-: "${PAD_ROOT:=$HOME/spike2root}"
+# WHOSE rig is this? $HOME IS NOT THE ANSWER WHEN RUNNING AS ROOT, and that is
+# not an edge case - it is how the app starts and stops every run
+# (`wsl.exe -u root ...`). As root $HOME is /root, where this rig has never
+# lived, so every path and every pkill pattern built from $HOME silently points
+# at a directory that does not exist. Nothing errors; the globs just match
+# nothing and the patterns just match nothing.
+#
+# THAT COST AN HOUR ON 2026-08-11. killgame.sh globs "$HOME/card/"*/ to unmount
+# the card and matches "^tail ... $HOME/padvid\.log" to kill the event feed.
+# Run as root both became /root/..., so the card was never unmounted and the
+# tail never killed - while alive.sh, counting the same things by other
+# patterns, correctly reported them still up. The teardown then printed
+# PAD_STOP_NEEDS_WSL_RESTART, which reads as "this needs a VM restart" and
+# invites someone to kill fuse2fs by hand - and killing the fuse daemon instead
+# of unmounting leaves the kernel holding a mount with no userspace behind it,
+# so the NEXT run dies at "Transport endpoint is not connected" before it can
+# even create its mountpoint. One wrong $HOME, three failures deep.
+#
+# So: resolve the rig's home ONCE, here, and let every script use it. An
+# explicit PAD_HOME always wins; after that the order below applies.
+#
+# ROOT IS ELEVATION, NOT OWNERSHIP, and that is the rule that makes this work.
+# The rig belongs to a human's home; root is only how the scripts get the caps
+# to mount and chroot. So when $HOME is /root we do NOT trust it - not even if
+# /root/spike2root exists, because it usually does: any earlier root-without-
+# HOME run leaves a half-built one there, and this machine has exactly that
+# from 2026-08-08. Picking it would be the same silent-wrong-path bug in a new
+# costume, and worse, because it would look like a real rig.
+_pad_hasrig() { [ -d "$1/spike2root" ] || [ -d "$1/card" ]; }
+if [ -z "${PAD_HOME:-}" ]; then
+    if [ "$(id -u)" != 0 ] && _pad_hasrig "$HOME"; then
+        PAD_HOME=$HOME                       # ordinary user: their own rig
+    elif [ -n "${SUDO_USER:-}" ] && _pad_hasrig "/home/$SUDO_USER"; then
+        PAD_HOME=/home/$SUDO_USER            # sudo names the human; believe it
+    else
+        for _h in /home/*/; do               # the one /home/* that has a rig
+            if _pad_hasrig "${_h%/}"; then PAD_HOME=${_h%/}; break; fi
+        done
+        unset _h
+    fi
+    # Nothing found: fall back to $HOME. On a fresh machine that is where a rig
+    # should be built; as root with no user rig it is at least honest about
+    # where it looked.
+    : "${PAD_HOME:=$HOME}"
+fi
+export PAD_HOME
+
+: "${PAD_ROOT:=$PAD_HOME/spike2root}"
 export PAD_ROOT
 ROOT=$PAD_ROOT
 

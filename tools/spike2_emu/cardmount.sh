@@ -21,9 +21,15 @@
 set -u
 
 SELF=$(cd "$(dirname "$0")" && pwd)
-PREFIX=$HOME/local
-CARDS=$HOME/card
-CACHE=$HOME/cardcache
+# $PAD_HOME, so THE PLACE A CARD IS MOUNTED AND THE PLACE IT IS UNMOUNTED FROM
+# are the same string however the two scripts were invoked. killgame.sh globs
+# "$PAD_HOME/card/"*/ to unmount; if this mounted under a different $HOME the
+# unmount would silently match nothing, which is exactly the bug padpath.sh's
+# header describes. Sourced from padpath.sh, which resolves it once.
+. "$SELF/padpath.sh"
+PREFIX=$PAD_HOME/local
+CARDS=$PAD_HOME/card
+CACHE=$PAD_HOME/cardcache
 FUSE2FS="$PREFIX/usr/bin/fuse2fs"
 export LD_LIBRARY_PATH="$PREFIX/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
 

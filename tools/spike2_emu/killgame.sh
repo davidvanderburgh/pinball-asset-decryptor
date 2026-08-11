@@ -52,7 +52,22 @@ pkill -9 -f 'ballfeed[.]py'
 # it outlives a run that ends first. alive.sh counts it.
 pkill -9 -f 'mktables[.]py'
 # The event feed. An orphaned `tail -F` never exits by itself.
-pkill -9 -f "^tail -q -n 0 -F "$HOME/padvid"\.log"
+#
+# $PAD_HOME AND NOT $HOME, and padpath.sh's own header carries the full story:
+# this script is normally run as ROOT (the app stops a run with `wsl.exe -u
+# root`), so $HOME is /root and this pattern used to match nothing at all. The
+# feed survived every stop, alive.sh went on counting it, and the run never
+# read as clean.
+pkill -9 -f "^tail -q -n 0 -F $PAD_HOME/padvid\.log"
+# The awk on the other end of that pipe is NOT killed here on purpose: it reads
+# the tail's stdout, so it takes EOF and leaves by itself the moment the tail
+# above dies. It only ever survived because the tail did.
+#
+# The PIVOT run's game-log tail, which alive.sh has always counted and this
+# script never killed - so a pivot run (every run the app starts) could not
+# reach zero by stopping it. Same shape as the feed above: an orphaned `tail -F`
+# holds the file forever and never exits on its own.
+pkill -9 -f '^tail -F .*dump/game\.out'
 pkill -9 -f 'padvidhost\.py'
 pkill -9 -f 'playaudio.sh'
 # ^-anchored, and matched on the fifo not on '-f pulse': a severed player
@@ -160,11 +175,29 @@ sleep 1
 # script has just killed everything that could have been reading one, and the
 # expensive part (the local image cache under ~/cardcache) is a file that
 # survives: a remount is a fraction of a second.
-for m in "$HOME/card/"*/; do
+#
+# $PAD_HOME, NOT $HOME: as root this globbed /root/card/*/, matched nothing, and
+# the loop did nothing at all - silently, because a glob that matches nothing is
+# not an error. The card stayed mounted after every stop the app made.
+#
+# UNMOUNT, NEVER KILL, and the ordering above is what makes that possible. A
+# fuse mount is a kernel mount plus a userspace daemon; `fusermount -u` retires
+# both together, but SIGKILLing fuse2fs leaves the kernel half behind with
+# nothing serving it. Every access then fails ENOTCONN ("Transport endpoint is
+# not connected"), including the mkdir watch.sh does before mounting - so the
+# next run cannot start at all, and the error names a transport nobody in this
+# rig has ever configured. If a mount here will not go, report it; do not reach
+# for kill.
+for m in "$PAD_HOME/card/"*/; do
     mountpoint -q "$m" 2>/dev/null || continue
-    fusermount -u "$m" 2>/dev/null || fusermount3 -u "$m" 2>/dev/null
-    rmdir "$m" 2>/dev/null
-    echo "unmounted card $m"
+    if fusermount -u "$m" 2>/dev/null || fusermount3 -u "$m" 2>/dev/null \
+       || umount "$m" 2>/dev/null; then
+        rmdir "$m" 2>/dev/null
+        echo "unmounted card $m"
+    else
+        echo "COULD NOT UNMOUNT $m - leave it mounted rather than killing fuse2fs;" >&2
+        echo "  a killed daemon wedges the mountpoint and the next run cannot start." >&2
+    fi
 done
 sleep 1
 

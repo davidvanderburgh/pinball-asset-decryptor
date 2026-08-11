@@ -270,21 +270,33 @@ def main():
         "min gap %.0f ms)%s"
         % (HZ, FLIGHT_S * 1000, MIN_GAP_S * 1000, ", DRY RUN" if dry else ""))
 
-    period, gone_since = 1.0 / max(1.0, HZ), None
+    period, gone_since, ever = 1.0 / max(1.0, HZ), None, False
     while True:
         d = read_led()
         if d is None:
-            # The run going away is the ordinary way this exits: watch.sh's
-            # teardown removes dump/padled by design so readers can tell.
-            gone_since = gone_since or time.monotonic()
-            if time.monotonic() - gone_since > GONE_S:
-                say("no padled block for %.0f s - the run is over, %d ball(s) "
-                    "fed" % (GONE_S, f.fed))
-                break
-        else:
-            gone_since = None
-            if f.poll(m, d, time.monotonic()) and once:
-                break
+            # NOT YET AND GONE ARE DIFFERENT THINGS, and reading them as one
+            # made this exit before it had ever done anything - caught on the
+            # first live run, which the offline harness could not have caught
+            # because it writes the block before it starts anything. The shim
+            # creates dump/padled LAZILY, on the first LED frame it decodes,
+            # so a feeder started by watch.sh comes up a minute or so ahead of
+            # it. Waiting is right until the block has been seen once; after
+            # that, it going away is watch.sh's teardown and means the run is
+            # over (removing it is deliberate, so readers can tell).
+            if ever:
+                gone_since = gone_since or time.monotonic()
+                if time.monotonic() - gone_since > GONE_S:
+                    say("no padled block for %.0f s - the run is over, "
+                        "%d ball(s) fed" % (GONE_S, f.fed))
+                    break
+            time.sleep(0.5)
+            continue
+        if not ever:
+            ever = True
+            say("padled block is up - watching")
+        gone_since = None
+        if f.poll(m, d, time.monotonic()) and once:
+            break
         time.sleep(period)
     m.close()
     return 0

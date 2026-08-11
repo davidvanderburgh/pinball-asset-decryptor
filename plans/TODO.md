@@ -135,6 +135,25 @@ These have each been violated at least once and each cost a run or a window:
       `guest (comm=game)` label off its first line. `alive.sh` is the rig's only
       definition of clean, so a stray writer corrupting its first row is its own
       small bug.
+      **★ NARROWED FOR FREE, 2026-08-10 during item 21b's pass, and it is NOT
+      the wedge: that line comes from the LOGIN SHELL.** It printed on a bare
+      `wsl -e bash -lc 'ls ~'` with no run up at all, no emulator, no stranded
+      window — so something in the WSL profile emits it and any helper invoked
+      through a LOGIN shell (`bash -lc`) wears it. That makes it a
+      one-character fix in how alive.sh is invoked rather than a symptom of
+      the strand, and it means the corrupted first row is reproducible on
+      demand with no run at all. Do not spend a run on it.
+      **★ AND A CHEAP WAY TO AVOID THE INTEROP ZOMBIE, same pass, one
+      observation so treat it as a lead:** item 21a's run left the guest as a
+      `Zl` zombie held by a WSL interop Relay, and its handoff blames
+      `Start-Process wsl … watch.sh` from PowerShell for putting the relay in
+      the parent chain. This pass started its run with
+      `wsl -e setsid --fork bash -c "exec … watch.sh"` — setsid as the FIRST
+      process, so the run is a session leader and not the relay's child — and
+      after `killgame.sh` it printed `killed 19; still running: 0` with no
+      zombie and no `wsl --shutdown`. Also worth knowing: backgrounding inside
+      the shell (`… watch.sh & echo started`) does NOT survive `wsl -e`
+      returning, which looks exactly like the run silently never starting.
       **Acceptance:** force the repro (a run on a title with no game ELF, then a
       normal run) and have the rig SAY the picture is missing rather than let it
       be discovered; then state whether the strand still happens once teardown
@@ -381,13 +400,49 @@ These have each been violated at least once and each cost a run or a window:
       measured multiball can say where the line is. It logs every refusal it
       makes on that number, so it is visible rather than silently deciding how
       many balls a multiball gets.
-      **NOT ESTABLISHED — nothing here has met a running game.** No live run
-      this pass.
-      **Resume:** start a run and check the loop on the game's own display —
-      `plunge.py coin` then `plunge.py start` ALONE (no `plunge.py plunge`)
-      must reach BALL 1 with the ball fed by the game's eject, and
-      `~/padball.log` says what the feeder decided. Then play into a multiball
-      for the real acceptance below, and state the repeats.
+      **★★★ (6) VERIFIED LIVE, godzilla_pro, 2026-08-10, on the GAME'S OWN
+      DISPLAY. THE LOOP IS CLOSED: BALL 1 came up with nobody running
+      `plunge.py plunge`.** `plunge.py coin` then `plunge.py start`, and the
+      game fired its own trough eject; the feeder opened TROUGH 6 and closed
+      SHOOTER LANE; the screen showed PLAYER 1 / BALL 1 (screenshot). That is
+      the exact measurement at the top of this item — `coin` + `start` leaving
+      the trough at 6 of 6 — now reading 5 of 6 for the right reason.
+      **Two INDEPENDENT confirmations of the coil identification arrived free,
+      and neither was designed for:** the game drove the eject at **lvl=225**,
+      which is exactly the service menu's own "Trough Eject Power 225 (88%)",
+      and the auto plunger at **lvl=150 = 0x96**, which is exactly what
+      coildecode.py recorded from the ball-search capture ("the AUTO PLUNGER
+      goes out at 0x96 where everything else is 0xff"). The two coils the rig
+      now acts on are named by the table, by item 3's search, and by their own
+      drive strengths.
+      **THE WHOLE BALL CYCLE RAN, three feeds and two launches:** eject →
+      lane → launch → `plunge.py drain` → the game re-served → the feeder fed
+      again → **the game fired its own AUTO PLUNGER** and the feeder launched
+      it. The re-serves were BALL SAVE, correctly (score 00, drained seconds
+      after the plunge), which is why the display stayed on BALL 1 — that is
+      the machine behaving, not the rig failing.
+      **MEASURED, and it retires the one guessed number for now: ZERO
+      refusals in the whole run.** The game never sent a retry burst, so the
+      ~20 ms response beat its retry window every time and
+      `PAD_BALL_MIN_GAP_MS` never fired. It is still a guess for the multiball
+      case, where the spacing is the game's and not the rig's.
+      **A BUG THE OFFLINE HARNESS COULD NOT HAVE FOUND, and it is the reason
+      the first live start did nothing: the shim creates `dump/padled`
+      LAZILY,** on the first LED frame, so a feeder started by watch.sh comes
+      up a minute ahead of it — and "not yet" was being read as "gone", so it
+      announced the run was over and exited having fed nothing. The harness
+      writes the block before it starts anything and could never see it. Fixed:
+      waiting is right until the block has been seen ONCE.
+      **NOT ESTABLISHED — A MULTIBALL, which is this item's actual acceptance.**
+      No multiball was reached: getting one needs a game played into a mode,
+      not scripted pokes, and this run never scored (ball save kept re-serving
+      a 0-score ball). Everything the feed mechanism does for ball two of a
+      multiball it has now done three times for one ball, but that is an
+      argument, not the oracle this item asked for.
+      **Resume:** play a game into a multiball with a run up and read
+      `~/padball.log` beside the screen — the acceptance is 2+ balls in play
+      on the GAME's display, and the log will say how many ejects it answered
+      and whether `PAD_BALL_MIN_GAP_MS` ever refused one. State the repeats.
       **★ DAVID, 2026-08-06: "we will need some sophisticated ball handling
       and clear feedback about how many balls are in play. for example, during
       multiball, many balls are in play."** The feedback clause is 21a, done

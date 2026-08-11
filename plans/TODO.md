@@ -1075,60 +1075,72 @@ These have each been violated at least once and each cost a run or a window:
       session with a save and a load.
 
 - [ ] **41. On turtles_pro (TMNT), the guest HARD-CRASHES (qemu signal 11)
-      while navigating into some service menus.** `S2 D4`
-      **★ DAVID, 2026-08-11: "tmnt locked up when trying to go into some of the
-      service menus."** turtles_pro-1_59_0.1987-upscaled card, WSL,
-      `PAD_PIVOT=1`, watch.sh from the item-39 worktree. The run booted clean
-      and played for ~45 s (ch0/ch1 handing ~30 fps, switches responding), then
+      during ordinary interaction — seen on service-menu entry AND on selecting
+      a character.** `S2 D4`
+      **TWO SIGHTINGS, 2026-08-11, same title, same signature-less qemu
+      signal-11, DIFFERENT triggers — folded into one item because neither
+      captured a signature, so whether it is one fault reached two ways or two
+      faults cannot yet be told apart. It splits the day a `[segv] pc=` shows
+      two different faults.** Run recipe both times:
+      turtles_pro-1_59_0.1987-upscaled card, WSL, `PAD_PIVOT=1`,
+      `PAD_AUDIO_DUMP=30`, watch.sh from the item-39 worktree.
+      **(A) SERVICE MENUS. ★ DAVID: "tmnt locked up when trying to go into some
+      of the service menus."** Booted clean, played ~45 s, then
       **`qemu: uncaught target signal 11 (Segmentation fault) - core dumped`**
-      at 10:48:43 — the guest QEMU raising SIGSEGV, a HARD fault, not the clean
-      thread-return exit. Full app-pane capture: `C:\tmp\item41_turtles_service_menu_segv.log`.
-      **THE ONE PRECURSOR IN THE LOG:** twice while the game was still alive
-      (10:48:07 and 10:48:20) an `ExchangeData: read failed (received 0,
-      expected length=1…)` line printed — the node bus (`nodebus.py`) losing a
-      read, the same line dropped item 23 recorded as "the node bus going away
-      behind them." The crash arrived ~36 s after the first one, with the
-      renderer handing 30.0 fps to the last line. Around them the service
-      buttons were being walked: `[sw]` edges on switches 25/28 (SERVICE
-      SELECT / SERVICE BACK) and `[cabchg]` low nibble stepping
-      0f→0e→0d→0b→07, which is David driving into menus (Enter/-/= = service
-      per the watch banner).
-      **NO SIGNATURE WAS CAPTURED, and that is the first job, same as 36b.** The
-      app log ends on the bare qemu line — no `[segv] pc=…` header, no pc/lr/
-      fault — so this cannot yet be matched to any of item 23's three measured
-      shapes. **Item 23 (the whole "game exits by itself" crash class) was
-      DROPPED 2026-08-11**; its block in the Dropped section still carries those
-      three godzilla_pro signatures (pthread NULL-mutex churn segv
+      at 10:48:43 while the service buttons were walked — `[sw]` on switches
+      25/28 (SERVICE SELECT / SERVICE BACK), `[cabchg]` low nibble stepping
+      0f→0e→0d→0b→07. Capture: `C:\tmp\item41_turtles_service_menu_segv.log`.
+      **(B) CHARACTER SELECT — the sharper, deterministic trigger. ★ DAVID:
+      "i'm getting a seg fault when i tried to select a character."** Booted
+      clean, played ~90 s, David pressed START (switch 36, suffix `k` =
+      keyboard), reached character select, cycled with the FLIPPER buttons
+      (switch 64 RIGHT FLIPPER `k`/`p`, switch 34 LOCKDOWN `p` — TMNT picks a
+      turtle with the flippers), and the guest segfaulted at 11:11:32, ~1 s
+      after the last flipper/lockdown press. Capture:
+      `C:\tmp\item41_turtles_character_select_segv.log`. **This one is a
+      concrete in-game action anyone can repeat — press Start on turtles, cycle
+      turtles with the flippers — where (A) is only "some" menus.**
+      **THE SAME NODE-BUS PRECURSOR IN BOTH, and it is probably NOT the cause:**
+      an `ExchangeData: read failed (received 0, expected length=…)` printed
+      early in each run (10:48:07/10:48:20; 11:10:24/11:10:28) — the node bus
+      (`nodebus.py`) losing a read, the line item 23 recorded as "the node bus
+      going away behind them." In (B) it printed **~70 s before** the crash, so
+      treat it as a symptom of turtles' bus timing, not a trigger.
+      **NEITHER CAPTURED A SIGNATURE, and that is the first job, same as 36b.**
+      Both logs end on the bare qemu line — no `[segv] pc=…` header, no pc/lr/
+      fault — so this cannot yet be matched to any of item 23's three shapes.
+      **Item 23 (the whole "game exits by itself" crash class) was DROPPED
+      2026-08-11**; its block in the Dropped section still carries those three
+      godzilla_pro signatures (pthread NULL-mutex churn segv
       `pc=libpthread+0x8858`; game-code NULL deref `pc=0x51ef7c`; and the
-      signatureless clean thread-return) and the instrument note — read it
-      before starting. **What makes THIS worth a slot where 23 was dropped:** it
-      is a different title (turtles_pro, not godzilla_pro) and it has a
-      USER-ACTION trigger — entering a service menu — that none of item 23's
-      shapes had, so it may reproduce on demand once the menu is isolated.
+      signatureless clean thread-return) — read it before starting. **What makes
+      THIS worth a slot where 23 was dropped:** a different title (turtles_pro),
+      and a DETERMINISTIC user-action trigger (character select) that none of
+      item 23's shapes had.
       **First job (desk + one run): preserve the signature.** watch.sh's exit
       tail prints only the LAST lines of the crash block, so the `[segv] pc=`
       header scrolls off — make it grep and keep the header on exit (36b needs
-      the identical fix; do it once). Then find WHICH menu: David said "some,"
-      not which, so ladder the service menus one at a time and record which
-      entry faults.
-      **NOT ESTABLISHED — do not build on any of it:** whether this is one of
-      item 23's three signatures or a fourth; whether the `ExchangeData` failure
-      is cause or coincidence; and whether it reproduces on a specific menu at
-      all. One sighting, no signature.
-      **Acceptance:** entering the service menu(s) that crashed it on
-      turtles_pro leaves the run alive, stated over a number of repeats and
-      naming which menus were entered — OR the fault reproduces and the newly
-      preserved `[segv] pc=` line names it (and says whether it matches one of
-      item 23's three). Oracle is the guest surviving the menu on its own
-      display, plus the preserved crash header.
-      — S2: single-ball play is unaffected (every other item's runs play), so
-      not S1; what it costs is that the run DIES on entering certain service
-      menus, and those menus are the oracle for item 3 (Coil Test) and item 1d
-      (LED Tests), so it makes those more expensive. Arguable S1, since a hard
-      crash ends the whole session. D4: the mechanism is an uncaptured qemu
-      signal-11, the exact triggering menu is unknown, and the first job is the
-      same exit-reason instrument 36b needs and does not have yet — it could
-      drop to D3 if one menu gives a reliable on-demand repro.
+      the identical fix; do it once). Then run trigger (B) — start a game, cycle
+      characters with the flippers — since it is the repeatable one, and read
+      the preserved pc against (A)'s and against item 23's three.
+      **NOT ESTABLISHED — do not build on any of it:** whether (A) and (B) are
+      the same fault; whether either is one of item 23's signatures or a fourth;
+      whether the `ExchangeData` failure matters; and how reliably (B) repeats
+      (one sighting each). No signature on either.
+      **Acceptance:** on turtles_pro, both starting a game + selecting a
+      character with the flippers AND entering the service menus leave the run
+      alive, stated over a number of repeats — OR the fault reproduces and the
+      newly preserved `[segv] pc=` names it (say whether A and B share a pc, and
+      whether either matches one of item 23's three). Oracle is the guest
+      surviving on its own display plus the preserved crash header.
+      — S2 for now: single-ball play runs (each crash came after ~45-90 s of
+      healthy play), so not "cannot boot"; what it costs is that the run DIES on
+      these interactions and takes the whole session with it. **PROMOTE TO S1 if
+      the next pass confirms character select reliably crashes** — that is the
+      start-a-game path on turtles, so a reliable crash there IS "cannot play
+      turtles." D4: the mechanism is an uncaptured qemu signal-11 with no pc yet
+      and the first job is the same instrument 36b lacks — but trigger (B) is a
+      strong lead to a reliable on-demand repro, which would drop it to D3.
 
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the

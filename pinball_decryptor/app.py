@@ -333,10 +333,10 @@ class App:
             self.window.stop_all_preview_playback()
         except Exception:
             pass
-        # Quitting PAD takes the emulator down WITH it: the game window, the
-        # Controls window and the virtual playfield must not survive as
-        # orphans behind a vanished control surface (the guest alone burns
-        # ~140% CPU forever). Blocking, bounded, best-effort.
+        # Quitting PAD takes the emulator down WITH it: the game window and
+        # the virtual playfield must not survive as orphans behind a vanished
+        # control surface (the guest alone burns ~140% CPU forever).
+        # Blocking, bounded, best-effort.
         try:
             self.window.emulate_shutdown()
         except Exception:

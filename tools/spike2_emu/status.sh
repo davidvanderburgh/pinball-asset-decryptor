@@ -46,11 +46,14 @@ echo "log=$LOG"
 # When the saves last changed. The app's slot list refreshes itself the
 # moment this token moves - a playfield save, a CLI pack or delete - instead
 # of a human pressing Refresh (tester, 2026-08-10: "it should be event
-# based"). Max over the saves DIR mtime (savegame.sh rm -rf's and mkdir's
-# slots inside it, so saves and deletes move it) and every slot.meta (a
-# label rename touches only that file). Absent when nothing is saved yet.
-sm=$(stat -c %Y "$PAD_ROOT/saves" "$PAD_ROOT"/saves/*/slot.meta 2>/dev/null \
-     | sort -n | tail -1)
+# based"). Max over the saves DIR mtime, every per-game DIR (item 39: slots
+# live at saves/<game>/<slot> now, and a save or delete inside a game's
+# directory moves that directory, not saves/ itself) and every slot.meta at
+# either depth (a label rename touches only that file). Absent when nothing
+# is saved yet.
+sm=$(stat -c %Y "$PAD_ROOT/saves" "$PAD_ROOT"/saves/*/ \
+     "$PAD_ROOT"/saves/*/slot.meta "$PAD_ROOT"/saves/*/*/slot.meta \
+     2>/dev/null | sort -n | tail -1)
 [ -n "$sm" ] && echo "saves_mtime=$sm"
 
 if [ -z "$pid" ]; then

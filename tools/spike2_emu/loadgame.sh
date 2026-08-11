@@ -12,10 +12,26 @@ RIG=$(cd "$(dirname "$0")" && pwd)
 SLOT=${1:-quicksave}
 CRIU=${CRIU:-/var/tmp/criubuild/criu/criu/criu}
 
-# A filename, never a path - same rule as savegame.sh, same GUI feeding it.
+# Filenames, never paths - same rule as savegame.sh, same GUI feeding it.
+# ★ ITEM 39: slots are per game (saves/<game>/<slot>), and the argument may
+# name the game explicitly ("godzilla_pro/slot1") or stay bare ("slot1"),
+# in which case the game is the RUNNING guest's - which is what every
+# existing caller means by it.
+ok_name() {
+    case "$1" in ""|*[!A-Za-z0-9_.-]*|.|..) return 1 ;; esac
+    return 0
+}
+SGAME=""
 case "$SLOT" in
-    ""|*[!A-Za-z0-9_.-]*|.|..)
-        echo "loadgame: bad slot name '$SLOT'"; exit 2 ;;
+*/*)
+    SGAME=${SLOT%%/*}; SLOT=${SLOT#*/}
+    case "$SLOT" in */*) echo "loadgame: bad slot name"; exit 2 ;; esac
+    ok_name "$SGAME" && ok_name "$SLOT" \
+        || { echo "loadgame: bad slot name '$SGAME/$SLOT'"; exit 2; }
+    ;;
+*)
+    ok_name "$SLOT" || { echo "loadgame: bad slot name '$SLOT'"; exit 2; }
+    ;;
 esac
 
 [ "$(id -u)" = 0 ] || { echo "loadgame: needs root. Use: wsl -u root -e bash $0 [slot]"; exit 2; }
@@ -25,13 +41,29 @@ esac
 # path is the slot's own recorded rootfs, so try the common locations.
 PID=$(pgrep -x game | head -1)
 ROOT=""
-[ -n "$PID" ] && ROOT=$(tr '\0' '\n' < "/proc/$PID/environ" 2>/dev/null | sed -n 's/^PAD_ROOT=//p' | head -1)
+GGAME=""
+if [ -n "$PID" ]; then
+    ROOT=$(tr '\0' '\n' < "/proc/$PID/environ" 2>/dev/null | sed -n 's/^PAD_ROOT=//p' | head -1)
+    GGAME=$(tr '\0' '\n' < "/proc/$PID/environ" 2>/dev/null | sed -n 's/^PAD_GAME=//p' | head -1)
+fi
 # If no guest is up, fall back to the rootfs padpath would pick, then to the
 # slot meta once found.
 [ -n "$ROOT" ] || { . "$RIG/padpath.sh"; ROOT=$PAD_ROOT; }
+[ -n "$SGAME" ] || SGAME=$GGAME
 
-DIR=$ROOT/saves/$SLOT
-[ -f "$DIR/slot.meta" ] || { echo "loadgame: no save in slot '$SLOT' (looked in $DIR)"; exit 1; }
+# The per-game path first; the LEGACY bare path is honoured only while its
+# meta agrees about the game, so a bare name can never quietly load another
+# title's save - that is the exact confusion this layout ended.
+DIR=""
+if [ -n "$SGAME" ] && [ -f "$ROOT/saves/$SGAME/$SLOT/slot.meta" ]; then
+    DIR=$ROOT/saves/$SGAME/$SLOT
+elif [ -f "$ROOT/saves/$SLOT/slot.meta" ]; then
+    MGAME=$(sed -n 's/^game=//p' "$ROOT/saves/$SLOT/slot.meta" | head -1)
+    if [ -z "$SGAME" ] || [ "$MGAME" = "$SGAME" ]; then
+        DIR=$ROOT/saves/$SLOT
+    fi
+fi
+[ -n "$DIR" ] || { echo "loadgame: no save in slot '$SLOT'${SGAME:+ for $SGAME} (looked under $ROOT/saves)"; exit 1; }
 # The slot's own recorded rootfs wins - it is where the guest really lived.
 SROOT=$(sed -n 's/^root=//p' "$DIR/slot.meta")
 [ -n "$SROOT" ] && ROOT=$SROOT

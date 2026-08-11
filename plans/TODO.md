@@ -74,75 +74,6 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **39. Consolidate the two switch windows into one, to the right of the
-      playfield — and make the no-artwork view fit on a screen.** `S2 D3`
-      **★ DAVID, 2026-08-10: "i want to consolidate the two switch windows for
-      the emulator. there are too many windows. i do like the feedback and
-      interface of the small switch window, having a tight and compact view is
-      beneficial overall. with the virtual playfield, we should order them to
-      the right of the playfield since we have more horizontal space to work
-      with. for games without a virtual playfield, we need to compact the view
-      since it is so large and overflows even on large monitors. overall, we
-      need to make it look very nice and clean and elegant."**
-      **THE TWO WINDOWS, NAMED so nobody guesses which.** (a) `Controls - Spike
-      2 emulator` — `legend_open()`, `padglhost.c:1161`, an X11 window inside
-      WSLg, FIXED at 430 x (NBINDS*20+124) = **430x644**, 26 bind rows, and it
-      is the one carrying the feedback David likes: `legend_draw()`
-      inverse-videos a row while its key is down or latched
-      (`padglhost.c:1217`, off `key_down[]` / `key_latch[]`). (b) `<game> -
-      virtual playfield` — `playfield.py`, Tk, two views: `Field` (artwork) and
-      `Schematic` (`:2128`, the no-artwork fallback). The game window itself is
-      the third and is not in scope.
-      **ASSUMPTION, written in rather than asked: "to the right of the
-      playfield" means ONE window with the switch column packed to the right of
-      the artwork**, not a second window parked beside it — a positioned window
-      is still one of the "too many".
-      **THE STRUCTURAL OBSTACLE, and it is why this is not a Tk reflow.** The
-      legend is an X11 window drawn by the C renderer inside WSLg; the playfield
-      is a **Windows** Tk process launched through interop, because there is no
-      Tk inside the distro at all (item 37 established it — its `~` is the
-      Windows profile). The legend cannot be reparented into it. What makes the
-      merge feasible anyway: the rows are derivable host-side
-      (`binds_resolve()` resolves them by NAME out of
-      `$PAD_TABLES/$PAD_GAME/switch_list.txt`, item 27) and item 21a already
-      gave `playfield.py` a 10 Hz read of the whole merged switch array
-      (`PAD_PF_SW_HZ`), so the highlight can come off switch STATE. What does
-      NOT cross: `key_down[]`/`key_latch[]` (which key is physically held, as
-      against which switch is closed) and the `(n/a)` marking of a dead row.
-      **THREE THINGS THE LEGEND WINDOW ALSO DOES, so nobody deletes it and then
-      wonders:** it is a second keyboard target on purpose (`XSelectInput` takes
-      KeyPress/KeyRelease on it too, `padglhost.c:1178-1180`, "so whichever of
-      the two has focus can drive the game"); item 37's `winreset.sh` clears a
-      `legend` line in `~/.pad_windows`; and item 19 planned to put its replay
-      keys "in the Controls legend" — **19 was DROPPED 2026-08-11, so that third
-      constraint is gone** and this item no longer has to keep room for it.
-      **THE OVERFLOW HALF IS ESTABLISHED AT THE DESK, and it is worse than
-      "large".** `Schematic.__init__` sizes itself `w = COL_W * len(cols)` at
-      **COL_W = 300 per node column with NO cap**, and `h = ROW_H*tall + 8`
-      capped at `screenheight - 160` (`playfield.py:2192-2196`) — **and there is
-      no scrolling anywhere in `playfield.py`: zero `Scrollbar`, zero
-      `scrollregion`, zero `yview`/`xview`.** So the width is unbounded and
-      whatever the height cap clips is unreachable by mouse rather than merely
-      offscreen.
-      **Acceptance:** one switch window where there were two, on a title WITH
-      artwork (sitting to its right) and on one WITHOUT — and on the second,
-      every switch row reachable with the whole window on screen. State the
-      screen size and the two titles used (star_wars_le has no device table per
-      item 27, so it should be the Schematic case — confirm rather than assume).
-      `zorder.py --all` counts the windows; David's eyes are the oracle for
-      "clean and elegant", so budget his look rather than closing on a
-      screenshot.
-      — S2: nothing stops play and the keyboard still reaches every bound
-      switch, so not S1; what it costs is that on the no-artwork titles the
-      clipped rows cannot be clicked at all, and that view is the only mouse
-      route those titles have. Arguable as S3, since David filed it as an
-      appearance complaint. D3: it needs a run, the fault is visible the moment
-      you look, and every piece is already read off the source above — but it
-      spans `padglhost.c` (a rebuild, so no run may be live) and a Windows Tk
-      process, and window placement in this rig is the ground items 22, 37 and
-      38 all sit on (never `SetWindowPos`; WSLg ignores the create-time
-      position).
-
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
       instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**
@@ -1648,6 +1579,54 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **39. Consolidate the two switch windows into one, to the right of the
+      playfield — and make the no-artwork view fit on a screen.** DONE
+      2026-08-11, `df74030` (branch `item/39`, 7 commits `32913f1`..`df74030`).
+      **Closed on David's "looks good to me", after four rounds of his
+      feedback grew it into the emulator's whole control surface.**
+      **(1) One window.** The Controls X11 window no longer opens
+      (`PAD_GL_LEGEND=1` reverts, no rebuild); padglhost exports its resolved
+      `binds[]` to `dump/padbinds` (tmp+rename; watch.sh clears it at start)
+      and the playfield renders it — the table keeps ONE home in the C file,
+      `keybinds.py` owns the parse. `zorder.py` on a live run: GAME +
+      PLAYFIELD, nothing else.
+      **(2) The key panel**, docked right of the artwork: keys, a service
+      cluster drawn as the real coin-door panel (green BACK, red -/+, black
+      SELECT, press-and-hold through the artwork markers' own SwitchDriver),
+      a COIN DOOR click toggle (amber "48V off, coils dead" when open), and
+      the ball controls (TroughPanel grew `label_below`). One control per
+      action: the service/door/trough binds left the key list, their key
+      labels sit ON the widgets, made-state is a gold ring. Highlight is the
+      MERGED array — the row lights when the GAME can see the press, whoever
+      made it.
+      **(3) Keyboard with the playfield focused** — a new write path, since
+      the old one spawns wsl.exe per action (~80-200 ms): `swkeys.py` holds
+      the block open and reads "<id> <level>" lines (releases all on EOF),
+      `SwitchPipe` keeps one per session (pre-warmed at window open),
+      `KeyInput` binds the exported rows, swallows X auto-repeat with a
+      10 ms deferred release, drops keys typed into text widgets. Live proof:
+      SendInput held Left 2000 ms into the FOCUSED playfield → the guest
+      logged `[sw] +60p … -60p`, 1907 ms — tag `p` names the pipe.
+      **(4) The Schematic reflowed:** node headers inline, columns cut to the
+      screen's real height, measured column width, horizontal-scroll
+      backstop. star_wars_le: ~2100 px wide with mouse-unreachable clipped
+      rows → ~800 px including the panel, every row on screen.
+      **(5) Ten save slots PER GAME** (David: "i thought we had 10 slots per
+      game?" — they were global): `saves/<game>/<slot>`, slots.sh migrates
+      the flat layout on sight (ran against the real disk, 4 slots, labels
+      intact), savegame/loadgame resolve the game from the running guest so
+      every caller keeps passing bare `slotN`, status.sh's saves_mtime
+      watches both depths, the app's table keeps the qualified ref as row id.
+      A bare name can no longer resolve to another title's save.
+      **Instrument lesson kept:** a stale playfield window survives on the
+      desktop and `raise_existing()` raises IT instead of launching new code
+      — close the old window when a panel looks stale.
+      **NOT re-verified at close, stated:** the first live save+load in the
+      per-game layout (the restore machinery is untouched; only the
+      directory the wrappers resolve moved), and a live star_wars_le run (no
+      card on this machine; its schematic verified offline on its real
+      tables).
 
 - [x] **36a. Loading a save state on a card-run title, and a failed load that
       destroyed the rootfs.** DONE 2026-08-10, `322f688` (branch `item/36`).

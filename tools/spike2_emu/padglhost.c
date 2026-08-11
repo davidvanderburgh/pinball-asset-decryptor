@@ -866,6 +866,52 @@ static void binds_resolve(void)
     }
 }
 
+/* ★ ITEM 39: the Controls legend's CONTENT, exported for the playfield
+ * window to draw. The legend window itself no longer opens by default (David:
+ * "there are too many windows"); playfield.py renders the keys in a panel
+ * beside the artwork instead, and this file is how it knows them WITHOUT a
+ * second copy of binds[] - the table and its per-title resolution stay here,
+ * the playfield only renders what this writes. That keeps the rig's "never
+ * let two scripts define the same fact" rule intact: which key does what has
+ * exactly one home, and it is still this file.
+ *
+ * Written into PAD_SW_SHM's own directory - the same dump/ the playfield
+ * already reads padled and padsw from, so the reader needs no new path
+ * plumbing. tmp+rename, because the playfield POLLS for this file (it may
+ * open before the renderer) and must never parse half of one. Tab-separated
+ * (a key can be "KP Ent"): key, flags (c=cabinet section, t=toggle, else -),
+ * ids comma-joined ("0" = not on this title, drawn dim), label. */
+static void binds_export(void)
+{
+    const char *shm = getenv("PAD_SW_SHM");
+    char path[560], tmp[576];
+    const char *slash;
+    FILE *f;
+    int i, k;
+    if (!shm || !*shm) return;
+    slash = strrchr(shm, '/');
+    if (!slash) return;
+    snprintf(path, sizeof path, "%.*s/padbinds", (int)(slash - shm), shm);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    f = fopen(tmp, "w");
+    if (!f) return;
+    fprintf(f, "# key\tflags\tids\tlabel  (padglhost binds[], resolved for "
+               "%s; c=cabinet t=toggle, ids 0 = not on this title)\n",
+            getenv("PAD_GAME") ? getenv("PAD_GAME") : "?");
+    for (i = 0; i < NBINDS; i++) {
+        fprintf(f, "%s\t%s%s%s\t", binds[i].key,
+                binds[i].live ? "c" : "", binds[i].toggle ? "t" : "",
+                (binds[i].live || binds[i].toggle) ? "" : "-");
+        if (!binds[i].ids[0]) fputc('0', f);
+        for (k = 0; k < 7 && binds[i].ids[k]; k++)
+            fprintf(f, "%s%d", k ? "," : "", binds[i].ids[k]);
+        fprintf(f, "\t%s\n", binds[i].what);
+    }
+    fclose(f);
+    if (rename(tmp, path) == 0)
+        fprintf(stderr, "[padglhost] key binds exported to %s\n", path);
+}
+
 static struct padsw_shm *swshm;
 static unsigned char key_down[NBINDS];      /* momentary keys currently held */
 static unsigned char key_latch[NBINDS];     /* toggles currently latched     */
@@ -1311,7 +1357,15 @@ static int win_open(void)
     sw_src_tag = 'w';                    /* not a key press - see sw_publish() */
     sw_publish();
     sw_src_tag = 'k';
-    if (getenv("PAD_GL_LEGEND") == 0 || getenv("PAD_GL_LEGEND")[0] != '0')
+    /* ★ ITEM 39: the legend window no longer opens BY DEFAULT - its content
+     * is exported (binds_export) and drawn by the playfield window instead,
+     * which is one window fewer on the desktop. PAD_GL_LEGEND=1 brings the
+     * old window back with no rebuild, the same A/B convention as
+     * PAD_GL_RAISE; every legend_* path is already guarded on legend_win, so
+     * with it unset the restore, the raise and the redraw all no-op. What is
+     * DELIBERATELY lost with it: the legend was a second keyboard target -
+     * with it off, keys work in the game window only, and watch.sh says so. */
+    if (getenv("PAD_GL_LEGEND") && getenv("PAD_GL_LEGEND")[0] == '1')
         legend_open(scr);
     /* Both windows are mapped by here; the delayed restore counts from now. */
     win_mapped_s = now_s();
@@ -3435,8 +3489,10 @@ int main(int argc, char **argv)
 
     /* item 27: resolve the key binds from the title's own switch list BEFORE
      * the windows exist - the legend draws from binds[] and the window-open
-     * latch closes whatever the 'B' row holds. */
+     * latch closes whatever the 'B' row holds. Item 39 then exports the
+     * resolved table for the playfield window's key panel. */
     binds_resolve();
+    binds_export();
 
     /* Open the window FIRST: the EGL display should be the X display it lives
      * on, and the surface below has to be a window surface rather than the

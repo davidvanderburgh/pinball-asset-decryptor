@@ -44,10 +44,26 @@ find_root() {
 }
 SAVES=$(find_root) || { echo "slots: no saves directory found"; exit 1; }
 
-# A slot name is a FILENAME under $SAVES, never a path - it reaches rm -rf.
+# A name component is a FILENAME under $SAVES, never a path - it reaches
+# rm -rf.
 ok_name() {
     case "$1" in ""|*[!A-Za-z0-9_.-]*|.|..) return 1 ;; esac
     return 0
+}
+# ★ ITEM 39: SLOTS ARE PER GAME - $SAVES/<game>/<slot>. David: "i thought we
+# had 10 slots per game?" They were 10 GLOBAL slots that every game shared,
+# which is how turtles' picker came to offer a godzilla save as slot 1. A
+# slot is now addressed as <game>/<slot>; a bare name is a LEGACY slot still
+# at the top level (pre-migration, or one whose meta never recorded a game).
+slot_ref() {  # validates $1, bare or game/slot; both components filename-safe
+    case "$1" in
+    */*)
+        g=${1%%/*}; s=${1#*/}
+        case "$s" in */*) return 1 ;; esac
+        ok_name "$g" && ok_name "$s" ;;
+    *)
+        ok_name "$1" ;;
+    esac
 }
 # Only ever touch a directory that really is a slot (has the checkpoint's
 # metadata), so a stray directory someone made by hand cannot be deleted.
@@ -57,13 +73,30 @@ meta() {  # meta <slot> <key>
     sed -n "s/^$2=//p" "$SAVES/$1/slot.meta" 2>/dev/null | head -1
 }
 
+# --- MIGRATE LEGACY SLOTS the moment any caller arrives -------------------
+# A top-level slot whose meta names its game moves into that game's
+# directory: same filesystem, so the mv is a rename, not a copy of 60 MB.
+# One with no recorded game stays bare and keeps working as before.
+for _d in "$SAVES"/*/; do
+    [ -d "$_d" ] || continue
+    _s=${_d%/}; _s=${_s##*/}
+    is_slot "$_s" || continue
+    _g=$(meta "$_s" game)
+    ok_name "$_g" || continue
+    mkdir -p "$SAVES/$_g"
+    [ -e "$SAVES/$_g/$_s" ] || mv "$SAVES/$_s" "$SAVES/$_g/$_s"
+done
+
 case "$CMD" in
 list)
+    # Both levels: per-game slots as <game>/<slot>, plus any legacy bare
+    # slot the migration could not place. The name field IS the reference
+    # every other command takes, so a parser can hand it straight back.
     echo "root|$SAVES"
     total=0
-    for d in "$SAVES"/*/; do
+    for d in "$SAVES"/*/ "$SAVES"/*/*/; do
         [ -d "$d" ] || continue
-        s=${d%/}; s=${s##*/}
+        s=${d%/}; s=${s#"$SAVES"/}
         is_slot "$s" || continue
         bytes=$(du -sb "$SAVES/$s" 2>/dev/null | cut -f1)
         bytes=${bytes:-0}
@@ -78,10 +111,10 @@ list)
     echo "free|$(df -B1 --output=avail "$SAVES" 2>/dev/null | tail -1 | tr -d ' ')"
     ;;
 label)
-    SLOT=${2:?usage: slots.sh label <slot> <label...>}
+    SLOT=${2:?usage: slots.sh label <game/slot> <label...>}
     shift 2
     LABEL=$(printf '%s' "$*" | tr '\n\r|' '   ')
-    ok_name "$SLOT" || { echo "slots: bad slot name '$SLOT'"; exit 2; }
+    slot_ref "$SLOT" || { echo "slots: bad slot name '$SLOT'"; exit 2; }
     is_slot "$SLOT" || { echo "slots: no such slot '$SLOT'"; exit 1; }
     M=$SAVES/$SLOT/slot.meta
     [ -f "$M" ] || : > "$M"
@@ -90,23 +123,27 @@ label)
     echo "slots: '$SLOT' label is now '${LABEL:-<none>}'"
     ;;
 delete)
-    SLOT=${2:?usage: slots.sh delete <slot>}
-    ok_name "$SLOT" || { echo "slots: bad slot name '$SLOT'"; exit 2; }
+    SLOT=${2:?usage: slots.sh delete <game/slot>}
+    slot_ref "$SLOT" || { echo "slots: bad slot name '$SLOT'"; exit 2; }
     is_slot "$SLOT" || { echo "slots: no such slot '$SLOT'"; exit 1; }
     rm -rf "${SAVES:?}/$SLOT"
+    # A game directory with nothing left in it is noise, not state.
+    rmdir "$SAVES/${SLOT%%/*}" 2>/dev/null
     echo "slots: deleted '$SLOT'"
     ;;
 pack)
     # Compress a RAW slot in place (new saves pack themselves; this is for
     # slots from before packing existed). Same tar|zstd shape as savegame.sh,
     # slot.meta kept plain beside the pack.
-    SLOT=${2:?usage: slots.sh pack <slot>}
-    ok_name "$SLOT" || { echo "slots: bad slot name '$SLOT'"; exit 2; }
+    SLOT=${2:?usage: slots.sh pack <game/slot>}
+    slot_ref "$SLOT" || { echo "slots: bad slot name '$SLOT'"; exit 2; }
     is_slot "$SLOT" || { echo "slots: no such slot '$SLOT'"; exit 1; }
     [ -f "$SAVES/$SLOT/slot.tar.zst" ] \
         && { echo "slots: '$SLOT' is already packed"; exit 0; }
     command -v zstd >/dev/null 2>&1 || { echo "slots: no zstd"; exit 1; }
-    PACK=$SAVES/.pack.$SLOT.$$
+    # tr, because the ref may carry the game's slash and the scratch file
+    # must stay a single name at the top level.
+    PACK=$SAVES/.pack.$(printf '%s' "$SLOT" | tr / _).$$
     if tar -C "$SAVES/$SLOT" -cf - --exclude='./slot.meta' . 2>/dev/null \
             | zstd -3 -T0 -q -f -o "$PACK"; then
         find "$SAVES/$SLOT" -mindepth 1 ! -name slot.meta -delete
@@ -119,7 +156,8 @@ pack)
     fi
     ;;
 *)
-    echo "usage: slots.sh list | label <slot> <text...> | delete <slot> | pack <slot>"
+    echo "usage: slots.sh list | label <game/slot> <text...> |" \
+         "delete <game/slot> | pack <game/slot>"
     exit 2
     ;;
 esac

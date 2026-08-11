@@ -120,12 +120,14 @@ import sys
 import threading
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coilact
 import coilmap
 import gameinfo
+import keybinds
 import mktables
 import padpath
 import padsw
@@ -255,6 +257,14 @@ SW_PATH = (os.environ.get("PAD_SW_FILE")
            or os.path.join(padpath.dump() or "", "padsw"))
 PADSW_MAGIC = padsw.MAGIC
 SW_HELD, SW_COIN_DOOR = padsw.OFF_MRG, 33
+
+#: The key binds padglhost exports at startup (item 39) - the content of the
+#: retired Controls window, drawn by THIS window's key panel instead. Same
+#: directory as padled and padsw; keybinds.py owns the parse. PAD_PF_BINDS
+#: is the offline escape hatch, the same shape as PAD_SW_FILE above: a file
+#: written by hand turns the panel into something judgeable without a run.
+BINDS_PATH = (os.environ.get("PAD_PF_BINDS")
+              or os.path.join(padpath.dump() or "", "padbinds"))
 
 #: This directory, as WSL sees it - the helpers below are run inside WSL through
 #: interop, so they cannot be handed the Windows path this file was loaded from.
@@ -937,11 +947,13 @@ class TroughPanel:
     #: numbers are the part that makes the ORDER checkable, so they get room.
     NUM_H = 12
 
-    def __init__(self, cv, positions, how, x, y, anchor="sw", on_ball=None):
+    def __init__(self, cv, positions, how, x, y, anchor="sw", on_ball=None,
+                 label_below=False, wrap=0):
         self.cv = cv
         self.positions = positions
         self.how = how
         self.on_ball = on_ball
+        self.label_below = label_below
         self.items = []
         self.balls = []
         self.drawn = []
@@ -998,8 +1010,15 @@ class TroughPanel:
         # The caption sits to the RIGHT of the balls rather than above them:
         # this panel is pinned to the bottom of the artwork and a line above
         # the balls would be the line closest to the playfield markers.
-        self.label = cv.create_text(x0 + w + 6, cy, anchor="w", fill="#ddd",
-                                    font=("Consolas", 8), text="")
+        # UNLESS label_below (item 39): on the key panel there is no room to
+        # the right, so the caption wraps UNDER the balls at `wrap` px.
+        if label_below:
+            self.label = cv.create_text(x0 + 1, y0 + h + 4, anchor="nw",
+                                        fill="#ddd", font=("Consolas", 8),
+                                        text="", width=wrap or 0)
+        else:
+            self.label = cv.create_text(x0 + w + 6, cy, anchor="w", fill="#ddd",
+                                        font=("Consolas", 8), text="")
         self.items.append(self.label)
         self._box = (x0, y0, x0 + w, y0 + h)
         self._text = None
@@ -1038,11 +1057,14 @@ class TroughPanel:
             # (offline check, 2026-08-10). The width is not known until Tk has
             # laid the text out, so it is asked for afterwards rather than
             # guessed at, and the rect was created first so it stays behind.
-            b = self.cv.bbox(self.label)
-            x0, y0, x1, y1 = self._box
-            if b:
-                x1 = max(x1, b[2] + 5)
-            self.cv.coords(self.bg, x0, y0, x1, y1)
+            # A label_below panel skips this: it only ever draws on the key
+            # panel, whose background is already the readable dark.
+            if not self.label_below:
+                b = self.cv.bbox(self.label)
+                x0, y0, x1, y1 = self._box
+                if b:
+                    x1 = max(x1, b[2] + 5)
+                self.cv.coords(self.bg, x0, y0, x1, y1)
 
     def destroy(self):
         for i in self.items:
@@ -1084,6 +1106,14 @@ def poll_switches(view):
         view.cv.itemconfig(dot, fill=SW_MADE if made else "")
     if view.trough_panel is not None:
         view.trough_panel.update(view.sw.closed(), trough_text(view.sw))
+    # The key panel (item 39) rides the same read. It can be missing at
+    # window open - padbinds is written by padglhost, which may be seconds
+    # behind - so keep asking for it on the switch table's cadence.
+    if view.key_panel is None and time.monotonic() >= view._binds_next:
+        view._binds_next = time.monotonic() + SWITCH_POLL_S
+        view.key_panel = attach_key_panel(view)
+    if view.key_panel is not None:
+        view.key_panel.update(view.sw)
     return True
 
 
@@ -1108,13 +1138,532 @@ def trough_text(watch):
     return txt if watch.how == "named" else txt + "   (positions assumed)"
 
 
+class KeyPanel:
+    """The keyboard -> switches reference, docked beside the playfield.
+
+    ★ ITEM 39. This IS the retired Controls window's content - David: "i do
+    like the feedback and interface of the small switch window" - moved into
+    this window so a run opens two windows instead of three. The rows come
+    from dump/padbinds, which padglhost exports after resolving binds[] for
+    the title (keybinds.py parses it), so which key does what still has
+    exactly one home and it is still the C file.
+
+    THE HIGHLIGHT IS SWITCH STATE, NOT KEY STATE, and that is an upgrade
+    rather than a compromise. The old legend inverse-videoed a row off
+    key_down[] - the X event, this side of everything that can go wrong. This
+    panel reads the MERGED array (the same paced read the dots and the trough
+    panel hang off), which is what the GAME is being handed - so a row lights
+    when the game can see the press, whoever made it: a key, a click on the
+    artwork, or a script. Item 17 exists because those two answers differ.
+
+    KEYS WORK IN THIS WINDOW TOO (KeyInput + SwitchPipe): the same exported
+    rows that draw this panel bind the window's keys, and the edges ride a
+    persistent WSL helper instead of the ~80 ms-per-action spawn path, so a
+    flipper key is playable from here. The game window keeps its own X
+    keyboard exactly as before; the guest merges the two writers by last
+    edge, which is the machinery item 7 built.
+
+    ★ THE SERVICE BUTTONS ARE CLICKABLE, drawn as the coin-door cluster on the
+    real machine (David's reference photo: green BACK, red -/+, black SELECT,
+    "Press SELECT for SERVICE MENU"). Press-and-hold, exactly like a switch
+    marker on the artwork - the mouse button's length IS the closure - through
+    the same SwitchDriver, so the ~80 ms spawn cost is fine here: service
+    navigation is not a flipper. The ids come from the exported rows, not from
+    a second table. And the COIN DOOR is a click toggle, because on the real
+    machine the door is a thing that stays where you put it: open kills 48V
+    (the game says so on its own screen), close restores it.
+
+    ★ ONE CONTROL PER ACTION, NOT A ROW AND A BUTTON (David: "we need to
+    consolidate the keyboard inputs and the button inputs for the service
+    buttons since it looks weird to have them duplicated. maybe put the
+    keyboard inputs on or around the buttons somehow?"). The four service
+    binds, the door and the trough latch do NOT appear in the key list; their
+    key labels sit ON their widgets instead - under each service button, on
+    the door bar, beside the BALLS header - in the same blue every other key
+    wears, so the key column and the widgets read as one system.
+
+    THE BALL CONTROLS LIVE HERE TOO (David: "move the ball controls to the
+    right panel as well") - add_trough() puts the six clickable ball positions
+    at the panel's bottom, and the view keeps pointing its `trough_panel` at
+    whatever was built, so poll_switches() has one update path wherever the
+    trough is drawn.
+    """
+
+    ROW_H = 17
+    PAD = 10
+    #: The panel's own colours. Background matches the window's bars (#111);
+    #: the key column takes the schematic's node-header blue so "the thing you
+    #: press" reads apart from "what it does" at a glance; the made highlight
+    #: is the legend's inverse video, kept because its punch is the feedback
+    #: David asked to keep.
+    BG, KEY_FG, LAB_FG, DIM = "#111", "#7ecbff", "#d8d8d8", "#555"
+    HIT_BG, HIT_FG = "#e8e8e8", "#000"
+
+    #: The binds that are drawn as WIDGETS rather than list rows - the
+    #: consolidation above. Labels, because that is the identity the export
+    #: carries; the C table never renames its platform rows.
+    SVC_ORDER = ("Service Back", "Service Minus", "Service Plus",
+                 "Service Select")
+    DOOR_LABEL = "Coin Door Closed"
+
+    def __init__(self, parent, rows, drv):
+        self.drv = drv
+        f9 = tkfont.Font(family="Consolas", size=9)
+        f9b = tkfont.Font(family="Consolas", size=9, weight="bold")
+        f8 = tkfont.Font(family="Consolas", size=8)
+        self._f8, self._f9, self._f9b = f8, f9, f9b
+        self._svc_rows = {r["label"]: r for r in rows
+                          if r["label"] in self.SVC_ORDER and r["ids"]}
+        self._door_row = next((r for r in rows
+                               if r["label"] == self.DOOR_LABEL and r["ids"]),
+                              None)
+        self._trough_row = next((r for r in rows
+                                 if r["toggle"] and len(r["ids"]) > 1), None)
+        widget_rows = (set(map(id, self._svc_rows.values()))
+                       | {id(self._door_row), id(self._trough_row)})
+        self.rows = [r for r in rows if id(r) not in widget_rows]
+        keyw = max([f9b.measure("/".join(r["keys"])) for r in self.rows] + [30])
+        labw = max([f9.measure(r["label"]) for r in self.rows] + [30])
+        sufw = f9.measure("[off]")
+        w = self.PAD + 10 + keyw + 10 + labw + 8 + sufw + self.PAD
+        # The service cluster needs room for a key label under each button
+        # ("Enter/KP Ent" is the widest); the list must not be what caps it.
+        if self._svc_rows:
+            need = max(f8.measure("/".join(r["keys"])) + 14
+                       for r in self._svc_rows.values())
+            w = max(w, 2 * self.PAD + 4 * max(need, 66))
+        self._w = w
+        # Two section headers at most (cabinet first in the file, playfield
+        # after), a title line and a hint line under the rows.
+        nhdr = len(set(r["cabinet"] for r in self.rows))
+        h = 30 + nhdr * (self.ROW_H + 6) + len(self.rows) * self.ROW_H + 26
+        self.cv = tk.Canvas(parent, width=w, height=h, bg=self.BG,
+                            highlightthickness=0)
+        self._items, self._drawn = [], []
+
+        x_dot = self.PAD + 3
+        x_key = self.PAD + 10 + keyw            # right edge of the key column
+        x_lab = x_key + 10
+        x_suf = w - self.PAD
+        y = 20
+        self.cv.create_text(self.PAD, y, anchor="w", fill=self.KEY_FG,
+                            font=f9b, text="KEYBOARD")
+        self.cv.create_text(x_suf, y, anchor="e", fill="#777", font=f8,
+                            text="works here and in the game window")
+        y += 8
+        section = None
+        for r in self.rows:
+            if r["cabinet"] != section:
+                section = r["cabinet"]
+                y += 8
+                self.cv.create_text(self.PAD, y + 4, anchor="w",
+                                    fill="#8a8a8a", font=f8,
+                                    text="CABINET" if section else "PLAYFIELD")
+                y += self.ROW_H
+            box = self.cv.create_rectangle(self.PAD - 4, y - 8, w - self.PAD + 4,
+                                           y + 9, fill="", outline="")
+            fg = self.DIM if r["na"] else None
+            dot = self.cv.create_oval(x_dot - 3, y - 3 + 1, x_dot + 3, y + 3 + 1,
+                                      fill="", outline="")
+            key = self.cv.create_text(x_key, y + 1, anchor="e",
+                                      fill=fg or self.KEY_FG, font=f9b,
+                                      text="/".join(r["keys"]))
+            lab = self.cv.create_text(x_lab, y + 1, anchor="w",
+                                      fill=fg or self.LAB_FG, font=f9,
+                                      text=r["label"])
+            suf = self.cv.create_text(x_suf, y + 1, anchor="e",
+                                      fill=self.DIM, font=f9,
+                                      text="n/a" if r["na"] else "")
+            self._items.append((box, dot, key, lab, suf))
+            self._drawn.append(None)
+            y += self.ROW_H
+        self.cv.create_text(self.PAD, y + 10, anchor="w", fill="#777", font=f8,
+                            text="green dot = switch made")
+        y += 24
+
+        # ---- THE SERVICE CLUSTER, drawn as the real coin-door panel -------
+        # ONE control per action: each button wears its own key label in the
+        # key column's blue, and these binds are NOT in the list above.
+        self._svc_held = None
+        self._svc_btns = []            # (oval, switch id, base ring colour)
+        svc = [("Service Back", "BACK", "", "#1f9d4e", "#0d5c2a", "#dff5e6"),
+               ("Service Minus", "< -", "-", "#d43535", "#7a1717", "#ffffff"),
+               ("Service Plus", "+ >", "+", "#d43535", "#7a1717", "#ffffff"),
+               ("Service Select", "SELECT", "", "#1c1c1c", "#777", "#d8d8d8")]
+        if len(self._svc_rows) == 4:
+            y += 12
+            self.cv.create_text(self.PAD, y, anchor="w", fill="#8a8a8a",
+                                font=f8, text="SERVICE  -  click and hold")
+            y += 28
+            step = (w - 2 * self.PAD) // 4
+            r = 14
+            for k, (lbl, sub, glyph, fill, ring, subfg) in enumerate(svc):
+                row = self._svc_rows[lbl]
+                cx = self.PAD + step // 2 + k * step
+                btn = self.cv.create_oval(cx - r, y - r, cx + r, y + r,
+                                          fill=fill, outline=ring, width=3)
+                gly = self.cv.create_text(cx, y, fill="#fff", font=f9b,
+                                          text=glyph)
+                cap = self.cv.create_text(cx, y + r + 10, fill=subfg, font=f8,
+                                          text=sub)
+                keys = self.cv.create_text(cx, y + r + 22, fill=self.KEY_FG,
+                                           font=f8,
+                                           text="/".join(row["keys"]))
+                for it in (btn, gly, cap, keys):
+                    self.cv.tag_bind(it, "<ButtonPress-1>",
+                                     lambda e, s=row["ids"][0], b=btn:
+                                     self._svc_press(s, b))
+                    self.cv.tag_bind(it, "<ButtonRelease-1>",
+                                     lambda e: self._svc_release())
+                self._svc_btns.append((btn, row["ids"][0], ring))
+            y += r + 34
+            self.cv.create_text(self.PAD, y, anchor="w", fill="#777", font=f8,
+                                text="press SELECT for the service menu")
+            y += 8
+
+        # ---- THE COIN DOOR, a toggle because the real door STAYS ----------
+        self._door_id = self._door_row["ids"][0] if self._door_row else None
+        self.door_btn = self.door_txt = None
+        self._door_drawn = None
+        if self._door_id:
+            y += 14
+            self.door_btn = self.cv.create_rectangle(
+                self.PAD - 4, y, w - self.PAD + 4, y + 26,
+                fill="#1a2e1a", outline="#2e7d32", width=1)
+            door_key = self.cv.create_text(
+                self.PAD + 6, y + 13, anchor="w", fill=self.KEY_FG, font=f9b,
+                text="/".join(self._door_row["keys"]))
+            self.door_txt = self.cv.create_text(
+                w // 2 + 6, y + 13, fill="#d8d8d8", font=f9,
+                text="COIN DOOR  closed - 48V on")
+            for it in (self.door_btn, self.door_txt, door_key):
+                self.cv.tag_bind(it, "<Button-1>", lambda e: self._door_click())
+            y += 30
+
+        self._y = y
+        self.cv.config(height=y + 12)
+        self._last_sw = None
+        self._svc_drawn = [None] * len(self._svc_btns)
+
+    # ---- the service buttons: press-and-hold through the same driver ------
+    def _svc_press(self, sw_id, btn):
+        if self._svc_held is not None:
+            return
+        self._svc_held = (sw_id, btn)
+        self.cv.itemconfig(btn, width=5)
+        self.drv.press(sw_id)
+
+    def _svc_release(self):
+        """Open whatever the press closed - by what we HELD, the same rule as
+        the artwork markers: the canvas freezes its current item for the
+        length of a click, so the release lands here whatever is under the
+        cursor by then."""
+        if self._svc_held is None:
+            return
+        sw_id, btn = self._svc_held
+        self._svc_held = None
+        self.cv.itemconfig(btn, width=3)
+        self.drv.release(sw_id)
+
+    def _door_click(self):
+        """Toggle off the last DRAWN state, the TroughPanel._click rule: the
+        decision is the one the user could see when they clicked."""
+        if self._door_id is None or self._last_sw is None:
+            return
+        if self._last_sw.is_made(self._door_id):
+            self.drv.release(self._door_id)
+        else:
+            self.drv.press(self._door_id)
+
+    def add_trough(self, positions, how, on_ball):
+        """The ball controls, at the panel's bottom.
+
+        Returns the TroughPanel; the caller stores it as its own
+        `trough_panel`, so poll_switches() keeps ONE update path wherever the
+        trough is drawn - panel or fallback strip, never both.
+        """
+        y = self._y + 14
+        self.cv.create_text(self.PAD, y, anchor="w", fill="#8a8a8a",
+                            font=self._f8, text="BALLS")
+        if self._trough_row is not None:
+            # The trough latch's key, worn here instead of a list row - the
+            # same consolidation as the service buttons and the door.
+            self.cv.create_text(self.PAD + 44, y, anchor="w",
+                                fill=self.KEY_FG, font=self._f8,
+                                text="/".join(self._trough_row["keys"])
+                                     + " = all six in / out")
+        y += 10
+        t = TroughPanel(self.cv, positions, how, self.PAD - 4, y, anchor="nw",
+                        on_ball=on_ball, label_below=True,
+                        wrap=self._w - 2 * self.PAD)
+        # Balls and numbers are ~40 px; the wrapped caption below runs to
+        # three short lines.
+        self._y = y + 40 + 40
+        self.cv.config(height=self._y + 12)
+        return t
+
+    def update(self, sw):
+        """Repaint rows whose switch state moved; a still machine costs the
+        comparison and nothing else - the same change-gate as everything on
+        this window."""
+        self._last_sw = sw
+        # The service buttons wear their made-state as a gold ring - the rows
+        # that used to carry it are gone from the list, so the button is now
+        # the one place that answers "did the game see that press".
+        for k, (btn, sid, ring) in enumerate(self._svc_btns):
+            made = bool(sw.is_made(sid))
+            if self._svc_drawn[k] != made:
+                self._svc_drawn[k] = made
+                self.cv.itemconfig(btn, outline="#ffd400" if made else ring)
+        if self._door_id is not None:
+            closed = bool(sw.is_made(self._door_id))
+            if self._door_drawn != closed:
+                self._door_drawn = closed
+                if closed:
+                    self.cv.itemconfig(self.door_btn, fill="#1a2e1a",
+                                       outline="#2e7d32")
+                    self.cv.itemconfig(self.door_txt,
+                                       text="COIN DOOR  closed - 48V on")
+                else:
+                    # Amber, not red: an open door is a legitimate state you
+                    # chose, but the game will not fire a single coil while it
+                    # lasts, and that is worth reading at a glance.
+                    self.cv.itemconfig(self.door_btn, fill="#33270f",
+                                       outline="#c07000")
+                    self.cv.itemconfig(self.door_txt,
+                                       text="COIN DOOR  OPEN - 48V off, "
+                                            "coils dead")
+        for i, r in enumerate(self.rows):
+            if r["na"]:
+                continue
+            made = [bool(sw.is_made(sid)) for sid in r["ids"]]
+            n = sum(made)
+            if len(r["ids"]) > 1:
+                state = (n == len(made), "%d/%d" % (n, len(made)))
+            elif r["toggle"]:
+                state = (n > 0, "[ON]" if n else "[off]")
+            else:
+                state = (n > 0, "")
+            if self._drawn[i] == state:
+                continue
+            self._drawn[i] = state
+            on, suffix = state
+            box, dot, key, lab, suf = self._items[i]
+            self.cv.itemconfig(box, fill=self.HIT_BG if on else "")
+            self.cv.itemconfig(dot, fill=SW_MADE if n else "")
+            self.cv.itemconfig(key, fill=self.HIT_FG if on else self.KEY_FG)
+            self.cv.itemconfig(lab, fill=self.HIT_FG if on else self.LAB_FG)
+            self.cv.itemconfig(suf, text=suffix,
+                               fill=self.HIT_FG if on else self.DIM)
+
+
+class SwitchPipe:
+    """ONE persistent WSL helper for keyboard edges, instead of a spawn each.
+
+    The proven SwitchDriver path costs an ~80-200 ms wsl.exe spawn per action
+    (item 24 measured it), which is why this window never took keyboard input:
+    a flipper through that is unplayable. swkeys.py holds the block open and
+    reads "<id> <level>" lines, so a key edge costs a pipe write. The helper
+    releases everything it still holds on EOF - the same stuck-switch guard
+    as everywhere else - and a dead pipe fails the edge back to the caller,
+    who falls back to the spawn path rather than eating the press.
+    """
+
+    def __init__(self):
+        self._p = None
+        self._failed = 0
+
+    def _ensure(self):
+        if self._p is not None and self._p.poll() is None:
+            return True
+        if self._failed >= 2:          # spawn broken twice: stop trying
+            return False
+        try:
+            if sys.platform == "win32":
+                cmd = ["wsl.exe", "-e", "python3", "%s/swkeys.py" % WSL_DIR]
+            else:
+                cmd = ["python3", os.path.join(HERE, "swkeys.py")]
+            self._p = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                       stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL,
+                                       creationflags=_CREATE_NO_WINDOW)
+            return True
+        except Exception:                                   # noqa: BLE001
+            self._failed += 1
+            self._p = None
+            return False
+
+    def set(self, sw, val):
+        """True when the edge went down the pipe; False = use the fallback."""
+        if not self._ensure():
+            return False
+        try:
+            self._p.stdin.write(b"%d %d\n" % (sw, val))
+            self._p.stdin.flush()
+            return True
+        except Exception:                                   # noqa: BLE001
+            self._failed += 1
+            self._p = None
+            return False
+
+    def close(self):
+        try:
+            if self._p is not None and self._p.poll() is None:
+                self._p.stdin.close()                # EOF = helper releases all
+        except Exception:                                   # noqa: BLE001
+            pass
+
+
+class KeyInput:
+    """Keyboard play with THIS window focused.
+
+    ★ ITEM 39, DAVID: "the keyboard inputs are not working unless the
+    emulator window is focused. it should work with the virtual playfield
+    focused." The bindings come from the SAME exported rows the panel draws -
+    one table, two windows that honour it - and the edges ride SwitchPipe,
+    with the per-action spawn as the fallback.
+
+    TWO TRAPS THIS ALREADY KNOWS ABOUT:
+    * X auto-repeat arrives as Release-then-Press at the same instant, which
+      naively makes a held flipper flutter (padglhost swallows the pair with
+      XPeekEvent). Windows Tk repeats differ - repeated KeyPress, one real
+      KeyRelease - but the container runs this window under X, so a release
+      is committed only after a few ms with no matching press: the same
+      swallow, spelled in `after`.
+    * A key typed into a real text widget (the save-slot picker) must not
+      fire a flipper - the handler drops events whose focus widget takes
+      text input.
+    """
+
+    #: How long a release waits for the press that would mark it auto-repeat.
+    REPEAT_MS = 10
+
+    def __init__(self, view, rows):
+        self.view = view
+        self.pipe = SwitchPipe()
+        self.map = {}
+        for r in rows:
+            if r["na"] or not r["ids"]:
+                continue
+            for k in r["keys"]:
+                for sym in keybinds.tk_keysyms(k):
+                    self.map[sym] = r
+        self.down = set()
+        self._pending = {}             # keysym -> after id, releases in flight
+        # Pre-warm the helper: spawned lazily, the FIRST press of a session
+        # pays the ~90-200 ms wsl.exe start (measured live: a 2000 ms hold
+        # reached the guest as 1907 ms, the whole shortfall on the press
+        # side). Spawning now moves that cost to window open, where nobody
+        # is holding a flipper.
+        self.pipe._ensure()
+        view.root.bind("<KeyPress>", self._on_down)
+        view.root.bind("<KeyRelease>", self._on_up)
+
+    def _row(self, ev):
+        try:
+            if ev.widget.winfo_class() in ("Entry", "TEntry", "TCombobox",
+                                           "Text", "Spinbox", "TSpinbox"):
+                return None
+        except Exception:                                   # noqa: BLE001
+            pass
+        return self.map.get(ev.keysym)
+
+    def _on_down(self, ev):
+        r = self._row(ev)
+        if r is None:
+            return
+        pend = self._pending.pop(ev.keysym, None)
+        if pend is not None:
+            self.view.root.after_cancel(pend)   # auto-repeat pair: still held
+            return
+        if ev.keysym in self.down:
+            return                              # Windows-style repeat
+        self.down.add(ev.keysym)
+        if r["toggle"]:
+            # The toggle flips off the MERGED state - the same rule as the
+            # door button: the state acted on is the one on screen.
+            target = 0 if all(bool(self.view.sw.is_made(s))
+                              for s in r["ids"]) else 1
+            for s in r["ids"]:
+                self._set(s, target)
+        else:
+            self._set(r["ids"][0], 1)
+
+    def _on_up(self, ev):
+        r = self._row(ev)
+        if r is None or r["toggle"]:
+            self.down.discard(ev.keysym)
+            return
+        if ev.keysym in self._pending:
+            return
+        self._pending[ev.keysym] = self.view.root.after(
+            self.REPEAT_MS, lambda: self._commit_up(ev.keysym, r))
+
+    def _commit_up(self, keysym, r):
+        self._pending.pop(keysym, None)
+        self.down.discard(keysym)
+        self._set(r["ids"][0], 0)
+
+    def _set(self, sw, val):
+        if not self.pipe.set(sw, val):
+            (self.view.drv.press if val else self.view.drv.release)(sw)
+
+    def close(self):
+        self.pipe.close()
+
+
+def attach_key_panel(view):
+    """The panel, packed to the right of the view's canvas, or None.
+
+    None is the NORMAL state for the first seconds of a session: watch.sh
+    clears dump/padbinds at start and padglhost rewrites it once it is up, so
+    a window that opened first has nothing to read yet. poll_switches() keeps
+    asking on the same cadence the switch table uses, and the panel appears
+    when the file does - the same late-arrival shape as _pick_up_switches().
+
+    THE BALL CONTROLS MOVE IN WITH IT. A trough drawn before the panel
+    existed - the artwork corner, or the schematic's old strip - is destroyed
+    and rebuilt at the panel's bottom, so there is never a moment with two
+    trough displays disagreeing about where the balls are.
+    """
+    rows = keybinds.load(BINDS_PATH)
+    if not rows:
+        return None
+    panel = KeyPanel(view.root, rows, view.drv)
+    panel.cv.pack(side="right", fill="y", before=view.cv)
+    if view.trough_panel is not None:
+        view.trough_panel.destroy()
+        view.trough_panel = None
+    strip = getattr(view, "_trough_strip", None)
+    if strip is not None:
+        strip.destroy()
+        view._trough_strip = None
+    if view.sw.positions:
+        view.trough_panel = panel.add_trough(view.sw.positions, view.sw.how,
+                                             view.run_plunge)
+    # The keyboard arrives with the rows (item 39): the same table that drew
+    # the panel binds this window's keys, so the two can never disagree.
+    view.keys = KeyInput(view, rows)
+    return panel
+
+
 def state_slots():
-    """slots.sh list, parsed: {slot_dir: label} for every EXISTING slot.
+    """slots.sh list, parsed: {slot: label} for THIS GAME's existing slots.
 
     Root for the same reason state_run is - savegame.sh writes slots as
     root, so reading their metadata and sizes needs it too. Best-effort:
     a wedged WSL returns {} and the picker just shows every slot as empty,
-    which a save into it corrects."""
+    which a save into it corrects.
+
+    ★ ITEM 39, in two steps. David first caught the picker offering OTHER
+    games' saves as this game's (the parse dropped the game field - a Save
+    would have overwritten another title's slot), then asked the real
+    question: "i thought we had 10 slots per game?" Slots are now stored
+    per game (saves/<game>/<slot>, slots.sh migrates the old flat layout on
+    sight), so this filters to GAME and the ten slots the picker shows are
+    genuinely this title's ten. The keys stay bare slot names because that
+    is what savegame.sh/loadgame.sh take - they resolve the game from the
+    running guest themselves."""
     if sys.platform == "win32":
         cmd = ["wsl.exe", "-u", "root", "-e", "bash",
                "%s/slots.sh" % WSL_DIR, "list"]
@@ -1128,8 +1677,8 @@ def state_slots():
     out = {}
     for ln in (r.stdout or b"").decode("utf8", "replace").splitlines():
         p = ln.split("|")
-        if len(p) >= 6 and p[0] == "slot":
-            out[p[1]] = p[4]
+        if len(p) >= 6 and p[0] == "slot" and p[3] == GAME:
+            out[p[1].rsplit("/", 1)[-1]] = p[4]
     return out
 
 
@@ -1184,6 +1733,11 @@ class StateOps:
         return [self._slot_box] + self._state_btns
 
     def _slot_values(self):
+        """One line per slot. Every slot listed is THIS game's now (slots
+        are stored per game and state_slots filters), so ten slots means
+        ten of this title's slots - the "1 · [godzilla_pro]" foreign-slot
+        marking this method briefly carried is gone with the shared
+        namespace that made it necessary."""
         vals = []
         for i, sid in enumerate(self.SLOT_IDS):
             label = getattr(self, "_slot_labels", {}).get(sid)
@@ -1386,10 +1940,18 @@ class Field(StateOps):
         self.status = tk.Label(root, text="", anchor="w", bg="#111", fg="#ddd",
                                font=("Consolas", 9), width=1)
         self.status.pack(side="bottom", fill="x")
+        # side="left", NOT "top" (item 39): the key panel docks on the RIGHT -
+        # the playfield is tall and screens are wide, so the horizontal space
+        # is the free direction - and a side="top" canvas would centre itself
+        # over the panel's column when the window is stretched.
         self.cv = tk.Canvas(root, width=w, height=h, highlightthickness=0,
                             bg="black")
-        self.cv.pack(side="top")
+        self.cv.pack(side="left")
         self.cv.create_image(0, 0, anchor="nw", image=self.bg)
+        # ★ ITEM 39: the key panel attaches AFTER SwitchDriver exists, below -
+        # its service buttons and door toggle press through the same driver
+        # the artwork markers use.
+        self.key_panel, self.keys = None, None
 
         self.info = {}          # canvas item -> dict describing it
         self.fixtures = group_fixtures(self.leds)
@@ -1483,6 +2045,11 @@ class Field(StateOps):
 
         self.tip = Tip(root)
         self.drv = SwitchDriver()
+        # ★ ITEM 39: the retired Controls window's content, beside the art -
+        # keys, clickable service buttons, the door toggle, and the trough
+        # (attach moves the corner one in when the panel exists).
+        self._binds_next = time.monotonic() + SWITCH_POLL_S
+        self.key_panel = attach_key_panel(self)
         self.holding = None            # (canvas item, switch id) while held
         # PRESS and RELEASE, not <Button-1>: a switch is closed for as long as
         # the mouse is down. Tk's implicit grab delivers the release to this
@@ -1732,8 +2299,16 @@ class Field(StateOps):
         self._make_trough_panel()
 
     def _make_trough_panel(self):
-        """Build the panel once the trough is known. Idempotent."""
+        """Build the panel once the trough is known. Idempotent.
+
+        On the KEY PANEL when there is one (item 39, the ball controls moved
+        there); the artwork corner stays as the fallback for a window with no
+        padbinds to read - an old renderer, or a by-hand launch."""
         if self.trough_panel is not None or not self.sw.positions:
+            return
+        if self.key_panel is not None:
+            self.trough_panel = self.key_panel.add_trough(
+                self.sw.positions, self.sw.how, self.run_plunge)
             return
         x, y = self._panel_at
         self.trough_panel = TroughPanel(self.cv, self.sw.positions,
@@ -2210,10 +2785,26 @@ class Schematic(StateOps):
 
     Clicking a row closes that switch through the same swpoke.py path the
     artwork window uses, so a title with no drawing is still playable.
+
+    ★ ITEM 39 REFLOWED IT. The old form was one 300 px column PER NODE, width
+    unbounded and height capped at the screen - and with no scrolling anywhere,
+    whatever the cap clipped was unreachable by mouse, not merely offscreen.
+    David: "for games without a virtual playfield, we need to compact the view
+    since it is so large and overflows even on large monitors." Now the rows
+    FLOW: one ordered list (node headers inline), broken into columns of
+    however many rows the screen's height actually has, columns as wide as the
+    text actually measures. The height fits by construction; a pathological
+    width (hundreds of switches on a short screen) scrolls horizontally rather
+    than clipping, so every row stays reachable - that is the acceptance line.
     """
 
-    ROW_H = 19
-    COL_W = 300
+    ROW_H = 17
+    #: Room the window needs AROUND the switch canvas: title bar, top bar,
+    #: trough strip, status bar, taskbar. Same estimating job as pick_scale's
+    #: `chrome`, and like there, being generous costs a little empty space
+    #: while being short costs reachable rows.
+    CHROME = 250
+    NAME_W = 26
 
     def __init__(self, root, switches):
         self.root = root
@@ -2248,54 +2839,112 @@ class Schematic(StateOps):
         self.sw_dots, self._dot_drawn = [], {}
         self.sw = SwitchWatch(switches,
                               every=round(1000.0 / POLL_MS / max(1.0, SW_HZ)))
-        self.trough_panel = None
+        # The strip is the FALLBACK now (item 39): when the key panel attaches
+        # it destroys this and rebuilds the trough at the panel's bottom, so a
+        # window with no padbinds to read still shows its balls.
+        self.trough_panel, self._trough_strip = None, None
         if self.sw.positions:
             strip = tk.Frame(root, bg="#111")
             strip.pack(fill="x")
             pcv = tk.Canvas(strip, height=38, bg="#111", highlightthickness=0)
             pcv.pack(fill="x", padx=4, pady=(0, 3))
+            self._trough_strip = strip
             self.trough_panel = TroughPanel(
                 pcv, self.sw.positions, self.sw.how, 2, 2, anchor="nw",
-                on_ball=lambda what: self.drv.run_script("plunge.py", what))
+                on_ball=self.run_plunge)
 
+        # THE FLOW. One entry list in node order, then columns cut to the
+        # height the screen has. A node header may not be the LAST row of a
+        # column - a label that labels nothing - so it is pushed to the top of
+        # the next one.
         by_node = {}
         for sw in switches:
             by_node.setdefault(sw["node"], []).append(sw)
-        cols = sorted(by_node)
-        tall = max(len(v) for v in by_node.values()) + 2
-        w = self.COL_W * len(cols)
-        h = self.ROW_H * tall + 8
-        h = min(h, root.winfo_screenheight() - 160)
+        entries = []
+        for node in sorted(by_node):
+            entries.append(("hdr", node))
+            for sw in sorted(by_node[node], key=lambda s: s["bit"]):
+                entries.append(("sw", sw))
+        per_col = max(12, (root.winfo_screenheight() - self.CHROME)
+                      // self.ROW_H)
+        cols, col = [], []
+        for j, e in enumerate(entries):
+            col.append(e)
+            if len(col) >= per_col:
+                if col[-1][0] == "hdr" and j + 1 < len(entries):
+                    cols.append(col[:-1])
+                    col = [col[-1]]
+                else:
+                    cols.append(col)
+                    col = []
+        if col:
+            cols.append(col)
 
-        self.cv = tk.Canvas(root, width=w, height=h, bg="#101010",
-                            highlightthickness=0)
-        self.cv.pack(fill="both", expand=True)
+        # Column width is MEASURED, not guessed: the text is monospaced, so
+        # the widest possible row is the format string at full name width.
+        f9 = tkfont.Font(family="Consolas", size=9)
+        colw = f9.measure("999  " + "M" * self.NAME_W) + 26
+        w = len(cols) * colw + 8
+        h = per_col * self.ROW_H + 16
+
+        # THE SCROLL BACKSTOP. Normally the flow fits with room to spare (a
+        # 108-switch title is two columns on this desktop); if it ever does
+        # not, the canvas scrolls horizontally instead of clipping - clipped
+        # rows were the old view's real fault, unreachable rather than just
+        # offscreen. The status bar and the bars above stay put; only the
+        # rows scroll.
+        maxw = max(colw + 8, root.winfo_screenwidth() - 420)
+        self._hbar = None
+        if w > maxw:
+            self._hbar = tk.Scrollbar(root, orient="horizontal")
+            self._hbar.pack(side="bottom", fill="x")
+
+        # width=1 for the same reason as Field's bar: the text must never be
+        # what sizes the window. Packed BEFORE the canvas, side="bottom", the
+        # lesson Field's bar carries (a bar packed after the canvas is last in
+        # line for space and can simply not be shown).
+        self.status = tk.Label(root, text="", anchor="w", bg="#111", fg="#ddd",
+                               font=("Consolas", 9), width=1)
+        self.status.pack(side="bottom", fill="x")
+
+        self.cv = tk.Canvas(root, width=min(w, maxw), height=h, bg="#101010",
+                            highlightthickness=0, scrollregion=(0, 0, w, h))
+        if self._hbar is not None:
+            self.cv.configure(xscrollcommand=self._hbar.set)
+            self._hbar.configure(command=self.cv.xview)
+        self.cv.pack(side="left", fill="both", expand=True)
+        # ★ ITEM 39: the key panel attaches after SwitchDriver exists, below.
+        self.key_panel, self.keys = None, None
+
         self.info = {}
-        for ci, node in enumerate(cols):
-            x = ci * self.COL_W + 10
-            self.cv.create_text(x, 12, anchor="w", fill="#7ecbff",
-                                font=("Consolas", 10, "bold"),
-                                text="node %d" % node)
-            for ri, sw in enumerate(sorted(by_node[node], key=lambda s: s["bit"])):
-                y = 30 + ri * self.ROW_H
+        for ci, entries_col in enumerate(cols):
+            x = ci * colw + 18
+            for ri, (kind, d) in enumerate(entries_col):
+                y = 14 + ri * self.ROW_H
+                if kind == "hdr":
+                    self.cv.create_text(x, y, anchor="w", fill="#7ecbff",
+                                        font=("Consolas", 9, "bold"),
+                                        text="node %d" % d)
+                    continue
                 i = self.cv.create_text(
                     x, y, anchor="w", fill="#d8d8d8", font=("Consolas", 9),
-                    text="%3d  %-28s" % (sw["id"], sw["name"][:28]))
-                self.info[i] = dict(kind="switch", d=sw)
+                    text="%3d  %s" % (d["id"], d["name"][:self.NAME_W]))
+                self.info[i] = dict(kind="switch", d=d)
                 # The live-state dot beside the row, drawn OUTSIDE the text and
                 # not registered in `info` - the same rule as the artwork
                 # view's dots, so it can never become what a click lands on.
                 dot = self.cv.create_oval(x - 9, y - 3, x - 3, y + 3,
                                           fill="", outline="")
-                self.sw_dots.append((dot, sw["id"]))
+                self.sw_dots.append((dot, d["id"]))
 
-        # width=1 for the same reason as Field's bar: the text must never be
-        # what sizes the window.
-        self.status = tk.Label(root, text="", anchor="w", bg="#111", fg="#ddd",
-                               font=("Consolas", 9), width=1)
-        self.status.pack(fill="x")
         self.tip = Tip(root)
         self.drv = SwitchDriver()
+        # ★ ITEM 39: the retired Controls window's content, docked right -
+        # the same panel the artwork view gets (keys, service buttons, door,
+        # trough), so the two shapes of this window agree about where the
+        # controls are.
+        self._binds_next = time.monotonic() + SWITCH_POLL_S
+        self.key_panel = attach_key_panel(self)
         self.holding = None
         self.cv.bind("<ButtonPress-1>", self.on_press)
         self.cv.bind("<ButtonRelease-1>", self.on_release)
@@ -2303,9 +2952,16 @@ class Schematic(StateOps):
         self.cv.bind("<Leave>", lambda e: self.tip.hide())
         self.tick()
 
+    def run_plunge(self, what):
+        self.drv.run_script("plunge.py", what)
+
     def _hit(self, ev):
-        for i in reversed(self.cv.find_overlapping(ev.x - 2, ev.y - 8,
-                                                   ev.x + 2, ev.y + 8)):
+        # canvasx, because the scroll backstop makes window x and canvas x
+        # different things the moment the view is scrolled. canvasy for
+        # symmetry; this view never scrolls vertically today.
+        x, y = self.cv.canvasx(ev.x), self.cv.canvasy(ev.y)
+        for i in reversed(self.cv.find_overlapping(x - 2, y - 8,
+                                                   x + 2, y + 8)):
             if i in self.info:
                 return i
         return None
@@ -2443,9 +3099,12 @@ def main():
         # OPEN ANYTHING STILL HELD BEFORE THE PROCESS GOES. Closing the window
         # mid-hold otherwise leaves scr_held[] made, and nothing on this side
         # exists any more to clear it - the game would see a stuck switch for
-        # the rest of the run.
+        # the rest of the run. The keyboard pipe's close is its EOF, and the
+        # helper releases its own held set on the other side (swkeys.py).
         if view is not None:
             view.drv.release_all()
+            if getattr(view, "keys", None) is not None:
+                view.keys.close()
         save_state(root)
         root.destroy()
 

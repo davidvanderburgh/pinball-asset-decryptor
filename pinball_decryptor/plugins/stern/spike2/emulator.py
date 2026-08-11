@@ -177,6 +177,28 @@ def _accept_masterdir_malloc(cap, dst, n):
     return True
 
 
+def pick_slot(pool, tie):
+    """The codec entry to use out of ``pool`` = ``[(fn_va, specflat), ...]`` in
+    dispatch-slot order: the FIRST one scoring within *tie* of the best.
+
+    Ranking purely by specflat is unstable, because the pool routinely holds the
+    same codec twice.  Sub-slots 0/2 (stereo) and 1/3 (mono) reach one codec by
+    two entries that decode the same stream -- one of them starting a body word
+    earlier -- so their scores differ only by measurement jitter (<=6e-5
+    measured), and ``min`` hands the decision to that jitter.  Since the pool is
+    built in dispatch order and the wrong codec never scores within *tie*
+    (>=0.0993 away measured), taking the first qualifying entry resolves an
+    equivalent pair the same way every time, on the lower sub-slot the validated
+    build itself uses.  Returns None for an empty pool."""
+    if not pool:
+        return None
+    floor = min(sf for _fn, sf in pool)
+    for fn, sf in pool:
+        if sf <= floor + tie:
+            return fn
+    return pool[0][0]
+
+
 PROGRESS_UPDATES = 200
 
 
@@ -390,6 +412,7 @@ class Spike2Emu:
         self._mapped = set()
         self.st = {"R": 0, "k": 0}
         self._slot_cache = {}   # (scale, chan) -> resolved codec entry (generic)
+        self._slot_recipe = {}  # chan -> (row_delta, sub_slot) that won last
         # (lo, hi) of the master-directory record array, set by the chain that
         # is replaying it; bounds the record write-back (see _record_write_addr).
         self._md_range = (0, 0)
@@ -1312,6 +1335,25 @@ class Spike2Emu:
     # observed build (slots 0/2 and 1/3 alias the two real codecs).
     _PROBE_SLOTS = (0, 1, 2, 3)
 
+    # Dispatch ROWS to search, as a delta on the sound's own scale row, in order.
+    # The old code searched only the sound's own row, which is not where every
+    # build keeps the entry.  Mapped by brute-forcing the whole table against
+    # real sounds (rows that decode to band-limited audio, per scale S):
+    #
+    #   Godzilla Pro 1.15   mono S (odd sub-slots)    stereo S      (even)
+    #   Star Wars LE 1.30   mono S-1, S (odd)         stereo S-1, S (even)
+    #   Venom LE 1.07       mono S-1, S (even)        stereo S-1    (odd)
+    #
+    # Venom keeps NO stereo entry in the sound's own row, so every one of its
+    # 1374 stereo sounds decoded to white noise -- 34.5% of the card, the whole
+    # stereo half of it (PAD-52).  Row S-1 rescues them, and searching the own
+    # row FIRST keeps every card that already worked on exactly the entry it
+    # already used, at exactly the cost it already paid (pass 1 stops at the
+    # first clearly-audio candidate).  Row S-1 of scale 0 sits before DISPATCH,
+    # which is still inside the firmware image and is where Venom really keeps
+    # scale 0's stereo codec, so the row index is deliberately not clamped at 0.
+    _PROBE_ROWS = (0, -1)
+
     # The WRONG codec for a sound (a mono codec fed a stereo body, or vice
     # versa) decodes to near-white noise at roughly a third of full scale --
     # measured stable across every build at specflat ~0.85 / rms ~12.4k
@@ -1325,6 +1367,14 @@ class Spike2Emu:
     # used to decode to static.
     _NOISE_SF = 0.70
     _NOISE_RMS = 7000.0
+
+    # Two of the four probed sub-slots are the SAME codec reached a second way:
+    # they decode the same stream, one of them starting a body word earlier.
+    # Measured over 200 sounds of Star Wars LE 1.30, their specflat scores differ
+    # by at most 6e-5 (median 0), while the genuinely wrong codec sits at least
+    # 0.0993 away (median 0.63).  So a tie window this wide always ties the
+    # equivalent pair and never ties the wrong codec -- see _resolve_entry.
+    _SLOT_TIE = 0.02
 
     def _slot_metrics(self, p, fnv, secs):
         """``(specflat, rms)`` of decoding ``p`` with codec ``fnv`` over the
@@ -1354,24 +1404,33 @@ class Spike2Emu:
         Two passes.  Pass 1 (cheap, 0.6s): take the first slot that's clearly
         audio (specflat < 0.45) -- the common case, loud sounds resolve
         instantly.  Pass 2 (only if none was clearly audio -- a quiet/silent
-        intro): re-probe over a longer window and pick the lowest-specflat slot
-        that ISN'T the wrong loud-noise codec (see :data:`_NOISE_RMS`), so a
-        correct-but-quiet slot beats the noise codec instead of losing to it.
-        The noise rejection makes resolution robust no matter which sound first
-        seeds a given (scale, chan) -- even a short, silent one."""
+        intro): re-probe over a longer window, drop the wrong loud-noise codec
+        (see :data:`_NOISE_RMS`) so a correct-but-quiet slot beats it instead of
+        losing to it, then take the FIRST remaining slot in dispatch order among
+        those scoring within :data:`_SLOT_TIE` of the best.
+
+        That last tie-break is what makes the result reproducible.  Slots 0/2
+        and 1/3 are the same codec reached two ways -- same audio, one of them
+        emitting the layout predecessor's body word first -- so ranking them by
+        raw specflat let a difference of ~1e-5 decide, and the winner flipped
+        with whichever sound happened to seed the key.  Extract fans the catalog
+        across worker processes that each cache their own (scale, chan) map, so
+        the same card could decode a scale one way in one run and the other way
+        in the next: every sound of that scale gained a lone full-scale sample
+        at the head of its WAV (Star Wars LE 1.30 idx0088: 11326 of 21452 full
+        scale, in front of an otherwise silent head) and shifted by one sample.
+        Taking the lowest qualifying sub-slot instead is both stable and the
+        convention the validated build follows in :meth:`codec_fns` (stereo sub
+        0, mono sub 1), which is where 98.5% of sounds already landed."""
         key = (p["scale"], p["chan"])
         if key in self._slot_cache:
             return self._slot_cache[key]
-        mu = self.mu
-        cands = []
-        for slot in self._PROBE_SLOTS:
-            fnv = _u32(bytes(mu.mem_read(
-                self.DISPATCH + p["scale"] * 0x40 + slot * 4, 4)))
-            if fnv and self._backing_off(fnv) is not None and fnv not in cands:
-                cands.append(fnv)
+        cands = self._slot_candidates(p)
+        where = {fnv: place for fnv, place in cands}
+        order = [fnv for fnv, _place in cands]
         # Pass 1: a short window resolves loud sounds immediately.
         best = None
-        for fnv in cands:
+        for fnv in order:
             m = self._slot_metrics(p, fnv, 0.6)
             if m is not None and m[0] < 0.45:
                 best = fnv
@@ -1380,7 +1439,7 @@ class Spike2Emu:
         # intro.  Re-probe longer, reject the loud-noise codec, take lowest sf.
         if best is None:
             scored = []
-            for fnv in cands:
+            for fnv in order:
                 m = self._slot_metrics(p, fnv, 3.5)
                 if m is not None:
                     scored.append((fnv, m[0], m[1]))
@@ -1388,9 +1447,45 @@ class Spike2Emu:
                          if not (sf > self._NOISE_SF and rms > self._NOISE_RMS)]
             pool = survivors if survivors else [(f, sf) for f, sf, _ in scored]
             if pool:
-                best = min(pool, key=lambda t: t[1])[0]
+                best = pick_slot(pool, self._SLOT_TIE)
+        if best is not None:
+            # Where this build keeps a channel's codec is a property of the
+            # BUILD, not of the scale, so the winning (row delta, sub-slot) is
+            # tried first for every later scale of the same channel count.  That
+            # keeps the widened search a one-off: without it, a build like Venom
+            # would re-walk every candidate for all 32 of its stereo scales.
+            self._slot_recipe[p["chan"]] = where.get(best)
         self._slot_cache[key] = best
         return best
+
+    def _slot_candidates(self, p):
+        """``[(fn_va, (row_delta, sub_slot)), ...]`` to probe for this sound,
+        most-likely first and de-duplicated by function pointer.
+
+        Order is what keeps this cheap: any recipe already learned for this
+        channel count leads, then the sound's own dispatch row, then the rows in
+        :data:`_PROBE_ROWS`.  A card whose entry is where it has always been is
+        therefore resolved by the very first probe, exactly as before."""
+        scale = p["scale"]
+        places = []
+        hint = self._slot_recipe.get(p["chan"])
+        if hint is not None:
+            places.append(hint)
+        for d in self._PROBE_ROWS:
+            for s in self._PROBE_SLOTS:
+                if (d, s) != hint:
+                    places.append((d, s))
+        out, seen = [], set()
+        for d, s in places:
+            addr = self.DISPATCH + (scale + d) * 0x40 + s * 4
+            try:
+                fnv = _u32(bytes(self.mu.mem_read(addr, 4)))
+            except UcError:
+                continue          # a row off the end of the mapped table
+            if fnv and fnv not in seen and self._backing_off(fnv) is not None:
+                seen.add(fnv)
+                out.append((fnv, (d, s)))
+        return out
 
     def _backing_off(self, va):
         """File offset of a firmware vaddr (None if not in a load segment) —

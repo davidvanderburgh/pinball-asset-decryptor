@@ -1236,6 +1236,55 @@ These have each been violated at least once and each cost a run or a window:
       `padglhost.c` and `padgl.h`, needs a second render target, needs a rebuild
       (so no run may be live), and wants verifying on two titles.
 
+- [ ] **45. On james_bond_60th the emulator's picture is upside down, and the
+      one flip knob the rig has is the WRONG transform.** `S2 D3`
+      **★ DAVID, 2026-08-11: "bond 60th video is rotated upside down (the screen
+      is mounted differently in the game)."** He confirmed it is the EMULATOR's
+      game window, not an extracted file. The parenthesis is his diagnosis, not a
+      measurement — nothing in this rig knows a panel orientation, and no
+      james_bond run appears anywhere in this queue or the handoff, so today's is
+      the first recorded one.
+      **The card is on this machine:**
+      `images/Stern/spike2/james_bond_60th_le-1_10_0.Release.8G.sdcard.raw`
+      (7.86 GB). Item 34 applies: booting it from a different path re-copies the
+      whole card (~7.3 GB, +3 min), so pick the path once.
+      **★ MEASURED AT THE DESK, 2026-08-11, and it kills the obvious reading:
+      THE STORED VIDEO IS NOT UPSIDE DOWN.** David's extraction of that same card
+      (`C:\Users\david\OneDrive\Desktop\bond60\video`, 20 clips) probes 1360x768
+      h264 with NO rotation side data and no display matrix, and frames pulled
+      from `ATTRACT_LOOP1.mov` and `ATTRACT_LOOP_IC.mov` read right way up and
+      unmirrored — "INSIDER CONNECTED" reads normally. 2 of 20 clips, so it is
+      not a census, but it means the inversion is applied while the game DRAWS,
+      which is what a panel-orientation transform would look like.
+      **★ THE KNOB THAT ALREADY EXISTS IS A MIRROR, NOT A ROTATION, and a pass
+      that does not know this will call it fixed.** `PAD_GL_FLIP=1`
+      (`padglhost.c:1294`) sets `u_flip`, and the blit shader is
+      `uv = vec2(v_uv.x, 1.0 - v_uv.y)` (`padglhost.c:599`) — Y only. An
+      upside-down PANEL needs BOTH axes. On symmetric footage a mirror and a 180
+      are indistinguishable; on anything with text they are not, so judge every
+      screenshot on the TEXT, not on the picture looking the right way round.
+      **RULED OUT BEFORE IT IS TRIED — do not make the flip global.** The handoff
+      records that no Y flip is needed and that reasoning from "the PNG dumps are
+      right way up" to "the texture is Y-down" gave an upside-down window in the
+      first windowed build (`write_png` flips rows itself). Every other title
+      presents correctly today, so whatever this fix is, it is per-title.
+      **Two cheap first checks, one run, no rebuild:** whether the WHOLE window
+      is inverted or only the video layer — `PAD_VID=0` draws the scene/text
+      layer alone (item 43) and answers it, and "video" is the word David used;
+      and whether it is a 180 or a mirror — read the text in a `shotwin.py` grab.
+      **Acceptance:** a `shotwin.py` capture of the james_bond window with its
+      text reading right way up and unmirrored, plus a godzilla_pro capture from
+      the same build showing it unchanged — and state how the rig decides which
+      titles get the transform.
+      — S2: the game runs and every non-visual instrument works, so this is not
+      "I cannot play"; what it costs is that one title's entire display is
+      unreadable, which is strictly wider than item 43's service menus. Arguable
+      as S1 for anyone whose goal is playing Bond. D3: it needs a run, it is
+      visible the instant anyone looks, `shotwin.py` and `PAD_GL_FLIP` already
+      exist and the present point is one function (`win_present()`,
+      `padglhost.c:1723`) — what could make it D4 is if the transform has to be
+      DETECTED from the game rather than configured per title.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

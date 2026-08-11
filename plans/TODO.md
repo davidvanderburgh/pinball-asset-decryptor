@@ -1075,8 +1075,13 @@ These have each been violated at least once and each cost a run or a window:
       session with a save and a load.
 
 
-- [ ] **42. In the turtles service menus the picture goes HALF HEIGHT and the
+- [ ] **43. In the turtles service menus the picture goes HALF HEIGHT and the
       scene text stops drawing.** `S2 D3`
+      *(**Filed as 42 and renumbered to 43 on 2026-08-11 before merging**: David
+      took 42 for the save-state portability item on main the same afternoon,
+      and this branch had not landed yet. Numbers are stable IDs and are never
+      reused, so the one that reached main first keeps it. Any note elsewhere
+      calling this "item 42" means this item.)*
       **★ DAVID, 2026-08-11, watching item 41's run: "there was no crash, but
       the screen looked very weird in its last state. no scene data and video
       was half height centered vertically."**
@@ -1663,8 +1668,9 @@ rewriting it.**
       controls. It earned its keep immediately — the first version of the fix
       was not additive (it silently ate a guest's own handler) and only the
       reporter-off control showed it.
-      **Left open as item 42:** the half-height menu screen the crash happened
-      on. Same location, different fault.
+      **Left open as item 43:** the half-height menu screen the crash happened
+      on. Same location, different fault. (Filed as 42 during the pass and
+      renumbered before the merge — 42 went to the save-state portability item.)
 
 - [x] **39. Consolidate the two switch windows into one, to the right of the
       playfield — and make the no-artwork view fit on a screen.** DONE

@@ -1035,10 +1035,11 @@ class EmulatePanel:
                                     foreground="#c07000", text="")
         self._setup_pad = pad
 
-        # The key list that used to be here is gone. The rig opens its own
-        # Controls window listing every binding, and it is generated from the
-        # bindings themselves rather than typed out - so a copy on this tab was
-        # a second source of truth that could only ever drift out of date.
+        # The key list that used to be here is gone. The virtual playfield's
+        # key panel lists every binding (item 39; before that, the Controls
+        # window), and it is generated from the bindings themselves rather
+        # than typed out - so a copy on this tab was a second source of truth
+        # that could only ever drift out of date.
 
         if not rig_available():
             self._run_btn.configure(state=tk.DISABLED)
@@ -2248,9 +2249,9 @@ class EmulatePanel:
         if not messagebox.askyesno(
                 "Reset windows",
                 "Forget where the emulator windows were?\n\n"
-                "The next time you start the emulator, the game window, the "
-                "Controls window and the virtual playfield all open at their "
-                "default position and size.\n\n"
+                "The next time you start the emulator, the game window and "
+                "the virtual playfield open at their default position and "
+                "size.\n\n"
                 "Use this when a window has ended up off the screen — after "
                 "unplugging a second monitor, for example — and cannot be "
                 "dragged back.\n\n"
@@ -2323,15 +2324,15 @@ class EmulatePanel:
     def shutdown_sync(self):
         """Take the whole emulator down because PAD is quitting.  BLOCKING, on
         the main thread, bounded by the subprocess timeout — quitting the app
-        must close the game window, the Controls window and the virtual
-        playfield, not leave them orphaned behind a vanished control surface.
+        must close the game window and the virtual playfield, not leave them
+        orphaned behind a vanished control surface.
 
         Runs whenever this panel started a run OR the last status poll saw one
         (so a terminal-started run is taken down too — the user asked for
         "quitting PAD shuts down all the emulator windows", not "the ones PAD
         started").  killgame.sh SIGKILLs all five processes and removes the
         LED block, which is the playfield window's signal to close itself;
-        the game and Controls windows die with padglhost.
+        the game window dies with padglhost.
         """
         if not (self._proc is not None or self._last_up):
             return

@@ -1143,6 +1143,62 @@ These have each been violated at least once and each cost a run or a window:
       fault should reproduce on every load, but confirming it needs one windowed
       session with a save and a load.
 
+- [ ] **41. On turtles_pro (TMNT), the guest HARD-CRASHES (qemu signal 11)
+      while navigating into some service menus.** `S2 D4`
+      **★ DAVID, 2026-08-11: "tmnt locked up when trying to go into some of the
+      service menus."** turtles_pro-1_59_0.1987-upscaled card, WSL,
+      `PAD_PIVOT=1`, watch.sh from the item-39 worktree. The run booted clean
+      and played for ~45 s (ch0/ch1 handing ~30 fps, switches responding), then
+      **`qemu: uncaught target signal 11 (Segmentation fault) - core dumped`**
+      at 10:48:43 — the guest QEMU raising SIGSEGV, a HARD fault, not the clean
+      thread-return exit. Full app-pane capture: `C:\tmp\item41_turtles_service_menu_segv.log`.
+      **THE ONE PRECURSOR IN THE LOG:** twice while the game was still alive
+      (10:48:07 and 10:48:20) an `ExchangeData: read failed (received 0,
+      expected length=1…)` line printed — the node bus (`nodebus.py`) losing a
+      read, the same line dropped item 23 recorded as "the node bus going away
+      behind them." The crash arrived ~36 s after the first one, with the
+      renderer handing 30.0 fps to the last line. Around them the service
+      buttons were being walked: `[sw]` edges on switches 25/28 (SERVICE
+      SELECT / SERVICE BACK) and `[cabchg]` low nibble stepping
+      0f→0e→0d→0b→07, which is David driving into menus (Enter/-/= = service
+      per the watch banner).
+      **NO SIGNATURE WAS CAPTURED, and that is the first job, same as 36b.** The
+      app log ends on the bare qemu line — no `[segv] pc=…` header, no pc/lr/
+      fault — so this cannot yet be matched to any of item 23's three measured
+      shapes. **Item 23 (the whole "game exits by itself" crash class) was
+      DROPPED 2026-08-11**; its block in the Dropped section still carries those
+      three godzilla_pro signatures (pthread NULL-mutex churn segv
+      `pc=libpthread+0x8858`; game-code NULL deref `pc=0x51ef7c`; and the
+      signatureless clean thread-return) and the instrument note — read it
+      before starting. **What makes THIS worth a slot where 23 was dropped:** it
+      is a different title (turtles_pro, not godzilla_pro) and it has a
+      USER-ACTION trigger — entering a service menu — that none of item 23's
+      shapes had, so it may reproduce on demand once the menu is isolated.
+      **First job (desk + one run): preserve the signature.** watch.sh's exit
+      tail prints only the LAST lines of the crash block, so the `[segv] pc=`
+      header scrolls off — make it grep and keep the header on exit (36b needs
+      the identical fix; do it once). Then find WHICH menu: David said "some,"
+      not which, so ladder the service menus one at a time and record which
+      entry faults.
+      **NOT ESTABLISHED — do not build on any of it:** whether this is one of
+      item 23's three signatures or a fourth; whether the `ExchangeData` failure
+      is cause or coincidence; and whether it reproduces on a specific menu at
+      all. One sighting, no signature.
+      **Acceptance:** entering the service menu(s) that crashed it on
+      turtles_pro leaves the run alive, stated over a number of repeats and
+      naming which menus were entered — OR the fault reproduces and the newly
+      preserved `[segv] pc=` line names it (and says whether it matches one of
+      item 23's three). Oracle is the guest surviving the menu on its own
+      display, plus the preserved crash header.
+      — S2: single-ball play is unaffected (every other item's runs play), so
+      not S1; what it costs is that the run DIES on entering certain service
+      menus, and those menus are the oracle for item 3 (Coil Test) and item 1d
+      (LED Tests), so it makes those more expensive. Arguable S1, since a hard
+      crash ends the whole session. D4: the mechanism is an uncaptured qemu
+      signal-11, the exact triggering menu is unknown, and the first job is the
+      same exit-reason instrument 36b needs and does not have yet — it could
+      drop to D3 if one menu gives a reliable on-demand repro.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

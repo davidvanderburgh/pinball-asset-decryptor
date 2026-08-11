@@ -74,6 +74,74 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **39. Consolidate the two switch windows into one, to the right of the
+      playfield — and make the no-artwork view fit on a screen.** `S2 D3`
+      **★ DAVID, 2026-08-10: "i want to consolidate the two switch windows for
+      the emulator. there are too many windows. i do like the feedback and
+      interface of the small switch window, having a tight and compact view is
+      beneficial overall. with the virtual playfield, we should order them to
+      the right of the playfield since we have more horizontal space to work
+      with. for games without a virtual playfield, we need to compact the view
+      since it is so large and overflows even on large monitors. overall, we
+      need to make it look very nice and clean and elegant."**
+      **THE TWO WINDOWS, NAMED so nobody guesses which.** (a) `Controls - Spike
+      2 emulator` — `legend_open()`, `padglhost.c:1161`, an X11 window inside
+      WSLg, FIXED at 430 x (NBINDS*20+124) = **430x644**, 26 bind rows, and it
+      is the one carrying the feedback David likes: `legend_draw()`
+      inverse-videos a row while its key is down or latched
+      (`padglhost.c:1217`, off `key_down[]` / `key_latch[]`). (b) `<game> -
+      virtual playfield` — `playfield.py`, Tk, two views: `Field` (artwork) and
+      `Schematic` (`:2128`, the no-artwork fallback). The game window itself is
+      the third and is not in scope.
+      **ASSUMPTION, written in rather than asked: "to the right of the
+      playfield" means ONE window with the switch column packed to the right of
+      the artwork**, not a second window parked beside it — a positioned window
+      is still one of the "too many".
+      **THE STRUCTURAL OBSTACLE, and it is why this is not a Tk reflow.** The
+      legend is an X11 window drawn by the C renderer inside WSLg; the playfield
+      is a **Windows** Tk process launched through interop, because there is no
+      Tk inside the distro at all (item 37 established it — its `~` is the
+      Windows profile). The legend cannot be reparented into it. What makes the
+      merge feasible anyway: the rows are derivable host-side
+      (`binds_resolve()` resolves them by NAME out of
+      `$PAD_TABLES/$PAD_GAME/switch_list.txt`, item 27) and item 21a already
+      gave `playfield.py` a 10 Hz read of the whole merged switch array
+      (`PAD_PF_SW_HZ`), so the highlight can come off switch STATE. What does
+      NOT cross: `key_down[]`/`key_latch[]` (which key is physically held, as
+      against which switch is closed) and the `(n/a)` marking of a dead row.
+      **THREE THINGS THE LEGEND WINDOW ALSO DOES, so nobody deletes it and then
+      wonders:** it is a second keyboard target on purpose (`XSelectInput` takes
+      KeyPress/KeyRelease on it too, `padglhost.c:1178-1180`, "so whichever of
+      the two has focus can drive the game"); item 37's `winreset.sh` clears a
+      `legend` line in `~/.pad_windows`; and item 19 plans to put its replay
+      keys "in the Controls legend", so its acceptance moves with this.
+      **THE OVERFLOW HALF IS ESTABLISHED AT THE DESK, and it is worse than
+      "large".** `Schematic.__init__` sizes itself `w = COL_W * len(cols)` at
+      **COL_W = 300 per node column with NO cap**, and `h = ROW_H*tall + 8`
+      capped at `screenheight - 160` (`playfield.py:2192-2196`) — **and there is
+      no scrolling anywhere in `playfield.py`: zero `Scrollbar`, zero
+      `scrollregion`, zero `yview`/`xview`.** So the width is unbounded and
+      whatever the height cap clips is unreachable by mouse rather than merely
+      offscreen.
+      **Acceptance:** one switch window where there were two, on a title WITH
+      artwork (sitting to its right) and on one WITHOUT — and on the second,
+      every switch row reachable with the whole window on screen. State the
+      screen size and the two titles used (star_wars_le has no device table per
+      item 27, so it should be the Schematic case — confirm rather than assume).
+      `zorder.py --all` counts the windows; David's eyes are the oracle for
+      "clean and elegant", so budget his look rather than closing on a
+      screenshot.
+      — S2: nothing stops play and the keyboard still reaches every bound
+      switch, so not S1; what it costs is that on the no-artwork titles the
+      clipped rows cannot be clicked at all, and that view is the only mouse
+      route those titles have. Arguable as S3, since David filed it as an
+      appearance complaint. D3: it needs a run, the fault is visible the moment
+      you look, and every piece is already read off the source above — but it
+      spans `padglhost.c` (a rebuild, so no run may be live) and a Windows Tk
+      process, and window placement in this rig is the ground items 22, 37 and
+      38 all sit on (never `SetWindowPos`; WSLg ignores the create-time
+      position).
+
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
       instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**

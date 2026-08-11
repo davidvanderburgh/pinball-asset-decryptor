@@ -798,3 +798,48 @@ def test_plan_transfer_remaps_glyph_folder_tag(tmp_path):
     assert staged_changes.load(tgt)["image_group_tags"] == {
         "dir::images/scene_textures/glyphs/radimg_Font_64x64_cccccccc":
             "Score Font"}
+
+
+def test_staged_defaults_transfer_and_target_edits_win(tmp_path):
+    """The Defaults tab's staged settings and high-score slots ride along —
+    a tester making a Pro edition of his Prem/LE work should not have to
+    re-enter them.  They are keyed by the firmware's own names, so there is
+    nothing to reconcile; anything already set on the target stays put."""
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {"audio/idx0001.wav": b"SOUND-A" * 100})
+    _mk_extract(tgt, {"audio/idx0001.wav": b"SOUND-A" * 100})
+    staged_changes.save(src, {
+        "audio": {"audio/idx0001.wav": r"C:\r\a.mp3"},
+        "settings": {"AD_SOUND_MASTER_VOLUME_SETTING": 24, "AD_FREE_PLAY": 1},
+        "high_scores": {"GRAND CHAMPION": {"initials": "CFB",
+                                           "name": "MONKEYBUG"}},
+        "menu_expose_through": "AD_SOME_HIDDEN_SETTING",
+    })
+    staged_changes.save(tgt, {"settings": {"AD_FREE_PLAY": 0}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert plan["defaults"]["settings"]["AD_SOUND_MASTER_VOLUME_SETTING"] == 24
+    assert "GRAND CHAMPION" in plan["defaults"]["high_scores"]
+    # 1 audio + 2 settings + 1 high-score slot.
+    assert plan["totals"]["transfer"] == 4
+
+    res = mod_transfer.apply_transfer(src, tgt, plan)
+    saved = staged_changes.load(tgt)
+    assert saved["settings"]["AD_SOUND_MASTER_VOLUME_SETTING"] == 24
+    assert saved["high_scores"]["GRAND CHAMPION"]["initials"] == "CFB"
+    assert saved["menu_expose_through"] == "AD_SOME_HIDDEN_SETTING"
+    # The value the user had already set on the NEW extract is not overwritten.
+    assert saved["settings"]["AD_FREE_PLAY"] == 0
+    assert res["defaults"] == 2
+
+
+def test_no_staged_defaults_leaves_the_plan_alone(tmp_path):
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {"audio/idx0001.wav": b"SOUND-A" * 100})
+    _mk_extract(tgt, {"audio/idx0001.wav": b"SOUND-A" * 100})
+    staged_changes.save(src, {"audio": {"audio/idx0001.wav": r"C:\r\a.mp3"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert plan["defaults"] == {}
+    assert plan["totals"]["transfer"] == 1
+    assert mod_transfer.apply_transfer(src, tgt, plan)["defaults"] == 0

@@ -575,7 +575,8 @@ class CardImage:
 
     def write_adjustment_defaults(self, part_index, path, table, overrides,
                                   high_scores=None, name_overrides=None,
-                                  menu_last_id=None, menu_plan=None):
+                                  menu_last_id=None, menu_plan=None,
+                                  log=None):
         """Patch the game ELF's compiled defaults and write it back in place
         (exact-size, extent-mapped) with the ``.sidx`` record refreshed.
 
@@ -588,7 +589,8 @@ class CardImage:
         :mod:`.menu_visibility`); pass the caller's ``widen_plan`` as
         *menu_plan* to save re-scanning the firmware for it.  Every patch is
         composed into ONE buffer so the card is written — and its ``.sidx``
-        refreshed — once.
+        refreshed — once.  *log* is an optional ``log(text, level)`` for the
+        notes only this layer can write.
 
         Returns ``(n_settings, sidx_refreshed)``, where n_settings counts every
         adjustment and high-score slot changed (the menu page is one edit to
@@ -596,6 +598,7 @@ class CardImage:
         """
         new = table.patched_bytes(overrides)
         n = len(overrides)
+        new = self._with_master_volume(table, new, overrides, log)
         if name_overrides and high_scores is not None:
             # Re-bind to the already-patched bytes: the adjustment patch only
             # touched 4-byte value fields, so every string offset still holds,
@@ -612,6 +615,41 @@ class CardImage:
             new = widened_bytes(table, new, int(menu_last_id), plan=menu_plan)
         _n, refreshed = self.replace_file_bytes(part_index, path, new)
         return n, refreshed
+
+    @staticmethod
+    def _with_master_volume(table, elf, overrides, log=None):
+        """*elf* with the title's built-in master volume moved to match a
+        staged Master Volume default.
+
+        The compiled default alone does not decide what a machine comes up at:
+        the firmware ignores anything over 63 (Stern ships 64) and a factory
+        reset reads a separate byte outright, so the volume the operator sees
+        is that byte.  See :mod:`.factory_volume` — including why it declines
+        to patch a build it can't read with certainty.
+        """
+        from .factory_volume import (ADJUSTMENT, MAX_VOLUME, find,
+                                     patched_bytes)
+        if ADJUSTMENT not in (overrides or {}):
+            return elf
+        want = min(MAX_VOLUME, max(0, int(overrides[ADJUSTMENT])))
+        try:
+            spot = find(table)
+        except Exception:
+            spot = None
+        if spot is None:
+            if log:
+                log("This build's built-in master volume couldn't be located, "
+                    "so only the card's default was set — the machine may "
+                    "still start at its own volume.", "warning")
+            return elf
+        if spot["value"] == want:
+            return elf
+        out = patched_bytes(elf, spot, want)
+        if log:
+            log("Master volume: the machine will now start at %d instead of "
+                "this game's built-in %d (on a fresh card or after a factory "
+                "reset)." % (want, spot["value"]), "info")
+        return out
 
     # ---- lifecycle ----------------------------------------------------------
     def close(self):

@@ -578,7 +578,13 @@ HELP_CONTENT = {
          "your Replace edits from an older firmware's extract onto a new "
          "version's extract. Audio is matched by content signature, so it "
          "survives renumbered slots and renamed files; anything that can't "
-         "be matched is reported instead of silently dropped.\n\nFields 1 "
+         "be matched is reported instead of silently dropped. Your staged "
+         "Defaults (settings and high-score slots) come along too — those "
+         "are keyed by the firmware's own names, and the build skips any "
+         "the new image doesn't have.\n\nThe same thing works between the "
+         "two models of one game: point it at your Pro/Prem/LE extract and "
+         "a fresh extract of the other model, and what they share moves "
+         "over.\n\nFields 1 "
          "and 3 are never alternatives, and neither takes priority: field 1 "
          "(your old extract) is where your mods come FROM and is always "
          "required; field 3 is an optional clean, unmodified twin of that "
@@ -694,12 +700,21 @@ HELP_CONTENT = {
          "(the game rejects anything else)."),
         ("Settings the machine edits elsewhere",
          "Hovering a setting's name tells you when the machine won't show it "
-         "in its Adjustments menu. The master volume is the one to know "
-         "about: it lives on a service screen, and on titles with a "
-         "first-boot Guided Setup the wizard picks a volume of its own — so "
-         "the number the operator menu shows may not be the default you set "
-         "here. See the Menu column in the all-settings list below the form "
-         "for the same information on every setting."),
+         "in its Adjustments menu — the master volume, for one, lives on a "
+         "service screen rather than in Adjustments. See the Menu column in "
+         "the all-settings list below the form for the same information on "
+         "every setting."),
+        ("Master Volume",
+         "This row is the volume the machine comes up at, and \"On card\" is "
+         "the number this game was built with — 30 on Led Zeppelin, 10 on "
+         "Godzilla, 24 on John Wick. It is not the setting's own compiled "
+         "default: every Stern card ships that as 64, one past the 63 the "
+         "firmware accepts, so the machine ignores it and uses its built-in "
+         "number instead. Setting this row moves both, including the one a "
+         "factory reset reads, so a fresh card comes up on your number. Same "
+         "\"fresh cards only\" rule as the rest: a machine that has already "
+         "been set up keeps the volume it has until it is factory reset, "
+         "because Stern stores that on the board."),
         ("High scores",
          "The \"High Scores\" block is the board a fresh card boots with — "
          "Stern ships it filled with the design team's initials. Each slot "

@@ -2348,6 +2348,8 @@ class App:
 
         tags_note = ("" if not res.get("group_tags")
                      else ", %d group name(s)" % res["group_tags"])
+        if res.get("defaults"):
+            tags_note += ", %d staged default(s)" % res["defaults"]
         self.window.append_log(
             "Transferred mods from %s: %d audio, %d video, %d image, %d text%s."
             % (source_label or source_dir, res["audio"], res["video"],
@@ -2424,6 +2426,13 @@ class App:
             lines.append("Groups: %d renamed group name(s) carried, %d dropped"
                          % (len(g.get("matched", ())),
                             len(g.get("dropped", ()))))
+        d = plan.get("defaults") or {}
+        n_def = sum(len(v) for v in d.values())
+        if n_def:
+            # Nothing to drop here: these are keyed by the firmware's own
+            # names, and the build skips any the new image doesn't carry.
+            lines.append("Defaults: %d staged setting(s) / high-score slot(s) "
+                         "carried" % n_def)
         dropped = plan["totals"]["dropped"]
         if dropped:
             lines.append("")
@@ -4060,7 +4069,8 @@ class App:
                         overrides[name] = max(e["min"], min(e["max"], int(v)))
                 if overrides:
                     n, _ref = c.write_adjustment_defaults(
-                        part, path, table, overrides)
+                        part, path, table, overrides,
+                        log=self.window.append_log)
                     self.window.append_log(
                         "Applied Default Settings preset \"%s\" (%d setting(s)) "
                         "to the built image." % (active, n), "success")
@@ -4153,7 +4163,8 @@ class App:
                     n, _ref = c.write_adjustment_defaults(
                         part, path, table, overrides,
                         high_scores=hstd, name_overrides=name_overrides,
-                        menu_last_id=menu_last_id, menu_plan=menu_plan)
+                        menu_last_id=menu_last_id, menu_plan=menu_plan,
+                        log=self.window.append_log)
                     if n:
                         self.window.append_log(
                             "Applied %d staged default setting(s) to the built "

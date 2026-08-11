@@ -74,179 +74,6 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **39. Consolidate the two switch windows into one, to the right of the
-      playfield — and make the no-artwork view fit on a screen.** `S2 D2`
-      ← IN PROGRESS *(**~85%, 2026-08-11, branch `item/39`** — built, offline-
-      and live-verified; what is left is David's eyes and hands. D3 → D2: the
-      rebuild happened, both views work live, nothing left needs a new
-      instrument.)*
-      **★ SCOPE GREW MID-PASS, DAVID (2026-08-11), all three built:** "we
-      should move the ball controls to the right panel as well. and let's
-      make the service buttons interactive" (with the coin-door cluster photo
-      as the reference — green BACK, red -/+, black SELECT), and "we should
-      also have an 'open / close coin door' button".
-      **Established / shipped on the branch (`32913f1`, `1e6a13e`):**
-      • The Controls window no longer opens (PAD_GL_LEGEND=1 reverts, no
-      rebuild); `binds_export()` writes `dump/padbinds` (tmp+rename) after
-      `binds_resolve()`, `keybinds.py` parses, so which key does what still
-      has ONE home in the C table. watch.sh clears the file at start — a
-      stale one is another title's ids.
-      • The playfield gains a right-docked panel: keys (highlight = the
-      MERGED array, not key_down — the row lights when the GAME can see the
-      press, whoever made it), clickable service cluster + coin-door toggle
-      (through the artwork markers' own SwitchDriver), and the trough moved
-      in (label_below caption). Old corner/strip trough stays as the
-      fallback when padbinds is absent.
-      • Schematic reflowed: node headers inline, columns cut to the screen's
-      real height, measured column width, horizontal-scroll backstop —
-      star_wars_le went ~2100 px wide with unreachable clipped rows to ~800
-      including the panel, every row on screen.
-      **Live-verified (godzilla_pro, 4 min, alive 0 after):** `zorder.py`
-      counted GAME + PLAYFIELD and NO Controls; `swhold.py 60 1` lit the
-      Left Flipper row inverse with its green dot — the end-to-end path the
-      old legend could not see (it read key_down, this reads what the guest
-      merged). Door [ON] and trough 6/6 came off the window-open latch.
-      **★ ROUND 2, DAVID (2026-08-11, on the built panel), both built:**
-      "the keyboard inputs are not working unless the emulator window is
-      focused. it should work with the virtual playfield focused. and we
-      need to consolidate the keyboard inputs and the button inputs for the
-      service buttons since it looks weird to have them duplicated. maybe
-      put the keyboard inputs on or around the buttons somehow?"
-      • **Keyboard with the playfield focused, LIVE-PROVEN end-to-end:**
-      `swkeys.py` is a stdin-driven switch holder (swhold.py in a loop, same
-      padsw discipline, releases everything on EOF); `SwitchPipe` keeps ONE
-      of them for the session so a key edge costs a pipe write, not the
-      ~80-200 ms per-action spawn; `KeyInput` binds the SAME exported rows.
-      Proof: SendInput of a 2000 ms Left-arrow into the FOCUSED playfield
-      (a plain Windows window — UIPI does not apply, unlike the WSLg game
-      window) reached the guest as `[sw] +60p` … `-60p`, 1907 ms — tag `p`
-      is the new path naming itself. The 93 ms shortfall was the lazy first
-      spawn; the helper now pre-warms at window open. Auto-repeat is
-      swallowed by a 10 ms deferred release (the X pair trap, for the
-      container where this window runs under X).
-      • **One control per action:** the four service binds, the door and the
-      trough latch left the key list; their key labels sit ON their widgets
-      (Bksp/Esc under BACK, Enter/KP Ent under SELECT, C on the door bar,
-      B beside BALLS) in the key column's blue. Made-state became a gold
-      ring on the button itself.
-      **NOT verified, stated:** a live star_wars_le run (no card image on
-      this machine; its schematic was verified offline against the title's
-      REAL derived tables, and the live read path is shared code proven on
-      godzilla). Mouse clicks on the service buttons / door / balls-in-panel
-      — the write path is the live-proven driver and the keyboard injection
-      above exercised the window's event plumbing, but no hand has clicked
-      the buttons. David's "clean and elegant" bar is his call, not a
-      screenshot's. Typing feel (flipper latency through the pipe) is his
-      hands' call too — the pipe is warm and a held key measured 1907/2000
-      ms, but feel is the oracle item 17 says it is.
-      **★ ROUND 3, DAVID (2026-08-11, running turtles_pro from the card):
-      "the save state slots are not consistent with the game like they
-      should be." FIXED, and it was worse than labels:** the playfield's
-      picker parsed `slots.sh list` dropping the GAME field, so on turtles
-      it offered "1 - mech multiball" (a godzilla save) and "3 - sw game
-      play" (star_wars) as its own — and a Save into one would have
-      OVERWRITTEN another title's save. Now the game rides the parse,
-      foreign slots read "N · [godzilla_pro]" (listed, not hidden — hidden
-      would render "(empty)", which is the overwrite trap again), and
-      Save/Load refuse them with a status line pointing at the app's
-      Emulate tab. Same authority as the app's own filter: the game field
-      in slot.meta. Verified offline against the REAL slot set: turtles'
-      picker shows "1 · [godzilla_pro]".
-      **★ ROUND 4, DAVID (2026-08-11): "i thought we had 10 slots per
-      game?" They were 10 GLOBAL slots every game shared — item 13 built
-      them flat and the app merely filtered the view. NOW THEY ARE PER
-      GAME:** `saves/<game>/<slot>`, and slots.sh MIGRATES the flat layout
-      on sight (same filesystem, mv = rename — ran against the real disk:
-      all 4 slots landed under godzilla_pro/ and star_wars_le/ with labels
-      intact, including the non-numbered `wt36test`). savegame.sh saves
-      under the running guest's game and removes a stale legacy twin;
-      loadgame.sh takes bare `slotN` (game = the running guest's, which is
-      what every existing caller means) or explicit `game/slotN`, and a
-      bare name can no longer resolve to another title's save. slots.sh
-      label/delete/pack take `game/slotN` (legacy bare still honoured);
-      delete prunes an emptied game dir. status.sh's saves_mtime token
-      watches both depths so the app's event refresh survives the layout.
-      The playfield picker filters to GAME — ten slots means THIS title's
-      ten — and round 3's foreign-slot marking/guard came back out with the
-      shared namespace that made it necessary. The app's table keeps the
-      qualified name as the row id (what slots.sh takes) and shows the bare
-      name in the Slot column. Verified: label/delete round-trip on a
-      scratch per-game slot; godzilla's picker shows its two labels,
-      turtles' shows ten empties. NOT yet verified: a live save+load in the
-      new layout (needs a run; the restore machinery itself is untouched —
-      only the directory the wrappers resolve moved).
-      **Resume:** David plays with the playfield focused (flippers, service
-      cluster, door toggle, a ball click), saves and loads a slot on a card
-      run (the first live save/load in the per-game layout); fix what his
-      eyes and hands catch; then close — merge to main per the worktree
-      rule.
-      **★ DAVID, 2026-08-10: "i want to consolidate the two switch windows for
-      the emulator. there are too many windows. i do like the feedback and
-      interface of the small switch window, having a tight and compact view is
-      beneficial overall. with the virtual playfield, we should order them to
-      the right of the playfield since we have more horizontal space to work
-      with. for games without a virtual playfield, we need to compact the view
-      since it is so large and overflows even on large monitors. overall, we
-      need to make it look very nice and clean and elegant."**
-      **THE TWO WINDOWS, NAMED so nobody guesses which.** (a) `Controls - Spike
-      2 emulator` — `legend_open()`, `padglhost.c:1161`, an X11 window inside
-      WSLg, FIXED at 430 x (NBINDS*20+124) = **430x644**, 26 bind rows, and it
-      is the one carrying the feedback David likes: `legend_draw()`
-      inverse-videos a row while its key is down or latched
-      (`padglhost.c:1217`, off `key_down[]` / `key_latch[]`). (b) `<game> -
-      virtual playfield` — `playfield.py`, Tk, two views: `Field` (artwork) and
-      `Schematic` (`:2128`, the no-artwork fallback). The game window itself is
-      the third and is not in scope.
-      **ASSUMPTION, written in rather than asked: "to the right of the
-      playfield" means ONE window with the switch column packed to the right of
-      the artwork**, not a second window parked beside it — a positioned window
-      is still one of the "too many".
-      **THE STRUCTURAL OBSTACLE, and it is why this is not a Tk reflow.** The
-      legend is an X11 window drawn by the C renderer inside WSLg; the playfield
-      is a **Windows** Tk process launched through interop, because there is no
-      Tk inside the distro at all (item 37 established it — its `~` is the
-      Windows profile). The legend cannot be reparented into it. What makes the
-      merge feasible anyway: the rows are derivable host-side
-      (`binds_resolve()` resolves them by NAME out of
-      `$PAD_TABLES/$PAD_GAME/switch_list.txt`, item 27) and item 21a already
-      gave `playfield.py` a 10 Hz read of the whole merged switch array
-      (`PAD_PF_SW_HZ`), so the highlight can come off switch STATE. What does
-      NOT cross: `key_down[]`/`key_latch[]` (which key is physically held, as
-      against which switch is closed) and the `(n/a)` marking of a dead row.
-      **THREE THINGS THE LEGEND WINDOW ALSO DOES, so nobody deletes it and then
-      wonders:** it is a second keyboard target on purpose (`XSelectInput` takes
-      KeyPress/KeyRelease on it too, `padglhost.c:1178-1180`, "so whichever of
-      the two has focus can drive the game"); item 37's `winreset.sh` clears a
-      `legend` line in `~/.pad_windows`; and item 19 planned to put its replay
-      keys "in the Controls legend" — **19 was DROPPED 2026-08-11, so that third
-      constraint is gone** and this item no longer has to keep room for it.
-      **THE OVERFLOW HALF IS ESTABLISHED AT THE DESK, and it is worse than
-      "large".** `Schematic.__init__` sizes itself `w = COL_W * len(cols)` at
-      **COL_W = 300 per node column with NO cap**, and `h = ROW_H*tall + 8`
-      capped at `screenheight - 160` (`playfield.py:2192-2196`) — **and there is
-      no scrolling anywhere in `playfield.py`: zero `Scrollbar`, zero
-      `scrollregion`, zero `yview`/`xview`.** So the width is unbounded and
-      whatever the height cap clips is unreachable by mouse rather than merely
-      offscreen.
-      **Acceptance:** one switch window where there were two, on a title WITH
-      artwork (sitting to its right) and on one WITHOUT — and on the second,
-      every switch row reachable with the whole window on screen. State the
-      screen size and the two titles used (star_wars_le has no device table per
-      item 27, so it should be the Schematic case — confirm rather than assume).
-      `zorder.py --all` counts the windows; David's eyes are the oracle for
-      "clean and elegant", so budget his look rather than closing on a
-      screenshot.
-      — S2: nothing stops play and the keyboard still reaches every bound
-      switch, so not S1; what it costs is that on the no-artwork titles the
-      clipped rows cannot be clicked at all, and that view is the only mouse
-      route those titles have. Arguable as S3, since David filed it as an
-      appearance complaint. D3: it needs a run, the fault is visible the moment
-      you look, and every piece is already read off the source above — but it
-      spans `padglhost.c` (a rebuild, so no run may be live) and a Windows Tk
-      process, and window placement in this rig is the ground items 22, 37 and
-      38 all sit on (never `SetWindowPos`; WSLg ignores the create-time
-      position).
-
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
       instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**
@@ -1696,6 +1523,54 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **39. Consolidate the two switch windows into one, to the right of the
+      playfield — and make the no-artwork view fit on a screen.** DONE
+      2026-08-11, `df74030` (branch `item/39`, 7 commits `32913f1`..`df74030`).
+      **Closed on David's "looks good to me", after four rounds of his
+      feedback grew it into the emulator's whole control surface.**
+      **(1) One window.** The Controls X11 window no longer opens
+      (`PAD_GL_LEGEND=1` reverts, no rebuild); padglhost exports its resolved
+      `binds[]` to `dump/padbinds` (tmp+rename; watch.sh clears it at start)
+      and the playfield renders it — the table keeps ONE home in the C file,
+      `keybinds.py` owns the parse. `zorder.py` on a live run: GAME +
+      PLAYFIELD, nothing else.
+      **(2) The key panel**, docked right of the artwork: keys, a service
+      cluster drawn as the real coin-door panel (green BACK, red -/+, black
+      SELECT, press-and-hold through the artwork markers' own SwitchDriver),
+      a COIN DOOR click toggle (amber "48V off, coils dead" when open), and
+      the ball controls (TroughPanel grew `label_below`). One control per
+      action: the service/door/trough binds left the key list, their key
+      labels sit ON the widgets, made-state is a gold ring. Highlight is the
+      MERGED array — the row lights when the GAME can see the press, whoever
+      made it.
+      **(3) Keyboard with the playfield focused** — a new write path, since
+      the old one spawns wsl.exe per action (~80-200 ms): `swkeys.py` holds
+      the block open and reads "<id> <level>" lines (releases all on EOF),
+      `SwitchPipe` keeps one per session (pre-warmed at window open),
+      `KeyInput` binds the exported rows, swallows X auto-repeat with a
+      10 ms deferred release, drops keys typed into text widgets. Live proof:
+      SendInput held Left 2000 ms into the FOCUSED playfield → the guest
+      logged `[sw] +60p … -60p`, 1907 ms — tag `p` names the pipe.
+      **(4) The Schematic reflowed:** node headers inline, columns cut to the
+      screen's real height, measured column width, horizontal-scroll
+      backstop. star_wars_le: ~2100 px wide with mouse-unreachable clipped
+      rows → ~800 px including the panel, every row on screen.
+      **(5) Ten save slots PER GAME** (David: "i thought we had 10 slots per
+      game?" — they were global): `saves/<game>/<slot>`, slots.sh migrates
+      the flat layout on sight (ran against the real disk, 4 slots, labels
+      intact), savegame/loadgame resolve the game from the running guest so
+      every caller keeps passing bare `slotN`, status.sh's saves_mtime
+      watches both depths, the app's table keeps the qualified ref as row id.
+      A bare name can no longer resolve to another title's save.
+      **Instrument lesson kept:** a stale playfield window survives on the
+      desktop and `raise_existing()` raises IT instead of launching new code
+      — close the old window when a panel looks stale.
+      **NOT re-verified at close, stated:** the first live save+load in the
+      per-game layout (the restore machinery is untouched; only the
+      directory the wrappers resolve moved), and a live star_wars_le run (no
+      card on this machine; its schematic verified offline on its real
+      tables).
 
 - [x] **36a. Loading a save state on a card-run title, and a failed load that
       destroyed the rootfs.** DONE 2026-08-10, `322f688` (branch `item/36`).

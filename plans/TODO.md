@@ -359,8 +359,8 @@ These have each been violated at least once and each cost a run or a window:
       evening:** the eject coil index is no longer unknown, the model and the
       feeder are built and pass an end-to-end offline harness on two titles,
       and what is left needs a run rather than a new instrument.)*
-      **★★ BUILT THIS PASS, branch `item/21b`, and the loop is CLOSED offline.
-      Established:**
+      **★★ BUILT THIS PASS, branch `item/21b`, and THE LOOP IS CLOSED — live
+      on the game's own display, see (6). Established:**
       **(1) THE TROUGH-EJECT COIL INDEX WAS ALWAYS READABLE AT THE DESK, and
       this item's "item 3 is upstream" blocker below is wrong.** The device
       table names every coil against the (group, index) the fire frame

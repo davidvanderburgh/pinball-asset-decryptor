@@ -27,7 +27,7 @@ if ! command -v apt-get >/dev/null 2>&1; then
     echo "  BOF:    gnupg tar curl unzip xvfb webp + GDRE Tools (download from GitHub)"
     echo "  JJP:    partclone e2fsprogs xorriso pigz ffmpeg python3-zstandard gcc libc6-dev"
     echo "  CGC:    e2fsprogs xxd"
-    echo "  Stern:  qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev e2fsprogs fuse3 python3-tk ffmpeg"
+    echo "  Stern:  qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev e2fsprogs fuse3 python3-tk ffmpeg busybox-static"
     exit 1
 fi
 
@@ -84,7 +84,16 @@ declare -A MFR_PACKAGES=(
     #                             the emulator starts, opens its window, and
     #                             plays black and silent, which is the one
     #                             failure here that does not look like one.
-    [6]="qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev e2fsprogs fuse3 python3-tk ffmpeg"
+    #   busybox-static            SAVE STATES. The checkpointable boot pivots
+    #                             away from the host tree and then has to
+    #                             umount it, which needs a NATIVE STATIC
+    #                             binary inside the guest root; the rootfs's
+    #                             own busybox is ARM. Nobody has one by
+    #                             default and it was on no list, so v0.126.0
+    #                             refused to start at all without it - the rig
+    #                             now runs the ordinary boot instead, and this
+    #                             is what buys the feature back.
+    [6]="qemu-user-static gcc-arm-linux-gnueabihf gcc libc6-dev e2fsprogs fuse3 python3-tk ffmpeg busybox-static"
 )
 
 # Pip packages -- installed into the same Python that runs the app

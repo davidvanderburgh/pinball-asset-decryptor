@@ -152,8 +152,10 @@ PIVOT=${PAD_PIVOT:-}
 if [ -n "$PIVOT" ]; then
     QEMU=$(command -v qemu-arm-static)
     [ -x "$QEMU" ] || { echo "[run] PAD_PIVOT needs qemu-arm-static" >&2; exit 1; }
-    if ! head -c4 /bin/busybox 2>/dev/null | grep -q ELF || \
-       ldd /bin/busybox 2>&1 | grep -q '=>'; then
+    # pad_static_busybox (padpath.sh) is the ONE test for this - watch.sh asks
+    # it before it requests a pivot at all, and setupcheck.sh asks it before
+    # Start is pressed. A run that gets here anyway was asked for by hand.
+    if ! pad_static_busybox; then
         echo "[run] PAD_PIVOT needs a STATIC busybox at /bin/busybox (apt install busybox-static)" >&2
         exit 1
     fi
@@ -191,9 +193,22 @@ SETSID=""
 # restore is the simple case, and the guest runs as root - which is also how
 # the game runs on the real Spike machine. Non-root keeps `-r` (it has no other
 # way to get the caps), and such a run is simply not checkpointable, which is
-# fine because criu needs root anyway. Default (no PIVOT) is untouched.
+# fine because criu needs root anyway.
+#
+# ROOT DROPS IT WHETHER OR NOT THERE IS A PIVOT, and the `[ -n "$PIVOT" ]` that
+# used to be on this line was an assumption rather than a rule: root runs only
+# happened under PAD_PIVOT, so the two were the same condition. They stopped
+# being the same when watch.sh learned to withdraw a pivot it cannot do (a WSL
+# with no static busybox - see pad_static_busybox), which leaves a run that is
+# root AND not pivoted, a combination this script had never taken.
+#
+# The condition that belongs here is the one the paragraph above argues for:
+# `-r` exists to GET the caps, root already has them, so for root it is a
+# namespace that buys nothing - and a namespace this rig has already been bitten
+# by once (setgroups, above). A root run and a root run without a pivot should
+# differ by the pivot and by nothing else.
 USERNS="-r"
-[ -n "$PIVOT" ] && [ "$(id -u)" = 0 ] && USERNS=""
+[ "$(id -u)" = 0 ] && USERNS=""
 unshare $USERNS -m -p -f $SETSID bash -s "$R" "$NODEBUS_PTY" "$GAME" "$CARD_SRC" "$PIVOT" <<'INNER'
 R="$1"
 NODEBUS_PTY="$2"

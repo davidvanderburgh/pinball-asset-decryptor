@@ -72,6 +72,28 @@ pad_guest_up() {
     pgrep -f 'arm-binfmt|qemu-arm' >/dev/null 2>&1
 }
 
+# ---- WHAT A CHECKPOINTABLE BOOT NEEDS AND AN ORDINARY ONE DOES NOT --------
+#
+# PAD_PIVOT=1 (item 13, save states) gives the guest its own root with
+# pivot_root instead of chroot, because criu cannot dump a chroot'd task. The
+# host tree is then dropped with one lazy umount - and the program that does
+# that umount runs AFTER the pivot, with the host tree already gone, so it has
+# to be a NATIVE STATIC binary sitting inside the rootfs. The rootfs's own
+# busybox is ARM and would need the qemu we are about to exec into, so it
+# cannot do it. `busybox-static` puts a native one at /bin/busybox; noble's
+# busybox-initramfs is DYNAMIC and is not a substitute.
+#
+# ONE DEFINITION, because three places ask the same question: run_game.sh does
+# the pivot, watch.sh decides whether to ask for one, and setupcheck.sh
+# predicts the answer for the Emulate tab before Start is pressed. Two copies
+# of this is exactly how the tab clears a machine that the run then refuses -
+# the rule this rig keeps writing down (alive.sh and killgame.sh disagreeing
+# about what a running rig is has already cost a session).
+pad_static_busybox() {
+    head -c4 /bin/busybox 2>/dev/null | grep -q ELF || return 1
+    ! ldd /bin/busybox 2>&1 | grep -q '=>'
+}
+
 # ---- WHAT THE HARDWARE SHIM IS BUILT FROM, IN ONE PLACE ------------------
 #
 # build.sh compiles this list and stamps its digest beside the .so; watch.sh

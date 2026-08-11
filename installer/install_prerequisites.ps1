@@ -296,6 +296,17 @@ $ManufacturerPrereqs = [ordered]@{
             # audio itself; both are done Linux-side, so without this the
             # emulator starts perfectly and plays a black, silent window.
             @{ probe="ffmpeg";                 pkg="ffmpeg";                   label="ffmpeg (in WSL)";         reason="Emulate tab: decodes the game's video and sound, which the game cannot decode itself" }
+            # SAVE STATES, and it is the one line here whose absence used to
+            # stop the emulator dead.  Every Start since v0.126.0 boots the
+            # checkpointable shape, that shape umounts the old root with a
+            # NATIVE STATIC busybox after pivoting away from the host tree,
+            # and no machine has one by default.  The rig now falls back to
+            # the ordinary boot instead of refusing to start, so what this
+            # supplies is the feature; probed by name because that is the
+            # file the pivot copies (Ubuntu's busybox-initramfs is dynamic
+            # and would not do).
+            @{ probe="/bin/busybox";           pkg="busybox-static";           label="busybox-static";          reason="Emulate tab: save states - the guest boots in the one shape that can be frozen and reloaded";
+               probeCmd="test -f /bin/busybox && ! ldd /bin/busybox 2>&1 | grep -q '=>'" }
         )
         HostPackages = @(
             @{ command="ffmpeg"; winget="Gyan.FFmpeg"; label="ffmpeg + ffplay"; manualUrl="https://www.gyan.dev/ffmpeg/builds/"; reason="Replace Audio/Video preview (ffplay), spectrogram + format conversion (ffmpeg)" }

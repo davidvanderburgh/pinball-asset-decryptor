@@ -1076,22 +1076,34 @@ These have each been violated at least once and each cost a run or a window:
 
 
 - [ ] **43. In the turtles service menus the picture goes HALF HEIGHT and the
-      scene text stops drawing.** `S2 D3` ← IN PROGRESS *(**90%, 2026-08-11
-      evening: SOLVED AND VERIFIED — the menus render, matching David's photo
-      of a real machine. Awaiting David's own hands on the ergonomics before
-      the box closes.** Branch `item/43`, clean and pushed; no run left up,
-      `alive.sh` 0.)*
-      **★★★ THE RESOLUTION, so nobody re-reads the archaeology below to use
-      the fix: `PAD_DOOR_OPEN=1` on a watch.sh run boots with the coin door
-      held open, and every service page on turtles renders its complete
-      DMD-dot menu — icons, captions, submenus, all navigable**
-      (`C:\tmp\item43\t_BOOTDOOR3.png` = the main menu identical to David's
-      real-machine photo; `t_BOOTDOOR4_diag.png` = the Diagnostics submenu,
-      which is the page items 3 and 1d need). Close the door (`swhold.py 33
-      1`, or click switch 33 on the playfield) and full-screen video comes
-      back by itself (`t_doorclose.png`). Godzilla's 4.31 menus are
-      unaffected by the gate (`gz_regression.png`, one page deeper than any
-      earlier capture).
+      scene text stops drawing.** `S2 D2` ← IN PROGRESS *(**95%, 2026-08-11
+      night: THE DOOR GATE WAS THE LAST BUG AND IT IS REMOVED (`0df8a01`).
+      One verification run stands between this and closed, and it needs
+      David to restart the app's run — the fix is in the shim, which only
+      rebuilds at run start, and his instance was live with the old build.**
+      Branch `item/43`, clean and pushed.)*
+      **★★★ THE RESOLUTION (rewritten 2026-08-11 night — the earlier
+      "PAD_DOOR_OPEN boot" resolution below it is superseded): the service
+      pages pick dots BY THEMSELVES.** A 4.28 page decides video-vs-dots at
+      PAGE BUILD, inside the ASYNC preroll window `gststub` answers for
+      set_state(PAUSED) — video "not yet ready" locks the page's DMD dot
+      mode, and the backdrop video then plays UNDERNEATH the dots. The green
+      screen is dots OVER the dark tiled backdrop; the menu NEEDS its video.
+      No gate required, no special boot required. The door gate (e) was
+      refusing the menu's own backdrop arm, which turned set_state(PAUSED)
+      into FAILURE — a state a healthy real pipeline cannot produce — and
+      the page build hung: dark stale frame, no text, no dots, watched live
+      mid-session on David's own run. `PAD_DOOR_OPEN=1` survives as a
+      convenience (service buttons unlocked from boot), nothing more.
+      **MID-SESSION ENTRY, PROVEN ON A LIVE RUN (David's 19:10 instance,
+      db4b83a shim): the service buttons are polled SLOWLY — a 500 ms press
+      falls between polls and reads as nothing. Hold Select two seconds
+      (`swpoke.py 25 2000`).** Door open mid-attract = instant red "48V
+      DISABLED" overlay, zero lag, zero freeze (`t_select1.png`); long
+      Select = version splash, perfectly rendered (`t_hold25.png`); Select
+      again = the menu pages — which wedged dark-and-textless ONLY because
+      the gate refused their backdrop (`t_menu1.png`). Lag and freeze fixes
+      both field-verified on the same run; exit via long Backs recovered it.
       **THE MECHANISM, in three lines:** the System 4.28 menu renders a
       128x32 DMD surface (1024x256 RGBA, TexDirect) into the SAME LCD texture
       the video path writes, scaled x10.625 to the 1360x340 band — the band
@@ -1105,13 +1117,15 @@ These have each been violated at least once and each cost a run or a window:
       delivery (real semantics — the absorb used to keep delivering);
       (c) set_state(NULL/READY) marks a pipeline torn down and a loop-seek on
       it is REFUSED, as real GStreamer refuses; (d) set_state(PAUSED) returns
-      ASYNC not SUCCESS, as a real decoder must; (e) THE DOOR GATE
-      (`PAD_VID_DOOR=0` to disable): while the coin door reads open, new
-      video arms are refused, running deliveries hold, and state/caps read
-      dead — the exact environment PAD_VID=0 proved triggers the game's own
-      dot fallback. (a)-(d) are correct emulation regardless of the menu;
-      each was proven insufficient alone for the menu, which is what
-      established the init-latch and forced (e)+boot.
+      ASYNC not SUCCESS, as a real decoder must; (e) THE DOOR GATE — dead,
+      removed in `0df8a01`, tombstone comment above vid_thread. (a)-(d) are
+      correct emulation and are the WHOLE fix; (d) is the one that picks the
+      dots. The "init-latch" this entry used to assert was (e) observing its
+      own damage: the latch experiments all ran with some door-gate draft
+      live, and the wedge the gate caused looked exactly like a latch.
+      Also fixed with the removal: `pad_vid_play` only stamps
+      gst_state=PLAYING on a stream that CAN serve — stamping a failed
+      prepare is how the wedged page was told its dead backdrop flowed.
       **Paid for and written down: `pkill -f autoattract.sh` from an inline
       `bash -c` kills the CALLING SHELL** (the pattern matches its own
       command line — exit 15, two walks lost); the rest-state writer forces
@@ -1163,25 +1177,23 @@ These have each been violated at least once and each cost a run or a window:
       edges — new arms refused, natural clip-end rewinds refused, running
       streams never held, never killed, answering true state/caps until they
       end on their own (the dead-pipeline lies scoped to `!playing`).
-      **STATE OF THE FEATURE, honestly:** mid-session door-open is now SAFE
-      (no lag, no freeze — backdrops play out within ~30 s and rest) but NOT
-      seamless; the green menu still needs the `PAD_DOOR_OPEN=1` boot, which
-      remains verified end-to-end. David's bar is the real machine's
-      seamless mid-session transition, and that is the item's open half.
-      **THE SHARPEST LEAD FOR SEAMLESS, untested: the spike_menu handoff.**
-      `/usr/local/spike/spike_menu/` in the rootfs is a complete separate
-      menu PROGRAM (a 2 MB `game` ELF + 5.7 MB `image.bin`; "GO TO
-      DIAGNOSTICS MENU" lives in BOTH binaries). A real machine may hand the
-      display to that program at door-open instead of negotiating its video
-      down — which would explain the seamlessness AND why nothing video-side
-      ever flips the choice mid-session. First probe: does the main game ever
-      TRY to exec it here (execve is invisible to PAD_OPEN_LOG — trace qemu
-      or hook execve in the shim), and does running it BY HAND against the
-      rig's display produce the menu?
-      **Resume — when the rig is free:** (1) verify `db4b83a`: ordinary boot
-      clean, mid-session door-open lag- and freeze-free, `PAD_DOOR_OPEN=1`
-      boot still green; (2) the spike_menu exec probe above. Wishlist:
-      Emulate-tab "Service mode" checkbox; auto-detect 4.28 titles.
+      **THE spike_menu LEAD IS DEAD**, killed by `/etc/init.d/game` in the
+      rootfs: `spike_menu` runs ONLY when no game is installed (the `elif`
+      after the `$GAMES_PATH/game` check), and `game_monitor` is a plain
+      restart-on-exit loop. There is no door-open program handoff; the game
+      itself owns the whole service flow, which the live walk confirmed.
+      **Resume — the moment a fresh run is up (David: Stop + Start on the
+      Emulate tab; the shim rebuild is automatic, "built ok" in the log):**
+      (1) ordinary boot clean — backdrops, zero refusals; (2) the walk:
+      `swhold.py 33 0`, `swpoke.py 25 2000` twice — EXPECT the version
+      splash then menu pages with their dark backdrop PLAYING and their
+      text/dots drawn (this is the frame the whole item is about); (3) into
+      Diagnostics — EXPECT green dots over the backdrop, matching David's
+      photo; (4) door close in-menu keeps the menu (real machines allow
+      it); (5) godzilla attract/menus unchanged (gate removal restores
+      pre-gate arms, which godzilla always used). Wishlist: Emulate-tab
+      "Service mode" checkbox that documents the LONG-press; auto-detect
+      4.28 titles.
       *(**Filed as 42 and renumbered to 43 on 2026-08-11 before merging**: David
       took 42 for the save-state portability item on main the same afternoon,
       and this branch had not landed yet. Numbers are stable IDs and are never

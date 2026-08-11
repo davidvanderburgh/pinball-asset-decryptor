@@ -141,6 +141,79 @@ pad_static_busybox() {
     ! ldd /bin/busybox 2>&1 | grep -q '=>'
 }
 
+# THE OTHER HALF OF A PIVOT, AND THE HALF NOBODY CHECKED: the program that
+# performs it. Reported 2026-08-11 by the same user as the busybox fault above,
+# one release later and on the very next run - he installed the package the tab
+# had just asked him for, the run got PAST pad_static_busybox, and died two
+# lines further on:
+#
+#     [run] PAD_PIVOT: checkpointable boot (pivot_root, explicit qemu)
+#     bash: line 98: pivot_root: command not found
+#     [run] pivot_root failed
+#     [watch] the game never started.
+#
+# So the repair the app offered is what took his emulator away: without
+# busybox-static the request was withdrawn and the game ran, and WITH it the
+# run reached a pivot this machine cannot spell. That is the PAD-53 fault a
+# second time in a different program, and the lesson is the one that file
+# already wrote down - what a pivot needs is a LIST, and a gate that tests one
+# item of it clears machines the run then refuses.
+#
+# WHERE IT CAN COME FROM, cheapest first, because two different faults produce
+# that one message and this answers both:
+#
+#   * `pivot_root` on PATH - util-linux, essential, /usr/sbin. What every
+#     healthy machine answers with.
+#   * its absolute paths. A root shell launched by `wsl.exe -u root -e` carries
+#     whatever PATH WSL built for it rather than a login shell's, and /usr/sbin
+#     is the only directory outside /usr/bin this rig needs from it - so a PATH
+#     without it fails HERE and nowhere earlier, which is exactly the shape of
+#     the report.
+#   * busybox's own applet. Free to rely on: a pivot already requires the
+#     static busybox above, and Debian and Ubuntu both build it with pivot_root
+#     in. Measured on 2026-08-11 against a real namespace - it pivots and the
+#     lazy umount of the old root works the same as util-linux's.
+#
+# `command -v` IS NOT AN EXECUTABLE TEST WHEN THIS RUNS AS ROOT, and a pivot
+# ALWAYS runs as root (watch.sh launches PAD_PIVOT sessions with `wsl.exe -u
+# root`). Measured here on 2026-08-11 with a non-executable file in
+# /usr/sbin/pivot_root's place: `command -v pivot_root` printed the path and
+# returned 0, while `type` said not found and running it said Permission
+# denied. So every candidate is confirmed with -f -x, which for root means "a
+# regular file with an execute bit", and the busybox applet is confirmed by
+# RUNNING busybox. A resolver that hands back something unrunnable is the
+# `command not found` fault again, one directory deeper.
+#
+# Prints the ABSOLUTE path it resolved to, so no caller has to know which of
+# the three it got and the pivot itself does not depend on a PATH - the inner
+# namespace in run_game.sh has fewer reasons to trust one than anywhere else in
+# this rig. The busybox form is two words on purpose: callers run it unquoted
+# ($PIVOTROOT . oldroot), which splits it correctly.
+pad_pivot_root_cmd() {
+    local c p
+    for c in pivot_root /usr/sbin/pivot_root /sbin/pivot_root; do
+        p=$(command -v "$c" 2>/dev/null) || continue
+        [ -n "$p" ] && [ -f "$p" ] && [ -x "$p" ] || continue
+        printf '%s\n' "$p"
+        return 0
+    done
+    for c in /bin/busybox "$(command -v busybox 2>/dev/null)"; do
+        [ -n "$c" ] && [ -f "$c" ] && [ -x "$c" ] || continue
+        "$c" --list 2>/dev/null | grep -qx pivot_root || continue
+        printf '%s pivot_root\n' "$c"
+        return 0
+    done
+    return 1
+}
+
+#: CAN THIS MACHINE BOOT A CHECKPOINTABLE GUEST AT ALL - the whole question in
+#: one call, and the thing watch.sh and setupcheck.sh must ask. Both used to
+#: ask pad_static_busybox, which was half of it; asking half a question is how
+#: the tab cleared a machine and the run then refused it.
+pad_can_pivot() {
+    pad_static_busybox && pad_pivot_root_cmd >/dev/null 2>&1
+}
+
 # ---- WHAT THE HARDWARE SHIM IS BUILT FROM, IN ONE PLACE ------------------
 #
 # build.sh compiles this list and stamps its digest beside the .so; watch.sh

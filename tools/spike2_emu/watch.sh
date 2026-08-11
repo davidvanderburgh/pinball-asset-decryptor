@@ -233,12 +233,34 @@ fi
 # below and before anything reads PAD_PIVOT, so the log names the shape that
 # actually ran and the playfield does not offer Save/Load buttons that could
 # only fail (see PF_STATES).
-if [ -n "${PAD_PIVOT:-}" ] && ! pad_static_busybox; then
-    echo "[watch] no static busybox here, so this run cannot be checkpointed:"
+#
+# AND THE SAME FAULT AGAIN ONE RELEASE LATER, 2026-08-11, from the same user:
+# he installed busybox-static, this gate cleared him, and the run died on
+# `pivot_root: command not found`. The gate tested ONE of the two programs a
+# pivot needs, so the repair the app offered is what took his emulator away.
+# pad_can_pivot asks about both (padpath.sh); which one is missing only decides
+# what this says, because the outcome - run without save states - is the same.
+if [ -n "${PAD_PIVOT:-}" ] && ! pad_can_pivot; then
+    # WHICH PACKAGE IS THE HONEST ONE DEPENDS ON WHICH HALF IS MISSING.
+    # busybox-static carries a pivot_root applet as well as the static binary,
+    # so it repairs BOTH halves at once - which is why it is the only package
+    # named for the common case. It is already installed here, though, if the
+    # missing half is pivot_root and the applet was not found either, and
+    # telling someone to install what they have is worse than saying nothing:
+    # /usr/sbin/pivot_root comes from util-linux, and putting it back is what
+    # that machine actually needs.
+    if pad_static_busybox; then
+        _pv_why="this machine has no pivot_root"
+        _pv_how="sudo apt install --reinstall util-linux"
+    else
+        _pv_why="no static busybox here"
+        _pv_how="sudo apt install busybox-static"
+    fi
+    echo "[watch] $_pv_why, so this run cannot be checkpointed:"
     echo "[watch]   save states are off. To turn them on:"
-    echo "[watch]   sudo apt install busybox-static     (then start again)"
+    echo "[watch]   $_pv_how     (then start again)"
     echo "[watch] starting WITHOUT them - nothing else about the run changes."
-    unset PAD_PIVOT
+    unset PAD_PIVOT _pv_why _pv_how
 fi
 
 # ---- WHAT THIS RUN ACTUALLY IS, in the run's own log ----------------------
@@ -758,8 +780,20 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     # and a hand-run PAD_PIVOT session keeps its buttons with no extra flag.
     # It rides the COMMAND LINE because the Windows-side window only sees
     # WSLENV-listed variables, and an argv is one less thing to keep in step.
+    #
+    # ...AND WHAT THE RUN TURNED OUT TO BE BEATS WHAT IT WAS ASKED TO BE. The
+    # gate above withdraws a pivot this machine cannot do, but run_game.sh can
+    # still be refused by the kernel at the pivot itself - and it now answers
+    # that by booting the ordinary way rather than by dying. That run is up,
+    # correct and NOT checkpointable, and this line is written after the guest
+    # has started, so the log already says so if it happened. Buttons that can
+    # only fail are the thing this flag exists to prevent; asking the log costs
+    # one grep and covers the case no pre-flight can.
     PF_STATES=""
-    if [ "${PAD_SAVESTATES:-${PAD_PIVOT:-0}}" = 1 ]; then PF_STATES="--savestates"; fi
+    if [ "${PAD_SAVESTATES:-${PAD_PIVOT:-0}}" = 1 ] &&
+       ! grep -q '^\[run\] pivot_root failed' "$LOG" 2>/dev/null; then
+        PF_STATES="--savestates"
+    fi
     if [ "$IS_WSL" = 0 ]; then
         PF_PY=${PAD_PF_PYTHON:-python3}
         if "$PF_PY" -c 'import tkinter' >/dev/null 2>&1; then

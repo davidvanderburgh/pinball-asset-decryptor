@@ -30,12 +30,12 @@
 #   nativecc                   1 = this machine can compile and link a NATIVE
 #                              program, which is a different question from
 #                              whether gcc is on PATH - see _pad_cc_works
-#   busybox                    1 = there is a native STATIC busybox, which is
-#                              what a checkpointable (save-state) boot needs
-#                              and an ordinary one does not - see
-#                              pad_static_busybox. Its absence costs SAVE
-#                              STATES, not the emulator, so the tab reports it
-#                              apart from the six above
+#   busybox                    1 = this machine can boot the checkpointable
+#                              (save-state) shape, which an ordinary run does
+#                              not need: a native STATIC busybox AND a
+#                              pivot_root to run - see pad_can_pivot. Its
+#                              absence costs SAVE STATES, not the emulator, so
+#                              the tab reports it apart from the six above
 #   need                       the packages that would supply the missing
 #                              ones, in apt's spelling
 #   indexed                    1 = apt has index metadata to answer questions
@@ -123,13 +123,21 @@ _have() {
 #: the same, because the alternative is a user finding out from a log line
 #: mid-run - which is the thing this whole script exists to prevent. The tab
 #: keeps it out of "this PC cannot run the emulator" for the same reason.
+#: AND IT ASKS ABOUT THE WHOLE BOOT, NOT ONE PACKAGE OF IT. This line used to
+#: be pad_static_busybox, and the user above installed exactly what it named,
+#: came back the next day, and lost the emulator to the OTHER program that
+#: shape needs - `pivot_root: command not found`, one release later. A gate
+#: that clears a machine the run then refuses is this file's whole subject, so
+#: the question is now pad_can_pivot: both halves, one answer. busybox-static
+#: stays the package, because it carries a pivot_root applet as well as the
+#: static binary and so repairs either half (see pad_pivot_root_cmd).
 PAD_SETUP_TOOLS="qemu:qemu-arm-static:qemu-user-static:1
 armgcc:arm-linux-gnueabihf-gcc:gcc-arm-linux-gnueabihf:0
 nativecc:@_pad_cc_works:gcc,libc6-dev:0
 debugfs:debugfs:e2fsprogs:0
 fuse:fusermount3:fuse3:0
 ffmpeg:ffmpeg:ffmpeg:0
-busybox:@pad_static_busybox:busybox-static:0"
+busybox:@pad_can_pivot:busybox-static:0"
 
 need= _xrel_ok=
 for _t in $PAD_SETUP_TOOLS; do

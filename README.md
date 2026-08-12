@@ -856,8 +856,12 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    the warning off and leave the buttons just as dead. That build now
    carries criu's own later fix for one of its feature probes, which a
    2026 compiler answers backwards — without it the build stops with
-   `conflicting redefinition of enum` on a brand-new Linux install, and
-   with it the same source builds on old and new compilers alike.
+   `conflicting redefinition of enum` on a brand-new Linux install — and
+   it now compiles that pinned source in the C dialect it was written in,
+   so a compiler that defaults to a newer language stops rejecting lines
+   the original one allowed (`discards 'const' qualifier` on `strrchr`,
+   250 files further in). With both, the same source builds on old and
+   new compilers alike.
    One more machine shape works without being told about now: WSL can be
    configured so Linux can't start a Windows program at all
    (`[interop] enabled=false`), and the virtual playfield *is* a Windows

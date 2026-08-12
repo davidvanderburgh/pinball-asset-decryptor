@@ -2754,6 +2754,123 @@ static void jgl_poll(int idle, int quiet)
     }
 }
 
+/* ---- THE PICTURE ORACLE, ALWAYS ON ----------------------------------------
+ *
+ * WHAT IT ANSWERS, AND WHY NOTHING ELSE COULD. A user reported a BLACK GAME
+ * WINDOW on 2026-08-12 (PAD-63) and sent a log in which every instrument this
+ * rig owns read healthy: the card mounted, the guest booted, the node bus went
+ * quiet, auto-advance reached attract mode, ffmpeg decoded his clips, the guest
+ * was handed 30.0 frames/s, and THIS process reported 40.9 fps with 28.4 video
+ * uploads/s and a real 15.36 ms/f swap - so win_present() ran, the blit ran and
+ * eglSwapBuffers was called for every one of 4210 frames. The log could not
+ * distinguish the only two things it can be:
+ *
+ *   * the picture is BLACK WHERE IT IS DRAWN - the guest's draws are landing
+ *     somewhere other than fbo_screen, or the frame really is empty. Then the
+ *     window is innocent and a WSL restart is a waste of a session.
+ *   * the picture is FINE HERE and is lost between eglSwapBuffers and the
+ *     Windows desktop - WSLg's RAIL mirror, REMAINING item 38. Then the cure
+ *     is the restart and nothing in the emulator needs touching.
+ *
+ * Those want opposite work, and the difference is one glReadPixels of the FBO
+ * that every draw ends up in. The measurement already existed - present()'s
+ * PADGL_DEBUG block below has read this exact percentage since item 27 - but it
+ * was gated on an env var nobody sets, capped at frame 400 (~10 s in, while the
+ * screen is legitimately still black during boot) and printed to a log the app
+ * never showed. An oracle that only answers when you already knew to ask is not
+ * an oracle.
+ *
+ * WHAT IT COSTS. The same readback the debug path below has always done, on one
+ * frame in two to three hundred rather than one in forty: once every
+ * PAD_GL_PICCHECK seconds, default 5. PAD_GL_PICCHECK=0 switches it off.
+ *
+ * WHAT IT PRINTS, AND WHY SO LITTLE. Four lines at most per run, all of them
+ * starting `[padglhost] picture:` so watch.sh's event filter can carry them to
+ * the app's log pane with one pattern: the first picture, a picture that goes
+ * away, one that comes back, and the contradiction that names the fault outright
+ * - video frames uploading into a screen that stays empty. A number every five
+ * seconds would be noise; a state CHANGE is the whole content.
+ *
+ * ANY LIT PIXEL IS A PICTURE. The question is "is anything at all being drawn",
+ * and one non-black pixel already answers it, so there is no threshold here to
+ * get wrong. The COUNT goes in the line rather than a percentage, so a
+ * one-pixel answer reads as the nonsense it would be instead of rounding to a
+ * confident 0%. */
+static double pic_every = 5.0;   /* PAD_GL_PICCHECK seconds; 0 = off        */
+static double pic_next;          /* next check, in now_s() terms            */
+static int    pic_lit;           /* the last answer                         */
+static int    pic_ever;          /* have we ever had a picture              */
+static int    pic_said;          /* the contradiction line, printed once    */
+
+/* Non-black pixels in fbo_screen, or -1 if it could not be read.
+ *
+ * THE COUNT AND NOT A PERCENTAGE, because the caller's question is "is anything
+ * lit at all" and a percentage answers it wrong: a dark scene with a small logo
+ * in it rounds to 0% and would be reported as a black screen, which is the one
+ * mistake this whole oracle exists to avoid making.
+ *
+ * SAVES AND RESTORES THE FBO BINDING, like jgl_poll's on-demand shot: this runs
+ * in the middle of the guest's command stream and its binding must survive. */
+static long screen_nonblack_px(void)
+{
+    unsigned char *px;
+    long i, n = (long)fb_w * fb_h, lit = 0;
+    int prev = 0;
+    if (n <= 0) return -1;
+    px = malloc((size_t)n * 4);
+    if (!px) return -1;
+    p_glGetIntegerv(0x8CA6, &prev);          /* FRAMEBUFFER_BINDING */
+    p_glBindFramebuffer(0x8D40, fbo_screen);
+    p_glFinish();
+    p_glReadPixels(0, 0, fb_w, fb_h, 0x1908, 0x1401, px);   /* RGBA, UBYTE */
+    p_glBindFramebuffer(0x8D40, (unsigned)prev);
+    for (i = 0; i < n; i++)
+        if (px[i*4] | px[i*4+1] | px[i*4+2]) lit++;
+    free(px);
+    return lit;
+}
+
+static void pic_check(void)
+{
+    double now;
+    long lit, n = (long)fb_w * fb_h;
+    if (pic_every <= 0.0) return;
+    now = now_s();
+    if (now < pic_next) return;
+    pic_next = now + pic_every;
+    lit = screen_nonblack_px();
+    if (lit < 0) return;
+    if (lit > 0) {
+        if (!pic_ever)
+            fprintf(stderr, "[padglhost] picture: FIRST at frame %ld "
+                    "(%ld of %ld pixels are not black)\n", frames_done, lit, n);
+        else if (!pic_lit)
+            fprintf(stderr, "[padglhost] picture: back at frame %ld "
+                    "(%ld of %ld pixels)\n", frames_done, lit, n);
+        pic_ever = pic_lit = 1;
+        return;
+    }
+    if (pic_lit) {
+        pic_lit = 0;
+        fprintf(stderr, "[padglhost] picture: GONE BLACK at frame %ld - the "
+                "renderer is still drawing and what it draws is now empty, so "
+                "this is the game, not the window\n", frames_done);
+        return;
+    }
+    /* NO TIMEOUT HERE, ON PURPOSE. "Still black after N seconds" needs a number
+     * that is right for every title's boot, and a boot legitimately IS black -
+     * this user's reached its first clip 74 s in. The contradiction needs no
+     * such number: video frames uploading into a screen with nothing in it
+     * cannot be a slow boot whatever the clock says. */
+    if (!pic_ever && !pic_said && vid_distinct > 0) {
+        pic_said = 1;
+        fprintf(stderr, "[padglhost] picture: STILL BLACK after %ld video "
+                "frames - the game is drawing and the screen it draws into is "
+                "empty, so a black window here is NOT WSLg's mirror\n",
+                vid_distinct);
+    }
+}
+
 static void present(void)
 {
     frames_done++;
@@ -2762,6 +2879,9 @@ static void present(void)
      * anything placed further down would render only every Nth frame and then
      * stop forever - which for a live window means a picture that freezes. */
     win_present();
+    /* AFTER the present, so what is measured is the frame that just went to the
+     * window rather than one being built. See the oracle's header. */
+    pic_check();
     /* "the draws arrived with correct state" and "the target has pixels in it"
      * are separate claims. Check the second directly. */
     if (dbg && frames_done <= 400 && (frames_done % 40) == 0) {
@@ -3464,6 +3584,7 @@ int main(int argc, char **argv)
                 "(red=x, green=y, white grid every 32)\n", s);
     }
     if (getenv("PAD_GL_RING_MB"))     ring_mb    = strtoul(getenv("PAD_GL_RING_MB"), 0, 10);
+    if (getenv("PAD_GL_PICCHECK"))    pic_every  = atof(getenv("PAD_GL_PICCHECK"));
     dbg = getenv("PADGL_DEBUG") ? atoi(getenv("PADGL_DEBUG")) : 0;
     if (getenv("PADGL_SEQ_FROM")) seq_from = atol(getenv("PADGL_SEQ_FROM"));
     if (getenv("PADGL_SEQ_TO"))   seq_to   = atol(getenv("PADGL_SEQ_TO"));

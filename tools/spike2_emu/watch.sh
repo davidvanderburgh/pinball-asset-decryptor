@@ -825,7 +825,18 @@ case "$GLWIN" in
         echo "[watch] game window ${GLWIN#*window }"
         echo "[watch]   (no game window on the desktop? Then it is WSLg's"
         echo "[watch]   mirror that is missing, not the window: Stop, then"
-        echo "[watch]   'Restart WSL...' on the Emulate tab.)" ;;
+        echo "[watch]   'Restart WSL...' on the Emulate tab.)"
+        # A WINDOW THAT IS THERE AND BLACK IS A DIFFERENT FAULT and used to get
+        # the same answer, which is only right half the time: a WSL restart
+        # repaints a lost mirror and does nothing at all for a picture that is
+        # black where it is drawn. The renderer now says which, so point at it
+        # rather than guessing here - the line arrives a few seconds later, in
+        # this same pane.
+        echo "[watch]   (a window that IS there and stays BLACK? The"
+        echo "[watch]   '[padglhost] picture:' line below says which half it"
+        echo "[watch]   is - a picture here and none on the desktop is the"
+        echo "[watch]   mirror again; no picture here is the game or the"
+        echo "[watch]   renderer, and no restart touches that.)" ;;
     *headless*)
         echo "[watch] THE RENDERER HAS NO WINDOW, so this run will show no" \
              "picture at all." >&2
@@ -1180,8 +1191,18 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
                 { print "[event] " $0; fflush() }
             next }
         /\[play\]/               { print "[event] " $0; fflush(); next }
-        /\[padglhost\] (window opened|video block|ring |UNKNOWN)/ \
+        /\[padglhost\] (window opened|video block|ring |UNKNOWN|picture:)/ \
                                  { print "[event] " $0; fflush(); next }
+        # `picture:` IS THE SAME GAP ONE STEP FURTHER IN. The lines above cover
+        # a window that never opened; a window that opens and stays BLACK was
+        # invisible to this pane in exactly the same way, and it is the harder
+        # of the two to reason about from outside (PAD-63, 2026-08-12: 4210
+        # rendered frames, 28.4 video uploads/s, and a black window). The
+        # picture oracle in the renderer names which half it is - see its
+        # header in padglhost.c - and every one of its lines starts with the
+        # word, so one pattern carries all four. (No apostrophes in here: this
+        # comment is INSIDE the single-quoted awk program, and one of them ends
+        # it - which is why the comments around it are written the same way.)
         # ...AND WHEN THERE IS NO WINDOW, WHICH IS THE ONE THAT WAS MISSING.
         # padglhost degrades to headless rather than dying (a broken X server
         # must not end a run that is otherwise fine), so its two explanations -
@@ -1216,7 +1237,23 @@ END=0
 [ "$MINS" != 0 ] && END=$(( $(date +%s) + MINS * 60 ))
 while :; do
     if ! pgrep -x padglhost >/dev/null; then
-        echo "[watch] renderer exited (window closed)."
+        # NOT "(window closed)" FOR EVERY WAY THE RENDERER CAN GO. This line
+        # used to assert that, unconditionally, on nothing but "the process is
+        # not there anymore" - so a renderer that DIED read in the log as a
+        # human closing a window, and PAD-63's black-window report arrived with
+        # exactly that sentence on the end of it, which is the one thing that
+        # had to be established before anything else could be. padglhost says
+        # why it is stopping ("window closed; stopping" / "window destroyed;
+        # stopping"); when it said neither, say THAT and show its last words,
+        # rather than putting it on the user.
+        if grep -q 'window \(closed\|destroyed\); stopping' "$HOSTLOG" 2>/dev/null; then
+            echo "[watch] renderer exited (window closed)."
+        else
+            echo "[watch] THE RENDERER STOPPED ON ITS OWN - it did not report" \
+                 "a closed window, so this was not you closing it." >&2
+            echo "[watch]   its last lines ($HOSTLOG):" >&2
+            tail -3 "$HOSTLOG" 2>/dev/null | sed 's/^/[watch]   /' >&2
+        fi
         break
     fi
     # A SAVE-STATE RELOAD IS NOT THE GAME EXITING (item 13). loadgame.sh kills

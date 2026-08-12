@@ -1245,11 +1245,19 @@ static int vid_gate_on(void)
  *
  * So the variable that matters is not WHAT is answered but HOW LONG the answer
  * has been wrong before the page is built - and the cheapest honest place to
- * start it is the service button itself (sw25 Select / sw28 Back, both only
- * reachable behind an open door). Attract then bands for the couple of seconds
- * a hand is on the button instead of the whole time the door stands open,
- * which is a smaller version of the cost David rejected rather than a removal
- * of it. He chose to try it 2026-08-12 knowing that.
+ * start it is the service button itself, which is only reachable behind an
+ * open door. Attract then bands for the couple of seconds a hand is on the
+ * button instead of the whole time the door stands open, which is a smaller
+ * version of the cost David rejected rather than a removal of it. He chose to
+ * try it 2026-08-12 knowing that.
+ *
+ * ★ SELECT (sw25) ONLY, NOT BACK (sw28) - a distinction the first build got
+ * wrong and paid for inside one boot. `autoattract.sh` presses Service BACK to
+ * get the game past Tech Alerts, so Back fired the pre-trigger DURING BOOT,
+ * the game built its scenes under the lie, and the run came up with zero
+ * streams ever started: attract black, the pinned build's failure reproduced
+ * by accident. Select is the button that ENTERS the menu; Back only ever
+ * leaves it.
  *
  * The window is generous on purpose - the buttons are polled slowly enough
  * that a real press is held ~2 s ([[reference_spike2_coin_door_interlock]]),
@@ -1273,9 +1281,9 @@ static int vid_svc_pretrigger(void)
     }
     if (!win_ms) return 0;
     now = vid_us();
-    if (pad_sw_level(25) || pad_sw_level(28)) {
+    if (pad_sw_level(25)) {
         if (!until)
-            VLOG("[vid] service button down - starting the menu lie %d ms "
+            VLOG("[vid] service Select down - starting the menu lie %d ms "
                  "early, before the page is built (item 43)\n", win_ms);
         until = now + (unsigned long)win_ms * 1000ul;
     }

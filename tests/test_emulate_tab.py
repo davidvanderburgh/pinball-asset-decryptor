@@ -1976,3 +1976,240 @@ def test_a_rig_that_never_heard_of_criu_accuses_nobody():
     assert setup_extras(facts) == []
     assert emulate_tab.setup_built(facts) == []
     assert setup_settled(facts)
+
+
+# ----------------------------------------------------------------------
+# What the app's own WSL restart leaves behind
+#
+# Reported 2026-08-12 (Pinside, #151-#153).  A tester's run stopped on an
+# unset DISPLAY; the cure offered was "Restart WSL…" on this tab; and his
+# NEXT run stopped on
+#
+#     chroot: failed to run command '/bin/sh': Exec format error
+#
+# because the kernel's 32-bit ARM registration lives in the RUNNING kernel
+# and his distro does not boot systemd, so the restart took it with it.  The
+# tab said nothing about that at all: the setup probe ran once, at build
+# time, against the machine as it was BEFORE the restart - so the notice and
+# the "Set up emulator…" button that puts the handler back both stayed
+# hidden, and what the user got instead was a wall of guest log text telling
+# him to edit /etc/wsl.conf by hand.
+# ----------------------------------------------------------------------
+
+def _restart_rig(tmp_path, monkeypatch, survives):
+    """Build a panel over a WSL whose `--shutdown` costs the ARM handler (or
+    not, when `survives`), and hand back the panel, the log and the root."""
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    machine = {"binfmt": "1", "probes": 0}
+
+    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
+
+    def probe():
+        machine["probes"] += 1
+        return _facts(binfmt=machine["binfmt"], wslconf="0")
+
+    monkeypatch.setattr(emulate_tab, "setup_state", probe)
+
+    def fake_run(cmd, *a, **kw):
+        # THE FACT BEING SIMULATED, and it is one line: a distro without
+        # systemd comes back from `wsl --shutdown` with an empty
+        # binfmt_misc.  Everything else about the machine is unchanged -
+        # qemu-user-static is still installed, which is why the tab cannot
+        # infer this and has to ask.
+        if not survives and any("--shutdown" in str(c) for c in cmd):
+            machine["binfmt"] = "0"
+        return SimpleNamespace(stdout=b"", returncode=0)
+
+    monkeypatch.setattr(emulate_tab.subprocess, "run", fake_run)
+    root, panel = _panel(tmp_path)
+    logged = []
+    panel._log_sink = logged.append
+    return root, panel, logged, machine
+
+
+def _pump(root, want, seconds=10):
+    """Wait for *want* under a REAL mainloop, and say whether it came true.
+
+    NOT ``root.update()`` in a loop, which is what every other panel test
+    here uses and what this one cannot: the restart worker hands its answer
+    back with ``after`` FROM ANOTHER THREAD, and tkinter refuses that unless
+    the mainloop is genuinely running in the thread that made the
+    interpreter.  ``update()`` does not count - the worker's ``after`` raises
+    RuntimeError, the panel swallows it exactly as it must in a torn-down
+    tab, and the test then watches a tab that nothing ever reached.  (Both
+    of the log lines the worker writes travel the same way, so this is the
+    production path, not a test-only one.)
+    """
+    import time
+    deadline = time.time() + seconds
+    got = {"v": False}
+
+    def tick():
+        got["v"] = bool(want())
+        if got["v"] or time.time() > deadline:
+            root.quit()
+        else:
+            root.after(20, tick)
+
+    root.after(0, tick)
+    root.mainloop()
+    return got["v"]
+
+
+def test_a_wsl_restart_re_probes_what_it_left_behind(tmp_path, monkeypatch):
+    """The button that restarts WSL is one of the two ways a machine that
+    could emulate a minute ago stops being one, so the answer it invalidates
+    is asked again - and the notice and its button come back with it."""
+    root, panel, logged, machine = _restart_rig(tmp_path, monkeypatch,
+                                                survives=False)
+    try:
+        assert _pump(root, lambda: panel._setup is not None), \
+            "the build-time probe never answered"
+        assert not panel._setup_msg.winfo_ismapped(), \
+            "a healthy machine was given a notice before anything happened"
+
+        panel._restart_wsl("the test's own reason")
+        assert _pump(root, lambda: panel._setup_msg.winfo_ismapped()), \
+            ("the tab still shows the machine it probed BEFORE the restart - "
+             "the next Start is the only thing that would say otherwise")
+        assert panel._setup_btn.winfo_ismapped(), \
+            "nothing on the tab offers to put the handler back"
+        assert "32-bit ARM" in panel._setup_msg.cget("text")
+        # ...and in the log too, which is where the user is looking while a
+        # restart runs.
+        assert any("ARM handler" in m for m in logged), logged
+    finally:
+        root.destroy()
+
+
+def test_a_machine_that_came_back_intact_is_told_nothing(tmp_path,
+                                                         monkeypatch):
+    """David's own WSL boots systemd, so its handler survives - and a restart
+    there must not leave a notice or an accusation behind.  The re-probe is
+    allowed to cost one wsl.exe and nothing else."""
+    root, panel, logged, machine = _restart_rig(tmp_path, monkeypatch,
+                                                survives=True)
+    try:
+        assert _pump(root, lambda: machine["probes"] >= 1)
+        # SNAPSHOT, not a fixed count: a panel from an earlier test in this
+        # file can still have a probe worker in flight, and monkeypatch has
+        # by now pointed `setup_state` at THIS test's counter - so an
+        # absolute `>= 2` can be satisfied by someone else's straggler.
+        before = machine["probes"]
+        panel._restart_wsl("the test's own reason")
+        assert _pump(root, lambda: any("what the restart left behind" in m
+                                       for m in logged)), \
+            "the restart did not re-probe at all"
+        assert _pump(root, lambda: machine["probes"] > before)
+        # ...and then let the answer be applied before insisting on silence.
+        _pump(root, lambda: False, seconds=1)
+        assert not panel._setup_msg.winfo_ismapped()
+        assert not panel._setup_btn.winfo_ismapped()
+        assert not any("took the 32-bit ARM handler" in m for m in logged), \
+            logged
+    finally:
+        root.destroy()
+
+
+def test_the_restart_says_why_it_is_looking_before_it_looks(tmp_path,
+                                                            monkeypatch):
+    """The re-probe is what boots WSL back up, and on a cold VM that is tens
+    of seconds - which would read as the restart itself hanging.  So the
+    reason goes up first, whatever the answer turns out to be."""
+    root, panel, logged, machine = _restart_rig(tmp_path, monkeypatch,
+                                                survives=True)
+    try:
+        assert _pump(root, lambda: machine["probes"] >= 1)
+        panel._restart_wsl("the test's own reason")
+        assert _pump(root, lambda: any("what the restart left behind" in m
+                                       for m in logged)), logged
+        said = [m for m in logged if "what the restart left behind" in m][0]
+        assert "systemd" in said
+    finally:
+        root.destroy()
+
+
+# ----------------------------------------------------------------------
+# ...and the same fault said from the other side.
+#
+# When the handler really is gone, the run's own message is what the user
+# reads, and it used to be two root commands and an /etc/wsl.conf edit with
+# no mention that the app in front of him does both.  The tester on
+# 2026-08-12 set about doing it by hand.
+# ----------------------------------------------------------------------
+
+def _guest_binfmt_message():
+    """The lines pad_ensure_guest_exec prints when no ARM handler exists,
+    comments dropped - what the user reads, not what the file explains."""
+    text = (pathlib.Path(DEFAULT_RIG_DIR) / "ensurebuild.sh").read_text(
+        encoding="utf-8")
+    body = text[text.index("no handler registered for 32-bit ARM"):]
+    body = body[:body.index("return 1")]
+    return "\n".join(ln for ln in body.splitlines()
+                     if not ln.lstrip().startswith("#"))
+
+
+def test_the_guest_message_names_the_button_that_does_all_of_it(tmp_path,
+                                                                monkeypatch):
+    """One string, two languages: the rig prints the name of a button this
+    module packs, so the two must not drift.  It is checked without its
+    ellipsis - the shell writes three dots and Tk one character."""
+    said = _guest_binfmt_message()
+    assert "Set up emulator" in said
+    # No probe: this test is about a label, and the build-time one is a real
+    # wsl.exe on a Windows runner.
+    monkeypatch.setattr(emulate_tab, "setup_state", lambda: None)
+    root, panel = _panel(tmp_path)
+    try:
+        assert panel._setup_btn.cget("text").startswith("Set up emulator")
+    finally:
+        root.destroy()
+
+
+def test_the_button_is_offered_before_the_commands_and_only_on_wsl():
+    """A Linux desktop has no such button and no free root, so it keeps the
+    commands on their own - and where the button does exist it comes first,
+    because it is what the reader should do."""
+    said = _guest_binfmt_message()
+    assert said.index("Set up emulator") < said.index("$(_pad_binfmt_advice)")
+    assert 'IS_WSL' in said[:said.index("Set up emulator")], \
+        "a Linux desktop is being pointed at a button it does not have"
+    # The by-hand route is still printed, for a terminal run and for anyone
+    # who wants to see what is being done.
+    assert "wsl.conf" in said and "systemd=true" in said
+
+
+def test_the_notice_asks_the_window_to_make_room_for_it(tmp_path, monkeypatch):
+    """FOUND IN THE PROOF SHOTS, not here: the first cut of the re-probe put
+    the button up beside a sentence nobody could read.
+
+    ttk.Notebook pins its pane to the selected tab's requested height, and
+    that is measured when the tab is selected.  Every other notice on this
+    panel is already there by then; this one appears LATER, while the user is
+    sitting on the tab - and pack gives a slave that no longer fits no space
+    at all and leaves it unmapped.  So the panel says it is taller now.
+    """
+    root, panel, logged, machine = _restart_rig(tmp_path, monkeypatch,
+                                                survives=False)
+    asked = []
+    panel._resize_fn = lambda: asked.append(1)
+    try:
+        assert _pump(root, lambda: panel._setup is not None)
+        panel._restart_wsl("the test's own reason")
+        assert _pump(root, lambda: panel._setup_msg.winfo_ismapped())
+        assert asked, ("the notice was packed into a pane measured without "
+                       "it, so it is there and invisible")
+    finally:
+        root.destroy()
+
+
+def test_the_window_hands_the_panel_something_to_ask_with():
+    """The panel's half is useless without the wiring, and the wiring is one
+    keyword nobody would miss until a notice went missing again."""
+    import inspect
+    from pinball_decryptor.gui.main_window import MainWindow
+    src_ = inspect.getsource(MainWindow._build_emulate_tab)
+    assert "resize_fn=" in src_
+    assert "_resize_notebook_to_current_tab" in src_
+    # ...and it must be the real method, not a name that has moved on.
+    assert callable(MainWindow._resize_notebook_to_current_tab)

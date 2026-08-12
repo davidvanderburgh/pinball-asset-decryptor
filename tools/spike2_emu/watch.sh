@@ -556,10 +556,41 @@ trap 'teardown' EXIT
 case $(pad_display_state) in
     ok|remote) ;;
     none)
+        # AN UNSET DISPLAY IS NOT ONE FAULT, and this used to name only the
+        # rarest of them, in a sentence that invited the user to CREATE the
+        # setting that causes it. A tester met this on 2026-08-12, went looking
+        # for %USERPROFILE%\.wslconfig, HAD NO SUCH FILE, and set about writing
+        # one: "I followed instructions online to create the .wslconfig text
+        # file but unsure if I just dump those strings in there or what". The
+        # only string this message had given him was guiApplications=false -
+        # so one paste would have switched GUI apps OFF on a machine where they
+        # were on, and this message would have caused the fault it describes.
+        # A restart cured his.
+        #
+        # Hence the order and the wording: the cure that usually works first,
+        # the settings file second and only as something to LOOK AT, said as
+        # plainly as it can be said that there is nothing to add there. And
+        # third the one that no amount of restarting fixes - a WSL too old to
+        # have WSLg at all, which is not something anything in here can see.
         echo "[watch] DISPLAY is unset - WSLg is not available, so there is no window to open." >&2
-        echo "[watch]   On WSL that usually means GUI apps are switched off:" >&2
-        echo "[watch]   check for guiApplications=false in %USERPROFILE%\\.wslconfig," >&2
-        echo "[watch]   then 'wsl --shutdown' and start the emulator again." >&2
+        if [ "$IS_WSL" = 1 ]; then
+            echo "[watch]   WSLg sets DISPLAY when the distro starts, so an unset one" >&2
+            echo "[watch]   usually means this session came up without it. Restart WSL" >&2
+            echo "[watch]   ('Restart WSL...' on the Emulate tab, or 'wsl --shutdown' in" >&2
+            echo "[watch]   a Windows terminal), then start the emulator again." >&2
+            echo "[watch]   If it comes back after that, GUI apps are switched off for" >&2
+            echo "[watch]   this PC. That switch is %USERPROFILE%\\.wslconfig on the" >&2
+            echo "[watch]   WINDOWS side, and it is OPTIONAL: no such file means GUI apps" >&2
+            echo "[watch]   are ON, so there is nothing to put in one - do not create it." >&2
+            echo "[watch]   Only if it already exists and says guiApplications=false," >&2
+            echo "[watch]   change that word to true (or delete the line) and restart WSL." >&2
+            echo "[watch]   A WSL too old to have WSLg at all does this too, and no" >&2
+            echo "[watch]   restart cures that one: 'wsl --update' in a Windows terminal." >&2
+        else
+            echo "[watch]   Nothing here can open a window. Start the emulator from a" >&2
+            echo "[watch]   desktop session, or point DISPLAY at one this machine can" >&2
+            echo "[watch]   reach." >&2
+        fi
         exit 1 ;;
     masked)
         # WSLg's socket is where WSL put it and something has mounted over the

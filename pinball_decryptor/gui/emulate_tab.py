@@ -1019,9 +1019,21 @@ class EmulatePanel:
     POLL_IDLE_MS = 10000
 
     def __init__(self, parent, log=None, card_var=None, savestates_var=None,
-                 theme_fn=None, badge_fn=None):
+                 theme_fn=None, badge_fn=None, resize_fn=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
+        #: "This tab is taller than it was" - MainWindow._resize_notebook_to_
+        #: current_tab, injected the same way the log and the theme are.
+        #:
+        #: WHY THE PANEL HAS TO ASK.  ttk.Notebook is pinned to the selected
+        #: tab's requested height, measured when the tab is selected, and the
+        #: setup notice is the one thing here that appears LATER: the probe
+        #: that arms it now runs after a WSL restart, with the user already
+        #: sitting on this tab.  Packed into a pane that was measured without
+        #: it, the label gets no room and pack leaves it unmapped - so the
+        #: "Set up emulator…" button appeared beside a sentence nobody could
+        #: read.  Found in the before/after shots for PAD-62, not in a test.
+        self._resize_fn = resize_fn or (lambda: None)
         # The card path lives in a variable the WINDOW owns (when given one):
         # the app persists it into the project anchor and restores it when a
         # project loads, exactly like the Extract/Write path fields. The
@@ -1103,6 +1115,10 @@ class EmulatePanel:
         self._setup_busy = False
         self._setup_result = None
         self._setup_fixing = False
+        #: The probe now out was armed by a `wsl --shutdown` this panel did,
+        #: so its answer is worth a line in the log as well as the notice.
+        #: See _setup_after_restart and _setup_apply.
+        self._setup_restart_check = False
         #: A status poll's wsl.exe is in flight — see _poll.  Written only on
         #: the main thread, so it cannot be raced by the worker it gates.
         self._poll_busy = False
@@ -1549,10 +1565,26 @@ class EmulatePanel:
         there is how the save-state package would have stayed invisible - the
         button that installs it lives under exactly this notice."""
         self._setup = facts
+        # THE ONE ANSWER THAT ALSO BELONGS IN THE LOG.  Every other probe on
+        # this panel is a background fact the notice speaks for; this one
+        # answers a question the user just asked by pressing a button, and the
+        # log pane is where they are looking while it runs.  Said once, by the
+        # probe the restart armed, and only when the machine really did come
+        # back unable to run the emulator - _setup_apply is called on every
+        # probe and a line per poll would be noise.
+        if getattr(self, "_setup_restart_check", False):
+            self._setup_restart_check = False
+            if facts and not setup_ok(facts):
+                self._log("[emulate] the restart took the 32-bit ARM handler "
+                          "with it, so the emulator cannot start until it is "
+                          "registered again — press “Set up emulator…” above, "
+                          "which does that and makes it survive the next "
+                          "restart.")
         try:
             if setup_settled(facts):
                 self._setup_btn.pack_forget()
                 self._setup_msg.pack_forget()
+                self._refit()
                 return
             self._setup_msg.configure(
                 text=setup_notice(facts, can_fix=sys.platform == "win32"))
@@ -1567,8 +1599,21 @@ class EmulatePanel:
                 self._setup_btn.pack_forget()
             self._setup_msg.pack(anchor=tk.W,
                                  **getattr(self, "_setup_pad", {}))
+            self._refit()
         except (tk.TclError, AttributeError):
             pass            # the tab was never built, or is being torn down
+
+    def _refit(self):
+        """Tell the window this tab is a different height now.
+
+        See _resize_fn.  Best effort by design: the panel is built standalone
+        in tests and by anything that is not MainWindow, and a notice that
+        appears is worth more than an exception about the frame around it.
+        """
+        try:
+            self._resize_fn()
+        except Exception:                                   # noqa: BLE001
+            pass
 
     def _setup_fix(self):
         """Install what is missing and register the ARM handler.
@@ -2658,7 +2703,25 @@ class EmulatePanel:
         it: the "Restart WSL…" button (pre_kill=True - a terminal-started run
         deserves a teardown before the VM dies under it) and Stop's
         stuck-process offer (pre_kill=False - killgame.sh just ran, and its
-        failure to finish is the reason we are here)."""
+        failure to finish is the reason we are here).
+
+        ...AND IT RE-PROBES AFTERWARDS, because this button is one of the two
+        ways a machine that could emulate a minute ago stops being one.  The
+        kernel's 32-bit ARM registration lives in the RUNNING kernel; systemd
+        puts it back at boot, and a WSL distro started without systemd loses it
+        on every restart.  So the app would shut WSL down, say "start the
+        emulator again when ready", and leave a tab still showing the machine
+        it probed at launch - notice hidden, "Set up emulator…" hidden - while
+        the next Start died at
+
+            chroot: failed to run command '/bin/sh': Exec format error
+
+        A tester walked exactly that path on 2026-08-12: a display fault, this
+        button as the cure, and then a wall of guest log text about binfmt and
+        /etc/wsl.conf that he was left to act on by hand - past a button that
+        does the whole of it.  The probe costs one wsl.exe, which the status
+        poll spends every 10 s anyway.
+        """
         self._resetting = True
         self._fixaud_btn.configure(state=tk.DISABLED)
         self._set("state", "Restarting WSL…")
@@ -2684,8 +2747,36 @@ class EmulatePanel:
                 self._log("[emulate] WSL restart failed: %s" % exc)
             finally:
                 self._resetting = False
+                # ASK THE MACHINE WHAT THE RESTART LEFT, rather than assume it
+                # left everything.  See this method's docstring: on a distro
+                # without systemd the ARM handler has just gone, and the whole
+                # point is that the tab says so HERE - with the button that
+                # puts it back - instead of the next Start saying it in guest
+                # log text.  Back on the main thread: _setup_check's drain
+                # touches widgets.
+                try:
+                    self._timer().after(0, self._setup_after_restart)
+                except (tk.TclError, RuntimeError):
+                    pass
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _setup_after_restart(self):
+        """Re-probe once WSL has been shut down, and SAY that is why.
+
+        The line goes up before the probe rather than after it because the
+        probe is what boots WSL back up: on a cold VM that is tens of seconds
+        of "Starting WSL…" which would otherwise look like the restart itself
+        hanging.  A machine that came back intact gets this one line and
+        nothing else - _setup_apply keeps its notice hidden.
+        """
+        if self._stopped:
+            return
+        self._log("[emulate] checking what the restart left behind: the "
+                  "kernel's 32-bit ARM handler only survives one on a distro "
+                  "that boots systemd.")
+        self._setup_restart_check = True
+        self._setup_check()
 
     def shutdown_sync(self):
         """Take the whole emulator down because PAD is quitting.  BLOCKING, on

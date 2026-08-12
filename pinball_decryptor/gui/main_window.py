@@ -12640,7 +12640,12 @@ class MainWindow:
             card_var=self.emulate_card_var,
             savestates_var=self.emulate_savestates_var,
             theme_fn=lambda: self._current_theme,
-            badge_fn=self._make_round_icon)
+            badge_fn=self._make_round_icon,
+            # The panel's setup notice can appear while the user is already
+            # sitting on this tab (a WSL restart re-probes), and the notebook
+            # pane is pinned to the height it was measured at — so the panel
+            # has to be able to say "I am taller now".
+            resize_fn=self._resize_notebook_to_current_tab)
         self._emulate_panel.build(self._tab_emulate)
 
     def emulate_shutdown(self):

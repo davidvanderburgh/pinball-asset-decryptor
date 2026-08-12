@@ -88,3 +88,68 @@ class BasePipeline:
 
     def _run(self):
         raise NotImplementedError
+
+
+class ReadCardPipeline(BasePipeline):
+    """Read a whole physical card into a raw image file (the inverse of the
+    flash-image pipeline).
+
+    Manufacturer-agnostic on purpose: a card dump is the same sector copy for
+    every plugin whose medium is a raw card image, so :class:`Manufacturer`
+    hands this out directly rather than each plugin re-implementing it.  The
+    GUI collects and confirms the card + destination first; elevation is
+    handled inside (only the read is elevated, like the flash).
+    """
+
+    PHASES = ("Check card", "Read card", "Save image")
+
+    def __init__(self, device_path, image_path,
+                 log_cb, phase_cb, progress_cb, done_cb):
+        super().__init__(log_cb, phase_cb, progress_cb, done_cb)
+        self.device_path = device_path
+        self.image_path = image_path
+
+    def _run(self):
+        import os
+
+        from .elevated_flash import read_device_with_privileges
+        from .rawdevice import (FlashCancelled, FlashError, format_size,
+                                is_device_path)
+
+        self._set_phase(0)  # Check card
+        if not is_device_path(self.device_path):
+            raise PipelineError(
+                "Check card",
+                "Reading a card needs a physical drive (e.g. "
+                "\\\\.\\PHYSICALDRIVE2), not a file path (got %r). Pick the "
+                "card from the dropdown." % self.device_path)
+        if not self.image_path:
+            raise PipelineError("Check card",
+                                "Pick where the image file should be saved.")
+        if os.path.isdir(self.image_path):
+            raise PipelineError(
+                "Check card",
+                "%r is a folder — give the image a file name too."
+                % self.image_path)
+        self._check_cancel()
+
+        self._set_phase(1)  # Read card
+        try:
+            read = read_device_with_privileges(
+                self.device_path, self.image_path,
+                log=self._log, progress=self._progress,
+                cancel=lambda: self._cancelled)
+        except FlashCancelled:
+            # Nothing was written to the card and the partial image was
+            # deleted, so there is nothing for the user to clean up.
+            self._log("Read cancelled — the partial image was discarded. "
+                      "The card itself was not changed.", "info")
+            self._check_cancel()   # raises PipelineError("Cancelled", ...)
+            return
+        except FlashError as e:
+            raise PipelineError("Read card", str(e))
+        self._check_cancel()
+
+        self._set_phase(2)  # Save image
+        self._done(True, "Saved %s from the card to %s."
+                   % (format_size(read), self.image_path))

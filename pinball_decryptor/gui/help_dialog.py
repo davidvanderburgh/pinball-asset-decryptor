@@ -30,6 +30,14 @@ HELP_CONTENT = {
          "with direct-media support also offer a \"From SD card / SSD\" mode "
          "that reads the physical media in a reader (needs Administrator on "
          "Windows)."),
+        ("Save card as image",
+         "In \"From SD card\" mode, \"Save card as image…\" copies the whole "
+         "card, sector for sector, into one .raw file — the reverse of the "
+         "Write tab's flash. Use it to back a stock card up before modding "
+         "it, to keep a copy of a card someone sent you, or to dump the same "
+         "card twice (before and after a change made on the machine) and diff "
+         "the two on the Compare tab. The file is as big as the card is, "
+         "empty space included, and nothing on the card is changed."),
         ("Detection",
          "Once the game is recognised, its name (and firmware version) "
          "appears in the window's title bar. \"Not recognised\" under the "

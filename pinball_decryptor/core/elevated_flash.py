@@ -42,7 +42,7 @@ import time
 
 from .admin import is_admin
 from .rawdevice import (FlashCancelled, FlashError, flash_image_to_device,
-                        is_device_path)
+                        is_device_path, read_device_to_image)
 
 # IPC file names inside the per-flash temp directory.  The parent creates the
 # directory and ``job.json``; the elevated child writes the rest.
@@ -119,9 +119,52 @@ def flash_image_with_privileges(image_path, device_path, *, log=None,
         _rmtree_quiet(ipc)
 
 
-def _relay_until_done(run, ipc, *, log, progress, cancel, on_verify_start):
+def read_device_with_privileges(device_path, image_path, *, log=None,
+                                progress=None, cancel=None):
+    """Read *device_path* into *image_path*, elevating only the read.
+
+    Drop-in for :func:`core.rawdevice.read_device_to_image` with the same
+    return value (bytes read) and exceptions.  Reading raw sectors is gated on
+    Administrator/root exactly like writing them, so this reuses the flash
+    helper's elevation + IPC wholesale — only the job's ``mode`` differs.
+    """
+    if is_admin() or not is_device_path(device_path):
+        return read_device_to_image(device_path, image_path, log=log,
+                                    progress=progress, cancel=cancel)
+
+    if log is not None:
+        log("Reading the card needs administrator access — approve the "
+            "prompt to continue (the app itself keeps running normally).",
+            "info")
+
+    ipc = tempfile.mkdtemp(prefix="pad_read_")
+    try:
+        with open(os.path.join(ipc, _JOB), "w", encoding="utf-8") as f:
+            json.dump({"mode": "read", "image": image_path,
+                       "device": device_path}, f)
+
+        run = _spawn_elevated_helper(ipc)
+        if run is None:
+            raise FlashError(
+                "Could not request administrator access on this system. "
+                "Re-launch the app as administrator and read the card again.")
+
+        return _relay_until_done(
+            run, ipc, log=log, progress=progress, cancel=cancel,
+            on_verify_start=None, mode="read")
+    finally:
+        _rmtree_quiet(ipc)
+
+
+def _relay_until_done(run, ipc, *, log, progress, cancel, on_verify_start,
+                      mode="flash"):
     """Pump the IPC files to the UI callbacks until the child exits, then
-    translate its result into a return value / exception."""
+    translate its result into a return value / exception.
+
+    *mode* only picks the wording for the failure paths — a read that never
+    reported back must not tell the user "the card may not have been written",
+    since a read never touches the card at all."""
+    reading = mode == "read"
     prog_path = os.path.join(ipc, _PROGRESS)
     log_path = os.path.join(ipc, _LOG)
     cancel_path = os.path.join(ipc, _CANCEL)
@@ -159,26 +202,37 @@ def _relay_until_done(run, ipc, *, log, progress, cancel, on_verify_start):
         # or it crashed on startup.
         if run.declined:
             raise FlashError(
+                "Administrator access was declined, so the card was not read. "
+                "Nothing was changed on the card." if reading else
                 "Administrator access was declined, so the card was not "
                 "written. Nothing was changed on the card.")
         detail = (run.stderr or "").strip()
         raise FlashError(
-            "The elevated flash helper exited (code %s) without reporting a "
-            "result, so the card may not have been written.%s"
-            % (run.exit_code, ("\n\n" + detail) if detail else ""))
+            "The elevated %s helper exited (code %s) without reporting a "
+            "result, so the %s.%s"
+            % ("read" if reading else "flash", run.exit_code,
+               "image was not finished" if reading
+               else "card may not have been written",
+               ("\n\n" + detail) if detail else ""))
 
     if result.get("cancelled"):
-        raise FlashCancelled(result.get("error")
-                             or "Flash cancelled before completion.")
+        raise FlashCancelled(
+            result.get("error")
+            or ("Read cancelled before completion." if reading
+                else "Flash cancelled before completion."))
     if not result.get("ok"):
-        raise FlashError(result.get("error") or "The elevated flash failed.")
+        raise FlashError(
+            result.get("error")
+            or ("The elevated read failed." if reading
+                else "The elevated flash failed."))
 
     # The child's flash_image_to_device already logged its own "Wrote … to …
     # (verified)." success line, which we relayed from log.jsonl — don't repeat
     # it here.  Just settle the progress bar at 100%.
     written = int(result.get("written", 0))
     if progress is not None:
-        progress(written, written, "Flash complete")
+        progress(written, written, "Read complete" if reading
+                 else "Flash complete")
     return written
 
 
@@ -409,7 +463,8 @@ class _WindowsRunasRun(_ElevatedRun):
 def run_helper_main(argv):
     """Flash-helper entry point (dispatched on ``--flash-helper <ipc_dir>``).
 
-    Runs the real flash against the job described in ``ipc_dir/job.json``,
+    Runs the real flash — or, with ``"mode": "read"`` in the job, the real
+    card-to-image read — against the job described in ``ipc_dir/job.json``,
     streaming progress / log to the sibling IPC files and honouring the
     ``cancel`` sentinel.  Always returns 0 (even on a flash failure): the parent
     reads ``result.json`` as the source of truth, and a nonzero exit would make
@@ -422,6 +477,7 @@ def run_helper_main(argv):
     job = _read_json(os.path.join(ipc, _JOB)) or {}
     image = job.get("image")
     device = job.get("device")
+    reading = job.get("mode") == "read"
     verify = bool(job.get("verify", True))
     cancel_path = os.path.join(ipc, _CANCEL)
     log_path = os.path.join(ipc, _LOG)
@@ -451,9 +507,13 @@ def run_helper_main(argv):
         state["last_write"] = 0.0        # force the next progress write through
 
     try:
-        written = flash_image_to_device(
-            image, device, log=_log, progress=_progress, cancel=_cancel,
-            verify=verify, on_verify_start=_on_verify_start)
+        if reading:
+            written = read_device_to_image(
+                device, image, log=_log, progress=_progress, cancel=_cancel)
+        else:
+            written = flash_image_to_device(
+                image, device, log=_log, progress=_progress, cancel=_cancel,
+                verify=verify, on_verify_start=_on_verify_start)
         _write_json_atomic(result_path, {"ok": True, "written": written})
     except FlashCancelled as e:
         _write_json_atomic(result_path,
@@ -464,8 +524,9 @@ def run_helper_main(argv):
         import traceback
         _write_json_atomic(result_path, {
             "ok": False,
-            "error": "The flash helper hit an unexpected error:\n%s"
-                     % traceback.format_exc(),
+            "error": "The %s helper hit an unexpected error:\n%s"
+                     % ("read" if reading else "flash",
+                        traceback.format_exc()),
             "exc": repr(e)})
     return 0
 

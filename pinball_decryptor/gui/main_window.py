@@ -1162,6 +1162,7 @@ class MainWindow:
                  on_apply_delta=None,
                  on_revert_all=None,
                  on_flash_image=None,
+                 on_read_card=None,
                  on_recheck_prereqs=None, on_install_prereqs=None,
                  on_back=None,
                  on_theme_change=None, initial_theme=None,
@@ -1213,6 +1214,9 @@ class MainWindow:
         self._on_apply_delta = on_apply_delta
         self._on_revert_all = on_revert_all
         self._on_flash_image = on_flash_image
+        # Card → image file (``on_read_card(device_path, image_path)``), the
+        # inverse of on_flash_image.  None hides the Extract tab's button.
+        self._on_read_card = on_read_card
         # Build-then-flash chain (the two-section Build / flash dialog):
         # ``on_build_flash(build_path, device_path_or_None)``.
         self._on_build_flash = on_build_flash
@@ -2244,6 +2248,21 @@ class MainWindow:
         ttk.Button(self._extract_drive_row, text="Refresh",
                    command=lambda: self._refresh_drives("extract")).pack(
             side=tk.LEFT, padx=(8, 0))
+        # "Save card as image…" — the inverse of the Write tab's flash: copy
+        # the whole card into a .raw file (batch 33 — the app could put an
+        # image on a card but never take one off, so backing a stock card up,
+        # or diffing a card against itself after a change made on the machine,
+        # needed an outside imaging tool).  Packed here because this row is
+        # where the card is already picked; shown only for plugins whose
+        # medium is a card image (capabilities.read_card_image).
+        self._read_card_btn = ttk.Button(
+            self._extract_drive_row, text="Save card as image…",
+            command=self._open_read_card_dialog)
+        _Tooltip(self._read_card_btn,
+                 "Copy the whole card into a .raw image file — a backup you "
+                 "can flash back later, open on the Partitions tab, or "
+                 "compare against another image. Nothing on the card changes.",
+                 lambda: self._current_theme)
 
         # We previously surfaced a "Force partition #" entry here, but
         # it spooked users — a numeric override field next to a
@@ -14629,6 +14648,16 @@ class MainWindow:
             self._flash_btn.pack(side=tk.RIGHT)
         elif not self._write_btn.winfo_manager():
             self._write_btn.pack(side=tk.RIGHT)
+        # "Save card as image…" on the Extract tab's card row — plugins that
+        # can hand a whole card back as a .raw (caps.read_card_image).  Packed
+        # here rather than in the row's builder because the row itself is
+        # shared and its contents are per-plugin.  Stays enabled without admin:
+        # the read elevates itself, exactly like the flash.
+        if caps.read_card_image and self._on_read_card is not None:
+            self._read_card_btn.pack(side=tk.LEFT, padx=(6, 0))
+        else:
+            self._read_card_btn.pack_forget()
+
         # Card diagnostics — manufacturers that can read a failed install's
         # on-card log back (CGC's diagnose_card).  Beside Flash, so it can
         # only show when flashing does too.
@@ -16729,17 +16758,35 @@ class MainWindow:
         if t0s is None:
             t0s = self._scan_t0 = {}
         if active:
-            if tab_key not in t0s:      # re-entrant starts: keep first t0
-                t0s[tab_key] = time.monotonic()
-                # Say WHY, when the caller set a reason.  feedback batch 22
-                # saw a 40-second Write change scan start on its own right
-                # after saving a project and read it as the save doing needless
-                # work; the save triggers nothing, but a bare "scan started"
-                # gave him no way to tell that.
-                why = self._scan_reasons.pop(tab_key, None)
+            prev_t0 = t0s.get(tab_key)
+            if prev_t0 is not None:
+                # A scan already in flight is being REPLACED here, not
+                # continued: every caller bumps its scan-id before entering
+                # this state, so the older walk's results are already being
+                # dropped.  Say so, and restart the clock.
+                #
+                # This used to keep the first t0 and log nothing at all, which
+                # is what batch 33 hit: his Write change scan restarted every
+                # time the tab regained focus, so the log carried ONE "started"
+                # line and no "finished" for the next several minutes, and the
+                # eventual "finished in N s" timed the scan it replaced rather
+                # than itself (the same defect batch 25 fixed for the Cancel
+                # button, which this path bypasses).  The suppressed start also
+                # left the caller's reason sitting in _scan_reasons, so it got
+                # stuck onto whatever scan started next.
                 self.append_log(
-                    "%s scan started%s." % (label, " (%s)" % why if why else ""),
-                    "info")
+                    "%s scan replaced after %.1f s by a newer scan."
+                    % (label, time.monotonic() - prev_t0), "info")
+            t0s[tab_key] = time.monotonic()
+            # Say WHY, when the caller set a reason.  feedback batch 22
+            # saw a 40-second Write change scan start on its own right
+            # after saving a project and read it as the save doing needless
+            # work; the save triggers nothing, but a bare "scan started"
+            # gave him no way to tell that.
+            why = self._scan_reasons.pop(tab_key, None)
+            self.append_log(
+                "%s scan started%s." % (label, " (%s)" % why if why else ""),
+                "info")
             self._begin_scan_ui(tab_key)
         else:
             t0 = t0s.pop(tab_key, None)
@@ -17728,6 +17775,39 @@ class MainWindow:
             has_pending_changes=self._has_pending_write_changes(),
             initial_choices=self._saved_flash_choices.get(mfr_key),
             on_choices=lambda c, k=mfr_key: self._remember_flash_choices(k, c))
+
+    def _open_read_card_dialog(self):
+        """Open the "Save card as image…" modal (card → .raw file).
+
+        The inverse of :meth:`_open_flash_dialog`, and deliberately its own
+        small dialog rather than a third section in that one — the Build /
+        flash dialog is entirely about getting an image ONTO a card, and a
+        section that goes the other way reads as a mode of the thing above it.
+        Hands the pair to the app's ``on_read_card``, which runs the read
+        through the normal status area.  Refuses while a run is in flight."""
+        if self._on_read_card is None:
+            return
+        if self._is_running():
+            messagebox.showinfo(
+                "Busy",
+                "Finish or cancel the current operation before reading a "
+                "card.")
+            return
+        # Default the destination next to the project folder the user is
+        # already working in (falling back to the folder their current card
+        # image lives in) — a card image is a big file and that is where their
+        # other big files are.
+        initial_dir = (self.extract_output_var.get() or "").strip()
+        if not (initial_dir and os.path.isdir(initial_dir)):
+            card = (self.extract_input_var.get() or "").strip()
+            initial_dir = os.path.dirname(card) if card else ""
+        from .read_card_dialog import ReadCardDialog
+        ReadCardDialog(
+            self._tk_root(),
+            manufacturer=self._current_mfr,
+            theme_name=self._current_theme,
+            on_read=self._on_read_card,
+            initial_dir=initial_dir)
 
     def _remember_flash_choices(self, mfr_key, choices):
         """Persist the Build / flash dialog's ticked sections for *mfr_key*.

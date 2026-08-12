@@ -175,6 +175,11 @@ class SternManufacturer(Manufacturer):
         # separate imaging tool (and the built-in size guard refuses an image
         # too big for the card, the failure a tester hit externally).
         flash_image=True,
+        # …and the other direction: save the whole card to a .raw image file, so
+        # a stock card can be backed up before modding and two dumps of the same
+        # card can be diffed on the Compare tab (a tester wanted to see where
+        # the machine stores a setting he changed on the machine itself).
+        read_card_image=True,
         # On-screen LCD text lives in the .radium scene files; Extract pulls the
         # editable display strings out to text/strings.tsv, the Replace Text tab
         # lets the user edit them, and Write patches every matching occurrence

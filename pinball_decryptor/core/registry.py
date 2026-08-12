@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
 from .config import EXTRACT_PHASES, WRITE_PHASES
+from .pipeline_base import ReadCardPipeline
 from .prereqs import Prerequisite  # re-exported for plugins
 
 # Plugins are imported in this order at startup.  Order drives the
@@ -218,6 +219,21 @@ class Capabilities:
     # ``make_flash_pipeline`` and the ``flash_*`` wording attributes below
     # label the button/dialog; raw device writes need Administrator/root.
     flash_image: bool = False
+    # Read-card path: surfaces a "Save card as image…" action on the Extract
+    # tab's card row, dumping the whole physical card into a ``.raw`` file — the
+    # exact inverse of ``flash_image``.  For backing a stock card up before
+    # modding it, and for diffing a card against itself after a change made on
+    # the machine (batch 33: the app could write a card but not read one, so
+    # that round trip needed an outside imaging tool).  Set True only for
+    # plugins whose medium IS a small raw whole-card image the app can hand
+    # straight to its own Partitions / Compare tabs — Stern Spike 2 today.  Off
+    # for JJP: its Direct medium is a multi-hundred-GB game SSD, and a sector
+    # dump of one is neither practical nor useful to the rest of the flow.  The
+    # button lives on the Extract tab's card row, so a plugin also needs
+    # ``direct_ssd`` for it to surface.  The read itself is manufacturer-
+    # agnostic (see core.pipeline_base.ReadCardPipeline); raw device reads need
+    # Administrator/root, elevated per-run exactly like the flash.
+    read_card_image: bool = False
     # Mod-transfer path: surfaces a "Transfer Mods to New Version" section on the
     # (shared) Mod Pack tab that pulls a user's pending Replace edits from an OLD
     # extract folder onto the current new-version one, reconciling layout changes
@@ -303,6 +319,10 @@ class Manufacturer(ABC):
     # ``capabilities.flash_image`` is True) — a dd-style raw copy of a
     # pre-built image onto a card.
     flash_phases: Tuple[str, ...] = ()
+    # Phase labels for the read-card path (``capabilities.read_card_image``).
+    # The default matches the shared ReadCardPipeline; a plugin only needs to
+    # override this if it also overrides ``make_read_card_pipeline``.
+    read_card_phases: Tuple[str, ...] = ReadCardPipeline.PHASES
 
     # Runtime tools this plugin needs.  Probed on a worker thread when
     # the user picks this manufacturer in the GUI; results render as
@@ -597,6 +617,20 @@ class Manufacturer(ABC):
         """
         raise NotImplementedError(
             f"{self.display} does not implement a flash-image pipeline.")
+
+    def make_read_card_pipeline(self, device_path, image_path,
+                                log_cb, phase_cb, progress_cb, done_cb):
+        r"""Build the read-card pipeline (raw-copy a whole card into a file).
+
+        Only meaningful when ``capabilities.read_card_image`` is True.
+        ``device_path`` is an OS-native physical-disk path
+        (``\\.\PHYSICALDRIVEn`` / ``/dev/sdX``); ``image_path`` is the ``.raw``
+        to create.  Unlike the other factories this has a real default: a
+        sector-for-sector card dump is identical for every plugin, so plugins
+        only override it if their medium needs something else.
+        """
+        return ReadCardPipeline(device_path, image_path,
+                                log_cb, phase_cb, progress_cb, done_cb)
 
     def audio_slot_dirs(self, assets_dir):
         """Subdirectories of *assets_dir* that hold replaceable audio slots.

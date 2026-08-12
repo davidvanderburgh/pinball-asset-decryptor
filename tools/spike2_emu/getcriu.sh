@@ -146,7 +146,7 @@ if [ ! -d "$SRC/.git" ]; then
     fi
 fi
 
-# ---- 2a. the one patch this pinned tree needs on a 2026 compiler ----------
+# ---- 2a. the one SOURCE patch this pinned tree needs ----------------------
 #
 # THE SAME SHAPE AS v0.119.1's hwshim fault, in someone else's source tree:
 # the user's compiler is newer than the one this pin was proven with, and it
@@ -186,6 +186,12 @@ fi
 # depends on scripts/feature-tests.mak, so a tree that was already built with
 # the wrong answer regenerates it and recompiles rather than reusing objects
 # built around a definition that is not there.
+#
+# 2b's dialect pin below would settle this probe too - in C17 the redefinition
+# is an error again, which is what the probe is asking. This stays anyway,
+# because the failure message tells the user the tree is left at $SRC "so it
+# can be looked at or built again by hand", and a hand `make` in there gets
+# none of 2b.
 FEATURES=$SRC/scripts/feature-tests.mak
 if [ -f "$FEATURES" ] && ! grep -q RSEQ_CPU_CRIU_TEST "$FEATURES"; then
     # Confined to the one probe by the address range: those enumerator names
@@ -205,6 +211,80 @@ if [ -f "$FEATURES" ] && ! grep -q RSEQ_CPU_CRIU_TEST "$FEATURES"; then
     fi
 fi
 
+# ---- 2b. the C DIALECT this tag was written in ----------------------------
+#
+# THE SECOND REPORT FROM THE SAME MACHINE (2026-08-12), once the rseq patch
+# above had got the build past the parasite and on into criu's own sources:
+#
+#   CC criu/tty.o
+#   criu/tty.c:262:21: error: initialization discards 'const' qualifier from
+#                             pointer target type [-Werror=discarded-qualifiers]
+#   262 |     char *pos = strrchr(link->name, '/');
+#   cc1: all warnings being treated as errors
+#
+# THAT LINE IS NOT WRONG. `link` is a `const struct fd_link *`, so `link->name`
+# is a `const char *`, and C's strrchr has always taken a const char * and
+# handed back a plain `char *` - a deliberate hole in the type system that
+# every compiler until now agreed to. C23 closed it: strchr, strrchr, memchr,
+# strstr and strpbrk became TYPE-GENERIC, so a const argument gives a const
+# result. A 2026 libc's <string.h> implements that, gated on the same C23 mode
+# GCC 15 selects by default, and this pinned tag predates the whole change.
+#
+# SO THE FAULT IS NOT IN A LINE, IT IS IN A DIALECT, and this is the SECOND
+# thing C23 has changed under this one pin - 2a was the first. Patching tty.c
+# the way 2a patches the probe would be a guess: this tree calls the str*chr
+# family 84 times, and nothing here can say which of those take a const
+# argument, because the machine this is developed on is glibc 2.39, where the
+# question does not arise at all. Every wrong guess costs the person who
+# reported it another four-minute build. Asking for the language the tag was
+# written and PROVEN in answers all 84 at once, and cannot introduce a
+# difference between this build and the one criuladder was run against - it
+# removes one.
+#
+# criu's own USERCFLAGS is the documented seam, and its Makefile folds it into
+# CFLAGS on line 171, BEFORE Makefile.config is included on line 232 - so the
+# feature probes in 2a compile in the same dialect the sources do, and cannot
+# answer a question one way for a build that then happens the other way.
+#
+# THE TWO THINGS THAT LOOK EASIER AND ARE NOT:
+#   * `-Wno-error=discarded-qualifiers` - USERCFLAGS lands BEFORE $(WARNINGS)
+#     on the command line, and $(WARNINGS) ends in -Werror, which turns it
+#     straight back on. It does nothing at all.
+#   * `WERROR=0` - works, and blinds the build to every other complaint a
+#     compiler this much newer than the pin has, including the ones that mean
+#     something. A dialect is a statement about the source; WERROR=0 is a
+#     statement about not wanting to hear.
+#
+# Probed, not assumed: -std=gnu17 wants GCC 8 or clang 6, and a compiler old
+# enough to refuse it is old enough not to have the problem. An empty STD is
+# then exactly the build every machine got before this block existed.
+STD=
+if echo 'int main(void) { return 0; }' |
+   "${CC:-cc}" -std=gnu17 -x c - -o /dev/null 2>/dev/null; then
+    STD=-std=gnu17
+    echo "building it as C17, which is the dialect criu $CRIU_VERSION was"
+    echo "written in - a C23 compiler's strrchr returns const and this tree"
+    echo "predates that"
+else
+    echo "${CC:-cc} does not take -std=gnu17; building with its own default"
+fi
+
+# AND THE TREE MAY ALREADY HOLD OBJECTS BUILT THE OTHER WAY. make compares
+# timestamps, not command lines: nothing here is a file, so a flag change is
+# invisible to it and a reused tree would link C17 objects to C23 ones. That
+# tree is reused ON PURPOSE (step 2 says so), which is exactly what makes this
+# necessary. So the flags are recorded beside it, and a change costs the
+# objects once - never the download, and never on a fresh clone, which has no
+# objects to lose.
+STAMP=$WORK/.pad-build-flags
+if [ "$(cat "$STAMP" 2>/dev/null)" != "$STD" ] &&
+   [ -n "$(find "$SRC" -name '*.o' -print -quit 2>/dev/null)" ]; then
+    echo "this tree was last built with different flags - clearing its objects"
+    echo "so the whole binary is one dialect"
+    _run make -C "$SRC" clean || true
+fi
+printf '%s\n' "$STD" > "$STAMP" 2>/dev/null || true
+
 # ---- 3. build it ----------------------------------------------------------
 #
 # `make criu`, NOT `make`. The default target is `all: criu lib crit
@@ -221,7 +301,8 @@ echo "building criu $CRIU_VERSION (this is the slow part)..."
 # succeeds. Without it a build that failed on line three reports success and
 # the missing binary is discovered two steps later, blamed on something else.
 if ! ( cd "$SRC" && set -o pipefail &&
-       make -j"$(nproc 2>/dev/null || echo 2)" criu 2>&1 | sed -u 's/^/  /' ); then
+       make -j"$(nproc 2>/dev/null || echo 2)" USERCFLAGS="$STD" criu 2>&1 |
+       sed -u 's/^/  /' ); then
     echo "the build failed - the errors are above. The source is left at $SRC"
     echo "so it can be looked at or built again by hand."
     echo "result=buildfailed"

@@ -308,5 +308,60 @@ def test_the_pinned_tree_is_patched_for_a_c23_compiler_before_it_is_built():
     # And it can never stop a build that would have worked: every compiler
     # older than this answers the original probe correctly.
     block = text[text.index("FEATURES=$SRC"):]
-    block = block[:block.index("\n# ---- 3.")]
+    block = block[:block.index("\n# ---- 2b.")]
     assert "exit" not in block, "a probe that cannot be patched is not fatal"
+
+
+def test_the_build_asks_for_the_dialect_the_pinned_tag_was_written_in():
+    """The same machine, one compiler generation further in (2026-08-12):
+    `char *pos = strrchr(link->name, '/')` in criu/tty.c stopped the build
+    with -Werror=discarded-qualifiers.  C23 made the str*chr family
+    type-generic, so a const argument now gives a const result, and v4.1
+    predates that.  criu calls those functions a few dozen times, so patching
+    the one line only buys the next one three minutes later - the build asks
+    for C17 instead."""
+    text = src("getcriu.sh")
+    assert "-std=gnu17" in text
+    assert "USERCFLAGS" in text, (
+        "criu's own seam for this; anything else has to edit its makefiles")
+    # On the make line itself, not exported and hoped for.
+    make_line = [ln for ln in text.split("\n") if "make -j" in ln]
+    assert make_line and 'USERCFLAGS="$STD"' in make_line[0], make_line
+    # Chosen before make reads it, and after the source exists to build.
+    assert line_of(text, "STD=-std=gnu17") < line_of(text, "make -j")
+    assert line_of(text, "STD=-std=gnu17") > line_of(text, "git clone --depth 1")
+    # PROBED. A compiler too old for -std=gnu17 (before GCC 8) is also too old
+    # to have C23's semantics, so it must still get the build it always got.
+    probe = text[text.index("STD=\n"):text.index("# AND THE TREE MAY")]
+    assert "-x c -" in probe, "the flag is tried before it is used"
+    assert "else" in probe, "no branch for the compiler that refuses it"
+
+
+def test_neither_shortcut_that_looks_like_the_same_fix_is_taken():
+    """-Wno-error=discarded-qualifiers cannot work here: USERCFLAGS lands
+    before $(WARNINGS), which ends in -Werror.  WERROR=0 does work, and turns
+    off every other complaint a compiler this much newer than the pin has."""
+    text = src("getcriu.sh")
+    code = [ln for ln in text.split("\n") if not ln.lstrip().startswith("#")]
+    for shortcut in ("WERROR=0", "-Wno-error"):
+        assert not [ln for ln in code if shortcut in ln], (
+            "%s silences the compiler instead of answering it" % shortcut)
+
+
+def test_a_reused_tree_cannot_mix_two_dialects():
+    """Step 2 reuses the source tree on purpose, and make compares timestamps:
+    a flag change is invisible to it, so half a binary would be C17 and half
+    C23.  The flags are recorded beside the tree and a change costs the
+    objects, once."""
+    text = src("getcriu.sh")
+    assert "STAMP=$WORK/.pad-build-flags" in text, (
+        "written beside the tree, not inside someone else's git checkout")
+    assert line_of(text, 'make -C "$SRC" clean') < line_of(text, "make -j"), (
+        "the objects have to go before the build that would reuse them")
+    # Only when they differ AND there is something to clean - a fresh clone
+    # must never pay for this, and neither must an unchanged rerun.
+    block = text[text.index("STAMP=$WORK"):text.index("# ---- 3.")]
+    assert '"$(cat "$STAMP" 2>/dev/null)" != "$STD"' in block
+    assert "-name '*.o' -print -quit" in block, (
+        "a tree with no objects has nothing to clean and would just lose "
+        "three minutes to `make clean`")

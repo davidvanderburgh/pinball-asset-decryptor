@@ -281,10 +281,36 @@ int glGenTextures(int n, unsigned int *ids)
 int glDeleteTextures(int n, const unsigned int *ids)
 { int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_DELTEX; U(ids[i]); } return 0; }
 
+/* ★ ITEM 43: WHICH TEXTURE THE VIVANTE DIRECT-TEXTURE CALLS MEAN.
+ *
+ * glTexDirectVIVMap / glTexDirectVIV / glTexDirectInvalidateVIV take a TARGET
+ * and no texture name - the extension names the texture implicitly, by what is
+ * bound. So the only way to answer "which texture is this registration for" is
+ * to shadow the binding here, and until 2026-08-12 this file did not: it kept
+ * ONE process-global registration, and the service menu paid for it for a week.
+ * The menu binds its own 1024x256 RGBA DMD texture and invalidates it; the
+ * global was last written by the video path; so the bridge sent the VIDEO's
+ * 1360x768 I420 registration and the host uploaded video pixels into the menu's
+ * quad. That is the band, and the game was drawing its menu correctly the whole
+ * time. Captured proof, C:\tmp\item43_pathA_phase1.txt: `BINDTEX 3553 2`
+ * immediately followed by `TEXDIRECT 1360 768 36805` - texture 2 asked for,
+ * video's registration sent.
+ *
+ * Keying on the bound GL_TEXTURE_2D name is sound for every user in this
+ * binary, checked in the disassembly rather than assumed: Texture::Texture
+ * (0x4d9dd4) binds at 0x4d9e10 BEFORE both direct calls and unbinds only at
+ * 0x4d9fac; Texture::SetPixels binds through the virtual Bind() at 0x4da10c
+ * before invalidating at 0x4da12c; and the video path binds [this+332] before
+ * its Map. Every one of them has its texture bound at both moments. */
+static unsigned cur_unit;                /* index, not the GL_TEXTURE0 enum */
+static unsigned cur_tex2d[16];
+
 int glBindTexture(unsigned int t, unsigned int id)
-{ const unsigned int op_ = PADGL_BINDTEX; U(t,id); return 0; }
+{ const unsigned int op_ = PADGL_BINDTEX;
+  if (t == 0x0DE1u) cur_tex2d[cur_unit & 15u] = id;   /* GL_TEXTURE_2D */
+  U(t,id); return 0; }
 int glActiveTexture(unsigned int u)
-{ const unsigned int op_ = PADGL_ACTIVETEX; U(u); return 0; }
+{ const unsigned int op_ = PADGL_ACTIVETEX; cur_unit = (u - 0x84C0u) & 15u; U(u); return 0; }
 int glTexParameteri(unsigned int t, unsigned int p, int v)
 { const unsigned int op_ = PADGL_TEXPARAM; U(t,p,(unsigned)v); return 0; }
 
@@ -607,8 +633,84 @@ const char *glGetString(unsigned int n)
  * contract - Map hands over an address, Invalidate says its contents changed -
  * and it matters here because the game calls Map every frame with a new ring
  * slot, so sending on Map would upload a frame the game has not finished with.
+ *
+ * ★ ITEM 43: ONE REGISTRATION PER TEXTURE, NOT ONE PER PROCESS. This used to
+ * be a single global struct, which is wrong for an extension that names its
+ * texture by what is bound - see the comment above glBindTexture for how that
+ * one global painted video into the service menu's DMD quad for a week. Eight
+ * slots is generous: this binary has four direct-texture users in total (the
+ * video, the DMD scene, the presenter, and Texture::Texture's allocate path).
  */
-static struct { unsigned w, h, fmt; const unsigned char *px; } viv;
+#define VIVMAX 8
+struct viv_reg {
+    unsigned used, name, w, h, fmt;
+    const unsigned char *px;      /* what Invalidate must send                */
+    unsigned char *own;           /* this texture's OWN buffer, allocate path */
+    unsigned long ownsz;
+};
+static struct viv_reg viv_tab[VIVMAX];
+
+/* The slot for the currently bound GL_TEXTURE_2D, claiming a free one if this
+ * texture has not registered before. Null only if all eight are taken, which
+ * this binary cannot do. */
+static struct viv_reg *viv_slot(void)
+{
+    unsigned name = cur_tex2d[cur_unit & 15u];
+    int i, free_i = -1;
+    for (i = 0; i < VIVMAX; i++) {
+        if (viv_tab[i].used) {
+            if (viv_tab[i].name == name) return &viv_tab[i];
+        } else if (free_i < 0) {
+            free_i = i;
+        }
+    }
+    if (free_i < 0) return 0;
+    viv_tab[free_i].used = 1;
+    viv_tab[free_i].name = name;
+    return &viv_tab[free_i];
+}
+
+/* Lookup only - Invalidate must never invent a registration. */
+static struct viv_reg *viv_find(void)
+{
+    unsigned name = cur_tex2d[cur_unit & 15u];
+    int i;
+    for (i = 0; i < VIVMAX; i++)
+        if (viv_tab[i].used && viv_tab[i].name == name) return &viv_tab[i];
+    return 0;
+}
+
+/* Say each texture's registration ONCE, with its name, so a run can be judged
+ * from the log without a screenshot: the menu's DMD texture must appear with
+ * its own size and format (1024x256 GL_RGBA = 0x1908) and not the video's
+ * 1360x768 0x8fc5. Before the per-texture registry there was only ever one
+ * line, and it was always the video's. */
+static void viv_said(const struct viv_reg *r, const char *how)
+{
+    static unsigned said[VIVMAX];
+    static const char hx[] = "0123456789abcdef";
+    char m[96];
+    int i = 0, k;
+    const char *p;
+    unsigned slot = (unsigned)(r - viv_tab);
+    if (slot >= VIVMAX || said[slot] == r->fmt + r->w) return;
+    said[slot] = r->fmt + r->w;
+    p = "[bridge] item43: texture ";
+    while (*p) m[i++] = *p++;
+    for (k = 3; k >= 0; k--) m[i++] = hx[(r->name >> (k * 4)) & 0xf];
+    m[i++] = ' ';
+    for (k = 3; k >= 0; k--) m[i++] = hx[(r->w >> (k * 4)) & 0xf];
+    m[i++] = 'x';
+    for (k = 3; k >= 0; k--) m[i++] = hx[(r->h >> (k * 4)) & 0xf];
+    p = " fmt 0x";
+    while (*p) m[i++] = *p++;
+    for (k = 3; k >= 0; k--) m[i++] = hx[(r->fmt >> (k * 4)) & 0xf];
+    m[i++] = ' ';
+    while (*how) m[i++] = *how++;
+    m[i++] = '\n';
+    m[i] = 0;
+    say(m);
+}
 
 /* gstvid.c, inside the LD_PRELOADed hwshim.so. Weak so libGLESv2 still loads
  * without it, in which case every frame takes the copying path. */
@@ -633,9 +735,12 @@ static unsigned viv_frame_bytes(unsigned fmt, unsigned w, unsigned h)
 void glTexDirectVIVMap(unsigned int target, int w, int h, unsigned int fmt,
                        void **logical, const unsigned int *physical)
 {
+    struct viv_reg *r = viv_slot();
     (void)target; (void)physical;
-    viv.w = (unsigned)w; viv.h = (unsigned)h; viv.fmt = fmt;
-    viv.px = logical ? (const unsigned char *)*logical : 0;
+    if (!r) return;
+    r->w = (unsigned)w; r->h = (unsigned)h; r->fmt = fmt;
+    r->px = logical ? (const unsigned char *)*logical : 0;
+    viv_said(r, "map");
     /* Vivante's Map hands the CALLER an address to write into. This caller
      * already has its frame at the address it passed in, so *logical is left
      * exactly as it came - overwriting it would point the game at nothing. */
@@ -661,12 +766,22 @@ void glTexDirectVIVMap(unsigned int target, int w, int h, unsigned int fmt,
 void glTexDirectVIV(unsigned int target, int w, int h, unsigned int fmt,
                     void **logical)
 {
-    static unsigned char *buf;
-    static unsigned long bufsz;
+    /* ★ ITEM 43, THE CO-DEFECT, and it is the same mistake as the registration:
+     * this buffer used to be ONE `static` for the whole process. There is
+     * exactly one call site for this function in the entire game binary -
+     * 0x4da060, inside Texture::Texture - so that single buffer was serving
+     * EVERY allocating texture the game builds, including the DMD's 1024x256
+     * RGBA (1 MiB) and the presenter's 1360x768 RGBA (4 MiB). Whichever was
+     * constructed second resized the buffer under the first, and both then
+     * memmoved their pixels into the same bytes. The extension's contract is
+     * that a texture keeps ITS allocation until the target is respecified, so
+     * the allocation belongs in the texture's slot. */
+    struct viv_reg *r = viv_slot();
     unsigned need = viv_frame_bytes(fmt, (unsigned)w, (unsigned)h);
 
     (void)target;
     if (logical) *logical = 0;
+    if (!r) return;
     if (!need) {
         /* SAY WHICH FORMAT. "unsupported" on its own cost a whole run: Jaws
          * does call this, so the entry point was right and the only thing left
@@ -687,7 +802,7 @@ void glTexDirectVIV(unsigned int target, int w, int h, unsigned int fmt,
         }
         return;
     }
-    if (need > bufsz) {
+    if (need > r->ownsz) {
         /* mmap rather than malloc: this file is the guest's libGLESv2 and does
          * not link an allocator of its own. Anonymous, private, and never
          * freed - there is one of these per texture size for the life of the
@@ -697,35 +812,52 @@ void glTexDirectVIV(unsigned int target, int w, int h, unsigned int fmt,
             say("[bridge] glTexDirectVIV: could not allocate a frame buffer\n");
             return;
         }
-        buf = (unsigned char *)p;
-        bufsz = need;
+        r->own = (unsigned char *)p;
+        r->ownsz = need;
     }
-    if (logical) *logical = buf;
-    viv.w = (unsigned)w; viv.h = (unsigned)h; viv.fmt = fmt; viv.px = buf;
+    if (logical) *logical = r->own;
+    r->w = (unsigned)w; r->h = (unsigned)h; r->fmt = fmt; r->px = r->own;
+    viv_said(r, "alloc");
 }
 
 void glTexDirectInvalidateVIV(unsigned int target)
 {
+    /* ★ ITEM 43: send THIS texture's registration, or nothing. There is
+     * deliberately no fallback to "whatever registered last" - that fallback,
+     * in the shape of a single process-global, IS the bug this function spent a
+     * week causing, and a silent one would put it straight back. A miss says so
+     * once and sends nothing, which is this file's standing rule: anything not
+     * implemented fails loudly. */
+    struct viv_reg *r = viv_find();
     unsigned int a[6];
     unsigned int bytes;
     long off = -1;
     (void)target;
-    if (!viv.px || !viv.w || !viv.h) return;
-    bytes = viv_frame_bytes(viv.fmt, viv.w, viv.h);
+    if (!r) {
+        static int moaned;
+        if (!moaned) {
+            moaned = 1;
+            say("[bridge] glTexDirectInvalidateVIV on a texture that never "
+                "registered - sending nothing (item 43)\n");
+        }
+        return;
+    }
+    if (!r->px || !r->w || !r->h) return;
+    bytes = viv_frame_bytes(r->fmt, r->w, r->h);
     if (!bytes) {
         static int moaned;
         if (!moaned) { moaned = 1; say("[bridge] unsupported glTexDirectVIV format\n"); }
         return;
     }
-    if (pad_vid_ring_offset) off = pad_vid_ring_offset(viv.px);
-    a[0] = viv.w; a[1] = viv.h; a[2] = viv.fmt;
+    if (pad_vid_ring_offset) off = pad_vid_ring_offset(r->px);
+    a[0] = r->w; a[1] = r->h; a[2] = r->fmt;
     if (off >= 0) {
         /* The pixels are already in a block the host has open. Send six words. */
         a[3] = PADGL_SRC_VIDSHM; a[4] = (unsigned)off; a[5] = bytes;
         emit(PADGL_TEXDIRECT, a, sizeof a, 0, 0);
     } else {
         a[3] = PADGL_SRC_INLINE; a[4] = 0; a[5] = bytes;
-        emit(PADGL_TEXDIRECT, a, sizeof a, viv.px, bytes);
+        emit(PADGL_TEXDIRECT, a, sizeof a, r->px, bytes);
     }
 }
 

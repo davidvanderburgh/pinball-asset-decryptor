@@ -1076,18 +1076,20 @@ These have each been violated at least once and each cost a run or a window:
 
 
 - [ ] **43. In the turtles service menus the picture goes HALF HEIGHT and the
-      scene text stops drawing.** `S2 D4` ← IN PROGRESS *(**~85%. The
-      MECHANISM IS SOLVED and it is STARVATION, not persuasion: the menu
-      composes its own LCD image and re-uploads the last video frame it was
-      ever given, so no answer the video layer can give will make it draw
-      dots — proven by holding delivery to zero in a verified menu and
-      getting byte-identical frames. The pinned run's dots were the game
-      never having had a frame. The per-stream build `e51e171` keeps attract
-      full-screen (half the pair, solid); the menu half has no remaining
-      video-side move except a service-button pre-trigger that SHRINKS the
-      door gate's cost rather than removing it — David's call, see the end of
-      this item. The door gate `71caeb5` remains the working resting state.
-      Branch `item/43`, HEAD `73f46a6`, clean, pushed.**)*
+      scene text stops drawing.** `S2 D4` ← IN PROGRESS *(**~70%, DOWN from
+      the 80% this item carried for weeks, and the drop is the finding. THE
+      VIDEO LAYER IS A DEAD END, controlled: the menu composes its own LCD
+      image and re-uploads the last video frame it was ever given, so once
+      attract has played, NOTHING the video layer answers makes it draw dots —
+      per-stream stamp, live door gate, service-button pre-trigger and
+      delivery-held-to-zero all banded from a live attract on 2026-08-12. ★ AND
+      THE DOOR GATE `71caeb5` IS NOT THE WORKING RESTING STATE IT WAS RECORDED
+      AS: run as a faithful control it bands in David's flow too; its dots came
+      from a PAD_DOOR_OPEN=1 SERVICE BOOT, i.e. starvation before the game ever
+      held a frame. What DID survive is `e51e171`, which keeps attract
+      full-screen. Next moves are off the video layer entirely (game side or
+      renderer side) — see the end of this item. Branch `item/43`, HEAD
+      `4b0306d`, clean, pushed.**)*
       **════ SESSION 2026-08-12 (cont., Path B): FORK RESOLVED + TWO DEAD ENDS
       + A METHOD CONFOUND THAT INVALIDATES THE "MODE-GATE INSUFFICIENT" CLAIM.
       Resume from HERE.**
@@ -1364,6 +1366,41 @@ These have each been violated at least once and each cost a run or a window:
       blip is expensive: the composer latches into strip mode and STAYS there
       until the scene changes, so attract kept banding long after the flags
       dropped.**
+      **★★★ THE PRE-TRIGGER WAS RUN AND BANDED, AND THE CONTROL IT PROMPTED IS
+      THE RESULT OF THE WHOLE SESSION (2026-08-12 late, `4b0306d`).** David
+      chose the pre-trigger; it was built (`0f322b1`), cost two boots to two
+      of my own errors — `autoattract.sh` presses Service BACK, so watching
+      sw28 fired the lie DURING BOOT and reproduced the pinned failure by
+      accident (`2cd316d`, Select-only), and `pad_sw_level` answers **-1** for
+      a switch nobody has edged, which is TRUE, so the pre-trigger latched on
+      its first call and never let go (`0c619f4`, `== 1`). Third run was clean:
+      pre-trigger silent through boot, attract full-screen, fired on the
+      Select, menu verified by the in-menu boolean — **and it banded.**
+      ★ SO I RAN THE CONTROL THIS ITEM NEVER RAN: the plain door gate, from a
+      NORMAL boot and a live attract, with `PAD_VID_LIVEGATE=1` making
+      caps/get_state answer from the live gate exactly as `71caeb5` does.
+      **IT BANDS TOO** (`C:\tmp\door2_menu.png`). And attract with the door
+      open was NOT banded on the way in (`door_attract_open.png` — full-screen
+      video under the 48V overlay), which is the same surprise from the other
+      side. **THE DOOR GATE DOES NOT FIX DAVID'S FLOW.** Its recorded success
+      was on a `PAD_DOOR_OPEN=1` SERVICE BOOT — the notes say so, because a
+      mid-session `swhold.py 33 0` reads unstably — which is starvation from
+      boot again. **Every dots result in this item's history came from the lie
+      being true before the game ever held a video frame. Four independent
+      video-side moves have now failed from a live attract: per-stream
+      arm-time stamp, live door gate, service-button pre-trigger, and delivery
+      held to zero.** The "working resting state" line at the top of this item
+      is therefore WRONG for a normal boot and should not be shipped as a fix
+      without David seeing this.
+      ★ WHAT IS LEFT, both off the video layer: (a) THE GAME SIDE — find what
+      the LCD composer actually reads when it picks video vs dots (it is not
+      caps, not get_state, not frame arrival, and not the pipeline's identity;
+      it behaves like a per-scene layer built once and reused), and make the
+      game drop that layer at menu entry; (b) THE RENDERER SIDE — padglhost
+      already classifies the menu from the draw stream with zero false
+      positives, so it could refuse the video-textured strip draw, but the
+      dots are never composed at all in this state, so that yields black, not
+      dots, unless the menu's own surface can be found upstream.**
       **★ THE GUEST CANNOT READ ITS OWN MEMORY (unexplained, 2026-08-12).**
       The shim's in-guest load of the mode word 0x650744 returns 0 in EVERY
       state, while a host read of the same address in the same process

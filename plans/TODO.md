@@ -1154,6 +1154,53 @@ These have each been violated at least once and each cost a run or a window:
       nogset.sh, item43_run_door.sh, plus the earlier run_flag.sh / poll.py /
       drive_menu.sh. Screenshots: item43_mg_*.png (mode-gate), item43_door_*.png
       (door-gate), item43_emu_*.png (no-lie trace).**
+      **════ DAVID CHOSE (b) PATH A - THE RENDERER FIX (2026-08-12). ════**
+      **★★★ PATH A PHASE 1 DONE — a CLEAN BINARY DISCRIMINATOR found in the GL
+      draw stream (reference frames saved: `C:\tmp\item43_pathA_phase1.txt`).**
+      Captured full per-frame op sequences (live `touch /tmp/padgl_dumpseq` ->
+      padglhost dumps one frame's ops to `~/padglhost.log` as `[seq]` lines;
+      PAD_GL_DRAWLOG only logs DRAWARRAYS/DRAWELEMENTS and does NOT capture the
+      TEXDIRECT backdrop, which is why the earlier "prog-27 band" note read as
+      absent). THE FINDING:
+      - ATTRACT frame: backdrop = `USEPROGRAM 36` -> TEXDIRECT 1360x768 ->
+        DRAWARRAYS (mode5 TRIANGLE_STRIP, full-screen quad), THEN a prog-6
+        overlay + ~9 prog-9/15 text draws (the full LCD scene). ~11 draws.
+      - MENU (band) frame: backdrop = `USEPROGRAM 27` -> TEXDIRECT 1360x768 ->
+        DRAWARRAYS (mode4, VAO 2, 6 verts) and NOTHING ELSE. Exactly 1 draw.
+      **So the game draws the menu backdrop with a DIFFERENT SHADER PROGRAM —
+      prog 27 (the DMD/LCD-strip renderer) — vs prog 36 (attract's full-screen
+      backdrop). This is the Path A signal: a frame that draws its backdrop via
+      prog 27 (not 36) is in the menu. Binary, not a noisy draw-count (a static
+      attract frame can be as few as 3 draws, so COUNT alone is unreliable — the
+      PROGRAM is the clean cut). Expected stable across the lie: prog 27 is the
+      menu PAGE TYPE's renderer whether it shows band-video (no lie) or dots
+      (lie), so the feedback loop cannot oscillate — the whole reason Path A is
+      viable.** TEXDIRECT dims are 1360x768 in BOTH (that's the SOURCE texture);
+      the DEST program is the discriminator.
+      **★ PATH A REMAINING — a fresh agent picks up HERE. (Phase 1 verify, ~1
+      run) confirm prog 27 does NOT appear at BOOT (tech-alerts shows a DIMMED
+      full-screen backdrop = likely prog 36; if boot used prog 27 the detector
+      would flag boot -> boot-lie -> the PREPARE STORM this file already records,
+      so the detector MUST NOT fire at boot) and does NOT appear in GAMEPLAY;
+      and that the menu-DOTS case (lie active) STILL uses prog 27 (stability
+      across the lie). (Phase 2) in padglhost `dispatch()`: per frame track
+      whether a DRAWARRAYS happened under `USEPROGRAM 27` (menu) vs `36`
+      (attract); latch the verdict at PADGL_SWAP (frames_done++ site ~L2766).
+      (Phase 3) HOST->GUEST FLAG CHANNEL: padglhost is the host renderer, gstvid
+      runs in the guest - need a byte padglhost WRITES and the guest READS. The
+      existing padvid shared-memory (vshm/padvid_chan) is guest->host for video;
+      add a host->guest field (a menu-flag byte in the same shm the guest maps),
+      or reuse an existing mapped region. (Phase 4) gstvid `vid_menu_gate()`
+      reads that flag IN PLACE OF the door (`vid_door_open`), so the lie fires
+      exactly when the renderer confirms the menu - no unstable door, no mode
+      word. Keep the door as the fallback for unconfigured/other titles. (Phase
+      5) validate: menu draws DOTS at the audits page (David's oracle: green GO
+      TO AUDITS MENU on black), attract full-screen, gameplay + boot untouched,
+      no storm, no oscillation. NOTE the first menu page may still flash band
+      before the flag sets (detector is 1 frame behind); deeper pages clean.
+      Reference: `C:\tmp\item43_pathA_phase1.txt`, launcher
+      `C:\tmp\item43_run_drawlog.sh` (PAD_GL_DRAWLOG=1, no lie), padglhost draw
+      machinery at padglhost.c ~L2867 (draw_say) + ~L3046 (dispatch/[seq]).**
       **★★★ THE FUNDAMENTAL WALL (proven 2026-08-12, do not re-litigate): a
       SETTLED service-menu page and settled attract are BYTE-IDENTICAL to
       the video shim — both a steadily-playing backdrop, zero state changes,

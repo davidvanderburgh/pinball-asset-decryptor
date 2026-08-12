@@ -51,8 +51,6 @@ extern void *mmap(void *, unsigned long, int, int, int, long);
 extern int usleep(unsigned);
 extern void pad_say(const char *);
 extern int pad_sw_level(unsigned);      /* hwshim.c - item 43's caps door gate */
-static int vid_menu_confirmed(void);    /* item 43: the delivery hold in
-                                         * vid_thread runs above its definition */
 extern int pthread_create(unsigned long *, void *, void *(*)(void *), void *);
 extern int clock_gettime(int, unsigned long *);
 
@@ -781,47 +779,18 @@ static void *vid_thread(void *arg)
          * at PAUSED; nothing here has ever needed it - fresh clips only start
          * their thread at PLAYING - so the hold is total.) */
         if (s->paused) { t_epoch = 0; usleep(5000); continue; }
-        /* ★ ITEM 43, AND THIS IS THE ONE THAT MATTERS: HOLD WHILE THE GAME IS
-         * IN ITS SERVICE MENU. Not an answer - the frames themselves.
-         *
-         * Measured 2026-08-12, the run that finally showed the machinery: with
-         * the lie per-stream and correct (`lie=1 gate=1` on every stream the
-         * menu armed, caps NONE, get_state PAUSED) the page STILL banded, while
-         * ch3 - armed back in attract and never torn down - went on handing the
-         * game 61 frames every 2033 ms, 30.0/s, all through the menu. The host
-         * counters name what the game does with them: 60 uploads/s at 0.0
-         * NEW/s, which is the menu compositing its LCD image itself and
-         * uploading it whole (item 43's earlier draw analysis: the menu frame
-         * uploads TEXDIRECT 1360x768 VIDEO where a real machine uploads dots).
-         * So the game picks video for that composition whenever video CONTENT
-         * is arriving, whatever it has been told about the pipeline's state -
-         * which is also the honest reading of the pinned run's dots: pinning
-         * from boot did not persuade the composer, it starved it.
-         *
-         * Starve it deliberately, and only here. The hold is on a CONFIRMED
-         * menu (never the bare door - see vid_menu_confirmed for the tombstone
-         * that distinction exists to avoid), it releases the instant the flag
-         * drops, and it leaves every answer, set_state and EOS path untouched.
-         * PAD_VID_MENUHOLD=0 turns it off for an A/B without a rebuild. */
-        {
-            static int hold_on = -1;
-            if (hold_on < 0) {
-                const char *e = getenv("PAD_VID_MENUHOLD");
-                hold_on = !(e && e[0] == '0');
-            }
-            if (hold_on && vid_menu_confirmed()) {
-                static int said;
-                if (!said) {
-                    said = 1;
-                    VLOG("[vid] ch%d holding delivery for the service menu - "
-                         "the menu composes its own LCD image and picks video "
-                         "whenever video is arriving (item 43)\n", chan_of(s));
-                }
-                t_epoch = 0;
-                usleep(5000);
-                continue;
-            }
-        }
+        /* ★ ITEM 43: A MENU DELIVERY HOLD BELONGS HERE AND IS NOT COMING BACK.
+         * Built twice now, on two different gates, with the same answer both
+         * times - the second one measured hard enough to close it, 2026-08-12:
+         * in a VERIFIED service menu (the game's own in-menu boolean reading 1,
+         * not just the mode word) every stream held, the guest handed over
+         * nothing at all, and the band did not merely survive - two screenshots
+         * seconds apart came back BYTE-IDENTICAL while padglhost reported 60
+         * uploads/s at 0.0 NEW/s. The game composes its LCD image itself and
+         * re-uploads the last video frame it was ever given, forever.
+         * Starving a latched choice only freezes it. The corollary is the one
+         * worth carrying: the pinned run's dots were never persuasion, they
+         * were STARVATION FROM BOOT - the game had no frame to hold onto. */
         /* item 43: NOTE THE ABSENCE of a door check here, and keep it absent.
          * Both attempts to act on a RUNNING stream at door-open failed in
          * David's hands within minutes: a HOLD stalled the game's sync=1
@@ -1260,27 +1229,6 @@ static int vid_gate_on(void)
         on = !(e && e[0] == '0');
     }
     return on;
-}
-
-/* ★ ITEM 43: the menu, CONFIRMED BY A REAL SIGNAL - the game's own word or the
- * renderer's draw stream - with the door fallback deliberately excluded.
- *
- * The difference matters for exactly one caller, the delivery hold in
- * vid_thread, and it is the difference between a targeted hold and the one
- * this file already has a tombstone for: a hold gated on the DOOR is also true
- * through attract and gameplay with the door open, which is how the first
- * attempt stalled the game's sync consumers into a timeout per frame per
- * channel ("really slow and laggy the second we open the coin door"). A hold
- * gated on THIS is true only while a configured title is actually in its
- * service menu, where there is no gameplay to lag - and it is false on every
- * title that has no detector, which is every other card. */
-static int vid_menu_confirmed(void)
-{
-    int r, m;
-    if (!vid_gate_on()) return 0;
-    r = vid_rflag();
-    m = vid_modeflag();
-    return (r > 0 || m > 0);
 }
 
 static int vid_menu_gate(void)

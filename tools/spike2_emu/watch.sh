@@ -1204,6 +1204,40 @@ if [ "${PAD_BALL_FEED:-1}" != 0 ]; then
     echo "[watch] (PAD_BALL_FEED=0 to move balls by hand with plunge.py)."
 fi
 
+# PAD_DOOR_OPEN=1 - boot with the coin door held OPEN, for servicing (item 43).
+# This is a convenience, not a rendering fix any more: the video-side door
+# gate is GONE (see gstvid.c's tombstone - the service pages pick their DMD
+# dot mode on their own in the ASYNC preroll window, and they NEED their
+# backdrop video working). Holding the door open from boot just means the
+# service buttons are unlocked the moment the game is up. One early swhold is
+# not enough: the rest-state writer forces the door shut once at guest start
+# and the merge is last-edge-wins, so this loop re-asserts through the boot
+# window. Close the door (click switch 33, or swhold.py 33 1) when done.
+if [ "${PAD_DOOR_OPEN:-0}" = 1 ]; then
+    (
+        # The gate only trusts an EDGE-established door state (see
+        # pad_sw_level), so stamp CLOSED once and then hold OPEN - the 1->0
+        # transition is what makes "open" a known fact rather than a fresh
+        # block's meaningless zeros. Re-asserted through the boot window
+        # because the writers are last-edge-wins and the playfield stamps
+        # its own rest state when it comes up.
+        first=1
+        for _i in $(seq 1 30); do
+            if [ -f "$ROOT/dump/padsw" ]; then
+                if [ -n "$first" ]; then
+                    setsid_as_user python3 "$S/swhold.py" 33 1 >/dev/null 2>&1
+                    first=
+                fi
+                setsid_as_user python3 "$S/swhold.py" 33 0 >/dev/null 2>&1
+            fi
+            sleep 2
+        done
+    ) &
+    echo "[watch] coin door held OPEN through boot (PAD_DOOR_OPEN=1):"
+    echo "[watch] service buttons unlocked; close the door (swhold.py 33 1)"
+    echo "[watch] when done."
+fi
+
 # KEY EVENTS, on THIS script's stdout. The app's Emulate tab drains watch.sh's
 # output into its log pane, and a terminal run shows the same thing - so the
 # one place worth publishing "what is the run doing" is right here. The

@@ -53,6 +53,9 @@ extern void *pad_vid_structure_for(void *);
 extern int  pad_vid_get_int(void *, const char *, int *);
 extern void pad_vid_play(void *);
 extern void pad_vid_stop(void *);
+extern void pad_vid_teardown(void *);
+extern void pad_vid_note_paused(void *);
+extern int  pad_vid_last_state(void *);
 extern int  pad_vid_is_ours(void *);
 extern int  pad_vid_is_pipeline(void *);
 extern long long pad_vid_duration_ns(void *);
@@ -181,14 +184,39 @@ int gst_element_set_state(void *element, int state)
      * one run first would start vpudec, which is the thing that cannot work
      * and the thing that wedged the boot the last time its firmware loaded. */
     if (pad_vid_is_pipeline(element)) {
-        if (state <= 2) {                 /* NULL / READY: tear down */
-            pad_vid_stop(element);
+        if (state <= 2) {                 /* NULL / READY: tear down.
+                                           * pad_vid_teardown, NOT _stop: the
+                                           * game tearing a pipeline DOWN and a
+                                           * streaming thread standing down at
+                                           * EOS both end at playing==0, and
+                                           * item 43 was the difference between
+                                           * them - a loop-seek must resurrect
+                                           * the second and refuse the first,
+                                           * exactly as real GStreamer refuses
+                                           * a seek on a NULL pipeline. */
+            pad_vid_teardown(element);
             r = 1;
         } else if (state == 3) {          /* PAUSED: this is where it used to
                                            * fail, and where the host is asked
                                            * to open the file */
             r = pad_vid_prepare(element) ? 1 : 0;
+            /* item 43: a paused pipeline delivers no frames, including one a
+             * same-clip absorb kept streaming. Noted after prepare so the
+             * flag reflects the game's ask whatever the absorb decided. */
+            if (r) pad_vid_note_paused(element);
             if (r) pad_vid_announce(element, 2, 3);   /* READY -> PAUSED, prerolled */
+            /* ★ ITEM 43: PAUSED answers ASYNC (2), not SUCCESS (1). A real
+             * pipeline with a real decoder CANNOT complete preroll inside
+             * set_state - it returns ASYNC and finishes on the streaming
+             * thread - and the System 4.28 service menu builds its page in
+             * that window: video not yet ready, so the page locks in its DMD
+             * dot mode and the backdrop video plays underneath the dots.
+             * Answering SUCCESS made video "ready" at page build, the page
+             * chose video as the LCD source, and the whole dot menu was
+             * never drawn. The bus already carries ASYNC_DONE (posted by
+             * pad_vid_announce above), so a caller that genuinely waits for
+             * completion still gets its answer, exactly as on hardware. */
+            if (r) r = 2;
         } else {                          /* PLAYING */
             pad_vid_play(element);
             pad_vid_announce(element, 3, 4);          /* PAUSED -> PLAYING */
@@ -206,12 +234,22 @@ int gst_element_set_state(void *element, int state)
 }
 
 /* The game polls this after set_state. Answer for our pipeline without going
- * near the real one, which has no idea any of this happened. */
+ * near the real one, which has no idea any of this happened.
+ *
+ * ★ ITEM 43: THE ANSWER IS THE GAME'S OWN LAST set_state, NOT AN
+ * UNCONDITIONAL PLAYING. The lie was cheap right up until the System 4.28
+ * service menu, which polls its backdrop pipeline's state to choose what
+ * feeds the LCD texture: dots when the pipeline is down, video when it is
+ * flowing. With every pipeline reading PLAYING forever - including ones the
+ * game had set to NULL - the menu chose video, and the whole dot menu was
+ * rendered into a texture that a paused backdrop overwrote 30 times a
+ * second. Truth here plus real PAUSED/teardown semantics in gstvid is what
+ * lets the menu own its own texture, exactly as it does on hardware. */
 int gst_element_get_state(void *element, int *state, int *pending, unsigned long long timeout)
 {
     static int (*real)(void *, int *, int *, unsigned long long);
     if (pad_vid_is_pipeline(element)) {
-        if (state) *state = 4;            /* PLAYING */
+        if (state) *state = pad_vid_last_state(element);
         if (pending) *pending = 0;        /* VOID_PENDING */
         return 1;                         /* SUCCESS */
     }

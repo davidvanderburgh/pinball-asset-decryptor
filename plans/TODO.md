@@ -1075,110 +1075,6 @@ These have each been violated at least once and each cost a run or a window:
       session with a save and a load.
 
 
-- [ ] **43. In the turtles service menus the picture goes HALF HEIGHT and the
-      scene text stops drawing.** `S2 D3`
-      *(**Filed as 42 and renumbered to 43 on 2026-08-11 before merging**: David
-      took 42 for the save-state portability item on main the same afternoon,
-      and this branch had not landed yet. Numbers are stable IDs and are never
-      reused, so the one that reached main first keeps it. Any note elsewhere
-      calling this "item 42" means this item.)*
-      **★ DAVID, 2026-08-11, watching item 41's run: "there was no crash, but
-      the screen looked very weird in its last state. no scene data and video
-      was half height centered vertically."**
-      **CAPTURED, and there is a LABELLED PAIR — the same run, minutes apart,
-      so the difference is the state and not the setup:**
-      `C:\tmp\item41\turtles_attract_normal.png` — attract/game start, video
-      fills the window AND the scene text draws (`PLAYER 1`, `00`, `CREDITS 3
-      1/4` all present). `C:\tmp\item41\turtles_service_halfheight.png` — after
-      a 15-press walk into the service menus: the video occupies a horizontal
-      band roughly half the window height, centred vertically with black above
-      and below, and **no menu text at all** — just the Stern Pinball logo
-      backdrop. Two defects at once, and they may or may not be one fault.
-      **HOW IT WAS REACHED, exactly:** turtles_pro-1_59_0.1987-upscaled card,
-      `PAD_PIVOT=1`, watch.sh from the item-41 worktree; `plunge.py coin`,
-      `plunge.py start`, a ball plunged and drained, then `swpoke.py` on
-      switches 25/26/27/28 (SERVICE SELECT/PLUS/MINUS/BACK) fifteen times. It
-      should reproduce from a cold run without the ball part.
-      **★ MEASURED ON A LIVE RUN, 2026-08-11 (David's, while it was up), and it
-      rules out the whole "something is failing" family:** ZERO Radium errors,
-      ZERO GL errors (`[readback] glGetError=0` and every other counter 0), the
-      guest rendering steadily at **52.9 fps**, and the renderer compositing at
-      60 fps with `30.0 NEW/s` of video. Nothing is erroring. Whatever is wrong
-      is a GEOMETRY or LAYOUT decision, not a failure.
-      **The band is EXACTLY HALF the framebuffer height and vertically
-      centred** — content occupies ~384 of the 768 lines, black above and below.
-      An arbitrary letterbox would not land on a round half.
-      **TWO video channels are serving at once on this screen** — ch0
-      `bc0792d8…/45a4e8c6…/scene.assets/2.asset/14.asset` (899 frames) and ch1
-      `60ed7e50…/scene.assets/2.asset/22.asset` (759) — where ordinary attract
-      used ch0 alone. **`60ed7e50…` is a SHARED Stern bundle, not turtles': the
-      same hash serves clips on godzilla_pro** (see item 41's godzilla log), so
-      this backdrop is Stern's common LCD asset set and the screen is likely a
-      common one rather than a TMNT screen.
-      **★★ FIVE THINGS ESTABLISHED 2026-08-11, 40% — the fault is now boxed
-      into the VIDEO COMPOSITING PATH and everything else is eliminated.**
-      **(1) THE SERVICE MENU'S FIRST PAGE RENDERS PERFECTLY** — "TMNT PRO /
-      SERVICE MENU", the version table, "Press 'Select' to continue", the QR
-      code, all sharp and full height (`C:\tmp\item41\menu_page1_good.png`). So
-      menu text on turtles is not broken as such. **It is a DEEPER page that
-      breaks**, reached by pressing Select on from there.
-      **(2) IT IS NOT A VIEWPORT OR SCISSOR.** New instrument this pass,
-      `PAD_GL_VPLOG=1` in `glbridge.c`, prints every CHANGE of `glViewport` /
-      `glScissor`. Across a whole run — boot, attract, working menu page and
-      broken page — **the guest sets exactly ONE viewport: `0,0 1360x768`**, and
-      scissor is only ever "off" (`-8192,-7424 16384x16384`) or full size.
-      Nothing is being clipped and the guest never asks for a short surface, so
-      the half-height band is drawn GEOMETRY, not a clipped full-size draw.
-      **(3) IT IS NOT THE SOURCE MATERIAL.** All three clips involved probe as
-      natively **1360x768** (`ffprobe`: 341.asset 1779 frames, 22.asset 759,
-      14.asset 899). Not half-height banners being drawn correctly.
-      **(4) THE GL/TEXT LAYER IS HEALTHY.** With `PAD_VID=0` the same session
-      draws its text full height and correctly placed on black. So whatever is
-      wrong is not the scene/text renderer.
-      **(5) THE ONE THING UNIQUE TO THE BROKEN SCREEN: it runs TWO video
-      channels at once** (ch0 `…/2.asset/14.asset` and ch1 `…/2.asset/341.asset`
-      or `/22.asset`), where attract and the working menu page use ch0 alone.
-      **So the next pass starts at the two-channel composite path**, not at the
-      scene renderer and not at the geometry the game asks for.
-      **★ RULED OUT WITH A RUN, do not repeat: `PAD_GL_W=1920 PAD_GL_H=1080`.**
-      The idea was that `glbridge.c:173-174` defaults to the real LCD size and
-      `watch.sh` overrides to 1360x768, so a menu laid out for 1080 might
-      misplace itself. **It is the other way round: the game lays out at a FIXED
-      1360x768** — at 1920x1080 the whole UI shrinks into the top-left of the
-      surface with the backdrop oversized around it, and David's verdict on
-      seeing it was "that breaks the regular screens". watch.sh's 1360x768 is
-      correct and must stay.
-      **★ ALSO RULED OUT: a stale build.** `ensurebuild` had been refusing to
-      rebuild the guest GL bridge (see the loose end about it continuing anyway),
-      so the first suspicion was guest/host protocol drift across `padgl.h`.
-      Both halves were rebuilt together (13:54:24 and :25) and **the fault still
-      reproduces**, so it is a real fault and not a build artefact.
-      **NOT ESTABLISHED, and do not assume either half:** whether the missing
-      text and the half-height video are one fault or two; whether the band is
-      the menu's own video mode being letterboxed wrongly by `win_present()`
-      (`padglhost.c:1367` scales one quad into `win_w x win_h`) or the guest
-      genuinely drawing a shorter surface; and whether this is turtles-only.
-      **The cheap first checks, none needing a new instrument:** compare
-      against godzilla_pro in the same menu (one run, and it says at once
-      whether this is the title or the menu); and read `[eglshim]`/`[vid]` for
-      the surface size while the band is on screen, since a guest drawing
-      1360x384 and a host letterboxing 1360x768 are different faults with the
-      same picture.
-      **Relevant, unconfirmed as related:** turtles' device table does not read
-      (`watch.sh` says so at boot — "the device table did not read, so this is
-      off the SWITCH LIST alone"), which is item 29's territory. Scene text and
-      device tables are different stores, so treat any link as a guess.
-      **Acceptance:** the service menus on turtles draw their text, at full
-      picture height, stated with a screenshot against the attract-mode one
-      above — and say whether godzilla behaves the same, since that decides
-      whether this is a title fault or a menu fault.
-      — S2: nothing crashes and play is unaffected, so not S1; what it costs is
-      that the service menus are UNREADABLE on this title, and those menus are
-      the oracle item 3 (Coil Test) and item 1d (LED Tests) both depend on, and
-      the place item 41's other trigger lives. D3: it needs a run, it was
-      visible the moment anyone looked, every instrument already exists, and
-      the godzilla comparison is one more run rather than a new tool.
-
 - [ ] **44. Stranger Things' PROJECTOR picture has nowhere to go: the emulator
       presents exactly ONE display and deliberately swallows every other
       surface the game opens.** `S3 D4`
@@ -1734,6 +1630,84 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **43. In the turtles service menus the picture went HALF HEIGHT and the
+      scene text stopped drawing — and the fault was OURS, in the GL bridge.**
+      DONE 2026-08-12, branch `item/43`. **Verified in DAVID'S OWN RUN**
+      ("it's working perfectly now"), and re-verified afterwards on the
+      DEFAULT build with every workaround stripped out.
+      **THE FAULT.** `glbridge.c` kept ONE process-global `glTexDirectVIV`
+      registration — for a Vivante direct-texture extension whose three calls
+      (`Map`, `VIV`, `InvalidateVIV`) take only a TARGET and name their texture
+      IMPLICITLY, by whatever is BOUND. So when the service menu bound its own
+      1024x256 GL_RGBA DMD texture and invalidated it, the bridge sent the
+      VIDEO's 1360x768 I420 registration, and the host uploaded video pixels
+      into the menu's quad. **The band was the menu's own DMD strip, correctly
+      shaped and correctly placed, filled with the wrong pixels. The game was
+      drawing its menu right the whole time.** The captured frame said so and
+      was read past for a week: `BINDTEX 3553 2` immediately followed by
+      `TEXDIRECT 1360 768 36805`.
+      **THE CO-DEFECT, same mistake:** `glTexDirectVIV`'s frame buffer was also
+      one process-global `static`, and that function has exactly ONE call site
+      in the whole game binary (`0x4da060`, `Texture::Texture`) — so every
+      allocating texture shared it, the DMD's 1 MiB and the presenter's 4 MiB
+      in the same bytes. It showed up as the renderer reporting 60 uploads/s at
+      **0.0 NEW/s**: one frame re-sent forever.
+      **THE FIX (`ca0ab7c`).** Shadow `glActiveTexture`/`glBindTexture` and keep
+      one registration per texture NAME, with each texture's allocation in its
+      own slot. Sound for all four direct-texture users in this binary, checked
+      in the disassembly rather than assumed: `Texture::Texture` binds at
+      `0x4d9e10` BEFORE both direct calls and unbinds only at `0x4d9fac`,
+      `SetPixels` binds through the virtual `Bind()` before invalidating, and
+      the video path binds `[this+332]` before its `Map`. `Invalidate` on an
+      unregistered texture sends NOTHING and says so once — deliberately no
+      fallback to "whatever registered last", because that fallback IS the bug.
+      **WHY IT TOOK A WEEK: every instrument pointed at the game.** The symptom
+      is a video-shaped fault, so the search stayed in the video shim, and four
+      separate video-side theories were built, run and killed — a coin-door
+      caps gate, a per-stream arm-time lie stamp, a service-button pre-trigger,
+      and holding frame delivery to zero. All four banded from a live attract.
+      Two apparent successes were the same illusion: lying FROM BOOT drew the
+      dots only because with no video ever registered the one global happened
+      to hold the DMD's own registration. **That also means the committed door
+      gate (`71caeb5`) never worked in David's flow at all** — its recorded
+      success was a `PAD_DOOR_OPEN=1` service boot, and run as a faithful
+      control from a normal boot it banded like everything else. A memory diff
+      of the dots state against the band state (six snapshots each, matched
+      configs) found 273 stable differences and none of them mattered: poking
+      all 40 non-pointer differences at once, and separately zeroing the
+      24-word object table that was null in the dots state, moved the picture
+      not at all — because the game was never deciding anything.
+      **WHAT CAME OUT WITH IT (`e600f2c`..close).** The gate, the host-side
+      mode-word poller (`modewatch.py`, deleted), the renderer's draw-stream
+      menu detector, the pre-trigger, the per-stream stamp, both `padgl.h`
+      header flags and the debug stamper — about 320 lines from `gstvid.c`
+      alone, and 4.7 KB off the shim. The video layer answers the TRUTH again
+      in every state on every title. What survives of this item is the part
+      that was always correct on its own terms and unrelated to the band:
+      `get_state` reports the game's own last `set_state` instead of an
+      unconditional PLAYING, a PAUSED pipeline holds delivery, and a seek on a
+      torn-down pipeline is refused.
+      **VERIFIED, default configuration, nothing set:** attract full-screen
+      with video; **attract with the COIN DOOR OPEN still full-screen** (the
+      regression the old gate caused, and the reason it had to come out); the
+      service menu drawing David's reference green dot page; the deep Tech
+      Alerts page rendering completely; a game started and playing over
+      full-screen video; three correctly separated bridge registrations in the
+      log (DMD `0400x0100` fmt `0x1908`, two videos `0550x0300` fmt `0x8fc5`);
+      zero bridge complaints; no prepare storm; 60 fps at 29.9 uploads/s and
+      **29.9 NEW/s**.
+      **INSTRUMENTS LEFT BEHIND:** `guestmem.py` (snapshot/read/POKE the running
+      guest host-side — poking `0x6046e0` drove the game out of its own menu,
+      which is how causation got tested instead of theorised) and `memdiff.py`
+      (differential state scan). Both carry the traps that cost captures: match
+      the configs before diffing, verify a menu with the in-menu boolean
+      `0x663958` and never `mode==0` alone, and `PAD_DOOR_OPEN=1` does NOT
+      survive the playfield window stamping the door closed again.
+      **THE LESSON, worth more than the fix:** the symptom's shape named the
+      wrong layer for a week. When a menu looks wrong, capture the draw stream
+      and ask WHICH TEXTURE the upload is for before asking what the game
+      believes. See [[reference_spike2_caps_preroll_latch]].
 
 - [x] **41. turtles_pro hard-crashed (qemu signal 11) on service menus and on
       character select — and the crash was OURS.** DONE 2026-08-11, `e5a99fc`

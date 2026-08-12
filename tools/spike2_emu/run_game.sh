@@ -340,7 +340,7 @@ if [ -n "$PIVOT" ]; then
         cd /
         /busybox umount -l /oldroot
         cd "/games/$GAME" || exit 1
-        export LD_PRELOAD=/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=1
+        export LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=1
         # stdio has to point INSIDE the container. The caller's stdout is a file
         # on a host mount ($HOME/gzwatch.log for watch.sh), and that mount leaves
         # the namespace with the pivot - criu then refuses fd 1 ("Can't lookup
@@ -364,5 +364,5 @@ fi
 # LD_PRELOAD is applied to the game alone: the busybox tools in this rootfs do
 # not link libdl and fail to start with the shim forced on them.
 exec chroot "$R" /bin/sh -c \
-  "cd /games/$GAME && LD_PRELOAD=/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=1 exec ./game"
+  "cd /games/$GAME && LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=1 exec ./game"
 INNER

@@ -37,6 +37,14 @@ typedef struct {
     unsigned int  fb_w, fb_h;
     unsigned int  host_ready;
     unsigned int  host_error;
+    /* ★ ITEM 43 HAD TWO FLAG FIELDS HERE (menu_flag, mode_flag) carrying a
+     * "the game is in its service menu" signal from the renderer and from a
+     * host-side memory poller to the video shim. The item was fixed in
+     * glbridge.c instead - the menu's band was the Vivante direct-texture
+     * registration being one process-global for a per-texture API - so both
+     * signals and both their producers are gone. Removing them is safe in the
+     * way appending them was: the ring data starts at the fixed
+     * PADGL_HDR_BYTES page boundary, so no other field moves. */
 } padgl_hdr;
 
 #define PADGL_HDR_BYTES  4096          /* header page, then the ring data */

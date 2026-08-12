@@ -1080,7 +1080,80 @@ These have each been violated at least once and each cost a run or a window:
       RENDER is solved (door gate, committed `71caeb5` = the working
       resting state), but it has an inherent cost — attract shows the band
       while the coin door is open — and David chose to pursue the harder,
-      cleaner fix rather than accept it. Branch `item/43`, clean, pushed.**)*
+      cleaner fix rather than accept it. Branch `item/43`, HEAD `e39eecb`,
+      clean, pushed.**)*
+      **════ SESSION 2026-08-12 (cont., Path B): FORK RESOLVED + TWO DEAD ENDS
+      + A METHOD CONFOUND THAT INVALIDATES THE "MODE-GATE INSUFFICIENT" CLAIM.
+      Resume from HERE.**
+      **(1) THE FORK IS RESOLVED (clean emulator gst trace vs the real trace,
+      both saved: `C:\tmp\padtrace_emu.log`, `C:\tmp\padtrace_real.log`).** Built
+      the `-DPAD_TRACE_NO_GSET` padtrace variant (`/c/tmp/item43_build_padtrace_
+      nogset.sh` -> `$ROOT/lib/padtrace_nogset.so`) so gststub keeps the emu
+      video alive, ran no-lie (`/c/tmp/item43_run_trace_nogset.sh`), drove door
+      + 2 Selects. RESULT: the emulator's video layer is STRUCTURALLY IDENTICAL
+      to hardware — same pipeline rebuild on menu entry, same caps 1360x768,
+      and the SAME return addresses (0x4ed240..0x4eea38 = BusCallbackStatic), so
+      the video-engine CODE is byte-identical (the "upscaled" card differs only
+      in data/assets, NOT the Radium .text). The ONE difference: preroll is
+      INSTANT (set_state(PAUSED)->READY->PAUSED in the SAME ms) vs ~400-675 ms on
+      hardware. The menu's dots-vs-band is LATCHED per page at page build from
+      the backdrop's playing-state; hardware's real preroll means the entry
+      latch reads "still prerolling" -> dots, the emulator's instant preroll
+      reads PLAYING -> band. That is the whole mechanism.
+      **(2) DEAD END A — bus PLAYING-announce suppression (committed revert
+      `e39eecb`, tombstoned in `pad_vid_announce`).** The DEEP audit pages
+      (Select #2+) never re-arm and never re-poll get_state/caps (0 gst calls on
+      Select #2 in the no-lie trace) — they read a CACHED playing-flag the game
+      maintains off the bus `PAUSED->PLAYING` message, which the get_state/caps
+      lie cannot reach. So I withheld ONLY that message (newst==4) in the menu,
+      keeping every READY->PAUSED/ASYNC_DONE (the prior 2026-08-12 attempt killed
+      ASYNC_DONE and stalled the entry; this did not). RESULT: PREPARE STORM —
+      renderer 40->6.9 fps, pipelines re-arming forever (incrementing addrs).
+      The game's lifecycle REQUIRES the PLAYING message; the bus must tell the
+      truth. Same failure class as the NULL-caps preroll model. RULED OUT.
+      **(3) DEAD END B — mode-ONLY gate (drop the flickering door term).** Made
+      the gate `mode==0` alone (stable, no door). RESULT: storm at BOOT, because
+      boot is also mode==0 and the lie then fires while boot arms its backdrop.
+      The door term was PROTECTING boot (door shut at boot). RULED OUT — any gate
+      that is true at boot storms; the lie must be OFF at boot.
+      **(4) ★★★ THE METHOD CONFOUND (this is the important one): opening the
+      coin door MID-SESSION via `swhold.py 33 0` reads UNSTABLY at the shim.**
+      `pad_sw_level(33)` flickers 0/1 at the ms scale under the game's matrix
+      scan, so `[menudbg] caps` came back MIXED -1/1 and the entry-latch caps
+      read (the decisive first read) mostly caught the door SHUT -> band —
+      EVEN THOUGH the game showed "48V DISABLED" (game-level door open). Tried
+      three ways: single swhold, a 0.7 s re-assert loop, and a proper 1->0 EDGE
+      + 0.2 s tight loop — ALL banded the audits page; the latch always caught a
+      shut frame. The game sees a stable open door (debounced/latched); the
+      shim's merged level does not. watch.sh's `PAD_DOOR_OPEN=1` is the ONLY
+      stable open: it stamps a CLOSED edge then re-asserts OPEN through boot
+      BEFORE the game scans. **CONSEQUENCE: today's "mode-gate bands the audits
+      menu" AND the earlier "mode-gate insufficient from attract-entry" results
+      are CONFOUNDED — they used mid-attract swhold, so the door was flickering
+      at the latch, not (only) the mode term. The door-gate's own 53667d5
+      verification that DREW DOTS must have had a stable door. This has NOT been
+      cleanly re-tested.** The ONE clean, unconfounded win today: the mode-gate's
+      attract-door-open plays FULL SCREEN (mode==1, no door dependency) —
+      verified, real, `t2_attractdoor` screenshot in /c/tmp.
+      **★ THE TENSION that blocks a clean fix: the lie must be OFF at boot (else
+      storm), so the door must be SHUT at boot and opened LATER — but a
+      mid-session open reads unstably at the latch -> band. A service boot
+      (PAD_DOOR_OPEN) gives a stable open but has the door open at boot ->
+      boot-storm risk, AND still carries the attract-door-open band cost David
+      disliked.**
+      **★ NEXT (a fresh agent, DECISION PENDING — David was asked): three ways.
+      (a) CLEAN RE-TEST with PAD_DOOR_OPEN=1 service boot: does the door-gate (or
+      mode-gate) draw DOTS at the audits menu with a STABLE door, and does the
+      boot backdrop storm under the lie? This is the missing clean data — run it
+      FIRST before any more code. (b) RENDERER (Path A, the substantial project):
+      padglhost detects the menu from the GL draw stream (menu = the 1-draw DMD
+      band, prog-27 sy~=340 vs ~768 full; attract = 19-draw scene) and handles it
+      independent of the fragile door read and the latch timing. (c) ACCEPT the
+      door-gate `71caeb5` with its attract-door-open band cost, or PARK. Tools
+      this session in /c/tmp: item43_build_padtrace_nogset.sh, item43_run_trace_
+      nogset.sh, item43_run_door.sh, plus the earlier run_flag.sh / poll.py /
+      drive_menu.sh. Screenshots: item43_mg_*.png (mode-gate), item43_door_*.png
+      (door-gate), item43_emu_*.png (no-lie trace).**
       **★★★ THE FUNDAMENTAL WALL (proven 2026-08-12, do not re-litigate): a
       SETTLED service-menu page and settled attract are BYTE-IDENTICAL to
       the video shim — both a steadily-playing backdrop, zero state changes,

@@ -410,44 +410,66 @@ These have each been violated at least once and each cost a run or a window:
       mechanism is cracked, the instrument is built and validated, and the fault
       now reproduces on demand from a script — so a pass can no longer end
       having learned nothing. What is left needs a run, not a new instrument.)*
-      **PASS STATE 2026-08-12 evening, branch `item/17`:**
-      **Established at the desk this pass, and it retires the MINSCANS-sweep
-      cost:** `swpoke.py --tap <id> <reads>` already presses for an EXACT number
-      of SPI transfers — a deterministic consumption ladder needing no rebuild
-      and no restart per rung. Its own docstring carries the prior measurement
-      this item needs: Main Menu cursor moved 0 rows at 120/200 ms, 1-2 at
-      250 ms, 3 at 300 ms — the consumer counts transfers inside the hold.
-      Both `PAD_SW_LATCH` and `PAD_SW_MINSCANS` are cached one-shot getenv
-      (`hwshim.c:4460-4477`), so a MINSCANS value still costs a guest restart —
-      use --tap instead wherever it answers the same question.
-      **RUN 1 KILLED BY A COLLISION at ~3 min, nothing measured.** Launched
-      18:52 from this branch (worktree scripts, `PAD_SW_PEND=59,60`, detached
-      per item 38's setsid lead). Boot was normal, bus quiet at 31 s, then
-      autoattract's Service Back presses (2000 ms) logged "did not take" ×2 and
-      at 18:55:26 everything died: `~/padauto.log` ends with a `Killed` job
-      message from a MAIN-CHECKOUT watch.sh running the `runuser` branch of
-      `setsid_as_user` — the AS-ROOT shape only the app uses. The app was open
-      on the desktop at the time (title "… v0.121.0 — bond60"). Not
-      established: who started/stopped what; David asked. The "did not take"
-      lines are NOT evidence yet — the run died mid-sequence.
-      **Fixed on this branch while here: `alive.sh` bare invocation was broken
-      on main tip** — `set -u` + `$PAD_HOME` referenced (9d25782) but padpath.sh
-      never sourced, so the helpers row's subshell died and printed a hollow 0
-      every time. It did not hide this collision (guest/host rows don't use
-      PAD_HOME) but the row was unconditionally 0. Now sources padpath.sh like
-      killgame.sh always has; verified bare-clean.
-      **Launch lesson, costs nothing to keep: a detached watch.sh loses its
-      console** (`[watch] cfg …` lines go to stdout, which dies with the wsl
-      shell). Redirect it to a file next launch.
-      **Resume (this pass):** relaunch once David confirms the rig is free —
-      same recipe plus `> ~/watch_console.log 2>&1` — reach the service menu
-      (door open `swhold.py 33 0`, LONG Select ×2), then: (a) consumption
-      ladder `swpoke.py --tap 59 N` for N=1,2,3,4,8, four presses each,
-      `shotwin.py` grab before/after each, the oracle is the CURSOR MOVING;
-      (b) wall-clock ladder `swpoke.py 59` at 100/250/500/1000/2000 ms, same
-      grabs; (c) `swladder.py 59,60` for the delivery record ([swpend] in
-      `~/gzwatch.log`); (d) per-node scan gap for 59/60's nodes in-menu from
-      [swpend] timestamps.
+      **★★★ MEASURED 2026-08-12 evening, branch `item/17`, godzilla_pro
+      service menu (Quick Adjustments), and THE SPLIT IS NOW A NUMBER ON EACH
+      SIDE: DELIVERY 20/20, CONSUMPTION 0/20.** A wall-clock flipper ladder
+      (switch 59, node 8 — the flippers this item had never measured) at
+      100/250/500/1000/2000 ms × 4 rounds, interleaved and jittered, with a
+      `shotwin.py` grab after every press: **every press was recorded by the
+      game's own scan drain** (`entry[+24]` lvl toggled 20/20; the latch saved
+      the five sub-scan closures, waits 185–363 ms) **and the menu cursor
+      moved ZERO times, including four 2-second presses.** Full evidence:
+      handoff REMAINING item 17; log preserved at
+      `/var/tmp/gzwatch_item17_run3.log`, shots `C:\tmp\item17\`.
+      **THE CONTROLS THAT MAKE 0/20 MEAN SOMETHING, same screen, same run:**
+      a DOOR button at 2000 ms is consumed every time it was tried (Select ×2
+      navigated in, Plus changed the value preview, Back exited, autoattract's
+      first Back passed Tech Alerts) — **and the same Plus at 800 ms was
+      IGNORED.** So the menu's consumption is width-gated somewhere ABOVE the
+      scan rate, and flippers are not consumed at all on this screen at any
+      width ≤ 2 s. Item 43's turtles rule ("hold 2 s or nothing") is now
+      reproduced on a second title with the wire half instrumented.
+      **The scan is NOT the gate, measured:** node 8's in-menu scan gap is
+      ~400–700 ms (latch waits 185–363 ms at uniform phase) — same order as
+      the 670 ms attract figure, and presses of 500+ ms were sampled naturally
+      yet still ignored. **Something in the game's MENU code wants ~2 s of
+      made-state, and on the real machine it does not** (a tech clicking
+      through a service menu is sub-second presses; if 2 s were the real rule
+      every Stern would feel broken). HYPOTHESIS, unproven, the resume trail:
+      the menu debouncer wants K CONSECUTIVE made samples on a faster clock
+      and something in our cabinet-word path drops the made bit between
+      rebuilds mid-hold, so only very long holds accumulate K in a row. Read
+      `sw_scan_bytes()`/word-rebuild for a made-bit dropout before any run.
+      **RULED OUT this pass — `swpoke.py --tap` for NODE switches:** the tap
+      is applied only where the CABINET word is handed over (`hwshim.c:2408+`)
+      and its count decrements per cabinet transfer (~640 us each), so a tap
+      on a node-8 flipper is a ~N·0.6 ms ghost the node scan never samples and
+      the merge never logs. No [sw] edge, no swpend, nothing. The tap docstring
+      measurement (Main Menu 0 rows at 120/200 ms, 1–2 at 250, 3 at 300) is a
+      CABINET-button measurement and consistent with today's door-button gate.
+      **Also fixed on this branch: `alive.sh` bare invocation was broken on
+      main tip** (`set -u` + `$PAD_HOME` referenced since 9d25782, padpath.sh
+      never sourced → helpers row printed a hollow 0 every time). Sources
+      padpath.sh now, like killgame.sh always has. Verified bare-clean.
+      **RUN 1 was lost to a collision, recorded for the pattern's sake:** a
+      MAIN-CHECKOUT as-root watch.sh (the app's shape) killed it at ~3 min;
+      David confirmed the rig free afterwards. Two rig lessons kept: a
+      detached watch.sh loses its console unless redirected, and the rootfs
+      `games/game` symlink can silently pick the WRONG TITLE for a bare
+      `watch.sh` (run 2 came up as turtles_pro — whose flippers are 64/65, not
+      59/60 — because item 43 left the symlink there; `PAD_GAME=godzilla_pro`
+      pins it).
+      **Resume:** (a) the desk read first — find the menu consumer's clock:
+      disassemble the service-menu input path (the adjustment screens poll
+      SOMETHING at ~1–2 s; radium sidx trap applies, see
+      reference_spike2_program_text) and check `sw_scan_bytes()` for a made-bit
+      dropout mid-hold; (b) then one run into BATTLE SELECT (the in-game
+      flipper consumer David actually named — needs a game with balls, door
+      CLOSED) with the same ladder + grabs, because in-play flipper
+      consumption may be a different rule from the service menu's; (c) a
+      turtles run for the same ladder joins item 46's discriminator to this
+      one. The MENU-half acceptance stays: an ordinary sub-second press moves
+      the cursor, stated over N presses, oracle the game's own display.
       **★★★ DAVID AGAIN, 2026-08-12, ON A BUILD THAT ALREADY HAS THE LATCH
       (`979b940` is on main), so `sw_owed[]` did NOT cure the felt case and the
       half that is left is LATENCY, not delivery: "switch input by keyboard or

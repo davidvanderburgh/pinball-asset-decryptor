@@ -4457,17 +4457,6 @@ static unsigned char sw_served[256];     /* it has been on the wire as made    *
 static unsigned long sw_made_at[256];    /* when it closed, for the log line   */
 static unsigned long sw_shut_at[256];    /* when it opened again               */
 
-/* item 43: SERVICE MODE. A settled service-menu page and settled attract are
- * identical to the video shim - both a steadily-playing backdrop (proven by
- * trace: no state changes, just handoffs). The one thing that differs is what
- * the OPERATOR is doing: to be in the menu you opened the coin door AND
- * pressed a service button; attract-with-the-door-open is the door alone. So
- * this stamps the moment a service button (25-28) is pressed while the door
- * (33) is open, and pad_service_mode() reports "operating the menu" for a
- * window after. That window is what lets gstvid draw the menu's dots over its
- * backdrop while leaving door-open ATTRACT full-screen until you engage. */
-static unsigned long sw_service_ms;
-
 static int sw_latch_on(void)
 {
     static int on = -1;
@@ -4524,14 +4513,6 @@ static void sw_shm_merge(void)
             if (want) {
                 sw_served[n] = 0;
                 sw_made_at[n] = pad_ms();
-                /* item 43: a service button pressed while the coin door is
-                 * KNOWN open marks the operator as working the service menu -
-                 * see sw_service_ms / pad_service_mode. Door 33 is edged early
-                 * (playfield stamp or PAD_DOOR_OPEN), so its merged 0 is real
-                 * here rather than a fresh block's zero. */
-                if ((n == 25 || n == 26 || n == 27 || n == 28)
-                        && sw_edged[33] && sw_mrg[33] == 0)
-                    sw_service_ms = pad_ms();
             } else if (!sw_served[n] && sw_latch_on()) {
                 sw_owed[n] = (unsigned char)sw_latch_scans();
                 sw_shut_at[n] = pad_ms();
@@ -4606,28 +4587,6 @@ int pad_sw_level(unsigned id)
     sw_shm_merge();
     if (!sw_edged[id]) return -1;
     return sw_mrg[id] != 0;
-}
-
-/* item 43: is the operator working the service menu right now? True while the
- * coin door is open AND a service button was pressed within the window (see
- * sw_service_ms). gstvid.c uses this to draw the 4.28 menu's dots over its
- * backdrop while leaving door-open ATTRACT full-screen until the door is
- * engaged - the two are indistinguishable by the video alone. Falls false
- * the moment the door shuts (merged 33 != 0) or the window lapses, so gameplay
- * and idle attract are never touched. PAD_VID_SERVICE_MS overrides (ms). */
-int pad_service_mode(void)
-{
-    static int win = -1;
-    if (win < 0) {
-        const char *e = getenv("PAD_VID_SERVICE_MS");
-        win = 15000;
-        if (e && e[0]) { win = 0; while (*e >= '0' && *e <= '9') win = win*10 + (*e++ -'0'); }
-    }
-    if (!sw_shm || sw_shm->magic != PADSW_MAGIC) return 0;
-    sw_shm_merge();
-    if (!sw_edged[33] || sw_mrg[33] != 0) return 0;   /* door not known-open */
-    if (!sw_service_ms) return 0;
-    return (long)(pad_ms() - sw_service_ms) < (long)win;
 }
 
 /* [sw] - every EDGE in the MERGED switch state, logged at the point the shim

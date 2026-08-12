@@ -49,7 +49,7 @@ extern int close(int);
 extern void *mmap(void *, unsigned long, int, int, int, long);
 extern int usleep(unsigned);
 extern void pad_say(const char *);
-extern int pad_service_mode(void);      /* hwshim.c - operator working the menu */
+extern int pad_sw_level(unsigned);      /* hwshim.c - item 43's caps door gate */
 extern int pthread_create(unsigned long *, void *, void *(*)(void *), void *);
 extern int clock_gettime(int, unsigned long *);
 
@@ -1007,39 +1007,44 @@ static void *vid_thread(void *arg)
 
 /* ---- entry points called from gststub.c --------------------------------- */
 
-/* ★ ITEM 43: THE DISCRIMINATOR IS SERVICE MODE, not the door alone. The 4.28
- * service page reads a pipeline's state/caps and picks its picture: PLAYING
- * with real caps -> a video-styled mode that draws one band of backdrop and
- * NO text/dots (the fault); PAUSED / no caps -> the complete DMD text+dot
- * menu. A settled menu page and settled attract are IDENTICAL to this shim
- * (both a steadily-playing backdrop - trace-proven), so nothing about the
- * stream can tell them apart; and a blanket "door open -> not playing" lie
- * banded ATTRACT whenever the door was open over it (David, 2026-08-12).
- * pad_service_mode() (hwshim) is the honest signal: door open AND a service
- * button pressed within the window = the operator is working the menu. The
- * lie rides that, so the menu draws its dots while door-open attract stays
- * full-screen until engaged, and a door-shut game is never touched.
+/* ★ ITEM 43: THE ONE HONEST DISCRIMINATOR IS THE COIN DOOR, and the gate is
+ * as small as it can be. The 4.28 service page reads a pipeline's negotiated
+ * caps microseconds after set_state(PAUSED) and picks its picture from the
+ * answer: real dimensions -> a video-styled menu mode that draws one band of
+ * backdrop and NO text/dots (the fault); NONE -> the complete green DMD dot
+ * menu. A real machine ALWAYS reads NONE there because its decoder is still
+ * prerolling - but a SCENE that wants video reads caps the same way and
+ * RE-ARMS relentlessly until it gets them (16,000+ pipelines, the main loop
+ * starved to 15 fps - the "freeze"). So "answer NONE" cannot be time-based:
+ * it satisfies the menu and destroys every scene that needs video.
  *
- * A time-based preroll lie was tried and is fatal - it is not door/mode-gated,
- * so every SCENE that wants video reads "not ready" and re-arms relentlessly
- * (16,000+ pipelines, main loop starved to 15 fps, the "freeze"). Do not
- * reintroduce one. */
-
-/* item 43: is THIS stream one the shim should present as still prerolling -
- * no negotiated caps, state PAUSED not PLAYING - so the 4.28 service page
- * draws its text/dots over it?
+ * The coin door tells them apart with certainty. You reach a service menu ONLY
+ * with the door open (the service buttons are behind the interlock); you PLAY
+ * with it shut. So: door OPEN -> caps read NONE, the menu draws dots, and the
+ * backdrop still PLAYS underneath (set_state succeeds, the thread still
+ * delivers - this gate touches NOTHING but the caps answer, which is why it
+ * has none of the wedge/lag/freeze the earlier door gates caused). Door SHUT
+ * -> caps are the truth, scenes get their size, gameplay and attract are
+ * exactly as before this item. PAD_VID_DOOR=0 disables; PAD_VID_DOOR_ID
+ * overrides the switch (33 = COIN DOOR INTERLOCK; open reads merged level 0).
  *
- * A settled service-menu page and settled attract are IDENTICAL here: both a
- * steadily-playing backdrop, no state changes, just handoffs (proven by
- * trace). Nothing about the stream itself - size, frames delivered, state
- * cycling once it settles - tells them apart. The only true signal is the
- * OPERATOR: the menu means the coin door is open AND a service button was
- * pressed. pad_service_mode() (hwshim) carries exactly that, so the lie is
- * on precisely while someone is working the menu, and door-open ATTRACT
- * stays full-screen until they engage. A door-shut game is never touched. */
-static int vid_prerolling(const struct stream *s)
+ * Blocks ONLY on an edge-established open: pad_sw_level is -1 until the switch
+ * has been moved once, and an unknown door must never cost a caps answer (the
+ * first door gate read a fresh block's zeros as "open" and stripped a boot's
+ * backdrops). watch.sh's PAD_DOOR_OPEN stamps the edge for a service boot. */
+static int vid_door_open(void)
 {
-    return s && s->gst_state == 4 && pad_service_mode();
+    static int gate = -1, door_id = 33;
+    if (gate < 0) {
+        const char *e = getenv("PAD_VID_DOOR");
+        gate = !(e && e[0] == '0');
+        if ((e = getenv("PAD_VID_DOOR_ID")) && e[0]) {
+            int v = 0;
+            while (*e >= '0' && *e <= '9') v = v * 10 + (*e++ - '0');
+            if (v > 0 && v < 256) door_id = v;
+        }
+    }
+    return gate && pad_sw_level((unsigned)door_id) == 0;
 }
 
 /* Ask the host to open a stream's location. Returns 1 if it can be played. */
@@ -1367,27 +1372,21 @@ void *pad_vid_caps_for_pad(void *pad)
 {
     int i, ready = 0;
     struct stream *fb = 0;
-    /* ★ ITEM 43: in service mode, a backdrop's caps read NONE - the answer a
-     * real decoder gives mid-preroll, which is what the 4.28 page reads to
-     * pick its DMD text/dot menu. NOTE: this is NOT gated on gst_state, unlike
-     * the get_state lie. The page reads caps in the PAUSED window right after
-     * set_state(PAUSED) - gst_state is 3 there, not 4 - so a gst_state==4
-     * guard (vid_prerolling) would miss the one read that matters. Service
-     * mode alone is the gate: door open AND a service button pressed, so
-     * door-open ATTRACT (no button) still answers real caps and plays
-     * full-screen. */
-    if (pad && pad_service_mode()) {
-        for (i = 0; i < PADVID_CHANNELS; i++) {
-            if (streams[i].ready && streams[i].sinkpad == pad) {
-                static unsigned char said[PADVID_CHANNELS];
-                if (!said[i]) {
-                    said[i] = 1;
-                    VLOG("[vid] ch%d caps none - service mode, the page draws "
-                         "its own menu (item 43)\n", i);
-                }
-                return 0;
-            }
+    /* ★ ITEM 43: caps read NONE while the coin door is open - a real decoder
+     * mid-preroll has none, which is the state the 4.28 service page reads.
+     * The page-build DOT LATCH is really driven by get_state (see
+     * pad_vid_last_state); this keeps caps consistent with that PAUSED
+     * answer. Gameplay (door shut) gets the truth. Neither gate touches
+     * delivery/set_state/EOS - see vid_door_open(). */
+    if (vid_door_open()) {
+        static int said;
+        if (!said) {
+            said = 1;
+            VLOG("[vid] caps answered NONE while the coin door is open - the "
+                 "service menu draws its own dots (item 43, PAD_VID_DOOR=0 "
+                 "to disable)\n");
         }
+        return 0;
     }
     for (i = 0; i < PADVID_CHANNELS; i++) {
         if (!streams[i].ready) continue;
@@ -1613,18 +1612,17 @@ void pad_vid_note_paused(void *pipeline)
 int pad_vid_last_state(void *pipeline)
 {
     struct stream *s = find_pipeline(pipeline);
-    /* ★ ITEM 43: a backdrop the service page is CYCLING reads PAUSED, not
-     * PLAYING (vid_prerolling) - the state a real decoder is in while it
-     * prerolls, which is the instant the 4.28 page decides its picture, and
-     * what flips the page to its DMD text/dot menu (caps NONE alone still
-     * left it painting the clip - the band). The cycle - PAUSED, READY,
-     * PAUSED, PLAYING every page - is what tells this from a SETTLED attract
-     * clip that the door happens to be open over: that clip has not been
-     * un-played in seconds, so it answers the truth and plays full-screen
-     * (David, 2026-08-12 - a blanket door lie banded attract). Door shut:
-     * the truth. Touches only what get_state ANSWERS - never delivery,
-     * set_state, or EOS. */
-    if (vid_prerolling(s)) return 3;
+    /* ★ ITEM 43: with the coin door open, a backdrop reads PAUSED, not
+     * PLAYING - the state a real decoder is genuinely in while it prerolls,
+     * which is the instant the 4.28 service page decides its picture. THIS,
+     * not the caps read, is what flips the page to its DMD dot menu: caps
+     * NONE alone still left the page painting the delivering clip (the band).
+     * Reported for a stream that is STILL DELIVERING on purpose - the dots
+     * are drawn OVER the backdrop, exactly as on hardware - and it is safe
+     * here because it changes only what get_state ANSWERS, never delivery
+     * (the lag), never set_state (the wedge), never EOS (the freeze). Door
+     * shut: the truth, so gameplay and attract are untouched. */
+    if (vid_door_open() && s && s->gst_state == 4) return 3;
     if (!s || !s->gst_state) return 1;
     return s->gst_state;
 }

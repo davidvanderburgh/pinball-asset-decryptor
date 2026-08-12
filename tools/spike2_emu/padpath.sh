@@ -556,3 +556,33 @@ pad_export_win() {
 pad_win() {
     wslpath -w "$1"
 }
+
+# A WINDOWS Python that can actually open a sound device, or "".
+#
+# BOTH HALVES MATTER: an interpreter without sounddevice is no use, and finding
+# that out at startup is what turns a silent downgrade into an actionable
+# message. playaudio.sh routes WSL audio through it because the WSLg hop is
+# measurably damaged (+16 dB of error against -14.8 dB for this path; the
+# measurement is in playaudio.sh's own header).
+#
+# IT LIVES HERE, NOT IN playaudio.sh, BECAUSE TWO PLACES NOW ASK. setupcheck.sh
+# reports it so the Emulate tab can say the sound will be poor BEFORE a run
+# rather than in one line of a log during one, and this rig's standing rule is
+# that two scripts defining one fact eventually disagree - alive.sh and
+# killgame.sh did, about what a running rig even is.
+#
+# AND IT NEEDS INTEROP, which is worth knowing when reading its answer: every
+# candidate is a Windows .exe, so a distro that cannot start Windows programs
+# answers "" here however many Pythons are installed. setupcheck.sh reports
+# interop separately for exactly that reason - otherwise the advice that
+# follows ("install sounddevice") is addressed to the wrong fault.
+pad_win_python() {
+    local c
+    for c in ${PAD_WINPYTHON:+"$PAD_WINPYTHON"} \
+             /mnt/c/Python3*/python.exe \
+             /mnt/c/Users/*/AppData/Local/Programs/Python/Python3*/python.exe; do
+        [ -x "$c" ] || continue
+        "$c" -c "import sounddevice" >/dev/null 2>&1 && { echo "$c"; return; }
+    done
+    echo ""
+}

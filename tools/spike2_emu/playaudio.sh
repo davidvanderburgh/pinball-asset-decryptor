@@ -88,19 +88,11 @@ trap 'kill $HOLD 2>/dev/null; rm -f "$FIFO"' EXIT
 # disagreed about what a running rig even is.
 is_wsl() { pad_is_wsl; }
 
-# A Windows Python that can actually open a sound device. Both halves matter:
-# an interpreter without sounddevice is no use, and finding that out at startup
-# gives an actionable message instead of a silent run.
-find_winpython() {
-    local c
-    for c in ${PAD_WINPYTHON:+"$PAD_WINPYTHON"} \
-             /mnt/c/Python3*/python.exe \
-             /mnt/c/Users/*/AppData/Local/Programs/Python/Python3*/python.exe; do
-        [ -x "$c" ] || continue
-        "$c" -c "import sounddevice" >/dev/null 2>&1 && { echo "$c"; return; }
-    done
-    echo ""
-}
+# A Windows Python that can actually open a sound device. THE SEARCH ITSELF now
+# lives in padpath.sh as pad_win_python, because setupcheck.sh asks the same
+# question so the Emulate tab can answer it before a run instead of during one,
+# and one fact with two definitions is how this rig has been bitten before.
+find_winpython() { pad_win_python; }
 
 # THE DEFAULT IS `auto`, AND AUTO MEANS "BRIDGE ON WSL, NATIVE EVERYWHERE ELSE".
 #

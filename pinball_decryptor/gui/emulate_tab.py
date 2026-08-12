@@ -855,6 +855,34 @@ def setup_report(facts):
     return lines
 
 
+def setup_report_darwin(docker):
+    """The Check button's answer on a Mac, where the question is a different
+    one.
+
+    ``setup_state`` answers None on macOS BY DESIGN - the container carries
+    every package the emulator needs (docker/Dockerfile installs them at build
+    time), so Docker itself is the whole prerequisite and ``docker_state``
+    owns it.  Asking WSL's question on a machine that has no WSL would report
+    "no answer from WSL - it may not be installed" to a user whose Mac is
+    perfect, which is the same class of lie the None-is-not-fine rule on
+    ``setup_state`` exists to prevent.
+
+    Pure, like ``setup_report``, so the wording is testable without a Tk root
+    or a Docker.
+    """
+    lines = ["setup check:",
+             "  this Mac emulates in a container, so there are no packages "
+             "to install here."]
+    lines.append("  Docker: " + {
+        "ok": "running",
+        "stopped": "installed, but NOT running",
+        "absent": "NOT installed",
+    }.get(docker, "unknown — the probe gave no answer"))
+    lines.append("this Mac can run the emulator." if docker == "ok" else
+                 "this Mac cannot run the emulator yet.")
+    return lines
+
+
 def setup_settled(facts):
     """Is there NOTHING left to say about this machine?
 
@@ -1253,6 +1281,10 @@ class EmulatePanel:
         #: so its answer is worth a line in the log as well as the notice.
         #: See _setup_after_restart and _setup_apply.
         self._setup_restart_check = False
+        #: The macOS half of the same flag: there the Check button asks Docker,
+        #: because that is the whole of what a Mac needs.  See
+        #: _setup_recheck_now and _docker_report_if_asked.
+        self._docker_report_next = False
         #: The probe now out was asked for by “Check setup…”, so its answer is
         #: reported IN FULL to the log pane - including a machine with nothing
         #: wrong, which no other path here ever says out loud.  See
@@ -1569,10 +1601,31 @@ class EmulatePanel:
         if self._docker_result is not None:
             self._docker_apply(self._docker_result)
             self._docker_result = None
+        else:
+            # NO ANSWER IS STILL AN ANSWER TO A BUTTON PRESS - the same rule
+            # _setup_drain follows, and for the same reason: _docker_apply is
+            # deliberately not called with None.  No-op unless Check asked.
+            self._docker_report_if_asked(None)
+
+    def _docker_report_if_asked(self, state):
+        """“Check setup…”'s answer on a Mac.  See _setup_report_if_asked, whose
+        shape and whose reasons this mirrors exactly - a Check that left the
+        button reading "Checking…" for the rest of the session is the fault
+        that button exists to fix, and on macOS that is what it did."""
+        if not getattr(self, "_docker_report_next", False):
+            return
+        self._docker_report_next = False
+        for line in setup_report_darwin(state):
+            self._log("[emulate] " + line)
+        try:
+            self._check_btn.configure(state=tk.NORMAL, text="Check setup…")
+        except (tk.TclError, AttributeError):
+            pass
 
     def _docker_apply(self, state):
         """Put the Docker answer on the tab, or take it away when it is fine."""
         self._docker = state
+        self._docker_report_if_asked(state)
         try:
             if state == "ok":
                 self._docker_btn.pack_forget()
@@ -1739,15 +1792,34 @@ class EmulatePanel:
         NOTHING IS CHANGED BY IT.  setupcheck.sh is read-only by design (its
         own header), which is why this button needs no confirmation dialog and
         no root, and why it is safe to leave it there permanently.
+
+        EACH PLATFORM IS ASKED ITS OWN QUESTION.  The button is on every
+        platform, but "what does this machine still need" is not one question:
+        macOS has no WSL and no packages to install, and ``setup_state``
+        answers None there BY DESIGN, so _setup_check returns without starting
+        a probe at all - which left this button DISABLED and reading
+        "Checking…" for the rest of the session on every Mac, the exact fault
+        _setup_report_if_asked exists to prevent.  The Mac gets the probe it
+        can answer instead (see _docker_report_if_asked).
         """
         if self._setup_busy:
             return
-        self._setup_report_next = True
         try:
             self._check_btn.configure(state=tk.DISABLED, text="Checking…")
         except (tk.TclError, AttributeError):
             pass
         self._log("[emulate] checking what this PC needs…")
+        if sys.platform == "darwin":
+            self._docker_report_next = True
+            # A probe already in flight has a _docker_drain pending, and that
+            # drain reports for us - starting a second one would not.
+            self._docker_check()
+            if not self._docker_busy and self._docker_result is None:
+                # It neither started nor had an answer waiting: report what the
+                # tab already knows rather than leaving the button stranded.
+                self._docker_report_if_asked(self._docker)
+            return
+        self._setup_report_next = True
         self._setup_check()
 
     def _setup_report_if_asked(self, facts):

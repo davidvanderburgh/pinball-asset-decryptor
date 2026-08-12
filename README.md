@@ -957,7 +957,9 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    32-bit ARM handler is registered and whether it survives a restart,
    who the distro logs in as, whether it can start Windows programs,
    which display it has, and a closing line saying whether this PC can
-   run the emulator. It asks four things the package check never did —
+   run the emulator. A Mac gets the question a Mac has instead — there
+   are no packages to install there, so what it reports is Docker. It
+   asks four things the package check never did —
    the login user, Windows interop, the display state, and whether the
    good audio path is available at all — and each of them, when wrong,
    becomes a notice line naming what that machine will do wrong and

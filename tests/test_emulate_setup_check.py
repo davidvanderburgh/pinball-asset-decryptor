@@ -24,6 +24,8 @@ way.
 import os
 import shutil
 import subprocess
+import sys
+import time
 
 import pytest
 
@@ -194,6 +196,23 @@ def test_check_setup_is_always_there():
         root.destroy()
 
 
+def _settle(root, panel, tries=200):
+    """Run the main loop until the press has been answered.
+
+    The drain reschedules itself with ``after(250, ...)`` and ``update()`` does
+    NOT wait for a timer, so a tight loop of updates can run out long before
+    the probe is ever collected - a race that only ever fell the right way
+    because the probes here are monkeypatched to return instantly.  This gives
+    the timers real time to fire and stops the moment nothing is armed.
+    """
+    for _ in range(tries):
+        root.update()
+        if not (panel._setup_busy or panel._docker_busy
+                or panel._setup_report_next or panel._docker_report_next):
+            return
+        time.sleep(0.02)
+
+
 def test_check_setup_reports_and_re_enables(monkeypatch):
     """The press-to-answer loop, including the case where the probe fails."""
     root, panel = _panel()
@@ -201,16 +220,62 @@ def test_check_setup_reports_and_re_enables(monkeypatch):
         said = []
         monkeypatch.setattr(panel, "_log", said.append)
         monkeypatch.setattr(emulate_tab, "setup_state", lambda: HEALTHY)
+        monkeypatch.setattr(emulate_tab, "docker_state", lambda: "ok")
         panel._setup_recheck_now()
-        for _ in range(80):
-            root.update()
-            if not panel._setup_busy and not panel._setup_report_next:
-                break
-        assert any("this PC can run the emulator." in s for s in said), said
+        _settle(root, panel)
+        # EACH PLATFORM IS ASKED ITS OWN QUESTION and answers in its own words:
+        # a Mac has no WSL and no packages to install, so "this PC can run the
+        # emulator" is not a sentence its probe can honestly print.  What is
+        # the same everywhere is that the press is ANSWERED and the button
+        # comes back, which is the whole reason the button exists.
+        want = ("this Mac can run the emulator." if sys.platform == "darwin"
+                else "this PC can run the emulator.")
+        assert any(want in s for s in said), said
         assert str(panel._check_btn["text"]) == "Check setup…"
         assert str(panel._check_btn["state"]) == "normal"
     finally:
         root.destroy()
+
+
+def test_check_setup_answers_even_when_there_is_no_probe_to_run(monkeypatch):
+    """★ THE FAULT THIS BUTTON EXISTS TO FIX, TURNED ON THE BUTTON ITSELF.
+
+    A press that goes unanswered leaves it DISABLED and reading "Checking…"
+    for the rest of the session, which is worse than the silence it replaced.
+    Every Mac got exactly that: ``setup_state`` answers None on macOS by
+    design, so ``_setup_check`` returned without starting a probe at all and
+    nothing ever called back.  Whatever this machine is, and whether or not
+    anything can be asked of it, the button must come back with words.
+    """
+    root, panel = _panel()
+    try:
+        said = []
+        monkeypatch.setattr(panel, "_log", said.append)
+        monkeypatch.setattr(emulate_tab, "setup_state", lambda: None)
+        monkeypatch.setattr(emulate_tab, "docker_state", lambda: "absent")
+        panel._setup_recheck_now()
+        _settle(root, panel)
+        assert str(panel._check_btn["state"]) == "normal", said
+        assert str(panel._check_btn["text"]) == "Check setup…"
+        assert len(said) > 1, said       # more than the "checking…" line
+        assert any("cannot run the emulator" in s or "no answer" in s
+                   for s in said), said
+    finally:
+        root.destroy()
+
+
+def test_setup_report_darwin_never_asks_a_mac_about_wsl():
+    """setup_report's no-answer line names WSL, which on a Mac would accuse a
+    perfect machine of missing something it is not supposed to have."""
+    for state in ("ok", "stopped", "absent", None):
+        lines = " ".join(emulate_tab.setup_report_darwin(state))
+        assert "WSL" not in lines, lines
+        assert "packages" in lines, lines
+    assert "can run the emulator." in " ".join(
+        emulate_tab.setup_report_darwin("ok"))
+    for state in ("stopped", "absent", None):
+        assert "cannot run the emulator yet." in " ".join(
+            emulate_tab.setup_report_darwin(state))
 
 
 # --------------------------------------------------------------------------

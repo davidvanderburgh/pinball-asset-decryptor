@@ -1106,14 +1106,20 @@ static int vid_mode_menu(void)
     if (have && mode) {
         unsigned w = *mode;
         /* ★ SAW-ATTRACT LATCH (2026-08-12): boot is ALSO mode==0, and a lie
-         * that fires at boot is the prepare storm. But the menu can only be
-         * REACHED from somewhere else - tech-alerts/attract read 1, gameplay
-         * reads 3 - so mode==0 means "menu" exactly when the word has been
-         * seen NOT-zero first. This is what lets the mode term run without
-         * the door term (whose mid-session read flickers - the confound). */
+         * that fires at a NORMAL boot is the prepare storm. The menu is only
+         * REACHED from somewhere else - attract reads 1, gameplay 3 - so
+         * mode==0 means "menu" once the word has been seen NOT-zero. That
+         * covers every mid-session entry without the door term (whose
+         * mid-session read flickers - the confound). The OR-DOOR arm covers
+         * the SERVICE BOOT, where the word can sit at 0 from cold and
+         * attract never happens: there PAD_DOOR_OPEN's stamped edge reads
+         * STABLY open (the flicker is a mid-session artifact), and the
+         * door-gate build already proved a lie held through a service boot
+         * is safe - it is exactly what that build did. A normal boot has
+         * the door shut and no attract yet: both arms off, no storm. */
         static int saw_attract;
         if (w == 1 || w == 3) saw_attract = 1;
-        return w == 0 && saw_attract;
+        return w == 0 && (saw_attract || vid_door_open());
     }
     return -1;
 }

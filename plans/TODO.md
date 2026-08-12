@@ -1222,6 +1222,24 @@ These have each been violated at least once and each cost a run or a window:
       place of the door term, so it cannot fire at boot (boot is mode==0
       from cold - the old mode-only boot storm). Neither term needs the
       flicker-prone door read. Fallback when BOTH absent: plain door gate.**
+      **★ TAKE 3 (same day): STILL BAND on a SERVICE boot, and the menudbg
+      trace says why - THE SERVICE-BOOT FLOW IS NOT THE ORACLE FLOW. With
+      PAD_DOOR_OPEN=1 the game sits at mode==0 FROM COLD (saw-attract never
+      arms; take 2's term was dead - take 3 added the OR-door arm), and at
+      the Select that enters the band pages there is NO get_state/caps read
+      AT ALL (menudbg: only the 20-30s clip-loop set_state rhythm) - the
+      menu's video choice on a service boot is made EARLIER (the only caps
+      reads are in EARLY boot, answered truthfully while the door level was
+      still unstamped) or from the bus-fed cached playing-flag, NOT at a
+      Select-time latch. David's reference is a NORMAL machine: attract ->
+      door -> Select x2 -> dots. Take 4 (IN FLIGHT,
+      `C:\tmp\item43_run_oracle.sh`) drives exactly that: NORMAL boot,
+      attract (mode reads 1 -> saw-attract arms), Select x2 - the mode term
+      needs NO door read there, so the swhold flicker confound is out of
+      the loop entirely. If take 4 dots, the service-boot band is a
+      NON-GOAL (wrong flow; the door fallback keeps covering it); if it
+      still bands, the entry latch is not caps/get_state in ANY flow and
+      the lie needs a different mouth.**
       (Phase 4) gstvid `vid_menu_gate()` reads
       the flag IN PLACE OF the door read: gstvid maps the header page of the
       `PAD_GL_BRIDGE` file itself (glbridge's `hdr` is static in a DIFFERENT

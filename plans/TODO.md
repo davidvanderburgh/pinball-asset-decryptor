@@ -571,49 +571,68 @@ These have each been violated at least once and each cost a run or a window:
       State the press length and the delay, and do not report the wire number
       alone as a pass.
 
-- [ ] **46. On turtles_pro the ACTION BUTTON does not select a character at
-      game start, and switch control on that title generally does not feel
-      right.** `S2 D3`
-      **★ DAVID, 2026-08-12: "tmnt switch controls don't seem right. the action
-      button isn't selecting a character after game start like it should."**
-      **RULED OUT AT THE DESK THE SAME DAY, so nobody pays for it: the key is
-      NOT pointing at the wrong switch on this title.** `padglhost.c:747` binds
-      Space to "Action Button" id **34** as a PLATFORM row, and platform rows
-      are never re-resolved per title (`padglhost.c:703-713`, on a layout
-      measured across star_wars/godzilla/john_wick — turtles was NOT one of the
-      three). Turtles' own table agrees anyway:
+- [ ] **46. On turtles_pro the ACTION BUTTON is FINICKY, not dead: it works
+      occasionally in attract and never selects a character during a game.**
+      `S2 D3`
+      **★ DAVID, 2026-08-12, the report: "tmnt switch controls don't seem right.
+      the action button isn't selecting a character after game start like it
+      should." Then, the same day, having tested every switch by hand: "they are
+      actually mapped correctly. however, just the action button seems to be
+      finicky. i can press it in attract mode occasionally to bring up the game
+      mode menu. but during a game, it doesn't seem to register to select a
+      character."**
+      **THAT SECOND MESSAGE IS THE MEASUREMENT THIS ITEM TURNS ON, and it moves
+      the fault twice.** (i) **The mapping half is CLOSED by David's own test** —
+      every switch on turtles is right, so this is one button, not "the
+      controls". (ii) **The button is INTERMITTENT, not dead**, and an
+      occasional success in attract proves the whole chain end to end on this
+      title: the X key event, the bind, the write, the merge, the wire, and the
+      game acting on it. Nothing is mis-wired; the closure is being LOST
+      sometimes and (apparently) always during a game.
+      **RULED OUT AT THE DESK, before the report and confirmed by it — do not
+      re-test: the key is not pointing at the wrong switch.** `padglhost.c:747`
+      binds Space to "Action Button" id **34** as a PLATFORM row, never
+      re-resolved per title (`padglhost.c:703-713`, measured on
+      star_wars/godzilla/john_wick — turtles was NOT one of the three, so this
+      needed checking). Turtles' own table agrees:
       `$PAD_TABLES/turtles_pro/switch_list.txt` carries `34  80  1  2  LOCKDOWN
-      BUTTON` — node 1 bit 2, the same physical slot Godzilla calls Action
-      Button. The flippers resolve too: turtles names them `LEFT FLIPPER BUTTON`
-      65 and `RIGHT FLIPPER BUTTON` 64, both exact matches for
-      `binds_resolve()`'s candidate names.
-      **A TRAP FOR THE SECOND HALF OF THE REPORT: several playfield keys are
-      SUPPOSED to be dead on turtles.** It has no `POP BUMPER` (it has LEFT /
-      RIGHT / BOTTOM), no `RIGHT SPINNER` (one `SPINNER`, id 55), and no
-      `RIGHT SCOOP`, `SKILL SHOT` or `GODZILLA TARGET` — so E, G, D, Q and R go
-      n/a by design, not by fault. Read the legend before counting a dead key.
-      **The live suspect is item 17's class, on a title and a screen it has
-      never been measured on.** `0x11` is request-driven, so 34 registers only
-      when the game gets round to scanning NODE 1, and that gap ran to 670 ms on
-      godzilla in attract. 34 is the very switch item 17 laddered to 72/72 down
-      to 10 ms — but on godzilla_pro, in attract, not here.
-      **NOT ESTABLISHED, and it is the cheapest thing to check first: whether
-      the game asks for the action button on that screen at all.** Nothing in
-      this rig records how TMNT's character select is driven; read the game's
-      own on-screen prompt before treating this as a fault.
+      BUTTON`, node 1 bit 2 — the same physical slot Godzilla calls Action
+      Button. Flippers likewise: `LEFT FLIPPER BUTTON` 65, `RIGHT FLIPPER
+      BUTTON` 64, both exact matches for `binds_resolve()`'s candidates.
+      **★★ THE THING THAT MAKES THIS WORTH A PASS: item 17's latch says this
+      CANNOT happen, and it is on.** `sw_owed[]` (`hwshim.c:4436-4520,4744`)
+      defers a release until the next scan of that switch's node, so a closure
+      is owed a scan and cannot be dropped for want of one; `PAD_SW_LATCH` is
+      default-ON (only `=0` disables, `hwshim.c:4463`); the commit is on main;
+      and switch 34 on node 1 is the EXACT switch item 17 laddered to **72/72 at
+      every width down to 10 ms**. So either the latch is not in effect on this
+      path, or the closure reaches the game and the GAME ignores it. Those are
+      different faults and the pass must not start by guessing which.
+      **THE DISCRIMINATOR IS CHEAP AND ALREADY BUILT — run it first.**
+      `[swlatch]` prints the closure width and the wait every time a press is
+      saved, and `PAD_SW_PEND` / `swladder.py` read the game's own `entry[+24]`.
+      Together they say whether the press reached the guest. **Reached and
+      ignored ⇒ the game wants something else here** (nothing in this rig
+      records how TMNT drives character select — read the on-screen prompt).
+      **Never arrived ⇒ it is item 17's class**, and the attract/in-game split
+      is then the finding: the per-node scan gap ran to 670 ms on godzilla in
+      attract and **the DURING-PLAY per-node rate has never been measured on any
+      title** — item 26 wants that same number, so measuring it pays twice.
       **Repro:** turtles_pro run, `plunge.py coin` + `start`, character select
-      comes up at game start. Item 41 reached exactly this screen and the crash
-      it used to take there is fixed (`e5a99fc`), so it is reachable and safe.
-      **Acceptance:** on turtles_pro, one press of Space at character select
-      locks in the turtle the flippers have highlighted, on the GAME's display,
-      stated over several presses — or `swladder.py` on 34 shows the closure
-      never reaches the game on this title, and the item becomes that fault.
-      — S2: the game still starts and plays, so nothing is unreachable and no
-      ball is lost; what it costs is a cabinet button that does nothing on this
-      title. **Raise to S1 if the ladder shows 34 never reaching the game at all
-      on turtles**, which would be item 17's own S1 argument. D3: it needs a run
-      and a game started into character select, the fault shows up when you
-      look, and every instrument (`swladder.py`, `PAD_SW_PEND`, padglhost's
+      comes up at game start; press Space there and in attract. Item 41 reached
+      exactly this screen and the crash it used to take there is fixed
+      (`e5a99fc`), so it is reachable and safe. State how many presses of each.
+      **Acceptance:** on turtles_pro, a press of Space at character select locks
+      in the highlighted turtle on the GAME's display, over a stated number of
+      presses — or the instruments above name which of the two faults it is, and
+      the item becomes that one.
+      — S2: the game still starts and plays and no ball is lost. **The S1
+      trigger is a MEASUREMENT that has not been made: if 34 is shown never
+      reaching the game during play, this is item 17's argument that unreliable
+      input is the thing you play with, and it goes to S1.** David's report is
+      consistent with that and is not it. D3: it needs a run and a game driven
+      into character select, the fault shows up when you look, and every
+      instrument (`swladder.py`, `PAD_SW_PEND`, `[swlatch]`, padglhost's
       `[key]`) already exists.
 
 - [ ] **3. The coil map.** `S3 D3` — S3: nothing is broken, this is a map that

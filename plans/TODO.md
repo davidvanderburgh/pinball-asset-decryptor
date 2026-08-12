@@ -1240,6 +1240,44 @@ These have each been violated at least once and each cost a run or a window:
       NON-GOAL (wrong flow; the door fallback keeps covering it); if it
       still bands, the entry latch is not caps/get_state in ANY flow and
       the lie needs a different mouth.**
+      **★★★ 2026-08-12, THE BIG ONE - THE LIE IS NECESSARY BUT NOT
+      SUFFICIENT, and that reframes the whole item.** Built the host-side
+      menu watcher (`modewatch.py`, commit `5e91af1`) after discovering the
+      guest CANNOT READ ITS OWN MENU WORD (below), so the gate finally fires
+      exactly at the entry latch. Live trace confirms the lie is fully
+      working: `caps -> -1` (NONE) and `get_state -> 3` (PAUSED) answered
+      continuously through the menu, both header flags reading 3, the
+      renderer confirming prog 27, the shim even logging "caps answered NONE
+      - the game is in a service menu". **AND EVERY PAGE STILL BANDS.**
+      Then pinned the flag ON mid-run and re-entered from attract: still
+      bands. So dots-vs-band is NOT decided by what the shim answers at the
+      page build. Working theory, and the reason the door gate (`71caeb5`)
+      ever produced dots: it lied FROM BOOT, so the backdrop pipelines were
+      ARMED under the lie - and those pipelines are long-lived (the same
+      ch0/ch1 addresses 0x1152080/0x1152198 recur for the whole run). What
+      decides the page looks like the pipeline's state AT ARM TIME, cached,
+      not re-read at page build. **IN FLIGHT:
+      `C:\tmp\item43_run_pin.sh` (PAD_VID_MENUPIN=1) pins the lie from boot
+      = the door build reproduced through the new channel. DOTS -> the
+      constraint is arm-time, and the fix must make the lie true before the
+      menu's backdrop pipeline is armed (forcing a re-arm at the flag's
+      rising edge is then the design space - carefully, the bus is where the
+      prepare storms live). STILL BANDS -> the lie is not the mechanism on
+      this card at all, and the door-gate result needs re-verifying before
+      anything else is built on it.**
+      **★ THE GUEST CANNOT READ ITS OWN MEMORY (unexplained, 2026-08-12).**
+      The shim's in-guest load of the mode word 0x650744 returns 0 in EVERY
+      state, while a host read of the same address in the same process
+      returns the true enum (attract 1, menu 0, gameplay 3). Not timing (60 s
+      window, host sampled 5 kHz: 314,316 samples, value 1, ZERO transitions,
+      while two in-guest stamps inside that window both said 0); not a fork
+      (one pid, 21 threads, no other process maps the game); not an address
+      offset (guest_base 0 - the guest ELF's magic is at host 0x18000); the
+      disassembly shows a literal `ldr` of 0x650744. All FOUR candidate
+      addresses read 0 in-guest while the host sees 0/1/2/7 - the guest sees
+      that whole window as zeros. The guest's getpid() is 1 (PID namespace),
+      which is the only asymmetry found so far and is worth pulling on next.
+      Worked around by reading host-side; DO NOT rebuild an in-guest reader.
       (Phase 4) gstvid `vid_menu_gate()` reads
       the flag IN PLACE OF the door read: gstvid maps the header page of the
       `PAD_GL_BRIDGE` file itself (glbridge's `hdr` is static in a DIFFERENT

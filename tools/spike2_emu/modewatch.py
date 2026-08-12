@@ -45,6 +45,17 @@ PADGL_MAGIC = 0x4C477061
 ATTRACT, GAMEPLAY = 1, 3          # values that mean "not in the menu system"
 POLL_S = 0.0002                   # 5 kHz: the latch is ms-scale work
 
+# ★ WHY TWO WORDS AND NOT ONE (measured 2026-08-12, the run that banded with
+# the mode word alone). The mode word is EARLY but it BOUNCES: walking the
+# menu it reads 0, then 6, then 0 again, and every page built during a bounce
+# read the truthful caps and banded - the trace shows ch1's page taking real
+# 1360x768 caps between two NONE answers. The in-service-menu boolean is the
+# opposite: it flips a beat LATE (after the entry latch - that is why gating on
+# it alone left the first page banded) but then STAYS UP for the whole visit.
+# So one covers the entry instant and the other covers the visit, and the gate
+# is their OR. Neither alone is enough, which is exactly what the two failed
+# runs proved.
+
 
 def say(msg):
     print(f"[modewatch] {msg}", flush=True)
@@ -66,11 +77,13 @@ def guest_pid():
 
 def main():
     addr = os.environ.get("PAD_VID_MENUMODE", "")
+    boolad = os.environ.get("PAD_VID_MENUBOOL", "")
     ring = os.environ.get("PAD_GL_BRIDGE_HOST") or os.environ.get("PAD_GL_BRIDGE")
     if not addr or not ring:
         say("no PAD_VID_MENUMODE or ring path - nothing to watch")
         return 0
-    addr = int(addr, 16 if addr.lower().startswith("0x") else 16)
+    addr = int(addr, 16)
+    boolad = int(boolad, 16) if boolad else 0
 
     # Wait for BOTH ends: the ring is created by padglhost, the memory by the
     # guest. Neither is up when watch.sh starts its helpers.
@@ -94,7 +107,24 @@ def main():
         say(f"cannot attach ({e}) - the door gate still works")
         return 1
 
-    say(f"watching 0x{addr:x} in pid {pid}, publishing to {ring}+{MODE_FLAG_OFF}")
+    # PAD_VID_MENUPIN=1 - DIAGNOSTIC: publish "in the menu" from the moment the
+    # ring exists and never clear it, which is the door-gate build's behaviour
+    # (lie on from boot) reproduced through this channel. It exists because a
+    # lie switched on AT menu entry - caps NONE and get_state PAUSED, both
+    # confirmed live in the trace - still banded every page, so what decides
+    # the page is not only WHETHER the shim lies but WHEN the lie started
+    # relative to the backdrop pipeline's arming. This pins it from boot and
+    # tells those apart in one run. Not a fix: it bands attract too.
+    if os.environ.get("PAD_VID_MENUPIN") == "1":
+        rf.seek(MODE_FLAG_OFF)
+        rf.write(struct.pack("<I", 3))
+        say("PINNED menu=1 from boot (diagnostic; attract will band too)")
+        while os.path.exists(f"/proc/{pid}"):
+            time.sleep(1)
+        return 0
+
+    say(f"watching 0x{addr:x}" + (f" + 0x{boolad:x}" if boolad else "")
+        + f" in pid {pid}, publishing to {ring}+{MODE_FLAG_OFF}")
     saw_attract = False
     published = None
     misses = 0
@@ -102,6 +132,10 @@ def main():
         try:
             mem.seek(addr)
             val = struct.unpack("<I", mem.read(4))[0]
+            inmenu = 0
+            if boolad:
+                mem.seek(boolad)
+                inmenu = struct.unpack("<I", mem.read(4))[0]
         except OSError:
             misses += 1
             if misses > 20:            # the guest went away; so do we
@@ -112,14 +146,18 @@ def main():
         misses = 0
         if val in (ATTRACT, GAMEPLAY):
             saw_attract = True
-        # ARMED always (bit 1) so the shim can tell "watching, not in the menu"
-        # from "nobody is watching" and fall back only in the second case.
-        flag = 2 | (1 if (val == 0 and saw_attract) else 0)
+        # EARLY term: the mode word, in time for the entry latch, guarded by
+        # saw-attract so a cold boot (also 0) never fires it. HOLD term: the
+        # in-service-menu boolean, late but steady, which covers the mode
+        # word's mid-menu bounces. ARMED (bit 1) always, so the shim can tell
+        # "watching, not in the menu" from "nobody is watching".
+        early = val == 0 and saw_attract
+        flag = 2 | (1 if (early or inmenu == 1) else 0)
         if flag != published:
             rf.seek(MODE_FLAG_OFF)
             rf.write(struct.pack("<I", flag))
             if published is not None or (flag & 1):
-                say(f"mode word {val} -> menu={flag & 1}")
+                say(f"mode={val} inmenu={inmenu} -> menu={flag & 1}")
             published = flag
         time.sleep(POLL_S)
 

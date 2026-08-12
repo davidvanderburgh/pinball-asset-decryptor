@@ -887,6 +887,39 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    and when it can't it stops with the one `sudo mount --bind` command
    that fixes the machine instead of spending a whole run drawing
    nothing.
+   A window that opens and stays **black** is the other half of that,
+   and no instrument could tell its two causes apart: a picture that is
+   black where it is *drawn*, and a picture that is drawn correctly and
+   then lost between the graphics card and the Windows desktop. Both
+   arrive as a log in which every reading is healthy — card mounted,
+   guest booted, attract reached, clips decoding, frames swapping at 40
+   fps. The renderer now answers that question directly: it reads the
+   screen every few seconds and says whether there is a picture at all,
+   in at most four lines that reach the app's log pane, and only when
+   the answer changes — the first picture, one that goes away, one that
+   comes back. The fourth needs no waiting at all: video frames
+   arriving into a screen that stays empty means the black is being
+   *drawn*, so the window is innocent and *Restart WSL…* is not the
+   cure. It counts lit pixels rather than a percentage, because a dark
+   scene with a small logo rounds to zero and would be reported as a
+   black screen. `PAD_GL_PICCHECK` sets the seconds between readings
+   (default 5), or `0` switches it off.
+   One cause of that black window is now named before you press Start:
+   a WSL that **logs in as root** can't attach to the WSLg X server's
+   shared memory, so the game window opens black while the sound, the
+   switches and the playfield all work perfectly. The tab says so, and
+   says the cure — give the distro an ordinary user account and make it
+   the default — and the renderer's own Mesa complaint is carried to
+   the log pane instead of ending up in a file the app never shows.
+   Nothing is changed for you: which user a run starts as is a WSL
+   setting, and a guessed one is easy to get wrong in a way that trades
+   a black window for a renderer that can't start at all.
+   The run also stopped claiming you closed the window when you didn't.
+   *"renderer exited (window closed)"* was printed on nothing more than
+   the process being gone, so a renderer that **died** read exactly
+   like someone clicking the X. It now claims a close only when the
+   renderer says it was closed, and otherwise shows the renderer's own
+   last lines.
    The tab checks for those before
    you press anything, instead of leaving the run to hit them one
    failure at a time: on a machine that already has them there is
@@ -914,6 +947,23 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    went on showing the machine it had probed at launch and the next
    Start failed with `chroot: failed to run command '/bin/sh': Exec
    format error`. A machine that came back intact is told nothing.
+   Silence from that notice used to mean two different things —
+   *asked, and nothing is wrong* and *nobody ever asked* — which left
+   anyone staring at a black window with nothing to press and nothing
+   to send. A **Check setup…** button now sits beside it, on every
+   platform. It changes nothing at all (the probe is read-only, so it
+   needs no confirmation dialog and no password) and it always answers,
+   in full, into the log pane: which packages are present, whether the
+   32-bit ARM handler is registered and whether it survives a restart,
+   who the distro logs in as, whether it can start Windows programs,
+   which display it has, and a closing line saying whether this PC can
+   run the emulator. It asks four things the package check never did —
+   the login user, Windows interop, the display state, and whether the
+   good audio path is available at all — and each of them, when wrong,
+   becomes a notice line naming what that machine will do wrong and
+   what to change. None of the four is something a button can install,
+   so **Set up emulator…** no longer turns up underneath a notice it
+   has nothing to do about.
    A package that is missing and a package apt can actually *install*
    are two different facts, and the tab now reports both. Ubuntu
    publishes `qemu-user-static` in its `universe` component while the

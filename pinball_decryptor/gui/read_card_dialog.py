@@ -11,6 +11,7 @@ destructive-write confirmation; the checks here are about the *destination*
 (is there room, is something already there).
 """
 
+import ntpath
 import os
 import sys
 import threading
@@ -393,12 +394,18 @@ class ReadCardDialog:
         reported (``mount_label``, e.g. ``"E: F:"``) — an unlettered volume or
         a UNC destination just isn't caught here.  The core read still refuses
         on free space, which is the failure this would otherwise become.
+
+        The path is split with :mod:`ntpath` rather than ``os.path``: this is
+        drive-letter logic that only ever runs on Windows (where the two are
+        the same module anyway), and going through ``os.path`` made the
+        behaviour untestable off Windows — posixpath sees no drive in
+        ``E:\\backups`` and every case quietly answered False.
         """
         if sys.platform != "win32":
             return False
         letters = (getattr(drive, "mount_label", "") or "").split()
         try:
-            head = os.path.splitdrive(os.path.abspath(folder))[0]
+            head = ntpath.splitdrive(ntpath.abspath(folder))[0]
         except (OSError, ValueError):
             return False
         head = head.rstrip(":").upper()

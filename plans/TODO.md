@@ -1226,6 +1226,57 @@ These have each been violated at least once and each cost a run or a window:
       NEXT: read the real caps/preroll timeline; the fix is to model that
       preroll window in the shim (NOT a wall-clock timer — that FROZE gameplay,
       see the wall above; must be state/first-read driven).**
+      **★★★ REAL-MACHINE TRACE DONE (2026-08-12) — THE WALL IS CONFIRMED ON
+      HARDWARE, AND IT REFRAMES THE FIX. Log: `C:\tmp\padtrace_real.log` (176
+      lines; also debugfs-extractable from a card p6 dump). Findings:
+      (1) THE VIDEO PIPELINE IS IDENTICAL IN ATTRACT AND IN THE MENU. Across
+      BOTH of David's menu entries the backdrop just loads a clip -> prerolls
+      (~200–700 ms) -> plays 20–30 s -> loops -> repeats, the same in attract
+      and menu. There is NO "in the menu" signature anywhere in the gst layer.
+      The real machine keeps the backdrop PLAYING while the green dots are on
+      screen — the game paints the dots in its UI, video pipeline uninvolved.
+      So the menu-vs-dots choice is a RENDERING/UI decision, not a video one —
+      the emulator "wall" is real hardware behaviour, not an emulation artifact.
+      (2) EVERY VIDEO-SIDE LIE (get_state=PAUSED, caps=NONE, delivery cut) is
+      therefore a HACK that only works because it flips the emulator's
+      (modified) game into drawing dots; it is not the real mechanism, which is
+      why it is fragile (the latch, band-from-attract).
+      (3) THE EMULATOR CARD ≠ THE REAL MACHINE BINARY. 0x650744 reads the clean
+      enum in the emulator but a CONSTANT 3898197567 on hardware; 0x663958=0
+      throughout. The "1987-upscaled" card was rebuilt, so its .bss layout
+      differs from stock V1.59.0 — the mode/flag addresses were emulator-only
+      (fine for the emulator fix, meaningless on hardware).
+      (4) Real decoder specifics: get_negotiated_caps ALWAYS returns valid caps
+      (width=1360 height=768); the game reads caps only AFTER the READY->PAUSED
+      (preroll-complete) message, so the preroll gap does NOT drive the menu.
+      Clip ids on the backdrop pipeline (0x6bd5d158) were 2.asset/0,341,14 —
+      attract segments, reused in the menu.
+      **★ PATH B CHOSEN (David, 2026-08-12): move the fix toward the RENDERER,
+      but FIRST run the decisive experiment the trace sets up:
+      (i) CLEAN EMULATOR GST TRACE + DIFF. Run the emulator with padtrace
+      (build the -DPAD_TRACE_NO_GSET variant so gststub keeps the emu video
+      alive — see build note in padtrace.c) and NO lie (unset PAD_VID_MENUMODE,
+      PAD_VID_DOOR=0), via item43_run_trace.sh + the run_game.sh PAD_TRACE_SO
+      hook. Drive attract -> door -> 2 long Selects -> menu (PAD_AUTO_ATTRACT=0
+      so nothing presses Back). Diff its gst timeline against
+      C:\tmp\padtrace_real.log at menu entry.
+      (ii) THE FORK: does the emulator's video layer MATCH the real machine
+      (caps valid 1360x768, preroll present)? If it DIFFERS (e.g. caps=NULL, or
+      instant preroll changing the game's path) that difference is the bug —
+      make the shim's caps/state EXACTLY mimic the real trace and the game may
+      draw dots-in-menu with NO lie (the clean fix; the real trace is the
+      oracle). If it MATCHES, the game still draws video-in-menu on the emulator
+      only because the upscaled binary differs / the renderer mishandles the
+      draw — then the fix is padglhost detecting the menu from the GL draw
+      stream (item 43's earlier draw analysis: menu frame uploads TEXDIRECT
+      1360x768 video to the LCD; real menu would upload dots) and rendering
+      dots, i.e. a genuine renderer project.
+      FALLBACK ALWAYS AVAILABLE: the door-gate build (`71caeb5`) already draws
+      correct dots in the menu (lie active throughout door-open, no latch race);
+      its only cost is the band during attract-with-the-door-open on the way in.
+      padtrace round-trip is proven end to end (inject via debugfs, full-image
+      write since wsl --mount rejects the removable SD, log off p6 via elevated
+      PowerShell dump `C:\tmp\dump_p6.ps1` + debugfs).**
       **FULL VERIFICATION on the final build (`53667d5`, 2026-08-11 late
       night, my instrumented run):** (1) door open mid-attract → instant red
       48V overlay, no lag; (2) long Select → version splash; (3) long Select

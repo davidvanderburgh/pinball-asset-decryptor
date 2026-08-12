@@ -357,6 +357,51 @@ setsid_as_user() {
 # the WSL side of a Windows pythonw.exe reached through interop; `python3` is
 # the same window on a Linux desktop, where it is an ordinary local process.
 pf_up() { pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null; }
+if [ "$(id -u)" = 0 ] && [ "$DROP" = 0 ]; then
+    # ★ THE BLACK WINDOW, AND THE ONE CONFIGURATION THAT CAUSES IT.
+    #
+    # The block above says why root must not run the helpers: as root the
+    # renderer cannot attach to the WSLg X server's shared memory, so the game
+    # window OPENS AND STAYS BLACK. The drop dance exists to stop that, and it
+    # is skipped in exactly one case - root with nobody to drop to, which is a
+    # WSL whose DEFAULT USER IS ROOT. Then $HOME is /root, $ROOT is
+    # /root/spike2root, it is root-owned, PAD_USER comes out empty, and this
+    # runs the renderer as root without a word.
+    #
+    # REPORTED 2026-08-12 (PAD-63) AND IT COST THE WHOLE TICKET. The user got a
+    # black game window beside a perfectly good playfield - the playfield is a
+    # WINDOWS process on that machine, so it is the one thing root cannot spoil
+    # - and his log was flawless everywhere else: card mounted, guest booted,
+    # attract reached, his own clips decoded and handed over at 30.0/s, the
+    # renderer at 40.9 fps over 4210 frames. Mesa says what is wrong
+    # ("MESA: error: Failed to attach to x11 shm", carried to the app's pane
+    # by the event filter as of this commit) but only in the renderer's own
+    # log, and nothing said the run was in this state at all.
+    #
+    # NOT FATAL, for the reason the ffmpeg guard gives: the guest boots, the
+    # sound plays, the switches and the playfield work, and a machine that is
+    # one `adduser` away from a picture should not be refused.
+    #
+    # AND NO AUTOMATIC DROP HERE, deliberately. The X socket names the desktop
+    # user, so guessing one is easy - and wrong: with HOME=/root, $ROOT lives
+    # under a 0700 /root that the dropped helper cannot even traverse, so it
+    # would trade a black window for a renderer that cannot open the ring. The
+    # fix is which user the run STARTS as, which is the app's decision and the
+    # user's setting, not something to patch over from in here.
+    echo "[watch] THIS WSL RUNS AS ROOT, and its game window will be BLACK." >&2
+    echo "[watch]   Everything else on this run is real - sound, switches, the" >&2
+    echo "[watch]   playfield - but as root the renderer cannot attach to the X" >&2
+    echo "[watch]   server's shared memory, so no picture reaches the window." >&2
+    echo "[watch]   Nothing in the emulator can fix that from in here: it is" >&2
+    echo "[watch]   which account this distro logs in as." >&2
+    echo "[watch]   The cure, once, in a Windows terminal:" >&2
+    echo "[watch]     wsl -u root adduser <name>" >&2
+    echo "[watch]     wsl -u root usermod -aG sudo <name>" >&2
+    echo "[watch]     wsl -u root sh -c 'printf \"[user]\\ndefault=<name>\\n\" >> /etc/wsl.conf'" >&2
+    echo "[watch]   then 'Restart WSL...' on the Emulate tab and start again." >&2
+    echo "[watch]   (A distro that already has an ordinary account needs only" >&2
+    echo "[watch]   the last line.)" >&2
+fi
 if [ "$DROP" = 1 ]; then
     echo "[watch] running the guest as root, helpers as $PAD_USER"
     # Hand the log files back, or the NEXT ordinary run cannot truncate them:
@@ -825,7 +870,18 @@ case "$GLWIN" in
         echo "[watch] game window ${GLWIN#*window }"
         echo "[watch]   (no game window on the desktop? Then it is WSLg's"
         echo "[watch]   mirror that is missing, not the window: Stop, then"
-        echo "[watch]   'Restart WSL...' on the Emulate tab.)" ;;
+        echo "[watch]   'Restart WSL...' on the Emulate tab.)"
+        # A WINDOW THAT IS THERE AND BLACK IS A DIFFERENT FAULT and used to get
+        # the same answer, which is only right half the time: a WSL restart
+        # repaints a lost mirror and does nothing at all for a picture that is
+        # black where it is drawn. The renderer now says which, so point at it
+        # rather than guessing here - the line arrives a few seconds later, in
+        # this same pane.
+        echo "[watch]   (a window that IS there and stays BLACK? The"
+        echo "[watch]   '[padglhost] picture:' line below says which half it"
+        echo "[watch]   is - a picture here and none on the desktop is the"
+        echo "[watch]   mirror again; no picture here is the game or the"
+        echo "[watch]   renderer, and no restart touches that.)" ;;
     *headless*)
         echo "[watch] THE RENDERER HAS NO WINDOW, so this run will show no" \
              "picture at all." >&2
@@ -1180,8 +1236,28 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
                 { print "[event] " $0; fflush() }
             next }
         /\[play\]/               { print "[event] " $0; fflush(); next }
-        /\[padglhost\] (window opened|video block|ring |UNKNOWN)/ \
+        # THE LINE THAT NAMES A BLACK WINDOW, and it is not ours: Mesa prints
+        # it, into the renderer log, when the renderer is running as root and
+        # cannot attach to the WSLg X server shared memory. The window opens,
+        # every counter in the run reads healthy and no picture ever arrives.
+        # It came a whole ticket late once (PAD-63) because nothing carried it
+        # here. Collapsed like Radium: the log FILLS with it.
+        /Failed to attach to x11 shm/ {
+            if (++n[$0] == 1 || n[$0] % 500 == 0)
+                { printf "[event] %s (x%d)\n", $0, n[$0]; fflush() }
+            next }
+        /\[padglhost\] (window opened|video block|ring |UNKNOWN|picture:)/ \
                                  { print "[event] " $0; fflush(); next }
+        # `picture:` IS THE SAME GAP ONE STEP FURTHER IN. The lines above cover
+        # a window that never opened; a window that opens and stays BLACK was
+        # invisible to this pane in exactly the same way, and it is the harder
+        # of the two to reason about from outside (PAD-63, 2026-08-12: 4210
+        # rendered frames, 28.4 video uploads/s, and a black window). The
+        # picture oracle in the renderer names which half it is - see its
+        # header in padglhost.c - and every one of its lines starts with the
+        # word, so one pattern carries all four. (No apostrophes in here: this
+        # comment is INSIDE the single-quoted awk program, and one of them ends
+        # it - which is why the comments around it are written the same way.)
         # ...AND WHEN THERE IS NO WINDOW, WHICH IS THE ONE THAT WAS MISSING.
         # padglhost degrades to headless rather than dying (a broken X server
         # must not end a run that is otherwise fine), so its two explanations -
@@ -1216,7 +1292,23 @@ END=0
 [ "$MINS" != 0 ] && END=$(( $(date +%s) + MINS * 60 ))
 while :; do
     if ! pgrep -x padglhost >/dev/null; then
-        echo "[watch] renderer exited (window closed)."
+        # NOT "(window closed)" FOR EVERY WAY THE RENDERER CAN GO. This line
+        # used to assert that, unconditionally, on nothing but "the process is
+        # not there anymore" - so a renderer that DIED read in the log as a
+        # human closing a window, and PAD-63's black-window report arrived with
+        # exactly that sentence on the end of it, which is the one thing that
+        # had to be established before anything else could be. padglhost says
+        # why it is stopping ("window closed; stopping" / "window destroyed;
+        # stopping"); when it said neither, say THAT and show its last words,
+        # rather than putting it on the user.
+        if grep -q 'window \(closed\|destroyed\); stopping' "$HOSTLOG" 2>/dev/null; then
+            echo "[watch] renderer exited (window closed)."
+        else
+            echo "[watch] THE RENDERER STOPPED ON ITS OWN - it did not report" \
+                 "a closed window, so this was not you closing it." >&2
+            echo "[watch]   its last lines ($HOSTLOG):" >&2
+            tail -3 "$HOSTLOG" 2>/dev/null | sed 's/^/[watch]   /' >&2
+        fi
         break
     fi
     # A SAVE-STATE RELOAD IS NOT THE GAME EXITING (item 13). loadgame.sh kills

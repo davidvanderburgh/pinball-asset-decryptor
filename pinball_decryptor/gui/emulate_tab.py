@@ -726,6 +726,14 @@ def setup_fixable(facts):
     """
     if not facts:
         return True
+    # NOTHING TO DO IS NOT SOMETHING TO PRESS, and this became reachable with
+    # setup_env_faults: the notice now appears for machines whose packages are
+    # all present (a root login spoils the picture on a fully installed PC),
+    # and without this the button would appear under it offering to install
+    # nothing.  Single-sourced against the consent list rather than re-deciding
+    # it here - if setupfix.sh has no step to take, there is no button.
+    if not setup_fix_steps(facts):
+        return False
     if facts.get("universe") == "0":
         return True             # turning universe on IS the repair
     unavailable = set(setup_unavailable(facts)) - set(setup_fetchable(facts))
@@ -748,6 +756,105 @@ def setup_ok(facts):
     return not missing and binfmt == "1"
 
 
+def setup_env_faults(facts):
+    """What this WSL will SPOIL, even though the emulator can start on it.
+
+    A different class from everything above, and the class that cost PAD-63.
+    The package facts answer "can a 32-bit ARM binary execute here"; a machine
+    can pass every one of them and still show a black window, no window, or
+    play through the damaged audio hop.  Nothing asked, so the tab said nothing
+    and the user found out by running it and reading a log.
+
+    Returns ``[(what is wrong, what to do), ...]`` - pure, so the wording is
+    testable without a WSL or a Tk root, like every other notice part here.
+
+    NONE OF IT IS FIXABLE BY THE BUTTON, which is why it is a separate list:
+    three of the four are WSL settings that belong to the user.  The notice
+    carries the route out instead, the same shape ``setup_fixable`` already
+    uses for a package apt cannot supply.
+
+    ABSENT KEYS ACCUSE NOBODY, as everywhere else here: an older rig emits none
+    of these lines, and silence is not a fault.
+    """
+    facts = facts or {}
+    out = []
+    if facts.get("user") == "root":
+        out.append((
+            "This WSL logs in as root, so the game window will open and stay "
+            "BLACK. Everything else works — sound, switches, the playfield.",
+            "Give the distro an ordinary user account, make it the default, "
+            "and restart WSL."))
+    if facts.get("display") in ("none", "nosocket"):
+        out.append((
+            "WSLg is not reachable from this distro, so there will be no game "
+            "window at all.",
+            "Restart WSL. If it comes back, GUI apps are switched off for this "
+            "PC in %USERPROFILE%\\.wslconfig."))
+    if facts.get("interop") == "0":
+        out.append((
+            "This WSL cannot start Windows programs, so the playfield window "
+            "has to be opened from here and the sound takes its poorer route.",
+            "Usually systemd dropping the interop registration at boot; "
+            "`wsl --update` in a Windows terminal is the cure."))
+    elif facts.get("winaudio") == "0":
+        # ONLY WHEN INTEROP WORKS.  Every candidate interpreter is a Windows
+        # .exe, so a distro that cannot start Windows programs answers "no
+        # Windows Python" however many are installed - and telling that user to
+        # install one more is advice addressed to the wrong fault.  It was in a
+        # reply draft on 2026-08-12 before this branch existed.
+        out.append((
+            "No Windows Python with sounddevice, so the sound goes through "
+            "WSLg's audio, which is measurably damaged.",
+            "`py -m pip install sounddevice` in a Windows terminal, once."))
+    return out
+
+
+def setup_report(facts):
+    """The Check button's answer, one line per fact, for the log pane.
+
+    THE POINT IS THAT IT ALWAYS SAYS SOMETHING.  The notice speaks only when
+    something is wrong, which makes silence ambiguous between "checked, fine"
+    and "never asked" - and leaves a user with a black window nothing to press
+    and nothing to send.  This is the thing to ask someone for instead of a
+    log: every fact the rig has about their machine, in one paste.
+    """
+    if not facts:
+        return ["setup check: no answer from WSL — it may not be installed, "
+                "or the probe timed out."]
+    missing, binfmt = setup_summary(facts)
+    yes_no = lambda k, y, n: y if facts.get(k) == "1" else (      # noqa: E731
+        n if facts.get(k) == "0" else "unknown")
+    lines = ["setup check:"]
+    lines.append("  packages: " + (", ".join(p for p, _ in missing) + " MISSING"
+                                   if missing else "all present"))
+    extras = setup_extras(facts)
+    if extras:
+        lines.append("  save states: %s MISSING"
+                     % ", ".join(p for p, _ in extras))
+    lines.append("  32-bit ARM handler: "
+                 + {"1": "registered", "0": "NOT REGISTERED",
+                    "disabled": "registered but SWITCHED OFF"}.get(binfmt,
+                                                                   binfmt))
+    if facts.get("iswsl") == "1":
+        lines.append("  survives a WSL restart: "
+                     + yes_no("wslconf", "yes", "NO — systemd is off"))
+        lines.append("  logs in as: %s%s"
+                     % (facts.get("user", "unknown"),
+                        "  <- the picture will be black"
+                        if facts.get("user") == "root" else ""))
+        lines.append("  can start Windows programs: "
+                     + yes_no("interop", "yes", "NO"))
+        lines.append("  Windows sound player: "
+                     + yes_no("winaudio", "found", "not found"))
+    lines.append("  display: %s" % facts.get("display", "unknown"))
+    if facts.get("distro"):
+        lines.append("  distro: %s" % facts["distro"])
+    lines.append("this PC can run the emulator."
+                 if setup_ok(facts) else
+                 "this PC cannot run the emulator yet.")
+    return lines
+
+
 def setup_settled(facts):
     """Is there NOTHING left to say about this machine?
 
@@ -756,8 +863,12 @@ def setup_settled(facts):
     states need.  The tab shows its notice on this, so that "runs, but the save
     slots will not" is a thing it can say - and stays silent on the machine
     that has everything, which is what it did before.
+
+    ...AND "runs, but the picture will be black" IS THE SAME KIND OF THING,
+    which the tab was silent about until PAD-63.  See setup_env_faults.
     """
-    return setup_ok(facts) and not setup_extras(facts)
+    return (setup_ok(facts) and not setup_extras(facts)
+            and not setup_env_faults(facts))
 
 
 def setup_fix_steps(facts):
@@ -847,11 +958,19 @@ def setup_notice(facts, can_fix):
         return ""
     missing, binfmt = setup_summary(facts)
     extras = setup_extras(facts)
+    env = setup_env_faults(facts)
     if setup_ok(facts):
         # Everything the RUN needs is here; what is missing costs a feature.
         # Lead with the good news, because the alternative wording has just
-        # told a working machine that it is broken.
-        parts = ["The emulator runs on this PC. Save states do not yet."]
+        # told a working machine that it is broken.  Three headlines rather
+        # than two now: a fully installed PC can still be one whose picture
+        # will be black, and "Save states do not yet" would be a false
+        # description of that machine.
+        if extras:
+            parts = ["The emulator runs on this PC. Save states do not yet."]
+        else:
+            parts = ["The emulator runs on this PC, but this WSL will spoil "
+                     "it."]
     else:
         parts = ["This PC cannot run the emulator yet."]
     if binfmt == "0":
@@ -906,7 +1025,13 @@ def setup_notice(facts, can_fix):
                          "not offer it.")
             parts.append(said)
     fetch = [p for p in setup_unavailable(facts) if p in setup_fetchable(facts)]
-    if can_fix and not setup_fixable(facts):
+    # `unavailable and` IS NEW AND IS LOAD-BEARING.  setup_fixable now also
+    # answers False for a machine with simply nothing to install - which became
+    # reachable the moment setup_env_faults let the notice appear on a fully
+    # installed PC - and without this gate a root-login machine with every
+    # package present would be told that “Set up emulator…” cannot get `that`
+    # from this distro, which is a sentence about a fault it does not have.
+    if can_fix and unavailable and not setup_fixable(facts):
         # The button is hidden in this state (see _setup_apply), so this is
         # the whole of what the user has to go on.
         if setup_ok(facts):
@@ -928,7 +1053,10 @@ def setup_notice(facts, can_fix):
                 "     wsl --set-default %s"
                 % (", ".join(unavailable) or "the packages",
                    KNOWN_GOOD_DISTRO, KNOWN_GOOD_DISTRO))
-    elif can_fix:
+    elif can_fix and setup_fix_steps(facts):
+        # ...and the same gate on this side: with no step to take there is no
+        # button and nothing to describe, and `does[0]` on an empty list is an
+        # IndexError rather than a wrong sentence.
         # ONLY THE PARTS IT IS ACTUALLY GOING TO DO.  Every earlier
         # prerequisite failed on machines whose handler was unregistered too,
         # so "installs those and registers the handler" was always true; the
@@ -994,6 +1122,12 @@ def setup_notice(facts, can_fix):
         if cmds:
             parts.append("Run this, then start again:\n" + "\n".join(
                 "     %s" % c for c in cmds))
+    # LAST, AND SEPARATELY, because none of it is anything the button can do.
+    # Each line says what the machine will do wrong and what to change; the
+    # button above stays hidden or stays about packages, and neither sentence
+    # is allowed to claim these.
+    for what, cure in env:
+        parts.append("%s\n     %s" % (what, cure))
     return "\n\n".join(parts)
 
 
@@ -1119,6 +1253,11 @@ class EmulatePanel:
         #: so its answer is worth a line in the log as well as the notice.
         #: See _setup_after_restart and _setup_apply.
         self._setup_restart_check = False
+        #: The probe now out was asked for by “Check setup…”, so its answer is
+        #: reported IN FULL to the log pane - including a machine with nothing
+        #: wrong, which no other path here ever says out loud.  See
+        #: _setup_report_if_asked.
+        self._setup_report_next = False
         #: A status poll's wsl.exe is in flight — see _poll.  Written only on
         #: the main thread, so it cannot be raced by the worker it gates.
         self._poll_busy = False
@@ -1241,6 +1380,32 @@ class EmulatePanel:
         # _setup_apply(), so a machine that is already set up never sees it.
         self._setup_btn = ttk.Button(btns, text="Set up emulator…",
                                      command=self._setup_fix, width=18)
+
+        # ★ AND THE ONE THAT IS ALWAYS THERE, because LOOKING is not something
+        # a user should have to consent to - setupcheck.sh's own header has
+        # said that since it was written, and the UI never offered the looking
+        # half.  The pair is deliberate and the split is the point: this one
+        # changes NOTHING and is always available, “Set up emulator…” changes
+        # the machine and appears only when it has something to change.
+        #
+        # WHY IT HAD TO EXIST (PAD-63).  Silence from this tab meant two
+        # different things - "asked, nothing wrong" and "never asked" - and a
+        # user whose game window was black had nothing to press and nothing to
+        # send.  The answer goes into the LOG PANE, not just the notice, so
+        # that "press Check setup and paste what it says" is a thing that can
+        # be asked of someone, and so it is one paste rather than a run.
+        #
+        # NOT MADE A PERMANENT “Set up emulator…” INSTEAD: that button is
+        # allowed to install packages and write /etc/wsl.conf, and one that is
+        # always pressable with nothing to do is what _setup_apply already
+        # records a tester meeting twice, minutes apart.
+        # EVERY PLATFORM, unlike the button above it: the probe is read-only,
+        # and a Linux desktop or a Mac has just as much right to be told what
+        # its machine is missing as a Windows one - it simply gets commands to
+        # run instead of a button to press (setup_notice's `can_fix` split).
+        self._check_btn = ttk.Button(btns, text="Check setup…",
+                                     command=self._setup_recheck_now, width=14)
+        self._check_btn.pack(side=tk.LEFT, padx=(6, 0))
 
         # BOTH tickboxes are read ONCE, when Start builds the environment for
         # watch.sh, so they are start-time options and not live controls.  They
@@ -1555,6 +1720,63 @@ class EmulatePanel:
         if self._setup_result is not None:
             self._setup_apply(self._setup_result)
             self._setup_result = None
+        else:
+            # NO ANSWER IS STILL AN ANSWER TO A BUTTON PRESS.  _setup_apply is
+            # deliberately not called with None - that would overwrite what the
+            # tab already knows with "unknown" on one flaky probe - so the
+            # report is done from here instead.  No-op unless Check asked.
+            self._setup_report_if_asked(None)
+
+    def _setup_recheck_now(self):
+        """“Check setup…”: ask again, and SAY the answer either way.
+
+        The same probe the tab runs at build time and after a WSL restart - not
+        a second one, because two ways of asking one question is how this rig
+        gets two answers.  What is different is that this one reports: a
+        machine with nothing wrong gets a line saying so, which is the whole
+        point of a button whose job is to end the ambiguity of silence.
+
+        NOTHING IS CHANGED BY IT.  setupcheck.sh is read-only by design (its
+        own header), which is why this button needs no confirmation dialog and
+        no root, and why it is safe to leave it there permanently.
+        """
+        if self._setup_busy:
+            return
+        self._setup_report_next = True
+        try:
+            self._check_btn.configure(state=tk.DISABLED, text="Checking…")
+        except (tk.TclError, AttributeError):
+            pass
+        self._log("[emulate] checking what this PC needs…")
+        self._setup_check()
+
+    def _setup_report_if_asked(self, facts):
+        """★ THE BUTTON ASKED, SO THE BUTTON IS ANSWERED - in the log pane, in
+        full, whatever the answer is.
+
+        This is the only path on this panel that reports a HEALTHY machine.
+        Every other probe here is a background fact the notice speaks for, and
+        the notice says nothing when there is nothing wrong - which is what
+        made silence ambiguous and left a black-window user with nothing to
+        send.
+
+        ONE PLACE, TWO CALLERS, because ``None`` is an answer too: a probe that
+        could not reach WSL never reaches _setup_apply (see _setup_drain), and
+        a Check that silently left the button reading "Checking…" for the rest
+        of the session would be the same fault this button exists to fix.  The
+        flag is cleared first either way, so a failed probe cannot leave it
+        armed for the next background poll to spend on a report nobody asked
+        for.
+        """
+        if not getattr(self, "_setup_report_next", False):
+            return
+        self._setup_report_next = False
+        for line in setup_report(facts):
+            self._log("[emulate] " + line)
+        try:
+            self._check_btn.configure(state=tk.NORMAL, text="Check setup…")
+        except (tk.TclError, AttributeError):
+            pass
 
     def _setup_apply(self, facts):
         """Put the answer on the tab, or take it away when there is nothing to
@@ -1565,6 +1787,7 @@ class EmulatePanel:
         there is how the save-state package would have stayed invisible - the
         button that installs it lives under exactly this notice."""
         self._setup = facts
+        self._setup_report_if_asked(facts)
         # THE ONE ANSWER THAT ALSO BELONGS IN THE LOG.  Every other probe on
         # this panel is a background fact the notice speaks for; this one
         # answers a question the user just asked by pressing a button, and the

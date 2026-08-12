@@ -279,3 +279,63 @@ else
     echo "iswsl=0"
     echo "wslconf=1"
 fi
+
+# ---------------------------------------------------------------------------
+# ...AND WHETHER IT CAN SHOW YOU A GAME, WHICH IS A DIFFERENT QUESTION.
+#
+# Everything above answers "can a 32-bit ARM binary execute here": packages,
+# and the kernel handler. A machine can pass all of it and still be unusable,
+# and on 2026-08-12 one was (PAD-63): the tab said nothing was wrong, because
+# nothing here had ever asked about the four things below. They cost, in order,
+# the PICTURE, the PLAYFIELD LAUNCH, the WINDOW and the SOUND - and every one
+# of them was discovered the way this whole script exists to prevent, by
+# reading a log after a run that looked healthy.
+#
+# READ-ONLY, like the rest of this file, and NOT FIXABLE BY setupfix.sh: three
+# of the four are WSL settings that belong to the user, not to us. They are
+# reported so the tab can say them, not so a button can press them.
+#
+# ABSENT KEYS ACCUSE NOBODY. Every reader in the app treats a missing line as
+# "nothing known", so an older app against a newer rig - or the reverse - is
+# never told a working PC is broken.
+
+# WHO THIS DISTRO LOGS IN AS. Root is the one that costs the picture: as root
+# the renderer cannot attach to the WSLg X server's shared memory, so the game
+# window opens and stays BLACK while sound, switches and the playfield all work
+# (watch.sh's own header carries the measurement). watch.sh normally hands the
+# helpers back to the desktop user; on a root-login distro there is no such
+# user and it cannot.
+echo "user=$(id -un 2>/dev/null)"
+
+# CAN IT START A WINDOWS PROGRAM. Interop is what launches the playfield window
+# and what finds the Windows sound player; without it the run still works, but
+# it takes the poorer route for both and says so only in passing. Read from the
+# kernel registration rather than by running something: it is the mechanism
+# itself, it costs nothing, and it is equally true for `[interop] enabled=false`
+# in /etc/wsl.conf and for a systemd that flushed the entry at boot.
+_interop=0
+for _e in /proc/sys/fs/binfmt_misc/WSLInterop-late \
+          /proc/sys/fs/binfmt_misc/WSLInterop; do
+    [ -e "$_e" ] || continue
+    [ "$(head -1 "$_e" 2>/dev/null)" = enabled ] && { _interop=1; break; }
+done
+pad_is_wsl || _interop=1        # not WSL: there is no boundary to cross
+echo "interop=$_interop"
+
+# IS THERE A DISPLAY TO PUT THE WINDOW ON. watch.sh already refuses a run over
+# this (see pad_display_state for what each word means), which is right and is
+# also the last possible moment: the user has pressed Start and waited. Asking
+# here means the tab can say it while nobody is waiting for anything.
+echo "display=$(pad_display_state)"
+
+# WILL THE SOUND BE THE GOOD ONE. The WSLg audio hop is measurably damaged
+# (+16 dB of error; playaudio.sh's header has the measurement), so a Windows
+# Python with sounddevice is what a WSL run should be using. Nothing installs
+# it today and nothing checks for it, so the answer arrives as one line of
+# stderr during a run - which is how it has stayed missing on every fresh
+# machine. Skipped entirely off WSL, where the native path is simply correct.
+if pad_is_wsl; then
+    [ -n "$(pad_win_python)" ] && echo "winaudio=1" || echo "winaudio=0"
+else
+    echo "winaudio=1"
+fi

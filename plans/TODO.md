@@ -1265,6 +1265,31 @@ These have each been violated at least once and each cost a run or a window:
       prepare storms live). STILL BANDS -> the lie is not the mechanism on
       this card at all, and the door-gate result needs re-verifying before
       anything else is built on it.**
+      **★★★ ANSWERED, AND IT IS DOTS (2026-08-12, `C:\tmp\pin2_menu.png` -
+      the first time this item has EVER produced David's reference screen):
+      with `PAD_VID_MENUPIN=1` (lie on from boot) the menu draws the green
+      dot-matrix "GO TO DIAGNOSTICS MENU". So the mechanism is ARM TIME, not
+      page-build time: the backdrop pipeline's apparent state WHEN IT IS
+      ARMED is what the page remembers. THE COST, also measured
+      (`pin2_attract.png`): attract loses its backdrop ENTIRELY - black
+      behind the text, worse than the band - which is the door-gate cost
+      David rejected, so pinning is a measurement and NOT a candidate fix.
+      ★ THE FIX THIS POINTS AT, and the next build: make the lie PER-STREAM,
+      LATCHED AT ARM. The trace shows the menu ARMS ITS OWN FRESH PIPELINES
+      (pads 0xb82563f8 / 0xb852a330 in the pinned run, high addresses, not
+      attract's 0x114ba70). So in `pad_vid_prepare()` stamp each `struct
+      stream` with the gate's value AT THAT MOMENT (`s->lie = vid_menu_gate()`)
+      and have `pad_vid_caps_for_pad()` / `pad_vid_last_state()` consult
+      `s->lie` INSTEAD of the live gate. Then attract's streams - armed while
+      the flag is 0 - always tell the truth and attract keeps its video,
+      while the menu's streams - armed after modewatch raises the flag, which
+      it now does before the entry latch - always answer NONE/PAUSED and the
+      page draws dots. It also explains every failure in this item: a live
+      gate flips under streams that were already armed, which is both why
+      mid-run pinning did nothing and why the storms happened. WATCH FOR: a
+      menu that REUSES an attract-armed stream (the non-pinned run read caps
+      on attract's old pad) - if that recurs, the stamp must be refreshed on
+      re-arm, which `pad_vid_prepare` already sees as `s->torn_down = 0`.**
       **★ THE GUEST CANNOT READ ITS OWN MEMORY (unexplained, 2026-08-12).**
       The shim's in-guest load of the mode word 0x650744 returns 0 in EVERY
       state, while a host read of the same address in the same process

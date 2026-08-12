@@ -1125,6 +1125,29 @@ These have each been violated at least once and each cost a run or a window:
       video-manager code → the nearby menu-state flag) or a memory diff of
       attract vs menu. Cleaner architecture (reflects true game state, no
       transition flash) but the address hunt is the work.
+      **★ CHOSEN 2026-08-12 (David): PATH B. Resume plan for a fresh agent:**
+      (1) The shim (hwshim.so + gstvid, PAD_SHIM_SRCS) is LD_PRELOADed into
+      the qemu-user guest, so its C reads guest ARM memory directly. Goal:
+      find a guest variable that is one value in the SERVICE MENU and another
+      in attract/gameplay, then read it in `vid_prerolling` (gstvid) IN PLACE
+      OF the door — so the get_state=PAUSED + caps=NONE lie fires only in the
+      real menu, and attract-with-door-open plays full-screen.
+      (2) Two ways to find it. (a) Instrument gststub's `gst_element_get_state`
+      to log `__builtin_return_address(0)` — that is the 4.28 video-manager
+      polling state; disassemble the game ELF around there (radare/objdump on
+      the card's game ELF, PAD_VID_ROOT) to find the branch that picks
+      dots-vs-video and the flag it tests. (b) MEMORY DIFF: add a shim routine
+      that hashes/snapshots guest memory regions; capture in attract vs a
+      banded menu (PAD_VID_DOOR=0 so nothing lies); find bytes that flip
+      consistently; confirm by polling the candidate address across several
+      menu/attract transitions before trusting it.
+      (3) Anchors: the game BLANKS THE LCD in the menu (menu frame = 1 draw,
+      the DMD band; attract = 19-draw scene) — a cross-check that a candidate
+      variable really tracks the menu. Working door gate = `71caeb5`
+      (`0cd1a05` logic); `PAD_VID_DOOR=0` disables it. `vid_prerolling()` in
+      gstvid.c is the single gate site. RIG STATE at handoff: running the
+      no-lie RE diagnostic build (`item43_run_nolie.sh`, PAD_VID_DOOR=0,
+      PAD_GST_TRACE + PAD_GL_DRAWLOG); rebuild clean as needed.
       **FULL VERIFICATION on the final build (`53667d5`, 2026-08-11 late
       night, my instrumented run):** (1) door open mid-attract → instant red
       48V overlay, no lag; (2) long Select → version splash; (3) long Select

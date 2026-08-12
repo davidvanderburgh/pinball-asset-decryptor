@@ -446,6 +446,16 @@ These have each been violated at least once and each cost a run or a window:
       produces. Cheap test before building anything: ladder a service-menu
       switch with `PAD_SW_MINSCANS` at 1, 2 and 4 and see whether the MENU
       moves where `entry[+24]` already moved.
+      **★★ AND ITEM 46 IS THE SAME QUESTION ON A DIFFERENT SWITCH — filed the
+      same day, independently, and it reached the same fork ("reached and
+      ignored" vs "never arrived").** Read it before starting here. It carries
+      the sharpest form of the contradiction: turtles' Action Button is switch
+      **34 on node 1, the EXACT switch this item laddered 72/72 down to 10 ms**,
+      the latch is default-ON and on main, and the button is still finicky in
+      attract and (apparently) dead at character select. Same latch, same
+      switch, ladder passes, game behaviour fails. **Neither item should buy the
+      during-play per-node scan rate separately** — it has never been measured
+      on any title, item 26 wants it too, and one run pays for three items.
       **AND THE REPRO JUST GOT CHEAP, which is the best news in this update.**
       This item had budgeted a run to reach BATTLE SELECT, which the rig has
       never reached. The service screens are the same symptom by David's own

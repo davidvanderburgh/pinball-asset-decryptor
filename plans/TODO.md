@@ -410,6 +410,48 @@ These have each been violated at least once and each cost a run or a window:
       mechanism is cracked, the instrument is built and validated, and the fault
       now reproduces on demand from a script — so a pass can no longer end
       having learned nothing. What is left needs a run, not a new instrument.)*
+      **★★★ DAVID AGAIN, 2026-08-12, ON A BUILD THAT ALREADY HAS THE LATCH
+      (`979b940` is on main), so `sw_owed[]` did NOT cure the felt case and the
+      half that is left is LATENCY, not delivery: "switch input by keyboard or
+      interactive switch matrix seems to take a long time to register… the
+      menus are not responsive enough from switch inputs (even the service
+      screens using left and right flippers as input are noticeably clunky)."**
+      **(i) It is not the keyboard path, and that is free to state.** The
+      MATRIX is clunky too, and the three writers cost completely different
+      amounts host-side — the game window's `binds[]` (no host cost), the
+      playfield mouse through `SwitchDriver` (a ~80 ms `wsl.exe` spawn per
+      action, item 24), and the playfield keyboard through item 39's
+      `swkeys.py` pipe (no spawn). All three feel the same, so the fault is
+      DOWNSTREAM of the merge — where the measured mechanism already is.
+      **(ii) DAVID'S PROPOSED CURE IS ALREADY RULED OUT WITH NUMBERS: do not
+      spend a pass on it.** "Interpreted with longer samples" is the
+      minimum-closure-width theory, and there is no minimum — 72/72 registered
+      down to 10 ms once the game looked. A longer sample buys DELIVERY odds,
+      and delivery is the half already fixed. It cannot buy back LATENCY, which
+      is what "takes a long time to register" is, and which this item's own
+      limit (c) predicted in writing.
+      **(iii) ★★ THE SERVICE-MENU CASE IS ALREADY MEASURED and was never
+      written down here — it came out of item 43's turtles passes, 2026-08-11:
+      `swpoke.py 25 2000`, a TWO-SECOND hold, registers every time, while
+      250-500 ms presses fall between polls and read as nothing.** That is
+      where "12 presses moved 3 rows" came from, and it was measured with the
+      latch in the build. **That contradiction is the most valuable thing in
+      this update:** the latch owes every closure a scan and the ladder read
+      72/72, yet a 400 ms service-menu press still does nothing.
+      **THE HYPOTHESIS THAT WOULD RESOLVE IT — a hypothesis, not a finding:
+      this item's oracle proves DELIVERY, not CONSUMPTION.** `entry[+24]` is
+      the scan drain's level. A menu that samples that level on its OWN UI
+      period, or wants it made across two consecutive looks, never sees a
+      closure exactly ONE scan wide — which is precisely what the latch
+      produces. Cheap test before building anything: ladder a service-menu
+      switch with `PAD_SW_MINSCANS` at 1, 2 and 4 and see whether the MENU
+      moves where `entry[+24]` already moved.
+      **AND THE REPRO JUST GOT CHEAP, which is the best news in this update.**
+      This item had budgeted a run to reach BATTLE SELECT, which the rig has
+      never reached. The service screens are the same symptom by David's own
+      report and are reachable from boot with no game played — door open
+      (`swhold.py 33 0`), LONG Select, version splash, LONG Select; item 43 did
+      it repeatedly. Measure there first and keep BATTLE SELECT for confirming.
       **★★ MEASURED AND FIXED 2026-08-06. 35 of 72 closures reached the game
       before; 72 of 72 after — 4/4 at every duration on both nodes, including
       10 ms.** Long form: `spike2_pc_emulation_handoff.md`, REMAINING item 17.
@@ -492,12 +534,17 @@ These have each been violated at least once and each cost a run or a window:
       the only one that knows how long a key was really held; the three clocks
       are never aligned, only differenced within themselves).
       **Committed:** `979b940` (measurement + latch + instruments).
-      **Resume:** ladder switches 59 and 60 with `swladder.py` — they have never
-      been measured and David's report is about them. Then play into a battle
-      and put `[key]` and `[sw]` both on, diffing each key edge's X-time width
-      against the closure the guest was handed. **Do not ask David which key and
-      which screen; he answered on 2026-08-06 and the answer is at the top of
-      this item.**
+      **Resume — and start in a SERVICE SCREEN, not a battle, per the 2026-08-12
+      update at the top:** ladder switches 59 and 60 with `swladder.py` (never
+      measured, and both of David's reports are about them) with the service
+      menu on screen, then answer the delivery-vs-consumption question — does
+      the MENU move where `entry[+24]` moved, and does `PAD_SW_MINSCANS` 2 or 4
+      change that. Measure the per-node scan gap in a service screen too: 670 ms
+      is an ATTRACT number and nothing has measured a menu. Then play into a
+      battle to confirm, with `[key]` and `[sw]` both on, diffing each key
+      edge's X-time width against the closure the guest was handed. **Do not ask
+      David which key and which screen; he answered on 2026-08-06 and again on
+      2026-08-12, and both answers are at the top of this item.**
       **The acceptance for the repeat half needs writing before it is built, and
       the bar David set is LEGIBILITY, not just delivery:** one press moves one
       row, and a hold repeats at a rate a human can predict — not 0 rows at
@@ -517,6 +564,12 @@ These have each been violated at least once and each cost a run or a window:
       key repeats. Oracle is the guest's own `[sw]` lines against the X event
       times, plus David's hands, since this fault is defined by how it feels.
       **The script half of that is now met: 10 ms, 72/72.**
+      **★ AND THAT ORACLE IS NOT SUFFICIENT ON ITS OWN — added 2026-08-12.** A
+      closure that reaches `entry[+24]` and does not move the cursor is still
+      exactly the fault David is reporting, so for the menu half the oracle is
+      **the cursor moving on the GAME's own display**, timed against the press.
+      State the press length and the delay, and do not report the wire number
+      alone as a pass.
 
 - [ ] **46. On turtles_pro the ACTION BUTTON does not select a character at
       game start, and switch control on that title generally does not feel

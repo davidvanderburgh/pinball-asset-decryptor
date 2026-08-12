@@ -1076,14 +1076,18 @@ These have each been violated at least once and each cost a run or a window:
 
 
 - [ ] **43. In the turtles service menus the picture goes HALF HEIGHT and the
-      scene text stops drawing.** `S2 D4` ← IN PROGRESS *(**~90%. The
-      MECHANISM IS SOLVED — it is the backdrop pipeline's state AT ARM TIME,
-      proven by pinning the lie from boot and getting David's exact reference
-      screen. The remaining work is paying for it without the pin's cost
-      (attract loses its backdrop), which is the per-stream build `e51e171`,
-      IN A LIVE RUN as this line is written. The door gate `71caeb5` remains
-      the working resting state. Branch `item/43`, HEAD `e51e171`, clean,
-      pushed.**)*
+      scene text stops drawing.** `S2 D4` ← IN PROGRESS *(**~85%. The
+      MECHANISM IS SOLVED and it is STARVATION, not persuasion: the menu
+      composes its own LCD image and re-uploads the last video frame it was
+      ever given, so no answer the video layer can give will make it draw
+      dots — proven by holding delivery to zero in a verified menu and
+      getting byte-identical frames. The pinned run's dots were the game
+      never having had a frame. The per-stream build `e51e171` keeps attract
+      full-screen (half the pair, solid); the menu half has no remaining
+      video-side move except a service-button pre-trigger that SHRINKS the
+      door gate's cost rather than removing it — David's call, see the end of
+      this item. The door gate `71caeb5` remains the working resting state.
+      Branch `item/43`, HEAD `73f46a6`, clean, pushed.**)*
       **════ SESSION 2026-08-12 (cont., Path B): FORK RESOLVED + TWO DEAD ENDS
       + A METHOD CONFOUND THAT INVALIDATES THE "MODE-GATE INSUFFICIENT" CLAIM.
       Resume from HERE.**
@@ -1316,6 +1320,50 @@ These have each been violated at least once and each cost a run or a window:
       game's mode words - 0 in every state, a needle glued to zero. Run
       script: `C:\tmp\item43_run_perstream.sh` (David's flow, nothing
       pinned).**
+      **★★★ RUN, AND THE ANSWER IS THE FIRST READING: BAND WITH `lie=1`
+      (2026-08-12, two runs). The per-stream build works exactly as designed -
+      every stream the menu armed logged "armed UNDER the menu lie" and every
+      answer read `lie=1 gate=1`, caps NONE, get_state PAUSED - and the page
+      banded anyway. So the lie is not the mechanism at arm time either, and
+      arm-time bookkeeping is NOT what the pinned run was doing.
+      ★ WHAT IT WAS DOING IS STARVATION. In the same run ch3 - armed back in
+      attract, never torn down - went on handing the game 61 frames every
+      2033 ms, 30.0/s, right through the menu, while padglhost reported 60
+      uploads/s at **0.0 NEW/s**: the menu composes its own LCD image and
+      uploads it whole (matching the earlier draw finding - TEXDIRECT
+      1360x768 VIDEO where a real machine uploads dots). A delivery hold was
+      then built and run: in a VERIFIED menu (in-menu boolean 1) with the
+      guest handing over NOTHING, two screenshots seconds apart came back
+      **byte-identical**. Starving a latched choice only freezes it - which
+      this file's own vid_thread tombstone already said, and which I rebuilt
+      before reading far enough; the hold is reverted (`73f46a6`) and the
+      tombstone now carries the harder measurement. **THE COROLLARY IS THE
+      RESULT: the pinned run's dots were STARVATION FROM BOOT - the game
+      simply never had a frame to hold - and that is why its attract was
+      black. There is no answer the video layer can give, at any time, that
+      makes a game holding a video frame draw dots instead.**
+      ★ WHAT THE PER-STREAM BUILD DID EARN, and it is worth keeping: attract
+      played **full-screen** right up to menu entry (`C:\tmp\hold_attract2.png`
+      - the high-score page over a live backdrop), which the pinned run could
+      never have. Half the pair is now solid; the missing half is the menu.
+      ★ THE ONE DESIGN LEFT ON THIS SIDE, and it needs David's call because it
+      trades cost rather than removing it: the door-gate build draws dots
+      because it starves the game from DOOR-OPEN, seconds before the page is
+      built. A **service-button pre-trigger** would raise the lie when a
+      service button goes down (sw25/28, only reachable behind an open door)
+      and hand over to the mode/renderer flags for the rest of the visit, so
+      attract bands only for the ~2 s the button is held instead of the whole
+      door-open period. It is a strictly smaller version of the cost David
+      rejected, not a removal of it. Whether it works at all rests on whether
+      the composer's choice is made before the mode word flips - tonight says
+      the mode word, which flips BEFORE the caps latch, is already too late.
+      ★ TRAPS PAID FOR TONIGHT: `mode==0` alone does NOT mean the menu is open
+      (it is menu OR boot, and it blips during transitions - one screenshot
+      this session was attract-with-a-blip, not a menu); verify with the
+      in-menu boolean 0x663958 before believing any menu screenshot. And a
+      blip is expensive: the composer latches into strip mode and STAYS there
+      until the scene changes, so attract kept banding long after the flags
+      dropped.**
       **★ THE GUEST CANNOT READ ITS OWN MEMORY (unexplained, 2026-08-12).**
       The shim's in-guest load of the mode word 0x650744 returns 0 in EVERY
       state, while a host read of the same address in the same process

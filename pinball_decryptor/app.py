@@ -219,6 +219,7 @@ class App:
             on_apply_delta=self._start_apply_delta,
             on_revert_all=self._start_revert_all,
             on_flash_image=self._start_flash_image,
+            on_read_card=self._start_read_card,
             on_build_flash=self._on_build_flash_request,
             on_save_project=self._save_project,
             on_load_project=self._load_project,
@@ -1642,6 +1643,35 @@ class App:
             image_path, device_path, log_cb, phase_cb, progress_cb, done_cb)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
 
+    def _start_read_card(self, device_path, image_path):
+        """Save a whole card into a raw image file (the inverse of a flash).
+
+        The card + destination were collected and checked by the read-card
+        dialog (``gui.read_card_dialog.ReadCardDialog``); this runs the read
+        through the normal status area.  It reports as an *extract*: it reads
+        a card into a file, so the Extract button is the run's Cancel and the
+        Extract phase row carries its steps."""
+        mfr = self._current_mfr
+        if mfr is None or not mfr.capabilities.read_card_image:
+            return
+
+        self._save_settings()
+        self._active_mode = "extract"
+        self._read_card_active = True
+        # A raw-device read — the same proof that macOS Full Disk Access works
+        # as a Direct-SD run, so a success dismisses that banner too.
+        self._current_run_is_direct_ssd = True
+        self._cancel_requested = False
+        self.window.show_chained_phases(
+            getattr(mfr, "read_card_phases", ()))
+        self.window.set_running(True, mode="extract")
+        self.window.reset_steps(mode="extract")
+
+        log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
+        self.pipeline = mfr.make_read_card_pipeline(
+            device_path, image_path, log_cb, phase_cb, progress_cb, done_cb)
+        threading.Thread(target=self.pipeline.run, daemon=True).start()
+
     # ------------------------------------------------------------------
     # Transcribe (CGC opt-in, faster-whisper)
     # ------------------------------------------------------------------
@@ -2933,6 +2963,42 @@ class App:
                 self.window.set_status("Failed")
                 messagebox.showerror("Revert Failed", summary)
             self.window.refresh_after_revert()
+            return
+
+        # A card read borrows the extract run-state (it reads a card into a
+        # file, so the Extract button is its Cancel) but none of the
+        # extract-completion behaviour applies: nothing was extracted, there's
+        # no assets folder to stamp or re-scan, and "Extract completed" for a
+        # card backup reads as the wrong thing having happened.
+        if getattr(self, "_read_card_active", False):
+            self._read_card_active = False
+            if success and self._current_run_is_direct_ssd \
+                    and sys.platform == "darwin":
+                self.window.acknowledge_macos_fda()   # raw read proves FDA
+            self._current_run_is_direct_ssd = False
+            self.window.set_running(False, mode="extract")
+            if self._cancel_requested:
+                self._cancel_requested = False
+                self.window.set_status("Cancelled")
+                self.window.append_log("Card read cancelled.", "info")
+            elif success:
+                # Past the last chip, so every step shows green rather than
+                # leaving the final one stuck on "active" (same trick the
+                # normal done-path uses).
+                self.window.set_phase(
+                    len(getattr(self._current_mfr, "read_card_phases", ())
+                        or ()), mode="extract")
+                self.window.set_status(
+                    time.strftime("Completed at %I:%M %p").replace(" 0", " "))
+                self.window.set_progress(1, 1, mode="extract")
+                self.window.append_log(summary, "success")
+                messagebox.showinfo("Card image saved", summary)
+            else:
+                self.window.set_status("Failed")
+                self.window.append_log(summary, "error")
+                messagebox.showerror("Card Read Failed", summary)
+            # Put the tab's own phase row back (this run swapped in its own).
+            self.window._refresh_extract_phases()
             return
 
         is_extract = self._active_mode == "extract"

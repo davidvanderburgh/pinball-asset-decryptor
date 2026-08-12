@@ -31,6 +31,7 @@ the GUI gates the Direct-SD buttons on that before these are reached.
 import contextlib
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -976,6 +977,119 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
 # Read-back verify chunk (bytes).  Large enough that the per-chunk overhead is
 # negligible against the multi-GB read, small enough to report smooth progress.
 _VERIFY_CHUNK = 16 * 1024 * 1024
+
+
+def read_device_to_image(device_path, image_path, *, log=None, progress=None,
+                         cancel=None):
+    """dd-style raw copy of the whole card *device_path* into *image_path*.
+
+    The exact inverse of :func:`flash_image_to_device`: every sector of the
+    card, in order, into one ``.raw`` file the app's own Partitions / Compare
+    tabs (and any imaging tool) can open.  Batch 33 asked for it — the app
+    could write a card but not back one up, so "image the card, change one
+    setting on the machine, image it again and diff" needed an outside tool.
+
+    Refuses (:class:`FlashError`) when the card's size can't be probed or the
+    destination volume hasn't room for it; both are cheap checks that turn a
+    multi-GB failure at 99% into an instant, explicable one.  Reports progress
+    and honours ``cancel`` (a True return raises :class:`FlashCancelled`).
+    Returns the number of bytes read.
+
+    The image is built at ``<image_path>.part`` and renamed only once the whole
+    card has landed, so an interrupted read can never leave a short file
+    sitting there looking like a good backup.
+    """
+    dev_size = device_size(device_path)
+    if not dev_size:
+        raise FlashError(
+            "Could not read the size of %s, so there is no way to know how "
+            "much to copy. Re-seat the card (or its reader) and try again."
+            % device_path)
+
+    dest_dir = os.path.dirname(os.path.abspath(image_path)) or "."
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+    except OSError as e:
+        raise FlashError("Could not create the folder for the image:\n%s"
+                         % e) from e
+    try:
+        free = shutil.disk_usage(dest_dir).free
+    except OSError:
+        free = None
+    if free is not None and free < dev_size:
+        raise FlashError(
+            "The card is %s but only %s is free in %s. A card image is a "
+            "copy of the whole card, empty space included, so it needs the "
+            "card's full size. Pick a location with more room."
+            % (format_size(dev_size), format_size(free), dest_dir))
+
+    if log is not None:
+        log("Source card: %s (%s)" % (device_path, format_size(dev_size)),
+            "info")
+        log("Image: %s" % image_path, "info")
+
+    part_path = image_path + ".part"
+    read = 0
+    try:
+        with RawDeviceFile(device_path, writable=False) as dev, \
+                open(part_path, "wb") as out:
+            while read < dev_size:
+                if cancel is not None and cancel():
+                    raise FlashCancelled(
+                        "Read cancelled after %d of %d bytes."
+                        % (read, dev_size))
+                want = min(_VERIFY_CHUNK, dev_size - read)
+                buf = dev._aligned_read(read, want)
+                if not buf:
+                    break
+                out.write(buf)
+                read += len(buf)
+                if progress is not None:
+                    progress(read, dev_size, "Reading SD card…")
+            out.flush()
+            os.fsync(out.fileno())
+    except PermissionError as e:
+        # Same remedy as the flash side: a denied raw open is elevation
+        # (or macOS Full Disk Access), not a broken card.
+        _unlink_quiet(part_path)
+        raise FlashError(str(e)) from e
+    except FlashCancelled:
+        _unlink_quiet(part_path)
+        raise
+    except OSError as e:
+        _unlink_quiet(part_path)
+        raise FlashError("Reading the card failed at byte %s:\n%s"
+                         % (f"{read:,}", e)) from e
+
+    if read < dev_size:
+        # The card stopped handing bytes back early — a short image would
+        # look complete in Explorer and fail on the machine.
+        _unlink_quiet(part_path)
+        raise FlashError(
+            "The card stopped responding after %s of %s. The image was not "
+            "kept. Re-seat the card (or its reader) and try again."
+            % (format_size(read), format_size(dev_size)))
+
+    try:
+        os.replace(part_path, image_path)
+    except OSError as e:
+        _unlink_quiet(part_path)
+        raise FlashError("Could not save the finished image to %s:\n%s"
+                         % (image_path, e)) from e
+
+    if progress is not None:
+        progress(read, read, "Read complete")
+    if log is not None:
+        log("Read %s from %s into %s."
+            % (format_size(read), device_path, image_path), "success")
+    return read
+
+
+def _unlink_quiet(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def _verify_flash_readback(device_path, image_path, img_size, *, log=None,

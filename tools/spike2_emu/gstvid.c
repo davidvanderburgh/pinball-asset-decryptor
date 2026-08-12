@@ -126,6 +126,18 @@ struct stream {
     void *handoff_data;
     char location[PADVID_PATH_MAX];
     int  ready;                 /* host answered with a size                 */
+    unsigned long last_unplay_us; /* item 43: when the game last pushed this
+                                 * pipeline OUT of PLAYING - a set_state(PAUSED)
+                                 * or teardown(READY/NULL). The 4.28 service
+                                 * page CYCLES its backdrop's state (PAUSED,
+                                 * READY, PAUSED, PLAYING, ...) every page,
+                                 * measured in the trace; attract sets PLAYING
+                                 * once and lets the clip run for seconds. So
+                                 * "un-played within the last window" is what
+                                 * tells a menu backdrop (draw dots over it)
+                                 * from a settled attract clip (full-screen) -
+                                 * the two are identical by size AND by frames
+                                 * delivered, and only differ in this churn. */
     int  playing;
     unsigned run_id;            /* bumped per play(); a thread that wakes to
                                  * find it changed belongs to a PREVIOUS run
@@ -1049,26 +1061,29 @@ static int vid_door_open(void)
 
 /* item 43: is THIS stream one the shim should present as still prerolling -
  * no negotiated caps, state PAUSED not PLAYING - so the 4.28 service page
- * draws its text/dots over it? True only for a backdrop the game just armed
- * (delivered < VID_FRESH_FRAMES) while the coin door is open. A settled
- * attract clip (delivered past the window) or a door-shut game answers the
- * plain truth, which is why attract plays full-screen and gameplay is
- * untouched. PAD_VID_FRESH overrides the window count. */
-#define VID_FRESH_FRAMES_DEFAULT 30
-static unsigned vid_fresh_frames(void)
+ * draws its text/dots over it? The page CYCLES its backdrop out of PLAYING
+ * every page build (set_state PAUSED/READY, traced); attract sets PLAYING
+ * once and lets it run. So the test is: coin door open, and the game pushed
+ * this pipeline out of PLAYING within the last window (last_unplay_us). A
+ * settled attract clip has not been un-played in seconds, so it answers the
+ * plain truth and plays full-screen even with the door open; a door-shut
+ * game is never touched. PAD_VID_UNPLAY_MS overrides the window. */
+#define VID_UNPLAY_MS_DEFAULT 800
+static unsigned vid_unplay_ms(void)
 {
     static int n = -1;
     if (n < 0) {
-        const char *e = getenv("PAD_VID_FRESH");
-        n = VID_FRESH_FRAMES_DEFAULT;
+        const char *e = getenv("PAD_VID_UNPLAY_MS");
+        n = VID_UNPLAY_MS_DEFAULT;
         if (e && e[0]) { n = 0; while (*e >= '0' && *e <= '9') n = n*10 + (*e++ -'0'); }
     }
     return (unsigned)n;
 }
 static int vid_prerolling(const struct stream *s)
 {
-    return vid_door_open() && s && s->gst_state == 4
-        && s->delivered < vid_fresh_frames();
+    if (!vid_door_open() || !s || s->gst_state != 4) return 0;
+    if (!s->last_unplay_us) return 0;   /* never un-played: a steady clip */
+    return (long)(vid_us() - s->last_unplay_us) < (long)vid_unplay_ms() * 1000l;
 }
 
 /* Ask the host to open a stream's location. Returns 1 if it can be played. */
@@ -1617,7 +1632,11 @@ void pad_vid_teardown(void *pipeline)
 {
     struct stream *s = find_pipeline(pipeline);
     pad_vid_stop(pipeline);
-    if (s) { s->torn_down = 1; s->paused = 0; s->gst_state = 1; }
+    if (s) {
+        s->torn_down = 1; s->paused = 0; s->gst_state = 1;
+        s->last_unplay_us = vid_us();   /* item 43: the game pushed it out of
+                                         * PLAYING - see vid_prerolling */
+    }
 }
 
 /* The GAME's set_state(PAUSED), noted AFTER prepare() has answered - see the
@@ -1632,6 +1651,9 @@ void pad_vid_note_paused(void *pipeline)
              "(item 43)\n", chan_of(s));
     s->paused = 1;
     s->gst_state = 3;
+    s->last_unplay_us = vid_us();   /* item 43: pushed out of PLAYING - the
+                                     * service page's cycle stamps this every
+                                     * page; see vid_prerolling */
 }
 
 /* What gst_element_get_state answers for our pipelines: the game's own last
@@ -1641,22 +1663,17 @@ void pad_vid_note_paused(void *pipeline)
 int pad_vid_last_state(void *pipeline)
 {
     struct stream *s = find_pipeline(pipeline);
-    /* ★ ITEM 43: a FRESHLY-ARMED backdrop reads PAUSED, not PLAYING, while
-     * the coin door is open - the state a real decoder is in while it
-     * prerolls, which is the instant the 4.28 service page decides its
-     * picture. That is what flips the page to its DMD text/dot menu (caps
-     * NONE alone still left it painting the clip - the band).
-     *
-     * The `delivered < FRESH` guard is what keeps this from banding ATTRACT.
-     * The band geometry appears whenever the backdrop is not PLAYING, and a
-     * blanket door-open lie made a SETTLED attract clip (playing for seconds,
-     * door opened over it) report PAUSED too - so attract itself drew the
-     * band (David, 2026-08-12). A menu backdrop at page-build has delivered
-     * ~0 frames; a settled attract clip has delivered hundreds. So the lie is
-     * scoped to the preroll-sized window right after an arm: the menu's
-     * page-build read lands inside it (dots), a long-running attract clip is
-     * long past it (full-screen). Door shut, or settled: the truth. Touches
-     * only what get_state ANSWERS - never delivery, set_state, or EOS. */
+    /* ★ ITEM 43: a backdrop the service page is CYCLING reads PAUSED, not
+     * PLAYING (vid_prerolling) - the state a real decoder is in while it
+     * prerolls, which is the instant the 4.28 page decides its picture, and
+     * what flips the page to its DMD text/dot menu (caps NONE alone still
+     * left it painting the clip - the band). The cycle - PAUSED, READY,
+     * PAUSED, PLAYING every page - is what tells this from a SETTLED attract
+     * clip that the door happens to be open over: that clip has not been
+     * un-played in seconds, so it answers the truth and plays full-screen
+     * (David, 2026-08-12 - a blanket door lie banded attract). Door shut:
+     * the truth. Touches only what get_state ANSWERS - never delivery,
+     * set_state, or EOS. */
     if (vid_prerolling(s)) return 3;
     if (!s || !s->gst_state) return 1;
     return s->gst_state;

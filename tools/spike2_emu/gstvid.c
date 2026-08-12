@@ -1449,7 +1449,19 @@ void pad_vid_announce(void *pipeline, int oldst, int newst)
      * entry sequence stalls half-built - after the first long Select it never
      * arms the menu's own backdrop and never draws the dot page, worse than
      * the band. The door-gate build always posted these and rendered the menu
-     * right; the bus is load-bearing for page builds and must tell the truth. */
+     * right; the bus is load-bearing for page builds and must tell the truth.
+     *
+     * ★ ITEM 43 take 2 (2026-08-12), ALSO REVERTED: withhold ONLY the
+     * PAUSED->PLAYING message (newst==4) - the one the game caches as "backdrop
+     * live" - keeping every READY->PAUSED/ASYNC_DONE so preroll still completes.
+     * The AIM was the DEEP audit pages, which (unlike the entry) never re-arm or
+     * re-poll get_state/caps, so the get_state/caps lie cannot reach them; they
+     * read the bus-fed cached flag. RESULT: a PREPARE STORM. Without its PLAYING
+     * confirmation the game treats the arm as failed and re-arms a fresh
+     * pipeline forever (renderer 40 -> 6.9 fps, incrementing pipeline addrs in
+     * [menudbg]). Same failure class as the NULL-caps preroll model: the game's
+     * pipeline lifecycle REQUIRES the PLAYING message, in the menu as everywhere.
+     * The deep-menu band is NOT reachable by any lie on this bus. See TODO 43. */
     if (find_pipeline(pipeline)) post_state(pipeline, oldst, newst, 0);
 }
 

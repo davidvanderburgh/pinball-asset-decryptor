@@ -49,6 +49,7 @@ extern int close(int);
 extern void *mmap(void *, unsigned long, int, int, int, long);
 extern int usleep(unsigned);
 extern void pad_say(const char *);
+extern int pad_sw_level(unsigned);      /* hwshim.c - item 43's caps door gate */
 extern int pthread_create(unsigned long *, void *, void *(*)(void *), void *);
 extern int clock_gettime(int, unsigned long *);
 
@@ -125,18 +126,6 @@ struct stream {
     void *handoff_data;
     char location[PADVID_PATH_MAX];
     int  ready;                 /* host answered with a size                 */
-    unsigned long preroll_us;   /* item 43: when this arm's PREROLL completes.
-                                 * A real pipeline has NO negotiated caps and
-                                 * delivers NO frames between set_state(PAUSED)
-                                 * and preroll completion - never microseconds.
-                                 * The 4.28 service flow asks for caps in that
-                                 * exact window and latches its page style on
-                                 * the answer: none = the DMD dot menu, real
-                                 * dimensions = a half-built video-menu mode no
-                                 * real machine ever shows (the band). Fresh
-                                 * arms stamp this; absorbed re-arms of a live
-                                 * clip keep their completed preroll, as a live
-                                 * real pipeline keeps its caps.             */
     int  playing;
     unsigned run_id;            /* bumped per play(); a thread that wakes to
                                  * find it changed belongs to a PREVIOUS run
@@ -730,8 +719,6 @@ static unsigned long vid_us(void)
  * The door is game logic's business; video answers the truth and nothing
  * else. */
 
-static int vid_fw_loading(void);   /* the VPU firmware model, defined below */
-
 static void *vid_thread(void *arg)
 {
     struct stream *s = (struct stream *)arg;
@@ -768,15 +755,6 @@ static void *vid_thread(void *arg)
          * at PAUSED; nothing here has ever needed it - fresh clips only start
          * their thread at PLAYING - so the hold is total.) */
         if (s->paused) { t_epoch = 0; usleep(5000); continue; }
-        /* item 43: no frames until PREROLL completes (which the first arm of
-         * the process stretches to the VPU firmware window - both stamped in
-         * preroll_us). A real pipeline delivers nothing in that window. The
-         * epoch resets so the clip starts on schedule afterwards. */
-        if ((long)(vid_us() - s->preroll_us) < 0) {
-            t_epoch = 0;
-            usleep(20000);
-            continue;
-        }
         /* item 43: NOTE THE ABSENCE of a door check here, and keep it absent.
          * Both attempts to act on a RUNNING stream at door-open failed in
          * David's hands within minutes: a HOLD stalled the game's sync=1
@@ -1029,35 +1007,44 @@ static void *vid_thread(void *arg)
 
 /* ---- entry points called from gststub.c --------------------------------- */
 
-/* ★ ITEM 43: THE VPU FIRMWARE LOAD, MODELLED. On a real i.MX6 the FIRST
- * vpudec instantiation of the process loads the VPU firmware blob - seconds,
- * not milliseconds - and until it finishes, a prerolling pipeline has no
- * negotiated caps and delivers nothing. The 4.28 video-manager init runs a
- * probe inside that window (build, PAUSED, read caps, tear to READY - the
- * whole dance is in this run's PAD_GST_TRACE), reads NULL on real hardware,
- * and latches the SERVICE MENUS to their complete DMD dot mode for the life
- * of the process. This stub used to answer that probe instantly with real
- * dimensions, which flipped the latch to a video-styled menu mode that no
- * real machine ever runs - and which draws NO text and NO dots (the band).
- * Attract is untouched: its clips arm after the window and play normally,
- * exactly as on a real machine whose firmware has finished loading.
- * PAD_VID_FWLOAD_MS overrides the window; 0 disables the model. */
-static unsigned long vid_fw_t0;
-static int vid_fw_ms = -1;
-static int vid_fw_loading(void)
+/* ★ ITEM 43: THE ONE HONEST DISCRIMINATOR IS THE COIN DOOR, and the gate is
+ * as small as it can be. The 4.28 service page reads a pipeline's negotiated
+ * caps microseconds after set_state(PAUSED) and picks its picture from the
+ * answer: real dimensions -> a video-styled menu mode that draws one band of
+ * backdrop and NO text/dots (the fault); NONE -> the complete green DMD dot
+ * menu. A real machine ALWAYS reads NONE there because its decoder is still
+ * prerolling - but a SCENE that wants video reads caps the same way and
+ * RE-ARMS relentlessly until it gets them (16,000+ pipelines, the main loop
+ * starved to 15 fps - the "freeze"). So "answer NONE" cannot be time-based:
+ * it satisfies the menu and destroys every scene that needs video.
+ *
+ * The coin door tells them apart with certainty. You reach a service menu ONLY
+ * with the door open (the service buttons are behind the interlock); you PLAY
+ * with it shut. So: door OPEN -> caps read NONE, the menu draws dots, and the
+ * backdrop still PLAYS underneath (set_state succeeds, the thread still
+ * delivers - this gate touches NOTHING but the caps answer, which is why it
+ * has none of the wedge/lag/freeze the earlier door gates caused). Door SHUT
+ * -> caps are the truth, scenes get their size, gameplay and attract are
+ * exactly as before this item. PAD_VID_DOOR=0 disables; PAD_VID_DOOR_ID
+ * overrides the switch (33 = COIN DOOR INTERLOCK; open reads merged level 0).
+ *
+ * Blocks ONLY on an edge-established open: pad_sw_level is -1 until the switch
+ * has been moved once, and an unknown door must never cost a caps answer (the
+ * first door gate read a fresh block's zeros as "open" and stripped a boot's
+ * backdrops). watch.sh's PAD_DOOR_OPEN stamps the edge for a service boot. */
+static int vid_caps_door_open(void)
 {
-    if (vid_fw_ms < 0) {
-        const char *e = getenv("PAD_VID_FWLOAD_MS");
-        vid_fw_ms = e && e[0] ? 0 : 4000;
-        if (e && e[0]) {
+    static int gate = -1, door_id = 33;
+    if (gate < 0) {
+        const char *e = getenv("PAD_VID_DOOR");
+        gate = !(e && e[0] == '0');
+        if ((e = getenv("PAD_VID_DOOR_ID")) && e[0]) {
             int v = 0;
             while (*e >= '0' && *e <= '9') v = v * 10 + (*e++ - '0');
-            vid_fw_ms = v;
+            if (v > 0 && v < 256) door_id = v;
         }
     }
-    if (!vid_fw_ms) return 0;
-    if (!vid_fw_t0) return 1;   /* no pipeline armed yet: fw never started */
-    return (long)(vid_us() - vid_fw_t0) < (long)vid_fw_ms * 1000l;
+    return gate && pad_sw_level((unsigned)door_id) == 0;
 }
 
 /* Ask the host to open a stream's location. Returns 1 if it can be played. */
@@ -1073,17 +1060,6 @@ int pad_vid_prepare(void *pipeline)
     if (!vshm || !s->location[0]) return 0;
     if (!stream_buf(s)) return 0;
     c = &vshm->ch[hw_of(s)];
-
-    /* item 43: the first arm of the process starts the VPU firmware clock -
-     * see vid_fw_loading(). Stamped whatever else this call decides, because
-     * on real hardware merely INSTANTIATING vpudec starts the load. */
-    if (!vid_fw_t0) {
-        vid_fw_t0 = vid_us();
-        if (vid_fw_loading())
-            VLOG("[vid] first pipeline arm: modelling the VPU firmware load "
-                 "(%d ms; PAD_VID_FWLOAD_MS overrides, 0 disables)\n",
-                 vid_fw_ms);
-    }
 
     /* item 43: the game re-arming this pipeline - whatever else this call
      * decides - means it is alive again. Cleared BEFORE the absorbs so the
@@ -1180,30 +1156,6 @@ int pad_vid_prepare(void *pipeline)
      * still declined, which is what the flag was for. The orphaned thread
      * exits on run_id/req_gen and touches nothing on its way out. */
     s->playing = 0;
-
-    /* item 43: this is a FRESH arm - preroll starts now. ~150 ms models a
-     * healthy decoder's cold start; the first arm of the process stretches
-     * to the VPU firmware window (see vid_fw_loading). PAD_VID_PREROLL_MS
-     * overrides; 0 disables (caps then answer instantly, the pre-model
-     * behaviour, and the service pages go back to the band). */
-    {
-        static int pr_ms = -1;
-        if (pr_ms < 0) {
-            const char *e = getenv("PAD_VID_PREROLL_MS");
-            pr_ms = 150;
-            if (e && e[0]) {
-                int v = 0;
-                while (*e >= '0' && *e <= '9') v = v * 10 + (*e++ - '0');
-                pr_ms = v;
-            }
-        }
-        s->preroll_us = vid_us() + (unsigned long)pr_ms * 1000ul;
-        if (vid_fw_ms > 0 && vid_fw_t0) {
-            unsigned long fw_done = vid_fw_t0 + (unsigned long)vid_fw_ms * 1000ul;
-            if ((long)(fw_done - s->preroll_us) > 0)
-                s->preroll_us = fw_done;
-        }
-    }
 
     /* item 27: a real re-arm settles any deferred EOS-reflex rewind - the
      * location change this absorb predicted has arrived (or something else
@@ -1420,40 +1372,22 @@ void *pad_vid_caps_for_pad(void *pad)
 {
     int i, ready = 0;
     struct stream *fb = 0;
-    /* item 43: no negotiated caps while the VPU firmware loads - the answer
-     * a real prerolling pipeline gives, and the answer the 4.28 init probe
-     * must read for the service menus to latch their dot mode. */
-    if (vid_fw_loading()) {
+    /* ★ ITEM 43: caps read NONE while the coin door is open - the service
+     * menu draws its dots on this, gameplay (door shut) gets the truth. See
+     * vid_caps_door_open() for why the door, and why NOTHING but this answer
+     * is touched. This is the ONLY behavioural gate for the item. */
+    if (vid_caps_door_open()) {
         static int said;
         if (!said) {
             said = 1;
-            VLOG("[vid] caps asked while the VPU firmware loads - answering "
-                 "none, as the real decoder would (item 43)\n");
+            VLOG("[vid] caps answered NONE while the coin door is open - the "
+                 "service menu draws its own dots (item 43, PAD_VID_DOOR=0 "
+                 "to disable)\n");
         }
         return 0;
     }
-    /* item 43: THE PAD-OWNER CHECK RUNS FIRST, over every stream, prerolling
-     * or not. A mid-preroll owner answers NONE - falling through to another
-     * stream's caps is how the service flow's page probe was handed attract's
-     * 1360x768 for a pipeline that had none yet, and the band came back. */
-    if (pad) {
-        for (i = 0; i < PADVID_CHANNELS; i++) {
-            if (!streams[i].ready || streams[i].sinkpad != pad) continue;
-            if ((long)(vid_us() - streams[i].preroll_us) < 0) {
-                static unsigned char said_pr[PADVID_CHANNELS];
-                if (!said_pr[i]) {
-                    said_pr[i] = 1;
-                    VLOG("[vid] ch%d caps asked mid-preroll - answering none,"
-                         " as the real decoder would (item 43)\n", i);
-                }
-                return 0;
-            }
-            break;
-        }
-    }
     for (i = 0; i < PADVID_CHANNELS; i++) {
         if (!streams[i].ready) continue;
-        if ((long)(vid_us() - streams[i].preroll_us) < 0) continue;
         ready++;
         if (pad && streams[i].sinkpad == pad) {
             /* Say it once per channel per size: "the pad matched" is the
@@ -1469,9 +1403,7 @@ void *pad_vid_caps_for_pad(void *pad)
         }
         if (!fb) fb = &streams[i];
     }
-    if (last_created && last_created->ready
-            && (long)(vid_us() - last_created->preroll_us) >= 0)
-        fb = last_created;
+    if (last_created && last_created->ready) fb = last_created;
     if (fb) {
         static int said;
         static unsigned last_w, last_h;
@@ -1588,9 +1520,8 @@ void pad_vid_play(void *pipeline)
     /* item 43: PLAYING ends a pause hold - BEFORE the early return below,
      * which is exactly the absorbed-re-arm case this flag exists for (the
      * thread is alive and holding, s->playing is still 1). gst_state tracks
-     * the ask for get_state's answer, but only on a stream that CAN serve:
-     * stamping 4 on one whose prepare() failed is how the door-gate wedge
-     * told the service page its dead backdrop was flowing. */
+     * the ask for get_state's answer, but only on a stream that CAN serve -
+     * a stream whose prepare() never made it ready is not PLAYING. */
     if (s) {
         s->paused = 0;
         if (s->ready) s->gst_state = 4;

@@ -1231,10 +1231,62 @@ static int vid_gate_on(void)
     return on;
 }
 
+/* ★ ITEM 43: THE SERVICE-BUTTON PRE-TRIGGER - the lie goes up when a human
+ * reaches inside the coin door, not when the menu opens.
+ *
+ * This exists because of what the starvation result leaves behind. The menu
+ * composes its own LCD image and re-uploads the last video frame it was ever
+ * given (see the tombstone in vid_thread), so nothing said AT menu entry can
+ * change the picture - proven twice, with the lie perfect and with delivery at
+ * zero. The door-gate build nevertheless draws dots, and the only thing it
+ * does differently is START EARLIER: it lies from DOOR-OPEN, seconds before
+ * the page is built, which is long enough for the game to rebuild its attract
+ * scene under the lie and arrive at the menu with no video layer to compose.
+ *
+ * So the variable that matters is not WHAT is answered but HOW LONG the answer
+ * has been wrong before the page is built - and the cheapest honest place to
+ * start it is the service button itself (sw25 Select / sw28 Back, both only
+ * reachable behind an open door). Attract then bands for the couple of seconds
+ * a hand is on the button instead of the whole time the door stands open,
+ * which is a smaller version of the cost David rejected rather than a removal
+ * of it. He chose to try it 2026-08-12 knowing that.
+ *
+ * The window is generous on purpose - the buttons are polled slowly enough
+ * that a real press is held ~2 s ([[reference_spike2_coin_door_interlock]]),
+ * and the page builds after the release - and the mode/renderer flags take
+ * over for the rest of the visit. PAD_VID_PRETRIG is the window in ms; 0 turns
+ * it off, which is the A/B against everything that came before. */
+static int vid_svc_pretrigger(void)
+{
+    static int win_ms = -1;
+    static unsigned long until;
+    unsigned long now;
+    if (win_ms < 0) {
+        const char *e = getenv("PAD_VID_PRETRIG");
+        win_ms = 6000;
+        if (e && *e) {
+            int v = 0;
+            const char *p = e;
+            while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
+            win_ms = v;
+        }
+    }
+    if (!win_ms) return 0;
+    now = vid_us();
+    if (pad_sw_level(25) || pad_sw_level(28)) {
+        if (!until)
+            VLOG("[vid] service button down - starting the menu lie %d ms "
+                 "early, before the page is built (item 43)\n", win_ms);
+        until = now + (unsigned long)win_ms * 1000ul;
+    }
+    return until && now < until;
+}
+
 static int vid_menu_gate(void)
 {
     int r, m;
     if (!vid_gate_on()) return 0;
+    if (vid_svc_pretrigger()) return 1;   /* earliest signal there is */
     r = vid_rflag();          /* the renderer's verdict: right, but late    */
     m = vid_modeflag();       /* the game's own word: in time for the latch */
     if (r > 0 || m > 0) return 1;

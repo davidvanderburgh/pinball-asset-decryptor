@@ -1400,6 +1400,47 @@ These have each been violated at least once and each cost a run or a window:
       already classifies the menu from the draw stream with zero false
       positives, so it could refuse the video-textured strip draw, but the
       dots are never composed at all in this state, so that yields black, not
+      dots, unless the menu's own surface can be found upstream.
+      **════ SESSION 2026-08-12 (cont.): THE GAME SIDE, ATTACKED CAUSALLY.**
+      **★ NEW CAPABILITY: the host can WRITE the running guest's memory, not
+      just read it** (`tools/spike2_emu/guestmem.py`, `memdiff.py`, `e600f2c`).
+      Poking 0x6046e0 drove the game straight out of its service menu, from
+      Windows-side Python into a live ARM guest. That turns every "what does it
+      read?" question from theory into an experiment: set a band-state word to
+      its dots-state value and look at the screen.
+      **★ BOTH STATES CAPTURED AND DIFFED, matched configs** (dots =
+      `item43_run_pin.sh`, band = `item43_run_perstream.sh`, identical env but
+      the pin; six snapshots each, every one stamped mode=0 inmenu=1;
+      `C:\tmp\wf\`). 273 words are steady in both states and different between
+      them — 37 small-valued, the rest pointers. **The one structural finding:
+      a 24-word pointer table at 0x64bb2c..0x64bb88 that is entirely NULL in
+      the dots state and entirely populated in the band state — an object list
+      the starved run never built.**
+      **★★★ AND THE DECISION VARIABLE IS NOT IN THE STATIC GLOBALS. Poked all
+      40 non-pointer differences to their dots values AT ONCE, in a verified
+      menu: the picture did not move. Zeroed the 24-pointer table: the picture
+      did not move (and did not crash).** So the thing that chooses dots vs
+      video lives in a HEAP object, where a cross-run diff cannot follow it
+      because the addresses move. That is a real limit on this instrument and
+      the next pass needs a different one — a heap walker seeded from the
+      object table above, or the ELF route.
+      **★ TRAP, and it invalidated a whole first diff: `PAD_DOOR_OPEN=1` DOES
+      NOT GIVE YOU A SERVICE BOOT while the virtual playfield window is up.**
+      hwshim forces the 1->0 edge early, then the playfield window stamps the
+      door CLOSED again, so the run boots with the door SHUT — video streams,
+      attract is normal, and the "service boot" you think you captured is an
+      ordinary one. Check `[sw] id=33 ... logical=` in the log. The reliable
+      starved state is `PAD_VID_MENUPIN=1`.
+      **★ TRAP: MATCH THE CONFIGS BEFORE DIFFING.** A first pass diffed the
+      pinned run against a door-gate run and produced eight beautiful boolean
+      flips — 0x69133c, 0x6db858, 0x6db880, 0x6db8b0 among them — every one of
+      which was a difference between BUILDS, not between PICTURES. Caught by
+      poking them live and finding they already held the "other" value. The
+      matched pair has exactly one boolean (0x6046e0) and it is the menu's own
+      navigation state.
+      ★ ALSO SETTLED IN PASSING: attract comes back FULL-SCREEN with video
+      after a menu visit under the per-stream build, so the stale-stamp worry
+      recorded against `e51e171` is answered — it recovers on its own.
       dots, unless the menu's own surface can be found upstream.**
       **★ THE GUEST CANNOT READ ITS OWN MEMORY (unexplained, 2026-08-12).**
       The shim's in-guest load of the mode word 0x650744 returns 0 in EVERY

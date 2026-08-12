@@ -1103,6 +1103,19 @@ These have each been violated at least once and each cost a run or a window:
       Attract is untouched: boot on the final build served real clips at
       30/s — the game never needed caps for playback, only the service
       probe reads them.**
+      **FULL VERIFICATION on the final build (`53667d5`, 2026-08-11 late
+      night, my instrumented run):** (1) door open mid-attract → instant red
+      48V overlay, no lag; (2) long Select → version splash; (3) long Select
+      → green "GO TO SWITCH MENU" in full DMD dots (`t_preroll2_menu.png`);
+      (4) Select → green "GO TO DIAGNOSTICS MENU" submenu, navigable
+      (`t_preroll2_submenu.png`); (5) ZERO pipeline churn parked on the menu
+      (0 pipeline_new in 8 s); (6) door close in-menu keeps the menu; (7)
+      long Backs exit cleanly to attract; (8) attract fully healthy after —
+      the DONATELLO champion card renders crisp (`t_attract_now.png`).
+      **REMAINING before close: (a) David's own hands (his acceptance bar);
+      (b) a godzilla 4.31 regression run — the preroll/firmware model is
+      title-agnostic, so godzilla's video menus must be re-checked; it needs
+      this turtles run torn down first (never two rigs at once).**
       **★★★ THE RESOLUTION (rewritten 2026-08-11 night — the earlier
       "PAD_DOOR_OPEN boot" resolution below it is superseded): the service
       pages pick dots BY THEMSELVES.** A 4.28 page decides video-vs-dots at

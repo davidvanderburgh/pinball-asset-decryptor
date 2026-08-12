@@ -1367,22 +1367,23 @@ void *pad_vid_caps_for_pad(void *pad)
 {
     int i, ready = 0;
     struct stream *fb = 0;
-    /* ★ ITEM 43: a stream this shim is presenting as still PREROLLING (see
-     * vid_prerolling) has no negotiated caps yet - the answer that keeps caps
-     * consistent with the PAUSED get_state, which is the real page-build dot
-     * latch. Per-stream and freshness-scoped, NOT a blanket door-open NULL: a
-     * blanket NULL made a settled attract clip answer none while it reported
-     * PLAYING, an inconsistency the game need never see. Runs before the
-     * pad-owner scan so a prerolling owner answers none. */
-    if (pad) {
+    /* ★ ITEM 43: in service mode, a backdrop's caps read NONE - the answer a
+     * real decoder gives mid-preroll, which is what the 4.28 page reads to
+     * pick its DMD text/dot menu. NOTE: this is NOT gated on gst_state, unlike
+     * the get_state lie. The page reads caps in the PAUSED window right after
+     * set_state(PAUSED) - gst_state is 3 there, not 4 - so a gst_state==4
+     * guard (vid_prerolling) would miss the one read that matters. Service
+     * mode alone is the gate: door open AND a service button pressed, so
+     * door-open ATTRACT (no button) still answers real caps and plays
+     * full-screen. */
+    if (pad && pad_service_mode()) {
         for (i = 0; i < PADVID_CHANNELS; i++) {
-            if (streams[i].ready && streams[i].sinkpad == pad
-                    && vid_prerolling(&streams[i])) {
+            if (streams[i].ready && streams[i].sinkpad == pad) {
                 static unsigned char said[PADVID_CHANNELS];
                 if (!said[i]) {
                     said[i] = 1;
-                    VLOG("[vid] ch%d caps none - presenting it as prerolling "
-                         "for the service page (item 43)\n", i);
+                    VLOG("[vid] ch%d caps none - service mode, the page draws "
+                         "its own menu (item 43)\n", i);
                 }
                 return 0;
             }

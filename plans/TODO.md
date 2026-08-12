@@ -1203,14 +1203,25 @@ These have each been violated at least once and each cost a run or a window:
       for the whole run; and the shm word at header offset 64 reads 0 out /
       1 in - the guest-visible channel is live. Menu flow observed from
       attract: Select#1 -> front page (scene, flag 0), Select#2 -> first
-      video page (band, flag 1). NOTE the flag rises AFTER that first video
-      page's build latched (physics: the build precedes the frame), so with
-      the gate wired, page 1 likely bands and pages 2+ draw dots - phase 5
-      observes this; if page 1 matters, the assist is the guest mode word
-      (PAD_VID_MENUMODE 0x650744, menu==0) latched with a SAW-ATTRACT bit
-      to protect boot, which flips BEFORE the page build. Screenshots:
+      video page (band, flag 1). Screenshots:
       C:\tmp\det_boot1(->tmpdet_boot1.png)/det_menu1/det_menu2/det_exit/
       det_reentry/det_reentry2.png.**
+      **★ PHASE 5 TAKE 1 (2026-08-12): RENDERER FLAG ALONE LOSES THE ENTRY
+      RACE - every menu page banded (rflag_menu1/rflag_menu2.png). This
+      CONFIRMS the Path B menudbg trace fact and KILLS the per-page-latch
+      model this file briefly carried: the game latches dots-vs-video ONCE,
+      at menu-SYSTEM entry, at a caps read on the FIRST long Select - and
+      the renderer flag rises only when the first menu FRAME draws, AFTER
+      that latch, by construction. No renderer-side signal can precede the
+      entry latch (the frame IS the evidence, and it does not exist yet).
+      The door gate worked because the door was open BEFORE entry. FIX
+      (built, take 2): vid_menu_gate = rflag OR mode-term, where the mode
+      term is the guest word 0x650744==0 (PAD_VID_MENUMODE, flips BEFORE
+      the entry latch - how it was found) guarded by a SAW-ATTRACT LATCH
+      (mode read 1=attract/tech-alerts or 3=gameplay at least once) in
+      place of the door term, so it cannot fire at boot (boot is mode==0
+      from cold - the old mode-only boot storm). Neither term needs the
+      flicker-prone door read. Fallback when BOTH absent: plain door gate.**
       (Phase 4) gstvid `vid_menu_gate()` reads
       the flag IN PLACE OF the door read: gstvid maps the header page of the
       `PAD_GL_BRIDGE` file itself (glbridge's `hdr` is static in a DIFFERENT

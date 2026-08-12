@@ -1103,7 +1103,18 @@ static int vid_mode_menu(void)
             if (a) { mode = (volatile unsigned int *)a; have = 1; }
         }
     }
-    if (have) return mode && *mode == 0;
+    if (have && mode) {
+        unsigned w = *mode;
+        /* ★ SAW-ATTRACT LATCH (2026-08-12): boot is ALSO mode==0, and a lie
+         * that fires at boot is the prepare storm. But the menu can only be
+         * REACHED from somewhere else - tech-alerts/attract read 1, gameplay
+         * reads 3 - so mode==0 means "menu" exactly when the word has been
+         * seen NOT-zero first. This is what lets the mode term run without
+         * the door term (whose mid-session read flickers - the confound). */
+        static int saw_attract;
+        if (w == 1 || w == 3) saw_attract = 1;
+        return w == 0 && saw_attract;
+    }
     return -1;
 }
 
@@ -1161,13 +1172,19 @@ static int vid_rflag(void)
 
 /* item 43: should the menu lie (get_state=PAUSED + caps=NONE) fire right now?
  * PAD_VID_DOOR=0 is still the MASTER OFF for the whole gate, whatever the
- * source. Then: the RENDERER FLAG when it can answer (vid_rflag above - no
- * unstable door read, no per-title memory address); otherwise the old
- * door/mode logic exactly as the door-gate build proved it: DOOR OPEN alone,
- * or DOOR OPEN && MODE==MENU when the mode word is configured. */
+ * source. Then TWO live signals, OR'd, because each covers the other's blind
+ * beat - PROVEN 2026-08-12: the game latches dots-vs-video ONCE, at menu-
+ * SYSTEM entry, at a caps read on the FIRST long Select. The renderer flag
+ * rises only when the first menu FRAME draws - AFTER that latch - so alone
+ * it banded every page (run-verified); the MODE WORD flips to 0 BEFORE the
+ * latch (the decisive menudbg trace fact), so it wins the entry race, while
+ * the renderer flag confirms through the pages with no per-title address.
+ * Neither fires at boot: the flag was run-proven silent there, the mode term
+ * carries the saw-attract latch. Both configured absent (other titles, old
+ * host binary): the plain door gate, exactly as the door-gate build. */
 static int vid_menu_gate(void)
 {
-    int r;
+    int r, m;
     {
         static int on = -1;
         if (on < 0) {
@@ -1177,12 +1194,10 @@ static int vid_menu_gate(void)
         if (!on) return 0;
     }
     r = vid_rflag();
-    if (r >= 0) return r;
-    {
-        int m = vid_mode_menu();
-        if (m < 0) return vid_door_open();
-        return vid_door_open() && m;
-    }
+    m = vid_mode_menu();
+    if (r > 0 || m > 0) return 1;
+    if (r < 0 && m < 0) return vid_door_open();
+    return 0;
 }
 
 /* ★ ITEM 43 DEBUG (PAD_VID_MENUDBG=1, turtles_pro only): stamp every

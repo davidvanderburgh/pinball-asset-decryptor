@@ -65,6 +65,15 @@ fi
 #     phantom hits.
 set -u
 
+# padpath.sh supplies $PAD_HOME for the feed/tail patterns below. It was
+# referenced without being sourced (9d25782), so a BARE invocation - which is
+# exactly how the non-negotiable says to run this script - died at the helpers
+# row under set -u: the $(...) subshell aborted and the row printed a hollow 0.
+# A counter that reads 0 because it crashed is the exact failure this script
+# exists to not have (its own words, forty lines down). killgame.sh, the
+# sibling, has sourced it at the top all along.
+. "$(dirname "$0")/padpath.sh"
+
 # --total  : the number only. Everything a run leaves behind, mounts included.
 #            This is the "is the machine clean" answer; killgame.sh uses it.
 # --procs  : the number only, WITHOUT card mounts. This is the "is a run up"

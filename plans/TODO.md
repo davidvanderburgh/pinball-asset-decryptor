@@ -410,6 +410,44 @@ These have each been violated at least once and each cost a run or a window:
       mechanism is cracked, the instrument is built and validated, and the fault
       now reproduces on demand from a script — so a pass can no longer end
       having learned nothing. What is left needs a run, not a new instrument.)*
+      **PASS STATE 2026-08-12 evening, branch `item/17`:**
+      **Established at the desk this pass, and it retires the MINSCANS-sweep
+      cost:** `swpoke.py --tap <id> <reads>` already presses for an EXACT number
+      of SPI transfers — a deterministic consumption ladder needing no rebuild
+      and no restart per rung. Its own docstring carries the prior measurement
+      this item needs: Main Menu cursor moved 0 rows at 120/200 ms, 1-2 at
+      250 ms, 3 at 300 ms — the consumer counts transfers inside the hold.
+      Both `PAD_SW_LATCH` and `PAD_SW_MINSCANS` are cached one-shot getenv
+      (`hwshim.c:4460-4477`), so a MINSCANS value still costs a guest restart —
+      use --tap instead wherever it answers the same question.
+      **RUN 1 KILLED BY A COLLISION at ~3 min, nothing measured.** Launched
+      18:52 from this branch (worktree scripts, `PAD_SW_PEND=59,60`, detached
+      per item 38's setsid lead). Boot was normal, bus quiet at 31 s, then
+      autoattract's Service Back presses (2000 ms) logged "did not take" ×2 and
+      at 18:55:26 everything died: `~/padauto.log` ends with a `Killed` job
+      message from a MAIN-CHECKOUT watch.sh running the `runuser` branch of
+      `setsid_as_user` — the AS-ROOT shape only the app uses. The app was open
+      on the desktop at the time (title "… v0.121.0 — bond60"). Not
+      established: who started/stopped what; David asked. The "did not take"
+      lines are NOT evidence yet — the run died mid-sequence.
+      **Fixed on this branch while here: `alive.sh` bare invocation was broken
+      on main tip** — `set -u` + `$PAD_HOME` referenced (9d25782) but padpath.sh
+      never sourced, so the helpers row's subshell died and printed a hollow 0
+      every time. It did not hide this collision (guest/host rows don't use
+      PAD_HOME) but the row was unconditionally 0. Now sources padpath.sh like
+      killgame.sh always has; verified bare-clean.
+      **Launch lesson, costs nothing to keep: a detached watch.sh loses its
+      console** (`[watch] cfg …` lines go to stdout, which dies with the wsl
+      shell). Redirect it to a file next launch.
+      **Resume (this pass):** relaunch once David confirms the rig is free —
+      same recipe plus `> ~/watch_console.log 2>&1` — reach the service menu
+      (door open `swhold.py 33 0`, LONG Select ×2), then: (a) consumption
+      ladder `swpoke.py --tap 59 N` for N=1,2,3,4,8, four presses each,
+      `shotwin.py` grab before/after each, the oracle is the CURSOR MOVING;
+      (b) wall-clock ladder `swpoke.py 59` at 100/250/500/1000/2000 ms, same
+      grabs; (c) `swladder.py 59,60` for the delivery record ([swpend] in
+      `~/gzwatch.log`); (d) per-node scan gap for 59/60's nodes in-menu from
+      [swpend] timestamps.
       **★★★ DAVID AGAIN, 2026-08-12, ON A BUILD THAT ALREADY HAS THE LATCH
       (`979b940` is on main), so `sw_owed[]` did NOT cure the felt case and the
       half that is left is LATENCY, not delivery: "switch input by keyboard or

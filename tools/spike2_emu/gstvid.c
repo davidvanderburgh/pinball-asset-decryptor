@@ -1281,7 +1281,13 @@ static int vid_svc_pretrigger(void)
     }
     if (!win_ms) return 0;
     now = vid_us();
-    if (pad_sw_level(25)) {
+    /* == 1, NOT truthiness: pad_sw_level answers -1 for a switch nobody has
+     * ever edged, which is the state Select is in for the whole of a normal
+     * boot, and -1 is true. That cost a run - the pre-trigger latched on its
+     * very first call and never let go, so the game built every scene under
+     * the lie and came up with no video at all. hwshim.c warns about exactly
+     * this two lines above pad_sw_level; the door gate learned it first. */
+    if (pad_sw_level(25) == 1) {
         if (!until)
             VLOG("[vid] service Select down - starting the menu lie %d ms "
                  "early, before the page is built (item 43)\n", win_ms);

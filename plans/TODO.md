@@ -1076,12 +1076,14 @@ These have each been violated at least once and each cost a run or a window:
 
 
 - [ ] **43. In the turtles service menus the picture goes HALF HEIGHT and the
-      scene text stops drawing.** `S2 D4` ← IN PROGRESS *(**~80%. The MENU
-      RENDER is solved (door gate, committed `71caeb5` = the working
-      resting state), but it has an inherent cost — attract shows the band
-      while the coin door is open — and David chose to pursue the harder,
-      cleaner fix rather than accept it. Branch `item/43`, HEAD `e39eecb`,
-      clean, pushed.**)*
+      scene text stops drawing.** `S2 D4` ← IN PROGRESS *(**~90%. The
+      MECHANISM IS SOLVED — it is the backdrop pipeline's state AT ARM TIME,
+      proven by pinning the lie from boot and getting David's exact reference
+      screen. The remaining work is paying for it without the pin's cost
+      (attract loses its backdrop), which is the per-stream build `e51e171`,
+      IN A LIVE RUN as this line is written. The door gate `71caeb5` remains
+      the working resting state. Branch `item/43`, HEAD `e51e171`, clean,
+      pushed.**)*
       **════ SESSION 2026-08-12 (cont., Path B): FORK RESOLVED + TWO DEAD ENDS
       + A METHOD CONFOUND THAT INVALIDATES THE "MODE-GATE INSUFFICIENT" CLAIM.
       Resume from HERE.**
@@ -1290,6 +1292,30 @@ These have each been violated at least once and each cost a run or a window:
       menu that REUSES an attract-armed stream (the non-pinned run read caps
       on attract's old pad) - if that recurs, the stamp must be refreshed on
       re-arm, which `pad_vid_prepare` already sees as `s->torn_down = 0`.**
+      **★ BUILT, `e51e171` (2026-08-12). `struct stream` carries `lie`,
+      stamped in `pad_vid_prepare()` beside the `torn_down` clear - AHEAD of
+      the absorbs, because an absorbed re-arm is still the game asking for
+      that pipeline at that instant, and that is what carries a stream the
+      menu re-points into the menu's answer. `pad_vid_caps_for_pad()` and
+      `pad_vid_last_state()` read the stamp; an object no stream owns still
+      falls back to the live gate, so unknown pads behave exactly as before.
+      caps now resolves its pad OWNER before answering and matches a stream
+      that is armed but not yet sized - precisely the stream the menu asks
+      about at its entry latch. The stamp is deliberately NOT cleared when
+      the gate falls (leaving the menu re-arms attract's backdrop with a
+      different clip, which re-stamps it truthful); if a run shows attract
+      silent AFTER the menu, that is the first thing to look at, and the fix
+      is a falling-edge clear in prepare(), not a live gate at the questions.
+      `[menudbg]` now prints WHICH STREAM answered, its stamp and the live
+      gate (`ch= lie= gate= r= m=`), and every arm logs "armed UNDER/without
+      the menu lie" - so the run says which reading is right even if it
+      bands: **band with `lie=1` on the answering stream = the lie is not the
+      mechanism at arm time either; band with `lie=0` under `gate=1` = the
+      menu reused a pipeline attract armed, and the build after this one has
+      to force the re-arm.** Out of menudbg go the in-guest reads of the
+      game's mode words - 0 in every state, a needle glued to zero. Run
+      script: `C:\tmp\item43_run_perstream.sh` (David's flow, nothing
+      pinned).**
       **★ THE GUEST CANNOT READ ITS OWN MEMORY (unexplained, 2026-08-12).**
       The shim's in-guest load of the mode word 0x650744 returns 0 in EVERY
       state, while a host read of the same address in the same process

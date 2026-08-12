@@ -51,8 +51,6 @@ extern void *mmap(void *, unsigned long, int, int, int, long);
 extern int usleep(unsigned);
 extern void pad_say(const char *);
 extern int pad_sw_level(unsigned);      /* hwshim.c - item 43's caps door gate */
-static int vid_menu_gate(void);         /* item 43: the delivery loop uses it
-                                         * above its definition */
 extern int pthread_create(unsigned long *, void *, void *(*)(void *), void *);
 extern int clock_gettime(int, unsigned long *);
 
@@ -198,6 +196,29 @@ struct stream {
                                  * the game had torn down at service-menu
                                  * entry, and the resurrected stream's frames
                                  * overwrote the DMD menu texture at 30/s. */
+    /* ★ ITEM 43, THE ARM-TIME LATCH: was the menu gate up when the GAME last
+     * armed this pipeline? This - not the live gate - is what caps and
+     * get_state answer from, and the difference is the whole item.
+     *
+     * Measured 2026-08-12, three runs deep: a lie switched on AT MENU ENTRY is
+     * not enough. caps answering NONE and get_state answering PAUSED
+     * continuously through the visit, both header flags reading 3, the
+     * renderer confirming the menu's own shader program - and every page still
+     * drew the squashed video band. Pinning the same lie ON FROM BOOT drew
+     * David's reference screen, the green dot-matrix page, first time. So what
+     * the service page remembers is the backdrop pipeline's apparent state
+     * WHEN THAT PIPELINE WAS ARMED, and a live gate is wrong in both
+     * directions: it flips under attract's long-lived pipelines (pinning costs
+     * attract its backdrop ENTIRELY - measured, black behind the text, worse
+     * than the band and the cost David rejected), and it arrives at the menu's
+     * own pipelines too late to be what they were built under.
+     *
+     * Stamping it per stream at prepare() gives each pipeline the answer that
+     * was true for IT: attract's streams, armed with the gate down, keep
+     * telling the truth and keep their video, while the menu's own freshly
+     * armed streams - the pinned trace shows the menu arming new pads rather
+     * than reusing attract's - answer NONE/PAUSED and let the page draw dots. */
+    unsigned char lie;
     unsigned long handoff_worst, handoff_total;   /* item 11: does it block? */
     /* item 11's PRE-ARM: the host was told to start decoding this path at
      * note_location() time, under this generation, and prepare() should
@@ -1206,12 +1227,24 @@ static int vid_menu_gate(void)
     return 0;
 }
 
-/* ★ ITEM 43 DEBUG (PAD_VID_MENUDBG=1, turtles_pro only): stamp every
- * get_state/caps answer with the game's own mode/flag words, read in-guest at
- * that exact instant - the only way to see whether the dots-vs-video LATCH at
- * menu entry happens before or after each flips. 0x650744 = app mode
- * (attract=1, menu=0, gameplay=3); 0x663958 = in-service-menu (0/1). Addresses
- * are V1.59.0-specific, which is fine for a debug line that ships disabled. */
+/* ★ ITEM 43: what a QUESTION ABOUT THIS STREAM answers from - the stamp the
+ * stream took when the game last armed it, never the live gate. See the `lie`
+ * field for why arm time is the thing the service page remembers.
+ *
+ * A question about no stream at all - a pad nothing owns, a pipeline that was
+ * never registered - still falls back to the live gate: there is no arm to
+ * read, and the live gate is what every build before this one answered, so an
+ * unknown object behaves exactly as it always did rather than newly telling
+ * the truth in the menu. */
+static int vid_lie_for(const struct stream *s)
+{
+    return s ? (int)s->lie : vid_menu_gate();
+}
+
+/* ★ ITEM 43 DEBUG (PAD_VID_MENUDBG=1): stamp every get_state/caps answer with
+ * the stream that answered it, that stream's arm-time lie, and the live gate -
+ * the only way to see whether the dots-vs-video LATCH at menu entry lands on a
+ * pipeline the menu armed or one attract left lying around. Ships disabled. */
 static int vid_menudbg_on(void)
 {
     static int on = -1;
@@ -1222,22 +1255,26 @@ static int vid_menudbg_on(void)
     return on;
 }
 
-extern int getpid(void);
-
-static void vid_menudbg(const char *site, void *obj, int answer)
+/* ★ 2026-08-12: the in-guest reads of the game's own mode words are GONE from
+ * this line. They printed 0 in every state - the guest cannot read that address
+ * while /proc/<pid>/mem reads the true enum at the same instant, unexplained
+ * and worked around host-side (see modewatch.py) - so they were a needle glued
+ * to zero taking up the space the answer needs.
+ *
+ * What replaces them is what the arm-time build has to be judged on: WHICH
+ * STREAM answered, what stamp it was carrying, and what the live gate said at
+ * the same moment. That is the whole experiment in one line - a menu page that
+ * bands while its answering stream reads lie=0 under gate=1 means the menu is
+ * reusing a pipeline armed back in attract, and a band with lie=1 means the
+ * lie is not the mechanism even at arm time. */
+static void vid_menudbg(const char *site, void *obj, int answer,
+                        const struct stream *s)
 {
     if (!vid_menudbg_on()) return;
-    /* ★ 2026-08-12: pid + ALL FOUR memory-diff candidates, because the shim's
-     * in-guest read of 0x650744 disagrees LIVE with /proc/<game>/mem at the
-     * same address (shim: 0 always; poller: the attract/menu/gameplay enum)
-     * even though the maps prove guest_base==0 and the disassembly proves the
-     * load is real. The pid names which process these stamps actually run in;
-     * the extra cells give the poller more points to match against. */
-    VLOG("[menudbg] %s %p -> %d  mode=%u flag=%u pid=%d c2=%u c3=%u\n",
+    VLOG("[menudbg] %s %p -> %d  ch=%d lie=%d gate=%d r=%d m=%d\n",
          site, obj, answer,
-         *(volatile unsigned *)0x650744, *(volatile unsigned *)0x663958,
-         getpid(),
-         *(volatile unsigned *)0x681c3c, *(volatile unsigned *)0x6d6bbc);
+         s ? chan_of(s) : -1, s ? (int)s->lie : -1,
+         vid_menu_gate(), vid_rflag(), vid_modeflag());
 }
 
 /* Ask the host to open a stream's location. Returns 1 if it can be played. */
@@ -1248,7 +1285,7 @@ int pad_vid_prepare(void *pipeline)
     unsigned gen;
     int spins = 0;
     int adopted = 0;
-    vid_menudbg("set_state(PAUSED)", pipeline, 0);
+    vid_menudbg("set_state(PAUSED)", pipeline, 0, s);
     if (!s || !vid_on()) return 0;
     vid_map();
     if (!vshm || !s->location[0]) return 0;
@@ -1260,6 +1297,29 @@ int pad_vid_prepare(void *pipeline)
      * EOS-reflex defer they can set is honoured by the seek that follows it
      * rather than refused by the torn-down gate. */
     s->torn_down = 0;
+
+    /* ★ ITEM 43: AND THIS IS THE ARM. Stamp the gate onto the stream here,
+     * ahead of the absorbs and every other decision this function makes, for
+     * the same reason torn_down clears here: the game has asked for this
+     * pipeline AT THIS INSTANT, and that instant is what the service page will
+     * remember about it. An absorbed re-arm is still an arm from the game's
+     * side, so it re-stamps too - which is what carries a stream the menu
+     * re-points into the menu's answer.
+     *
+     * The stamp is never cleared by the gate falling: a stream keeps its
+     * answer until the game arms it again, and leaving the menu re-arms
+     * attract's backdrop (a location change - it is a different clip) which
+     * re-stamps it truthful. If a run ever shows attract coming back from the
+     * menu STILL silent, that is the case to look at first, and the fix is a
+     * falling-edge clear here rather than a live gate at the questions. */
+    {
+        int lie = vid_menu_gate();
+        if (lie != (int)s->lie) {
+            VLOG("[vid] ch%d armed %s the menu lie (item 43)\n",
+                 chan_of(s), lie ? "UNDER" : "without");
+            s->lie = (unsigned char)lie;
+        }
+    }
 
     /* ★ ITEM 11, THE STATE-PATH HALF: A RE-ARM OF A CLIP THAT IS STILL
      * PLAYING THE SAME FILE IS ABSORBED, exactly like the rewind absorb in
@@ -1583,43 +1643,54 @@ void pad_vid_announce(void *pipeline, int oldst, int newst)
 void *pad_vid_caps_for_pad(void *pad)
 {
     int i, ready = 0;
-    struct stream *fb = 0;
-    /* ★ ITEM 43: caps read NONE while the coin door is open - a real decoder
-     * mid-preroll has none, which is the state the 4.28 service page reads.
-     * The page-build DOT LATCH is really driven by get_state (see
-     * pad_vid_last_state); this keeps caps consistent with that PAUSED
-     * answer. Gameplay (door shut) gets the truth. Neither gate touches
-     * delivery/set_state/EOS - see vid_door_open(). */
-    if (vid_menu_gate()) {
-        static int said;
-        if (!said) {
-            said = 1;
-            VLOG("[vid] caps answered NONE - the game is in a service menu, "
-                 "so it draws its own dots (item 43; guest flag "
-                 "PAD_VID_MENUFLAG, or the door gate PAD_VID_DOOR)\n");
-        }
-        vid_menudbg("caps", pad, -1);
-        return 0;
-    }
-    vid_menudbg("caps", pad, 1);
+    struct stream *owner = 0, *fb = 0;
+
+    /* Who OWNS this pad is settled before anything is answered, because it is
+     * also who the item 43 lie is read from. Ownership is matched whatever
+     * state the stream is in - a stream that has been armed but has no size
+     * back from the host yet is exactly the one the menu asks about at its
+     * entry latch, and it carries the arm stamp that decides the page. */
     for (i = 0; i < PADVID_CHANNELS; i++) {
+        if (pad && streams[i].pipeline && streams[i].sinkpad == pad && !owner)
+            owner = &streams[i];
         if (!streams[i].ready) continue;
         ready++;
-        if (pad && streams[i].sinkpad == pad) {
-            /* Say it once per channel per size: "the pad matched" is the
-             * healthy answer and a log that only prints the sick one cannot
-             * tell "never happened" from "logging is off". */
-            static unsigned said_w[PADVID_CHANNELS], said_h[PADVID_CHANNELS];
-            if (said_w[i] != streams[i].w || said_h[i] != streams[i].h) {
-                said_w[i] = streams[i].w; said_h[i] = streams[i].h;
-                VLOG("[vid] ch%d caps %ux%u -> its own pad %p\n",
-                     i, streams[i].w, streams[i].h, pad);
-            }
-            return (void *)streams[i].fake_caps;
-        }
         if (!fb) fb = &streams[i];
     }
     if (last_created && last_created->ready) fb = last_created;
+
+    /* ★ ITEM 43: caps read NONE for a stream ARMED INSIDE THE MENU - a real
+     * decoder mid-preroll has none, which is the state the 4.28 service page
+     * reads. The page-build DOT LATCH is really driven by get_state (see
+     * pad_vid_last_state); this keeps caps consistent with that PAUSED answer.
+     * A stream armed OUTSIDE the menu keeps answering the truth however the
+     * gate reads now, which is what leaves attract its backdrop - see `lie`
+     * and vid_lie_for(). Neither gate touches delivery/set_state/EOS. */
+    if (vid_lie_for(owner ? owner : fb)) {
+        static int said;
+        if (!said) {
+            said = 1;
+            VLOG("[vid] caps answered NONE - this stream was armed in a "
+                 "service menu, so the game draws its own dots (item 43; "
+                 "PAD_VID_MENUMODE + the renderer flag, or PAD_VID_DOOR)\n");
+        }
+        vid_menudbg("caps", pad, -1, owner ? owner : fb);
+        return 0;
+    }
+    vid_menudbg("caps", pad, 1, owner ? owner : fb);
+    if (owner && owner->ready) {
+        /* Say it once per channel per size: "the pad matched" is the
+         * healthy answer and a log that only prints the sick one cannot
+         * tell "never happened" from "logging is off". */
+        static unsigned said_w[PADVID_CHANNELS], said_h[PADVID_CHANNELS];
+        int c = chan_of(owner);
+        if (said_w[c] != owner->w || said_h[c] != owner->h) {
+            said_w[c] = owner->w; said_h[c] = owner->h;
+            VLOG("[vid] ch%d caps %ux%u -> its own pad %p\n",
+                 c, owner->w, owner->h, pad);
+        }
+        return (void *)owner->fake_caps;
+    }
     if (fb) {
         static int said;
         static unsigned last_w, last_h;
@@ -1733,7 +1804,7 @@ void pad_vid_play(void *pipeline)
     struct stream *s = find_pipeline(pipeline);
     unsigned long th;
     int rc;
-    vid_menudbg("set_state(PLAYING)", pipeline, 0);
+    vid_menudbg("set_state(PLAYING)", pipeline, 0, s);
     /* item 43: PLAYING ends a pause hold - BEFORE the early return below,
      * which is exactly the absorbed-re-arm case this flag exists for (the
      * thread is alive and holding, s->playing is still 1). gst_state tracks
@@ -1827,7 +1898,7 @@ void pad_vid_note_paused(void *pipeline)
 int pad_vid_last_state(void *pipeline)
 {
     struct stream *s = find_pipeline(pipeline);
-    /* ★ ITEM 43: with the coin door open, a backdrop reads PAUSED, not
+    /* ★ ITEM 43: a backdrop ARMED INSIDE THE MENU reads PAUSED, not
      * PLAYING - the state a real decoder is genuinely in while it prerolls,
      * which is the instant the 4.28 service page decides its picture. THIS,
      * not the caps read, is what flips the page to its DMD dot menu: caps
@@ -1835,14 +1906,15 @@ int pad_vid_last_state(void *pipeline)
      * Reported for a stream that is STILL DELIVERING on purpose - the dots
      * are drawn OVER the backdrop, exactly as on hardware - and it is safe
      * here because it changes only what get_state ANSWERS, never delivery
-     * (the lag), never set_state (the wedge), never EOS (the freeze). Door
-     * shut: the truth, so gameplay and attract are untouched. */
-    if (vid_menu_gate() && s && s->gst_state == 4) {
-        vid_menudbg("get_state(lie)", pipeline, 3);
+     * (the lag), never set_state (the wedge), never EOS (the freeze). A
+     * stream armed outside the menu: the truth, so gameplay and attract are
+     * untouched however the gate reads while they are asked. */
+    if (s && s->lie && s->gst_state == 4) {
+        vid_menudbg("get_state(lie)", pipeline, 3, s);
         return 3;
     }
-    if (!s || !s->gst_state) { vid_menudbg("get_state", pipeline, 1); return 1; }
-    vid_menudbg("get_state", pipeline, s->gst_state);
+    if (!s || !s->gst_state) { vid_menudbg("get_state", pipeline, 1, s); return 1; }
+    vid_menudbg("get_state", pipeline, s->gst_state, s);
     return s->gst_state;
 }
 

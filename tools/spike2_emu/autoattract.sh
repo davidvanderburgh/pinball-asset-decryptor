@@ -64,6 +64,18 @@
 # was ready and the hold that followed landed just after. Press LENGTH was
 # confounded with READINESS, and the conclusion drawn was about the wrong
 # variable. Once readiness is detected properly, 300-500 ms is plenty.
+#
+# ★ AND THAT TABLE IS PER-TITLE, which cost David two manual rescues on
+# 2026-08-12 (item 43): on turtles_pro 1.59.0 a 500 ms press is SWALLOWED -
+# all five tries logged "the last one did not take" and the game sat on Tech
+# Alerts until he pressed Escape himself, twice, on two separate runs - while
+# two 2000 ms holds (swpoke.py 28 2000) took FIRST TIME, both times. So the
+# default is now 2000. That fits what the coin-door work already found: these
+# service buttons are polled slowly, and the floor is a property of the TITLE
+# ([[reference_spike2_coin_door_interlock]]). The noise argument above does not
+# survive the change either - it was written when a fixed 3 s timer fired four
+# to eleven presses per boot; with the readiness signal a boot presses ONCE,
+# and one long hold is quieter than five short ones that do nothing at all.
 . "$(dirname "$0")/padpath.sh"
 set -u
 
@@ -74,7 +86,7 @@ S=$(dirname "$0")
 SW=$ROOT/dump/padsw
 
 BACK=28                              # Service Back == Esc in the legend window
-HOLD=${PAD_AUTO_HOLD:-500}           # ms to press; see the table above
+HOLD=${PAD_AUTO_HOLD:-2000}          # ms to press; see the table above
 QUIET=${PAD_AUTO_QUIET:-2}           # s of bus silence that means "ready"
 TRIES=${PAD_AUTO_TRIES:-5}           # presses before giving up and saying so
 # 45 s, raised from 20 on 2026-08-10, after star_wars_le walked into the

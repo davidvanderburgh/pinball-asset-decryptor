@@ -52,6 +52,19 @@ typedef struct {
      * fixed PADGL_HDR_BYTES page boundary, so old binaries and new agree on
      * every other field and an old reader simply never looks at this one. */
     unsigned int  menu_flag;
+    /* ★ ITEM 43: the SECOND menu signal, same two-bit shape (bit1 ARMED,
+     * bit0 MENU), written by modewatch.py - a host-side helper that reads the
+     * game's own app-mode word out of /proc/<guest>/mem. It exists because
+     * the renderer's verdict above, however clean, CANNOT WIN THE ENTRY RACE:
+     * the game latches dots-vs-video at a caps read on the first long Select,
+     * before the first menu frame is ever drawn, so a signal derived FROM
+     * frames is structurally too late (run-proven 2026-08-12, twice). The
+     * mode word flips BEFORE that latch. It is read host-side rather than
+     * in-guest because the guest's own load of that address returns 0 while
+     * /proc reads the true value at the same instant in the same process -
+     * unexplained, measured to 314k samples; see TODO item 43. Two fields
+     * rather than one so a run can still say WHICH signal fired. */
+    unsigned int  mode_flag;
 } padgl_hdr;
 
 #define PADGL_HDR_BYTES  4096          /* header page, then the ring data */

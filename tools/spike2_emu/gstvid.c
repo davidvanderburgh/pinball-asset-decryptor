@@ -1081,48 +1081,26 @@ static int vid_door_open(void)
  * (hex, 0x-optional) and the launcher sets it only for the title it was found
  * on. Returns 1 when the word reads 0 (menu/boot), 0 otherwise; -1 when it is
  * not configured, so the caller falls back to the plain door gate and every
- * other title behaves exactly as the committed door-gate build (71caeb5). */
-static int vid_mode_menu(void)
-{
-    static int inited, have;
-    static volatile unsigned int *mode;
-    if (!inited) {
-        const char *e = getenv("PAD_VID_MENUMODE");
-        inited = 1;
-        if (e && e[0]) {
-            unsigned long a = 0;
-            if (e[0] == '0' && (e[1] == 'x' || e[1] == 'X')) e += 2;
-            for (; *e; e++) {
-                int d;
-                if (*e >= '0' && *e <= '9') d = *e - '0';
-                else if (*e >= 'a' && *e <= 'f') d = *e - 'a' + 10;
-                else if (*e >= 'A' && *e <= 'F') d = *e - 'A' + 10;
-                else break;
-                a = a * 16 + (unsigned)d;
-            }
-            if (a) { mode = (volatile unsigned int *)a; have = 1; }
-        }
-    }
-    if (have && mode) {
-        unsigned w = *mode;
-        /* ★ SAW-ATTRACT LATCH (2026-08-12): boot is ALSO mode==0, and a lie
-         * that fires at a NORMAL boot is the prepare storm. The menu is only
-         * REACHED from somewhere else - attract reads 1, gameplay 3 - so
-         * mode==0 means "menu" once the word has been seen NOT-zero. That
-         * covers every mid-session entry without the door term (whose
-         * mid-session read flickers - the confound). The OR-DOOR arm covers
-         * the SERVICE BOOT, where the word can sit at 0 from cold and
-         * attract never happens: there PAD_DOOR_OPEN's stamped edge reads
-         * STABLY open (the flicker is a mid-session artifact), and the
-         * door-gate build already proved a lie held through a service boot
-         * is safe - it is exactly what that build did. A normal boot has
-         * the door shut and no attract yet: both arms off, no storm. */
-        static int saw_attract;
-        if (w == 1 || w == 3) saw_attract = 1;
-        return w == 0 && (saw_attract || vid_door_open());
-    }
-    return -1;
-}
+ * other title behaves exactly as the committed door-gate build (71caeb5).
+ *
+ * ★★★ AND THE IN-GUEST READ OF IT IS GONE, 2026-08-12, because IT DOES NOT
+ * WORK AND NOBODY KNOWS WHY. The shim's own load of 0x650744 returns 0 in
+ * EVERY state - attract, menu, gameplay - while a host-side read of the SAME
+ * address, in the SAME process, at the SAME instant, returns the true enum.
+ * That is not a timing artifact and not a fork: one pid, 21 threads, no child
+ * process maps the game; guest_base is 0 (the guest ELF's magic sits at host
+ * 0x18000); the disassembly of this function showed a literal `ldr` of
+ * 0x650744; and a 60 s window sampling the host at 5 kHz logged 314,316
+ * samples, value 1 throughout, ZERO transitions, while two in-guest stamps
+ * inside that same window both said 0. Its neighbour at 0x663958 agrees
+ * between the two readers, which makes it stranger still, not less strange.
+ *
+ * Rather than wait on an explanation, the word is now read HOST-side by
+ * modewatch.py and published through the padgl header (vid_modeflag() below).
+ * The knowledge is kept here because the address, the saw-attract latch that
+ * stops it firing at boot, and the reason this signal is needed AT ALL - it
+ * is the only one that arrives before the entry latch - all moved to that
+ * helper, and this is where the next person will come looking. */
 
 /* ★ ITEM 43 PATH A: THE RENDERER'S OWN VERDICT, read back host->guest. The
  * host renderer (padglhost) classifies every draw by shader program - a frame
@@ -1143,7 +1121,7 @@ static int vid_mode_menu(void)
  * and every other title behaves exactly as before. The armed bit is read
  * PER CALL, not latched: a guest that maps before the host stamps it heals
  * on the next query. PAD_VID_RFLAG=0 refuses the channel outright. */
-static int vid_rflag(void)
+static volatile padgl_hdr *vid_bridge_hdr(void)
 {
     static int inited, refused;
     static volatile padgl_hdr *gh;
@@ -1164,16 +1142,38 @@ static int vid_rflag(void)
                         && ((padgl_hdr *)p)->version == PADGL_VERSION)
                     gh = (volatile padgl_hdr *)p;
             }
-            VLOG("[vid] renderer menu flag: %s\n",
-                 gh ? "attached" : "unavailable (door/mode gate)");
+            VLOG("[vid] host menu channel: %s\n",
+                 gh ? "attached" : "unavailable (door gate)");
         }
     }
-    if (refused || !gh) return -1;
-    {
-        unsigned w = gh->menu_flag;
-        if (!(w & 2u)) return -1;       /* detector not armed: fall back */
-        return (int)(w & 1u);
-    }
+    return refused ? 0 : gh;
+}
+
+static int vid_rflag(void)
+{
+    volatile padgl_hdr *gh = vid_bridge_hdr();
+    unsigned w;
+    if (!gh) return -1;
+    w = gh->menu_flag;
+    if (!(w & 2u)) return -1;           /* detector not armed: fall back */
+    return (int)(w & 1u);
+}
+
+/* ★ ITEM 43: the OTHER half of the same header page - the game's own menu word,
+ * read host-side by modewatch.py and published here because the guest cannot
+ * read that address itself (its load returns 0 in every state while /proc
+ * reads the true enum at the same instant; see modewatch.py). This is the term
+ * that WINS THE ENTRY RACE: the word flips before the service page latches
+ * dots-vs-video, where the renderer's frame-derived verdict cannot. Same
+ * two-bit contract: no armed bit -> -1 -> the caller falls back. */
+static int vid_modeflag(void)
+{
+    volatile padgl_hdr *gh = vid_bridge_hdr();
+    unsigned w;
+    if (!gh) return -1;
+    w = gh->mode_flag;
+    if (!(w & 2u)) return -1;
+    return (int)(w & 1u);
 }
 
 /* item 43: should the menu lie (get_state=PAUSED + caps=NONE) fire right now?
@@ -1199,8 +1199,8 @@ static int vid_menu_gate(void)
         }
         if (!on) return 0;
     }
-    r = vid_rflag();
-    m = vid_mode_menu();
+    r = vid_rflag();          /* the renderer's verdict: right, but late    */
+    m = vid_modeflag();       /* the game's own word: in time for the latch */
     if (r > 0 || m > 0) return 1;
     if (r < 0 && m < 0) return vid_door_open();
     return 0;
@@ -1222,11 +1222,22 @@ static int vid_menudbg_on(void)
     return on;
 }
 
+extern int getpid(void);
+
 static void vid_menudbg(const char *site, void *obj, int answer)
 {
     if (!vid_menudbg_on()) return;
-    VLOG("[menudbg] %s %p -> %d  mode=%u flag=%u\n", site, obj, answer,
-         *(volatile unsigned *)0x650744, *(volatile unsigned *)0x663958);
+    /* ★ 2026-08-12: pid + ALL FOUR memory-diff candidates, because the shim's
+     * in-guest read of 0x650744 disagrees LIVE with /proc/<game>/mem at the
+     * same address (shim: 0 always; poller: the attract/menu/gameplay enum)
+     * even though the maps prove guest_base==0 and the disassembly proves the
+     * load is real. The pid names which process these stamps actually run in;
+     * the extra cells give the poller more points to match against. */
+    VLOG("[menudbg] %s %p -> %d  mode=%u flag=%u pid=%d c2=%u c3=%u\n",
+         site, obj, answer,
+         *(volatile unsigned *)0x650744, *(volatile unsigned *)0x663958,
+         getpid(),
+         *(volatile unsigned *)0x681c3c, *(volatile unsigned *)0x6d6bbc);
 }
 
 /* Ask the host to open a stream's location. Returns 1 if it can be played. */

@@ -1076,33 +1076,55 @@ These have each been violated at least once and each cost a run or a window:
 
 
 - [ ] **43. In the turtles service menus the picture goes HALF HEIGHT and the
-      scene text stops drawing.** `S2 D2` ← IN PROGRESS *(**98%, 2026-08-11
-      late night: THE GREEN MENU WORKS MID-SESSION — door open, two long
-      Selects, "GO TO SWITCH MENU" and "GO TO DIAGNOSTICS MENU" in full
-      DMD dots, navigable, `t_preroll2_menu.png` / `t_preroll2_submenu.png`.
-      What remains: David's own hands, and a godzilla regression run.**
-      Branch `item/43`, clean and pushed.)*
-      **★★★ THE ACTUAL MECHANISM, found by tracing what the game ASKS (the
-      three theories before it are archaeology now):** the 4.28 service flow
-      arms its backdrop pipeline and reads `pad_get_negotiated_caps`
-      MICROSECONDS after set_state(PAUSED). No real pipeline has caps that
-      soon — preroll is a cold decoder start, and the first one of the
-      process is seconds of VPU firmware load (the game's own log even
-      prints the fw-load error here). Real hardware therefore ALWAYS answers
-      that probe "none", and the page style latches the DMD dot menu. Our
-      stub answered instantly with 1360x768, which latched a HALF-BUILT
-      video-menu mode that draws one band of backdrop video, no text, no
-      dots — the original complaint, and a mode no real machine ever shows.
-      **THE FIX (three commits): `0df8a01` removes the door gate (it turned
-      the menu's own backdrop arm into a set_state FAILURE — the wedge);
-      `47a5b3d` models the VPU firmware load (first arm = 4 s window,
-      `PAD_VID_FWLOAD_MS`); `eab777d`+`53667d5` model per-arm PREROLL
-      (~150 ms, `PAD_VID_PREROLL_MS`; fresh arms stamp it, absorbed re-arms
-      of a live clip keep their caps, and a mid-preroll pad OWNER answers
-      none rather than letting the fallback leak another stream's size).
-      Attract is untouched: boot on the final build served real clips at
-      30/s — the game never needed caps for playback, only the service
-      probe reads them.**
+      scene text stops drawing.** `S2 D4` ← IN PROGRESS *(**~80%. The MENU
+      RENDER is solved (door gate, committed `71caeb5` = the working
+      resting state), but it has an inherent cost — attract shows the band
+      while the coin door is open — and David chose to pursue the harder,
+      cleaner fix rather than accept it. Branch `item/43`, clean, pushed.**)*
+      **★★★ THE FUNDAMENTAL WALL (proven 2026-08-12, do not re-litigate): a
+      SETTLED service-menu page and settled attract are BYTE-IDENTICAL to
+      the video shim — both a steadily-playing backdrop, zero state changes,
+      just handoffs (trace-proven). The menu draws its dots/text ONLY when
+      the game believes its backdrop is not playing; that same lie, whenever
+      active, bands ATTRACT. Nothing the VIDEO layer sees distinguishes "in
+      the menu" from "in attract with the door open."** Every video-side
+      discriminator was built and killed: door alone (bands attract-open),
+      per-arm preroll timer (FROZE gameplay — 16,000-pipeline storm, 15 fps),
+      frames-delivered freshness (menu backdrop settled at 207 frames, same
+      as attract), state-cycling (only during transitions; settled pages are
+      identical), and service-mode = door+service-button (works but latches
+      the lie over attract too, and caps read at PAUSED so a gst_state==4
+      guard misses it). The get_state=PAUSED lie is necessary AND caps=NULL
+      alone is insufficient. See [[reference_spike2_caps_preroll_latch]].
+      **THE WORKING RESTING STATE (`71caeb5`, the door gate = 0cd1a05's
+      logic): while the coin door is open, get_state answers PAUSED for a
+      PLAYING backdrop and caps read NONE → the menu renders (Tech Alerts
+      text, GO TO SWITCH/DIAGNOSTICS dots — `t_stategate_menu.png`).
+      Verified it also starts a game and plays (`t_stategate_gamestart.png`).
+      COST: attract-with-door-open bands (David saw it). `PAD_VID_DOOR=0`
+      disables the whole gate.**
+      **★ DEEP-RE FINDING (2026-08-12, the path David chose): the game
+      BLANKS THE LCD in the service menu — a no-lie menu frame draws exactly
+      ONE thing (the DMD-strip band: 1 DRAWARRAYS, 1 TEXDIRECT, prog-27 unit
+      quad, tex 2), while an attract frame draws a 19-draw scene. So the menu
+      is detectable by GAME STATE (LCD blank / only the DMD strip live), and
+      that signal holds whether or not the lie is active. BUT the menu's
+      dot/text content does NOT exist without the lie (the game never uploads
+      a dot surface when it picks video), so the renderer cannot synthesize
+      it — the signal can only GATE THE LIE. Two build paths, both
+      substantial, neither done:
+      (A) RENDERER→SHIM FEEDBACK: padglhost detects "no full-screen LCD draw
+      this frame" (prog-27 model matrix sy≈340 band vs ≈768 full) and writes
+      a flag to shared memory; gstvid reads it in place of the door in
+      vid_prerolling. Stable across the lie (both menu states blank the LCD),
+      so no oscillation; first page may flash band before the flag sets.
+      (B) GUEST-MEMORY STATE VAR: the shim runs in the guest arm address
+      space, so gstvid can read a "screen mode / in-service-menu" variable
+      directly — no feedback channel. Needs that address found, via the
+      caller of gst_element_get_state (log `__builtin_return_address` → the
+      video-manager code → the nearby menu-state flag) or a memory diff of
+      attract vs menu. Cleaner architecture (reflects true game state, no
+      transition flash) but the address hunt is the work.
       **FULL VERIFICATION on the final build (`53667d5`, 2026-08-11 late
       night, my instrumented run):** (1) door open mid-attract → instant red
       48V overlay, no lag; (2) long Select → version splash; (3) long Select

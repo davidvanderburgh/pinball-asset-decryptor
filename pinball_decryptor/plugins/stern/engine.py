@@ -371,20 +371,62 @@ _ASSET_REF = re.compile(rb"\d+\.asset/\d+\.asset")
 _IDENT = re.compile(rb"[A-Za-z][A-Za-z0-9_]{2,80}")
 _RADIUM_SKIP = {"Video", "video", "in_game_videos"}
 
+# A radium video record is
+#   <u64 len><name><u32 id><u64 len><N.asset/M.asset>
+# so the name always ends exactly 12 bytes before the reference it names.
+_RADIUM_NAME_GAP = 4 + 8
+_RADIUM_NAME_MAX = 96
+
+
+def _radium_name_before(data, end):
+    """The length-prefixed scene-element name ending at *end*, or ``None``.
+
+    Strings in a ``scene.radium`` carry a ``u64`` length prefix (the same
+    framing :func:`_nearest_element_name` reads for images), so the name is
+    recovered by finding the ``ln`` whose prefix sits exactly ``ln + 8`` bytes
+    back.  Scanning *forward* from ``ln = 1`` can't match early: a shorter
+    candidate would have to read its prefix out of the name's own bytes, and a
+    small ``u64`` needs seven zero bytes that printable text never has.
+    """
+    for ln in range(1, _RADIUM_NAME_MAX + 1):
+        p = end - ln - 8
+        if p < 0:
+            break
+        if struct.unpack_from("<Q", data, p)[0] != ln:
+            continue
+        body = data[end - ln:end]
+        if all(32 <= b < 127 for b in body):
+            return body.decode("latin1")
+    return None
+
 
 def _parse_radium(data):
     """Map ``asset_ref -> name`` from a ``scene.radium``: each LCD video asset is
-    named by the scene-element identifier immediately preceding its
-    ``N.asset/M.asset`` reference (verified contiguous on the TMNT card)."""
+    named by the scene element that references it.
+
+    The name is read from its ``u64`` length prefix.  Trusting the nearest
+    identifier *text* instead used to append a stray character, because the
+    ``u32`` id between the name and the reference is ``0x800000nn`` and its low
+    byte is usually ASCII -- ``GodzillaVsMegalon_Award1`` came out as
+    ``GodzillaVsMegalon_Award1i``, and a run of clips picked up ``c, d, e, f
+    ...`` as the id counted up.  Falls back to the identifier scan for any
+    reference that isn't framed this way.
+    """
     import bisect
-    names = [(m.start(), m.group().decode("latin1"))
-             for m in _IDENT.finditer(data)]
-    name_offs = [p for p, _ in names]
+    names = name_offs = None
     out = {}
     for m in _ASSET_REF.finditer(data):
         ref = m.group().decode()
         if ref in out:
             continue
+        nm = _radium_name_before(data, m.start() - _RADIUM_NAME_GAP)
+        if nm and nm not in _RADIUM_SKIP and ".asset" not in nm:
+            out[ref] = nm
+            continue
+        if names is None:      # unframed record -- pay for the scan once
+            names = [(x.start(), x.group().decode("latin1"))
+                     for x in _IDENT.finditer(data)]
+            name_offs = [p for p, _ in names]
         j = bisect.bisect_left(name_offs, m.start()) - 1
         while j >= 0:
             nm = names[j][1]
@@ -424,6 +466,54 @@ def _work_dir(label=None, base="spike2_"):
         except FileExistsError:
             continue
     return tempfile.mkdtemp(prefix=base)  # astronomically unlikely fallback
+
+
+def _read_video_manifest(vid_dir):
+    """``{output filename: card path}`` from a previous extract's
+    ``video/manifest.txt``, or ``{}`` when there isn't one."""
+    out = {}
+    try:
+        with open(os.path.join(vid_dir, "manifest.txt"), encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("#"):
+                    continue
+                cols = line.rstrip("\n").split("\t")
+                if len(cols) >= 2 and cols[0]:
+                    out[cols[0]] = cols[1]
+    except OSError:
+        pass
+    return out
+
+
+def _remove_renamed_video_twins(vid_dir, prev, written, log=None):
+    """Delete a previous extract's copy of a clip this run wrote under a new
+    name.
+
+    Clip names come from the card's scene data, so they move when the title's
+    firmware changes -- and once, for every card, when the naming itself is
+    corrected.  The re-extract writes the new name and the old file just sits
+    there: two files for one clip, no ``manifest.txt`` row for the stale one,
+    and the same GUI clutter / Write-mapping hazard
+    :func:`_remove_renamed_audio_twins` exists to prevent.
+
+    Only files this tool itself recorded in the old manifest are considered,
+    and only when this run wrote the same card path under a different name --
+    so anything the user put in the folder is left alone.
+    """
+    removed = 0
+    for old_name, card_path in prev.items():
+        new_name = written.get(card_path)
+        if not new_name or new_name == old_name:
+            continue
+        try:
+            os.remove(os.path.join(vid_dir, old_name))
+            removed += 1
+        except OSError:
+            pass
+    if removed and log:
+        log("Removed %d video(s) a previous extract had saved under a "
+            "different name." % removed, "info")
+    return removed
 
 
 def extract_videos(reader, output_dir, log=None, progress=None, cancel=None):
@@ -471,8 +561,10 @@ def extract_videos(reader, output_dir, log=None, progress=None, cancel=None):
 
     vid_dir = os.path.join(output_dir, "video")
     os.makedirs(vid_dir, exist_ok=True)
+    prev = _read_video_manifest(vid_dir)
     log("Extracting %d video(s)..." % len(vids), "info")
     manifest = []
+    written = {}       # card path -> output filename this run
     used = {}
     named = 0
     for i, (path, node, brand) in enumerate(vids):
@@ -490,11 +582,13 @@ def extract_videos(reader, output_dir, log=None, progress=None, cancel=None):
         fname = (base if k == 0 else "%s_%d" % (base, k + 1)) + ext
         reader.extract_file(node, os.path.join(vid_dir, fname))
         manifest.append("%s\t%s\t%d" % (fname, path, node["size"]))
+        written[path] = fname
     try:
         with open(os.path.join(vid_dir, "manifest.txt"), "w", encoding="utf-8") as f:
             f.write("# output\tcard path\tbytes\n" + "\n".join(manifest) + "\n")
     except Exception:
         pass
+    _remove_renamed_video_twins(vid_dir, prev, written, log)
     log("Extracted %d video(s) to %s (%d named from scene data)."
         % (len(manifest), vid_dir, named), "success")
     return len(manifest)

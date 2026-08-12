@@ -1112,10 +1112,36 @@ These have each been violated at least once and each cost a run or a window:
       (0 pipeline_new in 8 s); (6) door close in-menu keeps the menu; (7)
       long Backs exit cleanly to attract; (8) attract fully healthy after —
       the DONATELLO champion card renders crisp (`t_attract_now.png`).
-      **REMAINING before close: (a) David's own hands (his acceptance bar);
-      (b) a godzilla 4.31 regression run — the preroll/firmware model is
-      title-agnostic, so godzilla's video menus must be re-checked; it needs
-      this turtles run torn down first (never two rigs at once).**
+      **★★★★ THE PREROLL MODEL WAS WRONG AND IS GONE. David field-tested it:
+      it FROZE gameplay** — the game stuck on the high-score screen with the
+      start music playing, and attract video vanished. Diagnosed live: the
+      per-arm 150 ms NULL-caps caused a PREPARE STORM (16,000+ pipelines,
+      renderer starved 57→15 fps) because every scene that WANTS video reads
+      caps in <1 ms, gets NULL, and re-arms forever. The menu was satisfied
+      by NULL (dots) but no scene could be. Same NULL, opposite need — the
+      model could not tell them apart.
+      **THE REAL FIX (`0cd1a05`), and it is the whole item's synthesis: the
+      COIN DOOR is the only honest discriminator (menu = door open, play =
+      door shut), and the DOT LATCH is driven by get_state, not caps.** While
+      the door is open, `pad_vid_last_state` answers PAUSED (not PLAYING) for
+      a backdrop that is still delivering — the state a real decoder is
+      genuinely in mid-preroll, which is the instant the 4.28 page decides
+      its picture, so it renders its TEXT/dots and plays video underneath.
+      caps also read NONE (kept consistent). The gate touches NOTHING else:
+      not delivery (the lag), not set_state (the wedge), not EOS (the
+      freeze). Door SHUT = the truth = gameplay and attract exactly as
+      before. Removed: door-refuses-prepare, delivery holds, the VPU/preroll
+      timers — all the mechanisms that ever manufactured an unreal state.
+      **VERIFIED END-TO-END on the final build (2026-08-11 late night):**
+      (1) attract video plays — the four-turtles cartoon backdrop behind
+      PLAYER 1 (`t_doorgate_attract.png`); (2) door open + long Selects →
+      the Tech Alerts service page renders EVERY switch line in text on a
+      full-screen backdrop, no band (`t_stategate_menu.png`) — the original
+      "scene text stops drawing" is fixed; (3) door shut + coin + Start →
+      the game STARTS, Leonardo/Ball 1/full HUD (`t_stategate_gamestart.png`)
+      — the freeze is gone; (4) no storm (0-8 pipeline_new), 42-52 fps
+      throughout. **REMAINING: (a) David's own hands; (b) a godzilla 4.31
+      regression run (needs this run torn down first).**
       **★★★ THE RESOLUTION (rewritten 2026-08-11 night — the earlier
       "PAD_DOOR_OPEN boot" resolution below it is superseded): the service
       pages pick dots BY THEMSELVES.** A 4.28 page decides video-vs-dots at

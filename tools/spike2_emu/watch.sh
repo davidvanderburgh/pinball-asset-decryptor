@@ -359,7 +359,7 @@ if [ "$DROP" = 1 ]; then
 fi
 
 HOSTPG=""; GAMEPG=""; AUDPG=""; AUTOPG=""; VIDPG=""; EVTPG=""; TBLPG=""
-BALLPG=""; MODEPG=""
+BALLPG=""
 # PAD_PIVOT run only: the guest logs to $ROOT/dump/game.out (its stdout points
 # inside the container - see run_game.sh), so a tail folds that back into $LOG
 # and every existing reader (autoattract, the [sw]/[segv] greps, gamestate)
@@ -406,8 +406,6 @@ teardown() {
     pkill -9 -f 'autoattract.sh' 2>/dev/null
     [ -n "$BALLPG" ] && kill -9 -"$BALLPG" 2>/dev/null
     pkill -9 -f 'ballfeed[.]py' 2>/dev/null
-    [ -n "$MODEPG" ] && kill -9 -"$MODEPG" 2>/dev/null
-    pkill -9 -f 'modewatch[.]py' 2>/dev/null
     # longplay.sh is started BESIDE a run rather than by it, so it has no pgid
     # here - but a leaked one keeps poking ramp optos, and it would do that
     # into the NEXT run. It watches the guest and exits on its own; this is the
@@ -960,22 +958,6 @@ if [ "${PAD_BALL_FEED:-1}" != 0 ]; then
     BALLPG=$!
     echo "[watch] ball feed on: the game's own trough eject will be answered"
     echo "[watch] (PAD_BALL_FEED=0 to move balls by hand with plunge.py)."
-fi
-
-# THE MENU WATCHER (item 43), started only when the title has a mode-word
-# address configured. It reads the game's own "in the service menu" word out
-# of /proc/<guest>/mem and publishes it to the video shim through the padgl
-# ring header, because that is the ONE signal that arrives before the service
-# page latches dots-vs-video - and because the guest cannot read that address
-# itself (see modewatch.py's header for the measurement). Without it the shim
-# falls back to the renderer flag and then the door gate, so a title with no
-# address configured behaves exactly as before.
-if [ -n "${PAD_VID_MENUMODE:-}" ]; then
-    PAD_GL_BRIDGE_HOST=$RING_HOST setsid_as_user python3 "$S/modewatch.py" \
-        > "$HOME/padmode.log" 2>&1 &
-    MODEPG=$!
-    echo "[watch] menu watcher on: publishing the game's own menu word to the"
-    echo "[watch] video shim (unset PAD_VID_MENUMODE to turn it off)."
 fi
 
 # PAD_DOOR_OPEN=1 - boot with the coin door held OPEN, for servicing (item 43).

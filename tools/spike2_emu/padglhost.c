@@ -240,24 +240,14 @@ static long seq_from = 60, seq_to = 62;
  * live, whatever PADGL_DEBUG said at start. The trigger file is unlinked as
  * it is consumed so each touch dumps exactly one frame. */
 static int seq_trigger_armed;
-/* ★ ITEM 43 Phase 2: the MENU DETECTOR. The service menu's dots-vs-band choice
- * is latched in the GUEST from the backdrop pipeline's apparent state, and the
- * only stable "we are in the menu" signal anywhere in the system is HERE, in
- * the draw stream: a menu frame draws its backdrop with the DMD/LCD-strip
- * program (27 on turtles 4.28) and NOTHING else, while attract/boot/gameplay
- * frames draw with other programs (attract backdrop = 36 + text). So: classify
- * every draw by jcur_prog; a frame whose draws are ALL menu-prog raises
- * hdr->menu_flag (mid-frame, at the first such draw, for minimum latency); a
- * frame with any other-prog draw clears it at SWAP; a no-draw frame holds.
- * The guest's gstvid reads the flag in place of the coin-door level, whose
- * mid-session read flickers under the matrix scan (the confound that sank the
- * door gate). PAD_GL_MENUPROG overrides the program number; 0 disarms.
- * menu_mixed_frames counts frames with BOTH kinds of draw - expected never;
- * nonzero means the discriminator is dirtier than phase 1 measured. */
-static unsigned menu_prog = 27;
-static int menu_flag_cur;
-static unsigned fr_menu_draws, fr_scene_draws, fr_scene_prog;
-static long menu_mixed_frames;
+/* ★ ITEM 43's MENU DETECTOR LIVED HERE AND IS GONE (item fixed 2026-08-12).
+ * It classified every draw by shader program so the guest could be told "you
+ * are in the service menu" - a clean signal, run-verified with no false
+ * positives - built to feed a lie in the video shim that turned out to be
+ * unnecessary. The band was glbridge.c sending the VIDEO's Vivante texture
+ * registration for the MENU's texture; see the tombstone in gstvid.c. If a
+ * future item wants a menu signal, it is in the history at ca0ab7c~1, about
+ * forty lines. */
 static unsigned cur_tex_unit_binding;
 /* The MIN_FILTER the GAME set on each texture, 0 when it never set one.
  *
@@ -3061,36 +3051,6 @@ static void draw_say(unsigned count, unsigned first,
     }
 }
 
-/* ★ ITEM 43: flip the menu flag and publish it to the guest. Transitions only
- * - the log stays a handful of lines per menu visit, and boot/gameplay runs
- * that never enter the menu stay silent (any line during boot would mean the
- * discriminator fires where it must not - the boot-lie storm). */
-static void menuflag_set(int v, unsigned prog)
-{
-    if (menu_flag_cur == v) return;
-    menu_flag_cur = v;
-    if (hdr) hdr->menu_flag = 2u | (unsigned)v;   /* bit 1 = armed, see padgl.h */
-    fprintf(stderr, "[padglhost] item43: menu flag -> %d at frame %ld "
-            "(%s prog %u)\n", v, frames_done,
-            v ? "menu-prog draw" : "scene draw", prog);
-}
-
-/* Classify the draw that is about to be issued (skipped draws never get here).
- * ON is raised mid-frame at the first menu-prog draw so the guest's page build
- * - which runs BEFORE the frame completes - sees it as early as physics
- * allows; OFF waits for SWAP so one frame's draw order cannot flap the flag. */
-static void menu_note_draw(void)
-{
-    if (!menu_prog) return;
-    if (jcur_prog == menu_prog) {
-        fr_menu_draws++;
-        if (!fr_scene_draws) menuflag_set(1, jcur_prog);
-    } else {
-        fr_scene_draws++;
-        fr_scene_prog = jcur_prog;
-    }
-}
-
 static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
 {
     const unsigned *u = (const unsigned *)pl;
@@ -3171,22 +3131,6 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                                 if (swap_vidmask >> 4) swap_content_hi++;
                                 if (!swap_draws) swap_nodraw++;
                                 swap_vidmask = 0; swap_draws = 0;
-                                /* item 43: the frame's menu verdict. Any
-                                 * scene-prog draw clears the flag; a frame
-                                 * with BOTH kinds is the discriminator
-                                 * failing and gets counted out loud. */
-                                if (menu_prog) {
-                                    if (fr_menu_draws && fr_scene_draws
-                                            && ++menu_mixed_frames <= 8)
-                                        fprintf(stderr, "[padglhost] item43: "
-                                                "MIXED frame %ld - %u menu + "
-                                                "%u scene draws (prog %u)\n",
-                                                frames_done, fr_menu_draws,
-                                                fr_scene_draws, fr_scene_prog);
-                                    if (fr_scene_draws)
-                                        menuflag_set(0, fr_scene_prog);
-                                    fr_menu_draws = fr_scene_draws = 0;
-                                }
                                 /* frame boundary: a journal request answered
                                  * here is a frame-consistent snapshot */
                                 jgl_poll(0, 0); break;
@@ -3652,7 +3596,6 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
             break;
         }
         swap_draws++;                            /* item 27: this frame drew */
-        menu_note_draw();                        /* item 43: menu detector   */
         draw_say(u[2], u[1], 0, 0, 0, 0);        /* item 43                  */
         p_glDrawArrays(u[0],(int)u[1],(int)u[2]); break;
     case PADGL_DRAWELEMENTS:
@@ -3665,7 +3608,6 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
             break;
         }
         swap_draws++;                            /* item 27: this frame drew */
-        menu_note_draw();                        /* item 43: menu detector   */
         {   /* item 43: the indices come from the mirrored element buffer the
              * journal keeps for this VAO, so an indexed quad reports the same
              * box a direct one would. */
@@ -3738,11 +3680,6 @@ int main(int argc, char **argv)
                 "(red=x, green=y, white grid every 32)\n", s);
     }
     if (getenv("PAD_GL_RING_MB"))     ring_mb    = strtoul(getenv("PAD_GL_RING_MB"), 0, 10);
-    if (getenv("PAD_GL_MENUPROG"))    /* item 43: 0 disarms the detector */
-        menu_prog = (unsigned)atoi(getenv("PAD_GL_MENUPROG"));
-    if (menu_prog)
-        fprintf(stderr, "[padglhost] item43: menu detector armed (prog %u)\n",
-                menu_prog);
     dbg = getenv("PADGL_DEBUG") ? atoi(getenv("PADGL_DEBUG")) : 0;
     if (getenv("PADGL_SEQ_FROM")) seq_from = atol(getenv("PADGL_SEQ_FROM"));
     if (getenv("PADGL_SEQ_TO"))   seq_to   = atol(getenv("PADGL_SEQ_TO"));
@@ -3765,10 +3702,6 @@ int main(int argc, char **argv)
     hdr->magic = PADGL_MAGIC; hdr->version = PADGL_VERSION;
     hdr->ring_bytes = ring_bytes;
     hdr->fb_w = (unsigned)fb_w; hdr->fb_h = (unsigned)fb_h;
-    /* item 43: tell the guest the menu detector is alive (bit 1) - without it
-     * a flag stuck at 0 is ambiguous and gstvid falls back to the door. */
-    hdr->menu_flag = menu_prog ? 2u : 0u;
-
     /* item 27: resolve the key binds from the title's own switch list BEFORE
      * the windows exist - the legend draws from binds[] and the window-open
      * latch closes whatever the 'B' row holds. Item 39 then exports the

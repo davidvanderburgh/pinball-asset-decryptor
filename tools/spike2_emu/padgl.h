@@ -37,34 +37,14 @@ typedef struct {
     unsigned int  fb_w, fb_h;
     unsigned int  host_ready;
     unsigned int  host_error;
-    /* ★ ITEM 43: HOST->GUEST. Two bits, so the guest can tell "not in the
-     * menu" from "nobody is watching":
-     *   bit 1 (ARMED) - a padglhost with the menu detector is alive and
-     *                   classifying draws (PAD_GL_MENUPROG nonzero);
-     *   bit 0 (MENU)  - the renderer currently sees the game drawing the
-     *                   SERVICE MENU (frames whose only draws use the menu
-     *                   page-type's program - 27 on turtles 4.28).
-     * So: 0 = old binary or disarmed detector (guest FALLS BACK to the door
-     * gate), 2 = armed + not menu, 3 = armed + in menu. Written by padglhost
-     * at draw/SWAP time; read by the guest video shim (gstvid) as the "in
-     * the menu" gate that replaces the flicker-prone coin-door read.
-     * Appended AFTER host_error on purpose: the ring data starts at the
-     * fixed PADGL_HDR_BYTES page boundary, so old binaries and new agree on
-     * every other field and an old reader simply never looks at this one. */
-    unsigned int  menu_flag;
-    /* ★ ITEM 43: the SECOND menu signal, same two-bit shape (bit1 ARMED,
-     * bit0 MENU), written by modewatch.py - a host-side helper that reads the
-     * game's own app-mode word out of /proc/<guest>/mem. It exists because
-     * the renderer's verdict above, however clean, CANNOT WIN THE ENTRY RACE:
-     * the game latches dots-vs-video at a caps read on the first long Select,
-     * before the first menu frame is ever drawn, so a signal derived FROM
-     * frames is structurally too late (run-proven 2026-08-12, twice). The
-     * mode word flips BEFORE that latch. It is read host-side rather than
-     * in-guest because the guest's own load of that address returns 0 while
-     * /proc reads the true value at the same instant in the same process -
-     * unexplained, measured to 314k samples; see TODO item 43. Two fields
-     * rather than one so a run can still say WHICH signal fired. */
-    unsigned int  mode_flag;
+    /* ★ ITEM 43 HAD TWO FLAG FIELDS HERE (menu_flag, mode_flag) carrying a
+     * "the game is in its service menu" signal from the renderer and from a
+     * host-side memory poller to the video shim. The item was fixed in
+     * glbridge.c instead - the menu's band was the Vivante direct-texture
+     * registration being one process-global for a per-texture API - so both
+     * signals and both their producers are gone. Removing them is safe in the
+     * way appending them was: the ring data starts at the fixed
+     * PADGL_HDR_BYTES page boundary, so no other field moves. */
 } padgl_hdr;
 
 #define PADGL_HDR_BYTES  4096          /* header page, then the ring data */

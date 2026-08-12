@@ -1032,7 +1032,7 @@ static void *vid_thread(void *arg)
  * has been moved once, and an unknown door must never cost a caps answer (the
  * first door gate read a fresh block's zeros as "open" and stripped a boot's
  * backdrops). watch.sh's PAD_DOOR_OPEN stamps the edge for a service boot. */
-static int vid_caps_door_open(void)
+static int vid_door_open(void)
 {
     static int gate = -1, door_id = 33;
     if (gate < 0) {
@@ -1372,11 +1372,13 @@ void *pad_vid_caps_for_pad(void *pad)
 {
     int i, ready = 0;
     struct stream *fb = 0;
-    /* ★ ITEM 43: caps read NONE while the coin door is open - the service
-     * menu draws its dots on this, gameplay (door shut) gets the truth. See
-     * vid_caps_door_open() for why the door, and why NOTHING but this answer
-     * is touched. This is the ONLY behavioural gate for the item. */
-    if (vid_caps_door_open()) {
+    /* ★ ITEM 43: caps read NONE while the coin door is open - a real decoder
+     * mid-preroll has none, which is the state the 4.28 service page reads.
+     * The page-build DOT LATCH is really driven by get_state (see
+     * pad_vid_last_state); this keeps caps consistent with that PAUSED
+     * answer. Gameplay (door shut) gets the truth. Neither gate touches
+     * delivery/set_state/EOS - see vid_door_open(). */
+    if (vid_door_open()) {
         static int said;
         if (!said) {
             said = 1;
@@ -1610,6 +1612,17 @@ void pad_vid_note_paused(void *pipeline)
 int pad_vid_last_state(void *pipeline)
 {
     struct stream *s = find_pipeline(pipeline);
+    /* ★ ITEM 43: with the coin door open, a backdrop reads PAUSED, not
+     * PLAYING - the state a real decoder is genuinely in while it prerolls,
+     * which is the instant the 4.28 service page decides its picture. THIS,
+     * not the caps read, is what flips the page to its DMD dot menu: caps
+     * NONE alone still left the page painting the delivering clip (the band).
+     * Reported for a stream that is STILL DELIVERING on purpose - the dots
+     * are drawn OVER the backdrop, exactly as on hardware - and it is safe
+     * here because it changes only what get_state ANSWERS, never delivery
+     * (the lag), never set_state (the wedge), never EOS (the freeze). Door
+     * shut: the truth, so gameplay and attract are untouched. */
+    if (vid_door_open() && s && s->gst_state == 4) return 3;
     if (!s || !s->gst_state) return 1;
     return s->gst_state;
 }

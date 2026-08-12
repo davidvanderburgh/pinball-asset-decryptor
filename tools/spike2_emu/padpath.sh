@@ -281,7 +281,7 @@ pad_can_pivot() {
 # reason build.sh already records in its own comment: alsastub.c was on the
 # compile line and missing from the copy list, an edit was silently never
 # built, and the build still said "built ok".
-PAD_SHIM_SRCS="hwshim.c alsastub.c gststub.c gstvid.c padvid.h padsw.h"
+PAD_SHIM_SRCS="hwshim.c alsastub.c gststub.c gstvid.c padvid.h padsw.h padgl.h"
 export PAD_SHIM_SRCS
 
 #: Where build.sh records what it compiled.

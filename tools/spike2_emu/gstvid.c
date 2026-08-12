@@ -39,6 +39,7 @@
  */
 
 #include "padvid.h"
+#include "padgl.h"     /* item 43: padgl_hdr.menu_flag, the renderer's verdict */
 
 extern void *dlsym(void *, const char *);
 #define RTLD_NEXT ((void *)-1L)
@@ -1106,19 +1107,82 @@ static int vid_mode_menu(void)
     return -1;
 }
 
+/* ★ ITEM 43 PATH A: THE RENDERER'S OWN VERDICT, read back host->guest. The
+ * host renderer (padglhost) classifies every draw by shader program - a frame
+ * whose draws are ALL the menu page-type's program (27 on turtles 4.28) is
+ * the service menu, anything else is a scene - and publishes the answer in
+ * the padgl ring header the game's GL bridge already shares with it. This
+ * shim maps the HEADER PAGE of the same file (PAD_GL_BRIDGE; glbridge's own
+ * mapping is a static in a different .so, so we map it again - same file,
+ * same page, ~4 KB). Validated 2026-08-12, observe-only: silent through
+ * boot, 0 in attract WITH THE DOOR OPEN (the case the door read got wrong),
+ * 1 across menu pages with zero flapping, 0 again on exit, and band frames
+ * still count as menu (prog 27 either way), so the lie cannot oscillate
+ * the signal that fires it.
+ *
+ * Returns the live flag (0/1), or -1 when the channel cannot answer - no
+ * env, no file, bad magic, or a padglhost WITHOUT the armed bit (old binary
+ * or PAD_GL_MENUPROG=0) - so the caller falls back to the door/mode gate
+ * and every other title behaves exactly as before. The armed bit is read
+ * PER CALL, not latched: a guest that maps before the host stamps it heals
+ * on the next query. PAD_VID_RFLAG=0 refuses the channel outright. */
+static int vid_rflag(void)
+{
+    static int inited, refused;
+    static volatile padgl_hdr *gh;
+    if (!inited) {
+        const char *e = getenv("PAD_VID_RFLAG");
+        inited = 1;
+        refused = e && e[0] == '0';
+        if (!refused) {
+            const char *path = getenv("PAD_GL_BRIDGE");
+            int fd;
+            void *p;
+            if (path && path[0] && (fd = open(path, 0 /*O_RDONLY*/, 0)) >= 0) {
+                p = mmap(0, PADGL_HDR_BYTES, 1 /*PROT_READ*/,
+                         1 /*MAP_SHARED*/, fd, 0);
+                close(fd);
+                if (p && p != (void *)-1
+                        && ((padgl_hdr *)p)->magic == PADGL_MAGIC
+                        && ((padgl_hdr *)p)->version == PADGL_VERSION)
+                    gh = (volatile padgl_hdr *)p;
+            }
+            VLOG("[vid] renderer menu flag: %s\n",
+                 gh ? "attached" : "unavailable (door/mode gate)");
+        }
+    }
+    if (refused || !gh) return -1;
+    {
+        unsigned w = gh->menu_flag;
+        if (!(w & 2u)) return -1;       /* detector not armed: fall back */
+        return (int)(w & 1u);
+    }
+}
+
 /* item 43: should the menu lie (get_state=PAUSED + caps=NONE) fire right now?
- * DOOR OPEN **AND** MODE==MENU when the mode word is configured. The door term
- * keeps every state the door-gate build already proved good exactly as it was
- * (normal boot: door shut -> truth; service boot with the door held open: lie,
- * same as the door build); the mode term is what the door alone never had - it
- * kills the lie in attract-with-the-door-open, so attract finally plays FULL
- * SCREEN there, while still being flipped BEFORE the entry latch reads caps.
- * Unconfigured mode word (every other title): the plain door gate. */
+ * PAD_VID_DOOR=0 is still the MASTER OFF for the whole gate, whatever the
+ * source. Then: the RENDERER FLAG when it can answer (vid_rflag above - no
+ * unstable door read, no per-title memory address); otherwise the old
+ * door/mode logic exactly as the door-gate build proved it: DOOR OPEN alone,
+ * or DOOR OPEN && MODE==MENU when the mode word is configured. */
 static int vid_menu_gate(void)
 {
-    int m = vid_mode_menu();
-    if (m < 0) return vid_door_open();
-    return vid_door_open() && m;
+    int r;
+    {
+        static int on = -1;
+        if (on < 0) {
+            const char *e = getenv("PAD_VID_DOOR");
+            on = !(e && e[0] == '0');
+        }
+        if (!on) return 0;
+    }
+    r = vid_rflag();
+    if (r >= 0) return r;
+    {
+        int m = vid_mode_menu();
+        if (m < 0) return vid_door_open();
+        return vid_door_open() && m;
+    }
 }
 
 /* ★ ITEM 43 DEBUG (PAD_VID_MENUDBG=1, turtles_pro only): stamp every

@@ -37,14 +37,20 @@ typedef struct {
     unsigned int  fb_w, fb_h;
     unsigned int  host_ready;
     unsigned int  host_error;
-    /* ★ ITEM 43: HOST->GUEST. 1 while the renderer sees the game drawing the
-     * SERVICE MENU (frames whose only draws use the menu page-type's program -
-     * PAD_GL_MENUPROG, 27 on turtles 4.28), 0 otherwise. Written by padglhost
-     * at draw/SWAP time; read by the guest video shim (gstvid) as the "in the
-     * menu" gate that replaces the flicker-prone coin-door read. Appended
-     * AFTER host_error on purpose: the ring data starts at the fixed
-     * PADGL_HDR_BYTES page boundary, so old binaries and new agree on every
-     * other field and an old reader simply never looks at this one. */
+    /* ★ ITEM 43: HOST->GUEST. Two bits, so the guest can tell "not in the
+     * menu" from "nobody is watching":
+     *   bit 1 (ARMED) - a padglhost with the menu detector is alive and
+     *                   classifying draws (PAD_GL_MENUPROG nonzero);
+     *   bit 0 (MENU)  - the renderer currently sees the game drawing the
+     *                   SERVICE MENU (frames whose only draws use the menu
+     *                   page-type's program - 27 on turtles 4.28).
+     * So: 0 = old binary or disarmed detector (guest FALLS BACK to the door
+     * gate), 2 = armed + not menu, 3 = armed + in menu. Written by padglhost
+     * at draw/SWAP time; read by the guest video shim (gstvid) as the "in
+     * the menu" gate that replaces the flicker-prone coin-door read.
+     * Appended AFTER host_error on purpose: the ring data starts at the
+     * fixed PADGL_HDR_BYTES page boundary, so old binaries and new agree on
+     * every other field and an old reader simply never looks at this one. */
     unsigned int  menu_flag;
 } padgl_hdr;
 

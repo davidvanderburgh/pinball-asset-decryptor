@@ -3069,7 +3069,7 @@ static void menuflag_set(int v, unsigned prog)
 {
     if (menu_flag_cur == v) return;
     menu_flag_cur = v;
-    if (hdr) hdr->menu_flag = (unsigned)v;
+    if (hdr) hdr->menu_flag = 2u | (unsigned)v;   /* bit 1 = armed, see padgl.h */
     fprintf(stderr, "[padglhost] item43: menu flag -> %d at frame %ld "
             "(%s prog %u)\n", v, frames_done,
             v ? "menu-prog draw" : "scene draw", prog);
@@ -3765,6 +3765,9 @@ int main(int argc, char **argv)
     hdr->magic = PADGL_MAGIC; hdr->version = PADGL_VERSION;
     hdr->ring_bytes = ring_bytes;
     hdr->fb_w = (unsigned)fb_w; hdr->fb_h = (unsigned)fb_h;
+    /* item 43: tell the guest the menu detector is alive (bit 1) - without it
+     * a flag stuck at 0 is ambiguous and gstvid falls back to the door. */
+    hdr->menu_flag = menu_prog ? 2u : 0u;
 
     /* item 27: resolve the key binds from the title's own switch list BEFORE
      * the windows exist - the legend draws from binds[] and the window-open

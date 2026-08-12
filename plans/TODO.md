@@ -1076,12 +1076,33 @@ These have each been violated at least once and each cost a run or a window:
 
 
 - [ ] **43. In the turtles service menus the picture goes HALF HEIGHT and the
-      scene text stops drawing.** `S2 D2` ← IN PROGRESS *(**95%, 2026-08-11
-      night: THE DOOR GATE WAS THE LAST BUG AND IT IS REMOVED (`0df8a01`).
-      One verification run stands between this and closed, and it needs
-      David to restart the app's run — the fix is in the shim, which only
-      rebuilds at run start, and his instance was live with the old build.**
+      scene text stops drawing.** `S2 D2` ← IN PROGRESS *(**98%, 2026-08-11
+      late night: THE GREEN MENU WORKS MID-SESSION — door open, two long
+      Selects, "GO TO SWITCH MENU" and "GO TO DIAGNOSTICS MENU" in full
+      DMD dots, navigable, `t_preroll2_menu.png` / `t_preroll2_submenu.png`.
+      What remains: David's own hands, and a godzilla regression run.**
       Branch `item/43`, clean and pushed.)*
+      **★★★ THE ACTUAL MECHANISM, found by tracing what the game ASKS (the
+      three theories before it are archaeology now):** the 4.28 service flow
+      arms its backdrop pipeline and reads `pad_get_negotiated_caps`
+      MICROSECONDS after set_state(PAUSED). No real pipeline has caps that
+      soon — preroll is a cold decoder start, and the first one of the
+      process is seconds of VPU firmware load (the game's own log even
+      prints the fw-load error here). Real hardware therefore ALWAYS answers
+      that probe "none", and the page style latches the DMD dot menu. Our
+      stub answered instantly with 1360x768, which latched a HALF-BUILT
+      video-menu mode that draws one band of backdrop video, no text, no
+      dots — the original complaint, and a mode no real machine ever shows.
+      **THE FIX (three commits): `0df8a01` removes the door gate (it turned
+      the menu's own backdrop arm into a set_state FAILURE — the wedge);
+      `47a5b3d` models the VPU firmware load (first arm = 4 s window,
+      `PAD_VID_FWLOAD_MS`); `eab777d`+`53667d5` model per-arm PREROLL
+      (~150 ms, `PAD_VID_PREROLL_MS`; fresh arms stamp it, absorbed re-arms
+      of a live clip keep their caps, and a mid-preroll pad OWNER answers
+      none rather than letting the fallback leak another stream's size).
+      Attract is untouched: boot on the final build served real clips at
+      30/s — the game never needed caps for playback, only the service
+      probe reads them.**
       **★★★ THE RESOLUTION (rewritten 2026-08-11 night — the earlier
       "PAD_DOOR_OPEN boot" resolution below it is superseded): the service
       pages pick dots BY THEMSELVES.** A 4.28 page decides video-vs-dots at

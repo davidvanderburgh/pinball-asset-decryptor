@@ -2177,3 +2177,39 @@ def test_the_button_is_offered_before_the_commands_and_only_on_wsl():
     # The by-hand route is still printed, for a terminal run and for anyone
     # who wants to see what is being done.
     assert "wsl.conf" in said and "systemd=true" in said
+
+
+def test_the_notice_asks_the_window_to_make_room_for_it(tmp_path, monkeypatch):
+    """FOUND IN THE PROOF SHOTS, not here: the first cut of the re-probe put
+    the button up beside a sentence nobody could read.
+
+    ttk.Notebook pins its pane to the selected tab's requested height, and
+    that is measured when the tab is selected.  Every other notice on this
+    panel is already there by then; this one appears LATER, while the user is
+    sitting on the tab - and pack gives a slave that no longer fits no space
+    at all and leaves it unmapped.  So the panel says it is taller now.
+    """
+    root, panel, logged, machine = _restart_rig(tmp_path, monkeypatch,
+                                                survives=False)
+    asked = []
+    panel._resize_fn = lambda: asked.append(1)
+    try:
+        assert _pump(root, lambda: panel._setup is not None)
+        panel._restart_wsl("the test's own reason")
+        assert _pump(root, lambda: panel._setup_msg.winfo_ismapped())
+        assert asked, ("the notice was packed into a pane measured without "
+                       "it, so it is there and invisible")
+    finally:
+        root.destroy()
+
+
+def test_the_window_hands_the_panel_something_to_ask_with():
+    """The panel's half is useless without the wiring, and the wiring is one
+    keyword nobody would miss until a notice went missing again."""
+    import inspect
+    from pinball_decryptor.gui.main_window import MainWindow
+    src_ = inspect.getsource(MainWindow._build_emulate_tab)
+    assert "resize_fn=" in src_
+    assert "_resize_notebook_to_current_tab" in src_
+    # ...and it must be the real method, not a name that has moved on.
+    assert callable(MainWindow._resize_notebook_to_current_tab)

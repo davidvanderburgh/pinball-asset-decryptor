@@ -1019,9 +1019,21 @@ class EmulatePanel:
     POLL_IDLE_MS = 10000
 
     def __init__(self, parent, log=None, card_var=None, savestates_var=None,
-                 theme_fn=None, badge_fn=None):
+                 theme_fn=None, badge_fn=None, resize_fn=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
+        #: "This tab is taller than it was" - MainWindow._resize_notebook_to_
+        #: current_tab, injected the same way the log and the theme are.
+        #:
+        #: WHY THE PANEL HAS TO ASK.  ttk.Notebook is pinned to the selected
+        #: tab's requested height, measured when the tab is selected, and the
+        #: setup notice is the one thing here that appears LATER: the probe
+        #: that arms it now runs after a WSL restart, with the user already
+        #: sitting on this tab.  Packed into a pane that was measured without
+        #: it, the label gets no room and pack leaves it unmapped - so the
+        #: "Set up emulator…" button appeared beside a sentence nobody could
+        #: read.  Found in the before/after shots for PAD-62, not in a test.
+        self._resize_fn = resize_fn or (lambda: None)
         # The card path lives in a variable the WINDOW owns (when given one):
         # the app persists it into the project anchor and restores it when a
         # project loads, exactly like the Extract/Write path fields. The
@@ -1572,6 +1584,7 @@ class EmulatePanel:
             if setup_settled(facts):
                 self._setup_btn.pack_forget()
                 self._setup_msg.pack_forget()
+                self._refit()
                 return
             self._setup_msg.configure(
                 text=setup_notice(facts, can_fix=sys.platform == "win32"))
@@ -1586,8 +1599,21 @@ class EmulatePanel:
                 self._setup_btn.pack_forget()
             self._setup_msg.pack(anchor=tk.W,
                                  **getattr(self, "_setup_pad", {}))
+            self._refit()
         except (tk.TclError, AttributeError):
             pass            # the tab was never built, or is being torn down
+
+    def _refit(self):
+        """Tell the window this tab is a different height now.
+
+        See _resize_fn.  Best effort by design: the panel is built standalone
+        in tests and by anything that is not MainWindow, and a notice that
+        appears is worth more than an exception about the frame around it.
+        """
+        try:
+            self._resize_fn()
+        except Exception:                                   # noqa: BLE001
+            pass
 
     def _setup_fix(self):
         """Install what is missing and register the ARM handler.

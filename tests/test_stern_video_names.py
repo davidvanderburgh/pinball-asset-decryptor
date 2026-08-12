@@ -8,6 +8,7 @@ picked up ``a, b, c ...`` as the id counted up.  These pin the framed parse and
 the identifier-scan fallback.
 """
 
+import os
 import struct
 
 from pinball_decryptor.plugins.stern import engine
@@ -78,3 +79,54 @@ def test_skip_words_are_not_used_as_names():
 
 def test_radium_name_before_reports_none_when_unframed():
     assert engine._radium_name_before(b"\x11" * 64, 40) is None
+
+
+# ---- stale twins left behind when a clip's name changes --------------------
+
+def _touch(d, *names):
+    for n in names:
+        with open(os.path.join(d, n), "w", encoding="utf-8") as f:
+            f.write(n)
+
+
+def test_renamed_clip_does_not_leave_its_old_copy_behind(tmp_path):
+    d = str(tmp_path)
+    _touch(d, "clip10c.mp4", "clip10.mp4", "unchanged.mp4")
+    removed = engine._remove_renamed_video_twins(
+        d,
+        {"clip10c.mp4": "/g/2.asset/1.asset", "unchanged.mp4": "/g/2.asset/2.asset"},
+        {"/g/2.asset/1.asset": "clip10.mp4", "/g/2.asset/2.asset": "unchanged.mp4"})
+    assert removed == 1
+    assert sorted(os.listdir(d)) == ["clip10.mp4", "unchanged.mp4"]
+
+
+def test_files_the_user_added_are_never_removed(tmp_path):
+    """Only names the old manifest recorded are candidates."""
+    d = str(tmp_path)
+    _touch(d, "my_own_clip.mp4", "clip10.mp4")
+    engine._remove_renamed_video_twins(
+        d, {}, {"/g/2.asset/1.asset": "clip10.mp4"})
+    assert sorted(os.listdir(d)) == ["clip10.mp4", "my_own_clip.mp4"]
+
+
+def test_clip_not_rewritten_this_run_is_left_alone(tmp_path):
+    """A cancelled run must not delete clips it never got to re-extract."""
+    d = str(tmp_path)
+    _touch(d, "clip10c.mp4")
+    engine._remove_renamed_video_twins(
+        d, {"clip10c.mp4": "/g/2.asset/1.asset"}, {})
+    assert os.listdir(d) == ["clip10c.mp4"]
+
+
+def test_read_video_manifest_round_trips(tmp_path):
+    d = str(tmp_path)
+    with open(os.path.join(d, "manifest.txt"), "w", encoding="utf-8") as f:
+        f.write("# output\tcard path\tbytes\n"
+                "a.mp4\t/g/2.asset/1.asset\t10\n"
+                "b.mov\t/g/2.asset/2.asset\t20\n")
+    assert engine._read_video_manifest(d) == {
+        "a.mp4": "/g/2.asset/1.asset", "b.mov": "/g/2.asset/2.asset"}
+
+
+def test_read_video_manifest_missing_file_is_empty(tmp_path):
+    assert engine._read_video_manifest(str(tmp_path)) == {}

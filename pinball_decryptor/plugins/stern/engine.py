@@ -468,6 +468,54 @@ def _work_dir(label=None, base="spike2_"):
     return tempfile.mkdtemp(prefix=base)  # astronomically unlikely fallback
 
 
+def _read_video_manifest(vid_dir):
+    """``{output filename: card path}`` from a previous extract's
+    ``video/manifest.txt``, or ``{}`` when there isn't one."""
+    out = {}
+    try:
+        with open(os.path.join(vid_dir, "manifest.txt"), encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("#"):
+                    continue
+                cols = line.rstrip("\n").split("\t")
+                if len(cols) >= 2 and cols[0]:
+                    out[cols[0]] = cols[1]
+    except OSError:
+        pass
+    return out
+
+
+def _remove_renamed_video_twins(vid_dir, prev, written, log=None):
+    """Delete a previous extract's copy of a clip this run wrote under a new
+    name.
+
+    Clip names come from the card's scene data, so they move when the title's
+    firmware changes -- and once, for every card, when the naming itself is
+    corrected.  The re-extract writes the new name and the old file just sits
+    there: two files for one clip, no ``manifest.txt`` row for the stale one,
+    and the same GUI clutter / Write-mapping hazard
+    :func:`_remove_renamed_audio_twins` exists to prevent.
+
+    Only files this tool itself recorded in the old manifest are considered,
+    and only when this run wrote the same card path under a different name --
+    so anything the user put in the folder is left alone.
+    """
+    removed = 0
+    for old_name, card_path in prev.items():
+        new_name = written.get(card_path)
+        if not new_name or new_name == old_name:
+            continue
+        try:
+            os.remove(os.path.join(vid_dir, old_name))
+            removed += 1
+        except OSError:
+            pass
+    if removed and log:
+        log("Removed %d video(s) a previous extract had saved under a "
+            "different name." % removed, "info")
+    return removed
+
+
 def extract_videos(reader, output_dir, log=None, progress=None, cancel=None):
     """Extract every directly-stored video (H.264 in an MP4/QuickTime ``ftyp``
     container) from the card's asset tree to ``output_dir/video/``.
@@ -513,8 +561,10 @@ def extract_videos(reader, output_dir, log=None, progress=None, cancel=None):
 
     vid_dir = os.path.join(output_dir, "video")
     os.makedirs(vid_dir, exist_ok=True)
+    prev = _read_video_manifest(vid_dir)
     log("Extracting %d video(s)..." % len(vids), "info")
     manifest = []
+    written = {}       # card path -> output filename this run
     used = {}
     named = 0
     for i, (path, node, brand) in enumerate(vids):
@@ -532,11 +582,13 @@ def extract_videos(reader, output_dir, log=None, progress=None, cancel=None):
         fname = (base if k == 0 else "%s_%d" % (base, k + 1)) + ext
         reader.extract_file(node, os.path.join(vid_dir, fname))
         manifest.append("%s\t%s\t%d" % (fname, path, node["size"]))
+        written[path] = fname
     try:
         with open(os.path.join(vid_dir, "manifest.txt"), "w", encoding="utf-8") as f:
             f.write("# output\tcard path\tbytes\n" + "\n".join(manifest) + "\n")
     except Exception:
         pass
+    _remove_renamed_video_twins(vid_dir, prev, written, log)
     log("Extracted %d video(s) to %s (%d named from scene data)."
         % (len(manifest), vid_dir, named), "success")
     return len(manifest)

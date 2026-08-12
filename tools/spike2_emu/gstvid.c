@@ -50,6 +50,8 @@ extern void *mmap(void *, unsigned long, int, int, int, long);
 extern int usleep(unsigned);
 extern void pad_say(const char *);
 extern int pad_sw_level(unsigned);      /* hwshim.c - item 43's caps door gate */
+static int vid_menu_gate(void);         /* item 43: the delivery loop uses it
+                                         * above its definition */
 extern int pthread_create(unsigned long *, void *, void *(*)(void *), void *);
 extern int clock_gettime(int, unsigned long *);
 
@@ -899,6 +901,14 @@ static void *vid_thread(void *arg)
              * tens of ms, that is the fault; if it stays near zero, the
              * lateness is somewhere nobody has looked yet and this candidate
              * dies too. */
+            /* ★ ITEM 43: an in-menu delivery cut here was TRIED TWICE
+             * (2026-08-12, flag-gated then mode-gated) and REVERTED BOTH
+             * TIMES. It provably stopped the frames (handoff 0 us, 0 texture
+             * uploads) and the band animated anyway - the game's tex binding
+             * samples the RING memory live, so the drain itself repaints it -
+             * and on the working door-gate build the dots rendered fine WITH
+             * delivery flowing underneath. Delivery is not the mechanism;
+             * the get_state/caps answers are. Do not cut here again. */
             if (s->handoff) {
                 unsigned long h0 = vid_us();
                 unsigned long hd;
@@ -1047,6 +1057,93 @@ static int vid_door_open(void)
     return gate && pad_sw_level((unsigned)door_id) == 0;
 }
 
+/* ★ ITEM 43, PATH B: read the GAME'S OWN app-mode word straight out of guest
+ * memory. The shim is LD_PRELOADed into the qemu-user arm process, so a guest
+ * .data/.bss address is a plain pointer here - no feedback channel, no
+ * heuristic. For turtles_pro (System 4.28, game V1.59.0) the word lives at
+ * 0x00650744: 1 = attract (door shut AND door open/48V both read 1),
+ * 3 = gameplay, 0 = the service-menu system (and pre-attract boot). Found
+ * 2026-08-12 by a memory diff of attract vs the banded menu (7 attract
+ * snapshots incl. door-open x 3 separate menu entries over the 983 KB
+ * static-globals window 0x5f8000..0x6e8000), then picked over its sibling
+ * candidates by the [menudbg] entry trace, which is the decisive fact of this
+ * whole item: THE GAME LATCHES dots-vs-video ONCE, AT MENU-SYSTEM ENTRY, at a
+ * caps read that happens on the FIRST long Select - and at that read the mode
+ * word has ALREADY flipped to 0 while the "in a service menu" boolean at
+ * 0x663958 is STILL 0 (it flips a beat later, after the latch; gating on it
+ * left the page latching real caps -> the squashed-video band, David's repro).
+ * A delivery cut after the latch was also tried and reverted: 0 uploads for
+ * 3 s and the band stayed - starving a latched choice only freezes it.
+ *
+ * The address is per-binary, so it is CONFIG, not a constant baked into a shim
+ * that also runs every other title: PAD_VID_MENUMODE carries the guest address
+ * (hex, 0x-optional) and the launcher sets it only for the title it was found
+ * on. Returns 1 when the word reads 0 (menu/boot), 0 otherwise; -1 when it is
+ * not configured, so the caller falls back to the plain door gate and every
+ * other title behaves exactly as the committed door-gate build (71caeb5). */
+static int vid_mode_menu(void)
+{
+    static int inited, have;
+    static volatile unsigned int *mode;
+    if (!inited) {
+        const char *e = getenv("PAD_VID_MENUMODE");
+        inited = 1;
+        if (e && e[0]) {
+            unsigned long a = 0;
+            if (e[0] == '0' && (e[1] == 'x' || e[1] == 'X')) e += 2;
+            for (; *e; e++) {
+                int d;
+                if (*e >= '0' && *e <= '9') d = *e - '0';
+                else if (*e >= 'a' && *e <= 'f') d = *e - 'a' + 10;
+                else if (*e >= 'A' && *e <= 'F') d = *e - 'A' + 10;
+                else break;
+                a = a * 16 + (unsigned)d;
+            }
+            if (a) { mode = (volatile unsigned int *)a; have = 1; }
+        }
+    }
+    if (have) return mode && *mode == 0;
+    return -1;
+}
+
+/* item 43: should the menu lie (get_state=PAUSED + caps=NONE) fire right now?
+ * DOOR OPEN **AND** MODE==MENU when the mode word is configured. The door term
+ * keeps every state the door-gate build already proved good exactly as it was
+ * (normal boot: door shut -> truth; service boot with the door held open: lie,
+ * same as the door build); the mode term is what the door alone never had - it
+ * kills the lie in attract-with-the-door-open, so attract finally plays FULL
+ * SCREEN there, while still being flipped BEFORE the entry latch reads caps.
+ * Unconfigured mode word (every other title): the plain door gate. */
+static int vid_menu_gate(void)
+{
+    int m = vid_mode_menu();
+    if (m < 0) return vid_door_open();
+    return vid_door_open() && m;
+}
+
+/* ★ ITEM 43 DEBUG (PAD_VID_MENUDBG=1, turtles_pro only): stamp every
+ * get_state/caps answer with the game's own mode/flag words, read in-guest at
+ * that exact instant - the only way to see whether the dots-vs-video LATCH at
+ * menu entry happens before or after each flips. 0x650744 = app mode
+ * (attract=1, menu=0, gameplay=3); 0x663958 = in-service-menu (0/1). Addresses
+ * are V1.59.0-specific, which is fine for a debug line that ships disabled. */
+static int vid_menudbg_on(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("PAD_VID_MENUDBG");
+        on = (e && *e && *e != '0') ? 1 : 0;
+    }
+    return on;
+}
+
+static void vid_menudbg(const char *site, void *obj, int answer)
+{
+    if (!vid_menudbg_on()) return;
+    VLOG("[menudbg] %s %p -> %d  mode=%u flag=%u\n", site, obj, answer,
+         *(volatile unsigned *)0x650744, *(volatile unsigned *)0x663958);
+}
+
 /* Ask the host to open a stream's location. Returns 1 if it can be played. */
 int pad_vid_prepare(void *pipeline)
 {
@@ -1055,6 +1152,7 @@ int pad_vid_prepare(void *pipeline)
     unsigned gen;
     int spins = 0;
     int adopted = 0;
+    vid_menudbg("set_state(PAUSED)", pipeline, 0);
     if (!s || !vid_on()) return 0;
     vid_map();
     if (!vshm || !s->location[0]) return 0;
@@ -1346,6 +1444,12 @@ static void post_eos(void *pipeline)
 
 void pad_vid_announce(void *pipeline, int oldst, int newst)
 {
+    /* ★ ITEM 43: announce suppression while in the menu was TRIED (2026-08-12)
+     * and REVERTED THE SAME DAY. With ASYNC_DONE never posted, the game's
+     * entry sequence stalls half-built - after the first long Select it never
+     * arms the menu's own backdrop and never draws the dot page, worse than
+     * the band. The door-gate build always posted these and rendered the menu
+     * right; the bus is load-bearing for page builds and must tell the truth. */
     if (find_pipeline(pipeline)) post_state(pipeline, oldst, newst, 0);
 }
 
@@ -1378,16 +1482,18 @@ void *pad_vid_caps_for_pad(void *pad)
      * pad_vid_last_state); this keeps caps consistent with that PAUSED
      * answer. Gameplay (door shut) gets the truth. Neither gate touches
      * delivery/set_state/EOS - see vid_door_open(). */
-    if (vid_door_open()) {
+    if (vid_menu_gate()) {
         static int said;
         if (!said) {
             said = 1;
-            VLOG("[vid] caps answered NONE while the coin door is open - the "
-                 "service menu draws its own dots (item 43, PAD_VID_DOOR=0 "
-                 "to disable)\n");
+            VLOG("[vid] caps answered NONE - the game is in a service menu, "
+                 "so it draws its own dots (item 43; guest flag "
+                 "PAD_VID_MENUFLAG, or the door gate PAD_VID_DOOR)\n");
         }
+        vid_menudbg("caps", pad, -1);
         return 0;
     }
+    vid_menudbg("caps", pad, 1);
     for (i = 0; i < PADVID_CHANNELS; i++) {
         if (!streams[i].ready) continue;
         ready++;
@@ -1519,6 +1625,7 @@ void pad_vid_play(void *pipeline)
     struct stream *s = find_pipeline(pipeline);
     unsigned long th;
     int rc;
+    vid_menudbg("set_state(PLAYING)", pipeline, 0);
     /* item 43: PLAYING ends a pause hold - BEFORE the early return below,
      * which is exactly the absorbed-re-arm case this flag exists for (the
      * thread is alive and holding, s->playing is still 1). gst_state tracks
@@ -1622,8 +1729,12 @@ int pad_vid_last_state(void *pipeline)
      * here because it changes only what get_state ANSWERS, never delivery
      * (the lag), never set_state (the wedge), never EOS (the freeze). Door
      * shut: the truth, so gameplay and attract are untouched. */
-    if (vid_door_open() && s && s->gst_state == 4) return 3;
-    if (!s || !s->gst_state) return 1;
+    if (vid_menu_gate() && s && s->gst_state == 4) {
+        vid_menudbg("get_state(lie)", pipeline, 3);
+        return 3;
+    }
+    if (!s || !s->gst_state) { vid_menudbg("get_state", pipeline, 1); return 1; }
+    vid_menudbg("get_state", pipeline, s->gst_state);
     return s->gst_state;
 }
 

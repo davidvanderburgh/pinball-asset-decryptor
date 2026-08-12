@@ -1148,6 +1148,47 @@ These have each been violated at least once and each cost a run or a window:
       gstvid.c is the single gate site. RIG STATE at handoff: running the
       no-lie RE diagnostic build (`item43_run_nolie.sh`, PAD_VID_DOOR=0,
       PAD_GST_TRACE + PAD_GL_DRAWLOG); rebuild clean as needed.
+      **★★ PATH B RESULT (2026-08-12, this session): SOLVED IN PRINCIPLE — the
+      GATE IS `door open AND app-mode==0`, and the reason is THE LATCH.**
+      Memory diff of the 983 KB static-globals window (0x5f8000..0x6e8000) via
+      /proc/<qemu-pid>/mem (qemu-user identity-mapped: guest vaddr == host
+      addr, so the in-guest shim dereferences the same number) narrowed 5349 →
+      4 clean candidates across 7 attract snapshots (incl. door-open attract) ×
+      3 menu entries; a gameplay poll killed two (0x681c3c, 0x6d6bbc read 0 in
+      gameplay = would band it). The two survivors: `0x663958` = "in a service
+      menu" boolean (0,0,0,1,1,1 across attract/door-open-attract/gameplay/
+      menu-entry/submenu/nav) and `0x650744` = APP-MODE enum (attract=1,
+      menu-system AND pre-attract boot=0, gameplay=3).
+      **★ THE LATCH (the decisive fact, [menudbg]-trace-proven): the game
+      latches dots-vs-video ONCE, at menu-system entry, at a CAPS READ that
+      happens on the FIRST long Select — and at that read `0x650744` has
+      ALREADY flipped to 0 while `0x663958` is STILL 0 (flips a beat AFTER the
+      latch).** Hence: flag-gating left real caps at the latch → the squashed-
+      video band even with the flag correctly 1 afterwards (David's repro:
+      first menu page video animating; deeper pages pause it; Back unpauses —
+      the latched choice, game pausing its own pipeline). A DELIVERY CUT
+      (suppress the handoff while in-menu) was tried and REVERTED: proven 0
+      texture uploads for 3 s and the band STAYED (sprite-drawn screensaver +
+      frozen latch) — starving a latched choice only freezes it. GROUND TRUTH
+      from David's real-machine video (PXL_20260812_142432909.mp4, Desktop):
+      door → Select → version splash → Select → GREEN "GO TO AUDITS MENU" icon
+      page on BLACK; note the real menu is ALSO a half-height strip centered
+      on black — the emulator's band GEOMETRY was always right, the CONTENT
+      (video instead of dots) was the bug.
+      **FIX (uncommitted, gstvid.c): `vid_mode_menu()` reads the mode word via
+      guest pointer (env `PAD_VID_MENUMODE`, =0x650744 for turtles only);
+      `vid_menu_gate()` = door_open && mode==0 (unset env → plain door gate =
+      71caeb5 behaviour for every other title); both the caps and get_state
+      sites use it. Door term keeps boot/other titles exactly as the proven
+      door build; mode term kills the attract-with-door-open band (VERIFIED
+      live on the flag build: door open in attract stayed FULL SCREEN with the
+      48V overlay). `[menudbg]` instrument (PAD_VID_MENUDBG=1) stamps every
+      caps/get_state/set_state answer with live mode+flag. Tools in /c/tmp:
+      item43_snap.py (snap/diff2), item43_poll.py, item43_run_flag.sh. Menu
+      nav: door open (swhold 33 0), then Selects 2 s (swpoke 25 2000) — the
+      real machine needs exactly TWO. TESTING NOW: mode-gated build; accept =
+      renders like the real-machine video (green icons on black), attract-
+      door-open full screen, gameplay untouched.**
       **FULL VERIFICATION on the final build (`53667d5`, 2026-08-11 late
       night, my instrumented run):** (1) door open mid-attract → instant red
       48V overlay, no lag; (2) long Select → version splash; (3) long Select

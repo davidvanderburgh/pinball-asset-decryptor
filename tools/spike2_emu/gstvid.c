@@ -125,6 +125,18 @@ struct stream {
     void *handoff_data;
     char location[PADVID_PATH_MAX];
     int  ready;                 /* host answered with a size                 */
+    unsigned long preroll_us;   /* item 43: when this arm's PREROLL completes.
+                                 * A real pipeline has NO negotiated caps and
+                                 * delivers NO frames between set_state(PAUSED)
+                                 * and preroll completion - never microseconds.
+                                 * The 4.28 service flow asks for caps in that
+                                 * exact window and latches its page style on
+                                 * the answer: none = the DMD dot menu, real
+                                 * dimensions = a half-built video-menu mode no
+                                 * real machine ever shows (the band). Fresh
+                                 * arms stamp this; absorbed re-arms of a live
+                                 * clip keep their completed preroll, as a live
+                                 * real pipeline keeps its caps.             */
     int  playing;
     unsigned run_id;            /* bumped per play(); a thread that wakes to
                                  * find it changed belongs to a PREVIOUS run
@@ -756,10 +768,15 @@ static void *vid_thread(void *arg)
          * at PAUSED; nothing here has ever needed it - fresh clips only start
          * their thread at PLAYING - so the hold is total.) */
         if (s->paused) { t_epoch = 0; usleep(5000); continue; }
-        /* item 43: no frames while the VPU firmware loads (see
-         * vid_fw_loading) - a real first pipeline delivers nothing until the
-         * blob is in. The epoch resets so the clip starts on time after. */
-        if (vid_fw_loading()) { t_epoch = 0; usleep(20000); continue; }
+        /* item 43: no frames until PREROLL completes (which the first arm of
+         * the process stretches to the VPU firmware window - both stamped in
+         * preroll_us). A real pipeline delivers nothing in that window. The
+         * epoch resets so the clip starts on schedule afterwards. */
+        if ((long)(vid_us() - s->preroll_us) < 0) {
+            t_epoch = 0;
+            usleep(20000);
+            continue;
+        }
         /* item 43: NOTE THE ABSENCE of a door check here, and keep it absent.
          * Both attempts to act on a RUNNING stream at door-open failed in
          * David's hands within minutes: a HOLD stalled the game's sync=1
@@ -1164,6 +1181,30 @@ int pad_vid_prepare(void *pipeline)
      * exits on run_id/req_gen and touches nothing on its way out. */
     s->playing = 0;
 
+    /* item 43: this is a FRESH arm - preroll starts now. ~150 ms models a
+     * healthy decoder's cold start; the first arm of the process stretches
+     * to the VPU firmware window (see vid_fw_loading). PAD_VID_PREROLL_MS
+     * overrides; 0 disables (caps then answer instantly, the pre-model
+     * behaviour, and the service pages go back to the band). */
+    {
+        static int pr_ms = -1;
+        if (pr_ms < 0) {
+            const char *e = getenv("PAD_VID_PREROLL_MS");
+            pr_ms = 150;
+            if (e && e[0]) {
+                int v = 0;
+                while (*e >= '0' && *e <= '9') v = v * 10 + (*e++ - '0');
+                pr_ms = v;
+            }
+        }
+        s->preroll_us = vid_us() + (unsigned long)pr_ms * 1000ul;
+        if (vid_fw_ms > 0 && vid_fw_t0) {
+            unsigned long fw_done = vid_fw_t0 + (unsigned long)vid_fw_ms * 1000ul;
+            if ((long)(fw_done - s->preroll_us) > 0)
+                s->preroll_us = fw_done;
+        }
+    }
+
     /* item 27: a real re-arm settles any deferred EOS-reflex rewind - the
      * location change this absorb predicted has arrived (or something else
      * legitimately took the stream over). Clear the window too, so a late
@@ -1393,6 +1434,18 @@ void *pad_vid_caps_for_pad(void *pad)
     }
     for (i = 0; i < PADVID_CHANNELS; i++) {
         if (!streams[i].ready) continue;
+        /* item 43: a stream still PREROLLING has no caps yet, exactly as on
+         * hardware - the service flow's page style hangs on this answer (see
+         * preroll_us in struct stream). It stays out of the fallback too. */
+        if ((long)(vid_us() - streams[i].preroll_us) < 0) {
+            static unsigned char said_pr[PADVID_CHANNELS];
+            if (!said_pr[i]) {
+                said_pr[i] = 1;
+                VLOG("[vid] ch%d caps asked mid-preroll - answering none, as "
+                     "the real decoder would (item 43)\n", i);
+            }
+            continue;
+        }
         ready++;
         if (pad && streams[i].sinkpad == pad) {
             /* Say it once per channel per size: "the pad matched" is the
@@ -1408,7 +1461,9 @@ void *pad_vid_caps_for_pad(void *pad)
         }
         if (!fb) fb = &streams[i];
     }
-    if (last_created && last_created->ready) fb = last_created;
+    if (last_created && last_created->ready
+            && (long)(vid_us() - last_created->preroll_us) >= 0)
+        fb = last_created;
     if (fb) {
         static int said;
         static unsigned last_w, last_h;

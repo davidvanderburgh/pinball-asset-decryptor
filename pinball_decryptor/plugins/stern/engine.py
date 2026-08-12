@@ -371,20 +371,62 @@ _ASSET_REF = re.compile(rb"\d+\.asset/\d+\.asset")
 _IDENT = re.compile(rb"[A-Za-z][A-Za-z0-9_]{2,80}")
 _RADIUM_SKIP = {"Video", "video", "in_game_videos"}
 
+# A radium video record is
+#   <u64 len><name><u32 id><u64 len><N.asset/M.asset>
+# so the name always ends exactly 12 bytes before the reference it names.
+_RADIUM_NAME_GAP = 4 + 8
+_RADIUM_NAME_MAX = 96
+
+
+def _radium_name_before(data, end):
+    """The length-prefixed scene-element name ending at *end*, or ``None``.
+
+    Strings in a ``scene.radium`` carry a ``u64`` length prefix (the same
+    framing :func:`_nearest_element_name` reads for images), so the name is
+    recovered by finding the ``ln`` whose prefix sits exactly ``ln + 8`` bytes
+    back.  Scanning *forward* from ``ln = 1`` can't match early: a shorter
+    candidate would have to read its prefix out of the name's own bytes, and a
+    small ``u64`` needs seven zero bytes that printable text never has.
+    """
+    for ln in range(1, _RADIUM_NAME_MAX + 1):
+        p = end - ln - 8
+        if p < 0:
+            break
+        if struct.unpack_from("<Q", data, p)[0] != ln:
+            continue
+        body = data[end - ln:end]
+        if all(32 <= b < 127 for b in body):
+            return body.decode("latin1")
+    return None
+
 
 def _parse_radium(data):
     """Map ``asset_ref -> name`` from a ``scene.radium``: each LCD video asset is
-    named by the scene-element identifier immediately preceding its
-    ``N.asset/M.asset`` reference (verified contiguous on the TMNT card)."""
+    named by the scene element that references it.
+
+    The name is read from its ``u64`` length prefix.  Trusting the nearest
+    identifier *text* instead used to append a stray character, because the
+    ``u32`` id between the name and the reference is ``0x800000nn`` and its low
+    byte is usually ASCII -- ``GodzillaVsMegalon_Award1`` came out as
+    ``GodzillaVsMegalon_Award1i``, and a run of clips picked up ``c, d, e, f
+    ...`` as the id counted up.  Falls back to the identifier scan for any
+    reference that isn't framed this way.
+    """
     import bisect
-    names = [(m.start(), m.group().decode("latin1"))
-             for m in _IDENT.finditer(data)]
-    name_offs = [p for p, _ in names]
+    names = name_offs = None
     out = {}
     for m in _ASSET_REF.finditer(data):
         ref = m.group().decode()
         if ref in out:
             continue
+        nm = _radium_name_before(data, m.start() - _RADIUM_NAME_GAP)
+        if nm and nm not in _RADIUM_SKIP and ".asset" not in nm:
+            out[ref] = nm
+            continue
+        if names is None:      # unframed record -- pay for the scan once
+            names = [(x.start(), x.group().decode("latin1"))
+                     for x in _IDENT.finditer(data)]
+            name_offs = [p for p, _ in names]
         j = bisect.bisect_left(name_offs, m.start()) - 1
         while j >= 0:
             nm = names[j][1]

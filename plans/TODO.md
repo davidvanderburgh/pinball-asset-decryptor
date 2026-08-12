@@ -1186,9 +1186,46 @@ These have each been violated at least once and each cost a run or a window:
       caps/get_state/set_state answer with live mode+flag. Tools in /c/tmp:
       item43_snap.py (snap/diff2), item43_poll.py, item43_run_flag.sh. Menu
       nav: door open (swhold 33 0), then Selects 2 s (swpoke 25 2000) — the
-      real machine needs exactly TWO. TESTING NOW: mode-gated build; accept =
-      renders like the real-machine video (green icons on black), attract-
-      door-open full screen, gameplay untouched.**
+      real machine needs exactly TWO.**
+      **★ MODE-GATE COMMITTED (`afeedb1`) but INSUFFICIENT ALONE for the menu
+      when entered FROM ATTRACT — the latch beat it. Verified: attract-door-
+      open now plays FULL SCREEN (mode kills the band there); but two long
+      Selects from attract still landed the squashed backdrop, because the
+      emulator's preroll is INSTANT — [menudbg] entry trace shows
+      set_state(PAUSED) -> state_changed READY->PAUSED -> get_state=PAUSED ->
+      caps=NULL all in the SAME millisecond, so the page's latch never sees a
+      "still prerolling" window. A real vpudec takes real time; that window is
+      what lets the real menu draw dots. GOTCHA that muddied several tests: the
+      rig's AUTO-ATTRACT helper presses Back (sw28, +28a in the [sw] log) every
+      ~45 s (PAD_AUTO_GAP) and kept exiting the menu mid-capture — set
+      PAD_AUTO_ATTRACT=0 for any menu test. David's real-machine video
+      (PXL_20260812_142432909.mp4) is the acceptance oracle: door -> Select ->
+      version splash -> Select -> GREEN "GO TO AUDITS MENU" icons on BLACK;
+      the real menu is ALSO a centered half-height strip, so the band GEOMETRY
+      was always right — only the CONTENT (video vs dots) was wrong.**
+      **★★ PIVOT TO A REAL-MACHINE TRACE (David has the physical machine).
+      padtrace.c / build_padtrace.sh (committed `afeedb1`, + fsync since): a
+      TRACE-ONLY LD_PRELOAD tap, built -nostdlib against the card's own glibc
+      2.21 so it loads natively; chains every gst set_state/get_state/caps/
+      state-changed/location/handoff to the real library and logs it with
+      timestamps + the game's mode/flag words (0x650744/0x663958) to
+      /dump/padtrace.log (fsync per line so a card-pull keeps it). VALIDATED in
+      the emulator: loads, logs the full entry timeline, reads the fixed
+      addresses correctly (the reads only fire at gst calls = transitions, so
+      they read mode=0/flag=0 = the pre-latch instant, consistent with the
+      /proc findings). PACKAGING: inject via debugfs (fuse2fs absent, debugfs
+      present) into the rootfs (p2) — add /lib/padtrace.so + one LD_PRELOAD
+      line in /etc/init.d/game_monitor (the game exec `$1`), preserving the
+      launch. Proven byte-perfect on an extracted p2. wsl --mount of the SD
+      FAILS (0x8007000f) — the NORELSYS reader is "Removable Media", a WSL
+      limitation — so the delivery is a FULL MODIFIED IMAGE (C:\tmp\
+      turtles_trace.raw) David writes with his imaging tool. Menu nav on the
+      real machine: coin door open, then TWO long Selects. RETRIEVAL: log is on
+      p6 (/dump, ext4, not Windows-readable) — David dumps the card (or p6) back
+      to a file, extract padtrace.log with `debugfs -R "cat /dump/padtrace.log"`.
+      NEXT: read the real caps/preroll timeline; the fix is to model that
+      preroll window in the shim (NOT a wall-clock timer — that FROZE gameplay,
+      see the wall above; must be state/first-read driven).**
       **FULL VERIFICATION on the final build (`53667d5`, 2026-08-11 late
       night, my instrumented run):** (1) door open mid-attract → instant red
       48V overlay, no lag; (2) long Select → version splash; (3) long Select

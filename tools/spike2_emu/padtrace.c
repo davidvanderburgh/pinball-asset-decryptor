@@ -35,6 +35,7 @@ extern void *dlsym(void *, const char *);
 #define RTLD_NEXT ((void *)-1L)
 extern int   open(const char *, int, int);
 extern long  write(int, const void *, unsigned long);
+extern int   fsync(int);
 extern int   snprintf(char *, unsigned long, const char *, ...);
 extern int   clock_gettime(int, void *);
 extern char *getenv(const char *);
@@ -116,6 +117,10 @@ static void say(const char *s)
     while (s[n] && m < sizeof b - 2) b[m++] = s[n++];
     b[m++] = '\n';
     write(logfd, b, m);
+    /* flush each line to the SD: the card is pulled by hand after the trace,
+     * with no clean unmount, and /dump is mounted async - without this the
+     * last (most interesting) lines can sit in the page cache and be lost. */
+    fsync(logfd);
 }
 
 /* return address of the caller, so a menu-entry read is attributable to the

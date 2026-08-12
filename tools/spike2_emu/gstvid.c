@@ -1432,20 +1432,28 @@ void *pad_vid_caps_for_pad(void *pad)
         }
         return 0;
     }
+    /* item 43: THE PAD-OWNER CHECK RUNS FIRST, over every stream, prerolling
+     * or not. A mid-preroll owner answers NONE - falling through to another
+     * stream's caps is how the service flow's page probe was handed attract's
+     * 1360x768 for a pipeline that had none yet, and the band came back. */
+    if (pad) {
+        for (i = 0; i < PADVID_CHANNELS; i++) {
+            if (!streams[i].ready || streams[i].sinkpad != pad) continue;
+            if ((long)(vid_us() - streams[i].preroll_us) < 0) {
+                static unsigned char said_pr[PADVID_CHANNELS];
+                if (!said_pr[i]) {
+                    said_pr[i] = 1;
+                    VLOG("[vid] ch%d caps asked mid-preroll - answering none,"
+                         " as the real decoder would (item 43)\n", i);
+                }
+                return 0;
+            }
+            break;
+        }
+    }
     for (i = 0; i < PADVID_CHANNELS; i++) {
         if (!streams[i].ready) continue;
-        /* item 43: a stream still PREROLLING has no caps yet, exactly as on
-         * hardware - the service flow's page style hangs on this answer (see
-         * preroll_us in struct stream). It stays out of the fallback too. */
-        if ((long)(vid_us() - streams[i].preroll_us) < 0) {
-            static unsigned char said_pr[PADVID_CHANNELS];
-            if (!said_pr[i]) {
-                said_pr[i] = 1;
-                VLOG("[vid] ch%d caps asked mid-preroll - answering none, as "
-                     "the real decoder would (item 43)\n", i);
-            }
-            continue;
-        }
+        if ((long)(vid_us() - streams[i].preroll_us) < 0) continue;
         ready++;
         if (pad && streams[i].sinkpad == pad) {
             /* Say it once per channel per size: "the pad matched" is the

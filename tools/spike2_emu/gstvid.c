@@ -1319,6 +1319,19 @@ static int vid_menu_gate(void)
  * the truth in the menu. */
 static int vid_lie_for(const struct stream *s)
 {
+    /* PAD_VID_LIVEGATE=1 answers from the LIVE gate instead of the stamp,
+     * which is the pre-`e51e171` semantics - what the committed door-gate
+     * build (71caeb5) actually does. It exists so the door gate can be run as
+     * a faithful CONTROL without checking out an old tree: on 2026-08-12 the
+     * door gate banded when entered from a live attract, but that run carried
+     * the per-stream stamp, so it could not tell "the door gate does not work
+     * from a live attract" from "the stamp broke the door gate". */
+    static int live = -1;
+    if (live < 0) {
+        const char *e = getenv("PAD_VID_LIVEGATE");
+        live = (e && *e && *e != '0') ? 1 : 0;
+    }
+    if (live) return vid_menu_gate();
     return s ? (int)s->lie : vid_menu_gate();
 }
 
@@ -1990,7 +2003,7 @@ int pad_vid_last_state(void *pipeline)
      * (the lag), never set_state (the wedge), never EOS (the freeze). A
      * stream armed outside the menu: the truth, so gameplay and attract are
      * untouched however the gate reads while they are asked. */
-    if (s && s->lie && s->gst_state == 4) {
+    if (s && vid_lie_for(s) && s->gst_state == 4) {
         vid_menudbg("get_state(lie)", pipeline, 3, s);
         return 3;
     }

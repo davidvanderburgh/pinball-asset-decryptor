@@ -718,6 +718,8 @@ static unsigned long vid_us(void)
  * The door is game logic's business; video answers the truth and nothing
  * else. */
 
+static int vid_fw_loading(void);   /* the VPU firmware model, defined below */
+
 static void *vid_thread(void *arg)
 {
     struct stream *s = (struct stream *)arg;
@@ -754,6 +756,10 @@ static void *vid_thread(void *arg)
          * at PAUSED; nothing here has ever needed it - fresh clips only start
          * their thread at PLAYING - so the hold is total.) */
         if (s->paused) { t_epoch = 0; usleep(5000); continue; }
+        /* item 43: no frames while the VPU firmware loads (see
+         * vid_fw_loading) - a real first pipeline delivers nothing until the
+         * blob is in. The epoch resets so the clip starts on time after. */
+        if (vid_fw_loading()) { t_epoch = 0; usleep(20000); continue; }
         /* item 43: NOTE THE ABSENCE of a door check here, and keep it absent.
          * Both attempts to act on a RUNNING stream at door-open failed in
          * David's hands within minutes: a HOLD stalled the game's sync=1
@@ -1006,6 +1012,37 @@ static void *vid_thread(void *arg)
 
 /* ---- entry points called from gststub.c --------------------------------- */
 
+/* ★ ITEM 43: THE VPU FIRMWARE LOAD, MODELLED. On a real i.MX6 the FIRST
+ * vpudec instantiation of the process loads the VPU firmware blob - seconds,
+ * not milliseconds - and until it finishes, a prerolling pipeline has no
+ * negotiated caps and delivers nothing. The 4.28 video-manager init runs a
+ * probe inside that window (build, PAUSED, read caps, tear to READY - the
+ * whole dance is in this run's PAD_GST_TRACE), reads NULL on real hardware,
+ * and latches the SERVICE MENUS to their complete DMD dot mode for the life
+ * of the process. This stub used to answer that probe instantly with real
+ * dimensions, which flipped the latch to a video-styled menu mode that no
+ * real machine ever runs - and which draws NO text and NO dots (the band).
+ * Attract is untouched: its clips arm after the window and play normally,
+ * exactly as on a real machine whose firmware has finished loading.
+ * PAD_VID_FWLOAD_MS overrides the window; 0 disables the model. */
+static unsigned long vid_fw_t0;
+static int vid_fw_ms = -1;
+static int vid_fw_loading(void)
+{
+    if (vid_fw_ms < 0) {
+        const char *e = getenv("PAD_VID_FWLOAD_MS");
+        vid_fw_ms = e && e[0] ? 0 : 4000;
+        if (e && e[0]) {
+            int v = 0;
+            while (*e >= '0' && *e <= '9') v = v * 10 + (*e++ - '0');
+            vid_fw_ms = v;
+        }
+    }
+    if (!vid_fw_ms) return 0;
+    if (!vid_fw_t0) return 1;   /* no pipeline armed yet: fw never started */
+    return (long)(vid_us() - vid_fw_t0) < (long)vid_fw_ms * 1000l;
+}
+
 /* Ask the host to open a stream's location. Returns 1 if it can be played. */
 int pad_vid_prepare(void *pipeline)
 {
@@ -1019,6 +1056,17 @@ int pad_vid_prepare(void *pipeline)
     if (!vshm || !s->location[0]) return 0;
     if (!stream_buf(s)) return 0;
     c = &vshm->ch[hw_of(s)];
+
+    /* item 43: the first arm of the process starts the VPU firmware clock -
+     * see vid_fw_loading(). Stamped whatever else this call decides, because
+     * on real hardware merely INSTANTIATING vpudec starts the load. */
+    if (!vid_fw_t0) {
+        vid_fw_t0 = vid_us();
+        if (vid_fw_loading())
+            VLOG("[vid] first pipeline arm: modelling the VPU firmware load "
+                 "(%d ms; PAD_VID_FWLOAD_MS overrides, 0 disables)\n",
+                 vid_fw_ms);
+    }
 
     /* item 43: the game re-arming this pipeline - whatever else this call
      * decides - means it is alive again. Cleared BEFORE the absorbs so the
@@ -1331,6 +1379,18 @@ void *pad_vid_caps_for_pad(void *pad)
 {
     int i, ready = 0;
     struct stream *fb = 0;
+    /* item 43: no negotiated caps while the VPU firmware loads - the answer
+     * a real prerolling pipeline gives, and the answer the 4.28 init probe
+     * must read for the service menus to latch their dot mode. */
+    if (vid_fw_loading()) {
+        static int said;
+        if (!said) {
+            said = 1;
+            VLOG("[vid] caps asked while the VPU firmware loads - answering "
+                 "none, as the real decoder would (item 43)\n");
+        }
+        return 0;
+    }
     for (i = 0; i < PADVID_CHANNELS; i++) {
         if (!streams[i].ready) continue;
         ready++;

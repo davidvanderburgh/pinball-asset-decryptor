@@ -357,6 +357,51 @@ setsid_as_user() {
 # the WSL side of a Windows pythonw.exe reached through interop; `python3` is
 # the same window on a Linux desktop, where it is an ordinary local process.
 pf_up() { pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null; }
+if [ "$(id -u)" = 0 ] && [ "$DROP" = 0 ]; then
+    # ★ THE BLACK WINDOW, AND THE ONE CONFIGURATION THAT CAUSES IT.
+    #
+    # The block above says why root must not run the helpers: as root the
+    # renderer cannot attach to the WSLg X server's shared memory, so the game
+    # window OPENS AND STAYS BLACK. The drop dance exists to stop that, and it
+    # is skipped in exactly one case - root with nobody to drop to, which is a
+    # WSL whose DEFAULT USER IS ROOT. Then $HOME is /root, $ROOT is
+    # /root/spike2root, it is root-owned, PAD_USER comes out empty, and this
+    # runs the renderer as root without a word.
+    #
+    # REPORTED 2026-08-12 (PAD-63) AND IT COST THE WHOLE TICKET. The user got a
+    # black game window beside a perfectly good playfield - the playfield is a
+    # WINDOWS process on that machine, so it is the one thing root cannot spoil
+    # - and his log was flawless everywhere else: card mounted, guest booted,
+    # attract reached, his own clips decoded and handed over at 30.0/s, the
+    # renderer at 40.9 fps over 4210 frames. Mesa says what is wrong
+    # ("MESA: error: Failed to attach to x11 shm", carried to the app's pane
+    # by the event filter as of this commit) but only in the renderer's own
+    # log, and nothing said the run was in this state at all.
+    #
+    # NOT FATAL, for the reason the ffmpeg guard gives: the guest boots, the
+    # sound plays, the switches and the playfield work, and a machine that is
+    # one `adduser` away from a picture should not be refused.
+    #
+    # AND NO AUTOMATIC DROP HERE, deliberately. The X socket names the desktop
+    # user, so guessing one is easy - and wrong: with HOME=/root, $ROOT lives
+    # under a 0700 /root that the dropped helper cannot even traverse, so it
+    # would trade a black window for a renderer that cannot open the ring. The
+    # fix is which user the run STARTS as, which is the app's decision and the
+    # user's setting, not something to patch over from in here.
+    echo "[watch] THIS WSL RUNS AS ROOT, and its game window will be BLACK." >&2
+    echo "[watch]   Everything else on this run is real - sound, switches, the" >&2
+    echo "[watch]   playfield - but as root the renderer cannot attach to the X" >&2
+    echo "[watch]   server's shared memory, so no picture reaches the window." >&2
+    echo "[watch]   Nothing in the emulator can fix that from in here: it is" >&2
+    echo "[watch]   which account this distro logs in as." >&2
+    echo "[watch]   The cure, once, in a Windows terminal:" >&2
+    echo "[watch]     wsl -u root adduser <name>" >&2
+    echo "[watch]     wsl -u root usermod -aG sudo <name>" >&2
+    echo "[watch]     wsl -u root sh -c 'printf \"[user]\\ndefault=<name>\\n\" >> /etc/wsl.conf'" >&2
+    echo "[watch]   then 'Restart WSL...' on the Emulate tab and start again." >&2
+    echo "[watch]   (A distro that already has an ordinary account needs only" >&2
+    echo "[watch]   the last line.)" >&2
+fi
 if [ "$DROP" = 1 ]; then
     echo "[watch] running the guest as root, helpers as $PAD_USER"
     # Hand the log files back, or the NEXT ordinary run cannot truncate them:
@@ -1191,6 +1236,16 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
                 { print "[event] " $0; fflush() }
             next }
         /\[play\]/               { print "[event] " $0; fflush(); next }
+        # THE LINE THAT NAMES A BLACK WINDOW, and it is not ours: Mesa prints
+        # it, into the renderer log, when the renderer is running as root and
+        # cannot attach to the WSLg X server shared memory. The window opens,
+        # every counter in the run reads healthy and no picture ever arrives.
+        # It came a whole ticket late once (PAD-63) because nothing carried it
+        # here. Collapsed like Radium: the log FILLS with it.
+        /Failed to attach to x11 shm/ {
+            if (++n[$0] == 1 || n[$0] % 500 == 0)
+                { printf "[event] %s (x%d)\n", $0, n[$0]; fflush() }
+            next }
         /\[padglhost\] (window opened|video block|ring |UNKNOWN|picture:)/ \
                                  { print "[event] " $0; fflush(); next }
         # `picture:` IS THE SAME GAP ONE STEP FURTHER IN. The lines above cover

@@ -176,6 +176,59 @@ def test_the_event_filter_carries_the_picture_lines_to_the_pane():
     assert not [g for g in got if "just some line" in g]
 
 
+# --------------------------------------------------------------------------
+# ...and the configuration that actually produces a black window
+# --------------------------------------------------------------------------
+
+def test_root_with_nobody_to_drop_to_is_told_its_window_will_be_black():
+    """The one configuration that makes the window black on purpose.
+
+    watch.sh's own header records the measurement: as root the renderer cannot
+    attach to the WSLg X server's shared memory and THE WINDOW IS BLACK.  The
+    drop dance exists to prevent it and is skipped in exactly one case - root
+    with no user to drop to, which is a WSL whose DEFAULT USER IS ROOT.  That
+    case used to run the renderer as root in silence; PAD-63 is what it costs.
+    """
+    src = _read("watch.sh")
+    i = src.index("THIS WSL RUNS AS ROOT")
+    guard = src[max(0, i - 2200):i]
+    assert '[ "$(id -u)" = 0 ] && [ "$DROP" = 0 ]' in guard, \
+        "the warning is not gated on root-with-no-drop-target"
+    block = src[i:i + 1800]
+    assert "BLACK" in block
+    assert "default=<name>" in block, "it does not name the cure"
+    assert "exit" not in block.split("fi", 1)[0], \
+        "this became fatal; the rest of the run is real (see the ffmpeg guard)"
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="no bash")
+def test_the_cure_survives_shell_quoting():
+    """The middle line of the cure carries nested quotes and a \\n, which is
+    exactly the kind of thing that reaches a user mangled.  Run the block."""
+    src = _read("watch.sh")
+    i = src.index('echo "[watch] THIS WSL RUNS AS ROOT')
+    end = src.index("\nfi\n", i)
+    out = subprocess.run([shutil.which("bash"), "-c", src[i:end]],
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    text = out.stderr
+    assert 'printf "[user]\\ndefault=<name>\\n" >> /etc/wsl.conf' in text, text
+    assert "adduser <name>" in text
+
+
+@pytest.mark.skipif(not AWK, reason="no awk")
+def test_mesas_own_explanation_reaches_the_pane():
+    """Mesa names this fault and the app never showed the line.  It also
+    repeats without limit, so it is collapsed like the Radium storm."""
+    line = "MESA: error: Failed to attach to x11 shm"
+    out = subprocess.run([AWK, _event_filter()], input=(line + "\n") * 3,
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    got = out.stdout.splitlines()
+    assert got == ["[event] %s (x1)" % line], \
+        "shown once per sighting, or not shown at all: %r" % got
+
+
 def test_the_window_hint_says_which_half_a_black_window_is():
     """The old hint sent every "no picture" to `Restart WSL...`, which is right
     for a lost mirror and useless for a picture that is black where it is

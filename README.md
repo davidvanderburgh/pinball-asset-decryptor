@@ -902,6 +902,18 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    turns on systemd in `/etc/wsl.conf` so that registration survives a
    WSL restart. It lists every package and file it will touch before it
    changes one, and needs no password (`wsl -u root` is already root).
+   That registration lives in the *running* kernel, which makes
+   *Restart WSL…* one of the two ways a machine that could emulate a
+   minute ago quietly stops being one — on a distro that doesn't boot
+   systemd, the restart takes the ARM handler with it. So the restart
+   now asks the machine what it left behind instead of assuming it left
+   everything: the log says it is looking (the check is what boots WSL
+   back up, so on a cold VM the wait is the check, not a hang), and a
+   machine that came back unable to emulate gets the amber notice and
+   the **Set up emulator…** button right there — where before the tab
+   went on showing the machine it had probed at launch and the next
+   Start failed with `chroot: failed to run command '/bin/sh': Exec
+   format error`. A machine that came back intact is told nothing.
    A package that is missing and a package apt can actually *install*
    are two different facts, and the tab now reports both. Ubuntu
    publishes `qemu-user-static` in its `universe` component while the

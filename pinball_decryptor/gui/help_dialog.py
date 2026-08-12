@@ -1005,7 +1005,14 @@ HELP_CONTENT = {
          "first and stays greyed out while a run is up — stop the game, "
          "then use it. Nothing on disk is lost. (A stop that cannot finish "
          "cleanly offers this same restart by itself, so you rarely need "
-         "to come here for that.)"),
+         "to come here for that.) When the restart is done the tab checks "
+         "this PC again, because the kernel's 32-bit ARM registration only "
+         "survives a restart on a distro that boots systemd — so a machine "
+         "that came back unable to run the emulator says so here, with "
+         "“Set up emulator…” beside it, instead of leaving it to the next "
+         "Start to fail. The log says it is checking before it checks, "
+         "since that check is what boots WSL back up. A machine that came "
+         "back intact is told nothing."),
     ],
     "Compare": [
         ("What it does",

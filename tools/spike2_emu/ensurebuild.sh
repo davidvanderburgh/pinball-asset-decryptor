@@ -524,6 +524,21 @@ pad_ensure_guest_exec() {
         echo "[guest] the registration lives in the running kernel and is put" >&2
         echo "[guest] back at boot by systemd, so a distro started without" >&2
         echo "[guest] systemd loses it every time WSL restarts." >&2
+        # THE BUTTON FIRST, WHERE THERE IS ONE. Everything below is what
+        # "Set up emulator..." already does - it registers the handler and
+        # writes the [boot] section - and on WSL the app can do it without a
+        # password (setupfix.sh's header has the whole argument). Printing two
+        # root commands ahead of it is how a tester ended up hand-editing WSL
+        # config files on 2026-08-12, unsure which strings went in which file,
+        # with the one-click version of both sitting on the tab he had just
+        # pressed Start on. The commands stay, underneath, for a terminal run
+        # and for anyone who would rather see what is being done.
+        if [ "${IS_WSL:-0}" = 1 ]; then
+            echo "[guest] In PAD: the Emulate tab now offers 'Set up emulator...'," >&2
+            echo "[guest] which registers the handler AND makes it survive the next" >&2
+            echo "[guest] restart. It lists what it will change before it changes it." >&2
+            echo "[guest] By hand instead:" >&2
+        fi
         echo "[guest] Now:  $(_pad_binfmt_advice)" >&2
         echo "[guest] Keep: put   [boot]   and   systemd=true   in /etc/wsl.conf," >&2
         echo "[guest]       then wsl --shutdown once." >&2

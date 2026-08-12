@@ -362,3 +362,82 @@ def test_the_renderers_own_headless_lines_reach_the_event_feed():
     host = src("padglhost.c")
     assert "staying headless" in host
     assert "falling back to headless" in host
+
+
+# ---- and what an unset DISPLAY is told to do about it ----------------------
+#
+# Reported 2026-08-12 (Pinside, #151-#153).  The `none` branch used to be four
+# lines, and the only thing it named was `guiApplications=false in
+# %USERPROFILE%\.wslconfig`.  The tester who met it HAD NO SUCH FILE, read the
+# line as an instruction to make one, and said so: "I followed instructions
+# online to create the .wslconfig text file but unsure if I just dump those
+# strings in there or what."  The only string he had been given was the one
+# that SWITCHES GUI APPS OFF - so the message was one paste away from causing
+# the fault it describes, on a machine whose real cure (a restart) it
+# mentioned only as the last clause of the last line.
+
+
+def _none_branch():
+    """The advice an unset DISPLAY prints, and nothing around it.
+
+    COMMENTS STRIPPED, because these tests are about what the USER reads.
+    This branch's comment block quotes the old wording it replaced - the
+    `guiApplications=false` line included - so a test that searched the raw
+    text would be answered by the history rather than by the message.
+    """
+    text = src("watch.sh")
+    body = text[text.index("case $(pad_display_state) in"):]
+    body = body[:body.index("\nesac")]
+    start = body.index("    none)")
+    body = body[start:body.index("exit 1 ;;", start)]
+    return "\n".join(ln for ln in body.splitlines()
+                     if not ln.lstrip().startswith("#"))
+
+
+def test_the_restart_leads_and_the_settings_file_follows():
+    """The cure that actually worked for the machine that reported this, said
+    first.  The settings file is the rarer cause and reads as a red herring
+    where it is not the fault."""
+    body = _none_branch()
+    assert body.index("Restart WSL") < body.index(".wslconfig")
+
+
+def test_the_missing_file_is_named_as_the_healthy_state():
+    """No .wslconfig means GUI apps are ON.  Without that sentence the advice
+    sends someone who has no such file off to write one."""
+    body = _none_branch()
+    assert "OPTIONAL" in body
+    assert "do not create it" in body
+
+
+def test_nothing_here_can_be_read_as_add_this_line():
+    """`guiApplications=false` may only ever appear as something to LOOK FOR
+    and undo.  It must never be the last thing a confused reader copies."""
+    body = _none_branch()
+    said = [ln for ln in body.splitlines() if "guiApplications" in ln]
+    assert said, "the setting is no longer named at all"
+    for line in said:
+        assert "already exists" in line or "Only if" in line, line
+    # ...and the sentence that follows says what to do with it.
+    assert "change that word to true" in body
+    assert "delete the line" in body
+
+
+def test_a_wsl_too_old_for_wslg_is_named_too():
+    """No restart cures that one, and nothing inside the distro can see it -
+    so a message that offers only the restart sends that machine round a loop
+    it cannot leave."""
+    body = _none_branch()
+    assert "wsl --update" in body
+
+
+def test_a_linux_desktop_is_not_sent_to_a_windows_settings_file():
+    """%USERPROFILE% means nothing on a Linux box with no DISPLAY, and the
+    branch is reached there too - the same wrong-machine advice the `nosocket`
+    branch below has always been careful to avoid."""
+    body = _none_branch()
+    assert '[ "$IS_WSL" = 1 ]' in body
+    wsl_half, _, linux_half = body.partition("else")
+    assert ".wslconfig" in wsl_half
+    assert ".wslconfig" not in linux_half
+    assert "DISPLAY" in linux_half

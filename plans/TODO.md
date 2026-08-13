@@ -915,6 +915,45 @@ These have each been violated at least once and each cost a run or a window:
       Gray-code pair rather than flipped blindly. Worth fixing on its own
       merits, and it must NOT be bundled with the latency fix — separate
       change, separate verification.**
+      **★★★ RUN 11, 2026-08-13 — THE POLL RATE IS MEASURED, AND THE LOSS
+      RATE FALLS OUT OF IT TO WITHIN ONE PERCENT. New instrument
+      (`PAD_CAB_PROBE=1`, hwshim.c, default off): stamp a 16-bit transfer
+      counter into cabinet reply bytes 6 and 7. The game copies the reply
+      into NodeRec.cur unconditionally, so cur[6..7] records the counter
+      AS OF EACH POLL — every change is one poll, its timestamp is the
+      poll time, the delta is the transfers in between. Safe because bits
+      48–63 carry no node-0 switch (our builder never sets a bit above 23;
+      the idle word is `ff 0f 0f 00 00 00 00 00`) and the decoder drops
+      changed bits whose switch id is 0.**
+      **THE CABINET IS NOT POLLED SLOWLY. IT IS POLLED IN BURSTS:**
+      ```
+      median gap   9-10 ms   (~100 Hz while it is polling)
+      p90 gap      11-12 ms
+      MAX gap      ~690 ms   and there are several per 5 s window
+      ```
+      **In 4.6 s of capture: ~150 polls at ~9 ms (1.35 s of it) plus five
+      gaps of 683–690 ms (3.45 s of it). So the duty cycle is roughly
+      0.3 s of polling then a ~0.69 s blind gap, on a ~1 s cycle.**
+      **THE ARITHMETIC CLOSES THE CASE. A 300 ms press is lost only if it
+      falls ENTIRELY inside a blind gap, i.e. if it starts in the first
+      (690 − 300) = 390 ms of a 1 s cycle → 39% loss, 61% capture.
+      MEASURED CAPTURE WAS 12/20 = 60%. Nothing else needs to be true.**
+      **AND IT IS NOT MENU-SPECIFIC: attract and the service menu give the
+      same numbers (32.4/s vs 31.2/s, median 9 vs 10 ms, max 690 vs
+      693 ms). So the flipper complaints in attract and item 46's turtles
+      Action Button are very probably THIS, not three separate faults.**
+      **WHAT IS LEFT IS ONE QUESTION: what blocks the cabinet poll for
+      ~690 ms at a time? The sweep reaches node 0 only after a node-bus
+      serial round trip (0x59ef30 → 0x59ebac → 0x59d824: write@plt,
+      read@plt, tcflush on the fd at 0x70a474), so the prime suspect is
+      OUR emulated serial read blocking or timing out. Instrument the
+      shim's node-bus read path with entry/exit timestamps and find the
+      ~690 ms. If it is ours, this is a real fix and not a hold.**
+      **Instrument note: ringwatch AUTOSUPPRESSED the probe bytes after
+      150 changes and cost run 11 forty of its forty-five seconds — the
+      watcher silenced the very thing being measured. Fixed on the branch
+      with a NEVER_SUPPRESS list; the numbers above come from the first
+      ~4.7 s, which is why the spans are short.**
       **RUN 10's second question, kept because the deferral
       does not answer it:
       what does the game require of the cabinet reply before it decodes

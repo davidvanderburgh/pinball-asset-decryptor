@@ -2427,7 +2427,49 @@ int shim_ioctl(int fd, unsigned long req, ...)
             }
         }
         if (have) {
+            unsigned char out8[8];
+            unsigned j0;
             sw_prime(0, bits);
+            for (j0 = 0; j0 < 8; j0++) out8[j0] = bits[j0];
+            /* ---- ITEM 17: THE CABINET POLL-RATE PROBE (PAD_CAB_PROBE=1) ---
+             *
+             * The whole item now turns on ONE unmeasured number: how often
+             * does the game actually read this word? It takes the reply on
+             * every transfer (~1560/s) but only forwards it to the recorder
+             * when the runtime sweep reaches node 0, and node 0 is the
+             * sweep's terminator - so the forward rate is invisible from
+             * both sides. Capture rates only let you INFER it (300 ms
+             * presses land 12/20, so T is about 500 ms); this measures it.
+             *
+             * Stamp a 16-bit transfer counter into reply bytes 6 and 7. The
+             * game copies the reply into NodeRec.cur unconditionally
+             * (0x1e7988), so cur[6..7] then holds the counter value AS OF
+             * THE POLL: every change of those bytes is one poll, its
+             * timestamp is the poll time, and the delta is how many
+             * transfers went by in between. Watch live 0x7b95b6/b7.
+             *
+             * SAFE because bits 48-63 carry no node-0 switch: sw_scan_bytes
+             * builds `bits` from the GAME'S OWN entry table and never sets
+             * a bit above 23 (the idle word is ff 0f 0f 00 00 00 00 00), and
+             * the decoder drops changed bits whose switch id is 0 (0x1e79bc)
+             * before they can reach an entry. 16 bits so it does not wrap
+             * inside a poll interval - one byte would wrap every 164 ms.
+             *
+             * This is an INSTRUMENT, not a fix: default off, and it must not
+             * be left on in a measuring run of anything else. */
+            {
+                static int on = -1;
+                static unsigned ctr;
+                if (on == -1) {
+                    char *q = getenv("PAD_CAB_PROBE");
+                    on = q && *q == '1';
+                }
+                if (on) {
+                    ctr++;
+                    out8[6] = (unsigned char)(ctr & 0xffu);
+                    out8[7] = (unsigned char)((ctr >> 8) & 0xffu);
+                }
+            }
             for (k = 0; k < msgs; k++) {
                 const unsigned char *m = (const unsigned char *)arg + k * 32;
                 unsigned rx  = *(const unsigned *)(m + 8);
@@ -2436,7 +2478,7 @@ int shim_ioctl(int fd, unsigned long req, ...)
                 if (!rx || !len) continue;
                 if (len > 8) len = 8;
                 for (j = 0; j < len; j++)
-                    ((unsigned char *)(unsigned long)rx)[j] = bits[j];
+                    ((unsigned char *)(unsigned long)rx)[j] = out8[j];
             }
             {
                 static int budget = 8;

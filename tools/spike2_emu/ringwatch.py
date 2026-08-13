@@ -73,6 +73,11 @@ GUEST_BASE = 0x10000
 AUTOSUP_AT = 150          # per-word changes before it stops being printed
 POLL_SLEEP = 0.004        # ~200 Hz. The 60 Hz engine cannot hide from this
                           # and it leaves the rig's cores to the game.
+# Regions whose whole point is their RATE, so autosuppressing them destroys
+# the measurement. Run 11 lost 40 of its 45 seconds this way: the cabinet
+# poll probe writes a counter into NodeRec, every write is a data point, and
+# the watcher helpfully silenced it after 150 of them.
+NEVER_SUPPRESS = ('noderec',)
 EV_WINDOW = 0x10000       # bytes of heap watched around the event pool
 EV_BACKOFF = 0x1000       # start the window this far below the lowest ptr
 
@@ -317,7 +322,7 @@ def main():
                     changes += 1
                     if key in supp:
                         continue
-                    if n > AUTOSUP_AT:
+                    if n > AUTOSUP_AT and name not in NEVER_SUPPRESS:
                         supp.add(key)
                         print(f"{now} AUTOSUPPRESS {name}+{off:#x} "
                               f"({base+off:#x}) after {n}", flush=True)

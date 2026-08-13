@@ -671,11 +671,82 @@ These have each been violated at least once and each cost a run or a window:
       (a) event never posted, (b) posted but never dispatched, (c)
       dispatched but cancelled at recheck. Each branch has a different
       fix; that trichotomy is the whole remaining question.**
-      **New tools on branch: queuewatch.py + threadwatch2.py (scratchpad
-      — promote if run 8 reuses). gatewatch.py committed. Logs preserved
+      **★★★ RUN 8 + 8b, 2026-08-13 — THE TRICHOTOMY IS ANSWERED AND THE
+      DEFECT MOVED UPSTREAM OF EVERYTHING RUNS 5–7b WERE WATCHING.
+      `ringwatch.py` (NEW) follows the ring/freelist pointers into the
+      HEAP, so the 64 event nodes — invisible to every previous watcher,
+      because the pool is one 0x145000 malloc outside .data — are diffed
+      directly. 24-press train, then a 16-press confirming train.**
+      **(i) BRANCH (b) IS EMPTY. Nothing is ever posted-and-left-
+      undispatched: on every press that posts, the freelist pop, the ring
+      head move, the node write and the pane busy words land in the SAME
+      5 ms sample. There is no dispatch latency — which retires the whole
+      "event pump cadence / bimodal dispatch" framing runs 5 and 6 built.**
+      **(ii) THE SPLIT, run 8 (24 presses): 12 CONSUMED, 3 dispatched-then-
+      cancelled (c), 9 nothing-at-all (a). Run 8b (16 presses): 10 / 0 / 6.
+      Same ~60/40 either way, and the ~40% "lottery" is now located.**
+      **(iii) (a) IS THE DEFECT, AND IT IS FURTHER UPSTREAM THAN (a) WAS
+      DEFINED. On a dead press the switch-entry PENDING COUNT (+0x16)
+      never increments, so THE RECORDER NEVER RAN. The drain, the post,
+      the ring walker and the coroutine recheck are all innocent — they
+      were never handed anything. On live presses +0x16, the debounced
+      level +0x18 and the producer head all move in one sample, 93–348 ms
+      after the wire.**
+      **(iv) ★★ FIVE RUNS OF "DELIVERY IS 20/20, 24/24" WERE MEASURING THE
+      WRONG WORD. 0x852108 is the DEVICE-LEVEL word, and it carries a
+      textbook ~300 ms closure 16/16 — on dead presses exactly as on live
+      ones (`0f→0d` for Plus, `0f→0b` for Minus, back 300 ms later). The
+      game's real switch layer is `*(0x7b958c) + id*32`, stride 32 proven
+      three ways in the disassembly AND independently by hwshim.c's own
+      probe (`st + id*32`, `pend = *(u16*)(e+22)`, `lvl = e[24]`). That
+      array sees only 10/16. So "delivery is dead as a suspect" was true
+      of the device word and false of the game.**
+      **(v) THE SHIM'S OWN PROBE SEPARATES THEM PERFECTLY, 6/6 vs 10/10,
+      and it is OUR structure it disagrees on: live presses log the full
+      `cur 1→0, pend 1, lvl 1→0` sequence out of `SW_NODEREC(node)`; dead
+      presses log exactly two lines, `cur=1` at the press and `cur=1` at
+      +305 ms, i.e. the closure never appears in the shim's node record at
+      all. Note the probe is change-gated, so this corroborates rather
+      than proves on its own — ringwatch's unconditional 200 Hz sampling
+      of +0x16 is the load-bearing evidence.**
+      **WHERE IT NOW LIVES: between the device-level word and the game's
+      switch-entry array — the node-record merge / cabinet handover the
+      SHIM performs for ids 25–28. `sw_owed[]` (979b940) latches a closure
+      against the NODE scan; this cabinet path evidently is not covered by
+      it, which is exactly why the latch never cured the felt case. RUN 9:
+      trace the shim side unconditionally (PAD_SW_PEND's change-gating can
+      hide a complete +1/−1 cycle), find what paces the cabinet handover,
+      and extend the latch to it. Fix shape is the release-defer that has
+      been this item's fallback all along — now with a measured target.**
+      **A SECOND ADDRESS TRAP, found and fixed here: a pointer VALUE read
+      out of guest memory is a GUEST address and needs +0x10000 too.
+      gatewatch.py's DEREF_REGIONS did NOT add it, so run 7's `parity` and
+      `snap` regions were 0x10000 low — which is why they "never changed
+      once". RUN 7's F1 (ring parity) VERDICT IS THEREFORE REOPENED; it
+      rests on a bad read. Its F2/F3/F4 verdicts used static regions and
+      stand. ringwatch.py has a `deref()` helper that carries the rule.**
+      **The disassembly that made run 8 readable (agent, desk work, report
+      at `C:\tmp\item17\run8\drain_ring_report.txt`): the drain 0x1e7540
+      has FIVE ways an entry in the list fails to reach the post — two
+      descriptor flag bits (0x0800 press / 0x0400 release at desc+0x1a),
+      the global category mask 0x7aba5a acting as a strict whitelist when
+      nonzero, a null entry function at desc+0, and a SILENT freelist
+      exhaustion (0x2551dc returns NULL, pool hard-capped at 64 nodes, no
+      retry — the edge is gone forever). Event nodes are 320 B, countdown
+      at +0x88, flags at +0x02 with bit 0x40 = suspended-and-skipped. The
+      menu handler 0x23b4d0 also has two undocumented early exits gating
+      on switches 3 and 4 read from a SECOND bitmap `*(0x7b93a0)` — the
+      likeliest home of the (c) minority. None of these fire on the (a)
+      path, because the drain never sees the edge.**
+      **New tools on branch: `ringwatch.py` (the run-8 instrument, and the
+      first watcher that can see the event pool at all), queuewatch.py +
+      threadwatch2.py. gatewatch.py committed. Logs preserved
       /var/tmp/*_run7*_preserved.log + C:\tmp\item17\run7\ (gate report,
-      gatewatch/queuewatch/threadwatch2/console). Shim mitigation
-      (release-defer) remains the fallback once the branch is known.
+      gatewatch/queuewatch/threadwatch2/console); run 8 at
+      /var/tmp/*_run8*_preserved.log + C:\tmp\item17\run8\ (ringwatch
+      run8 + run8b, manifests, console, drain_ring_report.txt, nav shots).
+      Shim mitigation (release-defer) is no longer the fallback — it is
+      the fix, now that the cabinet handover is the measured target.
       Acceptance unchanged: ordinary sub-second press acts EVERY time
       over N≥10, oracle = MEMORY (value word live 0x7c908c), display as
       the human check.**

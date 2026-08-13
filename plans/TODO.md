@@ -1594,11 +1594,16 @@ rewriting it.**
 ## Done
 
 - [x] **17. Keyboard switch input needs holding longer than a keystroke, and
-      DONE 2026-08-13, branch `item/17`, acceptance 20/20 in run 21 —
-      root cause: the game re-ran its aux-device init every ~924 ms
-      because three shim replies said "never initialized"; see the
-      RUNS 12–21 block below for the chain and the fix.
-      does not repeat.** `S1 D3` ← IN PROGRESS *(**D4 → D3 on 2026-08-06:** the
+      does not repeat.** `S1 D3`
+      DONE 2026-08-13, branch `item/17`, acceptance 20/20 in run 21, and
+      **VERIFIED IN DAVID'S OWN RUN** ("this is great and ready to
+      release!") — with a side effect he spotted before any instrument
+      did: **the playfield LEDs went from ~2 Hz to ~30 Hz**, because the
+      same blind bus thread was starving the LED frames to nodes 7/12/14
+      exactly as it starved the cabinet poll. Root cause: the game re-ran
+      its aux-device init every ~924 ms because three shim replies said
+      "never initialized"; see the RUNS 12–21 block below for the chain
+      and the fix. *(**D4 → D3 on 2026-08-06:** the
       mechanism is cracked, the instrument is built and validated, and the fault
       now reproduces on demand from a script — so a pass can no longer end
       having learned nothing. What is left needs a run, not a new instrument.)*

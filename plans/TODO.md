@@ -462,17 +462,76 @@ These have each been violated at least once and each cost a run or a window:
       `watch.sh` (run 2 came up as turtles_pro — whose flippers are 64/65, not
       59/60 — because item 43 left the symlink there; `PAD_GAME=godzilla_pro`
       pins it).
-      **Resume:** (a) the desk read first — find the menu consumer's clock:
-      disassemble the service-menu input path (the adjustment screens poll
-      SOMETHING at ~1–2 s; radium sidx trap applies, see
-      reference_spike2_program_text) and check `sw_scan_bytes()` for a made-bit
-      dropout mid-hold; (b) then one run into BATTLE SELECT (the in-game
-      flipper consumer David actually named — needs a game with balls, door
-      CLOSED) with the same ladder + grabs, because in-play flipper
-      consumption may be a different rule from the service menu's; (c) a
-      turtles run for the same ladder joins item 46's discriminator to this
-      one. The MENU-half acceptance stays: an ordinary sub-second press moves
-      the cursor, stated over N presses, oracle the game's own display.
+      **★★★ THE MECHANISM, CRACKED AT THE DESK 2026-08-12 late evening (4-way
+      desk-read fan-out over the shim, the run-3 wire log and the game ELF)
+      AND THEN PINNED LIVE IN RUN 5. The menu never debounces and never
+      slow-polls: a door-button edge becomes a QUEUED EVENT, and the event's
+      coroutine (0x23b8f0 → 0x23b4d0) RE-READS the live level (0x1e6d90,
+      = entry[+24]) WHEN IT FINALLY RUNS — a press whose release has already
+      been drained by then is silently cancelled into a jump table. No
+      K-samples constant exists anywhere in the path. The gate is the EVENT
+      PUMP'S LATENCY racing the release edge.**
+      **MEASURED LIVE, run 5 (godzilla, PEND on 25-28+59,60, log preserved
+      `/var/tmp/gzwatch_item17_run5.log`, shots `C:\tmp\item17\bisect\`):**
+      **(i) Door-button delivery is FAST and CORRECT** — the drain recorded
+      make edges 15–205 ms after the wire on every press, including every
+      press the menu ignored (b003: textbook lvl sequence, ~950 ms of
+      made-state, ignored). Delivery is dead as a suspect on BOTH transports.
+      **(ii) Consumption is a WIDTH-INDEPENDENT ~40% LOTTERY: Minus/Plus in
+      the QA value editor, flip-oracle on the game's display — 1200 ms 2/4,
+      800 ms 1/4, 500 ms 0/4, 300 ms 2/4, 150 ms 3/4 (8/20 overall).** A
+      150 ms press can land and a 2000 ms press can die. So dispatch latency
+      is BIMODAL: sometimes <~0.3 s (any press lands), otherwise >~2.5 s
+      (even a 2 s press has released → cancelled at the recheck). The felt
+      lottery IS the pump's cadence. Run 3's "consumed at 2000 5/5, nothing
+      below" was luck plus a too-small sample; corrected by this bisect.
+      **(iii) The no-repeat half has its own finding: the held-button
+      REPEAT tracker exists in the game (0x23acf0, first repeat after 30
+      coroutine ticks, then accelerating) but its arming is gated on the
+      service class mask u16@0x7aba5a bit8 — which reads 0 in the rig's
+      menu.** Whether real hardware sets it there is open; if yes, that is a
+      second, separate rig defect. Also the 30-tick onset at the rig's
+      coroutine rate would be tens of seconds — the tick rate is the same
+      root problem.
+      **(iv) Flippers not moving Quick Adjustments is MACHINE BEHAVIOUR**
+      (exactly four door-button records route to the menu tracker; menu
+      consumers poll only those four counters). The flipper half of David's
+      report lives in OTHER screens — the attract splash literally says
+      "HOLD BOTH FLIPPER BUTTONS FOR MENU", and battle select is in-game.
+      **Addresses (godzilla_pro 1.15.0, verified against the live ELF):**
+      recorder 0x1e78f4, drain 0x1e7540 (parity rule on entry[+22]), event
+      post 0x2551dc, thunk 0x23b8f0, press fn 0x23b4d0 (recheck at
+      0x23b510), tracker ctor 0x23acf0, tracker globals 0x7b130c/1320/
+      133c/1350, event pool 0x7b7e80, current-event 0x7b7e84, scheduler ctx
+      0x7b7e8c, class mask 0x7aba5a. Full chain + evidence: handoff.
+      **RUN HYGIENE, two more collisions this evening, both recorded so the
+      next pass survives them:** a turtles CARD run (PIVOT, 120-min backstop,
+      launched ~19:55 through MY worktree's scripts by something that was not
+      me — possibly item 46's session; no worktree of its own) collided with
+      run 4; my own alive.sh check had tail-1'd the MOUNT line and missed the
+      live guest above it. **Gate on `alive.sh --total` (the number-only
+      form), never on eyeballing the table.** Both runs killed with David's
+      explicit OK; also /proc reads against pgrep's FIRST match had been
+      reading the WRONG GUEST's memory — doortrack.py now needs a
+      per-game pgrep or a PID argument before anyone trusts it again.
+      **New tools on this branch:** `doortrack.py` (tracker watcher, ~100 Hz
+      /proc poller — needs root for ptrace scope), `menuprobe.py` (cyan-mask
+      screen oracle, positive example now exists: run5 `plus800.png`-era "No"
+      vs `run5_afterplus.png` "Yes").
+      **Resume — the pump cadence is the one number left:** watch the
+      current-event pointer 0x7b7e84 (and freelist 0x7b7e80+0xd4) at ~100 Hz
+      through /proc during a swpoke train — every change is a dispatched
+      event, so the change log IS the pump cadence, and its stall pattern
+      names the root defect (what blocks the coroutine scheduler for seconds
+      in menus when real hardware runs it at frame rate). Then: (a) find the
+      blocker (suspect the main tick ~0x4ec850 waits on something the rig
+      serves slowly); (b) A/B a shim-side mitigation — defer cabinet RELEASE
+      edges until the make's event has had a dispatch window (sw_owed-style,
+      node 0) — which trades latency for reliability and is honest about it;
+      (c) battle select + turtles (item 46 joins here: same event path, its
+      'occasionally in attract' is this same lottery). The MENU-half
+      acceptance: an ordinary sub-second press acts EVERY time, stated over
+      N≥10 presses, oracle the game's display.
       **★★★ DAVID AGAIN, 2026-08-12, ON A BUILD THAT ALREADY HAS THE LATCH
       (`979b940` is on main), so `sw_owed[]` did NOT cure the felt case and the
       half that is left is LATENCY, not delivery: "switch input by keyboard or

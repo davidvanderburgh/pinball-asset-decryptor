@@ -213,47 +213,26 @@ fi
 
 # ---- 2b. the C DIALECT this tag was written in ----------------------------
 #
-# THE SECOND REPORT FROM THE SAME MACHINE (2026-08-12), once the rseq patch
-# above had got the build past the parasite and on into criu's own sources:
+# This holds the build in the language criu v4.1 was written and PROVEN in,
+# which is worth doing on its own: it is the dialect criuladder.sh's seven
+# rungs were run against, and in C17 the rseq redefinition 2a patches is an
+# error again, so the probe there is asked its question twice over.
 #
-#   CC criu/tty.o
-#   criu/tty.c:262:21: error: initialization discards 'const' qualifier from
-#                             pointer target type [-Werror=discarded-qualifiers]
-#   262 |     char *pos = strrchr(link->name, '/');
-#   cc1: all warnings being treated as errors
-#
-# THAT LINE IS NOT WRONG. `link` is a `const struct fd_link *`, so `link->name`
-# is a `const char *`, and C's strrchr has always taken a const char * and
-# handed back a plain `char *` - a deliberate hole in the type system that
-# every compiler until now agreed to. C23 closed it: strchr, strrchr, memchr,
-# strstr and strpbrk became TYPE-GENERIC, so a const argument gives a const
-# result. A 2026 libc's <string.h> implements that, gated on the same C23 mode
-# GCC 15 selects by default, and this pinned tag predates the whole change.
-#
-# SO THE FAULT IS NOT IN A LINE, IT IS IN A DIALECT, and this is the SECOND
-# thing C23 has changed under this one pin - 2a was the first. Patching tty.c
-# the way 2a patches the probe would be a guess: this tree calls the str*chr
-# family 84 times, and nothing here can say which of those take a const
-# argument, because the machine this is developed on is glibc 2.39, where the
-# question does not arise at all. Every wrong guess costs the person who
-# reported it another four-minute build. Asking for the language the tag was
-# written and PROVEN in answers all 84 at once, and cannot introduce a
-# difference between this build and the one criuladder was run against - it
-# removes one.
+# WHAT IT DOES NOT DO - and v0.130.1 shipped believing it did - IS FIX 2c
+# BELOW. That is written up there in full; the short version is that the C23
+# str*chr change is gated on a glibc feature macro that criu's own
+# -D_GNU_SOURCE turns on no matter what -std= says, so a dialect never
+# reaches it. Reported again 2026-08-13 by a second user, on a build that
+# already had this block.
 #
 # criu's own USERCFLAGS is the documented seam, and its Makefile folds it into
 # CFLAGS on line 171, BEFORE Makefile.config is included on line 232 - so the
 # feature probes in 2a compile in the same dialect the sources do, and cannot
 # answer a question one way for a build that then happens the other way.
 #
-# THE TWO THINGS THAT LOOK EASIER AND ARE NOT:
-#   * `-Wno-error=discarded-qualifiers` - USERCFLAGS lands BEFORE $(WARNINGS)
-#     on the command line, and $(WARNINGS) ends in -Werror, which turns it
-#     straight back on. It does nothing at all.
-#   * `WERROR=0` - works, and blinds the build to every other complaint a
-#     compiler this much newer than the pin has, including the ones that mean
-#     something. A dialect is a statement about the source; WERROR=0 is a
-#     statement about not wanting to hear.
+# NOT WERROR=0, here or in 2c: it works, and blinds the build to every other
+# complaint a compiler this much newer than the pin has, including the ones
+# that mean something. It is a statement about not wanting to hear.
 #
 # Probed, not assumed: -std=gnu17 wants GCC 8 or clang 6, and a compiler old
 # enough to refuse it is old enough not to have the problem. An empty STD is
@@ -263,8 +242,7 @@ if echo 'int main(void) { return 0; }' |
    "${CC:-cc}" -std=gnu17 -x c - -o /dev/null 2>/dev/null; then
     STD=-std=gnu17
     echo "building it as C17, which is the dialect criu $CRIU_VERSION was"
-    echo "written in - a C23 compiler's strrchr returns const and this tree"
-    echo "predates that"
+    echo "written and proven in"
 else
     echo "${CC:-cc} does not take -std=gnu17; building with its own default"
 fi
@@ -284,6 +262,77 @@ if [ "$(cat "$STAMP" 2>/dev/null)" != "$STD" ] &&
     _run make -C "$SRC" clean || true
 fi
 printf '%s\n' "$STD" > "$STAMP" 2>/dev/null || true
+
+# ---- 2c. the one line C23 made wrong, and upstream has already fixed ------
+#
+# REPORTED TWICE, by two different people, and v0.130.1's answer to the first
+# one did not work. The build stops ~250 files after the parasite:
+#
+#   CC criu/tty.o
+#   criu/tty.c:262:21: error: initialization discards 'const' qualifier from
+#                             pointer target type [-Werror=discarded-qualifiers]
+#   262 |     char *pos = strrchr(link->name, '/');
+#
+# THE LINE IS NOT WRONG BY THE RULES IT WAS WRITTEN UNDER. `link` is a `const
+# struct fd_link *`, so `link->name` is a `const char *`, and C's strrchr has
+# always taken a const char * and handed back a plain `char *` - a deliberate
+# hole in the type system every compiler agreed to. C23 closed it: strchr,
+# strrchr, memchr, strstr and strpbrk became TYPE-GENERIC, so a const argument
+# gives a const result, and this pinned tag predates the change.
+#
+# WHY 2b's DIALECT PIN DOES NOT REACH IT, which is the whole lesson of this
+# ticket, because -std=gnu17 looks like it must. The gate is five links long
+# and NOT ONE OF THEM ASKS WHAT -std= IS:
+#
+#   criu Makefile:114     DEFINES += -D_GNU_SOURCE        (unconditional)
+#   glibc features.h      _GNU_SOURCE  => _ISOC23_SOURCE 1
+#   glibc features.h      _ISOC23_SOURCE => __GLIBC_USE_ISOC23 1
+#   glibc sys/cdefs.h     __glibc_const_generic exists whenever the compiler
+#                         has _Generic (__GNUC_PREREQ(4,9)), not by dialect
+#   glibc string.h        #if __GLIBC_USE (ISOC23) && defined
+#                            __glibc_const_generic => the const-generic macros
+#
+# So criu asks for the C23 str*chr behaviour ITSELF, in DEFINES, every time it
+# compiles anything - and DEFINES lands on the command line AFTER USERCFLAGS.
+# Confirmed on this box (glibc 2.39): `-std=gnu17 -D_GNU_SOURCE` reports
+# __GLIBC_USE(ISOC2X)=1, and criu's own line under the real glibc macros gives
+# the reporter's exact error in gnu17 and gnu2x alike, clean only when
+# _GNU_SOURCE is removed - which criu cannot do.
+#
+# AND -Wno-error=discarded-qualifiers IS NOT THE WAY OUT EITHER: USERCFLAGS
+# lands BEFORE $(WARNINGS), which ends in -Werror, so it is turned straight
+# back on. That leaves the line, which is where the fault actually is.
+#
+# IT IS ONE LINE, AND THAT IS MEASURED, NOT GUESSED. The worry that stopped
+# this last time was that the tree calls str*chr 84 times and a glibc 2.39 box
+# cannot see which take a const argument. It can: build v4.1 with the five
+# macros above forced in ahead of it and WERROR=0, and every affected site
+# warns at once. The whole tree, criu binary and all, yields EXACTLY ONE -
+# this one. tty.c:514's `char *pos = strrchr(orig->rfe->name, '/')` is not
+# const and is deliberately left alone, which is why the match below is
+# anchored to `link->name`.
+#
+# THE FIX IS UPSTREAM'S OWN, from the same release 2a already borrows from:
+# criu v4.2.1 declares it `const char *pos`. Everything the function then does
+# with pos - the bounds compare and atoi(pos + 1) - is fine on a const char *.
+# Applied here rather than by moving the pin, for the reason 2a gives. Drop
+# this block whenever the pin moves to v4.2.1 or later; the grep leaves an
+# already-fixed tree alone, so a rebuild costs nothing.
+TTY=$SRC/criu/tty.c
+if [ -f "$TTY" ] && grep -q '^[[:space:]]*char \*pos = strrchr(link->name' "$TTY"
+then
+    sed -i 's/^\([[:space:]]*\)char \*pos = strrchr(link->name/\1const char *pos = strrchr(link->name/' \
+        "$TTY" 2>/dev/null
+    if grep -q 'const char \*pos = strrchr(link->name' "$TTY"; then
+        echo "patched criu's tty.c (v4.2.1's fix): C23 made strrchr return const"
+        echo "for a const argument and this tag predates that"
+    else
+        # Never silent, and never fatal: a tree this does not match still
+        # builds perfectly on every compiler older than C23, which is most.
+        echo "could not patch criu's tty.c - this tree does not have the line"
+        echo "where it was; building it as it came"
+    fi
+fi
 
 # ---- 3. build it ----------------------------------------------------------
 #

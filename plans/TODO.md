@@ -589,15 +589,19 @@ These have each been violated at least once and each cost a run or a window:
       **Instrument notes, so nobody re-pays:** `bigdiff.py` (NEW, the
       workhorse), `pumpwatch.py` (NEW, region watcher — now pointed at live
       addresses), doortrack.py pgrep defect fixed (explicit PID/game arg).
-      PAD_SW_PEND emitted NOTHING to the run-6 console (watch.sh forwards
-      [sw]/[tap]/[cabchg] — [swpend] may need its own forward or a raw-log
-      read; check before the next run needs it). bigdiff_run6.log has an
-      unexplained gap +143 s→+325 s (its own counters say it printed 8975
-      lines; 3556 on disk; 129 GB free) — nothing above rests on that
-      window, but find it before trusting a long bigdiff. threadwatch.py
-      (scratchpad) dies on transient-tid races — the guest churns
-      short-lived threads constantly (per-expiration SIGEV threads).
-      Logs preserved: /var/tmp/*_run6*_preserved.log + C:\tmp\item17\run6\.
+      PAD_SW_PEND emitted nothing to the run-6 console because watch.sh's
+      forward filter dropped [swpend]/[swlatch] — FIXED on this branch
+      (watch.sh:1304). The "bigdiff gap" was NOT a bigdiff bug: the
+      analysis copy was made MID-RUN (~+143 s) and every "gap" symptom was
+      the truncation — rule: never analyze a copy taken before the `done`
+      line; the preserved original (9036 lines) is complete and RE-CONFIRMS
+      stall-3: zero engine-word events +118 s→+325 s, p11/p12 never
+      processed, pane coroutine frozen ≥207 s. threadwatch.py (scratchpad)
+      dies on transient-tid races — the guest churns short-lived threads
+      constantly (per-expiration SIGEV threads).
+      Logs preserved: /var/tmp/*_run6*_preserved.log + C:\tmp\item17\run6\
+      (bigdiff_run6_full.log is the complete copy; bigdiff_run6.log there
+      is the truncated mid-run copy, kept as the cautionary artifact).
       **Resume — name the gate, then fix it: (a) the four-agent gate-hunt
       workflow (level-word writers ELF 0x842108, hook-0x37 subscribers via
       table ELF 0x7e4d48/live 0x7f4d48, pane-driver, ring-walk gates) —

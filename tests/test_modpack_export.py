@@ -470,3 +470,114 @@ def _drain(q):
     while not q.empty():
         out.append(q.get_nowait())
     return out
+
+
+def test_pack_carries_the_partition_replace_it_can_reach(tmp_path, monkeypatch):
+    """Naming SternLogo.png was half the answer: the journal records the file
+    each swap came from, so the pack can carry the bytes too and land them
+    where a Partitions-tab Replace can reach them.  It still does not APPLY
+    them — that is a resize inside the card's ext4 partition, needing WSL2 and
+    with no undo, against an image the import was never pointed at."""
+    import json
+
+    from pinball_decryptor.core import card_edits
+
+    monkeypatch.setattr(card_edits, "CARD_EDITS_FILE",
+                        str(tmp_path / "card_edits.json"))
+    card = tmp_path / "card.raw"
+    _write(card, b"card-bytes")
+    logo = tmp_path / "MyLogo.png"
+    _write(logo, b"PNGDATA")
+    card_edits.record_replace(str(card), 1, "/usr/local/spike/SternLogo.png",
+                              162000, 188000, source_path=str(logo))
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _write(src / "a.wav", b"orig")
+    (src / ".checksums.md5").write_text(
+        f"a.wav\t{_md5(b'orig')}\n", encoding="utf-8")
+    (src / ".extract_source.json").write_text(
+        json.dumps({"input_name": "card.raw", "input_path": str(card)}),
+        encoding="utf-8")
+    _write(src / "a.wav", b"CHANGED")
+
+    zip_path = str(tmp_path / "pack.zip")
+    modpack.export_mod_pack(str(src), zip_path)
+    with zipfile.ZipFile(zip_path) as zf:
+        man = json.loads(zf.read(modpack.MANIFEST_NAME).decode("utf-8"))
+        member = man["card_files"][0]["member"]
+        assert zf.read(member) == b"PNGDATA"
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    _write(dest / "a.wav", b"orig")
+    (dest / ".checksums.md5").write_text(
+        f"a.wav\t{_md5(b'orig')}\n", encoding="utf-8")
+
+    logs = []
+    res = modpack.import_mod_pack(zip_path, str(dest),
+                                  log_cb=lambda t, l="info": logs.append((l, t)))
+    landed = (dest / modpack.IMPORTED_CARD_DIR / "usr" / "local" / "spike"
+              / "SternLogo.png")
+    assert landed.read_bytes() == b"PNGDATA"
+    assert [p for p, _ in res["card_saved"]] == ["/usr/local/spike/SternLogo.png"]
+    assert any("Partitions tab" in t and modpack.IMPORTED_CARD_DIR in t
+               for _lvl, t in logs)
+    # The card file is not an asset of this extract and must never be judged
+    # against its baseline — otherwise it reports as a file "this card
+    # doesn't have" and inflates the skipped count.
+    assert res["skipped"] == []
+    assert res["applied"] == ["a.wav"]
+
+
+def test_import_card_file_cannot_escape_the_project(tmp_path):
+    """The on-card path arrives inside a zip, so an absolute or ``..`` path
+    must not write outside the folder it is unpacked into."""
+    import json
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    _write(dest / "a.wav", b"x")
+    (dest / ".checksums.md5").write_text(
+        f"a.wav\t{_md5(b'x')}\n", encoding="utf-8")
+    zip_path = tmp_path / "pack.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("a.wav", b"MOD")
+        zf.writestr(modpack.MANIFEST_NAME, json.dumps({
+            "card_files": [{"path": "../../escaped.png", "partition": 1,
+                            "member": modpack.CARD_DIR + "/0/escaped.png"}]}))
+        zf.writestr(modpack.CARD_DIR + "/0/escaped.png", b"NOPE")
+
+    res = modpack.import_mod_pack(str(zip_path), str(dest))
+    assert res["card_saved"] == []
+    assert not (tmp_path / "escaped.png").exists()
+    assert not (tmp_path.parent / "escaped.png").exists()
+
+
+def test_unpacked_card_files_never_list_as_slots(tmp_path):
+    """The copies Import drops are files off someone's card IMAGE, not assets
+    of this extract — so if a Replace tab walked them they would be exactly
+    the phantom slots this whole batch removed, and a re-extract would
+    baseline them as if the card had them."""
+    from pinball_decryptor.core import (audio_slots, checksums, image_slots,
+                                        video_slots)
+
+    assert modpack.IMPORTED_CARD_DIR in checksums.NON_ASSET_DIRS
+
+    proj = tmp_path / "proj"
+    (proj / "images").mkdir(parents=True)
+    _write(proj / "images" / "real.png", b"art")
+    carried = proj / modpack.IMPORTED_CARD_DIR / "usr" / "local" / "spike"
+    carried.mkdir(parents=True)
+    _write(carried / "SternLogo.png", b"logo")
+    _write(carried / "boot.wav", b"snd")
+    _write(carried / "splash.mov", b"vid")
+
+    assert [s.rel_path for s in
+            image_slots.scan_image_slots(str(proj), probe=False)] == \
+        ["images/real.png"]
+    assert audio_slots.scan_audio_slots(str(proj), probe=False) == []
+    assert video_slots.scan_video_slots(str(proj), probe=False) == []
+
+    checksums.generate_checksums(str(proj))
+    assert sorted(checksums.read_baseline_any(str(proj))) == ["images/real.png"]

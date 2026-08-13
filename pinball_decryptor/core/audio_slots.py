@@ -23,6 +23,7 @@ from typing import Dict, List, Optional
 
 from .audio import (AudioInfo, detect_audio_info, find_ffmpeg,
                     process_modified_audio, transcode_to)
+from .checksums import NON_ASSET_DIRS
 
 # Audio containers we treat as replaceable slots.
 AUDIO_EXTS = (".wav", ".ogg")
@@ -149,12 +150,14 @@ def scan_audio_slots(assets_dir: str, roots=None, exts=None,
     seen = set()
     for walk_root in walk_roots:
         for root, dirs, files in os.walk(walk_root):
-            # Dot-dirs are folder state (.orig/.hydrate); "build" at the
-            # assets root is the project's build output (batch 19) — a
-            # generated image, never an asset slot.
+            # Dot-dirs are folder state (.orig/.hydrate); the folders at the
+            # assets root named in checksums.NON_ASSET_DIRS are generated or
+            # staged state, never asset slots — the build output (batch 19),
+            # and the copies an import drops of files the sender replaced on
+            # their card IMAGE, which belong to a .raw and not to this card.
             dirs[:] = [d for d in dirs
                        if not d.startswith(".")
-                       and not (d == "build"
+                       and not (d in NON_ASSET_DIRS
                                 and os.path.normcase(os.path.normpath(root))
                                 == os.path.normcase(
                                     os.path.normpath(assets_dir)))]

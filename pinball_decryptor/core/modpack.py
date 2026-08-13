@@ -30,6 +30,17 @@ MANIFEST_NAME = ".modpack.json"
 _EXTRA_MAPS = ("settings", "high_scores", "image_group_tags")
 _EXTRA_SCALARS = ("menu_expose_through",)
 
+# Reserved zip folder for the BYTES of the Partitions-tab replaces the manifest
+# already lists.  They are not assets of this extract, so they are kept out of
+# the member list the baseline judges (see :func:`inspect_mod_pack`) — and an
+# older PAD, which judges every member, files them as foreign and skips them.
+CARD_DIR = ".modpack_card"
+
+# Where Import drops them inside the target project: not applied (that is a
+# write into the .raw, through the ext4 driver, with no undo), just placed
+# where a right-click → Replace on the Partitions tab can reach them.
+IMPORTED_CARD_DIR = "card_files"
+
 
 def _is_packable(rel):
     """False for baseline entries that are pipeline scratch, not card assets.
@@ -116,11 +127,15 @@ def card_replacements(assets_folder):
     """The Partitions-tab replaces recorded against *assets_folder*'s own card
     image, as ``[{partition, path, source, when}]`` (newest edit per path).
 
-    A pack CANNOT carry these: the Partitions tab writes straight into the card
-    image, which is not part of the project folder the pack is a diff of.  They
-    are listed in the manifest anyway so Import can name the files to redo
-    rather than leave the user to notice a stock logo on a finished build (a
-    tester lost the same ``SternLogo.png`` swap twice).
+    A pack cannot APPLY these: the Partitions tab writes straight into the card
+    image, which is not part of the project folder the pack is a diff of, and
+    doing it costs a resize inside the card's ext4 partition (WSL2, no undo)
+    against a multi-gigabyte file the import was never pointed at.  It can
+    carry them, though — the journal records the file each swap came from — so
+    the recipient gets the bytes instead of only the news that a swap is
+    missing (a tester lost the same ``SternLogo.png`` three times).  See
+    :func:`pack_card_files`; entries whose source file is gone are still listed
+    in the manifest so Import can at least name them.
     """
     from . import card_edits
     rec = read_extract_source(assets_folder) or {}
@@ -145,6 +160,41 @@ def describe_card_files(card_files, limit=4):
     if len(paths) > limit:
         shown += ", and %d more" % (len(paths) - limit)
     return shown
+
+
+def pack_card_files(card_files):
+    """Split :func:`card_replacements` into the entries a pack can carry the
+    bytes of and the ones it can only name — ``(carried, named_only)``.
+
+    Carried entries gain a ``member`` naming their place in the zip.  An entry
+    is only carried when the file the swap came from is still readable: the
+    journal records a path on the exporter's PC, and a swap made months ago
+    from a folder since tidied away leaves nothing to pack.
+    """
+    carried, named_only = [], []
+    for i, e in enumerate(card_files or []):
+        source = e.get("source") or ""
+        if source and os.path.isfile(source):
+            out = dict(e)
+            out["member"] = "%s/%d/%s" % (
+                CARD_DIR, i, os.path.basename(e.get("path") or "") or "file")
+            carried.append(out)
+        else:
+            named_only.append(e)
+    return carried, named_only
+
+
+def _safe_card_relpath(card_path):
+    """``/usr/local/spike/SternLogo.png`` -> ``usr/local/spike/SternLogo.png``.
+
+    ``None`` for anything that would escape the folder it is unpacked into —
+    the on-card path arrives inside a zip, so it is untrusted input.
+    """
+    rel = (card_path or "").replace("\\", "/").lstrip("/")
+    parts = [p for p in rel.split("/") if p not in ("", ".")]
+    if not parts or any(p == ".." or ":" in p for p in parts):
+        return None
+    return "/".join(parts)
 
 
 def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
@@ -219,7 +269,8 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
 
     src = read_extract_source(assets_folder) or {}
     extras = project_extras(assets_folder)
-    card_files = card_replacements(assets_folder)
+    carried_card, named_card = pack_card_files(
+        card_replacements(assets_folder))
     manifest = {
         "format": 2,
         "source_name": src.get("input_name") or "",
@@ -228,7 +279,7 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
         "total_bytes": total_bytes,
         "files": sorted(changed),
         "extras": extras,
-        "card_files": card_files,
+        "card_files": carried_card + named_card,
     }
 
     if log_cb:
@@ -245,14 +296,24 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
         if rode:
             log_cb("Also packing " + ", ".join(rode)
                    + " — they are project settings, not files.", "info")
-        if card_files:
-            # Honest limit, said at pack time rather than discovered on the
-            # rebuilt card: these live on the card image, not in this folder.
+        if carried_card:
+            # These ride as bytes but can never be APPLIED by an import: say
+            # both halves here, at pack time, rather than let the recipient
+            # discover a stock logo on a finished build.
+            log_cb("Also packing %d file(s) you replaced on the card image "
+                   "itself with the Partitions tab (%s). An import cannot "
+                   "write those into a card for you, but it will put your "
+                   "copies where the Partitions tab can reach them."
+                   % (len(carried_card), describe_card_files(carried_card)),
+                   "info")
+        if named_card:
+            # Honest limit: the journal knows the swap happened but the file it
+            # came from is no longer where it was picked from.
             log_cb("NOT in the pack: %d file(s) you replaced on the card image "
-                   "itself with the Partitions tab (%s). Those are written into "
-                   "the .raw, not into this project, so redo them on the "
-                   "Partitions tab of whatever card you import this into."
-                   % (len(card_files), describe_card_files(card_files)),
+                   "(%s) — the file each came from is no longer at the path it "
+                   "was picked from, so only the name travels. Redo those on "
+                   "the Partitions tab of whatever card you import this into."
+                   % (len(named_card), describe_card_files(named_card)),
                    "warning")
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -263,6 +324,13 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
                 progress_cb(i + 1, len(changed),
                             "Archiving %d of %d: %s" % (i + 1, len(changed),
                                                         rel))
+        for e in carried_card:
+            try:
+                zf.write(e["source"], e["member"])
+            except OSError as err:     # vanished between the stat and here
+                if log_cb:
+                    log_cb("Could not pack the card file %s — %s."
+                           % (e.get("path"), err), "warning")
 
     return len(changed), zip_path
 
@@ -293,9 +361,13 @@ def inspect_mod_pack(zip_path, assets_folder):
     """
     with zipfile.ZipFile(zip_path, "r") as zf:
         # Directory entries (some zip writers add them) are not files and must
-        # not land in the skipped count as if they were.
+        # not land in the skipped count as if they were.  Neither are the
+        # card-image files under CARD_DIR: they belong to the .raw, not to any
+        # extract, so the baseline has nothing to say about them and judging
+        # them would report every one as a file "this card doesn't have".
         names = [n for n in zf.namelist()
-                 if n != MANIFEST_NAME and not n.endswith(("/", "\\"))]
+                 if n != MANIFEST_NAME and not n.endswith(("/", "\\"))
+                 and not n.startswith(CARD_DIR + "/")]
         try:
             manifest = json.loads(zf.read(MANIFEST_NAME).decode("utf-8"))
         except (KeyError, ValueError, UnicodeDecodeError):
@@ -495,14 +567,61 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
 
     extras = apply_extras(assets_folder, manifest.get("extras"), log_cb=log_cb)
     card_files = manifest.get("card_files") or []
-    if card_files and log_cb:
+    card_saved = _unpack_card_files(zip_path, assets_folder, card_files,
+                                    log_cb=log_cb)
+    named_only = [c for c in card_files
+                  if c.get("path") not in {p for p, _ in card_saved}]
+    if named_only and log_cb:
         log_cb("This pack's card also had %d file(s) replaced on the card "
-               "image itself with the Partitions tab (%s). Those are not in "
-               "any pack — redo them on the Partitions tab against this card."
-               % (len(card_files), describe_card_files(card_files)), "warning")
+               "image itself with the Partitions tab (%s), and the pack does "
+               "not hold those — redo them on the Partitions tab against this "
+               "card." % (len(named_only), describe_card_files(named_only)),
+               "warning")
     return {"applied": applicable, "skipped": plan["foreign"],
             "removed": removed, "extras": extras, "card_files": card_files,
-            "plan": plan}
+            "card_saved": card_saved, "plan": plan}
+
+
+def _unpack_card_files(zip_path, assets_folder, card_files, log_cb=None):
+    """Write the pack's carried card-image files into
+    :data:`IMPORTED_CARD_DIR`.  Returns ``[(on-card path, local path)]``.
+
+    Deliberately not applied — see :func:`card_replacements`.  They land under
+    their own on-card path so the folder reads as the card's tree, and the log
+    says which Partitions-tab path each belongs at.
+    """
+    wanted = [c for c in (card_files or [])
+              if isinstance(c, dict) and c.get("member")]
+    if not wanted:
+        return []
+    out = []
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for e in wanted:
+            rel = _safe_card_relpath(e.get("path"))
+            if not rel:
+                continue
+            dest = os.path.join(assets_folder, IMPORTED_CARD_DIR,
+                                *rel.split("/"))
+            try:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with zf.open(e["member"]) as src, open(dest, "wb") as dst:
+                    dst.write(src.read())
+            except (KeyError, OSError) as err:
+                if log_cb:
+                    log_cb("Could not unpack the card file %s — %s."
+                           % (e.get("path"), err), "warning")
+                continue
+            out.append((e.get("path"), dest))
+    if out and log_cb:
+        log_cb("The pack also carries %d file(s) replaced on the card image "
+               "itself (%s). An import cannot write those into a card, so "
+               "your copies are in this project's %s folder under the same "
+               "path — right-click that path on the Partitions tab and "
+               "Replace it with the copy sitting there."
+               % (len(out), describe_card_files(
+                   [{"path": p} for p, _ in out]), IMPORTED_CARD_DIR),
+               "warning")
+    return out
 
 
 def _prune_empty(assets_folder, removed):

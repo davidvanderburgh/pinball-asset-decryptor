@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from .audio_slots import replace_with_retry
+from .checksums import NON_ASSET_DIRS
 from .image import (IMAGE_EXTS, ImageInfo, detect_image_info, pil_available,
                     transcode_image_to)
 
@@ -76,10 +77,10 @@ def scan_image_slots(assets_dir: str, roots=None, exts=None,
     for walk_root in walk_roots:
         for root, dirs, files in os.walk(walk_root):
             # Same prune as audio_slots: dot-dirs + the project's top-level
-            # build output (batch 19 — generated, never an asset slot).
+            # generated / staged folders (checksums.NON_ASSET_DIRS).
             dirs[:] = [d for d in dirs
                        if not d.startswith(".")
-                       and not (d == "build"
+                       and not (d in NON_ASSET_DIRS
                                 and os.path.normcase(os.path.normpath(root))
                                 == os.path.normcase(
                                     os.path.normpath(assets_dir)))]

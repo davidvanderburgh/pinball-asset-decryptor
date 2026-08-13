@@ -110,12 +110,14 @@ def _extract(tmp_path, name="lz"):
 class _ScanStub:
     _start_change_scan = MainWindow._start_change_scan
     _note_foreign_slots = MainWindow._note_foreign_slots
+    _mark_change_scan = MainWindow._mark_change_scan
     _SCAN_LABELS = MainWindow._SCAN_LABELS
 
     def __init__(self, assets_dir, video_slots=None, image_slots=None):
         self.root = _Root()
         self.write_assets_var = _Var(assets_dir)
         self._change_scan_ids = {}
+        self._change_scan_running = set()
         self._video_slots = (video_slots if video_slots is not None
                              else [_Slot("video/attract.mov")])
         self._image_slots = (image_slots if image_slots is not None

@@ -602,20 +602,43 @@ These have each been violated at least once and each cost a run or a window:
       Logs preserved: /var/tmp/*_run6*_preserved.log + C:\tmp\item17\run6\
       (bigdiff_run6_full.log is the complete copy; bigdiff_run6.log there
       is the truncated mid-run copy, kept as the cautionary artifact).
-      **Resume — name the gate, then fix it: (a) the four-agent gate-hunt
-      workflow (level-word writers ELF 0x842108, hook-0x37 subscribers via
-      table ELF 0x7e4d48/live 0x7f4d48, pane-driver, ring-walk gates) —
-      launched 2026-08-13, read its synthesis before anything else; (b)
-      run 7 executes its cheapest live test (likely: watch the named gate
-      global + hook table + freelist at +0x10000 through a deaf stretch);
-      (c) then the fix is either the gated condition (rig-side) or a shim
-      mitigation, and the shim release-defer idea is WEAKENED but not dead
-      (it cannot beat a 29 s veto, but it converts every wake-drain cancel
-      into a consume); (d) battle select + turtles (item 46) after the
-      gate is named — same engine, and the finding reframes 46's 'finicky'
-      as duty-cycle too. Acceptance unchanged: an ordinary sub-second
-      press acts EVERY time over N≥10, but the oracle is now MEMORY (value
-      word flip at live 0x7c908c) with the display as the human check.**
+      **★★★ RUN 7, 2026-08-13 — ALL FOUR CANDIDATE GATES KILLED IN ONE
+      CAPTURE (gatewatch.py, the synthesis's discriminator; report at
+      C:\tmp\item17\run6\gate_workflow_report.txt; logs C:\tmp\item17\
+      run7\).** 16-press train, 8 consumed / 6 fully deaf / 2 wake-drain
+      (p5, p15: busy cycles + event alloc at their OWN edges, no value
+      flip — the backlog-cancel signature again, edge-correlated wakes
+      reconfirmed). Verdicts: **(F4) freelist never pinned** (LIFO head
+      toggling normally through everything). **(F1 parity and F3 mask)
+      their gate variables NEVER CHANGED ONCE across five deaf↔awake
+      transitions** — a stretch-gate must flip at each boundary; both
+      dead (the mask at live 0x7bba5a — its first real read ever — is
+      static). **(F2 hook-0x37 tick-body veto) dead twice over: the
+      chain's single node is a HEAP node with callback=0 (an
+      unregister-in-place), and a 50 Hz watch of slot+node through 8
+      more presses caught NO re-arm — the chain cannot veto, ever, in
+      this build's runtime state.** Yet the freeze phenomenology stands:
+      fully-deaf presses produce ZERO body-side activity (no decoder
+      busy, no value, no event alloc) while the pass loop runs. With
+      every entry-gate dead, the coherent survivor is a TIMEBASE FREEZE:
+      the body runs but an early callee's elapsed-ticks/dt computes 0,
+      so decoder/display/drain all no-op "for no time having passed" —
+      which would also explain edge-correlated wakes if input touches
+      the clock path. Two agents out (2026-08-13): (i) disassemble early
+      body callees 0x20fb28/0x519530/0x3ba53c/0x4ed698/0x46b478 for the
+      timebase globals; (ii) identify block+0x1c's writer (the
+      60Hz-through-freezes proof rests on it). Run-6 data cross-check:
+      no monotonic awake-only accumulator exists in .data — the dt state
+      is heap or register-local, so the agent read is the path.**
+      **Resume: (a) read the two agent reports; (b) watch the named
+      timebase globals live through a freeze (gatewatch pattern); (c)
+      if the clock is the gate, chase it INTO the rig (qemu clock_gettime
+      / shim-served time) — that is the actual fix site; the shim
+      release-defer mitigation remains the fallback (converts wake-drain
+      cancels into consumes); (d) battle select + turtles (item 46) after
+      the mechanism is named. Acceptance unchanged: ordinary sub-second
+      press acts EVERY time over N≥10, oracle = MEMORY (value word live
+      0x7c908c), display as the human check.**
       **★★★ DAVID AGAIN, 2026-08-12, ON A BUILD THAT ALREADY HAS THE LATCH
       (`979b940` is on main), so `sw_owed[]` did NOT cure the felt case and the
       half that is left is LATENCY, not delivery: "switch input by keyboard or

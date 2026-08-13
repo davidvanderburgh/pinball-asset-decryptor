@@ -12,6 +12,8 @@ pipeline repacks it.  This module is the ffmpeg layer beneath that:
   - Raw RGB frame streaming for the in-app embedded player
   - Transcoding an arbitrary input into the slot's native format, scaled to
     the slot's resolution, preserving alpha when the slot has it (ProRes)
+  - Encoding rendered frames the other way, out to an H.264 MP4 (the Scenes
+    window exports an animated scene through this)
 
 ffmpeg / ffprobe discovery (and the no-console-window flag) is shared with
 :mod:`core.audio`, so installing ffmpeg once lights up both tabs.
@@ -21,6 +23,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import threading
 import time
 
@@ -585,6 +588,109 @@ def open_raw_stream(path, width, height, fps, start=0.0):
             creationflags=_CREATE_FLAGS)
     except OSError:
         return None
+
+
+def encode_frames_to_mp4(frames, out_path, fps=12.0, progress=None):
+    """Encode rendered RGB frames into an H.264 MP4 at *fps*.
+
+    *frames* is any iterable of equally-sized ``PIL.Image`` objects, and a
+    GENERATOR is the point of it: the Scenes window exports a scene by
+    re-rendering it a frame at a time, and holding a long one all at once is
+    the thing that can't be done — a ~1900-frame TMNT static loop is about
+    6 GB of 1360x768 images when nothing needs more than one of them.  Each
+    frame is converted and piped straight into ffmpeg as raw bytes, so peak
+    memory is one frame however long the scene runs.
+
+    *progress*, if given, is called with the number of frames written so far
+    (the export runs on a worker thread and the window reports it).
+
+    Returns the number of frames written.
+
+    Raises:
+        RuntimeError: ffmpeg is missing, or the encode failed.
+        ValueError: *frames* yielded nothing.
+    """
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        raise RuntimeError(
+            "ffmpeg is needed to write an MP4 and it isn't installed here. "
+            "Install ffmpeg and try again, or save the scene as a GIF.")
+    it = iter(frames)
+    for first in it:
+        if first is not None:
+            break
+    else:
+        raise ValueError("No frames to encode")
+    first = first.convert("RGB")
+    w, h = first.size
+    rate = max(1.0, min(float(fps or 12.0), 240.0))
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".",
+                exist_ok=True)
+    cmd = [ffmpeg, "-y", "-loglevel", "error", "-nostats",
+           "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "%dx%d" % (w, h),
+           "-framerate", "%.6f" % rate, "-i", "-"]
+    # yuv420p halves the chroma planes, so H.264 needs even dimensions.  A
+    # scene stage is 1360x768, but one screen isolated out of it need not be.
+    if w % 2 or h % 2:
+        cmd += ["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"]
+    cmd += ["-an", "-c:v", "libx264", "-crf", "20", "-preset", "fast",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path]
+
+    err = tempfile.TemporaryFile()
+
+    def _tail():
+        try:
+            err.seek(0)
+            return err.read()[-500:].decode("utf-8", "replace").strip()
+        except (OSError, ValueError):
+            return ""
+
+    try:
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                stdout=subprocess.DEVNULL, stderr=err,
+                                creationflags=_CREATE_FLAGS)
+    except OSError as e:
+        err.close()
+        raise RuntimeError("could not run ffmpeg: %s" % e)
+
+    written = [0]
+
+    def _write(img):
+        if img is None:
+            return
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        if img.size != (w, h):
+            # Every frame of one scene is the stage size; a stray mismatch
+            # would desync the raw stream into diagonal garbage from that
+            # frame on, so it goes onto a black frame of the right size.
+            from PIL import Image
+            fitted = Image.new("RGB", (w, h))
+            fitted.paste(img, (0, 0))
+            img = fitted
+        proc.stdin.write(img.tobytes())
+        written[0] += 1
+        if progress is not None:
+            progress(written[0])
+
+    try:
+        try:
+            _write(first)
+            for img in it:
+                _write(img)
+            proc.stdin.close()
+            proc.wait(timeout=900)
+        except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+            # A broken pipe means ffmpeg died early — its own last words are
+            # the useful half of the message, not the write error.
+            proc.kill()
+            raise RuntimeError("ffmpeg failed: %s\n%s" % (e, _tail()))
+        if proc.returncode != 0:
+            raise RuntimeError("ffmpeg failed (exit %d): %s"
+                               % (proc.returncode, _tail()))
+    finally:
+        err.close()
+    return written[0]
 
 
 def play_video_windowed(path, start=0.0):

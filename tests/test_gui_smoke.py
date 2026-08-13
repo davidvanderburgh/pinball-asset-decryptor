@@ -3270,6 +3270,153 @@ def test_scene_browser_caption_is_one_line_with_the_rest_on_its_button(app,
     app.root.update()
 
 
+def test_scene_browser_saves_an_animated_scene_as_mp4(app, tmp_path,
+                                                      monkeypatch):
+    """"Save preview…" exports a scene that moves as an MP4 (a tester: "it
+    would be cool to have the option to export the rendered scenes as MP4").
+
+    The two things worth pinning: MP4 is what an animated scene offers and
+    defaults to, and the export covers the WHOLE scene — the canvas only ever
+    plays the first ``_MAX_PREVIEW_FRAMES``, and a GIF of a 1900-frame loop is
+    not the answer.  ffmpeg itself is covered in test_scene_export_mp4."""
+    pytest = __import__("pytest")
+    pytest.importorskip("PIL")
+    import json
+    from PIL import Image
+    from tests.test_stern_fontrender import _make_extract
+    from pinball_decryptor.gui import scene_browser as sb_mod
+    from pinball_decryptor.plugins.stern import scene_render
+
+    _make_extract(tmp_path)
+    # 80 frames: more than the 60 the preview renders, so "all of it" and
+    # "what is on the canvas" are different numbers.
+    n_all = 80
+    assert n_all > sb_mod._MAX_PREVIEW_FRAMES
+    layout = {"/g/scene1/scene.radium": {
+        "stage": [320, 180, 30.0], "unplaced": 0, "offstage": 0, "texts": [],
+        "sprites": [{"name": "a", "x": 0, "y": 0, "image": "a.png",
+                     "frames": ["f%d.png" % i for i in range(n_all)]}]}}
+    with open(str(tmp_path / scene_render.SCENE_LAYOUT_MANIFEST), "w",
+              encoding="utf-8") as f:
+        json.dump(layout, f)
+
+    w = app.window
+    w.write_assets_var.set(str(tmp_path))
+    w._open_scene_browser()
+    sb = w._scene_browser
+    sb._tree.selection_set("/g/scene1")
+    sb._on_select()
+    # _on_select starts a real render on a worker; this test flushes the event
+    # queue later for its own after() hop, so retire that render the way the
+    # window itself does (its result carries the old token and is discarded).
+    app.root.update()
+    sb._preview_token += 1
+    frames = [Image.new("RGB", (320, 180), (i, 0, 0)) for i in range(60)]
+    sb._show_preview(sb._preview_token, frames,
+                     layout["/g/scene1/scene.radium"])
+    assert sb._fps_shown is True                    # it moves
+    # the caption promises the export, and says how many frames it will hold
+    # (on the "?" button: the visible line is one sentence of it)
+    assert "writes all 80 to MP4" in sb._caption_tip.text
+
+    asked = {}
+
+    def fake_dialog(**kw):
+        asked.update(kw)
+        return str(tmp_path / "out.mp4")
+
+    monkeypatch.setattr(sb_mod.filedialog, "asksaveasfilename", fake_dialog)
+
+    # The worker runs inline so the export is deterministic here.
+    class _SyncThread:
+        def __init__(self, target=None, daemon=None):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr(sb_mod, "threading",
+                        type("_T", (), {"Thread": _SyncThread}))
+
+    got = {}
+
+    def fake_encode(frames_iter, path, fps=12.0, progress=None):
+        n = 0
+        for _f in frames_iter:               # drains the generator lazily
+            n += 1
+            if progress is not None:
+                progress(n)
+        got.update(path=path, fps=fps, n=n)
+        return n
+
+    monkeypatch.setattr(sb_mod.video, "encode_frames_to_mp4", fake_encode)
+
+    sb._save_preview()
+    app.root.update()                        # flush the after() hop
+
+    # MP4 is offered first and is the default extension for a moving scene
+    assert asked["defaultextension"] == ".mp4"
+    assert asked["filetypes"][0] == ("MP4 video", "*.mp4")
+    assert ("Animated GIF", "*.gif") in asked["filetypes"]
+    assert asked["initialfile"].endswith(".mp4")
+    # ...and the export is the whole scene at its own rate, not the 60 frames
+    # the canvas is playing
+    assert got["n"] == n_all
+    assert got["fps"] == 30.0
+    assert got["path"] == str(tmp_path / "out.mp4")
+    assert sb._export is None                       # finished, not stuck
+    assert str(sb._save_btn.cget("state")) == "normal"
+    assert "Saved out.mp4" in sb._preview_lbl.cget("text")
+    assert "80 frames at 30 fps" in sb._preview_lbl.cget("text")
+
+    # a failed encode (no ffmpeg on this machine) says so and leaves the
+    # button usable rather than disabled forever
+    errs = []
+    monkeypatch.setattr(sb_mod.messagebox, "showerror",
+                        lambda *a, **k: errs.append(a))
+
+    def boom(*_a, **_k):
+        raise RuntimeError("ffmpeg is needed to write an MP4")
+
+    monkeypatch.setattr(sb_mod.video, "encode_frames_to_mp4", boom)
+    sb._save_preview()
+    app.root.update()
+    assert len(errs) == 1 and "ffmpeg" in errs[0][1]
+    assert sb._export is None
+    assert str(sb._save_btn.cget("state")) == "normal"
+    assert "Could not write out.mp4" in sb._preview_lbl.cget("text")
+
+    # While one is being written the button cancels it (a long scene is a
+    # minute of rendering), and a cancelled export leaves no half-length file
+    # behind — ffmpeg closes a truncated stream cleanly, so one would exist.
+    partial = tmp_path / "partial.mp4"
+    partial.write_bytes(b"\x00" * 8)
+    state = sb._export = {"cancel": False}
+    sb._save_btn.configure(text="Cancel")
+    sb._save_preview()
+    assert state["cancel"] is True
+    sb._export_done(state, str(partial), 12, 30.0, None)
+    assert not partial.exists()
+    assert "Stopped" in sb._preview_lbl.cget("text")
+    assert str(sb._save_btn.cget("text")) == "Save preview…"
+    assert str(sb._save_btn.cget("state")) == "normal"
+
+    # a stale worker's result (its state superseded) is ignored outright
+    sb._export_done({"cancel": False}, str(tmp_path / "x.mp4"), 5, 30.0, None)
+    assert "Stopped" in sb._preview_lbl.cget("text")
+
+    # a still scene offers no video at all — an MP4 of one frame is a picture
+    still = dict(layout["/g/scene1/scene.radium"], sprites=[])
+    sb._show_preview(sb._preview_token, [frames[0]], still)
+    monkeypatch.setattr(sb_mod.filedialog, "asksaveasfilename", fake_dialog)
+    sb._save_preview()
+    assert asked["defaultextension"] == ".png"
+    assert [t[0] for t in asked["filetypes"]] == ["PNG image"]
+
+    sb._close()
+    app.root.update()
+
+
 def test_scene_browser_steps_through_screens(app, tmp_path):
     """◀/▶ walk the Screen list without re-opening the drop-down (David), with
     "All screens" as the entry before the first and wrap-around at both ends."""

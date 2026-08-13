@@ -108,7 +108,8 @@ static void nv_load(void);
  * question is which files the validator actually touches and whether any of
  * them are missing here. Successful opens under /assets/ are skipped unless
  * PAD_OPEN_LOG=2, because scene loading alone is thousands of them. */
-static void openlog(const char *path, int ok, unsigned long from)
+static void openlog(const char *path, int ok, unsigned long from,
+                    unsigned long dur_ms)
 {
     static int mode = -1;
     char b[300];
@@ -118,8 +119,14 @@ static void openlog(const char *path, int ok, unsigned long from)
     }
     if (!mode) return;
     if (ok && mode < 2 && path && strstr(path, "/assets/")) return;
-    snprintf(b, sizeof b, "[open] %-6s %s  (from 0x%lx)\n",
-             ok ? "ok" : "FAIL", path ? path : "(null)", from);
+    /* ITEM 17: t= and dur= joined this line for the maintenance-cycle hunt.
+     * The bus thread's 681 ms hole is a usleep(100000) loop at 0x5a5f90
+     * polling fstream is_open() on the bus object's +0x5d0 member, so the
+     * question became WHICH file another thread opens once per cycle and
+     * when. pad_ms is the same clock every [nbts] frame is stamped with. */
+    snprintf(b, sizeof b, "[open] t=%lu dur=%lu %-6s %s  (from 0x%lx)\n",
+             pad_ms(), dur_ms, ok ? "ok" : "FAIL",
+             path ? path : "(null)", from);
     logmsg(b);
 }
 
@@ -317,9 +324,11 @@ void *shim_fopen(const char *path, const char *mode)
 {
     static void *(*real_fopen)(const char *, const char *);
     void *f;
+    unsigned long t0 = pad_ms();
     if (!real_fopen) real_fopen = dlsym(RTLD_NEXT, "fopen");
     f = real_fopen(path, mode);
-    openlog(path, f != 0, (unsigned long)__builtin_return_address(0));
+    openlog(path, f != 0, (unsigned long)__builtin_return_address(0),
+            pad_ms() - t0);
     scene_open(f, path, (unsigned long)__builtin_return_address(0));
     val_sample();
     if (path && strstr(path, "radium") && radium_trace-- > 0) {
@@ -337,9 +346,11 @@ void *shim_fopen64(const char *path, const char *mode)
 {
     static void *(*real_fopen64)(const char *, const char *);
     void *f;
+    unsigned long t0 = pad_ms();
     if (!real_fopen64) real_fopen64 = dlsym(RTLD_NEXT, "fopen64");
     f = real_fopen64(path, mode);
-    openlog(path, f != 0, (unsigned long)__builtin_return_address(0));
+    openlog(path, f != 0, (unsigned long)__builtin_return_address(0),
+            pad_ms() - t0);
     scene_open(f, path, (unsigned long)__builtin_return_address(0));
     val_sample();
     if (path && strstr(path, "radium") && radium_trace-- > 0) {
@@ -1110,10 +1121,13 @@ int shim_open(const char *path, int flags, ...) __asm__("open");
 int shim_open(const char *path, int flags, ...)
 {
     va_list ap; int m; int fd;
+    unsigned long t0;
     init();
     va_start(ap, flags); m = va_arg(ap, int); va_end(ap);
+    t0 = pad_ms();
     fd = real_open(path, flags, m);
-    openlog(path, fd >= 0, (unsigned long)__builtin_return_address(0));
+    openlog(path, fd >= 0, (unsigned long)__builtin_return_address(0),
+            pad_ms() - t0);
     if (path && strstr(path, "radium") && radium_trace-- > 0) {
         char b[200];
         snprintf(b, sizeof b, "[trace] open(%s) called from 0x%lx\n",
@@ -1128,10 +1142,13 @@ int shim_open64(const char *path, int flags, ...) __asm__("open64");
 int shim_open64(const char *path, int flags, ...)
 {
     va_list ap; int m; int fd;
+    unsigned long t0;
     init();
     va_start(ap, flags); m = va_arg(ap, int); va_end(ap);
+    t0 = pad_ms();
     fd = real_open64 ? real_open64(path, flags, m) : real_open(path, flags, m);
-    openlog(path, fd >= 0, (unsigned long)__builtin_return_address(0));
+    openlog(path, fd >= 0, (unsigned long)__builtin_return_address(0),
+            pad_ms() - t0);
     if (path && strstr(path, "radium") && radium_trace-- > 0) {
         char b[200];
         snprintf(b, sizeof b, "[trace] open64(%s) called from 0x%lx\n",
@@ -1986,7 +2003,24 @@ static int slot_addr[NSLOT];
 static int slot_used;
 static int cur_slot[MAXFD];
 static unsigned int cur_ptr[NSLOT];
+/* ITEM 17: env-tunable. The fixed 120 was spent inside the first second of
+ * boot on every run this rig ever made, so the RUNTIME i2c traffic - the 250
+ * transfers per 924 ms maintenance cycle that hold the node bus thread for
+ * 681 ms - had never once been seen. PAD_I2C_LOG=<n> sets it. */
 static int i2c_log_budget = 120;
+static void i2c_log_init(void)
+{
+    static int done;
+    char *p;
+    if (done) return;
+    done = 1;
+    p = getenv("PAD_I2C_LOG");
+    if (p && *p) {
+        int v = 0;
+        while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
+        i2c_log_budget = v;
+    }
+}
 
 struct i2c_msg { unsigned short addr, flags, len; unsigned char *buf; };
 struct i2c_rdwr { struct i2c_msg *msgs; unsigned int nmsgs; };
@@ -2006,6 +2040,13 @@ static unsigned char ser[96] = {
     0,0,0,0,   32,0,0,0,  0,0,0,0,   0x00,0x09,0x3d,0x00
 };
 static int ser_seen;
+
+/* ITEM 17: the cabinet SPI transfer counter (PAD_CAB_PROBE=1). File scope so
+ * the node bus read path can stamp [nbsilent] lines with it - this counter is
+ * the one timebase BOTH logs can see (ringwatch reads it out of NodeRec.cur,
+ * the shim prints it), so a cabinet-poll gap and a silent-read train can be
+ * joined EXACTLY, with no cross-clock alignment step at all. */
+static unsigned cab_ctr;
 
 static int slot_for(int addr)
 {
@@ -2098,18 +2139,86 @@ static void nv_save(void)
     real_close(fd);
 }
 
+/* ITEM 17, THE ROOT CAUSE FIX. Two i2c MCUs, slaves 0x0a and 0x2a, present
+ * 0x0111 in register 0x24 after a reset, or the game holds the NODE BUS
+ * THREAD hostage forever.
+ *
+ * The chain, measured end to end (runs 11-18):
+ *   - The cabinet switch word is forwarded to NodeRec.cur only when the bus
+ *     service thread's sweep reaches node 0, and that thread was blind for
+ *     681 ms of every 924 ms - the 39% press loss David reported as item 17.
+ *   - 163 of 163 blind windows were bracketed by the same broadcast group:
+ *     `0a 0a 07 01 01 08 01 01` ... 681 ms ... `0b 01 06` (PAD_NB_TRACE=2).
+ *   - 100% of the run's steady-state /dev/i2c-1 traffic sat INSIDE those
+ *     windows: exactly 250 poll-pairs per window of register 0x24 from
+ *     slaves 0x0a and 0x2a (PAD_OPEN_LOG + PAD_I2C_LOG).
+ *   - The game side is 0x1fa9c8: pulse the reset lines via 0x5a9eac (the
+ *     07/08 broadcasts ride along), then up to 250 tries of
+ *     { usleep(1000); read reg 0x24 from both } until BOTH have read
+ *     0x0111 once (r5 = #250 and r7 = #0x111 are literals in the loop).
+ *     Success runs once: usleep(750000), then 0x1fa8c0 programs a register
+ *     table into both devices - A TABLE THAT INCLUDES reg 0x24 itself
+ *     (0x0020 into 0x0a, 0x0022 into 0x2a: the RUN-state value).
+ *     Exhaustion returns plain, and a supervisor re-runs the whole init
+ *     ~every 924 ms until it succeeds - that retry loop IS the deafness.
+ *   - The periodic health check at 0x1fb38c re-reads reg 0x24 and treats
+ *     == 0x0111 as "the device reset itself": full re-init. Healthy is the
+ *     CONFIG value persisting. So 0x0111 must appear after a reset and
+ *     must NOT survive the config write.
+ *
+ * Runs 15-18 each killed one wrong version of this model, and the wrong
+ * versions are worth recording because they LOOK right:
+ *   - sticky 0x0111 (a write-transform re-arming it on any write covering
+ *     0x24) turned the health check into a 1 Hz re-init loop - the 681 ms
+ *     exhaustion hole became an 834 ms success hole (run 16);
+ *   - read-clear consumed the seed once and nothing ever re-armed it, so
+ *     every health-check-triggered re-init exhausted its 250 tries again
+ *     (runs 17/18).
+ *
+ * The model that matches the device: power-on state 0x0111 (the seed
+ * below); ALL writes stick verbatim (the config value is what the health
+ * check wants to see); and the `08 01 01` bus-reset broadcast - which this
+ * shim can see on the tty - re-arms 0x0111, because that broadcast rides
+ * the same reset the waiter polls the aftermath of. PAD_I2C_READY=0
+ * restores the blank store. */
+static void i2c_ready_arm(void)
+{
+    static int on = -1;
+    int s;
+    if (on == -1) {
+        char *p = getenv("PAD_I2C_READY");
+        on = !(p && *p == '0');
+    }
+    if (!on) return;
+    for (s = 0; s < 2; s++) {
+        int slot = slot_for(s ? 0x2a : 0x0a);
+        store[slot][0x24] = 0x01;      /* reg 0x24 reads back 0x0111, the  */
+        store[slot][0x25] = 0x11;      /* value 0x1fa9c8 polls 250x for    */
+    }
+}
+
+static void i2c_seed_ready(void)
+{
+    static int done;
+    if (done) return;
+    done = 1;
+    i2c_ready_arm();
+}
+
 static void do_msg(int slot, struct i2c_msg *m)
 {
     char line[256], h[40];
     unsigned int p = cur_ptr[slot];
+    i2c_log_init();
+    i2c_seed_ready();
     if (m->flags & I2C_M_RD) {
         unsigned int i;
         for (i = 0; i < m->len; i++) m->buf[i] = store[slot][(p + i) % SLOTSIZE];
         cur_ptr[slot] = (p + m->len) % SLOTSIZE;
         if (i2c_log_budget-- > 0) {
             hex(h, m->buf, m->len);
-            snprintf(line, sizeof line, "[i2c] addr=0x%02x READ  @0x%04x len=%u %s\n",
-                     m->addr, p, m->len, h);
+            snprintf(line, sizeof line, "[i2c] t=%lu addr=0x%02x READ  @0x%04x len=%u %s\n",
+                     pad_ms(), m->addr, p, m->len, h);
             logmsg(line);
         }
     } else {
@@ -2121,8 +2230,8 @@ static void do_msg(int slot, struct i2c_msg *m)
         if (slot == 0 && m->len > off) nv_save();
         if (i2c_log_budget-- > 0) {
             hex(h, m->buf, m->len);
-            snprintf(line, sizeof line, "[i2c] addr=0x%02x WRITE @0x%04x len=%u %s\n",
-                     m->addr, p, m->len, h);
+            snprintf(line, sizeof line, "[i2c] t=%lu addr=0x%02x WRITE @0x%04x len=%u %s\n",
+                     pad_ms(), m->addr, p, m->len, h);
             logmsg(line);
         }
     }
@@ -2459,15 +2568,14 @@ int shim_ioctl(int fd, unsigned long req, ...)
              * be left on in a measuring run of anything else. */
             {
                 static int on = -1;
-                static unsigned ctr;
                 if (on == -1) {
                     char *q = getenv("PAD_CAB_PROBE");
                     on = q && *q == '1';
                 }
                 if (on) {
-                    ctr++;
-                    out8[6] = (unsigned char)(ctr & 0xffu);
-                    out8[7] = (unsigned char)((ctr >> 8) & 0xffu);
+                    cab_ctr++;
+                    out8[6] = (unsigned char)(cab_ctr & 0xffu);
+                    out8[7] = (unsigned char)((cab_ctr >> 8) & 0xffu);
                 }
             }
             for (k = 0; k < msgs; k++) {
@@ -6360,6 +6468,22 @@ int shim_close(int fd)
 {
     static int (*real_close)(int);
     if (!real_close) real_close = dlsym(RTLD_NEXT, "close");
+    /* ITEM 17: under PAD_OPEN_LOG, say when the node bus tty itself is
+     * closed. If the 924 ms maintenance cycle is a port close/reopen, this
+     * line plus the [open] line bracket the 681 ms hole exactly. */
+    if (fd >= 0 && fd < MAXFD && faked[fd] == 'T') {
+        static int mode = -1;
+        if (mode < 0) {
+            char *p = getenv("PAD_OPEN_LOG");
+            mode = (p && p[0] >= '0' && p[0] <= '9') ? p[0] - '0' : 0;
+        }
+        if (mode) {
+            char b[96];
+            snprintf(b, sizeof b, "[open] t=%lu CLOSE tty fd=%d\n",
+                     pad_ms(), fd);
+            logmsg(b);
+        }
+    }
     if (fd >= 0 && fd < MAXFD) faked[fd] = 0;
     return real_close(fd);
 }
@@ -6457,7 +6581,26 @@ long shim_read(int fd, void *b, unsigned long n)
                     unsigned v = 0;
                     int any = 0;
                     while (*s >= '0' && *s <= '9') { v = v * 10 + (unsigned)(*s++ - '0'); any = 1; }
-                    if (any && v == want) return 0;
+                    if (any && v == want) {
+                        /* ITEM 17: timestamp every refusal. Run 11 showed the
+                         * cabinet poll stops for ~690 ms at a time (~138 x the
+                         * game's 5 ms retry sleep), and the prime suspect is
+                         * the game timing out on THIS deliberate silence. If
+                         * that is right, these lines arrive in ~5 ms trains
+                         * whose cab_ctr values land INSIDE a gap's counter
+                         * jump - the counter is the shared timebase, so the
+                         * join needs no clock alignment. If the gaps show NO
+                         * [nbsilent] train inside them, the theory is dead. */
+                        static int sbudget = 8000;
+                        if (sbudget-- > 0) {
+                            char sm[96];
+                            snprintf(sm, sizeof sm,
+                                     "[nbsilent] t=%lu node=%u want=%lu ctr=%u\n",
+                                     pad_ms(), want, n, cab_ctr);
+                            logmsg(sm);
+                        }
+                        return 0;
+                    }
                     if (*s) s++;
                 }
             }
@@ -6474,6 +6617,30 @@ long shim_read(int fd, void *b, unsigned long n)
         if (!(nb_req_len > 0 && (nb_req[0] & 0x80))) {
             if (nb_req_len > 0 && nb_req[0] == 0x03 && n >= 3) {
                 p[0] = 0; p[1] = 5; p[2] = 0;
+            }
+            /* ITEM 17, the recurrence gate. `0a 00` is the bus master's aux
+             * status query: 0x59ed10 sends it, reads 2 bytes, and fans
+             * reply[0] out as single bits. The runtime sweep 0x1d7d88 asks
+             * every 30 passes (~270 ms of service) and re-runs the WHOLE
+             * aux-device init - 750 ms settle and all, on the bus thread,
+             * with the cabinet blind throughout - whenever reply[0] BIT 1
+             * is clear (1d7e24: the out written from ubfx ip,#1,#1). A
+             * zero-filled reply therefore meant "aux never initialized",
+             * once a second, forever: that retry loop was the 74%-blind
+             * cabinet and the 39% press loss this item is about. And BIT 0
+             * is graded too: when the mode flag at [0x7a919c] is set the
+             * sweep takes 1d7e8c first, which re-inits on bit 0 CLEAR
+             * before it ever looks at bit 1 - run 20 kept cycling on
+             * exactly that with only bit 1 crafted. Bits 0+1 together say
+             * what a real bus master says: present and initialized, leave
+             * it be. Same kill switch as the MCU model: PAD_I2C_READY=0. */
+            if (nb_req_len == 2 && nb_req[0] == 0x0a && n >= 1) {
+                static int on = -1;
+                if (on == -1) {
+                    char *q = getenv("PAD_I2C_READY");
+                    on = !(q && *q == '0');
+                }
+                if (on) p[0] = 0x03;
             }
             /* The one-byte `00` poll: which node wants servicing. See
              * nb_next_node() - answering this is what makes the playfield a
@@ -6812,6 +6979,13 @@ long shim_write(int fd, const void *b, unsigned long n)
         unsigned long i, keep = n < sizeof nb_req ? n : sizeof nb_req;
         for (i = 0; i < keep; i++) nb_req[i] = p[i];
         nb_req_len = (int)keep;
+        /* ITEM 17: the `08 01 01` broadcast rides the reset that puts the
+         * two i2c MCUs (slaves 0x0a/0x2a) back into their power-on state,
+         * where register 0x24 presents 0x0111 - the value the init waiter
+         * at 0x1fa9c8 polls for. Re-arm the model here so a mid-run re-init
+         * completes the same way the boot one does. See i2c_ready_arm(). */
+        if (nb_req_len == 3 && nb_req[0] == 0x08 && !(nb_req[0] & 0x80))
+            i2c_ready_arm();
         {
             static int rabudget = 12;
             unsigned long ra = (unsigned long)__builtin_return_address(0);

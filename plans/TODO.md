@@ -630,15 +630,55 @@ These have each been violated at least once and each cost a run or a window:
       60Hz-through-freezes proof rests on it). Run-6 data cross-check:
       no monotonic awake-only accumulator exists in .data — the dt state
       is heap or register-local, so the agent read is the path.**
-      **Resume: (a) read the two agent reports; (b) watch the named
-      timebase globals live through a freeze (gatewatch pattern); (c)
-      if the clock is the gate, chase it INTO the rig (qemu clock_gettime
-      / shim-served time) — that is the actual fix site; the shim
-      release-defer mitigation remains the fallback (converts wake-drain
-      cancels into consumes); (d) battle select + turtles (item 46) after
-      the mechanism is named. Acceptance unchanged: ordinary sub-second
-      press acts EVERY time over N≥10, oracle = MEMORY (value word live
-      0x7c908c), display as the human check.**
+      **★★★ RUN 7b, 2026-08-13 — TIMEBASE, PRODUCER-STARVATION, AND
+      CLOCK-STALL ALL FALSIFIED TOO. The desk read (agent) proved the
+      tick body computes NO dt/elapsed — it calls each subsystem once
+      per pass unconditionally; the frozen subsystems are cross-thread
+      QUEUE-DRAINS (switch producer list ELF 0x7aa9b8 / live 0x7ba9b8;
+      pump queue 0x7c8a94/98). So the timebase theory is dead. Then
+      queuewatch.py + threadwatch2.py tested the producer-starvation
+      successor LIVE and killed it too:**
+      **(i) NO THREAD STARVES. All 20 guest threads burned identical
+      CPU across deaf and consumed press windows (utime deltas equal to
+      the tick). Kernel-stack snapshots during a deaf stretch: every
+      thread parked in futex/nanosleep/poll/select as normal, none
+      wedged in an ioctl/read. (Caveat: CPU is dominated by two ~6%
+      SoLoud audio mixers, tids 225818/226738; the scheduler thread
+      225755 is near-zero CPU because it cond-waits the 60Hz timer, so
+      this test is weak FOR the scheduler specifically — but it decisively
+      kills "a producer thread wedged in the shim".)**
+      **(ii) EDGE ENQUEUE DOES NOT PREDICT CONSUMPTION. The switch
+      producer list head 0x7ba9b8 fired (edge recorded) on several DEAF
+      presses (TP01, TP04) and stayed quiet on others — no correlation
+      with whether the pane responded. So the recorder works and the
+      drain has edges to drain even when the press dies: the drop is
+      DOWNSTREAM of the producer list, in event post→dispatch→recheck.**
+      **(iii) CLOCK-STALL DEAD. The input-service thread (entry ELF
+      0x1d7e9c) runs its own ~100Hz scan loop gated on 1f1a3c =
+      clock_gettime(CLOCK_MONOTONIC) with a 9ms step; but that is the
+      SAME clock family as the SIGEV timer we proved ticks a perfect
+      60Hz, so the guest clock is healthy. block+0x1c's 60Hz was
+      re-confirmed loop-thread-written (agent, by elimination: the timer
+      notify 0x3b92bc touches ONLY 0x7e6658), so "pass loop alive" holds.**
+      **WHERE IT NOW LIVES — one window, three branches: the press is
+      recorded and drained, but between the drain's event POST (0x2551dc)
+      and the coroutine RECHECK (0x23b4d0 via game-side getter 0x1e6d90,
+      which reads a SEPARATE snapshot behind pointer globals 0x7e43d8/
+      0x7a958c — NOT the raw bitmap) something drops it in multi-second
+      bands. Run 8 must watch, together, through a press train: event
+      ring head/current (0x7c7e80/84), retire pointer 0x9dc54c, and the
+      game-side snapshot (deref [0x7b958c]) — to split deaf presses into
+      (a) event never posted, (b) posted but never dispatched, (c)
+      dispatched but cancelled at recheck. Each branch has a different
+      fix; that trichotomy is the whole remaining question.**
+      **New tools on branch: queuewatch.py + threadwatch2.py (scratchpad
+      — promote if run 8 reuses). gatewatch.py committed. Logs preserved
+      /var/tmp/*_run7*_preserved.log + C:\tmp\item17\run7\ (gate report,
+      gatewatch/queuewatch/threadwatch2/console). Shim mitigation
+      (release-defer) remains the fallback once the branch is known.
+      Acceptance unchanged: ordinary sub-second press acts EVERY time
+      over N≥10, oracle = MEMORY (value word live 0x7c908c), display as
+      the human check.**
       **★★★ DAVID AGAIN, 2026-08-12, ON A BUILD THAT ALREADY HAS THE LATCH
       (`979b940` is on main), so `sw_owed[]` did NOT cure the felt case and the
       half that is left is LATENCY, not delivery: "switch input by keyboard or

@@ -2003,11 +2003,55 @@ class App:
             return
         self.window.remember_browse_dir("mod_pack", zip_path)
 
-        if not messagebox.askyesno(
-            "Import Mod Pack",
-            f"Extract mod pack into:\n  {assets_dir}\n\n"
-            f"Existing files with the same names will be overwritten.\n\nContinue?",
-        ):
+        # Look inside the pack BEFORE asking, so the question can say what will
+        # actually happen: a pack from another card matches almost nothing here,
+        # and importing it anyway scattered 209 files that no build could use
+        # (a tester).  Reading the zip index + the folder baseline can take a
+        # moment on a NAS, so it happens off the UI thread.
+        threading.Thread(
+            target=self._import_inspect_worker,
+            args=(zip_path, assets_dir), daemon=True).start()
+
+    def _import_inspect_worker(self, zip_path, assets_dir):
+        """Worker: work out what the pack would do here, then ask."""
+        try:
+            plan = modpack.inspect_mod_pack(zip_path, assets_dir)
+        except Exception as e:
+            self.msg_queue.put(LogMsg(f"Import failed: {e}", "error"))
+            self.root.after(0, lambda e=e: messagebox.showerror(
+                "Import Failed", str(e)))
+            return
+        self.root.after(0, lambda: self._confirm_import(
+            zip_path, assets_dir, plan))
+
+    def _confirm_import(self, zip_path, assets_dir, plan):
+        """Main thread: the import confirmation, spelling out the mismatch."""
+        n_apply = len(plan["applicable"])
+        n_all = len(plan["names"])
+        if not n_apply:
+            messagebox.showerror(
+                "Nothing to Import",
+                "None of this pack's %d file(s) belong to this extract.\n\n"
+                "The pack was built from %s and this folder was extracted "
+                "from %s.\n\nUse \"Transfer Mods to New Version\" on the Mod "
+                "Pack tab to carry your mods between two different cards — it "
+                "matches them by what they are, not by where they sat."
+                % (n_all, plan.get("pack_card") or "another card",
+                   plan.get("here_card") or "a different card"))
+            return
+        lines = ["Extract mod pack into:\n  %s\n" % assets_dir]
+        if n_apply == n_all:
+            lines.append("%d file(s) will be imported. Existing files with "
+                         "the same names will be overwritten." % n_apply)
+        else:
+            lines.append("%d of the pack's %d file(s) will be imported; "
+                         "existing files with the same names will be "
+                         "overwritten." % (n_apply, n_all))
+        for level, text in modpack.mismatch_lines(plan):
+            if level == "warning":
+                lines.append(text)
+        lines.append("Continue?")
+        if not messagebox.askyesno("Import Mod Pack", "\n\n".join(lines)):
             return
 
         # "started" / "completed" bracket + a by-kind breakdown at the end —
@@ -2020,28 +2064,51 @@ class App:
 
         def _run():
             try:
-                names = modpack.import_mod_pack(
-                    zip_path, assets_dir,
+                res = modpack.import_mod_pack(
+                    zip_path, assets_dir, plan=plan,
                     log_cb=lambda t, l="info": self.msg_queue.put(LogMsg(t, l)),
                     progress_cb=lambda c, t, d="": self.msg_queue.put(
                         ProgressMsg(c, t, d)),
                 )
+                names = res["applied"]
                 n = len(names)
                 kinds = modpack.kind_summary(names)
+                skipped = len(res["skipped"])
                 self.msg_queue.put(LogMsg(
                     f"Mod pack import completed: {n} file(s)"
-                    + (f" — {kinds}." if kinds else "."), "success"))
+                    + (f" — {kinds}" if kinds else "")
+                    + (f"; {skipped} skipped (not part of this extract)."
+                       if skipped else "."), "success"))
                 # Re-scan the Replace tabs so the imported changes show up
                 # immediately — without this the tabs keep the pre-import scan
                 # ("0 slots changed") until a manual re-scan (a tester).  Same
                 # refresh the mod-transfer flow does.
                 self.root.after(0, self.window.reload_assets_tabs)
+                extra = ""
+                if res["extras"].get("settings"):
+                    extra += ("\n\n%d default setting(s) came across too — see "
+                              "the Defaults tab."
+                              % res["extras"]["settings"])
+                if skipped:
+                    extra += ("\n\n%d file(s) were skipped: this extract has "
+                              "nothing they match." % skipped)
+                if res["removed"]:
+                    extra += ("\n%d left here by an earlier import were "
+                              "removed." % len(res["removed"]))
+                if res["card_files"]:
+                    extra += ("\n\nThe pack's card also had %d file(s) "
+                              "replaced on the card image itself (%s). Those "
+                              "never travel in a pack — redo them on the "
+                              "Partitions tab."
+                              % (len(res["card_files"]),
+                                 modpack.describe_card_files(
+                                     res["card_files"])))
                 self.root.after(0, lambda: messagebox.showinfo(
                     "Import Complete",
                     f"Imported {n} file(s)"
                     + (f" ({kinds})" if kinds else "") + ".\n\n"
                     f"The Replace tabs are re-scanning so the imported "
-                    f"changes show up."))
+                    f"changes show up." + extra))
             except Exception as e:
                 self.msg_queue.put(LogMsg(f"Import failed: {e}", "error"))
                 self.root.after(0, lambda e=e: messagebox.showerror(

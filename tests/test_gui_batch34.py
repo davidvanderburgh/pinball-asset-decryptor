@@ -109,18 +109,26 @@ def _extract(tmp_path, name="lz"):
 
 class _ScanStub:
     _start_change_scan = MainWindow._start_change_scan
+    _note_foreign_slots = MainWindow._note_foreign_slots
+    _SCAN_LABELS = MainWindow._SCAN_LABELS
 
-    def __init__(self, assets_dir):
+    def __init__(self, assets_dir, video_slots=None, image_slots=None):
         self.root = _Root()
         self.write_assets_var = _Var(assets_dir)
         self._change_scan_ids = {}
-        self._video_slots = [_Slot("video/attract.mov")]
-        self._image_slots = [_Slot("images/logo.png")]
+        self._video_slots = (video_slots if video_slots is not None
+                             else [_Slot("video/attract.mov")])
+        self._image_slots = (image_slots if image_slots is not None
+                             else [_Slot("images/logo.png")])
         self._audio_slots = []
         self._video_changed_on_disk = set()
         self._image_changed_on_disk = set()
         self._audio_changed_on_disk = set()
         self.refreshed = []
+        self.logs = []
+
+    def append_log(self, text, level="info"):
+        self.logs.append((level, text))
 
     def _refresh_video_list(self):
         self.refreshed.append("video")
@@ -169,6 +177,30 @@ def test_change_scan_ids_are_per_kind(tmp_path, _sync_threads):
     me._start_change_scan("video")
     me._start_change_scan("image")
     assert me._change_scan_ids == {"video": 1, "image": 1}
+
+
+def test_scan_names_files_that_are_not_part_of_this_extract(tmp_path,
+                                                            _sync_threads):
+    """A pack built from another card left files this extract never produced;
+    they list as slots no build can use (a tester's Pro folder showed 201 of
+    them).  The scan has to say so — once, not on every rescan."""
+    assets = _extract(tmp_path)
+    stray = os.path.join(assets, "images", "other_card_logo.png")
+    with open(stray, "wb") as f:
+        f.write(b"not from this card")
+
+    me = _ScanStub(assets, image_slots=[_Slot("images/logo.png"),
+                                        _Slot("images/other_card_logo.png")])
+    me._start_change_scan("image")
+    me.root.drain()
+    notes = [t for lvl, t in me.logs if lvl == "warning"]
+    assert len(notes) == 1
+    assert "1 file(s) in this folder aren't part of this extract" in notes[0]
+    assert "images/other_card_logo.png" in notes[0]
+
+    me._start_change_scan("image")            # same folder, same strays
+    me.root.drain()
+    assert len([t for lvl, t in me.logs if lvl == "warning"]) == 1
 
 
 # ---------------------------------------------------------------------------

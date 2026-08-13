@@ -4053,6 +4053,7 @@ class MainWindow:
         root = self.root
 
         def _work():
+            foreign = set()
             try:
                 baseline = checksums.read_baseline_any(assets_path)
                 rel_set = set(rels)
@@ -4061,6 +4062,8 @@ class MainWindow:
                 to_hash = [r for r in rels if r not in snaps]
                 changed = snaps | checksums.changed_rels(
                     assets_path, to_hash, baseline=baseline)
+                if baseline:
+                    foreign = {r for r in rels if r not in baseline}
             except Exception:
                 changed = set()
 
@@ -4068,6 +4071,7 @@ class MainWindow:
                 if self._change_scan_ids.get(kind) != scan_id:
                     return            # superseded by a newer scan of THIS kind
                 setattr(self, "_%s_changed_on_disk" % kind, changed)
+                self._note_foreign_slots(kind, assets_path, foreign)
                 if refresh:
                     refresh()
             # A busy main thread (>1 s inside one callback — big tree
@@ -4094,6 +4098,37 @@ class MainWindow:
             root.after(0, _spawn)
         except (tk.TclError, RuntimeError):
             pass
+
+    def _note_foreign_slots(self, kind, assets_path, foreign):
+        """Log once when *kind*'s list holds files this extract never produced.
+
+        The Replace tabs list every audio/video/image file in the folder, so a
+        mod pack built from a DIFFERENT card turns its whole contents into
+        slots: a tester's Pro extract showed 750 audio slots where the card has
+        549, each of the 201 extras previewing his own mod as the card's
+        original, and no build could use one of them (batch 31).  Import skips
+        those now, but a folder that already has them says nothing on its own —
+        so name them here.  Logged only when the count changes, since every
+        rescan of the same folder would otherwise repeat it."""
+        seen = getattr(self, "_foreign_slot_notes", None)
+        if seen is None:
+            seen = self._foreign_slot_notes = {}
+        key = (kind, os.path.normcase(os.path.normpath(assets_path or "")))
+        if seen.get(key) == len(foreign):
+            return
+        seen[key] = len(foreign)
+        if not foreign:
+            return
+        label = self._SCAN_LABELS.get(kind, kind)
+        shown = ", ".join(sorted(foreign)[:3])
+        if len(foreign) > 3:
+            shown += ", and %d more" % (len(foreign) - 3)
+        self.append_log(
+            "%s: %d file(s) in this folder aren't part of this extract (%s). "
+            "They are listed here, but nothing on the card matches them so a "
+            "build can't use them — usually a mod pack built from a different "
+            "card. Importing that pack again takes them back out."
+            % (label, len(foreign), shown), "warning")
 
     def _slot_changed_on_disk(self, kind, rel):
         """Whether *kind* (audio/video/image) slot *rel* is already modified
@@ -6520,6 +6555,16 @@ class MainWindow:
             self._rescan_all_assets_tabs()
         except Exception:
             pass
+        # The Defaults tab is not a Replace tab and has no scan, but a mod-pack
+        # import / transfer writes staged settings into the same folder sidecar
+        # it reads.  Without this its fields kept showing the card's own stock
+        # values until the form was rebuilt (a tester read that as his defaults
+        # not carrying over at all — they had, invisibly).
+        try:
+            if getattr(self, "_settings_rows", None) is not None:
+                self._settings_apply_staged_overlay()
+        except Exception:
+            pass
 
     # ---- Revert all changes (Write tab button -> app callback) -------
 
@@ -7382,6 +7427,12 @@ class MainWindow:
 
         self._image_empty.configure(text="Scanning for image files…")
         self._image_empty.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        # Drop the previous selection's preview NOW rather than when the scan
+        # lands: a re-scan can run for minutes on a folder this size, and the
+        # pane sitting there over an emptied list read as the new scan's answer
+        # ("it was scanning but still had the artifact preview from the last
+        # time I was in this tab" — a tester).
+        self._image_clear_preview()
 
         mfr = self._current_mfr
 

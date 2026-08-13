@@ -671,6 +671,10 @@ These have each been violated at least once and each cost a run or a window:
       (a) event never posted, (b) posted but never dispatched, (c)
       dispatched but cancelled at recheck. Each branch has a different
       fix; that trichotomy is the whole remaining question.**
+      *(ANSWERED — see RUN 8 below: (b) is empty, (a) is the defect, and
+      it turned out to sit upstream of the drain entirely. The one claim
+      in this paragraph that did not survive is "the press is recorded":
+      on a dead press it is not.)*
       **★★★ RUN 8 + 8b, 2026-08-13 — THE TRICHOTOMY IS ANSWERED AND THE
       DEFECT MOVED UPSTREAM OF EVERYTHING RUNS 5–7b WERE WATCHING.
       `ringwatch.py` (NEW) follows the ring/freelist pointers into the

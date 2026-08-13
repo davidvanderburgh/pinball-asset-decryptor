@@ -24,6 +24,7 @@ import threading
 import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
+from ..core import video
 from ..plugins.stern import scene_render, text_colors
 from .theme import THEMES, platform_font
 from .widgets import _Tooltip, center_over
@@ -241,6 +242,7 @@ class SceneBrowserWindow:
         self._sort_col = "#0"      # scene-list sort column / direction
         self._sort_rev = False
         self._rebuild = None       # {"cancel": bool} while a rebuild runs
+        self._export = None        # {"cancel": bool} while an MP4 is written
         self._sans, _mono = platform_font()
         self._build()
         self.reload(preselect, focus_text)
@@ -455,6 +457,15 @@ class SceneBrowserWindow:
             "there. Pick a light backdrop (or the checkerboard) to see the "
             "black borders and the edges of the art; nothing about the scene "
             "itself changes, only what shows through behind it.")
+        _Tooltip(
+            self._save_btn,
+            "Write the scene out full size — the canvas here is a thumbnail "
+            "of a 1360x768 frame.\n\n"
+            "A still scene saves as a PNG. One that moves offers MP4 or GIF: "
+            "the MP4 is the whole scene at its own frame rate, re-rendered "
+            "for the export, and needs ffmpeg installed. The GIF is what is "
+            "playing in the preview.",
+            lambda: getattr(self.app, "_current_theme", "light"))
         _Tooltip(
             self._rebuild_btn,
             "Re-read the scene layouts from the card image on the Extract "
@@ -1042,10 +1053,12 @@ class SceneBrowserWindow:
             cw // 2, chh // 2, image=self._preview_img)
         # describe() counts every frame the layout has; say so when the render
         # cap means fewer are actually on screen, or the caption over-promises.
+        # Save preview… is where the rest exist: the MP4 export re-renders the
+        # scene in full (the GIF is what is playing here, all it can be).
         n_all = scene_render.frame_count(layout, 0, group)
         if len(frames) > 1 and n_all > len(frames):
-            note += (" Showing the first %d of them — the rest are rendered "
-                     "only on Save preview…" % len(frames))
+            note += (" Playing the first %d of them — \"Save preview…\" writes"
+                     " all %d to MP4." % (len(frames), n_all))
         self._set_caption(note)
         self._save_btn.configure(state="normal")
         if len(self._frame_imgs) > 1:
@@ -1101,11 +1114,28 @@ class SceneBrowserWindow:
     def _save_preview(self):
         """Write the full-size render out — the canvas is a thumbnail of a
         1360x768 frame, and it deserves a proper look.  An animated scene
-        offers a GIF so the motion survives the export."""
+        offers MP4 and GIF so the motion survives the export.
+
+        MP4 is the default for one that moves, and the only export that is
+        the WHOLE scene: it is re-rendered frame by frame straight into
+        ffmpeg (:func:`core.video.encode_frames_to_mp4`), so it is neither
+        capped at the :data:`_MAX_PREVIEW_FRAMES` the canvas plays nor held
+        in memory.  A GIF stays what the preview holds — a 1900-frame one
+        would be a few hundred MB of a format that stores 8-bit palettes and
+        10ms delays.  A tester: "It would be cool to have the option to
+        export the rendered scenes as MP4 files"."""
         img = getattr(self, "_preview_full", None)
         if img is None:
             return
+        if self._export is not None:      # writing one: the button cancels
+            self._export["cancel"] = True
+            self._save_btn.configure(state="disabled")
+            self._set_caption("Stopping the export…")
+            return
         frames = [f for f in (self._frames_full or ()) if f is not None]
+        layout = self._current_layout()
+        group = self._screen_index(layout)
+        n_all = scene_render.frame_count(layout, 0, group)
         animated = len(frames) > 1
         sel = self._tree.selection()
         base = (self._scenes.get(sel[0], {}).get("label") if sel else "") or "scene"
@@ -1113,16 +1143,21 @@ class SceneBrowserWindow:
         types = [("PNG image", "*.png")]
         if animated:
             types.insert(0, ("Animated GIF", "*.gif"))
+            types.insert(0, ("MP4 video", "*.mp4"))
+        ext = "mp4" if animated else "png"
         path = filedialog.asksaveasfilename(
             parent=self.win, title="Save scene preview",
-            defaultextension=".gif" if animated else ".png",
-            initialfile="%s.%s" % (safe, "gif" if animated else "png"),
+            defaultextension="." + ext,
+            initialfile="%s.%s" % (safe, ext),
             filetypes=types)
         if not path:
             return
+        fps = self._effective_fps(layout)
+        if animated and path.lower().endswith(".mp4"):
+            self._export_mp4(path, layout, group, n_all, fps)
+            return
         try:
             if animated and path.lower().endswith(".gif"):
-                fps = self._effective_fps(self._current_layout())
                 # GIF frame delays are stored in 10ms units and most viewers
                 # clamp anything under 20ms, so that is the honest floor here
                 # even when the scene asks for 60 fps.
@@ -1135,6 +1170,96 @@ class SceneBrowserWindow:
             messagebox.showerror("Save failed", str(e), parent=self.win)
             return
         self._set_caption("Saved %s" % os.path.basename(path))
+
+    def _export_mp4(self, path, layout, group, n_all, fps):
+        """Re-render the whole scene into an MP4 off the UI thread.
+
+        Rendering is the slow half (a frame is a composite of the project
+        folder's own PNGs), so it runs on a worker and reports frames as they
+        go — the same shape as "Rebuild previews…", cancel button included:
+        a long scene is a minute of work and the window would otherwise sit
+        there with no way out of it."""
+        bg = self._background_name()
+        card, _lay = scene_render.layout_for_scene_dir(self._layouts,
+                                                       self._preview_dir)
+        colors = self._pending_colors(card)
+        state = self._export = {"cancel": False}
+        self._save_btn.configure(text="Cancel")
+        self._set_caption("Writing %s — frame 1 of %d…"
+                          % (os.path.basename(path), n_all))
+
+        def work():
+            def render():
+                for i in range(n_all):
+                    if state["cancel"]:
+                        return
+                    yield scene_render.render_layout(
+                        self.assets_dir, layout, fonts=self._fonts, frame=i,
+                        background=bg, colors=colors, group=group)
+
+            try:
+                n = video.encode_frames_to_mp4(
+                    render(), path, fps=fps,
+                    progress=lambda c: self._export_progress(state, c, n_all))
+                err = None
+            except Exception as e:          # no ffmpeg, bad path, ffmpeg died
+                n, err = 0, e
+            try:
+                self.app._tk_root().after(
+                    0, lambda: self._export_done(state, path, n, fps, err))
+            except (tk.TclError, RuntimeError):
+                pass                        # window closed mid-export
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _export_progress(self, state, cur, total):
+        """Worker thread: report progress ~every 10 frames (a label update per
+        frame of a 1900-frame scene is all jitter)."""
+        if state is not self._export or (cur % 10 and cur != total):
+            return
+        try:
+            self.app._tk_root().after(
+                0, lambda: self._export_tick(state, cur, total))
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def _export_tick(self, state, cur, total):
+        if state is not self._export:
+            return
+        try:
+            self._set_caption("Writing the MP4 — frame %d of %d…"
+                              % (cur, total))
+        except tk.TclError:
+            pass
+
+    def _export_done(self, state, path, n, fps, err):
+        if state is not self._export:
+            return
+        self._export = None
+        try:
+            self._save_btn.configure(text="Save preview…", state="normal")
+        except tk.TclError:
+            return
+        if state["cancel"]:
+            # ffmpeg closed a truncated stream cleanly, so there IS a file —
+            # a half-length one nobody asked for.  Take it away rather than
+            # leave a silently short scene on disk.
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            self._set_caption("Stopped — %s not written."
+                              % os.path.basename(path))
+            return
+        if err is not None or not n:
+            self._set_caption("Could not write %s" % os.path.basename(path))
+            messagebox.showerror(
+                "Save failed", str(err) or "Nothing could be rendered.",
+                parent=self.win)
+            return
+        self._set_caption("Saved %s — %d frame%s at %g fps"
+                          % (os.path.basename(path), n,
+                             "" if n == 1 else "s", fps))
 
     # -- rebuild previews -------------------------------------------------
 

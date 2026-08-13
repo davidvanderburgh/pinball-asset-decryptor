@@ -742,6 +742,52 @@ These have each been violated at least once and each cost a run or a window:
       on switches 3 and 4 read from a SECOND bitmap `*(0x7b93a0)` — the
       likeliest home of the (c) minority. None of these fire on the (a)
       path, because the drain never sees the edge.**
+      **★★★ RUN 9, 2026-08-13 — THE CHAIN IS COMPLETE, END TO END, AND THE
+      ONE LOSSY LINK IS NAMED. `SW_NODEREC(n)` in hwshim.c is
+      `SW_STRUCT + 16 + n*160` off the ADDRESS of the pointer global, not
+      its value — so node 0's record is the STATIC live 0x7b959c (prev
+      bitmap +0x0c, cur bitmap +0x14), which no watcher had ever sampled.
+      The disassembly says the same thing independently (the drain reads
+      `0x7a958c + board*160 + 36`). Adding it to ringwatch splits the last
+      ambiguity. 20 presses, 300 ms:**
+      ```
+      shim wire (devbuf 0x852100) ......... 20/20   +87..+103 ms
+      game decode (NodeRec.cur 0x7b95b1) .. 12/20   <-- THE ONLY LOSS
+      recorder (entry +0x16) .............. 12/12   same sample as cur
+      value word 0x7c908c ................. 10/12
+      ```
+      **Decoded-but-not-recorded is ZERO: every closure the game decodes,
+      it records, in the same 5 ms sample. So the recorder, the drain, the
+      post, the ring and the recheck are all exonerated — the entire
+      remaining defect is that 8 of 20 closures NEVER REACH NodeRec.cur.**
+      **AND THE SHIM HELD THE BIT DOWN THE WHOLE TIME, from its own log:
+      `[cabchg] ff0f0f… → ff0b0f…` and back **303 ms** later; the next
+      press `ff0d0f…` for **302 ms**. Run 8b's `[swpend]` says the same
+      thing per press (`sent=0` for the full closure on presses the game
+      never saw). The cabinet word is rebuilt on the merge generation
+      (`sw_shm_gen()` = `gen + scr_gen`, so a script press bumps it
+      immediately) and the SPI stub copies `bits` into the rx buffer of
+      every message on EVERY `SPI_IOC_MESSAGE` — paced to ~640 us, i.e.
+      ~470 transfers during a 300 ms closure. The game had the made bit
+      handed to it hundreds of times and took it 12/20.**
+      **SO IT IS NOT A SAMPLING RACE ON EITHER SIDE, and the latch cannot
+      help: `sw_owed[]` extends a closure the game already fails to read
+      when it is continuously present. (Worth keeping in view anyway: the
+      latch counts down inside `sw_scan_bytes`, i.e. per REBUILD, and for
+      the cabinet a rebuild fires on the release itself — so an owed
+      cabinet closure can be spent microseconds after release, before the
+      game looks. That is a second, real defect on the same path; the tap
+      path already learned this lesson and applies at the handover.)**
+      **RUN 10 — the question is now protocol fidelity, and it is OURS:
+      what does the game require of the cabinet reply before it decodes
+      it? Byte 0 of our word is a constant `ff` and bytes 3–7 constant
+      zero; if the real board carries a change flag, a sequence/frame
+      counter or a checksum there, a constant makes the game skip the
+      decode, and 60/40 is what "skip unless something else says so"
+      looks like. Read the game's SPI reply consumer (the 0x5a9b60 loop
+      and whatever it feeds) and compare against what `sw_prime()` and
+      the `[cabspi]` copy actually put in the buffer. Same shape as item
+      43: one global answer standing in for a per-frame protocol.**
       **New tools on branch: `ringwatch.py` (the run-8 instrument, and the
       first watcher that can see the event pool at all), queuewatch.py +
       threadwatch2.py. gatewatch.py committed. Logs preserved

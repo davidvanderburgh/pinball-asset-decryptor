@@ -78,8 +78,22 @@ EV_BACKOFF = 0x1000       # start the window this far below the lowest ptr
 
 # name, live addr, length
 STATIC_REGIONS = (
-    ('entry',  0x8520c0, 0xc0),   # switch-entry struct: +0x16 parity byte
-                                  # (0x852106), +0x18 level word (0x852108)
+    ('devbuf', 0x852100, 0x10),   # the SPI reader thread's own buffer. Runs
+                                  # 3-7 called this "the switch level word"
+                                  # and read delivery off it; it is NOT the
+                                  # game's switch layer, and it carries a
+                                  # textbook closure even on presses the
+                                  # game never sees. Kept as the wire proof.
+    ('noderec', 0x7b959c, 0xa0),  # NODE 0's record. SW_NODEREC(n) in
+                                  # hwshim.c is SW_STRUCT + 16 + n*160 off
+                                  # the ADDRESS of the pointer global, not
+                                  # its value - so this is a static address,
+                                  # and the disassembly agrees (the drain
+                                  # reads 0x7a958c + board*160 + 36).
+                                  # prev bitmap +0x0c, cur bitmap +0x14:
+                                  # cur is what the game DECODED off the
+                                  # wire, so it splits "shim never sent it"
+                                  # from "game never took it".
     ('prod',   0x7ba9a0, 0x30),   # switch producer list head @0x7ba9b8
     ('sched',  0x7c7e70, 0x40),   # ring head 0x7c7e80 / current 0x7c7e84 /
                                   # ctx 0x7c7e8c / pass counter 0x7c7e9c

@@ -525,13 +525,17 @@ These have each been violated at least once and each cost a run or a window:
       (`bigdiff.py`, the item-43 causal method applied to time). The 12.6MB
       window preads in 9ms; a menu screen idles at ~120 changed words/s, so
       press-correlated words stand out like flares.**
-      **(i) RETRACTION: the desk-read pass's data addresses were one nibble
-      off (0x7b7e80 → the LIVE scheduler block is at 0x7C7E80), so run 5's
-      "no tracker movement" and "mask 0x7aba5a reads 0 → repeat never arms"
-      were reads of the wrong bytes. Every ELF-text address (functions)
-      survives; every .data address from that pass is dead until live-tested.
-      A region watcher on ALL the old addresses sat byte-stable through a
-      consumed Select that switched the whole screen — that is the proof.**
+      **(i) THE ADDRESS MYSTERY IS SOLVED, and the desk read is VINDICATED
+      (2026-08-13 correction of run 6's own first diagnosis, which said
+      "one nibble off" — wrong): qemu-user loads this binary with
+      GUEST_BASE = +0x10000. Live /proc addresses = ELF address + 0x10000
+      (visible in /proc/<pid>/maps all along: text mapped at 0x18000, ELF
+      links at 0x8000). The live scheduler block 0x7C7E80 IS the desk
+      read's 0x7b7e80; the 60Hz word live at 0x7f6658 IS its generation
+      counter 0x7e6658. Run 5 read RAW ELF addresses without the shift —
+      that is the whole reason its "no tracker movement" and "mask bit8=0"
+      claims were garbage. EVERY /proc read of this guest must add
+      0x10000; guestmem/pumpwatch/bigdiff users beware.**
       **(ii) Delivery, exonerated a third way: every press lands in the
       door-switch LEVEL WORD 0x852108 (active-low, bit = id−17: Select=8,
       Plus=9, Minus=10) 60–145 ms after the wire, every time, including
@@ -572,15 +576,16 @@ These have each been violated at least once and each cost a run or a window:
       **THE ONE REMAINING QUESTION, sharp: what gates posting/dispatch for
       seconds while passes run at 60 Hz? PRIME SUSPECT (fits everything):
       the tick-body VETO — hook chain id 0x37/55 at entry to 0x4ec828
-      (dispatcher 0x4bb42c, table 0x7e4d48 — LIVE ADDRESS UNVERIFIED, mind
-      the nibble): a subscriber returning 0 skips pump AND drain for the
-      pass, so edges pile up in the recorder (events post only when the
-      veto lifts — matching the wake-drain cancel bursts), the pump's
-      timer slots freeze (matching the blink freezing), yet the ring
-      walker keeps running (matching pass counter 60 Hz). Alternative:
-      the drain posts events with a delay/flags variant during those
-      stretches (per-event +0x88 countdown, flags bit 0x40, half-rate
-      parity skip).**
+      (dispatcher 0x4bb42c, table ELF 0x7e4d48 = live 0x7f4d48): a
+      subscriber returning 0 skips pump AND drain for the pass, so edges
+      pile up in the recorder (events post only when the veto lifts —
+      matching the wake-drain cancel bursts), the pump's timer slots
+      freeze (matching the blink freezing), yet the ring walker keeps
+      running (matching pass counter 60 Hz). Alternative: the drain posts
+      events with a delay/flags variant during those stretches (per-event
+      +0x88 countdown, flags bit 0x40, half-rate parity skip). The gate
+      hunt over run-6 data found NO stored flag constant-per-stretch, so
+      the veto condition is likely COMPUTED per pass (or heap state).**
       **Instrument notes, so nobody re-pays:** `bigdiff.py` (NEW, the
       workhorse), `pumpwatch.py` (NEW, region watcher — now pointed at live
       addresses), doortrack.py pgrep defect fixed (explicit PID/game arg).
@@ -593,21 +598,20 @@ These have each been violated at least once and each cost a run or a window:
       (scratchpad) dies on transient-tid races — the guest churns
       short-lived threads constantly (per-expiration SIGEV threads).
       Logs preserved: /var/tmp/*_run6*_preserved.log + C:\tmp\item17\run6\.
-      **Resume — name the gate, then fix it: (a) live-verify the hook
-      table (find the real .data address by diffing a veto period: watch
-      what flips at deaf-stretch onset — bigdiff already recorded three
-      onsets; the boundary-correlator in scratchpad/correlate17.py is the
-      tool); (b) read the hook-0x37 subscriber list from the live process
-      and disassemble the one that vetoes — what condition is it waiting
-      on that the rig serves slowly?; (c) then the fix is either that
-      condition (rig-side) or a shim mitigation, and the shim release-defer
-      idea is WEAKENED but not dead (it cannot beat a 29 s veto, but it
-      converts every wake-drain cancel into a consume); (d) battle select +
-      turtles (item 46) after the gate is named — same engine, and the
-      finding reframes 46's 'finicky' as duty-cycle too. Acceptance
-      unchanged: an ordinary sub-second press acts EVERY time over N≥10,
-      but the oracle is now MEMORY (value word flip) with the display as
-      the human check.**
+      **Resume — name the gate, then fix it: (a) the four-agent gate-hunt
+      workflow (level-word writers ELF 0x842108, hook-0x37 subscribers via
+      table ELF 0x7e4d48/live 0x7f4d48, pane-driver, ring-walk gates) —
+      launched 2026-08-13, read its synthesis before anything else; (b)
+      run 7 executes its cheapest live test (likely: watch the named gate
+      global + hook table + freelist at +0x10000 through a deaf stretch);
+      (c) then the fix is either the gated condition (rig-side) or a shim
+      mitigation, and the shim release-defer idea is WEAKENED but not dead
+      (it cannot beat a 29 s veto, but it converts every wake-drain cancel
+      into a consume); (d) battle select + turtles (item 46) after the
+      gate is named — same engine, and the finding reframes 46's 'finicky'
+      as duty-cycle too. Acceptance unchanged: an ordinary sub-second
+      press acts EVERY time over N≥10, but the oracle is now MEMORY (value
+      word flip at live 0x7c908c) with the display as the human check.**
       **★★★ DAVID AGAIN, 2026-08-12, ON A BUILD THAT ALREADY HAS THE LATCH
       (`979b940` is on main), so `sw_owed[]` did NOT cure the felt case and the
       half that is left is LATENCY, not delivery: "switch input by keyboard or

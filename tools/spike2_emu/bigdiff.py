@@ -9,12 +9,15 @@ are the live input path, whatever the disassembly says they should be.
     sudo python3 bigdiff.py godzilla_pro 120 30 > /var/tmp/bigdiff.log &
 
 Built 2026-08-12 (item 17, run 6) after every desk-read address failed the
-live test: the per-switch record array @0x7b7d10, the "trackers"
-@0x7b130c, the "mask" @0x7aba5a and the recorder head @0x7aa9b8 all sat
-BYTE-STABLE through a consumed Select that switched the whole screen.
-Numbers that make this viable: the 12.6MB window preads in ~9ms, and a
-menu screen's idle churn is ~120 words/s, so press-correlated words are
-signal, not needles.
+live test - which, it turned out (2026-08-13), was because qemu-user loads
+this guest with GUEST_BASE=+0x10000: live /proc address = ELF address +
+0x10000, and those reads used raw ELF addresses. The tool outlived its
+origin story: addresses it names are LIVE addresses (subtract 0x10000 to
+grep the disassembly). Numbers that make it viable: the 12.6MB window
+preads in ~9ms, and a menu screen's idle churn is ~120 words/s, so
+press-correlated words are signal, not needles. Note the window covers
+.data/.bss/brk only - the 320B event objects live in a high mmap arena
+(~0xbaa00000) and are invisible here; their globals are not.
 
 Output: one line per poll that saw changes -
     <epoch_ms> n=<count> <addr>:<old>-><new> <addr>:<old>-><new> ...

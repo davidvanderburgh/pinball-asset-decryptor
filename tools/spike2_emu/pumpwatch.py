@@ -6,24 +6,15 @@ directly instead of inferred from consumption lotteries.
 
     sudo python3 pumpwatch.py godzilla_pro 300 > /var/tmp/pumpwatch.log &
 
-WHAT IS WATCHED (godzilla_pro 1.15.0, live-probed 2026-08-12 on run 6):
-
-  records   0x7b7d10..0x7b8020: a per-switch record ARRAY, stride 0x70,
-            vtable 0x6243d8, switch id at +0x14 - ids 0x17..0x1d (23..29,
-            the door/service inputs; Select=0x19, Plus=0x1a, Minus=0x1b,
-            Back=0x1c). +0x20/+0x24 are byte-packed live state; config
-            words at +0x28 read 60,30,30,125 (the 30 matches the
-            repeat-onset constant). THE DESK-READ'S "event pool @0x7b7e80 /
-            current-event @0x7b7e84" WAS A MISREAD OF THIS ARRAY: those
-            addresses are +0x20/+0x24 of the Plus record. Flippers (59/60)
-            are NOT in the array - consistent with flippers never driving
-            menus.
-  trackers  0x7b1300..0x7b1360: the four door-button held trackers
-            (0x7b130c/0x7b1320/0x7b133c/0x7b1350: +0 count, +4 ticks,
-            +12 cancel).
-  mask      0x7aba50..0x7aba60: service class mask u16 @0x7aba5a (bit8
-            arms the repeat tracker; read 0 in the rig's menu on run 5).
-  recorder  0x7aa9b0..0x7aa9e0: the edge recorder's list head @0x7aa9b8.
+WHAT IS WATCHED (godzilla_pro 1.15.0, live-verified in run 6 and corrected
+2026-08-13): the LIVE addresses of the scheduler engine. qemu-user loads
+this guest with GUEST_BASE=+0x10000, so live = ELF + 0x10000 - run 5 read
+raw ELF addresses and every one of its live claims was garbage for exactly
+that reason. Current regions: the scheduler block (live 0x7c7e80: ring
+head/current event/pass counter +0x1c/LIFO freelist +0xd4), the SIGEV
+generation word (live 0x7f6658, 60 Hz when the beat flows), the QA edit
+pane cluster (live 0x7c9080: value +0xc, busy +0x34, blink +0xf4), and the
+pump timer table (live 0x7c9310).
 
 Any byte changing in these regions prints as a contiguous-run diff line.
 The first argument is REQUIRED and names the guest: a PID, or a game name
@@ -41,17 +32,21 @@ import subprocess
 import sys
 import time
 
+# GUEST_BASE (2026-08-13): qemu-user loads this guest shifted +0x10000, so a
+# LIVE /proc address = ELF address + GUEST_BASE. Region addresses below are
+# LIVE. Run 5 read raw ELF addresses and got garbage; do not repeat that.
+GUEST_BASE = 0x10000
+
 REGIONS = (
-    # Discriminator set (2026-08-12 late night): does the PUMP run during a
-    # coroutine stall? ptmr is the pump's 8-entry timer table (decremented
-    # once per pump pass, per the ELF read); tickctr is the desk-read's
-    # cond-wait counter; cnt/cnt2 churn at ~60Hz through stalls (owner
-    # unknown); val covers the QA edit pane's value/busy/blink words.
-    ('ptmr',    0x7b9318, 0x60),
-    ('tickctr', 0x7e6650, 0x10),
-    ('cnt',     0x7c7e98, 0x8),
-    ('val',     0x7c9080, 0xd0),
-    ('retire',  0x9dc548, 0x8),
+    # Live-verified set (run 6): sched is the scheduler block (ELF 0x7b7e80):
+    # +0 ring head, +4 current event, +0x1c pass counter (60Hz when alive),
+    # +0xd4 LIFO freelist. gen is the SIGEV generation word (ELF 0x7e6658).
+    # val is the QA edit pane cluster (ELF 0x7b9080): +0xc value state,
+    # +0x34 busy, +0xf4 blink. ptmr is the pump timer table (ELF 0x7b9310).
+    ('sched', 0x7c7e80, 0xe0),
+    ('gen',   0x7f6650, 0x10),
+    ('val',   0x7c9080, 0x100),
+    ('ptmr',  0x7c9310, 0x60),
 )
 
 

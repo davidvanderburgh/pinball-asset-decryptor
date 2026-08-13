@@ -421,25 +421,28 @@ These have each been violated at least once and each cost a run or a window:
       moved ZERO times, including four 2-second presses.** Full evidence:
       handoff REMAINING item 17; log preserved at
       `/var/tmp/gzwatch_item17_run3.log`, shots `C:\tmp\item17\`.
-      **THE CONTROLS THAT MAKE 0/20 MEAN SOMETHING, same screen, same run:**
-      a DOOR button at 2000 ms is consumed every time it was tried (Select ×2
-      navigated in, Plus changed the value preview, Back exited, autoattract's
-      first Back passed Tech Alerts) — **and the same Plus at 800 ms was
-      IGNORED.** So the menu's consumption is width-gated somewhere ABOVE the
-      scan rate, and flippers are not consumed at all on this screen at any
-      width ≤ 2 s. Item 43's turtles rule ("hold 2 s or nothing") is now
-      reproduced on a second title with the wire half instrumented.
-      **The scan is NOT the gate, measured:** node 8's in-menu scan gap is
-      ~400–700 ms (latch waits 185–363 ms at uniform phase) — same order as
-      the 670 ms attract figure, and presses of 500+ ms were sampled naturally
-      yet still ignored. **Something in the game's MENU code wants ~2 s of
-      made-state, and on the real machine it does not** (a tech clicking
-      through a service menu is sub-second presses; if 2 s were the real rule
-      every Stern would feel broken). HYPOTHESIS, unproven, the resume trail:
-      the menu debouncer wants K CONSECUTIVE made samples on a faster clock
-      and something in our cabinet-word path drops the made bit between
-      rebuilds mid-hold, so only very long holds accumulate K in a row. Read
-      `sw_scan_bytes()`/word-rebuild for a made-bit dropout before any run.
+      **THE CONTROLS, same screen, same run — CORRECTED the same evening
+      after the instrument validation caught an over-claim:** Select ×2 and
+      Back ×2 at 2000 ms were consumed every time (screen transitions,
+      unambiguous), and autoattract's first 2000 ms Back passed Tech Alerts.
+      **Service Plus (26) was consumed at NEITHER 800 nor 2000 ms** — the
+      value pane read "No" in every shot; the "preview changed" reading in
+      this pass's first commit was rendering wobble (diff bbox 51×48 px,
+      cyan-mask XOR only 4). So the clean statement is: flippers delivered
+      and never consumed; Select/Back consumed at 2 s (nothing shorter was
+      tried on them); Plus consumed at nothing — either +/- need edit mode
+      entered first (Select = Enter?) or Plus is not reaching the game, and
+      its delivery was UNINSTRUMENTED this run (PAD_SW_PEND watched only
+      59,60). **Next run must instrument 25–28 and ladder SELECT/BACK
+      widths** — they have screen-change oracles that cannot wobble.
+      **The scan is NOT the gate for flippers, measured:** node 8's in-menu
+      scan gap is ~400–700 ms (latch waits 185–363 ms at uniform phase) —
+      same order as the 670 ms attract figure, and presses of 500+ ms were
+      sampled naturally yet still ignored. HYPOTHESIS, unproven, the resume
+      trail: the menu's consumer runs on its own slow clock or wants K
+      consecutive made samples, and something in our word path may drop the
+      made bit between rebuilds mid-hold. Read `sw_scan_bytes()`/word-rebuild
+      for a dropout before any run (desk-read workflow in flight).
       **RULED OUT this pass — `swpoke.py --tap` for NODE switches:** the tap
       is applied only where the CABINET word is handed over (`hwshim.c:2408+`)
       and its count decrements per cabinet transfer (~640 us each), so a tap

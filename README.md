@@ -722,9 +722,17 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    image/scene names, which are project settings rather than files, and
    merges them on import (the pack wins per setting, anything you'd
    already staged here survives). Files you replaced on the card image
-   itself with the Partitions tab can't travel in a pack — they live in
-   the `.raw`, not the project folder — so they're named at export *and*
-   again at import as the short list to redo. Pipeline working files
+   itself with the Partitions tab can't be *applied* by an import — they
+   live in the `.raw`, not the project folder, and putting one back means
+   resizing inside the card's own filesystem — but the pack carries your
+   copies of them whenever the file you swapped in is still on the
+   exporting PC, and Import drops them into the project's `card_files/`
+   folder under the same on-card path, ready for one right-click
+   *Replace* on the Partitions tab. Any whose source file has moved since
+   are named at export *and* again at import as the short list to redo.
+   Those copies are deliberately invisible to the Replace tabs and to the
+   extract baseline, so they can never list as slots this card doesn't
+   have. Pipeline working files
    (decrypted blobs, raw
    `.img`s) are left out, so a pack weighs what its assets weigh. For Stern
    Spike 2 (where new game code re-lays-out the card), a **Transfer Mods

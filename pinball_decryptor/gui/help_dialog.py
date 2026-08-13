@@ -590,10 +590,15 @@ HELP_CONTENT = {
          "you gave image groups and scenes ride along in the pack as well — "
          "they are project settings rather than files, so they are keyed by "
          "the firmware's own names and land staged for the next Build. One "
-         "thing no pack can carry: files you replaced on the card image "
+         "thing no import can APPLY: files you replaced on the card image "
          "itself with the Partitions tab (SternLogo.png and friends). Those "
-         "are written into the .raw, not into the project folder, so Import "
-         "names them for you to redo on the new card."),
+         "are written into the .raw rather than into the project folder, and "
+         "putting one back means resizing inside the card's own filesystem. "
+         "The pack carries your copies anyway, as long as the file you "
+         "swapped in is still on this PC: Import drops them into the "
+         "project's card_files folder under the same on-card path, so it is "
+         "one right-click Replace on the Partitions tab. If that file has "
+         "moved since, Import can only name it for you to redo."),
         ("Transfer mods",
          "\"Transfer mods from another extract\" (where available) carries "
          "your Replace edits from an older firmware's extract onto a new "

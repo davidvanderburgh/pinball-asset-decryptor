@@ -100,6 +100,11 @@ def normalize_update_interval(value):
 # prefix guarantees a group header's iid can't collide with any slot.
 _IMG_GROUP_IID = "::grp::"
 
+# Tail a Replace tab's count line wears while its on-disk change diff is still
+# running (see MainWindow._mark_change_scan).  Kept short: the line shares its
+# row with the Scan button, so a longer note is clipped on a 1024-wide window.
+_CHANGE_SCAN_NOTE = "  ·  still checking…"
+
 # Partition Explorer: suffix marking a directory node's lazy-load placeholder
 # child (a NUL can't appear in a real POSIX path, so it never collides).
 _PEX_PLACEHOLDER = "\x00__lazy__"
@@ -322,7 +327,10 @@ class _AudioPreviewPane:
         h = canvas.winfo_height() or 90
         if w <= 10:  # not mapped yet; <Configure> re-draws once it is
             return
-        canvas.create_text(w // 2, h // 2, fill="#888888", text=self._hint)
+        # Wrapped (the video twin always was): a hint longer than "no
+        # replacement assigned" drew as one line and ran off both edges.
+        canvas.create_text(w // 2, h // 2, fill="#888888", width=w - 16,
+                           justify=tk.CENTER, text=self._hint)
 
     def _on_canvas_resize(self, _event=None):
         if self.path is None:
@@ -1556,6 +1564,9 @@ class MainWindow:
         # last kind to start ever applied its result and the others stayed at
         # "0 changed" until the app was restarted (a tester, batch 34).
         self._change_scan_ids = {}
+        # Kinds whose on-disk change diff is still running, so the count line
+        # can admit it is still counting instead of claiming "0 changed".
+        self._change_scan_running = set()
         # Replace-Video "Convert" column: (rel, replacement, no_conversion,
         # trim) -> "As-is" / "Repackage" / "Re-encode" / "".  A row can cost an
         # ffprobe of the replacement, so it's resolved on a background pass
@@ -4049,7 +4060,9 @@ class MainWindow:
         self._change_scan_ids[kind] = scan_id
         if not assets_path or not os.path.isdir(assets_path) or not rels:
             setattr(self, "_%s_changed_on_disk" % kind, set())
+            self._mark_change_scan(kind, False)
             return
+        self._mark_change_scan(kind, True)
         root = self.root
 
         def _work():
@@ -4071,9 +4084,10 @@ class MainWindow:
                 if self._change_scan_ids.get(kind) != scan_id:
                     return            # superseded by a newer scan of THIS kind
                 setattr(self, "_%s_changed_on_disk" % kind, changed)
+                self._mark_change_scan(kind, False)
                 self._note_foreign_slots(kind, assets_path, foreign)
                 if refresh:
-                    refresh()
+                    refresh()       # rewrites the count line without the note
             # A busy main thread (>1 s inside one callback — big tree
             # rebuild, spectrogram render) makes this cross-thread after()
             # raise RuntimeError; retry until it lands so the changed-marks
@@ -4129,6 +4143,67 @@ class MainWindow:
             "build can't use them — usually a mod pack built from a different "
             "card. Importing that pack again takes them back out."
             % (label, len(foreign), shown), "warning")
+
+    def _rep_pane_empty_text(self, kind, rel, default):
+        """What *kind*'s Replacement pane says when it has nothing to show.
+
+        A slot already changed on disk with no ``.orig`` snapshot has its
+        change on the LEFT — there is no pristine copy to put there instead —
+        and a bare "no replacement assigned" next to it reads as the mod having
+        been lost.  A tester asked outright whether a blank Replacement box was
+        what he should expect, having assumed "the left is always the stock
+        Stern file and the right is always the latest replacement" (batch 31).
+        Import no longer creates those slots, but every project already built
+        or hand-edited before snapshots existed still has them.  Say where the
+        change actually is."""
+        from ..core import staged_originals
+        if rel is None or not self._slot_changed_on_disk(kind, rel):
+            return default
+        scan_dir = getattr(self, "_%s_scan_dir" % kind, None)
+        if staged_originals.snapshot_path(scan_dir, rel):
+            return default            # the pair is showing properly already
+        return ("already changed on disk — the change is on the left, and it "
+                "is what the next build puts on the card. No original was "
+                "saved for this slot.")
+
+    def _change_scan_note(self, kind):
+        """The tail *kind*'s count line wears while its change diff runs — the
+        number on screen is a floor until the diff lands."""
+        return (_CHANGE_SCAN_NOTE
+                if kind in getattr(self, "_change_scan_running", ()) else "")
+
+    def _mark_change_scan(self, kind, running):
+        """Flag *kind*'s change diff as running / done and keep the count line
+        honest about it.
+
+        The count is written when the slot scan lands, but this diff MD5s every
+        slot behind it — 11 677 images on a network share took minutes, and
+        until it finished the tab claimed "0 changed" about a folder full of
+        freshly imported mods, which reads as the import having done nothing (a
+        tester switched tabs and back to shake the marks loose, batch 31).
+
+        The note is appended to the existing text rather than rebuilt through
+        the list refresh: the refresh re-inserts every row, which would drop
+        the selection the scan just made and blank the preview with it."""
+        flags = getattr(self, "_change_scan_running", None)
+        if flags is None:
+            flags = self._change_scan_running = set()
+        if running:
+            flags.add(kind)
+        else:
+            flags.discard(kind)
+        var = getattr(self, "%s_status_var" % kind, None)
+        if var is None:
+            return
+        try:
+            text = var.get() or ""
+        except tk.TclError:
+            return
+        has = text.endswith(_CHANGE_SCAN_NOTE)
+        if running and text and not has:
+            var.set(text + _CHANGE_SCAN_NOTE)
+        elif not running and has:
+            var.set(text[:-len(_CHANGE_SCAN_NOTE)])
 
     def _slot_changed_on_disk(self, kind, rel):
         """Whether *kind* (audio/video/image) slot *rel* is already modified
@@ -4472,7 +4547,8 @@ class MainWindow:
             shown = len(slots)
             extra = f"  ({shown} shown)" if shown != total else ""
             self.audio_status_var.set(
-                f"{changed_total} of {total} slots changed{extra}")
+                f"{changed_total} of {total} slots changed{extra}"
+                + self._change_scan_note("audio"))
             if shown == 0:
                 # Everything filtered out — say so, or an empty list reads
                 # like a failed scan.  An empty category that an Auto-name
@@ -5368,7 +5444,8 @@ class MainWindow:
                     cur, _audio.probe_duration(cur) or 0.0, None,
                     autoplay=autoplay)
                 return
-        self._audio_pane_rep.clear("no replacement assigned")
+        self._audio_pane_rep.clear(
+            self._rep_pane_empty_text("audio", rel, "no replacement assigned"))
 
     def _audio_activate_pane(self, side):
         """▶ pressed on an empty pane: load the selected row, then play the
@@ -6437,7 +6514,8 @@ class MainWindow:
             shown = len(slots)
             extra = f"  ({shown} shown)" if shown != total else ""
             self.video_status_var.set(
-                f"{changed_total} of {total} slots changed{extra}")
+                f"{changed_total} of {total} slots changed{extra}"
+                + self._change_scan_note("video"))
             self._video_empty.place_forget()
         self._autosize_tree_columns(
             tree, "video", ("#0", "len", "res", "fmt", "aud", "rep", "conv"))
@@ -7032,7 +7110,8 @@ class MainWindow:
             if cur and os.path.isfile(cur):
                 self._video_pane_rep.load(cur, autoplay=autoplay)
                 return
-        self._video_pane_rep.clear("no replacement assigned")
+        self._video_pane_rep.clear(
+            self._rep_pane_empty_text("video", rel, "no replacement assigned"))
 
     # Convert answers that mean "the machine will get something it can play".
     _VIDEO_CONV_GOOD = (_VIDEO_CONV_ASIS, _VIDEO_CONV_REENC,
@@ -8017,7 +8096,8 @@ class MainWindow:
             shown = len(slots)
             extra = f"  ({shown} shown)" if shown != total else ""
             self.image_status_var.set(
-                f"{total} images, {changed_total} changed{extra}")
+                f"{total} images, {changed_total} changed{extra}"
+                + self._change_scan_note("image"))
             self._image_empty.place_forget()
         self._autosize_tree_columns(
             tree, "image", ("#0", "res", "fmt", "src", "rep"))
@@ -8591,8 +8671,10 @@ class MainWindow:
         self._image_render_thumb(
             getattr(self, "_image_canvas_rep", None), rep,
             "_image_preview_img_rep",
-            empty_text=("(no replacement assigned — double-click the row "
-                        "to pick one)" if slot else ""))
+            empty_text=(self._rep_pane_empty_text(
+                "image", rel,
+                "(no replacement assigned — double-click the row to pick one)")
+                if slot else ""))
 
     def _image_set_orig_header(self, text):
         hdr = getattr(self, "_image_hdr_orig", None)

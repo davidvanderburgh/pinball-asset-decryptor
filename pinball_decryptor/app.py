@@ -2095,14 +2095,26 @@ class App:
                 if res["removed"]:
                     extra += ("\n%d left here by an earlier import were "
                               "removed." % len(res["removed"]))
-                if res["card_files"]:
-                    extra += ("\n\nThe pack's card also had %d file(s) "
-                              "replaced on the card image itself (%s). Those "
-                              "never travel in a pack — redo them on the "
-                              "Partitions tab."
-                              % (len(res["card_files"]),
+                saved = res.get("card_saved") or []
+                if saved:
+                    extra += ("\n\nThe pack also carries %d file(s) replaced "
+                              "on the card image itself (%s). An import can't "
+                              "write those into a card, so your copies are in "
+                              "the project's %s folder — Replace them from "
+                              "there on the Partitions tab."
+                              % (len(saved),
                                  modpack.describe_card_files(
-                                     res["card_files"])))
+                                     [{"path": p} for p, _ in saved]),
+                                 modpack.IMPORTED_CARD_DIR))
+                named = [c for c in res["card_files"]
+                         if c.get("path") not in {p for p, _ in saved}]
+                if named:
+                    extra += ("\n\nThe pack's card also had %d file(s) "
+                              "replaced on the card image itself (%s) that "
+                              "the pack does not hold — redo them on the "
+                              "Partitions tab."
+                              % (len(named),
+                                 modpack.describe_card_files(named)))
                 self.root.after(0, lambda: messagebox.showinfo(
                     "Import Complete",
                     f"Imported {n} file(s)"

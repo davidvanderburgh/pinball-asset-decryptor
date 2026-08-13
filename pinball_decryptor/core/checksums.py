@@ -20,6 +20,14 @@ _MD5SUM_LINE = re.compile(r'^([a-f0-9]{32})\s+\*?(.+)$')
 # the baseline written here and from the Write "Modified Files Preview".
 TRACKING_SIDECARS = frozenset({"callouts.csv", "music_titles.csv"})
 
+# Top-level folders inside a project that hold generated or staged state rather
+# than card assets: the build output, the hydrate parking lot, and the copies a
+# mod-pack import drops of the files the sender replaced on their card IMAGE
+# (``modpack.IMPORTED_CARD_DIR`` — they belong to a .raw, not to this extract).
+# Excluded from the baseline below AND pruned by the audio/video/image slot
+# scanners, so nothing in them ever lists as a slot the card doesn't have.
+NON_ASSET_DIRS = frozenset({"build", ".hydrate", "card_files"})
+
 
 def md5_file(path):
     h = hashlib.md5()
@@ -60,8 +68,7 @@ def generate_checksums(folder, log_cb=None, progress_cb=None,
     # baselined build image would make every re-extract flag a multi-GB
     # "modified file"; .hydrate/ holds edited files mid-hydrate.  (The walk
     # only skips dot-FILES on its own, so the dot-DIR needs listing too.)
-    excluded.add("build")
-    excluded.add(".hydrate")
+    excluded.update(NON_ASSET_DIRS)
     files = []
     for dirpath, dirnames, filenames in os.walk(folder):
         rel_dir = os.path.relpath(dirpath, folder).replace("\\", "/")

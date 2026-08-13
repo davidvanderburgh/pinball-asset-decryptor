@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from .audio_slots import replace_with_retry
+from .checksums import NON_ASSET_DIRS
 from .video import (VIDEO_EXTS, VideoInfo, backend_for, detect_video_info,
                     encode_replacement, find_ffmpeg, isobmff_brand,
                     profile_rank, remux_video_to, same_pix_fmt,
@@ -122,10 +123,10 @@ def scan_video_slots(assets_dir: str, roots=None, exts=None,
     for walk_root in walk_roots:
         for root, dirs, files in os.walk(walk_root):
             # Same prune as audio_slots: dot-dirs + the project's top-level
-            # build output (batch 19 — generated, never an asset slot).
+            # generated / staged folders (checksums.NON_ASSET_DIRS).
             dirs[:] = [d for d in dirs
                        if not d.startswith(".")
-                       and not (d == "build"
+                       and not (d in NON_ASSET_DIRS
                                 and os.path.normcase(os.path.normpath(root))
                                 == os.path.normcase(
                                     os.path.normpath(assets_dir)))]

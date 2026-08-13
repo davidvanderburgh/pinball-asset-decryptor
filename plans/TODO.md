@@ -628,6 +628,19 @@ These have each been violated at least once and each cost a run or a window:
       is then the finding: the per-node scan gap ran to 670 ms on godzilla in
       attract and **the DURING-PLAY per-node rate has never been measured on any
       title** — item 26 wants that same number, so measuring it pays twice.
+      **★★ READ ITEM 17's BRANCH FIRST — 2026-08-12 late: it cracked a
+      mechanism that predicts THIS item's symptom exactly.** On godzilla a
+      button press becomes a queued EVENT whose coroutine re-reads the live
+      level when it finally runs and silently cancels if the release already
+      drained; measured consumption is a **width-independent ~40% lottery**
+      (150 ms presses land 3/4 while 2 s presses can die — delivery correct
+      on every press). "Occasionally in attract, never at character select"
+      is what that lottery + a per-screen consumer difference feels like.
+      The discriminator above still runs first, but if it reads
+      reached-and-ignored, do NOT conclude "the game wants something else" —
+      check the event-pump race before inventing a TMNT-specific rule.
+      Chain + addresses (godzilla 1.15.0; turtles' differ): item/17's
+      `plans/TODO.md` and the handoff's late-2026-08-12 section.
       **Repro:** turtles_pro run, `plunge.py coin` + `start`, character select
       comes up at game start; press Space there and in attract. Item 41 reached
       exactly this screen and the crash it used to take there is fixed

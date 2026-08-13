@@ -803,7 +803,65 @@ These have each been violated at least once and each cost a run or a window:
       registered, of course they are quiet. The only non-circular reading
       is (b): the 60 Hz machinery keeps running, and the guest's overall
       change rate never drops (245–505 words/s throughout).**
-      **RUN 10 — the question is now protocol fidelity, and it is OURS:
+      **★★★ AND THEN THE ACTUAL ROOT CAUSE, from the run-9 log plus a desk
+      read of hwshim.c — no further run needed. THE LATCH NEVER ARMS FOR
+      CABINET SWITCHES, and the reason is one line.**
+      **(1) Evidence first: ZERO `[swlatch]` lines in a 20-press run. The
+      latch (979b940) did not fire once. Every other gate is static too —
+      `rgate`, `mgate` and the category `mask` recorded 0 changes across
+      90 s, and entry+0x1a (the recorder's per-switch swallow gate) never
+      moves. Only +0x04, +0x16 and +0x18 move, and devbuf moves exactly
+      40 times = 20 presses × 2 edges.**
+      **(2) The mechanism. In `sw_scan_bytes()` the `else if (held)` arm
+      sets `sw_served[id] = 1` — "this switch has been on the wire as
+      made". For a NODE switch that is sound, because `sw_scan_bytes(nid)`
+      is called when the GAME asks for that node, so on-the-wire ≈
+      consumed. For the CABINET it is false: `sw_scan_bytes(0, bits)` is
+      called on the shim's own REBUILD, which fires within ~640 us of the
+      press (the rebuild condition includes `sw_shm_gen()` = `gen +
+      scr_gen`, so a script press bumps it at once). So `sw_served[26]` is
+      set microseconds after the press, and at release `sw_shm_merge()`'s
+      `else if (!sw_served[n] && sw_latch_on())` is false and NOTHING IS
+      EVER OWED. The latch is dead code on this path.**
+      **(3) A second defect behind it, so the obvious one-line fix is not
+      enough: `sw_owed[]` is also DECREMENTED inside `sw_scan_bytes`, i.e.
+      per rebuild — and a cabinet rebuild fires on the release itself. Arm
+      the latch without moving the count and it would be spent
+      microseconds later, still before the game looks. The tap path
+      already learned this and applies its count where the word is handed
+      over ("the only place a press can be counted in transfers").**
+      **(4) BUT THE HANDOVER IS NOT THE RIGHT CLOCK EITHER, and this is
+      the part that is genuinely new. The game takes the word on every
+      `SPI_IOC_MESSAGE` (~1560/s, paced 640 us) but only FORWARDS it to
+      the recorder every ~500 ms: hwshim.c's own header says the reader
+      thread copies rx into 0x842108 and `0x5a9df8` then hands those 8
+      bytes to `0x1e78f4(0, buf)` — the same distributor the node bus
+      feeds. Counting transfers would spend the latch in under a
+      millisecond. THE CABINET NEEDS A WALL-CLOCK HOLD.**
+      **(5) THE ~500 ms IS MEASURED, not guessed. 300 ms presses are
+      captured 12/20 = 60%, and for a fixed-period poll of period T with
+      uniform phase the capture rate is 300/T, giving T ≈ 500 ms. The
+      latencies from the device word to the node record on the 12 captured
+      presses are 0, 4, 4, 4, 10, 11, 51, 84, 127, 183, 240, 269 ms — a
+      spread across 0..~270 with no clustering at a fixed offset, which is
+      the signature of sampling a slow poll, not of a gate. It also
+      retro-explains every historical observation at once: 2000 ms always
+      registers (2000 > 500), 250–500 ms "falls between polls" (item 43's
+      turtles pass said exactly this on 2026-08-11), and the 72/72 ladder
+      passed because it measured a word the poll is not on.**
+      **THE FIX, now fully specified: defer the cabinet RELEASE edge in
+      `bits` by at least one poll period (~600 ms), keyed on wall clock,
+      independent of both the rebuild count and the transfer count. That
+      is this item's long-standing release-defer fallback, and it is now
+      the fix with a measured constant behind it. Acceptance unchanged:
+      an ordinary sub-second press acts EVERY time over N≥10.**
+      **STILL OPEN, and worth one desk read before coding: whether the
+      ~500 ms cabinet service interval is the game's own design or
+      something the rig imposes (node 0 is serviced out of the same
+      `nb_next_node()` schedule the shim owns). If the rig is what makes
+      it 500 ms, fixing the schedule beats papering over it with a hold.**
+      **RUN 10 — a second, independent question, kept because the deferral
+      does not answer it:
       what does the game require of the cabinet reply before it decodes
       it? Byte 0 of our word is a constant `ff` and bytes 3–7 constant
       zero; if the real board carries a change flag, a sequence/frame

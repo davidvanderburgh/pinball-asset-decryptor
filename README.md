@@ -1165,12 +1165,18 @@ Clonezilla extract doesn't wall on a too-small WSL volume.
 
 ## Auto-update
 
-The app polls the GitHub releases API on launch. If a newer release
-exists it shows a banner at the top of the window, puts a ● notification
-on the ⚙ settings gear, and logs a clickable download link. The check is
-non-blocking; the outcome ("update available" / "you're on the latest" /
-"check failed") is always mirrored into the log, and a manual check lives
-in the ⚙ menu.
+The app polls the GitHub releases API on launch, and then keeps checking
+while it runs — ⚙ → **Check automatically** picks the gap (only at
+startup, hourly, every 6 hours, or once a day; 6 hours by default), so a
+release published mid-session no longer goes unnoticed until you go
+looking. If a newer release exists it shows a banner at the top of the
+window, puts a ● notification on the ⚙ settings gear, and logs a
+clickable download link. Closing the banner sticks: the repeating check
+won't re-open it for a version you've already waved off (the gear's ●
+and its menu entry still carry the news, and a newer version banners
+normally). The check is non-blocking; the outcome ("update available" /
+"you're on the latest" / "check failed") is always mirrored into the
+log, and a manual check lives in the ⚙ menu.
 
 On Windows the banner offers a one-click **Install update**: the app
 downloads the release installer itself and runs it silently, then reopens

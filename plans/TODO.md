@@ -405,185 +405,20 @@ These have each been violated at least once and each cost a run or a window:
       into a multiball, and its first dependency (the eject coil index) is
       itself an unfinished item.
 
-- [ ] **17. Keyboard switch input needs holding longer than a keystroke, and
-      does not repeat.** `S1 D3` ← IN PROGRESS *(**D4 → D3 on 2026-08-06:** the
-      mechanism is cracked, the instrument is built and validated, and the fault
-      now reproduces on demand from a script — so a pass can no longer end
-      having learned nothing. What is left needs a run, not a new instrument.)*
-      **★★★ DAVID AGAIN, 2026-08-12, ON A BUILD THAT ALREADY HAS THE LATCH
-      (`979b940` is on main), so `sw_owed[]` did NOT cure the felt case and the
-      half that is left is LATENCY, not delivery: "switch input by keyboard or
-      interactive switch matrix seems to take a long time to register… the
-      menus are not responsive enough from switch inputs (even the service
-      screens using left and right flippers as input are noticeably clunky)."**
-      **(i) It is not the keyboard path, and that is free to state.** The
-      MATRIX is clunky too, and the three writers cost completely different
-      amounts host-side — the game window's `binds[]` (no host cost), the
-      playfield mouse through `SwitchDriver` (a ~80 ms `wsl.exe` spawn per
-      action, item 24), and the playfield keyboard through item 39's
-      `swkeys.py` pipe (no spawn). All three feel the same, so the fault is
-      DOWNSTREAM of the merge — where the measured mechanism already is.
-      **(ii) DAVID'S PROPOSED CURE IS ALREADY RULED OUT WITH NUMBERS: do not
-      spend a pass on it.** "Interpreted with longer samples" is the
-      minimum-closure-width theory, and there is no minimum — 72/72 registered
-      down to 10 ms once the game looked. A longer sample buys DELIVERY odds,
-      and delivery is the half already fixed. It cannot buy back LATENCY, which
-      is what "takes a long time to register" is, and which this item's own
-      limit (c) predicted in writing.
-      **(iii) ★★ THE SERVICE-MENU CASE IS ALREADY MEASURED and was never
-      written down here — it came out of item 43's turtles passes, 2026-08-11:
-      `swpoke.py 25 2000`, a TWO-SECOND hold, registers every time, while
-      250-500 ms presses fall between polls and read as nothing.** That is
-      where "12 presses moved 3 rows" came from, and it was measured with the
-      latch in the build. **That contradiction is the most valuable thing in
-      this update:** the latch owes every closure a scan and the ladder read
-      72/72, yet a 400 ms service-menu press still does nothing.
-      **THE HYPOTHESIS THAT WOULD RESOLVE IT — a hypothesis, not a finding:
-      this item's oracle proves DELIVERY, not CONSUMPTION.** `entry[+24]` is
-      the scan drain's level. A menu that samples that level on its OWN UI
-      period, or wants it made across two consecutive looks, never sees a
-      closure exactly ONE scan wide — which is precisely what the latch
-      produces. Cheap test before building anything: ladder a service-menu
-      switch with `PAD_SW_MINSCANS` at 1, 2 and 4 and see whether the MENU
-      moves where `entry[+24]` already moved.
-      **★★ AND ITEM 46 IS THE SAME QUESTION ON A DIFFERENT SWITCH — filed the
-      same day, independently, and it reached the same fork ("reached and
-      ignored" vs "never arrived").** Read it before starting here. It carries
-      the sharpest form of the contradiction: turtles' Action Button is switch
-      **34 on node 1, the EXACT switch this item laddered 72/72 down to 10 ms**,
-      the latch is default-ON and on main, and the button is still finicky in
-      attract and (apparently) dead at character select. Same latch, same
-      switch, ladder passes, game behaviour fails. **Neither item should buy the
-      during-play per-node scan rate separately** — it has never been measured
-      on any title, item 26 wants it too, and one run pays for three items.
-      **AND THE REPRO JUST GOT CHEAP, which is the best news in this update.**
-      This item had budgeted a run to reach BATTLE SELECT, which the rig has
-      never reached. The service screens are the same symptom by David's own
-      report and are reachable from boot with no game played — door open
-      (`swhold.py 33 0`), LONG Select, version splash, LONG Select; item 43 did
-      it repeatedly. Measure there first and keep BATTLE SELECT for confirming.
-      **★★ MEASURED AND FIXED 2026-08-06. 35 of 72 closures reached the game
-      before; 72 of 72 after — 4/4 at every duration on both nodes, including
-      10 ms.** Long form: `spike2_pc_emulation_handoff.md`, REMAINING item 17.
-      **The item's own suspicion was right in effect and wrong in location, and
-      the location decides the fix. There is NO minimum closure width and NO
-      debounce problem — there is a SAMPLING RATE, and it is the game's.**
-      `swladder.py` poked switch 34 (node 1) and 46 (node 8) at
-      10/20/30/50/80/120/200/400/900 ms, four rounds each, read off the game's
-      own `entry[+24]` via `PAD_SW_PEND`. **Every failure had ZERO samples
-      inside it** — the game had never looked at that node — and **every closure
-      it did look at registered, down to 10 ms, off ONE scan with the switch
-      made.** `0x11` is REQUEST-driven: the game asks per node when its service
-      loop gets round to it, so the rate is entirely the game's, and the gap
-      between two scans of one node **ran to 670 ms in attract**. Holding a key
-      longer only buys more chances to be looked at.
-      **Fixed (`sw_owed[]` in `hwshim.c`): a closure is OWED a scan.** Merged
-      state going 1→0 having never been on the wire as made defers the release
-      until the next scan of that switch's own node. One scan is enough —
-      measured, not assumed. `PAD_SW_MINSCANS` raises it, `PAD_SW_LATCH=0` A/Bs
-      it, `[swlatch]` prints the closure width and the wait each time it saves a
-      press (**42 saves in the verification run**). One change fixes the
-      keyboard and the scripts, because both writers land in the same merge.
-      **★★ THE BLOCKING QUESTION IS ANSWERED. DAVID, 2026-08-06: "the left and
-      right flipper buttons when needed to navigate the game options does not
-      seem to react very well. it's hard to determine if i need to press it over
-      and over again or hold it (for example: when selecting a battle). are the
-      flipper keys working? (left and right arrows)"** This item's own Resume
-      line asked which key and which screen before any of the repeat half was
-      written. **The key: LEFT/RIGHT FLIPPER — 60 and 59 — bound to the left and
-      right arrows in padglhost's `binds[]`. The screen: in-game option
-      navigation, worked example BATTLE SELECT.**
-      **The symptom is not "it does nothing", it is "the rule is not legible" —
-      and this rig has ALREADY MEASURED exactly that, so start there rather than
-      from scratch.** `padsw.h`: on the Main Menu a hold of 120 ms and 200 ms
-      moved the cursor 0 rows, 250 ms moved 1 or 2, and 300 ms moved 3, because
-      what decides it is how many SPI transfers land inside the hold. A rule
-      that changes with the transfer phase is a rule a human cannot learn, which
-      is precisely "hard to determine if I press it over and over or hold it".
-      **NOT ESTABLISHED, and it is David's actual question: whether the flipper
-      keys work AT ALL on that screen.** `swladder.py` laddered switch 34
-      (node 1) and 46 (node 8) — **not 59 or 60** — so the flippers have never
-      been through the instrument, and the 72/72 result does not cover them.
-      Ladder 59 and 60 first; a flipper is on a different node from either
-      switch already tested, and the sampling gap is per node.
-      **New cost this exposes: BATTLE SELECT has never been reached by this
-      rig**, the way `Diagnostics → Coil Test` has not (item 3). It needs a game
-      played into a mode, not attract, so budget the run for that and say how
-      you got there.
-      **WHAT IS NOT DONE, and it is why the box is open:**
-      **(a) nobody has played it.** This is the script path; the keyboard shares
-      the merge so the same latch applies, but David's hands are the final
-      oracle and this fault is defined by how it feels. **(b) The "repeat" half
-      is untouched, and its premise is now in doubt** — see the ruled-out list.
-      **(c) The latch makes a press land LATE**, by up to the scan gap, which is
-      strictly better than losing it but is a latency the real machine does not
-      have. `nb_next_node()` already emits the whole node list per cycle, so the
-      shim is not the limit; the service loop is the game's.
-      **RULED OUT, with numbers, so nobody pays twice:**
-      • **the X drain.** `win_pump()` drains from the idle poll as well as per
-      frame (200 us for 16 empty polls then 2 ms) and the frame rate is 50-60
-      fps over 301 samples — ~2-20 ms granularity, which cannot swallow a 60 ms
-      keystroke. The SUSPECTED mechanism this item was filed with is dead.
-      • **the auto-repeat peek eating the game's repeat.** It keeps `key_down`
-      at 1 for the whole hold, and the GAME already auto-repeats a held cabinet
-      switch (`padsw.h`, measured on the Main Menu; the whole `tap_reads` region
-      exists for it). So "does not repeat" is NOT the peek, and the repeat half
-      must not be built on that guess. **Ask David which key and which screen
-      before writing any of it.**
-      • **a flat inter-poke gap.** It phase-locks the ladder to the sampler:
-      the first run had 400 ms missing 4/4 on node 8 while 10 ms landed 4/4 on
-      node 1. `swladder.py` jitters now.
-      **Two instrument faults, both of which cost a reading:** `PAD_SW_PEND`
-      claimed 1 ms sampling and was on the SPI loop's ~20 ms coarse tick (fixed,
-      now per transfer); and `swwidth.py` shipped with **the oracle inverted** —
-      these levels are ACTIVE LOW, MADE is 0 — plus a 250 ms window that closed
-      *before* the latched answer arrived, so the first read of the verification
-      run wrongly said the fix had not worked. Window now runs to the next press.
-      **New tools:** `swladder.py`, `swwidth.py`, and `[key]` in padglhost (the
-      X event time per key edge — the third of this item's three timestamps, and
-      the only one that knows how long a key was really held; the three clocks
-      are never aligned, only differenced within themselves).
-      **Committed:** `979b940` (measurement + latch + instruments).
-      **Resume — and start in a SERVICE SCREEN, not a battle, per the 2026-08-12
-      update at the top:** ladder switches 59 and 60 with `swladder.py` (never
-      measured, and both of David's reports are about them) with the service
-      menu on screen, then answer the delivery-vs-consumption question — does
-      the MENU move where `entry[+24]` moved, and does `PAD_SW_MINSCANS` 2 or 4
-      change that. Measure the per-node scan gap in a service screen too: 670 ms
-      is an ATTRACT number and nothing has measured a menu. Then play into a
-      battle to confirm, with `[key]` and `[sw]` both on, diffing each key
-      edge's X-time width against the closure the guest was handed. **Do not ask
-      David which key and which screen; he answered on 2026-08-06 and again on
-      2026-08-12, and both answers are at the top of this item.**
-      **The acceptance for the repeat half needs writing before it is built, and
-      the bar David set is LEGIBILITY, not just delivery:** one press moves one
-      row, and a hold repeats at a rate a human can predict — not 0 rows at
-      200 ms and 3 rows at 300 ms. State the rule the fix gives and show it
-      holds at several hold lengths.
-      — S1 because unreliable input is not a defect
-      you play around, it is the thing you play WITH.
-      **Observed 2026-08-06:** a normal-length keystroke sometimes does not
-      register; the key has to be held noticeably longer than typing. Wanted:
-      immediate like typing, plus hold and repeat.
-      **NOT a regression of item 7, and not a duplicate of it.** Item 7 fixed
-      WHO writes the switch array (three regions, one writer each, last edge
-      wins); this is WHEN the game looks at it.
-      **Acceptance:** a tap of ordinary keystroke length registers as a switch
-      close in the guest every time (state the length you tested, do not assume);
-      a held flipper key stays closed as long as it is held; a held menu/service
-      key repeats. Oracle is the guest's own `[sw]` lines against the X event
-      times, plus David's hands, since this fault is defined by how it feels.
-      **The script half of that is now met: 10 ms, 72/72.**
-      **★ AND THAT ORACLE IS NOT SUFFICIENT ON ITS OWN — added 2026-08-12.** A
-      closure that reaches `entry[+24]` and does not move the cursor is still
-      exactly the fault David is reporting, so for the menu half the oracle is
-      **the cursor moving on the GAME's own display**, timed against the press.
-      State the press length and the delay, and do not report the wire number
-      alone as a pass.
-
 - [ ] **46. On turtles_pro the ACTION BUTTON is FINICKY, not dead: it works
       occasionally in attract and never selects a character during a game.**
       `S2 D3`
+      **★ PROBABLY ALREADY FIXED by item 17's close (2026-08-13): the cabinet
+      was blind 74% of the time on EVERY title — the game re-ran its aux
+      device init every ~924 ms because the shim's i2c/bus replies said
+      "never initialized", and the fix (PAD_I2C_READY device models in
+      hwshim.c) removed the blindness entirely on godzilla_pro (max poll gap
+      690 ms → 17 ms, presses 12/20 → 20/20). "Works occasionally" is that
+      fault's signature. What this item still needs is ONE verification run
+      on turtles_pro: ~10 Action Button presses in attract and ~10 at
+      character select, every press registering. If so, close on item 17's
+      mechanism; if in-game selects still fail while attract works, THAT
+      residue is the real item 46.**
       **★ DAVID, 2026-08-12, the report: "tmnt switch controls don't seem right.
       the action button isn't selecting a character after game start like it
       should." Then, the same day, having tested every switch by hand: "they are
@@ -1770,6 +1605,832 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **17. Keyboard switch input needs holding longer than a keystroke, and
+      does not repeat.** `S1 D3`
+      DONE 2026-08-13, branch `item/17`, acceptance 20/20 in run 21, and
+      **VERIFIED IN DAVID'S OWN RUN** ("this is great and ready to
+      release!") — with a side effect he spotted before any instrument
+      did: **the playfield LEDs went from ~2 Hz to ~30 Hz**, because the
+      same blind bus thread was starving the LED frames to nodes 7/12/14
+      exactly as it starved the cabinet poll. Root cause: the game re-ran
+      its aux-device init every ~924 ms because three shim replies said
+      "never initialized"; see the RUNS 12–21 block below for the chain
+      and the fix. *(**D4 → D3 on 2026-08-06:** the
+      mechanism is cracked, the instrument is built and validated, and the fault
+      now reproduces on demand from a script — so a pass can no longer end
+      having learned nothing. What is left needs a run, not a new instrument.)*
+      **★★★ MEASURED 2026-08-12 evening, branch `item/17`, godzilla_pro
+      service menu (Quick Adjustments), and THE SPLIT IS NOW A NUMBER ON EACH
+      SIDE: DELIVERY 20/20, CONSUMPTION 0/20.** A wall-clock flipper ladder
+      (switch 59, node 8 — the flippers this item had never measured) at
+      100/250/500/1000/2000 ms × 4 rounds, interleaved and jittered, with a
+      `shotwin.py` grab after every press: **every press was recorded by the
+      game's own scan drain** (`entry[+24]` lvl toggled 20/20; the latch saved
+      the five sub-scan closures, waits 185–363 ms) **and the menu cursor
+      moved ZERO times, including four 2-second presses.** Full evidence:
+      handoff REMAINING item 17; log preserved at
+      `/var/tmp/gzwatch_item17_run3.log`, shots `C:\tmp\item17\`.
+      **THE CONTROLS, same screen, same run — CORRECTED the same evening
+      after the instrument validation caught an over-claim:** Select ×2 and
+      Back ×2 at 2000 ms were consumed every time (screen transitions,
+      unambiguous), and autoattract's first 2000 ms Back passed Tech Alerts.
+      **Service Plus (26) was consumed at NEITHER 800 nor 2000 ms** — the
+      value pane read "No" in every shot; the "preview changed" reading in
+      this pass's first commit was rendering wobble (diff bbox 51×48 px,
+      cyan-mask XOR only 4). So the clean statement is: flippers delivered
+      and never consumed; Select/Back consumed at 2 s (nothing shorter was
+      tried on them); Plus consumed at nothing — either +/- need edit mode
+      entered first (Select = Enter?) or Plus is not reaching the game, and
+      its delivery was UNINSTRUMENTED this run (PAD_SW_PEND watched only
+      59,60). **Next run must instrument 25–28 and ladder SELECT/BACK
+      widths** — they have screen-change oracles that cannot wobble.
+      **The scan is NOT the gate for flippers, measured:** node 8's in-menu
+      scan gap is ~400–700 ms (latch waits 185–363 ms at uniform phase) —
+      same order as the 670 ms attract figure, and presses of 500+ ms were
+      sampled naturally yet still ignored. HYPOTHESIS, unproven, the resume
+      trail: the menu's consumer runs on its own slow clock or wants K
+      consecutive made samples, and something in our word path may drop the
+      made bit between rebuilds mid-hold. Read `sw_scan_bytes()`/word-rebuild
+      for a dropout before any run (desk-read workflow in flight).
+      **RULED OUT this pass — `swpoke.py --tap` for NODE switches:** the tap
+      is applied only where the CABINET word is handed over (`hwshim.c:2408+`)
+      and its count decrements per cabinet transfer (~640 us each), so a tap
+      on a node-8 flipper is a ~N·0.6 ms ghost the node scan never samples and
+      the merge never logs. No [sw] edge, no swpend, nothing. The tap docstring
+      measurement (Main Menu 0 rows at 120/200 ms, 1–2 at 250, 3 at 300) is a
+      CABINET-button measurement and consistent with today's door-button gate.
+      **Also fixed on this branch: `alive.sh` bare invocation was broken on
+      main tip** (`set -u` + `$PAD_HOME` referenced since 9d25782, padpath.sh
+      never sourced → helpers row printed a hollow 0 every time). Sources
+      padpath.sh now, like killgame.sh always has. Verified bare-clean.
+      **RUN 1 was lost to a collision, recorded for the pattern's sake:** a
+      MAIN-CHECKOUT as-root watch.sh (the app's shape) killed it at ~3 min;
+      David confirmed the rig free afterwards. Two rig lessons kept: a
+      detached watch.sh loses its console unless redirected, and the rootfs
+      `games/game` symlink can silently pick the WRONG TITLE for a bare
+      `watch.sh` (run 2 came up as turtles_pro — whose flippers are 64/65, not
+      59/60 — because item 43 left the symlink there; `PAD_GAME=godzilla_pro`
+      pins it).
+      **★★★ THE MECHANISM, CRACKED AT THE DESK 2026-08-12 late evening (4-way
+      desk-read fan-out over the shim, the run-3 wire log and the game ELF)
+      AND THEN PINNED LIVE IN RUN 5. The menu never debounces and never
+      slow-polls: a door-button edge becomes a QUEUED EVENT, and the event's
+      coroutine (0x23b8f0 → 0x23b4d0) RE-READS the live level (0x1e6d90,
+      = entry[+24]) WHEN IT FINALLY RUNS — a press whose release has already
+      been drained by then is silently cancelled into a jump table. No
+      K-samples constant exists anywhere in the path. The gate is the EVENT
+      PUMP'S LATENCY racing the release edge.**
+      **MEASURED LIVE, run 5 (godzilla, PEND on 25-28+59,60, log preserved
+      `/var/tmp/gzwatch_item17_run5.log`, shots `C:\tmp\item17\bisect\`):**
+      **(i) Door-button delivery is FAST and CORRECT** — the drain recorded
+      make edges 15–205 ms after the wire on every press, including every
+      press the menu ignored (b003: textbook lvl sequence, ~950 ms of
+      made-state, ignored). Delivery is dead as a suspect on BOTH transports.
+      **(ii) Consumption is a WIDTH-INDEPENDENT ~40% LOTTERY: Minus/Plus in
+      the QA value editor, flip-oracle on the game's display — 1200 ms 2/4,
+      800 ms 1/4, 500 ms 0/4, 300 ms 2/4, 150 ms 3/4 (8/20 overall).** A
+      150 ms press can land and a 2000 ms press can die. So dispatch latency
+      is BIMODAL: sometimes <~0.3 s (any press lands), otherwise >~2.5 s
+      (even a 2 s press has released → cancelled at the recheck). The felt
+      lottery IS the pump's cadence. Run 3's "consumed at 2000 5/5, nothing
+      below" was luck plus a too-small sample; corrected by this bisect.
+      **(iii) The no-repeat half has its own finding: the held-button
+      REPEAT tracker exists in the game (0x23acf0, first repeat after 30
+      coroutine ticks, then accelerating) but its arming is gated on the
+      service class mask u16@0x7aba5a bit8 — which reads 0 in the rig's
+      menu.** Whether real hardware sets it there is open; if yes, that is a
+      second, separate rig defect. Also the 30-tick onset at the rig's
+      coroutine rate would be tens of seconds — the tick rate is the same
+      root problem.
+      **(iv) Flippers not moving Quick Adjustments is MACHINE BEHAVIOUR**
+      (exactly four door-button records route to the menu tracker; menu
+      consumers poll only those four counters). The flipper half of David's
+      report lives in OTHER screens — the attract splash literally says
+      "HOLD BOTH FLIPPER BUTTONS FOR MENU", and battle select is in-game.
+      **Addresses (godzilla_pro 1.15.0, verified against the live ELF):**
+      recorder 0x1e78f4, drain 0x1e7540 (parity rule on entry[+22]), event
+      post 0x2551dc, thunk 0x23b8f0, press fn 0x23b4d0 (recheck at
+      0x23b510), tracker ctor 0x23acf0, tracker globals 0x7b130c/1320/
+      133c/1350, event pool 0x7b7e80, current-event 0x7b7e84, scheduler ctx
+      0x7b7e8c, class mask 0x7aba5a. Full chain + evidence: handoff.
+      **RUN HYGIENE, two more collisions this evening, both recorded so the
+      next pass survives them:** a turtles CARD run (PIVOT, 120-min backstop,
+      launched ~19:55 through MY worktree's scripts by something that was not
+      me — possibly item 46's session; no worktree of its own) collided with
+      run 4; my own alive.sh check had tail-1'd the MOUNT line and missed the
+      live guest above it. **Gate on `alive.sh --total` (the number-only
+      form), never on eyeballing the table.** Both runs killed with David's
+      explicit OK; also /proc reads against pgrep's FIRST match had been
+      reading the WRONG GUEST's memory — doortrack.py now needs a
+      per-game pgrep or a PID argument before anyone trusts it again.
+      **New tools on this branch:** `doortrack.py` (tracker watcher, ~100 Hz
+      /proc poller — needs root for ptrace scope), `menuprobe.py` (cyan-mask
+      screen oracle, positive example now exists: run5 `plus800.png`-era "No"
+      vs `run5_afterplus.png` "Yes").
+      **★★★ RUN 6, 2026-08-12 late night — THE CADENCE IS MEASURED, THE
+      SCHEDULER IS EXONERATED, AND EVERY RUN-5 /proc CLAIM IS RETRACTED.
+      Method change that did it: stop dereferencing desk-read addresses and
+      diff the ENTIRE 12.6MB rw window around timestamped presses
+      (`bigdiff.py`, the item-43 causal method applied to time). The 12.6MB
+      window preads in 9ms; a menu screen idles at ~120 changed words/s, so
+      press-correlated words stand out like flares.**
+      **(i) THE ADDRESS MYSTERY IS SOLVED, and the desk read is VINDICATED
+      (2026-08-13 correction of run 6's own first diagnosis, which said
+      "one nibble off" — wrong): qemu-user loads this binary with
+      GUEST_BASE = +0x10000. Live /proc addresses = ELF address + 0x10000
+      (visible in /proc/<pid>/maps all along: text mapped at 0x18000, ELF
+      links at 0x8000). The live scheduler block 0x7C7E80 IS the desk
+      read's 0x7b7e80; the 60Hz word live at 0x7f6658 IS its generation
+      counter 0x7e6658. Run 5 read RAW ELF addresses without the shift —
+      that is the whole reason its "no tracker movement" and "mask bit8=0"
+      claims were garbage. EVERY /proc read of this guest must add
+      0x10000; guestmem/pumpwatch/bigdiff users beware.**
+      **(ii) Delivery, exonerated a third way: every press lands in the
+      door-switch LEVEL WORD 0x852108 (active-low, bit = id−17: Select=8,
+      Plus=9, Minus=10) 60–145 ms after the wire, every time, including
+      every press the menu ignored.**
+      **(iii) The scheduler thread NEVER stalls. Pass counter = scheduler
+      block+0x1c = 0x7c7e9c, and it ran at exactly 60.0 Hz through every
+      deaf period (measured across four windows incl. a 29 s one). The
+      four-agent ELF read (workflow, this pass) mapped the engine: one
+      scheduler THREAD (loop 0x254ca8) waits on a 60 Hz SIGEV_THREAD POSIX
+      timer (notify 0x3b92bc, period 16,666,667 ns), each pass runs the
+      tick body 0x4ec828 (pump 0x2a3744 at +0x88, drain 0x1e7540) then
+      walks the event ring swapcontext-ing into due events; missed ticks
+      are latched away, never replayed. Timer-starvation was the leading
+      theory and it is DEAD — the beat is perfect.**
+      **(iv) What actually happens — measured end to end: a press becomes
+      an event and the event's DISPATCH is bimodal. Awake: dispatch lands
+      60–230 ms after the level write and EVERY press consumes — a 12-press
+      300 ms train consumed 6/6 during awake stretches, and a 10 s hold
+      auto-repeated at full speed (first repeat ~470 ms → coroutine tick ≈
+      60 Hz; the "does not repeat" half is the SAME defect, not a mask).
+      Deaf: dispatch arrives 1.3–5.3 s late, the press fn's recheck
+      (0x23b4d0) finds the button released, and the event dies with a
+      visible cancel signature (edit-pane busy words 0x7c90b4/0x7c9174
+      cycle, value 0x7c908c does NOT flip) — a 6-press burst at 1.2 s gaps
+      died 6/6 that way, each event dispatching around the NEXT press's
+      edge. Deaf and awake come in multi-second STRETCHES (observed 5.3 s
+      and 29 s deaf; awake runs of 4+ presses), which is why run 5 read a
+      width-independent "~40% lottery": the lottery is the duty cycle.**
+      **(v) The screen lags memory: two presses flipped the value in memory
+      within 150 ms and the display still showed the old value 2.9 s later.
+      menuprobe-negative ≠ not-consumed; memory is the oracle now.**
+      **(vi) Event objects live OUTSIDE .data — one 0x145000 malloc
+      (64×320 B events + 64×20 KB stacks) mmapped near 0xbaa00000, so
+      bigdiff's window sees the globals (ring head 0x7c7e80, current
+      0x7c7e84, LIFO freelist 0x7c7f54) but not the nodes; the LIFO head
+      restores itself across single-event transactions, so only bursts
+      visibly churn it.**
+      **THE ONE REMAINING QUESTION, sharp: what gates posting/dispatch for
+      seconds while passes run at 60 Hz? PRIME SUSPECT (fits everything):
+      the tick-body VETO — hook chain id 0x37/55 at entry to 0x4ec828
+      (dispatcher 0x4bb42c, table ELF 0x7e4d48 = live 0x7f4d48): a
+      subscriber returning 0 skips pump AND drain for the pass, so edges
+      pile up in the recorder (events post only when the veto lifts —
+      matching the wake-drain cancel bursts), the pump's timer slots
+      freeze (matching the blink freezing), yet the ring walker keeps
+      running (matching pass counter 60 Hz). Alternative: the drain posts
+      events with a delay/flags variant during those stretches (per-event
+      +0x88 countdown, flags bit 0x40, half-rate parity skip). The gate
+      hunt over run-6 data found NO stored flag constant-per-stretch, so
+      the veto condition is likely COMPUTED per pass (or heap state).**
+      **Instrument notes, so nobody re-pays:** `bigdiff.py` (NEW, the
+      workhorse), `pumpwatch.py` (NEW, region watcher — now pointed at live
+      addresses), doortrack.py pgrep defect fixed (explicit PID/game arg).
+      PAD_SW_PEND emitted nothing to the run-6 console because watch.sh's
+      forward filter dropped [swpend]/[swlatch] — FIXED on this branch
+      (watch.sh:1304). The "bigdiff gap" was NOT a bigdiff bug: the
+      analysis copy was made MID-RUN (~+143 s) and every "gap" symptom was
+      the truncation — rule: never analyze a copy taken before the `done`
+      line; the preserved original (9036 lines) is complete and RE-CONFIRMS
+      stall-3: zero engine-word events +118 s→+325 s, p11/p12 never
+      processed, pane coroutine frozen ≥207 s. threadwatch.py (scratchpad)
+      dies on transient-tid races — the guest churns short-lived threads
+      constantly (per-expiration SIGEV threads).
+      Logs preserved: /var/tmp/*_run6*_preserved.log + C:\tmp\item17\run6\
+      (bigdiff_run6_full.log is the complete copy; bigdiff_run6.log there
+      is the truncated mid-run copy, kept as the cautionary artifact).
+      **★★★ RUN 7, 2026-08-13 — ALL FOUR CANDIDATE GATES KILLED IN ONE
+      CAPTURE (gatewatch.py, the synthesis's discriminator; report at
+      C:\tmp\item17\run6\gate_workflow_report.txt; logs C:\tmp\item17\
+      run7\).** 16-press train, 8 consumed / 6 fully deaf / 2 wake-drain
+      (p5, p15: busy cycles + event alloc at their OWN edges, no value
+      flip — the backlog-cancel signature again, edge-correlated wakes
+      reconfirmed). Verdicts: **(F4) freelist never pinned** (LIFO head
+      toggling normally through everything). **(F1 parity and F3 mask)
+      their gate variables NEVER CHANGED ONCE across five deaf↔awake
+      transitions** — a stretch-gate must flip at each boundary; both
+      dead (the mask at live 0x7bba5a — its first real read ever — is
+      static). **(F2 hook-0x37 tick-body veto) dead twice over: the
+      chain's single node is a HEAP node with callback=0 (an
+      unregister-in-place), and a 50 Hz watch of slot+node through 8
+      more presses caught NO re-arm — the chain cannot veto, ever, in
+      this build's runtime state.** Yet the freeze phenomenology stands:
+      fully-deaf presses produce ZERO body-side activity (no decoder
+      busy, no value, no event alloc) while the pass loop runs. With
+      every entry-gate dead, the coherent survivor is a TIMEBASE FREEZE:
+      the body runs but an early callee's elapsed-ticks/dt computes 0,
+      so decoder/display/drain all no-op "for no time having passed" —
+      which would also explain edge-correlated wakes if input touches
+      the clock path. Two agents out (2026-08-13): (i) disassemble early
+      body callees 0x20fb28/0x519530/0x3ba53c/0x4ed698/0x46b478 for the
+      timebase globals; (ii) identify block+0x1c's writer (the
+      60Hz-through-freezes proof rests on it). Run-6 data cross-check:
+      no monotonic awake-only accumulator exists in .data — the dt state
+      is heap or register-local, so the agent read is the path.**
+      **★★★ RUN 7b, 2026-08-13 — TIMEBASE, PRODUCER-STARVATION, AND
+      CLOCK-STALL ALL FALSIFIED TOO. The desk read (agent) proved the
+      tick body computes NO dt/elapsed — it calls each subsystem once
+      per pass unconditionally; the frozen subsystems are cross-thread
+      QUEUE-DRAINS (switch producer list ELF 0x7aa9b8 / live 0x7ba9b8;
+      pump queue 0x7c8a94/98). So the timebase theory is dead. Then
+      queuewatch.py + threadwatch2.py tested the producer-starvation
+      successor LIVE and killed it too:**
+      **(i) NO THREAD STARVES. All 20 guest threads burned identical
+      CPU across deaf and consumed press windows (utime deltas equal to
+      the tick). Kernel-stack snapshots during a deaf stretch: every
+      thread parked in futex/nanosleep/poll/select as normal, none
+      wedged in an ioctl/read. (Caveat: CPU is dominated by two ~6%
+      SoLoud audio mixers, tids 225818/226738; the scheduler thread
+      225755 is near-zero CPU because it cond-waits the 60Hz timer, so
+      this test is weak FOR the scheduler specifically — but it decisively
+      kills "a producer thread wedged in the shim".)**
+      **(ii) EDGE ENQUEUE DOES NOT PREDICT CONSUMPTION. The switch
+      producer list head 0x7ba9b8 fired (edge recorded) on several DEAF
+      presses (TP01, TP04) and stayed quiet on others — no correlation
+      with whether the pane responded. So the recorder works and the
+      drain has edges to drain even when the press dies: the drop is
+      DOWNSTREAM of the producer list, in event post→dispatch→recheck.**
+      **(iii) CLOCK-STALL DEAD. The input-service thread (entry ELF
+      0x1d7e9c) runs its own ~100Hz scan loop gated on 1f1a3c =
+      clock_gettime(CLOCK_MONOTONIC) with a 9ms step; but that is the
+      SAME clock family as the SIGEV timer we proved ticks a perfect
+      60Hz, so the guest clock is healthy. block+0x1c's 60Hz was
+      re-confirmed loop-thread-written (agent, by elimination: the timer
+      notify 0x3b92bc touches ONLY 0x7e6658), so "pass loop alive" holds.**
+      **WHERE IT NOW LIVES — one window, three branches: the press is
+      recorded and drained, but between the drain's event POST (0x2551dc)
+      and the coroutine RECHECK (0x23b4d0 via game-side getter 0x1e6d90,
+      which reads a SEPARATE snapshot behind pointer globals 0x7e43d8/
+      0x7a958c — NOT the raw bitmap) something drops it in multi-second
+      bands. Run 8 must watch, together, through a press train: event
+      ring head/current (0x7c7e80/84), retire pointer 0x9dc54c, and the
+      game-side snapshot (deref [0x7b958c]) — to split deaf presses into
+      (a) event never posted, (b) posted but never dispatched, (c)
+      dispatched but cancelled at recheck. Each branch has a different
+      fix; that trichotomy is the whole remaining question.**
+      *(ANSWERED — see RUN 8 below: (b) is empty, (a) is the defect, and
+      it turned out to sit upstream of the drain entirely. The one claim
+      in this paragraph that did not survive is "the press is recorded":
+      on a dead press it is not.)*
+      **★★★ RUN 8 + 8b, 2026-08-13 — THE TRICHOTOMY IS ANSWERED AND THE
+      DEFECT MOVED UPSTREAM OF EVERYTHING RUNS 5–7b WERE WATCHING.
+      `ringwatch.py` (NEW) follows the ring/freelist pointers into the
+      HEAP, so the 64 event nodes — invisible to every previous watcher,
+      because the pool is one 0x145000 malloc outside .data — are diffed
+      directly. 24-press train, then a 16-press confirming train.**
+      **(i) BRANCH (b) IS EMPTY. Nothing is ever posted-and-left-
+      undispatched: on every press that posts, the freelist pop, the ring
+      head move, the node write and the pane busy words land in the SAME
+      5 ms sample. There is no dispatch latency — which retires the whole
+      "event pump cadence / bimodal dispatch" framing runs 5 and 6 built.**
+      **(ii) THE SPLIT, run 8 (24 presses): 12 CONSUMED, 3 dispatched-then-
+      cancelled (c), 9 nothing-at-all (a). Run 8b (16 presses): 10 / 0 / 6.
+      Same ~60/40 either way, and the ~40% "lottery" is now located.**
+      **(iii) (a) IS THE DEFECT, AND IT IS FURTHER UPSTREAM THAN (a) WAS
+      DEFINED. On a dead press the switch-entry PENDING COUNT (+0x16)
+      never increments, so THE RECORDER NEVER RAN. The drain, the post,
+      the ring walker and the coroutine recheck are all innocent — they
+      were never handed anything. On live presses +0x16, the debounced
+      level +0x18 and the producer head all move in one sample, 93–348 ms
+      after the wire.**
+      **(iv) ★★ FIVE RUNS OF "DELIVERY IS 20/20, 24/24" WERE MEASURING THE
+      WRONG WORD. 0x852108 is the DEVICE-LEVEL word, and it carries a
+      textbook ~300 ms closure 16/16 — on dead presses exactly as on live
+      ones (`0f→0d` for Plus, `0f→0b` for Minus, back 300 ms later). The
+      game's real switch layer is `*(0x7b958c) + id*32`, stride 32 proven
+      three ways in the disassembly AND independently by hwshim.c's own
+      probe (`st + id*32`, `pend = *(u16*)(e+22)`, `lvl = e[24]`). That
+      array sees only 10/16. So "delivery is dead as a suspect" was true
+      of the device word and false of the game.**
+      **(v) THE SHIM'S OWN PROBE SEPARATES THEM PERFECTLY, 6/6 vs 10/10,
+      and it is OUR structure it disagrees on: live presses log the full
+      `cur 1→0, pend 1, lvl 1→0` sequence out of `SW_NODEREC(node)`; dead
+      presses log exactly two lines, `cur=1` at the press and `cur=1` at
+      +305 ms, i.e. the closure never appears in the shim's node record at
+      all. Note the probe is change-gated, so this corroborates rather
+      than proves on its own — ringwatch's unconditional 200 Hz sampling
+      of +0x16 is the load-bearing evidence.**
+      **WHERE IT NOW LIVES: between the device-level word and the game's
+      switch-entry array — the node-record merge / cabinet handover the
+      SHIM performs for ids 25–28. `sw_owed[]` (979b940) latches a closure
+      against the NODE scan; this cabinet path evidently is not covered by
+      it, which is exactly why the latch never cured the felt case. RUN 9:
+      trace the shim side unconditionally (PAD_SW_PEND's change-gating can
+      hide a complete +1/−1 cycle), find what paces the cabinet handover,
+      and extend the latch to it. Fix shape is the release-defer that has
+      been this item's fallback all along — now with a measured target.**
+      **A SECOND ADDRESS TRAP, found and fixed here: a pointer VALUE read
+      out of guest memory is a GUEST address and needs +0x10000 too.
+      gatewatch.py's DEREF_REGIONS did NOT add it, so run 7's `parity` and
+      `snap` regions were 0x10000 low — which is why they "never changed
+      once". RUN 7's F1 (ring parity) VERDICT IS THEREFORE REOPENED; it
+      rests on a bad read. Its F2/F3/F4 verdicts used static regions and
+      stand. ringwatch.py has a `deref()` helper that carries the rule.**
+      **The disassembly that made run 8 readable (agent, desk work, report
+      at `C:\tmp\item17\run8\drain_ring_report.txt`): the drain 0x1e7540
+      has FIVE ways an entry in the list fails to reach the post — two
+      descriptor flag bits (0x0800 press / 0x0400 release at desc+0x1a),
+      the global category mask 0x7aba5a acting as a strict whitelist when
+      nonzero, a null entry function at desc+0, and a SILENT freelist
+      exhaustion (0x2551dc returns NULL, pool hard-capped at 64 nodes, no
+      retry — the edge is gone forever). Event nodes are 320 B, countdown
+      at +0x88, flags at +0x02 with bit 0x40 = suspended-and-skipped. The
+      menu handler 0x23b4d0 also has two undocumented early exits gating
+      on switches 3 and 4 read from a SECOND bitmap `*(0x7b93a0)` — the
+      likeliest home of the (c) minority. None of these fire on the (a)
+      path, because the drain never sees the edge.**
+      **★★★ RUN 9, 2026-08-13 — THE CHAIN IS COMPLETE, END TO END, AND THE
+      ONE LOSSY LINK IS NAMED. `SW_NODEREC(n)` in hwshim.c is
+      `SW_STRUCT + 16 + n*160` off the ADDRESS of the pointer global, not
+      its value — so node 0's record is the STATIC live 0x7b959c (prev
+      bitmap +0x0c, cur bitmap +0x14), which no watcher had ever sampled.
+      The disassembly says the same thing independently (the drain reads
+      `0x7a958c + board*160 + 36`). Adding it to ringwatch splits the last
+      ambiguity. 20 presses, 300 ms:**
+      ```
+      shim wire (devbuf 0x852100) ......... 20/20   +87..+103 ms
+      game decode (NodeRec.cur 0x7b95b1) .. 12/20   <-- THE ONLY LOSS
+      recorder (entry +0x16) .............. 12/12   same sample as cur
+      value word 0x7c908c ................. 10/12
+      ```
+      **Decoded-but-not-recorded is ZERO: every closure the game decodes,
+      it records, in the same 5 ms sample. So the recorder, the drain, the
+      post, the ring and the recheck are all exonerated — the entire
+      remaining defect is that 8 of 20 closures NEVER REACH NodeRec.cur.**
+      **AND THE SHIM HELD THE BIT DOWN THE WHOLE TIME, from its own log:
+      `[cabchg] ff0f0f… → ff0b0f…` and back **303 ms** later; the next
+      press `ff0d0f…` for **302 ms**. Run 8b's `[swpend]` says the same
+      thing per press (`sent=0` for the full closure on presses the game
+      never saw). The cabinet word is rebuilt on the merge generation
+      (`sw_shm_gen()` = `gen + scr_gen`, so a script press bumps it
+      immediately) and the SPI stub copies `bits` into the rx buffer of
+      every message on EVERY `SPI_IOC_MESSAGE` — paced to ~640 us, i.e.
+      ~470 transfers during a 300 ms closure. The game had the made bit
+      handed to it hundreds of times and took it 12/20.**
+      **SO IT IS NOT A SAMPLING RACE ON EITHER SIDE, and the latch cannot
+      help: `sw_owed[]` extends a closure the game already fails to read
+      when it is continuously present. (Worth keeping in view anyway: the
+      latch counts down inside `sw_scan_bytes`, i.e. per REBUILD, and for
+      the cabinet a rebuild fires on the release itself — so an owed
+      cabinet closure can be spent microseconds after release, before the
+      game looks. That is a second, real defect on the same path; the tap
+      path already learned this lesson and applies at the handover.)**
+      **RUN 9 FOLLOW-UP ANALYSIS (free, on the captured log):**
+      **(a) The node record is WHOLLY untouched on a dead press — neither
+      `cur` (0x7b95b1) nor `prev` (0x7b95a9) moves. 24 changes each over
+      the run = exactly 12 presses × 2 edges. So the decode does not run
+      and then decline to apply; it does not run.**
+      **(b) The pass counter is 60.0/s across EVERY deaf window (heartbeat
+      `pass=`, 16 beats, no deviation). Fourth independent confirmation —
+      the scheduler is not the problem and never was.**
+      **(c) NOT PERIODIC. Run 9's deaf windows (8–11 s, 24–30 s, 44–49 s)
+      look like a ~16–19 s cycle, and that is a coincidence of a 20-press
+      sample: runs 8 and 8b give start-to-start spacings of 6–24 s with no
+      common period. Written down because the near-match to the 5.2 s /
+      16.5 s yield-loop constants in 0x255448 is exactly the kind of
+      false lead that costs a pass. A ~16 s heartbeat word does NOT exist
+      in .data either — a scan of run 6's full 12.6 MB window for
+      addresses changing regularly every 8–28 s returns one weak
+      candidate (0x9b7bd4, cv 0.45, gaps 4.6–35.4 s), i.e. nothing.**
+      **(d) A READING TO AVOID, recorded because I nearly published it:
+      comparing "which regions were active" in deaf vs live windows shows
+      pane/ev/entries/noderec at zero during deaf windows and busy during
+      live ones — which looks like a whole-engine freeze and is CIRCULAR.
+      Those regions are driven BY the press; in a window where no press
+      registered, of course they are quiet. The only non-circular reading
+      is (b): the 60 Hz machinery keeps running, and the guest's overall
+      change rate never drops (245–505 words/s throughout).**
+      **★★★ AND THEN THE ACTUAL ROOT CAUSE, from the run-9 log plus a desk
+      read of hwshim.c — no further run needed. THE LATCH NEVER ARMS FOR
+      CABINET SWITCHES, and the reason is one line.**
+      **(1) Evidence first: ZERO `[swlatch]` lines in a 20-press run. The
+      latch (979b940) did not fire once. Every other gate is static too —
+      `rgate`, `mgate` and the category `mask` recorded 0 changes across
+      90 s, and entry+0x1a (the recorder's per-switch swallow gate) never
+      moves. Only +0x04, +0x16 and +0x18 move, and devbuf moves exactly
+      40 times = 20 presses × 2 edges.**
+      **(2) The mechanism. In `sw_scan_bytes()` the `else if (held)` arm
+      sets `sw_served[id] = 1` — "this switch has been on the wire as
+      made". For a NODE switch that is sound, because `sw_scan_bytes(nid)`
+      is called when the GAME asks for that node, so on-the-wire ≈
+      consumed. For the CABINET it is false: `sw_scan_bytes(0, bits)` is
+      called on the shim's own REBUILD, which fires within ~640 us of the
+      press (the rebuild condition includes `sw_shm_gen()` = `gen +
+      scr_gen`, so a script press bumps it at once). So `sw_served[26]` is
+      set microseconds after the press, and at release `sw_shm_merge()`'s
+      `else if (!sw_served[n] && sw_latch_on())` is false and NOTHING IS
+      EVER OWED. The latch is dead code on this path.**
+      **(3) A second defect behind it, so the obvious one-line fix is not
+      enough: `sw_owed[]` is also DECREMENTED inside `sw_scan_bytes`, i.e.
+      per rebuild — and a cabinet rebuild fires on the release itself. Arm
+      the latch without moving the count and it would be spent
+      microseconds later, still before the game looks. The tap path
+      already learned this and applies its count where the word is handed
+      over ("the only place a press can be counted in transfers").**
+      **(4) BUT THE HANDOVER IS NOT THE RIGHT CLOCK EITHER, and this is
+      the part that is genuinely new. The game takes the word on every
+      `SPI_IOC_MESSAGE` (~1560/s, paced 640 us) but only FORWARDS it to
+      the recorder every ~500 ms: hwshim.c's own header says the reader
+      thread copies rx into 0x842108 and `0x5a9df8` then hands those 8
+      bytes to `0x1e78f4(0, buf)` — the same distributor the node bus
+      feeds. Counting transfers would spend the latch in under a
+      millisecond. THE CABINET NEEDS A WALL-CLOCK HOLD.**
+      **(5) THE ~500 ms IS MEASURED, not guessed. 300 ms presses are
+      captured 12/20 = 60%, and for a fixed-period poll of period T with
+      uniform phase the capture rate is 300/T, giving T ≈ 500 ms. The
+      latencies from the device word to the node record on the 12 captured
+      presses are 0, 4, 4, 4, 10, 11, 51, 84, 127, 183, 240, 269 ms — a
+      spread across 0..~270 with no clustering at a fixed offset, which is
+      the signature of sampling a slow poll, not of a gate. It also
+      retro-explains every historical observation at once: 2000 ms always
+      registers (2000 > 500), 250–500 ms "falls between polls" (item 43's
+      turtles pass said exactly this on 2026-08-11), and the 72/72 ladder
+      passed because it measured a word the poll is not on.**
+      **THE FIX, now fully specified: defer the cabinet RELEASE edge in
+      `bits` by at least one poll period (~600 ms), keyed on wall clock,
+      independent of both the rebuild count and the transfer count. That
+      is this item's long-standing release-defer fallback, and it is now
+      the fix with a measured constant behind it. Acceptance unchanged:
+      an ordinary sub-second press acts EVERY time over N≥10.**
+      **STILL OPEN, and worth one desk read before coding: whether the
+      ~500 ms cabinet service interval is the game's own design or
+      something the rig imposes (node 0 is serviced out of the same
+      `nb_next_node()` schedule the shim owns). If the rig is what makes
+      it 500 ms, fixing the schedule beats papering over it with a hold.**
+      **★★★ RUN 10, 2026-08-13 — THE SPI REPLY IS EXONERATED BY
+      DISASSEMBLY, AND THE GATE IS NAMED. Desk read (agent; report at
+      `C:\tmp\item17\run10\spi_decode_report.txt`; it died mid-write on an
+      API error but the report is complete, and its ELF addresses check out
+      against run 9's live measurements — its LIVE column does not, it
+      added 0x1000 instead of 0x10000 for the 0x7a9xxx family, so trust
+      the ELF values only).**
+      **(i) MY PROTOCOL-FIDELITY HYPOTHESIS IS DEAD, with proof. The
+      cabinet SPI path is a dumb pipe: the reader stores all 8 reply bytes
+      raw and unconditionally (0x5a9c6c), no reply byte is metadata, and
+      `0x1e78f4` writes NodeRec.cur with an UNCONDITIONAL `strb` at
+      0x1e7988 after snapshotting prev at 0x1e7974. There is no change
+      flag, no sequence compare, no checksum and no state machine. The
+      rol8-XOR scramble from the earlier pass is real but lives on the
+      NODE BUS (0x59ef60) and never touches the cabinet. So our constant
+      bytes cannot be the intermittency.**
+      **(ii) THE ONE GATE THAT EXISTS: the cabinet IS node 0 (0x1d6da0),
+      and `0x1d6d58` — the only path from the SPI word to NodeRec.cur —
+      has NO gate at all. But the runtime sweep 0x1d7d88 opens with a
+      node-bus query at 0x59ef30 and RETURNS IMMEDIATELY if it comes back
+      negative (0x1d7da0), and node 0 is the sweep's TERMINATOR: it is
+      serviced once per sweep and only when the query finally yields 0.
+      So the cabinet is read only as a side effect of a successful
+      node-bus poll. Other callers exist and matter: `delay(ms)`
+      (0x1d6f64) polls the cabinet every 16 ms while it sleeps, which is
+      probably why some phases feel fine.**
+      **(iii) TESTED IT AND THE OBVIOUS VERSION IS WRONG. I instrumented
+      `nb_next_node()` (PAD_NB_SWEEP=1, committed) expecting to show that
+      emitting the whole node list before the terminating zero divides the
+      cabinet poll rate by the board count. The run produced ZERO
+      `[nbsweep]` lines — and zero `[nbsched]` lines, which pre-date this
+      pass — so that branch is never reached and the schedule is not what
+      paces the cabinet here. Most likely `nb_nnodes == 0`, taking the
+      early return, in which case every poll already answers 0 and the
+      cabinet is serviced every sweep. EITHER WAY the "our node schedule
+      starves node 0" theory is dead, and so is the plan to fix the
+      schedule. The `[nbsched]` 1024-poll summary also never printed, so
+      the game issued fewer than 1024 `00` polls in ~2 minutes — under
+      ~9 Hz — which is itself consistent with a slow sweep.**
+      **RUN 11, THE INSTRUMENT THAT SETTLES IT, and it is cheap: put a
+      monotonic COUNTER in an unused cabinet reply byte (byte 7 — which
+      the report says we should be sending as 0xff anyway, see (iv)).
+      NodeRec.cur byte 7 then records the counter value AT EVERY POLL, so
+      ringwatch's log of that one byte gives both the poll TIMES and, from
+      the deltas, how many SPI transfers passed between polls. That
+      measures the cabinet service rate directly instead of inferring it
+      from capture rates, and it needs no guest instrumentation.**
+      **(iv) A REAL BUG FOUND IN PASSING, on correctness not
+      intermittency: the bus is ACTIVE LOW and we send bytes 3–7 as 0x00,
+      which asserts FORTY permanently-closed switches; the high nibbles of
+      bytes 1 and 2 assert eight more. Idle should be 0xff. Byte 2 bits
+      2–3 are a quadrature encoder (0x5a9ac0) and must be held at a valid
+      Gray-code pair rather than flipped blindly. Worth fixing on its own
+      merits, and it must NOT be bundled with the latency fix — separate
+      change, separate verification.**
+      **★★★ RUN 11, 2026-08-13 — THE POLL RATE IS MEASURED, AND THE LOSS
+      RATE FALLS OUT OF IT TO WITHIN ONE PERCENT. New instrument
+      (`PAD_CAB_PROBE=1`, hwshim.c, default off): stamp a 16-bit transfer
+      counter into cabinet reply bytes 6 and 7. The game copies the reply
+      into NodeRec.cur unconditionally, so cur[6..7] records the counter
+      AS OF EACH POLL — every change is one poll, its timestamp is the
+      poll time, the delta is the transfers in between. Safe because bits
+      48–63 carry no node-0 switch (our builder never sets a bit above 23;
+      the idle word is `ff 0f 0f 00 00 00 00 00`) and the decoder drops
+      changed bits whose switch id is 0.**
+      **THE CABINET IS NOT POLLED SLOWLY. IT IS POLLED IN BURSTS:**
+      ```
+      median gap   9-10 ms   (~100 Hz while it is polling)
+      p90 gap      11-12 ms
+      MAX gap      ~690 ms   and there are several per 5 s window
+      ```
+      **In 4.6 s of capture: ~150 polls at ~9 ms (1.35 s of it) plus five
+      gaps of 683–690 ms (3.45 s of it). So the duty cycle is roughly
+      0.3 s of polling then a ~0.69 s blind gap, on a ~1 s cycle.**
+      **THE ARITHMETIC CLOSES THE CASE. A 300 ms press is lost only if it
+      falls ENTIRELY inside a blind gap, i.e. if it starts in the first
+      (690 − 300) = 390 ms of a 1 s cycle → 39% loss, 61% capture.
+      MEASURED CAPTURE WAS 12/20 = 60%. Nothing else needs to be true.**
+      **AND IT IS NOT MENU-SPECIFIC: attract and the service menu give the
+      same numbers (32.4/s vs 31.2/s, median 9 vs 10 ms, max 690 vs
+      693 ms). So the flipper complaints in attract and item 46's turtles
+      Action Button are very probably THIS, not three separate faults.**
+      **WHAT IS LEFT IS ONE QUESTION: what blocks the cabinet poll for
+      ~690 ms at a time? The sweep reaches node 0 only after a node-bus
+      serial round trip (0x59ef30 → 0x59ebac → 0x59d824: write@plt,
+      read@plt, tcflush on the fd at 0x70a474), so the prime suspect is
+      OUR emulated serial read blocking or timing out. Instrument the
+      shim's node-bus read path with entry/exit timestamps and find the
+      ~690 ms. If it is ours, this is a real fix and not a hold.**
+      **Instrument note: ringwatch AUTOSUPPRESSED the probe bytes after
+      150 changes and cost run 11 forty of its forty-five seconds — the
+      watcher silenced the very thing being measured. Fixed on the branch
+      with a NEVER_SUPPRESS list; the numbers above come from the first
+      ~4.7 s, which is why the spans are short.**
+      **RUN 10's second question, kept because the deferral
+      does not answer it:
+      what does the game require of the cabinet reply before it decodes
+      it? Byte 0 of our word is a constant `ff` and bytes 3–7 constant
+      zero; if the real board carries a change flag, a sequence/frame
+      counter or a checksum there, a constant makes the game skip the
+      decode, and 60/40 is what "skip unless something else says so"
+      looks like. Read the game's SPI reply consumer (the 0x5a9b60 loop
+      and whatever it feeds) and compare against what `sw_prime()` and
+      the `[cabspi]` copy actually put in the buffer. Same shape as item
+      43: one global answer standing in for a per-frame protocol.**
+      **New tools on branch: `ringwatch.py` (the run-8 instrument, and the
+      first watcher that can see the event pool at all), queuewatch.py +
+      threadwatch2.py. gatewatch.py committed. Logs preserved
+      /var/tmp/*_run7*_preserved.log + C:\tmp\item17\run7\ (gate report,
+      gatewatch/queuewatch/threadwatch2/console); run 8 at
+      /var/tmp/*_run8*_preserved.log + C:\tmp\item17\run8\ (ringwatch
+      run8 + run8b, manifests, console, drain_ring_report.txt, nav shots).
+      Shim mitigation (release-defer) is no longer the fallback — it is
+      the fix, now that the cabinet handover is the measured target.
+      Acceptance unchanged: ordinary sub-second press acts EVERY time
+      over N≥10, oracle = MEMORY (value word live 0x7c908c), display as
+      the human check.**
+      **★★★ RUNS 12–21, 2026-08-13 — ROOT CAUSE FOUND, FIXED, ACCEPTANCE
+      20/20. The ~690 ms blind windows were the game RE-RUNNING ITS AUX
+      DEVICE INIT every ~924 ms, forever, on the bus service thread, and
+      the fix is three crafted replies in the shim's device models
+      (PAD_I2C_READY=0 restores all three).**
+      **The full causal chain, each link measured:**
+      **(1) Run 12 (PAD_NB_TRACE=2): 163 of 163 blind windows bracketed
+      by the same broadcasts — `0a 0a 070101 080101` … 681±3 ms …
+      `0b0106`, period ~924 ms. Node-2 silence was NOT it: every
+      [nbsilent] train sits in the first 20 s (bring-up + grading), and
+      the run-12 join's 16 "matches" were mod-2^16 counter collisions.**
+      **(2) Runs 13–14 (PAD_OPEN_LOG + PAD_I2C_LOG, both new t=-stamped):
+      100% of steady-state /dev/i2c-1 traffic sits INSIDE the windows —
+      exactly 250 poll-pairs per window of register 0x24 from i2c slaves
+      0x0a and 0x2a. The window = 250 × (usleep(1000) + open + paced
+      transfers + close) ≈ 681 ms.**
+      **(3) The game side, disassembled: 0x1fa9c8 pulses the reset lines
+      (the 07/08 broadcasts ride along) then polls reg 0x24 of both MCUs
+      up to 250 times for the value 0x0111 (#250 and #0x111 are literals
+      in the loop). Success: usleep(750000) once + 0x1fa8c0 programs a
+      register table — WHICH INCLUDES reg 0x24 itself (run value 0x0020
+      into 0x0a, 0x0022 into 0x2a). Exhaustion: plain return, and the
+      supervisor re-runs it next cycle.**
+      **(4) THE SUPERVISOR is the runtime sweep itself: 0x1d7d88's
+      terminator path. Every 30 passes (~270 ms of service — the observed
+      busy window) it sends the unaddressed `0a 00` status query
+      (0x59ed10, 2-byte reply) and re-runs the ENTIRE init whenever
+      reply[0] bit 1 is clear — or bit 0, when the mode flag [0x7a919c]
+      is set (1d7e8c). A zero-filled reply therefore meant "aux never
+      initialized", once a second, for the life of every run this rig
+      ever made. (The other gate, bus-error word 0x841e2c & 0x1f10, was
+      sampled live at 200 Hz: always 0 — not the driver.)**
+      **(5) THE FIX, all in hwshim.c as device modelling, no workarounds:
+      (a) i2c MCUs 0x0a/0x2a power up presenting 0x0111 in reg 0x24
+      (i2c_seed_ready), re-armed when the `08 01 01` reset broadcast is
+      seen on the tty (i2c_ready_arm); config writes stick verbatim.
+      (b) the `0a 00` reply carries bits 0+1 set (present + initialized).
+      Three WRONG models were run and killed on hardware, kept in the
+      hwshim comment because they look right: sticky 0x0111 (run 16 —
+      turns the health check into a 1 Hz re-init: 0x0111 is a TRANSIENT
+      the health check at 0x1fb38c treats as "device rebooted"),
+      read-clear + write-transform (runs 17/18 — the config write to
+      0x24 re-armed 0x0111 and the loop survived), bit 1 alone (run 20 —
+      1d7e8c grades bit 0 first).**
+      **(6) RUN 21, THE VERDICT: `0b` appears ONCE in the whole run (the
+      boot init) and never again. Cabinet forward rate 31/s → 115.8/s;
+      gap census over 45 s of attract: median 10 ms, p99 15 ms, MAX
+      17 ms, ZERO gaps ≥ 100 ms (run 12 had 64 gaps of ~690 ms in 60 s).**
+      **(7) ACCEPTANCE, run 21, Quick Adjustments via 3× Select-2000:
+      twenty 300 ms presses alternating Minus(27)/Plus(26) at ~1.5 s
+      spacing — 20/20 decoded into NodeRec.cur (40 edges, 0f→0b / 0f→0d),
+      20/20 value-word changes at the specified oracle 0x7c908c, one per
+      press, none missed, press-to-value latency 8 ms. Run 9's number at
+      the decode layer was 12/20.**
+      **A regex trap that cost two runs, recorded so it is not paid
+      again: the shim's [i2c] READ lines carry TWO spaces ("READ  @") and
+      WRITE lines one; a join regex written for one space silently
+      dropped every READ, which is what made runs 14–18's cycles look
+      write-only and sent two fixes at the wrong layer.**
+      **Instrument debt kept deliberately: PAD_CAB_PROBE, PAD_NB_TRACE,
+      PAD_OPEN_LOG (now with t=/dur=), PAD_I2C_LOG (env-tunable budget,
+      t=-stamped) — all default-off. What the two MCUs actually ARE
+      (audio amps on the backbox board is the best guess: the init sits
+      beside the ALSA mixer bring-up at 0x1faad4) never mattered to the
+      fix and is left open.**
+      **Item 46 (turtles Action Button) is very probably this same fault
+      — verify on the turtles title before closing it. The run-10
+      idle-reply-levels question (bytes 3–7 as 0x00 asserting forty
+      closed switches, quadrature pair in byte 2) stays open as its own
+      filed item, deliberately unbundled.**
+      **Logs: /var/tmp/gzwatch_run1[2-9]*_preserved.log,
+      gzwatch_run2[01]*_preserved.log, ringwatch_run21_*.log, and
+      C:\tmp\item17\run21\ (attract census, train capture, full shim
+      log).**
+      **★★★ DAVID AGAIN, 2026-08-12, ON A BUILD THAT ALREADY HAS THE LATCH
+      (`979b940` is on main), so `sw_owed[]` did NOT cure the felt case and the
+      half that is left is LATENCY, not delivery: "switch input by keyboard or
+      interactive switch matrix seems to take a long time to register… the
+      menus are not responsive enough from switch inputs (even the service
+      screens using left and right flippers as input are noticeably clunky)."**
+      **(i) It is not the keyboard path, and that is free to state.** The
+      MATRIX is clunky too, and the three writers cost completely different
+      amounts host-side — the game window's `binds[]` (no host cost), the
+      playfield mouse through `SwitchDriver` (a ~80 ms `wsl.exe` spawn per
+      action, item 24), and the playfield keyboard through item 39's
+      `swkeys.py` pipe (no spawn). All three feel the same, so the fault is
+      DOWNSTREAM of the merge — where the measured mechanism already is.
+      **(ii) DAVID'S PROPOSED CURE IS ALREADY RULED OUT WITH NUMBERS: do not
+      spend a pass on it.** "Interpreted with longer samples" is the
+      minimum-closure-width theory, and there is no minimum — 72/72 registered
+      down to 10 ms once the game looked. A longer sample buys DELIVERY odds,
+      and delivery is the half already fixed. It cannot buy back LATENCY, which
+      is what "takes a long time to register" is, and which this item's own
+      limit (c) predicted in writing.
+      **(iii) ★★ THE SERVICE-MENU CASE IS ALREADY MEASURED and was never
+      written down here — it came out of item 43's turtles passes, 2026-08-11:
+      `swpoke.py 25 2000`, a TWO-SECOND hold, registers every time, while
+      250-500 ms presses fall between polls and read as nothing.** That is
+      where "12 presses moved 3 rows" came from, and it was measured with the
+      latch in the build. **That contradiction is the most valuable thing in
+      this update:** the latch owes every closure a scan and the ladder read
+      72/72, yet a 400 ms service-menu press still does nothing.
+      **THE HYPOTHESIS THAT WOULD RESOLVE IT — a hypothesis, not a finding:
+      this item's oracle proves DELIVERY, not CONSUMPTION.** `entry[+24]` is
+      the scan drain's level. A menu that samples that level on its OWN UI
+      period, or wants it made across two consecutive looks, never sees a
+      closure exactly ONE scan wide — which is precisely what the latch
+      produces. Cheap test before building anything: ladder a service-menu
+      switch with `PAD_SW_MINSCANS` at 1, 2 and 4 and see whether the MENU
+      moves where `entry[+24]` already moved.
+      **★★ AND ITEM 46 IS THE SAME QUESTION ON A DIFFERENT SWITCH — filed the
+      same day, independently, and it reached the same fork ("reached and
+      ignored" vs "never arrived").** Read it before starting here. It carries
+      the sharpest form of the contradiction: turtles' Action Button is switch
+      **34 on node 1, the EXACT switch this item laddered 72/72 down to 10 ms**,
+      the latch is default-ON and on main, and the button is still finicky in
+      attract and (apparently) dead at character select. Same latch, same
+      switch, ladder passes, game behaviour fails. **Neither item should buy the
+      during-play per-node scan rate separately** — it has never been measured
+      on any title, item 26 wants it too, and one run pays for three items.
+      **AND THE REPRO JUST GOT CHEAP, which is the best news in this update.**
+      This item had budgeted a run to reach BATTLE SELECT, which the rig has
+      never reached. The service screens are the same symptom by David's own
+      report and are reachable from boot with no game played — door open
+      (`swhold.py 33 0`), LONG Select, version splash, LONG Select; item 43 did
+      it repeatedly. Measure there first and keep BATTLE SELECT for confirming.
+      **★★ MEASURED AND FIXED 2026-08-06. 35 of 72 closures reached the game
+      before; 72 of 72 after — 4/4 at every duration on both nodes, including
+      10 ms.** Long form: `spike2_pc_emulation_handoff.md`, REMAINING item 17.
+      **The item's own suspicion was right in effect and wrong in location, and
+      the location decides the fix. There is NO minimum closure width and NO
+      debounce problem — there is a SAMPLING RATE, and it is the game's.**
+      `swladder.py` poked switch 34 (node 1) and 46 (node 8) at
+      10/20/30/50/80/120/200/400/900 ms, four rounds each, read off the game's
+      own `entry[+24]` via `PAD_SW_PEND`. **Every failure had ZERO samples
+      inside it** — the game had never looked at that node — and **every closure
+      it did look at registered, down to 10 ms, off ONE scan with the switch
+      made.** `0x11` is REQUEST-driven: the game asks per node when its service
+      loop gets round to it, so the rate is entirely the game's, and the gap
+      between two scans of one node **ran to 670 ms in attract**. Holding a key
+      longer only buys more chances to be looked at.
+      **Fixed (`sw_owed[]` in `hwshim.c`): a closure is OWED a scan.** Merged
+      state going 1→0 having never been on the wire as made defers the release
+      until the next scan of that switch's own node. One scan is enough —
+      measured, not assumed. `PAD_SW_MINSCANS` raises it, `PAD_SW_LATCH=0` A/Bs
+      it, `[swlatch]` prints the closure width and the wait each time it saves a
+      press (**42 saves in the verification run**). One change fixes the
+      keyboard and the scripts, because both writers land in the same merge.
+      **★★ THE BLOCKING QUESTION IS ANSWERED. DAVID, 2026-08-06: "the left and
+      right flipper buttons when needed to navigate the game options does not
+      seem to react very well. it's hard to determine if i need to press it over
+      and over again or hold it (for example: when selecting a battle). are the
+      flipper keys working? (left and right arrows)"** This item's own Resume
+      line asked which key and which screen before any of the repeat half was
+      written. **The key: LEFT/RIGHT FLIPPER — 60 and 59 — bound to the left and
+      right arrows in padglhost's `binds[]`. The screen: in-game option
+      navigation, worked example BATTLE SELECT.**
+      **The symptom is not "it does nothing", it is "the rule is not legible" —
+      and this rig has ALREADY MEASURED exactly that, so start there rather than
+      from scratch.** `padsw.h`: on the Main Menu a hold of 120 ms and 200 ms
+      moved the cursor 0 rows, 250 ms moved 1 or 2, and 300 ms moved 3, because
+      what decides it is how many SPI transfers land inside the hold. A rule
+      that changes with the transfer phase is a rule a human cannot learn, which
+      is precisely "hard to determine if I press it over and over or hold it".
+      **NOT ESTABLISHED, and it is David's actual question: whether the flipper
+      keys work AT ALL on that screen.** `swladder.py` laddered switch 34
+      (node 1) and 46 (node 8) — **not 59 or 60** — so the flippers have never
+      been through the instrument, and the 72/72 result does not cover them.
+      Ladder 59 and 60 first; a flipper is on a different node from either
+      switch already tested, and the sampling gap is per node.
+      **New cost this exposes: BATTLE SELECT has never been reached by this
+      rig**, the way `Diagnostics → Coil Test` has not (item 3). It needs a game
+      played into a mode, not attract, so budget the run for that and say how
+      you got there.
+      **WHAT IS NOT DONE, and it is why the box is open:**
+      **(a) nobody has played it.** This is the script path; the keyboard shares
+      the merge so the same latch applies, but David's hands are the final
+      oracle and this fault is defined by how it feels. **(b) The "repeat" half
+      is untouched, and its premise is now in doubt** — see the ruled-out list.
+      **(c) The latch makes a press land LATE**, by up to the scan gap, which is
+      strictly better than losing it but is a latency the real machine does not
+      have. `nb_next_node()` already emits the whole node list per cycle, so the
+      shim is not the limit; the service loop is the game's.
+      **RULED OUT, with numbers, so nobody pays twice:**
+      • **the X drain.** `win_pump()` drains from the idle poll as well as per
+      frame (200 us for 16 empty polls then 2 ms) and the frame rate is 50-60
+      fps over 301 samples — ~2-20 ms granularity, which cannot swallow a 60 ms
+      keystroke. The SUSPECTED mechanism this item was filed with is dead.
+      • **the auto-repeat peek eating the game's repeat.** It keeps `key_down`
+      at 1 for the whole hold, and the GAME already auto-repeats a held cabinet
+      switch (`padsw.h`, measured on the Main Menu; the whole `tap_reads` region
+      exists for it). So "does not repeat" is NOT the peek, and the repeat half
+      must not be built on that guess. **Ask David which key and which screen
+      before writing any of it.**
+      • **a flat inter-poke gap.** It phase-locks the ladder to the sampler:
+      the first run had 400 ms missing 4/4 on node 8 while 10 ms landed 4/4 on
+      node 1. `swladder.py` jitters now.
+      **Two instrument faults, both of which cost a reading:** `PAD_SW_PEND`
+      claimed 1 ms sampling and was on the SPI loop's ~20 ms coarse tick (fixed,
+      now per transfer); and `swwidth.py` shipped with **the oracle inverted** —
+      these levels are ACTIVE LOW, MADE is 0 — plus a 250 ms window that closed
+      *before* the latched answer arrived, so the first read of the verification
+      run wrongly said the fix had not worked. Window now runs to the next press.
+      **New tools:** `swladder.py`, `swwidth.py`, and `[key]` in padglhost (the
+      X event time per key edge — the third of this item's three timestamps, and
+      the only one that knows how long a key was really held; the three clocks
+      are never aligned, only differenced within themselves).
+      **Committed:** `979b940` (measurement + latch + instruments).
+      **Resume — and start in a SERVICE SCREEN, not a battle, per the 2026-08-12
+      update at the top:** ladder switches 59 and 60 with `swladder.py` (never
+      measured, and both of David's reports are about them) with the service
+      menu on screen, then answer the delivery-vs-consumption question — does
+      the MENU move where `entry[+24]` moved, and does `PAD_SW_MINSCANS` 2 or 4
+      change that. Measure the per-node scan gap in a service screen too: 670 ms
+      is an ATTRACT number and nothing has measured a menu. Then play into a
+      battle to confirm, with `[key]` and `[sw]` both on, diffing each key
+      edge's X-time width against the closure the guest was handed. **Do not ask
+      David which key and which screen; he answered on 2026-08-06 and again on
+      2026-08-12, and both answers are at the top of this item.**
+      **The acceptance for the repeat half needs writing before it is built, and
+      the bar David set is LEGIBILITY, not just delivery:** one press moves one
+      row, and a hold repeats at a rate a human can predict — not 0 rows at
+      200 ms and 3 rows at 300 ms. State the rule the fix gives and show it
+      holds at several hold lengths.
+      — S1 because unreliable input is not a defect
+      you play around, it is the thing you play WITH.
+      **Observed 2026-08-06:** a normal-length keystroke sometimes does not
+      register; the key has to be held noticeably longer than typing. Wanted:
+      immediate like typing, plus hold and repeat.
+      **NOT a regression of item 7, and not a duplicate of it.** Item 7 fixed
+      WHO writes the switch array (three regions, one writer each, last edge
+      wins); this is WHEN the game looks at it.
+      **Acceptance:** a tap of ordinary keystroke length registers as a switch
+      close in the guest every time (state the length you tested, do not assume);
+      a held flipper key stays closed as long as it is held; a held menu/service
+      key repeats. Oracle is the guest's own `[sw]` lines against the X event
+      times, plus David's hands, since this fault is defined by how it feels.
+      **The script half of that is now met: 10 ms, 72/72.**
+      **★ AND THAT ORACLE IS NOT SUFFICIENT ON ITS OWN — added 2026-08-12.** A
+      closure that reaches `entry[+24]` and does not move the cursor is still
+      exactly the fault David is reporting, so for the menu half the oracle is
+      **the cursor moving on the GAME's own display**, timed against the press.
+      State the press length and the delay, and do not report the wire number
+      alone as a pass.
 
 - [x] **43. In the turtles service menus the picture went HALF HEIGHT and the
       scene text stopped drawing — and the fault was OURS, in the GL bridge.**

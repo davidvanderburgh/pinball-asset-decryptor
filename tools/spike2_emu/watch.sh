@@ -1317,7 +1317,12 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         # the line because both put the word at the END of it.
         /\[padglhost\] .*headless/ { print "[event] " $0; fflush(); next }
         /\[vid\]|\[card\]/       { print "[event] " $0; fflush(); next }
-        /\[sw\] |\[tap\] |\[cabchg\]/ { print "[event] " $0; fflush(); next }
+        # [swpend]/[swlatch] were silently dropped here until 2026-08-13 -
+        # run 6 exported PAD_SW_PEND and got a console with zero swpend
+        # lines, which read as "instrument dead" until this filter was
+        # checked. Forward them like [sw]; they only exist when their env
+        # vars are set, so a normal run pays nothing.
+        /\[sw\] |\[tap\] |\[cabchg\]|\[swpend\] |\[swlatch\] / { print "[event] " $0; fflush(); next }
         # THE CRASH SIGNATURE needs its own pattern: the shim prints
         # "[segv] pc=..." in LOWER CASE and the /SEGV/ rule below is
         # case-sensitive, so the one line naming where a crash happened was

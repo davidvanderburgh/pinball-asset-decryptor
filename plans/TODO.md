@@ -518,20 +518,96 @@ These have each been violated at least once and each cost a run or a window:
       /proc poller — needs root for ptrace scope), `menuprobe.py` (cyan-mask
       screen oracle, positive example now exists: run5 `plus800.png`-era "No"
       vs `run5_afterplus.png` "Yes").
-      **Resume — the pump cadence is the one number left:** watch the
-      current-event pointer 0x7b7e84 (and freelist 0x7b7e80+0xd4) at ~100 Hz
-      through /proc during a swpoke train — every change is a dispatched
-      event, so the change log IS the pump cadence, and its stall pattern
-      names the root defect (what blocks the coroutine scheduler for seconds
-      in menus when real hardware runs it at frame rate). Then: (a) find the
-      blocker (suspect the main tick ~0x4ec850 waits on something the rig
-      serves slowly); (b) A/B a shim-side mitigation — defer cabinet RELEASE
-      edges until the make's event has had a dispatch window (sw_owed-style,
-      node 0) — which trades latency for reliability and is honest about it;
-      (c) battle select + turtles (item 46 joins here: same event path, its
-      'occasionally in attract' is this same lottery). The MENU-half
-      acceptance: an ordinary sub-second press acts EVERY time, stated over
-      N≥10 presses, oracle the game's display.
+      **★★★ RUN 6, 2026-08-12 late night — THE CADENCE IS MEASURED, THE
+      SCHEDULER IS EXONERATED, AND EVERY RUN-5 /proc CLAIM IS RETRACTED.
+      Method change that did it: stop dereferencing desk-read addresses and
+      diff the ENTIRE 12.6MB rw window around timestamped presses
+      (`bigdiff.py`, the item-43 causal method applied to time). The 12.6MB
+      window preads in 9ms; a menu screen idles at ~120 changed words/s, so
+      press-correlated words stand out like flares.**
+      **(i) RETRACTION: the desk-read pass's data addresses were one nibble
+      off (0x7b7e80 → the LIVE scheduler block is at 0x7C7E80), so run 5's
+      "no tracker movement" and "mask 0x7aba5a reads 0 → repeat never arms"
+      were reads of the wrong bytes. Every ELF-text address (functions)
+      survives; every .data address from that pass is dead until live-tested.
+      A region watcher on ALL the old addresses sat byte-stable through a
+      consumed Select that switched the whole screen — that is the proof.**
+      **(ii) Delivery, exonerated a third way: every press lands in the
+      door-switch LEVEL WORD 0x852108 (active-low, bit = id−17: Select=8,
+      Plus=9, Minus=10) 60–145 ms after the wire, every time, including
+      every press the menu ignored.**
+      **(iii) The scheduler thread NEVER stalls. Pass counter = scheduler
+      block+0x1c = 0x7c7e9c, and it ran at exactly 60.0 Hz through every
+      deaf period (measured across four windows incl. a 29 s one). The
+      four-agent ELF read (workflow, this pass) mapped the engine: one
+      scheduler THREAD (loop 0x254ca8) waits on a 60 Hz SIGEV_THREAD POSIX
+      timer (notify 0x3b92bc, period 16,666,667 ns), each pass runs the
+      tick body 0x4ec828 (pump 0x2a3744 at +0x88, drain 0x1e7540) then
+      walks the event ring swapcontext-ing into due events; missed ticks
+      are latched away, never replayed. Timer-starvation was the leading
+      theory and it is DEAD — the beat is perfect.**
+      **(iv) What actually happens — measured end to end: a press becomes
+      an event and the event's DISPATCH is bimodal. Awake: dispatch lands
+      60–230 ms after the level write and EVERY press consumes — a 12-press
+      300 ms train consumed 6/6 during awake stretches, and a 10 s hold
+      auto-repeated at full speed (first repeat ~470 ms → coroutine tick ≈
+      60 Hz; the "does not repeat" half is the SAME defect, not a mask).
+      Deaf: dispatch arrives 1.3–5.3 s late, the press fn's recheck
+      (0x23b4d0) finds the button released, and the event dies with a
+      visible cancel signature (edit-pane busy words 0x7c90b4/0x7c9174
+      cycle, value 0x7c908c does NOT flip) — a 6-press burst at 1.2 s gaps
+      died 6/6 that way, each event dispatching around the NEXT press's
+      edge. Deaf and awake come in multi-second STRETCHES (observed 5.3 s
+      and 29 s deaf; awake runs of 4+ presses), which is why run 5 read a
+      width-independent "~40% lottery": the lottery is the duty cycle.**
+      **(v) The screen lags memory: two presses flipped the value in memory
+      within 150 ms and the display still showed the old value 2.9 s later.
+      menuprobe-negative ≠ not-consumed; memory is the oracle now.**
+      **(vi) Event objects live OUTSIDE .data — one 0x145000 malloc
+      (64×320 B events + 64×20 KB stacks) mmapped near 0xbaa00000, so
+      bigdiff's window sees the globals (ring head 0x7c7e80, current
+      0x7c7e84, LIFO freelist 0x7c7f54) but not the nodes; the LIFO head
+      restores itself across single-event transactions, so only bursts
+      visibly churn it.**
+      **THE ONE REMAINING QUESTION, sharp: what gates posting/dispatch for
+      seconds while passes run at 60 Hz? PRIME SUSPECT (fits everything):
+      the tick-body VETO — hook chain id 0x37/55 at entry to 0x4ec828
+      (dispatcher 0x4bb42c, table 0x7e4d48 — LIVE ADDRESS UNVERIFIED, mind
+      the nibble): a subscriber returning 0 skips pump AND drain for the
+      pass, so edges pile up in the recorder (events post only when the
+      veto lifts — matching the wake-drain cancel bursts), the pump's
+      timer slots freeze (matching the blink freezing), yet the ring
+      walker keeps running (matching pass counter 60 Hz). Alternative:
+      the drain posts events with a delay/flags variant during those
+      stretches (per-event +0x88 countdown, flags bit 0x40, half-rate
+      parity skip).**
+      **Instrument notes, so nobody re-pays:** `bigdiff.py` (NEW, the
+      workhorse), `pumpwatch.py` (NEW, region watcher — now pointed at live
+      addresses), doortrack.py pgrep defect fixed (explicit PID/game arg).
+      PAD_SW_PEND emitted NOTHING to the run-6 console (watch.sh forwards
+      [sw]/[tap]/[cabchg] — [swpend] may need its own forward or a raw-log
+      read; check before the next run needs it). bigdiff_run6.log has an
+      unexplained gap +143 s→+325 s (its own counters say it printed 8975
+      lines; 3556 on disk; 129 GB free) — nothing above rests on that
+      window, but find it before trusting a long bigdiff. threadwatch.py
+      (scratchpad) dies on transient-tid races — the guest churns
+      short-lived threads constantly (per-expiration SIGEV threads).
+      Logs preserved: /var/tmp/*_run6*_preserved.log + C:\tmp\item17\run6\.
+      **Resume — name the gate, then fix it: (a) live-verify the hook
+      table (find the real .data address by diffing a veto period: watch
+      what flips at deaf-stretch onset — bigdiff already recorded three
+      onsets; the boundary-correlator in scratchpad/correlate17.py is the
+      tool); (b) read the hook-0x37 subscriber list from the live process
+      and disassemble the one that vetoes — what condition is it waiting
+      on that the rig serves slowly?; (c) then the fix is either that
+      condition (rig-side) or a shim mitigation, and the shim release-defer
+      idea is WEAKENED but not dead (it cannot beat a 29 s veto, but it
+      converts every wake-drain cancel into a consume); (d) battle select +
+      turtles (item 46) after the gate is named — same engine, and the
+      finding reframes 46's 'finicky' as duty-cycle too. Acceptance
+      unchanged: an ordinary sub-second press acts EVERY time over N≥10,
+      but the oracle is now MEMORY (value word flip) with the display as
+      the human check.**
       **★★★ DAVID AGAIN, 2026-08-12, ON A BUILD THAT ALREADY HAS THE LATCH
       (`979b940` is on main), so `sw_owed[]` did NOT cure the felt case and the
       half that is left is LATENCY, not delivery: "switch input by keyboard or

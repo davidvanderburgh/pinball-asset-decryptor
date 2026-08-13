@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""doortrack.py [seconds] - watch the game's four door-button HELD-TRACKER
-objects and print every change, timestamped, so a press's fate past
-entry[+24] is finally observable.
+"""doortrack.py <pid|game-name> [seconds] - watch the game's four
+door-button HELD-TRACKER objects and print every change, timestamped, so a
+press's fate past entry[+24] is finally observable.
 
-    python3 doortrack.py 240 > ~/doortrack.log &
+    python3 doortrack.py godzilla_pro 240 > ~/doortrack.log &
+
+The guest argument is REQUIRED: pgrep's first match read the WRONG GUEST
+during the 2026-08-12 two-run collision (a hidden turtles run) and produced
+garbage that looked like bad addresses. A game name is matched against each
+candidate's /proc cwd; anything ambiguous is refused with the candidate
+list. pumpwatch.py watches these trackers PLUS the event pump words on one
+clock - prefer it for new measurements.
 
 WHY THESE FOUR ADDRESSES (godzilla_pro 1.15.0, found in the ELF 2026-08-12,
 item 17's desk-read pass). The menu never polls switch levels: a door-button
@@ -42,23 +49,39 @@ TRACKERS = {
 FIELDS = (0, 4, 12)   # count u32, held-ticks u32, cancel byte
 
 
-def guest_pid():
-    for cmd in (["pgrep", "-x", "game"], ["pgrep", "-f", "arm-binfmt|qemu-arm"]):
+def guest_pid(arg):
+    if arg.isdigit():
+        return int(arg)
+    cands = []
+    for cmd in (["pgrep", "-x", "game"], ["pgrep", "-f", "qemu-arm"]):
         try:
             out = subprocess.run(cmd, capture_output=True, text=True).stdout.split()
         except OSError:
             continue
         for p in out:
             if p.isdigit() and os.path.exists(f"/proc/{p}/mem"):
-                return int(p)
+                try:
+                    cwd = os.readlink(f"/proc/{p}/cwd")
+                except OSError:
+                    continue
+                if (int(p), cwd) not in cands:
+                    cands.append((int(p), cwd))
+    hits = [(p, cwd) for p, cwd in cands if f"/games/{arg}" in cwd]
+    if len(hits) == 1:
+        return hits[0][0]
+    print(f"cannot resolve '{arg}' to one guest; candidates:", file=sys.stderr)
+    for p, cwd in cands:
+        print(f"  pid {p}  cwd {cwd}", file=sys.stderr)
     return None
 
 
 def main():
-    secs = float(sys.argv[1]) if len(sys.argv) > 1 else 300.0
-    pid = guest_pid()
+    if len(sys.argv) < 2:
+        print(__doc__, file=sys.stderr)
+        return 2
+    secs = float(sys.argv[2]) if len(sys.argv) > 2 else 300.0
+    pid = guest_pid(sys.argv[1])
     if not pid:
-        print("no guest running")
         return 2
     m = open(f"/proc/{pid}/mem", "rb", buffering=0)
     last = {}

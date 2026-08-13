@@ -64,6 +64,37 @@ VOICE_QUALITY_CHOICES = (
     ("medium.en", "Highest — best accuracy, ~10× slower (~1.5 GB model)"),
 )
 
+# "Check for updates" choices in the ⚙ settings menu: how often the app
+# re-checks the release feed while it is running.  (hours, label); the app
+# always checks once at startup, so these only govern the RE-check — a session
+# left open for days used to never notice a new version until the user went
+# looking (a tester, batch 34).  ``UPDATE_INTERVAL_DEFAULT`` must be one of
+# these values.
+UPDATE_INTERVAL_CHOICES = (
+    (0, "Only at startup"),
+    (1, "Every hour"),
+    (6, "Every 6 hours"),
+    (24, "Once a day"),
+)
+UPDATE_INTERVAL_DEFAULT = 6
+
+
+def normalize_update_interval(value):
+    """The stored update-check interval as one of :data:`UPDATE_INTERVAL_CHOICES`.
+
+    Anything missing, unparseable or not on the menu falls back to
+    :data:`UPDATE_INTERVAL_DEFAULT` — a settings.json hand-edited to ``"6h"``
+    or to a value a later version dropped must not leave the app with a timer
+    it can't show the user.  ``0`` (startup only) is a real choice, not a
+    missing one, so it survives.
+    """
+    try:
+        hours = int(value)
+    except (TypeError, ValueError):
+        return UPDATE_INTERVAL_DEFAULT
+    return hours if hours in {h for h, _ in UPDATE_INTERVAL_CHOICES} \
+        else UPDATE_INTERVAL_DEFAULT
+
 # Replace-Image "Group by scene" parent-row iid prefix.  Image-row iids are
 # the slot rel_path (relative, so it can never start with a colon); this
 # prefix guarantees a group header's iid can't collide with any slot.
@@ -1176,6 +1207,8 @@ class MainWindow:
                  on_admin_warning_collapsed_change=None,
                  initial_voice_quality=None,
                  on_voice_quality_change=None,
+                 initial_update_interval=None,
+                 on_update_interval_change=None,
                  initial_audio_advanced=None,
                  on_audio_advanced_change=None,
                  on_detected_game_change=None,
@@ -1290,6 +1323,14 @@ class MainWindow:
             vq = VOICE_QUALITY_CHOICES[0][0]
         self.voice_quality_var = tk.StringVar(value=vq)
         self._on_voice_quality_change = on_voice_quality_change
+        # How often the app re-checks for a new release while it runs, picked
+        # in the ⚙ settings menu and persisted via ``on_update_interval_change``
+        # (a tester: "have PAD check for updates every hour or six hours or X
+        # hours — it doesn't pop up that there is a new version unless I
+        # explicitly look").  The App owns the timer; this is just the setting.
+        self.update_interval_var = tk.IntVar(
+            value=normalize_update_interval(initial_update_interval))
+        self._on_update_interval_change = on_update_interval_change
         # Advanced audio options (head/tail modes + anti-pop seed +
         # machine-render previews) — experiment levers for the Spike 2
         # trigger-pop hunt.  Persisted via ``on_audio_advanced_change``; the
@@ -1508,7 +1549,13 @@ class MainWindow:
         self._audio_changed_on_disk = set()
         self._video_changed_on_disk = set()
         self._image_changed_on_disk = set()
-        self._change_scan_id = 0         # bump-counter for the background diff
+        # Bump-counter for the background diff, PER KIND.  One shared counter
+        # made the three tabs cancel each other: a mod-pack import re-scans all
+        # of them at once, each finished slot-scan starts its own change scan,
+        # and every start invalidated the ones already in flight — so only the
+        # last kind to start ever applied its result and the others stayed at
+        # "0 changed" until the app was restarted (a tester, batch 34).
+        self._change_scan_ids = {}
         # Replace-Video "Convert" column: (rel, replacement, no_conversion,
         # trim) -> "As-is" / "Repackage" / "Re-encode" / "".  A row can cost an
         # ffprobe of the replacement, so it's resolved on a background pass
@@ -3984,7 +4031,11 @@ class MainWindow:
 
         Runs off the UI thread (the slot list is already shown), then updates
         ``self._<kind>_changed_on_disk`` and refreshes the list.  Snapshotted
-        slots are known-changed and skipped from hashing; the rest are MD5'd."""
+        slots are known-changed and skipped from hashing; the rest are MD5'd.
+
+        The bump-counter is per KIND: audio, video and image scan concurrently
+        (a mod-pack import kicks off all three), and one shared counter had each
+        start discard whichever ones were still hashing."""
         import threading
         from ..core import checksums, staged_originals
 
@@ -3994,8 +4045,8 @@ class MainWindow:
         refresh = {"audio": self._refresh_audio_list,
                    "video": self._refresh_video_list,
                    "image": self._refresh_image_list}.get(kind)
-        self._change_scan_id += 1
-        scan_id = self._change_scan_id
+        scan_id = self._change_scan_ids.get(kind, 0) + 1
+        self._change_scan_ids[kind] = scan_id
         if not assets_path or not os.path.isdir(assets_path) or not rels:
             setattr(self, "_%s_changed_on_disk" % kind, set())
             return
@@ -4014,8 +4065,8 @@ class MainWindow:
                 changed = set()
 
             def _apply():
-                if self._change_scan_id != scan_id:
-                    return            # superseded by a newer scan
+                if self._change_scan_ids.get(kind) != scan_id:
+                    return            # superseded by a newer scan of THIS kind
                 setattr(self, "_%s_changed_on_disk" % kind, changed)
                 if refresh:
                     refresh()
@@ -7433,7 +7484,16 @@ class MainWindow:
                                  self._apply_image_meta)
 
     def _apply_image_meta(self, scan_id, rel, info):
-        """Main-thread: store a probed slot's metadata and update its row."""
+        """Main-thread: store a probed slot's metadata and update its row.
+
+        The Replacement cell is rebuilt with the SAME three-way rule the list
+        refresh uses (assignment → its file name, else changed-on-disk → the ✓
+        mark, else "Choose…").  It used to fall straight to "Choose…" whenever
+        there was no pending assignment, so on a folder whose changes are baked
+        in — every mod-pack import — this pass quietly wiped the ✓ off all
+        11 819 rows behind the user, and the tab then said no image had been
+        touched (a tester, batch 34).  Video's probe has always kept the mark;
+        this is images catching up."""
         if self._image_scan_id != scan_id:
             return
         slot = self._image_slots_by_rel.get(rel)
@@ -7445,7 +7505,12 @@ class MainWindow:
         if tree is None or not tree.exists(rel):
             return
         rep = self._image_assignments.get(rel)
-        rep_disp = os.path.basename(rep) if rep else "Choose…"
+        if rep:
+            rep_disp = os.path.basename(rep)
+        elif rel in self._image_changed_on_disk:
+            rep_disp = "✓ changed on disk"
+        else:
+            rep_disp = "Choose…"
         tree.item(rel, values=("", slot.resolution_str(),
                                slot.format_summary(),
                                self._image_source_label(rel), rep_disp))
@@ -8577,33 +8642,48 @@ class MainWindow:
                             % (len(dropped) - 6, kind),
                             "error" if any_pending else "info")
 
-    def _seed_group_tags_from_library(self, scan_dir):
-        """Fill in group names the user gave a PREVIOUS extract of this same
-        card (the per-folder sidecar is blank on a fresh extract).
+    def _seed_names_from_library(self, scan_dir, present_keys, tags):
+        """Merge the container names the user gave a PREVIOUS extract of this
+        same card into *tags* (in place), and persist anything new.
 
         The library is scoped by the source card's file name (game + version),
         so only same-version re-extracts are seeded — cross-version carry-over
         stays Mod Transfer's job.  The folder's own sidecar always wins; the
-        library only fills groups that have no name yet.  Seeded names are
+        library only fills containers that have no name yet.  Seeded names are
         written straight back into this folder's sidecar so they also ride a
-        later Mod Transfer / reopen, not just this session.  Best-effort."""
+        later Mod Transfer / reopen, not just this session.
+
+        Shared by the Images tab (group tags) and the Text tab (scene names) —
+        one store, and either tab may be the first to scan a fresh folder.
+        Returns True when something was added.  Best-effort."""
         try:
             from ..core import staged_changes, tag_library
-            present = {self._image_group_of(s.rel_path)[0]
-                       for s in self._image_slots}
-            seeded = tag_library.seed_tags(scan_dir, present)
+            seeded = tag_library.seed_tags(scan_dir, present_keys)
             added = False
             for key, name in seeded.items():
-                if key not in self._image_group_tags:
-                    self._image_group_tags[key] = name
+                if key not in tags:
+                    tags[key] = name
                     added = True
             if added:
                 data = staged_changes.load(scan_dir)
-                data["image_group_tags"] = {
-                    k: v for k, v in self._image_group_tags.items() if v}
+                merged = dict(data.get("image_group_tags") or {})
+                merged.update({k: v for k, v in tags.items() if v})
+                data["image_group_tags"] = merged
                 staged_changes.save(scan_dir, data)
+            return added
         except Exception:
-            pass
+            return False
+
+    def _seed_group_tags_from_library(self, scan_dir):
+        """Images-tab entry point: seed this folder's group tags from the
+        library, keyed on the groups this extract actually has."""
+        try:
+            present = {self._image_group_of(s.rel_path)[0]
+                       for s in self._image_slots}
+        except Exception:
+            return
+        self._seed_names_from_library(scan_dir, present,
+                                      self._image_group_tags)
 
     def _audio_trim_forced(self):
         """True when the Trim/pad checkbox is force-disabled for this plugin
@@ -13238,6 +13318,19 @@ class MainWindow:
                 tags.pop(key, None)
             data["image_group_tags"] = tags
             staged_changes.save(scan_dir, data)
+            # Mirror into the per-card library, exactly as the Images tab's
+            # rename does — otherwise a scene named HERE was remembered only
+            # inside this folder, and a fresh extract of the same card came
+            # back with bare hashes (a tester, batch 34).
+            try:
+                from ..core import tag_library
+                known = {self._text_scene_key(r["path"])
+                         for r in self._text_rows
+                         if (r["path"] or "").lower().endswith(".radium")}
+                known |= set(tags)
+                tag_library.remember(scan_dir, tags, known)
+            except Exception:
+                pass
             if self._same_folder(getattr(self, "_image_scan_dir", ""),
                                  scan_dir):
                 self._image_group_tags = dict(tags)
@@ -13365,6 +13458,19 @@ class MainWindow:
             self._text_scene_names = (
                 {str(k): str(v).strip()[:50] for k, v in tags.items()
                  if str(v).strip()} if isinstance(tags, dict) else {})
+            # A fresh extract's sidecar has no names in it yet — they live in
+            # the per-card library until some tab seeds them back.  Only the
+            # Images tab did that, so on a new extract of a card whose scenes
+            # were already named, the Scene dropdown here was 40-hex-digit
+            # hashes until the (much slower) image scan finished AND the folder
+            # changed again — in practice, until the app was restarted (a
+            # tester, batch 34).  Seed from the same library ourselves, keyed
+            # on the scenes this folder's strings actually mention.
+            self._seed_names_from_library(
+                scan_dir,
+                {self._text_scene_key(r["path"]) for r in rows
+                 if (r["path"] or "").lower().endswith(".radium")},
+                self._text_scene_names)
             saved_scene = staged.get("text_scene_filter")
             self.text_scene_filter_var.set(
                 saved_scene if isinstance(saved_scene, str) and saved_scene
@@ -17562,6 +17668,17 @@ class MainWindow:
             command=self._handle_check_updates,
             state=(tk.DISABLED if self._update_check_busy else tk.NORMAL))
 
+        # …and how often to do it by itself.  Same shape as the voice-quality
+        # cascade: radio choices, persisted, applied immediately.
+        up_menu = tk.Menu(menu, **kw)
+        for hours, label in UPDATE_INTERVAL_CHOICES:
+            up_menu.add_radiobutton(
+                label=label, value=hours,
+                variable=self.update_interval_var,
+                command=self._on_update_interval_pick)
+        menu.add_cascade(label=self._cascade_label("Check automatically"),
+                         menu=up_menu)
+
         # Disk space (Windows-only; see _build_ui).  Carries the leftover-
         # staging badge so the warning survives the move into the menu.
         if sys.platform == "win32":
@@ -17680,6 +17797,11 @@ class MainWindow:
     def _on_voice_quality_pick(self):
         if self._on_voice_quality_change:
             self._on_voice_quality_change(self.voice_quality_var.get())
+
+    def _on_update_interval_pick(self):
+        """⚙ → Check automatically → one of UPDATE_INTERVAL_CHOICES."""
+        if self._on_update_interval_change:
+            self._on_update_interval_change(self.update_interval_var.get())
 
     def _clear_voice_models(self):
         """⚙ → Voice recognition quality → Clear downloaded voice models."""
@@ -19085,6 +19207,9 @@ class MainWindow:
         # The URL to open when the Download button is clicked.
         # Populated by show_update_banner.
         self._update_banner_url = None
+        # Version string the user closed the banner on (see
+        # _dismiss_update_banner) — the repeating check honours it.
+        self._update_banner_dismissed = None
 
     def show_update_banner(self, version, url, installer=None):
         """Display the 'update available' banner.
@@ -19098,9 +19223,17 @@ class MainWindow:
         ``installer`` (updater._pick_installer_asset dict) enables the
         one-click update button; without it the banner keeps the plain
         open-the-release-page Download button.
+
+        A version the user has already dismissed does NOT re-open the banner:
+        the check now repeats on a timer, and re-packing the same notice every
+        few hours would turn "✕" into a button that does nothing.  The gear's ●
+        badge and its menu entry still carry the news, and a NEWER version than
+        the dismissed one banners normally.
         """
         from pinball_decryptor import __version__ as _current
         self._update_banner_url = url
+        muted = (version == self._update_banner_dismissed
+                 and not self._update_banner.winfo_ismapped())
         can_auto = bool(installer and self._on_install_update)
         # The gear carries a ● notification too, so the news survives a
         # dismissed banner (its menu gets an install/download entry).
@@ -19121,6 +19254,8 @@ class MainWindow:
         self._update_banner_text.configure(
             text=f"Pinball Asset Decryptor v{version} is available "
                  f"— you're on v{_current}.")
+        if muted:
+            return
         # Anchor above the back-button row so the banner sits at the
         # very top of the window regardless of which view (picker /
         # mfr) is currently shown.
@@ -19135,7 +19270,10 @@ class MainWindow:
             self._update_banner.pack(fill=tk.X, side=tk.TOP)
 
     def _dismiss_update_banner(self):
-        """Hide the update banner for this session."""
+        """Hide the update banner for this session, and remember WHICH version
+        was waved off so the repeating check doesn't put it straight back."""
+        if self._update_available:
+            self._update_banner_dismissed = self._update_available[0]
         self._update_banner.pack_forget()
 
     def _open_update_url(self):

@@ -255,6 +255,8 @@ class App:
                 self._on_admin_warning_collapsed_change),
             initial_voice_quality=self._settings.get("voice_quality"),
             on_voice_quality_change=self._on_voice_quality_change,
+            initial_update_interval=self._settings.get("update_check_hours"),
+            on_update_interval_change=self._on_update_interval_change,
             initial_audio_advanced=self._settings.get("audio_advanced") or {},
             on_audio_advanced_change=self._on_audio_advanced_change,
             on_detected_game_change=self._on_detected_game_change,
@@ -3172,6 +3174,55 @@ class App:
         """
         self._run_update_check(show_up_to_date_toast=False)
 
+    def _schedule_update_recheck(self):
+        """(Re-)arm the repeating background update check.
+
+        A session left open for days only ever checked once, at startup, so a
+        release published while the app was running went unnoticed until the
+        user opened the gear and asked (a tester, batch 34).  The interval is
+        the ⚙ "Check automatically" setting; 0 means startup only.
+
+        Armed from :meth:`_handle_update_check_result`, so the gap is measured
+        from the last ANSWER rather than from launch — a check that had to wait
+        on a slow network doesn't stack up behind the next one — and re-armed
+        when the setting changes.
+        """
+        after_id = getattr(self, "_update_recheck_after", None)
+        self._update_recheck_after = None
+        if after_id:
+            try:
+                self.root.after_cancel(after_id)
+            except (tk.TclError, ValueError):
+                pass
+        try:
+            hours = int(self.window.update_interval_var.get())
+        except (AttributeError, ValueError, tk.TclError):
+            return
+        if hours <= 0:
+            return
+        try:
+            self._update_recheck_after = self.root.after(
+                hours * 3600 * 1000, self._recheck_for_update)
+        except (tk.TclError, RuntimeError):
+            pass                       # window gone
+
+    def _recheck_for_update(self):
+        """The timer firing: same silent check as startup (which re-arms)."""
+        self._update_recheck_after = None
+        self._check_for_update()
+
+    def _on_update_interval_change(self, hours):
+        """Persist the ⚙ "Check automatically" pick and re-arm the timer."""
+        from .gui.main_window import (UPDATE_INTERVAL_CHOICES,
+                                      normalize_update_interval)
+        hours = normalize_update_interval(hours)
+        self._settings["update_check_hours"] = hours
+        self._save_settings()
+        label = dict(UPDATE_INTERVAL_CHOICES).get(hours, str(hours))
+        self.window.append_log(
+            "Automatic update check: %s." % label.lower(), "info")
+        self._schedule_update_recheck()
+
     def _check_for_update_now(self):
         """User-triggered "Check for updates" button click.
 
@@ -3226,6 +3277,8 @@ class App:
                                     failed=None, publishing=None):
         """Main-thread continuation of the update check."""
         self.window.set_update_check_running(False)
+        # Next automatic check is timed from here — see _schedule_update_recheck.
+        self._schedule_update_recheck()
         if result:
             version, url, _notes, installer = result
             self.window.show_update_banner(version, url, installer=installer)

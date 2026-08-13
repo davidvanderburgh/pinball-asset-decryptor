@@ -574,6 +574,12 @@ extern int XPending(XDisplay *);
 extern int XNextEvent(XDisplay *, void *);
 extern int XFlush(XDisplay *);
 extern int XSync(XDisplay *, int);
+/* DisplayWidth()/DisplayHeight() are MACROS in Xlib.h, so a headerless build
+ * calls the exported function forms - the same trap XDefaultScreen() and
+ * XBlackPixel() above are hand-declared for. These are what the remembered
+ * geometry is checked against; see winpos_reachable(). */
+extern int XDisplayWidth(XDisplay *, int);
+extern int XDisplayHeight(XDisplay *, int);
 
 extern EGLSurface eglCreateWindowSurface(EGLDisplay, EGLConfig, unsigned long, const EGLint *);
 extern EGLBoolean eglSwapBuffers(EGLDisplay, EGLSurface);
@@ -1015,6 +1021,44 @@ static void winpos_put(const char *key, int x, int y, int w, int h)
     fclose(f);
 }
 
+/* IS A REMEMBERED RECTANGLE SOMEWHERE A USER COULD REACH IT?
+ *
+ * Nothing used to ask. winreset.sh's header says so in as many words - "the
+ * remembered geometry is restored with no on-screen check anywhere ... a
+ * window that is fully off every monitor cannot be dragged back" - and the
+ * only cure was the Reset windows button, which a user has to know exists.
+ *
+ * MEASURED FIRST, because the answer decides how much this is allowed to do
+ * (2026-08-13, real WSLg, the real renderer, ~/.pad_windows rigged by hand):
+ *
+ *     game 9000 9000    -> restore try 1..5: game at 6,27 ... never converges
+ *     game -3000 -2000  -> restore try 1..6: game at 6,27, then GAVE UP
+ *     game 86 59        -> restore converged after 2 check(s)
+ *
+ * So THIS compositor clamps an unreachable move and the window stays visible;
+ * what an off-screen line actually costs here is the whole 6-try restore
+ * window and six lines of noise. That is the common case and it is handled by
+ * the refusal detector in win_pump() rather than here.
+ *
+ * This check is for the compositor that does NOT clamp, which is the case
+ * winreset.sh was written for and the one that genuinely hides a window. It is
+ * deliberately the WEAKEST test that still catches it: no intersection with
+ * the root at all. A window half off an edge, or on a second monitor the X
+ * root spans, intersects and is left exactly alone - guessing anything more
+ * confident than that would move windows a user put where they wanted them,
+ * and a multi-monitor root is precisely where a tighter rule would be wrong.
+ *
+ * A screen that measures 0 (no sensible answer from the server) returns 1:
+ * "reachable" is the answer that changes nothing. */
+static int winpos_reachable(int scr, int x, int y, int w, int h)
+{
+    int sw = XDisplayWidth(xdpy, scr), sh = XDisplayHeight(xdpy, scr);
+    if (sw <= 0 || sh <= 0) return 1;
+    if (w <= 0) w = 1;
+    if (h <= 0) h = 1;
+    return x < sw && y < sh && x + w > 0 && y + h > 0;
+}
+
 /* Absolute CLIENT position on the root, reparenting WM and all. Client space
  * is the right space to save even though XMoveWindow does not land there
  * directly: Weston places the VISIBLE frame corner at the requested
@@ -1062,6 +1106,15 @@ static int game_want_x, game_want_y, game_want_pos;
 static int legend_want_x, legend_want_y, legend_want_pos;
 static int game_aim_x, game_aim_y, game_settled;
 static int legend_aim_x, legend_aim_y, legend_settled;
+/* THE REFUSAL DETECTOR's memory: where each window was read LAST try, and
+ * whether there is a last try to compare against. A compositor that clamps an
+ * unreachable move reports the same position every time, and the corrective
+ * nudge below adds the whole error again on each of them - measured on real
+ * WSLg with `game 9000 9000`, the aim marched 17994 -> 26988 -> 35982 ->
+ * 44976 -> 53970 while the window never left 6,27. Two identical readings say
+ * the move is not being honored, which no amount of aiming can fix. */
+static int game_seen_x, game_seen_y, game_seen;
+static int legend_seen_x, legend_seen_y, legend_seen;
 static int save_pending;                 /* a ConfigureNotify awaits saving   */
 
 /* Recompute held[] from scratch and publish. Rebuilding rather than patching
@@ -1330,6 +1383,25 @@ static int win_open(void)
         if (gw >= 160 && gh >= 120 && gw <= 7680 && gh <= 4320) {
             win_w = gw; win_h = gh;
         }
+        /* A REMEMBERED POSITION NOTHING COULD REACH IS NOT RESTORED. On a
+         * compositor that honors it, obeying that line opens the game window
+         * where no user can see or drag it - and it is sticky, because the
+         * next run reads the same file back. Dropping it here means the
+         * compositor's own placement stands (game_want_pos 0 also marks the
+         * restore settled at once, so no XMoveWindow is ever issued), which is
+         * exactly what Reset windows does - without the user having to know
+         * that button exists. The SIZE is kept: it is bounded above and a
+         * remembered size cannot hide a window. */
+        if (game_want_pos && !winpos_reachable(scr, gx, gy, win_w, win_h)) {
+            fprintf(stderr, "[padglhost] window: remembered position %d,%d is "
+                    "off every screen (%dx%d); opening where the compositor "
+                    "puts it instead. 'Reset windows' on the Emulate tab "
+                    "clears it for good.\n",
+                    gx, gy, XDisplayWidth(xdpy, scr), XDisplayHeight(xdpy, scr));
+            game_want_pos = 0;
+            gx = gy = 0;
+            game_want_x = game_want_y = 0;
+        }
         xwin = XCreateSimpleWindow(xdpy, XRootWindow(xdpy, scr), gx, gy,
                                    (unsigned)win_w, (unsigned)win_h, 0,
                                    XBlackPixel(xdpy, scr), XBlackPixel(xdpy, scr));
@@ -1571,7 +1643,17 @@ static void win_pump(void)
         restore_tries++;
         if (!game_settled && winpos_read(xwin, &ax, &ay)) {
             if (ax == game_want_x && ay == game_want_y) game_settled = 1;
-            else {
+            else if (game_seen && ax == game_seen_x && ay == game_seen_y) {
+                /* Moved twice, did not budge: the compositor is refusing, not
+                 * missing. Stop rather than aim again - see game_seen. */
+                fprintf(stderr, "[padglhost] window: the compositor will not "
+                        "put the game window at %d,%d - it stayed at %d,%d "
+                        "after %d tries. Leaving it there. ('Reset windows' "
+                        "on the Emulate tab forgets the remembered spot.)\n",
+                        game_want_x, game_want_y, ax, ay, restore_tries);
+                game_settled = 1;
+            } else {
+                game_seen = 1; game_seen_x = ax; game_seen_y = ay;
                 game_aim_x += game_want_x - ax;
                 game_aim_y += game_want_y - ay;
                 fprintf(stderr, "[padglhost] restore try %d: game at %d,%d "
@@ -1583,7 +1665,14 @@ static void win_pump(void)
         }
         if (!legend_settled && winpos_read(legend_win, &ax, &ay)) {
             if (ax == legend_want_x && ay == legend_want_y) legend_settled = 1;
-            else {
+            else if (legend_seen && ax == legend_seen_x && ay == legend_seen_y) {
+                fprintf(stderr, "[padglhost] window: the compositor will not "
+                        "put the legend window at %d,%d - it stayed at %d,%d "
+                        "after %d tries. Leaving it there.\n",
+                        legend_want_x, legend_want_y, ax, ay, restore_tries);
+                legend_settled = 1;
+            } else {
+                legend_seen = 1; legend_seen_x = ax; legend_seen_y = ay;
                 legend_aim_x += legend_want_x - ax;
                 legend_aim_y += legend_want_y - ay;
                 fprintf(stderr, "[padglhost] restore try %d: legend at %d,%d "

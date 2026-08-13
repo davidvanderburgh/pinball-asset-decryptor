@@ -868,9 +868,20 @@ GLLATE=$(pad_window_line "$HOSTLOG") && GLWIN=$GLLATE
 case "$GLWIN" in
     *"window opened"*)
         echo "[watch] game window ${GLWIN#*window }"
-        echo "[watch]   (no game window on the desktop? Then it is WSLg's"
-        echo "[watch]   mirror that is missing, not the window: Stop, then"
-        echo "[watch]   'Restart WSL...' on the Emulate tab.)"
+        # TWO CURES, AND THE ORDER MATTERS. This used to name the WSL restart
+        # alone, which is right only when the window is where a user could see
+        # it. The other way a window that "opened" is nowhere on the desktop is
+        # that it opened at a REMEMBERED POSITION off the screen - and a
+        # restart does nothing at all for that, because the coordinates come
+        # back out of ~/.pad_windows on the next run too. The renderer now
+        # names that case itself ("[padglhost] window: ...", carried to this
+        # pane by the event filter), so the cheap, reversible cure is offered
+        # first and the restart second.
+        echo "[watch]   (no game window on the desktop? Two causes, in the"
+        echo "[watch]   order worth trying: it opened somewhere you cannot see"
+        echo "[watch]   - Stop, then 'Reset windows' on the Emulate tab, which"
+        echo "[watch]   forgets where the windows were; or WSLg is not"
+        echo "[watch]   mirroring it - Stop, then 'Restart WSL...'.)"
         # A WINDOW THAT IS THERE AND BLACK IS A DIFFERENT FAULT and used to get
         # the same answer, which is only right half the time: a WSL restart
         # repaints a lost mirror and does nothing at all for a picture that is
@@ -1280,7 +1291,12 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
             if (++n[$0] == 1 || n[$0] % 500 == 0)
                 { printf "[event] %s (x%d)\n", $0, n[$0]; fflush() }
             next }
-        /\[padglhost\] (window opened|video block|ring |UNKNOWN|picture:)/ \
+        # `window:` joins `window opened` here for the same reason picture:
+        # did - it is the renderer answering "where did the window go", and a
+        # verdict nobody sees is a verdict that costs a ticket. It carries the
+        # remembered position that was refused or ignored, and names the button
+        # that clears it.
+        /\[padglhost\] (window opened|window:|video block|ring |UNKNOWN|picture:)/ \
                                  { print "[event] " $0; fflush(); next }
         # `picture:` IS THE SAME GAP ONE STEP FURTHER IN. The lines above cover
         # a window that never opened; a window that opens and stays BLACK was

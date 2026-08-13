@@ -778,6 +778,31 @@ These have each been violated at least once and each cost a run or a window:
       cabinet closure can be spent microseconds after release, before the
       game looks. That is a second, real defect on the same path; the tap
       path already learned this lesson and applies at the handover.)**
+      **RUN 9 FOLLOW-UP ANALYSIS (free, on the captured log):**
+      **(a) The node record is WHOLLY untouched on a dead press — neither
+      `cur` (0x7b95b1) nor `prev` (0x7b95a9) moves. 24 changes each over
+      the run = exactly 12 presses × 2 edges. So the decode does not run
+      and then decline to apply; it does not run.**
+      **(b) The pass counter is 60.0/s across EVERY deaf window (heartbeat
+      `pass=`, 16 beats, no deviation). Fourth independent confirmation —
+      the scheduler is not the problem and never was.**
+      **(c) NOT PERIODIC. Run 9's deaf windows (8–11 s, 24–30 s, 44–49 s)
+      look like a ~16–19 s cycle, and that is a coincidence of a 20-press
+      sample: runs 8 and 8b give start-to-start spacings of 6–24 s with no
+      common period. Written down because the near-match to the 5.2 s /
+      16.5 s yield-loop constants in 0x255448 is exactly the kind of
+      false lead that costs a pass. A ~16 s heartbeat word does NOT exist
+      in .data either — a scan of run 6's full 12.6 MB window for
+      addresses changing regularly every 8–28 s returns one weak
+      candidate (0x9b7bd4, cv 0.45, gaps 4.6–35.4 s), i.e. nothing.**
+      **(d) A READING TO AVOID, recorded because I nearly published it:
+      comparing "which regions were active" in deaf vs live windows shows
+      pane/ev/entries/noderec at zero during deaf windows and busy during
+      live ones — which looks like a whole-engine freeze and is CIRCULAR.
+      Those regions are driven BY the press; in a window where no press
+      registered, of course they are quiet. The only non-circular reading
+      is (b): the 60 Hz machinery keeps running, and the guest's overall
+      change rate never drops (245–505 words/s throughout).**
       **RUN 10 — the question is now protocol fidelity, and it is OURS:
       what does the game require of the cabinet reply before it decodes
       it? Byte 0 of our word is a constant `ff` and bytes 3–7 constant

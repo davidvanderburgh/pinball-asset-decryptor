@@ -709,7 +709,23 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    **every change made since that folder's last Extract**, not just the
    current session's, and records which card image and version it was
    built from so Import can warn you when you're applying it to a
-   different firmware. Pipeline working files (decrypted blobs, raw
+   different firmware. Import checks the pack against the extract you're
+   applying it to and writes only the files this card actually has: a
+   pack built from a different card (an LE pack dropped on a Pro extract,
+   say — the two share a version number, so a version check can't see it)
+   is named as such and pointed at *Transfer Mods to New Version*, one
+   that fits nothing at all is refused instead of emptying itself into
+   the folder, and strays a previous import left behind are cleaned up.
+   The confirmation box says what will land, what will be skipped and
+   what will be removed before anything is written. A pack also carries
+   your staged **Default Settings**, high-score defaults and your
+   image/scene names, which are project settings rather than files, and
+   merges them on import (the pack wins per setting, anything you'd
+   already staged here survives). Files you replaced on the card image
+   itself with the Partitions tab can't travel in a pack — they live in
+   the `.raw`, not the project folder — so they're named at export *and*
+   again at import as the short list to redo. Pipeline working files
+   (decrypted blobs, raw
    `.img`s) are left out, so a pack weighs what its assets weigh. For Stern
    Spike 2 (where new game code re-lays-out the card), a **Transfer Mods
    to New Version** panel pulls your mods from an old extract onto a

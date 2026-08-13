@@ -126,8 +126,9 @@ def test_export_writes_manifest_and_import_reads_it(tmp_path):
 
     dest = tmp_path / "dest"
     dest.mkdir()
-    n = modpack.import_mod_pack(zip_path, str(dest))
-    assert n == ["a.wav"]                          # the manifest isn't an asset
+    res = modpack.import_mod_pack(zip_path, str(dest))
+    # No baseline in dest, so nothing can be judged foreign — import as before.
+    assert res["applied"] == ["a.wav"]              # the manifest isn't an asset
     assert (dest / "a.wav").read_bytes() == b"CHANGED"
     assert not (dest / modpack.MANIFEST_NAME).exists()
 
@@ -136,8 +137,8 @@ def test_import_snapshots_pristine_originals(tmp_path):
     """Import backs up each still-pristine original into .orig/ before
     overwriting (same backup staging takes), so the imported change can be
     previewed against its true original and reverted — but never captures a
-    file that already diverged from the baseline, and never one the baseline
-    doesn't know (a wrong snapshot would 'revert' to wrong bytes)."""
+    file that already diverged from the baseline (a wrong snapshot would
+    'revert' to wrong bytes)."""
     dest = tmp_path / "dest"
     dest.mkdir()
     _write(dest / "a.wav", b"orig-a")                 # pristine
@@ -150,15 +151,203 @@ def test_import_snapshots_pristine_originals(tmp_path):
     with zipfile.ZipFile(zip_path, "w") as zf:
         zf.writestr("a.wav", b"MODDED-A")
         zf.writestr("b.wav", b"MODDED-B")
-        zf.writestr("extra.wav", b"NOT-IN-BASELINE")
 
-    n = modpack.import_mod_pack(str(zip_path), str(dest))
-    assert sorted(n) == ["a.wav", "b.wav", "extra.wav"]
+    res = modpack.import_mod_pack(str(zip_path), str(dest))
+    assert sorted(res["applied"]) == ["a.wav", "b.wav"]
     assert (dest / "a.wav").read_bytes() == b"MODDED-A"
-    # pristine original captured; divergent + unknown files are not
+    # pristine original captured; the divergent one is not
     assert (dest / ".orig" / "a.wav").read_bytes() == b"orig-a"
     assert not (dest / ".orig" / "b.wav").exists()
-    assert not (dest / ".orig" / "extra.wav").exists()
+
+
+def test_import_skips_files_this_extract_does_not_have(tmp_path):
+    """A pack from ANOTHER card (an LE pack on a Pro extract) mostly lands on
+    paths this card doesn't have.  Writing them made 201 phantom audio slots
+    that previewed the user's own mod as the card's original and that no build
+    could ever use (batch 31) — skip them, and say how many."""
+    dest = tmp_path / "dest"
+    (dest / "audio").mkdir(parents=True)
+    _write(dest / "audio" / "pro.wav", b"orig")
+    (dest / ".checksums.md5").write_text(
+        f"audio/pro.wav\t{_md5(b'orig')}\n", encoding="utf-8")
+
+    zip_path = tmp_path / "pack.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("audio/pro.wav", b"MINE")
+        zf.writestr("audio/le-only-1.wav", b"MINE-1")
+        zf.writestr("audio/le-only-2.wav", b"MINE-2")
+
+    logs = []
+    res = modpack.import_mod_pack(str(zip_path), str(dest),
+                                  log_cb=lambda t, l="info": logs.append((l, t)))
+    assert res["applied"] == ["audio/pro.wav"]
+    assert sorted(res["skipped"]) == ["audio/le-only-1.wav",
+                                      "audio/le-only-2.wav"]
+    assert (dest / "audio" / "pro.wav").read_bytes() == b"MINE"
+    assert not (dest / "audio" / "le-only-1.wav").exists()
+    assert any(lvl == "warning" and "not part of this extract" in t
+               for lvl, t in logs)
+
+
+def test_import_removes_strays_a_previous_import_left(tmp_path):
+    """The same pack imported twice: the first (old-version) import scattered
+    files this card has no slot for, and they are still listed as slots.  The
+    second import takes them back out."""
+    dest = tmp_path / "dest"
+    (dest / "audio").mkdir(parents=True)
+    _write(dest / "audio" / "pro.wav", b"orig")
+    _write(dest / "audio" / "le-only.wav", b"STRAY")      # left by import #1
+    (dest / ".checksums.md5").write_text(
+        f"audio/pro.wav\t{_md5(b'orig')}\n", encoding="utf-8")
+
+    zip_path = tmp_path / "pack.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("audio/pro.wav", b"MINE")
+        zf.writestr("audio/le-only.wav", b"MINE-STRAY")
+
+    res = modpack.import_mod_pack(str(zip_path), str(dest))
+    assert res["removed"] == ["audio/le-only.wav"]
+    assert not (dest / "audio" / "le-only.wav").exists()
+    assert (dest / "audio" / "pro.wav").read_bytes() == b"MINE"
+
+    # ...and leaving them is still possible for a caller that wants to.
+    _write(dest / "audio" / "le-only.wav", b"STRAY")
+    res = modpack.import_mod_pack(str(zip_path), str(dest),
+                                  remove_leftovers=False)
+    assert res["removed"] == []
+    assert (dest / "audio" / "le-only.wav").exists()
+
+
+def test_import_refuses_a_pack_that_fits_nothing(tmp_path):
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    _write(dest / "pro.wav", b"orig")
+    (dest / ".checksums.md5").write_text(
+        f"pro.wav\t{_md5(b'orig')}\n", encoding="utf-8")
+    zip_path = tmp_path / "pack.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("le.wav", b"MINE")
+
+    with pytest.raises(ValueError, match="nothing to import"):
+        modpack.import_mod_pack(str(zip_path), str(dest))
+    assert not (dest / "le.wav").exists()
+
+
+def test_import_warns_when_the_pack_is_from_another_card(tmp_path):
+    """Same firmware version, different card: the version check can't see it,
+    and it is exactly the case that scatters files."""
+    import json
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    _write(dest / "a.wav", b"orig")
+    (dest / ".checksums.md5").write_text(
+        f"a.wav\t{_md5(b'orig')}\n", encoding="utf-8")
+    (dest / ".extract_source.json").write_text(
+        json.dumps({"input_name": "led_zeppelin_pro-1_22_0.Release.8G.sdcard.raw"}),
+        encoding="utf-8")
+
+    zip_path = tmp_path / "pack.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr(modpack.MANIFEST_NAME, json.dumps({
+            "format": 2, "version_hint": "1.22.0 (Release)",
+            "source_name": "led_zeppelin_le-1_22_0.Release.8G.sdcard.raw"}))
+        zf.writestr("a.wav", b"MINE")
+
+    logs = []
+    modpack.import_mod_pack(str(zip_path), str(dest),
+                            log_cb=lambda t, l="info": logs.append((l, t)))
+    assert any(lvl == "warning" and "different card" in t
+               and "led_zeppelin_le" in t and "Transfer Mods" in t
+               for lvl, t in logs)
+
+
+def test_pack_carries_defaults_and_scene_names(tmp_path):
+    """The Defaults tab's staged edits and the image/scene names live in the
+    folder sidecar, not in any baselined file, so the file diff never saw
+    them: a tester's imported project came up on stock volume with unnamed
+    scenes every time."""
+    import json
+
+    from pinball_decryptor.core import staged_changes
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _write(src / "a.wav", b"orig")
+    (src / ".checksums.md5").write_text(
+        f"a.wav\t{_md5(b'orig')}\n", encoding="utf-8")
+    _write(src / "a.wav", b"CHANGED")
+    staged_changes.save(str(src), {
+        "audio": {"a.wav": "W:/mine/a.wav"},        # a path — must NOT travel
+        "settings": {"AD_MASTER_VOLUME": 24},
+        "high_scores": {"Grand Champion": {"initials": "CFB", "name": "C"}},
+        "image_group_tags": {"rad::abc": "Jukebox"},
+        "menu_expose_through": "AD_SOMETHING",
+    })
+
+    zip_path = str(tmp_path / "pack.zip")
+    modpack.export_mod_pack(str(src), zip_path)
+    with zipfile.ZipFile(zip_path) as zf:
+        man = json.loads(zf.read(modpack.MANIFEST_NAME).decode("utf-8"))
+    assert man["extras"]["settings"] == {"AD_MASTER_VOLUME": 24}
+    assert "audio" not in man["extras"]
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    _write(dest / "a.wav", b"orig")
+    (dest / ".checksums.md5").write_text(
+        f"a.wav\t{_md5(b'orig')}\n", encoding="utf-8")
+    staged_changes.save(str(dest), {"settings": {"AD_FREE_PLAY": 1}})
+
+    res = modpack.import_mod_pack(zip_path, str(dest))
+    assert res["extras"]["settings"] == 1
+    got = staged_changes.load(str(dest))
+    # merged, not replaced: this folder's own staged setting survives
+    assert got["settings"] == {"AD_FREE_PLAY": 1, "AD_MASTER_VOLUME": 24}
+    assert got["image_group_tags"] == {"rad::abc": "Jukebox"}
+    assert got["menu_expose_through"] == "AD_SOMETHING"
+
+
+def test_pack_names_the_partition_replaces_it_cannot_carry(tmp_path,
+                                                           monkeypatch):
+    """SternLogo.png is replaced on the card IMAGE, so no pack can hold it.
+    Say so at export and again at import instead of letting it turn up stock
+    on a finished build (a tester, twice)."""
+    import json
+
+    from pinball_decryptor.core import card_edits
+
+    monkeypatch.setattr(card_edits, "CARD_EDITS_FILE",
+                        str(tmp_path / "card_edits.json"))
+    card = tmp_path / "card.raw"
+    _write(card, b"card-bytes")
+    card_edits.record_replace(str(card), 1, "/usr/local/spike/SternLogo.png",
+                              162000, 188000, source_path="W:/mine/logo.png")
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _write(src / "a.wav", b"orig")
+    (src / ".checksums.md5").write_text(
+        f"a.wav\t{_md5(b'orig')}\n", encoding="utf-8")
+    (src / ".extract_source.json").write_text(
+        json.dumps({"input_name": "card.raw", "input_path": str(card)}),
+        encoding="utf-8")
+    _write(src / "a.wav", b"CHANGED")
+
+    logs = []
+    zip_path = str(tmp_path / "pack.zip")
+    modpack.export_mod_pack(str(src), zip_path,
+                            log_cb=lambda t, l="info": logs.append((l, t)))
+    assert any(lvl == "warning" and "SternLogo.png" in t for lvl, t in logs)
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    logs = []
+    res = modpack.import_mod_pack(zip_path, str(dest),
+                                  log_cb=lambda t, l="info": logs.append((l, t)))
+    assert res["card_files"][0]["path"] == "/usr/local/spike/SternLogo.png"
+    assert any("SternLogo.png" in t and "Partitions tab" in t
+               for _lvl, t in logs)
 
 
 def test_import_never_clobbers_existing_snapshot(tmp_path):

@@ -313,13 +313,12 @@ def test_the_pinned_tree_is_patched_for_a_c23_compiler_before_it_is_built():
 
 
 def test_the_build_asks_for_the_dialect_the_pinned_tag_was_written_in():
-    """The same machine, one compiler generation further in (2026-08-12):
-    `char *pos = strrchr(link->name, '/')` in criu/tty.c stopped the build
-    with -Werror=discarded-qualifiers.  C23 made the str*chr family
-    type-generic, so a const argument now gives a const result, and v4.1
-    predates that.  criu calls those functions a few dozen times, so patching
-    the one line only buys the next one three minutes later - the build asks
-    for C17 instead."""
+    """C17 is the language v4.1 was written and PROVEN in - criuladder.sh's
+    seven rungs were run against it - and in C17 the rseq redefinition 2a
+    patches is an error again, so that probe is asked its question twice over.
+
+    What the dialect does NOT do is settle criu/tty.c, which is what v0.130.1
+    shipped believing.  See the next test."""
     text = src("getcriu.sh")
     assert "-std=gnu17" in text
     assert "USERCFLAGS" in text, (
@@ -335,6 +334,41 @@ def test_the_build_asks_for_the_dialect_the_pinned_tag_was_written_in():
     probe = text[text.index("STD=\n"):text.index("# AND THE TREE MAY")]
     assert "-x c -" in probe, "the flag is tried before it is used"
     assert "else" in probe, "no branch for the compiler that refuses it"
+
+
+def test_the_one_line_c23_made_wrong_is_patched_not_just_the_dialect():
+    """v0.130.1 answered criu/tty.c:262 with -std=gnu17, and a dialect cannot
+    reach it.  criu's own DEFINES carry -D_GNU_SOURCE; glibc's features.h
+    turns _GNU_SOURCE into _ISOC23_SOURCE, which sets __GLIBC_USE (ISOC23);
+    and string.h gates the const-generic str*chr macros on THAT, never on
+    __STDC_VERSION__.  So criu asks for the C23 behaviour itself, every
+    compile, whatever -std= says - and a second user hit the identical error
+    on a build that already had the dialect pin (2026-08-13).
+
+    Measured, not guessed: building v4.1 with those glibc macros forced in and
+    WERROR=0 warns at exactly one site in the whole tree, this one.  Upstream
+    v4.2.1 declares it `const char *pos`, and that is what is taken."""
+    text = src("getcriu.sh")
+    assert "const char *pos = strrchr(link->name" in text, (
+        "nothing corrects the line, so a 2026 glibc still stops the build at "
+        "criu/tty.o however the dialect is set")
+    # Patched before make reads the file, and after the source exists to patch
+    # - so the clone and the reuse path both get it.
+    assert line_of(text, "TTY=$SRC/criu/tty.c") < line_of(text, "make -j")
+    assert line_of(text, "TTY=$SRC/criu/tty.c") > line_of(text, "git clone --depth 1")
+    # ANCHORED. tty.c carries a second `char *pos = strrchr(orig->rfe->name,
+    # '/')` that is not const and builds fine; a looser match rewrites it too.
+    code = [ln for ln in text.split("\n") if not ln.lstrip().startswith("#")]
+    matchers = [ln for ln in code if "strrchr" in ln
+                and ("grep" in ln or "sed" in ln)]
+    assert matchers and all("link->name" in ln for ln in matchers), matchers
+    # Idempotent: the guard matches only the UNFIXED declaration, so a reused
+    # tree is not patched twice and a pin moved to v4.2.1 is left alone.
+    assert r"grep -q '^[[:space:]]*char \*pos = strrchr(link->name'" in text
+    # And it can never stop a build that would otherwise have worked: every
+    # compiler older than C23 builds the line exactly as it came.
+    block = text[text.index("TTY=$SRC/criu/tty.c"):text.index("# ---- 3.")]
+    assert "exit" not in block, "a line that cannot be patched is not fatal"
 
 
 def test_neither_shortcut_that_looks_like_the_same_fix_is_taken():
@@ -360,7 +394,7 @@ def test_a_reused_tree_cannot_mix_two_dialects():
         "the objects have to go before the build that would reuse them")
     # Only when they differ AND there is something to clean - a fresh clone
     # must never pay for this, and neither must an unchanged rerun.
-    block = text[text.index("STAMP=$WORK"):text.index("# ---- 3.")]
+    block = text[text.index("STAMP=$WORK"):text.index("# ---- 2c.")]
     assert '"$(cat "$STAMP" 2>/dev/null)" != "$STD"' in block
     assert "-name '*.o' -print -quit" in block, (
         "a tree with no objects has nothing to clean and would just lose "

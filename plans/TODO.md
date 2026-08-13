@@ -860,7 +860,62 @@ These have each been violated at least once and each cost a run or a window:
       something the rig imposes (node 0 is serviced out of the same
       `nb_next_node()` schedule the shim owns). If the rig is what makes
       it 500 ms, fixing the schedule beats papering over it with a hold.**
-      **RUN 10 — a second, independent question, kept because the deferral
+      **★★★ RUN 10, 2026-08-13 — THE SPI REPLY IS EXONERATED BY
+      DISASSEMBLY, AND THE GATE IS NAMED. Desk read (agent; report at
+      `C:\tmp\item17\run10\spi_decode_report.txt`; it died mid-write on an
+      API error but the report is complete, and its ELF addresses check out
+      against run 9's live measurements — its LIVE column does not, it
+      added 0x1000 instead of 0x10000 for the 0x7a9xxx family, so trust
+      the ELF values only).**
+      **(i) MY PROTOCOL-FIDELITY HYPOTHESIS IS DEAD, with proof. The
+      cabinet SPI path is a dumb pipe: the reader stores all 8 reply bytes
+      raw and unconditionally (0x5a9c6c), no reply byte is metadata, and
+      `0x1e78f4` writes NodeRec.cur with an UNCONDITIONAL `strb` at
+      0x1e7988 after snapshotting prev at 0x1e7974. There is no change
+      flag, no sequence compare, no checksum and no state machine. The
+      rol8-XOR scramble from the earlier pass is real but lives on the
+      NODE BUS (0x59ef60) and never touches the cabinet. So our constant
+      bytes cannot be the intermittency.**
+      **(ii) THE ONE GATE THAT EXISTS: the cabinet IS node 0 (0x1d6da0),
+      and `0x1d6d58` — the only path from the SPI word to NodeRec.cur —
+      has NO gate at all. But the runtime sweep 0x1d7d88 opens with a
+      node-bus query at 0x59ef30 and RETURNS IMMEDIATELY if it comes back
+      negative (0x1d7da0), and node 0 is the sweep's TERMINATOR: it is
+      serviced once per sweep and only when the query finally yields 0.
+      So the cabinet is read only as a side effect of a successful
+      node-bus poll. Other callers exist and matter: `delay(ms)`
+      (0x1d6f64) polls the cabinet every 16 ms while it sleeps, which is
+      probably why some phases feel fine.**
+      **(iii) TESTED IT AND THE OBVIOUS VERSION IS WRONG. I instrumented
+      `nb_next_node()` (PAD_NB_SWEEP=1, committed) expecting to show that
+      emitting the whole node list before the terminating zero divides the
+      cabinet poll rate by the board count. The run produced ZERO
+      `[nbsweep]` lines — and zero `[nbsched]` lines, which pre-date this
+      pass — so that branch is never reached and the schedule is not what
+      paces the cabinet here. Most likely `nb_nnodes == 0`, taking the
+      early return, in which case every poll already answers 0 and the
+      cabinet is serviced every sweep. EITHER WAY the "our node schedule
+      starves node 0" theory is dead, and so is the plan to fix the
+      schedule. The `[nbsched]` 1024-poll summary also never printed, so
+      the game issued fewer than 1024 `00` polls in ~2 minutes — under
+      ~9 Hz — which is itself consistent with a slow sweep.**
+      **RUN 11, THE INSTRUMENT THAT SETTLES IT, and it is cheap: put a
+      monotonic COUNTER in an unused cabinet reply byte (byte 7 — which
+      the report says we should be sending as 0xff anyway, see (iv)).
+      NodeRec.cur byte 7 then records the counter value AT EVERY POLL, so
+      ringwatch's log of that one byte gives both the poll TIMES and, from
+      the deltas, how many SPI transfers passed between polls. That
+      measures the cabinet service rate directly instead of inferring it
+      from capture rates, and it needs no guest instrumentation.**
+      **(iv) A REAL BUG FOUND IN PASSING, on correctness not
+      intermittency: the bus is ACTIVE LOW and we send bytes 3–7 as 0x00,
+      which asserts FORTY permanently-closed switches; the high nibbles of
+      bytes 1 and 2 assert eight more. Idle should be 0xff. Byte 2 bits
+      2–3 are a quadrature encoder (0x5a9ac0) and must be held at a valid
+      Gray-code pair rather than flipped blindly. Worth fixing on its own
+      merits, and it must NOT be bundled with the latency fix — separate
+      change, separate verification.**
+      **RUN 10's second question, kept because the deferral
       does not answer it:
       what does the game require of the cabinet reply before it decodes
       it? Byte 0 of our word is a constant `ff` and bytes 3–7 constant

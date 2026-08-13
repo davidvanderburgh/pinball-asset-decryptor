@@ -4306,7 +4306,43 @@ static unsigned nb_next_node(void)
      * under it between the first node and the terminating zero. */
     if (idx == 0) nb_nodes_add_boards();
     if (nb_nnodes <= 0) return 0;
-    if (idx >= nb_nnodes) { idx = 0; return 0; }
+    if (idx >= nb_nnodes) {
+        idx = 0;
+        /* ITEM 17: THIS ZERO IS THE CABINET, AND THIS IS ITS ONLY CLOCK.
+         *
+         * The game's runtime sweep (0x1d7d88) asks us who needs service and
+         * keeps looping until we answer 0. Node 0 is BOTH the terminator and
+         * the cabinet, so 0x1d6d58 - the only path there is from the SPI word
+         * to NodeRec.cur - runs exactly once per cycle of this list. Emitting
+         * the whole list before the zero therefore divides the cabinet's poll
+         * rate by the number of boards, which is the shape of item 17: a
+         * 300 ms button press is seen about 60% of the time and a 2 s hold
+         * always is.
+         *
+         * Measure the period rather than inferring it from capture rates.
+         * PAD_NB_SWEEP=1. */
+        {
+            static int on = -1;
+            static unsigned long prev_ms;
+            static unsigned cyc, budget = 300;
+            if (on == -1) {
+                char *q = getenv("PAD_NB_SWEEP");
+                on = q && *q == '1';
+            }
+            if (on && budget > 0) {
+                unsigned long now = pad_ms();
+                char m[120];
+                budget--;
+                snprintf(m, sizeof m,
+                         "[nbsweep] %lu ms cycle=%u nodes=%d since=%lu ms\n",
+                         now, ++cyc, nb_nnodes,
+                         prev_ms ? now - prev_ms : 0);
+                logmsg(m);
+                prev_ms = now;
+            }
+        }
+        return 0;
+    }
     return nb_nodes[idx++];
 }
 

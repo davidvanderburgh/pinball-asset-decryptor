@@ -784,10 +784,20 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    jump in front of the window you just clicked, so the rig keeps asking
    until it's allowed, which can take a few seconds. And a **Reset
    windows** button puts them all back to their default positions if one
-   ever ends up somewhere you can't drag it back from: the rig remembers
-   where you last left each window and restores it with no check that the
-   spot is still on screen, so a window parked on a second monitor that
-   is later unplugged comes back out of reach. It works on every
+   ever ends up somewhere you can't drag it back from. That button is
+   now the second thing to reach for rather than the first: the rig
+   remembers where you last left each window, and a remembered position
+   that is off *every* screen is no longer restored at all, so a window
+   parked on a second monitor that was later unplugged opens where the
+   desktop puts it instead of out of reach, and the log names the
+   position it dropped. The check is deliberately the weakest one that
+   still catches a window nobody could see — a window half off an edge,
+   or on a second monitor the desktop still spans, is left exactly where
+   you put it — and the remembered *size* is always restored, because a
+   size cannot hide a window. A desktop that refuses a move outright is
+   also taken at its word now, after two readings that don't budge,
+   rather than aiming further away on each of six tries. The button
+   still exists for everything those leave alone, and works on every
    platform, running or not.
    **Save states**, on by default — every Start boots the guest in the
    one shape that can be checkpointed, so there is nothing to tick, and
@@ -879,10 +889,14 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    the playfield opens, the log says the emulator is up, the guest really
    is running, and there is no picture. When the window does exist the
    run names it — `game window opened 1920x1080 on DISPLAY=:0` — and a
-   desktop showing nothing after that line is missing WSLg's mirror of
-   the window rather than the window, so the cure is *Restart WSL…*,
-   which nothing inside Linux can work out for you because nothing
-   inside Linux can see the Windows desktop. When the renderer went
+   desktop showing nothing after that line now gets both of its causes,
+   in the order worth trying: the window opened somewhere you cannot see
+   it, cured by Stop and *Reset windows*, or WSLg is not mirroring it,
+   cured by Stop and *Restart WSL…* — which nothing inside Linux can
+   work out for you, because nothing inside Linux can see the Windows
+   desktop. The restart used to be the only advice offered, and it does
+   nothing whatever for the first case: the coordinates come straight
+   back out of the same file on the next run. When the renderer went
    without a window instead, a block says so loudly and quotes the
    renderer's own reason, and the run carries on rather than dying — the
    guest boots, the sound plays, the playfield answers, and only the

@@ -1153,6 +1153,22 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Loose ends worth a look, not yet worth a queue slot
 
+- **"The switch table isn't coming through" is (at least partly) THE FIRST RUN
+  OF A TITLE, by design — and nothing says so at the time.** David, 2026-08-14,
+  on his bond 60th run. Measured the same hour: `watch.sh` prints *"switches —
+  no switch dump yet - clickable switches will appear on the next run of this
+  title"*, because the dump is written DURING a run for the NEXT one, and his
+  was james_bond_60th's first run on this rig. The very next run of the same
+  title dumped all 118 with real names (`QR SCANNER STATUS READY`, `DIP 1`,
+  `Reel 1 at Destination Virtual`), and `[swfind] found the switch table:
+  entry[] at 0x007d2680, 118 switches` on both. So the reader is fine and the
+  first-run experience is the fault: a user meets a numberless playfield with
+  the explanation buried in a log pane. Cheap fix shape: say it in the
+  playfield window, not only in the log. **Separately and NOT explained: `[dev]
+  --- ball devices: count=1119174656 ---`** on both bond runs. 1.1 billion is a
+  misparse of something; the switch names still came out, so it is the ball
+  DEVICE table specifically, which is what item 21b's trough model reads.
+
 - **A NON-PIVOT, ordinary-user run of james_bond_60th dies about three frames
   in, every time — and it is not the title's assets or item 45's mask.** Found
   2026-08-14 while verifying item 45. Three runs from `item/45` launched as

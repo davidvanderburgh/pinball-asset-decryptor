@@ -225,6 +225,10 @@ class _ImageMetaStub:
     _apply_image_meta = MainWindow._apply_image_meta
     _slot_not_on_card = MainWindow._slot_not_on_card
     _NOT_ON_CARD_MARK = MainWindow._NOT_ON_CARD_MARK
+    # Batch 37: the mark can now name the file the slot was changed with.
+    # No scan dir on the stub, so it falls back to the bare mark.
+    _changed_on_disk_cell = MainWindow._changed_on_disk_cell
+    _remembered_rep_name = MainWindow._remembered_rep_name
 
     def __init__(self, rel, changed=(), assigned=None, foreign=()):
         self._image_scan_id = 7

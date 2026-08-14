@@ -245,6 +245,8 @@ class _AudioPreviewPane:
         self._render_id = 0       # bump to drop stale async renders
         self._spec_img = None     # PhotoImage ref (must stay alive)
         self._hint = ""           # message shown when nothing is loaded
+        #: Optional () -> bool the window sets; True = it handled this ▶.
+        self.play_intercept = None
 
         self.frame = ttk.Frame(parent)
         # Title carries the loaded file's name ("Original — idx0258.wav") so
@@ -281,9 +283,13 @@ class _AudioPreviewPane:
 
     # ---- loading ------------------------------------------------------
 
-    def load(self, path, dur, limit=None, autoplay=False):
+    def load(self, path, dur, limit=None, autoplay=False, label=None):
         """Load *path* into the strip.  *dur* is its probed duration (s);
-        *limit* is the trim stop point (s), or None to play the whole file."""
+        *limit* is the trim stop point (s), or None to play the whole file.
+
+        *label* names the file in the title instead of *path*'s own name —
+        for the folder's own copy of a slot, whose name is the SLOT's, when
+        the project remembers what it was replaced with."""
         self.stop_playback()
         self.path = path
         self.dur = dur or 0.0
@@ -292,7 +298,7 @@ class _AudioPreviewPane:
         self._hint = ""
         try:
             self.title_var.set("%s — %s" % (self.base_title,
-                                            os.path.basename(path)))
+                                            label or os.path.basename(path)))
         except Exception:
             pass
         self._render_spectrogram(path)
@@ -415,6 +421,17 @@ class _AudioPreviewPane:
             if self._on_activate is not None:
                 self._on_activate()
             return
+        # "Play replacements" applies to whichever ▶ is pressed, not only to
+        # the rows the run steps onto (a tester pressed ▶ on the Original of a
+        # replaced row with the box ticked and heard the stock file: "Should it
+        # not play the replacement regardless of which play button is
+        # pressed?").  The window decides; True means it started the sibling.
+        if not self.playing and self.play_intercept is not None:
+            try:
+                if self.play_intercept():
+                    return
+            except Exception:
+                pass
         if self.playing:
             self.stop_playback()  # pause, keeps position
         else:
@@ -691,8 +708,11 @@ class _VideoPreviewPane:
 
     # ---- loading ------------------------------------------------------
 
-    def load(self, path, autoplay=False):
-        """Load *path* into the player and poster a representative frame."""
+    def load(self, path, autoplay=False, label=None):
+        """Load *path* into the player and poster a representative frame.
+
+        *label* names the file in the title instead of *path*'s own name (see
+        the audio pane's twin)."""
         from ..core import video as _video
         self._cancel_scrub()
         self.stop_playback()
@@ -701,7 +721,7 @@ class _VideoPreviewPane:
         self.path = path
         try:
             self.title_var.set("%s — %s" % (self.base_title,
-                                            os.path.basename(path)))
+                                            label or os.path.basename(path)))
         except Exception:
             pass
         info = _video.detect_video_info(path)
@@ -1290,6 +1310,9 @@ class MainWindow:
         # ``on_column_widths_change`` (settings.json).  ``{tree_key: {col: px}}``.
         self._saved_column_widths = dict(initial_column_widths or {})
         self._on_column_widths_change = on_column_widths_change
+        # Column widths captured when a press lands on a tree separator, so
+        # the matching release knows a real resize from a row click.
+        self._tree_drag_widths = {}
         # Which Build / flash sections the user last ran, per manufacturer
         # (``{mfr_key: {"build": bool, "write": bool}}``), persisted via
         # ``on_flash_choices_change`` — a tester who builds here and writes the
@@ -1613,6 +1636,9 @@ class MainWindow:
         self._video_slots = []           # list[VideoSlot] from last scan
         self._video_slots_by_rel = {}    # rel_path -> VideoSlot
         self._video_assignments = {}     # rel_path -> replacement file path
+        # Per-clip answer to "use my files as-is", overriding the tab-wide
+        # box for just that slot (right-click → This clip's conversion).
+        self._video_asis_flags = {}      # rel_path -> bool
         self._video_scan_id = 0          # bump-counter to drop stale scans
         self._video_scan_dir = ""        # folder the current slots came from
         # Preview players: Original + Replacement side-by-side panes
@@ -1891,6 +1917,10 @@ class MainWindow:
         # work on every keystroke into the Browse field.
         self.write_assets_var.trace_add(
             "write", lambda *_: self._maybe_rescan_write_preview())
+        # Point the per-project log mirror at whatever folder is being worked
+        # on, so each project keeps its own history (batch 37).
+        self.write_assets_var.trace_add(
+            "write", lambda *_: self._follow_project_log())
         self.write_assets_var.trace_add(
             "write", lambda *_: self._refresh_write_assets_warning())
         self.write_assets_var.trace_add(
@@ -2062,11 +2092,32 @@ class MainWindow:
             (0, 0), window=self._mfr_view, anchor="nw")
 
         def _update_mfr_scroll(_e=None):
+            # The canvas window item carries an explicit height (see
+            # _resize_mfr_view), which FORCES the inner frame to that height —
+            # so a widget packed after the last canvas <Configure> gets no
+            # space at all and simply disappears rather than overflowing.  A
+            # tester hit exactly that: the big red WRONG FORMAT callout under
+            # the Video preview pushed the whole "Use my files as-is / Trim"
+            # options row out of existence, and only switching tabs and back
+            # (which re-runs _refresh_mfr_scrollregion) brought it back
+            # (batch 37).  Re-apply the height from the frame's own REQUESTED
+            # height here too — reqheight is independent of the height we
+            # force, so this settles rather than oscillating, and it is a
+            # no-op unless the content actually grew or shrank.
+            visible = self._mfr_view_canvas.winfo_height()
+            inner_h = self._mfr_view.winfo_reqheight()
+            want = max(visible, inner_h)
+            try:
+                if int(self._mfr_view_canvas.itemcget(
+                        self._mfr_view_id, "height") or 0) != want:
+                    self._mfr_view_canvas.itemconfig(self._mfr_view_id,
+                                                     height=want)
+            except (tk.TclError, ValueError):
+                pass
             bbox = self._mfr_view_canvas.bbox("all")
             if bbox is None:
                 return
             self._mfr_view_canvas.configure(scrollregion=bbox)
-            visible = self._mfr_view_canvas.winfo_height()
             content_h = bbox[3] - bbox[1]
             if content_h > visible + 2:
                 self._mfr_view_scroll.pack(side=tk.RIGHT, fill=tk.Y)
@@ -2985,6 +3036,18 @@ class MainWindow:
             preview_toolbar, text="Refresh",
             command=self._rescan_write_preview_clicked)
         self._write_preview_refresh_btn.pack(side=tk.RIGHT, padx=(0, 24))
+        # Sits with the scan control, not with the act-on-these-changes group:
+        # it reads the list rather than changing anything.
+        self._write_csv_btn = ttk.Button(
+            preview_toolbar, text="Export CSV", command=self._write_export_csv)
+        self._write_csv_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        _Tooltip(
+            self._write_csv_btn,
+            "Save this list — every file the next build will write, with its "
+            "type and whether it already differs from the extract or is "
+            "staged for the build — as a CSV.\n\nFor comparing two projects "
+            "that disagree about how many changes they hold.",
+            lambda: self._current_theme)
         # Register with the shared scan-state machinery so the preview scan
         # gets the same treatment as the Replace tabs — list blanked, big
         # animated spinner, Refresh flips to a live Cancel (feedback batch 8:
@@ -3029,6 +3092,15 @@ class MainWindow:
         self._persist_tree_columns(
             self._write_preview_tree, "write_preview",
             ("#0", "type", "status"))
+        # Click-header sort, like the Replace tabs.  A tester comparing the
+        # build lists of two projects ("LE said 231 file changes while Beta4
+        # said 222 which does not make sense") wanted to sort by type and
+        # could not: "there is no sorting. Can sorting be added to this
+        # screen?" (batch 37).  A third click restores the scan's own order,
+        # which groups Pending above Modified.
+        self._wire_sort_headings(
+            self._write_preview_tree, self._WRITE_SORT_CFG, "_write_sort",
+            self._refresh_write_preview_list, cycle_to_natural=True)
         preview_scroll = ttk.Scrollbar(
             preview_inner, orient=tk.VERTICAL,
             command=self._write_preview_tree.yview)
@@ -3076,6 +3148,10 @@ class MainWindow:
         # Bump-counter to invalidate in-flight scans when the user
         # changes the assets folder before a previous scan finishes.
         self._write_preview_scan_id = 0
+        # The rows behind the tree, so the list can be re-sorted and exported
+        # without re-scanning: [(rel, ext, status, tag)].
+        self._write_preview_rows = []
+        self._write_sort = (None, False)     # scan order until a header click
 
         # (Build / Revert / Refresh live in the preview-frame toolbar above;
         # the Build button also serves as the run-time Cancel — see
@@ -3532,6 +3608,7 @@ class MainWindow:
         self._audio_pane_rep.sibling = self._audio_pane_orig
         self._audio_pane_orig.on_finished = self._audio_on_clip_finished
         self._audio_pane_rep.on_finished = self._audio_on_clip_finished
+        self._audio_pane_orig.play_intercept = self._audio_play_intercept
         self._audio_pane_orig.frame.grid(row=0, column=0, sticky="ew",
                                          padx=(0, 4))
         self._audio_pane_rep.frame.grid(row=0, column=1, sticky="ew",
@@ -3586,8 +3663,11 @@ class MainWindow:
                  "replacement instead of the original — the whole list "
                  "sounds the way the built card will.\n\nSo anything that "
                  "still sounds stock is a clip you haven't replaced yet.\n\n"
-                 "Ticking this turns on \"Play sequentially\" too — it only "
-                 "acts while sequential play is stepping through the list.",
+                 "It applies to the ▶ buttons too: with this ticked, pressing "
+                 "▶ under Original on a row you have replaced plays your "
+                 "replacement, so what you hear is always what the card "
+                 "will play.\n\nTicking this turns on \"Play sequentially\" "
+                 "as well.",
                  lambda: self._current_theme)
         # Experiment levers for the trigger-pop hunt (Stern-only): per-knob
         # encode overrides + a stock characterization report.
@@ -4170,6 +4250,18 @@ class MainWindow:
     #: Replacement-column mark for a row the card has no slot for.
     _NOT_ON_CARD_MARK = "⚠ not on this card"
 
+    def _changed_on_disk_cell(self, kind, rel):
+        """The Replacement column's text for a slot that differs from the
+        extract but has no live assignment to name.
+
+        Names the file it was changed with when the folder remembers one.  A
+        mod pack carries the changed files and not the paths they came from,
+        so an imported project could only ever say "changed on disk", and a
+        tester asked outright why the name could not be shown (batch 37).
+        Packs now carry the names, so most of the time it can."""
+        name = self._remembered_rep_name(kind, rel)
+        return "✓ changed on disk (%s)" % name if name else "✓ changed on disk"
+
     def _rep_pane_empty_text(self, kind, rel, default):
         """What *kind*'s Replacement pane says when it has nothing to show.
 
@@ -4514,7 +4606,8 @@ class MainWindow:
                 # WILL still be in the next build (Write repacks anything that
                 # differs from the baseline), so surface it: the count matches
                 # the Write tab; right-click → Revert to undo it.
-                rep_disp, tag = "✓ changed on disk", "changed"
+                rep_disp, tag = self._changed_on_disk_cell(
+                    "audio", s.rel_path), "changed"
             else:
                 rep_disp, tag = "Choose…", ""
             loop_disp = "☑" if self._audio_loop_flags.get(s.rel_path) else "☐"
@@ -5046,6 +5139,84 @@ class MainWindow:
         root.wait_window(dlg)
         return result[0] if result else None
 
+    def ask_with_details(self, title, message, rows, details_label,
+                         details_columns=("File", "Why")):
+        """A Yes/No question with a "Details" button that expands the box into
+        a table of *rows* (``[(col1, col2), ...]``).  Returns True on Yes.
+
+        Built for the mod-pack import question, which could only say "8 of the
+        pack's 232 file(s) will be skipped" — a tester had to go hunting
+        through the folder afterwards to find out which ones, and asked for
+        exactly this: "a details button that you can click and the window will
+        expand to show a table of what is being skipped" (batch 37).  Falls
+        back to a plain messagebox when there is nothing to detail, so the
+        common case is unchanged.
+        """
+        if not rows:
+            return messagebox.askyesno(title, message)
+        root = self._tk_root()
+        dlg = tk.Toplevel(root)
+        dlg.title(title)
+        dlg.transient(root)
+        self._theme_toplevel(dlg)
+        ttk.Label(dlg, text=message, justify=tk.LEFT,
+                  wraplength=560).pack(anchor=tk.W, padx=14, pady=(14, 8))
+
+        # The table starts collapsed: the question is answerable without it,
+        # and an always-on list of 200 files would bury the question itself.
+        detail_frame = ttk.Frame(dlg)
+        tree = ttk.Treeview(detail_frame, columns=("why",), height=8,
+                            selectmode="browse")
+        tree.heading("#0", text=details_columns[0], anchor=tk.W)
+        tree.heading("why", text=details_columns[1], anchor=tk.W)
+        tree.column("#0", width=340, minwidth=180)
+        tree.column("why", width=260, minwidth=140)
+        dscroll = ttk.Scrollbar(detail_frame, orient=tk.VERTICAL,
+                                command=tree.yview)
+        tree.configure(yscrollcommand=dscroll.set)
+        dscroll.pack(side=tk.RIGHT, fill=tk.Y)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        for first, second in rows:
+            tree.insert("", tk.END, text=first, values=(second,))
+
+        btns = ttk.Frame(dlg)
+        btns.pack(fill=tk.X, padx=14, pady=(0, 14))
+        result = []
+
+        def _toggle():
+            if detail_frame.winfo_manager():
+                detail_frame.pack_forget()
+                dlg.geometry("")            # shrink back to the question
+                det_btn.configure(text="%s ▾" % details_label)
+            else:
+                detail_frame.pack(fill=tk.BOTH, expand=True, padx=14,
+                                  pady=(0, 10), before=btns)
+                dlg.geometry("")            # grow to fit the table
+                det_btn.configure(text="%s ▴" % details_label)
+
+        det_btn = ttk.Button(btns, text="%s ▾" % details_label,
+                             command=_toggle)
+        det_btn.pack(side=tk.LEFT)
+
+        def _yes(_e=None):
+            result.append(True)
+            dlg.destroy()
+
+        def _no(_e=None):
+            dlg.destroy()
+
+        ttk.Button(btns, text="Yes", command=_yes,
+                   style="Go.TButton").pack(side=tk.RIGHT)
+        ttk.Button(btns, text="No", command=_no).pack(
+            side=tk.RIGHT, padx=(0, 6))
+        dlg.bind("<Return>", _yes)
+        dlg.bind("<Escape>", _no)
+        dlg.protocol("WM_DELETE_WINDOW", _no)
+        center_over(root, dlg)
+        dlg.grab_set()
+        root.wait_window(dlg)
+        return bool(result)
+
     def _audio_rename_slot(self, rel):
         """Right-click → Properties…: set the name after the slot's decode
         index and/or its Type bucket.
@@ -5365,6 +5536,29 @@ class MainWindow:
                 and not self.audio_play_through_var.get()):
             self.audio_play_through_var.set(True)
 
+    def _audio_play_intercept(self):
+        """▶ was pressed on the Original pane.  With "Play replacements" on,
+        play the replacement instead and report that we handled it.
+
+        The box promises the list will sound the way the built card will, and
+        it kept that promise from the SECOND row onwards — the row you pressed
+        ▶ on played stock, which is exactly the inconsistency a tester hit
+        ("Should it not play the replacement regardless of which play button
+        is pressed?", batch 37).  Only when a replacement actually exists for
+        the row; otherwise the stock file is what the card plays anyway."""
+        if not self.audio_play_subst_var.get():
+            return False
+        rel = self._audio_current_rel
+        if rel is None or not self._audio_rep_available(rel):
+            return False
+        pane = self._audio_pane_rep
+        if pane is None or pane.path is None:
+            return False
+        self._audio_pane_orig.stop_playback()
+        pane.pos = 0.0
+        pane.start_playback(0.0)
+        return True
+
     def _audio_on_clip_finished(self, pane):
         """A preview finished on its own — step to the next row when "Play
         through the list" is on (feedback batch 23).
@@ -5436,9 +5630,15 @@ class MainWindow:
         # Honest title: with no snapshot, an already-changed slot's on-disk
         # bytes ARE the replacement — don't call them "Original" (a tester
         # read his imported mod as a missing replacement).
+        #
+        # And when the snapshot IS in use, both panes hold a file with the
+        # slot's own name, so the two titles read identically and the pair
+        # looks like a mistake ("the two preview boxes have the same file name
+        # which does not seem correct", batch 37).  Say which copy each one
+        # is; the Replacement side does the same in _audio_load_rep_pane.
         self._audio_pane_orig.base_title = (
             "Current file (already modified)" if changed and not snap_used
-            else "Original")
+            else "Original (stock)" if snap_used else "Original")
         if opath and os.path.isfile(opath):
             self._audio_pane_orig.load(
                 opath, _audio.probe_duration(opath) or 0.0, None,
@@ -5471,6 +5671,7 @@ class MainWindow:
         rpath = self._audio_assignments.get(rel) if rel else None
         if rpath and os.path.isfile(rpath):
             rdur = _audio.probe_duration(rpath) or 0.0
+            self._audio_pane_rep.base_title = "Replacement"
             self._audio_pane_rep.load(
                 rpath, rdur, self._audio_compute_preview_limit(rel, rdur),
                 autoplay=autoplay)
@@ -5485,19 +5686,32 @@ class MainWindow:
             slot = self._audio_slots_by_rel.get(rel)
             cur = slot.abs_path if slot else None
             if cur and os.path.isfile(cur):
+                # This is the folder's own file, which carries the slot's
+                # name — the same name the stock copy on the left has.  Name
+                # the copy, not just the file, or the pair reads as one file
+                # shown twice (batch 37).  When the folder remembers what it
+                # was replaced WITH, that name goes here instead of the slot's.
+                self._audio_pane_rep.base_title = "Replacement (your file)"
                 self._audio_pane_rep.load(
                     cur, _audio.probe_duration(cur) or 0.0, None,
-                    autoplay=autoplay)
+                    autoplay=autoplay,
+                    label=self._remembered_rep_name("audio", rel) or None)
                 return
+        self._audio_pane_rep.base_title = "Replacement"
         self._audio_pane_rep.clear(
             self._rep_pane_empty_text("audio", rel, "no replacement assigned"))
 
     def _audio_activate_pane(self, side):
         """▶ pressed on an empty pane: load the selected row, then play the
-        pane that asked."""
+        pane that asked — or its replacement, when "Play replacements" says
+        that is what the card will play (see :meth:`_audio_play_intercept`)."""
         rel = self._audio_selected_rel()
-        if rel is not None:
-            self._audio_load_track(rel, autoplay=side)
+        if rel is None:
+            return
+        if (side == "orig" and self.audio_play_subst_var.get()
+                and self._audio_rep_available(rel)):
+            side = "rep"
+        self._audio_load_track(rel, autoplay=side)
 
     def _audio_space_toggle(self, _event=None):
         """Spacebar on the audio list: pause whichever pane is playing, else
@@ -5907,7 +6121,11 @@ class MainWindow:
             "can see that coming.\n\nOff: anything that isn't already a match "
             "is converted to suit the slot, at full size — and a clip that is "
             "already this slot's video in the wrong container is repackaged "
-            "rather than re-encoded, so it loses nothing either.",
+            "rather than re-encoded, so it loses nothing either.\n\nFor a "
+            "single clip, right-click its row and use \"This clip's "
+            "conversion\" — that setting wins over this box, either way, so "
+            "one hand-encoded clip can go on untouched in a project that "
+            "converts everything else.",
             lambda: self._current_theme)
 
         self._video_trim_cb = ttk.Checkbutton(
@@ -5959,12 +6177,70 @@ class MainWindow:
                 rep_ext or "extension-less"))
         if not deep:
             return None
-        return (self._video_playability_conflict(slot, path)
+        stock = self._video_stock_path(rel)
+        return (self._video_playability_conflict(slot, path, stock)
                 or self._video_extra_audio(slot, path))
 
+    def _video_asis_for(self, rel):
+        """Whether *rel* goes on as-is: its own setting when it has one, the
+        tab-wide box otherwise."""
+        flag = self._video_asis_flags.get(rel)
+        if flag is None:
+            return bool(self.video_no_conversion_var.get())
+        return bool(flag)
+
+    def _video_set_asis(self, rel, value):
+        """Set (or clear, with *value* None) *rel*'s own conversion setting.
+
+        The tab-wide box changes what the build does with every clip at once,
+        which is right for "I encode everything myself" but not for the one
+        hand-tuned clip in an otherwise ordinary project — a tester ran into
+        exactly that: "I unchecked it and noticed it is an all or nothing
+        option. You can't mix and match. Any reason why?" (batch 37)."""
+        if value is None:
+            self._video_asis_flags.pop(rel, None)
+            word = ("as-is" if self.video_no_conversion_var.get()
+                    else "converted")
+            self.append_log(
+                "Replace Video: %s follows the box below again (%s)."
+                % (rel, word), "info")
+        else:
+            self._video_asis_flags[rel] = bool(value)
+            self.append_log(
+                "Replace Video: %s is set to %s, whatever the box below says."
+                % (rel, "go on as-is" if value else "be converted"), "info")
+        self._save_staged_changes()
+        # The Convert column's verdict keys off the flag, so it has to be
+        # re-asked for this row (its cache entry is keyed by the old value).
+        self._video_probe_conv_async()
+        self._refresh_video_list()
+        if rel == self._video_current_rel:
+            self._video_update_preview_note(rel)
+
+    def _video_stock_path(self, rel):
+        """The pristine copy of slot *rel* (its ``.orig`` snapshot), or None.
+
+        Cheap — a path test, no probe — so it is safe to resolve on the main
+        thread before handing work to the Convert column's worker."""
+        from ..core import staged_originals
+        if not rel:
+            return None
+        return staged_originals.snapshot_path(self._video_scan_dir, rel)
+
     @staticmethod
-    def _video_playability_conflict(slot, path):
+    def _video_playability_conflict(slot, path, stock_path=None):
         """Why the machine wouldn't play *path* in *slot*, or None.
+
+        The geometry / frame-rate / profile half is measured against the
+        STOCK clip (*stock_path*, the slot's ``.orig`` snapshot) whenever one
+        exists, falling back to whatever is in the slot right now.  Only the
+        factory clip is evidence of what the machine's decoder accepts: once a
+        slot holds the user's own earlier replacement, comparing against it
+        measures his file against his file.  A tester's 30 fps clips were
+        rejected for "this slot's clip is 60 fps" where the 60 fps was his own
+        previous import, and the message read as the card demanding 60 fps —
+        "I never realized these videos were 60fps when everything else was
+        30fps. That seems really odd" (batch 37).
 
         Touches no Tk state, so the Convert column's worker thread can call it.
         Best-effort: without ffprobe there is nothing to measure, and a file
@@ -5983,23 +6259,27 @@ class MainWindow:
         if pix and pix not in _video.SAFE_PIX_FMTS:
             return ("%s is %s and the machine's decoder handles only 8-bit "
                     "4:2:0" % (name, pix))
-        sinfo = getattr(slot, "info", None)
+        sinfo = _video.detect_video_info(stock_path) if stock_path else None
+        whose = "this slot's stock clip" if sinfo is not None \
+            else "this slot's clip"
+        if sinfo is None:
+            sinfo = getattr(slot, "info", None)
         if sinfo is None or not sinfo.width or not sinfo.height:
             return None
         if info.width and info.height and (
                 (info.width, info.height) != (sinfo.width, sinfo.height)):
-            return ("%s is %dx%d and this slot's clip is %dx%d"
-                    % (name, info.width, info.height,
+            return ("%s is %dx%d and %s is %dx%d"
+                    % (name, info.width, info.height, whose,
                        sinfo.width, sinfo.height))
         if sinfo.fps > 0 and info.fps > 0 and abs(info.fps - sinfo.fps) > 0.5:
-            return ("%s runs at %.3g fps and this slot's clip is %.3g fps"
-                    % (name, info.fps, sinfo.fps))
+            return ("%s runs at %.3g fps and %s is %.3g fps"
+                    % (name, info.fps, whose, sinfo.fps))
         rank = _video.profile_rank(info)
         slot_rank = _video.profile_rank(sinfo)
         if rank is not None and slot_rank is not None and rank > slot_rank:
-            return ("%s is H.264 %s profile and this slot's clip is %s — above "
+            return ("%s is H.264 %s profile and %s is %s — above "
                     "what the slot proves the machine decodes"
-                    % (name, info.profile, sinfo.profile))
+                    % (name, info.profile, whose, sinfo.profile))
         return None
 
     def _slot_unplayable(self, slot):
@@ -6102,7 +6382,7 @@ class MainWindow:
     _VIDEO_CONV_ASIS_NOISY = "As-is ⚠ audio"
 
     @staticmethod
-    def _video_conv_mode(slot, path, no_conversion, trim):
+    def _video_conv_mode(slot, path, no_conversion, trim, stock_path=None):
         """What Write will do with *path* for *slot*: copy it in verbatim
         (``As-is``), rewrite only its container (``Repackage`` — lossless too)
         or re-encode it (``Re-encode``); "" when it can't be determined (no
@@ -6125,7 +6405,7 @@ class MainWindow:
             # It WILL be copied on untouched — so the honest answer is whether
             # the machine can play what's being copied, not just whether Write
             # will accept it.
-            if MainWindow._video_playability_conflict(slot, path):
+            if MainWindow._video_playability_conflict(slot, path, stock_path):
                 return MainWindow._VIDEO_CONV_REJECT
             if MainWindow._video_extra_audio(slot, path):
                 # The picture is fine; it is the extra soundtrack that isn't.
@@ -6166,7 +6446,7 @@ class MainWindow:
         except OSError:
             ident = (0, 0)
         return (rel, path, ident,
-                bool(self.video_no_conversion_var.get()),
+                self._video_asis_for(rel),
                 bool(self.video_trim_var.get()))
 
     def _video_conv_cached(self, rel, path):
@@ -6176,6 +6456,15 @@ class MainWindow:
         if not path:
             return ""
         return self._video_conv_cache.get(self._video_conv_key(rel, path), "…")
+
+    def _video_conv_cell(self, rel, path):
+        """The Convert column's text, marked with a • when this clip has its
+        own conversion setting rather than following the box below — otherwise
+        an override is invisible among a hundred rows."""
+        text = self._video_conv_cached(rel, path)
+        if text and self._video_asis_flags.get(rel) is not None:
+            return "• " + text
+        return text
 
     def _video_probe_conv_async(self):
         """Resolve the Convert column for every assigned row that isn't cached
@@ -6188,7 +6477,6 @@ class MainWindow:
         import threading
         self._video_conv_pass_id += 1
         pass_id = self._video_conv_pass_id
-        no_conv = bool(self.video_no_conversion_var.get())
         trim = bool(self.video_trim_var.get())
         # Keys are built HERE (main thread) via _video_conv_key so they carry
         # the picked file's size+mtime — the worker must store its answer
@@ -6200,6 +6488,13 @@ class MainWindow:
             return
         slots = {rel: self._video_slots_by_rel.get(rel)
                  for _k, rel, _p in pending}
+        # Resolved here (main thread) because it reads _video_scan_dir; it is
+        # only a path test, so it costs nothing even with 200 assigned rows —
+        # the worker does the probing.
+        stock = {rel: self._video_stock_path(rel) for _k, rel, _p in pending}
+        # Per-clip, because a clip can now be set to go on as-is (or to be
+        # converted) against whatever the tab-wide box says.
+        asis = {rel: self._video_asis_for(rel) for _k, rel, _p in pending}
 
         def _work():
             out = []
@@ -6208,7 +6503,8 @@ class MainWindow:
                     return
                 out.append((key,
                             self._video_conv_mode(slots.get(rel), path,
-                                                  no_conv, trim)))
+                                                  asis.get(rel, False), trim,
+                                                  stock.get(rel))))
             try:
                 self._tk_root().after(0, self._apply_video_conv, pass_id, out)
             except (tk.TclError, RuntimeError):
@@ -6236,7 +6532,10 @@ class MainWindow:
                     continue
                 vals = list(tree.item(rel, "values"))
                 if len(vals) >= 6:
-                    vals[5] = mode
+                    vals[5] = ("• " + mode
+                               if mode
+                               and self._video_asis_flags.get(rel) is not None
+                               else mode)
                     tree.item(rel, values=vals)
             except tk.TclError:
                 pass
@@ -6303,30 +6602,37 @@ class MainWindow:
         # thread, and the deeper "would the machine play it?" answer arrives in
         # the Convert column from its own worker pass.
         if self.video_no_conversion_var.get():
+            # Only the clips the box actually governs: one set to be converted
+            # is not affected by this at all.
             bad = [w for w in (
                 self._video_noconv_conflict(rel, p, deep=False)
-                for rel, p in sorted(self._video_assignments.items()))
+                for rel, p in sorted(self._video_assignments.items())
+                if self._video_asis_for(rel))
                 if w is not None]
             if bad:
                 messagebox.showwarning(
                     "Using your files as-is",
                     "These assigned replacements can't be used as-is and "
                     "would be rejected at build time:\n\n%s\n\nUntick \"Use "
-                    "my files as-is\" to have them converted automatically."
-                    % "\n".join("  • %s" % w for w in bad))
+                    "my files as-is\" to have them all converted, or "
+                    "right-click just these rows and set them to be "
+                    "converted." % "\n".join("  • %s" % w for w in bad))
         # The flag decides every row's Convert answer — redraw so the column
         # tracks the checkbox.
         self._refresh_video_list()
 
     def _update_video_trim_enabled(self):
-        """Enable the trim/pad checkbox only when we'll actually re-encode
-        (i.e. 'No conversion' is off)."""
+        """Enable the trim/pad checkbox only when something will actually be
+        re-encoded — the box is off, or at least one clip is set to be
+        converted against it (per-clip conversion, batch 37)."""
         cb = getattr(self, "_video_trim_cb", None)
         if cb is None:
             return
+        any_converted = (not self.video_no_conversion_var.get()
+                         or any(v is False
+                                for v in self._video_asis_flags.values()))
         try:
-            cb.state(["disabled"] if self.video_no_conversion_var.get()
-                     else ["!disabled"])
+            cb.state(["!disabled"] if any_converted else ["disabled"])
         except tk.TclError:
             pass
 
@@ -6420,11 +6726,18 @@ class MainWindow:
             if "video_no_conversion" in staged:
                 self.video_no_conversion_var.set(
                     bool(staged["video_no_conversion"]))
+            self._video_asis_flags = {
+                rel: bool(v)
+                for rel, v in (staged.get("video_asis_slots") or {}).items()
+                if rel in self._video_slots_by_rel}
             self._restore_change_filter("video", staged)
             self._update_video_trim_enabled()
         else:
             self._video_assignments = {
                 rel: rep for rel, rep in self._video_assignments.items()
+                if rel in self._video_slots_by_rel}
+            self._video_asis_flags = {
+                rel: v for rel, v in self._video_asis_flags.items()
                 if rel in self._video_slots_by_rel}
         folder_changed = scan_dir != self._video_scan_dir
         self._video_scan_dir = scan_dir
@@ -6478,13 +6791,13 @@ class MainWindow:
         elif self._slot_not_on_card("video", rel):
             rep_disp = self._NOT_ON_CARD_MARK
         elif rel in self._video_changed_on_disk:
-            rep_disp = "✓ changed on disk"
+            rep_disp = self._changed_on_disk_cell("video", rel)
         else:
             rep_disp = "Choose…"
         tree.item(rel, values=(slot.duration_str(), slot.resolution_str(),
                                self._video_fmt_cell(slot),
                                slot.info.audio_summary() if slot.info else "",
-                               rep_disp, self._video_conv_cached(rel, rep)))
+                               rep_disp, self._video_conv_cell(rel, rep)))
 
     def _refresh_video_list(self):
         """Apply the search filter + sort and repopulate the slot tree."""
@@ -6539,7 +6852,8 @@ class MainWindow:
             elif self._slot_not_on_card("video", s.rel_path):
                 rep_disp, tag = self._NOT_ON_CARD_MARK, "foreign"
             elif is_changed:
-                rep_disp, tag = "✓ changed on disk", "changed"
+                rep_disp, tag = self._changed_on_disk_cell(
+                    "video", s.rel_path), "changed"
             else:
                 rep_disp, tag = "Choose…", ""
             if s.info is None and not s.probed:
@@ -6550,7 +6864,7 @@ class MainWindow:
             tree.insert("", tk.END, iid=s.rel_path, text=s.rel_path,
                         values=(length, res, self._video_fmt_cell(s), aud,
                                 rep_disp,
-                                self._video_conv_cached(s.rel_path, rep)),
+                                self._video_conv_cell(s.rel_path, rep)),
                         tags=(tag,) if tag else ())
 
         total = len(self._video_slots)
@@ -6855,22 +7169,29 @@ class MainWindow:
         # "No conversion" + a file the copy-through would reject used to fail
         # silently until build time ("✗ … needs a .mov") — a tester hit it.
         # Surface the mismatch here, while the user can still act on it.
-        if self.video_no_conversion_var.get():
+        if self._video_asis_for(rel):
             why = self._video_noconv_conflict(rel, path)
             if why is not None:
+                # Offered per clip, not as "untick the box": the box governs
+                # every replacement in the project, and a tester with one bad
+                # file among his hand-encoded ones had no way to fix just that
+                # one ("it is an all or nothing option", batch 37).
                 if messagebox.askyesno(
                         "Using your files as-is",
-                        "%s.\n\nWith \"Use my files as-is\" ticked, this file "
-                        "goes onto the card exactly as it is.\n\nUntick it so "
-                        "replacements are converted to suit the slot?"
-                        % why, icon="warning"):
-                    self.video_no_conversion_var.set(False)
-                    self._video_on_no_conversion_toggle()
+                        "%s.\n\nAs things stand this file goes onto the card "
+                        "exactly as it is, and the machine plays its sound "
+                        "over a black picture.\n\nConvert just this clip to "
+                        "suit the slot? Every other clip keeps whatever it is "
+                        "set to." % why, icon="warning"):
+                    self._video_asis_flags[rel] = False
+                    self.append_log(
+                        "Replace Video: %s is set to be converted, whatever "
+                        "the box below says." % rel, "info")
                 else:
                     self.append_log(
-                        "Replace Video: %s — %s; it goes on the card as it is "
-                        "unless 'Use my files as-is' is unticked."
-                        % (rel, why), "error")
+                        "Replace Video: %s — %s; it goes on the card as it is. "
+                        "Right-click the row → This clip's conversion to "
+                        "change just this one." % (rel, why), "error")
         self._video_assignments[rel] = path
         self._save_staged_changes()
         note = self._video_conversion_note(rel, path)
@@ -6975,6 +7296,32 @@ class MainWindow:
                 label="Show scene contents…",
                 command=lambda r=row: self._open_scene_browser(
                     preselect_video=r))
+        # Per-clip conversion, so one hand-encoded clip can go on untouched in
+        # a project that converts everything else (and the other way round) —
+        # the tab-wide box was all or nothing (a tester, batch 37).
+        menu.add_separator()
+        conv_menu = tk.Menu(menu, tearoff=0)
+        try:
+            conv_menu.configure(
+                background=c.get("field_bg"), foreground=c.get("fg"),
+                activebackground=c.get("select_bg"),
+                activeforeground="#ffffff")
+        except tk.TclError:
+            pass
+        choice = tk.StringVar(
+            value={None: "box", True: "asis", False: "convert"}[
+                self._video_asis_flags.get(row)])
+        self._video_conv_choice_var = choice      # keep the var alive
+        follow = ("as-is" if self.video_no_conversion_var.get()
+                  else "convert")
+        for label, val, arg in (
+                ("Follow the box below (%s)" % follow, "box", None),
+                ("Always use my file as-is", "asis", True),
+                ("Always convert this clip", "convert", False)):
+            conv_menu.add_radiobutton(
+                label=label, value=val, variable=choice,
+                command=lambda r=row, a=arg: self._video_set_asis(r, a))
+        menu.add_cascade(label="This clip's conversion", menu=conv_menu)
         slot = self._video_slots_by_rel.get(row)
         if slot is not None:
             menu.add_separator()
@@ -7133,11 +7480,13 @@ class MainWindow:
             if snap:
                 opath = snap
                 snap_used = True
-        # Honest title when there's no snapshot (see _audio_load_track).
+        # Honest title when there's no snapshot, and a distinguishing one when
+        # there is — both panes otherwise wear the slot's own name and read as
+        # one clip shown twice (see _audio_load_track).
         self._video_pane_orig.base_title = (
             "Current file (already modified)"
             if changed and not snap_used
-            else "Original")
+            else "Original (stock)" if snap_used else "Original")
         if opath and os.path.isfile(opath):
             self._video_pane_orig.load(opath, autoplay=(autoplay == "orig"))
         else:
@@ -7151,6 +7500,7 @@ class MainWindow:
         from ..core import staged_originals
         rpath = self._video_assignments.get(rel) if rel else None
         if rpath and os.path.isfile(rpath):
+            self._video_pane_rep.base_title = "Replacement"
             self._video_pane_rep.load(rpath, autoplay=autoplay)
             return
         # Already-changed slot with its true original on the left: the
@@ -7161,8 +7511,12 @@ class MainWindow:
             slot = self._video_slots_by_rel.get(rel)
             cur = slot.abs_path if slot else None
             if cur and os.path.isfile(cur):
-                self._video_pane_rep.load(cur, autoplay=autoplay)
+                self._video_pane_rep.base_title = "Replacement (your file)"
+                self._video_pane_rep.load(
+                    cur, autoplay=autoplay,
+                    label=self._remembered_rep_name("video", rel) or None)
                 return
+        self._video_pane_rep.base_title = "Replacement"
         self._video_pane_rep.clear(
             self._rep_pane_empty_text("video", rel, "no replacement assigned"))
 
@@ -7222,14 +7576,26 @@ class MainWindow:
                 else:
                     text = ("✗  WRONG FORMAT — %s. As-is it will play its "
                             "sound over a black picture on the machine. "
-                            "Untick \"Use my files as-is\" to have it "
-                            "converted, or pick a game-ready file."
+                            "Right-click the row → This clip's conversion → "
+                            "Always convert this clip, untick \"Use my files "
+                            "as-is\" for the lot, or pick a game-ready file."
                             % (conflict or ("%s can't play on the machine "
                                             "as it is"
                                             % os.path.basename(rep))))
                     color_key = "error"
+        # The notebook's pane height is pinned to the tab's requested height
+        # at the moment the tab was selected, so a widget packed in afterwards
+        # gets no space at all and simply vanishes — taking the options row
+        # under it with it.  That is what a tester saw when this callout
+        # appeared: "when the error popped up, the option buttons disappeared.
+        # Switching to another tab and back fixed the UI issue" — switching
+        # tabs being the only thing that re-pins the height (batch 37).
+        # Re-pin whenever the callout comes or goes.
+        was_shown = bool(lbl.winfo_manager())
         if not text:
-            lbl.pack_forget()
+            if was_shown:
+                lbl.pack_forget()
+                self._retune_tab_height()
             return
         c = THEMES.get(self._current_theme, {})
         try:
@@ -7237,8 +7603,9 @@ class MainWindow:
                           foreground=c.get(color_key) or c.get("fg"))
         except tk.TclError:
             return
-        if not lbl.winfo_manager():
+        if not was_shown:
             lbl.pack(fill=tk.X, padx=8, pady=(0, 6))
+            self._retune_tab_height()
 
     def _video_activate_pane(self, side):
         """▶ pressed on an empty pane: load the selected row, then play the
@@ -7302,10 +7669,12 @@ class MainWindow:
     # ---- Replace Video: pending assignments (applied at Write time) --
 
     def pending_video_assignments(self, assets_dir):
-        """Return ``(slots_by_rel, assignments, trim, no_conversion)`` of
-        replacements the user assigned for *assets_dir*, or ``None`` when
-        there's nothing to apply.  Called by the Write flow to auto-stage edits
-        just before it repacks — there is no manual "stage" step.
+        """Return ``(slots_by_rel, assignments, trim, no_conversion,
+        asis_overrides)`` of replacements the user assigned for *assets_dir*,
+        or ``None`` when there's nothing to apply.  Called by the Write flow to
+        auto-stage edits just before it repacks — there is no manual "stage"
+        step.  *asis_overrides* is the per-clip conversion setting and wins
+        over *no_conversion* for the slots it names.
 
         Guarded so it only fires when the folder being written is the same one
         the assignments were made against."""
@@ -7325,7 +7694,9 @@ class MainWindow:
             return None
         return (dict(self._video_slots_by_rel), assignments,
                 bool(self.video_trim_var.get()),
-                bool(self.video_no_conversion_var.get()))
+                bool(self.video_no_conversion_var.get()),
+                {rel: bool(v) for rel, v in self._video_asis_flags.items()
+                 if rel in assignments})
 
     # ==================================================================
     # Replace Image tab — mirrors Replace Video, but the preview is a
@@ -7694,7 +8065,7 @@ class MainWindow:
         elif self._slot_not_on_card("image", rel):
             rep_disp = self._NOT_ON_CARD_MARK
         elif rel in self._image_changed_on_disk:
-            rep_disp = "✓ changed on disk"
+            rep_disp = self._changed_on_disk_cell("image", rel)
         else:
             rep_disp = "Choose…"
         tree.item(rel, values=("", slot.resolution_str(),
@@ -8074,7 +8445,8 @@ class MainWindow:
             elif self._slot_not_on_card("image", s.rel_path):
                 rep_disp, tag = self._NOT_ON_CARD_MARK, "foreign"
             elif is_changed:
-                rep_disp, tag = "✓ changed on disk", "changed"
+                rep_disp, tag = self._changed_on_disk_cell(
+                    "image", s.rel_path), "changed"
             else:
                 rep_disp, tag = "Choose…", ""
             if s.info is None and not s.probed:
@@ -8787,7 +9159,29 @@ class MainWindow:
     def _load_staged_changes(self, assets_dir):
         """Read the staged-changes sidecar for *assets_dir* (``{}`` if none)."""
         from ..core import staged_changes
-        return staged_changes.load(assets_dir)
+        data = staged_changes.load(assets_dir)
+        # Cache the remembered replacement names alongside, so every Replace
+        # tab can say what a "changed on disk" slot was changed WITH — the
+        # assignment path is a path on the PC that made the change and does
+        # not survive a mod pack, but the name does (batch 37).
+        self._rep_names_dir = assets_dir
+        self._rep_names = {
+            rel: str(name)
+            for rel, name in (data.get("replacement_names") or {}).items()
+            if isinstance(name, str) and name.strip()}
+        return data
+
+    def _remembered_rep_name(self, kind, rel):
+        """The name of the file *rel* was replaced with, when the folder
+        remembers one and there is no live assignment to name instead."""
+        scan_dir = getattr(self, "_%s_scan_dir" % kind, "") or ""
+        if not scan_dir or not getattr(self, "_rep_names", None):
+            return ""
+        if (os.path.normcase(os.path.normpath(scan_dir))
+                != os.path.normcase(os.path.normpath(
+                    getattr(self, "_rep_names_dir", "") or "\0"))):
+            return ""
+        return self._rep_names.get(rel, "")
 
     def _warn_dropped_assignments(self, kind, saved, slots_by_rel, scan_dir):
         """Log the sidecar assignments a restore had to drop (slot gone, or
@@ -9258,6 +9652,8 @@ class MainWindow:
             data["video_trim"] = bool(self.video_trim_var.get())
             data["video_no_conversion"] = bool(
                 self.video_no_conversion_var.get())
+            data["video_asis_slots"] = {
+                rel: bool(v) for rel, v in self._video_asis_flags.items()}
             data["video_change_filter"] = self.video_change_filter_var.get()
         if _live(getattr(self, "_text_scan_dir", "")):
             # The Text tab stages nothing (edits go straight to strings.tsv),
@@ -9285,6 +9681,27 @@ class MainWindow:
                     assets_dir, self._image_group_tags, known)
             except Exception:
                 pass
+        # Remember the NAME of the file each slot was replaced with, for every
+        # kind, keyed by slot.  The assignment maps hold a path on this PC, so
+        # they are lost the moment the project moves — and a mod pack carries
+        # the changed files themselves, not a note of where they came from, so
+        # after an import every row read "changed on disk" with no way to tell
+        # what it had been changed with ("when you originally put in the file
+        # it shows the actual replacement file name. Is there a reason that
+        # this cannot be shown here?", batch 37).  Names are small, card
+        # independent and travel with the pack (modpack._EXTRA_MAPS).
+        names = dict(data.get("replacement_names") or {})
+        for key, live, scan_dir in (
+                ("audio", self._audio_assignments, self._audio_scan_dir),
+                ("video", self._video_assignments, self._video_scan_dir),
+                ("image", self._image_assignments, self._image_scan_dir)):
+            if not _live(scan_dir):
+                continue
+            for rel, path in live.items():
+                if isinstance(path, str) and path.strip():
+                    names[rel] = os.path.basename(path)
+        if names:
+            data["replacement_names"] = names
         staged_changes.save(assets_dir, data)
         history_log.record(assets_dir, [h for h in hist if h])
         # Batch 19 anchor materialization: a staged change is the app
@@ -14168,6 +14585,18 @@ class MainWindow:
         # space then flows to the expand=True Log pane below.
         self._notebook.after_idle(self._resize_notebook_to_current_tab)
 
+    def _retune_tab_height(self):
+        """Re-pin the notebook to the current tab after its content grew or
+        shrank on the spot (a notice packed in, a callout removed).
+
+        :meth:`_resize_notebook_to_current_tab` only runs on a tab change, so
+        without this anything packed later is squeezed out of the tab
+        entirely rather than making it taller."""
+        try:
+            self._notebook.after_idle(self._resize_notebook_to_current_tab)
+        except (tk.TclError, AttributeError):
+            pass
+
     def _resize_notebook_to_current_tab(self):
         """Set the notebook's pane height to the currently-selected tab's
         natural height.  ttk.Notebook otherwise sizes every tab to the
@@ -14634,6 +15063,7 @@ class MainWindow:
         self._video_slots = []
         self._video_slots_by_rel = {}
         self._video_assignments = {}
+        self._video_asis_flags = {}
         self._video_scan_dir = ""
         self._video_clear_preview()
         self._refresh_video_list()
@@ -16596,6 +17026,9 @@ class MainWindow:
             if scan_id != self._write_preview_scan_id:
                 return          # a newer scan owns the tree and spinner now
             pending_n = self._add_pending_preview_rows(assets_path, scan_id)
+            if pending_n and (
+                    getattr(self, "_write_sort", None) or (None,))[0]:
+                self._refresh_write_preview_list()
             self._set_tab_scanning("write_preview", False)
             if not pending_n:
                 self._write_preview_empty.configure(text=msg)
@@ -16842,6 +17275,9 @@ class MainWindow:
             self._write_preview_empty.place_forget()
         except tk.TclError:
             pass
+        # Kept alongside the tree so the list can be re-sorted and exported
+        # without re-running the (minutes-long, over a NAS) scan.
+        self._write_preview_rows.append((rel, ext, status, tag))
         self._write_preview_tree.insert(
             "", tk.END, text=rel, values=(ext, status),
             tags=(tag,))
@@ -16851,6 +17287,78 @@ class MainWindow:
         # (don't wait for the scan to finish).
         self._update_revert_btn_state()
         self._update_write_preview_count()
+
+    #: Write tab "Modified Files" sort columns: (id, heading, default-desc).
+    _WRITE_SORT_CFG = (("#0", "File", False), ("type", "Type", False),
+                       ("status", "Status", False))
+
+    def _refresh_write_preview_list(self):
+        """Rebuild the Modified Files tree from :attr:`_write_preview_rows` in
+        the active sort order (no sort column = the scan's own order)."""
+        tree = getattr(self, "_write_preview_tree", None)
+        if tree is None:
+            return
+        col, desc = getattr(self, "_write_sort", None) or (None, False)
+        rows = list(self._write_preview_rows)
+        if col is not None:
+            idx = {"#0": 0, "type": 1, "status": 2}.get(col, 0)
+            rows.sort(key=lambda r: (str(r[idx]).lower(), r[0].lower()),
+                      reverse=desc)
+        self._show_sort_arrows(tree, self._WRITE_SORT_CFG,
+                               (col, desc) if col else ("", False))
+        try:
+            tree.delete(*tree.get_children())
+            for rel, ext, status, tag in rows:
+                tree.insert("", tk.END, text=rel, values=(ext, status),
+                            tags=(tag,))
+        except tk.TclError:
+            return
+        self._update_write_preview_count()
+
+    def _clear_write_preview_rows(self):
+        """Forget the Modified Files rows — the tree is being blanked."""
+        self._write_preview_rows = []
+
+    def _write_export_csv(self):
+        """Save the Modified Files list as a CSV.
+
+        A tester wanted to diff the build lists of two projects that disagreed
+        on their change count and had no way to get the list out of the app:
+        "I then thought maybe I could export a file and compare but that does
+        not exist" (batch 37).  Exports every row, in the order on screen."""
+        import csv
+        rows = list(self._write_preview_rows)
+        if not rows:
+            messagebox.showinfo(
+                "Export CSV",
+                "Nothing to export yet — scan the Write tab first.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Save the modified-files list as CSV",
+            defaultextension=".csv",
+            initialdir=self.last_browse_dir("write_csv"),
+            initialfile="modified_files.csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+        if not path:
+            return
+        self.remember_browse_dir("write_csv", path)
+        col, desc = getattr(self, "_write_sort", None) or (None, False)
+        if col is not None:
+            idx = {"#0": 0, "type": 1, "status": 2}.get(col, 0)
+            rows.sort(key=lambda r: (str(r[idx]).lower(), r[0].lower()),
+                      reverse=desc)
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f)
+                w.writerow(["File", "Type", "Status"])
+                for rel, ext, status, _tag in rows:
+                    w.writerow([rel, ext, status])
+        except OSError as e:
+            messagebox.showerror("Export CSV",
+                                 "Couldn't write the CSV:\n%s" % e)
+            return
+        self.append_log("Modified files exported: %d row(s) → %s"
+                        % (len(rows), os.path.normpath(path)), "success")
 
     def _update_write_preview_count(self):
         """Keep the "Total changes: N" readout in step with the preview tree
@@ -16879,22 +17387,72 @@ class MainWindow:
                     tree.column(col, width=w)
                 except tk.TclError:
                     pass
-        # ButtonRelease fires on any click; we only write when a width actually
-        # changed (a separator drag), so row-selection clicks are free.
+        self._pin_tree_columns(tree, col_ids, saved)
+        # Only a press that started ON a separator counts as a resize: a plain
+        # row click also fires ButtonRelease, and ttk's own stretch pass moves
+        # widths behind our back, so "the width differs from last time" saved
+        # columns the user never touched — which then froze the fit-to-content
+        # sizing for the whole tree.
+        tree.bind("<ButtonPress-1>",
+                  lambda e: self._note_tree_press(tree, tree_key, col_ids, e),
+                  add="+")
         tree.bind("<ButtonRelease-1>",
                   lambda _e: self._save_tree_columns(tree, tree_key, col_ids),
                   add="+")
 
+    def _note_tree_press(self, tree, tree_key, col_ids, event):
+        """Remember *tree*'s column widths when a press lands on a separator,
+        so the matching release can tell a resize from a row click."""
+        try:
+            resizing = tree.identify_region(event.x, event.y) == "separator"
+            self._tree_drag_widths[tree_key] = (
+                {col: int(tree.column(col, "width")) for col in col_ids}
+                if resizing else None)
+        except tk.TclError:
+            self._tree_drag_widths[tree_key] = None
+
+    def _pin_tree_columns(self, tree, col_ids, tuned):
+        """Stop ttk reclaiming the width of every column in *tuned*.
+
+        ttk redistributes any difference between the total column width and
+        the widget's width across the columns with ``stretch`` set, on the
+        next layout pass — so dragging a stretchy column wider than the tree
+        showed the new width during the drag and snapped straight back on
+        release ("Column resizing snapping to wrong width. I seem to get this
+        with a lot of these columns across all tabs", batch 37).  A column the
+        user has sized themselves stops stretching, so the redistribution goes
+        to the ones they haven't.  The last displayed column keeps stretching
+        unless it is one of theirs, so the tree still fills the window."""
+        if not tuned:
+            return
+        try:
+            disp = tree["displaycolumns"]
+            cols = tree["columns"] if disp in ("#all", (), "") else disp
+            last = cols[-1] if cols else None
+            for col in col_ids:
+                if col not in tuned or (col == last and len(tuned) < len(cols)):
+                    continue
+                tree.column(col, stretch=False)
+        except tk.TclError:
+            pass
+
     def _save_tree_columns(self, tree, tree_key, col_ids):
-        """Snapshot *tree*'s current column widths; if they differ from what's
-        stored, update + persist via the settings callback."""
+        """Persist the columns the user just dragged (and only those), then
+        pin them so ttk's stretch pass can't take the width back."""
+        before = self._tree_drag_widths.pop(tree_key, None)
+        if not before:
+            return                              # not a separator drag
         try:
             widths = {col: int(tree.column(col, "width")) for col in col_ids}
         except tk.TclError:
             return
-        if self._saved_column_widths.get(tree_key) == widths:
+        changed = {c: widths[c] for c in col_ids if before.get(c) != widths[c]}
+        if not changed:
             return
-        self._saved_column_widths[tree_key] = widths
+        tuned = dict(self._saved_column_widths.get(tree_key) or {})
+        tuned.update(changed)
+        self._saved_column_widths[tree_key] = tuned
+        self._pin_tree_columns(tree, col_ids, tuned)
         if self._on_column_widths_change:
             try:
                 self._on_column_widths_change(dict(self._saved_column_widths))
@@ -17106,6 +17664,7 @@ class MainWindow:
             except tk.TclError:
                 pass
             if tab_key == "write_preview":
+                self._clear_write_preview_rows()
                 self._update_write_preview_count()
         if empty is not None:
             try:
@@ -17222,6 +17781,7 @@ class MainWindow:
             except tk.TclError:
                 pass
             if tab_key == "write_preview":
+                self._clear_write_preview_rows()
                 self._update_write_preview_count()
         empty = getattr(self, "_%s_empty" % tab_key, None)
         if empty is not None:
@@ -17251,6 +17811,7 @@ class MainWindow:
                     *self._write_preview_tree.get_children())
             except tk.TclError:
                 pass
+            self._clear_write_preview_rows()
             self._update_write_preview_count()
         try:
             self._write_preview_empty.configure(text="Reverting…")
@@ -17289,6 +17850,10 @@ class MainWindow:
             self._add_pending_preview_rows(assets_path, scan_id)
         for rel, ext in changed:
             self._add_write_preview_row(rel, ext, "Modified", scan_id)
+        # Re-apply a sort the user left on a previous scan (rows go in as they
+        # are found, which is the scan's own order).
+        if (getattr(self, "_write_sort", None) or (None,))[0] is not None:
+            self._refresh_write_preview_list()
         # Latest scan finished — leave the scanning state (spinner stops,
         # Cancel flips back to Refresh; the duration is logged there), and
         # log what it found so slow scans + change counts are traceable.
@@ -17885,6 +18450,11 @@ class MainWindow:
         logs_menu = tk.Menu(menu, **kw)
         logs_menu.add_command(label="View log history…",
                               command=self._open_log_history)
+        # Every line also goes into the open project's own folder, so the
+        # shared history stays untangled when several projects are on the go
+        # (batch 37).
+        logs_menu.add_command(label="View this project's log…",
+                              command=self._open_project_log)
         logs_menu.add_checkbutton(
             label="Show previous sessions in the log",
             variable=self.show_log_history_var,
@@ -18893,6 +19463,8 @@ class MainWindow:
                          command=lambda w=widget: self._log_save_as(w))
         menu.add_command(label="View log history…",
                          command=self._open_log_history)
+        menu.add_command(label="View this project's log…",
+                         command=self._open_project_log)
         menu.add_separator()
         menu.add_command(label="Clear",
                          command=lambda w=widget: self._log_clear(w))
@@ -18943,6 +19515,47 @@ class MainWindow:
         widget.delete("1.0", tk.END)
         widget.configure(state=tk.DISABLED)
 
+    def _follow_project_log(self):
+        """Mirror the log into the project folder now being worked on.
+
+        A tester works several projects at once, sometimes two copies of the
+        app at a time, and every line from all of them went into one shared
+        file: "if you are bouncing around projects, this could get muddy"
+        (batch 37).  Each project now keeps its own copy under
+        ``<project>/logs/project.log``, and the shared history gets a banner
+        naming the project whenever the working folder changes, so it stays
+        readable too."""
+        from pinball_decryptor import __version__ as _v
+        folder = (self.write_assets_var.get() or "").strip()
+        try:
+            if session_log.set_project(folder, version=_v):
+                if session_log.active_project():
+                    self.append_log(
+                        "Log for this project is also being written to %s"
+                        % os.path.normpath(session_log.project_log_path()),
+                        "info")
+        except Exception:
+            pass                      # a log mirror must never break the app
+
+    def _open_project_log(self):
+        """Open the open project's own log (see :meth:`_follow_project_log`)."""
+        path = session_log.project_log_path()
+        if not path:
+            messagebox.showinfo(
+                "This project's log",
+                "No project folder is open, so there is no per-project log "
+                "yet.\n\nPick a project folder and everything from then on is "
+                "written to a logs folder inside it as well as to the shared "
+                "history.")
+            return
+        if not os.path.isfile(path):
+            messagebox.showinfo(
+                "This project's log",
+                "Nothing has been logged for this project yet — it starts "
+                "collecting from now on.\n\nIt will be written to:\n%s" % path)
+            return
+        self._open_in_text_viewer(path)
+
     def _open_log_history(self):
         """Open the rolling on-disk session log (every line from every
         session, capped by size/age — see core.session_log) in the system's
@@ -18954,6 +19567,11 @@ class MainWindow:
                 "No log history yet — it starts collecting from now on.\n\n"
                 "Everything the log pane shows is also saved to:\n%s" % path)
             return
+        self._open_in_text_viewer(path)
+
+    def _open_in_text_viewer(self, path):
+        """Hand *path* to the system's default viewer, falling back to
+        revealing it in the file manager when nothing is associated."""
         import subprocess
         try:
             if sys.platform == "win32":

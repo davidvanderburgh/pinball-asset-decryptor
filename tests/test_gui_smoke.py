@@ -65,6 +65,10 @@ def app(tmp_path, monkeypatch):
     from pinball_decryptor.core import session_log
     monkeypatch.setattr(session_log, "LOG_DIR_OVERRIDE",
                         str(tmp_path / "logs"))
+    # The per-project mirror is module state that would otherwise leak from
+    # one test into the next (and keep writing into the previous test's
+    # tmp_path).  Start every test with no project attached.
+    monkeypatch.setattr(session_log, "_project_dir", None)
     # Don't fire the real prerequisite probes: every mfr selection would
     # spawn a background thread + a storm of subprocess probes that outlive
     # the (sub-second) test and churn against the next Tk create.  Tests
@@ -1091,12 +1095,18 @@ def test_column_width_change_persists_and_is_idempotent(app):
     w._on_column_widths_change = lambda widths: captured.append(widths)
     cols = ("#0", "len", "fmt", "rep", "loop")
 
+    # Only a press that landed on a column separator counts as a resize
+    # (batch 37) — record one, the way _note_tree_press does.
+    w._tree_drag_widths["audio"] = {
+        c: int(w._audio_tree.column(c, "width")) for c in cols}
     w._audio_tree.column("fmt", width=137)
     w._save_tree_columns(w._audio_tree, "audio", cols)
     assert captured and captured[-1]["audio"]["fmt"] == 137
 
     # No real change → no second callback.
     n = len(captured)
+    w._tree_drag_widths["audio"] = {
+        c: int(w._audio_tree.column(c, "width")) for c in cols}
     w._save_tree_columns(w._audio_tree, "audio", cols)
     assert len(captured) == n
 

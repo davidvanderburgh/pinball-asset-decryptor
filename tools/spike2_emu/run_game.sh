@@ -329,7 +329,11 @@ BDC="$R/games/data/boot_display_cmd"
 if [ "${PAD_DISPLAY_INVERT:-0}" != "1" ] && [ -s "$BDC" ] && grep -qa -- '-invert' "$BDC"; then
     NOINV="$R/dump/data_noinvert"
     rm -rf "$NOINV"
-    if cp -a "$R/games/$GAME/data" "$NOINV" 2>/dev/null &&
+    # cp -r, NOT cp -a: -a preserves ownership, the card's files are root's,
+    # and a non-root run therefore fails the whole copy on a permission it does
+    # not need. The guest only ever reads these.
+    if cp -rL "$R/games/$GAME/data" "$NOINV" 2>/dev/null &&
+       chmod -R u+rwX "$NOINV" 2>/dev/null &&
        rm -f "$NOINV/boot_display_cmd" &&
        mount --bind "$NOINV" "$R/games/$GAME/data"; then
         echo "[run] display: this title asks the panel for -invert (its LCD is"

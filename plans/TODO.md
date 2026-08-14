@@ -1586,7 +1586,7 @@ rewriting it.**
       bind the copy over it), which is the exact state the control titles are in;
       `PAD_DISPLAY_INVERT=1` keeps the machine's own behaviour. **Verified on
       both oracles with matched pairs:** bond attract before = full frame,
-      inverted (`C:	mp\item45b_shot_1.png`), after = full frame, right way
+      inverted (`C:/tmp/item45/fb_shot_1.png`), after = full frame, right way
       up with the 007 logo back at bottom-right (`fb_after_2.png`), plus the
       window itself (`bond_window_1.png` / `bond_window_after.png`); and the
       godzilla_pro CONTROL unchanged with the mask correctly not firing

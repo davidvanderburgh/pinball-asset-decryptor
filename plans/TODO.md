@@ -1107,6 +1107,123 @@ These have each been violated at least once and each cost a run or a window:
       `padglhost.c` and `padgl.h`, needs a second render target, needs a rebuild
       (so no run may be live), and wants verifying on two titles.
 
+- [ ] **48. The playfield keyboard legend is GODZILLA'S list, so every other
+      title gets a legend full of holes and a row named after another game.**
+      `S3 D2`
+      **★ DAVID, 2026-08-14, looking at james_bond_60th: "the 'standard
+      playfield' switches here are probably not common on all machines. I don't
+      think the 'godzilla target' belongs here or on any machine."** He is
+      right, and the screenshot is the evidence: Bond's PLAYFIELD section shows
+      `Upper Left Flipper`, `Skill Shot`, `Left Spinner`, `Pop Bumper`,
+      `Godzilla Target` and `Right Scoop` all greyed with `n/a`, i.e. six of
+      thirteen rows are dead, and one of them is named after a different
+      machine.
+      **THE MECHANISM IS ALREADY UNDERSTOOD AND IS NOT A BUG IN THE RESOLVER —
+      do not "fix" binds_resolve().** `binds[]` (`padglhost.c:~745-790`) is a
+      fixed list whose ids are Godzilla Pro's, each row carrying candidate
+      NAMES; `binds_resolve()` looks each name up in the title's own
+      switch_list.txt and **correctly kills a row it cannot find**. Measured on
+      the live Bond run: `bind Godzilla Target: not on james_bond_60th_le; key
+      dead`, and the flippers, shooter lane, slingshots, outlanes and right
+      spinner all rebound to Bond's own ids. **So nothing fires the wrong
+      switch — the fault is that the MENU is Godzilla's, not that the binding
+      is wrong.** Item 27 built the resolver precisely to stop wrong-switch
+      presses (star_wars arrows hitting a drop target); this item is the next
+      step, and the wrong-switch class is already closed.
+      **What it should probably be instead (design, not decided):** derive the
+      playfield rows FROM THE TITLE's switch list — the useful shots on any
+      Stern are recognisable by name (slingshots, outlanes, scoops, spinners,
+      pop bumpers, targets, lanes) — and keep only the CABINET rows fixed,
+      since those are the ones measured identical on every title 2017-2024.
+      A title with no match for a letter simply does not use that letter,
+      instead of showing a dead row.
+      **Acceptance:** on three titles with different layouts (godzilla_pro,
+      james_bond_60th_le, turtles_pro) the playfield legend lists only switches
+      that title HAS, no row is named after another game, and every listed key
+      closes the switch it names — verified with `swshow.py`, not by eye.
+      — S3: nothing is broken and no key fires a wrong switch, so there is no
+      way to lose a run to it; what it costs is that the control legend is
+      misleading on every title that is not Godzilla. D2: it is desk work in
+      one table plus one resolver function, and the oracle (`swshow.py`, plus
+      the existing `bind ... key dead` lines) already exists; it needs one run
+      per title to confirm.
+
+- [ ] **49. LEAD: "LOCATING PINBALLS" on james_bond_60th clears when the
+      CAPTIVE BALL switch is held made, so a machine at rest needs more than a
+      full trough.** `S2 D2`
+      **★ DAVID, 2026-08-14: "why am i stuck with 'locating pinballs' when
+      trying to start? The balls in trough should default to all being in
+      there."** They were: `swshow.py` on his live run read `balls the GAME
+      sees in the trough: 6 of 6 [77, 76, 75, 74, 73, 72]`, Shooter Lane open,
+      Trough Jam open, coin door closed. The rig's rest state was correct and
+      the game still searched.
+      **★ MEASURED THE SAME SESSION, and it is one observation, not a proof:**
+      `swhold.py 84 1` (84 = `Captive Ball`, from Bond's own switch list) then
+      `plunge.py start` took the game straight into a game — `PLAYER 1`,
+      `FREE PLAY`, `SELECT SOUND STYLE: Modern` — instead of a ball search.
+      **Why it is plausible:** a captive ball physically rests against its
+      switch, so on a real machine that switch is made at rest and the game
+      counts that ball as accounted for. An open one is a missing ball, and a
+      missing ball is exactly what a ball search is for.
+      **NOT ESTABLISHED, and it is the first job: THE CONTROL WAS NOT RUN.**
+      Nobody opened 84 again and re-pressed Start on the same run to see
+      LOCATING PINBALLS come back. Until that is done this is a correlation on
+      one title, and the pair is David's report (84 open, search) against one
+      measurement (84 made, game starts) taken minutes apart.
+      **The general shape, if it holds:** "a machine at rest" is currently the
+      trough plus the coin door (`hwshim.c:~4578`, latched when padglhost's
+      window opens). Bond says that set is title-dependent — anything that
+      HOLDS A BALL at rest belongs in it. `device_xy.txt` names ball devices
+      per title, which is where the list should come from rather than a
+      hard-coded id. **Related and possibly the same knot: `[dev] --- ball
+      devices: count=1119174656 ---`**, the misparse recorded in the loose
+      ends, because that is the very table this would read.
+      **Acceptance:** state the control both ways on one run (84 open → search,
+      84 made → game starts, and how many repeats), then make the rest state
+      derive from the title's own ball devices and show it on godzilla_pro
+      unchanged.
+      — S2: it stops a game being started on this title, which is severe, but a
+      one-command workaround exists now that it is known (`swhold.py 84 1`) and
+      no other item is blocked by it. D2: the instruments all exist
+      (`swshow.py`, `swhold.py`, `plunge.py`), the fault appears on every start
+      attempt, and the first job is one run to get the control.
+
+- [ ] **50. No LED feedback at all on a title with no playfield artwork,
+      which is most of them.** `S3 D3`
+      **★ DAVID, 2026-08-14: "we should have some visual indication of leds
+      here even without the playfield. can we think of some elegant way to show
+      that?"** The window's own status bar says `2285 LED writes decoded` while
+      showing nothing lit — the data is arriving and there is nowhere to put
+      it.
+      **WHY THERE IS NO PICTURE, measured on james_bond_60th so the next pass
+      does not go looking for a missing file:** the artwork branch needs a
+      playfield image AND something positioned on it, and Bond has neither.
+      Its `device_xy.txt` header reads `513 records (coil=16 led=426
+      switch=71), 0 on the playfield image`, its `playfield.png` is a **202x443
+      8-bit GRAYSCALE thumbnail**, and its `led_io.txt` carries **29 rows, all
+      CABINET** (`COIN DOOR GI`, `START BUTTON`, `ACTION BUTTON-G/-R`) against
+      the cabinet-front image. So 426 LEDs exist in the device table and 29
+      reach the map, none with a playfield position.
+      **THE DESIGN THAT FOLLOWS FROM THAT — drive it from the LIVE RING, not
+      from led_io.txt.** A swatch grid in the empty right-hand column, grouped
+      by node exactly as the switch list is, one cell per FIXTURE rather than
+      per channel so an RGB triple is one cell in its true colour (the rig
+      already joins 113 channels to 81 fixtures for the artwork view, item 1a).
+      Name each cell from `device_xy` where a name exists and `node.index`
+      where it does not. Reading the padled block directly means it works on
+      every title regardless of table quality — Bond would show all its
+      channels, not the 29 that made it into the map — and the light show
+      becomes a field of colour you can watch move.
+      **Acceptance:** on a title with no artwork the window shows LED activity
+      that visibly tracks the game (state what you compared it against — the
+      LED-writes counter moving with cells changing is the weakest form; the
+      service menu's own `Diagnostics → LED Tests` driving one fixture at a
+      time by name is the real one), and a title WITH artwork is unchanged.
+      — S3: nothing is broken and the LEDs are decoded and counted already, so
+      this is a missing view rather than a missing capability. D3: the data and
+      the fixture join both exist, the layout is new drawing work in
+      playfield.py, and confirming it means a run with the LED test menu.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

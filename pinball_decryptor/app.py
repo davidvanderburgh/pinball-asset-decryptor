@@ -2051,7 +2051,11 @@ class App:
             if level == "warning":
                 lines.append(text)
         lines.append("Continue?")
-        if not messagebox.askyesno("Import Mod Pack", "\n\n".join(lines)):
+        # "Details" lists the skipped files by name — the count on its own
+        # told a tester nothing and he had to go hunting for them afterwards.
+        if not self.window.ask_with_details(
+                "Import Mod Pack", "\n\n".join(lines),
+                modpack.skipped_rows(plan), "Details — skipped files"):
             return
 
         # "started" / "completed" bracket + a by-kind breakdown at the end —
@@ -2083,7 +2087,14 @@ class App:
                 # immediately — without this the tabs keep the pre-import scan
                 # ("0 slots changed") until a manual re-scan (a tester).  Same
                 # refresh the mod-transfer flow does.
-                self.root.after(0, self.window.reload_assets_tabs)
+                #
+                # Queued rather than root.after(0, ...): a direct main-loop hop
+                # runs before the queue above it drains, so every "<tab> scan
+                # started" line landed ABOVE the import's own "completed" line
+                # and the import read as finishing after the scans it kicked
+                # off — which is why a tester reported the dialog "never
+                # kicked off any more scans" when it already had (batch 37).
+                self.msg_queue.put(UiCallMsg(self.window.reload_assets_tabs))
                 extra = ""
                 if res["extras"].get("settings"):
                     extra += ("\n\n%d default setting(s) came across too — see "
@@ -2091,7 +2102,8 @@ class App:
                               % res["extras"]["settings"])
                 if skipped:
                     extra += ("\n\n%d file(s) were skipped: this extract has "
-                              "nothing they match." % skipped)
+                              "nothing they match. Each one is named in the "
+                              "log." % skipped)
                 if res["removed"]:
                     extra += ("\n%d left here by an earlier import were "
                               "removed." % len(res["removed"]))
@@ -2119,8 +2131,10 @@ class App:
                     "Import Complete",
                     f"Imported {n} file(s)"
                     + (f" ({kinds})" if kinds else "") + ".\n\n"
-                    f"The Replace tabs are re-scanning so the imported "
-                    f"changes show up." + extra))
+                    f"Audio, Video, Images and Text have each started a "
+                    f"fresh scan of this folder so the imported changes "
+                    f"show up — the log says when each one finishes."
+                    + extra))
             except Exception as e:
                 self.msg_queue.put(LogMsg(f"Import failed: {e}", "error"))
                 self.root.after(0, lambda e=e: messagebox.showerror(

@@ -450,6 +450,29 @@ def mismatch_lines(plan):
     return out
 
 
+def skipped_rows(plan):
+    """``[(name, why)]`` for every file *plan* will skip — the detail behind
+    the "N of the pack's M file(s) are not part of this extract" count.
+
+    A tester was told 8 of 232 files would be skipped and had nothing to go
+    on: "I would be interested in know what those files were... I later
+    figured it out but had to go hunting for it" (batch 37).  Sorted by name
+    so the same pack always reads the same way.
+
+    *why* separates the two cases that need different action: a file an
+    earlier import already dropped into the folder is about to be taken back
+    out, while the rest are simply left in the zip.
+    """
+    leftovers = set(plan.get("leftovers") or ())
+    rows = []
+    for name in sorted(plan.get("foreign") or (), key=str.lower):
+        rows.append((name.replace("\\", "/"),
+                     "already here from an earlier import — will be removed"
+                     if name in leftovers else
+                     "no slot on this card has that name"))
+    return rows
+
+
 def apply_extras(assets_folder, extras, log_cb=None):
     """Merge a pack's non-file edits (:func:`project_extras`) into
     *assets_folder*'s staged-changes sidecar.  Returns ``{key: count}``.
@@ -522,6 +545,11 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
     if log_cb:
         for level, text in mismatch_lines(plan):
             log_cb(text, level)
+        # Name every skipped file, not just count them — the count alone sent
+        # a tester hunting through the folder to work out which ones they
+        # were (batch 37: "Also maybe log each skip as well?").
+        for name, why in skipped_rows(plan):
+            log_cb("  skipped %s — %s" % (name, why), "warning")
         log_cb("Importing %d file(s)..." % len(applicable), "info")
     if not applicable:
         raise ValueError(

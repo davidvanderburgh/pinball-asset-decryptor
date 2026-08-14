@@ -286,6 +286,7 @@ class _NoteStub:
     _slot_unplayable = MainWindow._slot_unplayable
     _video_conv_cached = MainWindow._video_conv_cached
     _video_conv_key = MainWindow._video_conv_key
+    _video_asis_for = MainWindow._video_asis_for
     _VIDEO_CONV_GOOD = MainWindow._VIDEO_CONV_GOOD
     _VIDEO_CONV_REJECT = MainWindow._VIDEO_CONV_REJECT
     _VIDEO_CONV_ASIS_NOISY = MainWindow._VIDEO_CONV_ASIS_NOISY
@@ -300,12 +301,19 @@ class _NoteStub:
         self._current_theme = "dark"
         self.video_no_conversion_var = _Var(True)
         self.video_trim_var = _Var(False)
+        self._video_asis_flags = {}       # no per-clip overrides (batch 37)
+        self.retuned = 0
         if rep and mode is not None:
             self._video_conv_cache[
                 self._video_conv_key(slot.rel_path, rep)] = mode
 
     def _video_noconv_conflict(self, rel, path, deep=True):
         return None
+
+    def _retune_tab_height(self):
+        """Real one re-pins the notebook pane so a callout packed after the
+        tab was selected gets space (batch 37); here just count the calls."""
+        self.retuned += 1
 
 
 def _vslot(codec="h264"):
@@ -323,6 +331,9 @@ def test_note_flags_an_unplayable_slot_with_no_pick():
     lbl = me._video_preview_note
     assert lbl.winfo_manager() == "pack"
     assert "WRONG FORMAT" in lbl.text and "black picture" in lbl.text
+    # Packing the callout has to re-pin the tab height, or it takes the
+    # options row under it off screen until you switch tabs (batch 37).
+    assert me.retuned == 1
 
 
 def test_note_promises_the_fix_when_a_good_pick_is_assigned(tmp_path):
@@ -342,6 +353,7 @@ def test_note_hidden_for_a_healthy_slot():
     me._video_preview_note.pack()             # pretend it was showing
     me._video_update_preview_note()
     assert me._video_preview_note.winfo_manager() == ""
+    assert me.retuned == 1                    # removing it re-pins too
 
 
 def test_note_flags_a_rejected_pick_on_a_healthy_slot(tmp_path):

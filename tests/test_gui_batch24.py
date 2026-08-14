@@ -32,9 +32,23 @@ def _slot(codec="h264", pix_fmt="yuv420p", ext=".mov", info=True):
 # old file's verdict through re-picks and re-scans.
 # ---------------------------------------------------------------------------
 
+class _ConvStub:
+    """Just enough of MainWindow for the Convert cache key.
+
+    The key asks ``_video_asis_for`` rather than reading the tab-wide box
+    directly, since batch 37 gave each clip its own optional conversion
+    setting — with no per-clip flag set, the answer is still the box.
+    """
+    _video_asis_for = MainWindow._video_asis_for
+
+    def __init__(self):
+        self.video_no_conversion_var = _var(True)
+        self.video_trim_var = _var(False)
+        self._video_asis_flags = {}
+
+
 def _conv_self():
-    return SimpleNamespace(video_no_conversion_var=_var(True),
-                           video_trim_var=_var(False))
+    return _ConvStub()
 
 
 def test_conv_key_changes_when_the_file_is_rewritten(tmp_path):

@@ -139,8 +139,9 @@ HELP_CONTENT = {
          "New Version\" on the Mod Pack tab carries the change over by "
          "content instead of by name."),
         ("Preview",
-         "Two players side by side — the original on the left, your "
-         "replacement on the right — each with its own controls, so you can "
+         "Two players side by side — \"Original (stock)\" on the left, "
+         "\"Replacement (your file)\" on the right — each with its own "
+         "controls, so you can "
          "compare them before you commit to a build. Starting one pauses "
          "the other, and ■ on either silences both — only the pane you "
          "pressed rewinds."),
@@ -313,7 +314,14 @@ HELP_CONTENT = {
          "callout turns amber and says the build will fix it. The "
          "\"Original\" preview pane shows the untouched factory clip "
          "whenever its backup exists, even for a slot you've already "
-         "replaced."),
+         "replaced — its title reads \"Original (stock)\" against "
+         "\"Replacement (your file)\" so the two panes can't be mixed up "
+         "when both sides carry the same slot name. That factory clip is "
+         "also what the Convert column measures your replacement against: "
+         "a slot whose current file is a wrong-format one you put there "
+         "earlier can't teach the app the wrong frame rate, size or "
+         "profile, so a clip cut to the machine's real spec still reads "
+         "\"As-is\"."),
         ("Undo",
          "Right-click a slot to remove an un-built assignment or revert an "
          "already-changed file."),
@@ -541,6 +549,13 @@ HELP_CONTENT = {
          "doesn't exist yet is created when the build starts — and if it "
          "can't be, you're told which folder and why before any work "
          "happens, not a minute into the build."),
+        ("Reading the Modified Files list",
+         "Click any column header — File, Type or Status — to sort the "
+         "list; click the same one again to flip it, and a third time to "
+         "put it back in the scan's own order, which groups Pending above "
+         "Modified. Export CSV saves every row exactly as it reads on "
+         "screen, so two projects that disagree on their change count can "
+         "be diffed in a spreadsheet instead of by eye."),
         ("Undo",
          "\"Revert all changes…\" restores every changed asset back to its "
          "extract original (the build inputs, not any card)."),
@@ -598,7 +613,13 @@ HELP_CONTENT = {
          "different places, so most of it fits nothing here: those files are "
          "skipped and counted rather than dropped into the folder, where they "
          "would list as slots no build can use. Use \"Transfer mods\" for that "
-         "instead.\n\nYour staged Defaults, high-score defaults and the names "
+         "instead.\n\nThe confirmation before an import counts the skips, and "
+         "a \"Details\" button on it opens the full list — every file that "
+         "won't be applied, each with the reason it isn't: either your "
+         "extract has no such file (it stays in the zip, untouched), or it's "
+         "a stray this import will take back out of the project folder. The "
+         "log names them one per line as well, so the same list is still "
+         "there to read after the dialog is gone.\n\nYour staged Defaults, high-score defaults and the names "
          "you gave image groups and scenes ride along in the pack as well — "
          "they are project settings rather than files, so they are keyed by "
          "the firmware's own names and land staged for the next Build. One "

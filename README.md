@@ -697,7 +697,12 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    go actions (Extract, Build), red for the live Cancel and Revert all
    changes — with neutral buttons (Browse, Refresh) left plain.
    Any Replace Audio / Video assignments are applied automatically
-   here — no extra step. The assets folder *is* your project: your picks and built
+   here — no extra step. The **Modified Files** list sorts on any
+   column header (File, Type, Status — click again to flip, a third
+   time to restore the scan's own Pending-above-Modified order) and an
+   **Export CSV** button saves the whole list, so two projects that
+   disagree on their change count can be diffed in a spreadsheet.
+   The assets folder *is* your project: your picks and built
    changes persist there across app restarts, so you extract once and
    keep iterating (no re-extract per edit). Each Replace tab marks slots
    already changed by an earlier build, and **Revert all changes…**
@@ -721,7 +726,13 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    and its Replacement pane says no original was overwritten and the
    next build can't place it.
    The confirmation box says what will land, what will be skipped and
-   what will be removed before anything is written. A pack also carries
+   what will be removed before anything is written, and its **Details**
+   button expands into the full list — every skipped file by name, each
+   with the reason it isn't being applied (no slot on this card has that
+   name, so it stays in the zip; or it's a stray an earlier import left
+   behind and this one takes back out). The log names them one per line
+   too, so the list is still readable after the dialog is gone. A pack
+   also carries
    your staged **Default Settings**, high-score defaults and your
    image/scene names, which are project settings rather than files, and
    merges them on import (the pack wins per setting, anything you'd

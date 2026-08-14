@@ -1108,13 +1108,75 @@ These have each been violated at least once and each cost a run or a window:
       (so no run may be live), and wants verifying on two titles.
 
 - [ ] **45. On james_bond_60th the emulator's picture is upside down, and the
-      one flip knob the rig has is the WRONG transform.** `S2 D3`
+      one flip knob the rig has is the WRONG transform.** `S2 D2` ← IN PROGRESS
+      *(**80%, 2026-08-14, branch `item/45`:** cause found in the title's own
+      data, fix built, and the picture verified right way up on the guest's own
+      framebuffer AND in the window. What is left is one control run and David's
+      eyes.)* *(**D3 → D2:** the mechanism is no longer unknown and the change is
+      six lines of shell with no rebuild; what remains is a confirming run.)*
+      **★★ ESTABLISHED, IN ORDER, AND EACH STEP KILLED THE STEP BEFORE IT:**
+      **(1) It is a TRUE 180, never a mirror.** `shotwin.py` on David's live run
+      (`C:\tmp\item45\bond_window_1.png`) caught the service menu with every
+      string inverted and NONE of them reversed. That alone acquits the host:
+      the only transform `win_present()` can express is `u_flip`, which is
+      `uv.y -> 1-uv.y` (`padglhost.c:599`) — a mirror, and a mirror is not a
+      rotation.
+      **(2) The GUEST draws it rotated, measured with no window in the path.**
+      New tool this pass, **`glshot.sh`** — `padglhost` has answered a
+      `glshot.req` in the ring directory since the GL journal went in
+      (`padglhost.c:2811`) and NOTHING in the repo could reach it. It writes the
+      screen FBO at fb_w x fb_h, so no chrome, no letterbox, no RAIL proxy. The
+      1360x768 shot came back filling the surface and upside down
+      (`C:\tmp\item45\fb_shot_1.png`), and `write_png` already flips rows, so a
+      correct frame arrives the right way up.
+      **(3) WHY, and it is the title's own data:** `/games/data/boot_display_cmd`
+      on the Bond card is 8 bytes holding exactly `-invert`, sitting beside
+      `DisplayRenderer` in the ELF's string table. The cabinet's LCD is bolted in
+      upside down and the game renders to suit it.
+      **(4) THE FILE IS THE SWITCH, NOT A TITLE LIST — two labelled negatives.**
+      godzilla_pro and turtles_pro carry the IDENTICAL
+      `/games/data/boot_display_cmd` + `-invert` block in their own game ELFs, so
+      the code path is generic; they simply ship no such file (their `data/` holds
+      only READMEs), and their picture is known good.
+      **(5) THE FIX, `run_game.sh`: mask by ABSENCE inside the private
+      namespace** — copy the title's tiny `data/`, drop the flag, bind the copy
+      over it, so the guest sees exactly what a non-inverted title's card looks
+      like. `PAD_DISPLAY_INVERT=1` keeps the machine's own behaviour. Masking
+      beats un-rotating in `win_present()` twice: it fixes EVERY consumer rather
+      than the window alone (glshot, `PAD_GL_DUMP`, video capture), and it needs
+      no rebuild — and a rebuild invalidates every save slot (36a (3)).
+      **★★ (6) VERIFIED, 2026-08-14, both oracles:** with the mask on, the Tech
+      Alerts screen reads right way up and unmirrored on the guest's framebuffer
+      (`C:\tmp\item45\fb_after_1.png`) and in the window
+      (`C:\tmp\item45\bond_window_after.png`). Before/after pairs are all four
+      files above.
+      **RULED OUT, WITH A CONTROL, and it cost two runs to be sure: the mask is
+      NOT what kills the guest.** An early version masked with an empty file and
+      the game exited cleanly three frames in (threads RETURNED — an orderly
+      shutdown, not a crash). The obvious reading was "the game needs the flag".
+      **It is wrong: the CONTROL run, `PAD_DISPLAY_INVERT=1` with everything else
+      identical, died exactly the same way.** What actually kills it is running
+      bond WITHOUT `PAD_PIVOT` as an ordinary user — see the loose end below.
+      **The launch that works is the app's own** (`emulate_tab.watch_cmd`):
+      `wsl -u root -e env HOME=/home/david PAD_PIVOT=1 … bash watch.sh`. Setting
+      `PAD_HOME` instead of `HOME` is NOT enough — `PAD_GLHOST_BIN` still comes
+      off root's `$HOME` and the run dies on
+      `env: '/root/padglhost': Permission denied` before the guest starts.
+      **NOT DONE, and it is why the box is open:** the godzilla_pro control run
+      (the mask cannot fire without the file, but that is an argument, not the
+      capture the acceptance asks for); an attract-mode after-shot to pair with
+      the upside-down attract shot already taken; and David's own eyes.
+      **Resume:** run godzilla_pro from this branch with the launch shape above
+      and capture `shotwin.py` — the acceptance is that it is unchanged. Then
+      merge. **Observation, NOT this item's fault and do not chase it here:** the
+      Tech Alerts and service-menu screens draw into roughly the top-left 800x480
+      of the 1360x768 surface with black around them, before AND after the fix
+      (the 180 is what used to put them bottom-right). Attract fills the frame.
+      That is item 43's family, on a different title.
       **★ DAVID, 2026-08-11: "bond 60th video is rotated upside down (the screen
       is mounted differently in the game)."** He confirmed it is the EMULATOR's
-      game window, not an extracted file. The parenthesis is his diagnosis, not a
-      measurement — nothing in this rig knows a panel orientation, and no
-      james_bond run appears anywhere in this queue or the handoff, so today's is
-      the first recorded one.
+      game window, not an extracted file. **His diagnosis was right** — see (3),
+      which is the machine's own declaration of it.
       **The card is on this machine:**
       `images/Stern/spike2/james_bond_60th_le-1_10_0.Release.8G.sdcard.raw`
       (7.86 GB). Item 34 applies: booting it from a different path re-copies the
@@ -1201,6 +1263,25 @@ These have each been violated at least once and each cost a run or a window:
   this machine. The deep detail behind every numbered item above.
 
 ## Loose ends worth a look, not yet worth a queue slot
+
+- **A NON-PIVOT, ordinary-user run of james_bond_60th dies about three frames
+  in, every time — and it is not the title's assets or item 45's mask.** Found
+  2026-08-14 while verifying item 45. Three runs from `item/45` launched as
+  `wsl -e setsid --fork bash … watch.sh` (no `PAD_PIVOT`, running as david) all
+  behaved identically: card mounted, tables built, window opened 1445x827,
+  `[padglhost] picture: FIRST at frame 4 (4034 of 1044480 pixels are not
+  black)`, then the guest's `[thread] #2 RETURNED` / `[thread] #3 RETURNED` and
+  a clean exit at 3 frames. The same card in the app's own shape —
+  `wsl -u root -e env HOME=/home/david PAD_PIVOT=1 … watch.sh` — runs
+  indefinitely. **Two of the three runs were the A and the B of item 45's mask
+  (on, and `PAD_DISPLAY_INVERT=1` off), which is how the mask was cleared: both
+  died the same way**, so whatever this is, it is upstream of anything item 45
+  touched. Worth knowing before it is blamed for something else. Suspect, not
+  established: the card FUSE mount without `allow_other` (a non-root run gets
+  `user_id=1000` and the guest is root inside the userns), or the same
+  clean-exit family as 36b. Untested on any other title, which is the first
+  thing to find out — one godzilla_pro run would say whether this is bond or the
+  launch mode.
 
 - **The Linux path has never been run on a real Linux desktop, and the one part
   that cannot be tested from here is the playfield WINDOW.** Everything else was

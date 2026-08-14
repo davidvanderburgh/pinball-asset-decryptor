@@ -488,6 +488,18 @@ no reinstall or restart helps until then. The app's prerequisite check
 reports the same condition in its tooltip. Enable the option, boot back
 into Windows, then run **Install Prerequisites** again.
 
+If the app keeps reporting **WSL2** as missing while **Install
+Prerequisites** reports everything as already installed, your default
+distro is registered as **WSL 1**. WSL 1 has no loop devices at all, so
+it can't mount a card or game image whatever packages are present, and
+reinstalling WSL doesn't change that — only converting the distro does.
+Both halves now say so: the installer reads `wsl -l -v`, names the distro
+and offers to convert it, and the app's prerequisite tooltip and log say
+"WSL is installed, but its default distro is WSL 1" instead of asking for
+another install. To do it by hand, run `wsl --set-version <name> 2` in an
+admin PowerShell (it runs for a few minutes; close anything using WSL
+first), then click **Re-check** in the app.
+
 ### macOS
 
 1. Download the DMG matching your Mac from the

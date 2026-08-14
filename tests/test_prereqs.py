@@ -223,9 +223,9 @@ def test_wsl_restart_pending_says_restart_windows(monkeypatch):
 
 
 def test_wsl_fastfail_with_registered_distro_keeps_static_hint(monkeypatch):
-    """A registered distro whose probe fails (e.g. WSL 1's losetup) keeps
-    the real error line and the static hint (which carries the WSL 1
-    conversion steps)."""
+    """A registered distro whose probe fails on a TOOL (an apt package that
+    isn't installed) keeps the real error line and the static hint, which
+    names the apt install."""
     _wsl_env(monkeypatch)
 
     def _run(cmd, *a, **kw):
@@ -233,13 +233,149 @@ def test_wsl_fastfail_with_registered_distro_keeps_static_hint(monkeypatch):
             return subprocess.CompletedProcess(cmd, 0)
         return subprocess.CompletedProcess(
             cmd, 1, stdout="",
+            stderr="bash: partclone.ext4: command not found\n")
+
+    monkeypatch.setattr(prereqs.subprocess, "run", _run)
+    ok, msg, hint = prereqs._probe_wsl("which partclone.ext4")
+    assert ok is False
+    assert "partclone" in msg
+    assert hint == ""
+
+
+# ---------------------------------------------------------------------------
+# A WSL that IS installed but can't hand out a loop device (PAD-73).
+#
+# The app said "Missing prerequisite(s): WSL2" and led with `wsl --install`;
+# the prerequisite installer, which only checked that wsl.exe answers and
+# that losetup exists, said everything was already installed.  Neither named
+# the actual state — a registered distro running under WSL 1, which owns no
+# loop devices — so the user bounced between the two.  A loop-probe failure
+# inside an answering distro now reads the VERSION column and says which of
+# the two it is, and never asks for a reinstall.
+# ---------------------------------------------------------------------------
+
+_WSL_LIST_HEADER = "  NAME      STATE           VERSION\n"
+
+
+def _loop_probe_run(monkeypatch, *, version_line, calls=None,
+                    version_rc=0):
+    """wsl fake for a loop probe: registration OK, the in-VM probe fails
+    with a losetup error, and `wsl -l -v` answers *version_line*."""
+    def _run(cmd, *a, **kw):
+        assert cmd[0] == "wsl"
+        if list(cmd[1:3]) == ["-l", "-v"]:
+            if calls is not None:
+                calls.append("version")
+            return subprocess.CompletedProcess(
+                cmd, version_rc,
+                stdout=_WSL_LIST_HEADER + version_line, stderr="")
+        if "-l" in cmd:
+            if calls is not None:
+                calls.append("list")
+            return subprocess.CompletedProcess(cmd, 0)
+        if calls is not None:
+            calls.append("probe")
+        return subprocess.CompletedProcess(
+            cmd, 1, stdout="",
             stderr="losetup: cannot find an unused loop device\n")
 
     monkeypatch.setattr(prereqs.subprocess, "run", _run)
-    ok, msg, hint = prereqs._probe_wsl("losetup -f")
+
+
+def test_wsl1_loop_failure_names_the_distro_and_the_conversion(monkeypatch):
+    """The reported machine: WSL installed, distro answers, no loop device.
+    Say WSL is installed, name the real distro, and give the conversion —
+    never `wsl --install`, which is what sent the user round the loop."""
+    _wsl_env(monkeypatch)
+    _loop_probe_run(monkeypatch, version_line="* Ubuntu    Running   1\n")
+    ok, msg, hint = prereqs._probe_wsl(prereqs_loop_probe())
+    assert ok is False
+    assert "WSL is installed" in msg and "WSL 1" in msg and "Ubuntu" in msg
+    assert "wsl --set-version Ubuntu 2" in hint
+    assert "wsl --install" not in hint
+
+
+def test_wsl2_loop_failure_says_installed_and_shows_the_error(monkeypatch):
+    """Same symptom on a WSL 2 distro is NOT a version problem: keep the
+    losetup error visible and still keep the user away from a reinstall."""
+    _wsl_env(monkeypatch)
+    _loop_probe_run(monkeypatch, version_line="* Ubuntu    Running   2\n")
+    ok, msg, hint = prereqs._probe_wsl(prereqs_loop_probe())
+    assert ok is False
+    assert "WSL 2 is installed" in msg
+    assert "cannot find an unused loop device" in msg
+    assert "wsl --shutdown" in hint
+    assert "wsl --install" not in hint
+
+
+def test_unreadable_version_falls_back_to_the_static_hint(monkeypatch):
+    """`wsl -l -v` didn't answer: don't guess which state it is — the
+    static hint carries both routes."""
+    _wsl_env(monkeypatch)
+    _loop_probe_run(monkeypatch, version_line="", version_rc=1)
+    ok, msg, hint = prereqs._probe_wsl(prereqs_loop_probe())
     assert ok is False
     assert "losetup" in msg
     assert hint == ""
+
+
+def test_non_loop_probe_never_reads_the_wsl_version(monkeypatch):
+    """A missing apt package is not a WSL-version story; don't pay for the
+    extra wsl.exe call or offer a conversion for it."""
+    _wsl_env(monkeypatch)
+    calls = []
+
+    def _run(cmd, *a, **kw):
+        if list(cmd[1:3]) == ["-l", "-v"]:
+            calls.append("version")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if "-l" in cmd:
+            return subprocess.CompletedProcess(cmd, 0)
+        return subprocess.CompletedProcess(cmd, 1, stdout="",
+                                           stderr="which: no debugfs\n")
+
+    monkeypatch.setattr(prereqs.subprocess, "run", _run)
+    ok, msg, hint = prereqs._probe_wsl("which debugfs")
+    assert ok is False and hint == ""
+    assert calls == []
+
+
+def test_default_distro_parsing(monkeypatch):
+    """The * line, read without touching the localized header."""
+    def _answer(stdout, rc=0):
+        monkeypatch.setattr(
+            prereqs.subprocess, "run",
+            lambda cmd, *a, **kw: subprocess.CompletedProcess(
+                cmd, rc, stdout=stdout, stderr=""))
+
+    _answer(_WSL_LIST_HEADER
+            + "* Ubuntu            Running   2\n"
+            + "  Ubuntu-18.04      Stopped   1\n")
+    assert prereqs._wsl_default_distro() == ("Ubuntu", 2)
+
+    # Not the first row, and a name with spaces (wsl --import allows them).
+    _answer(_WSL_LIST_HEADER
+            + "  Ubuntu            Stopped   2\n"
+            + "* My Old Distro     Running   1\n")
+    assert prereqs._wsl_default_distro() == ("My Old Distro", 1)
+
+    # A wsl.exe that ignores WSL_UTF8 answers in UTF-16LE, which arrives as
+    # NUL-interleaved bytes; stripping NULs has to read the same thing.
+    _answer(("* Ubuntu   Running   1\n").encode("utf-16-le"))
+    assert prereqs._wsl_default_distro() == ("Ubuntu", 1)
+
+    # Nothing to go on: never guess a version.
+    _answer(_WSL_LIST_HEADER + "  Ubuntu   Running   2\n")   # no default row
+    assert prereqs._wsl_default_distro() == ("", None)
+    _answer("", rc=1)
+    assert prereqs._wsl_default_distro() == ("", None)
+
+
+def prereqs_loop_probe():
+    """The real loop probe string the Stern/JJP plugins register, so these
+    tests can't drift from what the strip actually runs."""
+    from pinball_decryptor.core.ext4_grow import LOOP_PROBE
+    return LOOP_PROBE
 
 
 def test_check_prerequisite_wsl_hint_override_reaches_result(monkeypatch):

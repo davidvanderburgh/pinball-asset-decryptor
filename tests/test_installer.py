@@ -637,6 +637,36 @@ def test_windows_installer_requires_wsl_for_stern():
         "then silently fall back on every Windows machine without WSL2.")
 
 
+def test_installer_checks_the_default_distro_is_wsl2():
+    """Regression guard — PAD-73 (the app and the installer disagreed).
+
+    `wsl --status` exits 0 and losetup is present on a WSL 1 machine, so
+    the installer reported WSL2, Ubuntu and util-linux all green while the
+    app's own strip reported WSL2 missing — the app probes the loop device
+    a WSL 1 distro can never provide.  A user ping-ponged between "it says
+    I don't have WSL" and "the fixer says it's already installed".  The
+    installer must read the VERSION column and say so.
+    """
+    ps1 = PS1.read_text(encoding="utf-8", errors="replace")
+    assert "Get-WslDefaultDistro" in ps1 and "wsl -l -v" in ps1, (
+        "install_prerequisites.ps1 must read `wsl -l -v` to learn whether "
+        "the distro our probes run in is WSL 1 — `wsl --status` answers "
+        "0 either way, which is how a WSL 1 machine got an all-green "
+        "report from a run that fixed nothing (PAD-73).")
+    assert "wsl --set-version" in ps1, (
+        "install_prerequisites.ps1 must name (and offer) the conversion "
+        "-- reinstalling WSL cannot give a WSL 1 distro loop devices.")
+    # And the check must actually be wired to a manufacturer that needs a
+    # loop device, or it never runs for the users who hit this.
+    for mfr in ('"Stern Pinball" = @{', '"Jersey Jack Pinball" = @{'):
+        entry = ps1.split(mfr, 1)[1].split("HostPackages", 1)[0]
+        assert 'probe="losetup"' in entry, (
+            f"{mfr} declares no losetup probe, so the WSL-version check "
+            f"(gated on it) never runs for that manufacturer -- both "
+            f"plugins loop-mount an image and declare the loop "
+            f"prerequisite app-side.")
+
+
 def test_reboot_banner_names_the_start_menu_shortcut():
     """Regression guard — PAD-16 (user looped on the WSL2 reboot step).
 

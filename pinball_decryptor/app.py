@@ -582,7 +582,15 @@ class App:
                     f"Missing prerequisite(s) for {target_display}: "
                     f"{names}.", "error"))
                 for r in missing:
+                    # The probe's own message goes in the log, not just the
+                    # hover tooltip: a user reporting "it says WSL2 is
+                    # missing" pastes the LOG, and the one line saying
+                    # WHICH way it failed was the one line missing from it
+                    # (PAD-73).  Cheap here, and it is what the reply is
+                    # written from.
                     detail = (f"  [x] {r.name}: {r.reason}"
+                              + (f" — problem: {r.message}"
+                                 if r.message else "")
                               + (f" — fix: {r.install_hint}"
                                  if r.install_hint else ""))
                     self.msg_queue.put(LogMsg(detail, "error"))

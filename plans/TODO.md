@@ -1153,21 +1153,14 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Loose ends worth a look, not yet worth a queue slot
 
-- **"The switch table isn't coming through" is (at least partly) THE FIRST RUN
-  OF A TITLE, by design — and nothing says so at the time.** David, 2026-08-14,
-  on his bond 60th run. Measured the same hour: `watch.sh` prints *"switches —
-  no switch dump yet - clickable switches will appear on the next run of this
-  title"*, because the dump is written DURING a run for the NEXT one, and his
-  was james_bond_60th's first run on this rig. The very next run of the same
-  title dumped all 118 with real names (`QR SCANNER STATUS READY`, `DIP 1`,
-  `Reel 1 at Destination Virtual`), and `[swfind] found the switch table:
-  entry[] at 0x007d2680, 118 switches` on both. So the reader is fine and the
-  first-run experience is the fault: a user meets a numberless playfield with
-  the explanation buried in a log pane. Cheap fix shape: say it in the
-  playfield window, not only in the log. **Separately and NOT explained: `[dev]
-  --- ball devices: count=1119174656 ---`** on both bond runs. 1.1 billion is a
-  misparse of something; the switch names still came out, so it is the ball
-  DEVICE table specifically, which is what item 21b's trough model reads.
+- **NOT EXPLAINED: `[dev] --- ball devices: count=1119174656 ---`** on both
+  james_bond_60th runs, 2026-08-14. 1.1 billion is a misparse of something. The
+  switch names still came out and `[swfind] found the switch table: entry[] at
+  0x007d2680, 118 switches` on both runs, so it is the ball DEVICE table
+  specifically - which is what item 21b's trough model reads, so it is worth
+  knowing before that item trusts it. (The other half of David's "the switch
+  table isn't coming through" report that day was the first-run window gap, now
+  fixed and closed as item 47.)
 
 - **A NON-PIVOT, ordinary-user run of james_bond_60th dies about three frames
   in, every time — and it is not the title's assets or item 45's mask.** Found
@@ -1591,6 +1584,32 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **47. A title's FIRST run showed no switches, because the window read its
+      tables once and they land a few seconds later.** DONE 2026-08-14,
+      `item/47`. **★ DAVID, on james_bond_60th's first run: "how do we get the
+      tables from james bond? without the switches here I can't test it."** The
+      tables were complete on disk; only the window did not know. The switch
+      list CANNOT exist before a run - the game builds its switch table on the
+      heap, so the id behind a name reaches us only as the shim's `[sw]` dump a
+      few seconds in - so watch.sh rebuilds in the background with `--wait`
+      while the window is already up. Everything deciding what that window shows
+      ran ONCE, at construction, so a window that opened a few seconds early
+      stayed a paragraph of explanatory text for the whole session. **On a title
+      with no usable artwork that paragraph IS the window, so the title's first
+      run could not be played** - and Bond is exactly that case: its tables say
+      `513 records (coil=16 led=426 switch=71), 0 on the playfield image` and
+      its playfield.png is a 202x443 GRAYSCALE thumbnail. **Fix:**
+      `poll_for_tables()` in playfield.py - a stat every 2 s, giving up after
+      15 min so an abandoned window does not poll forever, then the same two
+      branches as construction so a title WITH artwork still gets the artwork
+      view. **Verified live against a running emulator** (2026-08-14): the table
+      was moved aside, the window relaunched and drew "WAITING for them"
+      (`C:/tmp/item47/waiting.png`), the table was put back, and the window
+      swapped itself to the full 117-switch schematic with no restart of
+      anything (`C:/tmp/item47/arrived.png`). Three real-Tk regression tests
+      beside it - a stub root records an `after` that Tk never runs, which is
+      the one thing this needed to know.
 
 - [x] **45. james_bond_60th presented its whole picture upside down.** DONE
       2026-08-14, `ecf08d4` (branch `item/45`). **The title says so itself:**

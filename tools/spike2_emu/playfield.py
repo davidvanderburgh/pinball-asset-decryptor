@@ -3052,6 +3052,44 @@ def raise_existing():
         return False                        # never block on the guard failing
 
 
+def poll_for_tables(root, load, on_rows, every_ms=2000, timeout_s=900,
+                    _now=time.time):
+    """Watch for a title's switch list ARRIVING while this window is open.
+
+    THE SWITCH LIST CANNOT EXIST BEFORE A RUN AND THIS WINDOW OPENS DURING ONE.
+    The game builds its switch table on the heap, so the id behind a name only
+    reaches the outside world as the shim's `[sw]` dump a few seconds into a run
+    (mktables.py's header has the whole reasoning). watch.sh therefore rebuilds
+    the tables in the background, with --wait, while this window is already up.
+
+    Everything that decides what this window SHOWS used to run once, at
+    construction. So a window that opened a few seconds too early stayed a
+    paragraph of explanatory text for the rest of the session, while the tables
+    it was describing sat complete on disk. The first run of any title was
+    therefore a run you could not click a switch in - and on a title with no
+    usable artwork, which is most of them, that is the whole window.
+
+    David hit it on james_bond_60th_le's first run, 2026-08-14: "without the
+    switches here I can't test it". The tables were fine; only this window did
+    not know they had arrived.
+
+    A stat every two seconds costs nothing against a wasted run. `timeout_s`
+    stops an abandoned window polling forever; `_now` and the two intervals are
+    injected so a test can drive this in milliseconds with real Tk.
+    """
+    deadline = _now() + timeout_s
+
+    def tick():
+        rows = load()
+        if rows:
+            on_rows(rows)
+            return
+        if _now() < deadline:
+            root.after(every_ms, tick)
+
+    root.after(every_ms, tick)
+
+
 def main():
     if raise_existing():
         # SAY SO, because from the outside this is a launch that started and
@@ -3096,17 +3134,50 @@ def main():
     else:
         rows = load_switch_list()
         if not rows:
-            tk.Label(root, padx=20, pady=20, justify="left", font=("Consolas", 10),
-                     text=("No tables for %s yet." '\n\n'
-                           "They are built from the title's own files, not" '\n'
-                           "shipped: mktables.py reads the game binary for" '\n'
-                           "positions and the run log for the switch list." '\n\n'
-                           "  tables : %s" '\n'
-                           "  game   : %s" '\n\n'
-                           "The switch list only exists once the game has" '\n'
-                           "published its table, a few seconds into a run, so" '\n'
-                           "the first start of a title can land here.")
-                     % (GAME, TDIR, gameinfo.game_dir(GAME))).pack()
+            waiting = tk.Label(
+                root, padx=20, pady=20, justify="left", font=("Consolas", 10),
+                text=("No tables for %s yet - WAITING for them." '\n\n'
+                      "They are built from the title's own files, not" '\n'
+                      "shipped: mktables.py reads the game binary for" '\n'
+                      "positions and the run log for the switch list." '\n\n'
+                      "  tables : %s" '\n'
+                      "  game   : %s" '\n\n'
+                      "The switch list only exists once the game has" '\n'
+                      "published its table, a few seconds into a run, so" '\n'
+                      "the first start of a title lands here first. This" '\n'
+                      "window now picks them up by itself when they arrive.")
+                % (GAME, TDIR, gameinfo.game_dir(GAME)))
+            waiting.pack()
+
+            # ★ THE TABLES LAND *DURING* THIS RUN, AND THIS WINDOW USED TO MISS
+            # THEM FOR GOOD.
+            #
+            # The switch list cannot be built before a run: the game builds its
+            # switch table on the heap, so the id behind a name only reaches us
+            # as the shim's [sw] dump a few seconds in (mktables.py's own header
+            # says so). watch.sh therefore rebuilds in the background with
+            # --wait while this window is already up. But everything above runs
+            # ONCE, at construction, so the window that opened a few seconds too
+            # early stayed a paragraph of text for the whole session - and the
+            # tables it was describing were sitting on disk the entire time.
+            #
+            # David hit exactly that on james_bond_60th_le's first run
+            # (2026-08-14): "without the switches here I can't test it". The
+            # tables were complete; only this window did not know.
+            #
+            # So poll. A stat every two seconds costs nothing next to a wasted
+            # run, and the swap is the same two branches as the construction
+            # above, so a title that has artwork still gets the artwork view.
+            def _swap_in(fresh):
+                nonlocal view
+                waiting.destroy()
+                if PF_PNG and os.path.exists(PF_PNG) and (
+                        load_switches() or load_leds() or load_coils()):
+                    view = Field(root)
+                else:
+                    view = Schematic(root, fresh)
+
+            poll_for_tables(root, load_switch_list, _swap_in)
         else:
             view = Schematic(root, rows)
     pos = load_state().get("playfield_pos")

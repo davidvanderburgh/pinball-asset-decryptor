@@ -297,6 +297,38 @@ if [ -n "$CARD_SRC" ]; then
         || { echo "[run] could not bind the card at $CARD_SRC" >&2; exit 1; }
 fi
 
+# ★ ITEM 45 - THIS TITLE'S PANEL IS BOLTED IN UPSIDE DOWN AND OUR MONITOR IS NOT.
+#
+# james_bond_60th_le ships an 8-byte /games/data/boot_display_cmd holding exactly
+# `-invert`, and its whole picture comes out rotated 180 - measured straight off
+# the screen FBO with glshot.sh, so it is the GUEST drawing it that way and not
+# the window: win_present() can express only a Y flip, and a Y flip is a mirror,
+# not a rotation. The text in a shot reads inverted but never mirrored.
+#
+# THE FILE IS THE SWITCH, NOT A TITLE LIST, and that is measured both ways:
+# godzilla_pro and turtles_pro carry the IDENTICAL `/games/data/boot_display_cmd`
+# + `-invert` string block in their own game ELFs, so the code path is generic -
+# they simply ship no such file, and their picture is the right way up.
+#
+# The machine inverts because the LCD is mounted upside down in the cabinet. A
+# desktop monitor is not, so the faithful thing on a PC is to let the guest draw
+# the right way up. Masking the flag does that AT THE SOURCE, which keeps every
+# downstream consumer correct - glshot.sh, the PAD_GL_DUMP frames, video capture,
+# save-state thumbnails - where un-rotating in win_present() would fix the window
+# alone AND need a rebuild, and a rebuild invalidates every existing save slot
+# (item 36a (3)). PAD_DISPLAY_INVERT=1 keeps the machine's own behaviour.
+BDC="$R/games/data/boot_display_cmd"
+if [ "${PAD_DISPLAY_INVERT:-0}" != "1" ] && [ -s "$BDC" ] && grep -qa -- '-invert' "$BDC"; then
+    : > "$R/dump/boot_display_cmd.masked"
+    if mount --bind "$R/dump/boot_display_cmd.masked" "$BDC"; then
+        echo "[run] display: this title asks the panel for -invert (its LCD is"
+        echo "[run]   mounted upside down); masked, so the picture comes up the"
+        echo "[run]   right way up here. PAD_DISPLAY_INVERT=1 keeps the machine's."
+    else
+        echo "[run] display: could not mask $BDC - expect an upside-down picture" >&2
+    fi
+fi
+
 # real host char devices
 for f in null zero urandom random; do mount --bind /dev/$f "$R/dev/$f"; done
 # fakes: opening succeeds, ioctls will fail

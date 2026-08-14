@@ -376,13 +376,22 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                        trim_to_length: bool = False,
                        no_conversion: bool = False,
                        log_cb=None, progress_cb=None, assets_dir=None,
-                       cancel_cb=None, pin_byte_size: bool = False):
+                       cancel_cb=None, pin_byte_size: bool = False,
+                       asis_overrides: Optional[Dict[str, bool]] = None):
     """Stage every assignment in *assignments* (rel_path -> replacement path).
 
     *slots_by_rel* maps the same rel_path keys to their VideoSlot.  Returns
     ``(staged, failures)`` where *failures* is a list of ``(rel_path, error)``.
     Optional *log_cb(text, level)* and *progress_cb(current, total, desc)*
     drive the GUI log + progress bar.
+
+    *asis_overrides*, when given, is ``{rel_path: bool}`` and wins over
+    *no_conversion* for those slots — the per-clip answer to "use my files
+    as-is".  A tester asked for it outright: "I unchecked it and noticed it is
+    an all or nothing option. You can't mix and match. Any reason why?"  It
+    goes both ways, so one hand-encoded clip can go on untouched in a build
+    that converts everything else, and one clip can be converted in a build
+    that otherwise copies files through.
 
     *assets_dir*, when given, snapshots each slot's pristine bytes under
     ``.orig/`` before the first overwrite so the edit can be reverted without a
@@ -411,6 +420,7 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
     total = len(items)
     staged = 0
     failures: List = []
+    overrides = dict(asis_overrides or {})
     baseline = read_baseline_any(assets_dir) if assets_dir else {}
 
     for i, (rel, rep) in enumerate(items):
@@ -420,10 +430,15 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                        "replacement(s).", "error")
             break
         slot = slots_by_rel[rel]
+        slot_noconv = bool(overrides.get(rel, no_conversion))
         if progress_cb:
             progress_cb(i, total, rel)
         if log_cb:
-            log_cb(f"Staging {rel}  ←  {os.path.basename(rep)}", "info")
+            note = ""
+            if rel in overrides and bool(overrides[rel]) != bool(no_conversion):
+                note = ("  (this clip is set to go on as-is)" if slot_noconv
+                        else "  (this clip is set to be converted)")
+            log_cb(f"Staging {rel}  ←  {os.path.basename(rep)}{note}", "info")
         if assets_dir:
             staged_originals.snapshot(assets_dir, rel, baseline.get(rel))
         # The budget is the PRISTINE original's length.  slot.size is only
@@ -440,7 +455,7 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
             elif slot.size > 0:
                 budget = slot.size
         ok, detail = stage_replacement(slot, rep, trim_to_length=trim_to_length,
-                                       no_conversion=no_conversion,
+                                       no_conversion=slot_noconv,
                                        cancel_cb=cancel_cb,
                                        byte_budget=budget)
         if ok:

@@ -16,8 +16,11 @@ Six separate reports, all from the same session:
   row off the screen ("the option buttons disappeared");
 * both audio preview boxes carried the same file name.
 
-Plus two Write-tab asks: sortable columns and a CSV export, so two projects
-that disagree about their change count can actually be compared.
+Plus four asks: sortable Write-tab columns and a CSV export (so two projects
+that disagree about their change count can be compared), a per-clip answer to
+"use my files as-is" ("you can't mix and match. Any reason why?"), a log per
+project instead of one shared file, and the ▶ under Original honouring "Play
+replacements" the way the rest of the run already did.
 """
 
 import os
@@ -307,3 +310,236 @@ def test_the_two_preview_boxes_no_longer_read_identically(app, tmp_path):
     assert left != right
     assert left.startswith("Original (stock)")
     assert right.startswith("Replacement (your file)")
+
+
+# ---------------------------------------------------------------------------
+# 3. "Use my files as-is", per clip.
+# ---------------------------------------------------------------------------
+
+def _fake_stage(store):
+    def _stage(slot, rep, trim_to_length=False, no_conversion=False,
+               cancel_cb=None, byte_budget=None):
+        store.append((slot.rel_path, no_conversion))
+        return True, ""
+    return _stage
+
+
+def test_a_clip_can_go_on_as_is_in_a_project_that_converts(tmp_path,
+                                                           monkeypatch):
+    """The box is project-wide; one hand-encoded clip should not need the
+    whole project switched over to it."""
+    from pinball_decryptor.core import video_slots
+    staged = []
+    monkeypatch.setattr(video_slots, "stage_replacement", _fake_stage(staged))
+    rels = ["video/a.mov", "video/b.mov"]
+    slots = {}
+    for rel in rels:
+        p = tmp_path / os.path.basename(rel)
+        p.write_bytes(b"x")
+        slots[rel] = VideoSlot(rel_path=rel, abs_path=str(p), ext=".mov",
+                               info=None, size=1)
+    rep = tmp_path / "mine.mov"
+    rep.write_bytes(b"y")
+    video_slots.stage_replacements(
+        slots, {rel: str(rep) for rel in rels}, no_conversion=False,
+        asis_overrides={"video/b.mov": True})
+    assert dict(staged) == {"video/a.mov": False, "video/b.mov": True}
+
+
+def test_an_override_also_forces_a_conversion_the_box_would_skip(tmp_path,
+                                                                 monkeypatch):
+    """It goes both ways — one bad clip converted in a project that otherwise
+    copies files through byte-for-byte."""
+    from pinball_decryptor.core import video_slots
+    staged = []
+    monkeypatch.setattr(video_slots, "stage_replacement", _fake_stage(staged))
+    p = tmp_path / "a.mov"
+    p.write_bytes(b"x")
+    rep = tmp_path / "mine.mov"
+    rep.write_bytes(b"y")
+    slots = {"video/a.mov": VideoSlot(rel_path="video/a.mov", abs_path=str(p),
+                                      ext=".mov", info=None, size=1)}
+    video_slots.stage_replacements(
+        slots, {"video/a.mov": str(rep)}, no_conversion=True,
+        asis_overrides={"video/a.mov": False})
+    assert staged == [("video/a.mov", False)]
+
+
+@pytest.mark.gui
+@pytestmark_gui
+def test_the_per_clip_setting_wins_over_the_box_and_is_remembered(app,
+                                                                 tmp_path):
+    from pinball_decryptor.core import staged_changes
+    w = _stern(app)
+    rel = "video/JUKEBOX_LOOP3.mov"
+    folder = tmp_path / "ex"
+    folder.mkdir()
+    w.write_assets_var.set(str(folder))
+    w._video_scan_dir = str(folder)
+    w._video_slots_by_rel = {rel: _slot60()}
+    w._video_slots = [w._video_slots_by_rel[rel]]
+    w._video_assignments = {rel: str(tmp_path / "mine.mov")}
+    w._video_asis_flags = {}
+    w.video_no_conversion_var.set(False)
+    assert w._video_asis_for(rel) is False
+
+    w._video_set_asis(rel, True)
+    assert w._video_asis_for(rel) is True
+    assert staged_changes.load(str(folder))["video_asis_slots"] == {rel: True}
+
+    # Clearing it hands the row back to the box.
+    w._video_set_asis(rel, None)
+    assert w._video_asis_for(rel) is False
+    w.video_no_conversion_var.set(True)
+    assert w._video_asis_for(rel) is True
+
+
+@pytest.mark.gui
+@pytestmark_gui
+def test_an_overridden_row_is_marked_in_the_convert_column(app):
+    """One row set apart from the box has to be findable among a hundred."""
+    w = _stern(app)
+    rel = "video/JUKEBOX_LOOP3.mov"
+    w._video_slots_by_rel = {rel: _slot60()}
+    w._video_asis_flags = {}
+    w._video_conv_cache[w._video_conv_key(rel, "C:/x/mine.mov")] = "As-is"
+    assert w._video_conv_cell(rel, "C:/x/mine.mov") == "As-is"
+    w._video_asis_flags[rel] = True
+    w._video_conv_cache[w._video_conv_key(rel, "C:/x/mine.mov")] = "As-is"
+    assert w._video_conv_cell(rel, "C:/x/mine.mov") == "• As-is"
+
+
+# ---------------------------------------------------------------------------
+# 4. One log per project.
+# ---------------------------------------------------------------------------
+
+def test_each_project_gets_its_own_log(tmp_path, monkeypatch):
+    """"the logs are not independent of each project but rather they are one
+    large one. So if you are bouncing around projects, this could get muddy"."""
+    from pinball_decryptor.core import session_log
+    monkeypatch.setattr(session_log, "LOG_DIR_OVERRIDE",
+                        str(tmp_path / "shared"))
+    monkeypatch.setattr(session_log, "_project_dir", None)
+    one, two = tmp_path / "redux3", tmp_path / "redux4"
+    one.mkdir()
+    two.mkdir()
+
+    assert session_log.set_project(str(one), version="9.9.9") is True
+    session_log.append("Audio scan finished in 1.0 s.")
+    assert session_log.set_project(str(two), version="9.9.9") is True
+    session_log.append("Video scan finished in 2.0 s.")
+
+    first = (one / "logs" / "project.log").read_text(encoding="utf-8")
+    second = (two / "logs" / "project.log").read_text(encoding="utf-8")
+    assert "Audio scan finished" in first
+    assert "Video scan finished" not in first
+    assert "Video scan finished" in second
+    assert "Audio scan finished" not in second
+    # The shared history still has both, with a banner naming each project.
+    shared = open(session_log.log_path(), encoding="utf-8").read()
+    assert "Audio scan finished" in shared and "Video scan finished" in shared
+    assert "----- Project: redux3" in shared
+    assert "----- Project: redux4" in shared
+
+
+def test_a_project_folder_that_went_away_is_not_recreated(tmp_path,
+                                                          monkeypatch):
+    """An unplugged NAS must not have its tree rebuilt at a stale mount."""
+    from pinball_decryptor.core import session_log
+    monkeypatch.setattr(session_log, "LOG_DIR_OVERRIDE",
+                        str(tmp_path / "shared"))
+    monkeypatch.setattr(session_log, "_project_dir", None)
+    import shutil
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    session_log.set_project(str(gone))
+    shutil.rmtree(gone)                          # the NAS went away
+    session_log.append("still logging")          # no raise
+    assert not gone.exists()
+    assert "still logging" in open(session_log.log_path(),
+                                   encoding="utf-8").read()
+
+
+def test_the_project_log_folder_is_never_treated_as_an_asset():
+    """It is the app's own file inside the user's project, like build/."""
+    from pinball_decryptor.core import session_log
+    from pinball_decryptor.core.checksums import NON_ASSET_DIRS
+    assert session_log.PROJECT_LOG_DIR in NON_ASSET_DIRS
+
+
+# ---------------------------------------------------------------------------
+# 5. A pack carries the name of the file each slot was replaced with.
+# ---------------------------------------------------------------------------
+
+def test_a_pack_carries_the_replacement_names(tmp_path):
+    """"when you originally put in the file it shows the actual replacement
+    file name. Is there a reason that this cannot be shown here?"."""
+    from pinball_decryptor.core import staged_changes
+    src = tmp_path / "from"
+    src.mkdir()
+    staged_changes.save(str(src), {
+        "audio": {"audio/idx0172.wav": "W:/mine/Song Remains.wav"},
+        "replacement_names": {"audio/idx0172.wav": "Song Remains.wav"}})
+    extras = modpack.project_extras(str(src))
+    assert extras["replacement_names"] == {
+        "audio/idx0172.wav": "Song Remains.wav"}
+    dest = _extract(tmp_path, ["audio/idx0172.wav"])
+    modpack.apply_extras(dest, extras)
+    assert staged_changes.load(dest)["replacement_names"] == {
+        "audio/idx0172.wav": "Song Remains.wav"}
+
+
+@pytest.mark.gui
+@pytestmark_gui
+def test_changed_on_disk_names_the_file_it_was_changed_with(app, tmp_path):
+    from pinball_decryptor.core import staged_changes
+    w = _stern(app)
+    rel = "audio/00m44s895 - idx0172 - Song Remains The Same Snippet.wav"
+    folder = tmp_path / "ex"
+    folder.mkdir()
+    staged_changes.save(str(folder),
+                        {"replacement_names": {rel: "Song Remains.wav"}})
+    w._load_staged_changes(str(folder))
+    w._audio_scan_dir = str(folder)
+    assert w._changed_on_disk_cell("audio", rel) == \
+        "✓ changed on disk (Song Remains.wav)"
+    # A slot with nothing remembered still reads the way it always did.
+    assert w._changed_on_disk_cell("audio", "audio/other.wav") == \
+        "✓ changed on disk"
+
+
+# ---------------------------------------------------------------------------
+# 6. "Play replacements" applies to the play button you press, not only to
+#    the rows the sequential run steps onto.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.gui
+@pytestmark_gui
+def test_play_replacements_redirects_the_original_play_button(app,
+                                                              monkeypatch):
+    """"If you select 'play replacements' but click start on the left original
+    audio file, it plays the original and not the replacement."."""
+    w = _stern(app)
+    w._audio_current_rel = "audio/a.wav"
+    monkeypatch.setattr(w, "_audio_rep_available", lambda _rel: True)
+    started = []
+    w._audio_pane_rep.path = "C:/x/mine.wav"
+    monkeypatch.setattr(w._audio_pane_rep, "start_playback",
+                        lambda pos=0.0: started.append(pos))
+
+    w.audio_play_subst_var.set(False)
+    assert w._audio_play_intercept() is False    # off: the button means stock
+    w.audio_play_subst_var.set(True)
+    assert w._audio_play_intercept() is True
+    assert started == [0.0]
+
+
+@pytest.mark.gui
+@pytestmark_gui
+def test_a_row_with_no_replacement_still_plays_its_original(app, monkeypatch):
+    """Stock is what the card plays there, so nothing is redirected."""
+    w = _stern(app)
+    w._audio_current_rel = "audio/a.wav"
+    w.audio_play_subst_var.set(True)
+    monkeypatch.setattr(w, "_audio_rep_available", lambda _rel: False)
+    assert w._audio_play_intercept() is False

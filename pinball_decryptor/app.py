@@ -2744,7 +2744,10 @@ class App:
                     bool(saved.get("video_trim",
                                    self.window.video_trim_var.get())),
                     bool(saved.get("video_no_conversion",
-                                   self.window.video_no_conversion_var.get())))
+                                   self.window.video_no_conversion_var.get())),
+                    {rel: bool(v) for rel, v
+                     in (saved.get("video_asis_slots") or {}).items()
+                     if rel in assignments})
         return (slots_by_rel, assignments)
 
     def _stage_pending_audio(self, assets_dir):
@@ -2800,7 +2803,7 @@ class App:
                 or self._sidecar_pending(assets_dir, "video"))
         if not pend:
             return (0, 0, [])
-        slots_by_rel, assignments, trim, no_conversion = pend
+        slots_by_rel, assignments, trim, no_conversion, asis = pend
         from .core.video_slots import stage_replacements
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
         self.msg_queue.put(LogMsg(
@@ -2818,7 +2821,7 @@ class App:
                 slots_by_rel, assignments, trim_to_length=trim,
                 no_conversion=no_conversion, log_cb=log_cb,
                 assets_dir=assets_dir, cancel_cb=cancel_cb,
-                pin_byte_size=pin_size)
+                pin_byte_size=pin_size, asis_overrides=asis)
             self.msg_queue.put(LogMsg(
                 f"Applied {staged} video replacement(s)."
                 + (f"  {len(failures)} could not be converted (see above)."

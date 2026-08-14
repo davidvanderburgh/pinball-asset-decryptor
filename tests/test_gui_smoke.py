@@ -65,6 +65,10 @@ def app(tmp_path, monkeypatch):
     from pinball_decryptor.core import session_log
     monkeypatch.setattr(session_log, "LOG_DIR_OVERRIDE",
                         str(tmp_path / "logs"))
+    # The per-project mirror is module state that would otherwise leak from
+    # one test into the next (and keep writing into the previous test's
+    # tmp_path).  Start every test with no project attached.
+    monkeypatch.setattr(session_log, "_project_dir", None)
     # Don't fire the real prerequisite probes: every mfr selection would
     # spawn a background thread + a storm of subprocess probes that outlive
     # the (sub-second) test and churn against the next Tk create.  Tests

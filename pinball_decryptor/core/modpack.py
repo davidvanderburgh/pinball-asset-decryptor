@@ -27,7 +27,14 @@ MANIFEST_NAME = ".modpack.json"
 # keyed by something card-independent (the firmware's ``AD_`` name, the high
 # score slot label, the scene's own container id), so they carry across a
 # re-extract of the same card the same way they carry across a version.
-_EXTRA_MAPS = ("settings", "high_scores", "image_group_tags")
+# ``replacement_names`` joined them in batch 37: {slot rel -> the name of the
+# file it was replaced with}.  A pack carries the changed FILES, not a note of
+# where on the exporter's PC each came from, so an imported project could only
+# say "changed on disk" — the tester who asked for this had to open his old
+# project's change history to find out what he had used.  The name is keyed by
+# slot, so it survives a re-extract of the same card the way the other maps do.
+_EXTRA_MAPS = ("settings", "high_scores", "image_group_tags",
+               "replacement_names")
 _EXTRA_SCALARS = ("menu_expose_through",)
 
 # Reserved zip folder for the BYTES of the Partitions-tab replaces the manifest
@@ -516,6 +523,7 @@ def apply_extras(assets_folder, extras, log_cb=None):
         words = {"settings": "%d default setting(s)",
                  "high_scores": "%d high-score default(s)",
                  "image_group_tags": "%d image/scene name(s)",
+                 "replacement_names": "the name(s) of %d replacement file(s)",
                  "menu_expose_through": "the Adjustments-menu reveal"}
         parts = []
         for key, n in applied.items():

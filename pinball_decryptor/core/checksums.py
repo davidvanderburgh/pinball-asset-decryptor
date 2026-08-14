@@ -26,7 +26,11 @@ TRACKING_SIDECARS = frozenset({"callouts.csv", "music_titles.csv"})
 # (``modpack.IMPORTED_CARD_DIR`` — they belong to a .raw, not to this extract).
 # Excluded from the baseline below AND pruned by the audio/video/image slot
 # scanners, so nothing in them ever lists as a slot the card doesn't have.
-NON_ASSET_DIRS = frozenset({"build", ".hydrate", "card_files"})
+# "logs" holds the project's own copy of the log (core.session_log.set_project)
+# — written by the app into the project it is working on, so like "build" it is
+# ours, not the card's, and must never be baselined, scanned as a slot, or
+# packed into a mod pack.
+NON_ASSET_DIRS = frozenset({"build", ".hydrate", "card_files", "logs"})
 
 
 def md5_file(path):

@@ -1107,117 +1107,6 @@ These have each been violated at least once and each cost a run or a window:
       `padglhost.c` and `padgl.h`, needs a second render target, needs a rebuild
       (so no run may be live), and wants verifying on two titles.
 
-- [ ] **45. On james_bond_60th the emulator's picture is upside down, and the
-      one flip knob the rig has is the WRONG transform.** `S2 D2` ← IN PROGRESS
-      *(**80%, 2026-08-14, branch `item/45`:** cause found in the title's own
-      data, fix built, and the picture verified right way up on the guest's own
-      framebuffer AND in the window. What is left is one control run and David's
-      eyes.)* *(**D3 → D2:** the mechanism is no longer unknown and the change is
-      six lines of shell with no rebuild; what remains is a confirming run.)*
-      **★★ ESTABLISHED, IN ORDER, AND EACH STEP KILLED THE STEP BEFORE IT:**
-      **(1) It is a TRUE 180, never a mirror.** `shotwin.py` on David's live run
-      (`C:\tmp\item45\bond_window_1.png`) caught the service menu with every
-      string inverted and NONE of them reversed. That alone acquits the host:
-      the only transform `win_present()` can express is `u_flip`, which is
-      `uv.y -> 1-uv.y` (`padglhost.c:599`) — a mirror, and a mirror is not a
-      rotation.
-      **(2) The GUEST draws it rotated, measured with no window in the path.**
-      New tool this pass, **`glshot.sh`** — `padglhost` has answered a
-      `glshot.req` in the ring directory since the GL journal went in
-      (`padglhost.c:2811`) and NOTHING in the repo could reach it. It writes the
-      screen FBO at fb_w x fb_h, so no chrome, no letterbox, no RAIL proxy. The
-      1360x768 shot came back filling the surface and upside down
-      (`C:\tmp\item45\fb_shot_1.png`), and `write_png` already flips rows, so a
-      correct frame arrives the right way up.
-      **(3) WHY, and it is the title's own data:** `/games/data/boot_display_cmd`
-      on the Bond card is 8 bytes holding exactly `-invert`, sitting beside
-      `DisplayRenderer` in the ELF's string table. The cabinet's LCD is bolted in
-      upside down and the game renders to suit it.
-      **(4) THE FILE IS THE SWITCH, NOT A TITLE LIST — two labelled negatives.**
-      godzilla_pro and turtles_pro carry the IDENTICAL
-      `/games/data/boot_display_cmd` + `-invert` block in their own game ELFs, so
-      the code path is generic; they simply ship no such file (their `data/` holds
-      only READMEs), and their picture is known good.
-      **(5) THE FIX, `run_game.sh`: mask by ABSENCE inside the private
-      namespace** — copy the title's tiny `data/`, drop the flag, bind the copy
-      over it, so the guest sees exactly what a non-inverted title's card looks
-      like. `PAD_DISPLAY_INVERT=1` keeps the machine's own behaviour. Masking
-      beats un-rotating in `win_present()` twice: it fixes EVERY consumer rather
-      than the window alone (glshot, `PAD_GL_DUMP`, video capture), and it needs
-      no rebuild — and a rebuild invalidates every save slot (36a (3)).
-      **★★ (6) VERIFIED, 2026-08-14, both oracles:** with the mask on, the Tech
-      Alerts screen reads right way up and unmirrored on the guest's framebuffer
-      (`C:\tmp\item45\fb_after_1.png`) and in the window
-      (`C:\tmp\item45\bond_window_after.png`). Before/after pairs are all four
-      files above.
-      **RULED OUT, WITH A CONTROL, and it cost two runs to be sure: the mask is
-      NOT what kills the guest.** An early version masked with an empty file and
-      the game exited cleanly three frames in (threads RETURNED — an orderly
-      shutdown, not a crash). The obvious reading was "the game needs the flag".
-      **It is wrong: the CONTROL run, `PAD_DISPLAY_INVERT=1` with everything else
-      identical, died exactly the same way.** What actually kills it is running
-      bond WITHOUT `PAD_PIVOT` as an ordinary user — see the loose end below.
-      **The launch that works is the app's own** (`emulate_tab.watch_cmd`):
-      `wsl -u root -e env HOME=/home/david PAD_PIVOT=1 … bash watch.sh`. Setting
-      `PAD_HOME` instead of `HOME` is NOT enough — `PAD_GLHOST_BIN` still comes
-      off root's `$HOME` and the run dies on
-      `env: '/root/padglhost': Permission denied` before the guest starts.
-      **NOT DONE, and it is why the box is open:** the godzilla_pro control run
-      (the mask cannot fire without the file, but that is an argument, not the
-      capture the acceptance asks for); an attract-mode after-shot to pair with
-      the upside-down attract shot already taken; and David's own eyes.
-      **Resume:** run godzilla_pro from this branch with the launch shape above
-      and capture `shotwin.py` — the acceptance is that it is unchanged. Then
-      merge. **Observation, NOT this item's fault and do not chase it here:** the
-      Tech Alerts and service-menu screens draw into roughly the top-left 800x480
-      of the 1360x768 surface with black around them, before AND after the fix
-      (the 180 is what used to put them bottom-right). Attract fills the frame.
-      That is item 43's family, on a different title.
-      **★ DAVID, 2026-08-11: "bond 60th video is rotated upside down (the screen
-      is mounted differently in the game)."** He confirmed it is the EMULATOR's
-      game window, not an extracted file. **His diagnosis was right** — see (3),
-      which is the machine's own declaration of it.
-      **The card is on this machine:**
-      `images/Stern/spike2/james_bond_60th_le-1_10_0.Release.8G.sdcard.raw`
-      (7.86 GB). Item 34 applies: booting it from a different path re-copies the
-      whole card (~7.3 GB, +3 min), so pick the path once.
-      **★ MEASURED AT THE DESK, 2026-08-11, and it kills the obvious reading:
-      THE STORED VIDEO IS NOT UPSIDE DOWN.** David's extraction of that same card
-      (`C:\Users\david\OneDrive\Desktop\bond60\video`, 20 clips) probes 1360x768
-      h264 with NO rotation side data and no display matrix, and frames pulled
-      from `ATTRACT_LOOP1.mov` and `ATTRACT_LOOP_IC.mov` read right way up and
-      unmirrored — "INSIDER CONNECTED" reads normally. 2 of 20 clips, so it is
-      not a census, but it means the inversion is applied while the game DRAWS,
-      which is what a panel-orientation transform would look like.
-      **★ THE KNOB THAT ALREADY EXISTS IS A MIRROR, NOT A ROTATION, and a pass
-      that does not know this will call it fixed.** `PAD_GL_FLIP=1`
-      (`padglhost.c:1294`) sets `u_flip`, and the blit shader is
-      `uv = vec2(v_uv.x, 1.0 - v_uv.y)` (`padglhost.c:599`) — Y only. An
-      upside-down PANEL needs BOTH axes. On symmetric footage a mirror and a 180
-      are indistinguishable; on anything with text they are not, so judge every
-      screenshot on the TEXT, not on the picture looking the right way round.
-      **RULED OUT BEFORE IT IS TRIED — do not make the flip global.** The handoff
-      records that no Y flip is needed and that reasoning from "the PNG dumps are
-      right way up" to "the texture is Y-down" gave an upside-down window in the
-      first windowed build (`write_png` flips rows itself). Every other title
-      presents correctly today, so whatever this fix is, it is per-title.
-      **Two cheap first checks, one run, no rebuild:** whether the WHOLE window
-      is inverted or only the video layer — `PAD_VID=0` draws the scene/text
-      layer alone (item 43) and answers it, and "video" is the word David used;
-      and whether it is a 180 or a mirror — read the text in a `shotwin.py` grab.
-      **Acceptance:** a `shotwin.py` capture of the james_bond window with its
-      text reading right way up and unmirrored, plus a godzilla_pro capture from
-      the same build showing it unchanged — and state how the rig decides which
-      titles get the transform.
-      — S2: the game runs and every non-visual instrument works, so this is not
-      "I cannot play"; what it costs is that one title's entire display is
-      unreadable, which is strictly wider than item 43's service menus. Arguable
-      as S1 for anyone whose goal is playing Bond. D3: it needs a run, it is
-      visible the instant anyone looks, `shotwin.py` and `PAD_GL_FLIP` already
-      exist and the present point is one function (`win_present()`,
-      `padglhost.c:1723`) — what could make it D4 is if the transform has to be
-      DETECTED from the game rather than configured per title.
-
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.
@@ -1686,6 +1575,31 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **45. james_bond_60th presented its whole picture upside down.** DONE
+      2026-08-14, `ecf08d4` (branch `item/45`). **The title says so itself:**
+      `/games/data/boot_display_cmd` on the Bond card is 8 bytes holding
+      `-invert`, the cabinet's LCD is bolted in upside down, and the game renders
+      to suit it — so the emulator was faithfully reproducing a transform a
+      desktop monitor must not get. `run_game.sh` now masks that flag by ABSENCE
+      inside the private namespace (copy the title's tiny `data/`, drop the flag,
+      bind the copy over it), which is the exact state the control titles are in;
+      `PAD_DISPLAY_INVERT=1` keeps the machine's own behaviour. **Verified on
+      both oracles with matched pairs:** bond attract before = full frame,
+      inverted (`C:	mp\item45b_shot_1.png`), after = full frame, right way
+      up with the 007 logo back at bottom-right (`fb_after_2.png`), plus the
+      window itself (`bond_window_1.png` / `bond_window_after.png`); and the
+      godzilla_pro CONTROL unchanged with the mask correctly not firing
+      (`gz_control.png`, zero `[run] display:` lines). **Three things worth
+      keeping:** (a) **`glshot.sh` is new** — `padglhost` has answered a
+      `glshot.req` since the GL journal went in (`padglhost.c:2811`) and nothing
+      in the repo could reach it; it writes the screen FBO at fb_w x fb_h, so it
+      is the only picture instrument with no window, letterbox or RAIL proxy in
+      the path, and it works on a live run with no rebuild. (b) **A mirror is not
+      a rotation** — `PAD_GL_FLIP` is `uv.y -> 1-uv.y` and could never have fixed
+      this; judge orientation shots on the TEXT. (c) **The file is the switch,
+      not a title list**: godzilla_pro and turtles_pro carry the identical code
+      path in their own ELFs and ship no such file.
 
 - [x] **17. Keyboard switch input needs holding longer than a keystroke, and
       does not repeat.** `S1 D3`

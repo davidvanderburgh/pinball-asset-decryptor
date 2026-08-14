@@ -1557,6 +1557,12 @@ class MainWindow:
         self._audio_changed_on_disk = set()
         self._video_changed_on_disk = set()
         self._image_changed_on_disk = set()
+        # Rows the Extract baseline has never heard of — strays an older
+        # import dropped in the folder, not slots (see _slot_not_on_card).
+        # Filled by the same background diff, cleared beside it.
+        self._audio_foreign_rels = set()
+        self._video_foreign_rels = set()
+        self._image_foreign_rels = set()
         # Bump-counter for the background diff, PER KIND.  One shared counter
         # made the three tabs cancel each other: a mod-pack import re-scans all
         # of them at once, each finished slot-scan starts its own change scan,
@@ -3784,6 +3790,7 @@ class MainWindow:
         # Drop the previous folder's diff until this folder's background scan
         # repopulates it (avoids a flash of stale "changed" markers).
         self._audio_changed_on_disk = set()
+        self._audio_foreign_rels = set()
         # Duplicate-group cache: a different folder invalidates it outright;
         # a same-folder rescan keeps it unless a cached member vanished
         # (transcribe renames slots out from under the cached rel_paths).
@@ -4060,6 +4067,7 @@ class MainWindow:
         self._change_scan_ids[kind] = scan_id
         if not assets_path or not os.path.isdir(assets_path) or not rels:
             setattr(self, "_%s_changed_on_disk" % kind, set())
+            setattr(self, "_%s_foreign_rels" % kind, set())
             self._mark_change_scan(kind, False)
             return
         self._mark_change_scan(kind, True)
@@ -4084,6 +4092,10 @@ class MainWindow:
                 if self._change_scan_ids.get(kind) != scan_id:
                     return            # superseded by a newer scan of THIS kind
                 setattr(self, "_%s_changed_on_disk" % kind, changed)
+                # Kept, not just logged: these rows must not claim in the list
+                # or the preview that the next build puts them on the card
+                # (see _slot_not_on_card).
+                setattr(self, "_%s_foreign_rels" % kind, foreign)
                 self._mark_change_scan(kind, False)
                 self._note_foreign_slots(kind, assets_path, foreign)
                 if refresh:
@@ -4144,6 +4156,20 @@ class MainWindow:
             "card. Importing that pack again takes them back out."
             % (label, len(foreign), shown), "warning")
 
+    def _slot_not_on_card(self, kind, rel):
+        """Whether *kind*'s row *rel* is a file this extract never produced —
+        it is not in the Extract baseline, so nothing on the card matches it
+        and no build can write it.
+
+        Answered by the background change diff (:meth:`_start_change_scan`),
+        which already computes the set for :meth:`_note_foreign_slots`; until
+        that lands the answer is False, so a row is never wrongly disowned."""
+        return rel is not None and rel in getattr(
+            self, "_%s_foreign_rels" % kind, ())
+
+    #: Replacement-column mark for a row the card has no slot for.
+    _NOT_ON_CARD_MARK = "⚠ not on this card"
+
     def _rep_pane_empty_text(self, kind, rel, default):
         """What *kind*'s Replacement pane says when it has nothing to show.
 
@@ -4155,10 +4181,26 @@ class MainWindow:
         Stern file and the right is always the latest replacement" (batch 31).
         Import no longer creates those slots, but every project already built
         or hand-edited before snapshots existed still has them.  Say where the
-        change actually is."""
+        change actually is.
+
+        A row that isn't in the baseline at all gets the opposite answer: its
+        file is a stray an older import dropped here, no original was ever
+        overwritten, and the next build will NOT put it on the card.  A tester
+        read that promise on a clip whose name had changed between extracts
+        (his pack carried the pre-PAD-61 name) and took the missing original
+        for the only problem (batch 32)."""
         from ..core import staged_originals
         if rel is None or not self._slot_changed_on_disk(kind, rel):
             return default
+        if self._slot_not_on_card(kind, rel):
+            return ("this file is not part of this extract — nothing on the "
+                    "card matches its name, so no original was overwritten "
+                    "and the next build cannot put it anywhere. It is usually "
+                    "a mod pack made from an older extract, whose names for "
+                    "some files have since changed. Importing that pack again "
+                    "takes the stray files back out; use \"Transfer Mods to "
+                    "New Version\" on the Mod Pack tab to carry the change "
+                    "over by content instead of by name.")
         scan_dir = getattr(self, "_%s_scan_dir" % kind, None)
         if staged_originals.snapshot_path(scan_dir, rel):
             return default            # the pair is showing properly already
@@ -4463,6 +4505,9 @@ class MainWindow:
                 # into the working copy.  Same colours as the Write tab.
                 rep_disp = os.path.basename(rep)
                 tag = "changed" if is_changed else "assigned"
+            elif self._slot_not_on_card("audio", s.rel_path):
+                # Not in the baseline at all: a stray, not a change (below).
+                rep_disp, tag = self._NOT_ON_CARD_MARK, "foreign"
             elif is_changed:
                 # Differs from the Extract baseline but wasn't reassigned this
                 # session — a previous build OR a hand-edit in the folder.  It
@@ -6384,6 +6429,7 @@ class MainWindow:
         folder_changed = scan_dir != self._video_scan_dir
         self._video_scan_dir = scan_dir
         self._video_changed_on_disk = set()
+        self._video_foreign_rels = set()
         if folder_changed:
             # Drop the previous card's preview so it doesn't linger (and so the
             # new first row's select isn't short-circuited by a matching rel).
@@ -6429,6 +6475,8 @@ class MainWindow:
         rep = self._video_assignments.get(rel)
         if rep:
             rep_disp = os.path.basename(rep)
+        elif self._slot_not_on_card("video", rel):
+            rep_disp = self._NOT_ON_CARD_MARK
         elif rel in self._video_changed_on_disk:
             rep_disp = "✓ changed on disk"
         else:
@@ -6488,6 +6536,8 @@ class MainWindow:
             if rep:
                 rep_disp = os.path.basename(rep)
                 tag = "changed" if is_changed else "assigned"
+            elif self._slot_not_on_card("video", s.rel_path):
+                rep_disp, tag = self._NOT_ON_CARD_MARK, "foreign"
             elif is_changed:
                 rep_disp, tag = "✓ changed on disk", "changed"
             else:
@@ -6690,6 +6740,9 @@ class MainWindow:
         self._audio_changed_on_disk = set()
         self._video_changed_on_disk = set()
         self._image_changed_on_disk = set()
+        self._audio_foreign_rels = set()
+        self._video_foreign_rels = set()
+        self._image_foreign_rels = set()
         for fn in (getattr(self, "_refresh_audio_list", None),
                    getattr(self, "_refresh_video_list", None),
                    getattr(self, "_refresh_image_list", None)):
@@ -7590,6 +7643,7 @@ class MainWindow:
         folder_changed = scan_dir != self._image_scan_dir
         self._image_scan_dir = scan_dir
         self._image_changed_on_disk = set()
+        self._image_foreign_rels = set()
         if folder_changed:
             # A new folder's slots supersede the previous card's — drop the stale
             # preview so it doesn't keep showing the old image (and so selecting
@@ -7637,6 +7691,8 @@ class MainWindow:
         rep = self._image_assignments.get(rel)
         if rep:
             rep_disp = os.path.basename(rep)
+        elif self._slot_not_on_card("image", rel):
+            rep_disp = self._NOT_ON_CARD_MARK
         elif rel in self._image_changed_on_disk:
             rep_disp = "✓ changed on disk"
         else:
@@ -8015,6 +8071,8 @@ class MainWindow:
             if rep:
                 rep_disp = os.path.basename(rep)
                 tag = "changed" if is_changed else "assigned"
+            elif self._slot_not_on_card("image", s.rel_path):
+                rep_disp, tag = self._NOT_ON_CARD_MARK, "foreign"
             elif is_changed:
                 rep_disp, tag = "✓ changed on disk", "changed"
             else:
@@ -19868,6 +19926,9 @@ class MainWindow:
             # Already changed on disk by an earlier build — same hue as the
             # Write tab's "Modified" rows so the two views read as one truth.
             self._audio_tree.tag_configure("changed", foreground=c["link"])
+            # A file this extract never produced: no build can use it, so it
+            # must not wear the same hue as a change that WILL build.
+            self._audio_tree.tag_configure("foreign", foreground=c["warning"])
         for pane in (getattr(self, "_audio_pane_orig", None),
                      getattr(self, "_audio_pane_rep", None)):
             if pane is not None:
@@ -19876,6 +19937,7 @@ class MainWindow:
         if hasattr(self, "_video_tree"):
             self._video_tree.tag_configure("assigned", foreground=c["success"])
             self._video_tree.tag_configure("changed", foreground=c["link"])
+            self._video_tree.tag_configure("foreign", foreground=c["warning"])
         for pane in (getattr(self, "_video_pane_orig", None),
                      getattr(self, "_video_pane_rep", None)):
             if pane is not None:
@@ -19884,6 +19946,7 @@ class MainWindow:
         if hasattr(self, "_image_tree"):
             self._image_tree.tag_configure("assigned", foreground=c["success"])
             self._image_tree.tag_configure("changed", foreground=c["link"])
+            self._image_tree.tag_configure("foreign", foreground=c["warning"])
         for _attr in ("_image_canvas", "_image_canvas_rep"):
             _cv = getattr(self, _attr, None)
             if _cv is not None:

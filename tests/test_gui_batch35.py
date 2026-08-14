@@ -145,10 +145,12 @@ def test_an_empty_tab_gets_no_note():
 class _PaneStub:
     _rep_pane_empty_text = MainWindow._rep_pane_empty_text
     _slot_changed_on_disk = MainWindow._slot_changed_on_disk
+    _slot_not_on_card = MainWindow._slot_not_on_card
 
     def __init__(self, scan_dir):
         self._audio_scan_dir = scan_dir
         self._audio_changed_on_disk = set()
+        self._audio_foreign_rels = set()
 
 
 _DEFAULT_HINT = "no replacement assigned"

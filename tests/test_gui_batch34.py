@@ -223,13 +223,16 @@ class _Tree:
 
 class _ImageMetaStub:
     _apply_image_meta = MainWindow._apply_image_meta
+    _slot_not_on_card = MainWindow._slot_not_on_card
+    _NOT_ON_CARD_MARK = MainWindow._NOT_ON_CARD_MARK
 
-    def __init__(self, rel, changed=(), assigned=None):
+    def __init__(self, rel, changed=(), assigned=None, foreign=()):
         self._image_scan_id = 7
         slot = _Slot(rel)
         self._image_slots_by_rel = {rel: slot}
         self._image_assignments = dict(assigned or {})
         self._image_changed_on_disk = set(changed)
+        self._image_foreign_rels = set(foreign)
         self._image_tree = _Tree([rel])
 
     def _image_source_label(self, _rel):

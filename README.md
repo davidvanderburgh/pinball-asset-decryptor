@@ -716,6 +716,10 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    is named as such and pointed at *Transfer Mods to New Version*, one
    that fits nothing at all is refused instead of emptying itself into
    the folder, and strays a previous import left behind are cleaned up.
+   Until they are, the Replace tabs own up to them: a stray row reads
+   **⚠ not on this card** instead of the blue "changed on disk" tick,
+   and its Replacement pane says no original was overwritten and the
+   next build can't place it.
    The confirmation box says what will land, what will be skipped and
    what will be removed before anything is written. A pack also carries
    your staged **Default Settings**, high-score defaults and your

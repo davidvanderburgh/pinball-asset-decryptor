@@ -129,7 +129,15 @@ HELP_CONTENT = {
          "which is why replacing files in the project folder by hand works: "
          "batch-process them however you like, drop them over the originals, "
          "press Scan, and they show up here as changed. The counter shows "
-         "every change the next build will pack, not just this session's."),
+         "every change the next build will pack, not just this session's.\n\n"
+         "\"⚠ not on this card\" is the opposite answer: that file is in your "
+         "project folder but not in the extract, so nothing on the card "
+         "matches its name, no original was overwritten, and the next build "
+         "cannot place it. It's usually a mod pack built from an older "
+         "extract whose names for some files have since changed — importing "
+         "that pack again takes the strays back out, and \"Transfer Mods to "
+         "New Version\" on the Mod Pack tab carries the change over by "
+         "content instead of by name."),
         ("Preview",
          "Two players side by side — the original on the left, your "
          "replacement on the right — each with its own controls, so you can "

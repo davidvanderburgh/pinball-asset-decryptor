@@ -317,10 +317,21 @@ fi
 # save-state thumbnails - where un-rotating in win_present() would fix the window
 # alone AND need a rebuild, and a rebuild invalidates every existing save slot
 # (item 36a (3)). PAD_DISPLAY_INVERT=1 keeps the machine's own behaviour.
+#
+# HOW IT IS MASKED, and the shape is deliberate: the guest is shown a data/
+# directory with NO boot_display_cmd in it, rather than an empty one. That is
+# the exact state the two control titles are in - godzilla_pro and turtles_pro
+# ship a data/ holding only READMEs - so the guest lands in a configuration
+# that is known to work on this rig rather than in a novel one. An empty file
+# is a third state nobody has ever booted, and the first attempt here used one:
+# the game read it, its threads returned, and it exited cleanly four frames in.
 BDC="$R/games/data/boot_display_cmd"
 if [ "${PAD_DISPLAY_INVERT:-0}" != "1" ] && [ -s "$BDC" ] && grep -qa -- '-invert' "$BDC"; then
-    : > "$R/dump/boot_display_cmd.masked"
-    if mount --bind "$R/dump/boot_display_cmd.masked" "$BDC"; then
+    NOINV="$R/dump/data_noinvert"
+    rm -rf "$NOINV"
+    if cp -a "$R/games/$GAME/data" "$NOINV" 2>/dev/null &&
+       rm -f "$NOINV/boot_display_cmd" &&
+       mount --bind "$NOINV" "$R/games/$GAME/data"; then
         echo "[run] display: this title asks the panel for -invert (its LCD is"
         echo "[run]   mounted upside down); masked, so the picture comes up the"
         echo "[run]   right way up here. PAD_DISPLAY_INVERT=1 keeps the machine's."

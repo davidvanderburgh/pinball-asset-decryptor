@@ -202,6 +202,13 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str, str]:
     endless loop (PAD-17; the pre-restart half of it was PAD-16).  When
     no registered distro can explain the failure, we diagnose which step
     is actually missing and say that instead.
+
+    The same is true one state further along: a distro that ANSWERS but
+    can't hand out a loop device is a working WSL install, and leading
+    with ``wsl --install`` there sent a user off to reinstall WSL while
+    the prerequisite installer told him it was already there — neither
+    half of the app naming the thing that was actually wrong (PAD-73).
+    See :func:`_diagnose_wsl_loop_failure`.
     """
     global _wsl_boot_wait_failed
     if sys.platform != "win32":
@@ -241,14 +248,20 @@ def _probe_wsl(cmd: str) -> Tuple[bool, str, str]:
         return True, out[0] if out else "available", ""
 
     # Non-zero exit with a registered distro: the distro answered and the
-    # tool inside it is missing/broken (e.g. the WSL 1 loop-device case) —
-    # the static hint is the right advice.  Without one, the "error" is
-    # just wsl.exe saying there is nothing to run the command in.
+    # tool inside it is missing/broken — the static hint (an apt install)
+    # is the right advice.  Without one, the "error" is just wsl.exe
+    # saying there is nothing to run the command in.
     if not _wsl_distro_registered():
         msg, hint = _diagnose_wsl_unusable()
         return False, msg, hint
-    err = (result.stderr or result.stdout or "").strip().splitlines()
-    return False, (err[0] if err else f"exit {result.returncode}"), ""
+    lines = (result.stderr or result.stdout or "").strip().splitlines()
+    err = lines[0] if lines else f"exit {result.returncode}"
+    # ...except the loop-device probe, whose failure is a property of the
+    # DISTRO (WSL 1 owns no loop devices), not of a package apt can fix.
+    if "losetup" in cmd:
+        msg, hint = _diagnose_wsl_loop_failure(err)
+        return False, msg, hint
+    return False, err, ""
 
 
 def _run_in_wsl(cmd: str, timeout: float) -> subprocess.CompletedProcess:
@@ -282,6 +295,91 @@ def _wsl_distro_registered() -> bool:
         ).returncode == 0
     except (subprocess.TimeoutExpired, OSError):
         return False
+
+
+def _wsl_default_distro() -> Tuple[str, Optional[int]]:
+    """``(name, version)`` of the DEFAULT distro — the one every probe runs
+    in — or ``("", None)`` when it can't be read.
+
+    ``wsl -l -v`` marks the default with ``*`` and puts the version last::
+
+          NAME      STATE      VERSION
+        * Ubuntu    Running    2
+
+    Nothing here reads the header: it is localized, and on a non-English
+    Windows the column titles are translated.  The ``*`` line is split
+    from the RIGHT instead (state, then version), so a distro name with
+    spaces in it — ``wsl --import`` allows them — survives intact.
+
+    Decoding is deliberately belt-and-braces: ``WSL_UTF8=1`` asks wsl.exe
+    for UTF-8, but builds older than 0.64 ignore it and emit UTF-16LE,
+    which decodes to NUL-interleaved ASCII.  Stripping NULs reads both
+    (the same trick install_prerequisites.ps1 uses on `wsl --help`).
+    """
+    try:
+        result = subprocess.run(
+            ["wsl", "-l", "-v"],
+            capture_output=True,
+            timeout=PROBE_TIMEOUT,
+            env=dict(os.environ, WSL_UTF8="1"),
+            creationflags=_CREATE_FLAGS,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return "", None
+    if result.returncode != 0:
+        return "", None
+    out = result.stdout or ""
+    if isinstance(out, bytes):
+        out = out.decode("utf-8", "replace")
+    for line in out.replace("\x00", "").splitlines():
+        line = line.strip()
+        if not line.startswith("*"):
+            continue
+        parts = line[1:].strip().rsplit(None, 2)
+        if len(parts) == 3 and parts[2].isdigit():
+            return parts[0].strip(), int(parts[2])
+        break
+    return "", None
+
+
+def _diagnose_wsl_loop_failure(err: str) -> Tuple[str, str]:
+    """(message, hint) for a LOOP-DEVICE probe that failed inside a
+    registered, answering distro.
+
+    Every state here has WSL installed, so every one of them is a state
+    where "install WSL2 + Ubuntu" is the wrong instruction — and it was
+    the first line of the static hint.  A user hit exactly that: the app
+    told him WSL2 was missing, the prerequisite installer told him it was
+    already installed, and neither said the word that mattered (PAD-73).
+
+    A WSL 1 distro owns no loop devices at all, so no install and no apt
+    package can help — only ``wsl --set-version <name> 2``, which we can
+    now name with the user's REAL distro name instead of a placeholder.
+    A WSL 2 distro that still can't get a loop device is something else
+    (usually a VM that wants a restart), so say the error out loud and
+    keep the user away from a reinstall either way.  When the version
+    can't be read, fall back to the static hint — it carries both routes.
+    """
+    name, version = _wsl_default_distro()
+    if version == 1:
+        return (f"WSL is installed, but its default distro "
+                f"({name or 'the default distro'}) is WSL 1, which has no "
+                f"loop devices — so the card image cannot be mounted. "
+                f"Installing WSL again will not change that: the distro "
+                f"has to be converted.",
+                f"Convert the distro to WSL 2 in PowerShell, then click "
+                f"'Re-check' above the tabs:\n"
+                f"wsl --set-version {name or '<name>'} 2\n"
+                f"(it runs for a few minutes; close anything using WSL "
+                f"first). 'Install Missing' now offers to do this for you.")
+    if version == 2:
+        return (f"WSL 2 is installed and {name or 'the default distro'} "
+                f"answered, but it could not hand out a loop device: {err}",
+                "WSL2 itself is installed — do not install it again. Run "
+                "'wsl --shutdown' in PowerShell, wait ten seconds, then "
+                "click 'Re-check' above the tabs. If it still fails, send "
+                "the log: this is not a missing install.")
+    return err, ""
 
 
 # ---------------------------------------------------------------------------

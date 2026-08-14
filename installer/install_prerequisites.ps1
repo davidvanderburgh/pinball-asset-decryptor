@@ -79,6 +79,35 @@ function Test-WslHasApt {
     }
 }
 
+# --- Which distro do our probes actually run in, and is it WSL 2? --------
+# `wsl --status` exits 0 on a machine whose only distro is WSL 1, and
+# losetup is present in WSL 1's util-linux like anywhere else - so on such
+# a machine this installer used to report [OK] WSL2, [OK] Ubuntu and [OK]
+# util-linux while the app's own strip stayed red, because a WSL 1 distro
+# owns no loop devices.  A user bounced between the two for a whole
+# support round-trip (PAD-73).  Read the VERSION column instead.
+#
+# `wsl -l -v` marks the default distro with * and puts the version last:
+#     NAME      STATE      VERSION
+#   * Ubuntu    Running    2
+# The header is localized, so nothing here reads it; the * line is split
+# from the right so a distro name with spaces survives.  NULs are stripped
+# for the same reason Get-WslInstallPlan strips them - wsl.exe builds older
+# than 0.64 ignore WSL_UTF8 and answer in UTF-16LE.
+function Get-WslDefaultDistro {
+    if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) { return $null }
+    $out = ""
+    try {
+        $out = ((& wsl -l -v 2>&1 | Out-String) -replace "`0", "")
+    } catch { return $null }
+    foreach ($line in ($out -split "`r?`n")) {
+        if ($line -match '^\s*\*\s*(.+?)\s+\S+\s+(\d+)\s*$') {
+            return @{ Name = $Matches[1].Trim(); Version = [int]$Matches[2] }
+        }
+    }
+    return $null
+}
+
 # --- wsl --install capability probe --------------------------------------
 # Older inbox wsl.exe builds (pre-Store WSL) reject options they don't
 # know by printing usage and exiting -1 WITHOUT installing anything, so
@@ -244,6 +273,12 @@ $ManufacturerPrereqs = [ordered]@{
     "Jersey Jack Pinball" = @{
         Description  = "Wonka, GnR, Hobbit, Wizard of Oz, Avatar, etc. (.iso disk images)"
         WslPackages  = @(
+            # Every JJP flow loop-mounts the ext4 image it pulls out of the
+            # .iso, which is why the plugin declares the same loop-device
+            # prerequisite Stern does.  Listed here so the WSL-version check
+            # below (a WSL 1 distro has no loop devices at all) covers a JJP
+            # user too, not only a Stern one.
+            @{ probe="losetup";        pkg="util-linux mount";   label="util-linux (losetup/mount, in WSL)"; reason="Loop-mounts the game image extracted from the .iso" }
             @{ probe="partclone.ext4"; pkg="partclone";          label="partclone";              reason="ISO partition extraction" }
             @{ probe="debugfs";        pkg="e2fsprogs";          label="e2fsprogs/debugfs";      reason="ext4 filesystem extraction" }
             @{ probe="xorriso";        pkg="xorriso";            label="xorriso";                reason="ISO rebuild for Write pipeline" }
@@ -676,6 +711,54 @@ if ($needsWsl) {
         Write-SKIP "Ubuntu (will install after the Windows restart)"
     } elseif (-not $wslAvailable) {
         Write-SKIP "Ubuntu (WSL2 not available yet)"
+    }
+
+    # --- Is that distro WSL 2? -------------------------------------------
+    # Only asked when something in the plan loop-mounts an image (Stern's
+    # file growth, every JJP flow): those are the features WSL 1 cannot do
+    # at all, and the ONLY fix is converting the distro.  Reporting the
+    # tools green here while the app reported WSL2 missing is the loop this
+    # check exists to break (PAD-73).
+    $loopNeeded = @($wslPlan | Where-Object { $_.probe -eq "losetup" }).Count -gt 0
+    if ($loopNeeded -and $wslAvailable -and $ubuntuFound) {
+        Write-Step "Checking the WSL version of the default distro..."
+        $def = Get-WslDefaultDistro
+        if ($null -eq $def) {
+            Write-Host "  Could not read 'wsl -l -v' - skipping the version check." -ForegroundColor Yellow
+        } elseif ($def.Version -ge 2) {
+            Write-OK ("WSL 2 (default distro: {0})" -f $def.Name)
+        } else {
+            $dn = $def.Name
+            Write-Host ""
+            Write-Host "  ============================================================" -ForegroundColor Yellow
+            Write-Host ("  '{0}' IS REGISTERED AS WSL 1" -f $dn)                        -ForegroundColor Yellow
+            Write-Host "  ============================================================" -ForegroundColor Yellow
+            Write-Host "  WSL 1 has no loop devices, so it cannot mount a card or game" -ForegroundColor Yellow
+            Write-Host "  image no matter which packages are installed.  This is why"   -ForegroundColor Yellow
+            Write-Host "  the app keeps reporting WSL2 as missing while this installer" -ForegroundColor Yellow
+            Write-Host "  reports everything as already installed.  Converting the"     -ForegroundColor Yellow
+            Write-Host "  distro is the fix - nothing needs reinstalling."               -ForegroundColor Yellow
+            Write-Host ("  Manual command:   wsl --set-version {0} 2" -f $dn)           -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "  The conversion rewrites the distro's disk and can run for"    -ForegroundColor Gray
+            Write-Host "  several minutes.  Close anything using WSL before saying yes." -ForegroundColor Gray
+            $ans = Read-Host ("  Convert {0} to WSL 2 now? (y/N)" -f $dn)
+            if ($ans -match '^\s*y') {
+                Write-Host "  Shutting WSL down..." -ForegroundColor Cyan
+                & wsl --shutdown
+                Write-Host ("  Converting {0} - do not close this window..." -f $dn) -ForegroundColor Cyan
+                & wsl --set-version $dn 2
+                $after = Get-WslDefaultDistro
+                if ($after -and $after.Version -ge 2) {
+                    Write-Installed ("WSL 2 (converted {0})" -f $dn)
+                } else {
+                    Write-Host "  The conversion did not finish.  wsl.exe's own error text is above." -ForegroundColor Red
+                    Write-FAIL ("WSL 2 (conversion of {0} did not complete; manual: wsl --set-version {0} 2)" -f $dn)
+                }
+            } else {
+                Write-FAIL ("WSL 2 (default distro {0} is WSL 1; run: wsl --set-version {0} 2)" -f $dn)
+            }
+        }
     }
 }
 

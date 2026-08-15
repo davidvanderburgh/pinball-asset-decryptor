@@ -56,7 +56,9 @@ OFF_MRG = OFF_MRG_GEN + 4            # 540  merged array      (the shim writes)
 OFF_KBD_SRC = OFF_MRG + MAX_ID       # 796  who padglhost was  (it writes)
 OFF_SCR_SRC = OFF_KBD_SRC + 4        # 800  who WE are         (WE write)
 OFF_GUEST_T0 = OFF_SCR_SRC + 4       # 804  the guest's clock  (the shim writes)
-SIZE = OFF_GUEST_T0 + 4              # 808, in a 4096-byte block
+OFF_SPIN_GEN = OFF_GUEST_T0 + 4      # 808  rip generation     (swspin.py writes)
+OFF_SPIN = OFF_SPIN_GEN + 4          # 812  rip array          (swspin.py writes)
+SIZE = OFF_SPIN + MAX_ID             # 1068, in a 4096-byte block
 
 
 def open_block(path=PATH):
@@ -151,3 +153,23 @@ def take(m, ids):
             changed = True
     if changed:
         bump(m)
+
+
+def spinning(m, sw):
+    """Is `sw` being ripped right now (item 26)?"""
+    return m[OFF_SPIN + sw]
+
+
+def set_spin(m, sw, val):
+    """Start or stop RIPPING one switch (item 26).
+
+    Not a hold and not an edge: the shim alternates the level it reports on
+    each scan of this switch's node while the flag is set, which is the maximum
+    closure rate the diffed 0x11 scan can carry. No take() and no scr_held[] -
+    the rip has its own single-writer region and never touches the merge, so
+    clearing the flag leaves the switch OPEN by construction.
+    """
+    m[OFF_SPIN + sw] = 1 if val else 0
+    struct.pack_into("<I", m, OFF_SPIN_GEN,
+                     struct.unpack_from("<I", m, OFF_SPIN_GEN)[0] + 1)
+    m.flush()

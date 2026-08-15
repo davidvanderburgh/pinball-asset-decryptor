@@ -2273,6 +2273,7 @@ struct padsw_shm {
     unsigned scr_gen; unsigned char scr_held[256];
     unsigned mrg_gen; unsigned char mrg[256];
     unsigned kbd_src; unsigned scr_src; unsigned guest_t0_ms;
+    unsigned spin_gen; unsigned char spin[256];
 };
 #define PADSW_MAGIC 0x53444150u
 
@@ -4643,6 +4644,28 @@ static unsigned char sw_served[256];     /* it has been on the wire as made    *
 static unsigned long sw_made_at[256];    /* when it closed, for the log line   */
 static unsigned long sw_shut_at[256];    /* when it opened again               */
 
+/* ---- THE RIP. Item 26, and padsw.h owns the why. ---------------------------
+ *
+ * While the host holds spin[id] set, the level reported for id ALTERNATES on
+ * successive scans of its own node - a closure per two scans, the maximum rate
+ * a diffed level can carry, at whatever rate the game actually scans. Nothing
+ * here touches the merge, sw_owed[] or sw_served[]: those book-keep the merged
+ * state, the rip rides above it, and when the flag clears the report falls
+ * back to the merge - which is OPEN unless something else really holds the
+ * switch, so a rip cannot strand a switch closed.
+ *
+ * The stop line is also a MEASUREMENT, and it is one this rig has never had:
+ * closures delivered over the rip's own duration is the per-node scan rate of
+ * a live game, directly, on whatever screen the game was showing. Item 17
+ * measured 670 ms between scans of one node in attract; nobody has measured
+ * during play, and item 46 wants the same number. */
+static unsigned char sw_spin_on[256];    /* a rip was seen in progress         */
+static unsigned char sw_spin_phase[256]; /* the level the NEXT scan reports    */
+static unsigned sw_spin_scans[256];      /* scans of its node while ripping    */
+static unsigned sw_spin_made[256];       /* how many of them reported MADE     */
+static unsigned long sw_spin_t0[256];    /* pad_ms() when the rip began        */
+static int sw_spin_budget = 200;         /* [swspin] lines; saturates          */
+
 static int sw_latch_on(void)
 {
     static int on = -1;
@@ -4951,6 +4974,52 @@ static int sw_scan_bytes(unsigned nid, unsigned char out[8])
                 /* On the wire as made, so nothing is owed for this closure. */
                 sw_served[id] = 1;
                 sw_owed[id] = 0;
+            }
+            /* THE RIP OVERRIDES A HOLD on purpose: the game diffs levels, so
+             * "made forever" is one closure and a rip has to keep making
+             * edges. See the long comment on sw_spin_on[]. */
+            if (id < 256 && sw_shm && sw_shm->magic == PADSW_MAGIC &&
+                sw_shm->spin[id]) {
+                if (!sw_spin_on[id]) {
+                    sw_spin_on[id] = 1;
+                    sw_spin_phase[id] = 1;     /* first scan reports MADE */
+                    sw_spin_scans[id] = 0;
+                    sw_spin_made[id] = 0;
+                    sw_spin_t0[id] = pad_ms();
+                    if (sw_spin_budget > 0) {
+                        char m[96];
+                        sw_spin_budget--;
+                        snprintf(m, sizeof m,
+                                 "[swspin] %lu ms id=%u node=%u rip START\n",
+                                 pad_ms(), id, nid);
+                        logmsg(m);
+                    }
+                }
+                held = sw_spin_phase[id];
+                sw_spin_phase[id] ^= 1;
+                sw_spin_scans[id]++;
+                sw_spin_made[id] += held;
+            } else if (id < 256 && sw_spin_on[id]) {
+                /* The flag cleared: stop overriding - the merge is OPEN unless
+                 * something really holds it - and state what was delivered.
+                 * closures/s IS the per-node scan rate over two, measured on
+                 * the live game; no other instrument has ever had it. */
+                sw_spin_on[id] = 0;
+                if (sw_spin_budget > 0) {
+                    char m[160];
+                    unsigned long dt = pad_ms() - sw_spin_t0[id];
+                    sw_spin_budget--;
+                    if (!dt) dt = 1;
+                    snprintf(m, sizeof m,
+                             "[swspin] %lu ms id=%u node=%u rip END: "
+                             "%u closures in %lu ms (%lu/s; node scanned "
+                             "%u times, %lu scans/s)\n",
+                             pad_ms(), id, nid, sw_spin_made[id], dt,
+                             (unsigned long)sw_spin_made[id] * 1000ul / dt,
+                             sw_spin_scans[id],
+                             (unsigned long)sw_spin_scans[id] * 1000ul / dt);
+                    logmsg(m);
+                }
             }
             if (held) level = !level;
         }

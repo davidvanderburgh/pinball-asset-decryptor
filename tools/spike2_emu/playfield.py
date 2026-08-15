@@ -422,6 +422,7 @@ class SwitchDriver:
     def __init__(self):
         self.q = queue.Queue()
         self.held = set()                  # ids we have latched ON
+        self.spinning = set()              # ids we have set RIPPING (item 26)
         self.last_ms = None                # last action's round trip, measured
         self._lock = threading.Lock()
         self._t = threading.Thread(target=self._run, daemon=True)
@@ -438,19 +439,41 @@ class SwitchDriver:
             self.held.discard(sw_id)
         self.q.put((sw_id, 0))
 
+    def spin(self, sw_id, on):
+        """Start or stop a RIP (item 26) - right-hold on a spinner.
+
+        One flag in the block each way, exactly like a hold's press/release;
+        the guest shim does the actual ripping by alternating the level it
+        reports on each scan of that switch's node. Same serial queue, so a
+        rip's stop cannot overtake its start and a fast right-click cannot
+        leave a spinner ripping forever - the stuck-switch argument again.
+        """
+        with self._lock:
+            if on:
+                self.spinning.add(sw_id)
+            else:
+                self.spinning.discard(sw_id)
+        self.q.put((sw_id, "spin1" if on else "spin0"))
+
     def release_all(self):
         """Open everything we still hold, and WAIT for it.
 
         On window close this is the last chance: a daemon worker dies with the
         process, so an unqueued release would simply never happen and the game
         would keep seeing a made switch until the next run rebuilt the block.
+        A rip is the same shape: an unstopped spin flag outlives this window,
+        so the spins are cleared here too.
         """
         with self._lock:
             ids = sorted(self.held)
             self.held.clear()
+            spins = sorted(self.spinning)
+            self.spinning.clear()
         for sw_id in ids:
             self.q.put((sw_id, 0))
-        if ids:
+        for sw_id in spins:
+            self.q.put((sw_id, "spin0"))
+        if ids or spins:
             self.q.join()
 
     def pulse(self, sw_id, ms=None):
@@ -482,6 +505,12 @@ class SwitchDriver:
                     # only a missed click. So retry the one that matters, once.
                     if ok is None and what == 0:
                         ok = wsl_run("swhold.py", str(sw_id), "0")
+                elif what in ("spin0", "spin1"):
+                    # item 26: the rip. Same shape as a hold - the stop is the
+                    # edge that must not be lost, so it gets the same retry.
+                    ok = wsl_run("swspin.py", str(sw_id), what[-1])
+                    if ok is None and what == "spin0":
+                        ok = wsl_run("swspin.py", str(sw_id), "0")
                 else:
                     ok = wsl_run("swpoke.py", str(sw_id), str(what))
                 self.last_ms = (time.monotonic() - t0) * 1000.0
@@ -2051,12 +2080,17 @@ class Field(StateOps):
         self._binds_next = time.monotonic() + SWITCH_POLL_S
         self.key_panel = attach_key_panel(self)
         self.holding = None            # (canvas item, switch id) while held
+        self.ripping = None            # (canvas item, switch id) while ripped
         # PRESS and RELEASE, not <Button-1>: a switch is closed for as long as
         # the mouse is down. Tk's implicit grab delivers the release to this
         # canvas even if the pointer has left it, so a drag off the marker still
         # opens the switch.
         self.cv.bind("<ButtonPress-1>", self.on_press)
         self.cv.bind("<ButtonRelease-1>", self.on_release)
+        # RIGHT-hold RIPS a switch (item 26) - closures for as long as the
+        # button is down, the way a ball spinning a spinner does.
+        self.cv.bind("<ButtonPress-3>", self.on_rip)
+        self.cv.bind("<ButtonRelease-3>", self.on_rip_end)
         self.cv.bind("<Motion>", self.on_move)
         self.cv.bind("<Leave>", lambda e: self.tip.hide())
         self.tick()
@@ -2155,7 +2189,7 @@ class Field(StateOps):
         d = e["d"]
         if e["kind"] == "switch":
             return ("SWITCH  %s\nid %d   node %d  bit %d\n"
-                    "hold to keep it closed"
+                    "hold to keep it closed\nright-hold to RIP it (spinners)"
                     % (d["name"], d["id"], d["node"], d["bit"]))
         if e["kind"] == "coil":
             where = ("node %d index %d" % (d["node"], d["index"])
@@ -2227,6 +2261,30 @@ class Field(StateOps):
         item, sw_id, restore = self.holding
         self.holding = None
         self.drv.release(sw_id)
+        self.cv.itemconfig(item, outline=restore, width=2)
+
+    def on_rip(self, ev):
+        """Right-hold RIPS a switch (item 26): repeated closures for as long
+        as the button is down, shim-side, at the game's own scan rate. Only a
+        switch marker rips - a coil has no level to alternate."""
+        i = self._hit(ev)
+        if i is None:
+            return
+        e = self.info[i]
+        if e["kind"] != "switch":
+            return
+        self.cv.itemconfig(i, outline="#ff9500", width=3)
+        self.ripping = (i, e["d"]["id"], "#2a8cff")
+        self.drv.spin(e["d"]["id"], True)
+
+    def on_rip_end(self, ev):
+        """Stop the rip we STARTED, same argument as on_release: the pointer
+        may have left the marker, but the flag we set is the one to clear."""
+        if self.ripping is None:
+            return
+        item, sw_id, restore = self.ripping
+        self.ripping = None
+        self.drv.spin(sw_id, False)
         self.cv.itemconfig(item, outline=restore, width=2)
 
     #: The gap between the action buttons, and their inset from the canvas
@@ -2946,8 +3004,12 @@ class Schematic(StateOps):
         self._binds_next = time.monotonic() + SWITCH_POLL_S
         self.key_panel = attach_key_panel(self)
         self.holding = None
+        self.ripping = None
         self.cv.bind("<ButtonPress-1>", self.on_press)
         self.cv.bind("<ButtonRelease-1>", self.on_release)
+        # RIGHT-hold RIPS a switch (item 26), same as the artwork view.
+        self.cv.bind("<ButtonPress-3>", self.on_rip)
+        self.cv.bind("<ButtonRelease-3>", self.on_rip_end)
         self.cv.bind("<Motion>", self.on_move)
         self.cv.bind("<Leave>", lambda e: self.tip.hide())
         self.tick()
@@ -2974,7 +3036,8 @@ class Schematic(StateOps):
         d = self.info[i]["d"]
         self.tip.show("SWITCH  %s\n"
                       "id %d   num %d   node %d  bit %d\n"
-                      "hold to keep it closed"
+                      "hold to keep it closed\n"
+                      "right-hold to RIP it (spinners)"
                       % (d["name"], d["id"], d["num"], d["node"], d["bit"]),
                       ev.x_root, ev.y_root)
 
@@ -2993,6 +3056,24 @@ class Schematic(StateOps):
         item, sw_id = self.holding
         self.holding = None
         self.drv.release(sw_id)
+        self.cv.itemconfig(item, fill="#d8d8d8")
+
+    def on_rip(self, ev):
+        """Right-hold RIPS a switch (item 26) - see the artwork view."""
+        i = self._hit(ev)
+        if i is None:
+            return
+        d = self.info[i]["d"]
+        self.cv.itemconfig(i, fill="#ff9500")
+        self.ripping = (i, d["id"])
+        self.drv.spin(d["id"], True)
+
+    def on_rip_end(self, ev):
+        if self.ripping is None:
+            return
+        item, sw_id = self.ripping
+        self.ripping = None
+        self.drv.spin(sw_id, False)
         self.cv.itemconfig(item, fill="#d8d8d8")
 
     def tick(self):

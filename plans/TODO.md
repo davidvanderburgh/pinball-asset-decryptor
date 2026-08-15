@@ -688,6 +688,33 @@ These have each been violated at least once and each cost a run or a window:
       something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
 
 - [ ] **26. Right-click-hold a switch to RIP IT, for spinners.** `S3 D4`
+      ← IN PROGRESS *(**70%, 2026-08-15, branch `item/26`:** the whole
+      boundary-spanning build is DONE and offline-verified; what is left is
+      the one live run the acceptance test names.)*
+      **Established this pass:** the SPIN design is built exactly as written
+      below — `spin_gen`/`spin[256]` appended to the block (offsets 808/812,
+      SIZE 1068, `swlayout.sh` proves all three copies agree), `hwshim.c`
+      alternates the reported level per scan of the node while the flag is
+      set and logs `[swspin] rip START/END` with closures, duration and the
+      node's own scan rate — the END line IS the during-play scan-rate
+      measurement this item said to make first. `swspin.py` sets/clears the
+      flag (no take(), no scr_held — its own single-writer region);
+      right-hold rides SwitchDriver in BOTH playfield views; `release_all()`
+      clears spins on window close. Offline: `swspintest.py` ALL PASS (flag
+      set 160 ms, solid 263/263 samples over 2 s, cleared 153 ms; rip never
+      touches scr_held, left-hold never touches spin; 10 fast right-clicks
+      end not spinning) and `swholdtest.py 53` still ALL PASS. Shim builds
+      clean; rebuilt with no run live.
+      **Found on the way:** Tk's find_overlapping treats an UNFILLED oval as
+      its outline band only, so a bare switch ring's exact centre hit-tests
+      to NOTHING — real mice never notice (they aim at the drawn circle, and
+      scooped switches are covered by their filled coil marker), but a
+      synthesised probe must aim at the ring's stroke. Recorded in
+      swspintest.py.
+      **Resume:** one live run on godzilla_pro from this worktree, per the
+      acceptance below — rip 47 during play with PAD_SW_PEND=47, quote the
+      `[swspin] rip END` closures/s against the game-side `lvl` count, and
+      rip once in attract for the 670 ms comparison.
       **★ DAVID, 2026-08-06: "for switches, let's also add a right click hold
       function that 'rips the spinner' as long as the click is held."**
       The sibling of item 24: left-hold closes a switch and keeps it closed,

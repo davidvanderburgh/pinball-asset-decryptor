@@ -461,8 +461,11 @@ These have each been violated at least once and each cost a run or a window:
       records how TMNT drives character select — read the on-screen prompt).
       **Never arrived ⇒ it is item 17's class**, and the attract/in-game split
       is then the finding: the per-node scan gap ran to 670 ms on godzilla in
-      attract and **the DURING-PLAY per-node rate has never been measured on any
-      title** — item 26 wants that same number, so measuring it pays twice.
+      attract and **the DURING-PLAY per-node rate is now MEASURED — item 26's
+      close (2026-08-15): godzilla node 8 averaged 109 scans/s during play and
+      120 scans/s in attract** (item 17's 670 ms was a worst single gap, not
+      the average). Any rip on any title reprints it free in `[swspin] rip
+      END`, so turtles' own number is one right-hold away.
       **★★ READ ITEM 17's BRANCH FIRST — 2026-08-12 late: it cracked a
       mechanism that predicts THIS item's symptom exactly.** On godzilla a
       button press becomes a queued EVENT whose coroutine re-reads the live
@@ -686,89 +689,6 @@ These have each been violated at least once and each cost a run or a window:
       `PAD_PF_FADE_UNIT_MS` and says whether the ramp is linear or gamma'd,
       with no firmware at all. Do that first if a pass has to produce
       something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
-
-- [ ] **26. Right-click-hold a switch to RIP IT, for spinners.** `S3 D4`
-      ← IN PROGRESS *(**70%, 2026-08-15, branch `item/26`:** the whole
-      boundary-spanning build is DONE and offline-verified; what is left is
-      the one live run the acceptance test names.)*
-      **Established this pass:** the SPIN design is built exactly as written
-      below — `spin_gen`/`spin[256]` appended to the block (offsets 808/812,
-      SIZE 1068, `swlayout.sh` proves all three copies agree), `hwshim.c`
-      alternates the reported level per scan of the node while the flag is
-      set and logs `[swspin] rip START/END` with closures, duration and the
-      node's own scan rate — the END line IS the during-play scan-rate
-      measurement this item said to make first. `swspin.py` sets/clears the
-      flag (no take(), no scr_held — its own single-writer region);
-      right-hold rides SwitchDriver in BOTH playfield views; `release_all()`
-      clears spins on window close. Offline: `swspintest.py` ALL PASS (flag
-      set 160 ms, solid 263/263 samples over 2 s, cleared 153 ms; rip never
-      touches scr_held, left-hold never touches spin; 10 fast right-clicks
-      end not spinning) and `swholdtest.py 53` still ALL PASS. Shim builds
-      clean; rebuilt with no run live.
-      **Found on the way:** Tk's find_overlapping treats an UNFILLED oval as
-      its outline band only, so a bare switch ring's exact centre hit-tests
-      to NOTHING — real mice never notice (they aim at the drawn circle, and
-      scooped switches are covered by their filled coil marker), but a
-      synthesised probe must aim at the ring's stroke. Recorded in
-      swspintest.py.
-      **A LIVE RUN MAY BE UP — THIS PASS'S, not David's:** godzilla_pro,
-      started 2026-08-15 from the item-26 worktree's watch.sh with
-      PAD_SW_PEND=47 and a 20-minute backstop, for the acceptance
-      measurement. The pass tears it down itself (killgame.sh + alive.sh 0);
-      if you are reading this later than that, check alive.sh before
-      touching anything.
-      **Resume:** one live run on godzilla_pro from this worktree, per the
-      acceptance below — rip 47 during play with PAD_SW_PEND=47, quote the
-      `[swspin] rip END` closures/s against the game-side `lvl` count, and
-      rip once in attract for the 670 ms comparison.
-      **★ DAVID, 2026-08-06: "for switches, let's also add a right click hold
-      function that 'rips the spinner' as long as the click is held."**
-      The sibling of item 24: left-hold closes a switch and keeps it closed,
-      right-hold should make it close over and over for as long as the button
-      is down, the way a ball spinning a spinner does. **Godzilla's three
-      spinners: 47 LEFT SPINNER (node 8 bit 9), 83 TOP SPINNER (node 9 bit 21),
-      84 RIGHT SPINNER (node 9 bit 28).** No `<Button-3>` binding exists
-      anywhere in `playfield.py` today.
-      **★★ ESTABLISHED AT THE DESK, from `hwshim.c`, and it decides the whole
-      shape — do NOT build a host-side pulse loop.** The `0x11` switch scan
-      replies with a per-switch LEVEL, not a closure count: `hwshim.c:4464` is
-      `if (held) level = !level` into a bitmap. So the game counts spins by
-      DIFFING successive scans, which caps the rip at **one closure per scan of
-      that switch's own node** however fast anything pulses. Two rates bound it
-      and they are not the same number: the poll itself is described as a
-      37.5 Hz scan (`hwshim.c:5665`), but item 17 measured the gap between two
-      scans of ONE node running to **670 ms in attract**. The during-play
-      per-node rate has never been measured and is the first thing to find out.
-      **Which also kills the obvious implementation.** Each host action is a
-      ~80 ms `wsl.exe` spawn (item 24, measured) and each closure needs two, so
-      a host-side ripper tops out near 6 closures/s while saturating
-      SwitchDriver's queue and blocking every other switch action including a
-      release.
-      **THE DESIGN THIS POINTS AT, not yet built:** a SPIN flag in the shared
-      block, and `hwshim.c` flips the reported level on each scan of that node
-      while the flag is set. That delivers the maximum rate the wire can carry
-      by construction and costs ONE interop call on press and one on release,
-      exactly like `swhold.py`. Right-click then rides item 24's `SwitchDriver`
-      queue unchanged.
-      **What makes it D4 rather than D2: it spans the boundary.** A new flag
-      means `padsw.h`, `padsw.py`, a new `swspin.py`, `hwshim.c` and
-      `playfield.py` — and the block layout is THREE hand-kept copies, which is
-      what `swlayout.sh` (item 16, `145e79b`) exists to prove agree. Run
-      `swlayout.sh` before believing any of it. A rebuild is needed, so no run
-      may be live. The ladder would call a boundary-spanning change D5; it is
-      D4 because the mechanism above is already read off the source and the
-      design is written down, which is what D5 usually pays for.
-      **Acceptance, and the oracle must be on the GAME's side of the wire:** a
-      right-hold on a spinner produces many closures the GAME SEES, not many
-      writes this rig made. Count them with item 17's `PAD_SW_PEND` /
-      `swladder.py`, which read the game's own `entry[+24]`, and state the
-      achieved closures per second against the measured per-node scan rate.
-      Left-click hold must still behave as item 24 shipped it, and a right-hold
-      must end OPEN — the stuck-switch failure is the same one, and
-      `swholdtest.py` is the harness that already checks for it.
-      — S3: nothing is broken and a spinner can still be closed once per click,
-      so no shot is unreachable; what is missing is the magnitude. D4, armchair
-      beyond the desk work above.
 
 - [ ] **29. Switch names come back as `?` on most titles, so the schematic
       playfield is a list of numbers and switch positions cannot be joined.**
@@ -1734,6 +1654,29 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **26. Right-click-hold a switch to RIP IT, for spinners.** DONE
+      2026-08-15, `item/26`, `263a9dc`. Right-hold on any switch marker, in
+      both playfield views, now rips: ONE SPIN flag in the shared block (new
+      single-writer region `spin_gen`/`spin[256]` at 808/812, `swlayout.sh`
+      proves all three copies agree) and `hwshim.c` ALTERNATES the level it
+      reports on each scan of that switch's own node while the flag is set —
+      a closure per two scans, the wire's maximum by construction, one
+      interop call each way (`swspin.py`; the host-pulse alternative caps
+      near 6/s). **Live on godzilla_pro, alive.sh 0 after: attract rip
+      608 closures in 10.0 s (60/s, node 8 at 120 scans/s); during-play rip
+      554 closures in 10.1 s (54/s, node 8 at 109 scans/s) — the first
+      during-play per-node scan rate ever measured, and `[swspin] rip END`
+      now prints it free on every rip. PAD_SW_PEND agreed EXACTLY: 608 and
+      554 game-side `lvl` closures, 100% of the wire's, ending OPEN both
+      times.** Found: the game QUEUES edges (entry[+22]) and drains ~1 per
+      16.7 ms tick, so a rip fed at 2x that backlogs and coasts after
+      release (10 s rip → ~9 s tail; a normal 1 s rip trails under a
+      second, which reads as a spinner coasting down, not a defect).
+      Offline: swspintest.py ALL PASS, swholdtest.py still ALL PASS. Traps:
+      Tk `find_overlapping` treats an unfilled oval as its outline band, so
+      synthesised clicks must aim at the ring's STROKE; godzilla_pro wanted
+      several `plunge.py coin` before Start took (pricing, not a fault).
 
 - [x] **47. A title's FIRST run showed no switches, because the window read its
       tables once and they land a few seconds later.** DONE 2026-08-14,

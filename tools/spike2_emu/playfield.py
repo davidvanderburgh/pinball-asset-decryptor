@@ -1109,12 +1109,43 @@ def poll_switches(view):
     # The key panel (item 39) rides the same read. It can be missing at
     # window open - padbinds is written by padglhost, which may be seconds
     # behind - so keep asking for it on the switch table's cadence.
-    if view.key_panel is None and time.monotonic() >= view._binds_next:
+    #
+    # ★ ITEM 49: AND IT CAN CHANGE MID-RUN. On a title's first run padglhost
+    # exports padbinds with the playfield rows withheld ('0': the switch
+    # table has not arrived), then RE-exports the moment it has - so a panel
+    # read once at construction would show dim dead keys for the rest of a
+    # session whose keys came alive a minute in. Watch the file's mtime on
+    # the same cadence and rebuild; tmp+rename on the writer's side means a
+    # changed mtime is always a WHOLE new file.
+    if time.monotonic() >= view._binds_next:
         view._binds_next = time.monotonic() + SWITCH_POLL_S
-        view.key_panel = attach_key_panel(view)
+        if view.key_panel is None:
+            view.key_panel = attach_key_panel(view)
+            view._binds_mtime = _binds_mtime()
+        else:
+            m = _binds_mtime()
+            if m != getattr(view, "_binds_mtime", None):
+                view._binds_mtime = m
+                if getattr(view, "keys", None) is not None:
+                    view.keys.close()
+                    view.keys = None
+                # The trough panel lives inside the key panel's canvas and
+                # dies with it; forget it BEFORE the destroy so
+                # attach_key_panel does not touch a dead widget.
+                view.trough_panel = None
+                view.key_panel.cv.destroy()
+                view.key_panel = attach_key_panel(view)
     if view.key_panel is not None:
         view.key_panel.update(view.sw)
     return True
+
+
+def _binds_mtime():
+    """padbinds' mtime, or None - the change signal for the key panel."""
+    try:
+        return os.path.getmtime(BINDS_PATH)
+    except OSError:
+        return None
 
 
 def trough_text(watch):

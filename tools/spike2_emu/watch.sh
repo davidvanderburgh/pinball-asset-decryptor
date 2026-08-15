@@ -996,8 +996,11 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     # miss - david could not even build it by hand without root). Recursive,
     # deliberately: it also heals any title dir an older run already
     # poisoned. Same drop-dance as $ROOT/dump and the log files above.
+    # $TABLES, not a hardcoded path: every writer resolves the tree through
+    # padpath's PAD_TABLES, so a machine that overrides it must have the
+    # override healed, not the default nobody is using.
     if [ "$DROP" = 1 ]; then
-        chown -R "$PAD_USER" "$ROOT/dump/tables" 2>/dev/null
+        chown -R "$PAD_USER" "$TABLES" 2>/dev/null
     fi
 
     # PASS TWO IS WHERE THE WAIT GOES, AND WHETHER IT BLOCKS DEPENDS ON WHETHER
@@ -1012,7 +1015,13 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
         TBLPG=$!
     else
         echo "[watch]   nothing to draw yet - waiting for the game's own switch list"
-        python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" 2>&1 \
+        # as_user (item 49): on a pivot run this used to run as ROOT and
+        # re-create switch_list.txt root-owned INSIDE the tree the chown
+        # above just healed - the Led Zeppelin / Elvira shape re-poisoning
+        # the cache one branch below the cure. Foreground and piped, so
+        # as_user (plain runuser) rather than setsid_as_user: the output is
+        # the [watch] pane's, and teardown has nothing to kill here.
+        as_user python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" 2>&1 \
             | grep -v '^drawable=' | sed 's/^/[watch]   /'
     fi
     rm -f "$TBL_OUT"

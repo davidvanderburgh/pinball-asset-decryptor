@@ -124,11 +124,26 @@ def _stale(dest, source):
 
 
 def _write(path, text):
+    """Write ATOMICALLY - tmp in the same dir, then replace (item 49).
+
+    Two 2-second pollers latch PERMANENTLY on their first successful parse of
+    exactly these files: padglhost's binds_resolve (switch_list.txt) and the
+    playfield's poll_for_tables. binds_export in padglhost.c states the rule
+    for a polled file - tmp+rename, "must never parse half of one" - and this
+    producer did not follow it: a reader could catch the file mid-write and
+    commit to the head of it for the whole run. The same shape also meant a
+    write that failed AFTER open() (disk full, a kill mid-write) left a
+    truncated destination that the exists-means-cached check upstream then
+    trusted on every later run. With the replace, the destination either does
+    not exist or is whole; a stray .tmp is harmless and overwritten next
+    time."""
     d = os.path.dirname(os.path.abspath(path))
     if not os.path.isdir(d):
         os.makedirs(d)
-    with open(path, "w", newline="") as f:     # newline='': LF even on Windows
+    tmp = path + ".tmp"
+    with open(tmp, "w", newline="") as f:      # newline='': LF even on Windows
         f.write(text)
+    os.replace(tmp, path)
 
 
 def build(game=None, log_path=None, wait_s=0, force=False, say=print):
@@ -190,7 +205,16 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
                 recs = None
     if recs is not None:
         pf_w, pf_h = devicexy.playfield_size(game)
-        _write(dev_dest, devicexy.text(game, recs, art_src, pf_w, pf_h))
+        # Named failure, not a traceback (item 49): an uncaught raise here
+        # kills main() BEFORE the drawable= line prints, and watch.sh then
+        # routes a title with perfectly good artwork into its "nothing to
+        # draw yet" branch. Same class as the switch write below.
+        try:
+            _write(dev_dest, devicexy.text(game, recs, art_src, pf_w, pf_h))
+        except OSError as exc:
+            say("  devices      FAILED to write %s: %s" % (dev_dest, exc))
+            recs = None
+    if recs is not None:
         made["device_xy.txt"] = dev_dest
         counts = devicexy.counts(recs)
         if not recs:
@@ -213,10 +237,13 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
                 say("               %s" % line)
 
         rows, _problems, _report = ledio.build(recs, None)
-        _write(led_dest, ledio.text(game, rows, False))
-        made["led_io.txt"] = led_dest
-        if rows:
-            say("  inserts      %d LEDs" % len(rows))
+        try:
+            _write(led_dest, ledio.text(game, rows, False))
+            made["led_io.txt"] = led_dest
+            if rows:
+                say("  inserts      %d LEDs" % len(rows))
+        except OSError as exc:
+            say("  inserts      FAILED to write %s: %s" % (led_dest, exc))
     else:
         say("  devices      (cached)" if os.path.exists(dev_dest)
             else "  devices      MISSING - the playfield will be a schematic")
@@ -250,8 +277,9 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
             _write(sw_list, swtable.text(game, live_rows))
         except OSError as exc:
             say("  switches     FAILED to write %s: %s" % (sw_list, exc))
-            say("  switches     (a root-owned tables dir from an old run? "
-                "watch.sh now chowns it at start - rerun, or fix by hand)")
+            say("  switches     (a root-owned tables dir from an old run? a "
+                "PIVOT run heals it at start; a plain run cannot chown "
+                "root's files - fix by hand: sudo chown -R <you> that dir)")
             return made
         made["switch_list.txt"] = sw_list
         say("  switches     %d in the game's own table" % len(live_rows))
@@ -278,10 +306,13 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
             names = switchxy.read_list(sw_list)
             joined = switchxy.join(names, recs)
             if joined:
-                _write(sw_xy, switchxy.text(game, joined))
-                made["switch_xy.txt"] = sw_xy
-                say("  positions    %d switches placed on the artwork"
-                    % len(joined))
+                try:
+                    _write(sw_xy, switchxy.text(game, joined))
+                    made["switch_xy.txt"] = sw_xy
+                    say("  positions    %d switches placed on the artwork"
+                        % len(joined))
+                except OSError as exc:
+                    say("  positions    FAILED to write %s: %s" % (sw_xy, exc))
             else:
                 # Real and worth saying out loud: it means the two tables
                 # share no names - a title whose device table names things

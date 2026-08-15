@@ -812,12 +812,19 @@ static struct keybind binds[] = {
  * state we gave it (reproduced both ways on 2026-08-14: hide the table and
  * Start searches, restore it and the same launch starts a game).
  *
- * So: sw_publish() contributes non-platform rows only once this returned 1,
+ * So: sw_publish() contributes non-platform rows only once this resolved,
  * and win_pump() keeps calling this until it does - the table lands DURING
  * the first run, the same arrival item 47 taught the playfield window to
  * watch for. Platform rows (Start, coin, service, door) are untouched by
  * the gate: their layout is identical on every title and Start-on-a-first-
- * run must keep working. */
+ * run must keep working.
+ *
+ * Returns: 1 = resolved from the title's own table; 0 = the table is not
+ * here (or not usable) YET, keep polling; -1 = NO RIG ENV AT ALL, in which
+ * case the compiled ids are the only semantics this binary has and they
+ * STAND, exactly as the header above promises - a bare `./padglhost
+ * /dev/shm/padgl` debug launch must not lose its keyboard to a gate built
+ * for titles that merely have not published their table yet. */
 static int binds_resolved;      /* gate for sw_publish(); set by main/poll */
 
 static int binds_resolve(void)
@@ -829,7 +836,7 @@ static int binds_resolve(void)
     FILE *f;
     int n = 0, i, c, k;
 
-    if (!tab || !*tab || !game || !*game) return 0;
+    if (!tab || !*tab || !game || !*game) return -1;
     snprintf(path, sizeof path, "%s/%s/switch_list.txt", tab, game);
     f = fopen(path, "r");
     if (!f) {
@@ -860,8 +867,16 @@ static int binds_resolve(void)
     }
     fclose(f);
     if (!n) {
-        fprintf(stderr, "[padglhost] %s parsed to nothing; "
-                        "key binds stay Godzilla's\n", path);
+        /* Once, not per poll: a comment-only or truncated file that never
+         * grows rows would otherwise print this every 2 s for the whole
+         * run. And the old text ("key binds stay Godzilla's") is FALSE
+         * under the item-49 gate - they are withheld, which is the point. */
+        static int said_empty;
+        if (!said_empty++)
+            fprintf(stderr, "[padglhost] %s parsed to nothing; playfield "
+                            "keys and the trough latch stay WITHHELD until "
+                            "it has rows (truncated table? `mktables.py "
+                            "--force` rebuilds it)\n", path);
         return 0;
     }
 
@@ -942,12 +957,21 @@ static void binds_export(void)
                "%s; c=cabinet t=toggle, ids 0 = not on this title)\n",
             getenv("PAD_GAME") ? getenv("PAD_GAME") : "?");
     for (i = 0; i < NBINDS; i++) {
+        /* ★ ITEM 49: a row the sw_publish gate is WITHHOLDING (non-platform,
+         * table not resolved yet) exports as '0' - the format's own "not on
+         * this title, drawn dim" - rather than as Godzilla's compiled ids.
+         * The playfield's key panel reads this file, and on a first run it
+         * used to draw a confident Godzilla legend for keys that (now)
+         * press nothing. The re-export on resolve replaces the 0s with the
+         * title's own ids, and the panel rebuilds when the file changes. */
+        int withheld = !binds_resolved && binds[i].want[0] != 0;
         fprintf(f, "%s\t%s%s%s\t", binds[i].key,
                 binds[i].live ? "c" : "", binds[i].toggle ? "t" : "",
                 (binds[i].live || binds[i].toggle) ? "" : "-");
-        if (!binds[i].ids[0]) fputc('0', f);
-        for (k = 0; k < 7 && binds[i].ids[k]; k++)
-            fprintf(f, "%s%d", k ? "," : "", binds[i].ids[k]);
+        if (withheld || !binds[i].ids[0]) fputc('0', f);
+        else
+            for (k = 0; k < 7 && binds[i].ids[k]; k++)
+                fprintf(f, "%s%d", k ? "," : "", binds[i].ids[k]);
         fprintf(f, "\t%s\n", binds[i].what);
     }
     fclose(f);
@@ -1644,7 +1668,7 @@ static void win_pump(void)
         double t = now_s();
         if (t >= binds_next_s) {
             binds_next_s = t + 2.0;
-            if (binds_resolve()) {
+            if (binds_resolve() == 1) {
                 binds_resolved = 1;
                 binds_export();
                 sw_src_tag = 'w';
@@ -3979,12 +4003,19 @@ int main(int argc, char **argv)
      * mktables from this very run's [sw] dump. Until then sw_publish()
      * withholds every non-platform row, so the game is handed an honestly
      * empty trough instead of Godzilla's six ids masquerading as one. */
-    binds_resolved = binds_resolve();
-    if (!binds_resolved)
-        fprintf(stderr, "[padglhost] no switch list for %s yet; playfield "
-                "keys and the trough latch WAIT for it (cabinet keys work; "
-                "the table normally arrives a minute into a first run)\n",
-                getenv("PAD_GAME") ? getenv("PAD_GAME") : "?");
+    {
+        int r = binds_resolve();
+        /* -1 = no rig env: the compiled ids are all the semantics there
+         * are, so they ACT, as they always did - the gate is for titles
+         * whose table has not ARRIVED, not for launches with no rig. */
+        binds_resolved = (r != 0);
+        if (r == 0)
+            fprintf(stderr, "[padglhost] no switch list for %s yet; "
+                    "playfield keys and the trough latch WAIT for it "
+                    "(cabinet keys work; the table normally arrives a "
+                    "minute into a first run)\n",
+                    getenv("PAD_GAME") ? getenv("PAD_GAME") : "?");
+    }
     binds_export();
 
     /* Open the window FIRST: the EGL display should be the X display it lives

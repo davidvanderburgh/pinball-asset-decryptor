@@ -1249,8 +1249,31 @@ These have each been violated at least once and each cost a run or a window:
       pass two writes the table mid-run, padglhost logs `switch list
       arrived`, the playfield swaps in, and Start begins a game with no
       LOCATING PINBALLS. Then the godzilla control unchanged. State repeats.
-      An adversarial review of `91863df` was running when this was written;
-      apply anything real it finds before the runs.
+      **★ THE ADVERSARIAL REVIEW LANDED EIGHT REAL FINDINGS AND ALL EIGHT ARE
+      FIXED, `c191609`.** The verdicts held the core (state machine,
+      normal-run path, merge timing clean); the real faults were file-boundary
+      ones, and the biggest is worth its own line: **`mktables._write` was
+      non-atomic while TWO 2-second pollers latch permanently on their first
+      successful parse of exactly those files** — a half-written
+      `switch_list.txt` could be committed as the truth for a whole run, and
+      a write that failed after `open()` stranded a truncated file that
+      "exists means cached" then trusted forever. Atomic now (tmp +
+      `os.replace`). Also fixed: the parsed-to-nothing log flooding every
+      2 s with now-false text; a no-rig-env `./padglhost` launch losing its
+      keyboard to the gate; the chown healing a hardcoded path instead of
+      `$TABLES`; the `drawable=no` branch re-poisoning the tree as root one
+      branch below the cure; dev/led/sw_xy writes dying as tracebacks that
+      killed the `drawable=` probe; padbinds exporting Godzilla ids for
+      withheld rows (they export as `'0'` and the playfield rebuilds its key
+      panel on mtime change); and a heal-promise message a non-pivot run
+      cannot keep. **Recorded, NOT fixed, pre-existing:** a HEADLESS run
+      never publishes, so the shim's own machine-at-rest fallback
+      (`sw_rest_ids`, compiled Godzilla, cached once, `hwshim.c:4154`) stays
+      active all run on a first-run title; a shim fix costs every save slot,
+      and headless runs have no player.
+      **A run was LIVE (the item-44 session's star_wars) when the fixes
+      landed, so the rebuild waits** — never rebuild over a live run; a
+      monitor is armed on the rig clearing.
       — **S2 → S2, unchanged but for a different reason than it was filed
       with:** the captive ball was a red herring; what it actually costs is
       that the FIRST run of any title cannot start a game, which is the same

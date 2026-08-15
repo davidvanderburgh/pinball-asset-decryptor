@@ -113,6 +113,9 @@ def test_tk_keysyms_for_every_exported_display_name(keybinds):
     assert keybinds.tk_keysyms("=") == ["equal"]
     assert keybinds.tk_keysyms("-") == ["minus"]
     assert keybinds.tk_keysyms("Left") == ["Left"]
+    # item 48: the generated legend can bind an upper-RIGHT flipper (jaws'
+    # UP RIGHT FLIPPER BUTTON), which exports as Down - new to the contract.
+    assert keybinds.tk_keysyms("Down") == ["Down"]
     assert keybinds.tk_keysyms("1") == ["1"]
 
 

@@ -706,17 +706,17 @@ struct keybind {
     short         ids[7];   /* 0-terminated list of switch ids */
     int           toggle;   /* 1 = latching, for things you hold for minutes */
     int           live;     /* 0 = playfield; a SECTION MARKER, not "inert" */
-    /* ★ ITEM 27: candidate NAMES for this row in the title's own switch
-     * list, tried in order; the compiled ids are GODZILLA PRO's and stand
-     * only as the fallback for a rig with no derived tables. NULL want[0]
-     * marks a PLATFORM switch (service buttons, start, coin, tilt, door),
-     * whose (node,bit) layout measured identical on every title from 2017
-     * to 2024 - those ids are never re-resolved. binds_resolve() fills the
-     * rest from PAD_TABLES/PAD_GAME/switch_list.txt; a row whose name is
-     * not on this title goes DEAD (ids[0]=0, legend shows n/a) rather than
-     * firing a wrong switch - David's arrows on star_wars were pressing a
-     * FORC(E) DROP TARGET, because Godzilla's 60 is that title's id for
-     * it. */
+    /* ★ ITEM 27/48: NULL want[0] marks a PLATFORM switch (service buttons,
+     * start, coin, tilt, door), whose (node,bit) layout measured identical
+     * on every title from 2017 to 2024 - those ids are never re-resolved.
+     * Non-NULL marks a playfield row. In the compiled table those rows are
+     * GODZILLA PRO's and act only as the no-rig-env fallback (item 27's
+     * candidate lists live in them); on a rigged run binds_playfield()
+     * replaces them with rows derived from the title's own switch list,
+     * where want[0] is simply the matched switch's name. Item 27's reason
+     * stands either way: an id acted on must come from THIS title's table -
+     * David's arrows on star_wars were pressing a FORC(E) DROP TARGET,
+     * because Godzilla's 60 is that title's id for it. */
     const char   *want[4];
 };
 
@@ -735,13 +735,23 @@ struct keybind {
  * 60 (both PLAYFIELD switches, both `live = 0` here) opened CHOOSE YOUR MODE OF
  * PLAY and closed it again on release. Screenshot-verified both ways.
  *
- * The candidate names below are MEASURED, not guessed - the four derived
- * switch lists on this disk agree on "LEFT/RIGHT FLIPPER BUTTON", "SHOOTER
- * LANE", "TROUGH 1..6", the slingshots and the outlanes (case varies, the
- * match is case-insensitive), and differ exactly where the extra candidates
- * say: skill shot is "Skill Shot 1" on john_wick, the left spinner is "Left
- * Spinner Opto" there and plain "SPINNER" on star_wars. */
-static struct keybind binds[] = {
+ * ★ ITEM 48: THE PLAYFIELD ROWS BELOW ARE THE FALLBACK, NOT THE LEGEND.
+ * They are Godzilla Pro's, and on every other title they drew a menu full
+ * of dead rows with another machine's name on one (David, 2026-08-14, on
+ * Bond: "I don't think the 'godzilla target' belongs here or on any
+ * machine"). On any rigged run binds_playfield() now REPLACES the whole
+ * playfield tail with rows derived from the title's own switch list; the
+ * compiled rows act only on a launch with NO rig env at all (the -1 case
+ * below), where they are the only semantics this binary has. The CABINET
+ * rows stay compiled always - their (node,bit) layout measured identical
+ * on every title 2017-2024.
+ *
+ * The candidate names in the fallback rows are MEASURED, not guessed - the
+ * derived switch lists on this disk agree on "LEFT/RIGHT FLIPPER BUTTON",
+ * "SHOOTER LANE", "TROUGH 1..6", the slingshots and the outlanes (case
+ * varies, the match is case-insensitive). */
+#define MAXBINDS 64
+static struct keybind binds[MAXBINDS] = {
     { 0xff0d, "Enter",  "Service Select",      { 25, 0 }, 0, 1, { 0 } },
     { 0xff8d, "KP Ent", "Service Select",      { 25, 0 }, 0, 1, { 0 } },
     { 0x003d, "=",      "Service Plus",        { 26, 0 }, 0, 1, { 0 } },
@@ -784,7 +794,195 @@ static struct keybind binds[] = {
     { 0x0062, "B",      "6 balls in trough",   { 66, 67, 68, 69, 70, 71, 0 }, 1, 0,
       { "TROUGH 1", 0 } },   /* special-cased: fills TROUGH 1..6 */
 };
-#define NBINDS ((int)(sizeof binds / sizeof binds[0]))
+
+/* The live row count. The array above has spare capacity because item 48's
+ * generator rebuilds the playfield tail per title; every loop that used the
+ * old compile-time NBINDS runs to nbinds instead. binds_init() counts the
+ * compiled rows once, at the top of main(), before anything reads binds[]. */
+static int nbinds;
+
+static void binds_init(void)
+{
+    if (nbinds) return;
+    while (nbinds < MAXBINDS && binds[nbinds].sym) nbinds++;
+}
+
+/* The key state, indexed like binds[]. Declared here rather than with the
+ * other window statics because binds_playfield() below rebuilds the tail
+ * they describe and must reset (and for the trough latch, carry) them. */
+static unsigned char key_down[MAXBINDS];    /* momentary keys currently held */
+static unsigned char key_latch[MAXBINDS];   /* toggles currently latched     */
+
+/* The parsed switch list, kept at file scope because binds_playfield() reads
+ * it after binds_resolve() fills it. sw_nm is UPPERCASED for matching; sw_disp
+ * keeps the table's own case, because it becomes the legend label and the
+ * legend must never disagree with the table about what a key presses. */
+static short sw_id[192];
+static char  sw_nm[192][44];
+static char  sw_disp[192][44];
+
+/* ★ ITEM 48: THE PLAYFIELD LEGEND IS DERIVED FROM THE TITLE'S OWN SWITCH
+ * LIST. Two tables drive it, and they were chosen against the eight derived
+ * switch lists on this disk (godzilla_pro, james_bond_60th_le, turtles_pro,
+ * star_wars_le, jaws_le, john_wick_le, plus two all-'?' titles), not guessed:
+ *
+ * gen_fixed[] - the universal shots, on the keys they have always had:
+ * flippers on the arrows, F shooter lane, A/S slingshots, Z/X outlanes.
+ * Exact-name matches except the upper flippers, which vary too much for a
+ * list (UP LEFT FLIP BUTTON / UP LEFT FLIPPER BUTTON / UP RIGHT FLIPPER
+ * BUTTON) and get a piecewise match instead.
+ *
+ * gen_cats[] - everything else a Stern names recognisably, each category
+ * with its own key(s) so a key means the same KIND of shot on every title.
+ * Matching is an INCLUDE list on purpose: mech sensors (SHARK POSITION,
+ * Angle Sensor, Car Front Opto, RAMP STOPPER CB) match no category and stay
+ * unbound, which is what keeps the legend a list of shots rather than a dump
+ * of the switch table. Within a category, switch-list order decides who gets
+ * the key(s); the LABEL is the switch's own name, so a surprising winner
+ * explains itself. A title with no match for a key simply does not use that
+ * key - no row is ever dead, and no row is ever another game's. Category
+ * ORDER is priority: CAPTIVE runs before TARGET so "Captive Ball Tgt" is a
+ * captive ball, TARGET before RAMP so "LEFT RAMP LEFT TARGET" (a standup at
+ * the ramp mouth) is a target, LANE last so it sweeps up return/top lanes
+ * without eating "Left Lane Spinner". */
+static const struct {
+    unsigned long sym; const char *key; const char *nm[2];
+} gen_fixed[] = {
+    { 0xff51, "Left",  { "LEFT FLIPPER BUTTON",  "LEFT FLIPPER"  } },
+    { 0xff53, "Right", { "RIGHT FLIPPER BUTTON", "RIGHT FLIPPER" } },
+    { 0xff52, "Up",    { 0, 0 } },        /* upper LEFT flipper, piecewise  */
+    { 0xff54, "Down",  { 0, 0 } },        /* upper RIGHT flipper, piecewise */
+    { 0x0066, "F",     { "SHOOTER LANE", 0 } },
+    { 0x0061, "A",     { "LEFT SLINGSHOT", 0 } },
+    { 0x0073, "S",     { "RIGHT SLINGSHOT", 0 } },
+    { 0x007a, "Z",     { "LEFT OUTLANE", 0 } },
+    { 0x0078, "X",     { "RIGHT OUTLANE", 0 } },
+};
+
+static const struct {
+    const char *pat[5];                   /* any-substring, 0-terminated */
+    unsigned long sym[2]; const char *key[2]; int nk;
+} gen_cats[] = {
+    { { "SKILL SHOT", 0 },                     { 0x71, 0 },    { "Q", 0 },   1 },
+    { { "SPINNER", 0 },                        { 0x77, 0x67 }, { "W", "G" }, 2 },
+    { { "POP BUMPER", 0 },                     { 0x65, 0x75 }, { "E", "U" }, 2 },
+    { { "SCOOP", 0 },                          { 0x64, 0 },    { "D", 0 },   1 },
+    { { "ORBIT", 0 },                          { 0x69, 0x76 }, { "I", "V" }, 2 },
+    { { "LOOP", 0 },                           { 0x6f, 0x70 }, { "O", "P" }, 2 },
+    { { "EJECT", "VUK", 0 },                   { 0x6d, 0 },    { "M", 0 },   1 },
+    { { "CAPTIVE", 0 },                        { 0x79, 0 },    { "Y", 0 },   1 },
+    { { "TARGET", "TGT", "DROP", " BANK", 0 }, { 0x72, 0x6e }, { "R", "N" }, 2 },
+    { { "RAMP", 0 },                           { 0x68, 0x6a }, { "H", "J" }, 2 },
+    { { "LANE", 0 },                           { 0x6b, 0x6c }, { "K", "L" }, 2 },
+};
+
+static int binds_emit(int pos, unsigned long sym, const char *key, int k)
+{
+    if (pos >= MAXBINDS - 1) return pos;   /* keep room for the trough row */
+    memset(&binds[pos], 0, sizeof binds[pos]);
+    binds[pos].sym     = sym;
+    binds[pos].key     = key;
+    binds[pos].what    = sw_disp[k];
+    binds[pos].ids[0]  = sw_id[k];
+    binds[pos].want[0] = sw_nm[k];        /* non-NULL = non-platform row */
+    fprintf(stderr, "[padglhost] key %-5s -> %d \"%s\"\n",
+            key, sw_id[k], sw_nm[k]);
+    return pos + 1;
+}
+
+/* Rebuild everything after the platform head from the n parsed switches.
+ * Runs once per process in practice (binds_resolve() stops being called the
+ * moment it returns 1) but is written to be idempotent, because a rebuild
+ * that only works from the compiled state is a trap for the next caller. */
+static void binds_playfield(int n)
+{
+    unsigned char claimed[192];
+    struct keybind tr;
+    int head, i, k, c, pos, tr_latch = -1;
+
+    for (head = 0; head < nbinds && !binds[head].want[0]; head++) ;
+
+    /* The trough latch is the one piece of key state in the tail (set by the
+     * window-open latch, toggled by B); the rebuild moves its row, so carry
+     * the state to wherever the row lands. */
+    for (i = head; i < nbinds; i++)
+        if (binds[i].toggle) tr_latch = key_latch[i];
+
+    /* The trough template rides along from the current table - sym 'b' and
+     * toggle identify it in both the compiled and a rebuilt tail. */
+    memset(&tr, 0, sizeof tr);
+    for (i = head; i < nbinds; i++)
+        if (binds[i].sym == 0x0062 && binds[i].toggle) tr = binds[i];
+
+    memset(claimed, 0, sizeof claimed);
+    for (k = 0; k < n; k++)
+        if (strstr(sw_nm[k], "TROUGH") || strstr(sw_nm[k], "EOS") ||
+            strstr(sw_nm[k], "VIRTUAL"))
+            claimed[k] = 1;
+
+    pos = head;
+    for (i = 0; i < (int)(sizeof gen_fixed / sizeof gen_fixed[0]); i++)
+        for (k = 0; k < n; k++) {
+            if (claimed[k]) continue;
+            if (gen_fixed[i].nm[0]) {
+                if (strcmp(sw_nm[k], gen_fixed[i].nm[0]) &&
+                    (!gen_fixed[i].nm[1] ||
+                     strcmp(sw_nm[k], gen_fixed[i].nm[1])))
+                    continue;
+            } else {
+                const char *side =
+                    gen_fixed[i].sym == 0xff52 ? "LEFT" : "RIGHT";
+                if (!strstr(sw_nm[k], "FLIP") || !strstr(sw_nm[k], "BUTTON") ||
+                    !strstr(sw_nm[k], side) ||
+                    (strncmp(sw_nm[k], "UP", 2) != 0 &&
+                     strncmp(sw_nm[k], "MID", 3) != 0))
+                    continue;
+            }
+            claimed[k] = 1;
+            pos = binds_emit(pos, gen_fixed[i].sym, gen_fixed[i].key, k);
+            break;
+        }
+
+    for (c = 0; c < (int)(sizeof gen_cats / sizeof gen_cats[0]); c++) {
+        int used = 0;
+        for (k = 0; k < n && used < gen_cats[c].nk; k++) {
+            int p;
+            if (claimed[k] || strstr(sw_nm[k], "BUTTON")) continue;
+            for (p = 0; gen_cats[c].pat[p]; p++)
+                if (strstr(sw_nm[k], gen_cats[c].pat[p])) break;
+            if (!gen_cats[c].pat[p]) continue;
+            claimed[k] = 1;
+            pos = binds_emit(pos, gen_cats[c].sym[used],
+                             gen_cats[c].key[used], k);
+            used++;
+        }
+    }
+
+    /* The trough row closes the list, resolved by its own names exactly as
+     * item 27 always did. Zero matches (an all-'?' title, item 29's fault)
+     * leaves it exported as '0' and drawn dim, same as before. */
+    if (tr.sym) {
+        char tn[12];
+        int t, got = 0;
+        memset(tr.ids, 0, sizeof tr.ids);
+        for (t = 1; t <= 6; t++) {
+            snprintf(tn, sizeof tn, "TROUGH %d", t);
+            for (k = 0; k < n; k++)
+                if (!strcmp(sw_nm[k], tn)) { tr.ids[got++] = sw_id[k]; break; }
+        }
+        fprintf(stderr, "[padglhost] bind %s -> %d trough switch(es)\n",
+                tr.what, got);
+        binds[pos] = tr;
+        pos++;
+    }
+
+    for (i = head; i < MAXBINDS; i++) { key_down[i] = 0; key_latch[i] = 0; }
+    if (tr.sym && tr_latch >= 0) key_latch[pos - 1] = (unsigned char)tr_latch;
+    nbinds = pos;
+    fprintf(stderr, "[padglhost] legend: %d playfield key(s) derived from "
+            "%s's own switch list\n", pos - head - (tr.sym ? 1 : 0),
+            getenv("PAD_GAME") ? getenv("PAD_GAME") : "?");
+}
 
 /* ★ ITEM 27: RESOLVE THE BINDS FROM THE TITLE'S OWN SWITCH LIST, the same
  * unblock plunge.py got (`6d19946`): the NAME is the portable identifier,
@@ -831,11 +1029,10 @@ static int binds_resolve(void)
 {
     const char *tab = getenv("PAD_TABLES"), *game = getenv("PAD_GAME");
     char path[512], line[256];
-    static short sw_id[192];
-    static char  sw_nm[192][44];
     FILE *f;
-    int n = 0, i, c, k;
+    int n = 0, k;
 
+    binds_init();
     if (!tab || !*tab || !game || !*game) return -1;
     snprintf(path, sizeof path, "%s/%s/switch_list.txt", tab, game);
     f = fopen(path, "r");
@@ -857,10 +1054,13 @@ static int binds_resolve(void)
         for (fld = 0; fld < 3; fld++) strtol(p, &p, 10);
         while (*p == ' ' || *p == '\t') p++;
         for (k = 0; p[k] && p[k] != '\n' && p[k] != '\r' &&
-                    k < (int)sizeof sw_nm[0] - 1; k++)
+                    k < (int)sizeof sw_nm[0] - 1; k++) {
+            sw_disp[n][k] = p[k];
             sw_nm[n][k] = (char)(p[k] >= 'a' && p[k] <= 'z' ? p[k] - 32 : p[k]);
+        }
         while (k > 0 && sw_nm[n][k - 1] == ' ') k--;   /* trailing pad */
         sw_nm[n][k] = 0;
+        sw_disp[n][k] = 0;
         if (!k) continue;
         sw_id[n] = (short)id;
         n++;
@@ -880,47 +1080,9 @@ static int binds_resolve(void)
         return 0;
     }
 
-    for (i = 0; i < NBINDS; i++) {
-        if (!binds[i].want[0]) continue;               /* platform row */
-        if (binds[i].want[0][0] == 'T' && binds[i].ids[1]) {
-            /* the trough latch: TROUGH 1..6, each found by its own name */
-            char tn[12];
-            int t, got = 0;
-            for (t = 1; t <= 6; t++) {
-                snprintf(tn, sizeof tn, "TROUGH %d", t);
-                for (k = 0; k < n; k++)
-                    if (!strcmp(sw_nm[k], tn)) {
-                        binds[i].ids[got++] = sw_id[k];
-                        break;
-                    }
-            }
-            binds[i].ids[got] = 0;
-            fprintf(stderr, "[padglhost] bind %s -> %d trough switch(es)\n",
-                    binds[i].what, got);
-            continue;
-        }
-        {
-            short old = binds[i].ids[0];
-            int hit = 0;
-            for (c = 0; c < 4 && binds[i].want[c] && !hit; c++)
-                for (k = 0; k < n; k++)
-                    if (!strcmp(sw_nm[k], binds[i].want[c])) {
-                        binds[i].ids[0] = sw_id[k];
-                        binds[i].ids[1] = 0;
-                        if (sw_id[k] != old)
-                            fprintf(stderr, "[padglhost] bind %s -> %d "
-                                    "\"%s\" (was %d)\n", binds[i].what,
-                                    sw_id[k], sw_nm[k], old);
-                        hit = 1;
-                        break;
-                    }
-            if (!hit) {
-                binds[i].ids[0] = 0;
-                fprintf(stderr, "[padglhost] bind %s: not on %s; key dead\n",
-                        binds[i].what, game);
-            }
-        }
-    }
+    /* ★ ITEM 48: no more per-row candidate matching against a compiled menu
+     * - the playfield tail is REBUILT from what the title actually has. */
+    binds_playfield(n);
     return 1;
 }
 
@@ -938,14 +1100,45 @@ static int binds_resolve(void)
  * plumbing. tmp+rename, because the playfield POLLS for this file (it may
  * open before the renderer) and must never parse half of one. Tab-separated
  * (a key can be "KP Ent"): key, flags (c=cabinet section, t=toggle, else -),
- * ids comma-joined ("0" = not on this title, drawn dim), label. */
+ * ids comma-joined ("0" = not on this title, drawn dim), label.
+ *
+ * ★ ITEM 48: the row-writing half is its own function so `--binds` can print
+ * the same bytes to stdout - the desk instrument for judging a title's legend
+ * without a run. */
+static void binds_write(FILE *f)
+{
+    int i, k;
+    fprintf(f, "# key\tflags\tids\tlabel  (padglhost binds[], resolved for "
+               "%s; c=cabinet t=toggle, ids 0 = not on this title)\n",
+            getenv("PAD_GAME") ? getenv("PAD_GAME") : "?");
+    for (i = 0; i < nbinds; i++) {
+        /* ★ ITEM 49/48: a row the sw_publish gate is WITHHOLDING
+         * (non-platform, table not resolved yet) is not exported AT ALL.
+         * Item 49 exported it as '0' (dim), but the dim rows were still the
+         * compiled fallback's - so a first run of Bond spent its first
+         * minute showing 'Godzilla Target  n/a', the very row item 48
+         * exists to remove. The panel rebuilds when the file changes, so
+         * the playfield section simply appears when the table lands. The
+         * -1 no-rig case is unaffected: it sets binds_resolved, and the
+         * compiled rows print with their ids as always. */
+        if (!binds_resolved && binds[i].want[0]) continue;
+        fprintf(f, "%s\t%s%s%s\t", binds[i].key,
+                binds[i].live ? "c" : "", binds[i].toggle ? "t" : "",
+                (binds[i].live || binds[i].toggle) ? "" : "-");
+        if (!binds[i].ids[0]) fputc('0', f);
+        else
+            for (k = 0; k < 7 && binds[i].ids[k]; k++)
+                fprintf(f, "%s%d", k ? "," : "", binds[i].ids[k]);
+        fprintf(f, "\t%s\n", binds[i].what);
+    }
+}
+
 static void binds_export(void)
 {
     const char *shm = getenv("PAD_SW_SHM");
     char path[560], tmp[576];
     const char *slash;
     FILE *f;
-    int i, k;
     if (!shm || !*shm) return;
     slash = strrchr(shm, '/');
     if (!slash) return;
@@ -953,35 +1146,13 @@ static void binds_export(void)
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
     f = fopen(tmp, "w");
     if (!f) return;
-    fprintf(f, "# key\tflags\tids\tlabel  (padglhost binds[], resolved for "
-               "%s; c=cabinet t=toggle, ids 0 = not on this title)\n",
-            getenv("PAD_GAME") ? getenv("PAD_GAME") : "?");
-    for (i = 0; i < NBINDS; i++) {
-        /* ★ ITEM 49: a row the sw_publish gate is WITHHOLDING (non-platform,
-         * table not resolved yet) exports as '0' - the format's own "not on
-         * this title, drawn dim" - rather than as Godzilla's compiled ids.
-         * The playfield's key panel reads this file, and on a first run it
-         * used to draw a confident Godzilla legend for keys that (now)
-         * press nothing. The re-export on resolve replaces the 0s with the
-         * title's own ids, and the panel rebuilds when the file changes. */
-        int withheld = !binds_resolved && binds[i].want[0] != 0;
-        fprintf(f, "%s\t%s%s%s\t", binds[i].key,
-                binds[i].live ? "c" : "", binds[i].toggle ? "t" : "",
-                (binds[i].live || binds[i].toggle) ? "" : "-");
-        if (withheld || !binds[i].ids[0]) fputc('0', f);
-        else
-            for (k = 0; k < 7 && binds[i].ids[k]; k++)
-                fprintf(f, "%s%d", k ? "," : "", binds[i].ids[k]);
-        fprintf(f, "\t%s\n", binds[i].what);
-    }
+    binds_write(f);
     fclose(f);
     if (rename(tmp, path) == 0)
         fprintf(stderr, "[padglhost] key binds exported to %s\n", path);
 }
 
 static struct padsw_shm *swshm;
-static unsigned char key_down[NBINDS];      /* momentary keys currently held */
-static unsigned char key_latch[NBINDS];     /* toggles currently latched     */
 static unsigned long legend_win;
 static XGC legend_gc;
 static int legend_dirty = 1;
@@ -1191,7 +1362,7 @@ static void sw_publish(void)
     legend_dirty = 1;
     if (!swshm) return;
     memset(h, 0, sizeof h);
-    for (i = 0; i < NBINDS; i++) {
+    for (i = 0; i < nbinds; i++) {
         /* ★ ITEM 49: until the title's own switch list has resolved, a
          * non-platform row still CARRIES Godzilla's compiled ids (the trough
          * re-resolve needs ids[1] intact to recognise the row), so it must
@@ -1339,7 +1510,7 @@ static void legend_open(int scr)
     legend_want_x = lx; legend_want_y = ly;
     legend_win = XCreateSimpleWindow(xdpy, XRootWindow(xdpy, scr),
                                      lx, ly, 430,
-                                     (unsigned)(NBINDS * 20 + 124), 0,
+                                     (unsigned)(nbinds * 20 + 124), 0,
                                      XBlackPixel(xdpy, scr), XBlackPixel(xdpy, scr));
     win_place(legend_win, lx, ly);
     XStoreName(xdpy, legend_win, "Controls - Spike 2 emulator");
@@ -1368,7 +1539,7 @@ static void legend_draw(int scr)
     XDrawString(xdpy, legend_win, legend_gc, 12, 46,
                 "click a window first. B and C latch.", 36);
     XDrawString(xdpy, legend_win, legend_gc, 12, 74, "CABINET - these work:", 21);
-    for (i = 0; i < NBINDS; i++) {
+    for (i = 0; i < nbinds; i++) {
         int on = binds[i].toggle ? key_latch[i] : key_down[i];
         char line[96];
         int n;
@@ -1399,7 +1570,7 @@ static void legend_draw(int scr)
 static int bind_for(unsigned long sym)
 {
     int i;
-    for (i = 0; i < NBINDS; i++) if (binds[i].sym == sym) return i;
+    for (i = 0; i < nbinds; i++) if (binds[i].sym == sym) return i;
     return -1;
 }
 
@@ -1493,7 +1664,7 @@ static int win_open(void)
      * which is why they are toggles at all. Press C or B for the other state. */
     {
         int i;
-        for (i = 0; i < NBINDS; i++) if (binds[i].toggle) key_latch[i] = 1;
+        for (i = 0; i < nbinds; i++) if (binds[i].toggle) key_latch[i] = 1;
     }
     sw_src_tag = 'w';                    /* not a key press - see sw_publish() */
     sw_publish();
@@ -3932,6 +4103,21 @@ int main(int argc, char **argv)
     static const EGLint pbattr[]  = { 0x3057,16, 0x3056,16, 0x3038 };
     static const EGLint ctxattr[] = { 0x3098,3, 0x30FB,0, 0x3038 };
     double t0; long last_frames = 0; double last_report;
+
+    binds_init();
+    /* ★ ITEM 48: resolve-and-print, so the legend a title will get is
+     * judgeable at a desk - no X, no ring, no run:
+     *     PAD_TABLES=<tables> PAD_GAME=<title> ./padglhost --binds
+     * Prints the padbinds bytes to stdout (the generation log goes to
+     * stderr) and exits 0 if the title's own switch list resolved, 1 if it
+     * is missing or empty - in which case what IS printed is the withheld
+     * form a run would export, which is also worth being able to see. */
+    if (argc > 1 && !strcmp(argv[1], "--binds")) {
+        int r = binds_resolve();
+        binds_resolved = (r != 0);
+        binds_write(stdout);
+        return r == 1 ? 0 : 1;
+    }
 
     if (getenv("PAD_GL_W")) fb_w = atoi(getenv("PAD_GL_W"));
     if (getenv("PAD_GL_H")) fb_h = atoi(getenv("PAD_GL_H"));

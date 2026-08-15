@@ -144,6 +144,12 @@ static long rb_error, rb_integerv, rb_uniloc, rb_attrloc, rb_shaderiv, rb_progiv
 int pad_fb_width(void)  { return fb_w; }
 int pad_fb_height(void) { return fb_h; }
 
+/* item 44: libEGL routes multi-display titles through pad_target. This
+ * rasteriser has one in-guest framebuffer and no windows, so it has nothing
+ * to route - but the symbol must exist or libEGL.so.1 fails to link against
+ * this backend (buildgl.sh). */
+void pad_target(int disp) { (void)disp; }
+
 /* libEGL's eglGetProcAddress asks the backend for extension entry points by
  * name. This rasteriser implements none - notably not the Vivante direct
  * texture the game uploads video through, which glbridge.c does - so every

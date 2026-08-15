@@ -179,6 +179,17 @@ long pad_readback_counts(long *e, long *i, long *u, long *a, long *s, long *p)
 long pad_getintegerv_hist(unsigned int *names, long *counts)
 { int k; for (k = 0; k < 8; k++) { names[k] = 0; counts[k] = 0; } return 8; }
 
+/* item 44: eglshim announces which display the ops that follow belong to.
+ * Through emit_u so it is ordered with the draws in the ring - a target that
+ * bypassed the ring could overtake the scene it labels. */
+void pad_target(int disp)
+{
+    unsigned int v[1];
+    if (!bridge_init()) return;
+    v[0] = (unsigned int)disp;
+    emit_u(PADGL_TARGET, v, 1);
+}
+
 void pad_present(void)
 {
     unsigned int v[1];

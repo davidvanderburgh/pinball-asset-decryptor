@@ -68,10 +68,11 @@ EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 ROLES = (
     ("controls - spike 2 emulator", "CONTROLS"),
     ("- virtual playfield", "PLAYFIELD"),
+    ("] - stern spike 2 emulator", "GAME2"),   # item 44: "<game> [display N]"
     ("- stern spike 2 emulator", "GAME"),
     ("pinball asset decryptor", "APP"),
 )
-EMU_ROLES = ("GAME", "CONTROLS", "PLAYFIELD")
+EMU_ROLES = ("GAME", "GAME2", "CONTROLS", "PLAYFIELD")
 
 
 def role_of(title):

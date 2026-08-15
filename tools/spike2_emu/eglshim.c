@@ -16,6 +16,8 @@ extern char *getenv(const char *);
 
 /* provided by libGLESv2.so.2 (glraster.c) */
 extern void pad_present(void);
+extern void pad_target(int disp);      /* item 44: bridge emits PADGL_TARGET;
+                                        * the rasteriser's is a no-op */
 extern int  pad_fb_width(void);
 extern int  pad_fb_height(void);
 extern long pad_readback_counts(long *, long *, long *, long *, long *, long *);
@@ -104,8 +106,50 @@ void *eglCreateWindowSurface(void *dpy, void *cfg, void *win, const int *attr)
     return (void *)(0x4000ul | (unsigned)slot);
 }
 
+/* ★ ITEM 44: THE DRAW SURFACE IS NO LONGER THROWN AWAY. Switching draw
+ * surfaces is the ONLY way a one-threaded game switches scenes in EGL, so
+ * this call is where "which display do the next draws belong to" is known -
+ * and item 44 measured what discarding it cost: PAD_EGL_PRIMARY=2 presented
+ * the second surface's swaps and got STILL BLACK over 279 video frames,
+ * because both scenes rendered into the one framebuffer and the routing
+ * information lived only here. Emit the display index into the ring (ordered
+ * with the draws by construction) and let the host route.
+ *
+ * solo mode (PAD_EGL_PRIMARY set) keeps the old single-window suppression
+ * and emits NO targets, so the A/B knob still A/Bs exactly what it used to. */
+static int solo_slot(void)
+{
+    static int solo = -1;              /* -1 = env not read yet; 0 = routing */
+    if (solo < 0) {
+        const char *e = getenv("PAD_EGL_PRIMARY");
+        solo = (e && *e >= '1' && *e <= '8') ? *e - '0' : 0;
+    }
+    return solo;
+}
+
 int eglMakeCurrent(void *dpy, void *draw, void *read, void *ctx)
-{ (void)dpy; (void)draw; (void)read; (void)ctx; return 1; }
+{
+    unsigned long d = (unsigned long)draw;
+    int slot = ((d & ~0xfful) == 0x4000ul) ? (int)(d & 0xff) : 0;
+    (void)dpy; (void)read; (void)ctx;
+    if (slot && surf_n >= 2 && !solo_slot()) {
+        static int cur_disp;           /* the host boots targeting 0 */
+        int disp = surf_disp[slot];
+        if (disp != cur_disp) {
+            static int said;
+            cur_disp = disp;
+            pad_target(disp);
+            if (said < 4) {
+                char b[80];
+                said++;
+                snprintf(b, sizeof b, "[eglshim] target -> display %d "
+                         "(surface %d)\n", disp, slot);
+                say(b);
+            }
+        }
+    }
+    return 1;
+}
 
 /* The game runs its boot at unbounded frame rate otherwise, and moves on
  * before the asynchronous asset loader has read anything. */
@@ -130,24 +174,33 @@ int eglSwapBuffers(void *dpy, void *surf)
     int present = 1;
     (void)dpy;
 
-    /* item 27: with two or more surfaces, only the primary presents - see
-     * the long comment at eglCreateWindowSurface. A slot of 0 is a handle
-     * this file did not make (or made before the identity scheme); present
-     * it, which is the old behaviour and the safe direction. The pacing
-     * below runs for EVERY swap either way: the game's own render loop is
-     * what is being throttled, whichever scene it just drew. */
+    /* item 27 suppressed every non-primary present because both scenes
+     * shared one framebuffer and one window - two pictures interleaving at
+     * 60 Hz was the star_wars flicker. Item 44 replaces suppression with
+     * ROUTING: eglMakeCurrent has already told the host which display the
+     * scene that just finished belongs to, the host renders each display
+     * into its own texture and window, so every swap presents. A slot of 0
+     * is a handle this file did not make; present it, the old behaviour and
+     * the safe direction. The pacing below runs for EVERY swap either way:
+     * the game's own render loop is what is being throttled, whichever
+     * scene it just drew.
+     *
+     * PAD_EGL_PRIMARY=<slot> is SOLO MODE now, kept as the A/B diagnostic:
+     * one window, only that slot presents, no routing - and item 44
+     * measured what that shows for a non-primary slot: black, because the
+     * suppressed-scene draws share the primary's framebuffer. */
     if (surf_n >= 2 && slot) {
-        int prim = primary_slot ? primary_slot : 1;
-        {
-            const char *e = getenv("PAD_EGL_PRIMARY");
-            if (e && *e >= '1' && *e <= '8') prim = *e - '0';
-        }
-        present = (slot == prim);
+        int solo = solo_slot();
+        present = solo ? (slot == solo) : 1;
         if (!policy_said) {
             char b[112];
             policy_said = 1;
-            snprintf(b, sizeof b, "[eglshim] %d surfaces: presenting only "
-                     "surface %d, suppressing the other(s)\n", surf_n, prim);
+            if (solo)
+                snprintf(b, sizeof b, "[eglshim] %d surfaces: SOLO mode, "
+                         "presenting only surface %d\n", surf_n, solo);
+            else
+                snprintf(b, sizeof b, "[eglshim] %d surfaces: routing each "
+                         "display to its own window\n", surf_n);
             say(b);
         }
         if (!present && ++suppressed == 1)
@@ -257,9 +310,39 @@ void *fbGetDisplayByIndex(int index)
     return (void *)(0x6000ul | (unsigned)index);
 }
 
+/* ★ ITEM 44: ANSWER PER DISPLAY. This used to hand every display the one
+ * framebuffer size, so a projector asking its own geometry was told the
+ * backbox's. The default is unchanged (same size for every display - the
+ * measured behaviour every verified title has always run with); PAD_GL2_W /
+ * PAD_GL2_H override the answer for displays other than 0, and the host
+ * sizes its second texture and window from the SAME env vars, so the two
+ * sides cannot disagree. */
 void fbGetDisplayGeometry(void *dpy, int *width, int *height)
 {
-    (void)dpy;
+    unsigned long d = (unsigned long)dpy;
+    int disp = ((d & ~0xfful) == 0x6000ul) ? (int)(d & 0xff) : 0;
+    if (disp > 0) {
+        static int w2 = -1, h2 = -1;
+        if (w2 < 0) {
+            const char *p;
+            w2 = h2 = 0;
+            for (p = getenv("PAD_GL2_W"); p && *p >= '0' && *p <= '9'; p++)
+                w2 = w2 * 10 + (*p - '0');
+            for (p = getenv("PAD_GL2_H"); p && *p >= '0' && *p <= '9'; p++)
+                h2 = h2 * 10 + (*p - '0');
+            if (w2 > 0 && h2 > 0) {
+                char b[80];
+                snprintf(b, sizeof b, "[eglshim] display >0 geometry "
+                         "override: %dx%d\n", w2, h2);
+                say(b);
+            }
+        }
+        if (w2 > 0 && h2 > 0) {
+            if (width)  *width  = w2;
+            if (height) *height = h2;
+            return;
+        }
+    }
     if (width)  *width  = pad_fb_width();
     if (height) *height = pad_fb_height();
 }

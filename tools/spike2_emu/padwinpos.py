@@ -41,9 +41,14 @@ except Exception:
 STATE = os.path.join(os.path.expanduser("~"), ".pad_windows_win.json")
 
 #: key -> title substring. "Controls" must be checked FIRST: both titles
-#: contain "Spike 2 emulator".
+#: contain "Spike 2 emulator". "game2" (item 44's second-display window,
+#: titled "<game> [display N] - Stern Spike 2 emulator") must be checked
+#: before "game" for the same reason - first-hit-wins per key, and the
+#: generic needle matches it too, so without this row the second window
+#: could silently claim the game window's slot.
 TRACK = (
     ("controls", "Controls - Spike 2 emulator"),
+    ("game2", "] - Stern Spike 2 emulator"),
     ("game", "- Stern Spike 2 emulator"),
 )
 

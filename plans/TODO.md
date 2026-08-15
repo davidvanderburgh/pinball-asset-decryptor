@@ -112,9 +112,31 @@ These have each been violated at least once and each cost a run or a window:
       attract. D4: the update dialogue is uncaptured yet, the fix likely
       spans per-title derivation plus possibly emulating a chunked
       firmware-transfer protocol, and the oracle needs runs on two titles.
-      **Resume:** read the PAD_NB_TRACE capture (`~/i51_sw_trace.log`,
-      `[nbts]` lines, node=12 non-0x11 cmds) and the protocol map; then make
-      node identity per-title.
+      **★ FIRST TRACE, 2026-08-15 (`/var/tmp/i51_sw_trace_run1.log`, 13537
+      lines), and it INVERTS the theory: the fault is not node-12-specific.**
+      Established: **(1) star_wars has nodes 10, 11, 13 and 15**, which
+      godzilla's `nb_idents[]` has no entry for — unknowns fall to
+      `NB_FW_DEFAULT` 0.1.0 (or worse, no reply), and the screen's faint
+      text IS "LOCATING NODE BOARDS / NODE NOT FOUND". **(2) EVERY node gets
+      `fe` (identity) re-asked in bursts of six, forever** (215-226 per node
+      in ~5 min; census-silenced node 2: 720) — the game never accepts any
+      board's identity on this title. **(3) `nb_fw_title()` works on SW**
+      (`[nbfw] node firmware 1.29.0`). **(4) The godzilla-address
+      instruments read ZEROES on SW** (`[nbhex] head = 0x00000000`,
+      `[nbtbl]` empty) — game-binary addresses are per-title, so the
+      registry readers are blind here. **(5) cmd census node 12: fe 215,
+      f2 272 (chunked 8-byte-step reads, only to nodes 7/12/14), f9 70,
+      f0 64, fc 35, f1 3** — no bulk-write/update-transfer traffic seen, so
+      the game may fail BEFORE any real transfer. **(6) Node 12 carries the
+      R2D2 mech optos** on SW — likely a tmc stepper node, NOT the lcdnode;
+      the lcdnode theory for the dark d2 is weakened but not dead.
+      **★ SUSPECT (marked as one): stranger_things' "NODES NOT FOUND" wedge
+      (items 29/50's blocker) is THIS SAME disease** — its node set differs
+      from godzilla's too. One fix may unblock three titles.
+      **Resume:** the protocol map (identity-reply builder: does it gate on
+      known ids? what do unknowns claim?) then make node identity per-title
+      — the reply must satisfy the game's grading for the node TYPES the
+      title actually has.
 
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every

@@ -1148,174 +1148,6 @@ These have each been violated at least once and each cost a run or a window:
       the existing `bind ... key dead` lines) already exists; it needs one run
       per title to confirm.
 
-- [ ] **49. A title's FIRST run cannot start a game: with no switch table the
-      trough latch falls back to GODZILLA'S ids, so the game is handed an empty
-      trough and searches for its missing balls.** `S2 D2` ← IN PROGRESS, 60%,
-      branch `item/49` *(**RENAMED 2026-08-14.** It was filed as "LOCATING
-      PINBALLS clears when the CAPTIVE BALL is held" - that lead was tested and
-      REFUTED, and the title now names what the control actually found.)*
-      **★★ FOUND WHILE SETTING THE CONTROL UP, 2026-08-14, AND IT COST THE
-      FIRST ATTEMPT: PRESSING SERVICE BACK ON BOND'S TECH ALERTS SCREEN ENDS
-      THE GUEST.** The run's own switch log is the evidence, and the two
-      sources are distinguishable because the rig stamps them — autoattract's
-      presses are `+28a`, a hand poke is `+28p`. Autoattract pressed three
-      times without harm (`+28a` at 32456 ms, 79690 ms, 126918 ms, each held
-      ~2 s); then `swpoke.py 28` fired three ~400 ms presses at 130015, 132458
-      and 134902 ms, and the guest exited at ~135.6 s — a CLEAN exit at a
-      healthy 51.9 fps (7040 frames), no segv, no signal. **Whether it is the
-      sixth press or the rapid spacing is NOT established.** This is item 41's
-      family (turtles_pro died on service menus) on a new title and probably
-      deserves its own item; it is recorded here because it is what makes this
-      control expensive.
-      **HOW TO REACH ATTRACT ON BOND WITHOUT TRIPPING IT: press nothing.** The
-      item 45 pass reached the gun-barrel attract screen with autoattract as
-      the only thing pressing anything, roughly six minutes in. Wait it out
-      rather than poking Back.
-      **★★★ THE CONTROL RAN, 2026-08-14, AND IT REFUTES THE LEAD THIS ITEM WAS
-      FILED ON. THE CAPTIVE BALL IS NOT WHAT CLEARS THE SEARCH.** Trial A, on a
-      run in attract with the tables present: `swhold.py 84 0` (captive ball
-      explicitly OPEN, `id=84 was 0 -> 0`), trough reading `6 of 6 [77, 76, 75,
-      74, 73, 72]`, then `plunge.py start` — and the game went **straight into a
-      game**: `PLAYER 1 / SELECT SOUND STYLE / FREE PLAY`
-      (`C:/tmp/item49/A1.png`). No ball search at all. So the earlier
-      observation (84 made, game starts) was CONFOUNDED: the game would have
-      started either way, and holding 84 changed nothing. This is exactly what
-      the item said the first job was, and the answer is no.
-      **★★ WHAT THE CONTROL POINTS AT INSTEAD, and it is a much better fit:
-      THE TROUGH LATCH FALLS BACK TO GODZILLA'S IDS ON A TITLE'S FIRST RUN.**
-      `binds_resolve()` reads `$PAD_TABLES/$PAD_GAME/switch_list.txt`, which
-      does not exist when the renderer starts on a title's first run — that is
-      item 47's whole subject — and `binds[]`'s "6 balls in trough" row carries
-      the COMPILED GODZILLA ids `{66,67,68,69,70,71}` as its fallback. On Bond
-      those six are RIGHT SPINNER, TARGET C, SHOOTER LANE, RIGHT SLINGSHOT,
-      LEFT SLINGSHOT and RIGHT FLIPPER EOS. **So on a first run the game is
-      handed an EMPTY trough and six stuck playfield switches, and a game that
-      searches for missing balls is behaving correctly.** David's LOCATING
-      PINBALLS was on james_bond_60th's first run on this rig; every run since,
-      including both trials above, had the tables and resolved
-      `bind 6 balls in trough -> 6 trough switch(es)` to Bond's own 72..77.
-      **★★★ REPRODUCED ON DEMAND, 2026-08-14, AND THE PREDICTION HELD IN FULL.
-      This is the cause.** `switch_list.txt` was moved aside and the title
-      booted; the renderer said so itself —
-      `[padglhost] no switch list at .../switch_list.txt; key binds stay
-      Godzilla's` — the latch went onto **66..71**, and `plunge.py start` put
-      **`LOCATING PINBALLS PLEASE WAIT...`** on the screen
-      (`C:/tmp/item49/D1_firstrun.png`). Restore the table and the same title,
-      same card, same launch starts a game instead (trial A above,
-      `C:/tmp/item49/A1.png`). A labelled pair, both directions, mechanism read
-      off the log rather than inferred.
-      **★ AND EVERY INSTRUMENT LIES IN THE SAME DIRECTION, which is why this
-      was hard to see from inside:** with no table, `swshow.py` ALSO falls back,
-      so it reports a confident `balls the GAME sees in the trough: 6 of 6
-      [71, 70, 69, 68, 67, 66]` and labels 62 "Shooter Lane" and 72 "Trough
-      Jam" — Godzilla's numbering — while Bond's real trough (72..77) sits
-      open. The rig agreed with itself and was wrong.
-      **★ THE CHEAP FIX LOOKS VIABLE, one observation, NOT a proof:** opening
-      66..71 and making 72..77 from the SCRIPT side (`swhold.py`, no rebuild —
-      the merge is last-edge-wins per id) left the screen on `REPLAY AT 5,000`
-      ten seconds later (`C:/tmp/item49/E1_scriptfix.png`). **A ball search can
-      also time out, and that was not controlled for**, so treat this as
-      encouraging rather than settled.
-      **★★ THE FIX IS BUILT, 2026-08-15, commit `91863df` — shape (a) plus the
-      latch-nothing principle plus the piece neither shape knew it needed:
-      THE TABLE WAS NEVER GOING TO ARRIVE AT ALL.** On a pivot run watch.sh's
-      PASS ONE mktables runs as ROOT and creates the per-title tables dir
-      root-owned; PASS TWO — the one with `--log --wait` that builds the
-      switch list mid-run — runs as the DESKTOP USER (`setsid_as_user`) and
-      dies on an uncaught PermissionError in `padtables.log`, which nothing
-      displays. A poisoned cache: every later run fails identically. Bond's
-      dir was the only root-owned one on the machine, and `touch` as david
-      confirmed NOT WRITABLE. **Four fixes, one principle — never assert ids
-      you cannot name:** (1) watch.sh chowns the tables tree between the two
-      passes (recursive, healing already-poisoned dirs); (2) mktables names a
-      failed switch write in the pass output instead of dying silently; (3)
-      padglhost: `binds_resolve()` returns whether a usable table parsed,
-      `sw_publish()` withholds every NON-PLATFORM row until it has (compiled
-      ids stay in the rows — the trough re-resolve needs `ids[1]` intact —
-      but are never acted on; platform rows exempt, Start must keep working),
-      `win_pump()` polls every 2 s and on arrival resolves, re-exports
-      padbinds and publishes once as `'w'`; (4) ballfeed waits up to 300 s
-      (`PAD_BALL_TABLE_WAIT_S`) rebuilding its Feeder every 2 s instead of
-      exiting feederless; swshow and plunge label their fallbacks out loud.
-      **NOTE: a padglhost rebuild does NOT cost the save slots** — the slots
-      checkpoint the GUEST; the renderer restarts fresh on every restore and
-      the padgl protocol is untouched. The D3 fear was about the shim. Six
-      offline tests pass (`test_spike2_first_run_tables.py`); the build is
-      clean.
-      **Resume:** the live proof — with `switch_list.txt` deleted and the
-      tables dir root-owned (the true first-run + poisoned state, already
-      staged), boot Bond from this branch in the app's own pivot shape and
-      the run must reach a startable game BY ITSELF: chown heals the dir,
-      pass two writes the table mid-run, padglhost logs `switch list
-      arrived`, the playfield swaps in, and Start begins a game with no
-      LOCATING PINBALLS. Then the godzilla control unchanged. State repeats.
-      **★ THE ADVERSARIAL REVIEW LANDED EIGHT REAL FINDINGS AND ALL EIGHT ARE
-      FIXED, `c191609`.** The verdicts held the core (state machine,
-      normal-run path, merge timing clean); the real faults were file-boundary
-      ones, and the biggest is worth its own line: **`mktables._write` was
-      non-atomic while TWO 2-second pollers latch permanently on their first
-      successful parse of exactly those files** — a half-written
-      `switch_list.txt` could be committed as the truth for a whole run, and
-      a write that failed after `open()` stranded a truncated file that
-      "exists means cached" then trusted forever. Atomic now (tmp +
-      `os.replace`). Also fixed: the parsed-to-nothing log flooding every
-      2 s with now-false text; a no-rig-env `./padglhost` launch losing its
-      keyboard to the gate; the chown healing a hardcoded path instead of
-      `$TABLES`; the `drawable=no` branch re-poisoning the tree as root one
-      branch below the cure; dev/led/sw_xy writes dying as tracebacks that
-      killed the `drawable=` probe; padbinds exporting Godzilla ids for
-      withheld rows (they export as `'0'` and the playfield rebuilds its key
-      panel on mtime change); and a heal-promise message a non-pivot run
-      cannot keep. **Recorded, NOT fixed, pre-existing:** a HEADLESS run
-      never publishes, so the shim's own machine-at-rest fallback
-      (`sw_rest_ids`, compiled Godzilla, cached once, `hwshim.c:4154`) stays
-      active all run on a first-run title; a shim fix costs every save slot,
-      and headless runs have no player.
-      **A run was LIVE (the item-44 session's star_wars) when the fixes
-      landed, so the rebuild waits** — never rebuild over a live run; a
-      monitor is armed on the rig clearing.
-      — **S2 → S2, unchanged but for a different reason than it was filed
-      with:** the captive ball was a red herring; what it actually costs is
-      that the FIRST run of any title cannot start a game, which is the same
-      first-run gap item 47 fixed for the window. **D2 → D3** if (a) is taken
-      (a rebuild, and the save-slot cost), D2 if (b).
-      **★ DAVID, 2026-08-14: "why am i stuck with 'locating pinballs' when
-      trying to start? The balls in trough should default to all being in
-      there."** They were: `swshow.py` on his live run read `balls the GAME
-      sees in the trough: 6 of 6 [77, 76, 75, 74, 73, 72]`, Shooter Lane open,
-      Trough Jam open, coin door closed. The rig's rest state was correct and
-      the game still searched.
-      **★ MEASURED THE SAME SESSION, and it is one observation, not a proof:**
-      `swhold.py 84 1` (84 = `Captive Ball`, from Bond's own switch list) then
-      `plunge.py start` took the game straight into a game — `PLAYER 1`,
-      `FREE PLAY`, `SELECT SOUND STYLE: Modern` — instead of a ball search.
-      **Why it is plausible:** a captive ball physically rests against its
-      switch, so on a real machine that switch is made at rest and the game
-      counts that ball as accounted for. An open one is a missing ball, and a
-      missing ball is exactly what a ball search is for.
-      **NOT ESTABLISHED, and it is the first job: THE CONTROL WAS NOT RUN.**
-      Nobody opened 84 again and re-pressed Start on the same run to see
-      LOCATING PINBALLS come back. Until that is done this is a correlation on
-      one title, and the pair is David's report (84 open, search) against one
-      measurement (84 made, game starts) taken minutes apart.
-      **The general shape, if it holds:** "a machine at rest" is currently the
-      trough plus the coin door (`hwshim.c:~4578`, latched when padglhost's
-      window opens). Bond says that set is title-dependent — anything that
-      HOLDS A BALL at rest belongs in it. `device_xy.txt` names ball devices
-      per title, which is where the list should come from rather than a
-      hard-coded id. **Related and possibly the same knot: `[dev] --- ball
-      devices: count=1119174656 ---`**, the misparse recorded in the loose
-      ends, because that is the very table this would read.
-      **Acceptance:** state the control both ways on one run (84 open → search,
-      84 made → game starts, and how many repeats), then make the rest state
-      derive from the title's own ball devices and show it on godzilla_pro
-      unchanged.
-      — S2: it stops a game being started on this title, which is severe, but a
-      one-command workaround exists now that it is known (`swhold.py 84 1`) and
-      no other item is blocked by it. D2: the instruments all exist
-      (`swshow.py`, `swhold.py`, `plunge.py`), the fault appears on every start
-      attempt, and the first job is one run to get the control.
-
 - [ ] **50. No LED feedback at all on a title with no playfield artwork,
       which is most of them.** `S3 D3`
       **★ DAVID, 2026-08-14: "we should have some visual indication of leds
@@ -1842,6 +1674,50 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **49. A title's FIRST run could not start a game: with no switch table
+      the trough latch fell back to GODZILLA'S ids, and the table was never
+      going to arrive because the tables dir was root-poisoned.** DONE
+      2026-08-15, `c8cb897` (branch `item/49`). Filed as a captive-ball lead;
+      the CONTROL REFUTED IT (84 explicitly open, game started anyway) and
+      found the real chain: on a pivot run watch.sh's PASS ONE mktables (root)
+      created the per-title tables dir root-owned, PASS TWO (desktop user, the
+      one that builds the switch list from the run's own [sw] dump) died on an
+      uncaught PermissionError in a log nothing shows, so `switch_list.txt`
+      never existed - and padglhost's window-open latch then closed Godzilla's
+      66..71, which on Bond are six playfield switches and no trough at all.
+      LOCATING PINBALLS was the game being CORRECT about the state it was
+      handed. Reproduced both ways pre-fix (hide the table -> search; restore
+      it -> game starts). **The fix, one principle - never assert ids you
+      cannot name:** watch.sh chowns `$TABLES` between the passes (recursive,
+      heals poisoned dirs) and runs the drawable=no branch as_user; mktables
+      writes ATOMICALLY (tmp+replace - two 2 s pollers latch on their first
+      successful parse of these files) and names every write failure;
+      padglhost withholds non-platform rows until `binds_resolve()` parses a
+      usable table, polls every 2 s, then resolves, re-exports padbinds and
+      latches the title's own trough mid-run (no-rig-env launches keep the
+      compiled ids - the gate is for tables that have not arrived, not for
+      debug shapes with no rig); padbinds exports withheld rows as '0' and the
+      playfield rebuilds its key panel on mtime change; ballfeed waits up to
+      `PAD_BALL_TABLE_WAIT_S` (300 s) instead of exiting feederless; swshow
+      and plunge label their fallbacks out loud. An adversarial review (five
+      lenses) found eight real file-boundary faults, all fixed in `c191609`.
+      **Verified live, repeats stated:** the healing run - Bond booted from
+      the true poisoned first-run state and reached a STARTED GAME entirely by
+      itself (chown healed mid-run, 117 switches written at 12:05, `[padglhost]
+      switch list arrived; binds resolved, trough latched on this title's own
+      ids`, key panel rebuilt with exactly the six absent rows n/a, swshow on
+      72..77 with no banner, PLAYER 1 with no LOCATING PINBALLS) - 1 run;
+      godzilla control 2 runs: run 1 exited cleanly mid-Tech-Alerts (the known
+      clean-exit family, logged, did not recur), run 2 end-to-end into BALL 1
+      with the startup path byte-identical (`bind 6 balls in trough -> 6` at
+      start, no gate lines). 2653 tests green; the one recurring red was item
+      47's OWN harness beating its 1 ms timer with sleepless update() calls -
+      fixed, five-for-five after. Artifacts: `C:/tmp/item49/`. **Left behind,
+      recorded in the loose ends:** Bond's TROUGH coil is device-group 8,
+      which coilmap cannot map (multiball feeding dead on this title - item
+      21b); a HEADLESS run still bakes the shim's own compiled rest-set
+      (pre-existing, a shim fix costs every save slot).
 
 - [x] **47. A title's FIRST run showed no switches, because the window read its
       tables once and they land a few seconds later.** DONE 2026-08-14,

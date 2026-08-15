@@ -1120,14 +1120,31 @@ These have each been violated at least once and each cost a run or a window:
       projector would have anything to show, so **the acceptance run wants
       star_wars_le as well** — its playfield LCD is the same feature with a
       title that boots.
-      **Resume:** build the per-display render target, because nothing short of
-      it can be observed. In order: (1) record the draw surface in
-      `eglMakeCurrent` instead of discarding it; (2) add a target op to
-      `padgl.h` and bump `PADGL_VERSION` — both sides of the bridge must agree,
-      and item 16's `swlayout.sh` is the precedent for proving hand-kept copies
-      match; (3) give `padglhost` a second FBO and a second X window; (4) make
-      `fbGetDisplayGeometry` answer PER DISPLAY. Verify on star_wars_le first
-      (it boots and its second display is documented), then Stranger Things.
+      **★★ BUILT 2026-08-15, `86d43a5` on `item/44` — the whole Resume list in
+      one commit, compile-clean both sides, NOT yet verified on a run.** The
+      mechanism turned out cheaper than the D5 estimate feared because guest
+      FBO 0 was ALREADY an indirection (`map_fbo[0]` → a texture-backed FBO,
+      `win_present()` blitting it) — so the second display is a second
+      texture/FBO pair, a second lazy window, and a route marker
+      (`PADGL_TARGET`, u32 display index; `PADGL_VERSION` 1→2, host-written,
+      guest-validated, so mismatched halves refuse loudly). `eglMakeCurrent`
+      emits the target through the ring — ordered with the draws — and every
+      swap presents; item 27's suppression survives only as `PAD_EGL_PRIMARY`
+      solo mode. Per-display picture oracle (`picture: d2 …`) and per-display
+      swap-content histograms are the acceptance instruments; the GL journal
+      shadows the last target so a restored save-state stream resumes routed;
+      the close handler now checks WHICH window sent `wm_delete` (it never
+      did — closing the second window hides it and the run continues).
+      Degrade = item 27's suppress, never interleave: a failed second target
+      still routes the swap to a present that no-ops. `zorder.py` /
+      `padwinpos.py` key `] - Stern Spike 2 emulator` ahead of their generic
+      needles so the new window cannot steal the game slot.
+      **Resume:** adversarial review round, then verify in order: star_wars_le
+      (two windows, `picture: d2 FIRST`, each window's swap masks a SINGLE
+      family where the shared window showed `2x60 4x60`), godzilla_pro
+      (single-surface regression: no TARGET emitted, behaviour unchanged),
+      stranger_things_le (report what the projector shows; it may be black
+      while the title sits at NODES NOT FOUND — items 29/50's fault).
       **Budget for slow boots: a cold card crawls, and the eglshim fps counter
       is CUMULATIVE — read the incremental rate, not the printed average.**
       **Acceptance:** on a Stranger Things Premium/LE card the projector picture

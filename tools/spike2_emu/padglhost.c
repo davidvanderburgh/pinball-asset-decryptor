@@ -2145,7 +2145,18 @@ static void win2_open(int disp)
     XSelectInput(xdpy, xwin2, (1L << 17) | 1L | 2L);
     XSetWMProtocols(xdpy, xwin2, &wm_delete, 1);
     XMapWindow(xdpy, xwin2);
-    XFlush(xdpy);
+    /* MEASURED, and it is why this window is not created the way the main
+     * one is: creating the EGL surface microseconds after XMapWindow left a
+     * window whose swaps SUCCEEDED into a swapchain nothing ever composited
+     * - backbuffer read back fully lit, eglSwapBuffers true, err 0x0, and
+     * the desktop window black, David's eyes confirming PrintWindow. The
+     * main window never hits this because its surface is created after the
+     * whole eglInitialize/eglChooseConfig sequence, long after the window
+     * is realized. XSync drains the map round-trip, and the settle gives
+     * WSLg's XWayland/RAIL plumbing time to realize the window before the
+     * surface binds to it. */
+    XSync(xdpy, 0);
+    usleep(250000);
     egl_surf2 = eglCreateWindowSurface(egl_dpy, egl_cfg, xwin2, 0);
     if (!egl_surf2) {
         fprintf(stderr, "[padglhost] display %d: eglCreateWindowSurface "
@@ -2167,9 +2178,12 @@ static void win2_open(int disp)
      * in the same thread could park the whole pipeline for a second refresh
      * per frame pair. GATED on the switch actually landing: eglSwapInterval
      * applies to the CURRENT draw surface, so issuing it after a failed
-     * switch would silently strip the primary window's vsync instead. */
+     * switch would silently strip the primary window's vsync instead.
+     * PAD_GL2_VSYNC=1 keeps the default interval - the A/B for a mirror
+     * that ignores interval-0 presents. */
     if (egl_use(egl_surf2)) {
-        eglSwapInterval(egl_dpy, 0);
+        if (!(getenv("PAD_GL2_VSYNC") && getenv("PAD_GL2_VSYNC")[0] == '1'))
+            eglSwapInterval(egl_dpy, 0);
         egl_use(egl_surf);
     }
     win2_on = 1;
@@ -2268,7 +2282,42 @@ static void win2_present(void)
     {   int fl = p_glGetUniformLocation(blit_prog, "u_flip");
         if (fl >= 0) p_glUniform1f(fl, win_flip ? 1.f : 0.f); }
     p_glDrawArrays(0x0005, 0, 4);
-    eglSwapBuffers(egl_dpy, egl_surf2);
+    /* The d2 window went black while its FBO measured fully lit, with no
+     * EGL call reporting failure - so this path checks what nothing else
+     * can see: whether the blit reached the WINDOW's backbuffer, and what
+     * the swap says. Once per ~5 s, and it stops after the first success. */
+    {
+        static double probe_next;
+        static int probe_done;
+        double now = now_s();
+        if (!probe_done && now >= probe_next) {
+            unsigned char px[64];
+            int e;
+            probe_next = now + 5.0;
+            memset(px, 0, sizeof px);
+            p_glFinish();
+            p_glReadPixels(win2_w / 2 - 2, win2_h / 2 - 2, 4, 4,
+                           0x1908, 0x1401, px);
+            e = (int)p_glGetError();
+            {
+                int i, lit = 0;
+                for (i = 0; i < 16; i++)
+                    if (px[i*4] | px[i*4+1] | px[i*4+2]) lit++;
+                if (!eglSwapBuffers(egl_dpy, egl_surf2)) {
+                    fprintf(stderr, "[padglhost] display probe: d2 SWAP "
+                            "FAILED 0x%x (backbuffer centre %d/16 lit, "
+                            "err 0x%x)\n", eglGetError(), lit, e);
+                } else {
+                    fprintf(stderr, "[padglhost] display probe: d2 swap ok, "
+                            "backbuffer centre %d/16 lit before it, "
+                            "err 0x%x\n", lit, e);
+                    if (lit) probe_done = 1;
+                }
+            }
+        } else {
+            eglSwapBuffers(egl_dpy, egl_surf2);
+        }
+    }
 
     p_glBindTexture(0x0DE1, (unsigned)tex0);
     p_glActiveTexture((unsigned)act);

@@ -134,6 +134,29 @@ struct padsw_shm {
     unsigned kbd_src;                    /* padglhost's tag for its last publish */
     unsigned scr_src;                    /* the scripts' tag for theirs          */
     unsigned guest_t0_ms;                /* the shim writes; everyone else reads */
+
+    /* ---- THE RIP (item 26): right-hold makes a spinner spin. --------------
+     *
+     * A rip is not a hold. The 0x11 switch scan replies with a per-switch
+     * LEVEL, and the game counts spins by DIFFING successive scans of that
+     * switch's own node - so "held made" is ONE closure however long it lasts,
+     * and no pulse loop on the host can beat the scan rate either: each host
+     * action is a ~80 ms wsl.exe spawn (measured, item 24) and each closure
+     * needs two, a ceiling near 6/s that also saturates SwitchDriver's queue.
+     *
+     * So the host does not pulse anything. It sets ONE flag here, and the shim
+     * ALTERNATES the level it reports on each scan of that switch's node for
+     * as long as the flag is set - a closure per two scans, which is the
+     * maximum rate a diffed level can carry, by construction, at any scan
+     * rate, for one interop call on press and one on release.
+     *
+     * SINGLE WRITER, like every other region: swspin.py (and only it) writes
+     * these; the shim only reads them. The rip never touches scr_held[] or the
+     * merge - mrg[] stays the resting level throughout, so a rip that ends
+     * simply stops being overridden and the switch is OPEN by construction.
+     * That is the stuck-switch property item 24 fought for, inherited free. */
+    unsigned spin_gen;                   /* swspin.py bumps after every change */
+    unsigned char spin[PADSW_MAX_ID];    /* 1 = rip this switch id             */
 };
 
 #endif

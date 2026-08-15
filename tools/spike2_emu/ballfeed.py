@@ -77,6 +77,13 @@ MIN_GAP_S = _num("PAD_BALL_MIN_GAP_MS", 600) / 1000.0
 #: teardown can make one read fail, so it takes a few in a row.
 GONE_S = 3.0
 
+#: How long to wait for a first run's switch table before concluding this
+#: title genuinely has nothing to feed (item 49). mktables derives the table
+#: from the run's own [sw] dump about a minute in; watch.sh's own budget for
+#: that wait is PAD_PF_WAIT (default 120 s), so this sits comfortably above
+#: it rather than racing it.
+TABLE_WAIT_S = _num("PAD_BALL_TABLE_WAIT_S", 300.0)
+
 
 def say(msg):
     """One line, flushed. watch.sh folds this into the run log."""
@@ -261,8 +268,34 @@ def main():
         return 0
 
     if not f.usable():
-        say("nothing to do on this title - exiting rather than idling")
-        return 1
+        # ★ ITEM 49: WAIT FOR THE TABLE, THE WAY THIS FILE ALREADY WAITS FOR
+        # dump/padled BELOW. On a title's FIRST run the switch list does not
+        # exist when watch.sh starts this - mktables derives it from the
+        # run's own [sw] dump about a minute in - and exiting here meant the
+        # whole first run went feederless after one log line: the game fired
+        # its trough eject, nothing answered, and multiball died silently.
+        # "Not yet" and "never" are different things, same as the padled
+        # lesson at the bottom of this file. Bounded rather than forever:
+        # the table has no teardown-removal signal the way padled does, so
+        # a title that genuinely has no trough must not idle for the whole
+        # run - past the deadline the old exit is the right answer.
+        deadline = time.monotonic() + TABLE_WAIT_S
+        said_wait = False
+        while not f.usable() and time.monotonic() < deadline:
+            if not said_wait:
+                said_wait = True
+                say("switch table not here yet - waiting up to %.0f s for "
+                    "mktables to derive it from this run's own dump"
+                    % TABLE_WAIT_S)
+            time.sleep(2.0)
+            f = Feeder(dry=dry)
+        if f.usable():
+            say("switch table arrived - resolved:")
+            for line in f.describe():
+                say(line)
+        else:
+            say("nothing to do on this title - exiting rather than idling")
+            return 1
     m = padsw.open_block()
     if m is None:
         return 2

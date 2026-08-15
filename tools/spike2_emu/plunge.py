@@ -95,8 +95,13 @@ _TROUGH_NAMES = ["TROUGH %d" % n for n in range(1, 7)]
 def _resolve():
     """Look the ids up in THIS title's switch list, falling back to Godzilla's.
 
-    Silent on failure on purpose: a missing table must not stop a Godzilla run
-    working the way it always has, and every caller here prints what it did.
+    The fallback still runs a Godzilla checkout the way it always has - but it
+    is LABELLED now, not silent (item 49). Silence was right when the compiled
+    ids were the only source there was; once they became a fallback, a first
+    run of any other title had this module closing six switches the title does
+    not watch while its callers printed success. One stderr line, so a human
+    reading the output knows the ids are a guess; stdout stays exactly as the
+    playfield window's buttons expect it.
     """
     ids = dict(_GZ)
     try:
@@ -109,6 +114,10 @@ def _resolve():
             if len(f) >= 5:
                 by_name[f[4].strip().upper()] = int(f[0])
     except (OSError, TypeError):
+        print("plunge: no switch table for this title yet - using "
+              "godzilla_pro's compiled ids, which on another title may drive "
+              "the WRONG switches (it arrives a minute into a first run; "
+              "rerun then)", file=sys.stderr)
         return ids
     for key, name in _WANT.items():
         if name in by_name:

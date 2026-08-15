@@ -39,6 +39,7 @@ struct shim_mirror {
     unsigned scr_gen; unsigned char scr_held[256];
     unsigned mrg_gen; unsigned char mrg[256];
     unsigned kbd_src; unsigned scr_src; unsigned guest_t0_ms;
+    unsigned spin_gen; unsigned char spin[256];
 };
 
 #define P(f) printf("%s %zu %zu\n", #f, offsetof(struct padsw_shm, f), \
@@ -49,6 +50,7 @@ int main(void)
     P(magic); P(gen); P(held); P(tap_gen); P(tap_id); P(tap_reads);
     P(scr_gen); P(scr_held); P(mrg_gen); P(mrg);
     P(kbd_src); P(scr_src); P(guest_t0_ms);
+    P(spin_gen); P(spin);
     printf("SIZE %zu %zu\n", sizeof(struct padsw_shm), sizeof(struct shim_mirror));
     printf("BYTES %d %d\n", PADSW_BYTES, PADSW_BYTES);
     return 0;
@@ -88,6 +90,7 @@ WANT = [("magic", p.OFF_MAGIC), ("gen", p.OFF_GEN), ("held", p.OFF_HELD),
         ("scr_held", p.OFF_SCR_HELD), ("mrg_gen", p.OFF_MRG_GEN),
         ("mrg", p.OFF_MRG), ("kbd_src", p.OFF_KBD_SRC),
         ("scr_src", p.OFF_SCR_SRC), ("guest_t0_ms", p.OFF_GUEST_T0),
+        ("spin_gen", p.OFF_SPIN_GEN), ("spin", p.OFF_SPIN),
         ("SIZE", p.SIZE)]
 
 got = {}

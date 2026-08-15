@@ -461,8 +461,11 @@ These have each been violated at least once and each cost a run or a window:
       records how TMNT drives character select — read the on-screen prompt).
       **Never arrived ⇒ it is item 17's class**, and the attract/in-game split
       is then the finding: the per-node scan gap ran to 670 ms on godzilla in
-      attract and **the DURING-PLAY per-node rate has never been measured on any
-      title** — item 26 wants that same number, so measuring it pays twice.
+      attract and **the DURING-PLAY per-node rate is now MEASURED — item 26's
+      close (2026-08-15): godzilla node 8 averaged 109 scans/s during play and
+      120 scans/s in attract** (item 17's 670 ms was a worst single gap, not
+      the average). Any rip on any title reprints it free in `[swspin] rip
+      END`, so turtles' own number is one right-hold away.
       **★★ READ ITEM 17's BRANCH FIRST — 2026-08-12 late: it cracked a
       mechanism that predicts THIS item's symptom exactly.** On godzilla a
       button press becomes a queued EVENT whose coroutine re-reads the live
@@ -686,56 +689,6 @@ These have each been violated at least once and each cost a run or a window:
       `PAD_PF_FADE_UNIT_MS` and says whether the ramp is linear or gamma'd,
       with no firmware at all. Do that first if a pass has to produce
       something. Trace for any wire question: `/var/tmp/led_trace_1d.log`.
-
-- [ ] **26. Right-click-hold a switch to RIP IT, for spinners.** `S3 D4`
-      **★ DAVID, 2026-08-06: "for switches, let's also add a right click hold
-      function that 'rips the spinner' as long as the click is held."**
-      The sibling of item 24: left-hold closes a switch and keeps it closed,
-      right-hold should make it close over and over for as long as the button
-      is down, the way a ball spinning a spinner does. **Godzilla's three
-      spinners: 47 LEFT SPINNER (node 8 bit 9), 83 TOP SPINNER (node 9 bit 21),
-      84 RIGHT SPINNER (node 9 bit 28).** No `<Button-3>` binding exists
-      anywhere in `playfield.py` today.
-      **★★ ESTABLISHED AT THE DESK, from `hwshim.c`, and it decides the whole
-      shape — do NOT build a host-side pulse loop.** The `0x11` switch scan
-      replies with a per-switch LEVEL, not a closure count: `hwshim.c:4464` is
-      `if (held) level = !level` into a bitmap. So the game counts spins by
-      DIFFING successive scans, which caps the rip at **one closure per scan of
-      that switch's own node** however fast anything pulses. Two rates bound it
-      and they are not the same number: the poll itself is described as a
-      37.5 Hz scan (`hwshim.c:5665`), but item 17 measured the gap between two
-      scans of ONE node running to **670 ms in attract**. The during-play
-      per-node rate has never been measured and is the first thing to find out.
-      **Which also kills the obvious implementation.** Each host action is a
-      ~80 ms `wsl.exe` spawn (item 24, measured) and each closure needs two, so
-      a host-side ripper tops out near 6 closures/s while saturating
-      SwitchDriver's queue and blocking every other switch action including a
-      release.
-      **THE DESIGN THIS POINTS AT, not yet built:** a SPIN flag in the shared
-      block, and `hwshim.c` flips the reported level on each scan of that node
-      while the flag is set. That delivers the maximum rate the wire can carry
-      by construction and costs ONE interop call on press and one on release,
-      exactly like `swhold.py`. Right-click then rides item 24's `SwitchDriver`
-      queue unchanged.
-      **What makes it D4 rather than D2: it spans the boundary.** A new flag
-      means `padsw.h`, `padsw.py`, a new `swspin.py`, `hwshim.c` and
-      `playfield.py` — and the block layout is THREE hand-kept copies, which is
-      what `swlayout.sh` (item 16, `145e79b`) exists to prove agree. Run
-      `swlayout.sh` before believing any of it. A rebuild is needed, so no run
-      may be live. The ladder would call a boundary-spanning change D5; it is
-      D4 because the mechanism above is already read off the source and the
-      design is written down, which is what D5 usually pays for.
-      **Acceptance, and the oracle must be on the GAME's side of the wire:** a
-      right-hold on a spinner produces many closures the GAME SEES, not many
-      writes this rig made. Count them with item 17's `PAD_SW_PEND` /
-      `swladder.py`, which read the game's own `entry[+24]`, and state the
-      achieved closures per second against the measured per-node scan rate.
-      Left-click hold must still behave as item 24 shipped it, and a right-hold
-      must end OPEN — the stuck-switch failure is the same one, and
-      `swholdtest.py` is the harness that already checks for it.
-      — S3: nothing is broken and a spinner can still be closed once per click,
-      so no shot is unreachable; what is missing is the magnitude. D4, armchair
-      beyond the desk work above.
 
 - [ ] **29. Switch names come back as `?` on most titles, so the schematic
       playfield is a list of numbers and switch positions cannot be joined.**
@@ -1240,46 +1193,6 @@ These have each been violated at least once and each cost a run or a window:
       the existing `bind ... key dead` lines) already exists; it needs one run
       per title to confirm.
 
-- [ ] **49. LEAD: "LOCATING PINBALLS" on james_bond_60th clears when the
-      CAPTIVE BALL switch is held made, so a machine at rest needs more than a
-      full trough.** `S2 D2`
-      **★ DAVID, 2026-08-14: "why am i stuck with 'locating pinballs' when
-      trying to start? The balls in trough should default to all being in
-      there."** They were: `swshow.py` on his live run read `balls the GAME
-      sees in the trough: 6 of 6 [77, 76, 75, 74, 73, 72]`, Shooter Lane open,
-      Trough Jam open, coin door closed. The rig's rest state was correct and
-      the game still searched.
-      **★ MEASURED THE SAME SESSION, and it is one observation, not a proof:**
-      `swhold.py 84 1` (84 = `Captive Ball`, from Bond's own switch list) then
-      `plunge.py start` took the game straight into a game — `PLAYER 1`,
-      `FREE PLAY`, `SELECT SOUND STYLE: Modern` — instead of a ball search.
-      **Why it is plausible:** a captive ball physically rests against its
-      switch, so on a real machine that switch is made at rest and the game
-      counts that ball as accounted for. An open one is a missing ball, and a
-      missing ball is exactly what a ball search is for.
-      **NOT ESTABLISHED, and it is the first job: THE CONTROL WAS NOT RUN.**
-      Nobody opened 84 again and re-pressed Start on the same run to see
-      LOCATING PINBALLS come back. Until that is done this is a correlation on
-      one title, and the pair is David's report (84 open, search) against one
-      measurement (84 made, game starts) taken minutes apart.
-      **The general shape, if it holds:** "a machine at rest" is currently the
-      trough plus the coin door (`hwshim.c:~4578`, latched when padglhost's
-      window opens). Bond says that set is title-dependent — anything that
-      HOLDS A BALL at rest belongs in it. `device_xy.txt` names ball devices
-      per title, which is where the list should come from rather than a
-      hard-coded id. **Related and possibly the same knot: `[dev] --- ball
-      devices: count=1119174656 ---`**, the misparse recorded in the loose
-      ends, because that is the very table this would read.
-      **Acceptance:** state the control both ways on one run (84 open → search,
-      84 made → game starts, and how many repeats), then make the rest state
-      derive from the title's own ball devices and show it on godzilla_pro
-      unchanged.
-      — S2: it stops a game being started on this title, which is severe, but a
-      one-command workaround exists now that it is known (`swhold.py 84 1`) and
-      no other item is blocked by it. D2: the instruments all exist
-      (`swshow.py`, `swhold.py`, `plunge.py`), the fault appears on every start
-      attempt, and the first job is one run to get the control.
-
 - [ ] **50. No LED feedback at all on a title with no playfield artwork,
       which is most of them.** `S3 D3`
       **★ DAVID, 2026-08-14: "we should have some visual indication of leds
@@ -1370,6 +1283,19 @@ These have each been violated at least once and each cost a run or a window:
   knowing before that item trusts it. (The other half of David's "the switch
   table isn't coming through" report that day was the first-run window gap, now
   fixed and closed as item 47.)
+
+- **The ball feeder cannot see ejects on james_bond_60th: its TROUGH coil is
+  device-table GROUP 8, and `coilmap.GROUP_NODE` only knows groups 6 and 7.**
+  Found 2026-08-15 during item 49's healing run: ballfeed's new wait picked the
+  switch table up, resolved Bond's trough, and then reported `eject coil NOT IN
+  THE DEVICE TABLE - ejects cannot be seen` - the row is there
+  (`coil TROUGH ... grp 8 index 1` in Bond's device_xy.txt) but the group→node
+  map was measured on godzilla_pro (6→8) and jaws_le (7→9) and has no entry
+  for 8. So on Bond the feeder correctly concludes it has nothing to watch and
+  exits after its wait; single-ball play is fine (the game serves, the rig's
+  trough answers), but nothing will answer a MULTIBALL eject on this title.
+  Item 21b's territory; the fix needs one Bond capture with `PAD_COIL_PROBE=1`
+  to say which node group 8 lands on, not a guess.
 
 - **A NON-PIVOT, ordinary-user run of james_bond_60th dies about three frames
   in, every time — and it is not the title's assets or item 45's mask.** Found
@@ -1793,6 +1719,73 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **26. Right-click-hold a switch to RIP IT, for spinners.** DONE
+      2026-08-15, `item/26`, `263a9dc`. Right-hold on any switch marker, in
+      both playfield views, now rips: ONE SPIN flag in the shared block (new
+      single-writer region `spin_gen`/`spin[256]` at 808/812, `swlayout.sh`
+      proves all three copies agree) and `hwshim.c` ALTERNATES the level it
+      reports on each scan of that switch's own node while the flag is set —
+      a closure per two scans, the wire's maximum by construction, one
+      interop call each way (`swspin.py`; the host-pulse alternative caps
+      near 6/s). **Live on godzilla_pro, alive.sh 0 after: attract rip
+      608 closures in 10.0 s (60/s, node 8 at 120 scans/s); during-play rip
+      554 closures in 10.1 s (54/s, node 8 at 109 scans/s) — the first
+      during-play per-node scan rate ever measured, and `[swspin] rip END`
+      now prints it free on every rip. PAD_SW_PEND agreed EXACTLY: 608 and
+      554 game-side `lvl` closures, 100% of the wire's, ending OPEN both
+      times.** Found: the game QUEUES edges (entry[+22]) and drains ~1 per
+      16.7 ms tick, so a rip fed at 2x that backlogs and coasts after
+      release (10 s rip → ~9 s tail; a normal 1 s rip trails under a
+      second, which reads as a spinner coasting down, not a defect).
+      Offline: swspintest.py ALL PASS, swholdtest.py still ALL PASS. Traps:
+      Tk `find_overlapping` treats an unfilled oval as its outline band, so
+      synthesised clicks must aim at the ring's STROKE; godzilla_pro wanted
+      several `plunge.py coin` before Start took (pricing, not a fault).
+
+- [x] **49. A title's FIRST run could not start a game: with no switch table
+      the trough latch fell back to GODZILLA'S ids, and the table was never
+      going to arrive because the tables dir was root-poisoned.** DONE
+      2026-08-15, `c8cb897` (branch `item/49`). Filed as a captive-ball lead;
+      the CONTROL REFUTED IT (84 explicitly open, game started anyway) and
+      found the real chain: on a pivot run watch.sh's PASS ONE mktables (root)
+      created the per-title tables dir root-owned, PASS TWO (desktop user, the
+      one that builds the switch list from the run's own [sw] dump) died on an
+      uncaught PermissionError in a log nothing shows, so `switch_list.txt`
+      never existed - and padglhost's window-open latch then closed Godzilla's
+      66..71, which on Bond are six playfield switches and no trough at all.
+      LOCATING PINBALLS was the game being CORRECT about the state it was
+      handed. Reproduced both ways pre-fix (hide the table -> search; restore
+      it -> game starts). **The fix, one principle - never assert ids you
+      cannot name:** watch.sh chowns `$TABLES` between the passes (recursive,
+      heals poisoned dirs) and runs the drawable=no branch as_user; mktables
+      writes ATOMICALLY (tmp+replace - two 2 s pollers latch on their first
+      successful parse of these files) and names every write failure;
+      padglhost withholds non-platform rows until `binds_resolve()` parses a
+      usable table, polls every 2 s, then resolves, re-exports padbinds and
+      latches the title's own trough mid-run (no-rig-env launches keep the
+      compiled ids - the gate is for tables that have not arrived, not for
+      debug shapes with no rig); padbinds exports withheld rows as '0' and the
+      playfield rebuilds its key panel on mtime change; ballfeed waits up to
+      `PAD_BALL_TABLE_WAIT_S` (300 s) instead of exiting feederless; swshow
+      and plunge label their fallbacks out loud. An adversarial review (five
+      lenses) found eight real file-boundary faults, all fixed in `c191609`.
+      **Verified live, repeats stated:** the healing run - Bond booted from
+      the true poisoned first-run state and reached a STARTED GAME entirely by
+      itself (chown healed mid-run, 117 switches written at 12:05, `[padglhost]
+      switch list arrived; binds resolved, trough latched on this title's own
+      ids`, key panel rebuilt with exactly the six absent rows n/a, swshow on
+      72..77 with no banner, PLAYER 1 with no LOCATING PINBALLS) - 1 run;
+      godzilla control 2 runs: run 1 exited cleanly mid-Tech-Alerts (the known
+      clean-exit family, logged, did not recur), run 2 end-to-end into BALL 1
+      with the startup path byte-identical (`bind 6 balls in trough -> 6` at
+      start, no gate lines). 2653 tests green; the one recurring red was item
+      47's OWN harness beating its 1 ms timer with sleepless update() calls -
+      fixed, five-for-five after. Artifacts: `C:/tmp/item49/`. **Left behind,
+      recorded in the loose ends:** Bond's TROUGH coil is device-group 8,
+      which coilmap cannot map (multiball feeding dead on this title - item
+      21b); a HEADLESS run still bakes the shim's own compiled rest-set
+      (pre-existing, a shim fix costs every save slot).
 
 - [x] **47. A title's FIRST run showed no switches, because the window read its
       tables once and they land a few seconds later.** DONE 2026-08-14,

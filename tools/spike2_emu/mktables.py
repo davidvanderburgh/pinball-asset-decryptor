@@ -238,7 +238,21 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
         if not live_rows:
             say("  switches     the dump is there but held no rows")
             return made
-        _write(sw_list, swtable.text(game, live_rows))
+        # ★ ITEM 49: NAME a failed write instead of dying in a log nobody
+        # reads. The background pass runs as the desktop user and pass one
+        # (root, on a pivot run) creates this directory - before watch.sh
+        # chowned it in between, the PermissionError here was an uncaught
+        # traceback in padtables.log and the switch table silently never
+        # existed, on this run and every run after it. build()'s own
+        # docstring promises it never raises for a missing part; this was
+        # the one write that could.
+        try:
+            _write(sw_list, swtable.text(game, live_rows))
+        except OSError as exc:
+            say("  switches     FAILED to write %s: %s" % (sw_list, exc))
+            say("  switches     (a root-owned tables dir from an old run? "
+                "watch.sh now chowns it at start - rerun, or fix by hand)")
+            return made
         made["switch_list.txt"] = sw_list
         say("  switches     %d in the game's own table" % len(live_rows))
 

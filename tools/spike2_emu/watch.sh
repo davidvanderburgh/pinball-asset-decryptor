@@ -986,6 +986,20 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     python3 "$RIG/mktables.py" > "$TBL_OUT" 2>&1
     grep -v '^drawable=' "$TBL_OUT" | sed 's/^/[watch]   /'
 
+    # ★ ITEM 49: PASS ONE JUST RAN AS ROOT ON A PIVOT RUN, AND PASS TWO RUNS
+    # AS $PAD_USER - hand the tables tree over IN BETWEEN, or pass two cannot
+    # write switch_list.txt into the per-title directory pass one created.
+    # That exact deadlock is why james_bond_60th's first run never got its
+    # switch table: mktables died on an uncaught PermissionError in
+    # padtables.log, which nothing shows, and the dir stayed root-owned so
+    # EVERY later run failed the same way (a poisoned cache, not a transient
+    # miss - david could not even build it by hand without root). Recursive,
+    # deliberately: it also heals any title dir an older run already
+    # poisoned. Same drop-dance as $ROOT/dump and the log files above.
+    if [ "$DROP" = 1 ]; then
+        chown -R "$PAD_USER" "$ROOT/dump/tables" 2>/dev/null
+    fi
+
     # PASS TWO IS WHERE THE WAIT GOES, AND WHETHER IT BLOCKS DEPENDS ON WHETHER
     # THERE IS ANYTHING TO LOOK AT MEANWHILE. Blocking always would delay the
     # window by a minute on every first run of a title; never blocking would

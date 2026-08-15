@@ -1052,7 +1052,10 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **44. Stranger Things' PROJECTOR picture has nowhere to go: the emulator
       presents exactly ONE display and deliberately swallows every other
-      surface the game opens.** `S3 D4` ← IN PROGRESS
+      surface the game opens.** `S3 D5` ← IN PROGRESS *(**35%, 2026-08-15:** the
+      DIAGNOSIS half is essentially done — mechanism confirmed, display index
+      named on two titles, and the cheap route killed with a control. None of
+      the BUILD exists. `D4 → D5`, reason below.)*
       **★★ CONFIRMED ON THE CARD, 2026-08-15, FIRST BOOT OF THIS TITLE — THE
       MARKED GUESS WAS RIGHT AND THE PROJECTOR IS DISPLAY INDEX 2.** The
       guest's own lines, `~/st44_boot1.log`:
@@ -1125,30 +1128,76 @@ These have each been violated at least once and each cost a run or a window:
       alternative it was testing for is dead: the projector is not a separate
       video path (a GStreamer sink, a second framebuffer) that never reaches
       eglshim — it is an ordinary second EGL display, index 2.
+      **★★★ RULED OUT 2026-08-15, WITH A CONTROL, AND IT IS THE EXPENSIVE
+      NEGATIVE OF THIS PASS: `PAD_EGL_PRIMARY=2` DOES NOT SHOW YOU DISPLAY 2.
+      IT SHOWS BLACK.** This item was filed asserting the override would put
+      the second feed in the main window "immediately"; measured, it does not,
+      and **that claim was mine and it was wrong.** Validated on the LABELLED
+      example rather than on the title in question — star_wars_le, whose second
+      display item 27 already established carries real content — so the answer
+      cannot be blamed on Stranger Things. Same card, same build, one env var
+      apart, scored by the renderer's own pixel counter on the far side of the
+      bridge:
+      • default (surface 1): `picture: FIRST at frame 4 (102511 of 1044480
+        pixels are not black)`.
+      • `PAD_EGL_PRIMARY=2` (surface 2): `picture: STILL BLACK after 279 video
+        frames — the game is drawing and the screen it draws into is empty`,
+        while `swap content: 6x60  no-draw 0/60` says every presented swap had
+        draws AND video from two channels. Drawing, video, black.
+      Stranger Things behaves identically (`swap content: 2x60 no-draw 0/60`,
+      STILL BLACK), so the two titles agree.
+      **Why this matters more than a lost shortcut: BOTH SURFACES RENDER INTO
+      ONE SHARED FRAMEBUFFER, and item 27's own argument only ever worked in
+      one direction.** It reasoned that the primary's full-screen background
+      overwrites the secondary's leftovers — which is why presenting the
+      PRIMARY is safe. It never established the converse, and the converse is
+      false: presenting at the secondary's swap does not yield the secondary's
+      scene. **So there is NO cheap route to see display 2 at all.** Nothing
+      can observe the projector until the per-display render target exists,
+      which means the build and its own oracle are the same job.
       Whatever is built, the window non-negotiables hold: never `SetWindowPos`
       an emulator window, and a second window doubles item 38's strand surface.
-      **Resume:** re-run the same card with `PAD_EGL_PRIMARY=2` (slot, no
-      rebuild) and screenshot the main window against a `PAD_EGL_PRIMARY=1`
-      boot — same title, same card, one env var apart, which is the labelled
-      comparison this needs. That gives the reference picture of what the
-      projector is drawing and says whether display 2 carries real projector
-      content or an empty/duplicate surface, which decides whether the
-      expensive half is worth building at all. **Budget for a slow boot: the
-      first run of this card crawled and the fps counter is cumulative, so read
-      the INCREMENTAL rate, not the printed average.**
+      **A SECOND BLOCKER, on this title only, and it is not item 44's to fix:
+      stranger_things_le never gets past `LOCATING NODE BOARDS / NODES NOT
+      FOUND`** (screenshot taken). It ships **no device table and no artwork**,
+      so the node census silences nothing — `watch.sh` says so itself: "neither
+      the device table nor a switch list could be read (no board 8 or 9 in
+      either)". That is item 29's and item 50's ground, on a title neither has
+      tried. Until it is fixed, this title cannot reach a screen where the
+      projector would have anything to show, so **the acceptance run wants
+      star_wars_le as well** — its playfield LCD is the same feature with a
+      title that boots.
+      **Resume:** build the per-display render target, because nothing short of
+      it can be observed. In order: (1) record the draw surface in
+      `eglMakeCurrent` instead of discarding it; (2) add a target op to
+      `padgl.h` and bump `PADGL_VERSION` — both sides of the bridge must agree,
+      and item 16's `swlayout.sh` is the precedent for proving hand-kept copies
+      match; (3) give `padglhost` a second FBO and a second X window; (4) make
+      `fbGetDisplayGeometry` answer PER DISPLAY. Verify on star_wars_le first
+      (it boots and its second display is documented), then Stranger Things.
+      **Budget for slow boots: a cold card crawls, and the eglshim fps counter
+      is CUMULATIVE — read the incremental rate, not the printed average.**
       **Acceptance:** on a Stranger Things Premium/LE card the projector picture
       is visible — as its own window or by a stated, documented route — with the
       backbox picture unchanged beside it, and no return of item 27's flicker
       (state black-frame % and mean |dY| from the same classifier). If the first
       boot shows the projector is not an EGL surface at all, that finding closes
       the diagnosis half and the item is re-scoped rather than failed.
-      — S3: the game plays, the backbox picture is correct, and
-      `PAD_EGL_PRIMARY` already lets the other feed be looked at one at a time,
-      so this is a capability gap with a workaround, not something you play
-      around. D4: the mechanism is already read off the source and reproduces on
-      every run of a two-surface title, but the fix spans `eglshim.c`,
-      `padglhost.c` and `padgl.h`, needs a second render target, needs a rebuild
-      (so no run may be live), and wants verifying on two titles.
+      — **S3, UNCHANGED, but its stated reason was wrong and is corrected.** It
+      used to rest on "`PAD_EGL_PRIMARY` already lets the other feed be looked
+      at one at a time"; that is measured false (above), so there is no
+      workaround at all. S3 stands on the part that is still true and measured:
+      play is unaffected and the backbox picture is correct, so nobody loses a
+      run to this. **Deliberately NOT promoted to S2** — losing a workaround
+      makes an item dearer, not more severe, and promoting S to reflect effort
+      is exactly how the scale stops meaning anything.
+      **D4 → D5, 2026-08-15, on evidence:** the cheap oracle is dead, so
+      display 2 cannot be observed AT ALL until the full per-display render
+      target is built — the build and the instrument that judges it are the
+      same job, which is the D5 line. It also spans the guest shim
+      (`eglshim.c`), the shared protocol (`padgl.h`, a `PADGL_VERSION` bump
+      both sides must agree on) and the host (`padglhost.c`), and needs a
+      rebuild, so no run may be live. Budget more than one pass.
 
 - [ ] **48. The playfield keyboard legend is GODZILLA'S list, so every other
       title gets a legend full of holes and a row named after another game.**

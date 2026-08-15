@@ -17,6 +17,7 @@ The clock and both intervals are injected so this answers in milliseconds.
 """
 import os
 import sys
+import time
 
 import pytest
 
@@ -40,9 +41,16 @@ def _root():
 
 
 def _pump(root, times=40):
-    """Let Tk actually run its timers, rather than trusting it will."""
+    """Let Tk actually run its timers, rather than trusting it will.
+
+    WITH A REAL WAIT PER SPIN (item 49 found this): 40 bare update() calls
+    can finish in under a millisecond of wall clock, so an after(1, ...)
+    timer is genuinely not due yet and the poll under test never fires -
+    a flake that bites only on a fast, unloaded machine, the worst
+    polarity. 2 ms per spin makes the 1 ms timer due ~40 times over."""
     for _ in range(times):
         root.update()
+        time.sleep(0.002)
 
 
 def test_tables_arriving_mid_run_are_picked_up():

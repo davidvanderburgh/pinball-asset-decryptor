@@ -67,6 +67,16 @@ These have each been violated at least once and each cost a run or a window:
   lists, so there is exactly one place to add to.
 - **Never run two measurement runs at once.** `killgame.sh` is global, so the
   older script's teardown kills the newer run mid-boot.
+- **The rig is a mutex, and the lock file is how sessions take turns.** David
+  runs more than one PAD session at a time (2026-08-15). Worktrees isolate the
+  code; nothing isolates `~/spike2root`, `~/padglhost`, the rings or the run
+  logs — so before any build, run, `killgame.sh`, save-state op or mutation
+  under the rootfs, TAKE `/home/david/.pad_rig_lock` (atomic `set -C` create,
+  content = your item branch + what you are doing, mtime = the clock), and
+  release it only when `alive.sh` reads 0 again. Held by someone else = the
+  rig is theirs; stay at the desk. Full protocol: `~/.claude/skills/next/
+  SKILL.md`, "The rig lock". A lock with `alive.sh` 0 that is under ~60 min
+  old is a session between steps, not stale.
 - **Item work commits on `item/<N>` in its own worktree, never straight to
   main.** Main is the release branch and only moves when a finished item is
   merged in — `/next` owns the mechanics (branch, sibling worktree dir, merge
@@ -1062,44 +1072,78 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **48. The playfield keyboard legend is GODZILLA'S list, so every other
       title gets a legend full of holes and a row named after another game.**
-      `S3 D2`
+      `S3 D2` ← IN PROGRESS *(**85%, 2026-08-15:** built, desk-verified on all
+      EIGHT derived switch lists, and live-verified end to end on godzilla_pro
+      including the first-run arrival path. What remains is the acceptance's
+      per-key clause on bond/turtles, which needs hands on keys.)*
+      **★★ BUILT AND LIVE-VERIFIED THIS PASS, branch `item/48`, `936836e`.
+      Established:**
+      **(1) `binds_playfield()` in padglhost.c derives the playfield tail from
+      the title's own switch_list.txt at resolve time.** Universal shots keep
+      their keys (arrows/F/A/S/Z/X, exact-name matched; the upper flippers are
+      piecewise-matched because their names vary); an INCLUDE-list of
+      categories (skill shot, spinners, pop bumpers, scoops, orbits, loops,
+      ejects/VUKs, captive balls, targets, ramps, lanes) hands fixed
+      per-category keys to whatever the title has, labels = the switch's own
+      names. Mech sensors match no category and stay unbound. Compiled
+      Godzilla rows survive ONLY as the no-rig-env debug fallback; the trough
+      'B' row resolves as before and its latch state is CARRIED across the
+      rebuild.
+      **(2) Desk oracle built: `padglhost --binds`** resolves and prints the
+      padbinds bytes with no X, no ring, no run. All six named titles generate
+      full legends from their own switches (jaws gains an upper-RIGHT flipper
+      on Down that the fixed table could never bind); led_zeppelin_le and
+      elvira3 (all-`?` names, item 29's fault) get an honest cabinet-only
+      legend instead of thirteen dead rows.
+      **(3) Withheld rows no longer export at all** (they used to export as
+      dim '0' rows — which were still GODZILLA'S names on a first run, the
+      very complaint). First run shows cabinet-only until the table lands;
+      the panel rebuilds on the re-export, item 49's machinery unchanged.
+      **(4) LIVE, godzilla_pro, tables MASKED to force the first-run arrival
+      path:** main() withheld; the table landed at guest 3.5 s; win_pump's
+      poll rebuilt the tail (21 keys logged), the trough latched on the
+      title's own ids (`[sw] 3568 ms +66w..+71w`), padbinds matched the desk
+      output, the panel drew the derived legend, and coin x4 + start started
+      a REAL GAME: trough 5/6, shooter lane closed, feeder answered, BALL 1
+      with the F row wearing the made-dot. The regenerated tables came out
+      byte-identical to the masked originals (free mktables regression).
+      **Seen during the run, NOT this item's fault: godzilla booted into a
+      "Left Spinner — No usage detected!" tech-alert/switch-test screen** (the
+      spinner never spins in scripted runs, so the game's usage tracker
+      flagged it). Zero `[key]` events and zero service edges in the log
+      prove nothing pressed Service; three `swpoke.py 47` pulses cleared it.
+      Worth knowing: coins/Start during that screen do nothing, and godzilla
+      needs FOUR left coins (0.25 each) for one 1.00 credit.
       **★ DAVID, 2026-08-14, looking at james_bond_60th: "the 'standard
-      playfield' switches here are probably not common on all machines. I don't
-      think the 'godzilla target' belongs here or on any machine."** He is
-      right, and the screenshot is the evidence: Bond's PLAYFIELD section shows
-      `Upper Left Flipper`, `Skill Shot`, `Left Spinner`, `Pop Bumper`,
-      `Godzilla Target` and `Right Scoop` all greyed with `n/a`, i.e. six of
-      thirteen rows are dead, and one of them is named after a different
-      machine.
-      **THE MECHANISM IS ALREADY UNDERSTOOD AND IS NOT A BUG IN THE RESOLVER —
-      do not "fix" binds_resolve().** `binds[]` (`padglhost.c:~745-790`) is a
-      fixed list whose ids are Godzilla Pro's, each row carrying candidate
-      NAMES; `binds_resolve()` looks each name up in the title's own
-      switch_list.txt and **correctly kills a row it cannot find**. Measured on
-      the live Bond run: `bind Godzilla Target: not on james_bond_60th_le; key
-      dead`, and the flippers, shooter lane, slingshots, outlanes and right
-      spinner all rebound to Bond's own ids. **So nothing fires the wrong
-      switch — the fault is that the MENU is Godzilla's, not that the binding
-      is wrong.** Item 27 built the resolver precisely to stop wrong-switch
-      presses (star_wars arrows hitting a drop target); this item is the next
-      step, and the wrong-switch class is already closed.
-      **What it should probably be instead (design, not decided):** derive the
-      playfield rows FROM THE TITLE's switch list — the useful shots on any
-      Stern are recognisable by name (slingshots, outlanes, scoops, spinners,
-      pop bumpers, targets, lanes) — and keep only the CABINET rows fixed,
-      since those are the ones measured identical on every title 2017-2024.
-      A title with no match for a letter simply does not use that letter,
-      instead of showing a dead row.
+      playfield' switches here are probably not common on all machines. I
+      don't think the 'godzilla target' belongs here or on any machine."**
+      That row is gone everywhere except a bare no-rig debug launch.
+      **Log shape changed:** the old `bind <row>: not on <title>; key dead`
+      lines no longer exist (nothing goes dead any more); the new lines are
+      `key <K> -> <id> "<NAME>"` per generated row plus a
+      `legend: N playfield key(s) derived from <title>'s own switch list`
+      summary. Item 46's queue text cites the old lines as a minor oracle —
+      the new ones carry strictly more information.
+      **Resume:** the remaining acceptance clause is per-key: on
+      james_bond_60th_le and turtles_pro, press a handful of legend keys with
+      a run up and confirm with `swshow.py <ids>` that each closes the switch
+      its row names (key→X-event→bind_for→sw_publish is UNCHANGED code; the
+      table feeding it is desk-verified against the same file swshow reads,
+      so this is a spot-check, not a search). Needs hands on the keyboard —
+      X key injection into WSLg is a recorded dead end (item 7) — so David
+      pressing five keys during any session is the cheapest form.
       **Acceptance:** on three titles with different layouts (godzilla_pro,
       james_bond_60th_le, turtles_pro) the playfield legend lists only switches
       that title HAS, no row is named after another game, and every listed key
       closes the switch it names — verified with `swshow.py`, not by eye.
+      The first two clauses are MET on all eight titles (desk, `--binds`);
+      the third is met on godzilla_pro (trough latch + game start on the
+      derived ids) and spot-check-pending on the other two.
       — S3: nothing is broken and no key fires a wrong switch, so there is no
       way to lose a run to it; what it costs is that the control legend is
-      misleading on every title that is not Godzilla. D2: it is desk work in
-      one table plus one resolver function, and the oracle (`swshow.py`, plus
-      the existing `bind ... key dead` lines) already exists; it needs one run
-      per title to confirm.
+      misleading on every title that is not Godzilla. D2 → D1 in substance
+      (the remaining work is five key presses per title while a run is up),
+      kept at **D2** because it still needs a windowed run and hands.
 
 - [ ] **50. No LED feedback at all on a title with no playfield artwork,
       which is most of them.** `S3 D3`

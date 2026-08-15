@@ -105,11 +105,20 @@ def test_a_dark_scene_is_not_reported_as_a_black_screen():
 
 def test_the_readback_puts_the_framebuffer_binding_back():
     """It runs mid-stream, so the guest's own binding has to survive it - the
-    same rule jgl_poll's on-demand shot follows."""
-    body = _func(_read("padglhost.c"), "screen_nonblack_px")
+    same rule jgl_poll's on-demand shot follows.
+
+    Item 44 moved the readback into fbo_nonblack_px so the d2 oracle shares
+    it; screen_nonblack_px is a wrapper now, and the guard follows the code
+    that actually binds."""
+    src = _read("padglhost.c")
+    body = _func(src, "fbo_nonblack_px")
     assert "0x8CA6" in body, "the previous binding is never read"
-    assert body.index("fbo_screen") < body.index("(unsigned)prev"), \
-        "it binds the screen FBO and never puts the old one back"
+    assert body.index("p_glBindFramebuffer(0x8D40, fbo)") \
+        < body.index("(unsigned)prev"), \
+        "it binds the target FBO and never puts the old one back"
+    assert "fbo_nonblack_px(fbo_screen, fb_w, fb_h)" in \
+        _func(src, "screen_nonblack_px"), \
+        "the d0 wrapper no longer reads the d0 screen"
 
 
 def test_it_speaks_on_a_change_and_not_on_a_timer():

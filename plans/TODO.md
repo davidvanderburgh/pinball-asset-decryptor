@@ -1407,6 +1407,19 @@ These have each been violated at least once and each cost a run or a window:
   table isn't coming through" report that day was the first-run window gap, now
   fixed and closed as item 47.)
 
+- **The ball feeder cannot see ejects on james_bond_60th: its TROUGH coil is
+  device-table GROUP 8, and `coilmap.GROUP_NODE` only knows groups 6 and 7.**
+  Found 2026-08-15 during item 49's healing run: ballfeed's new wait picked the
+  switch table up, resolved Bond's trough, and then reported `eject coil NOT IN
+  THE DEVICE TABLE - ejects cannot be seen` - the row is there
+  (`coil TROUGH ... grp 8 index 1` in Bond's device_xy.txt) but the group→node
+  map was measured on godzilla_pro (6→8) and jaws_le (7→9) and has no entry
+  for 8. So on Bond the feeder correctly concludes it has nothing to watch and
+  exits after its wait; single-ball play is fine (the game serves, the rig's
+  trough answers), but nothing will answer a MULTIBALL eject on this title.
+  Item 21b's territory; the fix needs one Bond capture with `PAD_COIL_PROBE=1`
+  to say which node group 8 lands on, not a guess.
+
 - **A NON-PIVOT, ordinary-user run of james_bond_60th dies about three frames
   in, every time — and it is not the title's assets or item 45's mask.** Found
   2026-08-14 while verifying item 45. Three runs from `item/45` launched as

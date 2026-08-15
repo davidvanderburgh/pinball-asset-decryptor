@@ -1052,16 +1052,52 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **44. Stranger Things' PROJECTOR picture has nowhere to go: the emulator
       presents exactly ONE display and deliberately swallows every other
-      surface the game opens.** `S3 D4`
+      surface the game opens.** `S3 D4` ← IN PROGRESS
+      **★★ CONFIRMED ON THE CARD, 2026-08-15, FIRST BOOT OF THIS TITLE — THE
+      MARKED GUESS WAS RIGHT AND THE PROJECTOR IS DISPLAY INDEX 2.** The
+      guest's own lines, `~/st44_boot1.log`:
+      `fbGetDisplayByIndex(0)` → `surface 1 on display 0 (primary)`;
+      `fbGetDisplayByIndex(2)` → `surface 2 on display 2`; then
+      `2 surfaces: presenting only surface 1, suppressing the other(s)` and
+      `first suppressed swap (counted, not presented)`. So the projector
+      picture IS being drawn every frame and thrown away at the swap, exactly
+      as this item supposed. **Same indices as star_wars_le (0 and 2), so "the
+      second display is index 2" now holds on TWO titles** and nothing should
+      hard-code a slot: `PAD_EGL_PRIMARY` takes the SLOT (1/2), not the index.
+      **The card is the right model:**
+      `D:\Pinball\images\Stern\spike2\stranger_things_le-1_12_0.Release.8G.sdcard.raw`
+      (7.3 GB, **LE**, so it has the projector). Run it with `PAD_CARD=` and no
+      extraction; it had never been booted here, so the first boot pays the
+      cold-card copy (item 34) and crawls — ~4 fps incremental through boot.
+      **★★ THREE THINGS MEASURED AT THE DESK THAT DECIDE THE SHAPE OF THE FIX,
+      and together they say a second WINDOW is the small half:**
+      **(1) `eglMakeCurrent` THROWS THE DRAW SURFACE AWAY** (`eglshim.c:107`
+      ignores its `draw` argument), and **(2) the bridge protocol has no target
+      op at all** — `padgl.h`'s `PADGL_SWAP` is a bare "end of frame" and the
+      host logs `[bridge] attached, ring 64 MB, host target 1360x768`, ONE
+      target. So the host cannot tell which display any draw belongs to; that
+      needs a new op and a `PADGL_VERSION` bump on both sides before a second
+      render target can exist. **(3) `fbGetDisplayGeometry` hands EVERY display
+      the same size** (`eglshim.c:260` returns `pad_fb_width()`/`pad_fb_height()`,
+      one global pair from `PAD_GL_W`/`PAD_GL_H` — 1360x768 on this run), and
+      `fbCreateWindow` ignores its `w`/`h` outright. A projector asking its own
+      geometry is told the backbox's.
+      **Also seen, and it belongs to other items rather than this one:**
+      stranger_things_le ships **no playfield artwork and no device table**, so
+      the node census silenced nothing and the playfield is a bare schematic —
+      that is item 50's case and item 29's, on a title neither has tried.
+      **Instrument trap this pass paid for, recorded so nobody repays it:**
+      `wsl -e setsid --fork bash -c "exec … watch.sh"` (item 38's
+      zombie-avoiding launch) **detaches watch.sh's OWN stdout**, so when the
+      run died immediately it died silently — twice — and `$LOG` stayed 0
+      bytes because `$LOG` only ever carries the GUEST's output. Redirect the
+      script's stdout too, or run it in the foreground, or the diagnostic is
+      gone.
       **★ DAVID, 2026-08-11: "no projector out on stranger things (NOT IN
       PRO)."** Read as: the Premium/LE projector feed never appears. The
       parenthesis is the model caveat — **the Stranger Things PRO has no
-      projector at all**, so only a Premium/LE card can test this, and which
-      card this rig has is the FIRST thing to check. `stranger_things` is a
-      known Spike 2 title (`pinball_decryptor/plugins/stern/games.py:46`) and a
-      `PAD_CARD` title runs with no extraction (item 28), but **no
-      stranger_things run appears anywhere in this queue or the handoff** — it
-      may never have been booted here.
+      projector at all**, so only a Premium/LE card can test this. Answered
+      above: the LE card exists and it opens the second display.
       **THIS IS NOT A NEW MECHANISM — IT IS ITEM 27'S OWN LEFTOVER LEAD**,
       which its Done entry names in those words: *"playfield-LCD feed as a
       second window (/add candidate)"*. `eglshim.c:56-105` gives each surface
@@ -1084,15 +1120,22 @@ These have each been violated at least once and each cost a run or a window:
       overwritten by the primary's full-screen background — so a second window
       needs a second RENDER TARGET, not just a second X window. That is the
       real cost of this item.
-      **THE CHEAP FIRST STEP IS ONE BOOT AND NO REBUILD:** read the `[eglshim]
-      surface N on display D` lines. If the title opens two surfaces the
-      projector is one of them, and `PAD_EGL_PRIMARY=<slot>` puts it in the
-      main window immediately — confirming the diagnosis and giving a reference
-      picture. **GUESS, marked as one: that the projector is an EGL display at
-      all.** It may be a separate video path (a GStreamer sink, a second
-      framebuffer) that never reaches eglshim, and that boot is what says which.
+      **~~THE CHEAP FIRST STEP IS ONE BOOT AND NO REBUILD~~ — DONE 2026-08-15,
+      and the guess it was gating is CONFIRMED; see the top of this item.** The
+      alternative it was testing for is dead: the projector is not a separate
+      video path (a GStreamer sink, a second framebuffer) that never reaches
+      eglshim — it is an ordinary second EGL display, index 2.
       Whatever is built, the window non-negotiables hold: never `SetWindowPos`
       an emulator window, and a second window doubles item 38's strand surface.
+      **Resume:** re-run the same card with `PAD_EGL_PRIMARY=2` (slot, no
+      rebuild) and screenshot the main window against a `PAD_EGL_PRIMARY=1`
+      boot — same title, same card, one env var apart, which is the labelled
+      comparison this needs. That gives the reference picture of what the
+      projector is drawing and says whether display 2 carries real projector
+      content or an empty/duplicate surface, which decides whether the
+      expensive half is worth building at all. **Budget for a slow boot: the
+      first run of this card crawled and the fps counter is cumulative, so read
+      the INCREMENTAL rate, not the printed average.**
       **Acceptance:** on a Stranger Things Premium/LE card the projector picture
       is visible — as its own window or by a stated, documented route — with the
       backbox picture unchanged beside it, and no return of item 27's flicker

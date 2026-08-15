@@ -799,8 +799,35 @@ static struct keybind binds[] = {
  * The list is $PAD_TABLES/$PAD_GAME/switch_list.txt, derived from the card
  * by mktables at run start; both variables ride the environment watch.sh
  * already passes. No file, or no rig env, means the compiled Godzilla ids
- * stand - the behaviour every run had before this function existed. */
-static void binds_resolve(void)
+ * stand - the behaviour every run had before this function existed.
+ *
+ * ★ ITEM 49: RETURNS whether a usable table was parsed, and the compiled ids
+ * are no longer ACTED ON while it has not. On a title's FIRST run this file
+ * does not exist yet (mktables derives it from the run's own [sw] dump, a
+ * minute in), and the window-open latch used to close Godzilla's 66..71
+ * regardless - which on james_bond_60th are the right spinner, target C, the
+ * shooter lane, both slingshots and the right flipper EOS. The game was
+ * handed an EMPTY trough plus six phantom closures, and its LOCATING
+ * PINBALLS ball search on Start was the machine being CORRECT about the
+ * state we gave it (reproduced both ways on 2026-08-14: hide the table and
+ * Start searches, restore it and the same launch starts a game).
+ *
+ * So: sw_publish() contributes non-platform rows only once this resolved,
+ * and win_pump() keeps calling this until it does - the table lands DURING
+ * the first run, the same arrival item 47 taught the playfield window to
+ * watch for. Platform rows (Start, coin, service, door) are untouched by
+ * the gate: their layout is identical on every title and Start-on-a-first-
+ * run must keep working.
+ *
+ * Returns: 1 = resolved from the title's own table; 0 = the table is not
+ * here (or not usable) YET, keep polling; -1 = NO RIG ENV AT ALL, in which
+ * case the compiled ids are the only semantics this binary has and they
+ * STAND, exactly as the header above promises - a bare `./padglhost
+ * /dev/shm/padgl` debug launch must not lose its keyboard to a gate built
+ * for titles that merely have not published their table yet. */
+static int binds_resolved;      /* gate for sw_publish(); set by main/poll */
+
+static int binds_resolve(void)
 {
     const char *tab = getenv("PAD_TABLES"), *game = getenv("PAD_GAME");
     char path[512], line[256];
@@ -809,13 +836,14 @@ static void binds_resolve(void)
     FILE *f;
     int n = 0, i, c, k;
 
-    if (!tab || !*tab || !game || !*game) return;
+    if (!tab || !*tab || !game || !*game) return -1;
     snprintf(path, sizeof path, "%s/%s/switch_list.txt", tab, game);
     f = fopen(path, "r");
     if (!f) {
-        fprintf(stderr, "[padglhost] no switch list at %s; "
-                        "key binds stay Godzilla's\n", path);
-        return;
+        /* Quiet on purpose when polled: the first miss is logged by main()'s
+         * caller context below; a 2 s poll repeating this line would flood
+         * the log with a fact that has not changed. */
+        return 0;
     }
     while (n < (int)(sizeof sw_id / sizeof sw_id[0]) &&
            fgets(line, sizeof line, f)) {
@@ -839,9 +867,17 @@ static void binds_resolve(void)
     }
     fclose(f);
     if (!n) {
-        fprintf(stderr, "[padglhost] %s parsed to nothing; "
-                        "key binds stay Godzilla's\n", path);
-        return;
+        /* Once, not per poll: a comment-only or truncated file that never
+         * grows rows would otherwise print this every 2 s for the whole
+         * run. And the old text ("key binds stay Godzilla's") is FALSE
+         * under the item-49 gate - they are withheld, which is the point. */
+        static int said_empty;
+        if (!said_empty++)
+            fprintf(stderr, "[padglhost] %s parsed to nothing; playfield "
+                            "keys and the trough latch stay WITHHELD until "
+                            "it has rows (truncated table? `mktables.py "
+                            "--force` rebuilds it)\n", path);
+        return 0;
     }
 
     for (i = 0; i < NBINDS; i++) {
@@ -885,6 +921,7 @@ static void binds_resolve(void)
             }
         }
     }
+    return 1;
 }
 
 /* ★ ITEM 39: the Controls legend's CONTENT, exported for the playfield
@@ -920,12 +957,21 @@ static void binds_export(void)
                "%s; c=cabinet t=toggle, ids 0 = not on this title)\n",
             getenv("PAD_GAME") ? getenv("PAD_GAME") : "?");
     for (i = 0; i < NBINDS; i++) {
+        /* ★ ITEM 49: a row the sw_publish gate is WITHHOLDING (non-platform,
+         * table not resolved yet) exports as '0' - the format's own "not on
+         * this title, drawn dim" - rather than as Godzilla's compiled ids.
+         * The playfield's key panel reads this file, and on a first run it
+         * used to draw a confident Godzilla legend for keys that (now)
+         * press nothing. The re-export on resolve replaces the 0s with the
+         * title's own ids, and the panel rebuilds when the file changes. */
+        int withheld = !binds_resolved && binds[i].want[0] != 0;
         fprintf(f, "%s\t%s%s%s\t", binds[i].key,
                 binds[i].live ? "c" : "", binds[i].toggle ? "t" : "",
                 (binds[i].live || binds[i].toggle) ? "" : "-");
-        if (!binds[i].ids[0]) fputc('0', f);
-        for (k = 0; k < 7 && binds[i].ids[k]; k++)
-            fprintf(f, "%s%d", k ? "," : "", binds[i].ids[k]);
+        if (withheld || !binds[i].ids[0]) fputc('0', f);
+        else
+            for (k = 0; k < 7 && binds[i].ids[k]; k++)
+                fprintf(f, "%s%d", k ? "," : "", binds[i].ids[k]);
         fprintf(f, "\t%s\n", binds[i].what);
     }
     fclose(f);
@@ -1146,6 +1192,14 @@ static void sw_publish(void)
     if (!swshm) return;
     memset(h, 0, sizeof h);
     for (i = 0; i < NBINDS; i++) {
+        /* ★ ITEM 49: until the title's own switch list has resolved, a
+         * non-platform row still CARRIES Godzilla's compiled ids (the trough
+         * re-resolve needs ids[1] intact to recognise the row), so it must
+         * not CONTRIBUTE them - on another title they are six wrong switches
+         * and an invisible empty trough. Platform rows are exempt: their
+         * layout is identical on every title measured, and Start on a first
+         * run has to work. */
+        if (!binds_resolved && binds[i].want[0]) continue;
         if (!(binds[i].toggle ? key_latch[i] : key_down[i])) continue;
         for (j = 0; binds[i].ids[j]; j++)
             if (binds[i].ids[j] < PADSW_MAX_ID) h[binds[i].ids[j]] = 1;
@@ -1598,6 +1652,33 @@ static void win_pump(void)
     union { long l[32]; unsigned long ul[32]; int i[64]; } ev;
     if (!win_on) return;
     sw_keysim();            /* diagnostic, off unless PAD_SW_KEYSIM is set */
+
+    /* ★ ITEM 49: WATCH FOR THE SWITCH LIST ARRIVING MID-RUN. On a title's
+     * first run mktables derives it from this run's own [sw] dump about a
+     * minute in - the same arrival item 47 taught the playfield window to
+     * poll for. Until it lands, sw_publish() withholds every non-platform
+     * row; the moment it does, resolve, re-export for the playfield's key
+     * panel (it polls padbinds), and publish once as 'w' so the trough
+     * latch set at win_open finally reaches the game - on the title's OWN
+     * ids. A 2 s stat is nothing next to the wasted first run this
+     * replaces. Own timestamp, because win_pump runs per frame AND from the
+     * idle loop. */
+    if (!binds_resolved) {
+        static double binds_next_s;
+        double t = now_s();
+        if (t >= binds_next_s) {
+            binds_next_s = t + 2.0;
+            if (binds_resolve() == 1) {
+                binds_resolved = 1;
+                binds_export();
+                sw_src_tag = 'w';
+                sw_publish();
+                sw_src_tag = 'k';
+                fprintf(stderr, "[padglhost] switch list arrived; binds "
+                        "resolved, trough latched on this title's own ids\n");
+            }
+        }
+    }
 
     /* THE DELAYED MOVE - the one position-restore mechanism that works under
      * WSLg, after two proven-dead ones (2026-08-05):
@@ -3915,8 +3996,26 @@ int main(int argc, char **argv)
     /* item 27: resolve the key binds from the title's own switch list BEFORE
      * the windows exist - the legend draws from binds[] and the window-open
      * latch closes whatever the 'B' row holds. Item 39 then exports the
-     * resolved table for the playfield window's key panel. */
-    binds_resolve();
+     * resolved table for the playfield window's key panel.
+     *
+     * ★ ITEM 49: on a title's FIRST run the list does not exist yet; say so
+     * ONCE here, and win_pump() keeps trying - it lands mid-run, built by
+     * mktables from this very run's [sw] dump. Until then sw_publish()
+     * withholds every non-platform row, so the game is handed an honestly
+     * empty trough instead of Godzilla's six ids masquerading as one. */
+    {
+        int r = binds_resolve();
+        /* -1 = no rig env: the compiled ids are all the semantics there
+         * are, so they ACT, as they always did - the gate is for titles
+         * whose table has not ARRIVED, not for launches with no rig. */
+        binds_resolved = (r != 0);
+        if (r == 0)
+            fprintf(stderr, "[padglhost] no switch list for %s yet; "
+                    "playfield keys and the trough latch WAIT for it "
+                    "(cabinet keys work; the table normally arrives a "
+                    "minute into a first run)\n",
+                    getenv("PAD_GAME") ? getenv("PAD_GAME") : "?");
+    }
     binds_export();
 
     /* Open the window FIRST: the EGL display should be the X display it lives

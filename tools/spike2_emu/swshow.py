@@ -46,7 +46,8 @@ NAMES = {
 
 
 def at_rest():
-    """(ids, names, trough_ids) - the machine-at-rest set for the LIVE title.
+    """(ids, names, trough_ids, note) - the machine-at-rest set for the LIVE
+    title, plus a WARNING string when the set is not the title's own.
 
     THE IDS ARE PER TITLE AND THIS TOOL IS THE CROSS-CHECK, which is exactly
     why it must not keep Godzilla's. The playfield window draws the trough
@@ -54,14 +55,24 @@ def at_rest():
     Jaws - whose trough is 65..60 - would have the two disagreeing about
     WHICH SWITCHES they are discussing, and that disagreement reads as a
     fault in the window. Same module, same rule, one trough.
+
+    ★ ITEM 49: THE FALLBACK IS LABELLED, NEVER SILENT - trough.py's own
+    contract, which this file broke. On james_bond_60th's first run this
+    tool printed a confident `6 of 6 [71..66]` under Godzilla's names while
+    Bond's real trough (72..77) sat open, so every instrument agreed with
+    itself and was wrong. The ids may still be printed (they are the only
+    set there is), but the caller must SAY they are a guess.
     """
     game = gameinfo.active(None)
     tdir = gameinfo.table_dir(game) if game else None
     rows = (trough.load_list(os.path.join(tdir, "switch_list.txt"))
             if tdir else [])
-    positions, _how = trough.find(rows)
+    positions, how = trough.find(rows)
     if not positions:
-        return list(GZ_DEFAULT), dict(NAMES), [71, 70, 69, 68, 67, 66]
+        return (list(GZ_DEFAULT), dict(NAMES), [71, 70, 69, 68, 67, 66],
+                "NO switch table for %s - ids and names below are the "
+                "COMPILED FALLBACK (godzilla_pro's) and may be WRONG for "
+                "this title" % (game or "this title"))
     names, ids = dict(NAMES), []
     for P in positions:
         ids.append(P["id"])
@@ -78,7 +89,10 @@ def at_rest():
                 names[r["id"]] = label
                 break
     ids += [33, 36]              # the coin door and Start are cabinet ids
-    return ids, names, trough_ids
+    return ids, names, trough_ids, (
+        None if how == "named" else
+        "trough ids are ASSUMED from the node-8 bit shape, not named by "
+        "this title's own table - treat them as a guess")
 
 
 def main():
@@ -88,8 +102,10 @@ def main():
         i = args.index("--label")
         label = args[i + 1] if i + 1 < len(args) else ""
         del args[i:i + 2]
-    default_ids, names, trough_ids = at_rest()
+    default_ids, names, trough_ids, note = at_rest()
     ids = [int(a) for a in args] or default_ids
+    if note:
+        print("[swshow] !! %s" % note)
 
     m = padsw.open_block()
     if m is None:

@@ -1150,7 +1150,24 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **49. LEAD: "LOCATING PINBALLS" on james_bond_60th clears when the
       CAPTIVE BALL switch is held made, so a machine at rest needs more than a
-      full trough.** `S2 D2`
+      full trough.** `S2 D2` ← IN PROGRESS, branch `item/49`
+      **★★ FOUND WHILE SETTING THE CONTROL UP, 2026-08-14, AND IT COST THE
+      FIRST ATTEMPT: PRESSING SERVICE BACK ON BOND'S TECH ALERTS SCREEN ENDS
+      THE GUEST.** The run's own switch log is the evidence, and the two
+      sources are distinguishable because the rig stamps them — autoattract's
+      presses are `+28a`, a hand poke is `+28p`. Autoattract pressed three
+      times without harm (`+28a` at 32456 ms, 79690 ms, 126918 ms, each held
+      ~2 s); then `swpoke.py 28` fired three ~400 ms presses at 130015, 132458
+      and 134902 ms, and the guest exited at ~135.6 s — a CLEAN exit at a
+      healthy 51.9 fps (7040 frames), no segv, no signal. **Whether it is the
+      sixth press or the rapid spacing is NOT established.** This is item 41's
+      family (turtles_pro died on service menus) on a new title and probably
+      deserves its own item; it is recorded here because it is what makes this
+      control expensive.
+      **HOW TO REACH ATTRACT ON BOND WITHOUT TRIPPING IT: press nothing.** The
+      item 45 pass reached the gun-barrel attract screen with autoattract as
+      the only thing pressing anything, roughly six minutes in. Wait it out
+      rather than poking Back.
       **★ DAVID, 2026-08-14: "why am i stuck with 'locating pinballs' when
       trying to start? The balls in trough should default to all being in
       there."** They were: `swshow.py` on his live run read `balls the GAME

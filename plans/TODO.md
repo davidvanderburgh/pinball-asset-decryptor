@@ -74,6 +74,48 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **51. star_wars: "UPDATING NODE BOARD RUNTIME 12 / UPDATE FAILED"
+      loops over attract, and the second display stays BLACK on real
+      content.** `S2 D4` ← IN PROGRESS
+      **★ DAVID, 2026-08-15, screenshot, and it GATES THE RELEASE: "i'm not
+      seeing the second display populate for star wars. we can't release
+      until we get it shown. otherwise it looks broken. make it work, and
+      fix the node board update failures while you're at it."** His run
+      reached ATTRACT (star field, credits line) with the update-failure
+      overlay looping on the backbox and item 44's `[display 2]` window
+      black.
+      **THE TWO FAULTS ARE PLAUSIBLY ONE. Established at the desk:**
+      star_wars ships `lcdnode-LPC1113_302-1_29_0.hex` — its playfield LCD
+      is DRIVEN BY A NODE BOARD — and the shim's `nb_idents[]` table
+      (hwshim.c ~2800) is GODZILLA'S node directory hard-coded: node 12
+      claims an LPC1313 part. If SW's node 12 is the lcdnode, the game looks
+      for `lcdnode-LPC1313-*.hex`, which does not exist, decides the runtime
+      needs updating, and the shim implements no update transfer → UPDATE
+      FAILED forever → and a game whose LCD node never comes up plausibly
+      never lights the LCD scene (item 44 measured that scene composing
+      EMPTY: `d2 4x57` video uploads in, black out — the pipe itself is
+      proven to the desktop with blue clears).
+      **The version half is already per-title** (`nb_fw_title()` reads the
+      hex filenames in "."; SW = 1.29.0 ✓). **What is hard-coded is the
+      node-id → TYPE mapping**, i.e. which part id each node must claim —
+      the item 27 disease, named in the table's own comment.
+      **Item 44's leftover, folded in:** star_wars autoattract never cleared
+      Tech Alerts in three worktree runs (David's flow does); and the
+      backbuffer probe once returned err 0x506 on a never-lit window
+      (cosmetic, self-silencing probe).
+      **Acceptance:** a star_wars boot reaches attract with NO node-update
+      failure overlay, and the `[display 2]` window shows the playfield
+      LCD's real content (`picture: d2 FIRST` with game imagery, David's
+      eyes); state what stranger_things then shows.
+      — S2, not S1: play works; what it costs is the release (David gates
+      it), the projector feature reads as broken, and an overlay defaces
+      attract. D4: the update dialogue is uncaptured yet, the fix likely
+      spans per-title derivation plus possibly emulating a chunked
+      firmware-transfer protocol, and the oracle needs runs on two titles.
+      **Resume:** read the PAD_NB_TRACE capture (`~/i51_sw_trace.log`,
+      `[nbts]` lines, node=12 non-0x11 cmds) and the protocol map; then make
+      node identity per-title.
+
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
       instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**

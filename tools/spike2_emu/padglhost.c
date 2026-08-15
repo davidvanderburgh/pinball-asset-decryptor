@@ -223,6 +223,17 @@ static long swap_content_hi;             /* any channel >= 4 saw an upload  */
 static long swap_nodraw, swap_total;
 static unsigned swap_vidmask;            /* since the last SWAP */
 static int swap_draws;
+/* item 44: the same histogram per display. Before routing, the two scenes'
+ * masks interleaved in ONE histogram (item 27's `2x60 4x60`); split, each
+ * display's masks should be a single family, which is the no-flicker
+ * evidence the item's acceptance asks for. */
+static long swap2_content_hist[16];
+static long swap2_content_hi;
+static long swap2_nodraw, swap2_total;
+/* item 44: the guest's CURRENT framebuffer name, shadowed at BINDFBO, so a
+ * target switch knows whether guest FBO 0 is live and must be rebound to
+ * the new display's texture right now. */
+static unsigned cur_guest_fbo;
 static int gl_tick;             /* PAD_GL_TICK=1: draw the per-swap counter */
 static double now_s(void);
 static const char *dump_dir;
@@ -568,6 +579,7 @@ extern int XStoreName(XDisplay *, unsigned long, const char *);
 extern int XSelectInput(XDisplay *, unsigned long, long);
 extern int XMapWindow(XDisplay *, unsigned long);
 extern int XDestroyWindow(XDisplay *, unsigned long);
+extern int XUnmapWindow(XDisplay *, unsigned long);
 extern unsigned long XInternAtom(XDisplay *, const char *, int);
 extern int XSetWMProtocols(XDisplay *, unsigned long, unsigned long *, int);
 extern int XPending(XDisplay *);
@@ -590,6 +602,30 @@ extern EGLBoolean eglQuerySurface(EGLDisplay, EGLSurface, EGLint, EGLint *);
  * win_present() needs them, so they are file scope now. */
 static EGLDisplay egl_dpy;
 static EGLSurface egl_surf;
+
+/* ★ ITEM 44: THE SECOND DISPLAY. A two-display title (star_wars's playfield
+ * LCD, Stranger Things' projector) tells this process which display the ops
+ * that follow belong to (PADGL_TARGET). Display 0 keeps every existing
+ * global; the one other display a Spike 2 title has gets this parallel set,
+ * created lazily on the first TARGET != 0 so single-display titles never
+ * open a second window. One EGLContext serves both window surfaces - GL
+ * objects and state live in the context; only guest FBO 0 resolves
+ * per-target, through map_fbo[0]. egl_ctx and egl_cfg are stashed by main()
+ * for the lazy creation; egl_cur tracks which surface is current so the two
+ * present paths switch only when they must. */
+static EGLContext egl_ctx;
+static EGLConfig  egl_cfg;
+static EGLSurface egl_cur;               /* surface currently bound, or 0    */
+static EGLSurface egl_surf2;
+static unsigned long xwin2;
+static int win2_on;                      /* the second window exists         */
+static int win2_w, win2_h;               /* its current drawable size        */
+static int fb2_w, fb2_h;                 /* display-2 render size            */
+static unsigned tex_screen2, fbo_screen2;
+static int cur_tgt;                      /* display index ops belong to now  */
+static int tgt2_disp = -1;               /* which display index slot 2 holds */
+static long frames2_done;
+static int egl_use(EGLSurface s);        /* defined after win_present()      */
 
 static int win_on;                       /* PAD_GL_WINDOW=1                  */
 static XDisplay *xdpy;
@@ -1800,6 +1836,22 @@ static void win_pump(void)
         case 33:                       /* ClientMessage */
             /* data.l[0] is at byte 56 = index 7, verified on this box. */
             if (ev.ul[7] == wm_delete) {
+                /* item 44: closing the SECOND display's window hides that
+                 * window and nothing else - a viewer someone dismissed must
+                 * not end the run. Keyed on xwin2, NOT win2_on: the id
+                 * outlives every failure path on purpose, so a late event
+                 * for a window already degraded cannot fall through to the
+                 * run-stopping branch below. The window field is ul[4],
+                 * same slot ConfigureNotify uses. */
+                if (xwin2 && ev.ul[4] == xwin2) {
+                    if (win2_on) {
+                        fprintf(stderr, "[padglhost] display-2 window "
+                                "closed; hidden, the run continues\n");
+                        XUnmapWindow(xdpy, xwin2);
+                        win2_on = 0;
+                    }
+                    break;
+                }
                 fprintf(stderr, "[padglhost] window closed; stopping\n");
                 /* The last position save was up to 1 s ago (the throttle), so
                  * the final resting spot of a drag could be lost. This runs
@@ -1819,6 +1871,15 @@ static void win_pump(void)
              * orphan-at-full-CPU state this rig has to avoid. Note UnmapNotify
              * is deliberately NOT treated as a close - that also fires on
              * minimise, and minimising should not kill the emulator. */
+            if (xwin2 && ev.ul[4] == xwin2) {   /* item 44: only its own;
+                                                 * keyed on the id, which
+                                                 * failure paths keep */
+                fprintf(stderr, "[padglhost] display-2 window destroyed; "
+                        "the run continues\n");
+                win2_on = 0;
+                xwin2 = 0;
+                break;
+            }
             fprintf(stderr, "[padglhost] window destroyed; stopping\n");
             stop_now = 1;
             break;
@@ -1826,6 +1887,10 @@ static void win_pump(void)
             /* The GAME window drives the drawable size; the legend window
              * resizing must not be mistaken for it. */
             if (ev.ul[4] == xwin) { win_w = ev.i[14]; win_h = ev.i[15]; }
+            else if (xwin2 && ev.ul[4] == xwin2) {
+                win2_w = ev.i[14]; win2_h = ev.i[15];
+                break;             /* item 44: not the game window; no save */
+            }
             /* SAVE FROM HERE, not at exit. Saving on shutdown does not
              * survive contact with watch.sh, which SIGINTs and then SIGKILLs
              * a second later - measured: the file was never written. A window
@@ -1931,6 +1996,12 @@ static void win_present(void)
         }
     }
 
+    /* item 44: FBO 0 = THIS window's backbuffer only while its surface is
+     * current. Before the state save, so a failed switch leaves nothing
+     * half-restored - and no-op on every single-display run, where the
+     * surface is never anything else. */
+    if (!egl_use(egl_surf)) return;
+
     p_glGetIntegerv(0x8B8D, &prog);    /* CURRENT_PROGRAM      */
     p_glGetIntegerv(0x8CA6, &fbo);     /* FRAMEBUFFER_BINDING  */
     p_glGetIntegerv(0x0BA2, vp);       /* VIEWPORT             */
@@ -1998,6 +2069,254 @@ static void win_present(void)
         double t = now_s();
         eglSwapBuffers(egl_dpy, egl_surf);
         swap_us += (now_s() - t) * 1e6;
+    }
+
+    p_glBindTexture(0x0DE1, (unsigned)tex0);
+    p_glActiveTexture((unsigned)act);
+    p_glBindVertexArray((unsigned)vao);
+    p_glUseProgram((unsigned)prog);
+    p_glBindFramebuffer(0x8D40, (unsigned)fbo);
+    p_glViewport(vp[0], vp[1], vp[2], vp[3]);
+    if (blend) p_glEnable(0x0BE2);
+    if (depth) p_glEnable(0x0B71);
+    if (scis)  p_glEnable(0x0C11);
+    if (cull)  p_glEnable(0x0B44);
+}
+
+/* ★ ITEM 44: THE SECOND DISPLAY'S WINDOW AND PRESENT PATH.
+ *
+ * One EGLContext serves both window surfaces: GL objects and state live in
+ * the context, so nothing the guest built needs duplicating - only guest
+ * FBO 0 resolves per display, through map_fbo[0], and only the blit needs
+ * to know which window it is copying to. Binding the context to the other
+ * surface is the one EGL call the switch costs, and egl_use() pays it only
+ * when the target actually changes.
+ *
+ * Everything here degrades legend-style: one attempt, failure clears only
+ * its own state, the run and the primary window carry on untouched. */
+/* Returns 1 with the surface current, 0 with the current surface UNCHANGED.
+ * The review's finding: a caller that ignores the failure goes on to bind
+ * real FBO 0 - or set a swap interval - on whichever surface is still
+ * current, which is how a failed display-2 switch was one line away from
+ * turning vsync off on the PRIMARY window. Every caller checks now. */
+static int egl_use(EGLSurface s)
+{
+    if (!s) return 0;
+    if (egl_cur == s) return 1;
+    if (!eglMakeCurrent(egl_dpy, s, s, egl_ctx)) {
+        static int said;
+        if (!said++)
+            fprintf(stderr, "[padglhost] display: eglMakeCurrent across "
+                    "window surfaces failed 0x%x; the second display's "
+                    "window will stay black\n", eglGetError());
+        return 0;
+    }
+    egl_cur = s;
+    return 1;
+}
+
+static void win2_open(int disp)
+{
+    int scr;
+    if (!win_on || !xdpy) {
+        fprintf(stderr, "[padglhost] display %d: headless run, its feed "
+                "decodes but is not presented\n", disp);
+        return;
+    }
+    scr = XDefaultScreen(xdpy);
+    /* Beside the game window by default. No remembered position in v1: the
+     * delayed-restore state machine in win_pump() is per-window-pair
+     * hardcoded and this window is fine wherever the compositor puts it. */
+    xwin2 = XCreateSimpleWindow(xdpy, XRootWindow(xdpy, scr),
+                                win_w + 16, 0,
+                                (unsigned)fb2_w, (unsigned)fb2_h, 0,
+                                XBlackPixel(xdpy, scr), XBlackPixel(xdpy, scr));
+    {   /* "[display N]" between game and suffix: zorder.py and padwinpos.py
+         * key on it, ahead of their generic "- Stern Spike 2 emulator"
+         * needles, so the second window cannot steal the game window's slot. */
+        static char title[160];
+        const char *g = getenv("PAD_GAME");
+        snprintf(title, sizeof title, "%s [display %d] - Stern Spike 2 "
+                 "emulator", (g && *g) ? g : "Spike 2", disp);
+        XStoreName(xdpy, xwin2, title);
+    }
+    /* Keys selected here too, legend-style: whichever window has focus can
+     * drive the game. StructureNotify for resize. */
+    XSelectInput(xdpy, xwin2, (1L << 17) | 1L | 2L);
+    XSetWMProtocols(xdpy, xwin2, &wm_delete, 1);
+    XMapWindow(xdpy, xwin2);
+    /* MEASURED, and it is why this window is not created the way the main
+     * one is: creating the EGL surface microseconds after XMapWindow left a
+     * window whose swaps SUCCEEDED into a swapchain nothing ever composited
+     * - backbuffer read back fully lit, eglSwapBuffers true, err 0x0, and
+     * the desktop window black, David's eyes confirming PrintWindow. The
+     * main window never hits this because its surface is created after the
+     * whole eglInitialize/eglChooseConfig sequence, long after the window
+     * is realized. XSync drains the map round-trip, and the settle gives
+     * WSLg's XWayland/RAIL plumbing time to realize the window before the
+     * surface binds to it. */
+    XSync(xdpy, 0);
+    usleep(250000);
+    egl_surf2 = eglCreateWindowSurface(egl_dpy, egl_cfg, xwin2, 0);
+    if (!egl_surf2) {
+        fprintf(stderr, "[padglhost] display %d: eglCreateWindowSurface "
+                "failed 0x%x; its feed decodes but is not presented\n",
+                disp, eglGetError());
+        /* UNMAP, do not destroy, and KEEP the xwin2 id: XDestroyWindow here
+         * queues a DestroyNotify that arrives after this id was zeroed, so
+         * win_pump's "is it the second window" guard could not match and the
+         * pre-existing handler stopped the WHOLE run - the review caught the
+         * exact degrade path this function exists to survive. The unmapped
+         * window is destroyed with the others at teardown. */
+        XUnmapWindow(xdpy, xwin2);
+        XFlush(xdpy);
+        return;
+    }
+    win2_w = fb2_w; win2_h = fb2_h;
+    /* Vsync OFF for this surface, deliberately asymmetric: the main window's
+     * swap already paces the drain loop at 60 Hz, and a second vsync'd swap
+     * in the same thread could park the whole pipeline for a second refresh
+     * per frame pair. GATED on the switch actually landing: eglSwapInterval
+     * applies to the CURRENT draw surface, so issuing it after a failed
+     * switch would silently strip the primary window's vsync instead.
+     * PAD_GL2_VSYNC=1 keeps the default interval - the A/B for a mirror
+     * that ignores interval-0 presents. */
+    if (egl_use(egl_surf2)) {
+        if (!(getenv("PAD_GL2_VSYNC") && getenv("PAD_GL2_VSYNC")[0] == '1'))
+            eglSwapInterval(egl_dpy, 0);
+        egl_use(egl_surf);
+    }
+    win2_on = 1;
+    fprintf(stderr, "[padglhost] display %d window opened %dx%d\n",
+            disp, fb2_w, fb2_h);
+}
+
+/* The display-2 twin of main()'s tex_screen/fbo_screen block. Runs inside
+ * the guest's command stream, so the bindings it disturbs are saved and
+ * restored the way win_present() does. Returns 1 if the render target
+ * exists; 0 leaves the guest routed at the primary texture, the exact
+ * pre-item-44 behaviour. */
+static int tgt2_create(void)
+{
+    int prev_fbo = 0, prev_tex = 0;
+    if (fbo_screen2) return 1;
+    p_glGetIntegerv(0x8CA6, &prev_fbo);      /* FRAMEBUFFER_BINDING */
+    p_glGetIntegerv(0x8069, &prev_tex);      /* TEXTURE_BINDING_2D  */
+    p_glGenTextures(1, &tex_screen2);
+    p_glBindTexture(0x0DE1, tex_screen2);
+    p_glTexImage2D(0x0DE1, 0, 0x1908, fb2_w, fb2_h, 0, 0x1908, 0x1401, 0);
+    p_glTexParameteri(0x0DE1, 0x2801, 0x2601);
+    p_glTexParameteri(0x0DE1, 0x2800, 0x2601);
+    p_glGenFramebuffers(1, &fbo_screen2);
+    p_glBindFramebuffer(0x8D40, fbo_screen2);
+    p_glFramebufferTexture2D(0x8D40, 0x8CE0, 0x0DE1, tex_screen2, 0);
+    if (p_glCheckFramebufferStatus(0x8D40) != 0x8CD5) {
+        fprintf(stderr, "[padglhost] display-2 framebuffer incomplete; its "
+                "feed stays on the primary texture\n");
+        fbo_screen2 = 0;
+    }
+    p_glBindFramebuffer(0x8D40, (unsigned)prev_fbo);
+    p_glBindTexture(0x0DE1, (unsigned)prev_tex);
+    return fbo_screen2 != 0;
+}
+
+/* win_present()'s twin for the second window: same save/blit/restore
+ * discipline, no gl_tick (that instrument belongs to the primary), no
+ * win_pump (the primary's present already pumps the one X connection),
+ * and its swap time deliberately kept OUT of swap_us so item 11's
+ * per-frame number stays the primary's. */
+static void win2_present(void)
+{
+    int prog = 0, fbo = 0, vp[4] = {0,0,0,0}, tex0 = 0, vao = 0, act = 0;
+    int blend = 0, depth = 0, scis = 0, cull = 0;
+    int dw, dh, dx, dy;
+
+    /* fbo_screen2 in the gate as well as win2_on: with the render target
+     * failed, tex_screen2 has no writer and blitting it presents undefined
+     * texture contents forever - the review's finding. No target, no
+     * present. */
+    if (!win2_on || !fbo_screen2) return;
+    if (win_every > 1 && (frames2_done % win_every)) return;
+
+    {   EGLint qw = 0, qh = 0;
+        if (eglQuerySurface(egl_dpy, egl_surf2, 0x3057, &qw) &&
+            eglQuerySurface(egl_dpy, egl_surf2, 0x3056, &qh) &&
+            qw > 0 && qh > 0) {
+            win2_w = qw; win2_h = qh;
+        }
+    }
+
+    /* BEFORE the state save: a failed switch must leave nothing to restore,
+     * and binding real FBO 0 with the wrong surface current would paint
+     * display 2's texture into the PRIMARY window mid-frame. */
+    if (!egl_use(egl_surf2)) return;
+
+    p_glGetIntegerv(0x8B8D, &prog);
+    p_glGetIntegerv(0x8CA6, &fbo);
+    p_glGetIntegerv(0x0BA2, vp);
+    p_glGetIntegerv(0x85B5, &vao);
+    p_glGetIntegerv(0x84E0, &act);
+    p_glGetIntegerv(0x0BE2, &blend);
+    p_glGetIntegerv(0x0B71, &depth);
+    p_glGetIntegerv(0x0C11, &scis);
+    p_glGetIntegerv(0x0B44, &cull);
+    p_glActiveTexture(0x84C0);
+    p_glGetIntegerv(0x8069, &tex0);
+
+    dw = win2_w; dh = (int)((long)win2_w * fb2_h / (fb2_w ? fb2_w : 1));
+    if (dh > win2_h) { dh = win2_h; dw = (int)((long)win2_h * fb2_w / (fb2_h ? fb2_h : 1)); }
+    dx = (win2_w - dw) / 2; dy = (win2_h - dh) / 2;
+
+    egl_use(egl_surf2);
+    p_glBindFramebuffer(0x8D40, 0);
+    p_glDisable(0x0BE2); p_glDisable(0x0B71);
+    p_glDisable(0x0C11); p_glDisable(0x0B44);
+    p_glViewport(0, 0, win2_w, win2_h);
+    p_glClearColor(0.f, 0.f, 0.f, 1.f);
+    p_glClear(0x4000);
+    p_glViewport(dx, dy, dw, dh);
+    p_glUseProgram(blit_prog);
+    p_glBindVertexArray(blit_vao);
+    p_glBindTexture(0x0DE1, tex_screen2);
+    if (blit_tex_loc >= 0) p_glUniform1i(blit_tex_loc, 0);
+    {   int fl = p_glGetUniformLocation(blit_prog, "u_flip");
+        if (fl >= 0) p_glUniform1f(fl, win_flip ? 1.f : 0.f); }
+    p_glDrawArrays(0x0005, 0, 4);
+    /* The d2 window went black while its FBO measured fully lit, with no
+     * EGL call reporting failure - so this path checks what nothing else
+     * can see: whether the blit reached the WINDOW's backbuffer, and what
+     * the swap says. Once per ~5 s, and it stops after the first success. */
+    {
+        static double probe_next;
+        static int probe_done;
+        double now = now_s();
+        if (!probe_done && now >= probe_next) {
+            unsigned char px[64];
+            int e;
+            probe_next = now + 5.0;
+            memset(px, 0, sizeof px);
+            p_glFinish();
+            p_glReadPixels(win2_w / 2 - 2, win2_h / 2 - 2, 4, 4,
+                           0x1908, 0x1401, px);
+            e = (int)p_glGetError();
+            {
+                int i, lit = 0;
+                for (i = 0; i < 16; i++)
+                    if (px[i*4] | px[i*4+1] | px[i*4+2]) lit++;
+                if (!eglSwapBuffers(egl_dpy, egl_surf2)) {
+                    fprintf(stderr, "[padglhost] display probe: d2 SWAP "
+                            "FAILED 0x%x (backbuffer centre %d/16 lit, "
+                            "err 0x%x)\n", eglGetError(), lit, e);
+                } else {
+                    fprintf(stderr, "[padglhost] display probe: d2 swap ok, "
+                            "backbuffer centre %d/16 lit before it, "
+                            "err 0x%x\n", lit, e);
+                    if (lit) probe_done = 1;
+                }
+            }
+        } else {
+            eglSwapBuffers(egl_dpy, egl_surf2);
+        }
     }
 
     p_glBindTexture(0x0DE1, (unsigned)tex0);
@@ -2162,6 +2481,9 @@ static struct { unsigned char have; unsigned len; unsigned char pl[76]; }
 static struct jvao  jvao[1024];
 static struct jfbo  jfbo[256];
 static struct jglob jg_view, jg_scis, jg_ccol, jg_blend, jg_beq;
+static struct jglob jg_tgt;      /* item 44: last PADGL_TARGET, so a restored
+                                  * two-display stream resumes routed at the
+                                  * display it was saved on */
 static struct { unsigned cap; unsigned char on, used; } jcap[24];
 static unsigned junit_tex[16];
 static unsigned char junit_have[16];
@@ -2231,6 +2553,10 @@ static void jgl_note(unsigned op, const unsigned char *pl, unsigned len)
     case PADGL_SCISSOR:
         if (len <= 16) { jg_scis.have = 1; jg_scis.op = op; jg_scis.len = len;
                          memcpy(jg_scis.pl, pl, len); }
+        break;
+    case PADGL_TARGET:
+        if (len <= 16) { jg_tgt.have = 1; jg_tgt.op = op; jg_tgt.len = len;
+                         memcpy(jg_tgt.pl, pl, len); }
         break;
     case PADGL_CLEARCOLOR:
         if (len <= 16) { jg_ccol.have = 1; jg_ccol.op = op; jg_ccol.len = len;
@@ -2668,6 +2994,7 @@ static int jgl_serialize(const char *path)
     if (jg_ccol.have)  jput(f, jg_ccol.op,  jg_ccol.pl,  jg_ccol.len,  0, 0);
     if (jg_blend.have) jput(f, jg_blend.op, jg_blend.pl, jg_blend.len, 0, 0);
     if (jg_beq.have)   jput(f, jg_beq.op,   jg_beq.pl,   jg_beq.len,   0, 0);
+    if (jg_tgt.have)   jput(f, jg_tgt.op,   jg_tgt.pl,   jg_tgt.len,   0, 0);
     for (i = 0; i < 24; i++)
         if (jcap[i].used) {
             unsigned m[1]; m[0] = jcap[i].cap;
@@ -2736,6 +3063,14 @@ static void jgl_reset_world(void)
     for (i = 1; i < 256; i++)
         if (map_fbo[i]) { p_glDeleteFramebuffers(1, &map_fbo[i]); map_fbo[i] = 0; }
     map_fbo[0] = fbo_screen; map_vao[0] = 0;
+    /* item 44: the routing state is a dispatch shadow like the rest. A
+     * journal with no TARGET record (saved before the title first targeted
+     * a second display, or pre-item-44) re-establishes nothing, so without
+     * this reset a replay inherited the DEAD stream's cur_tgt and routed
+     * every restored swap to the absent second display - primary window
+     * frozen on its pre-restore frame. The window itself stays; only the
+     * routing resets. */
+    cur_tgt = 0; cur_guest_fbo = 0;
     memset(vao_on, 0, sizeof vao_on);
     memset(vao_backed, 0, sizeof vao_backed);
     memset(vao_elem, 0, sizeof vao_elem);
@@ -2750,7 +3085,7 @@ static void jgl_reset_world(void)
     memset(jvao, 0, sizeof jvao); memset(jfbo, 0, sizeof jfbo);
     memset(&jg_view, 0, sizeof jg_view); memset(&jg_scis, 0, sizeof jg_scis);
     memset(&jg_ccol, 0, sizeof jg_ccol); memset(&jg_blend, 0, sizeof jg_blend);
-    memset(&jg_beq, 0, sizeof jg_beq);
+    memset(&jg_beq, 0, sizeof jg_beq); memset(&jg_tgt, 0, sizeof jg_tgt);
     memset(jcap, 0, sizeof jcap);
     memset(junit_tex, 0, sizeof junit_tex);
     memset(junit_have, 0, sizeof junit_have);
@@ -2790,7 +3125,7 @@ static int jgl_rec_ok(unsigned op, const unsigned char *pl, unsigned len)
         [PADGL_UNIFORM] = 12, [PADGL_REGUNIFORM] = 8,
         [PADGL_GENFBO] = 4, [PADGL_BINDFBO] = 8, [PADGL_FBOTEX] = 20,
         [PADGL_DRAWARRAYS] = 12, [PADGL_DRAWELEMENTS] = 16,
-        [PADGL_REGATTRIB] = 8, [PADGL_TEXDIRECT] = 24,
+        [PADGL_REGATTRIB] = 8, [PADGL_TEXDIRECT] = 24, [PADGL_TARGET] = 4,
     };
     const unsigned *u = (const unsigned *)pl;
     if (op >= PADGL_OP_MAX || len < need[op]) return 0;
@@ -2996,23 +3331,28 @@ static int    pic_said;          /* the contradiction line, printed once    */
  *
  * SAVES AND RESTORES THE FBO BINDING, like jgl_poll's on-demand shot: this runs
  * in the middle of the guest's command stream and its binding must survive. */
-static long screen_nonblack_px(void)
+static long fbo_nonblack_px(unsigned fbo, int w, int h)
 {
     unsigned char *px;
-    long i, n = (long)fb_w * fb_h, lit = 0;
+    long i, n = (long)w * h, lit = 0;
     int prev = 0;
     if (n <= 0) return -1;
     px = malloc((size_t)n * 4);
     if (!px) return -1;
     p_glGetIntegerv(0x8CA6, &prev);          /* FRAMEBUFFER_BINDING */
-    p_glBindFramebuffer(0x8D40, fbo_screen);
+    p_glBindFramebuffer(0x8D40, fbo);
     p_glFinish();
-    p_glReadPixels(0, 0, fb_w, fb_h, 0x1908, 0x1401, px);   /* RGBA, UBYTE */
+    p_glReadPixels(0, 0, w, h, 0x1908, 0x1401, px);         /* RGBA, UBYTE */
     p_glBindFramebuffer(0x8D40, (unsigned)prev);
     for (i = 0; i < n; i++)
         if (px[i*4] | px[i*4+1] | px[i*4+2]) lit++;
     free(px);
     return lit;
+}
+
+static long screen_nonblack_px(void)
+{
+    return fbo_nonblack_px(fbo_screen, fb_w, fb_h);
 }
 
 static void pic_check(void)
@@ -3054,6 +3394,56 @@ static void pic_check(void)
                 "empty, so a black window here is NOT WSLg's mirror\n",
                 vid_distinct);
     }
+}
+
+/* ★ ITEM 44: the same oracle for the second display, keeping the exact
+ * "picture:" prefix the app pane's awk filter matches, with "d2" inside the
+ * line. Its contradiction gate cannot use vid_distinct (that counts every
+ * channel), so it uses its own presented-frame count: 300 swaps of a scene
+ * that stayed all-black is a statement about the scene, not the boot. */
+static double pic2_next;
+static int    pic2_lit, pic2_ever, pic2_said;
+
+static void pic2_check(void)
+{
+    double now;
+    long lit, n = (long)fb2_w * fb2_h;
+    if (pic_every <= 0.0 || !fbo_screen2) return;
+    now = now_s();
+    if (now < pic2_next) return;
+    pic2_next = now + pic_every;
+    lit = fbo_nonblack_px(fbo_screen2, fb2_w, fb2_h);
+    if (lit < 0) return;
+    if (lit > 0) {
+        if (!pic2_ever)
+            fprintf(stderr, "[padglhost] picture: d2 FIRST at frame %ld "
+                    "(%ld of %ld pixels are not black)\n",
+                    frames2_done, lit, n);
+        else if (!pic2_lit)
+            fprintf(stderr, "[padglhost] picture: d2 back at frame %ld "
+                    "(%ld of %ld pixels)\n", frames2_done, lit, n);
+        pic2_ever = pic2_lit = 1;
+        return;
+    }
+    if (pic2_lit) {
+        pic2_lit = 0;
+        fprintf(stderr, "[padglhost] picture: d2 GONE BLACK at frame %ld\n",
+                frames2_done);
+        return;
+    }
+    if (!pic2_ever && !pic2_said && frames2_done > 300) {
+        pic2_said = 1;
+        fprintf(stderr, "[padglhost] picture: d2 STILL BLACK after %ld "
+                "presented frames - the game is composing this display's "
+                "scene and the scene is empty\n", frames2_done);
+    }
+}
+
+static void present2(void)
+{
+    frames2_done++;
+    win2_present();
+    pic2_check();
 }
 
 static void present(void)
@@ -3414,16 +3804,88 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         }
     }
     switch (op) {
-    case PADGL_SWAP:            present(); hdr->frame_ack++;
+    case PADGL_SWAP:            /* item 44: the swap belongs to whichever
+                                 * display the ops since the last TARGET drew.
+                                 * frame_ack counts BOTH - the guest's
+                                 * in-flight throttle counts every swap. */
+                                if (cur_tgt) present2(); else present();
+                                hdr->frame_ack++;
                                 /* item 27: what did this frame carry? */
-                                swap_total++;
-                                swap_content_hist[swap_vidmask & 15]++;
-                                if (swap_vidmask >> 4) swap_content_hi++;
-                                if (!swap_draws) swap_nodraw++;
+                                if (cur_tgt) {
+                                    swap2_total++;
+                                    swap2_content_hist[swap_vidmask & 15]++;
+                                    if (swap_vidmask >> 4) swap2_content_hi++;
+                                    if (!swap_draws) swap2_nodraw++;
+                                } else {
+                                    swap_total++;
+                                    swap_content_hist[swap_vidmask & 15]++;
+                                    if (swap_vidmask >> 4) swap_content_hi++;
+                                    if (!swap_draws) swap_nodraw++;
+                                }
                                 swap_vidmask = 0; swap_draws = 0;
                                 /* frame boundary: a journal request answered
                                  * here is a frame-consistent snapshot */
                                 jgl_poll(0, 0); break;
+    case PADGL_TARGET: {        /* item 44: route guest FBO 0 to this
+                                 * display's texture; window and texture are
+                                 * created on the first sighting. Any nonzero
+                                 * index shares the one secondary slot - a
+                                 * Spike 2 cabinet has at most two displays,
+                                 * and a third would need its own item. */
+        int d = (int)u[0];
+        if (d != 0) {
+            if (tgt2_disp < 0) {
+                tgt2_disp = d;
+                fb2_w = fb_w; fb2_h = fb_h;
+                {   /* BOTH or NEITHER, matching the guest's
+                     * fbGetDisplayGeometry exactly: with only one set, the
+                     * host would size the texture the game was never told
+                     * about, and the scene and its target would disagree on
+                     * one axis. */
+                    const char *ew = getenv("PAD_GL2_W");
+                    const char *eh = getenv("PAD_GL2_H");
+                    int w2 = ew ? atoi(ew) : 0, h2 = eh ? atoi(eh) : 0;
+                    if (w2 > 0 && h2 > 0) { fb2_w = w2; fb2_h = h2; }
+                }
+                fprintf(stderr, "[padglhost] display %d targeted by the "
+                        "guest; routing it to its own %dx%d texture and "
+                        "window\n", d, fb2_w, fb2_h);
+                win2_open(d);
+                if (!tgt2_create() && win2_on) {
+                    /* Window up, render target failed: hide the window
+                     * rather than let it swap a texture nothing can ever
+                     * render into (the review's finding - undefined
+                     * contents, oracle silent). The unmap makes the degrade
+                     * VISIBLE on the desktop as well as in the log. */
+                    fprintf(stderr, "[padglhost] display %d: render target "
+                            "failed, hiding its window; its feed decodes "
+                            "but is not presented\n", d);
+                    XUnmapWindow(xdpy, xwin2);
+                    XFlush(xdpy);
+                    win2_on = 0;
+                }
+            } else if (d != tgt2_disp) {
+                static int said;
+                if (!said++)
+                    fprintf(stderr, "[padglhost] display %d ALSO targeted - "
+                            "only one secondary display is supported; "
+                            "folding it into display %d's window\n",
+                            d, tgt2_disp);
+            }
+        }
+        /* cur_tgt tracks the GUEST's intent even when the secondary target
+         * failed to create: the swap still routes to present2(), which
+         * no-ops, so a failed second display degrades to item 27's suppress
+         * behaviour (the primary's own full pass overwrites the shared
+         * texture) instead of interleaving two scenes into one window. */
+        cur_tgt = d;
+        map_fbo[0] = (d && fbo_screen2) ? fbo_screen2 : fbo_screen;
+        /* If the guest is sitting on FBO 0 right now, the switch must land
+         * immediately - the next draws are the other scene's. */
+        if (cur_guest_fbo == 0)
+            p_glBindFramebuffer(0x8D40, map_fbo[0]);
+        break;
+    }
     case PADGL_VIEWPORT:        p_glViewport((int)u[0],(int)u[1],(int)u[2],(int)u[3]); break;
     case PADGL_SCISSOR:         p_glScissor((int)u[0],(int)u[1],(int)u[2],(int)u[3]); break;
     case PADGL_CLEARCOLOR:
@@ -3863,7 +4325,11 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
     }
 
     case PADGL_GENFBO:          if (u[0] < 256) p_glGenFramebuffers(1, &map_fbo[u[0]]); break;
-    case PADGL_BINDFBO:         p_glBindFramebuffer(u[0], u[1] < 256 ? map_fbo[u[1]] : 0); break;
+    case PADGL_BINDFBO:         /* item 44: shadow the guest's binding so a
+                                 * TARGET switch knows whether FBO 0 is live */
+                                if (u[0] == 0x8D40u || u[0] == 0x8CA9u)
+                                    cur_guest_fbo = u[1];
+                                p_glBindFramebuffer(u[0], u[1] < 256 ? map_fbo[u[1]] : 0); break;
     case PADGL_FBOTEX:
         p_glFramebufferTexture2D(u[0],u[1],u[2], u[3] < MAXNAME ? map_tex[u[3]] : 0,(int)u[4]);
         break;
@@ -4044,6 +4510,8 @@ int main(int argc, char **argv)
     if (!ctx || !eglMakeCurrent(dpy, surf, surf, ctx)) {
         fprintf(stderr, "context/makecurrent failed 0x%x\n", eglGetError()); return 1; }
     egl_dpy = dpy; egl_surf = surf;
+    /* item 44: the lazy second-display window shares this config and context. */
+    egl_ctx = ctx; egl_cfg = cfg; egl_cur = surf;
     /* Vsync on by default so the window is smooth; PAD_GL_VSYNC=0 removes the
      * 60 Hz block on eglSwapBuffers if it ever starves the ring drain. */
     if (win_on) eglSwapInterval(dpy, getenv("PAD_GL_VSYNC") &&
@@ -4221,6 +4689,27 @@ int main(int argc, char **argv)
                     memset(swap_content_hist, 0, sizeof swap_content_hist);
                     swap_content_hi = swap_nodraw = swap_total = 0;
                 }
+                /* item 44: the second display's own line. Each window's masks
+                 * being a SINGLE family - where the one shared window showed
+                 * item 27's alternating 2x60 4x60 - is the no-flicker
+                 * evidence the routing exists to produce. */
+                if (swap2_total) {
+                    char sc[200]; int sp = 0, mi;
+                    sp += snprintf(sc + sp, sizeof sc - (unsigned)sp,
+                                   "[padglhost] swap content d2:");
+                    for (mi = 0; mi < 16; mi++)
+                        if (swap2_content_hist[mi] && sp < (int)sizeof sc - 24)
+                            sp += snprintf(sc + sp, sizeof sc - (unsigned)sp,
+                                           " %xx%ld", mi, swap2_content_hist[mi]);
+                    if (swap2_content_hi && sp < (int)sizeof sc - 24)
+                        sp += snprintf(sc + sp, sizeof sc - (unsigned)sp,
+                                       " hix%ld", swap2_content_hi);
+                    snprintf(sc + sp, sizeof sc - (unsigned)sp,
+                             "  no-draw %ld/%ld\n", swap2_nodraw, swap2_total);
+                    fputs(sc, stderr);
+                    memset(swap2_content_hist, 0, sizeof swap2_content_hist);
+                    swap2_content_hi = swap2_nodraw = swap2_total = 0;
+                }
                 if (dbg) dump_op_histogram();
                 last_frames = frames_done; last_report = now_s();
             }
@@ -4258,6 +4747,7 @@ int main(int argc, char **argv)
      * it does not let anyone claim the ghost is gone. */
     if (xdpy) {
         if (legend_win) XDestroyWindow(xdpy, legend_win);
+        if (xwin2)      XDestroyWindow(xdpy, xwin2);   /* item 44 */
         if (xwin)       XDestroyWindow(xdpy, xwin);
         XSync(xdpy, 0);
         XCloseDisplay(xdpy);

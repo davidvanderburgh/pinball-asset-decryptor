@@ -1319,7 +1319,16 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         # verdict nobody sees is a verdict that costs a ticket. It carries the
         # remembered position that was refused or ignored, and names the button
         # that clears it.
-        /\[padglhost\] (window opened|window:|video block|ring |UNKNOWN|picture:)/ \
+        # `display` carries the item 44 second-display lifecycle - opened,
+        # targeted, closed-and-hidden, render target failed - every one of
+        # which starts "[padglhost] display". The review caught these lines
+        # missing from this alternation: a user would have seen "picture: d2
+        # FIRST" with no second window on the desktop and no line saying why,
+        # the exact PAD-63 gap the comments around this filter document.
+        # (And no apostrophes in here, as those comments say: this text is
+        # INSIDE the single-quoted awk program, and one of them ends it -
+        # the first draft of THIS comment broke watch.sh at line 1328.)
+        /\[padglhost\] (window opened|window:|video block|ring |UNKNOWN|picture:|display)/ \
                                  { print "[event] " $0; fflush(); next }
         # `picture:` IS THE SAME GAP ONE STEP FURTHER IN. The lines above cover
         # a window that never opened; a window that opens and stays BLACK was

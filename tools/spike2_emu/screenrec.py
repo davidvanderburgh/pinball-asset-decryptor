@@ -73,7 +73,18 @@ def find_window_rect():
             return True
         buf = ctypes.create_unicode_buffer(n + 1)
         user32.GetWindowTextW(hwnd, buf, n + 1)
-        if TITLE_SUB in buf.value:
+        # Item 44: the second-display window ("<game> [display N] - Stern
+        # Spike 2 emulator") also contains TITLE_SUB, and rects[0] takes
+        # whichever enumerates first - a recorder aimed at the backbox must
+        # not silently film the projector. PAD_REC_TITLE overrides to record
+        # a specific window (e.g. "[display 2]") on purpose.
+        want = os.environ.get("PAD_REC_TITLE")
+        if want:
+            if want not in buf.value:
+                return True
+        elif "] - " + TITLE_SUB in buf.value:
+            return True
+        if TITLE_SUB in buf.value or (want and want in buf.value):
             class RECT(ctypes.Structure):
                 _fields_ = [("l", ctypes.c_long), ("t", ctypes.c_long),
                             ("r", ctypes.c_long), ("b", ctypes.c_long)]

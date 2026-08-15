@@ -20,7 +20,11 @@
 #define PADGL_H
 
 #define PADGL_MAGIC   0x4c477061u      /* "apGL" */
-#define PADGL_VERSION 1
+/* 2: PADGL_TARGET (item 44). The host writes the version and the guest
+ * refuses a mismatch at attach (glbridge.c), and padgl.h is on BOTH source
+ * lists, so bumping it here makes both halves stale together - a new-host/
+ * old-guest pair fails loudly instead of dropping ops on the floor. */
+#define PADGL_VERSION 2
 
 /* Ring is a byte buffer with a header at offset 0. Single producer (guest),
  * single consumer (host). head/tail are free-running byte counters; the
@@ -119,6 +123,20 @@ enum {
      *                      normal case and it keeps 1.5 MB per frame out of
      *                      both the emulated guest and this ring.            */
     PADGL_TEXDIRECT,
+
+    /* ★ ITEM 44: WHICH DISPLAY THE OPS THAT FOLLOW BELONG TO. A two-display
+     * title (star_wars's playfield LCD, Stranger Things' projector) renders
+     * its scenes ALTERNATELY - one scene, one swap, the other scene, the
+     * other swap, measured as item 27's perfect 2x60/4x60 interleave - so a
+     * single "current target" marker is exact: every op between two TARGETs
+     * belongs to one scene. The guest emits it from eglMakeCurrent when the
+     * game switches draw surfaces (the only way to switch scenes in EGL),
+     * and the host routes guest-FBO-0 rendering and the following SWAP to
+     * that display's own texture, framebuffer and window.
+     *
+     * u32 display index (0 = backbox LCD, the primary; star_wars and
+     * stranger_things both use 2 for the second display). */
+    PADGL_TARGET,
     PADGL_OP_MAX
 };
 

@@ -1003,63 +1003,6 @@ These have each been violated at least once and each cost a run or a window:
       session with a save and a load.
 
 
-- [ ] **44. Stranger Things' PROJECTOR picture has nowhere to go: the emulator
-      presents exactly ONE display and deliberately swallows every other
-      surface the game opens.** `S3 D4`
-      **★ DAVID, 2026-08-11: "no projector out on stranger things (NOT IN
-      PRO)."** Read as: the Premium/LE projector feed never appears. The
-      parenthesis is the model caveat — **the Stranger Things PRO has no
-      projector at all**, so only a Premium/LE card can test this, and which
-      card this rig has is the FIRST thing to check. `stranger_things` is a
-      known Spike 2 title (`pinball_decryptor/plugins/stern/games.py:46`) and a
-      `PAD_CARD` title runs with no extraction (item 28), but **no
-      stranger_things run appears anywhere in this queue or the handoff** — it
-      may never have been booted here.
-      **THIS IS NOT A NEW MECHANISM — IT IS ITEM 27'S OWN LEFTOVER LEAD**,
-      which its Done entry names in those words: *"playfield-LCD feed as a
-      second window (/add candidate)"*. `eglshim.c:56-105` gives each surface
-      an identity from the display the game asked for (`fbGetDisplayByIndex(i)`
-      → `0x6000|i` → window `0x7000|i` → surface `0x4000|slot`), and with two
-      or more surfaces **only the PRIMARY presents** — the first on display 0,
-      the backbox LCD — while every other surface's `eglSwapBuffers` is counted
-      and thrown away (`[eglshim] N surfaces: presenting only surface M,
-      suppressing the other(s)`). On star_wars_le the suppressed feed is the
-      real playfield LCD at 480x272, display indices 0 and 2. A projector is
-      the same shape, so star_wars_le is a free second test case.
-      **THE WORD "projector" APPEARS NOWHERE IN THIS REPO.** There is no second
-      window, no second output, no display concept below eglshim's index, and
-      `padglhost` opens exactly one X window (`window opened WxH on DISPLAY=`).
-      So this is a missing capability, not a regression.
-      **DO NOT "just stop suppressing" — that IS the fault item 27 closed.**
-      Both surfaces presenting into one window is two pictures interleaving at
-      60 Hz (`2x60 4x60`, 32.8% black frames, David: "flickering a lot"). And
-      the suppressed surface's DRAWS still stream into the SAME framebuffer,
-      overwritten by the primary's full-screen background — so a second window
-      needs a second RENDER TARGET, not just a second X window. That is the
-      real cost of this item.
-      **THE CHEAP FIRST STEP IS ONE BOOT AND NO REBUILD:** read the `[eglshim]
-      surface N on display D` lines. If the title opens two surfaces the
-      projector is one of them, and `PAD_EGL_PRIMARY=<slot>` puts it in the
-      main window immediately — confirming the diagnosis and giving a reference
-      picture. **GUESS, marked as one: that the projector is an EGL display at
-      all.** It may be a separate video path (a GStreamer sink, a second
-      framebuffer) that never reaches eglshim, and that boot is what says which.
-      Whatever is built, the window non-negotiables hold: never `SetWindowPos`
-      an emulator window, and a second window doubles item 38's strand surface.
-      **Acceptance:** on a Stranger Things Premium/LE card the projector picture
-      is visible — as its own window or by a stated, documented route — with the
-      backbox picture unchanged beside it, and no return of item 27's flicker
-      (state black-frame % and mean |dY| from the same classifier). If the first
-      boot shows the projector is not an EGL surface at all, that finding closes
-      the diagnosis half and the item is re-scoped rather than failed.
-      — S3: the game plays, the backbox picture is correct, and
-      `PAD_EGL_PRIMARY` already lets the other feed be looked at one at a time,
-      so this is a capability gap with a workaround, not something you play
-      around. D4: the mechanism is already read off the source and reproduces on
-      every run of a two-surface title, but the fix spans `eglshim.c`,
-      `padglhost.c` and `padgl.h`, needs a second render target, needs a rebuild
-      (so no run may be live), and wants verifying on two titles.
-
 - [ ] **48. The playfield keyboard legend is GODZILLA'S list, so every other
       title gets a legend full of holes and a row named after another game.**
       `S3 D2`
@@ -1627,6 +1570,37 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **44. Stranger Things' PROJECTOR picture has nowhere to go.** DONE
+      2026-08-15, `item/44`, `a2eafb4`..`e693e4f` (+ close). **The second
+      display gets its own texture, window and swap chain.** One new wire op
+      (`PADGL_TARGET`, `PADGL_VERSION` 1→2, host-written guest-validated);
+      `eglMakeCurrent` stops discarding its draw argument and emits the
+      route through the ring; guest FBO 0 resolves per display through
+      `map_fbo[0]`; a lazy `[display N]` window presents the second feed, so
+      single-display titles are untouched (godzilla_pro verified: one
+      surface, zero TARGETs). **The item-27 flicker is structurally gone**:
+      the shared window's alternating `2x60 4x60` masks are now one family
+      per window (d0 pure `2x`, d2 pure `4x`, star_wars live). 40-agent
+      adversarial review: 11 confirmed findings fixed pre-run — the
+      DestroyNotify path that KILLED THE RUN on a failed second surface, the
+      vsync call landing on the primary after a failed switch, stale
+      `cur_tgt` across journal replay among them. **The last hop was a WSLg
+      RACE nothing but eyes could see**: swaps succeeded into a swapchain
+      nothing composited (backbuffer probe 16/16 lit, swap ok, desktop
+      BLACK, David confirming) — creating the EGL surface microseconds
+      after `XMapWindow` loses the RAIL realization race; `XSync` + 250 ms
+      settle before `eglCreateWindowSurface` fixes it (88.5% lit by a
+      now-eyes-validated PrintWindow, solid blue under `PADGL_DEBUG=2`).
+      **Caveat, recorded not hidden: no run has yet SHOWN real game content
+      in the second window.** star_wars sat on Tech Alerts (its LCD scene is
+      dark there — item 27's own measurement — and autoattract never
+      cleared it, a separate fault); stranger_things composes an EMPTY
+      projector scene while stuck at NODES NOT FOUND (`d2 0x48 no-draw
+      0/48`: draws, no video), which is items 29/50's blocker. The pipe is
+      proven to the desktop; the picture arrives with the first title that
+      reaches attract. Instruments live on: `picture: d2` oracle, per-window
+      masks, the self-silencing backbuffer probe, `PAD_GL2_W/H/VSYNC`.
 
 - [x] **26. Right-click-hold a switch to RIP IT, for spinners.** DONE
       2026-08-15, `item/26`, `263a9dc`. Right-hold on any switch marker, in

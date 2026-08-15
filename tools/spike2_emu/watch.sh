@@ -183,6 +183,33 @@ export PAD_GAME="$GAME"
 if [ -n "${CARD_PATH:-}" ]; then GAME_ELF="$CARD_PATH/game"
 elif [ -n "${PAD_GAME_DIR:-}" ]; then GAME_ELF="${PAD_GAME_DIR%/}/game"
 else GAME_ELF="$ROOT/games/$GAME/game"; fi
+
+# ★ ITEM 51: THE TITLE'S NODE DIRECTORY, DERIVED BEFORE ANYTHING CONSUMES IT.
+# Each game ELF statically declares its node ids and board types; nbdir.py
+# reads that (validated to reproduce godzilla's measured claims exactly) and
+# the shim answers the game's identity requests from the result instead of
+# from godzilla's hard-coded table - which is what had star_wars looping
+# "UPDATING NODE BOARD RUNTIME 12 / UPDATE FAILED" over attract: nodes
+# 10/11/13/15 claimed as firmware-0.1.0 pinnodes it never had. Written
+# tmp+mv so a failed derivation cannot half-write the file; failure keeps
+# the shim's built-in fallback, which is exactly the pre-item-51 behaviour.
+NBID="$PAD_TABLES/$GAME/node_ident.txt"
+mkdir -p "$PAD_TABLES/$GAME" 2>/dev/null
+if python3 "$RIG/nbdir.py" "$GAME_ELF" --hexdir "${GAME_ELF%/*}" \
+        --out "$NBID.tmp" 2>/dev/null && grep -q '^node=' "$NBID.tmp"; then
+    mv -f "$NBID.tmp" "$NBID"
+    echo "[watch] node identity: $(grep -c '^node=' "$NBID") boards derived" \
+         "from $GAME's own node directory"
+else
+    rm -f "$NBID.tmp" 2>/dev/null
+    if [ -f "$NBID" ]; then
+        echo "[watch] node identity: derivation failed; keeping the previous" \
+             "run's table"
+    else
+        echo "[watch] node identity: derivation failed; the shim keeps its" \
+             "built-in (godzilla) table"
+    fi
+fi
 #
 # THE SWITCH LIST IS PASSED TOO, as the fallback for a title whose device table
 # cannot be parsed at all. star_wars_le is why: it yields ZERO device records,
@@ -193,7 +220,8 @@ else GAME_ELF="$ROOT/games/$GAME/game"; fi
 # nodecensus.silent_nodes() documents exactly how this weaker evidence could be
 # wrong and why no known title trips it.
 NB_SILENT_DEFAULT=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
-    --switches "$PAD_TABLES/$GAME/switch_list.txt" --silent 2>/dev/null)
+    --switches "$PAD_TABLES/$GAME/switch_list.txt" \
+    --nodedir "$NBID" --silent 2>/dev/null)
 export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 # WHY, in the run's own log. The item that asked for this asked for the evidence
 # as well as the decision, and a silenced board is invisible by construction -
@@ -206,7 +234,8 @@ export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 # names the wrong source is worse than one that names none, because the whole
 # point of printing it is that a silenced board is otherwise invisible.
 NB_WHY=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
-    --switches "$PAD_TABLES/$GAME/switch_list.txt" 2>/dev/null \
+    --switches "$PAD_TABLES/$GAME/switch_list.txt" \
+    --nodedir "$NBID" 2>/dev/null \
     | sed -n 's/^because: //p')
 if [ -n "${PAD_NB_SILENT:-}" ]; then
     echo "[watch] node census: silencing node(s) $PAD_NB_SILENT on $GAME -" \

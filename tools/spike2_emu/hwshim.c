@@ -16,6 +16,7 @@ extern void *dlsym(void *, const char *);
 #define RTLD_NEXT ((void *)-1L)
 extern long write(int, const void *, unsigned long);
 extern char *strstr(const char *, const char *);
+extern size_t strlen(const char *);
 extern int snprintf(char *, unsigned long, const char *, ...);
 extern char *getenv(const char *);
 
@@ -2891,17 +2892,129 @@ static unsigned nb_fw_title(void)
     return v;
 }
 
+/* ★ ITEM 51: THE TITLE'S OWN NODE DIRECTORY, WHEN THE RIG HAS DERIVED IT.
+ *
+ * nb_idents[] above is godzilla's node set measured once and claimed at
+ * every title - which star_wars_le answered with "UPDATING NODE BOARD
+ * RUNTIME 12 / UPDATE FAILED" looping over attract, and 215+ identity
+ * re-asks per node in five minutes: it has nodes 10/11/13/15 the table
+ * never heard of (claimed as fw 0.1.0 pinnodes) and its 11/12 are
+ * coil4nodes the table claims as ws2812node. The truth is a static
+ * structure in each title's game ELF; nbdir.py reads it before the run and
+ * writes /dump/tables/<title>/node_ident.txt, and this loads that file -
+ * derived per title, nothing committed, the same shape as the census and
+ * mktables. The built-in table stays as the fallback for a run whose
+ * derivation failed, which is exactly the old behaviour.
+ *
+ * Read with dlsym(RTLD_NEXT) rather than plain fopen for the same reason
+ * nb_fw_title() reads the directory that way: the shim hooks the libc I/O
+ * the GAME uses, and going through its own hooks would recurse. */
+static struct nb_ident nb_fident[64];      /* file-derived, by node id      */
+static unsigned char   nb_fident_have[64];
+static int             nb_fident_state;    /* 0 unloaded, 1 loaded, -1 none */
+
+/* No <stdio.h> in this file, so no sscanf: find `key` in `line` and parse
+ * the number after it. Decimal and hex variants; both demand at least one
+ * digit and return 0 on a missing key or empty number. */
+static int nb_field_dec(const char *line, const char *key, unsigned *out)
+{
+    const char *s = strstr(line, key);
+    unsigned v = 0;
+    int any = 0;
+    if (!s) return 0;
+    for (s += strlen(key); *s >= '0' && *s <= '9'; s++) {
+        v = v * 10 + (unsigned)(*s - '0');
+        any = 1;
+    }
+    if (any) *out = v;
+    return any;
+}
+
+static int nb_field_hex(const char *line, const char *key, unsigned *out)
+{
+    const char *s = strstr(line, key);
+    unsigned v = 0;
+    int any = 0;
+    if (!s) return 0;
+    for (s += strlen(key); ; s++) {
+        char c = *s;
+        if (c >= '0' && c <= '9') v = v * 16 + (unsigned)(c - '0');
+        else if (c >= 'a' && c <= 'f') v = v * 16 + (unsigned)(c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F') v = v * 16 + (unsigned)(c - 'A' + 10);
+        else break;
+        any = 1;
+    }
+    if (any) *out = v;
+    return any;
+}
+
+static void nb_fident_load(void)
+{
+    typedef void *FILEP;
+    FILEP (*ropen)(const char *, const char *);
+    char *(*rgets)(char *, int, FILEP);
+    int  (*rclose)(FILEP);
+    FILEP f;
+    char path[192], line[256], msg[160];
+    const char *p, *g;
+    int n = 0;
+
+    if (nb_fident_state) return;
+    nb_fident_state = -1;
+    p = getenv("PAD_NB_IDENT");
+    g = getenv("PAD_GAME");
+    if (p && *p)
+        snprintf(path, sizeof path, "%s", p);
+    else if (g && *g)
+        snprintf(path, sizeof path, "/dump/tables/%s/node_ident.txt", g);
+    else
+        return;
+    ropen  = dlsym(RTLD_NEXT, "fopen");
+    rgets  = dlsym(RTLD_NEXT, "fgets");
+    rclose = dlsym(RTLD_NEXT, "fclose");
+    if (!ropen || !rgets || !rclose) return;
+    f = ropen(path, "r");
+    if (!f) return;
+    while (rgets(line, sizeof line, f)) {
+        unsigned id, part, var, fw;
+        if (line[0] == '#') continue;
+        if (!nb_field_dec(line, "node=", &id) || id >= 64) continue;
+        if (!nb_field_hex(line, "part=0x", &part)) continue;
+        if (!nb_field_hex(line, "variant=0x", &var)) continue;
+        if (!nb_field_hex(line, "fw=0x", &fw)) continue;
+        nb_fident[id].id = (unsigned char)id;
+        nb_fident[id].part = part;
+        nb_fident[id].variant = (unsigned char)var;
+        nb_fident[id].fw = fw;
+        nb_fident_have[id] = 1;
+        n++;
+    }
+    rclose(f);
+    if (n > 0) {
+        nb_fident_state = 1;
+        snprintf(msg, sizeof msg,
+                 "[nbid] %d node identities from %s\n", n, path);
+        logmsg(msg);
+    }
+}
+
 /* PAD_NB_PART / PAD_NB_VARIANT / PAD_NB_FW still override, globally, so the
  * table can be bypassed for a sweep without editing code. */
 static unsigned nb_ident_fw(const struct nb_ident *i)
 {
     if (!i) return NB_FW_DEFAULT;
+    /* file-derived entries carry the title's own per-node version already -
+     * only the built-in table's 1.35.0 placeholders go through the
+     * filename-glob fallback */
+    if (i >= nb_fident && i < nb_fident + 64) return i->fw;
     return i->fw == 0x012300u ? nb_fw_title() : i->fw;
 }
 
 static const struct nb_ident *nb_ident_for(unsigned id)
 {
     unsigned i;
+    nb_fident_load();
+    if (id < 64 && nb_fident_have[id]) return &nb_fident[id];
     for (i = 0; i < sizeof nb_idents / sizeof nb_idents[0]; i++)
         if (nb_idents[i].id == id) return &nb_idents[i];
     return 0;
@@ -6992,6 +7105,40 @@ long shim_read(int fd, void *b, unsigned long n)
                 unsigned fw   = nb_env_hex("PAD_NB_FW", nb_ident_fw(ident));
                 unsigned var  = nb_env_hex("PAD_NB_VARIANT",
                                            ident ? ident->variant : 0);
+                /* ★ ITEM 51's INSTRUMENT: say what each node claims, once,
+                 * and say when the game keeps refusing it. A healthy
+                 * registration asks a handful of times; the star_wars trace
+                 * measured 215+ per node when the claims were wrong, and
+                 * nothing anywhere said so. 48 re-asks is far above the
+                 * healthy count and far below the refused one. */
+                {
+                    static unsigned short fe_asks[64];
+                    static unsigned long long fe_said, fe_warned;
+                    if (fe_asks[nid] < 0xffff) fe_asks[nid]++;
+                    if (!(fe_said & (1ull << nid))) {
+                        char m[160];
+                        fe_said |= 1ull << nid;
+                        snprintf(m, sizeof m, "[nbid] node %u claims "
+                                 "part=0x%08x variant=0x%02x fw=%u.%u.%u (%s)\n",
+                                 nid, part, var, (fw >> 16) & 0xff,
+                                 (fw >> 8) & 0xff, fw & 0xff,
+                                 (nid < 64 && nb_fident_have[nid]) ? "derived"
+                                 : ident ? "built-in" : "default");
+                        logmsg(m);
+                    }
+                    if (fe_asks[nid] == 48 && !(fe_warned & (1ull << nid))) {
+                        char m[200];
+                        fe_warned |= 1ull << nid;
+                        snprintf(m, sizeof m, "[nbid] node %u identity STILL "
+                                 "RE-ASKED after 48 requests - the game is "
+                                 "refusing part=0x%08x variant=0x%02x "
+                                 "fw=%u.%u.%u; expect a Tech Alert or an "
+                                 "update loop naming this board\n",
+                                 nid, part, var, (fw >> 16) & 0xff,
+                                 (fw >> 8) & 0xff, fw & 0xff);
+                        logmsg(m);
+                    }
+                }
                 p[0]  = 0;
                 p[1]  = (unsigned char)(fw >> 16);
                 p[2]  = (unsigned char)(fw >> 8);

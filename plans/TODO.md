@@ -1216,18 +1216,41 @@ These have each been violated at least once and each cost a run or a window:
       ten seconds later (`C:/tmp/item49/E1_scriptfix.png`). **A ball search can
       also time out, and that was not controlled for**, so treat this as
       encouraging rather than settled.
-      **THE FIX, not built — two shapes, and the cheaper one avoids a
-      rebuild.** (a) `padglhost` re-resolves its binds and re-latches when
-      `switch_list.txt` appears, which is item 47's window fix one layer down;
-      correct, but it is a C change, so a rebuild, and a rebuild invalidates
-      every save slot (36a (3)). (b) A script-side correction once the table
-      lands — no rebuild, but the key legend stays Godzilla's for the rest of
-      that run, so it is a partial fix. **Also worth considering: with no
-      table, latch NOTHING rather than the wrong six.** An empty trough still
-      searches, but it does not additionally jam six playfield switches closed.
-      **Resume:** pick (a) or (b) and build it; the reproduction above is the
-      test harness — hide `switch_list.txt`, boot, and the run must reach a
-      startable game by itself. State how many repeats.
+      **★★ THE FIX IS BUILT, 2026-08-15, commit `91863df` — shape (a) plus the
+      latch-nothing principle plus the piece neither shape knew it needed:
+      THE TABLE WAS NEVER GOING TO ARRIVE AT ALL.** On a pivot run watch.sh's
+      PASS ONE mktables runs as ROOT and creates the per-title tables dir
+      root-owned; PASS TWO — the one with `--log --wait` that builds the
+      switch list mid-run — runs as the DESKTOP USER (`setsid_as_user`) and
+      dies on an uncaught PermissionError in `padtables.log`, which nothing
+      displays. A poisoned cache: every later run fails identically. Bond's
+      dir was the only root-owned one on the machine, and `touch` as david
+      confirmed NOT WRITABLE. **Four fixes, one principle — never assert ids
+      you cannot name:** (1) watch.sh chowns the tables tree between the two
+      passes (recursive, healing already-poisoned dirs); (2) mktables names a
+      failed switch write in the pass output instead of dying silently; (3)
+      padglhost: `binds_resolve()` returns whether a usable table parsed,
+      `sw_publish()` withholds every NON-PLATFORM row until it has (compiled
+      ids stay in the rows — the trough re-resolve needs `ids[1]` intact —
+      but are never acted on; platform rows exempt, Start must keep working),
+      `win_pump()` polls every 2 s and on arrival resolves, re-exports
+      padbinds and publishes once as `'w'`; (4) ballfeed waits up to 300 s
+      (`PAD_BALL_TABLE_WAIT_S`) rebuilding its Feeder every 2 s instead of
+      exiting feederless; swshow and plunge label their fallbacks out loud.
+      **NOTE: a padglhost rebuild does NOT cost the save slots** — the slots
+      checkpoint the GUEST; the renderer restarts fresh on every restore and
+      the padgl protocol is untouched. The D3 fear was about the shim. Six
+      offline tests pass (`test_spike2_first_run_tables.py`); the build is
+      clean.
+      **Resume:** the live proof — with `switch_list.txt` deleted and the
+      tables dir root-owned (the true first-run + poisoned state, already
+      staged), boot Bond from this branch in the app's own pivot shape and
+      the run must reach a startable game BY ITSELF: chown heals the dir,
+      pass two writes the table mid-run, padglhost logs `switch list
+      arrived`, the playfield swaps in, and Start begins a game with no
+      LOCATING PINBALLS. Then the godzilla control unchanged. State repeats.
+      An adversarial review of `91863df` was running when this was written;
+      apply anything real it finds before the runs.
       — **S2 → S2, unchanged but for a different reason than it was filed
       with:** the captive ball was a red herring; what it actually costs is
       that the FIRST run of any title cannot start a game, which is the same

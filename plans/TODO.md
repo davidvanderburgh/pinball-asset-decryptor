@@ -1148,9 +1148,12 @@ These have each been violated at least once and each cost a run or a window:
       the existing `bind ... key dead` lines) already exists; it needs one run
       per title to confirm.
 
-- [ ] **49. LEAD: "LOCATING PINBALLS" on james_bond_60th clears when the
-      CAPTIVE BALL switch is held made, so a machine at rest needs more than a
-      full trough.** `S2 D2` ← IN PROGRESS, branch `item/49`
+- [ ] **49. A title's FIRST run cannot start a game: with no switch table the
+      trough latch falls back to GODZILLA'S ids, so the game is handed an empty
+      trough and searches for its missing balls.** `S2 D2` ← IN PROGRESS, 60%,
+      branch `item/49` *(**RENAMED 2026-08-14.** It was filed as "LOCATING
+      PINBALLS clears when the CAPTIVE BALL is held" - that lead was tested and
+      REFUTED, and the title now names what the control actually found.)*
       **★★ FOUND WHILE SETTING THE CONTROL UP, 2026-08-14, AND IT COST THE
       FIRST ATTEMPT: PRESSING SERVICE BACK ON BOND'S TECH ALERTS SCREEN ENDS
       THE GUEST.** The run's own switch log is the evidence, and the two
@@ -1191,9 +1194,45 @@ These have each been violated at least once and each cost a run or a window:
       PINBALLS was on james_bond_60th's first run on this rig; every run since,
       including both trials above, had the tables and resolved
       `bind 6 balls in trough -> 6 trough switch(es)` to Bond's own 72..77.
-      **Being tested now** by hiding `switch_list.txt` and booting: the
-      prediction is the Godzilla fallback in the bind log, a trough that does
-      not read 6 of 6, and LOCATING PINBALLS on Start.
+      **★★★ REPRODUCED ON DEMAND, 2026-08-14, AND THE PREDICTION HELD IN FULL.
+      This is the cause.** `switch_list.txt` was moved aside and the title
+      booted; the renderer said so itself —
+      `[padglhost] no switch list at .../switch_list.txt; key binds stay
+      Godzilla's` — the latch went onto **66..71**, and `plunge.py start` put
+      **`LOCATING PINBALLS PLEASE WAIT...`** on the screen
+      (`C:/tmp/item49/D1_firstrun.png`). Restore the table and the same title,
+      same card, same launch starts a game instead (trial A above,
+      `C:/tmp/item49/A1.png`). A labelled pair, both directions, mechanism read
+      off the log rather than inferred.
+      **★ AND EVERY INSTRUMENT LIES IN THE SAME DIRECTION, which is why this
+      was hard to see from inside:** with no table, `swshow.py` ALSO falls back,
+      so it reports a confident `balls the GAME sees in the trough: 6 of 6
+      [71, 70, 69, 68, 67, 66]` and labels 62 "Shooter Lane" and 72 "Trough
+      Jam" — Godzilla's numbering — while Bond's real trough (72..77) sits
+      open. The rig agreed with itself and was wrong.
+      **★ THE CHEAP FIX LOOKS VIABLE, one observation, NOT a proof:** opening
+      66..71 and making 72..77 from the SCRIPT side (`swhold.py`, no rebuild —
+      the merge is last-edge-wins per id) left the screen on `REPLAY AT 5,000`
+      ten seconds later (`C:/tmp/item49/E1_scriptfix.png`). **A ball search can
+      also time out, and that was not controlled for**, so treat this as
+      encouraging rather than settled.
+      **THE FIX, not built — two shapes, and the cheaper one avoids a
+      rebuild.** (a) `padglhost` re-resolves its binds and re-latches when
+      `switch_list.txt` appears, which is item 47's window fix one layer down;
+      correct, but it is a C change, so a rebuild, and a rebuild invalidates
+      every save slot (36a (3)). (b) A script-side correction once the table
+      lands — no rebuild, but the key legend stays Godzilla's for the rest of
+      that run, so it is a partial fix. **Also worth considering: with no
+      table, latch NOTHING rather than the wrong six.** An empty trough still
+      searches, but it does not additionally jam six playfield switches closed.
+      **Resume:** pick (a) or (b) and build it; the reproduction above is the
+      test harness — hide `switch_list.txt`, boot, and the run must reach a
+      startable game by itself. State how many repeats.
+      — **S2 → S2, unchanged but for a different reason than it was filed
+      with:** the captive ball was a red herring; what it actually costs is
+      that the FIRST run of any title cannot start a game, which is the same
+      first-run gap item 47 fixed for the window. **D2 → D3** if (a) is taken
+      (a rebuild, and the save-slot cost), D2 if (b).
       **★ DAVID, 2026-08-14: "why am i stuck with 'locating pinballs' when
       trying to start? The balls in trough should default to all being in
       there."** They were: `swshow.py` on his live run read `balls the GAME

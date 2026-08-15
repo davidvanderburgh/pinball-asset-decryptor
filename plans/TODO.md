@@ -711,6 +711,12 @@ These have each been violated at least once and each cost a run or a window:
       scooped switches are covered by their filled coil marker), but a
       synthesised probe must aim at the ring's stroke. Recorded in
       swspintest.py.
+      **A LIVE RUN MAY BE UP — THIS PASS'S, not David's:** godzilla_pro,
+      started 2026-08-15 from the item-26 worktree's watch.sh with
+      PAD_SW_PEND=47 and a 20-minute backstop, for the acceptance
+      measurement. The pass tears it down itself (killgame.sh + alive.sh 0);
+      if you are reading this later than that, check alive.sh before
+      touching anything.
       **Resume:** one live run on godzilla_pro from this worktree, per the
       acceptance below — rip 47 during play with PAD_SW_PEND=47, quote the
       `[swspin] rip END` closures/s against the game-side `lvl` count, and

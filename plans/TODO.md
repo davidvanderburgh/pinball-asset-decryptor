@@ -1168,6 +1168,32 @@ These have each been violated at least once and each cost a run or a window:
       item 45 pass reached the gun-barrel attract screen with autoattract as
       the only thing pressing anything, roughly six minutes in. Wait it out
       rather than poking Back.
+      **★★★ THE CONTROL RAN, 2026-08-14, AND IT REFUTES THE LEAD THIS ITEM WAS
+      FILED ON. THE CAPTIVE BALL IS NOT WHAT CLEARS THE SEARCH.** Trial A, on a
+      run in attract with the tables present: `swhold.py 84 0` (captive ball
+      explicitly OPEN, `id=84 was 0 -> 0`), trough reading `6 of 6 [77, 76, 75,
+      74, 73, 72]`, then `plunge.py start` — and the game went **straight into a
+      game**: `PLAYER 1 / SELECT SOUND STYLE / FREE PLAY`
+      (`C:/tmp/item49/A1.png`). No ball search at all. So the earlier
+      observation (84 made, game starts) was CONFOUNDED: the game would have
+      started either way, and holding 84 changed nothing. This is exactly what
+      the item said the first job was, and the answer is no.
+      **★★ WHAT THE CONTROL POINTS AT INSTEAD, and it is a much better fit:
+      THE TROUGH LATCH FALLS BACK TO GODZILLA'S IDS ON A TITLE'S FIRST RUN.**
+      `binds_resolve()` reads `$PAD_TABLES/$PAD_GAME/switch_list.txt`, which
+      does not exist when the renderer starts on a title's first run — that is
+      item 47's whole subject — and `binds[]`'s "6 balls in trough" row carries
+      the COMPILED GODZILLA ids `{66,67,68,69,70,71}` as its fallback. On Bond
+      those six are RIGHT SPINNER, TARGET C, SHOOTER LANE, RIGHT SLINGSHOT,
+      LEFT SLINGSHOT and RIGHT FLIPPER EOS. **So on a first run the game is
+      handed an EMPTY trough and six stuck playfield switches, and a game that
+      searches for missing balls is behaving correctly.** David's LOCATING
+      PINBALLS was on james_bond_60th's first run on this rig; every run since,
+      including both trials above, had the tables and resolved
+      `bind 6 balls in trough -> 6 trough switch(es)` to Bond's own 72..77.
+      **Being tested now** by hiding `switch_list.txt` and booting: the
+      prediction is the Godzilla fallback in the bind log, a trough that does
+      not read 6 of 6, and LOCATING PINBALLS on Start.
       **★ DAVID, 2026-08-14: "why am i stuck with 'locating pinballs' when
       trying to start? The balls in trough should default to all being in
       there."** They were: `swshow.py` on his live run read `balls the GAME

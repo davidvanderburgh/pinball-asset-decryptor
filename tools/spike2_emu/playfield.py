@@ -776,7 +776,11 @@ def group_fixtures(leds):
         stem, chan = split_channel(L["name"])
         f = fixtures.get(stem)
         if f is None:
-            f = fixtures[stem] = dict(name=stem, channels={}, xs=[], ys=[])
+            # `group` rides along so a fixture with no wire address can still
+            # say WHICH board it is on (item 50) - the node is None precisely
+            # because the group is not one GROUP_NODE knows.
+            f = fixtures[stem] = dict(name=stem, channels={}, xs=[], ys=[],
+                                      group=L.get("group"))
             order.append(f)
         f["channels"][chan] = (L["node"], L["index"])
         f["xs"].append(L["x"])
@@ -2065,6 +2069,31 @@ def layout_extent(pad=NO_ART_PAD):
     return (max(p[0] for p in pts) + pad, max(p[1] for p in pts) + pad)
 
 
+def layout_is_usable():
+    """True when the positional view would actually SHOW something.
+
+    ★ POSITIONS ALONE ARE NOT ENOUGH, and the first version of this gate got
+    that wrong (item 50). It asked only "does the title position anything",
+    which promoted elvira3 - 275 lamps positioned on a TOPPER image, every one
+    in device-table group 3 which GROUP_NODE cannot address, no switches, no
+    coils and no playfield.png at all - out of the switch list and into an
+    artwork view with nothing live on it. Measured: 0 of 275 lamps can ever
+    light, 0 switch markers are drawn, and the 109 individually clickable
+    switch rows the Schematic gave it are lost. That is a worse window, and it
+    was a regression this pass introduced.
+
+    So the test is whether the layout yields anything a person can USE: a
+    switch to click, a coil to watch, or a lamp that can actually light. A
+    title that fails it keeps the switch list - and gets the swatch grid, which
+    reads the wire directly and so works exactly where the table does not.
+    """
+    if not layout_extent():
+        return False
+    if load_switches() or load_coils():
+        return True
+    return any(L["node"] is not None for L in load_leds())
+
+
 def layout_art():
     """The artwork to draw the layout on, or None to draw on a blank field.
 
@@ -2479,16 +2508,28 @@ class Field(StateOps, LedRing):
                 d["name"], where, live, how, act or "nothing wired")
         vals = self._chan_vals(d, self.last)
         fmt = lambda v: "%d" % v if v is not None else "no data"
+        # ★ node IS None FOR A LAMP THE TABLE POSITIONS AND THE WIRE CANNOT
+        # ADDRESS (item 50/53), and "%d" % None is a TypeError. The coil branch
+        # above has carried this guard all along; the LED branch did not, so
+        # every insert on james_bond_60th_le - all 73 of its lamps are in
+        # groups 8 and 9, which GROUP_NODE cannot map - raised inside the
+        # <Motion> binding. That does not show as a crash: the exception is
+        # swallowed by Tk's event loop, the tooltip freezes on whatever it last
+        # showed, and the window looks merely stuck.
+        where = lambda node, idx: (
+            "node %d  index %d" % (node, idx) if node is not None
+            else "group %d  index %d  - no wire address for this board"
+                 % (d.get("group", -1), idx))
         if "W" in d["channels"]:
             node, idx = d["channels"]["W"]
-            return ("LED  %s\nnode %d  index %d\nvalue %s"
-                    % (d["name"], node, idx, fmt(vals.get("W"))))
+            return ("LED  %s\n%s\nvalue %s"
+                    % (d["name"], where(node, idx), fmt(vals.get("W"))))
         lines = ["LED  %s   (RGB fixture)" % d["name"]]
         for chan in "RGB":
             if chan in d["channels"]:
                 node, idx = d["channels"][chan]
-                lines.append("%s  node %d  index %d  value %s"
-                             % (chan, node, idx, fmt(vals.get(chan))))
+                lines.append("%s  %s  value %s"
+                             % (chan, where(node, idx), fmt(vals.get(chan))))
         return "\n".join(lines)
 
     def on_move(self, ev):
@@ -3042,6 +3083,11 @@ LED_GRID_GAP = 10
 #: canvas the cells are drawn on or every dim lamp reads as a smudge.
 LED_GRID_BG = (16, 16, 16)
 
+#: The fill of an UNLIT cell. It matches the canvas exactly, so it is invisible
+#: - it exists only so the rectangle has an interior for Tk to hit-test. See
+#: LedGrid.tick().
+LED_GRID_DARK = "#%02x%02x%02x" % LED_GRID_BG
+
 
 class LedGrid(LedRing):
     """Every LED the wire has shown, as a field of colour, grouped by node.
@@ -3205,7 +3251,7 @@ class LedGrid(LedRing):
                 cy = y + (i // LED_PER_ROW) * LED_PITCH
                 if C["item"] is None:
                     C["item"] = self.cv.create_rectangle(
-                        0, 0, 0, 0, fill="", outline="#333333")
+                        0, 0, 0, 0, fill=LED_GRID_DARK, outline="#333333")
                     self.info[C["item"]] = C
                 self.cv.coords(C["item"], cx, cy,
                                cx + LED_CELL, cy + LED_CELL)
@@ -3227,13 +3273,28 @@ class LedGrid(LedRing):
         if not d or len(d) < LED_HDR:
             return 0, len(self.cells)
         self._take_fades(d, now)
-        # Discovery is gated on the block's own write counter, so an idle rig
-        # costs one unpack per tick instead of a scan of every board.
+        # ★ THE FADE RING IS A SECOND SOURCE OF CHANNELS, AND val[] ALONE MISSES
+        # THEM (item 50). An a2 pulse writes ONLY the fade ring - padled.h says
+        # "val[] is NOT touched here" in as many words - so a lamp the game
+        # animates purely with pulses, whose base level never leaves 0, is
+        # invisible to a scan of val[] however long you watch. Every key in the
+        # overlay is a channel the wire has addressed, which is exactly the
+        # membership test the roster wants, so they are folded in here. This
+        # also makes the class docstring's "the roster comes from the ring"
+        # true, which it was not when the ring meant val[] only.
+        grew = False
+        for key in self.overlay:
+            if key not in self.seen:
+                self.seen.add(key)
+                grew = True
+        # Discovery over val[] is gated on the block's own write counter, so an
+        # idle rig costs one unpack per tick instead of a scan of every board.
         dec = struct.unpack_from("<I", d, LED_DECODED_OFF)[0]
         if dec != self._decoded:
             self._decoded = dec
-            if self._discover(d):
-                self._rebuild()
+            grew = self._discover(d) or grew
+        if grew:
+            self._rebuild()
         lit = 0
         for C in self.cells:
             rgb, level = fixture_color(self._chan_vals(C, d, now))
@@ -3251,7 +3312,17 @@ class LedGrid(LedRing):
                 want = (blend(rgb, LED_GRID_BG, alpha),
                         blend(rgb, LED_GRID_BG, min(1.0, alpha * 1.3)))
             else:
-                want = ("", "#333333")
+                # ★ A DARK CELL IS FILLED, NOT EMPTY, AND THAT IS A HIT-TESTING
+                # FIX RATHER THAN A COLOUR CHOICE (item 50). Tk excludes the
+                # INTERIOR of an unfilled rectangle from find_overlapping, so
+                # with fill="" a point query inside a dark swatch returns
+                # nothing and only the ~1 px outline responds - measured here
+                # as 0 of 121 interior points hitting. _hit_led() is a point
+                # query, so the tooltip was unreachable on exactly the cells
+                # that need it most: on a table-less title the tooltip is the
+                # ONLY thing that says which lamp a swatch is. The fill matches
+                # the canvas, so nothing looks different.
+                want = (LED_GRID_DARK, "#333333")
             if want != C["drawn"]:
                 C["drawn"] = want
                 self.cv.itemconfig(C["item"], fill=want[0], outline=want[1])
@@ -3704,7 +3775,7 @@ def main():
     # a bonus, and requiring it sent james_bond_60th_le, which positions 138
     # devices, to the switch list. David: "if we can show them positionally
     # that is ideal... even if we can't show the playfield artwork".
-    if layout_extent() and (load_switches() or load_leds() or load_coils()):
+    if layout_is_usable():
         view = Field(root)
     else:
         rows = load_switch_list()
@@ -3746,8 +3817,7 @@ def main():
             def _swap_in(fresh):
                 nonlocal view
                 waiting.destroy()
-                if layout_extent() and (
-                        load_switches() or load_leds() or load_coils()):
+                if layout_is_usable():
                     view = Field(root)
                 else:
                     view = Schematic(root, fresh)

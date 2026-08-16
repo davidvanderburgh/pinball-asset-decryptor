@@ -231,6 +231,47 @@ def main():
         fail.append("the a2 envelope ended at %s, not back on the base layer %s"
                     % (swing[-1] if swing else None, env_base))
 
+    # ---- 5: A PULSE-ONLY LAMP MUST STILL GET A CELL -----------------------
+    # ★ An a2 pulse writes ONLY the fade ring: padled.h says val[] is not
+    # touched, and hwshim does not move `decoded` either. A roster built by
+    # scanning val[] therefore never sees a lamp the game animates purely with
+    # pulses - it is dark in val[] for ever. Drive a channel that has NEVER
+    # been written and check it earns a cell.
+    n_before = len(view.leds.cells)
+    fresh = (9, 33)
+    if fresh in view.leds.seen:
+        fail.append("test bug: %r was already in the roster" % (fresh,))
+    feed.fade(fresh[0], fresh[1], fresh[1], 0x00, 0xFF, 20, 20)
+    settle(root, 400)
+    print("--- PULSE-ONLY LAMP ---")
+    got = fresh in view.leds.seen
+    print("  channel %r never written to val[], only pulsed: %s"
+          % (fresh, "got a cell" if got else "NO CELL"))
+    if not got:
+        fail.append("a channel driven only by an a2 pulse never entered the "
+                    "roster (%d cells before, %d after)"
+                    % (n_before, len(view.leds.cells)))
+
+    # ---- 6: A DARK CELL MUST BE HIT-TESTABLE ------------------------------
+    # ★ Tk excludes the INTERIOR of an unfilled rectangle from
+    # find_overlapping, so a dark swatch drawn with fill="" cannot be hovered
+    # and its tooltip - the only thing naming the lamp on a table-less title -
+    # is unreachable. Query the centre of a dark cell the way _hit_led does.
+    dark = next((C for C in view.leds.cells if C["state"][0] is None), None)
+    if dark is None:
+        fail.append("no dark cell to hit-test")
+    else:
+        x0, y0, x1, y1 = view.cv.coords(dark["item"])
+        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        hits = view.cv.find_overlapping(cx, cy, cx, cy)
+        print("--- DARK CELL HIT TEST ---")
+        print("  centre of a dark swatch (%s): %d item(s) under the point"
+              % (dark["name"], len(hits)))
+        if dark["item"] not in hits:
+            fail.append("the centre of a DARK cell hit-tests to nothing, so "
+                        "its tooltip is unreachable - the one thing that names "
+                        "the lamp on a title with no table")
+
     root.destroy()
     print("\n" + "=" * 62)
     if fail:

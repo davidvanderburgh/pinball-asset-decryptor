@@ -4639,9 +4639,24 @@ int main(int argc, char **argv)
     EGLDisplay dpy; EGLConfig cfg; EGLContext ctx; EGLSurface surf;
     /* EGL_SURFACE_TYPE asks for WINDOW|PBUFFER (0x0005) rather than the old
      * PBUFFER-only 0x0001, so the one config serves both the headless path and
-     * the live window. All 80 configs on this display support both. */
-    static const EGLint cfgattr[] = { 0x3033,0x0005, 0x3040,0x0040,
+     * the live window. All 80 configs on the WSLg X11 display support both.
+     *
+     * BUT a SURFACELESS display (EGL_PLATFORM=surfaceless, or d3d12/llvmpipe
+     * with no X server at all) exposes NO window-capable config, so asking for
+     * WINDOW_BIT there returns "no ES3 config" and the headless run cannot even
+     * start. That is the exact wall a run hits after `wsl -t Ubuntu` reaps a
+     * zombie strand: WSLg's X server does not come back (only `wsl --shutdown`
+     * restarts it), /tmp/.X11-unix is empty, and a measurement run - which
+     * never opens a window - is stranded for want of a window config it will
+     * never use. So when this run is headless (win_open() left win_on clear),
+     * ask for PBUFFER-only: it is what the code already falls back to a line
+     * below, it matches on both windowed and surfaceless displays, and the
+     * windowed path (win_on==1) is byte-for-byte unchanged. */
+    static const EGLint cfgattr_win[] = { 0x3033,0x0005, 0x3040,0x0040,
         0x3024,8, 0x3023,8, 0x3022,8, 0x3021,8, 0x3038 };
+    static const EGLint cfgattr_hl[]  = { 0x3033,0x0001, 0x3040,0x0040,
+        0x3024,8, 0x3023,8, 0x3022,8, 0x3021,8, 0x3038 };
+    const EGLint *cfgattr;
     static const EGLint pbattr[]  = { 0x3057,16, 0x3056,16, 0x3038 };
     static const EGLint ctxattr[] = { 0x3098,3, 0x30FB,0, 0x3038 };
     double t0; long last_frames = 0; double last_report;
@@ -4755,6 +4770,10 @@ int main(int argc, char **argv)
     dpy = eglGetDisplay(win_on ? (void *)xdpy : (void *)0);
     if (!eglInitialize(dpy, &major, &minor)) { fprintf(stderr, "eglInitialize failed\n"); return 1; }
     eglBindAPI(0x30A0);
+    /* win_open() has run, so win_on is known: a headless run asks for a
+     * PBUFFER-only config (see cfgattr_hl above), which a surfaceless display
+     * can satisfy where the WINDOW|PBUFFER request cannot. */
+    cfgattr = win_on ? cfgattr_win : cfgattr_hl;
     if (!eglChooseConfig(dpy, cfgattr, &cfg, 1, &n) || n < 1) {
         fprintf(stderr, "no ES3 config\n"); return 1; }
     if (win_on) {

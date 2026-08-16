@@ -4026,6 +4026,14 @@ static void sw_force(void)
  */
 static int sw_find_done;
 
+/* The by-shape switch search has run and found nothing usable, this many times.
+ * ZERO on godzilla and on every title whose table IS found: godzilla's
+ * configured address checks out in sw_find_maybe so sw_find_table is never
+ * called, and a found table sets sw_find_done and stops the search. Non-zero
+ * only on a title whose switch table cannot be found by shape - which is what
+ * item 52's node-directory discovery fallback (nb_nodes_init) keys on. */
+static unsigned sw_find_fails;
+
 static int sw_ptr_ok(unsigned v)
 {
     return v >= 0x8000u && v < 0xf0000000u
@@ -4170,6 +4178,10 @@ static int sw_find_table(void)
             logmsg(m);
         }
     }
+    /* Searched and found nothing usable. item 52's discovery fallback counts
+     * these: enough of them, with no table ever found, means this title has no
+     * switch table to seed the node-bus discovery walk from. */
+    sw_find_fails++;
     return 0;
 }
 
@@ -4689,6 +4701,27 @@ static void sw_hold_init(void)
 static unsigned char nb_nodes[16];
 static int nb_nnodes = -1;
 
+/* Is `node` in PAD_NB_SILENT? One definition, because the node-bus RX handler
+ * (shim_read) tests the same list to refuse an addressed reply, and item 52's
+ * node-directory discovery fallback (nb_nodes_init) must not seed a node the
+ * machine does not have - two places, one fact. The list is a comma/space
+ * separated set of decimal ids; empty or unset means nothing is silenced. */
+static int nb_is_silent(unsigned node)
+{
+    static const char *silent = (const char *)-1;
+    const char *s;
+    if (silent == (const char *)-1) silent = getenv("PAD_NB_SILENT");
+    if (!silent) return 0;
+    for (s = silent; *s; ) {
+        unsigned v = 0;
+        int any = 0;
+        while (*s >= '0' && *s <= '9') { v = v * 10 + (unsigned)(*s++ - '0'); any = 1; }
+        if (any && v == node) return 1;
+        if (*s) s++;
+    }
+    return 0;
+}
+
 static void nb_nodes_add(unsigned node)
 {
     char b[80];
@@ -4750,6 +4783,16 @@ static void nb_nodes_add_boards(void)
     }
 }
 
+static void nb_nodes_seed_log(const char *src)
+{
+    char b[180];
+    int i, k = snprintf(b, sizeof b, "[nbsched] playfield nodes:");
+    for (i = 0; i < nb_nnodes; i++)
+        k += snprintf(b + k, sizeof b - (unsigned)k, " %u", nb_nodes[i]);
+    snprintf(b + k, sizeof b - (unsigned)k, " (from %s)\n", src);
+    logmsg(b);
+}
+
 static void nb_nodes_init(void)
 {
     unsigned st = tread(SW_STRUCT);
@@ -4757,22 +4800,59 @@ static void nb_nodes_init(void)
     unsigned id;
     int i;
     if (nb_nnodes >= 0) return;
-    if (!sw_ok(st) || n > 4096) return;          /* table not built yet */
-    nb_nnodes = 0;
-    for (id = 1; id < n && nb_nnodes < (int)sizeof nb_nodes; id++) {
-        unsigned node = ((const unsigned char *)(unsigned long)(st + id * 32))[20];
-        if (!node) continue;                     /* 0 is the cabinet, over SPI */
-        for (i = 0; i < nb_nnodes; i++) if (nb_nodes[i] == node) break;
-        if (i == nb_nnodes) nb_nodes[nb_nnodes++] = (unsigned char)node;
+
+    /* PRIMARY: the switch table names every board that carries a switch
+     * (entry[+20]). godzilla's path, and every title whose table resolves. */
+    if (sw_ok(st) && n <= 4096) {
+        nb_nnodes = 0;
+        for (id = 1; id < n && nb_nnodes < (int)sizeof nb_nodes; id++) {
+            unsigned node = ((const unsigned char *)(unsigned long)(st + id * 32))[20];
+            if (!node) continue;                 /* 0 is the cabinet, over SPI */
+            for (i = 0; i < nb_nnodes; i++) if (nb_nodes[i] == node) break;
+            if (i == nb_nnodes) nb_nodes[nb_nnodes++] = (unsigned char)node;
+        }
+        nb_nodes_seed_log("switch table");
+        return;
     }
-    {
-        char b[160];
-        int k = snprintf(b, sizeof b, "[nbsched] playfield nodes:");
-        for (i = 0; i < nb_nnodes; i++)
-            k += snprintf(b + k, sizeof b - (unsigned)k, " %u", nb_nodes[i]);
-        snprintf(b + k, sizeof b - (unsigned)k, "\n");
-        logmsg(b);
+
+    /* FALLBACK (item 52): a title with NO findable switch table - measured on
+     * stranger_things, whose device table is empty and whose in-memory switch
+     * table sw_find_table rejects as "(node,bit) not distinct". Without a seed
+     * the bare-00 discovery walk (0x1d6f28) is told the bus is EMPTY on its
+     * first ask, no board object is ever created, and bring-up wedges on
+     * "LOCATING NODE BOARDS / <required> / NODES NOT FOUND" forever - even
+     * though the game identifies every declared node correctly (its own static
+     * directory drives that, and the shim answers all six of ST's with correct
+     * replies). The boards are answerable; they were just never discovered.
+     *
+     * So seed the discovery schedule from the title's own NODE DIRECTORY - the
+     * node_ident.txt nbdir.py derives and nb_fident_load() already reads - minus
+     * any node the machine does not have (PAD_NB_SILENT). This breaks the
+     * chicken-and-egg: board objects exist only after discovery, discovery ran
+     * only from the switch/board tables, and both are empty until boards exist.
+     *
+     * IRONCLAD AGAINST TOUCHING A WORKING TITLE. `!sw_find_done` means no switch
+     * table has been found by ANY route (configured or by-shape); godzilla sets
+     * sw_find_done via sw_configured_ok before this is ever reached, and any
+     * title whose table is found - even slowly - sets it too, so this branch is
+     * permanently unreachable for them. sw_find_fails>=4 additionally keeps a
+     * title whose table is merely a few searches late on the switch path. */
+    if (!sw_find_done && sw_find_fails >= 4) {
+        nb_fident_load();
+        nb_nnodes = 0;
+        for (id = 1; id < 64 && nb_nnodes < (int)sizeof nb_nodes; id++) {
+            if (!nb_fident_have[id]) continue;
+            if (nb_is_silent(id)) continue;      /* the machine does not have it */
+            nb_nodes[nb_nnodes++] = (unsigned char)id;
+        }
+        if (nb_nnodes == 0) {                    /* no directory either: keep waiting */
+            nb_nnodes = -1;
+            return;
+        }
+        nb_nodes_seed_log("node directory - no switch table");
+        return;
     }
+    /* still waiting: neither a switch table nor a settled directory fallback */
 }
 
 /* The answer to one `00` poll. */
@@ -7008,38 +7088,26 @@ long shim_read(int fd, void *b, unsigned long n)
          * Returning 0 from read() is a short read, which is exactly what a real
          * absent board looks like to 0x59d824 (and is the one thing that DOES
          * move the ExchangeData counter). */
-        {
-            static const char *silent = (const char *)-1;
-            if (silent == (const char *)-1) silent = getenv("PAD_NB_SILENT");
-            if (silent && nb_req_len > 0 && (nb_req[0] & 0x80)) {
-                unsigned want = (unsigned)(nb_req[0] & 0x3f);
-                const char *s = silent;
-                while (*s) {
-                    unsigned v = 0;
-                    int any = 0;
-                    while (*s >= '0' && *s <= '9') { v = v * 10 + (unsigned)(*s++ - '0'); any = 1; }
-                    if (any && v == want) {
-                        /* ITEM 17: timestamp every refusal. Run 11 showed the
-                         * cabinet poll stops for ~690 ms at a time (~138 x the
-                         * game's 5 ms retry sleep), and the prime suspect is
-                         * the game timing out on THIS deliberate silence. If
-                         * that is right, these lines arrive in ~5 ms trains
-                         * whose cab_ctr values land INSIDE a gap's counter
-                         * jump - the counter is the shared timebase, so the
-                         * join needs no clock alignment. If the gaps show NO
-                         * [nbsilent] train inside them, the theory is dead. */
-                        static int sbudget = 8000;
-                        if (sbudget-- > 0) {
-                            char sm[96];
-                            snprintf(sm, sizeof sm,
-                                     "[nbsilent] t=%lu node=%u want=%lu ctr=%u\n",
-                                     pad_ms(), want, n, cab_ctr);
-                            logmsg(sm);
-                        }
-                        return 0;
-                    }
-                    if (*s) s++;
+        if (nb_req_len > 0 && (nb_req[0] & 0x80)) {
+            unsigned want = (unsigned)(nb_req[0] & 0x3f);
+            if (nb_is_silent(want)) {
+                /* ITEM 17: timestamp every refusal. Run 11 showed the cabinet
+                 * poll stops for ~690 ms at a time (~138 x the game's 5 ms
+                 * retry sleep), and the prime suspect is the game timing out on
+                 * THIS deliberate silence. If that is right, these lines arrive
+                 * in ~5 ms trains whose cab_ctr values land INSIDE a gap's
+                 * counter jump - the counter is the shared timebase, so the
+                 * join needs no clock alignment. If the gaps show NO [nbsilent]
+                 * train inside them, the theory is dead. */
+                static int sbudget = 8000;
+                if (sbudget-- > 0) {
+                    char sm[96];
+                    snprintf(sm, sizeof sm,
+                             "[nbsilent] t=%lu node=%u want=%lu ctr=%u\n",
+                             pad_ms(), want, n, cab_ctr);
+                    logmsg(sm);
                 }
+                return 0;
             }
         }
         for (i = 0; i < n; i++) p[i] = 0;

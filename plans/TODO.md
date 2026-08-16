@@ -1070,81 +1070,6 @@ These have each been violated at least once and each cost a run or a window:
       `padglhost.c` and `padgl.h`, needs a second render target, needs a rebuild
       (so no run may be live), and wants verifying on two titles.
 
-- [ ] **48. The playfield keyboard legend is GODZILLA'S list, so every other
-      title gets a legend full of holes and a row named after another game.**
-      `S3 D2` ← IN PROGRESS *(**85%, 2026-08-15:** built, desk-verified on all
-      EIGHT derived switch lists, and live-verified end to end on godzilla_pro
-      including the first-run arrival path. What remains is the acceptance's
-      per-key clause on bond/turtles, which needs hands on keys.)*
-      **★★ BUILT AND LIVE-VERIFIED THIS PASS, branch `item/48`, `936836e`.
-      Established:**
-      **(1) `binds_playfield()` in padglhost.c derives the playfield tail from
-      the title's own switch_list.txt at resolve time.** Universal shots keep
-      their keys (arrows/F/A/S/Z/X, exact-name matched; the upper flippers are
-      piecewise-matched because their names vary); an INCLUDE-list of
-      categories (skill shot, spinners, pop bumpers, scoops, orbits, loops,
-      ejects/VUKs, captive balls, targets, ramps, lanes) hands fixed
-      per-category keys to whatever the title has, labels = the switch's own
-      names. Mech sensors match no category and stay unbound. Compiled
-      Godzilla rows survive ONLY as the no-rig-env debug fallback; the trough
-      'B' row resolves as before and its latch state is CARRIED across the
-      rebuild.
-      **(2) Desk oracle built: `padglhost --binds`** resolves and prints the
-      padbinds bytes with no X, no ring, no run. All six named titles generate
-      full legends from their own switches (jaws gains an upper-RIGHT flipper
-      on Down that the fixed table could never bind); led_zeppelin_le and
-      elvira3 (all-`?` names, item 29's fault) get an honest cabinet-only
-      legend instead of thirteen dead rows.
-      **(3) Withheld rows no longer export at all** (they used to export as
-      dim '0' rows — which were still GODZILLA'S names on a first run, the
-      very complaint). First run shows cabinet-only until the table lands;
-      the panel rebuilds on the re-export, item 49's machinery unchanged.
-      **(4) LIVE, godzilla_pro, tables MASKED to force the first-run arrival
-      path:** main() withheld; the table landed at guest 3.5 s; win_pump's
-      poll rebuilt the tail (21 keys logged), the trough latched on the
-      title's own ids (`[sw] 3568 ms +66w..+71w`), padbinds matched the desk
-      output, the panel drew the derived legend, and coin x4 + start started
-      a REAL GAME: trough 5/6, shooter lane closed, feeder answered, BALL 1
-      with the F row wearing the made-dot. The regenerated tables came out
-      byte-identical to the masked originals (free mktables regression).
-      **Seen during the run, NOT this item's fault: godzilla booted into a
-      "Left Spinner — No usage detected!" tech-alert/switch-test screen** (the
-      spinner never spins in scripted runs, so the game's usage tracker
-      flagged it). Zero `[key]` events and zero service edges in the log
-      prove nothing pressed Service; three `swpoke.py 47` pulses cleared it.
-      Worth knowing: coins/Start during that screen do nothing, and godzilla
-      needs FOUR left coins (0.25 each) for one 1.00 credit.
-      **★ DAVID, 2026-08-14, looking at james_bond_60th: "the 'standard
-      playfield' switches here are probably not common on all machines. I
-      don't think the 'godzilla target' belongs here or on any machine."**
-      That row is gone everywhere except a bare no-rig debug launch.
-      **Log shape changed:** the old `bind <row>: not on <title>; key dead`
-      lines no longer exist (nothing goes dead any more); the new lines are
-      `key <K> -> <id> "<NAME>"` per generated row plus a
-      `legend: N playfield key(s) derived from <title>'s own switch list`
-      summary. Item 46's queue text cites the old lines as a minor oracle —
-      the new ones carry strictly more information.
-      **Resume:** the remaining acceptance clause is per-key: on
-      james_bond_60th_le and turtles_pro, press a handful of legend keys with
-      a run up and confirm with `swshow.py <ids>` that each closes the switch
-      its row names (key→X-event→bind_for→sw_publish is UNCHANGED code; the
-      table feeding it is desk-verified against the same file swshow reads,
-      so this is a spot-check, not a search). Needs hands on the keyboard —
-      X key injection into WSLg is a recorded dead end (item 7) — so David
-      pressing five keys during any session is the cheapest form.
-      **Acceptance:** on three titles with different layouts (godzilla_pro,
-      james_bond_60th_le, turtles_pro) the playfield legend lists only switches
-      that title HAS, no row is named after another game, and every listed key
-      closes the switch it names — verified with `swshow.py`, not by eye.
-      The first two clauses are MET on all eight titles (desk, `--binds`);
-      the third is met on godzilla_pro (trough latch + game start on the
-      derived ids) and spot-check-pending on the other two.
-      — S3: nothing is broken and no key fires a wrong switch, so there is no
-      way to lose a run to it; what it costs is that the control legend is
-      misleading on every title that is not Godzilla. D2 → D1 in substance
-      (the remaining work is five key presses per title while a run is up),
-      kept at **D2** because it still needs a windowed run and hands.
-
 - [ ] **50. No LED feedback at all on a title with no playfield artwork,
       which is most of them.** `S3 D3`
       **★ DAVID, 2026-08-14: "we should have some visual indication of leds
@@ -1671,6 +1596,27 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **48. The playfield keyboard legend is GODZILLA'S list, so every other
+      title gets a legend full of holes and a row named after another game.**
+      DONE 2026-08-16, `item/48`, `936836e`. `binds_playfield()` derives the
+      playfield legend from the title's own switch_list.txt — fixed keys for
+      the universal shots (arrows/F/A/S/Z/X), per-category pool keys for the
+      recognisable rest, labels = the switch's own names; Godzilla's compiled
+      rows survive only as the no-rig-env debug fallback, and WITHHELD rows
+      no longer export at all (a first run shows cabinet-only, never another
+      game's dim rows). Verified: `padglhost --binds` desk oracle over all
+      EIGHT derived switch lists (jaws gains an upper-right flipper on Down;
+      the two all-`?` titles get honest cabinet-only legends); 306 spike2
+      tests; one live masked-tables godzilla_pro run through the first-run
+      arrival path end to end (table at guest 3.5 s, 21 keys generated,
+      trough latch carried across the rebuild, coin x4 + start started a
+      real game); and David's own turtles_pro sessions drove keyboard play
+      through the derived binds (`+64k/+65k/+34k` on turtles' own ids)
+      before his "good to go". Also landed with this branch: the rig-mutex
+      non-negotiable (`.pad_rig_lock`) after two sessions ran `/next` at
+      once, and the note that godzilla's "no usage detected" tech alert eats
+      coins until the flagged switch sees usage.
 
 - [x] **26. Right-click-hold a switch to RIP IT, for spinners.** DONE
       2026-08-15, `item/26`, `263a9dc`. Right-hold on any switch marker, in

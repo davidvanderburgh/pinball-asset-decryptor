@@ -3101,6 +3101,27 @@ static void nb_dump_boards(void)
  * 0x59e904(part id), [+40..87] the 48-byte runtime-info record 0x5a2b88
  * builds, [+88] the hex-image owner, [+147]/[+148] two flags.
  */
+/* ★ THIS INSTRUMENT ONLY TELLS THE TRUTH ON GODZILLA PRO 1.15.0, AND IT DOES
+ * NOT SAY SO (item 52, 2026-08-16). 0x7bad88 is godzilla's address; nothing in
+ * this rig ever sets PAD_NB_OBJS - no watch.sh line, no mktables output, no
+ * per-title derivation - so on every other title a_nb_objs() returns the
+ * built-in default whenever that address merely happens to be READABLE in that
+ * guest, which is exactly the trap title_addr() carries and which already cost
+ * a pass on the switch table ("EHOH's binary is big enough to cover Godzilla
+ * Pro's 0x7a958c, so a_sw_struct() returned an address and the shim read a
+ * switch table out of somebody else's data").
+ *
+ * So [nbobj]/[nbtbl] readings on stranger_things, star_wars, turtles - anything
+ * but godzilla_pro - are somebody else's memory formatted as a status table.
+ * They are not weak evidence, they are no evidence. NB_TABLE and NB_RECORDS
+ * below are worse: plain #defines, not even overridable.
+ *
+ * This is what makes item 52 dear rather than cheap: the one instrument that
+ * turns "what does the screen say" into a per-board memory read cannot judge
+ * the title the item is about. Finding the array per title is the job - by
+ * shape at runtime is the durable form (32 slots of 0xe0 where slot[i][+0]==i
+ * and [+12] is non-zero for the populated ones), and godzilla is the labelled
+ * example any finder must reproduce 0x7bad88 on before it is trusted. */
 TITLE_ADDR(a_nb_objs, "PAD_NB_OBJS", 0x7bad88u)
 #define NB_OBJS   a_nb_objs()
 #define NB_OBJ_SZ 0xe0u

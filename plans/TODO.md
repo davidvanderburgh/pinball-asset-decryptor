@@ -84,35 +84,97 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **52. stranger_things: nodes 1, 8 and 9 — the three pinnodes — are
-      the ONLY boards the game cannot find, and it wedges on LOCATING NODE
-      BOARDS while its projector plays.** `S2 D3`
-      *(Split out of item 51 at its close, 2026-08-15: 51's derived
-      identities got ST's ws2812node and node4 boards FOUND — the wedge
-      shrank from "no nodes at all" to exactly the pinnode trio — and the
-      projector shows scene footage regardless, so the display side owes
-      this nothing.)*
-      **Observed (screenshot in the item-51 record):** main window
-      `LOCATING NODE BOARDS / 1 8 9 / NODES NOT FOUND`; `[nbid]` shows all
-      six boards claiming derived identities (pinnodes: part 0x00020023,
-      variant 0x01, fw 1.19.0 — the same claim SHAPE star_wars accepts at
-      1.29.0 and godzilla at 1.35.0). "NOT FOUND" is the game's ABSENT
-      verdict, not a grading failure — so ST's binary either parses the fe
-      reply differently for pinnode-class boards or validates a field the
-      shim answers globally (hwid 0x0001 for every node is the obvious
-      suspect).
-      **The instrument that decides it exists already:** hwshim's `[nbcen]`
-      per-command reply-length census — "fe asks an 11-byte payload and
-      only on FAILURE retries with a 10-byte one (reply_len 12), so a
-      nonzero count at 12 is a direct readout of the identity exchange
-      failing" — plus `PAD_NB_HWID` to sweep board ids without a rebuild.
-      **Acceptance:** stranger_things boots past LOCATING NODE BOARDS with
-      no NOT FOUND overlay, stated with a screenshot; then say what its
-      attract shows on BOTH displays.
+- [ ] **52. stranger_things wedges on LOCATING NODE BOARDS while its
+      projector plays. NOT, as this item used to say, "nodes 1, 8 and 9 are
+      the only boards it cannot find" — that reading is disproved below.**
+      `S2 D4` ← IN PROGRESS
+      *(**D3 → D4, 2026-08-16.** Both premises behind the D3 died this pass:
+      the census this item named as its readout is already answered, and the
+      instrument that would name the verdict per board cannot run on this
+      title at all. What is left needs a new instrument built and validated
+      before it can judge anything, which is the D4 line.)*
+      *(Split out of item 51 at its close, 2026-08-15. The projector shows
+      scene footage regardless, so the display side owes this nothing.)*
+      **★ ESTABLISHED 2026-08-16, ENTIRELY AT THE DESK — no emulator run;
+      the only rig time was a read-only card mount. The first two are
+      negative results and they close off most of this item's stated plan.**
+      **(1) THE WIRE IS IDENTICAL FOR THE BOARDS THAT "FAIL" AND THE ONES
+      THAT "PASS", so nothing on the bus singles out the pinnodes.** Mined
+      from item 51's own ST run (`~/i51_st_final.log`) as a per-node command
+      census: nodes 1, 2, 4, 8, 9 and 12 each received **exactly 12×`fe`,
+      4×`f9`, 2×`fc`** — byte for byte the same commands in the same counts.
+      Each got a correct, well-formed identity reply (pinnodes
+      `00 |01 13 00| 23 00 02 00 |01 00| 01` = fw 1.19.0, part 0x00020023,
+      board id 1, variant 0x01). **12 `fe` is the NORMAL identity ladder**
+      (2 rounds × 6), not a retry storm — star_wars' failure signature was
+      215-226 per node in five minutes. **So the identity exchange is not
+      failing and not being refused**, which is exactly what this item
+      proposed to learn from `[nbcen]`'s reply_len-12 count. That readout is
+      now had for free, and **the "pinnode-specific `fe` reply-length"
+      suspect is DEAD.** So is the `PAD_NB_HWID` suspect as a wire
+      explanation: the global 0x0001 goes to the passing boards too.
+      **★★ (2) AND NOTHING REGISTERED — INCLUDING THE BOARDS THE SCREEN DOES
+      NOT NAME.** In that whole log **no addressed subcommand at or below
+      0xef reached ANY node**; the only traffic is `fe`/`f9`/`fc`, all above
+      the 0x59ec1c gate, plus the unaddressed `03`/`0a`. A registered board
+      gets subcommands; none did. **So "1 8 9" is NOT the game naming three
+      that failed while 2/4/12 passed** — the reading this item was built on.
+      **What "1 8 9" actually tracks is the flags word in the title's own
+      node directory, and it is the SAME on a title that boots.**
+      `nbdir.py --dump` (added this pass) prints the two record fields the
+      derivation discards. ST: node 1 CABINET, 8 LOWER PLAYFIELD, 9 PLAYFIELD
+      carry `flags=0x8`; 2 CABINET LIGHTS and 12 TOPPER (OPTIONAL) carry
+      `0xc`; 4 QR SCANNER `0x4`. **The control — godzilla_pro, which boots
+      clean — declares IDENTICAL flags for every node the two titles share**
+      (1/8/9 = 0x8, 2/12 = 0xc). So the flags word cannot be what
+      distinguishes ST's failure from godzilla's success, and **nothing the
+      title declares statically singles out its pinnodes.** That 0x8 tracks
+      exactly which nodes ST's screen names is recorded in `nbdir.py` as an
+      observation and NOT as a decoded meaning: one title, one boot, and
+      godzilla never wedges so there is no second screen to test it against.
+      **★★★ (3) THE BLOCKER, and it is why this is now D4: the one instrument
+      that would name the verdict CANNOT JUDGE THIS TITLE, and does not say
+      so.** `board[+24]` — the status index the Tech Alerts line renders, per
+      board, "the cheapest available signal and it costs one memory read" —
+      is reached through `TITLE_ADDR(a_nb_objs, "PAD_NB_OBJS", 0x7bad88u)`,
+      and **0x7bad88 is Godzilla Pro 1.15.0's address. Nothing in this rig
+      ever sets `PAD_NB_OBJS`** — not watch.sh, not mktables, no per-title
+      derivation — and `title_addr()` keeps the built-in default whenever it
+      is merely READABLE in that guest. Same trap that once had the shim
+      reading "a switch table out of somebody else's data".
+      `NB_TABLE`/`NB_RECORDS` are worse: plain `#define`s, not overridable at
+      all. **So every `[nbobj]`/`[nbtbl]` reading on stranger_things is
+      somebody else's memory formatted as a status table — no evidence, not
+      weak evidence.** Now commented at the definition so the next reader is
+      warned at the point of use.
+      **Ruled out, do not re-spend: the class/part choice.** ST ships the
+      same three pinnode classes as godzilla (`pinnode-LPC1112_101`,
+      `-LPC1112_201`, `-LPC1313`, all at `1_19_0`) and `nbdir.py` picks class
+      1 on both, so CLASS_PREF is not the difference either.
+      **Resume — the next pass's job is the INSTRUMENT, not another theory.**
+      Find the board-object array PER TITLE instead of hard-coding godzilla's.
+      By shape at runtime is the durable form: 32 slots of stride 0xe0 where
+      `slot[i][+0] == i` and `[+12]` is non-zero for the populated ones — and
+      **godzilla is the labelled example any finder must reproduce 0x7bad88
+      on before it is allowed to judge ST**, per this rig's rule about
+      validating an instrument on a known case first. Then one ST run reads
+      `board[+24]` for all six boards and the verdict names itself. The
+      remaining suspects are title-wide rather than pinnode-specific: the
+      48-byte runtime-info record (`f9/00`, `f9/01`, `fc`) is answered as
+      **48 zero bytes for every board**, and node-bus bring-up gates on the
+      coin-door interlock (godzilla `0x1d6fb8` waits up to 60 s for it).
+      **Uncommitted: nothing.** `nbdir.py --dump` and the hwshim comment are
+      committed on `item/52`; `--check-godzilla` still passes, so the
+      derivation itself is unchanged.
+      **No live run.** The rig lock was taken for the card mount and
+      released; `alive.sh` reads 0.
+      **Acceptance (unchanged):** stranger_things boots past LOCATING NODE
+      BOARDS with no NOT FOUND overlay, stated with a screenshot; then say
+      what its attract shows on BOTH displays.
       — S2: the title is unplayable past boot, but no other title is
-      affected and the projector/display work is delivered; it costs runs
-      on one title. D3: one run cycle with existing instruments
-      (PAD_NB_DUMP census + PAD_NB_HWID sweep), fault reproduces on demand.
+      affected and the projector/display work is delivered; it costs runs on
+      one title. D4: the instrument that can judge it does not exist for this
+      title and has to be built and validated against godzilla first.
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
       instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**

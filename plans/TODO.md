@@ -133,10 +133,36 @@ These have each been violated at least once and each cost a run or a window:
       **★ SUSPECT (marked as one): stranger_things' "NODES NOT FOUND" wedge
       (items 29/50's blocker) is THIS SAME disease** — its node set differs
       from godzilla's too. One fix may unblock three titles.
-      **Resume:** the protocol map (identity-reply builder: does it gate on
-      known ids? what do unknowns claim?) then make node identity per-title
-      — the reply must satisfy the game's grading for the node TYPES the
-      title actually has.
+      **★★★ THE NODE-UPDATE HALF IS FIXED, VERIFIED ON SCREEN, 2026-08-15
+      (`1bc8276`):** star_wars booted with 12 derived identities (`[nbid] …
+      (derived)` per node), the census silenced NOTHING (directory names
+      node 2 Cabinet Lights), the update walk shrank 12→4 and COMPLETED, the
+      game reached Guided Setup (fresh card = fresh settings), saved, and
+      fell into CLEAN ATTRACT — tutorial video, pricing card, NO overlay, NO
+      faint LOCATING text (screenshots). nbdir.py reproduces godzilla's
+      measured claims exactly (the labelled example, all 8 nodes,
+      type/part/variant/fw).
+      **Two corrections from the run:** (a) ~200 `fe`/node is the game's
+      NORMAL periodic identity poll — the 48-ask "refused" detector fired
+      for boards the walk plainly accepted, so its threshold is noise;
+      retire or re-key it on post-registration rate. (b) The d2/node
+      COUPLING IS FALSE: with nodes healthy and the game in clean attract,
+      `picture: d2 STILL BLACK` — 0 lit pixels of 1044480 — while ch2 video
+      uploads into the d2 scene every swap (`d2 4x59 no-draw 0/63`).
+      **★ THE d2 MECHANISM, NARROWED BY THE ITEM-43 SEQUENCE DUMP
+      (`/var/tmp/i51_seqdump_full.txt`):** the LCD pipeline is offscreen
+      (BINDFBO 1, TEXDIRECT, draw) → BINDFBO 0 → TARGET 2 → composite
+      (USEPROGRAM 6, BINDTEX 3, **BINDVAO 2**, DRAWARRAYS 4/6) → SWAP. Per
+      the wire and the TARGET handler's rebind, the composite should land in
+      fbo_screen2 — it reads all-zero. Suspects: the VAO-based composite
+      draw (the d0 scene draws attrib-pointer-style; only this composite
+      uses a real VAO) vs the map_fbo[0] switch not landing. NOTE the seq
+      dump prints TARGET as `?` — its name table predates the op.
+      **Resume:** the discriminating run is SOLO mode on the FIXED build
+      (`PAD_EGL_PRIMARY=2`): routing off, composite lands in fbo_screen like
+      the item-27 era. Window shows LCD content → the game side is fine and
+      the routed map_fbo path owns the bug; still black → the game itself
+      composes black now and the search moves game-side.
 
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every

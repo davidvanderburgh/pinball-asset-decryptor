@@ -158,11 +158,37 @@ These have each been violated at least once and each cost a run or a window:
       draw (the d0 scene draws attrib-pointer-style; only this composite
       uses a real VAO) vs the map_fbo[0] switch not landing. NOTE the seq
       dump prints TARGET as `?` — its name table predates the op.
-      **Resume:** the discriminating run is SOLO mode on the FIXED build
-      (`PAD_EGL_PRIMARY=2`): routing off, composite lands in fbo_screen like
-      the item-27 era. Window shows LCD content → the game side is fine and
-      the routed map_fbo path owns the bug; still black → the game itself
-      composes black now and the search moves game-side.
+      **★★★ THE SECOND DISPLAY IS LIT, 2026-08-15 evening: `picture: d2
+      FIRST at frame 2 (102511 of 1044480 pixels)`, the STAR WARS logo on
+      the `[display 2]` window, screenshot sent to David.** The black-LCD
+      chain, each link measured (`e8f7781`, `7e85e57`):
+      **(1)** Solo mode composed black too → game-side, not item 44's
+      routing. **(2)** The clip is FINE (Stern logo on a starfield, decoded
+      and eyeballed; YAVG 16.5 = mostly dark, content real). **(3)** The
+      post-draw probe (new, lives gated inside the armed seq-dump window)
+      read err **0x506** off the offscreen stage: **guest FBO 1 was
+      INCOMPLETE on the host** — its attachment is defined only through the
+      Vivante map path, never given storage — and GL silently dropped every
+      LCD draw while the bridge's canned `glCheckFramebufferStatus` told the
+      game COMPLETE. Fix: `FBOTEX` allocates fb-sized RGBA for a
+      storage-less attachment (`tex_stored[]`, reset with the journal
+      world). **(4)** Still black → the last link: **two names, one
+      buffer** — `glTexDirectVIV` ALLOCATES the LCD framebuffer under the
+      render-target name and the game MAPS the returned pointer under the
+      sampler name; one physical buffer on hardware, two unrelated host
+      textures here, so the composite sampled memory nothing wrote. Fix:
+      the bridge aliases a Map that adopts another registration's own
+      buffer and translates the EMITTED name on BindTexture/FBOTEX
+      (detection exact — compared against alloc'd buffers only, video ring
+      slots can never trip it). **Which rewrites item 27's history: the
+      32.8%-black-frames flicker was bright-vs-BLACK — the LCD scene had
+      composed black in this rig since forever.**
+      **Remaining before close:** godzilla_pro regression run (single
+      display, no aliasing expected, unchanged behaviour), stranger_things
+      report on the routing+identity build, retire/re-key the 48-ask
+      refusal detector (fe ~200/node is the game's NORMAL poll — it cried
+      wolf on accepted boards), handoff long form, merge. **David's
+      acceptance is the release gate; no release without his yes.**
 
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every

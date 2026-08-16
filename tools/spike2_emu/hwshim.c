@@ -7105,16 +7105,16 @@ long shim_read(int fd, void *b, unsigned long n)
                 unsigned fw   = nb_env_hex("PAD_NB_FW", nb_ident_fw(ident));
                 unsigned var  = nb_env_hex("PAD_NB_VARIANT",
                                            ident ? ident->variant : 0);
-                /* ★ ITEM 51's INSTRUMENT: say what each node claims, once,
-                 * and say when the game keeps refusing it. A healthy
-                 * registration asks a handful of times; the star_wars trace
-                 * measured 215+ per node when the claims were wrong, and
-                 * nothing anywhere said so. 48 re-asks is far above the
-                 * healthy count and far below the refused one. */
+                /* ★ ITEM 51's INSTRUMENT: say what each node claims, once.
+                 * A re-ask-count "refusal detector" lived here for one run
+                 * and is deliberately GONE: ~200 fe per node in five
+                 * minutes is the game's NORMAL periodic identity poll - it
+                 * fired for boards the update walk plainly accepted, so the
+                 * count cannot distinguish refusal at all. The screen (the
+                 * update overlay naming a board) and the [nbid] claim lines
+                 * are the honest oracle pair. */
                 {
-                    static unsigned short fe_asks[64];
-                    static unsigned long long fe_said, fe_warned;
-                    if (fe_asks[nid] < 0xffff) fe_asks[nid]++;
+                    static unsigned long long fe_said;
                     if (!(fe_said & (1ull << nid))) {
                         char m[160];
                         fe_said |= 1ull << nid;
@@ -7124,18 +7124,6 @@ long shim_read(int fd, void *b, unsigned long n)
                                  (fw >> 8) & 0xff, fw & 0xff,
                                  (nid < 64 && nb_fident_have[nid]) ? "derived"
                                  : ident ? "built-in" : "default");
-                        logmsg(m);
-                    }
-                    if (fe_asks[nid] == 48 && !(fe_warned & (1ull << nid))) {
-                        char m[200];
-                        fe_warned |= 1ull << nid;
-                        snprintf(m, sizeof m, "[nbid] node %u identity STILL "
-                                 "RE-ASKED after 48 requests - the game is "
-                                 "refusing part=0x%08x variant=0x%02x "
-                                 "fw=%u.%u.%u; expect a Tech Alert or an "
-                                 "update loop naming this board\n",
-                                 nid, part, var, (fw >> 16) & 0xff,
-                                 (fw >> 8) & 0xff, fw & 0xff);
                         logmsg(m);
                     }
                 }

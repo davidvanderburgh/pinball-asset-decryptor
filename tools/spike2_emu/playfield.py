@@ -3555,14 +3555,36 @@ class Schematic(StateOps):
         # and the trough strip both come off it.
         poll_switches(self)
         state_msg = self._state_status()
-        if not d or struct.unpack_from("<I", d, 0)[0] != PADLED_MAGIC:
+        # ★ THE MAGIC IS NOT THE TEST FOR "IS THERE AN EMULATOR" (item 50,
+        # caught on a live turtles_pro run). hwshim stamps the block on the
+        # FIRST LED write it decodes, so a title that decodes none leaves it
+        # zeroed for ever - and this window then reported "no emulator" over a
+        # game that was plainly running its attract, which is David's item-40
+        # complaint arriving by a second route. Worse, the grid lived in the
+        # else-branch, so the one view built for these titles could never draw
+        # on the one title that needed it.
+        #
+        # The three states are now distinct: the file is unreadable (no
+        # emulator), it is readable and unstamped (a run with no LED data - the
+        # switch half above still works and proves the run is there), or it is
+        # stamped.
+        if not d:
             self.status.config(text=state_msg
                                or "no emulator (dump/padled not readable)")
         else:
             # ★ ITEM 50: the swatch grid, driven off the same read. It is the
             # only LED feedback this view can give - the title has no artwork
-            # and, on the four titles that land here, no table either.
+            # and, on the four titles that land here, no table either. It runs
+            # on an unstamped block too, where it correctly finds nothing.
             self.led_lit, self.led_total = self.leds.tick(d, time.perf_counter())
+        if d and struct.unpack_from("<I", d, 0)[0] != PADLED_MAGIC:
+            self.status.config(
+                text=state_msg
+                     or " emulator up   NO LED DATA on this title: the shim has"
+                        " decoded no LED writes at all   %s"
+                        % (self.sw.balls.text() if self.sw.positions
+                           else "no trough switches identified"))
+        elif d:
             self.status.config(
                 text=state_msg
                      or " emulator up   %d of %d LEDs lit   %d LED writes decoded"

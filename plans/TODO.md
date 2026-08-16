@@ -1114,16 +1114,41 @@ These have each been violated at least once and each cost a run or a window:
       per rebuild, leaking a canvas item per cell and burying the node headers
       under stale swatches — invisible to a test that lights everything at
       once. The staged-growth case exists because of it.
-      **★ LIVE RUN, 2026-08-16 ~16:0x: turtles_pro from THIS branch**,
-      `PAD_GAME=turtles_pro … watch.sh 8` (8-minute backstop), log
-      `~/item50run.log`, launcher log `~/item50watch.log`. **The rig lock is
-      held by `item/50`.** If you are a fresh session: this run is THIS item's,
-      not David playing — `killgame.sh` it if it is still up and release
+      **★★ (6) THE LIVE RUN, turtles_pro, 2026-08-16, AND IT FOUND TWO THINGS.**
+      **(6a) FIXED AND VERIFIED LIVE: the window said "no emulator" over a
+      game that was plainly running its attract.** The status was gated on the
+      padled MAGIC, which hwshim stamps on the first LED write it DECODES — so
+      a title that decodes none leaves the block zeroed and the window called
+      a healthy run dead. That is David's item-40 complaint arriving by a
+      second route, and it also meant the grid lived in the else-branch and
+      could never draw on the one title it was built for. Three states are now
+      distinct (unreadable / readable-but-unstamped / stamped); the live bar
+      now reads `emulator up   NO LED DATA on this title: the shim has decoded
+      no LED writes at all   trough 6/6   0 in play` — the trough proving the
+      run is there.
+      **(6b) turtles_pro DECODES NOTHING, and the run pinned why it is not the
+      grid's fault. `decoded=0, skipped=0` THROUGH THE GAME'S OWN
+      `Diagnostics → Single LED Test`** — David drove it to `13 / 8-LP-5 /
+      LEFT RETURN LANE LEFT-G / CN14 / RETURN=4, SOURCE=7/8`, i.e. the game
+      names the lamp, its node and its connector while the wire stays silent.
+      `skipped=0` matters: `led_publish()` is called on EVERY node bus write,
+      so the frames are not being rejected by the decoder, they are not
+      arriving. No NEW node bus command byte appeared during the test either —
+      turtles' whole vocabulary over the run is `00 03 04 07 08 0a f0 f1 f2 f9
+      fc fe`, with the shim answering `fe` (identity) and returning all-zeros
+      to `f9`/`fc`. See the new item on the LED write shape.
+      **★ RUN LEFT UP DELIBERATELY, and DAVID IS DRIVING IT** — he is in the
+      service menu. `PAD_GAME=turtles_pro … watch.sh 8`, logs
+      `~/item50run.log` and `~/item50watch.log`, rig lock held by `item/50`.
+      A fresh session must NOT kill it; ask David first, then release
       `/home/david/.pad_rig_lock`.
-      **Resume:** with the run up, confirm the grid tracks the game — the
-      strong form is `Diagnostics → LED Tests` driving one fixture at a time
-      by name, the weak form is the attract light show moving the cells. State
-      which one was reached and what it showed.
+      **Resume:** the grid is proven offline and cannot be proven live on
+      turtles until the new item lands. The cheapest live proof left is a
+      title that DOES decode LED writes and lands in this view — but note
+      Bond now gets the artwork view, so today that is star_wars_le or
+      led_zeppelin_le, and neither is known to decode. **State that in the
+      close: item 50's acceptance is blocked on the LED-write item, not on
+      the grid.**
       **Acceptance:** on a title with no artwork the window shows LED activity
       that visibly tracks the game (state what you compared it against — the
       LED-writes counter moving with cells changing is the weakest form; the
@@ -1133,6 +1158,58 @@ These have each been violated at least once and each cost a run or a window:
       this is a missing view rather than a missing capability. D3: the data and
       the fixture join both exist, the layout is new drawing work in
       playfield.py, and confirming it means a run with the LED test menu.
+
+- [ ] **54. Some titles send NO LED write the shim recognises — turtles_pro
+      lights nothing on the wire even during the game's own Single LED Test —
+      and their LED NAME TABLE is unreachable because lednames.py hard-codes
+      Godzilla's address.** `S2 D4` *(Split out of item 50 on 2026-08-16, from
+      a live run. Item 50's grid is correct and has nothing to draw; this is
+      why.)*
+      **★ DAVID, 2026-08-16, looking at the running game: "i feel like there
+      should be an led table somewhere. look at the diag → all leds screen for
+      example."** He is right, and the screen he was on is the oracle:
+      `SINGLE LED TEST / 13 / 8-LP-5 / LEFT RETURN LANE LEFT-G / CN14 /
+      RETURN=4, SOURCE=7/8 / GRN-BRN / YEL`. The game names the lamp, gives
+      its board (`8-LP-5` — node 8, lower playfield), its connector and its
+      matrix return/source. That data is in the binary.
+      **MEASURED ON A LIVE turtles_pro RUN (item 50's), and it is a negative
+      result with numbers:** `decoded=0, skipped=0` for the whole run
+      INCLUDING the Single LED Test being stepped by hand. `skipped` counts
+      frames that looked like indexed LED writes and fitted no shape, so zero
+      of BOTH means the frames never arrive — and `led_publish()` is called on
+      every node bus write (`hwshim.c:7224`), so nothing upstream is filtering
+      them. The `[nbcmd]` census (one line per first sighting of a command
+      byte, budget NOT spent — 3172 lines) shows turtles' entire vocabulary as
+      `00 03 04 07 08 0a f0 f1 f2 f9 fc fe`, **with no new byte appearing
+      during the LED test**. Godzilla's per-LED config writes are `0x84/0x85`
+      (ledio.py) and its fades are `a2`; none of those appear here. The shim
+      answers `fe` (identity) and returns all-zeros to `f9` and `fc`, e.g.
+      `TX 8103f9008312 → 18 bytes of 00`.
+      **TWO READINGS, AND THEY NEED DIFFERENT WORK — decide which before
+      building:** (i) turtles drives its lamps with a command shape nobody has
+      decoded, in which case `PAD_LED_SKIP_LOG` / `PAD_NB_LOG` raised on a run
+      that reaches the Single LED Test will show it, and the test screen NAMES
+      the lamp being driven, which is the labelled experiment this rig always
+      wants; or (ii) the game has concluded the boards are not there and is
+      not driving them at all, which makes this a sibling of items 51/52 and
+      the all-zeros `f9`/`fc` replies the thing to fix.
+      **THE NAME TABLE IS A SEPARATE, CHEAPER HALF, and it is desk work.**
+      `lednames.py` dies on turtles — `struct.error: ... offset 7725056
+      (actual buffer size is 6457552)` — because it hard-codes the VA where
+      godzilla_pro 1.15.0 keeps the table. devicexy.py already solved exactly
+      this shape of problem for the device table by SEEDING FROM STRINGS
+      instead of an address, and its header says why at length. The same move
+      here gives every table-less title real lamp names, which is what item
+      50's grid shows instead of `node.index` today.
+      **Acceptance:** state turtles_pro's LED write frame with the lamp the
+      Single LED Test named while it was captured (so the decode is labelled,
+      not guessed), and show `decoded` moving above zero on a run; separately,
+      lednames.py returns a named table for a title it has never seen.
+      — S2: no title is blocked from playing, but the LED half of the virtual
+      playfield is dead on the four table-less titles and item 50's view has
+      nothing to draw there. D4: it needs runs, the frame shape is unknown,
+      and reading (i) vs (ii) has to be settled before the instrument is
+      chosen.
 
 - [ ] **53. The device-table GROUP → bus NODE map is ONE TITLE'S measurement,
       so most titles' lamps and coils have a position and no wire address.**

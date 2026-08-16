@@ -2090,7 +2090,110 @@ def layout_art():
     return PF_PNG if wh[0] >= ext[0] and wh[1] >= ext[1] else None
 
 
-class Field(StateOps):
+class LedRing:
+    """Reading the live LED block: the base layer and the a2 pulse layer.
+
+    MOVED OUT OF Field VERBATIM (item 50) so the swatch grid can read the ring
+    the same way the artwork view does. Two views decoding one wire format is
+    exactly the drift this rig has been bitten by twice - alive.sh against
+    killgame.sh, autoattract.sh against status.sh - and the fade layer is the
+    half most worth stating once: a pulse is an OVERLAY whose level is computed
+    from a running envelope, and a second implementation of that would agree
+    with this one only until one of them was tuned.
+
+    A user needs `self.overlay` ({} ) and `self._fade_seen` (None) before the
+    first read; _init_ring() is the one line that does it.
+    """
+
+    def _init_ring(self):
+        # overlay maps a channel (node, idx) to its running pulse envelope;
+        # while one is active the channel's level comes from the envelope, not
+        # from val[]. _fade_seen is the ring head already consumed - primed on
+        # the FIRST read so a window opened mid-run does not replay a backlog
+        # of old pulses.
+        self.overlay = {}
+        self._fade_seen = None
+
+    def _take_fades(self, d, now):
+        """Consume new fade-ring entries into channel envelopes. Returns how
+        many arrived - each is ONE picture update for the rate fields, however
+        many frames its animation spans."""
+        if len(d) < FADE_ENT_OFF or struct.unpack_from("<I", d, 4)[0] < 3:
+            return 0
+        head = struct.unpack_from("<I", d, FADE_HEAD_OFF)[0]
+        if self._fade_seen is None:
+            self._fade_seen = head          # opened mid-run: skip the backlog
+            return 0
+        new = head - self._fade_seen
+        if new <= 0:
+            return 0
+        # A reader further than a full ring behind lost the oldest entries;
+        # take the survivors rather than replaying slots twice.
+        first = head - min(new, FADE_RING)
+        for n in range(first, head):
+            off = FADE_ENT_OFF + (n % FADE_RING) * FADE_STRIDE
+            if off + FADE_STRIDE > len(d):
+                break
+            _ms, node, s, e, frm, to, rise, fall, _pad = struct.unpack_from(
+                "<I8B", d, off)
+            # The slot for the direction of travel takes the pulse out; the
+            # OTHER slot brings it home. 0 = instantly (padled.h).
+            out_r, back_r = (rise, fall) if to >= frm else (fall, rise)
+            env = dict(t0=now, frm=frm, to=to,
+                       out_s=out_r * FADE_UNIT_MS / 1000.0,
+                       back_s=back_r * FADE_UNIT_MS / 1000.0)
+            if env["out_s"] <= 0 and env["back_s"] <= 0:
+                continue                    # degenerate: nothing visible
+            for i in range(s, e + 1):
+                self.overlay[(node, i)] = env
+        self._fade_seen = head
+        return new
+
+    def _env_level(self, env, now):
+        """The envelope's level right now, or None once it has expired."""
+        t = now - env["t0"]
+        if t < env["out_s"]:
+            k = t / env["out_s"]
+            return env["frm"] + (env["to"] - env["frm"]) * k
+        t -= env["out_s"]
+        if t < env["back_s"]:
+            k = t / env["back_s"]
+            return env["to"] + (env["frm"] - env["to"]) * k
+        return None
+
+    def _chan_vals(self, F, d, now=None):
+        """Live channel values for a fixture, e.g. {'R': 255, 'G': 40, 'B': 0}.
+        A channel with no readable byte reports None (distinct from 0 = off).
+        An active fade envelope OVERRIDES the base byte for its channel - the
+        pulse layer draws on top of the picture, exactly as on the wire."""
+        out = {}
+        env_on = False
+        for chan, (node, idx) in F["channels"].items():
+            v = None
+            # node is None for a lamp the table POSITIONS but whose group the
+            # group -> node map cannot address (item 50). It stays at None,
+            # which is already this function's word for "no readable byte" and
+            # is drawn dark - as distinct from 0, which means the game turned
+            # it off.
+            if d and node is not None:
+                off = LED_HDR + node * LED_IDX + idx
+                if off < len(d):
+                    v = d[off]
+            if now is not None:
+                env = self.overlay.get((node, idx))
+                if env is not None:
+                    lv = self._env_level(env, now)
+                    if lv is None:
+                        del self.overlay[(node, idx)]
+                    else:
+                        v = int(lv)
+                        env_on = True
+            out[chan] = v
+        F["env"] = env_on
+        return out
+
+
+class Field(StateOps, LedRing):
     def __init__(self, root):
         from PIL import Image, ImageTk
         self.root = root
@@ -2173,13 +2276,9 @@ class Field(StateOps):
         self._decoded = None                  # last `decoded` seen, to diff it
         self._gap_worst = 0.0                 # longest still stretch, for the log
         self._draw_last = None
-        # THE FADE LAYER (padled.h version 3). overlay maps a channel
-        # (node, idx) to its running pulse envelope; while one is active the
-        # channel's level comes from the envelope, not from val[]. _fade_seen
-        # is the ring head already consumed - primed on the FIRST read so a
-        # window opened mid-run does not replay a backlog of old pulses.
-        self.overlay = {}
-        self._fade_seen = None
+        # THE FADE LAYER (padled.h version 3), shared with the swatch grid -
+        # see LedRing, which owns both it and the base-layer read.
+        self._init_ring()
         # channel -> fixtures drawn from it, so a fade range finds its dots
         # without walking all 81 fixtures per lamp.
         self.chan_fix = {}
@@ -2572,84 +2671,6 @@ class Field(StateOps):
         """
         return self.sw.door
 
-    def _take_fades(self, d, now):
-        """Consume new fade-ring entries into channel envelopes. Returns how
-        many arrived - each is ONE picture update for the rate fields, however
-        many frames its animation spans."""
-        if len(d) < FADE_ENT_OFF or struct.unpack_from("<I", d, 4)[0] < 3:
-            return 0
-        head = struct.unpack_from("<I", d, FADE_HEAD_OFF)[0]
-        if self._fade_seen is None:
-            self._fade_seen = head          # opened mid-run: skip the backlog
-            return 0
-        new = head - self._fade_seen
-        if new <= 0:
-            return 0
-        # A reader further than a full ring behind lost the oldest entries;
-        # take the survivors rather than replaying slots twice.
-        first = head - min(new, FADE_RING)
-        for n in range(first, head):
-            off = FADE_ENT_OFF + (n % FADE_RING) * FADE_STRIDE
-            if off + FADE_STRIDE > len(d):
-                break
-            _ms, node, s, e, frm, to, rise, fall, _pad = struct.unpack_from(
-                "<I8B", d, off)
-            # The slot for the direction of travel takes the pulse out; the
-            # OTHER slot brings it home. 0 = instantly (padled.h).
-            out_r, back_r = (rise, fall) if to >= frm else (fall, rise)
-            env = dict(t0=now, frm=frm, to=to,
-                       out_s=out_r * FADE_UNIT_MS / 1000.0,
-                       back_s=back_r * FADE_UNIT_MS / 1000.0)
-            if env["out_s"] <= 0 and env["back_s"] <= 0:
-                continue                    # degenerate: nothing visible
-            for i in range(s, e + 1):
-                self.overlay[(node, i)] = env
-        self._fade_seen = head
-        return new
-
-    def _env_level(self, env, now):
-        """The envelope's level right now, or None once it has expired."""
-        t = now - env["t0"]
-        if t < env["out_s"]:
-            k = t / env["out_s"]
-            return env["frm"] + (env["to"] - env["frm"]) * k
-        t -= env["out_s"]
-        if t < env["back_s"]:
-            k = t / env["back_s"]
-            return env["to"] + (env["frm"] - env["to"]) * k
-        return None
-
-    def _chan_vals(self, F, d, now=None):
-        """Live channel values for a fixture, e.g. {'R': 255, 'G': 40, 'B': 0}.
-        A channel with no readable byte reports None (distinct from 0 = off).
-        An active fade envelope OVERRIDES the base byte for its channel - the
-        pulse layer draws on top of the picture, exactly as on the wire."""
-        out = {}
-        env_on = False
-        for chan, (node, idx) in F["channels"].items():
-            v = None
-            # node is None for a lamp the table POSITIONS but whose group the
-            # group -> node map cannot address (item 50). It stays at None,
-            # which is already this function's word for "no readable byte" and
-            # is drawn dark - as distinct from 0, which means the game turned
-            # it off.
-            if d and node is not None:
-                off = LED_HDR + node * LED_IDX + idx
-                if off < len(d):
-                    v = d[off]
-            if now is not None:
-                env = self.overlay.get((node, idx))
-                if env is not None:
-                    lv = self._env_level(env, now)
-                    if lv is None:
-                        del self.overlay[(node, idx)]
-                    else:
-                        v = int(lv)
-                        env_on = True
-            out[chan] = v
-        F["env"] = env_on
-        return out
-
     def _coil_state(self, d):
         """(fire count, drive byte) for a coil, or (None, None) with no data."""
         node = d["node"]
@@ -3008,6 +3029,243 @@ def _onscreen(root, x, y):
             and -20 <= y <= root.winfo_screenheight() - 80)
 
 
+#: The swatch grid's geometry in screen pixels: the cell, the pitch between
+#: cells, and how many sit in a row before a node's block wraps. 8 per row
+#: because the blocks then stack in one narrow column beside the switch list,
+#: which is the space this view actually has spare.
+LED_CELL, LED_PITCH, LED_PER_ROW = 12, 16, 8
+LED_GRID_HDR = 18
+LED_GRID_GAP = 10
+
+#: What a swatch blends toward. The grid has no artwork behind it, so unlike
+#: the artwork view's per-fixture sample this is one colour - it must match the
+#: canvas the cells are drawn on or every dim lamp reads as a smudge.
+LED_GRID_BG = (16, 16, 16)
+
+
+class LedGrid(LedRing):
+    """Every LED the wire has shown, as a field of colour, grouped by node.
+
+    ★ THE ROSTER COMES FROM THE RING, NOT FROM A TABLE, and that is the whole
+    design (item 50). Four of the nine titles with tables on this machine -
+    star_wars_le, stranger_things_le, turtles_pro, led_zeppelin_le - carry `0
+    records` in device_xy.txt: no names, no positions, nothing. A grid built
+    from a table shows them an empty box over a running light show. A grid
+    built from the block shows what the game is actually doing, and the table
+    is then only ever a LOOKUP for the name.
+
+    It also needs no group -> node map, which is what makes it the answer for
+    the titles item 53 currently costs (Bond addresses 0 of its 73 lamps). The
+    grid is keyed by the wire's own (node, index), so it cannot be wrong about
+    which lamp moved - only about what that lamp is called.
+
+    A CHANNEL EARNS ITS CELL BY BEING WRITTEN, AND KEEPS IT. Sticky on purpose:
+    a lamp that pulses once and goes dark would otherwise have its cell appear
+    and vanish, and a grid that reflows while you watch it is unreadable. So
+    the roster only ever grows, and a dark cell means "this lamp exists and is
+    off" - which is the same promise the artwork view makes.
+
+    ONE CELL PER FIXTURE WHERE THE NAMES ALLOW IT. An RGB insert is three
+    channels with -R/-G/-B stems, and joining them shows one cell in the
+    lamp's true colour instead of three in red, green and blue. That join
+    needs names, so it happens on titles that have a table and not on titles
+    that do not; an unnamed channel gets its own cell called `node.index`.
+    NOTHING IS INFERRED from consecutive indices - guessing which three
+    channels are one lamp is precisely the kind of invention this project
+    keeps having to undo, and being wrong would show a colour the game never
+    lit.
+    """
+
+    def __init__(self, cv, x0, y0, height, names):
+        self.cv, self.x0, self.y0, self.height = cv, x0, y0, height
+        self.names = names or {}
+        self.cells = []                 # one dict per drawn fixture
+        self.by_node = {}               # node -> [cell], in index order
+        self.seen = set()               # every (node, idx) the ring has shown
+        self.info = {}                  # canvas item -> cell, for tooltips
+        self.cols = 1                   # how many columns the flow needed
+        self._decoded = None            # last `decoded`, to gate discovery
+        self._init_ring()
+        self._note = cv.create_text(
+            x0, y0, anchor="nw", fill="#7a7a7a", font=("Consolas", 9),
+            text="LEDs\n\nwaiting for the first\nLED write from the game")
+
+    def reserved_width(self):
+        """What to add to the canvas width for the grid, before it has any."""
+        return LED_PER_ROW * LED_PITCH + 24
+
+    # ---- roster ----------------------------------------------------------
+    def _discover(self, d):
+        """Add a cell for every channel the block shows and we have not seen.
+
+        Returns True when the roster grew, i.e. when the layout must be redone.
+
+        THE SCAN IS PER NODE AND STARTS WITH A C-LEVEL TEST. `val` is
+        16 nodes x 96 indices; a node whose 96 bytes are all zero cannot
+        contribute and `bytes.count(0)` answers that in one call, so the Python
+        loop only runs over boards that have data. padled.h says only the
+        insert boards are decoded today - this deliberately does NOT hard-code
+        which those are, so a shim that starts decoding another board shows up
+        here with no change.
+        """
+        grew = False
+        for node in range(coilmap.NODES):
+            base = LED_HDR + node * LED_IDX
+            s = d[base:base + LED_IDX]
+            if len(s) < LED_IDX or s.count(0) == LED_IDX:
+                continue
+            for idx, v in enumerate(s):
+                if v and (node, idx) not in self.seen:
+                    self.seen.add((node, idx))
+                    grew = True
+        return grew
+
+    def _rebuild(self):
+        """Group the roster into fixtures and lay the blocks out.
+
+        Called only when the roster GREW, never per tick: it is a few hundred
+        coordinate computations, which is nothing once but real at 30 Hz.
+
+        ★ CELLS ARE REUSED ACROSS REBUILDS, KEYED BY (node, name), AND THE
+        FIRST VERSION OF THIS DID NOT DO THAT. It built fresh dicts with
+        `item=None` every time, so each growth of the roster created a NEW
+        rectangle for every cell and left the previous generation on the canvas
+        for ever - invisible in a test that lights every channel at once (one
+        rebuild), and on a real run a pile of stale swatches that covered the
+        node headers and leaked a canvas item per cell per rebuild. Reusing the
+        dict also keeps `drawn`/`state` - so a lamp that was already lit does
+        not flash off and on when some unrelated board is discovered - and
+        keeps `self.info` pointing at objects that still exist.
+        """
+        # Group by node, then by name stem where a name exists.
+        by_node = {}
+        for node, idx in sorted(self.seen):
+            by_node.setdefault(node, []).append(idx)
+        old = {(C["node"], C["name"]): C for C in self.cells}
+        cells, self.by_node, live = [], {}, set()
+        for node in sorted(by_node):
+            stems, order = {}, []
+            for idx in by_node[node]:
+                name = self.names.get((node, idx))
+                if name:
+                    stem, chan = split_channel(name)
+                else:
+                    stem, chan = "%d.%d" % (node, idx), "W"
+                # A stem that repeats a channel letter is two lamps sharing a
+                # name, not one lamp with two reds: give the second its own
+                # cell rather than silently dropping it.
+                C = stems.get(stem)
+                if C is not None and chan in C["channels"]:
+                    stem = "%s (%d.%d)" % (stem, node, idx)
+                    C = stems.get(stem)
+                if C is None:
+                    C = old.get((node, stem))
+                    if C is None:
+                        C = dict(name=stem, node=node, item=None, drawn=None,
+                                 state=(), named=bool(name))
+                    C["channels"], C["idxs"] = {}, []
+                    stems[stem] = C
+                    order.append(C)
+                C["channels"][chan] = (node, idx)
+                C["idxs"].append(idx)
+            for C in order:
+                C["sort"] = min(C["idxs"])
+            order.sort(key=lambda C: C["sort"])
+            self.by_node[node] = order
+            cells.extend(order)
+            live.update((node, C["name"]) for C in order)
+        # A cell whose stem no longer exists (its channels regrouped under a
+        # different name) takes its canvas item with it.
+        for key, C in old.items():
+            if key not in live and C["item"] is not None:
+                self.info.pop(C["item"], None)
+                self.cv.delete(C["item"])
+        self.cells = cells
+
+        # THE FLOW. A node's block is a header plus ceil(n/PER_ROW) rows, and a
+        # block that does not fit the remaining height starts a new column -
+        # the same shape as the switch list beside it, for the same reason
+        # (clipped is unreachable, not merely offscreen).
+        col_w = LED_PER_ROW * LED_PITCH + 24
+        x, y, self.cols = self.x0, self.y0, 1
+        for node in sorted(self.by_node):
+            block = self.by_node[node]
+            rows = (len(block) + LED_PER_ROW - 1) // LED_PER_ROW
+            need = LED_GRID_HDR + rows * LED_PITCH + LED_GRID_GAP
+            if y > self.y0 and y + need > self.y0 + self.height:
+                x += col_w
+                y = self.y0
+                self.cols += 1
+            hdr = self._hdr(node)
+            self.cv.coords(hdr, x, y)
+            self.cv.itemconfig(hdr, text="node %d  (%d)" % (node, len(block)))
+            y += LED_GRID_HDR
+            for i, C in enumerate(block):
+                cx = x + (i % LED_PER_ROW) * LED_PITCH
+                cy = y + (i // LED_PER_ROW) * LED_PITCH
+                if C["item"] is None:
+                    C["item"] = self.cv.create_rectangle(
+                        0, 0, 0, 0, fill="", outline="#333333")
+                    self.info[C["item"]] = C
+                self.cv.coords(C["item"], cx, cy,
+                               cx + LED_CELL, cy + LED_CELL)
+            y += rows * LED_PITCH + LED_GRID_GAP
+        if self._note is not None:
+            self.cv.delete(self._note)
+            self._note = None
+
+    def _hdr(self, node):
+        h = self.__dict__.setdefault("_hdrs", {})
+        if node not in h:
+            h[node] = self.cv.create_text(0, 0, anchor="nw", fill="#7ecbff",
+                                          font=("Consolas", 9, "bold"), text="")
+        return h[node]
+
+    # ---- the tick --------------------------------------------------------
+    def tick(self, d, now):
+        """Repaint the cells whose value moved. Returns (lit, total)."""
+        if not d or len(d) < LED_HDR:
+            return 0, len(self.cells)
+        self._take_fades(d, now)
+        # Discovery is gated on the block's own write counter, so an idle rig
+        # costs one unpack per tick instead of a scan of every board.
+        dec = struct.unpack_from("<I", d, LED_DECODED_OFF)[0]
+        if dec != self._decoded:
+            self._decoded = dec
+            if self._discover(d):
+                self._rebuild()
+        lit = 0
+        for C in self.cells:
+            rgb, level = fixture_color(self._chan_vals(C, d, now))
+            if rgb:
+                lit += 1
+            st = (rgb, level)
+            if st == C["state"]:
+                continue
+            C["state"] = st
+            # SAME ONLY-WHAT-CHANGED RULE AS THE ARTWORK VIEW, and for the same
+            # reason: an itemconfig is a round trip into Tcl, and on a real
+            # frame a handful of lamps move while the rest are identical.
+            if rgb:
+                _rs, alpha = level_shape(level)
+                want = (blend(rgb, LED_GRID_BG, alpha),
+                        blend(rgb, LED_GRID_BG, min(1.0, alpha * 1.3)))
+            else:
+                want = ("", "#333333")
+            if want != C["drawn"]:
+                C["drawn"] = want
+                self.cv.itemconfig(C["item"], fill=want[0], outline=want[1])
+        return lit, len(self.cells)
+
+    def describe(self, C):
+        where = ", ".join("%s=node %d index %d" % (c, n, i)
+                          for c, (n, i) in sorted(C["channels"].items()))
+        return ("LED  %s\n%s\n%s"
+                % (C["name"], where,
+                   "named by the title's device table" if C["named"]
+                   else "no name in this title's table - shown by wire address"))
+
+
 class Schematic(StateOps):
     """The window for a title with NO positions: every switch, by node, clickable.
 
@@ -3121,6 +3379,13 @@ class Schematic(StateOps):
         colw = f9.measure("999  " + "M" * self.NAME_W) + 26
         w = len(cols) * colw + 8
         h = per_col * self.ROW_H + 16
+        # ★ ITEM 50: the LED swatch grid lives to the RIGHT of the switch
+        # columns, on this same canvas, so it inherits the scroll backstop and
+        # the hit testing rather than growing a second scrolling surface. Its
+        # width is reserved here because the grid has no cells yet - the roster
+        # arrives from the wire, seconds into a run.
+        grid_x = w + 10
+        w = grid_x + LED_PER_ROW * LED_PITCH + 24
 
         # THE SCROLL BACKSTOP. Normally the flow fits with room to spare (a
         # 108-switch title is two columns on this desktop); if it ever does
@@ -3172,6 +3437,13 @@ class Schematic(StateOps):
                                           fill="", outline="")
                 self.sw_dots.append((dot, d["id"]))
 
+        # ★ ITEM 50. Names come from the device table where the title has one
+        # (any image - the grid has no picture, so it has no reason to drop a
+        # topper lamp); the ROSTER comes from the wire, which is what makes
+        # this work on the four titles whose table is empty.
+        self.leds = LedGrid(self.cv, grid_x, 14, h - 28, load_led_names())
+        self.led_lit, self.led_total = 0, 0
+
         self.tip = Tip(root)
         self.drv = SwitchDriver()
         # ★ ITEM 39: the retired Controls window's content, docked right -
@@ -3205,9 +3477,23 @@ class Schematic(StateOps):
                 return i
         return None
 
+    def _hit_led(self, ev):
+        """The swatch under the cursor, or None. SEPARATE from _hit(), so a
+        cell can never become something a press tries to close - the same rule
+        the live-state dots beside the rows follow."""
+        x, y = self.cv.canvasx(ev.x), self.cv.canvasy(ev.y)
+        for i in reversed(self.cv.find_overlapping(x, y, x, y)):
+            if i in self.leds.info:
+                return self.leds.info[i]
+        return None
+
     def on_move(self, ev):
         i = self._hit(ev)
         if i is None:
+            C = self._hit_led(ev)
+            if C is not None:
+                self.tip.show(self.leds.describe(C), ev.x_root, ev.y_root)
+                return
             self.tip.hide()
             return
         d = self.info[i]["d"]
@@ -3273,11 +3559,16 @@ class Schematic(StateOps):
             self.status.config(text=state_msg
                                or "no emulator (dump/padled not readable)")
         else:
+            # ★ ITEM 50: the swatch grid, driven off the same read. It is the
+            # only LED feedback this view can give - the title has no artwork
+            # and, on the four titles that land here, no table either.
+            self.led_lit, self.led_total = self.leds.tick(d, time.perf_counter())
             self.status.config(
                 text=state_msg
-                     or " emulator up   %d LED writes decoded   %d coils addressed"
-                        "   %s   (no positions for this title: see swtable.py)"
-                        % (struct.unpack_from("<I", d, 12)[0],
+                     or " emulator up   %d of %d LEDs lit   %d LED writes decoded"
+                        "   %d coils addressed   %s"
+                        % (self.led_lit, self.led_total,
+                           struct.unpack_from("<I", d, 12)[0],
                            struct.unpack_from("<I", d, COIL_GEN_OFF + 4)[0]
                            if len(d) >= PADLED_READ else 0,
                            self.sw.balls.text() if self.sw.positions

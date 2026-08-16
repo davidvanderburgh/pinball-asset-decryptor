@@ -3241,6 +3241,10 @@ static unsigned nb_scan_objs(unsigned *best_out, unsigned *near, unsigned *near_
     return best;
 }
 
+/* The best sub-threshold candidate the last scan saw, for nb_dump_objs() to
+ * report. Zero when the scan succeeded or saw nothing at all. */
+static unsigned nb_near_base, nb_near_n;
+
 /* Resolve once GENUINELY FOUND, and never cache a miss: the array is populated
  * as the game brings the bus up, so an early call must be allowed to fail and
  * be asked again. (TITLE_ADDR caches 0 forever, which is right for a fixed
@@ -3261,22 +3265,18 @@ static unsigned nb_objs_addr(void)
         unsigned near = 0, near_n = 0;
         a = nb_scan_objs(&cnt, &near, &near_n);
         if (!a) {
-            /* Report the best near miss ONCE, so a title that finds nothing
-             * says what it did see. One or two self-consistent boards is a
-             * real answer about a title stuck bringing its bus up; silence is
-             * not. */
-            static int said;
-            if (near && !said) {
-                said = 1;
-                snprintf(m, sizeof m,
-                         "[nbobj] near miss: a self-consistent board array at "
-                         "0x%08x with only %u slot(s) in use - below the %u "
-                         "needed to act on, but NOT nothing\n",
-                         near, near_n, NB_OBJS_MIN);
-                logmsg(m);
-            }
+            /* Hand the near miss to nb_dump_objs() to REPORT, rather than
+             * printing a bare address here. On stranger_things this branch is
+             * the whole result of the run - 11 ticks of "no table", best
+             * candidate 2 slots at 0x0087429c - and "2 slots" alone does not
+             * say WHICH boards, which is the next question every time. The
+             * reporting lives in one place and below nb_status_name(), so it
+             * can name the statuses too. */
+            nb_near_base = near;
+            nb_near_n = near_n;
             return 0;
         }
+        nb_near_base = 0;
     }
     found = a;
     /* THE LABELLED-EXAMPLE CHECK, printed by the rig itself: on godzilla_pro
@@ -3325,12 +3325,43 @@ static const char *nb_status_name(unsigned s)
     return s < 12 ? n[s] : "?";
 }
 
+/* What the near miss actually CONTAINS. "2 slots in use" is where the last ST
+ * run stopped, and the next question was immediately "which two, and saying
+ * what?" - so answer it in the same line rather than costing another run.
+ * Printed ONCE: 11 identical ticks of this would be noise, and the array does
+ * not change while the game is stuck. */
+static void nb_report_near(void)
+{
+    char line[320];
+    unsigned i, k;
+    static int said;
+    if (said || !nb_near_base) return;
+    said = 1;
+    k = (unsigned)snprintf(line, sizeof line,
+                           "[nbobj] near miss at 0x%08x: %u self-consistent "
+                           "slot(s), below the %u needed to act on -",
+                           nb_near_base, nb_near_n, NB_OBJS_MIN);
+    for (i = 0; i < 32 && k < sizeof line - 48; i++) {
+        const unsigned char *o = (const unsigned char *)(unsigned long)
+                                 (nb_near_base + i * NB_OBJ_SZ);
+        unsigned st;
+        if (!*(const unsigned *)(o + 12)) continue;
+        st = *(const unsigned *)(o + 24);
+        k += (unsigned)snprintf(line + k, sizeof line - k,
+                                " slot %u node %u status %u (%s)",
+                                i, o[0], st, nb_status_name(st));
+    }
+    snprintf(line + k, sizeof line - k, "\n");
+    logmsg(line);
+}
+
 static void nb_dump_objs(void)
 {
     char line[400];
     unsigned id;
     if (!NB_OBJS) {
         logmsg("[nbobj] no node-object table known for this title\n");
+        nb_report_near();
         return;
     }
     logmsg("[nbobj] --- node board objects ---\n");

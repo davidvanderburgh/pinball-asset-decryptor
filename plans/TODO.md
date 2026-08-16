@@ -197,20 +197,47 @@ These have each been violated at least once and each cost a run or a window:
       jumped clean over godzilla's real 9-slot array and reported a 2-slot
       one instead. Only a hit at or above `NB_OBJS_MIN` may skip; a near miss
       keeps scanning. Caught in one run because godzilla's answer is known.
-      **Resume.** The question is now "why is the board-object table never
-      populated on ST", and the near miss at `0x0087429c` (2 self-consistent
-      slots) is the thread to pull: dump those two slots' node ids and
-      statuses to see whether it is the real array caught half-built or a
-      coincidence. Remaining suspects stay title-wide rather than
-      pinnode-specific — the 48-byte runtime-info record (`f9/00`, `f9/01`,
-      `fc`) is answered as **48 zero bytes for every board**, and node-bus
-      bring-up gates on the coin-door interlock (godzilla `0x1d6fb8` waits up
-      to 60 s for it, and ST's own address for that is unknown).
+      **★ (5) THE NEAR MISS NOW REPORTS ITS CONTENTS, and there is a written
+      PREDICTION for the next run to test.** `nb_report_near()` prints the
+      node id and status of every in-use slot in the best sub-threshold
+      candidate, once. "2 slots in use" was where the last run stopped and
+      "which two, saying what?" was immediately the next question; answering
+      it in the same line saves a whole run.
+      **The prediction, so the next run is a TEST and not a look-around:** on
+      godzilla the first two slots to exist are **0 (CPU / Bridge)** and
+      **1 (Cabinet)**. If ST's 2-slot candidate at `0x0087429c` reports
+      exactly `slot 0 node 0` and `slot 1 node 1`, it is **the real array
+      caught half-built** — the game creates the bridge and the first cabinet
+      board and then stops — and the question becomes what gates the third.
+      If it reports anything else (mismatched ids, junk statuses), it is a
+      coincidence and the real answer is that ST creates NO board objects at
+      all. Those two outcomes point at completely different next moves, which
+      is what makes it worth predicting in advance rather than judging after.
+      **UNVERIFIED — compiled, not run.** The rig is held by `item/50`
+      (turtles_pro, `watch.sh 120`), so this change has a clean compile
+      (identical flags, output to `/tmp`, nothing shared written) but has NOT
+      been through a run. The next pass must re-run the godzilla labelled
+      example FIRST — `[nbobj] ... 0x007bad88 ... AGREES` — before trusting
+      anything it says about ST, because an intermediate build of this same
+      finder already regressed once in exactly that way.
+      **▼ EVIDENCE LOST, and it is a process fault worth fixing:** the ST run
+      wrote to `~/gzwatch.log`, which `item/50`'s run then overwrote. The
+      numbers above were extracted before that, but the raw log is gone and
+      cannot be re-read. **Any run whose output matters must copy
+      `gzwatch.log` aside under its own name the moment it finishes** — two
+      sessions share that one filename.
+      **Remaining suspects** stay title-wide rather than pinnode-specific:
+      the 48-byte runtime-info record (`f9/00`, `f9/01`, `fc`) is answered as
+      **48 zero bytes for every board**, and node-bus bring-up gates on the
+      coin-door interlock (godzilla `0x1d6fb8` waits up to 60 s for it, and
+      ST's own address for that is unknown).
+      **Resume.** Re-run godzilla to re-validate the finder, then one ST run,
+      and read the near-miss line against the prediction above.
       **Uncommitted: nothing.** All of it is committed on `item/52`;
-      `--check-godzilla` and the godzilla `[nbobj]` labelled example both
-      pass.
-      **No live run left up.** The rig lock was taken for the build, the card
-      mount and both runs, and released; `alive.sh` reads 0.
+      `--check-godzilla` passes and the godzilla `[nbobj]` labelled example
+      passed on the previous build.
+      **No live run of MINE left up**, and `alive.sh` is NOT 0 — `item/50`
+      holds the lock and is running turtles_pro. Do not kill it.
       **Acceptance (unchanged):** stranger_things boots past LOCATING NODE
       BOARDS with no NOT FOUND overlay, stated with a screenshot; then say
       what its attract shows on BOTH displays.

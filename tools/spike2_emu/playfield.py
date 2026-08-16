@@ -126,6 +126,7 @@ from tkinter import ttk
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coilact
 import coilmap
+import devicexy
 import gameinfo
 import keybinds
 import mktables
@@ -647,25 +648,101 @@ def _rows(path, at_least):
     return out
 
 
+#: Every device the title positions, and WHICH IMAGE the layout is drawn on.
+#: Read once, from the text table rather than the ELF, so a card run - whose
+#: binary lives on a mount this Windows process cannot reach - is no different
+#: from an extracted one. devicexy.layout_image() owns the choice and says why
+#: the literal "playfield" was never a safe filter.
+DEV_ROWS = devicexy.read_table(os.path.join(TDIR or "", "device_xy.txt"))
+LAYOUT_IMAGE = devicexy.layout_image(DEV_ROWS)
+
+
+def layout_rows(kind):
+    """The title's positioned devices of one class, on the layout image."""
+    if not LAYOUT_IMAGE:
+        return []
+    return [r for r in DEV_ROWS
+            if r["kind"] == kind and r["image"] == LAYOUT_IMAGE]
+
+
 def load_switches():
-    """switch_xy.txt: id node bit NAME... x y"""
-    return [dict(id=int(p[0]), node=int(p[1]), bit=int(p[2]),
+    """Switch id -> position, from switch_xy.txt or derived here.
+
+    switch_xy.txt is the built form (switchxy.py) and is preferred: it is what
+    mktables writes and what every title with an extracted binary already has.
+
+    ★ THE FALLBACK IS NOT A CONVENIENCE (item 50). switchxy.py filters on the
+    literal image name `playfield`, so james_bond_60th_le - which calls the
+    same image `Test/scaled_playfield` - produces an EMPTY join and no file at
+    all, and 49 positioned switches were unreachable because of a string
+    compare. Deriving here does the identical join (device-table position x
+    live id, matched on the NAME, case-insensitively) from two files that are
+    already on disk, so the title needs no rebuild and no run to become
+    clickable. 49 of 49 join on Bond; 41/41, 60/60 and 57/57 on the three
+    titles that also have the built file, which is what says the two paths
+    agree.
+    """
+    rows = [dict(id=int(p[0]), node=int(p[1]), bit=int(p[2]),
                  name=" ".join(p[3:-2]), x=int(p[-2]), y=int(p[-1]))
             for p in _rows(os.path.join(TDIR, "switch_xy.txt"), 6)]
+    if rows:
+        return rows
+    live = {r["name"].strip().upper(): r for r in load_switch_list()
+            if r["name"] and r["name"] != "?"}
+    if not live:
+        return []
+    for r in layout_rows("switch"):
+        hit = live.get(r["name"].strip().upper())
+        if hit:
+            rows.append(dict(id=hit["id"], node=hit["node"], bit=hit["bit"],
+                             name=r["name"], x=r["x"], y=r["y"]))
+    return sorted(rows, key=lambda r: r["id"])
 
 
 def load_leds():
-    """led_io.txt: node index NAME... x y conn image"""
+    """The layout's LEDs: name, position, and the (node, index) on the wire.
+
+    ★ READ FROM device_xy.txt RATHER THAN led_io.txt SINCE ITEM 50, and the
+    reason is that led_io.txt cannot carry these rows at all on some titles.
+    ledio.py writes only the four groups coilmap.GROUP_NODE can turn into a
+    node, so a title whose playfield lamps sit in groups it does not know -
+    Bond's are groups 8 and 9 - loses every one of them before the file is
+    written. The device table has them, with their positions.
+
+    `node` is therefore None for exactly those lamps: a POSITION is known and a
+    WIRE ADDRESS is not. Drawn dark, and the tooltip says which of the two is
+    missing rather than leaving a lamp that never lights unexplained. See the
+    queue item on the group -> node map being one title's measurement.
+    """
     out = []
-    for p in _rows(os.path.join(TDIR, "led_io.txt"), 6):
-        if p[-1] != "playfield":
+    for r in layout_rows("led"):
+        out.append(dict(node=GROUP_NODE.get(r["group"]), index=r["index"],
+                        x=r["x"], y=r["y"], name=r["name"], group=r["group"]))
+    return out
+
+
+def load_led_names():
+    """{(node, index): name} for every LED the title's table names, ANY image.
+
+    THE SAME TABLE AS load_leds(), READ WITHOUT ITS ONE FILTER, and the
+    omission is the point (item 50). load_leds() keeps only the layout image,
+    because it feeds markers onto a picture. This feeds the swatch grid, which
+    has no picture and so has no reason to drop a lamp for being on the topper
+    or the cabinet front - on james_bond_60th_le that is 315 topper LEDs and 24
+    backbox ones that the artwork view will never show.
+
+    It is only ever a LOOKUP. The grid's ROSTER comes from the live ring, not
+    from here, because four of the nine titles with tables on this machine
+    carry `0 records` in device_xy.txt and would otherwise show an empty grid
+    over a running light show.
+    """
+    out = {}
+    for r in DEV_ROWS:
+        if r["kind"] != "led":
             continue
-        try:
-            out.append(dict(node=int(p[0]), index=int(p[1]),
-                            x=int(p[-4]), y=int(p[-3]),
-                            name=" ".join(p[2:-4])))
-        except ValueError:
-            continue
+        node = GROUP_NODE.get(r["group"])
+        if node is not None:
+            out[(node, r["index"])] = r["name"]
     return out
 
 
@@ -783,7 +860,7 @@ def load_coils():
     "group 20 index 6".
     """
     return [c for c in coilmap.load(os.path.join(TDIR, "device_xy.txt"))
-            if c.get("image") == "playfield"]
+            if LAYOUT_IMAGE and c.get("image") == LAYOUT_IMAGE]
 
 
 def load_switch_list():
@@ -1960,6 +2037,59 @@ class StateOps:
         return text
 
 
+#: What a fixture blends toward when there is no artwork behind it, and the
+#: canvas colour that has to match it. See Field._sample().
+NO_ART_BG = (16, 16, 16)
+
+#: Space left around the devices when the layout is drawn WITHOUT artwork. The
+#: art normally supplies its own margin (a playfield drawing runs to the
+#: cabinet rails); an extent computed from marker centres alone would clip
+#: every edge device in half.
+NO_ART_PAD = 14
+
+
+def layout_extent(pad=NO_ART_PAD):
+    """(w, h) big enough to hold every positioned device, or None if there are
+    none. In the LAYOUT's own pixels, i.e. the same space the artwork uses.
+
+    `pad` IS FOR THE BLANK FIELD AND MUST BE 0 WHEN JUDGING ARTWORK. Comparing
+    a picture against the PADDED extent is a size check the real artwork fails:
+    Godzilla's devices reach x=301 inside a 313-wide drawing, and 301+14 does
+    not fit, so both it and Jaws refused their own correct art the first time
+    this was written.
+    """
+    pts = [(r["x"], r["y"]) for kind in ("led", "switch", "coil")
+           for r in layout_rows(kind)]
+    if not pts:
+        return None
+    return (max(p[0] for p in pts) + pad, max(p[1] for p in pts) + pad)
+
+
+def layout_art():
+    """The artwork to draw the layout on, or None to draw on a blank field.
+
+    ★ THE ARTWORK IS ONLY ACCEPTED IF IT CONTAINS THE COORDINATES (item 50).
+    The image NAME in the device table and the name of the png beside the
+    tables are found by two unrelated pieces of code - the table carries
+    `Test/scaled_playfield`, gameinfo picks a file by token match - so nothing
+    guarantees the picture that turns up is the one the positions were authored
+    against. Drawing on a mismatched image is the failure devicexy.py records
+    having shipped once: every marker plausible, every marker wrong.
+
+    A size check is not proof they are the same picture, but it is a cheap
+    refutation of the case that actually happens, and it fails SAFE - a title
+    whose art is refused still gets its layout, on a blank field, which is what
+    David asked for ("even if we can't show the playfield artwork").
+    """
+    if not PF_PNG or not os.path.exists(PF_PNG):
+        return None
+    ext = layout_extent(pad=0)
+    wh = gameinfo.png_size(PF_PNG)
+    if not ext or not wh:
+        return None
+    return PF_PNG if wh[0] >= ext[0] and wh[1] >= ext[1] else None
+
+
 class Field(StateOps):
     def __init__(self, root):
         from PIL import Image, ImageTk
@@ -1969,15 +2099,22 @@ class Field(StateOps):
         self.coils = load_coils()
         self.last = None
 
-        img = Image.open(PF_PNG).convert("RGB")
-        self.scale = pick_scale(root, img.height)
-        w, h = int(img.width * self.scale), int(img.height * self.scale)
+        # ARTWORK IF IT FITS THE COORDINATES, A BLANK FIELD OTHERWISE. Both
+        # draw the same markers in the same places; the picture behind them is
+        # the only difference, and a title without one is no longer pushed all
+        # the way down to the switch list (item 50).
+        art = layout_art()
+        img = Image.open(art).convert("RGB") if art else None
+        base = (img.width, img.height) if img else layout_extent()
+        self.scale = pick_scale(root, base[1])
+        w, h = int(base[0] * self.scale), int(base[1] * self.scale)
         # KEPT, not discarded after the PhotoImage is made: each fixture blends
         # toward the pixel that is actually behind it (see blend()), and that
         # pixel has to be sampled from somewhere. Sampled once at build time,
-        # never during a tick.
-        self._art = img.resize((w, h), Image.LANCZOS)
-        self.bg = ImageTk.PhotoImage(self._art)
+        # never during a tick. None with no artwork, and _sample() answers the
+        # flat background instead.
+        self._art = img.resize((w, h), Image.LANCZOS) if img else None
+        self.bg = ImageTk.PhotoImage(self._art) if self._art else None
 
         # THE STATUS BAR IS PACKED FIRST, AND side="bottom", AND THAT IS A FIX
         # RATHER THAN A STYLE CHOICE. Packed after the canvas it is last in
@@ -2005,9 +2142,11 @@ class Field(StateOps):
         # is the free direction - and a side="top" canvas would centre itself
         # over the panel's column when the window is stretched.
         self.cv = tk.Canvas(root, width=w, height=h, highlightthickness=0,
-                            bg="black")
+                            bg="black" if self.bg
+                               else "#%02x%02x%02x" % NO_ART_BG)
         self.cv.pack(side="left")
-        self.cv.create_image(0, 0, anchor="nw", image=self.bg)
+        if self.bg is not None:
+            self.cv.create_image(0, 0, anchor="nw", image=self.bg)
         # ★ ITEM 39: the key panel attaches AFTER SwitchDriver exists, below -
         # its service buttons and door toggle press through the same driver
         # the artwork markers use.
@@ -2191,6 +2330,8 @@ class Field(StateOps):
         box average is stable and costs nothing here - this runs once per
         fixture at build time, never in a tick.
         """
+        if self._art is None:
+            return NO_ART_BG        # blank field: one flat colour behind all
         w, h = self._art.size
         r = int(LED_GLOW_R)
         x0, y0 = max(0, int(x) - r), max(0, int(y) - r)
@@ -2487,7 +2628,12 @@ class Field(StateOps):
         env_on = False
         for chan, (node, idx) in F["channels"].items():
             v = None
-            if d:
+            # node is None for a lamp the table POSITIONS but whose group the
+            # group -> node map cannot address (item 50). It stays at None,
+            # which is already this function's word for "no readable byte" and
+            # is drawn dark - as distinct from 0, which means the game turned
+            # it off.
+            if d and node is not None:
                 off = LED_HDR + node * LED_IDX + idx
                 if off < len(d):
                     v = d[off]
@@ -3240,8 +3386,12 @@ def main():
     # playfield drawing and 217 positioned devices, opened its FIRST run
     # showing the "no tables" label, and only became a playfield on the second.
     # Inserts and coils are worth looking at on their own.
-    if PF_PNG and os.path.exists(PF_PNG) and (
-            load_switches() or load_leds() or load_coils()):
+    # ★ THE ARTWORK IS NO LONGER THE GATE (item 50). What decides this is
+    # whether the title POSITIONS anything - the picture behind the markers is
+    # a bonus, and requiring it sent james_bond_60th_le, which positions 138
+    # devices, to the switch list. David: "if we can show them positionally
+    # that is ideal... even if we can't show the playfield artwork".
+    if layout_extent() and (load_switches() or load_leds() or load_coils()):
         view = Field(root)
     else:
         rows = load_switch_list()
@@ -3283,7 +3433,7 @@ def main():
             def _swap_in(fresh):
                 nonlocal view
                 waiting.destroy()
-                if PF_PNG and os.path.exists(PF_PNG) and (
+                if layout_extent() and (
                         load_switches() or load_leds() or load_coils()):
                     view = Field(root)
                 else:

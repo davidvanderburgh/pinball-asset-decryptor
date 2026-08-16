@@ -1054,31 +1054,65 @@ These have each been violated at least once and each cost a run or a window:
 
 
 - [ ] **50. No LED feedback at all on a title with no playfield artwork,
-      which is most of them.** `S3 D3`
+      which is most of them.** `S3 D3` ← IN PROGRESS
       **★ DAVID, 2026-08-14: "we should have some visual indication of leds
       here even without the playfield. can we think of some elegant way to show
       that?"** The window's own status bar says `2285 LED writes decoded` while
       showing nothing lit — the data is arriving and there is nowhere to put
       it.
-      **WHY THERE IS NO PICTURE, measured on james_bond_60th so the next pass
-      does not go looking for a missing file:** the artwork branch needs a
-      playfield image AND something positioned on it, and Bond has neither.
-      Its `device_xy.txt` header reads `513 records (coil=16 led=426
-      switch=71), 0 on the playfield image`, its `playfield.png` is a **202x443
-      8-bit GRAYSCALE thumbnail**, and its `led_io.txt` carries **29 rows, all
-      CABINET** (`COIN DOOR GI`, `START BUTTON`, `ACTION BUTTON-G/-R`) against
-      the cabinet-front image. So 426 LEDs exist in the device table and 29
-      reach the map, none with a playfield position.
-      **THE DESIGN THAT FOLLOWS FROM THAT — drive it from the LIVE RING, not
-      from led_io.txt.** A swatch grid in the empty right-hand column, grouped
-      by node exactly as the switch list is, one cell per FIXTURE rather than
-      per channel so an RGB triple is one cell in its true colour (the rig
-      already joins 113 channels to 81 fixtures for the artwork view, item 1a).
-      Name each cell from `device_xy` where a name exists and `node.index`
-      where it does not. Reading the padled block directly means it works on
-      every title regardless of table quality — Bond would show all its
-      channels, not the 29 that made it into the map — and the light show
-      becomes a field of colour you can watch move.
+      **★★ DAVID, 2026-08-16, WHICH SPLIT THIS ITEM IN TWO: "if we can show
+      them positionally (relative placement) that is ideal. also showing
+      switches placement would be ideal. (even if we can't show the playfield
+      artwork)."**
+      **★★ THE PREMISE BELOW WAS WRONG, AND THAT IS THE PASS'S MAIN RESULT.**
+      This item said Bond "has neither" a playfield image nor anything
+      positioned on it. **james_bond_60th_le carries a COMPLETE playfield
+      layout — 73 LEDs, 49 switches, 16 coils, every one at a distinct
+      position — and its artwork is fine.** All 138 records were dropped by a
+      string compare: Godzilla, Jaws and John Wick name that image
+      `playfield`, Bond names it `Test/scaled_playfield`, and every loader in
+      the rig filtered on the literal. The `202x443` art is not a "thumbnail"
+      in any bad sense either — it is the same KIND of asset Godzilla uses (a
+      test-mode line drawing, Godzilla's is 313x710) and it CONTAINS Bond's
+      coordinates (x 6..196, y 26..409), so it draws correctly.
+      **Established, all at the desk, no run:**
+      **(1) Only 4 of 9 titles genuinely have nothing** — star_wars_le,
+      stranger_things_le, turtles_pro, led_zeppelin_le all carry `0 records`
+      in device_xy.txt. elvira3 has 275 LEDs positioned on its TOPPER image
+      and no playfield at all.
+      **(2) Bond's switches join 49/49** to a live id from switch_list.txt at
+      the desk, so they are positioned AND clickable with no run and no
+      rebuild. The three titles that already have a built switch_xy.txt score
+      41/41, 60/60 and 57/57 by the same join, which is what says the derived
+      path and the built one agree.
+      **(3) SHIPPED THIS PASS on `item/50`:** `devicexy.layout_image()` (one
+      definition of which image is the layout — most device CLASSES, then most
+      devices), `devicexy.read_table()` (device_xy.txt back into records, so a
+      CARD run needs no ELF), playfield.py reading its LEDs/switches/coils from
+      that table, artwork that is accepted only when its pixel size CONTAINS
+      the coordinates, and a blank-field fallback when it is not. Bond's window
+      now draws its playfield; `ledratetest.py` still PASSES on godzilla_pro,
+      which is the regression gate for the artwork view.
+      **★ (4) A SEPARATE DEFECT FOUND ON THE WAY, and it is bigger than this
+      item — see the new item on the group → node map.** `coilmap.GROUP_NODE`
+      is `{4:0, 5:1, 6:8, 7:9}`, measured on Godzilla and hard-coded. Bond's
+      playfield devices are groups 8 and 9, so **0 of 73** LEDs get a wire
+      address. It is not only Bond: **jaws draws 65 of its 143 LED channels and
+      john_wick 53 of 406** for the same reason, and nobody noticed because
+      both look fine. Positions are known; the wire address is not.
+      **WHAT IS LEFT — the swatch grid, which is what this item was filed as.**
+      Drive it from the LIVE RING, not from led_io.txt: a grid grouped by node
+      exactly as the switch list is, one cell per FIXTURE where a name joins
+      the channels and per channel where it does not, named from `device_xy`
+      where a name exists and `node.index` where it does not. Reading the
+      padled block directly is what makes it work on the 4 titles with no table
+      at all — **and it needs no group → node map**, so it also shows the light
+      show on Bond/jaws/john_wick that (4) currently costs them.
+      **Resume:** build `LedGrid` in the `Schematic` view (`playfield.py`),
+      then `ledgridtest.py` in `ledratetest.py`'s shape — it already publishes
+      a fake padled block and drives the REAL window offline, so the grid can
+      be judged against a known answer with no emulator. Include the labelled
+      negative: a channel the ring never writes must never get a cell.
       **Acceptance:** on a title with no artwork the window shows LED activity
       that visibly tracks the game (state what you compared it against — the
       LED-writes counter moving with cells changing is the weakest form; the
@@ -1088,6 +1122,48 @@ These have each been violated at least once and each cost a run or a window:
       this is a missing view rather than a missing capability. D3: the data and
       the fixture join both exist, the layout is new drawing work in
       playfield.py, and confirming it means a run with the LED test menu.
+
+- [ ] **53. The device-table GROUP → bus NODE map is ONE TITLE'S measurement,
+      so most titles' lamps and coils have a position and no wire address.**
+      `S2 D3` *(Split out of item 50 on 2026-08-16, which found it while
+      giving Bond a playfield. Item 50's grid does not need this — it reads the
+      ring directly — so the two are independent and this one is about the
+      ARTWORK view.)*
+      **The map is `coilmap.GROUP_NODE = {4: 0, 5: 1, 6: 8, 7: 9}`**, verified
+      by `ledio.py` against godzilla_pro's boot enumeration and then used for
+      every title. It is a lookup, not arithmetic — the comment in coilmap.py
+      already says group N is not simply node N+2 — and nothing re-derives it
+      per title.
+      **What it costs, measured at the desk 2026-08-16 (no run):**
+      james_bond_60th_le's playfield devices are groups **8 and 9**, so **0 of
+      73** LED channels, and none of its 16 coils, can be addressed; jaws_le
+      draws **65 of 143**; john_wick_le **53 of 406**. Those two look healthy
+      today, which is why this went unnoticed for so long — a partially lit
+      playfield reads as a game that is not lighting much.
+      **Switches are NOT affected and that is a clue**: their id/node/bit come
+      from the running game's own switch table by NAME, never from the group.
+      **THE INSTRUMENT ALREADY EXISTS AND THE JOIN IS SELF-VALIDATING.**
+      `ledio.py` proves the boot enumeration's per-node index set equals the
+      device table's index set for that group — 53/53 on node 8 and 69/69 on
+      node 9 on godzilla, **including ~19 irregular skips**. So: take each
+      group's index set from the table, take each node's index set from the
+      wire (the boot `0x84/0x85` per-LED writes, or simply which indices the
+      live `padled` ring ever writes), and match them. An irregular set of ~70
+      values matching is a fingerprint, not a coincidence — the same argument
+      ledio.py already makes. Then WRITE THE RESULT PER TITLE (a
+      `group_node.txt` beside the other derived tables) rather than editing the
+      constant, because the whole fault is one title's answer standing in for
+      every title's.
+      **Acceptance:** on a title whose groups are not in the hard-coded map,
+      state the derived group → node mapping and the index-set match that
+      supports it (counts both ways, e.g. 73/73), then show its playfield
+      lighting — Bond is the sharpest case because it currently lights nothing.
+      A title already working (godzilla) must derive the SAME map it has now.
+      — S2: play works and no title is blocked; what it costs is that the
+      virtual playfield is silently wrong on most titles, which makes it a
+      poor instrument for every other item. D3: one run to capture the wire
+      side (or a live ring read), the instrument exists and is validated, and
+      the fault is on demand.
 
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the

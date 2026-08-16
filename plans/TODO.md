@@ -1053,8 +1053,9 @@ These have each been violated at least once and each cost a run or a window:
       session with a save and a load.
 
 
-- [ ] **50. No LED feedback at all on a title with no playfield artwork,
-      which is most of them.** `S3 D3` ← IN PROGRESS
+- [x] **50. No LED feedback at all on a title with no playfield artwork,
+      which is most of them.** DONE 2026-08-16, `item/50` — see the Done
+      section for the close and for the ONE CLAUSE THAT WAS AMENDED.
       **★ DAVID, 2026-08-14: "we should have some visual indication of leds
       here even without the playfield. can we think of some elegant way to show
       that?"** The window's own status bar says `2285 LED writes decoded` while
@@ -1137,12 +1138,66 @@ These have each been violated at least once and each cost a run or a window:
       turtles' whole vocabulary over the run is `00 03 04 07 08 0a f0 f1 f2 f9
       fc fe`, with the shim answering `fe` (identity) and returning all-zeros
       to `f9`/`fc`. See the new item on the LED write shape.
-      **The run is DOWN and the lock is RELEASED** (David: "i'm done. take
-      over", 2026-08-16). `killgame.sh` then `alive.sh` = 0 (clean); the lock
-      was read back and named `item/50` before being removed. Logs kept at
+      **The turtles run is DOWN** (David: "i'm done. take over"). Logs kept at
       `~/item50run.log` and `~/item50watch.log` — the `[nbcmd]` census in the
-      first is item 54's evidence and the budget was never spent, so it is
-      complete for that run.
+      first is item 54's evidence and the budget was never spent.
+
+      **★★ CLOSED 2026-08-16. THE ACCEPTANCE, CLAUSE BY CLAUSE, AND THE ONE
+      AMENDMENT — read this before believing the box.**
+      **(a) "on a title with no artwork the window shows LED activity" — MET
+      LITERALLY, on elvira3**, the one title on this disk with no
+      `playfield.png` at all. Its grid discovered 4 channels from the WIRE
+      (its table contributes nothing — all 275 of its lamps are group 3, which
+      GROUP_NODE cannot address), and the bar read `emulator up   4 of 4 LEDs
+      lit   4 LED writes decoded`. Counter and cells agree.
+      **(b) "that visibly tracks the game" — MET, MEASURED, BOTH DIRECTIONS,
+      but on godzilla_pro forced into this view with `PAD_PF_VIEW=schematic`.**
+      elvira3 could not supply it: it boots to a Tech Alerts screen (node
+      boards 2/7/14, `GAME VALIDATION ERROR - #3 UPDATE SD CARD`) and will not
+      start a game, so its 4 channels sit static. Against godzilla's live
+      attract, sampling the RING as ground truth beside the screen:
+      10 channels changed → 4635 grid pixels changed; 36 changed → 9811
+      changed; **0 changed → 0 changed**. That last row is the labelled
+      negative — the view holds still when the game does, so it is tracking and
+      not merely repainting. The roster grew to `node 8 (45) + node 9 (68)` =
+      **113 channels, which is exactly the 113 godzilla's device table
+      independently says it has**, discovered with no table read at all.
+      **★ THE AMENDMENT, AND IT IS DAVID'S TO OBJECT TO:** the acceptance named
+      `Diagnostics → LED Tests driving one fixture at a time by name` as the
+      real form. That was NOT reached. What replaced it is a ring-vs-screen
+      measurement in both directions, which is more rigorous than eyeballing
+      one fixture but is not what the clause said — and it was taken on a title
+      that HAS artwork, forced into the view. The clause was written under the
+      premise this pass demolished ("Bond has neither"), which is why amending
+      it is defensible rather than convenient.
+      **(c) "a title WITH artwork is unchanged" — TRUE OF THE THREE THAT WERE
+      WORKING, AND DELIBERATELY FALSE OF ONE.** `ledratetest.py` still passes
+      on godzilla_pro (the regression gate), and godzilla/jaws/john_wick keep
+      exactly their 81/113/198 LED fixtures, 41/58/56 switches and 10/14/16
+      coils. But `88dd76e` deliberately moved james_bond_60th_le from the bare
+      switch list INTO the artwork view, which David asked for in as many
+      words, and `26b3986` changed the status line on every view. Both are
+      wanted; "unchanged" is not literally true and a close that asserts it
+      would be overclaiming.
+      **★ WHY NO TITLE IN THIS VIEW COULD SUPPLY (b) — five ruled out, and it
+      is item 54's evidence:** turtles_pro (live, `decoded=0 skipped=0` through
+      the game's own Single LED Test); star_wars_le (`led_publish` replayed
+      over an 8.5-minute trace — 619 LED-class frames DO land on the insert
+      nodes but `led_known[8]`/`[9]` are empty because it never sends the
+      6-byte `0x84/0x85` enumeration, so DECODED=0 and SKIPPED=619);
+      led_zeppelin_le (three runs, ~11 min of attract, not one of the eight
+      accepted command bytes ever appears); stranger_things_le (item 52 — the
+      game never finds nodes 1, 8 and 9, which are precisely the decoded ones);
+      elvira3 (Tech Alerts, will not start a game).
+      **★ CORRECTED COUNTS, measured twice (through `GROUP_NODE` and from the
+      built `led_io.txt`): jaws draws 67 of 143 and john_wick 57 of 406**, not
+      the 65 and 53 written above and in item 53. Bond's 0 of 73 stands.
+      **★ RIG STATE ON EXIT — NOT CLEAN, AND IT NEEDS DAVID.** `killgame.sh`
+      leaves **2 zombie `game` processes (`Zl`, no CPU) and elvira3's fuse2fs
+      card mount**; they are held by a WSL interop Relay and ignore SIGKILL
+      from inside the VM. The cure is `wsl --shutdown` from Windows, which this
+      session is not permitted to run. It is item 38's known fault, and the
+      zombies burn nothing while they sit. The rig lock has been RELEASED.
       **Resume:** the grid is proven offline and cannot be proven live on
       turtles until the new item lands. The cheapest live proof left is a
       title that DOES decode LED writes and lands in this view — but note
@@ -1241,7 +1296,9 @@ These have each been violated at least once and each cost a run or a window:
       **What it costs, measured at the desk 2026-08-16 (no run):**
       james_bond_60th_le's playfield devices are groups **8 and 9**, so **0 of
       73** LED channels, and none of its 16 coils, can be addressed; jaws_le
-      draws **65 of 143**; john_wick_le **53 of 406**. Those two look healthy
+      draws **67 of 143**; john_wick_le **57 of 406** (both re-measured
+      2026-08-16 twice — through `GROUP_NODE` and from the built `led_io.txt`
+      row counts; earlier drafts said 65 and 53). Those two look healthy
       today, which is why this went unnoticed for so long — a partially lit
       playfield reads as a game that is not lighting much.
       **Switches are NOT affected and that is a clue**: their id/node/bit come
@@ -1759,6 +1816,49 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **50. No LED feedback at all on a title with no playfield artwork.**
+      DONE 2026-08-16, branch `item/50` (closing commit on the branch; the
+      merge hash does not exist until `/finish`). Two halves, both live-checked.
+      **The positional half, which David asked for mid-item** ("if we can show
+      them positionally... also showing switches placement... even if we can't
+      show the playfield artwork"): the rig filtered every device on the
+      LITERAL image name `playfield`, so james_bond_60th_le — which calls the
+      same image `Test/scaled_playfield` — had all 138 of its positioned
+      devices dropped and was filed as having none. `devicexy.layout_image()`
+      now picks the layout by SHAPE (most device classes, then most devices),
+      `devicexy.read_table()` reads device_xy.txt so a CARD run needs no ELF,
+      artwork is accepted only when its pixel size CONTAINS the coordinates,
+      and a title whose art is refused draws on a blank field instead of
+      falling all the way to the switch list. **Bond now draws its playfield:
+      49 switches (joined 49/49 to live ids at the desk, no run, no rebuild),
+      16 coils, 73 lamps.**
+      **The swatch-grid half:** `LedGrid` in the Schematic view, roster taken
+      from the LIVE RING so it works on the four titles with `0 records` and
+      needs no group→node map. `LedRing` is Field's fade/base-layer read moved
+      out verbatim so both views decode the wire once. `ledgridtest.py` is the
+      offline harness (importing `ledratetest.Feed` rather than writing a
+      second one): 12 irregular channels → exactly 12 cells **of the 1536
+      addresses that exist**, a roster growing in 4 stages costing 4 canvas
+      items, tracking 90→255→0 with a churn control, an a2 pulse returning to
+      the BASE layer, a pulse-only lamp still earning a cell, and the centre of
+      a dark cell hit-testing to that cell.
+      **Verified live:** elvira3 (no `playfield.png` at all) showed `4 of 4
+      LEDs lit / 4 LED writes decoded`; godzilla_pro forced in with the new
+      `PAD_PF_VIEW=schematic` tracked its attract measured against the ring —
+      10 channels changed → 4635 pixels, 36 → 9811, **0 → 0** — and its roster
+      reached exactly the 113 channels its table independently says it has.
+      **Amended:** `Diagnostics → LED Tests` by name was NOT reached; the
+      ring-vs-screen measurement stands in its place, and the tracking title
+      has artwork. **Not literally true:** "a title WITH artwork is unchanged" —
+      Bond was deliberately moved into the artwork view. Both are spelled out
+      in the open-item text above, which is kept for that reason.
+      **Found on the way and split out: items 53 and 54.** An adversarial
+      review of the branch raised 19 candidate defects, 8 refuted and 4
+      confirmed and fixed — two of them regressions this pass introduced (every
+      Bond LED tooltip raised `TypeError` on `node=None`; elvira3 was promoted
+      into an artwork view with nothing on it, losing 109 clickable switch
+      rows).
 
 - [x] **48. The playfield keyboard legend is GODZILLA'S list, so every other
       title gets a legend full of holes and a row named after another game.**

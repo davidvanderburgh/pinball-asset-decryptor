@@ -67,6 +67,16 @@ These have each been violated at least once and each cost a run or a window:
   lists, so there is exactly one place to add to.
 - **Never run two measurement runs at once.** `killgame.sh` is global, so the
   older script's teardown kills the newer run mid-boot.
+- **The rig is a mutex, and the lock file is how sessions take turns.** David
+  runs more than one PAD session at a time (2026-08-15). Worktrees isolate the
+  code; nothing isolates `~/spike2root`, `~/padglhost`, the rings or the run
+  logs — so before any build, run, `killgame.sh`, save-state op or mutation
+  under the rootfs, TAKE `/home/david/.pad_rig_lock` (atomic `set -C` create,
+  content = your item branch + what you are doing, mtime = the clock), and
+  release it only when `alive.sh` reads 0 again. Held by someone else = the
+  rig is theirs; stay at the desk. Full protocol: `~/.claude/skills/next/
+  SKILL.md`, "The rig lock". A lock with `alive.sh` 0 that is under ~60 min
+  old is a session between steps, not stale.
 - **Item work commits on `item/<N>` in its own worktree, never straight to
   main.** Main is the release branch and only moves when a finished item is
   merged in — `/next` owns the mechanics (branch, sibling worktree dir, merge
@@ -1032,47 +1042,6 @@ These have each been violated at least once and each cost a run or a window:
       session with a save and a load.
 
 
-- [ ] **48. The playfield keyboard legend is GODZILLA'S list, so every other
-      title gets a legend full of holes and a row named after another game.**
-      `S3 D2`
-      **★ DAVID, 2026-08-14, looking at james_bond_60th: "the 'standard
-      playfield' switches here are probably not common on all machines. I don't
-      think the 'godzilla target' belongs here or on any machine."** He is
-      right, and the screenshot is the evidence: Bond's PLAYFIELD section shows
-      `Upper Left Flipper`, `Skill Shot`, `Left Spinner`, `Pop Bumper`,
-      `Godzilla Target` and `Right Scoop` all greyed with `n/a`, i.e. six of
-      thirteen rows are dead, and one of them is named after a different
-      machine.
-      **THE MECHANISM IS ALREADY UNDERSTOOD AND IS NOT A BUG IN THE RESOLVER —
-      do not "fix" binds_resolve().** `binds[]` (`padglhost.c:~745-790`) is a
-      fixed list whose ids are Godzilla Pro's, each row carrying candidate
-      NAMES; `binds_resolve()` looks each name up in the title's own
-      switch_list.txt and **correctly kills a row it cannot find**. Measured on
-      the live Bond run: `bind Godzilla Target: not on james_bond_60th_le; key
-      dead`, and the flippers, shooter lane, slingshots, outlanes and right
-      spinner all rebound to Bond's own ids. **So nothing fires the wrong
-      switch — the fault is that the MENU is Godzilla's, not that the binding
-      is wrong.** Item 27 built the resolver precisely to stop wrong-switch
-      presses (star_wars arrows hitting a drop target); this item is the next
-      step, and the wrong-switch class is already closed.
-      **What it should probably be instead (design, not decided):** derive the
-      playfield rows FROM THE TITLE's switch list — the useful shots on any
-      Stern are recognisable by name (slingshots, outlanes, scoops, spinners,
-      pop bumpers, targets, lanes) — and keep only the CABINET rows fixed,
-      since those are the ones measured identical on every title 2017-2024.
-      A title with no match for a letter simply does not use that letter,
-      instead of showing a dead row.
-      **Acceptance:** on three titles with different layouts (godzilla_pro,
-      james_bond_60th_le, turtles_pro) the playfield legend lists only switches
-      that title HAS, no row is named after another game, and every listed key
-      closes the switch it names — verified with `swshow.py`, not by eye.
-      — S3: nothing is broken and no key fires a wrong switch, so there is no
-      way to lose a run to it; what it costs is that the control legend is
-      misleading on every title that is not Godzilla. D2: it is desk work in
-      one table plus one resolver function, and the oracle (`swshow.py`, plus
-      the existing `bind ... key dead` lines) already exists; it needs one run
-      per title to confirm.
-
 - [ ] **50. No LED feedback at all on a title with no playfield artwork,
       which is most of them.** `S3 D3`
       **★ DAVID, 2026-08-14: "we should have some visual indication of leds
@@ -1599,6 +1568,27 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **48. The playfield keyboard legend is GODZILLA'S list, so every other
+      title gets a legend full of holes and a row named after another game.**
+      DONE 2026-08-16, `item/48`, `936836e`. `binds_playfield()` derives the
+      playfield legend from the title's own switch_list.txt — fixed keys for
+      the universal shots (arrows/F/A/S/Z/X), per-category pool keys for the
+      recognisable rest, labels = the switch's own names; Godzilla's compiled
+      rows survive only as the no-rig-env debug fallback, and WITHHELD rows
+      no longer export at all (a first run shows cabinet-only, never another
+      game's dim rows). Verified: `padglhost --binds` desk oracle over all
+      EIGHT derived switch lists (jaws gains an upper-right flipper on Down;
+      the two all-`?` titles get honest cabinet-only legends); 306 spike2
+      tests; one live masked-tables godzilla_pro run through the first-run
+      arrival path end to end (table at guest 3.5 s, 21 keys generated,
+      trough latch carried across the rebuild, coin x4 + start started a
+      real game); and David's own turtles_pro sessions drove keyboard play
+      through the derived binds (`+64k/+65k/+34k` on turtles' own ids)
+      before his "good to go". Also landed with this branch: the rig-mutex
+      non-negotiable (`.pad_rig_lock`) after two sessions ran `/next` at
+      once, and the note that godzilla's "no usage detected" tech alert eats
+      coins until the flagged switch sees usage.
 
 - [x] **51. star_wars: "UPDATING NODE BOARD RUNTIME / UPDATE FAILED" looped
       over attract and the second display stayed black.** DONE 2026-08-15,

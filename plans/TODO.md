@@ -1137,11 +1137,12 @@ These have each been violated at least once and each cost a run or a window:
       turtles' whole vocabulary over the run is `00 03 04 07 08 0a f0 f1 f2 f9
       fc fe`, with the shim answering `fe` (identity) and returning all-zeros
       to `f9`/`fc`. See the new item on the LED write shape.
-      **★ RUN LEFT UP DELIBERATELY, and DAVID IS DRIVING IT** — he is in the
-      service menu. `PAD_GAME=turtles_pro … watch.sh 8`, logs
-      `~/item50run.log` and `~/item50watch.log`, rig lock held by `item/50`.
-      A fresh session must NOT kill it; ask David first, then release
-      `/home/david/.pad_rig_lock`.
+      **The run is DOWN and the lock is RELEASED** (David: "i'm done. take
+      over", 2026-08-16). `killgame.sh` then `alive.sh` = 0 (clean); the lock
+      was read back and named `item/50` before being removed. Logs kept at
+      `~/item50run.log` and `~/item50watch.log` — the `[nbcmd]` census in the
+      first is item 54's evidence and the budget was never spent, so it is
+      complete for that run.
       **Resume:** the grid is proven offline and cannot be proven live on
       turtles until the new item lands. The cheapest live proof left is a
       title that DOES decode LED writes and lands in this view — but note
@@ -1193,14 +1194,29 @@ These have each been violated at least once and each cost a run or a window:
       wants; or (ii) the game has concluded the boards are not there and is
       not driving them at all, which makes this a sibling of items 51/52 and
       the all-zeros `f9`/`fc` replies the thing to fix.
-      **THE NAME TABLE IS A SEPARATE, CHEAPER HALF, and it is desk work.**
-      `lednames.py` dies on turtles — `struct.error: ... offset 7725056
-      (actual buffer size is 6457552)` — because it hard-codes the VA where
-      godzilla_pro 1.15.0 keeps the table. devicexy.py already solved exactly
-      this shape of problem for the device table by SEEDING FROM STRINGS
-      instead of an address, and its header says why at length. The same move
-      here gives every table-less title real lamp names, which is what item
-      50's grid shows instead of `node.index` today.
+      **THE NAME TABLE — HALF DONE 2026-08-16, and it turned out to be the
+      more interesting half.** `lednames.py` used to die on turtles
+      (`struct.error: ... offset 7725056 (actual buffer size is 6457552)`)
+      because it hard-coded godzilla's `TABLE_VA`. It now finds message tables
+      BY SHAPE, the same move devicexy.py made: a record is 0x18 bytes of FIVE
+      pointers to one string then a null, the five being untranslated language
+      slots, and requiring all five to be EQUAL is what makes the fingerprint
+      strong. **105 message tables located in godzilla_pro with no address at
+      all**, 11 of them carrying `-R/-G/-B` lamp names.
+      **★ AND IT DEMOLISHED THE OLD CONSTANT, which is the finding to keep:**
+      **`0x766000` is not the start of anything.** It is record 73 of the run
+      at `0x765928` and lands on `'Heat Ray 9-G'`, mid-family — so every
+      "channel index" that tool ever printed was offset by an arbitrary 73.
+      **There is no single LED table**: godzilla's lamp names are spread over
+      at least five runs (125, 104, 43, 27, 27 records), and names run
+      **DESCENDING** within a run — `Heat Ray 11-G, 10-B, 10-R, 10-G, 9-B`.
+      lednames.py now reports the candidate RUNS and states that its index is
+      within a run and is NOT the game's channel number, rather than inventing
+      the join. **Do not "fix" it by picking the biggest run.**
+      **What is left of this half:** the join from a run's records to the
+      game's own lamp index. The oracle is the Single LED Test itself — it
+      names one lamp against one index and one board, so a handful of stepped
+      LEDs with the names written down pins it as a labelled experiment.
       **Acceptance:** state turtles_pro's LED write frame with the lamp the
       Single LED Test named while it was captured (so the decode is labelled,
       not guessed), and show `decoded` moving above zero on a run; separately,

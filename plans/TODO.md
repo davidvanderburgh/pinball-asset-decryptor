@@ -87,12 +87,46 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **52. stranger_things wedges on LOCATING NODE BOARDS while its
       projector plays. NOT, as this item used to say, "nodes 1, 8 and 9 are
       the only boards it cannot find" — that reading is disproved below.**
-      `S2 D4` ← IN PROGRESS
-      *(**D3 → D4, 2026-08-16.** Both premises behind the D3 died this pass:
-      the census this item named as its readout is already answered, and the
-      instrument that would name the verdict per board cannot run on this
-      title at all. What is left needs a new instrument built and validated
-      before it can judge anything, which is the D4 line.)*
+      `S2 D3` ← IN PROGRESS
+      **★★★ ROOT CAUSE FOUND 2026-08-16 (code + log, not a theory), AND A FIX
+      IS COMMITTED — but NOT yet validated on a run; the rig was mid-cleanup
+      of a cross-session zombie strand. THE MECHANISM IS RIG-SIDE, so this is
+      no longer a firmware/crypto problem.** The shim tells the game the node
+      bus is EMPTY, so no board object is ever created and bring-up never
+      completes:
+      • the game's bare-00 discovery walk (`0x1d6f28`) asks the shim which
+        boards are on the bus, via `nb_next_node()`, whose schedule
+        `nb_nodes_init()` builds from the game's SWITCH TABLE (`entry[+20]`);
+      • ST has NO findable switch table — `sw_find_table()` rejects its
+        in-memory candidate (`[swfind] no switch table yet … (node,bit) not
+        distinct`, in the run log), so `SW_STRUCT` resolves to 0, `nb_nnodes`
+        stays −1, and `nb_next_node()` returns 0 on the first poll = empty bus;
+      • the tell is the **ABSENT `[nbsched] playfield nodes:` line** on ST
+        (present on godzilla) — `nb_nodes_init()` returns before printing it;
+      • so the game creates no board objects (the by-shape finder confirms:
+        godzilla 9 at 0x7bad88, ST none), yet still identifies all six
+        declared nodes correctly (item 51 census) because the identity ladder
+        is driven by the game's own static directory, not by discovery. The
+        boards are answerable; they were never discovered.
+      **THE FIX (committed `98f4797`, compiled clean, NOT run-validated):**
+      when no switch table can be found, `nb_nodes_init()` seeds the discovery
+      schedule from the title's own NODE DIRECTORY (`node_ident.txt`, which
+      nbdir.py derives and the shim already loads) minus `PAD_NB_SILENT`
+      nodes. Guarded by `!sw_find_done && sw_find_fails >= 4` so it is
+      permanently unreachable for godzilla and any title whose table is found
+      (they set `sw_find_done`). Also folds the `PAD_NB_SILENT` parse into one
+      `nb_is_silent()` used by both the fallback and `shim_read`.
+      **NEXT (the acceptance run): godzilla must still boot with `[nbsched]
+      … (from switch table)` and its 9-board array (fallback must NOT fire);
+      ST must reach `[nbsched] … (from node directory)`, create board objects,
+      and ideally boot past LOCATING NODE BOARDS.** A reader flagged a possible
+      DOWNSTREAM gate (the f9/fc runtime-info answered as 48 zero bytes) — if
+      ST now creates board objects but still wedges, the investigation moves
+      there, which is progress either way.
+      **D4 → D3: the mechanism is now known and a run reproduces it on demand,
+      so the instrument-building that made this D4 is spent.**
+      *(Earlier this day, D3 → D4 was recorded when both original premises
+      died; the mechanism crack has now brought it back to D3.)*
       *(Split out of item 51 at its close, 2026-08-15. The projector shows
       scene footage regardless, so the display side owes this nothing.)*
       **★ ESTABLISHED 2026-08-16, ENTIRELY AT THE DESK — no emulator run;

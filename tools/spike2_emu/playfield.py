@@ -2069,6 +2069,22 @@ def layout_extent(pad=NO_ART_PAD):
     return (max(p[0] for p in pts) + pad, max(p[1] for p in pts) + pad)
 
 
+#: PAD_PF_VIEW=schematic forces the switch-list-and-swatch-grid view on ANY
+#: title; PAD_PF_VIEW=field forces the positional one. Empty (the default)
+#: lets layout_is_usable() decide, which is what every normal run does.
+#:
+#: WHY IT EXISTS, and it is not a debug knob for its own sake: the grid reads
+#: the WIRE and needs no device table and no group -> node map, so it is the
+#: only view that can show the light show on a title whose artwork cannot
+#: address its lamps - james_bond_60th_le lights 0 of 73 markers while its ring
+#: carries real data (item 53). It is also the only way to watch a title's raw
+#: LED wire on a machine where the artwork view would otherwise hide it, which
+#: is how item 50's own acceptance was finally measured: godzilla_pro drives 59
+#: channels of a real attract light show, and forcing it into this view is what
+#: let the grid be watched tracking a game rather than a synthetic feed.
+PF_VIEW = (os.environ.get("PAD_PF_VIEW") or "").strip().lower()
+
+
 def layout_is_usable():
     """True when the positional view would actually SHOW something.
 
@@ -2087,6 +2103,10 @@ def layout_is_usable():
     title that fails it keeps the switch list - and gets the swatch grid, which
     reads the wire directly and so works exactly where the table does not.
     """
+    if PF_VIEW == "schematic":
+        return False
+    if PF_VIEW == "field":
+        return bool(layout_extent())
     if not layout_extent():
         return False
     if load_switches() or load_coils():

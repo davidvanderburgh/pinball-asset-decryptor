@@ -74,122 +74,35 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **51. star_wars: "UPDATING NODE BOARD RUNTIME 12 / UPDATE FAILED"
-      loops over attract, and the second display stays BLACK on real
-      content.** `S2 D4` ← IN PROGRESS
-      **★ DAVID, 2026-08-15, screenshot, and it GATES THE RELEASE: "i'm not
-      seeing the second display populate for star wars. we can't release
-      until we get it shown. otherwise it looks broken. make it work, and
-      fix the node board update failures while you're at it."** His run
-      reached ATTRACT (star field, credits line) with the update-failure
-      overlay looping on the backbox and item 44's `[display 2]` window
-      black.
-      **THE TWO FAULTS ARE PLAUSIBLY ONE. Established at the desk:**
-      star_wars ships `lcdnode-LPC1113_302-1_29_0.hex` — its playfield LCD
-      is DRIVEN BY A NODE BOARD — and the shim's `nb_idents[]` table
-      (hwshim.c ~2800) is GODZILLA'S node directory hard-coded: node 12
-      claims an LPC1313 part. If SW's node 12 is the lcdnode, the game looks
-      for `lcdnode-LPC1313-*.hex`, which does not exist, decides the runtime
-      needs updating, and the shim implements no update transfer → UPDATE
-      FAILED forever → and a game whose LCD node never comes up plausibly
-      never lights the LCD scene (item 44 measured that scene composing
-      EMPTY: `d2 4x57` video uploads in, black out — the pipe itself is
-      proven to the desktop with blue clears).
-      **The version half is already per-title** (`nb_fw_title()` reads the
-      hex filenames in "."; SW = 1.29.0 ✓). **What is hard-coded is the
-      node-id → TYPE mapping**, i.e. which part id each node must claim —
-      the item 27 disease, named in the table's own comment.
-      **Item 44's leftover, folded in:** star_wars autoattract never cleared
-      Tech Alerts in three worktree runs (David's flow does); and the
-      backbuffer probe once returned err 0x506 on a never-lit window
-      (cosmetic, self-silencing probe).
-      **Acceptance:** a star_wars boot reaches attract with NO node-update
-      failure overlay, and the `[display 2]` window shows the playfield
-      LCD's real content (`picture: d2 FIRST` with game imagery, David's
-      eyes); state what stranger_things then shows.
-      — S2, not S1: play works; what it costs is the release (David gates
-      it), the projector feature reads as broken, and an overlay defaces
-      attract. D4: the update dialogue is uncaptured yet, the fix likely
-      spans per-title derivation plus possibly emulating a chunked
-      firmware-transfer protocol, and the oracle needs runs on two titles.
-      **★ FIRST TRACE, 2026-08-15 (`/var/tmp/i51_sw_trace_run1.log`, 13537
-      lines), and it INVERTS the theory: the fault is not node-12-specific.**
-      Established: **(1) star_wars has nodes 10, 11, 13 and 15**, which
-      godzilla's `nb_idents[]` has no entry for — unknowns fall to
-      `NB_FW_DEFAULT` 0.1.0 (or worse, no reply), and the screen's faint
-      text IS "LOCATING NODE BOARDS / NODE NOT FOUND". **(2) EVERY node gets
-      `fe` (identity) re-asked in bursts of six, forever** (215-226 per node
-      in ~5 min; census-silenced node 2: 720) — the game never accepts any
-      board's identity on this title. **(3) `nb_fw_title()` works on SW**
-      (`[nbfw] node firmware 1.29.0`). **(4) The godzilla-address
-      instruments read ZEROES on SW** (`[nbhex] head = 0x00000000`,
-      `[nbtbl]` empty) — game-binary addresses are per-title, so the
-      registry readers are blind here. **(5) cmd census node 12: fe 215,
-      f2 272 (chunked 8-byte-step reads, only to nodes 7/12/14), f9 70,
-      f0 64, fc 35, f1 3** — no bulk-write/update-transfer traffic seen, so
-      the game may fail BEFORE any real transfer. **(6) Node 12 carries the
-      R2D2 mech optos** on SW — likely a tmc stepper node, NOT the lcdnode;
-      the lcdnode theory for the dark d2 is weakened but not dead.
-      **★ SUSPECT (marked as one): stranger_things' "NODES NOT FOUND" wedge
-      (items 29/50's blocker) is THIS SAME disease** — its node set differs
-      from godzilla's too. One fix may unblock three titles.
-      **★★★ THE NODE-UPDATE HALF IS FIXED, VERIFIED ON SCREEN, 2026-08-15
-      (`1bc8276`):** star_wars booted with 12 derived identities (`[nbid] …
-      (derived)` per node), the census silenced NOTHING (directory names
-      node 2 Cabinet Lights), the update walk shrank 12→4 and COMPLETED, the
-      game reached Guided Setup (fresh card = fresh settings), saved, and
-      fell into CLEAN ATTRACT — tutorial video, pricing card, NO overlay, NO
-      faint LOCATING text (screenshots). nbdir.py reproduces godzilla's
-      measured claims exactly (the labelled example, all 8 nodes,
-      type/part/variant/fw).
-      **Two corrections from the run:** (a) ~200 `fe`/node is the game's
-      NORMAL periodic identity poll — the 48-ask "refused" detector fired
-      for boards the walk plainly accepted, so its threshold is noise;
-      retire or re-key it on post-registration rate. (b) The d2/node
-      COUPLING IS FALSE: with nodes healthy and the game in clean attract,
-      `picture: d2 STILL BLACK` — 0 lit pixels of 1044480 — while ch2 video
-      uploads into the d2 scene every swap (`d2 4x59 no-draw 0/63`).
-      **★ THE d2 MECHANISM, NARROWED BY THE ITEM-43 SEQUENCE DUMP
-      (`/var/tmp/i51_seqdump_full.txt`):** the LCD pipeline is offscreen
-      (BINDFBO 1, TEXDIRECT, draw) → BINDFBO 0 → TARGET 2 → composite
-      (USEPROGRAM 6, BINDTEX 3, **BINDVAO 2**, DRAWARRAYS 4/6) → SWAP. Per
-      the wire and the TARGET handler's rebind, the composite should land in
-      fbo_screen2 — it reads all-zero. Suspects: the VAO-based composite
-      draw (the d0 scene draws attrib-pointer-style; only this composite
-      uses a real VAO) vs the map_fbo[0] switch not landing. NOTE the seq
-      dump prints TARGET as `?` — its name table predates the op.
-      **★★★ THE SECOND DISPLAY IS LIT, 2026-08-15 evening: `picture: d2
-      FIRST at frame 2 (102511 of 1044480 pixels)`, the STAR WARS logo on
-      the `[display 2]` window, screenshot sent to David.** The black-LCD
-      chain, each link measured (`e8f7781`, `7e85e57`):
-      **(1)** Solo mode composed black too → game-side, not item 44's
-      routing. **(2)** The clip is FINE (Stern logo on a starfield, decoded
-      and eyeballed; YAVG 16.5 = mostly dark, content real). **(3)** The
-      post-draw probe (new, lives gated inside the armed seq-dump window)
-      read err **0x506** off the offscreen stage: **guest FBO 1 was
-      INCOMPLETE on the host** — its attachment is defined only through the
-      Vivante map path, never given storage — and GL silently dropped every
-      LCD draw while the bridge's canned `glCheckFramebufferStatus` told the
-      game COMPLETE. Fix: `FBOTEX` allocates fb-sized RGBA for a
-      storage-less attachment (`tex_stored[]`, reset with the journal
-      world). **(4)** Still black → the last link: **two names, one
-      buffer** — `glTexDirectVIV` ALLOCATES the LCD framebuffer under the
-      render-target name and the game MAPS the returned pointer under the
-      sampler name; one physical buffer on hardware, two unrelated host
-      textures here, so the composite sampled memory nothing wrote. Fix:
-      the bridge aliases a Map that adopts another registration's own
-      buffer and translates the EMITTED name on BindTexture/FBOTEX
-      (detection exact — compared against alloc'd buffers only, video ring
-      slots can never trip it). **Which rewrites item 27's history: the
-      32.8%-black-frames flicker was bright-vs-BLACK — the LCD scene had
-      composed black in this rig since forever.**
-      **Remaining before close:** godzilla_pro regression run (single
-      display, no aliasing expected, unchanged behaviour), stranger_things
-      report on the routing+identity build, retire/re-key the 48-ask
-      refusal detector (fe ~200/node is the game's NORMAL poll — it cried
-      wolf on accepted boards), handoff long form, merge. **David's
-      acceptance is the release gate; no release without his yes.**
-
+- [ ] **52. stranger_things: nodes 1, 8 and 9 — the three pinnodes — are
+      the ONLY boards the game cannot find, and it wedges on LOCATING NODE
+      BOARDS while its projector plays.** `S2 D3`
+      *(Split out of item 51 at its close, 2026-08-15: 51's derived
+      identities got ST's ws2812node and node4 boards FOUND — the wedge
+      shrank from "no nodes at all" to exactly the pinnode trio — and the
+      projector shows scene footage regardless, so the display side owes
+      this nothing.)*
+      **Observed (screenshot in the item-51 record):** main window
+      `LOCATING NODE BOARDS / 1 8 9 / NODES NOT FOUND`; `[nbid]` shows all
+      six boards claiming derived identities (pinnodes: part 0x00020023,
+      variant 0x01, fw 1.19.0 — the same claim SHAPE star_wars accepts at
+      1.29.0 and godzilla at 1.35.0). "NOT FOUND" is the game's ABSENT
+      verdict, not a grading failure — so ST's binary either parses the fe
+      reply differently for pinnode-class boards or validates a field the
+      shim answers globally (hwid 0x0001 for every node is the obvious
+      suspect).
+      **The instrument that decides it exists already:** hwshim's `[nbcen]`
+      per-command reply-length census — "fe asks an 11-byte payload and
+      only on FAILURE retries with a 10-byte one (reply_len 12), so a
+      nonzero count at 12 is a direct readout of the identity exchange
+      failing" — plus `PAD_NB_HWID` to sweep board ids without a rebuild.
+      **Acceptance:** stranger_things boots past LOCATING NODE BOARDS with
+      no NOT FOUND overlay, stated with a screenshot; then say what its
+      attract shows on BOTH displays.
+      — S2: the title is unplayable past boot, but no other title is
+      affected and the projector/display work is delivered; it costs runs
+      on one title. D3: one run cycle with existing instruments
+      (PAD_NB_DUMP census + PAD_NB_HWID sweep), fault reproduces on demand.
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
       instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**
@@ -1686,6 +1599,34 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **51. star_wars: "UPDATING NODE BOARD RUNTIME / UPDATE FAILED" looped
+      over attract and the second display stayed black.** DONE 2026-08-15,
+      `item/51` (`7103ba6`..close). **Three stacked faults, none coupled the
+      way anyone guessed; both of David's asks verified on screen the same
+      evening.** (1) NODE IDENTITY IS THE TITLE'S OWN: each game ELF
+      statically declares its node directory; `nbdir.py` derives it
+      (reproduces godzilla's measured table EXACTLY — the labelled example),
+      watch.sh writes `node_ident.txt`, hwshim consumes it with the old
+      godzilla table as fallback, and the census gained the directory as
+      weak-branch evidence (star_wars node 2 = Cabinet Lights, the exact
+      "no such title is known" hazard, un-silenced). star_wars: update walk
+      completed, Guided Setup, CLEAN ATTRACT — no overlay. (2) A VIV-mapped
+      FBO attachment had no host storage → guest FBO INCOMPLETE → GL
+      silently dropped every LCD draw while the bridge's canned
+      CheckFramebufferStatus said COMPLETE; FBOTEX now heals storage-less
+      attachments. (3) TWO NAMES, ONE BUFFER: glTexDirectVIV allocates the
+      LCD framebuffer under the render-target name, the game Maps the same
+      pointer under the sampler name; the bridge now aliases the emitted
+      names. `picture: d2 FIRST at frame 2, 102511 lit` — the STAR WARS
+      logo in the [display 2] window, screenshot to David. **Rewrites item
+      27's record: its 32.8%-black flicker was bright-vs-BLACK; the LCD
+      scene had never composed a pixel in this rig.** Regressions:
+      godzilla identical (claims byte-equal, node 2 still silent, new paths
+      dormant); stranger_things's projector SHOWS SCENE FOOTAGE and its
+      wedge shrank to the pinnode trio (split to item 52). Retired: a
+      48-re-ask refusal detector (fe ~200/node is the game's normal poll).
+      Long form: handoff REMAINING item 51.
 
 - [x] **44. Stranger Things' PROJECTOR picture has nowhere to go.** DONE
       2026-08-15, `item/44`, `a2eafb4`..`e693e4f` (+ close). **The second

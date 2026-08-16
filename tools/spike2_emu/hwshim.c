@@ -3123,8 +3123,197 @@ static void nb_dump_boards(void)
  * and [+12] is non-zero for the populated ones), and godzilla is the labelled
  * example any finder must reproduce 0x7bad88 on before it is trusted. */
 TITLE_ADDR(a_nb_objs, "PAD_NB_OBJS", 0x7bad88u)
-#define NB_OBJS   a_nb_objs()
 #define NB_OBJ_SZ 0xe0u
+
+/* ★ ITEM 52: FIND THE ARRAY BY SHAPE, so this instrument works on a title
+ * other than the one it was measured on.
+ *
+ * THE SHAPE, taken from a measured godzilla dump rather than from prose - every
+ * populated slot LABELS ITSELF with its own index:
+ *
+ *     [nbobj] slot  0 node  0 ... status=2      [nbobj] slot  8 node  8 ...
+ *     [nbobj] slot  1 node  1 ... status=2      [nbobj] slot  9 node  9 ...
+ *     [nbobj] slot  2 node  2 ... status=8      [nbobj] slot 12 node 12 ...
+ *     [nbobj] slot  4 node  4 ... status=7      [nbobj] slot 14 node 14 ...
+ *
+ * so for 32 slots of stride 0xe0: [+12] non-zero means the slot is in use, and
+ * every in-use slot has [+0] == its own index and [+24] a status below 12. The
+ * self-labelling is what makes the base UNIQUE - a candidate off by one slot
+ * has every id one out and dies immediately - so no alignment guess is needed.
+ *
+ * DELIBERATE DUPLICATION, and it is worth a line. This repeats sw_find_table()'s
+ * /proc/self/maps walk instead of sharing it, because factoring that out would
+ * edit the switch table's discovery path - which is load-bearing on exactly the
+ * titles this pass is investigating, and which this pass has no way to
+ * regression-test. If a THIRD one of these ever appears, factor all three then.
+ *
+ * Reads stay inside the region the maps line already proved mapped, so no
+ * addr_readable() call is needed per candidate and the scan costs no syscalls. */
+/* Returns the number of in-use slots if EVERY in-use slot is self-consistent,
+ * and 0 the moment one is not. The count is the caller's to judge: three is
+ * enough to act on, and one or two is reported as a near miss rather than
+ * thrown away, because "an array with two boards in it" and "no array at all"
+ * are completely different answers about a title that will not boot - and a
+ * finder that cannot tell them apart is the kind of instrument this rig has
+ * been burned by before. */
+static unsigned nb_objs_shape_ok(unsigned base)
+{
+    unsigned i, present = 0;
+    for (i = 0; i < 32; i++) {
+        const unsigned char *o =
+            (const unsigned char *)(unsigned long)(base + i * NB_OBJ_SZ);
+        if (!*(const unsigned *)(o + 12)) continue;      /* slot not in use */
+        if (o[0] != (unsigned char)i) return 0;          /* must self-label */
+        if (*(const unsigned *)(o + 24) >= 12u) return 0;   /* status is 0..11 */
+        present++;
+    }
+    return present;
+}
+
+/* NB_OBJS_MIN is what separates a hit from a near miss, and the difference
+ * MATTERS TO THE SCAN ITSELF, not just to the report. A hit skips its own
+ * 0x1c00 span, because an array cannot start inside another one; a near miss
+ * must NOT, because weak 1-2 slot coincidences are common and each skip is
+ * 0x1c00 bytes of address space unexamined. Letting them skip cost this pass a
+ * godzilla regression: the scan matched a 2-slot coincidence, jumped its span,
+ * and sailed straight over the real 9-slot array at 0x7bad88 that the previous
+ * build had found. The labelled example caught it; that is what it is for. */
+#define NB_OBJS_MIN 3u
+
+static unsigned nb_scan_objs(unsigned *best_out, unsigned *near, unsigned *near_n)
+{
+    char buf[8192];
+    int fd, n;
+    int (*ro)(const char *, int, ...) = dlsym(RTLD_NEXT, "open");
+    long (*rr)(int, void *, unsigned long) = dlsym(RTLD_NEXT, "read");
+    int (*rc)(int) = dlsym(RTLD_NEXT, "close");
+    unsigned best = 0, best_n = 0;
+
+    if (!ro || !rr) return 0;
+    fd = ro("/proc/self/maps", 0, 0);
+    if (fd < 0) return 0;
+    while ((n = (int)rr(fd, buf, sizeof buf - 1)) > 0) {
+        char *line = buf, *end = buf + n;
+        buf[n] = 0;
+        while (line < end) {
+            char *nl = line, *p = line;
+            unsigned long lo = 0, hi = 0;
+            while (nl < end && *nl != '\n') nl++;
+            if (nl >= end) break;
+            *nl = 0;
+            while (*p && *p != '-') {
+                int c = *p++;
+                if (c >= '0' && c <= '9') c -= '0';
+                else if (c >= 'a' && c <= 'f') c -= 'a' - 10;
+                else break;
+                lo = lo * 16 + (unsigned long)c;
+            }
+            if (*p == '-') {
+                p++;
+                while (*p && *p != ' ') {
+                    int c = *p++;
+                    if (c >= '0' && c <= '9') c -= '0';
+                    else if (c >= 'a' && c <= 'f') c -= 'a' - 10;
+                    else break;
+                    hi = hi * 16 + (unsigned long)c;
+                }
+            }
+            if (hi > lo && hi - lo < 0x4000000UL && lo >= 0x8000UL
+                && hi < 0xf0000000UL && p[0] == ' ' && p[1] == 'r'
+                && p[2] == 'w') {
+                unsigned a, span = 32u * NB_OBJ_SZ;
+                for (a = (unsigned)lo; (unsigned long)a + span <= hi; a += 4) {
+                    unsigned cnt = nb_objs_shape_ok(a);
+                    if (!cnt) continue;
+                    if (cnt < NB_OBJS_MIN) {          /* weak: keep scanning */
+                        if (near && cnt > *near_n) { *near = a; *near_n = cnt; }
+                        continue;
+                    }
+                    if (cnt > best_n) { best = a; best_n = cnt; }
+                    a += span - 4;      /* a real hit consumes its own array */
+                }
+            }
+            line = nl + 1;
+        }
+    }
+    if (rc) rc(fd);
+    if (best_out) *best_out = best_n;
+    return best;
+}
+
+/* Resolve once GENUINELY FOUND, and never cache a miss: the array is populated
+ * as the game brings the bus up, so an early call must be allowed to fail and
+ * be asked again. (TITLE_ADDR caches 0 forever, which is right for a fixed
+ * address and wrong for a scan.) */
+static unsigned nb_objs_addr(void)
+{
+    static unsigned found;
+    unsigned a, cnt = 0;
+    char m[200];
+
+    if (found) return found;
+    a = a_nb_objs();                       /* PAD_NB_OBJS, else the built-in */
+    if (getenv("PAD_NB_OBJS")) {           /* an explicit override is obeyed */
+        found = a;
+        return found;
+    }
+    {
+        unsigned near = 0, near_n = 0;
+        a = nb_scan_objs(&cnt, &near, &near_n);
+        if (!a) {
+            /* Report the best near miss ONCE, so a title that finds nothing
+             * says what it did see. One or two self-consistent boards is a
+             * real answer about a title stuck bringing its bus up; silence is
+             * not. */
+            static int said;
+            if (near && !said) {
+                said = 1;
+                snprintf(m, sizeof m,
+                         "[nbobj] near miss: a self-consistent board array at "
+                         "0x%08x with only %u slot(s) in use - below the %u "
+                         "needed to act on, but NOT nothing\n",
+                         near, near_n, NB_OBJS_MIN);
+                logmsg(m);
+            }
+            return 0;
+        }
+    }
+    found = a;
+    /* THE LABELLED-EXAMPLE CHECK, printed by the rig itself: on godzilla_pro
+     * the scan must land on the address this file has always hard-coded. Any
+     * other title has nothing to compare against, and says so. */
+    snprintf(m, sizeof m,
+             "[nbobj] board objects found by shape at 0x%08x, %u slots in use "
+             "(built-in godzilla address 0x%08x: %s)\n",
+             a, cnt, 0x7bad88u,
+             a == 0x7bad88u ? "AGREES"
+                            : "differs - correct unless this IS godzilla_pro");
+    logmsg(m);
+    return found;
+}
+
+/* ★ ITEM 52: IS THIS THE TITLE THE BUILT-IN NODE-BUS ADDRESSES WERE MEASURED
+ * ON? NB_TABLE, NB_RECORDS and NB_HEXLIST are Godzilla Pro 1.15.0 literals -
+ * two of them plain #defines with no override at all - and on any other title
+ * they point into somebody else's data.
+ *
+ * That is not merely useless, it is DANGEROUS, and this pass proved it: with
+ * PAD_NB_DUMP on, stranger_things read NB_HEXLIST, got a plausible-looking
+ * 0x0086ce9c that passes every range check nb_dump_hexlist() makes, walked it,
+ * and the GUEST SEGFAULTED. Item 51's ST run never crashed because it never
+ * set PAD_NB_DUMP; turning the diagnostic on is what killed the title it was
+ * meant to diagnose.
+ *
+ * The gate is the by-shape scan agreeing with the built-in base, which is a
+ * MEASURED test rather than "is this address readable" - the readable test is
+ * exactly the trap that once had the shim reading a switch table out of
+ * another title's memory. */
+static int nb_addrs_are_this_title(void)
+{
+    return nb_objs_addr() == 0x7bad88u;
+}
+
+#define NB_OBJS   nb_objs_addr()
 
 static const char *nb_status_name(unsigned s)
 {
@@ -5925,9 +6114,23 @@ static void nb_maybe_dump(void)
     }
     if (every <= 0) return;
     if (++n % every) return;
-    nb_dump_boards();
+    /* nb_dump_objs() finds its own array per title and is safe anywhere. The
+     * other two are built on Godzilla Pro 1.15.0 literals and crashed
+     * stranger_things when they were let loose on it - see
+     * nb_addrs_are_this_title(). Say so rather than skipping in silence. */
     nb_dump_objs();
-    nb_dump_hexlist();
+    if (nb_addrs_are_this_title()) {
+        nb_dump_boards();
+        nb_dump_hexlist();
+    } else {
+        static int said;
+        if (!said) {
+            said = 1;
+            logmsg("[nbtbl] skipped: the registry and hex-list dumps are "
+                   "Godzilla Pro 1.15.0 addresses and this is not that title "
+                   "(walking them here segfaulted stranger_things)\n");
+        }
+    }
     nb_dump_census();
 }
 

@@ -113,12 +113,21 @@ These have each been violated at least once and each cost a run or a window:
       now had for free, and **the "pinnode-specific `fe` reply-length"
       suspect is DEAD.** So is the `PAD_NB_HWID` suspect as a wire
       explanation: the global 0x0001 goes to the passing boards too.
-      **★★ (2) AND NOTHING REGISTERED — INCLUDING THE BOARDS THE SCREEN DOES
-      NOT NAME.** In that whole log **no addressed subcommand at or below
-      0xef reached ANY node**; the only traffic is `fe`/`f9`/`fc`, all above
-      the 0x59ec1c gate, plus the unaddressed `03`/`0a`. A registered board
-      gets subcommands; none did. **So "1 8 9" is NOT the game naming three
-      that failed while 2/4/12 passed** — the reading this item was built on.
+      **▼ CORRECTION, same day, from the godzilla control run — an earlier
+      version of this entry argued "no addressed subcommand at or below 0xef
+      reached ANY node, therefore nothing registered". THAT INFERENCE IS
+      WITHDRAWN.** Godzilla, which boots clean, sends none either: its command
+      census over both a 45 s bridged run and the long `gz100.log` is
+      `fe f2 f0 f9 fa fc f1` and nothing at or below 0xef. So the test does
+      not separate a working title from a wedged one at these run lengths and
+      must not be used as evidence. (The `70 XX` switch-config writes this
+      file records elsewhere evidently belong to a later phase or a different
+      tracer.) The conclusion it was supporting still stands, on (1) and (3)
+      below — but it stands on those, not on this.
+      **★★ (2) SO "1 8 9" IS NOT THE GAME NAMING THREE THAT FAILED WHILE
+      2/4/12 PASSED** — the reading this item was built on — because what
+      those three actually have in common is declared statically and is
+      IDENTICAL on a title that boots.
       **What "1 8 9" actually tracks is the flags word in the title's own
       node directory, and it is the SAME on a title that boots.**
       `nbdir.py --dump` (added this pass) prints the two record fields the
@@ -151,23 +160,57 @@ These have each been violated at least once and each cost a run or a window:
       same three pinnode classes as godzilla (`pinnode-LPC1112_101`,
       `-LPC1112_201`, `-LPC1313`, all at `1_19_0`) and `nbdir.py` picks class
       1 on both, so CLASS_PREF is not the difference either.
-      **Resume — the next pass's job is the INSTRUMENT, not another theory.**
-      Find the board-object array PER TITLE instead of hard-coding godzilla's.
-      By shape at runtime is the durable form: 32 slots of stride 0xe0 where
-      `slot[i][+0] == i` and `[+12]` is non-zero for the populated ones — and
-      **godzilla is the labelled example any finder must reproduce 0x7bad88
-      on before it is allowed to judge ST**, per this rig's rule about
-      validating an instrument on a known case first. Then one ST run reads
-      `board[+24]` for all six boards and the verdict names itself. The
-      remaining suspects are title-wide rather than pinnode-specific: the
-      48-byte runtime-info record (`f9/00`, `f9/01`, `fc`) is answered as
-      **48 zero bytes for every board**, and node-bus bring-up gates on the
-      coin-door interlock (godzilla `0x1d6fb8` waits up to 60 s for it).
-      **Uncommitted: nothing.** `nbdir.py --dump` and the hwshim comment are
-      committed on `item/52`; `--check-godzilla` still passes, so the
-      derivation itself is unchanged.
-      **No live run.** The rig lock was taken for the card mount and
-      released; `alive.sh` reads 0.
+      **★★★★ (4) THE INSTRUMENT IS BUILT, VALIDATED, AND IT ANSWERS: ON
+      STRANGER_THINGS THERE ARE NO BOARD OBJECTS AT ALL.** `nb_scan_objs()` in
+      hwshim.c finds the array BY SHAPE per title — 32 slots of stride 0xe0,
+      every in-use slot (`[+12]` non-zero) self-labelling with `[+0] == its
+      own index` and carrying a status below 12 — so the instrument no longer
+      depends on any hard-coded address.
+      **Validated on the labelled example first, as this rig requires:** on
+      godzilla_pro it prints `board objects found by shape at 0x007bad88, 9
+      slots in use (built-in godzilla address 0x007bad88: AGREES)` and dumps
+      all nine slots with the statuses the historical `gzFinal.log` recorded.
+      **Then, stranger_things, 3-minute card run, 11 dump ticks, the game
+      rendering healthily throughout (15340 frames, 56.3 fps): NO ARRAY.**
+      Eleven times `no node-object table known for this title`, and the best
+      thing anywhere in the guest's writable memory is a **near miss: a
+      self-consistent board array at 0x0087429c with only 2 slots in use**.
+      **So the game is not failing to GRADE its boards — it never creates the
+      board records in the first place.** That is consistent with everything
+      else here (identical wire traffic, no registration) and it moves the
+      question from "why does the pinnode claim get rejected" to "why does the
+      board-object table never get populated".
+      **★ AND A TRAP PAID FOR, which is why this cost a run: `PAD_NB_DUMP`
+      CRASHED STRANGER_THINGS.** `nb_dump_hexlist()` dereferences
+      `NB_HEXLIST 0x7e1b98` — another godzilla literal, a plain `#define` —
+      got a plausible `0x0086ce9c` that passes every range check it makes,
+      walked it, and the guest **segfaulted**. Item 51's ST run never crashed
+      only because it never set `PAD_NB_DUMP`: turning the diagnostic on is
+      what killed the title it was meant to diagnose. Both godzilla-address
+      dumps are now gated behind `nb_addrs_are_this_title()` — which asks the
+      by-shape scan whether it agrees with the built-in base, a MEASURED test
+      rather than the "is it readable" one that is the trap itself — and the
+      skip announces itself instead of being silent.
+      **▼ One regression made and caught by the labelled example, recorded
+      because it is the argument FOR having one:** an intermediate build let a
+      weak 1-2 slot coincidence consume its own 0x1c00 span, so the scan
+      jumped clean over godzilla's real 9-slot array and reported a 2-slot
+      one instead. Only a hit at or above `NB_OBJS_MIN` may skip; a near miss
+      keeps scanning. Caught in one run because godzilla's answer is known.
+      **Resume.** The question is now "why is the board-object table never
+      populated on ST", and the near miss at `0x0087429c` (2 self-consistent
+      slots) is the thread to pull: dump those two slots' node ids and
+      statuses to see whether it is the real array caught half-built or a
+      coincidence. Remaining suspects stay title-wide rather than
+      pinnode-specific — the 48-byte runtime-info record (`f9/00`, `f9/01`,
+      `fc`) is answered as **48 zero bytes for every board**, and node-bus
+      bring-up gates on the coin-door interlock (godzilla `0x1d6fb8` waits up
+      to 60 s for it, and ST's own address for that is unknown).
+      **Uncommitted: nothing.** All of it is committed on `item/52`;
+      `--check-godzilla` and the godzilla `[nbobj]` labelled example both
+      pass.
+      **No live run left up.** The rig lock was taken for the build, the card
+      mount and both runs, and released; `alive.sh` reads 0.
       **Acceptance (unchanged):** stranger_things boots past LOCATING NODE
       BOARDS with no NOT FOUND overlay, stated with a screenshot; then say
       what its attract shows on BOTH displays.

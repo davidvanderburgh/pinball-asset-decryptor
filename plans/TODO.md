@@ -1100,19 +1100,30 @@ These have each been violated at least once and each cost a run or a window:
       address. It is not only Bond: **jaws draws 65 of its 143 LED channels and
       john_wick 53 of 406** for the same reason, and nobody noticed because
       both look fine. Positions are known; the wire address is not.
-      **WHAT IS LEFT — the swatch grid, which is what this item was filed as.**
-      Drive it from the LIVE RING, not from led_io.txt: a grid grouped by node
-      exactly as the switch list is, one cell per FIXTURE where a name joins
-      the channels and per channel where it does not, named from `device_xy`
-      where a name exists and `node.index` where it does not. Reading the
-      padled block directly is what makes it work on the 4 titles with no table
-      at all — **and it needs no group → node map**, so it also shows the light
-      show on Bond/jaws/john_wick that (4) currently costs them.
-      **Resume:** build `LedGrid` in the `Schematic` view (`playfield.py`),
-      then `ledgridtest.py` in `ledratetest.py`'s shape — it already publishes
-      a fake padled block and drives the REAL window offline, so the grid can
-      be judged against a known answer with no emulator. Include the labelled
-      negative: a channel the ring never writes must never get a cell.
+      **★ (5) THE SWATCH GRID IS BUILT AND PASSES OFFLINE, `5e87bb9`.**
+      `LedGrid` in the `Schematic` view, roster from the LIVE RING so it works
+      on the 4 titles with no table and needs no group → node map. `LedRing`
+      is Field's fade/base-layer read moved out verbatim, so both views decode
+      the wire once. `ledgridtest.py` is the harness, in `ledratetest.py`'s
+      shape and importing its `Feed`: 12 irregular channels → exactly 12 cells
+      **of the 1536 addresses that exist** (the labelled negative), a roster
+      growing in 4 stages costing 4 canvas items, tracking 90→255→0 with a
+      churn control, and an a2 pulse returning to the BASE layer. turtles_pro
+      captured showing 111 channels on nodes 8/9, "86 of 111 LEDs lit".
+      **Ruled out / fixed on the way:** `_rebuild` first made fresh cell dicts
+      per rebuild, leaking a canvas item per cell and burying the node headers
+      under stale swatches — invisible to a test that lights everything at
+      once. The staged-growth case exists because of it.
+      **★ LIVE RUN, 2026-08-16 ~16:0x: turtles_pro from THIS branch**,
+      `PAD_GAME=turtles_pro … watch.sh 8` (8-minute backstop), log
+      `~/item50run.log`, launcher log `~/item50watch.log`. **The rig lock is
+      held by `item/50`.** If you are a fresh session: this run is THIS item's,
+      not David playing — `killgame.sh` it if it is still up and release
+      `/home/david/.pad_rig_lock`.
+      **Resume:** with the run up, confirm the grid tracks the game — the
+      strong form is `Diagnostics → LED Tests` driving one fixture at a time
+      by name, the weak form is the attract light show moving the cells. State
+      which one was reached and what it showed.
       **Acceptance:** on a title with no artwork the window shows LED activity
       that visibly tracks the game (state what you compared it against — the
       LED-writes counter moving with cells changing is the weakest form; the

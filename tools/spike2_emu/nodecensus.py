@@ -193,13 +193,41 @@ def switch_nodes(game=None, table_path=None):
     return dict(out)
 
 
-def silent_nodes(counts, swnodes=None):
+def dir_nodes(path):
+    """{node id} declared by the title's own node directory (nbdir.py output),
+    or an empty set. THE THIRD EVIDENCE SOURCE (item 51): the game ELF's
+    static node directory names every board the title expects, switches or
+    no switches - which closes the hazard silent_nodes() documents below:
+    star_wars_le has an unreadable device table AND a switch-free populated
+    node 2 (its directory: Cabinet Lights, ws2812node), so the switch-list
+    fallback silenced a real board and the game hammered its identity 720
+    times in five minutes looking for it."""
+    out = set()
+    try:
+        with open(path) as f:
+            for line in f:
+                m = re.match(r"node=(\d+)\s", line)
+                if m:
+                    out.add(int(m.group(1)))
+    except (OSError, TypeError):
+        return set()
+    return out
+
+
+def silent_nodes(counts, swnodes=None, dirnodes=None):
     """The nodes the shim should NOT answer for, and why, as (list, reason).
 
     Two sources, and the weaker one is used ONLY when the stronger is absent.
     Returns an empty list whenever neither can support the claim, which is the
     safe direction: an extra board answering is a Tech Alert you can see and
     then explain, where a silenced board that exists is devices that vanish.
+
+    `dirnodes` (item 51) guards ONLY the weak branch: a node the title's own
+    directory declares is never silenced off switch-list evidence, because a
+    light-only board has no switches by construction. It deliberately does
+    NOT override the device-table branch - godzilla's directory also declares
+    node 2, and the measured truth there is that the config table's zero
+    devices is what decides the registered bit, so the strong evidence stands.
     """
     if readable(counts):
         absent = [n for n in CANDIDATES if n not in counts]
@@ -225,7 +253,16 @@ def silent_nodes(counts, swnodes=None):
         return [], ("neither the device table nor a switch list could be read "
                     "(no board %s in either), so nothing is silenced"
                     % " or ".join(str(n) for n in PLAYFIELD_NODES))
-    absent = [n for n in CANDIDATES if n not in swnodes]
+    dirnodes = dirnodes or set()
+    absent = [n for n in CANDIDATES if n not in swnodes and n not in dirnodes]
+    saved = [n for n in CANDIDATES if n not in swnodes and n in dirnodes]
+    if saved and not absent:
+        return [], ("the device table did not read and the switch list has "
+                    "no switch on %s, but the title's own node directory "
+                    "declares %s - a light-only board has no switches, so "
+                    "nothing is silenced" % (
+                        ", ".join("node %d" % n for n in saved),
+                        ", ".join("node %d" % n for n in saved)))
     if not absent:
         return [], ("the device table did not read; the switch list puts %s, "
                     "so nothing is silenced" % ", ".join(
@@ -244,6 +281,10 @@ def main():
                                   "extracted and has no run published yet")
     ap.add_argument("--switches", help="switch_list.txt, for the fallback when "
                                        "the device table cannot be read")
+    ap.add_argument("--nodedir", help="node_ident.txt (nbdir.py output): the "
+                                      "title's own node directory, which "
+                                      "guards the switch-list fallback "
+                                      "against light-only boards (item 51)")
     ap.add_argument("--silent", action="store_true",
                     help="print only the PAD_NB_SILENT value (may be empty)")
     a = ap.parse_args()
@@ -259,7 +300,7 @@ def main():
             print("no device table: %s" % e, file=sys.stderr)
 
     sw = switch_nodes(a.game, a.switches)
-    nodes, why = silent_nodes(counts, sw)
+    nodes, why = silent_nodes(counts, sw, dir_nodes(a.nodedir))
 
     if a.silent:
         print(",".join(str(n) for n in nodes))

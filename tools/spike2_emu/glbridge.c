@@ -316,10 +316,18 @@ int glDeleteTextures(int n, const unsigned int *ids)
 static unsigned cur_unit;                /* index, not the GL_TEXTURE0 enum */
 static unsigned cur_tex2d[16];
 
+/* item 51: two guest texture names can wrap ONE buffer (star_wars allocates
+ * its playfield-LCD framebuffer through glTexDirectVIV on one name and Maps
+ * the returned pointer under another - render target and sampler of the
+ * same memory, the Vivante zero-copy idiom). The host has no shared backing,
+ * so the EMITTED name is translated to the canonical one; the guest-side
+ * shadows keep the game's own names. */
+static unsigned viv_alias(unsigned name);
+
 int glBindTexture(unsigned int t, unsigned int id)
 { const unsigned int op_ = PADGL_BINDTEX;
   if (t == 0x0DE1u) cur_tex2d[cur_unit & 15u] = id;   /* GL_TEXTURE_2D */
-  U(t,id); return 0; }
+  U(t,viv_alias(id)); return 0; }
 int glActiveTexture(unsigned int u)
 { const unsigned int op_ = PADGL_ACTIVETEX; cur_unit = (u - 0x84C0u) & 15u; U(u); return 0; }
 int glTexParameteri(unsigned int t, unsigned int p, int v)
@@ -568,7 +576,8 @@ int glBindFramebuffer(unsigned int t, unsigned int id)
 { const unsigned int op_ = PADGL_BINDFBO; U(t,id); return 0; }
 int glFramebufferTexture2D(unsigned int t, unsigned int att, unsigned int tt,
                            unsigned int tex, int level)
-{ const unsigned int op_ = PADGL_FBOTEX; U(t,att,tt,tex,(unsigned)level); return 0; }
+{ const unsigned int op_ = PADGL_FBOTEX;
+  U(t,att,tt,viv_alias(tex),(unsigned)level); return 0; }   /* item 51 */
 int glCheckFramebufferStatus(unsigned int t) { (void)t; return 0x8CD5; }
 
 /* ---- draws ---- */
@@ -655,11 +664,35 @@ const char *glGetString(unsigned int n)
 #define VIVMAX 8
 struct viv_reg {
     unsigned used, name, w, h, fmt;
+    unsigned alias_of;            /* item 51: this name Maps another texture's
+                                   * OWN buffer - one memory, two names       */
     const unsigned char *px;      /* what Invalidate must send                */
     unsigned char *own;           /* this texture's OWN buffer, allocate path */
     unsigned long ownsz;
 };
 static struct viv_reg viv_tab[VIVMAX];
+
+/* item 51: the emitted-name translation. star_wars builds its playfield-LCD
+ * scene the Vivante zero-copy way: glTexDirectVIV allocates a buffer under
+ * one texture name (the FBO render target), then glTexDirectVIVMap adopts
+ * THE SAME pointer under a second name (the composite's sampler). On real
+ * hardware both wrap one physical buffer; on the host they were two
+ * unrelated textures, so the composite sampled memory nothing ever wrote
+ * and the LCD scene composed black - through every present path, since
+ * forever (item 27's "32.8% black frames" flicker was bright-vs-BLACK).
+ * Detection is exact: a Map whose address equals another registration's own
+ * buffer. Ring-slot video addresses can never trip this - they are compared
+ * against `own` allocations only. */
+static unsigned viv_alias(unsigned name)
+{
+    int i;
+    if (!name) return name;
+    for (i = 0; i < VIVMAX; i++)
+        if (viv_tab[i].used && viv_tab[i].name == name
+            && viv_tab[i].alias_of)
+            return viv_tab[i].alias_of;
+    return name;
+}
 
 /* The slot for the currently bound GL_TEXTURE_2D, claiming a free one if this
  * texture has not registered before. Null only if all eight are taken, which
@@ -751,6 +784,21 @@ void glTexDirectVIVMap(unsigned int target, int w, int h, unsigned int fmt,
     if (!r) return;
     r->w = (unsigned)w; r->h = (unsigned)h; r->fmt = fmt;
     r->px = logical ? (const unsigned char *)*logical : 0;
+    /* item 51: does this Map adopt a buffer glTexDirectVIV handed out under
+     * another name? Then the two names are one memory - record the alias so
+     * every emitted bind and attach lands on the canonical texture. */
+    r->alias_of = 0;
+    if (r->px) {
+        int i;
+        for (i = 0; i < VIVMAX; i++)
+            if (viv_tab[i].used && &viv_tab[i] != r
+                && viv_tab[i].own && viv_tab[i].own == (unsigned char *)r->px) {
+                r->alias_of = viv_tab[i].name;
+                say("[bridge] item51: Map adopts an allocated buffer - "
+                    "texture aliased to its render target\n");
+                break;
+            }
+    }
     viv_said(r, "map");
     /* Vivante's Map hands the CALLER an address to write into. This caller
      * already has its frame at the address it passed in, so *logical is left

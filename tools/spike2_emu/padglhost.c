@@ -146,6 +146,16 @@ static void load_gl(void)
 #define MAXPROG 128
 #define MAXUNI  32
 static unsigned map_tex[MAXNAME], map_buf[MAXNAME], map_obj[MAXNAME];
+/* ★ ITEM 51: which guest textures have STORAGE. A texture the game defines
+ * only through glTexDirectVIVMap (star_wars maps its playfield-LCD
+ * framebuffer this way, 1360x768, then renders INTO it through an FBO) has
+ * no host-side storage at attach time, the FBO is INCOMPLETE, and GL
+ * silently drops every draw of the LCD scene - real clip content in, zero
+ * pixels out, no error the guest can see because the bridge's
+ * glCheckFramebufferStatus answers a canned COMPLETE. FBOTEX allocates
+ * storage for a storage-less attachment (probe: stage A readback err 0x506
+ * = incomplete READ framebuffer, stage B a faithful composite of zeros). */
+static unsigned char tex_stored[MAXNAME];
 static unsigned map_vao[1024], map_fbo[256];
 /* Graveyards for DELBUF and DELTEX - deleted host objects are PARKED, not
  * freed, and the guest-name mapping is KEPT, because immediate deletion
@@ -3071,6 +3081,10 @@ static void jgl_reset_world(void)
      * frozen on its pre-restore frame. The window itself stays; only the
      * routing resets. */
     cur_tgt = 0; cur_guest_fbo = 0;
+    /* item 51: the world's textures were just deleted, so no guest texture
+     * has storage until the replay re-defines it - stale flags here would
+     * skip the FBOTEX storage heal on the replayed stream. */
+    memset(tex_stored, 0, sizeof tex_stored);
     memset(vao_on, 0, sizeof vao_on);
     memset(vao_backed, 0, sizeof vao_backed);
     memset(vao_elem, 0, sizeof vao_elem);
@@ -3946,6 +3960,8 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         }
         p_glTexImage2D(0x0DE1,(int)u[0],(int)u[1],(int)u[2],(int)u[3],0,u[4],u[5],
                        u[6] ? pl + 28 : 0);
+        if (u[0] == 0)                       /* level 0 defines storage */
+            tex_stored[cur_tex_unit_binding & (MAXNAME-1)] = 1;
         /* GLES samples BLACK from a texture that has only level 0 while
          * MIN_FILTER is still its default NEAREST_MIPMAP_LINEAR - the texture
          * is "incomplete". The Vivante driver on the machine is laxer, and the
@@ -3969,6 +3985,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         /* u[0..5] = w, h, fmt, src, arg, len */
         unsigned w = u[0], h = u[1], fmt = u[2], src = u[3];
         const unsigned char *yuv = 0, *rgba;
+        tex_stored[cur_tex_unit_binding & (MAXNAME-1)] = 1;   /* item 51 */
         /* ITEM 11's STAGE COUNTER. David's screen recording measured 22.7%
          * repeated frames against a 0.0% pristine control while every guest
          * and host counter read clean, so the question is WHICH STAGE stops
@@ -4330,9 +4347,45 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                                 if (u[0] == 0x8D40u || u[0] == 0x8CA9u)
                                     cur_guest_fbo = u[1];
                                 p_glBindFramebuffer(u[0], u[1] < 256 ? map_fbo[u[1]] : 0); break;
-    case PADGL_FBOTEX:
-        p_glFramebufferTexture2D(u[0],u[1],u[2], u[3] < MAXNAME ? map_tex[u[3]] : 0,(int)u[4]);
+    case PADGL_FBOTEX: {
+        /* ★ ITEM 51: an attachment the game only ever defined through the
+         * Vivante map path has no host storage - the FBO would be
+         * INCOMPLETE and every draw into it silently dropped, which is how
+         * star_wars' playfield-LCD scene composed black while the bridge's
+         * canned glCheckFramebufferStatus told the game all was well. Give
+         * a storage-less attachment fb-sized RGBA storage; the game's own
+         * later uploads and TEXPARAMs still win, they arrive after this in
+         * the stream. */
+        unsigned g = u[3];
+        if (g < MAXNAME && !map_tex[g])
+            p_glGenTextures(1, &map_tex[g]);
+        if (g < MAXNAME && map_tex[g] && !tex_stored[g]) {
+            int prevtex = 0;
+            p_glGetIntegerv(0x8069, &prevtex);
+            p_glBindTexture(0x0DE1, map_tex[g]);
+            p_glTexImage2D(0x0DE1, 0, 0x1908, fb_w, fb_h, 0, 0x1908, 0x1401, 0);
+            p_glTexParameteri(0x0DE1, 0x2801, 0x2601);
+            p_glTexParameteri(0x0DE1, 0x2800, 0x2601);
+            p_glBindTexture(0x0DE1, (unsigned)prevtex);
+            tex_stored[g] = 1;
+            fprintf(stderr, "[padglhost] fbo attachment: guest tex %u had no "
+                    "storage (VIV-mapped?); allocated %dx%d RGBA so the FBO "
+                    "is complete\n", g, fb_w, fb_h);
+        }
+        p_glFramebufferTexture2D(u[0],u[1],u[2], g < MAXNAME ? map_tex[g] : 0,(int)u[4]);
+        {   /* the verdict, once per guest fbo: the game cannot see this */
+            static unsigned long long said;
+            unsigned f = cur_guest_fbo;
+            unsigned s = p_glCheckFramebufferStatus(u[0]);
+            if (f < 64 && !(said & (1ull << f)) && s != 0x8CD5) {
+                said |= 1ull << f;
+                fprintf(stderr, "[padglhost] guest fbo %u INCOMPLETE after "
+                        "attach (status 0x%x) - draws into it will be "
+                        "dropped\n", f, s);
+            }
+        }
         break;
+    }
 
     /* THE DRAW GUARD.  If any ENABLED attribute of the bound VAO was
      * specified without a backing buffer, GL would read vertex data from
@@ -4353,7 +4406,30 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         }
         swap_draws++;                            /* item 27: this frame drew */
         draw_say(u[2], u[1], 0, 0, 0, 0);        /* item 43                  */
-        p_glDrawArrays(u[0],(int)u[1],(int)u[2]); break;
+        p_glDrawArrays(u[0],(int)u[1],(int)u[2]);
+        /* ★ ITEM 51: WHICH STAGE OF A TWO-STAGE SCENE GOES BLACK. The
+         * star_wars LCD scene renders video into guest FBO 1, then
+         * composites FBO 1's texture into FBO 0 - real clip content in,
+         * zero pixels out, no draw skipped, wire clean. Only inside the
+         * armed sequence-dump window: read a centre patch back after every
+         * draw and say what the target now holds, so one run names the
+         * stage that zeroes it. */
+        if (seq_trigger_armed && frames_done >= seq_from - 1
+                && frames_done < seq_to) {
+            unsigned char px[16 * 16 * 4];
+            int i, lit = 0, vp[4] = {0, 0, 0, 0};
+            p_glGetIntegerv(0x0BA2, vp);
+            p_glFinish();
+            p_glReadPixels(vp[0] + vp[2] / 2 - 8, vp[1] + vp[3] / 2 - 8,
+                           16, 16, 0x1908, 0x1401, px);
+            for (i = 0; i < 256; i++)
+                if (px[i*4] | px[i*4+1] | px[i*4+2]) lit++;
+            fprintf(stderr, "[seq] post-draw guest_fbo=%u tgt=%d lit=%d/256 "
+                    "vp=%d,%d %dx%d err=0x%x\n",
+                    cur_guest_fbo, cur_tgt, lit, vp[0], vp[1], vp[2], vp[3],
+                    (unsigned)p_glGetError());
+        }
+        break;
     case PADGL_DRAWELEMENTS:
         if ((vao_on[cur_vao_g] & (unsigned short)~vao_backed[cur_vao_g])
                 || !vao_elem[cur_vao_g]) {

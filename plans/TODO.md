@@ -74,6 +74,35 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **52. stranger_things: nodes 1, 8 and 9 — the three pinnodes — are
+      the ONLY boards the game cannot find, and it wedges on LOCATING NODE
+      BOARDS while its projector plays.** `S2 D3`
+      *(Split out of item 51 at its close, 2026-08-15: 51's derived
+      identities got ST's ws2812node and node4 boards FOUND — the wedge
+      shrank from "no nodes at all" to exactly the pinnode trio — and the
+      projector shows scene footage regardless, so the display side owes
+      this nothing.)*
+      **Observed (screenshot in the item-51 record):** main window
+      `LOCATING NODE BOARDS / 1 8 9 / NODES NOT FOUND`; `[nbid]` shows all
+      six boards claiming derived identities (pinnodes: part 0x00020023,
+      variant 0x01, fw 1.19.0 — the same claim SHAPE star_wars accepts at
+      1.29.0 and godzilla at 1.35.0). "NOT FOUND" is the game's ABSENT
+      verdict, not a grading failure — so ST's binary either parses the fe
+      reply differently for pinnode-class boards or validates a field the
+      shim answers globally (hwid 0x0001 for every node is the obvious
+      suspect).
+      **The instrument that decides it exists already:** hwshim's `[nbcen]`
+      per-command reply-length census — "fe asks an 11-byte payload and
+      only on FAILURE retries with a 10-byte one (reply_len 12), so a
+      nonzero count at 12 is a direct readout of the identity exchange
+      failing" — plus `PAD_NB_HWID` to sweep board ids without a rebuild.
+      **Acceptance:** stranger_things boots past LOCATING NODE BOARDS with
+      no NOT FOUND overlay, stated with a screenshot; then say what its
+      attract shows on BOTH displays.
+      — S2: the title is unplayable past boot, but no other title is
+      affected and the projector/display work is delivered; it costs runs
+      on one title. D3: one run cycle with existing instruments
+      (PAD_NB_DUMP census + PAD_NB_HWID sweep), fault reproduces on demand.
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
       instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**
@@ -1570,6 +1599,34 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **51. star_wars: "UPDATING NODE BOARD RUNTIME / UPDATE FAILED" looped
+      over attract and the second display stayed black.** DONE 2026-08-15,
+      `item/51` (`7103ba6`..close). **Three stacked faults, none coupled the
+      way anyone guessed; both of David's asks verified on screen the same
+      evening.** (1) NODE IDENTITY IS THE TITLE'S OWN: each game ELF
+      statically declares its node directory; `nbdir.py` derives it
+      (reproduces godzilla's measured table EXACTLY — the labelled example),
+      watch.sh writes `node_ident.txt`, hwshim consumes it with the old
+      godzilla table as fallback, and the census gained the directory as
+      weak-branch evidence (star_wars node 2 = Cabinet Lights, the exact
+      "no such title is known" hazard, un-silenced). star_wars: update walk
+      completed, Guided Setup, CLEAN ATTRACT — no overlay. (2) A VIV-mapped
+      FBO attachment had no host storage → guest FBO INCOMPLETE → GL
+      silently dropped every LCD draw while the bridge's canned
+      CheckFramebufferStatus said COMPLETE; FBOTEX now heals storage-less
+      attachments. (3) TWO NAMES, ONE BUFFER: glTexDirectVIV allocates the
+      LCD framebuffer under the render-target name, the game Maps the same
+      pointer under the sampler name; the bridge now aliases the emitted
+      names. `picture: d2 FIRST at frame 2, 102511 lit` — the STAR WARS
+      logo in the [display 2] window, screenshot to David. **Rewrites item
+      27's record: its 32.8%-black flicker was bright-vs-BLACK; the LCD
+      scene had never composed a pixel in this rig.** Regressions:
+      godzilla identical (claims byte-equal, node 2 still silent, new paths
+      dormant); stranger_things's projector SHOWS SCENE FOOTAGE and its
+      wedge shrank to the pinnode trio (split to item 52). Retired: a
+      48-re-ask refusal detector (fe ~200/node is the game's normal poll).
+      Long form: handoff REMAINING item 51.
 
 - [x] **44. Stranger Things' PROJECTOR picture has nowhere to go.** DONE
       2026-08-15, `item/44`, `a2eafb4`..`e693e4f` (+ close). **The second

@@ -941,9 +941,20 @@ These have each been violated at least once and each cost a run or a window:
       game, size and date, totals them against the WSL disk's free space,
       and Renames/Deletes** (slots.sh, root, guarded). David can now
       delete `wtest` himself from the tab. REMAINING here: the list does
-      not yet flag a REFUSABLE slot (dead-tty / gone-card per
-      restorestate.sh's pre-flight) with the reason a load would fail -
-      the polish this item's text asked for beyond the list itself.
+      not yet flag a REFUSABLE slot with the reason a load would fail -
+      the polish this item's text asked for beyond the list itself. The
+      refusable classes are restorestate.sh's pre-flight's three: dead
+      tty, gone card, and STALE BUILD - savestate.sh records a sha1 per
+      mapped library (36a (3)), and any shim/bridge rebuild breaks the
+      match, which `ensurebuild.sh` does by itself on any source change,
+      so this is the class a user actually hits.
+      **★ DAVID, 2026-08-16: "why do save states break between builds?"**
+      Answered at the desk (criu restores file-backed pages from the
+      files as they are NOW and validates size + build-ID, so a slot is
+      welded to the exact binaries it was dumped under - 36a (3) is the
+      full record) - but that the question needed asking is this item's
+      case in one line: the slots list should SAY a stale slot is stale
+      and which library moved, not leave the refusal to load time.
       **Acceptance:** wherever Save/Load already lives (playfield bar and/or
       Emulate tab), the user can see every slot with its size and save time
       plus a total, and can delete a slot from there; the numbers match `du`

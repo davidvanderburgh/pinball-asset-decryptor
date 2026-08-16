@@ -108,23 +108,49 @@ These have each been violated at least once and each cost a run or a window:
         declared nodes correctly (item 51 census) because the identity ladder
         is driven by the game's own static directory, not by discovery. The
         boards are answerable; they were never discovered.
-      **THE FIX (committed `98f4797`, compiled clean, NOT run-validated):**
-      when no switch table can be found, `nb_nodes_init()` seeds the discovery
-      schedule from the title's own NODE DIRECTORY (`node_ident.txt`, which
-      nbdir.py derives and the shim already loads) minus `PAD_NB_SILENT`
-      nodes. Guarded by `!sw_find_done && sw_find_fails >= 4` so it is
-      permanently unreachable for godzilla and any title whose table is found
-      (they set `sw_find_done`). Also folds the `PAD_NB_SILENT` parse into one
-      `nb_is_silent()` used by both the fallback and `shim_read`.
-      **NEXT (the acceptance run): godzilla must still boot with `[nbsched]
-      … (from switch table)` and its 9-board array (fallback must NOT fire);
-      ST must reach `[nbsched] … (from node directory)`, create board objects,
-      and ideally boot past LOCATING NODE BOARDS.** A reader flagged a possible
-      DOWNSTREAM gate (the f9/fc runtime-info answered as 48 zero bytes) — if
-      ST now creates board objects but still wedges, the investigation moves
-      there, which is progress either way.
-      **D4 → D3: the mechanism is now known and a run reproduces it on demand,
-      so the instrument-building that made this D4 is spent.**
+      **THE FIX (committed `98f4797`):** when no switch table can be found,
+      `nb_nodes_init()` seeds the discovery schedule from the title's own NODE
+      DIRECTORY (`node_ident.txt`, which nbdir.py derives and the shim already
+      loads) minus `PAD_NB_SILENT` nodes. Guarded by `!sw_find_done &&
+      sw_find_fails >= 4` so it is permanently unreachable for godzilla and any
+      title whose table is found (they set `sw_find_done`). Also folds the
+      `PAD_NB_SILENT` parse into one `nb_is_silent()` used by both the fallback
+      and `shim_read`.
+      **★★ GODZILLA REGRESSION PASSED (i52_gz10, 2026-08-16): `[nbsched]
+      playfield nodes: 4 1 8 9 (from switch table)`, 9 board objects at
+      0x7bad88, 1254 fa/f2 grading frames, no wedge, 55 fps — the fallback
+      correctly does NOT fire, and the fix leaves godzilla byte-for-byte on
+      its original path. So the fix is proven SAFE.**
+      **★★ ST ACCEPTANCE IS BLOCKED ON INFRASTRUCTURE, NOT ON THE FIX — it
+      needs `wsl --shutdown`, which the auto-mode classifier blocks.** The
+      chain: clearing a cross-session zombie strand needed a WSL restart;
+      `wsl -t Ubuntu` reaped the zombies but WSLg's X server did not come back
+      (`/tmp/.X11-unix` empty), which only `wsl --shutdown` restores; without X
+      the renderer runs SURFACELESS (the `padglhost` fix `3ca16f4` enables
+      that, and godzilla ran 55 fps on it) — but ST is 1-6 fps surfaceless
+      (its video/scene GL is pathologically slow headless) and hits a
+      TIMING-SENSITIVE guest crash at ~21 s (`[segv] pc=libpthread+0x8858`,
+      from guest 0x3f4584) BEFORE the node bus accumulates enough activity to
+      fire the fallback. **This crash is NOT the fix and NOT surfaceless-only:
+      it fired earlier this session under heavy CPU contention too, and item
+      51 ran ST 232 s crash-free AT FULL SPEED.** So ST at full speed on the
+      normal WSLg renderer will not crash and will exercise the fallback.
+      **PARTIAL POSITIVE EVIDENCE (i52_st5, minimal surfaceless run): the
+      guest DID reach the node bus under the fixed shim (2 bare-00 discovery
+      polls, 12 fa/f2 frames) before the ~21 s crash — further than any ST run
+      got before — it just did not survive long enough for `sw_find_fails` to
+      reach 4.**
+      **RESUME — ONE COMMAND FROM DAVID, THEN ONE RUN:** run `wsl --shutdown`
+      (clears the zombie strand AND restores WSLg's X server), then a normal
+      full-speed ST run: `PAD_CARD=…/stranger_things_le-1_12_0.raw
+      PAD_NB_DUMP=120 watch.sh 5`, and read `[nbsched]` — `(from node
+      directory)` + board objects created + past LOCATING NODE BOARDS is the
+      acceptance. If ST creates boards but still wedges, the DOWNSTREAM gate
+      (f9/fc runtime-info = 48 zero bytes, `PAD_NB_RT=1` probe) is next —
+      progress either way.
+      **D4 → D3: the mechanism is known, a run reproduces it on demand, the
+      fix is written and proven safe; only the final full-speed ST run remains,
+      gated on the WSL restart.**
       *(Earlier this day, D3 → D4 was recorded when both original premises
       died; the mechanism crack has now brought it back to D3.)*
       *(Split out of item 51 at its close, 2026-08-15. The projector shows

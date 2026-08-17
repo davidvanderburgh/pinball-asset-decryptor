@@ -169,30 +169,40 @@ These have each been violated at least once and each cost a run or a window:
       not fire: 289 s clean here, 232 s clean in item 51. **Consequence worth
       knowing: you cannot currently screenshot an ST run without inducing the
       crash**, which is why the acceptance below still has no screenshot.
-      **RESUME — one question: on ST the game is handed a full bus and correct
-      identities, so what stops it creating even ONE board object?** Suggested
-      order, cheapest first:
-      (a) **Find ST's static board array by RE, not by shape.** The shape scan
-      cannot see an all-zero array, so it can neither find it nor prove it
-      absent. It must lie in ST's static range `0x715000`..`0x8439dc`;
-      `/home/david/i52/st_game` (the ELF, copied out) and
-      `/home/david/i52/st_game.dis` (full objdump, 1.3M lines) are already on
-      disk for exactly this. Godzilla's accessor `0x39c9b0` returns
-      `base + node*0xe0` unconditionally — find ST's analogue and the base
-      falls out, after which `PAD_NB_OBJS=<addr>` makes every existing
-      instrument work on ST with no new code.
-      (b) **The bare-00 reply FORM.** The fallback feeds the schedule, but
-      nothing has verified the game ACCEPTS the walk: whether it wants the
-      list terminated differently, or whether ST's newer bring-up expects
-      something the godzilla-era RE does not describe. `PAD_NB_SCHED=0` (an
-      A/B against no schedule at all) and the `[nbsched] poll #N` trace are
-      the readouts.
-      (c) The coin-door interlock wait (godzilla `0x1d6fb8`; ST's address
-      unknown) — still untested on ST, and it is the one recorded godzilla
-      mechanism that stalls bring-up wholesale.
-      **Already ruled out, do not re-spend: the runtime-info payload (b above
-      in the old list) via `PAD_NB_RT=1`, and everything in the "wire is
-      identical" and "flags word" sections above.**
+      **RESUME — ONE question, and it is NOT "where is ST's board array".**
+      On ST the game is handed a full bus and correct identities, yet creates
+      **zero** board objects. **Finding the array's address would not answer
+      that** — an array with no boards in it is empty wherever it lives — so
+      do not start there. (I tried and it also does not fall out cheaply:
+      **ruled out, do not repeat — godzilla's `*0xe0` idiom
+      (`rsb rX,rX,rX,lsl #3` + `add rX,base,rX,lsl #5`, base in the
+      `movw`/`movt`, godzilla `0x39c9b0`) does NOT appear anywhere in ST's
+      disassembly**, and a `cmp rX,#31` structural sweep returns only string
+      code. ST compiles the accessor differently. The ELF and a full 1.3M-line
+      objdump are on disk at `/home/david/i52/` if someone wants to try
+      properly.)
+      **The real question is what runs BETWEEN "identity answered" and "board
+      created", and why ST never gets there.** The strongest lever is that on
+      godzilla creation is nearly UNCONDITIONAL once bring-up runs — the
+      handoff records boards existing at status 8 even in the era when every
+      identity exchange failed — so ST's bring-up is not merely failing a
+      check, it is not reaching the creation step at all. Suggested order:
+      (a) **Verify the game ACCEPTS the fed walk.** The fallback supplies the
+      schedule but nothing has confirmed the walk is consumed the way the
+      godzilla-era RE describes (list then terminating zero). `PAD_NB_SCHED=0`
+      as an A/B against no schedule, plus the `[nbsched] poll #N` trace, is
+      one cheap run. Note ST sends **108-113 `fe` per node over 289 s** —
+      roughly one every 2.7 s per node, which is a RETRY cadence, not a
+      ladder, so something is rejecting and re-asking on a timer.
+      (b) **The coin-door interlock wait** (godzilla `0x1d6fb8` waits up to
+      60 s for `[0x706464]`, enterable five times; `0x1d6c54` reports
+      not-done meanwhile). Untested on ST, its address unknown there, and it
+      is the one recorded godzilla mechanism that stalls bring-up wholesale.
+      (c) A guest-side trace of the bring-up thread on ST — expensive, but it
+      is what finally answers "how far does bring-up get".
+      **Already ruled out, do not re-spend:** the runtime-info payload
+      (`PAD_NB_RT=1`, run i52_st7rt), the array-base RE by pattern (above),
+      and everything in the "wire is identical" and "flags word" sections.
       **D4 → D3: the mechanism is known, a run reproduces it on demand, the
       fix is written and proven safe; only the final full-speed ST run remains,
       gated on the WSL restart.**

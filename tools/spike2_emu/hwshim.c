@@ -2635,6 +2635,53 @@ int shim_ioctl(int fd, unsigned long req, ...)
                     { 0xff, 0x0f, 0x0f, 0, 0, 0, 0, 0 };
                 static int said;
                 for (k = 0; k < 8; k++) bits[k] = idle[k];
+                /* ★ THE COUNTRY DIPS LIVE IN BYTE 0 OF THIS VERY WORD.
+                 *
+                 * stranger_things' own switch table (entry base *(0x724608),
+                 * stride 44; node+bit via the device table *(0x7260b8) stride
+                 * 24) names switch ids 17..24 "DIP 1".."DIP 8" at NODE 0,
+                 * BITS 0..7 - byte 0 here - with cfg 0x0020, i.e. bit 0x04
+                 * clear, i.e. ACTIVE LOW: a line rests at 1 and a MADE dip
+                 * pulls it to 0. So the 0xff above hands the game all eight
+                 * dips OPEN, which is a valid at-rest level carrying NO
+                 * country - and a machine with no country selected is exactly
+                 * what "THIS MACHINE WILL NOT OPERATE IN THIS COUNTRY" is.
+                 * (David called this from the start: it is a hardware dip
+                 * setting, not a software adjustment.)
+                 *
+                 * PAD_CAB_DIP=<n> makes dips 1..8 read the value n, so a
+                 * country can be selected the way an operator selects one -
+                 * by setting the switches. Active low, hence the complement.
+                 * WHICH n IS WHICH COUNTRY IS NOT YET DECODED (the handler at
+                 * 0x41c970 is the next thing to read), so this is a knob to
+                 * sweep, not a setting to trust. */
+                {
+                    char *dp = getenv("PAD_CAB_DIP");
+                    if (dp && *dp) {
+                        unsigned v = 0;
+                        int any = 0;
+                        if (dp[0] == '0' && (dp[1] == 'x' || dp[1] == 'X')) {
+                            dp += 2;
+                            for (; *dp; dp++) {
+                                if (*dp >= '0' && *dp <= '9') v = v*16 + (unsigned)(*dp-'0');
+                                else if (*dp >= 'a' && *dp <= 'f') v = v*16 + (unsigned)(*dp-'a'+10);
+                                else if (*dp >= 'A' && *dp <= 'F') v = v*16 + (unsigned)(*dp-'A'+10);
+                                else break;
+                                any = 1;
+                            }
+                        } else {
+                            for (; *dp >= '0' && *dp <= '9'; dp++) { v = v*10 + (unsigned)(*dp-'0'); any = 1; }
+                        }
+                        if (any) {
+                            char m4[160];
+                            bits[0] = (unsigned char)(~v & 0xff);
+                            snprintf(m4, sizeof m4,
+                                     "[cabdip] country dips 1..8 set to %u "
+                                     "(byte0=%02x, active low)\n", v & 0xff, bits[0]);
+                            logmsg(m4);
+                        }
+                    }
+                }
                 have = 1;
                 cab_synth = 1;
                 if (!said) {

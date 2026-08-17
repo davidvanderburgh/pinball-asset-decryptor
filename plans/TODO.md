@@ -145,6 +145,54 @@ These have each been violated at least once and each cost a run or a window:
       around file offset 5446264-5452536 if a value table is needed.
       **NOT established:** that the EEPROM had anything to do with this. The
       per-title EEPROM change (`ee033b9`) is still correct on its own merits.
+      **★★★ ST'S OWN SWITCH TABLE IS FOUND (2026-08-17, 13-agent RE workflow,
+      four routes, every claim adversarially verified). ST DOES NOT USE
+      GODZILLA'S LAYOUT AT ALL — which is why the finder rejected everything.**
+      | thing | ST |
+      |---|---|
+      | switch entry array | `*(0x724608)` = `0x758324`, **stride 44**, accessor `0x1bf068` |
+      | count global | `0x7bc86c` = **100** slots → ids 1..99 real, slot 0 = INVALID dummy |
+      | entry fields | `+0` → state object (**state = byte at `[ptr]+1`**), `+24` u16 operator number, `+26` u16 **device index**, `+32` u16 cfg (**bit `0x04` = polarity**; clear ⇒ active low) |
+      | node + bit | NOT in the entry — via device table `*(0x7260b8)` = `0x759454`, stride 24, count `*(0x7e03dc)` = 459, accessor `0x41f598`; device `+16` = node-directory ordinal, `+18` = **bit**, `+20` = type (**7 = switch**), `+12` = name cell |
+      | node id | byte at `*(0x725aac) + ord*16 + 14` |
+      All 100 slots walked: **99 type-7 devices, 99 DISTINCT (node,bit) pairs,
+      nodes {0,1,4,8,9}** — a strict subset of ST's declared set, and every row
+      has a name. That is exactly the acceptance the finder wanted.
+      **THE NAMES THAT MATTER, and they answer David's DIP question outright:**
+      ids **17..24 = "DIP 1".."DIP 8" at NODE 0, BITS 0..7**; id 25 = node 0
+      bit 8 SERVICE SELECT (26..28 = PLUS/MINUS/BACK); id 33 = node 0 bit 23
+      COIN DOOR INTERLOCK; id 34 = node 1 bit 2 LOCKDOWN BUTTON; id 36 = node 1
+      bit 11 START BUTTON; id 65 = node 8 bit 28 SHOOTER LANE; ids 66/67 = node
+      8 bits 29/30 RIGHT/LEFT SLINGSHOT; id 69 = node 8 bit 32 TROUGH 6; ids
+      1..16 = node 4 bits 0..15 QR SCANNER STATUS (cfg `0x0024`, the only
+      active-high group).
+      **The 32-byte tables at `0x7660e4` (ids 1..128) and `0x765904` (ids
+      129..164) are a DIFFERENT object** — game-logic/service descriptors
+      (handler `+0`, arg `+4`, name `+8`, mode mask `+12`, flags `+16`), no
+      node, no bit, no state, and 82 of 164 ids are `NOT USED` filler. Three of
+      the four routes initially called these "the" switch table; they are not.
+      **⛔ DO NOT SET `PAD_SW_STRUCT`/`PAD_SW_COUNT` WITH TODAY'S CODE.** The
+      verifier ran the shim's predicates over ST's bytes: **0 of 100 entries
+      pass `sw_entry_ok`** at any stride, so there is no benefit — and three
+      named REGRESSIONS: (1) `nb_nodes_init` does not gate on `sw_find_done`,
+      so it would take the primary branch and build the node schedule from byte
+      `+20` at stride 32 = `128, 220, 5, 24, 36, …` garbage, destroying the
+      working node-directory fallback; (2) `sw_prime` writes through
+      `SW_NODEREC(0)` into ST's `.data` at `0x724624..0x724633`, armed as soon
+      as `cab_synth` clears; (3) `sw_configured_ok` rejects the address anyway.
+      **The READER must be generalised to a per-title layout descriptor first.**
+      **★ THE CHEAP HALF NEEDS NO TABLE PLUMBING: the country dips are byte 0
+      of the word this shim already synthesises.** `{0xff,0x0f,0x0f,0,...}` at
+      hwshim.c:2634 hands ST **all eight dips OPEN** — a valid at-rest level
+      carrying NO country, which is precisely the refusal screen. The rest of
+      that constant happens to fit ST too (bits 8..11 SELECT/PLUS/MINUS/BACK,
+      bit 23 COIN DOOR INTERLOCK made). **`PAD_CAB_DIP=<n>` added this pass**
+      sets dips 1..8 to `n` (active low, so `byte0 = ~n`).
+      **UNKNOWN and next to read: which value is which country.** The country
+      list is real (`INDONESIA, CHINA, LITHUANIA, CANADA 2, RUSSIA, TAIWAN,
+      MIDDLE EAST, CROATIA, JAPAN, SOUTH AFRICA, CHUCK-E-CHEESE, SPAIN,
+      PORTUGAL, …` from `0x53b250`) and the dip handler is `0x41c970`, called
+      with arg 1..8. Sweep `PAD_CAB_DIP` or decode the handler.
       **★ DAVID, EYES ON THE GLASS, 2026-08-17: the boot now walks its NORMAL
       sequence — a "CHECK NODE BOARD 2" screen (not registered), and then
       straight to the country refusal.** Two consequences:

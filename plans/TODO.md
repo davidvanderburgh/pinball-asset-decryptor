@@ -121,33 +121,50 @@ These have each been violated at least once and each cost a run or a window:
       0x7bad88, 1254 fa/f2 grading frames, no wedge, 55 fps — the fallback
       correctly does NOT fire, and the fix leaves godzilla byte-for-byte on
       its original path. So the fix is proven SAFE.**
-      **★★ ST ACCEPTANCE IS BLOCKED ON INFRASTRUCTURE, NOT ON THE FIX — it
-      needs `wsl --shutdown`, which the auto-mode classifier blocks.** The
-      chain: clearing a cross-session zombie strand needed a WSL restart;
-      `wsl -t Ubuntu` reaped the zombies but WSLg's X server did not come back
-      (`/tmp/.X11-unix` empty), which only `wsl --shutdown` restores; without X
-      the renderer runs SURFACELESS (the `padglhost` fix `3ca16f4` enables
-      that, and godzilla ran 55 fps on it) — but ST is 1-6 fps surfaceless
-      (its video/scene GL is pathologically slow headless) and hits a
-      TIMING-SENSITIVE guest crash at ~21 s (`[segv] pc=libpthread+0x8858`,
-      from guest 0x3f4584) BEFORE the node bus accumulates enough activity to
-      fire the fallback. **This crash is NOT the fix and NOT surfaceless-only:
-      it fired earlier this session under heavy CPU contention too, and item
-      51 ran ST 232 s crash-free AT FULL SPEED.** So ST at full speed on the
-      normal WSLg renderer will not crash and will exercise the fallback.
-      **PARTIAL POSITIVE EVIDENCE (i52_st5, minimal surfaceless run): the
-      guest DID reach the node bus under the fixed shim (2 bare-00 discovery
-      polls, 12 fa/f2 frames) before the ~21 s crash — further than any ST run
-      got before — it just did not survive long enough for `sw_find_fails` to
-      reach 4.**
-      **RESUME — ONE COMMAND FROM DAVID, THEN ONE RUN:** run `wsl --shutdown`
-      (clears the zombie strand AND restores WSLg's X server), then a normal
-      full-speed ST run: `PAD_CARD=…/stranger_things_le-1_12_0.raw
-      PAD_NB_DUMP=120 watch.sh 5`, and read `[nbsched]` — `(from node
-      directory)` + board objects created + past LOCATING NODE BOARDS is the
-      acceptance. If ST creates boards but still wedges, the DOWNSTREAM gate
-      (f9/fc runtime-info = 48 zero bytes, `PAD_NB_RT=1` probe) is next —
-      progress either way.
+      **★★★ ST RUN 2026-08-16 (i52_st4, after David ran `wsl --shutdown` to
+      restore WSLg): THE FIX FIRES AND WORKS — but ST STILL WEDGES, so this
+      item stays OPEN. The fix is necessary and not sufficient.**
+      **What changed, measured against the pre-fix run (i51_st_final):**
+      | | before | after |
+      |---|---|---|
+      | `[nbsched]` line | ABSENT | `playfield nodes: 1 2 4 8 9 12 (from node directory - no switch table)` |
+      | bare-00 discovery polls | 3 (each answered "empty bus") | **19** |
+      | `fe` identity per node | 12 | **108-113** |
+      | board objects | 0 usable | **node 0 + node 1** |
+      The guest ran the FULL 289 s at **56.5 fps**, healthy throughout.
+      **★ THE PREDICTION THIS ITEM COMMITTED TO IN ADVANCE WAS CONFIRMED
+      EXACTLY:** `nb_report_near()` reports `slot 0 node 0 status 0 (No
+      Errors)` and `slot 1 node 1 status 2` — which is the "real array caught
+      half-built" branch, not the coincidence branch. (Per the RE, status 2 is
+      written at `0x1d5814` = *everything matched*; the `nb_status_name[]`
+      label "Not Registered" is off by the message-row offset and should not
+      be read literally — every healthy godzilla board also reads status 2.)
+      **So node 0 (CPU/bridge) and node 1 are created AND graded clean, and
+      nodes 2/4/8/9/12 never get objects at all.** Registration still never
+      completes for them: the census shows **no `fa`, no `f2`, no `ff`, no
+      `0x11`, no sub-0xef** anywhere in the run.
+      **THE QUESTION IS NOW SHARP AND NARROW: the discovery walk is fed all
+      six nodes and the game identifies all six 108 times each, yet only the
+      first two boards are ever created. What stops board 3?** That is a much
+      smaller question than the one this item started with.
+      **★ THE ST CRASH IS CHARACTERISED, and it is NOT the fix:** a
+      timing-sensitive guest fault at ~200 frames / ~21 s that fires whenever
+      ST renders SLOWLY — under CPU contention, under the surfaceless
+      renderer (1-6 fps), and under frame capture (`PAD_GL_DUMP` readbacks
+      slowed it enough to reproduce on demand, i52_st6). At full speed it does
+      not fire: 289 s clean here, 232 s clean in item 51. **Consequence worth
+      knowing: you cannot currently screenshot an ST run without inducing the
+      crash**, which is why the acceptance below still has no screenshot.
+      **RESUME — the next pass's single question: what gates the creation of
+      board 3 on ST?** The board objects live at `0x0087429c` (stable across
+      runs; slots 0 and 1 populated). Cheapest moves, in order: (a) lower
+      `NB_OBJS_MIN` to 2 so `NB_OBJS` resolves on ST and the full `[nbobj]`
+      dump + `nb_nodes_add_boards()` come alive (godzilla is unaffected — its
+      9-slot array always wins `best_n`); (b) probe the DOWNSTREAM gate the
+      workflow flagged — the 48-byte runtime-info record (`f9/00`, `f9/01`,
+      `fc`) is answered as **48 zero bytes for every board**, and `PAD_NB_RT=1`
+      exists to un-zero it; (c) the coin-door interlock wait (godzilla
+      `0x1d6fb8`; ST's own address unknown).
       **D4 → D3: the mechanism is known, a run reproduces it on demand, the
       fix is written and proven safe; only the final full-speed ST run remains,
       gated on the WSL restart.**

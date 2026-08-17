@@ -3439,6 +3439,32 @@ static unsigned nb_scan_objs(unsigned *best_out, unsigned *near, unsigned *near_
     return best;
 }
 
+/* ★ ITEM 52: WATCH the sweep's found array OVER TIME. The sweep reports once,
+ * early, so it shows the boards' initial flags; this dumps the same (base,
+ * stride) on every PAD_NB_DUMP tick, so the boards' LIFETIME is visible - in
+ * particular whether the playfield boards ever reach flags bit 1 (the ~10 Hz
+ * "serviced" heartbeat) the way godzilla's do, or stay stuck at flags=1. It is
+ * the missing instrument: nb_dump_objs() reads a fixed 0xe0 stride and so is
+ * blind to ST's 0x98 struct. Compact, one line per tick: node=flags/status. */
+static void nb_sweep_watch(void)
+{
+    char m[300];
+    unsigned i, k;
+    if (!nb_sweep_on() || !sw_best_a || !sw_best_s) return;
+    k = (unsigned)snprintf(m, sizeof m, "[nbwatch] 0x%08x/0x%x:",
+                           sw_best_a, sw_best_s);
+    for (i = 0; i < 32 && k < sizeof m - 24; i++) {
+        const unsigned char *o = (const unsigned char *)(unsigned long)
+                                 (sw_best_a + i * sw_best_s);
+        if (!*(const unsigned *)(o + 12)) continue;
+        k += (unsigned)snprintf(m + k, sizeof m - k, " n%u=f%us%u",
+                                o[0], *(const unsigned *)(o + 4),
+                                *(const unsigned *)(o + 24));
+    }
+    snprintf(m + k, sizeof m - k, "\n");
+    logmsg(m);
+}
+
 /* The best sub-threshold candidate the last scan saw, for nb_dump_objs() to
  * report. Zero when the scan succeeded or saw nothing at all. */
 static unsigned nb_near_base, nb_near_n;
@@ -6439,6 +6465,7 @@ static void nb_maybe_dump(void)
      * stranger_things when they were let loose on it - see
      * nb_addrs_are_this_title(). Say so rather than skipping in silence. */
     nb_dump_objs();
+    nb_sweep_watch();       /* item 52: the 0x98-aware board watch, per tick */
     if (nb_addrs_are_this_title()) {
         nb_dump_boards();
         nb_dump_hexlist();

@@ -88,6 +88,37 @@ These have each been violated at least once and each cost a run or a window:
       projector plays. NOT, as this item used to say, "nodes 1, 8 and 9 are
       the only boards it cannot find" — that reading is disproved below.**
       `S2 D4` ← IN PROGRESS
+      **════ CURRENT TRUTH, 2026-08-17, triangulated with an A/B control —
+      SUPERSEDES every dated block below, which flip-flopped twice on the way
+      here. Read only this to know where the item stands. ════**
+      ST's board array is at **`0x8239c8`, struct stride `0x98`** (NOT
+      godzilla's `0xe0` — the finder was blind to it, which is why five passes
+      wrongly believed "ST creates no boards"). The array holds **7 boards:
+      node 0 + ST's six declared nodes (1,2,4,8,9,12)**, correct versions,
+      graded to status 2. Established by run, not theory:
+      | fact | evidence |
+      |---|---|
+      | ST creates all 7 boards | sweep finds `0x8239c8/0x98/7`, versions match `node_ident.txt` |
+      | creation is INDEPENDENT of the discovery fix | control `PAD_NB_SCHED=0` (st11): identical array |
+      | WITHOUT the fix, playfield boards stay `flags=1` (unserviced) forever | control+watch (st13): 14 ticks, never changes |
+      | WITH the fix, ALL boards reach `flags=3` (serviced), godzilla's healthy end-state | watch (st12): early f1 → late f3 |
+      | **yet ST STILL wedges on LOCATING NODE BOARDS at flags=3** | every run |
+      **So the discovery fix (`98f4797`) IS load-bearing after all — it drives
+      the SERVICING that takes the playfield boards from flags=1 to flags=3.**
+      (The "not load-bearing" correction one commit back was itself wrong: it
+      reasoned from creation being fix-independent, but SERVICING is not.)
+      **THE REAL REMAINING QUESTION, now that the board array is provably
+      HEALTHY end-to-end: what does ST's LOCATING NODE BOARDS screen gate on,
+      if not the board flags?** godzilla has no such screen (it parks on Tech
+      Alerts); this is newer-firmware bring-up presentation the godzilla RE
+      does not cover. That is the next pass's target — and it is NOT in the
+      board-object table, which is where this item has been looking.
+      **Loose end for the curious: the boards reach flags=3 with NO `ff` and
+      NO `0x11` on the wire (census unchanged), which the godzilla RE says
+      should be impossible — bit 1 is set after the `ff` read. Either ST sets
+      the heartbeat by another path or the census regex misses ST's `ff`
+      framing. Not chased; not on the critical path.**
+      **════ END CURRENT TRUTH. Everything below is the historical trail. ════**
       **‼‼‼ 2026-08-17 — THE BRANCH'S CENTRAL CONCLUSION IS OVERTURNED, BY THE
       INSTRUMENT BUILT TO CHECK IT. "ST creates no board objects" IS FALSE.
       Everything below that rests on it is now suspect; read this block first.**

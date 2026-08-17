@@ -113,6 +113,22 @@ These have each been violated at least once and each cost a run or a window:
       Alerts); this is newer-firmware bring-up presentation the godzilla RE
       does not cover. That is the next pass's target — and it is NOT in the
       board-object table, which is where this item has been looking.
+      **Concrete starting points for that RE (ELF + full objdump already on
+      disk at `/home/david/i52/st_game{,.dis}`):** the message cell for
+      `NODE%s NOT FOUND` is at vaddr `0x749ea0` and `LOCATING NODE BOARDS` at
+      `0x749eb8` (5-language cells, found via `xref.py`); both are referenced
+      by message-table INDEX not literal, so the display code is reached
+      through the msg-table machinery (item 29's mechanism), which is the
+      thread to pull to find the screen's own exit condition.
+      **⛔ DEAD END, do not repeat: godzilla's boot globals are USELESS on ST.**
+      `boot_ready[0x7e1974]`, `loader_gate[0x7e1a10]`, `thread_run[0x794af5]`
+      are Godzilla Pro 1.15.0 addresses. A `[segv]` line in an ST run DID
+      print `boot_ready=0` — but only because godzilla's `a_sw_struct()`
+      default `0x7a958c` happens to fall inside ST's mapped range, so the
+      guard let it through; the value is ST's unrelated data read at
+      godzilla's address, i.e. the exact "invents findings" lie the code's
+      own comment warns about. ST's own boot-ready global is unknown and must
+      be found by RE, not borrowed.
       **Loose end for the curious: the boards reach flags=3 with NO `ff` and
       NO `0x11` on the wire (census unchanged), which the godzilla RE says
       should be impossible — bit 1 is set after the `ff` read. Either ST sets

@@ -243,6 +243,27 @@ These have each been violated at least once and each cost a run or a window:
       the next move (c) is a guest-side trace of the bring-up thread rather
       than another guess. Both fixes are worth keeping regardless — they are
       correct on their own terms and godzilla-verified safe.
+      **⚠ UNVERIFIED CODE ON THE BRANCH — do this before anything else.** A
+      **stride-independent sweep** (`PAD_NB_STRIDE_SWEEP=1`, `[nbsweep]`) is
+      committed but **NEVER COMPILED AND NEVER RUN**: WSL wedged mid-session
+      before it could be built. It exists to test the one assumption the board
+      finder cannot test about itself — `nb_scan_objs()` hard-codes the `0xe0`
+      stride, so an ST board array of a DIFFERENT struct size would be
+      invisible and "ST creates no board objects" would be an artefact of the
+      instrument rather than a fact about the title. It counts
+      `#{i : byte[a+i*s]==i}` over strides `0x80..0x200` and reports the best.
+      **Its acceptance is fixed in advance: on godzilla it MUST report
+      `base=0x007bad88 stride=0xe0 slots=9`.** If it does not, the sweep is
+      wrong and nothing it says about ST counts. **Next pass: run the
+      scratchpad `ccheck.sh` /tmp compile check FIRST, then the godzilla
+      labelled example, and only then point it at ST.**
+      **⚠ THE RIG IS DOWN AND NEEDS DAVID.** WSL is wedged: every command
+      hangs, `wsl --shutdown` returns 255 and `vmmemWSL` survives it, and
+      killing the 14 stuck `wsl.exe` clients did not recover it. It needs an
+      **LxssManager service restart or a reboot** before any run is possible.
+      Nothing of this rig's was running when it wedged — no game, lock
+      released, `alive.sh` last read 0 — so nothing is at risk, and no
+      cleanup is owed beyond the restart.
       **D4 → D3: the mechanism is known, a run reproduces it on demand, the
       fix is written and proven safe; only the final full-speed ST run remains,
       gated on the WSL restart.**

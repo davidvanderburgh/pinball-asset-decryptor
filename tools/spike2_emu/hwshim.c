@@ -3245,6 +3245,92 @@ static unsigned nb_objs_shape_ok(unsigned base)
  * build had found. The labelled example caught it; that is what it is for. */
 #define NB_OBJS_MIN 3u
 
+/* ★ ITEM 52: THE STRIDE SWEEP - the one assumption the finder above cannot
+ * test about itself. Defined ABOVE nb_scan_objs() because that is where it is
+ * called from; C wants it declared first.
+ *
+ * nb_scan_objs() hard-codes NB_OBJ_SZ (0xe0), which is godzilla 1.15.0's board
+ * struct size. Everything this branch concluded about stranger_things rests on
+ * "ST creates no board objects" - but an array whose struct grew or shrank in a
+ * newer firmware would be INVISIBLE to a 0xe0-stride scan, and the conclusion
+ * would be an artefact of the instrument rather than a fact about the title.
+ * That is exactly the class of mistake this rig keeps paying for, so test it.
+ *
+ * The signature is stride-independent: a board array SELF-LABELS, slot i
+ * carrying its own index at [+0]. So for a base `a` and stride `s`, count
+ *     #{ i in 0..31 : byte[a + i*s] == i }
+ * and report any (a, s) scoring well. On godzilla the answer must be
+ * (0x7bad88, 0xe0) with 9 - its nine populated slots; the unused ones are
+ * zeroed and only match at i==0. Random memory expects 32/256 = 0.125 matches,
+ * so a score of 5+ is not luck.
+ *
+ * Gated behind PAD_NB_STRIDE_SWEEP=1 and run ONCE per process, because it is
+ * O(range x strides) and has no business in a normal run. */
+static int nb_sweep_on(void)
+{
+    static int on = -1;
+    if (on == -1) {
+        char *q = getenv("PAD_NB_STRIDE_SWEEP");
+        on = q && *q == '1';
+    }
+    return on;
+}
+
+/* Accumulated across every rw region of ONE walk; reported by
+ * nb_sweep_report(), which also latches sw_swept so the sweep runs exactly
+ * once per process. nb_scan_objs() is re-entered on every dump tick while it
+ * keeps failing, and an O(range x strides) scan on each of those would be its
+ * own denial of service. */
+static unsigned sw_best_a, sw_best_s, sw_best_n, sw_hits, sw_lo, sw_hi;
+static int sw_swept;
+
+static void nb_stride_sweep(unsigned lo, unsigned hi)
+{
+    unsigned a, s, best_a = 0, best_s = 0, best_n = 0, hits = 0;
+
+    if (!sw_lo || lo < sw_lo) sw_lo = lo;
+    if (hi > sw_hi) sw_hi = hi;
+    for (a = lo; a + 32u * 0x200u <= hi; a += 4) {
+        const unsigned char *p = (const unsigned char *)(unsigned long)a;
+        if (p[0] != 0) continue;                    /* slot 0 labels itself 0 */
+        for (s = 0x80; s <= 0x200; s += 4) {
+            unsigned i, n = 0;
+            if (p[s] != 1) continue;                /* cheap reject on slot 1 */
+            for (i = 0; i < 32; i++)
+                if (p[i * s] == (unsigned char)i) n++;
+            if (n >= 5) {
+                hits++;
+                if (n > best_n) { best_n = n; best_a = a; best_s = s; }
+            }
+        }
+    }
+    sw_hits += hits;
+    if (best_n > sw_best_n) {
+        sw_best_n = best_n; sw_best_a = best_a; sw_best_s = best_s;
+    }
+}
+
+/* Called once the whole walk is done, so the verdict covers every rw region
+ * rather than whichever one happened to be last. */
+static void nb_sweep_report(void)
+{
+    char m[220];
+    if (sw_swept || !nb_sweep_on()) return;
+    sw_swept = 1;
+    if (sw_best_n)
+        snprintf(m, sizeof m,
+                 "[nbsweep] self-labelling array: base=0x%08x stride=0x%x "
+                 "slots=%u (%u candidate(s) scored >=5 over 0x%08x-0x%08x)\n",
+                 sw_best_a, sw_best_s, sw_best_n, sw_hits, sw_lo, sw_hi);
+    else
+        snprintf(m, sizeof m,
+                 "[nbsweep] NO self-labelling array at ANY stride 0x80-0x200 "
+                 "over 0x%08x-0x%08x - so the board table is not merely a "
+                 "DIFFERENT SIZE on this title, it is not populated at all\n",
+                 sw_lo, sw_hi);
+    logmsg(m);
+}
+
 static unsigned nb_scan_objs(unsigned *best_out, unsigned *near, unsigned *near_n)
 {
     char buf[8192];
@@ -3287,6 +3373,10 @@ static unsigned nb_scan_objs(unsigned *best_out, unsigned *near, unsigned *near_
                 && hi < 0xf0000000UL && p[0] == ' ' && p[1] == 'r'
                 && p[2] == 'w') {
                 unsigned a, span = 32u * NB_OBJ_SZ;
+                /* item 52: the stride-independent cross-check, off by default
+                 * and ONCE per process (sw_swept) - see its comment. */
+                if (nb_sweep_on() && !sw_swept)
+                    nb_stride_sweep((unsigned)lo, (unsigned)hi);
                 for (a = (unsigned)lo; (unsigned long)a + span <= hi; a += 4) {
                     unsigned cnt = nb_objs_shape_ok(a);
                     if (!cnt) continue;
@@ -3302,6 +3392,7 @@ static unsigned nb_scan_objs(unsigned *best_out, unsigned *near, unsigned *near_
         }
     }
     if (rc) rc(fd);
+    nb_sweep_report();          /* item 52: verdict over ALL regions, once */
     if (best_out) *best_out = best_n;
     return best;
 }

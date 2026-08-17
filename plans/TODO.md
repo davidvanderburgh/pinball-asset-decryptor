@@ -115,10 +115,36 @@ These have each been violated at least once and each cost a run or a window:
       simply the next gate, newly reachable and never configured. The simpler
       story is likelier. A backup of the pre-change EEPROM is at
       `/home/david/spike2root/data/nvram.bin.bak-20260817`.
-      **NEXT:** set ST's country code. Either drive the service menu / guided
-      setup as an operator would, or find the adjustment's EEPROM offset and
-      write a valid value (`FRANCE`, `USA`, `CANADA`, `JAPAN`, `SPAIN` all
-      appear as strings around file offset 5446264-5452536).
+      **★ DAVID ASKED WHETHER COUNTRY IS A HARDWARE DIP, AND HE IS RIGHT — WHICH
+      MOVES THE SUSPECT FROM THE EEPROM TO MY OWN CABINET FALLBACK.**
+      Evidence: hwshim's own comment records that **switch ids 17..33 are "DIPs
+      and service buttons, which are not on any node board"** — they arrive on
+      the CABINET switch input (SPI), not the node bus. The ST ROM contains NO
+      `DIP SWITCH` / `JUMPER` / `REGION` strings at all; `COUNTRY CODE`
+      (`0x53cabc`, message id 1294) is only the menu's NAME for what those
+      inputs produce. The refusal screen itself is drawn by `0x3c9658` (message
+      ids 767/768/769/770), reached through the dispatch table at `0x728f2c`.
+      **The uncomfortable part: ST is being handed a GODZILLA-SHAPED CONSTANT
+      for those bits, by the item-52 cabinet fallback in this very branch.**
+      Measured across runs: ST logs `[cabspi] this title has no findable switch
+      table: handing the game the platform AT-REST cabinet word
+      ff0f0f0000000000`, while godzilla logs the same BITS with no such line —
+      godzilla builds that word from its OWN switch table. So godzilla is happy
+      with those bits because they are literally godzilla's at-rest word, and if
+      ST numbers its cabinet switches differently the identical bits decode to a
+      different, unacceptable country. **The country ST reads is therefore very
+      likely an artefact of this rig, not a setting anyone chose.**
+      **NEXT, in order of cost:** (1) add a `PAD_CAB_BITS=<hex>` override for the
+      synthetic word and sweep the DIP bits until the refusal clears — cheap,
+      and it also proves the mechanism; (2) drive the service menu / guided setup
+      as an operator would (`COUNTRY CODE` is a menu adjustment, so it may be
+      settable without touching the bits); (3) the real cure, which is the
+      original blocker: get ST's switch table to resolve, after which the
+      cabinet word is built from ST's own data and no constant is involved.
+      Country name strings (`USA`, `CANADA`, `FRANCE`, `JAPAN`, `SPAIN`) sit
+      around file offset 5446264-5452536 if a value table is needed.
+      **NOT established:** that the EEPROM had anything to do with this. The
+      per-title EEPROM change (`ee033b9`) is still correct on its own merits.
       **════ CURRENT TRUTH — 2026-08-17 THIRD PASS. The screen's predicate is
       FOUND and read instruction-by-instruction, and it RETRACTS a claim the
       second pass committed. Read this block only. ════**

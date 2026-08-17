@@ -2243,6 +2243,11 @@ static void do_msg(int slot, struct i2c_msg *m)
  * RX half of an SPI transfer, and that is handled here in ioctl(). */
 static int sw_scan_bytes(unsigned nid, unsigned char out[8]);
 static int sw_scan_enabled(void);
+/* "This title has no findable switch table, and waiting will not help" - ONE
+ * definition, used by the cabinet at-rest word here and by the node-bus
+ * discovery fallback in nb_nodes_init(). Both are item 52 fallbacks and both
+ * must agree about when to give up, or one fires while the other waits. */
+static int sw_table_hopeless(void);
 static void sw_prime(unsigned nid, const unsigned char bits[8]);
 static unsigned long pad_ms(void);
 /* pad_ms()'s CLOCK_MONOTONIC origin, at file scope rather than a static inside
@@ -2446,6 +2451,10 @@ int shim_ioctl(int fd, unsigned long req, ...)
         static unsigned seen_gen = (unsigned)-1;
         static unsigned seen_kbd = (unsigned)-1;
         static int have;
+        /* Sticky, because `have` is: once the at-rest word is synthesized it
+         * stays in bits[] until a real scan replaces it, and sw_prime() must
+         * keep its hands off for exactly that long. */
+        static int cab_synth;
         unsigned long k;
         /* The thread spins with no pacing, so rebuilding the 88-entry walk on
          * every call would dominate the run. Rebuild when the held set changes
@@ -2493,6 +2502,7 @@ int shim_ioctl(int fd, unsigned long req, ...)
             seen_kbd = sw_shm_gen();
             sw_shm_edges();
             have = sw_scan_bytes(0, bits);
+            if (have) cab_synth = 0;      /* a real word replaced the synthetic */
             /* EVERY change to the cabinet word, with a timestamp. The menu
              * cursor was seen wandering on its own, and inferring the cause
              * from the screen is exactly the mistake this rig keeps making:
@@ -2537,10 +2547,65 @@ int shim_ioctl(int fd, unsigned long req, ...)
                 seen_kbd = sw_shm_gen();
             }
         }
+        /* ★ ITEM 52: WITH NO SWITCH TABLE, THE GAME WAS READING ITS OWN BUFFER
+         * AND SEEING EVERY CABINET SWITCH MADE.
+         *
+         * sw_scan_bytes() builds the cabinet word from the GAME'S OWN entry
+         * table. On a title whose table never resolves - stranger_things, whose
+         * device table is empty and whose in-memory table sw_find_table()
+         * rejects - it returns 0, and the `if (have)` below then skipped the
+         * RX write ENTIRELY: no `[cabspi]` line, nothing written into the
+         * transfer's rx buffer, so the game read whatever was already there.
+         * That is its own zeroed buffer, and THE CABINET BITS ARE ACTIVE LOW,
+         * so all-zero means ALL SWITCHES MADE - a machine booting with its
+         * cabinet shorted. Measured: godzilla logs `[cabspi]
+         * bits=ff0f0f0000000000` and `[swrest] machine at rest: coin door
+         * shut`; stranger_things logs NEITHER, not once in a 289 s run.
+         *
+         * The at-rest word is a PLATFORM constant, not godzilla's alone: the
+         * handoff records the node 0/1/4 cabinet layout measured identical
+         * across star_wars_le 1.30.0, godzilla_pro 1.15.0 and john_wick_le
+         * 1.01.0 (2017-2024), and ff 0f 0f 00 00 00 00 00 is what every one of
+         * them idles at. Handing that to a title we cannot build a word for is
+         * strictly better than handing it nothing, because "nothing" is not
+         * neutral here - it is the all-made word.
+         *
+         * Cannot affect a title whose table resolves: this runs only when
+         * sw_scan_bytes() returned 0. PAD_CAB_IDLE=0 disables it for an A/B. */
+        if (!have && sw_table_hopeless()) {
+            static int on = -1;
+            if (on == -1) {
+                char *q = getenv("PAD_CAB_IDLE");
+                on = !(q && *q == '0');
+            }
+            if (on) {
+                static const unsigned char idle[8] =
+                    { 0xff, 0x0f, 0x0f, 0, 0, 0, 0, 0 };
+                static int said;
+                for (k = 0; k < 8; k++) bits[k] = idle[k];
+                have = 1;
+                cab_synth = 1;
+                if (!said) {
+                    said = 1;
+                    logmsg("[cabspi] this title has no findable switch table: "
+                           "handing the game the platform AT-REST cabinet word "
+                           "ff0f0f0000000000 instead of leaving its buffer "
+                           "untouched (which reads as every switch MADE)\n");
+                }
+            }
+        }
         if (have) {
             unsigned char out8[8];
             unsigned j0;
-            sw_prime(0, bits);
+            /* NOT primed when the word is synthesized. sw_prime() writes into
+             * the GAME'S OWN NodeRec through SW_STRUCT, and a title with no
+             * findable switch table has no trustworthy SW_STRUCT either -
+             * sw_ok() only range-checks the pointer, so priming there writes
+             * into whatever happens to be mapped. Doing it unconditionally is
+             * what crashed godzilla at 6.5 s on the first cut of this change:
+             * the fallback fired during early boot, before the table existed,
+             * and primed a structure that was not built yet. */
+            if (!cab_synth) sw_prime(0, bits);
             for (j0 = 0; j0 < 8; j0++) out8[j0] = bits[j0];
             /* ---- ITEM 17: THE CABINET POLL-RATE PROBE (PAD_CAB_PROBE=1) ---
              *
@@ -4185,6 +4250,17 @@ static int sw_find_table(void)
     return 0;
 }
 
+/* The predicate both item 52 fallbacks key on - see its forward declaration.
+ * `!sw_find_done` means no table has been found by ANY route (configured or by
+ * shape), and `sw_find_fails >= 4` means the by-shape search has actually RUN
+ * and failed several times, so this is "hopeless" rather than "not yet". A
+ * title whose table resolves - godzilla via sw_configured_ok(), star_wars by
+ * shape at ~27 s - can never satisfy it. */
+static int sw_table_hopeless(void)
+{
+    return !sw_find_done && sw_find_fails >= 4;
+}
+
 /* Try, at most every 256 bus writes, until it works: the table does not exist
  * yet at the first ask, and a scan of the heap is not free. */
 /* Does the CONFIGURED address really point at a switch table in THIS title?
@@ -4837,7 +4913,7 @@ static void nb_nodes_init(void)
      * title whose table is found - even slowly - sets it too, so this branch is
      * permanently unreachable for them. sw_find_fails>=4 additionally keeps a
      * title whose table is merely a few searches late on the switch path. */
-    if (!sw_find_done && sw_find_fails >= 4) {
+    if (sw_table_hopeless()) {
         nb_fident_load();
         nb_nnodes = 0;
         for (id = 1; id < 64 && nb_nnodes < (int)sizeof nb_nodes; id++) {

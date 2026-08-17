@@ -161,6 +161,34 @@ These have each been violated at least once and each cost a run or a window:
       behaved identically (same `[nbsched]` fallback, 18 discovery polls, same
       2-slot heap near-miss, still no `fa`/`f2`, 56.4 fps for 278 s). The
       workflow's leading downstream suspect is dead.
+      **★★ A SECOND REAL RIG-SIDE BUG FOUND AND FIXED (`e8a4f31`-class, this
+      pass) — AND IT IS ALSO NOT THE GATE. ST WAS BOOTING WITH ITS WHOLE
+      CABINET SHORTED.** `sw_scan_bytes()` builds the cabinet word from the
+      game's own switch table; with no table it returns 0 and the `if (have)`
+      in the SPI ioctl branch skipped the RX write **entirely**, so the game
+      read its own zeroed buffer — and **the cabinet bits are ACTIVE LOW, so
+      all-zero means EVERY CABINET SWITCH MADE.** The contrast is total:
+      godzilla logs `[cabspi] bits=ff0f0f0000000000` and `[swrest] machine at
+      rest: coin door shut`; ST logged **neither, not once in 289 s**. Fixed
+      by handing a title with no findable table the platform AT-REST word
+      (`ff0f0f0000000000`, a platform constant — the node 0/1/4 cabinet layout
+      is measured identical across star_wars 1.30.0, godzilla 1.15.0 and
+      john_wick 1.01.0). `PAD_CAB_IDLE=0` disables it.
+      **`sw_table_hopeless()` is now ONE definition** of "no findable switch
+      table and waiting will not help", used by BOTH item 52 fallbacks (this
+      one and the node-bus discovery seed) so they cannot disagree.
+      **▼ A REGRESSION I MADE AND CAUGHT — the labelled example is the only
+      reason it did not ship.** The first cut gated on `!have` alone, so it
+      fired during EVERY title's early boot (before its table exists) and
+      called `sw_prime()` with the synthetic word — which writes into the
+      game's own NodeRec through a merely range-checked `SW_STRUCT`. **Godzilla
+      crashed at 6.5 s, 180 frames, segv.** Now it waits for *hopeless* rather
+      than *not yet*, and `sw_prime()` is skipped while the word is synthetic.
+      Post-fix godzilla is byte-for-byte baseline: 9 board objects, 33
+      discovery polls, 1254 fa/f2, **segv 0**, 55.2 fps.
+      **ST after this fix (i52_st8cab): the at-rest word IS delivered, and
+      bring-up is UNCHANGED — zero board objects, no `fa`/`f2`, 20 discovery
+      polls, 56.3 fps for 295 s.** A real bug, fixed; not the gate.
       **★ THE ST CRASH IS CHARACTERISED, and it is NOT the fix:** a
       timing-sensitive guest fault at ~200 frames / ~21 s that fires whenever
       ST renders SLOWLY — under CPU contention, under the surfaceless
@@ -201,8 +229,20 @@ These have each been violated at least once and each cost a run or a window:
       (c) A guest-side trace of the bring-up thread on ST — expensive, but it
       is what finally answers "how far does bring-up get".
       **Already ruled out, do not re-spend:** the runtime-info payload
-      (`PAD_NB_RT=1`, run i52_st7rt), the array-base RE by pattern (above),
-      and everything in the "wire is identical" and "flags word" sections.
+      (`PAD_NB_RT=1`, run i52_st7rt), the shorted cabinet word (fixed, run
+      i52_st8cab — a real bug but not the gate), the coin-door interlock as a
+      *bit* problem (switch 33 = node 0 bit 23 reads MADE = door CLOSED under
+      both the old all-zero word and the new at-rest word, so the door has
+      never been open on ST), the array-base RE by pattern (above), and
+      everything in the "wire is identical" and "flags word" sections.
+      **★ WHERE THIS LEAVES IT, honestly: two genuine rig-side bugs have been
+      found and fixed on this branch — the empty-bus discovery seed and the
+      shorted cabinet — and NEITHER unblocks stranger_things.** Six suspects
+      are now dead. The remaining space is structural: something about ST-era
+      bring-up that the godzilla 1.15.0 RE does not describe, which is why
+      the next move (c) is a guest-side trace of the bring-up thread rather
+      than another guess. Both fixes are worth keeping regardless — they are
+      correct on their own terms and godzilla-verified safe.
       **D4 → D3: the mechanism is known, a run reproduces it on demand, the
       fix is written and proven safe; only the final full-speed ST run remains,
       gated on the WSL restart.**

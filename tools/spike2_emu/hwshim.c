@@ -3465,6 +3465,31 @@ static void nb_sweep_watch(void)
     logmsg(m);
 }
 
+/* item 52 DECISIVE EXPERIMENT (PAD_NB_FORCE_HEALTHY=1): overwrite every in-use
+ * slot of the swept board array with a pristine state - flags |= 3 (registered
+ * + serviced) and status = 2 - on every node-bus TX. stranger_things settles
+ * its array at n2=f2 (never registered) and n4=s7 (bad status) and then wedges
+ * on LOCATING NODE BOARDS forever. If normalising the whole array to f3/s2
+ * dismisses that screen, the gate IS board health and we bisect to the culprit
+ * slot; if it still wedges, the board-object table is ruled out for good and
+ * the six passes spent there are closed. Requires PAD_NB_STRIDE_SWEEP=1 so the
+ * (base,stride) is resolved. Fields match nb_sweep_watch: o+4 flags, o+12
+ * in-use, o+24 status - all 4-byte. */
+static void nb_force_healthy(void)
+{
+    static int on = -1;
+    unsigned i;
+    if (on == -1) on = getenv("PAD_NB_FORCE_HEALTHY") ? 1 : 0;
+    if (!on || !sw_best_a || !sw_best_s) return;
+    for (i = 0; i < 32; i++) {
+        unsigned char *o = (unsigned char *)(unsigned long)
+                           (sw_best_a + i * sw_best_s);
+        if (!*(const unsigned *)(o + 12)) continue;   /* in-use slots only */
+        *(unsigned *)(o + 4) |= 3u;                    /* registered+serviced */
+        *(unsigned *)(o + 24) = 2u;                    /* healthy status */
+    }
+}
+
 /* The best sub-threshold candidate the last scan saw, for nb_dump_objs() to
  * report. Zero when the scan succeeded or saw nothing at all. */
 static unsigned nb_near_base, nb_near_n;
@@ -7786,6 +7811,7 @@ long shim_write(int fd, const void *b, unsigned long n)
         nb_trace();
         nb_maybe_poke();
         nb_watch_flags();
+        nb_force_healthy();     /* item 52: pristine-array gate test (per TX) */
         nb_maybe_dump();
         alert_maybe_dump();
         val_maybe_dump();

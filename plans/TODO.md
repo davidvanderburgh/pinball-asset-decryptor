@@ -88,6 +88,97 @@ These have each been violated at least once and each cost a run or a window:
       projector plays. NOT, as this item used to say, "nodes 1, 8 and 9 are
       the only boards it cannot find" — that reading is disproved below.**
       `S2 D4` ← IN PROGRESS
+      **════ CURRENT TRUTH — 2026-08-17 SECOND PASS. SUPERSEDES the block
+      below it too. Read this first; it RE-ANCHORS the item on the real
+      symptom, which the first pass (and most of this pass) had drifted off.
+      ════**
+      **THE SCREEN NAMES THE PINNODES (1, 8, 9), NOT node 2.** The eyes-on
+      symptom — recorded in `nbdir.py` from David's 2026-08-16 boot — is
+      `LOCATING NODE BOARDS / 1 8 9 / NODES NOT FOUND`. This pass spent most of
+      its length chasing node 2 (whose board object never sets bit0 — see
+      below), which is the WRONG board: the screen complains about 1/8/9, the
+      three pinnodes, not 2. Recorded so the next pass does not repeat the
+      detour.
+      **AND THE SCREEN DOES NOT READ THE BOARD-OBJECT FLAGS.** Proof, two
+      independent legs: (a) the pinnodes 1/8/9 reach `flags=3` (the healthy
+      end-state) in the board watch, yet the screen names them NOT FOUND; (b)
+      the census for the boot that showed that screen has NO addressed
+      subcommand at or below 0xef reaching ANY node, i.e. by the game's own
+      registration criterion nothing was registered — the flags word and the
+      screen's verdict disagree. **So the six passes (this one included) spent
+      in the board-object table were looking at the wrong structure. The board
+      table is RULED OUT as the screen's input.** What the screen actually
+      reads is still unknown and is the whole remaining job.
+      **What the boot log DOES establish (st12, fix ON, pre-reboot, the last
+      good run — analysed exhaustively this pass):**
+      | fact | evidence |
+      |---|---|
+      | node location COMPLETES, it is not an infinite poll | every node polled `fe` 126 rounds, then a final `f9/f9/fc` runtime-read pass, a `0a00` broadcast, one `f0`→node0, then the bus goes SILENT at L9536 and never speaks again for the remaining ~6 min |
+      | the LOCATING scene never dismisses | ch0 holds ONE LCD scene `bc0792d8/45a4e8c62515` from frame ~120 to frame ~20000 — through location completing and forever after |
+      | every node's runtime info (`f9 00`,`f9 01`,`fc`) reads back ALL ZERO | `nbparse.py` census: 18 zero bytes for all of 1,2,4,8,9,12 |
+      | three board TYPES by `fe` identity | A=(1,8,9) `0001130023…c500` pinnode; B=(2,12) `000113002b10…3f00` ws2812node; C=(4) `007c6b00…2c00` node4 |
+      | all six identities are VERSION-MATCHED to ST's own hex | `node_ident.txt`: every node `hexver=1.19.0`, variant per type, = what the shim claims. **The firmware-version-grade-mismatch theory is DEAD — there is no mismatch.** |
+      **Board-array end state (correcting this pass's own earlier "all reach
+      flags=3" overstatement):** `n0=f3s2 n1=f3s2 n2=f2s2 n4=f3s7 n8=f3s2
+      n9=f3s2 n12=f3s2`. Two anomalies, both present from the first watch tick
+      and BOTH FIX-INDEPENDENT (identical in the `PAD_NB_SCHED=0` control):
+      **n2 never sets bit0** (registered) — it is the only node that starts f0
+      not f1, and ends f2 not f3 — and **n4 carries status 7** (all others 2),
+      because its `fe` reply has a different byte layout (`00 7c…` vs the
+      `00 01…` version prefix) that the fixed-offset parser reads as fw
+      124.107.0. NEITHER is the screen's gate (the screen names 1/8/9, and n4
+      still registers). n2≡n12 by every identity field yet only n12 registers;
+      that asymmetry is unexplained and, since it is not the symptom, not worth
+      chasing further.
+      **Registration mechanism, read out of hwshim.c's own comments (godzilla
+      RE, addresses are godzilla's):** `0x5a2e10` identifies+registers from the
+      `fe` reply; part id `[4..7]` is looked up in the 28-entry part table at
+      `0x69cc24`; a MISS stores the "Unknown" descriptor whose `+20`=0, and
+      `0x59ec1c` refuses to send any subcommand ≤0xef to a board whose `+20`=0
+      — that is why an unregistered board is inert. Then `0x1d5780` grades the
+      claimed fw+variant against the decrypted `.hex`. This is the machinery
+      the screen's found-predicate is PROBABLY built on, but it has not been
+      located in ST's binary.
+      **Directory-attribute clue (from nbdir.py, one boot only — do not
+      over-read):** the per-node directory flags word is 1/8/9=`0x8`,
+      2/12=`0xc`, 4=`0x4`. The screen names exactly the `0x8` nodes; bit2
+      (`0x4`) is CLEAR on the named ones and SET on the unnamed (topper is
+      literally labelled OPTIONAL, QR scanner likely optional too). Working
+      read: **bit2 set = optional, so the screen names ESSENTIAL nodes it
+      judges not-found.** The pinnodes are essential AND judged not-found; WHY
+      they are judged not-found is the open question.
+      **Static route to the screen code is BLOCKED.** The strings
+      `LOCATING NODE BOARDS` (`0x5391e8`) and `NODE%s NOT FOUND` (`0x5391d4`)
+      sit in 5-word descriptor cells `0x749eb8`/`0x749ea0`, indexed as entries
+      34/35 of a 192-entry menu string-pointer table at `0x73dbb4`. Neither the
+      strings, the cells, nor the table base are loaded as an immediate ANYWHERE
+      in the objdump — the table is reached by base+offset arithmetic — so
+      "xref the string to find the display code" does not work. `msgtab.py`,
+      `msgtab2.py`, `msgtab3.py`, `nbparse.py`, `scenetl.py` in
+      `/home/david/i52/` are the instruments built this pass.
+      **NEXT-PASS TARGET:** find the LOCATING screen's per-node found-predicate
+      — what field, read from where, makes it judge a PINNODE not-found while
+      it accepts the ws2812nodes. Two approaches, neither needs the board
+      table: (1) locate the found-predicate by RE from the registration
+      machinery above (the `fe`-reply parser at `0x5a2e10` and the exchange
+      gate at `0x59ec1c`, ported to ST's addresses); (2) run ST and watch what
+      the game READS out of each pinnode vs each ws2812node during location — a
+      shim read-probe, once the rig can render again.
+      **⛔ ENVIRONMENTAL BLOCKER, 2026-08-17: ST will not currently run to the
+      LOCATING screen.** Post-reboot WSLg deadlocks the game+renderer ~2.1 s
+      into boot when the projector (display 2) window opens — padglhost prints
+      `stopped after 3 frames`, node bring-up never starts (0 TX). This is the
+      WSLg second-window stall; st12 rendered fine only because it PREDATES the
+      reboot. `PAD_GL_RAISE=0`/`PAD_PLAYFIELD=0` did not help. All runtime work
+      is gated on clearing this (likely a clean WSLg restart, weighed against
+      the WSL-wedge risk that already cost one reboot this session).
+      **A DECISIVE EXPERIMENT IS BUILT BUT UNRUN:** `PAD_NB_FORCE_HEALTHY=1`
+      (hwshim.c, gated off) overwrites every in-use board slot to `flags|=3
+      status=2` on each TX. Predicted to FAIL (the screen does not read flags),
+      but running it once the renderer works gives DIRECT proof instead of the
+      two-leg inference above. Deployed in the current shim build.
+      **════ END SECOND PASS. Below is the first pass's CURRENT TRUTH, still
+      valid on the board-array facts but drifted off the real symptom. ════**
       **════ CURRENT TRUTH, 2026-08-17, triangulated with an A/B control —
       SUPERSEDES every dated block below, which flip-flopped twice on the way
       here. Read only this to know where the item stands. ════**

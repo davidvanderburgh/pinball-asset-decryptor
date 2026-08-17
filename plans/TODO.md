@@ -1053,9 +1053,38 @@ These have each been violated at least once and each cost a run or a window:
       session with a save and a load.
 
 
-- [x] **50. No LED feedback at all on a title with no playfield artwork,
-      which is most of them.** DONE 2026-08-16, `item/50` — see the Done
-      section for the close and for the ONE CLAUSE THAT WAS AMENDED.
+- [ ] **50. No LED feedback at all on a title with no playfield artwork,
+      which is most of them.** `S3 D4` ← IN PROGRESS
+      **★★ REOPENED 2026-08-16, HOURS AFTER BEING CLOSED, BY DAVID — and the
+      reason is the one that matters.** Asked whether it worked, he said: *"i'm
+      confused did we make this work or not? does it work for TMNt for
+      example"*, and on being told no: *"do option 1 and let's make it work
+      now"*. **Option 1 was: fold item 54 into this one and keep it open until
+      TMNT actually lights up.**
+      **THE CLOSE WAS TOO GENEROUS AND THIS IS THE LESSON.** Everything in the
+      Done-section entry below is true — the view is built, the tracking is
+      measured, godzilla and elvira3 both showed real LED activity — but on
+      **turtles_pro, the title David was looking at when he FILED this item,
+      the window still shows nothing.** The acceptance was met on the machinery
+      and not on the ask. A feature that is correct and shows nothing to the
+      user who asked for it is not done. **D3 → D4:** what is left is not
+      drawing work at all, it is an unknown frame shape that needs runs.
+      **THE WHOLE OF WHAT IS LEFT is what was item 54** (now folded in; do not
+      work it separately): turtles_pro puts NO frame the shim recognises as a
+      lamp write on the wire — `decoded=0` AND `skipped=0` across a whole run,
+      including while the game's own `Diagnostics → Single LED Test` was being
+      stepped by hand and naming `13 / 8-LP-5 / LEFT RETURN LANE LEFT-G / CN14
+      / RETURN=4, SOURCE=7/8`. `skipped=0` is the load-bearing half:
+      `led_publish()` is called on EVERY node bus write (`hwshim.c:7224`), so
+      the frames are not failing the decoder, they are not reaching it.
+      **Acceptance, REPLACED and now the only one that counts:** on
+      **turtles_pro**, LEDs visibly light and move in the playfield window
+      while the game runs — stated with a screenshot and with the ring-vs-screen
+      measurement in BOTH directions (the picture must also hold still when the
+      game does).
+      **Resume:** see the folded item-54 body below for the five ruled-out
+      titles, the decoder's accept path, and the `lednames.py` name-table work
+      already done.
       **★ DAVID, 2026-08-14: "we should have some visual indication of leds
       here even without the playfield. can we think of some elegant way to show
       that?"** The window's own status bar says `2285 LED writes decoded` while
@@ -1215,12 +1244,13 @@ These have each been violated at least once and each cost a run or a window:
       the fixture join both exist, the layout is new drawing work in
       playfield.py, and confirming it means a run with the LED test menu.
 
-- [ ] **54. Some titles send NO LED write the shim recognises — turtles_pro
-      lights nothing on the wire even during the game's own Single LED Test —
-      and their LED NAME TABLE is unreachable because lednames.py hard-codes
-      Godzilla's address.** `S2 D4` *(Split out of item 50 on 2026-08-16, from
-      a live run. Item 50's grid is correct and has nothing to draw; this is
-      why.)*
+- [ ] **54. FOLDED BACK INTO ITEM 50 on 2026-08-16 at David's ask — do not
+      take this as a separate item.** It was split out when item 50 looked
+      closeable without it; David's "does it work for TMNT" made clear that
+      item 50 is not done until this is, so item 50 now carries the acceptance
+      and this entry is kept ONLY for the evidence below, which is expensive
+      and must not be re-derived. `S2 D4`
+      *(Everything under here is item 50's working state.)*
       **★ DAVID, 2026-08-16, looking at the running game: "i feel like there
       should be an led table somewhere. look at the diag → all leds screen for
       example."** He is right, and the screen he was on is the oracle:
@@ -1817,9 +1847,12 @@ rewriting it.**
 
 ## Done
 
-- [x] **50. No LED feedback at all on a title with no playfield artwork.**
-      DONE 2026-08-16, branch `item/50` (closing commit on the branch; the
-      merge hash does not exist until `/finish`). Two halves, both live-checked.
+- [ ] **50 — THIS ENTRY IS NOT DONE. It was moved here on 2026-08-16 and moved
+      back out the same day**, when David asked "does it work for TMNT" and the
+      answer was no. It is kept in place because everything it records is true
+      and was verified; what it got wrong was calling that finished. **The open
+      item above is authoritative.** Read this for what is BUILT.
+      Branch `item/50`. Two halves, both live-checked.
       **The positional half, which David asked for mid-item** ("if we can show
       them positionally... also showing switches placement... even if we can't
       show the playfield artwork"): the rig filtered every device on the

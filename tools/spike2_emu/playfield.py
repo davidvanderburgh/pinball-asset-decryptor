@@ -3468,15 +3468,18 @@ class Schematic(StateOps):
         # the widest possible row is the format string at full name width.
         f9 = tkfont.Font(family="Consolas", size=9)
         colw = f9.measure("999  " + "M" * self.NAME_W) + 26
-        w = len(cols) * colw + 8
         h = per_col * self.ROW_H + 16
-        # ★ ITEM 50: the LED swatch grid lives to the RIGHT of the switch
-        # columns, on this same canvas, so it inherits the scroll backstop and
-        # the hit testing rather than growing a second scrolling surface. Its
-        # width is reserved here because the grid has no cells yet - the roster
-        # arrives from the wire, seconds into a run.
-        grid_x = w + 10
-        w = grid_x + LED_PER_ROW * LED_PITCH + 24
+        # ★ ITEM 50: THE LED GRID GOES ON THE LEFT, AHEAD OF THE SWITCH
+        # COLUMNS, and that is a correction. It was first put to the RIGHT of
+        # them, which reads better - until turtles_pro, whose 93 switches flow
+        # into three columns and pushed the grid past the window edge, where it
+        # survived only behind the horizontal scrollbar. The window then
+        # reported "37 of 42 LEDs lit" in its status bar while showing the user
+        # nothing, which is the exact complaint this whole item exists to fix.
+        # The lamps are what this view is FOR on a title with no artwork; the
+        # switch list is what scrolls.
+        grid_w = LED_PER_ROW * LED_PITCH + 24
+        w = grid_w + len(cols) * colw + 8
 
         # THE SCROLL BACKSTOP. Normally the flow fits with room to spare (a
         # 108-switch title is two columns on this desktop); if it ever does
@@ -3509,7 +3512,7 @@ class Schematic(StateOps):
 
         self.info = {}
         for ci, entries_col in enumerate(cols):
-            x = ci * colw + 18
+            x = grid_w + ci * colw + 18
             for ri, (kind, d) in enumerate(entries_col):
                 y = 14 + ri * self.ROW_H
                 if kind == "hdr":
@@ -3532,7 +3535,7 @@ class Schematic(StateOps):
         # (any image - the grid has no picture, so it has no reason to drop a
         # topper lamp); the ROSTER comes from the wire, which is what makes
         # this work on the four titles whose table is empty.
-        self.leds = LedGrid(self.cv, grid_x, 14, h - 28, load_led_names())
+        self.leds = LedGrid(self.cv, 12, 14, h - 28, load_led_names())
         self.led_lit, self.led_total = 0, 0
 
         self.tip = Tip(root)

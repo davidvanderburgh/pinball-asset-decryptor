@@ -1116,14 +1116,53 @@ These have each been violated at least once and each cost a run or a window:
       not help. Needs an elevated `Restart-Service WSLService` or a reboot. **No
       rig work of any kind is possible until then**, including reading
       `/var/tmp`.
-      **Resume, in order, and the first two are desk work needing only WSL
-      back:** (1) verify the `/var/tmp/item43_*.log` claim YOURSELF — the agent
-      reports conflict, so re-derive the per-(node,cmd,len) census rather than
-      trusting the numbers above; (2) replay `led_publish`'s accept path over
-      those captures to see whether they WOULD decode, and in particular
-      whether the 6-byte `0x84/0x85` enumeration is present for nodes 8 and 9
-      (its absence is exactly what kills star_wars); (3) only then spend a run,
-      with `PAD_NB_TRACE=1`, on reaching the state where turtles drives lamps.
+      **★★★ TMNT LIGHTS UP, 2026-08-17. `37 of 42 LEDs lit`, `2772 LED writes
+      decoded`, `44 coils addressed` — screenshot taken.** The decoder needed
+      NO change. What was missing was the STATE the game has to be in, and the
+      recipe is the valuable part:
+      **(1) turtles boots to a Tech Alerts screen and stays there** — and they
+      are SWITCH complaints (`Check Switch #80 LOCKDOWN BUTTON`, `#91 TILT
+      PENDULUM`), not the node-board complaints elvira3 shows. Its boards are
+      found. While parked there it runs no light show at all.
+      **(2) `plunge.py reset` clears it** ("six balls in the trough, coin door
+      shut") and the game proceeds to attract.
+      **(3) ATTRACT IS NOT ENOUGH.** In attract turtles drives only node 1 —
+      `a4`/`a5` at len 7, body `0485`, blen 2 — which is too short for any
+      decoder shape and which **godzilla logs as `[ledskip]` with the identical
+      body**, so it is not lamp data on either title. Nodes 8 and 9 enumerate
+      (64 and 58 indices) and receive nothing.
+      **(4) A GAME IS WHAT DRIVES THE PLAYFIELD.** `plunge.py coin` ×2 then
+      `plunge.py start`, and lamp frames land on nodes 8 and 9 immediately:
+      `decoded` 0 → 380 → 2772 → 5142, live channels `{8: 2, 9: 35}`.
+      **★ THE 6-BYTE ENUMERATION DOES RUN ON TURTLES** — node 1: 6, node 8: 64,
+      node 9: 58, frames `88038400f100` / `89038500ef00`. So star_wars's
+      failure mode (enumeration absent, `led_known` empty, everything skipped)
+      is RULED OUT for turtles, and this was measured from the first
+      `PAD_NB_TRACE` capture turtles has ever had (`~/i50_tmnt_trace.log`;
+      every one of the 23 `/var/tmp/item43_*.log` files is the BUDGETED kind,
+      exactly 162 frames of boot handshake, and proves nothing either way).
+      **★ THE GRID MOVED TO THE LEFT, and that was a real fault not a
+      preference.** With turtles' 93 switches flowing into three columns the
+      grid was pushed past the window edge and survived only behind the
+      horizontal scrollbar — the window reported `37 of 42 LEDs lit` while
+      showing the user nothing, which is precisely the complaint this item
+      exists to fix. The lamps are what this view is FOR; the switch list is
+      what scrolls now.
+      **★ WHAT IS STILL NOT DEMONSTRATED, and it is why the box is still
+      empty.** The replaced acceptance asks for LEDs that "visibly light AND
+      MOVE", with the ring-vs-screen measurement in BOTH directions. Only the
+      NEGATIVE direction was obtained on turtles: across 13 samples the ring's
+      lit set held the same 37 channels and the screen changed 0 pixels, four
+      times over, even while `decoded` climbed by hundreds (the game rewriting
+      identical values — the churn control, and it passes). **No POSITIVE
+      transition was measured on turtles**: its lamp picture stayed static
+      through attract, ball launch and three target hits. The 0 → 37 change
+      when the game started WAS observed but not instrumented. The positive
+      direction is measured only on godzilla_pro (10 channels → 4635 pixels,
+      36 → 9811).
+      **Resume:** get a turtles lamp CHANGE under the instrument — likely a
+      ball drain, a mode start, or the game's own `Diagnostics → LED Tests`
+      now that the game reaches its menus. Then the acceptance is met in full.
       See the folded item-54 body below for the ruled-out titles, the decoder's
       accept path, and the `lednames.py` name-table work already done.
       **★ DAVID, 2026-08-14: "we should have some visual indication of leds

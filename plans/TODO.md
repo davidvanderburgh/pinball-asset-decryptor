@@ -132,21 +132,35 @@ These have each been violated at least once and each cost a run or a window:
       | `fe` identity per node | 12 | **108-113** |
       | board objects | 0 usable | **node 0 + node 1** |
       The guest ran the FULL 289 s at **56.5 fps**, healthy throughout.
-      **★ THE PREDICTION THIS ITEM COMMITTED TO IN ADVANCE WAS CONFIRMED
-      EXACTLY:** `nb_report_near()` reports `slot 0 node 0 status 0 (No
-      Errors)` and `slot 1 node 1 status 2` — which is the "real array caught
-      half-built" branch, not the coincidence branch. (Per the RE, status 2 is
-      written at `0x1d5814` = *everything matched*; the `nb_status_name[]`
-      label "Not Registered" is off by the message-row offset and should not
-      be read literally — every healthy godzilla board also reads status 2.)
-      **So node 0 (CPU/bridge) and node 1 are created AND graded clean, and
-      nodes 2/4/8/9/12 never get objects at all.** Registration still never
-      completes for them: the census shows **no `fa`, no `f2`, no `ff`, no
-      `0x11`, no sub-0xef** anywhere in the run.
+      **▼ AND A CORRECTION I OWE MYSELF, made the same evening before it could
+      mislead the next pass: the written prediction read as CONFIRMED, and it
+      is not.** `nb_report_near()` reported `slot 0 node 0 status 0 (No
+      Errors)` / `slot 1 node 1 status 2` at `0x0087429c`, which is the
+      "real array caught half-built" pattern — **but that address is HEAP, not
+      static, so it is almost certainly a coincidence.** Measured from the
+      program headers: ST's RW LOAD is vaddr `0x715000` memsz `0x12e9dc`, so
+      its static data (including .bss) ENDS at **`0x8439dc`** — and
+      `0x0087429c` is above it. godzilla's board array `0x7bad88` is INSIDE
+      its own static range (RW `0x6f52c0` + `0x14d8dc` = `0x842b9c`), i.e. the
+      real thing is `.bss` on the title where it is known. A stable heap
+      address across runs proves only a deterministic allocator, not identity.
+      **So the honest reading is the OTHER branch of the prediction: ST
+      creates NO board objects at all** — which is also what every other
+      signal says (no `fa`, no `f2`, no `ff`, no `0x11`, no sub-0xef anywhere
+      in 289 s). Note this is consistent with the finder printing nothing:
+      an existing-but-entirely-unpopulated array is INVISIBLE to it by
+      construction, because a slot only counts when `[+12]` is non-zero.
       **THE QUESTION IS NOW SHARP AND NARROW: the discovery walk is fed all
-      six nodes and the game identifies all six 108 times each, yet only the
-      first two boards are ever created. What stops board 3?** That is a much
-      smaller question than the one this item started with.
+      six nodes and the game identifies all six 108 times each, yet not one
+      board object is ever created.** That is a much smaller question than the
+      one this item started with, and it is squarely about what the game does
+      between "identity answered" and "board created".
+      **★ RULED OUT THE SAME EVENING, with a run (i52_st7rt): the ZERO-FILLED
+      RUNTIME INFO IS NOT THE GATE.** `PAD_NB_RT=1` fills the f9/00, f9/01 and
+      fc replies with a recognisable pattern instead of 48 zero bytes; ST
+      behaved identically (same `[nbsched]` fallback, 18 discovery polls, same
+      2-slot heap near-miss, still no `fa`/`f2`, 56.4 fps for 278 s). The
+      workflow's leading downstream suspect is dead.
       **★ THE ST CRASH IS CHARACTERISED, and it is NOT the fix:** a
       timing-sensitive guest fault at ~200 frames / ~21 s that fires whenever
       ST renders SLOWLY — under CPU contention, under the surfaceless
@@ -155,16 +169,30 @@ These have each been violated at least once and each cost a run or a window:
       not fire: 289 s clean here, 232 s clean in item 51. **Consequence worth
       knowing: you cannot currently screenshot an ST run without inducing the
       crash**, which is why the acceptance below still has no screenshot.
-      **RESUME — the next pass's single question: what gates the creation of
-      board 3 on ST?** The board objects live at `0x0087429c` (stable across
-      runs; slots 0 and 1 populated). Cheapest moves, in order: (a) lower
-      `NB_OBJS_MIN` to 2 so `NB_OBJS` resolves on ST and the full `[nbobj]`
-      dump + `nb_nodes_add_boards()` come alive (godzilla is unaffected — its
-      9-slot array always wins `best_n`); (b) probe the DOWNSTREAM gate the
-      workflow flagged — the 48-byte runtime-info record (`f9/00`, `f9/01`,
-      `fc`) is answered as **48 zero bytes for every board**, and `PAD_NB_RT=1`
-      exists to un-zero it; (c) the coin-door interlock wait (godzilla
-      `0x1d6fb8`; ST's own address unknown).
+      **RESUME — one question: on ST the game is handed a full bus and correct
+      identities, so what stops it creating even ONE board object?** Suggested
+      order, cheapest first:
+      (a) **Find ST's static board array by RE, not by shape.** The shape scan
+      cannot see an all-zero array, so it can neither find it nor prove it
+      absent. It must lie in ST's static range `0x715000`..`0x8439dc`;
+      `/home/david/i52/st_game` (the ELF, copied out) and
+      `/home/david/i52/st_game.dis` (full objdump, 1.3M lines) are already on
+      disk for exactly this. Godzilla's accessor `0x39c9b0` returns
+      `base + node*0xe0` unconditionally — find ST's analogue and the base
+      falls out, after which `PAD_NB_OBJS=<addr>` makes every existing
+      instrument work on ST with no new code.
+      (b) **The bare-00 reply FORM.** The fallback feeds the schedule, but
+      nothing has verified the game ACCEPTS the walk: whether it wants the
+      list terminated differently, or whether ST's newer bring-up expects
+      something the godzilla-era RE does not describe. `PAD_NB_SCHED=0` (an
+      A/B against no schedule at all) and the `[nbsched] poll #N` trace are
+      the readouts.
+      (c) The coin-door interlock wait (godzilla `0x1d6fb8`; ST's address
+      unknown) — still untested on ST, and it is the one recorded godzilla
+      mechanism that stalls bring-up wholesale.
+      **Already ruled out, do not re-spend: the runtime-info payload (b above
+      in the old list) via `PAD_NB_RT=1`, and everything in the "wire is
+      identical" and "flags word" sections above.**
       **D4 → D3: the mechanism is known, a run reproduces it on demand, the
       fix is written and proven safe; only the final full-speed ST run remains,
       gated on the WSL restart.**

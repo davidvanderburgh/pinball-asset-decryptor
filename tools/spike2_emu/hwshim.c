@@ -4535,8 +4535,30 @@ static int sw_configured_ok(void)
 static void sw_find_maybe(void)
 {
     static unsigned tick;
+    unsigned t;
     if (sw_find_done) return;
-    if (tick++ % 256) return;
+    /* DENSE EARLY, SPARSE LATER - and the spacing is load-bearing, not taste.
+     *
+     * A flat `tick % 256` costs one table pass per 256 node-bus frames, which
+     * is the right price for a search that usually succeeds. But the "there is
+     * no table on this title" VERDICT needs four failed searches
+     * (sw_table_hopeless), so a flat 256 put that verdict 1024 frames away -
+     * MEASURED at 178.4 s on stranger_things, where the discovery schedule
+     * then seeded at 178.4 s and the boards went found at 181 s.
+     *
+     * The game does not wait that long and never re-asks: 0x2059ac raises the
+     * LOCATING screen after 300 ms of failed location and gives up re-checking
+     * seconds later, and the only clear of that screen bit lives inside the
+     * loop that exits. So for the whole window in which stranger_things is
+     * asking, the shim was answering "the bus is empty", and by the time the
+     * truth arrived nothing was listening. The verdict has to be reachable in
+     * the same seconds the game spends asking.
+     *
+     * Four searches inside the first 32 frames, then the old 256 spacing. Same
+     * number of passes, front-loaded onto the frames the game actually cares
+     * about - those first frames ARE the bare-00 discovery walk. */
+    t = tick++;
+    if (t < 32 ? (t & 7) != 0 : (t % 256) != 0) return;
     if (sw_configured_ok()) {                               /* the known title */
         char m[160];
         sw_find_done = 1;

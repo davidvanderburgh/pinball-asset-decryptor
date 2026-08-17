@@ -168,8 +168,43 @@ These have each been violated at least once and each cost a run or a window:
       and the stale text sits on the glass forever. **This retires the
       "grading/identity/registration" framing entirely: nothing is wrong with
       what the boards CLAIM, only with WHEN they become found.**
-      **NEXT PASS — one question, and it is now a performance question:** what
-      takes 181 s? The FOUND bit is set by the game at `0x205cb8` for boards
+      **★ THE 181 s IS PART MINE, AND THAT PART IS FIXED (2026-08-17).**
+      `sw_find_maybe()` attempted the switch-table search on a flat
+      `tick % 256` node-bus frames, and `sw_table_hopeless()` needs FOUR failed
+      searches — so the "this title has no switch table" verdict, which is what
+      releases my discovery-schedule fallback, could not be reached until
+      **1024 bus frames**. Measured: the schedule seeded at **178.4 s** and the
+      boards went found at 181 s. The game asks for SECONDS and never re-asks,
+      so for the entire window in which ST was asking, the shim was answering
+      "the bus is empty". **Fix: four searches inside the first 32 frames, then
+      the old 256 spacing — same number of table passes, front-loaded onto the
+      frames that are the bare-00 discovery walk itself.**
+      | metric | before | after |
+      |---|---|---|
+      | schedule seeded | 178.4 s (L5985) | L3313 |
+      | nodes 1/8/9 all FOUND | 181 s | **142.6 s** |
+      | LCD scenes | frozen on `bc0792d8/45a4e8c62515` all run | `ch0 5b2d86be`, `ch1 60ed7e50` — the latter never seen in ANY prior run |
+      **Labelled example holds: godzilla is byte-for-byte unaffected** (89770
+      lines vs 89456, node TX 158 vs 158, 10540 frames vs 10520) because its
+      configured switch table checks out (`entry[] at 0x00991d98, 88 switches`)
+      so it sets `sw_find_done` and never reaches the hopeless branch at all.
+      **HONESTY: this is an improvement, NOT a cure, and I have no eyes on the
+      screen.** 142.6 s is still two orders of magnitude past the game's
+      window, so ST is very probably still wedged; the changed scene hashes say
+      the game's video state moved somewhere it never moved before, which is
+      evidence of progress and NOT evidence of a completed boot. Someone with
+      the glass in front of them should look.
+      **NEXT PASS — the remaining cost is the BUS RATE, not my scan spacing:**
+      at one point 120 bus frames took 142 s (**under 1 TX/s**), and the game
+      needs hundreds of frames before it sets the FOUND bit (each node is
+      polled `fe` ~126 times; 756 `fe` frames in the st12 census). So the
+      question is now: what paces the node bus, and why does the game need so
+      many rounds per node before `0x205cb8` sets the bit? Suspect the
+      shim's per-exchange latency or a reply the game keeps re-asking for
+      (the 126 rounds look like a retry, not a heartbeat, and the standing "no
+      `ff` in the census" loose end is likely the same story).
+      **Superseded sub-question (kept so it is not re-asked):** what takes
+      181 s? The FOUND bit is set by the game at `0x205cb8` for boards
       with `status==2` that answer the addressed `0xFF` read at `0x4f0c1c`, so
       the target is the latency from bus-up to that read completing per node.
       Note the standing loose end that now looks load-bearing: **the boards

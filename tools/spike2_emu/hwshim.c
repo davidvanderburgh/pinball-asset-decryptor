@@ -2100,6 +2100,41 @@ static void hex64(char *out, const unsigned char *p, int n)
 /* The NVRAM is the machine's identity, settings, audits and scores, so it has
  * to survive a restart the way the real board does. */
 #define NV_PATH "/data/nvram.bin"
+
+/* ...AND IT IS ONE MACHINE'S, NOT ONE DISK'S. A real Spike 2 EEPROM sits on the
+ * CPU board of a cabinet that runs ONE game; this rig has one rootfs that runs
+ * every title, so a single /data/nvram.bin meant godzilla, TMNT and
+ * stranger_things all read and wrote the SAME 64 KB - each interpreting the
+ * other's bytes at its own adjustment offsets. The game's own file-based stores
+ * under /data/nv/<title>/ were already per-title; this one was the outlier.
+ *
+ * MEASURED, 2026-08-17: two godzilla runs, then stranger_things put
+ * "THIS MACHINE WILL NOT OPERATE IN THIS COUNTRY / PLEASE CONTACT YOUR
+ * DISTRIBUTOR" on the glass - the COUNTRY CODE adjustment (0x53cabc) read out
+ * of bytes another title wrote.
+ *
+ * A missing per-title file is SEEDED from the shared one rather than started
+ * blank, because that file holds real settings and real high scores and this
+ * change must not be the thing that loses them. PAD_NV_BLANK=1 skips the seed
+ * for a deliberately fresh machine (which is also how you get back to a title's
+ * guided setup). */
+static const char *nv_path(void)
+{
+    static char p[160];
+    const char *g, *c;
+    int safe = 1;
+    if (p[0]) return p;
+    g = getenv("PAD_GAME");
+    /* No string.h here - this object is built -nostdlib. A title name with a
+     * slash in it would escape /data, so check by hand. */
+    for (c = g; c && *c; c++)
+        if (*c == '/') { safe = 0; break; }
+    if (g && *g && safe)
+        snprintf(p, sizeof p, "/data/nvram-%s.bin", g);
+    else
+        snprintf(p, sizeof p, "%s", NV_PATH);
+    return p;
+}
 static int nv_loaded;
 
 static long (*real_read)(int, void *, unsigned long);
@@ -2119,22 +2154,39 @@ static void nv_load(void)
     int fd;
     unsigned long got = 0;
     long r;
+    char m[220];
+    const char *path = nv_path();
+    int seeded = 0;
     if (nv_loaded) return;
     nv_loaded = 1;
     init(); io_init();
-    fd = real_open(NV_PATH, 0 /* O_RDONLY */, 0);
-    if (fd < 0) { logmsg("[i2c] no saved NVRAM, starting blank\n"); return; }
+    fd = real_open(path, 0 /* O_RDONLY */, 0);
+    if (fd < 0 && !getenv("PAD_NV_BLANK")) {
+        /* First run of this title since the EEPROM went per-title: inherit the
+         * shared file so nothing that was already saved is lost. */
+        fd = real_open(NV_PATH, 0, 0);
+        seeded = fd >= 0;
+    }
+    if (fd < 0) {
+        snprintf(m, sizeof m, "[i2c] no saved NVRAM at %s, starting blank\n", path);
+        logmsg(m);
+        return;
+    }
     while (got < SLOTSIZE && (r = real_read(fd, store[0] + got, SLOTSIZE - got)) > 0)
         got += (unsigned long)r;
     real_close(fd);
-    logmsg("[i2c] loaded saved NVRAM\n");
+    snprintf(m, sizeof m, "[i2c] loaded saved NVRAM from %s%s\n",
+             seeded ? NV_PATH : path,
+             seeded ? " (seeding this title's own EEPROM; it is per-title now)"
+                    : "");
+    logmsg(m);
 }
 
 static void nv_save(void)
 {
     int fd;
     io_init();
-    fd = real_open(NV_PATH, 0x241 /* O_WRONLY|O_CREAT|O_TRUNC */, 0644);
+    fd = real_open(nv_path(), 0x241 /* O_WRONLY|O_CREAT|O_TRUNC */, 0644);
     if (fd < 0) return;
     real_write(fd, store[0], SLOTSIZE);
     real_close(fd);

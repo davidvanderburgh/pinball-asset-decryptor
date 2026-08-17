@@ -88,6 +88,37 @@ These have each been violated at least once and each cost a run or a window:
       projector plays. NOT, as this item used to say, "nodes 1, 8 and 9 are
       the only boards it cannot find" — that reading is disproved below.**
       `S2 D4` ← IN PROGRESS
+      **★★★ 2026-08-17, EYES ON THE GLASS: THE NODE-BOARD WEDGE IS CLEARED.
+      David ran this branch's rig and stranger_things no longer shows LOCATING
+      NODE BOARDS. It shows `THIS MACHINE WILL NOT OPERATE IN THIS COUNTRY /
+      PLEASE CONTACT YOUR DISTRIBUTOR` — a different, LATER screen.** That is
+      the acceptance this item has wanted since it opened, and it confirms the
+      log prediction made an hour earlier (new LCD scenes `5b2d86be` /
+      `60ed7e50`, which no wedged run ever reached). The fix that did it is the
+      `sw_find` pacing change (`d2169db`): the discovery-schedule verdict used
+      to take 1024 bus frames (~178 s) and now lands in the first 32.
+      **What remains is a DIFFERENT problem and arguably a different item:** the
+      `COUNTRY CODE` adjustment (string `0x53cabc`, sitting beside
+      `GUIDED SETUP` / `START GUIDED SETUP`). That is an OPERATOR SETTING, not a
+      node-bus fault — a real machine sets it in the service menu.
+      **Measured, and it rules out "just factory-reset it": a BLANK EEPROM does
+      not boot** — the guest takes `uncaught target signal 6 (Aborted)` ~1000
+      log lines in. The machine identity in that EEPROM is required, so the
+      country code must be SET, not cleared.
+      **Latent bug found and fixed on the way (`ee033b9`):** the shim's i2c
+      EEPROM was ONE file, `/data/nvram.bin`, shared by every title, while the
+      game's own stores under `/data/nv/<title>/` were already per-title. Now
+      `/data/nvram-<title>.bin`, seeded from the shared file on first use so no
+      settings or high scores are lost (`PAD_NV_BLANK=1` skips the seed).
+      **Not established:** whether the country screen was CAUSED by cross-title
+      pollution (my godzilla regression runs wrote that shared EEPROM) or is
+      simply the next gate, newly reachable and never configured. The simpler
+      story is likelier. A backup of the pre-change EEPROM is at
+      `/home/david/spike2root/data/nvram.bin.bak-20260817`.
+      **NEXT:** set ST's country code. Either drive the service menu / guided
+      setup as an operator would, or find the adjustment's EEPROM offset and
+      write a valid value (`FRANCE`, `USA`, `CANADA`, `JAPAN`, `SPAIN` all
+      appear as strings around file offset 5446264-5452536).
       **════ CURRENT TRUTH — 2026-08-17 THIRD PASS. The screen's predicate is
       FOUND and read instruction-by-instruction, and it RETRACTS a claim the
       second pass committed. Read this block only. ════**

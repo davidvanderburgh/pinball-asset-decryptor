@@ -3221,18 +3221,28 @@ TITLE_ADDR(a_nb_objs, "PAD_NB_OBJS", 0x7bad88u)
  * are completely different answers about a title that will not boot - and a
  * finder that cannot tell them apart is the kind of instrument this rig has
  * been burned by before. */
-static unsigned nb_objs_shape_ok(unsigned base)
+/* The shape test, parameterised by STRIDE so the stride sweep below can run the
+ * exact same discriminator at every candidate size instead of a weaker one.
+ * The [+12] in-use gate and the [+24] status gate are what make this reject a
+ * plain incrementing byte table (which self-labels perfectly but has neither),
+ * and dropping them was why the first sweep failed its own labelled example. */
+static unsigned nb_objs_shape_ok_s(unsigned base, unsigned stride)
 {
     unsigned i, present = 0;
     for (i = 0; i < 32; i++) {
         const unsigned char *o =
-            (const unsigned char *)(unsigned long)(base + i * NB_OBJ_SZ);
+            (const unsigned char *)(unsigned long)(base + i * stride);
         if (!*(const unsigned *)(o + 12)) continue;      /* slot not in use */
         if (o[0] != (unsigned char)i) return 0;          /* must self-label */
         if (*(const unsigned *)(o + 24) >= 12u) return 0;   /* status is 0..11 */
         present++;
     }
     return present;
+}
+
+static unsigned nb_objs_shape_ok(unsigned base)
+{
+    return nb_objs_shape_ok_s(base, NB_OBJ_SZ);
 }
 
 /* NB_OBJS_MIN is what separates a hit from a near miss, and the difference
@@ -3256,16 +3266,22 @@ static unsigned nb_objs_shape_ok(unsigned base)
  * would be an artefact of the instrument rather than a fact about the title.
  * That is exactly the class of mistake this rig keeps paying for, so test it.
  *
- * The signature is stride-independent: a board array SELF-LABELS, slot i
- * carrying its own index at [+0]. So for a base `a` and stride `s`, count
- *     #{ i in 0..31 : byte[a + i*s] == i }
- * and report any (a, s) scoring well. On godzilla the answer must be
- * (0x7bad88, 0xe0) with 9 - its nine populated slots; the unused ones are
- * zeroed and only match at i==0. Random memory expects 32/256 = 0.125 matches,
- * so a score of 5+ is not luck.
+ * It runs the SAME discriminator as the real finder (nb_objs_shape_ok_s: self
+ * -label + [+12] in-use + [+24] status < 12) at every stride 0x80..0x200, and
+ * scores by in-use slot count. Self-labelling ALONE is far too weak - the first
+ * cut of this sweep counted only `byte[a+i*s]==i`, and a plain incrementing
+ * byte table (0,1,2,..) scores a perfect 32, which is exactly what it found:
+ * 0x0079aca4 stride 0x118 slots 32, beating godzilla's real 9-slot array. It
+ * FAILED its own labelled example, which is the whole reason the acceptance is
+ * fixed in advance. The [+12]/[+24] gates are what kill those coincidences.
  *
- * Gated behind PAD_NB_STRIDE_SWEEP=1 and run ONCE per process, because it is
- * O(range x strides) and has no business in a normal run. */
+ * On godzilla the answer must be (0x7bad88, 0xe0) with 9. Bounded to the low
+ * 16 MB where a statically allocated board array lives on both titles (godzilla
+ * 0x7bad88, ST static ends 0x8439dc) - the huge high mappings are all heap and
+ * coincidence, and sweeping them is what made the first cut O(3 GB x strides).
+ *
+ * Gated behind PAD_NB_STRIDE_SWEEP=1 and run ONCE per process. */
+#define NB_SWEEP_HI 0x1000000u
 static int nb_sweep_on(void)
 {
     static int on = -1;
@@ -3288,17 +3304,16 @@ static void nb_stride_sweep(unsigned lo, unsigned hi)
 {
     unsigned a, s, best_a = 0, best_s = 0, best_n = 0, hits = 0;
 
+    if (hi > NB_SWEEP_HI) hi = NB_SWEEP_HI;          /* low 16 MB only */
+    if (lo >= hi) return;
     if (!sw_lo || lo < sw_lo) sw_lo = lo;
     if (hi > sw_hi) sw_hi = hi;
     for (a = lo; a + 32u * 0x200u <= hi; a += 4) {
         const unsigned char *p = (const unsigned char *)(unsigned long)a;
-        if (p[0] != 0) continue;                    /* slot 0 labels itself 0 */
+        if (p[0] != 0) continue;         /* slot 0 self-labels as 0 (cheap) */
         for (s = 0x80; s <= 0x200; s += 4) {
-            unsigned i, n = 0;
-            if (p[s] != 1) continue;                /* cheap reject on slot 1 */
-            for (i = 0; i < 32; i++)
-                if (p[i * s] == (unsigned char)i) n++;
-            if (n >= 5) {
+            unsigned n = nb_objs_shape_ok_s(a, s);
+            if (n >= NB_OBJS_MIN) {
                 hits++;
                 if (n > best_n) { best_n = n; best_a = a; best_s = s; }
             }
@@ -3317,18 +3332,45 @@ static void nb_sweep_report(void)
     char m[220];
     if (sw_swept || !nb_sweep_on()) return;
     sw_swept = 1;
-    if (sw_best_n)
+    if (sw_best_n) {
+        unsigned i, k;
         snprintf(m, sizeof m,
                  "[nbsweep] self-labelling array: base=0x%08x stride=0x%x "
                  "slots=%u (%u candidate(s) scored >=5 over 0x%08x-0x%08x)\n",
                  sw_best_a, sw_best_s, sw_best_n, sw_hits, sw_lo, sw_hi);
-    else
+        logmsg(m);
+        /* WHAT IS IN IT. The count alone cannot tell a real board array from a
+         * coincidence that happens to pass the shape test; the node ids and
+         * statuses can. A board array's in-use slots carry the title's DECLARED
+         * node ids (ST: 0,1,2,4,8,9,12) - anything else is a false positive of
+         * a wider struct search, and saying which is the whole point. */
+        for (i = 0; i < 32; i++) {
+            const unsigned char *o = (const unsigned char *)(unsigned long)
+                                     (sw_best_a + i * sw_best_s);
+            unsigned st;
+            if (!*(const unsigned *)(o + 12)) continue;        /* not in use */
+            st = *(const unsigned *)(o + 24);
+            k = (unsigned)snprintf(m, sizeof m,
+                     "[nbsweep]   slot %2u node %2u status %u flags=%08x "
+                     "ver=%u.%u.%u raw:", i, o[0], st,
+                     *(const unsigned *)(o + 4), o[28], o[29], o[30]);
+            {
+                unsigned j;
+                for (j = 0; j < 32 && k < sizeof m - 4; j++)
+                    k += (unsigned)snprintf(m + k, sizeof m - k, "%s%02x",
+                                            (j % 4) ? "" : " ", o[j]);
+            }
+            snprintf(m + k, sizeof m - k, "\n");
+            logmsg(m);
+        }
+    } else {
         snprintf(m, sizeof m,
                  "[nbsweep] NO self-labelling array at ANY stride 0x80-0x200 "
                  "over 0x%08x-0x%08x - so the board table is not merely a "
                  "DIFFERENT SIZE on this title, it is not populated at all\n",
                  sw_lo, sw_hi);
-    logmsg(m);
+        logmsg(m);
+    }
 }
 
 static unsigned nb_scan_objs(unsigned *best_out, unsigned *near, unsigned *near_n)

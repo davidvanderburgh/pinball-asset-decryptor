@@ -87,7 +87,53 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **52. stranger_things wedges on LOCATING NODE BOARDS while its
       projector plays. NOT, as this item used to say, "nodes 1, 8 and 9 are
       the only boards it cannot find" — that reading is disproved below.**
-      `S2 D3` ← IN PROGRESS
+      `S2 D4` ← IN PROGRESS
+      **‼‼‼ 2026-08-17 — THE BRANCH'S CENTRAL CONCLUSION IS OVERTURNED, BY THE
+      INSTRUMENT BUILT TO CHECK IT. "ST creates no board objects" IS FALSE.
+      Everything below that rests on it is now suspect; read this block first.**
+      The board finder hard-codes godzilla's `0xe0` board-struct STRIDE. The
+      stride sweep (built precisely because the finder cannot test its own
+      stride assumption) found ST's real board array at **`0x8239c8`, stride
+      `0x98`** — a smaller struct the `0xe0` scan was BLIND to — with **7
+      slots carrying node ids 0, 1, 2, 4, 8, 9, 12**: node 0 (bridge) plus
+      ST's exact six declared nodes. The version fields clinch it (nodes
+      1/2/8/9/12 = 1.19.0, node 4 = 124.107.0, node 0 = 0.5.0 — matching
+      `node_ident.txt` exactly), and the first 0x20 bytes of the struct match
+      godzilla's layout field-for-field. **So ST CREATES AND IDENTIFIES ALL
+      ITS BOARD OBJECTS, and grades them to status 2 — the SAME status
+      godzilla's booting boards carry.** The sweep passes its labelled example
+      first (godzilla: `0x7bad88 stride 0xe0 slots 9`), so this is trusted.
+      **‼ AND MY DISCOVERY FIX DOES NOT CREATE THEM.** Control run
+      `i52_st11noched` with the schedule DISABLED (`PAD_NB_SCHED=0`): the
+      identical 7-board array at `0x8239c8/0x98`. Board creation is driven by
+      the game's own node directory and is INDEPENDENT of the discovery seed.
+      So the discovery fix (`98f4797`) makes the wire faithful (nbsched
+      populated, 3→19 bare-00 polls) but **does NOT create boards and does NOT
+      advance ST's boot** — I over-credited it, and the earlier "the fix fires
+      and works" framing is withdrawn to "the fix is correct but not
+      load-bearing for this wedge".
+      **WHAT ACTUALLY DIFFERS FROM GODZILLA (early snapshot): the flags.**
+      Godzilla's boards reach `flags=00000003`; ST's sit at `flags=00000001`
+      (bit 1 — the ~10 Hz "answered its last poll" heartbeat — missing) on
+      every board but node 0. The census agrees: no `ff`, no `0x11` to any
+      playfield node, so the service loop never reaches the stage that sets
+      bit 1. **CAVEAT, and it is the next run's job: the sweep is a ONE-SHOT
+      taken EARLY (`sw_swept` latches on the first scan), so these are the
+      boards' EARLY flags, not their final ones. The [nbobj] periodic dumper
+      is blind to the 0x98 struct, so ST's boards have never been watched over
+      time. That is the gap to close next.**
+      **So the real question, finally correctly framed: ST's boards are
+      created, identified and graded — why do the playfield boards never get
+      bit 1 (serviced), when godzilla's do?** This is downstream of creation,
+      which is where six passes of this item were NOT looking.
+      **`S2 D4` (▲ from D3): the mechanism moved, the old instrument was
+      proven blind, and the new question needs a per-title stride-aware
+      board dumper that does not yet exist.**
+      *(Historical note: the block below, down to the next ‼, was written
+      believing ST created no boards. It is preserved because its RULED-OUT
+      results (wire identical, flags word, runtime-info, cabinet) are still
+      valid negative results — but its FRAMING of the wedge as a
+      creation/discovery failure is superseded by the above.)*
       **★★★ ROOT CAUSE FOUND 2026-08-16 (code + log, not a theory), AND A FIX
       IS COMMITTED — but NOT yet validated on a run; the rig was mid-cleanup
       of a cross-session zombie strand. THE MECHANISM IS RIG-SIDE, so this is

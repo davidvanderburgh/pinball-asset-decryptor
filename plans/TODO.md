@@ -145,6 +145,19 @@ These have each been violated at least once and each cost a run or a window:
       around file offset 5446264-5452536 if a value table is needed.
       **NOT established:** that the EEPROM had anything to do with this. The
       per-title EEPROM change (`ee033b9`) is still correct on its own merits.
+      **★ DAVID, EYES ON THE GLASS, 2026-08-17: the boot now walks its NORMAL
+      sequence — a "CHECK NODE BOARD 2" screen (not registered), and then
+      straight to the country refusal.** Two consequences:
+      • **Node 2's registration failure is USER-VISIBLE and is a real defect.**
+        It is the anomaly measured all session and set aside as "not the wedge":
+        node 2 alone never sets flags bit 0 (`f0` → `f2`), while node 12 —
+        byte-identical identity (ws2812node, part `0x2c40102b`, variant `0x05`,
+        fw 1.19.0) — registers normally. Not boot-blocking (the game moves past
+        it), but it earns its own fix and probably its own item.
+      • **The country screen is a HARD STOP, not a Tech Alert.** `watch.sh`
+        auto-presses Service Back until the game leaves Tech Alerts; that
+        cleared the node-2 screen and did NOT clear this one. So it cannot be
+        dismissed, which is what a real machine refusing to operate looks like.
       **════ CURRENT TRUTH — 2026-08-17 THIRD PASS. The screen's predicate is
       FOUND and read instruction-by-instruction, and it RETRACTS a claim the
       second pass committed. Read this block only. ════**

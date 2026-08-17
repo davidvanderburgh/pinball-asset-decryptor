@@ -1082,9 +1082,50 @@ These have each been violated at least once and each cost a run or a window:
       while the game runs — stated with a screenshot and with the ring-vs-screen
       measurement in BOTH directions (the picture must also hold still when the
       game does).
-      **Resume:** see the folded item-54 body below for the five ruled-out
-      titles, the decoder's accept path, and the `lednames.py` name-table work
-      already done.
+      **★★ THE DIAGNOSIS FLIPPED, 2026-08-17, AND IT IS MUCH SMALLER THAN
+      "AN UNKNOWN FRAME SHAPE". turtles_pro ALREADY SENDS COMMANDS THE DECODER
+      ACCEPTS.** Unioned over **23 turtles captures in `/var/tmp`**
+      (`item43_*.log`, 2026-08-11/12, 345 KB–6.7 MB — nobody had looked there),
+      turtles sends **six of the eight accepted lamp commands — 97, a2, a4, a5,
+      b4, b5 — on nodes 1, 8 AND 9**, e.g. node 8 `8805b43abf07bf00` (b4),
+      node 9 `8908a224ab00ff0702f600` (a2). And its `node_ident.txt` says nodes
+      1/8/9 are `pinnode` boards, the same type as godzilla's. **So no new
+      decoder shape is needed.** The question is what makes turtles reach the
+      state where it drives them.
+      **Why the item-50 run saw nothing, two independent signals agreeing:**
+      hwshim's light-show announcer (`hwshim.c:6086-6118`) fires on those eight
+      commands on ANY node, deliberately before the node gate — it never fired;
+      and an un-enumerated board yields `decoded=0` with **`skipped > 0`**,
+      while that run had `skipped=0` too. Both say no lamp command was SENT,
+      not that one was sent and rejected.
+      **★ CORRECTIONS TO EVIDENCE THIS ITEM PREVIOUSLY RELIED ON — do not reuse
+      the old numbers:** (i) `/home/david/gzwatch.log` is **not** turtles; it
+      was overwritten by the concurrent item-52 session and now declares
+      `[run] title: stranger_things_le`. The "402-second turtles run" cited
+      earlier is `/home/david/gzt2.log` (2026-08-05, `[run] title: turtles_pro`)
+      — **and two agents disagree about whether that file has node-bus lines at
+      all, so re-derive it before use.** (ii) `[nb] TX` logging is BUDGETED
+      (~162 frames, all boot handshake), so any "vocabulary" read off a single
+      run's `[nbcmd]` census is truncated and is NOT the title's command set.
+      The `decoded`/`skipped` counters in the padled block are not budgeted and
+      remain authoritative.
+      **★ RIG IS DOWN AND NEEDS DAVID, 2026-08-17.** `wsl --shutdown` (run to
+      clear the item-38 interop zombies) never completed: `vmmemWSL` is still
+      up, `WSLService` reports Running, and every `wsl` invocation now HANGS
+      rather than returning. 18 hung `wsl.exe` clients were cleared, which did
+      not help. Needs an elevated `Restart-Service WSLService` or a reboot. **No
+      rig work of any kind is possible until then**, including reading
+      `/var/tmp`.
+      **Resume, in order, and the first two are desk work needing only WSL
+      back:** (1) verify the `/var/tmp/item43_*.log` claim YOURSELF — the agent
+      reports conflict, so re-derive the per-(node,cmd,len) census rather than
+      trusting the numbers above; (2) replay `led_publish`'s accept path over
+      those captures to see whether they WOULD decode, and in particular
+      whether the 6-byte `0x84/0x85` enumeration is present for nodes 8 and 9
+      (its absence is exactly what kills star_wars); (3) only then spend a run,
+      with `PAD_NB_TRACE=1`, on reaching the state where turtles drives lamps.
+      See the folded item-54 body below for the ruled-out titles, the decoder's
+      accept path, and the `lednames.py` name-table work already done.
       **★ DAVID, 2026-08-14: "we should have some visual indication of leds
       here even without the playfield. can we think of some elegant way to show
       that?"** The window's own status bar says `2285 LED writes decoded` while

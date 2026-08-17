@@ -1160,9 +1160,28 @@ These have each been violated at least once and each cost a run or a window:
       when the game started WAS observed but not instrumented. The positive
       direction is measured only on godzilla_pro (10 channels → 4635 pixels,
       36 → 9811).
-      **Resume:** get a turtles lamp CHANGE under the instrument — likely a
-      ball drain, a mode start, or the game's own `Diagnostics → LED Tests`
-      now that the game reaches its menus. Then the acceptance is met in full.
+      **★ AND THE STATIC PICTURE IS THE GAME'S, NOT THE VIEW'S — settled at
+      the desk from the capture, so no run was spent on it.** Replaying the
+      lamp frames out of `~/i50_tmnt_trace.log` and counting DISTINCT payloads
+      per (node, cmd, len): node 1 `a4`/`a5` sent **one** payload (`0485`)
+      1254 times; node 8 `b4` len 11 **one** payload 59 times; node 9 `b4` len
+      9 **one** payload 81 times; node 9 `b4` len 8 **two** — `3bbd0a` ×85 and
+      `26a701` ×1. **turtles sends NO `a2` frames at all**, so it animates
+      nothing through the fade ring either. The wire genuinely carried a still
+      picture; the grid was faithful to it. **That rules out a decode gap and
+      means the next move is GAMEPLAY, not code.**
+      It also explains the four missed sampling windows: the picture DOES
+      change (that lone `26a701`), just rarely while the game idles, so a
+      4-second sample almost never straddles a transition.
+      **Resume — the named oracle is now reachable and is the cheapest sure
+      thing.** turtles gets past its Tech Alerts once `plunge.py reset` runs,
+      so `Diagnostics → LED Tests` can be driven: `swhold.py 33 0` (door OPEN,
+      service menu live), then `swpoke.py 25 2000` for Service Select and
+      `swpoke.py 26 500` / `27 500` to move, `28` to go back. It lights ONE
+      named fixture at a time, which forces the transition the instrument
+      needs AND satisfies the acceptance's strongest form. Sample the ring and
+      the screen across each step. **Tap lengths are godzilla's and are a guess
+      on turtles' menu generation** — expect to calibrate.
       See the folded item-54 body below for the ruled-out titles, the decoder's
       accept path, and the `lednames.py` name-table work already done.
       **★ DAVID, 2026-08-14: "we should have some visual indication of leds

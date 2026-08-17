@@ -88,6 +88,106 @@ These have each been violated at least once and each cost a run or a window:
       projector plays. NOT, as this item used to say, "nodes 1, 8 and 9 are
       the only boards it cannot find" — that reading is disproved below.**
       `S2 D4` ← IN PROGRESS
+      **════ CURRENT TRUTH — 2026-08-17 THIRD PASS. The screen's predicate is
+      FOUND and read instruction-by-instruction, and it RETRACTS a claim the
+      second pass committed. Read this block only. ════**
+      **⛔ RETRACTION FIRST: "the board-object table is RULED OUT as the
+      screen's input" (committed `66e533e`) is WRONG.** The screen provably
+      reads `board[+4]` bit 1 and `board[+12]`. What the `flags=3` measurement
+      actually disproves is not the array — it is the ASSUMPTION that the
+      pixels on the glass were produced at the moment of that snapshot.
+      **THE NAMING PREDICATE (CONFIRMED — four independent RE routes converged
+      on it, an adversarial verifier could not refute it, and I re-read the
+      instructions myself).** The screen is `0x3db054` (character-page
+      renderer) and `0x3ee508` (scene overlay); they share a six-instruction
+      loop body. For each board `b = 0x8239c8 + 152*id`, walking id from 1:
+      | # | test | meaning |
+      |---|---|---|
+      | 1 | `ldr r3,[r4,#12]; cmp r3,#0; beq` | no directory entry → skip |
+      | 2 | `ldr r2,[r4,#4]; tst r2,#2; bne` | **FOUND bit SET → skip** |
+      | 3 | `ldr r3,[r3]; tst r3,#4; bne` | **OPTIONAL → skip** |
+      |   | `sprintf("%u", b[+0])` | else NAME IT |
+      **So "1 8 9" IS A COMPILE-TIME CONSTANT OF THIS TITLE, and the
+      "the named nodes are exactly the pinnodes" reading was a RED HERRING that
+      cost this item two passes.** ST's static node directory (base
+      `*(0x725aac)` = `0x7556a8`, 16-byte records, dumped from the ELF):
+      node 1 CABINET `0x8`, node 8 LOWER PLAYFIELD `0x8`, node 9 PLAYFIELD
+      `0x8`; node 2 CABINET LIGHTS `0xc`, node 12 **"TOPPER (OPTIONAL)"**
+      `0xc`, node 4 QR SCANNER `0x4`. Bit 2 = OPTIONAL is NAMED BY THE BINARY
+      (node 12's own display string says so), not inferred. Nodes 2/4/12 are
+      thrown out by clause 3 before their found-state is ever consulted, and
+      node 0 is unreachable (both renderers seed the walk at id 1). The
+      eligible set is therefore exactly {1,8,9} no matter what the bus does.
+      **THE PREDICATE REPRODUCES THE OBSERVED SCREEN FROM MY OWN DATA:** at
+      watch tick 1, n1/n8/n9 are `f1` (FOUND bit CLEAR) and 2/4/12 are
+      optional → replay names exactly `1 8 9`, which is what the glass showed.
+      **THE WEDGE IS THEREFORE NOT THE NAMING PREDICATE.** By tick 7 the
+      playfield boards reach `f3` (FOUND bit SET) → the list empties → and the
+      count gate (`3db178 cmp r6,#0; beq 3db244` / `3ee600 cmp r5,#0; beq
+      3ee7c0`) suppresses the ENTIRE draw, title line included. So after ~35 s
+      nothing is being drawn at all: **the "LOCATING NODE BOARDS / 1 8 9" on
+      the glass is STALE PIXELS**, which is exactly why the LCD scene hash
+      never changes for six minutes.
+      **THE ACTUAL GATE, and it is a rig-side bug of ours (mechanism read
+      instruction-by-instruction at `0x205328`, the boot-readiness check):**
+      ```
+      205388  ldr r0,[r3,#24]; cmp r0,#2      status==2 -> OK path
+      205394  ldr r0,[r2];     ands r0,#4     else: is the node OPTIONAL?
+      2053a0  ldr r0,[r3,#4];  tst r0,#2      optional AND FOUND...
+      2053a8  movne r4,#0                     ...but not status 2 = NOT READY
+      ```
+      **An OPTIONAL board that IS present but is NOT graded 2 pins readiness
+      at false forever — and that is ST's node 4 exactly** (QR SCANNER, attr
+      `0x4` optional, answers the bus so FOUND is set, graded **status 7**).
+      Readiness never returns true, so `0x776404` bit 5 (raised after 300 ms of
+      failed location at `205a9c`, cleared ONLY on a ready result at `205aac`)
+      stays latched forever. **Node 4's status 7 is OUR doing:** the shim has
+      node 4 claim godzilla's node4 firmware `124.107.0`/variant `0x98`, which
+      `nbdir.py`'s own comment flags as "reproduced not corrected … worth
+      revisiting if node 4 misbehaves". Node 4 is misbehaving.
+      **PROBE BUILT AND RUN THIS PASS:** `PAD_NB_FORCE_STATUS=<ids>|all`
+      (hwshim.c) forces the graded status to 2 for the named boards on each TX,
+      deliberately NOT touching flags so the readiness question and the naming
+      question cannot confound each other.
+      **★★★ THE ANSWER, AND IT IS A RACE — MEASURED, NOT THEORISED (run
+      `i52_st15ready`, 2026-08-17).** `PAD_NB_FORCE_STATUS=4` fired
+      (`[nbforce] forcing status 2 (was 7) on node 4`), every board ended
+      `s2` and nodes 1/8/9 reached `f3` — and **ST STILL WEDGED**, one LCD
+      scene for the whole run. So node 4's grade is NOT the blocker. The
+      timing measurement says why:
+      | when | evidence |
+      |---|---|
+      | first node-bus TX | ~0 s |
+      | **nodes 1/8/9 first ALL carry the FOUND bit** | **181 s** (188 s in the st12 wedge run) |
+      | the game's window to see it | the retry loop at `205a44`-`205a8c`, seconds, then it gives up at `205ab4` |
+      **Our bring-up finishes roughly two orders of magnitude too late.** At the
+      moment the game decides, the boards genuinely are NOT found — so the
+      screen names 1/8/9 CORRECTLY, latches `0x776404` bit 5, and the only code
+      that clears it (`205aac`) is inside the loop that has already exited.
+      Nothing re-checks, so the boards going healthy at 181 s changes nothing
+      and the stale text sits on the glass forever. **This retires the
+      "grading/identity/registration" framing entirely: nothing is wrong with
+      what the boards CLAIM, only with WHEN they become found.**
+      **NEXT PASS — one question, and it is now a performance question:** what
+      takes 181 s? The FOUND bit is set by the game at `0x205cb8` for boards
+      with `status==2` that answer the addressed `0xFF` read at `0x4f0c1c`, so
+      the target is the latency from bus-up to that read completing per node.
+      Note the standing loose end that now looks load-bearing: **the boards
+      reach the FOUND bit with NO `ff` visible in the TX census**, so either
+      the census regex misses ST's `ff` framing or the bit is set by another
+      path — resolving that names the slow step. Cheap instrumentation first:
+      timestamp every per-node state change (the `PAD_NB_SCREEN` sampler
+      design in the workflow brief) and find the gap.
+      **Rig note: godzilla's node bus is SLOWER in raw frames (158 TX in 180 s
+      vs ST's 1281 in 300 s) and boots clean, so raw bus rate is NOT the
+      metric — it is the per-node time-to-FOUND that matters.**
+      **Also corrected:** the message table's real base is `0x73bd98` (3740
+      entries, loaded as a movw/movt immediate at `0x2332f8`); the second
+      pass's "192-entry table at `0x73dbb4`" was a MID-TABLE OFFSET, which is
+      precisely why no immediate load of it existed and why the string-xref
+      route looked dead. The screen strings are message ids 1961/1962.
+      **════ END THIRD PASS. Below: second pass, still valid except for the
+      retracted "board table ruled out" line. ════**
       **════ CURRENT TRUTH — 2026-08-17 SECOND PASS. SUPERSEDES the block
       below it too. Read this first; it RE-ANCHORS the item on the real
       symptom, which the first pass (and most of this pass) had drifted off.

@@ -3465,28 +3465,84 @@ static void nb_sweep_watch(void)
     logmsg(m);
 }
 
-/* item 52 DECISIVE EXPERIMENT (PAD_NB_FORCE_HEALTHY=1): overwrite every in-use
- * slot of the swept board array with a pristine state - flags |= 3 (registered
- * + serviced) and status = 2 - on every node-bus TX. stranger_things settles
- * its array at n2=f2 (never registered) and n4=s7 (bad status) and then wedges
- * on LOCATING NODE BOARDS forever. If normalising the whole array to f3/s2
- * dismisses that screen, the gate IS board health and we bisect to the culprit
- * slot; if it still wedges, the board-object table is ruled out for good and
- * the six passes spent there are closed. Requires PAD_NB_STRIDE_SWEEP=1 so the
- * (base,stride) is resolved. Fields match nb_sweep_watch: o+4 flags, o+12
- * in-use, o+24 status - all 4-byte. */
-static void nb_force_healthy(void)
+/* item 52: FORCE A BOARD'S STATUS HEALTHY, to test the readiness gate.
+ *
+ * PAD_NB_FORCE_STATUS=<id>[,<id>...]  or  =all
+ *
+ * WHY, and it is a specific mechanism rather than a shotgun (the shotgun was
+ * the first cut of this probe and it tested nothing in particular):
+ * stranger_things' boot-readiness check at 0x205328 walks the board array and,
+ * for each board with a directory entry whose type is not 38/1:
+ *
+ *      205388  ldr r0,[r3,#24] ; cmp r0,#2   -> status==2 is the OK path
+ *      205394  ldr r0,[r2]     ; ands r0,#4  -> else, is the node OPTIONAL?
+ *      2053a0  ldr r0,[r3,#4]  ; tst r0,#2   -> optional AND found...
+ *      2053a8  movne r4,#0                   -> ...but not status 2 = NOT READY
+ *
+ * i.e. an OPTIONAL board that IS present but is NOT graded 2 pins readiness at
+ * false forever. ST's node 4 (QR SCANNER, directory attr 0x4 = optional) is
+ * graded status 7 and answers the bus, so it lands exactly there - and that
+ * status is OUR doing: the shim has node 4 claim godzilla's node4 firmware
+ * (124.107.0), which nbdir.py flags in a comment as "reproduced not corrected
+ * ... worth revisiting if node 4 misbehaves". This forces the status the game
+ * grades, so a run says whether that gate is what holds the boot.
+ *
+ * Requires PAD_NB_STRIDE_SWEEP=1 (the sweep resolves base/stride). Fields as
+ * nb_sweep_watch reads them: o+0 id, o+12 in-use, o+24 status. Deliberately
+ * does NOT touch flags: bit 1 is what the LOCATING screen's naming predicate
+ * reads, and moving both at once would confound the two questions. */
+static int nb_force_status_want(unsigned id)
 {
-    static int on = -1;
+    static int state = -1;          /* -1 unread, 0 off, 1 all, 2 list */
+    static unsigned char want[64];
+    if (state == -1) {
+        const char *p = getenv("PAD_NB_FORCE_STATUS");
+        state = 0;
+        if (p && *p) {
+            if (p[0] == 'a')                   /* "all" */
+                state = 1;
+            else {
+                unsigned v = 0;
+                int any = 0;
+                state = 2;
+                for (;; p++) {
+                    if (*p >= '0' && *p <= '9') { v = v*10 + (unsigned)(*p-'0'); any = 1; }
+                    else {
+                        if (any && v < 64) want[v] = 1;
+                        v = 0; any = 0;
+                        if (!*p) break;
+                    }
+                }
+            }
+        }
+    }
+    if (state == 0) return 0;
+    if (state == 1) return 1;
+    return id < 64 && want[id];
+}
+
+static void nb_force_status(void)
+{
+    static int said;
     unsigned i;
-    if (on == -1) on = getenv("PAD_NB_FORCE_HEALTHY") ? 1 : 0;
-    if (!on || !sw_best_a || !sw_best_s) return;
+    if (!sw_best_a || !sw_best_s) return;
     for (i = 0; i < 32; i++) {
         unsigned char *o = (unsigned char *)(unsigned long)
                            (sw_best_a + i * sw_best_s);
+        unsigned id;
         if (!*(const unsigned *)(o + 12)) continue;   /* in-use slots only */
-        *(unsigned *)(o + 4) |= 3u;                    /* registered+serviced */
-        *(unsigned *)(o + 24) = 2u;                    /* healthy status */
+        id = o[0];
+        if (!nb_force_status_want(id)) continue;
+        if (*(const unsigned *)(o + 24) == 2u) continue;
+        if (!said) {
+            char m[160];
+            said = 1;
+            snprintf(m, sizeof m, "[nbforce] forcing status 2 (was %u) on node "
+                     "%u and any other PAD_NB_FORCE_STATUS node\n",
+                     *(const unsigned *)(o + 24), id);
+            logmsg(m);
+        }
+        *(unsigned *)(o + 24) = 2u;
     }
 }
 
@@ -7811,7 +7867,7 @@ long shim_write(int fd, const void *b, unsigned long n)
         nb_trace();
         nb_maybe_poke();
         nb_watch_flags();
-        nb_force_healthy();     /* item 52: pristine-array gate test (per TX) */
+        nb_force_status();      /* item 52: readiness-gate test (per TX) */
         nb_maybe_dump();
         alert_maybe_dump();
         val_maybe_dump();

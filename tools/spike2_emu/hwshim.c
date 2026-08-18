@@ -1239,11 +1239,20 @@ static int addr_readable(const void *p)
  *
  * Deduped on value, so a static global prints once and a changing one prints
  * its transitions - the same discipline the screen oracle uses, and for the
- * same reason: an undeduped 5 Hz dump is thousands of identical lines. */
+ * same reason: an undeduped 5 Hz dump is thousands of identical lines.
+ *
+ * A leading `*` DEREFERENCES: `*0x724608:176` reads the pointer at 0x724608 and
+ * dumps 176 bytes from wherever it points. Half of what this rig wants to look
+ * at is reached that way - a game table is a pointer in .data or .bss and the
+ * table itself is on the heap, so without this every question costs two runs
+ * (one to learn the pointer, one to read through it) and the second run gets a
+ * different heap.
+ */
 #define PEEK_MAX   8
-#define PEEK_BYTES 64
+#define PEEK_BYTES 192
 static struct peek_slot {
     unsigned addr, len;
+    int deref;
     unsigned char last[PEEK_BYTES];
     int primed;
 } peek_slot[PEEK_MAX];
@@ -1257,8 +1266,9 @@ static void peek_init(void)
     if (!p || !*p) return;
     while (*p && peek_n < PEEK_MAX) {
         unsigned a = 0, l = 4;
-        int got = 0;
+        int got = 0, deref = 0;
         while (*p == ',' || *p == ' ') p++;
+        if (*p == '*') { deref = 1; p++; }
         if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) p += 2;
         for (;;) {
             int d;
@@ -1274,8 +1284,9 @@ static void peek_init(void)
             while (*p >= '0' && *p <= '9') l = l * 10u + (unsigned)(*p++ - '0');
         }
         if (l == 0 || l > PEEK_BYTES) l = 4;
-        peek_slot[peek_n].addr = a;
-        peek_slot[peek_n].len  = l;
+        peek_slot[peek_n].addr  = a;
+        peek_slot[peek_n].len   = l;
+        peek_slot[peek_n].deref = deref;
         peek_n++;
         while (*p && *p != ',') p++;
     }
@@ -1295,17 +1306,26 @@ static void pad_peek_tick(void)
         struct peek_slot *s = &peek_slot[i];
         const unsigned char *g;
         unsigned char cur[PEEK_BYTES];
-        char m[300];
+        char m[700];
+        unsigned at = s->addr;
         int o, same = 1;
-        if (!addr_readable((const void *)(unsigned long)s->addr)) continue;
-        g = (const unsigned char *)(unsigned long)s->addr;
+        if (!addr_readable((const void *)(unsigned long)at)) continue;
+        if (s->deref) {
+            at = *(const unsigned *)(unsigned long)at;
+            if (!at || !addr_readable((const void *)(unsigned long)at)) continue;
+        }
+        g = (const unsigned char *)(unsigned long)at;
+        if (!addr_readable(g + s->len - 1)) continue;
         for (j = 0; j < (int)s->len; j++) cur[j] = g[j];
         for (j = 0; j < (int)s->len; j++)
             if (cur[j] != s->last[j]) { same = 0; break; }
         if (s->primed && same) continue;
         for (j = 0; j < (int)s->len; j++) s->last[j] = cur[j];
         s->primed = 1;
-        o = snprintf(m, sizeof m, "[peek] t=%lu 0x%08x:", pad_ms(), s->addr);
+        o = snprintf(m, sizeof m, "[peek] t=%lu %s0x%08x%s:", pad_ms(),
+                     s->deref ? "*" : "", s->addr, s->deref ? "" : "");
+        if (s->deref)
+            o += snprintf(m + o, sizeof m - (unsigned)o, " ->0x%08x", at);
         for (j = 0; j < (int)s->len && o < (int)sizeof m - 6; j++)
             o += snprintf(m + o, sizeof m - (unsigned)o, " %02x", cur[j]);
         snprintf(m + o, sizeof m - (unsigned)o, "\n");
@@ -2833,26 +2853,29 @@ int shim_ioctl(int fd, unsigned long req, ...)
                     { 0xff, 0x0f, 0x0f, 0, 0, 0, 0, 0 };
                 static int said;
                 for (k = 0; k < 8; k++) bits[k] = idle[k];
-                /* ★ THE COUNTRY DIPS LIVE IN BYTE 0 OF THIS VERY WORD.
+                /* ▼ THE PARAGRAPH THAT USED TO BE HERE WAS WRONG, and it cost
+                 * four passes. It said the country dips live in byte 0 of this
+                 * word and that "THIS MACHINE WILL NOT OPERATE IN THIS COUNTRY"
+                 * meant no country was selected. IT IS NOT A COUNTRY PROBLEM AT
+                 * ALL. Message ids 765/766 are "50/60 HZ" and "60 HZ" and sit
+                 * immediately before 767-770, and the check that raises that
+                 * screen (0x23996c) tests the MAINS FREQUENCY: it wanted 57..63
+                 * and our own run_game.sh was reporting 1 Hz, because the game
+                 * divides in_power_frequency by 100 and we wrote "60". The
+                 * country the game read was a valid U.S.A. throughout. See
+                 * run_game.sh where the two iio values are written.
                  *
-                 * stranger_things' own switch table (entry base *(0x724608),
-                 * stride 44; node+bit via the device table *(0x7260b8) stride
-                 * 24) names switch ids 17..24 "DIP 1".."DIP 8" at NODE 0,
-                 * BITS 0..7 - byte 0 here - with cfg 0x0020, i.e. bit 0x04
-                 * clear, i.e. ACTIVE LOW: a line rests at 1 and a MADE dip
-                 * pulls it to 0. So the 0xff above hands the game all eight
-                 * dips OPEN, which is a valid at-rest level carrying NO
-                 * country - and a machine with no country selected is exactly
-                 * what "THIS MACHINE WILL NOT OPERATE IN THIS COUNTRY" is.
-                 * (David called this from the start: it is a hardware dip
-                 * setting, not a software adjustment.)
+                 * What survives from that paragraph, because it was measured
+                 * and is still true: stranger_things' switch table (entry base
+                 * *(0x724608), stride 44, count *(0x7bc86c) = 100; node+bit via
+                 * the device table *(0x7260b8), stride 24) names switch ids
+                 * 17..24 "DIP 1".."DIP 8" at NODE 0, BITS 0..7 - byte 0 here -
+                 * ACTIVE LOW, so the 0xff above rests them all open. That is a
+                 * correct at-rest level and there is no reason to move it.
                  *
-                 * PAD_CAB_DIP=<n> makes dips 1..8 read the value n, so a
-                 * country can be selected the way an operator selects one -
-                 * by setting the switches. Active low, hence the complement.
-                 * WHICH n IS WHICH COUNTRY IS NOT YET DECODED (the handler at
-                 * 0x41c970 is the next thing to read), so this is a knob to
-                 * sweep, not a setting to trust. */
+                 * PAD_CAB_DIP=<n> still forces dips 1..8 to n. It is a knob for
+                 * whoever needs one; it is NOT the country and it is NOT a
+                 * remedy for that screen. Do not sweep it looking for one. */
                 {
                     char *dp = getenv("PAD_CAB_DIP");
                     if (dp && *dp) {

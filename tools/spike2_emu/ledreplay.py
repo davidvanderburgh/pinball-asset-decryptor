@@ -144,6 +144,19 @@ def replay(fr):
             enum_by_node[node] += 1
             continue
 
+        # The service menu's own shapes (hwshim.c, item 50): exact cmd+length,
+        # bounded but NOT membership-gated - the Single LED Test lights
+        # node 1 idx 7 on a board that announced 6.
+        if (n == 7 and cmd in (0x94, 0x95)) or (n == 8 and cmd == 0x70):
+            st["lamp_on_insert"] += 1
+            lamp_by_node[(node, cmd)] += 1
+            lamp_examples.setdefault((node, cmd), p.hex())
+            if p[3] < 96:
+                st["would_decode"] += 1
+            else:
+                st["would_skip"] += 1
+            continue
+
         if cmd not in LAMP_CMDS:
             continue
 

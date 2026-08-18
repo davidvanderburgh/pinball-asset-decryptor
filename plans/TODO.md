@@ -1053,8 +1053,10 @@ These have each been violated at least once and each cost a run or a window:
       session with a save and a load.
 
 
-- [ ] **50. No LED feedback at all on a title with no playfield artwork,
-      which is most of them.** `S3 D4` ← IN PROGRESS
+- [x] **50. No LED feedback at all on a title with no playfield artwork,
+      which is most of them.** `S3 D4` ← CLOSED 2026-08-18, acceptance met on
+      turtles_pro in its strongest form; see the ★★★ close block below the
+      resume note. Awaiting `/finish`.
       **★★ REOPENED 2026-08-16, HOURS AFTER BEING CLOSED, BY DAVID — and the
       reason is the one that matters.** Asked whether it worked, he said: *"i'm
       confused did we make this work or not? does it work for TMNt for
@@ -1182,6 +1184,67 @@ These have each been violated at least once and each cost a run or a window:
       needs AND satisfies the acceptance's strongest form. Sample the ring and
       the screen across each step. **Tap lengths are godzilla's and are a guess
       on turtles' menu generation** — expect to calibrate.
+      **★★★ CLOSED 2026-08-18: THE ORACLE WAS DRIVEN, IT SPOKE A THIRD
+      VOCABULARY, AND THE VIEW NOW TRACKS IT — both directions, ring and
+      screen agreeing, measured across four runs.**
+      **The measurement that closes the box (run 4, `Single LED Test`, 12
+      stepped fixtures):** `lit=1` at every step — the SINGLE LED test reads
+      as a single LED — and every step that moved shows **RISEN(1) +
+      FALLEN(1) in the same step**: `1:2→1:3→1:5→1:4→1:7→8:3→8:6→8:5→8:4`,
+      cabinet board onto playfield board, each named on the glass (`2 / 1-LP-2
+      START BUTTON` …). The screen half: 404–712 grid pixels changed on the
+      stepped transitions (the three 0-px steps were shot-vs-tick aliasing,
+      proven by a same-ring re-shot moving 364 px as the grid caught up).
+      Window screenshot taken: node 8's row with ONE orange cell, status bar
+      `1 of 10 LEDs lit  44374 LED writes decoded`.
+      **Why the test was invisible before (run 2's capture, 85.7 s, 126k
+      frames, trace budget spent on purpose before attract could eat it): the
+      service menu never speaks 97/a2/b4/b5.** Its whole cycle is
+      `[node][05][70][idx][v16]` off-sweeps (×7755, value always 0000),
+      `[node][04][94][idx][val]` / `[node][04][95][idx][val]` for the ONE lit
+      fixture (×432, alternating ~133 ms apart), plus an `a2` flash tail on
+      stepping and a constant `41` len-52 broadcast that never tracked the
+      walk. The 94/95 (node,idx) walk matched the glass fixture-for-fixture
+      across 17 steps. godzilla's GAME mode also sends the len-7/len-8 forms
+      (6579 ×70 — all `idx 0000` — and 178 ×95 in the item-27 capture), all
+      skipped until now; its longer 94s (blen 7–14) are some run/compressed
+      form deliberately NOT claimed.
+      **The decode (hwshim.c, before the command gate): exact cmd+length
+      match, `idx < 96` bound, NO `led_known` gate** — measured: node 1
+      announces 6 LEDs yet the test lights node 1 idx 7. `70` writes the base
+      (`val[idx] = v`, observed only as clear). **`94`/`95` hold only while
+      refreshed** — the hammering is the evidence: the test re-asserts the lit
+      fixture at 7.5 Hz and never sends an off for indices past the sweep's
+      0x00..0x26 window; a latch left a trail (run 3 measured `lit` 1→10); a
+      watchdog output that decays goes dark by itself. Implemented entirely
+      in the existing overlay machinery: each 94/95 lands in the fade ring as
+      a flat hold (`from=to=val, rise=0, fall=33` ≈ 400 ms at the reader's
+      12 ms/unit), re-armed by every refresh, expiring onto base 0 when the
+      game moves on. Run 4's `lit=1`-everywhere is that model confirmed live.
+      `ledreplay.py` mirrors the accept path (run-2 window: 8373 of 8386
+      would-decode) so the desk stays truthful.
+      **The a6 comment's own caveat is now partially answered**: the oracle it
+      asked for has been run; on these indices the wire's idx IS the fixture
+      the glass names (1:2 = START BUTTON, per-step match ×17). The a6
+      bitmap-order question itself remains open — the test never spoke a6.
+      **Menu recipe, CORRECTED from the resume note's guesses — this is the
+      valuable operational half:** (1) `swpoke --tap` at 1–5 reads moves
+      NOTHING on turtles: menu actions need a real wall-clock press,
+      `swpoke.py 25 300`. In-menu cursor moves want `--tap 26 10` = exactly
+      one step (the tap lottery still eats ~⅓ of taps; screenshot between
+      steps). (2) Clearing Tech Alerts needs `plunge.py reset` AND a Back
+      press (door open) — reset alone parks there, run 1 only cleared because
+      autoattract had pressed Back first. (3) **Kill autoattract.sh before
+      any menu work** — it blind-presses Service Back every ~45 s against a
+      log that never answers, and its id-28 press is turtles' SERVICE BACK.
+      (4) Path: alerts →Back→ splash →Select→ main menu (DIAG) →Select→
+      diagnostics (SW) →+×2→ LAMP →Select→ SINGLE LED →Select→ in. Fixture 2
+      START BUTTON is the entry point.
+      **Evidence on disk:** `~/i50_test_window.log` (run 2's test window),
+      `~/i50_run{1,2,4}_gzwatch.log`, `C:/tmp/item50/` (grid + LCD
+      screenshots, per-step ring json), scratchpad `ledstep.py` /
+      `testvocab.py` / `map70.py` / `walk9495.py` (the instruments; session
+      paths, deliberately not shipped).
       See the folded item-54 body below for the ruled-out titles, the decoder's
       accept path, and the `lednames.py` name-table work already done.
       **★ DAVID, 2026-08-14: "we should have some visual indication of leds

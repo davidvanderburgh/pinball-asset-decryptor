@@ -28,6 +28,10 @@ static int (*real_open64)(const char *, int, int);
 static int (*real_ioctl)(int, unsigned long, void *);
 
 static unsigned long pad_ms(void);       /* defined with the periodic dumps */
+/* PAD_PEEK - read arbitrary guest globals. Defined after addr_readable(),
+ * declared here because the usleep interposer is the periodic site that drives
+ * it and that sits far above. */
+static void pad_peek_tick(void);
 
 /* PAD_LOG_TIME=1 - prefix every shim log line with "[SSS.mmm] ", milliseconds
  * since the shim started.
@@ -862,6 +866,7 @@ int shim_usleep(unsigned int us)
             for (i = 0; i < secs * 2; i++) real_usleep(500000);
         }
     }
+    pad_peek_tick();   /* PAD_PEEK - the periodic site every thread passes through */
     {
         unsigned long ra = (unsigned long)__builtin_return_address(0);
         n++;
@@ -1218,6 +1223,94 @@ static int addr_readable(const void *p)
     last = p;
     lastok = (nullfd >= 0 && w && w(nullfd, p, 1) == 1);
     return lastok;
+}
+
+/* PAD_PEEK=<hexaddr>[:<len>][,<hexaddr>[:<len>]]... - LOG GUEST GLOBALS WHEN
+ * THEY CHANGE. The shim shares the guest's address space, so a global the game
+ * keeps in .bss is just a pointer here.
+ *
+ * WHY THIS EXISTS, and it is the lesson of item 52's frequency pass: a whole
+ * day went into "what does the code do?", which disassembly answers, and the
+ * question that actually mattered was "what did the game MEASURE?", which it
+ * cannot. Every earlier attempt at that question took the form of changing an
+ * input and re-running to see whether the symptom moved - one bit of evidence
+ * per rig run, on a rig that is a mutex between sessions. This reads the answer
+ * directly. `len` defaults to 4 and caps at 64; up to 8 addresses.
+ *
+ * Deduped on value, so a static global prints once and a changing one prints
+ * its transitions - the same discipline the screen oracle uses, and for the
+ * same reason: an undeduped 5 Hz dump is thousands of identical lines. */
+#define PEEK_MAX   8
+#define PEEK_BYTES 64
+static struct peek_slot {
+    unsigned addr, len;
+    unsigned char last[PEEK_BYTES];
+    int primed;
+} peek_slot[PEEK_MAX];
+static int peek_n = -1;
+
+static void peek_init(void)
+{
+    const char *p = getenv("PAD_PEEK");
+    char m[120];
+    peek_n = 0;
+    if (!p || !*p) return;
+    while (*p && peek_n < PEEK_MAX) {
+        unsigned a = 0, l = 4;
+        int got = 0;
+        while (*p == ',' || *p == ' ') p++;
+        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) p += 2;
+        for (;;) {
+            int d;
+            if (*p >= '0' && *p <= '9')      d = *p - '0';
+            else if (*p >= 'a' && *p <= 'f') d = *p - 'a' + 10;
+            else if (*p >= 'A' && *p <= 'F') d = *p - 'A' + 10;
+            else break;
+            a = a * 16u + (unsigned)d; p++; got = 1;
+        }
+        if (!got) break;
+        if (*p == ':') {
+            p++; l = 0;
+            while (*p >= '0' && *p <= '9') l = l * 10u + (unsigned)(*p++ - '0');
+        }
+        if (l == 0 || l > PEEK_BYTES) l = 4;
+        peek_slot[peek_n].addr = a;
+        peek_slot[peek_n].len  = l;
+        peek_n++;
+        while (*p && *p != ',') p++;
+    }
+    snprintf(m, sizeof m, "[peek] watching %d address(es)\n", peek_n);
+    logmsg(m);
+}
+
+static void pad_peek_tick(void)
+{
+    static unsigned long next_ms;
+    int i, j;
+    if (peek_n < 0) peek_init();
+    if (peek_n <= 0) return;
+    if (pad_ms() < next_ms) return;
+    next_ms = pad_ms() + 200;
+    for (i = 0; i < peek_n; i++) {
+        struct peek_slot *s = &peek_slot[i];
+        const unsigned char *g;
+        unsigned char cur[PEEK_BYTES];
+        char m[300];
+        int o, same = 1;
+        if (!addr_readable((const void *)(unsigned long)s->addr)) continue;
+        g = (const unsigned char *)(unsigned long)s->addr;
+        for (j = 0; j < (int)s->len; j++) cur[j] = g[j];
+        for (j = 0; j < (int)s->len; j++)
+            if (cur[j] != s->last[j]) { same = 0; break; }
+        if (s->primed && same) continue;
+        for (j = 0; j < (int)s->len; j++) s->last[j] = cur[j];
+        s->primed = 1;
+        o = snprintf(m, sizeof m, "[peek] t=%lu 0x%08x:", pad_ms(), s->addr);
+        for (j = 0; j < (int)s->len && o < (int)sizeof m - 6; j++)
+            o += snprintf(m + o, sizeof m - (unsigned)o, " %02x", cur[j]);
+        snprintf(m + o, sizeof m - (unsigned)o, "\n");
+        logmsg(m);
+    }
 }
 
 /* Declared here because the SEGV report, far above where these are defined,

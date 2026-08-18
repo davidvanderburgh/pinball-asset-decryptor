@@ -1217,6 +1217,68 @@ These have each been violated at least once and each cost a run or a window:
       (locate crc32-of-name call sites), `scrdump.py` (screen table).
       **Uncommitted: nothing.** No shim change was needed and no rig run was
       spent, so the rig lock was never taken and no build was made.
+      **★★★ 2026-08-18: ITEM 52 IS CLEARED. IT WAS NEVER THE COUNTRY - IT WAS
+      OUR OWN `run_game.sh` LYING ABOUT THE MAINS.** David's eyes: attract
+      mode, "COMBO CHAMPION / 15 COMBOS", pricing `1/1.00 3/2.00`,
+      `CREDITS 1/2`.
+      **The refusal text says COUNTRY; the code tests LINE FREQUENCY.** Message
+      ids 765/766 are `50/60 HZ` and `60 HZ` and sit immediately before 767-770
+      (`THIS MACHINE WILL NOT / OPERATE IN THIS COUNTRY / ...`) - the refusal is
+      the 50/60 Hz family, and 771-778 are two more wordings (`CAN NOT`,
+      `SHALL NOT`) for the same class so a technician can tell them apart on the
+      phone. The country the game read was a **valid U.S.A.** the whole time
+      (EEPROM dev 0x50 offset 0x140, `0003fcff`, checksum good).
+      **The chain, all read off instructions:** `0x4f1c80` opens
+      `/sys/bus/iio/devices/iio:device0/in_power_frequency` and `in_power_input`
+      and starts the monitor thread `0x4f20b0`. That thread computes
+      `measured_hz = roundf(strtol(freq_line) / 100.0f)` - the divisor is the
+      literal `100.0` at `0x4f24e8` - and publishes it at `0x842cc4+0x274`; it
+      also sets the power-loss byte at `0x842cc4+0x270` to `strtol(input_line)
+      != 0`. `0x4f205c` then reports the frequency as **ZERO whenever that byte
+      is set**. `0x3aa564` needs 375 warm-up ticks and then 24 consecutive valid
+      samples before `0x3aa60c` will report; `0x23996c` passes only if the
+      reported value lands in **57..63** (`sub r3,#57 / cmp r3,#6`), or failing
+      that if the EEPROM factory config says 50 Hz - and that block, 52 bytes at
+      EEPROM offset **0**, is ALL ZEROS on this rig, so `0x238de4` fails both of
+      its checksums and reports nothing. On failure: `flag_set(3)` =
+      `FG_FACTORY_FREQUENCY_MISMATCH`, then `0x239a0c` starts screen **8**,
+      whose handler `0x3c9658` draws 767-770 and spins forever at priority 0xff
+      - which the admission gate at `0x46e6c8` can never displace, and that is
+      why the game drew no other text for three minutes.
+      **Our rig wrote `60` and `120`.** `60/100` = 1 Hz, outside the band; and
+      `120` being non-zero asserted power-fail, which zeroed even that. **Both
+      were wrong and each alone still refuses.** Now `6000` and `0`.
+      **MEASURED, not inferred, and that is the point of this pass.** A new
+      `PAD_PEEK=<hexaddr>[:<len>][,...]` reads guest globals and logs them on
+      change (in the usleep interposer, 5 Hz, deduped). With the old values it
+      showed `0x842cc4+0x274` holding float **60.0** while `+0x270` held **1**
+      and the accumulator at `0x7bff8c` never took a sample; with the new ones
+      the accumulator settles at `+4 = 375`, `+8 = 24`, **`+12 = 0x3c = 60`**,
+      `+16 = 0` and the refusal never appears. Four passes of this item changed
+      an input and re-ran to see whether the symptom moved - one bit of evidence
+      per rig run, on a rig that is a mutex. **`PAD_PEEK` is the instrument that
+      ends that**, and it is worth reaching for before any "what did the game
+      actually see?" question.
+      **Also settled on the way, and all of it retires guesswork:** the country
+      table `0x731aac` is a pure coinage table with no permitted flag, so the
+      build is NOT region-locked; the settings-store record keys are plain zlib
+      **crc32 of a name** (`crc32(0,name)` for scalars, `crc32(crc32(0,type),
+      name)` for arrays - proven on 18 of 18 NSEC headers), so `nvmap.py` names
+      every record in every store file offline and none of them is the country;
+      `85501bd4` is `error_log_index`; the EEPROM's own NFI2 blob at 0x2014 is
+      surface calibration and the 8 KB at 0x4000 is the coin/game audit journal.
+      **Two "dead ends" were WRONG and are retired:** "the store keys are hashed
+      at runtime and cannot be found" (they are crc32), and "poking the i2c
+      EEPROM changes nothing / 0x40..0xFF is the only bulk region read" (that
+      sweep covered 0x00..0xFF only, the country lives at 0x140, and the
+      "only region" claim was an artefact of the 120-line PAD_I2C_LOG budget).
+      **What is NOT done, and it is what stands between here and playable:** the
+      glass shows `TECH ALERTS: CHECK SWITCH #7..#22` (both flipper buttons,
+      both EOS, both slingshots, shooter lane, trough 6) because the shim's
+      `[swfind]` still reports **"no switch table yet"** for ST, and the virtual
+      playfield window says "No tables for stranger_things_le yet" because
+      `device_xy.txt` builds **0 records**. Also on the glass:
+      `GAME VALIDATION ERROR #3 UPDATE SD CARD` and `No Connection`.
       **Acceptance (unchanged):** stranger_things boots past LOCATING NODE
       BOARDS with no NOT FOUND overlay, stated with a screenshot; then say
       what its attract shows on BOTH displays.

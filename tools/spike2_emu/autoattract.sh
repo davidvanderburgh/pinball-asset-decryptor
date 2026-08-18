@@ -124,6 +124,19 @@ booted()  { gs_booted "$LOG"; }
 past()    { gs_past_alerts "$LOG"; }
 probes()  { count 'ExchangeData: read failed'; }
 up()      { pgrep -x game >/dev/null 2>&1; }
+# AN OPERATOR IS DRIVING - STAND DOWN (2026-08-18). stranger_things now boots
+# past Tech Alerts into its GUIDED SETUP wizard, a screen this script cannot
+# read (`past` keys on the attract light show and the wizard runs none), so it
+# fired all five blind presses ~45 s apart into David's own navigation: he
+# stepped through the wizard with the playfield window and the keyboard, and
+# every 45 s this script pressed Service Back and undid him. The whole point
+# of this script is to skip UNATTENDED waiting; a press from a human surface -
+# the playfield window (f), the game window's keyboard (k) or its buttons (p)
+# - is proof the run is attended, and the honest move is to get out of the
+# way. Deliberately NOT 'a' (our own presses) and NOT 'l'/'b' (plunge scripts,
+# ball feed): those run on unattended boots too, and standing down for them
+# would park an unattended godzilla on Tech Alerts forever.
+operator() { grep -aqE '\[sw\] [0-9]+ ms [+-][0-9]+[fkp]' "$LOG"; }
 # PAD_SW_SRC=a marks the press as THE RIG'S OWN, not a human's, in the guest's
 # [sw] log. It matters for replay (REMAINING item 16): every run does this for
 # itself, so a replay that re-delivers it fights the new run's own autoattract
@@ -163,6 +176,7 @@ nop=0
 while [ "$waited" -lt "$WAIT_MAX" ]; do
     up || { echo "[auto] the game exited"; exit 0; }
     past && { echo "[auto] already past Tech Alerts; nothing to do"; exit 0; }
+    operator && { echo "[auto] an operator is driving (human press in the log); standing down"; exit 0; }
     sleep 1
     waited=$((waited + 1))
     now=$(probes)
@@ -189,6 +203,7 @@ echo "[auto] bus quiet after ${waited}s ($last probes); pressing Service Back on
 for i in $(seq 1 "$TRIES"); do
     up || { echo "[auto] the game exited"; exit 0; }
     past && { echo "[auto] past Tech Alerts after $((i - 1)) presses"; exit 0; }
+    operator && { echo "[auto] an operator is driving; standing down"; exit 0; }
     [ -e "$SW" ] || { sleep 1; continue; }
     [ "$i" -gt 1 ] && echo "[auto] press $i (the last one did not take)"
     press "$HOLD"
@@ -200,6 +215,7 @@ for i in $(seq 1 "$TRIES"); do
         sleep 0.5; sleep 0.5
         n=$((n + 1))
         past && { echo "[auto] past Tech Alerts after $i press(es)"; exit 0; }
+        operator && { echo "[auto] an operator took over mid-gap; standing down"; exit 0; }
     done
 done
 

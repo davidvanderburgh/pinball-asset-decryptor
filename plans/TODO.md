@@ -1279,6 +1279,56 @@ These have each been violated at least once and each cost a run or a window:
       playfield window says "No tables for stranger_things_le yet" because
       `device_xy.txt` builds **0 records**. Also on the glass:
       `GAME VALIDATION ERROR #3 UPDATE SD CARD` and `No Connection`.
+      **★★ 2026-08-18, SAME DAY, THE PLAYFIELD WINDOW IS FIXED AND THE REAL
+      REMAINING BLOCKER IS NAMED.**
+      **`swelf.py` reads stranger_things' switch list straight out of the
+      ELF.** mktables.py's docstring says the switch tables cannot be built
+      without a run because the game builds its table on the heap - true of
+      godzilla, FALSE of ST, whose table is static and whose shape the shim's
+      by-shape hunt can never match (`sw_run_len`/`sw_entry_ok` walk
+      `base + k*32` reading node at +20 and bit at +18; ST's entries are 44
+      bytes and carry neither). "Clickable switches will appear on the next
+      run" was a promise this code could not keep for such a title.
+      Three roots: `entry(id) = *(0x724608) + 44*id` (+24 u16 num, +26 u16
+      device index), `dev(i) = *(0x7260b8) + 24*i` (+12 5-language name cell,
+      +16 slot, +18 bit, +20 kind, 7 = switch), `board(s) = *(0x725aac) + 16*s`
+      (+14 node id). **Validated three ways**: David's TECH ALERTS photograph
+      named eight switches by number and all eight come out with the same
+      number and name (#7 LEFT SLINGSHOT … #22 SHOOTER LANE, all node 8); the
+      independently-established DIP 1..8 at node 0 bits 0..7 and SERVICE SELECT
+      at node 0 bit 8 are reproduced through the slot→node indirection rather
+      than assumed; and the table length is not guessed - `ENT + 44*100` lands
+      exactly on the device base. Godzilla regression: `mktables.py --force`
+      rebuilds all five of its tables **byte-identical**, and `swelf.rows()`
+      declines any title with no recorded roots.
+      *Result, eyes on it:* the window now lists 99 switches by node with a
+      keyboard legend derived from ST's own list, service buttons, coin door
+      closed/48V on and trough 6/6. No artwork - ST ships none, and
+      `devicexy.py` finds no coordinates because ST's 24-byte device record has
+      none. It is a schematic and that is the correct outcome for this title.
+      **★ THE REMAINING BLOCKER, precisely localised: ST's node bus never
+      leaves the identify phase.** ST and godzilla issue an IDENTICAL first ten
+      commands - `0a 07 08 03 f1 f0 00 fe f9 fc`. Godzilla then continues
+      `fa f2 14 46 72 48 40 85 84 44 …`; **ST stops dead after `fc`** and
+      re-sends `fe` (identify) to nodes 1, 2, 4, 8, 9, 12 twelve times each,
+      for ever. No `0x11` means no switch scan; no `0x40` means no coils; no
+      coils means no flippers. That, not the switch table, is what "playable"
+      is waiting on, and it is plausibly what the glass calls `No Connection`.
+      The divergence is one frame wide: **godzilla's next frame is
+      `8203fa018003` (node 2, cmd `fa`, payload 01) and ST never sends it.**
+      Start at what the shim replies to `f9`/`fc` (`hwshim.c:8228`) and `fe`
+      (`hwshim.c:8400`), and at what makes the game issue `fa`.
+      **Cosmetic, do not spend runs on them:** `GAME VALIDATION ERROR #3 UPDATE
+      SD CARD` and `No Connection` are tech-alert rows; godzilla plays a full
+      game on this rig with validation errors on its glass. **But note the
+      verifier's caveat:** #3's verdict IS read by ten `bl` sites outside the
+      module, none of which was traced to coin-up or ball launch, so "cosmetic"
+      is the working assumption and not a proven one.
+      **Do NOT set `PAD_SW_STRUCT`/`PAD_SW_COUNT` for ST.** There is no working
+      value: `sw_entry_ok` needs live pointers at +8 and +12 and ST's entry 1 at
+      0x758350 has zeros in both, so every stride-32 reader downstream reads
+      noise. The by-shape hit at `0x842ffc` is a false positive in `.bss`, not a
+      near miss.
       **Acceptance (unchanged):** stranger_things boots past LOCATING NODE
       BOARDS with no NOT FOUND overlay, stated with a screenshot; then say
       what its attract shows on BOTH displays.

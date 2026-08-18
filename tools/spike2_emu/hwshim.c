@@ -11,6 +11,7 @@
 #define _GNU_SOURCE
 #include <stdarg.h>
 #include <stddef.h>
+#include <setjmp.h>   /* the scan fault guard - see scan_guard_check() */
 
 extern void *dlsym(void *, const char *);
 #define RTLD_NEXT ((void *)-1L)
@@ -19,6 +20,7 @@ extern char *strstr(const char *, const char *);
 extern size_t strlen(const char *);
 extern int snprintf(char *, unsigned long, const char *, ...);
 extern char *getenv(const char *);
+extern long syscall(long, ...);   /* raw gettid, from a signal handler */
 
 #define MAXFD 4096
 static char faked[MAXFD];
@@ -1227,32 +1229,30 @@ static struct { void *(*fn)(void *); void *arg; int id; } thslot[THMAX];
  * is t=145 s. The game gave up at 155 s. None of that is the game's doing and
  * none of it is a protocol problem; it is this cache.
  *
- * ▼▼▼ AND A PAGE CACHE IS NOT THE FIX. TRIED, MEASURED, REVERTED - read this
- * before trying it again, because it looks obviously right and it is not.
- * Readability IS a page property, so caching the probe per page (scoped to one
- * scan epoch) changes no decision on paper, and it worked exactly as intended:
- * the four dead windows collapsed, the node-directory seed moved from t=145 s
- * to t=20 s, and bus traffic went from TX 149 to TX 990 in a shorter run.
- * It also took a SIGSEGV inside sw_entry_ok, twice, at two different pcs, in
- * runs where no pre-change build had ever taken one.
+ * ▼▼▼ THE PAGE CACHE IS BACK, AND ONLY BECAUSE THE FAULT GUARD EXISTS. The
+ * first attempt cached the probe per page with no guard, and it worked as
+ * intended - the four dead windows collapsed, the node-directory seed moved
+ * from t=145 s to t=20 s, TX went 149 -> 990 - and then took a SIGSEGV inside
+ * sw_entry_ok, twice, at two different pcs, in runs where no pre-change build
+ * had ever taken one. The half of "readability" that is not a page property
+ * is WHEN: the scan walks a /proc/self/maps snapshot while the guest
+ * allocates and frees scene memory, so a page probed readable early in a scan
+ * can be gone by the time the walk reaches it, and the cache then hands
+ * sw_entry_ok a yes for memory that is no longer there.
  *
- * The reason is the half of "readability" that is not a page property: WHEN.
- * The scan reads /proc/self/maps once and then walks it, and the guest is
- * allocating and freeing scene memory the whole time. A page probed readable
- * early in a scan can be gone by the time the walk reaches it, and the cache
- * then hands sw_entry_ok a yes for memory that is no longer there. The
- * one-address memo below has the same race with a window of one candidate; the
- * page cache widens that window to a whole scan, which is the difference
- * between never seen and seen twice.
- *
- * So the throttle is real and the cost is real, but the fix has to be one that
- * cannot dereference a stale yes: bound the scan to a region and re-probe on
- * entry to each page immediately before touching it (window: one page), or wrap
- * the scan in a sigsetjmp so a fault aborts the scan instead of the process, or
- * do not probe at all and instead trust the maps snapshot with a fault guard -
- * which is the discipline nb_scan_objs() already documents ("no addr_readable()
- * call is needed per candidate and the scan costs no syscalls"). Whichever is
- * chosen has to answer the WHEN, not just the WHERE. */
+ * The answer to WHEN is not a fresher probe - any probe is stale by the time
+ * the read lands - it is to make the stale yes SURVIVABLE. sw_find_table
+ * wraps the scan in a sigsetjmp guard hooked into the SIGSEGV handlers this
+ * file already owns: a fault on the scanning thread aborts the scan (counted
+ * as a failed search, retried on a later tick) instead of killing the
+ * process. The cache below is armed only while that guard is (pr_gen != 0),
+ * so nothing outside a guarded scan can ever act on a scan-lifetime answer,
+ * and outside a scan this function is exactly the one-address memo it always
+ * was. */
+#define PR_SLOTS 2048
+static struct pr_slot { unsigned page, gen; unsigned char ok; } pr_tab[PR_SLOTS];
+static unsigned pr_gen;            /* nonzero while a guarded scan runs */
+
 static int addr_readable(const void *p)
 {
     static long (*w)(int, const void *, unsigned long);
@@ -1260,11 +1260,20 @@ static int addr_readable(const void *p)
     static const void *last;
     static int lastok;
     if (!p) return 0;
-    if (p == last) return lastok;
+    if (!pr_gen && p == last) return lastok;
     if (nullfd == -2) {
         int (*ro)(const char *, int, ...) = dlsym(RTLD_NEXT, "open");
         w = dlsym(RTLD_NEXT, "write");
         nullfd = ro ? ro("/dev/null", 1 /*O_WRONLY*/, 0) : -1;
+    }
+    if (pr_gen) {
+        unsigned page = (unsigned)(unsigned long)p >> 12;
+        struct pr_slot *c = &pr_tab[(page ^ (page >> 11)) & (PR_SLOTS - 1)];
+        if (c->gen == pr_gen && c->page == page) return c->ok;
+        c->page = page;
+        c->gen  = pr_gen;
+        c->ok   = (unsigned char)(nullfd >= 0 && w && w(nullfd, p, 1) == 1);
+        return c->ok;
     }
     last = p;
     lastok = (nullfd >= 0 && w && w(nullfd, p, 1) == 1);
@@ -1731,6 +1740,36 @@ static void segv_print_header(unsigned long *uc)
     }
 }
 
+/* ---- item 52: the scan fault guard --------------------------------- *
+ * sw_find_table() runs a whole-heap scan whose readability answers are
+ * page-cached for speed and can therefore be stale (see addr_readable's
+ * note). Rather than trying to out-probe the guest's allocator, the scan
+ * runs under this guard: when the SCANNING THREAD faults, the two handlers
+ * below land here first and siglongjmp back into sw_find_table, which
+ * closes the scan's fd, counts a failed search and moves on. Any other
+ * thread's fault, and any fault while no scan runs, falls through to the
+ * reporting and delegation below unchanged.
+ *
+ * The tid check is load-bearing: the jump buffer belongs to the scanning
+ * thread's stack, and a longjmp taken on another thread's fault would be a
+ * second, far stranger crash. gettid is a raw syscall (ARM EABI 224)
+ * because this runs inside a signal handler and because the shim resolves
+ * libc lazily. */
+static sigjmp_buf sw_scan_env;
+static volatile long sw_scan_tid;          /* nonzero = the guard is armed */
+static volatile int  scan_guard_busy;      /* one guarded scan at a time */
+static volatile unsigned long sw_scan_pc, sw_scan_addr;    /* for the log */
+static int sw_scan_fd = -1;   /* the scan's maps fd, closed on an abort */
+static int segv_guard_ready;  /* the constructor really took SIGSEGV */
+
+static void scan_guard_check(unsigned long *uc)
+{
+    if (!sw_scan_tid || syscall(224) != sw_scan_tid) return;
+    sw_scan_tid = 0;
+    if (uc) { sw_scan_pc = uc[23]; sw_scan_addr = uc[25]; }
+    siglongjmp(sw_scan_env, 1);
+}
+
 /* HEADER mode's handler: print, then put the fault back where it was going.
  *
  * "Where it was going" is the whole point - this must not change whether a run
@@ -1748,6 +1787,8 @@ static void segv_print_header(unsigned long *uc)
 static void segv_header_handler(int sig, void *info, void *ucv)
 {
     unsigned long *uc = ucv;
+
+    scan_guard_check(uc);   /* never returns if the guarded scan faulted */
 
     if (uc && segv_reports < 3) {
         segv_reports++;
@@ -1791,7 +1832,8 @@ static void segv_install(void)
     for (i = 0; i < 160; i++) mine[i] = 0;
     *(void **)mine = (void *)segv_header_handler;
     *(int *)(mine + 132) = 4;              /* SA_SIGINFO */
-    real_sigaction(11, mine, 0);
+    if (real_sigaction(11, mine, 0) == 0)
+        segv_guard_ready = 1;   /* sw_find_table's guard can land */
 }
 
 static void segv_handler(int sig, void *info, void *ucv)
@@ -1799,6 +1841,7 @@ static void segv_handler(int sig, void *info, void *ucv)
     unsigned long *uc = ucv;
     char b[200];
     (void)sig; (void)info;
+    scan_guard_check(uc);   /* never returns if the guarded scan faulted */
     if (!uc) { logmsg("[segv] no context\n"); _exit(99); }
 
     segv_print_header(uc);
@@ -3579,7 +3622,13 @@ TITLE_ADDR(a_nb_objs, "PAD_NB_OBJS", 0x7bad88u)
  * regression-test. If a THIRD one of these ever appears, factor all three then.
  *
  * Reads stay inside the region the maps line already proved mapped, so no
- * addr_readable() call is needed per candidate and the scan costs no syscalls. */
+ * addr_readable() call is needed per candidate and the scan costs no
+ * syscalls. ▼ AND "PROVED MAPPED" PROVES WHERE, NOT WHEN (2026-08-18): the
+ * guest freed a region mid-walk and this scan died reading a slot's [+12]
+ * in-use word, 16 s into the first run whose earlier scans were fast enough
+ * to land here during boot's heaviest scene churn. The walk therefore runs
+ * under the same fault guard as the switch scan - see nb_scan_objs() below,
+ * the guarded wrapper this body was renamed _walk for. */
 /* Returns the number of in-use slots if EVERY in-use slot is self-consistent,
  * and 0 the moment one is not. The count is the caller's to judge: three is
  * enough to act on, and one or two is reported as a near miss rather than
@@ -3739,7 +3788,7 @@ static void nb_sweep_report(void)
     }
 }
 
-static unsigned nb_scan_objs(unsigned *best_out, unsigned *near, unsigned *near_n)
+static unsigned nb_scan_objs_walk(unsigned *best_out, unsigned *near, unsigned *near_n)
 {
     char buf[8192];
     int fd, n;
@@ -3751,6 +3800,7 @@ static unsigned nb_scan_objs(unsigned *best_out, unsigned *near, unsigned *near_
     if (!ro || !rr) return 0;
     fd = ro("/proc/self/maps", 0, 0);
     if (fd < 0) return 0;
+    sw_scan_fd = fd;      /* published so an aborted scan can close it */
     while ((n = (int)rr(fd, buf, sizeof buf - 1)) > 0) {
         char *line = buf, *end = buf + n;
         buf[n] = 0;
@@ -3800,9 +3850,47 @@ static unsigned nb_scan_objs(unsigned *best_out, unsigned *near, unsigned *near_
         }
     }
     if (rc) rc(fd);
+    sw_scan_fd = -1;
     nb_sweep_report();          /* item 52: verdict over ALL regions, once */
     if (best_out) *best_out = best_n;
     return best;
+}
+
+/* The guard, worn by BOTH maps walks - see scan_guard_check(). The run that
+ * proved it needed to be: with the switch scan guarded and this one not, the
+ * 2026-08-18 run died at 16 s with pc inside nb_objs_shape_ok's [+12] read -
+ * the same region-freed-mid-walk race, in the walk whose own comment claimed
+ * the snapshot could be trusted. The page cache is NOT armed here (this walk
+ * never calls addr_readable); only the jump buffer and the latch are. */
+static unsigned nb_scan_objs(unsigned *best_out, unsigned *near, unsigned *near_n)
+{
+    unsigned ret;
+
+    if (!segv_guard_ready)
+        return nb_scan_objs_walk(best_out, near, near_n);
+    if (__sync_lock_test_and_set(&scan_guard_busy, 1)) {
+        if (best_out) *best_out = 0;
+        return 0;      /* another guarded scan is mid-flight; asked again */
+    }
+    if (sigsetjmp(sw_scan_env, 1) == 0) {
+        sw_scan_tid = syscall(224);
+        ret = nb_scan_objs_walk(best_out, near, near_n);
+    } else {
+        char m[160];
+        int (*rc)(int) = dlsym(RTLD_NEXT, "close");
+        if (sw_scan_fd >= 0 && rc) rc(sw_scan_fd);
+        sw_scan_fd = -1;
+        snprintf(m, sizeof m,
+                 "[nbobj] scan aborted by a fault (pc=0x%lx addr=0x%lx) - a "
+                 "region left while we walked it; asked again later\n",
+                 (unsigned long)sw_scan_pc, (unsigned long)sw_scan_addr);
+        logmsg(m);
+        if (best_out) *best_out = 0;
+        ret = 0;
+    }
+    sw_scan_tid = 0;
+    __sync_lock_release(&scan_guard_busy);
+    return ret;
 }
 
 /* ★ ITEM 52: WATCH the sweep's found array OVER TIME. The sweep reports once,
@@ -4772,6 +4860,7 @@ static int sw_find_table_scan(void)
     if (!ro || !rr) return 0;
     fd = ro("/proc/self/maps", 0, 0);
     if (fd < 0) return 0;
+    sw_scan_fd = fd;      /* published so an aborted scan can close it */
 
     while ((n = (int)rr(fd, buf, sizeof buf - 1)) > 0) {
         char *line = buf, *end = buf + n;
@@ -4820,6 +4909,7 @@ static int sw_find_table_scan(void)
         }
     }
     if (rc) rc(fd);
+    sw_scan_fd = -1;
 
     if (best) {
         char m[160];
@@ -4856,15 +4946,48 @@ static int sw_find_table_scan(void)
     return 0;
 }
 
-/* A seam, kept from the reverted page-cache experiment: whatever eventually
- * makes this scan affordable (see addr_readable's note - a per-page re-probe, a
- * sigsetjmp guard, or trusting the maps snapshot under one) belongs here, armed
- * around the call and dead outside it, rather than threaded through the scan's
- * four exits where the one that gets forgotten is the one that leaves a stale
- * permission behind for the rest of the run. */
+/* The seam, now filled - see addr_readable's note for the whole history.
+ * The scan runs with the page-granular probe cache armed and the fault guard
+ * around it. A stale cached yes - a region the guest freed mid-scan - faults,
+ * scan_guard_check() longjmps back here, and the abort is simply a failed
+ * search this tick: fd closed, fail counted, retried on a later tick. Armed
+ * around the call and dead outside it, so nothing else in the shim can ever
+ * act on a scan-lifetime readability answer. With PAD_SEGV_HEADER=0 there is
+ * no handler to land in, so the scan runs the old way: unguarded, uncached,
+ * slow, safe. */
 static int sw_find_table(void)
 {
-    return sw_find_table_scan();
+    int ret;
+
+    if (!segv_guard_ready)
+        return sw_find_table_scan();
+
+    if (__sync_lock_test_and_set(&scan_guard_busy, 1))
+        return 0;      /* another guarded scan is mid-flight; this tick is
+                        * simply lost and the cadence asks again soon */
+    pr_gen++;
+    if (!pr_gen) pr_gen = 1;                    /* 0 means disarmed */
+    if (sigsetjmp(sw_scan_env, 1) == 0) {
+        sw_scan_tid = syscall(224);             /* arm - see scan_guard_check */
+        ret = sw_find_table_scan();
+    } else {
+        char m[160];
+        int (*rc)(int) = dlsym(RTLD_NEXT, "close");
+        if (sw_scan_fd >= 0 && rc) rc(sw_scan_fd);
+        sw_scan_fd = -1;
+        snprintf(m, sizeof m,
+                 "[swfind] scan aborted by a fault (pc=0x%lx addr=0x%lx) - a "
+                 "region left while we walked it; counted as a failed "
+                 "search\n",
+                 (unsigned long)sw_scan_pc, (unsigned long)sw_scan_addr);
+        logmsg(m);
+        sw_find_fails++;
+        ret = 0;
+    }
+    sw_scan_tid = 0;
+    pr_gen = 0;
+    __sync_lock_release(&scan_guard_busy);
+    return ret;
 }
 
 /* The predicate both item 52 fallbacks key on - see its forward declaration.
@@ -4945,18 +5068,19 @@ static void sw_find_maybe(void)
      * because addr_readable() no longer costs a syscall per candidate; before
      * that fix this line would have made things worse, not better.
      *
-     * ▼ TRIED AT (t & 1) AND BACKED OUT: with the page cache making each scan
-     * complete in milliseconds, four scans at ticks 0/2/4/6 all land inside the
-     * first seconds of boot - which is exactly when the guest is allocating and
-     * freeing scene memory hardest - and the run took a SIGSEGV in sw_entry_ok
-     * at 79 s that no pre-change run has ever taken. The scan reads
-     * /proc/self/maps once and then walks it; a region that goes away under it
-     * is a race that has always existed and that speed made reachable. The
-     * cadence stays at every eighth write until that race is closed properly,
-     * because the throttle it was working around is gone either way: at
-     * millisecond scans, tick 24 arrives within seconds of bus traffic rather
-     * than at t=145 s. */
-    if (t < 32 ? (t & 7) != 0 : (t % 256) != 0) return;
+     * ▼ (t & 1) WAS TRIED, BACKED OUT, AND IS NOW BACK, in that order. With
+     * the page cache making each scan complete in milliseconds, four scans at
+     * ticks 0/2/4/6 all land inside the first seconds of boot - exactly when
+     * the guest allocates and frees scene memory hardest - and the first
+     * attempt took a SIGSEGV in sw_entry_ok at 79 s that no pre-change run
+     * had ever taken. That race is closed now, the only way it can be: the
+     * scan runs under sw_find_table's fault guard, so a scan that steps on a
+     * freed region aborts and counts as a failed search rather than killing
+     * the run. The dense cadence is therefore safe again - and it is the
+     * difference between the hopeless verdict landing on TX #7, five frames
+     * BEFORE the game's first discovery question at TX #12, and landing
+     * after the game has stopped listening. */
+    if (t < 8 ? (t & 1) != 0 : (t % 256) != 0) return;
     if (sw_configured_ok()) {                               /* the known title */
         char m[160];
         sw_find_done = 1;

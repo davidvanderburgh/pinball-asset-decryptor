@@ -2154,6 +2154,87 @@ static const char *nv_path(void)
 }
 static int nv_loaded;
 
+/* ══ PAD_NV_POKE ═════════════════════════════════════════════════════════
+ *
+ * PAD_NV_POKE=<lo>[-<hi>]:<val>[,...]   (all hex, e.g. "40-ff:01,200:1e")
+ *
+ * Overwrite EEPROM bytes after load, before the game sees them. This exists to
+ * find ONE number: the offset stranger_things keeps its COUNTRY CODE at. The
+ * static route is exhausted - the country table (0x731aac, 30 records, stride
+ * 36, +24 name msgid, +32 index 0..29) is reached through the table registry at
+ * 0x719b54, whose base 0x719b48 has 674 references and is therefore no
+ * shortcut. But the shim OWNS the EEPROM and the screen oracle can now read the
+ * glass, so the offset can simply be searched for: fill a range, see whether
+ * the refusal screen changes, bisect.
+ *
+ * SAVES ARE DISABLED WHENEVER THIS IS SET, and that is not a detail. The file
+ * being probed holds real settings and real high scores, and nv_save() runs on
+ * every EEPROM write the game makes - so without this, one probe run would
+ * write its own poked bytes back over the machine's actual NVRAM and the
+ * evidence and the data would be destroyed together. A probe must not be able
+ * to damage the thing it is measuring. */
+static int nv_poke_on(void)
+{
+    const char *p = getenv("PAD_NV_POKE");
+    return p && *p;
+}
+
+/* Hex parse in place; *nd is the digit count, so "no digits" is distinguishable
+ * from a legitimate zero. No string.h here - this object is built -nostdlib. */
+static unsigned nv_hex(const char **s, int *nd)
+{
+    unsigned v = 0;
+    *nd = 0;
+    for (;;) {
+        char c = **s;
+        unsigned d;
+        if (c >= '0' && c <= '9') d = (unsigned)(c - '0');
+        else if (c >= 'a' && c <= 'f') d = (unsigned)(c - 'a') + 10u;
+        else if (c >= 'A' && c <= 'F') d = (unsigned)(c - 'A') + 10u;
+        else break;
+        v = v * 16u + d;
+        (*s)++;
+        (*nd)++;
+    }
+    return v;
+}
+
+static void nv_poke_apply(void)
+{
+    const char *p = getenv("PAD_NV_POKE");
+    char m[240];
+    unsigned total = 0;
+    int nd;
+    if (!p || !*p) return;
+    while (*p) {
+        unsigned lo, hi, val, i;
+        lo = nv_hex(&p, &nd);
+        if (!nd) break;
+        hi = lo;
+        if (*p == '-') { p++; hi = nv_hex(&p, &nd); if (!nd) break; }
+        if (*p != ':') break;
+        p++;
+        val = nv_hex(&p, &nd);
+        if (!nd) break;
+        if (hi < lo || hi >= SLOTSIZE) {
+            snprintf(m, sizeof m, "[i2c] POKE 0x%04x..0x%04x REFUSED: out of "
+                     "range (EEPROM is 0x%x bytes)\n", lo, hi, SLOTSIZE);
+            logmsg(m);
+            break;
+        }
+        for (i = lo; i <= hi; i++) store[0][i] = (unsigned char)val;
+        total += hi - lo + 1u;
+        snprintf(m, sizeof m, "[i2c] POKE 0x%04x..0x%04x = 0x%02x\n",
+                 lo, hi, val & 0xffu);
+        logmsg(m);
+        if (*p == ',') p++; else break;
+    }
+    snprintf(m, sizeof m, "[i2c] %u EEPROM bytes poked; SAVES ARE DISABLED for "
+             "this run so the real NVRAM file cannot be damaged by a probe\n",
+             total);
+    logmsg(m);
+}
+
 static long (*real_read)(int, void *, unsigned long);
 static long (*real_write)(int, const void *, unsigned long);
 static int (*real_close)(int);
@@ -2187,6 +2268,7 @@ static void nv_load(void)
     if (fd < 0) {
         snprintf(m, sizeof m, "[i2c] no saved NVRAM at %s, starting blank\n", path);
         logmsg(m);
+        nv_poke_apply();     /* a poke must land on a blank chip too */
         return;
     }
     while (got < SLOTSIZE && (r = real_read(fd, store[0] + got, SLOTSIZE - got)) > 0)
@@ -2197,11 +2279,17 @@ static void nv_load(void)
              seeded ? " (seeding this title's own EEPROM; it is per-title now)"
                     : "");
     logmsg(m);
+    nv_poke_apply();
 }
 
 static void nv_save(void)
 {
     int fd;
+    /* A PROBE MUST NOT DAMAGE WHAT IT MEASURES. nv_save() runs on every EEPROM
+     * write the game makes, so without this one line a PAD_NV_POKE run would
+     * write its own poked bytes back over the machine's real settings and high
+     * scores - losing the data and the experiment in the same stroke. */
+    if (nv_poke_on()) return;
     io_init();
     fd = real_open(nv_path(), 0x241 /* O_WRONLY|O_CREAT|O_TRUNC */, 0644);
     if (fd < 0) return;

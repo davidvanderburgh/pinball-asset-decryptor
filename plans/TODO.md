@@ -342,7 +342,60 @@ These have each been violated at least once and each cost a run or a window:
       handler is entered through a `makecontext` trampoline, so the code that
       SELECTED screen 7 was never on this stack and no frame walk will reach it.
       That also explains why the screen table has no code reference at all.
-      **NEXT: read the guided-setup path, not the dispatcher.** Find the vtable
+      **★ 2026-08-18 — THE SETTINGS ARE NOT IN THE i2c EEPROM AT ALL. This is
+      the redirection the item needed.**
+      `PAD_NV_POKE=<lo>[-<hi>]:<val>[,...]` (new, hwshim.c) overwrites EEPROM
+      bytes after load; it forces saves OFF for that run, so a probe cannot
+      write its own bytes over David's real settings and scores. Verified
+      empirically, not asserted: the harness md5s the file before and after and
+      reports `UNCHANGED`.
+      **Result: `PAD_NV_POKE=0-ff:01` changed NOTHING.** The refusal still
+      shows, the game still boots, 256 bytes confirmed poked. `0x40..0xFF` is
+      the only bulk region the game reads from the EEPROM, so **the country
+      decision does not depend on the EEPROM.**
+      **Where the settings actually live:** `/data/nv/<title>/` — `SYS_NVRAM`,
+      `NVM`, `NVRAM`, `PIN_NVRAM`, `LKRAM`, `FRRAM`, `PTRAM`, `node_diag`, each
+      a directory of numbered generations with a `.crc32` sibling.
+      **`PAD_OPEN_LOG=1` proves ST uses them** — it opens
+      `SYS_NVRAM/00000005`, `NVM/00000007`, `NVRAM/00000007`,
+      `PIN_NVRAM/00000002`, `LKRAM/00000002`, `FRRAM/00000001`,
+      `PTRAM/00000001`, `node_diag/00000000`.
+      *(Correction: I first reported ST had no such directory. That came from a
+      `find | head -20` that truncated before reaching it — a tooling artifact,
+      not a finding. The open log is the real evidence.)*
+      **The file format is decoded** (`nfi2.py`):
+      ```
+      "NFI2" u32 size "ST" ...header...
+      "NSEC" u32 sect_size u32 hashA u32 hashB u32 n_records
+      "NDAT" u32 rec_size u32 KEY u32 payload_len <payload>
+      ```
+      SYS_NVRAM gen5 = 1384 bytes, NSEC claims 17 records (the parser walks 10
+      before losing the chain — records continue past a gap it does not model
+      yet). Sample: `key=85501bd4 len=2 value=6`, `key=127b01ba len=4`,
+      `key=fc733f84 len=3 01609e`.
+      **KEY is an identity, not a checksum** — records `@0x0068` and `@0x0090`
+      hold *identical* payloads (`01609e`) under *different* keys. But it is not
+      a plain hash of the obvious names either: 120 name candidates
+      (`Country`, `COUNTRY CODE`, `System.Country`, …) x 7 hashes (crc32, fnv1,
+      fnv1a, djb2, djb2x, sdbm, jenkins) produced **zero** matches, so the hash
+      is seeded or custom, or the key is an enum rather than a name hash.
+      **File permissions are `---xr-----`** — owner has execute but not read,
+      which is why they cannot be dumped directly. `nvgrab.sh` captures every
+      mode, chmods, copies, and restores; 40 files verified back to their
+      original modes. **Nothing in David's store has been modified.**
+      **Also spotted, possibly its own defect:** `SYS_NVRAM/00000006.crc32`
+      exists with **no matching `00000006` data file**, and is root-owned while
+      its siblings are david-owned — a half-written generation from an earlier
+      run.
+      **NEXT, in order:** (1) finish the NFI2 walker so all 17 records parse;
+      (2) find the key for the country — most cheaply by hooking the store's
+      lookup with `pad_hook()` and logging (key, name) pairs, since the static
+      hash guess failed; (3) write a valid country index (0..29, from the
+      country table at `0x731aac`) and recompute the `.crc32`. A
+      `PAD_NVFILE_POKE` knob in the shim would avoid touching the real files at
+      all, which is the right shape given the store holds real high scores.
+      **Superseded:** the guided-setup route below is still viable but is now
+      the second choice — the store is the direct path.
       for `MenuPageGuidedSetupCountry`; it leads to the adjustment's EEPROM
       offset, which is the one number needed to write a valid country directly.
       The cereal/Bitmap abort on a blank EEPROM deserves its own item.

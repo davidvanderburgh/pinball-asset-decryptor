@@ -1340,6 +1340,63 @@ These have each been violated at least once and each cost a run or a window:
       one. This also cleared `swelf.py` of suspicion: the A/B was run with
       `switch_list.txt` present in both arms, so the drop is PAD_GAME's and not
       the new table's.
+      **★★★ 2026-08-18: THE NODE BUS IS NOT STALLED BY THE GAME - IT IS
+      THROTTLED BY THE SHIM'S OWN SWITCH-TABLE SEARCH. Mechanism measured; the
+      obvious fix was tried, crashed, and is reverted.**
+      `sw_find_maybe()` is called from the node-bus write path, so the search
+      runs **inside the guest's `write()` to the bus** and the bus thread is
+      blocked for its whole duration. Godzilla never pays it: `sw_configured_ok()`
+      validates its table on tick 0 and `sw_find_table()` is never called. ST's
+      configured address is godzilla's, fails, so ST runs the by-shape search at
+      bus-write ticks 0, 8, 16, 24. That search walks every writable region at a
+      **4-byte step** calling `sw_entry_ok()`, which calls `addr_readable()`
+      twice (`e`, `e+28`) plus up to two more via `sw_ptr_ok()` - and
+      `addr_readable()` is **a real `write(2)` syscall**, memoised only on the
+      immediately-previous pointer, so `e` and `e+28` never hit the memo. Two to
+      four syscalls per four bytes of guest address space, under qemu-user.
+      *Measured in `i52_ab.log`:* four multi-second dead windows, each beginning
+      at exactly a search tick and at no other frame - **38.8 s, 43.7 s, 43.4 s**
+      - about 126 s of a 180 s run. Consequences, in order: the game asks its
+      first bare-`00` discovery question at t=57 s and the shim answers "bus
+      empty", because the node-directory seed needs `sw_find_fails >= 4`, i.e.
+      tick 24, i.e. **t=145 s**; the game gives up at ~155 s and there is not one
+      `[nb*]` line in the last 25 s.
+      **The obvious fix does not work and must not be re-tried blind.** Caching
+      the probe per PAGE for the duration of one scan is correct on paper -
+      readability is a page property - and it worked exactly as intended: the
+      dead windows collapsed, the seed moved from t=145 s to **t=20 s**, TX went
+      **149 → 990**. It also took a **SIGSEGV inside `sw_entry_ok`, twice, at two
+      different pcs**, where no pre-change build had ever taken one. The half of
+      "readable" that is not a page property is WHEN: the scan reads
+      `/proc/self/maps` once and walks it while the guest allocates and frees
+      scene memory, so a page probed readable early can be gone by the time the
+      walk reaches it. The one-address memo has the same race with a window of
+      one candidate; a page cache widens it to a whole scan. **Reverted; the tree
+      is crash-free (segv 0, full 180 s, 9720 frames).** Whatever replaces it has
+      to answer the WHEN: a re-probe on entry to each page immediately before
+      touching it, a `sigsetjmp` guard so a fault aborts the scan and not the
+      process, or trusting the maps snapshot under such a guard - the discipline
+      `nb_scan_objs()` already documents.
+      **A second measurement trap, and it invalidates TX counts in this
+      document:** `nb_log_budget` defaults to **400**, shared across TX/RX/
+      TX-reply. `i52_ab.log` is 149+126+125 = exactly 400 and `after.log` is
+      158+136+106 = exactly 400. **Both were truncated.** Use
+      `PAD_NB_LOG=20000` on every node-bus run; the same ST build reports TX 257
+      rather than 149 with the budget lifted, and nothing about the run changed.
+      The unbudgeted `[nbcmd]` census is the one frame statistic that was always
+      safe to read.
+      **Still true after all of it:** the census remains
+      `0a 07 08 03 f1 f0 00 fe f9 fc` and `[nbchg]` is 0, so no switch scan and
+      no coils. **Rank-2 hypothesis, untested:** the boards are answered but
+      never graded to state 2 - ST's bring-up driver is `0x2059ac`, its phase
+      gate `0x205328` wants every board's `[obj+24]` to be 2, and ST's board
+      array is **0x8239c8 stride 0x98** (not godzilla's 0x7bad88/0xe0, which is
+      what every previous per-node flag reading on ST actually sampled).
+      **`0xfa` is a red herring - do not chase it.** It is the failure path of a
+      node deliberately silenced by `PAD_NB_SILENT=2` in godzilla's own run
+      script, it goes to node 2 and no other node, and godzilla plays fine with
+      it looping. Likewise "ST re-asks `fe` twelve times" is not a refusal loop:
+      one accepted identify costs six `fe`, so twelve is two normal passes.
       **Acceptance (unchanged):** stranger_things boots past LOCATING NODE
       BOARDS with no NOT FOUND overlay, stated with a screenshot; then say
       what its attract shows on BOTH displays.

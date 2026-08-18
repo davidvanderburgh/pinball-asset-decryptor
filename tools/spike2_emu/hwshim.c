@@ -1206,7 +1206,53 @@ static struct { void *(*fn)(void *); void *arg; int id; } thslot[THMAX];
  * for the last address asked about, which is enough: these are asked per thread
  * start and per log line, always about the same one or two addresses.
  *
- * ANY new absolute address in this file must go through here. */
+ * ANY new absolute address in this file must go through here.
+ *
+ * ★★★ AND THE ONE-ADDRESS CACHE IS FINE UNTIL SOMETHING SCANS, at which point
+ * it is a catastrophe, which is what it turned out to be for stranger_things.
+ * sw_find_table() walks every writable region of the guest at a 4-BYTE step and
+ * asks about `e` and `e+28` per candidate - two different pointers, so the
+ * `p == last` memo never hits and every 4 bytes of address space costs two to
+ * four real write(2) syscalls under qemu-user. Godzilla never pays it
+ * (sw_configured_ok() validates on tick 0 and the search is never called); a
+ * title whose configured address does not validate pays it on bus-write ticks
+ * 0, 8, 16, 24.
+ *
+ * THAT SEARCH RUNS INSIDE THE GUEST'S write() TO THE NODE BUS, so the bus
+ * thread is blocked for its whole duration. Measured on stranger_things: three
+ * dead windows of 38.8 s, 43.7 s and 43.4 s, each beginning at exactly a search
+ * tick and at no other frame - about 126 s of a 180 s run. The game asked its
+ * first discovery question at t=57 s and the shim answered "bus empty", because
+ * the node-directory seed cannot exist until the FOURTH search failure, which
+ * is t=145 s. The game gave up at 155 s. None of that is the game's doing and
+ * none of it is a protocol problem; it is this cache.
+ *
+ * ▼▼▼ AND A PAGE CACHE IS NOT THE FIX. TRIED, MEASURED, REVERTED - read this
+ * before trying it again, because it looks obviously right and it is not.
+ * Readability IS a page property, so caching the probe per page (scoped to one
+ * scan epoch) changes no decision on paper, and it worked exactly as intended:
+ * the four dead windows collapsed, the node-directory seed moved from t=145 s
+ * to t=20 s, and bus traffic went from TX 149 to TX 990 in a shorter run.
+ * It also took a SIGSEGV inside sw_entry_ok, twice, at two different pcs, in
+ * runs where no pre-change build had ever taken one.
+ *
+ * The reason is the half of "readability" that is not a page property: WHEN.
+ * The scan reads /proc/self/maps once and then walks it, and the guest is
+ * allocating and freeing scene memory the whole time. A page probed readable
+ * early in a scan can be gone by the time the walk reaches it, and the cache
+ * then hands sw_entry_ok a yes for memory that is no longer there. The
+ * one-address memo below has the same race with a window of one candidate; the
+ * page cache widens that window to a whole scan, which is the difference
+ * between never seen and seen twice.
+ *
+ * So the throttle is real and the cost is real, but the fix has to be one that
+ * cannot dereference a stale yes: bound the scan to a region and re-probe on
+ * entry to each page immediately before touching it (window: one page), or wrap
+ * the scan in a sigsetjmp so a fault aborts the scan instead of the process, or
+ * do not probe at all and instead trust the maps snapshot with a fault guard -
+ * which is the discipline nb_scan_objs() already documents ("no addr_readable()
+ * call is needed per candidate and the scan costs no syscalls"). Whichever is
+ * chosen has to answer the WHEN, not just the WHERE. */
 static int addr_readable(const void *p)
 {
     static long (*w)(int, const void *, unsigned long);
@@ -4710,7 +4756,7 @@ static int sw_run_consistent(unsigned base, unsigned n)
 
 /* Walk /proc/self/maps and try every writable region: the table is heap and the
  * heap moves, so nothing here assumes an address. */
-static int sw_find_table(void)
+static int sw_find_table_scan(void)
 {
     char buf[8192];
     int fd, n;
@@ -4810,6 +4856,17 @@ static int sw_find_table(void)
     return 0;
 }
 
+/* A seam, kept from the reverted page-cache experiment: whatever eventually
+ * makes this scan affordable (see addr_readable's note - a per-page re-probe, a
+ * sigsetjmp guard, or trusting the maps snapshot under one) belongs here, armed
+ * around the call and dead outside it, rather than threaded through the scan's
+ * four exits where the one that gets forgotten is the one that leaves a stale
+ * permission behind for the rest of the run. */
+static int sw_find_table(void)
+{
+    return sw_find_table_scan();
+}
+
 /* The predicate both item 52 fallbacks key on - see its forward declaration.
  * `!sw_find_done` means no table has been found by ANY route (configured or by
  * shape), and `sw_find_fails >= 4` means the by-shape search has actually RUN
@@ -4878,6 +4935,27 @@ static void sw_find_maybe(void)
      * number of passes, front-loaded onto the frames the game actually cares
      * about - those first frames ARE the bare-00 discovery walk. */
     t = tick++;
+    /* Ticks 0, 2, 4, 6 rather than 0, 8, 16, 24. The FOURTH failure is what
+     * sw_table_hopeless() waits for, and everything item 52 built on top of it -
+     * the node-directory discovery seed, the cabinet at-rest word - cannot exist
+     * before then. At every eighth bus write that verdict lands on TX #25, and
+     * the game asks its first discovery question at TX #12: the answer was
+     * always going to be "bus empty" no matter how good it was. At every second
+     * it lands on TX #7, five frames before the question. Only affordable
+     * because addr_readable() no longer costs a syscall per candidate; before
+     * that fix this line would have made things worse, not better.
+     *
+     * ▼ TRIED AT (t & 1) AND BACKED OUT: with the page cache making each scan
+     * complete in milliseconds, four scans at ticks 0/2/4/6 all land inside the
+     * first seconds of boot - which is exactly when the guest is allocating and
+     * freeing scene memory hardest - and the run took a SIGSEGV in sw_entry_ok
+     * at 79 s that no pre-change run has ever taken. The scan reads
+     * /proc/self/maps once and then walks it; a region that goes away under it
+     * is a race that has always existed and that speed made reachable. The
+     * cadence stays at every eighth write until that race is closed properly,
+     * because the throttle it was working around is gone either way: at
+     * millisecond scans, tick 24 arrives within seconds of bus traffic rather
+     * than at t=145 s. */
     if (t < 32 ? (t & 7) != 0 : (t % 256) != 0) return;
     if (sw_configured_ok()) {                               /* the known title */
         char m[160];

@@ -1471,6 +1471,28 @@ These have each been violated at least once and each cost a run or a window:
       The remaining scan-aborts are nb_objs_addr re-scanning for a board
       array ST does not have in findable form - harmless, guard-caught.
 
+      **★ 2026-08-18 (evening): A GAME STARTED AND RAN - David's session, his
+      eyes, and the log agrees.** Fresh boot 14:01 (guided setup already
+      persisted): coin (+39k) credited, start (+36k) took, and at 114 s the
+      log shows `[sw] -69f` - BALLFEED answering the game's OWN trough eject
+      coil. Playfield hits (+99p node 9, +64p node 8) served; the video
+      channels left the attract loop for game scenes. Two session findings on
+      the way there: (1) autoattract was fighting the guided setup (fixed:
+      operator stand-down, commit f789276); (2) in the 45-minute first
+      session the game's switch sweep DEGRADED 3.3 s -> 32 s (a coin held
+      31.7 s on the wire because no node-1 scan happened between 2634 s and
+      2666 s) - a fresh boot resets it; cause unproven (candidate: the 1 Hz
+      clip EOS/rebuild cycle accumulating in-game state).
+
+      **THE REMAINING GAP, measured in-game: switch closures wait 0.5-2.8 s
+      for a scan even during play** (swlatch id=64 waited=2785 ms with a ball
+      in play). The game never enters a fast-scan state on ST as emulated.
+      The lever: the 0x11 scan is REQUEST-driven off our `00`-poll and `ff`
+      status answers - flag a node's pending switch news there so the game
+      fetches immediately instead of on its lazy sweep. Also open: budget the
+      [vid] EOS-cycle log lines; per-switch polarity is a uniform active-low
+      guess; the session-degradation cause above.
+
       **Acceptance (unchanged):** stranger_things boots past LOCATING NODE
       BOARDS with no NOT FOUND overlay, stated with a screenshot; then say
       what its attract shows on BOTH displays.

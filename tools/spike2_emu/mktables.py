@@ -51,6 +51,7 @@ import devicexy
 import gameinfo
 import ledio
 import padpath
+import swelf
 import swtable
 import switchxy
 
@@ -258,13 +259,33 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
             wait_for_switches(log_path, wait_s,
                               say=lambda m: say("  switches     %s" % m))
         if not log_path or not switch_dump_complete(log_path):
-            say("  switches     no switch dump yet - clickable switches will "
-                "appear on the next run of this title")
-            return made
-        live_rows = swtable.read(log_path)
-        if not live_rows:
-            say("  switches     the dump is there but held no rows")
-            return made
+            # ★ THE RUN IS NOT ALWAYS COMING. The docstring above says the
+            # switch tables "cannot" be built without a run because the game
+            # builds its table on the heap - true of Godzilla Pro, and false of
+            # stranger_things_le, whose table is static and whose shape the
+            # shim's by-shape hunt can never match (44-byte entries carrying
+            # neither node nor bit; see swelf.py). For a title like that,
+            # "appear on the next run" was a promise this code could not keep,
+            # and the playfield window sat on "No tables yet" for ever.
+            elf_rows = []
+            if elf and os.path.exists(elf):
+                try:
+                    elf_rows = swelf.rows(elf, game)
+                except (OSError, SystemExit):
+                    elf_rows = []
+            if elf_rows:
+                live_rows = elf_rows
+                sw_src = "read out of the game's binary, no run needed"
+            else:
+                say("  switches     no switch dump yet - clickable switches "
+                    "will appear on the next run of this title")
+                return made
+        else:
+            live_rows = swtable.read(log_path)
+            sw_src = "from the shim's dump"
+            if not live_rows:
+                say("  switches     the dump is there but held no rows")
+                return made
         # ★ ITEM 49: NAME a failed write instead of dying in a log nobody
         # reads. The background pass runs as the desktop user and pass one
         # (root, on a pivot run) creates this directory - before watch.sh
@@ -282,7 +303,8 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
                 "root's files - fix by hand: sudo chown -R <you> that dir)")
             return made
         made["switch_list.txt"] = sw_list
-        say("  switches     %d in the game's own table" % len(live_rows))
+        say("  switches     %d in the game's own table (%s)"
+            % (len(live_rows), sw_src))
 
     # --- positions, which NO LONGER need a run (item 27) -----------------
     #

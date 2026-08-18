@@ -1089,6 +1089,45 @@ These have each been violated at least once and each cost a run or a window:
       the fixture join both exist, the layout is new drawing work in
       playfield.py, and confirming it means a run with the LED test menu.
 
+- [ ] **53. A master volume knob and a Mute for the EMULATOR's sound to the PC
+      speakers — our level, not the game's.** `S3 D2`
+      **★ DAVID, 2026-08-18: "master pc volume knob for emulator (not for in
+      game, but for the emulator to my pc speakers). should have mute and
+      volume setting controls."** Today there is no level anywhere on our side
+      of the path: `padplay.py` (item 10's PortAudio player) copies the guest's
+      int16 PCM into the WASAPI callback at unity, and the only handles are
+      Windows' own mixer or the game's coin-door VOLUME −/+ — which changes the
+      MACHINE's adjustment, per title, and is exactly what he said this is not.
+      **Where the knob has to act:** in `padplay.py`'s callback — a gain
+      multiplied into the samples before they reach `outdata`, 0 for Mute —
+      because that is the one file that plays on all three platforms
+      (WASAPI / CoreAudio / ALSA); item 10's cross-platform rule still holds,
+      so per-app volume through the Windows session mixer (pycaw) is the wrong
+      layer. It must change LIVE, without restarting the run: `playaudio.sh`
+      starts padplay per run, so the control needs a channel into a RUNNING
+      player (its 250 ms status loop already polls; a small file it re-reads
+      or a control port are the obvious shapes — undecided, not measured).
+      Trap: `audioop` left the stdlib in 3.13, so scale with numpy.
+      **Where the controls live (ASSUMED, not asked):** the Emulate tab, next
+      to the audio setup notice, since that is where every other run setting
+      sits — a slider plus a Mute toggle, remembered across app restarts the
+      way the card image is (item 14), and handed to padplay at start so a run
+      comes up at the remembered level. Whether the playfield window also wants
+      a hotkey is a question for David, not a guess.
+      **Acceptance:** with a run live and the game making sound, moving the
+      slider changes what comes out of the PC speakers and Mute silences it,
+      both without a restart and without touching the game's own volume
+      adjustment (say what the service menu's Volume reads before and after);
+      the level survives an app restart. The oracle is the What U Hear
+      loopback capture (`C:\tmp\spike2_audio_ref\`): Mute records silence,
+      half-scale records ~-6 dB against full, and `audioscore.py` on the
+      full-volume capture must still meet item 10's -14.7 dB bar, so the knob
+      adds no damage at unity.
+      — S3: nothing is broken; the Windows mixer's per-app slider on padplay's
+      python.exe is the workaround today. D2: the gain is a few lines in one
+      callback plus two widgets and a control channel, and confirming it is one
+      run with the loopback capture.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

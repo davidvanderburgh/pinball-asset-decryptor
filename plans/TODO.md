@@ -213,12 +213,32 @@ These have each been violated at least once and each cost a run or a window:
       so the model is incomplete. A likely third shape is the classic Stern
       split, only dips 1..5 carrying the country and 6..8 separate flags, which
       would want `byte0 = 0xE0` i.e. **`PAD_CAB_DIP=31`**.
-      **NEXT, and pick one:** eyes on the glass for two or three values, or
-      build the TEXT-PAGE PROBE (character pages at
-      `0x7c0114 + (*(u32*)0x7de194)<<12`, 4 KB each) so a run reports its own
-      screen text and this stops being guesswork. The probe is the better
-      investment — every future screen question needs it. Dip handler
-      `0x41c970` (arg 1..8) is the static alternative.
+      **THE SCREEN ORACLE IS BUILT (`PAD_TEXTPAGE=<frames>`, hwshim.c) AND IT
+      DISPROVED ITS OWN MODEL — which is the point of building it.** It reads
+      the game's character page, reports printable runs, dedups, refuses to run
+      on a title it has no addresses for, and — after a first cut that returned
+      silently and taught nothing — SAYS WHY when it has nothing to say.
+      Measured on ST, in order:
+      | probe said | meaning |
+      |---|---|
+      | `index at 0x7de194 reads 16` | my `idx > 15` bound was invented and threw the real value away |
+      | `page 0x7d0114 (idx 16) ... (page is all zero)` | **the `base + idx<<12` char-page model is WRONG for this screen** |
+      **Why it is wrong, and this is the lead:** `0x7c0114 + idx<<12` came from
+      the LOCATING renderer `0x3db054`. **The country screen is a DIFFERENT
+      renderer, `0x3c9658`**, and re-reading it shows `*(0x7de194)` is not a
+      page index at all — it is loaded into `r1` and passed as an ARGUMENT to
+      the draw call `0x3afd64` (`3c965c movw r4,#0xe194 / 3c9664 movt r4,#0x7d
+      / 3c967c ldr r1,[r4] / 3c9690 bl 3afd64`), i.e. a context/handle, value
+      16. So the glyphs are written wherever `0x3afd64` puts them.
+      **NEXT: read `0x3afd64`** (the draw-one-message call used by both screen
+      renderers, args: r0 = message id, r1 = `*(0x7de194)`, r2/r3 = 2, plus
+      stack args) and find the buffer it writes. Point `PAD_TEXTPAGE_BASE` at
+      that and the oracle starts answering. Everything else in the probe —
+      gating, dedup, encoding fallback, self-diagnosis — is already done.
+      **Then, with the oracle working, the dip sweep is trivial:** run
+      `PAD_CAB_DIP` = 255, 31, 0 and read the screen text out of the log.
+      Static alternative to the whole sweep: decode the dip handler `0x41c970`
+      (called with arg 1..8).
       **★ DAVID, EYES ON THE GLASS, 2026-08-17: the boot now walks its NORMAL
       sequence — a "CHECK NODE BOARD 2" screen (not registered), and then
       straight to the country refusal.** Two consequences:

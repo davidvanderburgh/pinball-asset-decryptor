@@ -6651,6 +6651,174 @@ static void val_maybe_dump(void)
     val_dump_changed();
 }
 
+/* ══ THE SCREEN ORACLE ═══════════════════════════════════════════════════
+ *
+ * PAD_TEXTPAGE=<frames>: every <frames> node-bus frames, read the game's own
+ * CHARACTER PAGE and log the text that is actually on the glass.
+ *
+ * WHY THIS EXISTS, and it is the most expensive lesson of item 52: this rig
+ * has never been able to see its own screen. The LOCATING NODE BOARDS wedge
+ * burned six passes partly because "what is displayed" could only be answered
+ * by asking David to look, and the country-code dip sweep stopped dead on it -
+ * that message is a TEXT OVERLAY drawn over video, so the LCD scene hash
+ * cannot tell one screen from another and a blind A/B proves nothing at all.
+ * A run that cannot report its own screen makes every screen question a
+ * guess.
+ *
+ * stranger_things' character-page renderer at 0x3db054 clears its page with
+ *     memset(0x7c0114 + (*(u32*)0x7de194)<<12, 0, 0x1000)
+ * so a page is 4 KB at base + index<<12, and 0x7de190 holds the other index.
+ *
+ * BOTH ADDRESSES ARE STRANGER_THINGS', so they are env-overridable and the
+ * probe REFUSES to run on a title it has no addresses for. Reading godzilla's
+ * memory at ST's addresses and believing the answer is precisely the mistake
+ * this file warns about in four other places.
+ *
+ * THE ENCODING IS NOT KNOWN TO BE ASCII. Rather than assume and print
+ * nonsense, this reports printable runs when it finds them and a byte
+ * histogram when it does not - so one run yields either the screen text or
+ * the evidence needed to decode the glyph mapping. */
+TITLE_ADDR(a_textpage_base, "PAD_TEXTPAGE_BASE", 0x7c0114u)
+TITLE_ADDR(a_textpage_idx,  "PAD_TEXTPAGE_IDX",  0x7de194u)
+
+static int textpage_title_ok(void)
+{
+    static int ok = -1;
+    static const char want[] = "stranger_things_le";
+    const char *g;
+    int i;
+    if (ok != -1) return ok;
+    if (getenv("PAD_TEXTPAGE_BASE")) { ok = 1; return ok; }  /* told explicitly */
+    g = getenv("PAD_GAME");
+    ok = 0;
+    if (!g) return ok;
+    for (i = 0; want[i]; i++) if (g[i] != want[i]) return ok;
+    ok = g[i] == 0;
+    return ok;
+}
+
+/* One page -> printable runs. Returns the number of characters emitted. */
+static unsigned textpage_scan(unsigned page, char *out, unsigned cap)
+{
+    const unsigned char *p = (const unsigned char *)(unsigned long)page;
+    unsigned i, k = 0, run = 0;
+    char word[80];
+    for (i = 0; i < 0x1000 && k < cap - 90; i++) {
+        unsigned char c = p[i];
+        if (c >= 32 && c < 127) {
+            if (run < sizeof word - 1) word[run++] = (char)c;
+        } else {
+            if (run >= 4) {                       /* 4+ chars = real text */
+                word[run] = 0;
+                k += (unsigned)snprintf(out + k, cap - k, "%s%s",
+                                        k ? " | " : "", word);
+            }
+            run = 0;
+        }
+    }
+    if (run >= 4 && k < cap - 90) {
+        word[run] = 0;
+        k += (unsigned)snprintf(out + k, cap - k, "%s%s", k ? " | " : "", word);
+    }
+    return k;
+}
+
+static void textpage_dump(void)
+{
+    static int every = -1, n;
+    static char last[600];
+    static int said_shape;
+    char cur[600], m[760];
+    unsigned base, idxa, idx, page, k = 0, j;
+
+    if (every == -1) {
+        char *p = getenv("PAD_TEXTPAGE");
+        int v = 0;
+        while (p && *p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
+        every = v;
+        if (every > 0 && !textpage_title_ok()) {
+            logmsg("[textpage] refusing to run: 0x7c0114/0x7de194 are "
+                   "stranger_things addresses and this is not that title. "
+                   "Set PAD_TEXTPAGE_BASE/PAD_TEXTPAGE_IDX to use it here.\n");
+            every = 0;
+        }
+    }
+    if (every <= 0) return;
+    if (++n % every) return;
+
+    base = a_textpage_base();
+    idxa = a_textpage_idx();
+    /* SAY WHY WHEN THERE IS NOTHING TO SAY. The first cut of this probe had
+     * silent early-returns and produced a completely empty log, which is the
+     * same failure it exists to end: an instrument that cannot explain its own
+     * silence is indistinguishable from a broken one. One line, once. */
+    if (!base || !idxa) {
+        static int said;
+        if (!said) {
+            said = 1;
+            snprintf(m, sizeof m, "[textpage] not readable: base=0x%08x idx-addr=0x%08x "
+                     "(0 means addr_readable said no)\n", base, idxa);
+            logmsg(m);
+        }
+        return;
+    }
+    idx = *(const unsigned *)(unsigned long)idxa;
+    /* The first cut bounded this at 15 on no evidence and threw away the real
+     * value: stranger_things reads 16 here, which is a perfectly good page
+     * number (page 0x7d0114). Bound it only loosely enough to refuse obvious
+     * garbage - addr_readable() is the real guard. */
+    if (idx > 255u) {
+        static int said;
+        if (!said) {
+            said = 1;
+            snprintf(m, sizeof m, "[textpage] index at 0x%08x reads %u (0x%08x), "
+                     "which is not a page number - wrong address, or the page is "
+                     "selected another way\n", idxa, idx, idx);
+            logmsg(m);
+        }
+        return;
+    }
+    page = base + (idx << 12);
+    if (!addr_readable((const void *)(unsigned long)page)) {
+        static int said;
+        if (!said) {
+            said = 1;
+            snprintf(m, sizeof m, "[textpage] page 0x%08x (base 0x%08x idx %u) "
+                     "is not readable\n", page, base, idx);
+            logmsg(m);
+        }
+        return;
+    }
+
+    cur[0] = 0;
+    k = textpage_scan(page, cur, sizeof cur);
+
+    if (!k) {
+        /* No printable run. Say so ONCE with the evidence needed to decode the
+         * encoding, rather than silently reporting an empty screen forever. */
+        if (!said_shape) {
+            const unsigned char *p = (const unsigned char *)(unsigned long)page;
+            unsigned nz = 0;
+            said_shape = 1;
+            k = (unsigned)snprintf(m, sizeof m,
+                    "[textpage] page 0x%08x (idx %u) holds no printable run - "
+                    "first non-zero bytes:", page, idx);
+            for (j = 0; j < 0x1000 && nz < 32 && k < sizeof m - 8; j++)
+                if (p[j]) { k += (unsigned)snprintf(m + k, sizeof m - k, " %02x", p[j]); nz++; }
+            snprintf(m + k, sizeof m - k, "%s\n", nz ? "" : " (page is all zero)");
+            logmsg(m);
+        }
+        return;
+    }
+    for (j = 0; j < sizeof last && (last[j] || cur[j]); j++)
+        if (last[j] != cur[j]) break;
+    if (j < sizeof last && (last[j] || cur[j])) {       /* changed */
+        for (j = 0; j < sizeof last; j++) { last[j] = cur[j]; if (!cur[j]) break; }
+        snprintf(m, sizeof m, "[textpage] %lu ms idx %u: %s\n", pad_ms(), idx, cur);
+        logmsg(m);
+    }
+}
+
 static void nb_maybe_dump(void)
 {
     static int every = -1, n;
@@ -7989,6 +8157,7 @@ long shim_write(int fd, const void *b, unsigned long n)
         nb_maybe_poke();
         nb_watch_flags();
         nb_force_status();      /* item 52: readiness-gate test (per TX) */
+        textpage_dump();        /* item 52: what is actually on the glass */
         nb_maybe_dump();
         alert_maybe_dump();
         val_maybe_dump();

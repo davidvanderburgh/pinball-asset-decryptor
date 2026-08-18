@@ -282,16 +282,33 @@ These have each been violated at least once and each cost a run or a window:
       advance the boot, and the fix must make the country VALID. Note also
       `TX: 149` in both runs — the node bus goes quiet at the same count with
       and without the gate, which is worth its own look.
-      **THE COUNTRY IS AN EEPROM ADJUSTMENT, NOT A DIP, AND THE SEED IS THE
-      BUG.** `COUNTRY CODE` is message id 1294 (string `0x53cabc`) and no code
-      loads 1294 as an immediate — it is a service-menu **adjustment**, so it
-      lives in the EEPROM. The EEPROM went per-title earlier today for exactly
-      this reason, but `nv_load()` **seeds a missing per-title file from the
-      shared `/data/nvram.bin`, which is godzilla's**. So ST has been reading
-      godzilla's bytes at ST's `COUNTRY CODE` offset the whole time — from its
-      own copy of them. **The seed reproduced the corruption the split was
-      meant to fix.** `/data/nvram-stranger_things_le.bin` (19:09) is a copy of
-      godzilla's `nvram.bin` (18:21).
+      **THE COUNTRY IS AN EEPROM ADJUSTMENT, NOT A DIP.** `COUNTRY CODE` is
+      message id 1294 (string `0x53cabc`) and no code loads 1294 as an immediate
+      — it is a service-menu **adjustment**, so it lives in the EEPROM. Stop
+      sweeping `PAD_CAB_DIP`; the cabinet dips are not where this value lives.
+      **★ RETRACTION, 2026-08-18 — I BLAMED THE WRONG THING AND THE CODE
+      COMMENT SAID SO TOO.** I wrote that the shared `/data/nvram.bin` is
+      godzilla's, that ST's per-title copy was seeded from it, and that ST was
+      therefore reading another title's bytes at its `COUNTRY CODE` offset.
+      **Comparing the two files disproves all of it:**
+      | check | result |
+      |---|---|
+      | `/data/nvram.bin` @0x100 | `SPI-STR-19358604` — a **stranger_things** ident |
+      | `/data/nvram.bin` @0x150 | the string `stranger_things_le` |
+      | ST's per-title copy vs it | **16 differing bytes out of 65536** (0x10d, 0x13f..0x14d, 0x18c — a serial and two timestamps) |
+      There is **no godzilla content in that file to misread.** Cross-title
+      contamination is not the cause, and going per-title neither caused nor
+      could have fixed the refusal. The hwshim.c comment that carried the same
+      wrong attribution is corrected in place rather than deleted, because it
+      was believed long enough to aim a day's work.
+      **What the EEPROM actually shows (live i2c trace, `PAD_I2C_LOG`):** an
+      ident block at 0x100, a date at 0x1f4, and an adjustment area that is
+      **all zeros**. Reads before the refusal are `@0x1800 len=18`,
+      `@0x01f4 len=32`, `@0x0040 len=192` (polled every ~219 ms), `@0x0144
+      len=96`, `@0x0100 len=64`, `@0x1e08 len=7`. **The machine is
+      UNCONFIGURED, not mis-configured** — which fits a country stored as
+      "0 = never set" rather than "0 = U.S.A.", and fits guided setup being the
+      thing that is supposed to write it.
       **A BLANK EEPROM DOES NOT BOOT — this is a NEW, separate defect.**
       Moving the file aside and running `PAD_NV_BLANK=1`:
       ```

@@ -2108,16 +2108,33 @@ static void hex64(char *out, const unsigned char *p, int n)
  * other's bytes at its own adjustment offsets. The game's own file-based stores
  * under /data/nv/<title>/ were already per-title; this one was the outlier.
  *
- * MEASURED, 2026-08-17: two godzilla runs, then stranger_things put
- * "THIS MACHINE WILL NOT OPERATE IN THIS COUNTRY / PLEASE CONTACT YOUR
- * DISTRIBUTOR" on the glass - the COUNTRY CODE adjustment (0x53cabc) read out
- * of bytes another title wrote.
+ * The split is still right for the reason above. But the ATTRIBUTION that was
+ * written here on 2026-08-17 was WRONG, and it is corrected rather than deleted
+ * because it was believed long enough to aim a day's work:
+ *
+ *   CLAIMED: two godzilla runs, then stranger_things put "THIS MACHINE WILL NOT
+ *   OPERATE IN THIS COUNTRY" on the glass, so the COUNTRY CODE adjustment was
+ *   read out of bytes another title wrote.
+ *
+ *   MEASURED, 2026-08-18, by actually comparing the two files: /data/nvram.bin
+ *   is ITSELF a stranger_things EEPROM - it contains "SPI-STR-19358604" at
+ *   0x100 and the string "stranger_things_le" at 0x150 - and ST's per-title
+ *   copy differs from it in SIXTEEN BYTES out of 65536 (a serial and two
+ *   timestamps, at 0x10d, 0x13f..0x14d and 0x18c). There is no godzilla content
+ *   in it to misread. Cross-title contamination is NOT what causes the refusal,
+ *   and going per-title neither caused nor could have fixed it.
+ *
+ *   What the EEPROM actually shows: an ident block and a date, and an
+ *   adjustment area that is ALL ZEROS. The machine is unconfigured, not
+ *   mis-configured.
  *
  * A missing per-title file is SEEDED from the shared one rather than started
  * blank, because that file holds real settings and real high scores and this
  * change must not be the thing that loses them. PAD_NV_BLANK=1 skips the seed
- * for a deliberately fresh machine (which is also how you get back to a title's
- * guided setup). */
+ * for a deliberately fresh machine - but note that stranger_things does NOT
+ * survive a fresh one: on both an all-zero and an all-0xFF chip it aborts in
+ * cereal ("unregistered polymorphic type (Bitmap)") before the node bus starts,
+ * which is its own defect and not this function's. */
 static const char *nv_path(void)
 {
     static char p[160];

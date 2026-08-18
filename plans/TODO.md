@@ -1329,6 +1329,17 @@ These have each been violated at least once and each cost a run or a window:
       0x758350 has zeros in both, so every stride-32 reader downstream reads
       noise. The by-shape hit at `0x842ffc` is a false positive in `.bss`, not a
       near miss.
+      **▼ A TRAP MEASURED 2026-08-18, and it will misread every future log:
+      setting `PAD_GAME` ALONGSIDE `PAD_CARD` degrades a run badly.** With both
+      set, ST managed **TX 25** and the `[nbsched] playfield nodes:` line
+      disappeared entirely; with `PAD_CARD` alone and everything else identical
+      (same build, same `switch_list.txt` on disk) it is **TX 149** and the
+      nbsched line is back. Both runs otherwise agree - same frame counts per
+      second, no refusal. `/home/david/i52_pf.log` is a PAD_GAME run and must
+      NOT be used as a node-bus baseline; `/home/david/i52_ab.log` is the clean
+      one. This also cleared `swelf.py` of suspicion: the A/B was run with
+      `switch_list.txt` present in both arms, so the drop is PAD_GAME's and not
+      the new table's.
       **Acceptance (unchanged):** stranger_things boots past LOCATING NODE
       BOARDS with no NOT FOUND overlay, stated with a screenshot; then say
       what its attract shows on BOTH displays.

@@ -387,7 +387,47 @@ These have each been violated at least once and each cost a run or a window:
       exists with **no matching `00000006` data file**, and is root-owned while
       its siblings are david-owned — a half-written generation from an earlier
       run.
-      **NEXT, in order:** (1) finish the NFI2 walker so all 17 records parse;
+      **★ NFI2 FULLY DECODED, AND THE STORE IS RULED OUT TOO (2026-08-18).**
+      • **`.crc32` = `crc32(whole file)` little-endian** — verified against four
+        untouched files, so a generation can be written correctly.
+      • **The format has a fourth chunk type, `NARR` (arrays):**
+        `"NARR" u32 size u32 KEY u32 count u32 n <payload>`. SYS_NVRAM gen5 has
+        11 `NDAT` + 6 `NARR` = **17**, exactly NSEC's count. The walker now
+        parses all of them.
+      • **The keys are NOT in the binary** — 14 keys searched as raw dwords,
+        literal-pool words and movw/movt pairs: **zero hits**. They are computed
+        at runtime from names, so identifying a record statically is closed.
+      • **Cross-title diff is the cheap substitute** (`nvxdiff.py`). ST vs
+        elvira3 SYS_NVRAM: 15 keys in common, and exactly **one** differing
+        scalar in country range — `85501bd4`, ST=6 elvira3=0.
+      • **Tested, and it is NOT the country.** A generation with `85501bd4 = 0`
+        was read by the game (`[open] ok /data/nv/.../SYS_NVRAM/00000006`) and
+        the refusal was unchanged. It also **oscillates 1 → 6 → 1 across boots**
+        (gen4=1, gen5=6, gen7=1, gen8=1), so it is per-boot state, not a stored
+        setting.
+      • **PIN_NVRAM and NVRAM are ruled out as well** — every key shared with
+        elvira3 is byte-identical; the differences are title-specific game data.
+      **So the country is in none of: the cabinet dips, the i2c EEPROM, or any
+      scalar of SYS_NVRAM / PIN_NVRAM / NVRAM.** What is left: `NVM` (37 KB, the
+      big one), `LKRAM`/`FRRAM`/`PTRAM`, one of the differing `NARR` arrays
+      (`38fd284f`, `8553bdab`, `8efe5684`), or — increasingly worth taking
+      seriously — **the value is not stored on this machine at all** and this
+      1.12.0 build is region-locked to a country the rig cannot present.
+      **★ HOW THE STORE BEHAVES, learned the hard way and worth knowing before
+      touching it again:** the game reads the HIGHEST generation, and on every
+      run it WRITES new generations and ROTATES OLD ONES AWAY. One probe run
+      turned {4, 5} into {5, 7, 8} — generation 4 was deleted by the game, not
+      by me. Copies of every pre-probe generation are in
+      `/home/david/i52/nvstore/`.
+      **★ AND A FLAW IN MY OWN HARNESS, recorded so it is not repeated:** the
+      run's "originals restored" check `md5sum`'d the `.crc32` files, which are
+      **mode 0** and therefore unreadable — the baseline was empty and
+      `md5sum -c` verified NOTHING while printing as though it had. The probe
+      value did not in fact persist (gens 7/8 hold 1, the value the game writes
+      itself, checked separately) but **that was luck, not the check working.**
+      Any future harness must verify its baseline is non-empty before trusting
+      it.
+      **NEXT, in order:** (1) DONE — the NFI2 walker parses all 17 records;
       (2) find the key for the country — most cheaply by hooking the store's
       lookup with `pad_hook()` and logging (key, name) pairs, since the static
       hash guess failed; (3) write a valid country index (0..29, from the

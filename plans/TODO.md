@@ -1397,6 +1397,80 @@ These have each been violated at least once and each cost a run or a window:
       script, it goes to node 2 and no other node, and godzilla plays fine with
       it looping. Likewise "ST re-asks `fe` twelve times" is not a refusal loop:
       one accepted identify costs six `fe`, so twelve is two normal passes.
+      **★ 2026-08-18 (later): THE CRASH IS FIXED, THE BUS IS UP, AND THE
+      FLIPPERS REACH THE GAME.** Four findings, in the order they fell:
+
+      **(1) The scan fault guard (hwshim.c), and the crash was never
+      sw_entry_ok's.** A sigsetjmp guard now hooks into the SIGSEGV handlers
+      the shim already owns (scan_guard_check): a fault on the scanning
+      thread longjmps back, closes the scan's fd, counts a failed search,
+      retries later. The page cache and the 0/2/4/6 cadence are back behind
+      it. The first guarded run then died at 16 s ANYWAY - pc inside
+      nb_objs_shape_ok, the OTHER maps walk, whose comment claimed "reads
+      stay inside the region the maps line already proved mapped". Proved
+      mapped proves WHERE; the guest's allocator owns WHEN. Both walks now
+      wear the guard, serialized by a busy latch. Measured: segv 0 across
+      every subsequent run, 3-6 aborts per run survived, each one a would-be
+      dead run.
+
+      **(2) The rank-2 hypothesis was RIGHT, and PAD_PEEK of ST's own board
+      array (0x8239c8/0x98) named the board.** Six of seven boards grade
+      status 2; node 4 (QR SCANNER) sits at status 7 = Checksum, claiming
+      fw 124.107.0 - godzilla's node4 firmware, the exact substitution
+      nbdir.py flagged "reproduced not corrected ... worth revisiting if
+      node 4 misbehaves". The node4 hex image is ENCRYPTED (checked against
+      three titles: no plaintext version anywhere; the 7c 6b 00 at +9 in
+      godzilla's image is a coincidence of high-entropy bytes), so the
+      per-title truth cannot be read from the file. The game then tries to
+      REFLASH our fake node 4 forever (census command 04 at 143 s, flag
+      churn 13/43/53). And 0x205328's gate is asymmetric: an optional board
+      PRESENT but ungraded pins NOT READY forever; an optional board ABSENT
+      passes. ST declares node 4 attr 0x4 = OPTIONAL (godzilla's is 0x0).
+
+      **(3) So the durable fix is TRUTH, not a better lie: the machine does
+      not have a QR scanner.** nodecensus.py gained a second candidate class
+      (optional_node4_nodes: type node4 AND flags bit 2, read from the ELF
+      via nbdir's own parsers - no name check; godzilla is excluded by its
+      own 0x0 attr). watch.sh's census now emits PAD_NB_SILENT=4 for ST by
+      itself. Measured on the durable path: 0x40 coils at 30 s, 0x11 switch
+      scans at 53 s, all present boards status 2, node 4 takes the same fa
+      failure path godzilla's silenced node 2 does.
+
+      **(4) The last blocker was our own switch-table absence: sw_scan_bytes
+      answers "no switch state" for a title with no table - a playfield with
+      no switches and a keyboard wired to nothing** (coin, start and both
+      flippers were pressed on a LIVE bus: zero [nbchg]). The fix is the
+      FILE TABLE: sw_file_table() loads /dump/tables/<game>/switch_list.txt
+      (swelf.py's ELF-derived list) into godzilla-shaped entries and
+      publishes them through the existing sw_shadow seam - tried only at
+      sw_table_hopeless(), absent ids poisoned (node 0xff, not 0 - an
+      all-zero entry is DIP 1), NOT re-dumped (mktables prefers a log dump;
+      a round-trip would trade real names for "?"). The discovery seed
+      filters nb_is_silent in the primary branch too, and a file-table title
+      merges its declared node directory (minus silenced) into the seed so
+      the LED-only boards (2 CABINET LIGHTS, 12 TOPPER) are still
+      discovered - add_boards() cannot do it on ST because ST's board array
+      is DENSE, not self-labelling, so the by-shape array scan can never
+      resolve it.
+
+      **Measured end-to-end (i52_game.log): bus up at 19.9 s; plunge.py
+      reset/coin/start/plunge/flippers; 11 [nbchg] lines that tell the
+      physical story exactly** - at rest node 8 reads six trough switches
+      closed and TROUGH JAM open; the plunge opens trough 6 and closes the
+      shooter lane; LEFT FLIPPER (bit 25) at 45.3 s and RIGHT (bit 24) at
+      48.2 s both hit the wire, and the game answers node 8 with b7 at the
+      same millisecond, plus a 20-byte 96 burst right after START. The
+      pre-table replies ("all zeros = 78 active-low switches read ACTIVE")
+      are also gone: idle now reads open.
+
+      **Still open, and it needs eyes:** whether a game actually STARTS
+      (the screen oracle logs no text on ST attract/game scenes - the 0x11
+      story above is switch-level truth, not a scorecard), and per-switch
+      POLARITY is uniform active-low (right for 78 of godzilla's 88; if
+      ST's optos disagree the place for per-device polarity is the file).
+      The remaining scan-aborts are nb_objs_addr re-scanning for a board
+      array ST does not have in findable form - harmless, guard-caught.
+
       **Acceptance (unchanged):** stranger_things boots past LOCATING NODE
       BOARDS with no NOT FOUND overlay, stated with a screenshot; then say
       what its attract shows on BOTH displays.

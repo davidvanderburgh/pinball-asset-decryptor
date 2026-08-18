@@ -5001,6 +5001,126 @@ static int sw_table_hopeless(void)
     return !sw_find_done && sw_find_fails >= 4;
 }
 
+/* ★ ITEM 52: THE FILE TABLE - the third route to a switch table, for a title
+ * whose in-memory table cannot be found by shape. stranger_things is why: its
+ * entries are 44 bytes with node and bit in a separate device table, so the
+ * by-shape hunt (32-byte godzilla records) can never succeed - and without a
+ * table sw_scan_bytes() answers every 0x11 with "no switch state", which is a
+ * playfield with no switches and a keyboard wired to nothing. Measured
+ * 2026-08-18: bus fully up (0x11 at 53 s, 0x40 coils at 30 s), plunge.py
+ * pressed coin, start and both flippers, and NOT ONE [nbchg] line - every
+ * injection died at this table's absence.
+ *
+ * The table has existed on the host since swelf.py: mktables.py reads it
+ * straight out of the title's ELF (validated against David's photographed
+ * TECH ALERTS numbers) and writes /dump/tables/<game>/switch_list.txt. This
+ * loads that file into godzilla-SHAPED 32-byte entries - +8 cfg pointer,
+ * +18 bit, +20 node, the three fields the reply builder and the discovery
+ * seed read - and publishes them through the same sw_shadow seam a by-shape
+ * find uses, so every consumer downstream is unchanged. Tried only at
+ * sw_table_hopeless(), so godzilla (configured, tick 0) and any title whose
+ * in-memory table is found can never reach it.
+ *
+ * Absent ids are POISONED (node 0xff, bit 0xffff), not zeroed: an all-zero
+ * entry reads as node 0 bit 0, and a held id with no row would close DIP 1
+ * in the cabinet word. cfg is per-entry so the dump's num column stays real;
+ * +28 polarity is left clear (active low) uniformly, which is godzilla's
+ * shape for 78 of 88 - if ST's optos ever prove to need per-device polarity
+ * it belongs in the file, not in a constant here.
+ *
+ * NOT sw_dump()ed on install, deliberately: mktables.py PREFERS a log dump
+ * over the ELF walk, and this table would dump with every name "?" - the
+ * next regeneration would trade the ELF's real names for question marks.
+ * The file came from the host; publishing it back at the host is circular.
+ * One log line says what was loaded and from where. */
+#define SW_FTAB_MAX 512
+static unsigned char sw_ftab[SW_FTAB_MAX][32];
+static unsigned char sw_fcfg[SW_FTAB_MAX][32];
+static int sw_ftab_state;          /* 0 untried, -1 tried and refused */
+static int sw_ftab_installed;      /* the discovery seed keys on this */
+
+static int sw_file_table(void)
+{
+    typedef void *FILEP;
+    FILEP (*ropen)(const char *, const char *);
+    char *(*rgets)(char *, int, FILEP);
+    int  (*rclose)(FILEP);
+    FILEP f;
+    char path[192], line[300], msg[240];
+    const char *p, *g;
+    unsigned maxid = 0, n = 0, i;
+
+    if (sw_ftab_state) return 0;
+    sw_ftab_state = -1;
+    p = getenv("PAD_SW_TABLE");
+    g = getenv("PAD_GAME");
+    if (p && *p)
+        snprintf(path, sizeof path, "%s", p);
+    else if (g && *g)
+        snprintf(path, sizeof path, "/dump/tables/%s/switch_list.txt", g);
+    else
+        return 0;
+    ropen  = dlsym(RTLD_NEXT, "fopen");
+    rgets  = dlsym(RTLD_NEXT, "fgets");
+    rclose = dlsym(RTLD_NEXT, "fclose");
+    if (!ropen || !rgets || !rclose) return 0;
+    f = ropen(path, "r");
+    if (!f) {
+        snprintf(msg, sizeof msg, "[swfind] no by-shape table and no file "
+                 "table (%s): the playfield stays switchless this run\n", path);
+        logmsg(msg);
+        return 0;
+    }
+    for (i = 0; i < SW_FTAB_MAX; i++) {
+        sw_ftab[i][18] = 0xff;             /* poisoned - see the header */
+        sw_ftab[i][19] = 0xff;
+        sw_ftab[i][20] = 0xff;
+    }
+    while (rgets(line, sizeof line, f)) {
+        unsigned v[4], k = 0;
+        const char *q = line;
+        if (line[0] == '#') continue;
+        while (k < 4) {
+            unsigned val = 0;
+            int any = 0;
+            while (*q == ' ' || *q == '\t') q++;
+            while (*q >= '0' && *q <= '9') {
+                val = val * 10 + (unsigned)(*q++ - '0');
+                any = 1;
+            }
+            if (!any) break;
+            v[k++] = val;
+        }
+        /* id num node bit NAME... - the name stays in the file (see header) */
+        if (k < 4 || v[0] == 0 || v[0] >= SW_FTAB_MAX || v[2] >= 64
+            || v[3] >= 256)
+            continue;
+        *(unsigned short *)(sw_ftab[v[0]] + 18) = (unsigned short)v[3];
+        sw_ftab[v[0]][20] = (unsigned char)v[2];
+        *(unsigned *)(sw_ftab[v[0]] + 8) =
+            (unsigned)(unsigned long)sw_fcfg[v[0]];
+        *(unsigned short *)(sw_fcfg[v[0]] + 20) = (unsigned short)v[1];
+        if (v[0] > maxid) maxid = v[0];
+        n++;
+    }
+    rclose(f);
+    if (n < 16) {   /* a handful of rows is a parse accident, not a table */
+        snprintf(msg, sizeof msg, "[swfind] file table %s parsed to only %u "
+                 "row(s) - not trusted, not installed\n", path, n);
+        logmsg(msg);
+        return 0;
+    }
+    sw_shadow[0] = (unsigned)(unsigned long)&sw_ftab[0][0];
+    sw_shadow[1] = 0;
+    sw_shadow_count = maxid + 1;
+    sw_ftab_installed = 1;
+    snprintf(msg, sizeof msg,
+             "[swfind] switch table loaded from %s: %u switches, ids to %u "
+             "(ELF-derived; the names live in the file)\n", path, n, maxid);
+    logmsg(msg);
+    return 1;
+}
+
 /* Try, at most every 256 bus writes, until it works: the table does not exist
  * yet at the first ask, and a scan of the heap is not free. */
 /* Does the CONFIGURED address really point at a switch table in THIS title?
@@ -5091,7 +5211,10 @@ static void sw_find_maybe(void)
         sw_dump();      /* publish it, exactly as a found table is published */
         return;
     }
-    if (sw_find_table()) sw_find_done = 1;
+    if (sw_find_table()) { sw_find_done = 1; return; }
+    /* Hopeless by shape (four failed searches) - the file is the last route,
+     * and it is tried exactly once (sw_ftab_state). */
+    if (sw_table_hopeless() && sw_file_table()) sw_find_done = 1;
 }
 
 static void sw_dump(void)
@@ -5668,8 +5791,31 @@ static void nb_nodes_init(void)
         for (id = 1; id < n && nb_nnodes < (int)sizeof nb_nodes; id++) {
             unsigned node = ((const unsigned char *)(unsigned long)(st + id * 32))[20];
             if (!node) continue;                 /* 0 is the cabinet, over SPI */
+            if (nb_is_silent(node)) continue;    /* the machine does not have it
+                                                  * - same fact, same filter as
+                                                  * the fallback below */
             for (i = 0; i < nb_nnodes; i++) if (nb_nodes[i] == node) break;
             if (i == nb_nnodes) nb_nodes[nb_nnodes++] = (unsigned char)node;
+        }
+        /* item 52: a FILE table names only the boards that CARRY SWITCHES, so
+         * seeding from it alone would strand the LED-only boards (ST: node 2
+         * CABINET LIGHTS, node 12 TOPPER) - they are discovered on godzilla by
+         * nb_nodes_add_boards(), which walks a board array that resolves by
+         * shape there and can never resolve on ST (its array is dense, not
+         * self-labelling). Merge the title's own declared directory, minus
+         * the silenced - exactly the set the fallback below would have used.
+         * A title whose table came from GAME MEMORY is untouched: its board
+         * array resolves and add_boards() keeps doing this job. */
+        if (sw_ftab_installed) {
+            nb_fident_load();
+            for (id = 1; id < 64 && nb_nnodes < (int)sizeof nb_nodes; id++) {
+                if (!nb_fident_have[id] || nb_is_silent(id)) continue;
+                for (i = 0; i < nb_nnodes; i++)
+                    if (nb_nodes[i] == (unsigned char)id) break;
+                if (i == nb_nnodes) nb_nodes[nb_nnodes++] = (unsigned char)id;
+            }
+            nb_nodes_seed_log("switch table + node directory");
+            return;
         }
         nb_nodes_seed_log("switch table");
         return;

@@ -1117,6 +1117,106 @@ These have each been violated at least once and each cost a run or a window:
       passed on the previous build.
       **No live run of MINE left up**, and `alive.sh` is NOT 0 — `item/50`
       holds the lock and is running turtles_pro. Do not kill it.
+      **★★★ 2026-08-18, A WHOLE STATIC PASS AND NOT ONE RIG RUN: the settings
+      store is fully named, the country is found, and it reads a VALID
+      U.S.A. — so the refusal is neither "unset" nor "invalid".**
+      **(1) The region-lock question is ANSWERED: this build is not
+      region-locked.** The country table `0x731aac` (30 x 36) is a pure
+      COINAGE table. `+26` is the name msgid (1421 `U.S.A.` .. 1450
+      `INDONESIA`), `+28`/`+30` the two attract-marquee msgids, `+32` the
+      index; `+4`/`+16`/`+20` point into a 0xC0-byte per-country block in
+      `.data` — `+16` a 0x40-byte coin/currency record, `+20` a 0x40-byte
+      defaults block **byte-identical for all 30 countries**, `+4` a
+      variable-length pricing list. `+12` is null for 29 of 30;
+      CHUCK-E-CHEESE alone carries an extra list at `0x724118`. **No
+      permitted flag, no whitelist, no mask anywhere in the table**, and all
+      30 countries are fully populated. (`+24` is two u16s, not one u32 —
+      the old "+24 = name msgid" note was two bytes off.) That PROMOTES the
+      store line of work rather than killing it.
+      **(2) The store keys are not an unknown runtime hash — they are zlib
+      crc32 of a NAME, and every record in every file is now named,
+      offline.** `0x41b938` does `strlen(name)` then calls `0x4f4dc8`, the
+      same routine that writes the `.crc32` siblings. Two constructors, two
+      forms: scalars (`0x41b300`) `key = crc32(0, name)`; arrays
+      (`0x41b39c` / `0x41b41c`) `key = crc32(crc32(0, type), name)` — the
+      chained pair is exactly why a single-name dictionary found nothing.
+      *Proof:* NSEC's `hashA` is crc32 of the store's own name on **18 of 18
+      files**, and every recovered array pair is a (field, C type) pair.
+      `nvmap.py` recovers them: crc32 every printable string in the ELF,
+      then — because `crc32(init, A)` is affine in `init` — solve for the
+      init each candidate would need and look it up in `{ crc32(0, B) }`.
+      SYS_NVRAM entire: `dsp_block`, `low_shelf_filter`,
+      `high_shelf_filter`, `cabinet_low_shelf_filter`,
+      `cabinet_high_shelf_filter`, `custom_door_pricing`, `dip_data`,
+      `custom_message`, `error_log_index`, `burn_in_data`, and the arrays
+      `sw_broken[100] bool_t`, `sw_stuck_active[100] bool_t`,
+      `sw_alert_count[100]`, `sw_broken_matrix[11] sw_col_t`,
+      `sw_stuck_active_matrix[11] sw_col_t`, `sw_alert_count_array[176]`,
+      `error_log_array[10] error_log_entry_t`. PIN_NVRAM:
+      `total_players`, `boost_data`, `custom_pinball_pricing`,
+      `hstd_reset`, `score_average`, `tournament_players_active`,
+      `custom_pinball_door_pricing_table`,
+      `custom_pinball_credit_pricing_table`, `player_scores`. LKRAM
+      `replay_data` / `redemption_block`; FRRAM `tournament_reset` /
+      `factory_reset`; PTRAM `tournament_index`. **`85501bd4` is
+      `error_log_index`** — which is precisely why it oscillated 1 -> 6 -> 1.
+      `NVM` is not NFI2 at all: magic `MAP0`, parsed at `0x231a8c`, a device
+      map. **Not one record in any file is the country**, which closes the
+      remaining store search entirely — NVM, LKRAM, FRRAM, PTRAM and the
+      three "differing" NARRs are all named and none of them is it.
+      **(3) The country is an i2c EEPROM record at offset `0x140` — outside
+      the range the old sweep touched — and on this rig it is VALID U.S.A.**
+      `0x41c430 get_country()` -> `0x41c3d0` -> `0x41c380`, which calls
+      `0x4f2fe4(dev=0x50, addr=0x140, buf, len=4)`. The record is `u16
+      value` + `u16 check`, valid iff `check == ~(sum of the two value
+      bytes) & 0xffff` (`0x24dbbc` is an additive 16-bit sum); the country
+      index is the first byte, and `[0x52c0e0] = 30` bounds it — the same 30
+      as the table. *Evidence is this rig's OWN existing log,
+      `~/i52_country0.log`, with no new run:* `[i2c] t=1257 addr=0x50 WRITE
+      @0x0140 len=2 0140` / `READ @0x0140 len=4 0003fcff`, then at t=1340
+      `WRITE @0x0140 len=6 01400003fcff`. `00 03 fc ff` = value byte 0,
+      check `0xfffc`, and `~(0+3) = 0xfffc` — **VALID, country 0 =
+      U.S.A.**, written straight back unchanged. Both EEPROM images on disk
+      carry the same bytes. **So the refusal reads a correct country and
+      refuses anyway.**
+      **(4) A shim hypothesis raised and KILLED in the same pass, recorded so
+      nobody re-raises it:** `nv_load()` loads the 64 KB image into
+      `store[0]` while `slot_for()` allocates slots in first-seen order, so a
+      non-EEPROM slave selected first would put the image on the wrong
+      device. The log's first selection is `select slave 0x50 -> slot 0`, and
+      the 16-bit address path (`p = buf[0]<<8 | buf[1]`) serves `0x140`
+      correctly. The shim is right here.
+      **(5) The screen launcher is `0xb262c`** — `screen_start(id)`:
+      bounds-check `id < [0x52c0dc]` (= 376), `handler = *(0x730eec + id*8)`,
+      then spawn a 415-word fiber via `0x37808c`. The refusal is index
+      **8**, not 7 (`0x730f2c` is `base + 8*8`), and LOCATING is **15**, not
+      14. Only 16 call sites pass a literal id and **none of them passes 8**,
+      so the refusal is raised indirectly. That is the open end.
+      **(6) NEXT, and the first step still needs no run: find what writes
+      `0x7b9bec`.** `0x41c71c` (country init) takes its seed from
+      `(*(u16*)0x7b9bee >> 8) & 0x7f` and treats `0xff` as "nothing
+      reported". It only writes the EEPROM record when that record is
+      invalid — ours is valid, so that arm is skipped — but the same routine
+      compares the reported value against a SECOND stored copy at
+      `0x7e2cb8` (EEPROM `0x1a4`, which this rig holds as
+      `ffffffff00030000`). `0x7b9bec` is `.bss`, so something writes it at
+      runtime, and a mismatch between a *reported* country and the stored one
+      is exactly the shape of a refusal that fires on a valid country.
+      **Two "dead ends" need correcting, both mine to correct:**
+      "do not poke the i2c EEPROM, `PAD_NV_POKE=0-ff:01` changed nothing" —
+      that sweep covered `0x00..0xFF` only and the country lives at `0x140`;
+      the advice still stands, but for a better reason (the record there is
+      already valid U.S.A., so there is nothing to fix), and the companion
+      claim "`0x40..0xFF` is the only bulk region the game reads" was an
+      artefact of the default 120-line `PAD_I2C_LOG` budget. And "do not look
+      for store keys in the binary, they are hashed at runtime" — wrong; they
+      are crc32 of names and are now fully recovered.
+      **New scripts, `/home/david/i52/`:** `nvmap.py` (name every record in
+      an NFI2 file, both key forms), `ctyrec.py` (country records +
+      msgids), `ctyblk.py` (per-country coinage blocks), `crcsites.py`
+      (locate crc32-of-name call sites), `scrdump.py` (screen table).
+      **Uncommitted: nothing.** No shim change was needed and no rig run was
+      spent, so the rig lock was never taken and no build was made.
       **Acceptance (unchanged):** stranger_things boots past LOCATING NODE
       BOARDS with no NOT FOUND overlay, stated with a screenshot; then say
       what its attract shows on BOTH displays.

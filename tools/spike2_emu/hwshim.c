@@ -6653,8 +6653,8 @@ static void val_maybe_dump(void)
 
 /* ══ THE SCREEN ORACLE ═══════════════════════════════════════════════════
  *
- * PAD_TEXTPAGE=<frames>: every <frames> node-bus frames, read the game's own
- * CHARACTER PAGE and log the text that is actually on the glass.
+ * PAD_SCREEN=1: log every distinct line of text the game draws, as it draws
+ * it.
  *
  * WHY THIS EXISTS, and it is the most expensive lesson of item 52: this rig
  * has never been able to see its own screen. The LOCATING NODE BOARDS wedge
@@ -6665,158 +6665,229 @@ static void val_maybe_dump(void)
  * A run that cannot report its own screen makes every screen question a
  * guess.
  *
- * stranger_things' character-page renderer at 0x3db054 clears its page with
- *     memset(0x7c0114 + (*(u32*)0x7de194)<<12, 0, 0x1000)
- * so a page is 4 KB at base + index<<12, and 0x7de190 holds the other index.
+ * THE FIRST CUT OF THIS PROBE WAS WRONG, AND WHY IS WORTH KEEPING. It read a
+ * "character page" at 0x7c0114 + idx<<12, on the theory that the renderer
+ * composes text into a 4 KB buffer that could simply be read out. It found a
+ * page of zeros. Reading 0x3afd64 - the draw-one-message call - explained it:
  *
- * BOTH ADDRESSES ARE STRANGER_THINGS', so they are env-overridable and the
- * probe REFUSES to run on a title it has no addresses for. Reading godzilla's
- * memory at ST's addresses and believing the answer is precisely the mistake
- * this file warns about in four other places.
+ *     0x3afd64(id, ctx, ...):   r0 = message id
+ *         bl 0x233330           id -> const char *          (r0 = the string)
+ *         r1 = 0x7c0114 + ctx<<12
+ *         b  0x3afbc8
  *
- * THE ENCODING IS NOT KNOWN TO BE ASCII. Rather than assume and print
- * nonsense, this reports printable runs when it finds them and a byte
- * histogram when it does not - so one run yields either the screen text or
- * the evidence needed to decode the glyph mapping. */
-TITLE_ADDR(a_textpage_base, "PAD_TEXTPAGE_BASE", 0x7c0114u)
-TITLE_ADDR(a_textpage_idx,  "PAD_TEXTPAGE_IDX",  0x7de194u)
+ *     0x3afbc8(const char *s, target, font, flags, x, y, colour):
+ *         walks s one BYTE at a time and blits each character as a SPRITE
+ *         (bl 0x440d70 / 0x440ccc).
+ *
+ * There is no character buffer anywhere. 0x7c0114 + idx<<12 is a RENDER
+ * TARGET handle that 0x3afbc8 passes straight through to the blitter, and the
+ * old probe was reading a render target as if it were text.
+ *
+ * So the text is text at exactly ONE moment: on entry to 0x3afbc8, in r0.
+ * That is the hook point, and it is the right one because the whole wrapper
+ * family funnels into it - 0x3afd64 (draw by message id), 0x3afdec /
+ * 0x3afe58 / 0x3afed4 / 0x3aff3c (vsprintf first, so counts and node numbers
+ * are already substituted into the string) and 0x3afebc (draw a raw string).
+ * The country refusal screen at 0x3c9658 uses 0x3afd64; the LOCATING NODE
+ * BOARDS renderer at 0x3db054 uses 0x3afebc and 0x3afdec and would have been
+ * missed by hooking 0x3afd64 alone. Hooking the bottleneck catches every
+ * screen in the game and needs no message-table decode at all.
+ *
+ * HOW - an inline hook. The first two instructions of 0x3afbc8 are
+ *     e92d4ff0  push {r4,r5,r6,r7,r8,r9,sl,fp,lr}
+ *     e24dd01c  sub  sp, sp, #28
+ * Neither is PC-relative, so both can be relocated. We overwrite them with
+ * `ldr pc,[pc,#-4]; .word tramp`; the trampoline logs r0, re-executes those
+ * two, and jumps to 0x3afbd0. The stack is left EXACTLY as the original
+ * prologue would have left it, which matters here because the function reads
+ * its remaining arguments at [sp,#64], [sp,#68] and [sp,#72] - offsets that
+ * only work if 36 bytes of push and 28 of sub happened and nothing else.
+ *
+ * THE TRAMPOLINE IS GENERATED AS DATA rather than written in asm: a
+ * `.word symbol` literal inside a -fPIC shared object is a text relocation,
+ * and emitting six known instruction words costs less than arguing with the
+ * linker about one. `blx` reaches the logger whichever instruction set it was
+ * compiled to, so this does not care whether the shim is ARM or Thumb.
+ *
+ * THE ADDRESS IS STRANGER_THINGS' and is env-overridable, but the real guard
+ * is not the title name - it is that the hook REFUSES to patch unless the two
+ * instructions it is about to replace are the two it expects. Patching a byte
+ * pattern rather than a byte address is what keeps this from corrupting some
+ * other title's unrelated function. */
+TITLE_ADDR(a_draw_text, "PAD_SCREEN_FN", 0x3afbc8u)
 
-static int textpage_title_ok(void)
+#define SCREEN_INSN0 0xe92d4ff0u    /* push {r4,r5,r6,r7,r8,r9,sl,fp,lr} */
+#define SCREEN_INSN1 0xe24dd01cu    /* sub  sp, sp, #28                  */
+
+#define PAD_PROT_READ  1
+#define PAD_PROT_WRITE 2
+#define PAD_PROT_EXEC  4
+int mprotect(void *addr, unsigned long len, int prot);
+
+/* One page of our own BSS, made executable, to hold the generated trampoline.
+ * A static buffer rather than mmap() because this file interposes mmap. */
+static unsigned screen_tramp[1024] __attribute__((aligned(4096)));
+
+/* Called from the trampoline with r0 = the string about to be drawn.
+ *
+ * DEDUPED, because a screen redraws its text every frame and an undeduped
+ * hook here is the ~450-writes-a-second log flood this file warns about at
+ * the top. A 64-entry ring is enough that a static screen prints its lines
+ * once, while a screen CHANGE still shows up immediately as new lines. */
+__attribute__((noinline, used))
+static void screen_note(const char *s)
 {
-    static int ok = -1;
-    static const char want[] = "stranger_things_le";
-    const char *g;
-    int i;
-    if (ok != -1) return ok;
-    if (getenv("PAD_TEXTPAGE_BASE")) { ok = 1; return ok; }  /* told explicitly */
-    g = getenv("PAD_GAME");
-    ok = 0;
-    if (!g) return ok;
-    for (i = 0; want[i]; i++) if (g[i] != want[i]) return ok;
-    ok = g[i] == 0;
-    return ok;
+    static char seen[64][80];
+    static int nseen, head, total, capped, busy;
+    char m[200];
+    int i, j, n;
+
+    if (busy) return;                  /* never re-enter through logmsg */
+    busy = 1;
+    if (!s || !addr_readable(s)) { busy = 0; return; }
+    for (n = 0; n < 79 && s[n] >= 32 && s[n] < 127; n++) ;
+    if (n < 1) { busy = 0; return; }   /* empty or non-printable: not text */
+
+    for (i = 0; i < nseen; i++) {
+        for (j = 0; j < n && seen[i][j] == s[j]; j++) ;
+        if (j == n && seen[i][n] == 0) { busy = 0; return; }   /* already said */
+    }
+    for (j = 0; j < n; j++) seen[head][j] = s[j];
+    seen[head][n] = 0;
+    head = (head + 1) & 63;
+    if (nseen < 64) nseen++;
+
+    if (++total > 500) {
+        if (!capped) {
+            capped = 1;
+            logmsg("[screen] 500 distinct lines logged; suppressing the rest\n");
+        }
+        busy = 0;
+        return;
+    }
+    snprintf(m, sizeof m, "[screen] %lu ms: %s\n", pad_ms(), seen[(head - 1) & 63]);
+    logmsg(m);
+    busy = 0;
 }
 
-/* One page -> printable runs. Returns the number of characters emitted. */
-static unsigned textpage_scan(unsigned page, char *out, unsigned cap)
+static void screen_install(void)
 {
-    const unsigned char *p = (const unsigned char *)(unsigned long)page;
-    unsigned i, k = 0, run = 0;
-    char word[80];
-    for (i = 0; i < 0x1000 && k < cap - 90; i++) {
-        unsigned char c = p[i];
-        if (c >= 32 && c < 127) {
-            if (run < sizeof word - 1) word[run++] = (char)c;
-        } else {
-            if (run >= 4) {                       /* 4+ chars = real text */
-                word[run] = 0;
-                k += (unsigned)snprintf(out + k, cap - k, "%s%s",
-                                        k ? " | " : "", word);
-            }
-            run = 0;
-        }
-    }
-    if (run >= 4 && k < cap - 90) {
-        word[run] = 0;
-        k += (unsigned)snprintf(out + k, cap - k, "%s%s", k ? " | " : "", word);
-    }
-    return k;
-}
+    static int done;
+    volatile unsigned *p;
+    unsigned fn, page, *t;
+    char m[220];
 
-static void textpage_dump(void)
-{
-    static int every = -1, n;
-    static char last[600];
-    static int said_shape;
-    char cur[600], m[760];
-    unsigned base, idxa, idx, page, k = 0, j;
+    if (done) return;
+    done = 1;
+    if (!getenv("PAD_SCREEN")) return;
 
-    if (every == -1) {
-        char *p = getenv("PAD_TEXTPAGE");
-        int v = 0;
-        while (p && *p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
-        every = v;
-        if (every > 0 && !textpage_title_ok()) {
-            logmsg("[textpage] refusing to run: 0x7c0114/0x7de194 are "
-                   "stranger_things addresses and this is not that title. "
-                   "Set PAD_TEXTPAGE_BASE/PAD_TEXTPAGE_IDX to use it here.\n");
-            every = 0;
-        }
-    }
-    if (every <= 0) return;
-    if (++n % every) return;
-
-    base = a_textpage_base();
-    idxa = a_textpage_idx();
-    /* SAY WHY WHEN THERE IS NOTHING TO SAY. The first cut of this probe had
-     * silent early-returns and produced a completely empty log, which is the
-     * same failure it exists to end: an instrument that cannot explain its own
-     * silence is indistinguishable from a broken one. One line, once. */
-    if (!base || !idxa) {
-        static int said;
-        if (!said) {
-            said = 1;
-            snprintf(m, sizeof m, "[textpage] not readable: base=0x%08x idx-addr=0x%08x "
-                     "(0 means addr_readable said no)\n", base, idxa);
-            logmsg(m);
-        }
-        return;
-    }
-    idx = *(const unsigned *)(unsigned long)idxa;
-    /* The first cut bounded this at 15 on no evidence and threw away the real
-     * value: stranger_things reads 16 here, which is a perfectly good page
-     * number (page 0x7d0114). Bound it only loosely enough to refuse obvious
-     * garbage - addr_readable() is the real guard. */
-    if (idx > 255u) {
-        static int said;
-        if (!said) {
-            said = 1;
-            snprintf(m, sizeof m, "[textpage] index at 0x%08x reads %u (0x%08x), "
-                     "which is not a page number - wrong address, or the page is "
-                     "selected another way\n", idxa, idx, idx);
-            logmsg(m);
-        }
-        return;
-    }
-    page = base + (idx << 12);
-    if (!addr_readable((const void *)(unsigned long)page)) {
-        static int said;
-        if (!said) {
-            said = 1;
-            snprintf(m, sizeof m, "[textpage] page 0x%08x (base 0x%08x idx %u) "
-                     "is not readable\n", page, base, idx);
-            logmsg(m);
-        }
-        return;
-    }
-
-    cur[0] = 0;
-    k = textpage_scan(page, cur, sizeof cur);
-
-    if (!k) {
-        /* No printable run. Say so ONCE with the evidence needed to decode the
-         * encoding, rather than silently reporting an empty screen forever. */
-        if (!said_shape) {
-            const unsigned char *p = (const unsigned char *)(unsigned long)page;
-            unsigned nz = 0;
-            said_shape = 1;
-            k = (unsigned)snprintf(m, sizeof m,
-                    "[textpage] page 0x%08x (idx %u) holds no printable run - "
-                    "first non-zero bytes:", page, idx);
-            for (j = 0; j < 0x1000 && nz < 32 && k < sizeof m - 8; j++)
-                if (p[j]) { k += (unsigned)snprintf(m + k, sizeof m - k, " %02x", p[j]); nz++; }
-            snprintf(m + k, sizeof m - k, "%s\n", nz ? "" : " (page is all zero)");
-            logmsg(m);
-        }
-        return;
-    }
-    for (j = 0; j < sizeof last && (last[j] || cur[j]); j++)
-        if (last[j] != cur[j]) break;
-    if (j < sizeof last && (last[j] || cur[j])) {       /* changed */
-        for (j = 0; j < sizeof last; j++) { last[j] = cur[j]; if (!cur[j]) break; }
-        snprintf(m, sizeof m, "[textpage] %lu ms idx %u: %s\n", pad_ms(), idx, cur);
+    fn = a_draw_text();
+    if (!fn || !addr_readable((const void *)(unsigned long)fn)) {
+        snprintf(m, sizeof m, "[screen] not hooking: draw address 0x%08x is "
+                 "unreadable (0 means addr_readable said no)\n", fn);
         logmsg(m);
+        return;
     }
+    p = (volatile unsigned *)(unsigned long)fn;
+    if (p[0] != SCREEN_INSN0 || p[1] != SCREEN_INSN1) {
+        snprintf(m, sizeof m, "[screen] not hooking 0x%08x: expected %08x %08x, "
+                 "found %08x %08x - wrong title, or the renderer moved. Set "
+                 "PAD_SCREEN_FN to this title's text blitter.\n",
+                 fn, SCREEN_INSN0, SCREEN_INSN1, p[0], p[1]);
+        logmsg(m);
+        return;
+    }
+
+    /* The trampoline. Byte offsets matter: `ldr rX,[pc,#n]` reads from the
+     * instruction's own address + 8 + n, so t[1] reaching t[8] is #20 and
+     * t[6] reaching t[9] is #4. */
+    t = screen_tramp;
+    t[0] = 0xe92d500fu;   /* push {r0,r1,r2,r3,ip,lr}   - 24 bytes, stays 8-aligned */
+    t[1] = 0xe59fc014u;   /* ldr  ip, [pc, #20]         -> t[8], &screen_note */
+    t[2] = 0xe12fff3cu;   /* blx  ip                    - r0 is already the string */
+    t[3] = 0xe8bd500fu;   /* pop  {r0,r1,r2,r3,ip,lr}   - args and lr restored */
+    t[4] = p[0];          /* the relocated prologue, read not assumed */
+    t[5] = p[1];
+    t[6] = 0xe59ff004u;   /* ldr  pc, [pc, #4]          -> t[9], fn + 8 */
+    t[7] = 0u;            /* never executed */
+    t[8] = (unsigned)(unsigned long)&screen_note;
+    t[9] = fn + 8u;
+
+    if (mprotect(screen_tramp, sizeof screen_tramp,
+                 PAD_PROT_READ | PAD_PROT_WRITE | PAD_PROT_EXEC) != 0) {
+        logmsg("[screen] not hooking: mprotect of the trampoline failed\n");
+        return;
+    }
+    page = fn & ~0xfffu;   /* two pages: the 8 bytes may straddle a boundary */
+    if (mprotect((void *)(unsigned long)page, 0x2000,
+                 PAD_PROT_READ | PAD_PROT_WRITE | PAD_PROT_EXEC) != 0) {
+        snprintf(m, sizeof m, "[screen] not hooking: mprotect of 0x%08x failed\n", page);
+        logmsg(m);
+        return;
+    }
+    p[1] = (unsigned)(unsigned long)screen_tramp;   /* literal BEFORE the branch */
+    p[0] = 0xe51ff004u;                             /* ldr pc, [pc, #-4] */
+    __builtin___clear_cache((char *)screen_tramp,
+                            (char *)screen_tramp + sizeof screen_tramp);
+    __builtin___clear_cache((char *)(unsigned long)fn, (char *)(unsigned long)fn + 8);
+
+    snprintf(m, sizeof m, "[screen] hooked 0x%08x -> trampoline %p, resuming at "
+             "0x%08x. Every line of text this game draws will be logged once.\n",
+             fn, (void *)screen_tramp, fn + 8u);
+    logmsg(m);
+}
+
+/* ── PAD_NO_COUNTRY_GATE=1 ────────────────────────────────────────────────
+ *
+ * A DIAGNOSTIC, NOT A FIX, and off unless asked for. 0x3c9658 is
+ * stranger_things' country-refusal screen: it draws message ids 767..770
+ * ("THIS MACHINE WILL NOT" / "OPERATE IN THIS COUNTRY" / "PLEASE" / "CONTACT
+ * YOUR DISTRIBUTOR" - exactly the screen David photographed) and then spins
+ * forever at 0x3c9704. It never returns, so reaching it is terminal.
+ *
+ * Making it `bx lr` answers one question a dip sweep cannot: is the country
+ * gate the LAST thing standing between this rig and an attract mode, or only
+ * the first of several? It does not make the country right, and a run with
+ * this set is not evidence that anything is fixed. */
+TITLE_ADDR(a_country_screen, "PAD_COUNTRY_FN", 0x3c9658u)
+#define COUNTRY_INSN0 0xe92d4070u   /* push {r4, r5, r6, lr} */
+
+static void country_gate_bypass(void)
+{
+    static int done;
+    volatile unsigned *p;
+    unsigned fn, page;
+    char m[220];
+
+    if (done) return;
+    done = 1;
+    if (!getenv("PAD_NO_COUNTRY_GATE")) return;
+
+    fn = a_country_screen();
+    if (!fn || !addr_readable((const void *)(unsigned long)fn)) {
+        snprintf(m, sizeof m, "[country] not patching: 0x%08x unreadable\n", fn);
+        logmsg(m);
+        return;
+    }
+    p = (volatile unsigned *)(unsigned long)fn;
+    if (p[0] != COUNTRY_INSN0) {
+        snprintf(m, sizeof m, "[country] not patching 0x%08x: expected %08x, "
+                 "found %08x - wrong title or wrong address\n",
+                 fn, COUNTRY_INSN0, p[0]);
+        logmsg(m);
+        return;
+    }
+    page = fn & ~0xfffu;
+    if (mprotect((void *)(unsigned long)page, 0x2000,
+                 PAD_PROT_READ | PAD_PROT_WRITE | PAD_PROT_EXEC) != 0) {
+        logmsg("[country] not patching: mprotect failed\n");
+        return;
+    }
+    p[0] = 0xe12fff1eu;   /* bx lr */
+    __builtin___clear_cache((char *)(unsigned long)fn, (char *)(unsigned long)fn + 4);
+    snprintf(m, sizeof m, "[country] 0x%08x patched to return immediately. This "
+             "HIDES the refusal screen, it does not set a country.\n", fn);
+    logmsg(m);
 }
 
 static void nb_maybe_dump(void)
@@ -8157,7 +8228,12 @@ long shim_write(int fd, const void *b, unsigned long n)
         nb_maybe_poke();
         nb_watch_flags();
         nb_force_status();      /* item 52: readiness-gate test (per TX) */
-        textpage_dump();        /* item 52: what is actually on the glass */
+        /* item 52: what is actually on the glass. Both install once and then
+         * cost a load and a branch; the hook does the reporting from then on.
+         * Here rather than in a constructor because the node bus is the first
+         * thing this file is certain the game has reached. */
+        screen_install();
+        country_gate_bypass();
         nb_maybe_dump();
         alert_maybe_dump();
         val_maybe_dump();

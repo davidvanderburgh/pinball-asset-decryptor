@@ -230,15 +230,68 @@ These have each been violated at least once and each cost a run or a window:
       the draw call `0x3afd64` (`3c965c movw r4,#0xe194 / 3c9664 movt r4,#0x7d
       / 3c967c ldr r1,[r4] / 3c9690 bl 3afd64`), i.e. a context/handle, value
       16. So the glyphs are written wherever `0x3afd64` puts them.
-      **NEXT: read `0x3afd64`** (the draw-one-message call used by both screen
-      renderers, args: r0 = message id, r1 = `*(0x7de194)`, r2/r3 = 2, plus
-      stack args) and find the buffer it writes. Point `PAD_TEXTPAGE_BASE` at
-      that and the oracle starts answering. Everything else in the probe —
-      gating, dedup, encoding fallback, self-diagnosis — is already done.
-      **Then, with the oracle working, the dip sweep is trivial:** run
-      `PAD_CAB_DIP` = 255, 31, 0 and read the screen text out of the log.
-      Static alternative to the whole sweep: decode the dip handler `0x41c970`
-      (called with arg 1..8).
+      **`0x3afd64` IS NOW READ, AND THERE IS NO CHARACTER PAGE TO POINT AT —
+      the whole page-reading premise was wrong, not just its address.**
+      ```
+      0x3afd64(id, ctx, ...):  bl 0x233330   id -> const char*   (r0 = string)
+                               r1 = 0x7c0114 + ctx<<12
+                               b  0x3afbc8
+      0x3afbc8(const char *s, target, font, flags, x, y, colour):
+                               walks s ONE BYTE AT A TIME and blits each
+                               character as a SPRITE (bl 0x440d70 / 0x440ccc)
+      ```
+      `0x7c0114 + idx<<12` is a **render-target handle** that `0x3afbc8` passes
+      straight through to the blitter. The old probe was reading a render
+      target as if it were text. No character buffer exists anywhere, so no
+      value of `PAD_TEXTPAGE_BASE` could ever have worked.
+      **THE ORACLE IS REBUILT ON THE ONLY MOMENT THE TEXT IS TEXT — entry to
+      `0x3afbc8`, where `r0` is the finished string — AND IT IS VALIDATED.**
+      `PAD_SCREEN=1` installs an inline hook there and logs every distinct line
+      the game draws. Run `stscreen`, 2026-08-17:
+      ```
+      [screen] hooked 0x003afbc8 -> trampoline 0x40873000, resuming at 0x003afbd0
+      [screen] 23367 ms: THIS MACHINE WILL NOT
+      [screen] 23367 ms: OPERATE IN THIS COUNTRY
+      [screen] 23367 ms: PLEASE
+      [screen] 23367 ms: CONTACT YOUR DISTRIBUTOR
+      ```
+      **That is exactly the screen David photographed, so the instrument is
+      checked against known truth rather than trusted.** Message ids 767..770
+      decode to those same four strings, independently.
+      Why `0x3afbc8` and not `0x3afd64`: the whole wrapper family funnels
+      there — `0x3afd64` (by message id), `0x3afdec`/`0x3afe58`/`0x3afed4`/
+      `0x3aff3c` (vsprintf first, so counts and node numbers are already
+      substituted) and `0x3afebc` (raw string). **The LOCATING renderer
+      `0x3db054` uses `0x3afebc` and `0x3afdec` and calls `0x3afd64` ZERO
+      times** — hooking `0x3afd64`, which is what the last entry proposed,
+      would have silently missed it. The hook refuses to patch unless the two
+      instructions it is replacing are the two it expects, so it is a byte
+      PATTERN match, not a byte address.
+      **Two things the oracle established on its first run:**
+      • Those four lines are the **only** text ST draws in three minutes. It
+        reaches the gate at 23.4 s and draws nothing again — matching the
+        infinite loop at `0x3c9704`, which never returns.
+      • The dip sweep is no longer blind, but is now known to be the wrong
+        first move — see the bypass result below.
+      **`PAD_NO_COUNTRY_GATE=1` (diagnostic, default off) answers the question
+      a dip sweep cannot, and the answer is NO.** Patching `0x3c9658` to `bx
+      lr` hides the refusal — and the game then draws **no text at all** for
+      four minutes (20560 frames, so it is rendering, not hung). **The refusal
+      is a persistent STATE, not a one-shot screen:** the dispatcher keeps
+      selecting it and now gets an empty handler. So hiding the message cannot
+      advance the boot, and the fix must make the country VALID. Note also
+      `TX: 149` in both runs — the node bus goes quiet at the same count with
+      and without the gate, which is worth its own look.
+      **NEXT: find what the gate actually tests.** The static route is open:
+      `0x3c9658` is entry 7 of a 375-entry `{handler, attr}` **screen table at
+      `0x730ef4`** — entry 14 is `0x3db054`, the LOCATING renderer, which
+      cross-confirms what the table is. `attr`'s upper byte looks like a
+      priority: refusal `0xff` (max), LOCATING `0xf1`, its siblings
+      `0xf2/f3/f4`. The table is referenced by **no** movw/movt pair and **no**
+      literal pool, so the dispatcher reaches it some other way — find that,
+      and the country variable is one step upstream. `0x41c970` is a bare
+      `bx lr`, so the old "decode the dip handler at `0x41c970`" note was
+      pointing at a function boundary, not a handler.
       **★ DAVID, EYES ON THE GLASS, 2026-08-17: the boot now walks its NORMAL
       sequence — a "CHECK NODE BOARD 2" screen (not registered), and then
       straight to the country refusal.** Two consequences:

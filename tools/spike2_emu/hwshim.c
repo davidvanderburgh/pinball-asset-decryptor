@@ -6724,9 +6724,99 @@ TITLE_ADDR(a_draw_text, "PAD_SCREEN_FN", 0x3afbc8u)
 #define PAD_PROT_EXEC  4
 int mprotect(void *addr, unsigned long len, int prot);
 
-/* One page of our own BSS, made executable, to hold the generated trampoline.
+/* One page of our own BSS, made executable, holding the generated trampolines.
  * A static buffer rather than mmap() because this file interposes mmap. */
-static unsigned screen_tramp[1024] __attribute__((aligned(4096)));
+static unsigned pad_hook_page[1024] __attribute__((aligned(4096)));
+static int pad_hook_used;      /* trampolines handed out, 16 words each */
+
+/* INSTALL AN INLINE HOOK at `fn`, calling `logger` on every entry.
+ *
+ * Refuses unless the two instructions it is about to replace are `want0` and
+ * `want1` - a byte PATTERN match, not a byte address. That is the whole safety
+ * story: the addresses here are stranger_things', and patching some other
+ * title's unrelated function at the same offset would corrupt it silently.
+ * BOTH RELOCATED INSTRUCTIONS MUST BE PC-INDEPENDENT; every caller below has
+ * checked that by reading them.
+ *
+ * pass_lr=1 passes the CALLER's address to the logger instead of r0, which is
+ * how "who dispatches this screen?" gets answered without a debugger.
+ *
+ * The layout is fixed so one builder serves every hook. `ldr rX,[pc,#n]` reads
+ * from the instruction's own address + 8 + n, hence #20 at t[2] and #4 at t[7]. */
+static int pad_hook(unsigned fn, unsigned want0, unsigned want1,
+                    void *logger, int pass_lr, const char *tag)
+{
+    volatile unsigned *p;
+    unsigned *t, page;
+    char m[240];
+
+    if (!fn || !addr_readable((const void *)(unsigned long)fn)) {
+        snprintf(m, sizeof m, "[%s] not hooking: 0x%08x unreadable "
+                 "(0 means addr_readable said no)\n", tag, fn);
+        logmsg(m);
+        return 0;
+    }
+    p = (volatile unsigned *)(unsigned long)fn;
+    if (p[0] != want0 || p[1] != want1) {
+        snprintf(m, sizeof m, "[%s] not hooking 0x%08x: expected %08x %08x, "
+                 "found %08x %08x - wrong title, the function moved, or it is "
+                 "already hooked\n", tag, fn, want0, want1, p[0], p[1]);
+        logmsg(m);
+        return 0;
+    }
+    if ((pad_hook_used + 1) * 16 > 1024) {
+        snprintf(m, sizeof m, "[%s] not hooking: trampoline page full\n", tag);
+        logmsg(m);
+        return 0;
+    }
+    t = pad_hook_page + pad_hook_used * 16;
+    pad_hook_used++;
+
+    t[0] = 0xe92d500fu;   /* push {r0,r1,r2,r3,ip,lr}  - 24 bytes, stays 8-aligned */
+    t[1] = pass_lr ? 0xe1a0000eu   /* mov r0, lr - lr is still the CALLER's here */
+                   : 0xe1a00000u;  /* nop        - r0 is already the argument    */
+    /* ...and the ENTRY sp as the second argument, which is how a logger walks
+     * past a generic thunk. The refusal screen's immediate caller turned out to
+     * be `push {r3,lr}; blx r1; pop {r3,pc}` - an invoke-through-a-pointer used
+     * by every screen - so `lr` alone names the adapter, never the dispatcher.
+     * With the entry sp the logger can read the frame the thunk pushed. */
+    t[2] = pass_lr ? 0xe28d1018u   /* add r1, sp, #24 - undo our own push */
+                   : 0xe1a00000u;  /* nop */
+    t[3] = 0xe59fc014u;   /* ldr ip, [pc, #20]   -> t[10], the logger */
+    t[4] = 0xe12fff3cu;   /* blx ip - interworks, so ARM or Thumb both fine */
+    t[5] = 0xe8bd500fu;   /* pop  {r0,r1,r2,r3,ip,lr} - args and lr restored */
+    t[6] = p[0];          /* the relocated prologue, read rather than assumed */
+    t[7] = p[1];
+    t[8] = 0xe59ff004u;   /* ldr pc, [pc, #4]    -> t[11], fn + 8 */
+    t[9] = 0u;            /* never executed */
+    t[10] = (unsigned)(unsigned long)logger;
+    t[11] = fn + 8u;
+
+    if (mprotect(pad_hook_page, sizeof pad_hook_page,
+                 PAD_PROT_READ | PAD_PROT_WRITE | PAD_PROT_EXEC) != 0) {
+        snprintf(m, sizeof m, "[%s] not hooking: mprotect of the trampoline "
+                 "page failed\n", tag);
+        logmsg(m);
+        return 0;
+    }
+    page = fn & ~0xfffu;   /* two pages: the 8 bytes may straddle a boundary */
+    if (mprotect((void *)(unsigned long)page, 0x2000,
+                 PAD_PROT_READ | PAD_PROT_WRITE | PAD_PROT_EXEC) != 0) {
+        snprintf(m, sizeof m, "[%s] not hooking: mprotect of 0x%08x failed\n",
+                 tag, page);
+        logmsg(m);
+        return 0;
+    }
+    p[1] = (unsigned)(unsigned long)t;   /* the literal BEFORE the branch */
+    p[0] = 0xe51ff004u;                  /* ldr pc, [pc, #-4] */
+    __builtin___clear_cache((char *)t, (char *)(t + 16));
+    __builtin___clear_cache((char *)(unsigned long)fn, (char *)(unsigned long)fn + 8);
+
+    snprintf(m, sizeof m, "[%s] hooked 0x%08x -> trampoline %p, resuming at "
+             "0x%08x\n", tag, fn, (void *)t, fn + 8u);
+    logmsg(m);
+    return 1;
+}
 
 /* Called from the trampoline with r0 = the string about to be drawn.
  *
@@ -6773,68 +6863,12 @@ static void screen_note(const char *s)
 static void screen_install(void)
 {
     static int done;
-    volatile unsigned *p;
-    unsigned fn, page, *t;
-    char m[220];
-
     if (done) return;
     done = 1;
     if (!getenv("PAD_SCREEN")) return;
-
-    fn = a_draw_text();
-    if (!fn || !addr_readable((const void *)(unsigned long)fn)) {
-        snprintf(m, sizeof m, "[screen] not hooking: draw address 0x%08x is "
-                 "unreadable (0 means addr_readable said no)\n", fn);
-        logmsg(m);
-        return;
-    }
-    p = (volatile unsigned *)(unsigned long)fn;
-    if (p[0] != SCREEN_INSN0 || p[1] != SCREEN_INSN1) {
-        snprintf(m, sizeof m, "[screen] not hooking 0x%08x: expected %08x %08x, "
-                 "found %08x %08x - wrong title, or the renderer moved. Set "
-                 "PAD_SCREEN_FN to this title's text blitter.\n",
-                 fn, SCREEN_INSN0, SCREEN_INSN1, p[0], p[1]);
-        logmsg(m);
-        return;
-    }
-
-    /* The trampoline. Byte offsets matter: `ldr rX,[pc,#n]` reads from the
-     * instruction's own address + 8 + n, so t[1] reaching t[8] is #20 and
-     * t[6] reaching t[9] is #4. */
-    t = screen_tramp;
-    t[0] = 0xe92d500fu;   /* push {r0,r1,r2,r3,ip,lr}   - 24 bytes, stays 8-aligned */
-    t[1] = 0xe59fc014u;   /* ldr  ip, [pc, #20]         -> t[8], &screen_note */
-    t[2] = 0xe12fff3cu;   /* blx  ip                    - r0 is already the string */
-    t[3] = 0xe8bd500fu;   /* pop  {r0,r1,r2,r3,ip,lr}   - args and lr restored */
-    t[4] = p[0];          /* the relocated prologue, read not assumed */
-    t[5] = p[1];
-    t[6] = 0xe59ff004u;   /* ldr  pc, [pc, #4]          -> t[9], fn + 8 */
-    t[7] = 0u;            /* never executed */
-    t[8] = (unsigned)(unsigned long)&screen_note;
-    t[9] = fn + 8u;
-
-    if (mprotect(screen_tramp, sizeof screen_tramp,
-                 PAD_PROT_READ | PAD_PROT_WRITE | PAD_PROT_EXEC) != 0) {
-        logmsg("[screen] not hooking: mprotect of the trampoline failed\n");
-        return;
-    }
-    page = fn & ~0xfffu;   /* two pages: the 8 bytes may straddle a boundary */
-    if (mprotect((void *)(unsigned long)page, 0x2000,
-                 PAD_PROT_READ | PAD_PROT_WRITE | PAD_PROT_EXEC) != 0) {
-        snprintf(m, sizeof m, "[screen] not hooking: mprotect of 0x%08x failed\n", page);
-        logmsg(m);
-        return;
-    }
-    p[1] = (unsigned)(unsigned long)screen_tramp;   /* literal BEFORE the branch */
-    p[0] = 0xe51ff004u;                             /* ldr pc, [pc, #-4] */
-    __builtin___clear_cache((char *)screen_tramp,
-                            (char *)screen_tramp + sizeof screen_tramp);
-    __builtin___clear_cache((char *)(unsigned long)fn, (char *)(unsigned long)fn + 8);
-
-    snprintf(m, sizeof m, "[screen] hooked 0x%08x -> trampoline %p, resuming at "
-             "0x%08x. Every line of text this game draws will be logged once.\n",
-             fn, (void *)screen_tramp, fn + 8u);
-    logmsg(m);
+    if (pad_hook(a_draw_text(), SCREEN_INSN0, SCREEN_INSN1,
+                 (void *)&screen_note, 0, "screen"))
+        logmsg("[screen] every line of text this game draws will be logged once\n");
 }
 
 /* ── PAD_NO_COUNTRY_GATE=1 ────────────────────────────────────────────────
@@ -6850,7 +6884,53 @@ static void screen_install(void)
  * the first of several? It does not make the country right, and a run with
  * this set is not evidence that anything is fixed. */
 TITLE_ADDR(a_country_screen, "PAD_COUNTRY_FN", 0x3c9658u)
-#define COUNTRY_INSN0 0xe92d4070u   /* push {r4, r5, r6, lr} */
+#define COUNTRY_INSN0 0xe92d4070u   /* push {r4, r5, r6, lr}  */
+#define COUNTRY_INSN1 0xe30e4194u   /* movw r4, #0xe194       */
+
+/* PAD_COUNTRY_TRACE=1: log WHO dispatches the refusal screen.
+ *
+ * This is the one question blocking item 52 and static reading could not
+ * answer it. 0x3c9658 is entry 7 of the 375-entry {handler, attr} screen table
+ * at 0x730ef4 (entry 14 is 0x3db054, the LOCATING renderer, which is what
+ * confirms the table), but the table is referenced by NO movw/movt pair and NO
+ * literal pool, so the dispatcher is not findable by grep. It IS findable by
+ * asking the running game: hook the screen and report the caller. The country
+ * test is one step upstream of whatever that turns out to be. */
+__attribute__((noinline, used))
+static void country_note(unsigned caller, const unsigned *entry_sp)
+{
+    static int said;
+    char m[300];
+    unsigned k = 0, i;
+    if (said) return;              /* the dispatcher calls this every frame */
+    said = 1;
+    k = (unsigned)snprintf(m, sizeof m, "[country] refusal screen entered at "
+            "%lu ms, lr=0x%08x", pad_ms(), caller);
+    /* The immediate caller is the generic `blx r1` thunk, so print the words
+     * it pushed too: [sp+4] is ITS return address, i.e. the dispatcher. The
+     * rest is printed raw rather than guessed at - a wrong frame walk that
+     * looks confident is worse than eight honest words. */
+    if (entry_sp && addr_readable(entry_sp)) {
+        k += (unsigned)snprintf(m + k, sizeof m - k, " sp=[");
+        for (i = 0; i < 8 && k < sizeof m - 16; i++)
+            k += (unsigned)snprintf(m + k, sizeof m - k, "%s%08x",
+                                    i ? " " : "", entry_sp[i]);
+        snprintf(m + k, sizeof m - k, "]\n");
+    } else {
+        snprintf(m + k, sizeof m - k, " (entry sp unreadable)\n");
+    }
+    logmsg(m);
+}
+
+static void country_trace(void)
+{
+    static int done;
+    if (done) return;
+    done = 1;
+    if (!getenv("PAD_COUNTRY_TRACE")) return;
+    pad_hook(a_country_screen(), COUNTRY_INSN0, COUNTRY_INSN1,
+             (void *)&country_note, 1, "country");
+}
 
 static void country_gate_bypass(void)
 {
@@ -8233,6 +8313,7 @@ long shim_write(int fd, const void *b, unsigned long n)
          * Here rather than in a constructor because the node bus is the first
          * thing this file is certain the game has reached. */
         screen_install();
+        country_trace();
         country_gate_bypass();
         nb_maybe_dump();
         alert_maybe_dump();

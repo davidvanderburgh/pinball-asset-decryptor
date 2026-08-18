@@ -282,7 +282,54 @@ These have each been violated at least once and each cost a run or a window:
       advance the boot, and the fix must make the country VALID. Note also
       `TX: 149` in both runs — the node bus goes quiet at the same count with
       and without the gate, which is worth its own look.
-      **NEXT: find what the gate actually tests.** The static route is open:
+      **THE COUNTRY IS AN EEPROM ADJUSTMENT, NOT A DIP, AND THE SEED IS THE
+      BUG.** `COUNTRY CODE` is message id 1294 (string `0x53cabc`) and no code
+      loads 1294 as an immediate — it is a service-menu **adjustment**, so it
+      lives in the EEPROM. The EEPROM went per-title earlier today for exactly
+      this reason, but `nv_load()` **seeds a missing per-title file from the
+      shared `/data/nvram.bin`, which is godzilla's**. So ST has been reading
+      godzilla's bytes at ST's `COUNTRY CODE` offset the whole time — from its
+      own copy of them. **The seed reproduced the corruption the split was
+      meant to fix.** `/data/nvram-stranger_things_le.bin` (19:09) is a copy of
+      godzilla's `nvram.bin` (18:21).
+      **A BLANK EEPROM DOES NOT BOOT — this is a NEW, separate defect.**
+      Moving the file aside and running `PAD_NV_BLANK=1`:
+      ```
+      [i2c] no saved NVRAM at /data/nvram-stranger_things_le.bin, starting blank
+      terminate called after throwing an instance of 'cereal::Exception'
+        what():  Trying to load an unregistered polymorphic type (Bitmap).
+      qemu: uncaught target signal 6 (Aborted)
+      ```
+      1029 lines, **TX 0, no frames, no hook** — it dies before the node bus
+      starts. Measured against the same session's runs, this is new, not
+      pre-existing-and-caught: `stscreen` and `stnogate` have **zero** cereal
+      throws and zero `terminate`; `stblank` has one of each. The EEPROM has
+      been RESTORED, so the rig is bootable again.
+      **Why that matters:** the RTTI name **`26MenuPageGuidedSetupCountry`** is
+      in the binary — there is a **guided-setup page that asks for the
+      country**. So the intended flow on a fresh machine is setup-asks-operator,
+      and the two observations join up:
+      | EEPROM | what happens |
+      |---|---|
+      | godzilla's bytes (today's default) | looks configured, country invalid → refusal screen |
+      | blank | guided setup → **crashes** loading a Bitmap through cereal |
+      Neither path reaches a country, which is why nothing tried so far has
+      moved it. **The fix is one of: write a valid COUNTRY CODE into ST's
+      EEPROM, or make guided setup survive.** Do NOT keep sweeping
+      `PAD_CAB_DIP` — the cabinet dips are not where this value lives.
+      **SCREENS ARE FIBERS, so the dispatcher is not findable by stack walk.**
+      `PAD_COUNTRY_TRACE=1` hooks `0x3c9658` and reports its caller:
+      `lr=0x003dadac`, which is a generic thunk (`push {r3,lr}; blx r1; pop
+      {r3,pc}`) used by every screen. Passing the entry `sp` too and reading the
+      frame it pushed gives `[sp+4] = 0x00467930` — **inside `setcontext`**. The
+      handler is entered through a `makecontext` trampoline, so the code that
+      SELECTED screen 7 was never on this stack and no frame walk will reach it.
+      That also explains why the screen table has no code reference at all.
+      **NEXT: read the guided-setup path, not the dispatcher.** Find the vtable
+      for `MenuPageGuidedSetupCountry`; it leads to the adjustment's EEPROM
+      offset, which is the one number needed to write a valid country directly.
+      The cereal/Bitmap abort on a blank EEPROM deserves its own item.
+      **Superseded lead (kept so it is not re-chased):** the static route below
       `0x3c9658` is entry 7 of a 375-entry `{handler, attr}` **screen table at
       `0x730ef4`** — entry 14 is `0x3db054`, the LOCATING renderer, which
       cross-confirms what the table is. `attr`'s upper byte looks like a

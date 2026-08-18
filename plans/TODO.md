@@ -84,1469 +84,6 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **52. stranger_things wedges on LOCATING NODE BOARDS while its
-      projector plays. NOT, as this item used to say, "nodes 1, 8 and 9 are
-      the only boards it cannot find" — that reading is disproved below.**
-      `S2 D4` ← IN PROGRESS
-      **★★★ 2026-08-17, EYES ON THE GLASS: THE NODE-BOARD WEDGE IS CLEARED.
-      David ran this branch's rig and stranger_things no longer shows LOCATING
-      NODE BOARDS. It shows `THIS MACHINE WILL NOT OPERATE IN THIS COUNTRY /
-      PLEASE CONTACT YOUR DISTRIBUTOR` — a different, LATER screen.** That is
-      the acceptance this item has wanted since it opened, and it confirms the
-      log prediction made an hour earlier (new LCD scenes `5b2d86be` /
-      `60ed7e50`, which no wedged run ever reached). The fix that did it is the
-      `sw_find` pacing change (`d2169db`): the discovery-schedule verdict used
-      to take 1024 bus frames (~178 s) and now lands in the first 32.
-      **What remains is a DIFFERENT problem and arguably a different item:** the
-      `COUNTRY CODE` adjustment (string `0x53cabc`, sitting beside
-      `GUIDED SETUP` / `START GUIDED SETUP`). That is an OPERATOR SETTING, not a
-      node-bus fault — a real machine sets it in the service menu.
-      **Measured, and it rules out "just factory-reset it": a BLANK EEPROM does
-      not boot** — the guest takes `uncaught target signal 6 (Aborted)` ~1000
-      log lines in. The machine identity in that EEPROM is required, so the
-      country code must be SET, not cleared.
-      **Latent bug found and fixed on the way (`ee033b9`):** the shim's i2c
-      EEPROM was ONE file, `/data/nvram.bin`, shared by every title, while the
-      game's own stores under `/data/nv/<title>/` were already per-title. Now
-      `/data/nvram-<title>.bin`, seeded from the shared file on first use so no
-      settings or high scores are lost (`PAD_NV_BLANK=1` skips the seed).
-      **Not established:** whether the country screen was CAUSED by cross-title
-      pollution (my godzilla regression runs wrote that shared EEPROM) or is
-      simply the next gate, newly reachable and never configured. The simpler
-      story is likelier. A backup of the pre-change EEPROM is at
-      `/home/david/spike2root/data/nvram.bin.bak-20260817`.
-      **★ DAVID ASKED WHETHER COUNTRY IS A HARDWARE DIP, AND HE IS RIGHT — WHICH
-      MOVES THE SUSPECT FROM THE EEPROM TO MY OWN CABINET FALLBACK.**
-      Evidence: hwshim's own comment records that **switch ids 17..33 are "DIPs
-      and service buttons, which are not on any node board"** — they arrive on
-      the CABINET switch input (SPI), not the node bus. The ST ROM contains NO
-      `DIP SWITCH` / `JUMPER` / `REGION` strings at all; `COUNTRY CODE`
-      (`0x53cabc`, message id 1294) is only the menu's NAME for what those
-      inputs produce. The refusal screen itself is drawn by `0x3c9658` (message
-      ids 767/768/769/770), reached through the dispatch table at `0x728f2c`.
-      **The uncomfortable part: ST is being handed a GODZILLA-SHAPED CONSTANT
-      for those bits, by the item-52 cabinet fallback in this very branch.**
-      Measured across runs: ST logs `[cabspi] this title has no findable switch
-      table: handing the game the platform AT-REST cabinet word
-      ff0f0f0000000000`, while godzilla logs the same BITS with no such line —
-      godzilla builds that word from its OWN switch table. So godzilla is happy
-      with those bits because they are literally godzilla's at-rest word, and if
-      ST numbers its cabinet switches differently the identical bits decode to a
-      different, unacceptable country. **The country ST reads is therefore very
-      likely an artefact of this rig, not a setting anyone chose.**
-      **▼ SUPERSEDED 2026-08-18 — DO NOT FOLLOW THIS PLAN.** Step (1) below is
-      now disproved: `COUNTRY CODE` is message id 1294 and nothing loads it as an
-      immediate, so it is an ADJUSTMENT, not a dip, and a `PAD_NV_POKE` of the
-      whole EEPROM read-region changed nothing either. The live plan is the
-      "NEXT, in order" block later in this item. Kept only so the sweep is not
-      re-attempted.
-      *(superseded text follows)* **NEXT, in order of cost:** (1) add a `PAD_CAB_BITS=<hex>` override for the
-      synthetic word and sweep the DIP bits until the refusal clears — cheap,
-      and it also proves the mechanism; (2) drive the service menu / guided setup
-      as an operator would (`COUNTRY CODE` is a menu adjustment, so it may be
-      settable without touching the bits); (3) the real cure, which is the
-      original blocker: get ST's switch table to resolve, after which the
-      cabinet word is built from ST's own data and no constant is involved.
-      Country name strings (`USA`, `CANADA`, `FRANCE`, `JAPAN`, `SPAIN`) sit
-      around file offset 5446264-5452536 if a value table is needed.
-      **NOT established:** that the EEPROM had anything to do with this. The
-      per-title EEPROM change (`ee033b9`) is still correct on its own merits.
-      **★★★ ST'S OWN SWITCH TABLE IS FOUND (2026-08-17, 13-agent RE workflow,
-      four routes, every claim adversarially verified). ST DOES NOT USE
-      GODZILLA'S LAYOUT AT ALL — which is why the finder rejected everything.**
-      | thing | ST |
-      |---|---|
-      | switch entry array | `*(0x724608)` = `0x758324`, **stride 44**, accessor `0x1bf068` |
-      | count global | `0x7bc86c` = **100** slots → ids 1..99 real, slot 0 = INVALID dummy |
-      | entry fields | `+0` → state object (**state = byte at `[ptr]+1`**), `+24` u16 operator number, `+26` u16 **device index**, `+32` u16 cfg (**bit `0x04` = polarity**; clear ⇒ active low) |
-      | node + bit | NOT in the entry — via device table `*(0x7260b8)` = `0x759454`, stride 24, count `*(0x7e03dc)` = 459, accessor `0x41f598`; device `+16` = node-directory ordinal, `+18` = **bit**, `+20` = type (**7 = switch**), `+12` = name cell |
-      | node id | byte at `*(0x725aac) + ord*16 + 14` |
-      All 100 slots walked: **99 type-7 devices, 99 DISTINCT (node,bit) pairs,
-      nodes {0,1,4,8,9}** — a strict subset of ST's declared set, and every row
-      has a name. That is exactly the acceptance the finder wanted.
-      **THE NAMES THAT MATTER, and they answer David's DIP question outright:**
-      ids **17..24 = "DIP 1".."DIP 8" at NODE 0, BITS 0..7**; id 25 = node 0
-      bit 8 SERVICE SELECT (26..28 = PLUS/MINUS/BACK); id 33 = node 0 bit 23
-      COIN DOOR INTERLOCK; id 34 = node 1 bit 2 LOCKDOWN BUTTON; id 36 = node 1
-      bit 11 START BUTTON; id 65 = node 8 bit 28 SHOOTER LANE; ids 66/67 = node
-      8 bits 29/30 RIGHT/LEFT SLINGSHOT; id 69 = node 8 bit 32 TROUGH 6; ids
-      1..16 = node 4 bits 0..15 QR SCANNER STATUS (cfg `0x0024`, the only
-      active-high group).
-      **The 32-byte tables at `0x7660e4` (ids 1..128) and `0x765904` (ids
-      129..164) are a DIFFERENT object** — game-logic/service descriptors
-      (handler `+0`, arg `+4`, name `+8`, mode mask `+12`, flags `+16`), no
-      node, no bit, no state, and 82 of 164 ids are `NOT USED` filler. Three of
-      the four routes initially called these "the" switch table; they are not.
-      **⛔ DO NOT SET `PAD_SW_STRUCT`/`PAD_SW_COUNT` WITH TODAY'S CODE.** The
-      verifier ran the shim's predicates over ST's bytes: **0 of 100 entries
-      pass `sw_entry_ok`** at any stride, so there is no benefit — and three
-      named REGRESSIONS: (1) `nb_nodes_init` does not gate on `sw_find_done`,
-      so it would take the primary branch and build the node schedule from byte
-      `+20` at stride 32 = `128, 220, 5, 24, 36, …` garbage, destroying the
-      working node-directory fallback; (2) `sw_prime` writes through
-      `SW_NODEREC(0)` into ST's `.data` at `0x724624..0x724633`, armed as soon
-      as `cab_synth` clears; (3) `sw_configured_ok` rejects the address anyway.
-      **The READER must be generalised to a per-title layout descriptor first.**
-      **★ THE CHEAP HALF NEEDS NO TABLE PLUMBING: the country dips are byte 0
-      of the word this shim already synthesises.** `{0xff,0x0f,0x0f,0,...}` at
-      hwshim.c:2634 hands ST **all eight dips OPEN** — a valid at-rest level
-      carrying NO country, which is precisely the refusal screen. The rest of
-      that constant happens to fit ST too (bits 8..11 SELECT/PLUS/MINUS/BACK,
-      bit 23 COIN DOOR INTERLOCK made). **`PAD_CAB_DIP=<n>` added this pass**
-      sets dips 1..8 to `n` (active low, so `byte0 = ~n`).
-      **THE COUNTRY LIST IS DECODED — message ids 1421..1450, in index order:**
-      `0 U.S.A., 1 AUSTRIA, 2 BELGIUM, 3 CANADA 1, 4 NETHERLANDS, 5 FINLAND,
-      6 FRANCE, 7 GERMANY, 8 ITALY, 9 DENMARK, 10 NORWAY, 11 SWEDEN,
-      12 SWITZERLAND, 13 AUSTRALIA, 14 U.K., 15 GREECE, 16 NEW ZEALAND,
-      17 PORTUGAL, 18 SPAIN, 19 CHUCK-E-CHEESE, 20 SOUTH AFRICA, 21 JAPAN,
-      22 CROATIA, 23 MIDDLE EAST, 24 TAIWAN, 25 RUSSIA, 26 CANADA 2,
-      27 LITHUANIA, 28 CHINA, 29 INDONESIA`. So a country is a number 0..29,
-      and eight open dips read raw `0xff` = 255 — not a country, which fits the
-      refusal exactly.
-      **⚠ SWEEP RAN, RESULT INCONCLUSIVE — AND THE FAULT IS THE INSTRUMENT.**
-      `PAD_CAB_DIP=255` (byte0 = `0x00`, every dip MADE = raw 0 = U.S.A. if the
-      game reads the lines directly) fires correctly — `[cabdip] country dips
-      1..8 set to 255 (byte0=00, active low)` — and NOTHING MEASURABLE CHANGED.
-      **This rig has no oracle for what is on the glass:** the country message
-      is a TEXT OVERLAY drawn over video, so the LCD scene hash cannot tell it
-      apart from any other screen, and "scenes unchanged" is NOT evidence of
-      failure. No coil (`0x40`) traffic in either run, but that is equally true
-      of a machine sitting on any pre-attract screen.
-      **Two readings remain open and a blind run cannot separate them:**
-      (a) the game reads the lines RAW — `0xff` = 255 invalid, `0x00` = 0 =
-      U.S.A.; (b) the game INVERTS (made = 1) — `0xff` already means 0 =
-      U.S.A. and the refusal has another cause. Neither extreme visibly worked,
-      so the model is incomplete. A likely third shape is the classic Stern
-      split, only dips 1..5 carrying the country and 6..8 separate flags, which
-      would want `byte0 = 0xE0` i.e. **`PAD_CAB_DIP=31`**.
-      **THE SCREEN ORACLE IS BUILT (`PAD_TEXTPAGE=<frames>`, hwshim.c) AND IT
-      DISPROVED ITS OWN MODEL — which is the point of building it.** It reads
-      the game's character page, reports printable runs, dedups, refuses to run
-      on a title it has no addresses for, and — after a first cut that returned
-      silently and taught nothing — SAYS WHY when it has nothing to say.
-      Measured on ST, in order:
-      | probe said | meaning |
-      |---|---|
-      | `index at 0x7de194 reads 16` | my `idx > 15` bound was invented and threw the real value away |
-      | `page 0x7d0114 (idx 16) ... (page is all zero)` | **the `base + idx<<12` char-page model is WRONG for this screen** |
-      **Why it is wrong, and this is the lead:** `0x7c0114 + idx<<12` came from
-      the LOCATING renderer `0x3db054`. **The country screen is a DIFFERENT
-      renderer, `0x3c9658`**, and re-reading it shows `*(0x7de194)` is not a
-      page index at all — it is loaded into `r1` and passed as an ARGUMENT to
-      the draw call `0x3afd64` (`3c965c movw r4,#0xe194 / 3c9664 movt r4,#0x7d
-      / 3c967c ldr r1,[r4] / 3c9690 bl 3afd64`), i.e. a context/handle, value
-      16. So the glyphs are written wherever `0x3afd64` puts them.
-      **`0x3afd64` IS NOW READ, AND THERE IS NO CHARACTER PAGE TO POINT AT —
-      the whole page-reading premise was wrong, not just its address.**
-      ```
-      0x3afd64(id, ctx, ...):  bl 0x233330   id -> const char*   (r0 = string)
-                               r1 = 0x7c0114 + ctx<<12
-                               b  0x3afbc8
-      0x3afbc8(const char *s, target, font, flags, x, y, colour):
-                               walks s ONE BYTE AT A TIME and blits each
-                               character as a SPRITE (bl 0x440d70 / 0x440ccc)
-      ```
-      `0x7c0114 + idx<<12` is a **render-target handle** that `0x3afbc8` passes
-      straight through to the blitter. The old probe was reading a render
-      target as if it were text. No character buffer exists anywhere, so no
-      value of `PAD_TEXTPAGE_BASE` could ever have worked.
-      **THE ORACLE IS REBUILT ON THE ONLY MOMENT THE TEXT IS TEXT — entry to
-      `0x3afbc8`, where `r0` is the finished string — AND IT IS VALIDATED.**
-      `PAD_SCREEN=1` installs an inline hook there and logs every distinct line
-      the game draws. Run `stscreen`, 2026-08-17:
-      ```
-      [screen] hooked 0x003afbc8 -> trampoline 0x40873000, resuming at 0x003afbd0
-      [screen] 23367 ms: THIS MACHINE WILL NOT
-      [screen] 23367 ms: OPERATE IN THIS COUNTRY
-      [screen] 23367 ms: PLEASE
-      [screen] 23367 ms: CONTACT YOUR DISTRIBUTOR
-      ```
-      **That is exactly the screen David photographed, so the instrument is
-      checked against known truth rather than trusted.** Message ids 767..770
-      decode to those same four strings, independently.
-      Why `0x3afbc8` and not `0x3afd64`: the whole wrapper family funnels
-      there — `0x3afd64` (by message id), `0x3afdec`/`0x3afe58`/`0x3afed4`/
-      `0x3aff3c` (vsprintf first, so counts and node numbers are already
-      substituted) and `0x3afebc` (raw string). **The LOCATING renderer
-      `0x3db054` uses `0x3afebc` and `0x3afdec` and calls `0x3afd64` ZERO
-      times** — hooking `0x3afd64`, which is what the last entry proposed,
-      would have silently missed it. The hook refuses to patch unless the two
-      instructions it is replacing are the two it expects, so it is a byte
-      PATTERN match, not a byte address.
-      **Two things the oracle established on its first run:**
-      • Those four lines are the **only** text ST draws in three minutes. It
-        reaches the gate at 23.4 s and draws nothing again — matching the
-        infinite loop at `0x3c9704`, which never returns.
-      • The dip sweep is no longer blind, but is now known to be the wrong
-        first move — see the bypass result below.
-      **`PAD_NO_COUNTRY_GATE=1` (diagnostic, default off) answers the question
-      a dip sweep cannot, and the answer is NO.** Patching `0x3c9658` to `bx
-      lr` hides the refusal — and the game then draws **no text at all** for
-      four minutes (20560 frames, so it is rendering, not hung). **The refusal
-      is a persistent STATE, not a one-shot screen:** the dispatcher keeps
-      selecting it and now gets an empty handler. So hiding the message cannot
-      advance the boot, and the fix must make the country VALID. Note also
-      `TX: 149` in both runs — the node bus goes quiet at the same count with
-      and without the gate, which is worth its own look.
-      **THE COUNTRY IS AN EEPROM ADJUSTMENT, NOT A DIP.** `COUNTRY CODE` is
-      message id 1294 (string `0x53cabc`) and no code loads 1294 as an immediate
-      — it is a service-menu **adjustment**, so it lives in the EEPROM. Stop
-      sweeping `PAD_CAB_DIP`; the cabinet dips are not where this value lives.
-      **★ RETRACTION, 2026-08-18 — I BLAMED THE WRONG THING AND THE CODE
-      COMMENT SAID SO TOO.** I wrote that the shared `/data/nvram.bin` is
-      godzilla's, that ST's per-title copy was seeded from it, and that ST was
-      therefore reading another title's bytes at its `COUNTRY CODE` offset.
-      **Comparing the two files disproves all of it:**
-      | check | result |
-      |---|---|
-      | `/data/nvram.bin` @0x100 | `SPI-STR-19358604` — a **stranger_things** ident |
-      | `/data/nvram.bin` @0x150 | the string `stranger_things_le` |
-      | ST's per-title copy vs it | **16 differing bytes out of 65536** (0x10d, 0x13f..0x14d, 0x18c — a serial and two timestamps) |
-      There is **no godzilla content in that file to misread.** Cross-title
-      contamination is not the cause, and going per-title neither caused nor
-      could have fixed the refusal. The hwshim.c comment that carried the same
-      wrong attribution is corrected in place rather than deleted, because it
-      was believed long enough to aim a day's work.
-      **What the EEPROM actually shows (live i2c trace, `PAD_I2C_LOG`):** an
-      ident block at 0x100, a date at 0x1f4, and an adjustment area that is
-      **all zeros**. Reads before the refusal are `@0x1800 len=18`,
-      `@0x01f4 len=32`, `@0x0040 len=192` (polled every ~219 ms), `@0x0144
-      len=96`, `@0x0100 len=64`, `@0x1e08 len=7`. **The machine is
-      UNCONFIGURED, not mis-configured** — which fits a country stored as
-      "0 = never set" rather than "0 = U.S.A.", and fits guided setup being the
-      thing that is supposed to write it.
-      **A BLANK EEPROM DOES NOT BOOT — this is a NEW, separate defect.**
-      Moving the file aside and running `PAD_NV_BLANK=1`:
-      ```
-      [i2c] no saved NVRAM at /data/nvram-stranger_things_le.bin, starting blank
-      terminate called after throwing an instance of 'cereal::Exception'
-        what():  Trying to load an unregistered polymorphic type (Bitmap).
-      qemu: uncaught target signal 6 (Aborted)
-      ```
-      1029 lines, **TX 0, no frames, no hook** — it dies before the node bus
-      starts. Measured against the same session's runs, this is new, not
-      pre-existing-and-caught: `stscreen` and `stnogate` have **zero** cereal
-      throws and zero `terminate`; `stblank` has one of each. The EEPROM has
-      been RESTORED, so the rig is bootable again.
-      **Why that matters:** the RTTI name **`26MenuPageGuidedSetupCountry`** is
-      in the binary — there is a **guided-setup page that asks for the
-      country**. So the intended flow on a fresh machine is setup-asks-operator,
-      and the two observations join up:
-      | EEPROM | what happens |
-      |---|---|
-      | godzilla's bytes (today's default) | looks configured, country invalid → refusal screen |
-      | blank | guided setup → **crashes** loading a Bitmap through cereal |
-      Neither path reaches a country, which is why nothing tried so far has
-      moved it. **The fix is one of: write a valid COUNTRY CODE into ST's
-      EEPROM, or make guided setup survive.** Do NOT keep sweeping
-      `PAD_CAB_DIP` — the cabinet dips are not where this value lives.
-      **SCREENS ARE FIBERS, so the dispatcher is not findable by stack walk.**
-      `PAD_COUNTRY_TRACE=1` hooks `0x3c9658` and reports its caller:
-      `lr=0x003dadac`, which is a generic thunk (`push {r3,lr}; blx r1; pop
-      {r3,pc}`) used by every screen. Passing the entry `sp` too and reading the
-      frame it pushed gives `[sp+4] = 0x00467930` — **inside `setcontext`**. The
-      handler is entered through a `makecontext` trampoline, so the code that
-      SELECTED screen 7 was never on this stack and no frame walk will reach it.
-      That also explains why the screen table has no code reference at all.
-      **★ 2026-08-18 — THE SETTINGS ARE NOT IN THE i2c EEPROM AT ALL. This is
-      the redirection the item needed.**
-      `PAD_NV_POKE=<lo>[-<hi>]:<val>[,...]` (new, hwshim.c) overwrites EEPROM
-      bytes after load; it forces saves OFF for that run, so a probe cannot
-      write its own bytes over David's real settings and scores. Verified
-      empirically, not asserted: the harness md5s the file before and after and
-      reports `UNCHANGED`.
-      **Result: `PAD_NV_POKE=0-ff:01` changed NOTHING.** The refusal still
-      shows, the game still boots, 256 bytes confirmed poked. `0x40..0xFF` is
-      the only bulk region the game reads from the EEPROM, so **the country
-      decision does not depend on the EEPROM.**
-      **Where the settings actually live:** `/data/nv/<title>/` — `SYS_NVRAM`,
-      `NVM`, `NVRAM`, `PIN_NVRAM`, `LKRAM`, `FRRAM`, `PTRAM`, `node_diag`, each
-      a directory of numbered generations with a `.crc32` sibling.
-      **`PAD_OPEN_LOG=1` proves ST uses them** — it opens
-      `SYS_NVRAM/00000005`, `NVM/00000007`, `NVRAM/00000007`,
-      `PIN_NVRAM/00000002`, `LKRAM/00000002`, `FRRAM/00000001`,
-      `PTRAM/00000001`, `node_diag/00000000`.
-      *(Correction: I first reported ST had no such directory. That came from a
-      `find | head -20` that truncated before reaching it — a tooling artifact,
-      not a finding. The open log is the real evidence.)*
-      **The file format is decoded** (`nfi2.py`):
-      ```
-      "NFI2" u32 size "ST" ...header...
-      "NSEC" u32 sect_size u32 hashA u32 hashB u32 n_records
-      "NDAT" u32 rec_size u32 KEY u32 payload_len <payload>
-      ```
-      SYS_NVRAM gen5 = 1384 bytes, NSEC claims 17 records (the parser walks 10
-      before losing the chain — records continue past a gap it does not model
-      yet). Sample: `key=85501bd4 len=2 value=6`, `key=127b01ba len=4`,
-      `key=fc733f84 len=3 01609e`.
-      **KEY is an identity, not a checksum** — records `@0x0068` and `@0x0090`
-      hold *identical* payloads (`01609e`) under *different* keys. But it is not
-      a plain hash of the obvious names either: 120 name candidates
-      (`Country`, `COUNTRY CODE`, `System.Country`, …) x 7 hashes (crc32, fnv1,
-      fnv1a, djb2, djb2x, sdbm, jenkins) produced **zero** matches, so the hash
-      is seeded or custom, or the key is an enum rather than a name hash.
-      **File permissions are `---xr-----`** — owner has execute but not read,
-      which is why they cannot be dumped directly. `nvgrab.sh` captures every
-      mode, chmods, copies, and restores; 40 files verified back to their
-      original modes. **Nothing in David's store has been modified.**
-      **Also spotted, possibly its own defect:** `SYS_NVRAM/00000006.crc32`
-      exists with **no matching `00000006` data file**, and is root-owned while
-      its siblings are david-owned — a half-written generation from an earlier
-      run.
-      **★ NFI2 FULLY DECODED, AND THE STORE IS RULED OUT TOO (2026-08-18).**
-      • **`.crc32` = `crc32(whole file)` little-endian** — verified against four
-        untouched files, so a generation can be written correctly.
-      • **The format has a fourth chunk type, `NARR` (arrays):**
-        `"NARR" u32 size u32 KEY u32 count u32 n <payload>`. SYS_NVRAM gen5 has
-        11 `NDAT` + 6 `NARR` = **17**, exactly NSEC's count. The walker now
-        parses all of them.
-      • **The keys are NOT in the binary** — 14 keys searched as raw dwords,
-        literal-pool words and movw/movt pairs: **zero hits**. They are computed
-        at runtime from names, so identifying a record statically is closed.
-      • **Cross-title diff is the cheap substitute** (`nvxdiff.py`). ST vs
-        elvira3 SYS_NVRAM: 15 keys in common, and exactly **one** differing
-        scalar in country range — `85501bd4`, ST=6 elvira3=0.
-      • **Tested, and it is NOT the country.** A generation with `85501bd4 = 0`
-        was read by the game (`[open] ok /data/nv/.../SYS_NVRAM/00000006`) and
-        the refusal was unchanged. It also **oscillates 1 → 6 → 1 across boots**
-        (gen4=1, gen5=6, gen7=1, gen8=1), so it is per-boot state, not a stored
-        setting.
-      • **PIN_NVRAM and NVRAM are ruled out as well** — every key shared with
-        elvira3 is byte-identical; the differences are title-specific game data.
-      **So the country is in none of: the cabinet dips, the i2c EEPROM, or any
-      scalar of SYS_NVRAM / PIN_NVRAM / NVRAM.** What is left: `NVM` (37 KB, the
-      big one), `LKRAM`/`FRRAM`/`PTRAM`, one of the differing `NARR` arrays
-      (`38fd284f`, `8553bdab`, `8efe5684`), or — increasingly worth taking
-      seriously — **the value is not stored on this machine at all** and this
-      1.12.0 build is region-locked to a country the rig cannot present.
-      **★ HOW THE STORE BEHAVES, learned the hard way and worth knowing before
-      touching it again:** the game reads the HIGHEST generation, and on every
-      run it WRITES new generations and ROTATES OLD ONES AWAY. One probe run
-      turned {4, 5} into {5, 7, 8} — generation 4 was deleted by the game, not
-      by me. Copies of every pre-probe generation are in
-      `/home/david/i52/nvstore/`.
-      **★ AND A FLAW IN MY OWN HARNESS, recorded so it is not repeated:** the
-      run's "originals restored" check `md5sum`'d the `.crc32` files, which are
-      **mode 0** and therefore unreadable — the baseline was empty and
-      `md5sum -c` verified NOTHING while printing as though it had. The probe
-      value did not in fact persist (gens 7/8 hold 1, the value the game writes
-      itself, checked separately) but **that was luck, not the check working.**
-      Any future harness must verify its baseline is non-empty before trusting
-      it.
-      **NEXT, in order:** (1) DONE — the NFI2 walker parses all 17 records;
-      (2) find the key for the country — most cheaply by hooking the store's
-      lookup with `pad_hook()` and logging (key, name) pairs, since the static
-      hash guess failed; (3) write a valid country index (0..29, from the
-      country table at `0x731aac`) and recompute the `.crc32`. A
-      `PAD_NVFILE_POKE` knob in the shim would avoid touching the real files at
-      all, which is the right shape given the store holds real high scores.
-      **Superseded:** the guided-setup route below is still viable but is now
-      the second choice — the store is the direct path.
-      for `MenuPageGuidedSetupCountry`; it leads to the adjustment's EEPROM
-      offset, which is the one number needed to write a valid country directly.
-      The cereal/Bitmap abort on a blank EEPROM deserves its own item.
-      **Superseded lead (kept so it is not re-chased):** the static route below
-      `0x3c9658` is entry 7 of a 375-entry `{handler, attr}` **screen table at
-      `0x730ef4`** — entry 14 is `0x3db054`, the LOCATING renderer, which
-      cross-confirms what the table is. `attr`'s upper byte looks like a
-      priority: refusal `0xff` (max), LOCATING `0xf1`, its siblings
-      `0xf2/f3/f4`. The table is referenced by **no** movw/movt pair and **no**
-      literal pool, so the dispatcher reaches it some other way — find that,
-      and the country variable is one step upstream. `0x41c970` is a bare
-      `bx lr`, so the old "decode the dip handler at `0x41c970`" note was
-      pointing at a function boundary, not a handler.
-      **★ DAVID, EYES ON THE GLASS, 2026-08-17: the boot now walks its NORMAL
-      sequence — a "CHECK NODE BOARD 2" screen (not registered), and then
-      straight to the country refusal.** Two consequences:
-      • **Node 2's registration failure is USER-VISIBLE and is a real defect.**
-        It is the anomaly measured all session and set aside as "not the wedge":
-        node 2 alone never sets flags bit 0 (`f0` → `f2`), while node 12 —
-        byte-identical identity (ws2812node, part `0x2c40102b`, variant `0x05`,
-        fw 1.19.0) — registers normally. Not boot-blocking (the game moves past
-        it), but it earns its own fix and probably its own item.
-      • **The country screen is a HARD STOP, not a Tech Alert.** `watch.sh`
-        auto-presses Service Back until the game leaves Tech Alerts; that
-        cleared the node-2 screen and did NOT clear this one. So it cannot be
-        dismissed, which is what a real machine refusing to operate looks like.
-      **════ CURRENT TRUTH — 2026-08-17 THIRD PASS. The screen's predicate is
-      FOUND and read instruction-by-instruction, and it RETRACTS a claim the
-      second pass committed. Read this block only. ════**
-      **⛔ RETRACTION FIRST: "the board-object table is RULED OUT as the
-      screen's input" (committed `66e533e`) is WRONG.** The screen provably
-      reads `board[+4]` bit 1 and `board[+12]`. What the `flags=3` measurement
-      actually disproves is not the array — it is the ASSUMPTION that the
-      pixels on the glass were produced at the moment of that snapshot.
-      **THE NAMING PREDICATE (CONFIRMED — four independent RE routes converged
-      on it, an adversarial verifier could not refute it, and I re-read the
-      instructions myself).** The screen is `0x3db054` (character-page
-      renderer) and `0x3ee508` (scene overlay); they share a six-instruction
-      loop body. For each board `b = 0x8239c8 + 152*id`, walking id from 1:
-      | # | test | meaning |
-      |---|---|---|
-      | 1 | `ldr r3,[r4,#12]; cmp r3,#0; beq` | no directory entry → skip |
-      | 2 | `ldr r2,[r4,#4]; tst r2,#2; bne` | **FOUND bit SET → skip** |
-      | 3 | `ldr r3,[r3]; tst r3,#4; bne` | **OPTIONAL → skip** |
-      |   | `sprintf("%u", b[+0])` | else NAME IT |
-      **So "1 8 9" IS A COMPILE-TIME CONSTANT OF THIS TITLE, and the
-      "the named nodes are exactly the pinnodes" reading was a RED HERRING that
-      cost this item two passes.** ST's static node directory (base
-      `*(0x725aac)` = `0x7556a8`, 16-byte records, dumped from the ELF):
-      node 1 CABINET `0x8`, node 8 LOWER PLAYFIELD `0x8`, node 9 PLAYFIELD
-      `0x8`; node 2 CABINET LIGHTS `0xc`, node 12 **"TOPPER (OPTIONAL)"**
-      `0xc`, node 4 QR SCANNER `0x4`. Bit 2 = OPTIONAL is NAMED BY THE BINARY
-      (node 12's own display string says so), not inferred. Nodes 2/4/12 are
-      thrown out by clause 3 before their found-state is ever consulted, and
-      node 0 is unreachable (both renderers seed the walk at id 1). The
-      eligible set is therefore exactly {1,8,9} no matter what the bus does.
-      **THE PREDICATE REPRODUCES THE OBSERVED SCREEN FROM MY OWN DATA:** at
-      watch tick 1, n1/n8/n9 are `f1` (FOUND bit CLEAR) and 2/4/12 are
-      optional → replay names exactly `1 8 9`, which is what the glass showed.
-      **THE WEDGE IS THEREFORE NOT THE NAMING PREDICATE.** By tick 7 the
-      playfield boards reach `f3` (FOUND bit SET) → the list empties → and the
-      count gate (`3db178 cmp r6,#0; beq 3db244` / `3ee600 cmp r5,#0; beq
-      3ee7c0`) suppresses the ENTIRE draw, title line included. So after ~35 s
-      nothing is being drawn at all: **the "LOCATING NODE BOARDS / 1 8 9" on
-      the glass is STALE PIXELS**, which is exactly why the LCD scene hash
-      never changes for six minutes.
-      **THE ACTUAL GATE, and it is a rig-side bug of ours (mechanism read
-      instruction-by-instruction at `0x205328`, the boot-readiness check):**
-      ```
-      205388  ldr r0,[r3,#24]; cmp r0,#2      status==2 -> OK path
-      205394  ldr r0,[r2];     ands r0,#4     else: is the node OPTIONAL?
-      2053a0  ldr r0,[r3,#4];  tst r0,#2      optional AND FOUND...
-      2053a8  movne r4,#0                     ...but not status 2 = NOT READY
-      ```
-      **An OPTIONAL board that IS present but is NOT graded 2 pins readiness
-      at false forever — and that is ST's node 4 exactly** (QR SCANNER, attr
-      `0x4` optional, answers the bus so FOUND is set, graded **status 7**).
-      Readiness never returns true, so `0x776404` bit 5 (raised after 300 ms of
-      failed location at `205a9c`, cleared ONLY on a ready result at `205aac`)
-      stays latched forever. **Node 4's status 7 is OUR doing:** the shim has
-      node 4 claim godzilla's node4 firmware `124.107.0`/variant `0x98`, which
-      `nbdir.py`'s own comment flags as "reproduced not corrected … worth
-      revisiting if node 4 misbehaves". Node 4 is misbehaving.
-      **PROBE BUILT AND RUN THIS PASS:** `PAD_NB_FORCE_STATUS=<ids>|all`
-      (hwshim.c) forces the graded status to 2 for the named boards on each TX,
-      deliberately NOT touching flags so the readiness question and the naming
-      question cannot confound each other.
-      **★★★ THE ANSWER, AND IT IS A RACE — MEASURED, NOT THEORISED (run
-      `i52_st15ready`, 2026-08-17).** `PAD_NB_FORCE_STATUS=4` fired
-      (`[nbforce] forcing status 2 (was 7) on node 4`), every board ended
-      `s2` and nodes 1/8/9 reached `f3` — and **ST STILL WEDGED**, one LCD
-      scene for the whole run. So node 4's grade is NOT the blocker. The
-      timing measurement says why:
-      | when | evidence |
-      |---|---|
-      | first node-bus TX | ~0 s |
-      | **nodes 1/8/9 first ALL carry the FOUND bit** | **181 s** (188 s in the st12 wedge run) |
-      | the game's window to see it | the retry loop at `205a44`-`205a8c`, seconds, then it gives up at `205ab4` |
-      **Our bring-up finishes roughly two orders of magnitude too late.** At the
-      moment the game decides, the boards genuinely are NOT found — so the
-      screen names 1/8/9 CORRECTLY, latches `0x776404` bit 5, and the only code
-      that clears it (`205aac`) is inside the loop that has already exited.
-      Nothing re-checks, so the boards going healthy at 181 s changes nothing
-      and the stale text sits on the glass forever. **This retires the
-      "grading/identity/registration" framing entirely: nothing is wrong with
-      what the boards CLAIM, only with WHEN they become found.**
-      **★ THE 181 s IS PART MINE, AND THAT PART IS FIXED (2026-08-17).**
-      `sw_find_maybe()` attempted the switch-table search on a flat
-      `tick % 256` node-bus frames, and `sw_table_hopeless()` needs FOUR failed
-      searches — so the "this title has no switch table" verdict, which is what
-      releases my discovery-schedule fallback, could not be reached until
-      **1024 bus frames**. Measured: the schedule seeded at **178.4 s** and the
-      boards went found at 181 s. The game asks for SECONDS and never re-asks,
-      so for the entire window in which ST was asking, the shim was answering
-      "the bus is empty". **Fix: four searches inside the first 32 frames, then
-      the old 256 spacing — same number of table passes, front-loaded onto the
-      frames that are the bare-00 discovery walk itself.**
-      | metric | before | after |
-      |---|---|---|
-      | schedule seeded | 178.4 s (L5985) | L3313 |
-      | nodes 1/8/9 all FOUND | 181 s | **142.6 s** |
-      | LCD scenes | frozen on `bc0792d8/45a4e8c62515` all run | `ch0 5b2d86be`, `ch1 60ed7e50` — the latter never seen in ANY prior run |
-      **Labelled example holds: godzilla is byte-for-byte unaffected** (89770
-      lines vs 89456, node TX 158 vs 158, 10540 frames vs 10520) because its
-      configured switch table checks out (`entry[] at 0x00991d98, 88 switches`)
-      so it sets `sw_find_done` and never reaches the hopeless branch at all.
-      **HONESTY: this is an improvement, NOT a cure, and I have no eyes on the
-      screen.** 142.6 s is still two orders of magnitude past the game's
-      window, so ST is very probably still wedged; the changed scene hashes say
-      the game's video state moved somewhere it never moved before, which is
-      evidence of progress and NOT evidence of a completed boot. Someone with
-      the glass in front of them should look.
-      **NEXT PASS — the remaining cost is the BUS RATE, not my scan spacing:**
-      at one point 120 bus frames took 142 s (**under 1 TX/s**), and the game
-      needs hundreds of frames before it sets the FOUND bit (each node is
-      polled `fe` ~126 times; 756 `fe` frames in the st12 census). So the
-      question is now: what paces the node bus, and why does the game need so
-      many rounds per node before `0x205cb8` sets the bit? Suspect the
-      shim's per-exchange latency or a reply the game keeps re-asking for
-      (the 126 rounds look like a retry, not a heartbeat, and the standing "no
-      `ff` in the census" loose end is likely the same story).
-      **Superseded sub-question (kept so it is not re-asked):** what takes
-      181 s? The FOUND bit is set by the game at `0x205cb8` for boards
-      with `status==2` that answer the addressed `0xFF` read at `0x4f0c1c`, so
-      the target is the latency from bus-up to that read completing per node.
-      Note the standing loose end that now looks load-bearing: **the boards
-      reach the FOUND bit with NO `ff` visible in the TX census**, so either
-      the census regex misses ST's `ff` framing or the bit is set by another
-      path — resolving that names the slow step. Cheap instrumentation first:
-      timestamp every per-node state change (the `PAD_NB_SCREEN` sampler
-      design in the workflow brief) and find the gap.
-      **Rig note: godzilla's node bus is SLOWER in raw frames (158 TX in 180 s
-      vs ST's 1281 in 300 s) and boots clean, so raw bus rate is NOT the
-      metric — it is the per-node time-to-FOUND that matters.**
-      **Also corrected:** the message table's real base is `0x73bd98` (3740
-      entries, loaded as a movw/movt immediate at `0x2332f8`); the second
-      pass's "192-entry table at `0x73dbb4`" was a MID-TABLE OFFSET, which is
-      precisely why no immediate load of it existed and why the string-xref
-      route looked dead. The screen strings are message ids 1961/1962.
-      **════ END THIRD PASS. Below: second pass, still valid except for the
-      retracted "board table ruled out" line. ════**
-      **════ CURRENT TRUTH — 2026-08-17 SECOND PASS. SUPERSEDES the block
-      below it too. Read this first; it RE-ANCHORS the item on the real
-      symptom, which the first pass (and most of this pass) had drifted off.
-      ════**
-      **THE SCREEN NAMES THE PINNODES (1, 8, 9), NOT node 2.** The eyes-on
-      symptom — recorded in `nbdir.py` from David's 2026-08-16 boot — is
-      `LOCATING NODE BOARDS / 1 8 9 / NODES NOT FOUND`. This pass spent most of
-      its length chasing node 2 (whose board object never sets bit0 — see
-      below), which is the WRONG board: the screen complains about 1/8/9, the
-      three pinnodes, not 2. Recorded so the next pass does not repeat the
-      detour.
-      **AND THE SCREEN DOES NOT READ THE BOARD-OBJECT FLAGS.** Proof, two
-      independent legs: (a) the pinnodes 1/8/9 reach `flags=3` (the healthy
-      end-state) in the board watch, yet the screen names them NOT FOUND; (b)
-      the census for the boot that showed that screen has NO addressed
-      subcommand at or below 0xef reaching ANY node, i.e. by the game's own
-      registration criterion nothing was registered — the flags word and the
-      screen's verdict disagree. **So the six passes (this one included) spent
-      in the board-object table were looking at the wrong structure. The board
-      table is RULED OUT as the screen's input.** What the screen actually
-      reads is still unknown and is the whole remaining job.
-      **What the boot log DOES establish (st12, fix ON, pre-reboot, the last
-      good run — analysed exhaustively this pass):**
-      | fact | evidence |
-      |---|---|
-      | node location COMPLETES, it is not an infinite poll | every node polled `fe` 126 rounds, then a final `f9/f9/fc` runtime-read pass, a `0a00` broadcast, one `f0`→node0, then the bus goes SILENT at L9536 and never speaks again for the remaining ~6 min |
-      | the LOCATING scene never dismisses | ch0 holds ONE LCD scene `bc0792d8/45a4e8c62515` from frame ~120 to frame ~20000 — through location completing and forever after |
-      | every node's runtime info (`f9 00`,`f9 01`,`fc`) reads back ALL ZERO | `nbparse.py` census: 18 zero bytes for all of 1,2,4,8,9,12 |
-      | three board TYPES by `fe` identity | A=(1,8,9) `0001130023…c500` pinnode; B=(2,12) `000113002b10…3f00` ws2812node; C=(4) `007c6b00…2c00` node4 |
-      | all six identities are VERSION-MATCHED to ST's own hex | `node_ident.txt`: every node `hexver=1.19.0`, variant per type, = what the shim claims. **The firmware-version-grade-mismatch theory is DEAD — there is no mismatch.** |
-      **Board-array end state (correcting this pass's own earlier "all reach
-      flags=3" overstatement):** `n0=f3s2 n1=f3s2 n2=f2s2 n4=f3s7 n8=f3s2
-      n9=f3s2 n12=f3s2`. Two anomalies, both present from the first watch tick
-      and BOTH FIX-INDEPENDENT (identical in the `PAD_NB_SCHED=0` control):
-      **n2 never sets bit0** (registered) — it is the only node that starts f0
-      not f1, and ends f2 not f3 — and **n4 carries status 7** (all others 2),
-      because its `fe` reply has a different byte layout (`00 7c…` vs the
-      `00 01…` version prefix) that the fixed-offset parser reads as fw
-      124.107.0. NEITHER is the screen's gate (the screen names 1/8/9, and n4
-      still registers). n2≡n12 by every identity field yet only n12 registers;
-      that asymmetry is unexplained and, since it is not the symptom, not worth
-      chasing further.
-      **Registration mechanism, read out of hwshim.c's own comments (godzilla
-      RE, addresses are godzilla's):** `0x5a2e10` identifies+registers from the
-      `fe` reply; part id `[4..7]` is looked up in the 28-entry part table at
-      `0x69cc24`; a MISS stores the "Unknown" descriptor whose `+20`=0, and
-      `0x59ec1c` refuses to send any subcommand ≤0xef to a board whose `+20`=0
-      — that is why an unregistered board is inert. Then `0x1d5780` grades the
-      claimed fw+variant against the decrypted `.hex`. This is the machinery
-      the screen's found-predicate is PROBABLY built on, but it has not been
-      located in ST's binary.
-      **Directory-attribute clue (from nbdir.py, one boot only — do not
-      over-read):** the per-node directory flags word is 1/8/9=`0x8`,
-      2/12=`0xc`, 4=`0x4`. The screen names exactly the `0x8` nodes; bit2
-      (`0x4`) is CLEAR on the named ones and SET on the unnamed (topper is
-      literally labelled OPTIONAL, QR scanner likely optional too). Working
-      read: **bit2 set = optional, so the screen names ESSENTIAL nodes it
-      judges not-found.** The pinnodes are essential AND judged not-found; WHY
-      they are judged not-found is the open question.
-      **Static route to the screen code is BLOCKED.** The strings
-      `LOCATING NODE BOARDS` (`0x5391e8`) and `NODE%s NOT FOUND` (`0x5391d4`)
-      sit in 5-word descriptor cells `0x749eb8`/`0x749ea0`, indexed as entries
-      34/35 of a 192-entry menu string-pointer table at `0x73dbb4`. Neither the
-      strings, the cells, nor the table base are loaded as an immediate ANYWHERE
-      in the objdump — the table is reached by base+offset arithmetic — so
-      "xref the string to find the display code" does not work. `msgtab.py`,
-      `msgtab2.py`, `msgtab3.py`, `nbparse.py`, `scenetl.py` in
-      `/home/david/i52/` are the instruments built this pass.
-      **▼ ANSWERED — this target is CLOSED.** The predicate was found and
-      confirmed at `0x3db054`/`0x3ee508`, and the LOCATING wedge itself is FIXED
-      (the cause was the shim's own `sw_find_maybe()` pacing, not a predicate).
-      Kept for the method only; the live plan is the "NEXT, in order" block.
-      *(superseded text follows)* **NEXT-PASS TARGET:** find the LOCATING screen's per-node found-predicate
-      — what field, read from where, makes it judge a PINNODE not-found while
-      it accepts the ws2812nodes. Two approaches, neither needs the board
-      table: (1) locate the found-predicate by RE from the registration
-      machinery above (the `fe`-reply parser at `0x5a2e10` and the exchange
-      gate at `0x59ec1c`, ported to ST's addresses); (2) run ST and watch what
-      the game READS out of each pinnode vs each ws2812node during location — a
-      shim read-probe, once the rig can render again.
-      **⛔ ENVIRONMENTAL BLOCKER, 2026-08-17: ST will not currently run to the
-      LOCATING screen.** Post-reboot WSLg deadlocks the game+renderer ~2.1 s
-      into boot when the projector (display 2) window opens — padglhost prints
-      `stopped after 3 frames`, node bring-up never starts (0 TX). This is the
-      WSLg second-window stall; st12 rendered fine only because it PREDATES the
-      reboot. `PAD_GL_RAISE=0`/`PAD_PLAYFIELD=0` did not help. All runtime work
-      is gated on clearing this (likely a clean WSLg restart, weighed against
-      the WSL-wedge risk that already cost one reboot this session).
-      **A DECISIVE EXPERIMENT IS BUILT BUT UNRUN:** `PAD_NB_FORCE_HEALTHY=1`
-      (hwshim.c, gated off) overwrites every in-use board slot to `flags|=3
-      status=2` on each TX. Predicted to FAIL (the screen does not read flags),
-      but running it once the renderer works gives DIRECT proof instead of the
-      two-leg inference above. Deployed in the current shim build.
-      **════ END SECOND PASS. Below is the first pass's CURRENT TRUTH, still
-      valid on the board-array facts but drifted off the real symptom. ════**
-      **════ CURRENT TRUTH, 2026-08-17, triangulated with an A/B control —
-      SUPERSEDES every dated block below, which flip-flopped twice on the way
-      here. Read only this to know where the item stands. ════**
-      ST's board array is at **`0x8239c8`, struct stride `0x98`** (NOT
-      godzilla's `0xe0` — the finder was blind to it, which is why five passes
-      wrongly believed "ST creates no boards"). The array holds **7 boards:
-      node 0 + ST's six declared nodes (1,2,4,8,9,12)**, correct versions,
-      graded to status 2. Established by run, not theory:
-      | fact | evidence |
-      |---|---|
-      | ST creates all 7 boards | sweep finds `0x8239c8/0x98/7`, versions match `node_ident.txt` |
-      | creation is INDEPENDENT of the discovery fix | control `PAD_NB_SCHED=0` (st11): identical array |
-      | WITHOUT the fix, playfield boards stay `flags=1` (unserviced) forever | control+watch (st13): 14 ticks, never changes |
-      | WITH the fix, ALL boards reach `flags=3` (serviced), godzilla's healthy end-state | watch (st12): early f1 → late f3 |
-      | **yet ST STILL wedges on LOCATING NODE BOARDS at flags=3** | every run |
-      **So the discovery fix (`98f4797`) IS load-bearing after all — it drives
-      the SERVICING that takes the playfield boards from flags=1 to flags=3.**
-      (The "not load-bearing" correction one commit back was itself wrong: it
-      reasoned from creation being fix-independent, but SERVICING is not.)
-      **THE REAL REMAINING QUESTION, now that the board array is provably
-      HEALTHY end-to-end: what does ST's LOCATING NODE BOARDS screen gate on,
-      if not the board flags?** godzilla has no such screen (it parks on Tech
-      Alerts); this is newer-firmware bring-up presentation the godzilla RE
-      does not cover. That is the next pass's target — and it is NOT in the
-      board-object table, which is where this item has been looking.
-      **Concrete starting points for that RE (ELF + full objdump already on
-      disk at `/home/david/i52/st_game{,.dis}`):** the message cell for
-      `NODE%s NOT FOUND` is at vaddr `0x749ea0` and `LOCATING NODE BOARDS` at
-      `0x749eb8` (5-language cells, found via `xref.py`); both are referenced
-      by message-table INDEX not literal, so the display code is reached
-      through the msg-table machinery (item 29's mechanism), which is the
-      thread to pull to find the screen's own exit condition.
-      **⛔ DEAD END, do not repeat: godzilla's boot globals are USELESS on ST.**
-      `boot_ready[0x7e1974]`, `loader_gate[0x7e1a10]`, `thread_run[0x794af5]`
-      are Godzilla Pro 1.15.0 addresses. A `[segv]` line in an ST run DID
-      print `boot_ready=0` — but only because godzilla's `a_sw_struct()`
-      default `0x7a958c` happens to fall inside ST's mapped range, so the
-      guard let it through; the value is ST's unrelated data read at
-      godzilla's address, i.e. the exact "invents findings" lie the code's
-      own comment warns about. ST's own boot-ready global is unknown and must
-      be found by RE, not borrowed.
-      **Loose end for the curious: the boards reach flags=3 with NO `ff` and
-      NO `0x11` on the wire (census unchanged), which the godzilla RE says
-      should be impossible — bit 1 is set after the `ff` read. Either ST sets
-      the heartbeat by another path or the census regex misses ST's `ff`
-      framing. Not chased; not on the critical path.**
-      **════ END CURRENT TRUTH. Everything below is the historical trail. ════**
-      **‼‼‼ 2026-08-17 — THE BRANCH'S CENTRAL CONCLUSION IS OVERTURNED, BY THE
-      INSTRUMENT BUILT TO CHECK IT. "ST creates no board objects" IS FALSE.
-      Everything below that rests on it is now suspect; read this block first.**
-      The board finder hard-codes godzilla's `0xe0` board-struct STRIDE. The
-      stride sweep (built precisely because the finder cannot test its own
-      stride assumption) found ST's real board array at **`0x8239c8`, stride
-      `0x98`** — a smaller struct the `0xe0` scan was BLIND to — with **7
-      slots carrying node ids 0, 1, 2, 4, 8, 9, 12**: node 0 (bridge) plus
-      ST's exact six declared nodes. The version fields clinch it (nodes
-      1/2/8/9/12 = 1.19.0, node 4 = 124.107.0, node 0 = 0.5.0 — matching
-      `node_ident.txt` exactly), and the first 0x20 bytes of the struct match
-      godzilla's layout field-for-field. **So ST CREATES AND IDENTIFIES ALL
-      ITS BOARD OBJECTS, and grades them to status 2 — the SAME status
-      godzilla's booting boards carry.** The sweep passes its labelled example
-      first (godzilla: `0x7bad88 stride 0xe0 slots 9`), so this is trusted.
-      **‼ AND MY DISCOVERY FIX DOES NOT CREATE THEM.** Control run
-      `i52_st11noched` with the schedule DISABLED (`PAD_NB_SCHED=0`): the
-      identical 7-board array at `0x8239c8/0x98`. Board creation is driven by
-      the game's own node directory and is INDEPENDENT of the discovery seed.
-      So the discovery fix (`98f4797`) makes the wire faithful (nbsched
-      populated, 3→19 bare-00 polls) but **does NOT create boards and does NOT
-      advance ST's boot** — I over-credited it, and the earlier "the fix fires
-      and works" framing is withdrawn to "the fix is correct but not
-      load-bearing for this wedge".
-      **WHAT ACTUALLY DIFFERS FROM GODZILLA (early snapshot): the flags.**
-      Godzilla's boards reach `flags=00000003`; ST's sit at `flags=00000001`
-      (bit 1 — the ~10 Hz "answered its last poll" heartbeat — missing) on
-      every board but node 0. The census agrees: no `ff`, no `0x11` to any
-      playfield node, so the service loop never reaches the stage that sets
-      bit 1. **CAVEAT, and it is the next run's job: the sweep is a ONE-SHOT
-      taken EARLY (`sw_swept` latches on the first scan), so these are the
-      boards' EARLY flags, not their final ones. The [nbobj] periodic dumper
-      is blind to the 0x98 struct, so ST's boards have never been watched over
-      time. That is the gap to close next.**
-      **So the real question, finally correctly framed: ST's boards are
-      created, identified and graded — why do the playfield boards never get
-      bit 1 (serviced), when godzilla's do?** This is downstream of creation,
-      which is where six passes of this item were NOT looking.
-      **`S2 D4` (▲ from D3): the mechanism moved, the old instrument was
-      proven blind, and the new question needs a per-title stride-aware
-      board dumper that does not yet exist.**
-      *(Historical note: the block below, down to the next ‼, was written
-      believing ST created no boards. It is preserved because its RULED-OUT
-      results (wire identical, flags word, runtime-info, cabinet) are still
-      valid negative results — but its FRAMING of the wedge as a
-      creation/discovery failure is superseded by the above.)*
-      **★★★ ROOT CAUSE FOUND 2026-08-16 (code + log, not a theory), AND A FIX
-      IS COMMITTED — but NOT yet validated on a run; the rig was mid-cleanup
-      of a cross-session zombie strand. THE MECHANISM IS RIG-SIDE, so this is
-      no longer a firmware/crypto problem.** The shim tells the game the node
-      bus is EMPTY, so no board object is ever created and bring-up never
-      completes:
-      • the game's bare-00 discovery walk (`0x1d6f28`) asks the shim which
-        boards are on the bus, via `nb_next_node()`, whose schedule
-        `nb_nodes_init()` builds from the game's SWITCH TABLE (`entry[+20]`);
-      • ST has NO findable switch table — `sw_find_table()` rejects its
-        in-memory candidate (`[swfind] no switch table yet … (node,bit) not
-        distinct`, in the run log), so `SW_STRUCT` resolves to 0, `nb_nnodes`
-        stays −1, and `nb_next_node()` returns 0 on the first poll = empty bus;
-      • the tell is the **ABSENT `[nbsched] playfield nodes:` line** on ST
-        (present on godzilla) — `nb_nodes_init()` returns before printing it;
-      • so the game creates no board objects (the by-shape finder confirms:
-        godzilla 9 at 0x7bad88, ST none), yet still identifies all six
-        declared nodes correctly (item 51 census) because the identity ladder
-        is driven by the game's own static directory, not by discovery. The
-        boards are answerable; they were never discovered.
-      **THE FIX (committed `98f4797`):** when no switch table can be found,
-      `nb_nodes_init()` seeds the discovery schedule from the title's own NODE
-      DIRECTORY (`node_ident.txt`, which nbdir.py derives and the shim already
-      loads) minus `PAD_NB_SILENT` nodes. Guarded by `!sw_find_done &&
-      sw_find_fails >= 4` so it is permanently unreachable for godzilla and any
-      title whose table is found (they set `sw_find_done`). Also folds the
-      `PAD_NB_SILENT` parse into one `nb_is_silent()` used by both the fallback
-      and `shim_read`.
-      **★★ GODZILLA REGRESSION PASSED (i52_gz10, 2026-08-16): `[nbsched]
-      playfield nodes: 4 1 8 9 (from switch table)`, 9 board objects at
-      0x7bad88, 1254 fa/f2 grading frames, no wedge, 55 fps — the fallback
-      correctly does NOT fire, and the fix leaves godzilla byte-for-byte on
-      its original path. So the fix is proven SAFE.**
-      **★★★ ST RUN 2026-08-16 (i52_st4, after David ran `wsl --shutdown` to
-      restore WSLg): THE FIX FIRES AND WORKS — but ST STILL WEDGES, so this
-      item stays OPEN. The fix is necessary and not sufficient.**
-      **What changed, measured against the pre-fix run (i51_st_final):**
-      | | before | after |
-      |---|---|---|
-      | `[nbsched]` line | ABSENT | `playfield nodes: 1 2 4 8 9 12 (from node directory - no switch table)` |
-      | bare-00 discovery polls | 3 (each answered "empty bus") | **19** |
-      | `fe` identity per node | 12 | **108-113** |
-      | board objects | 0 usable | **node 0 + node 1** |
-      The guest ran the FULL 289 s at **56.5 fps**, healthy throughout.
-      **▼ AND A CORRECTION I OWE MYSELF, made the same evening before it could
-      mislead the next pass: the written prediction read as CONFIRMED, and it
-      is not.** `nb_report_near()` reported `slot 0 node 0 status 0 (No
-      Errors)` / `slot 1 node 1 status 2` at `0x0087429c`, which is the
-      "real array caught half-built" pattern — **but that address is HEAP, not
-      static, so it is almost certainly a coincidence.** Measured from the
-      program headers: ST's RW LOAD is vaddr `0x715000` memsz `0x12e9dc`, so
-      its static data (including .bss) ENDS at **`0x8439dc`** — and
-      `0x0087429c` is above it. godzilla's board array `0x7bad88` is INSIDE
-      its own static range (RW `0x6f52c0` + `0x14d8dc` = `0x842b9c`), i.e. the
-      real thing is `.bss` on the title where it is known. A stable heap
-      address across runs proves only a deterministic allocator, not identity.
-      **So the honest reading is the OTHER branch of the prediction: ST
-      creates NO board objects at all** — which is also what every other
-      signal says (no `fa`, no `f2`, no `ff`, no `0x11`, no sub-0xef anywhere
-      in 289 s). Note this is consistent with the finder printing nothing:
-      an existing-but-entirely-unpopulated array is INVISIBLE to it by
-      construction, because a slot only counts when `[+12]` is non-zero.
-      **THE QUESTION IS NOW SHARP AND NARROW: the discovery walk is fed all
-      six nodes and the game identifies all six 108 times each, yet not one
-      board object is ever created.** That is a much smaller question than the
-      one this item started with, and it is squarely about what the game does
-      between "identity answered" and "board created".
-      **★ RULED OUT THE SAME EVENING, with a run (i52_st7rt): the ZERO-FILLED
-      RUNTIME INFO IS NOT THE GATE.** `PAD_NB_RT=1` fills the f9/00, f9/01 and
-      fc replies with a recognisable pattern instead of 48 zero bytes; ST
-      behaved identically (same `[nbsched]` fallback, 18 discovery polls, same
-      2-slot heap near-miss, still no `fa`/`f2`, 56.4 fps for 278 s). The
-      workflow's leading downstream suspect is dead.
-      **★★ A SECOND REAL RIG-SIDE BUG FOUND AND FIXED (`e8a4f31`-class, this
-      pass) — AND IT IS ALSO NOT THE GATE. ST WAS BOOTING WITH ITS WHOLE
-      CABINET SHORTED.** `sw_scan_bytes()` builds the cabinet word from the
-      game's own switch table; with no table it returns 0 and the `if (have)`
-      in the SPI ioctl branch skipped the RX write **entirely**, so the game
-      read its own zeroed buffer — and **the cabinet bits are ACTIVE LOW, so
-      all-zero means EVERY CABINET SWITCH MADE.** The contrast is total:
-      godzilla logs `[cabspi] bits=ff0f0f0000000000` and `[swrest] machine at
-      rest: coin door shut`; ST logged **neither, not once in 289 s**. Fixed
-      by handing a title with no findable table the platform AT-REST word
-      (`ff0f0f0000000000`, a platform constant — the node 0/1/4 cabinet layout
-      is measured identical across star_wars 1.30.0, godzilla 1.15.0 and
-      john_wick 1.01.0). `PAD_CAB_IDLE=0` disables it.
-      **`sw_table_hopeless()` is now ONE definition** of "no findable switch
-      table and waiting will not help", used by BOTH item 52 fallbacks (this
-      one and the node-bus discovery seed) so they cannot disagree.
-      **▼ A REGRESSION I MADE AND CAUGHT — the labelled example is the only
-      reason it did not ship.** The first cut gated on `!have` alone, so it
-      fired during EVERY title's early boot (before its table exists) and
-      called `sw_prime()` with the synthetic word — which writes into the
-      game's own NodeRec through a merely range-checked `SW_STRUCT`. **Godzilla
-      crashed at 6.5 s, 180 frames, segv.** Now it waits for *hopeless* rather
-      than *not yet*, and `sw_prime()` is skipped while the word is synthetic.
-      Post-fix godzilla is byte-for-byte baseline: 9 board objects, 33
-      discovery polls, 1254 fa/f2, **segv 0**, 55.2 fps.
-      **ST after this fix (i52_st8cab): the at-rest word IS delivered, and
-      bring-up is UNCHANGED — zero board objects, no `fa`/`f2`, 20 discovery
-      polls, 56.3 fps for 295 s.** A real bug, fixed; not the gate.
-      **★ THE ST CRASH IS CHARACTERISED, and it is NOT the fix:** a
-      timing-sensitive guest fault at ~200 frames / ~21 s that fires whenever
-      ST renders SLOWLY — under CPU contention, under the surfaceless
-      renderer (1-6 fps), and under frame capture (`PAD_GL_DUMP` readbacks
-      slowed it enough to reproduce on demand, i52_st6). At full speed it does
-      not fire: 289 s clean here, 232 s clean in item 51. **Consequence worth
-      knowing: you cannot currently screenshot an ST run without inducing the
-      crash**, which is why the acceptance below still has no screenshot.
-      **RESUME — ONE question, and it is NOT "where is ST's board array".**
-      On ST the game is handed a full bus and correct identities, yet creates
-      **zero** board objects. **Finding the array's address would not answer
-      that** — an array with no boards in it is empty wherever it lives — so
-      do not start there. (I tried and it also does not fall out cheaply:
-      **ruled out, do not repeat — godzilla's `*0xe0` idiom
-      (`rsb rX,rX,rX,lsl #3` + `add rX,base,rX,lsl #5`, base in the
-      `movw`/`movt`, godzilla `0x39c9b0`) does NOT appear anywhere in ST's
-      disassembly**, and a `cmp rX,#31` structural sweep returns only string
-      code. ST compiles the accessor differently. The ELF and a full 1.3M-line
-      objdump are on disk at `/home/david/i52/` if someone wants to try
-      properly.)
-      **The real question is what runs BETWEEN "identity answered" and "board
-      created", and why ST never gets there.** The strongest lever is that on
-      godzilla creation is nearly UNCONDITIONAL once bring-up runs — the
-      handoff records boards existing at status 8 even in the era when every
-      identity exchange failed — so ST's bring-up is not merely failing a
-      check, it is not reaching the creation step at all. Suggested order:
-      (a) **Verify the game ACCEPTS the fed walk.** The fallback supplies the
-      schedule but nothing has confirmed the walk is consumed the way the
-      godzilla-era RE describes (list then terminating zero). `PAD_NB_SCHED=0`
-      as an A/B against no schedule, plus the `[nbsched] poll #N` trace, is
-      one cheap run. Note ST sends **108-113 `fe` per node over 289 s** —
-      roughly one every 2.7 s per node, which is a RETRY cadence, not a
-      ladder, so something is rejecting and re-asking on a timer.
-      (b) **The coin-door interlock wait** (godzilla `0x1d6fb8` waits up to
-      60 s for `[0x706464]`, enterable five times; `0x1d6c54` reports
-      not-done meanwhile). Untested on ST, its address unknown there, and it
-      is the one recorded godzilla mechanism that stalls bring-up wholesale.
-      (c) A guest-side trace of the bring-up thread on ST — expensive, but it
-      is what finally answers "how far does bring-up get".
-      **Already ruled out, do not re-spend:** the runtime-info payload
-      (`PAD_NB_RT=1`, run i52_st7rt), the shorted cabinet word (fixed, run
-      i52_st8cab — a real bug but not the gate), the coin-door interlock as a
-      *bit* problem (switch 33 = node 0 bit 23 reads MADE = door CLOSED under
-      both the old all-zero word and the new at-rest word, so the door has
-      never been open on ST), the array-base RE by pattern (above), and
-      everything in the "wire is identical" and "flags word" sections.
-      **★ WHERE THIS LEAVES IT, honestly: two genuine rig-side bugs have been
-      found and fixed on this branch — the empty-bus discovery seed and the
-      shorted cabinet — and NEITHER unblocks stranger_things.** Six suspects
-      are now dead. The remaining space is structural: something about ST-era
-      bring-up that the godzilla 1.15.0 RE does not describe, which is why
-      the next move (c) is a guest-side trace of the bring-up thread rather
-      than another guess. Both fixes are worth keeping regardless — they are
-      correct on their own terms and godzilla-verified safe.
-      **⚠ UNVERIFIED CODE ON THE BRANCH — do this before anything else.** A
-      **stride-independent sweep** (`PAD_NB_STRIDE_SWEEP=1`, `[nbsweep]`) is
-      committed but **NEVER COMPILED AND NEVER RUN**: WSL wedged mid-session
-      before it could be built. It exists to test the one assumption the board
-      finder cannot test about itself — `nb_scan_objs()` hard-codes the `0xe0`
-      stride, so an ST board array of a DIFFERENT struct size would be
-      invisible and "ST creates no board objects" would be an artefact of the
-      instrument rather than a fact about the title. It counts
-      `#{i : byte[a+i*s]==i}` over strides `0x80..0x200` and reports the best.
-      **Its acceptance is fixed in advance: on godzilla it MUST report
-      `base=0x007bad88 stride=0xe0 slots=9`.** If it does not, the sweep is
-      wrong and nothing it says about ST counts. **Next pass: run the
-      scratchpad `ccheck.sh` /tmp compile check FIRST, then the godzilla
-      labelled example, and only then point it at ST.**
-      **⚠ THE RIG IS DOWN AND NEEDS DAVID.** WSL is wedged: every command
-      hangs, `wsl --shutdown` returns 255 and `vmmemWSL` survives it, and
-      killing the 14 stuck `wsl.exe` clients did not recover it. It needs an
-      **LxssManager service restart or a reboot** before any run is possible.
-      Nothing of this rig's was running when it wedged — no game, lock
-      released, `alive.sh` last read 0 — so nothing is at risk, and no
-      cleanup is owed beyond the restart.
-      **D4 → D3: the mechanism is known, a run reproduces it on demand, the
-      fix is written and proven safe; only the final full-speed ST run remains,
-      gated on the WSL restart.**
-      *(Earlier this day, D3 → D4 was recorded when both original premises
-      died; the mechanism crack has now brought it back to D3.)*
-      *(Split out of item 51 at its close, 2026-08-15. The projector shows
-      scene footage regardless, so the display side owes this nothing.)*
-      **★ ESTABLISHED 2026-08-16, ENTIRELY AT THE DESK — no emulator run;
-      the only rig time was a read-only card mount. The first two are
-      negative results and they close off most of this item's stated plan.**
-      **(1) THE WIRE IS IDENTICAL FOR THE BOARDS THAT "FAIL" AND THE ONES
-      THAT "PASS", so nothing on the bus singles out the pinnodes.** Mined
-      from item 51's own ST run (`~/i51_st_final.log`) as a per-node command
-      census: nodes 1, 2, 4, 8, 9 and 12 each received **exactly 12×`fe`,
-      4×`f9`, 2×`fc`** — byte for byte the same commands in the same counts.
-      Each got a correct, well-formed identity reply (pinnodes
-      `00 |01 13 00| 23 00 02 00 |01 00| 01` = fw 1.19.0, part 0x00020023,
-      board id 1, variant 0x01). **12 `fe` is the NORMAL identity ladder**
-      (2 rounds × 6), not a retry storm — star_wars' failure signature was
-      215-226 per node in five minutes. **So the identity exchange is not
-      failing and not being refused**, which is exactly what this item
-      proposed to learn from `[nbcen]`'s reply_len-12 count. That readout is
-      now had for free, and **the "pinnode-specific `fe` reply-length"
-      suspect is DEAD.** So is the `PAD_NB_HWID` suspect as a wire
-      explanation: the global 0x0001 goes to the passing boards too.
-      **▼ CORRECTION, same day, from the godzilla control run — an earlier
-      version of this entry argued "no addressed subcommand at or below 0xef
-      reached ANY node, therefore nothing registered". THAT INFERENCE IS
-      WITHDRAWN.** Godzilla, which boots clean, sends none either: its command
-      census over both a 45 s bridged run and the long `gz100.log` is
-      `fe f2 f0 f9 fa fc f1` and nothing at or below 0xef. So the test does
-      not separate a working title from a wedged one at these run lengths and
-      must not be used as evidence. (The `70 XX` switch-config writes this
-      file records elsewhere evidently belong to a later phase or a different
-      tracer.) The conclusion it was supporting still stands, on (1) and (3)
-      below — but it stands on those, not on this.
-      **★★ (2) SO "1 8 9" IS NOT THE GAME NAMING THREE THAT FAILED WHILE
-      2/4/12 PASSED** — the reading this item was built on — because what
-      those three actually have in common is declared statically and is
-      IDENTICAL on a title that boots.
-      **What "1 8 9" actually tracks is the flags word in the title's own
-      node directory, and it is the SAME on a title that boots.**
-      `nbdir.py --dump` (added this pass) prints the two record fields the
-      derivation discards. ST: node 1 CABINET, 8 LOWER PLAYFIELD, 9 PLAYFIELD
-      carry `flags=0x8`; 2 CABINET LIGHTS and 12 TOPPER (OPTIONAL) carry
-      `0xc`; 4 QR SCANNER `0x4`. **The control — godzilla_pro, which boots
-      clean — declares IDENTICAL flags for every node the two titles share**
-      (1/8/9 = 0x8, 2/12 = 0xc). So the flags word cannot be what
-      distinguishes ST's failure from godzilla's success, and **nothing the
-      title declares statically singles out its pinnodes.** That 0x8 tracks
-      exactly which nodes ST's screen names is recorded in `nbdir.py` as an
-      observation and NOT as a decoded meaning: one title, one boot, and
-      godzilla never wedges so there is no second screen to test it against.
-      **★★★ (3) THE BLOCKER, and it is why this is now D4: the one instrument
-      that would name the verdict CANNOT JUDGE THIS TITLE, and does not say
-      so.** `board[+24]` — the status index the Tech Alerts line renders, per
-      board, "the cheapest available signal and it costs one memory read" —
-      is reached through `TITLE_ADDR(a_nb_objs, "PAD_NB_OBJS", 0x7bad88u)`,
-      and **0x7bad88 is Godzilla Pro 1.15.0's address. Nothing in this rig
-      ever sets `PAD_NB_OBJS`** — not watch.sh, not mktables, no per-title
-      derivation — and `title_addr()` keeps the built-in default whenever it
-      is merely READABLE in that guest. Same trap that once had the shim
-      reading "a switch table out of somebody else's data".
-      `NB_TABLE`/`NB_RECORDS` are worse: plain `#define`s, not overridable at
-      all. **So every `[nbobj]`/`[nbtbl]` reading on stranger_things is
-      somebody else's memory formatted as a status table — no evidence, not
-      weak evidence.** Now commented at the definition so the next reader is
-      warned at the point of use.
-      **Ruled out, do not re-spend: the class/part choice.** ST ships the
-      same three pinnode classes as godzilla (`pinnode-LPC1112_101`,
-      `-LPC1112_201`, `-LPC1313`, all at `1_19_0`) and `nbdir.py` picks class
-      1 on both, so CLASS_PREF is not the difference either.
-      **★★★★ (4) THE INSTRUMENT IS BUILT, VALIDATED, AND IT ANSWERS: ON
-      STRANGER_THINGS THERE ARE NO BOARD OBJECTS AT ALL.** `nb_scan_objs()` in
-      hwshim.c finds the array BY SHAPE per title — 32 slots of stride 0xe0,
-      every in-use slot (`[+12]` non-zero) self-labelling with `[+0] == its
-      own index` and carrying a status below 12 — so the instrument no longer
-      depends on any hard-coded address.
-      **Validated on the labelled example first, as this rig requires:** on
-      godzilla_pro it prints `board objects found by shape at 0x007bad88, 9
-      slots in use (built-in godzilla address 0x007bad88: AGREES)` and dumps
-      all nine slots with the statuses the historical `gzFinal.log` recorded.
-      **Then, stranger_things, 3-minute card run, 11 dump ticks, the game
-      rendering healthily throughout (15340 frames, 56.3 fps): NO ARRAY.**
-      Eleven times `no node-object table known for this title`, and the best
-      thing anywhere in the guest's writable memory is a **near miss: a
-      self-consistent board array at 0x0087429c with only 2 slots in use**.
-      **So the game is not failing to GRADE its boards — it never creates the
-      board records in the first place.** That is consistent with everything
-      else here (identical wire traffic, no registration) and it moves the
-      question from "why does the pinnode claim get rejected" to "why does the
-      board-object table never get populated".
-      **★ AND A TRAP PAID FOR, which is why this cost a run: `PAD_NB_DUMP`
-      CRASHED STRANGER_THINGS.** `nb_dump_hexlist()` dereferences
-      `NB_HEXLIST 0x7e1b98` — another godzilla literal, a plain `#define` —
-      got a plausible `0x0086ce9c` that passes every range check it makes,
-      walked it, and the guest **segfaulted**. Item 51's ST run never crashed
-      only because it never set `PAD_NB_DUMP`: turning the diagnostic on is
-      what killed the title it was meant to diagnose. Both godzilla-address
-      dumps are now gated behind `nb_addrs_are_this_title()` — which asks the
-      by-shape scan whether it agrees with the built-in base, a MEASURED test
-      rather than the "is it readable" one that is the trap itself — and the
-      skip announces itself instead of being silent.
-      **▼ One regression made and caught by the labelled example, recorded
-      because it is the argument FOR having one:** an intermediate build let a
-      weak 1-2 slot coincidence consume its own 0x1c00 span, so the scan
-      jumped clean over godzilla's real 9-slot array and reported a 2-slot
-      one instead. Only a hit at or above `NB_OBJS_MIN` may skip; a near miss
-      keeps scanning. Caught in one run because godzilla's answer is known.
-      **★ (5) THE NEAR MISS NOW REPORTS ITS CONTENTS, and there is a written
-      PREDICTION for the next run to test.** `nb_report_near()` prints the
-      node id and status of every in-use slot in the best sub-threshold
-      candidate, once. "2 slots in use" was where the last run stopped and
-      "which two, saying what?" was immediately the next question; answering
-      it in the same line saves a whole run.
-      **The prediction, so the next run is a TEST and not a look-around:** on
-      godzilla the first two slots to exist are **0 (CPU / Bridge)** and
-      **1 (Cabinet)**. If ST's 2-slot candidate at `0x0087429c` reports
-      exactly `slot 0 node 0` and `slot 1 node 1`, it is **the real array
-      caught half-built** — the game creates the bridge and the first cabinet
-      board and then stops — and the question becomes what gates the third.
-      If it reports anything else (mismatched ids, junk statuses), it is a
-      coincidence and the real answer is that ST creates NO board objects at
-      all. Those two outcomes point at completely different next moves, which
-      is what makes it worth predicting in advance rather than judging after.
-      **UNVERIFIED — compiled, not run.** The rig is held by `item/50`
-      (turtles_pro, `watch.sh 120`), so this change has a clean compile
-      (identical flags, output to `/tmp`, nothing shared written) but has NOT
-      been through a run. The next pass must re-run the godzilla labelled
-      example FIRST — `[nbobj] ... 0x007bad88 ... AGREES` — before trusting
-      anything it says about ST, because an intermediate build of this same
-      finder already regressed once in exactly that way.
-      **▼ EVIDENCE LOST, and it is a process fault worth fixing:** the ST run
-      wrote to `~/gzwatch.log`, which `item/50`'s run then overwrote. The
-      numbers above were extracted before that, but the raw log is gone and
-      cannot be re-read. **Any run whose output matters must copy
-      `gzwatch.log` aside under its own name the moment it finishes** — two
-      sessions share that one filename.
-      **Remaining suspects** stay title-wide rather than pinnode-specific:
-      the 48-byte runtime-info record (`f9/00`, `f9/01`, `fc`) is answered as
-      **48 zero bytes for every board**, and node-bus bring-up gates on the
-      coin-door interlock (godzilla `0x1d6fb8` waits up to 60 s for it, and
-      ST's own address for that is unknown).
-      **Resume.** Re-run godzilla to re-validate the finder, then one ST run,
-      and read the near-miss line against the prediction above.
-      **Uncommitted: nothing.** All of it is committed on `item/52`;
-      `--check-godzilla` passes and the godzilla `[nbobj]` labelled example
-      passed on the previous build.
-      **No live run of MINE left up**, and `alive.sh` is NOT 0 — `item/50`
-      holds the lock and is running turtles_pro. Do not kill it.
-      **★★★ 2026-08-18, A WHOLE STATIC PASS AND NOT ONE RIG RUN: the settings
-      store is fully named, the country is found, and it reads a VALID
-      U.S.A. — so the refusal is neither "unset" nor "invalid".**
-      **(1) The region-lock question is ANSWERED: this build is not
-      region-locked.** The country table `0x731aac` (30 x 36) is a pure
-      COINAGE table. `+26` is the name msgid (1421 `U.S.A.` .. 1450
-      `INDONESIA`), `+28`/`+30` the two attract-marquee msgids, `+32` the
-      index; `+4`/`+16`/`+20` point into a 0xC0-byte per-country block in
-      `.data` — `+16` a 0x40-byte coin/currency record, `+20` a 0x40-byte
-      defaults block **byte-identical for all 30 countries**, `+4` a
-      variable-length pricing list. `+12` is null for 29 of 30;
-      CHUCK-E-CHEESE alone carries an extra list at `0x724118`. **No
-      permitted flag, no whitelist, no mask anywhere in the table**, and all
-      30 countries are fully populated. (`+24` is two u16s, not one u32 —
-      the old "+24 = name msgid" note was two bytes off.) That PROMOTES the
-      store line of work rather than killing it.
-      **(2) The store keys are not an unknown runtime hash — they are zlib
-      crc32 of a NAME, and every record in every file is now named,
-      offline.** `0x41b938` does `strlen(name)` then calls `0x4f4dc8`, the
-      same routine that writes the `.crc32` siblings. Two constructors, two
-      forms: scalars (`0x41b300`) `key = crc32(0, name)`; arrays
-      (`0x41b39c` / `0x41b41c`) `key = crc32(crc32(0, type), name)` — the
-      chained pair is exactly why a single-name dictionary found nothing.
-      *Proof:* NSEC's `hashA` is crc32 of the store's own name on **18 of 18
-      files**, and every recovered array pair is a (field, C type) pair.
-      `nvmap.py` recovers them: crc32 every printable string in the ELF,
-      then — because `crc32(init, A)` is affine in `init` — solve for the
-      init each candidate would need and look it up in `{ crc32(0, B) }`.
-      SYS_NVRAM entire: `dsp_block`, `low_shelf_filter`,
-      `high_shelf_filter`, `cabinet_low_shelf_filter`,
-      `cabinet_high_shelf_filter`, `custom_door_pricing`, `dip_data`,
-      `custom_message`, `error_log_index`, `burn_in_data`, and the arrays
-      `sw_broken[100] bool_t`, `sw_stuck_active[100] bool_t`,
-      `sw_alert_count[100]`, `sw_broken_matrix[11] sw_col_t`,
-      `sw_stuck_active_matrix[11] sw_col_t`, `sw_alert_count_array[176]`,
-      `error_log_array[10] error_log_entry_t`. PIN_NVRAM:
-      `total_players`, `boost_data`, `custom_pinball_pricing`,
-      `hstd_reset`, `score_average`, `tournament_players_active`,
-      `custom_pinball_door_pricing_table`,
-      `custom_pinball_credit_pricing_table`, `player_scores`. LKRAM
-      `replay_data` / `redemption_block`; FRRAM `tournament_reset` /
-      `factory_reset`; PTRAM `tournament_index`. **`85501bd4` is
-      `error_log_index`** — which is precisely why it oscillated 1 -> 6 -> 1.
-      `NVM` is not NFI2 at all: magic `MAP0`, parsed at `0x231a8c`, a device
-      map. **Not one record in any file is the country**, which closes the
-      remaining store search entirely — NVM, LKRAM, FRRAM, PTRAM and the
-      three "differing" NARRs are all named and none of them is it.
-      **(3) The country is an i2c EEPROM record at offset `0x140` — outside
-      the range the old sweep touched — and on this rig it is VALID U.S.A.**
-      `0x41c430 get_country()` -> `0x41c3d0` -> `0x41c380`, which calls
-      `0x4f2fe4(dev=0x50, addr=0x140, buf, len=4)`. The record is `u16
-      value` + `u16 check`, valid iff `check == ~(sum of the two value
-      bytes) & 0xffff` (`0x24dbbc` is an additive 16-bit sum); the country
-      index is the first byte, and `[0x52c0e0] = 30` bounds it — the same 30
-      as the table. *Evidence is this rig's OWN existing log,
-      `~/i52_country0.log`, with no new run:* `[i2c] t=1257 addr=0x50 WRITE
-      @0x0140 len=2 0140` / `READ @0x0140 len=4 0003fcff`, then at t=1340
-      `WRITE @0x0140 len=6 01400003fcff`. `00 03 fc ff` = value byte 0,
-      check `0xfffc`, and `~(0+3) = 0xfffc` — **VALID, country 0 =
-      U.S.A.**, written straight back unchanged. Both EEPROM images on disk
-      carry the same bytes. **So the refusal reads a correct country and
-      refuses anyway.**
-      **(4) A shim hypothesis raised and KILLED in the same pass, recorded so
-      nobody re-raises it:** `nv_load()` loads the 64 KB image into
-      `store[0]` while `slot_for()` allocates slots in first-seen order, so a
-      non-EEPROM slave selected first would put the image on the wrong
-      device. The log's first selection is `select slave 0x50 -> slot 0`, and
-      the 16-bit address path (`p = buf[0]<<8 | buf[1]`) serves `0x140`
-      correctly. The shim is right here.
-      **(5) The screen launcher is `0xb262c`** — `screen_start(id)`:
-      bounds-check `id < [0x52c0dc]` (= 376), `handler = *(0x730eec + id*8)`,
-      then spawn a 415-word fiber via `0x37808c`. The refusal is index
-      **8**, not 7 (`0x730f2c` is `base + 8*8`), and LOCATING is **15**, not
-      14. Only 16 call sites pass a literal id and **none of them passes 8**,
-      so the refusal is raised indirectly. That is the open end.
-      **(6) NEXT, and the first step still needs no run: find what writes
-      `0x7b9bec`.** `0x41c71c` (country init) takes its seed from
-      `(*(u16*)0x7b9bee >> 8) & 0x7f` and treats `0xff` as "nothing
-      reported". It only writes the EEPROM record when that record is
-      invalid — ours is valid, so that arm is skipped — but the same routine
-      compares the reported value against a SECOND stored copy at
-      `0x7e2cb8` (EEPROM `0x1a4`, which this rig holds as
-      `ffffffff00030000`). `0x7b9bec` is `.bss`, so something writes it at
-      runtime, and a mismatch between a *reported* country and the stored one
-      is exactly the shape of a refusal that fires on a valid country.
-      **Two "dead ends" need correcting, both mine to correct:**
-      "do not poke the i2c EEPROM, `PAD_NV_POKE=0-ff:01` changed nothing" —
-      that sweep covered `0x00..0xFF` only and the country lives at `0x140`;
-      the advice still stands, but for a better reason (the record there is
-      already valid U.S.A., so there is nothing to fix), and the companion
-      claim "`0x40..0xFF` is the only bulk region the game reads" was an
-      artefact of the default 120-line `PAD_I2C_LOG` budget. And "do not look
-      for store keys in the binary, they are hashed at runtime" — wrong; they
-      are crc32 of names and are now fully recovered.
-      **New scripts, `/home/david/i52/`:** `nvmap.py` (name every record in
-      an NFI2 file, both key forms), `ctyrec.py` (country records +
-      msgids), `ctyblk.py` (per-country coinage blocks), `crcsites.py`
-      (locate crc32-of-name call sites), `scrdump.py` (screen table).
-      **Uncommitted: nothing.** No shim change was needed and no rig run was
-      spent, so the rig lock was never taken and no build was made.
-      **★★★ 2026-08-18: ITEM 52 IS CLEARED. IT WAS NEVER THE COUNTRY - IT WAS
-      OUR OWN `run_game.sh` LYING ABOUT THE MAINS.** David's eyes: attract
-      mode, "COMBO CHAMPION / 15 COMBOS", pricing `1/1.00 3/2.00`,
-      `CREDITS 1/2`.
-      **The refusal text says COUNTRY; the code tests LINE FREQUENCY.** Message
-      ids 765/766 are `50/60 HZ` and `60 HZ` and sit immediately before 767-770
-      (`THIS MACHINE WILL NOT / OPERATE IN THIS COUNTRY / ...`) - the refusal is
-      the 50/60 Hz family, and 771-778 are two more wordings (`CAN NOT`,
-      `SHALL NOT`) for the same class so a technician can tell them apart on the
-      phone. The country the game read was a **valid U.S.A.** the whole time
-      (EEPROM dev 0x50 offset 0x140, `0003fcff`, checksum good).
-      **The chain, all read off instructions:** `0x4f1c80` opens
-      `/sys/bus/iio/devices/iio:device0/in_power_frequency` and `in_power_input`
-      and starts the monitor thread `0x4f20b0`. That thread computes
-      `measured_hz = roundf(strtol(freq_line) / 100.0f)` - the divisor is the
-      literal `100.0` at `0x4f24e8` - and publishes it at `0x842cc4+0x274`; it
-      also sets the power-loss byte at `0x842cc4+0x270` to `strtol(input_line)
-      != 0`. `0x4f205c` then reports the frequency as **ZERO whenever that byte
-      is set**. `0x3aa564` needs 375 warm-up ticks and then 24 consecutive valid
-      samples before `0x3aa60c` will report; `0x23996c` passes only if the
-      reported value lands in **57..63** (`sub r3,#57 / cmp r3,#6`), or failing
-      that if the EEPROM factory config says 50 Hz - and that block, 52 bytes at
-      EEPROM offset **0**, is ALL ZEROS on this rig, so `0x238de4` fails both of
-      its checksums and reports nothing. On failure: `flag_set(3)` =
-      `FG_FACTORY_FREQUENCY_MISMATCH`, then `0x239a0c` starts screen **8**,
-      whose handler `0x3c9658` draws 767-770 and spins forever at priority 0xff
-      - which the admission gate at `0x46e6c8` can never displace, and that is
-      why the game drew no other text for three minutes.
-      **Our rig wrote `60` and `120`.** `60/100` = 1 Hz, outside the band; and
-      `120` being non-zero asserted power-fail, which zeroed even that. **Both
-      were wrong and each alone still refuses.** Now `6000` and `0`.
-      **MEASURED, not inferred, and that is the point of this pass.** A new
-      `PAD_PEEK=<hexaddr>[:<len>][,...]` reads guest globals and logs them on
-      change (in the usleep interposer, 5 Hz, deduped). With the old values it
-      showed `0x842cc4+0x274` holding float **60.0** while `+0x270` held **1**
-      and the accumulator at `0x7bff8c` never took a sample; with the new ones
-      the accumulator settles at `+4 = 375`, `+8 = 24`, **`+12 = 0x3c = 60`**,
-      `+16 = 0` and the refusal never appears. Four passes of this item changed
-      an input and re-ran to see whether the symptom moved - one bit of evidence
-      per rig run, on a rig that is a mutex. **`PAD_PEEK` is the instrument that
-      ends that**, and it is worth reaching for before any "what did the game
-      actually see?" question.
-      **Also settled on the way, and all of it retires guesswork:** the country
-      table `0x731aac` is a pure coinage table with no permitted flag, so the
-      build is NOT region-locked; the settings-store record keys are plain zlib
-      **crc32 of a name** (`crc32(0,name)` for scalars, `crc32(crc32(0,type),
-      name)` for arrays - proven on 18 of 18 NSEC headers), so `nvmap.py` names
-      every record in every store file offline and none of them is the country;
-      `85501bd4` is `error_log_index`; the EEPROM's own NFI2 blob at 0x2014 is
-      surface calibration and the 8 KB at 0x4000 is the coin/game audit journal.
-      **Two "dead ends" were WRONG and are retired:** "the store keys are hashed
-      at runtime and cannot be found" (they are crc32), and "poking the i2c
-      EEPROM changes nothing / 0x40..0xFF is the only bulk region read" (that
-      sweep covered 0x00..0xFF only, the country lives at 0x140, and the
-      "only region" claim was an artefact of the 120-line PAD_I2C_LOG budget).
-      **What is NOT done, and it is what stands between here and playable:** the
-      glass shows `TECH ALERTS: CHECK SWITCH #7..#22` (both flipper buttons,
-      both EOS, both slingshots, shooter lane, trough 6) because the shim's
-      `[swfind]` still reports **"no switch table yet"** for ST, and the virtual
-      playfield window says "No tables for stranger_things_le yet" because
-      `device_xy.txt` builds **0 records**. Also on the glass:
-      `GAME VALIDATION ERROR #3 UPDATE SD CARD` and `No Connection`.
-      **★★ 2026-08-18, SAME DAY, THE PLAYFIELD WINDOW IS FIXED AND THE REAL
-      REMAINING BLOCKER IS NAMED.**
-      **`swelf.py` reads stranger_things' switch list straight out of the
-      ELF.** mktables.py's docstring says the switch tables cannot be built
-      without a run because the game builds its table on the heap - true of
-      godzilla, FALSE of ST, whose table is static and whose shape the shim's
-      by-shape hunt can never match (`sw_run_len`/`sw_entry_ok` walk
-      `base + k*32` reading node at +20 and bit at +18; ST's entries are 44
-      bytes and carry neither). "Clickable switches will appear on the next
-      run" was a promise this code could not keep for such a title.
-      Three roots: `entry(id) = *(0x724608) + 44*id` (+24 u16 num, +26 u16
-      device index), `dev(i) = *(0x7260b8) + 24*i` (+12 5-language name cell,
-      +16 slot, +18 bit, +20 kind, 7 = switch), `board(s) = *(0x725aac) + 16*s`
-      (+14 node id). **Validated three ways**: David's TECH ALERTS photograph
-      named eight switches by number and all eight come out with the same
-      number and name (#7 LEFT SLINGSHOT … #22 SHOOTER LANE, all node 8); the
-      independently-established DIP 1..8 at node 0 bits 0..7 and SERVICE SELECT
-      at node 0 bit 8 are reproduced through the slot→node indirection rather
-      than assumed; and the table length is not guessed - `ENT + 44*100` lands
-      exactly on the device base. Godzilla regression: `mktables.py --force`
-      rebuilds all five of its tables **byte-identical**, and `swelf.rows()`
-      declines any title with no recorded roots.
-      *Result, eyes on it:* the window now lists 99 switches by node with a
-      keyboard legend derived from ST's own list, service buttons, coin door
-      closed/48V on and trough 6/6. No artwork - ST ships none, and
-      `devicexy.py` finds no coordinates because ST's 24-byte device record has
-      none. It is a schematic and that is the correct outcome for this title.
-      **★ THE REMAINING BLOCKER, precisely localised: ST's node bus never
-      leaves the identify phase.** ST and godzilla issue an IDENTICAL first ten
-      commands - `0a 07 08 03 f1 f0 00 fe f9 fc`. Godzilla then continues
-      `fa f2 14 46 72 48 40 85 84 44 …`; **ST stops dead after `fc`** and
-      re-sends `fe` (identify) to nodes 1, 2, 4, 8, 9, 12 twelve times each,
-      for ever. No `0x11` means no switch scan; no `0x40` means no coils; no
-      coils means no flippers. That, not the switch table, is what "playable"
-      is waiting on, and it is plausibly what the glass calls `No Connection`.
-      The divergence is one frame wide: **godzilla's next frame is
-      `8203fa018003` (node 2, cmd `fa`, payload 01) and ST never sends it.**
-      Start at what the shim replies to `f9`/`fc` (`hwshim.c:8228`) and `fe`
-      (`hwshim.c:8400`), and at what makes the game issue `fa`.
-      **Cosmetic, do not spend runs on them:** `GAME VALIDATION ERROR #3 UPDATE
-      SD CARD` and `No Connection` are tech-alert rows; godzilla plays a full
-      game on this rig with validation errors on its glass. **But note the
-      verifier's caveat:** #3's verdict IS read by ten `bl` sites outside the
-      module, none of which was traced to coin-up or ball launch, so "cosmetic"
-      is the working assumption and not a proven one.
-      **Do NOT set `PAD_SW_STRUCT`/`PAD_SW_COUNT` for ST.** There is no working
-      value: `sw_entry_ok` needs live pointers at +8 and +12 and ST's entry 1 at
-      0x758350 has zeros in both, so every stride-32 reader downstream reads
-      noise. The by-shape hit at `0x842ffc` is a false positive in `.bss`, not a
-      near miss.
-      **▼ A TRAP MEASURED 2026-08-18, and it will misread every future log:
-      setting `PAD_GAME` ALONGSIDE `PAD_CARD` degrades a run badly.** With both
-      set, ST managed **TX 25** and the `[nbsched] playfield nodes:` line
-      disappeared entirely; with `PAD_CARD` alone and everything else identical
-      (same build, same `switch_list.txt` on disk) it is **TX 149** and the
-      nbsched line is back. Both runs otherwise agree - same frame counts per
-      second, no refusal. `/home/david/i52_pf.log` is a PAD_GAME run and must
-      NOT be used as a node-bus baseline; `/home/david/i52_ab.log` is the clean
-      one. This also cleared `swelf.py` of suspicion: the A/B was run with
-      `switch_list.txt` present in both arms, so the drop is PAD_GAME's and not
-      the new table's.
-      **★★★ 2026-08-18: THE NODE BUS IS NOT STALLED BY THE GAME - IT IS
-      THROTTLED BY THE SHIM'S OWN SWITCH-TABLE SEARCH. Mechanism measured; the
-      obvious fix was tried, crashed, and is reverted.**
-      `sw_find_maybe()` is called from the node-bus write path, so the search
-      runs **inside the guest's `write()` to the bus** and the bus thread is
-      blocked for its whole duration. Godzilla never pays it: `sw_configured_ok()`
-      validates its table on tick 0 and `sw_find_table()` is never called. ST's
-      configured address is godzilla's, fails, so ST runs the by-shape search at
-      bus-write ticks 0, 8, 16, 24. That search walks every writable region at a
-      **4-byte step** calling `sw_entry_ok()`, which calls `addr_readable()`
-      twice (`e`, `e+28`) plus up to two more via `sw_ptr_ok()` - and
-      `addr_readable()` is **a real `write(2)` syscall**, memoised only on the
-      immediately-previous pointer, so `e` and `e+28` never hit the memo. Two to
-      four syscalls per four bytes of guest address space, under qemu-user.
-      *Measured in `i52_ab.log`:* four multi-second dead windows, each beginning
-      at exactly a search tick and at no other frame - **38.8 s, 43.7 s, 43.4 s**
-      - about 126 s of a 180 s run. Consequences, in order: the game asks its
-      first bare-`00` discovery question at t=57 s and the shim answers "bus
-      empty", because the node-directory seed needs `sw_find_fails >= 4`, i.e.
-      tick 24, i.e. **t=145 s**; the game gives up at ~155 s and there is not one
-      `[nb*]` line in the last 25 s.
-      **The obvious fix does not work and must not be re-tried blind.** Caching
-      the probe per PAGE for the duration of one scan is correct on paper -
-      readability is a page property - and it worked exactly as intended: the
-      dead windows collapsed, the seed moved from t=145 s to **t=20 s**, TX went
-      **149 → 990**. It also took a **SIGSEGV inside `sw_entry_ok`, twice, at two
-      different pcs**, where no pre-change build had ever taken one. The half of
-      "readable" that is not a page property is WHEN: the scan reads
-      `/proc/self/maps` once and walks it while the guest allocates and frees
-      scene memory, so a page probed readable early can be gone by the time the
-      walk reaches it. The one-address memo has the same race with a window of
-      one candidate; a page cache widens it to a whole scan. **Reverted; the tree
-      is crash-free (segv 0, full 180 s, 9720 frames).** Whatever replaces it has
-      to answer the WHEN: a re-probe on entry to each page immediately before
-      touching it, a `sigsetjmp` guard so a fault aborts the scan and not the
-      process, or trusting the maps snapshot under such a guard - the discipline
-      `nb_scan_objs()` already documents.
-      **A second measurement trap, and it invalidates TX counts in this
-      document:** `nb_log_budget` defaults to **400**, shared across TX/RX/
-      TX-reply. `i52_ab.log` is 149+126+125 = exactly 400 and `after.log` is
-      158+136+106 = exactly 400. **Both were truncated.** Use
-      `PAD_NB_LOG=20000` on every node-bus run; the same ST build reports TX 257
-      rather than 149 with the budget lifted, and nothing about the run changed.
-      The unbudgeted `[nbcmd]` census is the one frame statistic that was always
-      safe to read.
-      **Still true after all of it:** the census remains
-      `0a 07 08 03 f1 f0 00 fe f9 fc` and `[nbchg]` is 0, so no switch scan and
-      no coils. **Rank-2 hypothesis, untested:** the boards are answered but
-      never graded to state 2 - ST's bring-up driver is `0x2059ac`, its phase
-      gate `0x205328` wants every board's `[obj+24]` to be 2, and ST's board
-      array is **0x8239c8 stride 0x98** (not godzilla's 0x7bad88/0xe0, which is
-      what every previous per-node flag reading on ST actually sampled).
-      **`0xfa` is a red herring - do not chase it.** It is the failure path of a
-      node deliberately silenced by `PAD_NB_SILENT=2` in godzilla's own run
-      script, it goes to node 2 and no other node, and godzilla plays fine with
-      it looping. Likewise "ST re-asks `fe` twelve times" is not a refusal loop:
-      one accepted identify costs six `fe`, so twelve is two normal passes.
-      **★ 2026-08-18 (later): THE CRASH IS FIXED, THE BUS IS UP, AND THE
-      FLIPPERS REACH THE GAME.** Four findings, in the order they fell:
-
-      **(1) The scan fault guard (hwshim.c), and the crash was never
-      sw_entry_ok's.** A sigsetjmp guard now hooks into the SIGSEGV handlers
-      the shim already owns (scan_guard_check): a fault on the scanning
-      thread longjmps back, closes the scan's fd, counts a failed search,
-      retries later. The page cache and the 0/2/4/6 cadence are back behind
-      it. The first guarded run then died at 16 s ANYWAY - pc inside
-      nb_objs_shape_ok, the OTHER maps walk, whose comment claimed "reads
-      stay inside the region the maps line already proved mapped". Proved
-      mapped proves WHERE; the guest's allocator owns WHEN. Both walks now
-      wear the guard, serialized by a busy latch. Measured: segv 0 across
-      every subsequent run, 3-6 aborts per run survived, each one a would-be
-      dead run.
-
-      **(2) The rank-2 hypothesis was RIGHT, and PAD_PEEK of ST's own board
-      array (0x8239c8/0x98) named the board.** Six of seven boards grade
-      status 2; node 4 (QR SCANNER) sits at status 7 = Checksum, claiming
-      fw 124.107.0 - godzilla's node4 firmware, the exact substitution
-      nbdir.py flagged "reproduced not corrected ... worth revisiting if
-      node 4 misbehaves". The node4 hex image is ENCRYPTED (checked against
-      three titles: no plaintext version anywhere; the 7c 6b 00 at +9 in
-      godzilla's image is a coincidence of high-entropy bytes), so the
-      per-title truth cannot be read from the file. The game then tries to
-      REFLASH our fake node 4 forever (census command 04 at 143 s, flag
-      churn 13/43/53). And 0x205328's gate is asymmetric: an optional board
-      PRESENT but ungraded pins NOT READY forever; an optional board ABSENT
-      passes. ST declares node 4 attr 0x4 = OPTIONAL (godzilla's is 0x0).
-
-      **(3) So the durable fix is TRUTH, not a better lie: the machine does
-      not have a QR scanner.** nodecensus.py gained a second candidate class
-      (optional_node4_nodes: type node4 AND flags bit 2, read from the ELF
-      via nbdir's own parsers - no name check; godzilla is excluded by its
-      own 0x0 attr). watch.sh's census now emits PAD_NB_SILENT=4 for ST by
-      itself. Measured on the durable path: 0x40 coils at 30 s, 0x11 switch
-      scans at 53 s, all present boards status 2, node 4 takes the same fa
-      failure path godzilla's silenced node 2 does.
-
-      **(4) The last blocker was our own switch-table absence: sw_scan_bytes
-      answers "no switch state" for a title with no table - a playfield with
-      no switches and a keyboard wired to nothing** (coin, start and both
-      flippers were pressed on a LIVE bus: zero [nbchg]). The fix is the
-      FILE TABLE: sw_file_table() loads /dump/tables/<game>/switch_list.txt
-      (swelf.py's ELF-derived list) into godzilla-shaped entries and
-      publishes them through the existing sw_shadow seam - tried only at
-      sw_table_hopeless(), absent ids poisoned (node 0xff, not 0 - an
-      all-zero entry is DIP 1), NOT re-dumped (mktables prefers a log dump;
-      a round-trip would trade real names for "?"). The discovery seed
-      filters nb_is_silent in the primary branch too, and a file-table title
-      merges its declared node directory (minus silenced) into the seed so
-      the LED-only boards (2 CABINET LIGHTS, 12 TOPPER) are still
-      discovered - add_boards() cannot do it on ST because ST's board array
-      is DENSE, not self-labelling, so the by-shape array scan can never
-      resolve it.
-
-      **Measured end-to-end (i52_game.log): bus up at 19.9 s; plunge.py
-      reset/coin/start/plunge/flippers; 11 [nbchg] lines that tell the
-      physical story exactly** - at rest node 8 reads six trough switches
-      closed and TROUGH JAM open; the plunge opens trough 6 and closes the
-      shooter lane; LEFT FLIPPER (bit 25) at 45.3 s and RIGHT (bit 24) at
-      48.2 s both hit the wire, and the game answers node 8 with b7 at the
-      same millisecond, plus a 20-byte 96 burst right after START. The
-      pre-table replies ("all zeros = 78 active-low switches read ACTIVE")
-      are also gone: idle now reads open.
-
-      **Still open, and it needs eyes:** whether a game actually STARTS
-      (the screen oracle logs no text on ST attract/game scenes - the 0x11
-      story above is switch-level truth, not a scorecard), and per-switch
-      POLARITY is uniform active-low (right for 78 of godzilla's 88; if
-      ST's optos disagree the place for per-device polarity is the file).
-      The remaining scan-aborts are nb_objs_addr re-scanning for a board
-      array ST does not have in findable form - harmless, guard-caught.
-
-      **★ 2026-08-18 (evening): A GAME STARTED AND RAN - David's session, his
-      eyes, and the log agrees.** Fresh boot 14:01 (guided setup already
-      persisted): coin (+39k) credited, start (+36k) took, and at 114 s the
-      log shows `[sw] -69f` - BALLFEED answering the game's OWN trough eject
-      coil. Playfield hits (+99p node 9, +64p node 8) served; the video
-      channels left the attract loop for game scenes. Two session findings on
-      the way there: (1) autoattract was fighting the guided setup (fixed:
-      operator stand-down, commit f789276); (2) in the 45-minute first
-      session the game's switch sweep DEGRADED 3.3 s -> 32 s (a coin held
-      31.7 s on the wire because no node-1 scan happened between 2634 s and
-      2666 s) - a fresh boot resets it; cause unproven (candidate: the 1 Hz
-      clip EOS/rebuild cycle accumulating in-game state).
-
-      **THE REMAINING GAP, measured in-game: switch closures wait 0.5-2.8 s
-      for a scan even during play** (swlatch id=64 waited=2785 ms with a ball
-      in play). The game never enters a fast-scan state on ST as emulated.
-      The lever: the 0x11 scan is REQUEST-driven off our `00`-poll and `ff`
-      status answers - flag a node's pending switch news there so the game
-      fetches immediately instead of on its lazy sweep. Also open: budget the
-      [vid] EOS-cycle log lines; per-switch polarity is a uniform active-low
-      guess; the session-degradation cause above.
-
-      **★ 2026-08-18 (night): THE SWITCH LATENCY IS FIXED - it was OUR heap
-      scan running on the game's bus thread.** Press-to-wire on ST went from
-      0.5-2.9 s to 5-12 ms; the node-bus service tick from one pass per 3.3 s
-      to 9-10 ms (godzilla's exact cadence); 0x11 scans from ~1/s to 170-430/s.
-      Godzilla regression byte-identical (TX 7806, 10580 frames, 0 CNB).
-
-      **What it was.** `nb_objs_addr()` ("never cache a miss - the array is
-      populated as bring-up runs") is read through `NB_OBJS` by
-      `nb_nodes_add_boards()` at the top of EVERY node-bus service cycle,
-      inside the shim's reply to the game's `00` poll - i.e. ON `game:nodebus`.
-      On a title whose board array cannot be found by shape (ST's is dense, not
-      self-labelling), that is a full /proc/self/maps heap walk per cycle,
-      ~2.8 s each under qemu. The game's loop ran exactly as designed; the 3.3 s
-      between passes was us. Fix: rate-limit the miss (10 s apart, 3 tries,
-      then stop for the run). Godzilla resolves first try and caches forever,
-      which is why the labelled example never showed it.
-
-      **How it was found, and the rule to keep:** five hypotheses died on
-      measurement first - node 4's silence (X4: unsilenced, same 3.3 s), a bus
-      timeout (the pass is 1 ms and clean), the game's own scheduler (a page
-      of 0x2065c4 disassembly, three PAD_PEEKs, a pass-entry hook: it fires
-      from ONE site every 2.8 s and never otherwise), the video EOS churn (ST
-      dies with PAD_VID=0 - separate finding), the sleep-site addresses (real
-      but minor: 0x4eb5cc/0x204f5c are now recognised BY SHAPE, keep that).
-      The 30-second measurement that ended it: `/proc/<pid>/task/*/{stat,
-      wchan,syscall}` sampled 30x over 6 s - `game:nodebus` was `R`, wchan 0,
-      no syscall, EVERY sample. A thread that is running-not-blocked for
-      seconds is spinning, and the shim is the only thing on that thread that
-      can spin for seconds. **Sample the thread states BEFORE reading the
-      game's code.** (`i52sample.sh` in C:\tmp is the sampler; runs as david,
-      sudo -n for /proc syscall if available.)
-
-      **Also shipped on the way (all measured, all kept):** the priority lane
-      in nb_next_node (a node with unserved switch news is named first - now
-      that the loop runs at 100 Hz it is what makes a press land in the NEXT
-      tick), a silenced node answers its routine `ff` status poll (its
-      absence no longer costs the game a retry+timeout per pass), the
-      recovery/reset usleep substitutions keyed by shape not godzilla's
-      addresses, PAD_PASS_HOOK=<hexaddr> (log every entry to one function
-      with caller+timestamp - generic, pattern-guarded).
-
-      **Open, and small:** ST exits with PAD_VID=0 (needs the video path);
-      the first-session sweep degradation (3.3 s -> 32 s over 45 min) is
-      almost certainly this same scan re-running - re-measure on a long
-      session before chasing it separately; polarity still uniform
-      active-low.
-
-      **Acceptance (unchanged):** stranger_things boots past LOCATING NODE
-      BOARDS with no NOT FOUND overlay, stated with a screenshot; then say
-      what its attract shows on BOTH displays.
-      — S2: the title is unplayable past boot, but no other title is
-      affected and the projector/display work is delivered; it costs runs on
-      one title. D4: the instrument that can judge it does not exist for this
-      title and has to be built and validated against godzilla first.
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
       instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**
@@ -3013,6 +1550,1470 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **52. stranger_things wedges on LOCATING NODE BOARDS while its
+      projector plays. NOT, as this item used to say, "nodes 1, 8 and 9 are
+      the only boards it cannot find" — that reading is disproved below.**
+      `S2 D4` DONE 2026-08-18, `item/52`, `7b6791b`. stranger_things BOOTS, PLAYS, and its flippers land in 5 ms. In order: the "country" refusal was our own run_game.sh feeding the mains monitor 60/100 Hz and an AC-fail flag (fixed 6000/0); the node-bus stall was our by-shape switch scan blocking the bus thread (both maps walks now fault-guarded, page cache + dense cadence reinstated); the readiness wedge was node 4 (optional node4-type, encrypted image, status 7) - nodecensus.py now derives PAD_NB_SILENT=4 from the ELF; the dead keyboard was the missing switch table - sw_file_table() loads swelf.py's ELF-derived list through the sw_shadow seam; the guided-setup fight was autoattract (stands down for a human press); and the 0.5-2.9 s switch latency was nb_objs_addr re-scanning the heap every service cycle ON THE BUS THREAD (rate-limited). David coined up, started and played; ten paced 120 ms flipper taps measured 1-7 ms press-to-wire, zero deferrals; godzilla regression byte-identical throughout. Method rule recorded: sample the thread states before reading the game's code.
+      **★★★ 2026-08-17, EYES ON THE GLASS: THE NODE-BOARD WEDGE IS CLEARED.
+      David ran this branch's rig and stranger_things no longer shows LOCATING
+      NODE BOARDS. It shows `THIS MACHINE WILL NOT OPERATE IN THIS COUNTRY /
+      PLEASE CONTACT YOUR DISTRIBUTOR` — a different, LATER screen.** That is
+      the acceptance this item has wanted since it opened, and it confirms the
+      log prediction made an hour earlier (new LCD scenes `5b2d86be` /
+      `60ed7e50`, which no wedged run ever reached). The fix that did it is the
+      `sw_find` pacing change (`d2169db`): the discovery-schedule verdict used
+      to take 1024 bus frames (~178 s) and now lands in the first 32.
+      **What remains is a DIFFERENT problem and arguably a different item:** the
+      `COUNTRY CODE` adjustment (string `0x53cabc`, sitting beside
+      `GUIDED SETUP` / `START GUIDED SETUP`). That is an OPERATOR SETTING, not a
+      node-bus fault — a real machine sets it in the service menu.
+      **Measured, and it rules out "just factory-reset it": a BLANK EEPROM does
+      not boot** — the guest takes `uncaught target signal 6 (Aborted)` ~1000
+      log lines in. The machine identity in that EEPROM is required, so the
+      country code must be SET, not cleared.
+      **Latent bug found and fixed on the way (`ee033b9`):** the shim's i2c
+      EEPROM was ONE file, `/data/nvram.bin`, shared by every title, while the
+      game's own stores under `/data/nv/<title>/` were already per-title. Now
+      `/data/nvram-<title>.bin`, seeded from the shared file on first use so no
+      settings or high scores are lost (`PAD_NV_BLANK=1` skips the seed).
+      **Not established:** whether the country screen was CAUSED by cross-title
+      pollution (my godzilla regression runs wrote that shared EEPROM) or is
+      simply the next gate, newly reachable and never configured. The simpler
+      story is likelier. A backup of the pre-change EEPROM is at
+      `/home/david/spike2root/data/nvram.bin.bak-20260817`.
+      **★ DAVID ASKED WHETHER COUNTRY IS A HARDWARE DIP, AND HE IS RIGHT — WHICH
+      MOVES THE SUSPECT FROM THE EEPROM TO MY OWN CABINET FALLBACK.**
+      Evidence: hwshim's own comment records that **switch ids 17..33 are "DIPs
+      and service buttons, which are not on any node board"** — they arrive on
+      the CABINET switch input (SPI), not the node bus. The ST ROM contains NO
+      `DIP SWITCH` / `JUMPER` / `REGION` strings at all; `COUNTRY CODE`
+      (`0x53cabc`, message id 1294) is only the menu's NAME for what those
+      inputs produce. The refusal screen itself is drawn by `0x3c9658` (message
+      ids 767/768/769/770), reached through the dispatch table at `0x728f2c`.
+      **The uncomfortable part: ST is being handed a GODZILLA-SHAPED CONSTANT
+      for those bits, by the item-52 cabinet fallback in this very branch.**
+      Measured across runs: ST logs `[cabspi] this title has no findable switch
+      table: handing the game the platform AT-REST cabinet word
+      ff0f0f0000000000`, while godzilla logs the same BITS with no such line —
+      godzilla builds that word from its OWN switch table. So godzilla is happy
+      with those bits because they are literally godzilla's at-rest word, and if
+      ST numbers its cabinet switches differently the identical bits decode to a
+      different, unacceptable country. **The country ST reads is therefore very
+      likely an artefact of this rig, not a setting anyone chose.**
+      **▼ SUPERSEDED 2026-08-18 — DO NOT FOLLOW THIS PLAN.** Step (1) below is
+      now disproved: `COUNTRY CODE` is message id 1294 and nothing loads it as an
+      immediate, so it is an ADJUSTMENT, not a dip, and a `PAD_NV_POKE` of the
+      whole EEPROM read-region changed nothing either. The live plan is the
+      "NEXT, in order" block later in this item. Kept only so the sweep is not
+      re-attempted.
+      *(superseded text follows)* **NEXT, in order of cost:** (1) add a `PAD_CAB_BITS=<hex>` override for the
+      synthetic word and sweep the DIP bits until the refusal clears — cheap,
+      and it also proves the mechanism; (2) drive the service menu / guided setup
+      as an operator would (`COUNTRY CODE` is a menu adjustment, so it may be
+      settable without touching the bits); (3) the real cure, which is the
+      original blocker: get ST's switch table to resolve, after which the
+      cabinet word is built from ST's own data and no constant is involved.
+      Country name strings (`USA`, `CANADA`, `FRANCE`, `JAPAN`, `SPAIN`) sit
+      around file offset 5446264-5452536 if a value table is needed.
+      **NOT established:** that the EEPROM had anything to do with this. The
+      per-title EEPROM change (`ee033b9`) is still correct on its own merits.
+      **★★★ ST'S OWN SWITCH TABLE IS FOUND (2026-08-17, 13-agent RE workflow,
+      four routes, every claim adversarially verified). ST DOES NOT USE
+      GODZILLA'S LAYOUT AT ALL — which is why the finder rejected everything.**
+      | thing | ST |
+      |---|---|
+      | switch entry array | `*(0x724608)` = `0x758324`, **stride 44**, accessor `0x1bf068` |
+      | count global | `0x7bc86c` = **100** slots → ids 1..99 real, slot 0 = INVALID dummy |
+      | entry fields | `+0` → state object (**state = byte at `[ptr]+1`**), `+24` u16 operator number, `+26` u16 **device index**, `+32` u16 cfg (**bit `0x04` = polarity**; clear ⇒ active low) |
+      | node + bit | NOT in the entry — via device table `*(0x7260b8)` = `0x759454`, stride 24, count `*(0x7e03dc)` = 459, accessor `0x41f598`; device `+16` = node-directory ordinal, `+18` = **bit**, `+20` = type (**7 = switch**), `+12` = name cell |
+      | node id | byte at `*(0x725aac) + ord*16 + 14` |
+      All 100 slots walked: **99 type-7 devices, 99 DISTINCT (node,bit) pairs,
+      nodes {0,1,4,8,9}** — a strict subset of ST's declared set, and every row
+      has a name. That is exactly the acceptance the finder wanted.
+      **THE NAMES THAT MATTER, and they answer David's DIP question outright:**
+      ids **17..24 = "DIP 1".."DIP 8" at NODE 0, BITS 0..7**; id 25 = node 0
+      bit 8 SERVICE SELECT (26..28 = PLUS/MINUS/BACK); id 33 = node 0 bit 23
+      COIN DOOR INTERLOCK; id 34 = node 1 bit 2 LOCKDOWN BUTTON; id 36 = node 1
+      bit 11 START BUTTON; id 65 = node 8 bit 28 SHOOTER LANE; ids 66/67 = node
+      8 bits 29/30 RIGHT/LEFT SLINGSHOT; id 69 = node 8 bit 32 TROUGH 6; ids
+      1..16 = node 4 bits 0..15 QR SCANNER STATUS (cfg `0x0024`, the only
+      active-high group).
+      **The 32-byte tables at `0x7660e4` (ids 1..128) and `0x765904` (ids
+      129..164) are a DIFFERENT object** — game-logic/service descriptors
+      (handler `+0`, arg `+4`, name `+8`, mode mask `+12`, flags `+16`), no
+      node, no bit, no state, and 82 of 164 ids are `NOT USED` filler. Three of
+      the four routes initially called these "the" switch table; they are not.
+      **⛔ DO NOT SET `PAD_SW_STRUCT`/`PAD_SW_COUNT` WITH TODAY'S CODE.** The
+      verifier ran the shim's predicates over ST's bytes: **0 of 100 entries
+      pass `sw_entry_ok`** at any stride, so there is no benefit — and three
+      named REGRESSIONS: (1) `nb_nodes_init` does not gate on `sw_find_done`,
+      so it would take the primary branch and build the node schedule from byte
+      `+20` at stride 32 = `128, 220, 5, 24, 36, …` garbage, destroying the
+      working node-directory fallback; (2) `sw_prime` writes through
+      `SW_NODEREC(0)` into ST's `.data` at `0x724624..0x724633`, armed as soon
+      as `cab_synth` clears; (3) `sw_configured_ok` rejects the address anyway.
+      **The READER must be generalised to a per-title layout descriptor first.**
+      **★ THE CHEAP HALF NEEDS NO TABLE PLUMBING: the country dips are byte 0
+      of the word this shim already synthesises.** `{0xff,0x0f,0x0f,0,...}` at
+      hwshim.c:2634 hands ST **all eight dips OPEN** — a valid at-rest level
+      carrying NO country, which is precisely the refusal screen. The rest of
+      that constant happens to fit ST too (bits 8..11 SELECT/PLUS/MINUS/BACK,
+      bit 23 COIN DOOR INTERLOCK made). **`PAD_CAB_DIP=<n>` added this pass**
+      sets dips 1..8 to `n` (active low, so `byte0 = ~n`).
+      **THE COUNTRY LIST IS DECODED — message ids 1421..1450, in index order:**
+      `0 U.S.A., 1 AUSTRIA, 2 BELGIUM, 3 CANADA 1, 4 NETHERLANDS, 5 FINLAND,
+      6 FRANCE, 7 GERMANY, 8 ITALY, 9 DENMARK, 10 NORWAY, 11 SWEDEN,
+      12 SWITZERLAND, 13 AUSTRALIA, 14 U.K., 15 GREECE, 16 NEW ZEALAND,
+      17 PORTUGAL, 18 SPAIN, 19 CHUCK-E-CHEESE, 20 SOUTH AFRICA, 21 JAPAN,
+      22 CROATIA, 23 MIDDLE EAST, 24 TAIWAN, 25 RUSSIA, 26 CANADA 2,
+      27 LITHUANIA, 28 CHINA, 29 INDONESIA`. So a country is a number 0..29,
+      and eight open dips read raw `0xff` = 255 — not a country, which fits the
+      refusal exactly.
+      **⚠ SWEEP RAN, RESULT INCONCLUSIVE — AND THE FAULT IS THE INSTRUMENT.**
+      `PAD_CAB_DIP=255` (byte0 = `0x00`, every dip MADE = raw 0 = U.S.A. if the
+      game reads the lines directly) fires correctly — `[cabdip] country dips
+      1..8 set to 255 (byte0=00, active low)` — and NOTHING MEASURABLE CHANGED.
+      **This rig has no oracle for what is on the glass:** the country message
+      is a TEXT OVERLAY drawn over video, so the LCD scene hash cannot tell it
+      apart from any other screen, and "scenes unchanged" is NOT evidence of
+      failure. No coil (`0x40`) traffic in either run, but that is equally true
+      of a machine sitting on any pre-attract screen.
+      **Two readings remain open and a blind run cannot separate them:**
+      (a) the game reads the lines RAW — `0xff` = 255 invalid, `0x00` = 0 =
+      U.S.A.; (b) the game INVERTS (made = 1) — `0xff` already means 0 =
+      U.S.A. and the refusal has another cause. Neither extreme visibly worked,
+      so the model is incomplete. A likely third shape is the classic Stern
+      split, only dips 1..5 carrying the country and 6..8 separate flags, which
+      would want `byte0 = 0xE0` i.e. **`PAD_CAB_DIP=31`**.
+      **THE SCREEN ORACLE IS BUILT (`PAD_TEXTPAGE=<frames>`, hwshim.c) AND IT
+      DISPROVED ITS OWN MODEL — which is the point of building it.** It reads
+      the game's character page, reports printable runs, dedups, refuses to run
+      on a title it has no addresses for, and — after a first cut that returned
+      silently and taught nothing — SAYS WHY when it has nothing to say.
+      Measured on ST, in order:
+      | probe said | meaning |
+      |---|---|
+      | `index at 0x7de194 reads 16` | my `idx > 15` bound was invented and threw the real value away |
+      | `page 0x7d0114 (idx 16) ... (page is all zero)` | **the `base + idx<<12` char-page model is WRONG for this screen** |
+      **Why it is wrong, and this is the lead:** `0x7c0114 + idx<<12` came from
+      the LOCATING renderer `0x3db054`. **The country screen is a DIFFERENT
+      renderer, `0x3c9658`**, and re-reading it shows `*(0x7de194)` is not a
+      page index at all — it is loaded into `r1` and passed as an ARGUMENT to
+      the draw call `0x3afd64` (`3c965c movw r4,#0xe194 / 3c9664 movt r4,#0x7d
+      / 3c967c ldr r1,[r4] / 3c9690 bl 3afd64`), i.e. a context/handle, value
+      16. So the glyphs are written wherever `0x3afd64` puts them.
+      **`0x3afd64` IS NOW READ, AND THERE IS NO CHARACTER PAGE TO POINT AT —
+      the whole page-reading premise was wrong, not just its address.**
+      ```
+      0x3afd64(id, ctx, ...):  bl 0x233330   id -> const char*   (r0 = string)
+                               r1 = 0x7c0114 + ctx<<12
+                               b  0x3afbc8
+      0x3afbc8(const char *s, target, font, flags, x, y, colour):
+                               walks s ONE BYTE AT A TIME and blits each
+                               character as a SPRITE (bl 0x440d70 / 0x440ccc)
+      ```
+      `0x7c0114 + idx<<12` is a **render-target handle** that `0x3afbc8` passes
+      straight through to the blitter. The old probe was reading a render
+      target as if it were text. No character buffer exists anywhere, so no
+      value of `PAD_TEXTPAGE_BASE` could ever have worked.
+      **THE ORACLE IS REBUILT ON THE ONLY MOMENT THE TEXT IS TEXT — entry to
+      `0x3afbc8`, where `r0` is the finished string — AND IT IS VALIDATED.**
+      `PAD_SCREEN=1` installs an inline hook there and logs every distinct line
+      the game draws. Run `stscreen`, 2026-08-17:
+      ```
+      [screen] hooked 0x003afbc8 -> trampoline 0x40873000, resuming at 0x003afbd0
+      [screen] 23367 ms: THIS MACHINE WILL NOT
+      [screen] 23367 ms: OPERATE IN THIS COUNTRY
+      [screen] 23367 ms: PLEASE
+      [screen] 23367 ms: CONTACT YOUR DISTRIBUTOR
+      ```
+      **That is exactly the screen David photographed, so the instrument is
+      checked against known truth rather than trusted.** Message ids 767..770
+      decode to those same four strings, independently.
+      Why `0x3afbc8` and not `0x3afd64`: the whole wrapper family funnels
+      there — `0x3afd64` (by message id), `0x3afdec`/`0x3afe58`/`0x3afed4`/
+      `0x3aff3c` (vsprintf first, so counts and node numbers are already
+      substituted) and `0x3afebc` (raw string). **The LOCATING renderer
+      `0x3db054` uses `0x3afebc` and `0x3afdec` and calls `0x3afd64` ZERO
+      times** — hooking `0x3afd64`, which is what the last entry proposed,
+      would have silently missed it. The hook refuses to patch unless the two
+      instructions it is replacing are the two it expects, so it is a byte
+      PATTERN match, not a byte address.
+      **Two things the oracle established on its first run:**
+      • Those four lines are the **only** text ST draws in three minutes. It
+        reaches the gate at 23.4 s and draws nothing again — matching the
+        infinite loop at `0x3c9704`, which never returns.
+      • The dip sweep is no longer blind, but is now known to be the wrong
+        first move — see the bypass result below.
+      **`PAD_NO_COUNTRY_GATE=1` (diagnostic, default off) answers the question
+      a dip sweep cannot, and the answer is NO.** Patching `0x3c9658` to `bx
+      lr` hides the refusal — and the game then draws **no text at all** for
+      four minutes (20560 frames, so it is rendering, not hung). **The refusal
+      is a persistent STATE, not a one-shot screen:** the dispatcher keeps
+      selecting it and now gets an empty handler. So hiding the message cannot
+      advance the boot, and the fix must make the country VALID. Note also
+      `TX: 149` in both runs — the node bus goes quiet at the same count with
+      and without the gate, which is worth its own look.
+      **THE COUNTRY IS AN EEPROM ADJUSTMENT, NOT A DIP.** `COUNTRY CODE` is
+      message id 1294 (string `0x53cabc`) and no code loads 1294 as an immediate
+      — it is a service-menu **adjustment**, so it lives in the EEPROM. Stop
+      sweeping `PAD_CAB_DIP`; the cabinet dips are not where this value lives.
+      **★ RETRACTION, 2026-08-18 — I BLAMED THE WRONG THING AND THE CODE
+      COMMENT SAID SO TOO.** I wrote that the shared `/data/nvram.bin` is
+      godzilla's, that ST's per-title copy was seeded from it, and that ST was
+      therefore reading another title's bytes at its `COUNTRY CODE` offset.
+      **Comparing the two files disproves all of it:**
+      | check | result |
+      |---|---|
+      | `/data/nvram.bin` @0x100 | `SPI-STR-19358604` — a **stranger_things** ident |
+      | `/data/nvram.bin` @0x150 | the string `stranger_things_le` |
+      | ST's per-title copy vs it | **16 differing bytes out of 65536** (0x10d, 0x13f..0x14d, 0x18c — a serial and two timestamps) |
+      There is **no godzilla content in that file to misread.** Cross-title
+      contamination is not the cause, and going per-title neither caused nor
+      could have fixed the refusal. The hwshim.c comment that carried the same
+      wrong attribution is corrected in place rather than deleted, because it
+      was believed long enough to aim a day's work.
+      **What the EEPROM actually shows (live i2c trace, `PAD_I2C_LOG`):** an
+      ident block at 0x100, a date at 0x1f4, and an adjustment area that is
+      **all zeros**. Reads before the refusal are `@0x1800 len=18`,
+      `@0x01f4 len=32`, `@0x0040 len=192` (polled every ~219 ms), `@0x0144
+      len=96`, `@0x0100 len=64`, `@0x1e08 len=7`. **The machine is
+      UNCONFIGURED, not mis-configured** — which fits a country stored as
+      "0 = never set" rather than "0 = U.S.A.", and fits guided setup being the
+      thing that is supposed to write it.
+      **A BLANK EEPROM DOES NOT BOOT — this is a NEW, separate defect.**
+      Moving the file aside and running `PAD_NV_BLANK=1`:
+      ```
+      [i2c] no saved NVRAM at /data/nvram-stranger_things_le.bin, starting blank
+      terminate called after throwing an instance of 'cereal::Exception'
+        what():  Trying to load an unregistered polymorphic type (Bitmap).
+      qemu: uncaught target signal 6 (Aborted)
+      ```
+      1029 lines, **TX 0, no frames, no hook** — it dies before the node bus
+      starts. Measured against the same session's runs, this is new, not
+      pre-existing-and-caught: `stscreen` and `stnogate` have **zero** cereal
+      throws and zero `terminate`; `stblank` has one of each. The EEPROM has
+      been RESTORED, so the rig is bootable again.
+      **Why that matters:** the RTTI name **`26MenuPageGuidedSetupCountry`** is
+      in the binary — there is a **guided-setup page that asks for the
+      country**. So the intended flow on a fresh machine is setup-asks-operator,
+      and the two observations join up:
+      | EEPROM | what happens |
+      |---|---|
+      | godzilla's bytes (today's default) | looks configured, country invalid → refusal screen |
+      | blank | guided setup → **crashes** loading a Bitmap through cereal |
+      Neither path reaches a country, which is why nothing tried so far has
+      moved it. **The fix is one of: write a valid COUNTRY CODE into ST's
+      EEPROM, or make guided setup survive.** Do NOT keep sweeping
+      `PAD_CAB_DIP` — the cabinet dips are not where this value lives.
+      **SCREENS ARE FIBERS, so the dispatcher is not findable by stack walk.**
+      `PAD_COUNTRY_TRACE=1` hooks `0x3c9658` and reports its caller:
+      `lr=0x003dadac`, which is a generic thunk (`push {r3,lr}; blx r1; pop
+      {r3,pc}`) used by every screen. Passing the entry `sp` too and reading the
+      frame it pushed gives `[sp+4] = 0x00467930` — **inside `setcontext`**. The
+      handler is entered through a `makecontext` trampoline, so the code that
+      SELECTED screen 7 was never on this stack and no frame walk will reach it.
+      That also explains why the screen table has no code reference at all.
+      **★ 2026-08-18 — THE SETTINGS ARE NOT IN THE i2c EEPROM AT ALL. This is
+      the redirection the item needed.**
+      `PAD_NV_POKE=<lo>[-<hi>]:<val>[,...]` (new, hwshim.c) overwrites EEPROM
+      bytes after load; it forces saves OFF for that run, so a probe cannot
+      write its own bytes over David's real settings and scores. Verified
+      empirically, not asserted: the harness md5s the file before and after and
+      reports `UNCHANGED`.
+      **Result: `PAD_NV_POKE=0-ff:01` changed NOTHING.** The refusal still
+      shows, the game still boots, 256 bytes confirmed poked. `0x40..0xFF` is
+      the only bulk region the game reads from the EEPROM, so **the country
+      decision does not depend on the EEPROM.**
+      **Where the settings actually live:** `/data/nv/<title>/` — `SYS_NVRAM`,
+      `NVM`, `NVRAM`, `PIN_NVRAM`, `LKRAM`, `FRRAM`, `PTRAM`, `node_diag`, each
+      a directory of numbered generations with a `.crc32` sibling.
+      **`PAD_OPEN_LOG=1` proves ST uses them** — it opens
+      `SYS_NVRAM/00000005`, `NVM/00000007`, `NVRAM/00000007`,
+      `PIN_NVRAM/00000002`, `LKRAM/00000002`, `FRRAM/00000001`,
+      `PTRAM/00000001`, `node_diag/00000000`.
+      *(Correction: I first reported ST had no such directory. That came from a
+      `find | head -20` that truncated before reaching it — a tooling artifact,
+      not a finding. The open log is the real evidence.)*
+      **The file format is decoded** (`nfi2.py`):
+      ```
+      "NFI2" u32 size "ST" ...header...
+      "NSEC" u32 sect_size u32 hashA u32 hashB u32 n_records
+      "NDAT" u32 rec_size u32 KEY u32 payload_len <payload>
+      ```
+      SYS_NVRAM gen5 = 1384 bytes, NSEC claims 17 records (the parser walks 10
+      before losing the chain — records continue past a gap it does not model
+      yet). Sample: `key=85501bd4 len=2 value=6`, `key=127b01ba len=4`,
+      `key=fc733f84 len=3 01609e`.
+      **KEY is an identity, not a checksum** — records `@0x0068` and `@0x0090`
+      hold *identical* payloads (`01609e`) under *different* keys. But it is not
+      a plain hash of the obvious names either: 120 name candidates
+      (`Country`, `COUNTRY CODE`, `System.Country`, …) x 7 hashes (crc32, fnv1,
+      fnv1a, djb2, djb2x, sdbm, jenkins) produced **zero** matches, so the hash
+      is seeded or custom, or the key is an enum rather than a name hash.
+      **File permissions are `---xr-----`** — owner has execute but not read,
+      which is why they cannot be dumped directly. `nvgrab.sh` captures every
+      mode, chmods, copies, and restores; 40 files verified back to their
+      original modes. **Nothing in David's store has been modified.**
+      **Also spotted, possibly its own defect:** `SYS_NVRAM/00000006.crc32`
+      exists with **no matching `00000006` data file**, and is root-owned while
+      its siblings are david-owned — a half-written generation from an earlier
+      run.
+      **★ NFI2 FULLY DECODED, AND THE STORE IS RULED OUT TOO (2026-08-18).**
+      • **`.crc32` = `crc32(whole file)` little-endian** — verified against four
+        untouched files, so a generation can be written correctly.
+      • **The format has a fourth chunk type, `NARR` (arrays):**
+        `"NARR" u32 size u32 KEY u32 count u32 n <payload>`. SYS_NVRAM gen5 has
+        11 `NDAT` + 6 `NARR` = **17**, exactly NSEC's count. The walker now
+        parses all of them.
+      • **The keys are NOT in the binary** — 14 keys searched as raw dwords,
+        literal-pool words and movw/movt pairs: **zero hits**. They are computed
+        at runtime from names, so identifying a record statically is closed.
+      • **Cross-title diff is the cheap substitute** (`nvxdiff.py`). ST vs
+        elvira3 SYS_NVRAM: 15 keys in common, and exactly **one** differing
+        scalar in country range — `85501bd4`, ST=6 elvira3=0.
+      • **Tested, and it is NOT the country.** A generation with `85501bd4 = 0`
+        was read by the game (`[open] ok /data/nv/.../SYS_NVRAM/00000006`) and
+        the refusal was unchanged. It also **oscillates 1 → 6 → 1 across boots**
+        (gen4=1, gen5=6, gen7=1, gen8=1), so it is per-boot state, not a stored
+        setting.
+      • **PIN_NVRAM and NVRAM are ruled out as well** — every key shared with
+        elvira3 is byte-identical; the differences are title-specific game data.
+      **So the country is in none of: the cabinet dips, the i2c EEPROM, or any
+      scalar of SYS_NVRAM / PIN_NVRAM / NVRAM.** What is left: `NVM` (37 KB, the
+      big one), `LKRAM`/`FRRAM`/`PTRAM`, one of the differing `NARR` arrays
+      (`38fd284f`, `8553bdab`, `8efe5684`), or — increasingly worth taking
+      seriously — **the value is not stored on this machine at all** and this
+      1.12.0 build is region-locked to a country the rig cannot present.
+      **★ HOW THE STORE BEHAVES, learned the hard way and worth knowing before
+      touching it again:** the game reads the HIGHEST generation, and on every
+      run it WRITES new generations and ROTATES OLD ONES AWAY. One probe run
+      turned {4, 5} into {5, 7, 8} — generation 4 was deleted by the game, not
+      by me. Copies of every pre-probe generation are in
+      `/home/david/i52/nvstore/`.
+      **★ AND A FLAW IN MY OWN HARNESS, recorded so it is not repeated:** the
+      run's "originals restored" check `md5sum`'d the `.crc32` files, which are
+      **mode 0** and therefore unreadable — the baseline was empty and
+      `md5sum -c` verified NOTHING while printing as though it had. The probe
+      value did not in fact persist (gens 7/8 hold 1, the value the game writes
+      itself, checked separately) but **that was luck, not the check working.**
+      Any future harness must verify its baseline is non-empty before trusting
+      it.
+      **NEXT, in order:** (1) DONE — the NFI2 walker parses all 17 records;
+      (2) find the key for the country — most cheaply by hooking the store's
+      lookup with `pad_hook()` and logging (key, name) pairs, since the static
+      hash guess failed; (3) write a valid country index (0..29, from the
+      country table at `0x731aac`) and recompute the `.crc32`. A
+      `PAD_NVFILE_POKE` knob in the shim would avoid touching the real files at
+      all, which is the right shape given the store holds real high scores.
+      **Superseded:** the guided-setup route below is still viable but is now
+      the second choice — the store is the direct path.
+      for `MenuPageGuidedSetupCountry`; it leads to the adjustment's EEPROM
+      offset, which is the one number needed to write a valid country directly.
+      The cereal/Bitmap abort on a blank EEPROM deserves its own item.
+      **Superseded lead (kept so it is not re-chased):** the static route below
+      `0x3c9658` is entry 7 of a 375-entry `{handler, attr}` **screen table at
+      `0x730ef4`** — entry 14 is `0x3db054`, the LOCATING renderer, which
+      cross-confirms what the table is. `attr`'s upper byte looks like a
+      priority: refusal `0xff` (max), LOCATING `0xf1`, its siblings
+      `0xf2/f3/f4`. The table is referenced by **no** movw/movt pair and **no**
+      literal pool, so the dispatcher reaches it some other way — find that,
+      and the country variable is one step upstream. `0x41c970` is a bare
+      `bx lr`, so the old "decode the dip handler at `0x41c970`" note was
+      pointing at a function boundary, not a handler.
+      **★ DAVID, EYES ON THE GLASS, 2026-08-17: the boot now walks its NORMAL
+      sequence — a "CHECK NODE BOARD 2" screen (not registered), and then
+      straight to the country refusal.** Two consequences:
+      • **Node 2's registration failure is USER-VISIBLE and is a real defect.**
+        It is the anomaly measured all session and set aside as "not the wedge":
+        node 2 alone never sets flags bit 0 (`f0` → `f2`), while node 12 —
+        byte-identical identity (ws2812node, part `0x2c40102b`, variant `0x05`,
+        fw 1.19.0) — registers normally. Not boot-blocking (the game moves past
+        it), but it earns its own fix and probably its own item.
+      • **The country screen is a HARD STOP, not a Tech Alert.** `watch.sh`
+        auto-presses Service Back until the game leaves Tech Alerts; that
+        cleared the node-2 screen and did NOT clear this one. So it cannot be
+        dismissed, which is what a real machine refusing to operate looks like.
+      **════ CURRENT TRUTH — 2026-08-17 THIRD PASS. The screen's predicate is
+      FOUND and read instruction-by-instruction, and it RETRACTS a claim the
+      second pass committed. Read this block only. ════**
+      **⛔ RETRACTION FIRST: "the board-object table is RULED OUT as the
+      screen's input" (committed `66e533e`) is WRONG.** The screen provably
+      reads `board[+4]` bit 1 and `board[+12]`. What the `flags=3` measurement
+      actually disproves is not the array — it is the ASSUMPTION that the
+      pixels on the glass were produced at the moment of that snapshot.
+      **THE NAMING PREDICATE (CONFIRMED — four independent RE routes converged
+      on it, an adversarial verifier could not refute it, and I re-read the
+      instructions myself).** The screen is `0x3db054` (character-page
+      renderer) and `0x3ee508` (scene overlay); they share a six-instruction
+      loop body. For each board `b = 0x8239c8 + 152*id`, walking id from 1:
+      | # | test | meaning |
+      |---|---|---|
+      | 1 | `ldr r3,[r4,#12]; cmp r3,#0; beq` | no directory entry → skip |
+      | 2 | `ldr r2,[r4,#4]; tst r2,#2; bne` | **FOUND bit SET → skip** |
+      | 3 | `ldr r3,[r3]; tst r3,#4; bne` | **OPTIONAL → skip** |
+      |   | `sprintf("%u", b[+0])` | else NAME IT |
+      **So "1 8 9" IS A COMPILE-TIME CONSTANT OF THIS TITLE, and the
+      "the named nodes are exactly the pinnodes" reading was a RED HERRING that
+      cost this item two passes.** ST's static node directory (base
+      `*(0x725aac)` = `0x7556a8`, 16-byte records, dumped from the ELF):
+      node 1 CABINET `0x8`, node 8 LOWER PLAYFIELD `0x8`, node 9 PLAYFIELD
+      `0x8`; node 2 CABINET LIGHTS `0xc`, node 12 **"TOPPER (OPTIONAL)"**
+      `0xc`, node 4 QR SCANNER `0x4`. Bit 2 = OPTIONAL is NAMED BY THE BINARY
+      (node 12's own display string says so), not inferred. Nodes 2/4/12 are
+      thrown out by clause 3 before their found-state is ever consulted, and
+      node 0 is unreachable (both renderers seed the walk at id 1). The
+      eligible set is therefore exactly {1,8,9} no matter what the bus does.
+      **THE PREDICATE REPRODUCES THE OBSERVED SCREEN FROM MY OWN DATA:** at
+      watch tick 1, n1/n8/n9 are `f1` (FOUND bit CLEAR) and 2/4/12 are
+      optional → replay names exactly `1 8 9`, which is what the glass showed.
+      **THE WEDGE IS THEREFORE NOT THE NAMING PREDICATE.** By tick 7 the
+      playfield boards reach `f3` (FOUND bit SET) → the list empties → and the
+      count gate (`3db178 cmp r6,#0; beq 3db244` / `3ee600 cmp r5,#0; beq
+      3ee7c0`) suppresses the ENTIRE draw, title line included. So after ~35 s
+      nothing is being drawn at all: **the "LOCATING NODE BOARDS / 1 8 9" on
+      the glass is STALE PIXELS**, which is exactly why the LCD scene hash
+      never changes for six minutes.
+      **THE ACTUAL GATE, and it is a rig-side bug of ours (mechanism read
+      instruction-by-instruction at `0x205328`, the boot-readiness check):**
+      ```
+      205388  ldr r0,[r3,#24]; cmp r0,#2      status==2 -> OK path
+      205394  ldr r0,[r2];     ands r0,#4     else: is the node OPTIONAL?
+      2053a0  ldr r0,[r3,#4];  tst r0,#2      optional AND FOUND...
+      2053a8  movne r4,#0                     ...but not status 2 = NOT READY
+      ```
+      **An OPTIONAL board that IS present but is NOT graded 2 pins readiness
+      at false forever — and that is ST's node 4 exactly** (QR SCANNER, attr
+      `0x4` optional, answers the bus so FOUND is set, graded **status 7**).
+      Readiness never returns true, so `0x776404` bit 5 (raised after 300 ms of
+      failed location at `205a9c`, cleared ONLY on a ready result at `205aac`)
+      stays latched forever. **Node 4's status 7 is OUR doing:** the shim has
+      node 4 claim godzilla's node4 firmware `124.107.0`/variant `0x98`, which
+      `nbdir.py`'s own comment flags as "reproduced not corrected … worth
+      revisiting if node 4 misbehaves". Node 4 is misbehaving.
+      **PROBE BUILT AND RUN THIS PASS:** `PAD_NB_FORCE_STATUS=<ids>|all`
+      (hwshim.c) forces the graded status to 2 for the named boards on each TX,
+      deliberately NOT touching flags so the readiness question and the naming
+      question cannot confound each other.
+      **★★★ THE ANSWER, AND IT IS A RACE — MEASURED, NOT THEORISED (run
+      `i52_st15ready`, 2026-08-17).** `PAD_NB_FORCE_STATUS=4` fired
+      (`[nbforce] forcing status 2 (was 7) on node 4`), every board ended
+      `s2` and nodes 1/8/9 reached `f3` — and **ST STILL WEDGED**, one LCD
+      scene for the whole run. So node 4's grade is NOT the blocker. The
+      timing measurement says why:
+      | when | evidence |
+      |---|---|
+      | first node-bus TX | ~0 s |
+      | **nodes 1/8/9 first ALL carry the FOUND bit** | **181 s** (188 s in the st12 wedge run) |
+      | the game's window to see it | the retry loop at `205a44`-`205a8c`, seconds, then it gives up at `205ab4` |
+      **Our bring-up finishes roughly two orders of magnitude too late.** At the
+      moment the game decides, the boards genuinely are NOT found — so the
+      screen names 1/8/9 CORRECTLY, latches `0x776404` bit 5, and the only code
+      that clears it (`205aac`) is inside the loop that has already exited.
+      Nothing re-checks, so the boards going healthy at 181 s changes nothing
+      and the stale text sits on the glass forever. **This retires the
+      "grading/identity/registration" framing entirely: nothing is wrong with
+      what the boards CLAIM, only with WHEN they become found.**
+      **★ THE 181 s IS PART MINE, AND THAT PART IS FIXED (2026-08-17).**
+      `sw_find_maybe()` attempted the switch-table search on a flat
+      `tick % 256` node-bus frames, and `sw_table_hopeless()` needs FOUR failed
+      searches — so the "this title has no switch table" verdict, which is what
+      releases my discovery-schedule fallback, could not be reached until
+      **1024 bus frames**. Measured: the schedule seeded at **178.4 s** and the
+      boards went found at 181 s. The game asks for SECONDS and never re-asks,
+      so for the entire window in which ST was asking, the shim was answering
+      "the bus is empty". **Fix: four searches inside the first 32 frames, then
+      the old 256 spacing — same number of table passes, front-loaded onto the
+      frames that are the bare-00 discovery walk itself.**
+      | metric | before | after |
+      |---|---|---|
+      | schedule seeded | 178.4 s (L5985) | L3313 |
+      | nodes 1/8/9 all FOUND | 181 s | **142.6 s** |
+      | LCD scenes | frozen on `bc0792d8/45a4e8c62515` all run | `ch0 5b2d86be`, `ch1 60ed7e50` — the latter never seen in ANY prior run |
+      **Labelled example holds: godzilla is byte-for-byte unaffected** (89770
+      lines vs 89456, node TX 158 vs 158, 10540 frames vs 10520) because its
+      configured switch table checks out (`entry[] at 0x00991d98, 88 switches`)
+      so it sets `sw_find_done` and never reaches the hopeless branch at all.
+      **HONESTY: this is an improvement, NOT a cure, and I have no eyes on the
+      screen.** 142.6 s is still two orders of magnitude past the game's
+      window, so ST is very probably still wedged; the changed scene hashes say
+      the game's video state moved somewhere it never moved before, which is
+      evidence of progress and NOT evidence of a completed boot. Someone with
+      the glass in front of them should look.
+      **NEXT PASS — the remaining cost is the BUS RATE, not my scan spacing:**
+      at one point 120 bus frames took 142 s (**under 1 TX/s**), and the game
+      needs hundreds of frames before it sets the FOUND bit (each node is
+      polled `fe` ~126 times; 756 `fe` frames in the st12 census). So the
+      question is now: what paces the node bus, and why does the game need so
+      many rounds per node before `0x205cb8` sets the bit? Suspect the
+      shim's per-exchange latency or a reply the game keeps re-asking for
+      (the 126 rounds look like a retry, not a heartbeat, and the standing "no
+      `ff` in the census" loose end is likely the same story).
+      **Superseded sub-question (kept so it is not re-asked):** what takes
+      181 s? The FOUND bit is set by the game at `0x205cb8` for boards
+      with `status==2` that answer the addressed `0xFF` read at `0x4f0c1c`, so
+      the target is the latency from bus-up to that read completing per node.
+      Note the standing loose end that now looks load-bearing: **the boards
+      reach the FOUND bit with NO `ff` visible in the TX census**, so either
+      the census regex misses ST's `ff` framing or the bit is set by another
+      path — resolving that names the slow step. Cheap instrumentation first:
+      timestamp every per-node state change (the `PAD_NB_SCREEN` sampler
+      design in the workflow brief) and find the gap.
+      **Rig note: godzilla's node bus is SLOWER in raw frames (158 TX in 180 s
+      vs ST's 1281 in 300 s) and boots clean, so raw bus rate is NOT the
+      metric — it is the per-node time-to-FOUND that matters.**
+      **Also corrected:** the message table's real base is `0x73bd98` (3740
+      entries, loaded as a movw/movt immediate at `0x2332f8`); the second
+      pass's "192-entry table at `0x73dbb4`" was a MID-TABLE OFFSET, which is
+      precisely why no immediate load of it existed and why the string-xref
+      route looked dead. The screen strings are message ids 1961/1962.
+      **════ END THIRD PASS. Below: second pass, still valid except for the
+      retracted "board table ruled out" line. ════**
+      **════ CURRENT TRUTH — 2026-08-17 SECOND PASS. SUPERSEDES the block
+      below it too. Read this first; it RE-ANCHORS the item on the real
+      symptom, which the first pass (and most of this pass) had drifted off.
+      ════**
+      **THE SCREEN NAMES THE PINNODES (1, 8, 9), NOT node 2.** The eyes-on
+      symptom — recorded in `nbdir.py` from David's 2026-08-16 boot — is
+      `LOCATING NODE BOARDS / 1 8 9 / NODES NOT FOUND`. This pass spent most of
+      its length chasing node 2 (whose board object never sets bit0 — see
+      below), which is the WRONG board: the screen complains about 1/8/9, the
+      three pinnodes, not 2. Recorded so the next pass does not repeat the
+      detour.
+      **AND THE SCREEN DOES NOT READ THE BOARD-OBJECT FLAGS.** Proof, two
+      independent legs: (a) the pinnodes 1/8/9 reach `flags=3` (the healthy
+      end-state) in the board watch, yet the screen names them NOT FOUND; (b)
+      the census for the boot that showed that screen has NO addressed
+      subcommand at or below 0xef reaching ANY node, i.e. by the game's own
+      registration criterion nothing was registered — the flags word and the
+      screen's verdict disagree. **So the six passes (this one included) spent
+      in the board-object table were looking at the wrong structure. The board
+      table is RULED OUT as the screen's input.** What the screen actually
+      reads is still unknown and is the whole remaining job.
+      **What the boot log DOES establish (st12, fix ON, pre-reboot, the last
+      good run — analysed exhaustively this pass):**
+      | fact | evidence |
+      |---|---|
+      | node location COMPLETES, it is not an infinite poll | every node polled `fe` 126 rounds, then a final `f9/f9/fc` runtime-read pass, a `0a00` broadcast, one `f0`→node0, then the bus goes SILENT at L9536 and never speaks again for the remaining ~6 min |
+      | the LOCATING scene never dismisses | ch0 holds ONE LCD scene `bc0792d8/45a4e8c62515` from frame ~120 to frame ~20000 — through location completing and forever after |
+      | every node's runtime info (`f9 00`,`f9 01`,`fc`) reads back ALL ZERO | `nbparse.py` census: 18 zero bytes for all of 1,2,4,8,9,12 |
+      | three board TYPES by `fe` identity | A=(1,8,9) `0001130023…c500` pinnode; B=(2,12) `000113002b10…3f00` ws2812node; C=(4) `007c6b00…2c00` node4 |
+      | all six identities are VERSION-MATCHED to ST's own hex | `node_ident.txt`: every node `hexver=1.19.0`, variant per type, = what the shim claims. **The firmware-version-grade-mismatch theory is DEAD — there is no mismatch.** |
+      **Board-array end state (correcting this pass's own earlier "all reach
+      flags=3" overstatement):** `n0=f3s2 n1=f3s2 n2=f2s2 n4=f3s7 n8=f3s2
+      n9=f3s2 n12=f3s2`. Two anomalies, both present from the first watch tick
+      and BOTH FIX-INDEPENDENT (identical in the `PAD_NB_SCHED=0` control):
+      **n2 never sets bit0** (registered) — it is the only node that starts f0
+      not f1, and ends f2 not f3 — and **n4 carries status 7** (all others 2),
+      because its `fe` reply has a different byte layout (`00 7c…` vs the
+      `00 01…` version prefix) that the fixed-offset parser reads as fw
+      124.107.0. NEITHER is the screen's gate (the screen names 1/8/9, and n4
+      still registers). n2≡n12 by every identity field yet only n12 registers;
+      that asymmetry is unexplained and, since it is not the symptom, not worth
+      chasing further.
+      **Registration mechanism, read out of hwshim.c's own comments (godzilla
+      RE, addresses are godzilla's):** `0x5a2e10` identifies+registers from the
+      `fe` reply; part id `[4..7]` is looked up in the 28-entry part table at
+      `0x69cc24`; a MISS stores the "Unknown" descriptor whose `+20`=0, and
+      `0x59ec1c` refuses to send any subcommand ≤0xef to a board whose `+20`=0
+      — that is why an unregistered board is inert. Then `0x1d5780` grades the
+      claimed fw+variant against the decrypted `.hex`. This is the machinery
+      the screen's found-predicate is PROBABLY built on, but it has not been
+      located in ST's binary.
+      **Directory-attribute clue (from nbdir.py, one boot only — do not
+      over-read):** the per-node directory flags word is 1/8/9=`0x8`,
+      2/12=`0xc`, 4=`0x4`. The screen names exactly the `0x8` nodes; bit2
+      (`0x4`) is CLEAR on the named ones and SET on the unnamed (topper is
+      literally labelled OPTIONAL, QR scanner likely optional too). Working
+      read: **bit2 set = optional, so the screen names ESSENTIAL nodes it
+      judges not-found.** The pinnodes are essential AND judged not-found; WHY
+      they are judged not-found is the open question.
+      **Static route to the screen code is BLOCKED.** The strings
+      `LOCATING NODE BOARDS` (`0x5391e8`) and `NODE%s NOT FOUND` (`0x5391d4`)
+      sit in 5-word descriptor cells `0x749eb8`/`0x749ea0`, indexed as entries
+      34/35 of a 192-entry menu string-pointer table at `0x73dbb4`. Neither the
+      strings, the cells, nor the table base are loaded as an immediate ANYWHERE
+      in the objdump — the table is reached by base+offset arithmetic — so
+      "xref the string to find the display code" does not work. `msgtab.py`,
+      `msgtab2.py`, `msgtab3.py`, `nbparse.py`, `scenetl.py` in
+      `/home/david/i52/` are the instruments built this pass.
+      **▼ ANSWERED — this target is CLOSED.** The predicate was found and
+      confirmed at `0x3db054`/`0x3ee508`, and the LOCATING wedge itself is FIXED
+      (the cause was the shim's own `sw_find_maybe()` pacing, not a predicate).
+      Kept for the method only; the live plan is the "NEXT, in order" block.
+      *(superseded text follows)* **NEXT-PASS TARGET:** find the LOCATING screen's per-node found-predicate
+      — what field, read from where, makes it judge a PINNODE not-found while
+      it accepts the ws2812nodes. Two approaches, neither needs the board
+      table: (1) locate the found-predicate by RE from the registration
+      machinery above (the `fe`-reply parser at `0x5a2e10` and the exchange
+      gate at `0x59ec1c`, ported to ST's addresses); (2) run ST and watch what
+      the game READS out of each pinnode vs each ws2812node during location — a
+      shim read-probe, once the rig can render again.
+      **⛔ ENVIRONMENTAL BLOCKER, 2026-08-17: ST will not currently run to the
+      LOCATING screen.** Post-reboot WSLg deadlocks the game+renderer ~2.1 s
+      into boot when the projector (display 2) window opens — padglhost prints
+      `stopped after 3 frames`, node bring-up never starts (0 TX). This is the
+      WSLg second-window stall; st12 rendered fine only because it PREDATES the
+      reboot. `PAD_GL_RAISE=0`/`PAD_PLAYFIELD=0` did not help. All runtime work
+      is gated on clearing this (likely a clean WSLg restart, weighed against
+      the WSL-wedge risk that already cost one reboot this session).
+      **A DECISIVE EXPERIMENT IS BUILT BUT UNRUN:** `PAD_NB_FORCE_HEALTHY=1`
+      (hwshim.c, gated off) overwrites every in-use board slot to `flags|=3
+      status=2` on each TX. Predicted to FAIL (the screen does not read flags),
+      but running it once the renderer works gives DIRECT proof instead of the
+      two-leg inference above. Deployed in the current shim build.
+      **════ END SECOND PASS. Below is the first pass's CURRENT TRUTH, still
+      valid on the board-array facts but drifted off the real symptom. ════**
+      **════ CURRENT TRUTH, 2026-08-17, triangulated with an A/B control —
+      SUPERSEDES every dated block below, which flip-flopped twice on the way
+      here. Read only this to know where the item stands. ════**
+      ST's board array is at **`0x8239c8`, struct stride `0x98`** (NOT
+      godzilla's `0xe0` — the finder was blind to it, which is why five passes
+      wrongly believed "ST creates no boards"). The array holds **7 boards:
+      node 0 + ST's six declared nodes (1,2,4,8,9,12)**, correct versions,
+      graded to status 2. Established by run, not theory:
+      | fact | evidence |
+      |---|---|
+      | ST creates all 7 boards | sweep finds `0x8239c8/0x98/7`, versions match `node_ident.txt` |
+      | creation is INDEPENDENT of the discovery fix | control `PAD_NB_SCHED=0` (st11): identical array |
+      | WITHOUT the fix, playfield boards stay `flags=1` (unserviced) forever | control+watch (st13): 14 ticks, never changes |
+      | WITH the fix, ALL boards reach `flags=3` (serviced), godzilla's healthy end-state | watch (st12): early f1 → late f3 |
+      | **yet ST STILL wedges on LOCATING NODE BOARDS at flags=3** | every run |
+      **So the discovery fix (`98f4797`) IS load-bearing after all — it drives
+      the SERVICING that takes the playfield boards from flags=1 to flags=3.**
+      (The "not load-bearing" correction one commit back was itself wrong: it
+      reasoned from creation being fix-independent, but SERVICING is not.)
+      **THE REAL REMAINING QUESTION, now that the board array is provably
+      HEALTHY end-to-end: what does ST's LOCATING NODE BOARDS screen gate on,
+      if not the board flags?** godzilla has no such screen (it parks on Tech
+      Alerts); this is newer-firmware bring-up presentation the godzilla RE
+      does not cover. That is the next pass's target — and it is NOT in the
+      board-object table, which is where this item has been looking.
+      **Concrete starting points for that RE (ELF + full objdump already on
+      disk at `/home/david/i52/st_game{,.dis}`):** the message cell for
+      `NODE%s NOT FOUND` is at vaddr `0x749ea0` and `LOCATING NODE BOARDS` at
+      `0x749eb8` (5-language cells, found via `xref.py`); both are referenced
+      by message-table INDEX not literal, so the display code is reached
+      through the msg-table machinery (item 29's mechanism), which is the
+      thread to pull to find the screen's own exit condition.
+      **⛔ DEAD END, do not repeat: godzilla's boot globals are USELESS on ST.**
+      `boot_ready[0x7e1974]`, `loader_gate[0x7e1a10]`, `thread_run[0x794af5]`
+      are Godzilla Pro 1.15.0 addresses. A `[segv]` line in an ST run DID
+      print `boot_ready=0` — but only because godzilla's `a_sw_struct()`
+      default `0x7a958c` happens to fall inside ST's mapped range, so the
+      guard let it through; the value is ST's unrelated data read at
+      godzilla's address, i.e. the exact "invents findings" lie the code's
+      own comment warns about. ST's own boot-ready global is unknown and must
+      be found by RE, not borrowed.
+      **Loose end for the curious: the boards reach flags=3 with NO `ff` and
+      NO `0x11` on the wire (census unchanged), which the godzilla RE says
+      should be impossible — bit 1 is set after the `ff` read. Either ST sets
+      the heartbeat by another path or the census regex misses ST's `ff`
+      framing. Not chased; not on the critical path.**
+      **════ END CURRENT TRUTH. Everything below is the historical trail. ════**
+      **‼‼‼ 2026-08-17 — THE BRANCH'S CENTRAL CONCLUSION IS OVERTURNED, BY THE
+      INSTRUMENT BUILT TO CHECK IT. "ST creates no board objects" IS FALSE.
+      Everything below that rests on it is now suspect; read this block first.**
+      The board finder hard-codes godzilla's `0xe0` board-struct STRIDE. The
+      stride sweep (built precisely because the finder cannot test its own
+      stride assumption) found ST's real board array at **`0x8239c8`, stride
+      `0x98`** — a smaller struct the `0xe0` scan was BLIND to — with **7
+      slots carrying node ids 0, 1, 2, 4, 8, 9, 12**: node 0 (bridge) plus
+      ST's exact six declared nodes. The version fields clinch it (nodes
+      1/2/8/9/12 = 1.19.0, node 4 = 124.107.0, node 0 = 0.5.0 — matching
+      `node_ident.txt` exactly), and the first 0x20 bytes of the struct match
+      godzilla's layout field-for-field. **So ST CREATES AND IDENTIFIES ALL
+      ITS BOARD OBJECTS, and grades them to status 2 — the SAME status
+      godzilla's booting boards carry.** The sweep passes its labelled example
+      first (godzilla: `0x7bad88 stride 0xe0 slots 9`), so this is trusted.
+      **‼ AND MY DISCOVERY FIX DOES NOT CREATE THEM.** Control run
+      `i52_st11noched` with the schedule DISABLED (`PAD_NB_SCHED=0`): the
+      identical 7-board array at `0x8239c8/0x98`. Board creation is driven by
+      the game's own node directory and is INDEPENDENT of the discovery seed.
+      So the discovery fix (`98f4797`) makes the wire faithful (nbsched
+      populated, 3→19 bare-00 polls) but **does NOT create boards and does NOT
+      advance ST's boot** — I over-credited it, and the earlier "the fix fires
+      and works" framing is withdrawn to "the fix is correct but not
+      load-bearing for this wedge".
+      **WHAT ACTUALLY DIFFERS FROM GODZILLA (early snapshot): the flags.**
+      Godzilla's boards reach `flags=00000003`; ST's sit at `flags=00000001`
+      (bit 1 — the ~10 Hz "answered its last poll" heartbeat — missing) on
+      every board but node 0. The census agrees: no `ff`, no `0x11` to any
+      playfield node, so the service loop never reaches the stage that sets
+      bit 1. **CAVEAT, and it is the next run's job: the sweep is a ONE-SHOT
+      taken EARLY (`sw_swept` latches on the first scan), so these are the
+      boards' EARLY flags, not their final ones. The [nbobj] periodic dumper
+      is blind to the 0x98 struct, so ST's boards have never been watched over
+      time. That is the gap to close next.**
+      **So the real question, finally correctly framed: ST's boards are
+      created, identified and graded — why do the playfield boards never get
+      bit 1 (serviced), when godzilla's do?** This is downstream of creation,
+      which is where six passes of this item were NOT looking.
+      **`S2 D4` (▲ from D3): the mechanism moved, the old instrument was
+      proven blind, and the new question needs a per-title stride-aware
+      board dumper that does not yet exist.**
+      *(Historical note: the block below, down to the next ‼, was written
+      believing ST created no boards. It is preserved because its RULED-OUT
+      results (wire identical, flags word, runtime-info, cabinet) are still
+      valid negative results — but its FRAMING of the wedge as a
+      creation/discovery failure is superseded by the above.)*
+      **★★★ ROOT CAUSE FOUND 2026-08-16 (code + log, not a theory), AND A FIX
+      IS COMMITTED — but NOT yet validated on a run; the rig was mid-cleanup
+      of a cross-session zombie strand. THE MECHANISM IS RIG-SIDE, so this is
+      no longer a firmware/crypto problem.** The shim tells the game the node
+      bus is EMPTY, so no board object is ever created and bring-up never
+      completes:
+      • the game's bare-00 discovery walk (`0x1d6f28`) asks the shim which
+        boards are on the bus, via `nb_next_node()`, whose schedule
+        `nb_nodes_init()` builds from the game's SWITCH TABLE (`entry[+20]`);
+      • ST has NO findable switch table — `sw_find_table()` rejects its
+        in-memory candidate (`[swfind] no switch table yet … (node,bit) not
+        distinct`, in the run log), so `SW_STRUCT` resolves to 0, `nb_nnodes`
+        stays −1, and `nb_next_node()` returns 0 on the first poll = empty bus;
+      • the tell is the **ABSENT `[nbsched] playfield nodes:` line** on ST
+        (present on godzilla) — `nb_nodes_init()` returns before printing it;
+      • so the game creates no board objects (the by-shape finder confirms:
+        godzilla 9 at 0x7bad88, ST none), yet still identifies all six
+        declared nodes correctly (item 51 census) because the identity ladder
+        is driven by the game's own static directory, not by discovery. The
+        boards are answerable; they were never discovered.
+      **THE FIX (committed `98f4797`):** when no switch table can be found,
+      `nb_nodes_init()` seeds the discovery schedule from the title's own NODE
+      DIRECTORY (`node_ident.txt`, which nbdir.py derives and the shim already
+      loads) minus `PAD_NB_SILENT` nodes. Guarded by `!sw_find_done &&
+      sw_find_fails >= 4` so it is permanently unreachable for godzilla and any
+      title whose table is found (they set `sw_find_done`). Also folds the
+      `PAD_NB_SILENT` parse into one `nb_is_silent()` used by both the fallback
+      and `shim_read`.
+      **★★ GODZILLA REGRESSION PASSED (i52_gz10, 2026-08-16): `[nbsched]
+      playfield nodes: 4 1 8 9 (from switch table)`, 9 board objects at
+      0x7bad88, 1254 fa/f2 grading frames, no wedge, 55 fps — the fallback
+      correctly does NOT fire, and the fix leaves godzilla byte-for-byte on
+      its original path. So the fix is proven SAFE.**
+      **★★★ ST RUN 2026-08-16 (i52_st4, after David ran `wsl --shutdown` to
+      restore WSLg): THE FIX FIRES AND WORKS — but ST STILL WEDGES, so this
+      item stays OPEN. The fix is necessary and not sufficient.**
+      **What changed, measured against the pre-fix run (i51_st_final):**
+      | | before | after |
+      |---|---|---|
+      | `[nbsched]` line | ABSENT | `playfield nodes: 1 2 4 8 9 12 (from node directory - no switch table)` |
+      | bare-00 discovery polls | 3 (each answered "empty bus") | **19** |
+      | `fe` identity per node | 12 | **108-113** |
+      | board objects | 0 usable | **node 0 + node 1** |
+      The guest ran the FULL 289 s at **56.5 fps**, healthy throughout.
+      **▼ AND A CORRECTION I OWE MYSELF, made the same evening before it could
+      mislead the next pass: the written prediction read as CONFIRMED, and it
+      is not.** `nb_report_near()` reported `slot 0 node 0 status 0 (No
+      Errors)` / `slot 1 node 1 status 2` at `0x0087429c`, which is the
+      "real array caught half-built" pattern — **but that address is HEAP, not
+      static, so it is almost certainly a coincidence.** Measured from the
+      program headers: ST's RW LOAD is vaddr `0x715000` memsz `0x12e9dc`, so
+      its static data (including .bss) ENDS at **`0x8439dc`** — and
+      `0x0087429c` is above it. godzilla's board array `0x7bad88` is INSIDE
+      its own static range (RW `0x6f52c0` + `0x14d8dc` = `0x842b9c`), i.e. the
+      real thing is `.bss` on the title where it is known. A stable heap
+      address across runs proves only a deterministic allocator, not identity.
+      **So the honest reading is the OTHER branch of the prediction: ST
+      creates NO board objects at all** — which is also what every other
+      signal says (no `fa`, no `f2`, no `ff`, no `0x11`, no sub-0xef anywhere
+      in 289 s). Note this is consistent with the finder printing nothing:
+      an existing-but-entirely-unpopulated array is INVISIBLE to it by
+      construction, because a slot only counts when `[+12]` is non-zero.
+      **THE QUESTION IS NOW SHARP AND NARROW: the discovery walk is fed all
+      six nodes and the game identifies all six 108 times each, yet not one
+      board object is ever created.** That is a much smaller question than the
+      one this item started with, and it is squarely about what the game does
+      between "identity answered" and "board created".
+      **★ RULED OUT THE SAME EVENING, with a run (i52_st7rt): the ZERO-FILLED
+      RUNTIME INFO IS NOT THE GATE.** `PAD_NB_RT=1` fills the f9/00, f9/01 and
+      fc replies with a recognisable pattern instead of 48 zero bytes; ST
+      behaved identically (same `[nbsched]` fallback, 18 discovery polls, same
+      2-slot heap near-miss, still no `fa`/`f2`, 56.4 fps for 278 s). The
+      workflow's leading downstream suspect is dead.
+      **★★ A SECOND REAL RIG-SIDE BUG FOUND AND FIXED (`e8a4f31`-class, this
+      pass) — AND IT IS ALSO NOT THE GATE. ST WAS BOOTING WITH ITS WHOLE
+      CABINET SHORTED.** `sw_scan_bytes()` builds the cabinet word from the
+      game's own switch table; with no table it returns 0 and the `if (have)`
+      in the SPI ioctl branch skipped the RX write **entirely**, so the game
+      read its own zeroed buffer — and **the cabinet bits are ACTIVE LOW, so
+      all-zero means EVERY CABINET SWITCH MADE.** The contrast is total:
+      godzilla logs `[cabspi] bits=ff0f0f0000000000` and `[swrest] machine at
+      rest: coin door shut`; ST logged **neither, not once in 289 s**. Fixed
+      by handing a title with no findable table the platform AT-REST word
+      (`ff0f0f0000000000`, a platform constant — the node 0/1/4 cabinet layout
+      is measured identical across star_wars 1.30.0, godzilla 1.15.0 and
+      john_wick 1.01.0). `PAD_CAB_IDLE=0` disables it.
+      **`sw_table_hopeless()` is now ONE definition** of "no findable switch
+      table and waiting will not help", used by BOTH item 52 fallbacks (this
+      one and the node-bus discovery seed) so they cannot disagree.
+      **▼ A REGRESSION I MADE AND CAUGHT — the labelled example is the only
+      reason it did not ship.** The first cut gated on `!have` alone, so it
+      fired during EVERY title's early boot (before its table exists) and
+      called `sw_prime()` with the synthetic word — which writes into the
+      game's own NodeRec through a merely range-checked `SW_STRUCT`. **Godzilla
+      crashed at 6.5 s, 180 frames, segv.** Now it waits for *hopeless* rather
+      than *not yet*, and `sw_prime()` is skipped while the word is synthetic.
+      Post-fix godzilla is byte-for-byte baseline: 9 board objects, 33
+      discovery polls, 1254 fa/f2, **segv 0**, 55.2 fps.
+      **ST after this fix (i52_st8cab): the at-rest word IS delivered, and
+      bring-up is UNCHANGED — zero board objects, no `fa`/`f2`, 20 discovery
+      polls, 56.3 fps for 295 s.** A real bug, fixed; not the gate.
+      **★ THE ST CRASH IS CHARACTERISED, and it is NOT the fix:** a
+      timing-sensitive guest fault at ~200 frames / ~21 s that fires whenever
+      ST renders SLOWLY — under CPU contention, under the surfaceless
+      renderer (1-6 fps), and under frame capture (`PAD_GL_DUMP` readbacks
+      slowed it enough to reproduce on demand, i52_st6). At full speed it does
+      not fire: 289 s clean here, 232 s clean in item 51. **Consequence worth
+      knowing: you cannot currently screenshot an ST run without inducing the
+      crash**, which is why the acceptance below still has no screenshot.
+      **RESUME — ONE question, and it is NOT "where is ST's board array".**
+      On ST the game is handed a full bus and correct identities, yet creates
+      **zero** board objects. **Finding the array's address would not answer
+      that** — an array with no boards in it is empty wherever it lives — so
+      do not start there. (I tried and it also does not fall out cheaply:
+      **ruled out, do not repeat — godzilla's `*0xe0` idiom
+      (`rsb rX,rX,rX,lsl #3` + `add rX,base,rX,lsl #5`, base in the
+      `movw`/`movt`, godzilla `0x39c9b0`) does NOT appear anywhere in ST's
+      disassembly**, and a `cmp rX,#31` structural sweep returns only string
+      code. ST compiles the accessor differently. The ELF and a full 1.3M-line
+      objdump are on disk at `/home/david/i52/` if someone wants to try
+      properly.)
+      **The real question is what runs BETWEEN "identity answered" and "board
+      created", and why ST never gets there.** The strongest lever is that on
+      godzilla creation is nearly UNCONDITIONAL once bring-up runs — the
+      handoff records boards existing at status 8 even in the era when every
+      identity exchange failed — so ST's bring-up is not merely failing a
+      check, it is not reaching the creation step at all. Suggested order:
+      (a) **Verify the game ACCEPTS the fed walk.** The fallback supplies the
+      schedule but nothing has confirmed the walk is consumed the way the
+      godzilla-era RE describes (list then terminating zero). `PAD_NB_SCHED=0`
+      as an A/B against no schedule, plus the `[nbsched] poll #N` trace, is
+      one cheap run. Note ST sends **108-113 `fe` per node over 289 s** —
+      roughly one every 2.7 s per node, which is a RETRY cadence, not a
+      ladder, so something is rejecting and re-asking on a timer.
+      (b) **The coin-door interlock wait** (godzilla `0x1d6fb8` waits up to
+      60 s for `[0x706464]`, enterable five times; `0x1d6c54` reports
+      not-done meanwhile). Untested on ST, its address unknown there, and it
+      is the one recorded godzilla mechanism that stalls bring-up wholesale.
+      (c) A guest-side trace of the bring-up thread on ST — expensive, but it
+      is what finally answers "how far does bring-up get".
+      **Already ruled out, do not re-spend:** the runtime-info payload
+      (`PAD_NB_RT=1`, run i52_st7rt), the shorted cabinet word (fixed, run
+      i52_st8cab — a real bug but not the gate), the coin-door interlock as a
+      *bit* problem (switch 33 = node 0 bit 23 reads MADE = door CLOSED under
+      both the old all-zero word and the new at-rest word, so the door has
+      never been open on ST), the array-base RE by pattern (above), and
+      everything in the "wire is identical" and "flags word" sections.
+      **★ WHERE THIS LEAVES IT, honestly: two genuine rig-side bugs have been
+      found and fixed on this branch — the empty-bus discovery seed and the
+      shorted cabinet — and NEITHER unblocks stranger_things.** Six suspects
+      are now dead. The remaining space is structural: something about ST-era
+      bring-up that the godzilla 1.15.0 RE does not describe, which is why
+      the next move (c) is a guest-side trace of the bring-up thread rather
+      than another guess. Both fixes are worth keeping regardless — they are
+      correct on their own terms and godzilla-verified safe.
+      **⚠ UNVERIFIED CODE ON THE BRANCH — do this before anything else.** A
+      **stride-independent sweep** (`PAD_NB_STRIDE_SWEEP=1`, `[nbsweep]`) is
+      committed but **NEVER COMPILED AND NEVER RUN**: WSL wedged mid-session
+      before it could be built. It exists to test the one assumption the board
+      finder cannot test about itself — `nb_scan_objs()` hard-codes the `0xe0`
+      stride, so an ST board array of a DIFFERENT struct size would be
+      invisible and "ST creates no board objects" would be an artefact of the
+      instrument rather than a fact about the title. It counts
+      `#{i : byte[a+i*s]==i}` over strides `0x80..0x200` and reports the best.
+      **Its acceptance is fixed in advance: on godzilla it MUST report
+      `base=0x007bad88 stride=0xe0 slots=9`.** If it does not, the sweep is
+      wrong and nothing it says about ST counts. **Next pass: run the
+      scratchpad `ccheck.sh` /tmp compile check FIRST, then the godzilla
+      labelled example, and only then point it at ST.**
+      **⚠ THE RIG IS DOWN AND NEEDS DAVID.** WSL is wedged: every command
+      hangs, `wsl --shutdown` returns 255 and `vmmemWSL` survives it, and
+      killing the 14 stuck `wsl.exe` clients did not recover it. It needs an
+      **LxssManager service restart or a reboot** before any run is possible.
+      Nothing of this rig's was running when it wedged — no game, lock
+      released, `alive.sh` last read 0 — so nothing is at risk, and no
+      cleanup is owed beyond the restart.
+      **D4 → D3: the mechanism is known, a run reproduces it on demand, the
+      fix is written and proven safe; only the final full-speed ST run remains,
+      gated on the WSL restart.**
+      *(Earlier this day, D3 → D4 was recorded when both original premises
+      died; the mechanism crack has now brought it back to D3.)*
+      *(Split out of item 51 at its close, 2026-08-15. The projector shows
+      scene footage regardless, so the display side owes this nothing.)*
+      **★ ESTABLISHED 2026-08-16, ENTIRELY AT THE DESK — no emulator run;
+      the only rig time was a read-only card mount. The first two are
+      negative results and they close off most of this item's stated plan.**
+      **(1) THE WIRE IS IDENTICAL FOR THE BOARDS THAT "FAIL" AND THE ONES
+      THAT "PASS", so nothing on the bus singles out the pinnodes.** Mined
+      from item 51's own ST run (`~/i51_st_final.log`) as a per-node command
+      census: nodes 1, 2, 4, 8, 9 and 12 each received **exactly 12×`fe`,
+      4×`f9`, 2×`fc`** — byte for byte the same commands in the same counts.
+      Each got a correct, well-formed identity reply (pinnodes
+      `00 |01 13 00| 23 00 02 00 |01 00| 01` = fw 1.19.0, part 0x00020023,
+      board id 1, variant 0x01). **12 `fe` is the NORMAL identity ladder**
+      (2 rounds × 6), not a retry storm — star_wars' failure signature was
+      215-226 per node in five minutes. **So the identity exchange is not
+      failing and not being refused**, which is exactly what this item
+      proposed to learn from `[nbcen]`'s reply_len-12 count. That readout is
+      now had for free, and **the "pinnode-specific `fe` reply-length"
+      suspect is DEAD.** So is the `PAD_NB_HWID` suspect as a wire
+      explanation: the global 0x0001 goes to the passing boards too.
+      **▼ CORRECTION, same day, from the godzilla control run — an earlier
+      version of this entry argued "no addressed subcommand at or below 0xef
+      reached ANY node, therefore nothing registered". THAT INFERENCE IS
+      WITHDRAWN.** Godzilla, which boots clean, sends none either: its command
+      census over both a 45 s bridged run and the long `gz100.log` is
+      `fe f2 f0 f9 fa fc f1` and nothing at or below 0xef. So the test does
+      not separate a working title from a wedged one at these run lengths and
+      must not be used as evidence. (The `70 XX` switch-config writes this
+      file records elsewhere evidently belong to a later phase or a different
+      tracer.) The conclusion it was supporting still stands, on (1) and (3)
+      below — but it stands on those, not on this.
+      **★★ (2) SO "1 8 9" IS NOT THE GAME NAMING THREE THAT FAILED WHILE
+      2/4/12 PASSED** — the reading this item was built on — because what
+      those three actually have in common is declared statically and is
+      IDENTICAL on a title that boots.
+      **What "1 8 9" actually tracks is the flags word in the title's own
+      node directory, and it is the SAME on a title that boots.**
+      `nbdir.py --dump` (added this pass) prints the two record fields the
+      derivation discards. ST: node 1 CABINET, 8 LOWER PLAYFIELD, 9 PLAYFIELD
+      carry `flags=0x8`; 2 CABINET LIGHTS and 12 TOPPER (OPTIONAL) carry
+      `0xc`; 4 QR SCANNER `0x4`. **The control — godzilla_pro, which boots
+      clean — declares IDENTICAL flags for every node the two titles share**
+      (1/8/9 = 0x8, 2/12 = 0xc). So the flags word cannot be what
+      distinguishes ST's failure from godzilla's success, and **nothing the
+      title declares statically singles out its pinnodes.** That 0x8 tracks
+      exactly which nodes ST's screen names is recorded in `nbdir.py` as an
+      observation and NOT as a decoded meaning: one title, one boot, and
+      godzilla never wedges so there is no second screen to test it against.
+      **★★★ (3) THE BLOCKER, and it is why this is now D4: the one instrument
+      that would name the verdict CANNOT JUDGE THIS TITLE, and does not say
+      so.** `board[+24]` — the status index the Tech Alerts line renders, per
+      board, "the cheapest available signal and it costs one memory read" —
+      is reached through `TITLE_ADDR(a_nb_objs, "PAD_NB_OBJS", 0x7bad88u)`,
+      and **0x7bad88 is Godzilla Pro 1.15.0's address. Nothing in this rig
+      ever sets `PAD_NB_OBJS`** — not watch.sh, not mktables, no per-title
+      derivation — and `title_addr()` keeps the built-in default whenever it
+      is merely READABLE in that guest. Same trap that once had the shim
+      reading "a switch table out of somebody else's data".
+      `NB_TABLE`/`NB_RECORDS` are worse: plain `#define`s, not overridable at
+      all. **So every `[nbobj]`/`[nbtbl]` reading on stranger_things is
+      somebody else's memory formatted as a status table — no evidence, not
+      weak evidence.** Now commented at the definition so the next reader is
+      warned at the point of use.
+      **Ruled out, do not re-spend: the class/part choice.** ST ships the
+      same three pinnode classes as godzilla (`pinnode-LPC1112_101`,
+      `-LPC1112_201`, `-LPC1313`, all at `1_19_0`) and `nbdir.py` picks class
+      1 on both, so CLASS_PREF is not the difference either.
+      **★★★★ (4) THE INSTRUMENT IS BUILT, VALIDATED, AND IT ANSWERS: ON
+      STRANGER_THINGS THERE ARE NO BOARD OBJECTS AT ALL.** `nb_scan_objs()` in
+      hwshim.c finds the array BY SHAPE per title — 32 slots of stride 0xe0,
+      every in-use slot (`[+12]` non-zero) self-labelling with `[+0] == its
+      own index` and carrying a status below 12 — so the instrument no longer
+      depends on any hard-coded address.
+      **Validated on the labelled example first, as this rig requires:** on
+      godzilla_pro it prints `board objects found by shape at 0x007bad88, 9
+      slots in use (built-in godzilla address 0x007bad88: AGREES)` and dumps
+      all nine slots with the statuses the historical `gzFinal.log` recorded.
+      **Then, stranger_things, 3-minute card run, 11 dump ticks, the game
+      rendering healthily throughout (15340 frames, 56.3 fps): NO ARRAY.**
+      Eleven times `no node-object table known for this title`, and the best
+      thing anywhere in the guest's writable memory is a **near miss: a
+      self-consistent board array at 0x0087429c with only 2 slots in use**.
+      **So the game is not failing to GRADE its boards — it never creates the
+      board records in the first place.** That is consistent with everything
+      else here (identical wire traffic, no registration) and it moves the
+      question from "why does the pinnode claim get rejected" to "why does the
+      board-object table never get populated".
+      **★ AND A TRAP PAID FOR, which is why this cost a run: `PAD_NB_DUMP`
+      CRASHED STRANGER_THINGS.** `nb_dump_hexlist()` dereferences
+      `NB_HEXLIST 0x7e1b98` — another godzilla literal, a plain `#define` —
+      got a plausible `0x0086ce9c` that passes every range check it makes,
+      walked it, and the guest **segfaulted**. Item 51's ST run never crashed
+      only because it never set `PAD_NB_DUMP`: turning the diagnostic on is
+      what killed the title it was meant to diagnose. Both godzilla-address
+      dumps are now gated behind `nb_addrs_are_this_title()` — which asks the
+      by-shape scan whether it agrees with the built-in base, a MEASURED test
+      rather than the "is it readable" one that is the trap itself — and the
+      skip announces itself instead of being silent.
+      **▼ One regression made and caught by the labelled example, recorded
+      because it is the argument FOR having one:** an intermediate build let a
+      weak 1-2 slot coincidence consume its own 0x1c00 span, so the scan
+      jumped clean over godzilla's real 9-slot array and reported a 2-slot
+      one instead. Only a hit at or above `NB_OBJS_MIN` may skip; a near miss
+      keeps scanning. Caught in one run because godzilla's answer is known.
+      **★ (5) THE NEAR MISS NOW REPORTS ITS CONTENTS, and there is a written
+      PREDICTION for the next run to test.** `nb_report_near()` prints the
+      node id and status of every in-use slot in the best sub-threshold
+      candidate, once. "2 slots in use" was where the last run stopped and
+      "which two, saying what?" was immediately the next question; answering
+      it in the same line saves a whole run.
+      **The prediction, so the next run is a TEST and not a look-around:** on
+      godzilla the first two slots to exist are **0 (CPU / Bridge)** and
+      **1 (Cabinet)**. If ST's 2-slot candidate at `0x0087429c` reports
+      exactly `slot 0 node 0` and `slot 1 node 1`, it is **the real array
+      caught half-built** — the game creates the bridge and the first cabinet
+      board and then stops — and the question becomes what gates the third.
+      If it reports anything else (mismatched ids, junk statuses), it is a
+      coincidence and the real answer is that ST creates NO board objects at
+      all. Those two outcomes point at completely different next moves, which
+      is what makes it worth predicting in advance rather than judging after.
+      **UNVERIFIED — compiled, not run.** The rig is held by `item/50`
+      (turtles_pro, `watch.sh 120`), so this change has a clean compile
+      (identical flags, output to `/tmp`, nothing shared written) but has NOT
+      been through a run. The next pass must re-run the godzilla labelled
+      example FIRST — `[nbobj] ... 0x007bad88 ... AGREES` — before trusting
+      anything it says about ST, because an intermediate build of this same
+      finder already regressed once in exactly that way.
+      **▼ EVIDENCE LOST, and it is a process fault worth fixing:** the ST run
+      wrote to `~/gzwatch.log`, which `item/50`'s run then overwrote. The
+      numbers above were extracted before that, but the raw log is gone and
+      cannot be re-read. **Any run whose output matters must copy
+      `gzwatch.log` aside under its own name the moment it finishes** — two
+      sessions share that one filename.
+      **Remaining suspects** stay title-wide rather than pinnode-specific:
+      the 48-byte runtime-info record (`f9/00`, `f9/01`, `fc`) is answered as
+      **48 zero bytes for every board**, and node-bus bring-up gates on the
+      coin-door interlock (godzilla `0x1d6fb8` waits up to 60 s for it, and
+      ST's own address for that is unknown).
+      **Resume.** Re-run godzilla to re-validate the finder, then one ST run,
+      and read the near-miss line against the prediction above.
+      **Uncommitted: nothing.** All of it is committed on `item/52`;
+      `--check-godzilla` passes and the godzilla `[nbobj]` labelled example
+      passed on the previous build.
+      **No live run of MINE left up**, and `alive.sh` is NOT 0 — `item/50`
+      holds the lock and is running turtles_pro. Do not kill it.
+      **★★★ 2026-08-18, A WHOLE STATIC PASS AND NOT ONE RIG RUN: the settings
+      store is fully named, the country is found, and it reads a VALID
+      U.S.A. — so the refusal is neither "unset" nor "invalid".**
+      **(1) The region-lock question is ANSWERED: this build is not
+      region-locked.** The country table `0x731aac` (30 x 36) is a pure
+      COINAGE table. `+26` is the name msgid (1421 `U.S.A.` .. 1450
+      `INDONESIA`), `+28`/`+30` the two attract-marquee msgids, `+32` the
+      index; `+4`/`+16`/`+20` point into a 0xC0-byte per-country block in
+      `.data` — `+16` a 0x40-byte coin/currency record, `+20` a 0x40-byte
+      defaults block **byte-identical for all 30 countries**, `+4` a
+      variable-length pricing list. `+12` is null for 29 of 30;
+      CHUCK-E-CHEESE alone carries an extra list at `0x724118`. **No
+      permitted flag, no whitelist, no mask anywhere in the table**, and all
+      30 countries are fully populated. (`+24` is two u16s, not one u32 —
+      the old "+24 = name msgid" note was two bytes off.) That PROMOTES the
+      store line of work rather than killing it.
+      **(2) The store keys are not an unknown runtime hash — they are zlib
+      crc32 of a NAME, and every record in every file is now named,
+      offline.** `0x41b938` does `strlen(name)` then calls `0x4f4dc8`, the
+      same routine that writes the `.crc32` siblings. Two constructors, two
+      forms: scalars (`0x41b300`) `key = crc32(0, name)`; arrays
+      (`0x41b39c` / `0x41b41c`) `key = crc32(crc32(0, type), name)` — the
+      chained pair is exactly why a single-name dictionary found nothing.
+      *Proof:* NSEC's `hashA` is crc32 of the store's own name on **18 of 18
+      files**, and every recovered array pair is a (field, C type) pair.
+      `nvmap.py` recovers them: crc32 every printable string in the ELF,
+      then — because `crc32(init, A)` is affine in `init` — solve for the
+      init each candidate would need and look it up in `{ crc32(0, B) }`.
+      SYS_NVRAM entire: `dsp_block`, `low_shelf_filter`,
+      `high_shelf_filter`, `cabinet_low_shelf_filter`,
+      `cabinet_high_shelf_filter`, `custom_door_pricing`, `dip_data`,
+      `custom_message`, `error_log_index`, `burn_in_data`, and the arrays
+      `sw_broken[100] bool_t`, `sw_stuck_active[100] bool_t`,
+      `sw_alert_count[100]`, `sw_broken_matrix[11] sw_col_t`,
+      `sw_stuck_active_matrix[11] sw_col_t`, `sw_alert_count_array[176]`,
+      `error_log_array[10] error_log_entry_t`. PIN_NVRAM:
+      `total_players`, `boost_data`, `custom_pinball_pricing`,
+      `hstd_reset`, `score_average`, `tournament_players_active`,
+      `custom_pinball_door_pricing_table`,
+      `custom_pinball_credit_pricing_table`, `player_scores`. LKRAM
+      `replay_data` / `redemption_block`; FRRAM `tournament_reset` /
+      `factory_reset`; PTRAM `tournament_index`. **`85501bd4` is
+      `error_log_index`** — which is precisely why it oscillated 1 -> 6 -> 1.
+      `NVM` is not NFI2 at all: magic `MAP0`, parsed at `0x231a8c`, a device
+      map. **Not one record in any file is the country**, which closes the
+      remaining store search entirely — NVM, LKRAM, FRRAM, PTRAM and the
+      three "differing" NARRs are all named and none of them is it.
+      **(3) The country is an i2c EEPROM record at offset `0x140` — outside
+      the range the old sweep touched — and on this rig it is VALID U.S.A.**
+      `0x41c430 get_country()` -> `0x41c3d0` -> `0x41c380`, which calls
+      `0x4f2fe4(dev=0x50, addr=0x140, buf, len=4)`. The record is `u16
+      value` + `u16 check`, valid iff `check == ~(sum of the two value
+      bytes) & 0xffff` (`0x24dbbc` is an additive 16-bit sum); the country
+      index is the first byte, and `[0x52c0e0] = 30` bounds it — the same 30
+      as the table. *Evidence is this rig's OWN existing log,
+      `~/i52_country0.log`, with no new run:* `[i2c] t=1257 addr=0x50 WRITE
+      @0x0140 len=2 0140` / `READ @0x0140 len=4 0003fcff`, then at t=1340
+      `WRITE @0x0140 len=6 01400003fcff`. `00 03 fc ff` = value byte 0,
+      check `0xfffc`, and `~(0+3) = 0xfffc` — **VALID, country 0 =
+      U.S.A.**, written straight back unchanged. Both EEPROM images on disk
+      carry the same bytes. **So the refusal reads a correct country and
+      refuses anyway.**
+      **(4) A shim hypothesis raised and KILLED in the same pass, recorded so
+      nobody re-raises it:** `nv_load()` loads the 64 KB image into
+      `store[0]` while `slot_for()` allocates slots in first-seen order, so a
+      non-EEPROM slave selected first would put the image on the wrong
+      device. The log's first selection is `select slave 0x50 -> slot 0`, and
+      the 16-bit address path (`p = buf[0]<<8 | buf[1]`) serves `0x140`
+      correctly. The shim is right here.
+      **(5) The screen launcher is `0xb262c`** — `screen_start(id)`:
+      bounds-check `id < [0x52c0dc]` (= 376), `handler = *(0x730eec + id*8)`,
+      then spawn a 415-word fiber via `0x37808c`. The refusal is index
+      **8**, not 7 (`0x730f2c` is `base + 8*8`), and LOCATING is **15**, not
+      14. Only 16 call sites pass a literal id and **none of them passes 8**,
+      so the refusal is raised indirectly. That is the open end.
+      **(6) NEXT, and the first step still needs no run: find what writes
+      `0x7b9bec`.** `0x41c71c` (country init) takes its seed from
+      `(*(u16*)0x7b9bee >> 8) & 0x7f` and treats `0xff` as "nothing
+      reported". It only writes the EEPROM record when that record is
+      invalid — ours is valid, so that arm is skipped — but the same routine
+      compares the reported value against a SECOND stored copy at
+      `0x7e2cb8` (EEPROM `0x1a4`, which this rig holds as
+      `ffffffff00030000`). `0x7b9bec` is `.bss`, so something writes it at
+      runtime, and a mismatch between a *reported* country and the stored one
+      is exactly the shape of a refusal that fires on a valid country.
+      **Two "dead ends" need correcting, both mine to correct:**
+      "do not poke the i2c EEPROM, `PAD_NV_POKE=0-ff:01` changed nothing" —
+      that sweep covered `0x00..0xFF` only and the country lives at `0x140`;
+      the advice still stands, but for a better reason (the record there is
+      already valid U.S.A., so there is nothing to fix), and the companion
+      claim "`0x40..0xFF` is the only bulk region the game reads" was an
+      artefact of the default 120-line `PAD_I2C_LOG` budget. And "do not look
+      for store keys in the binary, they are hashed at runtime" — wrong; they
+      are crc32 of names and are now fully recovered.
+      **New scripts, `/home/david/i52/`:** `nvmap.py` (name every record in
+      an NFI2 file, both key forms), `ctyrec.py` (country records +
+      msgids), `ctyblk.py` (per-country coinage blocks), `crcsites.py`
+      (locate crc32-of-name call sites), `scrdump.py` (screen table).
+      **Uncommitted: nothing.** No shim change was needed and no rig run was
+      spent, so the rig lock was never taken and no build was made.
+      **★★★ 2026-08-18: ITEM 52 IS CLEARED. IT WAS NEVER THE COUNTRY - IT WAS
+      OUR OWN `run_game.sh` LYING ABOUT THE MAINS.** David's eyes: attract
+      mode, "COMBO CHAMPION / 15 COMBOS", pricing `1/1.00 3/2.00`,
+      `CREDITS 1/2`.
+      **The refusal text says COUNTRY; the code tests LINE FREQUENCY.** Message
+      ids 765/766 are `50/60 HZ` and `60 HZ` and sit immediately before 767-770
+      (`THIS MACHINE WILL NOT / OPERATE IN THIS COUNTRY / ...`) - the refusal is
+      the 50/60 Hz family, and 771-778 are two more wordings (`CAN NOT`,
+      `SHALL NOT`) for the same class so a technician can tell them apart on the
+      phone. The country the game read was a **valid U.S.A.** the whole time
+      (EEPROM dev 0x50 offset 0x140, `0003fcff`, checksum good).
+      **The chain, all read off instructions:** `0x4f1c80` opens
+      `/sys/bus/iio/devices/iio:device0/in_power_frequency` and `in_power_input`
+      and starts the monitor thread `0x4f20b0`. That thread computes
+      `measured_hz = roundf(strtol(freq_line) / 100.0f)` - the divisor is the
+      literal `100.0` at `0x4f24e8` - and publishes it at `0x842cc4+0x274`; it
+      also sets the power-loss byte at `0x842cc4+0x270` to `strtol(input_line)
+      != 0`. `0x4f205c` then reports the frequency as **ZERO whenever that byte
+      is set**. `0x3aa564` needs 375 warm-up ticks and then 24 consecutive valid
+      samples before `0x3aa60c` will report; `0x23996c` passes only if the
+      reported value lands in **57..63** (`sub r3,#57 / cmp r3,#6`), or failing
+      that if the EEPROM factory config says 50 Hz - and that block, 52 bytes at
+      EEPROM offset **0**, is ALL ZEROS on this rig, so `0x238de4` fails both of
+      its checksums and reports nothing. On failure: `flag_set(3)` =
+      `FG_FACTORY_FREQUENCY_MISMATCH`, then `0x239a0c` starts screen **8**,
+      whose handler `0x3c9658` draws 767-770 and spins forever at priority 0xff
+      - which the admission gate at `0x46e6c8` can never displace, and that is
+      why the game drew no other text for three minutes.
+      **Our rig wrote `60` and `120`.** `60/100` = 1 Hz, outside the band; and
+      `120` being non-zero asserted power-fail, which zeroed even that. **Both
+      were wrong and each alone still refuses.** Now `6000` and `0`.
+      **MEASURED, not inferred, and that is the point of this pass.** A new
+      `PAD_PEEK=<hexaddr>[:<len>][,...]` reads guest globals and logs them on
+      change (in the usleep interposer, 5 Hz, deduped). With the old values it
+      showed `0x842cc4+0x274` holding float **60.0** while `+0x270` held **1**
+      and the accumulator at `0x7bff8c` never took a sample; with the new ones
+      the accumulator settles at `+4 = 375`, `+8 = 24`, **`+12 = 0x3c = 60`**,
+      `+16 = 0` and the refusal never appears. Four passes of this item changed
+      an input and re-ran to see whether the symptom moved - one bit of evidence
+      per rig run, on a rig that is a mutex. **`PAD_PEEK` is the instrument that
+      ends that**, and it is worth reaching for before any "what did the game
+      actually see?" question.
+      **Also settled on the way, and all of it retires guesswork:** the country
+      table `0x731aac` is a pure coinage table with no permitted flag, so the
+      build is NOT region-locked; the settings-store record keys are plain zlib
+      **crc32 of a name** (`crc32(0,name)` for scalars, `crc32(crc32(0,type),
+      name)` for arrays - proven on 18 of 18 NSEC headers), so `nvmap.py` names
+      every record in every store file offline and none of them is the country;
+      `85501bd4` is `error_log_index`; the EEPROM's own NFI2 blob at 0x2014 is
+      surface calibration and the 8 KB at 0x4000 is the coin/game audit journal.
+      **Two "dead ends" were WRONG and are retired:** "the store keys are hashed
+      at runtime and cannot be found" (they are crc32), and "poking the i2c
+      EEPROM changes nothing / 0x40..0xFF is the only bulk region read" (that
+      sweep covered 0x00..0xFF only, the country lives at 0x140, and the
+      "only region" claim was an artefact of the 120-line PAD_I2C_LOG budget).
+      **What is NOT done, and it is what stands between here and playable:** the
+      glass shows `TECH ALERTS: CHECK SWITCH #7..#22` (both flipper buttons,
+      both EOS, both slingshots, shooter lane, trough 6) because the shim's
+      `[swfind]` still reports **"no switch table yet"** for ST, and the virtual
+      playfield window says "No tables for stranger_things_le yet" because
+      `device_xy.txt` builds **0 records**. Also on the glass:
+      `GAME VALIDATION ERROR #3 UPDATE SD CARD` and `No Connection`.
+      **★★ 2026-08-18, SAME DAY, THE PLAYFIELD WINDOW IS FIXED AND THE REAL
+      REMAINING BLOCKER IS NAMED.**
+      **`swelf.py` reads stranger_things' switch list straight out of the
+      ELF.** mktables.py's docstring says the switch tables cannot be built
+      without a run because the game builds its table on the heap - true of
+      godzilla, FALSE of ST, whose table is static and whose shape the shim's
+      by-shape hunt can never match (`sw_run_len`/`sw_entry_ok` walk
+      `base + k*32` reading node at +20 and bit at +18; ST's entries are 44
+      bytes and carry neither). "Clickable switches will appear on the next
+      run" was a promise this code could not keep for such a title.
+      Three roots: `entry(id) = *(0x724608) + 44*id` (+24 u16 num, +26 u16
+      device index), `dev(i) = *(0x7260b8) + 24*i` (+12 5-language name cell,
+      +16 slot, +18 bit, +20 kind, 7 = switch), `board(s) = *(0x725aac) + 16*s`
+      (+14 node id). **Validated three ways**: David's TECH ALERTS photograph
+      named eight switches by number and all eight come out with the same
+      number and name (#7 LEFT SLINGSHOT … #22 SHOOTER LANE, all node 8); the
+      independently-established DIP 1..8 at node 0 bits 0..7 and SERVICE SELECT
+      at node 0 bit 8 are reproduced through the slot→node indirection rather
+      than assumed; and the table length is not guessed - `ENT + 44*100` lands
+      exactly on the device base. Godzilla regression: `mktables.py --force`
+      rebuilds all five of its tables **byte-identical**, and `swelf.rows()`
+      declines any title with no recorded roots.
+      *Result, eyes on it:* the window now lists 99 switches by node with a
+      keyboard legend derived from ST's own list, service buttons, coin door
+      closed/48V on and trough 6/6. No artwork - ST ships none, and
+      `devicexy.py` finds no coordinates because ST's 24-byte device record has
+      none. It is a schematic and that is the correct outcome for this title.
+      **★ THE REMAINING BLOCKER, precisely localised: ST's node bus never
+      leaves the identify phase.** ST and godzilla issue an IDENTICAL first ten
+      commands - `0a 07 08 03 f1 f0 00 fe f9 fc`. Godzilla then continues
+      `fa f2 14 46 72 48 40 85 84 44 …`; **ST stops dead after `fc`** and
+      re-sends `fe` (identify) to nodes 1, 2, 4, 8, 9, 12 twelve times each,
+      for ever. No `0x11` means no switch scan; no `0x40` means no coils; no
+      coils means no flippers. That, not the switch table, is what "playable"
+      is waiting on, and it is plausibly what the glass calls `No Connection`.
+      The divergence is one frame wide: **godzilla's next frame is
+      `8203fa018003` (node 2, cmd `fa`, payload 01) and ST never sends it.**
+      Start at what the shim replies to `f9`/`fc` (`hwshim.c:8228`) and `fe`
+      (`hwshim.c:8400`), and at what makes the game issue `fa`.
+      **Cosmetic, do not spend runs on them:** `GAME VALIDATION ERROR #3 UPDATE
+      SD CARD` and `No Connection` are tech-alert rows; godzilla plays a full
+      game on this rig with validation errors on its glass. **But note the
+      verifier's caveat:** #3's verdict IS read by ten `bl` sites outside the
+      module, none of which was traced to coin-up or ball launch, so "cosmetic"
+      is the working assumption and not a proven one.
+      **Do NOT set `PAD_SW_STRUCT`/`PAD_SW_COUNT` for ST.** There is no working
+      value: `sw_entry_ok` needs live pointers at +8 and +12 and ST's entry 1 at
+      0x758350 has zeros in both, so every stride-32 reader downstream reads
+      noise. The by-shape hit at `0x842ffc` is a false positive in `.bss`, not a
+      near miss.
+      **▼ A TRAP MEASURED 2026-08-18, and it will misread every future log:
+      setting `PAD_GAME` ALONGSIDE `PAD_CARD` degrades a run badly.** With both
+      set, ST managed **TX 25** and the `[nbsched] playfield nodes:` line
+      disappeared entirely; with `PAD_CARD` alone and everything else identical
+      (same build, same `switch_list.txt` on disk) it is **TX 149** and the
+      nbsched line is back. Both runs otherwise agree - same frame counts per
+      second, no refusal. `/home/david/i52_pf.log` is a PAD_GAME run and must
+      NOT be used as a node-bus baseline; `/home/david/i52_ab.log` is the clean
+      one. This also cleared `swelf.py` of suspicion: the A/B was run with
+      `switch_list.txt` present in both arms, so the drop is PAD_GAME's and not
+      the new table's.
+      **★★★ 2026-08-18: THE NODE BUS IS NOT STALLED BY THE GAME - IT IS
+      THROTTLED BY THE SHIM'S OWN SWITCH-TABLE SEARCH. Mechanism measured; the
+      obvious fix was tried, crashed, and is reverted.**
+      `sw_find_maybe()` is called from the node-bus write path, so the search
+      runs **inside the guest's `write()` to the bus** and the bus thread is
+      blocked for its whole duration. Godzilla never pays it: `sw_configured_ok()`
+      validates its table on tick 0 and `sw_find_table()` is never called. ST's
+      configured address is godzilla's, fails, so ST runs the by-shape search at
+      bus-write ticks 0, 8, 16, 24. That search walks every writable region at a
+      **4-byte step** calling `sw_entry_ok()`, which calls `addr_readable()`
+      twice (`e`, `e+28`) plus up to two more via `sw_ptr_ok()` - and
+      `addr_readable()` is **a real `write(2)` syscall**, memoised only on the
+      immediately-previous pointer, so `e` and `e+28` never hit the memo. Two to
+      four syscalls per four bytes of guest address space, under qemu-user.
+      *Measured in `i52_ab.log`:* four multi-second dead windows, each beginning
+      at exactly a search tick and at no other frame - **38.8 s, 43.7 s, 43.4 s**
+      - about 126 s of a 180 s run. Consequences, in order: the game asks its
+      first bare-`00` discovery question at t=57 s and the shim answers "bus
+      empty", because the node-directory seed needs `sw_find_fails >= 4`, i.e.
+      tick 24, i.e. **t=145 s**; the game gives up at ~155 s and there is not one
+      `[nb*]` line in the last 25 s.
+      **The obvious fix does not work and must not be re-tried blind.** Caching
+      the probe per PAGE for the duration of one scan is correct on paper -
+      readability is a page property - and it worked exactly as intended: the
+      dead windows collapsed, the seed moved from t=145 s to **t=20 s**, TX went
+      **149 → 990**. It also took a **SIGSEGV inside `sw_entry_ok`, twice, at two
+      different pcs**, where no pre-change build had ever taken one. The half of
+      "readable" that is not a page property is WHEN: the scan reads
+      `/proc/self/maps` once and walks it while the guest allocates and frees
+      scene memory, so a page probed readable early can be gone by the time the
+      walk reaches it. The one-address memo has the same race with a window of
+      one candidate; a page cache widens it to a whole scan. **Reverted; the tree
+      is crash-free (segv 0, full 180 s, 9720 frames).** Whatever replaces it has
+      to answer the WHEN: a re-probe on entry to each page immediately before
+      touching it, a `sigsetjmp` guard so a fault aborts the scan and not the
+      process, or trusting the maps snapshot under such a guard - the discipline
+      `nb_scan_objs()` already documents.
+      **A second measurement trap, and it invalidates TX counts in this
+      document:** `nb_log_budget` defaults to **400**, shared across TX/RX/
+      TX-reply. `i52_ab.log` is 149+126+125 = exactly 400 and `after.log` is
+      158+136+106 = exactly 400. **Both were truncated.** Use
+      `PAD_NB_LOG=20000` on every node-bus run; the same ST build reports TX 257
+      rather than 149 with the budget lifted, and nothing about the run changed.
+      The unbudgeted `[nbcmd]` census is the one frame statistic that was always
+      safe to read.
+      **Still true after all of it:** the census remains
+      `0a 07 08 03 f1 f0 00 fe f9 fc` and `[nbchg]` is 0, so no switch scan and
+      no coils. **Rank-2 hypothesis, untested:** the boards are answered but
+      never graded to state 2 - ST's bring-up driver is `0x2059ac`, its phase
+      gate `0x205328` wants every board's `[obj+24]` to be 2, and ST's board
+      array is **0x8239c8 stride 0x98** (not godzilla's 0x7bad88/0xe0, which is
+      what every previous per-node flag reading on ST actually sampled).
+      **`0xfa` is a red herring - do not chase it.** It is the failure path of a
+      node deliberately silenced by `PAD_NB_SILENT=2` in godzilla's own run
+      script, it goes to node 2 and no other node, and godzilla plays fine with
+      it looping. Likewise "ST re-asks `fe` twelve times" is not a refusal loop:
+      one accepted identify costs six `fe`, so twelve is two normal passes.
+      **★ 2026-08-18 (later): THE CRASH IS FIXED, THE BUS IS UP, AND THE
+      FLIPPERS REACH THE GAME.** Four findings, in the order they fell:
+
+      **(1) The scan fault guard (hwshim.c), and the crash was never
+      sw_entry_ok's.** A sigsetjmp guard now hooks into the SIGSEGV handlers
+      the shim already owns (scan_guard_check): a fault on the scanning
+      thread longjmps back, closes the scan's fd, counts a failed search,
+      retries later. The page cache and the 0/2/4/6 cadence are back behind
+      it. The first guarded run then died at 16 s ANYWAY - pc inside
+      nb_objs_shape_ok, the OTHER maps walk, whose comment claimed "reads
+      stay inside the region the maps line already proved mapped". Proved
+      mapped proves WHERE; the guest's allocator owns WHEN. Both walks now
+      wear the guard, serialized by a busy latch. Measured: segv 0 across
+      every subsequent run, 3-6 aborts per run survived, each one a would-be
+      dead run.
+
+      **(2) The rank-2 hypothesis was RIGHT, and PAD_PEEK of ST's own board
+      array (0x8239c8/0x98) named the board.** Six of seven boards grade
+      status 2; node 4 (QR SCANNER) sits at status 7 = Checksum, claiming
+      fw 124.107.0 - godzilla's node4 firmware, the exact substitution
+      nbdir.py flagged "reproduced not corrected ... worth revisiting if
+      node 4 misbehaves". The node4 hex image is ENCRYPTED (checked against
+      three titles: no plaintext version anywhere; the 7c 6b 00 at +9 in
+      godzilla's image is a coincidence of high-entropy bytes), so the
+      per-title truth cannot be read from the file. The game then tries to
+      REFLASH our fake node 4 forever (census command 04 at 143 s, flag
+      churn 13/43/53). And 0x205328's gate is asymmetric: an optional board
+      PRESENT but ungraded pins NOT READY forever; an optional board ABSENT
+      passes. ST declares node 4 attr 0x4 = OPTIONAL (godzilla's is 0x0).
+
+      **(3) So the durable fix is TRUTH, not a better lie: the machine does
+      not have a QR scanner.** nodecensus.py gained a second candidate class
+      (optional_node4_nodes: type node4 AND flags bit 2, read from the ELF
+      via nbdir's own parsers - no name check; godzilla is excluded by its
+      own 0x0 attr). watch.sh's census now emits PAD_NB_SILENT=4 for ST by
+      itself. Measured on the durable path: 0x40 coils at 30 s, 0x11 switch
+      scans at 53 s, all present boards status 2, node 4 takes the same fa
+      failure path godzilla's silenced node 2 does.
+
+      **(4) The last blocker was our own switch-table absence: sw_scan_bytes
+      answers "no switch state" for a title with no table - a playfield with
+      no switches and a keyboard wired to nothing** (coin, start and both
+      flippers were pressed on a LIVE bus: zero [nbchg]). The fix is the
+      FILE TABLE: sw_file_table() loads /dump/tables/<game>/switch_list.txt
+      (swelf.py's ELF-derived list) into godzilla-shaped entries and
+      publishes them through the existing sw_shadow seam - tried only at
+      sw_table_hopeless(), absent ids poisoned (node 0xff, not 0 - an
+      all-zero entry is DIP 1), NOT re-dumped (mktables prefers a log dump;
+      a round-trip would trade real names for "?"). The discovery seed
+      filters nb_is_silent in the primary branch too, and a file-table title
+      merges its declared node directory (minus silenced) into the seed so
+      the LED-only boards (2 CABINET LIGHTS, 12 TOPPER) are still
+      discovered - add_boards() cannot do it on ST because ST's board array
+      is DENSE, not self-labelling, so the by-shape array scan can never
+      resolve it.
+
+      **Measured end-to-end (i52_game.log): bus up at 19.9 s; plunge.py
+      reset/coin/start/plunge/flippers; 11 [nbchg] lines that tell the
+      physical story exactly** - at rest node 8 reads six trough switches
+      closed and TROUGH JAM open; the plunge opens trough 6 and closes the
+      shooter lane; LEFT FLIPPER (bit 25) at 45.3 s and RIGHT (bit 24) at
+      48.2 s both hit the wire, and the game answers node 8 with b7 at the
+      same millisecond, plus a 20-byte 96 burst right after START. The
+      pre-table replies ("all zeros = 78 active-low switches read ACTIVE")
+      are also gone: idle now reads open.
+
+      **Still open, and it needs eyes:** whether a game actually STARTS
+      (the screen oracle logs no text on ST attract/game scenes - the 0x11
+      story above is switch-level truth, not a scorecard), and per-switch
+      POLARITY is uniform active-low (right for 78 of godzilla's 88; if
+      ST's optos disagree the place for per-device polarity is the file).
+      The remaining scan-aborts are nb_objs_addr re-scanning for a board
+      array ST does not have in findable form - harmless, guard-caught.
+
+      **★ 2026-08-18 (evening): A GAME STARTED AND RAN - David's session, his
+      eyes, and the log agrees.** Fresh boot 14:01 (guided setup already
+      persisted): coin (+39k) credited, start (+36k) took, and at 114 s the
+      log shows `[sw] -69f` - BALLFEED answering the game's OWN trough eject
+      coil. Playfield hits (+99p node 9, +64p node 8) served; the video
+      channels left the attract loop for game scenes. Two session findings on
+      the way there: (1) autoattract was fighting the guided setup (fixed:
+      operator stand-down, commit f789276); (2) in the 45-minute first
+      session the game's switch sweep DEGRADED 3.3 s -> 32 s (a coin held
+      31.7 s on the wire because no node-1 scan happened between 2634 s and
+      2666 s) - a fresh boot resets it; cause unproven (candidate: the 1 Hz
+      clip EOS/rebuild cycle accumulating in-game state).
+
+      **THE REMAINING GAP, measured in-game: switch closures wait 0.5-2.8 s
+      for a scan even during play** (swlatch id=64 waited=2785 ms with a ball
+      in play). The game never enters a fast-scan state on ST as emulated.
+      The lever: the 0x11 scan is REQUEST-driven off our `00`-poll and `ff`
+      status answers - flag a node's pending switch news there so the game
+      fetches immediately instead of on its lazy sweep. Also open: budget the
+      [vid] EOS-cycle log lines; per-switch polarity is a uniform active-low
+      guess; the session-degradation cause above.
+
+      **★ 2026-08-18 (night): THE SWITCH LATENCY IS FIXED - it was OUR heap
+      scan running on the game's bus thread.** Press-to-wire on ST went from
+      0.5-2.9 s to 5-12 ms; the node-bus service tick from one pass per 3.3 s
+      to 9-10 ms (godzilla's exact cadence); 0x11 scans from ~1/s to 170-430/s.
+      Godzilla regression byte-identical (TX 7806, 10580 frames, 0 CNB).
+
+      **What it was.** `nb_objs_addr()` ("never cache a miss - the array is
+      populated as bring-up runs") is read through `NB_OBJS` by
+      `nb_nodes_add_boards()` at the top of EVERY node-bus service cycle,
+      inside the shim's reply to the game's `00` poll - i.e. ON `game:nodebus`.
+      On a title whose board array cannot be found by shape (ST's is dense, not
+      self-labelling), that is a full /proc/self/maps heap walk per cycle,
+      ~2.8 s each under qemu. The game's loop ran exactly as designed; the 3.3 s
+      between passes was us. Fix: rate-limit the miss (10 s apart, 3 tries,
+      then stop for the run). Godzilla resolves first try and caches forever,
+      which is why the labelled example never showed it.
+
+      **How it was found, and the rule to keep:** five hypotheses died on
+      measurement first - node 4's silence (X4: unsilenced, same 3.3 s), a bus
+      timeout (the pass is 1 ms and clean), the game's own scheduler (a page
+      of 0x2065c4 disassembly, three PAD_PEEKs, a pass-entry hook: it fires
+      from ONE site every 2.8 s and never otherwise), the video EOS churn (ST
+      dies with PAD_VID=0 - separate finding), the sleep-site addresses (real
+      but minor: 0x4eb5cc/0x204f5c are now recognised BY SHAPE, keep that).
+      The 30-second measurement that ended it: `/proc/<pid>/task/*/{stat,
+      wchan,syscall}` sampled 30x over 6 s - `game:nodebus` was `R`, wchan 0,
+      no syscall, EVERY sample. A thread that is running-not-blocked for
+      seconds is spinning, and the shim is the only thing on that thread that
+      can spin for seconds. **Sample the thread states BEFORE reading the
+      game's code.** (`i52sample.sh` in C:\tmp is the sampler; runs as david,
+      sudo -n for /proc syscall if available.)
+
+      **Also shipped on the way (all measured, all kept):** the priority lane
+      in nb_next_node (a node with unserved switch news is named first - now
+      that the loop runs at 100 Hz it is what makes a press land in the NEXT
+      tick), a silenced node answers its routine `ff` status poll (its
+      absence no longer costs the game a retry+timeout per pass), the
+      recovery/reset usleep substitutions keyed by shape not godzilla's
+      addresses, PAD_PASS_HOOK=<hexaddr> (log every entry to one function
+      with caller+timestamp - generic, pattern-guarded).
+
+      **Open, and small:** ST exits with PAD_VID=0 (needs the video path);
+      the first-session sweep degradation (3.3 s -> 32 s over 45 min) is
+      almost certainly this same scan re-running - re-measure on a long
+      session before chasing it separately; polarity still uniform
+      active-low.
+
+      **Acceptance (unchanged):** stranger_things boots past LOCATING NODE
+      BOARDS with no NOT FOUND overlay, stated with a screenshot; then say
+      what its attract shows on BOTH displays.
+      — S2: the title is unplayable past boot, but no other title is
+      affected and the projector/display work is delivered; it costs runs on
+      one title. D4: the instrument that can judge it does not exist for this
+      title and has to be built and validated against godzilla first.
 
 - [x] **48. The playfield keyboard legend is GODZILLA'S list, so every other
       title gets a legend full of holes and a row named after another game.**

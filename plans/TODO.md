@@ -188,11 +188,37 @@ These have each been violated at least once and each cost a run or a window:
       that constant happens to fit ST too (bits 8..11 SELECT/PLUS/MINUS/BACK,
       bit 23 COIN DOOR INTERLOCK made). **`PAD_CAB_DIP=<n>` added this pass**
       sets dips 1..8 to `n` (active low, so `byte0 = ~n`).
-      **UNKNOWN and next to read: which value is which country.** The country
-      list is real (`INDONESIA, CHINA, LITHUANIA, CANADA 2, RUSSIA, TAIWAN,
-      MIDDLE EAST, CROATIA, JAPAN, SOUTH AFRICA, CHUCK-E-CHEESE, SPAIN,
-      PORTUGAL, …` from `0x53b250`) and the dip handler is `0x41c970`, called
-      with arg 1..8. Sweep `PAD_CAB_DIP` or decode the handler.
+      **THE COUNTRY LIST IS DECODED — message ids 1421..1450, in index order:**
+      `0 U.S.A., 1 AUSTRIA, 2 BELGIUM, 3 CANADA 1, 4 NETHERLANDS, 5 FINLAND,
+      6 FRANCE, 7 GERMANY, 8 ITALY, 9 DENMARK, 10 NORWAY, 11 SWEDEN,
+      12 SWITZERLAND, 13 AUSTRALIA, 14 U.K., 15 GREECE, 16 NEW ZEALAND,
+      17 PORTUGAL, 18 SPAIN, 19 CHUCK-E-CHEESE, 20 SOUTH AFRICA, 21 JAPAN,
+      22 CROATIA, 23 MIDDLE EAST, 24 TAIWAN, 25 RUSSIA, 26 CANADA 2,
+      27 LITHUANIA, 28 CHINA, 29 INDONESIA`. So a country is a number 0..29,
+      and eight open dips read raw `0xff` = 255 — not a country, which fits the
+      refusal exactly.
+      **⚠ SWEEP RAN, RESULT INCONCLUSIVE — AND THE FAULT IS THE INSTRUMENT.**
+      `PAD_CAB_DIP=255` (byte0 = `0x00`, every dip MADE = raw 0 = U.S.A. if the
+      game reads the lines directly) fires correctly — `[cabdip] country dips
+      1..8 set to 255 (byte0=00, active low)` — and NOTHING MEASURABLE CHANGED.
+      **This rig has no oracle for what is on the glass:** the country message
+      is a TEXT OVERLAY drawn over video, so the LCD scene hash cannot tell it
+      apart from any other screen, and "scenes unchanged" is NOT evidence of
+      failure. No coil (`0x40`) traffic in either run, but that is equally true
+      of a machine sitting on any pre-attract screen.
+      **Two readings remain open and a blind run cannot separate them:**
+      (a) the game reads the lines RAW — `0xff` = 255 invalid, `0x00` = 0 =
+      U.S.A.; (b) the game INVERTS (made = 1) — `0xff` already means 0 =
+      U.S.A. and the refusal has another cause. Neither extreme visibly worked,
+      so the model is incomplete. A likely third shape is the classic Stern
+      split, only dips 1..5 carrying the country and 6..8 separate flags, which
+      would want `byte0 = 0xE0` i.e. **`PAD_CAB_DIP=31`**.
+      **NEXT, and pick one:** eyes on the glass for two or three values, or
+      build the TEXT-PAGE PROBE (character pages at
+      `0x7c0114 + (*(u32*)0x7de194)<<12`, 4 KB each) so a run reports its own
+      screen text and this stops being guesswork. The probe is the better
+      investment — every future screen question needs it. Dip handler
+      `0x41c970` (arg 1..8) is the static alternative.
       **★ DAVID, EYES ON THE GLASS, 2026-08-17: the boot now walks its NORMAL
       sequence — a "CHECK NODE BOARD 2" screen (not registered), and then
       straight to the country refusal.** Two consequences:

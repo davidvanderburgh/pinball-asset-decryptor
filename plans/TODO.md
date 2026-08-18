@@ -1493,6 +1493,53 @@ These have each been violated at least once and each cost a run or a window:
       [vid] EOS-cycle log lines; per-switch polarity is a uniform active-low
       guess; the session-degradation cause above.
 
+      **★ 2026-08-18 (night): THE SWITCH LATENCY IS FIXED - it was OUR heap
+      scan running on the game's bus thread.** Press-to-wire on ST went from
+      0.5-2.9 s to 5-12 ms; the node-bus service tick from one pass per 3.3 s
+      to 9-10 ms (godzilla's exact cadence); 0x11 scans from ~1/s to 170-430/s.
+      Godzilla regression byte-identical (TX 7806, 10580 frames, 0 CNB).
+
+      **What it was.** `nb_objs_addr()` ("never cache a miss - the array is
+      populated as bring-up runs") is read through `NB_OBJS` by
+      `nb_nodes_add_boards()` at the top of EVERY node-bus service cycle,
+      inside the shim's reply to the game's `00` poll - i.e. ON `game:nodebus`.
+      On a title whose board array cannot be found by shape (ST's is dense, not
+      self-labelling), that is a full /proc/self/maps heap walk per cycle,
+      ~2.8 s each under qemu. The game's loop ran exactly as designed; the 3.3 s
+      between passes was us. Fix: rate-limit the miss (10 s apart, 3 tries,
+      then stop for the run). Godzilla resolves first try and caches forever,
+      which is why the labelled example never showed it.
+
+      **How it was found, and the rule to keep:** five hypotheses died on
+      measurement first - node 4's silence (X4: unsilenced, same 3.3 s), a bus
+      timeout (the pass is 1 ms and clean), the game's own scheduler (a page
+      of 0x2065c4 disassembly, three PAD_PEEKs, a pass-entry hook: it fires
+      from ONE site every 2.8 s and never otherwise), the video EOS churn (ST
+      dies with PAD_VID=0 - separate finding), the sleep-site addresses (real
+      but minor: 0x4eb5cc/0x204f5c are now recognised BY SHAPE, keep that).
+      The 30-second measurement that ended it: `/proc/<pid>/task/*/{stat,
+      wchan,syscall}` sampled 30x over 6 s - `game:nodebus` was `R`, wchan 0,
+      no syscall, EVERY sample. A thread that is running-not-blocked for
+      seconds is spinning, and the shim is the only thing on that thread that
+      can spin for seconds. **Sample the thread states BEFORE reading the
+      game's code.** (`i52sample.sh` in C:\tmp is the sampler; runs as david,
+      sudo -n for /proc syscall if available.)
+
+      **Also shipped on the way (all measured, all kept):** the priority lane
+      in nb_next_node (a node with unserved switch news is named first - now
+      that the loop runs at 100 Hz it is what makes a press land in the NEXT
+      tick), a silenced node answers its routine `ff` status poll (its
+      absence no longer costs the game a retry+timeout per pass), the
+      recovery/reset usleep substitutions keyed by shape not godzilla's
+      addresses, PAD_PASS_HOOK=<hexaddr> (log every entry to one function
+      with caller+timestamp - generic, pattern-guarded).
+
+      **Open, and small:** ST exits with PAD_VID=0 (needs the video path);
+      the first-session sweep degradation (3.3 s -> 32 s over 45 min) is
+      almost certainly this same scan re-running - re-measure on a long
+      session before chasing it separately; polarity still uniform
+      active-low.
+
       **Acceptance (unchanged):** stranger_things boots past LOCATING NODE
       BOARDS with no NOT FOUND overlay, stated with a screenshot; then say
       what its attract shows on BOTH displays.

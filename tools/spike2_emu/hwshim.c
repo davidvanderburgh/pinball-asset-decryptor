@@ -841,6 +841,55 @@ int shim_fclose(void *f)
  * a 480-iteration loop (2 minutes) before it gives up and shows the UI anyway.
  * Seeing that loop run to exhaustion is the difference between "scenes are
  * still loading" and "scene loading never completes". */
+/* ★ ITEM 52: THE TWO NODE-BUS SLEEP SITES ARE RECOGNISED BY SHAPE, NOT BY
+ * ADDRESS. Both substitutions below (recovery 5 ms pair -> 250 us, reset
+ * 2 s -> 1 s) used to key on Godzilla Pro 1.15.0 return addresses
+ * (0x59eb94, 0x1d6ec4). On stranger_things the same code lives at 0x4eb5cc
+ * and 0x204f5c, the literals matched nothing, and BOTH sleeps ran at the
+ * game's own full length - measured 2026-08-18: ST's node-bus service loop
+ * ran ONE pass every 3.3 s against godzilla's ~100 Hz tick, every switch
+ * closure waited 0.5-2.9 s for its node's scan, and a 113 ms tap read as
+ * seconds of hold. The pass itself took 1 ms; the other 3.3 s were these
+ * two sleeps at their real-hardware lengths, paid on every failed exchange
+ * (ST re-asks its absent node 4 every pass) and every bus reset.
+ *
+ * The recognisers read the CALLER'S CODE at the return address, which is the
+ * same on every title because it is the same source:
+ *
+ *   recovery  ...; bl X(port,1); mov r0,#5000; bl usleep      <- ra here:
+ *             ldr r0,[r4]; mov r1,#0; bl X(port,0); mov r0,#5000; b usleep
+ *             so at ra: `ldr r0,[r4]` (e5940000) then `mov r1,#0` (e3a01000)
+ *             and the sleep is 5000. The tail-call twin is caught by `armed`
+ *             exactly as before.
+ *   reset     bl X(assert); movw/movt r0,#2000000; bl usleep   <- ra here:
+ *             <release arg>; bl X(release) - so at ra: `mov r0, r5`
+ *             (e1a00005, stranger_things) or `mov r0, #1` (e3a00001,
+ *             godzilla) followed by a `bl` (top byte 0xeb), sleep 2000000.
+ *
+ * Verified against both disassemblies (godzilla 0x59eb94 = e5940000
+ * e3a01000, 0x1d6ec4 = e3a00001 eb0f35a5; ST 0x4eb5ec = e5940000 e3a01000,
+ * 0x204f60 = e1a00005 eb0baf91), so the labelled example keeps exactly the
+ * timings it was tuned to. Reads are
+ * addr_readable-guarded because a return address into a library that faults
+ * would be a crash in usleep. */
+static int addr_readable(const void *p);   /* defined with the fault reporter */
+static int nb_sleep_site_recover(unsigned long ra)
+{
+    const unsigned *p = (const unsigned *)ra;
+    if (ra < 0x8000ul || ra >= 0x02000000ul) return 0;   /* game image only */
+    if (!addr_readable(p) || !addr_readable(p + 1)) return 0;
+    return p[0] == 0xe5940000u && p[1] == 0xe3a01000u;
+}
+static int nb_sleep_site_reset(unsigned long ra)
+{
+    const unsigned *p = (const unsigned *)ra;
+    if (ra < 0x8000ul || ra >= 0x02000000ul) return 0;
+    if (!addr_readable(p) || !addr_readable(p + 1)) return 0;
+    /* the release argument is `mov r0, r5` on stranger_things and
+     * `mov r0, #1` on godzilla - both then `bl` the release */
+    return (p[0] == 0xe1a00005u || p[0] == 0xe3a00001u) && (p[1] >> 24) == 0xebu;
+}
+
 int shim_usleep(unsigned int us) __asm__("usleep");
 int shim_usleep(unsigned int us)
 {
@@ -957,8 +1006,8 @@ int shim_usleep(unsigned int us)
                     rec_us = v;
                 }
             }
-            if (us == 5000 && (ra == 0x59eb94ul || armed)) {
-                armed = (ra == 0x59eb94ul);
+            if (us == 5000 && (nb_sleep_site_recover(ra) || armed)) {
+                armed = nb_sleep_site_recover(ra);
                 if (rec_us < (int)us) us = (unsigned int)rec_us;
             } else {
                 armed = 0;
@@ -1021,7 +1070,7 @@ int shim_usleep(unsigned int us)
                     rst_us = v;
                 }
             }
-            if (us == 2000000 && ra == 0x1d6ec4ul && rst_us < (int)us)
+            if (us == 2000000 && nb_sleep_site_reset(ra) && rst_us < (int)us)
                 us = (unsigned int)rst_us;
         }
     }
@@ -4008,9 +4057,37 @@ static unsigned nb_near_base, nb_near_n;
  * as the game brings the bus up, so an early call must be allowed to fail and
  * be asked again. (TITLE_ADDR caches 0 forever, which is right for a fixed
  * address and wrong for a scan.) */
+/* ★ ITEM 52: A MISS IS RATE-LIMITED, and this one line of policy was the
+ * whole of stranger_things' unplayability. "Never cache a miss" (below) was
+ * right about WHY - the array fills in as bring-up runs - and catastrophic
+ * about HOW: NB_OBJS is read by nb_nodes_add_boards() at the top of EVERY
+ * node-bus service cycle, ON THE GAME'S BUS THREAD, inside its `00` poll.
+ * On a title whose array never resolves by shape (ST's is dense, not
+ * self-labelling) that is a full /proc/self/maps heap walk per cycle - and
+ * the walk is the whole cycle: measured 2026-08-18, `game:nodebus` was in
+ * state R (running, wchan 0, no syscall) in 30 of 30 samples over 6 s while
+ * the game got ONE service pass every ~2.8 s and every switch closure waited
+ * up to 2.9 s for a scan. Godzilla resolves on the first try and caches
+ * forever, which is why the labelled example never showed it. Every earlier
+ * theory - node 4's silence, a bus timeout, a game-side gate, the video
+ * churn - was measured and died; the profiler-by-/proc named the thread and
+ * this function is what runs on it.
+ *
+ * Policy: after a miss, do not scan again for NB_OBJS_RETRY_MS of wall
+ * clock, and after NB_OBJS_MAX_MISSES give up for the run. The numbers are
+ * sized to the cost: ONE scan is ~2.8 s of the bus thread on ST, so a 2 s
+ * retry (the first cut) still left the thread mostly scanning for the first
+ * minute - measured, the last late closures landed at 60 s. Ten seconds
+ * apart, three tries, covers bring-up (the array is populated within ~15 s
+ * on godzilla) and then stops. A title whose array appears late is found on
+ * a retry, and the near-miss report keeps its data. */
+#define NB_OBJS_RETRY_MS   10000ul   /* one scan is ~2.8 s of the bus thread */
+#define NB_OBJS_MAX_MISSES 3         /* bring-up populates within ~15 s */
 static unsigned nb_objs_addr(void)
 {
     static unsigned found;
+    static unsigned misses;
+    static unsigned long next_try_ms;
     unsigned a, cnt = 0;
     char m[200];
 
@@ -4020,10 +4097,21 @@ static unsigned nb_objs_addr(void)
         found = a;
         return found;
     }
+    if (misses >= NB_OBJS_MAX_MISSES) return 0;       /* gave up for the run */
+    if (next_try_ms && pad_ms() < next_try_ms) return 0;   /* too soon */
     {
         unsigned near = 0, near_n = 0;
         a = nb_scan_objs(&cnt, &near, &near_n);
         if (!a) {
+            misses++;
+            next_try_ms = pad_ms() + NB_OBJS_RETRY_MS;
+            if (misses == NB_OBJS_MAX_MISSES) {
+                snprintf(m, sizeof m, "[nbobj] no self-labelling board array "
+                         "after %u scans - not scanning again this run (the "
+                         "scan runs on the game's bus thread; see "
+                         "nb_objs_addr)\n", misses);
+                logmsg(m);
+            }
             /* Hand the near miss to nb_dump_objs() to REPORT, rather than
              * printing a bare address here. On stranger_things this branch is
              * the whole result of the run - 11 ticks of "no table", best
@@ -5684,6 +5772,13 @@ static void sw_hold_init(void)
 static unsigned char nb_nodes[16];
 static int nb_nnodes = -1;
 
+/* ★ ITEM 52: THE PRIORITY LANE. `nb_news[node]` is set by the switch merge
+ * the instant a switch on that node moves and cleared when that node's 0x11
+ * scan is answered; nb_next_node() names news-bearing nodes at the HEAD of
+ * every service cycle. See the long comment on nb_next_node's lane. */
+static volatile unsigned char nb_news[64];
+static int nb_lane_on = -1;                    /* PAD_NB_LANE=0 disables */
+
 /* Is `node` in PAD_NB_SILENT? One definition, because the node-bus RX handler
  * (shim_read) tests the same list to refuse an addressed reply, and item 52's
  * node-directory discovery fallback (nb_nodes_init) must not seed a node the
@@ -5897,6 +5992,40 @@ static unsigned nb_next_node(void)
      * under it between the first node and the terminating zero. */
     if (idx == 0) nb_nodes_add_boards();
     if (nb_nnodes <= 0) return 0;
+    /* ★ ITEM 52: THE PRIORITY LANE - a node with unserved switch NEWS is
+     * named before the round-robin resumes, every cycle, until its scan is
+     * answered.
+     *
+     * WHY THIS IS THE FIX AND NOT A TUNING. The game's service loop
+     * (0x1d7d88) fetches a node's 0x11 switch scan INSIDE servicing that
+     * node, one board per pass, and it asks US which node to service (the
+     * bare `00` poll). Its own cadence is what it is - measured on
+     * stranger_things IN A GAME, closures waited 0.5-2.8 s for their node's
+     * turn (swlatch id=64 waited=2785 ms with a ball in play), and in the
+     * guided-setup wizard a 113 ms tap read as a 3-7 s hold because node 8's
+     * turn came round every ~3.3 s. Every earlier answer to "the flippers
+     * feel late" tuned the SHIM (hold longer, latch a closure, minscans) -
+     * all of which trade width for delivery and none of which move WHEN the
+     * game looks. This moves WHEN: the round-robin is ours to order, and a
+     * board with news goes first. A real bus master does the same thing -
+     * it services the board that raised its line.
+     *
+     * The lane is a queue, not a hijack: news nodes are drained one per
+     * call and then the round-robin continues exactly where it was, and the
+     * terminating zero (the CABINET's only clock - see below) still comes
+     * once per cycle. Godzilla is unaffected in the common case (no news =
+     * no lane) and helped in the same way when it has news. */
+    if (nb_lane_on == -1) { char *q = getenv("PAD_NB_LANE"); nb_lane_on = !(q && *q == '0'); }
+    if (nb_lane_on) {
+        int i;
+        for (i = 0; i < nb_nnodes; i++) {
+            unsigned n = nb_nodes[i];
+            if (n < 64 && nb_news[n] == 1) {
+                nb_news[n] = 2;             /* named; cleared when 0x11 answers */
+                return n;
+            }
+        }
+    }
     if (idx >= nb_nnodes) {
         idx = 0;
         /* ITEM 17: THIS ZERO IS THE CABINET, AND THIS IS ITS ONLY CLOCK.
@@ -6155,6 +6284,20 @@ static void sw_shm_merge(void)
             sw_src[n] = src ? src : '?';
             sw_edged[n] = 1;                       /* item 43: state now known */
             moved = 1;
+            /* item 52: RAISE THE NEWS for this switch's node - the priority
+             * lane in nb_next_node() names it at the head of the next service
+             * cycle. Read through the resolved table so it holds for a found,
+             * configured or file table alike; node 0 is the cabinet (SPI, not
+             * the bus) and is skipped. */
+            {
+                unsigned st = tread(SW_STRUCT), cnt = tread(SW_COUNT);
+                if (sw_ok(st) && (unsigned)n < cnt && cnt <= 4096) {
+                    unsigned node = ((const unsigned char *)(unsigned long)
+                                     (st + (unsigned)n * 32))[20];
+                    if (node && node < 64 && nb_news[node] != 1)
+                        nb_news[node] = 1;
+                }
+            }
             /* The latch bookkeeping lives HERE because this is the only place
              * the merged answer moves, and the merged answer is what the game
              * is handed. Doing it at either input would count a keyboard
@@ -7501,6 +7644,51 @@ static void country_trace(void)
              (void *)&country_note, 1, "country");
 }
 
+/* ★ ITEM 52 INSTRUMENT: PAD_PASS_HOOK=<hexaddr> - log every ENTRY to one
+ * function, with its caller and a timestamp. Generic on purpose: the pattern
+ * guard is read from the function itself at arm time (both words must be
+ * PC-independent - the caller of this knob has checked). First 200 calls
+ * verbatim, then every 256th, so a 60 Hz caller stays legible. Written to
+ * answer "how often does the stranger_things bus service pass (0x2064b0)
+ * run, and from which branch of its loop" - a question three peeks and a
+ * page of disassembly could not settle. */
+__attribute__((noinline, used))
+static void pass_note(unsigned caller, const unsigned *entry_sp)
+{
+    static unsigned n, busy;
+    static unsigned long last_ms;
+    char m[160];
+    unsigned long now;
+    (void)entry_sp;
+    if (busy) return;
+    busy = 1;
+    n++;
+    now = pad_ms();
+    if (n <= 200 || (n & 255u) == 0) {
+        snprintf(m, sizeof m, "[passhook] #%u %lu ms (+%lu) lr=0x%08x\n",
+                 n, now, last_ms ? now - last_ms : 0ul, caller);
+        logmsg(m);
+    }
+    last_ms = now;
+    busy = 0;
+}
+
+static void pass_hook_arm(void)
+{
+    static int done;
+    unsigned fn = 0;
+    const char *e;
+    volatile unsigned *p;
+    if (done) return;
+    done = 1;
+    e = getenv("PAD_PASS_HOOK");
+    if (!e || !*e) return;
+    while (ishex(*e)) fn = fn * 16 + hexval(*e++);
+    if (!fn || !addr_readable((const void *)(unsigned long)fn)) return;
+    p = (volatile unsigned *)(unsigned long)fn;
+    pad_hook(fn, p[0], p[1], (void *)&pass_note, 1, "passhook");
+}
+
 static void country_gate_bypass(void)
 {
     static int done;
@@ -8416,6 +8604,37 @@ long shim_read(int fd, void *b, unsigned long n)
          * move the ExchangeData counter). */
         if (nb_req_len > 0 && (nb_req[0] & 0x80)) {
             unsigned want = (unsigned)(nb_req[0] & 0x3f);
+            /* ★ ITEM 52: SILENT FOR IDENTITY, PRESENT FOR STATUS. The `ff`
+             * status poll is carved OUT of the silence and answered below
+             * with the ordinary zero-filled word (no faults, no input news).
+             *
+             * WHY, measured 2026-08-18 on stranger_things: the game's service
+             * loop polls `ff` on EVERY node its directory declares, silenced
+             * or not, once per pass. On a silenced node the read returns
+             * short, the game retries once, times out (10 ms), and then - on
+             * ST's node 4, a device-class board on the coil/switch service
+             * path - the whole service pass took a ~3.3 s penalty before the
+             * next one ran. That was the "one pass every 3.3 s" that made
+             * every switch closure wait 0.5-2.9 s for a scan and a 113 ms tap
+             * read as seconds of hold; the pass itself was 1 ms. Item 17 saw
+             * the same mechanism on godzilla as a ~690 ms cabinet stall from
+             * node 2's silence and named this exact suspect in the comment
+             * below; node 2 is a light board and its penalty was smaller.
+             *
+             * WHY THIS IS STILL TRUTHFUL. Silence exists so the board is
+             * never IDENTIFIED - never registered, never graded, never
+             * wedging the readiness gate (fe/f9/fc/fa/04 stay refused). A
+             * status poll on an unregistered address answering "nothing to
+             * report" registers nothing: 0x5a43d0 hands the caller two zero
+             * words, no fault bits, no input-changed flag. It is what a bus
+             * with no board on that address and a master that does not wait
+             * on it would look like - which is the machine we are modelling.
+             * PAD_NB_SILENT_FF=0 restores the old total silence for A/B. */
+            if (nb_is_silent(want) && nb_req_len > 2 && nb_req[2] == 0xff) {
+                static int on = -1;
+                if (on == -1) { char *q = getenv("PAD_NB_SILENT_FF"); on = !(q && *q == '0'); }
+                if (on) goto silent_status_ok;
+            }
             if (nb_is_silent(want)) {
                 /* ITEM 17: timestamp every refusal. Run 11 showed the cabinet
                  * poll stops for ~690 ms at a time (~138 x the game's 5 ms
@@ -8436,6 +8655,7 @@ long shim_read(int fd, void *b, unsigned long n)
                 return 0;
             }
         }
+    silent_status_ok:
         for (i = 0; i < n; i++) p[i] = 0;
 
         /* UNADDRESSED reply (request byte 0 has no 0x80). 0x59dbf8 branches on
@@ -8661,6 +8881,7 @@ long shim_read(int fd, void *b, unsigned long n)
                 sw_scan_enabled()) {
                 unsigned nid = (unsigned)(nb_req[0] & 0x3f);
                 unsigned char bits[8];
+                if (nid < 64) nb_news[nid] = 0;    /* item 52: news delivered */
                 if (sw_scan_bytes(nid, bits)) {
                     /* Same trace as [cabchg], for the node bus half. A burst of
                      * 27 playfield switches was seen flipping together at 35 s
@@ -8883,6 +9104,7 @@ long shim_write(int fd, const void *b, unsigned long n)
          * thing this file is certain the game has reached. */
         screen_install();
         country_trace();
+        pass_hook_arm();
         country_gate_bypass();
         nb_maybe_dump();
         alert_maybe_dump();

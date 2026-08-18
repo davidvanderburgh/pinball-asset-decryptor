@@ -94,12 +94,14 @@ so finding neither means the table was not read, however many records came back.
 """
 import argparse
 import collections
+import io
 import os
 import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import devicexy
+import nbdir
 
 #: A connector that names a board: "8b", "9a", "2a", and bare "8" if it ever
 #: appears. Anything else - Godzilla's "CN4" on the topper strip - names a
@@ -214,6 +216,65 @@ def dir_nodes(path):
     return out
 
 
+def optional_node4_nodes(elf_path):
+    """{node id} for every directory record that is BOTH type node4 AND
+    marked optional (flags bit 2) - the second silencing candidate, and a
+    different mechanism from node 2's (item 52, 2026-08-18).
+
+    THE MECHANISM, measured on stranger_things_le with a PAD_PEEK of the
+    title's own board array (0x8239c8 stride 0x98):
+
+      * The shim's identity reply for a node4 board claims firmware
+        124.107.0 - a value MEASURED ON GODZILLA (nbdir.NODE4_FW_AS_READ),
+        because the node4 hex image is encrypted end to end and the
+        per-title truth cannot be read out of the file. nbdir's own comment
+        promised "the refusal detector will say if another title's node4
+        image disagrees"; stranger_things is that title.
+      * A version that does not match the game's decrypted hex-image list
+        grades the board status 7 = Checksum. Every other ST board grades 2.
+      * ST's readiness gate (0x205328) then wedges: an OPTIONAL board that
+        IS present but is NOT status 2 pins readiness false forever - while
+        an optional board that is ABSENT passes the same gate. The wedge
+        held the whole bus at identify: no 0x11 switch scans, no 0x40
+        coils, TECH ALERTS on the glass.
+      * Silenced (= truthfully absent, like the QR-scanner accessory a real
+        machine can lack), ST's census went from 10 commands to a full bus:
+        0x40 coils at 30 s, 0x11 switch scans at 53 s, all present boards
+        status 2.
+
+    OPTIONALITY IS THE GUARD, and it is what keeps this off godzilla, the
+    one title whose 124.107.0 claim is CORRECT: godzilla's node 4 record
+    carries flags 0x0, stranger_things' carries 0x4. A REQUIRED node4 with
+    an unknowable version is deliberately left alone - absence would wedge
+    the locate step just as hard as a bad version wedges grading, so
+    silencing buys nothing and hides the evidence.
+
+    Read from the ELF rather than from node_ident.txt because the flags
+    word is not in that file, and because the file can be stale on a title
+    whose hexdir has moved (ST's has: its games/ dir is a bare ELF symlink,
+    so nbdir derivation fails and watch.sh keeps the previous table).
+    Empty set on any parse failure - same safe direction as everything
+    else here: silence only what the evidence names.
+    """
+    if not elf_path:
+        return set()
+    try:
+        elf = io.open(elf_path, "rb").read()
+        rx, rw = nbdir.load_segments(elf)
+        _base, cat = nbdir.find_catalog(elf, rx, rw)
+        full = []
+        nbdir.find_node_directory(elf, rx, rw, full=full)
+    except (OSError, SystemExit, ValueError):
+        return set()
+    out = set()
+    for nid, code, fl, _hand, _cell, _w3, _off in full:
+        idx = code - 2
+        typ = cat[idx] if 0 <= idx < len(cat) else None
+        if typ == "node4" and (fl & 4):
+            out.add(nid)
+    return out
+
+
 def silent_nodes(counts, swnodes=None, dirnodes=None):
     """The nodes the shim should NOT answer for, and why, as (list, reason).
 
@@ -301,6 +362,16 @@ def main():
 
     sw = switch_nodes(a.game, a.switches)
     nodes, why = silent_nodes(counts, sw, dir_nodes(a.nodedir))
+    n4 = sorted(optional_node4_nodes(a.elf) - set(nodes))
+    if n4:
+        nodes = sorted(set(nodes) | set(n4))
+        n4txt = ("%s is an OPTIONAL node4-type board whose identity claim "
+                 "is a firmware version measured on another title (the hex "
+                 "image is encrypted): it grades status 7 = Checksum and "
+                 "wedges the readiness gate, where an absent optional board "
+                 "passes - see nodecensus.optional_node4_nodes()"
+                 % ", ".join("node %d" % n for n in n4))
+        why = ("%s; and %s" % (why, n4txt)) if nodes != n4 else n4txt
 
     if a.silent:
         print(",".join(str(n) for n in nodes))

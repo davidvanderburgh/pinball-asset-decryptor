@@ -2,6 +2,7 @@
 the per-node identity claims the shim should make on the node bus.
 
     python3 nbdir.py <game-elf> [--hexdir DIR] [--out FILE] [--check-godzilla]
+    python3 nbdir.py <game-elf> --dump      # every field, for reading by eye
 
 WHY THIS FILE EXISTS. hwshim.c answers the game's 0xfe identity request from
 nb_idents[], and that table is GODZILLA'S node set hard-coded - measured on one
@@ -120,6 +121,39 @@ CLASS_PREF_DEFAULT = (5, 1, 4)
 # if another title's node4 image disagrees.
 NODE4_FW_AS_READ = 0x7C6B00
 
+# THE FLAGS WORD IS A STATIC PER-NODE ATTRIBUTE, AND IT IS THE SAME ON A TITLE
+# THAT BOOTS AND ONE THAT WEDGES (item 52, 2026-08-16). That is a negative
+# result and it is the point of printing it.
+#
+# stranger_things_le wedges on "LOCATING NODE BOARDS / 1 8 9 / NODES NOT FOUND",
+# recorded as "1, 8 and 9 are the ONLY boards the game cannot find" - i.e. as
+# though 2/4/12 had been found and something were specific to the pinnodes.
+# Measured on both titles' own directories:
+#
+#   node   stranger_things_le          godzilla_pro (boots clean)
+#     1    0x8  CABINET                0x8  Cabinet
+#     8    0x8  LOWER PLAYFIELD        0x8  Lower Playfield
+#     9    0x8  PLAYFIELD              0x8  Upper Playfield
+#     2    0xc  CABINET LIGHTS         0xc  Cabinet Lights
+#    12    0xc  TOPPER (OPTIONAL)      0xc  Topper
+#     4    0x4  QR SCANNER             0x0  QR Scanner
+#
+# IDENTICAL for every node the two titles share. So the flags word cannot be
+# what distinguishes ST's failure from godzilla's success, and nothing the
+# title declares statically singles out its pinnodes.
+#
+# What the value DOES track on ST is exactly which nodes the screen names:
+# 0x8 named, 0xc and 0x4 not - so bit 2 (0x4) clear, bit 3 (0x8) set. That is
+# ONE title's screen against one boot, so it is written down as an observation
+# and NOT as a decoded meaning: godzilla never wedges, so there is no second
+# screen to test it against. Do not build on it without one.
+#
+# The load-bearing consequence: "1 8 9" is not evidence that 2/4/12 registered.
+# The bus census for that same run says nothing registered at all - no
+# addressed subcommand at or below 0xef reached ANY node. Do not read that
+# screen as naming the failures.
+SCREEN_NAMED_ON_ST = 0x8
+
 
 def load_segments(elf):
     """(rx, rw) as (file_off, file_size, vaddr) triples from program headers."""
@@ -234,11 +268,18 @@ def _plausible_cat_entry(elf, off, rx, rw):
             (w3 == 0 or in_seg(w3, rx)))
 
 
-def find_node_directory(elf, rx, rw):
+def find_node_directory(elf, rx, rw, full=None):
     """Runs of 16-byte records {flags, handler(RX), name_cell(RW), w3} where
     byte2 of w3 is a node id < 64. Node records share a handler; the CPU
     record differs, so a run may carry at most a few distinct handlers.
-    Returns list of (node_id, code) sorted by node id."""
+    Returns list of (node_id, code) sorted by node id.
+
+    Pass a list as `full` to also collect every field, as
+    (node_id, code, flags, handler, name_cell, w3, file_off). The derivation
+    itself needs only (id, code), but the FLAGS word is evidence - see
+    REQUIRED_FLAG below - and re-scanning for it in a second script is the
+    "two places defining one fact" this rig forbids.
+    """
     data_lo, data_n = rw[0], rw[1]
     runs = []
     off = data_lo
@@ -247,7 +288,7 @@ def find_node_directory(elf, rx, rw):
         rec = []
         o = off
         while o <= end_off:
-            _fl, hand, cell, w3 = struct.unpack_from("<4I", elf, o)
+            fl, hand, cell, w3 = struct.unpack_from("<4I", elf, o)
             nid = (w3 >> 16) & 0xFF
             code = w3 & 0xFFFF
             # w3's TOP byte is a per-node FLAG, not padding: star_wars node 8
@@ -256,7 +297,7 @@ def find_node_directory(elf, rx, rw):
             if not (in_seg(hand, rx) and in_seg(cell, rw)
                     and nid < 64 and 0 < code < 0x100):
                 break
-            rec.append((nid, code, hand))
+            rec.append((nid, code, hand, fl, cell, w3, o))
             o += 16
         if len(rec) >= 5:
             # node ids must be unique and the handlers few
@@ -267,7 +308,10 @@ def find_node_directory(elf, rx, rw):
     if not runs:
         raise SystemExit("no node directory found")
     rec = max(runs, key=len)
-    return sorted((nid, code) for nid, code, _h in rec)
+    if full is not None:
+        full.extend(sorted((nid, code, fl, hand, cell, w3, o)
+                           for nid, code, hand, fl, cell, w3, o in rec))
+    return sorted((nid, code) for nid, code, _h, _f, _c, _w, _o in rec)
 
 
 def hex_inventory(hexdir):
@@ -375,11 +419,54 @@ def check_godzilla(rows):
           "exactly" % len(want))
 
 
+def node_name(elf, rx, rw, cell):
+    """The English name in a directory record's 5-language name cell
+    ("Lower Playfield", "TOPPER (OPTIONAL)"), or None."""
+    co = va_to_off(cell, rw)
+    if co is None:
+        return None
+    p, = struct.unpack_from("<I", elf, co)
+    po = va_to_off(p, rx)
+    return cstr(elf, po) if po is not None else None
+
+
+def dump(elf_path):
+    """Print the directory and the catalog with every field, for reading by
+    eye. This is the diagnostic half: derive() answers "what should the shim
+    claim", this answers "what does the title actually say about its boards",
+    which is what item 52 needed and what the flags table above was measured
+    with. Run it on two titles and diff: that is how it earns its keep."""
+    elf = io.open(elf_path, "rb").read()
+    rx, rw = load_segments(elf)
+    cat_base, cat = find_catalog(elf, rx, rw)
+    full = []
+    find_node_directory(elf, rx, rw, full=full)
+
+    print("# nbdir dump elf=%s" % os.path.basename(elf_path))
+    print("# catalog: %d rows at file offset 0x%x" % (len(cat), cat_base))
+    for i, t in enumerate(cat):
+        _w0, _w1, fl, w3, h = struct.unpack_from("<5I", elf, cat_base + i * 0x14)
+        po = va_to_off(w3, rx) if w3 else None
+        print("cat[%2d] code=%-3d type=%-16s flags=%08x part=%-14s hash=%08x"
+              % (i, i + 2, t or "-", fl,
+                 (cstr(elf, po) if po is not None else None) or "-", h))
+    print("# node directory: %d records at file offset 0x%x"
+          % (len(full), full[0][6] if full else 0))
+    for nid, code, fl, _hand, cell, w3, _o in full:
+        idx = code - 2
+        typ = cat[idx] if 0 <= idx < len(cat) else None
+        print("node=%-3d code=%-3d type=%-14s flags=%08x%s w3=%08x name=%s"
+              % (nid, code, typ or "-", fl,
+                 " screen-named-on-ST" if fl == SCREEN_NAMED_ON_ST else "",
+                 w3, node_name(elf, rx, rw, cell) or "?"))
+
+
 def main(argv):
     elf_path = None
     hexdir = None
     out = None
     check = False
+    want_dump = False
     it = iter(argv[1:])
     for a in it:
         if a == "--hexdir":
@@ -388,10 +475,15 @@ def main(argv):
             out = next(it)
         elif a == "--check-godzilla":
             check = True
+        elif a == "--dump":
+            want_dump = True
         else:
             elf_path = a
     if not elf_path:
         raise SystemExit(__doc__)
+    if want_dump:
+        dump(elf_path)
+        return
     if hexdir is None:
         hexdir = os.path.dirname(os.path.abspath(elf_path))
     rows, skipped = derive(elf_path, hexdir)

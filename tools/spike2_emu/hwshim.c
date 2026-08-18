@@ -11,6 +11,7 @@
 #define _GNU_SOURCE
 #include <stdarg.h>
 #include <stddef.h>
+#include <setjmp.h>   /* the scan fault guard - see scan_guard_check() */
 
 extern void *dlsym(void *, const char *);
 #define RTLD_NEXT ((void *)-1L)
@@ -19,6 +20,7 @@ extern char *strstr(const char *, const char *);
 extern size_t strlen(const char *);
 extern int snprintf(char *, unsigned long, const char *, ...);
 extern char *getenv(const char *);
+extern long syscall(long, ...);   /* raw gettid, from a signal handler */
 
 #define MAXFD 4096
 static char faked[MAXFD];
@@ -28,6 +30,10 @@ static int (*real_open64)(const char *, int, int);
 static int (*real_ioctl)(int, unsigned long, void *);
 
 static unsigned long pad_ms(void);       /* defined with the periodic dumps */
+/* PAD_PEEK - read arbitrary guest globals. Defined after addr_readable(),
+ * declared here because the usleep interposer is the periodic site that drives
+ * it and that sits far above. */
+static void pad_peek_tick(void);
 
 /* PAD_LOG_TIME=1 - prefix every shim log line with "[SSS.mmm] ", milliseconds
  * since the shim started.
@@ -835,6 +841,55 @@ int shim_fclose(void *f)
  * a 480-iteration loop (2 minutes) before it gives up and shows the UI anyway.
  * Seeing that loop run to exhaustion is the difference between "scenes are
  * still loading" and "scene loading never completes". */
+/* ★ ITEM 52: THE TWO NODE-BUS SLEEP SITES ARE RECOGNISED BY SHAPE, NOT BY
+ * ADDRESS. Both substitutions below (recovery 5 ms pair -> 250 us, reset
+ * 2 s -> 1 s) used to key on Godzilla Pro 1.15.0 return addresses
+ * (0x59eb94, 0x1d6ec4). On stranger_things the same code lives at 0x4eb5cc
+ * and 0x204f5c, the literals matched nothing, and BOTH sleeps ran at the
+ * game's own full length - measured 2026-08-18: ST's node-bus service loop
+ * ran ONE pass every 3.3 s against godzilla's ~100 Hz tick, every switch
+ * closure waited 0.5-2.9 s for its node's scan, and a 113 ms tap read as
+ * seconds of hold. The pass itself took 1 ms; the other 3.3 s were these
+ * two sleeps at their real-hardware lengths, paid on every failed exchange
+ * (ST re-asks its absent node 4 every pass) and every bus reset.
+ *
+ * The recognisers read the CALLER'S CODE at the return address, which is the
+ * same on every title because it is the same source:
+ *
+ *   recovery  ...; bl X(port,1); mov r0,#5000; bl usleep      <- ra here:
+ *             ldr r0,[r4]; mov r1,#0; bl X(port,0); mov r0,#5000; b usleep
+ *             so at ra: `ldr r0,[r4]` (e5940000) then `mov r1,#0` (e3a01000)
+ *             and the sleep is 5000. The tail-call twin is caught by `armed`
+ *             exactly as before.
+ *   reset     bl X(assert); movw/movt r0,#2000000; bl usleep   <- ra here:
+ *             <release arg>; bl X(release) - so at ra: `mov r0, r5`
+ *             (e1a00005, stranger_things) or `mov r0, #1` (e3a00001,
+ *             godzilla) followed by a `bl` (top byte 0xeb), sleep 2000000.
+ *
+ * Verified against both disassemblies (godzilla 0x59eb94 = e5940000
+ * e3a01000, 0x1d6ec4 = e3a00001 eb0f35a5; ST 0x4eb5ec = e5940000 e3a01000,
+ * 0x204f60 = e1a00005 eb0baf91), so the labelled example keeps exactly the
+ * timings it was tuned to. Reads are
+ * addr_readable-guarded because a return address into a library that faults
+ * would be a crash in usleep. */
+static int addr_readable(const void *p);   /* defined with the fault reporter */
+static int nb_sleep_site_recover(unsigned long ra)
+{
+    const unsigned *p = (const unsigned *)ra;
+    if (ra < 0x8000ul || ra >= 0x02000000ul) return 0;   /* game image only */
+    if (!addr_readable(p) || !addr_readable(p + 1)) return 0;
+    return p[0] == 0xe5940000u && p[1] == 0xe3a01000u;
+}
+static int nb_sleep_site_reset(unsigned long ra)
+{
+    const unsigned *p = (const unsigned *)ra;
+    if (ra < 0x8000ul || ra >= 0x02000000ul) return 0;
+    if (!addr_readable(p) || !addr_readable(p + 1)) return 0;
+    /* the release argument is `mov r0, r5` on stranger_things and
+     * `mov r0, #1` on godzilla - both then `bl` the release */
+    return (p[0] == 0xe1a00005u || p[0] == 0xe3a00001u) && (p[1] >> 24) == 0xebu;
+}
+
 int shim_usleep(unsigned int us) __asm__("usleep");
 int shim_usleep(unsigned int us)
 {
@@ -862,6 +917,7 @@ int shim_usleep(unsigned int us)
             for (i = 0; i < secs * 2; i++) real_usleep(500000);
         }
     }
+    pad_peek_tick();   /* PAD_PEEK - the periodic site every thread passes through */
     {
         unsigned long ra = (unsigned long)__builtin_return_address(0);
         n++;
@@ -950,8 +1006,8 @@ int shim_usleep(unsigned int us)
                     rec_us = v;
                 }
             }
-            if (us == 5000 && (ra == 0x59eb94ul || armed)) {
-                armed = (ra == 0x59eb94ul);
+            if (us == 5000 && (nb_sleep_site_recover(ra) || armed)) {
+                armed = nb_sleep_site_recover(ra);
                 if (rec_us < (int)us) us = (unsigned int)rec_us;
             } else {
                 armed = 0;
@@ -1014,7 +1070,7 @@ int shim_usleep(unsigned int us)
                     rst_us = v;
                 }
             }
-            if (us == 2000000 && ra == 0x1d6ec4ul && rst_us < (int)us)
+            if (us == 2000000 && nb_sleep_site_reset(ra) && rst_us < (int)us)
                 us = (unsigned int)rst_us;
         }
     }
@@ -1201,7 +1257,51 @@ static struct { void *(*fn)(void *); void *arg; int id; } thslot[THMAX];
  * for the last address asked about, which is enough: these are asked per thread
  * start and per log line, always about the same one or two addresses.
  *
- * ANY new absolute address in this file must go through here. */
+ * ANY new absolute address in this file must go through here.
+ *
+ * ★★★ AND THE ONE-ADDRESS CACHE IS FINE UNTIL SOMETHING SCANS, at which point
+ * it is a catastrophe, which is what it turned out to be for stranger_things.
+ * sw_find_table() walks every writable region of the guest at a 4-BYTE step and
+ * asks about `e` and `e+28` per candidate - two different pointers, so the
+ * `p == last` memo never hits and every 4 bytes of address space costs two to
+ * four real write(2) syscalls under qemu-user. Godzilla never pays it
+ * (sw_configured_ok() validates on tick 0 and the search is never called); a
+ * title whose configured address does not validate pays it on bus-write ticks
+ * 0, 8, 16, 24.
+ *
+ * THAT SEARCH RUNS INSIDE THE GUEST'S write() TO THE NODE BUS, so the bus
+ * thread is blocked for its whole duration. Measured on stranger_things: three
+ * dead windows of 38.8 s, 43.7 s and 43.4 s, each beginning at exactly a search
+ * tick and at no other frame - about 126 s of a 180 s run. The game asked its
+ * first discovery question at t=57 s and the shim answered "bus empty", because
+ * the node-directory seed cannot exist until the FOURTH search failure, which
+ * is t=145 s. The game gave up at 155 s. None of that is the game's doing and
+ * none of it is a protocol problem; it is this cache.
+ *
+ * ▼▼▼ THE PAGE CACHE IS BACK, AND ONLY BECAUSE THE FAULT GUARD EXISTS. The
+ * first attempt cached the probe per page with no guard, and it worked as
+ * intended - the four dead windows collapsed, the node-directory seed moved
+ * from t=145 s to t=20 s, TX went 149 -> 990 - and then took a SIGSEGV inside
+ * sw_entry_ok, twice, at two different pcs, in runs where no pre-change build
+ * had ever taken one. The half of "readability" that is not a page property
+ * is WHEN: the scan walks a /proc/self/maps snapshot while the guest
+ * allocates and frees scene memory, so a page probed readable early in a scan
+ * can be gone by the time the walk reaches it, and the cache then hands
+ * sw_entry_ok a yes for memory that is no longer there.
+ *
+ * The answer to WHEN is not a fresher probe - any probe is stale by the time
+ * the read lands - it is to make the stale yes SURVIVABLE. sw_find_table
+ * wraps the scan in a sigsetjmp guard hooked into the SIGSEGV handlers this
+ * file already owns: a fault on the scanning thread aborts the scan (counted
+ * as a failed search, retried on a later tick) instead of killing the
+ * process. The cache below is armed only while that guard is (pr_gen != 0),
+ * so nothing outside a guarded scan can ever act on a scan-lifetime answer,
+ * and outside a scan this function is exactly the one-address memo it always
+ * was. */
+#define PR_SLOTS 2048
+static struct pr_slot { unsigned page, gen; unsigned char ok; } pr_tab[PR_SLOTS];
+static unsigned pr_gen;            /* nonzero while a guarded scan runs */
+
 static int addr_readable(const void *p)
 {
     static long (*w)(int, const void *, unsigned long);
@@ -1209,15 +1309,132 @@ static int addr_readable(const void *p)
     static const void *last;
     static int lastok;
     if (!p) return 0;
-    if (p == last) return lastok;
+    if (!pr_gen && p == last) return lastok;
     if (nullfd == -2) {
         int (*ro)(const char *, int, ...) = dlsym(RTLD_NEXT, "open");
         w = dlsym(RTLD_NEXT, "write");
         nullfd = ro ? ro("/dev/null", 1 /*O_WRONLY*/, 0) : -1;
     }
+    if (pr_gen) {
+        unsigned page = (unsigned)(unsigned long)p >> 12;
+        struct pr_slot *c = &pr_tab[(page ^ (page >> 11)) & (PR_SLOTS - 1)];
+        if (c->gen == pr_gen && c->page == page) return c->ok;
+        c->page = page;
+        c->gen  = pr_gen;
+        c->ok   = (unsigned char)(nullfd >= 0 && w && w(nullfd, p, 1) == 1);
+        return c->ok;
+    }
     last = p;
     lastok = (nullfd >= 0 && w && w(nullfd, p, 1) == 1);
     return lastok;
+}
+
+/* PAD_PEEK=<hexaddr>[:<len>][,<hexaddr>[:<len>]]... - LOG GUEST GLOBALS WHEN
+ * THEY CHANGE. The shim shares the guest's address space, so a global the game
+ * keeps in .bss is just a pointer here.
+ *
+ * WHY THIS EXISTS, and it is the lesson of item 52's frequency pass: a whole
+ * day went into "what does the code do?", which disassembly answers, and the
+ * question that actually mattered was "what did the game MEASURE?", which it
+ * cannot. Every earlier attempt at that question took the form of changing an
+ * input and re-running to see whether the symptom moved - one bit of evidence
+ * per rig run, on a rig that is a mutex between sessions. This reads the answer
+ * directly. `len` defaults to 4 and caps at 64; up to 8 addresses.
+ *
+ * Deduped on value, so a static global prints once and a changing one prints
+ * its transitions - the same discipline the screen oracle uses, and for the
+ * same reason: an undeduped 5 Hz dump is thousands of identical lines.
+ *
+ * A leading `*` DEREFERENCES: `*0x724608:176` reads the pointer at 0x724608 and
+ * dumps 176 bytes from wherever it points. Half of what this rig wants to look
+ * at is reached that way - a game table is a pointer in .data or .bss and the
+ * table itself is on the heap, so without this every question costs two runs
+ * (one to learn the pointer, one to read through it) and the second run gets a
+ * different heap.
+ */
+#define PEEK_MAX   8
+#define PEEK_BYTES 192
+static struct peek_slot {
+    unsigned addr, len;
+    int deref;
+    unsigned char last[PEEK_BYTES];
+    int primed;
+} peek_slot[PEEK_MAX];
+static int peek_n = -1;
+
+static void peek_init(void)
+{
+    const char *p = getenv("PAD_PEEK");
+    char m[120];
+    peek_n = 0;
+    if (!p || !*p) return;
+    while (*p && peek_n < PEEK_MAX) {
+        unsigned a = 0, l = 4;
+        int got = 0, deref = 0;
+        while (*p == ',' || *p == ' ') p++;
+        if (*p == '*') { deref = 1; p++; }
+        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) p += 2;
+        for (;;) {
+            int d;
+            if (*p >= '0' && *p <= '9')      d = *p - '0';
+            else if (*p >= 'a' && *p <= 'f') d = *p - 'a' + 10;
+            else if (*p >= 'A' && *p <= 'F') d = *p - 'A' + 10;
+            else break;
+            a = a * 16u + (unsigned)d; p++; got = 1;
+        }
+        if (!got) break;
+        if (*p == ':') {
+            p++; l = 0;
+            while (*p >= '0' && *p <= '9') l = l * 10u + (unsigned)(*p++ - '0');
+        }
+        if (l == 0 || l > PEEK_BYTES) l = 4;
+        peek_slot[peek_n].addr  = a;
+        peek_slot[peek_n].len   = l;
+        peek_slot[peek_n].deref = deref;
+        peek_n++;
+        while (*p && *p != ',') p++;
+    }
+    snprintf(m, sizeof m, "[peek] watching %d address(es)\n", peek_n);
+    logmsg(m);
+}
+
+static void pad_peek_tick(void)
+{
+    static unsigned long next_ms;
+    int i, j;
+    if (peek_n < 0) peek_init();
+    if (peek_n <= 0) return;
+    if (pad_ms() < next_ms) return;
+    next_ms = pad_ms() + 200;
+    for (i = 0; i < peek_n; i++) {
+        struct peek_slot *s = &peek_slot[i];
+        const unsigned char *g;
+        unsigned char cur[PEEK_BYTES];
+        char m[700];
+        unsigned at = s->addr;
+        int o, same = 1;
+        if (!addr_readable((const void *)(unsigned long)at)) continue;
+        if (s->deref) {
+            at = *(const unsigned *)(unsigned long)at;
+            if (!at || !addr_readable((const void *)(unsigned long)at)) continue;
+        }
+        g = (const unsigned char *)(unsigned long)at;
+        if (!addr_readable(g + s->len - 1)) continue;
+        for (j = 0; j < (int)s->len; j++) cur[j] = g[j];
+        for (j = 0; j < (int)s->len; j++)
+            if (cur[j] != s->last[j]) { same = 0; break; }
+        if (s->primed && same) continue;
+        for (j = 0; j < (int)s->len; j++) s->last[j] = cur[j];
+        s->primed = 1;
+        o = snprintf(m, sizeof m, "[peek] t=%lu %s0x%08x%s:", pad_ms(),
+                     s->deref ? "*" : "", s->addr, s->deref ? "" : "");
+        if (s->deref)
+            o += snprintf(m + o, sizeof m - (unsigned)o, " ->0x%08x", at);
+        for (j = 0; j < (int)s->len && o < (int)sizeof m - 6; j++)
+            o += snprintf(m + o, sizeof m - (unsigned)o, " %02x", cur[j]);
+        snprintf(m + o, sizeof m - (unsigned)o, "\n");
+        logmsg(m);
+    }
 }
 
 /* Declared here because the SEGV report, far above where these are defined,
@@ -1572,6 +1789,36 @@ static void segv_print_header(unsigned long *uc)
     }
 }
 
+/* ---- item 52: the scan fault guard --------------------------------- *
+ * sw_find_table() runs a whole-heap scan whose readability answers are
+ * page-cached for speed and can therefore be stale (see addr_readable's
+ * note). Rather than trying to out-probe the guest's allocator, the scan
+ * runs under this guard: when the SCANNING THREAD faults, the two handlers
+ * below land here first and siglongjmp back into sw_find_table, which
+ * closes the scan's fd, counts a failed search and moves on. Any other
+ * thread's fault, and any fault while no scan runs, falls through to the
+ * reporting and delegation below unchanged.
+ *
+ * The tid check is load-bearing: the jump buffer belongs to the scanning
+ * thread's stack, and a longjmp taken on another thread's fault would be a
+ * second, far stranger crash. gettid is a raw syscall (ARM EABI 224)
+ * because this runs inside a signal handler and because the shim resolves
+ * libc lazily. */
+static sigjmp_buf sw_scan_env;
+static volatile long sw_scan_tid;          /* nonzero = the guard is armed */
+static volatile int  scan_guard_busy;      /* one guarded scan at a time */
+static volatile unsigned long sw_scan_pc, sw_scan_addr;    /* for the log */
+static int sw_scan_fd = -1;   /* the scan's maps fd, closed on an abort */
+static int segv_guard_ready;  /* the constructor really took SIGSEGV */
+
+static void scan_guard_check(unsigned long *uc)
+{
+    if (!sw_scan_tid || syscall(224) != sw_scan_tid) return;
+    sw_scan_tid = 0;
+    if (uc) { sw_scan_pc = uc[23]; sw_scan_addr = uc[25]; }
+    siglongjmp(sw_scan_env, 1);
+}
+
 /* HEADER mode's handler: print, then put the fault back where it was going.
  *
  * "Where it was going" is the whole point - this must not change whether a run
@@ -1589,6 +1836,8 @@ static void segv_print_header(unsigned long *uc)
 static void segv_header_handler(int sig, void *info, void *ucv)
 {
     unsigned long *uc = ucv;
+
+    scan_guard_check(uc);   /* never returns if the guarded scan faulted */
 
     if (uc && segv_reports < 3) {
         segv_reports++;
@@ -1632,7 +1881,8 @@ static void segv_install(void)
     for (i = 0; i < 160; i++) mine[i] = 0;
     *(void **)mine = (void *)segv_header_handler;
     *(int *)(mine + 132) = 4;              /* SA_SIGINFO */
-    real_sigaction(11, mine, 0);
+    if (real_sigaction(11, mine, 0) == 0)
+        segv_guard_ready = 1;   /* sw_find_table's guard can land */
 }
 
 static void segv_handler(int sig, void *info, void *ucv)
@@ -1640,6 +1890,7 @@ static void segv_handler(int sig, void *info, void *ucv)
     unsigned long *uc = ucv;
     char b[200];
     (void)sig; (void)info;
+    scan_guard_check(uc);   /* never returns if the guarded scan faulted */
     if (!uc) { logmsg("[segv] no context\n"); _exit(99); }
 
     segv_print_header(uc);
@@ -2100,7 +2351,140 @@ static void hex64(char *out, const unsigned char *p, int n)
 /* The NVRAM is the machine's identity, settings, audits and scores, so it has
  * to survive a restart the way the real board does. */
 #define NV_PATH "/data/nvram.bin"
+
+/* ...AND IT IS ONE MACHINE'S, NOT ONE DISK'S. A real Spike 2 EEPROM sits on the
+ * CPU board of a cabinet that runs ONE game; this rig has one rootfs that runs
+ * every title, so a single /data/nvram.bin meant godzilla, TMNT and
+ * stranger_things all read and wrote the SAME 64 KB - each interpreting the
+ * other's bytes at its own adjustment offsets. The game's own file-based stores
+ * under /data/nv/<title>/ were already per-title; this one was the outlier.
+ *
+ * The split is still right for the reason above. But the ATTRIBUTION that was
+ * written here on 2026-08-17 was WRONG, and it is corrected rather than deleted
+ * because it was believed long enough to aim a day's work:
+ *
+ *   CLAIMED: two godzilla runs, then stranger_things put "THIS MACHINE WILL NOT
+ *   OPERATE IN THIS COUNTRY" on the glass, so the COUNTRY CODE adjustment was
+ *   read out of bytes another title wrote.
+ *
+ *   MEASURED, 2026-08-18, by actually comparing the two files: /data/nvram.bin
+ *   is ITSELF a stranger_things EEPROM - it contains "SPI-STR-19358604" at
+ *   0x100 and the string "stranger_things_le" at 0x150 - and ST's per-title
+ *   copy differs from it in SIXTEEN BYTES out of 65536 (a serial and two
+ *   timestamps, at 0x10d, 0x13f..0x14d and 0x18c). There is no godzilla content
+ *   in it to misread. Cross-title contamination is NOT what causes the refusal,
+ *   and going per-title neither caused nor could have fixed it.
+ *
+ *   What the EEPROM actually shows: an ident block and a date, and an
+ *   adjustment area that is ALL ZEROS. The machine is unconfigured, not
+ *   mis-configured.
+ *
+ * A missing per-title file is SEEDED from the shared one rather than started
+ * blank, because that file holds real settings and real high scores and this
+ * change must not be the thing that loses them. PAD_NV_BLANK=1 skips the seed
+ * for a deliberately fresh machine - but note that stranger_things does NOT
+ * survive a fresh one: on both an all-zero and an all-0xFF chip it aborts in
+ * cereal ("unregistered polymorphic type (Bitmap)") before the node bus starts,
+ * which is its own defect and not this function's. */
+static const char *nv_path(void)
+{
+    static char p[160];
+    const char *g, *c;
+    int safe = 1;
+    if (p[0]) return p;
+    g = getenv("PAD_GAME");
+    /* No string.h here - this object is built -nostdlib. A title name with a
+     * slash in it would escape /data, so check by hand. */
+    for (c = g; c && *c; c++)
+        if (*c == '/') { safe = 0; break; }
+    if (g && *g && safe)
+        snprintf(p, sizeof p, "/data/nvram-%s.bin", g);
+    else
+        snprintf(p, sizeof p, "%s", NV_PATH);
+    return p;
+}
 static int nv_loaded;
+
+/* ══ PAD_NV_POKE ═════════════════════════════════════════════════════════
+ *
+ * PAD_NV_POKE=<lo>[-<hi>]:<val>[,...]   (all hex, e.g. "40-ff:01,200:1e")
+ *
+ * Overwrite EEPROM bytes after load, before the game sees them. This exists to
+ * find ONE number: the offset stranger_things keeps its COUNTRY CODE at. The
+ * static route is exhausted - the country table (0x731aac, 30 records, stride
+ * 36, +24 name msgid, +32 index 0..29) is reached through the table registry at
+ * 0x719b54, whose base 0x719b48 has 674 references and is therefore no
+ * shortcut. But the shim OWNS the EEPROM and the screen oracle can now read the
+ * glass, so the offset can simply be searched for: fill a range, see whether
+ * the refusal screen changes, bisect.
+ *
+ * SAVES ARE DISABLED WHENEVER THIS IS SET, and that is not a detail. The file
+ * being probed holds real settings and real high scores, and nv_save() runs on
+ * every EEPROM write the game makes - so without this, one probe run would
+ * write its own poked bytes back over the machine's actual NVRAM and the
+ * evidence and the data would be destroyed together. A probe must not be able
+ * to damage the thing it is measuring. */
+static int nv_poke_on(void)
+{
+    const char *p = getenv("PAD_NV_POKE");
+    return p && *p;
+}
+
+/* Hex parse in place; *nd is the digit count, so "no digits" is distinguishable
+ * from a legitimate zero. No string.h here - this object is built -nostdlib. */
+static unsigned nv_hex(const char **s, int *nd)
+{
+    unsigned v = 0;
+    *nd = 0;
+    for (;;) {
+        char c = **s;
+        unsigned d;
+        if (c >= '0' && c <= '9') d = (unsigned)(c - '0');
+        else if (c >= 'a' && c <= 'f') d = (unsigned)(c - 'a') + 10u;
+        else if (c >= 'A' && c <= 'F') d = (unsigned)(c - 'A') + 10u;
+        else break;
+        v = v * 16u + d;
+        (*s)++;
+        (*nd)++;
+    }
+    return v;
+}
+
+static void nv_poke_apply(void)
+{
+    const char *p = getenv("PAD_NV_POKE");
+    char m[240];
+    unsigned total = 0;
+    int nd;
+    if (!p || !*p) return;
+    while (*p) {
+        unsigned lo, hi, val, i;
+        lo = nv_hex(&p, &nd);
+        if (!nd) break;
+        hi = lo;
+        if (*p == '-') { p++; hi = nv_hex(&p, &nd); if (!nd) break; }
+        if (*p != ':') break;
+        p++;
+        val = nv_hex(&p, &nd);
+        if (!nd) break;
+        if (hi < lo || hi >= SLOTSIZE) {
+            snprintf(m, sizeof m, "[i2c] POKE 0x%04x..0x%04x REFUSED: out of "
+                     "range (EEPROM is 0x%x bytes)\n", lo, hi, SLOTSIZE);
+            logmsg(m);
+            break;
+        }
+        for (i = lo; i <= hi; i++) store[0][i] = (unsigned char)val;
+        total += hi - lo + 1u;
+        snprintf(m, sizeof m, "[i2c] POKE 0x%04x..0x%04x = 0x%02x\n",
+                 lo, hi, val & 0xffu);
+        logmsg(m);
+        if (*p == ',') p++; else break;
+    }
+    snprintf(m, sizeof m, "[i2c] %u EEPROM bytes poked; SAVES ARE DISABLED for "
+             "this run so the real NVRAM file cannot be damaged by a probe\n",
+             total);
+    logmsg(m);
+}
 
 static long (*real_read)(int, void *, unsigned long);
 static long (*real_write)(int, const void *, unsigned long);
@@ -2119,22 +2503,46 @@ static void nv_load(void)
     int fd;
     unsigned long got = 0;
     long r;
+    char m[220];
+    const char *path = nv_path();
+    int seeded = 0;
     if (nv_loaded) return;
     nv_loaded = 1;
     init(); io_init();
-    fd = real_open(NV_PATH, 0 /* O_RDONLY */, 0);
-    if (fd < 0) { logmsg("[i2c] no saved NVRAM, starting blank\n"); return; }
+    fd = real_open(path, 0 /* O_RDONLY */, 0);
+    if (fd < 0 && !getenv("PAD_NV_BLANK")) {
+        /* First run of this title since the EEPROM went per-title: inherit the
+         * shared file so nothing that was already saved is lost. */
+        fd = real_open(NV_PATH, 0, 0);
+        seeded = fd >= 0;
+    }
+    if (fd < 0) {
+        snprintf(m, sizeof m, "[i2c] no saved NVRAM at %s, starting blank\n", path);
+        logmsg(m);
+        nv_poke_apply();     /* a poke must land on a blank chip too */
+        return;
+    }
     while (got < SLOTSIZE && (r = real_read(fd, store[0] + got, SLOTSIZE - got)) > 0)
         got += (unsigned long)r;
     real_close(fd);
-    logmsg("[i2c] loaded saved NVRAM\n");
+    snprintf(m, sizeof m, "[i2c] loaded saved NVRAM from %s%s\n",
+             seeded ? NV_PATH : path,
+             seeded ? " (seeding this title's own EEPROM; it is per-title now)"
+                    : "");
+    logmsg(m);
+    nv_poke_apply();
 }
 
 static void nv_save(void)
 {
     int fd;
+    /* A PROBE MUST NOT DAMAGE WHAT IT MEASURES. nv_save() runs on every EEPROM
+     * write the game makes, so without this one line a PAD_NV_POKE run would
+     * write its own poked bytes back over the machine's real settings and high
+     * scores - losing the data and the experiment in the same stroke. */
+    if (nv_poke_on()) return;
     io_init();
-    fd = real_open(NV_PATH, 0x241 /* O_WRONLY|O_CREAT|O_TRUNC */, 0644);
+    fd = real_open(nv_path(), 0x241 /* O_WRONLY|O_CREAT|O_TRUNC */, 0644);
     if (fd < 0) return;
     real_write(fd, store[0], SLOTSIZE);
     real_close(fd);
@@ -2243,6 +2651,11 @@ static void do_msg(int slot, struct i2c_msg *m)
  * RX half of an SPI transfer, and that is handled here in ioctl(). */
 static int sw_scan_bytes(unsigned nid, unsigned char out[8]);
 static int sw_scan_enabled(void);
+/* "This title has no findable switch table, and waiting will not help" - ONE
+ * definition, used by the cabinet at-rest word here and by the node-bus
+ * discovery fallback in nb_nodes_init(). Both are item 52 fallbacks and both
+ * must agree about when to give up, or one fires while the other waits. */
+static int sw_table_hopeless(void);
 static void sw_prime(unsigned nid, const unsigned char bits[8]);
 static unsigned long pad_ms(void);
 /* pad_ms()'s CLOCK_MONOTONIC origin, at file scope rather than a static inside
@@ -2446,6 +2859,10 @@ int shim_ioctl(int fd, unsigned long req, ...)
         static unsigned seen_gen = (unsigned)-1;
         static unsigned seen_kbd = (unsigned)-1;
         static int have;
+        /* Sticky, because `have` is: once the at-rest word is synthesized it
+         * stays in bits[] until a real scan replaces it, and sw_prime() must
+         * keep its hands off for exactly that long. */
+        static int cab_synth;
         unsigned long k;
         /* The thread spins with no pacing, so rebuilding the 88-entry walk on
          * every call would dominate the run. Rebuild when the held set changes
@@ -2493,6 +2910,7 @@ int shim_ioctl(int fd, unsigned long req, ...)
             seen_kbd = sw_shm_gen();
             sw_shm_edges();
             have = sw_scan_bytes(0, bits);
+            if (have) cab_synth = 0;      /* a real word replaced the synthetic */
             /* EVERY change to the cabinet word, with a timestamp. The menu
              * cursor was seen wandering on its own, and inferring the cause
              * from the screen is exactly the mistake this rig keeps making:
@@ -2537,10 +2955,115 @@ int shim_ioctl(int fd, unsigned long req, ...)
                 seen_kbd = sw_shm_gen();
             }
         }
+        /* ★ ITEM 52: WITH NO SWITCH TABLE, THE GAME WAS READING ITS OWN BUFFER
+         * AND SEEING EVERY CABINET SWITCH MADE.
+         *
+         * sw_scan_bytes() builds the cabinet word from the GAME'S OWN entry
+         * table. On a title whose table never resolves - stranger_things, whose
+         * device table is empty and whose in-memory table sw_find_table()
+         * rejects - it returns 0, and the `if (have)` below then skipped the
+         * RX write ENTIRELY: no `[cabspi]` line, nothing written into the
+         * transfer's rx buffer, so the game read whatever was already there.
+         * That is its own zeroed buffer, and THE CABINET BITS ARE ACTIVE LOW,
+         * so all-zero means ALL SWITCHES MADE - a machine booting with its
+         * cabinet shorted. Measured: godzilla logs `[cabspi]
+         * bits=ff0f0f0000000000` and `[swrest] machine at rest: coin door
+         * shut`; stranger_things logs NEITHER, not once in a 289 s run.
+         *
+         * The at-rest word is a PLATFORM constant, not godzilla's alone: the
+         * handoff records the node 0/1/4 cabinet layout measured identical
+         * across star_wars_le 1.30.0, godzilla_pro 1.15.0 and john_wick_le
+         * 1.01.0 (2017-2024), and ff 0f 0f 00 00 00 00 00 is what every one of
+         * them idles at. Handing that to a title we cannot build a word for is
+         * strictly better than handing it nothing, because "nothing" is not
+         * neutral here - it is the all-made word.
+         *
+         * Cannot affect a title whose table resolves: this runs only when
+         * sw_scan_bytes() returned 0. PAD_CAB_IDLE=0 disables it for an A/B. */
+        if (!have && sw_table_hopeless()) {
+            static int on = -1;
+            if (on == -1) {
+                char *q = getenv("PAD_CAB_IDLE");
+                on = !(q && *q == '0');
+            }
+            if (on) {
+                static const unsigned char idle[8] =
+                    { 0xff, 0x0f, 0x0f, 0, 0, 0, 0, 0 };
+                static int said;
+                for (k = 0; k < 8; k++) bits[k] = idle[k];
+                /* ▼ THE PARAGRAPH THAT USED TO BE HERE WAS WRONG, and it cost
+                 * four passes. It said the country dips live in byte 0 of this
+                 * word and that "THIS MACHINE WILL NOT OPERATE IN THIS COUNTRY"
+                 * meant no country was selected. IT IS NOT A COUNTRY PROBLEM AT
+                 * ALL. Message ids 765/766 are "50/60 HZ" and "60 HZ" and sit
+                 * immediately before 767-770, and the check that raises that
+                 * screen (0x23996c) tests the MAINS FREQUENCY: it wanted 57..63
+                 * and our own run_game.sh was reporting 1 Hz, because the game
+                 * divides in_power_frequency by 100 and we wrote "60". The
+                 * country the game read was a valid U.S.A. throughout. See
+                 * run_game.sh where the two iio values are written.
+                 *
+                 * What survives from that paragraph, because it was measured
+                 * and is still true: stranger_things' switch table (entry base
+                 * *(0x724608), stride 44, count *(0x7bc86c) = 100; node+bit via
+                 * the device table *(0x7260b8), stride 24) names switch ids
+                 * 17..24 "DIP 1".."DIP 8" at NODE 0, BITS 0..7 - byte 0 here -
+                 * ACTIVE LOW, so the 0xff above rests them all open. That is a
+                 * correct at-rest level and there is no reason to move it.
+                 *
+                 * PAD_CAB_DIP=<n> still forces dips 1..8 to n. It is a knob for
+                 * whoever needs one; it is NOT the country and it is NOT a
+                 * remedy for that screen. Do not sweep it looking for one. */
+                {
+                    char *dp = getenv("PAD_CAB_DIP");
+                    if (dp && *dp) {
+                        unsigned v = 0;
+                        int any = 0;
+                        if (dp[0] == '0' && (dp[1] == 'x' || dp[1] == 'X')) {
+                            dp += 2;
+                            for (; *dp; dp++) {
+                                if (*dp >= '0' && *dp <= '9') v = v*16 + (unsigned)(*dp-'0');
+                                else if (*dp >= 'a' && *dp <= 'f') v = v*16 + (unsigned)(*dp-'a'+10);
+                                else if (*dp >= 'A' && *dp <= 'F') v = v*16 + (unsigned)(*dp-'A'+10);
+                                else break;
+                                any = 1;
+                            }
+                        } else {
+                            for (; *dp >= '0' && *dp <= '9'; dp++) { v = v*10 + (unsigned)(*dp-'0'); any = 1; }
+                        }
+                        if (any) {
+                            char m4[160];
+                            bits[0] = (unsigned char)(~v & 0xff);
+                            snprintf(m4, sizeof m4,
+                                     "[cabdip] country dips 1..8 set to %u "
+                                     "(byte0=%02x, active low)\n", v & 0xff, bits[0]);
+                            logmsg(m4);
+                        }
+                    }
+                }
+                have = 1;
+                cab_synth = 1;
+                if (!said) {
+                    said = 1;
+                    logmsg("[cabspi] this title has no findable switch table: "
+                           "handing the game the platform AT-REST cabinet word "
+                           "ff0f0f0000000000 instead of leaving its buffer "
+                           "untouched (which reads as every switch MADE)\n");
+                }
+            }
+        }
         if (have) {
             unsigned char out8[8];
             unsigned j0;
-            sw_prime(0, bits);
+            /* NOT primed when the word is synthesized. sw_prime() writes into
+             * the GAME'S OWN NodeRec through SW_STRUCT, and a title with no
+             * findable switch table has no trustworthy SW_STRUCT either -
+             * sw_ok() only range-checks the pointer, so priming there writes
+             * into whatever happens to be mapped. Doing it unconditionally is
+             * what crashed godzilla at 6.5 s on the first cut of this change:
+             * the fallback fired during early boot, before the table existed,
+             * and primed a structure that was not built yet. */
+            if (!cab_synth) sw_prime(0, bits);
             for (j0 = 0; j0 < 8; j0++) out8[j0] = bits[j0];
             /* ---- ITEM 17: THE CABINET POLL-RATE PROBE (PAD_CAB_PROBE=1) ---
              *
@@ -3101,9 +3624,543 @@ static void nb_dump_boards(void)
  * 0x59e904(part id), [+40..87] the 48-byte runtime-info record 0x5a2b88
  * builds, [+88] the hex-image owner, [+147]/[+148] two flags.
  */
+/* ★ THIS INSTRUMENT ONLY TELLS THE TRUTH ON GODZILLA PRO 1.15.0, AND IT DOES
+ * NOT SAY SO (item 52, 2026-08-16). 0x7bad88 is godzilla's address; nothing in
+ * this rig ever sets PAD_NB_OBJS - no watch.sh line, no mktables output, no
+ * per-title derivation - so on every other title a_nb_objs() returns the
+ * built-in default whenever that address merely happens to be READABLE in that
+ * guest, which is exactly the trap title_addr() carries and which already cost
+ * a pass on the switch table ("EHOH's binary is big enough to cover Godzilla
+ * Pro's 0x7a958c, so a_sw_struct() returned an address and the shim read a
+ * switch table out of somebody else's data").
+ *
+ * So [nbobj]/[nbtbl] readings on stranger_things, star_wars, turtles - anything
+ * but godzilla_pro - are somebody else's memory formatted as a status table.
+ * They are not weak evidence, they are no evidence. NB_TABLE and NB_RECORDS
+ * below are worse: plain #defines, not even overridable.
+ *
+ * This is what makes item 52 dear rather than cheap: the one instrument that
+ * turns "what does the screen say" into a per-board memory read cannot judge
+ * the title the item is about. Finding the array per title is the job - by
+ * shape at runtime is the durable form (32 slots of 0xe0 where slot[i][+0]==i
+ * and [+12] is non-zero for the populated ones), and godzilla is the labelled
+ * example any finder must reproduce 0x7bad88 on before it is trusted. */
 TITLE_ADDR(a_nb_objs, "PAD_NB_OBJS", 0x7bad88u)
-#define NB_OBJS   a_nb_objs()
 #define NB_OBJ_SZ 0xe0u
+
+/* ★ ITEM 52: FIND THE ARRAY BY SHAPE, so this instrument works on a title
+ * other than the one it was measured on.
+ *
+ * THE SHAPE, taken from a measured godzilla dump rather than from prose - every
+ * populated slot LABELS ITSELF with its own index:
+ *
+ *     [nbobj] slot  0 node  0 ... status=2      [nbobj] slot  8 node  8 ...
+ *     [nbobj] slot  1 node  1 ... status=2      [nbobj] slot  9 node  9 ...
+ *     [nbobj] slot  2 node  2 ... status=8      [nbobj] slot 12 node 12 ...
+ *     [nbobj] slot  4 node  4 ... status=7      [nbobj] slot 14 node 14 ...
+ *
+ * so for 32 slots of stride 0xe0: [+12] non-zero means the slot is in use, and
+ * every in-use slot has [+0] == its own index and [+24] a status below 12. The
+ * self-labelling is what makes the base UNIQUE - a candidate off by one slot
+ * has every id one out and dies immediately - so no alignment guess is needed.
+ *
+ * DELIBERATE DUPLICATION, and it is worth a line. This repeats sw_find_table()'s
+ * /proc/self/maps walk instead of sharing it, because factoring that out would
+ * edit the switch table's discovery path - which is load-bearing on exactly the
+ * titles this pass is investigating, and which this pass has no way to
+ * regression-test. If a THIRD one of these ever appears, factor all three then.
+ *
+ * Reads stay inside the region the maps line already proved mapped, so no
+ * addr_readable() call is needed per candidate and the scan costs no
+ * syscalls. ▼ AND "PROVED MAPPED" PROVES WHERE, NOT WHEN (2026-08-18): the
+ * guest freed a region mid-walk and this scan died reading a slot's [+12]
+ * in-use word, 16 s into the first run whose earlier scans were fast enough
+ * to land here during boot's heaviest scene churn. The walk therefore runs
+ * under the same fault guard as the switch scan - see nb_scan_objs() below,
+ * the guarded wrapper this body was renamed _walk for. */
+/* Returns the number of in-use slots if EVERY in-use slot is self-consistent,
+ * and 0 the moment one is not. The count is the caller's to judge: three is
+ * enough to act on, and one or two is reported as a near miss rather than
+ * thrown away, because "an array with two boards in it" and "no array at all"
+ * are completely different answers about a title that will not boot - and a
+ * finder that cannot tell them apart is the kind of instrument this rig has
+ * been burned by before. */
+/* The shape test, parameterised by STRIDE so the stride sweep below can run the
+ * exact same discriminator at every candidate size instead of a weaker one.
+ * The [+12] in-use gate and the [+24] status gate are what make this reject a
+ * plain incrementing byte table (which self-labels perfectly but has neither),
+ * and dropping them was why the first sweep failed its own labelled example. */
+static unsigned nb_objs_shape_ok_s(unsigned base, unsigned stride)
+{
+    unsigned i, present = 0;
+    for (i = 0; i < 32; i++) {
+        const unsigned char *o =
+            (const unsigned char *)(unsigned long)(base + i * stride);
+        if (!*(const unsigned *)(o + 12)) continue;      /* slot not in use */
+        if (o[0] != (unsigned char)i) return 0;          /* must self-label */
+        if (*(const unsigned *)(o + 24) >= 12u) return 0;   /* status is 0..11 */
+        present++;
+    }
+    return present;
+}
+
+static unsigned nb_objs_shape_ok(unsigned base)
+{
+    return nb_objs_shape_ok_s(base, NB_OBJ_SZ);
+}
+
+/* NB_OBJS_MIN is what separates a hit from a near miss, and the difference
+ * MATTERS TO THE SCAN ITSELF, not just to the report. A hit skips its own
+ * 0x1c00 span, because an array cannot start inside another one; a near miss
+ * must NOT, because weak 1-2 slot coincidences are common and each skip is
+ * 0x1c00 bytes of address space unexamined. Letting them skip cost this pass a
+ * godzilla regression: the scan matched a 2-slot coincidence, jumped its span,
+ * and sailed straight over the real 9-slot array at 0x7bad88 that the previous
+ * build had found. The labelled example caught it; that is what it is for. */
+#define NB_OBJS_MIN 3u
+
+/* ★ ITEM 52: THE STRIDE SWEEP - the one assumption the finder above cannot
+ * test about itself. Defined ABOVE nb_scan_objs() because that is where it is
+ * called from; C wants it declared first.
+ *
+ * nb_scan_objs() hard-codes NB_OBJ_SZ (0xe0), which is godzilla 1.15.0's board
+ * struct size. Everything this branch concluded about stranger_things rests on
+ * "ST creates no board objects" - but an array whose struct grew or shrank in a
+ * newer firmware would be INVISIBLE to a 0xe0-stride scan, and the conclusion
+ * would be an artefact of the instrument rather than a fact about the title.
+ * That is exactly the class of mistake this rig keeps paying for, so test it.
+ *
+ * It runs the SAME discriminator as the real finder (nb_objs_shape_ok_s: self
+ * -label + [+12] in-use + [+24] status < 12) at every stride 0x80..0x200, and
+ * scores by in-use slot count. Self-labelling ALONE is far too weak - the first
+ * cut of this sweep counted only `byte[a+i*s]==i`, and a plain incrementing
+ * byte table (0,1,2,..) scores a perfect 32, which is exactly what it found:
+ * 0x0079aca4 stride 0x118 slots 32, beating godzilla's real 9-slot array. It
+ * FAILED its own labelled example, which is the whole reason the acceptance is
+ * fixed in advance. The [+12]/[+24] gates are what kill those coincidences.
+ *
+ * On godzilla the answer must be (0x7bad88, 0xe0) with 9. Bounded to the low
+ * 16 MB where a statically allocated board array lives on both titles (godzilla
+ * 0x7bad88, ST static ends 0x8439dc) - the huge high mappings are all heap and
+ * coincidence, and sweeping them is what made the first cut O(3 GB x strides).
+ *
+ * Gated behind PAD_NB_STRIDE_SWEEP=1 and run ONCE per process. */
+#define NB_SWEEP_HI 0x1000000u
+static int nb_sweep_on(void)
+{
+    static int on = -1;
+    if (on == -1) {
+        char *q = getenv("PAD_NB_STRIDE_SWEEP");
+        on = q && *q == '1';
+    }
+    return on;
+}
+
+/* Accumulated across every rw region of ONE walk; reported by
+ * nb_sweep_report(), which also latches sw_swept so the sweep runs exactly
+ * once per process. nb_scan_objs() is re-entered on every dump tick while it
+ * keeps failing, and an O(range x strides) scan on each of those would be its
+ * own denial of service. */
+static unsigned sw_best_a, sw_best_s, sw_best_n, sw_hits, sw_lo, sw_hi;
+static int sw_swept;
+
+static void nb_stride_sweep(unsigned lo, unsigned hi)
+{
+    unsigned a, s, best_a = 0, best_s = 0, best_n = 0, hits = 0;
+
+    if (hi > NB_SWEEP_HI) hi = NB_SWEEP_HI;          /* low 16 MB only */
+    if (lo >= hi) return;
+    if (!sw_lo || lo < sw_lo) sw_lo = lo;
+    if (hi > sw_hi) sw_hi = hi;
+    for (a = lo; a + 32u * 0x200u <= hi; a += 4) {
+        const unsigned char *p = (const unsigned char *)(unsigned long)a;
+        if (p[0] != 0) continue;         /* slot 0 self-labels as 0 (cheap) */
+        for (s = 0x80; s <= 0x200; s += 4) {
+            unsigned n = nb_objs_shape_ok_s(a, s);
+            if (n >= NB_OBJS_MIN) {
+                hits++;
+                if (n > best_n) { best_n = n; best_a = a; best_s = s; }
+            }
+        }
+    }
+    sw_hits += hits;
+    if (best_n > sw_best_n) {
+        sw_best_n = best_n; sw_best_a = best_a; sw_best_s = best_s;
+    }
+}
+
+/* Called once the whole walk is done, so the verdict covers every rw region
+ * rather than whichever one happened to be last. */
+static void nb_sweep_report(void)
+{
+    char m[220];
+    if (sw_swept || !nb_sweep_on()) return;
+    sw_swept = 1;
+    if (sw_best_n) {
+        unsigned i, k;
+        snprintf(m, sizeof m,
+                 "[nbsweep] self-labelling array: base=0x%08x stride=0x%x "
+                 "slots=%u (%u candidate(s) scored >=5 over 0x%08x-0x%08x)\n",
+                 sw_best_a, sw_best_s, sw_best_n, sw_hits, sw_lo, sw_hi);
+        logmsg(m);
+        /* WHAT IS IN IT. The count alone cannot tell a real board array from a
+         * coincidence that happens to pass the shape test; the node ids and
+         * statuses can. A board array's in-use slots carry the title's DECLARED
+         * node ids (ST: 0,1,2,4,8,9,12) - anything else is a false positive of
+         * a wider struct search, and saying which is the whole point. */
+        for (i = 0; i < 32; i++) {
+            const unsigned char *o = (const unsigned char *)(unsigned long)
+                                     (sw_best_a + i * sw_best_s);
+            unsigned st;
+            if (!*(const unsigned *)(o + 12)) continue;        /* not in use */
+            st = *(const unsigned *)(o + 24);
+            k = (unsigned)snprintf(m, sizeof m,
+                     "[nbsweep]   slot %2u node %2u status %u flags=%08x "
+                     "ver=%u.%u.%u raw:", i, o[0], st,
+                     *(const unsigned *)(o + 4), o[28], o[29], o[30]);
+            {
+                unsigned j;
+                for (j = 0; j < 32 && k < sizeof m - 4; j++)
+                    k += (unsigned)snprintf(m + k, sizeof m - k, "%s%02x",
+                                            (j % 4) ? "" : " ", o[j]);
+            }
+            snprintf(m + k, sizeof m - k, "\n");
+            logmsg(m);
+        }
+    } else {
+        snprintf(m, sizeof m,
+                 "[nbsweep] NO self-labelling array at ANY stride 0x80-0x200 "
+                 "over 0x%08x-0x%08x - so the board table is not merely a "
+                 "DIFFERENT SIZE on this title, it is not populated at all\n",
+                 sw_lo, sw_hi);
+        logmsg(m);
+    }
+}
+
+static unsigned nb_scan_objs_walk(unsigned *best_out, unsigned *near, unsigned *near_n)
+{
+    char buf[8192];
+    int fd, n;
+    int (*ro)(const char *, int, ...) = dlsym(RTLD_NEXT, "open");
+    long (*rr)(int, void *, unsigned long) = dlsym(RTLD_NEXT, "read");
+    int (*rc)(int) = dlsym(RTLD_NEXT, "close");
+    unsigned best = 0, best_n = 0;
+
+    if (!ro || !rr) return 0;
+    fd = ro("/proc/self/maps", 0, 0);
+    if (fd < 0) return 0;
+    sw_scan_fd = fd;      /* published so an aborted scan can close it */
+    while ((n = (int)rr(fd, buf, sizeof buf - 1)) > 0) {
+        char *line = buf, *end = buf + n;
+        buf[n] = 0;
+        while (line < end) {
+            char *nl = line, *p = line;
+            unsigned long lo = 0, hi = 0;
+            while (nl < end && *nl != '\n') nl++;
+            if (nl >= end) break;
+            *nl = 0;
+            while (*p && *p != '-') {
+                int c = *p++;
+                if (c >= '0' && c <= '9') c -= '0';
+                else if (c >= 'a' && c <= 'f') c -= 'a' - 10;
+                else break;
+                lo = lo * 16 + (unsigned long)c;
+            }
+            if (*p == '-') {
+                p++;
+                while (*p && *p != ' ') {
+                    int c = *p++;
+                    if (c >= '0' && c <= '9') c -= '0';
+                    else if (c >= 'a' && c <= 'f') c -= 'a' - 10;
+                    else break;
+                    hi = hi * 16 + (unsigned long)c;
+                }
+            }
+            if (hi > lo && hi - lo < 0x4000000UL && lo >= 0x8000UL
+                && hi < 0xf0000000UL && p[0] == ' ' && p[1] == 'r'
+                && p[2] == 'w') {
+                unsigned a, span = 32u * NB_OBJ_SZ;
+                /* item 52: the stride-independent cross-check, off by default
+                 * and ONCE per process (sw_swept) - see its comment. */
+                if (nb_sweep_on() && !sw_swept)
+                    nb_stride_sweep((unsigned)lo, (unsigned)hi);
+                for (a = (unsigned)lo; (unsigned long)a + span <= hi; a += 4) {
+                    unsigned cnt = nb_objs_shape_ok(a);
+                    if (!cnt) continue;
+                    if (cnt < NB_OBJS_MIN) {          /* weak: keep scanning */
+                        if (near && cnt > *near_n) { *near = a; *near_n = cnt; }
+                        continue;
+                    }
+                    if (cnt > best_n) { best = a; best_n = cnt; }
+                    a += span - 4;      /* a real hit consumes its own array */
+                }
+            }
+            line = nl + 1;
+        }
+    }
+    if (rc) rc(fd);
+    sw_scan_fd = -1;
+    nb_sweep_report();          /* item 52: verdict over ALL regions, once */
+    if (best_out) *best_out = best_n;
+    return best;
+}
+
+/* The guard, worn by BOTH maps walks - see scan_guard_check(). The run that
+ * proved it needed to be: with the switch scan guarded and this one not, the
+ * 2026-08-18 run died at 16 s with pc inside nb_objs_shape_ok's [+12] read -
+ * the same region-freed-mid-walk race, in the walk whose own comment claimed
+ * the snapshot could be trusted. The page cache is NOT armed here (this walk
+ * never calls addr_readable); only the jump buffer and the latch are. */
+static unsigned nb_scan_objs(unsigned *best_out, unsigned *near, unsigned *near_n)
+{
+    unsigned ret;
+
+    if (!segv_guard_ready)
+        return nb_scan_objs_walk(best_out, near, near_n);
+    if (__sync_lock_test_and_set(&scan_guard_busy, 1)) {
+        if (best_out) *best_out = 0;
+        return 0;      /* another guarded scan is mid-flight; asked again */
+    }
+    if (sigsetjmp(sw_scan_env, 1) == 0) {
+        sw_scan_tid = syscall(224);
+        ret = nb_scan_objs_walk(best_out, near, near_n);
+    } else {
+        char m[160];
+        int (*rc)(int) = dlsym(RTLD_NEXT, "close");
+        if (sw_scan_fd >= 0 && rc) rc(sw_scan_fd);
+        sw_scan_fd = -1;
+        snprintf(m, sizeof m,
+                 "[nbobj] scan aborted by a fault (pc=0x%lx addr=0x%lx) - a "
+                 "region left while we walked it; asked again later\n",
+                 (unsigned long)sw_scan_pc, (unsigned long)sw_scan_addr);
+        logmsg(m);
+        if (best_out) *best_out = 0;
+        ret = 0;
+    }
+    sw_scan_tid = 0;
+    __sync_lock_release(&scan_guard_busy);
+    return ret;
+}
+
+/* ★ ITEM 52: WATCH the sweep's found array OVER TIME. The sweep reports once,
+ * early, so it shows the boards' initial flags; this dumps the same (base,
+ * stride) on every PAD_NB_DUMP tick, so the boards' LIFETIME is visible - in
+ * particular whether the playfield boards ever reach flags bit 1 (the ~10 Hz
+ * "serviced" heartbeat) the way godzilla's do, or stay stuck at flags=1. It is
+ * the missing instrument: nb_dump_objs() reads a fixed 0xe0 stride and so is
+ * blind to ST's 0x98 struct. Compact, one line per tick: node=flags/status. */
+static void nb_sweep_watch(void)
+{
+    char m[300];
+    unsigned i, k;
+    if (!nb_sweep_on() || !sw_best_a || !sw_best_s) return;
+    k = (unsigned)snprintf(m, sizeof m, "[nbwatch] 0x%08x/0x%x:",
+                           sw_best_a, sw_best_s);
+    for (i = 0; i < 32 && k < sizeof m - 24; i++) {
+        const unsigned char *o = (const unsigned char *)(unsigned long)
+                                 (sw_best_a + i * sw_best_s);
+        if (!*(const unsigned *)(o + 12)) continue;
+        k += (unsigned)snprintf(m + k, sizeof m - k, " n%u=f%us%u",
+                                o[0], *(const unsigned *)(o + 4),
+                                *(const unsigned *)(o + 24));
+    }
+    snprintf(m + k, sizeof m - k, "\n");
+    logmsg(m);
+}
+
+/* item 52: FORCE A BOARD'S STATUS HEALTHY, to test the readiness gate.
+ *
+ * PAD_NB_FORCE_STATUS=<id>[,<id>...]  or  =all
+ *
+ * WHY, and it is a specific mechanism rather than a shotgun (the shotgun was
+ * the first cut of this probe and it tested nothing in particular):
+ * stranger_things' boot-readiness check at 0x205328 walks the board array and,
+ * for each board with a directory entry whose type is not 38/1:
+ *
+ *      205388  ldr r0,[r3,#24] ; cmp r0,#2   -> status==2 is the OK path
+ *      205394  ldr r0,[r2]     ; ands r0,#4  -> else, is the node OPTIONAL?
+ *      2053a0  ldr r0,[r3,#4]  ; tst r0,#2   -> optional AND found...
+ *      2053a8  movne r4,#0                   -> ...but not status 2 = NOT READY
+ *
+ * i.e. an OPTIONAL board that IS present but is NOT graded 2 pins readiness at
+ * false forever. ST's node 4 (QR SCANNER, directory attr 0x4 = optional) is
+ * graded status 7 and answers the bus, so it lands exactly there - and that
+ * status is OUR doing: the shim has node 4 claim godzilla's node4 firmware
+ * (124.107.0), which nbdir.py flags in a comment as "reproduced not corrected
+ * ... worth revisiting if node 4 misbehaves". This forces the status the game
+ * grades, so a run says whether that gate is what holds the boot.
+ *
+ * Requires PAD_NB_STRIDE_SWEEP=1 (the sweep resolves base/stride). Fields as
+ * nb_sweep_watch reads them: o+0 id, o+12 in-use, o+24 status. Deliberately
+ * does NOT touch flags: bit 1 is what the LOCATING screen's naming predicate
+ * reads, and moving both at once would confound the two questions. */
+static int nb_force_status_want(unsigned id)
+{
+    static int state = -1;          /* -1 unread, 0 off, 1 all, 2 list */
+    static unsigned char want[64];
+    if (state == -1) {
+        const char *p = getenv("PAD_NB_FORCE_STATUS");
+        state = 0;
+        if (p && *p) {
+            if (p[0] == 'a')                   /* "all" */
+                state = 1;
+            else {
+                unsigned v = 0;
+                int any = 0;
+                state = 2;
+                for (;; p++) {
+                    if (*p >= '0' && *p <= '9') { v = v*10 + (unsigned)(*p-'0'); any = 1; }
+                    else {
+                        if (any && v < 64) want[v] = 1;
+                        v = 0; any = 0;
+                        if (!*p) break;
+                    }
+                }
+            }
+        }
+    }
+    if (state == 0) return 0;
+    if (state == 1) return 1;
+    return id < 64 && want[id];
+}
+
+static void nb_force_status(void)
+{
+    static int said;
+    unsigned i;
+    if (!sw_best_a || !sw_best_s) return;
+    for (i = 0; i < 32; i++) {
+        unsigned char *o = (unsigned char *)(unsigned long)
+                           (sw_best_a + i * sw_best_s);
+        unsigned id;
+        if (!*(const unsigned *)(o + 12)) continue;   /* in-use slots only */
+        id = o[0];
+        if (!nb_force_status_want(id)) continue;
+        if (*(const unsigned *)(o + 24) == 2u) continue;
+        if (!said) {
+            char m[160];
+            said = 1;
+            snprintf(m, sizeof m, "[nbforce] forcing status 2 (was %u) on node "
+                     "%u and any other PAD_NB_FORCE_STATUS node\n",
+                     *(const unsigned *)(o + 24), id);
+            logmsg(m);
+        }
+        *(unsigned *)(o + 24) = 2u;
+    }
+}
+
+/* The best sub-threshold candidate the last scan saw, for nb_dump_objs() to
+ * report. Zero when the scan succeeded or saw nothing at all. */
+static unsigned nb_near_base, nb_near_n;
+
+/* Resolve once GENUINELY FOUND, and never cache a miss: the array is populated
+ * as the game brings the bus up, so an early call must be allowed to fail and
+ * be asked again. (TITLE_ADDR caches 0 forever, which is right for a fixed
+ * address and wrong for a scan.) */
+/* ★ ITEM 52: A MISS IS RATE-LIMITED, and this one line of policy was the
+ * whole of stranger_things' unplayability. "Never cache a miss" (below) was
+ * right about WHY - the array fills in as bring-up runs - and catastrophic
+ * about HOW: NB_OBJS is read by nb_nodes_add_boards() at the top of EVERY
+ * node-bus service cycle, ON THE GAME'S BUS THREAD, inside its `00` poll.
+ * On a title whose array never resolves by shape (ST's is dense, not
+ * self-labelling) that is a full /proc/self/maps heap walk per cycle - and
+ * the walk is the whole cycle: measured 2026-08-18, `game:nodebus` was in
+ * state R (running, wchan 0, no syscall) in 30 of 30 samples over 6 s while
+ * the game got ONE service pass every ~2.8 s and every switch closure waited
+ * up to 2.9 s for a scan. Godzilla resolves on the first try and caches
+ * forever, which is why the labelled example never showed it. Every earlier
+ * theory - node 4's silence, a bus timeout, a game-side gate, the video
+ * churn - was measured and died; the profiler-by-/proc named the thread and
+ * this function is what runs on it.
+ *
+ * Policy: after a miss, do not scan again for NB_OBJS_RETRY_MS of wall
+ * clock, and after NB_OBJS_MAX_MISSES give up for the run. The numbers are
+ * sized to the cost: ONE scan is ~2.8 s of the bus thread on ST, so a 2 s
+ * retry (the first cut) still left the thread mostly scanning for the first
+ * minute - measured, the last late closures landed at 60 s. Ten seconds
+ * apart, three tries, covers bring-up (the array is populated within ~15 s
+ * on godzilla) and then stops. A title whose array appears late is found on
+ * a retry, and the near-miss report keeps its data. */
+#define NB_OBJS_RETRY_MS   10000ul   /* one scan is ~2.8 s of the bus thread */
+#define NB_OBJS_MAX_MISSES 3         /* bring-up populates within ~15 s */
+static unsigned nb_objs_addr(void)
+{
+    static unsigned found;
+    static unsigned misses;
+    static unsigned long next_try_ms;
+    unsigned a, cnt = 0;
+    char m[200];
+
+    if (found) return found;
+    a = a_nb_objs();                       /* PAD_NB_OBJS, else the built-in */
+    if (getenv("PAD_NB_OBJS")) {           /* an explicit override is obeyed */
+        found = a;
+        return found;
+    }
+    if (misses >= NB_OBJS_MAX_MISSES) return 0;       /* gave up for the run */
+    if (next_try_ms && pad_ms() < next_try_ms) return 0;   /* too soon */
+    {
+        unsigned near = 0, near_n = 0;
+        a = nb_scan_objs(&cnt, &near, &near_n);
+        if (!a) {
+            misses++;
+            next_try_ms = pad_ms() + NB_OBJS_RETRY_MS;
+            if (misses == NB_OBJS_MAX_MISSES) {
+                snprintf(m, sizeof m, "[nbobj] no self-labelling board array "
+                         "after %u scans - not scanning again this run (the "
+                         "scan runs on the game's bus thread; see "
+                         "nb_objs_addr)\n", misses);
+                logmsg(m);
+            }
+            /* Hand the near miss to nb_dump_objs() to REPORT, rather than
+             * printing a bare address here. On stranger_things this branch is
+             * the whole result of the run - 11 ticks of "no table", best
+             * candidate 2 slots at 0x0087429c - and "2 slots" alone does not
+             * say WHICH boards, which is the next question every time. The
+             * reporting lives in one place and below nb_status_name(), so it
+             * can name the statuses too. */
+            nb_near_base = near;
+            nb_near_n = near_n;
+            return 0;
+        }
+        nb_near_base = 0;
+    }
+    found = a;
+    /* THE LABELLED-EXAMPLE CHECK, printed by the rig itself: on godzilla_pro
+     * the scan must land on the address this file has always hard-coded. Any
+     * other title has nothing to compare against, and says so. */
+    snprintf(m, sizeof m,
+             "[nbobj] board objects found by shape at 0x%08x, %u slots in use "
+             "(built-in godzilla address 0x%08x: %s)\n",
+             a, cnt, 0x7bad88u,
+             a == 0x7bad88u ? "AGREES"
+                            : "differs - correct unless this IS godzilla_pro");
+    logmsg(m);
+    return found;
+}
+
+/* ★ ITEM 52: IS THIS THE TITLE THE BUILT-IN NODE-BUS ADDRESSES WERE MEASURED
+ * ON? NB_TABLE, NB_RECORDS and NB_HEXLIST are Godzilla Pro 1.15.0 literals -
+ * two of them plain #defines with no override at all - and on any other title
+ * they point into somebody else's data.
+ *
+ * That is not merely useless, it is DANGEROUS, and this pass proved it: with
+ * PAD_NB_DUMP on, stranger_things read NB_HEXLIST, got a plausible-looking
+ * 0x0086ce9c that passes every range check nb_dump_hexlist() makes, walked it,
+ * and the GUEST SEGFAULTED. Item 51's ST run never crashed because it never
+ * set PAD_NB_DUMP; turning the diagnostic on is what killed the title it was
+ * meant to diagnose.
+ *
+ * The gate is the by-shape scan agreeing with the built-in base, which is a
+ * MEASURED test rather than "is this address readable" - the readable test is
+ * exactly the trap that once had the shim reading a switch table out of
+ * another title's memory. */
+static int nb_addrs_are_this_title(void)
+{
+    return nb_objs_addr() == 0x7bad88u;
+}
+
+#define NB_OBJS   nb_objs_addr()
 
 static const char *nb_status_name(unsigned s)
 {
@@ -3115,12 +4172,43 @@ static const char *nb_status_name(unsigned s)
     return s < 12 ? n[s] : "?";
 }
 
+/* What the near miss actually CONTAINS. "2 slots in use" is where the last ST
+ * run stopped, and the next question was immediately "which two, and saying
+ * what?" - so answer it in the same line rather than costing another run.
+ * Printed ONCE: 11 identical ticks of this would be noise, and the array does
+ * not change while the game is stuck. */
+static void nb_report_near(void)
+{
+    char line[320];
+    unsigned i, k;
+    static int said;
+    if (said || !nb_near_base) return;
+    said = 1;
+    k = (unsigned)snprintf(line, sizeof line,
+                           "[nbobj] near miss at 0x%08x: %u self-consistent "
+                           "slot(s), below the %u needed to act on -",
+                           nb_near_base, nb_near_n, NB_OBJS_MIN);
+    for (i = 0; i < 32 && k < sizeof line - 48; i++) {
+        const unsigned char *o = (const unsigned char *)(unsigned long)
+                                 (nb_near_base + i * NB_OBJ_SZ);
+        unsigned st;
+        if (!*(const unsigned *)(o + 12)) continue;
+        st = *(const unsigned *)(o + 24);
+        k += (unsigned)snprintf(line + k, sizeof line - k,
+                                " slot %u node %u status %u (%s)",
+                                i, o[0], st, nb_status_name(st));
+    }
+    snprintf(line + k, sizeof line - k, "\n");
+    logmsg(line);
+}
+
 static void nb_dump_objs(void)
 {
     char line[400];
     unsigned id;
     if (!NB_OBJS) {
         logmsg("[nbobj] no node-object table known for this title\n");
+        nb_report_near();
         return;
     }
     logmsg("[nbobj] --- node board objects ---\n");
@@ -3785,6 +4873,14 @@ static void sw_force(void)
  */
 static int sw_find_done;
 
+/* The by-shape switch search has run and found nothing usable, this many times.
+ * ZERO on godzilla and on every title whose table IS found: godzilla's
+ * configured address checks out in sw_find_maybe so sw_find_table is never
+ * called, and a found table sets sw_find_done and stops the search. Non-zero
+ * only on a title whose switch table cannot be found by shape - which is what
+ * item 52's node-directory discovery fallback (nb_nodes_init) keys on. */
+static unsigned sw_find_fails;
+
 static int sw_ptr_ok(unsigned v)
 {
     return v >= 0x8000u && v < 0xf0000000u
@@ -3836,7 +4932,7 @@ static int sw_run_consistent(unsigned base, unsigned n)
 
 /* Walk /proc/self/maps and try every writable region: the table is heap and the
  * heap moves, so nothing here assumes an address. */
-static int sw_find_table(void)
+static int sw_find_table_scan(void)
 {
     char buf[8192];
     int fd, n;
@@ -3852,6 +4948,7 @@ static int sw_find_table(void)
     if (!ro || !rr) return 0;
     fd = ro("/proc/self/maps", 0, 0);
     if (fd < 0) return 0;
+    sw_scan_fd = fd;      /* published so an aborted scan can close it */
 
     while ((n = (int)rr(fd, buf, sizeof buf - 1)) > 0) {
         char *line = buf, *end = buf + n;
@@ -3900,6 +4997,7 @@ static int sw_find_table(void)
         }
     }
     if (rc) rc(fd);
+    sw_scan_fd = -1;
 
     if (best) {
         char m[160];
@@ -3929,7 +5027,186 @@ static int sw_find_table(void)
             logmsg(m);
         }
     }
+    /* Searched and found nothing usable. item 52's discovery fallback counts
+     * these: enough of them, with no table ever found, means this title has no
+     * switch table to seed the node-bus discovery walk from. */
+    sw_find_fails++;
     return 0;
+}
+
+/* The seam, now filled - see addr_readable's note for the whole history.
+ * The scan runs with the page-granular probe cache armed and the fault guard
+ * around it. A stale cached yes - a region the guest freed mid-scan - faults,
+ * scan_guard_check() longjmps back here, and the abort is simply a failed
+ * search this tick: fd closed, fail counted, retried on a later tick. Armed
+ * around the call and dead outside it, so nothing else in the shim can ever
+ * act on a scan-lifetime readability answer. With PAD_SEGV_HEADER=0 there is
+ * no handler to land in, so the scan runs the old way: unguarded, uncached,
+ * slow, safe. */
+static int sw_find_table(void)
+{
+    int ret;
+
+    if (!segv_guard_ready)
+        return sw_find_table_scan();
+
+    if (__sync_lock_test_and_set(&scan_guard_busy, 1))
+        return 0;      /* another guarded scan is mid-flight; this tick is
+                        * simply lost and the cadence asks again soon */
+    pr_gen++;
+    if (!pr_gen) pr_gen = 1;                    /* 0 means disarmed */
+    if (sigsetjmp(sw_scan_env, 1) == 0) {
+        sw_scan_tid = syscall(224);             /* arm - see scan_guard_check */
+        ret = sw_find_table_scan();
+    } else {
+        char m[160];
+        int (*rc)(int) = dlsym(RTLD_NEXT, "close");
+        if (sw_scan_fd >= 0 && rc) rc(sw_scan_fd);
+        sw_scan_fd = -1;
+        snprintf(m, sizeof m,
+                 "[swfind] scan aborted by a fault (pc=0x%lx addr=0x%lx) - a "
+                 "region left while we walked it; counted as a failed "
+                 "search\n",
+                 (unsigned long)sw_scan_pc, (unsigned long)sw_scan_addr);
+        logmsg(m);
+        sw_find_fails++;
+        ret = 0;
+    }
+    sw_scan_tid = 0;
+    pr_gen = 0;
+    __sync_lock_release(&scan_guard_busy);
+    return ret;
+}
+
+/* The predicate both item 52 fallbacks key on - see its forward declaration.
+ * `!sw_find_done` means no table has been found by ANY route (configured or by
+ * shape), and `sw_find_fails >= 4` means the by-shape search has actually RUN
+ * and failed several times, so this is "hopeless" rather than "not yet". A
+ * title whose table resolves - godzilla via sw_configured_ok(), star_wars by
+ * shape at ~27 s - can never satisfy it. */
+static int sw_table_hopeless(void)
+{
+    return !sw_find_done && sw_find_fails >= 4;
+}
+
+/* ★ ITEM 52: THE FILE TABLE - the third route to a switch table, for a title
+ * whose in-memory table cannot be found by shape. stranger_things is why: its
+ * entries are 44 bytes with node and bit in a separate device table, so the
+ * by-shape hunt (32-byte godzilla records) can never succeed - and without a
+ * table sw_scan_bytes() answers every 0x11 with "no switch state", which is a
+ * playfield with no switches and a keyboard wired to nothing. Measured
+ * 2026-08-18: bus fully up (0x11 at 53 s, 0x40 coils at 30 s), plunge.py
+ * pressed coin, start and both flippers, and NOT ONE [nbchg] line - every
+ * injection died at this table's absence.
+ *
+ * The table has existed on the host since swelf.py: mktables.py reads it
+ * straight out of the title's ELF (validated against David's photographed
+ * TECH ALERTS numbers) and writes /dump/tables/<game>/switch_list.txt. This
+ * loads that file into godzilla-SHAPED 32-byte entries - +8 cfg pointer,
+ * +18 bit, +20 node, the three fields the reply builder and the discovery
+ * seed read - and publishes them through the same sw_shadow seam a by-shape
+ * find uses, so every consumer downstream is unchanged. Tried only at
+ * sw_table_hopeless(), so godzilla (configured, tick 0) and any title whose
+ * in-memory table is found can never reach it.
+ *
+ * Absent ids are POISONED (node 0xff, bit 0xffff), not zeroed: an all-zero
+ * entry reads as node 0 bit 0, and a held id with no row would close DIP 1
+ * in the cabinet word. cfg is per-entry so the dump's num column stays real;
+ * +28 polarity is left clear (active low) uniformly, which is godzilla's
+ * shape for 78 of 88 - if ST's optos ever prove to need per-device polarity
+ * it belongs in the file, not in a constant here.
+ *
+ * NOT sw_dump()ed on install, deliberately: mktables.py PREFERS a log dump
+ * over the ELF walk, and this table would dump with every name "?" - the
+ * next regeneration would trade the ELF's real names for question marks.
+ * The file came from the host; publishing it back at the host is circular.
+ * One log line says what was loaded and from where. */
+#define SW_FTAB_MAX 512
+static unsigned char sw_ftab[SW_FTAB_MAX][32];
+static unsigned char sw_fcfg[SW_FTAB_MAX][32];
+static int sw_ftab_state;          /* 0 untried, -1 tried and refused */
+static int sw_ftab_installed;      /* the discovery seed keys on this */
+
+static int sw_file_table(void)
+{
+    typedef void *FILEP;
+    FILEP (*ropen)(const char *, const char *);
+    char *(*rgets)(char *, int, FILEP);
+    int  (*rclose)(FILEP);
+    FILEP f;
+    char path[192], line[300], msg[240];
+    const char *p, *g;
+    unsigned maxid = 0, n = 0, i;
+
+    if (sw_ftab_state) return 0;
+    sw_ftab_state = -1;
+    p = getenv("PAD_SW_TABLE");
+    g = getenv("PAD_GAME");
+    if (p && *p)
+        snprintf(path, sizeof path, "%s", p);
+    else if (g && *g)
+        snprintf(path, sizeof path, "/dump/tables/%s/switch_list.txt", g);
+    else
+        return 0;
+    ropen  = dlsym(RTLD_NEXT, "fopen");
+    rgets  = dlsym(RTLD_NEXT, "fgets");
+    rclose = dlsym(RTLD_NEXT, "fclose");
+    if (!ropen || !rgets || !rclose) return 0;
+    f = ropen(path, "r");
+    if (!f) {
+        snprintf(msg, sizeof msg, "[swfind] no by-shape table and no file "
+                 "table (%s): the playfield stays switchless this run\n", path);
+        logmsg(msg);
+        return 0;
+    }
+    for (i = 0; i < SW_FTAB_MAX; i++) {
+        sw_ftab[i][18] = 0xff;             /* poisoned - see the header */
+        sw_ftab[i][19] = 0xff;
+        sw_ftab[i][20] = 0xff;
+    }
+    while (rgets(line, sizeof line, f)) {
+        unsigned v[4], k = 0;
+        const char *q = line;
+        if (line[0] == '#') continue;
+        while (k < 4) {
+            unsigned val = 0;
+            int any = 0;
+            while (*q == ' ' || *q == '\t') q++;
+            while (*q >= '0' && *q <= '9') {
+                val = val * 10 + (unsigned)(*q++ - '0');
+                any = 1;
+            }
+            if (!any) break;
+            v[k++] = val;
+        }
+        /* id num node bit NAME... - the name stays in the file (see header) */
+        if (k < 4 || v[0] == 0 || v[0] >= SW_FTAB_MAX || v[2] >= 64
+            || v[3] >= 256)
+            continue;
+        *(unsigned short *)(sw_ftab[v[0]] + 18) = (unsigned short)v[3];
+        sw_ftab[v[0]][20] = (unsigned char)v[2];
+        *(unsigned *)(sw_ftab[v[0]] + 8) =
+            (unsigned)(unsigned long)sw_fcfg[v[0]];
+        *(unsigned short *)(sw_fcfg[v[0]] + 20) = (unsigned short)v[1];
+        if (v[0] > maxid) maxid = v[0];
+        n++;
+    }
+    rclose(f);
+    if (n < 16) {   /* a handful of rows is a parse accident, not a table */
+        snprintf(msg, sizeof msg, "[swfind] file table %s parsed to only %u "
+                 "row(s) - not trusted, not installed\n", path, n);
+        logmsg(msg);
+        return 0;
+    }
+    sw_shadow[0] = (unsigned)(unsigned long)&sw_ftab[0][0];
+    sw_shadow[1] = 0;
+    sw_shadow_count = maxid + 1;
+    sw_ftab_installed = 1;
+    snprintf(msg, sizeof msg,
+             "[swfind] switch table loaded from %s: %u switches, ids to %u "
+             "(ELF-derived; the names live in the file)\n", path, n, maxid);
+    logmsg(msg);
+    return 1;
 }
 
 /* Try, at most every 256 bus writes, until it works: the table does not exist
@@ -3966,8 +5243,52 @@ static int sw_configured_ok(void)
 static void sw_find_maybe(void)
 {
     static unsigned tick;
+    unsigned t;
     if (sw_find_done) return;
-    if (tick++ % 256) return;
+    /* DENSE EARLY, SPARSE LATER - and the spacing is load-bearing, not taste.
+     *
+     * A flat `tick % 256` costs one table pass per 256 node-bus frames, which
+     * is the right price for a search that usually succeeds. But the "there is
+     * no table on this title" VERDICT needs four failed searches
+     * (sw_table_hopeless), so a flat 256 put that verdict 1024 frames away -
+     * MEASURED at 178.4 s on stranger_things, where the discovery schedule
+     * then seeded at 178.4 s and the boards went found at 181 s.
+     *
+     * The game does not wait that long and never re-asks: 0x2059ac raises the
+     * LOCATING screen after 300 ms of failed location and gives up re-checking
+     * seconds later, and the only clear of that screen bit lives inside the
+     * loop that exits. So for the whole window in which stranger_things is
+     * asking, the shim was answering "the bus is empty", and by the time the
+     * truth arrived nothing was listening. The verdict has to be reachable in
+     * the same seconds the game spends asking.
+     *
+     * Four searches inside the first 32 frames, then the old 256 spacing. Same
+     * number of passes, front-loaded onto the frames the game actually cares
+     * about - those first frames ARE the bare-00 discovery walk. */
+    t = tick++;
+    /* Ticks 0, 2, 4, 6 rather than 0, 8, 16, 24. The FOURTH failure is what
+     * sw_table_hopeless() waits for, and everything item 52 built on top of it -
+     * the node-directory discovery seed, the cabinet at-rest word - cannot exist
+     * before then. At every eighth bus write that verdict lands on TX #25, and
+     * the game asks its first discovery question at TX #12: the answer was
+     * always going to be "bus empty" no matter how good it was. At every second
+     * it lands on TX #7, five frames before the question. Only affordable
+     * because addr_readable() no longer costs a syscall per candidate; before
+     * that fix this line would have made things worse, not better.
+     *
+     * ▼ (t & 1) WAS TRIED, BACKED OUT, AND IS NOW BACK, in that order. With
+     * the page cache making each scan complete in milliseconds, four scans at
+     * ticks 0/2/4/6 all land inside the first seconds of boot - exactly when
+     * the guest allocates and frees scene memory hardest - and the first
+     * attempt took a SIGSEGV in sw_entry_ok at 79 s that no pre-change run
+     * had ever taken. That race is closed now, the only way it can be: the
+     * scan runs under sw_find_table's fault guard, so a scan that steps on a
+     * freed region aborts and counts as a failed search rather than killing
+     * the run. The dense cadence is therefore safe again - and it is the
+     * difference between the hopeless verdict landing on TX #7, five frames
+     * BEFORE the game's first discovery question at TX #12, and landing
+     * after the game has stopped listening. */
+    if (t < 8 ? (t & 1) != 0 : (t % 256) != 0) return;
     if (sw_configured_ok()) {                               /* the known title */
         char m[160];
         sw_find_done = 1;
@@ -3978,7 +5299,10 @@ static void sw_find_maybe(void)
         sw_dump();      /* publish it, exactly as a found table is published */
         return;
     }
-    if (sw_find_table()) sw_find_done = 1;
+    if (sw_find_table()) { sw_find_done = 1; return; }
+    /* Hopeless by shape (four failed searches) - the file is the last route,
+     * and it is tried exactly once (sw_ftab_state). */
+    if (sw_table_hopeless() && sw_file_table()) sw_find_done = 1;
 }
 
 static void sw_dump(void)
@@ -4448,6 +5772,34 @@ static void sw_hold_init(void)
 static unsigned char nb_nodes[16];
 static int nb_nnodes = -1;
 
+/* ★ ITEM 52: THE PRIORITY LANE. `nb_news[node]` is set by the switch merge
+ * the instant a switch on that node moves and cleared when that node's 0x11
+ * scan is answered; nb_next_node() names news-bearing nodes at the HEAD of
+ * every service cycle. See the long comment on nb_next_node's lane. */
+static volatile unsigned char nb_news[64];
+static int nb_lane_on = -1;                    /* PAD_NB_LANE=0 disables */
+
+/* Is `node` in PAD_NB_SILENT? One definition, because the node-bus RX handler
+ * (shim_read) tests the same list to refuse an addressed reply, and item 52's
+ * node-directory discovery fallback (nb_nodes_init) must not seed a node the
+ * machine does not have - two places, one fact. The list is a comma/space
+ * separated set of decimal ids; empty or unset means nothing is silenced. */
+static int nb_is_silent(unsigned node)
+{
+    static const char *silent = (const char *)-1;
+    const char *s;
+    if (silent == (const char *)-1) silent = getenv("PAD_NB_SILENT");
+    if (!silent) return 0;
+    for (s = silent; *s; ) {
+        unsigned v = 0;
+        int any = 0;
+        while (*s >= '0' && *s <= '9') { v = v * 10 + (unsigned)(*s++ - '0'); any = 1; }
+        if (any && v == node) return 1;
+        if (*s) s++;
+    }
+    return 0;
+}
+
 static void nb_nodes_add(unsigned node)
 {
     char b[80];
@@ -4509,6 +5861,16 @@ static void nb_nodes_add_boards(void)
     }
 }
 
+static void nb_nodes_seed_log(const char *src)
+{
+    char b[180];
+    int i, k = snprintf(b, sizeof b, "[nbsched] playfield nodes:");
+    for (i = 0; i < nb_nnodes; i++)
+        k += snprintf(b + k, sizeof b - (unsigned)k, " %u", nb_nodes[i]);
+    snprintf(b + k, sizeof b - (unsigned)k, " (from %s)\n", src);
+    logmsg(b);
+}
+
 static void nb_nodes_init(void)
 {
     unsigned st = tread(SW_STRUCT);
@@ -4516,22 +5878,82 @@ static void nb_nodes_init(void)
     unsigned id;
     int i;
     if (nb_nnodes >= 0) return;
-    if (!sw_ok(st) || n > 4096) return;          /* table not built yet */
-    nb_nnodes = 0;
-    for (id = 1; id < n && nb_nnodes < (int)sizeof nb_nodes; id++) {
-        unsigned node = ((const unsigned char *)(unsigned long)(st + id * 32))[20];
-        if (!node) continue;                     /* 0 is the cabinet, over SPI */
-        for (i = 0; i < nb_nnodes; i++) if (nb_nodes[i] == node) break;
-        if (i == nb_nnodes) nb_nodes[nb_nnodes++] = (unsigned char)node;
+
+    /* PRIMARY: the switch table names every board that carries a switch
+     * (entry[+20]). godzilla's path, and every title whose table resolves. */
+    if (sw_ok(st) && n <= 4096) {
+        nb_nnodes = 0;
+        for (id = 1; id < n && nb_nnodes < (int)sizeof nb_nodes; id++) {
+            unsigned node = ((const unsigned char *)(unsigned long)(st + id * 32))[20];
+            if (!node) continue;                 /* 0 is the cabinet, over SPI */
+            if (nb_is_silent(node)) continue;    /* the machine does not have it
+                                                  * - same fact, same filter as
+                                                  * the fallback below */
+            for (i = 0; i < nb_nnodes; i++) if (nb_nodes[i] == node) break;
+            if (i == nb_nnodes) nb_nodes[nb_nnodes++] = (unsigned char)node;
+        }
+        /* item 52: a FILE table names only the boards that CARRY SWITCHES, so
+         * seeding from it alone would strand the LED-only boards (ST: node 2
+         * CABINET LIGHTS, node 12 TOPPER) - they are discovered on godzilla by
+         * nb_nodes_add_boards(), which walks a board array that resolves by
+         * shape there and can never resolve on ST (its array is dense, not
+         * self-labelling). Merge the title's own declared directory, minus
+         * the silenced - exactly the set the fallback below would have used.
+         * A title whose table came from GAME MEMORY is untouched: its board
+         * array resolves and add_boards() keeps doing this job. */
+        if (sw_ftab_installed) {
+            nb_fident_load();
+            for (id = 1; id < 64 && nb_nnodes < (int)sizeof nb_nodes; id++) {
+                if (!nb_fident_have[id] || nb_is_silent(id)) continue;
+                for (i = 0; i < nb_nnodes; i++)
+                    if (nb_nodes[i] == (unsigned char)id) break;
+                if (i == nb_nnodes) nb_nodes[nb_nnodes++] = (unsigned char)id;
+            }
+            nb_nodes_seed_log("switch table + node directory");
+            return;
+        }
+        nb_nodes_seed_log("switch table");
+        return;
     }
-    {
-        char b[160];
-        int k = snprintf(b, sizeof b, "[nbsched] playfield nodes:");
-        for (i = 0; i < nb_nnodes; i++)
-            k += snprintf(b + k, sizeof b - (unsigned)k, " %u", nb_nodes[i]);
-        snprintf(b + k, sizeof b - (unsigned)k, "\n");
-        logmsg(b);
+
+    /* FALLBACK (item 52): a title with NO findable switch table - measured on
+     * stranger_things, whose device table is empty and whose in-memory switch
+     * table sw_find_table rejects as "(node,bit) not distinct". Without a seed
+     * the bare-00 discovery walk (0x1d6f28) is told the bus is EMPTY on its
+     * first ask, no board object is ever created, and bring-up wedges on
+     * "LOCATING NODE BOARDS / <required> / NODES NOT FOUND" forever - even
+     * though the game identifies every declared node correctly (its own static
+     * directory drives that, and the shim answers all six of ST's with correct
+     * replies). The boards are answerable; they were just never discovered.
+     *
+     * So seed the discovery schedule from the title's own NODE DIRECTORY - the
+     * node_ident.txt nbdir.py derives and nb_fident_load() already reads - minus
+     * any node the machine does not have (PAD_NB_SILENT). This breaks the
+     * chicken-and-egg: board objects exist only after discovery, discovery ran
+     * only from the switch/board tables, and both are empty until boards exist.
+     *
+     * IRONCLAD AGAINST TOUCHING A WORKING TITLE. `!sw_find_done` means no switch
+     * table has been found by ANY route (configured or by-shape); godzilla sets
+     * sw_find_done via sw_configured_ok before this is ever reached, and any
+     * title whose table is found - even slowly - sets it too, so this branch is
+     * permanently unreachable for them. sw_find_fails>=4 additionally keeps a
+     * title whose table is merely a few searches late on the switch path. */
+    if (sw_table_hopeless()) {
+        nb_fident_load();
+        nb_nnodes = 0;
+        for (id = 1; id < 64 && nb_nnodes < (int)sizeof nb_nodes; id++) {
+            if (!nb_fident_have[id]) continue;
+            if (nb_is_silent(id)) continue;      /* the machine does not have it */
+            nb_nodes[nb_nnodes++] = (unsigned char)id;
+        }
+        if (nb_nnodes == 0) {                    /* no directory either: keep waiting */
+            nb_nnodes = -1;
+            return;
+        }
+        nb_nodes_seed_log("node directory - no switch table");
+        return;
     }
+    /* still waiting: neither a switch table nor a settled directory fallback */
 }
 
 /* The answer to one `00` poll. */
@@ -4570,6 +5992,40 @@ static unsigned nb_next_node(void)
      * under it between the first node and the terminating zero. */
     if (idx == 0) nb_nodes_add_boards();
     if (nb_nnodes <= 0) return 0;
+    /* ★ ITEM 52: THE PRIORITY LANE - a node with unserved switch NEWS is
+     * named before the round-robin resumes, every cycle, until its scan is
+     * answered.
+     *
+     * WHY THIS IS THE FIX AND NOT A TUNING. The game's service loop
+     * (0x1d7d88) fetches a node's 0x11 switch scan INSIDE servicing that
+     * node, one board per pass, and it asks US which node to service (the
+     * bare `00` poll). Its own cadence is what it is - measured on
+     * stranger_things IN A GAME, closures waited 0.5-2.8 s for their node's
+     * turn (swlatch id=64 waited=2785 ms with a ball in play), and in the
+     * guided-setup wizard a 113 ms tap read as a 3-7 s hold because node 8's
+     * turn came round every ~3.3 s. Every earlier answer to "the flippers
+     * feel late" tuned the SHIM (hold longer, latch a closure, minscans) -
+     * all of which trade width for delivery and none of which move WHEN the
+     * game looks. This moves WHEN: the round-robin is ours to order, and a
+     * board with news goes first. A real bus master does the same thing -
+     * it services the board that raised its line.
+     *
+     * The lane is a queue, not a hijack: news nodes are drained one per
+     * call and then the round-robin continues exactly where it was, and the
+     * terminating zero (the CABINET's only clock - see below) still comes
+     * once per cycle. Godzilla is unaffected in the common case (no news =
+     * no lane) and helped in the same way when it has news. */
+    if (nb_lane_on == -1) { char *q = getenv("PAD_NB_LANE"); nb_lane_on = !(q && *q == '0'); }
+    if (nb_lane_on) {
+        int i;
+        for (i = 0; i < nb_nnodes; i++) {
+            unsigned n = nb_nodes[i];
+            if (n < 64 && nb_news[n] == 1) {
+                nb_news[n] = 2;             /* named; cleared when 0x11 answers */
+                return n;
+            }
+        }
+    }
     if (idx >= nb_nnodes) {
         idx = 0;
         /* ITEM 17: THIS ZERO IS THE CABINET, AND THIS IS ITS ONLY CLOCK.
@@ -4828,6 +6284,20 @@ static void sw_shm_merge(void)
             sw_src[n] = src ? src : '?';
             sw_edged[n] = 1;                       /* item 43: state now known */
             moved = 1;
+            /* item 52: RAISE THE NEWS for this switch's node - the priority
+             * lane in nb_next_node() names it at the head of the next service
+             * cycle. Read through the resolved table so it holds for a found,
+             * configured or file table alike; node 0 is the cabinet (SPI, not
+             * the bus) and is skipped. */
+            {
+                unsigned st = tread(SW_STRUCT), cnt = tread(SW_COUNT);
+                if (sw_ok(st) && (unsigned)n < cnt && cnt <= 4096) {
+                    unsigned node = ((const unsigned char *)(unsigned long)
+                                     (st + (unsigned)n * 32))[20];
+                    if (node && node < 64 && nb_news[node] != 1)
+                        nb_news[node] = 1;
+                }
+            }
             /* The latch bookkeeping lives HERE because this is the only place
              * the merged answer moves, and the merged answer is what the game
              * is handed. Doing it at either input would count a keyboard
@@ -5893,6 +7363,370 @@ static void val_maybe_dump(void)
     val_dump_changed();
 }
 
+/* ══ THE SCREEN ORACLE ═══════════════════════════════════════════════════
+ *
+ * PAD_SCREEN=1: log every distinct line of text the game draws, as it draws
+ * it.
+ *
+ * WHY THIS EXISTS, and it is the most expensive lesson of item 52: this rig
+ * has never been able to see its own screen. The LOCATING NODE BOARDS wedge
+ * burned six passes partly because "what is displayed" could only be answered
+ * by asking David to look, and the country-code dip sweep stopped dead on it -
+ * that message is a TEXT OVERLAY drawn over video, so the LCD scene hash
+ * cannot tell one screen from another and a blind A/B proves nothing at all.
+ * A run that cannot report its own screen makes every screen question a
+ * guess.
+ *
+ * THE FIRST CUT OF THIS PROBE WAS WRONG, AND WHY IS WORTH KEEPING. It read a
+ * "character page" at 0x7c0114 + idx<<12, on the theory that the renderer
+ * composes text into a 4 KB buffer that could simply be read out. It found a
+ * page of zeros. Reading 0x3afd64 - the draw-one-message call - explained it:
+ *
+ *     0x3afd64(id, ctx, ...):   r0 = message id
+ *         bl 0x233330           id -> const char *          (r0 = the string)
+ *         r1 = 0x7c0114 + ctx<<12
+ *         b  0x3afbc8
+ *
+ *     0x3afbc8(const char *s, target, font, flags, x, y, colour):
+ *         walks s one BYTE at a time and blits each character as a SPRITE
+ *         (bl 0x440d70 / 0x440ccc).
+ *
+ * There is no character buffer anywhere. 0x7c0114 + idx<<12 is a RENDER
+ * TARGET handle that 0x3afbc8 passes straight through to the blitter, and the
+ * old probe was reading a render target as if it were text.
+ *
+ * So the text is text at exactly ONE moment: on entry to 0x3afbc8, in r0.
+ * That is the hook point, and it is the right one because the whole wrapper
+ * family funnels into it - 0x3afd64 (draw by message id), 0x3afdec /
+ * 0x3afe58 / 0x3afed4 / 0x3aff3c (vsprintf first, so counts and node numbers
+ * are already substituted into the string) and 0x3afebc (draw a raw string).
+ * The country refusal screen at 0x3c9658 uses 0x3afd64; the LOCATING NODE
+ * BOARDS renderer at 0x3db054 uses 0x3afebc and 0x3afdec and would have been
+ * missed by hooking 0x3afd64 alone. Hooking the bottleneck catches every
+ * screen in the game and needs no message-table decode at all.
+ *
+ * HOW - an inline hook. The first two instructions of 0x3afbc8 are
+ *     e92d4ff0  push {r4,r5,r6,r7,r8,r9,sl,fp,lr}
+ *     e24dd01c  sub  sp, sp, #28
+ * Neither is PC-relative, so both can be relocated. We overwrite them with
+ * `ldr pc,[pc,#-4]; .word tramp`; the trampoline logs r0, re-executes those
+ * two, and jumps to 0x3afbd0. The stack is left EXACTLY as the original
+ * prologue would have left it, which matters here because the function reads
+ * its remaining arguments at [sp,#64], [sp,#68] and [sp,#72] - offsets that
+ * only work if 36 bytes of push and 28 of sub happened and nothing else.
+ *
+ * THE TRAMPOLINE IS GENERATED AS DATA rather than written in asm: a
+ * `.word symbol` literal inside a -fPIC shared object is a text relocation,
+ * and emitting six known instruction words costs less than arguing with the
+ * linker about one. `blx` reaches the logger whichever instruction set it was
+ * compiled to, so this does not care whether the shim is ARM or Thumb.
+ *
+ * THE ADDRESS IS STRANGER_THINGS' and is env-overridable, but the real guard
+ * is not the title name - it is that the hook REFUSES to patch unless the two
+ * instructions it is about to replace are the two it expects. Patching a byte
+ * pattern rather than a byte address is what keeps this from corrupting some
+ * other title's unrelated function. */
+TITLE_ADDR(a_draw_text, "PAD_SCREEN_FN", 0x3afbc8u)
+
+#define SCREEN_INSN0 0xe92d4ff0u    /* push {r4,r5,r6,r7,r8,r9,sl,fp,lr} */
+#define SCREEN_INSN1 0xe24dd01cu    /* sub  sp, sp, #28                  */
+
+#define PAD_PROT_READ  1
+#define PAD_PROT_WRITE 2
+#define PAD_PROT_EXEC  4
+int mprotect(void *addr, unsigned long len, int prot);
+
+/* One page of our own BSS, made executable, holding the generated trampolines.
+ * A static buffer rather than mmap() because this file interposes mmap. */
+static unsigned pad_hook_page[1024] __attribute__((aligned(4096)));
+static int pad_hook_used;      /* trampolines handed out, 16 words each */
+
+/* INSTALL AN INLINE HOOK at `fn`, calling `logger` on every entry.
+ *
+ * Refuses unless the two instructions it is about to replace are `want0` and
+ * `want1` - a byte PATTERN match, not a byte address. That is the whole safety
+ * story: the addresses here are stranger_things', and patching some other
+ * title's unrelated function at the same offset would corrupt it silently.
+ * BOTH RELOCATED INSTRUCTIONS MUST BE PC-INDEPENDENT; every caller below has
+ * checked that by reading them.
+ *
+ * pass_lr=1 passes the CALLER's address to the logger instead of r0, which is
+ * how "who dispatches this screen?" gets answered without a debugger.
+ *
+ * The layout is fixed so one builder serves every hook. `ldr rX,[pc,#n]` reads
+ * from the instruction's own address + 8 + n, hence #20 at t[2] and #4 at t[7]. */
+static int pad_hook(unsigned fn, unsigned want0, unsigned want1,
+                    void *logger, int pass_lr, const char *tag)
+{
+    volatile unsigned *p;
+    unsigned *t, page;
+    char m[240];
+
+    if (!fn || !addr_readable((const void *)(unsigned long)fn)) {
+        snprintf(m, sizeof m, "[%s] not hooking: 0x%08x unreadable "
+                 "(0 means addr_readable said no)\n", tag, fn);
+        logmsg(m);
+        return 0;
+    }
+    p = (volatile unsigned *)(unsigned long)fn;
+    if (p[0] != want0 || p[1] != want1) {
+        snprintf(m, sizeof m, "[%s] not hooking 0x%08x: expected %08x %08x, "
+                 "found %08x %08x - wrong title, the function moved, or it is "
+                 "already hooked\n", tag, fn, want0, want1, p[0], p[1]);
+        logmsg(m);
+        return 0;
+    }
+    if ((pad_hook_used + 1) * 16 > 1024) {
+        snprintf(m, sizeof m, "[%s] not hooking: trampoline page full\n", tag);
+        logmsg(m);
+        return 0;
+    }
+    t = pad_hook_page + pad_hook_used * 16;
+    pad_hook_used++;
+
+    t[0] = 0xe92d500fu;   /* push {r0,r1,r2,r3,ip,lr}  - 24 bytes, stays 8-aligned */
+    t[1] = pass_lr ? 0xe1a0000eu   /* mov r0, lr - lr is still the CALLER's here */
+                   : 0xe1a00000u;  /* nop        - r0 is already the argument    */
+    /* ...and the ENTRY sp as the second argument, which is how a logger walks
+     * past a generic thunk. The refusal screen's immediate caller turned out to
+     * be `push {r3,lr}; blx r1; pop {r3,pc}` - an invoke-through-a-pointer used
+     * by every screen - so `lr` alone names the adapter, never the dispatcher.
+     * With the entry sp the logger can read the frame the thunk pushed. */
+    t[2] = pass_lr ? 0xe28d1018u   /* add r1, sp, #24 - undo our own push */
+                   : 0xe1a00000u;  /* nop */
+    t[3] = 0xe59fc014u;   /* ldr ip, [pc, #20]   -> t[10], the logger */
+    t[4] = 0xe12fff3cu;   /* blx ip - interworks, so ARM or Thumb both fine */
+    t[5] = 0xe8bd500fu;   /* pop  {r0,r1,r2,r3,ip,lr} - args and lr restored */
+    t[6] = p[0];          /* the relocated prologue, read rather than assumed */
+    t[7] = p[1];
+    t[8] = 0xe59ff004u;   /* ldr pc, [pc, #4]    -> t[11], fn + 8 */
+    t[9] = 0u;            /* never executed */
+    t[10] = (unsigned)(unsigned long)logger;
+    t[11] = fn + 8u;
+
+    if (mprotect(pad_hook_page, sizeof pad_hook_page,
+                 PAD_PROT_READ | PAD_PROT_WRITE | PAD_PROT_EXEC) != 0) {
+        snprintf(m, sizeof m, "[%s] not hooking: mprotect of the trampoline "
+                 "page failed\n", tag);
+        logmsg(m);
+        return 0;
+    }
+    page = fn & ~0xfffu;   /* two pages: the 8 bytes may straddle a boundary */
+    if (mprotect((void *)(unsigned long)page, 0x2000,
+                 PAD_PROT_READ | PAD_PROT_WRITE | PAD_PROT_EXEC) != 0) {
+        snprintf(m, sizeof m, "[%s] not hooking: mprotect of 0x%08x failed\n",
+                 tag, page);
+        logmsg(m);
+        return 0;
+    }
+    p[1] = (unsigned)(unsigned long)t;   /* the literal BEFORE the branch */
+    p[0] = 0xe51ff004u;                  /* ldr pc, [pc, #-4] */
+    __builtin___clear_cache((char *)t, (char *)(t + 16));
+    __builtin___clear_cache((char *)(unsigned long)fn, (char *)(unsigned long)fn + 8);
+
+    snprintf(m, sizeof m, "[%s] hooked 0x%08x -> trampoline %p, resuming at "
+             "0x%08x\n", tag, fn, (void *)t, fn + 8u);
+    logmsg(m);
+    return 1;
+}
+
+/* Called from the trampoline with r0 = the string about to be drawn.
+ *
+ * DEDUPED, because a screen redraws its text every frame and an undeduped
+ * hook here is the ~450-writes-a-second log flood this file warns about at
+ * the top. A 64-entry ring is enough that a static screen prints its lines
+ * once, while a screen CHANGE still shows up immediately as new lines. */
+__attribute__((noinline, used))
+static void screen_note(const char *s)
+{
+    static char seen[64][80];
+    static int nseen, head, total, capped, busy;
+    char m[200];
+    int i, j, n;
+
+    if (busy) return;                  /* never re-enter through logmsg */
+    busy = 1;
+    if (!s || !addr_readable(s)) { busy = 0; return; }
+    for (n = 0; n < 79 && s[n] >= 32 && s[n] < 127; n++) ;
+    if (n < 1) { busy = 0; return; }   /* empty or non-printable: not text */
+
+    for (i = 0; i < nseen; i++) {
+        for (j = 0; j < n && seen[i][j] == s[j]; j++) ;
+        if (j == n && seen[i][n] == 0) { busy = 0; return; }   /* already said */
+    }
+    for (j = 0; j < n; j++) seen[head][j] = s[j];
+    seen[head][n] = 0;
+    head = (head + 1) & 63;
+    if (nseen < 64) nseen++;
+
+    if (++total > 500) {
+        if (!capped) {
+            capped = 1;
+            logmsg("[screen] 500 distinct lines logged; suppressing the rest\n");
+        }
+        busy = 0;
+        return;
+    }
+    snprintf(m, sizeof m, "[screen] %lu ms: %s\n", pad_ms(), seen[(head - 1) & 63]);
+    logmsg(m);
+    busy = 0;
+}
+
+static void screen_install(void)
+{
+    static int done;
+    if (done) return;
+    done = 1;
+    if (!getenv("PAD_SCREEN")) return;
+    if (pad_hook(a_draw_text(), SCREEN_INSN0, SCREEN_INSN1,
+                 (void *)&screen_note, 0, "screen"))
+        logmsg("[screen] every line of text this game draws will be logged once\n");
+}
+
+/* ── PAD_NO_COUNTRY_GATE=1 ────────────────────────────────────────────────
+ *
+ * A DIAGNOSTIC, NOT A FIX, and off unless asked for. 0x3c9658 is
+ * stranger_things' country-refusal screen: it draws message ids 767..770
+ * ("THIS MACHINE WILL NOT" / "OPERATE IN THIS COUNTRY" / "PLEASE" / "CONTACT
+ * YOUR DISTRIBUTOR" - exactly the screen David photographed) and then spins
+ * forever at 0x3c9704. It never returns, so reaching it is terminal.
+ *
+ * Making it `bx lr` answers one question a dip sweep cannot: is the country
+ * gate the LAST thing standing between this rig and an attract mode, or only
+ * the first of several? It does not make the country right, and a run with
+ * this set is not evidence that anything is fixed. */
+TITLE_ADDR(a_country_screen, "PAD_COUNTRY_FN", 0x3c9658u)
+#define COUNTRY_INSN0 0xe92d4070u   /* push {r4, r5, r6, lr}  */
+#define COUNTRY_INSN1 0xe30e4194u   /* movw r4, #0xe194       */
+
+/* PAD_COUNTRY_TRACE=1: log WHO dispatches the refusal screen.
+ *
+ * This is the one question blocking item 52 and static reading could not
+ * answer it. 0x3c9658 is entry 7 of the 375-entry {handler, attr} screen table
+ * at 0x730ef4 (entry 14 is 0x3db054, the LOCATING renderer, which is what
+ * confirms the table), but the table is referenced by NO movw/movt pair and NO
+ * literal pool, so the dispatcher is not findable by grep. It IS findable by
+ * asking the running game: hook the screen and report the caller. The country
+ * test is one step upstream of whatever that turns out to be. */
+__attribute__((noinline, used))
+static void country_note(unsigned caller, const unsigned *entry_sp)
+{
+    static int said;
+    char m[300];
+    unsigned k = 0, i;
+    if (said) return;              /* the dispatcher calls this every frame */
+    said = 1;
+    k = (unsigned)snprintf(m, sizeof m, "[country] refusal screen entered at "
+            "%lu ms, lr=0x%08x", pad_ms(), caller);
+    /* The immediate caller is the generic `blx r1` thunk, so print the words
+     * it pushed too: [sp+4] is ITS return address, i.e. the dispatcher. The
+     * rest is printed raw rather than guessed at - a wrong frame walk that
+     * looks confident is worse than eight honest words. */
+    if (entry_sp && addr_readable(entry_sp)) {
+        k += (unsigned)snprintf(m + k, sizeof m - k, " sp=[");
+        for (i = 0; i < 8 && k < sizeof m - 16; i++)
+            k += (unsigned)snprintf(m + k, sizeof m - k, "%s%08x",
+                                    i ? " " : "", entry_sp[i]);
+        snprintf(m + k, sizeof m - k, "]\n");
+    } else {
+        snprintf(m + k, sizeof m - k, " (entry sp unreadable)\n");
+    }
+    logmsg(m);
+}
+
+static void country_trace(void)
+{
+    static int done;
+    if (done) return;
+    done = 1;
+    if (!getenv("PAD_COUNTRY_TRACE")) return;
+    pad_hook(a_country_screen(), COUNTRY_INSN0, COUNTRY_INSN1,
+             (void *)&country_note, 1, "country");
+}
+
+/* ★ ITEM 52 INSTRUMENT: PAD_PASS_HOOK=<hexaddr> - log every ENTRY to one
+ * function, with its caller and a timestamp. Generic on purpose: the pattern
+ * guard is read from the function itself at arm time (both words must be
+ * PC-independent - the caller of this knob has checked). First 200 calls
+ * verbatim, then every 256th, so a 60 Hz caller stays legible. Written to
+ * answer "how often does the stranger_things bus service pass (0x2064b0)
+ * run, and from which branch of its loop" - a question three peeks and a
+ * page of disassembly could not settle. */
+__attribute__((noinline, used))
+static void pass_note(unsigned caller, const unsigned *entry_sp)
+{
+    static unsigned n, busy;
+    static unsigned long last_ms;
+    char m[160];
+    unsigned long now;
+    (void)entry_sp;
+    if (busy) return;
+    busy = 1;
+    n++;
+    now = pad_ms();
+    if (n <= 200 || (n & 255u) == 0) {
+        snprintf(m, sizeof m, "[passhook] #%u %lu ms (+%lu) lr=0x%08x\n",
+                 n, now, last_ms ? now - last_ms : 0ul, caller);
+        logmsg(m);
+    }
+    last_ms = now;
+    busy = 0;
+}
+
+static void pass_hook_arm(void)
+{
+    static int done;
+    unsigned fn = 0;
+    const char *e;
+    volatile unsigned *p;
+    if (done) return;
+    done = 1;
+    e = getenv("PAD_PASS_HOOK");
+    if (!e || !*e) return;
+    while (ishex(*e)) fn = fn * 16 + hexval(*e++);
+    if (!fn || !addr_readable((const void *)(unsigned long)fn)) return;
+    p = (volatile unsigned *)(unsigned long)fn;
+    pad_hook(fn, p[0], p[1], (void *)&pass_note, 1, "passhook");
+}
+
+static void country_gate_bypass(void)
+{
+    static int done;
+    volatile unsigned *p;
+    unsigned fn, page;
+    char m[220];
+
+    if (done) return;
+    done = 1;
+    if (!getenv("PAD_NO_COUNTRY_GATE")) return;
+
+    fn = a_country_screen();
+    if (!fn || !addr_readable((const void *)(unsigned long)fn)) {
+        snprintf(m, sizeof m, "[country] not patching: 0x%08x unreadable\n", fn);
+        logmsg(m);
+        return;
+    }
+    p = (volatile unsigned *)(unsigned long)fn;
+    if (p[0] != COUNTRY_INSN0) {
+        snprintf(m, sizeof m, "[country] not patching 0x%08x: expected %08x, "
+                 "found %08x - wrong title or wrong address\n",
+                 fn, COUNTRY_INSN0, p[0]);
+        logmsg(m);
+        return;
+    }
+    page = fn & ~0xfffu;
+    if (mprotect((void *)(unsigned long)page, 0x2000,
+                 PAD_PROT_READ | PAD_PROT_WRITE | PAD_PROT_EXEC) != 0) {
+        logmsg("[country] not patching: mprotect failed\n");
+        return;
+    }
+    p[0] = 0xe12fff1eu;   /* bx lr */
+    __builtin___clear_cache((char *)(unsigned long)fn, (char *)(unsigned long)fn + 4);
+    snprintf(m, sizeof m, "[country] 0x%08x patched to return immediately. This "
+             "HIDES the refusal screen, it does not set a country.\n", fn);
+    logmsg(m);
+}
+
 static void nb_maybe_dump(void)
 {
     static int every = -1, n;
@@ -5904,9 +7738,24 @@ static void nb_maybe_dump(void)
     }
     if (every <= 0) return;
     if (++n % every) return;
-    nb_dump_boards();
+    /* nb_dump_objs() finds its own array per title and is safe anywhere. The
+     * other two are built on Godzilla Pro 1.15.0 literals and crashed
+     * stranger_things when they were let loose on it - see
+     * nb_addrs_are_this_title(). Say so rather than skipping in silence. */
     nb_dump_objs();
-    nb_dump_hexlist();
+    nb_sweep_watch();       /* item 52: the 0x98-aware board watch, per tick */
+    if (nb_addrs_are_this_title()) {
+        nb_dump_boards();
+        nb_dump_hexlist();
+    } else {
+        static int said;
+        if (!said) {
+            said = 1;
+            logmsg("[nbtbl] skipped: the registry and hex-list dumps are "
+                   "Godzilla Pro 1.15.0 addresses and this is not that title "
+                   "(walking them here segfaulted stranger_things)\n");
+        }
+    }
     nb_dump_census();
 }
 
@@ -6753,40 +8602,60 @@ long shim_read(int fd, void *b, unsigned long n)
          * Returning 0 from read() is a short read, which is exactly what a real
          * absent board looks like to 0x59d824 (and is the one thing that DOES
          * move the ExchangeData counter). */
-        {
-            static const char *silent = (const char *)-1;
-            if (silent == (const char *)-1) silent = getenv("PAD_NB_SILENT");
-            if (silent && nb_req_len > 0 && (nb_req[0] & 0x80)) {
-                unsigned want = (unsigned)(nb_req[0] & 0x3f);
-                const char *s = silent;
-                while (*s) {
-                    unsigned v = 0;
-                    int any = 0;
-                    while (*s >= '0' && *s <= '9') { v = v * 10 + (unsigned)(*s++ - '0'); any = 1; }
-                    if (any && v == want) {
-                        /* ITEM 17: timestamp every refusal. Run 11 showed the
-                         * cabinet poll stops for ~690 ms at a time (~138 x the
-                         * game's 5 ms retry sleep), and the prime suspect is
-                         * the game timing out on THIS deliberate silence. If
-                         * that is right, these lines arrive in ~5 ms trains
-                         * whose cab_ctr values land INSIDE a gap's counter
-                         * jump - the counter is the shared timebase, so the
-                         * join needs no clock alignment. If the gaps show NO
-                         * [nbsilent] train inside them, the theory is dead. */
-                        static int sbudget = 8000;
-                        if (sbudget-- > 0) {
-                            char sm[96];
-                            snprintf(sm, sizeof sm,
-                                     "[nbsilent] t=%lu node=%u want=%lu ctr=%u\n",
-                                     pad_ms(), want, n, cab_ctr);
-                            logmsg(sm);
-                        }
-                        return 0;
-                    }
-                    if (*s) s++;
+        if (nb_req_len > 0 && (nb_req[0] & 0x80)) {
+            unsigned want = (unsigned)(nb_req[0] & 0x3f);
+            /* ★ ITEM 52: SILENT FOR IDENTITY, PRESENT FOR STATUS. The `ff`
+             * status poll is carved OUT of the silence and answered below
+             * with the ordinary zero-filled word (no faults, no input news).
+             *
+             * WHY, measured 2026-08-18 on stranger_things: the game's service
+             * loop polls `ff` on EVERY node its directory declares, silenced
+             * or not, once per pass. On a silenced node the read returns
+             * short, the game retries once, times out (10 ms), and then - on
+             * ST's node 4, a device-class board on the coil/switch service
+             * path - the whole service pass took a ~3.3 s penalty before the
+             * next one ran. That was the "one pass every 3.3 s" that made
+             * every switch closure wait 0.5-2.9 s for a scan and a 113 ms tap
+             * read as seconds of hold; the pass itself was 1 ms. Item 17 saw
+             * the same mechanism on godzilla as a ~690 ms cabinet stall from
+             * node 2's silence and named this exact suspect in the comment
+             * below; node 2 is a light board and its penalty was smaller.
+             *
+             * WHY THIS IS STILL TRUTHFUL. Silence exists so the board is
+             * never IDENTIFIED - never registered, never graded, never
+             * wedging the readiness gate (fe/f9/fc/fa/04 stay refused). A
+             * status poll on an unregistered address answering "nothing to
+             * report" registers nothing: 0x5a43d0 hands the caller two zero
+             * words, no fault bits, no input-changed flag. It is what a bus
+             * with no board on that address and a master that does not wait
+             * on it would look like - which is the machine we are modelling.
+             * PAD_NB_SILENT_FF=0 restores the old total silence for A/B. */
+            if (nb_is_silent(want) && nb_req_len > 2 && nb_req[2] == 0xff) {
+                static int on = -1;
+                if (on == -1) { char *q = getenv("PAD_NB_SILENT_FF"); on = !(q && *q == '0'); }
+                if (on) goto silent_status_ok;
+            }
+            if (nb_is_silent(want)) {
+                /* ITEM 17: timestamp every refusal. Run 11 showed the cabinet
+                 * poll stops for ~690 ms at a time (~138 x the game's 5 ms
+                 * retry sleep), and the prime suspect is the game timing out on
+                 * THIS deliberate silence. If that is right, these lines arrive
+                 * in ~5 ms trains whose cab_ctr values land INSIDE a gap's
+                 * counter jump - the counter is the shared timebase, so the
+                 * join needs no clock alignment. If the gaps show NO [nbsilent]
+                 * train inside them, the theory is dead. */
+                static int sbudget = 8000;
+                if (sbudget-- > 0) {
+                    char sm[96];
+                    snprintf(sm, sizeof sm,
+                             "[nbsilent] t=%lu node=%u want=%lu ctr=%u\n",
+                             pad_ms(), want, n, cab_ctr);
+                    logmsg(sm);
                 }
+                return 0;
             }
         }
+    silent_status_ok:
         for (i = 0; i < n; i++) p[i] = 0;
 
         /* UNADDRESSED reply (request byte 0 has no 0x80). 0x59dbf8 branches on
@@ -7012,6 +8881,7 @@ long shim_read(int fd, void *b, unsigned long n)
                 sw_scan_enabled()) {
                 unsigned nid = (unsigned)(nb_req[0] & 0x3f);
                 unsigned char bits[8];
+                if (nid < 64) nb_news[nid] = 0;    /* item 52: news delivered */
                 if (sw_scan_bytes(nid, bits)) {
                     /* Same trace as [cabchg], for the node bus half. A burst of
                      * 27 playfield switches was seen flipping together at 35 s
@@ -7227,6 +9097,15 @@ long shim_write(int fd, const void *b, unsigned long n)
         nb_trace();
         nb_maybe_poke();
         nb_watch_flags();
+        nb_force_status();      /* item 52: readiness-gate test (per TX) */
+        /* item 52: what is actually on the glass. Both install once and then
+         * cost a load and a branch; the hook does the reporting from then on.
+         * Here rather than in a constructor because the node bus is the first
+         * thing this file is certain the game has reached. */
+        screen_install();
+        country_trace();
+        pass_hook_arm();
+        country_gate_bypass();
         nb_maybe_dump();
         alert_maybe_dump();
         val_maybe_dump();

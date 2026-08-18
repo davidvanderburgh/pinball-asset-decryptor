@@ -273,8 +273,29 @@ echo "0x33445566" > "$R/sys/fsl_otp/HW_OCOTP_MAC1"
 echo 7   > "$R/sys/class/backlight/backlight_lvds.28/brightness"
 echo 7   > "$R/sys/class/backlight/backlight_lvds.28/max_brightness"
 echo 7   > "$R/sys/class/backlight/backlight_lvds.28/actual_brightness"
-echo 60  > "$R/sys/bus/iio/devices/iio:device0/in_power_frequency"
-echo 120 > "$R/sys/bus/iio/devices/iio:device0/in_power_input"
+# THIS ATTRIBUTE IS IN CENTI-HERTZ, AND "60" HERE IS WHY stranger_things SAT ON
+# "THIS MACHINE WILL NOT OPERATE IN THIS COUNTRY" FOREVER (item 52).
+# The game's power-monitor thread (0x4f20b0) computes
+#     measured_hz = roundf(strtol(line) / 100.0f)
+# and publishes it. The factory frequency check (0x23996c) passes only if that
+# lands in 57..63 - or, failing that, if the EEPROM factory config says 50 Hz,
+# and that block (52 bytes at EEPROM offset 0) is ALL ZEROS on this rig, so it
+# fails both of its checksums and reports nothing. With "60" the game measured
+# 60/100 = 1 Hz, missed 57..63, set FG_FACTORY_FREQUENCY_MISMATCH (flag 3) and
+# ran screen 8 - whose text is about the COUNTRY, which is what sent four
+# passes hunting a country setting that was correct the whole time (the EEPROM
+# says U.S.A. at offset 0x140 and its checksum is valid). 6000 = 60.00 Hz.
+echo 6000 > "$R/sys/bus/iio/devices/iio:device0/in_power_frequency"
+# ...AND in_power_input IS A FAULT FLAG, NOT A VOLTAGE. The same thread does
+#     power_fail = (strtol(in_power_input) != 0)          (0x4f28c8/0x4f28d8)
+# and power_sample_get (0x4f205c) reports frequency ZERO whenever that flag is
+# set - so the old "120" made the game measure a perfect 60.00 Hz and then
+# throw it away. Both values were needed; each alone still refuses. MEASURED
+# with PAD_PEEK on the guest's own state, not inferred: with 6000/120 the
+# platform block at 0x842cc4+0x274 held float 60.0 while +0x270 held 1, and the
+# accumulator at 0x7bff8c never took a single sample. 0 = mains present, no
+# fault, which is what an emulated cabinet on a bench should report.
+echo 0    > "$R/sys/bus/iio/devices/iio:device0/in_power_input"
 : >      "$R/sys/class/gpio/export"
 mount -t tmpfs tmpfs "$R/tmp" 2>/dev/null
 mount -t tmpfs tmpfs "$R/run" 2>/dev/null

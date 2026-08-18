@@ -134,7 +134,13 @@ These have each been violated at least once and each cost a run or a window:
       ST numbers its cabinet switches differently the identical bits decode to a
       different, unacceptable country. **The country ST reads is therefore very
       likely an artefact of this rig, not a setting anyone chose.**
-      **NEXT, in order of cost:** (1) add a `PAD_CAB_BITS=<hex>` override for the
+      **▼ SUPERSEDED 2026-08-18 — DO NOT FOLLOW THIS PLAN.** Step (1) below is
+      now disproved: `COUNTRY CODE` is message id 1294 and nothing loads it as an
+      immediate, so it is an ADJUSTMENT, not a dip, and a `PAD_NV_POKE` of the
+      whole EEPROM read-region changed nothing either. The live plan is the
+      "NEXT, in order" block later in this item. Kept only so the sweep is not
+      re-attempted.
+      *(superseded text follows)* **NEXT, in order of cost:** (1) add a `PAD_CAB_BITS=<hex>` override for the
       synthetic word and sweep the DIP bits until the refusal clears — cheap,
       and it also proves the mechanism; (2) drive the service menu / guided setup
       as an operator would (`COUNTRY CODE` is a menu adjustment, so it may be
@@ -665,7 +671,11 @@ These have each been violated at least once and each cost a run or a window:
       "xref the string to find the display code" does not work. `msgtab.py`,
       `msgtab2.py`, `msgtab3.py`, `nbparse.py`, `scenetl.py` in
       `/home/david/i52/` are the instruments built this pass.
-      **NEXT-PASS TARGET:** find the LOCATING screen's per-node found-predicate
+      **▼ ANSWERED — this target is CLOSED.** The predicate was found and
+      confirmed at `0x3db054`/`0x3ee508`, and the LOCATING wedge itself is FIXED
+      (the cause was the shim's own `sw_find_maybe()` pacing, not a predicate).
+      Kept for the method only; the live plan is the "NEXT, in order" block.
+      *(superseded text follows)* **NEXT-PASS TARGET:** find the LOCATING screen's per-node found-predicate
       — what field, read from where, makes it judge a PINNODE not-found while
       it accepts the ws2812nodes. Two approaches, neither needs the board
       table: (1) locate the found-predicate by RE from the registration

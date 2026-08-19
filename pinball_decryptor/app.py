@@ -620,6 +620,11 @@ class App:
                 "emulator use Docker Desktop "
                 "(install from https://www.docker.com/products/docker-desktop/) "
                 "and gpg/ffmpeg from Homebrew (`brew install gnupg ffmpeg`).\n\n"
+                "If Docker Desktop will not install on your macOS version, "
+                "Colima does the same job: `brew install colima docker` or "
+                "`sudo port install colima docker`, then `colima start`. A "
+                "package manager's docker on its own is only the client and "
+                "cannot run a container.\n\n"
                 "Docker is a macOS-only requirement: emulation runs through "
                 "WSL on Windows and natively on Linux.")
             return

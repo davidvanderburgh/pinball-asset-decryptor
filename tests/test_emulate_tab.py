@@ -738,6 +738,12 @@ def test_docker_state_tells_absent_from_stopped(monkeypatch):
     """Two different faults with two different remedies: nothing installed is a
     download, installed-but-down is one click.  Collapsing them into "no
     Docker" sends someone to the website who already has it."""
+    # The client is FOUND here, so this test is about the three answers the
+    # probe itself gives.  Finding it is its own question and its own test
+    # below - a machine with no docker at all answers "absent" before running
+    # anything, which is the point of that one.
+    monkeypatch.setattr(emulate_tab, "docker_cli",
+                        lambda: "/usr/local/bin/docker")
     monkeypatch.setattr(emulate_tab.subprocess, "run", _fake_run(rc=0))
     assert emulate_tab.docker_state() == "ok"
     monkeypatch.setattr(emulate_tab.subprocess, "run", _fake_run(rc=1))
@@ -745,6 +751,100 @@ def test_docker_state_tells_absent_from_stopped(monkeypatch):
     monkeypatch.setattr(emulate_tab.subprocess, "run",
                         _fake_run(raises=FileNotFoundError()))
     assert emulate_tab.docker_state() == "absent"
+
+
+def test_docker_is_looked_for_where_a_mac_actually_keeps_it(tmp_path,
+                                                           monkeypatch):
+    """★ PAD-74.  A Mac app launched from Finder inherits launchd's PATH -
+    /usr/bin:/bin:/usr/sbin:/sbin - so a bare ["docker", "info"] is a PATH
+    lookup that fails on a Mac where docker is installed and working.  A
+    reporter had installed it with MacPorts, and the tab told him Docker
+    Desktop was required while /opt/local/bin/docker sat on his disk."""
+    tool = tmp_path / "docker"
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(emulate_tab.shutil, "which", lambda *a, **kw: None)
+    assert emulate_tab.which_tool("docker", (str(tmp_path),)) == str(tool)
+    assert emulate_tab.which_tool("nosuchtool", (str(tmp_path),)) is None
+    # PATH still wins when it has an answer: someone who launched the app from
+    # a terminal has already said which docker they mean.
+    monkeypatch.setattr(emulate_tab.shutil, "which", lambda *a, **kw: "/p/d")
+    assert emulate_tab.which_tool("docker", (str(tmp_path),)) == "/p/d"
+    # The list itself is the fix, so the places it must name are the test.
+    for d in ("/usr/local/bin",                     # Docker Desktop's symlink
+              "/opt/homebrew/bin",                  # Homebrew, Apple Silicon
+              "/opt/local/bin",                     # MacPorts - the reporter
+              "~/.docker/bin"):                     # Desktop, no symlink
+        assert d in emulate_tab.DOCKER_DIRS, d
+
+
+def test_pad_docker_overrides_and_a_wrong_one_is_not_ignored(tmp_path,
+                                                             monkeypatch):
+    """The escape hatch for the Mac that keeps it somewhere else - and a
+    support instruction that is silently ignored when mistyped is worse than
+    one that fails, so a bad override is "absent", not a fallback."""
+    tool = tmp_path / "docker"
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setenv("PAD_DOCKER", str(tool))
+    assert emulate_tab.docker_cli() == str(tool)
+    monkeypatch.setenv("PAD_DOCKER", str(tmp_path / "nope"))
+    assert emulate_tab.docker_cli() is None
+
+
+def test_a_client_with_no_engine_is_not_a_missing_docker(monkeypatch):
+    """★ PAD-74's second half.  On macOS `docker` is only a client: the
+    containers need a Linux machine behind it, and a package manager's docker
+    ships none (MacPorts says so of its own port).  That Mac is neither
+    "Docker is stopped" - there is nothing to start - nor "not installed",
+    which is what it used to be told."""
+    monkeypatch.setattr(emulate_tab.sys, "platform", "darwin")
+    monkeypatch.setattr(emulate_tab, "docker_cli",
+                        lambda: "/opt/local/bin/docker")
+    monkeypatch.setattr(emulate_tab.subprocess, "run", _fake_run(rc=1))
+    monkeypatch.setattr(emulate_tab, "docker_engine", lambda: None)
+    assert emulate_tab.docker_state() == "engineless"
+    # An engine that IS installed makes the same failure "start it".
+    monkeypatch.setattr(emulate_tab, "docker_engine",
+                        lambda: ("Colima", "cli", "/opt/local/bin/colima"))
+    assert emulate_tab.docker_state() == "stopped"
+
+
+def test_engineless_is_macos_only(monkeypatch):
+    """Everywhere else the daemon is local, so "installed but not running" is
+    the whole of the question and a fourth answer would be a wrong one."""
+    monkeypatch.setattr(emulate_tab.sys, "platform", "linux")
+    monkeypatch.setattr(emulate_tab, "docker_cli", lambda: "/usr/bin/docker")
+    monkeypatch.setattr(emulate_tab.subprocess, "run", _fake_run(rc=1))
+    monkeypatch.setattr(emulate_tab, "docker_engine", lambda: None)
+    assert emulate_tab.docker_state() == "stopped"
+
+
+def test_the_engine_install_follows_the_package_manager_already_working(
+        monkeypatch):
+    """Colima, from whichever package manager put the client there.  Telling a
+    MacPorts user to install Homebrew first is a second package manager for a
+    problem the first one solves - and MacPorts' own docker port points at
+    colima for exactly this."""
+    monkeypatch.setattr(emulate_tab, "homebrew", lambda: None)
+    monkeypatch.setattr(emulate_tab, "which_tool",
+                        lambda name, dirs=None: ("/opt/local/bin/port"
+                                                 if name == "port" else None))
+    mgr, cmd = emulate_tab.engine_install("/opt/local/bin/docker")
+    assert mgr == "MacPorts"
+    assert cmd == "sudo port install colima && colima start"
+    # No client at all: colima is the Linux machine, not the docker command,
+    # so that Mac needs both.
+    assert emulate_tab.engine_install(None)[1] == \
+        "sudo port install docker colima && colima start"
+    # Homebrew's docker gets Homebrew's colima.
+    monkeypatch.setattr(emulate_tab, "homebrew",
+                        lambda: "/opt/homebrew/bin/brew")
+    monkeypatch.setattr(emulate_tab, "which_tool",
+                        lambda name, dirs=None: None)
+    assert emulate_tab.engine_install("/opt/homebrew/bin/docker") == \
+        ("Homebrew", "brew install colima && colima start")
+    # Neither package manager: there is nothing honest to put in a button.
+    monkeypatch.setattr(emulate_tab, "homebrew", lambda: None)
+    assert emulate_tab.engine_install("/opt/local/bin/docker") == (None, "")
 
 
 def test_a_slow_docker_is_starting_not_missing(monkeypatch):
@@ -801,6 +901,64 @@ def test_a_ready_docker_leaves_no_notice_behind(tmp_path):
         root.update()
         assert not panel._docker_btn.winfo_ismapped()
         assert not panel._docker_msg.winfo_ismapped()
+    finally:
+        root.destroy()
+
+
+def test_the_engineless_notice_says_what_is_there_and_what_is_missing(
+        tmp_path, monkeypatch):
+    """★ PAD-74.  The reporter's Mac was told "Docker Desktop is required"
+    with /opt/local/bin/docker installed, so the notice names the command it
+    found - and names the thing that is actually missing, which is the Linux
+    machine behind it and not Docker Desktop."""
+    root, panel = _panel(tmp_path)
+    _quiesce(panel)
+    try:
+        panel._docker_cli = "/opt/local/bin/docker"
+        panel._docker_engine = None
+        monkeypatch.setattr(
+            emulate_tab, "engine_install",
+            lambda cli=None: ("MacPorts",
+                              "sudo port install colima && colima start"))
+        panel._docker_apply("engineless")
+        root.update()
+        text = panel._docker_msg.cget("text")
+        assert "/opt/local/bin/docker" in text, text
+        assert "sudo port install colima" in text, text
+        # The two things it must NOT say to this machine.
+        assert "not running" not in text, text
+        assert "Docker Desktop is required" not in text, text
+        assert panel._docker_btn.cget("text") == "Install Colima…"
+        assert panel._docker_btn.winfo_ismapped()
+    finally:
+        root.destroy()
+
+
+def test_start_docker_starts_the_engine_this_mac_actually_has(tmp_path,
+                                                              monkeypatch):
+    """`open -a Docker` was the only thing the button could do, on a platform
+    where the engine is as likely to be Colima - and on a Mac without Docker
+    Desktop it opened nothing while the log said it had started something."""
+    root, panel = _panel(tmp_path)
+    _quiesce(panel)
+    opened, terminal = [], []
+    monkeypatch.setattr(emulate_tab.subprocess, "Popen",
+                        lambda a, *r, **kw: opened.append(a) or SimpleNamespace())
+    monkeypatch.setattr(panel, "_docker_terminal",
+                        lambda cmd, what: terminal.append(cmd))
+    monkeypatch.setattr(panel, "_log", lambda *a: None)
+    try:
+        panel._docker = "stopped"
+        panel._docker_engine = ("Colima", "cli", "/opt/local/bin/colima")
+        panel._docker_fix()
+        assert terminal == ["/opt/local/bin/colima start"], terminal
+        assert not opened, opened
+        # An .app is opened, by its own path - OrbStack is not "Docker".
+        terminal[:] = []
+        panel._docker_engine = ("OrbStack", "app", "/Applications/OrbStack.app")
+        panel._docker_fix()
+        assert opened == [["open", "-a", "/Applications/OrbStack.app"]], opened
+        assert not terminal, terminal
     finally:
         root.destroy()
 

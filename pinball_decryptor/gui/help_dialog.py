@@ -992,11 +992,19 @@ HELP_CONTENT = {
         ("Install Docker… (macOS only)",
          "The emulator is a Linux program, and a container is how a Mac runs "
          "one — so Docker is to macOS what WSL is to Windows here. This "
-         "button appears only when Docker is missing or not running, and does "
-         "whichever is needed: it starts Docker Desktop, or installs it (via "
-         "Homebrew in Terminal if you have Homebrew, otherwise it opens the "
-         "download page). It disappears once Docker is ready. Windows and "
-         "Linux never see it and never need Docker to emulate."),
+         "button appears only when Docker is not ready, and does whichever of "
+         "three things that Mac needs: it starts the engine you have (Docker "
+         "Desktop, OrbStack, Rancher Desktop or Colima), or installs Docker "
+         "Desktop, or — when the `docker` command is installed but nothing on "
+         "the Mac can actually run a container, which is what a package "
+         "manager's docker gives you — installs Colima, the Linux machine "
+         "that command needs. Colima also still works on macOS versions "
+         "Docker Desktop no longer supports. The app looks for docker in "
+         "Homebrew's, MacPorts' and Docker Desktop's own locations as well as "
+         "on PATH, because a Mac app launched from Finder inherits almost no "
+         "PATH at all; PAD_DOCKER overrides if yours lives somewhere else. It "
+         "disappears once Docker is ready. Windows and Linux never see it and "
+         "never need Docker to emulate."),
         ("Set up emulator… (Windows only)",
          "The tab asks this PC what the emulator still needs before you press "
          "anything, so a run does not stop on a missing tool a minute after "

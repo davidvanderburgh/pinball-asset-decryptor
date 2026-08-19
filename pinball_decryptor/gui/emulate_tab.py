@@ -264,9 +264,103 @@ DOCKER_URL = "https://www.docker.com/products/docker-desktop/"
 #: hang a background probe forever.
 _DOCKER_PROBE_S = 12
 
+#: Where a `docker` command lives on a Mac when this app's own PATH cannot see
+#: it.  A GUI app launched from Finder inherits launchd's PATH -
+#: /usr/bin:/bin:/usr/sbin:/sbin - and NOT ONE of these is on it, so a bare
+#: ``["docker", "info"]`` is a PATH lookup that fails on machines where docker
+#: is installed and working.  The same fact is already encoded elsewhere in
+#: this codebase (MacExecutor._EXTRA_PATH, homebrew() below, the gpg candidate
+#: list in plugins/bof/pipeline.py); the Docker probe was the one place that
+#: still assumed a login shell's PATH.
+DOCKER_DIRS = (
+    "/usr/local/bin",                                  # Docker Desktop's own
+                                                       # symlink; Intel Homebrew
+    "/opt/homebrew/bin",                               # Apple Silicon Homebrew
+    "/opt/local/bin",                                  # MacPorts
+    "~/.docker/bin",                                   # Docker Desktop when it
+                                                       # is told to keep out of
+                                                       # /usr/local/bin
+    "~/.rd/bin",                                       # Rancher Desktop
+    "~/.orbstack/bin",                                 # OrbStack
+    "/Applications/Docker.app/Contents/Resources/bin",  # Desktop's own copy,
+                                                        # there even when the
+                                                        # symlink was declined
+)
+
+#: The Mac apps that ship a Linux VM for the `docker` command to talk to.
+#: Directories, not files: these are .app bundles.
+DOCKER_ENGINE_APPS = (
+    ("Docker Desktop", "/Applications/Docker.app"),
+    ("OrbStack", "/Applications/OrbStack.app"),
+    ("Rancher Desktop", "/Applications/Rancher Desktop.app"),
+)
+
+
+def which_tool(name, dirs=DOCKER_DIRS):
+    """*name* as an absolute path, looking where a Mac actually keeps it.
+
+    PATH FIRST, ALWAYS: someone who launched the app from a terminal, or who
+    set PATH deliberately, has already answered this question and their answer
+    wins.  ``dirs`` is only consulted when the inherited PATH has no answer at
+    all, which for a Finder-launched .app is the normal case rather than the
+    exception.
+
+    ``isfile`` and not ``os.access(X_OK)``, matching :func:`homebrew` and the
+    rest of this codebase's tool lookups: a file sitting in one of these
+    directories under this name is the tool, and a permission problem is
+    better reported by running it than by pretending it is not installed.
+    """
+    found = shutil.which(name)
+    if found:
+        return found
+    for d in dirs:
+        p = os.path.join(os.path.expanduser(d), name)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def docker_cli():
+    """The `docker` command on this machine, or None.
+
+    ``PAD_DOCKER`` overrides, for the Mac that keeps it somewhere none of
+    :data:`DOCKER_DIRS` names - and a wrong override answers None rather than
+    silently falling back, because a support instruction that is quietly
+    ignored is worse than one that fails.
+    """
+    override = (os.environ.get("PAD_DOCKER") or "").strip()
+    if override:
+        return override if os.path.isfile(override) else None
+    return which_tool("docker")
+
+
+def docker_engine():
+    """What on THIS Mac can provide the daemon, as ``(label, kind, path)``,
+    or None.
+
+    macOS cannot run a Linux container itself.  ``docker`` is a client; the
+    daemon lives in a Linux VM, and something has to ship that VM - Docker
+    Desktop does, and so do OrbStack, Rancher Desktop and Colima.  A client
+    with no engine behind it is therefore NOT "Docker is stopped", and it is
+    the case a Mac reaches by installing a package manager's `docker`: MacPorts
+    says of its own port that it "contains command line utilities for
+    interacting with Docker, but not the core daemon".
+
+    ``kind`` is how it starts: ``"app"`` is ``open -a``, ``"cli"`` is a command
+    that has to be run and watched.
+    """
+    for label, app in DOCKER_ENGINE_APPS:
+        if os.path.isdir(app):
+            return (label, "app", app)
+    colima = which_tool("colima")
+    if colima:
+        return ("Colima", "cli", colima)
+    return None
+
 
 def docker_state():
-    """``ok`` / ``stopped`` / ``absent`` - macOS's answer to "can we emulate?".
+    """``ok`` / ``stopped`` / ``engineless`` / ``absent`` - macOS's answer to
+    "can we emulate?".
 
     THE EMULATOR NEEDS LINUX, and macOS reaches it through a container (see
     ``rig_cmd``), so Docker is as much a prerequisite there as WSL is on
@@ -277,20 +371,35 @@ def docker_state():
     the whole of "you need Docker" arrived as one line of padbox.sh's stderr,
     part way down the log pane, after Start appeared to work.
 
-    Three answers rather than two, because the remedies are different: nothing
-    installed is a download, and installed-but-not-running is one click.
+    Four answers rather than two, because the remedies are four different
+    things: nothing installed is a download, installed-but-down is one click,
+    and a CLIENT WITH NO ENGINE - the answer this app used to be unable to give
+    - is a second install that is not Docker Desktop at all.  A Mac in that
+    state was told "Docker Desktop is required" while `docker` sat on its disk,
+    and clicking Start Docker on it opens an app that is not there.
+
+    ``engineless`` is macOS-only by construction: everywhere else the daemon is
+    local and "installed but not running" is the whole of the question.
     """
+    cli = docker_cli()
+    if not cli:
+        return "absent"
     try:
-        out = subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL,
+        out = subprocess.run([cli, "info"], stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL,
                              timeout=_DOCKER_PROBE_S,
                              creationflags=_CREATE_FLAGS)
-        return "ok" if out.returncode == 0 else "stopped"
+        if out.returncode == 0:
+            return "ok"
     except FileNotFoundError:
         return "absent"
     except Exception:                                   # noqa: BLE001
-        # A timeout is Docker Desktop still waking up, not an absent one.
+        # A timeout is Docker Desktop still waking up, not an absent one - and
+        # something has to be there to be slow, so it is not engineless either.
         return "stopped"
+    if sys.platform != "darwin":
+        return "stopped"
+    return "stopped" if docker_engine() else "engineless"
 
 
 def homebrew():
@@ -300,6 +409,40 @@ def homebrew():
         if os.path.isfile(p):
             return p
     return None
+
+
+def engine_install(cli=None):
+    """``(label, command)`` that gets a container engine onto this Mac, or
+    ``(None, "")`` when there is nothing honest to suggest.
+
+    CHOSEN BY WHERE THE CLIENT CAME FROM, because that is the package manager
+    the user already has working: a Mac whose `docker` is /opt/local/bin/docker
+    installed it with MacPorts, whose own docker port points at colima for
+    exactly this ("this port contains command line utilities for interacting
+    with Docker, but not the core daemon"), and telling that person to install
+    Homebrew first would be a second package manager for a problem the first
+    one already solves.
+
+    Colima rather than Docker Desktop, and not as a preference: it is the
+    answer that still works on the Macs Docker Desktop has stopped supporting,
+    which is the machine that reported this.
+
+    ``cli`` is the client this Mac already has.  Without one the command has to
+    install that too - colima ships the Linux machine, not the `docker`
+    command.
+    """
+    port = which_tool("port", ("/opt/local/bin",))
+    brew = homebrew()
+    if cli and cli.startswith("/opt/local/") and port:
+        mgr, install = "MacPorts", "sudo port install"
+    elif brew:
+        mgr, install = "Homebrew", "brew install"
+    elif port:
+        mgr, install = "MacPorts", "sudo port install"
+    else:
+        return (None, "")
+    return (mgr, "%s %s && colima start"
+            % (install, "colima" if cli else "docker colima"))
 
 
 def parse_status(text):
@@ -897,7 +1040,7 @@ def setup_report(facts):
     return lines
 
 
-def setup_report_darwin(docker):
+def setup_report_darwin(docker, cli=None, engine=None):
     """The Check button's answer on a Mac, where the question is a different
     one.
 
@@ -910,7 +1053,10 @@ def setup_report_darwin(docker):
     ``setup_state`` exists to prevent.
 
     Pure, like ``setup_report``, so the wording is testable without a Tk root
-    or a Docker.
+    or a Docker.  ``cli`` and ``engine`` are what the probe found (see
+    :func:`docker_cli` and :func:`docker_engine`) and both are optional: this
+    is the paste a user is asked for when a Mac disagrees with the tab, and
+    "which docker, found where" is the fact that settles it.
     """
     lines = ["setup check:",
              "  this Mac emulates in a container, so there are no packages "
@@ -918,8 +1064,19 @@ def setup_report_darwin(docker):
     lines.append("  Docker: " + {
         "ok": "running",
         "stopped": "installed, but NOT running",
+        "engineless": "the command is installed, but nothing here runs "
+                      "containers",
         "absent": "NOT installed",
     }.get(docker, "unknown — the probe gave no answer"))
+    # NAMED, not just counted.  The bug that added this state was a docker in
+    # /opt/local/bin that the app could not see, and no line of any report said
+    # where it had looked.
+    lines.append("  docker command: " + (cli or "not found on PATH or in "
+                                         + ", ".join(DOCKER_DIRS)))
+    lines.append("  container engine: "
+                 + ("%s (%s)" % (engine[0], engine[2]) if engine else
+                    "none installed — Docker Desktop, OrbStack, Rancher "
+                    "Desktop and Colima each provide one"))
     lines.append("this Mac can run the emulator." if docker == "ok" else
                  "this Mac cannot run the emulator yet.")
     return lines
@@ -1312,6 +1469,14 @@ class EmulatePanel:
         self._docker_busy = False
         self._docker_ticks = 0
         self._docker_result = None
+        #: What that probe found alongside the state word: the `docker` command
+        #: it used, and the engine that could run a container for it.  Both are
+        #: needed to say anything useful about a Mac that has one and not the
+        #: other, and both are asked on the SAME worker thread as the state -
+        #: they are filesystem lookups, and the main loop does not do those on
+        #: behalf of a probe it has already moved off itself.
+        self._docker_cli = None
+        self._docker_engine = None
         #: Last answer from setup_state(), Windows/Linux only.  None means the
         #: question has not been answered yet OR could not be asked, and both
         #: read the same way on purpose: nothing is claimed without evidence.
@@ -1666,12 +1831,27 @@ class EmulatePanel:
 
         def run():
             try:
-                self._docker_result = docker_state()
+                self._docker_result = self._docker_probe()
             finally:
                 self._docker_busy = False
 
         threading.Thread(target=run, daemon=True).start()
         self._docker_drain()
+
+    def _docker_probe(self):
+        """The three questions, asked together, off the main loop.
+
+        ONE PLACE, because Start asks them again on every press - the user may
+        have installed or started something since build time - and a second
+        copy would be free to drift, which is how a state word and the paths
+        printed beside it end up describing different machines.
+
+        The two lookups come FIRST: the state is the conclusion drawn from
+        them, so they must not be the older pair.
+        """
+        self._docker_cli = docker_cli()
+        self._docker_engine = docker_engine()
+        return docker_state()
 
     def _docker_drain(self):
         """Main-loop side of _docker_check: show the answer once it lands."""
@@ -1700,7 +1880,8 @@ class EmulatePanel:
         if not getattr(self, "_docker_report_next", False):
             return
         self._docker_report_next = False
-        for line in setup_report_darwin(state):
+        for line in setup_report_darwin(state, self._docker_cli,
+                                        self._docker_engine):
             self._log("[emulate] " + line)
         try:
             self._check_btn.configure(state=tk.NORMAL, text="Check setup…")
@@ -1717,12 +1898,39 @@ class EmulatePanel:
                 self._docker_msg.pack_forget()
                 return
             if state == "stopped":
+                # NAME THE ENGINE THAT IS ACTUALLY HERE.  "Open Docker Desktop"
+                # is not advice on a Mac running Colima or OrbStack, and the
+                # button below used to `open -a Docker` on every one of them.
+                eng = self._docker_engine
+                label = eng[0] if eng else "Docker Desktop"
                 self._docker_btn.configure(text="Start Docker")
                 self._docker_msg.configure(
                     text=("Docker is installed but not running, and the "
                           "emulator runs inside it. Click “Start Docker”, or "
-                          "open Docker Desktop yourself and wait for its whale "
-                          "to stop animating."))
+                          "start %s yourself and give it a moment to come up."
+                          % label))
+            elif state == "engineless":
+                # ★ THE CASE THAT USED TO READ AS "NOT INSTALLED".  The client
+                # is right there; what is missing is the Linux VM behind it,
+                # which is a different install and on some Macs cannot be
+                # Docker Desktop at all.
+                mgr, cmd = engine_install(self._docker_cli)
+                self._docker_btn.configure(
+                    text="Install Colima…" if cmd else "Get Docker…")
+                self._docker_msg.configure(
+                    text=("The docker command is installed here (%s), but "
+                          "nothing on this Mac can run a container: on macOS "
+                          "docker is only the client, and the containers "
+                          "themselves need a Linux machine behind it. That is "
+                          "what Docker Desktop, OrbStack and Colima each "
+                          "provide."
+                          % (self._docker_cli or "found on PATH")
+                          + ("\n%s can install one, so the button below runs "
+                             "`%s` in Terminal. Colima is the one that still "
+                             "works on macOS versions Docker Desktop has "
+                             "dropped." % (mgr, cmd) if cmd else
+                             "\nThe button below opens the Docker Desktop "
+                             "download page.")))
             else:
                 self._docker_btn.configure(
                     text="Install Docker…" if homebrew() else "Get Docker…")
@@ -1743,27 +1951,44 @@ class EmulatePanel:
     def _docker_fix(self):
         """Install it, or start it - whichever this machine needs.
 
-        NEITHER IS DONE SILENTLY. Installing Docker Desktop wants an admin
-        password, and a GUI app that appears to hang while an invisible
-        installer waits for one is worse than no button at all - so the brew
-        path runs in Terminal, where the user can see it and answer it.
+        NEITHER IS DONE SILENTLY. Installing an engine wants an admin password,
+        and a GUI app that appears to hang while an invisible installer waits
+        for one is worse than no button at all - so every install path runs in
+        Terminal, where the user can see it and answer it.
+
+        AND IT STARTS WHAT IS ACTUALLY INSTALLED.  ``open -a Docker`` was the
+        only thing this button could do, on a platform where the engine is as
+        likely to be Colima or OrbStack; on a Mac without Docker Desktop it
+        opened nothing and said it had started something.
         """
         if self._docker == "stopped":
-            try:
-                subprocess.Popen(["open", "-a", "Docker"])
-                self._log("[emulate] starting Docker Desktop; it takes a "
-                          "moment to come up")
-            except Exception as exc:                    # noqa: BLE001
-                self._log("[emulate] could not start Docker Desktop: %s" % exc)
-            self._timer().after(4000, self._docker_check)
+            self._docker_start_engine()
+            return
+
+        if self._docker == "engineless":
+            # NOT the Docker Desktop cask.  This Mac has the client already,
+            # and it is a Mac that reached for a package manager rather than
+            # Docker Desktop - in the reported case because Docker Desktop no
+            # longer installs on its macOS at all.
+            mgr, cmd = engine_install(self._docker_cli)
+            if not cmd:
+                self._docker_download()
+                return
+            if not messagebox.askyesno(
+                    "Install a container engine",
+                    "Run this in Terminal?\n\n"
+                    "    %s\n\n"
+                    "Colima is the Linux machine your docker command needs. "
+                    "It downloads a few hundred MB and will ask for your "
+                    "password; after that `colima start` is all it needs."
+                    % cmd):
+                return
+            self._docker_terminal(cmd, "%s install" % mgr)
             return
 
         brew = homebrew()
         if not brew:
-            import webbrowser
-            webbrowser.open(DOCKER_URL)
-            self._log("[emulate] opened %s - install it, then click Start "
-                      "emulator again" % DOCKER_URL)
+            self._docker_download()
             return
         if not messagebox.askyesno(
                 "Install Docker Desktop",
@@ -1773,16 +1998,52 @@ class EmulatePanel:
                 "for your password. When it finishes, open Docker Desktop "
                 "once, then come back here."):
             return
-        # osascript rather than Popen(["brew", ...]): the point is that the
-        # user SEES it. A cask install asks for a password, and a progress bar
-        # nobody can see is a hang.
-        script = ('tell application "Terminal" to do script '
-                  '"%s install --cask docker"' % brew)
+        self._docker_terminal("%s install --cask docker" % brew,
+                              "Docker Desktop install")
+
+    def _docker_download(self):
+        """The last resort everywhere above: send them to the download page."""
+        import webbrowser
+        webbrowser.open(DOCKER_URL)
+        self._log("[emulate] opened %s - install it, then click Start "
+                  "emulator again" % DOCKER_URL)
+
+    def _docker_start_engine(self):
+        """Start whatever engine this Mac has, by the means that engine wants.
+
+        An .app is ``open -a``; Colima is a command that takes a minute or two
+        and prints as it goes, so it goes to Terminal for the same reason the
+        installs do - a silent two-minute wait is indistinguishable from a
+        button that did nothing.
+        """
+        eng = self._docker_engine
+        if eng and eng[1] == "cli":
+            self._docker_terminal("%s start" % eng[2], "%s start" % eng[0])
+            self._timer().after(15000, self._docker_check)
+            return
+        target = eng[2] if eng else "Docker"
+        label = eng[0] if eng else "Docker Desktop"
+        try:
+            subprocess.Popen(["open", "-a", target])
+            self._log("[emulate] starting %s; it takes a moment to come up"
+                      % label)
+        except Exception as exc:                        # noqa: BLE001
+            self._log("[emulate] could not start %s: %s" % (label, exc))
+        self._timer().after(4000, self._docker_check)
+
+    def _docker_terminal(self, cmd, what):
+        """Run *cmd* in Terminal.app, where the user can see and answer it.
+
+        osascript rather than Popen(cmd): the point is that it is WATCHED. An
+        install asks for a password and a start takes minutes, and a progress
+        bar nobody can see is a hang.
+        """
+        script = ('tell application "Terminal" to do script "%s"'
+                  % cmd.replace('\\', '\\\\').replace('"', '\\"'))
         try:
             subprocess.Popen(["osascript", "-e", script,
                               "-e", 'tell application "Terminal" to activate'])
-            self._log("[emulate] running `brew install --cask docker` in "
-                      "Terminal")
+            self._log("[emulate] running `%s` in Terminal (%s)" % (cmd, what))
         except Exception as exc:                        # noqa: BLE001
             self._log("[emulate] could not open Terminal: %s" % exc)
             import webbrowser
@@ -2704,12 +2965,15 @@ class EmulatePanel:
             # Docker" was one line of padbox.sh's stderr in the log pane, after
             # the button had already said "Starting…".
             if sys.platform == "darwin":
-                state = docker_state()
+                state = self._docker_probe()
                 if state != "ok":
                     self._log("[emulate] Docker is %s. The emulator runs in a "
                               "container on macOS, so it cannot start without "
-                              "it." % ("not installed" if state == "absent"
-                                       else "not running"))
+                              "it." % {
+                                  "absent": "not installed",
+                                  "engineless": "installed, but nothing on "
+                                                "this Mac can run a container",
+                              }.get(state, "not running"))
                     # QUEUED BEFORE the flag is cleared, so anything waiting on
                     # "no longer starting" can be sure the tab has already been
                     # told why.

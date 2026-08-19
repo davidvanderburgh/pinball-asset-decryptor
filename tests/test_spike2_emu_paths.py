@@ -548,6 +548,38 @@ def test_the_rig_is_staged_out_of_a_path_docker_cannot_share():
     assert box.index("pad_docker_can_share") < box.index("$RIG:/pad/rig:ro")
 
 
+def test_the_box_looks_for_docker_where_a_mac_keeps_it():
+    """★ PAD-74.  This script is normally started BY THE APP, and a Mac app
+    launched from Finder inherits launchd's PATH - /usr/bin:/bin:/usr/sbin:
+    /sbin - which has no docker, no colima and no ffplay on a Mac where all
+    three work.  `command -v docker` therefore failed on installed Macs, and
+    the same silence made runs on those machines silent (ffplay is the Mac-side
+    speaker)."""
+    box = _padbox()
+    setup = box[:box.index("command -v docker")]
+    for d in ("/usr/local/bin", "/opt/homebrew/bin", "/opt/local/bin",
+              "$HOME/.docker/bin"):
+        assert d in setup, d
+    # APPENDED, not prepended: a user who set PATH themselves has already
+    # answered this question.
+    assert "PATH=$PATH:/usr/local/bin" in setup
+    assert "export PATH" in setup
+    # And the app's own override reaches the box, so `docker` means the same
+    # binary here as in the check that let the run start.
+    assert "PAD_DOCKER" in setup
+
+
+def test_the_box_tells_a_missing_engine_from_a_stopped_one():
+    """On macOS `docker` is only a client; the containers need a Linux machine
+    behind it, and a package manager's docker ships none.  "start Docker
+    Desktop" names an app that Mac does not have."""
+    box = _padbox()
+    fail = box[box.index("docker info >/dev/null"):box.index("# alive.sh")]
+    assert "colima" in fail
+    assert "/Applications/Docker.app" in fail
+    assert "sudo port install colima" in fail
+
+
 def test_a_status_poll_does_not_build_a_container_configuration():
     """The Emulate tab asks status.sh every two seconds.  That question needs
     no image, no volume, no mount and no staged copy - it is answered from

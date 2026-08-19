@@ -1,0 +1,2 @@
+# The rig is Linux shell run inside WSL - CRLF breaks the shebang.
+*.sh text eol=lf

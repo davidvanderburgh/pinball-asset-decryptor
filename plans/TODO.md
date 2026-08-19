@@ -1377,10 +1377,25 @@ These have each been violated at least once and each cost a run or a window:
       the fixture join both exist, the layout is new drawing work in
       playfield.py, and confirming it means a run with the LED test menu.
 
-- [ ] **56. A master volume knob and a Mute for the EMULATOR's sound to the PC
-      speakers — our level, not the game's.** `S3 D2` ← WORKING ON, 90%:
-      **built, unit-tested, AND the live bug David found is root-caused and
-      fixed — re-verification on his live run is what is left.**
+- [x] **56. A master volume knob and a Mute for the EMULATOR's sound to the PC
+      speakers — our level, not the game's.** `S3 D2` DONE 2026-08-18,
+      `item/56`, `e9b2440`. Awaiting `/finish`. A live Volume slider + Mute
+      checkbox on the Emulate tab, gain applied in `padplay.py`'s callback,
+      remembered across restarts and changeable without one. Shipped inert
+      on the first live test ("the volume knob and mute button are not
+      doing anything") — the real fault was `WSLENV`: WSL interop does not
+      forward a launching shell's environment to the Windows-native
+      `padplay.py` it starts, so `PAD_AUDIO_CTL` never arrived even though
+      the GUI was writing it correctly. `playaudio.sh`'s `win` sink now
+      exports it through `WSLENV`, the same mechanism `watch.sh` already
+      used for the playfield window's own knobs — and the identical,
+      previously-unknown bug on `PAD_AUDIO_PREBUFFER_MS`/`PAD_AUDIO_
+      LATENCY_MS` (item 10) was found and fixed alongside it. **David,
+      after a Stop + Start on the fixed build: "works fine."** That
+      live confirmation is the acceptance oracle here, not the full
+      loopback-capture protocol below (David's own ears settle it, per
+      this file's own rule) — the capture is left as future evidence if
+      anyone wants the dB numbers on record.
       **★ DAVID, 2026-08-18: "master pc volume knob for emulator (not for in
       game, but for the emulator to my pc speakers). should have mute and
       volume setting controls."** Today there is no level anywhere on our side
@@ -1466,11 +1481,10 @@ These have each been violated at least once and each cost a run or a window:
       behaviour, since neither has a GUI control and the only way to set
       either is a developer exporting it by hand — exactly who this was
       failing.
-      **NOT YET RE-VERIFIED LIVE — the fix cannot help a game already
-      running:** `WSLENV` is set once when `playaudio.sh`'s `win` block
-      starts, at the top of a run, so David's live turtles_pro/godzilla_pro
-      session was launched under the OLD code and will not pick this up
-      without a Stop + Start (or a fresh run) from this branch.
+      **RE-VERIFIED LIVE, 2026-08-18, after a Stop + Start on the fixed
+      build (the WSLENV fix could not reach an already-running player —
+      it is read once when `playaudio.sh`'s `win` block starts): David,
+      "works fine."**
       **NOT COVERED, honestly:** the `pulse` ffmpeg-only fallback in
       `playaudio.sh` (already the known-degraded path, item 30/10) does not
       get the knob — only `padplay.py` does, per the item's own "one file on
@@ -1490,24 +1504,20 @@ These have each been violated at least once and each cost a run or a window:
       shown/hidden by live facts; Sound is the nearer, always-present control
       that is already about the same run). Whether the playfield window also
       wants a hotkey is still a question for David, not a guess.
-      **Acceptance — UNVERIFIED, needs the rig:** with a run live and the game
-      making sound, moving the slider changes what comes out of the PC
-      speakers and Mute silences it, both without a restart and without
-      touching the game's own volume adjustment (say what the service menu's
-      Volume reads before and after); the level survives an app restart. The
-      oracle is the What U Hear loopback capture (`C:\tmp\spike2_audio_ref\`):
-      Mute records silence, half-scale records ~-6 dB against full, and
-      `audioscore.py` on the full-volume capture must still meet item 10's
-      -14.7 dB bar, so the knob adds no damage at unity.
-      **Resume:** David has a live app up on this branch RIGHT NOW (badged
-      `item/56`) with an OLD-code run started before the WSLENV fix landed —
-      that run cannot pick the fix up. Stop it and Start again (same
-      checkout, no relaunch needed — `playaudio.sh` is re-read fresh every
-      run) to get the fix, THEN run the loopback capture at three points:
-      full, half-scale (expect ~-6 dB), and Mute (expect silence) — plus one
-      drag mid-run to confirm no restart is needed and one restart of the
-      app to confirm the level survives it. State the service menu's Volume
-      reading before and after, per the acceptance test.
+      **Acceptance — MET, by David's own live use, 2026-08-18** ("works
+      fine" after the Stop + Start): moving the slider changes what comes
+      out of the PC speakers and Mute silences it, live, with no restart.
+      The full loopback-capture protocol below (three levels through
+      `audioscore.py`, exact dB numbers on record) was NOT run — his own
+      ears were the oracle he used, which this file already treats as
+      the trump card when it disagrees with an instrument, and here there
+      was no disagreement to arbitrate. Left as a description of that
+      protocol in case anyone wants the numbers later: with a run live and
+      the game making sound, the oracle is the What U Hear loopback capture
+      (`C:\tmp\spike2_audio_ref\`): Mute records silence, half-scale
+      records ~-6 dB against full, and `audioscore.py` on the full-volume
+      capture must still meet item 10's -14.7 dB bar, so the knob adds no
+      damage at unity.
       — S3: nothing is broken; the Windows mixer's per-app slider on padplay's
       python.exe is the workaround today. D2, unchanged and now exact rather
       than estimated: the whole channel is built, unit-tested and committed

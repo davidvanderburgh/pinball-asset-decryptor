@@ -131,6 +131,14 @@ class SwitchShm:
         pid = int.from_bytes(self.map[OFF_GAME_PID:OFF_GAME_PID + 4], 'little')
         return rd, wr, pid
 
+    def out_frame(self, board):
+        o = OFF_OUT + board * FRAME_LEN
+        return self.map[o:o + FRAME_LEN]
+
+    def board_writes(self, board):
+        o = OFF_OUT_CHANGES + board * 4
+        return int.from_bytes(self.map[o:o + 4], 'little')
+
     def coil_changes(self):
         o = OFF_OUT_CHANGES
         return [int.from_bytes(self.map[o + i * 4:o + i * 4 + 4], 'little')
@@ -150,6 +158,13 @@ MARK_OFF = '#5aa9e6'
 MARK_ON = '#41d67c'
 
 
+#: Board index for the LED board, matching the enum in jjpshm.h.
+BOARD_LED = 1
+
+MARK_LAMP_OFF = '#4a4335'
+MARK_LAMP_ON = '#ffd34d'
+
+
 class MatrixUI:
     def __init__(self, root, devices, shm, pf_png=None, pulse_ms=120):
         self.root = root
@@ -157,6 +172,8 @@ class MatrixUI:
         self.pulse_ms = pulse_ms
         self.by_num = {}
         self.latched = set()
+        self.lamps = []
+        self.calib = devices.get('calibration', {})
 
         # Key on the FRAME ADDRESS, not the symbol name.
         #
@@ -178,6 +195,20 @@ class MatrixUI:
             # Prefer the descriptive alias, and any entry that has a position.
             if prev is None or (prev.get('x') is None and s.get('x') is not None):
                 self.by_num[n] = s
+
+        # Lamps arrive in INCHES and must be projected into the playfield
+        # photograph's pixel space.  swdump.py solves that mapping from
+        # devices that share an exact name suffix with a switch; if the fit
+        # failed we draw no lamps rather than draw them all in the corner.
+        cx = self.calib.get('x') if self.calib.get('ok') else None
+        cy = self.calib.get('y') if self.calib.get('ok') else None
+        for l in devices.get('lamps', []):
+            if not l.get('placed') or not cx or not cy:
+                continue
+            l = dict(l)
+            l['px'] = int(round(cx['scale'] * l['x_in'] + cx['offset']))
+            l['py'] = int(round(cy['scale'] * l['y_in'] + cy['offset']))
+            self.lamps.append(l)
 
         root.title('JJP switch matrix')
         root.configure(bg=BG)
@@ -213,6 +244,17 @@ class MatrixUI:
             self.pf.create_text(w // 2, h // 2, fill='#777',
                                 text='no playfield image\n(pass --pf)',
                                 justify='center')
+
+        # Lamps first, so a switch marker is never hidden behind one.
+        self.lamp_marks = {}
+        for i, l in enumerate(self.lamps):
+            x, y = l['px'], l['py']
+            r = 4
+            oid = self.pf.create_rectangle(x - r, y - r, x + r, y + r,
+                                           fill=MARK_LAMP_OFF, outline='')
+            self.lamp_marks[i] = oid
+            self.pf.tag_bind(oid, '<Enter>', lambda e, k=i: self.hover_lamp(k))
+            self.pf.tag_bind(oid, '<Leave>', lambda e: self.hover(None))
 
         self.markers = {}
         for n, s in sorted(self.by_num.items()):
@@ -259,6 +301,27 @@ class MatrixUI:
                                justify='left', font=('Consolas', 9))
         self.detail.pack(anchor='w', fill='x')
 
+        # --- LED panel ------------------------------------------------------
+        tk.Label(right, text=f'LEDs  ({len(self.lamps)} placed of '
+                             f'{len(devices.get("lamps", []))})',
+                 bg=BG, fg='#9aa3b2', font=('Segoe UI', 9)).pack(anchor='w',
+                                                                 pady=(10, 2))
+        self.led_note = tk.Label(right, text='', bg=BG, fg='#c88', anchor='w',
+                                 justify='left', font=('Segoe UI', 8))
+        self.led_note.pack(anchor='w')
+
+        ledgrid = tk.Frame(right, bg=BG)
+        ledgrid.pack(anchor='nw', pady=(4, 0))
+        self.led_cells = {}
+        per_row = 24
+        for i, l in enumerate(self.lamps):
+            c = tk.Label(ledgrid, width=1, height=1, bg=MARK_LAMP_OFF,
+                         relief='flat', borderwidth=1)
+            c.grid(row=i // per_row, column=i % per_row, padx=1, pady=1)
+            c.bind('<Enter>', lambda e, k=i: self.hover_lamp(k))
+            c.bind('<Leave>', lambda e: self.hover(None))
+            self.led_cells[i] = c
+
         tk.Label(right, bg=BG, fg='#6b7280', justify='left', font=('Segoe UI', 9),
                  text=('left-click = pulse (momentary, like a real rollover)\n'
                        'right-click = latch (trough balls, coin door)\n'
@@ -266,6 +329,29 @@ class MatrixUI:
                  ).pack(anchor='w', pady=(8, 0))
 
         self.tick()
+
+    def hover_lamp(self, i):
+        l = self.lamps[i]
+        self.detail.config(
+            text=f"LED {l['index']}  {l['name']}\n"
+                 f"  {l['symbol']}\n"
+                 f"  ({l['x_in']:.2f}, {l['y_in']:.2f}) in  ->  "
+                 f"({l['px']}, {l['py']}) px   kind {l['lamp_kind']}")
+
+    def led_lit(self, i):
+        """Is this lamp lit, according to the game's last LED frame?
+
+        PROVISIONAL.  The switch matrix layout was *derived and verified*; this
+        one is not.  The game has never yet written the LED board under the
+        rig, so there is no traffic to check a mapping against, and the byte
+        order inside JJP's 64-byte LED pages is still unknown.  We show a lamp
+        as lit when its index maps to a non-zero byte in the last LED frame,
+        which is the simplest thing consistent with what we know - and the UI
+        says plainly when the board has never been written, so nobody mistakes
+        an unlit panel for "all lamps off".
+        """
+        frame = self.shm.out_frame(BOARD_LED)
+        return bool(frame[self.lamps[i]['index'] % FRAME_LEN])
 
     def hover(self, n):
         if n is None:
@@ -306,11 +392,22 @@ class MatrixUI:
             cell.config(bg=GRID_ON if on else base)
         for n, oid in self.markers.items():
             self.pf.itemconfig(oid, fill=MARK_ON if self.shm.get_switch(n) else MARK_OFF)
+        led_writes = self.shm.board_writes(BOARD_LED)
+        for i, cell in self.led_cells.items():
+            on = self.led_lit(i) if led_writes else False
+            colour = MARK_LAMP_ON if on else MARK_LAMP_OFF
+            cell.config(bg=colour)
+            self.pf.itemconfig(self.lamp_marks[i], fill=colour)
+        self.led_note.config(
+            text='' if led_writes else
+            'LED board has never been written by the game - these show '
+            'LAYOUT ONLY, not live state.')
+
         rd, wr, pid = self.shm.counters()
         live = 'reading' if rd else 'NOT reading (game has not opened the boards)'
         self.status.config(
             text=f'game pid {pid or "-"}   frames in {rd}  out {wr}   {live}'
-                 f'   latched {len(self.latched)}')
+                 f'   latched {len(self.latched)}   LED writes {led_writes}')
         self.root.after(100, self.tick)
 
 

@@ -56,6 +56,7 @@ different space entirely.
 """
 
 import argparse
+import itertools
 import json
 import os
 import struct
@@ -116,6 +117,131 @@ def find_pid():
         if rss > best_rss:
             best, best_rss = p, rss
     return best
+
+
+def decode_lamp(mem, elf, pv):
+    """Decode one 88-byte Lamp object.
+
+    Offsets, read off live objects on 2026-08-19:
+
+        off  type   meaning
+          0  ptr    vtable (identical across every lamp)
+          8  f32    X in INCHES
+         12  f32    Y in INCHES
+         32  f32    X again (a second copy; same value)
+         36  f32    Y again
+         40  u32    lamp index (matches the game's own numbering)
+         48  ptr    -> name string ("Gobstopper", "Camera Spotlight")
+         56  u32    kind - 4 and 7 dominate, 8199 appears a few times
+         60  u32    unknown a
+         64  u32    unknown b
+         68  u32    sequence within hook_lamp_table
+         80  ptr    -> per-lamp heap block (NOT animation state: sampled over
+                    3 s of attract, neither the object nor that block changed)
+
+    NOTE THE UNITS.  Lamps are in INCHES; switches are in playfield-image
+    PIXELS.  Mixing them silently puts every lamp in the top-left corner.
+    calibrate() below solves the inches->pixels mapping.
+    """
+    b = mem.read(pv, LAMP_SIZE)
+    if len(b) < LAMP_SIZE:
+        return None
+    x, y = struct.unpack_from('<ff', b, 8)
+    return {
+        'symbol': elf.by_addr.get(pv, ''),
+        'name': mem.cstr(struct.unpack_from('<Q', b, 48)[0]),
+        'addr': pv,
+        'kind': 'lamp',
+        'index': struct.unpack_from('<I', b, 40)[0],
+        'x_in': round(x, 4),
+        'y_in': round(y, 4),
+        'lamp_kind': struct.unpack_from('<I', b, 56)[0],
+        'seq': struct.unpack_from('<I', b, 68)[0],
+        # A lamp at exactly (0,0) is unplaced, the same convention switches use
+        # with -1.  Do not draw these.
+        'placed': not (x == 0.0 and y == 0.0),
+    }
+
+
+def dump_lamps(elf, mem):
+    addr = elf.addr('hook_lamp_table')
+    nbytes = elf.size('hook_lamp_table')
+    if 'hook_lamp_table_size' in elf.syms:
+        n = struct.unpack('<I', mem.read(elf.addr('hook_lamp_table_size'), 4))[0]
+        if 0 < n * 8 <= nbytes:
+            nbytes = n * 8
+    raw = mem.read(addr, nbytes)
+    out = []
+    for pv in struct.unpack('<%dQ' % (len(raw) // 8), raw):
+        if not pv:
+            continue
+        try:
+            rec = decode_lamp(mem, elf, pv)
+        except OSError:
+            # One unreadable object must not lose the other 215.  An EIO here
+            # took the whole lamp table to zero once.
+            continue
+        if rec:
+            out.append(rec)
+    return out
+
+
+def calibrate(switches, lamps):
+    """Solve inches -> playfield-image pixels, and say how well it fits.
+
+    Switches carry pixel coordinates, lamps carry inches, and nothing in the
+    game states the relationship.  Devices that share an exact name suffix
+    (switch_jet_left / lp_jet_left) are the same physical spot, so each such
+    pair is one observation.
+
+    Matching on keyword OVERLAP instead was tried first and is a trap: it
+    paired switch_spinner with lp_factory_tour_1 and produced a fit with 51 px
+    mean error.  Exact suffix only, then RANSAC to drop the pairs where the
+    lamp genuinely is not co-located with the switch.
+    """
+    sw = {s['symbol'][7:]: (s['x'], s['y'])
+          for s in switches
+          if s.get('x') is not None and s.get('symbol', '').startswith('switch_')}
+    lp = {l['symbol'][3:]: (l['x_in'], l['y_in'])
+          for l in lamps
+          if l.get('placed') and l.get('symbol', '').startswith('lp_')}
+    pairs = [(k, sw[k], lp[k]) for k in sw if k in lp]
+    if len(pairs) < 2:
+        return {'ok': False, 'pairs': len(pairs),
+                'why': 'need at least two exact-suffix switch/lamp pairs'}
+
+    def solve(axis):
+        i = 0 if axis == 'x' else 1
+        best = None
+        for a_, b_ in itertools.combinations(pairs, 2):
+            d = a_[2][i] - b_[2][i]
+            if abs(d) < 0.5:
+                continue
+            m = (a_[1][i] - b_[1][i]) / d
+            c = a_[1][i] - m * a_[2][i]
+            inl = [p for p in pairs if abs(m * p[2][i] + c - p[1][i]) <= 12]
+            if not best or len(inl) > len(best[2]):
+                best = (m, c, inl)
+        if not best:
+            return None
+        inl = best[2]
+        n = len(inl)
+        sx = sum(p[2][i] for p in inl); sy = sum(p[1][i] for p in inl)
+        sxx = sum(p[2][i] ** 2 for p in inl); sxy = sum(p[2][i] * p[1][i] for p in inl)
+        den = n * sxx - sx * sx
+        if abs(den) < 1e-9:
+            return None
+        m = (n * sxy - sx * sy) / den
+        c = (sy - m * sx) / n
+        res = [abs(m * p[2][i] + c - p[1][i]) for p in inl]
+        return {'scale': m, 'offset': c, 'inliers': n, 'pairs': len(pairs),
+                'max_px': max(res), 'mean_px': sum(res) / n,
+                'outliers': [p[0] for p in pairs
+                             if abs(m * p[2][i] + c - p[1][i]) > 12]}
+
+    fx, fy = solve('x'), solve('y')
+    return {'ok': bool(fx and fy), 'x': fx, 'y': fy, 'pairs': len(pairs),
+            'pair_names': sorted(p[0] for p in pairs)}
 
 
 def dump_table(elf, mem, table_sym, obj_size, kind, size_sym=None):
@@ -210,16 +336,20 @@ def main(argv=None):
         'matrix': {'first_byte': MATRIX_FIRST_BYTE, 'count': MATRIX_SWITCHES},
         'switches': switches,
     }
-    for sym, osize, kind in (('hook_coil_override_table', COIL_SIZE, 'coil'),
-                             ('hook_lamp_table', LAMP_SIZE, 'lamp')):
-        if sym in elf.syms:
-            try:
-                out[kind + 's'] = dump_table(
-                    elf, mem, sym, osize, kind,
-                    size_sym='hook_lamp_table_size' if kind == 'lamp' else None)
-            except Exception as exc:                            # noqa: BLE001
-                out[kind + 's'] = []
-                out[kind + 's_error'] = str(exc)
+    if 'hook_coil_override_table' in elf.syms:
+        try:
+            out['coils'] = dump_table(elf, mem, 'hook_coil_override_table',
+                                      COIL_SIZE, 'coil')
+        except Exception as exc:                                # noqa: BLE001
+            out['coils'], out['coils_error'] = [], str(exc)
+
+    if 'hook_lamp_table' in elf.syms:
+        try:
+            out['lamps'] = dump_lamps(elf, mem)
+        except Exception as exc:                                # noqa: BLE001
+            out['lamps'], out['lamps_error'] = [], str(exc)
+
+    out['calibration'] = calibrate(switches, out.get('lamps', []))
 
     checked, bad = verify_matrix(switches)
     out['matrix']['verified'] = checked
@@ -236,7 +366,19 @@ def main(argv=None):
         print(f"playfield: {pf['width']} x {pf['height']} inches")
         for k in ('coils', 'lamps'):
             if k in out:
-                print(f"{k}: {len(out[k])}")
+                extra = ''
+                if k == 'lamps':
+                    extra = f", {sum(1 for l in out[k] if l['placed'])} placed"
+                print(f"{k}: {len(out[k])}{extra}")
+        cal = out['calibration']
+        if cal.get('ok'):
+            for ax in ('x', 'y'):
+                f = cal[ax]
+                print(f"calib {ax}: px = {f['scale']:.3f}*in + {f['offset']:.2f}  "
+                      f"inliers {f['inliers']}/{f['pairs']}  mean {f['mean_px']:.1f}px"
+                      + (f"  outliers {f['outliers']}" if f['outliers'] else ''))
+        else:
+            print("calibration FAILED:", cal.get('why', ''))
         print(f"matrix rule checked on {checked} switch_NNN symbols, "
               f"{len(bad)} mismatches")
         for m in bad[:10]:

@@ -89,6 +89,7 @@ wsl -u root -- bash tools/jjp_emu/build.sh          # the hardware shim
 wsl -u root -- env JJP_DISPLAY=:1 JJP_SHIM=1 bash tools/jjp_emu/run_game.sh --detach
 wsl -u root -- python3 tools/jjp_emu/swdump.py --out /var/tmp/devices.json
 wsl -e python3 tools/jjp_emu/jjpsw.py --devices /var/tmp/devices.json                                       --pf tools/jjp_emu/wonka_pf_image.png
+# jjpsw.py shows switches AND LEDs on the playfield, plus the raw matrix grid
 wsl -e     bash tools/jjp_emu/status.sh         # key=value, for the GUI
 wsl -u root -- bash tools/jjp_emu/killgame.sh   # stop, and PROVE it stopped
 wsl -u root -- bash tools/jjp_emu/unjail.sh     # tear the jail down
@@ -154,6 +155,24 @@ exact list of everything a run touched.
   threads, ~420% CPU, and a captured frame showing live attract mode.
   `grab.sh` reproduces the capture.
 
+## Two coordinate spaces, and the calibration between them
+
+**Switches are in playfield-image PIXELS. Lamps are in INCHES.** Mixing them
+silently piles every lamp into the top-left corner, and nothing in the game
+states the relationship. `swdump.py` solves it from devices that share an
+*exact* name suffix (`switch_jet_left` / `lp_jet_left`), which is the only
+evidence that two devices sit at the same physical spot:
+
+    x: px = 17.057 * in + 16.58   (8/8 pairs, mean error 2.7 px)
+    y: px = 18.880 * in - 40.37   (7/8 pairs, mean error 3.7 px)
+
+Matching on keyword *overlap* was tried first and is a trap - it paired
+`switch_spinner` with `lp_factory_tour_1` and produced a 51 px mean error. The
+fit is RANSAC'd and reports its own inliers, outliers and residuals on every
+dump, so a bad calibration announces itself instead of quietly skewing the
+markers. Note the two axes have different scales (17.06 vs 18.88 px/inch): the
+photograph is not a uniform scaling of the playfield body.
+
 ## What is open
 
 1. **Still software rendering.** `display.sh` fixed the resolution (1360x768,
@@ -162,7 +181,17 @@ exact list of everything a run touched.
 2. **Second display not wired up.** Wonka is a two-display title; `display.sh
    --dual` offers the 800x480 "Wonkavision" apron as a second Xinerama screen
    but the game has not been verified to open a window on it.
-4. **The game does not open the boards during attract.** Measured: four
+4. **LED live state is unavailable, and the UI says so.** The 216 lamps and
+   their positions are real and verified, but the game has never written the
+   LED board under the rig, so there is no live colour to show. `jjpsw.py`
+   displays lamps as LAYOUT ONLY with an explicit warning whenever the LED
+   write counter is zero - an unlit panel must never be mistaken for "all
+   lamps off". The index-to-frame-byte mapping used when traffic *does* appear
+   is PROVISIONAL and labelled as such in the code; unlike the switch matrix,
+   it has not been verified against real traffic. Animation state is also not
+   in the `Lamp` objects: sampled over 3 s of attract, neither the objects nor
+   their heap blocks changed a byte.
+5. **The game does not open the boards during attract.** Measured: four
    minutes with the shim tracing, `board_opens=0`, `dev_probes=0` — it never
    touches a `/dev` path at all. This is NOT a shim failure. The shim is
    proven by self-test, and `open`/`read`/`write`/`close`/`ioctl`/`access` are

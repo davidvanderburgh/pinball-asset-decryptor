@@ -10,7 +10,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from . import config
+from . import config, ecoredata
 from .resources import DECRYPT_C_SOURCE, ENCRYPT_C_SOURCE, STUB_C_SOURCE
 from .executor import (CommandError, create_executor, find_usbipd,
                        _decode_output as _exec_decode_output,
@@ -1491,6 +1491,32 @@ GAME_NAME = "{game_name}"
 EXTRACT_GRAPHICS = {extract_graphics}
 EXTRACT_SOUNDS = {extract_sounds}
 
+# The engine's shared trees, which no game's fl.dat lists and which the
+# original pipeline never decrypted — they shipped into system/ as ciphertext
+# that reads as a corrupt file rather than as an encrypted one.  They are
+# keyed exactly like game assets (scheme 3 routes them to CORE_KEY), so only
+# the walk and the output mapping are new.  Each lands under its own tree name
+# so an engine asset can never collide with, or be mistaken for, a game one.
+ECORE_DIRS = {ecore_dirs}
+SHARED_PREFIXES = {shared_prefixes}
+
+
+def _is_shared(crypto_path):
+    """True for an engine asset from one of the shared trees."""
+    return any(crypto_path.startswith(s) for s in SHARED_PREFIXES)
+
+
+def _out_rel(crypto_path):
+    """Map an absolute in-image path to its path inside the extract."""
+    for shared in SHARED_PREFIXES:
+        if crypto_path.startswith(shared):
+            # "/jjpe/gen1/ecoredata/sound/x.wav" -> "ecoredata/sound/x.wav",
+            # i.e. the tree name is kept so Write can map it straight back.
+            return shared[len("/jjpe/gen1/"):] + crypto_path[len(shared):]
+    if PREFIX and crypto_path.startswith(PREFIX):
+        return crypto_path[len(PREFIX):]
+    return crypto_path
+
 # Assigned in main() before the decrypt pool is created; forked workers
 # inherit it.
 PREFIX = ""
@@ -1556,13 +1582,17 @@ def _decrypt_one(task):
                                       GAME_NAME)
         else:
             content = decrypt_file(enc_data, filler_size, crypto_path)
-        rel = (crypto_path[len(PREFIX):]
-               if PREFIX and crypto_path.startswith(PREFIX) else crypto_path)
+        rel = _out_rel(crypto_path)
         out_path = OUT_DIR + "/" + rel
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(out_path, "wb") as f:
             f.write(content)
-        crc = crc32_buf(content) if not HAS_FL_DAT else 0
+        # Shared engine assets are in no fl.dat, so their decrypted CRC has to
+        # be computed here even in dongle mode — Write forges against it, and
+        # a zero here would re-encrypt every replacement to a checksum the
+        # machine rejects.
+        crc = (crc32_buf(content)
+               if (not HAS_FL_DAT or _is_shared(crypto_path)) else 0)
         return ("ok", crypto_path, crc, hashlib.md5(content).hexdigest())
     except Exception as ex:
         return ("fail", crypto_path + ": " + str(ex), 0, "")
@@ -1571,9 +1601,30 @@ def _decrypt_one(task):
 def main():
     global PREFIX, SCHEME_BY_PATH
 
+    def _walk_tree(root):
+        """(full_path, crypto_path) for every file under one encrypted tree."""
+        tree_prefix = root[len(MP):]
+        if not tree_prefix.endswith("/"):
+            tree_prefix += "/"
+        found = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            for fname in filenames:
+                full = os.path.join(dirpath, fname)
+                rel = os.path.relpath(full, root).replace(os.sep, "/")
+                found.append((full, tree_prefix + rel))
+        return found
+
+    # The shared engine trees are in no game's fl.dat, so they are scanned off
+    # the image in BOTH modes rather than read from the file list.
+    shared_files = []
+    for ecore_root in ECORE_DIRS:
+        if os.path.isdir(ecore_root):
+            shared_files.extend(_walk_tree(ecore_root))
+
     if HAS_FL_DAT:
         entries = parse_fl_dat(read_filelist_text("/tmp/fl_decrypted.dat"))
         PREFIX = detect_edata_prefix(entries)
+        all_files = []
     else:
         # Scan filesystem to build file list (dongle-free)
         print("Scanning edata directory...", flush=True)
@@ -1582,18 +1633,27 @@ def main():
         if not path_prefix.endswith("/"):
             path_prefix += "/"
 
-        all_files = []
-        for dirpath, dirnames, filenames in os.walk(edata_root):
-            for fname in filenames:
-                full = os.path.join(dirpath, fname)
-                rel = os.path.relpath(full, edata_root)
-                all_files.append((full, path_prefix + rel))
+        all_files = _walk_tree(edata_root)
+        # Take the prefix from the edata root itself.  Deriving it from the
+        # scanned entries would break the moment a shared-tree file sorted
+        # first, because "/jjpe/gen1/ecoredata/" holds no "/edata/" segment
+        # and the lookup would come back empty for every game asset.
+        PREFIX = path_prefix
+        entries = []
 
+    if shared_files:
+        print("Shared engine trees: {{}} file(s)".format(len(shared_files)),
+              flush=True)
+    all_files = all_files + shared_files
+
+    if not HAS_FL_DAT or shared_files:
         print("TOTAL_FILES={{}}".format(len(all_files)), flush=True)
         print("Detecting filler sizes ({{}} workers)...".format(N_WORKERS),
               flush=True)
 
-        entries = []
+        # Append rather than assign: in fl.dat mode ``entries`` already holds
+        # the game's assets, and replacing the list here would drop every one
+        # of them and extract nothing but the engine trees.
         scanned = 0
         total_scan = len(all_files)
         with _MP_CTX.Pool(N_WORKERS) as pool:
@@ -1610,7 +1670,10 @@ def main():
                     print("  Scanned {{}}/{{}}".format(scanned, total_scan),
                           flush=True)
 
-        PREFIX = detect_edata_prefix(entries)
+        # PREFIX is deliberately NOT recomputed from ``entries`` here: the list
+        # now mixes both roots, and a shared-tree path holds no "/edata/"
+        # segment, so re-deriving it would blank the prefix and send every
+        # game asset to the wrong place.
         print("Scan complete: {{}} files found".format(len(entries)),
               flush=True)
         if SCHEME_BY_PATH:
@@ -1621,8 +1684,15 @@ def main():
     # Filter entries by selected categories
     if not EXTRACT_GRAPHICS or not EXTRACT_SOUNDS:
         def _keep(e):
-            rel = (e.path[len(PREFIX):]
-                   if PREFIX and e.path.startswith(PREFIX) else e.path)
+            rel = _out_rel(e.path)
+            # Shared engine assets sit one level deeper ("ecoredata/sound/"),
+            # so match on the category segment rather than the string start —
+            # otherwise the tick-boxes silently stop filtering them.
+            for shared in SHARED_PREFIXES:
+                tree = shared[len("/jjpe/gen1/"):]
+                if rel.startswith(tree):
+                    rel = rel[len(tree):]
+                    break
             if rel.startswith("graphics/"):
                 return EXTRACT_GRAPHICS
             if rel.startswith("sound/"):
@@ -1684,13 +1754,18 @@ def main():
     print("Wrote edata checksums: {{}} entries".format(len(ck_lines)),
           flush=True)
 
-    # Save generated fl_decrypted.dat if we scanned
-    if not HAS_FL_DAT and crc_by_path:
+    # Save generated fl_decrypted.dat if we scanned.  Also save it when the
+    # shared engine trees contributed entries: the cached fl.dat copied in
+    # from a dongle extract cannot list them, and without them here Write
+    # would report every engine asset as "not found in fl.dat".
+    if crc_by_path and (not HAS_FL_DAT or shared_files):
         computed_entries = [
             FileEntry(path=e.path, filler_size=e.filler_size,
                       crc_encrypted=e.crc_encrypted,
-                      crc_decrypted=crc_by_path[e.path])
-            for e in entries if e.path in crc_by_path
+                      crc_decrypted=crc_by_path.get(e.path)
+                      or e.crc_decrypted)
+            for e in entries
+            if e.path in crc_by_path or e.crc_decrypted
         ]
         fl_out = OUT_DIR + "/fl_decrypted.dat"
         write_filelist(computed_entries, fl_out)
@@ -5391,12 +5466,18 @@ class StandaloneDecryptPipeline(DecryptionPipeline):
         # Build the decrypt script — writes directly to Windows output folder
         game_name = self.game_name or ""
         edata_dir = f"{mp}{config.GAME_BASE_PATH}/{game_name}/edata"
+        ecore_dirs = [f"{mp}{config.GAME_BASE_PATH}/{t}"
+                      for t in ecoredata.SHARED_TREES]
+        shared_prefixes = [ecoredata.GEN1_PREFIX + t + "/"
+                           for t in ecoredata.SHARED_TREES]
 
         script = _DECRYPT_SCRIPT.format(
             has_fl_dat="True" if has_fl_dat else "False",
             mp=mp,
             out_dir=wsl_out,
             edata_dir=edata_dir,
+            ecore_dirs=repr(ecore_dirs),
+            shared_prefixes=repr(shared_prefixes),
             game_name=game_name,
             extract_graphics="True" if self.extract_graphics else "False",
             extract_sounds="True" if self.extract_sounds else "False",
@@ -5527,7 +5608,14 @@ class StandaloneDecryptPipeline(DecryptionPipeline):
             self.log("  Warning: could not list mount root", "info")
 
         # Exclude edata (already decrypted) and Linux virtual/special dirs
-        # that can't be copied to NTFS
+        # that can't be copied to NTFS.
+        #
+        # The shared engine trees are deliberately NOT excluded even though
+        # they are decrypted into ecoredata/ now: system/ stays a faithful
+        # byte-for-byte mirror of the machine, and only part of those trees is
+        # encrypted (POTC ships miscfiles as ordinary PDFs).  Dropping them
+        # here would delete the plaintext members outright, because the
+        # decrypt scan keeps only files whose filler size it can detect.
         excludes = [edata_rel, "proc", "sys", "dev", "run", "tmp",
                     "lost+found"]
 
@@ -6714,7 +6802,7 @@ class StandaloneModPipeline(ModPipeline):
             self._check_cancel()
 
             # Find fl.dat entry
-            full_path = f"{edata_prefix}{rel_path}"
+            full_path = ecoredata.image_path_for_rel(rel_path, edata_prefix)
             entry = entry_map.get(full_path)
             if not entry:
                 self.log(f"[FAIL] {rel_path} (not found in fl.dat)", "error")
@@ -7058,7 +7146,7 @@ class StandaloneModPipeline(ModPipeline):
         entries = parse_fl_dat(_fl_text(self.fl_dat_path))
         edata_prefix = detect_edata_prefix(entries)
         entry_map = {e.path: e for e in entries}
-        full_path = f"{edata_prefix}{rel_path}"
+        full_path = ecoredata.image_path_for_rel(rel_path, edata_prefix)
         entry = entry_map.get(full_path)
 
         expected = getattr(self, '_expected_spot', None)
@@ -9627,7 +9715,7 @@ class DirectSSDModPipeline(StandaloneModPipeline):
             for i, (rel_path, win_path) in enumerate(edata_files):
                 self._check_cancel()
 
-                full_path = f"{edata_prefix}{rel_path}"
+                full_path = ecoredata.image_path_for_rel(rel_path, edata_prefix)
                 entry = entry_map.get(full_path)
                 if not entry:
                     self.log(f"[FAIL] {rel_path} (not found in fl.dat)", "error")

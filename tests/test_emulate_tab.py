@@ -744,6 +744,14 @@ def test_docker_state_tells_absent_from_stopped(monkeypatch):
     # anything, which is the point of that one.
     monkeypatch.setattr(emulate_tab, "docker_cli",
                         lambda: "/usr/local/bin/docker")
+    # AND THE ENGINE IS FOUND, because on darwin a failing `docker info` is
+    # only "stopped" when there is something behind the client to have
+    # stopped - the engineless split below is what this same call answers
+    # otherwise, and it has its own test.  Unpinned, this read "engineless"
+    # on the macOS CI runner, which ships neither an engine nor colima.
+    monkeypatch.setattr(emulate_tab, "docker_engine",
+                        lambda: ("Docker Desktop", "app",
+                                 "/Applications/Docker.app"))
     monkeypatch.setattr(emulate_tab.subprocess, "run", _fake_run(rc=0))
     assert emulate_tab.docker_state() == "ok"
     monkeypatch.setattr(emulate_tab.subprocess, "run", _fake_run(rc=1))
@@ -881,6 +889,11 @@ def test_a_slow_docker_is_starting_not_missing(monkeypatch):
     reporting that as "not installed" would send the user to reinstall
     something they already have."""
     import subprocess as sp
+    # The client has to be found for the probe to run at all - without this
+    # the answer is "absent" before subprocess is reached, which is what the
+    # macOS CI runner (no docker installed) actually returned.
+    monkeypatch.setattr(emulate_tab, "docker_cli",
+                        lambda: "/usr/local/bin/docker")
     monkeypatch.setattr(emulate_tab.subprocess, "run",
                         _fake_run(raises=sp.TimeoutExpired("docker", 12)))
     assert emulate_tab.docker_state() == "stopped"
@@ -912,11 +925,25 @@ def _quiesce(panel):
     panel._docker_result = None
 
 
-def test_a_ready_docker_leaves_no_notice_behind(tmp_path):
+def _bare_mac(monkeypatch):
+    """A Mac with no package manager at all, so “Set up emulator…” has nothing
+    to install and the Docker button is the one that packs.
+
+    Pinned rather than assumed: every macOS CI runner ships Homebrew, so
+    engine_setup_plan() answers there and the two buttons swap places.  Which
+    button appears for which machine is its own test below; these are about
+    the notice packing and unpacking at all."""
+    monkeypatch.setattr(emulate_tab, "homebrew", lambda: None)
+    monkeypatch.setattr(emulate_tab, "which_tool",
+                        lambda name, dirs=None: None)
+
+
+def test_a_ready_docker_leaves_no_notice_behind(tmp_path, monkeypatch):
     """The button and the message pack themselves only when there is something
     to say.  A Mac with Docker running should look like every other machine."""
     root, panel = _panel(tmp_path)
     _quiesce(panel)
+    _bare_mac(monkeypatch)
     try:
         panel._docker_apply("absent")
         root.update()

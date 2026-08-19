@@ -156,27 +156,79 @@ These have each been violated at least once and each cost a run or a window:
       bit=0x16 kind=7, `WING LEFT 5-B` at slot=8 bit=0x2f **kind=4** — the
       kind field alone separates switches from LEDs, cleanly, on real names.
       (d) The literal value `0x5d096c` appears at exactly two `.data` file
-      offsets (VA 0x599f0c and VA 0x5a6034) — one of these is almost
-      certainly the GOT-style pointer slot `swelf.py`'s `ROOTS` wants as
-      `dev_root` (recall `rows()` does `dev = e.u32(dev_root)`, i.e. the
-      root is the ADDRESS OF A POINTER, not the array itself) — NOT yet
-      disambiguated between the two.
-      **NOT YET FOUND, and it is the whole resume:** the ENTRY table root
-      (44-byte records, `+24` u16 num, `+26` u16 devidx, running right up to
-      `DEV_ROOT` per `swelf.py`'s own note) and the BOARD table root
-      (16-byte records, `+14` u16 node id, indexed by `slot`). Once those
-      three roots are in hand: add `"aerosmith_le": (ENT, DEV, BRD)` to
-      `swelf.py`'s `ROOTS`, run it offline against the mounted card's `game`
-      ELF and confirm the printed table names/slots/nodes make sense (no
-      run needed for that check), THEN one live run to confirm
+      offsets (VA 0x599f0c and VA 0x5a6034) — one of these is the GOT-style
+      pointer slot `swelf.py`'s `ROOTS` wants as `dev_root` (recall `rows()`
+      does `dev = e.u32(dev_root)`, i.e. the root is the ADDRESS OF A
+      POINTER, not the array itself) — still not disambiguated between the
+      two, same open question as before.
+      **★★★ BRD FOUND AND DISAMBIGUATED, same session, continuation after
+      David's "keep going... get the tables on all the games."** Method: (i)
+      dumped every distinct `slot` value actually used across all 313 DEV
+      records — exactly eight: `{0,2,3,4,5,6,7,8}`, slot 0 a one-record dummy
+      (`kind=0`); (ii) `swelf.py`'s BOARD record is 16 bytes with a `u16`
+      node id at `+14`, so scanned the WHOLE `.data` segment for a 16-byte-
+      stride base where slots 2-8 all land on a valid Aerosmith node id
+      (`{0,1,2,4,8,9,10,12}`, from `node_ident.txt`) AND no two slots land on
+      the same node (bijective — a real board table cannot double-book a
+      node). Two candidates survived that filter, 16 bytes apart
+      (0x5cd874 and 0x5cd884). **(iii) THE DISAMBIGUATOR, the same trick that
+      found DEV_ROOT's pointer slot: search the file for a literal reference
+      to each candidate's own address.** `0x5cd874` is referenced NOWHERE in
+      the binary (0 hits) — a coincidental match, not real data.
+      **`0x5cd884` is referenced at exactly two `.data` offsets (VA
+      0x589eb8 and VA 0x596558)** — same shape as `dev_root`'s two-hit
+      pattern. **`BRD_ROOT = 0x5cd884` is therefore confirmed, not guessed**,
+      giving slot→node: `{2:4, 3:0, 4:1, 5:8, 6:9, 7:10, 8:12}` (slot 3→node
+      0 reads as "not a real node-bus board" — node 0 is the CPU/bridge,
+      `node_ident.txt` itself skips it as reserved — which fits: slot 3's 18
+      records are almost all DIP/SERVICE/COIN-DOOR/TILT, the CABINET
+      switches that arrive over SPI, never the node bus, per item 52's own
+      finding on this exact class of switch).
+      **STILL NOT FOUND, and it is now the ONLY gap: the ENTRY table root**
+      (44-byte records, `+24` u16 num, `+26` u16 devidx). Tried twice more
+      this session: (a) a longer-minimum-run version of the original scan
+      (≥40 consecutive valid records) found 9 candidates, but **the same
+      pointer-slot disambiguator that worked twice above found ZERO
+      references to ANY of the 9** — meaning none of them are real, the scan
+      shape itself is probably slightly wrong for this title, not just
+      unlucky; (b) hand-scanned the exact two clusters where DEV's and BRD's
+      OWN pointer slots live (0x589e00-0x58a000, 0x595f00-0x596700) for any
+      third pointer that dereferences to an ENT-shaped run — nothing.
+      **A cheaper path than finding ENT may exist and is worth trying before
+      more address-hunting:** `swtable.py`'s own docstring says the schematic
+      view needs exactly `id, node, bit, name` and `by_name()` joins on NAME
+      alone — `num` is not in that list. Since DEV+BRD already give
+      `(name, node, bit, kind)` for every device with no ENT table at all, a
+      `swelf.py`-style reader could walk DEV directly, keep only `kind==7`,
+      and assign a SYNTHETIC sequential id — skipping the true entry-table
+      "id"/"num" (the technician switch NUMBER David would see on a real
+      TECH ALERTS screen) as a follow-up refinement rather than a blocker.
+      Untested this pass; flagged as the next thing to try, cheaper than a
+      third address hunt.
+      **Once ENT is found OR the synthetic-id path is judged good enough:**
+      add `"aerosmith_le": (ENT_or_None, 0x5d096c, 0x5cd884)` to `swelf.py`'s
+      `ROOTS` (using whichever DEV/BRD dereference — pointer-slot vs
+      direct — the actual read code expects; both slots are known and
+      listed above so this is a two-minute check, not a new hunt), run it
+      offline against the mounted card's `game` ELF and confirm the printed
+      table names/slots/nodes make sense, THEN one live run to confirm
       `switch_list.txt` gets written, the by-shape hunt's `[cabspi]`
       fallback line disappears, and Guided Setup can actually be navigated.
-      **Deliberately NOT attempted this pass, and why:** wiring an unverified
-      `ROOTS` entry in. `swelf.py`'s own docstring is explicit that a wrong
-      table is worse than an empty one ("producing an empty file is
-      recoverable; producing a wrong one sends the next reader somewhere
-      that does not exist") — ENT/BRD are not yet confirmed, so nothing here
-      has been added to the tracked file.
+      **Still deliberately NOT wired into the tracked file this pass** —
+      `swelf.py`'s own docstring is explicit that a wrong table is worse
+      than an empty one, and the exact ENT strategy (real table vs synthetic
+      id) is still an open choice, not a confirmed answer.
+      **★ SAME CLASS OF BUG CONFIRMED ON A THIRD TITLE, live boot-test,
+      `avengers_infinity_le`** (`PAD_CARD=<image> runlim.sh`, 150 s, bounded,
+      self-cleaning, survivors=0): `[swfind] no switch table yet` then
+      `[cabspi] this title has no findable switch table` — the identical
+      signature to Aerosmith's. Static old-struct scan on its ELF had
+      earlier read 0/0 in this pass's first survey, but that was BEFORE the
+      keyword-scoring fix to the table-picker (see the survey note below);
+      it has not yet been re-scanned with the fixed tool. Boot fps was also
+      unusually low (2-6 fps against a normal ~47-60) on an UNCACHED first
+      read straight off D: — worth knowing before reading anything into the
+      slow rate alone next time this title comes up.
       **Device-position table (item 2 above, the 0x30-byte struct):
       untouched this pass** — a second, independent RE job once the switch
       table is fixed; do not assume fixing (1) fixes the artwork/positions.

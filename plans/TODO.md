@@ -86,7 +86,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
       LED and coil matrix and boot to attract, checked one title at a time in
-      ALPHABETICAL ORDER.** `S1 D3` ← WORKING ON, 60%
+      ALPHABETICAL ORDER.** `S1 D3` ← WORKING ON, 92%
       *(Filed 2026-08-18 at David's ask: "i want to work on universal game
       compatibility. every game should be able to load a switch and led and
       coil matrix and boot into attract. let's go alphabetical order." This
@@ -696,6 +696,96 @@ These have each been violated at least once and each cost a run or a window:
       it and the story of what changed and why. Full test suite re-run
       after the `gameinfo.py` fix: clean, 0 failures (see commit for the
       exact count).
+      **★★★★★ MAJOR CORRECTION, same session, minutes later: the audit
+      above's "8 titles broken" verdict was mostly a METHODOLOGY BUG, not a
+      real finding.** The audit script checked the CONSOLE pane for the
+      live switch dump; the shim actually writes it to `gzwatch.log` first,
+      and the console's `tail -F` on that file can start watching AFTER the
+      dump already happened, so the lines exist on disk and never reach
+      console. Caught by re-checking `venom_le` directly against
+      `gzwatch.log`: **107 real switches, standard Stern numbering
+      (LEFT/RIGHT FLIPPER BUTTON 9/10, LEFT/RIGHT SLINGSHOT 7/8, TROUGH
+      1-6), the whole time** — it was never broken. Re-ran every "❌"
+      title from the table against `gzwatch.log` directly (never console)
+      and got the same result for **`turtles_le` (96), `uncanny_xmen_le`
+      (110), `deadpool_le` (104), `godzilla_le` (98), `metallica_spike`
+      (106)** — all working, all with plausible numbering. **Only
+      `sword_of_rage_le` and `munsters_le` are still genuinely broken**,
+      each with an explicit, on-the-record refusal:
+      `[swfind] no switch table yet. Longest run of the right shape: 35/33
+      records ... (node,bit) not distinct`. **This also retires the
+      "7-title 48-byte generation-2 struct" thread as a live-behaviour
+      concern**: `james_bond_le`, `king_kong_le`, `led_zeppelin_le`,
+      `venom_le`, `turtles_le`, `uncanny_xmen_le`, `metallica_spike` all
+      carry that struct AND all work fine live — the struct shape was never
+      the blocker for any of them, `swelf.py`'s static fallback was never
+      needed for any of them, and no more effort should go toward
+      "fixing" it. The struct-shape research itself stays true and stays
+      recorded (it may matter for something else later), but it is no
+      longer on this item's critical path. **`deadpool_pro`'s earlier
+      "confirmed fine, unlike sibling deadpool_le" note is now itself
+      superseded — `deadpool_le` is ALSO fine**; only `dungeons_and_
+      dragons_le` (missing artwork) and the king_kong/metallica position
+      bug remain as real, still-open gaps in that whole cluster.
+      **Net catalogue state after this correction, 30 known card
+      versions: 28 have a confirmed-working switch matrix (live or
+      static), 2 do not** (`sword_of_rage_le`, `munsters_le`). Separately:
+      `dungeons_and_dragons_le`/most of the ❌-artwork titles above
+      genuinely ship no CAD drawing at all (confirmed: no `Test` or
+      `TestMode` folder exists in their assets, not a lookup bug — same
+      class as TMNT's long-known case), and `king_kong_le`/`metallica_
+      spike` have device positions that resolve but land entirely outside
+      their (now-found) artwork, still not root-caused. `README.md`'s
+      table has the corrected, authoritative per-title state; this
+      section is the story of how the audit got it wrong and then right.
+      **Resume, in priority order, superseding the older list above:**
+      (1) `sword_of_rage_le`/`munsters_le`'s `(node,bit) not distinct`
+      refusal — the only two titles left with no switch matrix at all.
+      **`sword_of_rage_le` SOLVED AND SHIPPED same session, minutes after
+      being written down as priority (1):** its DEV record turned out to be
+      a THIRD struct variant — the name pointer sits at the record's OWN
+      start (offset 0), not +12 like the ORIGINAL struct or the 48-byte
+      james_bond_le-class titles. Found by the same "scan a wide offset
+      window for a field that stays small and repeats in blocks" technique
+      already used twice this session, THEN caught a fresh trap: the
+      hit-address scan for this title turns up two ISOLATED matches (1144
+      and 1560 bytes from the real run) before the true, densely-packed
+      array begins - `dev_addr = min(hits)` decoded record 0 plausibly and
+      then garbage from record 1 on, because record 1 under that wrong
+      anchor was 1144 bytes into unrelated memory. `stride_diag.py`'s own
+      delta histogram had the tell the whole time (`delta=24 count=270,
+      delta=1144 count=1, delta=1560 count=1`) - the two outlier deltas
+      ARE the two isolated hits. No ENT-equivalent table could be found
+      despite an exhaustive independent search, but `swtable.py` never
+      actually reads `num` (`for sid, _num, node, bit, name in rows` - the
+      underscore is deliberate), so shipping it as an honest, documented
+      placeholder cost nothing real. Shipped in `swelf.py` as
+      `ROOTS_NONUM`/`_rows_nonum()`, kept fully separate from the existing
+      `ROOTS`/`rows()` path (zero touch to the ten already-shipped
+      titles). Live-verified: 98 switches, clean shutdown, no crash. Full
+      test suite clean both before and after (2785 passed).
+      **`munsters_le` shares the IDENTICAL DEV struct** (verified: decodes
+      just as cleanly at the same offsets) **but its BRD table resisted an
+      exhaustive, properly-validated search** — 16,713 raw slot→node
+      candidates, 789 distinct node-tuples, the best of which are
+      dominated by zero-heavy patterns indistinguishable from
+      uninitialized memory. Ground-truth keyword validation (the technique
+      that cracked every other title) does NOT discriminate here, because
+      the switch NAMES come entirely from DEV, not BRD — every candidate
+      "finds" the same 18 keyword rows regardless of which one is picked,
+      since only the NODE each row reports changes, not the name or bit.
+      Needs either a genuinely different search angle or a live-shim
+      instrument, not another static scan of the same shape. **This is now
+      the LAST title in the whole 26-card catalogue with no switch
+      matrix**, down from a whole bucket believed broken at the start of
+      this session.
+      (2) `king_kong_le`/`metallica_spike`'s device-positions-land-outside-
+      artwork bug — real, confirmed, affects the virtual playfield's
+      picture even though switches/coils/LEDs all work underneath.
+      (3) `dungeons_and_dragons_le` and the other artwork-less titles are
+      NOT bugs to fix — they genuinely ship none, same as TMNT; only worth
+      revisiting if David wants schematic-mode titles to look better, not
+      because anything is broken.
 
 - [ ] **58. A second-display window opens and stays BLACK on titles that
       have no real second physical display.** `S2 D3` — **NO CONFIRMED

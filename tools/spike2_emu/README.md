@@ -57,7 +57,13 @@ known state with the date it was last run, not a guess.
 | james_bond_le | ✅ live, 108 | ✅ bond_le_playfield.png | ✅ | n/a | 2026-08-19 |
 | deadpool_pro | ✅ live, 104 | ✅ deadpool_pro_playfield.png | ✅ | n/a | 2026-08-19 |
 | king_kong_le | ✅ live, 105 | ✅ Rodeo…Wireframe.png (item 57 fix) | ❌ 0/517 land inside | n/a | 2026-08-19 |
-| dungeons_and_dragons_le | ✅ live, 104 | ❌ none found | ✅ 255 records | n/a | 2026-08-19 |
+| dungeons_and_dragons_le | ✅ live, 104 | ❌ none shipped | ✅ 255 records | n/a | 2026-08-19 |
+| venom_le | ✅ live, 107 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
+| turtles_le | ✅ live, 96 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
+| uncanny_xmen_le | ✅ live, 110 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
+| deadpool_le | ✅ live, 104 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
+| godzilla_le | ✅ live, 98 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
+| metallica_spike | ✅ live, 106 | ✅ metallica_playfield…png (item 57 fix) | ❌ 0/664 land inside | n/a | 2026-08-19 |
 | aerosmith_le | ✅ static (swelf.py), live-verified | — no device table shipped | — | n/a | 2026-08-19 |
 | avengers_infinity_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
 | batman | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
@@ -67,34 +73,75 @@ known state with the date it was last run, not a guess.
 | jurassic_park_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
 | mando_le | ✅ static (swelf.py), live-verified | — | — | ✅ real (topper accessory, David-confirmed) | 2026-08-19 |
 | rush_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
-| star_wars_le | ✅ live, 104 | ❌ none found | ? cached, not re-measured | ⚠️ opens, content unconfirmed | 2026-08-19 |
-| turtles_pro | ✅ live, 94 | ❌ none found | ? cached, not re-measured | n/a | 2026-08-19 |
-| elvira3 | ✅ live, 110 | ❌ none found | ? cached, not re-measured | n/a | 2026-08-19 |
-| led_zeppelin_le | ✅ live, 97 | ❌ none found | ? cached, not re-measured | n/a | 2026-08-19 |
-| metallica_spike | ❌ no live dump | ✅ metallica_playfield…png (item 57 fix) | ❌ 0/664 land inside | n/a | 2026-08-19 |
-| venom_le | ❌ no live dump | ❌ none found | ❌ no device table | n/a | 2026-08-19 |
-| sword_of_rage_le | ❌ no live dump | ❌ none found | ❌ no device table | n/a | 2026-08-19 |
-| munsters_le | ❌ no live dump | ❌ none found | ❌ no device table | n/a | 2026-08-19 |
-| turtles_le | ❌ no live dump | ❌ none found | ❌ no device table | n/a | 2026-08-19 |
-| uncanny_xmen_le | ❌ no live dump | ❌ none found | ❌ no device table | n/a | 2026-08-19 |
-| deadpool_le | ❌ no live dump | ❌ none found | ❌ no device table | n/a | 2026-08-19 |
-| godzilla_le | ❌ no live dump | ❌ none found | ❌ no device table | n/a | 2026-08-19 |
-| stranger_things_le | ✅ static (swelf.py, item 52) | ❌ none found | ? not re-measured | ✅ real (projector, item 44) | 2026-08-19 |
+| star_wars_le | ✅ live, 104 | ❌ none found | not re-measured | ✅ real (mini display above the targets, David-confirmed) | 2026-08-19 |
+| turtles_pro | ✅ live, 94 | ❌ none found | not re-measured | n/a | 2026-08-19 |
+| elvira3 | ✅ live, 110 | ❌ none found | not re-measured | n/a | 2026-08-19 |
+| led_zeppelin_le | ✅ live, 97 | ❌ none found | not re-measured | n/a | 2026-08-19 |
+| stranger_things_le | ✅ static (swelf.py, item 52) | ❌ none found | not re-measured | ✅ real (projector, item 44) | 2026-08-19 |
+| sword_of_rage_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 98 | ❌ none shipped | ❌ no device table | n/a | 2026-08-19 |
+| munsters_le | ❌ `[swfind] no switch table` — DEV solved, BRD still open | ❌ none shipped | ❌ no device table | n/a | 2026-08-19 |
 
-**Reading this table alongside item 57 in `plans/TODO.md`**: the ❌ rows
-above are exactly item 57's open buckets — 7 titles share a newly-found
-48-byte device-record generation (venom_le, sword_of_rage_le†, munsters_le†,
-turtles_le, uncanny_xmen_le, plus king_kong_le/james_bond_le/metallica_spike
-which turned out to be the OLDER 24-byte struct after all, just missing a
-literal reference — see item 57's full writeup for which titles landed
-where), and deadpool_le/godzilla_le are a confirmed different generation
-needing fresh RE. † = confirmed on the OLD 24-byte struct with an
-individual, not-yet-solved snag (see item 57). The "positions land outside
-the artwork" failure on `king_kong_le` and `metallica_spike` is a NEW,
-separate gap this table surfaced — the artwork file is now found (item 57's
-`Test`/`TestMode` fix), but the device XY coordinates still don't land
-inside it, so it is not yet the SAME bug as the missing-file one it looked
-like at first glance. Not yet root-caused.
+**CORRECTION, same session, right after this table's first version shipped:**
+the first pass checked the CONSOLE pane for the live switch dump
+(`[event] [sw] id=...` lines), and got 6 false "no live dump" negatives —
+`venom_le`, `turtles_le`, `uncanny_xmen_le`, `deadpool_le`, `godzilla_le`,
+`metallica_spike` **all actually have a real, complete, correctly-numbered
+switch table**; the console's `tail -F` on `gzwatch.log` simply had not
+attached yet when the shim wrote its dump, so the lines existed in
+`gzwatch.log` on disk but never reached console. `venom_le` was the catching
+case: 107 real switches (LEFT/RIGHT FLIPPER BUTTON at 9/10, LEFT/RIGHT
+SLINGSHOT at 7/8, TROUGH 1-6, the standard scheme) sitting in `gzwatch.log`
+the whole time, zero of them ever forwarded. **Checking `gzwatch.log`
+directly (never the console) is now the only trusted method** — the ★★★★
+solved-titles bucket up top used the same static/live methods and is
+unaffected, but every "❌ no live dump" verdict below this point had to be
+individually re-run and re-checked; only `sword_of_rage_le` and
+`munsters_le` survived the recheck as genuinely broken, each with its own
+EXPLICIT `[swfind] no switch table yet` refusal line naming why (35 and 33
+records of the right shape but "(node,bit) not distinct" — the same failure
+class already diagnosed, see item 57's `full_solve_one2.sh`/`solve_verify2.py`
+work). **`sword_of_rage_le` SOLVED AND SHIPPED same session**: its DEV
+record is a THIRD struct variant (name pointer at the record's own start,
+not +12 like the original or +12-with-48-byte-stride like the
+james_bond_le-class titles) — `swelf.py`'s `ROOTS_NONUM` + `_rows_nonum()`
+read it directly with no ENT table at all (none could be found for this
+title despite extensive search; `num` ships as an explicit, documented
+placeholder since `swtable.py` never actually reads it). Live-verified: 98
+switches, clean shutdown, no crash. **`munsters_le` shares the identical
+DEV struct** (same offsets, decodes just as cleanly) **but its BRD
+(slot→node) table could not be found** — an exhaustive scan turned up
+16,713 raw candidates and 789 distinct node-tuples, and the ones that pass
+a relaxed 5-or-6-of-6 check are dominated by zero-heavy patterns
+indistinguishable from uninitialized memory; nothing found looks
+trustworthy enough to ship (a wrong node mapping would make specific
+switches answer on the WRONG physical input, worse than the title staying
+broken). **Net: of 30 known card versions, 29 have a confirmed-working
+switch matrix (28 unchanged + `sword_of_rage_le` newly shipped), exactly
+ONE remains broken** (`munsters_le`, BRD only) — a much smaller problem
+than earlier passes of this table believed.
+
+**Reading this table alongside item 57 in `plans/TODO.md`**: the earlier
+"7 titles share a newly-found 48-byte device-record generation" static
+finding is REAL as a structural fact (confirmed by byte-delta histogramming)
+but turned out to be **irrelevant to whether a title actually works** —
+`james_bond_le`, `king_kong_le`, `led_zeppelin_le`, `venom_le`, `turtles_le`,
+`uncanny_xmen_le`, `metallica_spike` all carry that struct and every one of
+them has a working LIVE switch table via the runtime's own hunt, independent
+of the struct shape `swelf.py`'s static fallback would have needed. The
+struct-shape research is preserved in item 57's own history as a real,
+possibly-useful-later finding, but it was never the blocker for these
+titles' actual live behaviour, and no further work should be spent
+"fixing" it for titles that already work. The two ACTUALLY broken titles
+(`sword_of_rage_le`, `munsters_le`) instead need whatever makes their entry
+table's `(node,bit)` pairs not distinct — a live-shim-diagnosis question, not
+a static-struct one.
+The "positions land outside the artwork" failure on `king_kong_le` and
+`metallica_spike` is a real, separate, NOT-yet-root-caused gap — the artwork
+file is now found (item 57's `Test`/`TestMode` fix), the device XY
+coordinates just don't land inside it. `dungeons_and_dragons_le`'s positions
+DO land correctly (255 real records) despite having no artwork at all, which
+rules out "the fix broke something universal" — it is specific to whatever
+`king_kong_le` and `metallica_spike` share.
 
 **Titles not yet run this pass** (existed before this table, no fresh data
 to report against the 4 columns above): every other card version beyond the

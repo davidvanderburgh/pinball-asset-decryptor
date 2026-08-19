@@ -105,6 +105,58 @@ ROOTS = {
     "rush_le": (None, 0x5a1880, 0x5a182c),
 }
 
+# title -> (dev array address, brd array address). BOTH are the array's OWN
+# address, not a pointer-slot to dereference (unlike ROOTS above) - neither
+# has ever been found with a literal reference on these two titles, so there
+# is no root variable to point at; the array address itself is trusted the
+# same way ENT's walkback result is, by matching real Stern names at
+# plausible slots rather than by a GOT-style reference.
+#
+# ★ 2026-08-19, sword_of_rage_le/munsters_le: these two fail the RUNTIME's
+# own switch hunt too (`[swfind] no switch table yet ... (node,bit) not
+# distinct`) - the exact failure class item 52 built this whole file for -
+# so they are not a "different generation" the way the 48-byte-stride
+# titles above turned out to be irrelevant noise; they need this file's
+# fallback for real. Their DEV record is NOT the ROOTS-shape struct: the
+# name pointer sits at the record's OWN start (+0), not +12, so `slot`/
+# `bit`/`kind` land at +4/+6/+8 instead of +16/+18/+20. Found by scanning a
+# wide offset window for a field that stayed small and repeated in blocks
+# across many records (the tell that gave away the ORIGINAL struct's kind
+# field too) - see `sor_decode.py`/`stride48_probe.py` in the item 57
+# writeup for the discovery. Validated against real Stern names AND real
+# Stern numbering has NOT been possible: no ENT-equivalent table exists for
+# either title (walkback finds only garbage immediately before DEV; an
+# exhaustive independent stride/shape search across `.data` found several
+# candidate runs, none of which decode to real switch names through the
+# confirmed DEV array). `swtable.py`'s own `read()` never uses `num` for
+# anything (`for sid, _num, node, bit, name in rows` - the leading
+# underscore is Python's "deliberately unused" convention), so ROWS_NONUM
+# below serves the switches with a **placeholder num** rather than either a
+# guessed one (this file's own rule: a wrong number is worse than an
+# honestly missing one) or blocking on a table that plainly is not there.
+#
+# TRAP that cost real time finding this: the array's start is NOT always
+# `min(hits)`. sword_of_rage_le's hit-address scan turns up two ISOLATED
+# matches (1144 and 1560 bytes apart from each other and from the real run)
+# before the true, densely-packed 24-byte-stride array begins - almost
+# certainly one or two devices allocated separately from the main table.
+# Blindly taking the minimum decoded record 0 plausibly ("FLAIL MOTOR OPTO
+# 2") and then garbage from record 1 on, because record 1 under that wrong
+# anchor was 1144 bytes into unrelated memory, not the array's real second
+# entry. The tell was in data already on hand: stride_diag.py's own delta
+# histogram for this title reported "delta=24 count=270, delta=1144
+# count=1, delta=1560 count=1" - the two outlier deltas ARE the two
+# isolated hits, and they should have been read as "skip past these," not
+# shrugged off as noise. The fix: anchor on the first hit that begins an
+# actually-dense run of 24-byte-stride neighbours, not the lowest address.
+ROOTS_NONUM = {
+    "sword_of_rage_le": (0x5de4f4, 0x5db848),
+}
+
+NONUM_DEV_STRIDE = 24
+NONUM_BOARD_STRIDE = 16
+NUM_PLACEHOLDER = 0   # not a real Stern number - see ROOTS_NONUM's docstring
+
 ENTRY_STRIDE = 44
 DEV_STRIDE = 24
 BOARD_STRIDE = 16
@@ -207,6 +259,48 @@ def _ent_by_walkback(e, dev, dev_bound=2048, min_count=16):
     return (va + ENTRY_STRIDE) if n >= min_count else None
 
 
+def _rows_nonum(e, dev, brd, max_dev=400):
+    """ROOTS_NONUM's reader - see its docstring for why this struct and this
+    title bucket exist. No ENT indirection at all: DEV is walked directly by
+    index (there is no separate entry id/num layer to go through), each
+    record's own index doubles as `id`, and `num` is NUM_PLACEHOLDER.
+
+    Bounded by `max_dev` and stopped early the moment a record's `kind`
+    field cannot be read at all (`None`) - that is the array running off
+    the mapped segment, the same end-of-table signal `rows()` gets for free
+    from ENT's span check on the ROOTS path.
+    """
+    slot_node = {}
+    for s in range(16):
+        n = e.u16(brd + NONUM_BOARD_STRIDE * s + 14)
+        if n is None:
+            break
+        slot_node[s] = n
+
+    out = []
+    for i in range(max_dev):
+        base = dev + NONUM_DEV_STRIDE * i
+        kind = e.u16(base + 8)
+        if kind is None:
+            break
+        if kind != KIND_SWITCH:
+            continue
+        slot = e.u16(base + 4)
+        bit = e.u16(base + 6)
+        node = slot_node.get(slot)
+        if node is None or node > 63 or bit is None or bit > 255:
+            continue
+        p1 = e.u32(base)
+        p2 = e.u32(p1) if p1 else None
+        name = e.cstr(p2) if p2 else None
+        out.append((i, NUM_PLACEHOLDER, node, bit, name or "?"))
+
+    named = sum(1 for r in out if r[4] != "?")
+    if len(out) < 16 or named < len(out) // 2:
+        return []
+    return out
+
+
 def rows(elf_path, title):
     """[(id, num, node, bit, name)] - the same tuples swtable.read() returns.
 
@@ -214,12 +308,16 @@ def rows(elf_path, title):
     any structural self-check fails.
     """
     roots = ROOTS.get(title)
-    if not roots:
+    nonum_roots = ROOTS_NONUM.get(title)
+    if not roots and not nonum_roots:
         return []
     try:
         e = Elf(elf_path)
     except (OSError, struct.error):
         return []
+    if nonum_roots:
+        dev_addr, brd_addr = nonum_roots
+        return _rows_nonum(e, dev_addr, brd_addr)
     ent_root, dev_root, brd_root = roots
     dev = e.u32(dev_root)
     brd = e.u32(brd_root)

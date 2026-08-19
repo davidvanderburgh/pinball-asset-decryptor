@@ -620,6 +620,11 @@ class App:
                 "emulator use Docker Desktop "
                 "(install from https://www.docker.com/products/docker-desktop/) "
                 "and gpg/ffmpeg from Homebrew (`brew install gnupg ffmpeg`).\n\n"
+                "For the emulator you do not need to install Docker by hand "
+                "at all: open the Emulate tab and press “Set up emulator…”, "
+                "which installs a container engine with Homebrew or MacPorts "
+                "and starts it. That is also the answer when Docker Desktop "
+                "will not install on your macOS version.\n\n"
                 "Docker is a macOS-only requirement: emulation runs through "
                 "WSL on Windows and natively on Linux.")
             return

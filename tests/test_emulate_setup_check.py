@@ -273,9 +273,28 @@ def test_setup_report_darwin_never_asks_a_mac_about_wsl():
         assert "packages" in lines, lines
     assert "can run the emulator." in " ".join(
         emulate_tab.setup_report_darwin("ok"))
-    for state in ("stopped", "absent", None):
+    for state in ("stopped", "absent", "engineless", None):
         assert "cannot run the emulator yet." in " ".join(
             emulate_tab.setup_report_darwin(state))
+
+
+def test_the_mac_report_says_which_docker_and_where_it_looked():
+    """★ PAD-74.  The bug was a docker in /opt/local/bin that the app could
+    not see, and no line of any report said where it had looked - so the one
+    paste a user is asked for could not settle it either way."""
+    lines = " ".join(emulate_tab.setup_report_darwin(
+        "engineless", "/opt/local/bin/docker", None))
+    assert "/opt/local/bin/docker" in lines, lines
+    assert "none installed" in lines, lines
+    # Nothing found: say where it looked, not just that it failed.
+    lines = " ".join(emulate_tab.setup_report_darwin("absent"))
+    assert "/opt/local/bin" in lines, lines
+    assert "not found on PATH" in lines, lines
+    # And an engine that IS there is named with its path.
+    lines = " ".join(emulate_tab.setup_report_darwin(
+        "stopped", "/opt/local/bin/docker",
+        ("Colima", "cli", "/opt/local/bin/colima")))
+    assert "Colima (/opt/local/bin/colima)" in lines, lines
 
 
 # --------------------------------------------------------------------------

@@ -29,13 +29,43 @@ PORT=${PAD_VNC_PORT:-5900}
 # must match; see _apply() in pinball_decryptor/gui/emulate_tab.py.
 PAD_VNC_PASSWD=${PAD_VNC_PASSWD:-pinball}
 
+# WHERE THE MAC KEEPS ITS TOOLS. This script is normally started BY THE APP,
+# and a GUI app launched from Finder inherits launchd's PATH - /usr/bin:/bin:
+# /usr/sbin:/sbin - which contains no docker, no colima and no ffplay, on a Mac
+# where all three are installed and working. Appended, never prepended: a user
+# who set PATH themselves has already answered this and their answer wins.
+PATH=$PATH:/usr/local/bin:/opt/homebrew/bin:/opt/local/bin
+PATH=$PATH:$HOME/.docker/bin:$HOME/.rd/bin:$HOME/.orbstack/bin
+PATH=$PATH:/Applications/Docker.app/Contents/Resources/bin
+# The app's own override (see docker_cli() in emulate_tab.py), for the Mac that
+# keeps it somewhere none of those name. Its DIRECTORY goes first, so `docker`
+# means the same binary here as it did in the check that let this run start.
+[ -n "${PAD_DOCKER:-}" ] && [ -x "$PAD_DOCKER" ] && \
+    PATH=$(dirname "$PAD_DOCKER"):$PATH
+export PATH
+
 command -v docker >/dev/null 2>&1 || {
     echo "[box] docker is not installed." >&2
-    echo "[box] macOS: install Docker Desktop, or 'brew install --cask docker'." >&2
+    echo "[box] macOS: install Docker Desktop, or 'brew install colima docker'." >&2
     exit 1
 }
 docker info >/dev/null 2>&1 || {
-    echo "[box] docker is installed but not running - start Docker Desktop." >&2
+    # TWO DIFFERENT FAULTS. On macOS `docker` is only a client and the
+    # containers need a Linux machine behind it, so a package manager's docker
+    # on its own lands here with nothing to start - and "start Docker Desktop"
+    # names an app that Mac does not have. See docker_state() in emulate_tab.py.
+    if [ -d /Applications/Docker.app ] || [ -d /Applications/OrbStack.app ] \
+       || [ -d "/Applications/Rancher Desktop.app" ] \
+       || command -v colima >/dev/null 2>&1; then
+        echo "[box] docker is installed but not running - start it and try again." >&2
+    else
+        echo "[box] the docker command is installed, but nothing on this Mac runs" >&2
+        echo "[box] containers. docker is only the client; the containers need a" >&2
+        echo "[box] Linux machine behind it." >&2
+        echo "[box] In the app: Emulate tab -> \"Set up emulator...\", which installs" >&2
+        echo "[box] one and starts it. (From a shell: colima, from Homebrew or" >&2
+        echo "[box] MacPorts, is what that button installs.)" >&2
+    fi
     exit 1
 }
 

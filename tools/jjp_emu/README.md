@@ -83,6 +83,12 @@ wsl -u root -- bash tools/jjp_emu/audio.sh      # ALSA -> PulseAudio -> Windows
 wsl -u root -- bash tools/jjp_emu/display.sh    # resizable window at 1360x768
 wsl -u root -- env JJP_DISPLAY=:1 bash tools/jjp_emu/run_game.sh --detach
 wsl -u root -- env JJP_DISPLAY=:1 bash tools/jjp_emu/grab.sh out.png
+
+# switches
+wsl -u root -- bash tools/jjp_emu/build.sh          # the hardware shim
+wsl -u root -- env JJP_DISPLAY=:1 JJP_SHIM=1 bash tools/jjp_emu/run_game.sh --detach
+wsl -u root -- python3 tools/jjp_emu/swdump.py --out /var/tmp/devices.json
+wsl -e python3 tools/jjp_emu/jjpsw.py --devices /var/tmp/devices.json                                       --pf tools/jjp_emu/wonka_pf_image.png
 wsl -e     bash tools/jjp_emu/status.sh         # key=value, for the GUI
 wsl -u root -- bash tools/jjp_emu/killgame.sh   # stop, and PROVE it stopped
 wsl -u root -- bash tools/jjp_emu/unjail.sh     # tear the jail down
@@ -156,11 +162,16 @@ exact list of everything a run touched.
 2. **Second display not wired up.** Wonka is a two-display title; `display.sh
    --dual` offers the 800x480 "Wonkavision" apron as a second Xinerama screen
    but the game has not been verified to open a window on it.
-3. **No hardware shim yet.** Missing boards are *non-fatal*
-   (`CORE_NFERR_INIT_SWITCH/COIL/LED`), so attract, video and music should be
-   reachable with zero shim. Nothing here fakes `/dev/jjpio100` et al.
-4. **No device X/Y.** JJP ships the playfield photo but no coordinate table;
-   see `plans/jjp_pc_emulation_plan.md` §5.
+4. **The game does not open the boards during attract.** Measured: four
+   minutes with the shim tracing, `board_opens=0`, `dev_probes=0` — it never
+   touches a `/dev` path at all. This is NOT a shim failure. The shim is
+   proven by self-test, and `open`/`read`/`write`/`close`/`ioctl`/`access` are
+   all IMPORTED symbols in the game's dynsym (211 imported of 18,717), so
+   interposition reaches them. Board init is gated behind something not yet
+   found — a setting, or a state the game only enters on leaving attract. The
+   service menu's switch test (`DiagDedSwitchTest`) is the obvious next place
+   to look, but reaching it needs cabinet switches, which is circular until
+   the gate is understood.
 
 ## See also
 

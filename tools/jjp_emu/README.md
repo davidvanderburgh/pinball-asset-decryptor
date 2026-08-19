@@ -79,7 +79,10 @@ WSL 2 distribution running". Then:
 ```
 wsl -u root -- bash tools/jjp_emu/jail.sh       # overlay + bind mounts
 wsl -u root -- bash tools/jjp_emu/dongle.sh     # register key, start daemons
-wsl -u root -- bash tools/jjp_emu/run_game.sh --detach
+wsl -u root -- bash tools/jjp_emu/audio.sh      # ALSA -> PulseAudio -> Windows
+wsl -u root -- bash tools/jjp_emu/display.sh    # resizable window at 1360x768
+wsl -u root -- env JJP_DISPLAY=:1 bash tools/jjp_emu/run_game.sh --detach
+wsl -u root -- env JJP_DISPLAY=:1 bash tools/jjp_emu/grab.sh out.png
 wsl -e     bash tools/jjp_emu/status.sh         # key=value, for the GUI
 wsl -u root -- bash tools/jjp_emu/killgame.sh   # stop, and PROVE it stopped
 wsl -u root -- bash tools/jjp_emu/unjail.sh     # tear the jail down
@@ -133,6 +136,13 @@ exact list of everything a run touched.
   `XWAYLAND0` at 3840x2160.
 * `jail.sh` → `dongle.sh` → `run_game.sh --detach` → `status.sh` →
   `killgame.sh` is a verified clean cycle.
+* **Audio works**: `audio.sh` routes ALSA at PulseAudio and the game appears
+  as a live sink-input (`float32le 2ch 44100Hz`) on WSLg's RDP sink.
+  NB a sine test is a known false-negative for the WSLg->Windows hop; judge
+  music by ear, not by a tone.
+* **A resizable window at native resolution**: `display.sh` runs a nested
+  Xephyr at 1360x768, the game fullscreens into it, and CPU falls from ~420%
+  to ~170%.
 * The game **opens its window and renders**: `MAIN (100%) - Willy Wonka & the
   Chocolate Factory`, 32 threads including six busy `llvmpipe` software-raster
   threads, ~420% CPU, and a captured frame showing live attract mode.
@@ -140,17 +150,12 @@ exact list of everything a run touched.
 
 ## What is open
 
-1. **Wrong resolution, so software rendering is expensive.** The window opens
-   at the full **3840x2160** of WSLg's `XWAYLAND0` instead of Wonka's native
-   1360x768, and Mesa falls back to `llvmpipe`, burning ~420% CPU. Wonka is a
-   **two-display** title (1360x768 main + 800x480 "Wonkavision" apron) and
-   `setdisplayconf.sh` cannot configure that on one XWAYLAND0 — it emits
-   `xrandr: unrecognized option '0x0'`. Pin the mode and get hardware GL.
-2. **No sound.** `aplay: no soundcards found`. The PulseAudio socket and the
-   desktop user's cookie are wired into the jail, but the image's
-   `scripts/audio/setup.pl` looks for a literal
-   `pulseaudio --system=yes` process in `ps aux` and for an ALSA usb/pci card,
-   and finds neither under WSLg. Not fatal — the game runs without it.
+1. **Still software rendering.** `display.sh` fixed the resolution (1360x768,
+   CPU 420% -> 170%) but Mesa is still on `llvmpipe` inside the nested server.
+   Hardware GL through WSLg's D3D12 path would be the next win.
+2. **Second display not wired up.** Wonka is a two-display title; `display.sh
+   --dual` offers the 800x480 "Wonkavision" apron as a second Xinerama screen
+   but the game has not been verified to open a window on it.
 3. **No hardware shim yet.** Missing boards are *non-fatal*
    (`CORE_NFERR_INIT_SWITCH/COIL/LED`), so attract, video and music should be
    reachable with zero shim. Nothing here fakes `/dev/jjpio100` et al.

@@ -86,7 +86,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
       LED and coil matrix and boot to attract, checked one title at a time in
-      ALPHABETICAL ORDER.** `S1 D3` ← WORKING ON, 35%
+      ALPHABETICAL ORDER.** `S1 D4` ← WORKING ON, 20%
       *(Filed 2026-08-18 at David's ask: "i want to work on universal game
       compatibility. every game should be able to load a switch and led and
       coil matrix and boot into attract. let's go alphabetical order." This
@@ -193,6 +193,91 @@ These have each been violated at least once and each cost a run or a window:
       matches an existing, validated method (`swelf.py`/item 52); what is
       left is desk address-hunting for two more roots plus one confirming
       run — no new instrument, no unknown structure.
+      **★★ SAME SESSION, David: "keep going, and get the tables on all the
+      games... don't pause for me" — so this pass widened from Aerosmith
+      alone to a full desk-only survey of every card image on `D:\Pinball\
+      images\Stern\spike2\`, one title mounted read-only at a time via
+      `cardmount.sh` (`PAD_CARD_CACHE=0` so a quick look does not trigger a
+      7-15 GB background cache copy per title) then unmounted immediately.
+      No rig lock was taken for this — mounting a DIFFERENT title's card
+      read-only touches neither `~/spike2root` nor David's own live
+      `aerosmith_le` mount, which stayed up and untouched the whole time
+      (confirmed with `alive.sh` before and after). The one attempt to also
+      take the formal rig-lock file for tidiness was refused by the
+      environment's own permission layer (mutating a file this pass did not
+      create) — a reasonable guard, so this pass proceeded on the
+      read-only-instrument exemption instead rather than fight it.
+      **★★ THE MECHANISM FOUND FOR AEROSMITH IS NOT AEROSMITH-SPECIFIC —
+      turtles_pro's ELF carries the IDENTICAL name-table + 24-byte dev-record
+      shape** (same `TROUGH JAM/1..6`, `LEFT/RIGHT SLINGSHOT`, `LEFT/RIGHT
+      FLIPPER BUTTON`, `SLAM TILT`, `DIP 1..8` vocabulary, found the same
+      way). turtles_pro does not currently NEED it — its switch table already
+      works via the runtime by-shape hunt — but it proves the method
+      generalizes across at least two titles from different eras rather
+      than being one binary's accident.
+      **★★★ THE SURVEY, one line per title, static desk analysis only (no
+      boot, no run) — `new_struct` = `devicexy.py`'s existing 0x30-byte
+      parser, `old_struct` = this pass's 24-byte name-table cross-reference,
+      both counting records found directly from the ELF:**
+      - **Fully working already** (both tables built by a prior run, on
+        record in `~/spike2root/dump/tables/`): **godzilla_pro** (switch 87,
+        device_xy 575, led_io 128), **jaws_le** (108/439/73), **john_wick_le**
+        (105/503/63), **james_bond_60th_le** (117/513/29).
+      - **Switch table works, device-position table empty** (playable
+        today, just no LED/coil/switch artwork positions on the virtual
+        playfield) — confirmed on record: **star_wars_le**, **stranger_
+        things_le** (swelf.py, item 52), **turtles_pro**, **led_zeppelin_le**,
+        and **elvira3** partially (109 switches, 275 device positions, 0
+        led_io). None of these matched EITHER static struct in this pass's
+        survey for their MISSING half, so the device-position gap on these
+        five is a **fourth, still-unidentified structure** — not the same
+        fix as Aerosmith's.
+      - **Switch table itself broken, mechanism now known, 2 of 3 roots
+        found:** **aerosmith_le** (this item's main finding, above).
+      - **Complete unknowns — neither static struct found anything, runtime
+        (boot) status not tested this pass:** avengers_infinity_le, batman,
+        deadpool_le, deadpool_pro, dungeons_and_dragons_le, foo_fighters_le,
+        **godzilla_le** (NOT the same binary as godzilla_pro — do not assume
+        the Pro fix carries over), guardians_le, iron_maiden_le, **james_
+        bond_le** (NOT james_bond_60th_le, which already works), jurassic_
+        park_le, king_kong_le, mando_le, metallica_spike, munsters_le,
+        rush_le, sword_of_rage_le, **turtles_le** (NOT turtles_pro),
+        uncanny_xmen_le, venom_le. **This is the largest bucket by far** —
+        roughly 20 of 26 distinct titles. A "0/0" here means only that this
+        pass's two known shapes do not fit; it is NOT evidence the title is
+        broken to play — most of these have never been booted under this
+        rig at all, so their true switch-table status is simply unmeasured.
+      **What this means for the initiative, stated plainly so nobody
+      re-derives it:** "get the tables on all the games" is not a bug to
+      close, it is a SURVEY-THEN-FIX sweep across what looks like at least
+      three or four distinct binary/engine generations, each needing its own
+      structural RE the way Aerosmith's did — exactly what this item's
+      opening note already expected ("expect it to spawn per-title
+      sub-items"). One pass, alone, static-only, covered the survey
+      (cheap, bounded, done) and one full title's mechanism (expensive,
+      partial). Finishing every title is realistically several more passes.
+      **Resume, in priority order:**
+      (1) Finish Aerosmith: find `swelf.py`'s `ENT` and `BRD` roots (this
+      item's earlier section has the method and the two dead-end attempts
+      already tried, so as not to redo them), wire `"aerosmith_le"` into
+      `ROOTS`, verify offline, then one live run.
+      (2) Boot-test a handful of the "complete unknown" titles (a real run,
+      needs the rig) to learn which of them are ALREADY playable today
+      despite the static survey finding nothing — for a title whose switch
+      table already works via the runtime hunt, this whole item may be a
+      no-op, same as turtles_pro/star_wars_le/stranger_things_le turned out
+      to be for their switch half.
+      (3) For titles confirmed genuinely broken by a boot test, RE their
+      actual struct the way this pass did Aerosmith's — budget one title
+      per pass unless a shared shape is found again.
+      (4) The "device-position table" gap on the five already-playable
+      titles (star_wars_le, stranger_things_le, turtles_pro, led_zeppelin_le,
+      elvira3) is real but lower severity (S2/S3, cosmetic) — do not let it
+      block on the S1 "can it even play" question above.
+      **If David wants this to go faster than one title per pass, a
+      multi-agent workflow (fan out one RE agent per unknown title, converge
+      on a shared struct catalogue) fits this shape well — but that needs his
+      explicit opt-in and was not started here.**
 
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every

@@ -3,8 +3,9 @@
 Runs a Jersey Jack game on this PC, the way `tools/spike2_emu` runs a Stern
 Spike 2 game. Development title: **Willy Wonka v03.03**.
 
-Status as of **2026-08-19**: the game **boots and runs** — stable, ~1.2 GB
-resident, three processes, indefinitely. It does **not** yet open a window.
+Status as of **2026-08-19**: the game **boots, runs and draws**. It reaches
+**attract mode** — verified by capturing its own window and reading the frame
+(Wonkavator Multiball, 3D model over an animated sky, 98% of the frame lit).
 See *What is proven* and *What is open* below; do not trust anything here that
 is not in one of those two lists.
 
@@ -132,24 +133,28 @@ exact list of everything a run touched.
   `XWAYLAND0` at 3840x2160.
 * `jail.sh` → `dongle.sh` → `run_game.sh --detach` → `status.sh` →
   `killgame.sh` is a verified clean cycle.
+* The game **opens its window and renders**: `MAIN (100%) - Willy Wonka & the
+  Chocolate Factory`, 32 threads including six busy `llvmpipe` software-raster
+  threads, ~420% CPU, and a captured frame showing live attract mode.
+  `grab.sh` reproduces the capture.
 
 ## What is open
 
-1. **No window appears.** The game runs but creates no X window — the only
-   children of the X root are Weston's own. Two visible causes, untested:
-   * `setdisplayconf.sh` builds an `xrandr` command from display *names* it
-     probes for, finds none on WSLg, and emits
-     `xrandr: unrecognized option '0x0'`. Wonka is a **two-display** title
-     (1360x768 main + 800x480 "Wonkavision" apron) and there is one XWAYLAND0.
-   * `aplay: no soundcards found`. Audio init is on JJP's **fatal** list
-     (`CORE_FERR_*`), so this may be aborting startup before the display opens.
-     PulseAudio is now wired in (socket + cookie) but the image's
-     `scripts/audio/setup.pl` still probes for an ALSA usb/pci card and fails.
-   Resolve audio first — it is the cheaper of the two and it is fatal.
-2. **No hardware shim yet.** Missing boards are *non-fatal*
+1. **Wrong resolution, so software rendering is expensive.** The window opens
+   at the full **3840x2160** of WSLg's `XWAYLAND0` instead of Wonka's native
+   1360x768, and Mesa falls back to `llvmpipe`, burning ~420% CPU. Wonka is a
+   **two-display** title (1360x768 main + 800x480 "Wonkavision" apron) and
+   `setdisplayconf.sh` cannot configure that on one XWAYLAND0 — it emits
+   `xrandr: unrecognized option '0x0'`. Pin the mode and get hardware GL.
+2. **No sound.** `aplay: no soundcards found`. The PulseAudio socket and the
+   desktop user's cookie are wired into the jail, but the image's
+   `scripts/audio/setup.pl` looks for a literal
+   `pulseaudio --system=yes` process in `ps aux` and for an ALSA usb/pci card,
+   and finds neither under WSLg. Not fatal — the game runs without it.
+3. **No hardware shim yet.** Missing boards are *non-fatal*
    (`CORE_NFERR_INIT_SWITCH/COIL/LED`), so attract, video and music should be
    reachable with zero shim. Nothing here fakes `/dev/jjpio100` et al.
-3. **No device X/Y.** JJP ships the playfield photo but no coordinate table;
+4. **No device X/Y.** JJP ships the playfield photo but no coordinate table;
    see `plans/jjp_pc_emulation_plan.md` §5.
 
 ## See also

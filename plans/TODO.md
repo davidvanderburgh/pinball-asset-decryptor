@@ -86,7 +86,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
       LED and coil matrix and boot to attract, checked one title at a time in
-      ALPHABETICAL ORDER.** `S1 D4` ← WORKING ON, 20%
+      ALPHABETICAL ORDER.** `S1 D4` ← WORKING ON, 25%
       *(Filed 2026-08-18 at David's ask: "i want to work on universal game
       compatibility. every game should be able to load a switch and led and
       coil matrix and boot into attract. let's go alphabetical order." This
@@ -229,6 +229,73 @@ These have each been violated at least once and each cost a run or a window:
       unusually low (2-6 fps against a normal ~47-60) on an UNCACHED first
       read straight off D: — worth knowing before reading anything into the
       slow rate alone next time this title comes up.
+      **★★★★ BOTH TITLES' SWITCH TABLES ARE SOLVED, SHIPPED IN `swelf.py`,
+      2026-08-19 — ENT included, and it is what was actually missing, not a
+      dead end.** Re-ran the disambiguator on `avengers_infinity_le`'s own
+      ELF using the same pipeline (name table → DEV_ROOT → slot enumeration →
+      BRD_ROOT, all pointer-slot-confirmed) and it reproduced the identical
+      shape: DEV_ROOT=0x657c9c (2 pointer-slot refs), slots
+      `{0,2,3,4,5,6,7}`, BRD_ROOT=0x654b94 disambiguated the same way from a
+      false-positive candidate 16 bytes off — and its slot→node map
+      (`{2:4 QR SCANNER, 3:0 cabinet, 4:1 CABINET, 5:8 LOWER PLAYFIELD, 6:9
+      UPPER PLAYFIELD, 7:12 TOPPER}`) lines up EXACTLY with the real board
+      names `nbdir.py` reads statically off the same ELF (`node=8 name=LOWER
+      PLAYFIELD`, `node=9 name=UPPER PLAYFIELD`, `node=12 name=TOPPER`) — a
+      second, independent confirmation neither Aerosmith cross-check had.
+      **THE ENT MYSTERY BROKE OPEN ON avengers_infinity_le: the entry table
+      has NO independent pointer anywhere in the binary** (both titles'
+      candidate ENT addresses came back with ZERO literal references, over
+      and over, no matter how the search was widened — this was never bad
+      luck, it is how these titles are actually built) **but it still sits
+      immediately before DEV_ROOT in memory, reached only by
+      `dev_addr - 44*count` arithmetic in the compiled code.** Walking
+      backward from `avengers_infinity_le`'s DEV_ROOT at the 44-byte entry
+      stride found 112 consecutive valid-looking records with NO gap, and
+      reading them off produced `DIP 1..8` at `num=1..8`, `SERVICE SELECT/
+      PLUS/MINUS/BACK` at `num=9..12`, `COIN DOOR INTERLOCK` at `num=25`,
+      `LOCKDOWN BUTTON` at `70`, `START BUTTON` at `73`, `TILT PENDULUM` at
+      `81` — the REAL, STANDARD Stern switch-numbering scheme used across
+      machines, not something a coincidental byte pattern could reproduce.
+      Aerosmith's own entry table sits at the same kind of offset from its
+      DEV_ROOT and decodes with the identical real-world numbering.
+      **Shipped:** `swelf.py`'s `rows()` now accepts `None` as a title's
+      entry-root, meaning "derive it" — `_ent_by_walkback()` walks backward
+      from the dereferenced DEV address until a record stops validating,
+      the same backward-scan proven above. `ROOTS` now carries:
+      ```
+      "aerosmith_le": (None, 0x599f0c, 0x599eb8),
+      "avengers_infinity_le": (None, 0x5fcc1c, 0x5fcbc8),
+      ```
+      (dev/board addresses are the POINTER SLOTS, not the arrays — `rows()`
+      dereferences them, matching stranger_things_le's existing convention;
+      each has a second, equally valid pointer-slot address recorded
+      earlier in this item if the one shipped ever needs cross-checking).
+      **Verified, all offline, no run:** `python3 swelf.py <elf> <title>`
+      against both mounted cards' `game` files prints a full, sane
+      `switch_list.txt` — 104 switches for `aerosmith_le` (nodes
+      `[0,1,4,8,9,10]`), 110 for `avengers_infinity_le` (nodes
+      `[0,1,4,8,9]`) — `TROUGH 1..6`, `LEFT/RIGHT FLIPPER BUTTON`, `SLAM
+      TILT`, `LOCKDOWN BUTTON` all landing on physically sensible node/bit
+      pairs. **Regression-checked stranger_things_le through the same
+      changed code path — still 99 switches, byte-identical to before** (its
+      `ent_root` is a real integer, so it never touches the new walkback
+      branch at all). `python -m pytest --collect-only` (2803 tests) and a
+      full suite run both clean after the change (suite result recorded in
+      the closing summary once it finishes).
+      **NOT YET DONE, and it is the actual remaining gap now:** wiring this
+      into a LIVE RUN. `mktables.py` already calls `swelf.rows(elf, game)`
+      as its fallback (no new plumbing needed there — this was the whole
+      point of item 52 building that seam), but it resolves the ELF from
+      `~/spike2root/games/<title>/game`, which is empty for both these
+      titles in THIS session (their card was only ever fuse2fs-mounted for
+      static reading, never run through the normal `watch.sh`/`PAD_CARD`
+      extraction flow that populates that directory, and that directory is
+      root-owned from David's own `PAD_PIVOT` session so this pass could not
+      symlink into it either). **Acceptance still needs: one live run of
+      each title, confirming `switch_list.txt` gets written for real, the
+      `[cabspi]` no-table fallback disappears from the log, and — the actual
+      point of all of this — that Guided Setup can be navigated with a
+      keyboard because switches now resolve.**
       **Device-position table (item 2 above, the 0x30-byte struct):
       untouched this pass** — a second, independent RE job once the switch
       table is fixed; do not assume fixing (1) fixes the artwork/positions.

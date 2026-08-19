@@ -44,6 +44,25 @@ title's pointers. Everything below also self-checks - the slot must resolve to a
 node, the kind must say switch, the name must decode - and rows() returns [] the
 moment the shape disagrees. Producing an empty file is recoverable; producing a
 wrong one sends the next reader somewhere that does not exist.
+
+★ 2026-08-19, aerosmith_le/avengers_infinity_le: SAME THREE STRUCTS, but ENT
+has no root of its own on these titles - exhaustively checked, zero literal
+references anywhere in the binary to any address that looks like the entry
+table's start, unlike DEV/BRD, which both have one (found the same way: the
+whole .data segment cross-referenced for a literal pointer to the candidate
+array's own address - the identical trick that finds a device's NAME from a
+pointer, run one level up, on the array instead of a string). The table is
+still there, still runs right up to DEV, just reached only via
+`dev - stride*count` arithmetic in the compiled code rather than through a
+second global. `_ent_by_walkback()` derives it by walking backward from the
+(already-dereferenced) DEV address; pass `None` as a title's entry-root in
+ROOTS to use it. Validated against GROUND TRUTH, not just self-consistency:
+avengers_infinity_le's derived table reproduces the real, standard Stern
+switch numbers at their real ids - DIP 1..8 at num=1..8, SERVICE SELECT/PLUS/
+MINUS/BACK at 9-12, COIN DOOR INTERLOCK at 25, LOCKDOWN BUTTON at 70, START
+BUTTON at 73, TILT PENDULUM at 81 - the exact numbering scheme real Stern
+manuals use across machines. No coincidental byte pattern reproduces a whole
+manual's numbering by accident.
 """
 import os
 import struct
@@ -51,9 +70,18 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# title -> (entry-array root, device-table root, board-table root)
+# title -> (entry-array root, device-table root, board-table root).
+# entry-array root is None where the title has no independent pointer to it -
+# see _ent_by_walkback(). dev/board roots below are POINTER SLOTS (each has
+# TWO in the binary that hold the same value; either works, one was picked),
+# found by cross-referencing the whole .data segment for a literal reference
+# to the array address itself - the same trick that finds a switch/LED name
+# by its address, run one level up. Method and verification: item 57,
+# 2026-08-18/19 (plans/TODO.md).
 ROOTS = {
     "stranger_things_le": (0x724608, 0x7260b8, 0x725aac),
+    "aerosmith_le": (None, 0x599f0c, 0x599eb8),
+    "avengers_infinity_le": (None, 0x5fcc1c, 0x5fcbc8),
 }
 
 ENTRY_STRIDE = 44
@@ -114,6 +142,50 @@ class Elf:
             return raw.decode("latin-1")
 
 
+def _entry_ok(e, va, dev_bound):
+    """Does a 44-byte record at `va` look like a plausible entry?
+
+    Generous on purpose - this is used to WALK, not to validate a single
+    guess, and a false accept just gets overwritten by the real boundary a
+    few records later while a false reject cuts a real table short.
+    """
+    num = e.u16(va + 24)
+    devidx = e.u16(va + 26)
+    return num is not None and devidx is not None and 0 <= devidx < dev_bound and num < 1024
+
+
+def _ent_by_walkback(e, dev, dev_bound=2048, min_count=16):
+    """Derive the entry table's address when it has NO root of its own.
+
+    ★ aerosmith_le/avengers_infinity_le, 2026-08-19: titles where the entry
+    table is never referenced by an independent GOT-style pointer anywhere in
+    the binary (checked exhaustively - zero literal references to any
+    candidate address), unlike `dev_root`/`brd_root`, which both are. The
+    entry table still sits immediately before the device table in memory
+    ("runs right up to" it, same as when a root exists) - the compiler
+    apparently reaches it only via `dev - stride*count` arithmetic, with no
+    separate global holding its own address. So: walk backward from the
+    ALREADY-DEREFERENCED `dev` address at ENTRY_STRIDE until a record stops
+    looking plausible, and the far end of that run is the table's start.
+
+    VALIDATED on both titles against ground truth, not just self-consistency:
+    avengers_infinity_le's derived table reproduces the REAL, standard Stern
+    switch numbers at their real ids - DIP 1..8 at num=1..8, SERVICE SELECT/
+    PLUS/MINUS/BACK at 9-12, COIN DOOR INTERLOCK at 25, LOCKDOWN BUTTON at 70,
+    START BUTTON at 73, TILT PENDULUM at 81 - the same numbering scheme real
+    Stern manuals use across machines, which no coincidental byte pattern
+    would reproduce this exactly. `dev_bound` is deliberately generous (the
+    real device count is not known yet at this point in the walk); `min_count`
+    guards against accepting a short run of coincidental noise as the table.
+    """
+    va = dev - ENTRY_STRIDE
+    n = 0
+    while _entry_ok(e, va, dev_bound):
+        n += 1
+        va -= ENTRY_STRIDE
+    return (va + ENTRY_STRIDE) if n >= min_count else None
+
+
 def rows(elf_path, title):
     """[(id, num, node, bit, name)] - the same tuples swtable.read() returns.
 
@@ -128,10 +200,14 @@ def rows(elf_path, title):
     except (OSError, struct.error):
         return []
     ent_root, dev_root, brd_root = roots
-    ent = e.u32(ent_root)
     dev = e.u32(dev_root)
     brd = e.u32(brd_root)
-    if not ent or not dev or not brd or dev <= ent:
+    if not dev or not brd:
+        return []
+    # ent_root is None for titles with no independent pointer to the entry
+    # table - see _ent_by_walkback(). A real root is dereferenced as usual.
+    ent = _ent_by_walkback(e, dev) if ent_root is None else e.u32(ent_root)
+    if not ent or dev <= ent:
         return []
 
     # The entry table runs right up to the device table - that is what bounds it.

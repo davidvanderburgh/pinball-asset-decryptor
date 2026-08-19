@@ -86,7 +86,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
       LED and coil matrix and boot to attract, checked one title at a time in
-      ALPHABETICAL ORDER.** `S1 D4` ← WORKING ON, 25%
+      ALPHABETICAL ORDER.** `S1 D4` ← WORKING ON, 30%
       *(Filed 2026-08-18 at David's ask: "i want to work on universal game
       compatibility. every game should be able to load a switch and led and
       coil matrix and boot into attract. let's go alphabetical order." This
@@ -296,6 +296,50 @@ These have each been violated at least once and each cost a run or a window:
       `[cabspi]` no-table fallback disappears from the log, and — the actual
       point of all of this — that Guided Setup can be navigated with a
       keyboard because switches now resolve.**
+      **★★★★★ A THIRD TITLE SOLVED AND SHIPPED, `batman`, using the pipeline
+      as a repeatable tool rather than a fresh investigation — this is the
+      first title where the whole method ran start to finish in minutes, not
+      hours.** Node set read statically off its own ELF via `nbdir.py`
+      (`{0,1,2,4,8,9,10,12,13,24}` — two toppers, `ACCESSORY TOPPER` and
+      `LE/SLE TOPPER`, which the derived BRD map places at nodes 12 and 13
+      exactly where their pure-LED slots (8 and 9, `kind=4` only, no
+      switches or coils) land). `DEV_ROOT` found with 2 pointer-slot refs,
+      `BRD_ROOT` disambiguated the same way from 3 candidates (only one had
+      any reference at all). `swelf.py` against the mounted card now prints
+      111 switches — `LEFT/RIGHT FLIPPER BUTTON` at `num=9/10`, `LEFT/RIGHT
+      SLINGSHOT` at `7/8`, `TROUGH 1..6` at `15..20` — the identical
+      real-world Stern numbering as the other two, on nodes/bits that make
+      physical sense. **One stray row** (`id=1 num=166 name='DIP 5'`) does
+      not fit the pattern the other 110 do; not chased further this pass —
+      worth a second look before this pass's confidence is extended to
+      titles beyond these three.
+      **★ THE METHOD DOES NOT GENERALIZE TO EVERY TITLE, and that boundary is
+      now mapped, not just assumed.** Re-ran the full pipeline (with the
+      SAME node-set-via-`nbdir.py` step) against `deadpool_pro`,
+      `deadpool_le`, `dungeons_and_dragons_le` and `godzilla_le`
+      (`foo_fighters_le`'s `nbdir.py` step also came back empty and was not
+      pipelined further) — `nbdir.py` DOES find a real node directory on all
+      of them (the board-catalog/node-directory reader is a genuinely
+      different, more general instrument than this item's DEV/BRD scan), but
+      the DEV/BRD pipeline itself finds nothing real: **zero pointer-slot
+      references on every single candidate**, and the "distinct slots" list
+      degenerates into thousands of huge, nonsensical numbers instead of a
+      clean handful of small ones — the unambiguous signature of the scan
+      matching noise, not structure. **These four are a DIFFERENT
+      generation** (`godzilla_le` sharing nothing with working sibling
+      `godzilla_pro` is the clearest tell) and need their own fresh
+      structural RE the way Aerosmith did originally, not a rerun of this
+      pipeline. **A real bug was found and fixed while surveying these: the
+      first pass's `full_survey_one.sh` captured `cardmount.sh`'s ENTIRE
+      multi-line stdout into its ELF-path variable instead of just the last
+      line, so `godzilla_le`/`deadpool_pro`/`deadpool_le`/`dungeons_and_
+      dragons_le` all read as "nbdir.py found nothing" the first time
+      through — false negatives from a shell bug, not a real absence.
+      Re-run with the fix (`| tail -1`); the "different generation, not
+      pipeline-solvable" conclusion above is from the CORRECTED run.**
+      **Full regression check on the `swelf.py` change: `pytest` clean,
+      2792 passed, 11 skipped (pre-existing, unrelated), 0 failed, in
+      ~10 minutes.**
       **Device-position table (item 2 above, the 0x30-byte struct):
       untouched this pass** — a second, independent RE job once the switch
       table is fixed; do not assume fixing (1) fixes the artwork/positions.
@@ -351,21 +395,34 @@ These have each been violated at least once and each cost a run or a window:
         survey for their MISSING half, so the device-position gap on these
         five is a **fourth, still-unidentified structure** — not the same
         fix as Aerosmith's.
-      - **Switch table itself broken, mechanism now known, 2 of 3 roots
-        found:** **aerosmith_le** (this item's main finding, above).
-      - **Complete unknowns — neither static struct found anything, runtime
-        (boot) status not tested this pass:** avengers_infinity_le, batman,
-        deadpool_le, deadpool_pro, dungeons_and_dragons_le, foo_fighters_le,
-        **godzilla_le** (NOT the same binary as godzilla_pro — do not assume
-        the Pro fix carries over), guardians_le, iron_maiden_le, **james_
-        bond_le** (NOT james_bond_60th_le, which already works), jurassic_
-        park_le, king_kong_le, mando_le, metallica_spike, munsters_le,
-        rush_le, sword_of_rage_le, **turtles_le** (NOT turtles_pro),
-        uncanny_xmen_le, venom_le. **This is the largest bucket by far** —
-        roughly 20 of 26 distinct titles. A "0/0" here means only that this
-        pass's two known shapes do not fit; it is NOT evidence the title is
-        broken to play — most of these have never been booted under this
-        rig at all, so their true switch-table status is simply unmeasured.
+      - **Switch table SOLVED AND SHIPPED in `swelf.py` this pass** (see the
+        ★★★★/★★★★★ blocks below for the full method and verification):
+        **aerosmith_le** (104 switches), **avengers_infinity_le** (110),
+        **batman** (111). Static/offline only — none has had its LIVE run
+        confirmed yet, which is the actual remaining acceptance step.
+      - **Confirmed a DIFFERENT generation — not solvable by rerunning this
+        pass's pipeline, needs its own fresh RE:** **deadpool_le**,
+        **deadpool_pro**, **dungeons_and_dragons_le**, **godzilla_le** (NOT
+        the same binary as working sibling godzilla_pro — do not assume the
+        Pro fix carries over). `nbdir.py` reads a real node directory on all
+        four (so THAT instrument generalizes fine), but the DEV/BRD scan
+        finds only noise on them — thousands of nonsense "slot" values and
+        zero pointer-slot references on every candidate, the clean opposite
+        of the aerosmith/avengers/batman signature.
+      - **Complete unknowns — nothing tried this pass beyond the very first,
+        now-corrected survey pass:** foo_fighters_le, guardians_le,
+        iron_maiden_le, **james_bond_le** (NOT james_bond_60th_le, which
+        already works), jurassic_park_le, king_kong_le, led_zeppelin_le
+        (device-position gap already known, above; switch side untested by
+        this pipeline), mando_le, metallica_spike, munsters_le, rush_le,
+        sword_of_rage_le, **turtles_le** (NOT turtles_pro), uncanny_xmen_le,
+        venom_le. **Still the largest bucket** — roughly 15 of 26 distinct
+        titles. A "nothing found" here is NOT evidence of being broken to
+        play; most have never been booted under this rig, so their true
+        switch-table status is simply unmeasured. (`foo_fighters_le`'s
+        `nbdir.py` step came back empty on the FIRST, buggy survey pass —
+        per the shell-bug note below, that specific result needs redoing
+        with the fix before it can be trusted either way.)
       **What this means for the initiative, stated plainly so nobody
       re-derives it:** "get the tables on all the games" is not a bug to
       close, it is a SURVEY-THEN-FIX sweep across what looks like at least

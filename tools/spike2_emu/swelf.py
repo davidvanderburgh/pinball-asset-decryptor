@@ -82,6 +82,7 @@ ROOTS = {
     "stranger_things_le": (0x724608, 0x7260b8, 0x725aac),
     "aerosmith_le": (None, 0x599f0c, 0x599eb8),
     "avengers_infinity_le": (None, 0x5fcc1c, 0x5fcbc8),
+    "batman": (None, 0x6d8780, 0x6d8714),
 }
 
 ENTRY_STRIDE = 44

@@ -86,7 +86,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
       LED and coil matrix and boot to attract, checked one title at a time in
-      ALPHABETICAL ORDER.** `S1 D3` ← WORKING ON, 55%
+      ALPHABETICAL ORDER.** `S1 D3` ← WORKING ON, 60%
       *(Filed 2026-08-18 at David's ask: "i want to work on universal game
       compatibility. every game should be able to load a switch and led and
       coil matrix and boot into attract. let's go alphabetical order." This
@@ -535,22 +535,93 @@ These have each been violated at least once and each cost a run or a window:
       genuinely different generation needing fresh RE the way Aerosmith's
       did originally. Every one of the 26 known card images has now been
       looked at; none remain completely untouched.
+      **★★★★ ALL SIX statically-solved titles LIVE-VERIFIED**
+      (2026-08-19, same session): `foo_fighters_le` (105 switches),
+      `guardians_le` (99), `iron_maiden_le` (101), `jurassic_park_le`
+      (107), `mando_le` (103), `rush_le` (104) — every one booted
+      through a bounded `watch.sh` run, showed real `[sw]` edges firing
+      on attract's auto-advance, no `[segv]`/SEGV/FATAL, and cleaned up
+      to `alive.sh`'s "0 (clean)" on its own. Blocking pattern used:
+      `wsl -e bash -c "... && bash watch.sh N > log 2>&1"` run in the
+      FOREGROUND (no `setsid --fork`) — that detaches and returns before
+      the backstop fires, which cost one unnecessary `killgame.sh` on
+      `foo_fighters_le` before this was caught; every run after was
+      clean without any manual kill.
+      **★★★ THE "9 unconfirmed" WALKBACK HYPOTHESIS DID NOT HOLD — split
+      into three real sub-problems, none shippable this pass** (same
+      session, right after the live-verify above). The plan was to reuse
+      `_ent_by_walkback`'s trick on `DEV` itself. Built `solve_verify2.py`
+      (uses the array address directly when no literal ref exists, same
+      idea as the ENT fix) and ran it against all nine. Result:
+        - **`james_bond_le`, `king_kong_le`, `led_zeppelin_le`,
+          `metallica_spike`, `turtles_le`, `uncanny_xmen_le`, `venom_le`
+          (7 titles) use a DIFFERENT, LARGER device record — 48 bytes,
+          not 24.** Found by histogramming the byte-deltas between
+          consecutive name-table cross-references: these seven cluster
+          on delta=48 almost exclusively (e.g. king_kong_le 857/858
+          hits), where the original nine cluster on delta=24. Confirmed
+          this is a real second struct, not a misread of the first: at
+          the OLD 24-byte stride `james_bond_le`'s "DEV" decodes to
+          garbage after record 0 (slot/bit/kind fields become
+          nonsense 5-to-6-digit numbers); at the 48-byte stride, bucketing
+          every device by the field at `hit+12` gives clean, small,
+          repeated values with plausible samples — kind=7 -> `Right
+          Flipper, Trough, Right Slingshot, Left Slingshot, Auto
+          Plunger, Left Flipper`, kind=8 (near-equal count to kind=7,
+          suggesting switch/coil pairing) -> `Jet Pack Magnet, Right
+          VUK, Rocket Lock, Center 3 Bank Drop Target`, kind=4 ->
+          `BACKBOX GI, DIP 1..8`, kind=2 -> `QR SCANNER *` status
+          flags. **This is real, useful signal, but there is no `num`
+          (real Stern switch number) field found yet to check against
+          ground truth, so nothing here is trustworthy enough to ship.**
+          Treat as its OWN generation needing fresh RE, same bucket as
+          deadpool/godzilla_le/dungeons_and_dragons_le below — NOT a
+          quick trick.
+        - **`sword_of_rage_le` and `munsters_le` (2 titles) DO share the
+          original 24-byte struct**, confirming the hypothesis for these
+          two specifically — `solve_verify2.py` derives DEV directly (no
+          ref needed) for `sword_of_rage_le` and via ref for
+          `munsters_le`. But BOTH still fail past that point, on a
+          DIFFERENT problem each: `sword_of_rage_le`'s region
+          immediately before DEV is NOT a clean ENT run — walking back
+          hits several dozen identical `num=49968 devidx=36` records in a
+          row (not distinct entries, so not real), and an exhaustive
+          independent ENT search (`find_ent()`, unused code already in
+          `full_pipeline.py`) finds five candidate 40+-record runs
+          elsewhere in `.data`, none with a literal reference, so none
+          confirmable either way. `munsters_le`'s BRD bijective
+          slot→node search (requiring every needed slot to map to a
+          DISTINCT valid node) finds ZERO exact matches; relaxing to
+          "5 of 6 slots valid" turns up near-misses
+          (`nodes=[1,2,3,4,4,4]`, `nodes=[7,8,8,8,9,9]`) that look
+          structurally plausible but require either loosening the
+          distinctness rule or finding the true table at a shifted
+          offset — untried.
+      Net: the "cheap, same gap as ENT" read from the end of the last
+      pass was wrong as a blanket claim. It is right for 2 of 9, each
+      with its own new complication; wrong (real second generation) for
+      7 of 9. **Nothing new shipped into `swelf.py` this pass** — every
+      candidate above still lacks the ground-truth check (real Stern
+      switch numbering) the nine shipped titles all passed, and a wrong
+      table is explicitly worse than none (this file's own docstring).
+      Scratch scripts added this pass, same non-repo status as the
+      others: `solve_verify2.py`, `stride_diag.py`, `hits_diag.py`,
+      `kind_scan.py`, `wide_dump.py`, `raw_dump.py`, `brd_diag.py`,
+      `list_tables.py`, `ent_debug.py`, `ent_search_one.py`, plus their
+      `*_one.sh` mount wrappers — all in `C:\tmp`, all read-only against
+      the cards.
       **Resume, in priority order:**
-      (1) **Cheapest, try first:** extend the `ENT` walkback trick to
-      `DEV` itself for the nine "DEV found, unconfirmed" titles
-      (`james_bond_le`, `king_kong_le`, `led_zeppelin_le`, `metallica_
-      spike`, `munsters_le`, `sword_of_rage_le`, `turtles_le`, `uncanny_
-      xmen_le`, `venom_le`) — walk backward/forward from whatever DOES
-      have a confirmed anchor (BRD, where found) rather than requiring a
-      literal pointer to DEV's own address. If this works it could solve
-      most or all nine in one more pass, the same leverage the ENT
-      discovery already bought twice.
-      (2) LIVE-run the six statically-solved-but-unverified titles
-      (`foo_fighters_le`, `guardians_le`, `iron_maiden_le`,
-      `jurassic_park_le`, `mando_le`, `rush_le`) the same way aerosmith_le/
-      avengers_infinity_le/batman were — bounded `watch.sh` runs, check for
-      `[cabspi]`/crash-free progress. Cheap given the recipe is proven;
-      mainly rig time, not investigation time.
+      (1) The 7-title 48-byte-stride generation needs its own num-field
+      hunt (something must carry the real switch NUMBER for ground-truth
+      validation the way `+24` did on the 24-byte struct — not yet
+      found) before anything from it can ship. This is now the single
+      biggest remaining chunk of the catalog (7 of the 17 unsolved
+      titles) and the kind-bucketing above is a running start for
+      whoever takes it.
+      (2) `sword_of_rage_le`'s real ENT and `munsters_le`'s real BRD each
+      need their own small follow-up (see the two bullets above for
+      exactly where the search stopped) — smaller, title-specific gaps,
+      not a shared mechanism.
       (3) The four different-generation titles (`deadpool_le/pro`,
       `dungeons_and_dragons_le`, `godzilla_le`) need fresh structural RE
       the way Aerosmith's did originally — budget accordingly, this is
@@ -566,6 +637,61 @@ These have each been violated at least once and each cost a run or a window:
       multi-agent workflow (fan out one RE agent per unknown title, converge
       on a shared struct catalogue) fits this shape well — but that needs his
       explicit opt-in and was not started here.**
+
+- [ ] **58. A second-display window opens and stays BLACK on titles that
+      have no real second physical display.** `S2 D3` — **NO CONFIRMED
+      REPRODUCTION CASE YET; a fix was written, live-tested, and then
+      REVERTED this same session — read to the end before touching this.**
+      *(Filed 2026-08-19, David live-watching item 57's runs: "many games
+      don't have a second display. make sure we are not bringing up a
+      second display window if they don't have one.")*
+      **First candidate, RULED OUT by David directly:** `mando_le` opened
+      a display-2 window that read `[padglhost] picture: d2 STILL BLACK
+      after 419 presented frames` on one run — looked like exactly this
+      bug. Wrote the obvious fix (mirror the existing render-target-
+      failure path: when the "STILL BLACK" branch fires in `pic2_check()`
+      and `win2_on` is still set, unmap `xwin2` the same way
+      padglhost.c:4039-4051 already does for a target that fails to
+      CREATE). Rebuilt, reran `mando_le` — this time display 2 showed
+      real content from frame 2 onward (`picture: d2 FIRST at frame 2
+      (98511 of 1044480 pixels are not black)`), no black run at all.
+      **David: "mando has a topper with a second display. that's ok to
+      keep."** Checked why the SAME title gave opposite results twice:
+      the second display IS a real, purchasable accessory — Stern
+      shipped a $1999 "The Mandalorian Topper" with a 3D holographic
+      display, announced October 2022, compatible with Pro/Premium/LE
+      ([sternpinball.com](https://sternpinball.com/2022/10/19/stern-pinball-launches-new-the-mandaloriantm-topper-pinball-machine-accessory/)).
+      So the game's own content for that channel is real and wanted; the
+      419-black-frame run most likely just sampled before that content
+      started drawing (attract-cycle timing, not a fake/vestigial code
+      path) — the exact opposite of what this item assumed. **The fix
+      was REVERTED** (`git checkout -- tools/spike2_emu/padglhost.c` in
+      the item/57 worktree) because its premise doesn't hold and, worse,
+      the mechanism (hide after N frames of never-lit) could have hidden
+      a legitimate slow-starting topper display on some future run,
+      trading one cosmetic bug for an occasional real regression.
+      **Where this leaves the item:** the underlying worry (a title with
+      NO real second-display hardware, base config, still gets a black
+      window) may still be real, but needs a confirmed example that is
+      NOT also a real accessory before any fix is worth writing — the two
+      false starts above (this item's own history) are exactly the "a
+      wrong table/fix is worse than none" lesson item 57 already learned
+      twice this session, applied to a third kind of table.
+      **Also still true regardless of a fix:** `padglhost.c`'s
+      `PADGL_TARGET` handler (~line 4014) opens the window purely on
+      `d != 0`, and `pic2_check()` (~3592-3625) ALREADY measures and logs
+      "STILL BLACK after N frames" with nothing downstream reading it —
+      so the instrument to build a fix on is there whenever a real case
+      turns up.
+      **Acceptance:** a specific title, confirmed by David to have no
+      real second-display hardware (base config, no accessory), shown
+      opening a display-2 window that never shows real content for an
+      entire run — THEN design the fix against that title, not a
+      hypothesis.
+      — S2: cosmetic, does not block play. D3: mostly investigation:
+      finding a genuine reproduction case is the actual cost, the code
+      change itself (once one exists) is small and has already been
+      drafted once.
 
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
@@ -2105,6 +2231,40 @@ These have each been violated at least once and each cost a run or a window:
       RUNTIME banner for any node, stated with the game-start glass observed.
       — S3: the game recovers by itself; seconds lost and it reads like a
       fault. D2: a derivation guard plus one verification run.
+      **★ 2026-08-19: David live-watching item 57's runs flagged "node board
+      errors... I think 10-12" independently, before seeing this item.**
+      Checked `node_ident.txt` (nbdir.py's own output) across the six
+      titles just live-verified above plus aerosmith/avengers/batman —
+      node 12's fault class is NOT turtles_pro-specific, it is
+      widespread: `foo_fighters_le` (node 12), `guardians_le` (11, 12),
+      `mando_le` (12), `rush_le` (10, 12), `aerosmith_le` (10) all carry
+      a `coil4node`/`tmc5041node`/`hdmi_ws2812node` board at 10-12 with
+      `variant_guess=1` — the SAME "guessed, not measured" flag item 55
+      already calls out for turtles_pro's node 12, just on three MORE
+      board types nbdir.py has never measured (only `pinnode`,
+      `ws2812node`, `node4` are in `VARIANT_PRIOR`; anything else falls
+      back to `VARIANT_DEFAULT=0x01` and is marked a guess -
+      `nbdir.py:100-103`). **BUT**: none of those six live console logs
+      contain a refusal/mismatch/"UPDATE FAILED" line (grepped for
+      `refus|mismatch|update.*fail|nbhex|identity|UPDATING NODE|fident` -
+      zero hits outside the unrelated video-seek "refusing" lines), so
+      the 0x01 guess is not VISIBLY wrong on any of these six specific
+      titles in a ~2-minute run. **The variant byte cannot be read
+      directly** the way the firmware version can (that comes from the
+      hex FILENAME, which is plaintext) - nbdir.py's own comment says
+      the variant lives inside the hex file BODY at flash 0x1008, and
+      that body is encrypted per-title, so the only way any prior was
+      ever populated was by MEASURING it live off a title that already
+      boots (godzilla's `[nbhex]` dump, per the comment at
+      `nbdir.py:100`). **So this is not yet a confirmed live failure**,
+      it is a confirmed LATENT gap on the same three unmeasured board
+      types, now known to appear on at least five titles beyond
+      turtles_pro. If David is seeing an actual banner (not just this
+      log pattern) on a specific title, that title is the one to chase
+      first — its own refusal log names the node and lets the guess be
+      corrected from measurement rather than another guess. Until then,
+      do not touch `VARIANT_DEFAULT`/`VARIANT_PRIOR` blind — same rule as
+      item 57's tables: a wrong guess is worse than a flagged one.
 
 - [ ] **53. The device-table GROUP → bus NODE map is ONE TITLE'S measurement,
       so most titles' lamps and coils have a position and no wire address.**

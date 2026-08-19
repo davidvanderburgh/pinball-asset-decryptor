@@ -56,14 +56,14 @@ known state with the date it was last run, not a guess.
 | james_bond_60th_le | ✅ live, 118 | ✅ | ✅ | n/a | 2026-08-19 |
 | james_bond_le | ✅ live, 108 | ✅ bond_le_playfield.png | ✅ | n/a | 2026-08-19 |
 | deadpool_pro | ✅ live, 104 | ✅ deadpool_pro_playfield.png | ✅ | n/a | 2026-08-19 |
-| king_kong_le | ✅ live, 105 | ✅ Rodeo…Wireframe.png (item 57 fix) | ❌ 0/517 land inside | n/a | 2026-08-19 |
+| king_kong_le | ✅ live, 105 | ✅ Rodeo…Wireframe.png (item 57 fix) | ✅ 489/517 inside, 0 outside (item 57 fix) | n/a | 2026-08-19 |
 | dungeons_and_dragons_le | ✅ live, 104 | ❌ none shipped | ✅ 255 records | n/a | 2026-08-19 |
 | venom_le | ✅ live, 107 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
 | turtles_le | ✅ live, 96 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
 | uncanny_xmen_le | ✅ live, 110 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
 | deadpool_le | ✅ live, 104 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
 | godzilla_le | ✅ live, 98 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
-| metallica_spike | ✅ live, 106 | ✅ metallica_playfield…png (item 57 fix) | ❌ 0/664 land inside | n/a | 2026-08-19 |
+| metallica_spike | ✅ live, 106 | ✅ metallica_playfield…png (item 57 fix) | ✅ 502/664 inside, 0 outside (item 57 fix) | n/a | 2026-08-19 |
 | aerosmith_le | ✅ static (swelf.py), live-verified | — no device table shipped | — | n/a | 2026-08-19 |
 | avengers_infinity_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
 | batman | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
@@ -119,6 +119,27 @@ broken). **Net: of 30 known card versions, 29 have a confirmed-working
 switch matrix (28 unchanged + `sword_of_rage_le` newly shipped), exactly
 ONE remains broken** (`munsters_le`, BRD only) — a much smaller problem
 than earlier passes of this table believed.
+
+**`king_kong_le`/`metallica_spike`'s "positions land outside the artwork"
+gap SOLVED, same session, right after being written down as priority (2)
+above.** Not a coordinate bug at all: `devicexy.py`'s raw x/y values were
+correct the whole time (checked directly - x 7..512, y 1..654, well inside
+a 312x710 image). The bug was in the SELF-CHECK, not the data: `checks()`/
+`text()`/`main()` filtered "is this device on the playfield" by comparing
+`image == "playfield"` literally - a hard-coded spelling one title family
+uses, not a constant. `devicexy.py` already HAD the fix for exactly this
+class of bug (`layout_image()`, built for item 50's `james_bond_60th_le`,
+which spells it `Test/scaled_playfield`) and `playfield.py`'s actual
+renderer was already using it correctly - only the diagnostic/reporting
+functions were never wired to it, so the rendering was fine the whole
+time and only the "N playfield records" COUNT `watch.sh` prints was wrong.
+Fixed by routing `checks()`/`text()`/`main()` through `layout_image()`
+instead of the literal. Live-verified: `king_kong_le` 489/517 records now
+land inside with 0 outside (was 0/517); `metallica_spike` 502/664 (was
+0/664). Full test suite clean before and after (2785→2783 passed, the
+2 fewer are pre-existing Tk/Tcl display flakiness unrelated to this
+change, not new failures - 0 failures either run).
+**Both titles are now FULLY clean**: switches ✅, artwork ✅, positions ✅.
 
 **Reading this table alongside item 57 in `plans/TODO.md`**: the earlier
 "7 titles share a newly-found 48-byte device-record generation" static

@@ -86,7 +86,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
       LED and coil matrix and boot to attract, checked one title at a time in
-      ALPHABETICAL ORDER.** `S1 D3` ← WORKING ON, 92%
+      ALPHABETICAL ORDER.** `S1 D3` ← WORKING ON, 97%
       *(Filed 2026-08-18 at David's ask: "i want to work on universal game
       compatibility. every game should be able to load a switch and led and
       coil matrix and boot into attract. let's go alphabetical order." This
@@ -779,13 +779,33 @@ These have each been violated at least once and each cost a run or a window:
       the LAST title in the whole 26-card catalogue with no switch
       matrix**, down from a whole bucket believed broken at the start of
       this session.
-      (2) `king_kong_le`/`metallica_spike`'s device-positions-land-outside-
-      artwork bug — real, confirmed, affects the virtual playfield's
-      picture even though switches/coils/LEDs all work underneath.
+      (2) **SOLVED same session, minutes after being written down:**
+      `king_kong_le`/`metallica_spike`'s device-positions-land-outside-
+      artwork bug turned out not to be a coordinate bug at all — the raw
+      x/y values were correct the whole time (checked directly: x 7..512,
+      y 1..654, comfortably inside a 312x710 image). The bug was in the
+      SELF-CHECK: `devicexy.py`'s `checks()`/`text()`/`main()` filtered
+      "is this device on the playfield" by comparing `image == "playfield"`
+      literally, a hard-coded spelling that is one title family's, not a
+      constant — and `devicexy.py` already carried the fix for exactly
+      this (`layout_image()`, built for item 50's `james_bond_60th_le`,
+      which spells the same thing `Test/scaled_playfield`), already wired
+      into `playfield.py`'s ACTUAL renderer, just never wired into the
+      diagnostic functions that produce the "N playfield records, N
+      outside" line `watch.sh` prints. The rendering was fine the whole
+      time; only the reported count was wrong. Fixed by routing all three
+      functions through `layout_image()`. Live-verified: `king_kong_le`
+      489/517 land inside with 0 outside (was 0/517); `metallica_spike`
+      502/664 (was 0/664). **Both titles are now FULLY clean end to end**
+      — switches, artwork, and positions all working. Full test suite
+      clean (2785→2783 passed; the 2 fewer are pre-existing Tk/Tcl display
+      flakiness, unrelated to this change — 0 failures either run).
       (3) `dungeons_and_dragons_le` and the other artwork-less titles are
       NOT bugs to fix — they genuinely ship none, same as TMNT; only worth
       revisiting if David wants schematic-mode titles to look better, not
       because anything is broken.
+      **With (1) and (2) both closed this session, the only remaining gap
+      in the entire 26-title catalogue is `munsters_le`'s BRD table.**
 
 - [ ] **58. A second-display window opens and stays BLACK on titles that
       have no real second physical display.** `S2 D3` — **NO CONFIRMED

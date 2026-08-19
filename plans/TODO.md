@@ -97,6 +97,16 @@ These have each been violated at least once and each cost a run or a window:
       SOLVED in this codebase for one title (52/swelf.py) and Aerosmith's own
       layout now matches it field-for-field — what is left is address-hunting
       and one confirming run, not unknown-mechanism work.)*
+      **★ GOAL RESTATED, 2026-08-19, David: "the goal of this item is to
+      resolve all the problems."** Not just the switch/LED/coil matrix the
+      title originally named — every title's virtual playfield artwork,
+      device positions and second-display behaviour are IN SCOPE too, and
+      **`tools/spike2_emu/README.md`'s "Titles" table is now the single
+      standing record of where every title stands**, kept current by
+      `/finish` (see that skill) rather than re-derived from scratch each
+      session. Read the README table first when resuming this item — it is
+      the current truth, this TODO section is the archaeology of HOW each
+      row got there.
       **First title, alphabetically: AEROSMITH.** David's report: it is
       "stuck on the guided setup screen with 'no tables' found." This pass
       was entirely DESK WORK, read-only, alongside David's own LIVE run on
@@ -637,6 +647,55 @@ These have each been violated at least once and each cost a run or a window:
       multi-agent workflow (fan out one RE agent per unknown title, converge
       on a shared struct catalogue) fits this shape well — but that needs his
       explicit opt-in and was not started here.**
+      **★★★ FULL CATALOGUE AUDIT, 2026-08-19, same session, per the goal
+      restatement above.** Live-ran every title not yet covered this
+      session (venom_le, sword_of_rage_le, munsters_le, turtles_le,
+      uncanny_xmen_le, deadpool_le, deadpool_pro, dungeons_and_dragons_le,
+      godzilla_le, godzilla_pro, jaws_le, john_wick_le, james_bond_60th_le,
+      star_wars_le, turtles_pro, elvira3 — 16 titles, one at a time,
+      `bash watch.sh 1` bounded runs) so every known card has a fresh,
+      dated row in `README.md`'s table instead of an inferred one. **Two
+      corrections to earlier static-only classification, found only by
+      actually running them:**
+        - **`deadpool_pro` is FINE** (104 live switches, real artwork,
+          clean) — the earlier "confirmed different generation" bucket
+          had grouped it with `deadpool_le` on STATIC signature alone; the
+          two are not the same binary and do not share a fate. Only
+          `deadpool_le` and `godzilla_le` are still confirmed broken.
+        - **`dungeons_and_dragons_le` mostly works** (104 live switches,
+          255 real device records) — its ONLY gap is missing playfield
+          artwork, not the "different generation" it was grouped under.
+      **A NEW gap found by the artwork fix itself:** fixing `gameinfo.py`'s
+      `Test`/`TestMode` directory bug (below) makes `king_kong_le` and
+      `metallica_spike` both FIND their real artwork file for the first
+      time — but their device XY coordinates still land ENTIRELY outside
+      it (`0 playfield records, 0 outside the 312x710 artwork` on both,
+      after the fix, not before) — so there are now confirmed to be TWO
+      independent bugs where one was assumed, and only the file-lookup
+      half is fixed. Not yet root-caused; likely the same class of "wrong
+      coordinate space" problem this project has hit before (item 3's
+      note on the coil map), not investigated further this pass.
+      **`star_wars_le` opens a second-display window** (`display 2
+      targeted by the guest`) within its first minute — unconfirmed
+      whether it ever shows real content or stays black like item 58's
+      now-withdrawn `mando_le` example; needs the same live-content check
+      before it becomes an item 58 example, not before.
+      **Shipped: `gameinfo.py`'s `find_playfield_art()` only ever looked in
+      `assets/nuk/images/Test/`.** `king_kong_le` and `metallica_spike`
+      ship their drawing under `assets/nuk/images/TestMode/` instead and
+      have NO `Test` folder at all, so the lookup returned None before any
+      filename was even compared — "this title ships no playfield
+      drawing" about two titles that do. Fixed to try `Test` first (every
+      title measured before this fix already uses it, so nothing changes
+      for them), then `TestMode`. Verified live on both titles: artwork
+      now resolves (`Rodeo_LE_Service_Playfield_Wireframe_300dpi_cropped.
+      png`, `metallica_playfield_with_handle_cropped.png`).
+      **The full per-title results of this audit live in
+      `tools/spike2_emu/README.md`'s "Titles" table, not duplicated here**
+      — that table is now the standing record; this note is the pointer to
+      it and the story of what changed and why. Full test suite re-run
+      after the `gameinfo.py` fix: clean, 0 failures (see commit for the
+      exact count).
 
 - [ ] **58. A second-display window opens and stays BLACK on titles that
       have no real second physical display.** `S2 D3` — **NO CONFIRMED

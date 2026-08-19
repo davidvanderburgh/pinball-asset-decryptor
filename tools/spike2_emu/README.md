@@ -29,16 +29,80 @@ still works and is still the faster option for a title you run constantly.
 
 ## Titles
 
-| title | state |
-|---|---|
-| Godzilla Pro 1.15.0 | full: attract, video, audio, switches, coils, artwork playfield |
-| TMNT 1987 Pro 1.59.0 | attract, video, audio, switches, coils; schematic playfield; one Tech Alert (node 2 not registered) |
-| Elvira's HoH 1.13.0 | boots, 60 fps, switch input, reaches its Guided Setup |
-| Jaws LE 1.02.0 | boots, 60 fps, switch input, clears Tech Alerts, reaches its Guided Setup |
+**Per-title emulation status, one line per title, kept current by `/finish`**
+(item 57, David's ask 2026-08-19: "we should be keeping a running list of
+what each game has and doesn't have"). Four columns, each a plain fact about
+ONE run, not a promise about every card version of that title:
 
-All four boot, render at 60 fps and take input. EHOH and Jaws stop at Guided
-Setup because that is what a machine with no saved settings does on first boot,
-not because anything is wrong.
+- **switches** — does a real switch table exist (either the runtime's own
+  live `[sw]` dump, or `swelf.py`'s static fallback) with plausible Stern
+  numbering (flippers/slings/trough checked against the standard scheme)?
+- **artwork** — does the virtual playfield draw the title's own CAD/service
+  drawing, or fall back to the schematic dot layout?
+- **positions** — do the artwork-relative device (LED/coil/switch) XY
+  coordinates land INSIDE the artwork, so the picture and the wire agree?
+- **2nd display** — does the title open a second window, and does it show
+  real content or nothing? `n/a` = never targets one.
+
+A title only reaches "clean" when all four say so. **This table is built
+from real runs, not inference** — a title not yet re-checked keeps its last
+known state with the date it was last run, not a guess.
+
+| title | switches | artwork | positions | 2nd display | last checked |
+|---|---|---|---|---|---|
+| godzilla_pro | ✅ live, 88 | ✅ | ✅ (baseline) | n/a | 2026-08-19 |
+| jaws_le | ✅ live, 109 | ✅ | ✅ | n/a | 2026-08-19 |
+| john_wick_le | ✅ live, 106 | ✅ | ✅ | n/a | 2026-08-19 |
+| james_bond_60th_le | ✅ live, 118 | ✅ | ✅ | n/a | 2026-08-19 |
+| james_bond_le | ✅ live, 108 | ✅ bond_le_playfield.png | ✅ | n/a | 2026-08-19 |
+| deadpool_pro | ✅ live, 104 | ✅ deadpool_pro_playfield.png | ✅ | n/a | 2026-08-19 |
+| king_kong_le | ✅ live, 105 | ✅ Rodeo…Wireframe.png (item 57 fix) | ❌ 0/517 land inside | n/a | 2026-08-19 |
+| dungeons_and_dragons_le | ✅ live, 104 | ❌ none found | ✅ 255 records | n/a | 2026-08-19 |
+| aerosmith_le | ✅ static (swelf.py), live-verified | — no device table shipped | — | n/a | 2026-08-19 |
+| avengers_infinity_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
+| batman | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
+| foo_fighters_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
+| guardians_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
+| iron_maiden_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
+| jurassic_park_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
+| mando_le | ✅ static (swelf.py), live-verified | — | — | ✅ real (topper accessory, David-confirmed) | 2026-08-19 |
+| rush_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
+| star_wars_le | ✅ live, 104 | ❌ none found | ? cached, not re-measured | ⚠️ opens, content unconfirmed | 2026-08-19 |
+| turtles_pro | ✅ live, 94 | ❌ none found | ? cached, not re-measured | n/a | 2026-08-19 |
+| elvira3 | ✅ live, 110 | ❌ none found | ? cached, not re-measured | n/a | 2026-08-19 |
+| led_zeppelin_le | ✅ live, 97 | ❌ none found | ? cached, not re-measured | n/a | 2026-08-19 |
+| metallica_spike | ❌ no live dump | ✅ metallica_playfield…png (item 57 fix) | ❌ 0/664 land inside | n/a | 2026-08-19 |
+| venom_le | ❌ no live dump | ❌ none found | ❌ no device table | n/a | 2026-08-19 |
+| sword_of_rage_le | ❌ no live dump | ❌ none found | ❌ no device table | n/a | 2026-08-19 |
+| munsters_le | ❌ no live dump | ❌ none found | ❌ no device table | n/a | 2026-08-19 |
+| turtles_le | ❌ no live dump | ❌ none found | ❌ no device table | n/a | 2026-08-19 |
+| uncanny_xmen_le | ❌ no live dump | ❌ none found | ❌ no device table | n/a | 2026-08-19 |
+| deadpool_le | ❌ no live dump | ❌ none found | ❌ no device table | n/a | 2026-08-19 |
+| godzilla_le | ❌ no live dump | ❌ none found | ❌ no device table | n/a | 2026-08-19 |
+| stranger_things_le | ✅ static (swelf.py, item 52) | ❌ none found | ? not re-measured | ✅ real (projector, item 44) | 2026-08-19 |
+
+**Reading this table alongside item 57 in `plans/TODO.md`**: the ❌ rows
+above are exactly item 57's open buckets — 7 titles share a newly-found
+48-byte device-record generation (venom_le, sword_of_rage_le†, munsters_le†,
+turtles_le, uncanny_xmen_le, plus king_kong_le/james_bond_le/metallica_spike
+which turned out to be the OLDER 24-byte struct after all, just missing a
+literal reference — see item 57's full writeup for which titles landed
+where), and deadpool_le/godzilla_le are a confirmed different generation
+needing fresh RE. † = confirmed on the OLD 24-byte struct with an
+individual, not-yet-solved snag (see item 57). The "positions land outside
+the artwork" failure on `king_kong_le` and `metallica_spike` is a NEW,
+separate gap this table surfaced — the artwork file is now found (item 57's
+`Test`/`TestMode` fix), but the device XY coordinates still don't land
+inside it, so it is not yet the SAME bug as the missing-file one it looked
+like at first glance. Not yet root-caused.
+
+**Titles not yet run this pass** (existed before this table, no fresh data
+to report against the 4 columns above): every other card version beyond the
+one path each row above was tested against — `led_zeppelin_pro`,
+`turtles_le-1_58_1` (the 1987-upscaled build), older `jaws_le`/`venom_le`
+versions, etc. Re-running a DIFFERENT version of an already-clean title is
+low priority; a title with no row above at all has simply not been reached
+yet.
 
 What the rig works out about a title by itself:
 

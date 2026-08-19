@@ -7844,6 +7844,21 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
 
         has_fl_dat = self.fl_dat_path and os.path.isfile(self.fl_dat_path)
 
+        # The engine's shared trees are in no game's fl.dat, so they are
+        # discovered off the partition in both modes.  They stay bare path
+        # strings, which is exactly how the loop below marks "filler size
+        # unknown, detect it from the bytes".
+        shared_paths = []
+        for tree in ecoredata.SHARED_TREES:
+            try:
+                self._debugfs_ls_recursive(
+                    f"{config.GAME_BASE_PATH}/{tree}", shared_paths)
+            except (CommandError, PipelineError):
+                continue  # tree absent on this title
+        if shared_paths:
+            self.log(f"Shared engine trees: {len(shared_paths)} file(s)",
+                     "info")
+
         if has_fl_dat:
             entries = parse_fl_dat(_fl_text(self.fl_dat_path))
             prefix = detect_edata_prefix(entries)
@@ -7855,6 +7870,10 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                 shutil.copy2(self.fl_dat_path, fl_dest)
             self.log("Using cached fl_decrypted.dat", "info")
             paths = None  # filler_size already known per-entry
+            # Append the shared trees as bare paths: the cached file list
+            # cannot describe them, so their filler size is detected from the
+            # dumped bytes like any dongle-free scan.
+            entries = list(entries) + shared_paths
         else:
             # Discover paths only — DO NOT dump-and-scan up front.
             # The old design dumped every file twice (once to detect
@@ -7868,13 +7887,17 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
             self.log(f"Found {len(paths)} files in edata.", "info")
             # Prefix is needed for output-path stripping AND the
             # category filter; derive from first discovered path.
+            # Derive the prefix from the edata paths ONLY, before the shared
+            # trees are appended: "/jjpe/gen1/ecoredata/" carries no "/edata/"
+            # segment, so a mixed list can leave the prefix empty and misplace
+            # every game asset.
             prefix = ""
             for p in paths:
                 idx = p.find("/edata/")
                 if idx >= 0:
                     prefix = p[:idx + 7]
                     break
-            entries = paths  # passed through filter below as paths
+            entries = paths + shared_paths  # filtered below as bare paths
 
         # Filter by category — works on either FileEntry list (fl_dat
         # path) or bare path list (scan path); both expose .path or
@@ -7885,8 +7908,14 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
         if not self.extract_graphics or not self.extract_sounds:
             def _keep(item):
                 p = _path_of(item)
-                rel = p[len(prefix):] if prefix and \
-                    p.startswith(prefix) else p
+                rel = ecoredata.output_rel_for_image_path(p, prefix)
+                # Engine assets sit one level deeper ("ecoredata/sound/"), so
+                # strip the tree name before matching or the category
+                # tick-boxes silently stop filtering them.
+                for tree in ecoredata.SHARED_TREES:
+                    if rel.startswith(tree + "/"):
+                        rel = rel[len(tree) + 1:]
+                        break
                 if rel.startswith("graphics/"):
                     return self.extract_graphics
                 if rel.startswith("sound/"):
@@ -7977,14 +8006,17 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
                         n_v3 += 1
                     else:
                         content = decrypt_file(enc_data, filler_size, path)
-                    rel = path[len(prefix):] if prefix and \
-                        path.startswith(prefix) else path
+                    rel = ecoredata.output_rel_for_image_path(path, prefix)
                     out_path = os.path.join(out_dir, rel)
                     os.makedirs(os.path.dirname(out_path), exist_ok=True)
                     with open(out_path, "wb") as f:
                         f.write(content)
 
-                    if not has_fl_dat:
+                    # Shared engine assets are in no fl.dat, so their CRCs are
+                    # always recorded — Write forges against them, and without
+                    # an entry here it would reject every engine replacement
+                    # as "not found in fl.dat".
+                    if not has_fl_dat or ecoredata.is_shared_rel(rel):
                         n2 = crc32_buf(enc_data)
                         n3 = crc32_buf(content)
                         computed_entries.append(FileEntry(
@@ -8019,11 +8051,21 @@ class DirectSSDDecryptPipeline(StandaloneDecryptPipeline):
             except OSError:
                 pass
 
-        if not has_fl_dat and computed_entries:
+        if computed_entries:
             fl_out = os.path.join(out_dir, "fl_decrypted.dat")
-            write_filelist(computed_entries, fl_out)
+            merged = computed_entries
+            if has_fl_dat:
+                # Dongle mode already copied the cached list in; the shared
+                # trees are additions to it, so merge rather than overwrite —
+                # replacing it here would drop every game asset.
+                existing = parse_fl_dat(_fl_text(fl_out)) \
+                    if os.path.isfile(fl_out) else []
+                known = {e.path for e in existing}
+                merged = existing + [e for e in computed_entries
+                                     if e.path not in known]
+            write_filelist(merged, fl_out)
             self.log(f"Generated fl_decrypted.dat with "
-                     f"{len(computed_entries)} entries", "info")
+                     f"{len(merged)} entries", "info")
 
         if n_v3:
             self.log(f"Asset crypto: scheme 3 on {n_v3} file(s) "

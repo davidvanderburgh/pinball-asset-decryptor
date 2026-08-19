@@ -44,6 +44,22 @@ def test_write_reverse_mapping(abs_path, rel, shared):
     assert ec.image_path_for_rel(rel, EDATA_PREFIX) == abs_path
 
 
+@pytest.mark.parametrize("abs_path,rel,shared", PATH_CASES)
+def test_extract_forward_mapping(abs_path, rel, shared):
+    """Direct-SSD uses this where the WSL script uses its own ``_out_rel``."""
+    assert ec.output_rel_for_image_path(abs_path, EDATA_PREFIX) == rel
+
+
+@pytest.mark.parametrize("abs_path,rel,shared", PATH_CASES)
+def test_mapping_is_an_exact_inverse(abs_path, rel, shared):
+    """Extract and Write must compose to identity in both directions, or a
+    replacement is written to a path that does not exist on the image."""
+    fwd = ec.output_rel_for_image_path(abs_path, EDATA_PREFIX)
+    assert ec.image_path_for_rel(fwd, EDATA_PREFIX) == abs_path
+    back = ec.image_path_for_rel(rel, EDATA_PREFIX)
+    assert ec.output_rel_for_image_path(back, EDATA_PREFIX) == rel
+
+
 def test_game_assets_keep_their_original_mapping():
     """A game asset must be composed exactly as before this feature existed."""
     for _abs, rel, shared in PATH_CASES:

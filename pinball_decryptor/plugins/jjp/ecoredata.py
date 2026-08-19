@@ -87,6 +87,22 @@ def _norm_rel(rel):
     return r.lstrip("/")
 
 
+def output_rel_for_image_path(crypto_path, edata_prefix):
+    """Where an in-image asset lands inside the extract.
+
+    The inverse of :func:`image_path_for_rel`.  Shared assets keep their tree
+    name so the two directions compose exactly; game assets lose the
+    ``<Game>/edata/`` prefix as they always have.
+    """
+    for tree in SHARED_TREES:
+        root = GEN1_PREFIX + tree + "/"
+        if crypto_path.startswith(root):
+            return tree + "/" + crypto_path[len(root):]
+    if edata_prefix and crypto_path.startswith(edata_prefix):
+        return crypto_path[len(edata_prefix):]
+    return crypto_path
+
+
 def image_path_for_rel(rel, edata_prefix):
     """Absolute in-image path for an extract-relative asset.
 

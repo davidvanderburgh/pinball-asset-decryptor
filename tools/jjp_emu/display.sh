@@ -30,7 +30,10 @@ case "${1:-}" in
     --stop)
         pkill -f "Xephyr $JJP_NESTED" 2>/dev/null
         sleep 1
-        echo "Xephyr on $JJP_NESTED stopped ($(pgrep -fc "Xephyr $JJP_NESTED" 2>/dev/null || echo 0) left)"
+        # `pgrep -c` prints 0 AND exits 1, so the obvious `|| echo 0` prints
+        # TWO zeros - the same trap status.sh and alive.sh already carry.
+        LEFT=$(pgrep -fc "Xephyr $JJP_NESTED" 2>/dev/null)
+        echo "Xephyr on $JJP_NESTED stopped (${LEFT:-0} left)"
         exit 0 ;;
 esac
 

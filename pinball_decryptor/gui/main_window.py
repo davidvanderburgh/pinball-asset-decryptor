@@ -2229,6 +2229,7 @@ class MainWindow:
         self._tab_settings = ttk.Frame(self._notebook)
         self._tab_compare = ttk.Frame(self._notebook)
         self._tab_emulate = ttk.Frame(self._notebook)
+        self._tab_jjp_emulate = ttk.Frame(self._notebook)
 
         # Order: Extract → the Replace tabs → Default Settings (set defaults
         # before building) → Write → Mod Pack → Partitions.  Display labels are
@@ -2247,6 +2248,12 @@ class MainWindow:
             (self._tab_partition, "Partitions", "Partition Explorer"),
             (self._tab_compare, "Compare", "Compare"),
             (self._tab_emulate, "Emulate", "Emulate"),
+            # Same visible label as the Stern tab on purpose: labels are
+            # cosmetic (all logic keys off the stable identifier), the two are
+            # gated by different capability flags set by different plugins, and
+            # only one is ever visible at a time — so the user just sees
+            # "Emulate" for whichever manufacturer they have selected.
+            (self._tab_jjp_emulate, "Emulate", "Emulate JJP"),
         ]
         self._tab_keys = {}
         for _frame, _label, _key in _tabs:
@@ -2264,6 +2271,7 @@ class MainWindow:
         self._build_settings_tab()
         self._build_compare_tab()
         self._build_emulate_tab()
+        self._build_jjp_emulate_tab()
 
         # Phase indicators + progress bar
         status_frame = ttk.Frame(mv)
@@ -13336,13 +13344,48 @@ class MainWindow:
             resize_fn=self._resize_notebook_to_current_tab)
         self._emulate_panel.build(self._tab_emulate)
 
+    def _build_jjp_emulate_tab(self):
+        """Build the 'Emulate JJP' tab: run a Jersey Jack game on this PC.
+
+        The seam only.  Everything of substance is in
+        :mod:`..gui.jjp_emulate_tab`, and the launch sequence itself lives in
+        ``tools/jjp_emu/watch.sh`` — the order of mount, jail, dongle, audio,
+        boards, display, game is the part that was learned the hard way and it
+        must have exactly one definition.
+
+        Like the Stern tab, this acts on the RIG rather than on the image in
+        the Input box: it takes its own game ISO, mounts it read only, and runs
+        the real binary against it."""
+        from .jjp_emulate_tab import JJPEmulatePanel
+        # The ISO path is a WINDOW variable so the app can persist it into the
+        # project anchor and restore it on load, like the Extract/Write paths.
+        # Deliberately NOT sharing ``emulate_card_var`` with the Stern tab: a
+        # Stern .raw card and a JJP .iso in one key is a bug waiting for the
+        # first manufacturer switch.
+        self.jjp_emulate_iso_var = tk.StringVar()
+        self._jjp_emulate_panel = JJPEmulatePanel(
+            self._tab_jjp_emulate,
+            log=self.append_log,
+            iso_var=self.jjp_emulate_iso_var,
+            theme_fn=lambda: self._current_theme,
+            badge_fn=self._make_round_icon,
+            resize_fn=self._resize_notebook_to_current_tab)
+        self._jjp_emulate_panel.build(self._tab_jjp_emulate)
+
     def emulate_shutdown(self):
-        """App-quit hook: take the emulator down with the app (blocking,
+        """App-quit hook: take the emulators down with the app (blocking,
         bounded).  A quit must not leave the game, Controls and playfield
-        windows orphaned behind a vanished control surface."""
-        panel = getattr(self, "_emulate_panel", None)
-        if panel is not None:
-            panel.shutdown_sync()
+        windows orphaned behind a vanished control surface — nor, for JJP,
+        five CUSE daemons still serving device nodes for a game that is gone."""
+        for attr in ("_emulate_panel", "_jjp_emulate_panel"):
+            panel = getattr(self, attr, None)
+            if panel is not None:
+                try:
+                    panel.shutdown_sync()
+                except Exception:                          # noqa: BLE001
+                    # One panel failing to stop must not prevent the other from
+                    # being asked; a quit has to take BOTH down.
+                    pass
 
     def _build_compare_tab(self):
         """Build the 'Compare' tab: pick two card images (two releases, or a
@@ -14975,6 +15018,7 @@ class MainWindow:
                             getattr(caps, "settings_editor", False))
         self._configure_tab("Compare", getattr(caps, "compare", False))
         self._configure_tab("Emulate", getattr(caps, "emulate", False))
+        self._configure_tab("Emulate JJP", getattr(caps, "emulate_jjp", False))
         # The Mod Pack tab is shared, but the "Transfer Mods to New Version"
         # section only fits plugins whose vendor re-lays-out the card across
         # versions (Stern) — show it only for those, hide it for the rest.

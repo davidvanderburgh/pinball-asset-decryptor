@@ -71,4 +71,5 @@ for i in $(seq 1 "${JJP_DAEMON_TIMEOUT:-15}"); do
 done
 [ "$READY" = "1" ] || echo "warning: port 1947 never answered - the game will probably H0007"
 
-echo "aksusbd=$(pgrep -c -x aksusbd_x86_64 || echo 0) hasplmd=$(pgrep -c -x hasplmd_x86_64 || echo 0)"
+A=$(pgrep -c -x aksusbd_x86_64 2>/dev/null); H=$(pgrep -c -x hasplmd_x86_64 2>/dev/null)
+echo "aksusbd=${A:-0} hasplmd=${H:-0}"

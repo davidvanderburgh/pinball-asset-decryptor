@@ -63,6 +63,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from ..core import config
+from . import _rig
 from .widgets import _Tooltip
 
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -479,14 +480,10 @@ def parse_status(text):
 
     Split out of the panel so it can be tested without a Tk root — the state
     wording is the part most likely to be got wrong, and it is the part a user
-    reads first.
+    reads first.  The parsing itself now lives in :mod:`.._rig`, shared with
+    the JJP panel; both rigs speak key=value for the same reason.
     """
-    info = {}
-    for line in (text or "").splitlines():
-        if "=" in line:
-            key, _, value = line.partition("=")
-            info[key.strip()] = value.strip()
-    return info
+    return _rig.parse_status(text)
 
 
 def state_text(info):
@@ -514,13 +511,13 @@ def state_text(info):
 def _wsl_path(win_path):
     """``c:\\repo\\tools\\spike2_emu`` -> ``/mnt/c/repo/tools/spike2_emu``.
 
-    A POSIX path has no drive letter and passes through untouched, so this is
-    also correct on a Linux desktop where there is no translation to do.
+    Delegates to :func:`.._rig.wsl_path`, which the JJP panel uses too.  Kept
+    as a name here because three test files and several call sites import it,
+    but there is now exactly ONE definition of how a Windows path is spelled
+    for WSL - two panels each with their own copy is how ``alive.sh`` and
+    ``killgame.sh`` came to disagree about what a running rig is.
     """
-    p = win_path.replace("\\", "/")
-    if len(p) > 1 and p[1] == ":":
-        p = "/mnt/" + p[0].lower() + p[2:]
-    return p
+    return _rig.wsl_path(win_path)
 
 
 def rig_cmd(script, *args, env=()):

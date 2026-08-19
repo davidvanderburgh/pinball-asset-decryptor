@@ -7985,6 +7985,76 @@ static void led_publish(const unsigned char *p, int n)
         }
         return;
     }
+    /* ---- THE SERVICE MENU'S OWN SHAPES (cmd 94/95 set, cmd 70 clear) ------
+     *
+     * Measured on turtles_pro's Diagnostics -> LED Tests -> Single LED Test,
+     * driven one named fixture at a time (run 2 of item 50, 85.7 s window,
+     * 126k frames): the test never speaks 97/a2/b4/b5 at all. Its whole cycle
+     * is a per-LED off sweep and one set:
+     *
+     *   [node][05][70][idx][v16 lo][v16 hi]  x3948   every idx, value 0000
+     *   [node][04][94][idx][val]             x220    the lit fixture
+     *   [node][04][95][idx][val]             x212    ditto (alternates with 94)
+     *
+     * and the walk of (node, idx) across 17 stepped fixtures tracked the
+     * glass exactly: fixture 2 START BUTTON = node 1 idx 2, TEAM UP-R =
+     * node 8, and so on. godzilla's GAME mode also emits the len-7/len-8
+     * forms (178 x95, 6579 x70 in the item 27 capture), all dropped until
+     * now. The longer 94s (blen 7..14, godzilla) are some run/compressed
+     * form this does not claim to read; the length test keeps them out.
+     *
+     * NO led_known GATE HERE, and that is measured too: node 1 announces 6
+     * LEDs yet the test names and lights node 1 idx 7 (fixture 7). The
+     * membership gate exists to keep the LOOSE pair-shape heuristics from
+     * eating misparses; an exact cmd+length match has no such ambiguity, and
+     * gating would go dark on exactly the fixtures the oracle lights. The
+     * bound stays: val[] is 96 wide.
+     *
+     * 94/95 HOLD ONLY WHILE REFRESHED, and the hammering is the evidence: the
+     * test re-asserts the ONE lit fixture at ~7.5 Hz (94/95 alternating,
+     * ~133 ms apart, 432 frames for 17 fixtures) and never sends an OFF for
+     * indices past the 70-sweep's 0x00..0x26 window - stepping 8:55 -> 8:56
+     * emits only an a2 flash tail (37 b8 00 ff 00 08, an overlay by the 651-
+     * frame rule) and starts hammering 56. A latch would leave a growing
+     * trail of lit fixtures behind the SINGLE LED TEST; a watchdog output
+     * that decays when the refresh stops goes dark by itself, which is what
+     * the real glass shows and what the refresh rate is FOR. So a 94/95
+     * lands in the fade ring as a flat hold - from = to = value, fall = 33
+     * units (~400 ms at the reader's 12 ms/unit) - re-armed by every
+     * refresh, expiring onto the base val[] (0) when the game moves on.
+     * cmd 70 is the base layer's own clear (value observed 0000, 6579 of
+     * 6579 on godzilla, 7755 of 7755 on turtles) and writes val[] direct. */
+    if (n == 7 && (cmd == 0x94 || cmd == 0x95)) {
+        if (p[3] < 96) {
+            unsigned slot;
+            led_map();
+            if (!led_shm) return;
+            slot = led_shm->fade_head % 96u;
+            led_shm->fade[slot].ms    = (unsigned)pad_ms();
+            led_shm->fade[slot].node  = (unsigned char)node;
+            led_shm->fade[slot].start = p[3];
+            led_shm->fade[slot].end   = p[3];
+            led_shm->fade[slot].from  = p[4];
+            led_shm->fade[slot].to    = p[4];
+            led_shm->fade[slot].rise  = 0;
+            led_shm->fade[slot].fall  = 33;
+            led_shm->fade[slot].pad   = 0;
+            led_shm->fade_head++;
+            led_shm->decoded++;
+            led_shm->gen++;
+        }
+        return;
+    }
+    if (n == 8 && cmd == 0x70) {
+        if (p[3] < 96) {
+            led_map();
+            if (!led_shm) return;
+            led_shm->val[node][p[3]] = p[4];
+            led_shm->decoded++;
+            led_shm->gen++;
+        }
+        return;
+    }
     if (cmd != 0x97 && cmd != 0xa2 && cmd != 0xa3 && cmd != 0xa4 &&
         cmd != 0xa5 && cmd != 0xa6 && cmd != 0xb4 && cmd != 0xb5) return;
 

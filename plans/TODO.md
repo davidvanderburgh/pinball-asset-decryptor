@@ -1024,32 +1024,349 @@ These have each been violated at least once and each cost a run or a window:
       session with a save and a load.
 
 
-- [ ] **50. No LED feedback at all on a title with no playfield artwork,
-      which is most of them.** `S3 D3`
+- [x] **50. No LED feedback at all on a title with no playfield artwork,
+      which is most of them.** `S3 D4` ← CLOSED 2026-08-18, acceptance met on
+      turtles_pro in its strongest form; see the ★★★ close block below the
+      resume note. Awaiting `/finish`.
+      **★★ REOPENED 2026-08-16, HOURS AFTER BEING CLOSED, BY DAVID — and the
+      reason is the one that matters.** Asked whether it worked, he said: *"i'm
+      confused did we make this work or not? does it work for TMNt for
+      example"*, and on being told no: *"do option 1 and let's make it work
+      now"*. **Option 1 was: fold item 54 into this one and keep it open until
+      TMNT actually lights up.**
+      **THE CLOSE WAS TOO GENEROUS AND THIS IS THE LESSON.** Everything in the
+      Done-section entry below is true — the view is built, the tracking is
+      measured, godzilla and elvira3 both showed real LED activity — but on
+      **turtles_pro, the title David was looking at when he FILED this item,
+      the window still shows nothing.** The acceptance was met on the machinery
+      and not on the ask. A feature that is correct and shows nothing to the
+      user who asked for it is not done. **D3 → D4:** what is left is not
+      drawing work at all, it is an unknown frame shape that needs runs.
+      **THE WHOLE OF WHAT IS LEFT is what was item 54** (now folded in; do not
+      work it separately): turtles_pro puts NO frame the shim recognises as a
+      lamp write on the wire — `decoded=0` AND `skipped=0` across a whole run,
+      including while the game's own `Diagnostics → Single LED Test` was being
+      stepped by hand and naming `13 / 8-LP-5 / LEFT RETURN LANE LEFT-G / CN14
+      / RETURN=4, SOURCE=7/8`. `skipped=0` is the load-bearing half:
+      `led_publish()` is called on EVERY node bus write (`hwshim.c:7224`), so
+      the frames are not failing the decoder, they are not reaching it.
+      **Acceptance, REPLACED and now the only one that counts:** on
+      **turtles_pro**, LEDs visibly light and move in the playfield window
+      while the game runs — stated with a screenshot and with the ring-vs-screen
+      measurement in BOTH directions (the picture must also hold still when the
+      game does).
+      **★★ THE DIAGNOSIS FLIPPED, 2026-08-17, AND IT IS MUCH SMALLER THAN
+      "AN UNKNOWN FRAME SHAPE". turtles_pro ALREADY SENDS COMMANDS THE DECODER
+      ACCEPTS.** Unioned over **23 turtles captures in `/var/tmp`**
+      (`item43_*.log`, 2026-08-11/12, 345 KB–6.7 MB — nobody had looked there),
+      turtles sends **six of the eight accepted lamp commands — 97, a2, a4, a5,
+      b4, b5 — on nodes 1, 8 AND 9**, e.g. node 8 `8805b43abf07bf00` (b4),
+      node 9 `8908a224ab00ff0702f600` (a2). And its `node_ident.txt` says nodes
+      1/8/9 are `pinnode` boards, the same type as godzilla's. **So no new
+      decoder shape is needed.** The question is what makes turtles reach the
+      state where it drives them.
+      **Why the item-50 run saw nothing, two independent signals agreeing:**
+      hwshim's light-show announcer (`hwshim.c:6086-6118`) fires on those eight
+      commands on ANY node, deliberately before the node gate — it never fired;
+      and an un-enumerated board yields `decoded=0` with **`skipped > 0`**,
+      while that run had `skipped=0` too. Both say no lamp command was SENT,
+      not that one was sent and rejected.
+      **★ CORRECTIONS TO EVIDENCE THIS ITEM PREVIOUSLY RELIED ON — do not reuse
+      the old numbers:** (i) `/home/david/gzwatch.log` is **not** turtles; it
+      was overwritten by the concurrent item-52 session and now declares
+      `[run] title: stranger_things_le`. The "402-second turtles run" cited
+      earlier is `/home/david/gzt2.log` (2026-08-05, `[run] title: turtles_pro`)
+      — **and two agents disagree about whether that file has node-bus lines at
+      all, so re-derive it before use.** (ii) `[nb] TX` logging is BUDGETED
+      (~162 frames, all boot handshake), so any "vocabulary" read off a single
+      run's `[nbcmd]` census is truncated and is NOT the title's command set.
+      The `decoded`/`skipped` counters in the padled block are not budgeted and
+      remain authoritative.
+      **★ RIG IS DOWN AND NEEDS DAVID, 2026-08-17.** `wsl --shutdown` (run to
+      clear the item-38 interop zombies) never completed: `vmmemWSL` is still
+      up, `WSLService` reports Running, and every `wsl` invocation now HANGS
+      rather than returning. 18 hung `wsl.exe` clients were cleared, which did
+      not help. Needs an elevated `Restart-Service WSLService` or a reboot. **No
+      rig work of any kind is possible until then**, including reading
+      `/var/tmp`.
+      **★★★ TMNT LIGHTS UP, 2026-08-17. `37 of 42 LEDs lit`, `2772 LED writes
+      decoded`, `44 coils addressed` — screenshot taken.** The decoder needed
+      NO change. What was missing was the STATE the game has to be in, and the
+      recipe is the valuable part:
+      **(1) turtles boots to a Tech Alerts screen and stays there** — and they
+      are SWITCH complaints (`Check Switch #80 LOCKDOWN BUTTON`, `#91 TILT
+      PENDULUM`), not the node-board complaints elvira3 shows. Its boards are
+      found. While parked there it runs no light show at all.
+      **(2) `plunge.py reset` clears it** ("six balls in the trough, coin door
+      shut") and the game proceeds to attract.
+      **(3) ATTRACT IS NOT ENOUGH.** In attract turtles drives only node 1 —
+      `a4`/`a5` at len 7, body `0485`, blen 2 — which is too short for any
+      decoder shape and which **godzilla logs as `[ledskip]` with the identical
+      body**, so it is not lamp data on either title. Nodes 8 and 9 enumerate
+      (64 and 58 indices) and receive nothing.
+      **(4) A GAME IS WHAT DRIVES THE PLAYFIELD.** `plunge.py coin` ×2 then
+      `plunge.py start`, and lamp frames land on nodes 8 and 9 immediately:
+      `decoded` 0 → 380 → 2772 → 5142, live channels `{8: 2, 9: 35}`.
+      **★ THE 6-BYTE ENUMERATION DOES RUN ON TURTLES** — node 1: 6, node 8: 64,
+      node 9: 58, frames `88038400f100` / `89038500ef00`. So star_wars's
+      failure mode (enumeration absent, `led_known` empty, everything skipped)
+      is RULED OUT for turtles, and this was measured from the first
+      `PAD_NB_TRACE` capture turtles has ever had (`~/i50_tmnt_trace.log`;
+      every one of the 23 `/var/tmp/item43_*.log` files is the BUDGETED kind,
+      exactly 162 frames of boot handshake, and proves nothing either way).
+      **★ THE GRID MOVED TO THE LEFT, and that was a real fault not a
+      preference.** With turtles' 93 switches flowing into three columns the
+      grid was pushed past the window edge and survived only behind the
+      horizontal scrollbar — the window reported `37 of 42 LEDs lit` while
+      showing the user nothing, which is precisely the complaint this item
+      exists to fix. The lamps are what this view is FOR; the switch list is
+      what scrolls now.
+      **★ WHAT IS STILL NOT DEMONSTRATED, and it is why the box is still
+      empty.** The replaced acceptance asks for LEDs that "visibly light AND
+      MOVE", with the ring-vs-screen measurement in BOTH directions. Only the
+      NEGATIVE direction was obtained on turtles: across 13 samples the ring's
+      lit set held the same 37 channels and the screen changed 0 pixels, four
+      times over, even while `decoded` climbed by hundreds (the game rewriting
+      identical values — the churn control, and it passes). **No POSITIVE
+      transition was measured on turtles**: its lamp picture stayed static
+      through attract, ball launch and three target hits. The 0 → 37 change
+      when the game started WAS observed but not instrumented. The positive
+      direction is measured only on godzilla_pro (10 channels → 4635 pixels,
+      36 → 9811).
+      **★ AND THE STATIC PICTURE IS THE GAME'S, NOT THE VIEW'S — settled at
+      the desk from the capture, so no run was spent on it.** Replaying the
+      lamp frames out of `~/i50_tmnt_trace.log` and counting DISTINCT payloads
+      per (node, cmd, len): node 1 `a4`/`a5` sent **one** payload (`0485`)
+      1254 times; node 8 `b4` len 11 **one** payload 59 times; node 9 `b4` len
+      9 **one** payload 81 times; node 9 `b4` len 8 **two** — `3bbd0a` ×85 and
+      `26a701` ×1. **turtles sends NO `a2` frames at all**, so it animates
+      nothing through the fade ring either. The wire genuinely carried a still
+      picture; the grid was faithful to it. **That rules out a decode gap and
+      means the next move is GAMEPLAY, not code.**
+      It also explains the four missed sampling windows: the picture DOES
+      change (that lone `26a701`), just rarely while the game idles, so a
+      4-second sample almost never straddles a transition.
+      **Resume — the named oracle is now reachable and is the cheapest sure
+      thing.** turtles gets past its Tech Alerts once `plunge.py reset` runs,
+      so `Diagnostics → LED Tests` can be driven: `swhold.py 33 0` (door OPEN,
+      service menu live), then `swpoke.py 25 2000` for Service Select and
+      `swpoke.py 26 500` / `27 500` to move, `28` to go back. It lights ONE
+      named fixture at a time, which forces the transition the instrument
+      needs AND satisfies the acceptance's strongest form. Sample the ring and
+      the screen across each step. **Tap lengths are godzilla's and are a guess
+      on turtles' menu generation** — expect to calibrate.
+      **★★★ CLOSED 2026-08-18: THE ORACLE WAS DRIVEN, IT SPOKE A THIRD
+      VOCABULARY, AND THE VIEW NOW TRACKS IT — both directions, ring and
+      screen agreeing, measured across four runs.**
+      **The measurement that closes the box (run 4, `Single LED Test`, 12
+      stepped fixtures):** `lit=1` at every step — the SINGLE LED test reads
+      as a single LED — and every step that moved shows **RISEN(1) +
+      FALLEN(1) in the same step**: `1:2→1:3→1:5→1:4→1:7→8:3→8:6→8:5→8:4`,
+      cabinet board onto playfield board, each named on the glass (`2 / 1-LP-2
+      START BUTTON` …). The screen half: 404–712 grid pixels changed on the
+      stepped transitions (the three 0-px steps were shot-vs-tick aliasing,
+      proven by a same-ring re-shot moving 364 px as the grid caught up).
+      Window screenshot taken: node 8's row with ONE orange cell, status bar
+      `1 of 10 LEDs lit  44374 LED writes decoded`.
+      **Why the test was invisible before (run 2's capture, 85.7 s, 126k
+      frames, trace budget spent on purpose before attract could eat it): the
+      service menu never speaks 97/a2/b4/b5.** Its whole cycle is
+      `[node][05][70][idx][v16]` off-sweeps (×7755, value always 0000),
+      `[node][04][94][idx][val]` / `[node][04][95][idx][val]` for the ONE lit
+      fixture (×432, alternating ~133 ms apart), plus an `a2` flash tail on
+      stepping and a constant `41` len-52 broadcast that never tracked the
+      walk. The 94/95 (node,idx) walk matched the glass fixture-for-fixture
+      across 17 steps. godzilla's GAME mode also sends the len-7/len-8 forms
+      (6579 ×70 — all `idx 0000` — and 178 ×95 in the item-27 capture), all
+      skipped until now; its longer 94s (blen 7–14) are some run/compressed
+      form deliberately NOT claimed.
+      **The decode (hwshim.c, before the command gate): exact cmd+length
+      match, `idx < 96` bound, NO `led_known` gate** — measured: node 1
+      announces 6 LEDs yet the test lights node 1 idx 7. `70` writes the base
+      (`val[idx] = v`, observed only as clear). **`94`/`95` hold only while
+      refreshed** — the hammering is the evidence: the test re-asserts the lit
+      fixture at 7.5 Hz and never sends an off for indices past the sweep's
+      0x00..0x26 window; a latch left a trail (run 3 measured `lit` 1→10); a
+      watchdog output that decays goes dark by itself. Implemented entirely
+      in the existing overlay machinery: each 94/95 lands in the fade ring as
+      a flat hold (`from=to=val, rise=0, fall=33` ≈ 400 ms at the reader's
+      12 ms/unit), re-armed by every refresh, expiring onto base 0 when the
+      game moves on. Run 4's `lit=1`-everywhere is that model confirmed live.
+      `ledreplay.py` mirrors the accept path (run-2 window: 8373 of 8386
+      would-decode) so the desk stays truthful.
+      **The a6 comment's own caveat is now partially answered**: the oracle it
+      asked for has been run; on these indices the wire's idx IS the fixture
+      the glass names (1:2 = START BUTTON, per-step match ×17). The a6
+      bitmap-order question itself remains open — the test never spoke a6.
+      **Menu recipe, CORRECTED from the resume note's guesses — this is the
+      valuable operational half:** (1) `swpoke --tap` at 1–5 reads moves
+      NOTHING on turtles: menu actions need a real wall-clock press,
+      `swpoke.py 25 300`. In-menu cursor moves want `--tap 26 10` = exactly
+      one step (the tap lottery still eats ~⅓ of taps; screenshot between
+      steps). (2) Clearing Tech Alerts needs `plunge.py reset` AND a Back
+      press (door open) — reset alone parks there, run 1 only cleared because
+      autoattract had pressed Back first. (3) **Kill autoattract.sh before
+      any menu work** — it blind-presses Service Back every ~45 s against a
+      log that never answers, and its id-28 press is turtles' SERVICE BACK.
+      (4) Path: alerts →Back→ splash →Select→ main menu (DIAG) →Select→
+      diagnostics (SW) →+×2→ LAMP →Select→ SINGLE LED →Select→ in. Fixture 2
+      START BUTTON is the entry point.
+      **Evidence on disk:** `~/i50_test_window.log` (run 2's test window),
+      `~/i50_run{1,2,4}_gzwatch.log`, `C:/tmp/item50/` (grid + LCD
+      screenshots, per-step ring json), scratchpad `ledstep.py` /
+      `testvocab.py` / `map70.py` / `walk9495.py` (the instruments; session
+      paths, deliberately not shipped).
+      See the folded item-54 body below for the ruled-out titles, the decoder's
+      accept path, and the `lednames.py` name-table work already done.
       **★ DAVID, 2026-08-14: "we should have some visual indication of leds
       here even without the playfield. can we think of some elegant way to show
       that?"** The window's own status bar says `2285 LED writes decoded` while
       showing nothing lit — the data is arriving and there is nowhere to put
       it.
-      **WHY THERE IS NO PICTURE, measured on james_bond_60th so the next pass
-      does not go looking for a missing file:** the artwork branch needs a
-      playfield image AND something positioned on it, and Bond has neither.
-      Its `device_xy.txt` header reads `513 records (coil=16 led=426
-      switch=71), 0 on the playfield image`, its `playfield.png` is a **202x443
-      8-bit GRAYSCALE thumbnail**, and its `led_io.txt` carries **29 rows, all
-      CABINET** (`COIN DOOR GI`, `START BUTTON`, `ACTION BUTTON-G/-R`) against
-      the cabinet-front image. So 426 LEDs exist in the device table and 29
-      reach the map, none with a playfield position.
-      **THE DESIGN THAT FOLLOWS FROM THAT — drive it from the LIVE RING, not
-      from led_io.txt.** A swatch grid in the empty right-hand column, grouped
-      by node exactly as the switch list is, one cell per FIXTURE rather than
-      per channel so an RGB triple is one cell in its true colour (the rig
-      already joins 113 channels to 81 fixtures for the artwork view, item 1a).
-      Name each cell from `device_xy` where a name exists and `node.index`
-      where it does not. Reading the padled block directly means it works on
-      every title regardless of table quality — Bond would show all its
-      channels, not the 29 that made it into the map — and the light show
-      becomes a field of colour you can watch move.
+      **★★ DAVID, 2026-08-16, WHICH SPLIT THIS ITEM IN TWO: "if we can show
+      them positionally (relative placement) that is ideal. also showing
+      switches placement would be ideal. (even if we can't show the playfield
+      artwork)."**
+      **★★ THE PREMISE BELOW WAS WRONG, AND THAT IS THE PASS'S MAIN RESULT.**
+      This item said Bond "has neither" a playfield image nor anything
+      positioned on it. **james_bond_60th_le carries a COMPLETE playfield
+      layout — 73 LEDs, 49 switches, 16 coils, every one at a distinct
+      position — and its artwork is fine.** All 138 records were dropped by a
+      string compare: Godzilla, Jaws and John Wick name that image
+      `playfield`, Bond names it `Test/scaled_playfield`, and every loader in
+      the rig filtered on the literal. The `202x443` art is not a "thumbnail"
+      in any bad sense either — it is the same KIND of asset Godzilla uses (a
+      test-mode line drawing, Godzilla's is 313x710) and it CONTAINS Bond's
+      coordinates (x 6..196, y 26..409), so it draws correctly.
+      **Established, all at the desk, no run:**
+      **(1) Only 4 of 9 titles genuinely have nothing** — star_wars_le,
+      stranger_things_le, turtles_pro, led_zeppelin_le all carry `0 records`
+      in device_xy.txt. elvira3 has 275 LEDs positioned on its TOPPER image
+      and no playfield at all.
+      **(2) Bond's switches join 49/49** to a live id from switch_list.txt at
+      the desk, so they are positioned AND clickable with no run and no
+      rebuild. The three titles that already have a built switch_xy.txt score
+      41/41, 60/60 and 57/57 by the same join, which is what says the derived
+      path and the built one agree.
+      **(3) SHIPPED THIS PASS on `item/50`:** `devicexy.layout_image()` (one
+      definition of which image is the layout — most device CLASSES, then most
+      devices), `devicexy.read_table()` (device_xy.txt back into records, so a
+      CARD run needs no ELF), playfield.py reading its LEDs/switches/coils from
+      that table, artwork that is accepted only when its pixel size CONTAINS
+      the coordinates, and a blank-field fallback when it is not. Bond's window
+      now draws its playfield; `ledratetest.py` still PASSES on godzilla_pro,
+      which is the regression gate for the artwork view.
+      **★ (4) A SEPARATE DEFECT FOUND ON THE WAY, and it is bigger than this
+      item — see the new item on the group → node map.** `coilmap.GROUP_NODE`
+      is `{4:0, 5:1, 6:8, 7:9}`, measured on Godzilla and hard-coded. Bond's
+      playfield devices are groups 8 and 9, so **0 of 73** LEDs get a wire
+      address. It is not only Bond: **jaws draws 65 of its 143 LED channels and
+      john_wick 53 of 406** for the same reason, and nobody noticed because
+      both look fine. Positions are known; the wire address is not.
+      **★ (5) THE SWATCH GRID IS BUILT AND PASSES OFFLINE, `5e87bb9`.**
+      `LedGrid` in the `Schematic` view, roster from the LIVE RING so it works
+      on the 4 titles with no table and needs no group → node map. `LedRing`
+      is Field's fade/base-layer read moved out verbatim, so both views decode
+      the wire once. `ledgridtest.py` is the harness, in `ledratetest.py`'s
+      shape and importing its `Feed`: 12 irregular channels → exactly 12 cells
+      **of the 1536 addresses that exist** (the labelled negative), a roster
+      growing in 4 stages costing 4 canvas items, tracking 90→255→0 with a
+      churn control, and an a2 pulse returning to the BASE layer. turtles_pro
+      captured showing 111 channels on nodes 8/9, "86 of 111 LEDs lit".
+      **Ruled out / fixed on the way:** `_rebuild` first made fresh cell dicts
+      per rebuild, leaking a canvas item per cell and burying the node headers
+      under stale swatches — invisible to a test that lights everything at
+      once. The staged-growth case exists because of it.
+      **★★ (6) THE LIVE RUN, turtles_pro, 2026-08-16, AND IT FOUND TWO THINGS.**
+      **(6a) FIXED AND VERIFIED LIVE: the window said "no emulator" over a
+      game that was plainly running its attract.** The status was gated on the
+      padled MAGIC, which hwshim stamps on the first LED write it DECODES — so
+      a title that decodes none leaves the block zeroed and the window called
+      a healthy run dead. That is David's item-40 complaint arriving by a
+      second route, and it also meant the grid lived in the else-branch and
+      could never draw on the one title it was built for. Three states are now
+      distinct (unreadable / readable-but-unstamped / stamped); the live bar
+      now reads `emulator up   NO LED DATA on this title: the shim has decoded
+      no LED writes at all   trough 6/6   0 in play` — the trough proving the
+      run is there.
+      **(6b) turtles_pro DECODES NOTHING, and the run pinned why it is not the
+      grid's fault. `decoded=0, skipped=0` THROUGH THE GAME'S OWN
+      `Diagnostics → Single LED Test`** — David drove it to `13 / 8-LP-5 /
+      LEFT RETURN LANE LEFT-G / CN14 / RETURN=4, SOURCE=7/8`, i.e. the game
+      names the lamp, its node and its connector while the wire stays silent.
+      `skipped=0` matters: `led_publish()` is called on EVERY node bus write,
+      so the frames are not being rejected by the decoder, they are not
+      arriving. No NEW node bus command byte appeared during the test either —
+      turtles' whole vocabulary over the run is `00 03 04 07 08 0a f0 f1 f2 f9
+      fc fe`, with the shim answering `fe` (identity) and returning all-zeros
+      to `f9`/`fc`. See the new item on the LED write shape.
+      **The turtles run is DOWN** (David: "i'm done. take over"). Logs kept at
+      `~/item50run.log` and `~/item50watch.log` — the `[nbcmd]` census in the
+      first is item 54's evidence and the budget was never spent.
+
+      **★★ CLOSED 2026-08-16. THE ACCEPTANCE, CLAUSE BY CLAUSE, AND THE ONE
+      AMENDMENT — read this before believing the box.**
+      **(a) "on a title with no artwork the window shows LED activity" — MET
+      LITERALLY, on elvira3**, the one title on this disk with no
+      `playfield.png` at all. Its grid discovered 4 channels from the WIRE
+      (its table contributes nothing — all 275 of its lamps are group 3, which
+      GROUP_NODE cannot address), and the bar read `emulator up   4 of 4 LEDs
+      lit   4 LED writes decoded`. Counter and cells agree.
+      **(b) "that visibly tracks the game" — MET, MEASURED, BOTH DIRECTIONS,
+      but on godzilla_pro forced into this view with `PAD_PF_VIEW=schematic`.**
+      elvira3 could not supply it: it boots to a Tech Alerts screen (node
+      boards 2/7/14, `GAME VALIDATION ERROR - #3 UPDATE SD CARD`) and will not
+      start a game, so its 4 channels sit static. Against godzilla's live
+      attract, sampling the RING as ground truth beside the screen:
+      10 channels changed → 4635 grid pixels changed; 36 changed → 9811
+      changed; **0 changed → 0 changed**. That last row is the labelled
+      negative — the view holds still when the game does, so it is tracking and
+      not merely repainting. The roster grew to `node 8 (45) + node 9 (68)` =
+      **113 channels, which is exactly the 113 godzilla's device table
+      independently says it has**, discovered with no table read at all.
+      **★ THE AMENDMENT, AND IT IS DAVID'S TO OBJECT TO:** the acceptance named
+      `Diagnostics → LED Tests driving one fixture at a time by name` as the
+      real form. That was NOT reached. What replaced it is a ring-vs-screen
+      measurement in both directions, which is more rigorous than eyeballing
+      one fixture but is not what the clause said — and it was taken on a title
+      that HAS artwork, forced into the view. The clause was written under the
+      premise this pass demolished ("Bond has neither"), which is why amending
+      it is defensible rather than convenient.
+      **(c) "a title WITH artwork is unchanged" — TRUE OF THE THREE THAT WERE
+      WORKING, AND DELIBERATELY FALSE OF ONE.** `ledratetest.py` still passes
+      on godzilla_pro (the regression gate), and godzilla/jaws/john_wick keep
+      exactly their 81/113/198 LED fixtures, 41/58/56 switches and 10/14/16
+      coils. But `88dd76e` deliberately moved james_bond_60th_le from the bare
+      switch list INTO the artwork view, which David asked for in as many
+      words, and `26b3986` changed the status line on every view. Both are
+      wanted; "unchanged" is not literally true and a close that asserts it
+      would be overclaiming.
+      **★ WHY NO TITLE IN THIS VIEW COULD SUPPLY (b) — five ruled out, and it
+      is item 54's evidence:** turtles_pro (live, `decoded=0 skipped=0` through
+      the game's own Single LED Test); star_wars_le (`led_publish` replayed
+      over an 8.5-minute trace — 619 LED-class frames DO land on the insert
+      nodes but `led_known[8]`/`[9]` are empty because it never sends the
+      6-byte `0x84/0x85` enumeration, so DECODED=0 and SKIPPED=619);
+      led_zeppelin_le (three runs, ~11 min of attract, not one of the eight
+      accepted command bytes ever appears); stranger_things_le (item 52 — the
+      game never finds nodes 1, 8 and 9, which are precisely the decoded ones);
+      elvira3 (Tech Alerts, will not start a game).
+      **★ CORRECTED COUNTS, measured twice (through `GROUP_NODE` and from the
+      built `led_io.txt`): jaws draws 67 of 143 and john_wick 57 of 406**, not
+      the 65 and 53 written above and in item 53. Bond's 0 of 73 stands.
+      **★ RIG STATE ON EXIT — NOT CLEAN, AND IT NEEDS DAVID.** `killgame.sh`
+      leaves **2 zombie `game` processes (`Zl`, no CPU) and elvira3's fuse2fs
+      card mount**; they are held by a WSL interop Relay and ignore SIGKILL
+      from inside the VM. The cure is `wsl --shutdown` from Windows, which this
+      session is not permitted to run. It is item 38's known fault, and the
+      zombies burn nothing while they sit. The rig lock has been RELEASED.
+      **Resume:** the grid is proven offline and cannot be proven live on
+      turtles until the new item lands. The cheapest live proof left is a
+      title that DOES decode LED writes and lands in this view — but note
+      Bond now gets the artwork view, so today that is star_wars_le or
+      led_zeppelin_le, and neither is known to decode. **State that in the
+      close: item 50's acceptance is blocked on the LED-write item, not on
+      the grid.**
       **Acceptance:** on a title with no artwork the window shows LED activity
       that visibly tracks the game (state what you compared it against — the
       LED-writes counter moving with cells changing is the weakest form; the
@@ -1060,7 +1377,7 @@ These have each been violated at least once and each cost a run or a window:
       the fixture join both exist, the layout is new drawing work in
       playfield.py, and confirming it means a run with the LED test menu.
 
-- [ ] **53. A master volume knob and a Mute for the EMULATOR's sound to the PC
+- [ ] **56. A master volume knob and a Mute for the EMULATOR's sound to the PC
       speakers — our level, not the game's.** `S3 D2`
       **★ DAVID, 2026-08-18: "master pc volume knob for emulator (not for in
       game, but for the emulator to my pc speakers). should have mute and
@@ -1098,6 +1415,148 @@ These have each been violated at least once and each cost a run or a window:
       python.exe is the workaround today. D2: the gain is a few lines in one
       callback plus two widgets and a control channel, and confirming it is one
       run with the loopback capture.
+
+- [ ] **54. FOLDED BACK INTO ITEM 50 on 2026-08-16 at David's ask — do not
+      take this as a separate item.** It was split out when item 50 looked
+      closeable without it; David's "does it work for TMNT" made clear that
+      item 50 is not done until this is, so item 50 now carries the acceptance
+      and this entry is kept ONLY for the evidence below, which is expensive
+      and must not be re-derived. `S2 D4`
+      *(Everything under here is item 50's working state.)*
+      **★ DAVID, 2026-08-16, looking at the running game: "i feel like there
+      should be an led table somewhere. look at the diag → all leds screen for
+      example."** He is right, and the screen he was on is the oracle:
+      `SINGLE LED TEST / 13 / 8-LP-5 / LEFT RETURN LANE LEFT-G / CN14 /
+      RETURN=4, SOURCE=7/8 / GRN-BRN / YEL`. The game names the lamp, gives
+      its board (`8-LP-5` — node 8, lower playfield), its connector and its
+      matrix return/source. That data is in the binary.
+      **MEASURED ON A LIVE turtles_pro RUN (item 50's), and it is a negative
+      result with numbers:** `decoded=0, skipped=0` for the whole run
+      INCLUDING the Single LED Test being stepped by hand. `skipped` counts
+      frames that looked like indexed LED writes and fitted no shape, so zero
+      of BOTH means the frames never arrive — and `led_publish()` is called on
+      every node bus write (`hwshim.c:7224`), so nothing upstream is filtering
+      them. The `[nbcmd]` census (one line per first sighting of a command
+      byte, budget NOT spent — 3172 lines) shows turtles' entire vocabulary as
+      `00 03 04 07 08 0a f0 f1 f2 f9 fc fe`, **with no new byte appearing
+      during the LED test**. Godzilla's per-LED config writes are `0x84/0x85`
+      (ledio.py) and its fades are `a2`; none of those appear here. The shim
+      answers `fe` (identity) and returns all-zeros to `f9` and `fc`, e.g.
+      `TX 8103f9008312 → 18 bytes of 00`.
+      **TWO READINGS, AND THEY NEED DIFFERENT WORK — decide which before
+      building:** (i) turtles drives its lamps with a command shape nobody has
+      decoded, in which case `PAD_LED_SKIP_LOG` / `PAD_NB_LOG` raised on a run
+      that reaches the Single LED Test will show it, and the test screen NAMES
+      the lamp being driven, which is the labelled experiment this rig always
+      wants; or (ii) the game has concluded the boards are not there and is
+      not driving them at all, which makes this a sibling of items 51/52 and
+      the all-zeros `f9`/`fc` replies the thing to fix.
+      **THE NAME TABLE — HALF DONE 2026-08-16, and it turned out to be the
+      more interesting half.** `lednames.py` used to die on turtles
+      (`struct.error: ... offset 7725056 (actual buffer size is 6457552)`)
+      because it hard-coded godzilla's `TABLE_VA`. It now finds message tables
+      BY SHAPE, the same move devicexy.py made: a record is 0x18 bytes of FIVE
+      pointers to one string then a null, the five being untranslated language
+      slots, and requiring all five to be EQUAL is what makes the fingerprint
+      strong. **105 message tables located in godzilla_pro with no address at
+      all**, 11 of them carrying `-R/-G/-B` lamp names.
+      **★ AND IT DEMOLISHED THE OLD CONSTANT, which is the finding to keep:**
+      **`0x766000` is not the start of anything.** It is record 73 of the run
+      at `0x765928` and lands on `'Heat Ray 9-G'`, mid-family — so every
+      "channel index" that tool ever printed was offset by an arbitrary 73.
+      **There is no single LED table**: godzilla's lamp names are spread over
+      at least five runs (125, 104, 43, 27, 27 records), and names run
+      **DESCENDING** within a run — `Heat Ray 11-G, 10-B, 10-R, 10-G, 9-B`.
+      lednames.py now reports the candidate RUNS and states that its index is
+      within a run and is NOT the game's channel number, rather than inventing
+      the join. **Do not "fix" it by picking the biggest run.**
+      **What is left of this half:** the join from a run's records to the
+      game's own lamp index. The oracle is the Single LED Test itself — it
+      names one lamp against one index and one board, so a handful of stepped
+      LEDs with the names written down pins it as a labelled experiment.
+      **Acceptance:** state turtles_pro's LED write frame with the lamp the
+      Single LED Test named while it was captured (so the decode is labelled,
+      not guessed), and show `decoded` moving above zero on a run; separately,
+      lednames.py returns a named table for a title it has never seen.
+      — S2: no title is blocked from playing, but the LED half of the virtual
+      playfield is dead on the four table-less titles and item 50's view has
+      nothing to draw there. D4: it needs runs, the frame shape is unknown,
+      and reading (i) vs (ii) has to be settled before the instrument is
+      chosen.
+
+- [ ] **55. turtles_pro flashes "UPDATING NODE BOARD RUNTIME / UPDATE FAILED"
+      for nodes 4 and 12 at game start — the title's OWN node table carries
+      two mis-derived rows, and the shim serves them verbatim.** `S3 D2`
+      *(Filed 2026-08-18 from David's live report, mid-game screenshot in
+      hand. Same SCREEN as item 51 but not the same fault: 51 was godzilla's
+      table claimed at every title; this is the per-title derivation being
+      wrong twice for turtles. The banners PASS after a "PLEASE WAIT" spell —
+      David's game proceeded to PLAYER 1 / Ball 1 — so unlike star_wars's
+      fatal loop this costs seconds and a scare, not the game.)*
+      **The two nodes on the glass are exactly the two rows the generator
+      itself flagged** in `/dump/tables/turtles_pro/node_ident.txt`:
+      `node=4 type=node4 … fw=0x7c6b00 hexver=as-read(124.107.0)` — a
+      nonsense firmware version read raw, self-marked `as-read` — and
+      `node=12 type=coil4node … variant=0x01 variant_guess=1`. Every other
+      row says `fw=0x012100 hexver=1.33.0`. `nb_fident_load()` (hwshim.c,
+      item 51's loader) parses `fw=0x` verbatim and answers the game with
+      124.107.0 for node 4; the game ships `node4-LPC1124_303-1_33_0.hex`,
+      sees the mismatch, tries to update the board's runtime, and our bus
+      does not do updates → UPDATE FAILED. Node 12 is the same class via the
+      guessed variant.
+      **Likely fix is in `nbdir.py`, not the shim:** both flagged rows
+      already carry the answer in their `hex=` filename (`…-1_33_0.hex`) —
+      when the read version is implausible (as-read) serve the version the
+      title's own hex declares, keeping the as-read note as a comment. Then
+      regenerate the table and verify the banners are gone at game start.
+      **Acceptance:** a turtles_pro game starts with no UPDATING NODE BOARD
+      RUNTIME banner for any node, stated with the game-start glass observed.
+      — S3: the game recovers by itself; seconds lost and it reads like a
+      fault. D2: a derivation guard plus one verification run.
+
+- [ ] **53. The device-table GROUP → bus NODE map is ONE TITLE'S measurement,
+      so most titles' lamps and coils have a position and no wire address.**
+      `S2 D3` *(Split out of item 50 on 2026-08-16, which found it while
+      giving Bond a playfield. Item 50's grid does not need this — it reads the
+      ring directly — so the two are independent and this one is about the
+      ARTWORK view.)*
+      **The map is `coilmap.GROUP_NODE = {4: 0, 5: 1, 6: 8, 7: 9}`**, verified
+      by `ledio.py` against godzilla_pro's boot enumeration and then used for
+      every title. It is a lookup, not arithmetic — the comment in coilmap.py
+      already says group N is not simply node N+2 — and nothing re-derives it
+      per title.
+      **What it costs, measured at the desk 2026-08-16 (no run):**
+      james_bond_60th_le's playfield devices are groups **8 and 9**, so **0 of
+      73** LED channels, and none of its 16 coils, can be addressed; jaws_le
+      draws **67 of 143**; john_wick_le **57 of 406** (both re-measured
+      2026-08-16 twice — through `GROUP_NODE` and from the built `led_io.txt`
+      row counts; earlier drafts said 65 and 53). Those two look healthy
+      today, which is why this went unnoticed for so long — a partially lit
+      playfield reads as a game that is not lighting much.
+      **Switches are NOT affected and that is a clue**: their id/node/bit come
+      from the running game's own switch table by NAME, never from the group.
+      **THE INSTRUMENT ALREADY EXISTS AND THE JOIN IS SELF-VALIDATING.**
+      `ledio.py` proves the boot enumeration's per-node index set equals the
+      device table's index set for that group — 53/53 on node 8 and 69/69 on
+      node 9 on godzilla, **including ~19 irregular skips**. So: take each
+      group's index set from the table, take each node's index set from the
+      wire (the boot `0x84/0x85` per-LED writes, or simply which indices the
+      live `padled` ring ever writes), and match them. An irregular set of ~70
+      values matching is a fingerprint, not a coincidence — the same argument
+      ledio.py already makes. Then WRITE THE RESULT PER TITLE (a
+      `group_node.txt` beside the other derived tables) rather than editing the
+      constant, because the whole fault is one title's answer standing in for
+      every title's.
+      **Acceptance:** on a title whose groups are not in the hard-coded map,
+      state the derived group → node mapping and the index-set match that
+      supports it (counts both ways, e.g. 73/73), then show its playfield
+      lighting — Bond is the sharpest case because it currently lights nothing.
+      A title already working (godzilla) must derive the SAME map it has now.
+      — S2: play works and no title is blocked; what it costs is that the
+      virtual playfield is silently wrong on most titles, which makes it a
+      poor instrument for every other item. D3: one run to capture the wire
+      side (or a live ring read), the instrument exists and is validated, and
+      the fault is on demand.
 
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
@@ -3053,6 +3512,52 @@ rewriting it.**
       affected and the projector/display work is delivered; it costs runs on
       one title. D4: the instrument that can judge it does not exist for this
       title and has to be built and validated against godzilla first.
+
+- [ ] **50 — THIS ENTRY IS NOT DONE. It was moved here on 2026-08-16 and moved
+      back out the same day**, when David asked "does it work for TMNT" and the
+      answer was no. It is kept in place because everything it records is true
+      and was verified; what it got wrong was calling that finished. **The open
+      item above is authoritative.** Read this for what is BUILT.
+      Branch `item/50`. Two halves, both live-checked.
+      **The positional half, which David asked for mid-item** ("if we can show
+      them positionally... also showing switches placement... even if we can't
+      show the playfield artwork"): the rig filtered every device on the
+      LITERAL image name `playfield`, so james_bond_60th_le — which calls the
+      same image `Test/scaled_playfield` — had all 138 of its positioned
+      devices dropped and was filed as having none. `devicexy.layout_image()`
+      now picks the layout by SHAPE (most device classes, then most devices),
+      `devicexy.read_table()` reads device_xy.txt so a CARD run needs no ELF,
+      artwork is accepted only when its pixel size CONTAINS the coordinates,
+      and a title whose art is refused draws on a blank field instead of
+      falling all the way to the switch list. **Bond now draws its playfield:
+      49 switches (joined 49/49 to live ids at the desk, no run, no rebuild),
+      16 coils, 73 lamps.**
+      **The swatch-grid half:** `LedGrid` in the Schematic view, roster taken
+      from the LIVE RING so it works on the four titles with `0 records` and
+      needs no group→node map. `LedRing` is Field's fade/base-layer read moved
+      out verbatim so both views decode the wire once. `ledgridtest.py` is the
+      offline harness (importing `ledratetest.Feed` rather than writing a
+      second one): 12 irregular channels → exactly 12 cells **of the 1536
+      addresses that exist**, a roster growing in 4 stages costing 4 canvas
+      items, tracking 90→255→0 with a churn control, an a2 pulse returning to
+      the BASE layer, a pulse-only lamp still earning a cell, and the centre of
+      a dark cell hit-testing to that cell.
+      **Verified live:** elvira3 (no `playfield.png` at all) showed `4 of 4
+      LEDs lit / 4 LED writes decoded`; godzilla_pro forced in with the new
+      `PAD_PF_VIEW=schematic` tracked its attract measured against the ring —
+      10 channels changed → 4635 pixels, 36 → 9811, **0 → 0** — and its roster
+      reached exactly the 113 channels its table independently says it has.
+      **Amended:** `Diagnostics → LED Tests` by name was NOT reached; the
+      ring-vs-screen measurement stands in its place, and the tracking title
+      has artwork. **Not literally true:** "a title WITH artwork is unchanged" —
+      Bond was deliberately moved into the artwork view. Both are spelled out
+      in the open-item text above, which is kept for that reason.
+      **Found on the way and split out: items 53 and 54.** An adversarial
+      review of the branch raised 19 candidate defects, 8 refuted and 4
+      confirmed and fixed — two of them regressions this pass introduced (every
+      Bond LED tooltip raised `TypeError` on `node=None`; elvira3 was promoted
+      into an artwork view with nothing on it, losing 109 clickable switch
+      rows).
 
 - [x] **48. The playfield keyboard legend is GODZILLA'S list, so every other
       title gets a legend full of holes and a row named after another game.**

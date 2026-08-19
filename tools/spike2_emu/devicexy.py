@@ -90,10 +90,85 @@ STRIDE = 0x30
 #: lives 0x30 earlier, i.e. at +0x24 - 0x30.
 NAME_OFF = 0x24 - STRIDE
 
-#: The image name every playfield device carries. It is the same word in every
-#: title - the machine's own test mode draws "playfield" - and it is what seeds
-#: the search below.
+#: The image name a playfield device carries ON THE TITLES THIS WAS BUILT
+#: AGAINST, and what seeds the search below. It is NOT the same word in every
+#: title, which is what the comment here used to claim - see layout_image().
 PLAYFIELD_IMAGE = "playfield"
+
+
+def read_table(path):
+    """device_xy.txt back into records. The inverse of text(), below.
+
+    THE FILE IS THE DESK-SIDE COPY OF THE ELF'S TABLE, and reading it costs no
+    game binary. That matters for a title run FROM A CARD: its ELF lives on a
+    FUSE mount that only exists during a run, while mktables has already
+    written this text file beside the switch list. coilmap.py made the same
+    move for the coil rows and says why at more length; this is the whole
+    table, so a caller that wants switches or LEDs does not need a fourth
+    parser.
+
+    Fields are counted FROM THE RIGHT because the NAME is the multi-word one:
+    `class NAME... x y w h grp index conn image`. Counting from the left read
+    `h` as the group for a whole release.
+    """
+    out = []
+    try:
+        f = open(path)
+    except OSError:
+        return out                  # no table: several titles ship none at all
+    with f:
+        for line in f:
+            if line.startswith("#") or not line.strip():
+                continue
+            p = line.split()
+            if len(p) < 10:
+                continue
+            try:
+                out.append(dict(
+                    kind=p[0], name=" ".join(p[1:-8]),
+                    x=int(p[-8]), y=int(p[-7]), w=int(p[-6]), h=int(p[-5]),
+                    group=int(p[-4]), index=int(p[-3]),
+                    conn="" if p[-2] == "-" else p[-2], image=p[-1]))
+            except ValueError:
+                continue
+    return out
+
+
+def layout_image(recs):
+    """The image a title's LAYOUT is drawn on, or None if it has none.
+
+    ★ THE LITERAL "playfield" IS ONE TITLE FAMILY'S SPELLING, NOT A CONSTANT,
+    and every consumer in this rig hard-coded it (item 50, 2026-08-16).
+    Godzilla Pro, Jaws and John Wick all name the image `playfield`;
+    **james_bond_60th_le names the same thing `Test/scaled_playfield`**, so a
+    filter on the literal dropped ALL 138 of its positioned devices - 73 LEDs,
+    49 switches and 16 coils, every one at a distinct position - and the title
+    fell through to the no-positions switch list. It was filed as "Bond has no
+    playfield layout". Bond has a complete one.
+
+    THE RULE IS THE MOST DEVICE CLASSES, THEN THE MOST DEVICES, and the first
+    half is what makes it safe. A playfield is the one image a title draws
+    switches AND coils AND lamps on; a topper or a backbox carries lamps alone,
+    and a cabinet front carries a handful of each. Picking on COUNT alone would
+    hand Jaws its topper (198 LEDs) over its playfield (143), and elvira3 - the
+    one title here whose only positioned records are 275 topper LEDs - would
+    look identical to a real playfield. It is not asked to tell those apart:
+    with one class present it returns the only layout the title has, and the
+    caller says which image it is drawing rather than calling it the playfield.
+
+    Returns the image NAME, which is a key into the records - not a file. What
+    artwork, if any, matches it is gameinfo's question and a separate one: the
+    name in the table and the name of the png on the card need not agree.
+    """
+    per = {}
+    for r in recs:
+        per.setdefault(r["image"], []).append(r)
+    if not per:
+        return None
+    img, _ = max(per.items(),
+                 key=lambda kv: (len({r["kind"] for r in kv[1]}), len(kv[1]),
+                                 kv[0] == PLAYFIELD_IMAGE))
+    return img
 
 #: Fallback artwork size, used only when the title's own drawing cannot be
 #: found. Godzilla Pro's, and the right order of magnitude for any Spike 2.

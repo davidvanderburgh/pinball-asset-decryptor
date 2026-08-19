@@ -1474,6 +1474,36 @@ These have each been violated at least once and each cost a run or a window:
       and reading (i) vs (ii) has to be settled before the instrument is
       chosen.
 
+- [ ] **55. turtles_pro flashes "UPDATING NODE BOARD RUNTIME / UPDATE FAILED"
+      for nodes 4 and 12 at game start — the title's OWN node table carries
+      two mis-derived rows, and the shim serves them verbatim.** `S3 D2`
+      *(Filed 2026-08-18 from David's live report, mid-game screenshot in
+      hand. Same SCREEN as item 51 but not the same fault: 51 was godzilla's
+      table claimed at every title; this is the per-title derivation being
+      wrong twice for turtles. The banners PASS after a "PLEASE WAIT" spell —
+      David's game proceeded to PLAYER 1 / Ball 1 — so unlike star_wars's
+      fatal loop this costs seconds and a scare, not the game.)*
+      **The two nodes on the glass are exactly the two rows the generator
+      itself flagged** in `/dump/tables/turtles_pro/node_ident.txt`:
+      `node=4 type=node4 … fw=0x7c6b00 hexver=as-read(124.107.0)` — a
+      nonsense firmware version read raw, self-marked `as-read` — and
+      `node=12 type=coil4node … variant=0x01 variant_guess=1`. Every other
+      row says `fw=0x012100 hexver=1.33.0`. `nb_fident_load()` (hwshim.c,
+      item 51's loader) parses `fw=0x` verbatim and answers the game with
+      124.107.0 for node 4; the game ships `node4-LPC1124_303-1_33_0.hex`,
+      sees the mismatch, tries to update the board's runtime, and our bus
+      does not do updates → UPDATE FAILED. Node 12 is the same class via the
+      guessed variant.
+      **Likely fix is in `nbdir.py`, not the shim:** both flagged rows
+      already carry the answer in their `hex=` filename (`…-1_33_0.hex`) —
+      when the read version is implausible (as-read) serve the version the
+      title's own hex declares, keeping the as-read note as a comment. Then
+      regenerate the table and verify the banners are gone at game start.
+      **Acceptance:** a turtles_pro game starts with no UPDATING NODE BOARD
+      RUNTIME banner for any node, stated with the game-start glass observed.
+      — S3: the game recovers by itself; seconds lost and it reads like a
+      fault. D2: a derivation guard plus one verification run.
+
 - [ ] **53. The device-table GROUP → bus NODE map is ONE TITLE'S measurement,
       so most titles' lamps and coils have a position and no wire address.**
       `S2 D3` *(Split out of item 50 on 2026-08-16, which found it while

@@ -16,11 +16,19 @@
 # from a known state.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
+
+# The ISO must be known BEFORE padpath.sh is sourced: padpath derives JJP_BASE
+# from JJP_ISO, and without it falls back to the current-title pointer.  Source
+# it too early and a Godfather ISO resolves to the last-mounted Wonka
+# directory, reports "already mounted", and never restores the title asked for.
+# So take the ISO from the argument, export it, THEN source padpath.
+JJP_ISO=${JJP_ISO:-${1:-}}
+export JJP_ISO
 . "$HERE/padpath.sh"
 
 [ "$(id -u)" = "0" ] || { echo "mount.sh: must run as root" >&2; exit 2; }
 
-ISO=${1:-${JJP_ISO:-}}
+ISO=$JJP_ISO
 if [ -z "$ISO" ]; then
     echo "usage: mount.sh <path-to-iso>   (or set JJP_ISO)" >&2
     exit 64
@@ -86,9 +94,44 @@ restore_one() {
     set -- "$IMG/$part".*-ptcl-img.gz.*
     [ -e "$1" ] || { echo "  $part: not in this image, skipping"; return 1; }
     echo "  $part: restoring $# chunk(s) -> $dest"
-    cat "$IMG/$part".*-ptcl-img.gz.* | gunzip -c \
-        | partclone.restore -N -s - -o "$dest" 2>/dev/null || {
-            echo "  $part: partclone failed" >&2; rm -f "$dest"; return 1; }
+
+    # -C disables partclone's "target is smaller than source" check.  Restoring
+    # into a fresh regular file, partclone sees a 0-byte target and refuses
+    # ("Target partition size(0 MB) is smaller than source"); the check is meant
+    # for a real partition that might genuinely be too small.  Here the target
+    # is a SPARSE FILE on a filesystem with plenty of room, so it just grows -
+    # the check is not protecting anything.  (Wonka never hit this because its
+    # image was already restored on disk from an earlier session, so mount.sh
+    # skipped straight to "already restored"; Godfather is the first real
+    # restore and the first to exercise this path.)
+    if ! cat "$IMG/$part".*-ptcl-img.gz.* | gunzip -c \
+            | partclone.restore -C -N -s - -o "$dest" >/dev/null 2>&1; then
+        echo "  $part: partclone failed" >&2; rm -f "$dest"; return 1
+    fi
+
+    # partclone writes only the USED blocks, so the file ends at the last used
+    # block, which may fall short of the filesystem's declared size - and then
+    # the loop mount refuses it as "filesystem extends beyond the end of the
+    # device".  Size the file up to the ext4 superblock's own block_count so
+    # the mount always fits.  (ext4 superblock: s_blocks_count_lo @0x400+0x4,
+    # s_log_block_size @0x400+0x18 giving block size = 1024<<n.)
+    local fs_size
+    fs_size=$(python3 - "$dest" <<'PY'
+import struct, sys
+with open(sys.argv[1], 'rb') as f:
+    f.seek(0x400)
+    sb = f.read(0x100)
+if sb[56:58] != b'\x53\xef':          # ext magic 0xEF53, little-endian
+    print(0); sys.exit()
+blocks = struct.unpack_from('<I', sb, 0x4)[0]
+log_bs = struct.unpack_from('<I', sb, 0x18)[0]
+print(blocks * (1024 << log_bs))
+PY
+)
+    if [ -n "$fs_size" ] && [ "$fs_size" -gt 0 ]; then
+        cur=$(stat -c%s "$dest")
+        [ "$cur" -lt "$fs_size" ] && truncate -s "$fs_size" "$dest"
+    fi
 }
 
 restore_one sda3 "$BASE/sda3.raw" || { echo "mount.sh: sda3 is required" >&2; exit 7; }

@@ -22,11 +22,18 @@
 # one warns rather than aborting, except the dongle, which is fatal.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
+
+# Export the ISO BEFORE sourcing padpath, and before spawning any child script,
+# so watch.sh and every step (jail, dongle, boards, game) derive the SAME
+# JJP_BASE from it.  Otherwise padpath falls back to the last-mounted title and
+# a fresh Godfather launch runs against Wonka's directory.
+JJP_ISO=${JJP_ISO:-${1:-}}
+export JJP_ISO
 . "$HERE/padpath.sh"
 
 [ "$(id -u)" = "0" ] || { echo "watch.sh: must run as root (wsl -u root)" >&2; exit 2; }
 
-ISO=${1:-${JJP_ISO:-}}
+ISO=$JJP_ISO
 step() { echo "== $* =="; }
 
 if [ -n "$ISO" ]; then

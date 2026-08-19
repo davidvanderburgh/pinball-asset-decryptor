@@ -84,9 +84,10 @@ wsl -u root -- bash tools/jjp_emu/display.sh    # resizable window at 1360x768
 wsl -u root -- env JJP_DISPLAY=:1 bash tools/jjp_emu/run_game.sh --detach
 wsl -u root -- env JJP_DISPLAY=:1 bash tools/jjp_emu/grab.sh out.png
 
-# switches
-wsl -u root -- bash tools/jjp_emu/build.sh          # the hardware shim
-wsl -u root -- env JJP_DISPLAY=:1 JJP_SHIM=1 bash tools/jjp_emu/run_game.sh --detach
+# switches, LEDs and coils
+wsl -u root -- bash tools/jjp_emu/build.sh          # shim + CUSE daemon
+wsl -u root -- bash tools/jjp_emu/jjpcuse.sh start  # REAL /dev/jjp* devices
+wsl -u root -- env JJP_DISPLAY=:1 bash tools/jjp_emu/run_game.sh --detach
 wsl -u root -- python3 tools/jjp_emu/swdump.py --out /var/tmp/devices.json
 wsl -e python3 tools/jjp_emu/jjpsw.py --devices /var/tmp/devices.json                                       --pf tools/jjp_emu/wonka_pf_image.png
 # jjpsw.py shows switches AND LEDs on the playfield, plus the raw matrix grid
@@ -150,6 +151,12 @@ exact list of everything a run touched.
 * **A resizable window at native resolution**: `display.sh` runs a nested
   Xephyr at 1360x768, the game fullscreens into it, and CPU falls from ~420%
   to ~170%.
+* **Switches, LEDs and coils are live.** With CUSE devices present the game
+  opens them immediately and drives them at ~1 kHz: 382,506 frames in and
+  382,512 out in one 40 s run, 6.15 M LED writes. Injecting the six trough
+  switches flips the game's own `Switch` objects (offset 62 goes 0 -> 1, 64
+  takes a timestamp), so the whole loop - UI, shared memory, character device,
+  game - is verified end to end.
 * The game **opens its window and renders**: `MAIN (100%) - Willy Wonka & the
   Chocolate Factory`, 32 threads including six busy `llvmpipe` software-raster
   threads, ~420% CPU, and a captured frame showing live attract mode.

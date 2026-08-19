@@ -33,6 +33,15 @@ and against switch_068 / switch_128, whose matrix positions are known by name:
      56  i32    Y in playfield-image pixels, or -1 if unpositioned
      60  u8     frame byte index within the 64-byte I/O frame
      61  u8     bit mask within that byte
+     62  u8     LIVE STATE - 1 while the game considers the switch closed
+     63  u8     debounced/previous state
+     64  u32    tick at which the state last changed
+     68  u32    counter since last change (resets on an edge)
+
+Offsets 62-68 were confirmed by INJECTING: driving the six trough switches
+through the CUSE device and re-reading the objects showed 62 and 63 go 0 -> 1,
+64 take a timestamp, and 68 reset.  That is the whole loop - UI to shared
+memory to the character device to the game - verified end to end.
 
 THE MATRIX LAYOUT THIS REVEALS
 ------------------------------
@@ -274,6 +283,9 @@ def dump_table(elf, mem, table_sym, obj_size, kind, size_sym=None):
             rec['y'] = y if y >= 0 else None
             rec['frame_byte'] = b[60]
             rec['frame_bit'] = b[61]
+            # The game's OWN view of the switch, not ours - useful for
+            # confirming that an injected switch actually landed.
+            rec['live_closed'] = bool(b[62])
             rec['group'] = struct.unpack_from('<I', b, 32)[0]
         else:
             # Coil and lamp layouts are not decoded yet; carry the raw bytes so

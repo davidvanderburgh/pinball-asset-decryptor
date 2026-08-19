@@ -190,6 +190,34 @@ if [ "$SINK" = win ]; then
     trap 'kill $HOLD $SRV 2>/dev/null; [ -n "$WINPID" ] && kill $WINPID 2>/dev/null;
           win_kill; rm -f "$FIFO"' EXIT
 
+    # item 56's volume/mute knob reaches this Windows child ONLY through
+    # WSLENV, same mechanism and same trap as PAD_PF_LOG/PAD_PF_FADE_*_MS in
+    # watch.sh - a Windows process reached through interop gets none of this
+    # shell's environment unless the name is listed here. No `/p`: unlike
+    # PAD_PF_LOG (a WSL path translated for a Windows reader), this value is
+    # already a native Windows path - emulate_tab.py computed it AS a Windows
+    # process, so it needs no translation in either direction. Missing this
+    # line is exactly why the knob shipped inert 2026-08-18: the file was
+    # being written correctly and polled for correctly, but never actually
+    # seen (confirmed at the desk: `env PAD_X=1 python.exe -c "..."` through
+    # WSL interop with no WSLENV entry reads back None every time).
+    #
+    # SAME BUG, JUST FOUND, ON THE TWO KNOBS ALREADY HERE: PAD_AUDIO_PREBUFFER_MS
+    # and PAD_AUDIO_LATENCY_MS are read by padplay.py the same way and were
+    # NEVER forwarded either - the "350 ms, measured" / "60 ms" comments in
+    # padplay.py were true of whatever invocation measured them, not of a run
+    # through this win sink, where they have silently always been the
+    # hard-coded default. Carried across now for the same reason as the
+    # ctl file: nobody relies on today's (broken) behaviour, since there is
+    # no GUI control for either and a developer setting them by hand for a
+    # tuning experiment is exactly who this was failing.
+    [ -n "${PAD_AUDIO_CTL:-}" ] && \
+        export WSLENV="${WSLENV:+$WSLENV:}PAD_AUDIO_CTL"
+    [ -n "${PAD_AUDIO_PREBUFFER_MS:-}" ] && \
+        export WSLENV="${WSLENV:+$WSLENV:}PAD_AUDIO_PREBUFFER_MS"
+    [ -n "${PAD_AUDIO_LATENCY_MS:-}" ] && \
+        export WSLENV="${WSLENV:+$WSLENV:}PAD_AUDIO_LATENCY_MS"
+
     # NO READINESS PROBE HERE, deliberately. The obvious one - connect to the
     # port to see whether it is up yet - IS ITSELF A CLIENT: the relay accepts
     # it as the player, opens the FIFO for it and then sees it hang up ("player

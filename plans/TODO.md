@@ -1378,9 +1378,9 @@ These have each been violated at least once and each cost a run or a window:
       playfield.py, and confirming it means a run with the LED test menu.
 
 - [ ] **56. A master volume knob and a Mute for the EMULATOR's sound to the PC
-      speakers — our level, not the game's.** `S3 D2` ←
-      IN PROGRESS, 80%: **built and unit-tested; the live acceptance run is
-      what is left, and it needs the rig.**
+      speakers — our level, not the game's.** `S3 D2` ← WORKING ON, 90%:
+      **built, unit-tested, AND the live bug David found is root-caused and
+      fixed — re-verification on his live run is what is left.**
       **★ DAVID, 2026-08-18: "master pc volume knob for emulator (not for in
       game, but for the emulator to my pc speakers). should have mute and
       volume setting controls."** Today there is no level anywhere on our side
@@ -1422,26 +1422,68 @@ These have each been violated at least once and each cost a run or a window:
       keep working without a restart, which is the opposite shape. Every
       change writes the control file immediately (no debounce: a slider is
       meant to track the handle). `start()` now passes
-      `PAD_AUDIO_CTL=<path>` in `watch.sh`'s env, inherited across the
-      WSL→Windows interop hop the same way `PAD_AUDIO_PREBUFFER_MS` already
-      does (verified from the source, not assumed — `env KEY=VALUE … bash
-      watch.sh` puts it in the environment of everything bash execs,
-      Windows-native `padplay.py` included, with no `wslpath` translation
-      needed since both the GUI and this `win`-sink `padplay.py` run as
-      Windows processes and the path never has to cross the boundary itself).
+      `PAD_AUDIO_CTL=<path>` in `watch.sh`'s env.
       **9 new tests, `tests/test_emulate_tab.py`, plus a session isolation
       fixture in `conftest.py`** (same shape as `_isolate_card_edits` — a
       panel reads/writes this file unconditionally, so the suite must never
       touch the developer's real settings dir). Full suite: 2784 passed, 19
       skipped (all pre-existing/environmental), 0 failed.
+      **★★ THE BUG, DAVID LIVE, 2026-08-18: "it's not changing the volume. i
+      started a game, music is playing, but the volume knob and mute button
+      are not doing anything."** ROOT-CAUSED AND FIXED THE SAME PASS, and the
+      cause was a wrong claim written into this very item text above: I had
+      assumed `PAD_AUDIO_CTL`, set in `watch.sh`'s env, would reach the
+      Windows-native `padplay.py` (the `win` sink) the same way
+      `env KEY=VALUE bash watch.sh` reaches everything ELSE bash execs — true
+      for WSL-side children, **false for the one Windows child in this whole
+      chain.** WSL interop does NOT forward the launching shell's
+      environment to a Windows `.exe` it starts; only variables named in
+      `WSLENV` cross that specific hop, in EITHER direction. Confirmed at the
+      desk before touching anything: `export FOO=1; python.exe -c
+      "import os; print(os.environ.get('FOO'))"` through interop with no
+      `WSLENV` entry prints `None`, every time; adding `export
+      WSLENV=FOO` (no `/p` — the value is already Windows-native, needs no
+      translation) makes it read back correctly. So `audio_ctl.json` was
+      being written correctly (confirmed: its mtime moved and its content
+      matched the slider while David tested) and would have been read
+      correctly — `poll_gain()`'s own logic was never reached, because
+      `PAD_AUDIO_CTL` never arrived: `ctl_path` was `None` the whole time.
+      **This project ALREADY had the answer written down and I did not check
+      for it before designing the channel:** `watch.sh` forwards
+      `PAD_PF_LOG`/`PAD_PF_FADE_UNIT_MS`/`PAD_PF_FADE_MS` to the playfield
+      window through exactly this mechanism, with the exact same comment
+      ("only variables named in WSLENV cross that boundary"). **Fix:**
+      `playaudio.sh`'s `win` sink now does
+      `export WSLENV="${WSLENV:+$WSLENV:}PAD_AUDIO_CTL"` before the launch
+      loop — no `/p`, matching the empirical test above.
+      **FOUND WHILE FIXING IT, SAME BUG, NOT PREVIOUSLY KNOWN: `PAD_AUDIO_
+      PREBUFFER_MS` and `PAD_AUDIO_LATENCY_MS` (both pre-existing, item 10)
+      have identically never reached the `win` sink** — the "350 ms,
+      measured" / "60 ms" comments in `padplay.py` describe whatever
+      invocation measured them, not a run through this sink, where both have
+      silently been the hard default the whole time. Carried across the same
+      way, same commit: nobody could have been relying on the old (broken)
+      behaviour, since neither has a GUI control and the only way to set
+      either is a developer exporting it by hand — exactly who this was
+      failing.
+      **NOT YET RE-VERIFIED LIVE — the fix cannot help a game already
+      running:** `WSLENV` is set once when `playaudio.sh`'s `win` block
+      starts, at the top of a run, so David's live turtles_pro/godzilla_pro
+      session was launched under the OLD code and will not pick this up
+      without a Stop + Start (or a fresh run) from this branch.
       **NOT COVERED, honestly:** the `pulse` ffmpeg-only fallback in
       `playaudio.sh` (already the known-degraded path, item 30/10) does not
       get the knob — only `padplay.py` does, per the item's own "one file on
-      all three platforms" framing. The macOS container's `relay` sink and
-      the native macOS/Linux `--fifo` path should inherit `PAD_AUDIO_CTL` the
-      same way (same env-inheritance argument) but were not exercised — no
-      Mac/Linux machine in this pass. Neither is a regression; both are
-      exactly today's behaviour, unmodified.
+      all three platforms" framing. The native macOS/Linux `--fifo` path
+      needs NO `WSLENV` fix (no WSL, no interop hop, plain fork/exec inherits
+      the shell's environment same as anything else) so `PAD_AUDIO_CTL`
+      should reach it unmodified — but it was not exercised, no Mac/Linux
+      machine in this pass. The macOS container's `relay` sink is a
+      DIFFERENT, unexamined question: its `padplay.py` runs on the Mac HOST
+      via `padbox.sh`, outside this WSL interop path entirely, and whether
+      `PAD_AUDIO_CTL` reaches it depends on `padbox.sh`'s own env plumbing,
+      which this pass did not read. Neither gap is a regression — both are
+      exactly today's (pre-item-56) behaviour, unmodified.
       **Where the controls live (ASSUMED, not asked, and answered a level down
       from where the item guessed):** the Emulate tab, beside the Sound
       checkbox rather than the setup notice (the notice is conditionally
@@ -1457,13 +1499,15 @@ These have each been violated at least once and each cost a run or a window:
       Mute records silence, half-scale records ~-6 dB against full, and
       `audioscore.py` on the full-volume capture must still meet item 10's
       -14.7 dB bar, so the knob adds no damage at unity.
-      **Resume:** once the rig is free — take the lock, launch the app FROM
-      THIS WORKTREE (so the window is badged `item/56`), Start a run with
-      sound, and run the loopback capture at three points: full, half-scale
-      (expect ~-6 dB), and Mute (expect silence) — plus one drag mid-run to
-      confirm no restart is needed and one restart of the app to confirm the
-      level survives it. State the service menu's Volume reading before and
-      after, per the acceptance test.
+      **Resume:** David has a live app up on this branch RIGHT NOW (badged
+      `item/56`) with an OLD-code run started before the WSLENV fix landed —
+      that run cannot pick the fix up. Stop it and Start again (same
+      checkout, no relaunch needed — `playaudio.sh` is re-read fresh every
+      run) to get the fix, THEN run the loopback capture at three points:
+      full, half-scale (expect ~-6 dB), and Mute (expect silence) — plus one
+      drag mid-run to confirm no restart is needed and one restart of the
+      app to confirm the level survives it. State the service menu's Volume
+      reading before and after, per the acceptance test.
       — S3: nothing is broken; the Windows mixer's per-app slider on padplay's
       python.exe is the workaround today. D2, unchanged and now exact rather
       than estimated: the whole channel is built, unit-tested and committed

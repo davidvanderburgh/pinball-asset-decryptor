@@ -38,6 +38,23 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+# The hardware shim is opt-in.  Set JJP_SHIM=1 (build it first with build.sh)
+# to give the game a fake set of playfield boards it can read switches from.
+# Without it the game still runs - missing boards are non-fatal - it just never
+# sees a switch close.
+SHIM_ENV=""
+if [ "${JJP_SHIM:-0}" = "1" ]; then
+    SO=${JJP_SHIM_SO:-/var/tmp/jjphwshim.so}
+    if [ ! -f "$SO" ]; then
+        echo "run_game.sh: JJP_SHIM=1 but $SO is missing; run build.sh" >&2
+        exit 5
+    fi
+    # The .so must be reachable from INSIDE the jail.
+    cp -f "$SO" "$JJP_JAIL/tmp/jjphwshim.so"
+    SHIM_ENV='export LD_PRELOAD=/tmp/jjphwshim.so'
+    [ -n "${JJP_SHIM_DEBUG:-}" ] && SHIM_ENV="$SHIM_ENV; export JJP_SHIM_DEBUG=1"
+fi
+
 RUN='
   export JJPEDIR='"$JJPEDIR"'
   . $JJPEDIR/setenv.sh
@@ -45,6 +62,7 @@ RUN='
   export DISPLAY='"$JJP_DISPLAY"'
   export PULSE_SERVER='"$JJP_PULSE"'
   export HOME=/root
+  '"$SHIM_ENV"'
   cd $GAMEDIR
   exec ./game
 '

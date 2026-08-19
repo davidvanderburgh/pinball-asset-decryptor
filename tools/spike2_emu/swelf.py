@@ -63,6 +63,20 @@ MINUS/BACK at 9-12, COIN DOOR INTERLOCK at 25, LOCKDOWN BUTTON at 70, START
 BUTTON at 73, TILT PENDULUM at 81 - the exact numbering scheme real Stern
 manuals use across machines. No coincidental byte pattern reproduces a whole
 manual's numbering by accident.
+
+★ Same session, widened to 9 titles total (batman, foo_fighters_le,
+guardians_le, iron_maiden_le, jurassic_park_le, mando_le, rush_le added
+alongside the two above) by turning the method above into a repeatable
+pipeline: derive the title's valid node set from `nbdir.py` (also static,
+also no run), then DEV/BRD/ENT as above. Every one of the nine reproduces
+the same real Stern numbering on LEFT/RIGHT FLIPPER BUTTON, TROUGH 1..6,
+LEFT/RIGHT SLINGSHOT. Surveyed but NOT solved this pass - the device-name
+table itself was found (same keyword fingerprint), but no literal reference
+to its own address exists anywhere in the binary, so it could not be
+trusted the way DEV/BRD are elsewhere: james_bond_le, king_kong_le,
+led_zeppelin_le, metallica_spike, munsters_le, sword_of_rage_le, turtles_le,
+uncanny_xmen_le, venom_le. Full detail and the discovery scripts' shape are
+in plans/TODO.md under item 57.
 """
 import os
 import struct
@@ -83,6 +97,12 @@ ROOTS = {
     "aerosmith_le": (None, 0x599f0c, 0x599eb8),
     "avengers_infinity_le": (None, 0x5fcc1c, 0x5fcbc8),
     "batman": (None, 0x6d8780, 0x6d8714),
+    "foo_fighters_le": (None, 0x5be464, 0x5be410),
+    "guardians_le": (None, 0x569e30, 0x569ddc),
+    "iron_maiden_le": (None, 0x530c88, 0x530c34),
+    "jurassic_park_le": (None, 0x62d248, 0x62d1f4),
+    "mando_le": (None, 0x6591c4, 0x659170),
+    "rush_le": (None, 0x5a1880, 0x5a182c),
 }
 
 ENTRY_STRIDE = 44

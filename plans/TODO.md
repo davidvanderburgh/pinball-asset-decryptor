@@ -86,7 +86,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
       LED and coil matrix and boot to attract, checked one title at a time in
-      ALPHABETICAL ORDER.** `S1 D4` ← WORKING ON, 40%
+      ALPHABETICAL ORDER.** `S1 D3` ← WORKING ON, 55%
       *(Filed 2026-08-18 at David's ask: "i want to work on universal game
       compatibility. every game should be able to load a switch and led and
       coil matrix and boot into attract. let's go alphabetical order." This
@@ -395,6 +395,51 @@ These have each been violated at least once and each cost a run or a window:
       learn about `sw_file_table()` succeeding rather than being told this
       title has "no findable switch table" when it plainly does. Not fixed
       this pass; a clean, narrow follow-on for whoever picks this up next.
+      **★★★★★★★★★ THE METHOD TURNED INTO A PIPELINE AND RAN ACROSS EVERY
+      REMAINING "COMPLETE UNKNOWN" TITLE, per David's "survey the rest of
+      the titles now."** Node set derived statically from each title's own
+      `nbdir.py` output (no run, no guessing the valid-node list by hand
+      per title as the first three needed); DEV → BRD → ENT walkback as
+      established above, all pointer-slot-confirmed where confirmable.
+      **SIX MORE TITLES SOLVED AND SHIPPED, nine total now:**
+      `foo_fighters_le` (190 switch-kind rows decoded, incl. `RIGHT
+      FLIPPER BUTTON` num=10), `guardians_le` (99 switches),
+      `iron_maiden_le`, `jurassic_park_le`, `mando_le`, `rush_le` — every
+      one reproduces the identical real Stern numbering
+      (`LEFT/RIGHT FLIPPER BUTTON`, `TROUGH 1..6`, `LEFT/RIGHT SLINGSHOT`
+      at the same `num` values seen on the first three). `guardians_le`
+      spot-checked through the actual `swelf.py` entry point (not just the
+      discovery script) as a sanity check on the wiring itself: `99
+      switches on nodes [0, 1, 4, 8, 9]`, clean.
+      **NINE MORE SURVEYED AND NOT SOLVED — the device-name table itself
+      was found (same keyword fingerprint as the working nine) but has NO
+      literal reference to its own address anywhere in the binary, so it
+      could not be trusted the way `DEV_ROOT`/`BRD_ROOT` are everywhere
+      else:** `james_bond_le` (DEV confirmed, BRD not), `king_kong_le`,
+      `led_zeppelin_le`, `metallica_spike`, `sword_of_rage_le`,
+      `turtles_le`, `uncanny_xmen_le`, `venom_le` (DEV itself not
+      confirmed on these seven), `munsters_le` (DEV confirmed, BRD not).
+      **This is a real, structural finding and not just "ran out of
+      titles to try":** the SAME class of gap this pass already solved
+      once for `ENT` (no independent pointer, reached only by arithmetic)
+      may well apply to `DEV` on these nine too — worth trying a
+      walkback-style derivation for `DEV` the same way `_ent_by_walkback()`
+      already does for `ENT`, rather than assuming these are a different
+      generation outright. **Not attempted this pass** — flagged as the
+      cheapest next step before writing these nine off as needing fresh RE.
+      **Every survey/discovery script from this session lives in the
+      session's own scratch dir, not committed** (`full_pipeline.py`,
+      `solve_verify.py`, `full_solve_one.sh`, `nbdir.py`-based node
+      derivation) — reusable in-session, not yet promoted into the repo's
+      own tools; worth doing if this sweep continues.
+      **All 26 known card images are now accounted for**: 4 already
+      working before this item started, 9 solved and shipped this
+      session, 5 with a working switch table but a separate device-
+      position gap, 9 surveyed with DEV found but unconfirmed (need the
+      walkback idea above or fresh RE), 4 confirmed a different
+      generation entirely (`deadpool_le/pro`, `dungeons_and_dragons_le`,
+      `godzilla_le`, from the earlier pass). No title remains completely
+      untouched.
       **Device-position table (item 2 above, the 0x30-byte struct):
       untouched this pass** — a second, independent RE job once the switch
       table is fixed; do not assume fixing (1) fixes the artwork/positions.
@@ -450,11 +495,15 @@ These have each been violated at least once and each cost a run or a window:
         survey for their MISSING half, so the device-position gap on these
         five is a **fourth, still-unidentified structure** — not the same
         fix as Aerosmith's.
-      - **Switch table SOLVED AND SHIPPED in `swelf.py` this pass** (see the
-        ★★★★/★★★★★ blocks below for the full method and verification):
-        **aerosmith_le** (104 switches), **avengers_infinity_le** (110),
-        **batman** (111). Static/offline only — none has had its LIVE run
-        confirmed yet, which is the actual remaining acceptance step.
+      - **Switch table SOLVED AND SHIPPED in `swelf.py` this pass — NINE
+        titles** (see the ★★★★ blocks below for the full method and
+        verification): **aerosmith_le** (104 switches, LIVE-verified),
+        **avengers_infinity_le** (110, LIVE-verified clean),
+        **batman** (111, LIVE-verified), **foo_fighters_le** (190
+        switch-kind rows), **guardians_le** (99, spot-checked through the
+        real `swelf.py` entry point), **iron_maiden_le**,
+        **jurassic_park_le**, **mando_le**, **rush_le** — the last six
+        static/offline only, not yet LIVE-run.
       - **Confirmed a DIFFERENT generation — not solvable by rerunning this
         pass's pipeline, needs its own fresh RE:** **deadpool_le**,
         **deadpool_pro**, **dungeons_and_dragons_le**, **godzilla_le** (NOT
@@ -463,48 +512,56 @@ These have each been violated at least once and each cost a run or a window:
         four (so THAT instrument generalizes fine), but the DEV/BRD scan
         finds only noise on them — thousands of nonsense "slot" values and
         zero pointer-slot references on every candidate, the clean opposite
-        of the aerosmith/avengers/batman signature.
-      - **Complete unknowns — nothing tried this pass beyond the very first,
-        now-corrected survey pass:** foo_fighters_le, guardians_le,
-        iron_maiden_le, **james_bond_le** (NOT james_bond_60th_le, which
-        already works), jurassic_park_le, king_kong_le, led_zeppelin_le
-        (device-position gap already known, above; switch side untested by
-        this pipeline), mando_le, metallica_spike, munsters_le, rush_le,
-        sword_of_rage_le, **turtles_le** (NOT turtles_pro), uncanny_xmen_le,
-        venom_le. **Still the largest bucket** — roughly 15 of 26 distinct
-        titles. A "nothing found" here is NOT evidence of being broken to
-        play; most have never been booted under this rig, so their true
-        switch-table status is simply unmeasured. (`foo_fighters_le`'s
-        `nbdir.py` step came back empty on the FIRST, buggy survey pass —
-        per the shell-bug note below, that specific result needs redoing
-        with the fix before it can be trusted either way.)
+        of the working nine's signature.
+      - **DEV found (same keyword fingerprint), NOT confirmable — no literal
+        reference to its own address anywhere in the binary, the same class
+        of gap this item already solved once for ENT:** `james_bond_le` (NOT
+        james_bond_60th_le, which already works — DEV confirmed, BRD not),
+        `munsters_le` (DEV confirmed, BRD not), `king_kong_le`,
+        `led_zeppelin_le` (device-position gap already known, above; this is
+        its SWITCH side), `metallica_spike`, `sword_of_rage_le`, `turtles_le`
+        (NOT turtles_pro), `uncanny_xmen_le`, `venom_le` (DEV itself
+        unconfirmed on these seven). **Likely the SAME fixable gap as ENT,
+        not a different generation** — untried this pass, see the resume
+        note below.
       **What this means for the initiative, stated plainly so nobody
-      re-derives it:** "get the tables on all the games" is not a bug to
-      close, it is a SURVEY-THEN-FIX sweep across what looks like at least
-      three or four distinct binary/engine generations, each needing its own
-      structural RE the way Aerosmith's did — exactly what this item's
-      opening note already expected ("expect it to spawn per-title
-      sub-items"). One pass, alone, static-only, covered the survey
-      (cheap, bounded, done) and one full title's mechanism (expensive,
-      partial). Finishing every title is realistically several more passes.
+      re-derives it:** "get the tables on all the games" turned out to be
+      mostly ONE mechanism, not many — 9 of 26 titles share the exact
+      struct and switch-numbering scheme, cracked once and then applied
+      as a repeatable pipeline rather than re-derived per title. The
+      remaining 17 split into two very different-sized problems: 9 titles
+      where the SAME struct exists and likely needs only the same
+      walkback trick already proven for `ENT`, and 4 titles that are a
+      genuinely different generation needing fresh RE the way Aerosmith's
+      did originally. Every one of the 26 known card images has now been
+      looked at; none remain completely untouched.
       **Resume, in priority order:**
-      (1) Finish Aerosmith: find `swelf.py`'s `ENT` and `BRD` roots (this
-      item's earlier section has the method and the two dead-end attempts
-      already tried, so as not to redo them), wire `"aerosmith_le"` into
-      `ROOTS`, verify offline, then one live run.
-      (2) Boot-test a handful of the "complete unknown" titles (a real run,
-      needs the rig) to learn which of them are ALREADY playable today
-      despite the static survey finding nothing — for a title whose switch
-      table already works via the runtime hunt, this whole item may be a
-      no-op, same as turtles_pro/star_wars_le/stranger_things_le turned out
-      to be for their switch half.
-      (3) For titles confirmed genuinely broken by a boot test, RE their
-      actual struct the way this pass did Aerosmith's — budget one title
-      per pass unless a shared shape is found again.
+      (1) **Cheapest, try first:** extend the `ENT` walkback trick to
+      `DEV` itself for the nine "DEV found, unconfirmed" titles
+      (`james_bond_le`, `king_kong_le`, `led_zeppelin_le`, `metallica_
+      spike`, `munsters_le`, `sword_of_rage_le`, `turtles_le`, `uncanny_
+      xmen_le`, `venom_le`) — walk backward/forward from whatever DOES
+      have a confirmed anchor (BRD, where found) rather than requiring a
+      literal pointer to DEV's own address. If this works it could solve
+      most or all nine in one more pass, the same leverage the ENT
+      discovery already bought twice.
+      (2) LIVE-run the six statically-solved-but-unverified titles
+      (`foo_fighters_le`, `guardians_le`, `iron_maiden_le`,
+      `jurassic_park_le`, `mando_le`, `rush_le`) the same way aerosmith_le/
+      avengers_infinity_le/batman were — bounded `watch.sh` runs, check for
+      `[cabspi]`/crash-free progress. Cheap given the recipe is proven;
+      mainly rig time, not investigation time.
+      (3) The four different-generation titles (`deadpool_le/pro`,
+      `dungeons_and_dragons_le`, `godzilla_le`) need fresh structural RE
+      the way Aerosmith's did originally — budget accordingly, this is
+      NOT a rerun of the existing pipeline.
       (4) The "device-position table" gap on the five already-playable
       titles (star_wars_le, stranger_things_le, turtles_pro, led_zeppelin_le,
       elvira3) is real but lower severity (S2/S3, cosmetic) — do not let it
       block on the S1 "can it even play" question above.
+      (5) The `[cabspi]`/`[swfind]` disconnect found on `batman`'s live run
+      (above) is a small, well-scoped `hwshim.c` fix whenever someone wants
+      it — low urgency, it did not cost that run anything observable.
       **If David wants this to go faster than one title per pass, a
       multi-agent workflow (fan out one RE agent per unknown title, converge
       on a shared struct catalogue) fits this shape well — but that needs his

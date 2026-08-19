@@ -902,6 +902,13 @@ HELP_CONTENT = {
          "boot chime usually means it is still waiting at Tech Alerts. The "
          "status line shows frames played and frames dropped — dropped should "
          "stay at zero."),
+        ("Volume and Mute",
+         "Sets the level of the emulator's OWN sound coming out of your PC "
+         "speakers — not the in-game volume the coin door's -/+ buttons "
+         "adjust, which is a per-title setting on the machine itself and is "
+         "left alone. Both work live on a run that is already going, with no "
+         "restart needed, and the level you leave them at is remembered for "
+         "next time."),
         ("Video",
          "Clips play. The game's own decoder is an i.MX6 hardware block this "
          "PC does not have and the card carries no software fallback, so the "

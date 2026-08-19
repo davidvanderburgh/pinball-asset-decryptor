@@ -875,6 +875,11 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    one log line says save states are off and how to turn them on.)
    A run that cannot be saved says why on the button instead of failing
    quietly.
+   A **Volume slider and Mute** sit next to the Sound checkbox — the
+   level of the emulator's own sound coming out of your PC speakers,
+   not the in-game volume adjustment on the machine's own coin door.
+   Both work live, on a run that's already going, with no restart, and
+   the level you leave them at is remembered for next time.
    Runs on Linux, and on Windows through WSL2. The rig ships with the
    app, in `tools/spike2_emu`, and the prerequisites installer pulls in
    what it needs (`qemu-user-static`, an ARM cross-compiler, `gcc` +

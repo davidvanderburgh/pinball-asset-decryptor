@@ -62,6 +62,7 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from ..core import config
 from .widgets import _Tooltip
 
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -72,6 +73,47 @@ _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 DEFAULT_RIG_DIR = str(
     pathlib.Path(__file__).resolve().parents[2] / "tools" / "spike2_emu"
 )
+
+#: Item 56: master PC-side volume + Mute for the emulator's OWN sound - "our
+#: level, not the game's" (David).  One small JSON plays two roles at once,
+#: deliberately: it is BOTH the remembered setting (read once, at panel
+#: construction, so the slider already shows what a fresh run will play) AND
+#: the LIVE control channel a running padplay.py polls every ~250 ms (see its
+#: poll_gain()) - so dragging the slider or hitting Mute reaches the speakers
+#: with no restart, which is the whole of what this item asked for beyond a
+#: plain preference. One shared file alongside settings.json, same idiom as
+#: AUDIO_NAMES_FILE / CARD_EDITS_FILE / LIBRARY_FILE.
+#: Shape: {"gain": 0.0-1.0, "muted": bool}.
+AUDIO_CTL_FILE = os.path.join(os.path.dirname(config.SETTINGS_FILE),
+                              "audio_ctl.json")
+
+
+def _load_audio_ctl():
+    """The remembered volume/mute, defaulting to unity/unmuted — today's
+    behaviour, unchanged, for a machine that has never touched the knob."""
+    try:
+        with open(AUDIO_CTL_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        gain = float(data.get("gain", 1.0))
+        muted = bool(data.get("muted", False))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return 1.0, False
+    return max(0.0, min(1.0, gain)), muted
+
+
+def _write_audio_ctl(gain, muted):
+    """Persist AND live-publish.  Atomic (temp + ``os.replace``) so padplay.py's
+    poll never catches a half-written file — the file is small and this is
+    called on every slider tick, but a torn read would only ever cost one
+    250 ms poll's worth of stale gain, never a corrupt one."""
+    try:
+        os.makedirs(os.path.dirname(AUDIO_CTL_FILE), exist_ok=True)
+        tmp = AUDIO_CTL_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"gain": gain, "muted": muted}, f)
+        os.replace(tmp, AUDIO_CTL_FILE)
+    except OSError:
+        pass
 
 #: How the rig's ``state=`` word is shown to a human.  ``techalerts`` is not a
 #: fault: the game boots to its Tech Alerts screen and waits there for an
@@ -1303,6 +1345,13 @@ class EmulatePanel:
         #: takes it down - the hint label has other owners).
         self._setup_ticks = 0
         self._setup_said_boot = False
+        #: Item 56: master PC-side volume + Mute, loaded once here so the
+        #: widgets built in build() already show what padplay.py will
+        #: actually play.  LIVE controls, unlike Sound/Auto-attract above -
+        #: see build()'s comment on why they are never greyed out.
+        vol0, mute0 = _load_audio_ctl()
+        self._volume_var = tk.DoubleVar(value=vol0 * 100)
+        self._mute_var = tk.BooleanVar(value=mute0)
 
     def _timer(self):
         """The widget every ``after`` job on this panel is hung off.
@@ -1448,6 +1497,29 @@ class EmulatePanel:
         self._audio_chk = ttk.Checkbutton(btns, text="Sound",
                                           variable=self._audio_var)
         self._audio_chk.pack(side=tk.LEFT, padx=(16, 0))
+
+        # Item 56: the emulator's OWN volume to the PC speakers, not the
+        # game's in-game adjustment (that stays on the coin door, per title,
+        # untouched by this).  Deliberately LIVE, unlike Sound/Auto-attract
+        # just above: those are read once when Start builds watch.sh's
+        # environment, so David asked for a knob that moves the sound
+        # WITHOUT a restart, which is the opposite of that shape — so these
+        # two are never added to the up/busy disable block in _apply.
+        ttk.Label(btns, text="Volume:").pack(side=tk.LEFT, padx=(16, 4))
+        self._vol_scale = ttk.Scale(btns, from_=0, to=100, length=110,
+                                    orient=tk.HORIZONTAL,
+                                    variable=self._volume_var,
+                                    command=self._on_volume_change)
+        self._vol_scale.pack(side=tk.LEFT)
+        self._mute_chk = ttk.Checkbutton(btns, text="Mute",
+                                         variable=self._mute_var,
+                                         command=self._on_volume_change)
+        self._mute_chk.pack(side=tk.LEFT, padx=(6, 0))
+        # Seed the control file NOW, from whatever was just loaded (or the
+        # unity/unmuted default) — so it exists before the first Start even
+        # on a machine that has never touched the knob, rather than relying
+        # on padplay.py's own separate default to happen to agree.
+        self._on_volume_change()
 
         # On by default: the game boots to Tech Alerts and waits for an
         # operator, which means sitting through ~15 s of bring-up and then
@@ -2529,6 +2601,23 @@ class EmulatePanel:
                 pass
             self._poll_job = None
 
+    def _on_volume_change(self, *_args):
+        """Volume/Mute changed (item 56) - write the live control file.
+
+        No debounce: a Scale drag fires this on every tick and the write is a
+        few bytes, atomic, so the speakers are meant to track the handle the
+        way any other app's volume slider does, not settle after a pause.
+        Called with no run up too (build() seeds it once, at construction) -
+        harmless either way, since it is only ever read by a padplay.py that
+        may or may not currently exist.
+
+        ``*_args`` because ``ttk.Scale``'s ``command`` calls back with the new
+        value as a string; the Checkbutton's ``command`` calls back with
+        nothing.  Both are ignored — the vars themselves are already current
+        by the time either fires."""
+        gain = max(0.0, min(1.0, self._volume_var.get() / 100.0))
+        _write_audio_ctl(gain, bool(self._mute_var.get()))
+
     # ------------------------------------------------------------------
     # start / stop
     # ------------------------------------------------------------------
@@ -2576,7 +2665,13 @@ class EmulatePanel:
             self._run_label(False, False)
             self._set("state", "Not running")
             return
-        env = ["PAD_AUDIO_DUMP=30"] + src
+        # Item 56: padplay.py polls this file live (see its poll_gain()), so
+        # naming it here is what lets the volume/mute knob reach a run this
+        # tab starts - build() already wrote the file itself, this only
+        # tells the rig where it is.  Unconditional, unlike Sound/Auto-attract
+        # below: a muted or half-volume run is still worth having the file
+        # for, in case Mute gets unticked mid-run.
+        env = ["PAD_AUDIO_DUMP=30", "PAD_AUDIO_CTL=" + AUDIO_CTL_FILE] + src
         if not self._audio_var.get():
             env.append("PAD_AUDIO=0")
         if not self._auto_var.get():

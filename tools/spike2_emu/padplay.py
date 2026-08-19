@@ -38,6 +38,7 @@ does run dry the callback emits silence for that block and says so; it never
 blocks, because blocking inside an audio callback is how you get a glitch in
 every other application on the machine too.
 """
+import json
 import os
 import socket
 import sys
@@ -45,6 +46,12 @@ import threading
 import time
 
 import sounddevice as sd
+
+try:
+    import numpy as np
+except ImportError:      # the Windows python pad_win_python() finds only ever
+    np = None             # promises `import sounddevice` - see PAD_AUDIO_CTL
+                          # below for why that has to stay survivable
 
 
 def pick_device():
@@ -93,6 +100,52 @@ def main():
     lat_ms = int(os.environ.get("PAD_AUDIO_LATENCY_MS", "60"))
     prebuf = bps * pre_ms // 1000
 
+    # ---- item 56: master PC-side volume + Mute, our level not the game's --
+    #
+    # PAD_AUDIO_CTL names a small JSON ({"gain": 0-1, "muted": bool}) that the
+    # Emulate tab rewrites on every slider/Mute change
+    # (emulate_tab.py's _write_audio_ctl) — it is BOTH the remembered setting
+    # AND the live control channel, so a run already up picks up a change with
+    # no restart and a fresh run starts at whatever the file already says. No
+    # env var (a manual/dev invocation, or the macOS/Linux paths that do not
+    # set it yet) means unity gain — today's behaviour, unchanged.
+    #
+    # WHY NOT audioop: it left the stdlib in 3.13. numpy scales the int16
+    # buffer instead — but the WINDOWS python this runs under for the WSL
+    # bridge is found by pad_win_python() (padpath.sh), which only ever
+    # verifies `import sounddevice`, never numpy. An install with sounddevice
+    # but no numpy must keep playing exactly as it does today — not crash on
+    # import — so every numpy use below is guarded, and Mute (silence) still
+    # works with no numpy at all; only in-between volumes need it.
+    ctl_path = os.environ.get("PAD_AUDIO_CTL")
+    gain_state = {"value": 1.0}
+    _ctl_seen = [None]
+
+    def poll_gain():
+        if not ctl_path:
+            return
+        try:
+            mtime = os.stat(ctl_path).st_mtime
+        except OSError:
+            return
+        if mtime == _ctl_seen[0]:
+            return
+        _ctl_seen[0] = mtime
+        try:
+            with open(ctl_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            g = 0.0 if data.get("muted") else float(data.get("gain", 1.0))
+        except (OSError, ValueError, TypeError):
+            return
+        g = max(0.0, min(1.0, g))
+        if g != gain_state["value"]:
+            gain_state["value"] = g
+            print(f"[padplay] volume -> {g:.2f}", flush=True)
+
+    if ctl_path and np is None:
+        print("[padplay] numpy not installed; the volume/mute knob is inert "
+              "(pip install numpy to enable it)", flush=True)
+
     buf = bytearray()
     lock = threading.Lock()
     done = threading.Event()
@@ -131,10 +184,23 @@ def main():
         with lock:
             have = len(buf)
             n = min(need, have)
+            chunk = bytes(buf[:n]) if n else b""
             if n:
-                outdata[:n] = bytes(buf[:n])
                 del buf[:n]
             stats["played"] += n
+        if n:
+            g = gain_state["value"]
+            if g <= 0.0:
+                # Mute needs no numpy: a memset beats a multiply either way.
+                outdata[:n] = b"\0" * n
+            elif g >= 1.0 or np is None:
+                outdata[:n] = chunk
+            else:
+                # int16 * a fraction in [0, 1] can never overflow int16, so no
+                # clip is needed — this only ever attenuates, per the item
+                # (no boost lever was asked for).
+                samples = np.frombuffer(chunk, dtype=np.int16)
+                outdata[:n] = (samples * np.float32(g)).astype(np.int16).tobytes()
         if n < need:
             # Silence for what we could not fill. Never block, never sleep.
             outdata[n:need] = b"\0" * (need - n)
@@ -165,10 +231,13 @@ def main():
     print(f"[padplay] {src_desc} -> {rate} Hz x {ch} -> {name} via {api}, "
           f"prebuffer {pre_ms} ms, device latency {lat_ms} ms", flush=True)
 
+    poll_gain()   # so the very first buffers already play at the remembered
+                  # level, not at unity for one poll interval
     with stream:
         last = time.monotonic()
         while not done.is_set() or len(buf) > 0:
             time.sleep(0.25)
+            poll_gain()
             now = time.monotonic()
             if now - last >= 5:
                 with lock:

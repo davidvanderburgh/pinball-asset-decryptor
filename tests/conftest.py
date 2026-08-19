@@ -93,6 +93,19 @@ def _isolate_card_edits(tmp_path_factory):
         tmp_path_factory.mktemp("card_edits") / "card_edits.json")
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_audio_ctl(tmp_path_factory):
+    """Point the Emulate tab's volume/mute file (item 56) at a temp path for
+    the whole run — same reason and same shape as ``_isolate_card_edits``
+    above.  ``EmulatePanel.__init__`` reads it unconditionally (to seed the
+    Volume slider), so a panel built anywhere in the suite would otherwise
+    read, and every slider/Mute test would otherwise WRITE, the developer's
+    own ``%APPDATA%/pinball_decryptor/audio_ctl.json``."""
+    from pinball_decryptor.gui import emulate_tab
+    emulate_tab.AUDIO_CTL_FILE = str(
+        tmp_path_factory.mktemp("audio_ctl") / "audio_ctl.json")
+
+
 @pytest.fixture(scope="session")
 def all_manufacturers():
     from pinball_decryptor.core.registry import all_manufacturers as _am

@@ -181,26 +181,38 @@ photograph is not a uniform scaling of the playfield body.
 2. **Second display not wired up.** Wonka is a two-display title; `display.sh
    --dual` offers the 800x480 "Wonkavision" apron as a second Xinerama screen
    but the game has not been verified to open a window on it.
-4. **LED live state is unavailable, and the UI says so.** The 216 lamps and
-   their positions are real and verified, but the game has never written the
-   LED board under the rig, so there is no live colour to show. `jjpsw.py`
-   displays lamps as LAYOUT ONLY with an explicit warning whenever the LED
-   write counter is zero - an unlit panel must never be mistaken for "all
-   lamps off". The index-to-frame-byte mapping used when traffic *does* appear
-   is PROVISIONAL and labelled as such in the code; unlike the switch matrix,
-   it has not been verified against real traffic. Animation state is also not
-   in the `Lamp` objects: sampled over 3 s of attract, neither the objects nor
-   their heap blocks changed a byte.
-5. **The game does not open the boards during attract.** Measured: four
-   minutes with the shim tracing, `board_opens=0`, `dev_probes=0` — it never
-   touches a `/dev` path at all. This is NOT a shim failure. The shim is
-   proven by self-test, and `open`/`read`/`write`/`close`/`ioctl`/`access` are
-   all IMPORTED symbols in the game's dynsym (211 imported of 18,717), so
-   interposition reaches them. Board init is gated behind something not yet
-   found — a setting, or a state the game only enters on leaving attract. The
-   service menu's switch test (`DiagDedSwitchTest`) is the obvious next place
-   to look, but reaching it needs cabinet switches, which is circular until
-   the gate is understood.
+4. **LED page format is not decoded.** Live LED traffic now exists and
+   animates (2.3 M writes in 40 s, 31-51 bytes changing every half second),
+   but the byte layout inside JJP's 64-byte LED pages is still unknown - a
+   recurring `3f 0c` marker suggests a page header. The switch matrix layout
+   was *derived and verified*; the LED mapping is still PROVISIONAL and the
+   UI labels it as such.
+5. **The CAB board is never opened** (`cab_fd = 0`) even with `/dev/jjpcab100`
+   present, so cabinet switches - coin door, start button, flipper buttons -
+   have no route in yet.
+6. **Coils barely move in attract**, as expected: the I/O out frame holds a
+   steady `0x42` at byte 9 and nothing pulses. Verifying the coil half of the
+   frame needs an actual game in progress.
+
+## CORRECTED 2026-08-19: the boards WERE being opened
+
+An earlier version of this file said "the game does not open the boards during
+attract", measured over four minutes with the LD_PRELOAD shim tracing. That
+conclusion was **wrong**, and the way it was wrong is worth keeping:
+
+*The instrument was never connected.* The shim was mapped into the game and
+`LD_PRELOAD` was set in its environ, but the Sentinel envelope resolves libc
+for itself - it imports `dl_iterate_phdr`, `dladdr`, `dlsym` and `dlvsym` -
+instead of going through the PLT/GOT the loader had pointed at the shim. The
+control experiment is what exposed it: across a 40 s run the shim logged **zero
+`open()` and zero `fopen()`** while the game opened thousands of asset files.
+A hook that sees nothing at all is not evidence of absence; it is a broken
+hook.
+
+With real CUSE devices present the game opens them **immediately** -
+`io_fd = 24`, `led_fd = 25`, 8 open fds, and 69,500 frames read and written in
+40 s (it polls at ~1 kHz). The boards were never gated behind anything. They
+simply did not exist.
 
 ## See also
 

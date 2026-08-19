@@ -85,3 +85,15 @@ if [ -n "$MISSING" ]; then
     exit 6
 fi
 echo "symbol check OK: every undefined symbol resolves against the image's libs"
+
+# --- the CUSE daemon -------------------------------------------------------
+# This one runs on the WSL HOST, not inside the jail, so it links against the
+# host's libfuse3 and host glibc - none of the -nostdlib care above applies.
+if pkg-config --exists fuse3 2>/dev/null; then
+    COUT=${JJP_CUSE_BIN:-/var/tmp/jjpcuse}
+    gcc -O2 -Wall -Wextra -I"$HERE" -o "$COUT" "$HERE/jjpcuse.c"         $(pkg-config --cflags --libs fuse3) -lrt || exit 7
+    echo "built $COUT ($(stat -c%s "$COUT") bytes)"
+else
+    echo "note: libfuse3-dev not installed - skipping jjpcuse" >&2
+    echo "      apt-get install -y libfuse3-dev fuse3" >&2
+fi

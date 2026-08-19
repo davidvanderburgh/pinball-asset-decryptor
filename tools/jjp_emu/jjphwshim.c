@@ -70,6 +70,8 @@ struct fake {
 static struct fake g_fake[MAX_FAKE_FD];
 static struct jjp_shm *g_shm;
 static int g_debug;
+static int g_open_total;
+static int g_fopen_total;
 
 /* Real libc entry points. */
 static int  (*real_open)(const char *, int, ...);
@@ -230,6 +232,18 @@ static int open_common(const char *path, int flags)
          * is absent - it does not necessarily open() the node it wants. */
         if (g_debug > 1 && path && !strncmp(path, "/dev/", 5))
             dbg("probe open %s", path);
+        /* JJP_SHIM_DEBUG=3 counts EVERY open.  This is the control experiment:
+         * if the game opens thousands of assets and we see none of them, the
+         * envelope is not reaching libc through the PLT and no LD_PRELOAD can
+         * ever interpose it - which is a completely different problem from
+         * "the game chose not to open the boards". */
+        if (g_debug > 2) {
+            g_open_total++;
+            if (g_open_total <= 12)
+                dbg("open#%d %s", g_open_total, path ? path : "(null)");
+            else if ((g_open_total % 500) == 0)
+                dbg("open#%d ...", g_open_total);
+        }
         return -2;                          /* not ours */
     }
     shm_attach();
@@ -398,6 +412,27 @@ int ioctl(int fd, unsigned long req, ...)
     if (lookup(fd))
         return 0;
     return real_ioctl(fd, req, arg);
+}
+
+/* CONTROL ONLY (JJP_SHIM_DEBUG=3).  fopen is imported by the game, so if we
+ * see fopen traffic but no open traffic, the shim IS in the game's path and
+ * the game genuinely never open()s a /dev/jjp* node - the asset loading simply
+ * goes through fopen, whose internal open() happens inside libc and is not
+ * interposable by LD_PRELOAD.  If we see NEITHER, the shim is unreachable and
+ * no LD_PRELOAD approach can work; that is what /dev/cuse is for. */
+FILE *fopen(const char *path, const char *mode)
+{
+    static FILE *(*real_fopen)(const char *, const char *);
+    if (!real_fopen)
+        real_fopen = dlsym(RTLD_NEXT, "fopen");
+    if (g_debug > 2) {
+        g_fopen_total++;
+        if (g_fopen_total <= 8)
+            dbg("fopen#%d %s", g_fopen_total, path ? path : "(null)");
+        else if ((g_fopen_total % 500) == 0)
+            dbg("fopen#%d ...", g_fopen_total);
+    }
+    return real_fopen(path, mode);
 }
 
 __attribute__((constructor))

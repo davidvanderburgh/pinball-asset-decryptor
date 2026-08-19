@@ -12,6 +12,8 @@ environment the rig is handed — and that only exists once the widgets do.  The
 skip rather than fail when Tk is unusable.
 """
 
+import json
+import os
 import pathlib
 from types import SimpleNamespace
 
@@ -403,6 +405,162 @@ def test_keys_help_is_gone(tmp_path):
         blob = " ".join(texts)
         assert "Service Plus" not in blob
         assert "shooter lane" not in blob
+    finally:
+        root.destroy()
+
+
+# --- item 56: master PC-side volume + Mute -----------------------------------
+#
+# "master pc volume knob for emulator (not for in game, but for the emulator
+# to my pc speakers). should have mute and volume setting controls." — the
+# file is BOTH the remembered preference and padplay.py's live control
+# channel (see AUDIO_CTL_FILE's docstring), so these tests cover the GUI half
+# of that contract: what gets written, what gets loaded back, and that a
+# corrupt/missing file degrades to today's unity/unmuted behaviour rather
+# than failing the panel outright.
+#
+# EVERY test below points AUDIO_CTL_FILE at its own tmp_path first. The
+# session-wide _isolate_audio_ctl fixture in conftest.py is only the backstop
+# against a stray write reaching the developer's real settings dir; it shares
+# ONE path for the whole run, so a test that cares whether the file is
+# absent, corrupt, or holds a specific value needs its own, or it would be
+# reading whatever the previous test in the session left behind.
+
+def _isolated_ctl(monkeypatch, tmp_path):
+    path = str(tmp_path / "audio_ctl.json")
+    monkeypatch.setattr(emulate_tab, "AUDIO_CTL_FILE", path)
+    return path
+
+
+def test_audio_ctl_round_trips(monkeypatch, tmp_path):
+    _isolated_ctl(monkeypatch, tmp_path)
+    emulate_tab._write_audio_ctl(0.35, False)
+    assert emulate_tab._load_audio_ctl() == (0.35, False)
+    emulate_tab._write_audio_ctl(0.0, True)
+    assert emulate_tab._load_audio_ctl() == (0.0, True)
+
+
+def test_audio_ctl_defaults_to_unity_unmuted_when_absent(monkeypatch, tmp_path):
+    path = _isolated_ctl(monkeypatch, tmp_path)
+    assert not os.path.exists(path)
+    assert emulate_tab._load_audio_ctl() == (1.0, False)
+
+
+def test_audio_ctl_survives_a_corrupt_file(monkeypatch, tmp_path):
+    """Half-written or foreign JSON must not take the panel down with it —
+    same tolerance as every other small state file in this rig."""
+    path = _isolated_ctl(monkeypatch, tmp_path)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("{not json")
+    assert emulate_tab._load_audio_ctl() == (1.0, False)
+
+
+def test_audio_ctl_clamps_an_out_of_range_gain(monkeypatch, tmp_path):
+    path = _isolated_ctl(monkeypatch, tmp_path)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"gain": 4.0, "muted": False}, f)
+    assert emulate_tab._load_audio_ctl() == (1.0, False)
+
+
+def test_panel_shows_the_remembered_volume(monkeypatch, tmp_path):
+    """The slider reflects the file at construction — the acceptance test's
+    "the level survives an app restart", read from the GUI side."""
+    _isolated_ctl(monkeypatch, tmp_path)
+    emulate_tab._write_audio_ctl(0.6, False)
+    root, panel = _panel(tmp_path)
+    try:
+        assert round(panel._volume_var.get()) == 60
+        assert panel._mute_var.get() is False
+    finally:
+        root.destroy()
+
+
+def test_panel_shows_remembered_mute(monkeypatch, tmp_path):
+    _isolated_ctl(monkeypatch, tmp_path)
+    emulate_tab._write_audio_ctl(0.6, True)
+    root, panel = _panel(tmp_path)
+    try:
+        assert panel._mute_var.get() is True
+    finally:
+        root.destroy()
+
+
+def test_moving_the_slider_writes_the_control_file_live(monkeypatch, tmp_path):
+    """No restart, no Start press — the write happens the moment the var
+    changes, which is what lets a running padplay.py pick it up inside one
+    poll interval."""
+    _isolated_ctl(monkeypatch, tmp_path)
+    root, panel = _panel(tmp_path)
+    try:
+        panel._volume_var.set(25)
+        panel._on_volume_change()
+        assert emulate_tab._load_audio_ctl() == (0.25, False)
+        panel._mute_var.set(True)
+        panel._on_volume_change()
+        assert emulate_tab._load_audio_ctl() == (0.25, True)
+    finally:
+        root.destroy()
+
+
+def test_building_the_panel_seeds_the_file_on_a_fresh_machine(monkeypatch,
+                                                              tmp_path):
+    """A machine that has never touched the knob must still have the file
+    present before the first Start — padplay.py's own default (unity) would
+    otherwise happen to agree, but the file existing is what makes it a real
+    control channel rather than two defaults coinciding."""
+    path = _isolated_ctl(monkeypatch, tmp_path)
+    assert not os.path.exists(path)
+    root, panel = _panel(tmp_path)
+    try:
+        assert emulate_tab._load_audio_ctl() == (1.0, False)
+    finally:
+        root.destroy()
+
+
+def test_volume_and_mute_are_never_disabled_by_a_run(monkeypatch, tmp_path):
+    """The opposite of Sound/Auto-attract just beside them: those are
+    start-time-only and grey out while a run is up (see _apply's own
+    comment); the whole point of item 56's slider is that it works WITHOUT a
+    restart, so it must stay live through exactly the state that disables
+    its neighbours."""
+    _isolated_ctl(monkeypatch, tmp_path)
+    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
+    root, panel = _panel(tmp_path)
+    try:
+        panel._apply({"state": "running", "running": "1", "procs": "5"})
+        assert str(panel._audio_chk.cget("state")) == "disabled"      # sanity
+        assert str(panel._vol_scale.cget("state")) != "disabled"
+        assert str(panel._mute_chk.cget("state")) != "disabled"
+    finally:
+        root.destroy()
+
+
+def test_start_tells_the_rig_where_the_control_file_is(monkeypatch, tmp_path):
+    import time
+    _isolated_ctl(monkeypatch, tmp_path)
+    img = tmp_path / "godzilla_pro-1_15_0.Release.8G.sdcard.raw"
+    img.write_bytes(bytes(16))
+    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
+    monkeypatch.setattr(emulate_tab, "docker_state", lambda: "ok")
+    captured = {}
+
+    def fake_watch_cmd(minutes, env, savestates=True):
+        captured["env"] = env
+        return ["true"]
+
+    monkeypatch.setattr(emulate_tab, "watch_cmd", fake_watch_cmd)
+    monkeypatch.setattr(
+        emulate_tab.subprocess, "Popen",
+        lambda *a, **kw: SimpleNamespace(stdout=iter(()),
+                                         wait=lambda timeout=None: 0))
+    root, panel = _panel(tmp_path)
+    try:
+        panel._src_path.set(str(img))
+        panel.start()
+        deadline = time.time() + 5
+        while "env" not in captured and time.time() < deadline:
+            time.sleep(0.01)
+        assert "PAD_AUDIO_CTL=" + emulate_tab.AUDIO_CTL_FILE in captured["env"]
     finally:
         root.destroy()
 

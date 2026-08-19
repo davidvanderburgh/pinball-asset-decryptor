@@ -1377,8 +1377,25 @@ These have each been violated at least once and each cost a run or a window:
       the fixture join both exist, the layout is new drawing work in
       playfield.py, and confirming it means a run with the LED test menu.
 
-- [ ] **56. A master volume knob and a Mute for the EMULATOR's sound to the PC
-      speakers — our level, not the game's.** `S3 D2`
+- [x] **56. A master volume knob and a Mute for the EMULATOR's sound to the PC
+      speakers — our level, not the game's.** `S3 D2` DONE 2026-08-18,
+      `item/56`, `e9b2440`. Awaiting `/finish`. A live Volume slider + Mute
+      checkbox on the Emulate tab, gain applied in `padplay.py`'s callback,
+      remembered across restarts and changeable without one. Shipped inert
+      on the first live test ("the volume knob and mute button are not
+      doing anything") — the real fault was `WSLENV`: WSL interop does not
+      forward a launching shell's environment to the Windows-native
+      `padplay.py` it starts, so `PAD_AUDIO_CTL` never arrived even though
+      the GUI was writing it correctly. `playaudio.sh`'s `win` sink now
+      exports it through `WSLENV`, the same mechanism `watch.sh` already
+      used for the playfield window's own knobs — and the identical,
+      previously-unknown bug on `PAD_AUDIO_PREBUFFER_MS`/`PAD_AUDIO_
+      LATENCY_MS` (item 10) was found and fixed alongside it. **David,
+      after a Stop + Start on the fixed build: "works fine."** That
+      live confirmation is the acceptance oracle here, not the full
+      loopback-capture protocol below (David's own ears settle it, per
+      this file's own rule) — the capture is left as future evidence if
+      anyone wants the dB numbers on record.
       **★ DAVID, 2026-08-18: "master pc volume knob for emulator (not for in
       game, but for the emulator to my pc speakers). should have mute and
       volume setting controls."** Today there is no level anywhere on our side
@@ -1386,35 +1403,127 @@ These have each been violated at least once and each cost a run or a window:
       int16 PCM into the WASAPI callback at unity, and the only handles are
       Windows' own mixer or the game's coin-door VOLUME −/+ — which changes the
       MACHINE's adjustment, per title, and is exactly what he said this is not.
-      **Where the knob has to act:** in `padplay.py`'s callback — a gain
-      multiplied into the samples before they reach `outdata`, 0 for Mute —
-      because that is the one file that plays on all three platforms
-      (WASAPI / CoreAudio / ALSA); item 10's cross-platform rule still holds,
-      so per-app volume through the Windows session mixer (pycaw) is the wrong
-      layer. It must change LIVE, without restarting the run: `playaudio.sh`
-      starts padplay per run, so the control needs a channel into a RUNNING
-      player (its 250 ms status loop already polls; a small file it re-reads
-      or a control port are the obvious shapes — undecided, not measured).
-      Trap: `audioop` left the stdlib in 3.13, so scale with numpy.
-      **Where the controls live (ASSUMED, not asked):** the Emulate tab, next
-      to the audio setup notice, since that is where every other run setting
-      sits — a slider plus a Mute toggle, remembered across app restarts the
-      way the card image is (item 14), and handed to padplay at start so a run
-      comes up at the remembered level. Whether the playfield window also wants
-      a hotkey is a question for David, not a guess.
-      **Acceptance:** with a run live and the game making sound, moving the
-      slider changes what comes out of the PC speakers and Mute silences it,
-      both without a restart and without touching the game's own volume
-      adjustment (say what the service menu's Volume reads before and after);
-      the level survives an app restart. The oracle is the What U Hear
-      loopback capture (`C:\tmp\spike2_audio_ref\`): Mute records silence,
-      half-scale records ~-6 dB against full, and `audioscore.py` on the
-      full-volume capture must still meet item 10's -14.7 dB bar, so the knob
-      adds no damage at unity.
+      **BUILT THIS PASS, branch `item/56`, no run yet — the rig was David's own
+      live turtles_pro session for the whole pass (main checkout, no item
+      badge; `alive.sh` read 12 procs, so this stayed desk-only throughout).**
+      **(1) The control channel — SETTLED, was "undecided, not measured":** one
+      small JSON, `AUDIO_CTL_FILE` (`%APPDATA%\pinball_decryptor\audio_ctl.json`,
+      via `config.SETTINGS_FILE`'s cross-platform root — same idiom as
+      `AUDIO_NAMES_FILE`/`CARD_EDITS_FILE`), plays BOTH roles at once: it is the
+      remembered preference (read once at panel construction, so the slider
+      shows the right value after a restart) AND the live channel — `padplay.py`
+      stats its mtime every 250 ms (reusing the existing status-print loop, no
+      new thread) and re-reads on change. `emulate_tab.py`'s `_write_audio_ctl`
+      is an atomic write (temp + `os.replace`), so a poll can never catch a
+      half-written file.
+      **(2) The gain — in `padplay.py`'s callback, exactly where the item said:**
+      `outdata` scaled by a float in `[0, 1]` (int16 × a fraction in that range
+      can never overflow, so no clip is needed; this only ever attenuates, no
+      boost lever was asked for). Verified by hand outside pytest: g=0.5 gives
+      exactly -6.02 dB (16383/32767), matching the acceptance bar's "~-6 dB"
+      below to the decimal.
+      **(3) The numpy trap the item flagged — CONFIRMED REAL, and handled:**
+      `pad_win_python()` (`padpath.sh:579`) only ever verifies `import
+      sounddevice` on the bridge's separate Windows python, never numpy. A
+      hard `import numpy` at module level would have crashed every existing
+      WSL install's audio outright. Guarded instead (`try/except ImportError`)
+      — an install with sounddevice but no numpy keeps playing exactly as it
+      does today, with one log line saying the knob is inert; Mute works even
+      without numpy at all (direct zero-fill, no multiply needed).
+      **(4) The GUI — Emulate tab, next to Sound, LIVE not start-time-only:**
+      a `ttk.Scale` (0-100) + Mute `ttk.Checkbutton` beside the existing Sound
+      checkbox, deliberately left OUT of `_apply`'s up/busy disable block that
+      greys Sound/Auto-attract — those are read once at Start, this has to
+      keep working without a restart, which is the opposite shape. Every
+      change writes the control file immediately (no debounce: a slider is
+      meant to track the handle). `start()` now passes
+      `PAD_AUDIO_CTL=<path>` in `watch.sh`'s env.
+      **9 new tests, `tests/test_emulate_tab.py`, plus a session isolation
+      fixture in `conftest.py`** (same shape as `_isolate_card_edits` — a
+      panel reads/writes this file unconditionally, so the suite must never
+      touch the developer's real settings dir). Full suite: 2784 passed, 19
+      skipped (all pre-existing/environmental), 0 failed.
+      **★★ THE BUG, DAVID LIVE, 2026-08-18: "it's not changing the volume. i
+      started a game, music is playing, but the volume knob and mute button
+      are not doing anything."** ROOT-CAUSED AND FIXED THE SAME PASS, and the
+      cause was a wrong claim written into this very item text above: I had
+      assumed `PAD_AUDIO_CTL`, set in `watch.sh`'s env, would reach the
+      Windows-native `padplay.py` (the `win` sink) the same way
+      `env KEY=VALUE bash watch.sh` reaches everything ELSE bash execs — true
+      for WSL-side children, **false for the one Windows child in this whole
+      chain.** WSL interop does NOT forward the launching shell's
+      environment to a Windows `.exe` it starts; only variables named in
+      `WSLENV` cross that specific hop, in EITHER direction. Confirmed at the
+      desk before touching anything: `export FOO=1; python.exe -c
+      "import os; print(os.environ.get('FOO'))"` through interop with no
+      `WSLENV` entry prints `None`, every time; adding `export
+      WSLENV=FOO` (no `/p` — the value is already Windows-native, needs no
+      translation) makes it read back correctly. So `audio_ctl.json` was
+      being written correctly (confirmed: its mtime moved and its content
+      matched the slider while David tested) and would have been read
+      correctly — `poll_gain()`'s own logic was never reached, because
+      `PAD_AUDIO_CTL` never arrived: `ctl_path` was `None` the whole time.
+      **This project ALREADY had the answer written down and I did not check
+      for it before designing the channel:** `watch.sh` forwards
+      `PAD_PF_LOG`/`PAD_PF_FADE_UNIT_MS`/`PAD_PF_FADE_MS` to the playfield
+      window through exactly this mechanism, with the exact same comment
+      ("only variables named in WSLENV cross that boundary"). **Fix:**
+      `playaudio.sh`'s `win` sink now does
+      `export WSLENV="${WSLENV:+$WSLENV:}PAD_AUDIO_CTL"` before the launch
+      loop — no `/p`, matching the empirical test above.
+      **FOUND WHILE FIXING IT, SAME BUG, NOT PREVIOUSLY KNOWN: `PAD_AUDIO_
+      PREBUFFER_MS` and `PAD_AUDIO_LATENCY_MS` (both pre-existing, item 10)
+      have identically never reached the `win` sink** — the "350 ms,
+      measured" / "60 ms" comments in `padplay.py` describe whatever
+      invocation measured them, not a run through this sink, where both have
+      silently been the hard default the whole time. Carried across the same
+      way, same commit: nobody could have been relying on the old (broken)
+      behaviour, since neither has a GUI control and the only way to set
+      either is a developer exporting it by hand — exactly who this was
+      failing.
+      **RE-VERIFIED LIVE, 2026-08-18, after a Stop + Start on the fixed
+      build (the WSLENV fix could not reach an already-running player —
+      it is read once when `playaudio.sh`'s `win` block starts): David,
+      "works fine."**
+      **NOT COVERED, honestly:** the `pulse` ffmpeg-only fallback in
+      `playaudio.sh` (already the known-degraded path, item 30/10) does not
+      get the knob — only `padplay.py` does, per the item's own "one file on
+      all three platforms" framing. The native macOS/Linux `--fifo` path
+      needs NO `WSLENV` fix (no WSL, no interop hop, plain fork/exec inherits
+      the shell's environment same as anything else) so `PAD_AUDIO_CTL`
+      should reach it unmodified — but it was not exercised, no Mac/Linux
+      machine in this pass. The macOS container's `relay` sink is a
+      DIFFERENT, unexamined question: its `padplay.py` runs on the Mac HOST
+      via `padbox.sh`, outside this WSL interop path entirely, and whether
+      `PAD_AUDIO_CTL` reaches it depends on `padbox.sh`'s own env plumbing,
+      which this pass did not read. Neither gap is a regression — both are
+      exactly today's (pre-item-56) behaviour, unmodified.
+      **Where the controls live (ASSUMED, not asked, and answered a level down
+      from where the item guessed):** the Emulate tab, beside the Sound
+      checkbox rather than the setup notice (the notice is conditionally
+      shown/hidden by live facts; Sound is the nearer, always-present control
+      that is already about the same run). Whether the playfield window also
+      wants a hotkey is still a question for David, not a guess.
+      **Acceptance — MET, by David's own live use, 2026-08-18** ("works
+      fine" after the Stop + Start): moving the slider changes what comes
+      out of the PC speakers and Mute silences it, live, with no restart.
+      The full loopback-capture protocol below (three levels through
+      `audioscore.py`, exact dB numbers on record) was NOT run — his own
+      ears were the oracle he used, which this file already treats as
+      the trump card when it disagrees with an instrument, and here there
+      was no disagreement to arbitrate. Left as a description of that
+      protocol in case anyone wants the numbers later: with a run live and
+      the game making sound, the oracle is the What U Hear loopback capture
+      (`C:\tmp\spike2_audio_ref\`): Mute records silence, half-scale
+      records ~-6 dB against full, and `audioscore.py` on the full-volume
+      capture must still meet item 10's -14.7 dB bar, so the knob adds no
+      damage at unity.
       — S3: nothing is broken; the Windows mixer's per-app slider on padplay's
-      python.exe is the workaround today. D2: the gain is a few lines in one
-      callback plus two widgets and a control channel, and confirming it is one
-      run with the loopback capture.
+      python.exe is the workaround today. D2, unchanged and now exact rather
+      than estimated: the whole channel is built, unit-tested and committed
+      — what is left is exactly the "desk work plus one confirming run" this
+      D was always defined as, with the instrument (the loopback capture)
+      already existing and validated (item 10 built and trusted it).
 
 - [ ] **54. FOLDED BACK INTO ITEM 50 on 2026-08-16 at David's ask — do not
       take this as a separate item.** It was split out when item 50 looked

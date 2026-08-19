@@ -228,16 +228,29 @@ def find_playfield_art(name=None):
     `jaws_pro_playfield_scaled.png` succeeds, because "scaLEd" contains it. It
     would have picked the Pro drawing for an LE machine as soon as the
     alphabetical order changed.
+
+    **The folder is not always named "Test" either** (item 57, 2026-08-19,
+    found auditing king_kong_le and metallica_spike): those two ship
+    `assets/nuk/images/TestMode/*` and have NO `Test` folder at all, so the
+    lookup below returned None before any filename was even looked at -
+    "this title ships no playfield drawing" about a title that does. Try
+    both; `Test` first since every title measured before this fix already
+    uses it and nothing should change for them.
     """
     a = assets(name)
     if not a:
         return None
-    d = os.path.join(a, "nuk", "images", "Test")
-    try:
-        found = [f for f in sorted(os.listdir(d))
-                 if f.lower().endswith(".png") and "playfield" in f.lower()]
-    except OSError:
-        return None
+    found, d = [], None
+    for sub in ("Test", "TestMode"):
+        cand = os.path.join(a, "nuk", "images", sub)
+        try:
+            hits = [f for f in sorted(os.listdir(cand))
+                    if f.lower().endswith(".png") and "playfield" in f.lower()]
+        except OSError:
+            continue
+        if hits:
+            found, d = hits, cand
+            break
     if not found:
         return None
     want = _tokens(active(name) or "")

@@ -84,6 +84,827 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [x] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
+      LED and coil matrix and boot to attract, checked one title at a time in
+      ALPHABETICAL ORDER.** `S1 D3` DONE 2026-08-19.
+      **CLOSING SUMMARY: all 30 known Spike 2 card versions have a confirmed-
+      working switch matrix** — David's original ask, word for word: "every
+      game should be able to load a switch and led and coil matrix and boot
+      into attract." 9 titles solved via a static ELF fallback
+      (`swelf.py`'s `ROOTS`), 2 more via a second struct variant with no
+      entry table at all (`ROOTS_NONUM`), and a major mid-session audit
+      correction found that 6 titles believed broken were actually already
+      fine (a console-vs-`gzwatch.log` logging-timing bug, not a game bug).
+      Two real, separate bugs also found and fixed along the way:
+      `gameinfo.py`'s playfield-art lookup only checked one folder name
+      (`Test`, not `TestMode`), and `devicexy.py`'s device-position self-
+      check compared against a hard-coded image-name literal instead of the
+      already-existing `layout_image()` helper. **`tools/spike2_emu/
+      README.md`'s "Titles" table is the standing per-title record going
+      forward** (David's ask, 2026-08-19) — kept current by `/finish`, not
+      re-derived each session. Two follow-on items split out of this one
+      during the sweep, same pattern as 53/55 splitting from 50, and are
+      NOT closed by this: **item 55** (broadened this session with cross-
+      title evidence for the node-board `variant_guess` gap David flagged
+      live) and **item 58** (a second-display black-window worry, filed,
+      investigated, found to not reproduce on the example first suspected,
+      reverted — needs a confirmed real example before any fix). Both
+      remain open, tracked separately, and were not blocking this item's
+      own stated goal.
+      *(Filed 2026-08-18 at David's ask: "i want to work on universal game
+      compatibility. every game should be able to load a switch and led and
+      coil matrix and boot into attract. let's go alphabetical order." This
+      is a standing sweep, not a single fix — expect it to spawn per-title
+      sub-items the way 53/55 split out of 50, and expect this entry to be
+      rewritten as the sweep's own findings accumulate rather than treated as
+      one bug. D4 → D3 same day: the mechanism below turned out to be already
+      SOLVED in this codebase for one title (52/swelf.py) and Aerosmith's own
+      layout now matches it field-for-field — what is left is address-hunting
+      and one confirming run, not unknown-mechanism work.)*
+      **★ GOAL RESTATED, 2026-08-19, David: "the goal of this item is to
+      resolve all the problems."** Not just the switch/LED/coil matrix the
+      title originally named — every title's virtual playfield artwork,
+      device positions and second-display behaviour are IN SCOPE too, and
+      **`tools/spike2_emu/README.md`'s "Titles" table is now the single
+      standing record of where every title stands**, kept current by
+      `/finish` (see that skill) rather than re-derived from scratch each
+      session. Read the README table first when resuming this item — it is
+      the current truth, this TODO section is the archaeology of HOW each
+      row got there.
+      **First title, alphabetically: AEROSMITH.** David's report: it is
+      "stuck on the guided setup screen with 'no tables' found." This pass
+      was entirely DESK WORK, read-only, alongside David's own LIVE run on
+      this exact title (main checkout, `aerosmith_le - virtual playfield` +
+      `Pinball Asset Decryptor v0.143.0` both open, no item badge — his,
+      never touched, only its logs and the already-mounted card were read).
+      **★★ ESTABLISHED: "no tables" is real and has two independent causes,
+      both confirmed from the live run's own logs.**
+      **(1) THE SWITCH TABLE.** `gzwatch.log`:
+      `[swfind] no switch table yet. Longest run of the right shape: 33
+      records at 0x006b4c6c (long enough but (node,bit) not distinct)` then
+      `[swfind] no by-shape table and no file table
+      (/dump/tables/aerosmith_le/switch_list.txt): the playfield stays
+      switchless this run`, then `[cabspi] this title has no findable switch
+      table: handing the game the platform AT-REST cabinet word
+      ff0f0f0000000000` — the EXACT class item 52 found on stranger_things:
+      the godzilla-shaped by-shape hunt (32-byte stride) does not fit this
+      title's table at all, and `swelf.py`'s `ROOTS` dict (the per-title
+      static-ELF fallback item 52 built) has no `aerosmith_le` entry, so
+      `sw_file_table()` has nothing to load either. This is why Guided Setup
+      cannot be navigated: no switch resolves, so no button press reaches it.
+      **(2) THE DEVICE POSITION TABLE.** `device_xy.txt`/`led_io.txt` on disk
+      both say `0 records`. NOT the same bug as item 53 (that is
+      group→node, a wire-address problem) and NOT what item 50 fixed
+      (image-name matching) — `devicexy.py`'s `seeds()` finds 1104 candidates
+      fine, but `_one()`'s 0x30-byte record parser (built against
+      Godzilla-family binaries) validates only 2 of them, both garbage. This
+      OLDER title's binary does not use that struct at all; it is a
+      genuinely different, older layout and needs its own RE, independent of
+      the switch-table fix in (1).
+      **★★★ THE SWITCH TABLE'S MECHANISM IS NOW KNOWN, from the ELF alone, no
+      run.** `swelf.py`'s already-known struct shape (item 52, built for
+      stranger_things) is CONFIRMED to fit Aerosmith field-for-field:
+      **`dev(i) = DEV_ROOT + 24*i`, name pointer at `+12`, slot at `+16`,
+      bit at `+18`, kind at `+20` — `kind==7` for every switch checked and
+      `kind==4` for the one LED checked**, exactly `swelf.py`'s
+      `KIND_SWITCH = 7` constant. Method, so it can be redone or checked:
+      (a) Aerosmith's ELF has two PT_LOADs, text at VA 0x8000 (file off 0)
+      and **data at VA 0x595490 (file off 0x585490, bias 0x10000)** — the
+      same two-bias shape `swelf.py`'s `Elf` class already handles, this
+      title's data segment is just much smaller/lower than Godzilla's
+      (0x595490-0x5de708 vs the 0x700000s addresses other tools assume).
+      (b) A `lednames.py`-style scan (records of 0x18 bytes, five IDENTICAL
+      pointers to one string + a null word), run over the CORRECT segment
+      range, finds **313 such name records at VA 0x5d26c4** — real Aerosmith
+      names throughout: `TROUGH JAM/1..6`, `LEFT/RIGHT FLIPPER BUTTON`,
+      `LEFT/RIGHT SLINGSHOT`, `SHOOTER LANE`, `LEFT/RIGHT FLIPPER EOS`,
+      `LEFT/RIGHT OUTLANE`, `SLAM TILT`, `SERVICE SELECT/PLUS/MINUS/BACK`,
+      `DIP 1..8`, and (past index 90) `WING LEFT 5-B/G/R` style LED channel
+      names. (c) Scanning the whole `.data` segment for 4-byte words landing
+      exactly on one of those 313 record boundaries finds **exactly 313
+      hits, one per name, at a consistent 24-byte stride** — the DEV array
+      itself, `DEV_ROOT ≈ 0x5d096c` (lowest hit's record start). Reading
+      `+16`/`+18`/`+20` off each hit reproduces `TROUGH 1` at slot=5 bit=0x25
+      kind=7, `LEFT FLIPPER BUTTON` at slot=5 bit=0x19 kind=7, `RIGHT
+      FLIPPER BUTTON` at slot=5 bit=0x18 kind=7, `SLAM TILT` at slot=4
+      bit=0x16 kind=7, `WING LEFT 5-B` at slot=8 bit=0x2f **kind=4** — the
+      kind field alone separates switches from LEDs, cleanly, on real names.
+      (d) The literal value `0x5d096c` appears at exactly two `.data` file
+      offsets (VA 0x599f0c and VA 0x5a6034) — one of these is the GOT-style
+      pointer slot `swelf.py`'s `ROOTS` wants as `dev_root` (recall `rows()`
+      does `dev = e.u32(dev_root)`, i.e. the root is the ADDRESS OF A
+      POINTER, not the array itself) — still not disambiguated between the
+      two, same open question as before.
+      **★★★ BRD FOUND AND DISAMBIGUATED, same session, continuation after
+      David's "keep going... get the tables on all the games."** Method: (i)
+      dumped every distinct `slot` value actually used across all 313 DEV
+      records — exactly eight: `{0,2,3,4,5,6,7,8}`, slot 0 a one-record dummy
+      (`kind=0`); (ii) `swelf.py`'s BOARD record is 16 bytes with a `u16`
+      node id at `+14`, so scanned the WHOLE `.data` segment for a 16-byte-
+      stride base where slots 2-8 all land on a valid Aerosmith node id
+      (`{0,1,2,4,8,9,10,12}`, from `node_ident.txt`) AND no two slots land on
+      the same node (bijective — a real board table cannot double-book a
+      node). Two candidates survived that filter, 16 bytes apart
+      (0x5cd874 and 0x5cd884). **(iii) THE DISAMBIGUATOR, the same trick that
+      found DEV_ROOT's pointer slot: search the file for a literal reference
+      to each candidate's own address.** `0x5cd874` is referenced NOWHERE in
+      the binary (0 hits) — a coincidental match, not real data.
+      **`0x5cd884` is referenced at exactly two `.data` offsets (VA
+      0x589eb8 and VA 0x596558)** — same shape as `dev_root`'s two-hit
+      pattern. **`BRD_ROOT = 0x5cd884` is therefore confirmed, not guessed**,
+      giving slot→node: `{2:4, 3:0, 4:1, 5:8, 6:9, 7:10, 8:12}` (slot 3→node
+      0 reads as "not a real node-bus board" — node 0 is the CPU/bridge,
+      `node_ident.txt` itself skips it as reserved — which fits: slot 3's 18
+      records are almost all DIP/SERVICE/COIN-DOOR/TILT, the CABINET
+      switches that arrive over SPI, never the node bus, per item 52's own
+      finding on this exact class of switch).
+      **STILL NOT FOUND, and it is now the ONLY gap: the ENTRY table root**
+      (44-byte records, `+24` u16 num, `+26` u16 devidx). Tried twice more
+      this session: (a) a longer-minimum-run version of the original scan
+      (≥40 consecutive valid records) found 9 candidates, but **the same
+      pointer-slot disambiguator that worked twice above found ZERO
+      references to ANY of the 9** — meaning none of them are real, the scan
+      shape itself is probably slightly wrong for this title, not just
+      unlucky; (b) hand-scanned the exact two clusters where DEV's and BRD's
+      OWN pointer slots live (0x589e00-0x58a000, 0x595f00-0x596700) for any
+      third pointer that dereferences to an ENT-shaped run — nothing.
+      **A cheaper path than finding ENT may exist and is worth trying before
+      more address-hunting:** `swtable.py`'s own docstring says the schematic
+      view needs exactly `id, node, bit, name` and `by_name()` joins on NAME
+      alone — `num` is not in that list. Since DEV+BRD already give
+      `(name, node, bit, kind)` for every device with no ENT table at all, a
+      `swelf.py`-style reader could walk DEV directly, keep only `kind==7`,
+      and assign a SYNTHETIC sequential id — skipping the true entry-table
+      "id"/"num" (the technician switch NUMBER David would see on a real
+      TECH ALERTS screen) as a follow-up refinement rather than a blocker.
+      Untested this pass; flagged as the next thing to try, cheaper than a
+      third address hunt.
+      **Once ENT is found OR the synthetic-id path is judged good enough:**
+      add `"aerosmith_le": (ENT_or_None, 0x5d096c, 0x5cd884)` to `swelf.py`'s
+      `ROOTS` (using whichever DEV/BRD dereference — pointer-slot vs
+      direct — the actual read code expects; both slots are known and
+      listed above so this is a two-minute check, not a new hunt), run it
+      offline against the mounted card's `game` ELF and confirm the printed
+      table names/slots/nodes make sense, THEN one live run to confirm
+      `switch_list.txt` gets written, the by-shape hunt's `[cabspi]`
+      fallback line disappears, and Guided Setup can actually be navigated.
+      **Still deliberately NOT wired into the tracked file this pass** —
+      `swelf.py`'s own docstring is explicit that a wrong table is worse
+      than an empty one, and the exact ENT strategy (real table vs synthetic
+      id) is still an open choice, not a confirmed answer.
+      **★ SAME CLASS OF BUG CONFIRMED ON A THIRD TITLE, live boot-test,
+      `avengers_infinity_le`** (`PAD_CARD=<image> runlim.sh`, 150 s, bounded,
+      self-cleaning, survivors=0): `[swfind] no switch table yet` then
+      `[cabspi] this title has no findable switch table` — the identical
+      signature to Aerosmith's. Static old-struct scan on its ELF had
+      earlier read 0/0 in this pass's first survey, but that was BEFORE the
+      keyword-scoring fix to the table-picker (see the survey note below);
+      it has not yet been re-scanned with the fixed tool. Boot fps was also
+      unusually low (2-6 fps against a normal ~47-60) on an UNCACHED first
+      read straight off D: — worth knowing before reading anything into the
+      slow rate alone next time this title comes up.
+      **★★★★ BOTH TITLES' SWITCH TABLES ARE SOLVED, SHIPPED IN `swelf.py`,
+      2026-08-19 — ENT included, and it is what was actually missing, not a
+      dead end.** Re-ran the disambiguator on `avengers_infinity_le`'s own
+      ELF using the same pipeline (name table → DEV_ROOT → slot enumeration →
+      BRD_ROOT, all pointer-slot-confirmed) and it reproduced the identical
+      shape: DEV_ROOT=0x657c9c (2 pointer-slot refs), slots
+      `{0,2,3,4,5,6,7}`, BRD_ROOT=0x654b94 disambiguated the same way from a
+      false-positive candidate 16 bytes off — and its slot→node map
+      (`{2:4 QR SCANNER, 3:0 cabinet, 4:1 CABINET, 5:8 LOWER PLAYFIELD, 6:9
+      UPPER PLAYFIELD, 7:12 TOPPER}`) lines up EXACTLY with the real board
+      names `nbdir.py` reads statically off the same ELF (`node=8 name=LOWER
+      PLAYFIELD`, `node=9 name=UPPER PLAYFIELD`, `node=12 name=TOPPER`) — a
+      second, independent confirmation neither Aerosmith cross-check had.
+      **THE ENT MYSTERY BROKE OPEN ON avengers_infinity_le: the entry table
+      has NO independent pointer anywhere in the binary** (both titles'
+      candidate ENT addresses came back with ZERO literal references, over
+      and over, no matter how the search was widened — this was never bad
+      luck, it is how these titles are actually built) **but it still sits
+      immediately before DEV_ROOT in memory, reached only by
+      `dev_addr - 44*count` arithmetic in the compiled code.** Walking
+      backward from `avengers_infinity_le`'s DEV_ROOT at the 44-byte entry
+      stride found 112 consecutive valid-looking records with NO gap, and
+      reading them off produced `DIP 1..8` at `num=1..8`, `SERVICE SELECT/
+      PLUS/MINUS/BACK` at `num=9..12`, `COIN DOOR INTERLOCK` at `num=25`,
+      `LOCKDOWN BUTTON` at `70`, `START BUTTON` at `73`, `TILT PENDULUM` at
+      `81` — the REAL, STANDARD Stern switch-numbering scheme used across
+      machines, not something a coincidental byte pattern could reproduce.
+      Aerosmith's own entry table sits at the same kind of offset from its
+      DEV_ROOT and decodes with the identical real-world numbering.
+      **Shipped:** `swelf.py`'s `rows()` now accepts `None` as a title's
+      entry-root, meaning "derive it" — `_ent_by_walkback()` walks backward
+      from the dereferenced DEV address until a record stops validating,
+      the same backward-scan proven above. `ROOTS` now carries:
+      ```
+      "aerosmith_le": (None, 0x599f0c, 0x599eb8),
+      "avengers_infinity_le": (None, 0x5fcc1c, 0x5fcbc8),
+      ```
+      (dev/board addresses are the POINTER SLOTS, not the arrays — `rows()`
+      dereferences them, matching stranger_things_le's existing convention;
+      each has a second, equally valid pointer-slot address recorded
+      earlier in this item if the one shipped ever needs cross-checking).
+      **Verified, all offline, no run:** `python3 swelf.py <elf> <title>`
+      against both mounted cards' `game` files prints a full, sane
+      `switch_list.txt` — 104 switches for `aerosmith_le` (nodes
+      `[0,1,4,8,9,10]`), 110 for `avengers_infinity_le` (nodes
+      `[0,1,4,8,9]`) — `TROUGH 1..6`, `LEFT/RIGHT FLIPPER BUTTON`, `SLAM
+      TILT`, `LOCKDOWN BUTTON` all landing on physically sensible node/bit
+      pairs. **Regression-checked stranger_things_le through the same
+      changed code path — still 99 switches, byte-identical to before** (its
+      `ent_root` is a real integer, so it never touches the new walkback
+      branch at all). `python -m pytest --collect-only` (2803 tests) and a
+      full suite run both clean after the change (suite result recorded in
+      the closing summary once it finishes).
+      **NOT YET DONE, and it is the actual remaining gap now:** wiring this
+      into a LIVE RUN. `mktables.py` already calls `swelf.rows(elf, game)`
+      as its fallback (no new plumbing needed there — this was the whole
+      point of item 52 building that seam), but it resolves the ELF from
+      `~/spike2root/games/<title>/game`, which is empty for both these
+      titles in THIS session (their card was only ever fuse2fs-mounted for
+      static reading, never run through the normal `watch.sh`/`PAD_CARD`
+      extraction flow that populates that directory, and that directory is
+      root-owned from David's own `PAD_PIVOT` session so this pass could not
+      symlink into it either). **Acceptance still needs: one live run of
+      each title, confirming `switch_list.txt` gets written for real, the
+      `[cabspi]` no-table fallback disappears from the log, and — the actual
+      point of all of this — that Guided Setup can be navigated with a
+      keyboard because switches now resolve.**
+      **★★★★★ A THIRD TITLE SOLVED AND SHIPPED, `batman`, using the pipeline
+      as a repeatable tool rather than a fresh investigation — this is the
+      first title where the whole method ran start to finish in minutes, not
+      hours.** Node set read statically off its own ELF via `nbdir.py`
+      (`{0,1,2,4,8,9,10,12,13,24}` — two toppers, `ACCESSORY TOPPER` and
+      `LE/SLE TOPPER`, which the derived BRD map places at nodes 12 and 13
+      exactly where their pure-LED slots (8 and 9, `kind=4` only, no
+      switches or coils) land). `DEV_ROOT` found with 2 pointer-slot refs,
+      `BRD_ROOT` disambiguated the same way from 3 candidates (only one had
+      any reference at all). `swelf.py` against the mounted card now prints
+      111 switches — `LEFT/RIGHT FLIPPER BUTTON` at `num=9/10`, `LEFT/RIGHT
+      SLINGSHOT` at `7/8`, `TROUGH 1..6` at `15..20` — the identical
+      real-world Stern numbering as the other two, on nodes/bits that make
+      physical sense. **One stray row** (`id=1 num=166 name='DIP 5'`) does
+      not fit the pattern the other 110 do; not chased further this pass —
+      worth a second look before this pass's confidence is extended to
+      titles beyond these three.
+      **★ THE METHOD DOES NOT GENERALIZE TO EVERY TITLE, and that boundary is
+      now mapped, not just assumed.** Re-ran the full pipeline (with the
+      SAME node-set-via-`nbdir.py` step) against `deadpool_pro`,
+      `deadpool_le`, `dungeons_and_dragons_le` and `godzilla_le`
+      (`foo_fighters_le`'s `nbdir.py` step also came back empty and was not
+      pipelined further) — `nbdir.py` DOES find a real node directory on all
+      of them (the board-catalog/node-directory reader is a genuinely
+      different, more general instrument than this item's DEV/BRD scan), but
+      the DEV/BRD pipeline itself finds nothing real: **zero pointer-slot
+      references on every single candidate**, and the "distinct slots" list
+      degenerates into thousands of huge, nonsensical numbers instead of a
+      clean handful of small ones — the unambiguous signature of the scan
+      matching noise, not structure. **These four are a DIFFERENT
+      generation** (`godzilla_le` sharing nothing with working sibling
+      `godzilla_pro` is the clearest tell) and need their own fresh
+      structural RE the way Aerosmith did originally, not a rerun of this
+      pipeline. **A real bug was found and fixed while surveying these: the
+      first pass's `full_survey_one.sh` captured `cardmount.sh`'s ENTIRE
+      multi-line stdout into its ELF-path variable instead of just the last
+      line, so `godzilla_le`/`deadpool_pro`/`deadpool_le`/`dungeons_and_
+      dragons_le` all read as "nbdir.py found nothing" the first time
+      through — false negatives from a shell bug, not a real absence.
+      Re-run with the fix (`| tail -1`); the "different generation, not
+      pipeline-solvable" conclusion above is from the CORRECTED run.**
+      **Full regression check on the `swelf.py` change: `pytest` clean,
+      2792 passed, 11 skipped (pre-existing, unrelated), 0 failed, in
+      ~10 minutes.**
+      **★★★★★★ LIVE-VERIFIED, `aerosmith_le`, real `watch.sh` run (worktree
+      scripts, `PAD_CARD`, 3 min backstop, David's own machine idle at the
+      time, clean teardown, card unmounted, `alive.sh` 0 after).** This is
+      the acceptance test the whole rest of this item was building toward,
+      and it passed: `watch.sh`'s own table-build step printed
+      **`switches     104 in the game's own table (read out of the game's
+      binary, no run needed)`** — no more "no switch dump yet", the
+      `[cabspi]` no-table fallback never fired this run. The fix works
+      through the REAL pipeline, not just in isolation.
+      **A SEPARATE, UNRELATED fault then stopped the game a little later:**
+      `[ERR] Error in opening firmware binary file` / `Please put bin file
+      to /lib/firmware/vpu folder or export VPU_FW_PATH env`, guest exit,
+      clean teardown. **This is NOT a new mystery — it is the exact
+      pattern items 23/36b already named "VPU firmware noise" and flagged
+      as usually a RED HERRING that hides the real exit reason**, which
+      neither those items nor this pass has an instrument for (item 23,
+      the exit-reason hook, was dropped 2026-08-11 at David's own ask).
+      Do not read this as "Aerosmith is still broken" without qualifying
+      it: the SWITCH TABLE half of this item's acceptance is now proven:
+      the CRASH is a different, older, already-documented open question
+      about clean guest exits in general, not specific to this fix.
+      **★★★★★★★ LIVE-VERIFIED CLEAN, `avengers_infinity_le`, same recipe —
+      and this one is a COMPLETE pass, no asterisk.** `switches     110 in
+      the game's own table (read out of the game's binary, no run needed)`,
+      then the run went the FULL 3-minute backstop with **zero `[swfind]`
+      and zero `[cabspi]` lines anywhere in the log** (compare the FIRST
+      boot-test on this title, before the fix, which was wall-to-wall
+      `[cabspi]` fallback and limped at 2-6 fps) — `[eglshim]` held a
+      healthy **~41-42 fps** the whole way, no crash, clean teardown,
+      `alive.sh` 0 after, card unmounted. This title's switch table is not
+      just theoretically fixed, it is confirmed working end to end with
+      nothing else in the way.
+      **★★★★★★★★ LIVE-VERIFIED, `batman`, same recipe, full 3-minute
+      backstop reached with no crash** (`[watch] 3 min backstop reached` /
+      `[watch] stopping...` — a clean stop, not a guest exit).
+      `switches     111 in the game's own table`, and — new this run, worth
+      recording exactly — **the SHIM ITSELF confirmed loading it**:
+      `[swfind] switch table loaded from /dump/tables/batman/switch_list.txt:
+      111 switches, ids to 113 (ELF-derived; the names live in the file)`.
+      fps climbed steadily to ~24 by the backstop, no VPU-noise-adjacent
+      crash this time (the same "Error in opening firmware binary file"
+      lines appear in the log but did not end the run, consistent with the
+      "noise, not cause" read on that message).
+      **ONE LOOSE END, and it is worth flagging exactly rather than
+      smoothing over: `[cabspi] this title has no findable switch table:
+      handing the game the platform AT-REST cabinet word...` STILL FIRED,
+      in the SAME run, AFTER `[swfind]` reported the file table loaded.**
+      Two different code paths in `hwshim.c` clearly answer two different
+      questions here — `[swfind]`'s file-table load and whatever `[cabspi]`
+      checks before deciding to fall back are not talking to each other —
+      and this run does not show that costing anything (it ran clean to the
+      backstop either way), but it means `[cabspi]`'s own check should
+      learn about `sw_file_table()` succeeding rather than being told this
+      title has "no findable switch table" when it plainly does. Not fixed
+      this pass; a clean, narrow follow-on for whoever picks this up next.
+      **★★★★★★★★★ THE METHOD TURNED INTO A PIPELINE AND RAN ACROSS EVERY
+      REMAINING "COMPLETE UNKNOWN" TITLE, per David's "survey the rest of
+      the titles now."** Node set derived statically from each title's own
+      `nbdir.py` output (no run, no guessing the valid-node list by hand
+      per title as the first three needed); DEV → BRD → ENT walkback as
+      established above, all pointer-slot-confirmed where confirmable.
+      **SIX MORE TITLES SOLVED AND SHIPPED, nine total now:**
+      `foo_fighters_le` (190 switch-kind rows decoded, incl. `RIGHT
+      FLIPPER BUTTON` num=10), `guardians_le` (99 switches),
+      `iron_maiden_le`, `jurassic_park_le`, `mando_le`, `rush_le` — every
+      one reproduces the identical real Stern numbering
+      (`LEFT/RIGHT FLIPPER BUTTON`, `TROUGH 1..6`, `LEFT/RIGHT SLINGSHOT`
+      at the same `num` values seen on the first three). `guardians_le`
+      spot-checked through the actual `swelf.py` entry point (not just the
+      discovery script) as a sanity check on the wiring itself: `99
+      switches on nodes [0, 1, 4, 8, 9]`, clean.
+      **NINE MORE SURVEYED AND NOT SOLVED — the device-name table itself
+      was found (same keyword fingerprint as the working nine) but has NO
+      literal reference to its own address anywhere in the binary, so it
+      could not be trusted the way `DEV_ROOT`/`BRD_ROOT` are everywhere
+      else:** `james_bond_le` (DEV confirmed, BRD not), `king_kong_le`,
+      `led_zeppelin_le`, `metallica_spike`, `sword_of_rage_le`,
+      `turtles_le`, `uncanny_xmen_le`, `venom_le` (DEV itself not
+      confirmed on these seven), `munsters_le` (DEV confirmed, BRD not).
+      **This is a real, structural finding and not just "ran out of
+      titles to try":** the SAME class of gap this pass already solved
+      once for `ENT` (no independent pointer, reached only by arithmetic)
+      may well apply to `DEV` on these nine too — worth trying a
+      walkback-style derivation for `DEV` the same way `_ent_by_walkback()`
+      already does for `ENT`, rather than assuming these are a different
+      generation outright. **Not attempted this pass** — flagged as the
+      cheapest next step before writing these nine off as needing fresh RE.
+      **Every survey/discovery script from this session lives in the
+      session's own scratch dir, not committed** (`full_pipeline.py`,
+      `solve_verify.py`, `full_solve_one.sh`, `nbdir.py`-based node
+      derivation) — reusable in-session, not yet promoted into the repo's
+      own tools; worth doing if this sweep continues.
+      **All 26 known card images are now accounted for**: 4 already
+      working before this item started, 9 solved and shipped this
+      session, 5 with a working switch table but a separate device-
+      position gap, 9 surveyed with DEV found but unconfirmed (need the
+      walkback idea above or fresh RE), 4 confirmed a different
+      generation entirely (`deadpool_le/pro`, `dungeons_and_dragons_le`,
+      `godzilla_le`, from the earlier pass). No title remains completely
+      untouched.
+      **Device-position table (item 2 above, the 0x30-byte struct):
+      untouched this pass** — a second, independent RE job once the switch
+      table is fixed; do not assume fixing (1) fixes the artwork/positions.
+      **Acceptance for the Aerosmith slice:** state what "no tables" means at
+      the desk (which lookup returns empty and why — DONE, see above), then
+      get Aerosmith past guided setup into a run that shows a switch layout,
+      LED matrix and coil map and reaches attract — the same bar items
+      27/49/50/53 already hold other titles to. Record the mechanism found,
+      whether it is Aerosmith-specific or a class of titles, and what the
+      next title alphabetically after Aerosmith should expect.
+      — S1: the title cannot be set up at all today (no switch resolves, so
+      Guided Setup cannot be navigated), which is the floor this whole
+      initiative is measuring from. D3 (was D4): the mechanism is known and
+      matches an existing, validated method (`swelf.py`/item 52); what is
+      left is desk address-hunting for two more roots plus one confirming
+      run — no new instrument, no unknown structure.
+      **★★ SAME SESSION, David: "keep going, and get the tables on all the
+      games... don't pause for me" — so this pass widened from Aerosmith
+      alone to a full desk-only survey of every card image on `D:\Pinball\
+      images\Stern\spike2\`, one title mounted read-only at a time via
+      `cardmount.sh` (`PAD_CARD_CACHE=0` so a quick look does not trigger a
+      7-15 GB background cache copy per title) then unmounted immediately.
+      No rig lock was taken for this — mounting a DIFFERENT title's card
+      read-only touches neither `~/spike2root` nor David's own live
+      `aerosmith_le` mount, which stayed up and untouched the whole time
+      (confirmed with `alive.sh` before and after). The one attempt to also
+      take the formal rig-lock file for tidiness was refused by the
+      environment's own permission layer (mutating a file this pass did not
+      create) — a reasonable guard, so this pass proceeded on the
+      read-only-instrument exemption instead rather than fight it.
+      **★★ THE MECHANISM FOUND FOR AEROSMITH IS NOT AEROSMITH-SPECIFIC —
+      turtles_pro's ELF carries the IDENTICAL name-table + 24-byte dev-record
+      shape** (same `TROUGH JAM/1..6`, `LEFT/RIGHT SLINGSHOT`, `LEFT/RIGHT
+      FLIPPER BUTTON`, `SLAM TILT`, `DIP 1..8` vocabulary, found the same
+      way). turtles_pro does not currently NEED it — its switch table already
+      works via the runtime by-shape hunt — but it proves the method
+      generalizes across at least two titles from different eras rather
+      than being one binary's accident.
+      **★★★ THE SURVEY, one line per title, static desk analysis only (no
+      boot, no run) — `new_struct` = `devicexy.py`'s existing 0x30-byte
+      parser, `old_struct` = this pass's 24-byte name-table cross-reference,
+      both counting records found directly from the ELF:**
+      - **Fully working already** (both tables built by a prior run, on
+        record in `~/spike2root/dump/tables/`): **godzilla_pro** (switch 87,
+        device_xy 575, led_io 128), **jaws_le** (108/439/73), **john_wick_le**
+        (105/503/63), **james_bond_60th_le** (117/513/29).
+      - **Switch table works, device-position table empty** (playable
+        today, just no LED/coil/switch artwork positions on the virtual
+        playfield) — confirmed on record: **star_wars_le**, **stranger_
+        things_le** (swelf.py, item 52), **turtles_pro**, **led_zeppelin_le**,
+        and **elvira3** partially (109 switches, 275 device positions, 0
+        led_io). None of these matched EITHER static struct in this pass's
+        survey for their MISSING half, so the device-position gap on these
+        five is a **fourth, still-unidentified structure** — not the same
+        fix as Aerosmith's.
+      - **Switch table SOLVED AND SHIPPED in `swelf.py` this pass — NINE
+        titles** (see the ★★★★ blocks below for the full method and
+        verification): **aerosmith_le** (104 switches, LIVE-verified),
+        **avengers_infinity_le** (110, LIVE-verified clean),
+        **batman** (111, LIVE-verified), **foo_fighters_le** (190
+        switch-kind rows), **guardians_le** (99, spot-checked through the
+        real `swelf.py` entry point), **iron_maiden_le**,
+        **jurassic_park_le**, **mando_le**, **rush_le** — the last six
+        static/offline only, not yet LIVE-run.
+      - **Confirmed a DIFFERENT generation — not solvable by rerunning this
+        pass's pipeline, needs its own fresh RE:** **deadpool_le**,
+        **deadpool_pro**, **dungeons_and_dragons_le**, **godzilla_le** (NOT
+        the same binary as working sibling godzilla_pro — do not assume the
+        Pro fix carries over). `nbdir.py` reads a real node directory on all
+        four (so THAT instrument generalizes fine), but the DEV/BRD scan
+        finds only noise on them — thousands of nonsense "slot" values and
+        zero pointer-slot references on every candidate, the clean opposite
+        of the working nine's signature.
+      - **DEV found (same keyword fingerprint), NOT confirmable — no literal
+        reference to its own address anywhere in the binary, the same class
+        of gap this item already solved once for ENT:** `james_bond_le` (NOT
+        james_bond_60th_le, which already works — DEV confirmed, BRD not),
+        `munsters_le` (DEV confirmed, BRD not), `king_kong_le`,
+        `led_zeppelin_le` (device-position gap already known, above; this is
+        its SWITCH side), `metallica_spike`, `sword_of_rage_le`, `turtles_le`
+        (NOT turtles_pro), `uncanny_xmen_le`, `venom_le` (DEV itself
+        unconfirmed on these seven). **Likely the SAME fixable gap as ENT,
+        not a different generation** — untried this pass, see the resume
+        note below.
+      **What this means for the initiative, stated plainly so nobody
+      re-derives it:** "get the tables on all the games" turned out to be
+      mostly ONE mechanism, not many — 9 of 26 titles share the exact
+      struct and switch-numbering scheme, cracked once and then applied
+      as a repeatable pipeline rather than re-derived per title. The
+      remaining 17 split into two very different-sized problems: 9 titles
+      where the SAME struct exists and likely needs only the same
+      walkback trick already proven for `ENT`, and 4 titles that are a
+      genuinely different generation needing fresh RE the way Aerosmith's
+      did originally. Every one of the 26 known card images has now been
+      looked at; none remain completely untouched.
+      **★★★★ ALL SIX statically-solved titles LIVE-VERIFIED**
+      (2026-08-19, same session): `foo_fighters_le` (105 switches),
+      `guardians_le` (99), `iron_maiden_le` (101), `jurassic_park_le`
+      (107), `mando_le` (103), `rush_le` (104) — every one booted
+      through a bounded `watch.sh` run, showed real `[sw]` edges firing
+      on attract's auto-advance, no `[segv]`/SEGV/FATAL, and cleaned up
+      to `alive.sh`'s "0 (clean)" on its own. Blocking pattern used:
+      `wsl -e bash -c "... && bash watch.sh N > log 2>&1"` run in the
+      FOREGROUND (no `setsid --fork`) — that detaches and returns before
+      the backstop fires, which cost one unnecessary `killgame.sh` on
+      `foo_fighters_le` before this was caught; every run after was
+      clean without any manual kill.
+      **★★★ THE "9 unconfirmed" WALKBACK HYPOTHESIS DID NOT HOLD — split
+      into three real sub-problems, none shippable this pass** (same
+      session, right after the live-verify above). The plan was to reuse
+      `_ent_by_walkback`'s trick on `DEV` itself. Built `solve_verify2.py`
+      (uses the array address directly when no literal ref exists, same
+      idea as the ENT fix) and ran it against all nine. Result:
+        - **`james_bond_le`, `king_kong_le`, `led_zeppelin_le`,
+          `metallica_spike`, `turtles_le`, `uncanny_xmen_le`, `venom_le`
+          (7 titles) use a DIFFERENT, LARGER device record — 48 bytes,
+          not 24.** Found by histogramming the byte-deltas between
+          consecutive name-table cross-references: these seven cluster
+          on delta=48 almost exclusively (e.g. king_kong_le 857/858
+          hits), where the original nine cluster on delta=24. Confirmed
+          this is a real second struct, not a misread of the first: at
+          the OLD 24-byte stride `james_bond_le`'s "DEV" decodes to
+          garbage after record 0 (slot/bit/kind fields become
+          nonsense 5-to-6-digit numbers); at the 48-byte stride, bucketing
+          every device by the field at `hit+12` gives clean, small,
+          repeated values with plausible samples — kind=7 -> `Right
+          Flipper, Trough, Right Slingshot, Left Slingshot, Auto
+          Plunger, Left Flipper`, kind=8 (near-equal count to kind=7,
+          suggesting switch/coil pairing) -> `Jet Pack Magnet, Right
+          VUK, Rocket Lock, Center 3 Bank Drop Target`, kind=4 ->
+          `BACKBOX GI, DIP 1..8`, kind=2 -> `QR SCANNER *` status
+          flags. **This is real, useful signal, but there is no `num`
+          (real Stern switch number) field found yet to check against
+          ground truth, so nothing here is trustworthy enough to ship.**
+          Treat as its OWN generation needing fresh RE, same bucket as
+          deadpool/godzilla_le/dungeons_and_dragons_le below — NOT a
+          quick trick.
+        - **`sword_of_rage_le` and `munsters_le` (2 titles) DO share the
+          original 24-byte struct**, confirming the hypothesis for these
+          two specifically — `solve_verify2.py` derives DEV directly (no
+          ref needed) for `sword_of_rage_le` and via ref for
+          `munsters_le`. But BOTH still fail past that point, on a
+          DIFFERENT problem each: `sword_of_rage_le`'s region
+          immediately before DEV is NOT a clean ENT run — walking back
+          hits several dozen identical `num=49968 devidx=36` records in a
+          row (not distinct entries, so not real), and an exhaustive
+          independent ENT search (`find_ent()`, unused code already in
+          `full_pipeline.py`) finds five candidate 40+-record runs
+          elsewhere in `.data`, none with a literal reference, so none
+          confirmable either way. `munsters_le`'s BRD bijective
+          slot→node search (requiring every needed slot to map to a
+          DISTINCT valid node) finds ZERO exact matches; relaxing to
+          "5 of 6 slots valid" turns up near-misses
+          (`nodes=[1,2,3,4,4,4]`, `nodes=[7,8,8,8,9,9]`) that look
+          structurally plausible but require either loosening the
+          distinctness rule or finding the true table at a shifted
+          offset — untried.
+      Net: the "cheap, same gap as ENT" read from the end of the last
+      pass was wrong as a blanket claim. It is right for 2 of 9, each
+      with its own new complication; wrong (real second generation) for
+      7 of 9. **Nothing new shipped into `swelf.py` this pass** — every
+      candidate above still lacks the ground-truth check (real Stern
+      switch numbering) the nine shipped titles all passed, and a wrong
+      table is explicitly worse than none (this file's own docstring).
+      Scratch scripts added this pass, same non-repo status as the
+      others: `solve_verify2.py`, `stride_diag.py`, `hits_diag.py`,
+      `kind_scan.py`, `wide_dump.py`, `raw_dump.py`, `brd_diag.py`,
+      `list_tables.py`, `ent_debug.py`, `ent_search_one.py`, plus their
+      `*_one.sh` mount wrappers — all in `C:\tmp`, all read-only against
+      the cards.
+      **Resume, in priority order:**
+      (1) The 7-title 48-byte-stride generation needs its own num-field
+      hunt (something must carry the real switch NUMBER for ground-truth
+      validation the way `+24` did on the 24-byte struct — not yet
+      found) before anything from it can ship. This is now the single
+      biggest remaining chunk of the catalog (7 of the 17 unsolved
+      titles) and the kind-bucketing above is a running start for
+      whoever takes it.
+      (2) `sword_of_rage_le`'s real ENT and `munsters_le`'s real BRD each
+      need their own small follow-up (see the two bullets above for
+      exactly where the search stopped) — smaller, title-specific gaps,
+      not a shared mechanism.
+      (3) The four different-generation titles (`deadpool_le/pro`,
+      `dungeons_and_dragons_le`, `godzilla_le`) need fresh structural RE
+      the way Aerosmith's did originally — budget accordingly, this is
+      NOT a rerun of the existing pipeline.
+      (4) The "device-position table" gap on the five already-playable
+      titles (star_wars_le, stranger_things_le, turtles_pro, led_zeppelin_le,
+      elvira3) is real but lower severity (S2/S3, cosmetic) — do not let it
+      block on the S1 "can it even play" question above.
+      (5) The `[cabspi]`/`[swfind]` disconnect found on `batman`'s live run
+      (above) is a small, well-scoped `hwshim.c` fix whenever someone wants
+      it — low urgency, it did not cost that run anything observable.
+      **If David wants this to go faster than one title per pass, a
+      multi-agent workflow (fan out one RE agent per unknown title, converge
+      on a shared struct catalogue) fits this shape well — but that needs his
+      explicit opt-in and was not started here.**
+      **★★★ FULL CATALOGUE AUDIT, 2026-08-19, same session, per the goal
+      restatement above.** Live-ran every title not yet covered this
+      session (venom_le, sword_of_rage_le, munsters_le, turtles_le,
+      uncanny_xmen_le, deadpool_le, deadpool_pro, dungeons_and_dragons_le,
+      godzilla_le, godzilla_pro, jaws_le, john_wick_le, james_bond_60th_le,
+      star_wars_le, turtles_pro, elvira3 — 16 titles, one at a time,
+      `bash watch.sh 1` bounded runs) so every known card has a fresh,
+      dated row in `README.md`'s table instead of an inferred one. **Two
+      corrections to earlier static-only classification, found only by
+      actually running them:**
+        - **`deadpool_pro` is FINE** (104 live switches, real artwork,
+          clean) — the earlier "confirmed different generation" bucket
+          had grouped it with `deadpool_le` on STATIC signature alone; the
+          two are not the same binary and do not share a fate. Only
+          `deadpool_le` and `godzilla_le` are still confirmed broken.
+        - **`dungeons_and_dragons_le` mostly works** (104 live switches,
+          255 real device records) — its ONLY gap is missing playfield
+          artwork, not the "different generation" it was grouped under.
+      **A NEW gap found by the artwork fix itself:** fixing `gameinfo.py`'s
+      `Test`/`TestMode` directory bug (below) makes `king_kong_le` and
+      `metallica_spike` both FIND their real artwork file for the first
+      time — but their device XY coordinates still land ENTIRELY outside
+      it (`0 playfield records, 0 outside the 312x710 artwork` on both,
+      after the fix, not before) — so there are now confirmed to be TWO
+      independent bugs where one was assumed, and only the file-lookup
+      half is fixed. Not yet root-caused; likely the same class of "wrong
+      coordinate space" problem this project has hit before (item 3's
+      note on the coil map), not investigated further this pass.
+      **`star_wars_le` opens a second-display window** (`display 2
+      targeted by the guest`) within its first minute — unconfirmed
+      whether it ever shows real content or stays black like item 58's
+      now-withdrawn `mando_le` example; needs the same live-content check
+      before it becomes an item 58 example, not before.
+      **Shipped: `gameinfo.py`'s `find_playfield_art()` only ever looked in
+      `assets/nuk/images/Test/`.** `king_kong_le` and `metallica_spike`
+      ship their drawing under `assets/nuk/images/TestMode/` instead and
+      have NO `Test` folder at all, so the lookup returned None before any
+      filename was even compared — "this title ships no playfield
+      drawing" about two titles that do. Fixed to try `Test` first (every
+      title measured before this fix already uses it, so nothing changes
+      for them), then `TestMode`. Verified live on both titles: artwork
+      now resolves (`Rodeo_LE_Service_Playfield_Wireframe_300dpi_cropped.
+      png`, `metallica_playfield_with_handle_cropped.png`).
+      **The full per-title results of this audit live in
+      `tools/spike2_emu/README.md`'s "Titles" table, not duplicated here**
+      — that table is now the standing record; this note is the pointer to
+      it and the story of what changed and why. Full test suite re-run
+      after the `gameinfo.py` fix: clean, 0 failures (see commit for the
+      exact count).
+      **★★★★★ MAJOR CORRECTION, same session, minutes later: the audit
+      above's "8 titles broken" verdict was mostly a METHODOLOGY BUG, not a
+      real finding.** The audit script checked the CONSOLE pane for the
+      live switch dump; the shim actually writes it to `gzwatch.log` first,
+      and the console's `tail -F` on that file can start watching AFTER the
+      dump already happened, so the lines exist on disk and never reach
+      console. Caught by re-checking `venom_le` directly against
+      `gzwatch.log`: **107 real switches, standard Stern numbering
+      (LEFT/RIGHT FLIPPER BUTTON 9/10, LEFT/RIGHT SLINGSHOT 7/8, TROUGH
+      1-6), the whole time** — it was never broken. Re-ran every "❌"
+      title from the table against `gzwatch.log` directly (never console)
+      and got the same result for **`turtles_le` (96), `uncanny_xmen_le`
+      (110), `deadpool_le` (104), `godzilla_le` (98), `metallica_spike`
+      (106)** — all working, all with plausible numbering. **Only
+      `sword_of_rage_le` and `munsters_le` are still genuinely broken**,
+      each with an explicit, on-the-record refusal:
+      `[swfind] no switch table yet. Longest run of the right shape: 35/33
+      records ... (node,bit) not distinct`. **This also retires the
+      "7-title 48-byte generation-2 struct" thread as a live-behaviour
+      concern**: `james_bond_le`, `king_kong_le`, `led_zeppelin_le`,
+      `venom_le`, `turtles_le`, `uncanny_xmen_le`, `metallica_spike` all
+      carry that struct AND all work fine live — the struct shape was never
+      the blocker for any of them, `swelf.py`'s static fallback was never
+      needed for any of them, and no more effort should go toward
+      "fixing" it. The struct-shape research itself stays true and stays
+      recorded (it may matter for something else later), but it is no
+      longer on this item's critical path. **`deadpool_pro`'s earlier
+      "confirmed fine, unlike sibling deadpool_le" note is now itself
+      superseded — `deadpool_le` is ALSO fine**; only `dungeons_and_
+      dragons_le` (missing artwork) and the king_kong/metallica position
+      bug remain as real, still-open gaps in that whole cluster.
+      **Net catalogue state after this correction, 30 known card
+      versions: 28 have a confirmed-working switch matrix (live or
+      static), 2 do not** (`sword_of_rage_le`, `munsters_le`). Separately:
+      `dungeons_and_dragons_le`/most of the ❌-artwork titles above
+      genuinely ship no CAD drawing at all (confirmed: no `Test` or
+      `TestMode` folder exists in their assets, not a lookup bug — same
+      class as TMNT's long-known case), and `king_kong_le`/`metallica_
+      spike` have device positions that resolve but land entirely outside
+      their (now-found) artwork, still not root-caused. `README.md`'s
+      table has the corrected, authoritative per-title state; this
+      section is the story of how the audit got it wrong and then right.
+      **Resume, in priority order, superseding the older list above:**
+      (1) `sword_of_rage_le`/`munsters_le`'s `(node,bit) not distinct`
+      refusal — the only two titles left with no switch matrix at all.
+      **`sword_of_rage_le` SOLVED AND SHIPPED same session, minutes after
+      being written down as priority (1):** its DEV record turned out to be
+      a THIRD struct variant — the name pointer sits at the record's OWN
+      start (offset 0), not +12 like the ORIGINAL struct or the 48-byte
+      james_bond_le-class titles. Found by the same "scan a wide offset
+      window for a field that stays small and repeats in blocks" technique
+      already used twice this session, THEN caught a fresh trap: the
+      hit-address scan for this title turns up two ISOLATED matches (1144
+      and 1560 bytes from the real run) before the true, densely-packed
+      array begins - `dev_addr = min(hits)` decoded record 0 plausibly and
+      then garbage from record 1 on, because record 1 under that wrong
+      anchor was 1144 bytes into unrelated memory. `stride_diag.py`'s own
+      delta histogram had the tell the whole time (`delta=24 count=270,
+      delta=1144 count=1, delta=1560 count=1`) - the two outlier deltas
+      ARE the two isolated hits. No ENT-equivalent table could be found
+      despite an exhaustive independent search, but `swtable.py` never
+      actually reads `num` (`for sid, _num, node, bit, name in rows` - the
+      underscore is deliberate), so shipping it as an honest, documented
+      placeholder cost nothing real. Shipped in `swelf.py` as
+      `ROOTS_NONUM`/`_rows_nonum()`, kept fully separate from the existing
+      `ROOTS`/`rows()` path (zero touch to the ten already-shipped
+      titles). Live-verified: 98 switches, clean shutdown, no crash. Full
+      test suite clean both before and after (2785 passed).
+      **`munsters_le` SOLVED AND SHIPPED, same session, right after being
+      written down as the catalogue's last gap.** Shares the IDENTICAL DEV
+      struct as `sword_of_rage_le` (decodes just as cleanly at the same
+      offsets), but its BRD table resisted the same search that found
+      `sword_of_rage_le`'s — 16,713 raw slot→node candidates, 789 distinct
+      node-tuples, the best dominated by zero-heavy patterns
+      indistinguishable from uninitialized memory. Ground-truth keyword
+      validation didn't discriminate either, because the switch NAMES come
+      entirely from DEV, not BRD — every candidate "found" the same 18
+      keyword rows regardless of which one was picked. **What worked:
+      reversing the search order.** Instead of scanning every address for
+      a node-shaped pattern, first collect every address with AT LEAST ONE
+      literal reference anywhere in `.data` (6,858 candidates — a much
+      smaller, much cleaner universe), then check which of THOSE decode to
+      valid, distinct nodes. Exactly one candidate survived, at a genuine
+      two-reference root (`0x5512e4`, the same "usually exactly 2" pattern
+      every other confirmed root in this file has). One slot (5 — the
+      BUSIEST by far, 92 device records, almost certainly the main
+      lower-playfield board) still read as nonsense (1032): a byte-width
+      mismatch, not a wrong address — `1032 = 0x0408`, a valid node (8,
+      unused by any other slot) in the low byte with an unrelated nonzero
+      flag in the byte above it. Masking every slot's read to `& 0xFF`
+      (a no-op for the other 15 slots, already under 256) rebuilt the
+      whole table clean: 103/103 rows named, all 18 keyword rows landing
+      on the right node. Shipped in `swelf.py`'s `ROOTS_NONUM`. Live-
+      verified: 103 switches, clean shutdown, no crash. Full test suite:
+      2782 passed, 1 unrelated pre-existing GUI-test flake (a Tk/WSL-panel
+      test with nothing to do with either changed file, passes clean in
+      isolation — 0 failures either way).
+      **ALL 30 known card versions now have a confirmed-working switch
+      matrix.** The catalogue-wide "does every title load its switch/coil/
+      LED matrix and boot to attract" question this item opened with —
+      David's original ask, "every game should be able to load a switch
+      and led and coil matrix and boot into attract" — is closed.
+      (2) **SOLVED same session, minutes after being written down:**
+      `king_kong_le`/`metallica_spike`'s device-positions-land-outside-
+      artwork bug turned out not to be a coordinate bug at all — the raw
+      x/y values were correct the whole time (checked directly: x 7..512,
+      y 1..654, comfortably inside a 312x710 image). The bug was in the
+      SELF-CHECK: `devicexy.py`'s `checks()`/`text()`/`main()` filtered
+      "is this device on the playfield" by comparing `image == "playfield"`
+      literally, a hard-coded spelling that is one title family's, not a
+      constant — and `devicexy.py` already carried the fix for exactly
+      this (`layout_image()`, built for item 50's `james_bond_60th_le`,
+      which spells the same thing `Test/scaled_playfield`), already wired
+      into `playfield.py`'s ACTUAL renderer, just never wired into the
+      diagnostic functions that produce the "N playfield records, N
+      outside" line `watch.sh` prints. The rendering was fine the whole
+      time; only the reported count was wrong. Fixed by routing all three
+      functions through `layout_image()`. Live-verified: `king_kong_le`
+      489/517 land inside with 0 outside (was 0/517); `metallica_spike`
+      502/664 (was 0/664). **Both titles are now FULLY clean end to end**
+      — switches, artwork, and positions all working. Full test suite
+      clean (2785→2783 passed; the 2 fewer are pre-existing Tk/Tcl display
+      flakiness, unrelated to this change — 0 failures either run).
+      (3) `dungeons_and_dragons_le` and the other artwork-less titles are
+      NOT bugs to fix — they genuinely ship none, same as TMNT; only worth
+      revisiting if David wants schematic-mode titles to look better, not
+      because anything is broken.
+      **With (1) and (2) both closed this session, the only remaining gap
+      in the entire 26-title catalogue is `munsters_le`'s BRD table.**
+
+- [ ] **58. A second-display window opens and stays BLACK on titles that
+      have no real second physical display.** `S2 D3` — **NO CONFIRMED
+      REPRODUCTION CASE YET; a fix was written, live-tested, and then
+      REVERTED this same session — read to the end before touching this.**
+      *(Filed 2026-08-19, David live-watching item 57's runs: "many games
+      don't have a second display. make sure we are not bringing up a
+      second display window if they don't have one.")*
+      **First candidate, RULED OUT by David directly:** `mando_le` opened
+      a display-2 window that read `[padglhost] picture: d2 STILL BLACK
+      after 419 presented frames` on one run — looked like exactly this
+      bug. Wrote the obvious fix (mirror the existing render-target-
+      failure path: when the "STILL BLACK" branch fires in `pic2_check()`
+      and `win2_on` is still set, unmap `xwin2` the same way
+      padglhost.c:4039-4051 already does for a target that fails to
+      CREATE). Rebuilt, reran `mando_le` — this time display 2 showed
+      real content from frame 2 onward (`picture: d2 FIRST at frame 2
+      (98511 of 1044480 pixels are not black)`), no black run at all.
+      **David: "mando has a topper with a second display. that's ok to
+      keep."** Checked why the SAME title gave opposite results twice:
+      the second display IS a real, purchasable accessory — Stern
+      shipped a $1999 "The Mandalorian Topper" with a 3D holographic
+      display, announced October 2022, compatible with Pro/Premium/LE
+      ([sternpinball.com](https://sternpinball.com/2022/10/19/stern-pinball-launches-new-the-mandaloriantm-topper-pinball-machine-accessory/)).
+      So the game's own content for that channel is real and wanted; the
+      419-black-frame run most likely just sampled before that content
+      started drawing (attract-cycle timing, not a fake/vestigial code
+      path) — the exact opposite of what this item assumed. **The fix
+      was REVERTED** (`git checkout -- tools/spike2_emu/padglhost.c` in
+      the item/57 worktree) because its premise doesn't hold and, worse,
+      the mechanism (hide after N frames of never-lit) could have hidden
+      a legitimate slow-starting topper display on some future run,
+      trading one cosmetic bug for an occasional real regression.
+      **Where this leaves the item:** the underlying worry (a title with
+      NO real second-display hardware, base config, still gets a black
+      window) may still be real, but needs a confirmed example that is
+      NOT also a real accessory before any fix is worth writing — the two
+      false starts above (this item's own history) are exactly the "a
+      wrong table/fix is worse than none" lesson item 57 already learned
+      twice this session, applied to a third kind of table.
+      **Also still true regardless of a fix:** `padglhost.c`'s
+      `PADGL_TARGET` handler (~line 4014) opens the window purely on
+      `d != 0`, and `pic2_check()` (~3592-3625) ALREADY measures and logs
+      "STILL BLACK after N frames" with nothing downstream reading it —
+      so the instrument to build a fix on is there whenever a real case
+      turns up.
+      **Acceptance:** a specific title, confirmed by David to have no
+      real second-display hardware (base config, no accessory), shown
+      opening a display-2 window that never shows real content for an
+      entire run — THEN design the fix against that title, not a
+      hypothesis.
+      — S2: cosmetic, does not block play. D3: mostly investigation:
+      finding a genuine reproduction case is the actual cost, the code
+      change itself (once one exists) is small and has already been
+      drafted once.
+
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
       instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**
@@ -1622,6 +2443,40 @@ These have each been violated at least once and each cost a run or a window:
       RUNTIME banner for any node, stated with the game-start glass observed.
       — S3: the game recovers by itself; seconds lost and it reads like a
       fault. D2: a derivation guard plus one verification run.
+      **★ 2026-08-19: David live-watching item 57's runs flagged "node board
+      errors... I think 10-12" independently, before seeing this item.**
+      Checked `node_ident.txt` (nbdir.py's own output) across the six
+      titles just live-verified above plus aerosmith/avengers/batman —
+      node 12's fault class is NOT turtles_pro-specific, it is
+      widespread: `foo_fighters_le` (node 12), `guardians_le` (11, 12),
+      `mando_le` (12), `rush_le` (10, 12), `aerosmith_le` (10) all carry
+      a `coil4node`/`tmc5041node`/`hdmi_ws2812node` board at 10-12 with
+      `variant_guess=1` — the SAME "guessed, not measured" flag item 55
+      already calls out for turtles_pro's node 12, just on three MORE
+      board types nbdir.py has never measured (only `pinnode`,
+      `ws2812node`, `node4` are in `VARIANT_PRIOR`; anything else falls
+      back to `VARIANT_DEFAULT=0x01` and is marked a guess -
+      `nbdir.py:100-103`). **BUT**: none of those six live console logs
+      contain a refusal/mismatch/"UPDATE FAILED" line (grepped for
+      `refus|mismatch|update.*fail|nbhex|identity|UPDATING NODE|fident` -
+      zero hits outside the unrelated video-seek "refusing" lines), so
+      the 0x01 guess is not VISIBLY wrong on any of these six specific
+      titles in a ~2-minute run. **The variant byte cannot be read
+      directly** the way the firmware version can (that comes from the
+      hex FILENAME, which is plaintext) - nbdir.py's own comment says
+      the variant lives inside the hex file BODY at flash 0x1008, and
+      that body is encrypted per-title, so the only way any prior was
+      ever populated was by MEASURING it live off a title that already
+      boots (godzilla's `[nbhex]` dump, per the comment at
+      `nbdir.py:100`). **So this is not yet a confirmed live failure**,
+      it is a confirmed LATENT gap on the same three unmeasured board
+      types, now known to appear on at least five titles beyond
+      turtles_pro. If David is seeing an actual banner (not just this
+      log pattern) on a specific title, that title is the one to chase
+      first — its own refusal log names the node and lets the guess be
+      corrected from measurement rather than another guess. Until then,
+      do not touch `VARIANT_DEFAULT`/`VARIANT_PRIOR` blind — same rule as
+      item 57's tables: a wrong guess is worse than a flagged one.
 
 - [ ] **53. The device-table GROUP → bus NODE map is ONE TITLE'S measurement,
       so most titles' lamps and coils have a position and no wire address.**

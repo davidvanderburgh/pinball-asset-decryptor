@@ -29,16 +29,167 @@ still works and is still the faster option for a title you run constantly.
 
 ## Titles
 
-| title | state |
-|---|---|
-| Godzilla Pro 1.15.0 | full: attract, video, audio, switches, coils, artwork playfield |
-| TMNT 1987 Pro 1.59.0 | attract, video, audio, switches, coils; schematic playfield; one Tech Alert (node 2 not registered) |
-| Elvira's HoH 1.13.0 | boots, 60 fps, switch input, reaches its Guided Setup |
-| Jaws LE 1.02.0 | boots, 60 fps, switch input, clears Tech Alerts, reaches its Guided Setup |
+**Per-title emulation status, one line per title, kept current by `/finish`**
+(item 57, David's ask 2026-08-19: "we should be keeping a running list of
+what each game has and doesn't have"). Four columns, each a plain fact about
+ONE run, not a promise about every card version of that title:
 
-All four boot, render at 60 fps and take input. EHOH and Jaws stop at Guided
-Setup because that is what a machine with no saved settings does on first boot,
-not because anything is wrong.
+- **switches** — does a real switch table exist (either the runtime's own
+  live `[sw]` dump, or `swelf.py`'s static fallback) with plausible Stern
+  numbering (flippers/slings/trough checked against the standard scheme)?
+- **artwork** — does the virtual playfield draw the title's own CAD/service
+  drawing, or fall back to the schematic dot layout?
+- **positions** — do the artwork-relative device (LED/coil/switch) XY
+  coordinates land INSIDE the artwork, so the picture and the wire agree?
+- **2nd display** — does the title open a second window, and does it show
+  real content or nothing? `n/a` = never targets one.
+
+A title only reaches "clean" when all four say so. **This table is built
+from real runs, not inference** — a title not yet re-checked keeps its last
+known state with the date it was last run, not a guess.
+
+| title | switches | artwork | positions | 2nd display | last checked |
+|---|---|---|---|---|---|
+| godzilla_pro | ✅ live, 88 | ✅ | ✅ (baseline) | n/a | 2026-08-19 |
+| jaws_le | ✅ live, 109 | ✅ | ✅ | n/a | 2026-08-19 |
+| john_wick_le | ✅ live, 106 | ✅ | ✅ | n/a | 2026-08-19 |
+| james_bond_60th_le | ✅ live, 118 | ✅ | ✅ | n/a | 2026-08-19 |
+| james_bond_le | ✅ live, 108 | ✅ bond_le_playfield.png | ✅ | n/a | 2026-08-19 |
+| deadpool_pro | ✅ live, 104 | ✅ deadpool_pro_playfield.png | ✅ | n/a | 2026-08-19 |
+| king_kong_le | ✅ live, 105 | ✅ Rodeo…Wireframe.png (item 57 fix) | ✅ 489/517 inside, 0 outside (item 57 fix) | n/a | 2026-08-19 |
+| dungeons_and_dragons_le | ✅ live, 104 | ❌ none shipped | ✅ 255 records | n/a | 2026-08-19 |
+| venom_le | ✅ live, 107 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
+| turtles_le | ✅ live, 96 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
+| uncanny_xmen_le | ✅ live, 110 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
+| deadpool_le | ✅ live, 104 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
+| godzilla_le | ✅ live, 98 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
+| metallica_spike | ✅ live, 106 | ✅ metallica_playfield…png (item 57 fix) | ✅ 502/664 inside, 0 outside (item 57 fix) | n/a | 2026-08-19 |
+| aerosmith_le | ✅ static (swelf.py), live-verified | — no device table shipped | — | n/a | 2026-08-19 |
+| avengers_infinity_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
+| batman | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
+| foo_fighters_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
+| guardians_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
+| iron_maiden_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
+| jurassic_park_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
+| mando_le | ✅ static (swelf.py), live-verified | — | — | ✅ real (topper accessory, David-confirmed) | 2026-08-19 |
+| rush_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
+| star_wars_le | ✅ live, 104 | ❌ none found | not re-measured | ✅ real (mini display above the targets, David-confirmed) | 2026-08-19 |
+| turtles_pro | ✅ live, 94 | ❌ none found | not re-measured | n/a | 2026-08-19 |
+| elvira3 | ✅ live, 110 | ❌ none found | not re-measured | n/a | 2026-08-19 |
+| led_zeppelin_le | ✅ live, 97 | ❌ none found | not re-measured | n/a | 2026-08-19 |
+| stranger_things_le | ✅ static (swelf.py, item 52) | ❌ none found | not re-measured | ✅ real (projector, item 44) | 2026-08-19 |
+| sword_of_rage_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 98 | ❌ none shipped | ❌ no device table | n/a | 2026-08-19 |
+| munsters_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 103 | ❌ none shipped | ❌ no device table | n/a | 2026-08-19 |
+
+**CORRECTION, same session, right after this table's first version shipped:**
+the first pass checked the CONSOLE pane for the live switch dump
+(`[event] [sw] id=...` lines), and got 6 false "no live dump" negatives —
+`venom_le`, `turtles_le`, `uncanny_xmen_le`, `deadpool_le`, `godzilla_le`,
+`metallica_spike` **all actually have a real, complete, correctly-numbered
+switch table**; the console's `tail -F` on `gzwatch.log` simply had not
+attached yet when the shim wrote its dump, so the lines existed in
+`gzwatch.log` on disk but never reached console. `venom_le` was the catching
+case: 107 real switches (LEFT/RIGHT FLIPPER BUTTON at 9/10, LEFT/RIGHT
+SLINGSHOT at 7/8, TROUGH 1-6, the standard scheme) sitting in `gzwatch.log`
+the whole time, zero of them ever forwarded. **Checking `gzwatch.log`
+directly (never the console) is now the only trusted method** — the ★★★★
+solved-titles bucket up top used the same static/live methods and is
+unaffected, but every "❌ no live dump" verdict below this point had to be
+individually re-run and re-checked; only `sword_of_rage_le` and
+`munsters_le` survived the recheck as genuinely broken, each with its own
+EXPLICIT `[swfind] no switch table yet` refusal line naming why (35 and 33
+records of the right shape but "(node,bit) not distinct" — the same failure
+class already diagnosed, see item 57's `full_solve_one2.sh`/`solve_verify2.py`
+work). **`sword_of_rage_le` SOLVED AND SHIPPED same session**: its DEV
+record is a THIRD struct variant (name pointer at the record's own start,
+not +12 like the original or +12-with-48-byte-stride like the
+james_bond_le-class titles) — `swelf.py`'s `ROOTS_NONUM` + `_rows_nonum()`
+read it directly with no ENT table at all (none could be found for this
+title despite extensive search; `num` ships as an explicit, documented
+placeholder since `swtable.py` never actually reads it). Live-verified: 98
+switches, clean shutdown, no crash.
+
+**`munsters_le` SOLVED AND SHIPPED, same session, right after being written
+down as the catalogue's last gap.** Shares the identical DEV struct as
+`sword_of_rage_le` (same offsets, decodes just as cleanly), but its BRD
+(slot→node) table needed a different search: the bare-address bijective
+scan that found `sword_of_rage_le`'s turned up 16,713 candidates and 789
+node-tuples, all zero-heavy noise. Reversing the search order found it —
+first collect every address that has AT LEAST ONE literal reference
+anywhere in `.data` (6,858 candidates, a much smaller and much cleaner
+universe than "every 4-byte-aligned offset"), THEN check which of those
+decode to valid, distinct nodes. Exactly one candidate survived, at a
+genuine two-reference root (`0x5512e4` — the same "usually exactly 2"
+pattern every other confirmed root in this file has). One slot (5, the
+BUSIEST by far — 92 of the title's device records, almost certainly the
+main lower-playfield board) still read as a nonsense value (1032): turned
+out to be a byte-width mismatch, not a wrong address — `1032 = 0x0408`, a
+valid node (8, unused by any other slot) in the LOW byte with an
+unrelated nonzero flag sitting in the byte above it. Masking every slot's
+read to `& 0xFF` (harmless for the other 15 slots, already under 256)
+rebuilt the whole table clean: 103/103 rows named, all 18 ground-truth
+keyword rows (LEFT/RIGHT FLIPPER BUTTON, LEFT/RIGHT SLINGSHOT, TROUGH 1-6)
+landing on the correct node. Live-verified: 103 switches, clean shutdown,
+no crash. Full test suite: 2782 passed, 1 unrelated pre-existing GUI-test
+flake (`test_a_wsl_restart_re_probes_what_it_left_behind`, a Tk/WSL-panel
+test with nothing to do with either changed file — passes clean in
+isolation, 0 failures either way).
+
+**Net: of 30 known card versions, ALL 30 have a confirmed-working switch
+matrix.** The catalogue-wide "does every title load its switch/coil/LED
+matrix and boot to attract" question this item opened with is closed.
+
+**`king_kong_le`/`metallica_spike`'s "positions land outside the artwork"
+gap SOLVED, same session, right after being written down as priority (2)
+above.** Not a coordinate bug at all: `devicexy.py`'s raw x/y values were
+correct the whole time (checked directly - x 7..512, y 1..654, well inside
+a 312x710 image). The bug was in the SELF-CHECK, not the data: `checks()`/
+`text()`/`main()` filtered "is this device on the playfield" by comparing
+`image == "playfield"` literally - a hard-coded spelling one title family
+uses, not a constant. `devicexy.py` already HAD the fix for exactly this
+class of bug (`layout_image()`, built for item 50's `james_bond_60th_le`,
+which spells it `Test/scaled_playfield`) and `playfield.py`'s actual
+renderer was already using it correctly - only the diagnostic/reporting
+functions were never wired to it, so the rendering was fine the whole
+time and only the "N playfield records" COUNT `watch.sh` prints was wrong.
+Fixed by routing `checks()`/`text()`/`main()` through `layout_image()`
+instead of the literal. Live-verified: `king_kong_le` 489/517 records now
+land inside with 0 outside (was 0/517); `metallica_spike` 502/664 (was
+0/664). Full test suite clean before and after (2785→2783 passed, the
+2 fewer are pre-existing Tk/Tcl display flakiness unrelated to this
+change, not new failures - 0 failures either run).
+**Both titles are now FULLY clean**: switches ✅, artwork ✅, positions ✅.
+
+**Reading this table alongside item 57 in `plans/TODO.md`**: the earlier
+"7 titles share a newly-found 48-byte device-record generation" static
+finding is REAL as a structural fact (confirmed by byte-delta histogramming)
+but turned out to be **irrelevant to whether a title actually works** —
+`james_bond_le`, `king_kong_le`, `led_zeppelin_le`, `venom_le`, `turtles_le`,
+`uncanny_xmen_le`, `metallica_spike` all carry that struct and every one of
+them has a working LIVE switch table via the runtime's own hunt, independent
+of the struct shape `swelf.py`'s static fallback would have needed. The
+struct-shape research is preserved in item 57's own history as a real,
+possibly-useful-later finding, but it was never the blocker for these
+titles' actual live behaviour, and no further work should be spent
+"fixing" it for titles that already work. The two ACTUALLY broken titles
+(`sword_of_rage_le`, `munsters_le`) instead need whatever makes their entry
+table's `(node,bit)` pairs not distinct — a live-shim-diagnosis question, not
+a static-struct one.
+The "positions land outside the artwork" failure on `king_kong_le` and
+`metallica_spike` is a real, separate, NOT-yet-root-caused gap — the artwork
+file is now found (item 57's `Test`/`TestMode` fix), the device XY
+coordinates just don't land inside it. `dungeons_and_dragons_le`'s positions
+DO land correctly (255 real records) despite having no artwork at all, which
+rules out "the fix broke something universal" — it is specific to whatever
+`king_kong_le` and `metallica_spike` share.
+
+**Titles not yet run this pass** (existed before this table, no fresh data
+to report against the 4 columns above): every other card version beyond the
+one path each row above was tested against — `led_zeppelin_pro`,
+`turtles_le-1_58_1` (the 1987-upscaled build), older `jaws_le`/`venom_le`
+versions, etc. Re-running a DIFFERENT version of an already-clean title is
+low priority; a title with no row above at all has simply not been reached
+yet.
 
 What the rig works out about a title by itself:
 

@@ -339,8 +339,24 @@ def checks(keep, pf_w, pf_h):
         wrong name offset scored 21/31 and looked fine to a human reading rows.
       * -R/-G/-B of one stem are three channels of ONE physical LED, so they
         should share a position. Splits mean a misaligned record.
+
+    ★ 2026-08-19 (item 57): this used to filter on the literal `image ==
+    "playfield"` directly, the same hard-coded spelling `layout_image()`'s
+    own docstring already says is one title family's, not a constant. That
+    made THIS function - the one whose own text is the "N playfield
+    records, N outside" line `watch.sh` prints - blind to any title using a
+    different spelling, exactly the way "Bond has no playfield layout" was
+    filed wrongly before `layout_image()` existed (item 50). Caught on
+    `king_kong_le`/`metallica_spike`: `layout_image()` was already being
+    used by `playfield.py`'s actual renderer, correctly, while THIS
+    function kept reporting "0 playfield records" about titles whose
+    devices (`TestMode/Rodeo_LE_Service_Playfield_Wireframe_300dpi_
+    cropped`, `metallica_playfield_with_handle_cropped`) were positioned
+    fine the whole time - the rendering was never broken, only this
+    self-check's own count was.
     """
-    pf = [r for r in keep if r["image"] == PLAYFIELD_IMAGE]
+    img = layout_image(keep)
+    pf = [r for r in keep if r["image"] == img]
     out = [r for r in pf if not (0 <= r["x"] <= pf_w and 0 <= r["y"] <= pf_h)]
     lines = ["%d playfield records, %d outside the %dx%d artwork"
              % (len(pf), len(out), pf_w, pf_h)]
@@ -374,7 +390,7 @@ def counts(keep):
 
 def text(game, keep, art, pf_w, pf_h):
     """device_xy.txt, as a string."""
-    pf = [r for r in keep if r["image"] == PLAYFIELD_IMAGE]
+    pf = [r for r in keep if r["image"] == layout_image(keep)]
     c = counts(keep)
     lines = ["# %s device positions, from the game binary." % game,
              "# %d records (%s), %d on the playfield image."
@@ -406,7 +422,7 @@ def main():
     art = gameinfo.find_playfield_art(game)
     pf_w, pf_h = playfield_size(game)
     keep = build(game)
-    pf = [r for r in keep if r["image"] == PLAYFIELD_IMAGE]
+    pf = [r for r in keep if r["image"] == layout_image(keep)]
     print("# %s: %d records from %s" % (game, len(keep), gameinfo.elf(game)))
     for line in checks(keep, pf_w, pf_h):
         print("# %s" % line)

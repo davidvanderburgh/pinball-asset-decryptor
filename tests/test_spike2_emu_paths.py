@@ -577,7 +577,10 @@ def test_the_box_tells_a_missing_engine_from_a_stopped_one():
     fail = box[box.index("docker info >/dev/null"):box.index("# alive.sh")]
     assert "colima" in fail
     assert "/Applications/Docker.app" in fail
-    assert "sudo port install colima" in fail
+    # AND IT POINTS AT THE BUTTON, not at a command to type: the app installs
+    # the engine itself now (see _setup_fix_darwin).
+    assert "Set up emulator" in fail
+    assert "sudo port install" not in fail
 
 
 def test_a_status_poll_does_not_build_a_container_configuration():

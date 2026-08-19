@@ -61,10 +61,10 @@ docker info >/dev/null 2>&1 || {
     else
         echo "[box] the docker command is installed, but nothing on this Mac runs" >&2
         echo "[box] containers. docker is only the client; the containers need a" >&2
-        echo "[box] Linux machine behind it. Install Docker Desktop, or Colima:" >&2
-        echo "[box]   sudo port install colima   (MacPorts)" >&2
-        echo "[box]   brew install colima        (Homebrew)" >&2
-        echo "[box] then: colima start" >&2
+        echo "[box] Linux machine behind it." >&2
+        echo "[box] In the app: Emulate tab -> \"Set up emulator...\", which installs" >&2
+        echo "[box] one and starts it. (From a shell: colima, from Homebrew or" >&2
+        echo "[box] MacPorts, is what that button installs.)" >&2
     fi
     exit 1
 }

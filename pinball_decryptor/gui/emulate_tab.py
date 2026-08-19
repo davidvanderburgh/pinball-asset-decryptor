@@ -411,38 +411,67 @@ def homebrew():
     return None
 
 
-def engine_install(cli=None):
-    """``(label, command)`` that gets a container engine onto this Mac, or
-    ``(None, "")`` when there is nothing honest to suggest.
+def engine_setup_plan(cli=None):
+    """What “Set up emulator…” will DO on this Mac, or None when it cannot.
+
+    NOBODY IS SENT TO A TERMINAL.  The Windows half of this tab installs what
+    the emulator needs at the press of a button, and a Mac that was handed a
+    command to type instead was being asked to do the app's job - David,
+    2026-08-19, on the first version of this fix.  So this returns the work
+    itself, not advice: argv to run, and the sentences that describe it.
+
+    Like :func:`setup_fix_steps`, the consent list and the work are ONE object,
+    so what the dialog promises and what the button runs cannot drift apart.
 
     CHOSEN BY WHERE THE CLIENT CAME FROM, because that is the package manager
-    the user already has working: a Mac whose `docker` is /opt/local/bin/docker
-    installed it with MacPorts, whose own docker port points at colima for
-    exactly this ("this port contains command line utilities for interacting
-    with Docker, but not the core daemon"), and telling that person to install
-    Homebrew first would be a second package manager for a problem the first
-    one already solves.
+    already working on this Mac: a `docker` in /opt/local/bin came from
+    MacPorts, whose own docker port points at colima for exactly this ("this
+    port contains command line utilities for interacting with Docker, but not
+    the core daemon"), and driving Homebrew on that machine would be a second
+    package manager for a problem the first one already solves.
 
-    Colima rather than Docker Desktop, and not as a preference: it is the
-    answer that still works on the Macs Docker Desktop has stopped supporting,
-    which is the machine that reported this.
+    Colima rather than Docker Desktop, and not as a preference: it installs
+    without a browser, without a drag-to-Applications, and it still works on
+    the macOS versions Docker Desktop has stopped supporting - which is the
+    machine that reported this.  Docker Desktop stays one click away for
+    anyone who wants the GUI (see ``_docker_download``).
 
-    ``cli`` is the client this Mac already has.  Without one the command has to
-    install that too - colima ships the Linux machine, not the `docker`
+    ``cli`` is the client this Mac already has; without one the plan installs
+    that too, because colima ships the Linux machine and not the `docker`
     command.
     """
     port = which_tool("port", ("/opt/local/bin",))
     brew = homebrew()
     if cli and cli.startswith("/opt/local/") and port:
-        mgr, install = "MacPorts", "sudo port install"
+        mgr, tool, admin = "MacPorts", port, True
     elif brew:
-        mgr, install = "Homebrew", "brew install"
+        mgr, tool, admin = "Homebrew", brew, False
     elif port:
-        mgr, install = "MacPorts", "sudo port install"
+        mgr, tool, admin = "MacPorts", port, True
     else:
-        return (None, "")
-    return (mgr, "%s %s && colima start"
-            % (install, "colima" if cli else "docker colima"))
+        return None
+    packages = ["colima"] if cli else ["docker", "colima"]
+    # THE PACKAGE NAMES ARE ARGV, NOT PROSE.  "install docker colima" is what
+    # the machine needs; a person reads "the docker command" and "Colima", and
+    # this is the one place the two spellings are tied to each other.
+    label = " and ".join({"docker": "the docker command",
+                          "colima": "Colima"}.get(p, p) for p in packages)
+    # -N for MacPorts: no question this app cannot see gets asked half way
+    # through an install it is driving.  Homebrew is NEVER run as root - it
+    # refuses outright - which is also why `admin` is per-plan and not a
+    # constant.
+    install = ([tool, "-N", "install"] + packages if admin
+               else [tool, "install"] + packages)
+    steps = ["Install %s with %s. Nothing already on this Mac is changed or "
+             "removed." % (label, mgr),
+             "Start Colima, the Linux machine the docker command talks to. It "
+             "runs in the background and takes a couple of minutes the first "
+             "time, while it downloads its disk image."]
+    if admin:
+        steps.append("macOS will ask for your password once, in its own "
+                     "dialog, because %s installs system-wide." % mgr)
+    return {"manager": mgr, "packages": packages, "label": label,
+            "admin": admin, "install": install, "steps": steps}
 
 
 def parse_status(text):
@@ -1889,14 +1918,26 @@ class EmulatePanel:
             pass
 
     def _docker_apply(self, state):
-        """Put the Docker answer on the tab, or take it away when it is fine."""
+        """Put the Docker answer on the tab, or take it away when it is fine.
+
+        TWO BUTTONS, ONE JOB EACH, and the split is the same one Windows makes:
+        “Set up emulator…” CHANGES the machine (it installs the engine and
+        starts it, here as much as there), and the Docker button only starts
+        something already installed - or, when this Mac has no package manager
+        to install with, opens the download page.  Nothing tells anyone to type
+        a command: that was the first version of this fix, and it was wrong.
+        """
         self._docker = state
         self._docker_report_if_asked(state)
         try:
             if state == "ok":
                 self._docker_btn.pack_forget()
+                self._setup_btn.pack_forget()
                 self._docker_msg.pack_forget()
+                self._refit()
                 return
+            plan = (engine_setup_plan(self._docker_cli)
+                    if state in ("engineless", "absent") else None)
             if state == "stopped":
                 # NAME THE ENGINE THAT IS ACTUALLY HERE.  "Open Docker Desktop"
                 # is not advice on a Mac running Colima or OrbStack, and the
@@ -1914,95 +1955,81 @@ class EmulatePanel:
                 # is right there; what is missing is the Linux VM behind it,
                 # which is a different install and on some Macs cannot be
                 # Docker Desktop at all.
-                mgr, cmd = engine_install(self._docker_cli)
-                self._docker_btn.configure(
-                    text="Install Colima…" if cmd else "Get Docker…")
                 self._docker_msg.configure(
                     text=("The docker command is installed here (%s), but "
                           "nothing on this Mac can run a container: on macOS "
                           "docker is only the client, and the containers "
-                          "themselves need a Linux machine behind it. That is "
-                          "what Docker Desktop, OrbStack and Colima each "
-                          "provide."
+                          "themselves need a Linux machine behind it."
                           % (self._docker_cli or "found on PATH")
-                          + ("\n%s can install one, so the button below runs "
-                             "`%s` in Terminal. Colima is the one that still "
-                             "works on macOS versions Docker Desktop has "
-                             "dropped." % (mgr, cmd) if cmd else
-                             "\nThe button below opens the Docker Desktop "
-                             "download page.")))
+                          + (self._plan_sentence(plan) if plan else
+                             " Docker Desktop, OrbStack and Colima each "
+                             "provide one; the button below opens the Docker "
+                             "Desktop download page.")))
             else:
-                self._docker_btn.configure(
-                    text="Install Docker…" if homebrew() else "Get Docker…")
                 self._docker_msg.configure(
-                    text=("Docker Desktop is required to emulate on macOS: the "
-                          "game is a Linux program and the container is how "
-                          "this Mac runs one. It is a one-time install."
-                          + ("\nHomebrew is here, so the button below runs "
-                             "`brew install --cask docker` in Terminal."
-                             if homebrew() else
+                    text=("Docker is required to emulate on macOS: the game is "
+                          "a Linux program and a container is how this Mac "
+                          "runs one. It is a one-time install."
+                          + (self._plan_sentence(plan) if plan else
                              "\nThe button below opens the download page.")))
-            self._docker_btn.pack(side=tk.LEFT, padx=(6, 0))
+            # The install button is “Set up emulator…”, the same one Windows
+            # presses for the same reason; the Docker button stays for the
+            # cases that install nothing.
+            if plan:
+                self._docker_btn.pack_forget()
+                self._setup_btn.pack(side=tk.LEFT, padx=(6, 0))
+            else:
+                self._setup_btn.pack_forget()
+                self._docker_btn.configure(
+                    text="Start Docker" if state == "stopped" else "Get Docker…")
+                self._docker_btn.pack(side=tk.LEFT, padx=(6, 0))
             self._docker_msg.pack(anchor=tk.W,
                                   **getattr(self, "_docker_pad", {}))
+            self._refit()
         except (tk.TclError, AttributeError):
             pass            # the tab was never built, or is being torn down
 
-    def _docker_fix(self):
-        """Install it, or start it - whichever this machine needs.
+    @staticmethod
+    def _plan_sentence(plan):
+        """What “Set up emulator…” will do, in one sentence for the notice.
 
-        NEITHER IS DONE SILENTLY. Installing an engine wants an admin password,
-        and a GUI app that appears to hang while an invisible installer waits
-        for one is worse than no button at all - so every install path runs in
-        Terminal, where the user can see it and answer it.
+        Built from the plan and not typed out beside it, so the words under the
+        button cannot promise something other than what the button runs.
+        """
+        return ("\nPress “Set up emulator…” and this app will install %s with "
+                "%s and start it%s. Colima is the Linux machine that runs the "
+                "container, and it works on the macOS versions Docker Desktop "
+                "no longer supports."
+                % (plan["label"], plan["manager"],
+                   ", asking for your password once" if plan["admin"] else ""))
+
+    def _docker_fix(self):
+        """Start the engine this Mac has, or go and get one.
+
+        INSTALLING IS NOT THIS BUTTON'S JOB ANY MORE - “Set up emulator…” owns
+        that, on macOS exactly as on Windows (see _setup_fix_darwin).  What is
+        left here is starting something already installed, and the one case
+        this app cannot do for the user: a Mac with no package manager, which
+        gets the Docker Desktop download page rather than a command to type.
 
         AND IT STARTS WHAT IS ACTUALLY INSTALLED.  ``open -a Docker`` was the
         only thing this button could do, on a platform where the engine is as
         likely to be Colima or OrbStack; on a Mac without Docker Desktop it
         opened nothing and said it had started something.
         """
+        if self._setup_fixing:
+            return              # a start or an install is already running
         if self._docker == "stopped":
             self._docker_start_engine()
             return
-
-        if self._docker == "engineless":
-            # NOT the Docker Desktop cask.  This Mac has the client already,
-            # and it is a Mac that reached for a package manager rather than
-            # Docker Desktop - in the reported case because Docker Desktop no
-            # longer installs on its macOS at all.
-            mgr, cmd = engine_install(self._docker_cli)
-            if not cmd:
-                self._docker_download()
-                return
-            if not messagebox.askyesno(
-                    "Install a container engine",
-                    "Run this in Terminal?\n\n"
-                    "    %s\n\n"
-                    "Colima is the Linux machine your docker command needs. "
-                    "It downloads a few hundred MB and will ask for your "
-                    "password; after that `colima start` is all it needs."
-                    % cmd):
-                return
-            self._docker_terminal(cmd, "%s install" % mgr)
-            return
-
-        brew = homebrew()
-        if not brew:
-            self._docker_download()
-            return
-        if not messagebox.askyesno(
-                "Install Docker Desktop",
-                "Run this in Terminal?\n\n"
-                "    brew install --cask docker\n\n"
-                "It downloads Docker Desktop (a few hundred MB) and will ask "
-                "for your password. When it finishes, open Docker Desktop "
-                "once, then come back here."):
-            return
-        self._docker_terminal("%s install --cask docker" % brew,
-                              "Docker Desktop install")
+        self._docker_download()
 
     def _docker_download(self):
-        """The last resort everywhere above: send them to the download page."""
+        """The last resort: send them to the download page.
+
+        A page and an installer to double-click, which is a thing a Mac user
+        does; the alternative here was never a Terminal command.
+        """
         import webbrowser
         webbrowser.open(DOCKER_URL)
         self._log("[emulate] opened %s - install it, then click Start "
@@ -2011,15 +2038,16 @@ class EmulatePanel:
     def _docker_start_engine(self):
         """Start whatever engine this Mac has, by the means that engine wants.
 
-        An .app is ``open -a``; Colima is a command that takes a minute or two
-        and prints as it goes, so it goes to Terminal for the same reason the
-        installs do - a silent two-minute wait is indistinguishable from a
-        button that did nothing.
+        An .app is ``open -a``.  Colima is a command, and it is run HERE with
+        its output drained into the log pane - not handed to Terminal, which
+        would be this app asking the user to watch it work.
         """
         eng = self._docker_engine
         if eng and eng[1] == "cli":
-            self._docker_terminal("%s start" % eng[2], "%s start" % eng[0])
-            self._timer().after(15000, self._docker_check)
+            self._log("[emulate] starting %s; the first start takes a couple "
+                      "of minutes" % eng[0])
+            self._run_engine_setup([("starting %s" % eng[0],
+                                     [eng[2], "start"], False)])
             return
         target = eng[2] if eng else "Docker"
         label = eng[0] if eng else "Docker Desktop"
@@ -2031,23 +2059,161 @@ class EmulatePanel:
             self._log("[emulate] could not start %s: %s" % (label, exc))
         self._timer().after(4000, self._docker_check)
 
-    def _docker_terminal(self, cmd, what):
-        """Run *cmd* in Terminal.app, where the user can see and answer it.
+    # ------------------------------------------------------------------
+    # ...and doing something about it, without sending anyone to Terminal
+    # ------------------------------------------------------------------
 
-        osascript rather than Popen(cmd): the point is that it is WATCHED. An
-        install asks for a password and a start takes minutes, and a progress
-        bar nobody can see is a hang.
+    def _run_engine_setup(self, phases):
+        """Run *phases* off the main loop, into the log pane, then re-probe.
+
+        ``phases`` is ``(label, argv, admin)``, in order; the first failure
+        stops the rest, because "install failed" followed by "start failed"
+        is one fault reported twice and the second line is the less useful of
+        the two.
+
+        SHAPED LIKE _setup_fix's Windows worker on purpose: disable the button,
+        stream every line as it arrives, say what happened in words, then ask
+        the machine again rather than assuming the press worked.
         """
-        script = ('tell application "Terminal" to do script "%s"'
-                  % cmd.replace('\\', '\\\\').replace('"', '\\"'))
+        self._setup_fixing = True
+        # BOTH buttons, because either one can be the visible one here: “Set up
+        # emulator…” starts this, and so does “Start Docker” when the engine is
+        # Colima.  Leaving the other pressable is a second `colima start` on
+        # top of the one already running.
         try:
-            subprocess.Popen(["osascript", "-e", script,
-                              "-e", 'tell application "Terminal" to activate'])
-            self._log("[emulate] running `%s` in Terminal (%s)" % (cmd, what))
+            self._setup_btn.configure(state=tk.DISABLED, text="Setting up…")
+            self._docker_btn.configure(state=tk.DISABLED)
+        except (tk.TclError, AttributeError):
+            pass
+
+        def run():
+            ok = True
+            try:
+                for label, argv, admin in phases:
+                    # Resolved HERE when it is a callable: a step's command can
+                    # depend on what the step before it installed.
+                    argv = argv() if callable(argv) else argv
+                    if not argv:
+                        ok = False
+                        self._log("[emulate] %s: the command it needs is not "
+                                  "on this Mac, even after the install above."
+                                  % label)
+                        break
+                    ok = self._run_step(label, argv, admin)
+                    if not ok:
+                        break
+            except Exception as exc:                    # noqa: BLE001
+                ok = False
+                self._log("[emulate] setup failed: %s" % exc)
+            if ok:
+                self._log("[emulate] the container engine is installed and "
+                          "running; this Mac can emulate now.")
+            self._setup_fixing = False
+            try:
+                self._timer().after(0, self._setup_recheck)
+            except (tk.TclError, RuntimeError):
+                pass
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _run_step(self, label, argv, admin):
+        """One phase of the setup: run it, log every line, say if it worked.
+
+        ADMIN IS macOS's OWN DIALOG, not a password box this app invents and
+        not a Terminal window: ``do shell script … with administrator
+        privileges`` is what a Mac installer uses, and the user answers it with
+        Touch ID or the password they already know.
+
+        ``do shell script`` hands back its output only when it FINISHES, and a
+        package install runs for minutes - so the privileged command writes to
+        a log file that this side tails while it runs.  A silent five minutes
+        is indistinguishable from a hang, which is the whole reason the WSL
+        boot notice exists on the other half of this tab.
+        """
+        import shlex
+        import tempfile
+        self._log("[emulate] %s: %s" % (label, " ".join(argv)))
+        if not admin:
+            try:
+                proc = subprocess.Popen(argv, stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT,
+                                        creationflags=_CREATE_FLAGS)
+            except Exception as exc:                    # noqa: BLE001
+                self._log("[emulate] could not start %s: %s" % (argv[0], exc))
+                return False
+            for raw in proc.stdout:
+                line = raw.decode("utf-8", "replace").rstrip()
+                if line:
+                    self._log("[emulate] " + line)
+            rc = proc.wait()
+            if rc:
+                self._log("[emulate] %s did not finish (exit %s)."
+                          % (label, rc))
+            return rc == 0
+
+        # mkdtemp, not a name in /tmp: it is created 0700 and owned by this
+        # user, so nothing can swap the script out from under the root shell
+        # between writing it and running it.
+        work = tempfile.mkdtemp(prefix="pad_engine_")
+        script = os.path.join(work, "setup.sh")
+        out = os.path.join(work, "setup.log")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write("#!/bin/sh\n" + " ".join(shlex.quote(a) for a in argv)
+                    + "\n")
+        shell = "/bin/sh %s > %s 2>&1" % (shlex.quote(script),
+                                          shlex.quote(out))
+        osa = ('do shell script "%s" with administrator privileges'
+               % shell.replace("\\", "\\\\").replace('"', '\\"'))
+        try:
+            proc = subprocess.Popen(["osascript", "-e", osa],
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE)
         except Exception as exc:                        # noqa: BLE001
-            self._log("[emulate] could not open Terminal: %s" % exc)
-            import webbrowser
-            webbrowser.open(DOCKER_URL)
+            self._log("[emulate] could not ask macOS for permission: %s" % exc)
+            return False
+        seen = 0
+        while proc.poll() is None:
+            seen = self._tail(out, seen)
+            time.sleep(0.5)
+        self._tail(out, seen)
+        err = (proc.stderr.read() or b"").decode("utf-8", "replace")
+        try:
+            shutil.rmtree(work, ignore_errors=True)
+        except Exception:                               # noqa: BLE001
+            pass
+        if proc.returncode == 0:
+            return True
+        # A cancelled password dialog is not a failure to explain, it is a
+        # decision to respect - and the machine is exactly as it was.
+        if "-128" in err or "cancel" in err.lower():
+            self._log("[emulate] setup cancelled; nothing was changed.")
+        else:
+            self._log("[emulate] %s did not finish. %s"
+                      % (label, err.strip() or "See the lines above."))
+        return False
+
+    def _tail(self, path, seen):
+        """Log whatever is new in *path*, and say how far this got.
+
+        Bytes rather than lines: the install is still writing, so the tail of
+        the file is routinely half a line, and it must not be logged twice
+        once the rest of it lands.
+        """
+        try:
+            with open(path, "rb") as f:
+                f.seek(seen)
+                data = f.read()
+        except OSError:
+            return seen
+        if not data:
+            return seen
+        text = data.decode("utf-8", "replace")
+        keep = text.rsplit("\n", 1)
+        done = keep[0] if len(keep) > 1 else ""
+        for line in done.splitlines():
+            if line.strip():
+                self._log("[emulate] " + line.rstrip())
+        return seen + len(done.encode("utf-8")) + (1 if len(keep) > 1 else 0)
 
     # ------------------------------------------------------------------
     # the setup check, which is what WSL needs and Docker is on a Mac
@@ -2269,8 +2435,17 @@ class EmulatePanel:
         The work itself is setupfix.sh's.  This panel is a control surface for
         the rig and does not reimplement it - which is also what keeps the
         Windows path and a future Linux one from drifting apart.
+
+        ONE BUTTON, TWO MACHINES.  On a Mac the same press installs the
+        container engine, because what "set up the emulator" MEANS there is
+        Docker with a Linux machine behind it - see _setup_fix_darwin.
         """
-        if self._setup_fixing or sys.platform != "win32":
+        if self._setup_fixing:
+            return
+        if sys.platform == "darwin":
+            self._setup_fix_darwin()
+            return
+        if sys.platform != "win32":
             return
         facts = self._setup or {}
         steps = setup_fix_steps(facts)
@@ -2358,12 +2533,63 @@ class EmulatePanel:
 
         threading.Thread(target=run, daemon=True).start()
 
+    def _setup_fix_darwin(self):
+        """“Set up emulator…” on a Mac: install the container engine and start
+        it, here, without anyone opening Terminal.
+
+        THE MAC HALF OF THE SAME BUTTON.  Windows presses this and gets its
+        missing WSL packages installed; a Mac pressed nothing, because the
+        engine was a paragraph of instructions instead - and this app is
+        perfectly able to run a package manager itself.  macOS's own
+        authentication dialog is how the privileged half is agreed to, which is
+        the Mac's UAC and exactly what the Windows path leans on.
+
+        PROMPTED ONCE, THEN DONE, like its Windows twin: every step is named
+        before anything is touched, and a No leaves the machine as it was.
+        """
+        plan = engine_setup_plan(self._docker_cli)
+        if not plan:
+            # Nothing to drive: no package manager, so the honest offer is the
+            # Docker Desktop download and not a command to copy.
+            self._docker_download()
+            return
+        if not messagebox.askyesno(
+                "Set up the emulator",
+                "This Mac needs a container engine before it can emulate. "
+                "This will:\n\n"
+                + "\n\n".join("  •  " + s for s in plan["steps"])
+                + "\n\nIt runs here, in this window, and you can watch it in "
+                  "the log below. Nothing is removed.\n\nGo ahead?"):
+            return
+        self._log("[emulate] setting up a container engine with %s"
+                  % plan["manager"])
+        self._run_engine_setup([
+            ("installing " + plan["label"], plan["install"], plan["admin"]),
+            # A CALLABLE, because colima does not exist yet: its path is
+            # whatever the step above just put on this disk, and resolving it
+            # when the plan was built would resolve it to None.
+            ("starting Colima", self._colima_argv, False),
+        ])
+
+    def _colima_argv(self):
+        """``colima start``, resolved AFTER the install that provided it."""
+        colima = which_tool("colima")
+        return [colima, "start"] if colima else None
+
     def _setup_recheck(self):
         try:
             self._setup_btn.configure(state=tk.NORMAL, text="Set up emulator…")
-        except tk.TclError:
+            self._docker_btn.configure(state=tk.NORMAL)
+        except (tk.TclError, AttributeError):
             pass
-        self._setup_check()
+        # Each platform re-asks its OWN question.  _setup_check is a no-op on
+        # macOS by design (setup_state answers None there), so without this the
+        # Mac's notice would sit there describing the machine as it was before
+        # the button it just finished running.
+        if sys.platform == "darwin":
+            self._docker_check()
+        else:
+            self._setup_check()
 
     #: The cost, spelled out beside the section it belongs to.
     #:

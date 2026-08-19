@@ -989,23 +989,20 @@ HELP_CONTENT = {
          "title still starts and runs exactly as before — only the slots do "
          "nothing — so the tab says that in its own line before you press "
          "Start, and “Set up emulator…” gets both."),
-        ("Install Docker… (macOS only)",
+        ("Start Docker / Get Docker… (macOS only)",
          "The emulator is a Linux program, and a container is how a Mac runs "
          "one — so Docker is to macOS what WSL is to Windows here. This "
-         "button appears only when Docker is not ready, and does whichever of "
-         "three things that Mac needs: it starts the engine you have (Docker "
-         "Desktop, OrbStack, Rancher Desktop or Colima), or installs Docker "
-         "Desktop, or — when the `docker` command is installed but nothing on "
-         "the Mac can actually run a container, which is what a package "
-         "manager's docker gives you — installs Colima, the Linux machine "
-         "that command needs. Colima also still works on macOS versions "
-         "Docker Desktop no longer supports. The app looks for docker in "
-         "Homebrew's, MacPorts' and Docker Desktop's own locations as well as "
-         "on PATH, because a Mac app launched from Finder inherits almost no "
-         "PATH at all; PAD_DOCKER overrides if yours lives somewhere else. It "
-         "disappears once Docker is ready. Windows and Linux never see it and "
-         "never need Docker to emulate."),
-        ("Set up emulator… (Windows only)",
+         "button appears only when Docker is not ready and there is nothing "
+         "to install: it starts the engine you already have (Docker Desktop, "
+         "OrbStack, Rancher Desktop or Colima), or, on a Mac with no package "
+         "manager for “Set up emulator…” to use, opens the Docker Desktop "
+         "download page. Installing is the other button's job. The app looks "
+         "for docker in Homebrew's, MacPorts' and Docker Desktop's own "
+         "locations as well as on PATH, because a Mac app launched from "
+         "Finder inherits almost no PATH at all; PAD_DOCKER overrides if "
+         "yours lives somewhere else. It disappears once Docker is ready. "
+         "Windows and Linux never see it and never need Docker to emulate."),
+        ("Set up emulator… (Windows and macOS)",
          "The tab asks this PC what the emulator still needs before you press "
          "anything, so a run does not stop on a missing tool a minute after "
          "Start. A machine that is ready shows nothing at all. One that is not "
@@ -1058,9 +1055,20 @@ HELP_CONTENT = {
          "as they do now, and leaves the working machine alone. "
          "Linux sees the notice but no button, because there the same work "
          "needs a sudo password this app has nowhere to ask for — the notice "
-         "prints the command for that machine instead. macOS sees neither: "
-         "its container already carries all six, so Docker is the "
-         "prerequisite there."),
+         "prints the command for that machine instead. "
+         "macOS is asked a different question by the same button. Its "
+         "container already carries all six packages, so what a Mac can be "
+         "missing is Docker itself — and, more often, the Linux machine "
+         "behind it: on macOS `docker` is only a client, so a docker "
+         "installed from Homebrew or MacPorts has nothing to run a container "
+         "with. Press the button there and this app installs Colima (and the "
+         "docker client, if that is missing too) with whichever of Homebrew "
+         "or MacPorts you already have, then starts it — in this window, "
+         "with every line in the log pane. You never type a command: the "
+         "password, where one is needed, is asked for by macOS in its own "
+         "dialog, exactly as an installer would. As on Windows it lists what "
+         "it will do first, a No changes nothing, and the button disappears "
+         "when there is nothing left to install."),
         ("Check setup…",
          "Always here, on every platform, and it changes nothing — the probe "
          "only looks, so there is no confirmation to give and no password to "

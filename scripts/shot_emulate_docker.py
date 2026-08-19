@@ -15,7 +15,8 @@ dbotte's Mac, one layer lower: the ``docker`` command installed by
 Docker Desktop, and no daemon behind the client.  ``docker_state()``
 then runs for real and reaches its own conclusion, which is the thing
 the pair is about - the same Mac, told "Docker Desktop is required"
-before and told what it actually has and actually needs now.
+before, and now told what it actually has, what it is actually missing,
+and offered a button that installs it.
 
 The Windows-only setup notice is packed away first: this shot is what a
 Mac shows, and that half of the tab never runs there.
@@ -44,7 +45,7 @@ SETTINGS_BAK = SETTINGS + ".shotbak74"
 MACPORTS_DOCKER = "/opt/local/bin/docker"
 
 #: ...and the MacPorts `port` command that put it there, which is how the tab
-#: works out that `sudo port install colima` is the line for THIS Mac.
+#: works out that MacPorts is the package manager to drive on THIS Mac.
 MAC_FILES = (MACPORTS_DOCKER, "/opt/local/bin/port")
 
 #: Everything the probe may look for lives under one of these, and on his Mac
@@ -330,7 +331,12 @@ def s_snap():
     msg = panel._docker_msg
     log("notice mapped=%s h=%s text=%r"
         % (msg.winfo_ismapped(), msg.winfo_height(), msg.cget("text")))
-    log("button text=%r" % panel._docker_btn.cget("text"))
+    # THE ONE THAT IS ON SCREEN.  Both buttons exist at all times and only one
+    # is packed; logging the other's text is how a shot gets described wrongly.
+    for name in ("_setup_btn", "_docker_btn"):
+        btn = getattr(panel, name)
+        if btn.winfo_ismapped():
+            log("button shown: %s = %r" % (name, btn.cget("text")))
     snap(OUT)
 
 

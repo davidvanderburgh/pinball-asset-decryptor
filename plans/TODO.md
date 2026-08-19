@@ -84,6 +84,34 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
+      LED and coil matrix and boot to attract, checked one title at a time in
+      ALPHABETICAL ORDER.** `S1 D4` ← WORKING ON, 0%
+      *(Filed 2026-08-18 at David's ask: "i want to work on universal game
+      compatibility. every game should be able to load a switch and led and
+      coil matrix and boot into attract. let's go alphabetical order." This
+      is a standing sweep, not a single fix — expect it to spawn per-title
+      sub-items the way 53/55 split out of 50, and expect this entry to be
+      rewritten as the sweep's own findings accumulate rather than treated as
+      one bug.)*
+      **First title, alphabetically: AEROSMITH.** David's report: it is
+      "stuck on the guided setup screen with 'no tables' found." Not yet
+      established whether this is a card/table-extraction gap specific to
+      this title, a naming mismatch (title id, card path) that the table
+      builder can't match, or something the guided-setup flow itself gets
+      wrong before mktables ever runs.
+      **Acceptance for the Aerosmith slice:** state what "no tables" means at
+      the desk (which lookup returns empty and why), then get Aerosmith past
+      guided setup into a run that shows a switch layout, LED matrix and coil
+      map and reaches attract — the same bar items 27/49/50/53 already hold
+      other titles to. Record the mechanism found, whether it is
+      Aerosmith-specific or a class of titles, and what the next title
+      alphabetically after Aerosmith should expect.
+      — S1: the title cannot be set up at all today, which is the floor this
+      whole initiative is measuring from. D4 is a placeholder for "unknown
+      mechanism, needs at least one run to see the guided-setup failure" —
+      revise once the desk read of "no tables" narrows it.
+
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every
       instrument in the rig says it is healthy.** `S2 D3` *(**20%, 2026-08-10:**

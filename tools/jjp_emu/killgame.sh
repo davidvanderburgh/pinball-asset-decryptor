@@ -1,9 +1,12 @@
 #!/bin/bash
 # Stop a JJP run and PROVE it stopped.  Never assume - re-read until zero.
 #
-# A normal JJP launch is THREE processes sharing a process group (the game, a
-# small helper, and a worker).  Killing the leader is not enough, so we kill by
-# name and then verify.  See alive.sh for why the name (not a path) is matched.
+# A normal JJP launch is THREE `game` processes sharing a process group, AND a
+# supervising bash loop that restarts the game on a maintenance-reboot exit
+# (run_game.sh).  That loop is the trap: `pkill -x game` kills the game but not
+# the bash around it, which then immediately relaunches - so the run appears
+# unkillable.  The PID file holds the loop's pid, which is the group LEADER, so
+# we kill the whole process group first and only then sweep by name.
 set -u
 if [ ! -r /proc/1/stat ]; then
     echo "killgame.sh: no readable /proc - this is not a WSL/Linux shell." >&2
@@ -11,16 +14,32 @@ if [ ! -r /proc/1/stat ]; then
     exit 2
 fi
 
-BEFORE=$(pgrep -c -x game 2>/dev/null); BEFORE=${BEFORE:-0}
+HERE=$(cd "$(dirname "$0")" && pwd)
+. "$HERE/padpath.sh"
+
+BEFORE=$(jjp_game_count)
+
+# 1. The supervising loop, by its process GROUP, so it cannot relaunch the game
+#    after we kill it.  kill -PID sends to the whole group.
+if [ -r "${JJP_PID_FILE:-/var/tmp/jjp_game.pid}" ]; then
+    LEADER=$(cat "${JJP_PID_FILE:-/var/tmp/jjp_game.pid}" 2>/dev/null)
+    if [ -n "$LEADER" ] && [ -d "/proc/$LEADER" ]; then
+        PGID=$(awk '{print $5}' "/proc/$LEADER/stat" 2>/dev/null)
+        [ -n "$PGID" ] && kill -9 -- "-$PGID" 2>/dev/null
+    fi
+fi
+# 2. Any supervising bash that still holds a ./game loop, matched on its body.
+pkill -9 -f 'while \[ \$n -lt' 2>/dev/null
+# 3. The game processes themselves.
 pkill -9 -x game 2>/dev/null
 sleep 1
-AFTER=$(pgrep -c -x game 2>/dev/null); AFTER=${AFTER:-0}
+AFTER=$(jjp_game_count)
 
 # Second pass for anything that was mid-fork on the first sweep.
 if [ "$AFTER" != "0" ]; then
     pkill -9 -x game 2>/dev/null
     sleep 1
-    AFTER=$(pgrep -c -x game 2>/dev/null); AFTER=${AFTER:-0}
+    AFTER=$(jjp_game_count)
 fi
 
 echo "killed $(( BEFORE - AFTER )); still running: $AFTER"

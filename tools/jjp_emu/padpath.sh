@@ -76,6 +76,19 @@ jjp_title() {
     printf '%s\n' "$JJP_GAME"
 }
 
+# How many game processes are actually RUNNING.
+#
+# NOT `pgrep -x game`: that counts zombies, and a JJP game leaves them behind.
+# Its process group is reparented to WSL's /init relay when the launching
+# session exits, and that relay does not wait() on them - so a stopped game
+# shows up as three defunct `game` entries that no signal can clear (they are
+# already dead) and that init reaps only on its own schedule.  Counting them as
+# live made killgame.sh refuse to report clean over three corpses, forever.
+# A zombie is a dead process; the rig must not treat it as a running one.
+jjp_game_count() {
+    ps -eo stat,comm 2>/dev/null         | awk '$2=="game" && $1 !~ /Z/ { n++ } END { print n+0 }'
+}
+
 # Logs, on the WSL side (outside the jail) so a wedged run is still readable.
 : "${JJP_LOG_DIR:=/var/tmp}"
 : "${JJP_GAME_LOG:=$JJP_LOG_DIR/jjp_game.log}"

@@ -89,8 +89,7 @@ if [ "$DETACH" = "1" ]; then
     setsid chroot "$JJP_JAIL" /bin/bash -c "$RUN" >>"$JJP_GAME_LOG" 2>&1 &
     echo $! > "$JJP_PID_FILE"
     sleep 2
-    P=$(pgrep -c -x game 2>/dev/null)
-    echo "launched detached; pid=$(cat "$JJP_PID_FILE") procs=${P:-0}"
+    echo "launched detached; pid=$(cat "$JJP_PID_FILE") procs=$(jjp_game_count)"
     echo "log: $JJP_GAME_LOG"
 else
     if [ -n "$CAP" ]; then

@@ -20,7 +20,11 @@ if [ "${1:-}" = "--all" ]; then
     bash "$HERE/unjail.sh"
 fi
 
-G=$(pgrep -c -x game 2>/dev/null); G=${G:-0}
+# jjp_game_count, not pgrep: a stopped game leaves zombies that pgrep counts
+# and jjp_game_count does not (see padpath.sh).  Without this the teardown
+# reports "game=3" over three corpses and exits non-zero, which reads as a
+# failed stop when the stop in fact succeeded.
+G=$(jjp_game_count)
 C=$(pgrep -fc "${JJP_CUSE_BIN:-/var/tmp/jjpcuse}" 2>/dev/null); C=${C:-0}
 echo "game=$G cuse=$C"
 [ "$G" = "0" ] || exit 1

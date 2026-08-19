@@ -14,7 +14,14 @@
 #
 #  2. Run this from INSIDE WSL.  Git Bash's pgrep sees only Windows processes,
 #     so every pattern misses.  We refuse rather than reassure.
+#
+#  3. A stopped game leaves ZOMBIES.  Its process group is reparented to WSL's
+#     /init relay, which does not wait() on them, so `pgrep -x game` keeps
+#     seeing three defunct entries no signal can clear.  jjp_game_count (in
+#     padpath.sh) excludes state Z - a dead process is not a running one.
 set -u
+HERE=$(cd "$(dirname "$0")" && pwd)
+. "$HERE/padpath.sh"
 if [ ! -r /proc/1/stat ]; then
     echo "alive.sh: no readable /proc - this is not a WSL/Linux shell." >&2
     echo "Run it as:  wsl -e bash tools/jjp_emu/alive.sh" >&2
@@ -22,7 +29,7 @@ if [ ! -r /proc/1/stat ]; then
 fi
 
 # `pgrep -c` prints 0 AND exits 1 when nothing matches - capture, then default.
-GAMES=$(pgrep -c -x game 2>/dev/null); GAMES=${GAMES:-0}
+GAMES=$(jjp_game_count)
 HASPLMD=$(pgrep -c -x hasplmd_x86_64 2>/dev/null); HASPLMD=${HASPLMD:-0}
 AKSUSBD=$(pgrep -c -x aksusbd_x86_64 2>/dev/null); AKSUSBD=${AKSUSBD:-0}
 

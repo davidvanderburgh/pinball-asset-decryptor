@@ -11,7 +11,7 @@ echo "image_mounted=$(mountpoint -q "$JJP_ROOT" && echo 1 || echo 0)"
 echo "jail_mounted=$(mountpoint -q "$JJP_JAIL" && echo 1 || echo 0)"
 # NOTE: `pgrep -c` PRINTS 0 and EXITS 1 when nothing matches, so the obvious
 # `$(pgrep -c ... || echo 0)` emits TWO lines and corrupts key=value parsing.
-GAMES=$(pgrep -c -x game 2>/dev/null); echo "game_procs=${GAMES:-0}"
+echo "game_procs=$(jjp_game_count)"
 HLMD=$(pgrep -c -x hasplmd_x86_64 2>/dev/null); echo "hasplmd=${HLMD:-0}"
 AKSD=$(pgrep -c -x aksusbd_x86_64 2>/dev/null); echo "aksusbd=${AKSD:-0}"
 

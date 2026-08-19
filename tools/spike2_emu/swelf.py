@@ -149,8 +149,29 @@ ROOTS = {
 # isolated hits, and they should have been read as "skip past these," not
 # shrugged off as noise. The fix: anchor on the first hit that begins an
 # actually-dense run of 24-byte-stride neighbours, not the lowest address.
+#
+# ★ 2026-08-19, munsters_le: shares this title's exact DEV struct (same
+# offsets, decodes just as cleanly), but its BRD table needed a DIFFERENT
+# search - the bijective bare-address scan that found sword_of_rage_le's
+# turned up nothing trustworthy here; the same scan restricted to addresses
+# that have at least one literal reference elsewhere in `.data` (a much
+# smaller, much cleaner universe - 6,858 candidates instead of every
+# 4-byte-aligned offset in the segment) found exactly ONE with distinct
+# valid nodes across slots 2-7, at a genuine TWO-reference root
+# (0x5512e4 - the same "usually exactly 2" pattern every other confirmed
+# root in this file has). One slot (5, the busiest by far - 92 of the
+# title's DEV records - almost certainly the main lower-playfield board)
+# read as 1032 instead of a plausible node, which is exactly 0x0408: a
+# valid node (8, unused by any other slot) in the LOW byte with an
+# unrelated nonzero flag byte sitting above it - a byte-width mismatch,
+# not a wrong address. Confirmed by masking every slot's read to `& 0xFF`
+# (harmless for the other 15 slots, whose values were already under 256)
+# and rebuilding the full table: 103/103 rows named, all 18 ground-truth
+# keyword rows (LEFT/RIGHT FLIPPER BUTTON, LEFT/RIGHT SLINGSHOT, TROUGH
+# 1-6) land on node 8 - the slot the raw u16 read alone could not resolve.
 ROOTS_NONUM = {
     "sword_of_rage_le": (0x5de4f4, 0x5db848),
+    "munsters_le": (0x553f50, 0x5512e4),
 }
 
 NONUM_DEV_STRIDE = 24
@@ -269,13 +290,20 @@ def _rows_nonum(e, dev, brd, max_dev=400):
     field cannot be read at all (`None`) - that is the array running off
     the mapped segment, the same end-of-table signal `rows()` gets for free
     from ENT's span check on the ROOTS path.
+
+    Node is masked to its low byte (`& 0xFF`) - see `ROOTS_NONUM`'s
+    munsters_le note: one slot's raw u16 read carries an unrelated nonzero
+    flag in its high byte, and the node itself is the byte below it. Every
+    OTHER slot on both titles in this bucket was already under 256, so the
+    mask is a no-op for them - this is a generalisation, not a special case
+    bolted onto one title.
     """
     slot_node = {}
     for s in range(16):
         n = e.u16(brd + NONUM_BOARD_STRIDE * s + 14)
         if n is None:
             break
-        slot_node[s] = n
+        slot_node[s] = n & 0xFF
 
     out = []
     for i in range(max_dev):

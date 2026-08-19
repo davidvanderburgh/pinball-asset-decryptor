@@ -79,7 +79,7 @@ known state with the date it was last run, not a guess.
 | led_zeppelin_le | ✅ live, 97 | ❌ none found | not re-measured | n/a | 2026-08-19 |
 | stranger_things_le | ✅ static (swelf.py, item 52) | ❌ none found | not re-measured | ✅ real (projector, item 44) | 2026-08-19 |
 | sword_of_rage_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 98 | ❌ none shipped | ❌ no device table | n/a | 2026-08-19 |
-| munsters_le | ❌ `[swfind] no switch table` — DEV solved, BRD still open | ❌ none shipped | ❌ no device table | n/a | 2026-08-19 |
+| munsters_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 103 | ❌ none shipped | ❌ no device table | n/a | 2026-08-19 |
 
 **CORRECTION, same session, right after this table's first version shipped:**
 the first pass checked the CONSOLE pane for the live switch dump
@@ -107,18 +107,37 @@ james_bond_le-class titles) — `swelf.py`'s `ROOTS_NONUM` + `_rows_nonum()`
 read it directly with no ENT table at all (none could be found for this
 title despite extensive search; `num` ships as an explicit, documented
 placeholder since `swtable.py` never actually reads it). Live-verified: 98
-switches, clean shutdown, no crash. **`munsters_le` shares the identical
-DEV struct** (same offsets, decodes just as cleanly) **but its BRD
-(slot→node) table could not be found** — an exhaustive scan turned up
-16,713 raw candidates and 789 distinct node-tuples, and the ones that pass
-a relaxed 5-or-6-of-6 check are dominated by zero-heavy patterns
-indistinguishable from uninitialized memory; nothing found looks
-trustworthy enough to ship (a wrong node mapping would make specific
-switches answer on the WRONG physical input, worse than the title staying
-broken). **Net: of 30 known card versions, 29 have a confirmed-working
-switch matrix (28 unchanged + `sword_of_rage_le` newly shipped), exactly
-ONE remains broken** (`munsters_le`, BRD only) — a much smaller problem
-than earlier passes of this table believed.
+switches, clean shutdown, no crash.
+
+**`munsters_le` SOLVED AND SHIPPED, same session, right after being written
+down as the catalogue's last gap.** Shares the identical DEV struct as
+`sword_of_rage_le` (same offsets, decodes just as cleanly), but its BRD
+(slot→node) table needed a different search: the bare-address bijective
+scan that found `sword_of_rage_le`'s turned up 16,713 candidates and 789
+node-tuples, all zero-heavy noise. Reversing the search order found it —
+first collect every address that has AT LEAST ONE literal reference
+anywhere in `.data` (6,858 candidates, a much smaller and much cleaner
+universe than "every 4-byte-aligned offset"), THEN check which of those
+decode to valid, distinct nodes. Exactly one candidate survived, at a
+genuine two-reference root (`0x5512e4` — the same "usually exactly 2"
+pattern every other confirmed root in this file has). One slot (5, the
+BUSIEST by far — 92 of the title's device records, almost certainly the
+main lower-playfield board) still read as a nonsense value (1032): turned
+out to be a byte-width mismatch, not a wrong address — `1032 = 0x0408`, a
+valid node (8, unused by any other slot) in the LOW byte with an
+unrelated nonzero flag sitting in the byte above it. Masking every slot's
+read to `& 0xFF` (harmless for the other 15 slots, already under 256)
+rebuilt the whole table clean: 103/103 rows named, all 18 ground-truth
+keyword rows (LEFT/RIGHT FLIPPER BUTTON, LEFT/RIGHT SLINGSHOT, TROUGH 1-6)
+landing on the correct node. Live-verified: 103 switches, clean shutdown,
+no crash. Full test suite: 2782 passed, 1 unrelated pre-existing GUI-test
+flake (`test_a_wsl_restart_re_probes_what_it_left_behind`, a Tk/WSL-panel
+test with nothing to do with either changed file — passes clean in
+isolation, 0 failures either way).
+
+**Net: of 30 known card versions, ALL 30 have a confirmed-working switch
+matrix.** The catalogue-wide "does every title load its switch/coil/LED
+matrix and boot to attract" question this item opened with is closed.
 
 **`king_kong_le`/`metallica_spike`'s "positions land outside the artwork"
 gap SOLVED, same session, right after being written down as priority (2)

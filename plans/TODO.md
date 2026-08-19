@@ -86,7 +86,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
       LED and coil matrix and boot to attract, checked one title at a time in
-      ALPHABETICAL ORDER.** `S1 D3` ← WORKING ON, 97%
+      ALPHABETICAL ORDER.** `S1 D3` ← WORKING ON, 98%
       *(Filed 2026-08-18 at David's ask: "i want to work on universal game
       compatibility. every game should be able to load a switch and led and
       coil matrix and boot into attract. let's go alphabetical order." This
@@ -764,21 +764,40 @@ These have each been violated at least once and each cost a run or a window:
       `ROOTS`/`rows()` path (zero touch to the ten already-shipped
       titles). Live-verified: 98 switches, clean shutdown, no crash. Full
       test suite clean both before and after (2785 passed).
-      **`munsters_le` shares the IDENTICAL DEV struct** (verified: decodes
-      just as cleanly at the same offsets) **but its BRD table resisted an
-      exhaustive, properly-validated search** — 16,713 raw slot→node
-      candidates, 789 distinct node-tuples, the best of which are
-      dominated by zero-heavy patterns indistinguishable from
-      uninitialized memory. Ground-truth keyword validation (the technique
-      that cracked every other title) does NOT discriminate here, because
-      the switch NAMES come entirely from DEV, not BRD — every candidate
-      "finds" the same 18 keyword rows regardless of which one is picked,
-      since only the NODE each row reports changes, not the name or bit.
-      Needs either a genuinely different search angle or a live-shim
-      instrument, not another static scan of the same shape. **This is now
-      the LAST title in the whole 26-card catalogue with no switch
-      matrix**, down from a whole bucket believed broken at the start of
-      this session.
+      **`munsters_le` SOLVED AND SHIPPED, same session, right after being
+      written down as the catalogue's last gap.** Shares the IDENTICAL DEV
+      struct as `sword_of_rage_le` (decodes just as cleanly at the same
+      offsets), but its BRD table resisted the same search that found
+      `sword_of_rage_le`'s — 16,713 raw slot→node candidates, 789 distinct
+      node-tuples, the best dominated by zero-heavy patterns
+      indistinguishable from uninitialized memory. Ground-truth keyword
+      validation didn't discriminate either, because the switch NAMES come
+      entirely from DEV, not BRD — every candidate "found" the same 18
+      keyword rows regardless of which one was picked. **What worked:
+      reversing the search order.** Instead of scanning every address for
+      a node-shaped pattern, first collect every address with AT LEAST ONE
+      literal reference anywhere in `.data` (6,858 candidates — a much
+      smaller, much cleaner universe), then check which of THOSE decode to
+      valid, distinct nodes. Exactly one candidate survived, at a genuine
+      two-reference root (`0x5512e4`, the same "usually exactly 2" pattern
+      every other confirmed root in this file has). One slot (5 — the
+      BUSIEST by far, 92 device records, almost certainly the main
+      lower-playfield board) still read as nonsense (1032): a byte-width
+      mismatch, not a wrong address — `1032 = 0x0408`, a valid node (8,
+      unused by any other slot) in the low byte with an unrelated nonzero
+      flag in the byte above it. Masking every slot's read to `& 0xFF`
+      (a no-op for the other 15 slots, already under 256) rebuilt the
+      whole table clean: 103/103 rows named, all 18 keyword rows landing
+      on the right node. Shipped in `swelf.py`'s `ROOTS_NONUM`. Live-
+      verified: 103 switches, clean shutdown, no crash. Full test suite:
+      2782 passed, 1 unrelated pre-existing GUI-test flake (a Tk/WSL-panel
+      test with nothing to do with either changed file, passes clean in
+      isolation — 0 failures either way).
+      **ALL 30 known card versions now have a confirmed-working switch
+      matrix.** The catalogue-wide "does every title load its switch/coil/
+      LED matrix and boot to attract" question this item opened with —
+      David's original ask, "every game should be able to load a switch
+      and led and coil matrix and boot into attract" — is closed.
       (2) **SOLVED same session, minutes after being written down:**
       `king_kong_le`/`metallica_spike`'s device-positions-land-outside-
       artwork bug turned out not to be a coordinate bug at all — the raw

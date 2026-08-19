@@ -1498,29 +1498,6 @@ class EmulatePanel:
                                           variable=self._audio_var)
         self._audio_chk.pack(side=tk.LEFT, padx=(16, 0))
 
-        # Item 56: the emulator's OWN volume to the PC speakers, not the
-        # game's in-game adjustment (that stays on the coin door, per title,
-        # untouched by this).  Deliberately LIVE, unlike Sound/Auto-attract
-        # just above: those are read once when Start builds watch.sh's
-        # environment, so David asked for a knob that moves the sound
-        # WITHOUT a restart, which is the opposite of that shape — so these
-        # two are never added to the up/busy disable block in _apply.
-        ttk.Label(btns, text="Volume:").pack(side=tk.LEFT, padx=(16, 4))
-        self._vol_scale = ttk.Scale(btns, from_=0, to=100, length=110,
-                                    orient=tk.HORIZONTAL,
-                                    variable=self._volume_var,
-                                    command=self._on_volume_change)
-        self._vol_scale.pack(side=tk.LEFT)
-        self._mute_chk = ttk.Checkbutton(btns, text="Mute",
-                                         variable=self._mute_var,
-                                         command=self._on_volume_change)
-        self._mute_chk.pack(side=tk.LEFT, padx=(6, 0))
-        # Seed the control file NOW, from whatever was just loaded (or the
-        # unity/unmuted default) — so it exists before the first Start even
-        # on a machine that has never touched the knob, rather than relying
-        # on padplay.py's own separate default to happen to agree.
-        self._on_volume_change()
-
         # On by default: the game boots to Tech Alerts and waits for an
         # operator, which means sitting through ~15 s of bring-up and then
         # pressing Escape twice, every single start.  There is no state to save
@@ -1529,6 +1506,42 @@ class EmulatePanel:
         self._auto_chk = ttk.Checkbutton(btns, text="Skip to attract mode",
                                          variable=self._auto_var)
         self._auto_chk.pack(side=tk.LEFT, padx=(12, 0))
+
+        # ITS OWN ROW, not crowded into btns above: btns already re-packs
+        # _docker_btn/_setup_btn at the end of ITS OWN pack order whenever
+        # docker/setup state changes (pack_forget() then a bare pack() with
+        # no before=/after= always appends), and Tk's packer UNMAPS a slave
+        # it cannot fit rather than shrinking it - so a wider btns row was
+        # putting those two buttons at real risk of losing their mapping on
+        # a narrower/CI-sized window. Confirmed live: adding these three
+        # widgets to btns itself made test_a_ready_docker_leaves_no_notice_
+        # behind and test_a_wsl_restart_re_probes_what_it_left_behind fail
+        # winfo_ismapped() twice running on macOS CI, on a commit that
+        # changed nothing else about either button.
+        audio_row = ttk.Frame(frame)
+        audio_row.pack(fill=tk.X, **pad)
+        # Item 56: the emulator's OWN volume to the PC speakers, not the
+        # game's in-game adjustment (that stays on the coin door, per title,
+        # untouched by this).  Deliberately LIVE, unlike Sound/Auto-attract
+        # above: those are read once when Start builds watch.sh's
+        # environment, so David asked for a knob that moves the sound
+        # WITHOUT a restart, which is the opposite of that shape — so these
+        # two are never added to the up/busy disable block in _apply.
+        ttk.Label(audio_row, text="Volume:").pack(side=tk.LEFT)
+        self._vol_scale = ttk.Scale(audio_row, from_=0, to=100, length=110,
+                                    orient=tk.HORIZONTAL,
+                                    variable=self._volume_var,
+                                    command=self._on_volume_change)
+        self._vol_scale.pack(side=tk.LEFT, padx=(4, 0))
+        self._mute_chk = ttk.Checkbutton(audio_row, text="Mute",
+                                         variable=self._mute_var,
+                                         command=self._on_volume_change)
+        self._mute_chk.pack(side=tk.LEFT, padx=(6, 0))
+        # Seed the control file NOW, from whatever was just loaded (or the
+        # unity/unmuted default) — so it exists before the first Start even
+        # on a machine that has never touched the knob, rather than relying
+        # on padplay.py's own separate default to happen to agree.
+        self._on_volume_change()
 
         self._build_states(frame, pad)
 

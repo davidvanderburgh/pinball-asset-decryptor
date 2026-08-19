@@ -84,9 +84,33 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
+- [x] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
       LED and coil matrix and boot to attract, checked one title at a time in
-      ALPHABETICAL ORDER.** `S1 D3` ← WORKING ON, 98%
+      ALPHABETICAL ORDER.** `S1 D3` DONE 2026-08-19.
+      **CLOSING SUMMARY: all 30 known Spike 2 card versions have a confirmed-
+      working switch matrix** — David's original ask, word for word: "every
+      game should be able to load a switch and led and coil matrix and boot
+      into attract." 9 titles solved via a static ELF fallback
+      (`swelf.py`'s `ROOTS`), 2 more via a second struct variant with no
+      entry table at all (`ROOTS_NONUM`), and a major mid-session audit
+      correction found that 6 titles believed broken were actually already
+      fine (a console-vs-`gzwatch.log` logging-timing bug, not a game bug).
+      Two real, separate bugs also found and fixed along the way:
+      `gameinfo.py`'s playfield-art lookup only checked one folder name
+      (`Test`, not `TestMode`), and `devicexy.py`'s device-position self-
+      check compared against a hard-coded image-name literal instead of the
+      already-existing `layout_image()` helper. **`tools/spike2_emu/
+      README.md`'s "Titles" table is the standing per-title record going
+      forward** (David's ask, 2026-08-19) — kept current by `/finish`, not
+      re-derived each session. Two follow-on items split out of this one
+      during the sweep, same pattern as 53/55 splitting from 50, and are
+      NOT closed by this: **item 55** (broadened this session with cross-
+      title evidence for the node-board `variant_guess` gap David flagged
+      live) and **item 58** (a second-display black-window worry, filed,
+      investigated, found to not reproduce on the example first suspected,
+      reverted — needs a confirmed real example before any fix). Both
+      remain open, tracked separately, and were not blocking this item's
+      own stated goal.
       *(Filed 2026-08-18 at David's ask: "i want to work on universal game
       compatibility. every game should be able to load a switch and led and
       coil matrix and boot into attract. let's go alphabetical order." This

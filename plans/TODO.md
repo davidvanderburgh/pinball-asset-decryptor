@@ -86,7 +86,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
       LED and coil matrix and boot to attract, checked one title at a time in
-      ALPHABETICAL ORDER.** `S1 D4` ← WORKING ON, 30%
+      ALPHABETICAL ORDER.** `S1 D4` ← WORKING ON, 40%
       *(Filed 2026-08-18 at David's ask: "i want to work on universal game
       compatibility. every game should be able to load a switch and led and
       coil matrix and boot into attract. let's go alphabetical order." This
@@ -340,6 +340,61 @@ These have each been violated at least once and each cost a run or a window:
       **Full regression check on the `swelf.py` change: `pytest` clean,
       2792 passed, 11 skipped (pre-existing, unrelated), 0 failed, in
       ~10 minutes.**
+      **★★★★★★ LIVE-VERIFIED, `aerosmith_le`, real `watch.sh` run (worktree
+      scripts, `PAD_CARD`, 3 min backstop, David's own machine idle at the
+      time, clean teardown, card unmounted, `alive.sh` 0 after).** This is
+      the acceptance test the whole rest of this item was building toward,
+      and it passed: `watch.sh`'s own table-build step printed
+      **`switches     104 in the game's own table (read out of the game's
+      binary, no run needed)`** — no more "no switch dump yet", the
+      `[cabspi]` no-table fallback never fired this run. The fix works
+      through the REAL pipeline, not just in isolation.
+      **A SEPARATE, UNRELATED fault then stopped the game a little later:**
+      `[ERR] Error in opening firmware binary file` / `Please put bin file
+      to /lib/firmware/vpu folder or export VPU_FW_PATH env`, guest exit,
+      clean teardown. **This is NOT a new mystery — it is the exact
+      pattern items 23/36b already named "VPU firmware noise" and flagged
+      as usually a RED HERRING that hides the real exit reason**, which
+      neither those items nor this pass has an instrument for (item 23,
+      the exit-reason hook, was dropped 2026-08-11 at David's own ask).
+      Do not read this as "Aerosmith is still broken" without qualifying
+      it: the SWITCH TABLE half of this item's acceptance is now proven:
+      the CRASH is a different, older, already-documented open question
+      about clean guest exits in general, not specific to this fix.
+      **★★★★★★★ LIVE-VERIFIED CLEAN, `avengers_infinity_le`, same recipe —
+      and this one is a COMPLETE pass, no asterisk.** `switches     110 in
+      the game's own table (read out of the game's binary, no run needed)`,
+      then the run went the FULL 3-minute backstop with **zero `[swfind]`
+      and zero `[cabspi]` lines anywhere in the log** (compare the FIRST
+      boot-test on this title, before the fix, which was wall-to-wall
+      `[cabspi]` fallback and limped at 2-6 fps) — `[eglshim]` held a
+      healthy **~41-42 fps** the whole way, no crash, clean teardown,
+      `alive.sh` 0 after, card unmounted. This title's switch table is not
+      just theoretically fixed, it is confirmed working end to end with
+      nothing else in the way.
+      **★★★★★★★★ LIVE-VERIFIED, `batman`, same recipe, full 3-minute
+      backstop reached with no crash** (`[watch] 3 min backstop reached` /
+      `[watch] stopping...` — a clean stop, not a guest exit).
+      `switches     111 in the game's own table`, and — new this run, worth
+      recording exactly — **the SHIM ITSELF confirmed loading it**:
+      `[swfind] switch table loaded from /dump/tables/batman/switch_list.txt:
+      111 switches, ids to 113 (ELF-derived; the names live in the file)`.
+      fps climbed steadily to ~24 by the backstop, no VPU-noise-adjacent
+      crash this time (the same "Error in opening firmware binary file"
+      lines appear in the log but did not end the run, consistent with the
+      "noise, not cause" read on that message).
+      **ONE LOOSE END, and it is worth flagging exactly rather than
+      smoothing over: `[cabspi] this title has no findable switch table:
+      handing the game the platform AT-REST cabinet word...` STILL FIRED,
+      in the SAME run, AFTER `[swfind]` reported the file table loaded.**
+      Two different code paths in `hwshim.c` clearly answer two different
+      questions here — `[swfind]`'s file-table load and whatever `[cabspi]`
+      checks before deciding to fall back are not talking to each other —
+      and this run does not show that costing anything (it ran clean to the
+      backstop either way), but it means `[cabspi]`'s own check should
+      learn about `sw_file_table()` succeeding rather than being told this
+      title has "no findable switch table" when it plainly does. Not fixed
+      this pass; a clean, narrow follow-on for whoever picks this up next.
       **Device-position table (item 2 above, the 0x30-byte struct):
       untouched this pass** — a second, independent RE job once the switch
       table is fixed; do not assume fixing (1) fixes the artwork/positions.

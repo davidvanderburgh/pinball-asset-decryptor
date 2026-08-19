@@ -1378,7 +1378,7 @@ These have each been violated at least once and each cost a run or a window:
       playfield.py, and confirming it means a run with the LED test menu.
 
 - [ ] **56. A master volume knob and a Mute for the EMULATOR's sound to the PC
-      speakers — our level, not the game's.** `S3 D2`
+      speakers — our level, not the game's.** `S3 D2` ← WORKING ON
       **★ DAVID, 2026-08-18: "master pc volume knob for emulator (not for in
       game, but for the emulator to my pc speakers). should have mute and
       volume setting controls."** Today there is no level anywhere on our side

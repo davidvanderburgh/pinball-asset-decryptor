@@ -86,31 +86,113 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
       LED and coil matrix and boot to attract, checked one title at a time in
-      ALPHABETICAL ORDER.** `S1 D4` ← WORKING ON, 0%
+      ALPHABETICAL ORDER.** `S1 D3` ← WORKING ON, 35%
       *(Filed 2026-08-18 at David's ask: "i want to work on universal game
       compatibility. every game should be able to load a switch and led and
       coil matrix and boot into attract. let's go alphabetical order." This
       is a standing sweep, not a single fix — expect it to spawn per-title
       sub-items the way 53/55 split out of 50, and expect this entry to be
       rewritten as the sweep's own findings accumulate rather than treated as
-      one bug.)*
+      one bug. D4 → D3 same day: the mechanism below turned out to be already
+      SOLVED in this codebase for one title (52/swelf.py) and Aerosmith's own
+      layout now matches it field-for-field — what is left is address-hunting
+      and one confirming run, not unknown-mechanism work.)*
       **First title, alphabetically: AEROSMITH.** David's report: it is
-      "stuck on the guided setup screen with 'no tables' found." Not yet
-      established whether this is a card/table-extraction gap specific to
-      this title, a naming mismatch (title id, card path) that the table
-      builder can't match, or something the guided-setup flow itself gets
-      wrong before mktables ever runs.
+      "stuck on the guided setup screen with 'no tables' found." This pass
+      was entirely DESK WORK, read-only, alongside David's own LIVE run on
+      this exact title (main checkout, `aerosmith_le - virtual playfield` +
+      `Pinball Asset Decryptor v0.143.0` both open, no item badge — his,
+      never touched, only its logs and the already-mounted card were read).
+      **★★ ESTABLISHED: "no tables" is real and has two independent causes,
+      both confirmed from the live run's own logs.**
+      **(1) THE SWITCH TABLE.** `gzwatch.log`:
+      `[swfind] no switch table yet. Longest run of the right shape: 33
+      records at 0x006b4c6c (long enough but (node,bit) not distinct)` then
+      `[swfind] no by-shape table and no file table
+      (/dump/tables/aerosmith_le/switch_list.txt): the playfield stays
+      switchless this run`, then `[cabspi] this title has no findable switch
+      table: handing the game the platform AT-REST cabinet word
+      ff0f0f0000000000` — the EXACT class item 52 found on stranger_things:
+      the godzilla-shaped by-shape hunt (32-byte stride) does not fit this
+      title's table at all, and `swelf.py`'s `ROOTS` dict (the per-title
+      static-ELF fallback item 52 built) has no `aerosmith_le` entry, so
+      `sw_file_table()` has nothing to load either. This is why Guided Setup
+      cannot be navigated: no switch resolves, so no button press reaches it.
+      **(2) THE DEVICE POSITION TABLE.** `device_xy.txt`/`led_io.txt` on disk
+      both say `0 records`. NOT the same bug as item 53 (that is
+      group→node, a wire-address problem) and NOT what item 50 fixed
+      (image-name matching) — `devicexy.py`'s `seeds()` finds 1104 candidates
+      fine, but `_one()`'s 0x30-byte record parser (built against
+      Godzilla-family binaries) validates only 2 of them, both garbage. This
+      OLDER title's binary does not use that struct at all; it is a
+      genuinely different, older layout and needs its own RE, independent of
+      the switch-table fix in (1).
+      **★★★ THE SWITCH TABLE'S MECHANISM IS NOW KNOWN, from the ELF alone, no
+      run.** `swelf.py`'s already-known struct shape (item 52, built for
+      stranger_things) is CONFIRMED to fit Aerosmith field-for-field:
+      **`dev(i) = DEV_ROOT + 24*i`, name pointer at `+12`, slot at `+16`,
+      bit at `+18`, kind at `+20` — `kind==7` for every switch checked and
+      `kind==4` for the one LED checked**, exactly `swelf.py`'s
+      `KIND_SWITCH = 7` constant. Method, so it can be redone or checked:
+      (a) Aerosmith's ELF has two PT_LOADs, text at VA 0x8000 (file off 0)
+      and **data at VA 0x595490 (file off 0x585490, bias 0x10000)** — the
+      same two-bias shape `swelf.py`'s `Elf` class already handles, this
+      title's data segment is just much smaller/lower than Godzilla's
+      (0x595490-0x5de708 vs the 0x700000s addresses other tools assume).
+      (b) A `lednames.py`-style scan (records of 0x18 bytes, five IDENTICAL
+      pointers to one string + a null word), run over the CORRECT segment
+      range, finds **313 such name records at VA 0x5d26c4** — real Aerosmith
+      names throughout: `TROUGH JAM/1..6`, `LEFT/RIGHT FLIPPER BUTTON`,
+      `LEFT/RIGHT SLINGSHOT`, `SHOOTER LANE`, `LEFT/RIGHT FLIPPER EOS`,
+      `LEFT/RIGHT OUTLANE`, `SLAM TILT`, `SERVICE SELECT/PLUS/MINUS/BACK`,
+      `DIP 1..8`, and (past index 90) `WING LEFT 5-B/G/R` style LED channel
+      names. (c) Scanning the whole `.data` segment for 4-byte words landing
+      exactly on one of those 313 record boundaries finds **exactly 313
+      hits, one per name, at a consistent 24-byte stride** — the DEV array
+      itself, `DEV_ROOT ≈ 0x5d096c` (lowest hit's record start). Reading
+      `+16`/`+18`/`+20` off each hit reproduces `TROUGH 1` at slot=5 bit=0x25
+      kind=7, `LEFT FLIPPER BUTTON` at slot=5 bit=0x19 kind=7, `RIGHT
+      FLIPPER BUTTON` at slot=5 bit=0x18 kind=7, `SLAM TILT` at slot=4
+      bit=0x16 kind=7, `WING LEFT 5-B` at slot=8 bit=0x2f **kind=4** — the
+      kind field alone separates switches from LEDs, cleanly, on real names.
+      (d) The literal value `0x5d096c` appears at exactly two `.data` file
+      offsets (VA 0x599f0c and VA 0x5a6034) — one of these is almost
+      certainly the GOT-style pointer slot `swelf.py`'s `ROOTS` wants as
+      `dev_root` (recall `rows()` does `dev = e.u32(dev_root)`, i.e. the
+      root is the ADDRESS OF A POINTER, not the array itself) — NOT yet
+      disambiguated between the two.
+      **NOT YET FOUND, and it is the whole resume:** the ENTRY table root
+      (44-byte records, `+24` u16 num, `+26` u16 devidx, running right up to
+      `DEV_ROOT` per `swelf.py`'s own note) and the BOARD table root
+      (16-byte records, `+14` u16 node id, indexed by `slot`). Once those
+      three roots are in hand: add `"aerosmith_le": (ENT, DEV, BRD)` to
+      `swelf.py`'s `ROOTS`, run it offline against the mounted card's `game`
+      ELF and confirm the printed table names/slots/nodes make sense (no
+      run needed for that check), THEN one live run to confirm
+      `switch_list.txt` gets written, the by-shape hunt's `[cabspi]`
+      fallback line disappears, and Guided Setup can actually be navigated.
+      **Deliberately NOT attempted this pass, and why:** wiring an unverified
+      `ROOTS` entry in. `swelf.py`'s own docstring is explicit that a wrong
+      table is worse than an empty one ("producing an empty file is
+      recoverable; producing a wrong one sends the next reader somewhere
+      that does not exist") — ENT/BRD are not yet confirmed, so nothing here
+      has been added to the tracked file.
+      **Device-position table (item 2 above, the 0x30-byte struct):
+      untouched this pass** — a second, independent RE job once the switch
+      table is fixed; do not assume fixing (1) fixes the artwork/positions.
       **Acceptance for the Aerosmith slice:** state what "no tables" means at
-      the desk (which lookup returns empty and why), then get Aerosmith past
-      guided setup into a run that shows a switch layout, LED matrix and coil
-      map and reaches attract — the same bar items 27/49/50/53 already hold
-      other titles to. Record the mechanism found, whether it is
-      Aerosmith-specific or a class of titles, and what the next title
-      alphabetically after Aerosmith should expect.
-      — S1: the title cannot be set up at all today, which is the floor this
-      whole initiative is measuring from. D4 is a placeholder for "unknown
-      mechanism, needs at least one run to see the guided-setup failure" —
-      revise once the desk read of "no tables" narrows it.
+      the desk (which lookup returns empty and why — DONE, see above), then
+      get Aerosmith past guided setup into a run that shows a switch layout,
+      LED matrix and coil map and reaches attract — the same bar items
+      27/49/50/53 already hold other titles to. Record the mechanism found,
+      whether it is Aerosmith-specific or a class of titles, and what the
+      next title alphabetically after Aerosmith should expect.
+      — S1: the title cannot be set up at all today (no switch resolves, so
+      Guided Setup cannot be navigated), which is the floor this whole
+      initiative is measuring from. D3 (was D4): the mechanism is known and
+      matches an existing, validated method (`swelf.py`/item 52); what is
+      left is desk address-hunting for two more roots plus one confirming
+      run — no new instrument, no unknown structure.
 
 - [ ] **38. A run can strand its windows, and then EVERY later run is
       INVISIBLE — the game plays perfectly with no window, and every

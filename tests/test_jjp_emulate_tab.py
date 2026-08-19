@@ -173,10 +173,24 @@ def panel(root, monkeypatch):
 
 
 def test_panel_builds_and_starts_disabled_controls(panel):
-    """Switch matrix and Screenshot act on a RUNNING game; offering them when
-    nothing is running is an invitation to a confusing error."""
-    assert str(panel._matrix_btn["state"]) == "disabled"
+    """Screenshot acts on a RUNNING game; offering it when nothing is running
+    is an invitation to a confusing error."""
     assert str(panel._shot_btn["state"]) == "disabled"
+
+
+def test_there_is_no_switch_matrix_button(panel):
+    """The matrix opens WITH the emulator now.  A button for it silently did
+    nothing when it was launched as the wrong user, and a control that lies
+    about having worked is worse than no control."""
+    assert not hasattr(panel, "_matrix_btn")
+
+
+def test_matrix_launch_is_root(monkeypatch):
+    """swdump.py reads the game's memory and the game runs as root, so the
+    ordinary-user form fails before it ever reaches the UI."""
+    monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
+    cmd = rig_cmd_root("jjpsw_launch.sh")
+    assert cmd[:4] == ["wsl.exe", "-u", "root", "-e"]
 
 
 def test_apply_running_enables_controls_and_flips_the_button(panel):
@@ -187,7 +201,7 @@ def test_apply_running_enables_controls_and_flips_the_button(panel):
                   "image_mounted": "1", "game": "Wonka"})
     assert panel._last_up is True
     assert panel._go_btn["text"] == "Stop"
-    assert str(panel._matrix_btn["state"]) == "normal"
+    assert str(panel._shot_btn["state"]) == "normal"
     assert panel._cells["game"]["text"] == "Wonka"
     assert panel._cells["led_writes"]["text"] == "99"
 
@@ -198,7 +212,7 @@ def test_apply_stopped_flips_back(panel):
                   "image_mounted": "1"})
     assert panel._last_up is False
     assert panel._go_btn["text"] == "Start"
-    assert str(panel._matrix_btn["state"]) == "disabled"
+    assert str(panel._shot_btn["state"]) == "disabled"
 
 
 def test_note_warns_when_running_without_boards(panel):

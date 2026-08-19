@@ -81,5 +81,13 @@ PYEOF
 step "game"
 JJP_DISPLAY=$RUN_DISPLAY bash "$HERE/run_game.sh" --detach || exit 6
 
+# The switch matrix comes up WITH the emulator rather than behind a button:
+# it is the control surface for the machine, not an optional extra, and a
+# button that silently did nothing is how this presented the first time.
+if [ "${JJP_NO_MATRIX:-0}" != "1" ]; then
+    step "switch matrix"
+    bash "$HERE/jjpsw_launch.sh" || echo "watch.sh: switch matrix did not open"
+fi
+
 echo
 bash "$HERE/status.sh"

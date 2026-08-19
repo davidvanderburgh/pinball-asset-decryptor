@@ -26,10 +26,9 @@ if [ -z "$ISO" ]; then
     exit 64
 fi
 # Accept a Windows path for convenience; the GUI hands us whatever the user
-# picked in the file dialog.
-case "$ISO" in
-    [A-Za-z]:*) ISO="/mnt/$(echo "${ISO%%:*}" | tr 'A-Z' 'a-z')$(echo "${ISO#*:}" | tr '\\' '/')" ;;
-esac
+# picked in the file dialog.  jjp_norm_path lives in padpath.sh so that every
+# script accepts either spelling and none has its own idea of the conversion.
+ISO=$(jjp_norm_path "$ISO")
 [ -f "$ISO" ] || { echo "mount.sh: no such ISO: $ISO" >&2; exit 3; }
 
 for tool in partclone.restore gunzip; do
@@ -40,11 +39,33 @@ done
 BASE=$JJP_BASE
 mkdir -p "$BASE"
 
-# Already restored and mounted?  Then there is nothing to do.
+# Is the RIGHT image already mounted?
+#
+# This test used to be "is anything mounted at $JJP_ROOT", with $JJP_ROOT a
+# FIXED path — so once one title was up, every other ISO reported "already
+# mounted" and the GUI's picker appeared to do nothing at all.  $JJP_BASE is
+# now derived from the ISO, so a different title is a different directory and
+# this can only ever be true for the one actually asked for.
 if mountpoint -q "$JJP_ROOT"; then
     echo "already mounted: $JJP_ROOT"
-    echo "game: $(ls -d "$JJP_ROOT"/jjpe/gen1/*/ 2>/dev/null | head -3 | tr '\n' ' ')"
+    echo "$JJP_BASE" > "$JJP_CURRENT"
+    echo "game=$(jjp_title)"
     exit 0
+fi
+
+# A DIFFERENT title may still be mounted from a previous run.  It has to come
+# down first: the jail overlays whichever root was current when it was built,
+# so leaving it up would run the OLD title while every label said the new one.
+if [ -r "$JJP_CURRENT" ]; then
+    PREV=$(cat "$JJP_CURRENT" 2>/dev/null)
+    if [ -n "$PREV" ] && [ "$PREV" != "$JJP_BASE" ]; then
+        echo "switching image: $PREV -> $JJP_BASE"
+        bash "$HERE/stop.sh" >/dev/null 2>&1
+        JJP_BASE="$PREV" JJP_ROOT="$PREV/root" bash "$HERE/unjail.sh" >/dev/null 2>&1
+        for m in "$PREV/root" "$PREV/boot" "$PREV/perm" "$PREV/iso"; do
+            mountpoint -q "$m" && umount -l "$m" 2>/dev/null
+        done
+    fi
 fi
 
 ISOMNT=$BASE/iso
@@ -79,7 +100,6 @@ mountpoint -q "$JJP_ROOT"  || mount -o ro,loop "$BASE/sda3.raw" "$JJP_ROOT"
 [ -s "$BASE/sda2.raw" ] && { mountpoint -q "$JJP_BOOTP" || mount -o ro,loop "$BASE/sda2.raw" "$JJP_BOOTP" 2>/dev/null; }
 [ -s "$BASE/sda4.raw" ] && { mountpoint -q "$JJP_PERM"  || mount -o ro,loop "$BASE/sda4.raw" "$JJP_PERM" 2>/dev/null; }
 
-echo "mounted: $(mount | grep -c jjp_wonka) filesystem(s)"
-GAME=$(ls -d "$JJP_ROOT"/jjpe/gen1/*/ 2>/dev/null | while read -r d; do
-    [ -x "$d/game" ] && basename "$d"; done | head -1)
-echo "game=${GAME:-unknown}"
+echo "$JJP_BASE" > "$JJP_CURRENT"
+echo "mounted: $(mount | grep -c "$JJP_BASE") filesystem(s) under $JJP_BASE"
+echo "game=$(jjp_title)"

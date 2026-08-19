@@ -15,9 +15,16 @@
 #    69 maintenance reboot  127 exe not found  254 escape pressed
 #   255 unexpected exit   137 SIGKILL (ours - it was still running)
 #
-# 68 IS NORMAL ON A FIRST RUN.  The golden disk ships with a Guns N' Roses
-# hostname; the game renames itself (WONKA-<n>) and asks for a reboot.  Just run
-# it again - the jail's upper layer has kept the new name.
+# 68 IS NORMAL ON A FIRST RUN, and this script now handles it.  The golden disk
+# ships a Guns N' Roses hostname; on first boot the game renames itself
+# (WONKA-<n>) and asks to be restarted.  A FRESH JAIL IS A FIRST BOOT EVERY
+# TIME, because the overlay's upper layer starts empty - so without the restart
+# loop below the game appears to die instantly with an empty log, which is
+# exactly how this presented.  Restarts are bounded (JJP_MAX_RESTARTS) so a
+# genuine crash loop cannot spin forever.
+#
+# We deliberately do NOT use the image's own scripts/rungame.sh, which answers
+# 42/68/69 by rebooting the machine - here that would mean the WSL distro.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/padpath.sh"
@@ -64,7 +71,17 @@ RUN='
   export HOME=/root
   '"$SHIM_ENV"'
   cd $GAMEDIR
-  exec ./game
+  n=0
+  while [ $n -lt '"${JJP_MAX_RESTARTS:-6}"' ]; do
+    ./game
+    rc=$?
+    case "$rc" in
+      43|44|68) n=$((n+1)); echo "[rig] game exit $rc - restarting ($n)" ;;
+      *) exit $rc ;;
+    esac
+  done
+  echo "[rig] too many restarts; giving up"
+  exit 1
 '
 
 : > "$JJP_GAME_LOG"

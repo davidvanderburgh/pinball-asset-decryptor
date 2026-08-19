@@ -239,14 +239,6 @@ class JJPEmulatePanel:
         ctl.pack(fill=tk.X, pady=(2, 8))
         self._go_btn = ttk.Button(ctl, text="Start", command=self._toggle)
         self._go_btn.pack(side=tk.LEFT)
-        self._matrix_btn = ttk.Button(ctl, text="Switch matrix…",
-                                      command=self._open_matrix,
-                                      state=tk.DISABLED)
-        self._matrix_btn.pack(side=tk.LEFT, padx=(6, 0))
-        _Tooltip(self._matrix_btn,
-                 "The playfield with every switch and LED on it. Click a "
-                 "switch to close it; the game reacts.",
-                 self._theme_fn)
         self._shot_btn = ttk.Button(ctl, text="Screenshot…",
                                     command=self._screenshot, state=tk.DISABLED)
         self._shot_btn.pack(side=tk.LEFT, padx=(6, 0))
@@ -426,14 +418,34 @@ class JJPEmulatePanel:
             self._busy = False
 
     def _open_matrix(self):
-        """Open the switch/LED matrix beside the game."""
+        """Re-open the switch/LED matrix beside a running game.
+
+        Normally unnecessary: ``watch.sh`` opens it as its last step, because
+        it is the control surface for the machine rather than an optional
+        extra.  This exists for the case where the user closed it.
+
+        AS ROOT.  ``swdump.py`` reads the game's memory to get the switch and
+        lamp tables, and the game runs as root — so the ordinary-user form
+        fails before it ever reaches the UI, which is exactly how this first
+        presented: the log said "opened" and no window appeared.  The script
+        drops to the desktop user for the UI itself, which needs their WSLg
+        session.
+
+        And it REPORTS what happened.  The old version logged success
+        unconditionally, so a launch that died on the first line still read as
+        a working one.
+        """
         def work():
             try:
-                subprocess.Popen(
-                    rig_cmd("jjpsw_launch.sh"),
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    creationflags=_rig.CREATE_FLAGS)
-                self._log("JJP: switch matrix opened.")
+                out = subprocess.run(
+                    rig_cmd_root("jjpsw_launch.sh"),
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    timeout=180, creationflags=_rig.CREATE_FLAGS)
+                msg = out.stdout.decode("utf-8", "replace").strip()
+                if out.returncode == 0:
+                    self._log("JJP: " + (msg or "switch matrix opened."))
+                else:
+                    self._log("JJP: the switch matrix did not open. " + msg)
             except Exception as exc:                       # noqa: BLE001
                 self._log("JJP: could not open the switch matrix: %s" % exc)
         threading.Thread(target=work, daemon=True).start()
@@ -526,8 +538,8 @@ class JJPEmulatePanel:
             self._hint_lbl.configure(text=hint)
             if not self._busy:
                 self._go_btn.configure(text="Stop" if self._last_up else "Start")
-            for btn in (self._matrix_btn, self._shot_btn):
-                btn.configure(state=tk.NORMAL if self._last_up else tk.DISABLED)
+            self._shot_btn.configure(
+                state=tk.NORMAL if self._last_up else tk.DISABLED)
 
             def yn(k):
                 return "yes" if info.get(k) == "1" else "no"

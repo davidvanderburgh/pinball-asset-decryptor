@@ -558,8 +558,14 @@ For **Spooky** and **JJP** Clonezilla extraction you'll also need
 the app builds and uses an ephemeral container for partclone / debugfs
 on those flows.  The **Stern Emulate** tab needs it too on macOS, for a
 different reason: the game is a Linux program, and a container is how a
-Mac runs one.  The Emulate tab checks for Docker itself and offers to
-install or start it.  The other manufacturers (PB, BOF, CGC, Williams)
+Mac runs one.  You don't have to install it by hand there: the Emulate
+tab's **Set up emulator…** button installs a container engine with
+whichever of Homebrew or MacPorts you already have and starts it, in the
+app, with every line in the log pane — which is also the answer when
+Docker Desktop won't install on your version of macOS.  Any of Docker
+Desktop, OrbStack, Rancher Desktop or Colima will do, and the app looks
+for the `docker` command in each of their own locations as well as on
+PATH.  The other manufacturers (PB, BOF, CGC, Williams)
 run without Docker.  Docker is a macOS requirement only — emulation
 goes through WSL on Windows and runs natively on Linux.
 
@@ -1037,7 +1043,9 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    who the distro logs in as, whether it can start Windows programs,
    which display it has, and a closing line saying whether this PC can
    run the emulator. A Mac gets the question a Mac has instead — there
-   are no packages to install there, so what it reports is Docker. It
+   are no OS packages to install there, so what it reports is Docker,
+   naming the path the `docker` command was found at and the engine
+   found behind it. It
    asks four things the package check never did —
    the login user, Windows interop, the display state, and whether the
    good audio path is available at all — and each of them, when wrong,
@@ -1045,6 +1053,26 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    what to change. None of the four is something a button can install,
    so **Set up emulator…** no longer turns up underneath a notice it
    has nothing to do about.
+   On macOS that button now exists too, and does the one thing a Mac can
+   be missing. `docker` there is only a client: a Mac can have it
+   installed, on PATH and answering, with nothing behind it that runs a
+   container — which used to read as *"Docker isn't running"*, advice
+   about a Docker Desktop that Mac never had. A client with no engine is
+   now told apart from a stopped engine, in the check, in what Start
+   says when it refuses, and in the button: **Set up emulator…**
+   installs the engine (and the client too, if that is missing as well)
+   with whichever of Homebrew or MacPorts is already on the machine and
+   then starts it — in this window, streamed into the log pane, never
+   in Terminal. It lists what it will do before it does any of it, a No
+   changes nothing, and the half that needs a password is asked for by
+   macOS itself in its own dialog; saying no to that is reported as your
+   answer, not as a failure. Finding any of it stopped depending on PATH
+   as well, because a Mac app launched from Finder inherits almost none:
+   Homebrew's, MacPorts', Docker Desktop's, OrbStack's and Rancher
+   Desktop's own directories are searched too (`PAD_DOCKER` overrides).
+   That is also what un-silenced the Mac's speaker — the container's
+   sound is played on the Mac by `ffplay`, which was being missed the
+   very same way.
    A package that is missing and a package apt can actually *install*
    are two different facts, and the tab now reports both. Ubuntu
    publishes `qemu-user-static` in its `universe` component while the
@@ -1108,13 +1136,17 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    Linux path skips them. macOS runs it in a container, because
    `qemu-user` translates Linux syscalls and the chroot needs Linux
    namespaces — there is no port to write, only Linux to run. It needs
-   Docker Desktop and shows its picture over VNC: the app opens it in
+   a container engine — Docker Desktop, OrbStack, Rancher Desktop or
+   Colima, and **Set up emulator…** installs one for you — and shows
+   its picture over VNC: the app opens it in
    macOS Screen Sharing by itself once the game is up, with nothing to
    install (the VNC password, should Screen Sharing ask, is `pinball`).
    Every emulator window lives inside that one Screen Sharing desktop —
    click a window to give it the keyboard, drag title bars to arrange —
    and sound comes out of the container over a local stream played by
-   ffplay, part of the ffmpeg the prerequisites already require.
+   ffplay, part of the ffmpeg the prerequisites already require (looked
+   for in Homebrew's and MacPorts' own directories now, not only on
+   PATH, which is what stopped those Macs playing silently).
    Nothing has to be added to
    Docker's file-sharing list: the app copies the rig into your home
    directory, which Docker already shares, and mounts the copy.

@@ -57,7 +57,12 @@ PY
 if [ "$(id -u)" = "0" ]; then
     ok=0
     for _ in $(seq 1 16); do
-        if python3 "$HERE/swdump.py" --out "$DUMP" --quiet 2>/dev/null \
+        # --pf is the PHOTO'S SIZE, not the photo: calibrate() needs it to tell
+        # an impossible inches->pixels scale from a possible one (a scale whose
+        # playfield would be taller than the picture of it is wrong).  Without
+        # it the calibration still works, just without that check.
+        if python3 "$HERE/swdump.py" --out "$DUMP" --quiet \
+                ${PF:+--pf "$PF"} 2>/dev/null \
                 && dump_ok "$DUMP"; then
             ok=1; break
         fi

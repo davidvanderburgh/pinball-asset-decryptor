@@ -114,9 +114,43 @@ report_wrong_key() {
 if [ "$DETACH" = "1" ]; then
     setsid chroot "$JJP_JAIL" /bin/bash -c "$RUN" >>"$JJP_GAME_LOG" 2>&1 &
     echo $! > "$JJP_PID_FILE"
-    sleep 3
-    if [ "$(jjp_game_count)" = "0" ] && report_wrong_key; then
-        exit 7
+
+    # WATCH the first few seconds instead of a flat `sleep 3` then one check.
+    # Two things end this wait early, and both matter to the GUI:
+    #
+    #   * an H0007 - the plugged-in key does not decrypt THIS title.  A Sentinel
+    #     key is per-title, so a Wonka key on Guns N' Roses prints H0007 at the
+    #     very first envelope call (before the game touches boards or a display)
+    #     and exits.  We fail fast with exit 7 and the WRONG KEY message the
+    #     instant it appears - typically ~1 s - instead of waiting a flat 3 and
+    #     then only noticing if the process already happened to be gone.
+    #   * the game actually coming up - reported the moment it is up rather than
+    #     after a fixed delay.
+    #
+    # "Up for two consecutive checks" avoids a race: a wrong-key game exists for
+    # a heartbeat before it H0007s, and we must not read that heartbeat as a
+    # healthy launch.  The window is bounded (JJP_LAUNCH_WAIT) so a genuine wedge
+    # still returns.
+    up=0
+    for _ in $(seq 1 "${JJP_LAUNCH_WAIT:-12}"); do
+        sleep 1
+        if report_wrong_key; then
+            exit 7
+        fi
+        if [ "$(jjp_game_count)" != "0" ]; then
+            up=$((up + 1))
+            [ "$up" -ge 2 ] && break
+        else
+            up=0
+        fi
+    done
+    if [ "$up" -lt 2 ]; then
+        # No H0007, but the game is not staying up either - it exited for some
+        # other reason (see the exit-code table above).  Surface the log tail
+        # rather than claiming a launch that did not happen.
+        echo "run_game.sh: the game did not stay up and did not report a key error."
+        tail -n 6 "$JJP_GAME_LOG" 2>/dev/null | sed 's/^/  game: /'
+        exit 8
     fi
     echo "launched detached; pid=$(cat "$JJP_PID_FILE") procs=$(jjp_game_count)"
     echo "log: $JJP_GAME_LOG"

@@ -408,3 +408,81 @@ def test_wrong_key_clears_once_the_game_runs(panel):
     panel._wrong_key = True
     panel._apply({"wsl": "1", "game_procs": "3", "board_nodes": "5"})
     assert panel._state_lbl["text"] == "Running"
+
+
+def test_mark_wrong_key_sets_the_sticky_flag(panel):
+    """The flag is set synchronously (the headline paint is marshalled to the
+    Tk loop), so a poll arriving right after still shows the real reason."""
+    panel._wrong_key = False
+    panel._mark_wrong_key()
+    assert panel._wrong_key is True
+
+
+# --------------------------------------------------------------- log streaming --
+
+class _FakeStdout:
+    def __init__(self, lines):
+        self._it = iter(lines)
+
+    def __iter__(self):
+        return self._it
+
+    def close(self):
+        pass
+
+
+class _FakeProc:
+    """A subprocess whose stdout yields pre-canned lines, for driving the
+    streaming reader without a real WSL launch."""
+
+    def __init__(self, lines, rc):
+        self.stdout = _FakeStdout(lines)
+        self.returncode = rc
+        self.killed = False
+
+    def kill(self):
+        self.killed = True
+
+    def wait(self):
+        return self.returncode
+
+
+def test_run_streaming_logs_each_line_as_it_arrives(panel, monkeypatch):
+    """The launch is logged line by line, not captured and dumped at the end —
+    that end-dump is exactly what made a working launch look frozen."""
+    logged = []
+    monkeypatch.setattr(panel, "_log", lambda m: logged.append(m))
+    lines = ["== mount image ==\n", "== dongle ==\n", "== game (Wonka) ==\n",
+             "launched detached; pid=42\n"]
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda *a, **k: _FakeProc(lines, rc=0))
+    rc, wrong = panel._run_streaming(["watch.sh"], timeout=1800)
+    assert rc == 0 and wrong is False
+    assert [m for m in logged if "== dongle ==" in m]
+    assert [m for m in logged if "launched detached" in m]
+
+
+def test_run_streaming_flags_wrong_key_the_moment_it_prints(panel, monkeypatch):
+    """A WRONG KEY line flips the sticky flag during the stream, before the
+    process even exits — the headline does not wait for the launch to finish."""
+    monkeypatch.setattr(panel, "_log", lambda m: None)
+    lines = ["== dongle ==\n", "== game (GunsNRoses) ==\n",
+             "WRONG KEY: the plugged-in Sentinel key does not unlock GunsNRoses.\n"]
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda *a, **k: _FakeProc(lines, rc=7))
+    rc, wrong = panel._run_streaming(["watch.sh"], timeout=1800)
+    assert rc == 7 and wrong is True
+    assert panel._wrong_key is True
+
+
+def test_run_streaming_survives_a_popen_failure(panel, monkeypatch):
+    """If the launch cannot even start, the reader must report it rather than
+    raise out of the worker thread."""
+    monkeypatch.setattr(panel, "_log", lambda m: None)
+
+    def boom(*a, **k):
+        raise OSError("wsl.exe not found")
+
+    monkeypatch.setattr(subprocess, "Popen", boom)
+    rc, wrong = panel._run_streaming(["watch.sh"], timeout=1800)
+    assert rc is None and wrong is False

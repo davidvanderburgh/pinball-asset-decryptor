@@ -125,8 +125,17 @@ step "seed rest state"
 python3 "$HERE/seed_rest.py" "${JJP_DEVICES_JSON:-/var/tmp/jjp_devices.json}" \
     || echo "watch.sh: rest seed skipped"
 
-step "game"
-JJP_DISPLAY=$RUN_DISPLAY bash "$HERE/run_game.sh" --detach || exit 6
+step "game ($(jjp_title))"
+JJP_DISPLAY=$RUN_DISPLAY bash "$HERE/run_game.sh" --detach
+rc=$?
+if [ "$rc" != "0" ]; then
+    # Preserve run_game.sh's own exit code instead of flattening it to 6.  A
+    # wrong-title Sentinel key exits 7, and the GUI keys its "Wrong key for this
+    # game" headline off that - flattening it would make a wrong key look like
+    # any other launch failure.  On 7 the game never came up, so we also stop
+    # here rather than opening a switch matrix onto nothing.
+    exit "$rc"
+fi
 
 # The switch matrix comes up WITH the emulator rather than behind a button:
 # it is the control surface for the machine, not an optional extra, and a

@@ -23,6 +23,12 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 
 NEST=${JJP_NESTED:-:1}
 
+# 0. Remember where the game window is, FIRST - while there is still a window
+#    to ask.  The matrix UI saves its own geometry on the way out (it is a Tk
+#    program and can); Xephyr cannot, so the rig does it for it.  Best-effort:
+#    a position is a convenience and must never hold up a teardown.
+bash "$HERE/winpos.sh" save || true
+
 # 1. The game + its supervisor group.  SIGKILL is fine here: the game is a
 #    client of Xephyr, not of WSLg directly, and Xephyr is closed cleanly next.
 bash "$HERE/killgame.sh" || echo "stop.sh: game processes survived"

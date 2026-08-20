@@ -3,15 +3,22 @@
 
 WHAT IT IS
 ----------
-Two views of the same switches, side by side:
+Two views of the same machine, side by side:
 
 * the game's OWN playfield photograph (``graphics/Game Tests/pf_image.png``,
-  decrypted out of its edata) with a marker on every switch that has a position
-  - click a marker to close that switch.  The photo scales with the window and
-  the markers ride on top of it, so the view keeps its aspect ratio at any size;
-* a LABELLED switch table - every switch by name, grouped into Cabinet /
-  Playfield / Mechanism, so you can see what each one is at a glance (this is
-  the layout the Stern rig uses).  Click a row to pulse it, right-click to latch.
+  decrypted out of its edata) carrying EVERY placed device - switches, lamps and
+  coils - each one hoverable and the switches clickable.  The photo scales with
+  the window and the markers ride on top of it, so the view keeps its aspect
+  ratio at any size.  This is the primary view; anything it can already show is
+  deliberately not repeated in a panel beside it;
+* a LABELLED switch table - every REAL switch by name, grouped into Cabinet /
+  Playfield / Mechanism, so you can see what each one is at a glance.  Click a
+  row to pulse it, right-click to latch.
+
+  Switches the title does not use are left out.  They are not a minor
+  proportion: Wonka names 69 of its 296 switch addresses and calls the other 227
+  "not used", so listing them buries the real ones in seven times their number
+  of blanks.
 
 Switch state lives in the POSIX shared-memory block defined by ``jjpshm.h`` and
 is read by ``jjphwshim.c`` / ``jjpcuse.c`` on every ``read()`` of the I/O board.
@@ -49,14 +56,48 @@ coin door.
 KEYBOARD
 --------
 Common controls get keyboard shortcuts, resolved per-title from the switch
-names, and shown in the Keyboard panel with the switch each one hit.  Keys work
-while THIS window is focused (the game itself has no keyboard input - a real
-cabinet has none either).
+names.  Each one is shown in its OWN switch's row (the Key column) and on the
+ball buttons, rather than in a legend panel repeating the same pairs a second
+time.  Keys work while THIS window is focused (the game itself has no keyboard
+input - a real cabinet has none either).
 
-LEDS ARE RGB
-------------
-Playfield lamps render their colour (three bytes each).  The per-lamp byte
-mapping is still PROVISIONAL - see ``MatrixUI.led_rgb``.
+THE TWO COLUMNS ARE FIXED WIDTHS
+--------------------------------
+The switch column is pinned at ``RIGHT_W`` and the playfield takes the rest, so
+the photograph only ever changes size when the WINDOW does.  It used to be sized
+by whatever its widest child asked for, and three of those children rewrite
+their text ten times a second - so a longer status string made the column grow,
+the playfield shrink and the photo rescale, with nothing on the machine having
+moved.  See ``RIGHT_W``.
+
+HOVER TELLS YOU WHAT SOMETHING IS
+---------------------------------
+Hovering any marker raises a tooltip AT THE POINTER.  It used to write into a
+label beside the playfield, which meant reading in one place while pointing in
+another - and on a 385x768 photo scaled to a tall window that is a long way for
+the eye to travel.  The tooltip is drawn as canvas items rather than as a
+borderless Toplevel on purpose: a second X window is exactly what makes WSLg
+mis-handle surfaces (see the second-window race this rig has already been bitten
+by), and a tooltip is not worth that risk.
+
+LEDS ARE RGB, AND BRIGHTNESS IS DRAWN AS OPACITY
+------------------------------------------------
+Playfield lamps render their colour (three bytes each).  Brightness is shown by
+COMPOSITING the lamp over the photograph rather than by painting a darker
+square: an insert at a tenth brightness is a tenth-opacity tint of its own
+colour, which is what the eye reads as dim.  Painting the raw dark colour
+instead made every level below about half look the same flat near-black blob,
+so a fading lamp did not appear to fade at all.  Tk has no alpha, so the blend
+is done against the photo's own pixels - see ``MatrixUI._lamp_paint``.
+
+The per-lamp byte mapping is still PROVISIONAL - see ``MatrixUI.led_rgb``.
+
+COILS
+-----
+Coils are drawn too (amber diamonds), and they FLASH when the game fires them.
+That is not decoration: it is the only direct evidence that the game is driving
+the machine, and it is read from the same rising-edge counters jjpball answers
+ejects with, so the picture and the ball feeder can never disagree.
 """
 
 import argparse
@@ -93,6 +134,29 @@ DEFAULT_GEOM = os.path.join(os.path.expanduser('~'), '.jjp_matrix.json')
 #: playfield and the full switch table sit side by side without scrolling.
 DEFAULT_W = 1450
 DEFAULT_H = 1754
+
+#: The switch table's columns, in order: (id, heading, pixel width, anchor).
+#: The right-hand column's fixed width is DERIVED from these rather than being
+#: a second number that has to be kept in step with them.
+TREE_COLS = (
+    ('#0',   'Switch', 248, 'w'),
+    ('num',  '#',       44, 'e'),
+    ('key',  'Key',     78, 'center'),
+    ('addr', 'Frame',   54, 'center'),
+)
+SCROLLBAR_W = 18
+
+#: THE RIGHT-HAND COLUMN IS A FIXED WIDTH, and that is load-bearing.
+#:
+#: It used to take whatever width its widest child asked for.  Three of those
+#: children re-write their text on every 100 ms tick - the ball state, the
+#: three-line ball log and the LED note - so the column silently grew and shrank
+#: as the wording changed, the playfield beside it (which expands into whatever
+#: is left) was handed a different width each time, and the photograph rescaled
+#: under the pointer.  Nothing had moved on the machine; only the length of a
+#: status string had.  Pinning the column means the playfield only ever changes
+#: size when the WINDOW does.
+RIGHT_W = sum(w for _id, _h, w, _a in TREE_COLS) + SCROLLBAR_W
 
 
 # --------------------------------------------------------------------------
@@ -280,6 +344,51 @@ CAT_MECH = 'Steppers / topper'
 CAT_ORDER = (CAT_CABINET, CAT_PLAYFIELD, CAT_MECH)
 
 
+#: What the game calls a switch address it has nothing wired to.  Blank counts
+#: as the same thing: an address with no name is one nobody named.
+UNUSED_NAMES = ('', 'not used')
+
+
+def in_use(s):
+    """Does this title actually use this switch?
+
+    Worth filtering on rather than showing greyed out: Wonka names 69 of its 296
+    switch addresses, so the unused ones outnumber the real ones seven to one
+    and a full list is mostly blanks.  The addresses still exist and can still
+    be driven - they are simply not worth a row.
+    """
+    return (s.get('name') or '').strip().lower() not in UNUSED_NAMES
+
+
+def drawable_coils(coils):
+    """The coils that can honestly be drawn on the playfield.
+
+    Three separate reasons a coil is left off, and the middle one is the one
+    that bites:
+
+    * no position - real, but there is nowhere to put it (the knocker, the
+      coin meter);
+    * frame byte 255 - the game's UNMAPPED SENTINEL, the same one the switch
+      table uses for ``dswitch_null``.  Coils land on it too: Wonka parks its
+      three elevator coils there, all sharing the one address, and swdump's own
+      ``coil_addressing.problems`` reports them.  They DO carry positions, so
+      nothing else would exclude them - and because ``out_rise`` reads 0 for an
+      out-of-frame byte they would draw as markers that can never flash.  That
+      is worse than leaving them out: a coil that never lights reads as a coil
+      the game is not driving;
+    * no frame address at all.
+    """
+    out = []
+    for c in coils or []:
+        fb, mask = c.get('frame_byte'), c.get('frame_bit')
+        if fb is None or not mask or fb >= FRAME_LEN:
+            continue
+        if c.get('x') is None or c.get('y') is None:
+            continue
+        out.append(c)
+    return out
+
+
 def _descriptive(s):
     """A named switch (switch_trough_5) beats the bare alias (switch_071)."""
     return not _BARE.match(s.get('symbol', '') or '')
@@ -317,6 +426,85 @@ MARK_ON = '#41d67c'
 ROW_CLOSED = '#1f6f42'
 ROW_CLOSED_FG = '#eafff0'
 LED_DARK = '#242833'
+
+#: Coils: amber, and BRIGHT for the moment one fires.
+COIL_OFF = '#9a6b1f'
+COIL_FIRED = '#ffd479'
+#: How long a fired coil stays lit.  A coil pulse is ~32 ms - far shorter than
+#: the 100 ms tick - so what is drawn is deliberately a decay, not the live
+#: level: at the true duration a fire would land between two frames and never
+#: be seen at all.
+COIL_FLASH_TICKS = 4
+
+#: An unlit lamp is still drawn, faintly, so the layout is visible when the game
+#: is not running.  Any higher and a dark playfield looks lit; any lower and the
+#: lamps vanish.
+LAMP_FLOOR_ALPHA = 0.16
+
+#: Canvas tooltip.
+TIP_BG = '#0d1017'
+TIP_EDGE = '#3d4658'
+
+#: Buttons.  Explicitly coloured rather than left to the platform default: a
+#: default Tk button is light grey, which on this dark panel reads as a disabled
+#: block of nothing rather than as the control it is.
+#:
+#: SLATE BLUE, and not green, because every other colour here already means
+#: something: green is a CLOSED switch (ROW_CLOSED, MARK_ON), pale blue is an
+#: open switch marker and amber is a coil.  A green button sits directly under
+#: the green trough rows and reads as another piece of state rather than as
+#: something to press.
+BTN_BG = '#33507a'
+BTN_FG = '#eaf2ff'
+BTN_ACTIVE = '#456ba1'
+
+#: The canvas background, and what a lamp blends against when there is no photo
+#: to sample (no Pillow, or a title that ships none).
+PF_BG = '#0b0c10'
+
+
+#: One LED channel at full.  MEASURED, not assumed: over 15,393 samples of live
+#: traffic the payload runs 0x00..0x80, and 2.5% of bytes sit above 0x3f.  The
+#: old code scaled by 4 on a 6-bit (0x3f) assumption, which pinned everything
+#: from 0x40 up to 255 - flattening exactly the half of the range a fade climbs
+#: through, so lamps appeared to snap between colours instead of crossing.
+LED_FULL = 0x80
+
+#: How often the LED pages are RE-READ, which is not the same as how often they
+#: are redrawn.  The game rewrites the LED frame ~2,139 times a second, cycling
+#: 11 pages, and the shim keeps only the LATEST frame - so a reader sees one
+#: page per look.  At the 100 ms repaint tick that is 6 pages a second, i.e.
+#: each lamp refreshed about once every 1.8 s, which turns every fade into a
+#: jump between two samples taken a second and a half apart.  Polling at 100 Hz
+#: refreshes a given page roughly every 110 ms, which is fast enough to see one.
+#: (The complete fix is for the shim to keep a buffer PER PAGE instead of one
+#: frame; that is a C change and a rebuild, and cannot be done while a game is
+#: running.)
+LED_POLL_MS = 10
+
+
+def led_level(v):
+    """One raw LED byte -> an 8-bit channel."""
+    return 255 if v >= LED_FULL else (v * 255) // LED_FULL
+
+
+def _hex_rgb(h):
+    """'#rrggbb' -> (r, g, b)."""
+    h = h.lstrip('#')
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def blend(fg, bg, alpha):
+    """Composite ``fg`` over ``bg`` at ``alpha``, as '#rrggbb'.
+
+    Tk canvas items have no alpha channel, so translucency has to be resolved to
+    a solid colour before it is drawn.  Doing it here - against the photograph's
+    own pixels - is what lets a dim lamp read as dim rather than as dark.
+    """
+    a = 0.0 if alpha < 0 else (1.0 if alpha > 1 else alpha)
+    return '#%02x%02x%02x' % tuple(
+        max(0, min(255, int(round(f * a + b * (1.0 - a)))))
+        for f, b in zip(fg, bg))
 
 # Keyboard shortcuts.  (keysyms, label, symbol-patterns).  Resolved per title by
 # matching the patterns against each switch's symbol - exact symbol first, then
@@ -360,6 +548,7 @@ class MatrixUI:
         self.switches = {}          # (fb, mask) -> switch record
         self.latched = set()        # keys currently latched
         self.lamps = []
+        self.coils = []             # placed coils, drawn on the playfield
         self.calib = devices.get('calibration', {})
         self._led_pages = {}        # (board, page_id) -> 63-byte payload
         self._led_buf = b''         # accumulated LED byte space (all pages)
@@ -400,6 +589,13 @@ class MatrixUI:
             l['py'] = int(round(cy['scale'] * l['y_in'] + cy['offset']))
             self.lamps.append(l)
 
+        # Coils.  Already in playfield-image pixels (like switches, and unlike
+        # lamps, which are inches and need the calibration above), and addressed
+        # by the same (frame_byte, bit MASK) pair - so jjpball's rising-edge
+        # read works for these markers unchanged.  See drawable_coils() for
+        # which ones are left off, and why.
+        self.coils = drawable_coils(devices.get('coils'))
+
         root.title('JJP switch matrix')
         root.configure(bg=BG)
         self._restore_geometry()
@@ -419,9 +615,12 @@ class MatrixUI:
         self._build_playfield(body, pf_png)
         self._build_right(body, devices)
 
+        # The shortcuts still exist and still work; what went away is the panel
+        # that listed them.  Each one is written into its own switch's row
+        # (_annotate_tree_keys) and onto the ball buttons, so the pairing is
+        # shown where the thing it acts on already is.
         self.keybindings = self._resolve_keymap()
         self._annotate_tree_keys()
-        self._build_keyboard_legend(self._right)
         self._bind_keys()
 
         self._start_balls(devices)
@@ -431,6 +630,9 @@ class MatrixUI:
         self._geom_job = None
         root.bind('<Configure>', self._on_root_configure)
 
+        # Two loops, deliberately at different rates: gather the LED pages fast
+        # enough to catch a fade, repaint at a rate the eye needs.
+        self._led_poll()
         self.tick()
 
     def _start_balls(self, devices):
@@ -530,6 +732,7 @@ class MatrixUI:
         self.off_x = 0.0
         self.off_y = 0.0
         self._resize_job = None
+        self._tip = None            # (rect, label) canvas items, made on demand
         self._bg_id = self.pf.create_image(0, 0, anchor='nw')
         self._center_msg = None
         self._corner_msg = None
@@ -543,6 +746,12 @@ class MatrixUI:
                 0, 0, anchor='nw', fill='#556', font=('Segoe UI', 8),
                 text='install python3-pil.imagetk to scale the playfield')
 
+        # What each lamp sits ON.  Sampled once, from the photo's own pixels, so
+        # brightness can be composited against it every tick without re-reading
+        # the image - the positions never move in IMAGE space, only on screen.
+        self._lamp_bg = [self._sample_bg(l['px'], l['py']) for l in self.lamps]
+        self._lamp_drawn = {}       # i -> last colour drawn (skip no-op redraws)
+
         # Lamp markers (drawn first, so a switch marker is never hidden).
         self.lamp_marks = {}
         for i, l in enumerate(self.lamps):
@@ -550,8 +759,21 @@ class MatrixUI:
             oid = self.pf.create_rectangle(x - 4, y - 4, x + 4, y + 4,
                                            fill=LED_DARK, outline='')
             self.lamp_marks[i] = (oid, x, y)
-            self.pf.tag_bind(oid, '<Enter>', lambda e, k=i: self.hover_lamp(k))
-            self.pf.tag_bind(oid, '<Leave>', lambda e: self.hover(None))
+            self._bind_tip(oid, lambda i=i: self._lamp_tip(i))
+
+        # Coil markers - diamonds, so they read as a third kind of thing at a
+        # glance rather than as another switch.
+        self.coil_marks = {}
+        self._coil_rise = {}        # index -> last rising-edge byte SAMPLED
+        self._coil_fires = {}       # index -> edges counted since we opened
+        self._coil_flash = {}       # index -> ticks left lit
+        self._coil_drawn = {}       # index -> last colour drawn
+        for i, c in enumerate(self.coils):
+            x, y = c['x'], c['y']
+            oid = self.pf.create_polygon(x, y - 6, x + 6, y, x, y + 6, x - 6, y,
+                                         fill=COIL_OFF, outline=PF_BG, width=1)
+            self.coil_marks[i] = (oid, x, y)
+            self._bind_tip(oid, lambda i=i: self._coil_tip(i))
 
         # Switch markers, keyed by frame address.
         self.markers = {}
@@ -560,15 +782,43 @@ class MatrixUI:
                 continue
             x, y = s['x'], s['y']
             oid = self.pf.create_oval(x - 7, y - 7, x + 7, y + 7,
-                                      fill=MARK_OFF, outline='#0b0c10', width=2)
+                                      fill=MARK_OFF, outline=PF_BG, width=2)
             self.markers[key] = (oid, x, y)
             self.pf.tag_bind(oid, '<Button-1>', lambda e, k=key: self.pulse(k))
             self.pf.tag_bind(oid, '<Button-3>', lambda e, k=key: self.toggle(k))
-            self.pf.tag_bind(oid, '<Enter>', lambda e, k=key: self.hover(k))
-            self.pf.tag_bind(oid, '<Leave>', lambda e: self.hover(None))
+            self._bind_tip(oid, lambda k=key: self._switch_tip(k))
 
         self.pf.bind('<Configure>', self._on_resize)
         self.root.after(60, self._fit)
+
+    def _sample_bg(self, x, y):
+        """The photograph's own pixel under a marker, for compositing.
+
+        Clamped rather than skipped: a lamp can legitimately calibrate to just
+        outside the frame (the backpanel flashers sit above the photo's top
+        edge), and those still have to draw as something.
+        """
+        if self._raw is None:
+            return _hex_rgb(PF_BG)
+        px = max(0, min(self.img_w - 1, int(x)))
+        py = max(0, min(self.img_h - 1, int(y)))
+        try:
+            return tuple(self._raw.getpixel((px, py)))[:3]
+        except Exception:                                   # noqa: BLE001
+            return _hex_rgb(PF_BG)
+
+    def _bind_tip(self, oid, text_fn):
+        """Raise this item's tooltip under the pointer while it is hovered.
+
+        ``text_fn`` is called on every move rather than once on enter, so a
+        tooltip left up over a live lamp keeps showing that lamp's CURRENT
+        colour instead of the colour it had when the pointer arrived.
+        """
+        self.pf.tag_bind(oid, '<Enter>',
+                         lambda e, f=text_fn: self._show_tip(e.x, e.y, f()))
+        self.pf.tag_bind(oid, '<Motion>',
+                         lambda e, f=text_fn: self._show_tip(e.x, e.y, f()))
+        self.pf.tag_bind(oid, '<Leave>', lambda e: self._hide_tip())
 
     def _on_resize(self, _e=None):
         if self._resize_job is not None:
@@ -603,10 +853,18 @@ class MatrixUI:
         for oid, x, y in self.lamp_marks.values():
             self.pf.coords(oid, self._cx(x) - lr, self._cy(y) - lr,
                            self._cx(x) + lr, self._cy(y) + lr)
+        cr = max(3, 6 * self.scale)
+        for oid, x, y in self.coil_marks.values():
+            px, py = self._cx(x), self._cy(y)
+            self.pf.coords(oid, px, py - cr, px + cr, py, px, py + cr,
+                           px - cr, py)
         sr = max(3, 7 * self.scale)
         for oid, x, y in self.markers.values():
             self.pf.coords(oid, self._cx(x) - sr, self._cy(y) - sr,
                            self._cx(x) + sr, self._cy(y) + sr)
+        # A tooltip pinned to a marker that has just moved would be pointing at
+        # nothing.
+        self._hide_tip()
         if self._center_msg is not None:
             self.pf.coords(self._center_msg,
                            self.off_x + self.img_w * self.scale / 2,
@@ -616,8 +874,13 @@ class MatrixUI:
 
     # ---------------------------------------------------------------- right col
     def _build_right(self, body, devices):
-        right = tk.Frame(body, bg=BG)
+        right = tk.Frame(body, bg=BG, width=RIGHT_W)
         right.pack(side='left', fill='y', padx=(12, 0))
+        # Stop the children sizing the parent.  Without this the column is as
+        # wide as its widest child WANTS to be, and three of those children
+        # rewrite their text ten times a second - so the playfield next door
+        # kept being handed a new width and rescaling itself.  See RIGHT_W.
+        right.pack_propagate(False)
         self._right = right
 
         tk.Label(right, text='Switches  (click = pulse, right-click = latch)',
@@ -625,38 +888,36 @@ class MatrixUI:
 
         tw = tk.Frame(right, bg=BG)
         tw.pack(fill='both', expand=True, pady=(2, 4))
-        self.tree = ttk.Treeview(tw, columns=('num', 'key', 'addr'),
-                                 style='Sw.Treeview', height=16, selectmode='browse')
-        self.tree.heading('#0', text='Switch')
-        self.tree.heading('num', text='#')
-        self.tree.heading('key', text='Key')
-        self.tree.heading('addr', text='Frame')
-        self.tree.column('#0', width=248, stretch=True)
-        self.tree.column('num', width=44, anchor='e', stretch=False)
-        self.tree.column('key', width=78, anchor='center', stretch=False)
-        self.tree.column('addr', width=54, anchor='center', stretch=False)
+        # Built from TREE_COLS so the columns and the fixed width of the column
+        # they live in cannot drift apart - RIGHT_W is the sum of these.  Only
+        # the name column stretches; the three narrow ones are sized to their
+        # content and stay put.
+        self.tree = ttk.Treeview(tw, columns=tuple(c[0] for c in TREE_COLS[1:]),
+                                 style='Sw.Treeview', height=16,
+                                 selectmode='browse')
+        for cid, heading, width, anchor in TREE_COLS:
+            self.tree.heading(cid, text=heading)
+            self.tree.column(cid, width=width, anchor=anchor,
+                             stretch=(cid == '#0'))
         vs = ttk.Scrollbar(tw, orient='vertical', command=self.tree.yview)
         self.tree.configure(yscrollcommand=vs.set)
         self.tree.pack(side='left', fill='both', expand=True)
         vs.pack(side='left', fill='y')
+        # Rows are one colour.  They used to be dimmed when a switch had no
+        # playfield position, which read as "disabled" and was never explained;
+        # it was also redundant, because every such switch is a CABINET switch
+        # and is already sitting under the Cabinet heading.
         self.tree.tag_configure('closed', background=ROW_CLOSED,
                                 foreground=ROW_CLOSED_FG)
-        self.tree.tag_configure('nopos', foreground=DIM)
         self.tree.tag_configure('cat', background='#20242c', foreground='#9aa3b2')
 
         self.row_key = {}           # tree iid -> (fb, mask)
         self.key_row = {}           # (fb, mask) -> tree iid
-        self.row_base = {}          # iid -> base tag list
         self._row_closed = {}       # iid -> last drawn closed state
         self._populate_tree()
 
         self.tree.bind('<Button-1>', self._tree_click)
         self.tree.bind('<Button-3>', self._tree_right)
-        self.tree.bind('<<TreeviewSelect>>', self._tree_select)
-
-        self.detail = tk.Label(right, text='', bg=BG, fg=FG, anchor='w',
-                               justify='left', font=('Consolas', 9), height=3)
-        self.detail.pack(anchor='w', fill='x')
 
         self._build_ball_panel(right)
         self._build_led_panel(right, devices)
@@ -670,17 +931,41 @@ class MatrixUI:
         """
         tk.Label(right, text='Balls', bg=BG, fg='#9aa3b2',
                  font=('Segoe UI', 9)).pack(anchor='w', pady=(8, 2))
-        row = tk.Frame(right, bg=BG)
-        row.pack(anchor='w', fill='x')
-        self.ball_state = tk.Label(row, text='', bg=BG, fg=FG, anchor='w',
+        self.ball_state = tk.Label(right, text='', bg=BG, fg=FG, anchor='w',
                                    font=('Consolas', 10))
-        self.ball_state.pack(side='left', fill='x', expand=True)
-        tk.Button(row, text='Drain', command=self._do_drain).pack(side='right')
-        tk.Button(row, text='Plunge', command=self._do_plunge
-                  ).pack(side='right', padx=(0, 4))
+        self.ball_state.pack(anchor='w', fill='x')
+
+        # THE BUTTONS GET THEIR OWN ROW.  They used to sit beside the status
+        # line, which packed first with expand=True and so claimed the whole
+        # width - Plunge was pushed off the end and left showing "ge (Sp".  It
+        # was never going to fit either: the status line alone is ~300 px of the
+        # column's 442, and the two buttons want ~200 more.  Sharing a row with a
+        # label whose text the feeder rewrites is a fight the button loses.
+        #
+        # The shortcut stays written ON the button.  That is where the legend
+        # panel that used to list these went: a key is worth knowing at the
+        # moment you are looking for the thing it does.
+        keys = {action: self._key_label(ks) for ks, _lbl, action in BALL_KEYS}
+        row = tk.Frame(right, bg=BG)
+        row.pack(anchor='w', fill='x', pady=(4, 6))
+        for text, command in (
+                ('Plunge  (%s)' % keys.get('plunge', ''), self._do_plunge),
+                ('Drain  (%s)' % keys.get('drain', ''), self._do_drain)):
+            b = tk.Button(row, text=text, command=command,
+                          font=('Segoe UI', 9, 'bold'), pady=4,
+                          bg=BTN_BG, fg=BTN_FG, activebackground=BTN_ACTIVE,
+                          activeforeground=BTN_FG, relief='raised', bd=1,
+                          highlightthickness=0)
+            # Equal halves of the column: at this width nothing is clipped and
+            # both are a big, obvious target.
+            b.pack(side='left', fill='x', expand=True,
+                   padx=(0, 6) if command is self._do_plunge else 0)
+        # Fixed height AND a wrap width: this shows the newest three feeder
+        # messages, which vary in length, and both dimensions have to be pinned
+        # or the panel below it shuffles every time one arrives.
         self.ball_note = tk.Label(right, text='', bg=BG, fg='#8a93a2',
                                   anchor='w', justify='left', height=3,
-                                  font=('Consolas', 8))
+                                  wraplength=RIGHT_W, font=('Consolas', 8))
         self.ball_note.pack(anchor='w', fill='x')
 
     def _do_drain(self):
@@ -692,26 +977,35 @@ class MatrixUI:
             self.feeder.plunge()
 
     def _populate_tree(self):
+        # Categories are created only if something lands in them, so a title
+        # that uses no stepper switches does not get an empty heading.
         cats = {}
-        for name in CAT_ORDER:
-            cats[name] = self.tree.insert('', 'end', text=name, open=True,
-                                          tags=('cat',))
-        # Stable, readable order: by frame address within each category.
-        for key in sorted(self.switches):
-            fb, mask = key
-            s = self.switches[key]
-            cat = _category(fb)
-            num = _matrix_num(fb, mask)
-            name = s.get('name') or s.get('symbol') or ''
-            base = [] if s.get('x') is not None else ['nopos']
-            iid = self.tree.insert(
-                cats[cat], 'end', text='  ' + name,
-                values=('' if num is None else num, '', _addr_str(fb, mask)),
-                tags=tuple(base))
-            self.row_key[iid] = key
-            self.key_row[key] = iid
-            self.row_base[iid] = base
-            self._row_closed[iid] = False
+
+        def category(name):
+            if name not in cats:
+                cats[name] = self.tree.insert('', 'end', text=name, open=True,
+                                              tags=('cat',))
+            return cats[name]
+
+        # Stable, readable order: by frame address within each category, and
+        # categories in their own order rather than first-seen.
+        for cat_name in CAT_ORDER:
+            for key in sorted(self.switches):
+                fb, mask = key
+                if _category(fb) != cat_name:
+                    continue
+                s = self.switches[key]
+                if not in_use(s):
+                    continue
+                num = _matrix_num(fb, mask)
+                name = s.get('name') or s.get('symbol') or ''
+                iid = self.tree.insert(
+                    category(cat_name), 'end', text='  ' + name,
+                    values=('' if num is None else num, '',
+                            _addr_str(fb, mask)))
+                self.row_key[iid] = key
+                self.key_row[key] = iid
+                self._row_closed[iid] = False
 
     def _tree_click(self, event):
         iid = self.tree.identify_row(event.y)
@@ -723,31 +1017,25 @@ class MatrixUI:
         if iid in self.row_key:
             self.toggle(self.row_key[iid])
 
-    def _tree_select(self, _event):
-        sel = self.tree.selection()
-        if sel and sel[0] in self.row_key:
-            self.hover(self.row_key[sel[0]])
-
     # ---------------------------------------------------------------- LEDs
     def _build_led_panel(self, right, devices):
-        tk.Label(right, text=f'LEDs  ({len(self.lamps)} placed of '
-                             f'{len(devices.get("lamps", []))})  - RGB (provisional)',
+        """What the LEDs are doing - in WORDS.
+
+        There used to be a grid here, one coloured cell per placed lamp.  It
+        was the same information the playfield already shows, minus the only
+        part that makes it meaningful: on the photo a lamp is AT the insert it
+        lights, whereas in a 24-wide grid it is at an arbitrary square.  So the
+        grid is gone and the playfield is the LED display.
+        """
+        placed, total = len(self.lamps), len(devices.get('lamps', []))
+        tk.Label(right, text=f'LEDs  -  {placed} of {total} on the playfield'
+                             f'  (RGB mapping provisional)',
                  bg=BG, fg='#9aa3b2', font=('Segoe UI', 9)).pack(anchor='w',
                                                                  pady=(8, 2))
         self.led_note = tk.Label(right, text='', bg=BG, fg='#c88', anchor='w',
-                                 justify='left', font=('Segoe UI', 8))
+                                 justify='left', wraplength=RIGHT_W,
+                                 font=('Segoe UI', 8))
         self.led_note.pack(anchor='w')
-        ledgrid = tk.Frame(right, bg=BG)
-        ledgrid.pack(anchor='nw', pady=(2, 0))
-        self.led_cells = {}
-        per_row = 24
-        for i, _l in enumerate(self.lamps):
-            c = tk.Label(ledgrid, width=1, height=1, bg=LED_DARK,
-                         relief='flat', borderwidth=1)
-            c.grid(row=i // per_row, column=i % per_row, padx=1, pady=1)
-            c.bind('<Enter>', lambda e, k=i: self.hover_lamp(k))
-            c.bind('<Leave>', lambda e: self.hover(None))
-            self.led_cells[i] = c
 
     def _accumulate_leds(self):
         """Cache each LED page as it is seen, into one full LED byte space.
@@ -769,29 +1057,61 @@ class MatrixUI:
     def led_rgb(self, i, buf):
         """(r, g, b) for lamp i from the accumulated LED byte space.
 
-        STILL PROVISIONAL, and the UI says so.  The colour is now live and full
-        (all pages accumulated, 6-bit values scaled to 8-bit below), read at
-        index*3.  What is NOT yet verified is the exact page-ordering and the
-        per-lamp offset - decoding which (page, byte) drives which lamp needs a
-        correlation pass (drive one lamp in game-test, watch which byte moves).
-        The switch matrix, by contrast, WAS derived and verified.
+        THE FULL SCALE IS 0x80, NOT 0x3f.  This used to scale by 4, on the
+        belief that the values were 6-bit.  Measured against 15,393 samples of
+        live traffic they are not: the range runs to 0x80, and 2.5% of all bytes
+        sit above 0x3f.  Scaling those by 4 pinned everything from 0x40 upward
+        to 255, which is precisely where the bright half of a fade lives - so a
+        lamp crossing 0x40 appeared to snap to full instead of climbing.
+
+        The layout itself now has real evidence behind it.  Each lamp is three
+        bytes at index*3 in the concatenated pages, and the three are R, G, B:
+        during attract the general-illumination lamps read bright and warm
+        (gi_left_1 -> 70 00 10), 154 of 164 placed lamps are non-zero, and each
+        triplet's channels SUM to a quantised total (0x80, 0x40, 0x3f, 0x15) -
+        i.e. the colour is a split of one intensity across three channels, which
+        is what an RGB lamp driver looks like.
+
+        What is still NOT verified is the page ORDER (pages are concatenated by
+        id, which is an assumption) and therefore which lamp owns which triplet
+        beyond the run of them being self-consistent.  Nailing that needs a
+        correlation pass - light one lamp from the game's own test menu and
+        watch which byte moves.  The switch matrix, by contrast, WAS derived and
+        verified.
         """
         if not buf:
             return 0, 0, 0
         n = len(buf)
         base = (self.lamps[i]['index'] * 3) % n
-        # 6-bit brightness (0x3f max) -> 8-bit for display.
-        return (min(255, buf[base] * 4),
-                min(255, buf[(base + 1) % n] * 4),
-                min(255, buf[(base + 2) % n] * 4))
+        return (led_level(buf[base]),
+                led_level(buf[(base + 1) % n]),
+                led_level(buf[(base + 2) % n]))
 
-    @staticmethod
-    def _rgb_hex(r, g, b):
-        return f'#{r:02x}{g:02x}{b:02x}'
+    def _lamp_paint(self, i, buf):
+        """The colour to actually DRAW for lamp i - brightness as opacity.
 
-    def _led_colour(self, i, buf):
-        r, g, b = self.led_rgb(i, buf)
-        return self._rgb_hex(r, g, b) if (r or g or b) else LED_DARK
+        Painting the raw value is what made brightness invisible: an insert at a
+        fifth brightness is rgb (51, 0, 0), and a near-black square on a dark
+        photograph looks exactly like an unlit one.  A real insert at a fifth
+        brightness is not a darker red, it is a FAINTER one - the playfield art
+        shows through it - so the honest rendering is the lamp's own colour at
+        its own hue, composited over the photo at an alpha taken from its level.
+
+        Hue is normalised to full before blending so that dimming changes only
+        the opacity: without it a dim lamp loses its colour as well as its
+        strength and every lamp converges on the same grey.
+        """
+        r, g, b = self.led_rgb(i, buf) if buf else (0, 0, 0)
+        bg = self._lamp_bg[i]
+        peak = max(r, g, b)
+        if not peak:
+            # Unlit, but still worth seeing: this is the layout when the game is
+            # not running, and an invisible lamp cannot be hovered for its name.
+            return blend(_hex_rgb(LED_DARK), bg, LAMP_FLOOR_ALPHA)
+        k = 255.0 / peak
+        hue = (r * k, g * k, b * k)
+        level = peak / 255.0
+        return blend(hue, bg, LAMP_FLOOR_ALPHA + (1.0 - LAMP_FLOOR_ALPHA) * level)
 
     # ---------------------------------------------------------------- keyboard
     def _resolve_keymap(self):
@@ -861,89 +1181,105 @@ class MatrixUI:
                 names.append(nm)
         return '/'.join(names)
 
-    def _build_keyboard_legend(self, parent):
-        tk.Label(parent, text='Keyboard  (this window must be focused)',
-                 bg=BG, fg='#9aa3b2', font=('Segoe UI', 9)).pack(anchor='w',
-                                                                 pady=(8, 2))
-        wrap = tk.Frame(parent, bg=BG)
-        wrap.pack(anchor='w')
-        col = 0
-        rowf = None
-        entries = [(ks, lbl, key is not None)
-                   for ks, lbl, key in self.keybindings]
-        # The ball keys always resolve - they go to the feeder, not a switch.
-        entries += [(ks, lbl, True) for ks, lbl, _a in BALL_KEYS]
-        for i, (keysyms, label, ok) in enumerate(entries):
-            if i % 3 == 0:
-                rowf = tk.Frame(wrap, bg=BG)
-                rowf.pack(anchor='w')
-                col = 0
-            keytxt = self._key_label(keysyms)
-            fg = FG if ok else DIM
-            tk.Label(rowf, text=f'{keytxt:>7} {label}', bg=BG, fg=fg,
-                     font=('Consolas', 9), width=20, anchor='w'
-                     ).grid(row=0, column=col, sticky='w')
-            col += 1
+    # The keyboard legend and the "switch # / Pulse / Latch" entry used to live
+    # here.  Both were second ways to say something the panel already said: the
+    # legend repeated pairings that _annotate_tree_keys writes into each
+    # switch's own row (and that the ball buttons now carry), and the entry
+    # reached a switch by its matrix number when the table lists every switch
+    # WITH its number and pulses it on click.  The bindings themselves are
+    # untouched - see _bind_keys.
 
-        row = tk.Frame(parent, bg=BG)
-        row.pack(anchor='w', pady=(6, 0))
-        tk.Label(row, text='switch #', bg=BG, fg=FG,
-                 font=('Segoe UI', 9)).pack(side='left')
-        self.sw_entry = tk.Entry(row, width=5, font=('Consolas', 10))
-        self.sw_entry.pack(side='left', padx=4)
-        self.sw_entry.bind('<Return>', lambda e: self._entry_pulse())
-        tk.Button(row, text='Pulse', command=self._entry_pulse).pack(side='left')
-        tk.Button(row, text='Latch', command=self._entry_latch
-                  ).pack(side='left', padx=(4, 0))
-        tk.Label(parent, text='(# is the playfield matrix number; Shift+key latches)',
-                 bg=BG, fg=DIM, font=('Segoe UI', 8)).pack(anchor='w')
+    # ---------------------------------------------------------------- tooltip
+    def _show_tip(self, x, y, text):
+        """Draw the tooltip at the pointer, kept inside the canvas.
 
-    def _entry_key(self):
-        try:
-            n = int(self.sw_entry.get().strip())
-        except (ValueError, AttributeError):
-            return None
-        if not 1 <= n <= MATRIX_SWITCHES:
-            return None
-        fb = MATRIX_FIRST_BYTE + (n - 1) // 8
-        mask = 1 << ((n - 1) % 8)
-        return (fb, mask)
+        Two canvas items reused for the life of the window rather than created
+        and deleted per hover: a Motion-driven tooltip would otherwise churn two
+        items per mouse move.
+        """
+        if not text:
+            return self._hide_tip()
+        if self._tip is None:
+            rect = self.pf.create_rectangle(0, 0, 0, 0, fill=TIP_BG,
+                                            outline=TIP_EDGE, width=1)
+            label = self.pf.create_text(0, 0, anchor='nw', fill=FG,
+                                        justify='left', font=('Consolas', 9))
+            self._tip = (rect, label)
+        rect, label = self._tip
+        self.pf.itemconfig(label, text=text, state='normal')
+        self.pf.itemconfig(rect, state='normal')
 
-    def _entry_pulse(self):
-        key = self._entry_key()
-        if key is not None:
-            self.pulse(key)
+        pad, gap = 5, 14
+        self.pf.coords(label, 0, 0)
+        box = self.pf.bbox(label)
+        if not box:
+            return
+        w, h = box[2] - box[0], box[3] - box[1]
+        tx = self._tip_axis(x, w + 2 * pad, self.pf.winfo_width(), gap)
+        ty = self._tip_axis(y, h + 2 * pad, self.pf.winfo_height(), gap)
+        self.pf.coords(label, tx + pad, ty + pad)
+        self.pf.coords(rect, tx, ty, tx + w + 2 * pad, ty + h + 2 * pad)
+        self.pf.tag_raise(rect)
+        self.pf.tag_raise(label)
 
-    def _entry_latch(self):
-        key = self._entry_key()
-        if key is not None:
-            self.toggle(key)
+    @staticmethod
+    def _tip_axis(pos, size, extent, gap):
+        """Place one axis of the tooltip: past the pointer, else before it, else
+        pinned inside the canvas.
 
-    # ---------------------------------------------------------------- hover
-    def hover_lamp(self, i):
+        Flipping to the near side is only an improvement if the tooltip actually
+        FITS there.  Flipping unconditionally is what pins a wide tooltip to 0
+        no matter where the pointer is - which is what a narrow canvas (or one
+        not yet mapped, whose width Tk reports as 1) does to it.
+        """
+        if pos + gap + size <= extent:
+            return pos + gap
+        before = pos - gap - size
+        if before >= 0:
+            return before
+        return max(0, extent - size)
+
+    def _hide_tip(self):
+        if self._tip is not None:
+            for oid in self._tip:
+                self.pf.itemconfig(oid, state='hidden')
+
+    def _lamp_tip(self, i):
         l = self.lamps[i]
         buf = self._led_buf
         r, g, b = self.led_rgb(i, buf) if buf else (0, 0, 0)
-        self.detail.config(
-            text=f"LED {l['index']}  {l['name']}   rgb ({r}, {g}, {b})\n"
-                 f"  {l['symbol']}\n"
-                 f"  ({l['x_in']:.2f}, {l['y_in']:.2f}) in  kind {l['lamp_kind']}")
+        pct = round(max(r, g, b) * 100 / 255)
+        return (f"{l['name'] or l['symbol']}\n"
+                f"LED {l['index']}   rgb {r},{g},{b}   {pct}%\n"
+                f"{l['symbol']}")
 
-    def hover(self, key):
-        if key is None:
-            self.detail.config(text='')
-            return
+    def _coil_tip(self, i):
+        """One coil, and how often it has fired SINCE THIS WINDOW OPENED.
+
+        Deliberately not the shim's own counter: that is a byte, it wraps at
+        256, and it is already carrying whatever the game did before this
+        window existed - so printing it would claim a total it cannot support
+        and would eventually count backwards in front of the reader.
+        """
+        c = self.coils[i]
+        fb, mask = c['frame_byte'], c['frame_bit']
+        return (f"{c.get('name') or c.get('symbol')}\n"
+                f"COIL   {c.get('pulse_ms', '?')} ms pulse   "
+                f"{self._coil_fires.get(i, 0)} fired since opening\n"
+                f"{c.get('symbol', '')}   frame {_addr_str(fb, mask)}")
+
+    def _switch_tip(self, key):
         s = self.switches.get(key)
         if not s:
-            return
+            return ''
         fb, mask = key
         num = _matrix_num(fb, mask)
-        pos = f"({s['x']},{s['y']})" if s.get('x') is not None else '(no position)'
-        head = s.get('name') or s.get('symbol') or ''
-        self.detail.config(
-            text=f"{head}   {'#%d' % num if num else _category(fb)}\n"
-                 f"  {s.get('symbol','')}  {pos}\n"
-                 f"  frame byte {fb:#04x} bit {mask:#04x}")
+        state = 'CLOSED' if self.shm.get_switch(fb, mask) else 'open'
+        what = f'#{num}' if num else _category(fb)
+        return (f"{s.get('name') or s.get('symbol') or ''}\n"
+                f"SWITCH {what}   {state}"
+                + ('   inverted opto' if s.get('inverted') else '') + "\n"
+                f"{s.get('symbol', '')}   frame {_addr_str(fb, mask)}")
 
     # ---------------------------------------------------------------- input
     def pulse(self, key):
@@ -978,6 +1314,49 @@ class MatrixUI:
             for key in self.feeder.seat_trough():
                 self.latched.add(key)
 
+    def _led_poll(self):
+        """Gather LED pages far faster than the panel repaints.
+
+        Separate from ``tick`` on purpose.  Repainting 154 lamps ten times a
+        second is plenty for the eye; READING them ten times a second is not,
+        because each read yields only whichever one of the 11 pages the shim
+        last caught.  Sampling and drawing are two different rates and pretending
+        they are one is what made every fade look like a snap.
+        """
+        if self.shm.led_write_total():
+            self._accumulate_leds()
+        self.root.after(LED_POLL_MS, self._led_poll)
+
+    def _tick_coils(self):
+        """Light a coil marker when the game fires it, then fade it back.
+
+        The counter is a byte in shared memory and WRAPS at 256, so the test is
+        "different from last time", never "greater than".  First sight of a coil
+        seeds the count without flashing - otherwise every coil the game has
+        ever fired would appear to fire at once when this window opens.
+        """
+        for i, c in enumerate(self.coils):
+            fb, mask = c['frame_byte'], c['frame_bit']
+            now = self.shm.out_rise(BOARD_IO, fb, mask.bit_length() - 1)
+            was = self._coil_rise.get(i)
+            self._coil_rise[i] = now
+            if was is not None and now != was:
+                # Count the edges, do not just count this TICK.  The byte is a
+                # wrapping counter, so the number of pulses since the last look
+                # is the modular difference - a slingshot can fire several times
+                # inside one 100 ms tick, and a flat +1 would quietly under-
+                # report exactly the coils that are busiest.
+                self._coil_fires[i] = (self._coil_fires.get(i, 0)
+                                       + ((now - was) & 0xff))
+                self._coil_flash[i] = COIL_FLASH_TICKS
+            left = self._coil_flash.get(i, 0)
+            if left:
+                self._coil_flash[i] = left - 1
+            want = COIL_FIRED if left else COIL_OFF
+            if self._coil_drawn.get(i) != want:
+                self._coil_drawn[i] = want
+                self.pf.itemconfig(self.coil_marks[i][0], fill=want)
+
     def tick(self):
         # Switch markers + table rows (only retag rows whose state changed).
         for key, (oid, _x, _y) in self.markers.items():
@@ -987,20 +1366,30 @@ class MatrixUI:
             closed = self.shm.get_switch(*key)
             if closed != self._row_closed[iid]:
                 self._row_closed[iid] = closed
-                tags = self.row_base[iid] + (['closed'] if closed else [])
-                self.tree.item(iid, tags=tuple(tags))
+                self.tree.item(iid, tags=('closed',) if closed else ())
 
+        # The pages are gathered by _led_poll at LED_POLL_MS, NOT here: reading
+        # them once per repaint saw only ~6 of the 11 pages a second and turned
+        # every fade into a jump.  This just draws whatever the fast loop has.
         led_writes = self.shm.led_write_total()
-        if led_writes:
-            self._accumulate_leds()
         buf = self._led_buf
-        for i, cell in self.led_cells.items():
-            colour = self._led_colour(i, buf) if buf else LED_DARK
-            cell.config(bg=colour)
-            self.pf.itemconfig(self.lamp_marks[i][0], fill=colour)
+        for i in self.lamp_marks:
+            colour = self._lamp_paint(i, buf)
+            # Only touch the canvas when the colour actually changed: at ten
+            # ticks a second across every placed lamp (154 of Wonka's 216),
+            # redrawing unchanged items is most of this loop's work and all of
+            # it wasted.
+            if self._lamp_drawn.get(i) != colour:
+                self._lamp_drawn[i] = colour
+                self.pf.itemconfig(self.lamp_marks[i][0], fill=colour)
         self.led_note.config(
             text='' if led_writes else
-            'LED boards not written yet - cells show LAYOUT ONLY.')
+            'LED boards not written yet - the playfield shows LAYOUT ONLY.')
+
+        # Coils.  A 32 ms pulse cannot be caught as a level by a 100 ms tick, so
+        # the shim's rising-edge COUNT is what is read, and a change lights the
+        # marker for a few ticks so the eye can catch it.
+        self._tick_coils()
 
         # Answer the game's coils.  Polling here rather than on its own timer
         # keeps one view of the switches: the feeder and a human click are the

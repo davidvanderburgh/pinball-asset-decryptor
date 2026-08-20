@@ -28,6 +28,9 @@ DUAL=0
 case "${1:-}" in
     --dual) DUAL=1 ;;
     --stop)
+        # Remember where the window is BEFORE killing it - once Xephyr is gone
+        # there is no window left to ask.
+        bash "$HERE/winpos.sh" save || true
         # SIGTERM first and WAIT.  Xephyr is a WSLg client; if it is SIGKILL'd
         # it never releases its Windows-side surface and the frame ghosts on
         # the desktop.  SIGTERM lets it close its own window cleanly.
@@ -71,6 +74,12 @@ for i in $(seq 1 15); do
     if DISPLAY=$JJP_NESTED xdpyinfo >/dev/null 2>&1; then
         echo "Xephyr up on $JJP_NESTED after ${i}s"
         DISPLAY=$JJP_NESTED xdpyinfo 2>/dev/null | grep -E 'dimensions|number of screens'
+        # Put the window back on the monitor it was last closed on.  Nothing
+        # else does this: Xephyr cannot position its own host window and WSLg
+        # does not persist it, so without this the game lands wherever the
+        # compositor chooses - on a multi-monitor desktop, usually the wrong
+        # screen.  Best-effort and never fatal.
+        bash "$HERE/winpos.sh" restore || true
         echo
         echo "Now launch the game against it:"
         echo "  JJP_DISPLAY=$JJP_NESTED bash $HERE/run_game.sh --detach"

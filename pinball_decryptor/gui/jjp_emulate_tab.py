@@ -360,37 +360,109 @@ class JJPEmulatePanel:
                     # guidance instead of a redundant minute of restore + wait.
                     return
                 self._log("JJP: starting the rig (this takes a minute on a "
-                          "first run — the image has to be restored).")
+                          "first run — the image has to be restored). Each step "
+                          "is shown below as it runs.")
                 args = [iso] if iso else []
-                out = subprocess.run(
-                    rig_cmd_root("watch.sh", *args),
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    timeout=1800, creationflags=_rig.CREATE_FLAGS)
-                text = out.stdout.decode("utf-8", "replace")
-                for line in text.splitlines():
-                    if line.strip():
-                        self._log("JJP: " + line.rstrip())
-                # A wrong-title key is the one failure worth pulling out of the
-                # log into the headline: the key IS plugged in (so "No security
-                # key" would be misleading), it just unlocks a different game.
-                if "WRONG KEY" in text or out.returncode == 7:
-                    self._wrong_key = True
-                    self._timer().after(0, lambda: (
-                        self._state_lbl.configure(text="Wrong key for this game"),
-                        self._hint_lbl.configure(
-                            text="The plugged-in key runs a different JJP title. "
-                                 "JJP keys are per-title — plug in this game's own "
-                                 "key.")))
-                elif out.returncode != 0:
-                    self._log("JJP: start failed (exit %d)." % out.returncode)
-            except subprocess.TimeoutExpired:
-                self._log("JJP: start timed out.")
+                # Stream the launch line by line rather than capturing it all
+                # and logging it once at the end.  A wrong-title key only shows
+                # itself at the game step, ~15 s in, and the old capture-then-log
+                # meant the panel sat silent on "Starting…" the whole time — a
+                # launch that was working looked frozen.  A wrong-title key is
+                # the one failure worth pulling into the headline (the key IS
+                # plugged in, so "No security key" would mislead) and it is
+                # caught the instant "WRONG KEY" is printed.
+                rc, saw_wrong_key = self._run_streaming(
+                    rig_cmd_root("watch.sh", *args), timeout=1800)
+                if saw_wrong_key or rc == 7:
+                    self._mark_wrong_key()
+                elif rc not in (0, None):
+                    self._log("JJP: start failed (exit %d)." % rc)
             except Exception as exc:                       # noqa: BLE001
                 self._log("JJP: start failed: %s" % exc)
             finally:
                 self._release()
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _run_streaming(self, cmd, timeout=1800):
+        """Run a rig command, logging each line AS IT IS PRINTED.
+
+        Returns ``(returncode, saw_wrong_key)``.  The launch used to be a
+        single ``subprocess.run`` whose whole output was captured and only
+        logged once the process returned — so a twenty-second launch (or a
+        wrong-dongle launch that has to reach the game step to find out) showed
+        nothing at all until it was over, which reads as a frozen app.
+        Streaming turns that dead wait into a running account of what the rig is
+        doing, and surfaces a WRONG KEY the moment the game step prints it
+        rather than fifteen seconds later.
+
+        The whole launch is bounded by ``timeout``: a genuinely wedged step
+        must not leave the reader blocked forever.  The timer kills the process;
+        the readline loop then drains and ends.
+        """
+        timed_out = {"v": False}
+        saw_wrong = {"v": False}
+        try:
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                bufsize=1, universal_newlines=True,
+                creationflags=_rig.CREATE_FLAGS)
+        except Exception as exc:                           # noqa: BLE001
+            self._log("JJP: could not start the rig: %s" % exc)
+            return None, False
+
+        def _kill():
+            timed_out["v"] = True
+            try:
+                proc.kill()
+            except Exception:                              # noqa: BLE001
+                pass
+
+        killer = threading.Timer(timeout, _kill)
+        killer.daemon = True
+        killer.start()
+        try:
+            for line in proc.stdout:
+                line = line.rstrip()
+                if not line:
+                    continue
+                self._log("JJP: " + line)
+                if "WRONG KEY" in line and not saw_wrong["v"]:
+                    saw_wrong["v"] = True
+                    self._mark_wrong_key()
+        finally:
+            killer.cancel()
+            try:
+                proc.stdout.close()
+            except Exception:                              # noqa: BLE001
+                pass
+            proc.wait()
+        if timed_out["v"]:
+            self._log("JJP: start timed out — the rig was stopped.")
+        return proc.returncode, saw_wrong["v"]
+
+    def _mark_wrong_key(self):
+        """Flip the headline to the per-title-key explanation, from any thread.
+
+        Sticky (``_wrong_key``) so the next status poll — which sees a key
+        present and no game — does not immediately paint "Stopped" over the real
+        reason.  Cleared when the next start begins.
+        """
+        self._wrong_key = True
+
+        def paint():
+            try:
+                self._state_lbl.configure(text="Wrong key for this game")
+                self._hint_lbl.configure(
+                    text="The plugged-in key runs a different JJP title. "
+                         "JJP keys are per-title — plug in this game's own key.")
+            except tk.TclError:
+                pass
+
+        try:
+            self._timer().after(0, paint)
+        except (tk.TclError, RuntimeError):
+            pass
 
     def _attach_dongle(self):
         """Hand the key to WSL and WAIT until it is actually there.

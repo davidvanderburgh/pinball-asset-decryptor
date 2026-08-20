@@ -88,16 +88,26 @@ wsl -u root -- env JJP_DISPLAY=:1 bash tools/jjp_emu/grab.sh out.png
 wsl -u root -- bash tools/jjp_emu/build.sh          # shim + CUSE daemon
 wsl -u root -- bash tools/jjp_emu/jjpcuse.sh start  # REAL /dev/jjp* devices
 wsl -u root -- env JJP_DISPLAY=:1 bash tools/jjp_emu/run_game.sh --detach
-wsl -u root -- python3 tools/jjp_emu/swdump.py --out /var/tmp/devices.json
-wsl -e python3 tools/jjp_emu/jjpsw.py --devices /var/tmp/devices.json                                       --pf tools/jjp_emu/wonka_pf_image.png
-# jjpsw.py shows the playfield photo (markers on positioned switches) beside a
-# LABELLED switch table grouped Cabinet / Playfield / Mechanism - click a row to
-# pulse, right-click to latch.  The whole 64-byte IN frame is driven, so the
-# direct/cabinet switches below the matrix (start, flippers, coins) work too;
-# 1=Start, 5=Coin, arrows/A/'=flippers, Space=Shooter (Shift=latch, keys need
-# this window focused).  The photo scales with the window (keeps aspect; needs
-# python3-pil.imagetk), lamps render provisional RGB, and the window's size and
-# position are remembered between runs (~/.jjp_matrix.json).
+# The playfield photo is decrypted out of the MOUNTED title, never checked in -
+# a hard-coded Wonka image drew a Wonka playfield for every game.
+wsl -u root -- python3 tools/jjp_emu/pfimage.py --root /var/tmp/jjp_*/root                                       --out /var/tmp/pf.png
+wsl -u root -- python3 tools/jjp_emu/swdump.py --out /var/tmp/devices.json                                       --pf /var/tmp/pf.png
+wsl -e python3 tools/jjp_emu/jjpsw.py --devices /var/tmp/devices.json                                       --pf /var/tmp/pf.png
+# ...but normally you never type any of that: watch.sh opens the matrix itself,
+# and jjpsw_launch.sh does the dump + photo for you.
+#
+# jjpsw.py shows the playfield photo carrying EVERY placed device - switches
+# (blue circles, click to pulse, right-click to latch), lamps (brightness drawn
+# as opacity) and coils (amber diamonds that flash when the game fires them) -
+# beside a LABELLED table of the switches the title actually uses, grouped
+# Cabinet / Playfield / Mechanism.  Hovering any marker raises a tooltip AT THE
+# POINTER.  The whole 64-byte IN frame is driven, so the direct/cabinet switches
+# below the matrix (start, flippers, coins) work too; 1=Start, 5=Coin,
+# arrows/A/'=flippers, Space=Plunge, D=Drain (Shift=latch, keys need this window
+# focused).  Each key is shown in its own switch's row and on the ball buttons.
+# The photo scales with the window (keeps aspect; needs python3-pil.imagetk) and
+# the window's size and position are remembered between runs
+# (~/.jjp_matrix.json).
 wsl -e     bash tools/jjp_emu/status.sh         # key=value, for the GUI
 wsl -u root -- bash tools/jjp_emu/killgame.sh   # stop, and PROVE it stopped
 wsl -u root -- bash tools/jjp_emu/unjail.sh     # tear the jail down
@@ -169,6 +179,36 @@ exact list of everything a run touched.
   threads, ~420% CPU, and a captured frame showing live attract mode.
   `grab.sh` reproduces the capture.
 
+## The game window remembers its monitor
+
+The game runs inside a nested Xephyr server and **Xephyr's own window is an
+ordinary window on the Windows desktop** — but nothing persisted where it was,
+so every launch put the game wherever the compositor chose. On a multi-monitor
+desktop that is usually the wrong screen.
+
+Three things make this less obvious than it sounds:
+
+* **Xephyr cannot position itself.** Its `-screen WxH+X+Y` and `-origin X,Y`
+  place a screen inside the *virtual X screen* (Xinerama), not the host window.
+* **`Get-Process` cannot address the window.** WSLg windows are RAIL windows
+  hosted by `msrdc.exe`, and a process exposes exactly one `MainWindowTitle` —
+  so with the matrix and the game both open, which one you get is a coin toss.
+  `winpos.ps1` uses `EnumWindows`, which is the only way to reach a specific
+  one. It also matches the title as a **prefix**, because WSLg appends
+  `" (Ubuntu)"` to every title.
+* **`xdotool`/`wmctrl` are not installed**, and would be new apt dependencies
+  to reach a Windows window from the X side — a longer road to the same
+  `SetWindowPos`.
+
+`winpos.sh save` runs **before** anything kills Xephyr (there is no window left
+to ask afterwards — `stop.sh` step 0, and `display.sh --stop` before its
+`pkill`); `winpos.sh restore` runs once the display is up. Both are
+`|| true`: a window position is a convenience and must never hold up a launch
+or, worse, a teardown. A minimised window reports `-32000` and is refused, so
+it cannot overwrite a good position with an off-screen one. State lives in
+`/var/tmp/jjp_window.json`. The matrix UI does this for itself (it is a Tk
+program and can); the rig does it on Xephyr's behalf.
+
 ## Two coordinate spaces, and the calibration between them
 
 **Switches are in playfield-image PIXELS. Lamps are in INCHES.** Mixing them
@@ -177,15 +217,55 @@ states the relationship. `swdump.py` solves it from devices that share an
 *exact* name suffix (`switch_jet_left` / `lp_jet_left`), which is the only
 evidence that two devices sit at the same physical spot:
 
-    x: px = 17.057 * in + 16.58   (8/8 pairs, mean error 2.7 px)
-    y: px = 18.880 * in - 40.37   (7/8 pairs, mean error 3.7 px)
+    x: px = 17.057 * in + 16.58
+    y: px = 17.057 * in - 20.94
 
 Matching on keyword *overlap* was tried first and is a trap - it paired
 `switch_spinner` with `lp_factory_tour_1` and produced a 51 px mean error. The
 fit is RANSAC'd and reports its own inliers, outliers and residuals on every
 dump, so a bad calibration announces itself instead of quietly skewing the
-markers. Note the two axes have different scales (17.06 vs 18.88 px/inch): the
-photograph is not a uniform scaling of the playfield body.
+markers.
+
+### The two scales must be EQUAL, and getting that wrong cost us
+
+An earlier version of this file recorded `y = 18.880 * in - 40.37` and
+concluded that "the photograph is not a uniform scaling of the playfield body".
+That was **wrong**, and believing it hid a real bug for months: every LED
+drifted progressively downward, by 27 px at mid-playfield and **55 px** at the
+SHOOT AGAIN insert between the flipper tips.
+
+A photograph has **square pixels**, so one scale has to serve both axes. The
+per-axis fit produced 17.06 across and 18.88 down because a lamp and a switch
+that share a name are not always the same spot: `lp_inlane_left_1` is the arrow
+*insert* and `switch_inlane_left_1` is the *rollover*, which sits ~2.3 in
+**down-lane** of it. That offset runs along the lane, so it lands almost
+entirely in Y and cancels in X - and because the usable pairs bunch into two
+clusters (jets high, lanes low) it does not average out, it *tilts* the fit.
+The jets, by contrast, really are co-located: lamp and switch agree to ~1 px.
+
+Which scale is honest is decided by the game's own numbers, not by preference.
+`hook_playfield_width/height` say the playfield is 20.25 x 46.0 inches, so a
+scale implies a playfield of a given pixel size, and one that does not **fit**
+the photograph is impossible:
+
+| scale | implied playfield | fits a 385x768 photo? |
+|-------|-------------------|-----------------------|
+| 17.06 | 345 x 785 px      | yes                   |
+| 18.88 | 382 x **868** px  | no - taller than the picture of it |
+
+`_square_pixels()` therefore forces one scale onto both axes, keeps the one
+whose playfield fits, and pins the corrected axis at the topmost anchor (the
+jets - the pairs that genuinely are co-located). It records `square_pixels`
+plus the `raw_scale`/`raw_offset` it replaced in the dump, so a bad correction
+announces itself. `swdump.py --pf` takes the photo **for its size only**;
+without it the correction still runs, just without that check.
+
+Verified against six inserts measured by eye off Wonka's photo (SUPER SPINNER,
+SUPERX 2X/3X/4X/5X, SHOOT AGAIN): **mean error 38.5 px before, 3.4 px after**.
+
+Do not reach for an affine or homography fit here. Both were measured: an
+affine fit's largest corrections land on the already-accurate *top* and it
+barely moves the bottom, and eight clustered pairs cannot support a homography.
 
 ## What is open
 
@@ -200,10 +280,40 @@ photograph is not a uniform scaling of the playfield body.
    but the byte layout inside JJP's 64-byte LED pages is still unknown - a
    recurring `3f 0c` marker suggests a page header. The switch matrix layout
    was *derived and verified*; the LED mapping is still PROVISIONAL and the
-   UI labels it as such. The matrix UI now renders each lamp as its provisional
+   UI labels it as such. The matrix UI renders each lamp as its provisional
    RGB colour (three bytes at `index*3` in the concatenated LED frames) rather
-   than a bare on/off, so the plumbing is ready the moment the page header is
-   decoded and pages are accumulated into stable per-lamp state.
+   than a bare on/off. Brightness is drawn as **opacity** - the lamp composited
+   over the photograph at an alpha taken from its level - because Tk has no
+   alpha channel and painting the raw value made every level below about half
+   look like the same flat near-black blob.
+
+   **Measured 2026-08-20, against 15,393 samples of live traffic.** Three
+   things came out of it, and the first two were bugs:
+
+   * **full scale is 0x80, not 0x3f.** The payload runs 0x00..0x80 and 2.5% of
+     bytes sit above 0x3f, so the old `*4` scaling pinned everything from 0x40
+     up to 255 - the whole bright half of the range collapsed onto one colour
+     and a lamp climbing through it appeared to snap to full. `led_level()`
+     now scales by the measured `LED_FULL`;
+   * **the pages have to be READ faster than they are drawn.** The game
+     rewrites the LED frame ~2,139 times a second cycling 11 pages, and the
+     shim keeps only the LATEST frame, so one look yields one page. Reading
+     once per 100 ms repaint saw ~6 pages a second - each lamp refreshed about
+     every 1.8 s, which aliases every fade into a jump. A separate
+     `LED_POLL_MS` loop at 100 Hz gathers pages while the repaint stays at
+     10 Hz; measured, that is 110 byte-changes reaching the screen per draw
+     instead of 12. (The complete fix is for the *shim* to keep a buffer per
+     page rather than one frame - a C change that cannot be made while a game
+     is running.)
+   * **the triplet really is R,G,B.** During attract the GI lamps read bright
+     and warm (`gi_left_1` -> `70 00 10`), 154 of 164 placed lamps are
+     non-zero, and each triplet's channels SUM to a quantised total (0x80,
+     0x40, 0x3f, 0x15) - a colour split across three channels at one intensity.
+
+   What is still NOT verified is the page ORDER (pages are concatenated by id,
+   which is an assumption), so which lamp owns which triplet is only
+   self-consistent, not proven. Nailing that needs the correlation pass: light
+   one lamp from the game's own test menu and watch which byte moves.
 5. **Direct / cabinet switches now have a route** (was item 5's open problem).
    The live `Switch` objects show the IN frame is 37 bytes wide, not 16: bytes
    0..3 are the direct switches (`dswitch_start`, flippers, coins, menu, tilt),

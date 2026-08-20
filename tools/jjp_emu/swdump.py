@@ -89,7 +89,27 @@ switch_trough_5 is (221, 733) and the game's own
 graphics/Game Tests/pf_image.png is 385x768, so X/Y drop straight onto the
 playfield photograph with no calibration step.  Do not confuse this with
 hook_playfield_width / _height, which are 20.25 x 46.0 - those are INCHES and a
-different space entirely.
+different space entirely - but DO use them: they are what proves a candidate
+calibration scale impossible (see ``_square_pixels``).
+
+A LAMP AND A SWITCH THAT SHARE A NAME ARE NOT ALWAYS THE SAME SPOT
+------------------------------------------------------------------
+``calibrate()`` pairs lp_<x> with switch_<x> and treats the pair as one
+physical point.  For the jets that is exact - the lamp sits under the jet, and
+measured on Wonka the two agree to about a pixel.  For the lanes it is FALSE:
+lp_inlane_left_1 is the arrow INSERT and switch_inlane_left_1 is the ROLLOVER,
+and the rollover is ~2.3 inches DOWN-LANE of the insert (measured: 31-40 px on
+Wonka, and 3.85 in for outlane_left).
+
+That is a systematic error, along the lane, in the direction of travel - so it
+lands almost entirely in Y and cancels in X, which is why X was right all
+along.  And because the usable pairs bunch into just two clusters (jets around
+y=10-14 in, lanes around y=31-33 in), a constant offset in the lower cluster
+does not average out: it TILTS the fit.  On Wonka it dragged the Y scale from
+a true 17.09 px/in to 18.88, so every LED drifted progressively downward -
+55 px by the SHOOT AGAIN insert between the flipper tips.  The cure is in
+``_square_pixels``: the photo has SQUARE PIXELS, so one scale must serve both
+axes, and the axis the lane offset cannot corrupt is the one to keep.
 """
 
 import argparse
@@ -223,8 +243,13 @@ def dump_lamps(elf, mem):
     return out
 
 
-def calibrate(switches, lamps):
+def calibrate(switches, lamps, playfield=None, image_size=None):
     """Solve inches -> playfield-image pixels, and say how well it fits.
+
+    ``playfield`` is the game's own ``{'width': in, 'height': in}`` and
+    ``image_size`` the photograph's ``(w, h)`` in pixels.  Both are optional and
+    are used only by :func:`_square_pixels`, which needs them to tell an
+    impossible scale from a possible one.
 
     Switches carry pixel coordinates, lamps carry inches, and nothing in the
     game states the relationship.  Devices that share an exact name suffix
@@ -277,8 +302,107 @@ def calibrate(switches, lamps):
                              if abs(m * p[2][i] + c - p[1][i]) > 12]}
 
     fx, fy = solve('x'), solve('y')
-    return {'ok': bool(fx and fy), 'x': fx, 'y': fy, 'pairs': len(pairs),
-            'pair_names': sorted(p[0] for p in pairs)}
+    out = {'ok': bool(fx and fy), 'x': fx, 'y': fy, 'pairs': len(pairs),
+           'pair_names': sorted(p[0] for p in pairs)}
+    if fx and fy:
+        out['square_pixels'] = _square_pixels(fx, fy, pairs, playfield,
+                                              image_size)
+    return out
+
+
+def png_size(path):
+    """(width, height) from a PNG's IHDR, or None.
+
+    Header-only on purpose: this runs next to a live game and must not pull a
+    multi-megabyte photograph into memory to read two integers.
+    """
+    try:
+        with open(path, 'rb') as fh:
+            head = fh.read(24)
+    except OSError:
+        return None
+    if len(head) < 24 or not head.startswith(b'\x89PNG'):
+        return None
+    return (int.from_bytes(head[16:20], 'big'),
+            int.from_bytes(head[20:24], 'big'))
+
+
+def _square_pixels(fx, fy, pairs, playfield=None, image_size=None):
+    """Force ONE scale onto both axes, and say why it was needed.
+
+    THE BUG THIS FIXES.  ``solve()`` fits X and Y independently, which quietly
+    allows a mapping that no photograph can have: different inches-per-pixel
+    horizontally and vertically.  The playfield photo has square pixels, so the
+    two scales must be equal.  On Wonka they came out 17.06 and 18.88 - a 10.7%
+    disagreement - because the lane pairs put the arrow insert and its rollover
+    switch ~2.3 in apart along the lane (see the module docstring), which tilts
+    the Y fit and leaves X alone.  The result was an LED error that GREW with Y:
+    nothing at the top, ~27 px by the mid-playfield inserts, 55 px by SHOOT
+    AGAIN - which reads as "the LEDs drift downward toward the bottom".
+
+    WHICH SCALE IS THE HONEST ONE is decided by the game's own numbers, not by
+    a preference: ``hook_playfield_width/height`` say the playfield is
+    20.25 x 46.0 inches, so a scale implies a playfield of a certain pixel size,
+    and a scale whose playfield does not FIT the photograph is impossible.  On
+    Wonka that is decisive - 17.06 gives 345x785 px (fits a 385x768 photo),
+    18.88 gives 382x868, i.e. a playfield 100 px taller than the picture of it.
+    With no photo to check against we fall back to X, which is the axis a
+    down-lane offset cannot corrupt (it is a Y error by construction) and the
+    better-conditioned fit besides: the X pairs span the full width, while the
+    Y pairs bunch into two bands.
+
+    THE OFFSET IS PINNED AT THE TOPMOST ANCHOR.  Correcting a scale pivots
+    everything about some point, and the top is the right one to keep still:
+    the topmost anchors are the JETS, whose lamp and switch really are the same
+    spot (they agree to ~1 px), while it is the lower, lane pairs that are
+    offset.  Pinning there also means this only moves what was wrong.  Verified
+    against six inserts measured by eye off Wonka's photo (SUPER SPINNER,
+    SUPERX 2X/3X/4X/5X, SHOOT AGAIN): 28-55 px of error before, 2-6 px after.
+
+    Returns a dict describing what was done (recorded in the dump so a bad
+    correction announces itself), or None when nothing needed changing.
+    """
+    sx, sy = fx['scale'], fy['scale']
+    if not sx or not sy:
+        return None
+
+    def fits(s):
+        """Does a playfield at this scale fit inside the photograph?"""
+        if not playfield or not image_size:
+            return None
+        w = s * playfield.get('width', 0)
+        h = s * playfield.get('height', 0)
+        # 5% of slack: the photo is framed to the playfield but need not
+        # include every last millimetre of it (Wonka's crops ~2% off the top).
+        return w <= image_size[0] * 1.05 and h <= image_size[1] * 1.05
+
+    fit_x, fit_y = fits(sx), fits(sy)
+    if fit_y and not fit_x:
+        keep, drop, axis = fy, fx, 'x'          # Y is the credible one
+    else:
+        keep, drop, axis = fx, fy, 'y'          # X by default and by evidence
+    s = keep['scale']
+
+    if abs(drop['scale'] - s) <= 0.005 * s:
+        # Already isotropic to within half a percent - nothing to correct, and
+        # rewriting the fit would only add noise.
+        return None
+
+    # Pin the corrected axis at its topmost anchor so the good end stays put.
+    i = 0 if axis == 'x' else 1
+    top = min(p[2][i] for p in pairs)
+    raw_scale, raw_offset = drop['scale'], drop['offset']
+    drop['scale'] = s
+    drop['offset'] = (raw_scale * top + raw_offset) - s * top
+    drop['raw_scale'] = raw_scale
+    drop['raw_offset'] = raw_offset
+    drop['squared_from'] = axis_other = 'x' if axis == 'y' else 'y'
+    return {
+        'corrected': axis, 'took_scale_from': axis_other, 'scale': s,
+        'raw_scale': raw_scale, 'pinned_at_in': top,
+        'disagreement_pct': round(100.0 * abs(raw_scale - s) / s, 1),
+        'playfield_fits': {'x': fit_x, 'y': fit_y},
+    }
 
 
 def dump_table(elf, mem, table_sym, obj_size, kind, size_sym=None):
@@ -397,6 +521,9 @@ def main(argv=None):
     ap.add_argument('--elf', default=DEFAULT_ELF)
     ap.add_argument('--pid', type=int, default=None)
     ap.add_argument('--out', default=None, help='write JSON here')
+    ap.add_argument('--pf', default=None,
+                    help='the playfield photo, read for its size only - it is '
+                         'what proves an impossible calibration scale')
     ap.add_argument('--quiet', action='store_true')
     args = ap.parse_args(argv)
 
@@ -433,7 +560,12 @@ def main(argv=None):
         except Exception as exc:                                # noqa: BLE001
             out['lamps'], out['lamps_error'] = [], str(exc)
 
-    out['calibration'] = calibrate(switches, out.get('lamps', []))
+    # The photograph's size is what makes an impossible scale detectable, so
+    # pass it when we have been told where the photo is.
+    out['calibration'] = calibrate(switches, out.get('lamps', []),
+                                   playfield=out['playfield_inches'],
+                                   image_size=png_size(args.pf) if args.pf
+                                   else None)
 
     checked, bad = verify_matrix(switches)
     out['matrix']['verified'] = checked
@@ -464,6 +596,14 @@ def main(argv=None):
                 print(f"calib {ax}: px = {f['scale']:.3f}*in + {f['offset']:.2f}  "
                       f"inliers {f['inliers']}/{f['pairs']}  mean {f['mean_px']:.1f}px"
                       + (f"  outliers {f['outliers']}" if f['outliers'] else ''))
+            sq = cal.get('square_pixels')
+            if sq:
+                print(f"calib: forced SQUARE PIXELS - {sq['corrected']} scale "
+                      f"{sq['raw_scale']:.3f} was {sq['disagreement_pct']}% off "
+                      f"the {sq['took_scale_from']} scale {sq['scale']:.3f}; "
+                      f"the photo cannot have two scales, so "
+                      f"{sq['corrected']} was rescaled (pinned at "
+                      f"{sq['pinned_at_in']:.1f} in)")
         else:
             print("calibration FAILED:", cal.get('why', ''))
         print(f"matrix rule checked on {checked} switch_NNN symbols, "

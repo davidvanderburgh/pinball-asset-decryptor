@@ -3257,7 +3257,8 @@ class MainWindow:
                  "version's card with your mods on it. Fill the two required "
                  "folders (and, if you have it, the optional one for a more "
                  "accurate transfer). Works even for code modded outside this "
-                 "app.",
+                 "app, and field 2 can be the OTHER MODEL of the same title "
+                 "(Pro mods onto the Premium/LE code, or the reverse).",
             font=(_SANS_FONT, 9), justify=tk.LEFT)
         _transfer_intro.pack(anchor=tk.W, fill=tk.X, padx=8, pady=(4, 2))
         self._register_responsive_wrap(_transfer_intro)

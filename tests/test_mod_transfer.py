@@ -843,3 +843,177 @@ def test_no_staged_defaults_leaves_the_plan_alone(tmp_path):
     assert plan["defaults"] == {}
     assert plan["totals"]["transfer"] == 1
     assert mod_transfer.apply_transfer(src, tgt, plan)["defaults"] == 0
+
+
+# ----------------------------------------------------------------------
+# Cross-MODEL transfer (PAD-75): Stern ships the other half of a title as a
+# separate build whose only difference in every on-card path is the leading
+# game folder - "godzilla_pro" vs "godzilla_le".  Verified on David's vendor
+# images: 0 of 658 Godzilla videos pair on the raw card path, all 658 pair
+# once that component is swapped (and every pair is the same byte size); the
+# same holds for all 163 on the Led Zeppelin Pro/LE 1.22 pair.
+# ----------------------------------------------------------------------
+_PRO_SCENE = "/godzilla_pro/assets/lcd/auto_loaded/4e0bf266/scene.assets"
+_LE_SCENE = "/godzilla_le/assets/lcd/auto_loaded/4e0bf266/scene.assets"
+_PRO_RADIUM = "/godzilla_pro/assets/lcd/auto_loaded/4e0bf266/scene.radium"
+_LE_RADIUM = "/godzilla_le/assets/lcd/auto_loaded/4e0bf266/scene.radium"
+
+
+def _write_image_manifest(root, rows):
+    """rows: list of (out_rel under images/, on-card path)."""
+    d = os.path.join(root, "images")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "manifest.txt"), "w", encoding="utf-8") as f:
+        f.write("# output\tcard path\tbytes\n")
+        for out, card in rows:
+            f.write("%s\t%s\t0\n" % (out, card))
+
+
+def test_cross_model_video_pairs_when_only_the_game_folder_differs(tmp_path):
+    # The exact report: a Pro project's mods moved onto the Premium code, and
+    # "none of the videos match and will be skipped".
+    src, tgt = str(tmp_path / "pro_mods"), str(tmp_path / "prem_stock")
+    _mk_extract(src, {}, images={"video/godzilla_roar.mp4": b"STOCK-CLIP"})
+    _mk_extract(tgt, {}, images={"video/godzilla_roar_2.mp4": b"STOCK-CLIP"})
+    _write_manifest(src, [("godzilla_roar.mp4",
+                           _PRO_SCENE + "/35.asset/0.asset")])
+    _write_manifest(tgt, [("godzilla_roar_2.mp4",
+                           _LE_SCENE + "/35.asset/0.asset")])
+    staged_changes.save(src, {"video": {"video/godzilla_roar.mp4":
+                                        r"C:\mods\my_roar.mp4"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert plan["video"]["dropped"] == []
+    assert [e["rel"] for e in plan["video"]["matched"]] == [
+        "video/godzilla_roar_2.mp4"]
+
+    mod_transfer.apply_transfer(src, tgt, plan)
+    assert staged_changes.load(tgt)["video"] == {
+        "video/godzilla_roar_2.mp4": r"C:\mods\my_roar.mp4"}
+
+
+def test_cross_model_video_still_drops_a_clip_the_other_model_lacks(tmp_path):
+    # The Premium build has scenes the Pro doesn't and vice versa: pairing
+    # across models must not invent a home for a clip that isn't there.
+    src, tgt = str(tmp_path / "pro_mods"), str(tmp_path / "prem_stock")
+    _mk_extract(src, {}, images={"video/pro_only.mp4": b"PRO-ONLY"})
+    _mk_extract(tgt, {}, images={"video/other.mp4": b"OTHER"})
+    _write_manifest(src, [("pro_only.mp4", _PRO_SCENE + "/91.asset/0.asset")])
+    _write_manifest(tgt, [("other.mp4", _LE_SCENE + "/12.asset/0.asset")])
+    staged_changes.save(src, {"video": {"video/pro_only.mp4":
+                                        r"C:\mods\x.mp4"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert plan["video"]["matched"] == []
+    assert len(plan["video"]["dropped"]) == 1
+
+
+def test_cross_model_loose_image_rel_follows_the_game_folder(tmp_path):
+    # A loose image's rel IS its card path, so it carries the game folder too.
+    src, tgt = str(tmp_path / "pro_mods"), str(tmp_path / "prem_stock")
+    pro_rel = "godzilla_pro/assets/lcd/auto_loaded/4e0/GameLogo.png"
+    le_rel = "godzilla_le/assets/lcd/auto_loaded/4e0/GameLogo.png"
+    _mk_extract(src, {}, images={"images/" + pro_rel: b"STOCK-LOGO"})
+    _mk_extract(tgt, {}, images={"images/" + le_rel: b"STOCK-LOGO"})
+    _write_image_manifest(src, [(pro_rel, "/" + pro_rel)])
+    _write_image_manifest(tgt, [(le_rel, "/" + le_rel)])
+    staged_changes.save(src, {"image": {"images/" + pro_rel:
+                                        r"C:\mods\my_logo.png"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert plan["image"]["dropped"] == []
+    assert [e["rel"] for e in plan["image"]["matched"]] == ["images/" + le_rel]
+
+
+def test_cross_model_scene_texture_and_radium_images_pair(tmp_path):
+    src, tgt = str(tmp_path / "pro_mods"), str(tmp_path / "prem_stock")
+    _mk_extract(src, {}, images={
+        "images/scene_textures/a1b2_3_512x512.png": b"ATLAS",
+        "images/scene_textures/rad_deadbeef.png": b"RADIMG"})
+    _mk_extract(tgt, {}, images={
+        "images/scene_textures/9f8e_7_512x512.png": b"ATLAS",
+        "images/scene_textures/rad_cafef00d.png": b"RADIMG"})
+    _write_texture_manifest(src, [("scene_textures/a1b2_3_512x512.png",
+                                   _PRO_SCENE + "/7.asset")])
+    _write_texture_manifest(tgt, [("scene_textures/9f8e_7_512x512.png",
+                                   _LE_SCENE + "/7.asset")])
+    _write_radium_manifest(src, [("scene_textures/rad_deadbeef.png",
+                                  _PRO_RADIUM)])
+    _write_radium_manifest(tgt, [("scene_textures/rad_cafef00d.png",
+                                  _LE_RADIUM)])
+    staged_changes.save(src, {"image": {
+        "images/scene_textures/a1b2_3_512x512.png": r"C:\mods\atlas.png",
+        "images/scene_textures/rad_deadbeef.png": r"C:\mods\radimg.png"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert plan["image"]["dropped"] == []
+    assert sorted(e["rel"] for e in plan["image"]["matched"]) == [
+        "images/scene_textures/9f8e_7_512x512.png",
+        "images/scene_textures/rad_cafef00d.png"]
+
+
+def test_cross_model_group_tag_lands_on_the_targets_own_key(tmp_path):
+    # The new extract's own scan keys this group by the PREMIUM card path, so
+    # the transferred name has to be written under that key, not the Pro's.
+    src, tgt = str(tmp_path / "pro_mods"), str(tmp_path / "prem_stock")
+    _mk_extract(src, {}, images={"images/scene_textures/rad_a.png": b"R"})
+    _mk_extract(tgt, {}, images={"images/scene_textures/rad_b.png": b"R"})
+    _write_radium_manifest(src, [("scene_textures/rad_a.png", _PRO_RADIUM)])
+    _write_radium_manifest(tgt, [("scene_textures/rad_b.png", _LE_RADIUM)])
+    staged_changes.save(src, {"image_group_tags": {"rad::" + _PRO_RADIUM:
+                                                   "Attract art"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert plan["group_tags"]["dropped"] == []
+    assert plan["group_tags"]["matched"] == [{"key": "rad::" + _LE_RADIUM,
+                                              "name": "Attract art"}]
+
+    mod_transfer.apply_transfer(src, tgt, plan)
+    assert staged_changes.load(tgt)["image_group_tags"] == {
+        "rad::" + _LE_RADIUM: "Attract art"}
+
+
+def test_cross_model_direct_diff_pairs_videos_without_a_baseline(tmp_path):
+    # The no-baseline route (field 3 left empty) needs the same pairing.
+    mod, tgt = str(tmp_path / "pro_mods"), str(tmp_path / "prem_stock")
+    _mk_extract(mod, {}, images={"video/roar.mp4": b"MY-OWN-CLIP"})
+    _mk_extract(tgt, {}, images={"video/roar_2.mp4": b"STOCK-CLIP"})
+    _write_manifest(mod, [("roar.mp4", _PRO_SCENE + "/35.asset/0.asset")])
+    _write_manifest(tgt, [("roar_2.mp4", _LE_SCENE + "/35.asset/0.asset")])
+
+    plan = mod_transfer.plan_direct_diff(mod, tgt)
+    assert plan["notes"]["video_old_only"] == 0
+    assert [e["rel"] for e in plan["video"]["matched"]] == ["video/roar_2.mp4"]
+
+
+def test_same_model_transfer_never_rewrites_a_card_path(tmp_path):
+    # The ordinary new-version transfer must be untouched: the same game
+    # folder on both sides means the rewrite is the identity function.
+    src, tgt = str(tmp_path / "v115"), str(tmp_path / "v116")
+    _write_manifest(src, [("a.mp4", _PRO_SCENE + "/1.asset/0.asset")])
+    _write_manifest(tgt, [("b.mp4", _PRO_SCENE + "/1.asset/0.asset")])
+    assert mod_transfer._game_folder(src) == "godzilla_pro"
+    assert mod_transfer._model_remap(src, tgt)(_PRO_SCENE) == _PRO_SCENE
+
+
+def test_model_remap_needs_every_manifest_row_to_agree(tmp_path):
+    # A manifest whose rows share no leading component can't identify a game
+    # folder, so nothing is rewritten - fail safe, never mangle a path.
+    src, tgt = str(tmp_path / "odd"), str(tmp_path / "prem")
+    _write_manifest(src, [("a.mp4", "/godzilla_pro/assets/1.asset"),
+                          ("b.mp4", "/something_else/assets/2.asset")])
+    _write_manifest(tgt, [("c.mp4", "/godzilla_le/assets/1.asset")])
+    assert mod_transfer._game_folder(src) is None
+    remap = mod_transfer._model_remap(src, tgt)
+    assert remap("/godzilla_pro/assets/1.asset") == "/godzilla_pro/assets/1.asset"
+
+
+def test_model_remap_swaps_only_the_leading_component(tmp_path):
+    src, tgt = str(tmp_path / "pro"), str(tmp_path / "prem")
+    _write_manifest(src, [("a.mp4",
+                           "/godzilla_pro/assets/godzilla_pro/1.asset")])
+    _write_manifest(tgt, [("b.mp4",
+                           "/godzilla_le/assets/godzilla_pro/1.asset")])
+    remap = mod_transfer._model_remap(src, tgt)
+    assert (remap("/godzilla_pro/assets/godzilla_pro/1.asset")
+            == "/godzilla_le/assets/godzilla_pro/1.asset")

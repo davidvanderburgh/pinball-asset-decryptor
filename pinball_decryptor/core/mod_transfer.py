@@ -34,6 +34,13 @@ asset layout.  Two hazards, handled differently:
   image groups (``image_group_tags``) ride along too — their group keys are
   container identities that transfer when the container still exists.
 
+Every one of those on-card identities begins with the card's **game folder**,
+which Stern names after the MODEL of the title (``godzilla_pro`` on a Pro card,
+``godzilla_le`` on the Premium/LE build of the same game).  A transfer between
+the two models therefore shares no identity at all unless that one component is
+swapped, which is what :func:`_model_remap` does — see its docstring for why the
+rest of the path lines up exactly.
+
 ``plan_transfer`` computes a reconciliation report without touching anything;
 ``apply_transfer`` merges the resolved edits into the target folder.  Nothing
 here re-encodes or writes card data — the user still runs Write against the new
@@ -246,6 +253,60 @@ def _manifest_rows(path):
     return rows
 
 
+def _game_folder(root):
+    """The extract's own game-folder name (``godzilla_pro``), or ``None``.
+
+    Every on-card path starts with it, and a loose image's rel carries it one
+    level down (``images/godzilla_pro/...``) because the extract preserves the
+    card's directory structure.  Read from whichever extract manifest is
+    present, and only accepted when every row of that manifest agrees on one
+    leading component — so the answer can only ever be the game identifier
+    itself, never half a path.
+    """
+    for parts in (("video", "manifest.txt"),
+                  ("images", "scene_textures", "manifest.txt"),
+                  ("images", "manifest.txt"),
+                  ("images", "scene_textures", "radium_images.txt")):
+        firsts = set()
+        for cols in _manifest_rows(os.path.join(root, *parts)):
+            head, sep, tail = cols[1].lstrip("/").partition("/")
+            firsts.add(head if sep and tail else None)
+        if len(firsts) == 1 and None not in firsts:
+            return firsts.pop()
+    return None
+
+
+def _model_remap(source_dir, target_dir, log_cb=None):
+    """A rewrite of SOURCE-side identities into their TARGET-side form when the
+    two extracts are different MODELS of one title — a Pro extract's mods
+    moving onto the Premium/LE build, which is how Stern ships the other half
+    of a title and a very ordinary thing for a re-theme to want.
+
+    Without it that transfer carries nothing but audio: the game folder
+    (:func:`_game_folder`) is the first component of every video / scene
+    texture / radium card path and of every loose image's rel, so none of them
+    pair and the whole image+video half of the plan drops with "no ... in the
+    new version".  What FOLLOWS that component is a content hash of the scene
+    bundle, so the two models' asset trees line up exactly once it is swapped:
+    on the ``godzilla_pro`` 1.15 / ``godzilla_le`` 1.13 vendor pair all 658
+    videos pair this way and every pair is the same byte size (0 pair without
+    it), and on ``led_zeppelin_pro`` / ``led_zeppelin_le`` 1.22 all 163 do.
+
+    Only the first whole component equal to the source's game folder is
+    swapped, so a path that repeats the name deeper down keeps it.  Returns the
+    identity function when either side's folder is unknown or the two agree, so
+    the ordinary same-model new-version transfer is untouched.
+    """
+    src, tgt = _game_folder(source_dir), _game_folder(target_dir)
+    if not src or not tgt or src == tgt:
+        return lambda s: s
+    if log_cb:
+        log_cb("These are two different models of the same title (%s -> %s) — "
+               "pairing assets across the two builds." % (src, tgt))
+    pat = re.compile(r"(?<![^/])" + re.escape(src) + r"(?=/)")
+    return lambda s: pat.sub(tgt, s, count=1)
+
+
 def _scene_texture_cards(root):
     """``{asset_card_path: rel}`` from ``images/scene_textures/manifest.txt``
     (columns: out_rel-under-images/, card path, bytes, w, h, fmt).  Scene
@@ -301,9 +362,11 @@ def _glyph_identities(root, radium_occ, radiums):
     return out
 
 
-def _image_rel_remap(src_dir, tgt_dir):
+def _image_rel_remap(src_dir, tgt_dir, to_target=None):
     """``(remap, identified)`` pairing *src_dir*'s manifest-identified images
-    with *tgt_dir*'s.
+    with *tgt_dir*'s.  *to_target* is :func:`_model_remap`'s rewrite, applied
+    to every source-side card path before the target lookup (identity by
+    default).
 
     *remap* maps ``src_rel -> [tgt_rel, ...]`` (ordered, deduped) for every
     pairable image.  It's a MULTImap because radium images are extracted
@@ -323,6 +386,7 @@ def _image_rel_remap(src_dir, tgt_dir):
     by (radium card path, atlas occurrence ordinal, char) via
     :func:`_glyph_identities` — a glyph edit follows its character even when
     the atlas art (and thus every path under ``glyphs/``) changed."""
+    to_target = to_target or (lambda s: s)
     remap, identified = {}, set()
 
     def _pair(s, t):
@@ -335,7 +399,7 @@ def _image_rel_remap(src_dir, tgt_dir):
     if src_st and tgt_st:
         for card, rel in src_st.items():
             identified.add(rel)
-            tgt_rel = tgt_st.get(card)
+            tgt_rel = tgt_st.get(to_target(card))
             if tgt_rel is not None:
                 _pair(rel, tgt_rel)
 
@@ -344,18 +408,21 @@ def _image_rel_remap(src_dir, tgt_dir):
     if src_rad and tgt_rad:
         for radium, rels in src_rad.items():
             identified.update(rels)
-            tgt_rels = tgt_rad.get(radium)
+            tgt_rels = tgt_rad.get(to_target(radium))
             if tgt_rels is not None and len(tgt_rels) == len(rels):
                 for s, t in zip(rels, tgt_rels):
                     _pair(s, t)
         stable = {r for r, rels in src_rad.items()
-                  if len(tgt_rad.get(r) or ()) == len(rels)}
+                  if len(tgt_rad.get(to_target(r)) or ()) == len(rels)}
         src_gl = _glyph_identities(src_dir, src_rad, stable)
-        tgt_gl = _glyph_identities(tgt_dir, tgt_rad, stable)
+        # The target's own radium keys are its own model's, so the same guard
+        # has to be expressed in the target's names.
+        tgt_gl = _glyph_identities(tgt_dir, tgt_rad,
+                                   {to_target(r) for r in stable})
         if src_gl and tgt_gl:
-            for key, rel in src_gl.items():
+            for (radium, k, char), rel in src_gl.items():
                 identified.add(rel)
-                tgt_rel = tgt_gl.get(key)
+                tgt_rel = tgt_gl.get((to_target(radium), k, char))
                 if tgt_rel is not None:
                     _pair(rel, tgt_rel)
     return remap, identified
@@ -520,6 +587,8 @@ def plan_direct_diff(modded_dir, target_dir, log_cb=None):
              "audio_unmatched": 0, "text_unmatched": 0,
              "image_rebake_skipped": 0}
 
+    to_target = _model_remap(modded_dir, target_dir, log_cb=log_cb)
+
     # ---- Videos: card-path pairing, filename fallback -------------------
     mod_cards = _video_card_paths(modded_dir)
     tgt_cards = _video_card_paths(target_dir)
@@ -528,7 +597,7 @@ def plan_direct_diff(modded_dir, target_dir, log_cb=None):
     if mod_cards and tgt_cards:
         for card, mod_rel in mod_cards.items():
             manifest_paired.add(mod_rel)
-            tgt_rel = tgt_cards.get(card)
+            tgt_rel = tgt_cards.get(to_target(card))
             if tgt_rel is None:
                 notes["video_old_only"] += 1
             else:
@@ -539,8 +608,9 @@ def plan_direct_diff(modded_dir, target_dir, log_cb=None):
     for rel in _walk_rels(modded_dir, "video"):
         if rel in manifest_paired:
             continue
-        if _stock_exists(target_dir, rel):
-            pairs.append((rel, rel))
+        cand = to_target(rel)
+        if _stock_exists(target_dir, cand):
+            pairs.append((rel, cand))
         else:
             notes["video_old_only"] += 1
     log("Comparing %d video pair(s)..." % len(pairs))
@@ -559,7 +629,8 @@ def plan_direct_diff(modded_dir, target_dir, log_cb=None):
     # and radium-embedded images pair via the extract manifests — their
     # filenames are version-unstable / content-hashed, so name pairing would
     # miss exactly the modded ones (see _image_rel_remap).
-    remap, identified = _image_rel_remap(modded_dir, target_dir)
+    rel_remap, identified = _image_rel_remap(modded_dir, target_dir,
+                                             to_target)
     image_rels = _walk_rels(modded_dir, "images")
     log("Comparing %d image(s) (%d manifest-identified)..."
         % (len(image_rels), len(identified)))
@@ -568,9 +639,10 @@ def plan_direct_diff(modded_dir, target_dir, log_cb=None):
         if i % 250 == 0:
             log("  ...%d/%d images compared" % (i, len(image_rels)))
         if rel in identified:
-            tgt_rels = remap.get(rel) or []
+            tgt_rels = rel_remap.get(rel) or []
         else:
-            tgt_rels = [rel] if _stock_exists(target_dir, rel) else []
+            cand = to_target(rel)
+            tgt_rels = [cand] if _stock_exists(target_dir, cand) else []
         if not tgt_rels:
             notes["image_old_only"] += 1
             continue
@@ -678,11 +750,13 @@ def _plan_audio(source_dir, target_dir, saved_audio, log_cb=None):
     return matched, remapped, flagged, dropped
 
 
-def _plan_image(source_dir, target_dir, saved_map):
+def _plan_image(source_dir, target_dir, saved_map, to_target=None):
     """Reconcile an image assignment map.  Loose images pair by rel_path (the
     extractor preserves the card's directory structure); scene textures and
     radium-embedded images pair via the extract manifests (their filenames
     are version-unstable / content-hashed — see :func:`_image_rel_remap`).
+    *to_target* is :func:`_model_remap`'s rewrite (identity by default) — a
+    loose image's rel IS its card path, so it carries the game folder too.
 
     Returns ``(matched, dropped)`` — matched entries carry the TARGET's rel
     and note whether the stock asset's *content* changed (same slot, new art)
@@ -692,12 +766,13 @@ def _plan_image(source_dir, target_dir, saved_map):
     matched, dropped = [], []
     if not saved_map:
         return matched, dropped
-    remap, identified = _image_rel_remap(source_dir, target_dir)
+    to_target = to_target or (lambda s: s)
+    rel_remap, identified = _image_rel_remap(source_dir, target_dir, to_target)
     for rel, repl in saved_map.items():
         if rel in identified:
-            tgt_rels = remap.get(rel) or []
+            tgt_rels = rel_remap.get(rel) or []
         else:
-            tgt_rels = [rel] if _stock_exists(target_dir, rel) else []
+            tgt_rels = [to_target(rel)]
         tgt_rels = [t for t in tgt_rels if _stock_exists(target_dir, t)]
         if tgt_rels:
             src_sig = content_signature(_abs(source_dir, rel))
@@ -712,13 +787,15 @@ def _plan_image(source_dir, target_dir, saved_map):
     return matched, dropped
 
 
-def _plan_video(source_dir, target_dir, saved_map):
+def _plan_video(source_dir, target_dir, saved_map, to_target=None):
     """Reconcile a video assignment map: by on-card path when both extracts
     have a ``video/manifest.txt`` (output filenames are version-unstable —
-    see :func:`_video_card_paths`), by rel_path otherwise.
+    see :func:`_video_card_paths`), by rel_path otherwise.  *to_target* is
+    :func:`_model_remap`'s rewrite (identity by default).
 
     Matched entries carry the TARGET's rel (the slot the assignment lands
     on), which the card-path remap may have renamed."""
+    to_target = to_target or (lambda s: s)
     src_cards = _video_card_paths(source_dir)   # card -> rel
     tgt_cards = _video_card_paths(target_dir)
     rel_to_card = {rel: card for card, rel in src_cards.items()}
@@ -730,9 +807,10 @@ def _plan_video(source_dir, target_dir, saved_map):
             # Both manifests know this clip: the card path is authoritative —
             # even a same-named target file could be a DIFFERENT clip (the
             # title-derived name was reused).  Missing card ⇒ really gone.
-            tgt_rel = tgt_cards.get(card)
+            tgt_rel = tgt_cards.get(to_target(card))
         else:
-            tgt_rel = rel if _stock_exists(target_dir, rel) else None
+            cand = to_target(rel)
+            tgt_rel = cand if _stock_exists(target_dir, cand) else None
         if tgt_rel and _stock_exists(target_dir, tgt_rel):
             changed = (content_signature(_abs(source_dir, rel))
                        != content_signature(_abs(target_dir, tgt_rel)))
@@ -782,7 +860,7 @@ def _plan_text(source_dir, target_dir, src_rows=None):
 _GLYPH_DIR_RE = re.compile(r"^images/scene_textures/glyphs/([^/]+)$")
 
 
-def _plan_group_tags(source_dir, target_dir, saved):
+def _plan_group_tags(source_dir, target_dir, saved, to_target=None):
     """Reconcile the user's renamed image groups (the ``image_group_tags``
     sidecar map, written by the Replace Images tab's "Rename group…").
 
@@ -792,7 +870,12 @@ def _plan_group_tags(source_dir, target_dir, saved):
     the target extract.  The exception is a glyph folder
     (``dir::images/scene_textures/glyphs/<atlas stem>``): the stem embeds the
     atlas's content hash, so it's remapped through the atlas identity like
-    the glyph slices themselves.  Returns ``(matched, dropped)``."""
+    the glyph slices themselves.  *to_target* is :func:`_model_remap`'s
+    rewrite (identity by default) — every one of those container identities
+    starts with the game folder, and a matched entry carries the TARGET's key
+    so :func:`apply_transfer` writes the name under the key the new extract's
+    own scan will produce.  Returns ``(matched, dropped)``."""
+    to_target = to_target or (lambda s: s)
     tags = {k: v for k, v in
             ((saved or {}).get("image_group_tags") or {}).items() if v}
     if not tags:
@@ -810,32 +893,37 @@ def _plan_group_tags(source_dir, target_dir, saved):
         card_dir = cols[1].rsplit("/", 1)[0] if "/" in cols[1] else ""
         tgt_dirs.add(card_dir or "(root)")
 
-    remap = None
+    rel_remap = None
     matched, dropped = [], []
     for key, name in sorted(tags.items()):
         tgt_keys = []
         if key.startswith("rad::"):
-            if key[5:] in tgt_rad:
-                tgt_keys = [key]
+            card = to_target(key[5:])
+            if card in tgt_rad:
+                tgt_keys = ["rad::" + card]
         elif key.startswith("scn::"):
-            if key[5:] in tgt_scenes:
-                tgt_keys = [key]
+            scene = to_target(key[5:])
+            if scene in tgt_scenes:
+                tgt_keys = ["scn::" + scene]
         elif key.startswith("dir::"):
             folder = key[5:]
             gm = _GLYPH_DIR_RE.match(folder)
             if gm:
-                if remap is None:
-                    remap, _ident = _image_rel_remap(source_dir, target_dir)
+                if rel_remap is None:
+                    rel_remap, _ident = _image_rel_remap(source_dir, target_dir,
+                                                         to_target)
                 src_atlas = "images/scene_textures/%s.png" % gm.group(1)
-                for t in remap.get(src_atlas) or ():
+                for t in rel_remap.get(src_atlas) or ():
                     stem = os.path.splitext(os.path.basename(t))[0]
                     tk = "dir::images/scene_textures/glyphs/" + stem
                     if tk not in tgt_keys:
                         tgt_keys.append(tk)
-            elif folder in tgt_dirs or (
-                    folder != "(root)" and os.path.isdir(_abs(target_dir,
-                                                              folder))):
-                tgt_keys = [key]
+            else:
+                folder = to_target(folder)
+                if folder in tgt_dirs or (
+                        folder != "(root)" and os.path.isdir(
+                            _abs(target_dir, folder))):
+                    tgt_keys = ["dir::" + folder]
         for k in tgt_keys:
             matched.append({"key": k, "name": name})
         if not tgt_keys:
@@ -863,19 +951,25 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
     where *source_dir* must be the STOCK same-version extract (the audio
     matching reads its WAVs as the stock content).  *log_cb* streams progress
     (the audio content index hashes every target sound).
+
+    The two folders may be different MODELS of one title (Pro -> Premium/LE)
+    as well as different versions; :func:`_model_remap` is what makes their
+    on-card identities comparable.
     """
     if saved is None:
         saved = staged_changes.load(source_dir)
+    to_target = _model_remap(source_dir, target_dir, log_cb=log_cb)
 
     a_matched, a_remapped, a_flagged, a_dropped = _plan_audio(
         source_dir, target_dir, saved.get("audio"), log_cb=log_cb)
     v_matched, v_dropped = _plan_video(
-        source_dir, target_dir, saved.get("video"))
+        source_dir, target_dir, saved.get("video"), to_target)
     i_matched, i_dropped = _plan_image(
-        source_dir, target_dir, saved.get("image"))
+        source_dir, target_dir, saved.get("image"), to_target)
     t_matched, t_dropped = _plan_text(source_dir, target_dir,
                                       src_rows=src_text_rows)
-    g_matched, g_dropped = _plan_group_tags(source_dir, target_dir, saved)
+    g_matched, g_dropped = _plan_group_tags(source_dir, target_dir, saved,
+                                            to_target)
 
     plan = {
         "audio": {"matched": a_matched, "remapped": a_remapped,

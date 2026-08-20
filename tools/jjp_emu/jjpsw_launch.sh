@@ -34,9 +34,44 @@ if [ "$N" = "0" ]; then
     exit 3
 fi
 
+# The switch/lamp tables are filled by the game's constructors a few seconds
+# AFTER it starts, so a dump taken the instant the window appears is half-empty:
+# names read "not used", no lamps are placed, and calibration fails (which makes
+# the matrix UI show every switch as "not used" and zero LEDs).  Retry until the
+# dump is populated - calibration succeeding, or a real switch-name count - then
+# use whatever we have.  Read-only, so retrying costs nothing but time.
+dump_ok() {
+    python3 - "$1" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+cal = d.get('calibration', {}).get('ok')
+named = sum(1 for s in d.get('switches', [])
+            if (s.get('name') or '') not in ('', 'not used'))
+sys.exit(0 if (cal or named >= 60) else 1)
+PY
+}
+
 if [ "$(id -u)" = "0" ]; then
-    python3 "$HERE/swdump.py" --out "$DUMP" --quiet || {
-        echo "jjpsw_launch.sh: could not read the device tables" >&2; exit 4; }
+    ok=0
+    for _ in $(seq 1 16); do
+        if python3 "$HERE/swdump.py" --out "$DUMP" --quiet 2>/dev/null \
+                && dump_ok "$DUMP"; then
+            ok=1; break
+        fi
+        sleep 2
+    done
+    if [ "$ok" != "1" ]; then
+        if [ -s "$DUMP" ]; then
+            echo "jjpsw_launch.sh: device tables still sparse after retries -" >&2
+            echo "  opening the matrix with what was read (some switches may" >&2
+            echo "  show 'not used' until the game finishes initialising)." >&2
+        else
+            echo "jjpsw_launch.sh: could not read the device tables" >&2; exit 4
+        fi
+    fi
     chmod 666 "$DUMP" 2>/dev/null
     chmod 666 /dev/shm${JJP_SHM_NAME:-/jjp_switches} 2>/dev/null
     # Backgrounded, not exec'd: this is watch.sh's last step and must RETURN.

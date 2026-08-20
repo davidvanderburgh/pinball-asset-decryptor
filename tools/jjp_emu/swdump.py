@@ -43,6 +43,34 @@ through the CUSE device and re-reading the objects showed 62 and 63 go 0 -> 1,
 64 take a timestamp, and 68 reset.  That is the whole loop - UI to shared
 memory to the character device to the game - verified end to end.
 
+THE Coil STRUCT (80 bytes), decoded from live objects on 2026-08-20
+-------------------------------------------------------------------
+The same shape as Switch, one table over:
+
+    off  type   meaning
+      0  u32    index into hook_coil_override_table
+      8  ptr    -> name string ("Trough VUK", "Right Slingshot")
+     16  u32    pulse duration in MILLISECONDS (32 for a kicker, 200 for a
+                flipper hold, 500 for the topper LEDs, 1000 for a motor)
+     24  i32    X in playfield-image pixels, or -1
+     28  i32    Y in playfield-image pixels, or -1
+     36  u8     frame byte index within the 64-byte OUT frame
+     37  u8     bit mask within that byte
+
+Offsets 36/37 are the coil's twin of the switch's 60/61, and they decode
+cleanly: all 45 coils have DISTINCT (byte, bit) pairs, offset 37 holds only
+powers of two, and the grouping is what a driver board looks like (flippers
+together on byte 1, steppers on 5, topper on 6).
+
+CONFIRMED AGAINST THE LIVE OUT FRAME, so this is a reading and not a guess:
+coil_lamp_start_button is byte 9 bit 0x40, and during attract IO OUT byte 9 bit
+6 toggles at 2 Hz - the start button blinking, which is what attract does.  The
+offset between struct byte and frame byte is therefore ZERO, and all coils are
+on the IO board.
+
+This is what lets anything answer the game: coil_vuk_trough (byte 1 bit 0x10,
+32 ms) is the trough eject the ball feeder waits for.
+
 THE MATRIX LAYOUT THIS REVEALS
 ------------------------------
 switch_NNN maps into the I/O frame as:
@@ -287,9 +315,28 @@ def dump_table(elf, mem, table_sym, obj_size, kind, size_sym=None):
             # confirming that an injected switch actually landed.
             rec['live_closed'] = bool(b[62])
             rec['group'] = struct.unpack_from('<I', b, 32)[0]
+            # INVERTED OPTO flag (offset 0x24 bit 0x2).  MultiballDevice::
+            # update_ball_count reads the live state and, when this bit is set,
+            # INVERTS it: for the trough these are optos, so a ball BREAKS the
+            # beam -> reads OPEN, and empty -> CLOSED.  Seating such a switch
+            # "closed" for a present ball reads to the game as ABSENT, which is
+            # why a full trough looked empty and the game never started.  The
+            # feeder/UI flip these at the switch layer (see jjpsw.SwitchShm).
+            rec['inverted'] = bool(struct.unpack_from('<I', b, 0x24)[0] & 0x2)
+        elif kind == 'coil':
+            x, y = struct.unpack_from('<ii', b, 24)
+            rec['x'] = x if x >= 0 else None
+            rec['y'] = y if y >= 0 else None
+            # Where this coil lives in the OUT frame - see the module docstring.
+            # Everything that has to notice a coil FIRE (the ball feeder) reads
+            # these, so they are decoded here, once, rather than in each caller.
+            rec['frame_byte'] = b[36]
+            rec['frame_bit'] = b[37]
+            rec['pulse_ms'] = struct.unpack_from('<I', b, 16)[0]
+            rec['raw'] = b.hex()
         else:
-            # Coil and lamp layouts are not decoded yet; carry the raw bytes so
-            # a later pass can work them out without needing another live run.
+            # The lamp override layout is not decoded here; carry the raw bytes
+            # so a later pass can work it out without another live run.
             rec['raw'] = b.hex()
         items.append(rec)
     return items
@@ -316,6 +363,31 @@ def verify_matrix(switches):
         if (s['frame_byte'], s['frame_bit']) != (want_byte, want_bit):
             bad.append((sym, s['frame_byte'], s['frame_bit'], want_byte, want_bit))
     return checked, bad
+
+
+def verify_coils(coils):
+    """Coil (frame byte, bit) pairs must be DISTINCT, the way switch ones are.
+
+    A collision would mean offsets 36/37 are not the OUT address after all, and
+    the ball feeder would then be watching the wrong bit for the trough eject -
+    which fails as "the game ball-searches for ever", the least diagnosable
+    failure this rig has.  Cheap to check, so check it every dump.
+    """
+    seen = {}
+    bad = []
+    for c in coils:
+        fb, bit = c.get('frame_byte'), c.get('frame_bit')
+        if fb is None or not bit:
+            continue
+        if bit & (bit - 1):
+            bad.append((c['symbol'], f'bit {bit:#04x} is not a single bit'))
+            continue
+        key = (fb, bit)
+        if key in seen:
+            bad.append((c['symbol'], f'shares byte {fb} bit {bit:#04x} '
+                                     f'with {seen[key]}'))
+        seen[key] = c['symbol']
+    return len(seen), bad
 
 
 def main(argv=None):
@@ -367,6 +439,9 @@ def main(argv=None):
     out['matrix']['verified'] = checked
     out['matrix']['mismatches'] = bad
 
+    n_coil, coil_bad = verify_coils(out.get('coils', []))
+    out['coil_addressing'] = {'distinct': n_coil, 'problems': coil_bad}
+
     if args.out:
         with open(args.out, 'w') as fh:
             json.dump(out, fh, indent=1)
@@ -396,6 +471,11 @@ def main(argv=None):
         for m in bad[:10]:
             print(f"  MISMATCH {m[0]}: got byte {m[1]:#04x} bit {m[2]:#04x}, "
                   f"expected byte {m[3]:#04x} bit {m[4]:#04x}")
+        if 'coils' in out:
+            print(f"coil OUT addressing: {n_coil} distinct byte/bit pairs, "
+                  f"{len(coil_bad)} problems")
+            for sym, why in coil_bad[:10]:
+                print(f"  PROBLEM {sym}: {why}")
         print()
         print(f"{'idx':>4} {'symbol':<30} {'name':<26} {'x':>5} {'y':>5}  frame")
         for s in switches:

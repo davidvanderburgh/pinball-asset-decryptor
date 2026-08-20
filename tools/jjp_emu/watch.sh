@@ -47,6 +47,22 @@ fi
 step "jail"
 bash "$HERE/jail.sh" || exit 4
 
+# Rebuild the shim + CUSE daemon when their sources changed (or are missing).
+# The GUI only ever calls THIS script, so without this a C change would never
+# reach a running rig.  It is safe here and nowhere else: the jail is mounted
+# (build.sh links the shim against the image's libc) and the game is not up yet
+# (build.sh refuses while a game is live, to avoid SIGBUS'ing a mapped .so).
+CUSE_BIN=${JJP_CUSE_BIN:-/var/tmp/jjpcuse}
+SHIM_SO=${JJP_SHIM_SO:-/var/tmp/jjphwshim.so}
+if [ ! -x "$CUSE_BIN" ] || [ ! -f "$SHIM_SO" ] \
+   || [ "$HERE/jjpcuse.c"   -nt "$CUSE_BIN" ] \
+   || [ "$HERE/jjphwshim.c" -nt "$SHIM_SO" ] \
+   || [ "$HERE/jjpshm.h"    -nt "$CUSE_BIN" ] \
+   || [ "$HERE/jjpshm.h"    -nt "$SHIM_SO" ]; then
+    step "build (sources changed)"
+    bash "$HERE/build.sh" || echo "watch.sh: build failed - boards may be stale"
+fi
+
 step "dongle"
 if ! bash "$HERE/dongle.sh"; then
     echo "watch.sh: FATAL - no Sentinel key." >&2
@@ -74,16 +90,40 @@ fi
 # Zero the frame counters so the panel shows THIS run's traffic.  They live in
 # shared memory and outlive the game, so without this a stopped rig still reads
 # "382,506 frames in" from the last run and looks alive.
+JJPSHM="$HERE/jjpshm.h" SHMDEV="/dev/shm${JJP_SHM_NAME:-/jjp_switches}" \
 python3 - <<'PYEOF' 2>/dev/null || true
-import struct
-OFF = 12 + 16 + 16 + 8*64          # out_changes, per jjpshm.h
+import os, re
+# Derive the out_changes offset from jjpshm.h so this mirror can never drift
+# from the struct - the rig's one-definition rule.  Layout: magic+version+pid
+# (12) + in_frame(FRAME_LEN) + out(BOARD_COUNT*FRAME_LEN), then everything this
+# zeroes: out_changes, the per-bit out_rise counters, read_count, write_count.
+# in_frame is deliberately NOT touched - it is the machine's resting state and
+# zeroing it jams every cabinet switch (see jjpshm.h).
+h = open(os.environ["JJPSHM"]).read()
+frame = int(re.search(r'JJP_FRAME_LEN\s+(\d+)', h).group(1))
+names = [n.split('=')[0].strip()
+         for n in re.search(r'enum\s*\{(.*?)\}', h, re.S).group(1).split(',')
+         if n.strip()]
+boards = names.index('JJP_BOARD_COUNT')
+off = 12 + frame + boards * frame
+tail = boards * 4 + boards * frame * 8 + 8
 try:
-    f = open('/dev/shm/jjp_switches', 'r+b')
-    f.seek(OFF); f.write(bytes(8*4 + 8))   # out_changes + read/write counts
+    f = open(os.environ["SHMDEV"], 'r+b')
+    f.seek(off); f.write(bytes(tail))
     f.close()
 except OSError:
     pass
 PYEOF
+
+# Lay the machine down at rest BEFORE the game reads its first frame.  The game
+# latches its ball count at power-up and the trough is inverted optos, so a bare
+# idle frame reads as an empty/jammed trough and the game never starts.  Uses
+# the cached device dump for the inverted set (a first-ever boot has none and is
+# a no-op; the dump that run writes makes the next boot correct).  See
+# seed_rest.py.
+step "seed rest state"
+python3 "$HERE/seed_rest.py" "${JJP_DEVICES_JSON:-/var/tmp/jjp_devices.json}" \
+    || echo "watch.sh: rest seed skipped"
 
 step "game"
 JJP_DISPLAY=$RUN_DISPLAY bash "$HERE/run_game.sh" --detach || exit 6

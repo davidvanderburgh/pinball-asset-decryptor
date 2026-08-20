@@ -263,6 +263,41 @@ def test_poll_does_not_stack(panel, monkeypatch):
     assert not started
 
 
+def test_fix_state_button_exists(panel):
+    """The recovery button is the escalation past Stop for a wedged rig."""
+    assert hasattr(panel, "_reset_btn")
+
+
+def test_fix_state_shuts_down_wsl_when_confirmed(panel, monkeypatch):
+    """Confirming 'Fix stuck state' runs `wsl --shutdown` and nothing else."""
+    monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(jjp_emulate_tab.messagebox, "askyesno",
+                        lambda *a, **k: True)
+    calls = []
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: calls.append(a[0]) or SimpleNamespace(
+                            returncode=0, stdout=b""))
+    # Run the worker synchronously so we can assert on the command it issued.
+    monkeypatch.setattr(jjp_emulate_tab.threading, "Thread",
+                        lambda target=None, **k: SimpleNamespace(
+                            start=(target or (lambda: None)), daemon=True))
+    panel._fix_state()
+    assert calls == [["wsl.exe", "--shutdown"]]
+
+
+def test_fix_state_does_nothing_when_declined(panel, monkeypatch):
+    """Declining the confirmation must not touch WSL, and must not wedge the
+    panel in a busy state."""
+    monkeypatch.setattr(jjp_emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(jjp_emulate_tab.messagebox, "askyesno",
+                        lambda *a, **k: False)
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a))
+    panel._fix_state()
+    assert not calls
+    assert panel._busy is False
+
+
 # -------------------------------------------------------------- integration --
 
 def test_jjp_plugin_declares_the_capability():

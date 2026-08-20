@@ -90,7 +90,14 @@ wsl -u root -- bash tools/jjp_emu/jjpcuse.sh start  # REAL /dev/jjp* devices
 wsl -u root -- env JJP_DISPLAY=:1 bash tools/jjp_emu/run_game.sh --detach
 wsl -u root -- python3 tools/jjp_emu/swdump.py --out /var/tmp/devices.json
 wsl -e python3 tools/jjp_emu/jjpsw.py --devices /var/tmp/devices.json                                       --pf tools/jjp_emu/wonka_pf_image.png
-# jjpsw.py shows switches AND LEDs on the playfield, plus the raw matrix grid
+# jjpsw.py shows the playfield photo (markers on positioned switches) beside a
+# LABELLED switch table grouped Cabinet / Playfield / Mechanism - click a row to
+# pulse, right-click to latch.  The whole 64-byte IN frame is driven, so the
+# direct/cabinet switches below the matrix (start, flippers, coins) work too;
+# 1=Start, 5=Coin, arrows/A/'=flippers, Space=Shooter (Shift=latch, keys need
+# this window focused).  The photo scales with the window (keeps aspect; needs
+# python3-pil.imagetk), lamps render provisional RGB, and the window's size and
+# position are remembered between runs (~/.jjp_matrix.json).
 wsl -e     bash tools/jjp_emu/status.sh         # key=value, for the GUI
 wsl -u root -- bash tools/jjp_emu/killgame.sh   # stop, and PROVE it stopped
 wsl -u root -- bash tools/jjp_emu/unjail.sh     # tear the jail down
@@ -193,10 +200,19 @@ photograph is not a uniform scaling of the playfield body.
    but the byte layout inside JJP's 64-byte LED pages is still unknown - a
    recurring `3f 0c` marker suggests a page header. The switch matrix layout
    was *derived and verified*; the LED mapping is still PROVISIONAL and the
-   UI labels it as such.
-5. **The CAB board is never opened** (`cab_fd = 0`) even with `/dev/jjpcab100`
-   present, so cabinet switches - coin door, start button, flipper buttons -
-   have no route in yet.
+   UI labels it as such. The matrix UI now renders each lamp as its provisional
+   RGB colour (three bytes at `index*3` in the concatenated LED frames) rather
+   than a bare on/off, so the plumbing is ready the moment the page header is
+   decoded and pages are accumulated into stable per-lamp state.
+5. **Direct / cabinet switches now have a route** (was item 5's open problem).
+   The live `Switch` objects show the IN frame is 37 bytes wide, not 16: bytes
+   0..3 are the direct switches (`dswitch_start`, flippers, coins, menu, tilt),
+   4..19 the verified matrix, 20..36 stepper/topper. The shim used to fill only
+   4..19, so the game read start/flippers/coins as permanently open - which is
+   why keyboard start did nothing. Both the shim and the CUSE daemon now drive
+   the WHOLE frame (`in_frame` in jjpshm.h) and serve it for the IO *and* CAB
+   boards, since which one carries a given cabinet switch is not known and
+   serving both is free. NEEDS A LIVE CONFIRM: pressing `1` should start a game.
 6. **Coils barely move in attract**, as expected: the I/O out frame holds a
    steady `0x42` at byte 9 and nothing pulses. Verifying the coil half of the
    frame needs an actual game in progress.

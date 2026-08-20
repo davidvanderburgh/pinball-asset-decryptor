@@ -98,6 +98,9 @@ static void shm_attach(void)
     }
     if (g_shm->magic != JJP_SHM_MAGIC) {
         memset(g_shm, 0, sizeof(*g_shm));
+        /* NOT all zeroes: bytes 0..3 are active low, so a zeroed frame is a
+         * machine with every cabinet button jammed on (see jjpshm.h). */
+        jjp_in_frame_idle(g_shm->in_frame);
         g_shm->magic = JJP_SHM_MAGIC;
         g_shm->version = JJP_SHM_VERSION;
     }
@@ -124,12 +127,10 @@ static void jjp_read(fuse_req_t req, size_t size, off_t off,
     unsigned char frame[JJP_FRAME_LEN];
     memset(frame, 0, sizeof(frame));
 
-    if (g_board == JJP_BOARD_IO)
-        memcpy(frame + JJP_MATRIX_FIRST_BYTE, (const void *)g_shm->switches,
-               JJP_MATRIX_BYTES);
-    else if (g_board == JJP_BOARD_CAB)
-        memcpy(frame + JJP_MATRIX_FIRST_BYTE, (const void *)g_shm->cabinet,
-               sizeof(g_shm->cabinet));
+    /* The whole IN frame (bytes 0..3 direct/cabinet, 4..19 matrix, 20..36
+     * mech), served for both the IO and CAB boards - see jjpshm.h. */
+    if (g_board == JJP_BOARD_IO || g_board == JJP_BOARD_CAB)
+        memcpy(frame, (const void *)g_shm->in_frame, JJP_FRAME_LEN);
 
     g_shm->read_count++;
 
@@ -151,13 +152,21 @@ static void jjp_write(fuse_req_t req, const char *buf, size_t size, off_t off,
 
     if (g_board >= 0 && g_board < JJP_BOARD_COUNT) {
         volatile unsigned char *dst = g_shm->out[g_board];
-        /* Coils are PULSES.  A UI that samples a level misses a 30 ms
-         * slingshot about half the time, so publish a change counter and let
-         * the UI read edges. */
+        volatile unsigned char *rise = g_shm->out_rise[g_board];
+        /* Coils are PULSES.  A UI that samples a level misses a 32 ms trough
+         * eject most of the time, so publish counters and let readers take
+         * edges: out_changes per board for an activity meter, out_rise per BIT
+         * so "which coil fired" is answerable at all. */
         for (size_t i = 0; i < n; i++) {
-            if (dst[i] != (unsigned char)buf[i])
+            unsigned char was = dst[i], now = (unsigned char)buf[i];
+            if (was != now) {
                 g_shm->out_changes[g_board]++;
-            dst[i] = (unsigned char)buf[i];
+                unsigned char up = (unsigned char)(now & ~was);
+                for (int b = 0; up; b++, up >>= 1)
+                    if (up & 1u)
+                        rise[JJP_RISE_INDEX(i, b)]++;
+            }
+            dst[i] = now;
         }
         g_shm->write_count++;
     }

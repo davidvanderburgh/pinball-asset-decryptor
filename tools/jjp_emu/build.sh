@@ -21,7 +21,12 @@ set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/padpath.sh"
 
-LIVE=$(pgrep -c -x game 2>/dev/null); LIVE=${LIVE:-0}
+# jjp_game_count() excludes ZOMBIES; a raw `pgrep -c -x game` counts the
+# <defunct> game processes that always linger after a stop (the game spawns
+# three processes and leaves zombies behind).  Counting those made build.sh
+# refuse EVERY rebuild - which is exactly how a stale old-ABI daemon kept
+# running against a new UI, so start/switches/LEDs all silently broke.
+LIVE=$(jjp_game_count)
 if [ "$LIVE" != "0" ] && [ "${1:-}" != "--force" ]; then
     echo "build.sh: $LIVE game process(es) live - refusing to rebuild." >&2
     echo "  Overwriting a mapped .so can SIGBUS the game.  Stop it first:" >&2

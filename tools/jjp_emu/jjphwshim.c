@@ -137,6 +137,9 @@ static void shm_attach(void)
     g_shm = p;
     if (g_shm->magic != JJP_SHM_MAGIC) {
         memset(g_shm, 0, sizeof(*g_shm));
+        /* NOT all zeroes: bytes 0..3 are active low, so a zeroed frame is a
+         * machine with every cabinet button jammed on (see jjpshm.h). */
+        jjp_in_frame_idle(g_shm->in_frame);
         g_shm->magic = JJP_SHM_MAGIC;
         g_shm->version = JJP_SHM_VERSION;
     }
@@ -348,14 +351,14 @@ ssize_t read(int fd, void *buf, size_t count)
     unsigned char frame[FRAME_LEN];
     memset(frame, 0, sizeof(frame));
 
-    if (g_shm && f->board == JJP_BOARD_IO) {
-        /* bytes 4..19 = the 128-switch matrix, LSB first */
-        memcpy(frame + JJP_MATRIX_FIRST_BYTE, (const void *)g_shm->switches,
-               JJP_MATRIX_BYTES);
-        g_shm->read_count++;
-    } else if (g_shm && f->board == JJP_BOARD_CAB) {
-        memcpy(frame + JJP_MATRIX_FIRST_BYTE, (const void *)g_shm->cabinet,
-               sizeof(g_shm->cabinet));
+    if (g_shm && (f->board == JJP_BOARD_IO || f->board == JJP_BOARD_CAB)) {
+        /* The whole IN frame: bytes 0..3 direct/cabinet switches, 4..19 the
+         * 128-switch matrix, 20..36 stepper/topper.  Served for BOTH the IO
+         * and CAB boards - which one a title reads a cabinet switch from is not
+         * known, and serving both costs nothing (see jjpshm.h). */
+        memcpy(frame, (const void *)g_shm->in_frame, FRAME_LEN);
+        if (f->board == JJP_BOARD_IO)
+            g_shm->read_count++;
     }
 
     memcpy(buf, frame, FRAME_LEN);
@@ -374,13 +377,21 @@ ssize_t write(int fd, const void *buf, size_t count)
     size_t n = count > FRAME_LEN ? FRAME_LEN : count;
     if (g_shm && f->board >= 0 && f->board < JJP_BOARD_COUNT) {
         volatile unsigned char *dst = g_shm->out[f->board];
-        /* Coils are PULSES.  A UI that samples a level will miss a 30 ms
-         * slingshot about half the time, so publish a per-byte change counter
-         * alongside the level and let the UI read edges, never levels. */
+        volatile unsigned char *rise = g_shm->out_rise[f->board];
+        /* Coils are PULSES.  A UI that samples a level will miss a 32 ms trough
+         * eject most of the time, so publish counters and let readers take
+         * edges: out_changes per board for an activity meter, out_rise per BIT
+         * so "which coil fired" is answerable at all. */
         for (size_t i = 0; i < n; i++) {
-            if (dst[i] != ((const unsigned char *)buf)[i])
+            unsigned char was = dst[i], now = ((const unsigned char *)buf)[i];
+            if (was != now) {
                 g_shm->out_changes[f->board]++;
-            dst[i] = ((const unsigned char *)buf)[i];
+                unsigned char up = (unsigned char)(now & ~was);
+                for (int b = 0; up; b++, up >>= 1)
+                    if (up & 1u)
+                        rise[JJP_RISE_INDEX(i, b)]++;
+            }
+            dst[i] = now;
         }
         g_shm->write_count++;
     }

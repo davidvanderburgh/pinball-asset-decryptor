@@ -247,6 +247,19 @@ class JJPEmulatePanel:
                                     command=self._screenshot, state=tk.DISABLED)
         self._shot_btn.pack(side=tk.LEFT, padx=(6, 0))
 
+        # Recovery, off to the right so it reads as the escalation it is: when a
+        # run wedges, Stop (stop.sh) can hang on the same wedge, and WSLg can
+        # leave a frozen, border-less window that only a WSL restart clears.
+        self._reset_btn = ttk.Button(ctl, text="Fix stuck state",
+                                     command=self._fix_state)
+        self._reset_btn.pack(side=tk.RIGHT)
+        _Tooltip(self._reset_btn,
+                 "Force-restart WSL to clear a wedged emulator — a frozen "
+                 "window with no border, a game that will not stop, or orphaned "
+                 "board devices. Closes ALL WSL sessions and takes ~15s; your "
+                 "ISO and settings are untouched.",
+                 self._theme_fn)
+
         # --- state headline ----------------------------------------------
         self._state_lbl = ttk.Label(outer, text="Checking…",
                                     font=("Segoe UI", 11, "bold"))
@@ -511,6 +524,77 @@ class JJPEmulatePanel:
             self._timer().after(0, done)
         except (tk.TclError, RuntimeError):
             self._busy = False
+
+    def _fix_state(self):
+        """Force-restart WSL to recover from a wedged emulator.
+
+        This is the escalation past Stop.  ``stop.sh`` kills the processes it
+        can find, but a truly wedged run can leave things Stop cannot fix from
+        inside WSL: a frozen WSLg window with no border (the compositor never
+        got the surface back), zombies pinning a parent, a mount the kernel will
+        not release.  ``wsl --shutdown`` tears the whole VM down, which clears
+        ALL of that at once — and is the one thing the user was told to run by
+        hand for exactly this, so the panel should offer it as a button.
+
+        It is deliberately heavier than Stop and says so: it closes every WSL
+        session on the machine (other terminals included) and takes ~15s to come
+        back.  Nothing on disk is touched, so the ISO, the restored image and
+        settings all survive.
+        """
+        if self._busy:
+            return
+        if sys.platform != "win32":
+            messagebox.showinfo(
+                "Fix stuck state",
+                "This recovery restarts WSL and only applies on Windows.")
+            return
+        if not messagebox.askyesno(
+                "Fix stuck state",
+                "Force-restart WSL to clear a wedged emulator?\n\n"
+                "Use this when Stop did not work — a frozen window with no "
+                "border, a game that will not stop, or the boards left "
+                "orphaned.\n\n"
+                "It closes EVERYTHING running in WSL (any other WSL terminals "
+                "or sessions too) and takes about 15 seconds to come back. Your "
+                "ISO, the restored image and your settings are untouched."):
+            return
+
+        self._busy = True
+        self._go_btn.configure(state=tk.DISABLED)
+        self._reset_btn.configure(state=tk.DISABLED, text="Resetting…")
+
+        def work():
+            try:
+                self._log("JJP: shutting WSL down to clear stuck state…")
+                out = subprocess.run(
+                    ["wsl.exe", "--shutdown"], stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, timeout=120,
+                    creationflags=_rig.CREATE_FLAGS)
+                msg = out.stdout.decode("utf-8", "replace").strip()
+                if out.returncode == 0:
+                    self._log("JJP: WSL was shut down — frozen windows, stuck "
+                              "processes and orphaned devices are cleared. Press "
+                              "Start to run again.")
+                else:
+                    self._log("JJP: wsl --shutdown returned %d. %s"
+                              % (out.returncode, msg))
+            except Exception as exc:                       # noqa: BLE001
+                self._log("JJP: could not restart WSL: %s" % exc)
+            finally:
+                self._timer().after(0, self._reset_done)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _reset_done(self):
+        self._busy = False
+        try:
+            self._go_btn.configure(state=tk.NORMAL)
+            self._reset_btn.configure(state=tk.NORMAL, text="Fix stuck state")
+        except tk.TclError:
+            return
+        # Re-poll: the first status call boots WSL back up and confirms the
+        # clean state, which is the feedback that the reset worked.
+        self._poll()
 
     def _open_matrix(self):
         """Re-open the switch/LED matrix beside a running game.

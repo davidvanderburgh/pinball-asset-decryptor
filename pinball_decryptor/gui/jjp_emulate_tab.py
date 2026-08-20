@@ -173,6 +173,10 @@ class JJPEmulatePanel:
         self._busy = False            # a start/stop worker is in flight
         self._last_up = False
         self._info = {}
+        #: The last start failed because the plugged-in key unlocks a DIFFERENT
+        #: JJP title.  Sticky so the poll's own state text does not immediately
+        #: paint over the explanation; cleared when a new start begins.
+        self._wrong_key = False
 
     # ------------------------------------------------------------------
     # plumbing
@@ -332,6 +336,7 @@ class JJPEmulatePanel:
             self._log("JJP: security key not visible in WSL yet — attaching.")
 
         self._busy = True
+        self._wrong_key = False       # a new attempt clears the last verdict
         self._go_btn.configure(state=tk.DISABLED, text="Starting…")
 
         def work():
@@ -352,7 +357,18 @@ class JJPEmulatePanel:
                 for line in text.splitlines():
                     if line.strip():
                         self._log("JJP: " + line.rstrip())
-                if out.returncode != 0:
+                # A wrong-title key is the one failure worth pulling out of the
+                # log into the headline: the key IS plugged in (so "No security
+                # key" would be misleading), it just unlocks a different game.
+                if "WRONG KEY" in text or out.returncode == 7:
+                    self._wrong_key = True
+                    self._timer().after(0, lambda: (
+                        self._state_lbl.configure(text="Wrong key for this game"),
+                        self._hint_lbl.configure(
+                            text="The plugged-in key runs a different JJP title. "
+                                 "JJP keys are per-title — plug in this game's own "
+                                 "key.")))
+                elif out.returncode != 0:
                     self._log("JJP: start failed (exit %d)." % out.returncode)
             except subprocess.TimeoutExpired:
                 self._log("JJP: start timed out.")
@@ -613,6 +629,13 @@ class JJPEmulatePanel:
             self._info = info
             self._last_up = int(info.get("game_procs") or 0) > 0
             label, hint = state_text(info)
+            # A confirmed wrong-title key sticks until the next start: the game
+            # is down and dongle_present is 1, so the plain state text would say
+            # "Stopped" and hide the real reason it will not run.
+            if self._wrong_key and not self._last_up:
+                label = "Wrong key for this game"
+                hint = ("The plugged-in key runs a different JJP title. "
+                        "JJP keys are per-title — plug in this game's own key.")
             self._state_lbl.configure(text=label)
             self._hint_lbl.configure(text=hint)
             if not self._busy:

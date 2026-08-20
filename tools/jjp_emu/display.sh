@@ -51,7 +51,11 @@ command -v Xephyr >/dev/null || {
 # One nested server at a time, or the game picks up a stale one.
 pkill -f "Xephyr $JJP_NESTED" 2>/dev/null; sleep 1
 
-TITLE="JJP $JJP_GAME - emulated"
+# The window title must be the title actually MOUNTED, not JJP_GAME - that is a
+# hard-coded "Wonka" fallback, so every game's window was labelled "JJP Wonka -
+# emulated" no matter which title was running.  jjp_title reads it from the
+# mounted image.
+TITLE="JJP $(jjp_title) - emulated"
 if [ "$DUAL" = "1" ]; then
     setsid Xephyr "$JJP_NESTED" -title "$TITLE" -resizeable +xinerama \
         -screen "$JJP_MAIN_MODE" -screen "$JJP_AUX_MODE" \

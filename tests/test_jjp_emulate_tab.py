@@ -352,3 +352,24 @@ def test_start_skips_launch_when_key_never_appears(panel, monkeypatch):
     import time as _t
     _t.sleep(0.3)          # let the worker thread run
     assert not ran         # watch.sh was never invoked
+
+
+# ------------------------------------------------------------- wrong-title key --
+
+def test_wrong_key_sticks_in_the_headline(panel):
+    """A key that unlocks a different JJP title must not read as 'Stopped':
+    the key IS present (dongle_present=1) so the plain state would hide the
+    real reason.  The wrong-key verdict is sticky until the next start."""
+    panel._wrong_key = True
+    panel._apply({"wsl": "1", "game_procs": "0", "dongle_present": "1",
+                  "image_mounted": "1", "game": "Godfather"})
+    assert "Wrong key" in panel._state_lbl["text"]
+    assert "per-title" in panel._hint_lbl["text"].lower()
+
+
+def test_wrong_key_clears_once_the_game_runs(panel):
+    """If a later poll shows the game up, the stale wrong-key text must not
+    override 'Running'."""
+    panel._wrong_key = True
+    panel._apply({"wsl": "1", "game_procs": "3", "board_nodes": "5"})
+    assert panel._state_lbl["text"] == "Running"

@@ -49,8 +49,11 @@ else
 fi
 
 # 3. Tell Allegro to use PulseAudio directly rather than discovering ALSA first.
-#    Allegro reads allegro5.cfg from the executable's directory.
-GAMEDIR="$JJP_JAIL$JJPEDIR/$JJP_GAME"
+#    Allegro reads allegro5.cfg from the executable's directory.  Use the title
+#    actually mounted (jjp_title), not the JJP_GAME default - otherwise for any
+#    title but Wonka this wrote into a directory that does not exist and the
+#    audio config was silently never applied.
+GAMEDIR="$JJP_JAIL$JJPEDIR/$(jjp_title)"
 if [ -d "$GAMEDIR" ]; then
     cat > "$GAMEDIR/allegro5.cfg" <<'ACFG'
 # Written by tools/jjp_emu/audio.sh

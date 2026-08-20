@@ -96,11 +96,29 @@ RUN='
   exit 1
 '
 
+# The plugged-in key does not unlock this title.  JJP keys are per-title: the
+# Sentinel envelope's AES key is different for every game, and a key carries
+# only its own title's crypto - so a key that runs Wonka H0007s on Godfather
+# even though both present the same vendor code and Feature 0.  Called after a
+# launch to turn a bare H0007 into a message that says what is actually wrong.
+report_wrong_key() {
+    if grep -q 'H0007\|Sentinel key not found' "$JJP_GAME_LOG" 2>/dev/null; then
+        echo "WRONG KEY: the plugged-in Sentinel key does not unlock $(jjp_title)."
+        echo "  JJP keys are PER-TITLE - each unlocks only its own game.  Plug in"
+        echo "  the $(jjp_title) key (this one runs a different title)."
+        return 0
+    fi
+    return 1
+}
+
 : > "$JJP_GAME_LOG"
 if [ "$DETACH" = "1" ]; then
     setsid chroot "$JJP_JAIL" /bin/bash -c "$RUN" >>"$JJP_GAME_LOG" 2>&1 &
     echo $! > "$JJP_PID_FILE"
-    sleep 2
+    sleep 3
+    if [ "$(jjp_game_count)" = "0" ] && report_wrong_key; then
+        exit 7
+    fi
     echo "launched detached; pid=$(cat "$JJP_PID_FILE") procs=$(jjp_game_count)"
     echo "log: $JJP_GAME_LOG"
 else
@@ -109,5 +127,7 @@ else
     else
         setsid chroot "$JJP_JAIL" /bin/bash -c "$RUN" >>"$JJP_GAME_LOG" 2>&1
     fi
-    echo "EXIT CODE: $?"
+    rc=$?
+    report_wrong_key || true
+    echo "EXIT CODE: $rc"
 fi

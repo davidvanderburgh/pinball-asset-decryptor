@@ -71,24 +71,23 @@ RUN='
   export HOME=/root
   '"$SHIM_ENV"'
   cd $GAMEDIR
-  dnum=${DISPLAY#:}; dnum=${dnum%%.*}
   n=0
   while [ $n -lt '"${JJP_MAX_RESTARTS:-6}"' ]; do
     ./game
     rc=$?
     case "$rc" in
-      43|44|68)
-        # Restart ONLY if the display is still there.  If the user closed the
-        # window, Xephyr is gone and its X socket with it - restarting the game
-        # then just spawns a process that fails to open a display and dies at
-        # once, over and over, churning windows and leaving WSLg ghosts.  A
-        # closed window means "stop", so we stop.
-        if [ -S /tmp/.X11-unix/X${dnum} ] || [ "'"$JJP_DISPLAY"'" = ":0" ]; then
-          n=$((n+1)); echo "[rig] game exit $rc - restarting ($n)"
-        else
-          echo "[rig] display gone (window closed) - not restarting"
-          exit 0
-        fi ;;
+      # 43/44/68 are "exit and be restarted" - a settings restore, a changed
+      # setting, or the once-per-fresh-jail hostname reboot.  Restart, bounded.
+      #
+      # We do NOT try to detect a closed window and skip the restart here.  An
+      # earlier attempt checked for the display socket inside the chroot and got
+      # it wrong - the Xephyr :1 socket is not where the check looked, so a
+      # perfectly normal exit-68 was read as "window closed" and the game was
+      # never restarted, leaving a black screen.  It is also unnecessary:
+      # closing the window makes the game lose its X server and exit 1 (an X I/O
+      # error), which falls through to the "*" case and stops - and even a true
+      # loop is capped by JJP_MAX_RESTARTS.
+      43|44|68) n=$((n+1)); echo "[rig] game exit $rc - restarting ($n)" ;;
       *) exit $rc ;;
     esac
   done

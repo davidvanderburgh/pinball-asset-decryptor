@@ -1144,3 +1144,157 @@ def test_model_remap_swaps_only_the_leading_component(tmp_path):
     remap = mod_transfer._model_remap(src, tgt)
     assert (remap("/godzilla_pro/assets/godzilla_pro/1.asset")
             == "/godzilla_le/assets/godzilla_pro/1.asset")
+
+
+def test_detail_lines_name_every_mod_that_cannot_transfer(tmp_path):
+    # The confirm dialog only has room for counts, so a tester who saw "it
+    # missed a couple" had to diff the two folders by hand to find out which.
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {"audio/idx0001.wav": b"MOVED" * 100,
+                      "audio/idx0002.wav": b"GONE" * 100,
+                      "audio/idx0003.wav": b"REUSED-OLD" * 100},
+                images={"images/logo.png": b"art"})
+    _mk_extract(tgt, {"audio/idx0009.wav": b"MOVED" * 100,
+                      "audio/idx0003.wav": b"REUSED-NEW" * 100})
+    staged_changes.save(src, {"audio": {"audio/idx0001.wav": r"C:\r\a.mp3",
+                                        "audio/idx0002.wav": r"C:\r\b.mp3",
+                                        "audio/idx0003.wav": r"C:\r\c.mp3"},
+                              "image": {"images/logo.png": r"C:\r\logo.png"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    text = "\n".join(t for _lvl, t in mod_transfer.plan_detail_lines(plan))
+
+    # the sound that moved index, named with BOTH ends of the move
+    assert "audio/idx0001.wav  ->  audio/idx0009.wav" in text
+    # the one with no counterpart, and the one whose index was reused
+    assert "audio/idx0002.wav" in text
+    assert "audio/idx0003.wav" in text
+    # and the image slot the new version doesn't have
+    assert "images/logo.png" in text
+    # dropped/flagged read as errors, the move as ordinary progress
+    levels = dict((t, lvl) for lvl, t in mod_transfer.plan_detail_lines(plan))
+    assert levels["    audio/idx0002.wav"] == "error"
+    assert levels["    audio/idx0001.wav  ->  audio/idx0009.wav"] == "info"
+
+
+def test_detail_lines_are_empty_when_everything_transfers(tmp_path):
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {"audio/idx0001.wav": b"SAME" * 100})
+    _mk_extract(tgt, {"audio/idx0001.wav": b"SAME" * 100})
+    staged_changes.save(src, {"audio": {"audio/idx0001.wav": r"C:\r\a.mp3"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert plan["audio"]["matched"] and not plan["audio"]["remapped"]
+    assert mod_transfer.plan_detail_lines(plan) == []
+
+
+def test_detail_lines_cap_a_folder_wide_transfer(tmp_path):
+    # The log pane is a viewport (MainWindow._trim_log_pane): 500 dropped
+    # slots must not push the rest of the run out of it.
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    sounds = {"audio/idx%04d.wav" % i: b"S%d" % i * 50 for i in range(60)}
+    _mk_extract(src, sounds)
+    _mk_extract(tgt, {"audio/idx9999.wav": b"unrelated" * 50})
+    staged_changes.save(src, {"audio": {rel: r"C:\r\x.mp3" for rel in sounds}})
+
+    lines = mod_transfer.plan_detail_lines(mod_transfer.plan_transfer(src, tgt),
+                                           cap=40)
+    named = [t for _lvl, t in lines if t.startswith("    audio/")]
+    assert len(named) == 40
+    assert any("...and 20 more" in t for _lvl, t in lines)
+
+
+# ---------------------------------------------------------------------------
+# The same sound, one sample apart (PAD-77).  A Spike 2 decode could reach the
+# codec through its alias entry, which emits the layout predecessor's body word
+# as sample 0 and pushes the rest along a frame -- 29 of Godzilla LE 1.13's
+# 2523 sounds came out that way in one run and not the next.  The decode is
+# deterministic now, but extracts made before that are on disk, so pairing has
+# to see through it instead of dropping the mod.
+# ---------------------------------------------------------------------------
+
+def _pcm_wav(path, samples, chan=1):
+    import wave
+    import struct
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with wave.open(path, "wb") as w:
+        w.setnchannels(chan)
+        w.setsampwidth(2)
+        w.setframerate(44100)
+        w.writeframes(b"".join(struct.pack("<h", v) for v in samples))
+
+
+def _sound(n=2000, seed=7):
+    return [((i * seed) % 3000) - 1500 for i in range(n)]
+
+
+def test_sound_one_sample_apart_still_pairs(tmp_path):
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    clean = _sound()
+    # what the alias entry emits: a stray head sample, everything else shifted
+    shifted = [5978] + clean[:-1]
+    _pcm_wav(os.path.join(src, "audio", "idx0417.wav"), clean)
+    _pcm_wav(os.path.join(tgt, "audio", "idx0525.wav"), shifted)
+    _pcm_wav(os.path.join(tgt, "audio", "idx0526.wav"), _sound(seed=11))
+    staged_changes.save(src, {"audio": {"audio/idx0417.wav": r"C:\r\a.wav"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert not plan["audio"]["dropped"] and not plan["audio"]["flagged"]
+    assert [e["tgt_rel"] for e in plan["audio"]["remapped"]] == \
+        ["audio/idx0525.wav"]
+
+
+def test_the_shift_is_seen_from_either_side(tmp_path):
+    # the wobble can just as well be in the OLD folder's extract
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    clean = _sound()
+    _pcm_wav(os.path.join(src, "audio", "idx0417.wav"), [5978] + clean[:-1])
+    _pcm_wav(os.path.join(tgt, "audio", "idx0525.wav"), clean)
+    staged_changes.save(src, {"audio": {"audio/idx0417.wav": r"C:\r\a.wav"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert [e["tgt_rel"] for e in plan["audio"]["remapped"]] == \
+        ["audio/idx0525.wav"]
+
+
+def test_a_genuinely_different_sound_of_the_same_size_still_drops(tmp_path):
+    # Same byte size is the only thing the fallback screens on before the
+    # sample-for-sample check, so a different sound of that size must not pair.
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _pcm_wav(os.path.join(src, "audio", "idx0417.wav"), _sound(seed=7))
+    _pcm_wav(os.path.join(tgt, "audio", "idx0525.wav"), _sound(seed=13))
+    staged_changes.save(src, {"audio": {"audio/idx0417.wav": r"C:\r\a.wav"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert len(plan["audio"]["dropped"]) == 1
+    assert not plan["audio"]["remapped"]
+
+
+def test_stereo_shift_is_a_whole_frame_not_a_sample(tmp_path):
+    # A stereo frame is two samples; shifting by one SAMPLE would swap the
+    # channels over, which is not what the alias entry does.
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    clean = _sound(2000)
+    _pcm_wav(os.path.join(src, "audio", "idx0417.wav"), clean, chan=2)
+    _pcm_wav(os.path.join(tgt, "audio", "idx0525.wav"),
+             [5978, -410] + clean[:-2], chan=2)
+    _pcm_wav(os.path.join(tgt, "audio", "idx0526.wav"),
+             [5978] + clean[:-1], chan=2)        # half a frame: not a match
+    staged_changes.save(src, {"audio": {"audio/idx0417.wav": r"C:\r\a.wav"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert [e["tgt_rel"] for e in plan["audio"]["remapped"]] == \
+        ["audio/idx0525.wav"]
+
+
+def test_exact_match_always_wins_over_a_shifted_one(tmp_path):
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    clean = _sound()
+    _pcm_wav(os.path.join(src, "audio", "idx0417.wav"), clean)
+    _pcm_wav(os.path.join(tgt, "audio", "idx0100.wav"), [5978] + clean[:-1])
+    _pcm_wav(os.path.join(tgt, "audio", "idx0525.wav"), clean)
+    staged_changes.save(src, {"audio": {"audio/idx0417.wav": r"C:\r\a.wav"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert [e["tgt_rel"] for e in plan["audio"]["remapped"]] == \
+        ["audio/idx0525.wav"]

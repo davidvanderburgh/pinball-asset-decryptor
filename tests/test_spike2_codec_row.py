@@ -19,6 +19,8 @@ noise on every one of the 16 sub-slots of its own row, and decodes to speech
 
 Searching the own row FIRST is what keeps the cards that already worked byte for
 byte identical, and free: pass 1 stops at the first clearly-audio candidate.
+The order is the dispatch table's and nothing else -- see
+test_order_is_the_dispatch_table_not_what_won_last_time.
 """
 import pytest
 
@@ -44,11 +46,10 @@ class _FakeMu:
         return self.words[addr].to_bytes(4, "little")
 
 
-def _emu(words, recipe=None, backed=lambda va: 1):
+def _emu(words, backed=lambda va: 1):
     e = Spike2Emu.__new__(Spike2Emu)
     e.DISPATCH = DISPATCH
     e.mu = _FakeMu(words)
-    e._slot_recipe = dict(recipe or {})
     e._backing_off = backed
     return e
 
@@ -101,20 +102,29 @@ def test_unmapped_row_is_skipped_not_fatal():
     assert [fn for fn, _p in cands] == [0x300000, 0x300001, 0x300002, 0x300003]
 
 
-def test_learned_recipe_is_tried_first():
-    """The winning (row delta, sub-slot) is a build property, so later scales of
-    the same channel count lead with it -- that is what stops the widened search
-    from being re-walked for all 32 of a card's stereo scales."""
+def test_order_is_the_dispatch_table_not_what_won_last_time():
+    """The widened search used to lead with the (row delta, sub-slot) that won
+    for the last scale of the same channel count -- a build property, so it
+    saved re-walking the row-0 candidates for all 32 of a card's stereo scales.
+
+    THAT HINT IS GONE (PAD-77).  Rows 0 and -1 hold the same codec twice over,
+    and the pair scores a dead tie, so whichever the pool lists first wins:
+    with the hint leading, one worker resolving one quiet-intro sound onto the
+    alias flipped every later sound it touched, and the same card decoded 29 of
+    its 2523 sounds differently from one run to the next.  The order is the
+    dispatch table's, always, and the re-walk it costs is ~0.3 s per scale."""
     words = {}
     for d in (0, -1):
         for s in range(4):
             words[_row(15 + d, s)] = 0x4000 + (d + 1) * 0x100 + s
-    e = _emu(words, recipe={2: (-1, 1)})
-    cands = e._slot_candidates({"scale": 15, "chan": 2})
-    assert cands[0][1] == (-1, 1)
-    # and the recipe for the OTHER channel count must not leak into this one
-    e2 = _emu(words, recipe={1: (-1, 1)})
-    assert e2._slot_candidates({"scale": 15, "chan": 2})[0][1] == (0, 0)
+    places = [pl for _fn, pl in
+              _emu(words)._slot_candidates({"scale": 15, "chan": 2})]
+    assert places == [(0, 0), (0, 1), (0, 2), (0, 3),
+                      (-1, 0), (-1, 1), (-1, 2), (-1, 3)]
+    # ...and it is the same list for the other channel count and for a scale
+    # resolved after any number of others: nothing here carries history.
+    assert [pl for _fn, pl in
+            _emu(words)._slot_candidates({"scale": 15, "chan": 1})] == places
 
 
 def test_candidates_are_deduplicated_by_function_pointer():

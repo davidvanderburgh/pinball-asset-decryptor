@@ -116,6 +116,69 @@ def content_signature(path):
     return (size, h.hexdigest())
 
 
+def _wav_frame(data):
+    """``(data_offset, bytes_per_frame)`` of a PCM WAV in memory, or ``None``.
+
+    Minimal on purpose: enough to walk to the samples of the decoder's own
+    output (canonical 44-byte header) without pulling in :mod:`wave`.
+    """
+    if len(data) < 44 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return None
+    pos = 12
+    chan = bits = 0
+    while pos + 8 <= len(data):
+        cid = data[pos:pos + 4]
+        size = int.from_bytes(data[pos + 4:pos + 8], "little")
+        body = pos + 8
+        if cid == b"fmt " and size >= 16:
+            chan = int.from_bytes(data[body + 2:body + 4], "little")
+            bits = int.from_bytes(data[body + 14:body + 16], "little")
+        elif cid == b"data":
+            fb = chan * (bits // 8)
+            return (body, fb) if fb else None
+        pos = body + size + (size & 1)
+    return None
+
+
+def _one_sample_apart(path_a, path_b):
+    """True when two decoded WAVs are the SAME sound, one sample apart: same
+    header, and one file's samples are the other's shifted a frame later behind
+    a single stray sample.
+
+    That is not a hypothetical.  Until the Spike 2 decode was made independent
+    of how the catalog splits across worker processes (see
+    ``plugins/stern/spike2/emulator.Spike2Emu._resolve_entry``), a card could
+    decode a scale through the codec's alias entry, which emits the layout
+    predecessor's body word as sample 0 and pushes everything else along one.
+    Measured on Godzilla LE 1.13: 29 of 2523 sounds came out that way in one
+    run and not the next.  Audibly it is a faint tick at the head; to a matcher
+    keyed on content it is a different sound, so every mod on it silently
+    failed to transfer -- across two extracts of the SAME card, never mind two
+    models.  Extracts made before that fix are on people's disks, so pairing
+    has to survive it rather than send them off to re-extract two cards.
+
+    Only reached for a pick that found no exact-content match, and only against
+    targets of the identical byte size, so it costs two reads of one sound.
+    """
+    try:
+        with open(path_a, "rb") as f:
+            a = f.read()
+        with open(path_b, "rb") as f:
+            b = f.read()
+    except OSError:
+        return False
+    if len(a) != len(b) or a == b:
+        return False
+    head = _wav_frame(a)
+    if head is None or head != _wav_frame(b) or a[:head[0]] != b[:head[0]]:
+        return False
+    off, fb = head
+    if len(a) - off <= fb:
+        return False
+    return (a[off + fb:] == b[off:len(b) - fb]
+            or b[off + fb:] == a[off:len(a) - fb])
+
+
 def _abs(root, rel):
     return os.path.join(root, rel.replace("/", os.sep))
 
@@ -743,6 +806,7 @@ def _plan_audio(source_dir, target_dir, saved_audio, log_cb=None):
     # apply_transfer explicitly supports — still indexes by its stock sounds.
     tgt_audio_dir = os.path.join(target_dir, "audio")
     sig_to_rels = {}
+    size_to_rels = {}          # byte size -> rels, for the one-sample fallback
     if os.path.isdir(tgt_audio_dir):
         names = [n for n in os.listdir(tgt_audio_dir)
                  if n.lower().endswith(".wav")]
@@ -754,6 +818,7 @@ def _plan_audio(source_dir, target_dir, saved_audio, log_cb=None):
             sig = content_signature(_stock_path(target_dir, rel))
             if sig is not None:
                 sig_to_rels.setdefault(sig, []).append(rel)
+                size_to_rels.setdefault(sig[0], []).append(rel)
 
     # Last-resort identity for a slot whose pristine bytes are gone entirely:
     # no ``.orig`` snapshot because it was edited before snapshots shipped, or
@@ -778,9 +843,17 @@ def _plan_audio(source_dir, target_dir, saved_audio, log_cb=None):
         return [r for r in _base["tgt"].get(md5, ())
                 if _stock_exists(target_dir, r)]
 
+    n_shifted = 0
     for src_rel, repl in saved_audio.items():
-        src_sig = content_signature(_stock_path(source_dir, src_rel))
+        src_path = _stock_path(source_dir, src_rel)
+        src_sig = content_signature(src_path)
         cands = sig_to_rels.get(src_sig, []) if src_sig is not None else []
+        if not cands and src_sig is not None:
+            # Same sound, one sample apart: an older extract's decode wobble,
+            # not a different sound (see _one_sample_apart).
+            cands = [r for r in size_to_rels.get(src_sig[0], ())
+                     if _one_sample_apart(src_path, _stock_path(target_dir, r))]
+            n_shifted += len(cands[:1])
         if not cands:
             cands = _baseline_cands(src_rel)
         if src_rel in cands:
@@ -796,6 +869,9 @@ def _plan_audio(source_dir, target_dir, saved_audio, log_cb=None):
         else:
             dropped.append({"src_rel": src_rel, "repl": repl,
                             "reason": "no matching sound in the new version"})
+    if n_shifted:
+        log("%d sound(s) paired despite a one-sample difference at the head "
+            "left by an older extract of one of the two folders." % n_shifted)
     return matched, remapped, flagged, dropped
 
 
@@ -1041,6 +1117,79 @@ def plan_transfer(source_dir, target_dir, saved=None, src_text_rows=None,
     plan["totals"] = {"transfer": transfer, "flagged": flagged,
                       "dropped": dropped}
     return plan
+
+
+# How many slots each detail block names before it summarises the rest.  The
+# log pane is a viewport (see MainWindow._trim_log_pane), so a folder-wide
+# transfer must not push everything else out of it.
+_DETAIL_CAP = 40
+
+
+def _detail_block(out, level, header, entries, label, cap):
+    """Append ``header`` + one indented *label* line per entry to *out*."""
+    entries = list(entries or ())
+    if not entries:
+        return
+    out.append((level, header % len(entries)))
+    for e in entries[:cap]:
+        out.append((level, "    " + label(e)))
+    if len(entries) > cap:
+        out.append((level, "    ...and %d more" % (len(entries) - cap)))
+
+
+def plan_detail_lines(plan, cap=_DETAIL_CAP):
+    """Name, slot by slot, what a transfer plan can't carry — and where the
+    sounds that moved index landed.  Returns ``[(log_level, text), ...]``,
+    empty when everything transfers cleanly.
+
+    :func:`plan_transfer` reconciles by content, so the mods it can't place
+    are the interesting ones: a sound the new version re-recorded, a clip the
+    other model doesn't have.  The confirm dialog only has room for COUNTS,
+    which left the user to diff the two extracts by hand to find out WHICH of
+    his mods didn't come across (DoomWalrus666, Pro -> Premium: "it missed a
+    couple ... I guess I will need to run a compare to truly figure them all
+    out").  These lines go in the log, which survives the dialog.
+    """
+    out = []
+    a = plan.get("audio") or {}
+    _detail_block(
+        out, "info",
+        "Transfer: %d sound(s) moved to a new index in the new version — "
+        "their replacements follow:",
+        a.get("remapped"),
+        lambda e: "%s  ->  %s" % (e["src_rel"], e["tgt_rel"]), cap)
+    _detail_block(
+        out, "error",
+        "Transfer: %d audio replacement(s) can NOT be carried — no sound in "
+        "the new version has identical audio (re-recorded, or only on the "
+        "other model).  Re-pick these by hand on the Replace Audio tab:",
+        a.get("dropped"), lambda e: e["src_rel"], cap)
+    _detail_block(
+        out, "error",
+        "Transfer: %d audio replacement(s) flagged — that index now holds a "
+        "DIFFERENT sound, so applying them would replace the wrong sound:",
+        a.get("flagged"), lambda e: e["src_rel"], cap)
+    _detail_block(
+        out, "error",
+        "Transfer: %d video replacement(s) can NOT be carried — the new "
+        "version has no matching clip:",
+        (plan.get("video") or {}).get("dropped"), lambda e: e["rel"], cap)
+    _detail_block(
+        out, "error",
+        "Transfer: %d image replacement(s) can NOT be carried — the new "
+        "version has no matching image:",
+        (plan.get("image") or {}).get("dropped"), lambda e: e["rel"], cap)
+    _detail_block(
+        out, "error",
+        "Transfer: %d text edit(s) can NOT be carried — that original text "
+        "isn't in the new version:",
+        (plan.get("text") or {}).get("dropped"), lambda e: e["original"], cap)
+    _detail_block(
+        out, "error",
+        "Transfer: %d renamed image group(s) can NOT be carried — that group "
+        "isn't in the new version:",
+        (plan.get("group_tags") or {}).get("dropped"), lambda e: e["key"], cap)
+    return out
 
 
 def apply_transfer(source_dir, target_dir, plan, include_flagged=False,

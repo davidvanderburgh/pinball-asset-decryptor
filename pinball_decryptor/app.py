@@ -2459,6 +2459,13 @@ class App:
                 "version, so nothing can transfer.")
             return
 
+        # Name every mod that can't come across BEFORE the dialog opens, so
+        # the list is waiting in the log whichever way the user answers.  The
+        # dialog only has room for counts, which left a tester diffing the two
+        # extracts by hand to find the handful that didn't make it.
+        for level, line in mod_transfer.plan_detail_lines(plan):
+            self.window.append_log(line, level)
+
         summary = self._format_transfer_summary(plan)
         if intro:
             summary = intro + "\n\n" + summary
@@ -2548,6 +2555,7 @@ class App:
     @staticmethod
     def _format_transfer_summary(plan):
         a = plan["audio"]; v = plan["video"]; i = plan["image"]; t = plan["text"]
+        flagged = len(a["flagged"])
         lines = ["Move your mods onto the new extract:", ""]
         lines.append("Audio:  %d matched, %d moved to a new index, "
                      "%d flagged, %d dropped"
@@ -2577,6 +2585,10 @@ class App:
             lines.append("%d edit(s) can't transfer (the slot/text no longer "
                          "exists in the new version) and will be skipped."
                          % dropped)
+        if dropped or flagged or a["remapped"]:
+            lines.append("")
+            lines.append("The log behind this dialog names them slot by slot "
+                         "(what moved where, and what can't come across).")
         lines.append("")
         lines.append("Your existing edits on the new extract are kept. "
                      "Proceed?")

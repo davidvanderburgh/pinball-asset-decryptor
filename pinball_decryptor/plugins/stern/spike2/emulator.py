@@ -412,7 +412,6 @@ class Spike2Emu:
         self._mapped = set()
         self.st = {"R": 0, "k": 0}
         self._slot_cache = {}   # (scale, chan) -> resolved codec entry (generic)
-        self._slot_recipe = {}  # chan -> (row_delta, sub_slot) that won last
         # (lo, hi) of the master-directory record array, set by the chain that
         # is replaying it; bounds the record write-back (see _record_write_addr).
         self._md_range = (0, 0)
@@ -1376,6 +1375,12 @@ class Spike2Emu:
     # equivalent pair and never ties the wrong codec -- see _resolve_entry.
     _SLOT_TIE = 0.02
 
+    # Sub-slots 0/1 are the codec proper (stereo / mono); 2/3 are that SAME
+    # codec reached a second way, one of them emitting the layout
+    # predecessor's body word first.  Only a sub-slot below this may be taken
+    # on the cheap first pass -- see _resolve_entry.
+    _ALIAS_SUB = 2
+
     def _slot_metrics(self, p, fnv, secs):
         """``(specflat, rms)`` of decoding ``p`` with codec ``fnv`` over the
         first ``secs`` -- or None if it doesn't decode.  Stereo takes the WORSE
@@ -1421,16 +1426,42 @@ class Spike2Emu:
         scale, in front of an otherwise silent head) and shifted by one sample.
         Taking the lowest qualifying sub-slot instead is both stable and the
         convention the validated build follows in :meth:`codec_fns` (stereo sub
-        0, mono sub 1), which is where 98.5% of sounds already landed."""
+        0, mono sub 1), which is where 98.5% of sounds already landed.
+
+        THE SAME RULE HAS TO GOVERN PASS 1, and the candidate ORDER has to be
+        the dispatch table's, not a hint's -- both learned on Godzilla LE 1.13
+        (PAD-77), where 29 of 2523 sounds decoded differently depending only on
+        how the catalog happened to split across workers:
+
+        * A sound whose first 0.6 s is DIGITAL SILENCE scores 1.0 on the
+          correct entry (:meth:`_specflat`'s flat-signal guard) and 0.0 on the
+          alias, whose lone predecessor word is a click in that silence.  Pass
+          1 read the alias as "clearly audio" and took it, so pass 2 -- the
+          stabilised path built for exactly this quiet-intro case -- never ran.
+          Hence pass 1 may only settle on a sub-slot below :data:`_ALIAS_SUB`;
+          an alias-only hit falls through to pass 2, which scores the pair over
+          3.5 s (identical, as they must be) and keeps the lower sub-slot.
+        * Whatever won was then remembered per channel and probed FIRST for
+          every later scale, where the pair scores a dead tie and "first
+          qualifying" hands the decision to the probe order.  One quiet-intro
+          sound therefore flipped every later mono sound in that worker onto
+          the alias.  A hint that reorders the pool cannot be allowed to decide
+          it, so the search is always the dispatch order; the full eight-place
+          walk it was saving costs ~0.3 s (measured)."""
         key = (p["scale"], p["chan"])
         if key in self._slot_cache:
             return self._slot_cache[key]
         cands = self._slot_candidates(p)
         where = {fnv: place for fnv, place in cands}
         order = [fnv for fnv, _place in cands]
-        # Pass 1: a short window resolves loud sounds immediately.
+        # Pass 1: a short window resolves loud sounds immediately.  Aliases sit
+        # this pass out (above): on a silent head they are the only thing that
+        # reads as audio, and taking one there is what flipped a whole worker.
         best = None
         for fnv in order:
+            place = where.get(fnv)
+            if place is not None and place[1] >= self._ALIAS_SUB:
+                continue
             m = self._slot_metrics(p, fnv, 0.6)
             if m is not None and m[0] < 0.45:
                 best = fnv
@@ -1448,33 +1479,26 @@ class Spike2Emu:
             pool = survivors if survivors else [(f, sf) for f, sf, _ in scored]
             if pool:
                 best = pick_slot(pool, self._SLOT_TIE)
-        if best is not None:
-            # Where this build keeps a channel's codec is a property of the
-            # BUILD, not of the scale, so the winning (row delta, sub-slot) is
-            # tried first for every later scale of the same channel count.  That
-            # keeps the widened search a one-off: without it, a build like Venom
-            # would re-walk every candidate for all 32 of its stereo scales.
-            self._slot_recipe[p["chan"]] = where.get(best)
         self._slot_cache[key] = best
         return best
 
     def _slot_candidates(self, p):
-        """``[(fn_va, (row_delta, sub_slot)), ...]`` to probe for this sound,
-        most-likely first and de-duplicated by function pointer.
+        """``[(fn_va, (row_delta, sub_slot)), ...]`` to probe for this sound, in
+        DISPATCH-TABLE order and de-duplicated by function pointer.
 
-        Order is what keeps this cheap: any recipe already learned for this
-        channel count leads, then the sound's own dispatch row, then the rows in
-        :data:`_PROBE_ROWS`.  A card whose entry is where it has always been is
-        therefore resolved by the very first probe, exactly as before."""
+        The sound's own dispatch row leads, then the rows in
+        :data:`_PROBE_ROWS`, each low sub-slot first -- so a card whose entry is
+        where it has always been still resolves on the first probe or two and,
+        more importantly, every sound of a (scale, chan) resolves the same way
+        no matter which one gets there first.  This list used to lead with the
+        place that won for the last scale of the same channel count, which made
+        the answer depend on a worker's history: see :meth:`_resolve_entry` for
+        the extract that decoded 29 sounds differently because of it."""
         scale = p["scale"]
         places = []
-        hint = self._slot_recipe.get(p["chan"])
-        if hint is not None:
-            places.append(hint)
         for d in self._PROBE_ROWS:
             for s in self._PROBE_SLOTS:
-                if (d, s) != hint:
-                    places.append((d, s))
+                places.append((d, s))
         out, seen = [], set()
         for d, s in places:
             addr = self.DISPATCH + (scale + d) * 0x40 + s * 4

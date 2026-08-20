@@ -3311,7 +3311,11 @@ class MainWindow:
                 self.transfer_src_ver_var)
         _picker(1, "2. New extract (stock, new version):",
                 self.transfer_dst_var, self._browse_transfer_dst,
-                self.transfer_dst_ver_var)
+                self.transfer_dst_ver_var,
+                tip="A fresh, unmodified extract of the code your mods are "
+                    "moving ONTO. It can be the other model of the same "
+                    "title as well as a newer version — a Pro extract's mods "
+                    "transfer onto the Premium/LE code, and the reverse.")
         _picker(2, "3. Stock extract of the OLD version (optional):",
                 self.transfer_oldstock_var, self._browse_transfer_oldstock,
                 tip="Not an alternative to field 1, and never in conflict "

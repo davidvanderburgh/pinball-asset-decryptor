@@ -39,6 +39,7 @@ import json
 import mmap
 import os
 import re
+import signal
 import sys
 import tkinter as tk
 from tkinter import ttk
@@ -430,6 +431,40 @@ def main(argv=None):
     shm = SwitchShm(args.shm)
     root = tk.Tk()
     MatrixUI(root, devices, shm, pf_png=args.pf, pulse_ms=args.pulse_ms)
+
+    # Close cleanly on BOTH the window's X button and a SIGTERM from the rig's
+    # Stop.  This matters for more than tidiness: a Tk window that is SIGKILL'd
+    # (which is what happens if it does not exit on SIGTERM) never releases its
+    # WSLg surface, and the frame is left as an unresponsive GHOST on the
+    # Windows desktop that only `wsl --shutdown` clears.  So Stop must be able
+    # to make this window close ITSELF.
+    #
+    # A Python signal handler does not run while the interpreter is blocked in
+    # Tcl's mainloop, so we do not destroy from the handler directly - we set a
+    # flag and let the 100 ms tick (always scheduled) act on it, which is the
+    # first moment the interpreter has control back.
+    closing = {'now': False}
+
+    def request_close(*_a):
+        closing['now'] = True
+
+    def watch_close():
+        if closing['now']:
+            try:
+                root.destroy()
+            except tk.TclError:
+                pass
+            return
+        root.after(50, watch_close)
+
+    root.protocol('WM_DELETE_WINDOW', request_close)
+    try:
+        signal.signal(signal.SIGTERM, request_close)
+        signal.signal(signal.SIGINT, request_close)
+    except (ValueError, OSError):
+        pass                        # not the main thread; the X button still works
+    root.after(50, watch_close)
+
     root.mainloop()
     return 0
 

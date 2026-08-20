@@ -71,12 +71,24 @@ RUN='
   export HOME=/root
   '"$SHIM_ENV"'
   cd $GAMEDIR
+  dnum=${DISPLAY#:}; dnum=${dnum%%.*}
   n=0
   while [ $n -lt '"${JJP_MAX_RESTARTS:-6}"' ]; do
     ./game
     rc=$?
     case "$rc" in
-      43|44|68) n=$((n+1)); echo "[rig] game exit $rc - restarting ($n)" ;;
+      43|44|68)
+        # Restart ONLY if the display is still there.  If the user closed the
+        # window, Xephyr is gone and its X socket with it - restarting the game
+        # then just spawns a process that fails to open a display and dies at
+        # once, over and over, churning windows and leaving WSLg ghosts.  A
+        # closed window means "stop", so we stop.
+        if [ -S /tmp/.X11-unix/X${dnum} ] || [ "'"$JJP_DISPLAY"'" = ":0" ]; then
+          n=$((n+1)); echo "[rig] game exit $rc - restarting ($n)"
+        else
+          echo "[rig] display gone (window closed) - not restarting"
+          exit 0
+        fi ;;
       *) exit $rc ;;
     esac
   done

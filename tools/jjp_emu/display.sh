@@ -28,10 +28,18 @@ DUAL=0
 case "${1:-}" in
     --dual) DUAL=1 ;;
     --stop)
-        pkill -f "Xephyr $JJP_NESTED" 2>/dev/null
-        sleep 1
-        # `pgrep -c` prints 0 AND exits 1, so the obvious `|| echo 0` prints
-        # TWO zeros - the same trap status.sh and alive.sh already carry.
+        # SIGTERM first and WAIT.  Xephyr is a WSLg client; if it is SIGKILL'd
+        # it never releases its Windows-side surface and the frame ghosts on
+        # the desktop.  SIGTERM lets it close its own window cleanly.
+        pkill -TERM -f "Xephyr $JJP_NESTED" 2>/dev/null
+        for _ in 1 2 3 4; do
+            L=$(pgrep -fc "Xephyr $JJP_NESTED" 2>/dev/null); L=${L:-0}
+            [ "$L" = "0" ] && break
+            sleep 0.5
+        done
+        pkill -9 -f "Xephyr $JJP_NESTED" 2>/dev/null   # only a hung one reaches here
+        # `pgrep -c` prints 0 AND exits 1, so capture then default - the same
+        # trap status.sh and alive.sh already carry.
         LEFT=$(pgrep -fc "Xephyr $JJP_NESTED" 2>/dev/null)
         echo "Xephyr on $JJP_NESTED stopped (${LEFT:-0} left)"
         exit 0 ;;

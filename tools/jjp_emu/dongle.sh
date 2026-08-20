@@ -28,18 +28,34 @@ VID=${JJP_HASP_VIDPID%%:*}
 PID=${JJP_HASP_VIDPID##*:}
 
 # 1. Find the key in sysfs, exactly as udev's ATTRS match would.
+#
+# POLL for it, do not check once.  `usbipd attach` on the Windows side is
+# ASYNCHRONOUS: it returns before WSL has finished enumerating the USB device,
+# so a single check right after an attach reliably misses a key that is about
+# to appear a second or two later - which is exactly how a Start with the key
+# plugged in failed with "NO KEY".  Wait up to JJP_KEY_WAIT seconds.
+find_key() {
+    KDEV=""; USBNODE=""
+    for d in /sys/bus/usb/devices/*; do
+        [ -f "$d/idVendor" ] || continue
+        [ "$(cat "$d/idVendor")" = "$VID" ] || continue
+        [ "$(cat "$d/idProduct")" = "$PID" ] || continue
+        KDEV=$(basename "$d")
+        USBNODE=$(printf "/dev/bus/usb/%03d/%03d" "$(cat "$d/busnum")" "$(cat "$d/devnum")")
+        return 0
+    done
+    return 1
+}
+
 KDEV=""; USBNODE=""
-for d in /sys/bus/usb/devices/*; do
-    [ -f "$d/idVendor" ] || continue
-    [ "$(cat "$d/idVendor")" = "$VID" ] || continue
-    [ "$(cat "$d/idProduct")" = "$PID" ] || continue
-    KDEV=$(basename "$d")
-    USBNODE=$(printf "/dev/bus/usb/%03d/%03d" "$(cat "$d/busnum")" "$(cat "$d/devnum")")
-    break
+for _ in $(seq 1 "${JJP_KEY_WAIT:-15}"); do
+    find_key && break
+    sleep 1
 done
 if [ -z "$KDEV" ]; then
-    echo "NO KEY: Sentinel $JJP_HASP_VIDPID is not visible inside WSL." >&2
-    echo "  On Windows:  usbipd attach --wsl --hardware-id $JJP_HASP_VIDPID" >&2
+    echo "NO KEY: Sentinel $JJP_HASP_VIDPID did not appear inside WSL." >&2
+    echo "  Plug the purple JJP key into this PC, then on Windows:" >&2
+    echo "    usbipd attach --wsl --hardware-id $JJP_HASP_VIDPID" >&2
     echo "  (usbipd needs a WSL session already running, or it errors with" >&2
     echo "   'There is no WSL 2 distribution running'.)" >&2
     exit 3

@@ -336,7 +336,11 @@ class JJPEmulatePanel:
 
         def work():
             try:
-                self._attach_dongle()
+                if not self._attach_dongle():
+                    # The key never became visible.  watch.sh would just wait
+                    # again and fail with the same message; stop here with the
+                    # guidance instead of a redundant minute of restore + wait.
+                    return
                 self._log("JJP: starting the rig (this takes a minute on a "
                           "first run — the image has to be restored).")
                 args = [iso] if iso else []
@@ -360,34 +364,109 @@ class JJPEmulatePanel:
         threading.Thread(target=work, daemon=True).start()
 
     def _attach_dongle(self):
-        """Hand the key to WSL, poking WSL awake first.
+        """Hand the key to WSL and WAIT until it is actually there.
 
-        ``usbipd attach`` fails outright if no WSL 2 distribution is running,
-        and on a freshly booted machine nothing has started one yet — so the
-        harmless ``true`` below is load-bearing.
+        Two things make this need to be more than a single ``usbipd attach``:
+
+        * ``usbipd attach`` fails outright if no WSL 2 distribution is running,
+          and on a freshly booted machine — or right after a ``wsl --shutdown``
+          — nothing has started one yet.  The harmless ``true`` wakes it.
+        * ``usbipd attach`` is ASYNCHRONOUS.  It returns before WSL finishes
+          enumerating the USB device, so proceeding straight to the launch
+          hands the rig a key that is not visible yet, and the launch fails
+          "NO KEY" a second before the key appears.  This is exactly the error
+          the user hit.  So after attaching we POLL WSL until the key is really
+          visible, and re-attach once if it is not.
+
+        Returns True if the key ends up visible in WSL, False otherwise — the
+        caller can then decide whether the launch is worth attempting.
         """
         cmd = attach_dongle_cmd()
         if not cmd:
             self._log("JJP: usbipd-win not found — cannot pass the security "
                       "key through to WSL. Install it from "
                       "https://github.com/dorssel/usbipd-win")
-            return
+            return False
+
+        # Wake WSL so usbipd has a distribution to attach to.
         try:
             subprocess.run(["wsl.exe", "-e", "true"], timeout=60,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                            creationflags=_rig.CREATE_FLAGS)
-            out = subprocess.run(cmd, stdout=subprocess.PIPE,
-                                 stderr=subprocess.STDOUT, timeout=60,
-                                 creationflags=_rig.CREATE_FLAGS)
-            msg = out.stdout.decode("utf-8", "replace").strip()
-            if out.returncode == 0:
-                self._log("JJP: security key attached to WSL.")
-            elif "already attached" in msg.lower():
-                self._log("JJP: security key already attached.")
-            else:
-                self._log("JJP: could not attach the security key: %s" % msg)
-        except Exception as exc:                           # noqa: BLE001
-            self._log("JJP: usbipd failed: %s" % exc)
+        except Exception:                                  # noqa: BLE001
+            pass
+
+        if self._key_visible_in_wsl():
+            self._log("JJP: security key already present in WSL.")
+            return True
+
+        for attempt in (1, 2):
+            try:
+                out = subprocess.run(cmd, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT, timeout=60,
+                                     creationflags=_rig.CREATE_FLAGS)
+                msg = out.stdout.decode("utf-8", "replace").strip()
+            except Exception as exc:                       # noqa: BLE001
+                self._log("JJP: usbipd failed: %s" % exc)
+                return False
+
+            low = msg.lower()
+            if "no device" in low or "not found" in low:
+                # The key is not plugged into the PC at all — nothing to wait
+                # for, and the status grid already says "No security key".
+                self._log("JJP: the purple JJP key is not plugged into this PC.")
+                return False
+            if "not shared" in low or "bind" in low:
+                self._bind_dongle()                        # then the retry attaches
+
+            # Attached (or already attached) — now WAIT for it to enumerate.
+            if self._wait_for_key():
+                self._log("JJP: security key attached and visible in WSL.")
+                return True
+            self._log("JJP: key attached but not visible yet — retrying.")
+
+        self._log("JJP: the security key did not appear in WSL. If it is "
+                  "plugged in, unplug and replug it, then press Start again.")
+        return False
+
+    def _bind_dongle(self):
+        """Share the key with usbipd (needed the first time, or after a
+        reboot).  Best-effort; the attach retry is what actually uses it."""
+        exe = usbipd_path()
+        if not exe:
+            return
+        try:
+            subprocess.run([exe, "bind", "--hardware-id", HASP_VID_PID],
+                           timeout=30, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL,
+                           creationflags=_rig.CREATE_FLAGS)
+        except Exception:                                  # noqa: BLE001
+            pass
+
+    def _key_visible_in_wsl(self):
+        """True if the Sentinel key is enumerated in WSL right now."""
+        try:
+            out = subprocess.run(
+                ["wsl.exe", "-e", "bash", "-lc",
+                 "for d in /sys/bus/usb/devices/*; do "
+                 "[ -f $d/idVendor ] || continue; "
+                 "[ \"$(cat $d/idVendor)\" = 0529 ] && "
+                 "[ \"$(cat $d/idProduct)\" = 0001 ] && { echo yes; exit 0; }; "
+                 "done; echo no"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30,
+                creationflags=_rig.CREATE_FLAGS)
+            return b"yes" in out.stdout
+        except Exception:                                  # noqa: BLE001
+            return False
+
+    def _wait_for_key(self, tries=12):
+        """Poll for the key to enumerate after an attach (it is async)."""
+        import time
+        for _ in range(tries):
+            if self._key_visible_in_wsl():
+                return True
+            time.sleep(1)
+        return False
 
     def _stop_async(self):
         self._busy = True

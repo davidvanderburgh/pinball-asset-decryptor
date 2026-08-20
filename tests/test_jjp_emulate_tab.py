@@ -300,3 +300,55 @@ def test_help_has_an_entry_for_the_new_tab():
     body = " ".join(t + " " + b for t, b in HELP_CONTENT["Emulate JJP"])
     assert "security key" in body.lower()
     assert "read only" in body.lower()
+
+
+# ------------------------------------------------------- dongle self-healing --
+
+def test_attach_returns_true_when_key_already_visible(panel, monkeypatch):
+    """If the key is already enumerated in WSL, attach is a no-op that
+    succeeds without calling usbipd at all."""
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=0, stdout=b""))
+    monkeypatch.setattr(panel, "_key_visible_in_wsl", lambda: True)
+    assert panel._attach_dongle() is True
+
+
+def test_attach_waits_out_the_async_race(panel, monkeypatch):
+    """usbipd attach is async, so a key that is not visible at first but
+    appears shortly after must be waited for, not failed on."""
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=0,
+                                                        stdout=b"attached"))
+    # visible only from the 3rd check onward
+    seq = iter([False, False, False, True, True])
+    monkeypatch.setattr(panel, "_key_visible_in_wsl",
+                        lambda: next(seq, True))
+    monkeypatch.setattr("time.sleep", lambda *_a: None)
+    assert panel._attach_dongle() is True
+
+
+def test_attach_gives_up_cleanly_when_key_not_plugged_in(panel, monkeypatch):
+    """A key that is genuinely not on the PC is a clean False, not a hang or a
+    crash - usbipd says 'no device', and there is nothing to wait for."""
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(
+                            returncode=1, stdout=b"usbipd: error: no device"))
+    monkeypatch.setattr(panel, "_key_visible_in_wsl", lambda: False)
+    monkeypatch.setattr("time.sleep", lambda *_a: None)
+    assert panel._attach_dongle() is False
+
+
+def test_start_skips_launch_when_key_never_appears(panel, monkeypatch):
+    """If the key cannot be made visible, do NOT shell out to watch.sh - that
+    would restore the image and wait another minute only to fail the same way."""
+    monkeypatch.setattr(panel, "_attach_dongle", lambda: False)
+    ran = []
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: ran.append(a) or SimpleNamespace(
+                            returncode=0, stdout=b""))
+    panel._iso_var.set("D:/x/Godfather.iso")
+    panel._info = {}
+    panel._start_async()
+    import time as _t
+    _t.sleep(0.3)          # let the worker thread run
+    assert not ran         # watch.sh was never invoked

@@ -788,7 +788,12 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    wins. The panel is also how you move mods **between the two models of
    one game**: point it at your Pro extract and a fresh Premium/LE
    extract (or the other way round) and whatever the two share
-   transfers. It
+   transfers. From v0.147.0 that carries the video and image mods too,
+   not just the audio: every on-card path starts with a folder Stern
+   names after the model (`godzilla_pro` on the Pro card,
+   `godzilla_le` on the Premium/LE build of the same title), and the
+   panel swaps that one component so the two models' asset trees line
+   up. It
    works even for code modded outside this app (mods baked into the game
    itself), reads a version hint from each extract so you can see what
    you're combining, and wires the build straight to the new version so

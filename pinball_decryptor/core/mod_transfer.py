@@ -17,10 +17,14 @@ asset layout.  Two hazards, handled differently:
 * **Audio** slots are ``audio/idxNNNN.wav`` where ``NNNN`` is the master-
   directory index.  A new version can insert / remove / reorder sounds, so the
   same index can be a *different sound*.  We therefore match audio by the
-  **content of the stock WAV** (a cheap size + head/tail digest of the file the
-  Extract produced, which stays stock until Write), not by the raw index — so a
-  replacement follows its sound even if it moved to a new index, and an index
-  that now holds a *different* sound is flagged rather than silently mis-applied.
+  **content of the stock WAV** (a cheap size + head/tail digest), not by the raw
+  index — so a replacement follows its sound even if it moved to a new index,
+  and an index that now holds a *different* sound is flagged rather than
+  silently mis-applied.  The stock bytes are NOT always the ones at
+  ``audio/idxNNNN.wav``: building writes the replacement over the extracted
+  file, so :func:`_stock_path` reads the ``.orig/`` snapshot for any slot that
+  has one, and :func:`_plan_audio` falls back to the two folders' Extract
+  baselines when even that is missing.
 * **Image / Video / Text** are keyed by stable identities: loose images and
   videos by rel path / on-card path, scene textures by the manifest's asset
   card path, radium-embedded images by (radium card path, occurrence ordinal)
@@ -68,7 +72,7 @@ import hashlib
 import os
 import re
 
-from . import staged_changes, text_manifest
+from . import checksums, staged_changes, staged_originals, text_manifest
 
 # Slot categories that carry ``rel_path -> replacement`` assignment maps.
 _ASSIGN_KEYS = ("audio", "video", "image")
@@ -118,6 +122,21 @@ def _abs(root, rel):
 
 def _stock_exists(root, rel):
     return os.path.isfile(_abs(root, rel))
+
+
+def _stock_path(root, rel):
+    """Path holding *rel*'s PRISTINE, as-extracted bytes.
+
+    Not always ``root/rel``: the Replace tabs stage an edit by writing the
+    converted replacement *over* the extracted file and parking the original in
+    ``.orig/`` (:mod:`core.staged_originals`), so in any project the user has
+    actually BUILT — which is how you get a card — every modded slot holds the
+    replacement.  Audio pairs across versions and models by content, so reading
+    the replacement there matches nothing in the target and the sounds the user
+    modded (the only ones a transfer is about) all flag or drop.  Prefer the
+    snapshot; fall back to the file itself for an un-built folder.
+    """
+    return staged_originals.snapshot_path(root, rel) or _abs(root, rel)
 
 
 # Stable per-slot tokens in extracted WAV names, mirroring the Stern engine's
@@ -704,6 +723,9 @@ def plan_direct_diff(modded_dir, target_dir, log_cb=None):
 def _plan_audio(source_dir, target_dir, saved_audio, log_cb=None):
     """Reconcile audio assignments by stock-WAV content.
 
+    "Stock" means the bytes the Extract produced, which on a BUILT project is
+    the ``.orig/`` snapshot rather than the slot file — see :func:`_stock_path`.
+
     Returns ``(matched, remapped, flagged, dropped)`` where each entry is a dict
     the caller can render and :func:`apply_transfer` can consume:
       matched  {src_rel, tgt_rel==src_rel, repl}
@@ -716,7 +738,9 @@ def _plan_audio(source_dir, target_dir, saved_audio, log_cb=None):
     if not saved_audio:
         return matched, remapped, flagged, dropped
 
-    # Index the target's stock WAVs by content signature (audio/ only).
+    # Index the target's stock WAVs by content signature (audio/ only).  Via
+    # _stock_path, so a target the user has already staged edits on — which
+    # apply_transfer explicitly supports — still indexes by its stock sounds.
     tgt_audio_dir = os.path.join(target_dir, "audio")
     sig_to_rels = {}
     if os.path.isdir(tgt_audio_dir):
@@ -727,13 +751,38 @@ def _plan_audio(source_dir, target_dir, saved_audio, log_cb=None):
             if i % 250 == 0:
                 log("  ...%d/%d sounds indexed" % (i, len(names)))
             rel = "audio/" + name
-            sig = content_signature(_abs(target_dir, rel))
+            sig = content_signature(_stock_path(target_dir, rel))
             if sig is not None:
                 sig_to_rels.setdefault(sig, []).append(rel)
 
+    # Last-resort identity for a slot whose pristine bytes are gone entirely:
+    # no ``.orig`` snapshot because it was edited before snapshots shipped, or
+    # replaced by hand outside the Replace tabs (snapshot() refuses a file that
+    # has already diverged).  Both folders' Extract baselines still record what
+    # every file hashed to when it came off the card, so the pair can be made
+    # from bookkeeping alone, with no file read at all.  Built lazily: a folder
+    # whose sounds all match by content never touches it.
+    _base = {}
+
+    def _baseline_cands(src_rel):
+        if not _base:
+            _base["src"] = checksums.read_baseline_any(source_dir)
+            by_md5 = {}
+            for rel, md5 in checksums.read_baseline_any(target_dir).items():
+                if rel.startswith("audio/"):
+                    by_md5.setdefault(md5, []).append(rel)
+            _base["tgt"] = by_md5
+        md5 = _base["src"].get(src_rel)
+        if not md5:
+            return []
+        return [r for r in _base["tgt"].get(md5, ())
+                if _stock_exists(target_dir, r)]
+
     for src_rel, repl in saved_audio.items():
-        src_sig = content_signature(_abs(source_dir, src_rel))
+        src_sig = content_signature(_stock_path(source_dir, src_rel))
         cands = sig_to_rels.get(src_sig, []) if src_sig is not None else []
+        if not cands:
+            cands = _baseline_cands(src_rel)
         if src_rel in cands:
             matched.append({"src_rel": src_rel, "tgt_rel": src_rel, "repl": repl})
         elif cands:

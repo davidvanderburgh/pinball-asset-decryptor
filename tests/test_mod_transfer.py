@@ -3,7 +3,8 @@ extract folder onto a new-version extract, reconciling layout changes."""
 
 import os
 
-from pinball_decryptor.core import mod_transfer, staged_changes, text_manifest
+from pinball_decryptor.core import (checksums, mod_transfer, staged_changes,
+                                    staged_originals, text_manifest)
 
 
 def _wav(path, payload):
@@ -94,6 +95,132 @@ def test_audio_missing_sound_is_dropped(tmp_path):
     plan = mod_transfer.plan_transfer(src, tgt)
     assert len(plan["audio"]["dropped"]) == 1
     assert plan["totals"]["transfer"] == 0
+
+
+def _build(root, edits):
+    """Put *root* in the state a project the user has actually BUILT is in:
+    each edited slot's pristine bytes snapshotted into ``.orig/``, the
+    replacement written over the slot file.  Mirrors what
+    ``core.audio_slots.stage_replacements`` does at build time."""
+    baseline = checksums.read_checksums(root)
+    for rel, data in edits.items():
+        staged_originals.snapshot(root, rel, baseline.get(rel))
+        _wav(os.path.join(root, rel.replace("/", os.sep)), data)
+
+
+def test_built_source_matches_from_its_orig_snapshot(tmp_path):
+    # Building writes the replacement OVER audio/idxNNNN.wav, so the slot file
+    # is no longer the sound the matcher has to recognise.  The pristine bytes
+    # are in .orig/ and that is what must be compared.
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {"audio/idx0001.wav": b"THE-ROAR" * 100})
+    _mk_extract(tgt, {"audio/idx0001.wav": b"THE-ROAR" * 100})
+    staged_changes.save(src, {"audio": {"audio/idx0001.wav": r"C:\mods\roar.wav"}})
+    checksums.generate_checksums(src)
+    _build(src, {"audio/idx0001.wav": b"MY-OWN-ROAR" * 90})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert len(plan["audio"]["matched"]) == 1
+    assert not plan["audio"]["flagged"] and not plan["audio"]["dropped"]
+
+
+def test_built_source_remaps_across_models(tmp_path):
+    # DoomWalrus666's case: a built Pro project onto the Premium code, whose
+    # sound table numbers the same sounds differently.  Before the .orig read
+    # every pick landed in dropped ("dropping all the audio").
+    src, tgt = str(tmp_path / "pro"), str(tmp_path / "prem")
+    _mk_extract(src, {"audio/idx0001.wav": b"ROAR" * 100,
+                      "audio/idx0004.wav": b"CRY" * 100})
+    _mk_extract(tgt, {"audio/idx0011.wav": b"ROAR" * 100,
+                      "audio/idx0014.wav": b"CRY" * 100})
+    staged_changes.save(src, {"audio": {"audio/idx0001.wav": r"C:\mods\roar.wav",
+                                        "audio/idx0004.wav": r"C:\mods\cry.wav"},
+                              "audio_loop": {"audio/idx0001.wav": True}})
+    checksums.generate_checksums(src)
+    _build(src, {"audio/idx0001.wav": b"MY-ROAR" * 90,
+                 "audio/idx0004.wav": b"MY-CRY" * 80})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert not plan["audio"]["dropped"] and not plan["audio"]["flagged"]
+    assert sorted((e["src_rel"], e["tgt_rel"])
+                  for e in plan["audio"]["remapped"]) == [
+        ("audio/idx0001.wav", "audio/idx0011.wav"),
+        ("audio/idx0004.wav", "audio/idx0014.wav")]
+
+    mod_transfer.apply_transfer(src, tgt, plan)
+    saved = staged_changes.load(tgt)
+    assert saved["audio"]["audio/idx0011.wav"] == r"C:\mods\roar.wav"
+    assert saved["audio_loop"]["audio/idx0011.wav"] is True
+
+
+def test_built_source_without_a_snapshot_falls_back_to_the_baseline(tmp_path):
+    # Edited before .orig snapshots existed, or replaced by hand outside the
+    # Replace tabs (snapshot() refuses an already-diverged file): the pristine
+    # bytes are gone for good, but both Extract baselines still record what the
+    # sound hashed to when it came off the card.
+    src, tgt = str(tmp_path / "pro"), str(tmp_path / "prem")
+    _mk_extract(src, {"audio/idx0001.wav": b"ROAR" * 100})
+    _mk_extract(tgt, {"audio/idx0011.wav": b"ROAR" * 100})
+    staged_changes.save(src, {"audio": {"audio/idx0001.wav": r"C:\mods\roar.wav"}})
+    checksums.generate_checksums(src)
+    checksums.generate_checksums(tgt)
+    _wav(os.path.join(src, "audio", "idx0001.wav"), b"MY-ROAR" * 90)  # no .orig
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert len(plan["audio"]["remapped"]) == 1
+    assert plan["audio"]["remapped"][0]["tgt_rel"] == "audio/idx0011.wav"
+
+    # ...and with no baseline to fall back on there is nothing left to match.
+    os.remove(os.path.join(src, checksums.CHECKSUMS_FILE))
+    assert len(mod_transfer.plan_transfer(src, tgt)["audio"]["dropped"]) == 1
+
+
+def test_baseline_fallback_ignores_a_sound_the_new_version_dropped(tmp_path):
+    # The baseline is bookkeeping, not the folder: a rel it still lists but the
+    # new extract no longer has on disk must not become a transfer target.
+    src, tgt = str(tmp_path / "pro"), str(tmp_path / "prem")
+    _mk_extract(src, {"audio/idx0001.wav": b"ROAR" * 100})
+    _mk_extract(tgt, {"audio/idx0011.wav": b"ROAR" * 100})
+    staged_changes.save(src, {"audio": {"audio/idx0001.wav": r"C:\mods\roar.wav"}})
+    checksums.generate_checksums(src)
+    checksums.generate_checksums(tgt)
+    _wav(os.path.join(src, "audio", "idx0001.wav"), b"MY-ROAR" * 90)
+    os.remove(os.path.join(tgt, "audio", "idx0011.wav"))
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert len(plan["audio"]["dropped"]) == 1
+    assert not plan["audio"]["remapped"]
+
+
+def test_built_source_still_flags_a_reused_index(tmp_path):
+    # The .orig read must not turn into "match anything": a slot whose sound
+    # genuinely changed in the new version is still flagged, not applied.
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {"audio/idx0001.wav": b"OLD-SOUND" * 100})
+    _mk_extract(tgt, {"audio/idx0001.wav": b"DIFFERENT" * 100})
+    staged_changes.save(src, {"audio": {"audio/idx0001.wav": r"C:\mods\a.mp3"}})
+    checksums.generate_checksums(src)
+    checksums.generate_checksums(tgt)
+    _build(src, {"audio/idx0001.wav": b"MY-SOUND" * 90})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert len(plan["audio"]["flagged"]) == 1
+    assert not plan["audio"]["matched"] and not plan["audio"]["remapped"]
+
+
+def test_target_with_its_own_staged_edit_indexes_by_stock(tmp_path):
+    # Transferring onto an extract the user has already worked on: the target
+    # slot holds ITS replacement, so it too must be indexed from .orig/.
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _mk_extract(src, {"audio/idx0001.wav": b"THE-SONG" * 100})
+    _mk_extract(tgt, {"audio/idx0005.wav": b"THE-SONG" * 100})
+    staged_changes.save(src, {"audio": {"audio/idx0001.wav": r"C:\mods\song.mp3"}})
+    checksums.generate_checksums(tgt)
+    _build(tgt, {"audio/idx0005.wav": b"TARGETS-OWN-EDIT" * 60})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert len(plan["audio"]["remapped"]) == 1
+    assert plan["audio"]["remapped"][0]["tgt_rel"] == "audio/idx0005.wav"
 
 
 def test_image_matches_by_relpath(tmp_path):

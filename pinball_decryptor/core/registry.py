@@ -79,6 +79,15 @@ class Capabilities:
     # gui/emulate_tab.py).  Used by Stern Spike 2.  Windows only in practice:
     # the rig runs inside WSL and draws through WSLg.
     emulate: bool = False
+    # Emulate tab for Jersey Jack.  A SEPARATE flag from ``emulate`` rather
+    # than a shared one, because ``emulate`` is read at exactly one place to
+    # gate exactly one frame — two manufacturers setting it True would both
+    # get the STERN panel.  The two rigs have almost nothing in common beyond
+    # "runs inside WSL": JJP's game is a native x86-64 binary (no qemu-user,
+    # no GL bridge, no video bridge) but it cannot run at all without the
+    # purple Sentinel USB key, which supplies the AES key its code is
+    # encrypted with.  See gui/jjp_emulate_tab.py and tools/jjp_emu.
+    emulate_jjp: bool = False
     # Auto-transcribe path: run faster-whisper across the extracted
     # audio files and emit a ``callouts.csv`` mapping each WAV to its
     # spoken text (non-speech samples are skipped via VAD).  Used by

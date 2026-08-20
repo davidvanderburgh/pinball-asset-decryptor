@@ -839,6 +839,44 @@ HELP_CONTENT = {
          "machines need different defaults; tick it when one preset fits "
          "everything you build."),
     ],
+    "Emulate JJP": [
+        ("What it does",
+         "Runs the real Jersey Jack game on this PC — in its own resizable "
+         "window, with sound. The game is a native x86-64 Linux program, so "
+         "unlike the Stern emulator there is no CPU emulation involved: it "
+         "simply runs. Pick a JJP game ISO, press Start, and it boots the way "
+         "the machine does — through its own startup into attract mode."),
+        ("You need the purple USB key",
+         "The JJP security key is not optional and cannot be worked around. "
+         "The game's program code is ENCRYPTED, and the key holds the "
+         "decryption key — so without it the game stops immediately with "
+         "\"Sentinel key not found\", exactly as a real machine does with the "
+         "key unplugged. The key is also per-game: the key from one JJP title "
+         "will not start another. Plug it into this PC before pressing Start; "
+         "the app hands it through to the emulator for you."),
+        ("Your game image is never modified",
+         "The ISO is mounted READ ONLY and the game runs against a temporary "
+         "overlay held in memory. Everything it writes while running — its "
+         "settings, its high scores, the manual pages it renders on first "
+         "boot — is discarded when you stop. You can always start again from a "
+         "known state, and a crashed run cannot corrupt the image."),
+        ("Switch matrix",
+         "Once the game is running, \"Switch matrix…\" opens the playfield "
+         "with every switch and light on it, drawn on the game's own playfield "
+         "photograph. Left-click a switch to trigger it the way a ball rolling "
+         "over would (a brief pulse); right-click to hold it closed, which is "
+         "what you want for balls sitting in the trough or the coin door. The "
+         "game reacts exactly as it would on the machine."),
+        ("First start is slow",
+         "The first Start on a given ISO restores the game filesystem out of "
+         "it, which is several GB and takes a few minutes. That result is "
+         "cached, so every later Start on the same ISO is quick."),
+        ("If there is no sound",
+         "WSL has no sound card, so the emulator routes audio through "
+         "Windows. If music sounds wrong, judge it by ear rather than by a "
+         "test tone — the audio path is known to pass a plain tone cleanly "
+         "while distorting music."),
+    ],
     "Emulate": [
         ("What it does",
          "Runs the real Stern Spike 2 game binary on this PC — in its own "

@@ -506,6 +506,22 @@ class App:
         if states_var is not None:
             states_var.set(states)
 
+        # The JJP emulator's game ISO, restored the same way and with the same
+        # mapped-drive treatment, from its own key.
+        jjp_iso_var = getattr(self.window, "jjp_emulate_iso_var", None)
+        if jjp_iso_var is not None:
+            jjp_iso = ""
+            if project_folder:
+                from .core import project_file
+                try:
+                    data = project_file.load_anchor(project_folder)
+                    jjp_iso = str(data.get("jjp_emulate_iso") or "")
+                except (OSError, ValueError):
+                    jjp_iso = ""
+            else:
+                jjp_iso = str(self._settings.get("jjp_emulate_iso") or "")
+            jjp_iso_var.set(_rmd(jjp_iso) if jjp_iso else "")
+
     # ------------------------------------------------------------------
     # Prerequisite checking
     # ------------------------------------------------------------------
@@ -3814,6 +3830,15 @@ class App:
         if card_var is not None:
             try:
                 self._settings["emulate_card"] = card_var.get().strip()
+            except tk.TclError:
+                pass
+        # The JJP emulator's game ISO rides the same rail but under its OWN
+        # key: a Stern .raw card and a JJP .iso in one setting is a bug waiting
+        # for the first manufacturer switch.
+        jjp_iso_var = getattr(self.window, "jjp_emulate_iso_var", None)
+        if jjp_iso_var is not None:
+            try:
+                self._settings["jjp_emulate_iso"] = jjp_iso_var.get().strip()
             except tk.TclError:
                 pass
         states_var = getattr(self.window, "emulate_savestates_var", None)

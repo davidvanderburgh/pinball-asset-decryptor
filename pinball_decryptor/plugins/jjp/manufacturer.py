@@ -214,6 +214,13 @@ class JJPManufacturer(Manufacturer):
         # in-app.  The flash_* wording attrs below relabel the shared
         # button/dialog accordingly.
         flash_image=True,
+        # Emulate tab — run the game itself on this PC (gui/jjp_emulate_tab.py,
+        # rig in tools/jjp_emu).  Unlike every other capability here this one
+        # does not act on the image in the Input box: it mounts a game ISO read
+        # only and runs the real binary against it.  Needs the purple Sentinel
+        # USB key, which is not a check but the AES key the game's code is
+        # encrypted with, so there is no dongle-free path.
+        emulate_jjp=True,
     )
     input_spec = InputSpec(
         label="JJP game ISOs",

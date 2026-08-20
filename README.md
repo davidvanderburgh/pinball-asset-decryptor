@@ -777,7 +777,10 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    against new directly for images and video), and the new version's card
    image to build onto. Audio is matched by *sound content* so a
    replacement follows its sound even if its index moved, and a slot that
-   changed or vanished is flagged rather than silently mis-applied. Image
+   changed or vanished is flagged rather than silently mis-applied. From
+   v0.147.1 that comparison reads each slot's saved pre-edit original, so
+   it works the same from a project you have already built as from a
+   freshly extracted one. Image
    edits (including single-character font-glyph edits) and your renamed
    image-group names ride along too, matched by their on-card identity so
    they land on the right slot even when the new firmware re-baked the art

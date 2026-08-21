@@ -1344,7 +1344,19 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **46. On turtles_pro the ACTION BUTTON is FINICKY, not dead: it works
       occasionally in attract and never selects a character during a game.**
-      `S2 D3`
+      `S2 D3` ← WORKING ON
+      **★★ DAVID, 2026-08-21, GROUPING THIS INTO ITEM 60's PASS — AND IT IS A
+      MECHANISM CLAIM, NOT A FEATURE REQUEST:** *"i should be able to press the
+      action button to pick a character and launch a ball at the same time.
+      that's how it works on the actual machine."* On the real cabinet the
+      lockdown-bar action button IS the launch button, so at character select
+      one press both picks the turtle and plunges. **If the game gates that
+      press on having a ball to launch, "never selects a character" is a
+      SYMPTOM of this rig having no ball in the shooter lane, not a lost
+      press** — and that is a different fault from item 17's event lottery.
+      Branch `item/46` is cut from `item/60`, not from main, because item 60
+      built the very action row this may have to change and two branches
+      editing it would collide.
       **★ PROBABLY ALREADY FIXED by item 17's close (2026-08-13): the cabinet
       was blind 74% of the time on EVERY title — the game re-ran its aux
       device init every ~924 ms because the shim's i2c/bus replies said

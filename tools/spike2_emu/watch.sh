@@ -439,7 +439,7 @@ if [ "$DROP" = 1 ]; then
     # single PAD_PIVOT one, which is a nasty thing to leave behind.
     for f in "$LOG" "$HOSTLOG" "$HOME/padvid.log" "$HOME/padauto.log" \
              "$HOME/padball.log" "$HOME/padaudio.log" "$HOME/padtables.log" \
-             "$PFLOG"; do
+             "$HOME/padswx.log" "$PFLOG"; do
         [ -e "$f" ] || : > "$f" 2>/dev/null
         chown "$PAD_USER" "$f" 2>/dev/null
     done
@@ -1245,6 +1245,29 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
     AUTOPG=$!
     echo "[watch] auto-advance on: it will press Service Back until the game"
     echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
+fi
+
+# THE SWITCH EXERCISER (item 59). The `CHECK SWITCH #n` rows on Tech Alerts are
+# the game's own NO-USAGE audit, not a fault in this rig - on a machine nobody
+# plays, the trough, the slingshots, the EOS switches and the shooter lane
+# genuinely never move. A real machine clears them by being played; this works
+# every safe switch once instead. MEASURED on godzilla_pro 2026-08-21: the
+# switch-alert provider read `active=37`, an exercise took it to 0 and the glass
+# said "No Technician Alerts", and the NEXT BOOT read 37 again - so it belongs
+# here, on every boot, rather than being done once by hand.
+#
+# Backgrounded like autoattract, and for the same reason: it spends its first
+# ~15 s asleep waiting on the boot, and this script must stay responsive to the
+# window closing. It cannot disturb autoattract - swexercise.sh's header has
+# that argument checked against all three of that script's predicates.
+#
+# PAD_SW_EXERCISE=0 turns it off, and a measurement run that greps `[sw]` may
+# well want to: it puts ~44 tagged edges in the log about 20 s into every boot.
+# They carry source letter `x`, so `grep -v 'ms [+-][0-9]*x'` removes them.
+if [ "${PAD_SW_EXERCISE:-1}" != 0 ]; then
+    setsid_as_user bash "$S/swexercise.sh" "$LOG" > "$HOME/padswx.log" 2>&1 &
+    echo "[watch] switch exerciser on: it clears the CHECK SWITCH tech alerts"
+    echo "[watch] once the game's switch table is up (PAD_SW_EXERCISE=0 off)."
 fi
 
 # THE BALL FEEDER (item 21b). The game fires its trough eject coil and waits

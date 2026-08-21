@@ -51,6 +51,14 @@ pkill -9 -f 'ballfeed[.]py'
 # has artwork. It waits in a poll loop for the guest's switch table, so
 # it outlives a run that ends first. alive.sh counts it.
 pkill -9 -f 'mktables[.]py'
+# The switch exerciser (item 59), both halves. The shell half sleeps in a poll
+# loop for the guest's switch table and would outlive a run that ends first;
+# the python half drives ~44 switch ids over ~10 s, so a stop asked for mid
+# exercise must not leave it pressing switches into whatever runs next. Killed
+# BEFORE the shell half's own `up()` check could notice, deliberately - the
+# same argument as the ball feeder above. alive.sh counts both.
+pkill -9 -f 'swexercise[.]sh'
+pkill -9 -f 'swexercise[.]py'
 # The event feed. An orphaned `tail -F` never exits by itself.
 #
 # $PAD_HOME AND NOT $HOME, and padpath.sh's own header carries the full story:

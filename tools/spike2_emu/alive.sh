@@ -157,9 +157,17 @@ VID=$(n -f 'padvidhost\.py')
 # many were running. It mattered less here than in killgame.sh, which used the
 # same wrong path to KILL, but a counter that reads 0 because it looked in the
 # wrong place is the exact failure this script exists to not have.
+# swexercise.sh / swexercise.py (item 59) are counted from the day they were
+# written, which is this script's standing rule. The shell half sleeps in a
+# poll loop waiting for the guest's switch table, so it outlives a run that
+# ends first - the same shape as mktables.py; the python half then drives ~44
+# switch ids, so a leaked one would be pressing switches into the NEXT run,
+# which is the leaked-ballfeed shape and just as hard to read from the game's
+# side. BOTH patterns, because the shell can be waiting with no python yet.
 HELP=$(( $(n -f 'autoattract\.sh') + $(n -f "^tail -q -n 0 -F $PAD_HOME/padvid\.log") \
          + $(n -f '^tail -F .*dump/game\.out') + $(n -f 'ballfeed[.]py') \
-         + $(n -f '^bash [^ ]*longplay\.sh') + $(n -f 'mktables[.]py') ))
+         + $(n -f '^bash [^ ]*longplay\.sh') + $(n -f 'mktables[.]py') \
+         + $(n -f 'swexercise\.sh') + $(n -f 'swexercise[.]py') ))
 
 # ★ WINDOWS-INTEROP STUBS - the class that leaked seven deep unseen.
 #

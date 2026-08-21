@@ -3005,9 +3005,17 @@ These have each been violated at least once and each cost a run or a window:
       works; what it costs is the staging logic plus one confirming pair of
       boots.
 
-- [ ] **63. Straight from the game's own Stern splash to attract, with NO Tech
-      Alerts screen — by making the node boards READY before the game decides
-      to show it, NOT by drawing our own overlay.** `S2 D3` ← IN PROGRESS 85%
+- [x] **63. Straight from the game's own Stern splash to attract, with NO Tech
+      Alerts screen.** `S2 D3` **★★★ CLOSED 2026-08-21 — acceptance MET and
+      confirmed on the glass; David: “no this is perfect. let's /finish it.”
+      Awaiting `/finish`.** The stated acceptance was no Tech Alerts screen and
+      a boot straight to attract; both are met (godzilla, zero input, boots
+      Stern-splash → attract, proven). Root cause + one-line `hwshim.c` fix are
+      in the detail below. **David DECLINED the Guided-Setup follow-on** when
+      offered — it is preserved as item 64 so the finding is not lost, not
+      because it is being worked. The reframe history (node-board readiness,
+      the reverted STARTING UP overlay) is kept below because its dead ends
+      were expensive.
       *(Filed 2026-08-21 from David; REFRAMED 2026-08-21 by David after the
       first approach was built and rejected — see the revert below.)*
       **★★★ DAVID REFRAMED THIS, and the reframe IS the item now:** *"i don't
@@ -3260,6 +3268,33 @@ These have each been violated at least once and each cost a run or a window:
       yet known and may reach into the node-identity RE of items 51/55 (which
       would make it D5), and the CRUX may turn the whole approach from
       “clear alerts” into “make the game skip the screen”.
+- [ ] **64. First-boot “Guided Setup” wizard appears after attract, because the
+      machine is unconfigured / Insider-unregistered.** `S3 D3` ← DEFERRED
+      *(Filed 2026-08-21, revealed by item 63's fix; David declined to chase
+      it — “no this is perfect” — so this is a PARKED record, not active work.)*
+      Once item 63 stopped the phantom service-button press, godzilla boots
+      Stern-splash → ATTRACT (proven), runs attract for ~40 s (with the node-4
+      banner, item 55), then drops into the game's own **Guided Setup** wizard:
+      Language English / Country U.S.A. / Free Play No / Pricing / Volume, and
+      **“Stern Insider Connected: this machine has an invalid [key] — contact
+      your distributor.”** This is the real machine's first-boot operator
+      config; a registered, configured cabinet completes it once (Save & Exit)
+      and it persists. autoattract used to walk past BOTH Tech Alerts and this
+      wizard with its two Service Back presses, which is why item-59-era
+      godzilla runs reached a clean attract; with the phantom press gone, the
+      wizard is what is left on a hands-off boot.
+      **The open question when/if reopened:** does our config/NVRAM persist a
+      completed Guided Setup so a second boot skips it, or does the invalid
+      Insider key force it every boot? If it persists, the fix is “complete it
+      once” (or seed the config). If the invalid-Insider state forces it, that
+      ties to the QrOffline / Insider-registration layer (item 63's RE named
+      `QrOfflineListener` and the “re-scan to register game” strings). Do NOT
+      spoof a registration blindly — same wrong-table caution as items 55/57.
+      — S3: nothing is blocked (the machine reaches attract; a real operator
+      would do this setup once), it is friction on a hands-off boot. D3:
+      reproduces every boot, one run to test persistence; deeper if it turns
+      out the Insider state forces it.
+
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T
       FIX rather than as fixed — which is what it has actually been since the

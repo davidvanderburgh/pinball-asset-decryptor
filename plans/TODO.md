@@ -2674,7 +2674,7 @@ These have each been violated at least once and each cost a run or a window:
       switch-alert provider is unlocated — if it is not sitting beside the
       node-board provider `0x39c6b8` this grows to D4.
 
-- [ ] **60. The Start / Plunge / Reset balls buttons do not exist on a title
+- [x] **60. The Start / Plunge / Reset balls buttons do not exist on a title
       with no playfield artwork.** `S2 D2` *(Filed 2026-08-21 from David, looking
       at a godzilla_le window: "where is my 'plunge' button now when there's no
       playfield image?")*
@@ -2709,6 +2709,48 @@ These have each been violated at least once and each cost a run or a window:
       makes `_place_actions()` redundant — is the tidier one and matches item 39's
       goal, but it undoes a placement that was argued from marker coordinates, so
       it needs David's word rather than a guess.
+      **★★★ CLOSED 2026-08-21 (item/60) — ACCEPTANCE MET IN FULL ON THE
+      GLASS, with real mouse clicks on a live turtles_pro run. Awaiting
+      `/finish`.**
+      **What shipped:** the assumed reading, exactly as this item framed it —
+      the row is added to `Schematic` ONLY and the artwork view is untouched,
+      so item 25's measured placement is not disturbed. WHICH actions a window
+      offers is now one fact, `playfield.PLUNGE_ACTIONS`, read by both views;
+      WHERE they sit stays two facts with two separate arguments. On the
+      schematic the row is packed on the top bar, LEFT, with the save/load
+      cluster still packed right — item 25's own separation (a misclicked
+      "Load state" yanks the game back to the save).
+      **Live proof, turtles_pro (no device table, so the schematic view), every
+      edge tagged `f` = this window:** Plunge → `-72f +68f -68f` (trough switch
+      out, shooter lane closed, shooter lane opened = launched) and the window
+      went `trough 6/6  0 in play` → `trough 5/6  1 in play` with ball 6 drawn
+      hollow. **So a ball CAN be got into play from the window on a
+      no-artwork title, which is the measurement this item said would decide
+      the severity: S2 stands, it does not go to S1.** Start → `+36f -36f`
+      (switch 36 START BUTTON). Reset balls → `+72f`, back to `6/6  0 in
+      play`. Desk half: `tests/test_spike2_playfield_actions.py`, 3 tests,
+      real Tk, green — every assertion through `invoke()` onto a fake driver,
+      checking the SCRIPT NAME and the verb, and one test builds
+      `Field._place_actions()` on a bare instance from the same list so the
+      two views cannot drift again.
+      **Ruled out as unnecessary:** touching `KeyPanel`. It is shared, so a row
+      added there appears twice on the artwork view; the tidier
+      one-place-for-both refactor still needs David's word.
+      **★ A TRAP WORTH THE NEXT PASS'S TIME, because it cost this one a whole
+      run and looked exactly like a dead button.** The playfield window is Tk
+      and therefore DPI-UNAWARE by design (shotwin.py's docstring says why), so
+      on this 4K/150% display its logical 1026x1287 is presented as physical
+      1539x1943 — and `shotwin.py` writes the LOGICAL pixels into a bitmap
+      sized from the PHYSICAL rect. **A coordinate read off a shotwin capture
+      is LOGICAL and must be multiplied by monitor-DPI/window-DPI before it is
+      a screen position** (the black L-shaped margin down the right and bottom
+      of every capture IS the tell). Clicking the unscaled number lands two
+      thirds of the way to the target, on a real child widget that quietly does
+      nothing, and the switch log stays silent — which reads precisely like a
+      button wired to nothing. Second trap in the same helper: `mouse_event()`
+      normalises to the PRIMARY monitor, because `MOUSEEVENTF_VIRTUALDESK` is a
+      `SendInput`-only flag. A corrected helper is in `c:/tmp/item60/click.py`;
+      it converts logical→screen itself and prints both DPIs.
       **Oracle:** item 25's own harness pattern — `invoke()` each button with
       `run_plunge` stubbed and assert start / plunge / reset in order (a button
       that looks right and does nothing is what a screenshot cannot see) — then

@@ -26,6 +26,23 @@ differences from those scripts, each for a reason:
 
   * NO BORDER CROP. The crop in take_screenshots.py is tuned to a standard Tk
     toplevel frame and would shave the wrong amount off anything else.
+
+★ WHAT COMES OUT IS THE WINDOW'S OWN (LOGICAL) PIXELS, IN A BITMAP SIZED FROM
+ITS PHYSICAL RECT - and the difference is silent, so read this before using a
+coordinate off a capture for anything but looking (item 60, which lost a run
+to it). The Tk windows here are DPI-UNAWARE on purpose (see above), so on a
+4K/150% display the playfield's logical 1026x1287 is presented as physical
+1539x1943. GetWindowRect from THIS process is per-monitor aware and answers
+1539x1943, the bitmap is made that size, and PrintWindow then renders the
+window's own 1026x1287 into its top-left corner. **The black L down the right
+and bottom of the PNG is not the window being empty, it is that gap.**
+
+So a point measured on a capture is LOGICAL. To click it, or to hand it to
+anything that speaks screen coordinates, scale by
+GetDpiForMonitor / GetDpiForWindow first. Clicking the unscaled number lands
+two thirds of the way to the target - usually on some other real child widget,
+which accepts the click and does nothing - and the only symptom is that
+nothing happens, which reads exactly like a control that is wired to nothing.
 """
 import ctypes
 import sys

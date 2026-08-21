@@ -2710,7 +2710,7 @@ These have each been violated at least once and each cost a run or a window:
       **(4) IT PERSISTS — AND THIS PASS GOT THAT WRONG ONCE, so the evidence
       is here rather than the conclusion alone.** Run 2 (a fresh boot after
       run 1) read `active=37` again, which was written up mid-pass, and in
-      `77d0b1f`'s commit message, as "the audit is rebuilt every boot".
+      `a9bd18a`'s commit message, as "the audit is rebuilt every boot".
       **Run 4 refutes that**: booted with `PAD_SW_EXERCISE=0`, zero `x`-tagged
       edges in its log and `padswx.log` untouched from the previous run, it
       read `active=0` on all **16** of its dumps. So the audit IS persisted.

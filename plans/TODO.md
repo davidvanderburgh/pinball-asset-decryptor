@@ -1344,7 +1344,10 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **46. On turtles_pro the ACTION BUTTON is FINICKY, not dead: it works
       occasionally in attract and never selects a character during a game.**
-      `S2 D3` ← WORKING ON
+      `S2 D4` ← WORKING ON *(D3 → D4, 2026-08-21: the fault does not appear on
+      demand — five of six runs this pass never reached a state where it could
+      be tested at all, because the boot tech-alerts screen blocks starting a
+      game and the ball model will not feed this title. That is the D4 line.)*
       **★★ DAVID, 2026-08-21, GROUPING THIS INTO ITEM 60's PASS — AND IT IS A
       MECHANISM CLAIM, NOT A FEATURE REQUEST:** *"i should be able to press the
       action button to pick a character and launch a ball at the same time.
@@ -1397,6 +1400,70 @@ These have each been violated at least once and each cost a run or a window:
       reached ball start and is not retrying a trough eject: it is parked ON
       the select screen. The feeder's blindness (below) is real and still worth
       fixing, but it is NOT what is holding this screen.
+      **★★★★★ 85%, 2026-08-21, FIVE MORE RUNS. THE EJECT COIL IS FOUND, A
+      FEEDER FOR IT IS BUILT AND WORKS, AND THE REMAINING BLOCKER IS NAMED.
+      Two of these are worth more to other items than to this one.**
+      **(A) turtles_pro's TROUGH EJECT IS COIL-REGION OFFSET 132, READ OFF THE
+      WIRE, on a title whose device table has 0 records.** With a full trough
+      and nothing answering it bumps **+1 every ~1.3 s, indefinitely** (30
+      retries watched twice, runs 2 and 6) and nothing else on the wire behaves
+      that way — a game re-pulsing an eject it gets no answer for, which is
+      exactly `ballfeed.py`'s stated model of the retry queue. **This is the
+      capability item 53 and 21b both want: a coil address derived from the
+      GAME'S OWN BEHAVIOUR rather than from a table.** The watcher that found
+      it is committed as `tools/spike2_emu/coilwatch.py`.
+      Other counters seen, unidentified and recorded so nobody re-derives them:
+      **149** fires once at game start; **129** fires ~16 times at ~0.6 s and
+      then settles to ~5.8 s; offsets 384–408 are a 0xFF filler block that
+      populates when the coil table is first published, NOT fires.
+      **(B) A FEEDER USING THAT ADDRESS ANSWERS THE EJECT — AND THE GAME STILL
+      DOES NOT ACCEPT THE BALL.** `c:/tmp/item46/feed132.py` is ballfeed's loop
+      with 132 hard-coded; on run 6 it fired correctly on the first eject
+      (`trough switch 72 opened (ball out)` / `shooter lane 68 closed (ball
+      waiting)` / `fed 1, trough 5/6`) and then refused 29 more with "a ball is
+      already in the shooter lane" **because the game went on ejecting every
+      1.3 s regardless.** So the ball model's SWITCH CHOICE is wrong for this
+      title, not the coil address.
+      **The strongest candidate, and it is one command to test:** turtles has
+      **TWO** lanes — `66 UPPER SHOOTER LANE` (node 9) and `68 SHOOTER LANE`
+      (node 8) — and `ballmodel.LANE_NAME` matches the exact string, so the
+      feeder always closes 68. If TMNT's trough feeds the UPPER lane, the game
+      is watching 66 and never sees the ball. Closing 66 as well was attempted
+      and the run's wall-clock cap ended it first; that is the single next
+      action. The other candidate is the trough switch END (item 20's rule).
+      **(C) THE ACTION BUTTON TEST IS STILL NOT VALID, AND (B) IS WHY.** With a
+      ball fed into 68, two presses of 34 produced **no new coil** — but the
+      game was still re-ejecting at the time, i.e. it did not believe a ball
+      was in the lane, so it was never at "ball ready to launch". **David's
+      claim is neither confirmed nor refuted; the experiment has not yet been
+      run in a state where it could be.** The oracle is right, though: an
+      auto-launch must fire a coil, so a NEW offset appearing after a press of
+      34 is the acceptance, and the carousel never enters into it.
+      **(D) ★★ THIS BELONGS TO ITEM 59 AND IS THE BIGGEST THING HERE: ON
+      turtles_pro THE BOOT TECH-ALERTS SCREEN BLOCKS STARTING A GAME AT ALL.**
+      Runs 3, 4 and 5 put **five coins** in and pressed START repeatedly on an
+      uncleared machine: no game ever began, the trough never moved, offset 132
+      never fired once, and the display sat on a frozen dot-matrix menu frame
+      for minutes. Then item 59's OWN recipe — coin door open (`swhold.py 33
+      0`), two long Service Back presses, `plunge.py reset` — put the machine
+      straight into proper attract with the lair artwork and `CREDITS 1`, and
+      the very next START began a game that ejected on schedule. **So item 59's
+      "it may eat credits" suspicion is now much stronger than a suspicion on
+      this title, and item 46 was unreachable until it was cleared.** Any pass
+      on turtles_pro must clear the alerts FIRST.
+      **(E) A RECIPE TRAP THAT COST TWO RUNS: waiting in WALL clock does not
+      delay GUEST time.** Runs 3 and 4 waited 25 s and 55 s after watch.sh
+      printed `running`, and both still coined at guest ~10 s — while
+      autoattract's first Service Back lands at guest ~20.5 s. The guest clock
+      does not start when that line prints. Sequence against `[sw] <ms>`
+      timestamps or against an observed event, never against a host-side sleep.
+      **Uncommitted:** nothing. `coilwatch.py` is in the rig; `feed132.py`,
+      `coildiff.py`, `sample.py` and the run scripts are in `c:/tmp/item46/`
+      and are scaffolding, not shippable.
+      **Resume:** clear the alerts with (D)'s recipe, start a game, let the
+      feeder answer the eject, and close **66 UPPER SHOOTER LANE** instead of
+      (or as well as) 68. If the eject retry STOPS, the ball is accepted and
+      the action-button test in (C) can finally run.
       **★★★ DAVID, 2026-08-21, THE SEQUENCE ON THE REAL MACHINE — and it
       says my ball test above was RUN IN THE WRONG ORDER, so (3) refutes less
       than it looks:** *"when the action button is pushed on the game the ball

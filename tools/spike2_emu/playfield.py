@@ -377,15 +377,31 @@ SW_EVERY = max(1, int(round(TARGET_FPS / max(1.0, SW_HZ))))
 #: seen, so there is nothing to close with.
 GONE_POLLS = 2 * TARGET_FPS
 
-#: The action row: label, and the `plunge.py` verb it runs. ONE list for BOTH
-#: views (item 60). The artwork view draws these as canvas widgets beside the
-#: plunger and the schematic packs them on its top bar - different placements,
-#: argued separately and both kept - but WHICH actions the window offers is one
-#: fact, and it was two: `Field._place_actions()` had the row, `Schematic` never
-#: had an equivalent, so on a title that ships no device table nothing in the
-#: window reached plunge.py at all. A verb added here appears in both windows.
-PLUNGE_ACTIONS = (("Start", "start"), ("Plunge", "plunge"),
-                  ("Reset balls", "reset"))
+#: The action row: label, the script it runs, and its argument (None for a
+#: script that takes none). ONE list for BOTH views (item 60). The artwork view
+#: draws these as canvas widgets beside the plunger and the schematic packs them
+#: on its top bar - different placements, argued separately and both kept - but
+#: WHICH actions the window offers is one fact, and it was two:
+#: `Field._place_actions()` had the row, `Schematic` never had an equivalent, so
+#: on a title that ships no device table nothing in the window reached plunge.py
+#: at all. An action added here appears in both windows.
+#:
+#: IT CARRIES THE SCRIPT NAME as of item 59, and that is exactly what "Clear
+#: alerts" needed: the row used to be three plunge.py verbs, so a fourth button
+#: running a different helper could not be expressed without either a second
+#: list or a special case - and a second list is the thing item 60 collapsed.
+#:
+#: "Clear alerts" is David's ask (2026-08-21, watching turtles_pro still list
+#: twelve CHECK SWITCH rows after a boot-time exercise had already run: "maybe
+#: we need an 'opt-in' button that clears them?"). It works every safe switch
+#: once so the game's own no-usage audit sees usage. swexercise.py's header has
+#: the argument, including WHY the boot-time pass can be too early on some
+#: titles - which is what earns this button its place rather than making it a
+#: duplicate of something automatic.
+WINDOW_ACTIONS = (("Start", "plunge.py", "start"),
+                  ("Plunge", "plunge.py", "plunge"),
+                  ("Reset balls", "plunge.py", "reset"),
+                  ("Clear alerts", "swexercise.py", None))
 
 
 def emu_gone(view, readable):
@@ -2659,9 +2675,10 @@ class Field(StateOps, LedRing):
         rather than assumed, so a different theme or DPI still lines up.
         """
         self._acts = []
-        for label, arg in PLUNGE_ACTIONS:
-            self._acts.append(tk.Button(self.cv, text=label, width=11,
-                                        command=lambda a=arg: self.run_plunge(a)))
+        for label, script, arg in WINDOW_ACTIONS:
+            self._acts.append(tk.Button(
+                self.cv, text=label, width=11,
+                command=lambda s=script, a=arg: self.run_action(s, a)))
         x, y = w - self.ACT_PAD, h - self.ACT_PAD
         # Right to left, so "Reset balls" is the one against the corner and the
         # reading order left to right is the order the toolbar had.
@@ -2716,6 +2733,20 @@ class Field(StateOps, LedRing):
 
     def run_plunge(self, what):
         self.drv.run_script("plunge.py", what)
+
+    def run_action(self, script, arg=None):
+        """One action row entry (item 59). `arg` is None for a helper that
+        takes none, which is what keeps WINDOW_ACTIONS a plain table rather
+        than a table with a special case in it.
+
+        The driver already runs these on their own thread because "these take
+        seconds" - and "Clear alerts" takes about twelve, working ~50 switches
+        at 150+80 ms, so it would freeze the window if it did not.
+        """
+        if arg is None:
+            self.drv.run_script(script)
+        else:
+            self.drv.run_script(script, arg)
 
     # ---- live LED and coil state -----------------------------------------
     def read_leds(self):
@@ -3441,9 +3472,9 @@ class Schematic(StateOps):
         # reason the trough got its own strip - the switch columns already fill
         # the window, so anything placed over them lands on a node's rows.
         self._acts = []
-        for label, arg in PLUNGE_ACTIONS:
+        for label, script, arg in WINDOW_ACTIONS:
             b = tk.Button(bar, text=label,
-                          command=lambda a=arg: self.run_plunge(a))
+                          command=lambda s=script, a=arg: self.run_action(s, a))
             b.pack(side="left", padx=(0, 4), pady=2)
             self._acts.append(b)
 
@@ -3593,6 +3624,20 @@ class Schematic(StateOps):
 
     def run_plunge(self, what):
         self.drv.run_script("plunge.py", what)
+
+    def run_action(self, script, arg=None):
+        """One action row entry (item 59). `arg` is None for a helper that
+        takes none, which is what keeps WINDOW_ACTIONS a plain table rather
+        than a table with a special case in it.
+
+        The driver already runs these on their own thread because "these take
+        seconds" - and "Clear alerts" takes about twelve, working ~50 switches
+        at 150+80 ms, so it would freeze the window if it did not.
+        """
+        if arg is None:
+            self.drv.run_script(script)
+        else:
+            self.drv.run_script(script, arg)
 
     def _hit(self, ev):
         # canvasx, because the scroll backstop makes window x and canvas x

@@ -72,12 +72,12 @@ def test_schematic_offers_the_action_row_and_it_drives_plunge():
     try:
         view = playfield.Schematic(root, _switch_rows())
         assert [b.cget("text") for b in view._acts] == \
-            [lbl for lbl, _ in playfield.PLUNGE_ACTIONS]
+            [lbl for lbl, _, _ in playfield.WINDOW_ACTIONS]
         view.drv = FakeDrv()
         for b in view._acts:
             b.invoke()
-        assert view.drv.ran == [("plunge.py", (verb,))
-                                for _, verb in playfield.PLUNGE_ACTIONS]
+        assert view.drv.ran == [(script, () if arg is None else (arg,))
+                                for _, script, arg in playfield.WINDOW_ACTIONS]
     finally:
         root.destroy()
 
@@ -117,11 +117,50 @@ def test_field_builds_the_same_row_from_the_same_list():
         f.drv = FakeDrv()
         f._place_actions(400, 300)
         assert [b.cget("text") for b in f._acts] == \
-            [lbl for lbl, _ in playfield.PLUNGE_ACTIONS]
+            [lbl for lbl, _, _ in playfield.WINDOW_ACTIONS]
         for b in f._acts:
             b.invoke()
-        assert f.drv.ran == [("plunge.py", (verb,))
-                             for _, verb in playfield.PLUNGE_ACTIONS]
+        assert f.drv.ran == [(script, () if arg is None else (arg,))
+                             for _, script, arg in playfield.WINDOW_ACTIONS]
     finally:
         playfield.SAVESTATES = saved
         root.destroy()
+def test_clear_alerts_runs_the_exerciser_with_no_argument():
+    """Item 59, David's ask: an opt-in button that clears the CHECK SWITCH
+    tech alerts.
+
+    IT EXISTS BECAUSE THE BOOT-TIME PASS IS NOT ALWAYS ENOUGH, which is a
+    measurement rather than a worry. turtles_pro, 2026-08-21: swexercise.sh
+    ran at boot+8 s and moved all 50 switches (99 tagged edges in the guest
+    log), and the screen still listed twelve CHECK SWITCH rows a minute later
+    - the game had not built its audit yet. The identical exercise run by hand
+    afterwards cleared every one of them.
+
+    It must reach swexercise.py with NO argument: that script takes none, and
+    passing a verb would make it a plunge.py-shaped call, which is exactly the
+    special case WINDOW_ACTIONS carrying the script name exists to avoid.
+    """
+    root = _root()
+    import playfield
+    try:
+        view = playfield.Schematic(root, _switch_rows())
+        view.drv = FakeDrv()
+        clear = [b for b in view._acts if b.cget("text") == "Clear alerts"]
+        assert len(clear) == 1, "the row should offer exactly one Clear alerts"
+        clear[0].invoke()
+        assert view.drv.ran == [("swexercise.py", ())]
+    finally:
+        root.destroy()
+
+
+def test_the_action_row_stays_one_fact_as_it_grows():
+    """Item 60's list, kept honest now that it carries more than plunge verbs:
+    a reader must be able to say which helper each button reaches without
+    opening both views. A short entry or a bare verb means one has drifted.
+    """
+    import playfield
+    for entry in playfield.WINDOW_ACTIONS:
+        assert len(entry) == 3, entry
+        label, script, arg = entry
+        assert label and script.endswith(".py"), entry
+        assert arg is None or isinstance(arg, str), entry

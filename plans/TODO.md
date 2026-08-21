@@ -2670,12 +2670,60 @@ These have each been violated at least once and each cost a run or a window:
       side (or a live ring read), the instrument exists and is validated, and
       the fault is on demand.
 
-- [x] **59. Every boot lands on the game's TECH ALERTS screen with `CHECK
+- [ ] **59. Every boot lands on the game's TECH ALERTS screen with `CHECK
       SWITCH #n` rows, and nobody has ever established what puts them there.**
-      `S2 D2` *(Filed 2026-08-21 from David: "why do we always start into the
-      'tech alerts check switch' screen?")*
-      **★★★ CLOSED 2026-08-21 (item/59) — ACCEPTANCE MET IN FULL, ON THE GLASS,
-      ON godzilla_pro, ACROSS FOUR RUNS. Awaiting `/finish`.**
+      `S2 D2` ← IN PROGRESS, 80% *(Filed 2026-08-21 from David: "why do we
+      always start into the 'tech alerts check switch' screen?")*
+      **★★★★ REOPENED THE SAME DAY, HOURS AFTER BEING CLOSED, AND THE CLOSE
+      WAS THE MISTAKE — NOT THE FIX.** The box is UNTICKED again: the question
+      this item asks is answered, but the shipped behaviour is not finished,
+      and below 100% means unchecked. Item 50's entry already carries this
+      exact lesson ("THE CLOSE WAS TOO GENEROUS AND THIS IS THE LESSON"), and
+      this is the same mistake in the same week: **the acceptance was met on
+      the machinery and not on the ask.**
+      **WHAT HAPPENED.** David launched turtles_pro from the app minutes after
+      the close and sent a screenshot of twelve `CHECK SWITCH` rows still on
+      the glass: `#80 LOCKDOWN BUTTON`, `#91 TILT PENDULUM`, `#41`, `#55`,
+      `#36`, `#37`, `#29`, `#46`, `#47`, `#48`, `#23`, `#43`, and `[more]`.
+      His question was whether switches were MISSING from the exercise list.
+      **They were not** — every one of those twelve is in turtles_pro's
+      50-switch WOULD list. And the exerciser had run: `padswx.log` shows all
+      50 exercised, and the guest log carried **99 `x`-tagged edges**, so the
+      game was handed every one of them.
+      **THE FAULT IS TIMING, AND DAVID CALLED IT:** *"or maybe we need to
+      exercise these switches once the game boots?"* The trigger was "switch
+      table seen, plus 5 s" = **boot+8 s**, and on turtles_pro the audit is
+      not built by then, so the edges cleared nothing. Running the IDENTICAL
+      exercise by hand on that same live run, minutes later, **cleared every
+      one of the twelve rows** — what remained on the glass was `GAME
+      VALIDATION ERROR #3` and `Check Node Board 2 : Not Registered`, which
+      are different providers and different items. **godzilla_pro hid this**
+      because its audit is already populated by boot+14 s (`active=37` on the
+      first dump), so the early exercise happened to land after it.
+      **WHAT CHANGED IN RESPONSE (written, NOT yet verified on a run):**
+      (a) `swexercise.sh` now waits for the game to be **past Tech Alerts**
+      rather than for the switch table — that is the one moment the audit is
+      provably built, because the game has just rendered it. It waits for
+      `autoattract.sh` to EXIT rather than re-implementing that script's
+      bus-quiet predicate, since two copies of one fact is how this rig has
+      been bitten before; with auto-advance off it falls back to a blind
+      `PAD_SW_EXERCISE_BLIND` (60 s) wait. **The accepted cost:** the rows are
+      now on screen during the boot that clears them.
+      (b) A **"Clear alerts" button** in the playfield window, both views —
+      David's ask: *"if that's the case, maybe we need an 'opt-in' button
+      that clears them?"* Item 60's `PLUNGE_ACTIONS` was three plunge.py
+      verbs, so it is now `WINDOW_ACTIONS` of `(label, script, arg)`: a fourth
+      button running a different helper could not be expressed otherwise
+      without a second list, and a second list is what item 60 collapsed.
+      **Resume:** boot turtles_pro from the app and confirm on the glass that
+      a normal boot ends with no `CHECK SWITCH` rows, and that the "Clear
+      alerts" button clears them when pressed. THEN re-close. 338 spike2
+      tests green; nothing below this line has been invalidated.
+      **★★★ The original close block follows. Everything it states was
+      measured and is still true — what it got wrong was calling it finished
+      on the strength of one title.**
+      **★★★ CLOSED 2026-08-21 (item/59) — acceptance met on godzilla_pro
+      across four runs. SUPERSEDED BY THE REOPEN ABOVE.**
       *(D3 → D2 on the way out: the alert-provider walk turned out to be an
       instrument that already existed and was already validated, and the
       switch-alert provider is now named, so anything left here is a small

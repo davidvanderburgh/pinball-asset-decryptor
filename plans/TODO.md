@@ -3005,49 +3005,295 @@ These have each been violated at least once and each cost a run or a window:
       works; what it costs is the staging logic plus one confirming pair of
       boots.
 
-- [ ] **63. Show a LOADING screen while the emulator boots, instead of the
-      game's Tech Alerts screen with its transient bring-up errors.** `S2 D3`
-      *(Filed 2026-08-21 from David: "eventually, the two node errors clear
-      themselves at least, but I'd rather show the 'loading...' screen while
-      the emulator loads the game than the tech alerts screen (that's the way
-      the actual machine works)".)*
-      **THE ARGUMENT FOR DOING IT THIS WAY ROUND, rather than suppressing the
-      alerts one at a time.** `Check Node Board 2 : Not Registered` and
-      `Check Node Board 14 : Not Responding` are TRANSIENTS of bring-up, not
-      faults: the renderer at `0x39c834` substitutes msgid 887 while
-      `(flags&1)==0` and 888 while `(flags&2)==0`, and both bits get set as
-      the service schedule reaches those boards — which is exactly why David
-      sees them clear themselves. Silencing them would be writing a wrong
-      table over a right one, the rule items 55 and 57 both landed on. The
-      honest fix is to not put the boot's INTERMEDIATE state on the glass.
-      **A note that may or may not be a coincidence, so it is marked as one:**
-      on turtles_pro nodes 2 and 14 are both `ws2812node` LED boards
-      (`node_ident.txt`), and turtles_pro is the title item 50 records as
-      putting NO frame the shim recognises as a lamp write. Two LED boards
-      that are slow to register on the one title whose LED traffic nobody can
-      decode is worth ONE look before assuming the two are unrelated — but do
-      not let it turn this item into item 50.
-      **What to build, and the reason the cheap version is wrong:** the game
-      window is created by `padglhost` the moment the guest first draws, so
-      the boot's every intermediate screen is on the glass from frame 1.
-      Simply NOT opening the window until the game is ready trades a scary
-      screen for a missing one for ~40 s, which is worse. So this is a cover:
-      the renderer holds a "Starting up" surface until the boot has settled,
-      then reveals the game. The settle signal already exists and is the one
-      item 59 now uses — `autoattract.sh` exiting — with the same caveat that
-      it has three exits and only one means "ready" (item 59's `MIN_AGE` floor
-      is the pattern).
-      **Acceptance:** boot a title that shows node-board alerts (turtles_pro)
-      and state that no Tech Alerts screen is ever visible on the glass —
-      captured, not remembered — and that the game appears with attract or its
-      real first screen. Also state the boot-to-first-real-picture time, so it
-      is visible whether the cover added any wait.
-      — S2: nothing is blocked and the errors clear themselves, but it makes
-      every boot look broken to anyone who is not holding this queue in their
-      head, and it is the first thing anybody sees. D3: needs runs to judge
-      (the thing under test is what is on the glass at a given moment), the
-      capture instrument exists and is validated (`shotwin.py`, with item 60's
-      logical-vs-physical-pixel warning), and it reproduces on every boot.
+- [x] **63. Straight from the game's own Stern splash to attract, with NO Tech
+      Alerts screen.** `S2 D3` **★★★ CLOSED 2026-08-21 — acceptance MET and
+      confirmed on the glass; David: “no this is perfect. let's /finish it.”
+      Awaiting `/finish`.** The stated acceptance was no Tech Alerts screen and
+      a boot straight to attract; both are met (godzilla, zero input, boots
+      Stern-splash → attract, proven). Root cause + one-line `hwshim.c` fix are
+      in the detail below. **David DECLINED the Guided-Setup follow-on** when
+      offered — it is preserved as item 64 so the finding is not lost, not
+      because it is being worked. The reframe history (node-board readiness,
+      the reverted STARTING UP overlay) is kept below because its dead ends
+      were expensive.
+      *(Filed 2026-08-21 from David; REFRAMED 2026-08-21 by David after the
+      first approach was built and rejected — see the revert below.)*
+      **★★★ DAVID REFRAMED THIS, and the reframe IS the item now:** *"i don't
+      want a 'loading screen' overlay. i wanted the stern loading screen to be
+      shown instead... it goes from the loading splash screen straight to tech
+      alerts too early (before all the node boards are ready). can't we make
+      the 'node boards' ready earlier during the loading screen? ideally, we
+      go straight from loading splash to attract without seeing any tech
+      alerts screens and we do not have our own loading overlay."*
+      **★★★★★ MEASURED 2026-08-21, AND IT REFUTES THE PREMISE — David's AND my
+      own reframe. “Make the node boards ready → straight to attract” DOES NOT
+      WORK, because the wait is NOT caused by alerts.** Clean experiment on
+      godzilla (unmodified card, `PAD_AUTO_ATTRACT=0`, `PAD_SW_EXERCISE=0`,
+      ZERO input of any kind): the alert probe read **live entries: 0 on all
+      101 dumps** across the whole boot — no provider ever active — and the
+      glass sat on **“Tech Alerts / No Technician Alerts” from 12 s to 140 s
+      with no change** (`seq_12..seq_140.png`). The game NEVER advanced to
+      attract on its own. So the Tech Alerts screen is an UNCONDITIONAL boot
+      checkpoint that waits for an operator acknowledgement (a button press),
+      independent of whether any alert is active. This is the handoff's old
+      conclusion — “no state to save, only waiting to skip... the honest way
+      to skip waiting for an operator is to BE the operator” — now proven on a
+      genuinely zero-alert boot, which had never been isolated before.
+      **A trap this experiment cleared:** with the switch exerciser ON, the
+      SAME boot advanced off Tech Alerts to the SERVICE MENU at ~57 s — not an
+      auto-advance, but the exerciser's switch activity walking the game one
+      screen forward (handoff 2400: “a press after Tech Alerts walks INTO the
+      service menu”). Only the zero-input run tells the truth.
+      **SO THE NODE-BOARD FIX IS NECESSARY-BUT-NOT-SUFFICIENT AT BEST, AND NOT
+      THE LEVER.** Node 2 on turtles not registering is a real defect worth
+      fixing on its own (it makes Tech Alerts show a red row rather than
+      “No Technician Alerts”), but clearing every alert still leaves the game
+      parked on the screen. What actually gets past it is the operator ack,
+      which `autoattract.sh` already supplies — just ~19 s in, after it waits
+      for the node bus to go quiet, which is WHY the screen is visible.
+      **THE REAL QUESTION, and it is DAVID'S to answer because he knows the
+      hardware:** does a REAL machine stop on “Tech Alerts / No Technician
+      Alerts” and wait for a button, or go straight to attract? If it WAITS,
+      then “no Tech Alerts at all” is not how the real machine works either,
+      and the best honest outcome is a FAST auto-ack (press as early as the
+      game will accept it — the timing window in the handoff's “when the game
+      becomes willing” work — so the screen flashes rather than lingers). If
+      it ADVANCES on its own, then our parking is an ARTIFACT and the lever is
+      whatever the game waits on that we are not satisfying — the Insider
+      “No Connection” state in the corner and the coin-door/boot-complete
+      state are the first suspects. Not yet investigated; needs David's answer
+      to know which path is even real.
+      **★★★★★ THE EXIT MECHANISM IS NOW REVERSE-ENGINEERED (6-agent RE workflow,
+      3 tracks + 2 skeptics, all HIGH confidence and mutually consistent).**
+      The parked “Tech Alerts / No Technician Alerts” screen is the C++ class
+      **`MenuPageLandingPage`** (vtable 0x6952c0); “No Technician Alerts” is
+      just what it renders when its alert vector is empty. Its per-frame update
+      (`0x4e29bc`) advances the boot ONLY by draining a single-slot event
+      MAILBOX at global **`0x7ac9c8`**: when that mailbox holds a pending event
+      with **code==1**, the update stores the value and calls `0x25c040`
+      (posts internal msg 0x3d) — the sole state-advance trigger.
+      **PROVEN CLEAN NEGATIVE, so nobody re-hunts it:** that mailbox has
+      EXACTLY ONE writer (`0x21b9a4`), reached from EXACTLY ONE caller
+      (`0x521a08`) inside a HARDWARE-INPUT decoder (`QrOfflineListener`,
+      0x521940) that posts code==1 only for a decoded input event (a button).
+      Zero pointer refs to the writer, so it is not a timer/callback. **No
+      timer, no boot-complete flag, no connectivity/“connected” read, no
+      coin-door, no node-bus signal writes that mailbox.** The offline “No
+      Connection” and the OTP/VERSION polling are cosmetic and are NEVER read
+      by the exit. So there is NO environment condition our emulator fails to
+      satisfy on this screen — it genuinely advances only on an input event,
+      which is exactly why it parked 12s→140s with zero alerts and zero input.
+      **THE CONCRETE FIX THIS HANDS US:** the shim shares the address space,
+      so it can POST THE ADVANCE EVENT ITSELF — write code=1 into mailbox
+      `0x7ac9c8` (set +4=code, +8=value, +0xc=pending) the instant
+      `MenuPageLandingPage` is up. The screen would drain it on its very first
+      update and advance BEFORE it is ever presented — potentially true
+      zero-visibility, done at the event level, cleaner than a physical
+      SERVICE BACK press (no ~19 s bus-quiet wait, no service-menu timing
+      trap). This is buildable in `hwshim.c`.
+      **TWO THINGS TO CONFIRM BEFORE TRUSTING IT (RE + one run):** (1) where
+      internal msg 0x3d actually goes — it must lead to ATTRACT, not into the
+      service menu (`0x25c040` handles msgs 0x3c/0x3d/0x3e; not fully traced).
+      (2) the ENTRY-SIDE question, which is the real “why does a real machine
+      differ”: what SELECTS `MenuPageLandingPage` as the boot screen instead
+      of driving attract directly? Both Track A and Track C flag a possible
+      PARENT layer (a MenuSystem / attract-starter) that a real machine may
+      use to go straight to attract, gated on a boot/subsystem-ready condition
+      our emulator never asserts. NOT traced — if a removable artifact exists
+      for TRUE hands-off zero-visibility, it lives here, one layer up from the
+      exit. That is the next probe.
+      **★★★★★ ROOT CAUSE FOUND AND VERIFIED (a second 6-agent workflow: 3 tracks
+      + 3 skeptics, all reproducing the disassembly independently). THE BOOT
+      DEFAULT IS ATTRACT; WE ARE PUSHED INTO THE MENU BY A SPURIOUS SERVICE
+      INPUT.**
+      • `main` (0x1c2d0) writes the top-level mode bitfield 0x7aba5a := 0x10
+        UNCONDITIONALLY (bit4 = attract/idle; menu bit 0x100 CLEAR). No
+        readiness / config / identity / connectivity flag is read before it.
+        So the code-level boot default is ATTRACT, not the menu. Every named
+        ready-flag (node-bus-ready registry 0x7e1800, version globals,
+        0x706464, 0x6fc236, 0x6c5d38) is RULED OUT as the boot gate. The
+        “removable ready-flag a real machine asserts” hypothesis is REFUTED.
+      • The operator menu (MenuPageLandingPage = the parked “Tech Alerts”
+        screen) is shown ONLY when menu bit 0x100 is set, and bit 0x100 has
+        EXACTLY ONE setter in the whole binary: `MenuSystem::open` 0x23b21c,
+        reachable at boot ONLY via the service-button toggle 0x417a70 ←
+        0x521a60, inside the hardware-input decoder `QrOfflineListener`
+        0x521940, on **event OPCODE 19 (the MENU / service button)**. Zero
+        boot/timer/event-bus/callback path opens it; the listener has no tick.
+      • CONCLUSION (adversarially verified): a real cabinet — coin door
+        closed, no service button pressed — never receives opcode 19 and runs
+        attract. **WE LAND ON THE MENU BECAUSE OUR SWITCH/NODE INPUT LAYER
+        DELIVERS A SPURIOUS SERVICE-BUTTON (opcode 19) EVENT AT POWER-UP.**
+        The fix is in the INPUT layer, not any game flag — exactly David's
+        “it’s an artifact” instinct, now proven.
+      **★ THE LIKELY CULPRIT, from the clean-boot switch-table dump
+      (crux2.log): every service button reads `raw=0 logical=1` at boot —
+      Service Select/Plus/Minus/Back (ids 25–28, node 0 bits 8–11).** They
+      are active-low, so raw=0 presents as PRESSED. If the game reads a
+      service button as pressed at power-up (before the real node scans
+      settle it open), that IS the opcode-19 menu-open. STRONG LEAD, NOT YET
+      PROVEN LIVE — the dump is the shim’s table enumeration, not a captured
+      live read; opcode 19 must be caught being delivered.
+      **Resume (the confirming experiment + fix):** (1) hook `QrOfflineListener`
+      0x521940 in `hwshim.c` to log every call with its opcode and the source
+      switch, boot godzilla, and confirm opcode 19 fires at power-up and which
+      switch/bit produces it. (2) Fix the input layer so service buttons
+      (ids 25–28 / the opcode 13–22 range) read OPEN/not-pressed from the
+      first node scan — likely the shim’s initial node-0 switch state, or an
+      edge synthesized before the real scan. (3) Verify: godzilla boots
+      Stern-splash → attract with NO Tech Alerts screen, zero input, on the
+      glass. This is also the general fix (all titles, all cards — including
+      the upscaled turtles, whose validation banner would then never be shown
+      either, since the whole screen is skipped). D5 → D4: the mechanism is
+      known and the fix is a bounded input-layer change plus one run.
+      **★★★★★ FIXED AND CONFIRMED ON THE GLASS 2026-08-21 (`hwshim.c`).** The
+      cabinet SPI at-rest fallback (`ff0f0f...`, service buttons OPEN) was
+      gated on `sw_table_hopeless()` (= `sw_find_fails>=4`, true only for a
+      title whose table NEVER resolves). During a NORMAL title's early-boot
+      window — first SPI transfer until the switch table resolves ~3.5 s —
+      `sw_scan_bytes()` also returns 0 but hopeless() is still false, so the
+      fallback did not fire and the RX buffer was left untouched = the
+      all-made word. Active-low: all-made = every cabinet switch pressed,
+      INCLUDING the MENU button → the game opened the operator menu (the Tech
+      Alerts landing page). The fix fires the at-rest word on `!have` alone.
+      **PROOF:** godzilla, ZERO input (autoattract OFF, exerciser OFF), now
+      boots Stern-splash → ATTRACT (PLAYER 1 / high-score reel) on its own,
+      NO Tech Alerts screen ever (fix_0..fix_40.png). Previously it parked on
+      Tech Alerts 12s→140s. General fix: every title/card, and it makes the
+      upscaled-turtles validation banner moot too (whole screen skipped).
+      **★ TWO DOWNSTREAM SCREENS REVEALED (hidden behind the Tech Alerts park
+      before; NOT caused by this fix) — the remaining work for a fully clean
+      “splash → attract and STAY”:**
+      (1) a node-4 **“UPDATING NODE BOARD RUNTIME / UPDATE FAILED”** banner
+      over attract for ~40 s — this is **item 55** (a mis-derived node
+      firmware version; godzilla node 4 here, turtles nodes 4/12 there).
+      (2) a first-boot **“Guided Setup”** wizard (~70 s in): Language/Country/
+      Pricing/Volume, and **“Stern Insider Connected: this machine has an
+      invalid [key] — contact your distributor”.** The machine is unconfigured
+      / Insider-unregistered, so it prompts setup. On a real machine the
+      operator completes it once (Save & Exit) and it persists; OUR open
+      question is whether our config/NVRAM persists it so a second boot skips
+      it — if the invalid-Insider state forces it every boot, that is its own
+      layer. autoattract used to walk past BOTH Tech Alerts and this wizard
+      with its two presses, which is why item-59-era godzilla runs reached a
+      clean attract; with the phantom press gone, the wizard is what is left.
+      **Resume:** (a) the CORE ask — no Tech Alerts, boots to attract — is
+      DONE and proven; (b) decide with David whether “attract and STAY” needs
+      the Guided-Setup layer chased (test config persistence: complete Save &
+      Exit, reboot, does it skip?), which ties to the Insider-registration
+      state; (c) node-4 banner is item 55, now visible. This item’s own
+      acceptance (Tech Alerts gone, splash→attract) is met; whether to fold
+      the wizard in or split it is David’s call. D3 now the mechanism and fix
+      are known and shipped.
+      **Resume:** (a) build the shim mailbox-post and test on a godzilla run —
+      does the boot go splash→attract with the Tech Alerts screen never (or
+      sub-frame) visible, landing in ATTRACT not the service menu; (b) if it
+      lands wrong, trace msg 0x3d; (c) for true hands-off, RE the entry-side
+      boot-screen selection (the parent attract-starter). D5 stands; the
+      mechanism is cracked but the entry-side and a run remain.
+      **THE OVERLAY WAS BUILT, VERIFIED ON THE GLASS, THEN REVERTED — wrong
+      approach, and the lesson is mine.** A STARTING UP cover in `padglhost.c`
+      passed all four of its own acceptance points on turtles (the captures
+      are in the item/63 history at `5938acc`/`5452986`), and it was still the
+      wrong thing: David wants the game's OWN splash, not ours, and he wants
+      the Tech Alerts screen to not HAPPEN rather than be hidden. `5938acc`'s
+      `padglhost.c` + `watch.sh` changes are reverted to `d11fde7`; item 59's
+      switch exerciser on the same branch is untouched.
+      **THE GOAL, restated as a mechanism:** the game shows its Stern splash
+      while it brings the node bus up, and leaves the splash for Tech Alerts
+      the moment it evaluates its alert providers. If every alert is clear by
+      that instant, the game has nothing to show and (David's model, to be
+      confirmed — see THE CRUX) goes straight to attract. So the work is to
+      make every provider quiet BEFORE that evaluation, on its own boot.
+      **THE CRUX, and it decides whether this is even the right mechanism —
+      MUST be answered on the rig before building anything:** does the game
+      show the Tech Alerts screen UNCONDITIONALLY (and wait for an operator
+      ack, which `autoattract.sh` currently supplies with a Service Back), or
+      ONLY when at least one alert is active? The handoff's "waits on Tech
+      Alerts for an operator, exactly as a real machine does" was written when
+      alerts WERE active, and godzilla still takes 2 Service-Back presses even
+      with its switch audit and node boards clear — which HINTS the screen is
+      unconditional, but a second screen after Tech Alerts also needs one
+      press, so the count does not settle it. The clean experiment is a
+      godzilla boot (unmodified card, node fix already makes its boards ready,
+      switch audit persisted-clear from item 59): if it still shows Tech
+      Alerts, the screen is unconditional and the fix is to make the game SKIP
+      it, not to clear alerts; if it goes straight to attract, clearing alerts
+      is the whole job.
+      **THREE PROVIDERS FEED THAT SCREEN, and they are NOT one problem:**
+      **(1) NODE BOARDS.** On godzilla the existing `nb_nodes_add_boards()`
+      (`hwshim.c`, `PAD_NB_SCHED_BOARDS`) already makes the LED boards ready by
+      ~12 s and the screen reads `No Technician Alerts`. On TURTLES it does
+      not: node 2 (a real `ws2812node` LED board in turtles’ own table) shows
+      **Not Registered** — `(flags&1)==0`, i.e. it never REGISTERED, which is
+      a deeper failure than godzilla's LED boards (those registered but were
+      not SERVICED = `Not Responding`, `(flags&2)==0`). Registration is
+      `0x5a2e10`: it sends `0xfe`, reads the board's part id `[4..7]`, and
+      linear-scans it against the 28-entry LPC part table at `0x69cc24`; a
+      MISS stores the "Unknown" descriptor whose `+20` is 0, and `+20` is
+      what `0x59ec1c` tests before sending any subcommand ≤ 0xef — so an
+      unrecognised part id means the board is never registered. turtles’
+      `node_ident.txt` gives node 2 `part=0x2c40102b`; the open question is
+      whether that part id is in the `0x69cc24` table or is being answered
+      wrong by the shim. Node 14 (also `ws2812node`) was seen CLEARING, so
+      whatever ails node 2 is not all `ws2812node` boards. **This overlaps
+      items 51/52/53/55 (node identity / directory / group map) and should
+      borrow their instruments, not re-derive them.**
+      **(2) THE VALIDATION ERROR — THE HARD CONSTRAINT, and it is why “straight
+      to attract” is IMPOSSIBLE ON DAVID’S SPECIFIC CARD.** `GAME VALIDATION
+      ERROR #3` on turtles is item 62: the `1987-upscaled` card’s `game`
+      binary is deliberately code-patched (one function nopped to `bx lr`, 4
+      bytes in `.text`) with a stale validation trailer, so the game’s own
+      check correctly flags it. No node fix clears this, and no honest
+      emulator change can (silencing it is the wrong-table mistake of items
+      55/57). So: UNMODIFIED cards can reach zero-alerts; the upscaled turtles
+      card cannot, unless David uses an unmodified turtles card or makes a
+      deliberate operator whitelist decision. **This must be said to David
+      plainly — the node work will not clear his turtles banner.**
+      **(3) THE SWITCH AUDIT** (`CHECK SWITCH #n`) is item 59, done: the
+      exerciser clears it and the verdict PERSISTS, so a second boot has no
+      switch alerts. Not a blocker after the first exercise.
+      **Resume, in rig order:** (a) the CRUX experiment on godzilla — does
+      zero-alerts skip Tech Alerts or park on it; (b) if clearing works,
+      instrument a turtles boot for node 2’s registration: is `0x2c40102b` in
+      the `0x69cc24` part table, and what does the shim answer for node 2’s
+      `0xfe` identify; (c) make node 2 register in time (likely a part-table
+      or identity fix, shared with items 51/55), measured by `flags=3` before
+      the game’s Tech-Alerts evaluation; (d) confirm on the glass an
+      UNMODIFIED card goes splash→attract with no Tech Alerts. Do NOT touch
+      the validation provider.
+      — S2: play is not blocked (the errors clear or are walked past), but the
+      first screen of every boot looks broken, which is what David is asking
+      to end. D4: needs several runs, the mechanism for turtles’ node 2 is not
+      yet known and may reach into the node-identity RE of items 51/55 (which
+      would make it D5), and the CRUX may turn the whole approach from
+      “clear alerts” into “make the game skip the screen”.
+- [ ] **64. First-boot “Guided Setup” wizard appears after attract, because the
+      machine is unconfigured / Insider-unregistered.** `S3 D3` ← DEFERRED
+      *(Filed 2026-08-21, revealed by item 63's fix; David declined to chase
+      it — “no this is perfect” — so this is a PARKED record, not active work.)*
+      Once item 63 stopped the phantom service-button press, godzilla boots
+      Stern-splash → ATTRACT (proven), runs attract for ~40 s (with the node-4
+      banner, item 55), then drops into the game's own **Guided Setup** wizard:
+      Language English / Country U.S.A. / Free Play No / Pricing / Volume, and
+      **“Stern Insider Connected: this machine has an invalid [key] — contact
+      your distributor.”** This is the real machine's first-boot operator
+      config; a registered, configured cabinet completes it once (Save & Exit)
+      and it persists. autoattract used to walk past BOTH Tech Alerts and this
+      wizard with its two Service Back presses, which is why item-59-era
+      godzilla runs reached a clean attract; with the phantom press gone, the
+      wizard is what is left on a hands-off boot.
+      **The open question when/if reopened:** does our config/NVRAM persist a
+      completed Guided Setup so a second boot skips it, or does the invalid
+      Insider key force it every boot? If it persists, the fix is “complete it
+      once” (or seed the config). If the invalid-Insider state forces it, that
+      ties to the QrOffline / Insider-registration layer (item 63's RE named
+      `QrOfflineListener` and the “re-scan to register game” strings). Do NOT
+      spoof a registration blindly — same wrong-table caution as items 55/57.
+      — S3: nothing is blocked (the machine reaches attract; a real operator
+      would do this setup once), it is friction on a hands-off boot. D3:
+      reproduces every boot, one run to test persistence; deeper if it turns
+      out the Insider state forces it.
 
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T

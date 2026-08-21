@@ -2522,6 +2522,52 @@ These have each been violated at least once and each cost a run or a window:
       side (or a live ring read), the instrument exists and is validated, and
       the fault is on demand.
 
+- [ ] **59. Every boot lands on the game's TECH ALERTS screen with `CHECK
+      SWITCH #n` rows, and nobody has ever established what puts them there.**
+      `S2 D3` *(Filed 2026-08-21 from David: "why do we always start into the
+      'tech alerts check switch' screen?")*
+      **Observed, on more than one title:** turtles_pro shows `Check Switch #80
+      LOCKDOWN BUTTON` / `#91 TILT PENDULUM` and runs no light show while it
+      sits there (item 50); stranger_things shows `CHECK SWITCH #7..#22` —
+      both flipper buttons, both EOS, both slingshots, shooter lane, trough 6
+      (item 52). Reproduces on every boot, which makes the oracle free.
+      **THREE THINGS ARE ALREADY SETTLED — do not spend a pass re-testing
+      them.** (1) The screen appearing at all is NOT a missing acknowledgement
+      flag: NVRAM already persists (`nv_load`/`nv_save`, `/data/nvram.bin`,
+      `/data/nv/<title>`) and the screen still shows on every boot. It is the
+      live readout the node-bus walk, the validation tracks and the ball-device
+      checks report into — handoff, "Starting straight into attract mode". (2)
+      The NODE BOARD rows on this same screen WERE a real fault and were fixed
+      in `nb_nodes_add_boards()` (boards carrying no switches never got
+      `board[+4]` bit 1). **The SWITCH rows are a different track and have
+      never been attacked.** (3) `autoattract.sh` does not clear the alerts, it
+      walks past them with one 500 ms Service Back; on turtles, actually
+      clearing needs `plunge.py reset` AND a Back press with the door open.
+      **SUSPECTED, AND MARKED AS A GUESS:** these are the game's "no usage
+      detected" audit — a switch that has not changed state since the audit was
+      reset gets flagged, and on this rig no ball rolls, so trough / EOS /
+      slingshot / shooter never fire by themselves. If that is right the rows
+      self-clear through play and are near-cosmetic. **But "cosmetic" is NOT
+      established:** item 57's close records that godzilla's "no usage detected"
+      tech alert **eats coins until the flagged switch sees usage**, so this can
+      cost credits, which is the S2.
+      **Do NOT reach for `board[+24]`.** It is the node-board status index only,
+      and on any title but godzilla_pro 1.15.0 it reads someone else's memory —
+      nothing in this rig ever sets `PAD_NB_OBJS` (item 52's ★★★ (3)).
+      **Oracle:** the glass on every boot, plus `Diagnostics → Switch Tests`
+      for the per-switch audit; the coin claim is testable by coining up on a
+      title with a flagged switch and counting credits.
+      **Acceptance:** state, from measurement rather than inference, what puts
+      a `CHECK SWITCH #n` row on the screen and what takes it off; say whether
+      it costs credits or blocks anything; then either a normal boot shows no
+      switch rows, or it is written down as correct machine behaviour with the
+      coin question answered either way.
+      — S2: play is not blocked (godzilla plays a full game with alerts on its
+      glass) but it may eat credits and it is noise on the first screen of every
+      run. D3: on demand every boot and the glass reads out the answer, but the
+      switch-alert provider is unlocated — if it is not sitting beside the
+      node-board provider `0x39c6b8` this grows to D4.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

@@ -643,6 +643,7 @@ static unsigned long xwin, wm_delete;
 static int win_w, win_h;                 /* current drawable size            */
 static int win_flip;                     /* 0 = correct here; see win_present() */
 static int win_every = 1;                /* present every Nth frame          */
+static void cover_lift(const char *why); /* item 63; defined by win_present() */
 static unsigned blit_prog, blit_vao;
 static int blit_tex_loc = -1;
 
@@ -2089,6 +2090,12 @@ static void win_pump(void)
         case 3: {                      /* KeyRelease */
             int press = ev.i[0] == 2;
             unsigned kc = (unsigned)ev.i[21];
+            /* item 63: any key in this window lifts the boot cover - a human
+             * pressing keys here wants to see what the machine is showing,
+             * and a cover that hides the service menu from its own operator
+             * would be item 52's guided-setup fight all over again. Before
+             * bind_for(), so an UNBOUND key lifts it too. */
+            if (press) cover_lift("a key was pressed in this window");
             unsigned long t = ev.ul[7];
             int b;
             /* Auto-repeat arrives as Release immediately followed by Press of
@@ -2151,6 +2158,131 @@ static void win_pump(void)
  * PNGs come out correct" to "the texture must be Y-down" skips that line and
  * produces an upside-down window, which is exactly what the first version did.
  * PAD_GL_FLIP=1 forces the flip back on if a future backend changes this. */
+
+/* ---- item 63: the boot cover --------------------------------------------
+ *
+ * David: "I'd rather show the 'loading...' screen while the emulator loads
+ * the game than the tech alerts screen (that's the way the actual machine
+ * works)." The boot's intermediate screens - Tech Alerts with its transient
+ * node-board rows, the validation banner - are real machine state, but they
+ * are the BOOT's state, and putting them on the glass makes every start look
+ * broken. The alerts themselves must not be suppressed (items 55/57: a wrong
+ * table is worse than a flagged one), so the honest fix is a cover: the
+ * window opens on a STARTING UP card and reveals the game when the boot has
+ * settled.
+ *
+ * THE SIGNAL IS A FILE, and watch.sh owns the judgement. PAD_BOOT_COVER
+ * carries the path of a settle file; the cover holds until it exists. watch.sh
+ * touches it when autoattract.sh exits - the same "past Tech Alerts" signal
+ * item 59's exerciser waits on - so this file never re-implements that
+ * judgement, it only polls for the verdict (once a second, not per frame).
+ * Unset, empty or "0" means no cover, and watch.sh only arms it when
+ * auto-advance is on, because with auto-advance off nobody ever writes the
+ * file.
+ *
+ * TWO WAYS OUT BESIDES THE SIGNAL, both deliberate:
+ *   - any KEY PRESS in this window lifts it. An operator driving wants to see
+ *     what the machine is showing, and a cover that hides the service menu
+ *     from the person navigating it would be item 52's guided-setup fight in
+ *     a new coat. (The playfield window drives switches over shm, not X keys,
+ *     so IT cannot lift the cover by accident - its user is watching the
+ *     playfield, and the settle signal lifts this window regardless.)
+ *   - a FAILSAFE clock (PAD_BOOT_COVER_MAX, default 180 s) lifts it if the
+ *     signal never comes, because a cover that can hide a live game forever
+ *     is a worse bug than any screen it covers. 180 rather than 60 because a
+ *     first-run card copy legitimately boots for ~3 minutes (item 34).
+ *
+ * Drawn with scissor+clear like the item 11 tick, for the same reason: no
+ * program, no VAO, no texture, nothing to restore beyond the scissor enable.
+ * The glyphs are a 5x7 dot matrix scaled to the window, which on a Stern is
+ * not even out of character. */
+static char  *cover_path;       /* PAD_BOOT_COVER; NULL = off              */
+static int    cover_up = -1;    /* -1 not read yet, 1 covering, 0 lifted   */
+static double cover_t0, cover_max = 180.0, cover_poll;
+
+static void cover_lift(const char *why)
+{
+    if (cover_up == 1) {
+        cover_up = 0;
+        fprintf(stderr, "[padglhost] boot cover lifted after %.1fs: %s\n",
+                now_s() - cover_t0, why);
+    }
+}
+
+static int cover_active(void)
+{
+    if (cover_up == 0) return 0;
+    if (cover_up == -1) {
+        char *m = getenv("PAD_BOOT_COVER_MAX");
+        cover_path = getenv("PAD_BOOT_COVER");
+        if (cover_path && (!*cover_path || !strcmp(cover_path, "0")))
+            cover_path = 0;
+        if (m && atof(m) > 0) cover_max = atof(m);
+        cover_t0 = now_s();
+        cover_up = cover_path ? 1 : 0;
+        if (cover_up)
+            fprintf(stderr, "[padglhost] boot cover up; lifts on %s, a key, "
+                    "or %.0fs\n", cover_path, cover_max);
+    }
+    if (!cover_up) return 0;
+    {   double t = now_s();
+        if (t - cover_poll >= 1.0) {
+            cover_poll = t;
+            if (access(cover_path, F_OK) == 0)
+                cover_lift("the settle file appeared");
+        }
+        if (cover_up && t - cover_t0 > cover_max)
+            cover_lift("the failsafe clock - no settle signal ever came");
+    }
+    return cover_up;
+}
+
+static void cover_draw(void)
+{
+    /* 5x7 rows, bit 4 = leftmost column. Only the letters STARTING UP uses. */
+    static const unsigned char F[9][7] = {
+        {0x0E,0x11,0x10,0x0E,0x01,0x11,0x0E},   /* S */
+        {0x1F,0x04,0x04,0x04,0x04,0x04,0x04},   /* T */
+        {0x0E,0x11,0x11,0x1F,0x11,0x11,0x11},   /* A */
+        {0x1E,0x11,0x11,0x1E,0x14,0x12,0x11},   /* R */
+        {0x1F,0x04,0x04,0x04,0x04,0x04,0x1F},   /* I */
+        {0x11,0x19,0x15,0x13,0x11,0x11,0x11},   /* N */
+        {0x0E,0x11,0x10,0x17,0x11,0x11,0x0E},   /* G */
+        {0x11,0x11,0x11,0x11,0x11,0x11,0x0E},   /* U */
+        {0x1E,0x11,0x11,0x1E,0x10,0x10,0x10},   /* P */
+    };
+    static const char IDX[] = "STARINGUP";
+    const char *msg = "STARTING UP";
+    int px = win_h / 120; if (px < 2) px = 2; if (px > 8) px = 8;
+    int cell = px - (px > 2);           /* a 1px gap = the dot-matrix look   */
+    int n = (int)strlen(msg);
+    int x0 = (win_w - n * 6 * px) / 2;
+    int y0 = (win_h - 7 * px) / 2;      /* scissor y is from the BOTTOM      */
+    int ndots = (int)((frames_done / 30) % 4);
+    int k, r, c;
+
+    p_glEnable(0x0C11);                                  /* GL_SCISSOR_TEST  */
+    p_glClearColor(0.84f, 0.84f, 0.88f, 1.f);
+    for (k = 0; k < n + ndots; k++) {
+        int ch = k < n ? msg[k] : '.';
+        const char *p = strchr(IDX, ch);
+        int gx = x0 + k * 6 * px;
+        if (ch == '.') {
+            p_glScissor(gx + 2 * px, y0, cell, cell);
+            p_glClear(0x4000);
+            continue;
+        }
+        if (ch == ' ' || !p) continue;
+        for (r = 0; r < 7; r++)
+            for (c = 0; c < 5; c++)
+                if ((F[p - IDX][r] >> (4 - c)) & 1) {
+                    p_glScissor(gx + c * px, y0 + (6 - r) * px, cell, cell);
+                    p_glClear(0x4000);
+                }
+    }
+    p_glDisable(0x0C11);
+}
+
 static void win_present(void)
 {
     int prog = 0, fbo = 0, vp[4] = {0,0,0,0}, tex0 = 0, vao = 0, act = 0;
@@ -2206,6 +2338,14 @@ static void win_present(void)
     p_glViewport(0, 0, win_w, win_h);
     p_glClearColor(0.f, 0.f, 0.f, 1.f);
     p_glClear(0x4000);                 /* COLOR_BUFFER_BIT                   */
+    /* item 63: while the boot cover is up, this window shows STARTING UP
+     * instead of the boot's intermediate screens. ONLY the present changes:
+     * the guest keeps decoding, tex_screen keeps filling, the PNG dumps and
+     * the picture oracle still see the real frame - so every instrument
+     * reads the truth and only the human-facing glass waits for the settle. */
+    if (cover_active()) {
+        cover_draw();
+    } else {
     p_glViewport(dx, dy, dw, dh);
     p_glUseProgram(blit_prog);
     p_glBindVertexArray(blit_vao);
@@ -2214,6 +2354,7 @@ static void win_present(void)
     {   int fl = p_glGetUniformLocation(blit_prog, "u_flip");
         if (fl >= 0) p_glUniform1f(fl, win_flip ? 1.f : 0.f); }
     p_glDrawArrays(0x0005, 0, 4);      /* TRIANGLE_STRIP                     */
+    }
     /* ★ ITEM 11's PER-SWAP TICK, PAD_GL_TICK=1.
      *
      * THE ONE THING THAT CAN TELL AN UNEVEN PRESENT FROM AN UNEVEN GRABBER.

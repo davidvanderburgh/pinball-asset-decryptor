@@ -3010,7 +3010,37 @@ These have each been violated at least once and each cost a run or a window:
       *(Filed 2026-08-21 from David: "eventually, the two node errors clear
       themselves at least, but I'd rather show the 'loading...' screen while
       the emulator loads the game than the tech alerts screen (that's the way
-      the actual machine works)".)*  ← WORKING ON
+      the actual machine works)".)*  ← WORKING ON, IN PROGRESS 70%
+      **★★ BUILT THIS PASS (branch item/63), compiles clean, 337 spike2 tests
+      green — NOT yet seen on the glass, which is the whole acceptance, so it
+      stays open.**
+      **Established (the design that shipped):** the cover lives in
+      `padglhost.c`'s `win_present()` — while up, the window draws STARTING
+      UP as a 5x7 dot-matrix in scissor+clear (the item 11 tick's technique:
+      no program, no texture, nothing to restore) instead of blitting
+      `tex_screen`. ONLY the present changes: the guest keeps decoding, the
+      PNG dumps and picture oracle still see the real frame, so every
+      instrument reads the truth and only the human-facing glass waits.
+      **The signal is a FILE** (`PAD_BOOT_COVER` carries its path;
+      `$ROOT/dump/boot_settled`): watch.sh's four-line waiter touches it when
+      `autoattract.sh` exits — the same settle signal item 59's exerciser
+      waits on, turned into a file, never re-judged. watch.sh arms the cover
+      only when auto-advance is on and rm's the file with the other per-run
+      state so a stale one cannot lift the cover at open.
+      **Three lifts, all deliberate:** the settle file; ANY key pressed in
+      the game window (an operator wants to see — the playfield window
+      cannot trip this, it drives shm not X keys); and a failsafe clock
+      (`PAD_BOOT_COVER_MAX`, 180 s — above item 34's ~3 min first-copy boot)
+      because a cover that can hide a live game forever is worse than any
+      screen it covers. All three of autoattract's exits lift on purpose —
+      gave-up should SHOW what it could not clear, and stood-down means a
+      human is driving.
+      **Resume:** rebuild (`ensurebuild` picks the source change up by hash),
+      boot turtles_pro, and capture: (a) STARTING UP on the glass where Tech
+      Alerts used to be, (b) the reveal landing in attract, (c) the
+      boot-to-reveal time against the ~90 s the same boot showed without the
+      cover, (d) a key press lifting it early. shotwin.py, with item 60's
+      logical-vs-physical warning.
       **THE ARGUMENT FOR DOING IT THIS WAY ROUND, rather than suppressing the
       alerts one at a time.** `Check Node Board 2 : Not Registered` and
       `Check Node Board 14 : Not Responding` are TRANSIENTS of bring-up, not

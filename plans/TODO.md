@@ -2709,6 +2709,33 @@ These have each been violated at least once and each cost a run or a window:
       makes `_place_actions()` redundant — is the tidier one and matches item 39's
       goal, but it undoes a placement that was argued from marker coordinates, so
       it needs David's word rather than a guess.
+      **★ 50%, 2026-08-21 (item/60, `2e078e1`) — THE CODE HALF IS BUILT AND
+      TESTED; ONLY THE LIVE PLUNGE IS LEFT.**
+      **Established:** the assumed reading was taken — the row is added to
+      `Schematic` ONLY and the artwork view is byte-for-byte untouched, so
+      item 25's measured placement is not disturbed. WHICH actions a window
+      offers is now one fact, `playfield.PLUNGE_ACTIONS`, read by both views;
+      WHERE they sit stays two facts with two separate arguments. On the
+      schematic the row is packed on the top bar, LEFT, with the save/load
+      cluster still packed right — item 25's own separation (a misclicked
+      "Load state" yanks the game back to the save), and the bar rather than
+      the grid for the reason the trough got its own strip: the switch columns
+      already fill the window.
+      **Test:** `tests/test_spike2_playfield_actions.py`, 3 tests, real Tk,
+      all green in 1.5 s. Every assertion goes through `invoke()` onto a fake
+      driver and checks the SCRIPT NAME and the verb, not the label — a button
+      that is drawn and wired to nothing is what a screenshot cannot see. The
+      third test builds `Field._place_actions()` on a bare instance and asserts
+      it comes from the same list, so the two views cannot drift again.
+      **Ruled out as unnecessary:** touching `KeyPanel`. It is shared, so a row
+      added there appears twice on the artwork view; the tidier
+      one-place-for-both refactor still needs David's word, exactly as this
+      item said.
+      **Uncommitted:** nothing. All of it is on `item/60`, pushed.
+      **Resume:** the LIVE half only — one `turtles_pro` run, click Plunge on
+      the schematic window, and confirm a ball reaches the playfield. That run
+      also answers the severity question below (S1 if no ball can be got into
+      play from the window at all).
       **Oracle:** item 25's own harness pattern — `invoke()` each button with
       `run_plunge` stubbed and assert start / plunge / reset in order (a button
       that looks right and does nothing is what a screenshot cannot see) — then

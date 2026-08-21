@@ -377,6 +377,16 @@ SW_EVERY = max(1, int(round(TARGET_FPS / max(1.0, SW_HZ))))
 #: seen, so there is nothing to close with.
 GONE_POLLS = 2 * TARGET_FPS
 
+#: The action row: label, and the `plunge.py` verb it runs. ONE list for BOTH
+#: views (item 60). The artwork view draws these as canvas widgets beside the
+#: plunger and the schematic packs them on its top bar - different placements,
+#: argued separately and both kept - but WHICH actions the window offers is one
+#: fact, and it was two: `Field._place_actions()` had the row, `Schematic` never
+#: had an equivalent, so on a title that ships no device table nothing in the
+#: window reached plunge.py at all. A verb added here appears in both windows.
+PLUNGE_ACTIONS = (("Start", "start"), ("Plunge", "plunge"),
+                  ("Reset balls", "reset"))
+
 
 def emu_gone(view, readable):
     """Track LED-block readability; True when a once-seen emulator has left."""
@@ -2649,8 +2659,7 @@ class Field(StateOps, LedRing):
         rather than assumed, so a different theme or DPI still lines up.
         """
         self._acts = []
-        for label, arg in (("Start", "start"), ("Plunge", "plunge"),
-                           ("Reset balls", "reset")):
+        for label, arg in PLUNGE_ACTIONS:
             self._acts.append(tk.Button(self.cv, text=label, width=11,
                                         command=lambda a=arg: self.run_plunge(a)))
         x, y = w - self.ACT_PAD, h - self.ACT_PAD
@@ -3412,6 +3421,31 @@ class Schematic(StateOps):
         if SAVESTATES:
             for wdg in reversed(self._build_state_widgets(bar)):
                 wdg.pack(side="right", padx=(0, 4), pady=2)
+
+        # ★ ITEM 60: START / PLUNGE / RESET BALLS, which this view never had.
+        # The artwork view builds them in `Field._place_actions()` as canvas
+        # widgets beside the plunger (item 25's placement, argued from marker
+        # coordinates and left exactly where it was measured); `Schematic` had
+        # `run_plunge()` and nothing that called it but the trough dots, which
+        # only ever pass "take" and "drain". So on a title that ships no device
+        # table - turtles_pro is the one to test on - nothing in the window
+        # reached `plunge.py start`, `plunge` or `reset`, and getting a ball
+        # into play meant the keyboard or a shell. Item 39's stated goal was
+        # that "the two shapes of this window agree about where the controls
+        # are"; the action row was the one thing it did not bring across.
+        #
+        # ON THE BAR'S LEFT, WITH THE SAVE/LOAD CLUSTER STILL ON ITS RIGHT, and
+        # that split is item 25's rather than a fresh taste call: a misclicked
+        # "Load state" yanks the whole game back to the save, which is not a
+        # neighbour "Plunge" wants. The bar rather than the grid for the same
+        # reason the trough got its own strip - the switch columns already fill
+        # the window, so anything placed over them lands on a node's rows.
+        self._acts = []
+        for label, arg in PLUNGE_ACTIONS:
+            b = tk.Button(bar, text=label,
+                          command=lambda a=arg: self.run_plunge(a))
+            b.pack(side="left", padx=(0, 4), pady=2)
+            self._acts.append(b)
 
         # THE TROUGH GETS ITS OWN STRIP HERE, not a corner of the switch grid.
         # The grid is columns of text that already fill the window and the

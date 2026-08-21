@@ -842,7 +842,11 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    positions out of the game binary's own device table — so any title
    works without anything being added to this repository first. A title
    that ships no playfield drawing (many don't) gets a clickable
-   schematic of its switch list instead.
+   schematic of its switch list instead — and from v0.150.0 that is
+   known to be a property of the game's SOFTWARE VERSION rather than of
+   the title: Godzilla LE 1.13.0 ships neither the drawing nor the
+   device table while V1.14.0 ships both, so updating a card can turn a
+   schematic into a real playfield.
    **The balls are real now, as far as the game is concerned.** A pinball
    machine asks for a ball by firing its trough eject coil and then waits
    for a trough switch to change; until v0.125.0 nothing answered, so a

@@ -3010,7 +3010,7 @@ These have each been violated at least once and each cost a run or a window:
       *(Filed 2026-08-21 from David: "eventually, the two node errors clear
       themselves at least, but I'd rather show the 'loading...' screen while
       the emulator loads the game than the tech alerts screen (that's the way
-      the actual machine works)".)*
+      the actual machine works)".)*  ← WORKING ON
       **THE ARGUMENT FOR DOING IT THIS WAY ROUND, rather than suppressing the
       alerts one at a time.** `Check Node Board 2 : Not Registered` and
       `Check Node Board 14 : Not Responding` are TRANSIENTS of bring-up, not

@@ -2853,6 +2853,22 @@ These have each been violated at least once and each cost a run or a window:
       **Do NOT reach for `board[+24]`.** It is the node-board status index only,
       and on any title but godzilla_pro 1.15.0 it reads someone else's memory —
       nothing in this rig ever sets `PAD_NB_OBJS` (item 52's ★★★ (3)).
+      **★★★ EVIDENCE FROM ITEM 46's PASS, 2026-08-21 — THE COIN CLAIM IS NOW
+      MUCH MORE THAN A SUSPICION ON turtles_pro, AND THE SCREEN BLOCKS MORE
+      THAN CREDITS.** Three runs put **five coins** in an uncleared machine and
+      pressed START repeatedly: **no game ever began**, the trough never moved,
+      the trough-eject coil never fired once, and the display sat on a frozen
+      dot-matrix menu frame for minutes at a time. Then THIS ITEM'S OWN recipe —
+      coin door open (`swhold.py 33 0`), two long Service Back presses,
+      `plunge.py reset` — put the machine straight into proper attract with the
+      lair artwork and `CREDITS 1` showing, and the very next START began a game
+      that ejected on schedule. **So on this title the alerts screen does not
+      merely sit there being noise: it stops a game being started at all, which
+      is an S1 argument if it reproduces on a title David actually plays.** It
+      also made item 46 unreachable until cleared, which is the "makes other
+      items more expensive" case in the flesh. Not yet established: whether the
+      credits were consumed or simply never awarded — the glass showed
+      `CREDITS 1` after five coins, so at least four went somewhere.
       **Oracle:** the glass on every boot, plus `Diagnostics → Switch Tests`
       for the per-switch audit; the coin claim is testable by coining up on a
       title with a flagged switch and counting credits.

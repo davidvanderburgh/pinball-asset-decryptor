@@ -2973,10 +2973,41 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **62. Every title but the one the rootfs was built from raises `GAME
       VALIDATION ERROR #3 UPDATE SD CARD`, because `/mnt/boot/zImage` is
-      godzilla's forever.** `S2 D3` ← WORKING ON, 40% *(D2 → D3: the desk
+      godzilla's forever.** `S2 D3` ← NEEDS DAVID'S CALL, 60% *(D2 → D3: the desk
       diagnosis below is REFUTED for turtles_pro, so what is left needs a
       turtles-instrumented run or RE of its own validation module, not a
       staging call.)*
+      **★★★★★ VERIFIED 2026-08-21 BY A 7-AGENT ADVERSARIAL RE WORKFLOW — the
+      diagnosis is now proven and my earlier “digest mismatch” wording is
+      CORRECTED.** Two independent disassembly traces plus two skeptics who
+      re-ran every measurement on the two ELFs:
+      • The 4-byte patch at vaddr 0x2e15c4 nops the PROLOGUE of the game's
+        ONLY whole-file keyed-hash integrity checker (fopen “rb” / fread the
+        body [0,size-20) / memcmp against the 20-byte trailer digest). Proven
+        by compiler semantics: the rootfs epilogue at 0x2e1758 pops exactly
+        the 8 registers the prologue pushed, so `bx lr` is a deliberate
+        nop-out and the ROOTFS is the untouched original. Not an emulation
+        artifact — the 4 bytes are on-disk in the card binary.
+      • CONSEQUENCE: the nop DISABLES the check (it returns on entry), so the
+        digest mismatch is NEVER COMPUTED at runtime. #3 is NOT the memcmp
+        firing — it is the fingerprint of a self-integrity check that was
+        deliberately defeated, with the 20-byte trailer left stale rather than
+        re-signed. Self-referential: the hash covers the checker's own bytes,
+        so nop-ing the checker is the only way to ship a modified body.
+      • The exact provider that prints the literal “GAME VALIDATION ERROR #3”
+        stayed UNLOCATED (that agent errored on its output cap); most likely a
+        separate watchdog noticing the check never reached its “validated”
+        terminal state. This does not change the verdict.
+      **THE VERDICT, and it is DAVID'S CALL, not an emulator bug:** turtles'
+        #3 is a TRUE POSITIVE about a genuinely modified card. There is no
+        honest emulator fix — suppressing or spoofing it would re-defeat a
+        real shipped check and could hide OTHER modifications riding under the
+        nopped self-hash (only ./game was diffed; the rest of the card was
+        not). Options: (a) accept/whitelist THIS card knowingly; (b) use an
+        unmodified turtles card. **NEITHER is something to do without David
+        saying so.** Note item 63's zero-visibility work, if it lands, would
+        also hide this banner by skipping the whole Tech Alerts screen — which
+        may make the choice moot for the upscaled card.
       **★★ BUILT AND DESK-VERIFIED THIS PASS (branch item/62): per-card
       zImage staging.** `getboot.sh` now carries a size+mtime stamp
       (`/mnt/boot/.pad_card_stamp`, item 34's lesson: not the path) and

@@ -3033,7 +3033,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **62. Every title but the one the rootfs was built from raises `GAME
       VALIDATION ERROR #3 UPDATE SD CARD`, because `/mnt/boot/zImage` is
-      godzilla's forever.** `S2 D2` *(Filed 2026-08-21 from David, looking at
+      godzilla's forever.** `S2 D2` ← WORKING ON *(Filed 2026-08-21 from David, looking at
       a turtles_pro boot: "how do we fix these errors though?")*
       **DIAGNOSED AT THE DESK, no run needed, and it is a one-line-shaped
       fault with a general blast radius.** The ZK track validates the KERNEL:

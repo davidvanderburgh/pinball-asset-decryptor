@@ -2630,7 +2630,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **59. Every boot lands on the game's TECH ALERTS screen with `CHECK
       SWITCH #n` rows, and nobody has ever established what puts them there.**
-      `S2 D3` *(Filed 2026-08-21 from David: "why do we always start into the
+      `S2 D3` ← WORKING ON *(Filed 2026-08-21 from David: "why do we always start into the
       'tech alerts check switch' screen?")*
       **Observed, on more than one title:** turtles_pro shows `Check Switch #80
       LOCKDOWN BUTTON` / `#91 TILT PENDULUM` and runs no light show while it

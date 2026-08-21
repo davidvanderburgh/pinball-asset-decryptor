@@ -2675,7 +2675,7 @@ These have each been violated at least once and each cost a run or a window:
       node-board provider `0x39c6b8` this grows to D4.
 
 - [ ] **60. The Start / Plunge / Reset balls buttons do not exist on a title
-      with no playfield artwork.** `S2 D2` *(Filed 2026-08-21 from David, looking
+      with no playfield artwork.** `S2 D2` ← WORKING ON *(Filed 2026-08-21 from David, looking
       at a godzilla_le window: "where is my 'plunge' button now when there's no
       playfield image?")*
       **Answer, and it is a real gap rather than a moved control:** the three

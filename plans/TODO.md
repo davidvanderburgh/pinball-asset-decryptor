@@ -1357,6 +1357,48 @@ These have each been violated at least once and each cost a run or a window:
       Branch `item/46` is cut from `item/60`, not from main, because item 60
       built the very action row this may have to change and two branches
       editing it would collide.
+      **★★★ 55%, 2026-08-21, ESTABLISHED AT THE DESK WITH NO RUN — THE BALL
+      FEEDER IS COMPLETELY BLIND ON THIS TITLE, AND THAT FITS DAVID'S CLUE
+      EXACTLY.** `ballfeed.py` resolves the trough eject and auto-plunger coils
+      out of `device_xy.txt`, and **turtles_pro's device table has 0 records**
+      (`# 0 records (), 0 on the playfield image` — it is the same emptiness
+      that gives this title the schematic view). `PAD_GAME=turtles_pro
+      ballfeed.py --status` says it in its own words:
+      `eject coil NOT IN THE DEVICE TABLE - ejects cannot be seen` /
+      `auto plunger not in the device table`. godzilla_pro, where the button
+      works, has **575 records (coil=10)** and resolves both.
+      **So on turtles_pro the game fires its trough eject at ball start and
+      NOBODY ANSWERS: no ball ever reaches the shooter lane.** If the game
+      gates the character-select press on having a ball to launch — which is
+      what David's "pick a character and launch a ball at the same time" says
+      the button does — then "never selects a character during a game" is that
+      missing ball, and the attract/in-game split falls out for free: attract
+      has no ball logic, so there the button works (subject to item 17's
+      lottery), and in a game it cannot.
+      **Corroborated, and it is why the button is the launch control here:**
+      turtles' own switch list has `34  80  1  2  LOCKDOWN BUTTON` — the exact
+      physical slot godzilla calls `Action Button` — and **there is no separate
+      LAUNCH BUTTON switch on either title**. Note turtles has TWO lanes,
+      `66 UPPER SHOOTER LANE` and `68 SHOOTER LANE`; `ballmodel.LANE_NAME`
+      matches on the exact name, so it resolves 68, which is correct.
+      **STILL A HYPOTHESIS, NOT A MEASUREMENT — say so until the run is done.**
+      The two older candidates are not dead: the press may still be LOST
+      (item 17's class) or ignored for some other reason.
+      **The test that separates them, and it is sharp:** at character select,
+      press 34 with the lane EMPTY (today's state) and then again with a ball
+      WAITING in the lane — trough switch 72 opened and shooter lane 68 held
+      closed, which is the state `ballmodel.plan_eject` leaves and which
+      `plunge.py` only passes through. If it selects only in the second case
+      the mechanism is confirmed.
+      **Resume:** that run. `PAD_SW_PEND=34` + `swladder.py 34` still runs
+      FIRST as the delivery discriminator, because "reached and ignored" is
+      what the ball theory predicts and "never arrived" would refute it.
+      **If confirmed, the FIX IS NOT IN THIS ITEM:** feeding a ball on a title
+      with no device table is item 21b's ball model needing a coil address that
+      `device_xy.txt` cannot give — related to but NOT the same as item 53,
+      which is about titles that HAVE a table whose groups are unmapped.
+      turtles has no table at all, so there is no group to map and the index
+      has to come off the wire.
       **★ PROBABLY ALREADY FIXED by item 17's close (2026-08-13): the cabinet
       was blind 74% of the time on EVERY title — the game re-ran its aux
       device init every ~924 ms because the shim's i2c/bus replies said

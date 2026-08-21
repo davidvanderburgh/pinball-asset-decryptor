@@ -2568,6 +2568,55 @@ These have each been violated at least once and each cost a run or a window:
       switch-alert provider is unlocated — if it is not sitting beside the
       node-board provider `0x39c6b8` this grows to D4.
 
+- [ ] **60. The Start / Plunge / Reset balls buttons do not exist on a title
+      with no playfield artwork.** `S2 D2` *(Filed 2026-08-21 from David, looking
+      at a godzilla_le window: "where is my 'plunge' button now when there's no
+      playfield image?")*
+      **Answer, and it is a real gap rather than a moved control:** the three
+      buttons are built ONLY in `Field._place_actions()`
+      (`tools/spike2_emu/playfield.py:2627`), which draws them as `create_window`
+      widgets on the ARTWORK canvas beside the plunger — item 25's placement,
+      decided on a measurement. `Schematic` (line 3360) has no equivalent and
+      never had one. It does have `run_plunge()` (line 3560), but the only thing
+      that calls it there is `TroughPanel`'s ball dots, and those only ever pass
+      `"take"` or `"drain"` (line 1151). So on a schematic title nothing in the
+      window reaches `plunge.py start`, `plunge` or `reset`.
+      **Item 39 is where it went missing, and its own Done entry says what it
+      brought across:** keys, service cluster, coin door, ball controls. The
+      action row was not on that list, even though item 39's stated goal was
+      that "the two shapes of this window agree about where the controls are"
+      (`playfield.py:3542`).
+      **What still works on these titles, so the S is not inflated:** keyboard
+      `1` closes START BUTTON (the same switch `plunge.py start` pokes), the six
+      ball dots give take/drain, and `plunge.py <verb>` runs fine from a shell.
+      **UNTESTED, and it decides the severity:** whether a ball can be got into
+      play at all from the window on a schematic title — `F` is a MOMENTARY
+      SHOOTER LANE close, not a launch, and item 21b records the game firing its
+      own AUTO PLUNGER in some situations. If no ball can reach the playfield
+      from the window, this is S1, not S2. One godzilla_le run answers it.
+      **Also blocked by this:** item 59's Tech Alerts clearing recipe needs
+      `plunge.py reset` AND a Back press with the door open — the Back press has
+      a panel button on both views, the reset does not.
+      **ASSUMED, not asked:** add the row to the `Schematic` view only, leaving
+      the artwork view exactly as item 25 measured it. The other reading — put
+      the row on the shared `KeyPanel` so both views carry it in one place, which
+      makes `_place_actions()` redundant — is the tidier one and matches item 39's
+      goal, but it undoes a placement that was argued from marker coordinates, so
+      it needs David's word rather than a guess.
+      **Oracle:** item 25's own harness pattern — `invoke()` each button with
+      `run_plunge` stubbed and assert start / plunge / reset in order (a button
+      that looks right and does nothing is what a screenshot cannot see) — then
+      one run on a no-artwork title.
+      **Acceptance:** on a title that draws the schematic view, the window
+      offers Start, Plunge and Reset balls; each drives `plunge.py` with the
+      right verb; and a plunge on a live schematic-view run puts a ball into
+      play.
+      — S2: play is degraded rather than dead (keyboard Start and the ball dots
+      survive, and the shell is a workaround), and it makes item 59 more
+      expensive on these titles. D2: the fault reproduces on demand every time
+      this view opens, the call sites are located, and item 25's test harness
+      already exists — but confirming a real plunge costs one run.
+
 - [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
       numbers are here for whenever it is reopened.) ~20 Hz stutter in the
       first ~10 s.

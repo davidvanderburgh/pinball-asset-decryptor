@@ -3007,7 +3007,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **63. Straight from the game's own Stern splash to attract, with NO Tech
       Alerts screen — by making the node boards READY before the game decides
-      to show it, NOT by drawing our own overlay.** `S2 D5` ← IN PROGRESS 30%
+      to show it, NOT by drawing our own overlay.** `S2 D5` ← IN PROGRESS 45%
       *(Filed 2026-08-21 from David; REFRAMED 2026-08-21 by David after the
       first approach was built and rejected — see the revert below.)*
       **★★★ DAVID REFRAMED THIS, and the reframe IS the item now:** *"i don't
@@ -3055,6 +3055,51 @@ These have each been violated at least once and each cost a run or a window:
       “No Connection” state in the corner and the coin-door/boot-complete
       state are the first suspects. Not yet investigated; needs David's answer
       to know which path is even real.
+      **★★★★★ THE EXIT MECHANISM IS NOW REVERSE-ENGINEERED (6-agent RE workflow,
+      3 tracks + 2 skeptics, all HIGH confidence and mutually consistent).**
+      The parked “Tech Alerts / No Technician Alerts” screen is the C++ class
+      **`MenuPageLandingPage`** (vtable 0x6952c0); “No Technician Alerts” is
+      just what it renders when its alert vector is empty. Its per-frame update
+      (`0x4e29bc`) advances the boot ONLY by draining a single-slot event
+      MAILBOX at global **`0x7ac9c8`**: when that mailbox holds a pending event
+      with **code==1**, the update stores the value and calls `0x25c040`
+      (posts internal msg 0x3d) — the sole state-advance trigger.
+      **PROVEN CLEAN NEGATIVE, so nobody re-hunts it:** that mailbox has
+      EXACTLY ONE writer (`0x21b9a4`), reached from EXACTLY ONE caller
+      (`0x521a08`) inside a HARDWARE-INPUT decoder (`QrOfflineListener`,
+      0x521940) that posts code==1 only for a decoded input event (a button).
+      Zero pointer refs to the writer, so it is not a timer/callback. **No
+      timer, no boot-complete flag, no connectivity/“connected” read, no
+      coin-door, no node-bus signal writes that mailbox.** The offline “No
+      Connection” and the OTP/VERSION polling are cosmetic and are NEVER read
+      by the exit. So there is NO environment condition our emulator fails to
+      satisfy on this screen — it genuinely advances only on an input event,
+      which is exactly why it parked 12s→140s with zero alerts and zero input.
+      **THE CONCRETE FIX THIS HANDS US:** the shim shares the address space,
+      so it can POST THE ADVANCE EVENT ITSELF — write code=1 into mailbox
+      `0x7ac9c8` (set +4=code, +8=value, +0xc=pending) the instant
+      `MenuPageLandingPage` is up. The screen would drain it on its very first
+      update and advance BEFORE it is ever presented — potentially true
+      zero-visibility, done at the event level, cleaner than a physical
+      SERVICE BACK press (no ~19 s bus-quiet wait, no service-menu timing
+      trap). This is buildable in `hwshim.c`.
+      **TWO THINGS TO CONFIRM BEFORE TRUSTING IT (RE + one run):** (1) where
+      internal msg 0x3d actually goes — it must lead to ATTRACT, not into the
+      service menu (`0x25c040` handles msgs 0x3c/0x3d/0x3e; not fully traced).
+      (2) the ENTRY-SIDE question, which is the real “why does a real machine
+      differ”: what SELECTS `MenuPageLandingPage` as the boot screen instead
+      of driving attract directly? Both Track A and Track C flag a possible
+      PARENT layer (a MenuSystem / attract-starter) that a real machine may
+      use to go straight to attract, gated on a boot/subsystem-ready condition
+      our emulator never asserts. NOT traced — if a removable artifact exists
+      for TRUE hands-off zero-visibility, it lives here, one layer up from the
+      exit. That is the next probe.
+      **Resume:** (a) build the shim mailbox-post and test on a godzilla run —
+      does the boot go splash→attract with the Tech Alerts screen never (or
+      sub-frame) visible, landing in ATTRACT not the service menu; (b) if it
+      lands wrong, trace msg 0x3d; (c) for true hands-off, RE the entry-side
+      boot-screen selection (the parent attract-starter). D5 stands; the
+      mechanism is cracked but the entry-side and a run remain.
       **THE OVERLAY WAS BUILT, VERIFIED ON THE GLASS, THEN REVERTED — wrong
       approach, and the lesson is mine.** A STARTING UP cover in `padglhost.c`
       passed all four of its own acceptance points on turtles (the captures

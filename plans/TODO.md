@@ -3007,7 +3007,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **63. Straight from the game's own Stern splash to attract, with NO Tech
       Alerts screen — by making the node boards READY before the game decides
-      to show it, NOT by drawing our own overlay.** `S2 D4` ← IN PROGRESS 25%
+      to show it, NOT by drawing our own overlay.** `S2 D5` ← IN PROGRESS 30%
       *(Filed 2026-08-21 from David; REFRAMED 2026-08-21 by David after the
       first approach was built and rejected — see the revert below.)*
       **★★★ DAVID REFRAMED THIS, and the reframe IS the item now:** *"i don't
@@ -3017,6 +3017,44 @@ These have each been violated at least once and each cost a run or a window:
       the 'node boards' ready earlier during the loading screen? ideally, we
       go straight from loading splash to attract without seeing any tech
       alerts screens and we do not have our own loading overlay."*
+      **★★★★★ MEASURED 2026-08-21, AND IT REFUTES THE PREMISE — David's AND my
+      own reframe. “Make the node boards ready → straight to attract” DOES NOT
+      WORK, because the wait is NOT caused by alerts.** Clean experiment on
+      godzilla (unmodified card, `PAD_AUTO_ATTRACT=0`, `PAD_SW_EXERCISE=0`,
+      ZERO input of any kind): the alert probe read **live entries: 0 on all
+      101 dumps** across the whole boot — no provider ever active — and the
+      glass sat on **“Tech Alerts / No Technician Alerts” from 12 s to 140 s
+      with no change** (`seq_12..seq_140.png`). The game NEVER advanced to
+      attract on its own. So the Tech Alerts screen is an UNCONDITIONAL boot
+      checkpoint that waits for an operator acknowledgement (a button press),
+      independent of whether any alert is active. This is the handoff's old
+      conclusion — “no state to save, only waiting to skip... the honest way
+      to skip waiting for an operator is to BE the operator” — now proven on a
+      genuinely zero-alert boot, which had never been isolated before.
+      **A trap this experiment cleared:** with the switch exerciser ON, the
+      SAME boot advanced off Tech Alerts to the SERVICE MENU at ~57 s — not an
+      auto-advance, but the exerciser's switch activity walking the game one
+      screen forward (handoff 2400: “a press after Tech Alerts walks INTO the
+      service menu”). Only the zero-input run tells the truth.
+      **SO THE NODE-BOARD FIX IS NECESSARY-BUT-NOT-SUFFICIENT AT BEST, AND NOT
+      THE LEVER.** Node 2 on turtles not registering is a real defect worth
+      fixing on its own (it makes Tech Alerts show a red row rather than
+      “No Technician Alerts”), but clearing every alert still leaves the game
+      parked on the screen. What actually gets past it is the operator ack,
+      which `autoattract.sh` already supplies — just ~19 s in, after it waits
+      for the node bus to go quiet, which is WHY the screen is visible.
+      **THE REAL QUESTION, and it is DAVID'S to answer because he knows the
+      hardware:** does a REAL machine stop on “Tech Alerts / No Technician
+      Alerts” and wait for a button, or go straight to attract? If it WAITS,
+      then “no Tech Alerts at all” is not how the real machine works either,
+      and the best honest outcome is a FAST auto-ack (press as early as the
+      game will accept it — the timing window in the handoff's “when the game
+      becomes willing” work — so the screen flashes rather than lingers). If
+      it ADVANCES on its own, then our parking is an ARTIFACT and the lever is
+      whatever the game waits on that we are not satisfying — the Insider
+      “No Connection” state in the corner and the coin-door/boot-complete
+      state are the first suspects. Not yet investigated; needs David's answer
+      to know which path is even real.
       **THE OVERLAY WAS BUILT, VERIFIED ON THE GLASS, THEN REVERTED — wrong
       approach, and the lesson is mine.** A STARTING UP cover in `padglhost.c`
       passed all four of its own acceptance points on turtles (the captures

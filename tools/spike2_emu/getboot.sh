@@ -34,6 +34,26 @@ trap 'rm -rf "$TMP"' EXIT
 [ -n "$IMG" ] || { echo "usage: getboot.sh <card.raw> [rootfs] [lba]" >&2; exit 1; }
 [ -f "$IMG" ] || { echo "no card image at $IMG" >&2; exit 1; }
 
+# ONCE PER CARD, NOT ONCE PER ROOTFS (item 62). This used to run only from
+# rootfs.sh, so /mnt/boot/zImage was the rootfs-build card's forever and every
+# OTHER title hash-mismatched it - the provider raises #3 for state 2 (bad
+# hash) and 3 (missing file) alike, so a wrong kernel reads exactly like a
+# missing one. Now that cardmount.sh calls this on every card mount, a stamp
+# makes the repeat calls free.
+#
+# The stamp is SIZE+MTIME, deliberately not the path: item 34 is the tale of a
+# path-keyed stamp re-copying 7.3 GB whenever David launched the same card
+# from a different folder. The same trade too: two different cards with
+# coincidentally identical size AND mtime would wrongly share a staging -
+# vanishingly unlikely for card images, and a re-exported card gets a new
+# mtime and restages.
+STAMP="$R/mnt/boot/.pad_card_stamp"
+want=$(stat -c '%s %Y' "$IMG")
+if [ -f "$STAMP" ] && [ "$(cat "$STAMP" 2>/dev/null)" = "$want" ]; then
+    echo "[getboot] /mnt/boot already staged from this card - nothing to do"
+    exit 0
+fi
+
 if [ -z "$LBA" ]; then
     read -r LBA COUNT <<EOF
 $(python3 "$RIG/parts.py" --fat "$IMG")
@@ -116,6 +136,15 @@ for i in range(rootent):
     open(p, 'wb').write(out)
     print('[getboot] %-20s %9d bytes  md5=%s' % (name, size, hashlib.md5(out).hexdigest()))
 PY
+
+# The stamp is written AFTER the copy, so a failed stage retries next mount
+# rather than being remembered as done. set -eu means reaching here is success.
+echo "$want" > "$STAMP"
+
+# A PAD_PIVOT (root) run must not leave root-owned files where the next plain
+# user run cannot overwrite them - the same handback watch.sh does for logs.
+# --reference, so this needs to know nothing about which user owns the rootfs.
+[ "$(id -u)" = 0 ] && chown --reference="$R/mnt" "$R/mnt/boot" "$R/mnt/boot"/* 2>/dev/null
 
 echo "[getboot] /mnt/boot now:"
 ls -l "$R/mnt/boot"

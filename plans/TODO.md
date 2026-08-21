@@ -3007,7 +3007,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **63. Straight from the game's own Stern splash to attract, with NO Tech
       Alerts screen — by making the node boards READY before the game decides
-      to show it, NOT by drawing our own overlay.** `S2 D5` ← IN PROGRESS 45%
+      to show it, NOT by drawing our own overlay.** `S2 D4` ← IN PROGRESS 65%
       *(Filed 2026-08-21 from David; REFRAMED 2026-08-21 by David after the
       first approach was built and rejected — see the revert below.)*
       **★★★ DAVID REFRAMED THIS, and the reframe IS the item now:** *"i don't
@@ -3094,6 +3094,50 @@ These have each been violated at least once and each cost a run or a window:
       our emulator never asserts. NOT traced — if a removable artifact exists
       for TRUE hands-off zero-visibility, it lives here, one layer up from the
       exit. That is the next probe.
+      **★★★★★ ROOT CAUSE FOUND AND VERIFIED (a second 6-agent workflow: 3 tracks
+      + 3 skeptics, all reproducing the disassembly independently). THE BOOT
+      DEFAULT IS ATTRACT; WE ARE PUSHED INTO THE MENU BY A SPURIOUS SERVICE
+      INPUT.**
+      • `main` (0x1c2d0) writes the top-level mode bitfield 0x7aba5a := 0x10
+        UNCONDITIONALLY (bit4 = attract/idle; menu bit 0x100 CLEAR). No
+        readiness / config / identity / connectivity flag is read before it.
+        So the code-level boot default is ATTRACT, not the menu. Every named
+        ready-flag (node-bus-ready registry 0x7e1800, version globals,
+        0x706464, 0x6fc236, 0x6c5d38) is RULED OUT as the boot gate. The
+        “removable ready-flag a real machine asserts” hypothesis is REFUTED.
+      • The operator menu (MenuPageLandingPage = the parked “Tech Alerts”
+        screen) is shown ONLY when menu bit 0x100 is set, and bit 0x100 has
+        EXACTLY ONE setter in the whole binary: `MenuSystem::open` 0x23b21c,
+        reachable at boot ONLY via the service-button toggle 0x417a70 ←
+        0x521a60, inside the hardware-input decoder `QrOfflineListener`
+        0x521940, on **event OPCODE 19 (the MENU / service button)**. Zero
+        boot/timer/event-bus/callback path opens it; the listener has no tick.
+      • CONCLUSION (adversarially verified): a real cabinet — coin door
+        closed, no service button pressed — never receives opcode 19 and runs
+        attract. **WE LAND ON THE MENU BECAUSE OUR SWITCH/NODE INPUT LAYER
+        DELIVERS A SPURIOUS SERVICE-BUTTON (opcode 19) EVENT AT POWER-UP.**
+        The fix is in the INPUT layer, not any game flag — exactly David's
+        “it’s an artifact” instinct, now proven.
+      **★ THE LIKELY CULPRIT, from the clean-boot switch-table dump
+      (crux2.log): every service button reads `raw=0 logical=1` at boot —
+      Service Select/Plus/Minus/Back (ids 25–28, node 0 bits 8–11).** They
+      are active-low, so raw=0 presents as PRESSED. If the game reads a
+      service button as pressed at power-up (before the real node scans
+      settle it open), that IS the opcode-19 menu-open. STRONG LEAD, NOT YET
+      PROVEN LIVE — the dump is the shim’s table enumeration, not a captured
+      live read; opcode 19 must be caught being delivered.
+      **Resume (the confirming experiment + fix):** (1) hook `QrOfflineListener`
+      0x521940 in `hwshim.c` to log every call with its opcode and the source
+      switch, boot godzilla, and confirm opcode 19 fires at power-up and which
+      switch/bit produces it. (2) Fix the input layer so service buttons
+      (ids 25–28 / the opcode 13–22 range) read OPEN/not-pressed from the
+      first node scan — likely the shim’s initial node-0 switch state, or an
+      edge synthesized before the real scan. (3) Verify: godzilla boots
+      Stern-splash → attract with NO Tech Alerts screen, zero input, on the
+      glass. This is also the general fix (all titles, all cards — including
+      the upscaled turtles, whose validation banner would then never be shown
+      either, since the whole screen is skipped). D5 → D4: the mechanism is
+      known and the fix is a bounded input-layer change plus one run.
       **Resume:** (a) build the shim mailbox-post and test on a godzilla run —
       does the boot go splash→attract with the Tech Alerts screen never (or
       sub-frame) visible, landing in ATTRACT not the service menu; (b) if it

@@ -124,6 +124,57 @@ def _stale(dest, source):
         return True
 
 
+#: The header devicexy.text() writes naming the binary a table came from.
+BINARY_TAG = "# binary: "
+
+
+def _recorded_binary(dest):
+    """What `dest` says it was built from, or None if it does not say."""
+    try:
+        with open(dest) as f:
+            for line in f:
+                if not line.startswith("#"):
+                    return None            # past the header, nothing found
+                if line.startswith(BINARY_TAG):
+                    return line[len(BINARY_TAG):].strip()
+    except OSError:
+        return None
+    return None
+
+
+def _built_from(dest, source):
+    """Whether `dest` records having come from the binary that is there NOW.
+
+    ★ MTIME ALONE SAID YES TO SEVENTEEN FILES IT SHOULD HAVE REFUSED
+    (2026-08-21). _stale() above is the whole cache test, and it compares two
+    timestamps. Both of its answers were wrong here in the same way:
+
+      * A TABLE BUILT WITH NO BINARY AT ALL still counts as newer than one.
+        The item 57 catalogue sweep ran over every title in the cache, and for
+        the ones whose card was not mounted it wrote a device_xy.txt holding
+        zero records - which is indistinguishable, to a timestamp, from the
+        legitimate empty that a title with no device table gets, and which the
+        code above deliberately keeps so the table is not re-derived every run.
+        17 of 30 cached titles were carrying one, `godzilla_le` among them, and
+        nothing was ever going to rebuild them: the empty file WAS the cache.
+
+      * A CARD'S FILES CARRY THE IMAGE'S MTIMES, NOT THE COPY'S. godzilla_le's
+        binary on the card reads Jul 28; the empty table built from nothing
+        reads Aug 19. The table is "newer" than a binary it never opened, so a
+        DIFFERENT card for the same title is invisible here too.
+
+    So the identity of the source is written INTO the table (devicexy.text) and
+    checked here. A table that names no binary was built without one and is
+    rebuilt; a table naming a different one is rebuilt; the legitimate empty
+    names its binary, matches, and stays cached exactly as before.
+    """
+    if not os.path.exists(dest):
+        return True                # _stale() already answers this one
+    if not source or not os.path.exists(source):
+        return True                # nothing to compare against; keep what we have
+    return _recorded_binary(dest) == devicexy.binary_id(source)
+
+
 def _write(path, text):
     """Write ATOMICALLY - tmp in the same dir, then replace (item 49).
 
@@ -195,7 +246,8 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
     dev_dest = os.path.join(tdir, "device_xy.txt")
     led_dest = os.path.join(tdir, "led_io.txt")
     recs = None
-    if force or _stale(dev_dest, elf) or _stale(led_dest, elf):
+    if (force or _stale(dev_dest, elf) or _stale(led_dest, elf)
+            or not _built_from(dev_dest, elf)):
         if not elf or not os.path.exists(elf):
             say("  devices      no game binary at %s" % elf)
         else:
@@ -211,7 +263,8 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
         # routes a title with perfectly good artwork into its "nothing to
         # draw yet" branch. Same class as the switch write below.
         try:
-            _write(dev_dest, devicexy.text(game, recs, art_src, pf_w, pf_h))
+            _write(dev_dest,
+                   devicexy.text(game, recs, art_src, pf_w, pf_h, elf))
         except OSError as exc:
             say("  devices      FAILED to write %s: %s" % (dev_dest, exc))
             recs = None

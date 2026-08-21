@@ -258,12 +258,49 @@ def seeds(d):
     up entirely of TOPPER or CABINET records contains no pointer to "playfield"
     and was never seeded at all. The six cabinet switches went with it. A check
     that only looks at what it found cannot see that.
+
+    ★ A POINTER CAN LAND IN THE MIDDLE OF A STRING, and until 2026-08-21 this
+    looked only at where each string STARTS. The linker merges a string that is
+    a SUFFIX of another into it and points at the tail, and godzilla_le V1.14.0
+    keeps exactly ONE NUL-terminated `playfield` in the whole binary - at the
+    end of `Test/scaled_godzilla_le_playfield` - which is the address its table
+    carries. That address was never in `want`, so a run made up entirely of
+    playfield records had no seed at all: the title's 59 playfield switches and
+    every coil, all present and all parsing, were never reached, and the virtual
+    playfield fell back to the switch list. 61 playfield LEDs DID come out,
+    which is what made it look like a thin table rather than an unseeded one -
+    they sit inside a longer run that a neighbouring image name seeded.
+
+    Godzilla Pro hides the bug completely: it happens to keep a SECOND,
+    standalone NUL-terminated `playfield` at 0x6061f0 and its table points at
+    THAT one, so the same code found all 575 of its records. One title's string
+    pool is not a constant either - the same lesson layout_image() already
+    learned about the NAME.
+
+    Measured over all 40 card images in `images/Stern/spike2` (cardaudit.py):
+    ONE of them changes under this fix, and the other 39 - including all ten
+    that already had working tables - are byte-for-byte identical. Note that
+    the device table is a property of the BUILD: godzilla_le 1.13.0 ships none
+    at all, so the card that shows this bug is V1.14.0 specifically.
+
+    So seed every SUFFIX that would itself pass the image test above, not just
+    the whole string. Written without slicing (a rfind and an endswith per
+    string) because this runs over every printable run in an 8 MB binary.
     """
     want = set()
+    pf = PLAYFIELD_IMAGE.encode()
     for m in _STRINGS.finditer(d):
-        s = m.group(1)
-        if s == PLAYFIELD_IMAGE.encode() or b"/" in s:
-            want.add(m.start(1) + VA_BIAS)
+        s, base = m.group(1), m.start(1) + VA_BIAS
+        # Every suffix that still holds the LAST "/" passes "/ in s", so each
+        # is a legal image name and therefore a legal merge target. i == 0 is
+        # the whole string, which is what this used to add on its own.
+        cut = s.rfind(b"/")
+        for i in range(cut + 1):
+            want.add(base + i)
+        # ...and a tail that is exactly the bare playfield name passes too.
+        # This is the godzilla_le case, where the tail starts AFTER the slash.
+        if s.endswith(pf) and len(s) - len(pf) > cut:
+            want.add(base + len(s) - len(pf))
     if not want:
         return []
     out = []
@@ -388,11 +425,33 @@ def counts(keep):
     return out
 
 
-def text(game, keep, art, pf_w, pf_h):
+def binary_id(elf_path):
+    """`<basename> <size>`, the identity a cached table records for its source.
+
+    ★ WHY A SIZE AND NOT AN MTIME (2026-08-21). mktables decided a cached
+    table was current by comparing mtimes, and that answered YES to two files
+    it should have refused. A card's files carry the mtimes of the IMAGE, not
+    of the copy, so a different card for the same title is routinely OLDER than
+    the table built from a previous one - the swap is invisible. And a table
+    built when no binary was reachable at all names no source, so an empty
+    device_xy.txt written by a sweep that could not open an ELF looked exactly
+    like the legitimate empty a title with no device table gets. 17 of 30
+    cached titles here were carrying one, godzilla_le among them, and nothing
+    was ever going to rebuild them.
+    """
+    try:
+        return "%s %d bytes" % (os.path.basename(elf_path),
+                                os.path.getsize(elf_path))
+    except (OSError, TypeError):
+        return None
+
+
+def text(game, keep, art, pf_w, pf_h, elf=None):
     """device_xy.txt, as a string."""
     pf = [r for r in keep if r["image"] == layout_image(keep)]
     c = counts(keep)
     lines = ["# %s device positions, from the game binary." % game,
+             "# binary: %s" % (binary_id(elf) or "(unknown)"),
              "# %d records (%s), %d on the playfield image."
              % (len(keep), " ".join("%s=%d" % kv for kv in sorted(c.items())),
                 len(pf)),
@@ -434,7 +493,7 @@ def main():
     if not os.path.isdir(d_dir):
         os.makedirs(d_dir)
     with open(dest, "w", newline="") as f:      # newline='': LF even on Windows
-        f.write(text(game, keep, art, pf_w, pf_h))
+        f.write(text(game, keep, art, pf_w, pf_h, gameinfo.elf(game)))
     print("%d records (%d on the playfield) -> %s" % (len(keep), len(pf), dest))
     xs = [r["x"] for r in pf]
     ys = [r["y"] for r in pf]

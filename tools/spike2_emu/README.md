@@ -48,6 +48,80 @@ A title only reaches "clean" when all four say so. **This table is built
 from real runs, not inference** — a title not yet re-checked keeps its last
 known state with the date it was last run, not a guess.
 
+★ **THE DEVICE-TABLE AUDIT IS NOW MEASURED RATHER THAN INFERRED, AND IT WAS
+DONE OFF THE RIG** (2026-08-21, item 61). Every `.raw` in
+`images/Stern/spike2` plus the running custom card — 40 images — was read with
+the repo's OWN read-only ext4 reader (`plugins/stern/explorer.CardImage`), which
+pulls `/<title>/game` straight out of the image. Nothing was mounted, no card
+cache was copied, no lock was needed and a live run was untouched; the whole
+sweep takes about two minutes. **`cardaudit.py` is that sweep** — run it with
+no arguments for the whole library, or name images:
+
+```
+python tools/spike2_emu/cardaudit.py
+python tools/spike2_emu/cardaudit.py "C:/.../My Custom Card.raw"
+```
+
+**Re-run the audit that way. A mount-and-run sweep is what poisoned the table
+cache in the first place, and it cannot be done while anyone is playing.**
+
+**THE DEVICE TABLE IS A PROPERTY OF THE BUILD, NOT OF THE TITLE, and that is the
+finding that resolves most of the 2026-08-19 disagreements.** Stern adds the
+graphical device test data in a specific release, so an older card for the same
+title legitimately has none:
+
+| title | older build | newer build |
+|---|---|---|
+| `godzilla_le` | 1.13.0 — no `Test` dir, 0 records | **1.14.0 — 593 records, art shipped** |
+| `jaws_le` | 1.01.0 — 0 records | 1.02.0 — 439 records |
+| `elvira3` | 1.11.0 — 0 records | 1.13.0 — 275 (topper only) |
+
+So the 2026-08-19 sweep's `❌ none shipped` for `godzilla_le` was CORRECT about
+the card it measured (`godzilla_le-1_13_0`), and wrong only as a claim about the
+title. The card David actually runs is a custom image built on **V1.14.0**, and
+that build ships both the drawing and a complete layout. A row here names a
+build from now on.
+
+**11 of the 40 images carry a device table** (10 of the 39 in
+`images/Stern/spike2`, plus the running custom card):
+
+| card image | build | device records | layout image | art on the card | draws on art |
+|---|---|---|---|---|---|
+| `deadpool_pro-1_16_0.Release.8G.sdcard.raw` | 1.16.0 | **459** (coil=14 led=376 switch=69), 160 on the layout | `playfield` | `deadpool_le_playfield.png` 330x710<br>`deadpool_pro_playfield.png` 329x710 | yes |
+| `dungeons_and_dragons_le-1_00_0.Release.16G.sdcard.raw` | 1.00.0 | **255** (coil=16 led=169 switch=70), 229 on the layout | `TestMode/Rope_LE-Premium-X8-X9_TOP_rotated_edit_cropped` | none shipped | blank field |
+| `elvira3-1_13_0.Release.16G.sdcard.raw` | 1.13.0 | **275** (led=275), 275 on the layout | `System/TestMode/universal_topper_scaled` | none shipped | blank field |
+| `Heisei Custom Image Premium V1.raw` | custom (V1.14.0) | **593** (coil=14 led=513 switch=66), 177 on the layout | `playfield` | `scaled_godzilla_le_playfield.png` 313x710 | yes |
+| `godzilla_pro-1_15_0_spike2.Release.8G.sdcard.raw` | 1.15.0 | **575** (coil=10 led=506 switch=59), 164 on the layout | `playfield` | `scaled_godzilla_le_playfield.png` 313x710<br>`scaled_godzilla_pro_playfield.png` 313x710 | yes |
+| `james_bond_60th_le-1_10_0.Release.8G.sdcard.raw` | 1.10.0 | **513** (coil=16 led=426 switch=71), 138 on the layout | `Test/scaled_playfield` | `scaled_playfield.png` 202x443 | yes |
+| `james_bond_le-1_06_0.Release.16G.sdcard.raw` | 1.06.0 | **526** (coil=17 led=429 switch=80), 185 on the layout | `playfield` | `bond_le_playfield.png` 459x998<br>`bond_pro_playfield.png` 459x998 | yes |
+| `jaws_le-1_02_0.Release.16G.sdcard.raw` | 1.02.0 | **439** (coil=14 led=347 switch=78), 217 on the layout | `playfield` | `jaws_le_playfield_scaled.png` 312x710<br>`jaws_pro_playfield_scaled.png` 312x710 | yes |
+| `john_wick_le-1_01_0.Release.16G.sdcard.raw` | 1.01.0 | **503** (coil=16 led=412 switch=75), 479 on the layout | `playfield` | `john_wick_le_playfield.png` 321x710<br>`john_wick_pro_playfield.png` 321x710 | yes |
+| `king_kong_le-0_96_0.Release.16G.sdcard.raw` | 0.96.0 | **517** (coil=21 led=421 switch=75), 489 on the layout | `TestMode/Rodeo_LE_Service_Playfield_Wireframe_300dpi_cropped` | `Rodeo_LE_Service_Playfield_Wireframe_300dpi_cropped.png` 312x710<br>`Rodeo_PRO_Service_Playfield_Wireframe_300dpi_cropped.png` 313x710 | yes |
+| `metallica_spike-1_03_0.Release.32G.sdcard.raw` | 1.03.0 | **664** (coil=22 led=569 switch=73), 502 on the layout | `TestMode/metallica_playfield_with_handle_cropped` | `metallica_playfield_with_handle_cropped.png` 312x710 | yes |
+
+The other 29 genuinely ship none, on the builds we hold: `aerosmith_le 1.15.0`, `avengers_infinity_le 1.09.0`, `batman 1.13.0`, `deadpool_le 1.14.0`, `elvira3 1.11.0`, `foo_fighters_le 1.03.0`, `godzilla_le 1.13.0`, `guardians_le 1.14.0`, `iron_maiden_le 1.16.0`, `jaws_le 1.01.0`, `jurassic_park_le 1.15.0`, `led_zeppelin_le 1.20.0`, `led_zeppelin_le 1.21.0`, `led_zeppelin_le 1.22.0`, `led_zeppelin_pro 1.20.0`, `led_zeppelin_pro 1.22.0`, `mando_le 1.44.0`, `munsters_le 1.27.0`, `rush_le 1.18.0`, `star_wars_le 1.30.0`, `stranger_things_le 1.12.0`, `sword_of_rage_le 1.18.0`, `turtles_le 1.58.1`, `turtles_le 1.59.0`, `turtles_pro 1.58.0`, `turtles_pro 1.59.0`, `uncanny_xmen_le 0.97.0`, `venom_le 1.06.0`, `venom_le 1.07.0`.
+
+**What the 2026-08-21 seeder fix changed across the whole catalogue: exactly one
+image.** `godzilla_le` V1.14.0 went 477 → 593 records (coil 0 → 14, switch
+18 → 66) and its layout image flipped from
+`System/TestMode/spike_2_cabinet_front_cropped` to `playfield`. **The other 39
+are byte-for-byte identical under the old and new seeder** — that is the control
+that says the fix only adds the runs a merged string hid, and invents nothing.
+
+**Known self-check noise, not regressions** (identical before and after the
+fix): `LEFT POP BUMPER` sits right of centre on `deadpool_pro`, `james_bond_le`
+and `metallica_spike` — the name is the left pop OF A CLUSTER, so the
+left/right check counts it wrong; `elvira3` 1.13.0 positions 275 TOPPER lamps
+and nothing else, so its records fall outside a playfield-sized box by design
+(item 50's case); `dungeons_and_dragons_le` and `elvira3` position devices but
+ship no matching art, so they draw on a blank field.
+
+**Every `❌ none shipped` / `not re-measured` row in the table below is now
+CONFIRMED by that sweep** — for the build named in the list above, and only for
+it. What the sweep cannot answer is the other three columns: switches, second
+display and whether a title actually boots are properties of a RUN, and those
+still come from running it.
+
 | title | switches | artwork | positions | 2nd display | last checked |
 |---|---|---|---|---|---|
 | godzilla_pro | ✅ live, 88 | ✅ | ✅ (baseline) | n/a | 2026-08-19 |
@@ -62,7 +136,8 @@ known state with the date it was last run, not a guess.
 | turtles_le | ✅ live, 96 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
 | uncanny_xmen_le | ✅ live, 110 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
 | deadpool_le | ✅ live, 104 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
-| godzilla_le | ✅ live, 98 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
+| godzilla_le **V1.14.0** | ✅ live, 98 | ✅ scaled_godzilla_le_playfield.png 313x710 | ✅ 177/593 inside, 0 outside; 30/30 left-right; 48 switches, 14 coils, 115 lamps placed | n/a | 2026-08-21 |
+| godzilla_le 1.13.0 | not run | — no device test data in this build | — 0 records (measured off the card) | n/a | 2026-08-21 |
 | metallica_spike | ✅ live, 106 | ✅ metallica_playfield…png (item 57 fix) | ✅ 502/664 inside, 0 outside (item 57 fix) | n/a | 2026-08-19 |
 | aerosmith_le | ✅ static (swelf.py), live-verified | — no device table shipped | — | n/a | 2026-08-19 |
 | avengers_infinity_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |

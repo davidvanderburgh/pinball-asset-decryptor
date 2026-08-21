@@ -84,6 +84,112 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [x] **61. godzilla_le draws the switch list, and it has a complete playfield
+      layout the whole time.** `S2 D1` DONE 2026-08-21.
+      *(Filed and fixed the same session, from David looking at a live
+      godzilla_le run: "why didn't this bring up a virtual playfield image?
+      there should be one on here.")*
+      **He was right, and the window was not.** `dump/tables/godzilla_le/
+      device_xy.txt` held `0 records`, so `layout_is_usable()` chose
+      `Schematic` and its top bar said "no playfield artwork in this title" —
+      a claim about the TABLE dressed up as a claim about the CARD. The card
+      ships the drawing (`assets/nuk/images/Test/scaled_godzilla_le_playfield.
+      png`, 313x710) and the binary ships 593 device records. Two independent
+      bugs had to line up to hide both:
+
+      1. **`devicexy.seeds()` only seeded where a string STARTS.** The linker
+         merges a string that is a SUFFIX of another into it and points at the
+         tail, and godzilla_le keeps exactly ONE NUL-terminated `playfield` in
+         the whole binary — at the end of `Test/scaled_godzilla_le_playfield`,
+         at 0x62cc68 — which is the address its device table carries. That
+         address was never in `want`, so a record run made up ENTIRELY of
+         playfield records had no seed and was never walked: 59 playfield
+         switches and every coil, all present and all parsing, simply never
+         reached. 61 playfield LEDs did come out, because they sit inside a
+         longer run a neighbouring image name seeded — which is what made it
+         read as a thin table rather than an unseeded one.
+         **godzilla_pro hides this completely**: it happens to keep a SECOND,
+         standalone `playfield` at 0x6061f0 and its table points at THAT one,
+         so the same code found all 575 of its records and the bug looked like
+         a property of the LE card. Same shape as item 50's "Bond has no
+         playfield layout" and item 57's king_kong/metallica miscount, one
+         layer lower — not the filter this time, the SEEDER.
+      2. **`mktables._stale()` judged a cached table by mtime alone.** The item
+         57 catalogue sweep wrote a zero-record `device_xy.txt` for every title
+         whose card was not mounted, and a card's files carry the IMAGE's
+         mtimes — so the empty table was permanently "newer" than a binary it
+         had never opened, and nothing was ever going to rebuild it. **17 of 30
+         cached titles were carrying one.** It also meant a DIFFERENT card for
+         the same title was invisible.
+
+      **Fixes.** `seeds()` now seeds every SUFFIX that would itself pass
+      `_one()`'s image test (an rfind and an endswith per string, no slicing —
+      it runs over every printable run in an 8 MB binary; measured 0.2 s).
+      `devicexy.text()` writes `# binary: <file> <size> bytes` and
+      `mktables._built_from()` requires it to match, so a table that names no
+      binary, or names a different one, is rebuilt.
+      **Measured, all three ELFs on this machine.** godzilla_pro 575 -> 575,
+      byte-identical, `layout_image` unchanged: no false seeds. turtles_pro
+      0 -> 0: it genuinely ships no device table. godzilla_le 477 -> 593
+      (coil 0 -> 14, switch 18 -> 66), `layout_image` flips from
+      `System/TestMode/spike_2_cabinet_front_cropped` to `playfield`, and the
+      self-checks read **177 playfield records, 0 outside the 313x710 artwork,
+      30/30 left-right names on the correct side**.
+      **The 477-record intermediate is why a plain `--force` would have been
+      WORSE than the empty file, and that is the part worth remembering.** With
+      only 61 playfield LEDs and 12 cabinet-front devices, `layout_image()`'s
+      most-classes-first rule picks the CABINET FRONT, and `layout_art()`'s size
+      check accepts the 313x710 playfield png for a 299x342 extent — six coin
+      switches and the start button drawn confidently across the playfield.
+      Exactly the failure `devicexy.py`'s own header records having shipped
+      once. The seeder had to be fixed FIRST.
+      **Verified end to end**: `mktables.py` with NO `--force` rebuilt the table
+      by itself (`drawable=yes`, 593 records, 135 inserts, 48 switches placed),
+      and `playfield.py` re-imported against it reports `LAYOUT_IMAGE=playfield`,
+      art accepted, 48 switches / 14 coils / 115 addressable lamps placed,
+      `layout_is_usable() -> Field`.
+      **THE CATALOGUE RE-AUDIT IS DONE, AND IT NEEDED NO SWEEP AND NO RIG.**
+      David: "we have tons of card images to test here:
+      `images/Stern/spike2`" — 39 of them, plus the running custom card. The
+      repo already carries a read-only ext4 reader for these cards
+      (`plugins/stern/explorer.CardImage`, the Partition Explorer's own
+      engine), so `/<title>/game` comes straight out of a `.raw` with **no
+      mount, no root, no WSL, no lock and no effect on a live run** — about
+      two minutes for all 40, while a game was up the whole time. Shipped as
+      `tools/spike2_emu/cardaudit.py` so the next audit is one command rather
+      than 30 boots. **A mount-and-run sweep is what poisoned the cache in the
+      first place; this replaces it.**
+      **THE RESULT, and it is the finding that settles the 2026-08-19
+      disagreements: THE DEVICE TABLE IS A PROPERTY OF THE BUILD, NOT OF THE
+      TITLE.** Stern adds the graphical device test data in a specific release,
+      so an older card for the same title legitimately has none — `godzilla_le`
+      1.13.0 ships no `Test` directory and 0 records while V1.14.0 ships both,
+      and `jaws_le` (1.01 → 1.02) and `elvira3` (1.11 → 1.13) cross the same
+      line. **So the sweep's `❌ none shipped` for godzilla_le was CORRECT about
+      the card it measured** (`godzilla_le-1_13_0`, the one in the library) and
+      wrong only as a claim about the title; David's card is a custom image
+      built on V1.14.0. `README.md`'s Titles table names builds from now on.
+      11 of the 40 images carry a device table; the other 29 genuinely ship
+      none on the builds we hold.
+      **AND THE FIX'S BLAST RADIUS, MEASURED THE SAME WAY: EXACTLY ONE IMAGE OF
+      FORTY.** Only godzilla_le V1.14.0 moves (477 → 593, cabinet front →
+      playfield). The other 39 are byte-for-byte identical under the old and the
+      new seeder — 39 controls, including all 10 titles that already had
+      working tables. That is what says the fix only adds the runs a merged
+      string hid and invents nothing, and it is a much stronger statement than
+      the 3 ELFs available when the fix was written.
+      **The 29 poisoned CACHE files still heal on their own**, separately from
+      the audit: none carries a `# binary:` line, so each rebuilds once, with
+      the fixed seeder, on its next run.
+      **Item 60 is NOT closed by this** — godzilla_le stops being an example of
+      it, but a title that genuinely ships no device table (turtles_pro,
+      measured 0 here) still gets `Schematic` and still has no Start / Plunge /
+      Reset row.
+      — S2: the title was fully playable, but its playfield view — the thing
+      the window exists for — was unavailable and the UI asserted the card was
+      at fault. D1: reproduced from the cached table, root-caused to a single
+      address, and both fixes are measured against a control that did not move.
+
 - [x] **57. UNIVERSAL GAME COMPATIBILITY: every title should load a switch,
       LED and coil matrix and boot to attract, checked one title at a time in
       ALPHABETICAL ORDER.** `S1 D3` DONE 2026-08-19.
@@ -2611,6 +2717,11 @@ These have each been violated at least once and each cost a run or a window:
       offers Start, Plunge and Reset balls; each drives `plunge.py` with the
       right verb; and a plunge on a live schematic-view run puts a ball into
       play.
+      **★ godzilla_le IS NO LONGER AN EXAMPLE OF THIS (item 61, 2026-08-21).**
+      It has a complete playfield layout and now opens the `Field` view with the
+      action row, so the run this item wants must be done on a title that
+      genuinely ships no device table — `turtles_pro`, measured at 0 records
+      against the fixed seeder, is the one to use.
       — S2: play is degraded rather than dead (keyboard Start and the ball dots
       survive, and the shell is a workaround), and it makes item 59 more
       expensive on these titles. D2: the fault reproduces on demand every time

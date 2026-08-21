@@ -846,7 +846,11 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    known to be a property of the game's SOFTWARE VERSION rather than of
    the title: Godzilla LE 1.13.0 ships neither the drawing nor the
    device table while V1.14.0 ships both, so updating a card can turn a
-   schematic into a real playfield.
+   schematic into a real playfield. From v0.151.0 the schematic view
+   carries the Start, Plunge and Reset balls buttons too — they had only
+   ever been drawn on the artwork, beside the plunger, so on a title with
+   no drawing there was nothing in the window that could put a ball into
+   play.
    **The balls are real now, as far as the game is concerned.** A pinball
    machine asks for a ball by firing its trough eject coil and then waits
    for a trough switch to change; until v0.125.0 nothing answered, so a

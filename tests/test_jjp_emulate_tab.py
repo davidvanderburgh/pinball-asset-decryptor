@@ -350,6 +350,11 @@ def test_help_has_an_entry_for_the_new_tab():
 def test_attach_returns_true_when_key_already_visible(panel, monkeypatch):
     """If the key is already enumerated in WSL, attach is a no-op that
     succeeds without calling usbipd at all."""
+    # usbipd-win IS NOT ON A CI RUNNER, and _attach_dongle()'s first guard
+    # returns False without it - so this and the test below passed on the
+    # developer's machine and failed on all three runners. Pin the lookup the
+    # way test_attach_dongle_cmd above already does.
+    monkeypatch.setattr(jjp_emulate_tab, "usbipd_path", lambda: "usbipd")
     monkeypatch.setattr(subprocess, "run",
                         lambda *a, **k: SimpleNamespace(returncode=0, stdout=b""))
     monkeypatch.setattr(panel, "_key_visible_in_wsl", lambda: True)
@@ -359,6 +364,7 @@ def test_attach_returns_true_when_key_already_visible(panel, monkeypatch):
 def test_attach_waits_out_the_async_race(panel, monkeypatch):
     """usbipd attach is async, so a key that is not visible at first but
     appears shortly after must be waited for, not failed on."""
+    monkeypatch.setattr(jjp_emulate_tab, "usbipd_path", lambda: "usbipd")
     monkeypatch.setattr(subprocess, "run",
                         lambda *a, **k: SimpleNamespace(returncode=0,
                                                         stdout=b"attached"))
@@ -373,6 +379,10 @@ def test_attach_waits_out_the_async_race(panel, monkeypatch):
 def test_attach_gives_up_cleanly_when_key_not_plugged_in(panel, monkeypatch):
     """A key that is genuinely not on the PC is a clean False, not a hang or a
     crash - usbipd says 'no device', and there is nothing to wait for."""
+    # Without this the test still PASSES on a runner with no usbipd-win, but
+    # vacuously: _attach_dongle() returns False at its first guard and the
+    # "no device" branch this test is about never runs.
+    monkeypatch.setattr(jjp_emulate_tab, "usbipd_path", lambda: "usbipd")
     monkeypatch.setattr(subprocess, "run",
                         lambda *a, **k: SimpleNamespace(
                             returncode=1, stdout=b"usbipd: error: no device"))

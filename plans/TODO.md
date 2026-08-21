@@ -1357,6 +1357,78 @@ These have each been violated at least once and each cost a run or a window:
       Branch `item/46` is cut from `item/60`, not from main, because item 60
       built the very action row this may have to change and two branches
       editing it would collide.
+      **★★★★ 70%, 2026-08-21, ONE RUN ON turtles_pro — AND IT MOVES THE
+      ITEM OFF ITS ORIGINAL FRAMING TWICE. Read this before the desk section
+      below; the desk hypothesis under it is now PARTLY REFUTED.**
+      **(1) THE SCREEN AUTO-CYCLES, WHICH MEANS EVERY "IT CHANGED WHEN I
+      PRESSED" OBSERVATION EVER MADE ON IT IS WORTHLESS — INCLUDING THE ONE
+      THIS ITEM WAS FILED ON.** Ten captures a second apart with NO input at
+      all: Leonardo ×2, Donatello ×5, Raphael ×3. The character steps by
+      itself every ~2–5 s, irregularly. So the button looking "finicky" —
+      sometimes it does something, sometimes not — is EXACTLY what a random
+      press against a self-stepping carousel feels like, from either side. Do
+      not use the character name as an oracle again without a no-input control
+      run beside it; this pass nearly filed "the press cycles the character" as
+      a finding before running that control.
+      **(2) SWITCH DELIVERY DURING A GAME IS FINE, PROVED WITH AN ORACLE THAT
+      CANNOT MOVE ON ITS OWN.** One 200 ms poke of switch **36 START BUTTON**
+      at this very screen turned `PLAYER 2 / PRESS START` into `PLAYER 2 / 00`
+      — a second player joined, first try. **So this is NOT item 17's class and
+      NOT "never arrived": the game is awake, in a game, and acting on switches
+      on this screen.** That is the discriminator the item asked for, answered.
+      Note it was NOT answered by the instrument the item names: `PAD_SW_PEND=34`
+      was verified present in the guest's own `/proc/<pid>/environ` and the shim
+      emitted **zero** `[swpend]` lines all run. Unexplained, and worth its own
+      look — the item's named discriminator is currently dead.
+      **(3) SWITCH 34 DOES NOT LOCK IN THE CHARACTER, IN ANY BALL STATE.**
+      Tested three ways, each followed by four samples 2 s apart, and the
+      carousel kept stepping through all three: lane EMPTY; a ball faked as
+      WAITING (trough 72 opened, shooter lane 68 held closed — the state
+      `ballmodel.plan_eject` leaves); and after faking the LAUNCH (68 opened).
+      **So the ball theory below, as stated, is REFUTED for the lock-in:**
+      giving the game a ball in the lane does not make the action button
+      confirm.
+      **(4) AND THE GAME IS NOT WAITING FOR A BALL EITHER — IT FIRES NO COIL AT
+      ALL.** `dump/padled` on this run WAS stamped (`magic=PLED`, contrary to
+      the desk note below) and its coil counters are live, so the wire is
+      readable; diffing the 512-byte coil region over 8 s while the game sat at
+      character select found **0 counters moved**. The trough also stayed
+      **6/6, 0 in play** through a started game on BALL 1. So the game has not
+      reached ball start and is not retrying a trough eject: it is parked ON
+      the select screen. The feeder's blindness (below) is real and still worth
+      fixing, but it is NOT what is holding this screen.
+      **★★★ DAVID, 2026-08-21, THE SEQUENCE ON THE REAL MACHINE — and it
+      says my ball test above was RUN IN THE WRONG ORDER, so (3) refutes less
+      than it looks:** *"when the action button is pushed on the game the ball
+      auto launches out of the lane. when a game starts, a ball is ejected into
+      the shooter lane (closing the lane switch). launching opens the lane
+      switch since the ball is no longer there having been launched."* So the
+      ball is in the lane BEFORE character select, not after; this pass injected
+      the lane closure minutes into a game that had already been started without
+      one, which is not the same state. **And it hands us the oracle this item
+      has been missing: an auto-launch is the game FIRING THE AUTO-PLUNGER COIL,
+      so a press of 34 that works must bump a coil counter — screen-independent,
+      carousel-proof, and readable straight off `dump/padled`.** Note also (4)'s
+      coil diff was taken minutes after game start, so "no coil fires" is only
+      established for the STEADY state; the eject at game start was never
+      watched for.
+      **Resume — the next question is what advances this screen, and the
+      instruments must be chosen against (1).** Candidates, cheapest first:
+      (a) the FLIPPER buttons are the selector and 34 only confirms — one left
+      flipper poke held Donatello across 3 samples (2.4 s), which is INSIDE the
+      no-input dwell and therefore proves nothing; design it against the ~2–5 s
+      dwell, e.g. poke a flipper every 700 ms for 10 s and see whether the name
+      steps in lock-step with the pokes rather than on its own clock;
+      (b) fix `[swpend]` first so the oracle is the game's own `entry[+24]` and
+      the carousel stops mattering at all — this is probably the right order;
+      (c) let the screen simply time out untouched and see whether the game
+      starts a ball by itself, which says whether anything is blocked at all.
+      **What is NOT the next step:** building a ball feeder for this title. It
+      is a real gap (see below) but (4) shows it is not this fault, and it
+      belongs to item 21b.
+      **★★ THE DESK SECTION BELOW IS KEPT BECAUSE ITS FACTS ARE STILL TRUE —
+      the feeder IS blind on this title — but its CONCLUSION is refuted by (3)
+      and (4). Read it as a ruled-out theory, not as a lead.**
       **★★★ 55%, 2026-08-21, ESTABLISHED AT THE DESK WITH NO RUN — THE BALL
       FEEDER IS COMPLETELY BLIND ON THIS TITLE, AND THAT FITS DAVID'S CLUE
       EXACTLY.** `ballfeed.py` resolves the trough eject and auto-plunger coils

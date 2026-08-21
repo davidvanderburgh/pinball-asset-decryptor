@@ -2973,7 +2973,50 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **62. Every title but the one the rootfs was built from raises `GAME
       VALIDATION ERROR #3 UPDATE SD CARD`, because `/mnt/boot/zImage` is
-      godzilla's forever.** `S2 D2` ← WORKING ON *(Filed 2026-08-21 from David, looking at
+      godzilla's forever.** `S2 D3` ← WORKING ON, 40% *(D2 → D3: the desk
+      diagnosis below is REFUTED for turtles_pro, so what is left needs a
+      turtles-instrumented run or RE of its own validation module, not a
+      staging call.)*
+      **★★ BUILT AND DESK-VERIFIED THIS PASS (branch item/62): per-card
+      zImage staging.** `getboot.sh` now carries a size+mtime stamp
+      (`/mnt/boot/.pad_card_stamp`, item 34's lesson: not the path) and
+      `cardmount.sh` calls it on BOTH its exits — fresh mount and rejoin —
+      from `$IMG`, not `$SRC`, because the cache copier's dd does not
+      preserve mtime, so the copy is a different identity and the stamp
+      would thrash between the two paths. Tested four ways at the desk
+      against a throwaway rootfs: stages turtles' partition, skips on the
+      stamp, restages on a different card, failure is a warning not a die.
+      **★★★ AND THEN THE DIAGNOSIS FAILED ITS OWN MEASUREMENT, which is why
+      this is 40% and not closed:** turtles_pro's card and godzilla_pro's
+      card ship the BYTE-IDENTICAL kernel — zImage md5
+      `5bffdb676ba17b44248f2ad3621e6647`, dtb `ef9c01fa…`, both 6,041,256
+      bytes — and the rootfs' staged copy is that same file. So turtles
+      raises `GAME VALIDATION ERROR #3` WITH THE CORRECT KERNEL ALREADY IN
+      PLACE, and the wrong-zImage theory cannot be why. The staging is still
+      right (a future card with a different kernel would break exactly as
+      diagnosed, and the fix costs a stamp check per mount), but it will NOT
+      clear turtles' banner.
+      **What #3 means on turtles is therefore UNKNOWN.** The godzilla mapping
+      (`V[+44]` in {2,3}, the ZK kernel track) is godzilla-ELF knowledge; the
+      addresses, the track order and even the #N numbering may differ in
+      turtles 1.59. Both ELFs encrypt the `/mnt/boot/zImage` string (0 hits
+      for `mnt/boot|zImage` in either), so this is the encrypted-blob module
+      and the godzilla instruments (`PAD_VAL_DUMP`'s 0x249e00..0x24c2c0
+      caller filter, `obfstr.py`'s 0x6438bc table) are all title-locked.
+      **Resume:** cheapest first — boot turtles_pro with `PAD_OPEN_LOG=1`
+      and see whether the game even opens `/mnt/boot/zImage` and what else
+      the validation sweep touches; that decides between "a different track
+      is failing" (likely: the asset sweep, or `./game`'s own GE trailer on
+      an UPSCALED card whose game file was modified — David's card is
+      `turtles_pro-1_59_0.1987-upscaled`, and a retrofitted card is exactly
+      what a validation module exists to catch) and "the module is
+      different". THE UPSCALED-CARD THEORY FITS THE EVIDENCE AND THE KERNEL
+      THEORY DOES NOT: the kernel is stock, but if the upscale rebuilt
+      assets or the ELF, GE/asset tracks would fail on real corruption —
+      i.e. the banner may be TRUE and the fix is a whitelist decision for
+      David, not a staging bug. Then, if needed, find turtles' descriptor
+      table with `obfstr2.py` (it recovers keys from ciphertext alone).
+      *(Filed 2026-08-21 from David, looking at
       a turtles_pro boot: "how do we fix these errors though?")*
       **DIAGNOSED AT THE DESK, no run needed, and it is a one-line-shaped
       fault with a general blast radius.** The ZK track validates the KERNEL:

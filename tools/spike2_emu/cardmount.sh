@@ -222,6 +222,11 @@ fi
 if [ -d "$MNT" ] && mountpoint -q "$MNT" 2>/dev/null; then
     T=$(title_dir "$MNT") || die "$MNT is mounted but holds no game"
     cache_pick "$IMG" "$LABEL" >/dev/null
+    # The kernel too, item 62 - see the fresh-mount path below for the whole
+    # story. getboot's stamp makes this free when it already matches, and a
+    # rejoined mount is exactly the case where someone else likely staged it.
+    bash "$RIG/getboot.sh" "$IMG" "$ROOT" 1>&2 || \
+        echo "[card] getboot failed - the game will raise VALIDATION ERROR #3" >&2
     echo "[card] already mounted: $MNT"
     echo "$MNT/$T"
     exit 0
@@ -263,5 +268,26 @@ T=$(title_dir "$MNT") || {
     fusermount -u "$MNT" 2>/dev/null
     die "mounted, but no directory in it holds a game ELF"
 }
+
+# THE KERNEL THE GAME VALIDATES COMES FROM THIS CARD TOO (item 62). getboot.sh
+# used to run from exactly one place - rootfs.sh, at rootfs BUILD time - so
+# /mnt/boot/zImage was the build card's (godzilla's) forever, and every other
+# title raised GAME VALIDATION ERROR #3: the ZK track hashes the whole file
+# and its provider treats a bad hash and a missing file as the same state, so
+# a wrong kernel reads exactly like no kernel. Staging here, on the mount that
+# every card run goes through (watch.sh and run_game.sh both), gives the game
+# the bytes its own card ships - nothing is faked, it hashes them itself.
+# From $IMG and not $SRC, although $SRC is the faster disk: the copier's dd
+# does not preserve the original's mtime, so the cache copy's size+mtime is a
+# DIFFERENT identity from the original's, and staging from one while the
+# rejoin path checks the other would restage on every alternate mount. The
+# original's size+mtime is the identity David's own copies share (item 34:
+# the same card at three paths, same mtime), the read is a few MB once per
+# card, and the stamp makes every later call free. Failure is a warning and
+# not a die: a run with the wrong kernel banner is degraded, a run refused
+# over it would be worse.
+bash "$RIG/getboot.sh" "$IMG" "$ROOT" 1>&2 || \
+    echo "[card] getboot failed - the game will raise VALIDATION ERROR #3" >&2
+
 echo "[card] title: $T"
 echo "$MNT/$T"

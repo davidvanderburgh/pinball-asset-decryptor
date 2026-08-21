@@ -956,10 +956,32 @@ These have each been violated at least once and each cost a run or a window:
       **With (1) and (2) both closed this session, the only remaining gap
       in the entire 26-title catalogue is `munsters_le`'s BRD table.**
 
-- [ ] **58. A second-display window opens and stays BLACK on titles that
-      have no real second physical display.** `S2 D3` — **NO CONFIRMED
-      REPRODUCTION CASE YET; a fix was written, live-tested, and then
-      REVERTED this same session — read to the end before touching this.**
+- [x] **58. A second-display window opens and stays BLACK on titles that
+      have no real second physical display.** `S2 D3` **CLOSED 2026-08-21 at
+      David's ask** ("let's close the ones that are no longer necessary. like
+      4, 58, 3"), as NOT DEMONSTRATED rather than as fixed. Awaiting
+      `/finish`.
+      **What closing costs is nothing, and that is the argument.** This item
+      never had a reproduction case. Its one candidate, `mando_le`, turned
+      out to have a real $1999 Stern topper with a real second display, so
+      the game's content for that channel is wanted; the fix written against
+      that premise was reverted the same session because the premise was
+      false and the mechanism (hide after N never-lit frames) could have
+      hidden a legitimate slow-starting topper. Two false starts, no title
+      confirmed to lack the hardware, and the fault is cosmetic — an open
+      item whose first job is "find out whether this happens at all" is a
+      research question, not queued work.
+      **THE INSTRUMENT SURVIVES THE CLOSE, which is why reopening is cheap.**
+      `pic2_check()` (`padglhost.c` ~3592-3625) ALREADY measures and logs
+      "STILL BLACK after N frames" with nothing downstream reading it, and
+      `PADGL_TARGET` (~4014) still opens the window purely on `d != 0`. So
+      the day a title is confirmed to have no second-display hardware and
+      still opens a permanently black window, the measurement is already
+      there and only the policy has to be written. **Reopen on a title, not
+      on a hypothesis** — that is the whole lesson of the two false starts,
+      and it is the same "a wrong table is worse than none" rule item 57
+      learned three times.
+      **The original entry, kept because the two dead ends are expensive:**
       *(Filed 2026-08-19, David live-watching item 57's runs: "many games
       don't have a second display. make sure we are not bringing up a
       second display window if they don't have one.")*
@@ -1433,10 +1455,30 @@ These have each been violated at least once and each cost a run or a window:
       instrument (`swladder.py`, `PAD_SW_PEND`, `[swlatch]`, padglhost's
       `[key]`) already exists.
 
-- [ ] **3. The coil map.** `S3 D3` — S3: nothing is broken, this is a map that
-      is half confirmed. D3 — one run; the instrument exists and is validated,
-      but the Coil Test menu has not been reached yet so the navigation is
-      unknown.
+- [x] **3. The coil map.** `S3 D3` **CLOSED 2026-08-21 at David's ask**
+      ("let's close the ones that are no longer necessary. like 4, 58, 3"),
+      as SUPERSEDED rather than as finished. Awaiting `/finish`.
+      **What made it unnecessary was item 21b, which answered the question
+      this item was going to spend a run on — at the desk.** The blocker
+      recorded below ("the Coil Test menu has still never been reached", and
+      it is the one-at-a-time oracle) turned out not to be on the path at
+      all: the device table names every coil against the (group, index) the
+      fire frame already carries, so `TROUGH` is godzilla_pro group 6 index 1
+      = node 8 index 1 and jaws_le group 7 index 1 = node 9 index 1, with no
+      run needed and nothing hard-coding the node. That mapping is confirmed
+      **5 positive and 4 negative** against this item's own labelled ball
+      search, which is a stronger check than the menu would have been.
+      **WHAT IS GENUINELY LEFT UNDONE, stated rather than quietly dropped:**
+      (a) byte 7 is still not decoded (0xff slingshots/pop, 0x00
+      plunger/scoop, 0x32 magnet — on/off, hold power and board-self-fire all
+      still fit); (b) five coils (three flippers, trough eject, coin enable,
+      magnet) have no labelled experiment of their own. Neither has a
+      consumer: the ball feeder addresses the eject by (group, index), the
+      coil probe decodes what it sees, and nothing in the rig asks what byte
+      7 means. **An item whose remaining work has no consumer is curiosity,
+      not queue.** Everything needed to pick it up again — `coil_publish()`,
+      `coildecode.py`, `PAD_COIL_PROBE=1`, `coilread.py`, and the 48 V
+      door-closed prerequisite — is written below and unchanged.
       **★ THIS ENTRY WAS STALE UNTIL 2026-08-06 AND SAID "a map that does not
       exist yet". Half of it exists and is confirmed by a labelled experiment.**
       `313bb53` (2026-08-04) decoded the fire frame: `cmd 0x40` on nodes 8/9
@@ -2628,10 +2670,104 @@ These have each been violated at least once and each cost a run or a window:
       side (or a live ring read), the instrument exists and is validated, and
       the fault is on demand.
 
-- [ ] **59. Every boot lands on the game's TECH ALERTS screen with `CHECK
+- [x] **59. Every boot lands on the game's TECH ALERTS screen with `CHECK
       SWITCH #n` rows, and nobody has ever established what puts them there.**
-      `S2 D3` ← WORKING ON *(Filed 2026-08-21 from David: "why do we always start into the
+      `S2 D2` *(Filed 2026-08-21 from David: "why do we always start into the
       'tech alerts check switch' screen?")*
+      **★★★ CLOSED 2026-08-21 (item/59) — ACCEPTANCE MET IN FULL, ON THE GLASS,
+      ON godzilla_pro, ACROSS FOUR RUNS. Awaiting `/finish`.**
+      *(D3 → D2 on the way out: the alert-provider walk turned out to be an
+      instrument that already existed and was already validated, and the
+      switch-alert provider is now named, so anything left here is a small
+      change plus one confirming run.)*
+      **THE ANSWER, AND IT IS DAVID'S.** Mid-pass, unprompted: *"the 'check
+      switch' is real. if we don't trigger a switch in multiple games, then
+      the game thinks there's a problem with them. we probably need to
+      simulate the switches going on and off with each game boot to help
+      clear these tech alerts."* He was right, and the acceptance's SECOND
+      branch is the one that applies: this is correct machine behaviour, now
+      written down, not a fault in this rig.
+      **(1) THE PROVIDER IS NAMED FROM MEASUREMENT, not inferred.**
+      `PAD_ALERT_DUMP=5000 PAD_ALERT_PROBE=1` walks the game's own alert list
+      (`hwshim.c:4535`). Every one of the **37** live Tech Alerts entries came
+      from ONE provider — `fn=0x1e698c  msgid=759  fn2=0x48fd54` — whose
+      action jumps to Switch Test. Nothing else contributed a single row. The
+      other ten providers all read `active=0`, including the node-board one
+      (`0x39c6b8`) this item warned not to confuse it with.
+      **(2) THE SET IT FLAGS IS THE SET NOBODY PLAYS, provable at the desk
+      with no run at all.** The `num` column of the title's own
+      `switch_list.txt` is what the screen prints: turtles_pro's `#80`/`#91`
+      are LOCKDOWN BUTTON and TILT PENDULUM; stranger_things' `#7..#22` is
+      both slingshots, both flipper buttons, both EOS, the shooter lane, the
+      six trough switches and TROUGH JAM. Exactly the switches a machine
+      nobody plays never moves, and nothing else in either list is flagged.
+      **(3) WORKING THE SWITCHES CLEARS IT, on the glass.** `swexercise.py`
+      drives every safe switch away from its resting value and back. Run 1:
+      `active=37` → exercise → `active=0`, and the game window read **"Tech
+      Alerts / No Technician Alerts"**. Run 3, a completely normal boot with
+      it wired into `watch.sh` and nothing done by hand: `37, 37, 0, 0` across
+      four dumps, attract with full artwork on the glass.
+      **(4) IT PERSISTS — AND THIS PASS GOT THAT WRONG ONCE, so the evidence
+      is here rather than the conclusion alone.** Run 2 (a fresh boot after
+      run 1) read `active=37` again, which was written up mid-pass, and in
+      `77d0b1f`'s commit message, as "the audit is rebuilt every boot".
+      **Run 4 refutes that**: booted with `PAD_SW_EXERCISE=0`, zero `x`-tagged
+      edges in its log and `padswx.log` untouched from the previous run, it
+      read `active=0` on all **16** of its dumps. So the audit IS persisted.
+      **The likely reason run 1 did not save, stated as the guess it is:**
+      run 1 ran `PAD_AUTO_ATTRACT=0` and never left Tech Alerts, where the
+      game appears not to commit the audit; run 3 reached attract and lived
+      there. NOT ISOLATED — one variable was never held fixed — so do not
+      build on it without an A/B.
+      **(5) COINS ARE AWARDED once the rows are gone.** Two `LEFT COIN`
+      pokes in run 3's attract took the glass from `CREDITS 0` to
+      `CREDITS 1/2` at `1/1.00 3/2.00` pricing. **The other half of the coin
+      question is NOT answered and is now harder to answer:** run 4 came up
+      already clear, so there was no flagged machine left to coin into. Item
+      57's "eats coins until the flagged switch sees usage" and item 46's
+      five-coins-one-credit on turtles_pro are still the only evidence for
+      the flagged side, and both are observations rather than an A/B.
+      **WHAT SHIPPED.** `swexercise.py` (resolves switches BY NAME from the
+      title's own `switch_list.txt`, so the policy travels — desk-checked on
+      turtles_pro 50/43, godzilla_pro 44/43, stranger_things_le 56/43),
+      `swexercise.sh` (waits for the guest's switch table, then a settle),
+      wired into `watch.sh` DEFAULT ON with `PAD_SW_EXERCISE=0` to disable,
+      and counted by `alive.sh` / killed by `killgame.sh` per the standing
+      non-negotiable. 8 new tests, all on the SAFETY POLICY rather than the
+      machine: a run proves switches moved, it cannot prove the coin switches
+      stayed still. 336 spike2 tests green.
+      **THE REFUSALS ARE THE LOAD-BEARING PART.** DIP is configuration,
+      SERVICE walks the operator menu, the coin door interlock is latched
+      state gating 48 V, the coins award credits and move the money audits,
+      SLAM TILT ends a game and writes an audit, START would begin one, QR
+      SCANNER STATUS are status bits, HEADPHONE/VOLUME ENCODER are neither.
+      Each prints its own reason, because a row this never clears has to be
+      explainable or it reads exactly like a genuinely broken switch.
+      **TROUGH SWITCHES REST CLOSED** and are opened-then-closed; press-and-
+      release there would produce no edge at all — the same shape as the bug
+      item 20 was.
+      **★ IT CANNOT DISTURB `autoattract.sh`, checked against all three of
+      that script's predicates rather than assumed:** `probes()` counts
+      `ExchangeData: read failed`, `past()` keys on the attract light show,
+      and `operator()` matches source letters `f`/`k`/`p` only. The exerciser
+      tags its edges **`x`**, so an unattended boot does not stand down.
+      Runs 3 and 4 both reported `past Tech Alerts after 2 press(es)` — with
+      the exerciser ON and OFF respectively, which is the A/B — and two is
+      the documented normal for godzilla ("two Escape presses, one off Tech
+      Alerts, one off the screen after it").
+      **★ WHAT IS NOT ESTABLISHED, so nobody reads this as more than it is:**
+      (a) whether the audit ever RE-flags after N games with a switch still
+      unused — a real machine's audit usually does, and if so the per-boot
+      exercise is what keeps it clear, which is the argument for leaving it
+      default on; (b) the flagged-machine coin behaviour, per (5); (c) any
+      title but godzilla_pro for the ALERT MEASUREMENT specifically —
+      `PAD_ALERT_HEAD` and friends are godzilla_pro 1.15.0 addresses and
+      resolve to 0 elsewhere (`TITLE_ADDR`), so on turtles_pro the dump says
+      "no provider-list address known for this title" and the oracle is the
+      glass. The EXERCISER itself is title-independent and desk-checked on
+      three titles; only the instrument that measures it is not.
+      **The original entry follows, kept because its three settled facts and
+      its `board[+24]` warning are all still true.**
       **Observed, on more than one title:** turtles_pro shows `Check Switch #80
       LOCKDOWN BUTTON` / `#91 TILT PENDULUM` and runs no light show while it
       sits there (item 50); stranger_things shows `CHECK SWITCH #7..#22` —
@@ -2770,9 +2906,20 @@ These have each been violated at least once and each cost a run or a window:
       this view opens, the call sites are located, and item 25's test harness
       already exists — but confirming a real plunge costs one run.
 
-- [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
-      numbers are here for whenever it is reopened.) ~20 Hz stutter in the
-      first ~10 s.
+- [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
+      close the ones that are no longer necessary. like 4, 58, 3"), as WON'T
+      FIX rather than as fixed — which is what it has actually been since the
+      day it was parked. Awaiting `/finish`.
+      **Why closing beats staying parked:** the remaining distance is inside
+      the measurement's own error. The metric is a race (0.1 s = 118 voice
+      restarts, 1.0 s = 3, 2.0 s = 17), the knob sits at 5 against a bar of 3,
+      and 3 vs 5 was always noise rather than a trend — so no pass could ever
+      have moved this honestly. Parked, it stayed a line in the queue that
+      least-progress ranking had to keep stepping over. **The knob and its
+      numbers stay written down below**, so reopening costs a `git log` and
+      not a re-derivation, if the buzz ever becomes something a player
+      notices rather than something an instrument does.
+      ~20 Hz stutter in the first ~10 s.
       Balanced rather than fixed: `PAD_NB_RESET_US=1000000` takes it from 118
       voice restarts to 3 at no cost in boot time. Now sits at 5, at the bar.
       **The metric is a race** (0.1 s = 118, 1.0 s = 3, 2.0 s = 17), so treat

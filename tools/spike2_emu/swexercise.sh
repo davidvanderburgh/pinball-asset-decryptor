@@ -50,6 +50,20 @@ LOG=${1:-$HOME/gzwatch.log}
 S="$RIG"
 WAIT_MAX=${PAD_SW_EXERCISE_WAIT:-180}
 SETTLE=${PAD_SW_EXERCISE_SETTLE:-5}
+#: A FLOOR ON HOW EARLY THIS MAY FIRE, and it is not belt-and-braces - it
+#: closes a hole the first turtles_pro verification run walked straight into.
+#: The gate below is "autoattract.sh has exited", and that script has THREE
+#: ways out: past Tech Alerts, gave up, and STOOD DOWN because an operator is
+#: driving (source letters f/k/p). Only the first one implies the audit is
+#: built. In the verifying run autoattract stood down at 88 s, which was late
+#: enough by luck; had David touched a key at 10 s it would have stood down at
+#: 10 s and this would have fired at 15 s - boot+15 s, i.e. the same too-early
+#: failure the gate was added to fix, just reached by a different door.
+#: 60 s because boot+8 s is the value MEASURED not to work on turtles_pro and
+#: boot+14 s is where godzilla_pro's audit was already up; this is comfortably
+#: past both, and it is time nobody waits on since the run continues regardless.
+MIN_AGE=${PAD_SW_EXERCISE_MIN:-60}
+started=$(date +%s 2>/dev/null || echo 0)
 
 up()     { pgrep -x game >/dev/null 2>&1; }
 # The shim prints these when it reads (or finds) the game's switch table, which
@@ -94,6 +108,18 @@ else
 fi
 
 up || { echo "[swx] the game exited while waiting"; exit 0; }
+
+# THE FLOOR. See MIN_AGE at the top: "autoattract has exited" is three signals
+# wearing one coat, and only one of them means the audit is built. This makes
+# the early exits harmless instead of trusting which one fired.
+now=$(date +%s 2>/dev/null || echo 0)
+age=$((now - started))
+if [ "$started" -gt 0 ] && [ "$age" -lt "$MIN_AGE" ]; then
+    echo "[swx] only ${age}s in; holding to the ${MIN_AGE}s floor"
+    sleep $((MIN_AGE - age))
+    up || { echo "[swx] the game exited during the floor wait"; exit 0; }
+fi
+
 echo "[swx] settling ${SETTLE}s"
 sleep "$SETTLE"
 up || { echo "[swx] the game exited during the settle"; exit 0; }

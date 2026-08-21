@@ -2670,10 +2670,27 @@ These have each been violated at least once and each cost a run or a window:
       side (or a live ring read), the instrument exists and is validated, and
       the fault is on demand.
 
-- [ ] **59. Every boot lands on the game's TECH ALERTS screen with `CHECK
+- [x] **59. Every boot lands on the game's TECH ALERTS screen with `CHECK
       SWITCH #n` rows, and nobody has ever established what puts them there.**
-      `S2 D2` ← IN PROGRESS, 80% *(Filed 2026-08-21 from David: "why do we
+      `S2 D2` *(Filed 2026-08-21 from David: "why do we
       always start into the 'tech alerts check switch' screen?")*
+      **★★★★★ RE-CLOSED 2026-08-21, VERIFIED ON turtles_pro — the title that
+      broke the first close. Awaiting `/finish`.**
+      David's own boot from the app, `padswx.log`: switch table at 3 s, waited
+      for auto-advance (88 s), settled 5 s, exercised all 50. His screenshot of
+      that boot has **no `CHECK SWITCH` rows at all** — only `GAME VALIDATION
+      ERROR #3`, `Check Node Board 2` and `Check Node Board 14`, which are
+      three other providers and are now items 62 and 63. His verdict: *"that
+      seems to have worked."*
+      **★ A HOLE THAT RUN EXPOSED, AND IT IS FIXED RATHER THAN NOTED.** The
+      gate is "autoattract.sh has exited", and that script has THREE ways out:
+      past Tech Alerts, gave up, and STOOD DOWN because an operator is driving.
+      Only the first implies the audit is built — and this very run took the
+      THIRD (`[auto] an operator took over mid-gap; standing down`), which was
+      late enough only by luck. A key pressed at 10 s would have stood it down
+      at 10 s and fired the exercise at 15 s: the same too-early failure,
+      reached by a different door. `PAD_SW_EXERCISE_MIN` (60 s) is now a floor
+      under all three exits. Nobody waits on it — the run continues regardless.
       **★★★★ REOPENED THE SAME DAY, HOURS AFTER BEING CLOSED, AND THE CLOSE
       WAS THE MISTAKE — NOT THE FIX.** The box is UNTICKED again: the question
       this item asks is answered, but the shipped behaviour is not finished,
@@ -2953,6 +2970,84 @@ These have each been violated at least once and each cost a run or a window:
       expensive on these titles. D2: the fault reproduces on demand every time
       this view opens, the call sites are located, and item 25's test harness
       already exists — but confirming a real plunge costs one run.
+
+- [ ] **62. Every title but the one the rootfs was built from raises `GAME
+      VALIDATION ERROR #3 UPDATE SD CARD`, because `/mnt/boot/zImage` is
+      godzilla's forever.** `S2 D2` *(Filed 2026-08-21 from David, looking at
+      a turtles_pro boot: "how do we fix these errors though?")*
+      **DIAGNOSED AT THE DESK, no run needed, and it is a one-line-shaped
+      fault with a general blast radius.** The ZK track validates the KERNEL:
+      it mounts the boot partition, `fopen`s `/mnt/boot/zImage`, hashes the
+      WHOLE file and grades it — `ZK = 3 (E)` when the file is missing, `2 (F)`
+      on a digest mismatch — and provider `0x24a018` raises `#3` when
+      `V[+44]` is **2 OR 3**, so a WRONG zImage reads exactly like a missing
+      one. `getboot.sh` puts the card's real zImage there and nothing is
+      faked; the guest hashes the same bytes the machine has.
+      **THE BUG IS WHEN IT RUNS.** `getboot.sh` is called from ONE place,
+      `rootfs.sh:196`, i.e. at ROOTFS BUILD time. The rootfs is built once and
+      shared by every title, so `/home/david/spike2root/mnt/boot/zImage` is
+      dated **Aug 3** and is godzilla_pro's. Every other card therefore
+      hash-MISMATCHES and shows the banner — which is why this looked like a
+      godzilla-only success for weeks: godzilla is the title the rootfs was
+      built from.
+      **Fix:** re-run `getboot.sh` for the card actually being started when it
+      differs from the one staged, the same shape as the card cache's stamp
+      (item 34 is the cautionary tale about what to key that stamp on — do not
+      key it on the PATH). Stamp the staged card's identity beside the zImage
+      so a re-run is skipped when it already matches.
+      **Acceptance:** boot turtles_pro and godzilla_pro back to back and state
+      that neither shows `GAME VALIDATION ERROR` on the glass, with the second
+      boot logging that it re-staged rather than silently reusing.
+      — S2: play is not blocked (David played turtles with it on screen), but
+      it is a scary red banner on the first screen of every non-godzilla run
+      and it makes every other item's screenshots harder to read. D2: the
+      mechanism is fully established above and `getboot.sh` already exists and
+      works; what it costs is the staging logic plus one confirming pair of
+      boots.
+
+- [ ] **63. Show a LOADING screen while the emulator boots, instead of the
+      game's Tech Alerts screen with its transient bring-up errors.** `S2 D3`
+      *(Filed 2026-08-21 from David: "eventually, the two node errors clear
+      themselves at least, but I'd rather show the 'loading...' screen while
+      the emulator loads the game than the tech alerts screen (that's the way
+      the actual machine works)".)*
+      **THE ARGUMENT FOR DOING IT THIS WAY ROUND, rather than suppressing the
+      alerts one at a time.** `Check Node Board 2 : Not Registered` and
+      `Check Node Board 14 : Not Responding` are TRANSIENTS of bring-up, not
+      faults: the renderer at `0x39c834` substitutes msgid 887 while
+      `(flags&1)==0` and 888 while `(flags&2)==0`, and both bits get set as
+      the service schedule reaches those boards — which is exactly why David
+      sees them clear themselves. Silencing them would be writing a wrong
+      table over a right one, the rule items 55 and 57 both landed on. The
+      honest fix is to not put the boot's INTERMEDIATE state on the glass.
+      **A note that may or may not be a coincidence, so it is marked as one:**
+      on turtles_pro nodes 2 and 14 are both `ws2812node` LED boards
+      (`node_ident.txt`), and turtles_pro is the title item 50 records as
+      putting NO frame the shim recognises as a lamp write. Two LED boards
+      that are slow to register on the one title whose LED traffic nobody can
+      decode is worth ONE look before assuming the two are unrelated — but do
+      not let it turn this item into item 50.
+      **What to build, and the reason the cheap version is wrong:** the game
+      window is created by `padglhost` the moment the guest first draws, so
+      the boot's every intermediate screen is on the glass from frame 1.
+      Simply NOT opening the window until the game is ready trades a scary
+      screen for a missing one for ~40 s, which is worse. So this is a cover:
+      the renderer holds a "Starting up" surface until the boot has settled,
+      then reveals the game. The settle signal already exists and is the one
+      item 59 now uses — `autoattract.sh` exiting — with the same caveat that
+      it has three exits and only one means "ready" (item 59's `MIN_AGE` floor
+      is the pattern).
+      **Acceptance:** boot a title that shows node-board alerts (turtles_pro)
+      and state that no Tech Alerts screen is ever visible on the glass —
+      captured, not remembered — and that the game appears with attract or its
+      real first screen. Also state the boot-to-first-real-picture time, so it
+      is visible whether the cover added any wait.
+      — S2: nothing is blocked and the errors clear themselves, but it makes
+      every boot look broken to anyone who is not holding this queue in their
+      head, and it is the first thing anybody sees. D3: needs runs to judge
+      (the thing under test is what is on the glass at a given moment), the
+      capture instrument exists and is validated (`shotwin.py`, with item 60's
+      logical-vs-physical-pixel warning), and it reproduces on every boot.
 
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T

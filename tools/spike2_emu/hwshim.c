@@ -2978,9 +2978,32 @@ int shim_ioctl(int fd, unsigned long req, ...)
          * strictly better than handing it nothing, because "nothing" is not
          * neutral here - it is the all-made word.
          *
-         * Cannot affect a title whose table resolves: this runs only when
-         * sw_scan_bytes() returned 0. PAD_CAB_IDLE=0 disables it for an A/B. */
-        if (!have && sw_table_hopeless()) {
+         * ★ ITEM 63, 2026-08-21: THIS USED TO BE GATED ON sw_table_hopeless(),
+         * AND THAT GATE IS WHY EVERY BOOT LANDED ON THE TECH ALERTS SCREEN.
+         * hopeless() is `sw_find_fails >= 4` - it only becomes true after four
+         * failed find attempts, i.e. for a title whose table NEVER resolves.
+         * But a normal title (godzilla) has an EARLY-BOOT WINDOW - from the
+         * first SPI transfer until its switch table resolves at ~3.5 s
+         * (measured: first [cabspi] ff0f0f... at line ~2107 of a clean boot,
+         * right after [swrest]) - during which sw_scan_bytes() ALSO returns 0,
+         * hopeless() is still false, so this fallback did NOT fire and the RX
+         * buffer was left untouched = the all-made word. Active low, all-made =
+         * every cabinet switch pressed, INCLUDING the service/MENU button. The
+         * game's input decoder (QrOfflineListener) reads that as a MENU press
+         * and opens the operator menu (MenuPageLandingPage = the "Tech Alerts"
+         * screen) - the game's boot default is attract, so a spurious
+         * service-button press at power-up is the whole reason we land on Tech
+         * Alerts. A 6-agent RE workflow proved the menu's bit 0x100 has exactly
+         * one setter, reachable at boot only via that opcode-19 MENU event.
+         * FIRING ON `!have` ALONE presents the at-rest word (service buttons
+         * OPEN) through that window too, so the game never sees the phantom
+         * press and boots straight to attract. The word is the correct at-rest
+         * state (nothing is pressed at power-up), so it is strictly better than
+         * the all-made buffer for the early window exactly as it is for a
+         * hopeless title. Priming is still skipped (cab_synth), which is what
+         * the old crash-at-6.5s was about. PAD_CAB_IDLE=0 disables it for an
+         * A/B and restores the old land-on-Tech-Alerts behaviour. */
+        if (!have) {
             static int on = -1;
             if (on == -1) {
                 char *q = getenv("PAD_CAB_IDLE");

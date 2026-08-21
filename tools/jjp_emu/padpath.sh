@@ -85,6 +85,21 @@ jjp_title() {
 # already dead) and that init reaps only on its own schedule.  Counting them as
 # live made killgame.sh refuse to report clean over three corpses, forever.
 # A zombie is a dead process; the rig must not treat it as a running one.
+# Is the Sentinel key enumerated inside WSL at all?
+#
+# The distinction matters because H0007 does NOT mean "wrong key": it means the
+# game could not open one.  With the key absent, the fix is the passthrough;
+# with it present, the fix is the licence plumbing (see run_game.sh).  Defined
+# here so the scripts that ask cannot disagree about the answer.
+key_visible() {
+    local d
+    for d in /sys/bus/usb/devices/*; do
+        [ -f "$d/idVendor" ] || continue
+        [ "$(cat "$d/idVendor" 2>/dev/null)" = "${JJP_HASP_VIDPID%%:*}" ] && return 0
+    done
+    return 1
+}
+
 jjp_game_count() {
     ps -eo stat,comm 2>/dev/null         | awk '$2=="game" && $1 !~ /Z/ { n++ } END { print n+0 }'
 }

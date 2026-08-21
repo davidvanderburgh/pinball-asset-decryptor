@@ -1415,8 +1415,16 @@ class MatrixUI:
         try:
             with open(self.geom_file) as f:
                 g = json.load(f).get('geometry', '')
-            if re.match(r'^\d+x\d+[+-]\d+[+-]\d+$', g or ''):
-                saved = g
+            # SIZE ONLY.  Under WSLg Tk reads its own position as -32768, so
+            # what used to be written here was "1450x1754+-32768+-32768" - which
+            # this very regex then refused to match, silently throwing the
+            # geometry away on every launch.  The window therefore never
+            # restored its size either, which looked like the feature working
+            # (it always opened at the default, which IS the size it was).
+            # Position is winpos.sh's job now; it can actually place a window.
+            m = re.match(r'^(\d+x\d+)', g or '')
+            if m:
+                saved = m.group(1)
         except (OSError, ValueError):
             pass
         if saved:
@@ -1448,10 +1456,18 @@ class MatrixUI:
         self._geom_job = self.root.after(500, self.save_geometry)
 
     def save_geometry(self):
+        """Remember the SIZE.  The position is winpos.sh's, deliberately.
+
+        Tk reports this window's position as -32768 under WSLg, so persisting
+        what it says produced a geometry string nothing could read back.  The
+        size it gets right, and that is worth keeping.
+        """
         self._geom_job = None
         try:
+            geom = self.root.geometry()
+            size = re.match(r'^(\d+x\d+)', geom or '')
             with open(self.geom_file, 'w') as f:
-                json.dump({'geometry': self.root.geometry()}, f)
+                json.dump({'geometry': size.group(1) if size else geom}, f)
         except OSError:
             pass
 

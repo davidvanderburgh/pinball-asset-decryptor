@@ -186,28 +186,57 @@ ordinary window on the Windows desktop** — but nothing persisted where it was,
 so every launch put the game wherever the compositor chose. On a multi-monitor
 desktop that is usually the wrong screen.
 
-Three things make this less obvious than it sounds:
+**Xephyr cannot position itself.** Its `-screen WxH+X+Y` and `-origin X,Y` place
+a screen inside the *virtual X screen* (Xinerama), not the host window.
 
-* **Xephyr cannot position itself.** Its `-screen WxH+X+Y` and `-origin X,Y`
-  place a screen inside the *virtual X screen* (Xinerama), not the host window.
-* **`Get-Process` cannot address the window.** WSLg windows are RAIL windows
-  hosted by `msrdc.exe`, and a process exposes exactly one `MainWindowTitle` —
-  so with the matrix and the game both open, which one you get is a coin toss.
-  `winpos.ps1` uses `EnumWindows`, which is the only way to reach a specific
-  one. It also matches the title as a **prefix**, because WSLg appends
-  `" (Ubuntu)"` to every title.
-* **`xdotool`/`wmctrl` are not installed**, and would be new apt dependencies
-  to reach a Windows window from the X side — a longer road to the same
-  `SetWindowPos`.
+### It has to be moved through X, and that took two wrong turns to learn
+
+The first version used Win32 `SetWindowPos` on the WSLg window. It cannot work,
+and the measurements say why:
+
+| | before | after a Win32 move | back |
+|---|---|---|---|
+| what **Windows** reports | 508,4 | 628,94 | 508,4 |
+| what **X** reports | +800+65 | +800+65 | +800+65 |
+
+Windows moved the window; **Weston never heard about it**. The two then disagree
+about where the surface is, which is what left a window that could no longer be
+dragged by its title bar. An earlier attempt that also restored the **size**
+was worse: it killed the nested X server outright —
+
+```
+X connection to :1 broken (explicit kill or server shutdown)
+XIO: fatal IO error 2 on X server ":1"
+```
+
+— and took the game with it. Before dying it went black, because the host window
+ended up 957x768 while its X screen was still 1360x768 and WSLg painted the
+mismatch black, while the X content underneath was perfectly healthy (98.8%
+non-black in a `grab.sh` capture).
+
+An **X** move propagates both ways — `xdotool windowmove` took X from +800+65 to
++306+147 and Windows followed, 508,4 → 179,59 — so the compositor stays in step
+and the window keeps behaving like a window. `winpos.sh` is therefore entirely
+in X coordinates and never consults the Windows side.
+
+**This needs `xdotool`** (`apt-get install -y xdotool`), the rig's one addition
+beyond `xserver-xephyr`. Without it both halves no-op with a message rather than
+failing a launch.
+
+`windowmove` takes a *frame* coordinate while `getwindowgeometry` reports the
+window's, so asking for the remembered number lands close but not on it. Rather
+than hard-code a decoration size every WM would disagree about, restore moves,
+measures, and corrects by the error — it converges in one step and needs to know
+nothing. Verified end to end: parked at 104,126, stopped, relaunched, came back
+at 104,126.
 
 `winpos.sh save` runs **before** anything kills Xephyr (there is no window left
 to ask afterwards — `stop.sh` step 0, and `display.sh --stop` before its
-`pkill`); `winpos.sh restore` runs once the display is up. Both are
-`|| true`: a window position is a convenience and must never hold up a launch
-or, worse, a teardown. A minimised window reports `-32000` and is refused, so
-it cannot overwrite a good position with an off-screen one. State lives in
-`/var/tmp/jjp_window.json`. The matrix UI does this for itself (it is a Tk
-program and can); the rig does it on Xephyr's behalf.
+`pkill`); `restore` runs once the display is up. Both are `|| true`: a window
+position is a convenience and must never hold up a launch or a teardown. A
+window that is not on screen is refused rather than remembered, so it cannot
+overwrite a good position with an invisible one. State lives in
+`/var/tmp/jjp_window.json`, and only a position — never a size.
 
 ## Two coordinate spaces, and the calibration between them
 

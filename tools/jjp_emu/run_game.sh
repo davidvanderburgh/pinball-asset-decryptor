@@ -95,19 +95,46 @@ RUN='
   exit 1
 '
 
-# The plugged-in key does not unlock this title.  JJP keys are per-title: the
-# Sentinel envelope's AES key is different for every game, and a key carries
-# only its own title's crypto - so a key that runs Wonka H0007s on Godfather
-# even though both present the same vendor code and Feature 0.  Called after a
-# launch to turn a bare H0007 into a message that says what is actually wrong.
+# H0007 - "Sentinel key not found" - turned into a message that says what is
+# ACTUALLY wrong, which is not always what it first looks like.
+#
+# H0007 COVERS TWO DIFFERENT FAULTS and they need opposite fixes:
+#
+#   * the key is not this TITLE's.  JJP keys are per-title: the envelope's AES
+#     key differs per game and a key carries only its own title's crypto, so a
+#     Wonka key H0007s on Godfather even though both present the same vendor
+#     code and Feature 0.  Fix: plug in the right key.
+#   * the key is fine but the LICENCE DAEMON cannot read it - a usbipd
+#     passthrough that enumerated but that hasplmd never picked up.  Fix: the
+#     key plumbing, and no amount of swapping keys helps.
+#
+# This used to report the first unconditionally, and on 2026-08-20 that cost an
+# hour: it said "WRONG KEY ... plug in the GunsNRoses key" while the truth was
+# that the daemon could see NO key at all - every title failed the same way,
+# including the one whose key was plugged in.  The key was healthy (its USB
+# descriptors read back 0529:0001 "Sentinel HL"), it simply never reached
+# hasplmd.  So: report what can be checked, and name the way to tell them apart.
+# key_visible() lives in padpath.sh - watch.sh needs the same answer to decide
+# whether a retry can possibly help, and two scripts with their own idea of
+# "is the key there" is exactly the split this rig has been bitten by before.
 report_wrong_key() {
-    if grep -q 'H0007\|Sentinel key not found' "$JJP_GAME_LOG" 2>/dev/null; then
-        echo "WRONG KEY: the plugged-in Sentinel key does not unlock $(jjp_title)."
-        echo "  JJP keys are PER-TITLE - each unlocks only its own game.  Plug in"
-        echo "  the $(jjp_title) key (this one runs a different title)."
+    grep -q 'H0007\|Sentinel key not found' "$JJP_GAME_LOG" 2>/dev/null || return 1
+    if ! key_visible; then
+        echo "NO KEY: $(jjp_title) exited because no Sentinel key is visible inside WSL."
+        echo "  The key is not passed through (or the passthrough dropped).  From Windows:"
+        echo "      usbipd attach --wsl --hardware-id $JJP_HASP_VIDPID"
         return 0
     fi
-    return 1
+    echo "KEY NOT ACCEPTED: $(jjp_title) could not open the plugged-in Sentinel key."
+    echo "  The key IS visible in WSL ($JJP_HASP_VIDPID), so this is one of two things:"
+    echo "    1. it is ANOTHER TITLE's key - JJP keys are per-title; or"
+    echo "    2. the licence daemon never picked it up, which no key swap will fix."
+    echo "  Tell them apart - the Admin Control Center lists what the daemon can see:"
+    echo "      curl -s http://127.0.0.1:1947/_int_/devices.html | grep -ci 'sentinel hl'"
+    echo "  An EMPTY key list means (2), the plumbing.  Re-attach it from Windows:"
+    echo "      usbipd detach --busid <N> && usbipd attach --wsl --busid <N>"
+    echo "  and if that does not take, 'wsl --shutdown' and start the rig again."
+    return 0
 }
 
 : > "$JJP_GAME_LOG"

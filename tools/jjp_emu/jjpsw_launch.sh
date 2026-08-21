@@ -54,6 +54,29 @@ sys.exit(0 if (cal or named >= 60) else 1)
 PY
 }
 
+# Is this dump THIS game's, or the last one's?
+#
+# The dump file is one fixed path reused by every title, so a read that fails
+# leaves the PREVIOUS game's tables sitting there looking perfectly valid.  That
+# is how a Guns N' Roses run came up showing Wonka's switches - gobstopper
+# targets and a 6-ball trough on a GnR playfield - which is worse than showing
+# nothing, because every name, number and frame address in it is a confident
+# lie about the machine that is actually running.
+#
+# swdump records the ELF it read, which carries the title, so the check is exact
+# and needs nothing new written.
+dump_is_this_title() {
+    python3 - "$1" "$2" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+want = ('/%s/' % sys.argv[2])
+sys.exit(0 if want in (d.get('elf') or '') else 1)
+PY
+}
+
 if [ "$(id -u)" = "0" ]; then
     ok=0
     for _ in $(seq 1 16); do
@@ -69,13 +92,25 @@ if [ "$(id -u)" = "0" ]; then
         sleep 2
     done
     if [ "$ok" != "1" ]; then
-        if [ -s "$DUMP" ]; then
-            echo "jjpsw_launch.sh: device tables still sparse after retries -" >&2
-            echo "  opening the matrix with what was read (some switches may" >&2
-            echo "  show 'not used' until the game finishes initialising)." >&2
-        else
+        TITLE=$(jjp_title)
+        if [ ! -s "$DUMP" ]; then
             echo "jjpsw_launch.sh: could not read the device tables" >&2; exit 4
         fi
+        # A sparse dump OF THIS TITLE is worth opening - the names fill in as
+        # the game finishes its constructors.  A dump of a DIFFERENT title is
+        # not: it would draw another game's switches on this game's playfield,
+        # every one of them wrong and none of them saying so.
+        if ! dump_is_this_title "$DUMP" "$TITLE"; then
+            echo "jjpsw_launch.sh: the cached device tables are NOT $TITLE's" >&2
+            echo "  ($DUMP was left by a different title), and reading this" >&2
+            echo "  game's tables failed.  Refusing to open the matrix onto" >&2
+            echo "  another game's switches - start the game again, or wait for" >&2
+            echo "  it to finish initialising and re-run this script." >&2
+            exit 5
+        fi
+        echo "jjpsw_launch.sh: device tables still sparse after retries -" >&2
+        echo "  opening the matrix with what was read (some switches may" >&2
+        echo "  show 'not used' until the game finishes initialising)." >&2
     fi
     chmod 666 "$DUMP" 2>/dev/null
     chmod 666 /dev/shm${JJP_SHM_NAME:-/jjp_switches} 2>/dev/null
@@ -91,6 +126,10 @@ if [ "$(id -u)" = "0" ]; then
         tail -3 /var/tmp/jjp_ui.log >&2 2>/dev/null
         exit 5
     fi
+    # Put it back on the monitor it was closed on.  Tk cannot do this itself:
+    # under WSLg it reads its own position as -32768, so jjpsw.py keeps the SIZE
+    # and the position is settled here, the same way the game window's is.
+    bash "$HERE/winpos.sh" restore matrix || true
     echo "switch matrix: ${UI} process(es) on ${JJP_UI_DISPLAY:-:0}"
     exit 0
 fi

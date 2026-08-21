@@ -172,10 +172,20 @@ def panel(root, monkeypatch):
         pass
 
 
-def test_panel_builds_and_starts_disabled_controls(panel):
-    """Screenshot acts on a RUNNING game; offering it when nothing is running
-    is an invitation to a confusing error."""
-    assert str(panel._shot_btn["state"]) == "disabled"
+def test_there_is_no_screenshot_button(panel):
+    """Capturing the game is a RIG job: grab.sh knows about WSLg's RAIL, where
+    an x11grab of :0 returns a blank frame while the game draws perfectly.  A
+    panel button shelling out to the same script only added a file dialog."""
+    assert not hasattr(panel, "_shot_btn")
+    assert not hasattr(panel, "_screenshot")
+
+
+def test_recovery_sits_next_to_start(panel):
+    """Both are reached at the same moment and for the same reason - the run
+    will not come up - so the escalation belongs beside Start, not banished to
+    the opposite edge where it has to be gone looking for."""
+    assert panel._reset_btn.pack_info()["side"] == "left"
+    assert panel._go_btn.pack_info()["side"] == "left"
 
 
 def test_there_is_no_switch_matrix_button(panel):
@@ -201,7 +211,6 @@ def test_apply_running_enables_controls_and_flips_the_button(panel):
                   "image_mounted": "1", "game": "Wonka"})
     assert panel._last_up is True
     assert panel._go_btn["text"] == "Stop"
-    assert str(panel._shot_btn["state"]) == "normal"
     assert panel._cells["game"]["text"] == "Wonka"
     assert panel._cells["led_writes"]["text"] == "99"
 
@@ -212,7 +221,6 @@ def test_apply_stopped_flips_back(panel):
                   "image_mounted": "1"})
     assert panel._last_up is False
     assert panel._go_btn["text"] == "Start"
-    assert str(panel._shot_btn["state"]) == "disabled"
 
 
 def test_note_warns_when_running_without_boards(panel):
@@ -392,14 +400,15 @@ def test_start_skips_launch_when_key_never_appears(panel, monkeypatch):
 # ------------------------------------------------------------- wrong-title key --
 
 def test_wrong_key_sticks_in_the_headline(panel):
-    """A key that unlocks a different JJP title must not read as 'Stopped':
-    the key IS present (dongle_present=1) so the plain state would hide the
-    real reason.  The wrong-key verdict is sticky until the next start."""
-    panel._wrong_key = True
+    """A key verdict must not read as 'Stopped': the key IS present
+    (dongle_present=1) so the plain state would hide the real reason.  The
+    verdict is sticky until the next start, and it is the one the RIG
+    reported - not an assumed wrong-title."""
+    panel._mark_key_failure("Key not accepted", "the daemon never took it")
     panel._apply({"wsl": "1", "game_procs": "0", "dongle_present": "1",
                   "image_mounted": "1", "game": "Godfather"})
-    assert "Wrong key" in panel._state_lbl["text"]
-    assert "per-title" in panel._hint_lbl["text"].lower()
+    assert panel._state_lbl["text"] == "Key not accepted"
+    assert "daemon" in panel._hint_lbl["text"].lower()
 
 
 def test_wrong_key_clears_once_the_game_runs(panel):
@@ -410,12 +419,41 @@ def test_wrong_key_clears_once_the_game_runs(panel):
     assert panel._state_lbl["text"] == "Running"
 
 
-def test_mark_wrong_key_sets_the_sticky_flag(panel):
+def test_mark_key_failure_sets_the_sticky_flag(panel):
     """The flag is set synchronously (the headline paint is marshalled to the
     Tk loop), so a poll arriving right after still shows the real reason."""
     panel._wrong_key = False
-    panel._mark_wrong_key()
+    panel._mark_key_failure("No security key", "not visible in WSL")
     assert panel._wrong_key is True
+    assert panel._key_verdict == ("No security key", "not visible in WSL")
+
+
+def test_h0007_is_not_always_a_wrong_title_key():
+    """THE misdiagnosis, and it cost an hour on 2026-08-20.
+
+    H0007 is "Sentinel key not found" and covers two faults with OPPOSITE
+    fixes: another title's key (swap it), or a key the licence daemon never
+    picked up (swapping does nothing).  The panel used to report the first
+    unconditionally - so it said "plug in the GunsNRoses key" while the truth
+    was that the daemon could see NO key, and every title failed identically
+    including the one whose key was plugged in.
+    """
+    no_key = jjp_emulate_tab.key_failure("NO KEY: nothing visible inside WSL.")
+    assert no_key and no_key[0] == "No security key"
+
+    unusable = jjp_emulate_tab.key_failure(
+        "KEY NOT ACCEPTED: Wonka could not open the plugged-in Sentinel key.")
+    assert unusable and unusable[0] == "Key not accepted"
+    # It must NOT assert the title is wrong - that is the whole bug.
+    assert "either" in unusable[1].lower()
+    assert unusable[0] != no_key[0]
+
+    # An older rig script in a half-updated checkout still gets reported.
+    assert jjp_emulate_tab.key_failure("WRONG KEY: ...")[0] == \
+        "Wrong key for this game"
+    # Ordinary progress lines are not verdicts.
+    assert jjp_emulate_tab.key_failure("== game (Wonka) ==") is None
+    assert jjp_emulate_tab.key_failure("") is None
 
 
 # --------------------------------------------------------------- log streaming --
@@ -486,3 +524,92 @@ def test_run_streaming_survives_a_popen_failure(panel, monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", boom)
     rc, wrong = panel._run_streaming(["watch.sh"], timeout=1800)
     assert rc is None and wrong is False
+
+
+# ------------------------------------------------- key present but not shared --
+
+def test_a_key_in_the_pc_is_not_the_same_as_no_key():
+    """The panel said "No security key" at a user looking straight at the key.
+
+    ``dongle_present`` is a WSL question — status.sh reads sysfs INSIDE the
+    distro — so a key sitting in the machine that usbipd has not handed over
+    reads as absent.  Those are different faults with different fixes, and only
+    one of them is the user's to solve.
+    """
+    on_pc = {"wsl": "1", "game_procs": "0", "dongle_present": "0",
+             "key_on_pc": "1", "image_mounted": "1"}
+    label, hint = state_text(on_pc)
+    assert label != "No security key"
+    assert "cannot see it yet" in hint or "passed through" in hint.lower()
+
+    absent = dict(on_pc, key_on_pc="0")
+    assert state_text(absent)[0] == "No security key"
+
+    # Unknown (no usbipd) must fall back to the old wording, not invent a state.
+    unknown = {k: v for k, v in on_pc.items() if k != "key_on_pc"}
+    assert state_text(unknown)[0] == "No security key"
+
+
+def test_the_panel_attaches_the_key_itself_and_only_once(panel, monkeypatch):
+    """Detecting it and telling the user to plug in a key they already plugged
+    in is the panel describing a problem it is holding the fix for."""
+    calls = []
+    monkeypatch.setattr(panel, "_attach_dongle",
+                        lambda: calls.append(1) or True)
+    monkeypatch.setattr(jjp_emulate_tab.threading, "Thread",
+                        lambda target=None, **k: SimpleNamespace(
+                            start=(target or (lambda: None)), daemon=True))
+    monkeypatch.setattr(panel, "_poll", lambda: None)
+
+    info = {"wsl": "1", "game_procs": "0", "dongle_present": "0",
+            "key_on_pc": "1", "image_mounted": "1"}
+    panel._apply(info)
+    panel._apply(info)
+    panel._apply(info)
+    assert len(calls) == 1, "auto-attach must not fire on every poll"
+
+    # A key that comes back re-arms it, so a pull-and-replace is picked up.
+    panel._apply(dict(info, dongle_present="1"))
+    assert panel._auto_attached is False
+    panel._apply(info)
+    assert len(calls) == 2
+
+
+def test_key_on_pc_is_only_asked_when_the_rig_cannot_see_the_key():
+    """usbipd list is a Windows round trip; the happy path must not pay for it
+    on every poll."""
+    import inspect
+    src = inspect.getsource(JJPEmulatePanel._poll)
+    assert 'dongle_present") != "1"' in src
+    assert src.index('dongle_present') < src.index('key_on_pc(')
+
+
+# ------------------------------------------------------- the ISO is remembered --
+
+def test_the_game_iso_is_written_into_the_project_anchor():
+    """The Game ISO box came back EMPTY on every load with a project open.
+
+    It was saved to settings.json but never written into the project anchor -
+    and the restore reads the anchor first whenever a project is loaded.  So the
+    global copy was shadowed by an anchor that had no such key, and the box was
+    cleared however many launches had used the ISO.
+    """
+    import inspect
+    from pinball_decryptor import app as app_mod
+    src = inspect.getsource(app_mod)
+    # Written on BOTH anchor paths - the update of an existing one and the
+    # creation of the first - or half the projects still forget it.
+    assert "jjp_emulate_iso=jjp_emulate_iso" in src
+    assert '"jjp_emulate_iso": jjp_emulate_iso' in src
+
+
+def test_an_older_anchor_falls_back_to_the_global_setting():
+    """An anchor written before the fix has no such key.  Without a fallback
+    this would only ever help projects created afterwards, and every existing
+    one would still come back blank."""
+    import inspect
+    from pinball_decryptor import app as app_mod
+    src = inspect.getsource(app_mod)
+    i = src.index('data.get("jjp_emulate_iso")')
+    window = src[i:i + 700]
+    assert '_settings.get("jjp_emulate_iso")' in window

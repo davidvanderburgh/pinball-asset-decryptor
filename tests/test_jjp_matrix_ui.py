@@ -332,6 +332,43 @@ def test_default_geometry_is_generous_and_clamped(m):
     assert w2 <= 1280 - 80 and h2 <= 800 - 80
 
 
+def test_the_launcher_refuses_another_title_s_device_tables():
+    """A Guns N' Roses run came up showing WONKA's switches.
+
+    The dump is one fixed path reused by every title, so a read that fails
+    leaves the PREVIOUS game's tables sitting there looking perfectly valid -
+    and the launcher's only test was that the file was non-empty.  The matrix
+    then drew gobstopper targets and a 6-ball trough onto a GnR playfield.
+
+    That is worse than showing nothing: every name, number and frame address in
+    it is a confident lie about the machine actually running, and clicking one
+    drives a switch that is not the one named.
+    """
+    import os
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "tools", "jjp_emu", "jjpsw_launch.sh")
+    if not os.path.exists(path):
+        pytest.skip("jjpsw_launch.sh not present")
+    with open(path, encoding="utf-8") as fh:
+        src = fh.read()
+    lines = [l for l in src.splitlines() if not l.lstrip().startswith("#")]
+    body = "\n".join(lines)
+
+    # The check exists, and is made against the ELF swdump recorded - which
+    # carries the title, so nothing new has to be written to identify a dump.
+    assert "dump_is_this_title" in body
+    assert "elf" in body
+    # It must be CALLED on the fallback path, not merely defined.
+    assert body.count("dump_is_this_title") >= 2
+    # And a foreign dump must STOP the launch rather than be opened anyway.
+    # Bounded by lines, not by splitting on "fi" - that matches inside the word
+    # "finish" in the guard's own error text.
+    after = body[body.index("if ! dump_is_this_title"):].splitlines()
+    guard = after[:after.index("        fi")] if "        fi" in after else after[:12]
+    assert any(l.strip().startswith("exit ") for l in guard), \
+        "a foreign dump must abort the launch"
+
+
 def test_in_use_drops_the_addresses_the_title_never_wired(m):
     """The table lists switches the game NAMES.  Wonka names 69 of its 296
     addresses and calls the other 227 "not used", so showing them all buries

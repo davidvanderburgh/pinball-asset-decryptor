@@ -103,6 +103,59 @@ def attach_dongle_cmd():
     return [exe, "attach", "--wsl", "--hardware-id", HASP_VID_PID]
 
 
+def key_on_pc():
+    """Is the Sentinel key plugged into the PC, whatever WSL can see?
+
+    ``status.sh``'s ``dongle_present`` is a WSL question - it reads sysfs
+    INSIDE the distro - so a key sitting in the machine but not passed through
+    by usbipd reads as absent, and the panel said "No security key" at a user
+    looking straight at the key.  Those are different faults: one needs a key,
+    the other needs an attach, and the panel already knows how to do the second.
+
+    Returns True / False, or None when usbipd cannot be asked at all.
+    """
+    exe = usbipd_path()
+    if not exe:
+        return None
+    try:
+        out = subprocess.run([exe, "list"], stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, timeout=20,
+                             creationflags=_rig.CREATE_FLAGS)
+    except Exception:                                      # noqa: BLE001
+        return None
+    return HASP_VID_PID in out.stdout.decode("utf-8", "replace").lower()
+
+
+def key_failure(line):
+    """(headline, hint) if this rig line is a key verdict, else None.
+
+    H0007 — "Sentinel key not found" — covers TWO faults with opposite fixes,
+    and the panel used to report only the first.  On 2026-08-20 that cost an
+    hour: it said "wrong key, plug in the GunsNRoses key" while the truth was
+    that the licence daemon could see NO key at all, so every title failed the
+    same way, including the one whose key WAS plugged in.  ``run_game.sh`` now
+    distinguishes them and this reads its verdict rather than guessing one.
+    """
+    if line.startswith("NO KEY:"):
+        return ("No security key",
+                "No Sentinel key is visible inside WSL — the passthrough is "
+                "not up, or it dropped. Plug the key in and press Start; the "
+                "panel re-attaches it for you.")
+    if line.startswith("KEY NOT ACCEPTED:"):
+        return ("Key not accepted",
+                "The key is visible in WSL but the game could not open it. "
+                "Either it is another JJP title's key — they are per-title — "
+                "or the licence daemon never picked it up, which no key swap "
+                "fixes. The log line below says how to tell the two apart.")
+    # The pre-2026-08-20 wording, still understood so an older rig script in a
+    # half-updated checkout does not silently stop being reported.
+    if "WRONG KEY" in line:
+        return ("Wrong key for this game",
+                "The plugged-in key runs a different JJP title. JJP keys are "
+                "per-title — plug in this game's own key.")
+    return None
+
+
 def state_text(info):
     """(label, hint) for the panel's headline, from status.sh's key=value.
 
@@ -130,6 +183,14 @@ def state_text(info):
             bits.append("NO BOARDS — no switches or LEDs")
         return "Running", "  ·  ".join(bits)
     if info.get("dongle_present") != "1":
+        # The key can be IN the PC and still invisible to the rig: usbipd has
+        # to hand it to WSL first.  Saying "no security key" to someone looking
+        # at the key in the port is how this presented.
+        if info.get("key_on_pc") == "1":
+            return ("Key not passed through yet",
+                    "The key is in this PC but WSL cannot see it yet — it has "
+                    "to be handed over by usbipd. Doing that now; it takes a "
+                    "few seconds.")
         return ("No security key",
                 "Plug in the purple JJP USB key. The game's code is encrypted "
                 "with it — this is not a check that can be skipped.")
@@ -177,6 +238,12 @@ class JJPEmulatePanel:
         #: JJP title.  Sticky so the poll's own state text does not immediately
         #: paint over the explanation; cleared when a new start begins.
         self._wrong_key = False
+        #: One-shot guard for the automatic usbipd hand-over.
+        self._auto_attached = False
+        #: What the rig actually said about the key, so the sticky headline
+        #: repeats the real verdict instead of assuming a wrong-title key.
+        self._key_verdict = ("Wrong key for this game",
+                             "The plugged-in key runs a different JJP title.")
 
     # ------------------------------------------------------------------
     # plumbing
@@ -243,16 +310,14 @@ class JJPEmulatePanel:
         ctl.pack(fill=tk.X, pady=(2, 8))
         self._go_btn = ttk.Button(ctl, text="Start", command=self._toggle)
         self._go_btn.pack(side=tk.LEFT)
-        self._shot_btn = ttk.Button(ctl, text="Screenshot…",
-                                    command=self._screenshot, state=tk.DISABLED)
-        self._shot_btn.pack(side=tk.LEFT, padx=(6, 0))
 
-        # Recovery, off to the right so it reads as the escalation it is: when a
-        # run wedges, Stop (stop.sh) can hang on the same wedge, and WSLg can
-        # leave a frozen, border-less window that only a WSL restart clears.
+        # Recovery sits NEXT TO Start, not banished to the right edge.  It is
+        # reached at the same moment and for the same reason - the run will not
+        # come up - so putting it where the eye already is beats making it a
+        # thing to go and find.
         self._reset_btn = ttk.Button(ctl, text="Fix stuck state",
                                      command=self._fix_state)
-        self._reset_btn.pack(side=tk.RIGHT)
+        self._reset_btn.pack(side=tk.LEFT, padx=(6, 0))
         _Tooltip(self._reset_btn,
                  "Force-restart WSL to clear a wedged emulator — a frozen "
                  "window with no border, a game that will not stop, or orphaned "
@@ -427,9 +492,10 @@ class JJPEmulatePanel:
                 if not line:
                     continue
                 self._log("JJP: " + line)
-                if "WRONG KEY" in line and not saw_wrong["v"]:
+                verdict = key_failure(line)
+                if verdict and not saw_wrong["v"]:
                     saw_wrong["v"] = True
-                    self._mark_wrong_key()
+                    self._mark_key_failure(*verdict)
         finally:
             killer.cancel()
             try:
@@ -441,21 +507,20 @@ class JJPEmulatePanel:
             self._log("JJP: start timed out — the rig was stopped.")
         return proc.returncode, saw_wrong["v"]
 
-    def _mark_wrong_key(self):
-        """Flip the headline to the per-title-key explanation, from any thread.
+    def _mark_key_failure(self, label, hint):
+        """Flip the headline to the key verdict, from any thread.
 
-        Sticky (``_wrong_key``) so the next status poll — which sees a key
+        Sticky (``_wrong_key``) so the next status poll — which may see a key
         present and no game — does not immediately paint "Stopped" over the real
         reason.  Cleared when the next start begins.
         """
         self._wrong_key = True
+        self._key_verdict = (label, hint)
 
         def paint():
             try:
-                self._state_lbl.configure(text="Wrong key for this game")
-                self._hint_lbl.configure(
-                    text="The plugged-in key runs a different JJP title. "
-                         "JJP keys are per-title — plug in this game's own key.")
+                self._state_lbl.configure(text=label)
+                self._hint_lbl.configure(text=hint)
             except tk.TclError:
                 pass
 
@@ -463,6 +528,44 @@ class JJPEmulatePanel:
             self._timer().after(0, paint)
         except (tk.TclError, RuntimeError):
             pass
+
+    def _auto_attach(self):
+        """Hand the key to WSL without being asked.
+
+        The panel already knew how to do this - it just only did it when Start
+        was pressed, so a key plugged in before the app opened sat there reading
+        "No security key" until the user pressed a button they had no reason to
+        think would help.  Detecting it and saying "plug it in" was the panel
+        describing a problem it was holding the fix for.
+
+        ONE SHOT per drop.  It re-arms in _apply the moment the key is visible
+        again, so a key pulled and replaced is picked up - but a key that will
+        not attach does not get a usbipd call every poll for as long as the app
+        is open.
+        """
+        if self._auto_attached or self._busy:
+            return
+        self._auto_attached = True
+        self._log("JJP: the security key is in this PC but not passed through "
+                  "to WSL — attaching it.")
+
+        def work():
+            try:
+                if self._attach_dongle():
+                    self._log("JJP: security key attached.")
+                else:
+                    self._log("JJP: could not attach the security key "
+                              "automatically. Press Start to try again.")
+            except Exception as exc:                       # noqa: BLE001
+                self._log("JJP: auto-attach failed: %s" % exc)
+            finally:
+                # Poll straight away so the panel stops saying the old thing.
+                try:
+                    self._timer().after(0, self._poll)
+                except (tk.TclError, RuntimeError):
+                    pass
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _attach_dongle(self):
         """Hand the key to WSL and WAIT until it is actually there.
@@ -701,28 +804,11 @@ class JJPEmulatePanel:
                 self._log("JJP: could not open the switch matrix: %s" % exc)
         threading.Thread(target=work, daemon=True).start()
 
-    def _screenshot(self):
-        path = filedialog.asksaveasfilename(
-            title="Save a screenshot of the game",
-            defaultextension=".png",
-            filetypes=[("PNG image", "*.png")])
-        if not path:
-            return
-
-        def work():
-            try:
-                target = "/mnt/" + path[0].lower() + path[2:].replace("\\", "/") \
-                    if sys.platform == "win32" and len(path) > 1 and path[1] == ":" \
-                    else path
-                out = subprocess.run(
-                    rig_cmd_root("grab.sh", target, "1",
-                                 env=["JJP_DISPLAY=:1"]),
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    timeout=120, creationflags=_rig.CREATE_FLAGS)
-                self._log("JJP: " + out.stdout.decode("utf-8", "replace").strip())
-            except Exception as exc:                       # noqa: BLE001
-                self._log("JJP: screenshot failed: %s" % exc)
-        threading.Thread(target=work, daemon=True).start()
+    # The Screenshot button and its handler are gone.  Capturing the game is
+    # still a rig job - `grab.sh` does it, and does it better, because it knows
+    # about WSLg's RAIL (an x11grab of :0 returns a blank frame while the game
+    # draws perfectly).  A panel button that shells out to the same script only
+    # added a file dialog to a thing better done where the rig already lives.
 
     # ------------------------------------------------------------------
     # polling
@@ -763,6 +849,13 @@ class JJPEmulatePanel:
             except Exception:                              # noqa: BLE001
                 text = ""
             info = _rig.parse_status(text)
+            # A key the rig cannot see may still be sitting in the PC, waiting
+            # to be handed over.  Asked ONLY when it matters, so the ordinary
+            # poll stays the one WSL round trip it has always been.
+            if info and info.get("dongle_present") != "1":
+                on_pc = key_on_pc()
+                if on_pc is not None:
+                    info["key_on_pc"] = "1" if on_pc else "0"
             if self._stopped:
                 self._poll_busy = False
                 return
@@ -785,23 +878,23 @@ class JJPEmulatePanel:
             self._info = info
             self._last_up = int(info.get("game_procs") or 0) > 0
             label, hint = state_text(info)
-            # A confirmed wrong-title key sticks until the next start: the game
-            # is down and dongle_present is 1, so the plain state text would say
-            # "Stopped" and hide the real reason it will not run.
+            # A key verdict sticks until the next start: the game is down and
+            # dongle_present may well be 1, so the plain state text would say
+            # "Stopped" and hide the real reason it will not run.  The verdict
+            # is whatever the rig actually reported - not an assumed one.
             if self._wrong_key and not self._last_up:
-                label = "Wrong key for this game"
-                hint = ("The plugged-in key runs a different JJP title. "
-                        "JJP keys are per-title — plug in this game's own key.")
+                label, hint = self._key_verdict
             self._state_lbl.configure(text=label)
             self._hint_lbl.configure(text=hint)
             if not self._busy:
                 self._go_btn.configure(text="Stop" if self._last_up else "Start")
-            self._shot_btn.configure(
-                state=tk.NORMAL if self._last_up else tk.DISABLED)
+
 
             def yn(k):
                 return "yes" if info.get(k) == "1" else "no"
 
+            if info.get("dongle_present") == "1":
+                self._auto_attached = False      # re-arm for the next drop
             self._cells["dongle_present"].configure(text=yn("dongle_present"))
             self._cells["hasp_port_1947"].configure(text=yn("hasp_port_1947"))
             self._cells["image_mounted"].configure(text=yn("image_mounted"))
@@ -832,6 +925,12 @@ class JJPEmulatePanel:
                     text="The game is running but the playfield boards are not "
                          "present, so it can see no switches and drive no "
                          "LEDs. Stop and start again to bring them up.")
+            elif (not self._last_up and info.get("key_on_pc") == "1"
+                  and info.get("dongle_present") != "1"):
+                self._note.configure(
+                    text="The security key is in this PC but WSL cannot see it "
+                         "yet. Handing it over — no need to do anything.")
+                self._auto_attach()
             elif not self._last_up and info.get("dongle_present") == "0":
                 self._note.configure(
                     text="No security key detected. The game's code is "

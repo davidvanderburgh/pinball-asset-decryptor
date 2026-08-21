@@ -128,12 +128,39 @@ python3 "$HERE/seed_rest.py" "${JJP_DEVICES_JSON:-/var/tmp/jjp_devices.json}" \
 step "game ($(jjp_title))"
 JJP_DISPLAY=$RUN_DISPLAY bash "$HERE/run_game.sh" --detach
 rc=$?
+
+# A KEY FAILURE ON A REUSED JAIL HEALS ITSELF, ONCE.
+#
+# H0007 with the key sitting right there in WSL is usually not the key at all -
+# it is the jail.  hasplmd keeps its state under /var/hasplm INSIDE the overlay,
+# and the overlay outlives stop.sh, so a jail that has already hosted a run can
+# come back up with a licence daemon that will not see the key however many
+# times it is re-registered.  Measured 2026-08-20: three launches in a row
+# H0007'd on a key whose USB descriptors read back perfectly (0529:0001
+# "Sentinel HL"), and BOTH titles failed identically - then a single unjail and
+# relaunch worked first time.
+#
+# So: tear the jail down and try once more, rather than telling the user to go
+# and find a different dongle.  Bounded to one retry, and only when the key IS
+# visible - if it is genuinely absent, retrying cannot help and the message
+# run_game.sh already printed is the right one.
+if [ "$rc" = "7" ] && [ "${JJP_JAIL_HEAL:-1}" = "1" ] && key_visible; then
+    echo "watch.sh: the key is present but the game could not open it -"
+    echo "  rebuilding the jail (stale licence-daemon state survives a stop)"
+    bash "$HERE/unjail.sh" >/dev/null 2>&1
+    bash "$HERE/jail.sh" >/dev/null 2>&1 || echo "watch.sh: re-jail failed"
+    bash "$HERE/dongle.sh" >/dev/null 2>&1 || echo "watch.sh: dongle re-register failed"
+    bash "$HERE/jjpcuse.sh" start >/dev/null 2>&1
+    JJP_JAIL_HEAL=0 JJP_DISPLAY=$RUN_DISPLAY bash "$HERE/run_game.sh" --detach
+    rc=$?
+fi
+
 if [ "$rc" != "0" ]; then
-    # Preserve run_game.sh's own exit code instead of flattening it to 6.  A
-    # wrong-title Sentinel key exits 7, and the GUI keys its "Wrong key for this
-    # game" headline off that - flattening it would make a wrong key look like
-    # any other launch failure.  On 7 the game never came up, so we also stop
-    # here rather than opening a switch matrix onto nothing.
+    # Preserve run_game.sh's own exit code instead of flattening it to 6.  A key
+    # failure exits 7 and the GUI keys its headline off that - flattening it
+    # would make a key problem look like any other launch failure.  On 7 the
+    # game never came up, so we also stop here rather than opening a switch
+    # matrix onto nothing.
     exit "$rc"
 fi
 

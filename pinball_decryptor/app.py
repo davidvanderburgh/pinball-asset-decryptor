@@ -518,6 +518,12 @@ class App:
                     jjp_iso = str(data.get("jjp_emulate_iso") or "")
                 except (OSError, ValueError):
                     jjp_iso = ""
+                # Anchors written before the ISO was saved into them have no
+                # such key.  Falling back to the global setting is what makes
+                # an EXISTING project restore instead of coming back blank -
+                # without it this fix would only help projects created after it.
+                if not jjp_iso:
+                    jjp_iso = str(self._settings.get("jjp_emulate_iso") or "")
             else:
                 jjp_iso = str(self._settings.get("jjp_emulate_iso") or "")
             jjp_iso_var.set(_rmd(jjp_iso) if jjp_iso else "")
@@ -3925,6 +3931,13 @@ class App:
         emulate_card = card_var.get().strip() if card_var else ""
         states_var = getattr(self.window, "emulate_savestates_var", None)
         emulate_savestates = bool(states_var.get()) if states_var else False
+        # The JJP game ISO belongs in the anchor too.  It was saved to
+        # settings.json but never written HERE, while the restore reads the
+        # anchor first whenever a project is open - so with a project loaded the
+        # Game ISO box came back empty every time, however many launches had
+        # used it.
+        jjp_var = getattr(self.window, "jjp_emulate_iso_var", None)
+        jjp_emulate_iso = jjp_var.get().strip() if jjp_var else ""
         try:
             if project_file.has_anchor(folder):
                 project_file.update_anchor(
@@ -3936,6 +3949,7 @@ class App:
                     extract_options=opts,
                     emulate_card=emulate_card,
                     emulate_savestates=emulate_savestates,
+                    jjp_emulate_iso=jjp_emulate_iso,
                     saved_with=__version__)
             else:
                 # First anchor for this folder.  Compat rule: a custom Build
@@ -3960,7 +3974,8 @@ class App:
                     # only this app version knows rides in extra and format-2
                     # readers ignore it.
                     extra={"emulate_card": emulate_card,
-                           "emulate_savestates": emulate_savestates})
+                           "emulate_savestates": emulate_savestates,
+                           "jjp_emulate_iso": jjp_emulate_iso})
                 self.window.append_log(
                     "This folder is now a project — picking it again "
                     "restores this whole setup.", "info")

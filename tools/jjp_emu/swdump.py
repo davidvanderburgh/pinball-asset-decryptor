@@ -123,7 +123,35 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from jjpelf import GameElf                                       # noqa: E402
 
-DEFAULT_ELF = '/var/tmp/jjp_run/jjpe/gen1/Wonka/game'
+#: Where the game binary lives inside the jail, MINUS the title.
+JAIL_GAMES = '/var/tmp/jjp_run/jjpe/gen1'
+
+
+def default_elf(base=JAIL_GAMES):
+    """The mounted title's game binary, found rather than assumed.
+
+    This used to be the literal path ``.../gen1/Wonka/game``, which is the one
+    thing padpath.sh says must never happen: "nothing downstream should contain
+    the word Wonka".  It cost more than tidiness.  Running Guns N' Roses, swdump
+    died with FileNotFoundError on Wonka's path, so no dump was written - and
+    jjpsw_launch.sh, finding a perfectly valid dump already on disk from the last
+    Wonka run, opened the matrix onto it.  The panel then showed gobstopper
+    targets and a 6-ball trough over a GnR playfield, every name and frame
+    address a confident lie about the machine that was running.
+
+    The same discovery jjp_title() and pfimage.find_game_dir() use: the title
+    directory is the one with an executable ``game`` in it.
+    """
+    try:
+        for name in sorted(os.listdir(base)):
+            cand = os.path.join(base, name, 'game')
+            if os.access(cand, os.X_OK):
+                return cand
+    except OSError:
+        pass
+    # Nothing mounted.  Return the path we would have used so the error names
+    # the directory rather than dying on a None.
+    return os.path.join(base, '<no title mounted>', 'game')
 
 SWITCH_SIZE = 104
 COIL_SIZE = 80
@@ -518,7 +546,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(
         description='Dump live JJP switch/coil/lamp tables.',
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--elf', default=DEFAULT_ELF)
+    # Resolved at CALL time, not import time: the mounted title changes between
+    # runs and a module-level default would freeze whichever was up first.
+    ap.add_argument('--elf', default=None,
+                    help='the game binary (default: the mounted title\'s)')
     ap.add_argument('--pid', type=int, default=None)
     ap.add_argument('--out', default=None, help='write JSON here')
     ap.add_argument('--pf', default=None,
@@ -526,6 +557,8 @@ def main(argv=None):
                          'what proves an impossible calibration scale')
     ap.add_argument('--quiet', action='store_true')
     args = ap.parse_args(argv)
+    if not args.elf:
+        args.elf = default_elf()
 
     pid = args.pid or find_pid()
     if not pid:

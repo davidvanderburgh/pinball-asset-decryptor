@@ -722,11 +722,6 @@ rm -f "$ROOT/dump/padbinds"
 # One page, zeroed: the shim stamps the magic once it maps it.
 rm -f "$LED_HOST"
 dd if=/dev/zero of="$LED_HOST" bs=4096 count=1 status=none
-# item 63: the boot-cover settle file. STALE FROM THE LAST RUN IT MUST NOT BE,
-# or the cover lifts the instant the window opens and shows the boot after
-# all - so it is removed here with the other per-run state, before padglhost
-# starts. The waiter beside autoattract's launch is what recreates it.
-rm -f "$ROOT/dump/boot_settled"
 # This session's identity. savestate copies it into the slot; restorestate
 # compares to tell a SAME-SESSION load (renderer already holds the guest's GL
 # world) from a CROSS-SESSION one (it holds none of it - the game plays but
@@ -839,17 +834,6 @@ fi
 
 echo "[watch] starting renderer (it opens the game window; the picture arrives"
 echo "[watch] with the guest's first frame, ~15 s later)"
-# item 63: the boot cover. The window shows STARTING UP until the settle file
-# appears - touched by the waiter beside autoattract's launch below - so the
-# boot's Tech Alerts and validation banners never reach the glass, which is
-# how a real machine boots. ARMED ONLY WHEN AUTO-ADVANCE IS ON, because with
-# it off nobody ever writes the file and only padglhost's failsafe clock
-# would lift the cover. An explicit PAD_BOOT_COVER from the caller wins,
-# including PAD_BOOT_COVER=0 to turn it off; a key press in the game window
-# always lifts it (padglhost.c has the whole argument).
-if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
-    export PAD_BOOT_COVER="${PAD_BOOT_COVER-$ROOT/dump/boot_settled}"
-fi
 # PAD_GL_LEGEND passes through UNSET (item 39): the Controls window is
 # retired - the playfield's key panel carries its content - and padglhost
 # only opens it on an explicit =1, so a caller who wants the old window
@@ -1261,21 +1245,6 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
     AUTOPG=$!
     echo "[watch] auto-advance on: it will press Service Back until the game"
     echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
-    # item 63: the boot-cover waiter. autoattract.sh exiting IS the settle
-    # signal - the same one swexercise.sh waits on - and this turns it into
-    # the file padglhost polls. A subshell rather than a named helper because
-    # it is four lines that exit seconds after autoattract does; it re-checks
-    # that a game is still up so a boot that died does not leave a settle
-    # file for the NEXT run to trip over (run start rm's it anyway - this is
-    # the second lock on that door). ALL THREE of autoattract's exits lift
-    # the cover on purpose: past-Tech-Alerts is the settle, gave-up means
-    # show the human what it could not clear, and stood-down-for-an-operator
-    # means someone is driving and hiding the screen from them would be item
-    # 52's guided-setup fight again.
-    (
-        while kill -0 "$AUTOPG" 2>/dev/null; do sleep 1; done
-        pgrep -x game >/dev/null 2>&1 && touch "$ROOT/dump/boot_settled"
-    ) >/dev/null 2>&1 &
 fi
 
 # THE SWITCH EXERCISER (item 59). The `CHECK SWITCH #n` rows on Tech Alerts are

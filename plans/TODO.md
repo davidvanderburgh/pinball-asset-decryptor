@@ -3005,100 +3005,95 @@ These have each been violated at least once and each cost a run or a window:
       works; what it costs is the staging logic plus one confirming pair of
       boots.
 
-- [x] **63. Show a LOADING screen while the emulator boots, instead of the
-      game's Tech Alerts screen with its transient bring-up errors.** `S2 D3`
-      *(Filed 2026-08-21 from David: "eventually, the two node errors clear
-      themselves at least, but I'd rather show the 'loading...' screen while
-      the emulator loads the game than the tech alerts screen (that's the way
-      the actual machine works)".)*
-      **★★★ CLOSED 2026-08-21 (item/63) — ACCEPTANCE MET IN FULL ON THE GLASS,
-      turtles_pro, all four points captured. Awaiting `/finish`.**
-      Verified on David's own upscaled turtles card, one boot for the natural
-      path and one for the key path:
-      (a) STARTING UP dot-matrix on the glass where Tech Alerts used to be
-      (`cover.png`), with the animated trailing dot;
-      (b) the reveal landed in full TMNT attract — the four turtles, PLAYER 1,
-      CREDITS 2 — with NO Tech Alerts ever visible (`revealed.png`);
-      (c) the cover held 168.7 s and lifted via the SETTLE FILE, not the
-      failsafe (`boot cover lifted after 168.7s: the settle file appeared`) —
-      autoattract needed 4 Service Back presses on this boot, and the settle
-      path still won the race with the 180 s clock;
-      (d) a real X keypress (xdotool `space` to the window) lifted it early:
-      `boot cover lifted after 96.6s: a key was pressed in this window`, and
-      the glass revealed the underlying Tech Alerts screen — the operator
-      override working exactly as intended (auto-advance was off for this
-      test, so nothing had advanced the boot).
-      **Also confirmed the design's core promise:** the cover is present-only.
-      The same run carried `PAD_OPEN_LOG=1` for item 62 and the guest booted,
-      decoded and validated underneath the whole time — the cover changed
-      what the human saw, nothing the game did.
-      **★★ BUILT THIS PASS (branch item/63), compiles clean, 337 spike2 tests
-      green. The build + design notes follow.**
-      **Established (the design that shipped):** the cover lives in
-      `padglhost.c`'s `win_present()` — while up, the window draws STARTING
-      UP as a 5x7 dot-matrix in scissor+clear (the item 11 tick's technique:
-      no program, no texture, nothing to restore) instead of blitting
-      `tex_screen`. ONLY the present changes: the guest keeps decoding, the
-      PNG dumps and picture oracle still see the real frame, so every
-      instrument reads the truth and only the human-facing glass waits.
-      **The signal is a FILE** (`PAD_BOOT_COVER` carries its path;
-      `$ROOT/dump/boot_settled`): watch.sh's four-line waiter touches it when
-      `autoattract.sh` exits — the same settle signal item 59's exerciser
-      waits on, turned into a file, never re-judged. watch.sh arms the cover
-      only when auto-advance is on and rm's the file with the other per-run
-      state so a stale one cannot lift the cover at open.
-      **Three lifts, all deliberate:** the settle file; ANY key pressed in
-      the game window (an operator wants to see — the playfield window
-      cannot trip this, it drives shm not X keys); and a failsafe clock
-      (`PAD_BOOT_COVER_MAX`, 180 s — above item 34's ~3 min first-copy boot)
-      because a cover that can hide a live game forever is worse than any
-      screen it covers. All three of autoattract's exits lift on purpose —
-      gave-up should SHOW what it could not clear, and stood-down means a
-      human is driving.
-      **Resume:** rebuild (`ensurebuild` picks the source change up by hash),
-      boot turtles_pro, and capture: (a) STARTING UP on the glass where Tech
-      Alerts used to be, (b) the reveal landing in attract, (c) the
-      boot-to-reveal time against the ~90 s the same boot showed without the
-      cover, (d) a key press lifting it early. shotwin.py, with item 60's
-      logical-vs-physical warning.
-      **THE ARGUMENT FOR DOING IT THIS WAY ROUND, rather than suppressing the
-      alerts one at a time.** `Check Node Board 2 : Not Registered` and
-      `Check Node Board 14 : Not Responding` are TRANSIENTS of bring-up, not
-      faults: the renderer at `0x39c834` substitutes msgid 887 while
-      `(flags&1)==0` and 888 while `(flags&2)==0`, and both bits get set as
-      the service schedule reaches those boards — which is exactly why David
-      sees them clear themselves. Silencing them would be writing a wrong
-      table over a right one, the rule items 55 and 57 both landed on. The
-      honest fix is to not put the boot's INTERMEDIATE state on the glass.
-      **A note that may or may not be a coincidence, so it is marked as one:**
-      on turtles_pro nodes 2 and 14 are both `ws2812node` LED boards
-      (`node_ident.txt`), and turtles_pro is the title item 50 records as
-      putting NO frame the shim recognises as a lamp write. Two LED boards
-      that are slow to register on the one title whose LED traffic nobody can
-      decode is worth ONE look before assuming the two are unrelated — but do
-      not let it turn this item into item 50.
-      **What to build, and the reason the cheap version is wrong:** the game
-      window is created by `padglhost` the moment the guest first draws, so
-      the boot's every intermediate screen is on the glass from frame 1.
-      Simply NOT opening the window until the game is ready trades a scary
-      screen for a missing one for ~40 s, which is worse. So this is a cover:
-      the renderer holds a "Starting up" surface until the boot has settled,
-      then reveals the game. The settle signal already exists and is the one
-      item 59 now uses — `autoattract.sh` exiting — with the same caveat that
-      it has three exits and only one means "ready" (item 59's `MIN_AGE` floor
-      is the pattern).
-      **Acceptance:** boot a title that shows node-board alerts (turtles_pro)
-      and state that no Tech Alerts screen is ever visible on the glass —
-      captured, not remembered — and that the game appears with attract or its
-      real first screen. Also state the boot-to-first-real-picture time, so it
-      is visible whether the cover added any wait.
-      — S2: nothing is blocked and the errors clear themselves, but it makes
-      every boot look broken to anyone who is not holding this queue in their
-      head, and it is the first thing anybody sees. D3: needs runs to judge
-      (the thing under test is what is on the glass at a given moment), the
-      capture instrument exists and is validated (`shotwin.py`, with item 60's
-      logical-vs-physical-pixel warning), and it reproduces on every boot.
-
+- [ ] **63. Straight from the game's own Stern splash to attract, with NO Tech
+      Alerts screen — by making the node boards READY before the game decides
+      to show it, NOT by drawing our own overlay.** `S2 D4` ← IN PROGRESS 25%
+      *(Filed 2026-08-21 from David; REFRAMED 2026-08-21 by David after the
+      first approach was built and rejected — see the revert below.)*
+      **★★★ DAVID REFRAMED THIS, and the reframe IS the item now:** *"i don't
+      want a 'loading screen' overlay. i wanted the stern loading screen to be
+      shown instead... it goes from the loading splash screen straight to tech
+      alerts too early (before all the node boards are ready). can't we make
+      the 'node boards' ready earlier during the loading screen? ideally, we
+      go straight from loading splash to attract without seeing any tech
+      alerts screens and we do not have our own loading overlay."*
+      **THE OVERLAY WAS BUILT, VERIFIED ON THE GLASS, THEN REVERTED — wrong
+      approach, and the lesson is mine.** A STARTING UP cover in `padglhost.c`
+      passed all four of its own acceptance points on turtles (the captures
+      are in the item/63 history at `5938acc`/`5452986`), and it was still the
+      wrong thing: David wants the game's OWN splash, not ours, and he wants
+      the Tech Alerts screen to not HAPPEN rather than be hidden. `5938acc`'s
+      `padglhost.c` + `watch.sh` changes are reverted to `d11fde7`; item 59's
+      switch exerciser on the same branch is untouched.
+      **THE GOAL, restated as a mechanism:** the game shows its Stern splash
+      while it brings the node bus up, and leaves the splash for Tech Alerts
+      the moment it evaluates its alert providers. If every alert is clear by
+      that instant, the game has nothing to show and (David's model, to be
+      confirmed — see THE CRUX) goes straight to attract. So the work is to
+      make every provider quiet BEFORE that evaluation, on its own boot.
+      **THE CRUX, and it decides whether this is even the right mechanism —
+      MUST be answered on the rig before building anything:** does the game
+      show the Tech Alerts screen UNCONDITIONALLY (and wait for an operator
+      ack, which `autoattract.sh` currently supplies with a Service Back), or
+      ONLY when at least one alert is active? The handoff's "waits on Tech
+      Alerts for an operator, exactly as a real machine does" was written when
+      alerts WERE active, and godzilla still takes 2 Service-Back presses even
+      with its switch audit and node boards clear — which HINTS the screen is
+      unconditional, but a second screen after Tech Alerts also needs one
+      press, so the count does not settle it. The clean experiment is a
+      godzilla boot (unmodified card, node fix already makes its boards ready,
+      switch audit persisted-clear from item 59): if it still shows Tech
+      Alerts, the screen is unconditional and the fix is to make the game SKIP
+      it, not to clear alerts; if it goes straight to attract, clearing alerts
+      is the whole job.
+      **THREE PROVIDERS FEED THAT SCREEN, and they are NOT one problem:**
+      **(1) NODE BOARDS.** On godzilla the existing `nb_nodes_add_boards()`
+      (`hwshim.c`, `PAD_NB_SCHED_BOARDS`) already makes the LED boards ready by
+      ~12 s and the screen reads `No Technician Alerts`. On TURTLES it does
+      not: node 2 (a real `ws2812node` LED board in turtles’ own table) shows
+      **Not Registered** — `(flags&1)==0`, i.e. it never REGISTERED, which is
+      a deeper failure than godzilla's LED boards (those registered but were
+      not SERVICED = `Not Responding`, `(flags&2)==0`). Registration is
+      `0x5a2e10`: it sends `0xfe`, reads the board's part id `[4..7]`, and
+      linear-scans it against the 28-entry LPC part table at `0x69cc24`; a
+      MISS stores the "Unknown" descriptor whose `+20` is 0, and `+20` is
+      what `0x59ec1c` tests before sending any subcommand ≤ 0xef — so an
+      unrecognised part id means the board is never registered. turtles’
+      `node_ident.txt` gives node 2 `part=0x2c40102b`; the open question is
+      whether that part id is in the `0x69cc24` table or is being answered
+      wrong by the shim. Node 14 (also `ws2812node`) was seen CLEARING, so
+      whatever ails node 2 is not all `ws2812node` boards. **This overlaps
+      items 51/52/53/55 (node identity / directory / group map) and should
+      borrow their instruments, not re-derive them.**
+      **(2) THE VALIDATION ERROR — THE HARD CONSTRAINT, and it is why “straight
+      to attract” is IMPOSSIBLE ON DAVID’S SPECIFIC CARD.** `GAME VALIDATION
+      ERROR #3` on turtles is item 62: the `1987-upscaled` card’s `game`
+      binary is deliberately code-patched (one function nopped to `bx lr`, 4
+      bytes in `.text`) with a stale validation trailer, so the game’s own
+      check correctly flags it. No node fix clears this, and no honest
+      emulator change can (silencing it is the wrong-table mistake of items
+      55/57). So: UNMODIFIED cards can reach zero-alerts; the upscaled turtles
+      card cannot, unless David uses an unmodified turtles card or makes a
+      deliberate operator whitelist decision. **This must be said to David
+      plainly — the node work will not clear his turtles banner.**
+      **(3) THE SWITCH AUDIT** (`CHECK SWITCH #n`) is item 59, done: the
+      exerciser clears it and the verdict PERSISTS, so a second boot has no
+      switch alerts. Not a blocker after the first exercise.
+      **Resume, in rig order:** (a) the CRUX experiment on godzilla — does
+      zero-alerts skip Tech Alerts or park on it; (b) if clearing works,
+      instrument a turtles boot for node 2’s registration: is `0x2c40102b` in
+      the `0x69cc24` part table, and what does the shim answer for node 2’s
+      `0xfe` identify; (c) make node 2 register in time (likely a part-table
+      or identity fix, shared with items 51/55), measured by `flags=3` before
+      the game’s Tech-Alerts evaluation; (d) confirm on the glass an
+      UNMODIFIED card goes splash→attract with no Tech Alerts. Do NOT touch
+      the validation provider.
+      — S2: play is not blocked (the errors clear or are walked past), but the
+      first screen of every boot looks broken, which is what David is asking
+      to end. D4: needs several runs, the mechanism for turtles’ node 2 is not
+      yet known and may reach into the node-identity RE of items 51/55 (which
+      would make it D5), and the CRUX may turn the whole approach from
+      “clear alerts” into “make the game skip the screen”.
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T
       FIX rather than as fixed — which is what it has actually been since the

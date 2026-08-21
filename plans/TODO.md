@@ -3005,15 +3005,35 @@ These have each been violated at least once and each cost a run or a window:
       works; what it costs is the staging logic plus one confirming pair of
       boots.
 
-- [ ] **63. Show a LOADING screen while the emulator boots, instead of the
+- [x] **63. Show a LOADING screen while the emulator boots, instead of the
       game's Tech Alerts screen with its transient bring-up errors.** `S2 D3`
       *(Filed 2026-08-21 from David: "eventually, the two node errors clear
       themselves at least, but I'd rather show the 'loading...' screen while
       the emulator loads the game than the tech alerts screen (that's the way
-      the actual machine works)".)*  ← WORKING ON, IN PROGRESS 70%
+      the actual machine works)".)*
+      **★★★ CLOSED 2026-08-21 (item/63) — ACCEPTANCE MET IN FULL ON THE GLASS,
+      turtles_pro, all four points captured. Awaiting `/finish`.**
+      Verified on David's own upscaled turtles card, one boot for the natural
+      path and one for the key path:
+      (a) STARTING UP dot-matrix on the glass where Tech Alerts used to be
+      (`cover.png`), with the animated trailing dot;
+      (b) the reveal landed in full TMNT attract — the four turtles, PLAYER 1,
+      CREDITS 2 — with NO Tech Alerts ever visible (`revealed.png`);
+      (c) the cover held 168.7 s and lifted via the SETTLE FILE, not the
+      failsafe (`boot cover lifted after 168.7s: the settle file appeared`) —
+      autoattract needed 4 Service Back presses on this boot, and the settle
+      path still won the race with the 180 s clock;
+      (d) a real X keypress (xdotool `space` to the window) lifted it early:
+      `boot cover lifted after 96.6s: a key was pressed in this window`, and
+      the glass revealed the underlying Tech Alerts screen — the operator
+      override working exactly as intended (auto-advance was off for this
+      test, so nothing had advanced the boot).
+      **Also confirmed the design's core promise:** the cover is present-only.
+      The same run carried `PAD_OPEN_LOG=1` for item 62 and the guest booted,
+      decoded and validated underneath the whole time — the cover changed
+      what the human saw, nothing the game did.
       **★★ BUILT THIS PASS (branch item/63), compiles clean, 337 spike2 tests
-      green — NOT yet seen on the glass, which is the whole acceptance, so it
-      stays open.**
+      green. The build + design notes follow.**
       **Established (the design that shipped):** the cover lives in
       `padglhost.c`'s `win_present()` — while up, the window draws STARTING
       UP as a 5x7 dot-matrix in scissor+clear (the item 11 tick's technique:

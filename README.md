@@ -780,7 +780,19 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    changed or vanished is flagged rather than silently mis-applied. From
    v0.147.1 that comparison reads each slot's saved pre-edit original, so
    it works the same from a project you have already built as from a
-   freshly extracted one. Image
+   freshly extracted one. From v0.148.0 a card's sounds also decode the
+   same way on every extract, so the two sides of a transfer agree about
+   what a sound *is* — before that, which sounds landed on a
+   second-way-in decode of the same codec came down to how the extract
+   happened to split across worker processes, and the handful that
+   disagreed were the clips that quietly failed to come across.
+   Extracts already on your disk still pair: a sound that is the same
+   sound one frame apart is recognised as a match instead of dropped.
+   And the transfer now writes the whole plan to the log before the
+   confirm dialog opens — every sound that moved to a new index (with
+   both ends of the move) and everything that can't be carried, with the
+   reason — so you never have to diff two folders by hand to find out
+   what didn't make it. Image
    edits (including single-character font-glyph edits) and your renamed
    image-group names ride along too, matched by their on-card identity so
    they land on the right slot even when the new firmware re-baked the art

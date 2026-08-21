@@ -3007,7 +3007,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **63. Straight from the game's own Stern splash to attract, with NO Tech
       Alerts screen — by making the node boards READY before the game decides
-      to show it, NOT by drawing our own overlay.** `S2 D4` ← IN PROGRESS 65%
+      to show it, NOT by drawing our own overlay.** `S2 D3` ← IN PROGRESS 85%
       *(Filed 2026-08-21 from David; REFRAMED 2026-08-21 by David after the
       first approach was built and rejected — see the revert below.)*
       **★★★ DAVID REFRAMED THIS, and the reframe IS the item now:** *"i don't
@@ -3138,6 +3138,45 @@ These have each been violated at least once and each cost a run or a window:
       the upscaled turtles, whose validation banner would then never be shown
       either, since the whole screen is skipped). D5 → D4: the mechanism is
       known and the fix is a bounded input-layer change plus one run.
+      **★★★★★ FIXED AND CONFIRMED ON THE GLASS 2026-08-21 (`hwshim.c`).** The
+      cabinet SPI at-rest fallback (`ff0f0f...`, service buttons OPEN) was
+      gated on `sw_table_hopeless()` (= `sw_find_fails>=4`, true only for a
+      title whose table NEVER resolves). During a NORMAL title's early-boot
+      window — first SPI transfer until the switch table resolves ~3.5 s —
+      `sw_scan_bytes()` also returns 0 but hopeless() is still false, so the
+      fallback did not fire and the RX buffer was left untouched = the
+      all-made word. Active-low: all-made = every cabinet switch pressed,
+      INCLUDING the MENU button → the game opened the operator menu (the Tech
+      Alerts landing page). The fix fires the at-rest word on `!have` alone.
+      **PROOF:** godzilla, ZERO input (autoattract OFF, exerciser OFF), now
+      boots Stern-splash → ATTRACT (PLAYER 1 / high-score reel) on its own,
+      NO Tech Alerts screen ever (fix_0..fix_40.png). Previously it parked on
+      Tech Alerts 12s→140s. General fix: every title/card, and it makes the
+      upscaled-turtles validation banner moot too (whole screen skipped).
+      **★ TWO DOWNSTREAM SCREENS REVEALED (hidden behind the Tech Alerts park
+      before; NOT caused by this fix) — the remaining work for a fully clean
+      “splash → attract and STAY”:**
+      (1) a node-4 **“UPDATING NODE BOARD RUNTIME / UPDATE FAILED”** banner
+      over attract for ~40 s — this is **item 55** (a mis-derived node
+      firmware version; godzilla node 4 here, turtles nodes 4/12 there).
+      (2) a first-boot **“Guided Setup”** wizard (~70 s in): Language/Country/
+      Pricing/Volume, and **“Stern Insider Connected: this machine has an
+      invalid [key] — contact your distributor”.** The machine is unconfigured
+      / Insider-unregistered, so it prompts setup. On a real machine the
+      operator completes it once (Save & Exit) and it persists; OUR open
+      question is whether our config/NVRAM persists it so a second boot skips
+      it — if the invalid-Insider state forces it every boot, that is its own
+      layer. autoattract used to walk past BOTH Tech Alerts and this wizard
+      with its two presses, which is why item-59-era godzilla runs reached a
+      clean attract; with the phantom press gone, the wizard is what is left.
+      **Resume:** (a) the CORE ask — no Tech Alerts, boots to attract — is
+      DONE and proven; (b) decide with David whether “attract and STAY” needs
+      the Guided-Setup layer chased (test config persistence: complete Save &
+      Exit, reboot, does it skip?), which ties to the Insider-registration
+      state; (c) node-4 banner is item 55, now visible. This item’s own
+      acceptance (Tech Alerts gone, splash→attract) is met; whether to fold
+      the wizard in or split it is David’s call. D3 now the mechanism and fix
+      are known and shipped.
       **Resume:** (a) build the shim mailbox-post and test on a godzilla run —
       does the boot go splash→attract with the Tech Alerts screen never (or
       sub-frame) visible, landing in ATTRACT not the service menu; (b) if it

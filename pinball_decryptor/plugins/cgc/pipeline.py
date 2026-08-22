@@ -30,7 +30,8 @@ import sys
 import tempfile
 import zipfile
 
-from ...core.checksums import (CHECKSUMS_FILE, generate_checksums,
+from ...core.checksums import (CHECKSUMS_FILE, NON_ASSET_DIRS,
+                               TRACKING_SIDECARS, generate_checksums,
                                md5_file, read_checksums)
 from ...core.executor import CommandError, create_executor
 from ...core.pipeline_base import BasePipeline, PipelineError
@@ -1067,13 +1068,30 @@ class WritePipeline(BasePipeline):
             m = re.search(r"\bSize:\s*(\d+)", out)
             got = int(m.group(1)) if m else None
             if got != want:
+                # Two different faults share this check, and naming the
+                # wrong one sends the user resizing a partition that was
+                # never full.  No inode at all + "not found" from debugfs
+                # means the path is not in the image: debugfs `write`
+                # cannot create a parent directory, so a file whose folder
+                # the game does not have simply never lands.  A short
+                # inode is the real out-of-space signature.
+                if got is None and "not found" in out.lower():
+                    cause = (f"There is no {inner_path} inside the game "
+                             f"filesystem, and debugfs cannot create the "
+                             f"folder it would go in, so the file was "
+                             f"never written. That normally means it is "
+                             f"not a game asset at all -- something else "
+                             f"in the project folder picked up as one.")
+                else:
+                    cause = ("debugfs reported success but the file is "
+                             "missing or truncated -- often the game "
+                             "partition ran out of free space.")
                 raise PipelineError("Write",
                     f"{rel} did not land inside the game filesystem "
                     f"(expected {want:,} bytes, "
                     f"got {f'{got:,}' if got is not None else 'NO FILE'}). "
-                    f"debugfs reported success but the file is missing or "
-                    f"truncated -- often the game partition ran out of free "
-                    f"space. The build was aborted; the original image is "
+                    f"{cause} The build was aborted; the original "
+                    f"image is "
                     f"unchanged.\n\ndebugfs stat output:\n{out.strip()}")
 
     # A real CGC install payload (emmc.img) is 2-4 GB; anything under this
@@ -1483,6 +1501,14 @@ def _diff_assets(assets_dir, baseline, log=None):
         if rel_norm in jps_subdir_files:
             consumed_on_disk.add(rel_norm)
             continue
+        # Same for anything under the app's own project folders: today's
+        # baselines never list them, but an extract from before
+        # ``NON_ASSET_DIRS`` existed (v0.43 and older) can -- and a stale
+        # `build/<title>.img` entry would hand debugfs a multi-GB image to
+        # post into the game partition.
+        if rel_norm.split("/", 1)[0] in NON_ASSET_DIRS:
+            consumed_on_disk.add(rel_norm)
+            continue
         abs_path = os.path.join(assets_dir, rel)
         if os.path.isfile(abs_path):
             consumed_on_disk.add(rel_norm)
@@ -1525,12 +1551,37 @@ def _diff_assets(assets_dir, baseline, log=None):
     # so the dot-*directory* has to be pruned here or its snapshots get written
     # into the eMMC (and a snapshot of an apostrophe-named callout crashes the
     # debugfs write).
-    _skip_top = set(_DERIVED_SUBDIRS) | {ORIG_DIR}
+    #
+    # ``NON_ASSET_DIRS`` (build/, .hydrate/, card_files/, logs/) are the
+    # folders the app writes INSIDE the project folder -- our state, never the
+    # card's.  ``generate_checksums`` already keeps them out of the baseline,
+    # which is exactly what made them land here: unbaselined means "brand-new
+    # asset" to the sweep below.  ``logs/project.log`` (the per-project session
+    # log, written from the moment the folder is opened) then went to debugfs
+    # as a game file -- and since debugfs `write` cannot create the missing
+    # parent directory, the file never landed and the post-write verify aborted
+    # the whole build ("logs/project.log did not land inside the game
+    # filesystem ... expected 13,324 bytes, got NO FILE" -- RTS, v0.152.0 on a
+    # project first extracted under v0.43).  build/ is the same trap with worse
+    # odds: it is where Write puts its own output, so a second build would post
+    # a multi-GB installer image into the game partition.
+    _skip_top = set(_DERIVED_SUBDIRS) | {ORIG_DIR} | set(NON_ASSET_DIRS)
+    # Directories the inner ext4 is known to have -- every directory the
+    # baseline lists a file in, plus the assets root.  debugfs `write` cannot
+    # create a parent directory, so a "new" file anywhere else can never land;
+    # shipping it only buys the misleading out-of-space abort above.  Skip
+    # those and say so, rather than dropping them silently.
+    baseline_dirs = {""}
+    for rel in baseline:
+        rel_norm = rel.replace("\\", "/")
+        baseline_dirs.add(rel_norm.rsplit("/", 1)[0] if "/" in rel_norm else "")
+    stray = []
     for dirpath, dirnames, filenames in os.walk(assets_dir):
         if os.path.relpath(dirpath, assets_dir).replace("\\", "/") == ".":
             dirnames[:] = [d for d in dirnames if d not in _skip_top]
         for fn in filenames:
             if (fn == CHECKSUMS_FILE
+                    or fn in TRACKING_SIDECARS
                     or fn == CALLOUTS_CSV
                     or fn.startswith(".")
                     # repack scratch (ours); a leftover from an interrupted
@@ -1542,7 +1593,18 @@ def _diff_assets(assets_dir, baseline, log=None):
             if rel in jps_subdir_files:
                 continue
             if rel not in consumed_on_disk:
+                parent = rel.rsplit("/", 1)[0] if "/" in rel else ""
+                if parent not in baseline_dirs:
+                    stray.append(rel)
+                    continue
                 changed[rel] = abs_path
+    if stray and log:
+        log(f"  {len(stray)} new file(s) sit in a folder the game "
+            f"filesystem does not have -- not written back:", "info")
+        for rel in sorted(stray)[:10]:
+            log(f"    {rel}", "info")
+        if len(stray) > 10:
+            log(f"    ... and {len(stray) - 10} more", "info")
     return changed, missing
 
 

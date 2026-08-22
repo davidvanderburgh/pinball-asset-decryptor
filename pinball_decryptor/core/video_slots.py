@@ -13,7 +13,7 @@ existing per-manufacturer Write pipeline picks it up as a changed asset and
 repacks it — no manual copy-paste-and-rename by the user.  This module is
 manufacturer-agnostic; it relies on the plugin laying its video down as loose
 files the Write step repacks (JJP loose containers, Dutch Pinball AAIW
-.mp4/.mov, Spooky Godot .ogv, BoF standalone .ogv in the PCK tree).  Plugins
+.mp4/.mov, Spooky's loose .webm, BoF standalone .ogv in the PCK tree).  Plugins
 whose video can't round-trip don't enable the ``replace_video`` capability,
 so their dead-end files never surface here.
 
@@ -100,8 +100,8 @@ def scan_video_slots(assets_dir: str, roots=None, exts=None,
     video lives in a known surface.  ``None`` scans the whole tree.
 
     *exts* optionally narrows which video extensions count as slots (default
-    :data:`core.video.VIDEO_EXTS`).  Spooky passes ``(".ogv",)`` so only its
-    repackable Godot videos surface, not Unity ``.webm`` pulled from bundles.
+    :data:`core.video.VIDEO_EXTS`).  BoF passes ``(".ogv",)`` because Ogg
+    Theora is the one video form it ships.
 
     *probe* controls whether ffprobe metadata (duration / resolution / codec)
     is read during the walk.  Probing spawns one ffprobe process per file,

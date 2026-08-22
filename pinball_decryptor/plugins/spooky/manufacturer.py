@@ -1,8 +1,10 @@
 """Spooky Pinball manufacturer plugin."""
 
+import os
+
 from ...core.registry import (Capabilities, Game, InputSpec, Manufacturer,
                               Prerequisite)
-from .formats import detect_game as _detect_game
+from .formats import GENERATED_DIRS, detect_game as _detect_game
 from .games import GAME_DB
 from .pipeline import ExtractPipeline, WritePipeline
 
@@ -34,10 +36,11 @@ class SpookyManufacturer(Manufacturer):
     capabilities = Capabilities(
         extract=True, write=True, modpack=True, apply_delta=False, iso=True,
         replace_audio=True,
-        # Godot games ship loose .ogv videos that repack as-is (the same
-        # loose-file path Replace-Audio already uses).  Unity .webm is pulled
-        # out of bundles and can't be written back, so video_slot_exts()
-        # narrows the scan to .ogv only.
+        # Spooky games ship their video as loose files inside the archive,
+        # and Write re-packs the folder as it finds it, so those round-trip
+        # as-is (the same loose-file path Replace-Audio already uses).  What
+        # doesn't is the engine derivatives Extract generates — see
+        # video_slot_dirs().
         replace_video=True,
     )
     input_spec = InputSpec(
@@ -74,11 +77,35 @@ class SpookyManufacturer(Manufacturer):
                      install_hint="apt-get install zstd python3-zstandard (in WSL)"),
     )
 
-    def video_slot_exts(self, assets_dir):
-        # Only .ogv (Godot, copied as-is on extract) round-trips through Write;
-        # Unity .webm comes out of bundles and can't be repacked, so it stays
-        # off the Replace-Video list.
-        return (".ogv",)
+    def video_slot_dirs(self, assets_dir):
+        """Scan the tree the game shipped, not the scratch Extract generated.
+
+        Every video a Spooky game ships is a loose file inside the archive,
+        and Write re-packs the folder as it finds it, so all of them
+        round-trip: Halloween alone carries 242 loose ``.webm`` under
+        ``assets/dmd/animations/``.  What can't round-trip is what *we* wrote
+        into the folder on Extract — the Unity / Godot / P3 derivatives in
+        ``_extracted_assets/`` and the raw PCK dump in ``_pck_contents/``.
+        Nothing feeds those back into their container, so they are scoped out
+        of the scan here.
+
+        This replaces an extension filter (``.ogv`` only) that had it exactly
+        backwards: the only ``.ogv`` in an extract is a *derivative* Godot
+        copy, so the filter surfaced the dead ends and hid every shipped
+        ``.webm`` — which is why Halloween showed audio slots and no video
+        ones at all (PAD-79).
+        """
+        if not assets_dir or not os.path.isdir(assets_dir):
+            return None
+        try:
+            names = sorted(os.listdir(assets_dir))
+        except OSError:
+            return None
+        if not any(n in GENERATED_DIRS for n in names):
+            return None            # nothing of ours in there — scan it all
+        return [os.path.join(assets_dir, n) for n in names
+                if n not in GENERATED_DIRS
+                and os.path.isdir(os.path.join(assets_dir, n))]
 
     def detect(self, path):
         gf = _detect_game(path)

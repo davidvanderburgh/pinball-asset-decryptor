@@ -195,7 +195,8 @@ class Capabilities:
     # extracted files so the normal Write pipeline repacks them.  Set True only
     # for plugins whose video is loose files Write actually round-trips — JJP
     # (loose containers), Dutch Pinball AAIW (.mp4/.mov; gated off for TBL,
-    # whose .cdmd videos have no inverse encoder), and Spooky (Godot .ogv).
+    # whose .cdmd videos have no inverse encoder), and Spooky (the loose
+    # video in the game tree, e.g. Halloween's 242 .webm).
     # NOT BOF (no .ogv->.ctex encoder yet) and NOT CGC/Williams (real-time
     # render, no video files to swap).
     replace_video: bool = False
@@ -702,7 +703,9 @@ class Manufacturer(ABC):
         dead-end videos out of the list: Dutch Pinball excludes The Big
         Lebowski's decoded ``_DECODED VIDEOS`` (no .mp4->.cdmd encoder), so a
         TBL extract shows no editable video while an AAIW extract scans the
-        whole tree.
+        whole tree, and Spooky excludes the ``_extracted_assets`` /
+        ``_pck_contents`` folders Extract generates (nothing writes a Unity
+        or Godot derivative back into its container).
         """
         return None
 
@@ -710,9 +713,11 @@ class Manufacturer(ABC):
         """Video extensions the Replace-Video tab should surface as slots.
 
         Return ``None`` (default) to use :data:`core.video.VIDEO_EXTS`.
-        Override to narrow it when only some formats round-trip — Spooky
-        returns ``(".ogv",)`` because its Godot videos repack as loose .ogv
-        but Unity ``.webm`` pulled from bundles can't be written back.
+        Override to narrow it when only some formats round-trip — BoF
+        returns ``(".ogv",)`` because Ogg Theora is the one video form it
+        ships.  Narrow by *folder* instead wherever the same extension can
+        be both a shipped file and a dead-end derivative; an extension
+        filter can't tell those apart (see :meth:`video_slot_dirs`).
         """
         return None
 

@@ -115,12 +115,15 @@ def test_replace_video_capability_flags(manufacturers_by_key):
     assert manufacturers_by_key["cgc"].capabilities.replace_video is False
 
 
-def test_spooky_surfaces_ogv_only_others_default(manufacturers_by_key):
-    # Spooky and BOF narrow to .ogv (Godot, repackable); JJP uses the default
-    # whole VIDEO_EXTS set; DP adds .cdmd (covered in test_cdmd_replace).
-    assert manufacturers_by_key["spooky"].video_slot_exts("anything") == (".ogv",)
+def test_bof_surfaces_ogv_only_others_default(manufacturers_by_key):
+    # BOF narrows to .ogv — Ogg Theora is the one video form it ships.  JJP
+    # and Spooky use the default whole VIDEO_EXTS set (Spooky narrows by
+    # FOLDER instead: an extension can't tell a shipped clip from a
+    # derivative PAD generated — see test_spooky_video_slots.py); DP adds
+    # .cdmd (covered in test_cdmd_replace).
     assert manufacturers_by_key["bof"].video_slot_exts("anything") == (".ogv",)
     assert manufacturers_by_key["jjp"].video_slot_exts("anything") is None
+    assert manufacturers_by_key["spooky"].video_slot_exts("anything") is None
 
 
 def test_bof_surfaces_standalone_videos_not_the_import_cache(

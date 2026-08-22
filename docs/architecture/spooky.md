@@ -21,7 +21,7 @@ Game DB lives in [games.py:52-123](../../pinball_decryptor/plugins/spooky/games.
 | `texas_chainsaw` | Texas Chainsaw Massacre | yes | Unity, `tar_gz` (`tcm-*.pkg`) | |
 | `alice_cooper` | Alice Cooper's Nightmare Castle | yes | P-ROC, `ac_pkg` (AES) | key known |
 | `total_nuclear` | Total Nuclear Annihilation | **no** | P-ROC, `aes_pkg` | AES-256-CBC key unknown; no Clonezilla image either |
-| `halloween_78` | Halloween | yes | Unity, `h78_pkg` (GPG symmetric) | |
+| `halloween_78` | Halloween | yes | Warden loose assets, `h78_pkg` (GPG symmetric) | game tree is `assets/` + `config/` (242 loose `.webm`, 801 `.wav`); the Unity build under `uptest/` is the **updater app**, not the game — it is what `UNITY_GAMES` membership actually points UnityPy at |
 | `ultraman` | Ultraman | yes | Unity, `um_pkg` (GPG symmetric) | |
 | `americas_most_haunted` | America's Most Haunted | yes | P3 DMD, `plain_zip` | `.VID` 4bpp |
 | `rob_zombie` | Rob Zombie's Spookshow International | yes | P3 DMD, `plain_zip` | `.VID` 8bpp |
@@ -44,6 +44,7 @@ Note the key/display mismatch for Looney Tunes: the internal key is `legends_of_
 - `modpack=True` — Mod Pack tab is exposed (see [Mod Pack](#mod-pack--delta--direct-ssd)).
 - `iso=True` — input picker accepts `.iso` (Clonezilla restore images).
 - `replace_audio=True` — "Replace Audio" tab scans the extract for loose `.wav`/`.ogg` slots.
+- `replace_video=True` — "Replace Video" tab scans the shipped game tree for loose video slots (see [Replace-Video](#replace-video)).
 - `apply_delta=False` — no delta-merge path.
 
 ### Prerequisites
@@ -172,7 +173,7 @@ The R&M autoflash ISO is a bare ext4 image (`compression: "none"`) and skips ste
 
 **Phase 1 — Scan** ([pipeline.py:584-613](../../pinball_decryptor/plugins/spooky/pipeline.py#L584)): `_scan_changes` reads the `.checksums.md5` baseline and recomputes MD5 for every non-dotfile, yielding `(changed, added, removed)` ([pipeline.py:754-778](../../pinball_decryptor/plugins/spooky/pipeline.py#L754)). Zero changes → abort with a message. Then `_process_audio` auto-converts changed audio (below).
 
-**Phase 2 — Repack** ([pipeline.py:615-674](../../pinball_decryptor/plugins/spooky/pipeline.py#L615)): `_build_output` dispatches on `format_type`, the inverse of Extract:
+**Phase 2 — Repack** ([pipeline.py:615-674](../../pinball_decryptor/plugins/spooky/pipeline.py#L615)): `_build_output` dispatches on `format_type`, the inverse of Extract. Every packer walks the project through `_scan_for_tar`, which drops what the app itself put there — `formats.generated_at_root()`: `GENERATED_DIRS` (`_extracted_assets`, `_pck_contents`, plus `core.checksums.NON_ASSET_DIRS`: `build`, `.hydrate`, `card_files`, `logs`) and any root **dot-entry the `.checksums.md5` baseline doesn't list** (`.spooky_meta`, `.hashcache.json`, `.staged_changes.json`, `.pinproj`, … — sidecars are written outside the baseline, so one that IS in it came out of the archive and still packs). Matched only at the project root, so a game that ships its own `build/` deeper in the tree keeps it. Without that, a rebuilt update carried PAD's derivative copies of the game's own media *and* the previous build's output file:
 
 - `rm_pkg`/`ac_pkg` → `create_zip` to `.tmp.zip`, then `encrypt_aes_pkg` ([pipeline.py:676-698](../../pinball_decryptor/plugins/spooky/pipeline.py#L676)).
 - `um_pkg`/`h78_pkg` → `create_tar_gz` to `.tmp.tar.gz`, then `encrypt_gpg_symmetric` ([pipeline.py:700-722](../../pinball_decryptor/plugins/spooky/pipeline.py#L700)).
@@ -204,6 +205,12 @@ The R&M autoflash ISO is a bare ext4 image (`compression: "none"`) and skips ste
 ### Replace-Audio and the shared `core/audio.py` copy
 
 `capabilities.replace_audio=True` and `audio_slot_dirs()` is **not** overridden, so the Replace-Audio tab scans the whole extract for loose `.wav`/`.ogg` ([registry.py:283-294](../../pinball_decryptor/core/registry.py#L283)). The tab is driven by [core/audio_slots.py](../../pinball_decryptor/core/audio_slots.py), which imports from **`core.audio`**, *not* the plugin's copy ([audio_slots.py:23-24](../../pinball_decryptor/core/audio_slots.py#L23)). `stage_replacement` ([audio_slots.py:120-164](../../pinball_decryptor/core/audio_slots.py#L120)): if the replacement's container matches the slot it copies, else `transcode_to` converts via ffmpeg into the slot's codec; then `process_modified_audio` aligns format and (optionally) length; then it atomically `os.replace`s over the slot file. Because the staged files overwrite the extracted assets in place, the normal Write change-scanner then picks them up as "modified" and repacks them.
+
+### Replace-Video
+
+`capabilities.replace_video=True`, and `video_slot_dirs()` scopes the scan to the tree the archive shipped — every top-level folder of the project *except* `formats.GENERATED_DIRS` (`_extracted_assets/`, `_pck_contents/`, `build/`, `logs/`, …) ([manufacturer.py](../../pinball_decryptor/plugins/spooky/manufacturer.py)). Loose video repacks verbatim (Write re-tars the folder), so it all round-trips; the engine derivatives do not, because nothing writes a Unity `VideoClip` or a Godot PCK entry back into its container.
+
+> **This used to be an extension filter (`video_slot_exts() == (".ogv",)`) and it had the axis backwards** (PAD-79): the only `.ogv` in an extract is a Godot *derivative*, so the filter surfaced exactly the dead ends and hid everything a game ships. Halloween ships 242 `.webm` under `assets/dmd/animations/` (1280x720 VP8, most with a 48 kHz Vorbis track) and its Video tab listed nothing at all.
 
 > **Two near-identical audio modules exist.** `core/audio.py` is the same code as `plugins/spooky/audio.py` **plus** an extra `transcode_to()` (any-format→slot-codec) and an ffplay preview section ([core/audio.py:886-1004](../../pinball_decryptor/core/audio.py#L886)). The plugin copy must stay byte-identical to upstream (it's an `identical` lift); `core/audio.py` is the unified app's superset used by the cross-plugin Replace-Audio feature. Editing one does **not** change the other.
 

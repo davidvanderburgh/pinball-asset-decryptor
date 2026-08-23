@@ -1240,11 +1240,15 @@ _IMAGE_INFO_SECTIONS = [
      "card's own update index, and the short Version ID (like VEN106LE) is "
      "assembled from the title code inside the game firmware. Videos, "
      "images, scenes, sounds and sound fragments are all counted straight "
-     "off the card, no Extract needed: the sound counts are the asset "
+     "off the card, no Extract needed: those sound counts are the asset "
      "container's own header words. \"Sounds\" is what an Extract decodes "
      "to WAVs; \"Sound fragments\" is the (larger) pool of audio pieces "
      "the game's sound requests draw on — a request can chain several "
-     "fragments, and several requests can share one."),
+     "fragments, and several requests can share one. \"Sound requests\" is "
+     "that third number, the calls the game code itself can make: it is no "
+     "header word, so it is read from the request table inside the game "
+     "firmware, and the row is left out rather than guessed at on a card "
+     "whose table cannot be read."),
     ("Adjustments and high scores",
      "\"Adjustments\" is how many operator settings this firmware defines — "
      "the settings list in the machine's own service menu — and \"High "

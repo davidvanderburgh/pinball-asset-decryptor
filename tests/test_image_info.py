@@ -215,6 +215,41 @@ def test_container_counts():
     assert container_counts(b"") == (None, None)
 
 
+def test_card_info_reports_all_three_sound_counts(tmp_path, monkeypatch):
+    """Sounds and fragments come off the container header, requests off the
+    game ELF sitting beside it — the third tally a tester asked for, and the
+    one no header word carries."""
+    from tests._ext4_fake import install_fake_reader, write_fake_card
+    from tests.test_stern_sound_requests import _lists, make_elf
+    elf, _reg = make_elf(_lists(310, 900))
+    install_fake_reader(monkeypatch, spec={
+        "spk": {"index": {"venom.sidx": _make_sidx(["venom_le/image.bin"])}},
+        "venom_le": {"image.bin": _container_header(900, 880), "game": elf},
+    })
+    img = write_fake_card(tmp_path / "venom_le-1_07_0.Release.8G.sdcard.raw")
+
+    assets = dict(dict(card_info(img))["Assets on Card"])
+    assert assets["Sounds"].startswith("880 ")
+    assert assets["Sound fragments"].startswith("900 ")
+    assert assets["Sound requests"].startswith("310 ")
+
+
+def test_card_info_omits_sound_requests_without_a_readable_table(
+        tmp_path, monkeypatch):
+    """No game ELF (or one this scan can't read) drops the row rather than
+    printing a guess — the header counts still show."""
+    from tests._ext4_fake import install_fake_reader, write_fake_card
+    install_fake_reader(monkeypatch, spec={
+        "spk": {"index": {"venom.sidx": _make_sidx(["venom_le/image.bin"])}},
+        "venom_le": {"image.bin": _container_header(900, 880)},
+    })
+    img = write_fake_card(tmp_path / "venom_le-1_07_0.Release.8G.sdcard.raw")
+
+    assets = dict(dict(card_info(img))["Assets on Card"])
+    assert assets["Sound fragments"].startswith("900 ")
+    assert "Sound requests" not in assets
+
+
 def test_title_code_from_firmware():
     # The real code dominates the OB_/FG_ namespace (VEN 102 vs BEAT 20 on
     # the Venom card); SYS is the shared system namespace and never counts.

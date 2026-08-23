@@ -4358,6 +4358,44 @@ These have each been violated at least once and each cost a run or a window:
       hang. D2: mechanism fully known, the log and file sizes exist to draw
       progress from; needs one live copying boot to confirm.
 
+- [ ] **75. aerosmith_le's GUEST exits silently ~1-2 min into a scripted
+      watch.sh boot — and MAIN'S CODE does it identically, control-proven.**
+      `S3 D3`
+      *(Filed 2026-08-23 out of item 73's live verification, which hit it
+      three times and bisected it off that branch with a fourth run.)*
+      **Measured, four runs, one evening, same card
+      (images/Stern/spike2/aerosmith_le-1_15_0.Release.8G.sdcard.raw, the
+      cached copy):** item/73 code with defaults; with PAD_GL_RAISE=0; with
+      autoattract AND ballfeed disabled; and MAIN's checkout with the
+      identical env — every run: video bring-up completes ([gst] 3
+      factories), the scene enumeration walks ~103 scene.radium paths, then
+      the guest is GONE — no SEGV, no qemu signal report, no exit line;
+      the log's last line is the [sleep] #1500 cap so the death is not even
+      timestamped. watch.sh reports "the game exited" and tears down.
+      **What makes it strange:** batman and avengers_infinity_le boot fine
+      in the SAME session with the SAME flow (batman confirmed up 5+ min,
+      table loaded, keys pressed); item 57 live-verified aerosmith via
+      watch.sh ~2026-08-18; and David's own GUI runs of this exact card
+      earlier on 2026-08-23 reached a state where key presses drew switch
+      names. So it is aerosmith-specific AND recent AND possibly
+      script-flow-specific (env: PAD_SW_CHANGES=1 PAD_GL_RAISE=0 set in
+      all four runs — both were also absent from David's GUI flow, so they
+      are NOT excluded as the trigger; a run without them is the first
+      thing to try).
+      **Also on the suspect list:** whatever state David's session wrote
+      today (his Enter presses on this title landed on DIP 8 pre-item-73,
+      i.e. REAL dip toggles on the setup screen — if the game persisted a
+      half-applied config, every boot since may be tripping on it; the
+      title's writable state vs the card's read-only mount is where to
+      look).
+      **Acceptance:** aerosmith_le boots to attract under plain scripted
+      watch.sh again, the cause is named, and whichever of the suspects
+      above was innocent is written down as ruled out with its run.
+      — S3: one title, and the GUI flow may still work (unverified today);
+      nothing else is blocked. D3: needs runs, reproduces on demand (4/4),
+      instruments exist — the missing piece is an exit-reason hook on the
+      guest (item 23's) wired into this flow.
+
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T
       FIX rather than as fixed — which is what it has actually been since the

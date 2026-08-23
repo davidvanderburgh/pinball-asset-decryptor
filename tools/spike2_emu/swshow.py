@@ -99,7 +99,12 @@ def at_rest():
                     if r.get("node") == node and r.get("bit") == bit),
                    fallback)
         ids.append(sid)
-        names.setdefault(sid, label)
+        # ASSIGN, never setdefault: names is pre-seeded with godzilla's
+        # compiled labels, and a resolved id can collide with a compiled
+        # key meaning something else - batman's door is 36, which NAMES
+        # binds to "Start", so setdefault printed the door row as "Start"
+        # on exactly the title this resolution exists for.
+        names[sid] = label
     return ids, names, trough_ids, (
         None if how == "named" else
         "trough ids are ASSUMED from the node-8 bit shape, not named by "

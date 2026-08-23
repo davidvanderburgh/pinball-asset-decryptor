@@ -5933,8 +5933,13 @@ static void swwalk_tick(void)
 #define NB_GATE   0x7a908cu     /* +276+node = per-node scan enable          */
 
 /* Ids held ACTIVE right now: PAD_SW_HOLD plus whatever the tap sequence has
- * pressed. Bit per id, 128 ids is more than the 88 this machine has. */
-static unsigned char sw_active[128];
+ * pressed. Byte per id. 128 was "more than the 88 this machine has" - but an
+ * id is the TITLE'S table index and munsters/sword_of_rage index their whole
+ * cabinet past 190 (door 198/201, trough 234..240), so 128 silently dropped
+ * every one of their rows in sw_rest_resolve's guard (item 73's review
+ * caught it). 256 = PADSW_MAX_ID, the shm held[] bound; every use is
+ * sizeof-checked so this is the only line that names the size. */
+static unsigned char sw_active[256];
 static int sw_scan_on = -1;
 
 /* The level the shim put on the wire for each id on the last word it built.

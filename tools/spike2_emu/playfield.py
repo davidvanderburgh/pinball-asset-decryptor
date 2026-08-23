@@ -1008,12 +1008,19 @@ class SwitchWatch:
         not be identified at window open usually can be a minute later.
 
         The door id re-resolves here too (item 73): the wire (0,23) is
-        universal, the id is the title's own.
+        universal, the id is the title's own. The ARTWORK view feeds this
+        POSITIONED rows only (load_switches()), and the cabinet has no
+        playfield position, so when the given rows carry no (0,23) the full
+        switch list is consulted directly - otherwise the 48V banner would
+        keep reading godzilla's 33 on every artwork window.
         """
         self.positions, self.how = trough.find(rows)
-        for r in rows or []:
-            if r.get("node") == DOOR_NODE and r.get("bit") == DOOR_BIT:
-                self.door_id = r["id"]
+        for source in (rows or [], load_switch_list()):
+            hit = next((r for r in source
+                        if r.get("node") == DOOR_NODE
+                        and r.get("bit") == DOOR_BIT), None)
+            if hit is not None:
+                self.door_id = hit["id"]
                 break
         return bool(self.positions)
 

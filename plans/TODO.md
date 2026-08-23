@@ -2640,6 +2640,14 @@ These have each been violated at least once and each cost a run or a window:
       guess at runtime from the game's own decrypted images, did NOT fire for
       turtles' node 12 — no hexreg line appeared in any run. That safety net is
       not working here and is worth its own look.
+      **And a correction to this entry's own sibling claim:** the 2026-08-22
+      note below says the banner's centre number is "the RETRY COUNTDOWN, not a
+      node id". That is unsupported, and the evidence is now two titles deep
+      against it — godzilla_le banner-ed 4 and 10 with slots 4 and 10 at status
+      7, turtles_pro banner-ed 12 with slot 12 at status 7 and every other slot
+      at 2. Four numbers, four matching failing nodes. **It is the node id.**
+      Diagnose from `PAD_NB_DUMP` regardless: on turtles the number was right
+      and this entry's stated CAUSE was still wrong.
       *(The original 2026-08-18 analysis follows. Its node-4 half was already
       solved on godzilla; its node-12 half pointed at the derived table, which
       was the right file and the wrong reason.)* `S3 D2`

@@ -184,17 +184,26 @@ def test_extract_both_needs_two_different_real_images(
 
 def test_each_card_gets_a_folder_named_after_the_card(app):
     """A folder called "A" tells you nothing three days later; the card name
-    already carries the title and the version."""
+    already carries the title and the version.
+
+    Every path here is built with ``os.path.join``, never as a drive-letter
+    literal: the separator is the PLATFORM's, so a backslash literal is one
+    path on Windows and a single long filename that happens to contain
+    backslashes on the Linux and macOS CI runners, where ``basename`` then
+    hands the whole string back.
+    """
     f = app._extract_both_folder
-    assert f(r"C:\out", r"D:\img\turtles_pro-1_58_0.Release.8G.sdcard.raw",
-             r"D:\img\turtles_pro-1_59_0.Release.8G.sdcard.raw") \
-        == os.path.join(r"C:\out", "turtles_pro-1_58_0.Release.8G.sdcard")
+    out = os.path.join("out", "compare")
+    assert f(out,
+             os.path.join("img", "turtles_pro-1_58_0.Release.8G.sdcard.raw"),
+             os.path.join("img", "turtles_pro-1_59_0.Release.8G.sdcard.raw")) \
+        == os.path.join(out, "turtles_pro-1_58_0.Release.8G.sdcard")
     # Two cards with the SAME filename in different folders would otherwise
     # land on one folder and the second run would extract over the first.
-    one = f(r"C:\out", os.path.join("D:", "stock", "card.raw"),
-            os.path.join("D:", "modded", "card.raw"))
-    two = f(r"C:\out", os.path.join("D:", "modded", "card.raw"),
-            os.path.join("D:", "stock", "card.raw"))
+    one = f(out, os.path.join("cards", "stock", "card.raw"),
+            os.path.join("cards", "modded", "card.raw"))
+    two = f(out, os.path.join("cards", "modded", "card.raw"),
+            os.path.join("cards", "stock", "card.raw"))
     assert one != two
     assert one.endswith("card (stock)") and two.endswith("card (modded)")
 
@@ -296,6 +305,36 @@ def _scene_window(app, tmp_path, scenes=("scene1", "scene2", "scene9")):
     return win._scene_browser
 
 
+class _NoWorker:
+    """Stands in for the bulk-save worker thread: takes the dispatch, never
+    runs it."""
+
+    def __init__(self, target=None, **kw):
+        self.target = target
+
+    def start(self):
+        pass
+
+
+def _no_worker_thread(monkeypatch):
+    """Let the button dispatch a batch with no live thread behind it.
+
+    The two halves are driven by hand (see ``_run_bulk``) because a worker
+    cannot reach Tk outside ``mainloop()``.  If the real thread ALSO ran, the
+    same batch would render twice into one folder — which is how the Linux and
+    macOS runners caught it: the cancel test raced a live worker for the very
+    folder it asserts is empty, and Windows simply lost that race more often.
+    """
+    import threading as _real
+
+    class _Shim:
+        Thread = _NoWorker
+
+        def __getattr__(self, name):       # Event, Lock, … stay real
+            return getattr(_real, name)
+
+    monkeypatch.setattr("pinball_decryptor.gui.scene_browser.threading",
+                        _Shim())
 def _run_bulk(sb, out, monkeypatch):
     """Click "Save all previews…" for real, then run the two halves the
     worker thread would have.
@@ -308,6 +347,7 @@ def _run_bulk(sb, out, monkeypatch):
     """
     monkeypatch.setattr("tkinter.filedialog.askdirectory",
                         lambda **k: str(out))
+    _no_worker_thread(monkeypatch)
     sb._save_all_btn.invoke()
     state = sb._bulk
     assert state is not None, "the button did not start a batch"
@@ -385,6 +425,7 @@ def test_a_cancelled_batch_reports_what_it_did_write(app, tmp_path,
     out.mkdir()
     monkeypatch.setattr("tkinter.filedialog.askdirectory",
                         lambda **k: str(out))
+    _no_worker_thread(monkeypatch)
     sb._save_all_btn.invoke()
     state = sb._bulk
     # A second press IS the cancel (the button doubles as one, like the MP4

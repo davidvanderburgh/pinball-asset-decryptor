@@ -4275,6 +4275,26 @@ These have each been violated at least once and each cost a run or a window:
       generation — David's words above. D2: the mechanism is desk-confirmed
       and the name-resolving machinery exists; what is left is plumbing plus
       a three-title confirming run.
+      **Established (2026-08-23 pass, desk sweep of all 29 switch lists on
+      disk):** (1) the cabinet **(node,bit) layout is UNIVERSAL** — every
+      list that names its rows agrees (Service Select 0/8, Plus 0/9, Minus
+      0/10, Back 0/11, Coin Door Interlock 0/23, Lockdown/Action 1/2, Start
+      1/11, Tournament Start 1/12, Tilt Pendulum 1/14, coins 1/16..21), so
+      padglhost.c:791-793's premise was right about the wires and wrong only
+      about the ids. (2) The id for Service Select (0,8) by title: **25** =
+      godzilla-family + the five ?-name titles (elvira3, james_bond_le,
+      king_kong_le, led_zeppelin_le, metallica_spike — compiled ids already
+      CORRECT there); **26** = aerosmith, avengers, foo_fighters, guardians,
+      iron_maiden, jurassic_park, mando, rush; **28** = batman; **190/193** =
+      munsters, sword_of_rage. **ELEVEN titles are broken today, not three.**
+      (3) Resolution key must be **(node,bit), NOT name**: names vary
+      ("LOCKDOWN BUTTON" vs "Action Button", "(OPTIONAL)" suffixes, trailing
+      spaces, "Coin Door Power Interlock" vs "COIN DOOR INTERLOCK") and are
+      all "?" on five titles where (node,bit) still resolves.
+      **Resume:** implement (node,bit)→title-id resolution for the compiled
+      cabinet rows at binds build in padglhost.c (understand-workflow results
+      pending for exact seams: struct keybind fields, binds_playfield(),
+      binds_export, --binds oracle, tests).
 
 - [ ] **74. A boot that is copying the card shows NOTHING about the copy —
       minutes of "Startup In Progress" with no hint that a ~7 GB dd is

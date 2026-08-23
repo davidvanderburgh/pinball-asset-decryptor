@@ -139,7 +139,22 @@ PY
 
 # The stamp is written AFTER the copy, so a failed stage retries next mount
 # rather than being remembered as done. set -eu means reaching here is success.
-echo "$want" > "$STAMP"
+#
+# AN UNWRITABLE STAMP IS NOT A FAILED STAGE, and conflating the two cost a whole
+# turtles run on 2026-08-23. `$R/mnt/boot` was created root-owned by an old
+# rootfs build while the files inside it are the user's, so a plain run can
+# OVERWRITE zImage but cannot CREATE a new file beside it. The copy above had
+# already succeeded; only this memo failed, and with `set -e` the failed
+# redirect aborted the script, which made cardmount.sh announce "getboot failed
+# - the game will raise VALIDATION ERROR #3" about a boot partition that was
+# correctly staged. The cost of a missing stamp is one repeated copy per mount,
+# which is a few seconds; the cost of a false failure is chasing a fault that
+# is not there.
+if ! echo "$want" > "$STAMP" 2>/dev/null; then
+    echo "[getboot] staged OK, but the stamp at $STAMP is not writable" >&2
+    echo "[getboot] (is $R/mnt/boot root-owned?) - staging will simply repeat" >&2
+    echo "[getboot] next mount. This is NOT a validation problem." >&2
+fi
 
 # A PAD_PIVOT (root) run must not leave root-owned files where the next plain
 # user run cannot overwrite them - the same handback watch.sh does for logs.

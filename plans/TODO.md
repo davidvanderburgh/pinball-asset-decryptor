@@ -3102,6 +3102,19 @@ These have each been violated at least once and each cost a run or a window:
       screens where David saw it. The grade bytes are the evidence, and they are
       ground truth for what the provider tests — but a screenshot pair would
       close it properly and needs someone to navigate there.
+      **★ 2026-08-23, turtles_pro also fixed at David's ask** ("fix tmnt... it
+      still shows the sd validation error"). `nvgrades.py --fix turtles_pro`
+      applied; its slot B went `P/P/F` → cleared, and the shared `nvram.bin`
+      now reads `P/P/P` in both slots because godzilla_le's own boot rewrote it
+      clean. **NOT confirmed on turtles' glass**, because turtles_pro no longer
+      boots at all — that is now item 69, and it blocks this item's turtles
+      acceptance as well as item 55's.
+      **A constant was wrong and is corrected:** the restore is
+      `eeprom_read(devsel=80, addr=0x214, dst=MOD, len=128)` — 532 is the
+      ADDRESS and 128 is the LENGTH. I first read 532 as a length and zeroed
+      `0x214..0x427`, four times too much. It did no damage (verified against
+      the backups: every byte of `0x294..0x427` was already zero) but
+      `nvgrades.py` carried the wrong `BLOB_LEN` and now does not.
       **▼▼ MY OWN 2026-08-23 REVERSAL IS ITSELF PARTLY WRONG — REFUTED BY
       OBSERVATION, which outranks every disassembly in this entry.** David's
       Heisei boot shows `GAME VALIDATION ERROR - #3 UPDATE SD CARD` on Tech
@@ -3381,6 +3394,42 @@ These have each been violated at least once and each cost a run or a window:
       mechanism is fully established above and `getboot.sh` already exists and
       works; what it costs is the staging logic plus one confirming pair of
       boots.
+
+- [ ] **69. turtles_pro DOES NOT BOOT any more: the guest dies during asset
+      loading, silently, before the framebuffer or the node bus ever start.**
+      `S1 D3` *(Filed 2026-08-23 while trying to verify items 62 and 55 on
+      turtles at David's ask — it blocks both, and it is worse than either.)*
+      **The signature:** every boot reaches ~190-244 `[ifs]` scene opens, 4
+      `[eglshim]` lines, and then the guest process is simply GONE — thread
+      samples at 75 s, 95 s and 115 s all report no `game` process. A healthy
+      turtles boot (`~/t63k.log`, 2026-08-21) reaches `[fb]` after 228 `[ifs]`
+      and goes on to 437 `[nb]` and 362 `[eglshim]`. **No crash line of any
+      kind** — zero hits for `signal 11` / `segv` / `uncaught target` across
+      eight logs — so it exits silently rather than faulting, which is NOT the
+      item-41 crash shape.
+      **RULED OUT, each by its own run (D,E,F,G,I,J,K + a desk check):**
+      • not the rig — Heisei/godzilla_le boots perfectly throughout, 431 `[nb]`,
+        5095 frames at 42 fps, immediately before and after the turtles runs;
+      • not the card — `./game` still hashes `adb50ca387cf6c26f7d5baf140c6e8dc`
+        and the partition table reads clean;
+      • not the nvram edit from item 62 — run G restored the original and it
+        stalls identically;
+      • not the instruments — run F with nothing but frame capture stalls too;
+      • not item 63's cabinet at-rest word — `PAD_CAB_IDLE=0` changes nothing;
+      • not the stale fuse mount run D left behind — a fresh mount stalls too;
+      • not disk or memory — 30 GB free, 28 GiB RAM free.
+      **It is a REGRESSION and the window is narrow.** turtles last ran
+      healthily on 2026-08-21 (`t63k.log`), and `data/nvram-turtles_pro.bin` is
+      stamped 2026-08-22 14:39, which is David's own last turtles session. Main
+      has since taken v0.153.0, v0.154.0, v0.155.0 and the PAD-80/81 work.
+      **Resume:** bisect main across that window, rebuilding the shim each step
+      — `git -C <main> log --oneline v0.152.2..HEAD -- tools/spike2_emu/` is the
+      short list, and the shim is the only thing that could kill a guest
+      silently. Then re-check with the thread sampler in `c:\tmp\pad62_runL.sh`,
+      which is what proved the process is dead rather than hung.
+      — S1: the title cannot be played at all, and it blocks items 55 and 62's
+      turtles acceptance. D3: needs a run per bisect step and the fault appears
+      on every single boot, so it is reproducible on demand.
 
 - [x] **63. Straight from the game's own Stern splash to attract, with NO Tech
       Alerts screen.** `S2 D3` **★★★ CLOSED 2026-08-21 — acceptance MET and

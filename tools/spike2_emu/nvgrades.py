@@ -44,8 +44,12 @@ import os
 import shutil
 import sys
 
-BLOB = 0x214                  # area-80 blob base in the EEPROM image
-BLOB_LEN = 532
+#: The restore is eeprom_read(devsel=80, addr=0x214, dst=MOD, len=128) - so 532
+#: is the ADDRESS and 128 is the LENGTH. Reading those two the other way round
+#: (532 as a length) zeroes 0x214..0x427, which is four times too much; it did
+#: no harm the one time it happened only because 0x294 onward was already zero.
+BLOB = 0x214
+BLOB_LEN = 128
 SLOT_A, SLOT_B = 0x214, 0x244
 GE, CE, ZK = 42, 43, 44
 NAMES = {0: "S", 1: "P", 2: "F", 3: "E"}

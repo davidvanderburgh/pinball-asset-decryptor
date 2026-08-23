@@ -88,7 +88,18 @@ def at_rest():
                 ids.append(r["id"])
                 names[r["id"]] = label
                 break
-    ids += [33, 36]              # the coin door and Start are cabinet ids
+    # The coin door and Start resolve by WIRE, not by compiled id (item 73):
+    # (0,23) and (1,11) are universal across every derived list, the ids are
+    # table indexes (aerosmith's door is 34, batman's 36 - and batman's 36
+    # being the door while godzilla's 36 is Start is exactly why the compiled
+    # pair below is a fallback, not a truth).
+    for node, bit, fallback, label in ((0, 23, 33, "Coin Door"),
+                                       (1, 11, 36, "Start")):
+        sid = next((r["id"] for r in rows
+                    if r.get("node") == node and r.get("bit") == bit),
+                   fallback)
+        ids.append(sid)
+        names.setdefault(sid, label)
     return ids, names, trough_ids, (
         None if how == "named" else
         "trough ids are ASSUMED from the node-8 bit shape, not named by "

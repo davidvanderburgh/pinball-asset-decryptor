@@ -106,14 +106,15 @@ def _resolve():
     ids = dict(_GZ)
     try:
         path = gameinfo.table("switch_list.txt")
-        by_name = {}
+        by_name, by_wire = {}, {}
         for line in open(path):
             if line.startswith("#"):
                 continue
             f = line.split(None, 4)
             if len(f) >= 5:
                 by_name[f[4].strip().upper()] = int(f[0])
-    except (OSError, TypeError):
+                by_wire[(int(f[2]), int(f[3]))] = int(f[0])
+    except (OSError, TypeError, ValueError):
         print("plunge: no switch table for this title yet - using "
               "godzilla_pro's compiled ids, which on another title may drive "
               "the WRONG switches (it arrives a minute into a first run; "
@@ -122,6 +123,12 @@ def _resolve():
     for key, name in _WANT.items():
         if name in by_name:
             ids[key] = by_name[name]
+    # The door resolves by WIRE (item 73): (0,23) is universal, the NAME is
+    # not - this family says COIN DOOR INTERLOCK where godzilla says COIN
+    # DOOR POWER INTERLOCK, so the _WANT row above misses exactly on the
+    # titles whose door id differs.
+    if (0, 23) in by_wire:
+        ids["door"] = by_wire[(0, 23)]
     got = [by_name[n] for n in _TROUGH_NAMES if n in by_name]
     if len(got) == 6:
         ids["trough"] = tuple(got)

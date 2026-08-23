@@ -257,7 +257,12 @@ def coarse_timers():
 SW_PATH = (os.environ.get("PAD_SW_FILE")
            or os.path.join(padpath.dump() or "", "padsw"))
 PADSW_MAGIC = padsw.MAGIC
+#: 33 is the door's id on the GODZILLA generation only - the wire (node 0,
+#: bit 23) is universal across every derived list, the id is a table index
+#: (item 73: 34 on aerosmith, 36 on batman). SwitchWatch resolves the real
+#: id from the title's own rows; this constant is the no-table fallback.
 SW_HELD, SW_COIN_DOOR = padsw.OFF_MRG, 33
+DOOR_NODE, DOOR_BIT = 0, 23
 
 #: The key binds padglhost exports at startup (item 39) - the content of the
 #: retired Controls window, drawn by THIS window's key panel instead. Same
@@ -983,6 +988,7 @@ class SwitchWatch:
     def __init__(self, rows, every=None):
         self.mrg = None
         self.door = False
+        self.door_id = SW_COIN_DOOR
         self.balls = trough.Balls()
         self.positions, self.how = [], None
         self.set_rows(rows)
@@ -1000,8 +1006,15 @@ class SwitchWatch:
         switch list on the heap, so a first run of a title has no table for
         the first minute (Field._pick_up_switches), and a trough that could
         not be identified at window open usually can be a minute later.
+
+        The door id re-resolves here too (item 73): the wire (0,23) is
+        universal, the id is the title's own.
         """
         self.positions, self.how = trough.find(rows)
+        for r in rows or []:
+            if r.get("node") == DOOR_NODE and r.get("bit") == DOOR_BIT:
+                self.door_id = r["id"]
+                break
         return bool(self.positions)
 
     def poll(self):
@@ -1011,7 +1024,7 @@ class SwitchWatch:
             return False
         self._n = self.every
         self.mrg = read_merged()
-        self.door = bool(self.mrg) and not self.mrg[SW_COIN_DOOR]
+        self.door = bool(self.mrg) and not self.mrg[self.door_id]
         self.balls.update(self.closed())
         return True
 

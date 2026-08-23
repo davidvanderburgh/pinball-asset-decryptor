@@ -5996,9 +5996,19 @@ static int sw_rest_on;   /* the set is wanted at all (PAD_SW_REST != 0) */
  *
  * Resolution is by NAME from the derived table the guest can already see at
  * /dump/tables/$PAD_GAME/switch_list.txt (mktables writes it before the
- * guest starts; /dump is bound into the pivot). The door stays 33 - a
- * platform switch, identical on every title measured. No file, or no
- * PAD_GAME, keeps the compiled Godzilla ids: exactly the old behaviour. */
+ * guest starts; /dump is bound into the pivot). No file, or no PAD_GAME,
+ * keeps the compiled Godzilla ids: exactly the old behaviour.
+ *
+ * ★ ITEM 73: THE DOOR RESOLVES TOO, BY WIRE. "The door stays 33 - a
+ * platform switch, identical on every title measured" was true of the
+ * WIRE (node 0 bit 23 on all 29 derived lists) and false of the ID, which
+ * is a table index: 34 on aerosmith/avengers, 36 on batman, 198/201 on
+ * munsters/sword_of_rage. Holding id 33 on those titles holds some other
+ * switch while the interlock bit the game latches during bring-up
+ * (0x5a9e50(23), the sixty-second stall above) is only covered by the
+ * synthetic at-rest word for as long as no table has resolved. So the door
+ * takes the id its (node,bit) = (0,23) has in the title's own list; the
+ * name is not used because five titles' lists are all-'?'. */
 extern long read(int, void *, unsigned long);   /* self-interposed; unknown
                                                  * fds pass through, same as
                                                  * open/close in the LED
@@ -6036,16 +6046,31 @@ static void sw_rest_resolve(void)
     buf[n] = 0;
 
     /* Lines are `id num node bit NAME...`; find TROUGH 1..6 by name, case-
-     * insensitively, taking the id from the front of that line. */
-    sw_rest_n = 1;                                /* keep the door at 33 */
+     * insensitively, taking the id from the front of that line - and the
+     * door by wire, (node,bit) == (0,23) (item 73). */
+    sw_rest_n = 1;                     /* slot 0 = the door, 33 until found */
     for (p = buf; *p; p = e) {
-        unsigned id = 0, t;
+        unsigned id = 0, t, f;
+        unsigned num[3] = { 0, 0, 0 }; /* num, node, bit */
+        int seen[3] = { 0, 0, 0 };
         char *q = p;
         for (e = p; *e && *e != '\n'; e++) ;
         if (*e) e++;
         if (*q == '#') continue;
         while (*q >= '0' && *q <= '9') id = id * 10 + (unsigned)(*q++ - '0');
         if (!id || id >= sizeof sw_active) continue;
+        for (f = 0; f < 3; f++) {
+            while (*q == ' ' || *q == '\t') q++;
+            while (*q >= '0' && *q <= '9') {
+                num[f] = num[f] * 10 + (unsigned)(*q++ - '0');
+                seen[f] = 1;
+            }
+            if (!seen[f]) break;
+        }
+        if (seen[1] && seen[2] && num[1] == 0 && num[2] == 23) {
+            sw_rest_set[0] = (unsigned char)id;   /* the door, per title */
+            continue;
+        }
         for (; q < e - 8; q++) {
             if ((q[0] == 'T' || q[0] == 't') &&
                 (q[1] == 'R' || q[1] == 'r') &&
@@ -6073,12 +6098,20 @@ static void sw_rest_resolve(void)
         snprintf(m + o, sizeof m - (unsigned)o, "\n");
         logmsg(m);
     } else {
-        /* a list with no TROUGH rows: keep Godzilla's, but say so */
-        for (i = 0; i < sizeof sw_rest_ids; i++)
+        /* a list with no TROUGH rows: keep Godzilla's TROUGH ids, but say
+         * so. The door slot is NOT reset - its wire resolution above stands
+         * whatever the trough names look like (item 73). */
+        for (i = 1; i < sizeof sw_rest_ids; i++)
             sw_rest_set[i] = sw_rest_ids[i];
         sw_rest_n = sizeof sw_rest_ids;
         logmsg("[swrest] no TROUGH rows in the switch list; "
-               "rest set stays Godzilla's\n");
+               "trough rest set stays Godzilla's\n");
+    }
+    if (sw_rest_set[0] != sw_rest_ids[0]) {
+        char m[96];
+        snprintf(m, sizeof m, "[swrest] door resolved for %s: id %u "
+                 "(node 0 bit 23), not 33\n", game, sw_rest_set[0]);
+        logmsg(m);
     }
 }
 

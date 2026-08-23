@@ -1357,3 +1357,64 @@ def test_a_scrolling_scene_is_described_as_one_not_as_broken():
     # without the flag the honest admission is still there
     lay["scroll"] = ""
     assert "isn't fully decoded" in scene_render.describe(lay)
+
+
+# ---------------------------------------------------------------------------
+# PAD-81: which sentence of the caption goes on screen
+# ---------------------------------------------------------------------------
+
+def _caption_layout(**over):
+    """A minimal drawable layout, with the caveat counters overridable."""
+    lay = {"stage": [1360, 768, 30.0], "partial": False, "unplaced": 0,
+           "offstage": 0, "sprites": [{"name": "a", "x": 10, "y": 10,
+                                       "image_off": 1}],
+           "texts": []}
+    lay.update(over)
+    return lay
+
+
+def test_caption_lead_is_the_first_sentence_when_there_is_nothing_to_admit():
+    lay = _caption_layout()
+    assert scene_render.caption_lead(lay) == scene_render.describe(lay)
+    assert scene_render.caption_lead(lay).startswith("Still picture:")
+
+
+def test_caption_lead_is_the_caveat_when_there_is_one():
+    """PAD-81. A tester sent Venom 1.07's 7f71ddb3 in as a scene that "fails
+    to render". The window had ALREADY worked out that hundreds of its images
+    could not be placed and that it holds hundreds of separate screens to step
+    through — and the visible line said "Still picture", with both of those
+    sentences behind the "?". The line exists to say what the preview is NOT
+    showing, so that is what it leads with."""
+    lay = _caption_layout(unplaced=309)
+    lead = scene_render.caption_lead(lay)
+    assert lead == "309 more images in this scene can't be placed yet."
+    # ...and the whole paragraph is untouched, still opening with the summary.
+    full = scene_render.describe(lay)
+    assert full.startswith("Still picture:") and lead in full
+
+
+def test_caption_lead_keeps_the_summary_when_most_of_the_scene_is_drawn():
+    """The rule is self-relative, not a threshold: a scene missing ONE image
+    out of forty is not misrepresented by its summary, and leading with the
+    caveat everywhere fired on 182 of 182 scenes on a real godzilla_pro card —
+    trading "Animation: 20 frames at 30 fps" for "1 more image can't be placed
+    yet"."""
+    lay = _caption_layout(
+        unplaced=1,
+        sprites=[{"name": str(i), "x": 0, "y": 0, "image_off": i}
+                 for i in range(40)])
+    assert scene_render.caption_lead(lay).startswith("Still picture:")
+    # Off-stage elements alone never take the line: nothing is MISSING from
+    # the picture, the positions are just not fully trusted.
+    assert scene_render.caption_lead(
+        _caption_layout(offstage=3)).startswith("Still picture:")
+
+
+def test_caption_lead_prefers_the_first_caveat_of_several():
+    lay = _caption_layout(unplaced=2, offstage=3)
+    assert scene_render.caption_lead(lay).startswith("2 more images")
+
+
+def test_caption_lead_survives_a_scene_with_no_layout():
+    assert scene_render.caption_lead(None) == "No preview for this scene."

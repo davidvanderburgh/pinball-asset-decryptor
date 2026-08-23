@@ -406,3 +406,43 @@ def test_closing_the_window_stops_a_bulk_save(app, tmp_path):
     sb._bulk = {"cancel": False}
     sb._close()
     assert sb._bulk["cancel"] is True
+
+
+def test_the_caption_line_leads_with_what_the_preview_cannot_show(app,
+                                                                  tmp_path):
+    """PAD-81, from the two files the tester sent in for Venom 1.07's
+    7f71ddb3: PAD's PNG of that scene is 327 sprites composited on top of one
+    another, and the line under it read "Still picture: 200 images on a
+    1360x768 stage." The window had ALREADY established that 309 images could
+    not be placed and that the scene holds 327 screens to step through — both
+    sentences were behind the "?" while the visible one said all was well.
+
+    Through the real _show_preview, because the widget text is the thing that
+    was wrong; the full paragraph must still be on the tooltip."""
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    sb = _scene_window(app, tmp_path / "extract")
+    layout = {"stage": [1360, 768, 30.0], "partial": True, "unplaced": 309,
+              "offstage": 0, "texts": [],
+              "sprites": [{"name": "a", "x": 10, "y": 10, "image_off": 1}]}
+    sb._show_preview(sb._preview_token, [Image.new("RGB", (320, 180))], layout)
+
+    assert sb._preview_lbl.cget("text") ==         "309 more images in this scene can't be placed yet."
+    # The summary is not lost, only moved behind the "?".
+    assert sb._caption_tip.text.startswith("Still picture:")
+    assert "can't be placed yet" in sb._caption_tip.text
+
+
+def test_a_scene_with_nothing_to_admit_still_says_what_it_is(app, tmp_path):
+    """The other half of the rule: with no caveat the line is the summary, so
+    an ordinary scene reads exactly as it did before."""
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    sb = _scene_window(app, tmp_path / "extract")
+    layout = {"stage": [1360, 768, 30.0], "partial": False, "unplaced": 0,
+              "offstage": 0, "texts": [],
+              "sprites": [{"name": "a", "x": 10, "y": 10, "image_off": 1}]}
+    sb._show_preview(sb._preview_token, [Image.new("RGB", (320, 180))], layout)
+    assert sb._preview_lbl.cget("text").startswith("Still picture:")

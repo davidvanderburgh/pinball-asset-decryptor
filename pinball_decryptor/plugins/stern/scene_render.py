@@ -100,8 +100,54 @@ def text_tints(layouts):
 def describe(layout, state=0, group=None):
     """One human line about what a preview will show, including what it can't
     (so a static frame is never mistaken for the whole truth)."""
+    return " ".join(_describe_parts(layout, state, group))
+
+
+def caption_lead(layout, state=0, group=None):
+    """The ONE sentence of :func:`describe` worth putting on screen when only
+    one fits.
+
+    Normally that is the first: what the preview IS.  Nearly every real scene
+    has an undecoded corner, so leading with the caveat every time it exists
+    fires on essentially every scene, and trades a useful summary ("Animation:
+    20 frames ... at 30 fps") for a triviality ("1 more image can't be placed
+    yet") — measured at 182 of 182 scenes on a godzilla_pro card.
+
+    IT LEADS WITH THE ADMISSION ONLY WHEN THE PREVIEW IS SHOWING LESS OF THE
+    SCENE THAN IT IS LEAVING OUT, which is self-relative rather than a
+    threshold picked to fit one card.  PAD-81: a tester sent in Venom 1.07's
+    7f71ddb3 as a scene that "fails to render".  It draws 200 images and
+    cannot place 309, so what is on the canvas is a composite of a minority of
+    the scene — and the visible line said "Still picture: 200 images on a
+    1360x768 stage." while both the "309 can't be placed" and the "327
+    separate screens, pick one from Screen" sentences sat behind the "?".  At
+    that ratio the summary is the misleading half.
+
+    Built from the same parts as :func:`describe` so the two cannot drift.
+    """
+    parts = _describe_parts(layout, state, group)
+    if len(parts) > 1 and _mostly_missing(layout, state, group):
+        return parts[1]
+    return parts[0]
+
+
+def _mostly_missing(layout, state=0, group=None):
+    """Is more of this scene's art left out of the preview than is in it?
+
+    Counted in IMAGES, the same unit ``unplaced`` is counted in — mixing in
+    text lines would let a wordy scene tip the balance without a single piece
+    of art being missing."""
     if not layout:
-        return "No preview for this scene."
+        return False
+    drawn = len(_pick(layout.get("sprites") or (), state, group))
+    return int(layout.get("unplaced") or 0) > drawn
+
+
+def _describe_parts(layout, state=0, group=None):
+    """:func:`describe`'s sentences, in reading order: what the preview shows
+    first, then everything it has to admit."""
+    if not layout:
+        return ["No preview for this scene."]
     n_states = state_count(layout)
     names = group_names(layout)
     # An outline pass is the same line twice; counting it said "2 text lines"
@@ -125,47 +171,50 @@ def describe(layout, state=0, group=None):
     else:
         where = ""
     if n_frames > 1:
-        msg = ("Animation: %d frames of %s%s at the scene's own %g fps, each "
-               "frame held for one tick (per-frame holds aren't decoded).%s "
-               % (n_frames, what, stage, frame_rate(layout), where))
+        head = ("Animation: %d frames of %s%s at the scene's own %g fps, each "
+                "frame held for one tick (per-frame holds aren't decoded).%s"
+                % (n_frames, what, stage, frame_rate(layout), where))
     else:
         # Only claim animation is missing when the scene HAS any: saying
         # "animation isn't shown" on a still picture implied there was
         # something to play.
-        msg = "Still picture: %s%s.%s " % (what, stage, where)
+        head = "Still picture: %s%s.%s" % (what, stage, where)
+    parts = [head.strip()]
     # Say WHAT is missing, not merely that something is: nearly every real
     # scene has an undecoded corner, so a bare "partial" told the user nothing.
     n_un = int(layout.get("unplaced") or 0)
     n_off = int(layout.get("offstage") or 0)
     if n_un:
-        msg += ("%d more image%s in this scene can't be placed yet. "
-                % (n_un, "" if n_un == 1 else "s"))
+        parts.append("%d more image%s in this scene can't be placed yet."
+                     % (n_un, "" if n_un == 1 else "s"))
     scroll = layout.get("scroll") or ""
     if scroll and n_off:
         # A credits roll is taller than the screen ON PURPOSE.  Calling its
         # off-stage lines undecoded said the preview was broken when it was
         # right — Led Zeppelin's credits span 23 screens of it.
-        msg += ("This scene is a %s strip that scrolls through the screen, so "
-                "%d of its elements sit outside the frame by design — the "
-                "preview is one screenful of it, not the whole strip. "
-                % ("tall" if scroll == "vertical" else "wide", n_off))
+        parts.append("This scene is a %s strip that scrolls through the "
+                     "screen, so %d of its elements sit outside the frame by "
+                     "design — the preview is one screenful of it, not the "
+                     "whole strip."
+                     % ("tall" if scroll == "vertical" else "wide", n_off))
     elif n_off:
-        msg += ("%s off the stage, so %s position isn't fully decoded. "
-                % ("1 element sits" if n_off == 1
-                   else "%d elements sit" % n_off,
-                   "its" if n_off == 1 else "their"))
+        parts.append("%s off the stage, so %s position isn't fully decoded."
+                     % ("1 element sits" if n_off == 1
+                        else "%d elements sit" % n_off,
+                        "its" if n_off == 1 else "their"))
     n_alt = int(layout.get("alternates") or 0)
     if group is None and len(names) > 1:
-        msg += ("This scene holds %d separate screens the machine shows one at "
-                "a time, drawn here together — pick one from Screen to see it "
-                "by itself. " % len(names))
+        parts.append("This scene holds %d separate screens the machine shows "
+                     "one at a time, drawn here together — pick one from "
+                     "Screen to see it by itself." % len(names))
     elif group is None and n_alt:
         # No named screens to offer (the node tree didn't decode for this one),
         # so the repeats still have to be admitted rather than silently pruned.
-        msg += ("%d repeat%s of this content sit on top of each other — "
-                "alternative states the machine shows one at a time — so only "
-                "one of each is drawn. " % (n_alt, "" if n_alt == 1 else "s"))
-    return msg.strip()
+        parts.append("%d repeat%s of this content sit on top of each other — "
+                     "alternative states the machine shows one at a time — so "
+                     "only one of each is drawn."
+                     % (n_alt, "" if n_alt == 1 else "s"))
+    return parts
 
 
 def _tint(img, rgba):

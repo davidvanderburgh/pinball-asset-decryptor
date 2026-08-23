@@ -916,17 +916,23 @@ class SceneBrowserWindow:
         except tk.TclError:
             pass
 
-    def _set_caption(self, text):
-        """Put the caption's FIRST SENTENCE on screen and the whole of it
-        behind the "?".
+    def _set_caption(self, text, lead=None):
+        """Put ONE sentence of the caption on screen and the whole of it behind
+        the "?".
 
         The caption admits whatever a scene couldn't decode, so it ran to one,
         two or three wrapped lines depending on the scene — and the pane under
         it jumped every time you stepped to another screen.  One unwrapped line
-        is a fixed height; the detail is a hover away."""
+        is a fixed height; the detail is a hover away.
+
+        *lead* names which sentence that should be, for the callers that have a
+        layout to ask (``scene_render.caption_lead``).  Without it the first
+        sentence is used, which is right for the status texts ("Saved x.mp4",
+        "Drawing…") that are only one sentence anyway.
+        """
         text = text or ""
         self._caption_tip.text = text
-        head = text.split(". ")
+        head = (lead or text).split(". ")
         short = head[0] + ("." if len(head) > 1 else "")
         # Capped so the row can never grow wide enough to push the "?" out of
         # the window (nor the pane wider) — the full text is on the button.
@@ -1069,6 +1075,10 @@ class SceneBrowserWindow:
             return
         frames = [f for f in frames or () if f is not None]
         note = scene_render.describe(layout, 0, group)
+        # The one sentence that goes ON SCREEN is chosen by the same code that
+        # builds the paragraph, not by "take the first one" here — on a scene
+        # with something to admit the first sentence is the flattering one.
+        lead = scene_render.caption_lead(layout, 0, group)
         self._set_preview_controls(layout, group, len(frames) > 1)
         if not frames:
             self._set_caption(
@@ -1088,7 +1098,7 @@ class SceneBrowserWindow:
                 shown.thumbnail((cw, chh), Image.LANCZOS)
                 self._frame_imgs.append(ImageTk.PhotoImage(shown))
         except Exception:
-            self._set_caption(note)
+            self._set_caption(note, lead=lead)
             return
         self._preview_img = self._frame_imgs[0]
         self._preview.delete("all")
@@ -1102,7 +1112,7 @@ class SceneBrowserWindow:
         if len(frames) > 1 and n_all > len(frames):
             note += (" Playing the first %d of them — \"Save preview…\" writes"
                      " all %d to MP4." % (len(frames), n_all))
-        self._set_caption(note)
+        self._set_caption(note, lead=lead)
         self._save_btn.configure(state="normal")
         if len(self._frame_imgs) > 1:
             self._play(token, 0, self._effective_fps(layout))

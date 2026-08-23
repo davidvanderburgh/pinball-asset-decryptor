@@ -4991,12 +4991,32 @@ static void alert_maybe_dump(void)
  *
  * The module's own status line calls the three tracks GE (+42), CE (+43) and
  * ZK (+44) and names the states from 0x66d9d8: 0 "S", 1 "P", 2 "F", 3 "E".
+ *
+ * ALL THREE TRACKS ARE INITIALISED TO 1 ("P"), NOT 3 ("E") - the module init
+ * writes 1 to +42/+43/+44, on BOTH titles, instruction for instruction. A
+ * track is set to 3 when its handler STARTS and to 1 or 2 when it finishes,
+ * so on this screen "E" means IN PROGRESS at least as often as it means
+ * failed. That is why godzilla's #2 "cleared itself" at ~70 s: CE was simply
+ * running. Anything that stops the state machine ticking therefore leaves
+ * every track reading "P" and SILENCES the banner rather than raising it.
+ *
+ * ONE OVERRIDE MOVES ALL FOUR, because V, the state byte and the worker
+ * context are FIXED OFFSETS from the module base - +0xc0, +0xc5, +0xc8 - and
+ * that layout was confirmed identical on a second title (item 62, 2026-08-23).
+ * turtles_pro 1.59.0 puts the module at 0x681994 and godzilla_pro 1.15.0 at
+ * 0x7b7b70; every landmark in between maps at a constant +0x970f8, and the
+ * module's init, provider, decryptor and grade-setters are the same code. So
+ * `PAD_VAL_MOD=0x681994` is the whole of what turtles needs, rather than four
+ * addresses that could be given inconsistently.
  * ------------------------------------------------------------------------ */
-#define VAL_MOD  0x7b7b70u      /* module globals                            */
-#define VAL_V    0x7b7c30u      /* MOD+0xc0, the state object                */
-#define VAL_ST   0x7b7c35u      /* MOD+0xc5, the state-machine state         */
-#define VAL_CTX  0x7b7c38u      /* MOD+0xc8, the worker context              */
-#define VAL_AUD  0x7b9308u      /* the #4 term, inside the audio state block */
+TITLE_ADDR(a_val_mod, "PAD_VAL_MOD", 0x7b7b70u)  /* module globals           */
+TITLE_ADDR(a_val_aud, "PAD_VAL_AUD", 0x7b9308u)  /* #4 term, audio block     */
+
+#define VAL_MOD  a_val_mod()    /* module globals                            */
+#define VAL_V    (VAL_MOD + 0xc0u)  /* the state object (a pointer to MOD)   */
+#define VAL_ST   (VAL_MOD + 0xc5u)  /* the state-machine state               */
+#define VAL_CTX  (VAL_MOD + 0xc8u)  /* the worker context                    */
+#define VAL_AUD  a_val_aud()    /* the #4 term, inside the audio state block */
 
 static const char *val_state(unsigned s)
 {
@@ -7639,10 +7659,16 @@ static void sw_maybe_dump(void)
 static void val_dump(void)
 {
     char line[420];
-    const unsigned char *m = (const unsigned char *)(unsigned long)VAL_MOD;
-    unsigned v   = *(const unsigned *)(unsigned long)VAL_V;
-    unsigned ctx = *(const unsigned *)(unsigned long)VAL_CTX;
+    const unsigned char *m;
+    unsigned v, ctx;
     int i, k;
+
+    /* 0 means this title's module base is unknown or not mapped. Every other
+     * TITLE_ADDR reader bails the same way rather than dereferencing it. */
+    if (!VAL_MOD || !VAL_AUD) return;
+    m   = (const unsigned char *)(unsigned long)VAL_MOD;
+    v   = *(const unsigned *)(unsigned long)VAL_V;
+    ctx = *(const unsigned *)(unsigned long)VAL_CTX;
 
     snprintf(line, sizeof line,
              "[val] state=%u V=0x%08x ctx=0x%08x tick=%u ge_s=%u ce_s=%u zk_s=%u"
@@ -7715,9 +7741,13 @@ static void val_dump_changed(void)
     static unsigned char last[52];
     static int primed;
     unsigned char cur[52];
-    const unsigned char *m = (const unsigned char *)(unsigned long)VAL_MOD;
-    unsigned ctx = *(const unsigned *)(unsigned long)VAL_CTX;
+    const unsigned char *m;
+    unsigned ctx;
     int i;
+
+    if (!VAL_MOD) return;
+    m   = (const unsigned char *)(unsigned long)VAL_MOD;
+    ctx = *(const unsigned *)(unsigned long)VAL_CTX;
     for (i = 0; i < 48; i++) cur[i] = m[i];
     cur[48] = m[0xc5];
     cur[49] = (unsigned char)(ctx >> 24);
@@ -7734,8 +7764,16 @@ static void val_dump_changed(void)
     val_dump();
 }
 
-#define VAL_LO 0x249e00u
-#define VAL_HI 0x24c2c0u
+/* The caller filter: only stdio coming from inside the validation module is
+ * interesting, and everything else during boot is scene loading. Both bounds
+ * are TITLE addresses - on turtles the same module sits at +0x970f8, so a
+ * godzilla-shaped filter rejects every one of its calls and the probe reads a
+ * confident silence over a module that is working perfectly. */
+TITLE_ADDR(a_val_lo, "PAD_VAL_TEXT_LO", 0x249e00u)
+TITLE_ADDR(a_val_hi, "PAD_VAL_TEXT_HI", 0x24c2c0u)
+
+#define VAL_LO a_val_lo()
+#define VAL_HI a_val_hi()
 
 static void val_probe(const char *what, unsigned long ra,
                       unsigned long a, unsigned long b, unsigned long c)

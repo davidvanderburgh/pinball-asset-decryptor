@@ -3031,12 +3031,110 @@ These have each been violated at least once and each cost a run or a window:
       this view opens, the call sites are located, and item 25's test harness
       already exists — but confirming a real plunge costs one run.
 
-- [ ] **62. Every title but the one the rootfs was built from raises `GAME
-      VALIDATION ERROR #3 UPDATE SD CARD`, because `/mnt/boot/zImage` is
-      godzilla's forever.** `S2 D3` ← WORKING ON ← NEEDS DAVID'S CALL, 60% *(D2 → D3: the desk
-      diagnosis below is REFUTED for turtles_pro, so what is left needs a
-      turtles-instrumented run or RE of its own validation module, not a
-      staging call.)*
+- [ ] **62. `GAME VALIDATION ERROR #3 UPDATE SD CARD` — the item's PREMISE is
+      now in doubt: the upscaled turtles card CANNOT raise it, and no turtles
+      run has ever been instrumented to see whether it did.** `S3 D2`
+      ← WORKING ON, 85% *(S2 → S3, 2026-08-23, on evidence: item 63 shipped in
+      v0.153.0 and boots go splash → attract with no Tech Alerts screen, so
+      nothing here is on the glass in normal play; and the one card that
+      provoked the report cannot produce the banner at all. D3 → D2: the
+      mechanism is fully read off two ELFs at the desk, the instrument fix is
+      built and compiles, and what is left is one confirming run.)*
+      **★★★★★ THE 2026-08-21 VERDICT IS REVERSED ON CAUSATION, 2026-08-23. The
+      4-byte patch is real, but it SILENCES this banner — it cannot cause it.**
+      Everything below the reversal is kept because the evidence is expensive
+      and most of it still stands; what changed is what it MEANS.
+      **The true reference existed all along and nobody had used it: David
+      already owns a STOCK `turtles_pro-1_59_0` Release card**, cached at
+      `~/cardcache/turtles_pro-1_59_0.raw` (from
+      `/mnt/d/Pinball/images/Stern/spike2/turtles_pro-1_59_0.Release.8G.sdcard.raw`),
+      beside the `.1987-upscaled` one he boots. So the diff is stock-vs-modified
+      at the same version, not rootfs-vs-card with the provenance assumed.
+      `debugfs` pulls `./game` out of either card with no mount and no root, so
+      this is desk work: `parts.py --games`, then `debugfs -R "dump …"`.
+      **Established, all reproducible at the desk:**
+      • The rootfs `games/turtles_pro/game` IS the stock card's, byte for byte
+        (md5 `2a12ebe1144fcadcb7a5b6732044020d`). The upscaled card's is
+        `adb50ca387cf6c26f7d5baf140c6e8dc`, same 6,457,552 bytes.
+      • **Exactly 4 bytes differ in the whole 6.4 MB ELF**, at vaddr
+        `0x2e15c4`: `e92d47f0` (`push {r4-r10, lr}`) → `e12fff1e` (`bx lr`).
+        The 20-byte GE trailer at `size-20` is UNTOUCHED, so it is stale.
+      • **`0x2e15c4` is not "the integrity checker" — it is the validation
+        STATE MACHINE's tick.** It dispatches an 8-entry jump table on the
+        state byte at `MOD+0xc5` and carries the work budget at `MOD+0xe0`
+        with the 15/31 unit values the handoff already documents for godzilla.
+        Every other writer of that state byte is inside its dispatch tree; the
+        only one outside is the module's start function `0x2e1420`, which sets
+        `V := MOD` and `state := 1` once.
+      • **The module init `0x2e0f20` sets GE, CE and ZK all to 1 = "P".** A
+        track goes to 3 ("E") when its handler STARTS and to 1/2 when it ends.
+        Godzilla's init is instruction-for-instruction the same and also
+        writes 1 — so the handoff's "the tracks start in state 3 (E)" is
+        WRONG, and "E" on that screen means IN PROGRESS as much as it means
+        failed. (That is the real reason godzilla's `#2` "cleared itself" at
+        ~70 s: CE was merely running.)
+      • **Therefore `bx lr` on the tick freezes state at 1 forever, no track
+        ever runs, all three read "P", and the provider raises NOTHING.** The
+        patch is an alert-SUPPRESSION patch — which is exactly what an
+        upscaled card needs, since the asset sweep would fail on rebuilt
+        assets and re-signing them is not an option.
+      **Ruled out, and this one is now beyond doubt:** the wrong-zImage theory.
+      All four cards — both turtles_pro, turtles_le, godzilla_pro — ship a
+      byte-identical `zImage` (`5bffdb676ba17b44248f2ad3621e6647`, 6,041,256 B)
+      and `stern-spike2.dtb` (`ef9c01fa…`), and the rootfs already stages those
+      exact bytes. No card this rig owns can break on the kernel.
+      **Ruled out: that turtles' addresses, track order or #N numbering differ.
+      They do not.** turtles' obfuscated descriptor table is at `0x563710`
+      (blob at +128), same 16-byte layout, and decodes to the same eight
+      strings with the same `n = 2..7 → #1..#6` mapping. The provider
+      `0x2e1110` tests `V[+42]→#1`, `V[+43]→#2`, `V[+44]→#3` exactly as
+      godzilla's does. **Nine independently-located landmarks map at a constant
+      `turtles = godzilla + 0x970f8`** (init `0x249e28`→`0x2e0f20`, provider
+      `0x24a018`→`0x2e1110`, decryptor `0x249f60`→`0x2e1058`, ZK:=1
+      `0x24b8cc`→`0x2e29c4`, CE:=1 `0x24b918`→`0x2e2a10`, GE:=1
+      `0x24b928`→`0x2e2a20`, ZK:=2 `0x24b61c`→`0x2e2714`, ZK:=3
+      `0x24b6f8`→`0x2e27f0`, budget `0x24a668`→`0x2e1760`). The module is the
+      same code in both titles.
+      **THE INSTRUMENT WAS NEVER POINTED AT TURTLES, so the item never had an
+      observation to stand on.** All three turtles runs of 2026-08-21
+      (`t63.log`, `t63_run1.log`, `t63k.log`, all on the upscaled card) have
+      `strwatch=0` — the string watcher was OFF, so their zero
+      `GAME VALIDATION ERROR` hits prove nothing either way. The ONLY logs
+      anywhere that ever caught the string are `gz211/212/213.log`, which are
+      **godzilla**. The item's title — "every title but the one the rootfs was
+      built from raises #3" — was a theory, never a turtles measurement.
+      **★★ BUILT AND COMPILES THIS PASS: `PAD_VAL_DUMP` is no longer
+      godzilla-locked** (`hwshim.c`). `VAL_MOD/V/ST/CTX` were four hard-coded
+      godzilla addresses; V, the state byte and the worker context are fixed
+      offsets (+0xc0/+0xc5/+0xc8) from the module base on BOTH titles, so one
+      `TITLE_ADDR` moves all four — `PAD_VAL_MOD=0x681994` is the whole of what
+      turtles needs. The caller filter `VAL_LO/VAL_HI` is now
+      `PAD_VAL_TEXT_LO/HI` too: a godzilla-shaped filter rejects every turtles
+      call and the probe reads a confident silence over a working module, which
+      is the exact trap that would have wasted the confirming run.
+      `-fsyntax-only` clean; NOT yet run.
+      **Resume — one run decides it, and it is cheap now:** boot the upscaled
+      turtles card with `PAD_VAL_DUMP=1 PAD_VAL_MOD=0x681994
+      PAD_VAL_TEXT_LO=0x2e0ef8 PAD_VAL_TEXT_HI=0x2e33b8` and read `[val]`. The
+      PREDICTION is `state=1` never moving and `GE=CE=ZK=P` for the whole
+      boot — i.e. no banner is possible. **Inject the positive control:** the
+      same probe on godzilla (no env overrides) must show the tracks marching
+      P→E→P, or the instrument is not seeing anything on either title and the
+      turtles zero is worthless — which is precisely how this item got its
+      wrong answer the first time. If turtles reads as predicted, the honest
+      close is that the banner was never a turtles fault and item 63 already
+      removed the screen it lived on; if it somehow shows E, the module is
+      running despite the nop and the whole reversal above is wrong.
+      **▼ SUPERSEDED 2026-08-23 — read the reversal above first. This block got
+      the 4-byte patch RIGHT and what it does WRONG.** It called `0x2e15c4` "the
+      game's ONLY whole-file keyed-hash integrity checker"; it is the state
+      machine's tick, and nopping it disables ALL THREE tracks rather than
+      defeating one hash. The consequence it drew — that #3 is a true positive
+      about a modified card — is backwards: with the tick dead the provider has
+      nothing to report. Kept for the disassembly, which was sound, and as the
+      standing example of a 7-agent workflow agreeing on a wrong conclusion
+      because every agent was handed the same framing ("find the integrity
+      checker") and none was asked what the function actually WAS.
       **★★★★★ VERIFIED 2026-08-21 BY A 7-AGENT ADVERSARIAL RE WORKFLOW — the
       diagnosis is now proven and my earlier “digest mismatch” wording is
       CORRECTED.** Two independent disassembly traces plus two skeptics who
@@ -3058,6 +3156,13 @@ These have each been violated at least once and each cost a run or a window:
         stayed UNLOCATED (that agent errored on its output cap); most likely a
         separate watchdog noticing the check never reached its “validated”
         terminal state. This does not change the verdict.
+      **▼ THIS VERDICT IS WITHDRAWN 2026-08-23 — see the reversal at the top.
+        The card IS modified (that half stands, and the diff is now against
+        the stock Release card rather than an assumed-clean rootfs copy), but
+        the modification makes the banner IMPOSSIBLE rather than deserved, so
+        there is no whitelist decision for David to make and no clean-card
+        decision either. Kept because the "do not suppress a real check"
+        reasoning is right in general and will be wanted again.**
       **THE VERDICT, and it is DAVID'S CALL, not an emulator bug:** turtles'
         #3 is a TRUE POSITIVE about a genuinely modified card. There is no
         honest emulator fix — suppressing or spoofing it would re-defeat a

@@ -2597,9 +2597,60 @@ These have each been violated at least once and each cost a run or a window:
       and reading (i) vs (ii) has to be settled before the instrument is
       chosen.
 
-- [ ] **55. turtles_pro flashes "UPDATING NODE BOARD RUNTIME / UPDATE FAILED"
-      for nodes 4 and 12 at game start — the title's OWN node table carries
-      two mis-derived rows, and the shim serves them verbatim.** `S3 D2`
+- [x] **55. turtles_pro flashes "UPDATING NODE BOARD RUNTIME / UPDATE FAILED"
+      for nodes 4 and 12 at game start.** `S3 D2` **★★★ FIXED 2026-08-23. The
+      diagnosis in this entry was half right and half wrong, and the wrong half
+      is the interesting one: the shim was NOT "serving the title's table
+      verbatim" — it was never reading that table at all.**
+      **ROOT CAUSE, two independent faults stacked:**
+      1. **`run_game.sh` never exported `PAD_GAME` on a CARD run.**
+         `nb_fident_load()` builds `/dump/tables/$PAD_GAME/node_ident.txt` and
+         returns early when it is unset, so every card boot of every title fell
+         back to the built-in `nb_idents[]`, which is **godzilla's** node set.
+         The log said so all along, once looked at: `[nbid] node 12 claims
+         part=0x2c40102b variant=0x05 fw=1.33.0 (built-in)`. The built-in
+         claims variant 0x05 for everything on part 0x2c40102b because on
+         godzilla every board on it is a ws2812node — which is why turtles'
+         nodes 2 and 14 (genuinely ws2812node) graded clean and only node 12
+         looked broken. One `export PAD_GAME="$GAME"` fixes it, for every card
+         run of every title.
+      2. **`coil4node`'s variant was a GUESS.** It was absent from
+         `nbdir.py`'s `VARIANT_PRIOR`, so it took `VARIANT_DEFAULT = 0x01`.
+         Measured 2026-08-23 with `hexreg.py` off the live turtles registry:
+         **0x04**, on all three classes. The same scan reproduced ws2812node
+         0x05, node4 0x03 and pinnode 0x01 unchanged, which is what makes the
+         new row a measurement and not another guess.
+      **ACCEPTANCE, on a plain card boot with NO overrides:** the shim logs
+      `7 node identities from /dump/tables/turtles_pro/node_ident.txt`, every
+      row reads `(derived)`, node 12 claims `variant=0x04`, and **no slot is at
+      anything but status 2** — where before, slot 12 sat at `status=7
+      Checksum` while all seven others graded 2. Boot healthy at
+      `nb=431 fb=60 ifs=250`.
+      **Honest gap:** this item's stated acceptance was the GAME-START glass,
+      and I verified the mechanism (every board graded clean) at boot, not a
+      started game. With no board at status 7 there is nothing left to trigger
+      a runtime update, but the literal screenshot was not taken.
+      **Follow-up, not done:** thirteen other titles still carry
+      `variant_guess=1` rows in tables generated before this fix —
+      aerosmith_le, deadpool_le/pro, dungeons_and_dragons_le, elvira3,
+      foo_fighters_le, guardians_le, metallica_spike, munsters_le, rush_le,
+      star_wars_le, sword_of_rage_le, turtles_le. They pick the fix up when
+      their tables are regenerated; nobody has done that yet.
+      **Also noted:** `nb_hexreg_answer()`, which is supposed to correct a bad
+      guess at runtime from the game's own decrypted images, did NOT fire for
+      turtles' node 12 — no hexreg line appeared in any run. That safety net is
+      not working here and is worth its own look.
+      **And a correction to this entry's own sibling claim:** the 2026-08-22
+      note below says the banner's centre number is "the RETRY COUNTDOWN, not a
+      node id". That is unsupported, and the evidence is now two titles deep
+      against it — godzilla_le banner-ed 4 and 10 with slots 4 and 10 at status
+      7, turtles_pro banner-ed 12 with slot 12 at status 7 and every other slot
+      at 2. Four numbers, four matching failing nodes. **It is the node id.**
+      Diagnose from `PAD_NB_DUMP` regardless: on turtles the number was right
+      and this entry's stated CAUSE was still wrong.
+      *(The original 2026-08-18 analysis follows. Its node-4 half was already
+      solved on godzilla; its node-12 half pointed at the derived table, which
+      was the right file and the wrong reason.)* `S3 D2`
       *(Filed 2026-08-18 from David's live report, mid-game screenshot in
       hand. Same SCREEN as item 51 but not the same fault: 51 was godzilla's
       table claimed at every title; this is the per-title derivation being
@@ -3031,9 +3082,339 @@ These have each been violated at least once and each cost a run or a window:
       this view opens, the call sites are located, and item 25's test harness
       already exists — but confirming a real plunge costs one run.
 
-- [ ] **62. Every title but the one the rootfs was built from raises `GAME
-      VALIDATION ERROR #3 UPDATE SD CARD`, because `/mnt/boot/zImage` is
-      godzilla's forever.** `S2 D2` *(Filed 2026-08-21 from David, looking at
+- [ ] **62. `GAME VALIDATION ERROR #3` is a STALE FAILED GRADE IN NVRAM that a
+      nopped validation tick can never clear — SOLVED AND PROVEN with a
+      three-run controlled experiment; what is left is the product decision.**
+      `S2 D2` 90%
+      *(▲ from 70%. D3 → D2: the mechanism is proven end to end and the fix is
+      applied and verified; what remains is deciding what the rig should do
+      about it automatically, which is desk work plus one confirming boot.)*
+      **★★★★★ THE MECHANISM, PROVEN 2026-08-23 BY THREE RUNS WITH A CONTROL.**
+      All three booted the Heisei image identically, reading the grades live
+      through `PAD_VAL_DUMP` (now title-portable, `PAD_VAL_MOD=0x7f16bc`):
+
+      | run | change | GE | CE | ZK | V |
+      |---|---|---|---|---|---|
+      | A | none (control) | P | P | **F** | `0x7f16ec` = MOD+0x30, slot B |
+      | B | `nvram-godzilla_le.bin` deleted | P | P | **F** | `0x7f16ec` |
+      | C | validation area zeroed | P | P | **P** | `0x7f16bc` = MOD+0, slot A |
+
+      Run A is what makes the rest mean anything: without it, "no banner after
+      deleting something" could equally have meant the banner was never going to
+      show. Run C's two readouts moved TOGETHER and both matched a prediction
+      written down before the run.
+      **The chain, every link measured:**
+      • The module's start function restores a 532-byte blob (area 80) over its
+        own globals and only initialises when that restore FAILS. The grades at
+        +42/+43/+44 are inside the restored range, so a restore overwrites them
+        and the init never runs.
+      • That blob lives in the emulated EEPROM at **`/data/nvram.bin` offset
+        `0x214`**, as an A/B pair — slot A at `0x214`, slot B at `0x244`. Found
+        by searching the file for the live struct's own bytes, not by guessing
+        from file sizes.
+      • Slot A is clean `P/P/P`; **slot B carried `ZK=2 (F)`**. The game selects
+        slot B because the stored build stamp at +34 does not match this build's
+        (`memcmp` → `movne r0,#48`).
+      • The Heisei card's validation tick is nopped to `bx lr`, so nothing can
+        ever re-grade ZK back to P. **On a healthy card this self-heals on the
+        next boot; on a nopped card the banner is permanent and unclearable.**
+        That is the whole difference, and it is why the fault looked card-specific.
+      **★★ IT IS RIG-WIDE, NOT A HEISEI PROBLEM: 25 of 28 per-title NVRAMs carry
+      the same stale `ZK=F` at `0x244`.** `hwshim.c` `nv_path()` seeds a missing
+      per-title file from the shared `/data/nvram.bin`, and that shared file
+      carried a failed ZK — so every title minted from it inherited one. Only
+      `aerosmith_le` reads `P/P/P` in both slots. This also RETROSPECTIVELY
+      VINDICATES the item's original turtles report: `nvram-turtles_pro.bin`
+      carries `ZK=F` and the upscaled turtles card is nopped, so it would indeed
+      show the banner — my 2026-08-23 claim that it "cannot raise it" was wrong
+      for exactly the reason now proven.
+      **Why deleting the per-title nvram did nothing (run B):** `nv_path()`
+      re-seeds a missing per-title file *from the poisoned shared one*. The
+      obvious fix was a no-op, and only the control run made that legible.
+      **★ FIX APPLIED AND VERIFIED, surgically.** `PAD_NV_POKE=214-427:00` zeroes
+      only the validation module's own area, so identity, settings, audits and
+      high scores are untouched — `rm nvram.bin` would have thrown those away.
+      The same range is now zeroed on disk in `data/nvram.bin` and
+      `data/nvram-godzilla_le.bin`; backups are in `~/item62/`
+      (`nvram.bin.BACKUP`, `nvram-godzilla_le.BACKUP.bin`). The other 24
+      poisoned files are LEFT ALONE deliberately — they self-heal on any healthy
+      card, and the shared seed is now clean so new ones are born clean.
+      **Resume — the product decision, which is David's:** should the rig detect
+      this and fix it, or stay manual? Options, cheapest first: (a) nothing —
+      the shared seed is clean now, so this decays on its own; (b) a one-shot
+      `nvfix.sh` that zeroes the area in any nvram carrying F/E, for the two
+      known nopped cards (turtles_pro is the other one); (c) have the shim zero
+      the area at load when the tick is nopped — `valtick.py`'s signature makes
+      that detectable — which is self-maintaining but is the emulator quietly
+      editing the machine's EEPROM, and that deserves a deliberate yes.
+      **Still unverified, and honestly so:** the banner was never captured on
+      the glass BEFORE and AFTER, because an unattended boot parks on Guided
+      Setup within 25 s and never reaches the language-select or Tech Alerts
+      screens where David saw it. The grade bytes are the evidence, and they are
+      ground truth for what the provider tests — but a screenshot pair would
+      close it properly and needs someone to navigate there.
+      **★ 2026-08-23, turtles_pro also fixed at David's ask** ("fix tmnt... it
+      still shows the sd validation error"). `nvgrades.py --fix turtles_pro`
+      applied; its slot B went `P/P/F` → cleared, and the shared `nvram.bin`
+      now reads `P/P/P` in both slots because godzilla_le's own boot rewrote it
+      clean. **NOT confirmed on turtles' glass**, because turtles_pro no longer
+      boots at all — that is now item 69, and it blocks this item's turtles
+      acceptance as well as item 55's.
+      **A constant was wrong and is corrected:** the restore is
+      `eeprom_read(devsel=80, addr=0x214, dst=MOD, len=128)` — 532 is the
+      ADDRESS and 128 is the LENGTH. I first read 532 as a length and zeroed
+      `0x214..0x427`, four times too much. It did no damage (verified against
+      the backups: every byte of `0x294..0x427` was already zero) but
+      `nvgrades.py` carried the wrong `BLOB_LEN` and now does not.
+      **▼▼ MY OWN 2026-08-23 REVERSAL IS ITSELF PARTLY WRONG — REFUTED BY
+      OBSERVATION, which outranks every disassembly in this entry.** David's
+      Heisei boot shows `GAME VALIDATION ERROR - #3 UPDATE SD CARD` on Tech
+      Alerts AND a red `Game validation error, Update SD card` over the
+      language-select screen. The Heisei ELF's tick **is nopped** — verified —
+      so "a nopped tick SILENCES the banner" is false as a complete statement.
+      Finding what raises it anyway IS the item now.
+      **What survives the second reversal (verified; do not re-derive):**
+      • The 4-byte `bx lr` patch on the upscaled turtles card is real, and the
+        function it kills IS the state-machine tick, not a single hash checker.
+      • The module init writes **1 ("P")** to GE/CE/ZK, confirmed on FOUR
+        builds — turtles 1.59.0 `0x2e0fc4`, godzilla_pro 1.15.0 `0x249ecc`,
+        godzilla_le 1.13.0 `0x248234`, Heisei `0x4778ac` — so "maybe a newer
+        build inits to E" is closed too.
+      • Every card's kernel is byte-identical, Heisei included. The zImage
+        theory is dead for every card this rig owns.
+      • `turtles = godzilla_pro + 0x970f8` for the module text.
+      **★ NEW INSTRUMENT, validated on four known-answer binaries
+      (`c:\tmp\pad62_tick.py` — MOVE IT INTO THE REPO):** finds the validation
+      tick in ANY build with no addresses known, by the signature
+      `ldrb rX,[rY,#197]` + `cmp rX,#8`, then walks back to the prologue and
+      reports push-with-lr vs `bx lr`. Calls stock turtles healthy, upscaled
+      turtles NOPPED, godzilla_pro healthy (rediscovering its tick at
+      `0x24a4cc`, which the `+0x970f8` mapping predicts), stock godzilla_le
+      healthy, and **Heisei NOPPED at `0x477eac`, module base `0x7f16bc`**.
+      Exactly one candidate site per ELF.
+      **THE LIVE HYPOTHESIS — mechanism located, NOT proven:** the module does
+      not always initialise, it **RESTORES PERSISTED STATE**. Its start
+      function (`0x2e1420` turtles) calls `0x4d2214(area=80, 532, MOD, 128)`
+      FIRST and only falls through to reset-and-init-to-P when that returns 0.
+      `0x4d2214` is a storage dispatcher: r0 picks an area (80→0, 81→1, 82→2)
+      into a 16-byte descriptor table at `0x59c6f4`, then tail-calls the reader
+      `0x4d1f44`. 532 bytes landing at MOD covers +42/+43/+44, so a restore
+      overwrites the grades wholesale and the init NEVER RUNS. **If a stored
+      grade is 2 or 3 and the tick is dead, the banner is frozen on forever** —
+      nothing alive can grade it back to P. That fits the observation, and it
+      predicts the banner is UNCLEARABLE, which matches Heisei.
+      **Where the store is: the i2c NVRAM, and it is PER-TITLE** —
+      `hwshim.c:2353` `NV_PATH "/data/nvram.bin"`, split per title so one file
+      did not mix godzilla, TMNT and the rest; `$PAD_ROOT/data/nvram-<title>.bin`,
+      64 KB each. **The Heisei image runs as title `godzilla_le`**, so it
+      inherits `nvram-godzilla_le.bin` — which already existed from the STOCK
+      godzilla_le 1.13.0 card booted 2026-08-19, whose tick IS healthy and could
+      have written a failed grade into it. Heisei then cannot undo it.
+      **NOT proven, and the shortcut that FAILED:** scanning the nvram images
+      for the struct by SHAPE (two 48-byte A/B structs, grades 0..3, trailing
+      bytes zero) is worthless — ~780 hits per file, and the candidate offsets
+      are identical across godzilla_le, godzilla_pro, turtles_pro and
+      turtles_le, i.e. it finds common structure, not per-title state. The
+      offset must come from tracing `0x4d1f44`.
+      **Resume, cheapest first:** (1) trace `0x4d1f44` and the descriptor at
+      `0x59c6f4` for the nvram OFFSET of area 80, then read the grades straight
+      out of `data/nvram-godzilla_le.bin` — confirms or kills the hypothesis
+      with NO run. (2) The reversible one-run experiment, needing no code: back
+      up and remove `data/nvram-godzilla_le.bin`, boot Heisei, see whether the
+      banner goes. If it does, the mechanism is proven and what remains is a
+      policy call about when the rig resets a title's nvram — note it also
+      holds scores and settings, so deleting is not free. (3) Only then decide
+      what the emulator should do about it.
+      **Also on the same screenshot and NOT part of this item:** the Heisei boot
+      is on Tech Alerts at all, which item 63 was meant to prevent, and it shows
+      `SHIELD MOTOR - CHECK SW. 41 (Shield Motor Open)`. Either David entered
+      service deliberately or item 63's fix does not hold for this title/card —
+      worth one look before assuming the former.
+      **▼ THE EARLIER 2026-08-23 REVERSAL, now itself corrected above. The
+      4-byte patch is real, but the claim that it SILENCES this banner is
+      refuted by the Heisei observation.**
+      Everything below the reversal is kept because the evidence is expensive
+      and most of it still stands; what changed is what it MEANS.
+      **The true reference existed all along and nobody had used it: David
+      already owns a STOCK `turtles_pro-1_59_0` Release card**, cached at
+      `~/cardcache/turtles_pro-1_59_0.raw` (from
+      `/mnt/d/Pinball/images/Stern/spike2/turtles_pro-1_59_0.Release.8G.sdcard.raw`),
+      beside the `.1987-upscaled` one he boots. So the diff is stock-vs-modified
+      at the same version, not rootfs-vs-card with the provenance assumed.
+      `debugfs` pulls `./game` out of either card with no mount and no root, so
+      this is desk work: `parts.py --games`, then `debugfs -R "dump …"`.
+      **Established, all reproducible at the desk:**
+      • The rootfs `games/turtles_pro/game` IS the stock card's, byte for byte
+        (md5 `2a12ebe1144fcadcb7a5b6732044020d`). The upscaled card's is
+        `adb50ca387cf6c26f7d5baf140c6e8dc`, same 6,457,552 bytes.
+      • **Exactly 4 bytes differ in the whole 6.4 MB ELF**, at vaddr
+        `0x2e15c4`: `e92d47f0` (`push {r4-r10, lr}`) → `e12fff1e` (`bx lr`).
+        The 20-byte GE trailer at `size-20` is UNTOUCHED, so it is stale.
+      • **`0x2e15c4` is not "the integrity checker" — it is the validation
+        STATE MACHINE's tick.** It dispatches an 8-entry jump table on the
+        state byte at `MOD+0xc5` and carries the work budget at `MOD+0xe0`
+        with the 15/31 unit values the handoff already documents for godzilla.
+        Every other writer of that state byte is inside its dispatch tree; the
+        only one outside is the module's start function `0x2e1420`, which sets
+        `V := MOD` and `state := 1` once.
+      • **The module init `0x2e0f20` sets GE, CE and ZK all to 1 = "P".** A
+        track goes to 3 ("E") when its handler STARTS and to 1/2 when it ends.
+        Godzilla's init is instruction-for-instruction the same and also
+        writes 1 — so the handoff's "the tracks start in state 3 (E)" is
+        WRONG, and "E" on that screen means IN PROGRESS as much as it means
+        failed. (That is the real reason godzilla's `#2` "cleared itself" at
+        ~70 s: CE was merely running.)
+      • **Therefore `bx lr` on the tick freezes state at 1 forever, no track
+        ever runs, all three read "P", and the provider raises NOTHING.** The
+        patch is an alert-SUPPRESSION patch — which is exactly what an
+        upscaled card needs, since the asset sweep would fail on rebuilt
+        assets and re-signing them is not an option.
+      **Ruled out, and this one is now beyond doubt:** the wrong-zImage theory.
+      All four cards — both turtles_pro, turtles_le, godzilla_pro — ship a
+      byte-identical `zImage` (`5bffdb676ba17b44248f2ad3621e6647`, 6,041,256 B)
+      and `stern-spike2.dtb` (`ef9c01fa…`), and the rootfs already stages those
+      exact bytes. No card this rig owns can break on the kernel.
+      **Ruled out: that turtles' addresses, track order or #N numbering differ.
+      They do not.** turtles' obfuscated descriptor table is at `0x563710`
+      (blob at +128), same 16-byte layout, and decodes to the same eight
+      strings with the same `n = 2..7 → #1..#6` mapping. The provider
+      `0x2e1110` tests `V[+42]→#1`, `V[+43]→#2`, `V[+44]→#3` exactly as
+      godzilla's does. **Nine independently-located landmarks map at a constant
+      `turtles = godzilla + 0x970f8`** (init `0x249e28`→`0x2e0f20`, provider
+      `0x24a018`→`0x2e1110`, decryptor `0x249f60`→`0x2e1058`, ZK:=1
+      `0x24b8cc`→`0x2e29c4`, CE:=1 `0x24b918`→`0x2e2a10`, GE:=1
+      `0x24b928`→`0x2e2a20`, ZK:=2 `0x24b61c`→`0x2e2714`, ZK:=3
+      `0x24b6f8`→`0x2e27f0`, budget `0x24a668`→`0x2e1760`). The module is the
+      same code in both titles.
+      **THE INSTRUMENT WAS NEVER POINTED AT TURTLES, so the item never had an
+      observation to stand on.** All three turtles runs of 2026-08-21
+      (`t63.log`, `t63_run1.log`, `t63k.log`, all on the upscaled card) have
+      `strwatch=0` — the string watcher was OFF, so their zero
+      `GAME VALIDATION ERROR` hits prove nothing either way. The ONLY logs
+      anywhere that ever caught the string are `gz211/212/213.log`, which are
+      **godzilla**. The item's title — "every title but the one the rootfs was
+      built from raises #3" — was a theory, never a turtles measurement.
+      **★★ BUILT AND COMPILES THIS PASS: `PAD_VAL_DUMP` is no longer
+      godzilla-locked** (`hwshim.c`). `VAL_MOD/V/ST/CTX` were four hard-coded
+      godzilla addresses; V, the state byte and the worker context are fixed
+      offsets (+0xc0/+0xc5/+0xc8) from the module base on BOTH titles, so one
+      `TITLE_ADDR` moves all four — `PAD_VAL_MOD=0x681994` is the whole of what
+      turtles needs. The caller filter `VAL_LO/VAL_HI` is now
+      `PAD_VAL_TEXT_LO/HI` too: a godzilla-shaped filter rejects every turtles
+      call and the probe reads a confident silence over a working module, which
+      is the exact trap that would have wasted the confirming run.
+      `-fsyntax-only` clean; NOT yet run.
+      **★★ ALSO BUILT: `obfcrib.py`**, which is how turtles' table was found and
+      is the general answer to "this title's obfuscated strings are unreadable".
+      `obfstr.py` needs the TABLE address and `obfstr2.py` needs the BLOB
+      address, and on a new title neither is known. But
+      `x[i] = c[i]^c[i-1]` gives `x[i] = key[i&3] ^ out[i]`, so two indices in
+      the same class mod 4 cancel the key and `x[i]^x[i+4]` is a signature of
+      the PLAINTEXT ALONE — a message already known from another title finds
+      its own ciphertext by a plain scan, and the key falls out of the match.
+      Validated against godzilla: it recovers five of the seven keys
+      `obfstr2.py` hard-codes, from ciphertext alone. Takes `--elf` because
+      `gameinfo.elf()` prefers a stale published path after a card run ends.
+      **Resume — one run decides it, and it is cheap now:** boot the upscaled
+      turtles card with `PAD_VAL_DUMP=1 PAD_VAL_MOD=0x681994
+      PAD_VAL_TEXT_LO=0x2e0ef8 PAD_VAL_TEXT_HI=0x2e33b8` and read `[val]`. The
+      PREDICTION is `state=1` never moving and `GE=CE=ZK=P` for the whole
+      boot — i.e. no banner is possible. **Inject the positive control:** the
+      same probe on godzilla (no env overrides) must show the tracks marching
+      P→E→P, or the instrument is not seeing anything on either title and the
+      turtles zero is worthless — which is precisely how this item got its
+      wrong answer the first time. If turtles reads as predicted, the honest
+      close is that the banner was never a turtles fault and item 63 already
+      removed the screen it lived on; if it somehow shows E, the module is
+      running despite the nop and the whole reversal above is wrong.
+      **▼ SUPERSEDED 2026-08-23 — read the reversal above first. This block got
+      the 4-byte patch RIGHT and what it does WRONG.** It called `0x2e15c4` "the
+      game's ONLY whole-file keyed-hash integrity checker"; it is the state
+      machine's tick, and nopping it disables ALL THREE tracks rather than
+      defeating one hash. The consequence it drew — that #3 is a true positive
+      about a modified card — is backwards: with the tick dead the provider has
+      nothing to report. Kept for the disassembly, which was sound, and as the
+      standing example of a 7-agent workflow agreeing on a wrong conclusion
+      because every agent was handed the same framing ("find the integrity
+      checker") and none was asked what the function actually WAS.
+      **★★★★★ VERIFIED 2026-08-21 BY A 7-AGENT ADVERSARIAL RE WORKFLOW — the
+      diagnosis is now proven and my earlier “digest mismatch” wording is
+      CORRECTED.** Two independent disassembly traces plus two skeptics who
+      re-ran every measurement on the two ELFs:
+      • The 4-byte patch at vaddr 0x2e15c4 nops the PROLOGUE of the game's
+        ONLY whole-file keyed-hash integrity checker (fopen “rb” / fread the
+        body [0,size-20) / memcmp against the 20-byte trailer digest). Proven
+        by compiler semantics: the rootfs epilogue at 0x2e1758 pops exactly
+        the 8 registers the prologue pushed, so `bx lr` is a deliberate
+        nop-out and the ROOTFS is the untouched original. Not an emulation
+        artifact — the 4 bytes are on-disk in the card binary.
+      • CONSEQUENCE: the nop DISABLES the check (it returns on entry), so the
+        digest mismatch is NEVER COMPUTED at runtime. #3 is NOT the memcmp
+        firing — it is the fingerprint of a self-integrity check that was
+        deliberately defeated, with the 20-byte trailer left stale rather than
+        re-signed. Self-referential: the hash covers the checker's own bytes,
+        so nop-ing the checker is the only way to ship a modified body.
+      • The exact provider that prints the literal “GAME VALIDATION ERROR #3”
+        stayed UNLOCATED (that agent errored on its output cap); most likely a
+        separate watchdog noticing the check never reached its “validated”
+        terminal state. This does not change the verdict.
+      **▼ THIS VERDICT IS WITHDRAWN 2026-08-23 — see the reversal at the top.
+        The card IS modified (that half stands, and the diff is now against
+        the stock Release card rather than an assumed-clean rootfs copy), but
+        the modification makes the banner IMPOSSIBLE rather than deserved, so
+        there is no whitelist decision for David to make and no clean-card
+        decision either. Kept because the "do not suppress a real check"
+        reasoning is right in general and will be wanted again.**
+      **THE VERDICT, and it is DAVID'S CALL, not an emulator bug:** turtles'
+        #3 is a TRUE POSITIVE about a genuinely modified card. There is no
+        honest emulator fix — suppressing or spoofing it would re-defeat a
+        real shipped check and could hide OTHER modifications riding under the
+        nopped self-hash (only ./game was diffed; the rest of the card was
+        not). Options: (a) accept/whitelist THIS card knowingly; (b) use an
+        unmodified turtles card. **NEITHER is something to do without David
+        saying so.** Note item 63's zero-visibility work, if it lands, would
+        also hide this banner by skipping the whole Tech Alerts screen — which
+        may make the choice moot for the upscaled card.
+      **★★ BUILT AND DESK-VERIFIED THIS PASS (branch item/62): per-card
+      zImage staging.** `getboot.sh` now carries a size+mtime stamp
+      (`/mnt/boot/.pad_card_stamp`, item 34's lesson: not the path) and
+      `cardmount.sh` calls it on BOTH its exits — fresh mount and rejoin —
+      from `$IMG`, not `$SRC`, because the cache copier's dd does not
+      preserve mtime, so the copy is a different identity and the stamp
+      would thrash between the two paths. Tested four ways at the desk
+      against a throwaway rootfs: stages turtles' partition, skips on the
+      stamp, restages on a different card, failure is a warning not a die.
+      **★★★ AND THEN THE DIAGNOSIS FAILED ITS OWN MEASUREMENT, which is why
+      this is 40% and not closed:** turtles_pro's card and godzilla_pro's
+      card ship the BYTE-IDENTICAL kernel — zImage md5
+      `5bffdb676ba17b44248f2ad3621e6647`, dtb `ef9c01fa…`, both 6,041,256
+      bytes — and the rootfs' staged copy is that same file. So turtles
+      raises `GAME VALIDATION ERROR #3` WITH THE CORRECT KERNEL ALREADY IN
+      PLACE, and the wrong-zImage theory cannot be why. The staging is still
+      right (a future card with a different kernel would break exactly as
+      diagnosed, and the fix costs a stamp check per mount), but it will NOT
+      clear turtles' banner.
+      **What #3 means on turtles is therefore UNKNOWN.** The godzilla mapping
+      (`V[+44]` in {2,3}, the ZK kernel track) is godzilla-ELF knowledge; the
+      addresses, the track order and even the #N numbering may differ in
+      turtles 1.59. Both ELFs encrypt the `/mnt/boot/zImage` string (0 hits
+      for `mnt/boot|zImage` in either), so this is the encrypted-blob module
+      and the godzilla instruments (`PAD_VAL_DUMP`'s 0x249e00..0x24c2c0
+      caller filter, `obfstr.py`'s 0x6438bc table) are all title-locked.
+      **Resume:** cheapest first — boot turtles_pro with `PAD_OPEN_LOG=1`
+      and see whether the game even opens `/mnt/boot/zImage` and what else
+      the validation sweep touches; that decides between "a different track
+      is failing" (likely: the asset sweep, or `./game`'s own GE trailer on
+      an UPSCALED card whose game file was modified — David's card is
+      `turtles_pro-1_59_0.1987-upscaled`, and a retrofitted card is exactly
+      what a validation module exists to catch) and "the module is
+      different". THE UPSCALED-CARD THEORY FITS THE EVIDENCE AND THE KERNEL
+      THEORY DOES NOT: the kernel is stock, but if the upscale rebuilt
+      assets or the ELF, GE/asset tracks would fail on real corruption —
+      i.e. the banner may be TRUE and the fix is a whitelist decision for
+      David, not a staging bug. Then, if needed, find turtles' descriptor
+      table with `obfstr2.py` (it recovers keys from ciphertext alone).
+      *(Filed 2026-08-21 from David, looking at
       a turtles_pro boot: "how do we fix these errors though?")*
       **DIAGNOSED AT THE DESK, no run needed, and it is a one-line-shaped
       fault with a general blast radius.** The ZK track validates the KERNEL:
@@ -3064,6 +3445,62 @@ These have each been violated at least once and each cost a run or a window:
       mechanism is fully established above and `getboot.sh` already exists and
       works; what it costs is the staging logic plus one confirming pair of
       boots.
+
+- [x] **69. turtles_pro DOES NOT BOOT any more: the guest dies during asset
+      loading, silently, before the framebuffer or the node bus ever start.**
+      `S1 D3` **★★★ CLOSED 2026-08-23 — it was a corrupt per-title FILE STORE,
+      not code.** Moving `$PAD_ROOT/data/nv/turtles_pro/` aside and letting the
+      game recreate it restored a full boot immediately: `nb=431 fb=60 ifs=250`,
+      1598 frames, against `nb=0 fb=0 eglshim=4` before. The parked copy is at
+      `~/item62/nv-turtles_pro.parked` if anyone wants to work out what in it
+      was fatal.
+      **The bisect was the wrong instinct and is worth remembering as such.**
+      Only ONE commit touched `tools/spike2_emu` in the whole window
+      (`7fbc01a`, v0.153.0), so there was nothing to bisect BETWEEN — and a
+      build from **v0.152.2**, the last release before it, stalled exactly the
+      same way. That one run is what proved the fault was not in the repository
+      at all and turned the search towards machine state. Without it I would
+      have spent the afternoon reverting shim hunks.
+      **Still open as a question, not as work:** how the store got into that
+      state. Its `.crc32` companions and data files are written separately, and
+      a run always ends in SIGKILL, so a half-finished record is easy to
+      imagine — but orphaned `.crc32` files turn out to be NORMAL (godzilla_le
+      has them and boots), so that is not by itself the fault. Whether the rig
+      should detect an unloadable store and reset it, rather than leaving a
+      title permanently unbootable, is a design call for David.
+      *(Filed 2026-08-23 while trying to verify items 62 and 55 on
+      turtles at David's ask — it blocked both, and was worse than either.)*
+      **The signature:** every boot reaches ~190-244 `[ifs]` scene opens, 4
+      `[eglshim]` lines, and then the guest process is simply GONE — thread
+      samples at 75 s, 95 s and 115 s all report no `game` process. A healthy
+      turtles boot (`~/t63k.log`, 2026-08-21) reaches `[fb]` after 228 `[ifs]`
+      and goes on to 437 `[nb]` and 362 `[eglshim]`. **No crash line of any
+      kind** — zero hits for `signal 11` / `segv` / `uncaught target` across
+      eight logs — so it exits silently rather than faulting, which is NOT the
+      item-41 crash shape.
+      **RULED OUT, each by its own run (D,E,F,G,I,J,K + a desk check):**
+      • not the rig — Heisei/godzilla_le boots perfectly throughout, 431 `[nb]`,
+        5095 frames at 42 fps, immediately before and after the turtles runs;
+      • not the card — `./game` still hashes `adb50ca387cf6c26f7d5baf140c6e8dc`
+        and the partition table reads clean;
+      • not the nvram edit from item 62 — run G restored the original and it
+        stalls identically;
+      • not the instruments — run F with nothing but frame capture stalls too;
+      • not item 63's cabinet at-rest word — `PAD_CAB_IDLE=0` changes nothing;
+      • not the stale fuse mount run D left behind — a fresh mount stalls too;
+      • not disk or memory — 30 GB free, 28 GiB RAM free.
+      **It is a REGRESSION and the window is narrow.** turtles last ran
+      healthily on 2026-08-21 (`t63k.log`), and `data/nvram-turtles_pro.bin` is
+      stamped 2026-08-22 14:39, which is David's own last turtles session. Main
+      has since taken v0.153.0, v0.154.0, v0.155.0 and the PAD-80/81 work.
+      **Resume:** bisect main across that window, rebuilding the shim each step
+      — `git -C <main> log --oneline v0.152.2..HEAD -- tools/spike2_emu/` is the
+      short list, and the shim is the only thing that could kill a guest
+      silently. Then re-check with the thread sampler in `c:\tmp\pad62_runL.sh`,
+      which is what proved the process is dead rather than hung.
+      — S1: the title cannot be played at all, and it blocks items 55 and 62's
+      turtles acceptance. D3: needs a run per bisect step and the fault appears
+      on every single boot, so it is reproducible on demand.
 
 - [x] **63. Straight from the game's own Stern splash to attract, with NO Tech
       Alerts screen.** `S2 D3` **★★★ CLOSED 2026-08-21 — acceptance MET and

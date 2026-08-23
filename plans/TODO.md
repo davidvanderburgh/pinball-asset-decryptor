@@ -4235,7 +4235,7 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **73. The FIXED cabinet keys are compiled to GODZILLA's switch ids, so
       on the swelf-generation titles Enter lands on a DIP switch instead of
       Service Select — mechanism CONFIRMED at the desk on all three reported
-      titles.** `S2 D2`
+      titles.** `S2 D2` ← WORKING ON
       *(Filed 2026-08-23 from David's own test notes: "Switches are not
       mapped correctly. Enter does 'Dip 8' for example" — Aerosmith and
       Avengers; Batman reads "Dip 6". Together with item 34's re-copies:

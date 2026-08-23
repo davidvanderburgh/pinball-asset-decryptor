@@ -1133,12 +1133,20 @@ class App:
         left behind by one of those would fire card B onto the end of some
         later, unrelated extract.
         """
+        # Its OWN browse memory, and the fallbacks are both PARENT folders:
+        # this picks the folder the two sub-folders go in, so offering the
+        # last extract's output directly would nest the pair inside an
+        # existing project.
+        out_now = (self.window.extract_output_var.get() or "").strip()
         parent = filedialog.askdirectory(
             title="Extract both cards into this folder (one sub-folder each)",
-            initialdir=self.window.last_browse_dir("extract_output"))
+            initialdir=(self.window.last_browse_dir("extract_both")
+                        or self.window._initialdir_for(
+                            os.path.dirname(out_now),
+                            os.path.dirname(path_a))))
         if not parent:
             return
-        self.window.remember_browse_dir("extract_output", parent)
+        self.window.remember_browse_dir("extract_both", parent)
         out_a = self._extract_both_folder(parent, path_a, path_b)
         out_b = self._extract_both_folder(parent, path_b, path_a)
 

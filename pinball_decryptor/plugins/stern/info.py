@@ -65,9 +65,10 @@ def container_counts(head):
         (see sfx_names for the chain).  This is NOT the game-code *sound
         request* count — requests sit a level above and chain/share
         fragments, so a tester comparing counts on Venom caught the old
-        "Sound requests" label as wrong.  The request tally itself is not a
-        header word; counting it would mean mining the request tables out of
-        the game ELF.
+        "Sound requests" label as wrong.  The request tally is not a header
+        word at all; it is mined out of the game ELF's own request table by
+        :mod:`spike2.sound_requests`, which takes the fragment count from
+        here as its sid ceiling.
       * ``u32 @ 0x60`` — the packed cat-0 sounds.  Equals
         ``len(derive_params())`` (the Extract decode count) on every card
         with a cached derive (LZ 1.22 both editions = 549, Elvira 3 = 5597).
@@ -292,6 +293,23 @@ def _data_partition_probe(card):
             fragments, sounds = container_counts(reader.peek(image_bin, 0x68))
         except Exception:
             fragments = sounds = None
+
+    # One ELF read serves the title code, the adjustment/high-score counts and
+    # the sound-request tally, so the extra rows cost a parse rather than
+    # another pass over the card.  Read before the asset rows are assembled:
+    # the request count belongs beside the other two sound tallies.
+    try:
+        fw = _game_elf_bytes(reader, found)
+    except Exception:
+        fw = b""
+    requests = None
+    if fw and fragments:
+        try:
+            from .spike2.sound_requests import count_sound_requests
+            requests = count_sound_requests(fw, fragments)
+        except Exception:
+            requests = None
+
     asset_rows = [
         ("Videos", format(found["videos"], ",")),
         ("Images", format(found["images"], ",")),
@@ -306,6 +324,13 @@ def _data_partition_probe(card):
                                 "resolve and play (the game's sound "
                                 "requests chain and share them)"
              % format(fragments, ",")))
+        if requests is not None:
+            asset_rows.append(
+                ("Sound requests", "%s — the calls the game code can make to "
+                                   "play audio; each one chains one or more "
+                                   "fragments (from the game's own request "
+                                   "table, not a header count)"
+                 % format(requests, ",")))
     else:
         asset_rows.append(
             ("Sounds", "packed inside image.bin — run Extract to decode "
@@ -315,12 +340,8 @@ def _data_partition_probe(card):
             ("Music banks", "%d (per-category image-scNN.bin song banks)"
              % found["music_banks"]))
 
-    # One ELF read serves both the title code and the adjustment/high-score
-    # counts, so the extra rows cost a parse rather than another pass over the
-    # card.
     title_code = None
     try:
-        fw = _game_elf_bytes(reader, found)
         if fw:
             title_code = title_code_from_firmware(fw)
             rows.extend(_adjustment_rows(fw))

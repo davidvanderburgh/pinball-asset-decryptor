@@ -3033,7 +3033,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **62. Every title but the one the rootfs was built from raises `GAME
       VALIDATION ERROR #3 UPDATE SD CARD`, because `/mnt/boot/zImage` is
-      godzilla's forever.** `S2 D3` ← NEEDS DAVID'S CALL, 60% *(D2 → D3: the desk
+      godzilla's forever.** `S2 D3` ← WORKING ON ← NEEDS DAVID'S CALL, 60% *(D2 → D3: the desk
       diagnosis below is REFUTED for turtles_pro, so what is left needs a
       turtles-instrumented run or RE of its own validation module, not a
       staging call.)*

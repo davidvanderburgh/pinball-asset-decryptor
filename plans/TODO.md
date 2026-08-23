@@ -2796,9 +2796,19 @@ These have each been violated at least once and each cost a run or a window:
       header-only, no playfield art), so no inserts EXIST to light, mapped or
       not — the `0 records` class item 57's sweep explicitly ruled "NOT the
       same bug as item 53", whose device-position RE still has no owning
-      item. (3) **beatles — NOT IN THE CATALOGUE**: no card in the cache, no
-      tables dir, zero mentions anywhere in this file; unverifiable until a
-      card exists. **And a warning for this item's own acceptance: judge
+      item. (3) **beatles — RESOLVED 2026-08-23 the same day, and NOT this
+      item either.** David added beatles-1_29_0 (zip on the OneDrive
+      Desktop; not yet in the card library) and its device table parses
+      CLEANLY — 180 records (16 coil / 102 led / 62 switch), LED groups
+      ONLY 6 and 7, both INSIDE GROUP_NODE — so every beatles insert is
+      addressable TODAY and its dark attract has some OTHER cause (genuine
+      attract behavior, a decode gap — star_wars's class — or something
+      new; one PAD_NB_TRACE run once the card is in the library says
+      which). It also ships `Test/beatles_playfield.png` 336x710 with 168
+      of 180 records on it, 0 outside — full artwork-view material, no
+      item-71 rename trap. Note swelf.py has no beatles ROOTS entry, so
+      switch-id numbering needs the runtime shape-hunt. **And a warning
+      for this item's own acceptance: judge
       "show its playfield lighting" IN A STARTED GAME, not attract.** Item 50
       measured turtles driving NO playfield lamp frames in attract (only node
       1's `0485` heartbeat; nodes 8/9 receive nothing until coins+Start), so
@@ -4126,6 +4136,34 @@ These have each been violated at least once and each cost a run or a window:
       today. D2: the failing filter and the table-side name are both
       located; the catalogue-wide regression control is a desk run of
       cardaudit; one bounded run to see the window.
+      **★ 2026-08-23, David challenged the X-Men/JP half of the census and
+      the recheck both CONFIRMS it and CORRECTS two claims under it.**
+      Full-card sweeps this time (every partition, IHDR of every image,
+      magic-sniff of every extensionless blob, raw PNG-signature scan of
+      jurassic_park_le's whole 7.86GB and uncanny_xmen_le's 1.88GB
+      image.bin): NO playfield drawing exists anywhere on uncanny_xmen_le
+      0.97.0 or jurassic_park_le 1.15.0 — the census stands, now on
+      exhaustive evidence, but it is a property of THOSE BUILDS (ask any
+      tester on newer code for their version). The corrections: (1) "ZERO
+      device records" was the PARSER, not the card — both titles show the
+      documented aerosmith parser-gap signature (X-Men: 810 seeds → 17
+      garbage validations; JP: 1164 → 17, 'image' strings like
+      `/spine/src/Slot.cpp`), so absent POSITIONS are not proven, only
+      absent ART is; the 0-records class RE (batman/aerosmith, still
+      unowned) now has two more confirmed members. (2) **NEWER BUILDS
+      MOVED THE ART DIRS**: uncanny_xmen_le 0.97.0 has NO `images/Test/`
+      or `images/TestMode/` AT ALL — service art now lives under
+      `images/System/TestMode/` (beatles 1.29 ships BOTH trees) — so
+      find_playfield_art() and cardaudit's ART_DIRS would MISS playfield
+      art a future build ships in the new location. The fix this item
+      already prescribes (resolve the table's OWN layout_image name
+      against `assets/nuk/images/<name>.png`) handles that generically —
+      the name carries its own relative path — and the sweep control
+      should include an X-Men-class card so no-art rows stay no-art.
+      Counterexample now on hand: beatles-1_29_0 parses 180 records with
+      `Test/beatles_playfield.png` found by the CURRENT filter — art:yes
+      with no change. Also noted: JP's card is NOT in the WSL cardcache;
+      it lives in the repo library `images/Stern/spike2/`.
 
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T

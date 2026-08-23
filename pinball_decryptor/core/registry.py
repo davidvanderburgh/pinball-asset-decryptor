@@ -520,11 +520,29 @@ class Manufacturer(ABC):
         """What changed from image *path_a* to image *path_b*, in the same
         section shape as :meth:`image_info`.
 
+        A row may carry a THIRD element — ``(name, value, ref)`` — an opaque,
+        plugin-private token naming one file on one of the two images.  The
+        Compare tab hands it straight back to :meth:`extract_report_file` when
+        the user double-clicks that row; nothing else reads it, and renderers
+        take ``row[0]``/``row[1]`` so a two-element row stays valid.
+
         Called on a worker thread by the Compare tab; must stay read-only.
         Only meaningful for plugins advertising ``capabilities.compare`` —
         the default contributes nothing.
         """
         return []
+
+    def extract_report_file(self, image_path, ref, out_dir):
+        """Copy the file *ref* names off *image_path* into *out_dir* and
+        return the written path.
+
+        *ref* is a token this plugin itself put on a :meth:`compare_images`
+        row.  Called on a worker thread so the Compare tab can open a changed
+        asset without an Extract.  Raise ``FileNotFoundError`` when the image
+        no longer holds it; the default has no report rows to be asked about.
+        """
+        raise NotImplementedError(
+            f"{self.display} cannot open a file out of a card image.")
 
     # ------------------------------------------------------------------
     # Pipeline factories — implement those your capabilities advertise.

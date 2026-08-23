@@ -1243,6 +1243,7 @@ class MainWindow:
                  on_audio_profile=None,
                  on_partition_image_opened=None,
                  on_compare_run=None,
+                 on_extract_both=None,
                  initial_default_presets=None,
                  on_default_presets_change=None,
                  initial_flash_choices=None,
@@ -1387,6 +1388,9 @@ class MainWindow:
         # Fired with (path_a, path_b) when a Compare run starts — the App
         # records both into recent-paths history and persists them.
         self._on_compare_run = on_compare_run
+        # Fired with (path_a, path_b) by the Compare tab's Extract Both — the
+        # App picks the output folders and queues the two Extract runs.
+        self._on_extract_both = on_extract_both
         # Seed each log pane with the previous sessions' history (dimmed,
         # above a cut line)?  ⚙-menu checkbutton; OFF = a clean per-session
         # log for users who don't want the past in view.  Persisted in
@@ -1503,6 +1507,10 @@ class MainWindow:
         self.compare_b_var = tk.StringVar()
         self._compare_seq = 0        # bump-counter, same shape as _info_seq
         self._compare_sections = []  # last rendered sections (Copy Report)
+        # tree iid -> the plugin's ref for the file that row lists, so a
+        # double-click can pull it off the card (see _compare_open_row).
+        self._compare_refs = {}
+        self._compare_open_busy = False   # one on-demand extract at a time
         # Replace-Audio tab state (capabilities.replace_audio plugins).
         # The tab scans the assets folder for .wav/.ogg slots and lets the
         # user assign a replacement track per slot; staging writes the
@@ -13265,8 +13273,11 @@ class MainWindow:
             for title, rows in self._info_sections:
                 parent = tree.insert("", tk.END, text=title, open=True,
                                      tags=("section",))
-                for name, value in rows:
-                    tree.insert(parent, tk.END, text=name, values=(value,))
+                # row[0]/row[1], not an unpack: a section row may carry a
+                # third element (see Manufacturer.compare_images).
+                for row in rows:
+                    tree.insert(parent, tk.END, text=row[0],
+                                values=(row[1],))
             self._info_copy_btn.configure(
                 state=tk.NORMAL if self._info_sections else tk.DISABLED)
             self._info_status.configure(text="")
@@ -13407,7 +13418,9 @@ class MainWindow:
                     "Everything is read straight off the cards (no Extract): "
                     "files are diffed by the cards' own validation digests, "
                     "and the adjustment / high-score defaults come from each "
-                    "card's game firmware.",
+                    "card's game firmware. Double-click a listed file to open "
+                    "it — it is pulled off the card and handed to whatever "
+                    "you normally view or play it with.",
             font=(_SANS_FONT, 9, "italic"), justify=tk.LEFT)
         intro.pack(anchor=tk.W, fill=tk.X, padx=10, pady=4)
         intro.bind("<Configure>", lambda e: intro.configure(
@@ -13432,6 +13445,24 @@ class MainWindow:
         self._compare_btn = ttk.Button(arow, text="Compare",
                                        command=self._compare_run)
         self._compare_btn.pack(side=tk.LEFT)
+        # EXTRACT BOTH, next to Compare, because it answers the question this
+        # report raises and cannot answer: the digests say a sound or a scene
+        # changed, and hearing/seeing the difference needs both cards
+        # extracted.  A tester: "adding an Extract Both button for the two
+        # images would be very useful in order to have a complete comparison
+        # in one action."  Two full Extract runs back to back, into one
+        # parent folder, using the Extract tab's own progress and log.
+        self._compare_extract_btn = ttk.Button(
+            arow, text="Extract Both", command=self._compare_extract_both)
+        self._compare_extract_btn.pack(side=tk.LEFT, padx=(6, 0))
+        _Tooltip(
+            self._compare_extract_btn,
+            "Extract image A and then image B into one folder you pick — a "
+            "sub-folder per card, named after the card.\n\nThe report above "
+            "diffs the cards' own digests, which is instant but cannot play "
+            "you a sound or show you a scene. Two extracts can, and this "
+            "queues both without you re-picking anything.",
+            lambda: self._current_theme)
         self._compare_copy_btn = ttk.Button(
             arow, text="Copy Report", command=self._compare_copy_report,
             state=tk.DISABLED)
@@ -13450,6 +13481,10 @@ class MainWindow:
         self._compare_tree.column("value", width=640, minwidth=240)
         self._compare_tree.tag_configure("section",
                                          font=(_SANS_FONT, 9, "bold"))
+        # A listed file opens on double-click — the report knows exactly which
+        # file on which card each row came from, so getting a look/listen at
+        # one no longer means extracting a whole card first (a tester).
+        self._compare_tree.bind("<Double-1>", self._compare_open_row)
         vs = ttk.Scrollbar(body, orient="vertical",
                            command=self._compare_tree.yview)
         self._compare_tree.configure(yscrollcommand=vs.set)
@@ -13475,6 +13510,7 @@ class MainWindow:
         switch — a previous manufacturer's diff must not survive)."""
         self._compare_seq += 1
         self._compare_sections = []
+        self._compare_refs = {}
         if hasattr(self, "_compare_tree"):
             try:
                 self._compare_tree.delete(
@@ -13526,6 +13562,7 @@ class MainWindow:
         tree = self._compare_tree
         tree.delete(*tree.get_children())
         self._compare_sections = []
+        self._compare_refs = {}
         self._compare_btn.configure(state=tk.DISABLED)
         self._compare_copy_btn.configure(state=tk.DISABLED)
         self._compare_status.configure(text="Comparing images…")
@@ -13547,19 +13584,35 @@ class MainWindow:
                 self._compare_empty.place_forget()
             except tk.TclError:
                 return
-            self._compare_sections = holder.get("sections") or []
-            tree.delete(*tree.get_children())
-            for title, rows in self._compare_sections:
-                parent = tree.insert("", tk.END, text=title, open=True,
-                                     tags=("section",))
-                for name, value in rows:
-                    tree.insert(parent, tk.END, text=name, values=(value,))
-            self._compare_btn.configure(state=tk.NORMAL)
-            self._compare_copy_btn.configure(
-                state=tk.NORMAL if self._compare_sections else tk.DISABLED)
-            self._compare_status.configure(text="")
+            self._compare_render(holder.get("sections") or [])
 
         self.root.after(120, _poll)
+
+    def _compare_render(self, sections):
+        """Put a finished report on the tree, remembering which rows point at
+        a file on one of the two cards."""
+        tree = self._compare_tree
+        self._compare_sections = sections
+        tree.delete(*tree.get_children())
+        self._compare_refs = {}
+        for title, rows in sections:
+            parent = tree.insert("", tk.END, text=title, open=True,
+                                 tags=("section",))
+            for row in rows:
+                openable = len(row) > 2
+                iid = tree.insert(parent, tk.END, text=row[0],
+                                  values=(row[1],),
+                                  tags=("openable",) if openable else ())
+                if openable:
+                    # The plugin's own token for that file — kept beside the
+                    # tree rather than inside it: Tk item values are strings,
+                    # and round-tripping a dict through one is how a "path"
+                    # ends up being parsed back out of display text.
+                    self._compare_refs[iid] = row[2]
+        self._compare_btn.configure(state=tk.NORMAL)
+        self._compare_copy_btn.configure(
+            state=tk.NORMAL if sections else tk.DISABLED)
+        self._compare_status.configure(text="")
 
     def _compare_copy_report(self):
         from ..core import image_info as _info_mod
@@ -13569,6 +13622,144 @@ class MainWindow:
         self.root.clipboard_append(_info_mod.as_text(
             self._compare_sections, title="Compare Report"))
         self._compare_status.configure(text="Report copied to clipboard.")
+
+    def _compare_open_row(self, event):
+        """Double-click in the report tree: open the file that row lists."""
+        iid = self._compare_tree.identify_row(event.y)
+        if iid:
+            self._compare_open_iid(iid)
+
+    def _compare_open_target(self, iid):
+        """``(side, image_path, ref)`` for the row *iid*, or ``None``.
+
+        WHICH CARD IS THE DECISION HERE, and it is the plugin's: a Deleted row
+        only exists on image A, so sending it to image B would open nothing,
+        every time — indistinguishable from a broken reader.  The ref carries
+        the side; this maps it to the path in that picker and checks the file
+        is still there.  A row with no ref (a section header, a count row, the
+        "… and N more" line) says why nothing happened rather than swallowing
+        the click.
+        """
+        ref = self._compare_refs.get(iid)
+        if ref is None:
+            self._compare_status.configure(
+                text="Only the listed files open — double-click one of the "
+                     "file rows.")
+            return None
+        side = (ref.get("side") or "B").upper()
+        image = ((self.compare_a_var.get() if side == "A"
+                  else self.compare_b_var.get()) or "").strip()
+        if not image or not os.path.isfile(image):
+            messagebox.showerror(
+                "Open %s" % (ref.get("name") or "file"),
+                "Image %s is no longer at:\n\n%s" % (side, image))
+            return None
+        return side, image, ref
+
+    def _compare_open_iid(self, iid):
+        """Pull the file row *iid* lists off its card and open it.
+
+        A tester, once the report existed: "being able to open/play modified,
+        added, or deleted assets via double-click would be awesome."  The
+        report already knows which card and which on-card path every listed
+        file came from, so this is one bounded read, not an Extract — a few MB
+        out of an 8 GB card in about a second, on a worker thread.
+
+        The copy lands in a TEMP folder, not in a project: the file is being
+        looked at, not edited, and dropping it into an extract folder would
+        make it look like an asset the next Build should write.
+        """
+        if self._compare_open_busy:
+            return
+        mfr = self._current_mfr
+        target = self._compare_open_target(iid) if mfr is not None else None
+        if target is None:
+            return
+        side, image, ref = target
+        name = ref.get("name") or "file"
+
+        import tempfile
+        import threading
+
+        self._compare_open_busy = True
+        self._compare_status.configure(text="Opening %s from image %s…"
+                                            % (name, side))
+        holder = {}
+
+        def _worker():
+            try:
+                out = tempfile.mkdtemp(prefix="spike2_compare_")
+                holder["path"] = mfr.extract_report_file(image, ref, out)
+            except Exception as e:      # missing file, unreadable card…
+                holder["error"] = e
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
+        def _poll():
+            if t.is_alive():
+                self.root.after(150, _poll)
+                return
+            self._compare_open_finished(name, side, holder.get("path"),
+                                        holder.get("error"))
+
+        self.root.after(150, _poll)
+
+    def _compare_open_finished(self, name, side, path, err):
+        """Main thread: hand the extracted copy to the desktop, or say why
+        not.  A failure that reports nothing is the one outcome this must
+        never produce — the user double-clicked and is owed an answer."""
+        from ..core import desktop
+        self._compare_open_busy = False
+        if err is not None:
+            self._compare_status.configure(text="")
+            messagebox.showerror(
+                "Open %s" % name,
+                "That file couldn't be read off image %s:\n\n%s" % (side, err))
+            return
+        ok, why = desktop.open_path(path)
+        if ok:
+            self._compare_status.configure(
+                text="Opened %s from image %s." % (name, side))
+        else:
+            self._compare_status.configure(text="")
+            messagebox.showinfo(
+                "Open %s" % name,
+                "The file was copied here, but the desktop wouldn't open "
+                "it:\n\n%s\n\n%s" % (path, why))
+
+    def _compare_extract_both(self):
+        """Run a full Extract on image A and then on image B.
+
+        The report is digests only, on purpose — it never opens a sound or a
+        scene.  When the answer needs the assets themselves, both cards have
+        to be extracted, and doing that by hand means visiting the Extract tab
+        twice and inventing two output folders (a tester: "in order to have a
+        complete comparison in one action").  The App owns the run itself; the
+        tab only checks it has two real, different images to hand over.
+        """
+        a = (self.compare_a_var.get() or "").strip()
+        b = (self.compare_b_var.get() or "").strip()
+        if not a or not b:
+            messagebox.showinfo(
+                "Pick two images",
+                "Pick both card images first — Extract Both extracts the "
+                "pair.")
+            return
+        for side, p in (("A", a), ("B", b)):
+            if not os.path.isfile(p):
+                messagebox.showerror(
+                    "File not found", "Image %s:\n\n%s" % (side, p))
+                return
+        if os.path.normcase(os.path.abspath(a)) == os.path.normcase(
+                os.path.abspath(b)):
+            messagebox.showinfo(
+                "Same image twice",
+                "Images A and B are the same file, so there is only one "
+                "extract to run — use the Extract tab.")
+            return
+        if self._on_extract_both:
+            self._on_extract_both(a, b)
 
     def _build_text_tab(self):
         """Build the 'Replace Text' tab: a searchable list of the editable
@@ -20617,6 +20808,11 @@ class MainWindow:
             _cv = getattr(self, _attr, None)
             if _cv is not None:
                 _cv.configure(highlightbackground=c["border"])
+
+        if hasattr(self, "_compare_tree"):
+            # The rows a double-click can open, in the same hue every other
+            # tree uses for "this row leads somewhere".
+            self._compare_tree.tag_configure("openable", foreground=c["link"])
 
         if hasattr(self, "_text_tree"):
             self._text_tree.tag_configure("assigned", foreground=c["success"])

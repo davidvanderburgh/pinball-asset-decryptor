@@ -118,6 +118,12 @@ class App:
         # ticked); None otherwise.  Armed at build dispatch, consumed (and
         # cleared) in _on_done.
         self._chain_flash_after_build = None
+        # (in_path, out_path) for the SECOND card of a Compare "Extract Both"
+        # while the first one runs; None otherwise.  Armed at dispatch,
+        # consumed (and cleared) in _on_done, exactly like the flash chain
+        # above -- one stale entry firing on an unrelated later run is the
+        # failure mode both of these are shaped to avoid.
+        self._chain_extract_next = None
         # Path of the loaded/saved .pinproj (shown in the title bar), or None.
         self._project_path = None
         # Detected-game caption for the title bar ("Led Zeppelin v1.22 LE"),
@@ -263,6 +269,7 @@ class App:
             on_audio_profile=self._on_audio_profile_request,
             on_partition_image_opened=self._on_partition_image_opened,
             on_compare_run=self._on_compare_run,
+            on_extract_both=self._start_extract_both,
             initial_default_presets=self._settings.get(
                 "default_settings_presets", {}),
             on_default_presets_change=self._on_default_presets_change,
@@ -1088,6 +1095,97 @@ class App:
         if hasattr(self.pipeline, "set_log_line_cb"):
             self.pipeline.set_log_line_cb(self._post_log_line)
         threading.Thread(target=self.pipeline.run, daemon=True).start()
+
+    @staticmethod
+    def _extract_both_folder(parent, image_path, other_path):
+        """The output folder one card of an Extract Both pair gets.
+
+        Named after the CARD FILE, not "A"/"B": a folder called ``A`` tells
+        you nothing three days later, and the card name already carries the
+        title and the version, which is the whole reason the two are being
+        compared.  Two cards with the same filename in different directories
+        would land on one folder and the second run would extract over the
+        first, so that case (only) falls back to the parent directory name.
+        """
+        stem = os.path.splitext(os.path.basename(image_path))[0]
+        if stem == os.path.splitext(os.path.basename(other_path))[0]:
+            here = os.path.basename(os.path.dirname(os.path.abspath(
+                image_path))) or "card"
+            stem = "%s (%s)" % (stem, here)
+        return os.path.join(parent, stem)
+
+    def _start_extract_both(self, path_a, path_b):
+        """Extract card A, then card B, into one folder the user picks once.
+
+        A tester wanted "a complete comparison in one action": the Compare
+        report diffs digests and can never play a sound, so the follow-up is
+        always two extracts.  This is those two extracts, back to back,
+        through the ordinary Extract machinery — same tab, same phase row,
+        same log, same Cancel — rather than a second, parallel runner.
+
+        SEQUENTIAL, NOT SIDE BY SIDE.  One pipeline object, one run-state,
+        one progress bar; two at once would fight over all three, and a Spike
+        2 extract is disk-bound anyway, so the pair would not finish sooner.
+
+        The chain is armed only once the first run has actually STARTED.
+        ``_start_extract`` bails out at half a dozen guards (no output folder,
+        an overwrite the user declines, nothing ticked), and an armed chain
+        left behind by one of those would fire card B onto the end of some
+        later, unrelated extract.
+        """
+        parent = filedialog.askdirectory(
+            title="Extract both cards into this folder (one sub-folder each)",
+            initialdir=self.window.last_browse_dir("extract_output"))
+        if not parent:
+            return
+        self.window.remember_browse_dir("extract_output", parent)
+        out_a = self._extract_both_folder(parent, path_a, path_b)
+        out_b = self._extract_both_folder(parent, path_b, path_a)
+
+        # A card image is a FILE, so the "From SSD" radio (if this plugin has
+        # one and the user left it on a drive) has to come back to "From ISO"
+        # or _start_extract would dispatch a physical-device read against a
+        # path that is not a device.  The handler re-packs the picker rows to
+        # match; setting the var alone would leave the drive picker on screen.
+        src_var = getattr(self.window, "extract_input_source_var", None)
+        if src_var is not None:
+            try:
+                src_var.set("iso")
+                self.window._on_input_source_change("extract")
+            except tk.TclError:
+                pass
+        self.window.extract_input_var.set(os.path.normpath(path_a))
+        self.window.extract_output_var.set(os.path.normpath(out_a))
+        try:
+            self.window._notebook.select(self.window._tab_extract)
+        except tk.TclError:
+            # The run still happens; only the view is left where the user was.
+            pass
+        self.window.append_log(
+            "Extract Both: two cards, one after the other.\n"
+            "  1. %s  ->  %s\n  2. %s  ->  %s"
+            % (os.path.basename(path_a), out_a,
+               os.path.basename(path_b), out_b), "info")
+
+        before = self.pipeline
+        self._chain_extract_next = (os.path.normpath(path_b),
+                                    os.path.normpath(out_b))
+        self._start_extract()
+        if self.pipeline is before:
+            # Never started — drop the queued second card on the floor rather
+            # than let it ride on somebody else's run.
+            self._chain_extract_next = None
+            self.window.append_log(
+                "Extract Both: the first extract didn't start, so the second "
+                "card was not queued.", "info")
+
+    def _run_chained_extract(self, in_path, out_path):
+        """Second half of an Extract Both: point the Extract tab at card B and
+        run it.  Nothing is re-armed here — the pair is two runs, not a queue,
+        so a failure on B is just a failed extract."""
+        self.window.extract_input_var.set(in_path)
+        self.window.extract_output_var.set(out_path)
+        self._start_extract()
 
     def _extract_will_produce_audio(self):
         """True when the Extract run being dispatched will actually emit
@@ -3091,6 +3189,11 @@ class App:
         # leave a stale flash queued for a later, unrelated success.
         chain_flash = self._chain_flash_after_build
         self._chain_flash_after_build = None
+        # Same up-front consume for the Extract Both pair, and for the same
+        # reason: a cancelled or failed first card must not leave the second
+        # one armed for whatever run finishes next.
+        chain_extract = self._chain_extract_next
+        self._chain_extract_next = None
         # Revert runs reuse the write run-state but have their own messaging +
         # a post-run rescan (on-disk asset bytes changed under the tabs).
         if getattr(self, "_revert_active", False):
@@ -3242,6 +3345,17 @@ class App:
                     self.window.append_log(
                         f"Extract completed. Total time: "
                         f"{h:02d}:{m:02d}:{s:02d}.", "success")
+                if chain_extract:
+                    # Compare's Extract Both: card A is done, card B is next.
+                    # after(0, ...) so this _on_done fully unwinds (run state
+                    # cleared, queue drained) before the second run re-arms
+                    # it — the build->flash chain's rule, same reason.
+                    in_b, out_b = chain_extract
+                    self.window.append_log(
+                        "Extract Both: first card done — starting the second "
+                        "(%s)…" % os.path.basename(in_b), "info")
+                    self.root.after(
+                        0, lambda: self._run_chained_extract(in_b, out_b))
             else:
                 self.window.append_log(summary, "success")
                 if run_elapsed is not None:

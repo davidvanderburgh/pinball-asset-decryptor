@@ -4291,10 +4291,44 @@ These have each been violated at least once and each cost a run or a window:
       ("LOCKDOWN BUTTON" vs "Action Button", "(OPTIONAL)" suffixes, trailing
       spaces, "Coin Door Power Interlock" vs "COIN DOOR INTERLOCK") and are
       all "?" on five titles where (node,bit) still resolves.
-      **Resume:** implement (node,bit)→title-id resolution for the compiled
-      cabinet rows at binds build in padglhost.c (understand-workflow results
-      pending for exact seams: struct keybind fields, binds_playfield(),
-      binds_export, --binds oracle, tests).
+      **IMPLEMENTED (2026-08-23, item/73 `9327708`+`2d80977`) in SIX copies:**
+      padglhost binds_cabinet() (by wire at binds_resolve, want[0] stays NULL
+      so the item-49 gate is untouched), hwshim sw_rest door (0,23), playfield
+      48V-banner door id, swshow at-rest door/Start, plunge door (its _WANT
+      name misses this family), autoattract BACK (compiled 28 = batman's
+      Service SELECT — it would walk INTO the menu). nav.sh doc fixed;
+      ringwatch.py deliberately kept godzilla-wide (godzilla-addressed RE
+      instrument). gstvid's "switch 33" is a tombstone comment, no code.
+      **DESK ORACLE PASSED, all 30 titles:** --binds before/after under the
+      rig lock — 18 titles byte-identical (godzilla family + the five
+      ?-name titles), 12 remapped, and a cross-check of every exported
+      cabinet row against its own list = **330/330 correct, 0 mismatches**.
+      godzilla_pro export byte-identical (the control). Bonus catch:
+      james_bond_60th_le is a TWELFTH broken title — its Ticket Notch shifts
+      Tilt/Left Coin ids by one, so T pressed Left Coin there; nobody had
+      noticed. Live renderer log on a real aerosmith run shows all 11
+      remaps + Enter=26.
+      **LIVE HALF BLOCKED ON A RUN ANOMALY, being bisected:** aerosmith's
+      GUEST exits ~1-2 min into boot on this session's non-interactive
+      watch.sh runs (three runs: with/without GL_RAISE, with/without
+      autoattract+ballfeed — all exited; no SEGV, log ends after the scene
+      enumeration at [sleep] #1500). David's own GUI runs of the same card
+      today reached the switch-report state on main. My shim edit is
+      provably inert pre-table (no [swrest] line = silent no-file/early
+      return; pre-table cabinet word is the synthetic constant either way).
+      **CONTROL VERDICT: MAIN'S CODE EXITS IDENTICALLY** (same env, same
+      card, same silent death after scene enumeration, [gst] 3 factories
+      up) — **this branch is exonerated**; the aerosmith guest-exit is a
+      pre-existing anomaly of scripted runs on the current state (item 57
+      booted aerosmith via watch.sh ~Aug 18, so it is also recent — David's
+      GUI runs today are the last known-good). To be filed as its own item
+      with the control evidence, not chased inside this one.
+      **Resume:** batman + avengers live runs (in flight): at attract,
+      xdotool Enter into "<game> - Stern Spike 2 emulator", read [swchg]
+      naming SERVICE SELECT; then file the aerosmith-exit item and close
+      per the acceptance (state plainly that aerosmith's live half rests on
+      the desk oracle + the live renderer remap log until its boot anomaly
+      is fixed).
 
 - [ ] **74. A boot that is copying the card shows NOTHING about the copy —
       minutes of "Startup In Progress" with no hint that a ~7 GB dd is

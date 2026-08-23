@@ -4232,10 +4232,44 @@ These have each been violated at least once and each cost a run or a window:
       across possibly several generations — grade is from the armchair
       until the census sizes it.
 
-- [ ] **73. The FIXED cabinet keys are compiled to GODZILLA's switch ids, so
+- [x] **73. The FIXED cabinet keys are compiled to GODZILLA's switch ids, so
       on the swelf-generation titles Enter lands on a DIP switch instead of
       Service Select — mechanism CONFIRMED at the desk on all three reported
-      titles.** `S2 D2` ← WORKING ON
+      titles.** `S2 D2` DONE 2026-08-23, `item/73`, `9327708`..`0e1bec9`,
+      awaiting `/finish`.
+      **★★★ CLOSED 2026-08-23 — resolve by WIRE, in NINE copies, desk-oracled
+      over all 30 titles and live-verified on two.** The law: the cabinet's
+      (node,bit) layout is universal (all 29 lists agree), the ID is the
+      title's table index and drifts — TWELVE titles were wrong, not three
+      (the eight id-26 titles + batman + munsters/sword_of_rage at 190+, and
+      bond60th's Ticket Notch quietly shifting Tilt/Left Coin by one).
+      Fixed: padglhost binds_cabinet() (want[0] stays NULL, item-49 gate
+      untouched, compiled ids stand until a list parses); hwshim
+      sw_rest_resolve door by (0,23) + sw_active[128→256] (the old guard
+      silently dropped every munsters/sword row before the wire check —
+      found by the adversarial review, invisible to the oracle and both live
+      runs); watch.sh PAD_DOOR_OPEN (a seventh compiled 33, re-resolved per
+      pass); swinit.py headless rest set (desk-proven: munsters
+      [198,234-239], batman [36,71-76], godzilla unchanged); playfield 48V
+      door id (+ artwork-view fallback to the full list); plunge door;
+      swshow at-rest rows (assign, not setdefault — batman's door 36
+      collided with godzilla's "Start" label); autoattract BACK (re-resolved
+      before every press for first-run arrival); swexercise wire-refusal
+      backstop (the name globs failed OPEN on the five all-'?' titles).
+      **Evidence:** --binds desk oracle before/after under the rig lock — 18
+      titles byte-identical (godzilla family + ?-five), 12 remapped,
+      **330/330 exported cabinet rows match each title's own list**,
+      godzilla_pro byte-identical control. 341 spike2 tests green. **LIVE:
+      batman and avengers** — real xdotool Enter flipped the cabinet SPI
+      word at node 0 bit 8 ([cabchg] ff0f0f→ff0e0f, ~700 ms held) =
+      SERVICE SELECT on the game's own wiring, where the old build pressed
+      DIP 6 / DIP 8; [swrest] logged "door resolved: id 36 / 34, not 33";
+      autoattract's resolved Back visible as bit-11 pulses. **Aerosmith's
+      live half is the stated exception:** its guest exits under scripted
+      watch.sh on MAIN too (control-proven, filed as item 75), so it rests
+      on the desk oracle plus its own run's renderer log (all 11 remaps,
+      Enter→26, logged live before the guest died). Long form: handoff
+      "CLOSED item 73".
       *(Filed 2026-08-23 from David's own test notes: "Switches are not
       mapped correctly. Enter does 'Dip 8' for example" — Aerosmith and
       Avengers; Batman reads "Dip 6". Together with item 34's re-copies:

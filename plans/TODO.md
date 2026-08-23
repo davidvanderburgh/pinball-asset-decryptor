@@ -1904,7 +1904,7 @@ These have each been violated at least once and each cost a run or a window:
       it off D1.
 
 - [ ] **34. Booting the same card from a different path re-copies the whole
-      image, so "first run only" slowness comes back.** `S3 D2`
+      image, so "first run only" slowness comes back.** `S2 D2`
       **Observed 2026-08-09 (David's godzilla_pro session):** "Startup In
       Progress" for ~3 min — first frame at 177 s against the ~15 s a cached
       boot takes — with input laggy while the copy competed with the boot's own
@@ -1936,6 +1936,22 @@ These have each been violated at least once and each cost a run or a window:
       comparison, established from the source above; the acceptance needs one
       confirming session of two boots plus the negative case, which is what
       keeps it off D1.
+      **★ WIDENED + S3 → S2, 2026-08-23. David's own test notes, three titles
+      in one evening session: "first-time boot for games takes a very long
+      time... Aerosmith, Avengers, and Batman", and "blocking me on a lot of
+      diagnosis."** The cardcache logs put the copies on the clock: all three
+      logs carry today's mtime (18:10–18:21) and their "local cache of <card>
+      complete" line counts are **aerosmith_le ×2, avengers_infinity_le ×1,
+      batman ×3** — each line is one finished full-image copy, so batman
+      copied three times for bytes that never changed. All three titles
+      already ran live during item 57's sweep (~2026-08-19), so today's
+      copies were either this item's stamp thrash or a cleared/renamed
+      `~/cardcache` — **the next pass should read the stamp files and say
+      which before touching code**, because a cleared cache would point at
+      retention (item 33's visibility gap) rather than the stamp. S2 on
+      David's word: this now costs runs across the whole title sweep, not
+      friction on one card. The "looks like a hang" half — no progress
+      feedback while a copy runs — is item 74, filed the same day.
 
 - [x] **40. After a save-state LOAD the playfield's LEDs never come back, and
       the window says "no emulator" over a run that is plainly alive.** `S2 D2`
@@ -4215,6 +4231,78 @@ These have each been violated at least once and each cost a run or a window:
       with the instrument in hand, but the RE itself is an unknown struct
       across possibly several generations — grade is from the armchair
       until the census sizes it.
+
+- [ ] **73. The FIXED cabinet keys are compiled to GODZILLA's switch ids, so
+      on the swelf-generation titles Enter lands on a DIP switch instead of
+      Service Select — mechanism CONFIRMED at the desk on all three reported
+      titles.** `S2 D2`
+      *(Filed 2026-08-23 from David's own test notes: "Switches are not
+      mapped correctly. Enter does 'Dip 8' for example" — Aerosmith and
+      Avengers; Batman reads "Dip 6". Together with item 34's re-copies:
+      "These two items are blocking me on a lot of diagnosis.")*
+      **Confirmed symptom-for-symptom without a run.** padglhost.c:801-811
+      hard-codes the cabinet rows as switch IDS on godzilla's numbering —
+      Enter/KP Ent `{25,0}` Service Select, `=`/`-` 26/27, Bksp/Esc 28,
+      Start 36, Left Coin 39, Action 34, Tilt 38, Coin Door 33. The comment
+      above them (padglhost.c:791-793, item 48) says cabinet rows "stay
+      compiled always — their (node,bit) layout measured identical on every
+      title 2017-2024" — and the (node,bit) layout IS universal, but the row
+      payload is an ID, and the swelf generation numbers ids from the
+      title's own table (DIP 1..8 at num 1..8, swelf.py:61). The derived
+      lists on disk close the case: **aerosmith_le id 25 = node 0 bit 7
+      DIP 8; avengers_infinity_le id 25 = DIP 8; batman id 25 = node 0
+      bit 5 DIP 6** — David's report exactly, title for title. SERVICE
+      SELECT sits at id 26/26/28 on those lists, so `=` does Select on two
+      of them; on avengers id 34 (the compiled Action Button) is COIN DOOR
+      INTERLOCK. Every compiled cabinet row is off-by-N on this whole
+      generation. The playfield tail is NOT implicated: item 48's
+      binds_playfield() already re-derives it per title by NAME; the cabinet
+      rows were deliberately left compiled and are exactly the rows now
+      wrong.
+      **Fix shape (a guess, unlike the mechanism):** resolve the cabinet
+      rows by NAME against the title's own switch_list.txt at binds build —
+      the machinery item 48 built — or by the universal (node,bit) directly;
+      compiled ids stay as the no-rig-env fallback.
+      **Oracle:** dump/tables/<title>/switch_list.txt at the desk, then each
+      game's service-menu Switch Test naming the pressed switch live.
+      **Acceptance:** on aerosmith_le, avengers_infinity_le and batman,
+      Enter registers as SERVICE SELECT in the game's own switch test (or
+      the service menu navigates where the test is unreachable), Start and
+      coin do what their labels say, and godzilla_pro is the unchanged
+      control.
+      — S2, not S1: these titles reached attract and play in item 57's live
+      runs, but wrong service keys tax every diagnosis pass on this whole
+      generation — David's words above. D2: the mechanism is desk-confirmed
+      and the name-resolving machinery exists; what is left is plumbing plus
+      a three-title confirming run.
+
+- [ ] **74. A boot that is copying the card shows NOTHING about the copy —
+      minutes of "Startup In Progress" with no hint that a ~7 GB dd is
+      running, so every copying boot reads as a hang.** `S3 D2`
+      *(Filed 2026-08-23 alongside item 34's widening: David read three
+      copying boots in one session as "first-time startup took an
+      excessively long time", and item 34's original godzilla sighting
+      records the same confusion. This is the VISIBILITY half; item 34 is
+      the copies that should not happen at all. A genuine first boot of any
+      new card pays this even after 34 is fixed.)*
+      cardmount.sh backgrounds the copy into `~/cardcache` and logs one line
+      per copy — "local cache of <card> complete", at the END
+      (`~/cardcache/<label>.log`). Nothing on screen or in the GUI says a
+      copy is running, how far along it is, or that a first boot is expected
+      to be slow. Known numbers from item 34: 177 s to first picture vs
+      ~15 s cached, input laggy while the copy competes with the boot's own
+      9p reads.
+      **Acceptance:** during a copying boot the GUI names the copy and shows
+      its progress (source size is known, bytes-done/total is cheap), and a
+      cached boot shows nothing new. Whether to also PRE-copy before guest
+      start (a paced copy + a fast boot instead of the laggy 177 s hybrid)
+      is a design choice for the pass that takes this — it touches boot
+      ordering, so it is not free, and item 34's stamp semantics must not
+      change.
+      — S3: friction — the run completes, and once 34 is fixed each card
+      pays it once; what it costs is testers reading a working boot as a
+      hang. D2: mechanism fully known, the log and file sizes exist to draw
+      progress from; needs one live copying boot to confirm.
 
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T

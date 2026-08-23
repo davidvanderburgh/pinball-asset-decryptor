@@ -85,7 +85,17 @@ S=$(dirname "$0")
 . "$S/gamestate.sh"
 SW=$ROOT/dump/padsw
 
-BACK=28                              # Service Back == Esc in the legend window
+# Service Back == Esc in the legend window. 28 is GODZILLA's id for it; the
+# id is a per-title table index (item 73: on batman 28 is Service SELECT, so
+# the compiled constant would walk INTO the menu). The wire is universal -
+# node 0 bit 11 on all 29 derived lists - so resolve the title's own id from
+# its switch list when one exists, and keep 28 only as the no-list fallback.
+BACK=28
+SWLIST="${PAD_TABLES:-$ROOT/dump/tables}/${PAD_GAME:-}/switch_list.txt"
+if [ -n "${PAD_GAME:-}" ] && [ -f "$SWLIST" ]; then
+    BACK=$(awk '!/^#/ && $3 == 0 && $4 == 11 { print $1; exit }' "$SWLIST")
+    [ -n "$BACK" ] || BACK=28
+fi
 HOLD=${PAD_AUTO_HOLD:-2000}          # ms to press; see the table above
 QUIET=${PAD_AUTO_QUIET:-2}           # s of bus silence that means "ready"
 TRIES=${PAD_AUTO_TRIES:-5}           # presses before giving up and saying so

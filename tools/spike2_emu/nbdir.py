@@ -109,11 +109,24 @@ CLASS_BY_NAME = {v: k for k, v in CLASS_NAMES.items()}
 # tmc5041node's 0x01 guess before 2026-08-22 cost godzilla_le ~80 s of
 # failed "UPDATING NODE BOARD RUNTIME" retries per boot.
 #
-# Everything else is a GUESS the output marks as one - and hwshim's
-# nb_hexreg_answer() now corrects a wrong guess at runtime from the game's
-# own decrypted images, so a guess costs at most the first grading round.
+# ★ coil4node is 0x04, measured 2026-08-23 with hexreg.py off a LIVE
+# turtles_pro game (item 55). It was absent from this table, so it took
+# VARIANT_DEFAULT = 0x01 and turtles' node 12 sat at status 7 = Checksum on
+# every boot while all seven other slots graded 2 - the "UPDATING NODE BOARD
+# RUNTIME / UPDATE FAILED" banner David reported. All three coil4node classes
+# in the registry (1, 2 and 5) report 0x04; node 12 uses class 5.
+# The same scan reproduced ws2812node 0x05, node4 0x03 and pinnode 0x01
+# unchanged, which is what makes the new row trustworthy rather than another
+# guess - three known-correct answers came back correct in the same pass.
+#
+# NOTE hwshim's nb_hexreg_answer() is supposed to correct a wrong guess at
+# runtime and did NOT fire for turtles' node 12: the run that measured this
+# logged no hexreg correction at all. That gap is real and is recorded in
+# item 55; this prior fixes the symptom, not that.
+#
+# Everything else is a GUESS the output marks as one.
 VARIANT_PRIOR = {"pinnode": 0x01, "ws2812node": 0x05, "node4": 0x03,
-                 "tmc5041node": 0x0d}
+                 "tmc5041node": 0x0d, "coil4node": 0x04}
 VARIANT_DEFAULT = 0x01
 
 # Class preference PER TYPE, measured pair first: the variant byte lives

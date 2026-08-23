@@ -2597,9 +2597,52 @@ These have each been violated at least once and each cost a run or a window:
       and reading (i) vs (ii) has to be settled before the instrument is
       chosen.
 
-- [ ] **55. turtles_pro flashes "UPDATING NODE BOARD RUNTIME / UPDATE FAILED"
-      for nodes 4 and 12 at game start — the title's OWN node table carries
-      two mis-derived rows, and the shim serves them verbatim.** `S3 D2`
+- [x] **55. turtles_pro flashes "UPDATING NODE BOARD RUNTIME / UPDATE FAILED"
+      for nodes 4 and 12 at game start.** `S3 D2` **★★★ FIXED 2026-08-23. The
+      diagnosis in this entry was half right and half wrong, and the wrong half
+      is the interesting one: the shim was NOT "serving the title's table
+      verbatim" — it was never reading that table at all.**
+      **ROOT CAUSE, two independent faults stacked:**
+      1. **`run_game.sh` never exported `PAD_GAME` on a CARD run.**
+         `nb_fident_load()` builds `/dump/tables/$PAD_GAME/node_ident.txt` and
+         returns early when it is unset, so every card boot of every title fell
+         back to the built-in `nb_idents[]`, which is **godzilla's** node set.
+         The log said so all along, once looked at: `[nbid] node 12 claims
+         part=0x2c40102b variant=0x05 fw=1.33.0 (built-in)`. The built-in
+         claims variant 0x05 for everything on part 0x2c40102b because on
+         godzilla every board on it is a ws2812node — which is why turtles'
+         nodes 2 and 14 (genuinely ws2812node) graded clean and only node 12
+         looked broken. One `export PAD_GAME="$GAME"` fixes it, for every card
+         run of every title.
+      2. **`coil4node`'s variant was a GUESS.** It was absent from
+         `nbdir.py`'s `VARIANT_PRIOR`, so it took `VARIANT_DEFAULT = 0x01`.
+         Measured 2026-08-23 with `hexreg.py` off the live turtles registry:
+         **0x04**, on all three classes. The same scan reproduced ws2812node
+         0x05, node4 0x03 and pinnode 0x01 unchanged, which is what makes the
+         new row a measurement and not another guess.
+      **ACCEPTANCE, on a plain card boot with NO overrides:** the shim logs
+      `7 node identities from /dump/tables/turtles_pro/node_ident.txt`, every
+      row reads `(derived)`, node 12 claims `variant=0x04`, and **no slot is at
+      anything but status 2** — where before, slot 12 sat at `status=7
+      Checksum` while all seven others graded 2. Boot healthy at
+      `nb=431 fb=60 ifs=250`.
+      **Honest gap:** this item's stated acceptance was the GAME-START glass,
+      and I verified the mechanism (every board graded clean) at boot, not a
+      started game. With no board at status 7 there is nothing left to trigger
+      a runtime update, but the literal screenshot was not taken.
+      **Follow-up, not done:** thirteen other titles still carry
+      `variant_guess=1` rows in tables generated before this fix —
+      aerosmith_le, deadpool_le/pro, dungeons_and_dragons_le, elvira3,
+      foo_fighters_le, guardians_le, metallica_spike, munsters_le, rush_le,
+      star_wars_le, sword_of_rage_le, turtles_le. They pick the fix up when
+      their tables are regenerated; nobody has done that yet.
+      **Also noted:** `nb_hexreg_answer()`, which is supposed to correct a bad
+      guess at runtime from the game's own decrypted images, did NOT fire for
+      turtles' node 12 — no hexreg line appeared in any run. That safety net is
+      not working here and is worth its own look.
+      *(The original 2026-08-18 analysis follows. Its node-4 half was already
+      solved on godzilla; its node-12 half pointed at the derived table, which
+      was the right file and the wrong reason.)* `S3 D2`
       *(Filed 2026-08-18 from David's live report, mid-game screenshot in
       hand. Same SCREEN as item 51 but not the same fault: 51 was godzilla's
       table claimed at every title; this is the per-title derivation being
@@ -3395,10 +3438,30 @@ These have each been violated at least once and each cost a run or a window:
       works; what it costs is the staging logic plus one confirming pair of
       boots.
 
-- [ ] **69. turtles_pro DOES NOT BOOT any more: the guest dies during asset
+- [x] **69. turtles_pro DOES NOT BOOT any more: the guest dies during asset
       loading, silently, before the framebuffer or the node bus ever start.**
-      `S1 D3` *(Filed 2026-08-23 while trying to verify items 62 and 55 on
-      turtles at David's ask — it blocks both, and it is worse than either.)*
+      `S1 D3` **★★★ CLOSED 2026-08-23 — it was a corrupt per-title FILE STORE,
+      not code.** Moving `$PAD_ROOT/data/nv/turtles_pro/` aside and letting the
+      game recreate it restored a full boot immediately: `nb=431 fb=60 ifs=250`,
+      1598 frames, against `nb=0 fb=0 eglshim=4` before. The parked copy is at
+      `~/item62/nv-turtles_pro.parked` if anyone wants to work out what in it
+      was fatal.
+      **The bisect was the wrong instinct and is worth remembering as such.**
+      Only ONE commit touched `tools/spike2_emu` in the whole window
+      (`7fbc01a`, v0.153.0), so there was nothing to bisect BETWEEN — and a
+      build from **v0.152.2**, the last release before it, stalled exactly the
+      same way. That one run is what proved the fault was not in the repository
+      at all and turned the search towards machine state. Without it I would
+      have spent the afternoon reverting shim hunks.
+      **Still open as a question, not as work:** how the store got into that
+      state. Its `.crc32` companions and data files are written separately, and
+      a run always ends in SIGKILL, so a half-finished record is easy to
+      imagine — but orphaned `.crc32` files turn out to be NORMAL (godzilla_le
+      has them and boots), so that is not by itself the fault. Whether the rig
+      should detect an unloadable store and reset it, rather than leaving a
+      title permanently unbootable, is a design call for David.
+      *(Filed 2026-08-23 while trying to verify items 62 and 55 on
+      turtles at David's ask — it blocked both, and was worse than either.)*
       **The signature:** every boot reaches ~190-244 `[ifs]` scene opens, 4
       `[eglshim]` lines, and then the guest process is simply GONE — thread
       samples at 75 s, 95 s and 115 s all report no `game` process. A healthy

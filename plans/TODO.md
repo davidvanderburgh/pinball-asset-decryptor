@@ -3031,17 +3031,80 @@ These have each been violated at least once and each cost a run or a window:
       this view opens, the call sites are located, and item 25's test harness
       already exists — but confirming a real plunge costs one run.
 
-- [ ] **62. `GAME VALIDATION ERROR #3 UPDATE SD CARD` — the item's PREMISE is
-      now in doubt: the upscaled turtles card CANNOT raise it, and no turtles
-      run has ever been instrumented to see whether it did.** `S3 D2`
-      ← WORKING ON, 85% *(S2 → S3, 2026-08-23, on evidence: item 63 shipped in
-      v0.153.0 and boots go splash → attract with no Tech Alerts screen, so
-      nothing here is on the glass in normal play; and the one card that
-      provoked the report cannot produce the banner at all. D3 → D2: the
-      mechanism is fully read off two ELFs at the desk, the instrument fix is
-      built and compiles, and what is left is one confirming run.)*
-      **★★★★★ THE 2026-08-21 VERDICT IS REVERSED ON CAUSATION, 2026-08-23. The
-      4-byte patch is real, but it SILENCES this banner — it cannot cause it.**
+- [ ] **62. `GAME VALIDATION ERROR #3 UPDATE SD CARD` — SEEN LIVE on the Heisei
+      image, whose validation tick is NOPPED, so something raises this with the
+      state machine dead.** `S2 D3`
+      ← WORKING ON, 70% *(▼ from 85%. S3 → S2 and D2 → D3, 2026-08-23 later the
+      same day: David boots the Heisei custom image and SEES the banner, in two
+      places at once, so this is neither off-screen nor hypothetical, and what
+      is left needs a run to pin rather than a desk read.)*
+      **▼▼ MY OWN 2026-08-23 REVERSAL IS ITSELF PARTLY WRONG — REFUTED BY
+      OBSERVATION, which outranks every disassembly in this entry.** David's
+      Heisei boot shows `GAME VALIDATION ERROR - #3 UPDATE SD CARD` on Tech
+      Alerts AND a red `Game validation error, Update SD card` over the
+      language-select screen. The Heisei ELF's tick **is nopped** — verified —
+      so "a nopped tick SILENCES the banner" is false as a complete statement.
+      Finding what raises it anyway IS the item now.
+      **What survives the second reversal (verified; do not re-derive):**
+      • The 4-byte `bx lr` patch on the upscaled turtles card is real, and the
+        function it kills IS the state-machine tick, not a single hash checker.
+      • The module init writes **1 ("P")** to GE/CE/ZK, confirmed on FOUR
+        builds — turtles 1.59.0 `0x2e0fc4`, godzilla_pro 1.15.0 `0x249ecc`,
+        godzilla_le 1.13.0 `0x248234`, Heisei `0x4778ac` — so "maybe a newer
+        build inits to E" is closed too.
+      • Every card's kernel is byte-identical, Heisei included. The zImage
+        theory is dead for every card this rig owns.
+      • `turtles = godzilla_pro + 0x970f8` for the module text.
+      **★ NEW INSTRUMENT, validated on four known-answer binaries
+      (`c:\tmp\pad62_tick.py` — MOVE IT INTO THE REPO):** finds the validation
+      tick in ANY build with no addresses known, by the signature
+      `ldrb rX,[rY,#197]` + `cmp rX,#8`, then walks back to the prologue and
+      reports push-with-lr vs `bx lr`. Calls stock turtles healthy, upscaled
+      turtles NOPPED, godzilla_pro healthy (rediscovering its tick at
+      `0x24a4cc`, which the `+0x970f8` mapping predicts), stock godzilla_le
+      healthy, and **Heisei NOPPED at `0x477eac`, module base `0x7f16bc`**.
+      Exactly one candidate site per ELF.
+      **THE LIVE HYPOTHESIS — mechanism located, NOT proven:** the module does
+      not always initialise, it **RESTORES PERSISTED STATE**. Its start
+      function (`0x2e1420` turtles) calls `0x4d2214(area=80, 532, MOD, 128)`
+      FIRST and only falls through to reset-and-init-to-P when that returns 0.
+      `0x4d2214` is a storage dispatcher: r0 picks an area (80→0, 81→1, 82→2)
+      into a 16-byte descriptor table at `0x59c6f4`, then tail-calls the reader
+      `0x4d1f44`. 532 bytes landing at MOD covers +42/+43/+44, so a restore
+      overwrites the grades wholesale and the init NEVER RUNS. **If a stored
+      grade is 2 or 3 and the tick is dead, the banner is frozen on forever** —
+      nothing alive can grade it back to P. That fits the observation, and it
+      predicts the banner is UNCLEARABLE, which matches Heisei.
+      **Where the store is: the i2c NVRAM, and it is PER-TITLE** —
+      `hwshim.c:2353` `NV_PATH "/data/nvram.bin"`, split per title so one file
+      did not mix godzilla, TMNT and the rest; `$PAD_ROOT/data/nvram-<title>.bin`,
+      64 KB each. **The Heisei image runs as title `godzilla_le`**, so it
+      inherits `nvram-godzilla_le.bin` — which already existed from the STOCK
+      godzilla_le 1.13.0 card booted 2026-08-19, whose tick IS healthy and could
+      have written a failed grade into it. Heisei then cannot undo it.
+      **NOT proven, and the shortcut that FAILED:** scanning the nvram images
+      for the struct by SHAPE (two 48-byte A/B structs, grades 0..3, trailing
+      bytes zero) is worthless — ~780 hits per file, and the candidate offsets
+      are identical across godzilla_le, godzilla_pro, turtles_pro and
+      turtles_le, i.e. it finds common structure, not per-title state. The
+      offset must come from tracing `0x4d1f44`.
+      **Resume, cheapest first:** (1) trace `0x4d1f44` and the descriptor at
+      `0x59c6f4` for the nvram OFFSET of area 80, then read the grades straight
+      out of `data/nvram-godzilla_le.bin` — confirms or kills the hypothesis
+      with NO run. (2) The reversible one-run experiment, needing no code: back
+      up and remove `data/nvram-godzilla_le.bin`, boot Heisei, see whether the
+      banner goes. If it does, the mechanism is proven and what remains is a
+      policy call about when the rig resets a title's nvram — note it also
+      holds scores and settings, so deleting is not free. (3) Only then decide
+      what the emulator should do about it.
+      **Also on the same screenshot and NOT part of this item:** the Heisei boot
+      is on Tech Alerts at all, which item 63 was meant to prevent, and it shows
+      `SHIELD MOTOR - CHECK SW. 41 (Shield Motor Open)`. Either David entered
+      service deliberately or item 63's fix does not hold for this title/card —
+      worth one look before assuming the former.
+      **▼ THE EARLIER 2026-08-23 REVERSAL, now itself corrected above. The
+      4-byte patch is real, but the claim that it SILENCES this banner is
+      refuted by the Heisei observation.**
       Everything below the reversal is kept because the evidence is expensive
       and most of it still stands; what changed is what it MEANS.
       **The true reference existed all along and nobody had used it: David

@@ -4165,6 +4165,57 @@ These have each been violated at least once and each cost a run or a window:
       with no change. Also noted: JP's card is NOT in the WSL cardcache;
       it lives in the repo library `images/Stern/spike2/`.
 
+- [ ] **72. "0 device records" is the PARSER on at least three titles, not
+      the card — the Godzilla-family 0x30 struct is one generation's shape,
+      and nobody owns the RE for the others.** `S3 D3`
+      *(Filed 2026-08-23 at David's ask, after Sam's batman dark-inserts
+      report put a tester's face on the class and the X-Men/JP recheck
+      proved its signature twice more. Item 57's sweep named it and closed
+      without filing it; items 53 and 71 both lean on it.)*
+      **The proven tell is the funnel, reproducible at the desk:**
+      devicexy.seeds() resolves hundreds of candidate record pointers on
+      these binaries — the string/pointer machinery works — then _one()'s
+      0x30-byte validator keeps a handful of GARBAGE rows (service text as
+      'image names') and the >=4-run filter keeps zero. Measured members:
+      aerosmith_le (1104 seeds → 2 garbage, the first sighting, item 57
+      notes ~line 261-269), uncanny_xmen_le 0.97.0 (810 → 17),
+      jurassic_park_le 1.15.0 (1164 → 17, image strings like
+      `/spine/src/Slot.cpp`). batman reads `0 records` but its funnel has
+      NOT been run — the census below says which side it falls on, and it
+      is the payoff title if positions exist (Sam reported its inserts).
+      **The standing misread this item exists to end:** "0 records" has
+      been read as "ships no device table" twice — item 57's close said it
+      of dungeons_and_dragons_le (falsified: 255 records, its fault was
+      item 71's art FILENAME) and the 2026-08-23 census said it of X-Men/
+      JP until the funnel was run. Absence of a PARSE is not absence of a
+      TABLE. (DnD is NOT this class — it parses clean and is a positive
+      control, with beatles-1_29_0: 180 records, self-checks 48/48 sides
+      correct, 0/8 RGB stems misaligned.)
+      **First move is a census, not RE:** run the funnel over every ELF in
+      the card library and split README's "0 records" rows into parser-gap
+      (many seeds, garbage validations) vs genuinely-empty (few/no seeds)
+      — that names the generations and picks the RE target. Then crack ONE
+      title's layout. The oracles already exist: devicexy's own
+      self-checks (left/right switch names on the correct side, RGB stem
+      alignment) and XY plausibility against the layout image the records
+      name. With positions, a title gets item 50's positional view and
+      item 53's map can light its inserts on a blank field even where no
+      artwork ships.
+      **Acceptance:** batman's device table parses with sane rows
+      (self-checks pass, funnel numbers stated before/after) and its
+      playfield window shows positioned devices — OR the census proves its
+      build genuinely ships none, stated with the funnel numbers, and the
+      RE target becomes the largest parser-gap title instead. Either way:
+      cardaudit over the whole library changes only rows the RE claims,
+      beatles / DnD / godzilla rows unchanged, and every genuinely
+      table-less title is recorded per-BUILD with its numbers, so the next
+      reader inherits a measurement instead of a guess.
+      — S3: friction — affected titles play fine and fall back to the
+      schematic/grid view; nothing is blocked. D3: the census is desk work
+      with the instrument in hand, but the RE itself is an unknown struct
+      across possibly several generations — grade is from the armchair
+      until the census sizes it.
+
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T
       FIX rather than as fixed — which is what it has actually been since the

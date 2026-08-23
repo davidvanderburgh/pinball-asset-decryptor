@@ -2780,6 +2780,34 @@ These have each been violated at least once and each cost a run or a window:
       poor instrument for every other item. D3: one run to capture the wire
       side (or a live ring read), the instrument exists and is validated, and
       the fault is on demand.
+      **★ 2026-08-23, first tester sighting CONSISTENT with this item, plus a
+      census of what the trio he reported actually is.** Sam (external tester,
+      emailed David) reports attract-mode playfield inserts dark on The
+      Beatles, Batman '66 and James Bond 60th. Only ONE is this item.
+      (1) **james_bond_60th_le — THIS ITEM, seen on real glass at last**
+      (consistent with it, not confirming — see the attract warning below).
+      Fresh desk census: 426 LED rows in its device table, groups
+      {5:5, 7:24, 8:37, 9:45, 10:314}; only the 29 rows in groups 5/7 can be
+      addressed today — they ARE the whole of its led_io.txt — and every
+      artwork-view insert sits in groups 8/9: the 0 of 73 above stands.
+      (2) **batman — NOT this item.** Its card ships no device table at all
+      (README's 29-card "genuinely ship none" list;
+      `dump/tables/batman/device_xy.txt` says `0 records`, led_io.txt is
+      header-only, no playfield art), so no inserts EXIST to light, mapped or
+      not — the `0 records` class item 57's sweep explicitly ruled "NOT the
+      same bug as item 53", whose device-position RE still has no owning
+      item. (3) **beatles — NOT IN THE CATALOGUE**: no card in the cache, no
+      tables dir, zero mentions anywhere in this file; unverifiable until a
+      card exists. **And a warning for this item's own acceptance: judge
+      "show its playfield lighting" IN A STARTED GAME, not attract.** Item 50
+      measured turtles driving NO playfield lamp frames in attract (only node
+      1's `0485` heartbeat; nodes 8/9 receive nothing until coins+Start), so
+      even a correct derived map could show a dark attract — and Bond's
+      attract lamp traffic has never been captured, nor whether its frames
+      decode at all (star_wars's missing-0x84/0x85 class). One PAD_NB_TRACE
+      capture on Bond answers both before the derivation is attempted. See
+      also item 70: Bond's group-8/9 devices may live on the very board the
+      bus never discovers.
 
 - [x] **59. Every boot lands on the game's TECH ALERTS screen with `CHECK
       SWITCH #n` rows, and nobody has ever established what puts them there.**
@@ -3834,6 +3862,42 @@ These have each been violated at least once and each cost a run or a window:
       — S3: cosmetic, nothing is blocked. D2: the size half is a table plus
       two env vars that already work end to end; the rotation half is a shader
       change plus one live run per title to photograph.
+      **★ 2026-08-23, Sam's report (emailed to David) ADDS A FIFTH ROW AND
+      WIDENS THIS ITEM TO THE MAIN WINDOW: james_bond_60th_le — "content is
+      scaled for 800x480 pixels, making the window too large" — and Bond's is
+      DISPLAY 0.** Bond has never targeted a second display (item 44:
+      single-display titles emit zero PADGL_TARGETs; the two-display list is
+      star_wars_le / stranger_things_le / venom_le / mando_le), so this is
+      the SAME missing table one branch earlier in the same function: display
+      0's answer is the fall-through `pad_fb_width()`/`pad_fb_height()`
+      (eglshim.c:346-347) = `PAD_GL_W`/`PAD_GL_H` (glbridge.c:173-174), which
+      watch.sh:98-99 hardcodes to 1360x768 for EVERY title; `win_open()`
+      sizes the main window from the same numbers (padglhost.c:1644; Bond's
+      item-45 run log: "window opened 1445x827" — a remembered winpos size
+      over a 1360x768 fb, oracle frame 1044480 px = 1360x768). The guest
+      scales its scene to whatever it is told, so Bond's 800x480-authored art
+      comes up ~1.7x and ~6% aspect-stretched.
+      **And the first concrete answer to "where do the numbers come FROM":
+      the CARD carries the main-display size as the title's own art.**
+      `assets/lcd/GameLogo.png` IHDR, read off three cardcache images with
+      debugfs: james_bond_60th_le = **800x480**; star_wars_le AND
+      stranger_things_le = **1360x768** — Stern authors standard backbox
+      content at exactly the rig default, which is why nothing else ever
+      looked wrong on display 0. The u-boot env is NOT the table: `videoargs`
+      is byte-identical on every card checked (a generic hardware probe — the
+      real machine asks its panel), so it says nothing per-title. A second
+      candidate source, unmeasured: `fbCreateWindow` (eglshim.c:350-356)
+      DISCARDS the w/h the game asks for — log them on one Bond run before
+      hand-building any table row. No card source is known yet for the
+      SECOND-display rows above.
+      **Added acceptance row:** james_bond_60th_le's MAIN window opens
+      800x480 with the art 1:1, judged on the text. Two cautions for the fix:
+      `PAD_GL_W/H` sizes the guest's whole pipeline before it starts (screen
+      texture padglhost.c:4537, ring header padglhost.c:4738), so a per-title
+      value may orphan Bond's existing save slots (item 36a's class); and a
+      remembered winpos size survives the fix (padglhost.c:1654-1655) — the
+      letterbox keeps the aspect honest but the window stays big until Reset
+      windows.
 
 - [ ] **66. Deadpool and Avengers: Infinity Quest boot on a WHITE
       background.** `S3 D2`
@@ -3857,6 +3921,39 @@ These have each been violated at least once and each cost a run or a window:
       before/after shot each, and a black-booting control title unchanged.
       — S3: cosmetic, the game plays. D2: two titles reproduce it on demand
       and the instrument already exists.
+      **★ CENSUS WIDENED 2026-08-23, a second external tester (Sam, emailed
+      David), the day v0.156.0 shipped: Iron Maiden, Jurassic Park, TMNT,
+      Rush and Munsters (PARTIAL white) all show the white "Startup in
+      progress" background — seven titles of ~26 now, two independent
+      testers, symptom current.** (TMNT joining says nothing about Sam's
+      build age: its no-boot spell was rig-local machine state, item 69, not
+      shared code.)
+      **Seven titles retire the per-title framing** — "Startup in progress"
+      is engine-common UI, so read the white as ONE mechanism. Desk facts
+      (read 2026-08-23) bound where it hides: the window present clears
+      BLACK before the blit (win_present padglhost.c:2206-2208, win2
+      2455-2457), guest clears pass through verbatim (4076-4084 — the host
+      injects no white anywhere), the blit DISCARDS guest alpha (`o_col =
+      vec4(rgb, 1.0)`, BLIT_FS ~667), and `tex_screen` is created with NULL
+      data and never cleared (4807-4818). Two live hypotheses, and the
+      second now leads: (a) undefined tex_screen ground showing through a
+      transparent boot scene — but drivers commonly hand back ZEROED memory,
+      which this blit would show as black; (b) the guest paints white RGB
+      with transparent alpha that the real machine's display chain
+      multiplies away and our alpha-discarding blit does not — which fits
+      the SAME white on seven titles far better. **Munsters' PARTIAL white
+      is the discriminating datapoint**: whatever its boot scene paints
+      shows over the mechanism's ground.
+      **Instrument caveat found at the desk:** glshot READS the FBO as RGBA
+      (jgl_poll, padglhost.c:3426) but write_png then DROPS alpha (truecolor
+      PNG, ihdr[9]=2 at 2548, bytes 0-2 only at 2556) — so today's
+      glshot.png CANNOT split (a) from (b). The fix session's first move is
+      a small instrument change (RGBA PNG or raw dump), then one mid-boot
+      shot per this item's own prescription.
+      **Acceptance widened:** all seven reported titles boot black (measure
+      deadpool + avengers + one of Sam's five if the mechanism is shared;
+      all seven if not), before/after shots, and a black-booting control on
+      the same build unchanged.
 
 - [ ] **67. The Mandalorian's second display stays blank through attract.**
       `S3 D3`
@@ -3915,6 +4012,120 @@ These have each been violated at least once and each cost a run or a window:
       — S3: friction, nothing is blocked. D1: the tables are already parsed and
       both windows already build a bar; `Field` needs one packed above its
       canvas (mind `pick_scale`'s chrome budget).
+
+- [ ] **70. Tester report (Sam, 2026-08-23): "Node board 10 not found" on
+      Iron Maiden, "Node board 7 not found" on James Bond 60th.** `S2 D3`
+      *(Emailed to David 2026-08-23, on "the latest game code versions". His
+      build is unknown — ask for a run log; its `[nbid]` line says in one
+      grep whether his identities came from the derived table or the
+      built-in godzilla one. But do not close this as item 55 by proxy: NOT
+      FOUND is the DISCOVERY family — a graded board was already found — and
+      no commit between 22e5823 and v0.156.0 touches nb_nodes_init /
+      nb_nodes_add_boards / nb_next_node, so the hole below is in current
+      main.)*
+      **The tell: both reported nodes are SWITCHLESS boards of their
+      titles.** iron_maiden_le's switches sit on nodes [0,1,4,8,9]; its node
+      10 is a ws2812node. james_bond_60th_le's sit on [0,1,4,6,8,9]; its
+      node 7 is a pinnode (code 18). Both carry full measured rows in their
+      own derived node_ident.txt, hexes shipped on card — the roster FILES
+      are fine. (The switchless sets are larger — maiden also 2/12/13, bond
+      also 2/12/14 — and why exactly ONE per title is reported is
+      unexplained: required-board flags? PAD_NB_SILENT census? The boot
+      below answers it.)
+      **The mechanism: the game can only discover what the shim's `00`-poll
+      schedule names** (nb_next_node, hwshim.c:6391-6414), and nb_nodes_init
+      (6305-6388) seeds that schedule from the SWITCH table, so a switchless
+      board enters only by conditional routes, each with holes: the
+      node-directory merge (6335-6343) runs ONLY on a FILE-installed switch
+      table and only for loaded nb_fident_have ids; a MEMORY-found table —
+      bond, on record: `[swfind] found the switch table: entry[] at
+      0x007d2680` — skips the merge BY DESIGN on the godzilla-measured
+      assumption that nb_nodes_add_boards() (6278-6293) covers it, which
+      needs the by-shape board array to resolve AND the game to have already
+      registered the board: the chicken-and-egg the stranger_things comment
+      records at 6350-6364 ("no board object is ever created ... NODES NOT
+      FOUND"). Even godzilla's switchless boards registered by "some slower
+      path" (6262) nobody has explained. Which route each REPORTED title
+      actually dies on is for the boot to say, not this entry.
+      **Instrument, one card boot per title, GUI path, no overrides — the
+      log already names every link:** `[nbsched] playfield nodes: ... (from
+      <source>)`, `[nbid] N node identities from ...` vs per-node
+      `(built-in)`, `[watch] node identity: N boards derived` vs `derivation
+      failed` (Sam runs LATEST game code; our tables derive from
+      1.19.0/1.30.0-era cards), `[nbobj] board objects found by shape` vs
+      `no self-labelling board array after 3 scans`. Then the glass.
+      **Likely fix, to be confirmed by the boot, not assumed:** seed the
+      schedule from the title's own node directory on EVERY route — merge
+      nb_fident_have into the memory-table branch too — instead of only when
+      sw_ftab_installed. On godzilla the added ids are boards add_boards
+      already names, so the change is a no-op where the assumption held.
+      **Cross-link:** bond's not-found node 7 is plausibly the board its
+      GROUP-8 devices live on (the trough-coil loose end below; item 53's
+      groups 8/9) — the PAD_COIL_PROBE capture that closes that loose end
+      and this item's bond half may be the same run.
+      **Acceptance:** iron_maiden_le and james_bond_60th_le each boot from
+      card with the reported node in the `[nbsched]` roster (or registered
+      via add_boards), no NOT FOUND on the glass, the log stating which
+      route seeded it; godzilla_pro and turtles_pro unchanged.
+      — S2: the titles play, but a real board's devices are dead, the fault
+      is on the glass for every tester, and item 53's bond work may sit
+      behind it; on game code that gates bring-up on a required board it
+      would be a wedge. D3: two instrumented boots, a one-branch schedule
+      change, regression boots on two known-good titles — graded from the
+      desk; neither title's failure has been reproduced on this rig yet.
+
+- [ ] **71. dungeons_and_dragons_le draws its 255-device map on a BLANK
+      field while the card ships the exact drawing the map names.** `S3 D2`
+      *(Filed 2026-08-23 from Sam's report: "playfield artwork doesn't
+      display (though the map is present)" — Dungeons & Dragons, X-Men,
+      Jurassic Park. Only the first is a bug; the census below answers the
+      other two.)*
+      The device table names its layout image `TestMode/Rope_LE-Premium-X8-
+      X9_TOP_rotated_edit_cropped` (229 of 255 records on it) and the card
+      ships exactly that file at 313x710 with every coordinate inside it
+      ("229 playfield records, 0 outside the 313x710 artwork" — cardaudit;
+      max x=303, y=654). It never reaches the window because
+      `gameinfo.find_playfield_art()` keeps only filenames containing
+      "playfield" (gameinfo.py:248) and D&D names its drawing after the
+      codename Rope; king_kong_le survives the identical TestMode pattern
+      only because Stern spelled "Playfield" inside the Rodeo filename. So
+      the art is not REFUSED — `layout_art()`'s size gate never sees it, and
+      it would pass — it is never FOUND, and layout_art()'s docstring
+      already names the disease: the table name and the file lookup "are
+      found by two unrelated pieces of code" (playfield.py:2146-2152).
+      **The fix is to stop guessing when the guess fails:** if the token
+      match finds nothing, resolve `devicexy.layout_image()`'s own name
+      against `assets/nuk/images/<image>.png` — the table says which picture
+      it was authored on. Mirror it in cardaudit.py:111 (a whole-word
+      variant of the same filter; they agree on every filename at issue),
+      which is why README.md's table calls this card "none shipped" about a
+      drawing it ships. elvira3's `System/TestMode/universal_topper_scaled`
+      is a candidate the fallback may start finding — harmless
+      (layout_is_usable() still routes elvira3 to Schematic), but check it
+      in the sweep.
+      **This corrects item 57's close note** (~line 863: "genuinely ship no
+      CAD drawing at all (confirmed: no `Test` or `TestMode` folder
+      exists)" — the DnD card HAS TestMode with three drawings; the
+      `games/<title>/` stub dir is just empty outside a run,
+      gameinfo.py:74-78) and README.md's D&D rows.
+      **Census for Sam's other two, answered not chased:** uncanny_xmen_le
+      0.97.0 and jurassic_park_le 1.15.0 carry ZERO device records and their
+      cards ship NO `Test/` or `TestMode/` directory at all (read directly
+      off both cards: images/ holds only Connectivity/System) — their "map"
+      is item 50's designed schematic/LED-grid view; nothing on those builds
+      exists to draw. Known behavior, not this item — and per-build: a newer
+      Stern release could start shipping both (README.md:79-83 makes exactly
+      this point for godzilla_le).
+      **Acceptance:** a bounded dungeons_and_dragons_le run opens the
+      artwork view with the Rope drawing behind its markers (screenshot);
+      cardaudit.py over all card images changes ONLY the D&D row (plus
+      possibly elvira3's art column); mktables caches
+      `tables/dungeons_and_dragons_le/playfield.png`; README.md's D&D row
+      and the "genuinely ship none" list corrected.
+      — S3: cosmetic — the map, the switches (104 live) and the game work
+      today. D2: the failing filter and the table-side name are both
+      located; the catalogue-wide regression control is a desk run of
+      cardaudit; one bounded run to see the window.
 
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T

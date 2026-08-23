@@ -3085,7 +3085,7 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **62. `GAME VALIDATION ERROR #3` is a STALE FAILED GRADE IN NVRAM that a
       nopped validation tick can never clear — SOLVED AND PROVEN with a
       three-run controlled experiment; what is left is the product decision.**
-      `S2 D2` ← WORKING ON, 90%
+      `S2 D2` 90%
       *(▲ from 70%. D3 → D2: the mechanism is proven end to end and the fix is
       applied and verified; what remains is deciding what the rig should do
       about it automatically, which is desk work plus one confirming boot.)*

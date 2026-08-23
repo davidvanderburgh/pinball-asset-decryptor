@@ -449,7 +449,14 @@ HELP_CONTENT = {
          "animated GIF) of one that moves. The MP4 needs ffmpeg installed "
          "and is the whole scene at its own frame rate — it is re-rendered "
          "for the export, so it isn't limited to the frames the preview "
-         "plays. \"Rebuild previews…\" re-reads the scene "
+         "plays. \"Save all previews…\" does the whole list at once: one "
+         "PNG per scene into a folder you pick, following whatever the "
+         "Search box is filtering on, so you can flip through a card's "
+         "screens in an image viewer. It runs in the background — the "
+         "same button becomes Cancel while it works, closing the window "
+         "stops it, a name already in the folder is suffixed rather than "
+         "overwritten, and the caption tells you how many were written "
+         "and how many could not be drawn. \"Rebuild previews…\" re-reads the scene "
          "layouts off the card image on the Extract tab in a few seconds; "
          "it rewrites only the layout file, so your images, glyph slices "
          "and font imports are left alone (a full re-extract would "
@@ -1173,6 +1180,27 @@ HELP_CONTENT = {
          "(videos, images, scenes, music banks), the sound counts, "
          "adjustment defaults and the high-score board. Copy Report puts "
          "the whole diff on the clipboard as plain text."),
+        ("Open a file the report lists",
+         "DOUBLE-CLICK any file row in the report to look at the file "
+         "itself — it is pulled off the card it belongs to (image A for a "
+         "deleted file, image B for an added or modified one) into a "
+         "temp folder and opened with whatever your desktop uses for "
+         "that file type. No Extract needed, and it stays quick on a "
+         "multi-GB card because only that one file is read. Spike 2 "
+         "videos are stored without a file extension, so the app looks "
+         "at the first bytes and names the temp copy .mp4 / .png / .jpg / "
+         ".wav / .ogg to match; a file it does not recognise keeps the "
+         "name it has on the card and may not open on its own."),
+        ("Extract Both",
+         "Runs a full Extract on image A and then image B into one "
+         "parent folder you pick once, each card into its own sub-folder "
+         "named after the card file. Use it when the report tells you "
+         "WHAT changed and you now want both versions' assets side by "
+         "side. Pick the folder that should CONTAIN the two "
+         "sub-folders, not a project folder. The second card starts "
+         "only once the first has really begun, so cancelling or "
+         "declining an overwrite stops the pair there instead of "
+         "queueing card B onto some later run."),
         ("How files are diffed",
          "Straight off the cards, no Extract needed: every moddable file on "
          "a Spike 2 card is indexed in the card's own validation manifest "

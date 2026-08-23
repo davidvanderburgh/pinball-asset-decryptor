@@ -449,6 +449,10 @@ class SternManufacturer(Manufacturer):
         from .compare import compare_cards
         return compare_cards(path_a, path_b)
 
+    def extract_report_file(self, image_path, ref, out_dir):
+        from .compare import extract_ref
+        return extract_ref(image_path, ref, out_dir)
+
     def make_extract_pipeline(self, input_path, output_dir,
                               log_cb, phase_cb, progress_cb, done_cb,
                               extract_categories=None, duration_names=False):

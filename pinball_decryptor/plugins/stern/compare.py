@@ -22,6 +22,15 @@ changed at all.
 
 Requested by a tester: compare two releases — or a modded card against its
 stock base — and get a complete added/modified/deleted summary per type.
+
+Every listed FILE row also carries a *ref* — the third element of the row
+tuple, ``{"side", "part", "path", "name"}`` — naming the card and the
+on-card path that row came from, so the Compare tab can pull that one file
+off the image and open it (:func:`extract_ref`).  A tester, after the report
+shipped: "being able to open/play modified, added, or deleted assets via
+double-click would be awesome".  Nothing else in the report has one: an
+adjustment default or a scene FOLDER is not a file anything can open, and a
+ref that pointed at something unopenable would be worse than none.
 """
 
 import os
@@ -79,7 +88,7 @@ def _probe(path):
     and the firmware's adjustment/high-score tables."""
     p = {"path": path, "files": None, "video_paths": set(),
          "counts": (None, None), "adjust": None, "scores": None,
-         "folders": set(), "sidx_name": ""}
+         "folders": set(), "sidx_name": "", "part": None}
     p["version"], p["edition"] = version_from_filename(path)
     with CardImage(path) as card:
         parts = [pt for pt in card.partitions() if pt.browsable]
@@ -89,13 +98,15 @@ def _probe(path):
             reader = card.reader(pt.index)
             found = _walk_partition(reader)
             if best is None:
-                best = (reader, found)
+                best = (reader, found, pt.index)
             if found["sidx_node"] is not None:
-                best = (reader, found)
+                best = (reader, found, pt.index)
                 break
         if best is None:
             raise ValueError("no readable data partition")
-        reader, found = best
+        # The partition index travels with the report so a row's ref can be
+        # reopened later without repeating this walk (extract_ref).
+        reader, found, p["part"] = best
         if found["sidx_node"] is not None:
             p["sidx_name"] = os.path.basename(found["sidx_path"])
             try:
@@ -191,36 +202,58 @@ def _count_delta(name, av, bv, unavailable="not readable"):
     return (name, "%s -> %s (%+d)" % (_num(av), _num(bv), bv - av))
 
 
-def _listed(status, items, detail):
+def _listed(status, items, detail, ref=None):
     """Rows for one change status: a count row, then one row per item (the
     status column left blank under its header row), capped with an honest
-    "… and N more"."""
+    "… and N more".
+
+    *ref*, when given, is called per item for that row's third element — the
+    on-card file it names, for the Compare tab's double-click open.  The count
+    row and the "… and N more" row never get one: neither is a file."""
     if not items:
         return []
     rows = [(status, "%s:" % _num(len(items)))]
     for it in items[:_MAX_LISTED]:
-        rows.append(("", detail(it)))
+        rows.append(("", detail(it)) if ref is None
+                    else ("", detail(it), ref(it)))
     if len(items) > _MAX_LISTED:
         rows.append(("", "… and %s more"
                      % _num(len(items) - _MAX_LISTED)))
     return rows
 
 
-def _file_section(added, deleted, modified, a_files, b_files, folders):
-    """The Added/Modified/Deleted rows for one asset-type bucket."""
+def file_ref(side, part, path):
+    """One listed file row's ref: which card, which partition, which path.
+
+    ``part`` may be ``None`` on a card whose partition index could not be
+    recorded — :func:`extract_ref` then searches, rather than refusing."""
+    return {"side": side, "part": part, "path": path,
+            "name": path.rsplit("/", 1)[-1]}
+
+
+def _file_section(added, deleted, modified, a_files, b_files, folders,
+                  a_part=None, b_part=None):
+    """The Added/Modified/Deleted rows for one asset-type bucket.
+
+    Added and Modified rows point at card B (the file is there); Deleted rows
+    point at card A, which is the only card that still HAS the file — pointing
+    a deleted row at B would open nothing, every time."""
     rows = []
     rows += _listed("Added", added,
                     lambda p: "%s — %s" % (_disp(p, folders),
-                                           human_size(b_files[p][0])))
+                                           human_size(b_files[p][0])),
+                    ref=lambda p: file_ref("B", b_part, p))
     rows += _listed("Modified", modified, lambda p: "%s — %s" % (
         _disp(p, folders),
         "content changed (%s)" % human_size(b_files[p][0])
         if a_files[p][0] == b_files[p][0]
         else "%s -> %s" % (human_size(a_files[p][0]),
-                           human_size(b_files[p][0]))))
+                           human_size(b_files[p][0]))),
+        ref=lambda p: file_ref("B", b_part, p))
     rows += _listed("Deleted", deleted,
                     lambda p: "%s — %s" % (_disp(p, folders),
-                                           human_size(a_files[p][0])))
+                                           human_size(a_files[p][0])),
+                    ref=lambda p: file_ref("A", a_part, p))
     if not rows:
         rows = [("No changes", "")]
     return rows
@@ -368,7 +401,8 @@ def compare_cards(path_a, path_b):
                                     "modified": []})
             sections.append((title, _file_section(
                 bk["added"], bk["deleted"], bk["modified"],
-                a_files, b_files, folders)))
+                a_files, b_files, folders,
+                a_part=a["part"], b_part=b["part"])))
 
         _bucket_section("Music banks", "music")
         _bucket_section("Videos", "video")
@@ -413,3 +447,86 @@ def compare_cards(path_a, path_b):
     sections.append(("Adjustments", _adjust_rows(a["adjust"], b["adjust"])))
     sections.append(("High scores", _score_rows(a["scores"], b["scores"])))
     return sections
+
+
+# ---------------------------------------------------------------------------
+# Opening one listed file
+# ---------------------------------------------------------------------------
+
+#: Sniffed head -> the extension the desktop needs to open the copy.  Spike 2
+#: stores its videos EXTENSIONLESS (``0.asset``), so a straight copy of one
+#: lands on a name Windows has no handler for and "open the changed video"
+#: fails on the file name rather than on anything real.  Only formats the
+#: report already identifies this way are listed; a byte pattern nobody
+#: recognises keeps the card's own name.
+def _sniffed_ext(head):
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        return ".mp4"
+    if head[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if head[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+        return ".wav"
+    if head[:4] == b"OggS":
+        return ".ogg"
+    return ""
+
+
+def _name_for_desktop(path):
+    """Rename *path* to carry the extension its bytes say it has, when the
+    card's own name has none (or the useless ``.asset``).  Returns the path to
+    open — the original when nothing is recognised, so a file is never hidden
+    behind a wrong extension."""
+    base = os.path.basename(path)
+    stem, ext = os.path.splitext(base)
+    if ext and ext.lower() != ".asset":
+        return path
+    try:
+        with open(path, "rb") as f:
+            new_ext = _sniffed_ext(f.read(12))
+    except OSError:
+        return path
+    if not new_ext:
+        return path
+    renamed = os.path.join(os.path.dirname(path), (stem or base) + new_ext)
+    try:
+        os.replace(path, renamed)
+    except OSError:
+        return path
+    return renamed
+
+
+def extract_ref(image_path, ref, out_dir):
+    """Copy the file *ref* names off *image_path* into *out_dir*; return the
+    written path.
+
+    The recorded partition index is TRIED, NOT TRUSTED: the report can outlive
+    the card being renamed or replaced under the same path, and a stale index
+    would raise ``ValueError`` for a file that is plainly on the image.  So a
+    miss falls back to every browsable partition, biggest first (the data
+    partition), and only a genuine absence raises ``FileNotFoundError``.
+
+    Nothing is written on failure — a zero-byte file the desktop then opens
+    into an error dialog is the worst of both outcomes.
+    """
+    path = (ref or {}).get("path") or ""
+    if not path:
+        raise FileNotFoundError("no file recorded for that row")
+    out_path = os.path.join(out_dir, path.rsplit("/", 1)[-1])
+    with CardImage(image_path) as card:
+        order = [pt.index for pt in
+                 sorted((pt for pt in card.partitions() if pt.browsable),
+                        key=lambda pt: pt.size, reverse=True)]
+        want = ref.get("part")
+        if want is not None and want in order:
+            order.remove(want)
+            order.insert(0, want)
+        last = None
+        for index in order:
+            try:
+                card.extract_file(index, "/" + path.lstrip("/"), out_path)
+                return _name_for_desktop(out_path)
+            except (FileNotFoundError, IsADirectoryError, ValueError) as e:
+                last = e
+    raise FileNotFoundError(str(last) if last is not None else path)

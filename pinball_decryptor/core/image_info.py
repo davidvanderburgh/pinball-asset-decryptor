@@ -97,12 +97,17 @@ def collect(mfr, path, assets_dir=None):
 
 
 def as_text(sections, title="Image Info"):
-    """Render *sections* as the plain-text report the Copy button emits."""
+    """Render *sections* as the plain-text report the Copy button emits.
+
+    A row is ``(name, value)`` or ``(name, value, ref)`` — the Compare report
+    hangs an on-card file reference off its listed file rows (see
+    ``Manufacturer.compare_images``).  Indexing rather than unpacking is what
+    keeps the text report working for both."""
     lines = [title, "=" * len(title)]
     for section, rows in sections:
         lines.append("")
         lines.append(section)
-        width = max((len(name) for name, _v in rows), default=0)
-        for name, value in rows:
-            lines.append("  %-*s  %s" % (width, name, value))
+        width = max((len(r[0]) for r in rows), default=0)
+        for row in rows:
+            lines.append("  %-*s  %s" % (width, row[0], row[1]))
     return "\n".join(lines) + "\n"

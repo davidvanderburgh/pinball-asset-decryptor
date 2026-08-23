@@ -44,6 +44,28 @@ _FPS_FROM_FILE = "Scene rate"
 # composites it, which is what the preview has always drawn.
 _ALL_SCREENS = "All screens"
 
+
+def _safe_stem(label):
+    """A scene label as a filename stem — every non-alphanumeric replaced, so
+    the ` · ` separator and the odd punctuation in a scene name can't produce
+    a path the OS refuses."""
+    return "".join(c if (c.isalnum() or c in "-_") else "_"
+                   for c in (label or "scene")) or "scene"
+
+
+def _unique_png(label, used):
+    """``<label>.png``, suffixed when a batch holds two scenes whose labels
+    sanitise to the same stem — an overwrite there would silently drop one
+    scene from a folder that claims to hold them all.  *used* is the set of
+    stems already handed out, and is updated."""
+    stem = _safe_stem(label)
+    name, n = stem, 2
+    while name.lower() in used:
+        name, n = "%s_%d" % (stem, n), n + 1
+    used.add(name.lower())
+    return name + ".png"
+
+
 # Longest caption line kept on screen; the rest lives on its "?" button.  The
 # caption used to wrap to one, two or three lines depending on what a scene had
 # to admit, so the pane jumped every time you stepped to another screen.
@@ -243,6 +265,7 @@ class SceneBrowserWindow:
         self._sort_rev = False
         self._rebuild = None       # {"cancel": bool} while a rebuild runs
         self._export = None        # {"cancel": bool} while an MP4 is written
+        self._bulk = None          # {"cancel": bool} while every scene saves
         self._sans, _mono = platform_font()
         self._build()
         self.reload(preselect, focus_text)
@@ -361,6 +384,21 @@ class SceneBrowserWindow:
                                     command=self._save_preview,
                                     state="disabled")
         self._save_btn.pack(anchor=tk.W, pady=(4, 0))
+        # ONE PICTURE PER SCENE, FOR EVERY SCENE IN THE LIST. "Save preview…"
+        # is one scene at a time, and a card carries a few hundred — a tester
+        # comparing a modded card against stock: "a bulk Save Preview feature
+        # would be very helpful".  Deliberately next to the single save (they
+        # are the same job at two sizes), and it honours the Search box, so
+        # the batch is whatever the list is showing.
+        self._save_all_btn = ttk.Button(pside, text="Save all previews…",
+                                        command=self._save_all_previews)
+        self._save_all_btn.pack(anchor=tk.W, pady=(4, 0))
+        _Tooltip(self._save_all_btn,
+                 "Write one PNG per scene into a folder you pick — every "
+                 "scene the list is showing, so a Search narrows the batch."
+                 "\n\nAn animated scene is saved as its first frame; use "
+                 "\"Save preview…\" on that scene for the whole thing as MP4.",
+                 lambda: getattr(self.app, "_current_theme", "light"))
         self._rebuild_btn = ttk.Button(pside, text="Rebuild previews…",
                                        command=self._rebuild_previews)
         self._rebuild_btn.pack(anchor=tk.W, pady=(4, 0))
@@ -520,6 +558,11 @@ class SceneBrowserWindow:
         win.lift()
 
     def _close(self):
+        # A bulk save is the one background job here that WRITES FILES the
+        # user can see, so closing the window stops it rather than leaving
+        # PNGs appearing in a folder minutes after the window went away.
+        if self._bulk is not None:
+            self._bulk["cancel"] = True
         try:
             self.win.destroy()
         except tk.TclError:
@@ -873,17 +916,23 @@ class SceneBrowserWindow:
         except tk.TclError:
             pass
 
-    def _set_caption(self, text):
-        """Put the caption's FIRST SENTENCE on screen and the whole of it
-        behind the "?".
+    def _set_caption(self, text, lead=None):
+        """Put ONE sentence of the caption on screen and the whole of it behind
+        the "?".
 
         The caption admits whatever a scene couldn't decode, so it ran to one,
         two or three wrapped lines depending on the scene — and the pane under
         it jumped every time you stepped to another screen.  One unwrapped line
-        is a fixed height; the detail is a hover away."""
+        is a fixed height; the detail is a hover away.
+
+        *lead* names which sentence that should be, for the callers that have a
+        layout to ask (``scene_render.caption_lead``).  Without it the first
+        sentence is used, which is right for the status texts ("Saved x.mp4",
+        "Drawing…") that are only one sentence anyway.
+        """
         text = text or ""
         self._caption_tip.text = text
-        head = text.split(". ")
+        head = (lead or text).split(". ")
         short = head[0] + ("." if len(head) > 1 else "")
         # Capped so the row can never grow wide enough to push the "?" out of
         # the window (nor the pane wider) — the full text is on the button.
@@ -1026,6 +1075,10 @@ class SceneBrowserWindow:
             return
         frames = [f for f in frames or () if f is not None]
         note = scene_render.describe(layout, 0, group)
+        # The one sentence that goes ON SCREEN is chosen by the same code that
+        # builds the paragraph, not by "take the first one" here — on a scene
+        # with something to admit the first sentence is the flattering one.
+        lead = scene_render.caption_lead(layout, 0, group)
         self._set_preview_controls(layout, group, len(frames) > 1)
         if not frames:
             self._set_caption(
@@ -1045,7 +1098,7 @@ class SceneBrowserWindow:
                 shown.thumbnail((cw, chh), Image.LANCZOS)
                 self._frame_imgs.append(ImageTk.PhotoImage(shown))
         except Exception:
-            self._set_caption(note)
+            self._set_caption(note, lead=lead)
             return
         self._preview_img = self._frame_imgs[0]
         self._preview.delete("all")
@@ -1059,7 +1112,7 @@ class SceneBrowserWindow:
         if len(frames) > 1 and n_all > len(frames):
             note += (" Playing the first %d of them — \"Save preview…\" writes"
                      " all %d to MP4." % (len(frames), n_all))
-        self._set_caption(note)
+        self._set_caption(note, lead=lead)
         self._save_btn.configure(state="normal")
         if len(self._frame_imgs) > 1:
             self._play(token, 0, self._effective_fps(layout))
@@ -1139,7 +1192,7 @@ class SceneBrowserWindow:
         animated = len(frames) > 1
         sel = self._tree.selection()
         base = (self._scenes.get(sel[0], {}).get("label") if sel else "") or "scene"
-        safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in base)
+        safe = _safe_stem(base)
         types = [("PNG image", "*.png")]
         if animated:
             types.insert(0, ("Animated GIF", "*.gif"))
@@ -1260,6 +1313,160 @@ class SceneBrowserWindow:
         self._set_caption("Saved %s — %d frame%s at %g fps"
                           % (os.path.basename(path), n,
                              "" if n == 1 else "s", fps))
+
+    # -- save every scene's preview ---------------------------------------
+
+    def _save_all_previews(self):
+        """Write one PNG per listed scene into a folder the user picks.
+
+        THE BATCH IS WHAT THE LIST IS SHOWING, not every scene on the card:
+        the Search box already exists to narrow a card's few hundred scenes to
+        the ones being worked on, and silently exporting the other 280 would
+        be the "no silent extra work" version of the same surprise.
+
+        FRAME 0 OF THE COMPOSITE, and the summary says so.  An animated scene
+        is one still here — the whole thing is what "Save preview…" writes as
+        MP4, one scene at a time, and doing that for 300 scenes unattended is
+        a different (much longer) job than the one being asked for.
+
+        Same shape as "Rebuild previews…" and the MP4 export: rendering runs
+        on a worker (a frame is a composite of the project folder's own PNGs)
+        and the button becomes a live Cancel, so a big card is not a window
+        with no way out of it.
+        """
+        if self._bulk is not None:            # running: the button cancels
+            self._bulk["cancel"] = True
+            self._save_all_btn.configure(state="disabled")
+            self._set_caption("Stopping…")
+            return
+        dirs = [d for d in self._tree.get_children("") if d in self._scenes]
+        if not dirs:
+            messagebox.showinfo(
+                "Save all previews",
+                "No scenes are listed to save.", parent=self.win)
+            return
+        out = filedialog.askdirectory(
+            parent=self.win, title="Save every listed scene preview into…")
+        if not out:
+            return
+        # Tk is not safe off the main thread, so everything the render needs
+        # from a widget is read HERE (the MP4 export's rule, same reason).
+        # The batch travels ON the state, so what was dispatched is one
+        # readable fact rather than three closure variables.
+        state = self._bulk = {
+            "cancel": False, "out": out, "dirs": dirs,
+            "bg": self._background_name(),
+            "labels": {d: (self._scenes[d].get("label") or d) for d in dirs}}
+        self._save_all_btn.configure(text="Cancel")
+        self._set_caption("Saving %d scene preview%s…"
+                          % (len(dirs), "" if len(dirs) == 1 else "s"))
+
+        def work():
+            written, skipped, err = self._save_all_work(state)
+            try:
+                self.app._tk_root().after(
+                    0, lambda: self._save_all_done(state, out, written,
+                                                   skipped, err))
+            except (tk.TclError, RuntimeError):
+                pass                          # window closed mid-export
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _save_all_work(self, state):
+        """Worker body: render each scene in *state*'s batch and write it.
+        ``(written, skipped, error)``.
+
+        A SEPARATE, TK-FREE METHOD ON PURPOSE.  Every widget value it needs
+        was read onto *state* on the main thread, so the batch can be driven
+        straight in a test — a worker thread cannot reach Tk at all outside
+        ``mainloop()`` (``after`` from one raises ``RuntimeError: main thread
+        is not in main loop``), which makes the threaded shape untestable and
+        this half not.
+        """
+        dirs, labels = state["dirs"], state["labels"]
+        out, bg = state["out"], state["bg"]
+        written, skipped, used, err = 0, 0, set(), None
+        try:
+            if self._fonts is None:
+                from ..plugins.stern import fontrender as fr
+                self._fonts = fr.load_fonts(self.assets_dir)
+            for i, d in enumerate(dirs):
+                if state["cancel"]:
+                    break
+                card, layout = scene_render.layout_for_scene_dir(
+                    self._layouts, d)
+                img = None
+                if layout is not None:
+                    try:
+                        img = scene_render.render_layout(
+                            self.assets_dir, layout, fonts=self._fonts,
+                            frame=0, background=bg,
+                            colors=self._pending_colors(card), group=None)
+                    except Exception:
+                        img = None
+                if img is None:
+                    # A scene with no recorded layout, or one whose images are
+                    # not in this folder: counted, never guessed at.
+                    skipped += 1
+                else:
+                    try:
+                        img.save(os.path.join(
+                            out, _unique_png(labels[d], used)))
+                        written += 1
+                    except (OSError, ValueError):
+                        skipped += 1
+                self._bulk_progress(state, i + 1, len(dirs))
+        except Exception as e:                # no fonts, unreadable folder…
+            err = e
+        return written, skipped, err
+
+    def _bulk_progress(self, state, cur, total):
+        """Worker thread: report ~every 5 scenes (a label update per scene on
+        a 300-scene card is all jitter)."""
+        if state is not self._bulk or (cur % 5 and cur != total):
+            return
+        try:
+            self.app._tk_root().after(
+                0, lambda: self._bulk_tick(state, cur, total))
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def _bulk_tick(self, state, cur, total):
+        if state is not self._bulk:
+            return
+        try:
+            self._set_caption("Saving previews — scene %d of %d…"
+                              % (cur, total))
+        except tk.TclError:
+            pass
+
+    def _save_all_done(self, state, out, written, skipped, err):
+        if state is not self._bulk:
+            return
+        self._bulk = None
+        try:
+            self._save_all_btn.configure(text="Save all previews…",
+                                         state="normal")
+        except tk.TclError:
+            return
+        if err is not None:
+            self._set_caption("Could not save the previews.")
+            messagebox.showerror("Save all previews", str(err),
+                                 parent=self.win)
+            return
+        # The skipped count is never rounded away: a folder of 240 PNGs from a
+        # 300-scene list has to say what happened to the other 60.
+        tail = ("" if not skipped
+                else "  %d scene%s could not be drawn." % (
+                    skipped, "" if skipped == 1 else "s"))
+        if state["cancel"]:
+            self._set_caption("Stopped — %d preview(s) written.%s"
+                              % (written, tail))
+            return
+        self._set_caption(
+            "Saved %d preview%s to %s (first frame of each).%s"
+            % (written, "" if written == 1 else "s",
+               os.path.basename(out.rstrip("/\\")) or out, tail))
 
     # -- rebuild previews -------------------------------------------------
 

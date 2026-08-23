@@ -3355,6 +3355,130 @@ These have each been violated at least once and each cost a run or a window:
       reproduces every boot, one run to test persistence; deeper if it turns
       out the Insider state forces it.
 
+- [ ] **65. The second-display window is sized from the BACKBOX, so four
+      titles come up stretched or ringed in black — and Venom's is on its
+      side.** `S3 D2`
+      *(Filed 2026-08-23 from PAD-81, the tester who asked for the Compare
+      tab. Four separate reports, one cause plus one gap: Venom — "the
+      secondary screen needs to be set to portrait mode (90 degrees clockwise
+      rotation)" and "should match the native content size (800x480) to avoid
+      stretching"; Stranger Things — "much larger than its asset resolution
+      (368x214), causing large black borders"; The Mandalorian — "needs to be
+      set to 1280x800"; Star Wars — "needs to be set to 480x272".)*
+      **THE CAUSE IS ALREADY WRITTEN DOWN IN THE SHIM'S OWN COMMENT.**
+      `eglshim.c`'s `fbGetDisplayGeometry()` (item 44) answers per display,
+      but its ONLY per-display answer is the pair of env vars `PAD_GL2_W` /
+      `PAD_GL2_H`; with neither set it falls through to `pad_fb_width()` /
+      `pad_fb_height()` — the backbox LCD's size — for every display. The host
+      copies the same default on purpose (`padglhost.c`'s `PADGL_TARGET`:
+      `fb2_w = fb_w; fb2_h = fb_h;` then the same two env vars), so the two
+      sides cannot disagree. Nothing on the machine ever sets them, so **every
+      title's second display is opened at the FIRST display's size**, and
+      `win2_present()` then letterboxes the real content inside it — which is
+      exactly "large black borders" on a 368x214 asset and a stretch on
+      anything whose aspect differs.
+      **So the size half is a MISSING TABLE, not a broken renderer**, and the
+      four numbers above are four of its rows. Where they come FROM is the
+      open question and the reason this is not a five-minute change: a
+      hand-typed per-title list is the "a wrong table is worse than none" trap
+      items 55, 57 and 61 each fell into once. Look first for the geometry on
+      the CARD — the game must know it, it drives the panel — and only fall
+      back to a table if it genuinely is not there.
+      **The rotation half has no mechanism at all.** Item 51's note is the
+      standing warning: "a mirror is not a rotation — `PAD_GL_FLIP` is
+      `uv.y -> 1-uv.y` and could never have fixed this". A portrait second
+      display needs a real 90° step in the `blit_prog` shader `win2_present()`
+      uses, plus a swapped window aspect, and the same "where does the value
+      come from" question as the size.
+      **Acceptance:** venom_le's second window opens 800x480, portrait, with
+      readable (not mirrored) text; stranger_things_le's opens 368x214 with no
+      border; mando_le 1280x800; star_wars_le 480x272 — screenshots of all
+      four, judged ON THE TEXT.
+      — S3: cosmetic, nothing is blocked. D2: the size half is a table plus
+      two env vars that already work end to end; the rotation half is a shader
+      change plus one live run per title to photograph.
+
+- [ ] **66. Deadpool and Avengers: Infinity Quest boot on a WHITE
+      background.** `S3 D2`
+      *(Filed 2026-08-23 from PAD-81: "Deadpool: the white background
+      displayed during the 'Startup in progress' boot state is unexpected
+      behaviour", and the same sentence again for Avengers: Infinity Quest.)*
+      Two titles, one symptom, and the real machine's boot screen is black —
+      so this is ours, not the game's. Unmeasured: whether the white is a
+      surface cleared to white under a transparent boot scene (a
+      `glClearColor` nobody set on that title's boot path) or real content the
+      boot scene draws and the machine covers.
+      **Start with `glshot.sh`** (item 51 built it): it writes the screen FBO
+      with no window, letterbox or RAIL proxy in the path, so one shot
+      separates "the pixels handed to GL are already white" from "the draw is
+      wrong" — the same split item 51's own note argues for.
+      **Two titles is the lever.** deadpool_pro and deadpool_le are both on
+      hand and both known-good otherwise (item 57's catalogue audit), and
+      avengers_infinity_le is a third; any title that boots BLACK on the same
+      build is the control.
+      **Acceptance:** deadpool and avengers_infinity boot on black, a
+      before/after shot each, and a black-booting control title unchanged.
+      — S3: cosmetic, the game plays. D2: two titles reproduce it on demand
+      and the instrument already exists.
+
+- [ ] **67. The Mandalorian's second display stays blank through attract.**
+      `S3 D3`
+      *(Filed 2026-08-23 from PAD-81: "The Mandalorian: the secondary screen
+      remains blank during attract mode, which is unexpected behaviour.")*
+      **This is item 58's case, with an owner at last.** That item was closed
+      as NOT DEMONSTRATED because nobody could show a title whose
+      second-display window stays dark for a whole run; mando_le was its
+      candidate and was ruled out when a rerun showed real content from frame
+      2. A second person now reports the same title dark, which is the
+      reproduction case item 58's acceptance asked for — with the OPPOSITE
+      conclusion to draw from it: mando has a real (accessory) second display,
+      so the answer is to make it draw, not to hide the window.
+      **The instrument is still there and still read by nobody**:
+      `pic2_check()` (`padglhost.c`, around line 3595) already logs "d2 STILL
+      BLACK after N presented frames" and "d2 FIRST at frame N". Run mando_le
+      to attract and read that line before touching anything — item 58's whole
+      history is two fixes written against a premise no measurement supported.
+      **Ask first whether it is intermittent**: the same title gave both
+      answers on two runs in one session (2026-08-19), which points at
+      attract-cycle timing rather than a dead feed. Bound the run long enough
+      to cover a full attract cycle before calling it blank.
+      **Acceptance:** mando_le's second window shows its content during
+      attract on three consecutive runs, with the `pic2_check` line quoted for
+      each.
+      — S3: cosmetic, does not block play. D3: mostly measurement, and this is
+      the third pass at the same window; the fix cannot be designed until a
+      run says which of "never fed" or "fed late" it is.
+
+- [ ] **68. Neither playfield window says how many switches and lights the
+      title actually has.** `S3 D1`
+      *(Filed 2026-08-23 from PAD-81: "displaying the total count of switches
+      and lights on all virtual playfield windows would be a great feature
+      (even on models with playfield artwork)".)*
+      Half of it exists, and neither half is complete. `Schematic`'s top bar
+      says "`GAME`: N switches, no playfield artwork in this title" — switches
+      only, and worded as a complaint about the artwork. `Field` has no top
+      bar at all; its status strip reports "`%d of %d` inserts lit", so the
+      lamp total appears only ONCE THE GAME HAS WRITTEN A LAMP FRAME, and the
+      switch count never appears. Through boot — which is exactly when someone
+      is asking "did this title's tables load?" — both windows are silent
+      about their own inventory.
+      **One readout, both windows, from tables that are already loaded**
+      (`load_switches()` / `load_leds()` / `load_coils()` in `playfield.py`).
+      Coils cost nothing to add and answer the same question. Single-sourced:
+      two windows spelling one fact differently is the failure this file names
+      on its first page.
+      **The trap to avoid** is `LedGrid`'s roster, which comes from the WIRE
+      and not from a table (item 50) — so on a schematic-view title the honest
+      lamp number before the first LED write may be "not known yet", and
+      printing a table's count beside a grid built from something else would
+      be two numbers for one thing.
+      **Acceptance:** both window shapes show switch / lamp / coil totals from
+      the first frame, before the game writes anything — before/after shots of
+      a title with artwork (godzilla_le) and one without (turtles_pro).
+      — S3: friction, nothing is blocked. D1: the tables are already parsed and
+      both windows already build a bar; `Field` needs one packed above its
+      canvas (mind `pick_scale`'s chrome budget).
+
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T
       FIX rather than as fixed — which is what it has actually been since the

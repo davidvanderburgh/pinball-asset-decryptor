@@ -1937,8 +1937,43 @@ These have each been violated at least once and each cost a run or a window:
       confirming session of two boots plus the negative case, which is what
       keeps it off D1.
 
-- [ ] **40. After a save-state LOAD the playfield's LEDs never come back, and
+- [x] **40. After a save-state LOAD the playfield's LEDs never come back, and
       the window says "no emulator" over a run that is plainly alive.** `S2 D2`
+      ← CLOSED 2026-08-22, acceptance met live on a cross-session load;
+      shipped direct on main at David's ask (with the save-state stability
+      pass), not via an item branch. See the ★★★ close block.
+      **★★★ CLOSED 2026-08-22 — the guessed mechanism was the real one, and
+      the acceptance ran in full.** (iv) confirmed: watch.sh zeroes
+      dump/padled at session start, `led_map()` stamps the magic exactly
+      once at the first decoded lamp frame, and a criu-restored guest
+      already holds the mapping so it never stamps again — the restored
+      guest wrote LED frames into a header reading 00000000 for the rest of
+      the run. **The fix is the cheap host-side shape this item asked for:**
+      dump/padled is now the THIRD always-rewound ring in restorestate.sh
+      (with padsw and padvid, dd in place, never truncating) — the stash is
+      freeze-exact, so magic, decoded/skipped, coil counters and the fade
+      ring come back as exactly the state the restored guest's memory is
+      consistent with; same-session rewinds are equally right because the
+      guest is the block's only writer. The OTHER candidate (ownership) is
+      handled too: missing-ring put-backs chown to the rootfs owner.
+      **What the diagnosis ALSO turned up:** David's "saves don't work
+      anymore" (2026-08-22) was not this item at all — /proc mountinfo
+      octal-escapes spaces, so the Heisei card's mount source was recorded
+      as `...Heisei\040Custom...`, card_live() tested the literal string,
+      and the pre-flight refused EVERY load of every slot of any card whose
+      filename has a space. `unesc() { printf '%b' "$1"; }` at read time
+      (restore.env stays escaped — it is space-separated); the nsclean
+      keep-path now compares decoded via PAD_NS_KEEP. And slots now carry
+      their own guest libraries (savestate libs/ stash; restorestate
+      installs them after the guest kill and clears the build stamps), so
+      a shim rebuild no longer kills every existing slot.
+      **Acceptance, run live 2026-08-22:** save → full killgame teardown →
+      fresh 16 s boot → loadgame: padled magic present, decoded counter
+      +~370 writes/s (the attract show painting the LED half), switch poke
+      +60p/-60p landed in the restored timeline, video 30.0/s, and the bar
+      reads the honest state — playfield.py's artwork view now splits
+      "emulator up, no LED writes decoded yet" from "no emulator
+      (dump/padled not readable)" the way the Schematic already did.
       **★ DAVID, 2026-08-11: "load state doesn't seem to get the LEDs loaded up
       on the virtual playfield and it says that there is 'no emulator' but there
       is."** godzilla_pro card run, `PAD_PIVOT=1`, the load asked for before the
@@ -2625,6 +2660,31 @@ These have each been violated at least once and each cost a run or a window:
       corrected from measurement rather than another guess. Until then,
       do not touch `VARIANT_DEFAULT`/`VARIANT_PRIOR` blind — same rule as
       item 57's tables: a wrong guess is worse than a flagged one.
+      **★★ 2026-08-22: THE MECHANISM IS ROOT-CAUSED AND THE FIX IS SHIPPED
+      (on main, with the godzilla_le node-board work) — only this item's
+      own turtles glass check remains.** godzilla_le hit the identical
+      walk (its banner's center number is the RETRY COUNTDOWN, not a node
+      id) and the chase found both flagged row classes at once:
+      • `as-read(124.107.0)` was a MISREAD. The game's version reader
+        0x5a8644 has TWO paths — with the image node's [+32] selector set
+        (true on both node4 images) it grades the parsed HEADER, which is
+        the FILENAME version, exactly what this item prescribed serving.
+        nbdir.py now applies the filename rule to node4 (NODE4_FW_AS_READ
+        tombstoned) with measured variant 0x03; every [nbobj] dump ever
+        taken had slot 4 at status 7 because of this.
+      • The guessed-variant class is closed GENERICALLY, not per prior:
+        hwshim's nb_hexreg_answer() shape-scans the game's own decrypted
+        hex-image registry in-process and corrects any claim's variant/fw
+        from it (both 5a8644 paths mirrored; hexreg.py is the desk-side
+        twin that reads a live game via /proc/<pid>/mem — it measured
+        tmc5041node 0x0d, now a prior). The 2026-08-19 latent gap on
+        coil4node/hdmi_ws2812node/tmc5041node self-heals at grading time.
+      Verified on godzilla_le: no banner, slots 4 and 10 grade status 2,
+      attract at 16 s. STILL OPEN because this item's acceptance is
+      turtles_pro's own game-start glass; note turtles' node 4 has been
+      census-SILENCED since item 52 (its banner path is node 12's
+      coil4node guess), and the card is in the cache — one boot plus a
+      game start observes it.
 
 - [ ] **53. The device-table GROUP → bus NODE map is ONE TITLE'S measurement,
       so most titles' lamps and coils have a position and no wire address.**

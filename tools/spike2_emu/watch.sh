@@ -237,9 +237,31 @@ NB_WHY=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
     --switches "$PAD_TABLES/$GAME/switch_list.txt" \
     --nodedir "$NBID" 2>/dev/null \
     | sed -n 's/^because: //p')
+# WHICH SILENCED NODES STILL ANSWER THE ff STATUS POLL - PER NODE, not the
+# item-52 everywhere. Measured 2026-08-22 on the Heisei card (godzilla_le):
+# with its silenced node 2 answering `ff`, bring-up re-probed node 2's
+# identity in 90-probe bursts every ~15 s until t=100 s, and the game sat on
+# Tech Alerts - presses swallowed, no attract light show, the playfield
+# saying "no emulator" - until the last burst gave up. Item 17's run 12
+# (before the carve-out existed) is the control: every [nbsilent] train sat
+# inside the first 20 s. So the census hands the shim only the nodes the
+# carve-out was built for (the optional node4 class, stranger_things), and
+# every other silenced node is totally silent again. 0 = none; 1 = every
+# silenced node, kept as the A/B knob for exactly this comparison.
+NB_FF_DEFAULT=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
+    --switches "$PAD_TABLES/$GAME/switch_list.txt" \
+    --nodedir "$NBID" --silent-ff 2>/dev/null)
+export PAD_NB_SILENT_FF=${PAD_NB_SILENT_FF:-${NB_FF_DEFAULT:-0}}
 if [ -n "${PAD_NB_SILENT:-}" ]; then
     echo "[watch] node census: silencing node(s) $PAD_NB_SILENT on $GAME -" \
          "${NB_WHY:-reason unavailable}"
+    case "$PAD_NB_SILENT_FF" in
+        0) ;;
+        1) echo "[watch] node census: ff status polls answered on EVERY" \
+                "silenced node (PAD_NB_SILENT_FF=1, the A/B knob)" ;;
+        *) echo "[watch] node census: ff status polls still answered on" \
+                "node(s) $PAD_NB_SILENT_FF (optional node4 - item 52)" ;;
+    esac
 else
     echo "[watch] node census: silencing nothing on $GAME -" \
          "${NB_WHY:-reason unavailable}"
@@ -1261,10 +1283,16 @@ fi
 # window closing. It cannot disturb autoattract - swexercise.sh's header has
 # that argument checked against all three of that script's predicates.
 #
-# PAD_SW_EXERCISE=0 turns it off, and a measurement run that greps `[sw]` may
-# well want to: it puts ~44 tagged edges in the log about 20 s into every boot.
-# They carry source letter `x`, so `grep -v 'ms [+-][0-9]*x'` removes them.
-if [ "${PAD_SW_EXERCISE:-1}" != 0 ]; then
+# ★ OPT-IN as of 2026-08-22, off by default - David: "we no longer need the
+# 'clear alerts' function to automatically run every start up." The CHECK
+# SWITCH rows are cosmetic (autoattract walks past them regardless), the
+# playfield window's own "Clear alerts" button covers the case where they
+# matter, and the boot-time pass costs every run ~100 tagged edges and a
+# 12 s burst of switch pokes that lands mid-play on an attended boot -
+# autoattract stands down for an operator, this could not. PAD_SW_EXERCISE=1
+# brings the per-boot pass back; its edges carry source letter `x`, so
+# `grep -v 'ms [+-][0-9]*x'` removes them from a measurement.
+if [ "${PAD_SW_EXERCISE:-0}" = 1 ]; then
     setsid_as_user bash "$S/swexercise.sh" "$LOG" > "$HOME/padswx.log" 2>&1 &
     echo "[watch] switch exerciser on: it clears the CHECK SWITCH tech alerts"
     echo "[watch] once the game's switch table is up (PAD_SW_EXERCISE=0 off)."

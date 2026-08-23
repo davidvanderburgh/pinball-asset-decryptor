@@ -32,6 +32,11 @@
 # exerciser off), autoattract walks past the screen in ~20 s anyway, and the
 # window's own "Clear alerts" button is there for the impatient case.
 #
+# ★ OPT-IN as of 2026-08-22 (PAD_SW_EXERCISE=1). watch.sh no longer starts
+# this on every boot - David asked for the automatic pass to stop - so the
+# playfield window's "Clear alerts" button is the normal path now, and this
+# script's careful WHEN only matters to a run that opted back in.
+#
 # WHY IT CANNOT DISTURB autoattract.sh, checked rather than assumed - all three
 # of that script's predicates are blind to this:
 #   probes()   counts 'ExchangeData: read failed', a node-bus bring-up line

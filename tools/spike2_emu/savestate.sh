@@ -141,12 +141,26 @@ done < "/proc/$PID/mountinfo"
 # the card, are far larger, and cannot change without the card image
 # changing; hashing them would read tens of MB through fuse on every save
 # to answer a question nobody is asking.
+# ...AND THE FILES THEMSELVES RIDE IN THE SLOT. Hashes alone let the
+# pre-flight refuse a slot after a rebuild - which turned every shim change
+# into "all your slots are dead" (three or four times in one working day,
+# 2026-08-22, while the node-board work rebuilt the shim under David). With
+# the mapped libraries stashed here, restorestate INSTALLS the slot's own
+# build back into the rootfs when the current one differs, and the slot
+# outlives any rebuild. ~15-25 MB raw, but it rides inside slot.tar.zst
+# with everything else and binaries crush well.
+mkdir -p "$DDIR/libs"
 awk '$6 ~ /^\/(usr\/)?(local\/)?lib/ {print $6}' "/proc/$PID/maps" 2>/dev/null \
   | sort -u | while read -r gp; do
     [ -f "/proc/$PID/root$gp" ] || continue
     sum=$(sha1sum "/proc/$PID/root$gp" 2>/dev/null | cut -d' ' -f1)
-    [ -n "$sum" ] && echo "lib $sum $gp" >> "$DDIR/restore.env"
+    [ -n "$sum" ] || continue
+    echo "lib $sum $gp" >> "$DDIR/restore.env"
+    d="$DDIR/libs$gp"
+    mkdir -p "${d%/*}"
+    cp -f "/proc/$PID/root$gp" "$d" 2>/dev/null
 done
+echo "[save] guest libraries in the slot: $(find "$DDIR/libs" -type f | wc -l) (slot survives rebuilds)"
 
 # --- the tty fd the guest holds (the node bus) ---------------------------
 # criu's tty[] key is hex st_rdev:st_dev of the tty file; take the RAW numbers

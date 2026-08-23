@@ -3340,11 +3340,23 @@ static unsigned nb_env_hex(const char *name, unsigned def)
  *     byte against the ones inside that decrypted .hex. Those are printed by
  *     the [nbhex] dump, and the values below are copied straight from it.
  *
- * node4's two images report a version that does not look like 1.35.0 even
- * after decryption (LPC1124_303 -> 124.107.0, LPC812 -> 146.13.128). That is
- * reproduced here rather than "corrected", because what matters is matching
- * what 0x5a8644 actually reads. Worth revisiting if node 4 misbehaves. */
-struct nb_ident { unsigned char id; unsigned part; unsigned char variant; unsigned fw; };
+ * node4 misbehaved, and the 2026-08-22 revisit found the misread (the old
+ * note here reproduced "what 0x5a8644 actually reads" - 124.107.0 - off the
+ * image BUFFER at flash 0x1008). 0x5a8644 has TWO paths: when the image
+ * node's [+32] selector is set - true on BOTH node4 images, false on every
+ * other type - it grades against the parsed HEADER (the encrypted 06/07 hex
+ * records: maj/min/patch at node+16/18/20, variant at node+26), and node4's
+ * header says 1.35.0 variant 0x03, same as the FILENAME. The buffer bytes on
+ * a node4 image are simply not a version block. The 0x98/124.107.0 claim is
+ * why every [nbobj] dump ever taken shows slot 4 at status 7 = Checksum,
+ * and why godzilla_le (whose build answers a Checksum grade with an endless
+ * "UPDATING NODE BOARD RUNTIME" walk over attract) crawled. Measured live
+ * with hexreg.py on the Heisei card; nb_hexreg below reads both paths. */
+/* `tcrc` is CRC32 of the board's TYPE NAME - the key the game's own hex-image
+ * registry is indexed by (see nb_hexreg below). File-derived entries carry it
+ * from node_ident.txt's type= field; the built-in rows leave it 0 (positional
+ * initializers), which just means the registry cannot correct them. */
+struct nb_ident { unsigned char id; unsigned part; unsigned char variant; unsigned fw; unsigned tcrc; };
 static const struct nb_ident nb_idents[] = {
     /* id   part id      variant  fw (maj<<16|min<<8|patch)   type / firmware  */
     {  1, 0x00020023u, 0x01, 0x012300u },  /* pinnode    LPC1112_101  1.35.0 */
@@ -3354,7 +3366,8 @@ static const struct nb_ident nb_idents[] = {
     {  7, 0x2c40102bu, 0x05, 0x012300u },
     { 12, 0x2c40102bu, 0x05, 0x012300u },
     { 14, 0x2c40102bu, 0x05, 0x012300u },
-    {  4, 0x00140040u, 0x98, 0x7c6b00u },  /* node4      LPC1124_303  as read */
+    {  4, 0x00140040u, 0x03, 0x012300u },  /* node4      LPC1124_303  1.35.0
+                                              (HEADER values - see above)   */
 };
 
 /* THE FIRMWARE VERSION IS THE TITLE'S, AND IT IS WRITTEN ON THE TIN.
@@ -3523,6 +3536,7 @@ static void nb_fident_load(void)
     if (!f) return;
     while (rgets(line, sizeof line, f)) {
         unsigned id, part, var, fw;
+        const char *t;
         if (line[0] == '#') continue;
         if (!nb_field_dec(line, "node=", &id) || id >= 64) continue;
         if (!nb_field_hex(line, "part=0x", &part)) continue;
@@ -3532,6 +3546,22 @@ static void nb_fident_load(void)
         nb_fident[id].part = part;
         nb_fident[id].variant = (unsigned char)var;
         nb_fident[id].fw = fw;
+        /* The TYPE NAME, as its CRC32 - the key into the game's own hex-image
+         * registry (nb_hexreg below), so a derived claim can be corrected
+         * against what the game actually decrypted. Absent field = 0 = never
+         * corrected, which is exactly the old behaviour. */
+        nb_fident[id].tcrc = 0;
+        t = strstr(line, "type=");
+        if (t) {
+            unsigned c = 0xffffffffu;
+            int k;
+            for (t += 5; *t && *t != ' ' && *t != '\n'; t++) {
+                c ^= (unsigned char)*t;
+                for (k = 0; k < 8; k++)
+                    c = (c >> 1) ^ (0xedb88320u & (0u - (c & 1u)));
+            }
+            nb_fident[id].tcrc = c ^ 0xffffffffu;
+        }
         nb_fident_have[id] = 1;
         n++;
     }
@@ -3564,6 +3594,322 @@ static const struct nb_ident *nb_ident_for(unsigned id)
     for (i = 0; i < sizeof nb_idents / sizeof nb_idents[0]; i++)
         if (nb_idents[i].id == id) return &nb_idents[i];
     return 0;
+}
+
+/* ---- THE GAME'S OWN HEX-IMAGE EXPECTATIONS, READ BACK OUT OF ITS MEMORY --
+ *
+ * The game grades every board's claimed identity against the DECRYPTED
+ * <type>-<class>-*.hex image: variant at flash 0x1008, version at
+ * 0x1009..0x100b (0x1d5780 / 0x5a8644, and nb_dump_hexlist's annotations).
+ * A claim it rejects starts the RUNTIME UPDATE walk - "UPDATING NODE BOARD
+ * RUNTIME / UPDATE FAILED / PLEASE WAIT" retried every ~15 s, and the game
+ * sits on it before attract. MEASURED 2026-08-22 on the Heisei card
+ * (godzilla_le): nbdir.py had to GUESS the tmc5041node variant (0x01, the
+ * hex body is encrypted so the file cannot say), the game's decrypted image
+ * carries 0x0d, and that one byte cost every boot ~80 s of failed updates
+ * on node 10 before the game gave up and went to attract at t=104 s.
+ *
+ * The fix is to stop inventing what the game already knows: the decrypted
+ * images are IN ITS MEMORY, in the hex-image registry (a linked list keyed
+ * by CRC32 of the type name - zlib polynomial, verified against the keys at
+ * the top of this file - and LPC class). The registry HEAD is a per-title
+ * global (0x7e1b98 is godzilla_pro 1.15.0's, and walking that literal on
+ * another title is the segfault item 52 recorded), but the NODES have a
+ * rigid 64-byte shape, so they are found per title BY SHAPE, the same move
+ * as nb_objs_addr():
+ *
+ *     w[0]  CRC32(type name)  - must be one of the 14 known type names
+ *     w[1]  LPC class 1..7
+ *     w[2]  char* path        - must point at readable memory ending .hex
+ *     w[7]  decrypted image buffer (indexed by absolute flash address)
+ *     w[10] image-kind flag == 1
+ *     w[11] min flash address == 0x1000
+ *     w[12] span > 11
+ *
+ * SAFE BY CONSTRUCTION, unlike the pro-literal walk: every candidate and
+ * every pointer it carries is range-checked against /proc/self/maps (the
+ * guest view - qemu-user serves the guest's own mappings there) before it
+ * is dereferenced, so a false positive costs a skipped candidate, never a
+ * fault. host-side twin: hexreg.py, which read the live game's registry
+ * through /proc/<pid>/mem and produced the 0x0d measurement above.
+ *
+ * COST, because item 52's lesson was our own heap scan on the game's bus
+ * thread: the scan runs on the fe (identity) path, at most once every 2 s
+ * of RUN TIME and NB_HEXREG_TRIES attempts in total, only until it
+ * succeeds, over rw regions capped at 16 MB each / 32 MB per attempt - the
+ * registry lives in the low heap (found at guest 0x85xxxx), well inside the
+ * caps. TIME-paced rather than per-N-requests on purpose: the update walk
+ * hammers fe at ~18/s, and the first shape of this throttle (every 64th fe,
+ * 20 tries) spent its whole budget inside the first minute of a boot -
+ * "[nbexp] no hex-image registry found" on the very run whose walk was
+ * using that registry to flash from. Bring-up is also when the bus thread
+ * spends its time sleeping on probe timeouts, so a bounded scan there is
+ * invisible next to the traffic.
+ *
+ * PAD_NB_HEXREG=0 disables the whole thing for an A/B; claims then come
+ * from node_ident.txt / the built-in table exactly as before. */
+#define NB_HEXREG_MAX   24
+#define NB_HEXREG_TRIES 40
+
+static struct { unsigned tcrc, klass, fw; unsigned char variant; }
+    nb_hexreg[NB_HEXREG_MAX];
+static int nb_hexreg_n;                 /* entries found; -1 = given up      */
+
+static const char *const nb_hexreg_types[] = {
+    "pinnode", "ws2812pinnode", "ws2812node", "coil4_lednode", "coil4node",
+    "lcdnode", "hdminode", "hdmi_ws2812node", "afnode", "magsensornode",
+    "node4", "tmc2590node", "tmc5041node", "netbridge",
+};
+
+static unsigned nb_hexreg_crc(const char *s)
+{
+    unsigned c = 0xffffffffu;
+    int k;
+    for (; *s; s++) {
+        c ^= (unsigned char)*s;
+        for (k = 0; k < 8; k++)
+            c = (c >> 1) ^ (0xedb88320u & (0u - (c & 1u)));
+    }
+    return c ^ 0xffffffffu;
+}
+
+static int nb_hexreg_type_known(unsigned crc)
+{
+    static unsigned crcs[sizeof nb_hexreg_types / sizeof *nb_hexreg_types];
+    static int done;
+    unsigned i;
+    if (!done) {
+        for (i = 0; i < sizeof crcs / sizeof *crcs; i++)
+            crcs[i] = nb_hexreg_crc(nb_hexreg_types[i]);
+        done = 1;
+    }
+    for (i = 0; i < sizeof crcs / sizeof *crcs; i++)
+        if (crcs[i] == crc) return 1;
+    return 0;
+}
+
+/* /proc/self/maps, guest view. `rd` collects every readable region (for
+ * pointer validation), the return value is how many; `rw` marks which are
+ * also writable (scan candidates). Read through RTLD_NEXT like every other
+ * shim-side file read, so it cannot recurse into our own hooks. */
+#define NB_HEXREG_REGIONS 128
+static int nb_hexreg_maps(unsigned lo[], unsigned hi[], unsigned char rw[])
+{
+    typedef void *FILEP;
+    FILEP (*ropen)(const char *, const char *);
+    char *(*rgets)(char *, int, FILEP);
+    int (*rclose)(FILEP);
+    FILEP f;
+    /* 512, not a small buffer: a maps line longer than the buffer makes
+     * fgets hand back the TAIL of the line as a second read, and a path
+     * fragment that happens to parse as hex-dash-hex would put a fabricated
+     * region into a list the scanner dereferences. The perms-shape check
+     * below is the second lock on the same door. */
+    char line[512];
+    int n = 0;
+
+    ropen  = dlsym(RTLD_NEXT, "fopen");
+    rgets  = dlsym(RTLD_NEXT, "fgets");
+    rclose = dlsym(RTLD_NEXT, "fclose");
+    if (!ropen || !rgets || !rclose) return 0;
+    f = ropen("/proc/self/maps", "r");
+    if (!f) return 0;
+    while (n < NB_HEXREG_REGIONS && rgets(line, sizeof line, f)) {
+        unsigned a = 0, b = 0;
+        const char *s = line;
+        int any = 0;
+        for (; (*s >= '0' && *s <= '9') || (*s >= 'a' && *s <= 'f'); s++) {
+            a = a * 16 + (unsigned)(*s <= '9' ? *s - '0' : *s - 'a' + 10);
+            any = 1;
+        }
+        if (!any || *s != '-') continue;
+        for (s++; (*s >= '0' && *s <= '9') || (*s >= 'a' && *s <= 'f'); s++)
+            b = b * 16 + (unsigned)(*s <= '9' ? *s - '0' : *s - 'a' + 10);
+        if (*s != ' ' || b <= a || (a & 0xfff)) continue;
+        /* the whole rwxp column has to look like one, not just its first
+         * letter - see the buffer comment above */
+        if (s[1] != 'r') continue;
+        if (s[2] != 'w' && s[2] != '-') continue;
+        if (s[3] != 'x' && s[3] != '-') continue;
+        if (s[4] != 'p' && s[4] != 's') continue;
+        lo[n] = a;
+        hi[n] = b;
+        rw[n] = s[2] == 'w';
+        n++;
+    }
+    rclose(f);
+    return n;
+}
+
+static int nb_hexreg_readable(const unsigned lo[], const unsigned hi[],
+                              int n, unsigned addr, unsigned len)
+{
+    int i;
+    if (!addr || addr + len < addr) return 0;
+    for (i = 0; i < n; i++)
+        if (addr >= lo[i] && addr + len <= hi[i]) return 1;
+    return 0;
+}
+
+/* Last-scan facts for the give-up line: a scan that fails on some future
+ * title must say what it looked at, or "not found" cannot be told apart from
+ * "never really looked" (an empty maps parse, a giant heap skipped by the
+ * caps) without another instrumented run. */
+static unsigned nb_hexreg_stat_maps, nb_hexreg_stat_rw;
+static unsigned long nb_hexreg_stat_bytes;
+
+static void nb_hexreg_scan(void)
+{
+    static unsigned lo[NB_HEXREG_REGIONS], hi[NB_HEXREG_REGIONS];
+    static unsigned char rw[NB_HEXREG_REGIONS];
+    unsigned long scanned = 0;
+    char m[200];
+    int nmaps, r;
+
+    nmaps = nb_hexreg_maps(lo, hi, rw);
+    nb_hexreg_stat_maps = (unsigned)nmaps;
+    nb_hexreg_stat_rw = 0;
+    for (r = 0; r < nmaps; r++) nb_hexreg_stat_rw += rw[r];
+    /* CAPS, and they are about the bus thread, not memory: this runs inside
+     * an fe exchange, and the game's serial read timeout is ~10 ms - a scan
+     * that stalls the reply for long enough reads as an absent board, on
+     * EVERY title including the ones whose claims were already right. The
+     * registry sits in the first MBs of the guest heap (measured at
+     * 0x85xxxx), and maps come back in address order, so a 16 MB per-region
+     * / 32 MB per-attempt budget reaches it with room to spare while keeping
+     * one attempt to tens of emulated milliseconds. */
+    for (r = 0; r < nmaps && nb_hexreg_n < NB_HEXREG_MAX; r++) {
+        const unsigned *p, *end;
+        if (!rw[r] || hi[r] - lo[r] > 16u * 1024 * 1024) continue;
+        if (lo[r] >= 0xf0000000u) continue;
+        if (scanned > 32u * 1024 * 1024) break;
+        scanned += hi[r] - lo[r];
+        p = (const unsigned *)(unsigned long)((lo[r] + 3u) & ~3u);
+        end = (const unsigned *)(unsigned long)(hi[r] - 64u);
+        for (; p <= end && nb_hexreg_n < NB_HEXREG_MAX; p++) {
+            const unsigned char *buf, *path;
+            int i;
+            if (p[11] != 0x1000u) continue;     /* min flash addr, rarest    */
+            if (p[10] != 1u) continue;          /* image-kind flag           */
+            if ((int)p[12] <= 11) continue;     /* span                      */
+            if (p[1] < 1u || p[1] > 7u) continue;
+            if (!nb_hexreg_type_known(p[0])) continue;
+            /* validated for the WHOLE walk below, not the first byte - a
+             * string that runs to the very end of its mapping must not take
+             * the walk over the edge */
+            if (!nb_hexreg_readable(lo, hi, nmaps, p[2], 200)) continue;
+            path = (const unsigned char *)(unsigned long)p[2];
+            for (i = 0; i < 200 && path[i]; i++) ;
+            if (i < 4 || i >= 200) continue;
+            if (path[i-4] != '.' || path[i-3] != 'h'
+                    || path[i-2] != 'e' || path[i-1] != 'x') continue;
+            /* ★ TWO VERSION SOURCES, and the game's reader 0x5a8644 picks:
+             * with the node's [+32] selector SET it grades against the
+             * parsed HEADER (the encrypted 06/07 records - maj/min/patch at
+             * node+16/18/20, variant at node+26); only with it clear does it
+             * read the decrypted buffer at flash 0x1008. Both node4 images
+             * carry the selector, and reading only the buffer is exactly the
+             * misread that had node 4 claiming 124.107.0/0x98 against a
+             * header saying 1.35.0/0x03 - status 7 on every boot ever
+             * dumped. Mirror the game's choice, not one of its inputs. */
+            {
+                const unsigned char *nb = (const unsigned char *)p;
+                unsigned char var, v0, v1, v2;
+                const char *src;
+                if (p[8]) {
+                    var = nb[26]; v0 = nb[16]; v1 = nb[18]; v2 = nb[20];
+                    src = "header";
+                } else {
+                    if (!nb_hexreg_readable(lo, hi, nmaps, p[7] + p[11], 12))
+                        continue;
+                    buf = (const unsigned char *)(unsigned long)(p[7] + p[11]);
+                    var = buf[8]; v0 = buf[9]; v1 = buf[10]; v2 = buf[11];
+                    src = "image";
+                }
+                nb_hexreg[nb_hexreg_n].tcrc = p[0];
+                nb_hexreg[nb_hexreg_n].klass = p[1];
+                nb_hexreg[nb_hexreg_n].variant = var;
+                nb_hexreg[nb_hexreg_n].fw = ((unsigned)v0 << 16)
+                                          | ((unsigned)v1 << 8) | v2;
+                nb_hexreg_n++;
+                snprintf(m, sizeof m,
+                         "[nbexp] %s class=%u variant=0x%02x version=%u.%u.%u  %s\n",
+                         src, p[1], var, v0, v1, v2, (const char *)path);
+                logmsg(m);
+            }
+        }
+    }
+    nb_hexreg_stat_bytes = scanned;
+}
+
+/* The board's MCU part id names its LPC class (the game's own table at
+ * 0x69cc24); only the three classes hwshim has measured part ids for are
+ * ever claimed, so three entries is the whole mapping. */
+static unsigned nb_hexreg_class(unsigned part)
+{
+    if (part == 0x00020023u) return 1;          /* LPC1112_101 */
+    if (part == 0x00140040u) return 4;          /* LPC1124_303 */
+    if (part == 0x2c40102bu) return 5;          /* LPC1313     */
+    return 0;
+}
+
+/* Correct a claim's (variant, fw) from the game's own registry, when the
+ * registry has been found and carries this (type, class). Says so in the log
+ * once per node when it actually changed something - the update overlay and
+ * these lines are the oracle pair. */
+static void nb_hexreg_answer(unsigned nid, unsigned tcrc, unsigned part,
+                             unsigned *var, unsigned *fw)
+{
+    static int on = -1, tries;
+    static unsigned long last_try;
+    static unsigned long long said;
+    int i;
+
+    if (on == -1) { char *q = getenv("PAD_NB_HEXREG"); on = !(q && *q == '0'); }
+    if (!on || !tcrc) return;
+    if (nb_hexreg_n <= 0) {
+        unsigned long now;
+        if (tries < 0) return;                  /* given up                  */
+        now = pad_ms();
+        if (last_try && now - last_try < 2000) return;
+        last_try = now;
+        nb_hexreg_scan();
+        if (nb_hexreg_n > 0) {
+            char m[120];
+            snprintf(m, sizeof m, "[nbexp] the game's hex-image registry: "
+                     "%d decrypted image(s) found by shape\n", nb_hexreg_n);
+            logmsg(m);
+        } else if (++tries >= NB_HEXREG_TRIES) {
+            char m[200];
+            tries = -1;
+            snprintf(m, sizeof m, "[nbexp] no hex-image registry found by "
+                     "shape after %d scans (last: %u map lines, %u rw, "
+                     "%lu bytes walked); claims stay file/table-derived\n",
+                     NB_HEXREG_TRIES, nb_hexreg_stat_maps,
+                     nb_hexreg_stat_rw, nb_hexreg_stat_bytes);
+            logmsg(m);
+            return;
+        }
+    }
+    for (i = 0; i < nb_hexreg_n; i++) {
+        if (nb_hexreg[i].tcrc != tcrc) continue;
+        if (nb_hexreg[i].klass != nb_hexreg_class(part)) continue;
+        if ((*var != nb_hexreg[i].variant || *fw != nb_hexreg[i].fw)
+                && nid < 64 && !(said & (1ull << nid))) {
+            char m[160];
+            said |= 1ull << nid;
+            snprintf(m, sizeof m, "[nbexp] node %u claim corrected from the "
+                     "game's own image: variant 0x%02x->0x%02x fw %u.%u.%u->"
+                     "%u.%u.%u\n", nid, *var, nb_hexreg[i].variant,
+                     (*fw >> 16) & 0xff, (*fw >> 8) & 0xff, *fw & 0xff,
+                     (nb_hexreg[i].fw >> 16) & 0xff,
+                     (nb_hexreg[i].fw >> 8) & 0xff, nb_hexreg[i].fw & 0xff);
+            logmsg(m);
+        }
+        *var = nb_hexreg[i].variant;
+        *fw = nb_hexreg[i].fw;
+        return;
+    }
 }
 
 /* PAD_NB_DUMP=<n> - every n node bus writes, dump the node board registry.
@@ -5814,6 +6160,48 @@ static int nb_is_silent(unsigned node)
     if (silent == (const char *)-1) silent = getenv("PAD_NB_SILENT");
     if (!silent) return 0;
     for (s = silent; *s; ) {
+        unsigned v = 0;
+        int any = 0;
+        while (*s >= '0' && *s <= '9') { v = v * 10 + (unsigned)(*s++ - '0'); any = 1; }
+        if (any && v == node) return 1;
+        if (*s) s++;
+    }
+    return 0;
+}
+
+/* Does a SILENCED node still answer the `ff` status poll (item 52's
+ * "silent for identity, present for status" carve-out)? PER NODE now, because
+ * the global carve-out turned out to hold godzilla_le's whole boot hostage:
+ *
+ * MEASURED 2026-08-22 on the Heisei card (godzilla_le, node 2 silenced by the
+ * census): with every silenced node answering `ff`, bring-up re-probed node
+ * 2's identity in 90-probe bursts every ~15 s until t=100.4 s - 1530 refusals
+ * in all - and the attract light show (and with it the playfield's LED block,
+ * autoattract's `past` signal, everything) waited on the last burst. Item 17's
+ * run 12, taken BEFORE the carve-out existed, is the control: "every
+ * [nbsilent] train sits in the first 20 s". A board that answers status but
+ * refuses identity reads as alive-but-unidentified, and the game keeps trying
+ * to identify it; a board that answers nothing is written off at the first
+ * storm's end, which is what a real absent board looks like and is the whole
+ * point of the silence. So total silence is again the default, and the
+ * carve-out applies only where its benefit was actually measured: the
+ * OPTIONAL node4-class boards on stranger_things' coil/switch service path,
+ * whose refused `ff` cost every service pass ~3.3 s (item 52).
+ *
+ * PAD_NB_SILENT_FF: a comma/space list of node ids = answer `ff` on exactly
+ * those silenced nodes (watch.sh computes it from nodecensus.py, the same
+ * place the silence list comes from); "0" = none, the pre-item-52 total
+ * silence; "1" or unset = every silenced node, item 52's original shape, kept
+ * as the A/B knob. Node ids 0 and 1 are the CPU bridge and the cabinet board,
+ * never silenced, so the two flag values collide with no real list. */
+static int nb_silent_ff(unsigned node)
+{
+    static const char *ff = (const char *)-1;
+    const char *s;
+    if (ff == (const char *)-1) ff = getenv("PAD_NB_SILENT_FF");
+    if (!ff || !*ff || (ff[0] == '1' && !ff[1])) return 1;
+    if (ff[0] == '0' && !ff[1]) return 0;
+    for (s = ff; *s; ) {
         unsigned v = 0;
         int any = 0;
         while (*s >= '0' && *s <= '9') { v = v * 10 + (unsigned)(*s++ - '0'); any = 1; }
@@ -8722,12 +9110,16 @@ long shim_read(int fd, void *b, unsigned long n)
              * words, no fault bits, no input-changed flag. It is what a bus
              * with no board on that address and a master that does not wait
              * on it would look like - which is the machine we are modelling.
-             * PAD_NB_SILENT_FF=0 restores the old total silence for A/B. */
-            if (nb_is_silent(want) && nb_req_len > 2 && nb_req[2] == 0xff) {
-                static int on = -1;
-                if (on == -1) { char *q = getenv("PAD_NB_SILENT_FF"); on = !(q && *q == '0'); }
-                if (on) goto silent_status_ok;
-            }
+             *
+             * ★ PER NODE as of 2026-08-22, and nb_silent_ff() has the
+             * measurement: answering `ff` for godzilla_le's silenced node 2
+             * kept bring-up re-probing its identity until t=100 s, so the
+             * carve-out now applies only to the nodes watch.sh names in
+             * PAD_NB_SILENT_FF (the optional node4 class it was built for).
+             * PAD_NB_SILENT_FF=0 is total silence, =1 the old everywhere. */
+            if (nb_is_silent(want) && nb_req_len > 2 && nb_req[2] == 0xff
+                    && nb_silent_ff(want))
+                goto silent_status_ok;
             if (nb_is_silent(want)) {
                 /* ITEM 17: timestamp every refusal. Run 11 showed the cabinet
                  * poll stops for ~690 ms at a time (~138 x the game's 5 ms
@@ -9065,9 +9457,19 @@ long shim_read(int fd, void *b, unsigned long n)
                 unsigned part = nb_env_hex("PAD_NB_PART",
                                            ident ? ident->part : NB_PART_DEFAULT);
                 unsigned hwid = nb_env_hex("PAD_NB_HWID", NB_HWID_DEFAULT);
-                unsigned fw   = nb_env_hex("PAD_NB_FW", nb_ident_fw(ident));
-                unsigned var  = nb_env_hex("PAD_NB_VARIANT",
-                                           ident ? ident->variant : 0);
+                unsigned fwd  = nb_ident_fw(ident);
+                unsigned vard = ident ? ident->variant : 0;
+                unsigned fw, var;
+                /* THE GAME'S OWN DECRYPTED IMAGE OUTRANKS the derived table:
+                 * a variant nbdir could only guess (the hex bodies are
+                 * encrypted) is exactly what put godzilla_le through ~80 s
+                 * of failed RUNTIME UPDATEs on node 10 every boot - see
+                 * nb_hexreg_answer(). Env overrides still win below, so a
+                 * sweep can bypass both layers at once. */
+                nb_hexreg_answer(nid, ident ? ident->tcrc : 0, part,
+                                 &vard, &fwd);
+                fw  = nb_env_hex("PAD_NB_FW", fwd);
+                var = nb_env_hex("PAD_NB_VARIANT", vard);
                 /* ★ ITEM 51's INSTRUMENT: say what each node claims, once.
                  * A re-ask-count "refusal detector" lived here for one run
                  * and is deliberately GONE: ~200 fe per node in five

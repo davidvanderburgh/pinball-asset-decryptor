@@ -2750,14 +2750,24 @@ class Field(StateOps, LedRing):
 
     # ---- live LED and coil state -----------------------------------------
     def read_leds(self):
+        """(raw, d): `raw` is the block's bytes whenever dump/padled could be
+        READ at all - the emulator is there - and `d` is those same bytes only
+        once the shim has stamped its magic, i.e. once LED data has actually
+        been decoded. The Schematic learned this distinction on item 50; this
+        view folding "readable but unstamped" into "no emulator" is what had
+        the status bar calling a live run down for the whole boot (David,
+        2026-08-22: the shim stamps the block at the FIRST lamp write it
+        decodes, which on a normal boot is the attract light show - so the
+        window read "no emulator" across Tech Alerts, exactly when a human is
+        watching for signs of life)."""
         try:
             with open(LED_PATH, "rb") as f:
-                d = f.read(PADLED_READ)
+                raw = f.read(PADLED_READ)
         except OSError:
-            return None
-        if len(d) < LED_HDR or struct.unpack_from("<I", d, 0)[0] != PADLED_MAGIC:
-            return None
-        return d
+            return None, None
+        if len(raw) < LED_HDR or struct.unpack_from("<I", raw, 0)[0] != PADLED_MAGIC:
+            return raw, None
+        return raw, raw
 
     def door_open(self):
         """True when the coin door is open, so 48V is off and coils are dead.
@@ -2974,10 +2984,14 @@ class Field(StateOps, LedRing):
         poll_switches(self)
 
         t_read = time.perf_counter()
-        d = self.read_leds()
+        raw, d = self.read_leds()
         self._read_ms = (time.perf_counter() - t_read) * 1000.0
         self.last = d
-        if emu_gone(self, d is not None):
+        # `raw is not None`, NOT the stamped block: the emulator is "there"
+        # when its ring file can be read (watch.sh removes it at teardown
+        # precisely so this can tell), same as the Schematic's test. Keying
+        # this on the magic made an unstamped boot look like a torn-down run.
+        if emu_gone(self, raw is not None):
             # SAVE FIRST. Leaving with the run is the COMMON way this window
             # closes - the human closes the emulator, not the playfield - so a
             # destroy without this meant the remembered position only ever came
@@ -2989,7 +3003,11 @@ class Field(StateOps, LedRing):
         state_msg = self._state_status()
         if d is None:
             self.status.config(text=state_msg
-                               or "no emulator (dump/padled not readable)")
+                               or ("emulator up, no LED writes decoded yet"
+                                   " (normal through boot and Tech Alerts:"
+                                   " the attract light show is the first)"
+                                   if raw is not None else
+                                   "no emulator (dump/padled not readable)"))
         else:
             decoded = struct.unpack_from("<I", d, LED_DECODED_OFF)[0]
             skipped = struct.unpack_from("<I", d, LED_SKIPPED_OFF)[0]

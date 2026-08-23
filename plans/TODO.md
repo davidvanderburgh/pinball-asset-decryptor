@@ -3031,13 +3031,77 @@ These have each been violated at least once and each cost a run or a window:
       this view opens, the call sites are located, and item 25's test harness
       already exists — but confirming a real plunge costs one run.
 
-- [ ] **62. `GAME VALIDATION ERROR #3 UPDATE SD CARD` — SEEN LIVE on the Heisei
-      image, whose validation tick is NOPPED, so something raises this with the
-      state machine dead.** `S2 D3`
-      ← WORKING ON, 70% *(▼ from 85%. S3 → S2 and D2 → D3, 2026-08-23 later the
-      same day: David boots the Heisei custom image and SEES the banner, in two
-      places at once, so this is neither off-screen nor hypothetical, and what
-      is left needs a run to pin rather than a desk read.)*
+- [ ] **62. `GAME VALIDATION ERROR #3` is a STALE FAILED GRADE IN NVRAM that a
+      nopped validation tick can never clear — SOLVED AND PROVEN with a
+      three-run controlled experiment; what is left is the product decision.**
+      `S2 D2` ← WORKING ON, 90%
+      *(▲ from 70%. D3 → D2: the mechanism is proven end to end and the fix is
+      applied and verified; what remains is deciding what the rig should do
+      about it automatically, which is desk work plus one confirming boot.)*
+      **★★★★★ THE MECHANISM, PROVEN 2026-08-23 BY THREE RUNS WITH A CONTROL.**
+      All three booted the Heisei image identically, reading the grades live
+      through `PAD_VAL_DUMP` (now title-portable, `PAD_VAL_MOD=0x7f16bc`):
+
+      | run | change | GE | CE | ZK | V |
+      |---|---|---|---|---|---|
+      | A | none (control) | P | P | **F** | `0x7f16ec` = MOD+0x30, slot B |
+      | B | `nvram-godzilla_le.bin` deleted | P | P | **F** | `0x7f16ec` |
+      | C | validation area zeroed | P | P | **P** | `0x7f16bc` = MOD+0, slot A |
+
+      Run A is what makes the rest mean anything: without it, "no banner after
+      deleting something" could equally have meant the banner was never going to
+      show. Run C's two readouts moved TOGETHER and both matched a prediction
+      written down before the run.
+      **The chain, every link measured:**
+      • The module's start function restores a 532-byte blob (area 80) over its
+        own globals and only initialises when that restore FAILS. The grades at
+        +42/+43/+44 are inside the restored range, so a restore overwrites them
+        and the init never runs.
+      • That blob lives in the emulated EEPROM at **`/data/nvram.bin` offset
+        `0x214`**, as an A/B pair — slot A at `0x214`, slot B at `0x244`. Found
+        by searching the file for the live struct's own bytes, not by guessing
+        from file sizes.
+      • Slot A is clean `P/P/P`; **slot B carried `ZK=2 (F)`**. The game selects
+        slot B because the stored build stamp at +34 does not match this build's
+        (`memcmp` → `movne r0,#48`).
+      • The Heisei card's validation tick is nopped to `bx lr`, so nothing can
+        ever re-grade ZK back to P. **On a healthy card this self-heals on the
+        next boot; on a nopped card the banner is permanent and unclearable.**
+        That is the whole difference, and it is why the fault looked card-specific.
+      **★★ IT IS RIG-WIDE, NOT A HEISEI PROBLEM: 25 of 28 per-title NVRAMs carry
+      the same stale `ZK=F` at `0x244`.** `hwshim.c` `nv_path()` seeds a missing
+      per-title file from the shared `/data/nvram.bin`, and that shared file
+      carried a failed ZK — so every title minted from it inherited one. Only
+      `aerosmith_le` reads `P/P/P` in both slots. This also RETROSPECTIVELY
+      VINDICATES the item's original turtles report: `nvram-turtles_pro.bin`
+      carries `ZK=F` and the upscaled turtles card is nopped, so it would indeed
+      show the banner — my 2026-08-23 claim that it "cannot raise it" was wrong
+      for exactly the reason now proven.
+      **Why deleting the per-title nvram did nothing (run B):** `nv_path()`
+      re-seeds a missing per-title file *from the poisoned shared one*. The
+      obvious fix was a no-op, and only the control run made that legible.
+      **★ FIX APPLIED AND VERIFIED, surgically.** `PAD_NV_POKE=214-427:00` zeroes
+      only the validation module's own area, so identity, settings, audits and
+      high scores are untouched — `rm nvram.bin` would have thrown those away.
+      The same range is now zeroed on disk in `data/nvram.bin` and
+      `data/nvram-godzilla_le.bin`; backups are in `~/item62/`
+      (`nvram.bin.BACKUP`, `nvram-godzilla_le.BACKUP.bin`). The other 24
+      poisoned files are LEFT ALONE deliberately — they self-heal on any healthy
+      card, and the shared seed is now clean so new ones are born clean.
+      **Resume — the product decision, which is David's:** should the rig detect
+      this and fix it, or stay manual? Options, cheapest first: (a) nothing —
+      the shared seed is clean now, so this decays on its own; (b) a one-shot
+      `nvfix.sh` that zeroes the area in any nvram carrying F/E, for the two
+      known nopped cards (turtles_pro is the other one); (c) have the shim zero
+      the area at load when the tick is nopped — `valtick.py`'s signature makes
+      that detectable — which is self-maintaining but is the emulator quietly
+      editing the machine's EEPROM, and that deserves a deliberate yes.
+      **Still unverified, and honestly so:** the banner was never captured on
+      the glass BEFORE and AFTER, because an unattended boot parks on Guided
+      Setup within 25 s and never reaches the language-select or Tech Alerts
+      screens where David saw it. The grade bytes are the evidence, and they are
+      ground truth for what the provider tests — but a screenshot pair would
+      close it properly and needs someone to navigate there.
       **▼▼ MY OWN 2026-08-23 REVERSAL IS ITSELF PARTLY WRONG — REFUTED BY
       OBSERVATION, which outranks every disassembly in this entry.** David's
       Heisei boot shows `GAME VALIDATION ERROR - #3 UPDATE SD CARD` on Tech

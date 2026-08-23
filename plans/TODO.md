@@ -3113,6 +3113,17 @@ These have each been violated at least once and each cost a run or a window:
       call and the probe reads a confident silence over a working module, which
       is the exact trap that would have wasted the confirming run.
       `-fsyntax-only` clean; NOT yet run.
+      **★★ ALSO BUILT: `obfcrib.py`**, which is how turtles' table was found and
+      is the general answer to "this title's obfuscated strings are unreadable".
+      `obfstr.py` needs the TABLE address and `obfstr2.py` needs the BLOB
+      address, and on a new title neither is known. But
+      `x[i] = c[i]^c[i-1]` gives `x[i] = key[i&3] ^ out[i]`, so two indices in
+      the same class mod 4 cancel the key and `x[i]^x[i+4]` is a signature of
+      the PLAINTEXT ALONE — a message already known from another title finds
+      its own ciphertext by a plain scan, and the key falls out of the match.
+      Validated against godzilla: it recovers five of the seven keys
+      `obfstr2.py` hard-codes, from ciphertext alone. Takes `--elf` because
+      `gameinfo.elf()` prefers a stale published path after a card run ends.
       **Resume — one run decides it, and it is cheap now:** boot the upscaled
       turtles card with `PAD_VAL_DUMP=1 PAD_VAL_MOD=0x681994
       PAD_VAL_TEXT_LO=0x2e0ef8 PAD_VAL_TEXT_HI=0x2e33b8` and read `[val]`. The

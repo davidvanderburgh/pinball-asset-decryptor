@@ -4395,7 +4395,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **74. A boot that is copying the card shows NOTHING about the copy —
       minutes of "Startup In Progress" with no hint that a ~7 GB dd is
-      running, so every copying boot reads as a hang.** `S3 D2`
+      running, so every copying boot reads as a hang.** `S3 D3`
       *(Filed 2026-08-23 alongside item 34's widening: David read three
       copying boots in one session as "first-time startup took an
       excessively long time", and item 34's original godzilla sighting
@@ -4409,17 +4409,27 @@ These have each been violated at least once and each cost a run or a window:
       to be slow. Known numbers from item 34: 177 s to first picture vs
       ~15 s cached, input laggy while the copy competes with the boot's own
       9p reads.
-      **Acceptance:** during a copying boot the GUI names the copy and shows
-      its progress (source size is known, bytes-done/total is cheap), and a
-      cached boot shows nothing new. Whether to also PRE-copy before guest
-      start (a paced copy + a fast boot instead of the laggy 177 s hybrid)
-      is a design choice for the pass that takes this — it touches boot
-      ordering, so it is not free, and item 34's stamp semantics must not
-      change.
+      **★ WIDENED 2026-08-23, David's pick ("do both, widen 74 and add the
+      batch pre-cache item"): the PRE-COPY is no longer a design choice, it
+      is the direction.** A first boot of an uncached card copies FIRST,
+      with visible progress, then boots from the cache — at the measured
+      ~120-150 MB/s that is ~60-70 s of copy plus a ~10-15 s cached boot,
+      roughly 80 s to attract against the 177 s laggy hybrid, and input is
+      never degraded. Also in scope: start the copy the moment a card is
+      PICKED on the Emulate tab (validation time is copy time), so the
+      pre-boot wait shrinks further. Item 34's stamp semantics must not
+      change, and PAD_CARD_CACHE=0 must still mean no copy and a straight
+      9p boot.
+      **Acceptance:** boot an uncached card — the GUI names the copy and
+      shows its progress (source size is known, bytes-done/total is cheap),
+      the game does not start until the copy lands, total time-to-attract
+      is stated and well under the old hybrid's, and a cached boot shows
+      nothing new and is not delayed.
       — S3: friction — the run completes, and once 34 is fixed each card
       pays it once; what it costs is testers reading a working boot as a
-      hang. D2: mechanism fully known, the log and file sizes exist to draw
-      progress from; needs one live copying boot to confirm.
+      hang. D2 → D3 at the widening: still one provokable confirming run,
+      but the pre-copy touches boot ordering in watch.sh/run_game.sh plus
+      GUI progress plus the pick-time start — three surfaces, not one.
       **Measured at item 34's close (2026-08-23):** the copier alone runs
       ~120-150 MB/s on this machine (`.partial` growth watched live, no
       renderer up) — a full 7.3 GB copy is ~60-70 s uncontended, so David's
@@ -4463,6 +4473,35 @@ These have each been violated at least once and each cost a run or a window:
       nothing else is blocked. D3: needs runs, reproduces on demand (4/4),
       instruments exist — the missing piece is an exit-reason hook on the
       guest (item 23's) wired into this flow.
+
+- [ ] **76. Batch pre-cache: copy a chosen set of cards into `~/cardcache`
+      ahead of time, so a title sweep's first boots are all cached boots.**
+      `S3 D2`
+      *(Filed 2026-08-23 at David's ask — "do both, widen 74 and add the
+      batch pre-cache item" — after item 34's close measured the copier at
+      ~120-150 MB/s standalone: ~60-70 s per 7.3 GB card, so the whole
+      Stern folder pre-caches in well under an hour, unattended.)*
+      The copier already exists and runs detached: `cardmount.sh`
+      `cache_pick()` starts it per card and item 34's size+mtime stamp
+      decides validity. Missing is a way to run it for MANY cards without
+      booting each: point it at a folder (or a picked set) and it copies
+      every card not already cached, one at a time, with per-card progress
+      and a clean stop. Plausible shape (a guess, not established): a small
+      CLI (`precache.sh <folder>`) as the cheap half, a button on the
+      Emulate tab wrapping it later. Constraints: one card copying at a
+      time against the one disk (the per-label pid lock only guards one
+      card), NEVER while a run is live (rig-lock rules apply when a
+      session runs it), and PAD_CARD_CACHE=0 skips it.
+      **Acceptance:** run the batch tool over a folder holding at least one
+      uncached and one cached card — the cached one is skipped and says so,
+      the uncached one lands in `~/cardcache` with a stamp `cache_pick()`
+      accepts: a following boot of it logs "using local cache" and starts
+      no copier.
+      — S3: convenience — any card can already be cached by booting it
+      once, and item 74's pre-copy makes even that first boot honest; what
+      this buys is sweep sessions that never wait. D2: desk work — the copy
+      path exists and is proven — plus one confirming boot of a pre-cached
+      card.
 
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T

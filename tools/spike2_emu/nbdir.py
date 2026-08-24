@@ -130,9 +130,17 @@ CLASS_BY_NAME = {v: k for k, v in CLASS_NAMES.items()}
 # logged no hexreg correction at all. That gap is real and is recorded in
 # item 55; this prior fixes the symptom, not that.
 #
+# ★ lcdnode is 0x02, measured 2026-08-24 with hexreg.py off a LIVE batman
+# game mid "UPDATING NODE BOARD RUNTIME" walk (item 82): the registry's
+# decrypted class-3 image reads variant=0x02 version=1.19.0, stable across
+# two samples 30 s apart, with pinnode 0x01 / ws2812node 0x05 / node4 0x03
+# reconfirmed in the same pass - the item-55 trust rule. The 0x01 guess
+# graded VILLAIN VISION (board 24) as a mismatched image and put every boot
+# through the failed-update walk.
+#
 # Everything else is a GUESS the output marks as one.
 VARIANT_PRIOR = {"pinnode": 0x01, "ws2812node": 0x05, "node4": 0x03,
-                 "tmc5041node": 0x0d, "coil4node": 0x04}
+                 "tmc5041node": 0x0d, "coil4node": 0x04, "lcdnode": 0x02}
 VARIANT_DEFAULT = 0x01
 
 # Class preference PER TYPE, measured pair first: the variant byte lives

@@ -4926,7 +4926,7 @@ These have each been violated at least once and each cost a run or a window:
       nbdir.py `PART_BY_CLASS[3]=0x00030030` — MEASURED off batman's own
       28-byte MCU descriptor table (record at file 0x6736c4:
       `part=0x00030030 class=3 name="LPC1113FBD48/303"`), plus
-      `CLASS_PREF["lcdnode"]=(3,)`; hwshim.c `nb_hexreg_class` knows
+      `CLASS_PREF["lcdnode"]=(3,)` + `VARIANT_PRIOR["lcdnode"]=0x02` (measured live, hexreg, mid-update-walk); hwshim.c `nb_hexreg_class` knows
       class 3; hwshim.c `nb_nodes_init` skips swelf's node-0xff poison
       rows (the roster's bogus 255). Desk-verified: nbdir on batman's
       ELF+hexes now derives 9 nodes including

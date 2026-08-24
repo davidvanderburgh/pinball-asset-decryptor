@@ -4881,9 +4881,17 @@ These have each been violated at least once and each cost a run or a window:
       83). **NOTE: the fixes live on item/82 — David's main-checkout
       app re-derives batman's tables with MAIN's code every run, so HIS
       batman boots keep the old behavior until /finish.**
+      **★ batman UPDATE 2, same day: VILLAIN VISION RENDERS (item 83
+      CLOSED).** The second screen David asked about is batman's
+      three-insert playfield LCD, and the playfield window now draws all
+      three with the real '66 episode art the game names, live
+      (screenshot C:/tmp/item83_panel.png). Item 82 stays open at 90%
+      for the cosmetic alert-row config dump only. Both ride branch
+      item/83 (which contains item/82) awaiting /finish — David's
+      main-checkout app shows none of it until then.
       **Resume:** next title alphabetically is whatever comes after
       batman in David's own run. Wait for his report before touching
-      anything; items 82/83 hold batman's open work.
+      anything; item 82 (90%) holds batman's one open thread.
       **NOTE for later titles: the 24-title fleet nvram fix (item 62) means
       NO title should show the validation banner from here on — if one
       does, that is a NEW, live validation failure, not the stale-grade

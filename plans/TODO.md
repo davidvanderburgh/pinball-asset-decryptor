@@ -3165,10 +3165,20 @@ These have each been violated at least once and each cost a run or a window:
       this view opens, the call sites are located, and item 25's test harness
       already exists — but confirming a real plunge costs one run.
 
-- [ ] **62. `GAME VALIDATION ERROR #3` is a STALE FAILED GRADE IN NVRAM that a
-      nopped validation tick can never clear — SOLVED AND PROVEN with a
-      three-run controlled experiment; what is left is the product decision.**
-      `S2 D2` 90% ← WORKING ON
+- [x] **62. `GAME VALIDATION ERROR #3` is a STALE FAILED GRADE IN NVRAM that a
+      nopped validation tick can never clear — SOLVED, PROVEN, FLEET-FIXED
+      AND GLASS-VERIFIED.** `S2 D2` DONE 2026-08-24, `item/62`, `bf15c19`,
+      awaiting `/finish`.
+      **★★★ CLOSED 2026-08-24 — THE GLASS VERIFICATION THIS ITEM OWED SINCE
+      2026-08-23 IS DONE, by David's own eyes in the item-80 sweep:**
+      avengers_infinity_le showed the red `Game validation error, Update SD
+      card` banner (screenshot on record, the BEFORE), `nvgrades.py --fix`
+      zeroed its stale slot-B grade, and David's relaunch shows **the banner
+      is gone**. The product decision was his "let's fix item 62 now": the
+      one-shot fleet fix (`--fix-all`, verified `0 of 29 carry a stored F or
+      E`), NOT a shim auto-zero — the shared seed is clean so new files are
+      born clean, and auto-zeroing would mask an honest future failure. If a
+      stored F ever reappears, the census names it and `--fix` clears it.
       *(▲ from 70%. D3 → D2: the mechanism is proven end to end and the fix is
       applied and verified; what remains is deciding what the rig should do
       about it automatically, which is desk work plus one confirming boot.)*

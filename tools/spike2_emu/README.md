@@ -148,7 +148,7 @@ per-title follow-up items it spawns.
 | godzilla_le 1.13.0 | not run | — no device test data in this build | — 0 records (measured off the card) | n/a | not yet | 2026-08-21 |
 | metallica_spike | ✅ live, 106 | ✅ metallica_playfield…png (item 57 fix) | ✅ 502/664 inside, 0 outside (item 57 fix) | n/a | not yet | 2026-08-19 |
 | aerosmith_le | ✅ static (swelf.py), live-verified | — no device table shipped | — | n/a | ✅ clean, 2026-08-24 (David) | 2026-08-19 |
-| avengers_infinity_le | ✅ static (swelf.py), live-verified | — | — | n/a | ❌ `Game validation error, Update SD card` → item 62 (fix applied 2026-08-24, pending reverify) | 2026-08-19 |
+| avengers_infinity_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-24 (David; validation banner was item 62's stale NVRAM grade, fixed + relaunch-verified same day) | 2026-08-19 |
 | batman | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
 | foo_fighters_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
 | guardians_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |

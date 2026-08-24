@@ -4783,23 +4783,27 @@ These have each been violated at least once and each cost a run or a window:
       "standing record" idea, nothing lost.
       **THE LOG, alphabetical, one line per title as David reports it:**
       - **aerosmith_le — ✅ CLEAN**, David's own green check, 2026-08-24.
-      - **avengers_infinity_le — ❌ `Game validation error, Update SD card`**
-        on Tech Alerts / language-select, 2026-08-24 (David's screenshot).
-        This is item 62's exact mechanism (a stale `F` grade in NVRAM slot B
-        that title's own nopped-or-not tick may never re-heal). Census run
-        the same session (`nvgrades.py`, item 62's tool): only 4 of 29
-        titles read clean — `aerosmith_le`, `elvira3`, `godzilla_le`,
-        `turtles_pro` — matching David's aerosmith result independently.
-        Fix applied: `nvgrades.py --fix avengers_infinity_le`. **Not yet
-        re-verified on the glass** — Resume: David relaunches
-        avengers_infinity_le and confirms the banner is gone; see item 62.
-        Also noted, same title: **the switch-schematic view's hover zones
-        are not perfectly aligned with the text** (David, live) — filed as
-        its own follow-up, see item 81.
+      - **avengers_infinity_le — ✅ CLEAN after a same-day fix, David's
+        relaunch confirming.** First launch showed `Game validation error,
+        Update SD card` (screenshot on record) — item 62's exact mechanism,
+        a stale `F` grade in NVRAM slot B. The census (`nvgrades.py`) had
+        only 4 of 29 titles clean — `aerosmith_le`, `elvira3`,
+        `godzilla_le`, `turtles_pro` — independently matching David's
+        aerosmith result. Fixed (then fleet-wide `--fix-all` at David's
+        ask, 0 of 29 stuck after) and **David's relaunch shows the banner
+        GONE** — which was also item 62's long-owed glass verification, so
+        this sweep closed that item. Also spotted on this title's switch
+        list: **hover/click zones misaligned with the row text** — filed,
+        fixed and closed same day as item 81 (the lower ~38 % of every
+        row's glyphs belonged to the row BELOW, clicks included).
       **Resume:** next title alphabetically is whatever comes after
       avengers_infinity_le in David's own run (batman, most likely — check
       his actual order, do not assume the card-library's alphabetical
       order matches his). Wait for his report before touching anything.
+      **NOTE for later titles: the 24-title fleet nvram fix (item 62) means
+      NO title should show the validation banner from here on — if one
+      does, that is a NEW, live validation failure, not the stale-grade
+      class, and it earns its own item.**
 
 ## Reference material that is NOT in this repo
 

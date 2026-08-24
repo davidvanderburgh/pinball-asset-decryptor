@@ -3043,7 +3043,11 @@ def test_image_info_window_populates(app, manufacturers_by_key, tmp_path,
     fw_iid = tree.get_children("")[secs.index("Firmware")]
     fw = {tree.item(i, "text"): tree.item(i, "values")[0]
           for i in tree.get_children(fw_iid)}
-    assert fw["Version"].startswith("1.23.0") and fw["Edition"] == "LE"
+    # The fixture card is NAMED turtles_le but its on-card game folder is
+    # turtles_pro, so the edition comes back Pro — the card outranks the file
+    # name (info.resolve_version).  Its sidx carries no version, so the
+    # version is still the name's.
+    assert fw["Version"].startswith("1.23.0") and fw["Edition"] == "Pro"
     assert str(w._info_copy_btn["state"]) == "normal"
 
     # The rendered sections back the Copy Report text verbatim.

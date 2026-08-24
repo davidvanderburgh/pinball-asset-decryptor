@@ -171,7 +171,12 @@ def test_card_info_probe(tmp_path, monkeypatch):
     fw = dict(sections["Firmware"])
     assert fw["System"] == "Stern Spike 2"
     assert fw["Version"].startswith("1.23.0")
-    assert fw["Edition"] == "LE"
+    # This fixture's name and contents disagree on purpose: the FILE is named
+    # turtles_le, the card's own game folder is turtles_pro.  The card wins
+    # (resolve_version) — the edition is a fact about the image.  The version
+    # still comes from the name here because "turtles.sidx" carries none.
+    assert fw["Edition"] == "Pro"
+    assert fw["Version"].endswith("(from the filename)")
     assert fw["Game folder"] == "turtles_pro"
     assert fw["Validated files"] == "2 (FI64 manifest)"
     assert "image.bin — 2.0 KB (2,048 bytes)" == fw["Asset container"]
@@ -307,6 +312,61 @@ def test_card_info_counts_version_id_and_sidx_version(tmp_path, monkeypatch):
     assert assets["Sounds"].startswith("549 — ")
     assert assets["Sound fragments"].startswith("578 — ")
     assert assets["Music banks"].startswith("1 ")
+
+
+def test_card_info_prefers_the_card_over_a_disagreeing_filename(tmp_path,
+                                                                monkeypatch):
+    """A MODDED/relabelled card: the file is named 1_58_1, the card's own
+    update index says 1.58.0.  The card wins and the name is reported, not
+    silently dropped — the version is inside the image (a tester)."""
+    from tests._ext4_fake import install_fake_reader, write_fake_card
+    install_fake_reader(monkeypatch, spec=COUNTED_TREE)
+    img = write_fake_card(tmp_path / "turtles_pro-1_58_1.1987.8G.sdcard.raw")
+
+    fw = dict(dict(card_info(img))["Firmware"])
+    assert fw["Version"] == "1.58.0  (from the card's update index)"
+    assert fw["Filename version"].startswith("1.58.1 — ")
+    # The short id follows the card too, not the name.
+    assert fw["Version ID"] == "TUR158PRO"
+
+
+def test_card_info_says_nothing_when_the_filename_agrees(tmp_path,
+                                                         monkeypatch):
+    """The extra row is for disagreement only — a normally-named vendor card
+    must not grow a redundant 'Filename version' row."""
+    from tests._ext4_fake import install_fake_reader, write_fake_card
+    install_fake_reader(monkeypatch, spec=COUNTED_TREE)
+    img = write_fake_card(
+        tmp_path / "turtles_pro-1_58_0.Release.8G.sdcard.raw")
+
+    fw = dict(dict(card_info(img))["Firmware"])
+    assert fw["Version"] == "1.58.0  (from the card's update index)"
+    assert "Filename version" not in fw
+
+
+@pytest.mark.parametrize("path,sidx,folder,expected", [
+    # The card's index wins over any name, however the file is called.
+    ("D:\\backup.raw", "venom_le-1_07_0.sidx", "venom_le",
+     ("1.07.0", "LE", "the card's update index", None)),
+    # A name that disagrees comes back as the fourth element.
+    ("D:\\turtles_le-1_58_1.1987.8G.sdcard.raw", "turtles_le-1_58_0.sidx",
+     "turtles_le", ("1.58.0", "LE", "the card's update index", "1.58.1")),
+    # godzilla_pro's real vendor name has no parsable version (trailing
+    # "_spike2"); the index supplies it, and there's nothing to disagree.
+    ("D:\\godzilla_pro-1_15_0_spike2.Release.8G.sdcard.raw",
+     "godzilla_pro-1_15_0.sidx", "godzilla_pro",
+     ("1.15.0", "Pro", "the card's update index", None)),
+    # No readable index: the filename is still the fallback.
+    ("D:\\munsters_le-1_27_0.Release.8G.sdcard.raw", "", "",
+     ("1.27.0", "LE", "the filename", None)),
+    # Nothing anywhere.
+    ("D:\\card.raw", "", "", (None, None, "", None)),
+    # The on-card game folder alone can name the edition.
+    ("D:\\card.raw", "", "deadpool_pro", (None, "Pro", "", None)),
+])
+def test_resolve_version(path, sidx, folder, expected):
+    from pinball_decryptor.plugins.stern.info import resolve_version
+    assert resolve_version(path, sidx, folder) == expected
 
 
 def test_card_info_skips_counts_when_the_elf_is_unreadable(tmp_path,

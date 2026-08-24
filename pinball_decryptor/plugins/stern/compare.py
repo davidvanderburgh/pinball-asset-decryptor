@@ -39,7 +39,7 @@ from ...core.image_info import human_size
 from . import sidx as sidx_mod
 from .explorer import CardImage
 from .info import (_IMAGE_EXTS, _game_elf_bytes, _walk_partition,
-                   container_counts, version_from_filename)
+                   container_counts, resolve_version)
 
 # Listed file names are capped per change row; a final "… and N more" row
 # keeps the report honest about what it didn't list (Copy Report includes
@@ -88,8 +88,8 @@ def _probe(path):
     and the firmware's adjustment/high-score tables."""
     p = {"path": path, "files": None, "video_paths": set(),
          "counts": (None, None), "adjust": None, "scores": None,
-         "folders": set(), "sidx_name": "", "part": None}
-    p["version"], p["edition"] = version_from_filename(path)
+         "folders": set(), "sidx_name": "", "part": None,
+         "version": None, "edition": None, "name_version": None}
     with CardImage(path) as card:
         parts = [pt for pt in card.partitions() if pt.browsable]
         parts.sort(key=lambda pt: pt.size, reverse=True)
@@ -126,11 +126,12 @@ def _probe(path):
             p["adjust"], p["scores"] = _firmware_tables(fw)
     if p["files"]:
         p["folders"] = {f.split("/", 1)[0] for f in p["files"] if "/" in f}
-    # A renamed card still carries its version in the on-card sidx name.
-    if p["sidx_name"] and p["version"] is None:
-        p["version"], s_ed = version_from_filename(p["sidx_name"])
-        if p["edition"] is None:
-            p["edition"] = s_ed
+    # The card's own update index outranks the filename (info.resolve_version)
+    # — a renamed or relabelled card diffs as the build it really is, so the
+    # "Version A -> B" row can't be thrown off by what the file is called.
+    folder = next(iter(p["folders"])) if len(p["folders"]) == 1 else ""
+    p["version"], p["edition"], _src, p["name_version"] = \
+        resolve_version(path, p["sidx_name"], folder)
     return p
 
 
@@ -341,6 +342,14 @@ def compare_cards(path_a, path_b):
     if a["edition"] or b["edition"]:
         ae, be = a["edition"] or "?", b["edition"] or "?"
         head.append(("Edition", ae if ae == be else "%s -> %s" % (ae, be)))
+    # Say so when a file's NAME claims a different build than the card does,
+    # or the version row above looks wrong against what's in the file picker.
+    for tag, side in (("A", a), ("B", b)):
+        if side["name_version"]:
+            head.append(("Filename version (%s)" % tag,
+                         "named %s but the card says %s — renamed or "
+                         "relabelled; the diff uses the card"
+                         % (side["name_version"], side["version"])))
     folders = a["folders"] | b["folders"]
     if a["folders"] and b["folders"] and a["folders"] != b["folders"]:
         head.append(("Warning",

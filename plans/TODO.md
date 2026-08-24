@@ -4423,7 +4423,7 @@ These have each been violated at least once and each cost a run or a window:
       endpoint that fails stat, which the stale-mount healer now clears
       via /proc/self/mounts (\040-escaped for spaced labels).
       **GUI label not eyeballed in a live window** — unit-proven
-      (157 emulate_tab tests) and the drain provably receives the lines;
+      (154 emulate_tab tests) and the drain provably receives the lines;
       David's pre-/finish validation is that launch. 19 lifetime copies
       on godzilla's log tell this item's whole story. Escape hatch:
       PAD_CARD_PRECOPY=0 restores the old hybrid everywhere.

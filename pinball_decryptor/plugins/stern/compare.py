@@ -392,11 +392,11 @@ def _extract_audio_rows(assets_a, assets_b):
         # tolerance that makes a diff untrustworthy; this names exactly what
         # was set aside and why it isn't audio (core.audio_compare).
         rows.append(("Codec lead-in",
-                     "%s sound(s) matched only once their first frame was set "
-                     "aside — a Spike 2 sound decodes that one sample out of "
-                     "whatever image.bin packs in front of it, so repacking "
-                     "changes it on every sound at once. It is packing, not "
-                     "audio." % _num(diff["lead_in"])))
+                     "%s sound(s) matched only once their first frame was "
+                     "set aside — a Spike 2 sound decodes that one sample "
+                     "out of whatever image.bin packs in front of it, so "
+                     "repacking changes it on every sound at once. It is "
+                     "packing, not audio." % _num(diff["lead_in"])))
     # "Unchanged", not "identical": a sound that is byte-identical but has
     # been renumbered lands under Moved, and two rows both claiming to count
     # the identical audio would read as a contradiction.

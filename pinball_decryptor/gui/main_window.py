@@ -13540,8 +13540,9 @@ class MainWindow:
         _Tooltip(
             self._compare_limit_box,
             "How many entries of each change list (modified images, moved "
-            "sounds, …) the report shows before the rest are folded into one "
-            "line.\n\nNothing is thrown away: double-click that line to list "
+            "sounds, …) the report shows before the rest are folded into "
+            "one line.\n\nNothing is thrown away: double-click that line to "
+            "list "
             "the rest of THAT group, or press Copy Report, which always "
             "copies every row.\n\nChanging this re-draws the report you are "
             "looking at — the cards are not read again.",
@@ -13764,8 +13765,8 @@ class MainWindow:
             for g_i, (head, items) in enumerate(group_rows(rows)):
                 key = (s_i, g_i)
                 _insert(parent, head)
-                shown = (items if limit is None or key in self._compare_expanded
-                         else items[:limit])
+                full = limit is None or key in self._compare_expanded
+                shown = items if full else items[:limit]
                 for row in shown:
                     _insert(parent, row)
                 painted += 1 + len(shown)
@@ -13789,7 +13790,7 @@ class MainWindow:
             self._on_compare_row_limit_change(choice)
 
     def _compare_expand_group(self, iid):
-        """Double-click on a "… and N more" line: list the rest of THAT group.
+        """Double-click a "… and N more" line: list the rest of THAT group.
 
         Only that one — a report can hold several thousand-entry lists, and
         opening all of them because the user wanted to read one is how the row
@@ -13821,8 +13822,8 @@ class MainWindow:
                  "shown.")
 
     def _compare_open_row(self, event):
-        """Double-click in the report tree: open the file that row lists — or,
-        on the "… and N more" line, list the rest of that group."""
+        """Double-click in the report tree: open the file that row lists —
+        or, on the "… and N more" line, list the rest of that group."""
         iid = self._compare_tree.identify_row(event.y)
         if not iid:
             return

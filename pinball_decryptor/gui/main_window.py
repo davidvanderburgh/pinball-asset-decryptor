@@ -14727,7 +14727,10 @@ class MainWindow:
     #: actually spends its time on is the node bus bringing every board up -
     #: the alerts screen is the readout at the end of it, and the helper
     #: waits for the bring-up before pressing past it.
-    EMULATE_PHASES = ("Copy card", "Boot", "Node boards", "Attract")
+    #: ...and "Ready", not "Attract" (same day): the last chip is the
+    #: user's answer ("can I play now?"), not the machine's word for the
+    #: screen it happens to be showing.
+    EMULATE_PHASES = ("Copy card", "Boot", "Node boards", "Ready")
 
     def _init_phase_steps(self):
         # Initial labels — apply_manufacturer rebuilds them per-mfr later.

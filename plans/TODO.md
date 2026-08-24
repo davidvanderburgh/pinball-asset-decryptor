@@ -4414,8 +4414,34 @@ These have each been violated at least once and each cost a run or a window:
       emulate_tab tests, incl. 3 new for card_copy_progress) and the drain
       provably receives the lines (stderr merges into the Popen pipe), but
       no app was launched. David's pre-/finish validation is that launch.
-      **Resume:** collect the adversarial review workflow's findings, fix
-      any that survive, then close.
+      **Review pass (2026-08-23 late):** 3-lens adversarial workflow raised
+      11, confirmed 7, ALL FIXED in `b1bd678`: copier_alive() (/proc
+      identity, kills the pid-reuse wedge AND the root/user EPERM
+      duplicate-dd), full-size publish gate, rig-side precache run guard,
+      card stat off the UI thread, Stop wins the label, cardmount in
+      killgame/alive sweeps, PAD_CARD_PRECOPY=0 default in runlim/
+      runbridge/nbrun, stall 90→240 s (sparse zero-runs freeze st_size).
+      **Established the hard way, same evening:** repo `images/` is a
+      JUNCTION to `D:\Pinball\images` — one spinning disk behind both
+      spellings — and TWO concurrent copiers seek-thrash it to ~6 MB/s
+      COMBINED (David's D: pegged 100%: his app session's elvira3-1_11_0
+      pick-time precache beside this pass's confirming-run copier). Fixed
+      in-pass: other_copier() = one copier at a time machine-wide — a
+      precache YIELDS when any label is copying, a boot proceeds under a
+      warning. Both runaway copiers killed, partials cleared, godzilla
+      mtime restored (cache valid again). Also: the confirming run of the
+      fixed code was KILLED ~28 s in by the app session's killgame (its
+      quit/stop is global) — copier_alive proven live by 14 progress
+      ticks, but the end-to-end copy-then-boot on the FIXED code is not
+      yet re-run.
+      **Resume:** with the rig genuinely free (app CLOSED — its quit runs
+      the global killer), rerun the confirming boot: touch the godzilla
+      repo image mtime, `runlim.sh <log> 175 PAD_CARD_PRECOPY=1
+      PAD_CARD=<repo godzilla>` from the worktree under the lock, expect
+      progress 0→100%, "local cache ready", guest phases after, PAST TECH
+      ALERTS ~50-90 s; then restore mtime @1785257111 and realign the
+      stamp. Alternatively David's own GUI boot of an uncached card from
+      the item/74 checkout is the acceptance's GUI half.
       *(Filed 2026-08-23 alongside item 34's widening: David read three
       copying boots in one session as "first-time startup took an
       excessively long time", and item 34's original godzilla sighting

@@ -108,6 +108,23 @@ copier_alive() {   # <pidf> <copy>
         && grep -qsa -- "$2" "/proc/$pid/cmdline"
 }
 
+# Any OTHER label's copier live right now? One copier at a time, MACHINE-WIDE:
+# the card images live on one spinning disk (repo images/ is a JUNCTION to
+# D:\Pinball\images - same files, two spellings), and two concurrent dd
+# readers seek-thrash it to ~6 MB/s COMBINED for the pair - live-measured
+# 2026-08-23, when a pick-time precache ran beside another copy and D: pegged
+# at 100% for minutes with both copies crawling. Prints the other label.
+other_copier() {   # <own-copy-path>
+    local f c
+    for f in "$CACHE"/*.pid; do
+        [ -e "$f" ] || continue
+        c="${f%.pid}.raw"
+        [ "$c" = "$1" ] && continue
+        if copier_alive "$f" "$c"; then basename "${f%.pid}"; return 0; fi
+    done
+    return 1
+}
+
 # ITEM 74: wait for the detached copier, narrating progress so the minutes are
 # visible - one newline-terminated line every 2 s, because the GUI's drain
 # thread and the run log both read LINES (dd's own \r progress never surfaces
@@ -173,6 +190,17 @@ cache_pick() {
     if copier_alive "$pidf" "$copy"; then
         echo "[card] local cache copy already in progress" >&2
     else
+        local other
+        if other=$(other_copier "$copy"); then
+            if [ "$mode" = async ]; then
+                # A warm-up must never join a seek storm - it can wait for
+                # any next occasion. A BOOT (sync) is the user asking now,
+                # so it proceeds under a warning instead.
+                echo "[card] not pre-caching: $other is already copying (one copier at a time)" >&2
+                echo "$img"; return
+            fi
+            echo "[card] WARNING: $other is copying too - both copies will crawl on one disk" >&2
+        fi
         echo "[card] caching $(basename "$img") to the WSL disk in the background" >&2
         echo "[card]   (first run only; next boot of this card is native speed)" >&2
         # setsid, for the same reason fuse2fs gets it below: this shell is

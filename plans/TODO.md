@@ -3198,6 +3198,30 @@ These have each been violated at least once and each cost a run or a window:
       relaunches `avengers_infinity_le` in his own already-open app and says
       whether the banner is gone — closes this item's oldest open question
       for free, using the sweep instead of a scripted boot.
+      **★★ 2026-08-24, LATER THE SAME SESSION — DAVID MADE THE PRODUCT
+      DECISION ("let's fix item 62 now") AND THE WHOLE FLEET IS CLEAN:
+      `nvgrades.py --fix-all`, verified `0 of 29 carry a stored F or E`.**
+      The decision taken is option (b)'s spirit — a one-shot fleet fix with
+      the tool, NOT option (c)'s shim auto-zero: the shared seed is already
+      clean so new per-title files are born clean, and a FUTURE stored F on
+      a healthy-tick card would be an honest live failure that auto-zeroing
+      would mask. Recurrence is therefore not expected; if one appears, the
+      census names it and `--fix` clears it.
+      **A real tool bug found and fixed on the way (rig lock held
+      throughout):** the first `--fix-all` DIED at file 20 of 24 —
+      `PermissionError` on `nvram-stranger_things_le.bin`, which is
+      ROOT-owned because the GUI's PAD_PIVOT runs write their title's nvram
+      as root (same root/user split as the `dump/boot.id` loose end). A
+      fleet tool that aborts mid-fleet leaves the fleet in an unknown
+      state, so `fix()` now catches OSError, prints `NOT FIXED: ... rerun
+      as root`, and continues; the remaining 5 root-owned files were then
+      fixed with `wsl -u root` (`HOME=/home/david` so padpath resolves).
+      `valtick.py` was already in the repo, so the old "move pad62_tick.py
+      into the repo" note is satisfied.
+      **Resume (the one thing left):** David's relaunch of
+      `avengers_infinity_le` — or any previously-stuck title in his item-80
+      sweep — shows no banner; that is the glass BEFORE/AFTER this item has
+      owed since 2026-08-23, and the box gets checked on his word.
       **★★★★★ THE MECHANISM, PROVEN 2026-08-23 BY THREE RUNS WITH A CONTROL.**
       All three booted the Heisei image identically, reading the grades live
       through `PAD_VAL_DUMP` (now title-portable, `PAD_VAL_MOD=0x7f16bc`):

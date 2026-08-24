@@ -4534,9 +4534,30 @@ These have each been violated at least once and each cost a run or a window:
       path exists and is proven — plus one confirming boot of a pre-cached
       card.
 
-- [ ] **77. The card cache is unmanaged: 125 GB real across 25 entries on a
+- [x] **77. The card cache is unmanaged: 125 GB real across 25 entries on a
       251 GB WSL disk at 89%, nothing prunes it, and version updates orphan
-      old entries forever.** `S2 D2` ← WORKING ON
+      old entries forever.** `S2 D2` DONE 2026-08-23, `item/74` (folded),
+      `3202da0`, awaiting `/finish`.
+      **CLOSED 2026-08-23, same night it was filed.** Shipped: a `.boot`
+      sidecar stamps every sync cache hit (a --precache hit deliberately
+      does not count as a boot); `cache_make_room()` evicts
+      least-recently-booted entries before any copy that would push free
+      space under PAD_CACHE_KEEP_FREE_GB (default 8) — never the label
+      being copied, a mounted label, or a live copier's — and refuses to
+      cache at all when nothing is evictable; `--cache-list` /
+      `--cache-drop` for the GUI (tab-separated, source last, spaced
+      labels proven); and the Card cache manager off the Emulate tab's
+      Cache… button — biggest-first entries with real size / last booted /
+      source, totals + disk free in the header, multi-select delete behind
+      a confirm that names the space freed, all rig I/O on workers with
+      main-loop drain pollers. Help tip added. Tests: eviction order,
+      exhaustion refusal, drop refusals, manager end to end against a
+      canned rig — 158/158 emulate_tab, full suite 2959 passed / 0 failed
+      in the worktree. The pytest leak is fixed at the root: conftest
+      points PAD_EMU_DIR/PAD_JJP_EMU_DIR at an empty dir for every test,
+      and the LIVE cache verified untouched (24 entries, no debris) after
+      a full suite run. **Not eyeballed in a live window** — the dialog,
+      like item 74's copy label, awaits David's morning launch.
       *(Filed 2026-08-23 late, folded onto item/74's BRANCH at David's ask —
       "fold it in here and do it now. make a nice GUI for it. I'm going to
       bed" — after measuring the cache at half the WSL disk with 29 GB

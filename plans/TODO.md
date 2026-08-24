@@ -4932,6 +4932,19 @@ These have each been violated at least once and each cost a run or a window:
       3 = screen-inclusion** (node 2 is batman's only bit-3 board; the
       optional toppers grade invisibly). No install adjustment exists —
       both writers are driven purely by bus evidence.
+      **★★ VERIFIED SO FAR (boots 6-7 + two regressions, all with the
+      fixes live and the census deciding):** batman boot #7 with
+      AUTOATTRACT OFF reaches full attract at t=32 with NOBODY pressing
+      anything — no LOCATING screen, no Tech Alerts parking, no
+      failed-update dialog (glass shots run6_t40/run7_t32); fe
+      re-probe bursts 301→6 per node (the bus settles); attract 72s →
+      20s. The census line reads "silencing nothing on batman ... node
+      4 ... answered rather than silenced (item 82)". REGRESSIONS:
+      godzilla_pro — 8 boards derived, node 2 still silenced by the
+      strong-evidence branch, roster unchanged, light show at 9.7s;
+      stranger_things_le — derivation fails (bare symlink) → not fresh
+      → node 4 STAYS silenced with the original reason, ff-answering
+      intact. Both green.
       **(4) The video-latency theory is DEAD: the 2.3-5.7 s first-frame
       delays are the attract's double-buffered clip schedule (each delay
       = the alternate channel's clip duration), healthy over 35 min.**

@@ -4393,55 +4393,40 @@ These have each been violated at least once and each cost a run or a window:
       the desk oracle + the live renderer remap log until its boot anomaly
       is fixed).
 
-- [ ] **74. A boot that is copying the card shows NOTHING about the copy —
+- [x] **74. A boot that is copying the card shows NOTHING about the copy —
       minutes of "Startup In Progress" with no hint that a ~7 GB dd is
-      running, so every copying boot reads as a hang.** `S3 D3` ← WORKING ON
-      ← IN PROGRESS
-      **Established (live, 2026-08-23 evening, godzilla_pro, worktree
-      scripts under the lock):** copy-then-boot SHIPPED on this branch
-      (`54575f3`) and acceptance-run scripted: uncached boot (touched
-      mtime) narrated `[card] copying ...: N / 7497 MB (P%)` 0→98% in 2 s
-      steps, then `local cache ready - booting from it`, guest phases only
-      after — **PAST TECH ALERTS at 51.5 s total** (copy ~41 s @ ~180 MB/s
-      uncontended + ~6 s cached boot) vs 177 s for the old hybrid. Control
-      cached boot: 8.7 s, one `using local cache` line, no copier, not
-      delayed. `--precache` on a valid cache: idempotent no-op, no mount,
-      exit 0. Cleanup done: image mtime restored, stamp realigned, cache
-      desk-proven valid from all three godzilla_pro paths, rig 0, lock
-      released.
-      **Not yet eyeballed:** the GUI state label showing "Copying card:
-      N / M MB (P%)" in a live app window — proven at unit level (154/154
-      emulate_tab tests, incl. 3 new for card_copy_progress) and the drain
-      provably receives the lines (stderr merges into the Popen pipe), but
-      no app was launched. David's pre-/finish validation is that launch.
-      **Review pass (2026-08-23 late):** 3-lens adversarial workflow raised
-      11, confirmed 7, ALL FIXED in `b1bd678`: copier_alive() (/proc
-      identity, kills the pid-reuse wedge AND the root/user EPERM
-      duplicate-dd), full-size publish gate, rig-side precache run guard,
-      card stat off the UI thread, Stop wins the label, cardmount in
-      killgame/alive sweeps, PAD_CARD_PRECOPY=0 default in runlim/
-      runbridge/nbrun, stall 90→240 s (sparse zero-runs freeze st_size).
-      **Established the hard way, same evening:** repo `images/` is a
-      JUNCTION to `D:\Pinball\images` — one spinning disk behind both
-      spellings — and TWO concurrent copiers seek-thrash it to ~6 MB/s
-      COMBINED (David's D: pegged 100%: his app session's elvira3-1_11_0
-      pick-time precache beside this pass's confirming-run copier). Fixed
-      in-pass: other_copier() = one copier at a time machine-wide — a
-      precache YIELDS when any label is copying, a boot proceeds under a
-      warning. Both runaway copiers killed, partials cleared, godzilla
-      mtime restored (cache valid again). Also: the confirming run of the
-      fixed code was KILLED ~28 s in by the app session's killgame (its
-      quit/stop is global) — copier_alive proven live by 14 progress
-      ticks, but the end-to-end copy-then-boot on the FIXED code is not
-      yet re-run.
-      **Resume:** with the rig genuinely free (app CLOSED — its quit runs
-      the global killer), rerun the confirming boot: touch the godzilla
-      repo image mtime, `runlim.sh <log> 175 PAD_CARD_PRECOPY=1
-      PAD_CARD=<repo godzilla>` from the worktree under the lock, expect
-      progress 0→100%, "local cache ready", guest phases after, PAST TECH
-      ALERTS ~50-90 s; then restore mtime @1785257111 and realign the
-      stamp. Alternatively David's own GUI boot of an uncached card from
-      the item/74 checkout is the acceptance's GUI half.
+      running, so every copying boot reads as a hang.** `S3 D3` DONE
+      2026-08-23, `item/74`, `54575f3`..`77841de`, awaiting `/finish`.
+      **CLOSED 2026-08-23 — copy-then-boot with progress, three surfaces,
+      acceptance met live end to end on the final code: PAST TECH ALERTS
+      at 48.9 s from launch on an uncached card (copy narrated
+      `[card] copying ...: N / 7497 MB (P%)` to completion, then
+      `local cache ready - booting from it`, guest only after) against
+      177 s for the old copy-fights-boot hybrid; cached control 8.7 s,
+      one line, undelayed.** `cardmount.sh` `cache_pick()` sync mode
+      waits on the existing detached copier with 2 s progress lines
+      (watch.sh needed no change — it already blocks on cardmount before
+      renderer/guest, and stderr streams through `$(...)`); the Emulate
+      tab drains the lines into the state label (`card_copy_progress()`,
+      pure + tested) and fires `--precache` at card pick from a worker
+      thread. Adversarial review (3 lenses) confirmed 7 defects, all
+      fixed (`b1bd678`): copier_alive() /proc identity (pid-reuse wedge +
+      root/user EPERM duplicate-dd), full-size publish gate, rig-side
+      precache run guard, card stat off the UI thread, Stop wins the
+      label + cardmount in killgame/alive sweeps, PAD_CARD_PRECOPY=0
+      default in runlim/runbridge/nbrun, stall 90→240 s. Then two live
+      collisions taught two more (`663d722`, `77841de`): repo `images/`
+      is a JUNCTION to `D:\Pinball\images` — one spinning disk — and two
+      concurrent copiers seek-thrash it to ~6 MB/s combined, so
+      other_copier() now enforces ONE COPIER MACHINE-WIDE (precache
+      yields, boot warns); and a SIGKILLed fuse2fs leaves a DEAD
+      endpoint that fails stat, which the stale-mount healer now clears
+      via /proc/self/mounts (\040-escaped for spaced labels).
+      **GUI label not eyeballed in a live window** — unit-proven
+      (157 emulate_tab tests) and the drain provably receives the lines;
+      David's pre-/finish validation is that launch. 19 lifetime copies
+      on godzilla's log tell this item's whole story. Escape hatch:
+      PAD_CARD_PRECOPY=0 restores the old hybrid everywhere.
       *(Filed 2026-08-23 alongside item 34's widening: David read three
       copying boots in one session as "first-time startup took an
       excessively long time", and item 34's original godzilla sighting

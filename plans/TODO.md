@@ -5068,7 +5068,7 @@ These have each been violated at least once and each cost a run or a window:
       *(Both gradings superseded at pass end — see the title line.)*
 
 - [ ] **83. VILLAIN VISION renderer: draw batman's 320x240 playfield LCD
-      (node 24, lcdnode) the way the rig draws second displays.** `S3 D4`
+      (node 24, lcdnode) the way the rig draws second displays.** `S3 D4` ← WORKING ON
       *(Split out of item 82 on 2026-08-24, which fixed the board's
       identity/registration so the game now ENGAGES it — this is the
       capability half: actually showing the villain content David asked

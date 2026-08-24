@@ -240,6 +240,8 @@ class App:
             initial_show_log_history=bool(
                 self._settings.get("show_log_history", True)),
             on_show_log_history_change=self._on_show_log_history_change,
+            initial_compare_row_limit=self._settings.get("compare_row_limit"),
+            on_compare_row_limit_change=self._on_compare_row_limit_change,
             on_recheck_prereqs=self._recheck_prereqs,
             on_install_prereqs=self._launch_install_prereqs,
             on_back=self._on_back_to_picker,
@@ -4405,6 +4407,15 @@ class App:
     def _on_show_log_history_change(self, show):
         """Persist the ⚙ "Show previous sessions in the log" toggle."""
         self._settings["show_log_history"] = bool(show)
+        self._save_settings()
+
+    def _on_compare_row_limit_change(self, choice):
+        """Persist the Compare tab's "Rows per list" choice.
+
+        How much of a change list you want to read is a habit, not a decision
+        per pair of cards — a user who raised it once should not find it back
+        at a dozen next time he opens the app."""
+        self._settings["compare_row_limit"] = str(choice)
         self._save_settings()
 
     def _on_fda_acknowledge(self, acknowledged):

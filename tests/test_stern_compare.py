@@ -547,3 +547,64 @@ def test_a_sound_that_left_the_extract_folder_says_so(tmp_path):
         extract_ref("unused.raw",
                     {"disk": str(tmp_path / "audio" / "idx0001.wav"),
                      "name": "idx0001.wav", "side": "B"}, str(tmp_path))
+
+
+# ---------------------------------------------------------------------------
+# The report lists everything; the tab decides how much to show (PAD-86)
+# ---------------------------------------------------------------------------
+
+def test_a_long_change_list_is_not_truncated_by_the_report(tmp_path,
+                                                           monkeypatch):
+    """"Would it be possible to display more than the first 12 entries for
+    each asset category?"  It is the RENDERER's call now, so the report has
+    to carry every entry — and one blank-named row per entry, which is what
+    marks them as items of the count row above (image_info.group_rows).
+    """
+    from pinball_decryptor.core.image_info import group_rows
+
+    a, b = _two_cards(tmp_path, monkeypatch)
+    xa = _extract_folder(tmp_path / "xa",
+                         {"idx%04d.wav" % i: b"old %d" % i
+                          for i in range(40)})
+    xb = _extract_folder(tmp_path / "xb",
+                         {"idx%04d.wav" % i: b"new %d" % i
+                          for i in range(40)})
+    rows = dict(compare_cards(a, b, xa, xb))["Sounds"]
+
+    groups = dict((head[0], items) for head, items in group_rows(rows))
+    assert groups["Changed"] and len(groups["Changed"]) == 40
+    assert all(r[0] == "" for r in groups["Changed"])
+    # …and Copy Report is a copy of all forty, not of a truncation.
+    text = as_text([("Sounds", rows)], title="Compare Report")
+    for i in range(40):
+        assert "idx%04d.wav" % i in text
+    assert "more" not in text
+
+
+def test_the_codec_lead_in_is_named_when_it_had_to_be_set_aside(tmp_path,
+                                                                monkeypatch):
+    """Silently ignoring bytes is how a diff stops being trustworthy.  When
+    the repack case fires, the section says which bytes and why."""
+    import struct
+
+    def wav(first):
+        body = struct.pack("<h", first) + b"".join(
+            struct.pack("<h", s) for s in range(1, 300))
+        return (b"RIFF" + struct.pack("<I", 36 + len(body)) + b"WAVE"
+                + b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, 44100,
+                                        88200, 2, 16)
+                + b"data" + struct.pack("<I", len(body)) + body)
+
+    a, b = _two_cards(tmp_path, monkeypatch)
+    xa = _extract_folder(tmp_path / "xa", {"idx0001.wav": wav(111)})
+    xb = _extract_folder(tmp_path / "xb", {"idx0001.wav": wav(-9)})
+    snd = _named(dict(compare_cards(a, b, xa, xb))["Sounds"])
+
+    assert snd["Unchanged"] == ("1 of 1 sounds are identical and still in "
+                                "the same slot")
+    assert snd["Codec lead-in"].startswith("1 sound(s) matched only once "
+                                           "their first frame was set aside")
+    # And it stays off the report entirely when nothing needed it.
+    xc = _extract_folder(tmp_path / "xc", {"idx0001.wav": wav(111)})
+    assert "Codec lead-in" not in \
+        _named(dict(compare_cards(a, b, xa, xc))["Sounds"])

@@ -1298,3 +1298,52 @@ def test_exact_match_always_wins_over_a_shifted_one(tmp_path):
     plan = mod_transfer.plan_transfer(src, tgt)
     assert [e["tgt_rel"] for e in plan["audio"]["remapped"]] == \
         ["audio/idx0525.wav"]
+
+
+def test_a_repacked_new_version_still_carries_its_mods(tmp_path):
+    """PAD-86.  A Spike 2 sound decodes its first frame out of whatever
+    image.bin packs in front of its body, so a build that repacks changes
+    that one sample on every sound and nothing else (Jaws LE 1.01 -> 1.02:
+    all 1,733 of them).  Without the fallback not one mod transfers to the
+    new version, which is the whole feature.
+    """
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    clean = _sound()
+    _pcm_wav(os.path.join(src, "audio", "idx0417.wav"), clean)
+    # same sound, one neighbour's word in front of it
+    _pcm_wav(os.path.join(tgt, "audio", "idx0525.wav"), [-9] + clean[1:])
+    _pcm_wav(os.path.join(tgt, "audio", "idx0526.wav"), _sound(seed=11))
+    staged_changes.save(src, {"audio": {"audio/idx0417.wav": r"C:\r\a.wav"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert not plan["audio"]["dropped"] and not plan["audio"]["flagged"]
+    assert [e["tgt_rel"] for e in plan["audio"]["remapped"]] == \
+        ["audio/idx0525.wav"]
+
+
+def test_a_stereo_lead_in_is_a_whole_frame(tmp_path):
+    """Two samples on a stereo sound — the codec reads a word, not a byte.
+    A file that agrees from sample 1 but not sample 2 is a different sound."""
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    clean = _sound(2000)
+    _pcm_wav(os.path.join(src, "audio", "idx0417.wav"), clean, chan=2)
+    _pcm_wav(os.path.join(tgt, "audio", "idx0525.wav"),
+             [-9, 12] + clean[2:], chan=2)
+    _pcm_wav(os.path.join(tgt, "audio", "idx0526.wav"),
+             [-9, 12, 77] + clean[3:], chan=2)
+    staged_changes.save(src, {"audio": {"audio/idx0417.wav": r"C:\r\a.wav"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert [e["tgt_rel"] for e in plan["audio"]["remapped"]] == \
+        ["audio/idx0525.wav"]
+
+
+def test_the_lead_in_fallback_does_not_pair_a_different_sound(tmp_path):
+    """One frame of tolerance, not a fuzzy match."""
+    src, tgt = str(tmp_path / "old"), str(tmp_path / "new")
+    _pcm_wav(os.path.join(src, "audio", "idx0417.wav"), _sound(seed=7))
+    _pcm_wav(os.path.join(tgt, "audio", "idx0525.wav"), _sound(seed=13))
+    staged_changes.save(src, {"audio": {"audio/idx0417.wav": r"C:\r\a.wav"}})
+
+    plan = mod_transfer.plan_transfer(src, tgt)
+    assert len(plan["audio"]["dropped"]) == 1 and not plan["audio"]["remapped"]

@@ -116,11 +116,15 @@ def content_signature(path):
     return (size, h.hexdigest())
 
 
-def _wav_frame(data):
+def wav_frame(data):
     """``(data_offset, bytes_per_frame)`` of a PCM WAV in memory, or ``None``.
 
     Minimal on purpose: enough to walk to the samples of the decoder's own
     output (canonical 44-byte header) without pulling in :mod:`wave`.
+
+    Public because the head of a decoded sound is where the Spike 2 codec's
+    artefacts live, and more than one comparison has to step over them: this
+    one pairs a mod to its sound, :mod:`core.audio_compare` diffs two builds.
     """
     if len(data) < 44 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
         return None
@@ -169,14 +173,47 @@ def _one_sample_apart(path_a, path_b):
         return False
     if len(a) != len(b) or a == b:
         return False
-    head = _wav_frame(a)
-    if head is None or head != _wav_frame(b) or a[:head[0]] != b[:head[0]]:
+    head = wav_frame(a)
+    if head is None or head != wav_frame(b) or a[:head[0]] != b[:head[0]]:
         return False
     off, fb = head
     if len(a) - off <= fb:
         return False
     return (a[off + fb:] == b[off:len(b) - fb]
             or b[off + fb:] == a[off:len(a) - fb])
+
+
+def _lead_in_apart(path_a, path_b):
+    """True when two decoded WAVs are the SAME sound whose FIRST FRAME holds
+    a different value — same header, identical from the second frame on.
+
+    The sibling of :func:`_one_sample_apart`, and just as real.  A Spike 2
+    sound's first decoded frame is read from the word BELOW its body, i.e.
+    out of whatever ``image.bin`` packs in front of it, so a build that
+    repacks changes that one sample on every sound at once and nothing else:
+    measured on Jaws LE 1.01 vs 1.02, all 1,733 sounds differ in exactly
+    their first 2 (mono) or 4 (stereo) bytes.  To a matcher keyed on content
+    that is a whole catalog of different sounds, so not one mod would carry
+    to the new version -- and the Compare tab, which forgives the same frame
+    (:mod:`core.audio_compare`), would be sitting there saying the audio is
+    unchanged.
+
+    Same guards as its sibling: only reached when nothing matched exactly,
+    only against targets of the identical byte size."""
+    try:
+        with open(path_a, "rb") as f:
+            a = f.read()
+        with open(path_b, "rb") as f:
+            b = f.read()
+    except OSError:
+        return False
+    if len(a) != len(b) or a == b:
+        return False
+    head = wav_frame(a)
+    if head is None or head != wav_frame(b) or a[:head[0]] != b[:head[0]]:
+        return False
+    off, fb = head
+    return len(a) > off + fb and a[off + fb:] == b[off + fb:]
 
 
 def _abs(root, rel):
@@ -846,7 +883,7 @@ def _plan_audio(source_dir, target_dir, saved_audio, log_cb=None):
         return [r for r in _base["tgt"].get(md5, ())
                 if _stock_exists(target_dir, r)]
 
-    n_shifted = 0
+    n_shifted = n_lead_in = 0
     for src_rel, repl in saved_audio.items():
         src_path = _stock_path(source_dir, src_rel)
         src_sig = content_signature(src_path)
@@ -854,9 +891,19 @@ def _plan_audio(source_dir, target_dir, saved_audio, log_cb=None):
         if not cands and src_sig is not None:
             # Same sound, one sample apart: an older extract's decode wobble,
             # not a different sound (see _one_sample_apart).
-            cands = [r for r in size_to_rels.get(src_sig[0], ())
+            same_size = size_to_rels.get(src_sig[0], ())
+            cands = [r for r in same_size
                      if _one_sample_apart(src_path, _stock_path(target_dir, r))]
             n_shifted += len(cands[:1])
+            if not cands:
+                # Same sound, one frame's VALUE apart: the new build repacked
+                # image.bin, so the codec's lead-in reads a different
+                # neighbour (see _lead_in_apart).  Tried second because the
+                # shift is the older, narrower story of the two.
+                cands = [r for r in same_size
+                         if _lead_in_apart(src_path,
+                                           _stock_path(target_dir, r))]
+                n_lead_in += len(cands[:1])
         if not cands:
             cands = _baseline_cands(src_rel)
         if src_rel in cands:
@@ -875,6 +922,10 @@ def _plan_audio(source_dir, target_dir, saved_audio, log_cb=None):
     if n_shifted:
         log("%d sound(s) paired despite a one-sample difference at the head "
             "left by an older extract of one of the two folders." % n_shifted)
+    if n_lead_in:
+        log("%d sound(s) paired past the codec's lead-in frame: the new "
+            "version repacked its audio, which changes the first sample of "
+            "every sound and none of the rest." % n_lead_in)
     return matched, remapped, flagged, dropped
 
 

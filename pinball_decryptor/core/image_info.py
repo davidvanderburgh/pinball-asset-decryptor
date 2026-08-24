@@ -96,13 +96,42 @@ def collect(mfr, path, assets_dir=None):
     return sections
 
 
+def group_rows(rows):
+    """One section's rows split into its listed groups —
+    ``[(head_row, [item_row, ...]), ...]``.
+
+    A row with a name of its own is a head (``("Moved", "545:")``,
+    ``("Version", "1.21.0 -> 1.22.0")``); the rows after it whose name is
+    BLANK are the items listed under it, which is exactly how the Compare
+    report writes a change list (``plugins.stern.compare._listed``).
+
+    Splitting them out is what lets a renderer show the first N items of a
+    4,000-entry group and keep the rest one click away, without the report
+    itself having to guess how many rows the window can take — and without
+    re-reading two cards when the user wants more of them.  A leading blank
+    row (no head to belong to) becomes its own group rather than being
+    dropped: the report is never edited on the way to the screen."""
+    groups = []
+    for row in rows:
+        if row[0] or not groups:
+            groups.append((row, []))
+        else:
+            groups[-1][1].append(row)
+    return groups
+
+
 def as_text(sections, title="Image Info"):
     """Render *sections* as the plain-text report the Copy button emits.
 
     A row is ``(name, value)`` or ``(name, value, ref)`` — the Compare report
     hangs an on-card file reference off its listed file rows (see
     ``Manufacturer.compare_images``).  Indexing rather than unpacking is what
-    keeps the text report working for both."""
+    keeps the text report working for both.
+
+    EVERY row is rendered, including the ones the window is currently showing
+    only the first few of: a text report is scrollable and searchable in a way
+    a tree is not, so Copy Report is the answer to "let me see all 3,968 of
+    them" rather than a screenshot of the same truncation."""
     lines = [title, "=" * len(title)]
     for section, rows in sections:
         lines.append("")

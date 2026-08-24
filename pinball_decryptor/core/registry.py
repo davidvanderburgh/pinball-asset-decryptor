@@ -533,6 +533,13 @@ class Manufacturer(ABC):
         the user double-clicks that row; nothing else reads it, and renderers
         take ``row[0]``/``row[1]`` so a two-element row stays valid.
 
+        LIST EVERYTHING; DO NOT TRUNCATE.  A row whose name is blank is an
+        item of the named row above it (``image_info.group_rows``), and the
+        tab shows the first N of each such run with the rest one double-click
+        away.  A plugin that caps its own lists makes that setting cost two
+        card reads instead of a repaint, and makes Copy Report a copy of the
+        truncation.
+
         Called on a worker thread by the Compare tab; must stay read-only.
         Only meaningful for plugins advertising ``capabilities.compare`` —
         the default contributes nothing.

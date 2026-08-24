@@ -10,11 +10,16 @@ rather than noise —
   different naming options still line up;
 * bytes are matched BEFORE slots, so a build that inserts one sound and
   renumbers everything after it reports one addition, not two thousand
-  changes.
+  changes;
+* and the codec's LEAD-IN FRAME is not part of the sound (PAD-86) — it is
+  read out of whatever ``image.bin`` packs in front of the body, so a build
+  that repacks changes it on every sound at once.
 """
 
 import hashlib
 import os
+
+import pytest
 
 from pinball_decryptor.core import audio_compare
 from pinball_decryptor.core.checksums import CHECKSUMS_FILE
@@ -142,3 +147,85 @@ def test_dot_files_are_not_sounds(tmp_path):
     with open(os.path.join(a, "audio", ".hidden.wav"), "wb") as f:
         f.write(b"x")
     assert audio_compare.diff_audio(a, a)["count_a"] == 1
+
+
+# ---------------------------------------------------------------------------
+# The codec's lead-in frame (PAD-86)
+# ---------------------------------------------------------------------------
+
+def _wav(samples, chan=1):
+    """A canonical decoded WAV — the 44-byte header the extractor writes,
+    over 16-bit *samples* (a flat list of ints)."""
+    import struct
+    body = b"".join(struct.pack("<h", s) for s in samples)
+    return (b"RIFF" + struct.pack("<I", 36 + len(body)) + b"WAVE"
+            + b"fmt " + struct.pack("<IHHIIHH", 16, 1, chan, 44100,
+                                    44100 * 2 * chan, 2 * chan, 16)
+            + b"data" + struct.pack("<I", len(body)) + body)
+
+
+def test_a_repacked_build_is_not_a_rewritten_one(tmp_path):
+    """THE PAD-86 CASE.  A Spike 2 sound decodes its first frame out of the
+    word below its body, i.e. out of whatever image.bin packs in front of it,
+    so a build that repacks changes that one sample on every sound and
+    nothing else.  Measured on Jaws LE 1.01 vs 1.02: all 1,733 sounds differ
+    in exactly their first 2 (mono) or 4 (stereo) bytes.  Counting that read
+    the whole catalog as changed — a tester saw 3,968 of them.
+    """
+    body = list(range(1, 400))
+    a = _extract(tmp_path / "a", {"idx0001.wav": _wav([111] + body),
+                                  "idx0002.wav": _wav([111, 111] + body,
+                                                      chan=2)})
+    b = _extract(tmp_path / "b", {"idx0001.wav": _wav([-9] + body),
+                                  "idx0002.wav": _wav([-9, 7] + body,
+                                                      chan=2)})
+    d = audio_compare.diff_audio(a, b)
+    assert (d["same"], d["lead_in"]) == (2, 2)
+    assert not (d["changed"] or d["moved"] or d["added"] or d["removed"])
+
+
+def test_a_repack_that_also_renumbers_still_reads_as_moved(tmp_path):
+    """Both at once, which is what Stern actually ships (Jaws 1.01 -> 1.02
+    renumbered the whole directory AND repacked it)."""
+    one, two = list(range(1, 300)), list(range(500, 800))
+    a = _extract(tmp_path / "a", {"idx0001.wav": _wav([111] + one),
+                                  "idx0002.wav": _wav([111] + two)})
+    b = _extract(tmp_path / "b", {"idx0007.wav": _wav([-3] + two),
+                                  "idx0009.wav": _wav([-3] + one)})
+    d = audio_compare.diff_audio(a, b)
+    assert d["lead_in"] == 2 and d["same"] == 0
+    assert _names(d["moved"]) == [("idx0001.wav", "idx0009.wav"),
+                                  ("idx0002.wav", "idx0007.wav")]
+    assert not (d["changed"] or d["added"] or d["removed"])
+
+
+def test_only_the_lead_in_is_forgiven(tmp_path):
+    """One sample past it and the sounds are different sounds.  A tolerance
+    that grew would quietly turn real changes into "unchanged"."""
+    body = list(range(1, 300))
+    a = _extract(tmp_path / "a", {"idx0001.wav": _wav([111] + body)})
+    b = _extract(tmp_path / "b",
+                 {"idx0001.wav": _wav([-9, 12345] + body[1:])})
+    d = audio_compare.diff_audio(a, b)
+    assert d["same"] == 0 and d["lead_in"] == 0
+    assert _names(d["changed"]) == [("idx0001.wav", "idx0001.wav")]
+
+
+def test_the_second_pass_reads_nothing_when_the_first_placed_everything(
+        tmp_path, monkeypatch):
+    """The fast path stays free: two folders that match on their baselines
+    never open a WAV, however many thousand sounds they hold."""
+    wavs = {"idx0001.wav": _wav([1, 2, 3]), "idx0002.wav": _wav([4, 5, 6])}
+    a = _extract(tmp_path / "a", wavs)
+    b = _extract(tmp_path / "b", wavs)
+    monkeypatch.setattr(audio_compare, "sound_digest",
+                        lambda p: pytest.fail("hashed %s for nothing" % p))
+    assert audio_compare.diff_audio(a, b)["same"] == 2
+
+
+def test_a_file_that_is_not_a_walkable_wav_is_hashed_whole(tmp_path):
+    """An identity that is merely stricter, never wrong."""
+    p = tmp_path / "x.bin"
+    p.write_bytes(b"not a RIFF at all")
+    assert audio_compare.sound_digest(str(p)) == \
+        hashlib.md5(b"not a RIFF at all").hexdigest()

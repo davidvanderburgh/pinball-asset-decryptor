@@ -197,13 +197,16 @@ LED_PATH = os.path.join(padpath.dump() or "", "padled")
 #: \\wsl.localhost.
 LCD_PATH = os.path.join(padpath.dump() or "", "padlcd")
 
-#: Optional fast path for the LCD clip decode (item 83's motion review).
-#: Tk's own "gif -index N" has no frame cursor - every call re-parses the
-#: clip from byte 0, which measured up to ~139 ms per frame at the tail of a
-#: 150-frame clip and would stall the UI thread (the documented freeze
-#: class). PIL's GIF reader seeks INCREMENTALLY, so with it each tick costs
-#: one frame's decode, flat. Without PIL the panel still works, off an
-#: in-memory copy of the clip (one read, no repeated \\wsl.localhost I/O).
+#: The LCD clip decoder. PIL, not Tk, for two measured reasons: Tk's
+#: "gif -index N" has no frame cursor, so every call re-parsed the clip from
+#: byte 0 (~139 ms per frame at a 150-frame tail - the documented UI-freeze
+#: class), while PIL seeks INCREMENTALLY at ~1 ms/frame flat; and the clips
+#: are lossless WEBP now (David, 2026-08-24: GIF's 8-bit palette "looks off
+#: ... like it's not rendering the correct bit depth" - it was), which Tk
+#: cannot read at all. Pillow is a hard app dependency (requirements.txt,
+#: and Field.__init__ imports it unguarded for the playfield artwork); this
+#: guard only decides whether the TVs MOVE or stay on their stills, so a
+#: stripped environment degrades instead of crashing the window.
 try:
     from PIL import Image as _PILImage
     from PIL import ImageTk as _PILImageTk
@@ -3481,14 +3484,18 @@ class LcdPanel:
     for the fixture is "3 LCD INSERT" (item 83). Nothing crosses the bus but
     DISPLAY IDS - padlcd.h carries the frame shape and the measured evidence -
     and the id is the asset number in the card's villain-TV store, so each
-    cell PLAYS the clip the game named: a looping 10 fps GIF excerpt, advanced
-    one frame per poll so encode rate = display rate. The art is extracted
-    LAZILY by lcdart.py into <tables>/<game>/lcd/<id>.{png,gif} the first time
-    an id is seen (3,069 assets up front would be minutes of mktables for art
-    most runs never show), cheap-first: the still paints the moment it lands,
-    the motion takes over when the encode finishes behind it. Until either
-    lands the cell says "TV <id>", which is honest - the id is live data off
-    the wire, the art is a cache filling in behind it.
+    cell PLAYS the clip the game named: a looping 10 fps LOSSLESS WEBP
+    excerpt, advanced one frame per poll so encode rate = display rate. The
+    art is extracted LAZILY by lcdart.py into <tables>/<game>/lcd/<id>.{png,
+    webp} the first time an id is seen (3,069 assets up front would be
+    minutes of mktables for art most runs never show), cheap-first: the still
+    paints the moment it lands, the motion takes over when the encode
+    finishes behind it. Until either lands the cell says "TV <id>", which is
+    honest - the id is live data off the wire, the art is a cache filling in
+    behind it. (The clips were GIF for one afternoon; David spotted the
+    8-bit palette immediately - "the gif color looks off ... like it's not
+    rendering the correct bit depth" - and lcdart.py's docstring carries the
+    measurement that replaced it with a bit-exact format.)
 
     A SEPARATE WINDOW, not a strip in the playfield view - David's ask,
     2026-08-24: every other second-display title already gets its screen as
@@ -3534,7 +3541,7 @@ class LcdPanel:
         self.imgs = [None, None, None]
         self.ids = [None, None, None]
         self.have = [False, False, False]
-        #: Per-cell animation state. None while no gif is on disk (kept
+        #: Per-cell animation state. None while no clip is on disk (kept
         #: retryable); a dict once the clip's BYTES are read - in one go, so
         #: a \\wsl.localhost hiccup can only fail the whole read (caught,
         #: retried next tick) and never masquerade as end-of-clip. "n" is the
@@ -3618,9 +3625,9 @@ class LcdPanel:
                     not self.have[k] or self.anim[k] is None):
                 # ~1 Hz retry while EITHER artifact is missing. The old
                 # `not have[k]` test stopped the moment a cached still
-                # painted, which froze the gif upgrade forever when the
+                # painted, which froze the clip upgrade forever when the
                 # first sighting happened before drv existed (motion
-                # review finding 1) - anim is None exactly while the gif
+                # review finding 1) - anim is None exactly while the clip
                 # has not landed, so this keeps _show (and its deferred
                 # ask) alive until the motion exists.
                 self._show(k, ids[k])
@@ -3650,7 +3657,7 @@ class LcdPanel:
                 and time.monotonic() - self._asked.get(i, -1e9) > self.ASK_S
                 and not (
                     os.path.isfile(os.path.join(self._art, "%d.png" % i))
-                    and os.path.isfile(os.path.join(self._art, "%d.gif" % i)))):
+                    and os.path.isfile(os.path.join(self._art, "%d.webp" % i)))):
             self._asked[i] = time.monotonic()
             self.drv.run_script("lcdart.py", self.game, str(i))
         if self.ids[k] != i:
@@ -3678,51 +3685,45 @@ class LcdPanel:
         """Read the id's WHOLE clip into memory and open a decoder over it.
 
         One read, deliberately (motion review findings 2-4): the per-frame
-        `gif -index N` decode re-opened and re-parsed the file from byte 0
-        over \\\\wsl.localhost on every tick - measured at up to ~139 ms per
-        frame at a 150-frame clip's tail, on the UI thread. Reading once
-        also splits the failure modes honestly: an OSError here is the wire
+        decode used to re-open and re-parse the file from byte 0 over
+        \\\\wsl.localhost on every tick - measured at up to ~139 ms per frame
+        at a 150-frame clip's tail, on the UI thread. Reading once also
+        splits the failure modes honestly: an OSError here is the wire
         (return None, the caller retries next tick); a decode failure PAST
         this point is the file itself, and may be latched for good.
 
         Returns the anim dict, {"dead": True} for undecodable bytes, or
         None to retry.
         """
+        if _PILImage is None:
+            return {"dead": True}       # stills only; see the import guard
         try:
-            with open(os.path.join(self._art, "%d.gif" % i), "rb") as f:
+            with open(os.path.join(self._art, "%d.webp" % i), "rb") as f:
                 data = f.read()
         except OSError:
             return None                 # not encoded yet, or a 9P hiccup
-        if _PILImage is not None:
-            try:
-                im = _PILImage.open(io.BytesIO(data))
-                return {"pil": im, "n": im.n_frames, "i": 0, "frames": []}
-            except Exception:           # noqa: BLE001 - complete bytes, so
-                return {"dead": True}   # this is the clip, not the wire
-        return {"data": data, "n": None, "i": 0, "frames": []}
+        try:
+            im = _PILImage.open(io.BytesIO(data))
+            return {"pil": im, "n": getattr(im, "n_frames", 1),
+                    "i": 0, "frames": []}
+        except Exception:               # noqa: BLE001 - complete bytes, so
+            return {"dead": True}       # this is the clip, not the wire
 
     def _decode(self, a, idx):
-        """Frame idx as a PhotoImage, or None for end-of-clip (Tk path only
-        - PIL knows n up front, so it is never asked past the end)."""
-        if "pil" in a:
-            try:
-                a["pil"].seek(idx)      # sequential: PIL steps ONE frame
-                return _PILImageTk.PhotoImage(a["pil"].convert("RGB"))
-            except Exception:           # noqa: BLE001 - corrupt tail: the
-                a["n"] = idx            # clip honestly ends here
-                return None
+        """Frame idx as a PhotoImage, or None if the clip ends early."""
         try:
-            return tk.PhotoImage(data=a["data"],
-                                 format="gif -index %d" % idx)
-        except tk.TclError:
-            return None                 # first index past the end
+            a["pil"].seek(idx)          # sequential: PIL steps ONE frame
+            return _PILImageTk.PhotoImage(a["pil"].convert("RGB"))
+        except Exception:               # noqa: BLE001 - corrupt tail: the
+            a["n"] = idx                # clip honestly ends here
+            return None
 
     def _animate(self):
-        """Advance every animating cell one frame. The GIF is encoded at
-        10 fps by lcdart.py and this runs once per 10 Hz poll, so encode
-        rate = display rate by construction. Skipped entirely while the
-        window is hidden - nobody is watching, and the decode pass is the
-        one part of this panel with a real per-tick cost."""
+        """Advance every animating cell one frame. lcdart.py encodes at
+        10 fps and this runs once per 10 Hz poll, so encode rate = display
+        rate by construction. Skipped entirely while the window is hidden -
+        nobody is watching, and the decode pass is the one part of this
+        panel with a real per-tick cost."""
         if self._hidden:
             return
         for k in range(3):
@@ -3734,30 +3735,27 @@ class LcdPanel:
             if a is None:
                 a = self.anim[k] = self._open_clip(i)
                 if a is None:
-                    self.anim[k] = None
-                    continue            # no gif yet: retried next tick
+                    continue            # not encoded yet: retried next tick
             if a.get("dead"):
                 continue                # undecodable clip: keep the still
             idx = a["i"]
-            if a["n"] is not None and idx >= a["n"]:
+            if idx >= a["n"]:
                 idx = a["i"] = 0        # wrap: the clip loops
             if idx < len(a["frames"]):
                 frame = a["frames"][idx]
             else:
                 frame = self._decode(a, idx)
-                if frame is None:
+                if frame is None:       # corrupt tail: _decode shortened n
                     if not a["frames"]:
                         self.anim[k] = {"dead": True}
                         continue
-                    a["n"] = len(a["frames"])   # Tk path learns n at EOF
-                    a.pop("data", None)         # decode pass over
                     idx = a["i"] = 0
-                    frame = a["frames"][0]      # wrap and draw THIS tick -
-                else:                           # no 200 ms hitch at the seam
+                    frame = a["frames"][0]  # wrap and draw THIS tick, so
+                else:                       # the seam costs no blank frame
                     a["frames"].append(frame)
-                    if a["n"] is not None and len(a["frames"]) == a["n"]:
-                        a.pop("pil", None)      # decode pass over: drop the
-                        a.pop("data", None)     # reader and the raw bytes
+                    if len(a["frames"]) >= a["n"]:
+                        a.pop("pil", None)  # decode pass over: drop the
+                                            # reader and its buffered bytes
             self._draw(k, frame)
             a["i"] = idx + 1
 

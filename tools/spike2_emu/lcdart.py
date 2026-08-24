@@ -8,18 +8,37 @@ This extracts one id's art to the title's table dir, where the playfield's
 LCD panel picks it up - TWO artifacts per id, cheap-first:
 
     <PAD_TABLES>/<game>/lcd/<id>.png    first frame, ~200 ms, instant paint
-    <PAD_TABLES>/<game>/lcd/<id>.gif    looping 10 fps excerpt (<= 15 s) -
+    <PAD_TABLES>/<game>/lcd/<id>.webp   looping 10 fps excerpt (<= 15 s) -
                                         the MOTION (David's 2026-08-24 ask:
                                         the real TVs play the clips, stills
                                         were item 83's admitted residual)
 
-The GIF is 10 fps ON PURPOSE: the panel advances one frame per poll and
-polls at 10 Hz, so encode rate = display rate with no timer arithmetic on
-the Tk side. It is written to a .tmp and os.replace()d so the panel's
-frame-by-frame decoder can NEVER see a half-written file - a partial GIF
-would decode its early frames fine and then miscount the clip's length.
-Rebuilds whichever artifact is missing, so caches extracted before the GIF
-stage existed upgrade on the next sighting.
+10 fps ON PURPOSE: the panel advances one frame per poll and polls at 10 Hz,
+so encode rate = display rate with no timer arithmetic on the Tk side. Each
+artifact is written to a .tmp and os.replace()d so the panel's frame-by-frame
+decoder can NEVER see a half-written file. Rebuilds whichever artifact is
+missing, so older caches upgrade themselves on the next sighting.
+
+LOSSLESS WEBP, NOT GIF, AND `-pix_fmt bgra` IS LOAD-BEARING (David, live,
+2026-08-24: "the gif color looks off somehow (like it's not rendering the
+correct bit depth)"). He was reading it exactly right: GIF is 8-bit
+PALETTE, and a 256-colour palette plus error-diffusion dithering scatters
+bright confetti over dark 1966 footage. Measured against true-colour
+reference frames of a real clip (id 3004, 30 frames):
+
+    format                        size   MAE   PSNR  pixels off by >30
+    gif palettegen+dither (was)  981 KB  2.88  34.6  0.167%
+    gif full palette, no dither  896 KB  2.40  36.2  0.088%
+    apng (true colour)          2436 KB  0.00  99.0  0.000%
+    webp lossless (no pix_fmt)  1461 KB  1.56  39.3  0.042%
+    webp lossless -pix_fmt bgra 1233 KB  0.00  99.0  0.000%   <-- this
+
+So this is now BIT-EXACT, at 1.2 MB per 3 s and 1.0 ms/frame to decode
+(faster than the GIF it replaces, and most clips are 1-4 s: sampled
+durations run 0.7-3.8 s with a couple near 13 s). Without the explicit
+`-pix_fmt bgra`, "lossless" still lands 1.56 MAE - libwebp takes ffmpeg's
+default yuv420p and the YUV->RGB round trip is the loss, which is exactly
+the kind of silent-but-visible defect the number above is here to pin.
 
 Called LAZILY by the panel the first time it sees an id with no cached art -
 3,069 assets x ffmpeg up front would be minutes of mktables time for art most
@@ -44,7 +63,7 @@ nothing ever rewrites an existing file.
 FAILURES ALSO LAND IN <out_dir>/lcdart.log. The panel launches this through
 run_script, which captures and DISCARDS stdout - without the log, a failed
 encode is indistinguishable from one still running. Exit codes: 0 = all
-artifacts present, 1 = nothing produced, 2 = still kept but the gif stage
+artifacts present, 1 = nothing produced, 2 = still kept but the clip stage
 failed (the panel ignores codes; a batch caller must not count 2 as done).
 """
 import glob
@@ -69,8 +88,8 @@ def main():
 
     out_dir = os.path.join(padpath.tables() or "", game, "lcd")
     png = os.path.join(out_dir, "%s.png" % disp)
-    gif = os.path.join(out_dir, "%s.gif" % disp)
-    if os.path.isfile(png) and os.path.isfile(gif):
+    clip = os.path.join(out_dir, "%s.webp" % disp)
+    if os.path.isfile(png) and os.path.isfile(clip):
         print(png)
         return 0
     os.makedirs(out_dir, exist_ok=True)
@@ -92,7 +111,7 @@ def main():
         return 1
 
     # THE STILL FIRST - it is the cheap one and the panel paints it the
-    # moment it lands, while the GIF is still encoding behind it. Through a
+    # moment it lands, while the clip is still encoding behind it. Through a
     # .tmp: a torn png would pass every isfile check in the pipeline for
     # ever (nothing rewrites an existing file), showing a permanent
     # placeholder over a perfectly good clip.
@@ -111,35 +130,38 @@ def main():
                 % r.stderr.decode("utf8", "replace")[:200])
             return 1
 
-    if not os.path.isfile(gif):
-        tmp = gif + ".tmp"
-        # -gifflags -offsetting-transdiff: FULL frames, no delta encoding.
-        # The panel decodes with Tk's "gif -index N", which renders each
-        # frame STANDALONE - it never composites a frame onto its
-        # predecessor - so ffmpeg's default delta frames (changed pixels
-        # only, transparent elsewhere) draw as speckle over black. Bigger
-        # files, correct pixels.
+    if not os.path.isfile(clip):
+        tmp = clip + ".tmp"
+        # `-pix_fmt bgra` is not decoration: without it libwebp takes
+        # ffmpeg's default yuv420p and "lossless" still costs 1.56 MAE on
+        # the YUV->RGB round trip. With it the frames are bit-exact. See
+        # the module docstring's measured table.
         r = subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-t", "15", "-i", hits[0],
-             "-filter_complex",
-             "[0:v]fps=10[s];[s]split[a][b];"
-             "[a]palettegen=stats_mode=diff[p];[b][p]paletteuse",
-             "-gifflags", "-offsetting-transdiff",
-             "-loop", "0", "-f", "gif", tmp],
+             "-vf", "fps=10", "-c:v", "libwebp", "-lossless", "1",
+             "-pix_fmt", "bgra", "-loop", "0", "-f", "webp", tmp],
             capture_output=True, timeout=120)
         if r.returncode == 0 and os.path.isfile(tmp):
-            os.replace(tmp, gif)        # atomic: whole clip or no clip
+            os.replace(tmp, clip)       # atomic: whole clip or no clip
         else:
-            # The still already landed, so a failed GIF degrades to the
+            # The still already landed, so a failed clip degrades to the
             # pre-motion behaviour rather than to a broken cell - but say
             # so with exit 2, not a lying 0: a batch pre-warm that counted
             # this as done would never come back for the motion.
             if os.path.isfile(tmp):
                 os.unlink(tmp)
-            log("gif stage failed (still kept): %s"
+            log("clip stage failed (still kept): %s"
                 % r.stderr.decode("utf8", "replace")[:200])
             print(png)
             return 2
+    # The palette era's artifact, if this id predates the switch: it is
+    # dead weight now (the panel only reads .webp) and each one is ~1 MB.
+    stale = os.path.join(out_dir, "%s.gif" % disp)
+    if os.path.isfile(stale):
+        try:
+            os.unlink(stale)
+        except OSError:
+            pass
     print(png)
     return 0
 

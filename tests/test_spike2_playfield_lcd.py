@@ -174,14 +174,18 @@ def _write_png(art_dir, name):
     img.write(os.path.join(art_dir, name), format="png")
 
 
-def _write_gif(art_dir, name, colors):
-    """A real multi-frame GIF - PIL authors it, Tk plays it, exactly the
-    hand-off lcdart.py's ffmpeg stage performs."""
+def _write_clip(art_dir, name, colors):
+    """A real multi-frame lossless WebP - PIL authors it, PIL plays it,
+    exactly the hand-off lcdart.py's ffmpeg stage performs. Lossless so a
+    frame's colour comes back EXACTLY, which is the point of the format
+    (the GIF it replaced dithered a 256-colour palette and David caught it
+    on the glass within a minute)."""
     Image = pytest.importorskip("PIL.Image")
     os.makedirs(art_dir, exist_ok=True)
     frames = [Image.new("RGB", (240, 180), c) for c in colors]
     frames[0].save(os.path.join(art_dir, name), save_all=True,
-                   append_images=frames[1:], loop=0, duration=100)
+                   append_images=frames[1:], loop=0, duration=100,
+                   lossless=True)
 
 
 def test_cached_still_still_asks_for_motion(tmp_path, monkeypatch):
@@ -193,7 +197,7 @@ def test_cached_still_still_asks_for_motion(tmp_path, monkeypatch):
     root = _root()
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
-        _write_png(p._art, "54.png")                 # cached still, no gif
+        _write_png(p._art, "54.png")                 # cached still, no clip
         _write_block(block, [54])
         _poll(p)
         assert p.have[0] is True, "cached still did not paint"
@@ -211,8 +215,8 @@ def test_cached_still_still_asks_for_motion(tmp_path, monkeypatch):
         root.destroy()
 
 
-def test_gif_landing_animates_and_wraps(tmp_path, monkeypatch):
-    """The motion contract: once <id>.gif lands, each poll advances one
+def test_clip_landing_animates_and_wraps(tmp_path, monkeypatch):
+    """The motion contract: once <id>.webp lands, each poll advances one
     frame, frames cache as they decode, and the clip loops at its end WITH
     THE REPLAY IN ORDER - the review proved the old distinct-count
     assertion stayed green with looping fully broken (freeze on the last
@@ -223,14 +227,14 @@ def test_gif_landing_animates_and_wraps(tmp_path, monkeypatch):
         _write_png(p._art, "54.png")
         _write_block(block, [54])
         _poll(p)
-        assert p.anim[0] is None, "animation started with no gif on disk"
-        _write_gif(p._art, "54.gif", ["red", "green", "blue"])
+        assert p.anim[0] is None, "animation started with no clip on disk"
+        _write_clip(p._art, "54.webp", ["red", "green", "blue"])
         seen = []
         for _ in range(7):                          # two full loops + one
             _poll(p)
             seen.append(p.imgs[0])
         a = p.anim[0]
-        assert a is not None, "gif landed but the cell never animated"
+        assert a is not None, "clip landed but the cell never animated"
         assert a["n"] == 3, "frame count not learned: %r" % a.get("n")
         assert len(a["frames"]) == 3, "lazy decode cached %d frames" % \
             len(a["frames"])
@@ -252,11 +256,11 @@ def test_id_change_resets_animation(tmp_path, monkeypatch):
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
         _write_png(p._art, "54.png")
-        _write_gif(p._art, "54.gif", ["red", "green"])
+        _write_clip(p._art, "54.webp", ["red", "green"])
         _write_block(block, [54])
         _poll(p, times=3)
         assert p.anim[0] is not None
-        # 54 is FULLY cached (png + gif): the ask guard must not have
+        # 54 is FULLY cached (png + webp): the ask guard must not have
         # spawned a subprocess for it - the review proved this negative
         # was unasserted, so an always-ask regression stayed green.
         assert not any(c[2] == "54" for c in p.drv.calls), \
@@ -349,7 +353,7 @@ def test_position_persists_roundtrip(tmp_path, monkeypatch):
 def test_cached_still_with_late_driver_still_upgrades(tmp_path, monkeypatch):
     """THE motion review's headline: id first seen while drv is None, with
     a cached still. The still paints, have latches True - and the old
-    `not have[k]` retry gate then never re-entered _show, so the gif was
+    `not have[k]` retry gate then never re-entered _show, so the clip was
     never requested for the whole session (a mid-run window relaunch on a
     pre-GIF cache hit this deterministically on the steady attract id)."""
     root = _root()
@@ -372,14 +376,14 @@ def test_cached_still_with_late_driver_still_upgrades(tmp_path, monkeypatch):
 def test_corrupt_still_does_not_block_motion(tmp_path, monkeypatch):
     """A torn/corrupt png must degrade to a placeholder, not veto the clip:
     the review caught _animate gated on have[k], which let one bad still
-    permanently block a perfectly good gif."""
+    permanently block a perfectly good clip."""
     root = _root()
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
         os.makedirs(p._art, exist_ok=True)
         with open(os.path.join(p._art, "54.png"), "wb") as f:
             f.write(b"not a png")                    # the torn write
-        _write_gif(p._art, "54.gif", ["red", "green", "blue"])
+        _write_clip(p._art, "54.webp", ["red", "green", "blue"])
         _write_block(block, [54])
         _poll(p, times=3)
         assert p.have[0] is False, "corrupt still somehow decoded"
@@ -398,7 +402,7 @@ def test_hidden_window_stops_the_decode_work(tmp_path, monkeypatch):
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
         _write_png(p._art, "54.png")
-        _write_gif(p._art, "54.gif", ["red", "green", "blue"])
+        _write_clip(p._art, "54.webp", ["red", "green", "blue"])
         _write_block(block, [54])
         _poll(p, times=2)
         frames_before = len(p.anim[0]["frames"])

@@ -5164,6 +5164,30 @@ These have each been violated at least once and each cost a run or a window:
       a late frame and fails if the transdiff guard is ever "tidied".
       Live re-verified: 20 polls = 20 distinct captures off the real
       card clips, PIL fast path, no hitch tick.
+      **UPDATE 5 same day, David on a LIVE run: "the gif color looks off
+      somehow (like it's not rendering the correct bit depth)" — he was
+      reading it exactly right, and the clips are LOSSLESS WEBP now.** GIF
+      is an 8-bit PALETTE format; 256 colours plus error-diffusion
+      dithering scattered bright confetti over dark 1966 footage. Measured
+      against true-colour reference frames of the very clip he was looking
+      at (id 3004, 30 frames): current GIF 981 KB / MAE 2.88 / 0.167% of
+      pixels off by >30; full-palette no-dither GIF 896 KB / 2.40 /
+      0.088%; APNG 2436 KB / 0.00 / 0%; **webp lossless + `-pix_fmt bgra`
+      1233 KB / 0.00 / 0% — bit-exact, and 1.0 ms/frame to decode, faster
+      than the GIF it replaces.** `-pix_fmt bgra` is load-bearing: without
+      it libwebp takes ffmpeg's default yuv420p and "lossless" still costs
+      1.56 MAE on the YUV round trip (worst channel error 182 on the test
+      fixture, 0 with it). Sampled clip durations are 0.7-3.8 s with a
+      couple near 13 s, so typical cache entries are ~0.5-2 MB. Tk cannot
+      read WebP, so the decode is PIL-only now — Pillow is already a hard
+      app dependency (requirements.txt; Field.__init__ imports it
+      unguarded) and the guard only decides whether the TVs MOVE.
+      lcdart sweeps up each id's superseded .gif when it writes the .webp.
+      Tests: the delta-encode trap guard is replaced by a real-ffmpeg
+      BIT-EXACTNESS test over a yuv420p source (a PIL-authored RGB source
+      makes the flag a no-op and the test vacuous — that trap was found
+      while writing it), plus a stale-gif sweep test. 21 tests green;
+      re-recorded live off the real cache, colour clean.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

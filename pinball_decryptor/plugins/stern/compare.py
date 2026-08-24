@@ -21,10 +21,17 @@ report gives the container header's sound/fragment counts and its size —
 never a verdict off its digest, which is repacked and re-keyed on every build
 and so always differs.  The sound-by-sound answer comes from the two cards'
 EXTRACT folders when the caller can find them; see :func:`_sound_rows` and
-:mod:`core.audio_compare`.
+:mod:`core.audio_compare`.  That comparison is on the audio: a build that
+repacks changes the codec's lead-in frame on every sound, and counting those
+would report a whole catalog as rewritten.
 
 Requested by a tester: compare two releases — or a modded card against its
 stock base — and get a complete added/modified/deleted summary per type.
+
+Every change is listed IN FULL — a build that renumbers 4,000 sounds
+produces 4,000 rows here.  A row whose name is blank is an item of the count
+row above it, and the Compare tab shows the first N of each such run with the
+rest one double-click away; see :func:`_listed`.
 
 Every listed FILE row also carries a *ref* — the third element of the row
 tuple, ``{"side", "part", "path", "name"}`` — naming the card and the
@@ -44,10 +51,15 @@ from .explorer import CardImage
 from .info import (_IMAGE_EXTS, _game_elf_bytes, _walk_partition,
                    container_counts, resolve_version)
 
-# Listed file names are capped per change row; a final "… and N more" row
-# keeps the report honest about what it didn't list (Copy Report includes
-# the same rows, so the caps are never silent).
-_MAX_LISTED = 12
+# NOTHING IS CAPPED HERE.  The report carries every changed file and every
+# changed sound it found; how many of them the window lists is the Compare
+# tab's "Rows per list" setting, applied when the tree is painted.  Keeping
+# the cap out of the report is what lets that setting be instant — raising it
+# repaints a report already in memory instead of re-reading two multi-GB
+# cards — and what lets Copy Report hand over the whole list.  A tester,
+# looking at a build that renumbered thousands of sounds: "would it be
+# possible to display more than the first 12 entries for each asset category?
+# (Having 25 or 50 entries would be much more comfortable)".
 
 
 # ---------------------------------------------------------------------------
@@ -207,22 +219,24 @@ def _count_delta(name, av, bv, unavailable="not readable"):
 
 
 def _listed(status, items, detail, ref=None):
-    """Rows for one change status: a count row, then one row per item (the
-    status column left blank under its header row), capped with an honest
-    "… and N more".
+    """Rows for one change status: a count row, then one row per item — ALL
+    of them — with the status column left blank under its header row.
+
+    That blank name is not cosmetic: it is what marks a row as an ITEM of the
+    count row above it, so the renderer can group them and show the first N
+    (:func:`core.image_info.group_rows`).  Truncation belongs there, where the
+    user can change his mind about it for free; a cap baked in here would mean
+    re-reading both cards to see the thirteenth row.
 
     *ref*, when given, is called per item for that row's third element — the
     on-card file it names, for the Compare tab's double-click open.  The count
-    row and the "… and N more" row never get one: neither is a file."""
+    row never gets one: it is not a file."""
     if not items:
         return []
     rows = [(status, "%s:" % _num(len(items)))]
-    for it in items[:_MAX_LISTED]:
+    for it in items:
         rows.append(("", detail(it)) if ref is None
                     else ("", detail(it), ref(it)))
-    if len(items) > _MAX_LISTED:
-        rows.append(("", "… and %s more"
-                     % _num(len(items) - _MAX_LISTED)))
     return rows
 
 
@@ -373,6 +387,16 @@ def _extract_audio_rows(assets_a, assets_b):
 
     rows.append(_count_delta("Decoded sounds", diff["count_a"],
                              diff["count_b"]))
+    if diff.get("lead_in"):
+        # SAY IT, don't just do it.  Silently ignoring bytes is the kind of
+        # tolerance that makes a diff untrustworthy; this names exactly what
+        # was set aside and why it isn't audio (core.audio_compare).
+        rows.append(("Codec lead-in",
+                     "%s sound(s) matched only once their first frame was "
+                     "set aside — a Spike 2 sound decodes that one sample "
+                     "out of whatever image.bin packs in front of it, so "
+                     "repacking changes it on every sound at once. It is "
+                     "packing, not audio." % _num(diff["lead_in"])))
     # "Unchanged", not "identical": a sound that is byte-identical but has
     # been renumbered lands under Moved, and two rows both claiming to count
     # the identical audio would read as a contradiction.
@@ -396,8 +420,8 @@ def _extract_audio_rows(assets_a, assets_b):
                              "B", os.path.join(assets_b, pair[1])))
     if moved_rows and len(diff["moved"]) * 2 > diff["count_a"]:
         # Stern renumbers the whole sound directory on some builds (Led
-        # Zeppelin 1.21 -> 1.22 moves 545 of 549).  A bare "545:" over a dozen
-        # sample rows reads as a disaster; say what it is.
+        # Zeppelin 1.21 -> 1.22 moves 545 of 549).  A bare "545:" over a
+        # column of renamed slots reads as a disaster; say what it is.
         moved_rows[0] = ("Moved",
                          "%s — this build renumbered the sound directory; "
                          "the audio itself is unchanged"

@@ -95,6 +95,37 @@ def normalize_update_interval(value):
     return hours if hours in {h for h, _ in UPDATE_INTERVAL_CHOICES} \
         else UPDATE_INTERVAL_DEFAULT
 
+# Compare tab, "Rows per list": how many entries of one change list (Modified
+# images, Moved sounds, …) the report tree shows before it offers the rest.
+# The report itself is never truncated, so this is a repaint, not a re-read —
+# and the leftover row expands on double-click whatever this is set to.  A
+# tester on a build that renumbered 3,968 sounds: "would it be possible to
+# display more than the first 12 entries for each asset category? (Having 25
+# or 50 entries would be much more comfortable)."  So 50 is the default, and
+# "All" is on the menu for the times a dozen was never going to be enough.
+COMPARE_ROW_LIMIT_CHOICES = ("12", "25", "50", "100", "All")
+COMPARE_ROW_LIMIT_DEFAULT = "50"
+
+
+def normalize_compare_row_limit(value):
+    """A stored "Rows per list" choice as one of
+    :data:`COMPARE_ROW_LIMIT_CHOICES`.
+
+    Anything missing or off the menu falls back to
+    :data:`COMPARE_ROW_LIMIT_DEFAULT`: a hand-edited settings.json must not
+    leave the Compare tab showing a number its own dropdown can't display."""
+    text = str(value or "").strip()
+    for choice in COMPARE_ROW_LIMIT_CHOICES:
+        if text.lower() == choice.lower():
+            return choice
+    return COMPARE_ROW_LIMIT_DEFAULT
+
+
+def compare_row_limit_value(choice):
+    """The "Rows per list" choice as a row count, or ``None`` for "All"."""
+    choice = normalize_compare_row_limit(choice)
+    return None if choice == "All" else int(choice)
+
 # Replace-Image "Group by scene" parent-row iid prefix.  Image-row iids are
 # the slot rel_path (relative, so it can never start with a colon); this
 # prefix guarantees a group header's iid can't collide with any slot.
@@ -1260,7 +1291,9 @@ class MainWindow:
                  on_project_folder_picked=None,
                  on_folder_state_written=None,
                  initial_show_log_history=True,
-                 on_show_log_history_change=None):
+                 on_show_log_history_change=None,
+                 initial_compare_row_limit=None,
+                 on_compare_row_limit_change=None):
         self.root = root
         self._install_callback_error_logger(root)
         # Default Settings presets: {"presets": {name: {AD_name: value}},
@@ -1511,6 +1544,16 @@ class MainWindow:
         # double-click can pull it off the card (see _compare_open_row).
         self._compare_refs = {}
         self._compare_open_busy = False   # one on-demand extract at a time
+        # How many entries of one change list the tree shows, and which lists
+        # the user has since asked to see in full.  Both are display state:
+        # _compare_sections always holds the WHOLE report, so changing either
+        # is a repaint (_compare_paint), never another card read.
+        self.compare_limit_var = tk.StringVar(
+            value=normalize_compare_row_limit(initial_compare_row_limit))
+        self._on_compare_row_limit_change = on_compare_row_limit_change
+        self._compare_expanded = set()  # (section index, group index)
+        self._compare_more = {}         # tree iid -> that key, for the click
+        self._compare_row_count = 0     # rows painted, for scroll restore
         # Replace-Audio tab state (capabilities.replace_audio plugins).
         # The tab scans the assets folder for .wav/.ogg slots and lets the
         # user assign a replacement track per slot; staging writes the
@@ -13481,6 +13524,29 @@ class MainWindow:
             arow, text="Copy Report", command=self._compare_copy_report,
             state=tk.DISABLED)
         self._compare_copy_btn.pack(side=tk.LEFT, padx=(6, 0))
+        # ROWS PER LIST, next to Copy Report because they answer the same
+        # question: a build that renumbers thousands of sounds fills a change
+        # list with thousands of entries, and a dozen of them was not enough
+        # to see what had happened (a tester: "having 25 or 50 entries would
+        # be much more comfortable").  The report in memory is complete, so
+        # this only repaints the tree.
+        ttk.Label(arow, text="Rows per list:").pack(side=tk.LEFT, padx=(14, 4))
+        self._compare_limit_box = ttk.Combobox(
+            arow, textvariable=self.compare_limit_var, state="readonly",
+            width=5, values=COMPARE_ROW_LIMIT_CHOICES)
+        self._compare_limit_box.pack(side=tk.LEFT)
+        self._compare_limit_box.bind("<<ComboboxSelected>>",
+                                     self._compare_limit_changed)
+        _Tooltip(
+            self._compare_limit_box,
+            "How many entries of each change list (modified images, moved "
+            "sounds, …) the report shows before the rest are folded into "
+            "one line.\n\nNothing is thrown away: double-click that line to "
+            "list "
+            "the rest of THAT group, or press Copy Report, which always "
+            "copies every row.\n\nChanging this re-draws the report you are "
+            "looking at — the cards are not read again.",
+            lambda: self._current_theme)
         self._compare_status = ttk.Label(arow, text="", font=(_SANS_FONT, 9))
         self._compare_status.pack(side=tk.LEFT, padx=(10, 0))
 
@@ -13525,6 +13591,9 @@ class MainWindow:
         self._compare_seq += 1
         self._compare_sections = []
         self._compare_refs = {}
+        self._compare_more = {}
+        self._compare_expanded = set()
+        self._compare_row_count = 0
         if hasattr(self, "_compare_tree"):
             try:
                 self._compare_tree.delete(
@@ -13617,6 +13686,8 @@ class MainWindow:
         tree.delete(*tree.get_children())
         self._compare_sections = []
         self._compare_refs = {}
+        self._compare_more = {}
+        self._compare_expanded = set()
         self._compare_btn.configure(state=tk.DISABLED)
         self._compare_copy_btn.configure(state=tk.DISABLED)
         self._compare_status.configure(text="Comparing images…")
@@ -13643,45 +13714,123 @@ class MainWindow:
         self.root.after(120, _poll)
 
     def _compare_render(self, sections):
-        """Put a finished report on the tree, remembering which rows point at
-        a file on one of the two cards."""
-        tree = self._compare_tree
+        """Take a finished report and put it on the tree.
+
+        The report is kept WHOLE (``_compare_sections``); how much of it is
+        drawn is :meth:`_compare_paint`'s business.  A new report starts with
+        nothing expanded — the groups a user opened on the last pair of cards
+        say nothing about this one."""
         self._compare_sections = sections
-        tree.delete(*tree.get_children())
-        self._compare_refs = {}
-        for title, rows in sections:
-            parent = tree.insert("", tk.END, text=title, open=True,
-                                 tags=("section",))
-            for row in rows:
-                openable = len(row) > 2
-                iid = tree.insert(parent, tk.END, text=row[0],
-                                  values=(row[1],),
-                                  tags=("openable",) if openable else ())
-                if openable:
-                    # The plugin's own token for that file — kept beside the
-                    # tree rather than inside it: Tk item values are strings,
-                    # and round-tripping a dict through one is how a "path"
-                    # ends up being parsed back out of display text.
-                    self._compare_refs[iid] = row[2]
+        self._compare_expanded = set()
+        self._compare_paint()
         self._compare_btn.configure(state=tk.NORMAL)
         self._compare_copy_btn.configure(
             state=tk.NORMAL if sections else tk.DISABLED)
         self._compare_status.configure(text="")
 
+    def _compare_paint(self):
+        """Draw the stored report at the current "Rows per list" setting.
+
+        Each section is split into its listed groups — a named row plus the
+        blank-named rows under it (``image_info.group_rows``) — and only the
+        first N items of a group are inserted, with the remainder collapsed
+        into one "… and N more" line that expands on double-click.  Sections
+        are re-drawn from data already in memory, so the setting (and the
+        expansion) cost a repaint rather than two multi-GB card reads."""
+        from ..core.image_info import group_rows
+
+        tree = self._compare_tree
+        tree.delete(*tree.get_children())
+        self._compare_refs = {}
+        self._compare_more = {}
+        limit = compare_row_limit_value(self.compare_limit_var.get())
+        painted = 0
+
+        def _insert(parent, row):
+            openable = len(row) > 2
+            iid = tree.insert(parent, tk.END, text=row[0], values=(row[1],),
+                              tags=("openable",) if openable else ())
+            if openable:
+                # The plugin's own token for that file — kept beside the tree
+                # rather than inside it: Tk item values are strings, and
+                # round-tripping a dict through one is how a "path" ends up
+                # being parsed back out of display text.
+                self._compare_refs[iid] = row[2]
+            return iid
+
+        for s_i, (title, rows) in enumerate(self._compare_sections):
+            parent = tree.insert("", tk.END, text=title, open=True,
+                                 tags=("section",))
+            painted += 1
+            for g_i, (head, items) in enumerate(group_rows(rows)):
+                key = (s_i, g_i)
+                _insert(parent, head)
+                full = limit is None or key in self._compare_expanded
+                shown = items if full else items[:limit]
+                for row in shown:
+                    _insert(parent, row)
+                painted += 1 + len(shown)
+                hidden = len(items) - len(shown)
+                if hidden:
+                    iid = tree.insert(
+                        parent, tk.END, text="",
+                        values=("… and %s more — double-click to list them"
+                                % format(hidden, ","),))
+                    self._compare_more[iid] = key
+                    painted += 1
+        self._compare_row_count = painted
+
+    def _compare_limit_changed(self, _event=None):
+        """"Rows per list" picked: repaint and remember the choice."""
+        choice = normalize_compare_row_limit(self.compare_limit_var.get())
+        self.compare_limit_var.set(choice)
+        if self._compare_sections:
+            self._compare_paint()
+        if self._on_compare_row_limit_change:
+            self._on_compare_row_limit_change(choice)
+
+    def _compare_expand_group(self, iid):
+        """Double-click a "… and N more" line: list the rest of THAT group.
+
+        Only that one — a report can hold several thousand-entry lists, and
+        opening all of them because the user wanted to read one is how the row
+        he was looking at ends up somewhere else entirely.  Which is also why
+        the scroll position is put back: every row ABOVE this line is
+        unchanged by the expansion, so the top row's index is too."""
+        key = self._compare_more.get(iid)
+        if key is None:
+            return
+        tree = self._compare_tree
+        before = self._compare_row_count
+        top = tree.yview()[0] * before
+        self._compare_expanded.add(key)
+        self._compare_paint()
+        if self._compare_row_count:
+            tree.yview_moveto(top / self._compare_row_count)
+
     def _compare_copy_report(self):
+        """Copy the WHOLE report — every entry of every change list, not just
+        the rows the tree is currently showing."""
         from ..core import image_info as _info_mod
         if not self._compare_sections:
             return
         self.root.clipboard_clear()
         self.root.clipboard_append(_info_mod.as_text(
             self._compare_sections, title="Compare Report"))
-        self._compare_status.configure(text="Report copied to clipboard.")
+        self._compare_status.configure(
+            text="Report copied to clipboard — every row, not just the ones "
+                 "shown.")
 
     def _compare_open_row(self, event):
-        """Double-click in the report tree: open the file that row lists."""
+        """Double-click in the report tree: open the file that row lists —
+        or, on the "… and N more" line, list the rest of that group."""
         iid = self._compare_tree.identify_row(event.y)
-        if iid:
-            self._compare_open_iid(iid)
+        if not iid:
+            return
+        if iid in self._compare_more:
+            self._compare_expand_group(iid)
+            return
+        self._compare_open_iid(iid)
 
     def _compare_open_target(self, iid):
         """``(side, image_path, ref)`` for the row *iid*, or ``None``.

@@ -202,7 +202,7 @@ def test_compare_full_report(tmp_path, monkeypatch):
     snd = _named(by_title["Sounds"])
     assert snd["Sounds"] == "549 -> 551 (+2)"
     assert snd["Sound fragments"] == "578 -> 580 (+2)"
-    assert snd["Audio container"].startswith("image.bin changed")
+    assert snd["Audio container"].startswith("image.bin — ")
 
     # Every bucket lands where it should — and only there.  Paths are shown
     # relative to the shared game folder.
@@ -249,8 +249,7 @@ def test_compare_same_card_reports_no_changes(tmp_path, monkeypatch):
                        name_a=name, name_b="other.raw", spec_b=SPEC_A)
     sections = compare_cards(a, a)
     by_title = dict(sections)
-    assert _named(by_title["Sounds"])["Audio container"] \
-        == "image.bin unchanged"
+    assert "(unchanged)" in _named(by_title["Sounds"])["Audio container"]
     for title in ("Music banks", "Videos", "Images", "Scenes",
                   "Other files"):
         assert _named(by_title[title]) == {"No changes": ""}
@@ -439,3 +438,112 @@ def test_an_extensionless_video_gets_a_name_the_desktop_can_open(tmp_path,
     png = extract_ref(a, {"path": "turtles_pro/gfx/logo.png", "part": None},
                       out)
     assert os.path.basename(png) == "logo.png"
+
+
+# ---------------------------------------------------------------------------
+# Sounds — the section a tester's Extract Both used to leave unchanged
+# ---------------------------------------------------------------------------
+
+def _extract_folder(root, wavs):
+    """An extract folder holding ``{name: bytes}`` under ``audio/``, with the
+    ``.checksums.md5`` baseline every real Extract leaves behind."""
+    import hashlib
+
+    from pinball_decryptor.core.checksums import CHECKSUMS_FILE
+    os.makedirs(os.path.join(root, "audio"), exist_ok=True)
+    lines = []
+    for name, data in wavs.items():
+        with open(os.path.join(root, "audio", name), "wb") as f:
+            f.write(data)
+        lines.append("audio/%s\t%s" % (name, hashlib.md5(data).hexdigest()))
+    with open(os.path.join(root, CHECKSUMS_FILE), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return str(root)
+
+
+def test_sounds_never_judges_the_audio_by_the_container_digest(tmp_path,
+                                                               monkeypatch):
+    """image.bin is repacked and re-keyed on EVERY Stern build, so its stored
+    digest differs between any two releases whether or not a sound changed.
+    The section used to read that as "sounds were re-encoded or replaced" —
+    a guaranteed false alarm — and send the user off to extract both cards."""
+    a, b = _two_cards(tmp_path, monkeypatch)
+    snd = _named(dict(compare_cards(a, b))["Sounds"])
+    report = as_text(compare_cards(a, b), title="Compare Report")
+
+    assert "re-encoded or replaced" not in report
+    assert snd["Container bytes"].startswith("differ — as they do between ANY")
+    # ...and the section says what WOULD answer the question, in a way the
+    # tab can actually deliver on.
+    assert "Extract Both" in snd["Per-sound diff"]
+    assert "either card" in snd["Per-sound diff"]
+
+
+def test_one_extract_found_names_the_missing_side(tmp_path, monkeypatch):
+    a, b = _two_cards(tmp_path, monkeypatch)
+    only_a = _extract_folder(tmp_path / "xa", {"idx0001.wav": b"one"})
+    snd = _named(dict(compare_cards(a, b, only_a, None))["Sounds"])
+    assert "image B" in snd["Per-sound diff"]
+
+
+def test_two_extracts_turn_the_section_into_a_per_sound_diff(tmp_path,
+                                                             monkeypatch):
+    """The whole point: after Extract Both, Compare lists the sounds."""
+    a, b = _two_cards(tmp_path, monkeypatch)
+    xa = _extract_folder(tmp_path / "xa", {
+        "idx0001.wav": b"same", "idx0002.wav": b"stock", "idx0003.wav": b"gone",
+        "idx0004.wav": b"shifted"})
+    xb = _extract_folder(tmp_path / "xb", {
+        "idx0001.wav": b"same", "idx0002.wav": b"MODDED",
+        "idx0005.wav": b"shifted", "idx0006.wav": b"brand new"})
+    rows = dict(compare_cards(a, b, xa, xb))["Sounds"]
+    snd = _named(rows)
+    report = as_text([("Sounds", rows)], title="Compare Report")
+
+    assert snd["Extract A"] == xa and snd["Extract B"] == xb
+    assert snd["Decoded sounds"] == "4 (unchanged)"
+    assert snd["Unchanged"] == ("1 of 4 sounds are identical and still in "
+                                "the same slot")
+    assert snd["Changed"] == "1:" and snd["Moved"] == "1:"
+    assert snd["Added"] == "1:" and snd["Removed"] == "1:"
+    assert "idx0004.wav  ->  idx0005.wav" in report      # same audio, new slot
+    assert "idx0006.wav" in report and "idx0003.wav" in report
+
+    # Every listed sound carries a ref pointing at the file on disk, so the
+    # tab's double-click plays it instead of decoding it a second time.
+    refs = _refs(rows)
+    assert len(refs) == 4
+    assert {r["side"] for r in refs} == {"A", "B"}
+    for ref in refs:
+        assert os.path.isfile(ref["disk"])
+        assert extract_ref("unused.raw", ref, str(tmp_path)) == ref["disk"]
+
+
+def test_two_identical_extracts_say_so(tmp_path, monkeypatch):
+    a, b = _two_cards(tmp_path, monkeypatch)
+    wavs = {"idx0001.wav": b"one", "idx0002.wav": b"two"}
+    xa = _extract_folder(tmp_path / "xa", wavs)
+    xb = _extract_folder(tmp_path / "xb", wavs)
+    snd = _named(dict(compare_cards(a, b, xa, xb))["Sounds"])
+    assert snd["No changes"] == "every sound decodes identically on both cards"
+
+
+def test_an_audio_less_extract_says_which_one_and_why(tmp_path, monkeypatch):
+    """A video/images-only Extract has no audio folder.  Saying "no changes"
+    there would be a lie the user cannot see through."""
+    a, b = _two_cards(tmp_path, monkeypatch)
+    xa = _extract_folder(tmp_path / "xa", {"idx0001.wav": b"one"})
+    xb = str(tmp_path / "xb")
+    os.makedirs(xb)
+    snd = _named(dict(compare_cards(a, b, xa, xb))["Sounds"])
+    assert "image B" in snd["Per-sound diff"]
+    assert "Audio switched off" in snd["Per-sound diff"]
+
+
+def test_a_sound_that_left_the_extract_folder_says_so(tmp_path):
+    """Refs outlive the folder they name — a deleted extract must report,
+    not hand back a path to nothing."""
+    with pytest.raises(FileNotFoundError):
+        extract_ref("unused.raw",
+                    {"disk": str(tmp_path / "audio" / "idx0001.wav"),
+                     "name": "idx0001.wav", "side": "B"}, str(tmp_path))

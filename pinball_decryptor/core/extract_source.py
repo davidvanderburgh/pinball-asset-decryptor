@@ -105,6 +105,67 @@ def read_extract_source(assets_dir: str) -> Optional[dict]:
     return recorded if isinstance(recorded, dict) else None
 
 
+def _names_this_image(rec: dict, image_path: str) -> bool:
+    """Does the sidecar *rec* describe an extract of *image_path*?
+
+    The recorded absolute path is the strong answer.  The weak one — same file
+    NAME and same byte size — exists because a card gets moved or copied far
+    more often than it gets rebuilt, and refusing to pair a folder with the
+    card it plainly came from would put the report back on "run an Extract"
+    for a user who already has.  The mtime is deliberately NOT part of this:
+    that is :func:`stale_source_message`'s job, and a stale extract is still
+    the extract of this card.
+    """
+    if not rec:
+        return False
+    recorded = rec.get("input_path") or ""
+    if recorded and os.path.normcase(os.path.abspath(recorded)) == \
+            os.path.normcase(os.path.abspath(image_path)):
+        return True
+    if os.path.normcase(rec.get("input_name") or "") != \
+            os.path.normcase(os.path.basename(image_path)):
+        return False
+    try:
+        return rec.get("size") == os.path.getsize(image_path)
+    except OSError:
+        return False
+
+
+def find_extract_for(image_path: str, roots) -> Optional[str]:
+    """The extract folder *image_path* was extracted to, or ``None``.
+
+    *roots* are folders to look in; each is checked itself and one level down,
+    which is exactly the shape "Extract Both" leaves behind (one parent folder,
+    a sub-folder per card).  Only the sidecars are read — no walking, no
+    hashing — so this stays cheap enough to run on every Compare click.
+
+    Deliberately NOT a filesystem search.  Guessing at an extract folder from
+    a name would eventually pair a report with the wrong card's sounds, and a
+    confidently wrong audio diff is worse than the honest "extract both, then
+    compare again" the caller falls back to.
+    """
+    if not image_path:
+        return None
+    seen = set()
+    for root in roots or ():
+        if not root or not os.path.isdir(root):
+            continue
+        candidates = [root]
+        try:
+            candidates += [os.path.join(root, n)
+                           for n in sorted(os.listdir(root))]
+        except OSError:
+            pass
+        for cand in candidates:
+            key = os.path.normcase(os.path.abspath(cand))
+            if key in seen or not os.path.isdir(cand):
+                continue
+            seen.add(key)
+            if _names_this_image(read_extract_source(cand), image_path):
+                return cand
+    return None
+
+
 def version_hint_from_name(name: Optional[str]) -> Optional[str]:
     """A human version label parsed from a card-image filename, or ``None``.
 

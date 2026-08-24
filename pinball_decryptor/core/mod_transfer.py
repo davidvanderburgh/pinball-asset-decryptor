@@ -211,8 +211,11 @@ _IDX_TOKEN_RE = re.compile(r"\bidx0*(\d+)", re.IGNORECASE)
 _MUSIC_TOKEN_RE = re.compile(r"(music_cat\d+_\d+)", re.IGNORECASE)
 
 
-def _audio_slot_key(name):
-    """A naming-setting-independent identity for an extracted audio file."""
+def audio_slot_key(name):
+    """A naming-setting-independent identity for an extracted audio file.
+
+    Public because the Compare report's per-sound diff (:mod:`audio_compare`)
+    has to pair the same two folders up the same way this does."""
     stem = os.path.splitext(name)[0]
     m = _MUSIC_TOKEN_RE.search(stem)
     if m:
@@ -233,7 +236,7 @@ def _audio_by_slot_key(root):
         for name in sorted(os.listdir(d)):
             if name.startswith(".") or not name.lower().endswith(".wav"):
                 continue
-            out.setdefault(_audio_slot_key(name), "audio/" + name)
+            out.setdefault(audio_slot_key(name), "audio/" + name)
     return out
 
 

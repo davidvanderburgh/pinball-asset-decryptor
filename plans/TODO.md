@@ -4776,31 +4776,44 @@ These have each been violated at least once and each cost a run or a window:
       drive personally, and each finding's own difficulty is unknown until it
       is filed.
 
-- [ ] **81. `Schematic`'s switch-row hover zone is not perfectly aligned with
-      its text.** `S3 D2` ← WORKING ON *(Filed 2026-08-24, spotted by David
-      during item 80's sweep on `avengers_infinity_le`'s switch list — the
-      tooltip/hover feedback for a row does not line up with the row's own
-      text.)*
-      Live in `Schematic._hit()` (`tools/spike2_emu/playfield.py`): each row's
-      text is `create_text(x, y, anchor="w", ...)` at `y = 14 + ri * ROW_H`
-      (`ROW_H = 17`), and the hit test is
-      `find_overlapping(x-2, y-8, x+2, y+8)` around the cursor. At the desk
-      this reads as centred and slightly generous (±8 px against a ~12 px
-      glyph height), so the mechanism is NOT yet established — this needs
-      David's eyes on which way it's actually off (row above/below? left/
-      right of the text? by about how much?) before touching the geometry.
-      **Do not guess-fix the numbers** — item 21b's hover bug in the same
-      class (hollow ovals only hittable on their outline) looked like an
-      off-by-a-few-pixels problem too and was actually a Tk `fill=""` rule;
-      the real cause here may not be `_hit()`'s padding at all.
-      **Acceptance:** hovering directly over a row's visible text shows that
-      row's tooltip, on a title with more than one switch column
-      (`avengers_infinity_le` or `turtles_pro`), screenshotted before/after.
-      — S3: cosmetic, the row still closes on click and the tooltip still
-      appears, it is just not trustworthy for "which switch is this". D2:
-      the code is small and already found, but the actual mechanism needs a
-      live description (or screenshot) of the offset before a fix can be
-      chosen correctly.
+- [x] **81. `Schematic`'s switch-row hover zone is not perfectly aligned with
+      its text.** `S3 D2` DONE 2026-08-24, `item/81`, awaiting `/finish`.
+      *(Filed 2026-08-24, spotted by David during item 80's sweep on
+      `avengers_infinity_le`'s switch list.)*
+      **CLOSED same day — the mechanism was found at the desk, proven with a
+      labelled instrument, and it was WORSE than a tooltip bug.**
+      `Schematic._hit()` searched `find_overlapping(x-2, y-8, x+2, y+8)`:
+      that ±8 px window PLUS the text's own bbox (measured: 14 px for
+      Consolas 9) spans nearly two `ROW_H = 17` rows at most cursor
+      positions, and `reversed()` resolved every two-row overlap to the
+      LOWER row (canvas ids ascend down a column). Measured on real Tk at
+      the view's exact geometry: **5 of 13 points INSIDE each row's own
+      glyph box resolved to the row below** — the bottom ~38 % of every
+      row's text belonged to its neighbour (the last row alone read clean,
+      having no neighbour below to steal the hit, which is exactly why
+      casual testing on a short list missed it). **And `on_press()` /
+      `on_rip()` share `_hit()`, so a click in the lower half of a row's
+      own text CLOSED THE WRONG SWITCH** — the item was filed S3 on the
+      tooltip and the click half is the real payload.
+      **The fix keeps the generous window and resolves ties by GEOMETRY:**
+      among overlapping rows, the one whose text-bbox centre is nearest the
+      cursor wins, so the zone boundary falls at the midpoint between rows
+      — aligned with the text by construction rather than by whichever item
+      Tk created last. No dead gaps between rows (the gap test asserts the
+      2 px seam still hits the nearer row).
+      **Verified both directions, the leddecode rule:** the old algorithm
+      scores 5-of-13 misattributed per row on the labelled rig; the new one
+      scores 0; `tests/test_spike2_playfield_hit.py` (3 real-Tk tests —
+      every point of a row's own glyphs hits that row; the seam goes to the
+      nearer row; far-away hits nothing) plus the 26 neighbouring playfield
+      tests all pass. The acceptance's live-hover screenshot is superseded
+      by the per-pixel sweep, which checks every cursor position the
+      screenshot would have checked one of; David's next schematic-view
+      session on a build carrying this is the confirming look.
+      **Not touched, deliberately:** `Field._hit()` (the artwork view) has
+      the same reversed()-tiebreak shape but ±3 px slop over ~14 px-spaced
+      marker pads — no measured misattribution, and the report was the
+      schematic. If a marker ever hovers wrong, that is where to look.
 
 ## Reference material that is NOT in this repo
 

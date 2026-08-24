@@ -4746,6 +4746,36 @@ These have each been violated at least once and each cost a run or a window:
       **The metric is a race** (0.1 s = 118, 1.0 s = 3, 2.0 s = 17), so treat
       3 vs 5 as noise, not a trend. Do not reopen without a reason.
 
+- [ ] **80. Live, alphabetical, game-by-game E2E compatibility pass — David
+      plays, this session triages.** `S2 D4` *(Filed 2026-08-24 at David's ask,
+      in place of picking a queue item: "i want to go game by game instead and
+      confirm e2e compatibility one-by-one. we're going to go alphabetically
+      and I will tell you when we are starting each game and what issues we
+      are seeing.")*
+      **Same shape as item 57's "alphabetical, one title at a time" sweep**
+      (closed 2026-08-19, `S1 D3`) — but 57 was desk work, reading logs beside
+      David's own runs, and its standing record — `tools/spike2_emu/
+      README.md`'s "Titles" table — only checked switches / artwork /
+      positions / 2nd-display, most rows last-checked 2026-08-19/08-21. **This
+      is different: David plays each title himself in the app, alphabetically,
+      and reports what he sees per title** — a real E2E pass (ball serve,
+      video, audio, coils, in a played game, not just boot-to-attract) — and
+      this session triages what he reports live, in real time, the same way
+      items 65-76 were triaged from tester (PAD-81/Sam) email reports.
+      **Expect this to spawn per-title sub-items**, the same pattern as
+      53/55/58 splitting from 50/57 — this entry is the LOG of the sweep
+      itself, not a fix, and should be rewritten as the sweep's own findings
+      accumulate rather than treated as one bug.
+      **Acceptance:** every title in the card library gets a fresh
+      `last checked` row in README's Titles table dated from this pass —
+      either confirmed E2E-clean by David's own play, or with a filed
+      follow-up item number recording what was wrong.
+      — S2: play already works on most titles; this finds and orders what is
+      still broken rather than blocking anyone itself by existing. D4:
+      unbounded until the sweep says otherwise — many live runs David has to
+      drive personally, and each finding's own difficulty is unknown until it
+      is filed.
+
 ## Reference material that is NOT in this repo
 
 - **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own

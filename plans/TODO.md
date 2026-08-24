@@ -4878,13 +4878,37 @@ These have each been violated at least once and each cost a run or a window:
       (silence an optional node4 only when its hex header cannot be
       derived — ST keeps silence, batman answers) is DESIGNED but NOT
       yet written; boot #3 must confirm the alert state first.
-      **(3) NODE 2 "NOT REGISTERED": the game HAMMERS command f0 sub
-      0x20 at node 2 — 6,824 times in ~10 min (~11/s retry loop), plus
-      f0 sub 0x10 ×36 — and the shim has NO f0 handler (answers zeros).**
-      That retry loop is the registration suspect. f0 is also in
-      turtles' command census (item 54: `00 03 04 07 08 0a f0 f1 f2 f9
-      fc fe`), so the decode generalizes to the turtles LED wedge
-      (item 50). RE of batman's f0 sender/reply-test is IN FLIGHT.
+      **(3) ▼ THE f0 THEORY IS DEAD — RULED OUT BY DISASSEMBLY + 14,988
+      FRAMES, do not build an f0 handler, ever:** cmd f0 is a
+      FIRE-AND-FORGET WRITE. The game reads NO reply (zero RX with an f0
+      last-tx across two full runs; the sender `nb_exchange` 0x515f8c
+      skips its read loop at reply_len==0). The "6,824× hammer" is the
+      normal per-node service-cadence broadcast (f0 goes to EVERY node:
+      pinnodes get sub 0x11, ws2812-class 0x20/0x10; optional boards 36×
+      then give up, required boards forever). Zeros are already the
+      correct answer.
+      **(3b) THE REAL REGISTRATION MECHANISM, disassembled (batman VAs —
+      the shim's 0x59xxxx notes are godzilla's and do NOT map):**
+      registered = `board[+0x14] != 0`, per-node table at 0x6e9808
+      stride 4, gate code 0x517390-0x5173b4 — and every command ≤0xef
+      is GATED on it (the game refuses to send application commands to
+      an unregistered board; >0xef system cmds bypass). Set by the
+      fe-identity + hex-image-grading + runtime-info path. The grade
+      table (file 0x701fc0, 9 cells) decodes: 0 NO ERRORS, 1 NOT
+      RESPONDING, 2 NOT REGISTERED, 3 COLLISION, 4 NOT INITIALIZED,
+      5 VERSION MISMATCH, 6 HEX IMAGE VERSION NOT FOUND, 7 CHECKSUM,
+      8 RUNTIME INFO *(corrects the earlier "RUNTIME INFO = status 4"
+      desk note)*. Node 2's fe identity is answered CORRECTLY and it
+      still never registers — and the whole bus sits in fe re-probe
+      bursts (~301/node per 8 min) while any required board is
+      unregistered, which is also why attract takes ~72 s.
+      **LEADING SUSPECT NOW: the f9/fc RUNTIME-INFO block we answer
+      with ZEROS** — the game parses a serial ("%09d") and version
+      bytes out of it into board[+40..87]; board 24's white alert is
+      literally the RUNTIME INFO grade; a zero serial may also be what
+      blocks NOT-INITIALIZED→registered. The shim's own PAD_NB_RT=1
+      knob (pattern-fills f9/fc) was built as this exact experiment —
+      boot #4 is running it now.
       **(4) The video-latency theory is DEAD: the 2.3-5.7 s first-frame
       delays are the attract's double-buffered clip schedule (each delay
       = the alternate channel's clip duration), healthy over 35 min.**

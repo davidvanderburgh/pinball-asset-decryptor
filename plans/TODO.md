@@ -4582,6 +4582,27 @@ These have each been violated at least once and each cost a run or a window:
       from a full WSL disk, which fails copies and worse. D2: desk work,
       the copy path is proven, one dialog; no emulator run needed.
 
+- [ ] **78. The Emulate tab shows the extract pipeline's footer — Detect/
+      Locate-partitions chips and a bar that never moves — instead of the
+      emulation's own loading state; and the Sound / Skip-to-attract
+      tickboxes are dead weight.** `S3 D1` ← WORKING ON
+      *(Filed 2026-08-24 from David's morning screenshot + follow-up,
+      folded onto item/74's branch like item 77: "why are we showing this
+      progress bar on the emulate tab? let's use the progress bar for
+      loading state of the emulation instead" and "we don't need the sound
+      or skip to attract checkboxes anymore".)*
+      Scope: entering an Emulate tab hides both chip rows; the Stern panel
+      drives the footer bar via a new MainWindow.set_emulate_progress —
+      determinate card-copy percent (item 74's narration), marquee through
+      booting/techalerts, full at attract, empty idle; ownership handshake
+      so a running pipeline job keeps its footer and leaving the tab hands
+      it back. Both tickboxes removed (volume slider owns loudness since
+      item 56; boots land in attract since item 63); PAD_AUDIO=0 /
+      PAD_AUTO_ATTRACT=0 stay for scripted runs; help tips merged.
+      **Acceptance:** on the Emulate tab the chips are gone and the bar
+      tracks copy→boot→attract; pipeline tabs unchanged; toggles absent;
+      suite green.
+
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T
       FIX rather than as fixed — which is what it has actually been since the

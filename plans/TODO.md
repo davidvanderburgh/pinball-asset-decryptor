@@ -4856,10 +4856,22 @@ These have each been violated at least once and each cost a run or a window:
         list: **hover/click zones misaligned with the row text** — filed,
         fixed and closed same day as item 81 (the lower ~38 % of every
         row's glyphs belonged to the row BELOW, clicks included).
+      - **batman — ❌ two faults, filed as item 82** (2026-08-24, glass
+        screenshots + read-only log forensics off David's live run):
+        (i) `CHECK NODE BOARD 2 : NOT REGISTERED` red on Tech Alerts
+        though node 2 is scheduled AND identified — NOT item 70's hole,
+        the registration exchange itself; lead suspect for the `NODE NOT
+        FOUND` red screen is our own silencing of node 4, which the game
+        polls forever (`want=13/3/12`). Board 24 RUNTIME INFO white,
+        unexplained, lowest priority. (ii) The second screen that appears
+        over the carousel on the real machine never shows — 0
+        `PADGL_TARGET` all run, video pipeline alive but first frames
+        consumed 2.3–5.7 s after serve vs 58 ms healthy; awaiting David's
+        description of the real machine's behaviour. Needs an
+        instrumented boot once the rig is free — see item 82.
       **Resume:** next title alphabetically is whatever comes after
-      avengers_infinity_le in David's own run (batman, most likely — check
-      his actual order, do not assume the card-library's alphabetical
-      order matches his). Wait for his report before touching anything.
+      batman in David's own run. Wait for his report before touching
+      anything; item 82 holds batman's open work.
       **NOTE for later titles: the 24-title fleet nvram fix (item 62) means
       NO title should show the validation banner from here on — if one
       does, that is a NEW, live validation failure, not the stale-grade

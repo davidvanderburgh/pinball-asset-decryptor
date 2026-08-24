@@ -1178,8 +1178,12 @@ def test_start_builds_the_launch_off_the_ui_thread(tmp_path, monkeypatch):
     try:
         panel._src_path.set(str(img))
         # Item 74: picking a card fires ONE `cardmount.sh --precache` spawn —
-        # a fire-and-forget Popen (no wait, no pipe read), which is not the
-        # blocking launch this test polices.  Off the ledger before Start.
+        # from a worker thread, because the card-path stat must stay off the
+        # UI thread (a UNC path to a sleeping NAS blocks for seconds).  It is
+        # not a launch, so it comes off the ledger before Start is policed.
+        deadline = time.time() + 5
+        while not launched and time.time() < deadline:
+            time.sleep(0.01)
         assert launched and launched[0][-1] == "--precache", \
             "picking a card should start the background pre-cache"
         launched.clear()

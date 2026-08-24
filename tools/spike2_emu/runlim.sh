@@ -17,6 +17,13 @@ LOG=${1:-gzrun.log}
 SECS=${2:-45}
 shift 2 || true
 
+# Item 74 made an uncached card COPY FIRST (~60-70 s) before the guest
+# starts, which would eat this wrapper's whole budget inside the wait and
+# SIGKILL a run in which the game never existed. A timed instrument wants the
+# game up NOW, so it keeps the old boot-off-9p hybrid; pass PAD_CARD_PRECOPY=1
+# to measure the pre-copy path itself.
+export PAD_CARD_PRECOPY=${PAD_CARD_PRECOPY:-0}
+
 setsid env "$@" bash "$RIG/run_game.sh" > "$LOG" 2>&1 &
 LEADER=$!
 

@@ -3108,34 +3108,47 @@ class EmulatePanel:
     def _precache_kick(self):
         """Start the background card copy the moment a card is picked (item 74).
 
-        Fired by the entry's write-trace, which runs per KEYSTROKE — the
-        ``isfile`` test rejects every partial path and ``_precached``
-        keeps a full one from firing twice.  Skipped while a run is up:
-        the copy would compete with that run's disk reads, which is the
-        exact contention the pre-copy design removed.  ``--precache`` is
-        idempotent on the rig side (a valid cache is a no-op), so firing
-        it for an already-cached card costs one short-lived wsl process.
-        macOS is skipped: there the rig lives in a container and the
-        card's host path is not the container's, so the boot's own sync
-        wait is the whole story.
+        Fired by the entry's write-trace, which runs per KEYSTROKE on the Tk
+        MAIN thread — so only string comparisons happen here.  The card-path
+        ``isfile`` and the spawn go to a worker, because a card path can be
+        UNC to a sleeping NAS and a synchronous stat there is this app's
+        known UI-freeze class (the OneDrive stat, the wsl_home build).  The
+        worker's ``isfile`` also rejects every partial path while typing,
+        and ``_precached`` keeps a full one from firing twice.
+
+        The run-is-up guard here is best-effort only (``_last_up`` is blind
+        at startup, before the first status poll answers, and blind to
+        terminal-started runs) — the AUTHORITATIVE guard is in cardmount.sh
+        itself, which refuses to pre-cache beside a live game process.
+        ``--precache`` is idempotent on the rig side (a valid cache is a
+        no-op), so firing it for an already-cached card costs one
+        short-lived wsl process.  macOS is skipped: there the rig lives in
+        a container and the card's host path is not the container's, so
+        the boot's own sync wait is the whole story.
         """
         if sys.platform == "darwin" or not rig_available():
             return
         path = self._src_path.get().strip().strip('"')
-        if not path or path == self._precached or not os.path.isfile(path):
+        if not path or path == self._precached:
             return
         if self._proc is not None or self._last_up or self._starting:
             return
-        self._precached = path
-        cmd = rig_cmd("cardmount.sh", _wsl_path(path), "--precache")
-        try:
-            subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL,
-                             creationflags=_CREATE_FLAGS)
-            self._log("[emulate] pre-caching %s in the background"
-                      % os.path.basename(path))
-        except Exception as exc:                        # noqa: BLE001
-            self._log("[emulate] pre-cache failed to start: %s" % exc)
+
+        def run():
+            if not os.path.isfile(path) or path == self._precached:
+                return
+            self._precached = path
+            cmd = rig_cmd("cardmount.sh", _wsl_path(path), "--precache")
+            try:
+                subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL,
+                                 creationflags=_CREATE_FLAGS)
+                self._log("[emulate] pre-caching %s in the background"
+                          % os.path.basename(path))
+            except Exception as exc:                    # noqa: BLE001
+                self._log("[emulate] pre-cache failed to start: %s" % exc)
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _source_env(self):
         """The environment for watch.sh, or None with a reason already shown.
@@ -3316,7 +3329,7 @@ class EmulatePanel:
                     # reads so the 2 s status poll cannot overwrite the copy
                     # with "Not running".
                     prog = card_copy_progress(line)
-                    if prog is not None:
+                    if prog is not None and not self._stopping:
                         self._copying = prog
                         try:
                             self._timer().after(
@@ -3434,6 +3447,11 @@ class EmulatePanel:
         # A manual stop cancels any launch-from-slot still waiting for the
         # boot — the load must not fire into the NEXT run the user starts.
         self._launch_slot = None
+        # ...and cancels the copy narration (item 74): the user asked to
+        # stop, so "Copying card: …" must not be written back over
+        # "Stopping…" by _apply or by a straggling progress line — the drain
+        # and _apply both check _stopping before touching _copying again.
+        self._copying = None
         self._run_label(True, True)
         self._set("state", "Stopping…")
 
@@ -3924,7 +3942,8 @@ class EmulatePanel:
             # Item 74: while a first boot is copying the card, the guest is
             # deliberately not running yet — status.sh's honest "Not running"
             # would read as a hang, and the copy narration is the truth.
-            if self._copying is not None:
+            # Except during a Stop, when "Stopping…" is.
+            if self._copying is not None and not self._stopping:
                 label = self._copying
             self._set("state", label)
             self._hint.configure(text=hint)

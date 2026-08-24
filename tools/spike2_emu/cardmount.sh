@@ -90,6 +90,24 @@ cache_valid() {   # <img> <copy> <stamp>
         && [ "$(stamp_key "$(cat "$3")")" = "$(stamp_key "$(cache_stamp "$1")")" ]
 }
 
+# Is the pid in the pid file OUR copier, alive right now? Two review findings
+# killed the old bare `kill -0` here. (1) The pid file survives a WSL restart
+# on the ext4 disk, pids restart low, and a long-lived same-user daemon can
+# REUSE the recorded pid - kill -0 then reads "running" forever, no copier is
+# ever respawned, and every sync boot eats the full stall timeout. (2) The
+# GUI's Start runs as ROOT (PAD_PIVOT) while --precache runs as the user;
+# kill -0 across that boundary is EPERM, which read as "stale" and spawned a
+# DUPLICATE dd over the live one. /proc answers both: the cmdline of any
+# user's process is readable, and the copier's argv carries the cache path,
+# so identity comes with liveness in one test - and matching THIS label's
+# copy path (not just "cardcache") keeps a pid reused by another card's
+# copier from reading as ours.
+copier_alive() {   # <pidf> <copy>
+    local pid
+    pid=$(cat "$1" 2>/dev/null) && [ -n "$pid" ] \
+        && grep -qsa -- "$2" "/proc/$pid/cmdline"
+}
+
 # ITEM 74: wait for the detached copier, narrating progress so the minutes are
 # visible - one newline-terminated line every 2 s, because the GUI's drain
 # thread and the run log both read LINES (dd's own \r progress never surfaces
@@ -102,15 +120,19 @@ cache_wait() {   # <img> <copy> <stamp> <pidf>
     total=$(stat -c %s "$img" 2>/dev/null) || return 1
     [ "$total" -gt 0 ] || return 1
     tmb=$(( total / 1048576 ))
-    while [ -f "$pidf" ] && kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null; do
-        # .partial is written sequentially, so its apparent size IS the
-        # position - sparse holes do not change that.
+    while copier_alive "$pidf" "$copy"; do
+        # .partial is written sequentially, so its apparent size tracks the
+        # position - EXCEPT inside a run of zeros, where conv=sparse seeks
+        # and st_size freezes until real data lands (desk-verified during
+        # review). At the measured 139-180 MB/s a false stall needs >30 GB
+        # of contiguous zeros, which no card here has; a REAL wedge (dead
+        # NAS mid-copy) just waits the full 4 min before falling back.
         done=$(stat -c %s "$copy.partial" 2>/dev/null || echo 0)
         mb=$(( done / 1048576 )); pct=$(( done * 100 / total ))
         echo "[card] copying $(basename "$img"): $mb / $tmb MB ($pct%)" >&2
         if [ "$done" = "$last" ]; then
             still=$(( still + 1 ))
-            if [ "$still" -ge 45 ]; then   # 90 s without a byte moving
+            if [ "$still" -ge 120 ]; then   # 240 s without a byte moving
                 echo "[card] copy stalled - booting from the original instead (copy continues)" >&2
                 return 1
             fi
@@ -148,7 +170,7 @@ cache_pick() {
     # One copier at a time per label. The pid file is the lock; a stale one
     # (machine rebooted mid-copy) is detected by the pid being gone.
     local pidf="$CACHE/$label.pid"
-    if [ -f "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null; then
+    if copier_alive "$pidf" "$copy"; then
         echo "[card] local cache copy already in progress" >&2
     else
         echo "[card] caching $(basename "$img") to the WSL disk in the background" >&2
@@ -167,7 +189,14 @@ cache_pick() {
         setsid bash -c '
             img="$1"; copy="$2"; stamp="$3"; pidf="$4"
             rm -f "$copy.partial"
-            if dd if="$img" of="$copy.partial" bs=4M conv=sparse status=none; then
+            # The size gate on the way out is load-bearing: two copiers can
+            # only exist through a broken lock, but if they ever do they
+            # share the .partial NAME, and an mv would publish the OTHER
+            # copier in-flight file under a stamp cache_valid accepts.
+            # Never publish a file that is not the whole image.
+            if dd if="$img" of="$copy.partial" bs=4M conv=sparse status=none \
+               && [ "$(stat -c %s "$copy.partial" 2>/dev/null)" = \
+                    "$(stat -c %s "$img" 2>/dev/null)" ]; then
                 mv "$copy.partial" "$copy"
                 stat -c "%n %s %Y" "$img" > "$stamp"
                 # A root (PAD_PIVOT) run hands the finished copy back to the
@@ -274,6 +303,15 @@ fi
 # cache_pick collects whatever remains. Idempotent: a valid cache just prints
 # "using local cache", a copy already running prints that it is.
 if [ "${2:-}" = "--precache" ]; then
+    # Never start a 7 GB dd beside a live run - the copy would fight the
+    # run's 9p reads, which is the exact contention item 74 removed. Checked
+    # HERE rather than only in the GUI, because the GUI's run-is-up flag is
+    # blind at startup (the first status poll has not answered when a
+    # restored card path fires this) and blind to terminal-started runs.
+    if pgrep -x game >/dev/null 2>&1 || pgrep -x padglhost >/dev/null 2>&1; then
+        echo "[card] a run is up - not pre-caching" >&2
+        exit 0
+    fi
     cache_pick "$IMG" "$LABEL" async >/dev/null
     exit 0
 fi

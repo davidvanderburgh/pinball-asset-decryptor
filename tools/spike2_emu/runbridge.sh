@@ -24,6 +24,9 @@ pad_ensure_bridge || exit 1
 LOG=${1:-gzbridge.log}
 SECS=${2:-30}
 MODE=${3:-gpu}
+# Timed instrument: keep the old boot-off-9p hybrid rather than spending the
+# whole budget inside item 74's pre-copy wait. See runlim.sh.
+export PAD_CARD_PRECOPY=${PAD_CARD_PRECOPY:-0}
 
 RING_HOST=$ROOT/dump/padgl
 RING_GUEST=/dump/padgl

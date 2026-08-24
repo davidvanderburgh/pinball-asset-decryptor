@@ -1236,8 +1236,11 @@ _IMAGE_INFO_SECTIONS = [
      "to paste into a bug report."),
     ("Where its details come from",
      "Only from the image itself and its filename. A Stern card's version "
-     "is read from the vendor filename, or — on a renamed card — from the "
-     "card's own update index, and the short Version ID (like VEN106LE) is "
+     "is read from the card's own update index — the version is a fact "
+     "about the image, so renaming the file cannot change it — and the "
+     "filename is used only when that index cannot be read. If the name "
+     "claims a different version than the card, both are shown and the "
+     "card wins. The short Version ID (like VEN106LE) is "
      "assembled from the title code inside the game firmware. Videos, "
      "images, scenes, sounds and sound fragments are all counted straight "
      "off the card, no Extract needed: those sound counts are the asset "

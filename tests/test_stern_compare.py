@@ -280,6 +280,20 @@ def test_compare_different_games_warns(tmp_path, monkeypatch):
     assert "different games" in head["Warning"]
 
 
+def test_compare_uses_the_card_not_a_disagreeing_filename(tmp_path,
+                                                          monkeypatch):
+    """Card A is a relabelled 1.58.0 whose FILE claims 1.58.1.  The diff must
+    read 1.58.0 -> 1.59.0 off the cards themselves, and say why the name in
+    the picker looks different."""
+    a, b = _two_cards(tmp_path, monkeypatch,
+                      name_a="turtles_pro-1_58_1.1987.8G.sdcard.raw")
+    head = _named(dict(compare_cards(a, b))["Compared"])
+    assert head["Version"] == "1.58.0 -> 1.59.0"
+    assert head["Filename version (A)"].startswith("named 1.58.1 but the "
+                                                   "card says 1.58.0")
+    assert "Filename version (B)" not in head       # B's name agrees
+
+
 def test_compare_unopenable_card_reports_error(tmp_path):
     bad = tmp_path / "junk.raw"
     bad.write_bytes(b"junk")

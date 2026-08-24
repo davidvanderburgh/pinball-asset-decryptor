@@ -3953,6 +3953,37 @@ These have each been violated at least once and each cost a run or a window:
       remembered winpos size survives the fix (padglhost.c:1654-1655) — the
       letterbox keeps the aspect honest but the window stays big until Reset
       windows.
+      **★ 2026-08-24, Sam again (PAD-84) — THREE CORRECTIONS TO THE ROWS
+      ABOVE, one of which invalidates a shipped census row.**
+      1. **His resolutions are INFERRED, not measured panel specs**: "Regarding
+         the resolutions for the different screens I gave you yesterday, I
+         based them on the size of the videos displayed on them." So
+         368x214 / 1280x800 / 480x272 / 800x480 are the sizes of the CONTENT
+         Stern authored, not necessarily the panel's mode. They are still the
+         right target for "no stretch, no borders" (the guest scales its scene
+         to whatever it is told), but they must NOT be presented as hardware
+         facts, and a title whose art is authored smaller than its panel would
+         break the equivalence. This is the "a wrong table is worse than none"
+         warning above, now with a named mechanism.
+      2. **james_bond_60th_le HAS EXACTLY ONE SCREEN**: "there is only one
+         screen: it's under the playfield and is very small. The backbox
+         doesn't have an LCD screen." That confirms the 800x480 GameLogo.png
+         read and the item-44 observation that Bond emits zero PADGL_TARGETs —
+         Bond is a genuine single-display title, and the small under-playfield
+         panel IS display 0. **CAUTION FOR `ticket/PAD-83` (not yet merged):**
+         `tools/spike2_emu/gl2geom.py`'s census assigns Bond a SECONDARY at
+         800x480, because Bond is the one title carrying `SternLogo` at two
+         sizes and the "smallest other sane size" rule then invents a second
+         display it does not have. Bond must come back with a primary of
+         800x480 and NO secondary. Re-check that row before or right after
+         that branch merges.
+      3. **batman DOES have a second screen, "on the carousel"** — so the
+         240x180 `VideoClipPlayerDisplayElement_240x180` row is real hardware,
+         and PAD-83's finding stands as the open question: our two full runs
+         logged only `fbGetDisplayByIndex(0)`, i.e. the GUEST never asked. Both
+         runs stalled in the service menu (item 64) and never reached attract,
+         so "the TV is only asked for in attract" is still untested — reaching
+         attract on batman is the next measurement, not a shim change.
 
 - [ ] **66. Deadpool and Avengers: Infinity Quest boot on a WHITE
       background.** `S3 D2`

@@ -1903,8 +1903,37 @@ These have each been violated at least once and each cost a run or a window:
       but the UI half wants a windowed session to verify, which is what keeps
       it off D1.
 
-- [ ] **34. Booting the same card from a different path re-copies the whole
-      image, so "first run only" slowness comes back.** `S2 D2` ← WORKING ON
+- [x] **34. Booting the same card from a different path re-copies the whole
+      image, so "first run only" slowness comes back.** `S2 D2` DONE
+      2026-08-23, `item/34`, `e5a54ec`, awaiting `/finish`.
+      **CLOSED 2026-08-23 — cache identity narrowed to SIZE+MTIME; the path
+      stays in the stamp for debugging but no longer invalidates.** The
+      mandated pre-code question answered first: the 2026-08-23 triple-copy
+      session WAS stamp thrash, NOT retention — `~/cardcache` still held
+      every entry back to Aug 6, and aerosmith/avengers/batman each sit
+      byte-identical (same size+mtime) at BOTH repo `images/` and
+      `D:\Pinball\images`; godzilla_pro at THREE paths (those plus OneDrive
+      Desktop), matching its 15 lifetime "complete" lines. Fix:
+      `cardmount.sh` `cache_pick()` compares only the stamp's last two
+      fields (`stamp_key()`, taken from the right so spaced paths cannot
+      shift them); the stamp WRITE keeps full path+size+mtime, so every
+      pre-fix stamp stayed valid — nothing re-copies on upgrade.
+      `getboot.sh` already used size+mtime and cites this item.
+      **Acceptance MET live, three bounded runs under the lock (runlim.sh +
+      boottime.sh):** control boot from the stamped OneDrive path — "using
+      local cache", PAST TECH ALERTS 9.22 s; PATH-SWITCHED boot from repo
+      `images/` — "using local cache", NO copier, lifetime copies stayed 15,
+      PAST TECH ALERTS **9.21 s** (this exact case was 177 s to first frame
+      before); touched-mtime boot — copier started and completed (16th
+      "complete" line). Cleanup: image mtime restored to 1785257111 and the
+      stamp realigned; desk-proven VALID from all three paths after.
+      **Trade (stated in e5a54ec):** two DIFFERENT cards sharing a label AND
+      coincidentally identical size+mtime would wrongly share a cache.
+      **Loose end for the record:** run C's fuse2fs survived runlim in a
+      dead mount namespace and killgame.sh claimed
+      PAD_STOP_NEEDS_WSL_RESTART — but the process was plain S-state on a
+      futex and a direct `kill -9` by pid cleared it; killgame's "cannot be
+      cleared from inside WSL" was wrong for this case.
       **Observed 2026-08-09 (David's godzilla_pro session):** "Startup In
       Progress" for ~3 min — first frame at 177 s against the ~15 s a cached
       boot takes — with input laggy while the copy competed with the boot's own
@@ -4391,6 +4420,11 @@ These have each been violated at least once and each cost a run or a window:
       pays it once; what it costs is testers reading a working boot as a
       hang. D2: mechanism fully known, the log and file sizes exist to draw
       progress from; needs one live copying boot to confirm.
+      **Measured at item 34's close (2026-08-23):** the copier alone runs
+      ~120-150 MB/s on this machine (`.partial` growth watched live, no
+      renderer up) — a full 7.3 GB copy is ~60-70 s uncontended, so David's
+      3-4 minute copying boots were mostly the copy COMPETING with the
+      boot's 9p reads, which strengthens the pre-copy option above.
 
 - [ ] **75. aerosmith_le's GUEST exits silently ~1-2 min into a scripted
       watch.sh boot — and MAIN'S CODE does it identically, control-proven.**

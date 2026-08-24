@@ -3687,12 +3687,29 @@ class Schematic(StateOps):
         # canvasx, because the scroll backstop makes window x and canvas x
         # different things the moment the view is scrolled. canvasy for
         # symmetry; this view never scrolls vertically today.
+        #
+        # ★ ITEM 81 (David, live on avengers_infinity_le's list): the ±8 px
+        # search window plus the text's OWN bbox (~15 px for Consolas 9) is
+        # taller than ROW_H = 17, so most cursor positions overlap TWO rows'
+        # text - and reversed() resolved every such tie to the LOWER row,
+        # because canvas ids ascend down a column. Net effect: each row's
+        # hover/click zone sat shifted UP from its glyphs, and the lower half
+        # of a row's own text belonged to the row BELOW - a press there
+        # closed the wrong switch. Keep the generous window (no dead gaps
+        # between rows), but resolve the tie by GEOMETRY: the row whose text
+        # centre is nearest the cursor. The zone boundary then falls at the
+        # midpoint between rows, aligned with the text by construction
+        # rather than by whichever item Tk happened to create last.
         x, y = self.cv.canvasx(ev.x), self.cv.canvasy(ev.y)
-        for i in reversed(self.cv.find_overlapping(x - 2, y - 8,
-                                                   x + 2, y + 8)):
-            if i in self.info:
-                return i
-        return None
+        best, best_d = None, None
+        for i in self.cv.find_overlapping(x - 2, y - 8, x + 2, y + 8):
+            if i not in self.info:
+                continue
+            bb = self.cv.bbox(i)
+            d = abs((bb[1] + bb[3]) / 2.0 - y)
+            if best is None or d < best_d:
+                best, best_d = i, d
+        return best
 
     def _hit_led(self, ev):
         """The swatch under the cursor, or None. SEPARATE from _hit(), so a

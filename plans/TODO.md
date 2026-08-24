@@ -3165,13 +3165,73 @@ These have each been violated at least once and each cost a run or a window:
       this view opens, the call sites are located, and item 25's test harness
       already exists — but confirming a real plunge costs one run.
 
-- [ ] **62. `GAME VALIDATION ERROR #3` is a STALE FAILED GRADE IN NVRAM that a
-      nopped validation tick can never clear — SOLVED AND PROVEN with a
-      three-run controlled experiment; what is left is the product decision.**
-      `S2 D2` 90%
+- [x] **62. `GAME VALIDATION ERROR #3` is a STALE FAILED GRADE IN NVRAM that a
+      nopped validation tick can never clear — SOLVED, PROVEN, FLEET-FIXED
+      AND GLASS-VERIFIED.** `S2 D2` DONE 2026-08-24, `item/62`, `bf15c19`,
+      awaiting `/finish`.
+      **★★★ CLOSED 2026-08-24 — THE GLASS VERIFICATION THIS ITEM OWED SINCE
+      2026-08-23 IS DONE, by David's own eyes in the item-80 sweep:**
+      avengers_infinity_le showed the red `Game validation error, Update SD
+      card` banner (screenshot on record, the BEFORE), `nvgrades.py --fix`
+      zeroed its stale slot-B grade, and David's relaunch shows **the banner
+      is gone**. The product decision was his "let's fix item 62 now": the
+      one-shot fleet fix (`--fix-all`, verified `0 of 29 carry a stored F or
+      E`), NOT a shim auto-zero — the shared seed is clean so new files are
+      born clean, and auto-zeroing would mask an honest future failure. If a
+      stored F ever reappears, the census names it and `--fix` clears it.
       *(▲ from 70%. D3 → D2: the mechanism is proven end to end and the fix is
       applied and verified; what remains is deciding what the rig should do
       about it automatically, which is desk work plus one confirming boot.)*
+      **★★★★★★ 2026-08-24, INDEPENDENT LIVE CONFIRMATION AND ONE MORE FIXED
+      FILE, from item 80's alphabetical sweep — David playing the app, not
+      desk work.** Going alphabetically he hit `aerosmith_le` (clean, green
+      check) then `avengers_infinity_le` (glass showed the red `Game
+      validation error, Update SD card` banner over language-select — see
+      item 80's log) **before either of us had looked at `nvgrades.py`'s
+      census for this session**, and the census then printed exactly what
+      that predicts: `aerosmith_le` is one of only 4 titles reading clean
+      (`P/P/P` both slots — the others are `elvira3`, `godzilla_le`,
+      `turtles_pro`), and `avengers_infinity_le` was STUCK (`slot B P/P/F`).
+      Two independent methods (an EEPROM read and a human looking at the
+      glass) now agree on which titles carry the banner. **Also new: the
+      census now shows 24 of 29 stuck, not "25 of 28" — `godzilla_pro` reads
+      stuck too**, which the 2026-08-23 pass did not report (either it was
+      clean then and a later boot poisoned it, or it was missed; not chased,
+      not urgent since its own tick is healthy and slot A stays clean).
+      **Fix applied:** `nvgrades.py --fix avengers_infinity_le`
+      (`nvram-avengers_infinity_le.bin` slot B `P/P/F` → `S/S/S`, zeroed
+      `0x214..0x293`, backup `.bak-prevalfix` beside it, rig lock held for
+      the write and released after — see `killgame.sh`/lock rules). **NOT
+      YET RE-VERIFIED ON THE GLASS** — same gap the 2026-08-23 pass left
+      open ("the banner was never captured on the glass BEFORE and AFTER").
+      This time the BEFORE shot exists (David's screenshot). Resume: David
+      relaunches `avengers_infinity_le` in his own already-open app and says
+      whether the banner is gone — closes this item's oldest open question
+      for free, using the sweep instead of a scripted boot.
+      **★★ 2026-08-24, LATER THE SAME SESSION — DAVID MADE THE PRODUCT
+      DECISION ("let's fix item 62 now") AND THE WHOLE FLEET IS CLEAN:
+      `nvgrades.py --fix-all`, verified `0 of 29 carry a stored F or E`.**
+      The decision taken is option (b)'s spirit — a one-shot fleet fix with
+      the tool, NOT option (c)'s shim auto-zero: the shared seed is already
+      clean so new per-title files are born clean, and a FUTURE stored F on
+      a healthy-tick card would be an honest live failure that auto-zeroing
+      would mask. Recurrence is therefore not expected; if one appears, the
+      census names it and `--fix` clears it.
+      **A real tool bug found and fixed on the way (rig lock held
+      throughout):** the first `--fix-all` DIED at file 20 of 24 —
+      `PermissionError` on `nvram-stranger_things_le.bin`, which is
+      ROOT-owned because the GUI's PAD_PIVOT runs write their title's nvram
+      as root (same root/user split as the `dump/boot.id` loose end). A
+      fleet tool that aborts mid-fleet leaves the fleet in an unknown
+      state, so `fix()` now catches OSError, prints `NOT FIXED: ... rerun
+      as root`, and continues; the remaining 5 root-owned files were then
+      fixed with `wsl -u root` (`HOME=/home/david` so padpath resolves).
+      `valtick.py` was already in the repo, so the old "move pad62_tick.py
+      into the repo" note is satisfied.
+      **Resume (the one thing left):** David's relaunch of
+      `avengers_infinity_le` — or any previously-stuck title in his item-80
+      sweep — shows no banner; that is the glass BEFORE/AFTER this item has
+      owed since 2026-08-23, and the box gets checked on his word.
       **★★★★★ THE MECHANISM, PROVEN 2026-08-23 BY THREE RUNS WITH A CONTROL.**
       All three booted the Heisei image identically, reading the grades live
       through `PAD_VAL_DUMP` (now title-portable, `PAD_VAL_MOD=0x7f16bc`):
@@ -4804,6 +4864,45 @@ These have each been violated at least once and each cost a run or a window:
       NO title should show the validation banner from here on — if one
       does, that is a NEW, live validation failure, not the stale-grade
       class, and it earns its own item.**
+
+- [x] **81. `Schematic`'s switch-row hover zone is not perfectly aligned with
+      its text.** `S3 D2` DONE 2026-08-24, `item/81`, awaiting `/finish`.
+      *(Filed 2026-08-24, spotted by David during item 80's sweep on
+      `avengers_infinity_le`'s switch list.)*
+      **CLOSED same day — the mechanism was found at the desk, proven with a
+      labelled instrument, and it was WORSE than a tooltip bug.**
+      `Schematic._hit()` searched `find_overlapping(x-2, y-8, x+2, y+8)`:
+      that ±8 px window PLUS the text's own bbox (measured: 14 px for
+      Consolas 9) spans nearly two `ROW_H = 17` rows at most cursor
+      positions, and `reversed()` resolved every two-row overlap to the
+      LOWER row (canvas ids ascend down a column). Measured on real Tk at
+      the view's exact geometry: **5 of 13 points INSIDE each row's own
+      glyph box resolved to the row below** — the bottom ~38 % of every
+      row's text belonged to its neighbour (the last row alone read clean,
+      having no neighbour below to steal the hit, which is exactly why
+      casual testing on a short list missed it). **And `on_press()` /
+      `on_rip()` share `_hit()`, so a click in the lower half of a row's
+      own text CLOSED THE WRONG SWITCH** — the item was filed S3 on the
+      tooltip and the click half is the real payload.
+      **The fix keeps the generous window and resolves ties by GEOMETRY:**
+      among overlapping rows, the one whose text-bbox centre is nearest the
+      cursor wins, so the zone boundary falls at the midpoint between rows
+      — aligned with the text by construction rather than by whichever item
+      Tk created last. No dead gaps between rows (the gap test asserts the
+      2 px seam still hits the nearer row).
+      **Verified both directions, the leddecode rule:** the old algorithm
+      scores 5-of-13 misattributed per row on the labelled rig; the new one
+      scores 0; `tests/test_spike2_playfield_hit.py` (3 real-Tk tests —
+      every point of a row's own glyphs hits that row; the seam goes to the
+      nearer row; far-away hits nothing) plus the 26 neighbouring playfield
+      tests all pass. The acceptance's live-hover screenshot is superseded
+      by the per-pixel sweep, which checks every cursor position the
+      screenshot would have checked one of; David's next schematic-view
+      session on a build carrying this is the confirming look.
+      **Not touched, deliberately:** `Field._hit()` (the artwork view) has
+      the same reversed()-tiebreak shape but ±3 px slop over ~14 px-spaced
+      marker pads — no measured misattribution, and the report was the
+      schematic. If a marker ever hovers wrong, that is where to look.
 
 ## Reference material that is NOT in this repo
 

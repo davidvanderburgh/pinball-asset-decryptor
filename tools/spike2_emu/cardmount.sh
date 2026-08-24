@@ -57,11 +57,15 @@ give_back() {
 # 2.83 s -> 0.016 s on a 180 MB asset), so the cost that matters is the first
 # boot of a title after a WSL start.
 #
-# The fix is a copy of the image on the WSL disk - but made in the BACKGROUND,
-# after the original is already mounted and the game is already booting. The
-# first run pays nothing; the copy competes with the boot's reads for a while
-# and finishes on its own; every later mount of that card finds the local copy
-# and is native-speed end to end. dd conv=sparse punches holes for the zero
+# The fix is a copy of the image on the WSL disk. It used to be made in the
+# BACKGROUND while the game booted off the original - which meant the copy and
+# the boot fought over the same 9p reads: 177 s to first picture with laggy
+# input, against ~60-70 s for the copy alone plus ~9-15 s for a cached boot.
+# So since item 74 the first mount WAITS for the copy (with progress lines) and
+# then mounts the fresh cache - copy-then-boot, faster in total and never
+# laggy. The detached copier is unchanged underneath; --precache starts it
+# early (card pick time) and a stalled or failed copy falls back to booting
+# the original exactly as before. dd conv=sparse punches holes for the zero
 # blocks, so a 15 GB image lands as only its real data.
 #
 # PAD_CARD_CACHE=0 turns it off. The stamp file records path+size+mtime of the
@@ -79,15 +83,63 @@ cache_stamp() { stat -c "%n %s %Y" "$1" 2>/dev/null; }
 # with spaces cannot shift them.
 stamp_key() { local s="${1% *}"; echo "${s##* } ${1##* }"; }
 
+# Is the cached copy present with the image's size+mtime? One definition,
+# because cache_pick asks it on the way in and cache_wait on the way out.
+cache_valid() {   # <img> <copy> <stamp>
+    [ -f "$2" ] && [ -f "$3" ] \
+        && [ "$(stamp_key "$(cat "$3")")" = "$(stamp_key "$(cache_stamp "$1")")" ]
+}
+
+# ITEM 74: wait for the detached copier, narrating progress so the minutes are
+# visible - one newline-terminated line every 2 s, because the GUI's drain
+# thread and the run log both read LINES (dd's own \r progress never surfaces
+# through either). The copier is never killed here: on a stall or a failure
+# the boot falls back to the 9p hybrid and the copy keeps going for next time.
+# Returns 0 iff the cache is valid when the copier is done.
+cache_wait() {   # <img> <copy> <stamp> <pidf>
+    local img="$1" copy="$2" stamp="$3" pidf="$4"
+    local total tmb done mb pct last=-1 still=0
+    total=$(stat -c %s "$img" 2>/dev/null) || return 1
+    [ "$total" -gt 0 ] || return 1
+    tmb=$(( total / 1048576 ))
+    while [ -f "$pidf" ] && kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null; do
+        # .partial is written sequentially, so its apparent size IS the
+        # position - sparse holes do not change that.
+        done=$(stat -c %s "$copy.partial" 2>/dev/null || echo 0)
+        mb=$(( done / 1048576 )); pct=$(( done * 100 / total ))
+        echo "[card] copying $(basename "$img"): $mb / $tmb MB ($pct%)" >&2
+        if [ "$done" = "$last" ]; then
+            still=$(( still + 1 ))
+            if [ "$still" -ge 45 ]; then   # 90 s without a byte moving
+                echo "[card] copy stalled - booting from the original instead (copy continues)" >&2
+                return 1
+            fi
+        else
+            still=0
+        fi
+        last=$done
+        sleep 2
+    done
+    cache_valid "$img" "$copy" "$stamp"
+}
+
 # Prints the path to mount: the cached copy if it is valid, else the original -
 # and in the latter case starts the background copy if one is wanted and not
-# already running.
+# already running. Mode (arg 3): `sync` (the default) WAITS for that copy with
+# progress and mounts the fresh cache when it lands - item 74's pre-copy, which
+# replaced booting off 9p WHILE the copy competed for the same reads (177 s to
+# first picture, laggy input; measured ~9 s cached and ~60-70 s for the copy
+# alone, so copy-then-boot wins on both time and feel). `async` keeps the old
+# start-and-return behaviour - used by the already-mounted rejoin (the copy
+# only helps the NEXT mount, so blocking a rejoin on it would be pure delay)
+# and by --precache. PAD_CARD_PRECOPY=0 forces async everywhere - the escape
+# hatch back to the hybrid boot.
 cache_pick() {
-    local img="$1" label="$2"
+    local img="$1" label="$2" mode="${3:-sync}"
     local copy="$CACHE/$label.raw" stamp="$CACHE/$label.src"
     if [ "${PAD_CARD_CACHE:-1}" = 0 ]; then echo "$img"; return; fi
-    if [ -f "$copy" ] && [ -f "$stamp" ] \
-       && [ "$(stamp_key "$(cat "$stamp")")" = "$(stamp_key "$(cache_stamp "$img")")" ]; then
+    [ "${PAD_CARD_PRECOPY:-1}" = 0 ] && mode=async
+    if cache_valid "$img" "$copy" "$stamp"; then
         echo "[card] using local cache $copy" >&2
         echo "$copy"; return
     fi
@@ -136,6 +188,13 @@ cache_pick() {
             </dev/null >> "$CACHE/$label.log" 2>&1 &
         echo $! > "$pidf"
         give_back "$pidf" "$CACHE/$label.log"
+    fi
+    if [ "$mode" = sync ]; then
+        if cache_wait "$img" "$copy" "$stamp" "$pidf"; then
+            echo "[card] local cache ready - booting from it" >&2
+            echo "$copy"; return
+        fi
+        echo "[card] cache not usable - booting from the original" >&2
     fi
     echo "$img"
 }
@@ -197,7 +256,7 @@ title_dir() {
 }
 
 IMG=${1:-}
-[ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--umount]"
+[ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--umount|--precache]"
 [ -f "$IMG" ] || die "no image at $IMG"
 LABEL=$(basename "$IMG"); LABEL=${LABEL%%.Release*}; LABEL=${LABEL%%.raw}
 MNT="$CARDS/$LABEL"
@@ -206,6 +265,16 @@ if [ "${2:-}" = "--umount" ]; then
     fusermount -u "$MNT" 2>/dev/null || fusermount3 -u "$MNT" 2>/dev/null
     rmdir "$MNT" 2>/dev/null
     echo "[card] unmounted $MNT"
+    exit 0
+fi
+
+# ITEM 74: start (or join) the background copy and return - no mount, no wait.
+# The Emulate tab fires this the moment a card is PICKED, so by the time Start
+# is pressed the copy is done or well along, and the boot's sync wait in
+# cache_pick collects whatever remains. Idempotent: a valid cache just prints
+# "using local cache", a copy already running prints that it is.
+if [ "${2:-}" = "--precache" ]; then
+    cache_pick "$IMG" "$LABEL" async >/dev/null
     exit 0
 fi
 
@@ -231,7 +300,9 @@ fi
 # card mounted before the cache feature ever ran would stay slow forever.
 if [ -d "$MNT" ] && mountpoint -q "$MNT" 2>/dev/null; then
     T=$(title_dir "$MNT") || die "$MNT is mounted but holds no game"
-    cache_pick "$IMG" "$LABEL" >/dev/null
+    # async: the mount in use stays on whatever it was mounted from, so the
+    # copy only helps the NEXT mount - a rejoin must not block on it (item 74).
+    cache_pick "$IMG" "$LABEL" async >/dev/null
     # The kernel too, item 62 - see the fresh-mount path below for the whole
     # story. getboot's stamp makes this free when it already matches, and a
     # rejoined mount is exactly the case where someone else likely staged it.

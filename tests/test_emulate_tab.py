@@ -1177,6 +1177,12 @@ def test_start_builds_the_launch_off_the_ui_thread(tmp_path, monkeypatch):
         SimpleNamespace(stdout=iter(()), wait=lambda timeout=None: 0))
     try:
         panel._src_path.set(str(img))
+        # Item 74: picking a card fires ONE `cardmount.sh --precache` spawn —
+        # a fire-and-forget Popen (no wait, no pipe read), which is not the
+        # blocking launch this test polices.  Off the ledger before Start.
+        assert launched and launched[0][-1] == "--precache", \
+            "picking a card should start the background pre-cache"
+        launched.clear()
         panel.start()        # must come back with the "boot" still running
         assert not launched, "start() sat through the WSL boot on the UI thread"
         boot.set()
@@ -2208,6 +2214,40 @@ def test_an_ordinary_log_line_is_not_a_launch_request():
     # ...and neither is the token with nothing to launch.
     assert emulate_tab.playfield_launch(
         "PAD_PLAYFIELD_WINDOWS_LAUNCH savestates=1") is None
+
+
+# ----------------------------------------------------------------------
+# Item 74: a first boot copies the card BEFORE the guest starts, and
+# cardmount.sh narrates it one line every 2 s.  The drain thread turns those
+# lines into the state label, because status.sh's honest "Not running" during
+# the copy is exactly the looks-like-a-hang this item exists to remove.
+# ----------------------------------------------------------------------
+
+def test_a_copy_progress_line_becomes_a_state_label():
+    got = emulate_tab.card_copy_progress(
+        "[card] copying godzilla_pro-1_15_0_spike2.Release.8G.sdcard.raw: "
+        "3121 / 7497 MB (41%)")
+    assert got == "Copying card: 3121 / 7497 MB (41%)"
+
+
+def test_a_card_name_with_spaces_survives_the_parse():
+    """'Heisei Custom Image Premium V1.raw' is a real card on the desk."""
+    got = emulate_tab.card_copy_progress(
+        "[card] copying Heisei Custom Image Premium V1.raw: 0 / 7497 MB (0%)")
+    assert got == "Copying card: 0 / 7497 MB (0%)"
+
+
+def test_ordinary_card_lines_are_not_copy_progress():
+    """The verdict lines that FOLLOW the progress must parse as None — the
+    drain uses that edge to stop showing a copy that has finished."""
+    for line in ("[card] using local cache /home/david/cardcache/x.raw",
+                 "[card] local cache ready - booting from it",
+                 "[card] cache not usable - booting from the original",
+                 "[card] caching x.raw to the WSL disk in the background",
+                 "[card] copy stalled - booting from the original instead "
+                 "(copy continues)",
+                 "", "state=attract"):
+        assert emulate_tab.card_copy_progress(line) is None
 
 
 def test_the_interpreter_is_never_the_frozen_app_itself(monkeypatch):

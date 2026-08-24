@@ -181,6 +181,26 @@ _NEEDS_WSL_RESTART = "PAD_STOP_NEEDS_WSL_RESTART"
 #: and watch.sh gets on with the run.
 _PLAYFIELD_LAUNCH = "PAD_PLAYFIELD_WINDOWS_LAUNCH"
 
+#: Item 74: cardmount.sh narrates a first-boot copy one line every 2 s —
+#: ``[card] copying <name>: 3121 / 7497 MB (41%)``.  Parsed off the drain so
+#: the state label can show the copy instead of "Not running" while the guest
+#: deliberately waits for it.  Groups: name, done-MB, total-MB, percent.
+_CARD_COPY_RE = re.compile(
+    r"^\[card\] copying (.+): (\d+) / (\d+) MB \((\d+)%\)$")
+
+
+def card_copy_progress(line):
+    """The state-label text for a card-copy progress line, or None.
+
+    Pure, like :func:`playfield_launch`, and for the same reason: the format
+    can be tested without a WSL, a Tk root or a 7 GB card.
+    """
+    m = _CARD_COPY_RE.match(line)
+    if not m:
+        return None
+    name, done, total, pct = m.groups()
+    return "Copying card: %s / %s MB (%s%%)" % (done, total, pct)
+
 
 def playfield_launch(line):
     """Parse a ``_PLAYFIELD_LAUNCH`` line into its fields, or None.
@@ -1445,6 +1465,17 @@ class EmulatePanel:
         self._launch_slot = None
         self._loading = False
         self._proc = None            # the watch.sh child, while we own one
+        #: Item 74: the card-copy progress line to show in the state label, or
+        #: None when no copy is narrating. WRITTEN by the drain thread (a bare
+        #: attribute set, which is atomic), READ by _apply on the main loop —
+        #: the status poll would otherwise write "Not running" over minutes of
+        #: copy, because the guest deliberately does not start until the copy
+        #: lands.
+        self._copying = None
+        #: The card path already handed to `cardmount.sh --precache`, so the
+        #: entry's write-trace (which fires per keystroke) starts one copy per
+        #: picked card, not one per character.
+        self._precached = None
         #: The virtual playfield window, ON THE MACHINES WHERE PAD HAS TO OPEN
         #: IT ITSELF (see _open_playfield).  Normally watch.sh launches it
         #: through WSL interop and this stays None; when interop is off it
@@ -3051,6 +3082,14 @@ class EmulatePanel:
                 if hasattr(self, "_slots_tree") else None)
         except (AttributeError, tk.TclError):
             pass
+        # Item 74: the moment a card is PICKED, start caching it — the copy
+        # runs detached on the Linux side, so by the time Start is pressed it
+        # is done or well along and the boot's own wait collects the rest.
+        try:
+            self._src_path.trace_add(
+                "write", lambda *_a: self._precache_kick())
+        except (AttributeError, tk.TclError):
+            pass
         row = ttk.Frame(box)
         row.pack(fill=tk.X, padx=8, pady=6)
         self._src_entry = ttk.Entry(row, textvariable=self._src_path)
@@ -3065,6 +3104,38 @@ class EmulatePanel:
             filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
         if path:
             self._src_path.set(path)
+
+    def _precache_kick(self):
+        """Start the background card copy the moment a card is picked (item 74).
+
+        Fired by the entry's write-trace, which runs per KEYSTROKE — the
+        ``isfile`` test rejects every partial path and ``_precached``
+        keeps a full one from firing twice.  Skipped while a run is up:
+        the copy would compete with that run's disk reads, which is the
+        exact contention the pre-copy design removed.  ``--precache`` is
+        idempotent on the rig side (a valid cache is a no-op), so firing
+        it for an already-cached card costs one short-lived wsl process.
+        macOS is skipped: there the rig lives in a container and the
+        card's host path is not the container's, so the boot's own sync
+        wait is the whole story.
+        """
+        if sys.platform == "darwin" or not rig_available():
+            return
+        path = self._src_path.get().strip().strip('"')
+        if not path or path == self._precached or not os.path.isfile(path):
+            return
+        if self._proc is not None or self._last_up or self._starting:
+            return
+        self._precached = path
+        cmd = rig_cmd("cardmount.sh", _wsl_path(path), "--precache")
+        try:
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL,
+                             creationflags=_CREATE_FLAGS)
+            self._log("[emulate] pre-caching %s in the background"
+                      % os.path.basename(path))
+        except Exception as exc:                        # noqa: BLE001
+            self._log("[emulate] pre-cache failed to start: %s" % exc)
 
     def _source_env(self):
         """The environment for watch.sh, or None with a reason already shown.
@@ -3238,6 +3309,25 @@ class EmulatePanel:
                 for raw in self._proc.stdout:
                     line = raw.decode("utf-8", "replace").rstrip()
                     self._log("[emulate] " + line)
+                    # Item 74: a first boot COPIES the card before the guest
+                    # starts, and these lines are the only sign of life while
+                    # it does.  The label write goes back to the main loop
+                    # (Tk is not thread safe); the attribute is what _apply
+                    # reads so the 2 s status poll cannot overwrite the copy
+                    # with "Not running".
+                    prog = card_copy_progress(line)
+                    if prog is not None:
+                        self._copying = prog
+                        try:
+                            self._timer().after(
+                                0, lambda p=prog: self._set("state", p))
+                        except (tk.TclError, RuntimeError):
+                            pass
+                    elif self._copying is not None and line.startswith("[card]"):
+                        # The next [card] line after progress is the verdict
+                        # ("local cache ready" / "cache not usable") — either
+                        # way the copy stopped narrating, so stop showing it.
+                        self._copying = None
                     # ...and one line in it is addressed to US: the run cannot
                     # start a Windows program on this machine and is asking
                     # PAD to open the playfield window.  Done on THIS thread,
@@ -3251,6 +3341,7 @@ class EmulatePanel:
                 pass                                    # pipe closed under us
             finally:
                 self._proc = None
+                self._copying = None
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -3830,6 +3921,11 @@ class EmulatePanel:
     def _apply(self, info):
         try:
             label, hint = state_text(info)
+            # Item 74: while a first boot is copying the card, the guest is
+            # deliberately not running yet — status.sh's honest "Not running"
+            # would read as a hang, and the copy narration is the truth.
+            if self._copying is not None:
+                label = self._copying
             self._set("state", label)
             self._hint.configure(text=hint)
 

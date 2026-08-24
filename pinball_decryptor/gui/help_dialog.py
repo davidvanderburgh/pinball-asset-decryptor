@@ -937,14 +937,16 @@ HELP_CONTENT = {
          "them. Deleting is always safe: the card just re-copies on its "
          "next boot. When disk space runs low, the cache also cleans "
          "itself, dropping the cards you have not booted for the longest."),
-        ("Waiting at Tech Alerts is not a fault",
-         "The game boots to its Tech Alerts screen and waits there for an "
-         "operator, exactly like the real machine. Press a switch in the game "
-         "window — Enter is Service Select — and it carries on. The status "
-         "line says \"Waiting at Tech Alerts\" rather than pretending "
-         "something is wrong. \"Stuck at Tech Alerts\" is the different one: "
-         "it means the skip-to-attract helper pressed several times and the "
-         "screen never changed, and its hint says what to try."),
+        ("Tech Alerts handles itself",
+         "The game boots through its Tech Alerts screen — the machine's "
+         "operator readout — and the emulator steps past it automatically, "
+         "so a normal boot goes straight on to attract. While that is "
+         "happening the status line says \"Passing Tech Alerts…\". "
+         "\"Stuck at Tech Alerts\" is the one that needs you: the helper "
+         "pressed several times and the screen never changed, and its hint "
+         "says what to try. Once up, the status reads \"Game running\" — "
+         "the rig deliberately does not guess between the attract loop, the "
+         "operator menu, and a game you are playing."),
         ("Volume and Mute",
          "The game's audio always plays out to your PC speakers — through WSL "
          "on Windows, and on macOS over a local stream played by ffplay — and "

@@ -123,16 +123,25 @@ def _write_audio_ctl(gain, muted):
 _STATE_TEXT = {
     "off": ("Not running", ""),
     "booting": ("Starting…", "Loading scenes and bringing up the node bus."),
-    "techalerts": ("Waiting at Tech Alerts",
+    # "At", not "Waiting at": since item 63 a boot steps past this screen on
+    # its own, so the waiting word was a lie in the common case (David,
+    # 2026-08-24) — state_text swaps in "Passing Tech Alerts…" while the
+    # helper is actually pressing.
+    "techalerts": ("At Tech Alerts",
                    "Press a switch in the game window to carry on — this is "
-                   "what the real machine does, not a fault."),
-    "attract": ("In attract mode", "Playing its attract loop, or in the "
-                                   "operator menu."),
+                   "the machine's operator screen, not a fault."),
+    # "Game running", not "In attract mode": the rig deliberately does not
+    # tell attract from the operator menu or from a game in play (see
+    # gamestate.sh), and calling a game you are PLAYING "attract" was the
+    # misleading half of that honesty (David, 2026-08-24).
+    "attract": ("Game running", "Attract loop, operator menu, or a game "
+                                "in play."),
     # Kept: what status.sh emitted before it learned to say `attract`, so an
     # older rig against a newer app still reads as something rather than as a
     # bare word.  The rename happened because the old word was reached by a
     # test that had quietly stopped working - see gamestate.sh.
-    "running": ("Running", "Attract mode or the operator menu."),
+    "running": ("Game running", "Attract loop, operator menu, or a game "
+                                "in play."),
 }
 
 #: Replaces the Tech Alerts hint while the rig's own auto-advance helper is
@@ -180,6 +189,19 @@ _NEEDS_WSL_RESTART = "PAD_STOP_NEEDS_WSL_RESTART"
 #: tkinter (it is drawing its own window with it), so it opens the playfield
 #: and watch.sh gets on with the run.
 _PLAYFIELD_LAUNCH = "PAD_PLAYFIELD_WINDOWS_LAUNCH"
+
+#: Why a first boot says "Copying card": the state label's hover tip and the
+#: hint line under the status grid both carry this while a copy narrates
+#: (item 78 follow-up — David asked for the why, the where, and the
+#: only-once, next to the words).
+_COPY_EXPLAIN = (
+    "First boot of this card: it is being copied to the fast local cache "
+    "(~/cardcache on the WSL disk), because reading it straight off the "
+    "Windows drive makes every boot minutes-slow. This happens once per "
+    "card build — later boots start from the copy in seconds, and "
+    "rebuilding the image (a changed video, a new export) re-copies it "
+    "once, replacing the old copy. The Cache… button beside Browse shows "
+    "and manages what is kept.")
 
 #: Item 74: cardmount.sh narrates a first-boot copy one line every 2 s —
 #: ``[card] copying <name>: 3121 / 7497 MB (41%)``.  Parsed off the drain so
@@ -569,7 +591,9 @@ def state_text(info):
                                   (info.get("state", ""), ""))
     if info.get("state") == "techalerts":
         if info.get("auto", "0") != "0":
-            return label, _ADVANCING_HINT
+            # The helper is pressing right now - the boot is MOVING, and
+            # the old "Waiting at Tech Alerts" label said the opposite.
+            return "Passing Tech Alerts…", _ADVANCING_HINT
         if info.get("auto_result") == "gaveup":
             return "Stuck at Tech Alerts", _GAVEUP_HINT
     return label, hint
@@ -1835,6 +1859,12 @@ class EmulatePanel:
             v.grid(row=r, column=1, sticky=tk.W, padx=4, pady=2)
             self._vals[key] = v
         grid.columnconfigure(1, weight=1)
+        # The "Copying card: …" state explains itself on hover.  The tip's
+        # text is set only while a copy narrates — _Tooltip shows nothing
+        # when its text is empty, so the same tip is silent for every other
+        # state (those are the hint line's job, via state_text).
+        self._copy_tip = _Tooltip(self._vals["state"], "", self._theme_fn,
+                                  place="side")
 
         self._hint = ttk.Label(frame, justify=tk.LEFT, wraplength=820,
                                foreground="#888", text="")
@@ -4210,8 +4240,11 @@ class EmulatePanel:
     def _push_copy(self, text, pct):
         """Main-loop half of a drain-thread copy line: the tab's state label
         plus the footer bar (item 78) - both Tk, neither touchable from the
-        drain itself."""
+        drain itself.  The hint line and the state label's hover tip carry
+        the why/where/once explanation for as long as the copy narrates."""
         self._set("state", text)
+        self._hint.configure(text=_COPY_EXPLAIN)
+        self._copy_tip.text = _COPY_EXPLAIN
         if self._footer_cb is not None:
             try:
                 self._footer_cb("copy", pct, text)
@@ -4228,6 +4261,10 @@ class EmulatePanel:
             # Except during a Stop, when "Stopping…" is.
             if self._copying is not None and not self._stopping:
                 label = self._copying
+                hint = _COPY_EXPLAIN
+                self._copy_tip.text = _COPY_EXPLAIN
+            else:
+                self._copy_tip.text = ""
             self._set("state", label)
             self._hint.configure(text=hint)
             # Item 78: the footer bar under the notebook mirrors the loading
@@ -4239,8 +4276,7 @@ class EmulatePanel:
                     self._footer_cb("copy", self._copying_pct, self._copying)
                 elif info.get("running") == "1":
                     if info.get("state") in ("attract", "running"):
-                        self._footer_cb("run", None,
-                                        "Emulator running — " + st_label)
+                        self._footer_cb("run", None, st_label)
                     else:
                         self._footer_cb("boot", None,
                                         "Loading the emulator — " + st_label)

@@ -4623,10 +4623,32 @@ These have each been violated at least once and each cost a run or a window:
       tracks copy→boot→attract; pipeline tabs unchanged; toggles absent;
       suite green.
 
-- [ ] **79. batman reports `state=techalerts` through a whole attract —
+- [x] **79. batman reports `state=techalerts` through a whole attract —
       gamestate.sh's attract detector misses this title, so the footer
       marquee bounces forever, the label says "Passing Tech Alerts…", and
-      the auto helper's count never clears.** `S2 D3` ← WORKING ON
+      the auto helper's count never clears.** `S2 D3` DONE 2026-08-24,
+      `item/74` (folded), `2c7aa58`, awaiting `/finish`.
+      **CLOSED 2026-08-24 — cmd 0x70 joined hwshim's lamp-class set, and
+      both generations now announce their show.** Measured before fixing
+      (this detector's own law) with a NEW budgeted instrument,
+      `PAD_CMD_CENSUS=1` — one `[cmdmix]` line per 10 s window of
+      per-command TX counts: batman's attract carries cmd 70 (the
+      base-layer lamp write, already decoded) at ~109/s against ZERO in
+      the whole boot+alerts window; the undecoded 72/52/8a families
+      (~35-40/s) are deliberately NOT counted — guessed lamp commands
+      are how this detector went wrong twice. The 30-in-3s rate gate
+      stays. **Verified live, both generations:** batman — announce
+      6.6 s after the helper's first press, gs_state=attract, helper
+      pressed EXACTLY ONCE (the 45 s loop is gone); godzilla_pro control
+      — announce at 14.2 s in attract (also via 70 — that dialect flows
+      there too), nothing early, no presses. The helper stays: the
+      census proved batman parks at the alerts screen until the press
+      (zero show traffic before it), so the press IS the boot-to-attract
+      promise on that generation — David's removal question answered
+      with the measurement. Build notes: memset needs string.h hwshim
+      does not include (loop instead); a user-mode scripted run cannot
+      rebuild the root-owned shim — instrument runs use the GUI's root
+      PIVOT shape.
       *(Filed 2026-08-24 from David's live launch (item/74 validation,
       v0.158.0 badge): batman visibly in attract — BEST COMBO CHAMPION
       high-score screen, CREDITS 1 — while the tab showed "Passing Tech

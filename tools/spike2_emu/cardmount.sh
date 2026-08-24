@@ -65,9 +65,19 @@ give_back() {
 # blocks, so a 15 GB image lands as only its real data.
 #
 # PAD_CARD_CACHE=0 turns it off. The stamp file records path+size+mtime of the
-# source; any mismatch (new dump of the same title, touched file) invalidates.
+# source, but only SIZE+MTIME are the identity (item 34): David keeps
+# byte-identical cards at two and three paths, and while the path was part of
+# the compare, every launch that alternated paths re-ran the full 7.3 GB copy
+# - batman three times for bytes that never changed. A new dump of the same
+# title still invalidates: a re-export gets a new size/mtime. The trade: two
+# DIFFERENT cards sharing a label AND coincidentally identical size+mtime
+# would wrongly share a cache. The path stays in the stamp for debugging, and
+# staying with the full-stamp WRITE keeps every pre-fix stamp valid here.
 # `rm -rf ~/cardcache` is the whole reclaim story.
 cache_stamp() { stat -c "%n %s %Y" "$1" 2>/dev/null; }
+# The identity: the stamp's last two fields, taken from the right so a path
+# with spaces cannot shift them.
+stamp_key() { local s="${1% *}"; echo "${s##* } ${1##* }"; }
 
 # Prints the path to mount: the cached copy if it is valid, else the original -
 # and in the latter case starts the background copy if one is wanted and not
@@ -77,7 +87,7 @@ cache_pick() {
     local copy="$CACHE/$label.raw" stamp="$CACHE/$label.src"
     if [ "${PAD_CARD_CACHE:-1}" = 0 ]; then echo "$img"; return; fi
     if [ -f "$copy" ] && [ -f "$stamp" ] \
-       && [ "$(cat "$stamp")" = "$(cache_stamp "$img")" ]; then
+       && [ "$(stamp_key "$(cat "$stamp")")" = "$(stamp_key "$(cache_stamp "$img")")" ]; then
         echo "[card] using local cache $copy" >&2
         echo "$copy"; return
     fi

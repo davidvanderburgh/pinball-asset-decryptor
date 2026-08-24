@@ -122,39 +122,47 @@ it. What the sweep cannot answer is the other three columns: switches, second
 display and whether a title actually boots are properties of a RUN, and those
 still come from running it.
 
-| title | switches | artwork | positions | 2nd display | last checked |
-|---|---|---|---|---|---|
-| godzilla_pro | ✅ live, 88 | ✅ | ✅ (baseline) | n/a | 2026-08-19 |
-| jaws_le | ✅ live, 109 | ✅ | ✅ | n/a | 2026-08-19 |
-| john_wick_le | ✅ live, 106 | ✅ | ✅ | n/a | 2026-08-19 |
-| james_bond_60th_le | ✅ live, 118 | ✅ | ✅ | n/a | 2026-08-19 |
-| james_bond_le | ✅ live, 108 | ✅ bond_le_playfield.png | ✅ | n/a | 2026-08-19 |
-| deadpool_pro | ✅ live, 104 | ✅ deadpool_pro_playfield.png | ✅ | n/a | 2026-08-19 |
-| king_kong_le | ✅ live, 105 | ✅ Rodeo…Wireframe.png (item 57 fix) | ✅ 489/517 inside, 0 outside (item 57 fix) | n/a | 2026-08-19 |
-| dungeons_and_dragons_le | ✅ live, 104 | ❌ none shipped | ✅ 255 records | n/a | 2026-08-19 |
-| venom_le | ✅ live, 107 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
-| turtles_le | ✅ live, 96 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
-| uncanny_xmen_le | ✅ live, 110 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
-| deadpool_le | ✅ live, 104 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
-| godzilla_le **V1.14.0** | ✅ live, 98 | ✅ scaled_godzilla_le_playfield.png 313x710 | ✅ 177/593 inside, 0 outside; 30/30 left-right; 48 switches, 14 coils, 115 lamps placed | n/a | 2026-08-21 |
-| godzilla_le 1.13.0 | not run | — no device test data in this build | — 0 records (measured off the card) | n/a | 2026-08-21 |
-| metallica_spike | ✅ live, 106 | ✅ metallica_playfield…png (item 57 fix) | ✅ 502/664 inside, 0 outside (item 57 fix) | n/a | 2026-08-19 |
-| aerosmith_le | ✅ static (swelf.py), live-verified | — no device table shipped | — | n/a | 2026-08-19 |
-| avengers_infinity_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
-| batman | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
-| foo_fighters_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
-| guardians_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
-| iron_maiden_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
-| jurassic_park_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
-| mando_le | ✅ static (swelf.py), live-verified | — | — | ✅ real (topper accessory, David-confirmed) | 2026-08-19 |
-| rush_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
-| star_wars_le | ✅ live, 104 | ❌ none found | not re-measured | ✅ real (mini display above the targets, David-confirmed) | 2026-08-19 |
-| turtles_pro | ✅ live, 94 | ❌ none found | not re-measured | n/a | 2026-08-19 |
-| elvira3 | ✅ live, 110 | ❌ none found | not re-measured | n/a | 2026-08-19 |
-| led_zeppelin_le | ✅ live, 97 | ❌ none found | not re-measured | n/a | 2026-08-19 |
-| stranger_things_le | ✅ static (swelf.py, item 52) | ❌ none found | not re-measured | ✅ real (projector, item 44) | 2026-08-19 |
-| sword_of_rage_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 98 | ❌ none shipped | ❌ no device table | n/a | 2026-08-19 |
-| munsters_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 103 | ❌ none shipped | ❌ no device table | n/a | 2026-08-19 |
+**`E2E play (item 80)` column, added 2026-08-24.** The other columns are all
+DESK WORK or scripted-boot measurements (item 57's sweep and its successors).
+This one is different: it is David actually playing each title, alphabetically,
+in the app, and reporting what he sees — ball serve, video, audio, coils, the
+whole machine, not just switches-boot-to-attract. `not yet` means this pass
+has not reached that title. See item 80 in `plans/TODO.md` for the log and the
+per-title follow-up items it spawns.
+
+| title | switches | artwork | positions | 2nd display | E2E play (item 80) | last checked |
+|---|---|---|---|---|---|---|
+| godzilla_pro | ✅ live, 88 | ✅ | ✅ (baseline) | n/a | not yet | 2026-08-19 |
+| jaws_le | ✅ live, 109 | ✅ | ✅ | n/a | not yet | 2026-08-19 |
+| john_wick_le | ✅ live, 106 | ✅ | ✅ | n/a | not yet | 2026-08-19 |
+| james_bond_60th_le | ✅ live, 118 | ✅ | ✅ | n/a | not yet | 2026-08-19 |
+| james_bond_le | ✅ live, 108 | ✅ bond_le_playfield.png | ✅ | n/a | not yet | 2026-08-19 |
+| deadpool_pro | ✅ live, 104 | ✅ deadpool_pro_playfield.png | ✅ | n/a | not yet | 2026-08-19 |
+| king_kong_le | ✅ live, 105 | ✅ Rodeo…Wireframe.png (item 57 fix) | ✅ 489/517 inside, 0 outside (item 57 fix) | n/a | not yet | 2026-08-19 |
+| dungeons_and_dragons_le | ✅ live, 104 | ❌ none shipped | ✅ 255 records | n/a | not yet | 2026-08-19 |
+| venom_le | ✅ live, 107 | ❌ none shipped | not re-measured | n/a | not yet | 2026-08-19 |
+| turtles_le | ✅ live, 96 | ❌ none shipped | not re-measured | n/a | not yet | 2026-08-19 |
+| uncanny_xmen_le | ✅ live, 110 | ❌ none shipped | not re-measured | n/a | not yet | 2026-08-19 |
+| deadpool_le | ✅ live, 104 | ❌ none shipped | not re-measured | n/a | not yet | 2026-08-19 |
+| godzilla_le **V1.14.0** | ✅ live, 98 | ✅ scaled_godzilla_le_playfield.png 313x710 | ✅ 177/593 inside, 0 outside; 30/30 left-right; 48 switches, 14 coils, 115 lamps placed | n/a | not yet | 2026-08-21 |
+| godzilla_le 1.13.0 | not run | — no device test data in this build | — 0 records (measured off the card) | n/a | not yet | 2026-08-21 |
+| metallica_spike | ✅ live, 106 | ✅ metallica_playfield…png (item 57 fix) | ✅ 502/664 inside, 0 outside (item 57 fix) | n/a | not yet | 2026-08-19 |
+| aerosmith_le | ✅ static (swelf.py), live-verified | — no device table shipped | — | n/a | ✅ clean, 2026-08-24 (David) | 2026-08-19 |
+| avengers_infinity_le | ✅ static (swelf.py), live-verified | — | — | n/a | ❌ `Game validation error, Update SD card` → item 62 (fix applied 2026-08-24, pending reverify) | 2026-08-19 |
+| batman | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
+| foo_fighters_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
+| guardians_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
+| iron_maiden_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
+| jurassic_park_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
+| mando_le | ✅ static (swelf.py), live-verified | — | — | ✅ real (topper accessory, David-confirmed) | not yet | 2026-08-19 |
+| rush_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
+| star_wars_le | ✅ live, 104 | ❌ none found | not re-measured | ✅ real (mini display above the targets, David-confirmed) | not yet | 2026-08-19 |
+| turtles_pro | ✅ live, 94 | ❌ none found | not re-measured | n/a | not yet | 2026-08-19 |
+| elvira3 | ✅ live, 110 | ❌ none found | not re-measured | n/a | not yet | 2026-08-19 |
+| led_zeppelin_le | ✅ live, 97 | ❌ none found | not re-measured | n/a | not yet | 2026-08-19 |
+| stranger_things_le | ✅ static (swelf.py, item 52) | ❌ none found | not re-measured | ✅ real (projector, item 44) | not yet | 2026-08-19 |
+| sword_of_rage_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 98 | ❌ none shipped | ❌ no device table | n/a | not yet | 2026-08-19 |
+| munsters_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 103 | ❌ none shipped | ❌ no device table | n/a | not yet | 2026-08-19 |
 
 **CORRECTION, same session, right after this table's first version shipped:**
 the first pass checked the CONSOLE pane for the live switch dump

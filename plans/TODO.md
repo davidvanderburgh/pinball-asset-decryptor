@@ -4775,6 +4775,31 @@ These have each been violated at least once and each cost a run or a window:
       unbounded until the sweep says otherwise — many live runs David has to
       drive personally, and each finding's own difficulty is unknown until it
       is filed.
+      **Acceptance correction, same day: not `last checked`, a new column.**
+      Overwriting `last checked` would have erased WHEN the other four
+      columns (switches/artwork/positions/2nd display) were last verified,
+      which is a different fact from when David played it. Added
+      `E2E play (item 80)` as its own column instead — same table, same
+      "standing record" idea, nothing lost.
+      **THE LOG, alphabetical, one line per title as David reports it:**
+      - **aerosmith_le — ✅ CLEAN**, David's own green check, 2026-08-24.
+      - **avengers_infinity_le — ❌ `Game validation error, Update SD card`**
+        on Tech Alerts / language-select, 2026-08-24 (David's screenshot).
+        This is item 62's exact mechanism (a stale `F` grade in NVRAM slot B
+        that title's own nopped-or-not tick may never re-heal). Census run
+        the same session (`nvgrades.py`, item 62's tool): only 4 of 29
+        titles read clean — `aerosmith_le`, `elvira3`, `godzilla_le`,
+        `turtles_pro` — matching David's aerosmith result independently.
+        Fix applied: `nvgrades.py --fix avengers_infinity_le`. **Not yet
+        re-verified on the glass** — Resume: David relaunches
+        avengers_infinity_le and confirms the banner is gone; see item 62.
+        Also noted, same title: **the switch-schematic view's hover zones
+        are not perfectly aligned with the text** (David, live) — filed as
+        its own follow-up, see item 81.
+      **Resume:** next title alphabetically is whatever comes after
+      avengers_infinity_le in David's own run (batman, most likely — check
+      his actual order, do not assume the card-library's alphabetical
+      order matches his). Wait for his report before touching anything.
 
 ## Reference material that is NOT in this repo
 

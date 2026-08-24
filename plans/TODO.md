@@ -4623,6 +4623,35 @@ These have each been violated at least once and each cost a run or a window:
       tracks copy→boot→attract; pipeline tabs unchanged; toggles absent;
       suite green.
 
+- [ ] **79. batman reports `state=techalerts` through a whole attract —
+      gamestate.sh's attract detector misses this title, so the footer
+      marquee bounces forever, the label says "Passing Tech Alerts…", and
+      the auto helper's count never clears.** `S2 D3`
+      *(Filed 2026-08-24 from David's live launch (item/74 validation,
+      v0.158.0 badge): batman visibly in attract — BEST COMBO CHAMPION
+      high-score screen, CREDITS 1 — while the tab showed "Passing Tech
+      Alerts…", 26 processes, renderer 59.0 fps, 87800 audio frames
+      played / 0 dropped, and item 78's footer marquee bounced on. The
+      2026-08-05 status/autoattract disagreement was fixed by gamestate.sh
+      for godzilla-family titles; batman is a NEW miss of the same shape.)*
+      gamestate.sh declares attract by a video-output-rate proxy ("~40/s
+      sustained in attract... its attract clip set is a superset") —
+      batman is a no-playfield-artwork title whose attract holds long
+      static high-score screens, which is exactly the input that proxy
+      cannot see. The state word is wrong, so everything honest built on
+      it (item 78's footer, the label, `auto=`) inherits the lie; the
+      helper may also keep pressing Service Back into a live attract.
+      **Suspect first:** `gs_past_alerts` / the frame-rate window in
+      gamestate.sh against batman's run log — the log from David's launch
+      is ~/gzwatch.log until the next run truncates it.
+      **Acceptance:** a batman GUI boot reaches "Game running" on the tab
+      (and the footer bar fills) within ~15 s of the attract screen
+      appearing; godzilla-family titles unchanged; the auto count clears.
+      — S2: misleads on every boot of the affected titles and can
+      over-press into attract; play itself works. D3: needs a run, shows
+      up when you look, instrument = the run log + gamestate.sh sourced
+      standalone.
+
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T
       FIX rather than as fixed — which is what it has actually been since the

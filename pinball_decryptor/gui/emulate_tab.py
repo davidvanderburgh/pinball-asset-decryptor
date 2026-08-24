@@ -150,7 +150,8 @@ _STATE_TEXT = {
 #: over the same screen.
 _ADVANCING_HINT = ("Skipping to attract mode on its own — it waits for the "
                    "node bus to finish bringing up, then presses Service Back "
-                   "once. Untick “Skip to attract mode” to do it by hand.")
+                   "once. Nothing to do here; scripted runs can set "
+                   "PAD_AUTO_ATTRACT=0 to drive the boot by hand.")
 
 #: Shown when the auto-advance helper ran out of presses and stopped.  It names
 #: the service menu because that is the failure this cannot see: the menu opens
@@ -1798,39 +1799,24 @@ class EmulatePanel:
                                      command=self._setup_recheck_now, width=14)
         self._check_btn.pack(side=tk.LEFT, padx=(6, 0))
 
-        # The "Sound" and "Skip to attract mode" tickboxes lived here until
-        # 2026-08-24 (David: sound is the volume slider's job now, and boots
-        # land in attract on their own since item 63) - both rig behaviours
-        # are simply ON; PAD_AUDIO=0 / PAD_AUTO_ATTRACT=0 remain as env
-        # switches for scripted runs that want them off.
-
-        # ITS OWN ROW, not crowded into btns above: btns already re-packs
-        # _docker_btn/_setup_btn at the end of ITS OWN pack order whenever
-        # docker/setup state changes (pack_forget() then a bare pack() with
-        # no before=/after= always appends), and Tk's packer UNMAPS a slave
-        # it cannot fit rather than shrinking it - so a wider btns row was
-        # putting those two buttons at real risk of losing their mapping on
-        # a narrower/CI-sized window. Confirmed live: adding these three
-        # widgets to btns itself made test_a_ready_docker_leaves_no_notice_
-        # behind and test_a_wsl_restart_re_probes_what_it_left_behind fail
-        # winfo_ismapped() twice running on macOS CI, on a commit that
-        # changed nothing else about either button.
-        audio_row = ttk.Frame(frame)
-        audio_row.pack(fill=tk.X, **pad)
-        # Item 56: the emulator's OWN volume to the PC speakers, not the
-        # game's in-game adjustment (that stays on the coin door, per title,
-        # untouched by this).  Deliberately LIVE, unlike Sound/Auto-attract
-        # above: those are read once when Start builds watch.sh's
-        # environment, so David asked for a knob that moves the sound
-        # WITHOUT a restart, which is the opposite of that shape — so these
-        # two are never added to the up/busy disable block in _apply.
-        ttk.Label(audio_row, text="Volume:").pack(side=tk.LEFT)
-        self._vol_scale = ttk.Scale(audio_row, from_=0, to=100, length=110,
+        # Item 56's volume trio, IN this row since 2026-08-24 (David: "move
+        # the volume controls to be to the right of check setup") — safe now
+        # where it once was not: the Sound / Skip-to-attract tickboxes that
+        # used to fill this exact stretch are gone (same day, same ask), so
+        # the row is no wider than it was, and the old CI-window unmapping
+        # of the re-packed _docker_btn/_setup_btn (which always append LAST
+        # and so lose first when the row overflows) stays history.  The
+        # knob is the emulator's OWN volume to the PC speakers, not the
+        # game's in-game adjustment (that stays on the coin door, per
+        # title) — deliberately LIVE, never in _apply's up/busy disable
+        # block, because moving the sound WITHOUT a restart is its point.
+        ttk.Label(btns, text="Volume:").pack(side=tk.LEFT, padx=(16, 0))
+        self._vol_scale = ttk.Scale(btns, from_=0, to=100, length=110,
                                     orient=tk.HORIZONTAL,
                                     variable=self._volume_var,
                                     command=self._on_volume_change)
         self._vol_scale.pack(side=tk.LEFT, padx=(4, 0))
-        self._mute_chk = ttk.Checkbutton(audio_row, text="Mute",
+        self._mute_chk = ttk.Checkbutton(btns, text="Mute",
                                          variable=self._mute_var,
                                          command=self._on_volume_change)
         self._mute_chk.pack(side=tk.LEFT, padx=(6, 0))
@@ -1855,16 +1841,22 @@ class EmulatePanel:
         for r, (key, label) in enumerate(rows):
             ttk.Label(grid, text=label, width=22, anchor=tk.W).grid(
                 row=r, column=0, sticky=tk.W, padx=8, pady=2)
-            v = ttk.Label(grid, text="—", anchor=tk.W)
-            v.grid(row=r, column=1, sticky=tk.W, padx=4, pady=2)
+            if key == "state":
+                # The state's value cell is a small frame, because the
+                # "Copying card: …" state carries the app's blue ⓘ right
+                # beside the words (David: "put that next to 'Copying
+                # card'") — the badge packs in while a copy narrates and
+                # unpacks after, so every other state shows plain text.
+                cell = ttk.Frame(grid)
+                cell.grid(row=r, column=1, sticky=tk.W, padx=4, pady=2)
+                v = ttk.Label(cell, text="—", anchor=tk.W)
+                v.pack(side=tk.LEFT)
+                self._copy_badge = self._info_badge(cell, _COPY_EXPLAIN)
+            else:
+                v = ttk.Label(grid, text="—", anchor=tk.W)
+                v.grid(row=r, column=1, sticky=tk.W, padx=4, pady=2)
             self._vals[key] = v
         grid.columnconfigure(1, weight=1)
-        # The "Copying card: …" state explains itself on hover.  The tip's
-        # text is set only while a copy narrates — _Tooltip shows nothing
-        # when its text is empty, so the same tip is silent for every other
-        # state (those are the hint line's job, via state_text).
-        self._copy_tip = _Tooltip(self._vals["state"], "", self._theme_fn,
-                                  place="side")
 
         self._hint = ttk.Label(frame, justify=tk.LEFT, wraplength=820,
                                foreground="#888", text="")
@@ -2734,7 +2726,7 @@ class EmulatePanel:
         "emulator is already running, the slot loads into it right away — "
         "a load takes about 10–15 seconds either way.")
 
-    def _states_badge(self, parent):
+    def _info_badge(self, parent, tip):
         """The app's round blue ⓘ badge, or a plain marker without the app.
 
         Same shape as scene_browser's ``_info``: the badge is the window's
@@ -2745,14 +2737,17 @@ class EmulatePanel:
         """
         if self._badge_fn is None:
             lbl = ttk.Label(parent, text="(i)", foreground="#2f80ed")
-            _Tooltip(lbl, self._STATES_TIP, self._theme_fn, place="side")
+            _Tooltip(lbl, tip, self._theme_fn, place="side")
             return lbl
         badge = self._badge_fn(parent, "i", "#2f80ed", "#5296f2",
-                               self._STATES_TIP, lambda: None, size=18,
+                               tip, lambda: None, size=18,
                                font=("Georgia", 10, "bold italic"),
                                tooltip_place="side")
         badge.bind("<Button-1>", lambda _e: badge.icon_tip.show(), add="+")
         return badge
+
+    def _states_badge(self, parent):
+        return self._info_badge(parent, self._STATES_TIP)
 
     def _build_states(self, frame, pad):
         """The save-states section: the slot manager, and what it costs.
@@ -4237,14 +4232,25 @@ class EmulatePanel:
         threading.Thread(target=run, daemon=True).start()
         self._schedule_poll()
 
+    def _copy_badge_show(self, show):
+        """Pack or unpack the ⓘ beside the state — idempotent, main loop
+        only (both callers are)."""
+        try:
+            mapped = bool(self._copy_badge.winfo_ismapped())
+            if show and not mapped:
+                self._copy_badge.pack(side=tk.LEFT, padx=(6, 0))
+            elif not show and mapped:
+                self._copy_badge.pack_forget()
+        except (AttributeError, tk.TclError):
+            pass
+
     def _push_copy(self, text, pct):
         """Main-loop half of a drain-thread copy line: the tab's state label
         plus the footer bar (item 78) - both Tk, neither touchable from the
-        drain itself.  The hint line and the state label's hover tip carry
-        the why/where/once explanation for as long as the copy narrates."""
+        drain itself.  The blue ⓘ beside the state carries the why/where/
+        once explanation for as long as the copy narrates."""
         self._set("state", text)
-        self._hint.configure(text=_COPY_EXPLAIN)
-        self._copy_tip.text = _COPY_EXPLAIN
+        self._copy_badge_show(True)
         if self._footer_cb is not None:
             try:
                 self._footer_cb("copy", pct, text)
@@ -4259,12 +4265,10 @@ class EmulatePanel:
             # deliberately not running yet — status.sh's honest "Not running"
             # would read as a hang, and the copy narration is the truth.
             # Except during a Stop, when "Stopping…" is.
-            if self._copying is not None and not self._stopping:
+            copying = self._copying is not None and not self._stopping
+            if copying:
                 label = self._copying
-                hint = _COPY_EXPLAIN
-                self._copy_tip.text = _COPY_EXPLAIN
-            else:
-                self._copy_tip.text = ""
+            self._copy_badge_show(copying)
             self._set("state", label)
             self._hint.configure(text=hint)
             # Item 78: the footer bar under the notebook mirrors the loading

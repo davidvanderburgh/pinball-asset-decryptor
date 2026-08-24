@@ -447,14 +447,14 @@ class SternManufacturer(Manufacturer):
         from .info import card_info
         return card_info(path)
 
-    def compare_images(self, path_a, path_b):
+    def compare_images(self, path_a, path_b, assets_a=None, assets_b=None):
         # Spike 2 cards only — a Whitestar MAME zip has no manifest/firmware
         # to diff, so refuse with a plain explanation instead of a stack.
         if path_a.lower().endswith(".zip") or path_b.lower().endswith(".zip"):
             return [("Error", [("Compare", "Whitestar ROM zips can't be "
                                 "compared — pick two Spike 2 card images.")])]
         from .compare import compare_cards
-        return compare_cards(path_a, path_b)
+        return compare_cards(path_a, path_b, assets_a, assets_b)
 
     def extract_report_file(self, image_path, ref, out_dir):
         from .compare import extract_ref

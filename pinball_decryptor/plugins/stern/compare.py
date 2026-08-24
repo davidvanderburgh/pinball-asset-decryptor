@@ -15,10 +15,13 @@ metadata walk plus small bounded reads, nothing extracted or decoded:
   ELFs with the same parsers the Defaults tab uses, then diffed by
   adjustment name / slot label (the stable keys across builds).
 
-Sounds packed inside ``image.bin`` can't be diffed one-by-one without an
-Extract (the per-sound layout needs the booted firmware), so the report
-gives the header's sound/fragment counts and whether the container's bytes
-changed at all.
+Sounds packed inside ``image.bin`` can't be diffed one-by-one off the cards
+alone (the per-sound layout needs the booted firmware), so from the cards the
+report gives the container header's sound/fragment counts and its size —
+never a verdict off its digest, which is repacked and re-keyed on every build
+and so always differs.  The sound-by-sound answer comes from the two cards'
+EXTRACT folders when the caller can find them; see :func:`_sound_rows` and
+:mod:`core.audio_compare`.
 
 Requested by a tester: compare two releases — or a modded card against its
 stock base — and get a complete added/modified/deleted summary per type.
@@ -313,12 +316,165 @@ def _score_rows(a_sc, b_sc):
 
 
 # ---------------------------------------------------------------------------
+# Sounds
+# ---------------------------------------------------------------------------
+
+def _container_size(files):
+    """Bytes of the packed-audio container per the manifest, or ``None``."""
+    if not files:
+        return None
+    for path in sorted(files):
+        if path.endswith("/image.bin"):
+            return files[path][0]
+    return None
+
+
+def disk_ref(side, path):
+    """A report row pointing at a file that is already on disk — one decoded
+    WAV in the user's own extract folder.
+
+    The other rows' refs name a file still inside a card image and are read
+    back out of it on demand (:func:`file_ref` / :func:`extract_ref`).  This
+    one is a path, so double-clicking a changed sound plays it straight out of
+    the extract instead of decoding it a second time."""
+    return {"side": side, "disk": os.path.abspath(path),
+            "name": os.path.basename(path)}
+
+
+def _snd_name(rel):
+    """A decoded sound's row label: its file name, without the ``audio/``."""
+    return rel.split("/", 1)[-1]
+
+
+def _extract_audio_rows(assets_a, assets_b):
+    """The per-sound diff rows, or ``None`` when the two extracts can't
+    supply one (with a row saying which of them was the problem)."""
+    from ...core import audio_compare
+
+    missing = [tag for tag, d in (("A", assets_a), ("B", assets_b)) if not d]
+    if missing:
+        return [("Per-sound diff",
+                 "no extract found for %s — click Extract Both, then Compare "
+                 "again and every changed sound is listed here"
+                 % ("either card" if len(missing) == 2
+                    else "image " + missing[0]))]
+
+    rows = [("Extract A", assets_a), ("Extract B", assets_b)]
+    diff = audio_compare.diff_audio(assets_a, assets_b)
+    if not diff["count_a"] or not diff["count_b"]:
+        silent = [tag for tag, n in (("A", diff["count_a"]),
+                                     ("B", diff["count_b"])) if not n]
+        rows.append((
+            "Per-sound diff",
+            "the extract for %s holds no decoded sounds — that Extract ran "
+            "with Audio switched off, so re-run it with Audio ticked"
+            % ("either card" if len(silent) == 2 else "image " + silent[0])))
+        return rows
+
+    rows.append(_count_delta("Decoded sounds", diff["count_a"],
+                             diff["count_b"]))
+    # "Unchanged", not "identical": a sound that is byte-identical but has
+    # been renumbered lands under Moved, and two rows both claiming to count
+    # the identical audio would read as a contradiction.
+    rows.append(("Unchanged",
+                 "%s of %s sounds are identical and still in the same slot"
+                 % (_num(diff["same"]), _num(diff["count_a"]))))
+    rows += _listed("Changed", diff["changed"],
+                    lambda pair: _snd_name(pair[1]) if
+                    _snd_name(pair[0]) == _snd_name(pair[1])
+                    else "%s (image A: %s)" % (_snd_name(pair[1]),
+                                               _snd_name(pair[0])),
+                    ref=lambda pair: disk_ref("B", os.path.join(assets_b,
+                                                                pair[1])))
+    # Same audio, new slot.  Kept separate from "Changed" because it is the
+    # ordinary consequence of a build inserting a sound, not a difference the
+    # user can hear — folding it in would drown the rows that matter.
+    moved_rows = _listed("Moved", diff["moved"],
+                         lambda pair: "%s  ->  %s" % (_snd_name(pair[0]),
+                                                      _snd_name(pair[1])),
+                         ref=lambda pair: disk_ref(
+                             "B", os.path.join(assets_b, pair[1])))
+    if moved_rows and len(diff["moved"]) * 2 > diff["count_a"]:
+        # Stern renumbers the whole sound directory on some builds (Led
+        # Zeppelin 1.21 -> 1.22 moves 545 of 549).  A bare "545:" over a dozen
+        # sample rows reads as a disaster; say what it is.
+        moved_rows[0] = ("Moved",
+                         "%s — this build renumbered the sound directory; "
+                         "the audio itself is unchanged"
+                         % _num(len(diff["moved"])))
+    rows += moved_rows
+    rows += _listed("Added", diff["added"], _snd_name,
+                    ref=lambda rel: disk_ref("B", os.path.join(assets_b, rel)))
+    rows += _listed("Removed", diff["removed"], _snd_name,
+                    ref=lambda rel: disk_ref("A", os.path.join(assets_a, rel)))
+    if not (diff["changed"] or diff["moved"] or diff["added"]
+            or diff["removed"]):
+        rows.append(("No changes", "every sound decodes identically on both "
+                                   "cards"))
+    return rows
+
+
+def _sound_rows(a, b, cont, a_files, b_files, assets_a, assets_b):
+    """The Sounds section: what the two cards say about their packed audio,
+    and — once both cards have been extracted — the sound-by-sound diff.
+
+    NO VERDICT IS READ OFF THE CONTAINER'S DIGEST.  ``image.bin`` is repacked
+    and re-keyed on every Stern build, so its stored MD5 differs between any
+    two releases whether or not one sound changed (Led Zeppelin 1.21 vs 1.22:
+    same 549 sounds, same container length, 2.4% of the body bytes in common).
+    The row used to call that "sounds were re-encoded or replaced" and send
+    the user off to extract both cards — which the tab's own Extract Both
+    button does, and which used to change nothing about what this section
+    said.  Now it changes everything: the extracts ARE the answer.
+    """
+    rows = [_count_delta("Sounds", a["counts"][1], b["counts"][1],
+                         unavailable="container header not readable on this "
+                                     "build"),
+            _count_delta("Sound fragments", a["counts"][0], b["counts"][0],
+                         unavailable="container header not readable on this "
+                                     "build")]
+    if cont and (cont["added"] or cont["deleted"]):
+        rows.append(("Audio container", "present on only one card"))
+    else:
+        size_a, size_b = _container_size(a_files), _container_size(b_files)
+        if size_a is not None or size_b is not None:
+            rows.append(("Audio container",
+                         "image.bin — %s" % (
+                             "%s (unchanged)" % human_size(size_a)
+                             if size_a == size_b
+                             else "%s -> %s" % (
+                                 human_size(size_a) if size_a is not None
+                                 else "?",
+                                 human_size(size_b) if size_b is not None
+                                 else "?"))))
+        if cont and cont["modified"]:
+            rows.append(("Container bytes",
+                         "differ — as they do between ANY two builds: Stern "
+                         "repacks and re-keys image.bin every time, so this "
+                         "says nothing about the sounds inside it"))
+        elif a_files is not None and b_files is not None:
+            # Matching digests DO settle it: same container bytes, same
+            # packed audio.  (The inequality is the meaningless direction.)
+            rows.append(("Container bytes",
+                         "identical — both cards carry the same packed "
+                         "audio, byte for byte"))
+    rows += _extract_audio_rows(assets_a, assets_b)
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # The report
 # ---------------------------------------------------------------------------
 
-def compare_cards(path_a, path_b):
+def compare_cards(path_a, path_b, assets_a=None, assets_b=None):
     """Image-Info-shaped sections describing what changed from card A to
-    card B: ``[(section_title, [(name, value), ...]), ...]``."""
+    card B: ``[(section_title, [(name, value), ...]), ...]``.
+
+    *assets_a* / *assets_b* are the two cards' extract folders when the caller
+    could find them (:func:`core.extract_source.find_extract_for`).  They are
+    what makes the Sounds section a real answer rather than an instruction —
+    see :func:`_sound_rows`.  Everything else in the report is read off the
+    cards themselves and never needs them."""
     try:
         a = _probe(path_a)
     except Exception as e:
@@ -386,23 +542,9 @@ def compare_cards(path_a, path_b):
                 buckets.setdefault(kind, {"added": [], "deleted": [],
                                           "modified": []})[status].append(p)
 
-    # Sounds: header counts + whether the container's bytes moved at all.
-    snd = [_count_delta("Sounds", a["counts"][1], b["counts"][1],
-                        unavailable="header not readable — run Extract"),
-           _count_delta("Sound fragments", a["counts"][0], b["counts"][0],
-                        unavailable="header not readable — run Extract")]
-    if buckets is not None:
-        cont = buckets.pop("container", None)
-        if cont and cont["modified"]:
-            snd.append(("Audio container",
-                        "image.bin changed — sounds were re-encoded or "
-                        "replaced (extract both cards to compare them "
-                        "one by one)"))
-        elif cont and (cont["added"] or cont["deleted"]):
-            snd.append(("Audio container", "present on only one card"))
-        else:
-            snd.append(("Audio container", "image.bin unchanged"))
-    sections.append(("Sounds", snd))
+    cont = buckets.pop("container", None) if buckets is not None else None
+    sections.append(("Sounds", _sound_rows(a, b, cont, a_files, b_files,
+                                           assets_a, assets_b)))
 
     if buckets is not None:
         def _bucket_section(title, kind):
@@ -518,7 +660,19 @@ def extract_ref(image_path, ref, out_dir):
 
     Nothing is written on failure — a zero-byte file the desktop then opens
     into an error dialog is the worst of both outcomes.
+
+    A ref carrying ``disk`` (:func:`disk_ref`) is already a file: the Sounds
+    section's rows point at decoded WAVs in the user's own extract folder.
+    Those are handed back untouched rather than copied to *out_dir* — the
+    sound has been decoded once already, and a temp duplicate would be a
+    second copy of the same audio for no gain.
     """
+    on_disk = (ref or {}).get("disk") or ""
+    if on_disk:
+        if os.path.isfile(on_disk):
+            return on_disk
+        raise FileNotFoundError(
+            "%s is no longer in that extract folder" % on_disk)
     path = (ref or {}).get("path") or ""
     if not path:
         raise FileNotFoundError("no file recorded for that row")

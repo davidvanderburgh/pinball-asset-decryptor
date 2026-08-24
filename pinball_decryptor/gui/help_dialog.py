@@ -1208,11 +1208,25 @@ HELP_CONTENT = {
          "with its size and a digest, so \"modified\" means Stern's own "
          "stored digest changed — comparing two multi-GB cards takes "
          "seconds, not a full read. A scene counts as modified when any "
-         "file in its folder changed. Sounds are packed inside image.bin "
-         "and can't be listed one by one here: the report shows the sound "
-         "and fragment counts and whether the audio container changed at "
-         "all — for a sound-by-sound diff, extract both cards and compare "
-         "the WAVs (the length-prefix naming option helps line them up)."),
+         "file in its folder changed. Sounds are the exception — see "
+         "\"Sounds\" below."),
+        ("Sounds",
+         "The sounds are packed inside one container file (image.bin) whose "
+         "per-sound layout only exists once a card has been extracted, so "
+         "from the cards alone the report can show the container's sound "
+         "and fragment counts and its size, and nothing more. It "
+         "deliberately does NOT judge the sounds by that container's "
+         "digest: Stern repacks and re-keys image.bin on every build, so "
+         "two releases carrying identical sounds still have completely "
+         "different container bytes.\n\n"
+         "For the real answer, press Extract Both and then Compare again. "
+         "Once both cards have been extracted the Sounds section lists the "
+         "sounds that changed, moved to a new slot, were added or were "
+         "removed — matched by content first, so one inserted sound doesn't "
+         "read as a thousand changed ones. Double-click a listed sound to "
+         "play it. The extracts are found by the source card each one "
+         "records, so it does not matter which naming options they were "
+         "made with or in what order."),
         ("Adjustments and high scores",
          "Both game firmwares are decoded with the same parsers the "
          "Defaults tab uses, then diffed: settings added or removed, "

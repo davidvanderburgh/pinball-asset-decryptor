@@ -13425,12 +13425,14 @@ class MainWindow:
         intro = ttk.Label(
             f, text="Compare two card images of the same game — two "
                     "releases, or a modded card against its stock base. "
-                    "Everything is read straight off the cards (no Extract): "
-                    "files are diffed by the cards' own validation digests, "
+                    "Files are diffed by the cards' own validation digests "
                     "and the adjustment / high-score defaults come from each "
-                    "card's game firmware. Double-click a listed file to open "
-                    "it — it is pulled off the card and handed to whatever "
-                    "you normally view or play it with.",
+                    "card's game firmware, so the report needs no Extract. "
+                    "The packed sounds are the exception: run Extract Both "
+                    "and compare again, and every changed sound is listed "
+                    "by name. Double-click a listed file to open it — it is "
+                    "pulled off the card and handed to whatever you normally "
+                    "view or play it with.",
             font=(_SANS_FONT, 9, "italic"), justify=tk.LEFT)
         intro.pack(anchor=tk.W, fill=tk.X, padx=10, pady=4)
         intro.bind("<Configure>", lambda e: intro.configure(
@@ -13471,7 +13473,9 @@ class MainWindow:
             "sub-folder per card, named after the card.\n\nThe report above "
             "diffs the cards' own digests, which is instant but cannot play "
             "you a sound or show you a scene. Two extracts can, and this "
-            "queues both without you re-picking anything.",
+            "queues both without you re-picking anything.\n\nWhen they "
+            "finish, press Compare again: the Sounds section then lists the "
+            "sounds that actually changed, and double-clicking one plays it.",
             lambda: self._current_theme)
         self._compare_copy_btn = ttk.Button(
             arow, text="Copy Report", command=self._compare_copy_report,
@@ -13532,6 +13536,38 @@ class MainWindow:
             except tk.TclError:
                 pass
 
+    def _compare_extract_roots(self, a, b):
+        """Where to look for the two cards' extract folders.
+
+        A card's packed audio can only be diffed sound-by-sound once both
+        cards have been extracted, so the report needs to FIND those extracts
+        — a tester ran Extract Both, pressed Compare, and got back the same
+        "extract both cards" sentence he had just acted on.  Each folder here
+        is checked itself and one level down (extract_source.find_extract_for),
+        which covers every place an extract normally lands:
+
+        * the parent folder Extract Both put the pair in;
+        * the Extract tab's own output folder, and its parent;
+        * the project folder the Replace/Write tabs are pointed at;
+        * the folder each card image itself sits in — cards are commonly kept
+          inside the project extracted from them.
+
+        Nothing is searched or guessed: the folders' own ``.extract_source``
+        sidecars have to name the picked card.
+        """
+        cands = [self.last_browse_dir("extract_both"),
+                 (self.extract_output_var.get() or "").strip(),
+                 (self.write_assets_var.get() or "").strip()]
+        cands += [os.path.dirname(os.path.abspath(p)) for p in (a, b) if p]
+        roots = []
+        for cand in cands:
+            if not cand:
+                continue
+            for d in (cand, os.path.dirname(cand)):
+                if d and os.path.isdir(d) and d not in roots:
+                    roots.append(d)
+        return roots
+
     def _compare_run(self):
         """Diff the two picked card images on a worker thread and render the
         report — the same thread + after()-poll + bump-counter shape as the
@@ -13560,9 +13596,17 @@ class MainWindow:
         seq = self._compare_seq
         holder = {}
 
+        roots = self._compare_extract_roots(a, b)
+
         def _worker():
+            from ..core import extract_source
             try:
-                holder["sections"] = mfr.compare_images(a, b) or []
+                # Resolved here, not on the Tk thread: it is a handful of
+                # listdirs + sidecar reads, and the roots can sit on a NAS.
+                holder["sections"] = mfr.compare_images(
+                    a, b,
+                    assets_a=extract_source.find_extract_for(a, roots),
+                    assets_b=extract_source.find_extract_for(b, roots)) or []
             except Exception as e:  # never leave the tab on "Comparing…"
                 holder["sections"] = [
                     ("Error", [("Could not compare", str(e))])]

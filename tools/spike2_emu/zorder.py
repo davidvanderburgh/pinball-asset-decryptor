@@ -68,11 +68,16 @@ EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 ROLES = (
     ("controls - spike 2 emulator", "CONTROLS"),
     ("- virtual playfield", "PLAYFIELD"),
+    # Item 83's villain vision window contains GAME2's needle but is a
+    # Windows-side Tk sibling of PLAYFIELD, owned by playfield.py - its own
+    # role BEFORE game2's row, or a buried-window verdict would blame it on
+    # padglhost's [display N] raise machinery, which cannot even see it.
+    ("[villain vision] - stern spike 2 emulator", "VILLAIN"),
     ("] - stern spike 2 emulator", "GAME2"),   # item 44: "<game> [display N]"
     ("- stern spike 2 emulator", "GAME"),
     ("pinball asset decryptor", "APP"),
 )
-EMU_ROLES = ("GAME", "GAME2", "CONTROLS", "PLAYFIELD")
+EMU_ROLES = ("GAME", "GAME2", "CONTROLS", "PLAYFIELD", "VILLAIN")
 
 
 def role_of(title):

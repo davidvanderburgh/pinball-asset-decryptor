@@ -5082,14 +5082,18 @@ These have each been violated at least once and each cost a run or a window:
       emulator window like the other separate-display games"): the panel
       is now its OWN WINDOW, not a strip in the playfield view.** LcdPanel
       builds a Toplevel titled `batman [villain vision] - Stern Spike 2
-      emulator` — deliberately inside item 44's title family, so
-      padwinpos's "game2" row persists its position like any second
-      display and screenrec's backbox default skips it (record it on
-      purpose with PAD_REC_TITLE="[villain vision]"). Close box HIDES it
-      (item 44's contract), ids keep tracking behind it. main() owns the
-      panel now, so BOTH view shapes get it — the "Schematic view only"
-      residual below is RESOLVED — and the cells show the art at native
-      240x180 (the strip halved it).
+      emulator` — inside item 44's title family so screenrec's backbox
+      default skips it (record it on purpose with
+      PAD_REC_TITLE="[villain vision]"). Close box HIDES it (item 44's
+      contract), ids keep tracking behind it. main() owns the panel now,
+      so BOTH view shapes get it — the "Schematic view only" residual
+      below is RESOLVED — and the cells show the art at native 240x180
+      (the strip halved it). Position persistence is NATIVE:
+      "villain_pos" beside "playfield_pos" in the state file, restored in
+      _build, recorded by save_state and at close. (The first cut of this
+      UPDATE credited padwinpos's "game2" row with persistence — FALSE,
+      caught by the adversarial review: padwinpos is a passive diagnostic
+      recorder, nothing restores from ~/.pad_windows_win.json.)
       **UPDATE 2 same day, David: "they should be animated (video like)
       scenes, right?" — THE TVS PLAY THE CLIPS NOW.** lcdart.py gained a
       second stage: a looping 10 fps GIF excerpt (≤15 s, palette pass,
@@ -5112,8 +5116,24 @@ These have each been violated at least once and each cost a run or a window:
       the game's own device vocabulary names the fixture "3 LCD INSERT"
       (with "LCD 320X240", "Node board LCD display number out of range") —
       one lcdnode, three screens multiplexed by display number, and the
-      live game-start frame set all three ids at once (54/928/106).** 8
-      real-Tk tests.
+      live game-start frame set all three ids at once (54/928/106).**
+      **UPDATE 3 same day: adversarial review (15-agent workflow, mutation
+      testing) confirmed 9 findings on the window conversion; all fixed.**
+      The real ones: position persistence was a FALSE CLAIM (see UPDATE 1's
+      correction — now implemented natively); the villain title matched
+      padwinpos's AND zorder's "game2" needles, so a stranded villain
+      window could steal the [display N] slot in diagnostics and an
+      item-22 buried-window verdict would blame padglhost raise machinery
+      that cannot see a Tk window (both tools now key "[villain vision]"
+      first — padwinpos "villain", zorder "VILLAIN" in EMU_ROLES); start()
+      rescheduled AFTER poll with no guard, so one uncaught exception
+      permanently killed the panel (now try/finally). Test-honesty holes
+      the review mutation-proved (deleting _asked, the WM_DELETE
+      registration, the drv-None guard, or the native-size draw each left
+      the suite green): all pinned — 12 real-Tk tests now, including a
+      close driven through the registered handler, a driverless first-boot
+      deferred-ask test, a position round-trip, a poll-chain-survives
+      test, and a role-disambiguation test.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

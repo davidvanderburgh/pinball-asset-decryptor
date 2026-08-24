@@ -3153,16 +3153,30 @@ def load_state():
         return {}
 
 
-def save_state(root):
-    """Remember where the window was, so it opens there next time.
+#: The live LcdPanel, set by main() - save_state() records its window's
+#: position alongside the root's without every call site having to know the
+#: panel exists. (The item-83 review caught the docstring PROMISING position
+#: persistence via padwinpos, which is a passive diagnostic recorder nothing
+#: restores from - this is the mechanism that actually delivers it.)
+LCD_PANEL = None
+
+
+def save_state(root, lcd=None):
+    """Remember where the windows were, so they open there next time.
 
     Position only, not size: the canvas is sized from the artwork and the
     screen, so restoring a stale WxH would letterbox or clip it after a
-    resolution change.
+    resolution change. The villain vision window rides along under its own
+    key whenever it exists - callers that don't know about it (the views'
+    death paths, bye()) get it through LCD_PANEL; the panel itself passes
+    `lcd` so its close box works without the global.
     """
     try:
         st = load_state()
         st["playfield_pos"] = [root.winfo_x(), root.winfo_y()]
+        p = lcd if lcd is not None else LCD_PANEL
+        if p is not None and p.win is not None:
+            st["villain_pos"] = [p.win.winfo_x(), p.win.winfo_y()]
         with open(STATE, "w") as f:
             json.dump(st, f, indent=1)
     except Exception:
@@ -3467,13 +3481,19 @@ class LcdPanel:
     its own desktop window (item 44's "<game> [display N] - Stern Spike 2
     emulator"), and these TVs ARE batman's second display, the game just
     drives them by id instead of by pixels. The title deliberately joins that
-    family's needle: padwinpos.py's "game2" row ("] - Stern Spike 2 emulator")
-    then persists its position like any second display, and screenrec.py's
-    backbox default skips it the same way (record it on purpose with
-    PAD_REC_TITLE="[villain vision]"). Closing it HIDES it for the run, which
-    is item 44's close behaviour too. Owning a window instead of a slot in a
-    view's layout is also what puts it on BOTH playfield shapes - Field and
-    Schematic - instead of only the one that had room for a strip.
+    family so screenrec.py's backbox default skips it like any second display
+    (record it on purpose with PAD_REC_TITLE="[villain vision]"); padwinpos
+    and zorder each key "[villain vision]" AHEAD of their generic "] -" game2
+    row, so this Tk window can never claim a padglhost display window's slot
+    in a diagnostic. Position persistence is NATIVE, not the needle's doing -
+    "villain_pos" in the same state file as the root's "playfield_pos",
+    restored in _build(), recorded by save_state() and on close (an earlier
+    docstring credited padwinpos with this; padwinpos is a passive recorder
+    nothing restores from - the item-83 review caught the false claim).
+    Closing it HIDES it for the run, which is item 44's close behaviour too.
+    Owning a window instead of a slot in a view's layout is also what puts it
+    on BOTH playfield shapes - Field and Schematic - instead of only the one
+    that had room for a strip.
 
     LAZY BY CONSTRUCTION: no window exists until the padlcd block's magic
     stamps, which only an lcdnode title's shim ever does - every other title
@@ -3511,9 +3531,15 @@ class LcdPanel:
 
     def start(self):
         """Self-paced off root.after - the panel belongs to no view's tick.
-        50 ms so the timer never beats against poll()'s own 0.1 s gate."""
-        self.poll()
-        self.root.after(50, self.start)
+        50 ms so the timer never beats against poll()'s own 0.1 s gate.
+        The reschedule is in a finally on purpose: poll() crossing a live
+        run can always meet a surprise (a torn read, a broken pipe under
+        run_script), and one uncaught exception must cost one tick, not the
+        whole panel for the rest of the run."""
+        try:
+            self.poll()
+        finally:
+            self.root.after(50, self.start)
 
     def _build(self):
         self.win = tk.Toplevel(self.root)
@@ -3522,6 +3548,9 @@ class LcdPanel:
         self.win.configure(bg="#111")
         self.win.resizable(False, False)
         self.win.protocol("WM_DELETE_WINDOW", self._hide)
+        pos = load_state().get("villain_pos")
+        if pos and _onscreen(self.win, *pos):
+            self.win.geometry("+%d+%d" % (pos[0], pos[1]))
         for _ in range(3):
             cv = tk.Canvas(self.win, width=self.CW, height=self.CH, bg="#000",
                            highlightthickness=1, highlightbackground="#333")
@@ -3531,7 +3560,10 @@ class LcdPanel:
     def _hide(self):
         # Item 44's contract for a second display's close box: hide, don't
         # die. The ids keep updating behind it, so nothing is stale if a
-        # future change re-shows it.
+        # future change re-shows it. Record the position FIRST - a close is
+        # the one deliberate placement signal that must survive even a run
+        # that later dies without reaching save_state.
+        save_state(self.root, self)
         self.win.withdraw()
 
     def poll(self):
@@ -4115,7 +4147,9 @@ def main():
     # whichever view shape the title happens to get. Lazy: no window until
     # the padlcd block stamps, which only an lcdnode title's shim ever does,
     # so every other title pays one 48-byte read per poll and shows nothing.
-    lcd = LcdPanel(root, GAME)
+    # Registered as LCD_PANEL so save_state() records its position.
+    global LCD_PANEL
+    lcd = LCD_PANEL = LcdPanel(root, GAME)
     lcd.start()
     # ARTWORK IF THE TITLE HAS IT, THE SWITCH LIST IF IT DOES NOT. Both are
     # real answers; which one applies is a property of the game, not of this

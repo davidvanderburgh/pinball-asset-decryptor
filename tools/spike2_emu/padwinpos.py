@@ -46,8 +46,14 @@ STATE = os.path.join(os.path.expanduser("~"), ".pad_windows_win.json")
 #: before "game" for the same reason - first-hit-wins per key, and the
 #: generic needle matches it too, so without this row the second window
 #: could silently claim the game window's slot.
+#: "villain" (item 83's "<game> [villain vision] - Stern Spike 2 emulator",
+#: a Windows-side Tk window) must be checked before "game2" - it contains
+#: game2's needle too, and without its own row a stranded villain window and
+#: a real [display N] window on screen together would make the game2 record
+#: alternate between them with Z-order.
 TRACK = (
     ("controls", "Controls - Spike 2 emulator"),
+    ("villain", "[villain vision] - Stern Spike 2 emulator"),
     ("game2", "] - Stern Spike 2 emulator"),
     ("game", "- Stern Spike 2 emulator"),
 )

@@ -66,6 +66,9 @@ def _panel(root, tmp, monkeypatch):
     import playfield
     block = os.path.join(tmp, "padlcd")
     monkeypatch.setattr(playfield, "LCD_PATH", block)
+    # The state file too: _build restores villain_pos from it and _hide
+    # writes it - the tests must never touch the user's real one.
+    monkeypatch.setattr(playfield, "STATE", os.path.join(tmp, "state.json"))
     p = playfield.LcdPanel(root, "batman")
     p._art = os.path.join(tmp, "lcd")
     p.drv = FakeDrv()
@@ -108,8 +111,12 @@ def test_stamped_block_builds_window_and_requests_art(tmp_path, monkeypatch):
         assert not any(p.have)
         asked = {c[2] for c in p.drv.calls if c[0] == "lcdart.py"}
         assert asked == {"54", "919", "928"}, p.drv.calls
-        # a second poll must NOT re-request the same ids
-        _poll(p)
+        # Later polls must NOT re-request the same ids. times=10 on purpose:
+        # it drives _polls across the %10 retry branch, so _show actually
+        # re-runs with the art still missing and only the _asked dedup holds
+        # the count at 3 - the review's mutation test proved a single extra
+        # poll never re-entered _show and pinned nothing.
+        _poll(p, times=10)
         assert len(p.drv.calls) == 3
     finally:
         root.destroy()
@@ -131,6 +138,13 @@ def test_art_landing_upgrades_the_placeholder(tmp_path, monkeypatch):
         _poll(p, times=10)                           # the ~1 Hz retry branch
         assert p.have[0] is True, "art landed but the cell never upgraded"
         assert p.imgs[0] is not None, "PhotoImage reference not kept"
+        # NATIVE SIZE is the headline of the own-window change and was
+        # unasserted - re-adding subsample(2,2) or shrinking the cells kept
+        # the suite green (review mutation test).
+        assert (p.imgs[0].width(), p.imgs[0].height()) == (240, 180), \
+            "art no longer drawn at native size"
+        assert int(p.cvs[0]["width"]) == playfield.LcdPanel.CW
+        assert int(p.cvs[0]["height"]) == playfield.LcdPanel.CH
     finally:
         root.destroy()
 
@@ -235,18 +249,112 @@ def test_id_change_resets_animation(tmp_path, monkeypatch):
 
 def test_close_hides_and_polling_survives(tmp_path, monkeypatch):
     """Item 44's close contract carried over: the close box WITHDRAWS the
-    window, the panel keeps polling behind it, and nothing resurrects it."""
+    window, the panel keeps polling behind it, and nothing resurrects it.
+    Driven through the REGISTERED WM_DELETE handler, not _hide() directly -
+    the review's mutation test deleted the protocol() registration and the
+    old direct call kept the suite green while a live close box would have
+    destroyed the Toplevel."""
     root = _root()
     try:
+        import json
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
         _write_block(block, [54])
         _poll(p)
         assert p.win.state() != "withdrawn"
-        p._hide()                                    # the WM_DELETE handler
+        cmd = p.win.protocol("WM_DELETE_WINDOW")
+        assert cmd, "close box has no registered handler - Tk's default " \
+                    "would DESTROY the window and kill the poll loop"
+        p.win.tk.eval(cmd)                           # a real close-box click
         assert p.win.state() == "withdrawn"
+        with open(playfield.STATE) as f:
+            assert "villain_pos" in json.load(f), \
+                "close did not record the window's position"
         _write_block(block, [3047])                  # ids move while hidden
         _poll(p)
         assert p.ids[0] == 3047, "hidden window stopped tracking ids"
         assert p.win.state() == "withdrawn", "an id change re-showed the window"
+    finally:
+        root.destroy()
+
+
+def test_first_boot_with_no_driver_defers_the_ask(tmp_path, monkeypatch):
+    """batman's FIRST boot polls before any view exists (main starts the
+    panel while the tables are still building), so drv is None while the
+    shim is already stamping ids. That must not crash the poll chain, must
+    not swallow the id into _asked, and the ask must go out on a retry once
+    the driver lands - the review's mutation test removed the None-guard
+    and the suite stayed green."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        p.drv = None                                 # pre-view boot state
+        _write_block(block, [54])
+        _poll(p, times=10)                           # crosses a retry tick
+        assert p.win is not None
+        assert 54 not in p._asked, "driverless ask was swallowed for good"
+        p.drv = FakeDrv()                            # the view arrives
+        _poll(p, times=10)                           # next retry tick
+        assert ("lcdart.py", "batman", "54") in p.drv.calls, \
+            "deferred ask never went out once the driver existed"
+    finally:
+        root.destroy()
+
+
+def test_position_persists_roundtrip(tmp_path, monkeypatch):
+    """The own-window promise the review caught as FALSE, now real: _build
+    restores villain_pos from the state file, save_state records it."""
+    root = _root()
+    try:
+        import json
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        with open(playfield.STATE, "w") as f:
+            json.dump({"villain_pos": [473, 291]}, f)
+        _write_block(block, [54])
+        _poll(p)
+        root.update()
+        assert abs(p.win.winfo_x() - 473) < 45 and \
+               abs(p.win.winfo_y() - 291) < 60, \
+            "saved position not restored (window at +%d+%d)" % (
+                p.win.winfo_x(), p.win.winfo_y())
+        playfield.save_state(root, p)
+        st = json.load(open(playfield.STATE))
+        assert "villain_pos" in st and "playfield_pos" in st
+    finally:
+        root.destroy()
+
+
+def test_window_roles_disambiguate_villain_from_game2():
+    """The villain window's title contains game2's needle in both window
+    diagnostics; each must classify it under its OWN key or a stranded
+    villain window steals the [display N] slot (review findings 2 and 3)."""
+    zorder = pytest.importorskip("zorder")
+    assert zorder.role_of(
+        "batman [villain vision] - Stern Spike 2 emulator") == "VILLAIN"
+    assert zorder.role_of(
+        "star_wars [display 2] - Stern Spike 2 emulator") == "GAME2"
+    padwinpos = pytest.importorskip("padwinpos")
+    keys = [k for k, _ in padwinpos.TRACK]
+    assert keys.index("villain") < keys.index("game2")
+
+
+def test_poll_chain_survives_an_exception(tmp_path, monkeypatch):
+    """start() reschedules in a finally: one bad poll (torn read, broken
+    pipe under run_script) costs one tick, not the panel for the run. The
+    review traced the pre-fix ordering - poll before reschedule, no guard -
+    to a permanently dead VILLAIN VISION on any single uncaught error."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+
+        def boom():
+            raise RuntimeError("torn read")
+
+        p.poll = boom
+        with pytest.raises(RuntimeError):
+            p.start()
+        pending = root.tk.eval("after info")
+        assert pending, "the poll chain did not re-arm past the exception"
+        for aid in pending.split():
+            root.after_cancel(aid)
     finally:
         root.destroy()

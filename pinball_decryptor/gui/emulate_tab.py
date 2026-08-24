@@ -202,6 +202,53 @@ def card_copy_progress(line):
     return "Copying card: %s / %s MB (%s%%)" % (done, total, pct)
 
 
+def parse_cache_list(text):
+    """Parse ``cardmount.sh --cache-list`` into ``(entries, disk)`` (item 77).
+
+    ``entries``: dicts of ``label / real_kb / apparent_kb / boot / src``,
+    sorted by real size descending — the what-is-eating-my-disk order the
+    dialog opens in.  ``disk``: ``(avail_kb, size_kb)`` or None.  Lines are
+    tab-separated with the source LAST because labels and source paths may
+    carry spaces.  Pure, like :func:`playfield_launch`, so the format is
+    testable without a WSL or a 7 GB card.
+    """
+    entries, disk = [], None
+    for line in (text or "").splitlines():
+        parts = line.split("\t")
+        if parts[0] == "entry" and len(parts) >= 6:
+            try:
+                entries.append({
+                    "label": parts[1],
+                    "real_kb": int(parts[2]),
+                    "apparent_kb": int(parts[3]),
+                    "boot": int(parts[4]),
+                    "src": "\t".join(parts[5:]),
+                })
+            except ValueError:
+                continue
+        elif parts[0] == "disk" and len(parts) >= 3:
+            try:
+                disk = (int(parts[1]), int(parts[2]))
+            except ValueError:
+                pass
+    entries.sort(key=lambda e: e["real_kb"], reverse=True)
+    return entries, disk
+
+
+def human_size(kb):
+    """KiB -> "6.3 GB" / "890 MB".  One decimal only where it earns it."""
+    if kb >= 1048576:
+        return "%.1f GB" % (kb / 1048576.0)
+    return "%d MB" % round(kb / 1024.0)
+
+
+def cache_boot_text(epoch):
+    """The Last-booted cell: "never" for 0 (no sidecar yet), else local time."""
+    if not epoch:
+        return "never"
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(epoch))
+
+
 def playfield_launch(line):
     """Parse a ``_PLAYFIELD_LAUNCH`` line into its fields, or None.
 
@@ -1476,6 +1523,14 @@ class EmulatePanel:
         #: entry's write-trace (which fires per keystroke) starts one copy per
         #: picked card, not one per character.
         self._precached = None
+        #: The Card cache manager window (item 77), while one is open, and
+        #: its widget handles.  One window, reused - a second click lifts it.
+        self._cache_win = None
+        self._cache_ui = None
+        #: Worker -> main-loop handoffs for the manager, same split as
+        #: _docker_result: a worker thread never touches Tk.
+        self._cache_result = None
+        self._cache_drop_done = False
         #: The virtual playfield window, ON THE MACHINES WHERE PAD HAS TO OPEN
         #: IT ITSELF (see _open_playfield).  Normally watch.sh launches it
         #: through WSL interop and this stays None; when interop is off it
@@ -3096,6 +3151,9 @@ class EmulatePanel:
         self._src_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(row, text="Browse…", width=10,
                    command=self._browse).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(row, text="Cache…", width=8,
+                   command=self._open_cache_manager).pack(
+            side=tk.LEFT, padx=(6, 0))
 
     def _browse(self):
         from tkinter import filedialog
@@ -3149,6 +3207,220 @@ class EmulatePanel:
                 self._log("[emulate] pre-cache failed to start: %s" % exc)
 
         threading.Thread(target=run, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # Card cache manager (item 77).  The local card cache was measured at
+    # 125 GB real - half the WSL disk - with nothing showing it and nothing
+    # pruning it.  This window is the showing; cardmount.sh's eviction is
+    # the pruning; deleting here is the manual override between the two.
+
+    def _open_cache_manager(self):
+        """Open (or lift) the Card cache window.
+
+        All rig I/O happens off the UI thread: the list is one
+        ``cardmount.sh --cache-list`` call, deletes are one
+        ``--cache-drop`` per selected card, and both marshal back through
+        the Tk main loop.  Rows are sorted biggest-first, because the
+        question this window answers is "what is eating my disk"."""
+        if not rig_available():
+            self._hint.configure(
+                text="No emulator rig on this machine — there is no card "
+                     "cache to manage.")
+            return
+        if self._cache_win is not None:
+            try:
+                if self._cache_win.winfo_exists():
+                    self._cache_win.lift()
+                    return
+            except tk.TclError:
+                pass
+        top = self._parent.winfo_toplevel()
+        win = tk.Toplevel(top)
+        self._cache_win = win
+        win.title("Card cache — Spike 2 emulator")
+        win.transient(top)
+        win.geometry("780x430")
+        head = ttk.Label(win, text="Reading the cache…", anchor="w")
+        head.pack(fill=tk.X, padx=10, pady=(10, 4))
+        body = ttk.Frame(win)
+        body.pack(fill=tk.BOTH, expand=True, padx=10)
+        cols = ("size", "booted", "src")
+        tree = ttk.Treeview(body, columns=cols, show="tree headings",
+                            selectmode="extended")
+        tree.heading("#0", text="Card")
+        tree.column("#0", width=250, anchor="w")
+        tree.heading("size", text="On disk")
+        tree.column("size", width=90, anchor="e")
+        tree.heading("booted", text="Last booted")
+        tree.column("booted", width=130, anchor="w")
+        tree.heading("src", text="Source image")
+        tree.column("src", width=270, anchor="w")
+        sb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.LEFT, fill=tk.Y)
+        foot = ttk.Frame(win)
+        foot.pack(fill=tk.X, padx=10, pady=8)
+        hint = ttk.Label(
+            foot, anchor="w",
+            text="Deleting frees the space now; the card re-copies on its "
+                 "next boot.")
+        btn_close = ttk.Button(foot, text="Close", command=win.destroy)
+        btn_refresh = ttk.Button(foot, text="Refresh", state=tk.DISABLED,
+                                 command=self._cache_reload)
+        btn_delete = ttk.Button(foot, text="Delete selected",
+                                state=tk.DISABLED,
+                                command=self._cache_delete)
+        btn_close.pack(side=tk.RIGHT)
+        btn_refresh.pack(side=tk.RIGHT, padx=(0, 6))
+        btn_delete.pack(side=tk.RIGHT, padx=(0, 6))
+        hint.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._cache_ui = {"win": win, "head": head, "tree": tree,
+                          "hint": hint, "delete": btn_delete,
+                          "refresh": btn_refresh, "entries": {}}
+        # Delete only lights up over a selection - an enabled button beside
+        # an empty selection is an invitation to delete by accident.
+        tree.bind("<<TreeviewSelect>>", lambda _e: self._cache_selection())
+        self._cache_reload()
+
+    def _cache_alive(self):
+        ui = self._cache_ui
+        if not ui:
+            return None
+        try:
+            if ui["win"].winfo_exists():
+                return ui
+        except tk.TclError:
+            pass
+        return None
+
+    def _cache_selection(self):
+        ui = self._cache_alive()
+        if not ui:
+            return
+        state = tk.NORMAL if ui["tree"].selection() else tk.DISABLED
+        ui["delete"].configure(state=state)
+
+    def _cache_reload(self):
+        ui = self._cache_alive()
+        if not ui:
+            return
+        ui["head"].configure(text="Reading the cache…")
+        ui["refresh"].configure(state=tk.DISABLED)
+        ui["delete"].configure(state=tk.DISABLED)
+        self._cache_result = None
+
+        def run():
+            try:
+                out = subprocess.run(
+                    rig_cmd("cardmount.sh", "--cache-list"),
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    timeout=30, creationflags=_CREATE_FLAGS)
+                text = out.stdout.decode("utf-8", "replace")
+            except Exception:                            # noqa: BLE001
+                text = ""
+            # A plain attribute set - the worker must not touch Tk, and an
+            # after() scheduled FROM a worker is silently dropped whenever
+            # the main thread is not inside mainloop (the test harness pumps
+            # update() instead). Same split as _docker_drain, same reason.
+            self._cache_result = parse_cache_list(text)
+
+        threading.Thread(target=run, daemon=True).start()
+        self._cache_drain()
+
+    def _cache_drain(self):
+        """Main-loop poller that applies the list worker's answer."""
+        ui = self._cache_alive()
+        if not ui:
+            return
+        if self._cache_result is None:
+            try:
+                self._timer().after(100, self._cache_drain)
+            except (tk.TclError, RuntimeError):
+                pass
+            return
+        entries, disk = self._cache_result
+        self._cache_result = None
+        tree = ui["tree"]
+        tree.delete(*tree.get_children())
+        ui["entries"] = {e["label"]: e for e in entries}
+        for e in entries:
+            tree.insert(
+                "", tk.END, iid=e["label"], text=e["label"],
+                values=(human_size(e["real_kb"]),
+                        cache_boot_text(e["boot"]),
+                        e["src"]))
+        total = sum(e["real_kb"] for e in entries)
+        if disk:
+            ui["head"].configure(text=(
+                "%d cached cards — %s on disk · %s free of %s (WSL disk)"
+                % (len(entries), human_size(total),
+                   human_size(disk[0]), human_size(disk[1]))))
+        elif entries:
+            ui["head"].configure(text="%d cached cards — %s on disk"
+                                 % (len(entries), human_size(total)))
+        else:
+            ui["head"].configure(
+                text="The card cache is empty — cards land here on their "
+                     "first boot.")
+        ui["refresh"].configure(state=tk.NORMAL)
+
+    def _cache_delete(self):
+        ui = self._cache_alive()
+        if not ui:
+            return
+        labels = list(ui["tree"].selection())
+        if not labels:
+            return
+        freed = sum(ui["entries"].get(l, {}).get("real_kb", 0)
+                    for l in labels)
+        if not messagebox.askyesno(
+                "Delete cached cards",
+                "Delete %d cached card%s, freeing about %s?\n\n"
+                "Each re-copies on its next boot — nothing is lost."
+                % (len(labels), "" if len(labels) == 1 else "s",
+                   human_size(freed)),
+                parent=ui["win"]):
+            return
+        ui["delete"].configure(state=tk.DISABLED)
+        ui["refresh"].configure(state=tk.DISABLED)
+        ui["hint"].configure(text="Deleting…")
+        self._cache_drop_done = False
+
+        def run():
+            for label in labels:
+                try:
+                    out = subprocess.run(
+                        rig_cmd("cardmount.sh", "--cache-drop", label),
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        timeout=30, creationflags=_CREATE_FLAGS)
+                    for line in out.stdout.decode(
+                            "utf-8", "replace").splitlines():
+                        self._log("[emulate] " + line)
+                except Exception as exc:                 # noqa: BLE001
+                    self._log("[emulate] cache drop %s failed: %s"
+                              % (label, exc))
+            self._cache_drop_done = True     # plain attr; Tk stays untouched
+
+        threading.Thread(target=run, daemon=True).start()
+        self._cache_drop_drain()
+
+    def _cache_drop_drain(self):
+        """Main-loop poller for the delete worker; ends in a reload."""
+        ui = self._cache_alive()
+        if not ui:
+            return
+        if not self._cache_drop_done:
+            try:
+                self._timer().after(100, self._cache_drop_drain)
+            except (tk.TclError, RuntimeError):
+                pass
+            return
+        self._cache_drop_done = False
+        ui["hint"].configure(
+            text="Deleting frees the space now; the card re-copies on its "
+                 "next boot.")
+        self._cache_reload()
 
     def _source_env(self):
         """The environment for watch.sh, or None with a reason already shown.

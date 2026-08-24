@@ -2254,6 +2254,93 @@ def test_ordinary_card_lines_are_not_copy_progress():
         assert emulate_tab.card_copy_progress(line) is None
 
 
+# ----------------------------------------------------------------------
+# Item 77: the Card cache manager.  The list format is cardmount.sh's
+# --cache-list — tab separated, source LAST, because labels and source
+# paths are entitled to spaces ("Heisei Custom Image Premium V1" is real).
+# ----------------------------------------------------------------------
+
+_CACHE_LIST = (
+    "entry\talpha\t3072\t7168\t1787000000\t/mnt/d/cards/alpha.raw\n"
+    "entry\tbeta card\t5242880\t7761920\t0\t/mnt/c/spaced dir/beta card.raw\n"
+    "entry\tgamma\t2048\t2048\t1786000000\t\n"
+    "disk\t29355388\t263114392\n")
+
+
+def test_cache_list_parses_and_sorts_biggest_first():
+    entries, disk = emulate_tab.parse_cache_list(_CACHE_LIST)
+    assert [e["label"] for e in entries] == ["beta card", "alpha", "gamma"]
+    assert entries[0]["real_kb"] == 5242880
+    assert entries[0]["src"] == "/mnt/c/spaced dir/beta card.raw"
+    # boot 0 means no sidecar yet — rendered as "never", never as 1970.
+    assert entries[0]["boot"] == 0
+    assert disk == (29355388, 263114392)
+
+
+def test_cache_list_survives_garbage_and_emptiness():
+    assert emulate_tab.parse_cache_list("") == ([], None)
+    entries, disk = emulate_tab.parse_cache_list(
+        "noise\nentry\tbad\tNaN\t1\t2\tx\ndisk\ta\tb\n" + _CACHE_LIST)
+    assert len(entries) == 3 and disk is not None
+
+
+def test_cache_sizes_and_boot_render_for_humans():
+    assert emulate_tab.human_size(5242880) == "5.0 GB"
+    assert emulate_tab.human_size(2048) == "2 MB"
+    assert emulate_tab.cache_boot_text(0) == "never"
+    assert emulate_tab.cache_boot_text(1787000000).startswith("20")
+
+
+def test_cache_manager_lists_and_drops(tmp_path, monkeypatch):
+    """The dialog end to end against a canned rig: rows land biggest-first,
+    Delete confirms and shells one --cache-drop per selected label, then
+    reloads.  All rig calls are captured — nothing reaches a real WSL."""
+    import time as _time
+    root, panel = _panel(tmp_path)
+    panel._on_destroy(None)
+    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
+    calls = []
+
+    def fake_run(cmd, **_kw):
+        calls.append(cmd)
+        text = _CACHE_LIST if "--cache-list" in cmd else "[card] dropped\n"
+        return SimpleNamespace(stdout=text.encode())
+
+    monkeypatch.setattr(emulate_tab.subprocess, "run", fake_run)
+    monkeypatch.setattr(emulate_tab.messagebox, "askyesno",
+                        lambda *a, **k: True)
+    try:
+        panel._open_cache_manager()
+        tree = panel._cache_ui["tree"]
+        deadline = _time.time() + 5
+        while not tree.get_children() and _time.time() < deadline:
+            root.update()
+        assert list(tree.get_children()) == ["beta card", "alpha", "gamma"]
+        assert "5.0 GB" in panel._cache_ui["head"].cget("text")
+        # A second open LIFTS the same window instead of stacking another.
+        win = panel._cache_win
+        panel._open_cache_manager()
+        assert panel._cache_win is win
+        # Drop the spaced-label entry.
+        tree.selection_set("beta card")
+        root.update()
+        panel._cache_delete()
+        deadline = _time.time() + 5
+        while not any("--cache-drop" in c for c in calls) \
+                and _time.time() < deadline:
+            root.update()
+        drops = [c for c in calls if "--cache-drop" in c]
+        assert len(drops) == 1 and drops[0][-1] == "beta card"
+        # ...and the reload after the drop asked for a fresh list.
+        deadline = _time.time() + 5
+        while sum("--cache-list" in c for c in calls) < 2 \
+                and _time.time() < deadline:
+            root.update()
+        assert sum("--cache-list" in c for c in calls) >= 2
+    finally:
+        root.destroy()
+
+
 def test_the_interpreter_is_never_the_frozen_app_itself(monkeypatch):
     """sys.executable is the answer on the Windows build (the app runs on the
     Python bundled beside it) and a TRAP in a frozen one, where it is PAD.exe

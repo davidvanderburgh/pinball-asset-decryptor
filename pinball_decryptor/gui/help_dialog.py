@@ -926,6 +926,17 @@ HELP_CONTENT = {
          "tabs does not change what the emulator plays until you build a card "
          "and pick it here. The path is remembered per project, so it comes "
          "back on the next launch without another Browse."),
+        ("First boots copy the card — and Cache… shows where that space went",
+         "The first boot of a card copies it to a local cache so every "
+         "later boot starts in seconds instead of minutes. That copy is "
+         "narrated in the status line (\"Copying card: …\") and starts in "
+         "the background the moment you pick a card, so it is often already "
+         "done by the time you press Start. Cached copies add up — the "
+         "Cache… button beside Browse lists every cached card with its real "
+         "size on disk and when it last booted, and lets you delete any of "
+         "them. Deleting is always safe: the card just re-copies on its "
+         "next boot. When disk space runs low, the cache also cleans "
+         "itself, dropping the cards you have not booted for the longest."),
         ("Waiting at Tech Alerts is not a fault",
          "The game boots to its Tech Alerts screen and waits there for an "
          "operator, exactly like the real machine. Press a switch in the game "

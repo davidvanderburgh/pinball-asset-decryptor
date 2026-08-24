@@ -125,6 +125,48 @@ other_copier() {   # <own-copy-path>
     return 1
 }
 
+# ITEM 77: never start a copy the disk cannot hold - the cache was measured
+# at 125 GB real (half the WSL disk) with 29 GB free and NOTHING pruning it.
+# Frees space by evicting the least-recently-BOOTED entries first (the .boot
+# sidecar; a missing one falls back to the copy's own mtime, which makes
+# never-booted strays and pre-item-77 entries the first to go). Never evicts
+# the label being copied, a mounted label, or one whose copier is live.
+# `need` uses the image's APPARENT size - conservative, since sparse lands
+# smaller. Returns 1 when even eviction cannot make room; the boot then runs
+# off the original and nothing half-lands. PAD_CACHE_KEEP_FREE_GB (default 8)
+# is the floor the rest of the WSL disk keeps.
+cache_make_room() {   # <img> <own-copy-path>
+    local need keep free f vlabel vboot victim oldest
+    need=$(( $(stat -c %s "$1" 2>/dev/null || echo 0) / 1024 ))
+    keep=$(( ${PAD_CACHE_KEEP_FREE_GB:-8} * 1048576 ))
+    while :; do
+        free=$(df -k --output=avail "$CACHE" 2>/dev/null | tail -1 | tr -d " ")
+        [ -n "$free" ] || return 0             # df unreadable: do not guess
+        [ $(( free - need )) -ge "$keep" ] && return 0
+        victim=""; oldest=0
+        for f in "$CACHE"/*.raw; do
+            [ -e "$f" ] || break
+            [ "$f" = "$2" ] && continue
+            vlabel=$(basename "$f" .raw)
+            mountpoint -q "$CARDS/$vlabel" 2>/dev/null && continue
+            copier_alive "$CACHE/$vlabel.pid" "$f" && continue
+            vboot=$(stat -c %Y "$CACHE/$vlabel.boot" 2>/dev/null \
+                    || stat -c %Y "$f" 2>/dev/null) || continue
+            if [ -z "$victim" ] || [ "$vboot" -lt "$oldest" ]; then
+                victim="$vlabel"; oldest="$vboot"
+            fi
+        done
+        if [ -z "$victim" ]; then
+            echo "[card] disk too full to cache ($(( free / 1048576 )) GB free, want $(( (need + keep) / 1048576 )) GB) and nothing evictable - running off the original" >&2
+            return 1
+        fi
+        echo "[card] evicting cached $victim (least recently booted) to make room" >&2
+        rm -f "$CACHE/$victim.raw" "$CACHE/$victim.raw.partial" \
+              "$CACHE/$victim.src" "$CACHE/$victim.log" \
+              "$CACHE/$victim.boot" "$CACHE/$victim.pid"
+    done
+}
+
 # ITEM 74: wait for the detached copier, narrating progress so the minutes are
 # visible - one newline-terminated line every 2 s, because the GUI's drain
 # thread and the run log both read LINES (dd's own \r progress never surfaces
@@ -180,6 +222,11 @@ cache_pick() {
     [ "${PAD_CARD_PRECOPY:-1}" = 0 ] && mode=async
     if cache_valid "$img" "$copy" "$stamp"; then
         echo "[card] using local cache $copy" >&2
+        # Last-boot clock for the cache manager (item 77): atime is useless
+        # here (relatime, plus whole-tree scans touch everything), so a BOOT
+        # stamps a sidecar. Sync only - a --precache hit is not a boot and
+        # must not freshen the entry against LRU eviction.
+        [ "$mode" = sync ] && touch "$CACHE/$label.boot" 2>/dev/null
         echo "$copy"; return
     fi
     mkdir -p "$CACHE"
@@ -200,6 +247,9 @@ cache_pick() {
                 echo "$img"; return
             fi
             echo "[card] WARNING: $other is copying too - both copies will crawl on one disk" >&2
+        fi
+        if ! cache_make_room "$img" "$copy"; then
+            echo "$img"; return
         fi
         echo "[card] caching $(basename "$img") to the WSL disk in the background" >&2
         echo "[card]   (first run only; next boot of this card is native speed)" >&2
@@ -249,6 +299,7 @@ cache_pick() {
     if [ "$mode" = sync ]; then
         if cache_wait "$img" "$copy" "$stamp" "$pidf"; then
             echo "[card] local cache ready - booting from it" >&2
+            touch "$CACHE/$label.boot" 2>/dev/null
             echo "$copy"; return
         fi
         echo "[card] cache not usable - booting from the original" >&2
@@ -312,8 +363,37 @@ title_dir() {
     return 1
 }
 
+# ITEM 77: cache-manager queries. No image argument and no mount - these are
+# what the Emulate tab's Card cache dialog shells. Tab-separated so a label
+# or source path may carry spaces (the source is LAST for the same reason).
+if [ "${1:-}" = "--cache-list" ]; then
+    # entry <TAB> label <TAB> real_kb <TAB> apparent_kb <TAB> boot_epoch <TAB> source
+    for f in "$CACHE"/*.raw; do
+        [ -e "$f" ] || break
+        l=$(basename "$f" .raw)
+        rk=$(du -k "$f" 2>/dev/null | cut -f1)
+        ak=$(( $(stat -c %s "$f" 2>/dev/null || echo 0) / 1024 ))
+        b=$(stat -c %Y "$CACHE/$l.boot" 2>/dev/null || echo 0)
+        s=$(cat "$CACHE/$l.src" 2>/dev/null); s=${s% * *}
+        printf 'entry\t%s\t%s\t%s\t%s\t%s\n' "$l" "${rk:-0}" "$ak" "$b" "$s"
+    done
+    df -k --output=avail,size "$CACHE" 2>/dev/null | tail -1 \
+        | awk '{printf "disk\t%s\t%s\n", $1, $2}'
+    exit 0
+fi
+if [ "${1:-}" = "--cache-drop" ]; then
+    l="${2:-}"; [ -n "$l" ] || die "usage: cardmount.sh --cache-drop <label>"
+    c="$CACHE/$l.raw"
+    mountpoint -q "$CARDS/$l" 2>/dev/null && die "$l is mounted - not dropping"
+    copier_alive "$CACHE/$l.pid" "$c" && die "$l is being copied - not dropping"
+    rm -f "$c" "$c.partial" "$CACHE/$l.src" "$CACHE/$l.log" \
+          "$CACHE/$l.boot" "$CACHE/$l.pid"
+    echo "[card] dropped cached $l"
+    exit 0
+fi
+
 IMG=${1:-}
-[ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--umount|--precache]"
+[ -n "$IMG" ] || die "usage: cardmount.sh <card.raw> [--umount|--precache] | --cache-list | --cache-drop <label>"
 [ -f "$IMG" ] || die "no image at $IMG"
 LABEL=$(basename "$IMG"); LABEL=${LABEL%%.Release*}; LABEL=${LABEL%%.raw}
 MNT="$CARDS/$LABEL"

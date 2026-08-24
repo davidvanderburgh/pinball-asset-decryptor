@@ -3449,13 +3449,16 @@ class LedGrid(LedRing):
 class LcdPanel:
     """VILLAIN VISION - the lcdnode's LCD inserts, in their OWN window.
 
-    batman's node 24 drives three 320x240 playfield TVs (item 83). Nothing
-    crosses the bus but DISPLAY IDS - padlcd.h carries the frame shape and the
-    measured evidence - and the id is the asset number in the card's
-    villain-TV store, so this window shows, per insert, the FIRST FRAME of the
-    asset the game named. The art is extracted LAZILY by lcdart.py into
-    <tables>/<game>/lcd/<id>.png the first time an id is seen (3,069 assets up
-    front would be minutes of mktables for art most runs never show); until it
+    batman's node 24 drives three 320x240 playfield TVs - the ELF's own name
+    for the fixture is "3 LCD INSERT" (item 83). Nothing crosses the bus but
+    DISPLAY IDS - padlcd.h carries the frame shape and the measured evidence -
+    and the id is the asset number in the card's villain-TV store, so each
+    cell PLAYS the clip the game named: a looping 10 fps GIF excerpt, advanced
+    one frame per poll so encode rate = display rate. The art is extracted
+    LAZILY by lcdart.py into <tables>/<game>/lcd/<id>.{png,gif} the first time
+    an id is seen (3,069 assets up front would be minutes of mktables for art
+    most runs never show), cheap-first: the still paints the moment it lands,
+    the motion takes over when the encode finishes behind it. Until either
     lands the cell says "TV <id>", which is honest - the id is live data off
     the wire, the art is a cache filling in behind it.
 
@@ -3490,9 +3493,17 @@ class LcdPanel:
         self.drv = None             # assigned once the view's SwitchDriver exists
         self.win = None
         self.cvs = []
+        self.items = [None, None, None]     # persistent canvas image items
         self.imgs = [None, None, None]
         self.ids = [None, None, None]
         self.have = [False, False, False]
+        #: Per-cell animation state, or None while only the still exists:
+        #: {"gif": path, "i": next frame, "frames": [PhotoImage], "done": bool}.
+        #: Frames decode LAZILY, one per poll - the first pass through a clip
+        #: is the decode pass, every later loop is cache hits - and the whole
+        #: list drops on id change, so memory holds at most 3 active clips
+        #: (<=150 frames each, lcdart.py's 15 s cap).
+        self.anim = [None, None, None]
         self._asked = set()
         self._next = 0.0
         self._polls = 0
@@ -3544,10 +3555,32 @@ class LcdPanel:
                 self._show(k, ids[k])
             elif not self.have[k] and self._polls % 10 == 0:
                 self._show(k, ids[k])   # ~1 Hz retry while the art extracts
+        self._animate()                 # one frame per poll = 10 fps
+
+    def _draw(self, k, img):
+        """One persistent image item per cell, reconfigured per frame - a
+        delete/create pair per animation frame would churn canvas ids at
+        10 Hz for nothing."""
+        self.imgs[k] = img              # keep the reference: a PhotoImage
+        if self.items[k] is None:       # nobody holds goes blank
+            self.cvs[k].delete("all")
+            self.items[k] = self.cvs[k].create_image(
+                self.CW // 2, self.CH // 2, image=img)
+        else:
+            self.cvs[k].itemconfig(self.items[k], image=img)
 
     def _show(self, k, i):
-        cv = self.cvs[k]
-        cx, cy = self.CW // 2, self.CH // 2
+        # Ask lcdart.py for whatever this id is missing, ONCE per id per
+        # session. Checked against BOTH artifacts: a cache from before the
+        # GIF stage existed has the still but not the motion, and the old
+        # png-only test here silently left such an id frozen for ever.
+        if i and i not in self._asked and self.drv is not None and not (
+                os.path.isfile(os.path.join(self._art, "%d.png" % i))
+                and os.path.isfile(os.path.join(self._art, "%d.gif" % i))):
+            self._asked.add(i)
+            self.drv.run_script("lcdart.py", self.game, str(i))
+        if self.ids[k] != i:
+            self.anim[k] = None         # new id: the old clip's frames drop
         png = os.path.join(self._art, "%d.png" % i)
         if i and os.path.isfile(png):
             try:
@@ -3555,19 +3588,49 @@ class LcdPanel:
             except tk.TclError:
                 img = None
             if img is not None:
-                cv.delete("all")
-                self.imgs[k] = img          # keep the reference: a PhotoImage
-                cv.create_image(cx, cy, image=img)   # nobody holds goes blank
+                self._draw(k, img)
                 self.ids[k], self.have[k] = i, True
                 return
         if self.ids[k] != i:                # placeholder, once per id change
+            cv = self.cvs[k]
             cv.delete("all")
-            cv.create_text(cx, cy, text=("TV %d" % i) if i else "—",
+            self.items[k] = None
+            cv.create_text(self.CW // 2, self.CH // 2,
+                           text=("TV %d" % i) if i else "—",
                            fill="#888", font=("Consolas", 9))
         self.ids[k], self.have[k] = i, not i    # id 0 = nothing to fetch
-        if i and i not in self._asked and self.drv is not None:
-            self._asked.add(i)
-            self.drv.run_script("lcdart.py", self.game, str(i))
+
+    def _animate(self):
+        """Advance every animating cell one frame. The GIF is encoded at
+        10 fps by lcdart.py and this runs once per 10 Hz poll, so encode
+        rate = display rate by construction."""
+        for k in range(3):
+            i, a = self.ids[k], self.anim[k]
+            if not i or not self.have[k]:
+                continue
+            if a is None:
+                gif = os.path.join(self._art, "%d.gif" % i)
+                if not os.path.isfile(gif):
+                    continue            # still-only until the encode lands
+                a = self.anim[k] = {"gif": gif, "i": 0,
+                                    "frames": [], "done": False}
+            if a["done"] and not a["frames"]:
+                continue                # unreadable clip: stay on the still
+            idx = a["i"]
+            if idx >= len(a["frames"]) and a["done"]:
+                idx = a["i"] = 0        # wrap: the clip loops
+            if idx < len(a["frames"]):
+                frame = a["frames"][idx]
+            else:
+                try:
+                    frame = tk.PhotoImage(file=a["gif"],
+                                          format="gif -index %d" % idx)
+                    a["frames"].append(frame)
+                except tk.TclError:     # first index past the end
+                    a["done"] = True
+                    continue            # wrap on the next tick
+            self._draw(k, frame)
+            a["i"] = idx + 1
 
 
 class Schematic(StateOps):

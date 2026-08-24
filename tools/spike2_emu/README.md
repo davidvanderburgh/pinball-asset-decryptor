@@ -141,7 +141,7 @@ still come from running it.
 | metallica_spike | ✅ live, 106 | ✅ metallica_playfield…png (item 57 fix) | ✅ 502/664 inside, 0 outside (item 57 fix) | n/a | 2026-08-19 |
 | aerosmith_le | ✅ static (swelf.py), live-verified | — no device table shipped | — | n/a | 2026-08-19 |
 | avengers_infinity_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
-| batman | ✅ static (swelf.py), live-verified | — | — | ✅ VILLAIN VISION window: node 24's 3 LCD TVs by display id, own `[villain vision]` window (items 82/83) | 2026-08-24 |
+| batman | ✅ static (swelf.py), live-verified | — | — | ✅ VILLAIN VISION window: node 24's "3 LCD INSERT" by display id, own `[villain vision]` window, clips PLAY (looping 10 fps) (items 82/83) | 2026-08-24 |
 | foo_fighters_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
 | guardians_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
 | iron_maiden_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |

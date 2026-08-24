@@ -153,6 +153,86 @@ def test_id_change_redraws_and_id_zero_is_idle(tmp_path, monkeypatch):
         root.destroy()
 
 
+def _write_png(art_dir, name):
+    import tkinter as tk
+    os.makedirs(art_dir, exist_ok=True)
+    img = tk.PhotoImage(width=240, height=180)
+    img.write(os.path.join(art_dir, name), format="png")
+
+
+def _write_gif(art_dir, name, colors):
+    """A real multi-frame GIF - PIL authors it, Tk plays it, exactly the
+    hand-off lcdart.py's ffmpeg stage performs."""
+    Image = pytest.importorskip("PIL.Image")
+    os.makedirs(art_dir, exist_ok=True)
+    frames = [Image.new("RGB", (240, 180), c) for c in colors]
+    frames[0].save(os.path.join(art_dir, name), save_all=True,
+                   append_images=frames[1:], loop=0, duration=100)
+
+
+def test_cached_still_still_asks_for_motion(tmp_path, monkeypatch):
+    """The stale-cache upgrade path: an id whose PNG predates the GIF stage
+    must STILL ask lcdart.py once - the old png-only test here left every
+    pre-motion cache frozen for ever."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_png(p._art, "54.png")                 # cached still, no gif
+        _write_block(block, [54])
+        _poll(p)
+        assert p.have[0] is True, "cached still did not paint"
+        assert ("lcdart.py", "batman", "54") in p.drv.calls, \
+            "png-cached id never asked for its motion"
+    finally:
+        root.destroy()
+
+
+def test_gif_landing_animates_and_wraps(tmp_path, monkeypatch):
+    """The motion contract: once <id>.gif lands, each poll advances one
+    frame, frames cache as they decode, and the clip loops at its end."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_png(p._art, "54.png")
+        _write_block(block, [54])
+        _poll(p)
+        assert p.anim[0] is None, "animation started with no gif on disk"
+        _write_gif(p._art, "54.gif", ["red", "green", "blue"])
+        seen = []
+        for _ in range(7):                          # 3 frames + wrap + reuse
+            _poll(p)
+            seen.append(p.imgs[0])
+        a = p.anim[0]
+        assert a is not None, "gif landed but the cell never animated"
+        assert len(a["frames"]) == 3, "lazy decode cached %d frames" % \
+            len(a["frames"])
+        assert a["done"] is True, "clip end never detected"
+        assert len({id(s) for s in seen}) == 3, \
+            "7 polls drew %d distinct frames, not the 3-frame loop" % \
+            len({id(s) for s in seen})
+        assert seen[0] is not seen[1], "the drawn frame never advanced"
+    finally:
+        root.destroy()
+
+
+def test_id_change_resets_animation(tmp_path, monkeypatch):
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_png(p._art, "54.png")
+        _write_gif(p._art, "54.gif", ["red", "green"])
+        _write_block(block, [54])
+        _poll(p, times=3)
+        assert p.anim[0] is not None
+        _write_png(p._art, "919.png")               # still-only successor
+        _write_block(block, [919])
+        _poll(p)
+        assert p.anim[0] is None, "old clip's frames survived the id change"
+        assert p.ids[0] == 919 and p.have[0] is True
+    finally:
+        root.destroy()
+
+
 def test_close_hides_and_polling_survives(tmp_path, monkeypatch):
     """Item 44's close contract carried over: the close box WITHDRAWS the
     window, the panel keeps polling behind it, and nothing resurrects it."""

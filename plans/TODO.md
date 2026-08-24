@@ -5090,6 +5090,30 @@ These have each been violated at least once and each cost a run or a window:
       panel now, so BOTH view shapes get it — the "Schematic view only"
       residual below is RESOLVED — and the cells show the art at native
       240x180 (the strip halved it).
+      **UPDATE 2 same day, David: "they should be animated (video like)
+      scenes, right?" — THE TVS PLAY THE CLIPS NOW.** lcdart.py gained a
+      second stage: a looping 10 fps GIF excerpt (≤15 s, palette pass,
+      atomic .tmp+rename so the panel can never read a half-written clip),
+      still-first so the PNG paints while the GIF encodes. The panel
+      advances one frame per 10 Hz poll (encode rate = display rate, no
+      timer math), decodes frames LAZILY one per tick (first loop is the
+      decode pass, later loops are cache hits), drops a clip's frames on id
+      change (memory ≤3 active clips), and asks lcdart for ids whose cache
+      predates the GIF stage (the old png-only check left those frozen
+      forever). **The trap found on the way: ffmpeg's GIF encoder
+      delta-encodes by default and Tk's `gif -index N` decodes frames
+      STANDALONE, never compositing — the first extraction played as
+      speckle over black. `-gifflags -offsetting-transdiff` (full frames)
+      fixed it; the lcdart comment carries the why.** Verified against the
+      real card store: 54/928/106 re-extracted, 20 polls = 20
+      pixel-distinct captures, short clip 54 wrapped its loop
+      (C:/tmp/item83_motion.gif). The "stills not video" residual below is
+      RESOLVED. **Why 3 displays, David's question, answered from the ELF:
+      the game's own device vocabulary names the fixture "3 LCD INSERT"
+      (with "LCD 320X240", "Node board LCD display number out of range") —
+      one lcdnode, three screens multiplexed by display number, and the
+      live game-start frame set all three ids at once (54/928/106).** 8
+      real-Tk tests.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —
@@ -5118,13 +5142,13 @@ These have each been violated at least once and each cost a run or a window:
       lazily (~200 ms, once); playfield.py LcdPanel — its own lazy
       Toplevel on first magic stamp (see UPDATE above), 10 Hz
       reopen-reads, "TV <id>" placeholder until art lands, PhotoImage
-      reference kept. 5 real-Tk regression tests
+      reference kept. 8 real-Tk regression tests
       (tests/test_spike2_playfield_lcd.py) green.
-      **Honest residuals, none blocking:** stills not video (first frame
-      of the named clip; playing the H.264 loops in Tk needs a decode
-      pipeline — file it if David wants motion); the `137.asset`
+      **Honest residuals, none blocking:** the `137.asset`
       store number is a batman constant with a comment — a second lcdnode
-      title is the cue to derive it per title.
+      title is the cue to derive it per title. (The "stills not video" and
+      "Schematic view only" residuals were both resolved by the two
+      UPDATEs above.)
       *(Split out of item 82 on 2026-08-24, which fixed the board's
       identity/registration so the game now ENGAGES it — this is the
       capability half: actually showing the villain content David asked

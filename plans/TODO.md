@@ -4395,7 +4395,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **74. A boot that is copying the card shows NOTHING about the copy —
       minutes of "Startup In Progress" with no hint that a ~7 GB dd is
-      running, so every copying boot reads as a hang.** `S3 D3`
+      running, so every copying boot reads as a hang.** `S3 D3` ← WORKING ON
       *(Filed 2026-08-23 alongside item 34's widening: David read three
       copying boots in one session as "first-time startup took an
       excessively long time", and item 34's original godzilla sighting

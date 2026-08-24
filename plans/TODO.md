@@ -1904,7 +1904,7 @@ These have each been violated at least once and each cost a run or a window:
       it off D1.
 
 - [ ] **34. Booting the same card from a different path re-copies the whole
-      image, so "first run only" slowness comes back.** `S2 D2`
+      image, so "first run only" slowness comes back.** `S2 D2` ← WORKING ON
       **Observed 2026-08-09 (David's godzilla_pro session):** "Startup In
       Progress" for ~3 min — first frame at 177 s against the ~15 s a cached
       boot takes — with input laggy while the copy competed with the boot's own

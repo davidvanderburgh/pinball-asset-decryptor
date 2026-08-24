@@ -4869,9 +4869,21 @@ These have each been violated at least once and each cost a run or a window:
         consumed 2.3–5.7 s after serve vs 58 ms healthy; awaiting David's
         description of the real machine's behaviour. Needs an
         instrumented boot once the rig is free — see item 82.
+      **★ batman UPDATE, 2026-08-24 (item 82's pass, rig handed over):
+      the boot faults are FIXED and regression-proven** — the red
+      LOCATING screen, the board-24 alert mechanism (it is "VILLAIN
+      VISION", batman's playfield LCD, whose identity our tables
+      dropped), the failed-update walk, and a bus-wide re-probe storm
+      (attract 72s → 20s; boots reach attract unattended). What remains
+      on batman: cosmetic Tech-Alerts menu rows (no bus reply can clear
+      them — game-side config field, one instrumented dump left, item
+      82 at 90%) and the Villain Vision RENDERER (new capability, item
+      83). **NOTE: the fixes live on item/82 — David's main-checkout
+      app re-derives batman's tables with MAIN's code every run, so HIS
+      batman boots keep the old behavior until /finish.**
       **Resume:** next title alphabetically is whatever comes after
       batman in David's own run. Wait for his report before touching
-      anything; item 82 holds batman's open work.
+      anything; items 82/83 hold batman's open work.
       **NOTE for later titles: the 24-title fleet nvram fix (item 62) means
       NO title should show the validation banner from here on — if one
       does, that is a NEW, live validation failure, not the stale-grade

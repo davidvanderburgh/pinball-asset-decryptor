@@ -164,3 +164,21 @@ def test_the_action_row_stays_one_fact_as_it_grows():
         label, script, arg = entry
         assert label and script.endswith(".py"), entry
         assert arg is None or isinstance(arg, str), entry
+
+
+def test_a_machine_with_no_tables_still_opens_the_window():
+    """CI is the machine that has no prepared card, and for three releases it
+    was the only one that saw this: `gameinfo.table_dir()` answers None when no
+    title has ever been built here, item 73 made `set_rows()` consult the
+    switch list on EVERY window, and the join died before the window existed.
+    Every reader underneath is already silent about a file that is not there,
+    so the table-less machine must get the same empty answer, not a TypeError.
+    """
+    import playfield
+    saved = playfield.TDIR
+    playfield.TDIR = None
+    try:
+        assert playfield.load_switch_list() == []
+        assert playfield.load_coils() == []
+    finally:
+        playfield.TDIR = saved

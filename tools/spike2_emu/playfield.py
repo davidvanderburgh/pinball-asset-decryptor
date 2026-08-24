@@ -715,7 +715,7 @@ def load_switches():
     """
     rows = [dict(id=int(p[0]), node=int(p[1]), bit=int(p[2]),
                  name=" ".join(p[3:-2]), x=int(p[-2]), y=int(p[-1]))
-            for p in _rows(os.path.join(TDIR, "switch_xy.txt"), 6)]
+            for p in _rows(os.path.join(TDIR or "", "switch_xy.txt"), 6)]
     if rows:
         return rows
     live = {r["name"].strip().upper(): r for r in load_switch_list()
@@ -894,7 +894,7 @@ def load_coils():
     read `h` as the group for a whole release and every coil tooltip said
     "group 20 index 6".
     """
-    return [c for c in coilmap.load(os.path.join(TDIR, "device_xy.txt"))
+    return [c for c in coilmap.load(os.path.join(TDIR or "", "device_xy.txt"))
             if LAYOUT_IMAGE and c.get("image") == LAYOUT_IMAGE]
 
 
@@ -910,6 +910,12 @@ def load_switch_list():
     THE PARSE ITSELF IS IN trough.py, because swshow.py needs the same file and
     cannot import this module (no tkinter inside WSL). One parser, two callers.
     """
+    if not TDIR:
+        # No table dir at all: no card has been prepared on this machine
+        # (a bare CI runner is the honest case).  Every reader below is
+        # already silent about a MISSING file; only the join minded, and
+        # item 73 made this call unconditional, so it minded on import.
+        return []
     return trough.load_list(os.path.join(TDIR, "switch_list.txt"))
 
 

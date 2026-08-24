@@ -141,9 +141,10 @@ def test_auto_advance_giving_up_is_not_shown_as_ordinary_waiting():
                               "auto_result": "ok"})
     assert label == "At Tech Alerts"
     assert "press a switch" in hint.lower()
-    # ...and while the helper is actually pressing, the label says MOVING.
+    # ...and while the helper is actually on the job, the label names the
+    # node-bus work, matching the footer chip.
     label, _ = state_text({"state": "techalerts", "auto": "1"})
-    assert "passing" in label.lower()
+    assert "node boards" in label.lower()
 
 
 def test_unknown_state_falls_back_to_the_raw_word():

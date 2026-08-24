@@ -4534,6 +4534,33 @@ These have each been violated at least once and each cost a run or a window:
       path exists and is proven — plus one confirming boot of a pre-cached
       card.
 
+- [ ] **77. The card cache is unmanaged: 125 GB real across 25 entries on a
+      251 GB WSL disk at 89%, nothing prunes it, and version updates orphan
+      old entries forever.** `S2 D2` ← WORKING ON
+      *(Filed 2026-08-23 late, folded onto item/74's BRANCH at David's ask —
+      "fold it in here and do it now. make a nice GUI for it. I'm going to
+      bed" — after measuring the cache at half the WSL disk with 29 GB
+      free. Includes the pytest isolation leak found the same hour: the
+      suite writes 16-byte cards into the LIVE ~/cardcache because tests
+      never isolate the rig home.)*
+      Scope: (a) last-boot tracking — cardmount touches a `.boot` sidecar
+      per cache hit, because atime proved useless (every entry read today);
+      (b) eviction at copy time — when free space would drop below
+      PAD_CACHE_KEEP_FREE_GB (default 8), evict least-recently-booted
+      entries (never the one being copied, never a mounted or copying
+      label) until the new card fits, else skip caching with a warning;
+      (c) `--cache-list` / `--cache-drop <label>` modes for the GUI;
+      (d) a Card cache manager dialog on the Emulate tab: entries with
+      real size and last-booted, totals + disk free, delete selected;
+      (e) tests stop touching the live cache.
+      **Acceptance:** the dialog lists the real cache with sizes/dates and
+      deletes an entry end to end; a forced-low-space desk test evicts
+      oldest-booted first and skips uncachable copies; the test suite
+      leaves ~/cardcache byte-identical.
+      — S2 on the numbers: 29 GB free means a handful of new cards away
+      from a full WSL disk, which fails copies and worse. D2: desk work,
+      the copy path is proven, one dialog; no emulator run needed.
+
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T
       FIX rather than as fixed — which is what it has actually been since the

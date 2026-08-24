@@ -5188,6 +5188,53 @@ These have each been violated at least once and each cost a run or a window:
       makes the flag a no-op and the test vacuous — that trap was found
       while writing it), plus a stale-gif sweep test. 21 tests green;
       re-recorded live off the real cache, colour clean.
+      **UPDATE 6 same day — THE PROTOCOL WAS MIS-DECODED, and David's "why
+      is the villain display showing 3 images?" is what exposed it.** He
+      asked because two of the three cells sat empty on a live attract.
+      Reading the ring off his running game showed 327 id-frames since
+      boot, ALL addressed to what v1 called display 0 — so I disassembled
+      the game's own frame builders (agent pass over `game.elf`). The
+      finding, with addresses in padlcd.h: **there is exactly ONE
+      addressable display.** `lcd_init` (0x37dcf0) reads the device-LCD
+      table at 0x717e94 (entry 1 = "VILLAIN VISION", display number 0)
+      and bounds it against the fixture table at 0x717ed4 whose DISPLAY
+      COUNT is 1; all 299 LCD call sites pass the same device, so no code
+      path can emit a second display selector. The three physical TVs are
+      fed from one logical display by the node board. **And the "game
+      start sets all three inserts to 54/928/106" result — screenshotted,
+      eyeball-"verified", written into this item — was one PLAY-RANGE
+      command read as three ids: 54 is the range's first asset, 928 its
+      last, and 106 is a frame-PERIOD code (table 0x5c9340) meaning 12
+      fps.** An asset id can never be one of eight fixed values; that was
+      checkable and I did not check it.
+      **What the wire actually is** (padlcd.h now carries the full table):
+      selector = `0x98|display`, and the payload shape is disambiguated by
+      LENGTH — ilen 4 `[mode]` (1 loop / 2 one-shot, which is what the
+      constant `02 d8` frames were, NOT a "commit marker"), ilen 8
+      `[0][u32 asset]` (the asset is a **u32**, not u16), ilen 14
+      `[flags][u32 first][u32 last][u16 rate]`. Also real and previously
+      DROPPED by the `start >= 4` gate: `0x80|d` brightness/fade (132 call
+      sites) and `0x90` status poll, which wants a **12-byte reply**.
+      **FIXED:** padlcd.h + hwshim rewritten to v2 — one display, u32
+      assets, length-dispatched decode, fps decoded from the period table,
+      brightness/fade captured, and EVERY cmd-f2 selector ringed whether
+      understood or not (v1 ringed only frames it already believed in,
+      which is exactly how the mis-parse survived a live capture holding
+      the evidence against it). The window is ONE screen with a caption
+      naming what is on the wire (`asset 1736 · one-shot`, `range 54-928 @
+      12 fps · loop`); a range draws its FIRST asset and says it is a
+      range, because what the board does with first..last@rate —
+      playlist, flipbook, random pick — is NOT decoded, and inventing one
+      is how the three-screen error happened. 15 panel tests (v2 block,
+      plus a range-command test that fails if the old three-id reading
+      ever returns).
+      **OPEN, with evidence, worth its own item:** the game only clears a
+      command's pending bit on a reply (0x37e504) and we never answer, so
+      attract re-sending the same asset every 250 ms is probably OUR
+      fault; worse, `lcd_play_range`'s 27 call sites block until a field
+      only the 12-byte 0x90 poll reply fills. Answering that poll
+      plausibly may be what makes the display advance like the real
+      machine.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

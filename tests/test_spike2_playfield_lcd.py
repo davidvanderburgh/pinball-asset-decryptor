@@ -1,27 +1,33 @@
 """LcdPanel: the VILLAIN VISION window draws what the padlcd block names.
 
-Queue item 83. batman's lcdnode drives three playfield TVs by DISPLAY ID;
-the shim publishes the ids into dump/padlcd and the panel maps id ->
-<tables>/<game>/lcd/<id>.png, extracting art lazily. Since David's
-2026-08-24 consistency ask the panel is its OWN Toplevel window - the same
-shape as item 44's second-display windows - not a strip inside a view. The
-faults these guard against: a window that builds on titles with no lcdnode
-(every title would grow a stray black window), a placeholder that never
-upgrades when the art lands (the lazy extraction would be invisible), an id
-change that keeps showing the previous villain (stale cache reference), and
-a close box that kills the window instead of hiding it (item 44's contract).
+Queue item 83. batman's lcdnode drives the "3 LCD INSERT" fixture; the shim
+decodes the game's play commands into dump/padlcd and the panel maps the
+named asset -> <tables>/<game>/lcd/<id>.{png,webp}, extracting art lazily.
+
+★ THE BLOCK IS v2 AND SO ARE THESE TESTS. v1 believed the wire addressed
+three displays; disassembly of the game's frame builders says there is ONE
+(padlcd.h has the addresses), and the "three ids" it drew at game start
+were one play-range command - first asset, last asset, frame-rate code -
+read as three. So the panel is one screen, and the fault these tests exist
+to catch first is any return of per-cell state.
+
+The other faults guarded here: a window that builds on titles with no
+lcdnode (every title would grow a stray black window), a placeholder that
+never upgrades when the art lands (the lazy extraction would be invisible),
+an asset change that keeps showing the previous clip (stale cache
+reference), a close box that kills the window instead of hiding it (item
+44's contract), and a range command drawn as though it named one clip.
 
 REAL Tk, like the hit-test and action-row tests: what is under test is
 Toplevel construction, the WM_DELETE protocol, and PhotoImage lifetime -
 the keep-a-reference rule is exactly the thing a stub Tk cannot see. The
 padlcd block is a real temp file written with struct.pack, because the
-offsets (magic 0, id[4] at 16) are hard-coded on both sides and a drifting
-reader should fail HERE, not on a live run.
+offsets are hard-coded on both sides and a drifting reader should fail
+HERE, not on a live run.
 """
 import os
 import struct
 import sys
-import types
 
 import pytest
 
@@ -46,10 +52,11 @@ def _root():
     return root
 
 
-def _write_block(path, ids, magic=MAGIC):
-    d = struct.pack("<4I", magic, 1, 1, 1)
-    d += struct.pack("<4I", *(list(ids) + [0] * (4 - len(ids))))
-    d += b"\x00" * (48 - len(d))
+def _write_block(path, asset=0, first=0, last=0, rate=0, mode=0, magic=MAGIC):
+    """The v2 page: magic, version, gen, decoded, then the one display's
+    state (asset, first, last, rate, mode, bright, fade, ms)."""
+    d = struct.pack("<12I", magic, 2, 1, 1,
+                    asset, first, last, rate, mode, 0, 0, 0)
     with open(path, "wb") as f:
         f.write(d + b"\x00" * (4096 - len(d)))
 
@@ -81,92 +88,6 @@ def _poll(p, times=1):
         p.poll()
 
 
-def test_no_lcdnode_title_never_builds(tmp_path, monkeypatch):
-    """An unstamped (or absent) block must build NOTHING - this is what keeps
-    every non-batman title free of a stray black window."""
-    root = _root()
-    try:
-        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
-        _poll(p)                                    # file absent
-        assert p.win is None
-        _write_block(block, [54], magic=0)          # present but unstamped
-        _poll(p)
-        assert p.win is None
-    finally:
-        root.destroy()
-
-
-def test_stamped_block_builds_window_and_requests_art(tmp_path, monkeypatch):
-    root = _root()
-    try:
-        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
-        _write_block(block, [54, 919, 928])
-        _poll(p)
-        assert p.win is not None, "magic stamped but no window"
-        assert "villain vision" in p.win.title()
-        # The title must land in padwinpos's "game2" family so the window's
-        # position persists like any item 44 second display.
-        assert "] - Stern Spike 2 emulator" in p.win.title()
-        assert p.ids[:3] == [54, 919, 928]
-        assert not any(p.have)
-        asked = {c[2] for c in p.drv.calls if c[0] == "lcdart.py"}
-        assert asked == {"54", "919", "928"}, p.drv.calls
-        # Later polls must NOT re-request the same ids. times=10 on purpose:
-        # it drives _polls across the %10 retry branch, so _show actually
-        # re-runs with the art still missing and only the _asked dedup holds
-        # the count at 3 - the review's mutation test proved a single extra
-        # poll never re-entered _show and pinned nothing.
-        _poll(p, times=10)
-        assert len(p.drv.calls) == 3
-    finally:
-        root.destroy()
-
-
-def test_art_landing_upgrades_the_placeholder(tmp_path, monkeypatch):
-    """The lazy extraction's whole contract: the cell retries and swaps to
-    the image once <art>/<id>.png exists, keeping a PhotoImage reference."""
-    root = _root()
-    try:
-        import tkinter as tk
-        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
-        _write_block(block, [54])
-        _poll(p)
-        assert p.have[0] is False
-        os.makedirs(p._art)
-        img = tk.PhotoImage(width=240, height=180)   # a real 240x180 PNG
-        img.write(os.path.join(p._art, "54.png"), format="png")
-        _poll(p, times=10)                           # the ~1 Hz retry branch
-        assert p.have[0] is True, "art landed but the cell never upgraded"
-        assert p.imgs[0] is not None, "PhotoImage reference not kept"
-        # NATIVE SIZE is the headline of the own-window change and was
-        # unasserted - re-adding subsample(2,2) or shrinking the cells kept
-        # the suite green (review mutation test).
-        assert (p.imgs[0].width(), p.imgs[0].height()) == (240, 180), \
-            "art no longer drawn at native size"
-        assert int(p.cvs[0]["width"]) == playfield.LcdPanel.CW
-        assert int(p.cvs[0]["height"]) == playfield.LcdPanel.CH
-    finally:
-        root.destroy()
-
-
-def test_id_change_redraws_and_id_zero_is_idle(tmp_path, monkeypatch):
-    root = _root()
-    try:
-        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
-        _write_block(block, [54])
-        _poll(p)
-        _write_block(block, [3047])                  # villain captured
-        _poll(p)
-        assert p.ids[0] == 3047
-        assert ("lcdart.py", "batman", "3047") in p.drv.calls
-        _write_block(block, [0])                     # idle: nothing to fetch
-        _poll(p)
-        assert p.ids[0] == 0
-        assert not any(c[2] == "0" for c in p.drv.calls)
-    finally:
-        root.destroy()
-
-
 def _write_png(art_dir, name):
     import tkinter as tk
     os.makedirs(art_dir, exist_ok=True)
@@ -188,88 +109,260 @@ def _write_clip(art_dir, name, colors):
                    lossless=True)
 
 
+def test_no_lcdnode_title_never_builds(tmp_path, monkeypatch):
+    """An unstamped (or absent) block must build NOTHING - this is what keeps
+    every non-batman title free of a stray black window."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _poll(p)                                    # file absent
+        assert p.win is None
+        _write_block(block, asset=54, magic=0)      # present but unstamped
+        _poll(p)
+        assert p.win is None
+    finally:
+        root.destroy()
+
+
+def test_stamped_block_builds_window_and_requests_art(tmp_path, monkeypatch):
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_block(block, asset=1736, mode=2)
+        _poll(p)
+        assert p.win is not None, "magic stamped but no window"
+        assert "villain vision" in p.win.title()
+        # The title must land in the item 44 second-display family so
+        # screenrec skips it and the window diagnostics name it correctly.
+        assert "] - Stern Spike 2 emulator" in p.win.title()
+        assert p.id == 1736
+        assert p.have is False
+        assert [c[2] for c in p.drv.calls] == ["1736"], p.drv.calls
+        # ONE screen: nothing may reintroduce per-cell state.
+        assert not isinstance(p.id, (list, tuple))
+        # Later polls must NOT re-request. times=10 on purpose: it drives
+        # _polls across the %10 retry branch, so _show actually re-runs with
+        # the art still missing and only the backoff holds the count at 1.
+        _poll(p, times=10)
+        assert len(p.drv.calls) == 1
+    finally:
+        root.destroy()
+
+
+def test_range_command_draws_first_asset_and_says_so(tmp_path, monkeypatch):
+    """THE v1 MIS-DECODE, pinned. `play 54..928 @ 12 fps` is ONE command for
+    ONE display; v1 read it as three display ids and drew 54, 928 and 106
+    (a frame-rate code) side by side. The panel must draw the range's FIRST
+    asset, ask for that asset only, and caption the range rather than
+    pretending it named one clip."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_block(block, first=54, last=928, rate=12, mode=1)
+        _poll(p)
+        assert p.id == 54, "range not drawn as its first asset"
+        assert [c[2] for c in p.drv.calls] == ["54"], \
+            "range endpoints/rate fetched as if they were assets: %r" \
+            % p.drv.calls
+        cap = p.cap["text"]
+        assert "54-928" in cap and "12 fps" in cap and "loop" in cap, cap
+        # ... and a single-asset command afterwards must clear the range.
+        _write_block(block, asset=3004, mode=2)
+        _poll(p)
+        assert p.id == 3004
+        assert "range" not in p.cap["text"] and "3004" in p.cap["text"]
+        assert "one-shot" in p.cap["text"]
+    finally:
+        root.destroy()
+
+
+def test_art_landing_upgrades_the_placeholder(tmp_path, monkeypatch):
+    """The lazy extraction's whole contract: the cell retries and swaps to
+    the image once <art>/<id>.png exists, keeping a PhotoImage reference."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_block(block, asset=54)
+        _poll(p)
+        assert p.have is False
+        _write_png(p._art, "54.png")
+        _poll(p, times=10)                           # the ~1 Hz retry branch
+        assert p.have is True, "art landed but the cell never upgraded"
+        assert p.img is not None, "PhotoImage reference not kept"
+        # NATIVE SIZE was the headline of the own-window change and was
+        # unasserted - re-adding subsample(2,2) or shrinking the canvas kept
+        # the suite green (review mutation test).
+        assert (p.img.width(), p.img.height()) == (240, 180), \
+            "art no longer drawn at native size"
+        assert int(p.cv["width"]) == playfield.LcdPanel.CW
+        assert int(p.cv["height"]) == playfield.LcdPanel.CH
+    finally:
+        root.destroy()
+
+
+def test_asset_change_redraws_and_zero_is_idle(tmp_path, monkeypatch):
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_block(block, asset=54)
+        _poll(p)
+        _write_block(block, asset=3047)              # villain captured
+        _poll(p)
+        assert p.id == 3047
+        assert ("lcdart.py", "batman", "3047") in p.drv.calls
+        _write_block(block)                          # idle: nothing named
+        _poll(p)
+        assert p.id == 0
+        assert p.cap["text"] == "idle"
+        assert not any(c[2] == "0" for c in p.drv.calls)
+    finally:
+        root.destroy()
+
+
 def test_cached_still_still_asks_for_motion(tmp_path, monkeypatch):
-    """The stale-cache upgrade path: an id whose PNG predates the GIF stage
-    must STILL ask lcdart.py - the old png-only test here left every
-    pre-motion cache frozen for ever. And it must be ONE ask inside the
-    backoff window, across an id revisit too (review: membership alone
-    could not tell one ask from an ask per _show entry)."""
+    """The stale-cache upgrade path: an asset whose PNG predates the clip
+    stage must STILL ask lcdart.py - and ONE ask inside the backoff window,
+    across a revisit too (review: membership alone could not tell one ask
+    from an ask per _show entry)."""
     root = _root()
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
         _write_png(p._art, "54.png")                 # cached still, no clip
-        _write_block(block, [54])
+        _write_block(block, asset=54)
         _poll(p)
-        assert p.have[0] is True, "cached still did not paint"
+        assert p.have is True, "cached still did not paint"
         assert ("lcdart.py", "batman", "54") in p.drv.calls, \
-            "png-cached id never asked for its motion"
+            "png-cached asset never asked for its motion"
         _write_png(p._art, "919.png")
-        _write_block(block, [919])                   # away...
+        _write_block(block, asset=919)               # away...
         _poll(p, times=10)
-        _write_block(block, [54])                    # ...and back
+        _write_block(block, asset=54)                # ...and back
         _poll(p, times=10)
-        asks_54 = [c for c in p.drv.calls if c[2] == "54"]
-        assert len(asks_54) == 1, \
-            "revisited id re-asked inside the backoff: %r" % p.drv.calls
+        asks = [c for c in p.drv.calls if c[2] == "54"]
+        assert len(asks) == 1, \
+            "revisited asset re-asked inside the backoff: %r" % p.drv.calls
     finally:
         root.destroy()
 
 
 def test_clip_landing_animates_and_wraps(tmp_path, monkeypatch):
     """The motion contract: once <id>.webp lands, each poll advances one
-    frame, frames cache as they decode, and the clip loops at its end WITH
-    THE REPLAY IN ORDER - the review proved the old distinct-count
-    assertion stayed green with looping fully broken (freeze on the last
-    frame drew 3 distinct frames too)."""
+    frame, frames cache as they decode, and the clip loops WITH THE REPLAY
+    IN ORDER - the review proved the old distinct-count assertion stayed
+    green with looping fully broken (freeze on the last frame draws three
+    distinct frames too)."""
     root = _root()
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
         _write_png(p._art, "54.png")
-        _write_block(block, [54])
+        _write_block(block, asset=54)
         _poll(p)
-        assert p.anim[0] is None, "animation started with no clip on disk"
+        assert p.anim is None, "animation started with no clip on disk"
         _write_clip(p._art, "54.webp", ["red", "green", "blue"])
         seen = []
-        for _ in range(7):                          # two full loops + one
+        for _ in range(7):                           # two full loops + one
             _poll(p)
-            seen.append(p.imgs[0])
-        a = p.anim[0]
+            seen.append(p.img)
+        a = p.anim
         assert a is not None, "clip landed but the cell never animated"
         assert a["n"] == 3, "frame count not learned: %r" % a.get("n")
         assert len(a["frames"]) == 3, "lazy decode cached %d frames" % \
             len(a["frames"])
-        # THE WRAP, pinned by identity ORDER, not cardinality: the seam is
-        # same-tick (no hitch frame), so poll 4 replays frame 0.
         assert seen[3] is seen[0] and seen[4] is seen[1], \
             "the clip did not loop in order: %r" % [id(s) for s in seen]
         assert seen[0] is not seen[1], "the drawn frame never advanced"
         # One PERSISTENT canvas item, reconfigured per frame - a
         # delete/create pair per tick leaks an item per frame at 10 Hz.
-        assert len(p.cvs[0].find_all()) == 1, \
-            "%d canvas items after 7 draws" % len(p.cvs[0].find_all())
+        assert len(p.cv.find_all()) == 1, \
+            "%d canvas items after 7 draws" % len(p.cv.find_all())
     finally:
         root.destroy()
 
 
-def test_id_change_resets_animation(tmp_path, monkeypatch):
+def test_asset_change_resets_animation(tmp_path, monkeypatch):
     root = _root()
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
         _write_png(p._art, "54.png")
         _write_clip(p._art, "54.webp", ["red", "green"])
-        _write_block(block, [54])
+        _write_block(block, asset=54)
         _poll(p, times=3)
-        assert p.anim[0] is not None
+        assert p.anim is not None
         # 54 is FULLY cached (png + webp): the ask guard must not have
         # spawned a subprocess for it - the review proved this negative
         # was unasserted, so an always-ask regression stayed green.
         assert not any(c[2] == "54" for c in p.drv.calls), \
-            "fully-cached id still asked lcdart: %r" % p.drv.calls
-        _write_png(p._art, "919.png")               # still-only successor
-        _write_block(block, [919])
+            "fully-cached asset still asked lcdart: %r" % p.drv.calls
+        _write_png(p._art, "919.png")                # still-only successor
+        _write_block(block, asset=919)
         _poll(p)
-        assert p.anim[0] is None, "old clip's frames survived the id change"
-        assert p.ids[0] == 919 and p.have[0] is True
+        assert p.anim is None, "old clip's frames survived the change"
+        assert p.id == 919 and p.have is True
+    finally:
+        root.destroy()
+
+
+def test_cached_still_with_late_driver_still_upgrades(tmp_path, monkeypatch):
+    """THE motion review's headline: asset first seen while drv is None,
+    with a cached still. The still paints, `have` latches True - and a
+    `not have` retry gate then never re-entered _show, so the clip was
+    never requested for the whole session (a mid-run window relaunch on an
+    older cache hit this deterministically on the steady attract asset)."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_png(p._art, "54.png")                 # older cache
+        p.drv = None                                 # window up before view
+        _write_block(block, asset=54)
+        _poll(p, times=10)
+        assert p.have is True, "cached still did not paint"
+        assert 54 not in p._asked, "driverless ask was swallowed for good"
+        p.drv = FakeDrv()                            # the view arrives
+        _poll(p, times=10)                           # a retry tick passes
+        assert ("lcdart.py", "batman", "54") in p.drv.calls, \
+            "still-cached cell never asked for its motion after drv landed"
+    finally:
+        root.destroy()
+
+
+def test_corrupt_still_does_not_block_motion(tmp_path, monkeypatch):
+    """A torn/corrupt png must degrade to a placeholder, not veto the clip:
+    the review caught _animate gated on `have`, which let one bad still
+    permanently block a perfectly good clip."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        os.makedirs(p._art, exist_ok=True)
+        with open(os.path.join(p._art, "54.png"), "wb") as f:
+            f.write(b"not a png")                    # the torn write
+        _write_clip(p._art, "54.webp", ["red", "green", "blue"])
+        _write_block(block, asset=54)
+        _poll(p, times=3)
+        assert p.have is False, "corrupt still somehow decoded"
+        a = p.anim
+        assert a is not None and len(a["frames"]) >= 2, \
+            "good clip blocked by a corrupt still"
+    finally:
+        root.destroy()
+
+
+def test_hidden_window_stops_the_decode_work(tmp_path, monkeypatch):
+    """After the close box, the asset keeps tracking (cheap) but frames must
+    stop advancing - the review measured the decode pass as the panel's one
+    real cost, and it ran at full price for a window nobody could see."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_png(p._art, "54.png")
+        _write_clip(p._art, "54.webp", ["red", "green", "blue"])
+        _write_block(block, asset=54)
+        _poll(p, times=2)
+        before = len(p.anim["frames"])
+        p.win.tk.eval(p.win.protocol("WM_DELETE_WINDOW"))
+        assert p._hidden is True
+        _poll(p, times=4)
+        assert len(p.anim["frames"]) == before, \
+            "hidden window kept decoding frames"
     finally:
         root.destroy()
 
@@ -285,7 +378,7 @@ def test_close_hides_and_polling_survives(tmp_path, monkeypatch):
     try:
         import json
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
-        _write_block(block, [54])
+        _write_block(block, asset=54)
         _poll(p)
         assert p.win.state() != "withdrawn"
         cmd = p.win.protocol("WM_DELETE_WINDOW")
@@ -296,33 +389,10 @@ def test_close_hides_and_polling_survives(tmp_path, monkeypatch):
         with open(playfield.STATE) as f:
             assert "villain_pos" in json.load(f), \
                 "close did not record the window's position"
-        _write_block(block, [3047])                  # ids move while hidden
+        _write_block(block, asset=3047)              # the wire moves on
         _poll(p)
-        assert p.ids[0] == 3047, "hidden window stopped tracking ids"
-        assert p.win.state() == "withdrawn", "an id change re-showed the window"
-    finally:
-        root.destroy()
-
-
-def test_first_boot_with_no_driver_defers_the_ask(tmp_path, monkeypatch):
-    """batman's FIRST boot polls before any view exists (main starts the
-    panel while the tables are still building), so drv is None while the
-    shim is already stamping ids. That must not crash the poll chain, must
-    not swallow the id into _asked, and the ask must go out on a retry once
-    the driver lands - the review's mutation test removed the None-guard
-    and the suite stayed green."""
-    root = _root()
-    try:
-        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
-        p.drv = None                                 # pre-view boot state
-        _write_block(block, [54])
-        _poll(p, times=10)                           # crosses a retry tick
-        assert p.win is not None
-        assert 54 not in p._asked, "driverless ask was swallowed for good"
-        p.drv = FakeDrv()                            # the view arrives
-        _poll(p, times=10)                           # next retry tick
-        assert ("lcdart.py", "batman", "54") in p.drv.calls, \
-            "deferred ask never went out once the driver existed"
+        assert p.id == 3047, "hidden window stopped tracking the wire"
+        assert p.win.state() == "withdrawn", "a change re-showed the window"
     finally:
         root.destroy()
 
@@ -336,7 +406,7 @@ def test_position_persists_roundtrip(tmp_path, monkeypatch):
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
         with open(playfield.STATE, "w") as f:
             json.dump({"villain_pos": [473, 291]}, f)
-        _write_block(block, [54])
+        _write_block(block, asset=54)
         _poll(p)
         root.update()
         assert abs(p.win.winfo_x() - 473) < 45 and \
@@ -346,71 +416,6 @@ def test_position_persists_roundtrip(tmp_path, monkeypatch):
         playfield.save_state(root, p)
         st = json.load(open(playfield.STATE))
         assert "villain_pos" in st and "playfield_pos" in st
-    finally:
-        root.destroy()
-
-
-def test_cached_still_with_late_driver_still_upgrades(tmp_path, monkeypatch):
-    """THE motion review's headline: id first seen while drv is None, with
-    a cached still. The still paints, have latches True - and the old
-    `not have[k]` retry gate then never re-entered _show, so the clip was
-    never requested for the whole session (a mid-run window relaunch on a
-    pre-GIF cache hit this deterministically on the steady attract id)."""
-    root = _root()
-    try:
-        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
-        _write_png(p._art, "54.png")                 # pre-GIF-era cache
-        p.drv = None                                 # window up before view
-        _write_block(block, [54])
-        _poll(p, times=10)
-        assert p.have[0] is True, "cached still did not paint"
-        assert 54 not in p._asked, "driverless ask was swallowed for good"
-        p.drv = FakeDrv()                            # the view arrives
-        _poll(p, times=10)                           # a retry tick passes
-        assert ("lcdart.py", "batman", "54") in p.drv.calls, \
-            "still-cached cell never asked for its motion after drv landed"
-    finally:
-        root.destroy()
-
-
-def test_corrupt_still_does_not_block_motion(tmp_path, monkeypatch):
-    """A torn/corrupt png must degrade to a placeholder, not veto the clip:
-    the review caught _animate gated on have[k], which let one bad still
-    permanently block a perfectly good clip."""
-    root = _root()
-    try:
-        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
-        os.makedirs(p._art, exist_ok=True)
-        with open(os.path.join(p._art, "54.png"), "wb") as f:
-            f.write(b"not a png")                    # the torn write
-        _write_clip(p._art, "54.webp", ["red", "green", "blue"])
-        _write_block(block, [54])
-        _poll(p, times=3)
-        assert p.have[0] is False, "corrupt still somehow decoded"
-        a = p.anim[0]
-        assert a is not None and len(a["frames"]) >= 2, \
-            "good clip blocked by a corrupt still"
-    finally:
-        root.destroy()
-
-
-def test_hidden_window_stops_the_decode_work(tmp_path, monkeypatch):
-    """After the close box, ids keep tracking (cheap) but frames must stop
-    advancing - the review measured the decode pass as the panel's one
-    real cost, and it ran at full price for a window nobody could see."""
-    root = _root()
-    try:
-        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
-        _write_png(p._art, "54.png")
-        _write_clip(p._art, "54.webp", ["red", "green", "blue"])
-        _write_block(block, [54])
-        _poll(p, times=2)
-        frames_before = len(p.anim[0]["frames"])
-        p.win.tk.eval(p.win.protocol("WM_DELETE_WINDOW"))
-        assert p._hidden is True
-        _poll(p, times=4)
-        assert len(p.anim[0]["frames"]) == frames_before, \
-            "hidden window kept decoding frames"
     finally:
         root.destroy()
 

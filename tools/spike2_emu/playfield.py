@@ -3480,28 +3480,44 @@ class LedGrid(LedRing):
 class LcdPanel:
     """VILLAIN VISION - the lcdnode's LCD inserts, in their OWN window.
 
-    batman's node 24 drives three 320x240 playfield TVs - the ELF's own name
-    for the fixture is "3 LCD INSERT" (item 83). Nothing crosses the bus but
-    DISPLAY IDS - padlcd.h carries the frame shape and the measured evidence -
-    and the id is the asset number in the card's villain-TV store, so each
-    cell PLAYS the clip the game named: a looping 10 fps LOSSLESS WEBP
-    excerpt, advanced one frame per poll so encode rate = display rate. The
-    art is extracted LAZILY by lcdart.py into <tables>/<game>/lcd/<id>.{png,
-    webp} the first time an id is seen (3,069 assets up front would be
-    minutes of mktables for art most runs never show), cheap-first: the still
-    paints the moment it lands, the motion takes over when the encode
-    finishes behind it. Until either lands the cell says "TV <id>", which is
-    honest - the id is live data off the wire, the art is a cache filling in
-    behind it. (The clips were GIF for one afternoon; David spotted the
-    8-bit palette immediately - "the gif color looks off ... like it's not
-    rendering the correct bit depth" - and lcdart.py's docstring carries the
-    measurement that replaced it with a bit-exact format.)
+    batman's node 24 drives the fixture the ELF calls "3 LCD INSERT" - three
+    320x240 playfield TVs (item 83). Nothing crosses the bus but ASSET
+    NUMBERS naming stored clips; padlcd.h carries the frame table and the
+    disassembly addresses it was read off.
+
+    ★ ONE SCREEN HERE, NOT THREE, and the correction is worth stating plainly
+    because this window shipped with three. The game addresses ONE logical
+    display (fixture display count 1; all 299 LCD call sites pass the same
+    device), and the node board feeds the three physical TVs from it. The
+    first cut read a play-range command - "assets 54..928 at 12 fps" - as
+    three display ids and drew 54, 928 and 106 side by side, which looked
+    convincing and was wrong: 928 is the range's END and 106 is a frame-rate
+    code. David spotted the shape of it live ("there are still two empty
+    slots to the right") before the disassembly confirmed it.
+
+    So this draws what the one display was told to show: a looping 10 fps
+    LOSSLESS WEBP excerpt of the named clip, advanced one frame per poll so
+    encode rate = display rate. The art is extracted LAZILY by lcdart.py into
+    <tables>/<game>/lcd/<id>.{png,webp} the first time an asset is seen
+    (3,069 assets up front would be minutes of mktables for art most runs
+    never show), cheap-first: the still paints the moment it lands, the
+    motion takes over when the encode finishes behind it. Until either lands
+    the cell says "asset <id>", which is honest - the id is live data off the
+    wire, the art is a cache filling in behind it. (The clips were GIF for
+    one afternoon; David spotted the 8-bit palette immediately - "the gif
+    color looks off ... like it's not rendering the correct bit depth" - and
+    lcdart.py's docstring carries the measurement that replaced it.)
+
+    A RANGE COMMAND IS DRAWN AS ITS FIRST ASSET, with the caption saying so.
+    What the board actually does with first..last at N fps - playlist,
+    flipbook, random pick - is not decoded, and inventing one of those in the
+    renderer is how the three-screen mistake happened in the first place.
 
     A SEPARATE WINDOW, not a strip in the playfield view - David's ask,
     2026-08-24: every other second-display title already gets its screen as
     its own desktop window (item 44's "<game> [display N] - Stern Spike 2
-    emulator"), and these TVs ARE batman's second display, the game just
-    drives them by id instead of by pixels. The title deliberately joins that
+    emulator"), and this IS batman's second display, the game just drives it
+    by asset number instead of by pixels. The title deliberately joins that
     family so screenrec.py's backbox default skips it like any second display
     (record it on purpose with PAD_REC_TITLE="[villain vision]"); padwinpos
     and zorder each key "[villain vision]" AHEAD of their generic "] -" game2
@@ -3523,10 +3539,11 @@ class LcdPanel:
     frozen cache.
     """
 
-    READ = 48                       # header + id[4] + ms[4]; the ring is RE fuel
+    READ = 48                       # header .. ms; the ring beyond is RE fuel
     MAGIC = 0x44434c50              # 'PLCD'
-    #: Cell size. The store's clips are 240x180; a dedicated window has room
-    #: to show them at native size (the old in-view strip halved them).
+    #: The screen. The store's clips are 240x180; a dedicated window has room
+    #: to show them at native size (the in-view strip this replaced halved
+    #: them).
     CW, CH = 244, 184
     #: Re-ask backoff for lcdart, seconds. One subprocess per minute per id
     #: whose art is still missing - see _show.
@@ -3536,21 +3553,21 @@ class LcdPanel:
         self.root, self.game = root, game
         self.drv = None             # assigned once the view's SwitchDriver exists
         self.win = None
-        self.cvs = []
-        self.items = [None, None, None]     # persistent canvas image items
-        self.imgs = [None, None, None]
-        self.ids = [None, None, None]
-        self.have = [False, False, False]
-        #: Per-cell animation state. None while no clip is on disk (kept
-        #: retryable); a dict once the clip's BYTES are read - in one go, so
-        #: a \\wsl.localhost hiccup can only fail the whole read (caught,
-        #: retried next tick) and never masquerade as end-of-clip. "n" is the
-        #: frame count (exact via PIL, learned at first wrap without);
-        #: "dead": True marks an undecodable clip - honest now, because the
-        #: bytes are complete in memory, so a decode failure is the file, not
-        #: the wire. Frames decode one per poll and cache; the whole dict
-        #: drops on id change, so memory holds at most 3 active clips.
-        self.anim = [None, None, None]
+        self.cv = self.cap = None
+        self.item = None            # the persistent canvas image item
+        self.img = None
+        self.id = None              # asset currently drawn
+        self.have = False           # ... and whether that is real art
+        self.state = None           # (asset, first, last, rate, mode)
+        #: Animation state. None while no clip is on disk (kept retryable);
+        #: a dict once the clip's BYTES are read - in one go, so a
+        #: \\wsl.localhost hiccup can only fail the whole read (caught,
+        #: retried next tick) and never masquerade as end-of-clip. "n" is
+        #: the frame count; "dead": True marks an undecodable clip - honest,
+        #: because the bytes are complete in memory, so a decode failure is
+        #: the file, not the wire. Frames decode one per poll and cache; the
+        #: dict drops on asset change.
+        self.anim = None
         #: id -> monotonic time of the last lcdart ask. A dict, not a set
         #: (motion review): lcdart's contract says a missing store heals on
         #: retry, so an id whose art is STILL missing re-asks after ASK_S -
@@ -3584,11 +3601,16 @@ class LcdPanel:
         pos = load_state().get("villain_pos")
         if pos and _onscreen(self.win, *pos):
             self.win.geometry("+%d+%d" % (pos[0], pos[1]))
-        for _ in range(3):
-            cv = tk.Canvas(self.win, width=self.CW, height=self.CH, bg="#000",
-                           highlightthickness=1, highlightbackground="#333")
-            cv.pack(side="left", padx=3, pady=3)
-            self.cvs.append(cv)
+        self.cv = tk.Canvas(self.win, width=self.CW, height=self.CH, bg="#000",
+                            highlightthickness=1, highlightbackground="#333")
+        self.cv.pack(padx=4, pady=(4, 2))
+        # The caption is not decoration: what the game sent is either ONE
+        # asset or a RANGE at a frame rate, and only one of those can be
+        # drawn faithfully today (see poll()). Saying which is on the wire
+        # is the difference between a picture and a measurement.
+        self.cap = tk.Label(self.win, text="", bg="#111", fg="#7ecbff",
+                            font=("Consolas", 8))
+        self.cap.pack(pady=(0, 4))
 
     def _hide(self):
         # Item 44's contract for a second display's close box: hide, don't
@@ -3617,35 +3639,56 @@ class LcdPanel:
             return
         if self.win is None:
             self._build()
-        ids = struct.unpack_from("<4I", d, 16)
-        for k in range(3):
-            if ids[k] != self.ids[k]:
-                self._show(k, ids[k])
-            elif self._polls % 10 == 0 and ids[k] and (
-                    not self.have[k] or self.anim[k] is None):
-                # ~1 Hz retry while EITHER artifact is missing. The old
-                # `not have[k]` test stopped the moment a cached still
-                # painted, which froze the clip upgrade forever when the
-                # first sighting happened before drv existed (motion
-                # review finding 1) - anim is None exactly while the clip
-                # has not landed, so this keeps _show (and its deferred
-                # ask) alive until the motion exists.
-                self._show(k, ids[k])
+        (_m, _v, _g, _dec, asset, first, last, rate, mode,
+         _br, _fd, _ms) = struct.unpack_from("<12I", d)
+        self.state = (asset, first, last, rate, mode)
+        # ONE display (padlcd.h documents why: display count 1, and all 299
+        # LCD call sites pass the same device). A single-asset command names
+        # exactly what to draw; a RANGE command names first..last at a frame
+        # rate, and what the board does with that - a playlist, a per-frame
+        # flipbook, a random pick - is NOT decoded, so the honest thing is
+        # to draw its first asset and let the caption say it is a range.
+        want = asset or first
+        if want != self.id:
+            self._show(want)
+        elif self._polls % 10 == 0 and want and (
+                not self.have or self.anim is None):
+            # ~1 Hz retry while EITHER artifact is missing. A `not have`
+            # test alone stopped the moment a cached still painted, which
+            # froze the clip upgrade forever when the first sighting
+            # happened before drv existed (motion review finding 1); anim
+            # is None exactly while the clip has not landed.
+            self._show(want)
+        self._caption()
         self._animate()                 # one frame per poll = 10 fps
 
-    def _draw(self, k, img):
-        """One persistent image item per cell, reconfigured per frame - a
+    def _caption(self):
+        asset, first, last, rate, mode = self.state
+        how = {1: "loop", 2: "one-shot"}.get(mode, "")
+        if asset:
+            what = "asset %d" % asset
+        elif first:
+            what = "range %d-%d%s" % (first, last,
+                                      " @ %d fps" % rate if rate else "")
+        else:
+            what = "idle"
+        txt = " · ".join(x for x in (what, how) if x)
+        if self.cap["text"] != txt:
+            self.cap.configure(text=txt)
+
+    def _draw(self, img):
+        """One persistent image item, reconfigured per frame - a
         delete/create pair per animation frame would churn canvas ids at
         10 Hz for nothing."""
-        self.imgs[k] = img              # keep the reference: a PhotoImage
-        if self.items[k] is None:       # nobody holds goes blank
-            self.cvs[k].delete("all")
-            self.items[k] = self.cvs[k].create_image(
+        self.img = img                  # keep the reference: a PhotoImage
+        if self.item is None:           # nobody holds goes blank
+            self.cv.delete("all")
+            self.item = self.cv.create_image(
                 self.CW // 2, self.CH // 2, image=img)
         else:
-            self.cvs[k].itemconfig(self.items[k], image=img)
+            self.cv.itemconfig(self.item, image=img)
 
-    def _show(self, k, i):
+    def _show(self, i):
         # Ask lcdart.py for whatever this id is missing, at most once per
         # ASK_S per id. Checked against BOTH artifacts: a cache from before
         # the GIF stage existed has the still but not the motion, and the
@@ -3660,8 +3703,8 @@ class LcdPanel:
                     and os.path.isfile(os.path.join(self._art, "%d.webp" % i)))):
             self._asked[i] = time.monotonic()
             self.drv.run_script("lcdart.py", self.game, str(i))
-        if self.ids[k] != i:
-            self.anim[k] = None         # new id: the old clip's frames drop
+        if self.id != i:
+            self.anim = None            # new asset: the old clip's frames drop
         png = os.path.join(self._art, "%d.png" % i)
         if i and os.path.isfile(png):
             try:
@@ -3669,17 +3712,16 @@ class LcdPanel:
             except tk.TclError:
                 img = None
             if img is not None:
-                self._draw(k, img)
-                self.ids[k], self.have[k] = i, True
+                self._draw(img)
+                self.id, self.have = i, True
                 return
-        if self.ids[k] != i:                # placeholder, once per id change
-            cv = self.cvs[k]
-            cv.delete("all")
-            self.items[k] = None
-            cv.create_text(self.CW // 2, self.CH // 2,
-                           text=("TV %d" % i) if i else "—",
-                           fill="#888", font=("Consolas", 9))
-        self.ids[k], self.have[k] = i, not i    # id 0 = nothing to fetch
+        if self.id != i:                    # placeholder, once per change
+            self.cv.delete("all")
+            self.item = None
+            self.cv.create_text(self.CW // 2, self.CH // 2,
+                                text=("asset %d" % i) if i else "—",
+                                fill="#888", font=("Consolas", 9))
+        self.id, self.have = i, not i       # nothing named = nothing to fetch
 
     def _open_clip(self, i):
         """Read the id's WHOLE clip into memory and open a decoder over it.
@@ -3719,45 +3761,44 @@ class LcdPanel:
             return None
 
     def _animate(self):
-        """Advance every animating cell one frame. lcdart.py encodes at
-        10 fps and this runs once per 10 Hz poll, so encode rate = display
-        rate by construction. Skipped entirely while the window is hidden -
-        nobody is watching, and the decode pass is the one part of this
-        panel with a real per-tick cost."""
+        """Advance the screen one frame. lcdart.py encodes at 10 fps and
+        this runs once per 10 Hz poll, so encode rate = display rate by
+        construction. Skipped entirely while the window is hidden - nobody
+        is watching, and the decode pass is the one part of this panel with
+        a real per-tick cost."""
         if self._hidden:
             return
-        for k in range(3):
-            i, a = self.ids[k], self.anim[k]
-            # NOT gated on have[k] (motion review finding 5): a corrupt
-            # still must not block a perfectly good clip from playing.
-            if not i:
-                continue
+        i, a = self.id, self.anim
+        # NOT gated on `have` (motion review finding 5): a corrupt still
+        # must not block a perfectly good clip from playing.
+        if not i:
+            return
+        if a is None:
+            a = self.anim = self._open_clip(i)
             if a is None:
-                a = self.anim[k] = self._open_clip(i)
-                if a is None:
-                    continue            # not encoded yet: retried next tick
-            if a.get("dead"):
-                continue                # undecodable clip: keep the still
-            idx = a["i"]
-            if idx >= a["n"]:
-                idx = a["i"] = 0        # wrap: the clip loops
-            if idx < len(a["frames"]):
-                frame = a["frames"][idx]
-            else:
-                frame = self._decode(a, idx)
-                if frame is None:       # corrupt tail: _decode shortened n
-                    if not a["frames"]:
-                        self.anim[k] = {"dead": True}
-                        continue
-                    idx = a["i"] = 0
-                    frame = a["frames"][0]  # wrap and draw THIS tick, so
-                else:                       # the seam costs no blank frame
-                    a["frames"].append(frame)
-                    if len(a["frames"]) >= a["n"]:
-                        a.pop("pil", None)  # decode pass over: drop the
-                                            # reader and its buffered bytes
-            self._draw(k, frame)
-            a["i"] = idx + 1
+                return                  # not encoded yet: retried next tick
+        if a.get("dead"):
+            return                      # undecodable clip: keep the still
+        idx = a["i"]
+        if idx >= a["n"]:
+            idx = a["i"] = 0            # wrap: the clip loops
+        if idx < len(a["frames"]):
+            frame = a["frames"][idx]
+        else:
+            frame = self._decode(a, idx)
+            if frame is None:           # corrupt tail: _decode shortened n
+                if not a["frames"]:
+                    self.anim = {"dead": True}
+                    return
+                idx = a["i"] = 0
+                frame = a["frames"][0]  # wrap and draw THIS tick, so the
+            else:                       # seam costs no blank frame
+                a["frames"].append(frame)
+                if len(a["frames"]) >= a["n"]:
+                    a.pop("pil", None)  # decode pass over: drop the reader
+                                        # and its buffered bytes
+        self._draw(frame)
+        a["i"] = idx + 1
 
 
 class Schematic(StateOps):

@@ -8404,12 +8404,12 @@ extern int atoi(const char *);           /* same GCC 14 reason as open/close */
  * publishes nothing, which is every title without one. */
 struct padlcd_shm {
     unsigned magic, version, gen, decoded;
-    unsigned id[4];
-    unsigned ms[4];
+    unsigned asset, first, last, rate, mode, bright, fade, ms;
     unsigned ring_head;
-    struct { unsigned ms; unsigned char len, b[11]; } ring[64];
+    struct { unsigned ms; unsigned char sel, len, b[18]; } ring[64];
 };
 #define PADLCD_MAGIC 0x44434c50u
+#define PADLCD_VERSION 2u
 
 static struct padlcd_shm *lcd_shm;
 
@@ -8441,36 +8441,91 @@ static void lcd_map(void)
     if (!m || m == (void *)-1) return;
     lcd_shm = (struct padlcd_shm *)m;
     lcd_shm->magic = PADLCD_MAGIC;
-    lcd_shm->version = 1;
+    lcd_shm->version = PADLCD_VERSION;
 }
 
+/* Frame periods at 0x5c9340, in 1/1280 s -> fps. A range command carries the
+ * INDEX's value, not an fps, and it is decoded here so no reader has to know
+ * the table. An unknown value passes through as 0 rather than a wrong fps. */
+static unsigned lcd_fps(unsigned period)
+{
+    static const unsigned char per[8] = { 43, 53, 64, 80, 84, 106, 128, 160 };
+    static const unsigned char fps[8] = { 30, 24, 20, 16, 15, 12, 10, 8 };
+    unsigned i;
+    for (i = 0; i < 8; i++) if (per[i] == period) return fps[i];
+    return 0;
+}
+
+static unsigned lcd_le32(const unsigned char *q)
+{
+    return (unsigned)q[0] | ((unsigned)q[1] << 8)
+         | ((unsigned)q[2] << 16) | ((unsigned)q[3] << 24);
+}
+
+/* ★ REWRITTEN AGAINST THE GAME'S OWN FRAME BUILDERS (padlcd.h documents the
+ * table and the addresses). The first cut read the selector's payload as a
+ * list of u16 ids at stride 4 addressed by a starting display index, which
+ * invented two displays that do not exist and turned one play-range command
+ * into three bogus asset ids. What is real: the display number is the
+ * selector's low 2 bits and is ALWAYS 0 here, the asset is a u32, and the
+ * payload shape is disambiguated by LENGTH.
+ *
+ * Every cmd-f2 selector is ringed now, decoded or not - v1 ringed only the
+ * frames it already believed in, which is precisely how its mis-parse
+ * survived a live capture that contained the evidence against it. */
 static void lcd_publish(const unsigned char *p, int n)
 {
-    unsigned node, start, k, off, ilen, slot;
-    if (n < 7 || !(p[0] & 0x80)) return;
+    unsigned node, sel, ilen, slot, k, plen;
+    if (n < 6 || !(p[0] & 0x80)) return;
     node = p[0] & 0x3f;
     if (!lcd_node() || node != lcd_node()) return;
-    if (p[2] != 0xf2 || p[3] != 0x98) return;
-    ilen = p[1];                  /* cmd..cksum, so payload ends at p[1+ilen] */
+    if (p[2] != 0xf2) return;
+    sel = p[3];
+    if (sel < 0x80u) return;      /* every LCD selector is >= 0x80          */
+    ilen = p[1];                  /* cmd..cksum, so payload ends at p[1+ilen]*/
     if (ilen < 3 || (unsigned)n < ilen + 2) return;
-    start = p[4];
-    if (start >= 4) return;       /* sub 0x02 commit frames land here too    */
     lcd_map();
     if (!lcd_shm) return;
-    /* the raw ring first, so a mis-parse below is still on record */
+
+    /* THE RAW RING FIRST, so a mis-parse below is still on record. */
+    plen = ilen - 3;              /* bytes after the selector, before cksum */
+    if (plen > 18) plen = 18;
     slot = lcd_shm->ring_head % 64u;
     lcd_shm->ring[slot].ms  = (unsigned)pad_ms();
-    lcd_shm->ring[slot].len = (unsigned char)(ilen - 2 > 11 ? 11 : ilen - 2);
-    for (k = 0; k < lcd_shm->ring[slot].len; k++)
-        lcd_shm->ring[slot].b[k] = p[4 + k];
+    lcd_shm->ring[slot].sel = (unsigned char)sel;
+    lcd_shm->ring[slot].len = (unsigned char)plen;
+    for (k = 0; k < plen; k++) lcd_shm->ring[slot].b[k] = p[4 + k];
     lcd_shm->ring_head++;
-    /* ids: LE16 at stride 4 from p[5], stopping at the checksum */
-    for (k = 0, off = 5; off + 1 < 2 + ilen && start + k < 4; k++, off += 4) {
-        unsigned id = (unsigned)p[off] | ((unsigned)p[off + 1] << 8);
-        lcd_shm->id[start + k] = id;
-        lcd_shm->ms[start + k] = (unsigned)pad_ms();
+
+    if ((sel & 0xf8u) == 0x98u) {           /* the play family              */
+        if (ilen == 4) {                    /* [mode] 1 loop, 2 one-shot    */
+            lcd_shm->mode = p[4];
+        } else if (ilen == 8) {             /* [0] [u32 asset]              */
+            lcd_shm->asset = lcd_le32(p + 5);
+            lcd_shm->first = lcd_shm->last = lcd_shm->rate = 0;
+        } else if (ilen == 14) {            /* [flags][u32 f][u32 l][u16 r] */
+            lcd_shm->first = lcd_le32(p + 5);
+            lcd_shm->last  = lcd_le32(p + 9);
+            lcd_shm->rate  = lcd_fps((unsigned)p[13]
+                                     | ((unsigned)p[14] << 8));
+            lcd_shm->asset = 0;
+        } else {
+            return;                         /* ringed, not understood       */
+        }
+        lcd_shm->ms = (unsigned)pad_ms();
+        lcd_shm->decoded++;
+        lcd_shm->gen++;
+    } else if ((sel & 0xf8u) == 0x80u && ilen >= 5) {
+        lcd_shm->bright = p[4];             /* [brightness][fade]           */
+        lcd_shm->fade   = p[5];
+        lcd_shm->gen++;
     }
-    if (k) { lcd_shm->decoded++; lcd_shm->gen++; }
+    /* 0x90 (status poll, wants a 12-byte reply) and the never-called 0x88 /
+     * 0xb8 builders are ringed and left alone: answering the poll is a
+     * SEPARATE question - the game only clears a command's pending bit on a
+     * reply (0x37e504), which is the likely reason attract re-sends the same
+     * asset every 250 ms, and lcd_play_range's callers block on a reply
+     * field only the 12-byte poll answer fills. */
 }
 
 /* Budgeted like the skip log, and off unless PAD_LED_DEC_LOG is set. A run

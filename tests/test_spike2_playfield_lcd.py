@@ -1,19 +1,22 @@
-"""LcdPanel: the VILLAIN VISION inserts draw what the padlcd block names.
+"""LcdPanel: the VILLAIN VISION window draws what the padlcd block names.
 
 Queue item 83. batman's lcdnode drives three playfield TVs by DISPLAY ID;
 the shim publishes the ids into dump/padlcd and the panel maps id ->
-<tables>/<game>/lcd/<id>.png, extracting art lazily. The faults these guard
-against: a panel that builds on titles with no lcdnode (every title would
-grow an empty black strip), a placeholder that never upgrades when the art
-lands (the lazy extraction would be invisible), and an id change that keeps
-showing the previous villain (stale cache reference).
+<tables>/<game>/lcd/<id>.png, extracting art lazily. Since David's
+2026-08-24 consistency ask the panel is its OWN Toplevel window - the same
+shape as item 44's second-display windows - not a strip inside a view. The
+faults these guard against: a window that builds on titles with no lcdnode
+(every title would grow a stray black window), a placeholder that never
+upgrades when the art lands (the lazy extraction would be invisible), an id
+change that keeps showing the previous villain (stale cache reference), and
+a close box that kills the window instead of hiding it (item 44's contract).
 
 REAL Tk, like the hit-test and action-row tests: what is under test is
-widget construction, pack(before=), and PhotoImage lifetime - the
-keep-a-reference rule is exactly the thing a stub Tk cannot see. The padlcd
-block is a real temp file written with struct.pack, because the offsets
-(magic 0, id[4] at 16) are hard-coded on both sides and a drifting reader
-should fail HERE, not on a live run.
+Toplevel construction, the WM_DELETE protocol, and PhotoImage lifetime -
+the keep-a-reference rule is exactly the thing a stub Tk cannot see. The
+padlcd block is a real temp file written with struct.pack, because the
+offsets (magic 0, id[4] at 16) are hard-coded on both sides and a drifting
+reader should fail HERE, not on a live run.
 """
 import os
 import struct
@@ -60,13 +63,10 @@ class FakeDrv:
 
 
 def _panel(root, tmp, monkeypatch):
-    import tkinter as tk
     import playfield
     block = os.path.join(tmp, "padlcd")
     monkeypatch.setattr(playfield, "LCD_PATH", block)
-    cv = tk.Canvas(root, width=200, height=100)
-    cv.pack()
-    p = playfield.LcdPanel(root, "batman", before=lambda: cv)
+    p = playfield.LcdPanel(root, "batman")
     p._art = os.path.join(tmp, "lcd")
     p.drv = FakeDrv()
     return playfield, p, block
@@ -80,26 +80,30 @@ def _poll(p, times=1):
 
 def test_no_lcdnode_title_never_builds(tmp_path, monkeypatch):
     """An unstamped (or absent) block must build NOTHING - this is what keeps
-    every non-batman title free of an empty black strip."""
+    every non-batman title free of a stray black window."""
     root = _root()
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
         _poll(p)                                    # file absent
-        assert p.frame is None
+        assert p.win is None
         _write_block(block, [54], magic=0)          # present but unstamped
         _poll(p)
-        assert p.frame is None
+        assert p.win is None
     finally:
         root.destroy()
 
 
-def test_stamped_block_builds_placeholder_and_requests_art(tmp_path, monkeypatch):
+def test_stamped_block_builds_window_and_requests_art(tmp_path, monkeypatch):
     root = _root()
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
         _write_block(block, [54, 919, 928])
         _poll(p)
-        assert p.frame is not None, "magic stamped but no panel"
+        assert p.win is not None, "magic stamped but no window"
+        assert "villain vision" in p.win.title()
+        # The title must land in padwinpos's "game2" family so the window's
+        # position persists like any item 44 second display.
+        assert "] - Stern Spike 2 emulator" in p.win.title()
         assert p.ids[:3] == [54, 919, 928]
         assert not any(p.have)
         asked = {c[2] for c in p.drv.calls if c[0] == "lcdart.py"}
@@ -145,5 +149,24 @@ def test_id_change_redraws_and_id_zero_is_idle(tmp_path, monkeypatch):
         _poll(p)
         assert p.ids[0] == 0
         assert not any(c[2] == "0" for c in p.drv.calls)
+    finally:
+        root.destroy()
+
+
+def test_close_hides_and_polling_survives(tmp_path, monkeypatch):
+    """Item 44's close contract carried over: the close box WITHDRAWS the
+    window, the panel keeps polling behind it, and nothing resurrects it."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_block(block, [54])
+        _poll(p)
+        assert p.win.state() != "withdrawn"
+        p._hide()                                    # the WM_DELETE handler
+        assert p.win.state() == "withdrawn"
+        _write_block(block, [3047])                  # ids move while hidden
+        _poll(p)
+        assert p.ids[0] == 3047, "hidden window stopped tracking ids"
+        assert p.win.state() == "withdrawn", "an id change re-showed the window"
     finally:
         root.destroy()

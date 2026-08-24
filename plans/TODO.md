@@ -5078,6 +5078,18 @@ These have each been violated at least once and each cost a run or a window:
       more; padlcd carried 21 decoded frames in attract, then the
       game-start trio 54/928/106 across the three displays; the lazy art
       cache extracted 8 PNGs by itself during one boot).
+      **UPDATE same day, David's consistency ask ("make it a separate
+      emulator window like the other separate-display games"): the panel
+      is now its OWN WINDOW, not a strip in the playfield view.** LcdPanel
+      builds a Toplevel titled `batman [villain vision] - Stern Spike 2
+      emulator` — deliberately inside item 44's title family, so
+      padwinpos's "game2" row persists its position like any second
+      display and screenrec's backbox default skips it (record it on
+      purpose with PAD_REC_TITLE="[villain vision]"). Close box HIDES it
+      (item 44's contract), ids keep tracking behind it. main() owns the
+      panel now, so BOTH view shapes get it — the "Schematic view only"
+      residual below is RESOLVED — and the cells show the art at native
+      240x180 (the strip halved it).
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —
@@ -5103,14 +5115,14 @@ These have each been violated at least once and each cost a run or a window:
       chowns/tears down the block; killgame.sh rm; restorestate.sh
       always-rewind elif (the padled one-shot-magic lesson); lcdart.py
       extracts a first frame per id to `<tables>/<game>/lcd/<id>.png`
-      lazily (~200 ms, once); playfield.py LcdPanel — lazy-built on first
-      magic stamp, 10 Hz reopen-reads, "TV <id>" placeholder until art
-      lands, PhotoImage reference kept. 4 real-Tk regression tests
+      lazily (~200 ms, once); playfield.py LcdPanel — its own lazy
+      Toplevel on first magic stamp (see UPDATE above), 10 Hz
+      reopen-reads, "TV <id>" placeholder until art lands, PhotoImage
+      reference kept. 5 real-Tk regression tests
       (tests/test_spike2_playfield_lcd.py) green.
       **Honest residuals, none blocking:** stills not video (first frame
       of the named clip; playing the H.264 loops in Tk needs a decode
-      pipeline — file it if David wants motion); Schematic view only
-      (batman ships no artwork, so that IS its view); the `137.asset`
+      pipeline — file it if David wants motion); the `137.asset`
       store number is a batman constant with a comment — a second lcdnode
       title is the cue to derive it per title.
       *(Split out of item 82 on 2026-08-24, which fixed the board's

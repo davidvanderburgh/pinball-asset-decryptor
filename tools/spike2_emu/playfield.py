@@ -3447,35 +3447,48 @@ class LedGrid(LedRing):
 
 
 class LcdPanel:
-    """VILLAIN VISION - the lcdnode's LCD inserts, drawn off the padlcd block.
+    """VILLAIN VISION - the lcdnode's LCD inserts, in their OWN window.
 
     batman's node 24 drives three 320x240 playfield TVs (item 83). Nothing
     crosses the bus but DISPLAY IDS - padlcd.h carries the frame shape and the
     measured evidence - and the id is the asset number in the card's
-    villain-TV store, so this panel shows, per insert, the FIRST FRAME of the
+    villain-TV store, so this window shows, per insert, the FIRST FRAME of the
     asset the game named. The art is extracted LAZILY by lcdart.py into
     <tables>/<game>/lcd/<id>.png the first time an id is seen (3,069 assets up
     front would be minutes of mktables for art most runs never show); until it
     lands the cell says "TV <id>", which is honest - the id is live data off
     the wire, the art is a cache filling in behind it.
 
-    LAZY BY CONSTRUCTION: nothing is drawn until the padlcd block's magic
+    A SEPARATE WINDOW, not a strip in the playfield view - David's ask,
+    2026-08-24: every other second-display title already gets its screen as
+    its own desktop window (item 44's "<game> [display N] - Stern Spike 2
+    emulator"), and these TVs ARE batman's second display, the game just
+    drives them by id instead of by pixels. The title deliberately joins that
+    family's needle: padwinpos.py's "game2" row ("] - Stern Spike 2 emulator")
+    then persists its position like any second display, and screenrec.py's
+    backbox default skips it the same way (record it on purpose with
+    PAD_REC_TITLE="[villain vision]"). Closing it HIDES it for the run, which
+    is item 44's close behaviour too. Owning a window instead of a slot in a
+    view's layout is also what puts it on BOTH playfield shapes - Field and
+    Schematic - instead of only the one that had room for a strip.
+
+    LAZY BY CONSTRUCTION: no window exists until the padlcd block's magic
     stamps, which only an lcdnode title's shim ever does - every other title
-    pays one 48-byte read per poll and shows nothing. Packed `before=` the
-    switch canvas because by first sighting the canvas is already packed and a
-    plain pack() would land beside it instead of above it. The reopen-per-poll
+    pays one 48-byte read per poll and shows nothing. The reopen-per-poll
     read matches LED_PATH's rule: a held handle over \\\\wsl.localhost reads a
     frozen cache.
     """
 
     READ = 48                       # header + id[4] + ms[4]; the ring is RE fuel
     MAGIC = 0x44434c50              # 'PLCD'
+    #: Cell size. The store's clips are 240x180; a dedicated window has room
+    #: to show them at native size (the old in-view strip halved them).
+    CW, CH = 244, 184
 
-    def __init__(self, root, game, before):
+    def __init__(self, root, game):
         self.root, self.game = root, game
-        self.before = before        # callable -> the widget to pack ahead of
-        self.drv = None             # assigned once SwitchDriver exists
-        self.frame = None
+        self.drv = None             # assigned once the view's SwitchDriver exists
+        self.win = None
         self.cvs = []
         self.imgs = [None, None, None]
         self.ids = [None, None, None]
@@ -3485,16 +3498,30 @@ class LcdPanel:
         self._polls = 0
         self._art = os.path.join(padpath.tables() or "", game, "lcd")
 
+    def start(self):
+        """Self-paced off root.after - the panel belongs to no view's tick.
+        50 ms so the timer never beats against poll()'s own 0.1 s gate."""
+        self.poll()
+        self.root.after(50, self.start)
+
     def _build(self):
-        self.frame = tk.Frame(self.root, bg="#111")
-        tk.Label(self.frame, text=" VILLAIN VISION ", bg="#111", fg="#7ecbff",
-                 font=("Consolas", 9, "bold")).pack(side="left", padx=(4, 6))
+        self.win = tk.Toplevel(self.root)
+        self.win.title("%s [villain vision] - Stern Spike 2 emulator"
+                       % self.game)
+        self.win.configure(bg="#111")
+        self.win.resizable(False, False)
+        self.win.protocol("WM_DELETE_WINDOW", self._hide)
         for _ in range(3):
-            cv = tk.Canvas(self.frame, width=122, height=92, bg="#000",
+            cv = tk.Canvas(self.win, width=self.CW, height=self.CH, bg="#000",
                            highlightthickness=1, highlightbackground="#333")
             cv.pack(side="left", padx=3, pady=3)
             self.cvs.append(cv)
-        self.frame.pack(fill="x", before=self.before())
+
+    def _hide(self):
+        # Item 44's contract for a second display's close box: hide, don't
+        # die. The ids keep updating behind it, so nothing is stale if a
+        # future change re-shows it.
+        self.win.withdraw()
 
     def poll(self):
         now = time.monotonic()
@@ -3509,7 +3536,7 @@ class LcdPanel:
             return
         if len(d) < self.READ or struct.unpack_from("<I", d)[0] != self.MAGIC:
             return
-        if self.frame is None:
+        if self.win is None:
             self._build()
         ids = struct.unpack_from("<4I", d, 16)
         for k in range(3):
@@ -3520,21 +3547,22 @@ class LcdPanel:
 
     def _show(self, k, i):
         cv = self.cvs[k]
+        cx, cy = self.CW // 2, self.CH // 2
         png = os.path.join(self._art, "%d.png" % i)
         if i and os.path.isfile(png):
             try:
-                img = tk.PhotoImage(file=png).subsample(2, 2)
+                img = tk.PhotoImage(file=png)   # native 240x180
             except tk.TclError:
                 img = None
             if img is not None:
                 cv.delete("all")
                 self.imgs[k] = img          # keep the reference: a PhotoImage
-                cv.create_image(62, 47, image=img)   # nobody holds goes blank
+                cv.create_image(cx, cy, image=img)   # nobody holds goes blank
                 self.ids[k], self.have[k] = i, True
                 return
         if self.ids[k] != i:                # placeholder, once per id change
             cv.delete("all")
-            cv.create_text(62, 47, text=("TV %d" % i) if i else "—",
+            cv.create_text(cx, cy, text=("TV %d" % i) if i else "—",
                            fill="#888", font=("Consolas", 9))
         self.ids[k], self.have[k] = i, not i    # id 0 = nothing to fetch
         if i and i not in self._asked and self.drv is not None:
@@ -3647,11 +3675,6 @@ class Schematic(StateOps):
                 pcv, self.sw.positions, self.sw.how, 2, 2, anchor="nw",
                 on_ball=self.run_plunge)
 
-        # VILLAIN VISION (item 83): lazy - draws nothing until the padlcd
-        # block stamps, which only an lcdnode title's shim ever does. The
-        # canvas it packs ahead of does not exist yet, hence the callable.
-        self.lcd = LcdPanel(root, GAME, before=lambda: self.cv)
-
         # THE FLOW. One entry list in node order, then columns cut to the
         # height the screen has. A node header may not be the LAST row of a
         # column - a label that labels nothing - so it is pushed to the top of
@@ -3755,7 +3778,6 @@ class Schematic(StateOps):
 
         self.tip = Tip(root)
         self.drv = SwitchDriver()
-        self.lcd.drv = self.drv         # the panel's art fetches ride it
         # ★ ITEM 39: the retired Controls window's content, docked right -
         # the same panel the artwork view gets (keys, service buttons, door,
         # trough), so the two shapes of this window agree about where the
@@ -3895,7 +3917,6 @@ class Schematic(StateOps):
         # The same paced read the artwork view does: the dot beside each row
         # and the trough strip both come off it.
         poll_switches(self)
-        self.lcd.poll()                 # VILLAIN VISION, self-paced at 10 Hz
         state_msg = self._state_status()
         # ★ THE MAGIC IS NOT THE TEST FOR "IS THERE AN EMULATOR" (item 50,
         # caught on a live turtles_pro run). hwshim stamps the block on the
@@ -4026,6 +4047,13 @@ def main():
         return
     root = tk.Tk()
     root.title(WINDOW_TITLE)
+    # VILLAIN VISION (item 83): the lcdnode's TVs, as their OWN window beside
+    # this one - main owns it because it belongs to the TITLE, not to
+    # whichever view shape the title happens to get. Lazy: no window until
+    # the padlcd block stamps, which only an lcdnode title's shim ever does,
+    # so every other title pays one 48-byte read per poll and shows nothing.
+    lcd = LcdPanel(root, GAME)
+    lcd.start()
     # ARTWORK IF THE TITLE HAS IT, THE SWITCH LIST IF IT DOES NOT. Both are
     # real answers; which one applies is a property of the game, not of this
     # window. See load_switch_list() for why most titles are the second case.
@@ -4092,10 +4120,13 @@ def main():
                     view = Field(root)
                 else:
                     view = Schematic(root, fresh)
+                lcd.drv = view.drv      # the panel's art fetches ride it
 
             poll_for_tables(root, load_switch_list, _swap_in)
         else:
             view = Schematic(root, rows)
+    if view is not None:
+        lcd.drv = view.drv              # the panel's art fetches ride it
     pos = load_state().get("playfield_pos")
     if pos and _onscreen(root, *pos):
         root.geometry("+%d+%d" % (pos[0], pos[1]))

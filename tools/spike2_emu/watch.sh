@@ -1326,7 +1326,12 @@ fi
 # service buttons are unlocked the moment the game is up. One early swhold is
 # not enough: the rest-state writer forces the door shut once at guest start
 # and the merge is last-edge-wins, so this loop re-asserts through the boot
-# window. Close the door (click switch 33, or swhold.py 33 1) when done.
+# window. Close the door (click the door switch, or swhold.py <door-id> 1)
+# when done - the id is PER TITLE (item 73): the wire is always node 0
+# bit 23, the id is the title's own table index (godzilla 33, aerosmith 34,
+# batman 36, munsters 198), so the loop below re-resolves it from the
+# derived list on every pass and falls back to 33 only while no list
+# exists yet.
 if [ "${PAD_DOOR_OPEN:-0}" = 1 ]; then
     (
         # The gate only trusts an EDGE-established door state (see
@@ -1334,22 +1339,30 @@ if [ "${PAD_DOOR_OPEN:-0}" = 1 ]; then
         # transition is what makes "open" a known fact rather than a fresh
         # block's meaningless zeros. Re-asserted through the boot window
         # because the writers are last-edge-wins and the playfield stamps
-        # its own rest state when it comes up.
+        # its own rest state when it comes up. Re-resolved per pass because
+        # a first run's list arrives mid-loop, and an edge on a stale id
+        # would hold some other switch (item 73).
         first=1
         for _i in $(seq 1 30); do
             if [ -f "$ROOT/dump/padsw" ]; then
+                DOOR=33
+                if [ -f "$TABLES/$GAME/switch_list.txt" ]; then
+                    d=$(awk '!/^#/ && $3 == 0 && $4 == 23 { print $1; exit }' \
+                        "$TABLES/$GAME/switch_list.txt")
+                    [ -n "$d" ] && DOOR=$d
+                fi
                 if [ -n "$first" ]; then
-                    setsid_as_user python3 "$S/swhold.py" 33 1 >/dev/null 2>&1
+                    setsid_as_user python3 "$S/swhold.py" "$DOOR" 1 >/dev/null 2>&1
                     first=
                 fi
-                setsid_as_user python3 "$S/swhold.py" 33 0 >/dev/null 2>&1
+                setsid_as_user python3 "$S/swhold.py" "$DOOR" 0 >/dev/null 2>&1
             fi
             sleep 2
         done
     ) &
     echo "[watch] coin door held OPEN through boot (PAD_DOOR_OPEN=1):"
-    echo "[watch] service buttons unlocked; close the door (swhold.py 33 1)"
-    echo "[watch] when done."
+    echo "[watch] service buttons unlocked; close the door when done"
+    echo "[watch] (swhold.py <id> 1 - the id is the title's node-0-bit-23 row)."
 fi
 
 # KEY EVENTS, on THIS script's stdout. The app's Emulate tab drains watch.sh's

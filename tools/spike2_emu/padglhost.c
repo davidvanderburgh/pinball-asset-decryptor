@@ -752,17 +752,23 @@ struct keybind {
     short         ids[7];   /* 0-terminated list of switch ids */
     int           toggle;   /* 1 = latching, for things you hold for minutes */
     int           live;     /* 0 = playfield; a SECTION MARKER, not "inert" */
-    /* ★ ITEM 27/48: NULL want[0] marks a PLATFORM switch (service buttons,
-     * start, coin, tilt, door), whose (node,bit) layout measured identical
-     * on every title from 2017 to 2024 - those ids are never re-resolved.
-     * Non-NULL marks a playfield row. In the compiled table those rows are
-     * GODZILLA PRO's and act only as the no-rig-env fallback (item 27's
-     * candidate lists live in them); on a rigged run binds_playfield()
-     * replaces them with rows derived from the title's own switch list,
-     * where want[0] is simply the matched switch's name. Item 27's reason
-     * stands either way: an id acted on must come from THIS title's table -
-     * David's arrows on star_wars were pressing a FORC(E) DROP TARGET,
-     * because Godzilla's 60 is that title's id for it. */
+    /* ★ ITEM 27/48/73: NULL want[0] marks a PLATFORM switch (service
+     * buttons, start, coin, tilt, door), whose (node,bit) layout measured
+     * identical on every title from 2017 to 2024. Their IDS are not
+     * universal though - the id is the title's table index - so on a rigged
+     * run binds_cabinet() re-resolves each platform row to the id its
+     * (node,bit) has in the title's own list (item 73: compiled id 25 on
+     * aerosmith was DIP 8, not Service Select). want[0] stays NULL through
+     * that: it is also the marker that exempts these rows from the item-49
+     * withhold gate. Non-NULL marks a playfield row. In the compiled table
+     * those rows are GODZILLA PRO's and act only as the no-rig-env fallback
+     * (item 27's candidate lists live in them); on a rigged run
+     * binds_playfield() replaces them with rows derived from the title's
+     * own switch list, where want[0] is simply the matched switch's name.
+     * Item 27's reason stands either way: an id acted on must come from
+     * THIS title's table - David's arrows on star_wars were pressing a
+     * FORC(E) DROP TARGET, because Godzilla's 60 is that title's id for
+     * it. */
     const char   *want[4];
 };
 
@@ -789,8 +795,11 @@ struct keybind {
  * playfield tail with rows derived from the title's own switch list; the
  * compiled rows act only on a launch with NO rig env at all (the -1 case
  * below), where they are the only semantics this binary has. The CABINET
- * rows stay compiled always - their (node,bit) layout measured identical
- * on every title 2017-2024.
+ * rows' compiled ids are godzilla's too (★ ITEM 73): their (node,bit)
+ * layout IS identical on every title 2017-2024, but an id is a table INDEX
+ * and drifts per generation, so binds_cabinet() re-resolves them by wire
+ * from the same list. Until a list parses the compiled ids stand - Start
+ * on a first run must keep working.
  *
  * The candidate names in the fallback rows are MEASURED, not guessed - the
  * derived switch lists on this disk agree on "LEFT/RIGHT FLIPPER BUTTON",
@@ -862,8 +871,11 @@ static unsigned char key_latch[MAXBINDS];   /* toggles currently latched     */
 /* The parsed switch list, kept at file scope because binds_playfield() reads
  * it after binds_resolve() fills it. sw_nm is UPPERCASED for matching; sw_disp
  * keeps the table's own case, because it becomes the legend label and the
- * legend must never disagree with the table about what a key presses. */
+ * legend must never disagree with the table about what a key presses.
+ * ★ ITEM 73: node/bit are kept too - the cabinet rows resolve by them. */
 static short sw_id[192];
+static short sw_node[192];
+static short sw_bit[192];
 static char  sw_nm[192][44];
 static char  sw_disp[192][44];
 
@@ -1030,6 +1042,68 @@ static void binds_playfield(int n)
             getenv("PAD_GAME") ? getenv("PAD_GAME") : "?");
 }
 
+/* ★ ITEM 73: THE CABINET ROWS RESOLVE BY (node,bit), BECAUSE THE WIRES ARE
+ * UNIVERSAL AND THE IDS ARE NOT. The header above this table used to argue
+ * the cabinet ids never need re-resolving because their (node,bit) layout is
+ * identical on every title 2017-2024. The layout half is true - all 29
+ * derived switch lists on this disk agree on every wire below - but the id
+ * an entry sits at is the title's own table INDEX, and that drifts: SERVICE
+ * SELECT (node 0 bit 8) is id 25 on the godzilla generation, 26 on
+ * aerosmith/avengers/foo_fighters/guardians/iron_maiden/jurassic_park/mando/
+ * rush, 28 on batman, 190/193 on munsters/sword_of_rage. Since sw_publish()
+ * hands the shim bare IDS and the shim maps them through the title's own
+ * table, compiled id 25 pressed on aerosmith closed node 0 bit 7 = DIP 8
+ * (David's report, 2026-08-23, three titles, symptom for symptom). hwshim's
+ * item-27 note already counted this table among "the FOURTH copy of
+ * Godzilla's numbers to be found holding a wrong switch".
+ *
+ * So: once the title's list parses, each platform row takes the id its
+ * (node,bit) has THERE. Resolution is by wire and not by name because the
+ * names drift too ("LOCKDOWN BUTTON" vs "Action Button", "(OPTIONAL)"
+ * suffixes) and five titles' lists are all-'?' - their wires still resolve.
+ * want[0] stays NULL: it is the PLATFORM MARKER that exempts these rows from
+ * the item-49 withhold gate, and Start-on-a-first-run must keep working on
+ * the compiled ids until the table lands (the 2 s poll then re-resolves and
+ * re-exports). A wire missing from a list keeps its compiled id - today's
+ * behaviour, stated in the log. */
+static const struct { const char *what; short node, bit; } cab_wire[] = {
+    { "Service Select",   0,  8 },
+    { "Service Plus",     0,  9 },
+    { "Service Minus",    0, 10 },
+    { "Service Back",     0, 11 },
+    { "Start Button",     1, 11 },
+    { "Left Coin",        1, 16 },
+    { "Action Button",    1,  2 },   /* = LOCKDOWN BUTTON on older lists */
+    { "Tilt Pendulum",    1, 14 },
+    { "Coin Door Closed", 0, 23 },   /* the interlock the C toggle holds */
+};
+
+static void binds_cabinet(int n)
+{
+    int i, w, k;
+    for (i = 0; i < nbinds; i++) {
+        if (binds[i].want[0] || !binds[i].live) continue;
+        for (w = 0; w < (int)(sizeof cab_wire / sizeof cab_wire[0]); w++)
+            if (!strcmp(binds[i].what, cab_wire[w].what)) break;
+        if (w == (int)(sizeof cab_wire / sizeof cab_wire[0])) continue;
+        for (k = 0; k < n; k++)
+            if (sw_node[k] == cab_wire[w].node &&
+                sw_bit[k]  == cab_wire[w].bit) break;
+        if (k == n) {
+            fprintf(stderr, "[padglhost] cabinet %-16s (node %d bit %d) not "
+                    "in this title's list: id stays %d\n", binds[i].what,
+                    cab_wire[w].node, cab_wire[w].bit, binds[i].ids[0]);
+            continue;
+        }
+        if (binds[i].ids[0] != sw_id[k])
+            fprintf(stderr, "[padglhost] cabinet %-16s id %d -> %d "
+                    "(node %d bit %d)\n", binds[i].what, binds[i].ids[0],
+                    sw_id[k], cab_wire[w].node, cab_wire[w].bit);
+        binds[i].ids[0] = sw_id[k];
+        binds[i].ids[1] = 0;
+    }
+}
+
 /* ★ ITEM 27: RESOLVE THE BINDS FROM THE TITLE'S OWN SWITCH LIST, the same
  * unblock plunge.py got (`6d19946`): the NAME is the portable identifier,
  * the id is not. Godzilla's 60/59 are its flipper buttons; star_wars puts
@@ -1092,12 +1166,13 @@ static int binds_resolve(void)
            fgets(line, sizeof line, f)) {
         /* `id num node bit name...`; the name is the rest of the line. */
         char *p = line;
-        long id;
-        int  fld;
+        long id, node, bit;
         if (line[0] == '#') continue;
         id = strtol(p, &p, 10);
         if (id <= 0 || id >= PADSW_MAX_ID) continue;
-        for (fld = 0; fld < 3; fld++) strtol(p, &p, 10);
+        strtol(p, &p, 10);                 /* num: the Switch Test number */
+        node = strtol(p, &p, 10);
+        bit  = strtol(p, &p, 10);
         while (*p == ' ' || *p == '\t') p++;
         for (k = 0; p[k] && p[k] != '\n' && p[k] != '\r' &&
                     k < (int)sizeof sw_nm[0] - 1; k++) {
@@ -1108,7 +1183,9 @@ static int binds_resolve(void)
         sw_nm[n][k] = 0;
         sw_disp[n][k] = 0;
         if (!k) continue;
-        sw_id[n] = (short)id;
+        sw_id[n]   = (short)id;
+        sw_node[n] = (short)node;
+        sw_bit[n]  = (short)bit;
         n++;
     }
     fclose(f);
@@ -1125,6 +1202,11 @@ static int binds_resolve(void)
                             "--force` rebuilds it)\n", path);
         return 0;
     }
+
+    /* ★ ITEM 73: the cabinet head takes the title's own ids first - by
+     * wire, see cab_wire[] - so Enter is Service Select on every
+     * generation, not only godzilla's. */
+    binds_cabinet(n);
 
     /* ★ ITEM 48: no more per-row candidate matching against a compiled menu
      * - the playfield tail is REBUILT from what the title actually has. */

@@ -76,13 +76,39 @@ REFUSE = [
 #: Refused unless --coins: each closure awards a credit and moves the audits.
 COINS = [("* COIN", "would award a credit"), ("COIN *", "would award a credit")]
 
+#: ★ ITEM 73: THE WIRE BACKSTOP. The globs above match NAMES, and five
+#: titles' lists are all-'?' (item 29) - on those, every glob missed and the
+#: plan FAILED OPEN, queueing the dips, the service keys, Start and the door
+#: interlock. The cabinet's (node,bit) layout is universal across every
+#: derived list on this disk, so these wires are refusable without a name.
+#: Node 0 is the whole cabinet input word: dips, service keys, door
+#: interlock, headphone/volume, QR status - nothing on it is exercisable.
+#: Node 1 carries Start (bit 11), Tournament Start (12), Ticket Notch (8),
+#: Slam Tilt (22) and the coin chutes (16..21); the Action/Lockdown button
+#: (1,2) and Tilt Pendulum (1,14) stay exercisable, matching the name policy.
+WIRE_REFUSE = [
+    (0, None, "node 0 is the cabinet word - config/service/door/status"),
+    (1, 8,    "drives the ticket dispenser"),
+    (1, 11,   "would start a game"),
+    (1, 12,   "would start a game"),
+    (1, 22,   "ends a game and writes an audit"),
+]
+WIRE_COINS = [(1, b, "would award a credit") for b in range(16, 22)]
+
+
+def _wire_why(node, bit, wires):
+    for n, b, why in wires:
+        if node == n and (b is None or bit == b):
+            return why
+    return None
+
 #: Closed on a machine at rest, so exercising one is open-then-close. swinit.py
 #: holds the same set at boot; plunge.py owns what they MEAN about balls.
 CLOSED_AT_REST = ["TROUGH *"]
 
 
 def switches():
-    """(id, num, node, name) for this title, from its own switch table."""
+    """(id, num, node, bit, name) for this title, from its own switch table."""
     path = gameinfo.table("switch_list.txt")
     if not path or not os.path.exists(path):
         print("swexercise: no switch_list.txt for this title yet - it arrives "
@@ -94,7 +120,8 @@ def switches():
             continue
         f = line.split(None, 4)
         if len(f) >= 5:
-            out.append((int(f[0]), int(f[1]), int(f[2]), f[4].strip()))
+            out.append((int(f[0]), int(f[1]), int(f[2]), int(f[3]),
+                        f[4].strip()))
     return out
 
 
@@ -112,9 +139,13 @@ def _rests_closed(name):
 def plan(coins=False, only=None, skip=None):
     """What would be exercised and what would not, with a reason for each."""
     refuse = list(REFUSE) + ([] if coins else COINS)
+    wires = list(WIRE_REFUSE) + ([] if coins else WIRE_COINS)
     doing, refused = [], []
-    for sw, num, node, name in switches():
-        why = _why(name, refuse)
+    for sw, num, node, bit, name in switches():
+        # Name policy first (its reasons are the specific ones), then the
+        # item-73 wire backstop, which is what still refuses on a title
+        # whose names are all '?'.
+        why = _why(name, refuse) or _wire_why(node, bit, wires)
         if why is None and only and not any(
                 fnmatch.fnmatch(name.upper(), g.upper()) for g in only):
             why = "not in --only"

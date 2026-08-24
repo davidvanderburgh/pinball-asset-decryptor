@@ -4232,10 +4232,44 @@ These have each been violated at least once and each cost a run or a window:
       across possibly several generations — grade is from the armchair
       until the census sizes it.
 
-- [ ] **73. The FIXED cabinet keys are compiled to GODZILLA's switch ids, so
+- [x] **73. The FIXED cabinet keys are compiled to GODZILLA's switch ids, so
       on the swelf-generation titles Enter lands on a DIP switch instead of
       Service Select — mechanism CONFIRMED at the desk on all three reported
-      titles.** `S2 D2`
+      titles.** `S2 D2` DONE 2026-08-23, `item/73`, `9327708`..`0e1bec9`,
+      awaiting `/finish`.
+      **★★★ CLOSED 2026-08-23 — resolve by WIRE, in NINE copies, desk-oracled
+      over all 30 titles and live-verified on two.** The law: the cabinet's
+      (node,bit) layout is universal (all 29 lists agree), the ID is the
+      title's table index and drifts — TWELVE titles were wrong, not three
+      (the eight id-26 titles + batman + munsters/sword_of_rage at 190+, and
+      bond60th's Ticket Notch quietly shifting Tilt/Left Coin by one).
+      Fixed: padglhost binds_cabinet() (want[0] stays NULL, item-49 gate
+      untouched, compiled ids stand until a list parses); hwshim
+      sw_rest_resolve door by (0,23) + sw_active[128→256] (the old guard
+      silently dropped every munsters/sword row before the wire check —
+      found by the adversarial review, invisible to the oracle and both live
+      runs); watch.sh PAD_DOOR_OPEN (a seventh compiled 33, re-resolved per
+      pass); swinit.py headless rest set (desk-proven: munsters
+      [198,234-239], batman [36,71-76], godzilla unchanged); playfield 48V
+      door id (+ artwork-view fallback to the full list); plunge door;
+      swshow at-rest rows (assign, not setdefault — batman's door 36
+      collided with godzilla's "Start" label); autoattract BACK (re-resolved
+      before every press for first-run arrival); swexercise wire-refusal
+      backstop (the name globs failed OPEN on the five all-'?' titles).
+      **Evidence:** --binds desk oracle before/after under the rig lock — 18
+      titles byte-identical (godzilla family + ?-five), 12 remapped,
+      **330/330 exported cabinet rows match each title's own list**,
+      godzilla_pro byte-identical control. 341 spike2 tests green. **LIVE:
+      batman and avengers** — real xdotool Enter flipped the cabinet SPI
+      word at node 0 bit 8 ([cabchg] ff0f0f→ff0e0f, ~700 ms held) =
+      SERVICE SELECT on the game's own wiring, where the old build pressed
+      DIP 6 / DIP 8; [swrest] logged "door resolved: id 36 / 34, not 33";
+      autoattract's resolved Back visible as bit-11 pulses. **Aerosmith's
+      live half is the stated exception:** its guest exits under scripted
+      watch.sh on MAIN too (control-proven, filed as item 75), so it rests
+      on the desk oracle plus its own run's renderer log (all 11 remaps,
+      Enter→26, logged live before the guest died). Long form: handoff
+      "CLOSED item 73".
       *(Filed 2026-08-23 from David's own test notes: "Switches are not
       mapped correctly. Enter does 'Dip 8' for example" — Aerosmith and
       Avengers; Batman reads "Dip 6". Together with item 34's re-copies:
@@ -4275,6 +4309,60 @@ These have each been violated at least once and each cost a run or a window:
       generation — David's words above. D2: the mechanism is desk-confirmed
       and the name-resolving machinery exists; what is left is plumbing plus
       a three-title confirming run.
+      **Established (2026-08-23 pass, desk sweep of all 29 switch lists on
+      disk):** (1) the cabinet **(node,bit) layout is UNIVERSAL** — every
+      list that names its rows agrees (Service Select 0/8, Plus 0/9, Minus
+      0/10, Back 0/11, Coin Door Interlock 0/23, Lockdown/Action 1/2, Start
+      1/11, Tournament Start 1/12, Tilt Pendulum 1/14, coins 1/16..21), so
+      padglhost.c:791-793's premise was right about the wires and wrong only
+      about the ids. (2) The id for Service Select (0,8) by title: **25** =
+      godzilla-family + the five ?-name titles (elvira3, james_bond_le,
+      king_kong_le, led_zeppelin_le, metallica_spike — compiled ids already
+      CORRECT there); **26** = aerosmith, avengers, foo_fighters, guardians,
+      iron_maiden, jurassic_park, mando, rush; **28** = batman; **190/193** =
+      munsters, sword_of_rage. **ELEVEN titles are broken today, not three.**
+      (3) Resolution key must be **(node,bit), NOT name**: names vary
+      ("LOCKDOWN BUTTON" vs "Action Button", "(OPTIONAL)" suffixes, trailing
+      spaces, "Coin Door Power Interlock" vs "COIN DOOR INTERLOCK") and are
+      all "?" on five titles where (node,bit) still resolves.
+      **IMPLEMENTED (2026-08-23, item/73 `9327708`+`2d80977`) in SIX copies:**
+      padglhost binds_cabinet() (by wire at binds_resolve, want[0] stays NULL
+      so the item-49 gate is untouched), hwshim sw_rest door (0,23), playfield
+      48V-banner door id, swshow at-rest door/Start, plunge door (its _WANT
+      name misses this family), autoattract BACK (compiled 28 = batman's
+      Service SELECT — it would walk INTO the menu). nav.sh doc fixed;
+      ringwatch.py deliberately kept godzilla-wide (godzilla-addressed RE
+      instrument). gstvid's "switch 33" is a tombstone comment, no code.
+      **DESK ORACLE PASSED, all 30 titles:** --binds before/after under the
+      rig lock — 18 titles byte-identical (godzilla family + the five
+      ?-name titles), 12 remapped, and a cross-check of every exported
+      cabinet row against its own list = **330/330 correct, 0 mismatches**.
+      godzilla_pro export byte-identical (the control). Bonus catch:
+      james_bond_60th_le is a TWELFTH broken title — its Ticket Notch shifts
+      Tilt/Left Coin ids by one, so T pressed Left Coin there; nobody had
+      noticed. Live renderer log on a real aerosmith run shows all 11
+      remaps + Enter=26.
+      **LIVE HALF BLOCKED ON A RUN ANOMALY, being bisected:** aerosmith's
+      GUEST exits ~1-2 min into boot on this session's non-interactive
+      watch.sh runs (three runs: with/without GL_RAISE, with/without
+      autoattract+ballfeed — all exited; no SEGV, log ends after the scene
+      enumeration at [sleep] #1500). David's own GUI runs of the same card
+      today reached the switch-report state on main. My shim edit is
+      provably inert pre-table (no [swrest] line = silent no-file/early
+      return; pre-table cabinet word is the synthetic constant either way).
+      **CONTROL VERDICT: MAIN'S CODE EXITS IDENTICALLY** (same env, same
+      card, same silent death after scene enumeration, [gst] 3 factories
+      up) — **this branch is exonerated**; the aerosmith guest-exit is a
+      pre-existing anomaly of scripted runs on the current state (item 57
+      booted aerosmith via watch.sh ~Aug 18, so it is also recent — David's
+      GUI runs today are the last known-good). To be filed as its own item
+      with the control evidence, not chased inside this one.
+      **Resume:** batman + avengers live runs (in flight): at attract,
+      xdotool Enter into "<game> - Stern Spike 2 emulator", read [swchg]
+      naming SERVICE SELECT; then file the aerosmith-exit item and close
+      per the acceptance (state plainly that aerosmith's live half rests on
+      the desk oracle + the live renderer remap log until its boot anomaly
+      is fixed).
 
 - [ ] **74. A boot that is copying the card shows NOTHING about the copy —
       minutes of "Startup In Progress" with no hint that a ~7 GB dd is
@@ -4303,6 +4391,44 @@ These have each been violated at least once and each cost a run or a window:
       pays it once; what it costs is testers reading a working boot as a
       hang. D2: mechanism fully known, the log and file sizes exist to draw
       progress from; needs one live copying boot to confirm.
+
+- [ ] **75. aerosmith_le's GUEST exits silently ~1-2 min into a scripted
+      watch.sh boot — and MAIN'S CODE does it identically, control-proven.**
+      `S3 D3`
+      *(Filed 2026-08-23 out of item 73's live verification, which hit it
+      three times and bisected it off that branch with a fourth run.)*
+      **Measured, four runs, one evening, same card
+      (images/Stern/spike2/aerosmith_le-1_15_0.Release.8G.sdcard.raw, the
+      cached copy):** item/73 code with defaults; with PAD_GL_RAISE=0; with
+      autoattract AND ballfeed disabled; and MAIN's checkout with the
+      identical env — every run: video bring-up completes ([gst] 3
+      factories), the scene enumeration walks ~103 scene.radium paths, then
+      the guest is GONE — no SEGV, no qemu signal report, no exit line;
+      the log's last line is the [sleep] #1500 cap so the death is not even
+      timestamped. watch.sh reports "the game exited" and tears down.
+      **What makes it strange:** batman and avengers_infinity_le boot fine
+      in the SAME session with the SAME flow (batman confirmed up 5+ min,
+      table loaded, keys pressed); item 57 live-verified aerosmith via
+      watch.sh ~2026-08-18; and David's own GUI runs of this exact card
+      earlier on 2026-08-23 reached a state where key presses drew switch
+      names. So it is aerosmith-specific AND recent AND possibly
+      script-flow-specific (env: PAD_SW_CHANGES=1 PAD_GL_RAISE=0 set in
+      all four runs — both were also absent from David's GUI flow, so they
+      are NOT excluded as the trigger; a run without them is the first
+      thing to try).
+      **Also on the suspect list:** whatever state David's session wrote
+      today (his Enter presses on this title landed on DIP 8 pre-item-73,
+      i.e. REAL dip toggles on the setup screen — if the game persisted a
+      half-applied config, every boot since may be tripping on it; the
+      title's writable state vs the card's read-only mount is where to
+      look).
+      **Acceptance:** aerosmith_le boots to attract under plain scripted
+      watch.sh again, the cause is named, and whichever of the suspects
+      above was innocent is written down as ruled out with its run.
+      — S3: one title, and the GUI flow may still work (unverified today);
+      nothing else is blocked. D3: needs runs, reproduces on demand (4/4),
+      instruments exist — the missing piece is an exit-reason hook on the
+      guest (item 23's) wired into this flow.
 
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T

@@ -4582,10 +4582,30 @@ These have each been violated at least once and each cost a run or a window:
       from a full WSL disk, which fails copies and worse. D2: desk work,
       the copy path is proven, one dialog; no emulator run needed.
 
-- [ ] **78. The Emulate tab shows the extract pipeline's footer — Detect/
+- [x] **78. The Emulate tab shows the extract pipeline's footer — Detect/
       Locate-partitions chips and a bar that never moves — instead of the
       emulation's own loading state; and the Sound / Skip-to-attract
-      tickboxes are dead weight.** `S3 D1` ← WORKING ON
+      tickboxes are dead weight.** `S3 D1` DONE 2026-08-24, `item/74`
+      (folded), `b897402` + `52379f0`, awaiting `/finish`.
+      **CLOSED 2026-08-24, same morning.** Entering an Emulate tab hides
+      both chip rows; the Stern panel drives the footer bar through
+      MainWindow.set_emulate_progress — determinate card-copy percent,
+      marquee through booting/techalerts, full at attract, empty idle —
+      with a _footer_owner handshake so a running pipeline job keeps its
+      footer and leaving the tab hands it back. Both tickboxes removed
+      (volume slider owns loudness, boots land in attract since item 63;
+      PAD_AUDIO=0 / PAD_AUTO_ATTRACT=0 stay for scripted runs). Mid-pass
+      follow-ups from David, all in: "Copying card" explains its
+      why/where/once-per-build in the hint line AND a hover tip on the
+      state label (a rebuilt image re-copies once, replacing the old
+      entry); "Waiting at Tech Alerts" → "Passing Tech Alerts…" while the
+      helper presses / "At Tech Alerts" when a human must / "Stuck"
+      unchanged; "In attract mode" → "Game running" (the rig deliberately
+      cannot tell attract from play — gamestate.sh — so the label claims
+      only what it knows). Help tips reworked to match. Full suite 2962
+      passed / 0 failed; wording tests updated with their points intact.
+      **Not eyeballed live** — same caveat as 74/77, one launch shows all
+      three items at once.
       *(Filed 2026-08-24 from David's morning screenshot + follow-up,
       folded onto item/74's branch like item 77: "why are we showing this
       progress bar on the emulate tab? let's use the progress bar for

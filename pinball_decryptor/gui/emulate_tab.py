@@ -2737,7 +2737,9 @@ class EmulatePanel:
         """
         if self._badge_fn is None:
             lbl = ttk.Label(parent, text="(i)", foreground="#2f80ed")
-            _Tooltip(lbl, tip, self._theme_fn, place="side")
+            # Same attribute the real badge exposes, so _state_badge_set can
+            # retext either shape without asking which it got.
+            lbl.icon_tip = _Tooltip(lbl, tip, self._theme_fn, place="side")
             return lbl
         badge = self._badge_fn(parent, "i", "#2f80ed", "#5296f2",
                                tip, lambda: None, size=18,
@@ -4232,14 +4234,19 @@ class EmulatePanel:
         threading.Thread(target=run, daemon=True).start()
         self._schedule_poll()
 
-    def _copy_badge_show(self, show):
-        """Pack or unpack the ⓘ beside the state — idempotent, main loop
-        only (both callers are)."""
+    def _state_badge_set(self, tip_text):
+        """Show the ⓘ beside the state with ``tip_text`` on it, or hide it
+        when there is nothing to explain — idempotent, main loop only.
+        EVERY long state explanation lives here now, not just the copy's
+        (David: the gray hint line duplicated the footer text and got cut
+        off — "put all the text under the progress bar instead", with the
+        long form behind the ⓘ)."""
         try:
+            self._copy_badge.icon_tip.text = tip_text or ""
             mapped = bool(self._copy_badge.winfo_ismapped())
-            if show and not mapped:
+            if tip_text and not mapped:
                 self._copy_badge.pack(side=tk.LEFT, padx=(6, 0))
-            elif not show and mapped:
+            elif not tip_text and mapped:
                 self._copy_badge.pack_forget()
         except (AttributeError, tk.TclError):
             pass
@@ -4250,7 +4257,7 @@ class EmulatePanel:
         drain itself.  The blue ⓘ beside the state carries the why/where/
         once explanation for as long as the copy narrates."""
         self._set("state", text)
-        self._copy_badge_show(True)
+        self._state_badge_set(_COPY_EXPLAIN)
         if self._footer_cb is not None:
             try:
                 self._footer_cb("copy", pct, text)
@@ -4268,22 +4275,30 @@ class EmulatePanel:
             copying = self._copying is not None and not self._stopping
             if copying:
                 label = self._copying
-            self._copy_badge_show(copying)
+            self._state_badge_set(_COPY_EXPLAIN if copying else hint)
             self._set("state", label)
-            self._hint.configure(text=hint)
-            # Item 78: the footer bar under the notebook mirrors the loading
+            # The gray hint line no longer narrates states — the ⓘ beside
+            # the state carries the long explanation and the footer line
+            # under the bar carries the short one (David: the gray line
+            # duplicated the footer and got cut off).  Cleared rather than
+            # left alone, so action feedback (_source_env's "pick a card"
+            # etc.) still expires on the next poll exactly as it always did.
+            self._hint.configure(text="")
+            # Item 78: the footer under the notebook mirrors the loading
             # state while this tab is showing (the window ignores the call
-            # otherwise): determinate copy percent, marquee through the
-            # boot, full at attract, empty when nothing runs.
+            # otherwise): the emulate chip ladder plus a bar that never
+            # bounces — real copy percent, then a fixed value per stage.
             if self._footer_cb is not None:
-                if self._copying is not None and not self._stopping:
+                if copying:
                     self._footer_cb("copy", self._copying_pct, self._copying)
                 elif info.get("running") == "1":
-                    if info.get("state") in ("attract", "running"):
+                    st = info.get("state")
+                    if st in ("attract", "running"):
                         self._footer_cb("run", None, st_label)
+                    elif st == "techalerts":
+                        self._footer_cb("techalerts", None, st_label)
                     else:
-                        self._footer_cb("boot", None,
-                                        "Loading the emulator — " + st_label)
+                        self._footer_cb("boot", None, st_label)
                 else:
                     self._footer_cb("idle")
 

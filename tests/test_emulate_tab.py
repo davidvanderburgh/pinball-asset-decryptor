@@ -2323,9 +2323,10 @@ def test_the_footer_follows_the_emulation_state(monkeypatch, tmp_path):
         panel._apply({"state": "booting", "running": "1", "procs": "5"})
         assert pushes[-1][0] == "boot"
         assert "Starting" in pushes[-1][2]
-        # Tech Alerts is still LOADING — the bar must not read done there.
+        # Tech Alerts is its OWN chip on the ladder — still loading, never
+        # done, and never the same chip as the boot.
         panel._apply({"state": "techalerts", "running": "1", "procs": "5"})
-        assert pushes[-1][0] == "boot"
+        assert pushes[-1][0] == "techalerts"
         panel._apply({"state": "attract", "running": "1", "procs": "5"})
         assert pushes[-1][0] == "run"
         # A copy in flight outranks everything the poll says (the guest is

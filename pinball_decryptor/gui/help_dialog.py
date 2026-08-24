@@ -926,37 +926,38 @@ HELP_CONTENT = {
          "tabs does not change what the emulator plays until you build a card "
          "and pick it here. The path is remembered per project, so it comes "
          "back on the next launch without another Browse."),
-        ("Waiting at Tech Alerts is not a fault",
-         "The game boots to its Tech Alerts screen and waits there for an "
-         "operator, exactly like the real machine. Press a switch in the game "
-         "window — Enter is Service Select — and it carries on. The status "
-         "line says \"Waiting at Tech Alerts\" rather than pretending "
-         "something is wrong. \"Stuck at Tech Alerts\" is the different one: "
-         "it means the skip-to-attract helper pressed several times and the "
-         "screen never changed, and its hint says what to try."),
-        ("Skip to attract mode",
-         "Ticked by default. It waits until the node bus has finished bringing "
-         "up — that is the point at which the game will actually accept an "
-         "operator — and then presses Service Back once, which takes it "
-         "straight to attract mode. It cannot be saved instead: the screen is "
-         "a live readout of the boot checks, not an acknowledgement the "
-         "machine remembers, and the emulator's NVRAM already persists between "
-         "runs. Untick it to drive the boot yourself."),
-        ("Sound",
-         "The game's audio is played out to your speakers — through WSL on "
-         "Windows, and on macOS over a local stream played by ffplay, which "
-         "ships with the ffmpeg the prerequisites already install. It "
-         "only makes sound while it is actually running, so silence after the "
-         "boot chime usually means it is still waiting at Tech Alerts. The "
-         "status line shows frames played and frames dropped — dropped should "
-         "stay at zero."),
+        ("First boots copy the card — and Cache… shows where that space went",
+         "The first boot of a card copies it to a local cache so every "
+         "later boot starts in seconds instead of minutes. That copy is "
+         "narrated in the status line (\"Copying card: …\") and starts in "
+         "the background the moment you pick a card, so it is often already "
+         "done by the time you press Start. Cached copies add up — the "
+         "Cache… button beside Browse lists every cached card with its real "
+         "size on disk and when it last booted, and lets you delete any of "
+         "them. Deleting is always safe: the card just re-copies on its "
+         "next boot. When disk space runs low, the cache also cleans "
+         "itself, dropping the cards you have not booted for the longest."),
+        ("Tech Alerts handles itself",
+         "The game boots through its Tech Alerts screen — the machine's "
+         "operator readout — and the emulator steps past it automatically, "
+         "so a normal boot goes straight on to attract. While that is "
+         "happening the status line says \"Passing Tech Alerts…\". "
+         "\"Stuck at Tech Alerts\" is the one that needs you: the helper "
+         "pressed several times and the screen never changed, and its hint "
+         "says what to try. Once up, the status reads \"Game running\" — "
+         "the rig deliberately does not guess between the attract loop, the "
+         "operator menu, and a game you are playing."),
         ("Volume and Mute",
-         "Sets the level of the emulator's OWN sound coming out of your PC "
-         "speakers — not the in-game volume the coin door's -/+ buttons "
-         "adjust, which is a per-title setting on the machine itself and is "
-         "left alone. Both work live on a run that is already going, with no "
-         "restart needed, and the level you leave them at is remembered for "
-         "next time."),
+         "The game's audio always plays out to your PC speakers — through WSL "
+         "on Windows, and on macOS over a local stream played by ffplay — and "
+         "this slider is the one control over it. It sets the level of the "
+         "emulator's OWN sound, not the in-game volume the coin door's -/+ "
+         "buttons adjust, which is a per-title setting on the machine itself "
+         "and is left alone. Both work live on a run that is already going, "
+         "with no restart needed, and the level you leave them at is "
+         "remembered for next time. Silence after the boot chime usually "
+         "means the game is still waiting at Tech Alerts — it only makes "
+         "sound while it is actually running."),
         ("Video",
          "Clips play. The game's own decoder is an i.MX6 hardware block this "
          "PC does not have and the card carries no software fallback, so the "

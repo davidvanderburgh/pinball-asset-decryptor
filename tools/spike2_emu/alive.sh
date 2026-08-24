@@ -218,7 +218,7 @@ while :; do
     ANC="$ANC
 $_p"
 done
-SCRIPT=$(pgrep -f '^bash .*(watch|runbridge|nbrun|run_game)\.sh' 2>/dev/null \
+SCRIPT=$(pgrep -f '^bash .*(watch|runbridge|nbrun|run_game|cardmount)\.sh' 2>/dev/null \
          | grep -cvxF "$ANC")
 SCRIPT=${SCRIPT:-0}
 

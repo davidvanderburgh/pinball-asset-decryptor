@@ -2291,6 +2291,12 @@ class MainWindow:
         self._extract_phases_frame = ttk.Frame(status_frame)
         self._extract_phases_frame.pack(fill=tk.X)
         self._write_phases_frame = ttk.Frame(status_frame)
+        # Item 78: the Emulate tab's OWN chip row (Copy card / Boot / Tech
+        # Alerts / Attract), a third sibling rather than a borrowed extract
+        # row — manufacturer switches rebuild the other two and must not
+        # fight the emulation for labels.  Packed only while an Emulate tab
+        # shows; set_emulate_progress drives it.
+        self._emulate_phases_frame = ttk.Frame(status_frame)
 
         self._progress_bar = ttk.Progressbar(status_frame, mode="determinate",
                                              maximum=100)
@@ -13356,7 +13362,11 @@ class MainWindow:
             # sitting on this tab (a WSL restart re-probes), and the notebook
             # pane is pinned to the height it was measured at — so the panel
             # has to be able to say "I am taller now".
-            resize_fn=self._resize_notebook_to_current_tab)
+            resize_fn=self._resize_notebook_to_current_tab,
+            # Item 78: the footer bar under the notebook is the panel's to
+            # drive while its tab is showing - copy percent, boot marquee,
+            # full at attract.
+            footer_cb=self.set_emulate_progress)
         self._emulate_panel.build(self._tab_emulate)
 
     def _build_jjp_emulate_tab(self):
@@ -14705,8 +14715,22 @@ class MainWindow:
             labels.append(lbl)
         if mode == "extract":
             self._extract_phase_labels = labels
+        elif mode == "emulate":
+            self._emulate_phase_labels = labels
         else:
             self._write_phase_labels = labels
+
+    #: The Emulate tab's boot stages (item 78).  Fixed, unlike the extract/
+    #: write tuples: every Spike 2 boot walks this exact ladder, and a card
+    #: that is already cached simply starts with "Copy card" ticked off.
+    #: "Node boards", not "Tech Alerts" (David, 2026-08-24): what the stage
+    #: actually spends its time on is the node bus bringing every board up -
+    #: the alerts screen is the readout at the end of it, and the helper
+    #: waits for the bring-up before pressing past it.
+    #: ...and "Ready", not "Attract" (same day): the last chip is the
+    #: user's answer ("can I play now?"), not the machine's word for the
+    #: screen it happens to be showing.
+    EMULATE_PHASES = ("Copy card", "Boot", "Node boards", "Ready")
 
     def _init_phase_steps(self):
         # Initial labels — apply_manufacturer rebuilds them per-mfr later.
@@ -14716,6 +14740,9 @@ class MainWindow:
                                 self._extract_phases, "extract")
         self._build_phase_steps(self._write_phases_frame,
                                 self._write_phases, "write")
+        self._emulate_phases = self.EMULATE_PHASES
+        self._build_phase_steps(self._emulate_phases_frame,
+                                self._emulate_phases, "emulate")
 
     def _rebuild_phase_steps(self, extract_phases, write_phases):
         """Tear down + rebuild the phase indicator widgets when the
@@ -14733,6 +14760,18 @@ class MainWindow:
 
     def _on_tab_changed(self, _event=None):
         text = self._current_tab_key()   # stable key, not the short label
+        # Item 78: leaving an Emulate tab hands the footer back to the
+        # pipeline - without this the bar stays wherever the emulation left
+        # it (full after a boot) underneath the freshly repacked chips.
+        if text not in ("Emulate", "Emulate JJP"):
+            self._emulate_phases_frame.pack_forget()
+            if getattr(self, "_footer_owner", "pipeline") == "emulate" \
+                    and not getattr(self, "_running", False):
+                self._footer_owner = "pipeline"
+                self._progress_bar.stop()
+                self._progress_bar.configure(mode="determinate")
+                self._progress_bar["value"] = 0
+                self.set_status("Ready")
         # Switching tabs means leaving whatever preview was playing.  Each tab
         # owns its own player (Replace Audio's spectrogram transport, Replace
         # Video's embedded clip); an ffplay child keeps the sound going under
@@ -14788,6 +14827,19 @@ class MainWindow:
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
             self._pex_default_from_extract()
+        elif text in ("Emulate", "Emulate JJP"):
+            # Item 78 (David, 2026-08-24: "why are we showing this progress
+            # bar on the emulate tab?"): the extract/write chips swap for
+            # the emulation's OWN ladder (Copy card / Boot / Tech Alerts /
+            # Attract), and the bar belongs to its loading state — the
+            # Stern panel drives both through set_emulate_progress; its
+            # next status poll repaints within a couple of seconds, so
+            # entry just shows idle.
+            self._extract_phases_frame.pack_forget()
+            self._write_phases_frame.pack_forget()
+            self._emulate_phases_frame.pack(
+                fill=tk.X, before=self._progress_bar)
+            self.set_emulate_progress("idle")
         elif text == "Default Settings":
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
@@ -19974,6 +20026,7 @@ class MainWindow:
 
     def set_phase(self, index, mode="extract"):
         labels = (self._extract_phase_labels if mode == "extract"
+                  else self._emulate_phase_labels if mode == "emulate"
                   else self._write_phase_labels)
         c = THEMES[self._current_theme]
         for i, lbl in enumerate(labels):
@@ -19988,8 +20041,10 @@ class MainWindow:
 
     def reset_steps(self, mode="extract"):
         phases = (self._extract_phases if mode == "extract"
+                  else self._emulate_phases if mode == "emulate"
                   else self._write_phases)
         labels = (self._extract_phase_labels if mode == "extract"
+                  else self._emulate_phase_labels if mode == "emulate"
                   else self._write_phase_labels)
         c = THEMES[self._current_theme]
         for lbl, name in zip(labels, phases):
@@ -20020,6 +20075,8 @@ class MainWindow:
         self.reset_steps(mode="extract")
 
     def set_progress(self, current, total, desc="", mode="extract"):
+        self._footer_owner = "pipeline"
+        self._footer_kind = None
         if total > 0:
             self._progress_bar.stop()
             self._progress_bar.configure(mode="determinate")
@@ -20029,6 +20086,50 @@ class MainWindow:
             self._progress_bar.start(12)
         if desc:
             self.set_status(desc)
+
+    #: kind -> (chip index into EMULATE_PHASES, bar value).  The bar NEVER
+    #: bounces (David, 2026-08-24: an endless marquee "is very distracting"
+    #: - and item 79's stuck-state bug made it literally endless): each
+    #: stage holds a fixed, monotonic value, and the copy substitutes its
+    #: REAL percent scaled into the 0-40 slice.  "run" indexes past the
+    #: last chip on purpose - set_phase paints every chip < index as done,
+    #: so 4 means the whole ladder is green.
+    _EMULATE_KINDS = {"copy": (0, None), "boot": (1, 55),
+                      "techalerts": (2, 80), "run": (4, 100)}
+
+    def set_emulate_progress(self, kind, pct=None, text=""):
+        """Item 78 (David: "why are we showing this progress bar on the
+        emulate tab?"): while an Emulate tab is showing, the footer carries
+        the EMULATION's loading state - the bespoke chip row (Copy card /
+        Boot / Tech Alerts / Attract, David: "like on the mod pack tab, but
+        bespoke") plus a determinate bar: the copy's real percent in its
+        slice, then a fixed value per stage, full at attract, empty when
+        nothing runs.  The pipeline stays the owner while one of its jobs
+        runs (this is a no-op then), and switching back to a pipeline tab
+        hands the footer back - see _on_tab_changed.
+        ``kind``: copy / boot / techalerts / run / idle.
+        """
+        if getattr(self, "_running", False):
+            return
+        if self._current_tab_key() not in ("Emulate", "Emulate JJP"):
+            return
+        bar = self._progress_bar
+        bar.stop()
+        bar.configure(mode="determinate")
+        if kind in self._EMULATE_KINDS:
+            index, value = self._EMULATE_KINDS[kind]
+            if kind == "copy":
+                value = int((pct or 0) * 0.4)
+            self.set_phase(index, mode="emulate")
+            bar["value"] = value
+        else:                                            # idle
+            self.reset_steps(mode="emulate")
+            bar["value"] = 0
+        self._footer_owner = "pipeline" if kind == "idle" else "emulate"
+        if text:
+            self.set_status(text)
+        elif kind == "idle":
+            self.set_status("Ready")
 
     def set_status(self, text):
         self._status_label.configure(text=text)

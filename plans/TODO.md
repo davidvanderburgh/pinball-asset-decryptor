@@ -4424,9 +4424,40 @@ These have each been violated at least once and each cost a run or a window:
       the desk oracle + the live renderer remap log until its boot anomaly
       is fixed).
 
-- [ ] **74. A boot that is copying the card shows NOTHING about the copy —
+- [x] **74. A boot that is copying the card shows NOTHING about the copy —
       minutes of "Startup In Progress" with no hint that a ~7 GB dd is
-      running, so every copying boot reads as a hang.** `S3 D3`
+      running, so every copying boot reads as a hang.** `S3 D3` DONE
+      2026-08-23, `item/74`, `54575f3`..`77841de`, awaiting `/finish`.
+      **CLOSED 2026-08-23 — copy-then-boot with progress, three surfaces,
+      acceptance met live end to end on the final code: PAST TECH ALERTS
+      at 48.9 s from launch on an uncached card (copy narrated
+      `[card] copying ...: N / 7497 MB (P%)` to completion, then
+      `local cache ready - booting from it`, guest only after) against
+      177 s for the old copy-fights-boot hybrid; cached control 8.7 s,
+      one line, undelayed.** `cardmount.sh` `cache_pick()` sync mode
+      waits on the existing detached copier with 2 s progress lines
+      (watch.sh needed no change — it already blocks on cardmount before
+      renderer/guest, and stderr streams through `$(...)`); the Emulate
+      tab drains the lines into the state label (`card_copy_progress()`,
+      pure + tested) and fires `--precache` at card pick from a worker
+      thread. Adversarial review (3 lenses) confirmed 7 defects, all
+      fixed (`b1bd678`): copier_alive() /proc identity (pid-reuse wedge +
+      root/user EPERM duplicate-dd), full-size publish gate, rig-side
+      precache run guard, card stat off the UI thread, Stop wins the
+      label + cardmount in killgame/alive sweeps, PAD_CARD_PRECOPY=0
+      default in runlim/runbridge/nbrun, stall 90→240 s. Then two live
+      collisions taught two more (`663d722`, `77841de`): repo `images/`
+      is a JUNCTION to `D:\Pinball\images` — one spinning disk — and two
+      concurrent copiers seek-thrash it to ~6 MB/s combined, so
+      other_copier() now enforces ONE COPIER MACHINE-WIDE (precache
+      yields, boot warns); and a SIGKILLed fuse2fs leaves a DEAD
+      endpoint that fails stat, which the stale-mount healer now clears
+      via /proc/self/mounts (\040-escaped for spaced labels).
+      **GUI label not eyeballed in a live window** — unit-proven
+      (154 emulate_tab tests) and the drain provably receives the lines;
+      David's pre-/finish validation is that launch. 19 lifetime copies
+      on godzilla's log tell this item's whole story. Escape hatch:
+      PAD_CARD_PRECOPY=0 restores the old hybrid everywhere.
       *(Filed 2026-08-23 alongside item 34's widening: David read three
       copying boots in one session as "first-time startup took an
       excessively long time", and item 34's original godzilla sighting
@@ -4533,6 +4564,168 @@ These have each been violated at least once and each cost a run or a window:
       this buys is sweep sessions that never wait. D2: desk work — the copy
       path exists and is proven — plus one confirming boot of a pre-cached
       card.
+
+- [x] **77. The card cache is unmanaged: 125 GB real across 25 entries on a
+      251 GB WSL disk at 89%, nothing prunes it, and version updates orphan
+      old entries forever.** `S2 D2` DONE 2026-08-23, `item/74` (folded),
+      `3202da0`, awaiting `/finish`.
+      **CLOSED 2026-08-23, same night it was filed.** Shipped: a `.boot`
+      sidecar stamps every sync cache hit (a --precache hit deliberately
+      does not count as a boot); `cache_make_room()` evicts
+      least-recently-booted entries before any copy that would push free
+      space under PAD_CACHE_KEEP_FREE_GB (default 8) — never the label
+      being copied, a mounted label, or a live copier's — and refuses to
+      cache at all when nothing is evictable; `--cache-list` /
+      `--cache-drop` for the GUI (tab-separated, source last, spaced
+      labels proven); and the Card cache manager off the Emulate tab's
+      Cache… button — biggest-first entries with real size / last booted /
+      source, totals + disk free in the header, multi-select delete behind
+      a confirm that names the space freed, all rig I/O on workers with
+      main-loop drain pollers. Help tip added. Tests: eviction order,
+      exhaustion refusal, drop refusals, manager end to end against a
+      canned rig — 158/158 emulate_tab, full suite 2959 passed / 0 failed
+      in the worktree. The pytest leak is fixed at the root: conftest
+      points PAD_EMU_DIR/PAD_JJP_EMU_DIR at an empty dir for every test,
+      and the LIVE cache verified untouched (24 entries, no debris) after
+      a full suite run. **Not eyeballed in a live window** — the dialog,
+      like item 74's copy label, awaits David's morning launch.
+      *(Filed 2026-08-23 late, folded onto item/74's BRANCH at David's ask —
+      "fold it in here and do it now. make a nice GUI for it. I'm going to
+      bed" — after measuring the cache at half the WSL disk with 29 GB
+      free. Includes the pytest isolation leak found the same hour: the
+      suite writes 16-byte cards into the LIVE ~/cardcache because tests
+      never isolate the rig home.)*
+      Scope: (a) last-boot tracking — cardmount touches a `.boot` sidecar
+      per cache hit, because atime proved useless (every entry read today);
+      (b) eviction at copy time — when free space would drop below
+      PAD_CACHE_KEEP_FREE_GB (default 8), evict least-recently-booted
+      entries (never the one being copied, never a mounted or copying
+      label) until the new card fits, else skip caching with a warning;
+      (c) `--cache-list` / `--cache-drop <label>` modes for the GUI;
+      (d) a Card cache manager dialog on the Emulate tab: entries with
+      real size and last-booted, totals + disk free, delete selected;
+      (e) tests stop touching the live cache.
+      **Acceptance:** the dialog lists the real cache with sizes/dates and
+      deletes an entry end to end; a forced-low-space desk test evicts
+      oldest-booted first and skips uncachable copies; the test suite
+      leaves ~/cardcache byte-identical.
+      — S2 on the numbers: 29 GB free means a handful of new cards away
+      from a full WSL disk, which fails copies and worse. D2: desk work,
+      the copy path is proven, one dialog; no emulator run needed.
+
+- [x] **78. The Emulate tab shows the extract pipeline's footer — Detect/
+      Locate-partitions chips and a bar that never moves — instead of the
+      emulation's own loading state; and the Sound / Skip-to-attract
+      tickboxes are dead weight.** `S3 D1` DONE 2026-08-24, `item/74`
+      (folded), `b897402` + `52379f0`, awaiting `/finish`.
+      **CLOSED 2026-08-24, same morning.** Entering an Emulate tab hides
+      both chip rows; the Stern panel drives the footer bar through
+      MainWindow.set_emulate_progress — determinate card-copy percent,
+      marquee through booting/techalerts, full at attract, empty idle —
+      with a _footer_owner handshake so a running pipeline job keeps its
+      footer and leaving the tab hands it back. Both tickboxes removed
+      (volume slider owns loudness, boots land in attract since item 63;
+      PAD_AUDIO=0 / PAD_AUTO_ATTRACT=0 stay for scripted runs). Mid-pass
+      follow-ups from David, all in: "Copying card" explains its
+      why/where/once-per-build in the hint line AND a hover tip on the
+      state label (a rebuilt image re-copies once, replacing the old
+      entry); "Waiting at Tech Alerts" → "Passing Tech Alerts…" while the
+      helper presses / "At Tech Alerts" when a human must / "Stuck"
+      unchanged; "In attract mode" → "Game running" (the rig deliberately
+      cannot tell attract from play — gamestate.sh — so the label claims
+      only what it knows). Help tips reworked to match. Full suite 2962
+      passed / 0 failed; wording tests updated with their points intact.
+      **Not eyeballed live** — same caveat as 74/77, one launch shows all
+      three items at once.
+      *(Filed 2026-08-24 from David's morning screenshot + follow-up,
+      folded onto item/74's branch like item 77: "why are we showing this
+      progress bar on the emulate tab? let's use the progress bar for
+      loading state of the emulation instead" and "we don't need the sound
+      or skip to attract checkboxes anymore".)*
+      Scope: entering an Emulate tab hides both chip rows; the Stern panel
+      drives the footer bar via a new MainWindow.set_emulate_progress —
+      determinate card-copy percent (item 74's narration), marquee through
+      booting/techalerts, full at attract, empty idle; ownership handshake
+      so a running pipeline job keeps its footer and leaving the tab hands
+      it back. Both tickboxes removed (volume slider owns loudness since
+      item 56; boots land in attract since item 63); PAD_AUDIO=0 /
+      PAD_AUTO_ATTRACT=0 stay for scripted runs; help tips merged.
+      **Acceptance:** on the Emulate tab the chips are gone and the bar
+      tracks copy→boot→attract; pipeline tabs unchanged; toggles absent;
+      suite green.
+
+- [x] **79. batman reports `state=techalerts` through a whole attract —
+      gamestate.sh's attract detector misses this title, so the footer
+      marquee bounces forever, the label says "Passing Tech Alerts…", and
+      the auto helper's count never clears.** `S2 D3` DONE 2026-08-24,
+      `item/74` (folded), `2c7aa58`, awaiting `/finish`.
+      **CLOSED 2026-08-24 — cmd 0x70 joined hwshim's lamp-class set, and
+      both generations now announce their show.** Measured before fixing
+      (this detector's own law) with a NEW budgeted instrument,
+      `PAD_CMD_CENSUS=1` — one `[cmdmix]` line per 10 s window of
+      per-command TX counts: batman's attract carries cmd 70 (the
+      base-layer lamp write, already decoded) at ~109/s against ZERO in
+      the whole boot+alerts window; the undecoded 72/52/8a families
+      (~35-40/s) are deliberately NOT counted — guessed lamp commands
+      are how this detector went wrong twice. The 30-in-3s rate gate
+      stays. **Verified live, both generations:** batman — announce
+      6.6 s after the helper's first press, gs_state=attract, helper
+      pressed EXACTLY ONCE (the 45 s loop is gone); godzilla_pro control
+      — announce at 14.2 s in attract (also via 70 — that dialect flows
+      there too), nothing early, no presses. The helper stays: the
+      census proved batman parks at the alerts screen until the press
+      (zero show traffic before it), so the press IS the boot-to-attract
+      promise on that generation — David's removal question answered
+      with the measurement. Build notes: memset needs string.h hwshim
+      does not include (loop instead); a user-mode scripted run cannot
+      rebuild the root-owned shim — instrument runs use the GUI's root
+      PIVOT shape.
+      *(Filed 2026-08-24 from David's live launch (item/74 validation,
+      v0.158.0 badge): batman visibly in attract — BEST COMBO CHAMPION
+      high-score screen, CREDITS 1 — while the tab showed "Passing Tech
+      Alerts…", 26 processes, renderer 59.0 fps, 87800 audio frames
+      played / 0 dropped, and item 78's footer marquee bounced on. The
+      2026-08-05 status/autoattract disagreement was fixed by gamestate.sh
+      for godzilla-family titles; batman is a NEW miss of the same shape.)*
+      gamestate.sh declares attract by a video-output-rate proxy ("~40/s
+      sustained in attract... its attract clip set is a superset") —
+      batman is a no-playfield-artwork title whose attract holds long
+      static high-score screens, which is exactly the input that proxy
+      cannot see. The state word is wrong, so everything honest built on
+      it (item 78's footer, the label, `auto=`) inherits the lie; the
+      helper may also keep pressing Service Back into a live attract.
+      **Established 2026-08-24 morning, desk-only, against David's LIVE
+      batman run (game screenshot-confirmed in attract):** the attract
+      signal is hwshim's `[led] light show running`, announced at 30
+      lamp-class commands in 3 s where lamp-class = {97, a2..a6, b4, b5}
+      — the godzilla generation's dialect. Batman's log carries ZERO
+      `[led]` lines in 20+ min of attract and exactly 3 `factory_make`
+      (attract opens no clips), so both proxies are structurally blind.
+      Batman's lamp traffic is real but different: the ring's `decoded`
+      counter (fed only by cmds 70/94/95 — the service-LED vocab) counted
+      2142 writes ≈ 1.5/s, far under the 10/s the rate gate needs, and
+      the attract-only `[nbcmd] first frame` lines name an UNDECODED
+      command family — 0x72 (12 bytes of ff), 0x46, 0x48, 0x14 — as the
+      likely bulk of the show. David's "I still have to press Start"
+      confirms the shape: a GAME's heavier lamp burst finally trips the
+      godzilla-tuned counter; attract alone never does.
+      **Ruled out at the desk:** any gamestate.sh-only fix — no signal in
+      the run log separates batman's techalerts from its attract
+      ([nbsched] spans both; [throw]/[swscan] are unvetted one-title
+      proxies of exactly the class this file's header warns about).
+      **Resume:** one instrumented batman run (PAD_NB_LOG or a temporary
+      per-cmd counter) to measure the attract command mix — then teach
+      led_publish the older generation's show (candidate: count
+      0x72/0x46/0x48-family, or a per-generation rate window), verify on
+      batman AND a godzilla-family control (the star_wars service-menu
+      trap must stay caught), rebuild under the lock.
+      **Acceptance:** a batman GUI boot reaches "Game running" on the tab
+      (and the footer bar fills) within ~15 s of the attract screen
+      appearing; godzilla-family titles unchanged; the auto count clears.
+      — S2: misleads on every boot of the affected titles and can
+      over-press into attract; play itself works. D3: needs a run, shows
+      up when you look, instrument = the run log + gamestate.sh sourced
+      standalone.
 
 - [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
       close the ones that are no longer necessary. like 4, 58, 3"), as WON'T

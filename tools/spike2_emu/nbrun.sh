@@ -12,6 +12,9 @@ cd $HOME
 LOG=${1:-gznb.log}
 SECS=${2:-25}
 shift 2 || true
+# Timed instrument: keep the old boot-off-9p hybrid rather than spending the
+# whole budget inside item 74's pre-copy wait. See runlim.sh.
+export PAD_CARD_PRECOPY=${PAD_CARD_PRECOPY:-0}
 
 mkdir -p "$HOME/shots"
 rm -f "$HOME/shots/"*.png

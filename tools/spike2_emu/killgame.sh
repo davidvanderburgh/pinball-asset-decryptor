@@ -109,7 +109,13 @@ pkill -9 -f 'padplay\.py'
 # mount reference dies with the namespace. The pattern is run_game.sh's exact
 # shape (`unshare $USERNS -m -p -f ...`, -r absent for a root PIVOT run);
 # restorestate.sh's `unshare -m bash` is deliberately NOT matched.
-pkill -9 -f '^bash .*(watch|runbridge|nbrun|run_game)\.sh'
+# cardmount.sh joined the list at item 74: its sync cache_wait can be looping
+# for minutes under a boot, holding watch.sh's merged output pipe - a Stop
+# that leaves it running keeps wsl.exe from reaching EOF, so the GUI sat out
+# its full 20 s wait timeout on every mid-copy Stop. The DETACHED copier is
+# deliberately not matched: it survives a Stop on purpose, so the copy is not
+# lost, and its output goes to the cardcache log, not the pipe.
+pkill -9 -f '^bash .*(watch|runbridge|nbrun|run_game|cardmount)\.sh'
 pkill -9 -f '^unshare (-r )?-m -p -f'
 # longplay.sh is started BESIDE a run rather than by one, so it is not in the
 # group above - and watch.sh's own teardown was the only thing that ever killed

@@ -8386,6 +8386,93 @@ static void coil_publish(const unsigned char *p, int n)
 
 extern int atoi(const char *);           /* same GCC 14 reason as open/close */
 
+/* ---- VILLAIN VISION (padlcd.h, item 83) --------------------------------
+ *
+ *     98 <ilen> f2 98 <start> <id lo> <id hi> 00 00 [...] <cksum> <replylen>
+ *
+ * The lcdnode's three playfield LCDs are driven by DISPLAY IDS, not pixels:
+ * the game renders its lcd scenes host-side and this frame names which
+ * stored clip each insert shows (the id is the asset number in the card's
+ * villain-TV store - mapping eyeball-verified, see padlcd.h). ids are LE16
+ * at stride 4 after the start byte; N ids set displays start..start+N-1.
+ * Measured live: attract cycles single-id frames every 5.2 s, game start
+ * sends one 3-id frame (919/928/106).
+ *
+ * padlcd.h owns the meaning; this struct is its C twin - keep them in step.
+ * Which node is the lcdnode differs per title, so PAD_LCD_NODE names it
+ * (watch.sh derives it from node_ident.txt's type=lcdnode row); unset or 0
+ * publishes nothing, which is every title without one. */
+struct padlcd_shm {
+    unsigned magic, version, gen, decoded;
+    unsigned id[4];
+    unsigned ms[4];
+    unsigned ring_head;
+    struct { unsigned ms; unsigned char len, b[11]; } ring[64];
+};
+#define PADLCD_MAGIC 0x44434c50u
+
+static struct padlcd_shm *lcd_shm;
+
+static unsigned lcd_node(void)
+{
+    static int n = -1;
+    if (n < 0) {
+        const char *e = getenv("PAD_LCD_NODE");
+        n = (e && *e) ? atoi(e) : 0;
+        if (n < 0 || n > 63) n = 0;
+    }
+    return (unsigned)n;
+}
+
+static void lcd_map(void)
+{
+    static int tried;
+    const char *path;
+    int fd;
+    void *m;
+    if (lcd_shm || tried) return;
+    tried = 1;
+    path = getenv("PAD_LCD_SHM");
+    if (!path || !*path) return;
+    fd = open(path, 2 /*O_RDWR*/, 0);
+    if (fd < 0) return;
+    m = mmap(0, 4096, 3, 1, fd, 0);
+    close(fd);
+    if (!m || m == (void *)-1) return;
+    lcd_shm = (struct padlcd_shm *)m;
+    lcd_shm->magic = PADLCD_MAGIC;
+    lcd_shm->version = 1;
+}
+
+static void lcd_publish(const unsigned char *p, int n)
+{
+    unsigned node, start, k, off, ilen, slot;
+    if (n < 7 || !(p[0] & 0x80)) return;
+    node = p[0] & 0x3f;
+    if (!lcd_node() || node != lcd_node()) return;
+    if (p[2] != 0xf2 || p[3] != 0x98) return;
+    ilen = p[1];                  /* cmd..cksum, so payload ends at p[1+ilen] */
+    if (ilen < 3 || (unsigned)n < ilen + 2) return;
+    start = p[4];
+    if (start >= 4) return;       /* sub 0x02 commit frames land here too    */
+    lcd_map();
+    if (!lcd_shm) return;
+    /* the raw ring first, so a mis-parse below is still on record */
+    slot = lcd_shm->ring_head % 64u;
+    lcd_shm->ring[slot].ms  = (unsigned)pad_ms();
+    lcd_shm->ring[slot].len = (unsigned char)(ilen - 2 > 11 ? 11 : ilen - 2);
+    for (k = 0; k < lcd_shm->ring[slot].len; k++)
+        lcd_shm->ring[slot].b[k] = p[4 + k];
+    lcd_shm->ring_head++;
+    /* ids: LE16 at stride 4 from p[5], stopping at the checksum */
+    for (k = 0, off = 5; off + 1 < 2 + ilen && start + k < 4; k++, off += 4) {
+        unsigned id = (unsigned)p[off] | ((unsigned)p[off + 1] << 8);
+        lcd_shm->id[start + k] = id;
+        lcd_shm->ms[start + k] = (unsigned)pad_ms();
+    }
+    if (k) { lcd_shm->decoded++; lcd_shm->gen++; }
+}
+
 /* Budgeted like the skip log, and off unless PAD_LED_DEC_LOG is set. A run
  * decodes thousands of these; the point is a SAMPLE to compare against the
  * dropped frames, not a transcript. */
@@ -9724,6 +9811,7 @@ long shim_write(int fd, const void *b, unsigned long n)
         sw_find_maybe();
         led_publish(nb_req, nb_req_len);
         coil_publish(nb_req, nb_req_len);
+        lcd_publish(nb_req, nb_req_len);        /* item 83: VILLAIN VISION */
         coil_probe(nb_req, nb_req_len);
         nb_trace();
         nb_maybe_poke();

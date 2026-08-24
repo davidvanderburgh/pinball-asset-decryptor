@@ -129,6 +129,7 @@ pkill -9 -f '^bash [^ ]*longplay\.sh'
 # The LED block doubles as the virtual playfield's liveness signal; removing
 # it lets that window close itself instead of surviving the kill.
 rm -f "$ROOT/dump/padled"
+rm -f "$ROOT/dump/padlcd"
 for _ in 1 2 3 4 5 6; do
     pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null || break
     sleep 0.5

@@ -79,6 +79,12 @@ SW_HOST=$ROOT/dump/padsw
 # PAD_NB_LOG - raising that quadruples the boot.
 LED_HOST=$ROOT/dump/padled
 LED_GUEST=/dump/padled
+# VILLAIN VISION (padlcd.h, item 83): the lcdnode's display-id frames, decoded
+# by the shim into a one-page block so the playfield's LCD panel needs no log.
+# Only a title whose node directory declares an lcdnode gets a node id (below),
+# so on every other title the shim publishes nothing.
+LCD_HOST=$ROOT/dump/padlcd
+LCD_GUEST=/dump/padlcd
 SW_GUEST=/dump/padsw
 # Audio: the guest writes PCM into a FIFO, a native ffmpeg drains it into WSLg's
 # PulseAudio. Same host-path/guest-path split as the GL ring and the keyboard.
@@ -212,6 +218,11 @@ else
              "built-in (godzilla) table"
     fi
 fi
+# WHICH NODE IS THE lcdnode (item 83, batman's VILLAIN VISION = node 24).
+# From the derived table so it is per-title and empty on titles without one -
+# the shim publishes nothing when PAD_LCD_NODE is unset/0.
+LCD_NODE=$(sed -n 's/^node=\([0-9]*\) type=lcdnode .*/\1/p' "$NBID" 2>/dev/null | head -1)
+[ -n "$LCD_NODE" ] && echo "[watch] lcdnode: node $LCD_NODE drives this title's LCD inserts"
 #
 # THE SWITCH LIST IS PASSED TOO, as the fallback for a title whose device table
 # cannot be parsed at all. star_wars_le is why: it yields ZERO device records,
@@ -553,6 +564,7 @@ teardown() {
     # emu_gone). Removing it here is what makes closing the emulator window
     # close the playfield too. A new run recreates it before launching one.
     rm -f "$LED_HOST"
+    rm -f "$LCD_HOST"
 
     # ...AND THEN VERIFY IT, because "it closes itself" was only ever true of
     # the WINDOW. The playfield is a Windows process reached through interop,
@@ -746,6 +758,9 @@ rm -f "$ROOT/dump/padbinds"
 # One page, zeroed: the shim stamps the magic once it maps it.
 rm -f "$LED_HOST"
 dd if=/dev/zero of="$LED_HOST" bs=4096 count=1 status=none
+# The LCD block, same contract (item 83).
+rm -f "$LCD_HOST"
+dd if=/dev/zero of="$LCD_HOST" bs=4096 count=1 status=none
 # This session's identity. savestate copies it into the slot; restorestate
 # compares to tell a SAME-SESSION load (renderer already holds the guest's GL
 # world) from a CROSS-SESSION one (it holds none of it - the game plays but
@@ -759,6 +774,7 @@ cat /proc/sys/kernel/random/uuid > "$ROOT/dump/boot.id" 2>/dev/null || \
 # "dump/padled not readable". The guest is root and ignores the permissions.
 if [ "$DROP" = 1 ]; then
     chown "$PAD_USER" "$LED_HOST" 2>/dev/null
+    chown "$PAD_USER" "$LCD_HOST" 2>/dev/null
     chown "$PAD_USER" "$ROOT/dump" 2>/dev/null
 fi
 
@@ -970,6 +986,7 @@ echo "[watch] starting $GAME (boot to the first picture takes ~15 s)"
 [ -n "${PAD_PIVOT:-}" ] && rm -f "$ROOT/dump/game.out"
 setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_SW_SHM="$SW_GUEST" PAD_LED_SHM="$LED_GUEST" \
+           PAD_LCD_SHM="$LCD_GUEST" PAD_LCD_NODE="${PAD_LCD_NODE:-$LCD_NODE}" \
            PAD_AUDIO_PLAY="${PAD_AUDIO_PLAY:-}" \
            PAD_AUDIO_FMT="${PAD_AUDIO_FMT:-}" \
            PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \

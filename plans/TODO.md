@@ -5067,8 +5067,52 @@ These have each been violated at least once and each cost a run or a window:
       runs, and the second-screen half is not yet even characterised.
       *(Both gradings superseded at pass end — see the title line.)*
 
-- [ ] **83. VILLAIN VISION renderer: draw batman's 320x240 playfield LCD
-      (node 24, lcdnode) the way the rig draws second displays.** `S3 D4` ← WORKING ON
+- [x] **83. VILLAIN VISION renderer: draw batman's 320x240 playfield LCD
+      (node 24, lcdnode) the way the rig draws second displays.** `S3 D4`
+      DONE 2026-08-24, `item/83` (the branch carries item/82's fixes — cut
+      from it), awaiting `/finish`.
+      **CLOSED same day, live-verified with a screenshot: the playfield
+      window's new VILLAIN VISION panel draws all three LCD inserts with
+      the real '66 episode art the game names, updating live off the
+      wire** (`C:/tmp/item83_panel.png` — Robin in the Batmobile + two
+      more; padlcd carried 21 decoded frames in attract, then the
+      game-start trio 54/928/106 across the three displays; the lazy art
+      cache extracted 8 PNGs by itself during one boot).
+      **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
+      capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
+      plunge, TV-target shots, 760k points):** no pixels cross the bus —
+      the game renders its lcd Radium scenes host-side
+      (DisplayRenderer/SceneCache) and sends DISPLAY-ID frames, cmd f2
+      sub 0x98, ids LE16 at stride 4, N ids setting displays
+      start..start+N-1 (attract: single-id frames every 5.2 s; game
+      start: one 3-id frame). **The id is the asset number in the card's
+      villain-TV store** (`assets/lcd/auto_loaded/<sha1>/scene.assets/
+      137.asset/<id>.asset` — 3,069 H.264 assets, all 240x180,
+      radium-labeled "VillainTvsCombo"); mapping EYEBALL-VERIFIED (id 54
+      = Robin in the Batmobile, 919 = wall-climb cameo, 3047+ = villain
+      portraits). **Ruled out on the way (do not re-derive):** the f2
+      sub-0x90 59 Hz frame is a status poll repeated on our zero answers
+      (17,625× per game) that does NOT gate the display ids; f9/fc zeros
+      gate nothing; cmd 0x11 and the 0x14/44/46/48/72 burst are generic
+      all-node traffic.
+      **BUILT (padled's conventions throughout):** padlcd.h (one page:
+      magic/gen/id[4]/ms[4] + a 64-entry raw ring for RE); hwshim.c
+      lcd_publish() beside led_publish, gated on PAD_LCD_NODE; watch.sh
+      derives PAD_LCD_NODE from node_ident's `type=lcdnode` row (empty =
+      publish nothing — every other title untouched) and pre-creates/
+      chowns/tears down the block; killgame.sh rm; restorestate.sh
+      always-rewind elif (the padled one-shot-magic lesson); lcdart.py
+      extracts a first frame per id to `<tables>/<game>/lcd/<id>.png`
+      lazily (~200 ms, once); playfield.py LcdPanel — lazy-built on first
+      magic stamp, 10 Hz reopen-reads, "TV <id>" placeholder until art
+      lands, PhotoImage reference kept. 4 real-Tk regression tests
+      (tests/test_spike2_playfield_lcd.py) green.
+      **Honest residuals, none blocking:** stills not video (first frame
+      of the named clip; playing the H.264 loops in Tk needs a decode
+      pipeline — file it if David wants motion); Schematic view only
+      (batman ships no artwork, so that IS its view); the `137.asset`
+      store number is a batman constant with a comment — a second lcdnode
+      title is the cue to derive it per title.
       *(Split out of item 82 on 2026-08-24, which fixed the board's
       identity/registration so the game now ENGAGES it — this is the
       capability half: actually showing the villain content David asked

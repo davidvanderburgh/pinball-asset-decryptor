@@ -4836,6 +4836,64 @@ These have each been violated at least once and each cost a run or a window:
       drive personally, and each finding's own difficulty is unknown until it
       is filed.
 
+- [ ] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
+      and identified; node 4 polled forever while we silence it; board 24
+      RUNTIME INFO from no table we derive; and the carousel's overlay
+      screen never appears.** `S2 D4`
+      *(Filed 2026-08-24 from David's live item-80 sweep run — glass
+      screenshots on record: red `LOCATING NODE BOARDS / NODE NOT FOUND`
+      over the batman logo, then Tech Alerts `CHECK NODE BOARD 2 : NOT
+      REGISTERED` (red) + `CHECK NODE BOARD 24 : RUNTIME INFO` (white),
+      plus "we are not seeing the second screen that appears over the
+      carousel". All evidence below is READ-ONLY off his run's own logs.)*
+      **Established, and it rules item 70's mechanism OUT for batman:** the
+      discovery schedule INCLUDES node 2 — `[nbsched] playfield nodes: 255
+      1 8 9 10 2 12 13 (from switch table + node directory)` — and
+      `[nbid] node 2 claims part=0x2c40102b variant=0x05 fw=1.19.0
+      (derived)` loads from the derived 8-node `node_ident.txt` (nodes
+      1,2,4,8,9,10,12,13; node 2 = ws2812node code 22). Scheduled AND
+      identified, yet the game refuses to REGISTER it — so the hole is
+      DOWNSTREAM of everything item 70 suspects: the registration/grading
+      exchange for the swelf-generation ws2812 dialect. (Do not conflate
+      with ST's item 52 — its LED boards registered fine once merged into
+      the schedule; batman's is merged and still refuses.)
+      **Lead suspect for the red NOT FOUND screen: our own silencing of
+      node 4.** `[nbsilent] node=4 want=13/3/12 ctr=0` repeats forever from
+      t≈18 s — the game asking silenced node 4 for the runtime-update walk
+      (13 = 0x0d, the tmc5041 variant command) and never being satisfied.
+      The silence comes from nodecensus's optional-node4 rule (built for
+      stranger_things: optional+ABSENT passes). **Check at the desk whether
+      batman's ELF actually flags node 4 optional** — if it is REQUIRED on
+      this generation, the ST rule misfires here and the wedge is ours.
+      **Board 24 is in NO derived table** (ELF node directory = 8 nodes,
+      no 24) — informational grade, lowest priority, unexplained.
+      **The overlay screen: the game never ASKED for a second display**
+      (0 `PADGL_TARGET` lines all run — consistent with item 44's census,
+      batman was never in the two-display list), while its video pipeline
+      is alive (ch0/ch6 streaming scene assets). One anomaly worth
+      chasing: the game consumes first frames **2.3–5.7 s after serve**
+      against a healthy 58 ms. AWAITING DAVID: what the second screen
+      shows on the real machine, and whether it is a separate physical
+      display or a window drawn on the main screen — that answer decides
+      whether this half is item 44's family, a video-channel fault, or
+      gated behind the unregistered boards.
+      **Instrument, first move once the rig is free:** one `PAD_NB_LOG`
+      boot (GUI/root PIVOT shape — a user-mode scripted run cannot rebuild
+      the root-owned shim, item 79's note) to capture what the game
+      actually sends node 2 and node 4; the wire says what registration
+      wants. No shim change before that capture.
+      **Acceptance:** a batman boot from card shows NO red node-board
+      alert on Tech Alerts (board 24's white RUNTIME INFO may stay,
+      stated); the node-4 poll loop is explained — answered, or proven
+      optional-and-ignorable with the ELF flag quoted; godzilla_pro and
+      stranger_things_le regression boots unchanged. The overlay-screen
+      half gets its own acceptance once David describes the real
+      machine's behaviour.
+      — S2: the title plays (item 79 verified attract + play) but a red
+      alert stands on every boot and a real board's devices are dead; not
+      S1 because play works. D4: mechanism unknown, needs instrumented
+      runs, and the second-screen half is not yet even characterised.
+
 - [x] **81. `Schematic`'s switch-row hover zone is not perfectly aligned with
       its text.** `S3 D2` DONE 2026-08-24, `item/81`, awaiting `/finish`.
       *(Filed 2026-08-24, spotted by David during item 80's sweep on

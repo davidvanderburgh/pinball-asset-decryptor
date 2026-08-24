@@ -4839,7 +4839,7 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
       and identified; node 4 polled forever while we silence it; board 24
       RUNTIME INFO from no table we derive; and the carousel's overlay
-      screen never appears.** `S2 D4`
+      screen never appears.** `S2 D4` ← WORKING ON
       *(Filed 2026-08-24 from David's live item-80 sweep run — glass
       screenshots on record: red `LOCATING NODE BOARDS / NODE NOT FOUND`
       over the batman logo, then Tech Alerts `CHECK NODE BOARD 2 : NOT

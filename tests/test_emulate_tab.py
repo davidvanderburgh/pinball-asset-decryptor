@@ -15,6 +15,7 @@ skip rather than fail when Tk is unusable.
 import json
 import os
 import pathlib
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -1197,11 +1198,22 @@ def test_start_builds_the_launch_off_the_ui_thread(tmp_path, monkeypatch):
         # from a worker thread, because the card-path stat must stay off the
         # UI thread (a UNC path to a sleeping NAS blocks for seconds).  It is
         # not a launch, so it comes off the ledger before Start is policed.
-        deadline = time.time() + 5
-        while not launched and time.time() < deadline:
-            time.sleep(0.01)
-        assert launched and launched[0][-1] == "--precache", \
-            "picking a card should start the background pre-cache"
+        # macOS is the one platform _precache_kick deliberately skips (the
+        # rig lives in a container there and the card's host path is not
+        # the container's — see its own docstring), so nothing to wait for
+        # on that platform: this branch is what a real macOS CI run needs,
+        # not a hypothetical (found 2026-08-24 when v0.160.0's release CI
+        # failed here — the assertion below had never been exercised on
+        # Darwin at all).
+        if sys.platform == "darwin":
+            time.sleep(0.2)
+            assert not launched, "macOS must not pre-cache (see _precache_kick)"
+        else:
+            deadline = time.time() + 5
+            while not launched and time.time() < deadline:
+                time.sleep(0.01)
+            assert launched and launched[0][-1] == "--precache", \
+                "picking a card should start the background pre-cache"
         launched.clear()
         panel.start()        # must come back with the "boot" still running
         assert not launched, "start() sat through the WSL boot on the UI thread"

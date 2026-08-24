@@ -108,11 +108,19 @@ def fix(p):
         print("%-34s  too small, skipped" % os.path.basename(p))
         return False
     before = fmt(grades(d, SLOT_B))
-    shutil.copy2(p, p + ".bak-prevalfix")
-    b = bytearray(d)
-    b[BLOB:BLOB + BLOB_LEN] = b"\x00" * BLOB_LEN
-    with open(p, "wb") as f:
-        f.write(bytes(b))
+    # A GUI (PAD_PIVOT) run writes its title's nvram AS ROOT, so a fleet fix
+    # meets a mix of owners. One refusal must not abort the sweep - the first
+    # --fix-all died on file 20 of 24 and left the fleet in an unknown state.
+    try:
+        shutil.copy2(p, p + ".bak-prevalfix")
+        b = bytearray(d)
+        b[BLOB:BLOB + BLOB_LEN] = b"\x00" * BLOB_LEN
+        with open(p, "wb") as f:
+            f.write(bytes(b))
+    except OSError as e:
+        print("%-34s  NOT FIXED: %s - rerun as root (wsl -u root)"
+              % (os.path.basename(p), e.strerror))
+        return False
     print("%-34s  slot B %s -> %s   (0x%x..0x%x zeroed, backup .bak-prevalfix)"
           % (os.path.basename(p), before, fmt(grades(bytes(b), SLOT_B)),
              BLOB, BLOB + BLOB_LEN - 1))

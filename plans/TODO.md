@@ -4641,9 +4641,31 @@ These have each been violated at least once and each cost a run or a window:
       cannot see. The state word is wrong, so everything honest built on
       it (item 78's footer, the label, `auto=`) inherits the lie; the
       helper may also keep pressing Service Back into a live attract.
-      **Suspect first:** `gs_past_alerts` / the frame-rate window in
-      gamestate.sh against batman's run log — the log from David's launch
-      is ~/gzwatch.log until the next run truncates it.
+      **Established 2026-08-24 morning, desk-only, against David's LIVE
+      batman run (game screenshot-confirmed in attract):** the attract
+      signal is hwshim's `[led] light show running`, announced at 30
+      lamp-class commands in 3 s where lamp-class = {97, a2..a6, b4, b5}
+      — the godzilla generation's dialect. Batman's log carries ZERO
+      `[led]` lines in 20+ min of attract and exactly 3 `factory_make`
+      (attract opens no clips), so both proxies are structurally blind.
+      Batman's lamp traffic is real but different: the ring's `decoded`
+      counter (fed only by cmds 70/94/95 — the service-LED vocab) counted
+      2142 writes ≈ 1.5/s, far under the 10/s the rate gate needs, and
+      the attract-only `[nbcmd] first frame` lines name an UNDECODED
+      command family — 0x72 (12 bytes of ff), 0x46, 0x48, 0x14 — as the
+      likely bulk of the show. David's "I still have to press Start"
+      confirms the shape: a GAME's heavier lamp burst finally trips the
+      godzilla-tuned counter; attract alone never does.
+      **Ruled out at the desk:** any gamestate.sh-only fix — no signal in
+      the run log separates batman's techalerts from its attract
+      ([nbsched] spans both; [throw]/[swscan] are unvetted one-title
+      proxies of exactly the class this file's header warns about).
+      **Resume:** one instrumented batman run (PAD_NB_LOG or a temporary
+      per-cmd counter) to measure the attract command mix — then teach
+      led_publish the older generation's show (candidate: count
+      0x72/0x46/0x48-family, or a per-generation rate window), verify on
+      batman AND a godzilla-family control (the star_wars service-menu
+      trap must stay caught), rebuild under the lock.
       **Acceptance:** a batman GUI boot reaches "Game running" on the tab
       (and the footer bar fills) within ~15 s of the attract screen
       appearing; godzilla-family titles unchanged; the auto count clears.

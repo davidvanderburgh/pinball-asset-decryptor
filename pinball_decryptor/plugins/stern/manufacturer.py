@@ -419,6 +419,13 @@ class SternManufacturer(Manufacturer):
         # Spike 2 (feedback batch 20).  Version + edition parse straight off
         # Stern's vendor filename — cheap enough for the Tk thread; a renamed
         # card just shows the bare title.
+        # DELIBERATELY the filename, unlike info.resolve_version (which reads
+        # the card's own update index and outranks the name).  This runs on the
+        # Tk thread on every card pick, and the index costs an ext4 mount plus
+        # a directory walk — seconds on a multi-GB card, which is why the Info
+        # window probes on a worker with a spinner.  So a relabelled card can
+        # show one version here and the true one in Image Info; Image Info is
+        # the place that reports it as a fact, and it names the source it used.
         disp = re.sub(r"\s*\((?:Spike 2|Whitestar[^)]*)\)$", "", game.display)
         if game.era == "spike2":
             from .info import version_from_filename

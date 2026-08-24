@@ -4839,7 +4839,11 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
       and identified; node 4 polled forever while we silence it; board 24
       RUNTIME INFO from no table we derive; and the carousel's overlay
-      screen never appears.** `S2 D4` ← WORKING ON
+      screen never appears.** `S3 D2` 90% ← WORKING ON *(S2 → S3 and D4 →
+      D2 at pass end, 2026-08-24: everything that broke the BOOT is fixed
+      and regression-proven — what remains is a cosmetic menu row plus one
+      instrumented dump with a known method, and the mechanism is fully
+      established.)*
       *(Filed 2026-08-24 from David's live item-80 sweep run — glass
       screenshots on record: red `LOCATING NODE BOARDS / NODE NOT FOUND`
       over the batman logo, then Tech Alerts `CHECK NODE BOARD 2 : NOT
@@ -4945,6 +4949,44 @@ These have each been violated at least once and each cost a run or a window:
       stranger_things_le — derivation fails (bare symlink) → not fresh
       → node 4 STAYS silenced with the original reason, ff-answering
       intact. Both green.
+      **★★★ THE FINAL RE ANSWER (third pass), AND IT IS AN EXPENSIVE
+      NEGATIVE — do not hunt a bus-side fix for the alert rows again:
+      THERE IS NO GRADE-0 WRITER IN THE BINARY.** A whole-RX-segment
+      scan finds zero stores of 0 to `node_record[+0x18]`; grade 0 is
+      only the constructor default. Both graders (0x2614f8 via fe,
+      0x261754 via cmd 0x03) can only assign nonzero codes, and a
+      STABLE, VERSION-AND-VARIANT-MATCHED present board is assigned
+      grade 2 terminally. **No reply on any command clears it** — fe,
+      f9, fc, ff, gated app commands all traced; PAD_NB_RT confirmed
+      inert live. The row is suppressed only by a game-side
+      CONFIG-DERIVED registration field (godzilla's `board[+144]`
+      analogue — nodecensus's own header said this: "this title's own
+      config is what decides the board's registered bit; no bus reply
+      can change that"). **Corrected screen-inclusion rule:** a row
+      shows when graded-alerting AND `(flags & 0x0c) != 0x04` — node 2
+      (0x0c) and board 24 (0x00) show, nodes 4/12/13 (0x04) never do;
+      bit 3 means "force-check even though optional", reconciling
+      David's photo showing board 24. **Caveat: board 24, now
+      image-matched, lands in the same grade-2 state as node 2** — the
+      Tech Alerts page (unvisited since the fixes; the boot no longer
+      parks there) likely still lists both rows, as cosmetic,
+      non-blocking entries. The game already sends node 2 its
+      LED-layer traffic (gate open, 0x44/46/48/14/72 on the wire), so
+      the rows cost nothing functional.
+      **WHAT REMAINS (one measurement + one decision), the Resume:**
+      batman's board-object array has a DIFFERENT layout from
+      godzilla's (status +0x18, flags +0x04, fw +0x1c, desc +0x20 —
+      the [nbobj] self-labelling scan fails on it: "no self-labelling
+      board array after 3 scans"). Teach the scanner batman's shape,
+      dump node 2's config/registration field live, and decide:
+      config-EMPTY → the row is a fact of this build under emulation,
+      document it in README and close; config-populated-but-fill-
+      stalled → find the boot step that copies config→board and why it
+      stalls. EITHER WAY the boot/play experience is already clean.
+      **The VILLAIN VISION RENDERER is split out as item 83** — a new
+      capability (decode the LCD data path, draw the 320x240 panel),
+      not a fault fix; this item's screen half closes at "the board
+      registers and the game engages it".
       **(4) The video-latency theory is DEAD: the 2.3-5.7 s first-frame
       delays are the attract's double-buffered clip schedule (each delay
       = the alternate channel's clip duration), healthy over 35 min.**
@@ -5023,6 +5065,39 @@ These have each been violated at least once and each cost a run or a window:
       alert stands on every boot and a real board's devices are dead; not
       S1 because play works. D4: mechanism unknown, needs instrumented
       runs, and the second-screen half is not yet even characterised.
+      *(Both gradings superseded at pass end — see the title line.)*
+
+- [ ] **83. VILLAIN VISION renderer: draw batman's 320x240 playfield LCD
+      (node 24, lcdnode) the way the rig draws second displays.** `S3 D4`
+      *(Split out of item 82 on 2026-08-24, which fixed the board's
+      identity/registration so the game now ENGAGES it — this is the
+      capability half: actually showing the villain content David asked
+      about ("the second screen that appears over the carousel"). The
+      rig has NO lcdnode renderer at all; this is new feature work, not
+      a fault fix.)*
+      **What item 82 established, do not re-derive:** the screen is
+      node-bus hardware, not a GL display-2 (batman emits 0
+      PADGL_TARGETs, provably never calls fbGetDisplayByIndex(>0));
+      the board is node 24, lcdnode, class 3, part 0x00030030, fw
+      1.19.0, variant 0x02 (all measured); the ELF names a "Node board
+      LCD command/display number" API with LCD NODE UPDATE / LCD FLASH
+      strings, and run 3's 3,416-frame cmd-f2 burst to node 24 was the
+      firmware UPDATE walk, not display content — the actual display
+      data path is UNDECODED. Wire captures with the board engaging:
+      /home/david/item82/gzwatch.run[36].log.
+      **Plausible shape (a guess, not established):** decode the LCD
+      command family the game sends a registered node 24 (a capture on
+      a build where its grade settles is the first instrument), publish
+      frames to a ring like padled/padvid do, and draw a small window
+      the way the second-display window works. "3 LCD INSERT" suggests
+      up to three panels multiplexed by display number.
+      **Acceptance: not yet defined** beyond "the villain art shows
+      where the real machine shows it" — needs the data-path decode
+      before an honest test can be stated.
+      — S3: cosmetic-plus — the game plays fine without it; what it
+      costs is a real machine feature the sweep noticed missing. D4:
+      the command family is undecoded, a renderer must be built AND
+      validated, and it spans shim + host + window.
 
 - [x] **81. `Schematic`'s switch-row hover zone is not perfectly aligned with
       its text.** `S3 D2` DONE 2026-08-24, `item/81`, awaiting `/finish`.

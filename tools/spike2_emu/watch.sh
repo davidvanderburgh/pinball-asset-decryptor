@@ -195,9 +195,11 @@ else GAME_ELF="$ROOT/games/$GAME/game"; fi
 # the shim's built-in fallback, which is exactly the pre-item-51 behaviour.
 NBID="$PAD_TABLES/$GAME/node_ident.txt"
 mkdir -p "$PAD_TABLES/$GAME" 2>/dev/null
+NBID_FRESH=0
 if python3 "$RIG/nbdir.py" "$GAME_ELF" --hexdir "${GAME_ELF%/*}" \
         --out "$NBID.tmp" 2>/dev/null && grep -q '^node=' "$NBID.tmp"; then
     mv -f "$NBID.tmp" "$NBID"
+    NBID_FRESH=1
     echo "[watch] node identity: $(grep -c '^node=' "$NBID") boards derived" \
          "from $GAME's own node directory"
 else
@@ -221,7 +223,7 @@ fi
 # wrong and why no known title trips it.
 NB_SILENT_DEFAULT=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
     --switches "$PAD_TABLES/$GAME/switch_list.txt" \
-    --nodedir "$NBID" --silent 2>/dev/null)
+    --nodedir "$NBID" --nodedir-fresh "$NBID_FRESH" --silent 2>/dev/null)
 export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 # WHY, in the run's own log. The item that asked for this asked for the evidence
 # as well as the decision, and a silenced board is invisible by construction -
@@ -235,7 +237,7 @@ export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 # point of printing it is that a silenced board is otherwise invisible.
 NB_WHY=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
     --switches "$PAD_TABLES/$GAME/switch_list.txt" \
-    --nodedir "$NBID" 2>/dev/null \
+    --nodedir "$NBID" --nodedir-fresh "$NBID_FRESH" 2>/dev/null \
     | sed -n 's/^because: //p')
 # WHICH SILENCED NODES STILL ANSWER THE ff STATUS POLL - PER NODE, not the
 # item-52 everywhere. Measured 2026-08-22 on the Heisei card (godzilla_le):
@@ -250,7 +252,7 @@ NB_WHY=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
 # silenced node, kept as the A/B knob for exactly this comparison.
 NB_FF_DEFAULT=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
     --switches "$PAD_TABLES/$GAME/switch_list.txt" \
-    --nodedir "$NBID" --silent-ff 2>/dev/null)
+    --nodedir "$NBID" --nodedir-fresh "$NBID_FRESH" --silent-ff 2>/dev/null)
 export PAD_NB_SILENT_FF=${PAD_NB_SILENT_FF:-${NB_FF_DEFAULT:-0}}
 if [ -n "${PAD_NB_SILENT:-}" ]; then
     echo "[watch] node census: silencing node(s) $PAD_NB_SILENT on $GAME -" \

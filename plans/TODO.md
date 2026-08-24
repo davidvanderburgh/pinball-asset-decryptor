@@ -4902,13 +4902,36 @@ These have each been violated at least once and each cost a run or a window:
       still never registers — and the whole bus sits in fe re-probe
       bursts (~301/node per 8 min) while any required board is
       unregistered, which is also why attract takes ~72 s.
-      **LEADING SUSPECT NOW: the f9/fc RUNTIME-INFO block we answer
-      with ZEROS** — the game parses a serial ("%09d") and version
-      bytes out of it into board[+40..87]; board 24's white alert is
-      literally the RUNTIME INFO grade; a zero serial may also be what
-      blocks NOT-INITIALIZED→registered. The shim's own PAD_NB_RT=1
-      knob (pattern-fills f9/fc) was built as this exact experiment —
-      boot #4 is running it now.
+      **▼ The runtime-info-contents theory is ALSO dead: PAD_NB_RT=1
+      changed nothing** (fe re-probe bursts identical, flags unchanged).
+      **★★★ THE COMPLETE REGISTRATION MECHANISM, disassembled (second
+      RE pass) — TWO separate concepts, do not conflate:**
+      **(A) the app-command GATE `board[+0x14]`** — sole writer
+      0x51b65c in nb_register_identity 0x51b558: the fe reply's PART ID
+      bytes [4..7] linear-scanned against the 27-entry descriptor
+      table; a match stores that descriptor (its static [+0x14]≠0 =
+      gate OPEN for all ≤0xef app commands). **Node 2 PASSES this** —
+      our fe claim 0x2c40102b matches — so the game DOES send it LED
+      frames. **THEREFORE: NEVER nodecensus-silence node 2 on batman**
+      — silence kills the cabinet-lights traffic that is already
+      flowing; the star_wars silence was right because ITS node 2 is
+      absent. **(B) the Tech-Alerts GRADE `node_record[+0x18]`** —
+      written only by the grading state machine 0x261548-0x261750:
+      registry image missing → 4 RUNTIME INFO (board 24's old white
+      row, i.e. OUR default-identity claim caused it); version/variant
+      MISMATCH → 7 CHECKSUM + the update walk (board 24 under the
+      variant 0x01 guess); version AND variant MATCH → **grade 2 "NOT
+      REGISTERED" = known, correctly-versioned board that has not
+      completed RUNTIME REGISTRATION**. Only grades {1,2} alert red.
+      **Node 2's variant claim 0x05 MATCHES batman's decrypted image
+      (hexreg, live)** — so node 2 sits in matched-but-runtime-
+      unregistered, and the ONE remaining unknown is what moves grade
+      2 → 0 (the runtime-registration completion step). Third RE pass
+      is tracing the grade-0 writer now.
+      **Why only node 2 shows on the boot screen: directory flags bit
+      3 = screen-inclusion** (node 2 is batman's only bit-3 board; the
+      optional toppers grade invisibly). No install adjustment exists —
+      both writers are driven purely by bus evidence.
       **(4) The video-latency theory is DEAD: the 2.3-5.7 s first-frame
       delays are the attract's double-buffered clip schedule (each delay
       = the alternate channel's clip duration), healthy over 35 min.**

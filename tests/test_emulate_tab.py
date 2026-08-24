@@ -518,17 +518,17 @@ def test_building_the_panel_seeds_the_file_on_a_fresh_machine(monkeypatch,
 
 
 def test_volume_and_mute_are_never_disabled_by_a_run(monkeypatch, tmp_path):
-    """The opposite of Sound/Auto-attract just beside them: those are
-    start-time-only and grey out while a run is up (see _apply's own
-    comment); the whole point of item 56's slider is that it works WITHOUT a
+    """The whole point of item 56's slider is that it works WITHOUT a
     restart, so it must stay live through exactly the state that disables
-    its neighbours."""
+    its neighbours (Reset windows is the sanity probe for "a run disables
+    things" — the Sound/Auto-attract tickboxes that used to be it were
+    removed on 2026-08-24: both behaviours are simply always on)."""
     _isolated_ctl(monkeypatch, tmp_path)
     monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
     root, panel = _panel(tmp_path)
     try:
         panel._apply({"state": "running", "running": "1", "procs": "5"})
-        assert str(panel._audio_chk.cget("state")) == "disabled"      # sanity
+        assert str(panel._winreset_btn.cget("state")) == "disabled"   # sanity
         assert str(panel._vol_scale.cget("state")) != "disabled"
         assert str(panel._mute_chk.cget("state")) != "disabled"
     finally:
@@ -2289,6 +2289,56 @@ def test_cache_sizes_and_boot_render_for_humans():
     assert emulate_tab.human_size(2048) == "2 MB"
     assert emulate_tab.cache_boot_text(0) == "never"
     assert emulate_tab.cache_boot_text(1787000000).startswith("20")
+
+
+# ----------------------------------------------------------------------
+# Item 78: the footer bar under the notebook carries the EMULATION's
+# loading state while the Emulate tab is showing — the panel dispatches
+# semantic kinds and the window renders them.  These test the dispatch.
+# ----------------------------------------------------------------------
+
+def test_the_footer_follows_the_emulation_state(monkeypatch, tmp_path):
+    _isolated_ctl(monkeypatch, tmp_path)
+    root, panel = _panel(tmp_path)
+    pushes = []
+    panel._footer_cb = lambda kind, pct=None, text="": \
+        pushes.append((kind, pct, text))
+    try:
+        panel._apply({"state": "off", "running": "0", "procs": "0"})
+        assert pushes[-1][0] == "idle"
+        panel._apply({"state": "booting", "running": "1", "procs": "5"})
+        assert pushes[-1][0] == "boot"
+        assert "Starting" in pushes[-1][2]
+        # Tech Alerts is still LOADING — the bar must not read done there.
+        panel._apply({"state": "techalerts", "running": "1", "procs": "5"})
+        assert pushes[-1][0] == "boot"
+        panel._apply({"state": "attract", "running": "1", "procs": "5"})
+        assert pushes[-1][0] == "run"
+        # A copy in flight outranks everything the poll says (the guest is
+        # deliberately not running yet) — and carries its real percent.
+        panel._copying = "Copying card: 3121 / 7497 MB (41%)"
+        panel._copying_pct = 41
+        panel._apply({"state": "off", "running": "0", "procs": "0"})
+        assert pushes[-1] == ("copy", 41, "Copying card: 3121 / 7497 MB (41%)")
+        # ...except during a Stop, when the copy stops narrating.
+        panel._stopping = True
+        panel._apply({"state": "off", "running": "0", "procs": "0"})
+        assert pushes[-1][0] == "idle"
+    finally:
+        root.destroy()
+
+
+def test_the_sound_and_skip_toggles_are_gone_and_env_is_clean(
+        monkeypatch, tmp_path):
+    """David, 2026-08-24: the volume slider owns loudness and boots land in
+    attract on their own — the two start-time tickboxes are removed, and
+    Start's environment no longer carries either override."""
+    root, panel = _panel(tmp_path)
+    try:
+        assert not hasattr(panel, "_audio_chk")
+        assert not hasattr(panel, "_auto_chk")
+    finally:
+        root.destroy()
 
 
 def test_cache_manager_lists_and_drops(tmp_path, monkeypatch):

@@ -13356,7 +13356,11 @@ class MainWindow:
             # sitting on this tab (a WSL restart re-probes), and the notebook
             # pane is pinned to the height it was measured at — so the panel
             # has to be able to say "I am taller now".
-            resize_fn=self._resize_notebook_to_current_tab)
+            resize_fn=self._resize_notebook_to_current_tab,
+            # Item 78: the footer bar under the notebook is the panel's to
+            # drive while its tab is showing - copy percent, boot marquee,
+            # full at attract.
+            footer_cb=self.set_emulate_progress)
         self._emulate_panel.build(self._tab_emulate)
 
     def _build_jjp_emulate_tab(self):
@@ -14733,6 +14737,18 @@ class MainWindow:
 
     def _on_tab_changed(self, _event=None):
         text = self._current_tab_key()   # stable key, not the short label
+        # Item 78: leaving an Emulate tab hands the footer back to the
+        # pipeline - without this the bar stays wherever the emulation left
+        # it (full after a boot) underneath the freshly repacked chips.
+        if text not in ("Emulate", "Emulate JJP") \
+                and getattr(self, "_footer_owner", "pipeline") == "emulate" \
+                and not getattr(self, "_running", False):
+            self._footer_owner = "pipeline"
+            self._footer_kind = None
+            self._progress_bar.stop()
+            self._progress_bar.configure(mode="determinate")
+            self._progress_bar["value"] = 0
+            self.set_status("Ready")
         # Switching tabs means leaving whatever preview was playing.  Each tab
         # owns its own player (Replace Audio's spectrogram transport, Replace
         # Video's embedded clip); an ffplay child keeps the sound going under
@@ -14788,6 +14804,16 @@ class MainWindow:
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
             self._pex_default_from_extract()
+        elif text in ("Emulate", "Emulate JJP"):
+            # Item 78 (David, 2026-08-24: "why are we showing this progress
+            # bar on the emulate tab?"): the extract/write chips mean
+            # nothing here, and the bar belongs to the EMULATION's loading
+            # state — the Stern panel drives it through
+            # set_emulate_progress; its next status poll repaints within a
+            # couple of seconds, so entry just shows idle.
+            self._extract_phases_frame.pack_forget()
+            self._write_phases_frame.pack_forget()
+            self.set_emulate_progress("idle")
         elif text == "Default Settings":
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
@@ -20020,6 +20046,8 @@ class MainWindow:
         self.reset_steps(mode="extract")
 
     def set_progress(self, current, total, desc="", mode="extract"):
+        self._footer_owner = "pipeline"
+        self._footer_kind = None
         if total > 0:
             self._progress_bar.stop()
             self._progress_bar.configure(mode="determinate")
@@ -20029,6 +20057,47 @@ class MainWindow:
             self._progress_bar.start(12)
         if desc:
             self.set_status(desc)
+
+    def set_emulate_progress(self, kind, pct=None, text=""):
+        """Item 78 (David: "why are we showing this progress bar on the
+        emulate tab?"): while an Emulate tab is showing, the footer bar
+        carries the EMULATION's loading state - determinate through a card
+        copy (the percent is real, from cardmount's narration), marquee
+        through the boot, full at attract, empty when nothing runs.  The
+        pipeline stays the owner while one of its jobs runs (this is a
+        no-op then), and switching back to a pipeline tab hands the footer
+        back - see _on_tab_changed.  ``kind``: copy / boot / run / idle.
+        """
+        if getattr(self, "_running", False):
+            return
+        if self._current_tab_key() not in ("Emulate", "Emulate JJP"):
+            return
+        prev = getattr(self, "_footer_kind", None)
+        bar = self._progress_bar
+        if kind == "copy":
+            bar.stop()
+            bar.configure(mode="determinate")
+            bar["value"] = pct or 0
+        elif kind == "boot":
+            # start() again every poll would restart the marquee's sweep -
+            # only (re)arm it on the transition in.
+            if prev != "boot":
+                bar.configure(mode="indeterminate")
+                bar.start(12)
+        elif kind == "run":
+            bar.stop()
+            bar.configure(mode="determinate")
+            bar["value"] = 100
+        else:                                            # idle
+            bar.stop()
+            bar.configure(mode="determinate")
+            bar["value"] = 0
+        self._footer_kind = kind
+        self._footer_owner = "pipeline" if kind == "idle" else "emulate"
+        if text:
+            self.set_status(text)
+        elif kind == "idle":
+            self.set_status("Ready")
 
     def set_status(self, text):
         self._status_label.configure(text=text)

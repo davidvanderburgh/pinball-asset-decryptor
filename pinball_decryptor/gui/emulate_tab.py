@@ -1473,9 +1473,15 @@ class EmulatePanel:
     POLL_IDLE_MS = 10000
 
     def __init__(self, parent, log=None, card_var=None, savestates_var=None,
-                 theme_fn=None, badge_fn=None, resize_fn=None):
+                 theme_fn=None, badge_fn=None, resize_fn=None,
+                 footer_cb=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
+        #: Item 78: MainWindow.set_emulate_progress, injected like the log -
+        #: the footer bar under the notebook shows the EMULATION's loading
+        #: state while this tab is the visible one (the window ignores calls
+        #: from a hidden tab or under a running pipeline job).
+        self._footer_cb = footer_cb
         #: "This tab is taller than it was" - MainWindow._resize_notebook_to_
         #: current_tab, injected the same way the log and the theme are.
         #:
@@ -1519,6 +1525,9 @@ class EmulatePanel:
         #: copy, because the guest deliberately does not start until the copy
         #: lands.
         self._copying = None
+        #: The copy's percent (int), alongside _copying, for the footer bar
+        #: (item 78) - the one determinate phase of an emulator start.
+        self._copying_pct = None
         #: The card path already handed to `cardmount.sh --precache`, so the
         #: entry's write-trace (which fires per keystroke) starts one copy per
         #: picked card, not one per character.
@@ -1765,24 +1774,11 @@ class EmulatePanel:
                                      command=self._setup_recheck_now, width=14)
         self._check_btn.pack(side=tk.LEFT, padx=(6, 0))
 
-        # BOTH tickboxes are read ONCE, when Start builds the environment for
-        # watch.sh, so they are start-time options and not live controls.  They
-        # are therefore disabled while the emulator is up: leaving them
-        # clickable invites unticking one mid-run and concluding the option is
-        # broken when nothing happens, which is exactly what a tester reported.
-        self._audio_var = tk.BooleanVar(value=True)
-        self._audio_chk = ttk.Checkbutton(btns, text="Sound",
-                                          variable=self._audio_var)
-        self._audio_chk.pack(side=tk.LEFT, padx=(16, 0))
-
-        # On by default: the game boots to Tech Alerts and waits for an
-        # operator, which means sitting through ~15 s of bring-up and then
-        # pressing Escape twice, every single start.  There is no state to save
-        # instead — see autoattract.sh for why NVRAM is not the lever.
-        self._auto_var = tk.BooleanVar(value=True)
-        self._auto_chk = ttk.Checkbutton(btns, text="Skip to attract mode",
-                                         variable=self._auto_var)
-        self._auto_chk.pack(side=tk.LEFT, padx=(12, 0))
+        # The "Sound" and "Skip to attract mode" tickboxes lived here until
+        # 2026-08-24 (David: sound is the volume slider's job now, and boots
+        # land in attract on their own since item 63) - both rig behaviours
+        # are simply ON; PAD_AUDIO=0 / PAD_AUTO_ATTRACT=0 remain as env
+        # switches for scripted runs that want them off.
 
         # ITS OWN ROW, not crowded into btns above: btns already re-packs
         # _docker_btn/_setup_btn at the end of ITS OWN pack order whenever
@@ -3521,14 +3517,13 @@ class EmulatePanel:
         # Item 56: padplay.py polls this file live (see its poll_gain()), so
         # naming it here is what lets the volume/mute knob reach a run this
         # tab starts - build() already wrote the file itself, this only
-        # tells the rig where it is.  Unconditional, unlike Sound/Auto-attract
-        # below: a muted or half-volume run is still worth having the file
-        # for, in case Mute gets unticked mid-run.
+        # tells the rig where it is.  A muted or half-volume run is still
+        # worth having the file for, in case Mute gets unticked mid-run.
+        # (Sound and auto-attract are always on since 2026-08-24 - the
+        # volume slider owns loudness, and boots land in attract on their
+        # own; PAD_AUDIO=0 / PAD_AUTO_ATTRACT=0 stay available to scripted
+        # runs.)
         env = ["PAD_AUDIO_DUMP=30", "PAD_AUDIO_CTL=" + AUDIO_CTL_FILE] + src
-        if not self._audio_var.get():
-            env.append("PAD_AUDIO=0")
-        if not self._auto_var.get():
-            env.append("PAD_AUTO_ATTRACT=0")
         # ALWAYS THE CHECKPOINTABLE SHAPE (root, PAD_PIVOT) since the enable
         # checkbox was removed on 2026-08-10. It used to be the toggle's
         # answer, with a pending launch-from-slot forcing it anyway because
@@ -3603,9 +3598,12 @@ class EmulatePanel:
                     prog = card_copy_progress(line)
                     if prog is not None and not self._stopping:
                         self._copying = prog
+                        m = _CARD_COPY_RE.match(line)
+                        self._copying_pct = int(m.group(4)) if m else None
                         try:
                             self._timer().after(
-                                0, lambda p=prog: self._set("state", p))
+                                0, lambda p=prog, c=self._copying_pct:
+                                self._push_copy(p, c))
                         except (tk.TclError, RuntimeError):
                             pass
                     elif self._copying is not None and line.startswith("[card]"):
@@ -3724,6 +3722,7 @@ class EmulatePanel:
         # "Stopping…" by _apply or by a straggling progress line — the drain
         # and _apply both check _stopping before touching _copying again.
         self._copying = None
+        self._copying_pct = None
         self._run_label(True, True)
         self._set("state", "Stopping…")
 
@@ -4208,9 +4207,21 @@ class EmulatePanel:
         threading.Thread(target=run, daemon=True).start()
         self._schedule_poll()
 
+    def _push_copy(self, text, pct):
+        """Main-loop half of a drain-thread copy line: the tab's state label
+        plus the footer bar (item 78) - both Tk, neither touchable from the
+        drain itself."""
+        self._set("state", text)
+        if self._footer_cb is not None:
+            try:
+                self._footer_cb("copy", pct, text)
+            except tk.TclError:
+                pass
+
     def _apply(self, info):
         try:
             label, hint = state_text(info)
+            st_label = label
             # Item 74: while a first boot is copying the card, the guest is
             # deliberately not running yet — status.sh's honest "Not running"
             # would read as a hang, and the copy narration is the truth.
@@ -4219,6 +4230,22 @@ class EmulatePanel:
                 label = self._copying
             self._set("state", label)
             self._hint.configure(text=hint)
+            # Item 78: the footer bar under the notebook mirrors the loading
+            # state while this tab is showing (the window ignores the call
+            # otherwise): determinate copy percent, marquee through the
+            # boot, full at attract, empty when nothing runs.
+            if self._footer_cb is not None:
+                if self._copying is not None and not self._stopping:
+                    self._footer_cb("copy", self._copying_pct, self._copying)
+                elif info.get("running") == "1":
+                    if info.get("state") in ("attract", "running"):
+                        self._footer_cb("run", None,
+                                        "Emulator running — " + st_label)
+                    else:
+                        self._footer_cb("boot", None,
+                                        "Loading the emulator — " + st_label)
+                else:
+                    self._footer_cb("idle")
 
             procs = info.get("procs", "0")
             self._set("procs", "%s running%s" % (
@@ -4305,11 +4332,6 @@ class EmulatePanel:
             self._winreset_btn.configure(
                 state=tk.DISABLED if (up or busy or self._winresetting
                                       or not rig_available()) else tk.NORMAL)
-            # Start-time options: they follow the Start button, because that is
-            # the only moment they are read.
-            opts = tk.DISABLED if (up or busy) else tk.NORMAL
-            self._audio_chk.configure(state=opts)
-            self._auto_chk.configure(state=opts)
         except tk.TclError:
             pass        # the tab went away between the poll and its result
 

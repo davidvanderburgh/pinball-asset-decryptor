@@ -945,29 +945,17 @@ HELP_CONTENT = {
          "something is wrong. \"Stuck at Tech Alerts\" is the different one: "
          "it means the skip-to-attract helper pressed several times and the "
          "screen never changed, and its hint says what to try."),
-        ("Skip to attract mode",
-         "Ticked by default. It waits until the node bus has finished bringing "
-         "up — that is the point at which the game will actually accept an "
-         "operator — and then presses Service Back once, which takes it "
-         "straight to attract mode. It cannot be saved instead: the screen is "
-         "a live readout of the boot checks, not an acknowledgement the "
-         "machine remembers, and the emulator's NVRAM already persists between "
-         "runs. Untick it to drive the boot yourself."),
-        ("Sound",
-         "The game's audio is played out to your speakers — through WSL on "
-         "Windows, and on macOS over a local stream played by ffplay, which "
-         "ships with the ffmpeg the prerequisites already install. It "
-         "only makes sound while it is actually running, so silence after the "
-         "boot chime usually means it is still waiting at Tech Alerts. The "
-         "status line shows frames played and frames dropped — dropped should "
-         "stay at zero."),
         ("Volume and Mute",
-         "Sets the level of the emulator's OWN sound coming out of your PC "
-         "speakers — not the in-game volume the coin door's -/+ buttons "
-         "adjust, which is a per-title setting on the machine itself and is "
-         "left alone. Both work live on a run that is already going, with no "
-         "restart needed, and the level you leave them at is remembered for "
-         "next time."),
+         "The game's audio always plays out to your PC speakers — through WSL "
+         "on Windows, and on macOS over a local stream played by ffplay — and "
+         "this slider is the one control over it. It sets the level of the "
+         "emulator's OWN sound, not the in-game volume the coin door's -/+ "
+         "buttons adjust, which is a per-title setting on the machine itself "
+         "and is left alone. Both work live on a run that is already going, "
+         "with no restart needed, and the level you leave them at is "
+         "remembered for next time. Silence after the boot chime usually "
+         "means the game is still waiting at Tech Alerts — it only makes "
+         "sound while it is actually running."),
         ("Video",
          "Clips play. The game's own decoder is an i.MX6 hardware block this "
          "PC does not have and the card carries no software fallback, so the "

@@ -4776,6 +4776,32 @@ These have each been violated at least once and each cost a run or a window:
       drive personally, and each finding's own difficulty is unknown until it
       is filed.
 
+- [ ] **81. `Schematic`'s switch-row hover zone is not perfectly aligned with
+      its text.** `S3 D2` ← WORKING ON *(Filed 2026-08-24, spotted by David
+      during item 80's sweep on `avengers_infinity_le`'s switch list — the
+      tooltip/hover feedback for a row does not line up with the row's own
+      text.)*
+      Live in `Schematic._hit()` (`tools/spike2_emu/playfield.py`): each row's
+      text is `create_text(x, y, anchor="w", ...)` at `y = 14 + ri * ROW_H`
+      (`ROW_H = 17`), and the hit test is
+      `find_overlapping(x-2, y-8, x+2, y+8)` around the cursor. At the desk
+      this reads as centred and slightly generous (±8 px against a ~12 px
+      glyph height), so the mechanism is NOT yet established — this needs
+      David's eyes on which way it's actually off (row above/below? left/
+      right of the text? by about how much?) before touching the geometry.
+      **Do not guess-fix the numbers** — item 21b's hover bug in the same
+      class (hollow ovals only hittable on their outline) looked like an
+      off-by-a-few-pixels problem too and was actually a Tk `fill=""` rule;
+      the real cause here may not be `_hit()`'s padding at all.
+      **Acceptance:** hovering directly over a row's visible text shows that
+      row's tooltip, on a title with more than one switch column
+      (`avengers_infinity_le` or `turtles_pro`), screenshotted before/after.
+      — S3: cosmetic, the row still closes on click and the tooltip still
+      appears, it is just not trustworthy for "which switch is this". D2:
+      the code is small and already found, but the actual mechanism needs a
+      live description (or screenshot) of the offset before a fix can be
+      chosen correctly.
+
 ## Reference material that is NOT in this repo
 
 - **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own

@@ -3172,6 +3172,32 @@ These have each been violated at least once and each cost a run or a window:
       *(▲ from 70%. D3 → D2: the mechanism is proven end to end and the fix is
       applied and verified; what remains is deciding what the rig should do
       about it automatically, which is desk work plus one confirming boot.)*
+      **★★★★★★ 2026-08-24, INDEPENDENT LIVE CONFIRMATION AND ONE MORE FIXED
+      FILE, from item 80's alphabetical sweep — David playing the app, not
+      desk work.** Going alphabetically he hit `aerosmith_le` (clean, green
+      check) then `avengers_infinity_le` (glass showed the red `Game
+      validation error, Update SD card` banner over language-select — see
+      item 80's log) **before either of us had looked at `nvgrades.py`'s
+      census for this session**, and the census then printed exactly what
+      that predicts: `aerosmith_le` is one of only 4 titles reading clean
+      (`P/P/P` both slots — the others are `elvira3`, `godzilla_le`,
+      `turtles_pro`), and `avengers_infinity_le` was STUCK (`slot B P/P/F`).
+      Two independent methods (an EEPROM read and a human looking at the
+      glass) now agree on which titles carry the banner. **Also new: the
+      census now shows 24 of 29 stuck, not "25 of 28" — `godzilla_pro` reads
+      stuck too**, which the 2026-08-23 pass did not report (either it was
+      clean then and a later boot poisoned it, or it was missed; not chased,
+      not urgent since its own tick is healthy and slot A stays clean).
+      **Fix applied:** `nvgrades.py --fix avengers_infinity_le`
+      (`nvram-avengers_infinity_le.bin` slot B `P/P/F` → `S/S/S`, zeroed
+      `0x214..0x293`, backup `.bak-prevalfix` beside it, rig lock held for
+      the write and released after — see `killgame.sh`/lock rules). **NOT
+      YET RE-VERIFIED ON THE GLASS** — same gap the 2026-08-23 pass left
+      open ("the banner was never captured on the glass BEFORE and AFTER").
+      This time the BEFORE shot exists (David's screenshot). Resume: David
+      relaunches `avengers_infinity_le` in his own already-open app and says
+      whether the banner is gone — closes this item's oldest open question
+      for free, using the sweep instead of a scripted boot.
       **★★★★★ THE MECHANISM, PROVEN 2026-08-23 BY THREE RUNS WITH A CONTROL.**
       All three booted the Heisei image identically, reading the grades live
       through `PAD_VAL_DUMP` (now title-portable, `PAD_VAL_MOD=0x7f16bc`):

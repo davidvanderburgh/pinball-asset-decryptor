@@ -111,6 +111,7 @@ on this picture. 113 channels (53 on node 8, 60 on node 9) join into 81
 fixtures: 13 RGB, 6 red+green (the BUILDING FIRE pairs), 62 single. All covered.
 """
 import collections
+import io
 import json
 import os
 import queue
@@ -195,6 +196,19 @@ LED_PATH = os.path.join(padpath.dump() or "", "padled")
 #: reopen-per-poll rule as LED_PATH - a held handle reads a frozen cache over
 #: \\wsl.localhost.
 LCD_PATH = os.path.join(padpath.dump() or "", "padlcd")
+
+#: Optional fast path for the LCD clip decode (item 83's motion review).
+#: Tk's own "gif -index N" has no frame cursor - every call re-parses the
+#: clip from byte 0, which measured up to ~139 ms per frame at the tail of a
+#: 150-frame clip and would stall the UI thread (the documented freeze
+#: class). PIL's GIF reader seeks INCREMENTALLY, so with it each tick costs
+#: one frame's decode, flat. Without PIL the panel still works, off an
+#: in-memory copy of the clip (one read, no repeated \\wsl.localhost I/O).
+try:
+    from PIL import Image as _PILImage
+    from PIL import ImageTk as _PILImageTk
+except Exception:                                           # noqa: BLE001
+    _PILImage = _PILImageTk = None
 
 #: PAD_PF_LOG=<path> turns on the once-a-second loop report (see Field._log).
 #: Unset in normal use; this is the instrument the frame-rate claim rests on.
@@ -3507,6 +3521,9 @@ class LcdPanel:
     #: Cell size. The store's clips are 240x180; a dedicated window has room
     #: to show them at native size (the old in-view strip halved them).
     CW, CH = 244, 184
+    #: Re-ask backoff for lcdart, seconds. One subprocess per minute per id
+    #: whose art is still missing - see _show.
+    ASK_S = 60.0
 
     def __init__(self, root, game):
         self.root, self.game = root, game
@@ -3517,14 +3534,23 @@ class LcdPanel:
         self.imgs = [None, None, None]
         self.ids = [None, None, None]
         self.have = [False, False, False]
-        #: Per-cell animation state, or None while only the still exists:
-        #: {"gif": path, "i": next frame, "frames": [PhotoImage], "done": bool}.
-        #: Frames decode LAZILY, one per poll - the first pass through a clip
-        #: is the decode pass, every later loop is cache hits - and the whole
-        #: list drops on id change, so memory holds at most 3 active clips
-        #: (<=150 frames each, lcdart.py's 15 s cap).
+        #: Per-cell animation state. None while no gif is on disk (kept
+        #: retryable); a dict once the clip's BYTES are read - in one go, so
+        #: a \\wsl.localhost hiccup can only fail the whole read (caught,
+        #: retried next tick) and never masquerade as end-of-clip. "n" is the
+        #: frame count (exact via PIL, learned at first wrap without);
+        #: "dead": True marks an undecodable clip - honest now, because the
+        #: bytes are complete in memory, so a decode failure is the file, not
+        #: the wire. Frames decode one per poll and cache; the whole dict
+        #: drops on id change, so memory holds at most 3 active clips.
         self.anim = [None, None, None]
-        self._asked = set()
+        #: id -> monotonic time of the last lcdart ask. A dict, not a set
+        #: (motion review): lcdart's contract says a missing store heals on
+        #: retry, so an id whose art is STILL missing re-asks after ASK_S -
+        #: bounded at one subprocess per minute per id, instead of a
+        #: once-per-session set that made that promise false.
+        self._asked = {}
+        self._hidden = False        # close box used; skip draw/decode work
         self._next = 0.0
         self._polls = 0
         self._art = os.path.join(padpath.tables() or "", game, "lcd")
@@ -3562,8 +3588,11 @@ class LcdPanel:
         # die. The ids keep updating behind it, so nothing is stale if a
         # future change re-shows it. Record the position FIRST - a close is
         # the one deliberate placement signal that must survive even a run
-        # that later dies without reaching save_state.
+        # that later dies without reaching save_state. _hidden stops the
+        # decode/draw work too - ids keep tracking (cheap), frames do not
+        # advance for a window nobody can see.
         save_state(self.root, self)
+        self._hidden = True
         self.win.withdraw()
 
     def poll(self):
@@ -3585,8 +3614,16 @@ class LcdPanel:
         for k in range(3):
             if ids[k] != self.ids[k]:
                 self._show(k, ids[k])
-            elif not self.have[k] and self._polls % 10 == 0:
-                self._show(k, ids[k])   # ~1 Hz retry while the art extracts
+            elif self._polls % 10 == 0 and ids[k] and (
+                    not self.have[k] or self.anim[k] is None):
+                # ~1 Hz retry while EITHER artifact is missing. The old
+                # `not have[k]` test stopped the moment a cached still
+                # painted, which froze the gif upgrade forever when the
+                # first sighting happened before drv existed (motion
+                # review finding 1) - anim is None exactly while the gif
+                # has not landed, so this keeps _show (and its deferred
+                # ask) alive until the motion exists.
+                self._show(k, ids[k])
         self._animate()                 # one frame per poll = 10 fps
 
     def _draw(self, k, img):
@@ -3602,14 +3639,19 @@ class LcdPanel:
             self.cvs[k].itemconfig(self.items[k], image=img)
 
     def _show(self, k, i):
-        # Ask lcdart.py for whatever this id is missing, ONCE per id per
-        # session. Checked against BOTH artifacts: a cache from before the
-        # GIF stage existed has the still but not the motion, and the old
-        # png-only test here silently left such an id frozen for ever.
-        if i and i not in self._asked and self.drv is not None and not (
-                os.path.isfile(os.path.join(self._art, "%d.png" % i))
-                and os.path.isfile(os.path.join(self._art, "%d.gif" % i))):
-            self._asked.add(i)
+        # Ask lcdart.py for whatever this id is missing, at most once per
+        # ASK_S per id. Checked against BOTH artifacts: a cache from before
+        # the GIF stage existed has the still but not the motion, and the
+        # old png-only test here silently left such an id frozen for ever.
+        # The backoff (not a once-per-session set) is what makes lcdart's
+        # "the panel retries" contract true: a 'no store' race heals once
+        # the card mounts, at one bounded subprocess per minute per id.
+        if (i and self.drv is not None
+                and time.monotonic() - self._asked.get(i, -1e9) > self.ASK_S
+                and not (
+                    os.path.isfile(os.path.join(self._art, "%d.png" % i))
+                    and os.path.isfile(os.path.join(self._art, "%d.gif" % i)))):
+            self._asked[i] = time.monotonic()
             self.drv.run_script("lcdart.py", self.game, str(i))
         if self.ids[k] != i:
             self.anim[k] = None         # new id: the old clip's frames drop
@@ -3632,35 +3674,90 @@ class LcdPanel:
                            fill="#888", font=("Consolas", 9))
         self.ids[k], self.have[k] = i, not i    # id 0 = nothing to fetch
 
+    def _open_clip(self, i):
+        """Read the id's WHOLE clip into memory and open a decoder over it.
+
+        One read, deliberately (motion review findings 2-4): the per-frame
+        `gif -index N` decode re-opened and re-parsed the file from byte 0
+        over \\\\wsl.localhost on every tick - measured at up to ~139 ms per
+        frame at a 150-frame clip's tail, on the UI thread. Reading once
+        also splits the failure modes honestly: an OSError here is the wire
+        (return None, the caller retries next tick); a decode failure PAST
+        this point is the file itself, and may be latched for good.
+
+        Returns the anim dict, {"dead": True} for undecodable bytes, or
+        None to retry.
+        """
+        try:
+            with open(os.path.join(self._art, "%d.gif" % i), "rb") as f:
+                data = f.read()
+        except OSError:
+            return None                 # not encoded yet, or a 9P hiccup
+        if _PILImage is not None:
+            try:
+                im = _PILImage.open(io.BytesIO(data))
+                return {"pil": im, "n": im.n_frames, "i": 0, "frames": []}
+            except Exception:           # noqa: BLE001 - complete bytes, so
+                return {"dead": True}   # this is the clip, not the wire
+        return {"data": data, "n": None, "i": 0, "frames": []}
+
+    def _decode(self, a, idx):
+        """Frame idx as a PhotoImage, or None for end-of-clip (Tk path only
+        - PIL knows n up front, so it is never asked past the end)."""
+        if "pil" in a:
+            try:
+                a["pil"].seek(idx)      # sequential: PIL steps ONE frame
+                return _PILImageTk.PhotoImage(a["pil"].convert("RGB"))
+            except Exception:           # noqa: BLE001 - corrupt tail: the
+                a["n"] = idx            # clip honestly ends here
+                return None
+        try:
+            return tk.PhotoImage(data=a["data"],
+                                 format="gif -index %d" % idx)
+        except tk.TclError:
+            return None                 # first index past the end
+
     def _animate(self):
         """Advance every animating cell one frame. The GIF is encoded at
         10 fps by lcdart.py and this runs once per 10 Hz poll, so encode
-        rate = display rate by construction."""
+        rate = display rate by construction. Skipped entirely while the
+        window is hidden - nobody is watching, and the decode pass is the
+        one part of this panel with a real per-tick cost."""
+        if self._hidden:
+            return
         for k in range(3):
             i, a = self.ids[k], self.anim[k]
-            if not i or not self.have[k]:
+            # NOT gated on have[k] (motion review finding 5): a corrupt
+            # still must not block a perfectly good clip from playing.
+            if not i:
                 continue
             if a is None:
-                gif = os.path.join(self._art, "%d.gif" % i)
-                if not os.path.isfile(gif):
-                    continue            # still-only until the encode lands
-                a = self.anim[k] = {"gif": gif, "i": 0,
-                                    "frames": [], "done": False}
-            if a["done"] and not a["frames"]:
-                continue                # unreadable clip: stay on the still
+                a = self.anim[k] = self._open_clip(i)
+                if a is None:
+                    self.anim[k] = None
+                    continue            # no gif yet: retried next tick
+            if a.get("dead"):
+                continue                # undecodable clip: keep the still
             idx = a["i"]
-            if idx >= len(a["frames"]) and a["done"]:
+            if a["n"] is not None and idx >= a["n"]:
                 idx = a["i"] = 0        # wrap: the clip loops
             if idx < len(a["frames"]):
                 frame = a["frames"][idx]
             else:
-                try:
-                    frame = tk.PhotoImage(file=a["gif"],
-                                          format="gif -index %d" % idx)
+                frame = self._decode(a, idx)
+                if frame is None:
+                    if not a["frames"]:
+                        self.anim[k] = {"dead": True}
+                        continue
+                    a["n"] = len(a["frames"])   # Tk path learns n at EOF
+                    a.pop("data", None)         # decode pass over
+                    idx = a["i"] = 0
+                    frame = a["frames"][0]      # wrap and draw THIS tick -
+                else:                           # no 200 ms hitch at the seam
                     a["frames"].append(frame)
-                except tk.TclError:     # first index past the end
-                    a["done"] = True
-                    continue            # wrap on the next tick
+                    if a["n"] is not None and len(a["frames"]) == a["n"]:
+                        a.pop("pil", None)      # decode pass over: drop the
+                        a.pop("data", None)     # reader and the raw bytes
             self._draw(k, frame)
             a["i"] = idx + 1
 

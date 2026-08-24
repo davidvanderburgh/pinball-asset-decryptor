@@ -186,8 +186,10 @@ def _write_gif(art_dir, name, colors):
 
 def test_cached_still_still_asks_for_motion(tmp_path, monkeypatch):
     """The stale-cache upgrade path: an id whose PNG predates the GIF stage
-    must STILL ask lcdart.py once - the old png-only test here left every
-    pre-motion cache frozen for ever."""
+    must STILL ask lcdart.py - the old png-only test here left every
+    pre-motion cache frozen for ever. And it must be ONE ask inside the
+    backoff window, across an id revisit too (review: membership alone
+    could not tell one ask from an ask per _show entry)."""
     root = _root()
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
@@ -197,13 +199,24 @@ def test_cached_still_still_asks_for_motion(tmp_path, monkeypatch):
         assert p.have[0] is True, "cached still did not paint"
         assert ("lcdart.py", "batman", "54") in p.drv.calls, \
             "png-cached id never asked for its motion"
+        _write_png(p._art, "919.png")
+        _write_block(block, [919])                   # away...
+        _poll(p, times=10)
+        _write_block(block, [54])                    # ...and back
+        _poll(p, times=10)
+        asks_54 = [c for c in p.drv.calls if c[2] == "54"]
+        assert len(asks_54) == 1, \
+            "revisited id re-asked inside the backoff: %r" % p.drv.calls
     finally:
         root.destroy()
 
 
 def test_gif_landing_animates_and_wraps(tmp_path, monkeypatch):
     """The motion contract: once <id>.gif lands, each poll advances one
-    frame, frames cache as they decode, and the clip loops at its end."""
+    frame, frames cache as they decode, and the clip loops at its end WITH
+    THE REPLAY IN ORDER - the review proved the old distinct-count
+    assertion stayed green with looping fully broken (freeze on the last
+    frame drew 3 distinct frames too)."""
     root = _root()
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
@@ -213,18 +226,23 @@ def test_gif_landing_animates_and_wraps(tmp_path, monkeypatch):
         assert p.anim[0] is None, "animation started with no gif on disk"
         _write_gif(p._art, "54.gif", ["red", "green", "blue"])
         seen = []
-        for _ in range(7):                          # 3 frames + wrap + reuse
+        for _ in range(7):                          # two full loops + one
             _poll(p)
             seen.append(p.imgs[0])
         a = p.anim[0]
         assert a is not None, "gif landed but the cell never animated"
+        assert a["n"] == 3, "frame count not learned: %r" % a.get("n")
         assert len(a["frames"]) == 3, "lazy decode cached %d frames" % \
             len(a["frames"])
-        assert a["done"] is True, "clip end never detected"
-        assert len({id(s) for s in seen}) == 3, \
-            "7 polls drew %d distinct frames, not the 3-frame loop" % \
-            len({id(s) for s in seen})
+        # THE WRAP, pinned by identity ORDER, not cardinality: the seam is
+        # same-tick (no hitch frame), so poll 4 replays frame 0.
+        assert seen[3] is seen[0] and seen[4] is seen[1], \
+            "the clip did not loop in order: %r" % [id(s) for s in seen]
         assert seen[0] is not seen[1], "the drawn frame never advanced"
+        # One PERSISTENT canvas item, reconfigured per frame - a
+        # delete/create pair per tick leaks an item per frame at 10 Hz.
+        assert len(p.cvs[0].find_all()) == 1, \
+            "%d canvas items after 7 draws" % len(p.cvs[0].find_all())
     finally:
         root.destroy()
 
@@ -238,6 +256,11 @@ def test_id_change_resets_animation(tmp_path, monkeypatch):
         _write_block(block, [54])
         _poll(p, times=3)
         assert p.anim[0] is not None
+        # 54 is FULLY cached (png + gif): the ask guard must not have
+        # spawned a subprocess for it - the review proved this negative
+        # was unasserted, so an always-ask regression stayed green.
+        assert not any(c[2] == "54" for c in p.drv.calls), \
+            "fully-cached id still asked lcdart: %r" % p.drv.calls
         _write_png(p._art, "919.png")               # still-only successor
         _write_block(block, [919])
         _poll(p)
@@ -319,6 +342,71 @@ def test_position_persists_roundtrip(tmp_path, monkeypatch):
         playfield.save_state(root, p)
         st = json.load(open(playfield.STATE))
         assert "villain_pos" in st and "playfield_pos" in st
+    finally:
+        root.destroy()
+
+
+def test_cached_still_with_late_driver_still_upgrades(tmp_path, monkeypatch):
+    """THE motion review's headline: id first seen while drv is None, with
+    a cached still. The still paints, have latches True - and the old
+    `not have[k]` retry gate then never re-entered _show, so the gif was
+    never requested for the whole session (a mid-run window relaunch on a
+    pre-GIF cache hit this deterministically on the steady attract id)."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_png(p._art, "54.png")                 # pre-GIF-era cache
+        p.drv = None                                 # window up before view
+        _write_block(block, [54])
+        _poll(p, times=10)
+        assert p.have[0] is True, "cached still did not paint"
+        assert 54 not in p._asked, "driverless ask was swallowed for good"
+        p.drv = FakeDrv()                            # the view arrives
+        _poll(p, times=10)                           # a retry tick passes
+        assert ("lcdart.py", "batman", "54") in p.drv.calls, \
+            "still-cached cell never asked for its motion after drv landed"
+    finally:
+        root.destroy()
+
+
+def test_corrupt_still_does_not_block_motion(tmp_path, monkeypatch):
+    """A torn/corrupt png must degrade to a placeholder, not veto the clip:
+    the review caught _animate gated on have[k], which let one bad still
+    permanently block a perfectly good gif."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        os.makedirs(p._art, exist_ok=True)
+        with open(os.path.join(p._art, "54.png"), "wb") as f:
+            f.write(b"not a png")                    # the torn write
+        _write_gif(p._art, "54.gif", ["red", "green", "blue"])
+        _write_block(block, [54])
+        _poll(p, times=3)
+        assert p.have[0] is False, "corrupt still somehow decoded"
+        a = p.anim[0]
+        assert a is not None and len(a["frames"]) >= 2, \
+            "good clip blocked by a corrupt still"
+    finally:
+        root.destroy()
+
+
+def test_hidden_window_stops_the_decode_work(tmp_path, monkeypatch):
+    """After the close box, ids keep tracking (cheap) but frames must stop
+    advancing - the review measured the decode pass as the panel's one
+    real cost, and it ran at full price for a window nobody could see."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_png(p._art, "54.png")
+        _write_gif(p._art, "54.gif", ["red", "green", "blue"])
+        _write_block(block, [54])
+        _poll(p, times=2)
+        frames_before = len(p.anim[0]["frames"])
+        p.win.tk.eval(p.win.protocol("WM_DELETE_WINDOW"))
+        assert p._hidden is True
+        _poll(p, times=4)
+        assert len(p.anim[0]["frames"]) == frames_before, \
+            "hidden window kept decoding frames"
     finally:
         root.destroy()
 

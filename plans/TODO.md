@@ -5134,6 +5134,36 @@ These have each been violated at least once and each cost a run or a window:
       close driven through the registered handler, a driverless first-boot
       deferred-ask test, a position round-trip, a poll-chain-survives
       test, and a role-disambiguation test.
+      **UPDATE 4 same day: the motion commit's own adversarial review
+      (16 agents) confirmed 12 findings; all fixed — the decode was
+      REDESIGNED, not patched.** The mechanism findings: (1) drv-None +
+      cached-still froze the gif upgrade forever (the `not have[k]` retry
+      gate stopped once a still painted — deterministic on a mid-run
+      window relaunch; the retry now also fires while anim is None);
+      (2+3) per-frame `gif -index N` decode re-parsed the file from byte
+      0 over \\wsl.localhost on the UI thread — MEASURED at up to ~139 ms
+      per frame at a 150-frame tail, three cells saturating the tick
+      budget for ~30 s (the documented UI-freeze class) — and TclError
+      conflated end-of-clip with a 9P hiccup, permanently truncating
+      clips. Now: the clip's BYTES are read ONCE (OSError = wire =
+      retried; decode failure = the file = honest dead-latch), PIL's
+      incremental seek decodes one frame per tick flat (n_frames exact,
+      no EOF guessing; Tk in-memory fallback without PIL), the wrap draws
+      same-tick (hitch gone), and a hidden window skips decode entirely;
+      (4) png write made atomic like the gif (a torn still passed every
+      isfile check forever) and a corrupt still no longer vetoes a good
+      clip (_animate ungated from have); (5) lcdart diagnostics went into
+      run_script's discarded pipe and its "panel retries" docstring was
+      false — failures now land in lcd/lcdart.log, gif-failure exits 2
+      not 0, and the panel re-asks with a 60 s backoff (dict, not a
+      once-per-session set), making the no-store heal real. Test holes
+      (wrap assertion vacuous under freeze-on-last-frame, _asked/ask
+      guards unpinned, persistent-canvas-item leak unasserted, lcdart
+      entirely uncovered incl. the -gifflags trap): 15 panel tests + a
+      new 6-test lcdart suite, whose real-ffmpeg tier standalone-decodes
+      a late frame and fails if the transdiff guard is ever "tidied".
+      Live re-verified: 20 polls = 20 distinct captures off the real
+      card clips, PIL fast path, no hitch tick.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

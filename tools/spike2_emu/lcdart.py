@@ -34,13 +34,24 @@ attract id), id 919 = a wall-climb cameo (game-start trio), 3047+ = the
 per-villain portraits the radium names. A second lcdnode title is the cue to
 derive the store per title instead.
 
-Needs the card MOUNTED (any run has it); prints 'no store' otherwise and the
-panel simply retries on a later sighting.
+Needs the card MOUNTED (any run has it); reports 'no store' otherwise and
+the panel re-asks with a ~60 s backoff while either artifact is missing, so
+a store that mounts later heals in-session. BOTH artifacts are written
+atomically (.tmp + os.replace): every validity check in this pipeline is
+os.path.isfile, so a torn write would otherwise poison the id for ever -
+nothing ever rewrites an existing file.
+
+FAILURES ALSO LAND IN <out_dir>/lcdart.log. The panel launches this through
+run_script, which captures and DISCARDS stdout - without the log, a failed
+encode is indistinguishable from one still running. Exit codes: 0 = all
+artifacts present, 1 = nothing produced, 2 = still kept but the gif stage
+failed (the panel ignores codes; a batch caller must not count 2 as done).
 """
 import glob
 import os
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import padpath
@@ -62,22 +73,42 @@ def main():
     if os.path.isfile(png) and os.path.isfile(gif):
         print(png)
         return 0
+    os.makedirs(out_dir, exist_ok=True)
+
+    def log(msg):
+        # stdout is captured and thrown away by run_script - this file is
+        # the only trace a failure leaves. Best-effort on purpose.
+        print(msg)
+        try:
+            with open(os.path.join(out_dir, "lcdart.log"), "a") as f:
+                f.write("%s id %s: %s\n"
+                        % (time.strftime("%Y-%m-%d %H:%M:%S"), disp, msg))
+        except OSError:
+            pass
 
     hits = glob.glob(STORE_GLOB % (game, disp))
     if not hits:
-        print("no store (card not mounted, or id %s not in it)" % disp)
+        log("no store (card not mounted, or id %s not in it)" % disp)
         return 1
-    os.makedirs(out_dir, exist_ok=True)
 
     # THE STILL FIRST - it is the cheap one and the panel paints it the
-    # moment it lands, while the GIF is still encoding behind it.
+    # moment it lands, while the GIF is still encoding behind it. Through a
+    # .tmp: a torn png would pass every isfile check in the pipeline for
+    # ever (nothing rewrites an existing file), showing a permanent
+    # placeholder over a perfectly good clip.
     if not os.path.isfile(png):
+        tmp = png + ".tmp"
         r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", hits[0],
-                            "-frames:v", "1", png],
+                            "-frames:v", "1", "-c:v", "png", "-f", "image2",
+                            tmp],
                            capture_output=True, timeout=30)
-        if r.returncode != 0 or not os.path.isfile(png):
-            print("ffmpeg failed: %s"
-                  % r.stderr.decode("utf8", "replace")[:200])
+        if r.returncode == 0 and os.path.isfile(tmp):
+            os.replace(tmp, png)
+        else:
+            if os.path.isfile(tmp):
+                os.unlink(tmp)
+            log("png stage failed: %s"
+                % r.stderr.decode("utf8", "replace")[:200])
             return 1
 
     if not os.path.isfile(gif):
@@ -100,11 +131,15 @@ def main():
             os.replace(tmp, gif)        # atomic: whole clip or no clip
         else:
             # The still already landed, so a failed GIF degrades to the
-            # pre-motion behaviour rather than to a broken cell.
+            # pre-motion behaviour rather than to a broken cell - but say
+            # so with exit 2, not a lying 0: a batch pre-warm that counted
+            # this as done would never come back for the motion.
             if os.path.isfile(tmp):
                 os.unlink(tmp)
-            print("gif stage failed (still kept): %s"
-                  % r.stderr.decode("utf8", "replace")[:200])
+            log("gif stage failed (still kept): %s"
+                % r.stderr.decode("utf8", "replace")[:200])
+            print(png)
+            return 2
     print(png)
     return 0
 

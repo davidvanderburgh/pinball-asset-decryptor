@@ -90,6 +90,12 @@ TYPE_NAMES = [
 # which is strictly worse than a graded mismatch). class index per hwshim.c.
 PART_BY_CLASS = {
     1: 0x00020023,   # LPC1112_101  (pinnode et al)
+    3: 0x00030030,   # LPC1113_302  (lcdnode) - MEASURED off batman's own
+                     #   descriptor table (item 82): record at file 0x6736c4
+                     #   reads part=0x00030030 class=3 name "LPC1113FBD48/303".
+                     #   Without this row the lcdnode "VILLAIN VISION" board 24
+                     #   was dropped as no-usable-class, and hwshim's default
+                     #   pinnode identity manufactured its RUNTIME INFO grade.
     4: 0x00140040,   # LPC1124_303  (node4)
     5: 0x2C40102B,   # LPC1313      (ws2812node, coil4node, ...)
 }
@@ -139,6 +145,9 @@ CLASS_PREF = {
     "ws2812node": (5,),
     "node4":      (4,),
     "coil4node":  (5, 1),
+    "lcdnode":    (3,),      # the only class any card ships it in (item 82);
+                             # variant stays a marked GUESS until hexreg or a
+                             # live registry read measures it
 }
 CLASS_PREF_DEFAULT = (5, 1, 4)
 

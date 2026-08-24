@@ -3843,11 +3843,14 @@ static void nb_hexreg_scan(void)
 }
 
 /* The board's MCU part id names its LPC class (the game's own table at
- * 0x69cc24); only the three classes hwshim has measured part ids for are
- * ever claimed, so three entries is the whole mapping. */
+ * 0x69cc24); only the classes hwshim has measured part ids for are
+ * ever claimed, so these entries are the whole mapping. */
 static unsigned nb_hexreg_class(unsigned part)
 {
     if (part == 0x00020023u) return 1;          /* LPC1112_101 */
+    if (part == 0x00030030u) return 3;          /* LPC1113_302 (lcdnode) -
+                                                 * measured off batman's own
+                                                 * descriptor table, item 82 */
     if (part == 0x00140040u) return 4;          /* LPC1124_303 */
     if (part == 0x2c40102bu) return 5;          /* LPC1313     */
     return 0;
@@ -6355,6 +6358,12 @@ static void nb_nodes_init(void)
         for (id = 1; id < n && nb_nnodes < (int)sizeof nb_nodes; id++) {
             unsigned node = ((const unsigned char *)(unsigned long)(st + id * 32))[20];
             if (!node) continue;                 /* 0 is the cabinet, over SPI */
+            if (node == 0xffu) continue;         /* swelf poisons the ids its
+                                                  * file table does not carry
+                                                  * with node 0xff - a marker,
+                                                  * not a board. batman seeded
+                                                  * a bogus node 255 into the
+                                                  * schedule off it (item 82) */
             if (nb_is_silent(node)) continue;    /* the machine does not have it
                                                   * - same fact, same filter as
                                                   * the fallback below */

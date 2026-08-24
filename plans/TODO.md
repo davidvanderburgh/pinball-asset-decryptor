@@ -4846,6 +4846,76 @@ These have each been violated at least once and each cost a run or a window:
       REGISTERED` (red) + `CHECK NODE BOARD 24 : RUNTIME INFO` (white),
       plus "we are not seeing the second screen that appears over the
       carousel". All evidence below is READ-ONLY off his run's own logs.)*
+      **★★★★ 2026-08-24 PASS (4-agent desk workflow + instrumented boot,
+      rig handed over by David). ESTABLISHED, each with the receipt:**
+      **(1) THE SECOND SCREEN IS NAMED BY THE ELF: node 24 = "VILLAIN
+      VISION", an lcdnode (code 16, part 520-6976-XX, "LCD 320X240" /
+      "3 LCD INSERT"), declared REQUIRED (flags 0x0) in batman's OWN
+      10-record node directory** (file 0x707268; the directory is nodes
+      0,1,2,4,8,9,10,12,13,24 — names CABINET, CABINET LIGHTS, QR
+      SCANNER, PLAYFIELD 1/2, TURNTABLE, two OPTIONAL TOPPERs, VILLAIN
+      VISION). nbdir DROPPED it (lcdnode ships only LPC1113_302 = class
+      3, absent from PART_BY_CLASS), so the shim answered its identity
+      poll with the DEFAULT pinnode claim (`[nbid] node 24 claims
+      part=0x00020023 fw=0.1.0 (default)`) — the white RUNTIME INFO
+      grade is MANUFACTURED BY OUR DEFAULT ANSWER. Board 24 and the
+      missing overlay are ONE fault. Note: even registered, the rig has
+      NO lcdnode renderer — drawing Villain Vision content is follow-on
+      work; registration + alert-clearing comes first.
+      **(2) NODE 4 IS GENUINELY OPTIONAL (flags 0x4 at 0x7071e8 — and
+      batman corroborates the bit-2 decode: its OPTIONAL-named toppers
+      12/13 carry 0x4, required boards 0x0), so the ST census rule fired
+      as designed — and it is STILL the wedge on this generation:**
+      silenced nodes short-read NOTHING, and the game re-asks forever
+      (the `[nbsilent] node=4 want=13/3/12` lines are READ LENGTHS —
+      13=fe, 3=fa, 12=0x11 — NOT the 0x0d variant walk; the item's
+      original "want=13 = 0x0d" reading is CORRECTED). Instrumented boot
+      with `PAD_NB_SILENT=62` (nothing silenced): the shim answered node
+      4's identity from the derived row (`claims part=0x00140040
+      variant=0x03 fw=1.19.0 (derived)`), ZERO nbsilent lines all run,
+      attract light show by t=35.7s, glass shot clean attract
+      (`/home/david/item82/run2_glass.png`). The durable census rule
+      (silence an optional node4 only when its hex header cannot be
+      derived — ST keeps silence, batman answers) is DESIGNED but NOT
+      yet written; boot #3 must confirm the alert state first.
+      **(3) NODE 2 "NOT REGISTERED": the game HAMMERS command f0 sub
+      0x20 at node 2 — 6,824 times in ~10 min (~11/s retry loop), plus
+      f0 sub 0x10 ×36 — and the shim has NO f0 handler (answers zeros).**
+      That retry loop is the registration suspect. f0 is also in
+      turtles' command census (item 54: `00 03 04 07 08 0a f0 f1 f2 f9
+      fc fe`), so the decode generalizes to the turtles LED wedge
+      (item 50). RE of batman's f0 sender/reply-test is IN FLIGHT.
+      **(4) The video-latency theory is DEAD: the 2.3-5.7 s first-frame
+      delays are the attract's double-buffered clip schedule (each delay
+      = the alternate channel's clip duration), healthy over 35 min.**
+      And the game NEVER asks for a GL display 2 (0 PADGL_TARGET; one
+      fbGetDisplayByIndex(0) + one surface all run) — the overlay is
+      node-bus hardware, not a second GL window, so item 44's family is
+      ruled out.
+      **(5) Item 72's batman half ANSWERED (true negative): funnel 2441
+      seeds → 6 garbage → 0 kept; the swelf dev array (308 records, 178
+      kind==4 LEDs) carries NO XY anywhere; no separate position struct
+      exists (ENT +38/+40 fails the left/right oracle). batman is
+      genuinely position-less on 1.13.0. Sam's dark inserts = CABINET
+      LIGHTS (node 2) unregistered + attract behavior, NOT a parser gap.**
+      **FIXES APPLIED (this branch, pending boot #3 verification):**
+      nbdir.py `PART_BY_CLASS[3]=0x00030030` — MEASURED off batman's own
+      28-byte MCU descriptor table (record at file 0x6736c4:
+      `part=0x00030030 class=3 name="LPC1113FBD48/303"`), plus
+      `CLASS_PREF["lcdnode"]=(3,)`; hwshim.c `nb_hexreg_class` knows
+      class 3; hwshim.c `nb_nodes_init` skips swelf's node-0xff poison
+      rows (the roster's bogus 255). Desk-verified: nbdir on batman's
+      ELF+hexes now derives 9 nodes including
+      `node=24 type=lcdnode class=3 part=0x00030030 fw=1.19.0
+      (variant_guess)`.
+      **Preserved evidence:** /home/david/item82/ — David's full run
+      logs, game.elf, all 15 card hexes, run2 glass shot.
+      **Resume:** boot #3 with the fixes built (fresh node_ident gets 9
+      rows automatically): confirm roster carries 24 and not 255, node
+      24 claims the lcdnode identity, zero nbsilent; then the alert
+      state on the glass (service menu or David's eyes); then the f0
+      answer once the RE lands; then the census rule for node 4; then
+      godzilla_pro + stranger_things regression boots.
       **Established, and it rules item 70's mechanism OUT for batman:** the
       discovery schedule INCLUDES node 2 — `[nbsched] playfield nodes: 255
       1 8 9 10 2 12 13 (from switch table + node directory)` — and

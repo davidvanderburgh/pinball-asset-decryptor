@@ -1181,6 +1181,17 @@ HELP_CONTENT = {
          "(videos, images, scenes, music banks), the sound counts, "
          "adjustment defaults and the high-score board. Copy Report puts "
          "the whole diff on the clipboard as plain text."),
+        ("How much of each list you see",
+         "Every change list in the report is complete — a version that "
+         "renumbers four thousand sounds produces four thousand rows. "
+         "\"Rows per list\" (12 / 25 / 50 / 100 / All, next to Copy Report) "
+         "sets how many of each you see at once; the rest fold into a "
+         "single \"… and N more\" line. DOUBLE-CLICK that line to list the "
+         "rest of THAT group and nothing else, with your place on the "
+         "screen kept. Changing the setting only re-draws the report "
+         "already in memory — the cards are never read again — and it "
+         "is remembered the next time you open the app. Copy Report "
+         "ignores it entirely and writes every row."),
         ("Open a file the report lists",
          "DOUBLE-CLICK any file row in the report to look at the file "
          "itself — it is pulled off the card it belongs to (image A for a "
@@ -1224,7 +1235,17 @@ HELP_CONTENT = {
          "sounds that changed, moved to a new slot, were added or were "
          "removed — matched by content first, so one inserted sound doesn't "
          "read as a thousand changed ones. Double-click a listed sound to "
-         "play it. The extracts are found by the source card each one "
+         "play it."
+         "\n\n"
+         "The match is on the AUDIO, not on the raw file. The first frame "
+         "a Spike 2 sound decodes to is read out of whatever image.bin "
+         "packs in front of it, so a version that repacks its audio "
+         "changes that one frame on every sound at once and nothing "
+         "after it. The report steps over that frame and prints a "
+         "\"Codec lead-in\" row saying how many pairs needed it, rather "
+         "than calling an untouched catalog rewritten."
+         "\n\n"
+         "The extracts are found by the source card each one "
          "records, so it does not matter which naming options they were "
          "made with or in what order."),
         ("Adjustments and high scores",

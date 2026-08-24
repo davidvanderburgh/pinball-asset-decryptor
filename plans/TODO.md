@@ -4396,6 +4396,26 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **74. A boot that is copying the card shows NOTHING about the copy —
       minutes of "Startup In Progress" with no hint that a ~7 GB dd is
       running, so every copying boot reads as a hang.** `S3 D3` ← WORKING ON
+      ← IN PROGRESS
+      **Established (live, 2026-08-23 evening, godzilla_pro, worktree
+      scripts under the lock):** copy-then-boot SHIPPED on this branch
+      (`54575f3`) and acceptance-run scripted: uncached boot (touched
+      mtime) narrated `[card] copying ...: N / 7497 MB (P%)` 0→98% in 2 s
+      steps, then `local cache ready - booting from it`, guest phases only
+      after — **PAST TECH ALERTS at 51.5 s total** (copy ~41 s @ ~180 MB/s
+      uncontended + ~6 s cached boot) vs 177 s for the old hybrid. Control
+      cached boot: 8.7 s, one `using local cache` line, no copier, not
+      delayed. `--precache` on a valid cache: idempotent no-op, no mount,
+      exit 0. Cleanup done: image mtime restored, stamp realigned, cache
+      desk-proven valid from all three godzilla_pro paths, rig 0, lock
+      released.
+      **Not yet eyeballed:** the GUI state label showing "Copying card:
+      N / M MB (P%)" in a live app window — proven at unit level (154/154
+      emulate_tab tests, incl. 3 new for card_copy_progress) and the drain
+      provably receives the lines (stderr merges into the Popen pipe), but
+      no app was launched. David's pre-/finish validation is that launch.
+      **Resume:** collect the adversarial review workflow's findings, fix
+      any that survive, then close.
       *(Filed 2026-08-23 alongside item 34's widening: David read three
       copying boots in one session as "first-time startup took an
       excessively long time", and item 34's original godzilla sighting

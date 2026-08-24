@@ -353,7 +353,18 @@ fi
 # finding the desktop user's old plain-`ro` mount reads it as "stale" and
 # remounts it below, with allow_other this time, which is exactly the right
 # outcome. The message covers both.
-if [ -d "$MNT" ] && mountpoint -q "$MNT" 2>/dev/null && ! ls "$MNT" >/dev/null 2>&1; then
+# The [ -d ] || grep pair covers two distinct corpses. A mount whose fuse2fs
+# died politely still stats as a directory ([ -d ] true, contents unreadable).
+# A mount whose fuse2fs was SIGKILLED (killgame at app quit) is a DEAD
+# ENDPOINT: stat itself fails with ENOTCONN, so [ -d ] is FALSE and the first
+# test can never fire - item 74's confirming run died on exactly that, with
+# mkdir -p failing on the corpse. The kernel still lists the mount, so
+# /proc/self/mounts is the detector that survives; spaces in the path appear
+# there \040-escaped (the savestate rig learned this the hard way).
+MNT_ESC=$(printf %s "$MNT" | sed 's/ /\\040/g')
+if ! ls "$MNT" >/dev/null 2>&1 \
+   && { { [ -d "$MNT" ] && mountpoint -q "$MNT" 2>/dev/null; } \
+        || grep -qs " $MNT_ESC " /proc/self/mounts; }; then
     echo "[card] mount at $MNT is unreadable (fuse2fs gone, or another user's) - remounting"
     fusermount -u "$MNT" 2>/dev/null || fusermount3 -u "$MNT" 2>/dev/null
     umount -l "$MNT" 2>/dev/null

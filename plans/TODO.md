@@ -4626,7 +4626,7 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **79. batman reports `state=techalerts` through a whole attract —
       gamestate.sh's attract detector misses this title, so the footer
       marquee bounces forever, the label says "Passing Tech Alerts…", and
-      the auto helper's count never clears.** `S2 D3`
+      the auto helper's count never clears.** `S2 D3` ← WORKING ON
       *(Filed 2026-08-24 from David's live launch (item/74 validation,
       v0.158.0 badge): batman visibly in attract — BEST COMBO CHAMPION
       high-score screen, CREDITS 1 — while the tab showed "Passing Tech

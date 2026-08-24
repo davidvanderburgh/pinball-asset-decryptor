@@ -148,9 +148,10 @@ _STATE_TEXT = {
 #: still working.  The default hint tells the user to press something; saying
 #: that while something else is already pressing invites two operators fighting
 #: over the same screen.
-_ADVANCING_HINT = ("Skipping to attract mode on its own — it waits for the "
-                   "node bus to finish bringing up, then presses Service Back "
-                   "once. Nothing to do here; scripted runs can set "
+_ADVANCING_HINT = ("The game is checking its node boards and stops on its "
+                   "Tech Alerts readout; the emulator waits for the bus to "
+                   "finish bringing up, then presses past it to attract on "
+                   "its own. Nothing to do here; scripted runs can set "
                    "PAD_AUTO_ATTRACT=0 to drive the boot by hand.")
 
 #: Shown when the auto-advance helper ran out of presses and stopped.  It names
@@ -592,9 +593,11 @@ def state_text(info):
                                   (info.get("state", ""), ""))
     if info.get("state") == "techalerts":
         if info.get("auto", "0") != "0":
-            # The helper is pressing right now - the boot is MOVING, and
-            # the old "Waiting at Tech Alerts" label said the opposite.
-            return "Passing Tech Alerts…", _ADVANCING_HINT
+            # The helper is on the job - name the WORK (the node bus
+            # bring-up, matching the footer's "Node boards" chip), not the
+            # readout screen it ends on (David, 2026-08-24: with the chip
+            # renamed, "Passing Tech Alerts" beside it was misleading).
+            return "Bringing up node boards…", _ADVANCING_HINT
         if info.get("auto_result") == "gaveup":
             return "Stuck at Tech Alerts", _GAVEUP_HINT
     return label, hint

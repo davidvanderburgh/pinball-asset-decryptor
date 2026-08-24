@@ -82,10 +82,11 @@ def test_tech_alerts_is_described_as_a_place_not_a_fault():
 
 def test_tech_alerts_hint_changes_while_auto_advance_is_working():
     # Telling the user to press something while autoattract.sh is pressing it
-    # gets two operators fighting over the same screen — and the label says
-    # the boot is MOVING, because it is.
+    # gets two operators fighting over the same screen — and the label names
+    # the WORK (the node-bus bring-up, matching the footer's "Node boards"
+    # chip), not the readout screen it ends on.
     label, hint = state_text({"state": "techalerts", "auto": "1"})
-    assert "passing" in label.lower()
+    assert "node boards" in label.lower()
     assert "press a switch" not in hint.lower()
     assert "attract" in hint.lower()
 

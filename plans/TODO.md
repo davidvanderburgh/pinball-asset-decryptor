@@ -4747,7 +4747,7 @@ These have each been violated at least once and each cost a run or a window:
       3 vs 5 as noise, not a trend. Do not reopen without a reason.
 
 - [ ] **80. Live, alphabetical, game-by-game E2E compatibility pass — David
-      plays, this session triages.** `S2 D4` *(Filed 2026-08-24 at David's ask,
+      plays, this session triages.** `S2 D4` ← WORKING ON *(Filed 2026-08-24 at David's ask,
       in place of picking a queue item: "i want to go game by game instead and
       confirm e2e compatibility one-by-one. we're going to go alphabetically
       and I will tell you when we are starting each game and what issues we

@@ -14723,7 +14723,11 @@ class MainWindow:
     #: The Emulate tab's boot stages (item 78).  Fixed, unlike the extract/
     #: write tuples: every Spike 2 boot walks this exact ladder, and a card
     #: that is already cached simply starts with "Copy card" ticked off.
-    EMULATE_PHASES = ("Copy card", "Boot", "Tech Alerts", "Attract")
+    #: "Node boards", not "Tech Alerts" (David, 2026-08-24): what the stage
+    #: actually spends its time on is the node bus bringing every board up -
+    #: the alerts screen is the readout at the end of it, and the helper
+    #: waits for the bring-up before pressing past it.
+    EMULATE_PHASES = ("Copy card", "Boot", "Node boards", "Attract")
 
     def _init_phase_steps(self):
         # Initial labels — apply_manufacturer rebuilds them per-mfr later.

@@ -8419,7 +8419,20 @@ static void led_publish(const unsigned char *p, int n)
      * is Godzilla's node numbering, and a title whose insert boards sit
      * elsewhere (the group->node mapping shifts per title - see nodecensus.py)
      * must still trip this line. One line per run; gamestate.sh greps it. */
-    if (cmd == 0x97 || cmd == 0xa2 || cmd == 0xa3 || cmd == 0xa4 ||
+    /* 0x70 joined the set for the OLDER (swelf) generation - item 79.
+     * batman sat visibly in attract while this announcer stayed silent,
+     * because that generation's show never speaks the a2-family. The
+     * command census (PAD_CMD_CENSUS=1, batman 2026-08-24) measured cmd 70
+     * - the base-layer lamp write this file already decodes - at ~109/s
+     * sustained through attract against ZERO occurrences in the whole
+     * boot-plus-Tech-Alerts window, a wider margin than godzilla's own
+     * signal has. The show families this file does NOT decode (72/52/8a,
+     * ~35-40/s each) are deliberately not counted: nothing is known about
+     * their semantics, and guessed lamp commands are how this detector
+     * went wrong twice before. The 30-in-3s rate gate below still guards
+     * the star_wars service-menu-entry trap. */
+    if (cmd == 0x70 ||
+        cmd == 0x97 || cmd == 0xa2 || cmd == 0xa3 || cmd == 0xa4 ||
         cmd == 0xa5 || cmd == 0xa6 || cmd == 0xb4 || cmd == 0xb5) {
         /* RATE-QUALIFIED, not a bare count. The first version announced at
          * the 10th lamp command ever, and star_wars_le promptly showed why
@@ -9658,6 +9671,44 @@ long shim_write(int fd, const void *b, unsigned long n)
                 hex64(h, nb_req, nb_req_len);
                 snprintf(m, sizeof m, "[nbcmd] %02x first frame %s\n", cmd, h);
                 logmsg(m);
+            }
+        }
+        /* ---- THE COMMAND CENSUS (PAD_CMD_CENSUS=1) --------------------
+         * Item 79: batman's attract never trips the light-show announcer,
+         * because its show speaks an older command dialect the lamp-class
+         * set does not count - and nothing had measured WHICH commands the
+         * show is made of, at what rate. PAD_NB_LOG is the wrong instrument
+         * (quadruples the boot and buries the answer - see the coil probe's
+         * header below); this prints ONE line per 10 s window carrying that
+         * window's per-command TX counts, phase-attributable from the
+         * surrounding log, and costs nothing while the env is unset. */
+        {
+            static int census = -1;
+            static unsigned long win_start;
+            static unsigned cmix[256];
+            if (census < 0)
+                census = getenv("PAD_CMD_CENSUS") ? 1 : 0;
+            if (census) {
+                unsigned char c2 = nb_req_len > 2 && (nb_req[0] & 0x80)
+                                   ? nb_req[2] : nb_req[0];
+                unsigned long now = pad_ms();
+                int c, k;
+                cmix[c2]++;
+                if (!win_start) win_start = now;
+                if (now - win_start >= 10000) {
+                    char m[640];
+                    k = snprintf(m, sizeof m, "[cmdmix] %lu ms window %lu ms:",
+                                 now, now - win_start);
+                    for (c = 0; c < 256; c++)
+                        if (cmix[c] && k < (int)sizeof m - 16)
+                            k += snprintf(m + k, sizeof m - k, " %02x=%u",
+                                          c, cmix[c]);
+                    snprintf(m + k, sizeof m - k, "\n");
+                    logmsg(m);
+                    for (c = 0; c < 256; c++)   /* no memset: string.h is */
+                        cmix[c] = 0;            /* not included here      */
+                    win_start = now;
+                }
             }
         }
         nb_log("TX", nb_req, nb_req_len, 0);

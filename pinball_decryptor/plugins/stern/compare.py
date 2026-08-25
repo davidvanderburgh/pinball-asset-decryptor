@@ -22,8 +22,9 @@ never a verdict off its digest, which is repacked and re-keyed on every build
 and so always differs.  The sound-by-sound answer comes from the two cards'
 EXTRACT folders when the caller can find them; see :func:`_sound_rows` and
 :mod:`core.audio_compare`.  That comparison is on the audio: a build that
-repacks changes the codec's lead-in frame on every sound, and counting those
-would report a whole catalog as rewritten.
+repacks changes the codec's lead-in frame on every sound, and one that
+resolves its codec a second way shifts every sound along a frame — counting
+either would report a whole catalog as rewritten.
 
 Requested by a tester: compare two releases — or a modded card against its
 stock base — and get a complete added/modified/deleted summary per type.
@@ -397,6 +398,17 @@ def _extract_audio_rows(assets_a, assets_b):
                      "out of whatever image.bin packs in front of it, so "
                      "repacking changes it on every sound at once. It is "
                      "packing, not audio." % _num(diff["lead_in"])))
+    if diff.get("shifted"):
+        # Same rule as the row above: name the bytes that were set aside.
+        # This one is a whole frame of SHIFT, not one frame's value — the
+        # two cards hold the same samples at offsets one frame apart, which
+        # no digest of the whole file can match (core.audio_compare).
+        rows.append(("Codec frame shift",
+                     "%s sound(s) matched once one card was read a frame "
+                     "later — that build resolved its codec onto the entry "
+                     "that emits the packing word as sample 0 and pushes the "
+                     "sound along 23 microseconds. Same callout, same samples."
+                     % _num(diff["shifted"])))
     # "Unchanged", not "identical": a sound that is byte-identical but has
     # been renumbered lands under Moved, and two rows both claiming to count
     # the identical audio would read as a contradiction.

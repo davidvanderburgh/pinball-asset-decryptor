@@ -229,3 +229,118 @@ def test_a_file_that_is_not_a_walkable_wav_is_hashed_whole(tmp_path):
     p.write_bytes(b"not a RIFF at all")
     assert audio_compare.sound_digest(str(p)) == \
         hashlib.md5(b"not a RIFF at all").hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# A whole frame of shift (PAD-87)
+# ---------------------------------------------------------------------------
+
+def test_a_frame_of_shift_is_not_a_new_sound(tmp_path):
+    """THE PAD-87 CASE.  A build can resolve its codec onto the entry that
+    emits the packing word in front of the body as sample 0 instead of
+    reading past it, which pushes the whole sound along one frame and drops
+    its last.  The two cards then hold every sample of the same callout at
+    offsets one frame apart, so no digest of the whole file can match and the
+    lead-in pass — which only forgives that frame's VALUE — cannot help.
+
+    Measured on Venom LE 1.06 vs 1.07: 1,356 sounds, every one of them
+    stereo.  Blind to it the report called 889 of them added and 876 removed;
+    the tester had matched one up by ear ("00m02s331 - idx0004.wav ... was in
+    fact already present in 1.06 under the name 00m02s331 - idx3562.wav").
+    """
+    body = list(range(1, 400))
+    a = _extract(tmp_path / "a", {"idx0001.wav": _wav([-9] + body[:-1]),
+                                  "idx0002.wav": _wav([-9, 7] + body[:-2],
+                                                      chan=2)})
+    b = _extract(tmp_path / "b", {"idx0001.wav": _wav(body),
+                                  "idx0002.wav": _wav(body, chan=2)})
+    d = audio_compare.diff_audio(a, b)
+    assert (d["same"], d["shifted"]) == (2, 2)
+    assert not (d["changed"] or d["moved"] or d["added"] or d["removed"])
+
+
+def test_the_shift_is_forgiven_whichever_card_decoded_late(tmp_path):
+    """Which of the two builds resolved its codec that way is the build's
+    business, not the caller's — so the pass runs in both directions."""
+    body = list(range(1, 400))
+    a = _extract(tmp_path / "a", {"idx0001.wav": _wav(body)})
+    b = _extract(tmp_path / "b", {"idx0001.wav": _wav([-9] + body[:-1])})
+    d = audio_compare.diff_audio(a, b)
+    assert (d["same"], d["shifted"]) == (1, 1)
+    assert not (d["changed"] or d["moved"] or d["added"] or d["removed"])
+
+
+def test_a_shift_that_also_renumbers_still_reads_as_moved(tmp_path):
+    """Both at once, which is what Venom actually ships."""
+    one, two = list(range(1, 300)), list(range(500, 800))
+    a = _extract(tmp_path / "a", {"idx0001.wav": _wav([-3] + one[:-1]),
+                                  "idx0002.wav": _wav([-3] + two[:-1])})
+    b = _extract(tmp_path / "b", {"idx0007.wav": _wav(two),
+                                  "idx0009.wav": _wav(one)})
+    d = audio_compare.diff_audio(a, b)
+    assert d["shifted"] == 2 and d["same"] == 0
+    assert _names(d["moved"]) == [("idx0001.wav", "idx0009.wav"),
+                                  ("idx0002.wav", "idx0007.wav")]
+    assert not (d["changed"] or d["added"] or d["removed"])
+
+
+def test_the_shift_pass_runs_before_same_slot_different_audio(tmp_path):
+    """Order, and it is the whole fix.  "Changed" consumes any slot that
+    exists on both cards, so running the shift pass after it would eat the
+    very pairs the pass is there to find — which is how one renumbered,
+    shifted build reported 484 changed sounds that were all still there."""
+    one, two = list(range(1, 300)), list(range(500, 800))
+    a = _extract(tmp_path / "a", {"idx0001.wav": _wav([-3] + one[:-1]),
+                                  "idx0002.wav": _wav([-3] + two[:-1])})
+    b = _extract(tmp_path / "b", {"idx0001.wav": _wav(two),
+                                  "idx0002.wav": _wav(one)})
+    d = audio_compare.diff_audio(a, b)
+    assert not d["changed"]
+    assert _names(d["moved"]) == [("idx0001.wav", "idx0002.wav"),
+                                  ("idx0002.wav", "idx0001.wav")]
+
+
+def test_only_one_frame_of_shift_is_forgiven(tmp_path):
+    """Two frames along is a different sound.  The codec emits one word of
+    its predecessor, not a run of them."""
+    body = list(range(1, 300))
+    a = _extract(tmp_path / "a", {"idx0001.wav": _wav([-9, 12] + body[:-2])})
+    b = _extract(tmp_path / "b", {"idx0001.wav": _wav(body)})
+    d = audio_compare.diff_audio(a, b)
+    assert d["same"] == 0 and d["shifted"] == 0
+    assert _names(d["changed"]) == [("idx0001.wav", "idx0001.wav")]
+
+
+def test_the_shift_pass_reads_nothing_when_the_lead_in_pass_placed_all(
+        tmp_path, monkeypatch):
+    """It only ever sees what the two cheaper passes could not place — a
+    repacked build that is otherwise identical costs one extra read of
+    nothing."""
+    body = list(range(1, 400))
+    a = _extract(tmp_path / "a", {"idx0001.wav": _wav([111] + body)})
+    b = _extract(tmp_path / "b", {"idx0001.wav": _wav([-9] + body)})
+    monkeypatch.setattr(audio_compare, "shift_digests",
+                        lambda p: pytest.fail("read %s for nothing" % p))
+    d = audio_compare.diff_audio(a, b)
+    assert (d["same"], d["lead_in"], d["shifted"]) == (1, 1, 0)
+
+
+def test_shift_digests_of_something_that_is_not_a_wav(tmp_path):
+    """Both halves fall back to the plain MD5 — an identity that is merely
+    stricter, never wrong."""
+    p = tmp_path / "x.bin"
+    p.write_bytes(b"not a RIFF at all")
+    whole = hashlib.md5(b"not a RIFF at all").hexdigest()
+    assert audio_compare.shift_digests(str(p)) == (whole, whole)
+
+
+def test_a_stereo_shift_is_a_whole_frame_not_a_sample(tmp_path):
+    """Half a frame along would swap the channels over, which is not what
+    the codec entry does — and 1,356 of these were stereo."""
+    body = list(range(1, 300))
+    a = _extract(tmp_path / "a", {"idx0001.wav": _wav([-9] + body[:-1],
+                                                      chan=2)})
+    b = _extract(tmp_path / "b", {"idx0001.wav": _wav(body, chan=2)})
+    d = audio_compare.diff_audio(a, b)
+    assert d["shifted"] == 0
+    assert _names(d["changed"]) == [("idx0001.wav", "idx0001.wav")]

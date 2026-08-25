@@ -608,3 +608,36 @@ def test_the_codec_lead_in_is_named_when_it_had_to_be_set_aside(tmp_path,
     xc = _extract_folder(tmp_path / "xc", {"idx0001.wav": wav(111)})
     assert "Codec lead-in" not in \
         _named(dict(compare_cards(a, b, xa, xc))["Sounds"])
+
+
+def test_the_frame_shift_is_named_when_it_had_to_be_set_aside(tmp_path,
+                                                              monkeypatch):
+    """Its own row, not folded into the lead-in one: a different thing was
+    set aside (a whole frame of SHIFT, not one frame's value) for a
+    different reason, and 1,356 Venom sounds hung on it."""
+    import struct
+
+    def wav(samples):
+        body = b"".join(struct.pack("<h", s) for s in samples)
+        return (b"RIFF" + struct.pack("<I", 36 + len(body)) + b"WAVE"
+                + b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, 44100,
+                                        88200, 2, 16)
+                + b"data" + struct.pack("<I", len(body)) + body)
+
+    tone = list(range(1, 300))
+    a, b = _two_cards(tmp_path, monkeypatch)
+    xa = _extract_folder(tmp_path / "xa", {"idx0001.wav": wav([-9]
+                                                              + tone[:-1])})
+    xb = _extract_folder(tmp_path / "xb", {"idx0001.wav": wav(tone)})
+    snd = _named(dict(compare_cards(a, b, xa, xb))["Sounds"])
+
+    assert snd["Unchanged"] == ("1 of 1 sounds are identical and still in "
+                                "the same slot")
+    assert snd["Codec frame shift"].startswith(
+        "1 sound(s) matched once one card was read a frame later")
+    assert "Codec lead-in" not in snd
+    # And it stays off the report entirely when nothing needed it.
+    xc = _extract_folder(tmp_path / "xc", {"idx0001.wav": wav([-9]
+                                                              + tone[:-1])})
+    assert "Codec frame shift" not in \
+        _named(dict(compare_cards(a, b, xa, xc))["Sounds"])

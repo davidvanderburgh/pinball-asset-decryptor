@@ -5583,6 +5583,35 @@ These have each been violated at least once and each cost a run or a window:
       scene file`, window reading `asset 54 · once` / `S1E001 00:18:32`.
       41 LCD-suite tests (2 new: name formatting + a title with no table
       staying silent and reading once).
+      **UPDATE 15 (2026-08-25) — VISIBLE IN THE EMULATOR, David's ask
+      ("make changes that i can view in the emulator").** Two changes to
+      the villain window, both live-verified on a real boot:
+      **(a) IT LOOKS LIKE THE MACHINE'S TV.** The mirror was a black
+      rectangle floating on the desktop; the thing it mirrors is a
+      wood-cased 1960s portable with a chrome bezel, two knobs on a
+      right-hand panel and "Villain Vision" in script under the screen
+      (David's video is the reference). The window draws that now. The
+      screen keeps its native 240x180 — the case is padding — and the
+      cabinet is tagged "case" while the picture is tagged "pic", because
+      the draw path used to `delete("all")` on every asset change and with
+      a cabinet present that would have erased the TV the first time a
+      clip landed.
+      **(b) A FILMSTRIP of the last four clips**, oldest left, current
+      right and highlighted, under the TV. This answers David's ORIGINAL
+      complaint on this display — "it doesn't feel like the right
+      animations are showing up at the right times" is a question about
+      the SEQUENCE, which a window showing one frame can never answer.
+      Two rules it holds, both tested: a 250 ms re-send must not add a
+      second entry (or the strip lies about the sequence), and a clip with
+      no art must not enter the history as a placeholder. Thumbnails are
+      `subsample(4)` of the native still — no resampling, no extra file.
+      **Two tests needed updating for the cabinet and both got SHARPER:**
+      the canvas-size assertion (which existed to pin "native size, no
+      subsample") now checks the SCREEN geometry and that the picture is
+      centred in the screen rather than the case — those differ, the knob
+      panel being on one side only — and the canvas-churn assertion is now
+      tag-scoped to "pic" plus a check that the cabinet is not redrawn
+      while the clip plays. 23 panel tests.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

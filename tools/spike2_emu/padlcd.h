@@ -58,10 +58,16 @@
  *     bright < 128 rather than showing footage through the gap.
  *   - The content is motion video, one clip at a time.
  *   - ...AND it includes GAME-RENDERED CARDS: a "Game Over" card and the
- *     BATMAN logo on green (the one David kept asking for). Neither exists
- *     anywhere in the 3,069-clip store - three independent scans (first
+ *     BATMAN logo on green (the one David kept asking for). Neither is a
+ *     VIDEO CLIP - three independent scans of the 3,069-clip store (first
  *     frame green-dominance, mid-frame green-dominance, flat-graphic
- *     colour-count) all come back empty.
+ *     colour-count) all come back empty. They ARE on the card though, as
+ *     SCENE TEXTURES: David found the logo at
+ *     images/scene_textures/radimg_Shape_1280x720_7da3f132.png, an asset
+ *     class these scans never looked at. ("Not on the card" was my wrong
+ *     phrasing; "not a video clip" is the fact.) Which sharpens the
+ *     conclusion rather than changing it: the display composites scene
+ *     textures OVER video surfaces, and both halves ship on the card.
  * That last point is the proof, from the machine rather than the ELF, that
  * the real display is COMPOSITED by the game and not merely "play stored
  * clip N". A node-bus mirror can never show those cards, and pretending

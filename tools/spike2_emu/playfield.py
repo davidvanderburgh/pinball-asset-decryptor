@@ -115,6 +115,7 @@ import io
 import json
 import os
 import queue
+import re
 import struct
 import subprocess
 import sys
@@ -3568,7 +3569,7 @@ class LcdPanel:
         self.root, self.game = root, game
         self.drv = None             # assigned once the view's SwitchDriver exists
         self.win = None
-        self.cv = self.cap = None
+        self.cv = self.cap = self.nm = None
         self.item = None            # the persistent canvas image item
         self.img = None
         self.id = None              # asset currently drawn
@@ -3576,6 +3577,8 @@ class LcdPanel:
         self.state = None           # (asset, aux, rate, verb)
         self.cycle = None           # (first, last) while a block command is live
         self.bright = 255           # last 0x80 brightness; <128 blanks the screen
+        self.names = None           # {id: name} from lcdnames.py, loaded once
+        self._named = False         # ... and whether the load has been tried
         #: Animation state. None while no clip is on disk (kept retryable);
         #: a dict once the clip's BYTES are read - in one go, so a
         #: \\wsl.localhost hiccup can only fail the whole read (caught,
@@ -3627,7 +3630,16 @@ class LcdPanel:
         # is the difference between a picture and a measurement.
         self.cap = tk.Label(self.win, text="", bg="#111", fg="#7ecbff",
                             font=("Consolas", 8))
-        self.cap.pack(pady=(0, 4))
+        self.cap.pack()
+        # THE CLIP'S OWN NAME, from the card's scene file (lcdnames.py).
+        # "asset 54" is a number nobody can check; "S1E001 00:18:32" can be
+        # held up against a real Villain Vision, or against the episode.
+        # It is also the only independent check on the id->clip mapping
+        # there has ever been - asset 2 is named PhoneScenes and asset 2 is
+        # a picture of the Batphone.
+        self.nm = tk.Label(self.win, text="", bg="#111", fg="#7a8",
+                           font=("Consolas", 8))
+        self.nm.pack(pady=(0, 4))
 
     def _hide(self):
         # Item 44's contract for a second display's close box: hide, don't
@@ -3738,6 +3750,43 @@ class LcdPanel:
         txt = " · ".join(x for x in [what, how] + extra if x)
         if self.cap["text"] != txt:
             self.cap.configure(text=txt)
+        nm = self._name_for(self.id) if self.id else ""
+        if self.nm is not None and self.nm["text"] != nm:
+            self.nm.configure(text=nm)
+
+    def _name_for(self, i):
+        """The clip's episode+timecode, e.g. "S1E001 00:18:32", or "".
+
+        Loaded once from <art>/names.txt, which lcdnames.py writes from the
+        card's own scene file at run start (watch.sh, beside the other
+        derived tables - it is a per-title TABLE, not a per-asset artifact,
+        so it does not belong on the panel's lazy lcdart path). Read at
+        most ONCE per run; absent is normal and silent, which is every
+        title without an lcdnode.
+        """
+        if not self._named:
+            self._named = True
+            path = os.path.join(self._art, "names.txt")
+            try:
+                with open(path, encoding="utf8") as f:
+                    self.names = dict(
+                        (int(a), b) for a, _, b in
+                        (ln.rstrip("\n").partition("\t") for ln in f)
+                        if a.isdigit() and b)
+            except (OSError, ValueError):
+                self.names = None
+        if not self.names:
+            return ""
+        raw = self.names.get(i, "")
+        # "S1E001_Clips.S1E001_00-18-32-21" -> "S1E001 00:18:32". The tail
+        # after the last dot is the useful part and the frame count is
+        # noise at this size; anything that does not fit the shape is shown
+        # as-is rather than mangled.
+        tail = raw.rsplit(".", 1)[-1]
+        m = re.match(r"^(S\d+E\d+)_(\d\d)-(\d\d)-(\d\d)-\d\d$", tail)
+        if m:
+            return "%s %s:%s:%s" % m.groups()
+        return tail[:34]
 
     def _draw(self, img):
         """One persistent image item, reconfigured per frame - a

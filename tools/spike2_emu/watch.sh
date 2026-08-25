@@ -222,7 +222,24 @@ fi
 # From the derived table so it is per-title and empty on titles without one -
 # the shim publishes nothing when PAD_LCD_NODE is unset/0.
 LCD_NODE=$(sed -n 's/^node=\([0-9]*\) type=lcdnode .*/\1/p' "$NBID" 2>/dev/null | head -1)
-[ -n "$LCD_NODE" ] && echo "[watch] lcdnode: node $LCD_NODE drives this title's LCD inserts"
+if [ -n "$LCD_NODE" ]; then
+    echo "[watch] lcdnode: node $LCD_NODE drives this title's LCD insert"
+    # NAME THE CLIPS (item 83). The bus names them by number; the card's own
+    # scene file names them by episode and timecode, which is the only
+    # independent check on the id->clip mapping there has ever been and the
+    # only form a person can compare against a real Villain Vision. A table,
+    # so it is derived here with the others rather than lazily by the panel.
+    # ~0.2 s, skipped when it already exists; failure is not fatal - the
+    # panel just shows ids, exactly as before this existed.
+    # No chown: lcdnames writes 0644, and the panel only ever READS it.
+    # ($DROP is not defined this early - it is set ~200 lines below, and
+    # `set -u` would abort the run on it.)
+    if [ ! -s "$PAD_TABLES/$GAME/lcd/names.txt" ]; then
+        if python3 "$RIG/lcdnames.py" "$GAME" >/dev/null 2>&1; then
+            echo "[watch] villain clips: $(wc -l < "$PAD_TABLES/$GAME/lcd/names.txt") named from the card's own scene file"
+        fi
+    fi
+fi
 #
 # THE SWITCH LIST IS PASSED TOO, as the fallback for a title whose device table
 # cannot be parsed at all. star_wars_le is why: it yields ZERO device records,

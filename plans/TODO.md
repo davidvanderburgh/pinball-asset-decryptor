@@ -5547,6 +5547,42 @@ These have each been violated at least once and each cost a run or a window:
       (a pre-arm placeholder), no SPI video ioctl ever reaches the shim
       (the faked-ioctl census shows only class=V VPU reqs), and no "CPU SPI
       open failed" is logged. Worth knowing before someone re-derives it.
+      **UPDATE 14 (2026-08-25) — DAVID FOUND THE GREEN BATMAN LOGO, and my
+      "it is nowhere on the card" was WRONG in a way that matters.** He
+      pointed at `images/scene_textures/radimg_Shape_1280x720_7da3f132.png`
+      in his own extraction (`~/Desktop/bm`): the logo is a **SCENE
+      TEXTURE**, a whole asset class I never searched. My three scans were
+      all of the VIDEO CLIP store (137.asset) only, so the correct
+      statement is "not a video clip", not "not on the card". Corrected
+      everywhere. It does not change the architecture conclusion — it
+      sharpens it: the villain display composites **scene textures + video
+      surfaces**, and now both halves are known to be present on the card.
+      **AND HIS FOLDER PAID OFF TWICE MORE.** (a) The extraction holds
+      **3,058 clips at 240x180** — the villain store — with REAL NAMES:
+      `S1E001_Clips.S1E001_00-18-32-21` (season, episode, timecode).
+      (b) "Select Your Villain" lives in the demand_loaded scene that owns
+      the 155.asset store, which independently explains the `tv_1/tv_2/
+      tv_3` element names the RE found — that is the villain SELECTION
+      screen on the main LCD, **not** three physical TVs. Two independent
+      routes now kill the three-TV story.
+      **THE MAPPING IS FINALLY VERIFIED.** A radium video record is
+      `<u64 len><name><u32 id><u64 len><"137.asset/<n>.asset">`, so the
+      element name ends exactly 12 bytes before the reference (the app's
+      own `_parse_radium` documents this). New rig script **`lcdnames.py`**
+      parses the title's scene.radium and writes
+      `<tables>/<game>/lcd/names.txt` — **3,069 of 3,069 named, in 0.15 s**.
+      That is the FIRST independent check on the id->clip mapping, which
+      until now rested on eyeballing two frames and calling it
+      "eyeball-verified": asset 2 is named `PhoneScenes.S1E005_...` and
+      asset 2's picture is the red Batphone. It holds.
+      **Shipped:** watch.sh derives the table at run start (beside the
+      other per-title tables, not on the panel's lazy lcdart path — the
+      tests caught that design error by failing on the call shape), and
+      the panel shows the clip's name under the caption. Live-verified on
+      a real boot: `[watch] villain clips: 3069 named from the card's own
+      scene file`, window reading `asset 54 · once` / `S1E001 00:18:32`.
+      41 LCD-suite tests (2 new: name formatting + a title with no table
+      staying silent and reading once).
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

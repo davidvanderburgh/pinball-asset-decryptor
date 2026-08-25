@@ -241,6 +241,49 @@ def test_single_clip_verb_once_holds_not_loops(tmp_path, monkeypatch):
         root.destroy()
 
 
+def test_clip_name_is_shown_and_formatted(tmp_path, monkeypatch):
+    """The card's own scene file names every villain clip by episode and
+    timecode (lcdnames.py). Showing it is the only independent check on the
+    id->clip mapping there has ever been - and the only form a person can
+    hold up against a real Villain Vision. The raw name is a mouthful, so
+    it is trimmed to "S1E001 00:18:32"; anything not of that shape must
+    still be shown rather than mangled or dropped."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        os.makedirs(p._art, exist_ok=True)
+        with open(os.path.join(p._art, "names.txt"), "w", encoding="utf8") as f:
+            f.write("54\tS1E001_Clips.S1E001_00-18-32-21\n")
+            f.write("2\tPhoneScenes.S1E005_00-03-30-09_LVL_7\n")
+        _write_block(block, asset=54, verb=2)
+        _poll(p)
+        assert p.nm["text"] == "S1E001 00:18:32", p.nm["text"]
+        # An off-shape name survives as itself.
+        _write_block(block, asset=2, verb=2)
+        _poll(p)
+        assert "LVL_7" in p.nm["text"], p.nm["text"]
+        # An id with no name is blank, not "None".
+        _write_block(block, asset=999, verb=2)
+        _poll(p)
+        assert p.nm["text"] == "", p.nm["text"]
+    finally:
+        root.destroy()
+
+
+def test_a_title_with_no_name_table_stays_silent(tmp_path, monkeypatch):
+    """Every non-lcdnode title has no names.txt. That must be silent and
+    must not cost a read per poll - the load is tried exactly once."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_block(block, asset=54, verb=2)
+        _poll(p, times=8)
+        assert p.nm["text"] == ""
+        assert p._named is True and not p.names
+    finally:
+        root.destroy()
+
+
 def test_brightness_zero_blanks_the_screen(tmp_path, monkeypatch):
     """The 0x80 family (132 call sites): the game drops the TVs to 0 for
     ~250 ms around every clip swap. A panel that keeps showing footage

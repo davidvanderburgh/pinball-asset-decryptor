@@ -44,6 +44,19 @@ This module is the comparison that sentence promised.
   tester on a build like that: "PAD tells me that 3,968 audio files have
   changed, but it looks like only the numbering changed — hashes should take
   precedence over indexes."  They do; the hash just has to be of the sound.
+* **And past a whole FRAME OF SHIFT when it has to be.**  A build can also
+  resolve its codec onto the dispatch entry that emits that predecessor word
+  as sample 0 instead of reading past it, which pushes the entire sound along
+  one frame — so the two cards hold every sample of the same callout at
+  offsets one frame apart, and no digest of the whole file can ever match.
+  Measured on Venom LE 1.06 vs 1.07: 1,356 sounds, every one of them stereo.
+  Blind to that, the report called 484 of them "changed", 889 "added" and
+  876 "removed"; seeing it, the pair is 3,964 of 3,968 sounds moved, 17 added
+  and 4 removed.  The tester who found it had matched one up by ear: "the
+  screenshot shows 00m02s331 - idx0004.wav as added in 1.07, but this callout
+  was in fact already present in 1.06 under the name 00m02s331 - idx3562.wav."
+  :mod:`mod_transfer` has forgiven this since PAD-77 and carries mods across
+  it; the diff simply never learned the same trick.
 """
 
 import hashlib
@@ -134,6 +147,36 @@ def sound_digest(path):
     return h.hexdigest()
 
 
+def shift_digests(path):
+    """``(without the FIRST frame, without the LAST frame)`` — the pair of
+    MD5s that recognises one sound decoded a frame apart on the two cards.
+
+    A build can resolve its codec onto the dispatch entry that emits the
+    layout predecessor's body word as sample 0, which pushes the whole sound
+    along one frame and drops its last one (see
+    ``plugins.stern.spike2.emulator.Spike2Emu._resolve_entry`` and
+    :func:`mod_transfer._one_sample_apart`).  Sound *X* then decodes as
+    ``[stray] + X[:-1]`` on one card and as ``X`` on the other, so NO digest
+    of the whole thing can match: the two files share every sample but at
+    different offsets.  They do agree exactly on ``X[:-1]``, which is this
+    pair — the shifted card's samples past its first frame against the other
+    card's samples short of its last.
+
+    Whole-file read, one file at a time, like the byte-wise fallback in
+    :mod:`mod_transfer` this mirrors.  Anything that isn't a walkable PCM WAV
+    gets its plain MD5 in both slots: still an identity, just a stricter one.
+    """
+    with open(path, "rb") as f:
+        data = f.read()
+    frame = wav_frame(data[:_HEAD_READ])
+    if frame is None or len(data) <= frame[0] + frame[1]:
+        whole = hashlib.md5(data).hexdigest()
+        return whole, whole
+    off, size = frame
+    return (hashlib.md5(data[off + size:]).hexdigest(),
+            hashlib.md5(data[off:len(data) - size]).hexdigest())
+
+
 def _sound_digests(folder, rest):
     """``{slot_key: digest}`` past the lead-in, for the slots still unpaired.
 
@@ -149,6 +192,21 @@ def _sound_digests(folder, rest):
         except OSError:
             out[key] = "?%s" % rel
     return out
+
+
+def _shift_digests(folder, rest):
+    """``({slot_key: no-first-frame}, {slot_key: no-last-frame})`` for the
+    slots still unpaired — :func:`shift_digests` over what is left.
+
+    Unreadable files keep an identity nothing can equal, and a DIFFERENT one
+    per side, so a pair of unreadable slots never pairs with each other."""
+    first, last = {}, {}
+    for key, (rel, _md5) in rest.items():
+        try:
+            first[key], last[key] = shift_digests(os.path.join(folder, rel))
+        except OSError:
+            first[key], last[key] = "?first%s" % rel, "?last%s" % rel
+    return first, last
 
 
 def _pair_off(rest_a, rest_b, key_a, key_b):
@@ -207,11 +265,18 @@ def diff_audio(folder_a, folder_b):
         how many of the ``same`` + ``moved`` pairs only matched once the
         codec's lead-in frame was set aside (:func:`sound_digest`) — i.e. how
         much of the agreement this build's repack would otherwise have hidden.
+    ``shifted``
+        how many only matched once one side was read a frame later
+        (:func:`shift_digests`) — the same sound, decoded through the codec
+        entry that emits its predecessor's word first.
 
     Order matters: exact bytes first (free, off the baselines), then the same
-    two passes again past the lead-in for whatever is left, and only then
-    same-slot-different-audio.  Every reordering of those is a way to report
-    a repack as a rewrite.
+    passes again past the lead-in for whatever is left, then again a frame
+    apart, and only then same-slot-different-audio.  Every reordering of those
+    is a way to report a repack as a rewrite — and running the shift pass
+    AFTER "changed" would be worse than not running it at all, because
+    "changed" consumes any slot that exists on both cards, and would eat the
+    very pairs it is there to find.
     """
     a, b = digests(folder_a), digests(folder_b)
     rest_a, rest_b = dict(a), dict(b)
@@ -227,6 +292,20 @@ def diff_audio(folder_a, folder_b):
         lead_in = more_same + len(more_moved)
         same += more_same
         moved += more_moved
+
+    shifted = 0
+    if rest_a and rest_b:
+        first_a, last_a = _shift_digests(folder_a, rest_a)
+        first_b, last_b = _shift_digests(folder_b, rest_b)
+        # Both directions, tried in turn: whichever card decoded a frame late
+        # is a property of that build, not something the caller can order.
+        for key_a, key_b in ((first_a, last_b), (last_a, first_b)):
+            more_same, more_moved = _pair_off(rest_a, rest_b, key_a, key_b)
+            shifted += more_same + len(more_moved)
+            same += more_same
+            moved += more_moved
+            if not (rest_a and rest_b):
+                break
 
     changed = []
     for key in sorted(rest_a):
@@ -247,4 +326,5 @@ def diff_audio(folder_a, folder_b):
         "removed": [rest_a[k][0] for k in sorted(rest_a)],
         "added": [rest_b[k][0] for k in sorted(rest_b)],
         "lead_in": lead_in,
+        "shifted": shifted,
     }

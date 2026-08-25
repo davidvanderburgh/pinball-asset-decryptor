@@ -564,6 +564,14 @@ teardown() {
     # emu_gone). Removing it here is what makes closing the emulator window
     # close the playfield too. A new run recreates it before launching one.
     rm -f "$LED_HOST"
+    # KEEP THE LCD RING (item 83). The block carries the last 64 cmd-f2
+    # frames this node was sent, decoded or not, and it is the only record
+    # of what the game actually asked the villain TVs to do. Deleting it
+    # with the run meant every question about WHICH clip played WHEN needed
+    # a fresh run to answer, and two mis-decodes shipped for want of exactly
+    # this evidence. lcdring.py reads the copy.
+    cp -f "$LCD_HOST" "$ROOT/dump/padlcd.last" 2>/dev/null
+    [ "$DROP" = 1 ] && chown "$PAD_USER" "$ROOT/dump/padlcd.last" 2>/dev/null
     rm -f "$LCD_HOST"
 
     # ...AND THEN VERIFY IT, because "it closes itself" was only ever true of

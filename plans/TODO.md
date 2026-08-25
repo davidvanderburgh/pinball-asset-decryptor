@@ -5235,6 +5235,67 @@ These have each been violated at least once and each cost a run or a window:
       only the 12-byte 0x90 poll reply fills. Answering that poll
       plausibly may be what makes the display advance like the real
       machine.
+
+      **UPDATE 7 (2026-08-25) — v2 REPLACED ONE INVENTED READING WITH
+      ANOTHER, and David's "it doesn't feel like the right animations are
+      showing up at the right times" is what sent me back.** He also asked
+      whether the clips are live-fed, and reported never seeing the
+      green-background card he expects in attract. Desk work only — no run,
+      card mounted READ-ONLY (`cardmount.sh`), rig lock held, nothing on
+      the rig touched.
+      **Measured before theorising.** (a) Only **17 distinct assets have
+      ever been requested** across every batman run — 17 cached artifacts
+      in `<tables>/batman/lcd`, and `lcdart.log` does not exist, i.e.
+      lcdart has never once failed to find an id. Nothing is being lost at
+      the art stage; the vocabulary really is that narrow. (b) The v2 shim
+      has been live since the 16:04 rebuild on 08-24 and David's 4-minute
+      run on 08-25 (12:54–12:58) added **zero** new ids. (c) A full scan of
+      all 3,069 clips for a green-dominant first frame finds 19, and the
+      strong ones are the '66 fight-word cards — **2994 KAPOW!, 2997
+      CRUNCH!, 3034 POW!!, 3038 ZAP!!!, 2992 POW!!** — none of which the
+      game has ever named on the wire. (d) The store is right: `137.asset`
+      is 240x180 (the playfield TVs); the parallel `2.asset` bundle with
+      3,139 files is 800x600, a different display, and is correctly not
+      used.
+      **The RE, from the game's own dispatcher this time, not a capture.**
+      Every play command comes from one per-display service routine
+      (0x37e49c) switching on a command KIND at `display[+20]` through the
+      jump table at 0x37e4b4. Kind 4 hands **`*(display+24)`** — the u32 at
+      the request struct's offset 0 — to the one-asset builder (0x51a968)
+      as THE asset. Kinds 2 and 3 hand the SAME struct to 0x51a7c0 and
+      0x51a86c, which put that same field at payload offset 1. **So the
+      clip is one field, in every form, and v2's "first asset .. last
+      asset" was a name taken from a single capture that happened to read
+      54 and 928.** Nothing iterates; nothing says range. The companion
+      u32 (struct+12) is now published and captioned as `aux N`.
+      Two more corrections fell out: **the 1-byte command is a VERB, not a
+      mode** — five dispatch kinds call 0x51a9e0 with 1, 2, 3, 4 and 5, and
+      3/4/5 arrive with no content (kinds 7/5/6), so they are almost
+      certainly stop/pause/clear; v2 stored the byte in a field whose
+      reader only had words for 1 and 2, **so a "stop" reached the panel as
+      an empty caption, indistinguishable from "carry on playing"**. And
+      the **24-byte form has a call site after all** (kind 3 → 0x51a86c);
+      v2's own header called it dead and dropped it.
+      **The ilen question, settled properly:** the builders write 3/7/13/23
+      but the transmit path at 0x516188–0x516190 does `add r2,r2,#1` on the
+      length byte before the frame goes out, so the wire carries 4/8/14/24.
+      v2 had the right numbers from a capture; now they are derived.
+      **FIXED:** padlcd.h + hwshim to v3 (asset/aux/rate/verb/x1..x3, the
+      24-byte form decoded, RAW ring 18→22 so its 21-byte payload fits);
+      the caption prints `asset 54 · loop · aux 928 · 12 fps` and
+      `asset 3004 · verb 4` instead of inventing words; **`watch.sh` now
+      preserves the block as `dump/padlcd.last` instead of deleting it**,
+      and new **`lcdring.py`** prints the ring as a transcript with gaps —
+      two mis-decodes shipped because nothing could show what the wire
+      actually carried, and the ring died with every run. 23 panel/lcdart
+      tests + 8 new lcdring tests, all green.
+      **STILL NOT ANSWERED, and this is the honest state of David's
+      question:** *which* clip should play *when* is unverified against a
+      real machine. The narrowness above (17 ids ever, 0 new in 4 minutes)
+      is consistent with the unanswered 0x90 poll stalling the game's LCD
+      sequencer, but that is a hypothesis, not a measurement — `lcdring.py`
+      over a preserved attract run is now the instrument that can settle
+      it, and it did not exist until today.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

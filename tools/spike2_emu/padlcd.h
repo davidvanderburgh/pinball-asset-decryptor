@@ -13,32 +13,73 @@
  * (assets/lcd/auto_loaded/<sha1>/scene.assets/137.asset/<id>.asset, 3,069
  * QuickTime H.264 assets, all 240x180).
  *
- * ★ VERSION 2 CORRECTS A MIS-DECODE. v1 read the byte after `f2 98` as a
- * starting DISPLAY INDEX and the payload as a list of u16 ids at stride 4,
- * so it believed in three independently addressable screens and published
- * id[4]. Disassembly of the game's own frame builders (2026-08-24) says
- * otherwise, and the numbers v1 produced for a game start - "displays
- * 0/1/2 = assets 54/928/106" - were one PLAY-RANGE command misread: 54 and
- * 928 are the range's first and last asset, and 106 is a frame-rate code.
+ * ★ VERSION 3 STOPS NAMING FIELDS WE HAVE NOT PROVEN. v1 invented three
+ * displays. v2 fixed that but replaced one guess with another: it read the
+ * 14-byte payload as "first asset .. last asset @ rate" and captioned it
+ * that way on screen. The QUEUE STRUCT says otherwise - see below. Only
+ * one field in that payload is proven, and it is the one v2 called
+ * `first`. The rest are recorded under neutral names until something
+ * names them.
  *
- * THE FRAME, as the game builds it (game.elf, builders 0x519a60-0x51aa38,
- * wire framing 0x515f8c):
+ * THE FRAME, as the game builds it (builders 0x51a6e8-0x51aa38, wire
+ * framing 0x515f8c):
  *
- *     [0x80|node] [len+1] [0xf2] [selector] [payload...] [cksum] [replylen+2]
+ *     [0x80|node] [ilen] [0xf2] [selector] [payload...] [cksum] [replylen]
+ *
+ * ★ ilen IS THE BUILDER'S LENGTH PLUS ONE, and that +1 is not a guess:
+ * 0x516188-0x516190 in the transmit path reads the length byte, does
+ * `add r2,r2,#1`, and stores it back before the frame goes out. So the
+ * builders' 3/7/13/23 reach the wire as 4/8/14/24. (v2 asserted these
+ * numbers from a capture; this is where they actually come from.)
  *
  * The SELECTOR carries the display number in its low 2 bits (0x51a968:
  * `~((~display) & 0x67)` == 0x98|display), and the shape of the payload is
  * disambiguated BY LENGTH, not by any sub-code:
  *
  *   sel        ilen  payload                                    builder
- *   0x98|d       4   [mode]  1 = loop, 2 = one-shot             0x51a9e0
- *   0x98|d       8   [0x00] [u32 asset]                         0x51a968
- *   0x98|d      14   [flags] [u32 first] [u32 last] [u16 rate]  0x51a7c0
- *   0x98|d      24   as above + [u32][u32][u16]  (0 call sites) 0x51a86c
+ *   0x98|d       4   [verb]                                     0x51a9e0
+ *   0x98|d       8   [0x00] [u32 A]                             0x51a968
+ *   0x98|d      14   [flags] [u32 A] [u32 D] [u16 rate]         0x51a7c0
+ *   0x98|d      24   [flags] [u32 A] [u32 D] [u16 rate]
+ *                        [u32 B] [u32 C] [u16 E]                0x51a86c
  *   0x80|d       7   [brightness] [fade] [2 junk]               0x51a6e8
  *   0x88|d       7   3 bytes                     (0 call sites) 0x51a750
  *   0x90         7   [display] [3 junk], wants a 12-BYTE REPLY  0x519a60
  *   0xb8|d       7   none                        (0 call sites) 0x51aa38
+ *
+ * ★ A IS THE ASSET ID, AND THAT IS PROVEN. All four play commands are
+ * emitted by one dispatcher, the per-display service routine at
+ * 0x37e49c. It switches on a COMMAND KIND at display[+20] through the
+ * jump table at 0x37e4b4, and every kind that carries content points at
+ * the SAME queued request struct at display[+24]:
+ *
+ *   kind 4 (0x37e540)  ldr r2,[r6,#24]   -> 0x51a968  the u32 AT struct+0
+ *   kind 2 (0x37e5b0)  add r2,r6,#24     -> 0x51a7c0  reads struct+0,+12,+18,+20
+ *   kind 3 (0x37e578)  add r2,r6,#24     -> 0x51a86c  reads those +4,+8,+16
+ *
+ * Kind 4 hands struct+0 to the builder whose whole payload is one asset
+ * number. So struct+0 - the field that lands at payload offset 1 in the
+ * 8, 14 and 24-byte forms alike - IS the clip to play, in every form.
+ * That is why `asset` below is set from all three and why the panel draws
+ * it without apology.
+ *
+ * WHAT IS *NOT* PROVEN, and is therefore not named: struct+12 (`aux`).
+ * v2 called it the range's LAST asset on the strength of one capture
+ * where it read 928. Nothing in the builders or the dispatcher says
+ * "range", nothing iterates A..D, and the struct's other fields (+4, +8,
+ * +16) are plainly not endpoints of anything. It is recorded and shown as
+ * a number. Do not caption it as a range again without a call site that
+ * fills it.
+ *
+ * THE VERB is also not a "mode". 0x51a9e0 sends a single payload byte and
+ * FIVE dispatch kinds call it with five different values - 1 and 2 from
+ * the kinds that then send content (display[+48] chooses between them, so
+ * they read as play-looping / play-once), and 3, 4, 5 from kinds 7, 5 and
+ * 6 which send nothing after. Those three are almost certainly stop /
+ * pause / clear, in some order, and until that order is known the panel
+ * prints the number rather than picking a word. v2 stored this as `mode`
+ * and silently showed nothing for 3/4/5, which is how a "stop" looked
+ * identical to "carry on playing".
  *
  * The rate is a frame PERIOD code indexing the table at 0x5c9340 =
  * {43,53,64,80,84,106,128,160} in 1/1280 s, i.e. {30,24,20,16,15,12,10,8}
@@ -58,17 +99,17 @@
  * already serves every node-bus frame, and PAD_NB_LOG quadruples the boot.
  *
  * OFFSETS, since the Python reader hard-codes them: magic 0, version 4,
- * gen 8, decoded 12, asset 16, first 20, last 24, rate 28, mode 32,
- * bright 36, fade 40, ms 44, ring_head 48, ring at 52, stride 24,
+ * gen 8, decoded 12, asset 16, aux 20, rate 24, verb 28, x1 32, x2 36,
+ * x3 40, bright 44, fade 48, ms 52, ring_head 56, ring at 60, stride 28,
  * PADLCD_RING 64.
  */
 #ifndef PADLCD_H
 #define PADLCD_H
 
 #define PADLCD_MAGIC    0x44434c50u     /* 'PLCD' */
-#define PADLCD_VERSION  2               /* v1 believed in 3 displays        */
+#define PADLCD_VERSION  3               /* v1: 3 displays. v2: a fake range */
 #define PADLCD_RING     64
-#define PADLCD_RAW      18              /* longest payload is 23 - clipped  */
+#define PADLCD_RAW      22              /* the 24-byte form's payload is 21 */
 #define PADLCD_BYTES    4096
 
 struct padlcd_shm {
@@ -76,21 +117,23 @@ struct padlcd_shm {
     unsigned version;
     unsigned gen;                       /* bumped after every decoded frame */
     unsigned decoded;                   /* play commands decoded, ever      */
-    /* WHAT THE ONE DISPLAY WAS LAST TOLD TO SHOW. A single-asset command
-     * sets `asset` and clears the range; a range command sets first/last/
-     * rate and clears `asset`. Exactly one of the two is live. */
-    unsigned asset;                     /* single-asset play, 0 = none      */
-    unsigned first;                     /* range play: first asset, 0 = none*/
-    unsigned last;                      /* range play: last asset           */
-    unsigned rate;                      /* range play: fps (already decoded
-                                         * from the 0x5c9340 period code)   */
-    unsigned mode;                      /* 1 = loop, 2 = one-shot, 0 unseen */
+    /* WHAT THE ONE DISPLAY WAS LAST TOLD TO SHOW. `asset` is struct+0 and
+     * is the clip, whichever of the three content forms carried it. */
+    unsigned asset;                     /* the clip to play, 0 = none       */
+    unsigned aux;                       /* struct+12. UNNAMED. Not a range  */
+    unsigned rate;                      /* fps, decoded from the period code*/
+    unsigned verb;                      /* 1,2 = play (loop/once); 3,4,5 =
+                                         * sent with no content; 0 = unseen */
+    unsigned x1, x2, x3;                /* the 24-byte form's extra fields
+                                         * struct+4, +8, +16. UNNAMED.      */
     unsigned bright;                    /* last 0x80 brightness             */
     unsigned fade;                      /* last 0x80 fade                   */
     unsigned ms;                        /* guest CLOCK_MONOTONIC ms at change*/
     /* Raw payloads for EVERY cmd-f2 selector this node sees, a lossy ring
      * for RE - v1 ringed only what it already understood, which is exactly
-     * why the mis-decode above survived a live capture. */
+     * why its mis-decode survived a live capture. watch.sh preserves this
+     * page at run end (dump/padlcd.last) because a ring that dies with the
+     * run cannot settle an argument about what the game sent. */
     unsigned ring_head;                 /* frames written, ever; index = %64*/
     struct padlcd_raw {
         unsigned ms;

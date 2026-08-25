@@ -8388,28 +8388,30 @@ extern int atoi(const char *);           /* same GCC 14 reason as open/close */
 
 /* ---- VILLAIN VISION (padlcd.h, item 83) --------------------------------
  *
- *     98 <ilen> f2 98 <start> <id lo> <id hi> 00 00 [...] <cksum> <replylen>
+ *     98 <ilen> f2 <sel> <payload...> <cksum> <replylen>
  *
- * The lcdnode's three playfield LCDs are driven by DISPLAY IDS, not pixels:
- * the game renders its lcd scenes host-side and this frame names which
- * stored clip each insert shows (the id is the asset number in the card's
- * villain-TV store - mapping eyeball-verified, see padlcd.h). ids are LE16
- * at stride 4 after the start byte; N ids set displays start..start+N-1.
- * Measured live: attract cycles single-id frames every 5.2 s, game start
- * sends one 3-id frame (919/928/106).
+ * The lcdnode's three playfield LCDs are driven by ASSET NUMBERS, not
+ * pixels: the game names a stored clip in the card's villain-TV store and
+ * the board plays it locally, so nothing image-shaped ever crosses this
+ * bus. ONE logical display (fixture display count 1; 299/299 call sites on
+ * the same device) feeds all three TVs.
  *
- * padlcd.h owns the meaning; this struct is its C twin - keep them in step.
+ * The payload's shape is chosen BY LENGTH - 4 a verb, 8 an asset, 14 and 24
+ * an asset plus fields nobody has named yet. padlcd.h owns that table, the
+ * addresses behind it, and the reason `aux` is not called a range end; this
+ * struct is its C twin - keep them in step.
+ *
  * Which node is the lcdnode differs per title, so PAD_LCD_NODE names it
  * (watch.sh derives it from node_ident.txt's type=lcdnode row); unset or 0
  * publishes nothing, which is every title without one. */
 struct padlcd_shm {
     unsigned magic, version, gen, decoded;
-    unsigned asset, first, last, rate, mode, bright, fade, ms;
+    unsigned asset, aux, rate, verb, x1, x2, x3, bright, fade, ms;
     unsigned ring_head;
-    struct { unsigned ms; unsigned char sel, len, b[18]; } ring[64];
+    struct { unsigned ms; unsigned char sel, len, b[22]; } ring[64];
 };
 #define PADLCD_MAGIC 0x44434c50u
-#define PADLCD_VERSION 2u
+#define PADLCD_VERSION 3u
 
 static struct padlcd_shm *lcd_shm;
 
@@ -8462,15 +8464,26 @@ static unsigned lcd_le32(const unsigned char *q)
          | ((unsigned)q[2] << 16) | ((unsigned)q[3] << 24);
 }
 
-/* ★ REWRITTEN AGAINST THE GAME'S OWN FRAME BUILDERS (padlcd.h documents the
- * table and the addresses). The first cut read the selector's payload as a
- * list of u16 ids at stride 4 addressed by a starting display index, which
- * invented two displays that do not exist and turned one play-range command
- * into three bogus asset ids. What is real: the display number is the
- * selector's low 2 bits and is ALWAYS 0 here, the asset is a u32, and the
- * payload shape is disambiguated by LENGTH.
+/* ★ WRITTEN AGAINST THE GAME'S OWN FRAME BUILDERS AND ITS DISPATCHER
+ * (padlcd.h documents the table, the addresses, and what is still unnamed).
  *
- * Every cmd-f2 selector is ringed now, decoded or not - v1 ringed only the
+ * Two mis-decodes are buried under this function and both are worth keeping
+ * in view. v1 read the payload as u16 ids at stride 4 behind a display
+ * index, inventing two screens and turning one command into three bogus
+ * asset ids. v2 fixed the screens but kept inventing meaning: it named the
+ * 14-byte form's two u32s "first" and "last" and called it a range, from a
+ * single capture that happened to contain 54 and 928. The dispatcher at
+ * 0x37e49c settles it - the u32 at payload offset 1 is the SAME struct
+ * field the one-asset command sends as the asset, so it is the clip; the
+ * other u32 is a field nobody has traced to a filler yet, and it is
+ * published under a name that admits that.
+ *
+ * The 24-byte form is decoded here too. v2 dropped it as unknown while its
+ * own header claimed it had no call sites; kind 3 of the dispatcher
+ * (0x37e578 -> 0x51a86c) is that call site, and it carries the asset in the
+ * same slot as the other two.
+ *
+ * Every cmd-f2 selector is ringed, decoded or not - v1 ringed only the
  * frames it already believed in, which is precisely how its mis-parse
  * survived a live capture that contained the evidence against it. */
 static void lcd_publish(const unsigned char *p, int n)
@@ -8489,7 +8502,7 @@ static void lcd_publish(const unsigned char *p, int n)
 
     /* THE RAW RING FIRST, so a mis-parse below is still on record. */
     plen = ilen - 3;              /* bytes after the selector, before cksum */
-    if (plen > 18) plen = 18;
+    if (plen > 22) plen = 22;
     slot = lcd_shm->ring_head % 64u;
     lcd_shm->ring[slot].ms  = (unsigned)pad_ms();
     lcd_shm->ring[slot].sel = (unsigned char)sel;
@@ -8498,17 +8511,31 @@ static void lcd_publish(const unsigned char *p, int n)
     lcd_shm->ring_head++;
 
     if ((sel & 0xf8u) == 0x98u) {           /* the play family              */
-        if (ilen == 4) {                    /* [mode] 1 loop, 2 one-shot    */
-            lcd_shm->mode = p[4];
-        } else if (ilen == 8) {             /* [0] [u32 asset]              */
+        if (ilen == 4) {
+            /* [verb]. 1 and 2 precede content (play looping / play once);
+             * 3, 4 and 5 arrive alone from dispatch kinds 7, 5 and 6. The
+             * NUMBER is published: v2 stored these in a field called `mode`
+             * whose reader only had words for 1 and 2, so a bare 3/4/5 -
+             * every candidate for "stop" - reached the panel as silence. */
+            lcd_shm->verb = p[4];
+        } else if (ilen == 8) {             /* [0] [u32 A]                  */
             lcd_shm->asset = lcd_le32(p + 5);
-            lcd_shm->first = lcd_shm->last = lcd_shm->rate = 0;
-        } else if (ilen == 14) {            /* [flags][u32 f][u32 l][u16 r] */
-            lcd_shm->first = lcd_le32(p + 5);
-            lcd_shm->last  = lcd_le32(p + 9);
+            lcd_shm->aux = lcd_shm->rate = 0;
+            lcd_shm->x1 = lcd_shm->x2 = lcd_shm->x3 = 0;
+        } else if (ilen == 14 || ilen == 24) {
+            /* [flags][u32 A][u32 D][u16 rate], and for 24 three more
+             * fields after it. A is the clip either way. */
+            lcd_shm->asset = lcd_le32(p + 5);
+            lcd_shm->aux   = lcd_le32(p + 9);
             lcd_shm->rate  = lcd_fps((unsigned)p[13]
                                      | ((unsigned)p[14] << 8));
-            lcd_shm->asset = 0;
+            if (ilen == 24) {
+                lcd_shm->x1 = lcd_le32(p + 15);
+                lcd_shm->x2 = lcd_le32(p + 19);
+                lcd_shm->x3 = (unsigned)p[23] | ((unsigned)p[24] << 8);
+            } else {
+                lcd_shm->x1 = lcd_shm->x2 = lcd_shm->x3 = 0;
+            }
         } else {
             return;                         /* ringed, not understood       */
         }
@@ -8524,8 +8551,7 @@ static void lcd_publish(const unsigned char *p, int n)
      * 0xb8 builders are ringed and left alone: answering the poll is a
      * SEPARATE question - the game only clears a command's pending bit on a
      * reply (0x37e504), which is the likely reason attract re-sends the same
-     * asset every 250 ms, and lcd_play_range's callers block on a reply
-     * field only the 12-byte poll answer fills. */
+     * asset every 250 ms. */
 }
 
 /* Budgeted like the skip log, and off unless PAD_LED_DEC_LOG is set. A run

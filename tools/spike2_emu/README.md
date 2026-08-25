@@ -141,7 +141,7 @@ still come from running it.
 | metallica_spike | ✅ live, 106 | ✅ metallica_playfield…png (item 57 fix) | ✅ 502/664 inside, 0 outside (item 57 fix) | n/a | 2026-08-19 |
 | aerosmith_le | ✅ static (swelf.py), live-verified | — no device table shipped | — | n/a | 2026-08-19 |
 | avengers_infinity_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
-| batman | ✅ static (swelf.py), live-verified | — | — | ✅ VILLAIN VISION window: node 24's "3 LCD INSERT", ONE logical display (fixture display count 1 — the board feeds all three TVs), own `[villain vision]` window, clips PLAY (lossless webp, 10 fps) (items 82/83) | 2026-08-24 |
+| batman | ✅ static (swelf.py), live-verified | — | — | ✅ VILLAIN VISION window: node 24's "3 LCD INSERT", ONE logical display (fixture display count 1 — the board feeds all three TVs), own `[villain vision]` window, clips PLAY (lossless webp, 10 fps). Wire re-read from the dispatcher (padlcd v3): the clip is one struct field in every command form, the companion u32 is **not** a range end, and verbs 3/4/5 are shown as numbers. ⚠️ WHICH clip plays WHEN is still unverified against the machine — `lcdring.py` on `dump/padlcd.last` is the instrument (items 82/83) | 2026-08-25 |
 | foo_fighters_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
 | guardians_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |
 | iron_maiden_le | ✅ static (swelf.py), live-verified | — | — | n/a | 2026-08-19 |

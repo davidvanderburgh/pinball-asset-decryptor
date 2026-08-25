@@ -3489,11 +3489,20 @@ class LcdPanel:
     because this window shipped with three. The game addresses ONE logical
     display (fixture display count 1; all 299 LCD call sites pass the same
     device), and the node board feeds the three physical TVs from it. The
-    first cut read a play-range command - "assets 54..928 at 12 fps" - as
-    three display ids and drew 54, 928 and 106 side by side, which looked
-    convincing and was wrong: 928 is the range's END and 106 is a frame-rate
-    code. David spotted the shape of it live ("there are still two empty
-    slots to the right") before the disassembly confirmed it.
+    first cut read one command as three display ids and drew 54, 928 and 106
+    side by side, which looked convincing and was wrong: 106 is a frame-rate
+    code, and 928 is a companion field. David spotted the shape of it live
+    ("there are still two empty slots to the right") before the disassembly
+    confirmed it.
+
+    ★ AND THE SECOND CUT INVENTED A RANGE. Having stopped believing in three
+    screens, it started captioning that command "range 54-928 @ 12 fps" -
+    which is the same mistake wearing a different hat, a name for a field
+    read off one capture. The dispatcher settles it: every content form
+    carries the clip in the SAME struct field, the one the single-asset
+    command sends as the asset. So `asset` is always what to draw, and the
+    companion number is now shown as "aux N" because that is all anybody has
+    earned the right to call it.
 
     So this draws what the one display was told to show: a looping 10 fps
     LOSSLESS WEBP excerpt of the named clip, advanced one frame per poll so
@@ -3508,10 +3517,14 @@ class LcdPanel:
     color looks off ... like it's not rendering the correct bit depth" - and
     lcdart.py's docstring carries the measurement that replaced it.)
 
-    A RANGE COMMAND IS DRAWN AS ITS FIRST ASSET, with the caption saying so.
-    What the board actually does with first..last at N fps - playlist,
-    flipbook, random pick - is not decoded, and inventing one of those in the
-    renderer is how the three-screen mistake happened in the first place.
+    THE CAPTION IS AN INSTRUMENT, not decoration. It names the asset, the
+    verb the game sent (printed as a number past the two that are known -
+    a bare 3, 4 or 5 arrives with no content and is almost certainly stop,
+    pause or clear, and showing nothing for those made a stop look identical
+    to "carry on playing"), and any companion fields. Twice now this display
+    has been drawn from a confident reading of a payload nobody had traced
+    to a filler; printing the raw numbers is what lets the next wrong
+    reading be caught from a photograph.
 
     A SEPARATE WINDOW, not a strip in the playfield view - David's ask,
     2026-08-24: every other second-display title already gets its screen as
@@ -3534,12 +3547,12 @@ class LcdPanel:
 
     LAZY BY CONSTRUCTION: no window exists until the padlcd block's magic
     stamps, which only an lcdnode title's shim ever does - every other title
-    pays one 48-byte read per poll and shows nothing. The reopen-per-poll
+    pays one 56-byte read per poll and shows nothing. The reopen-per-poll
     read matches LED_PATH's rule: a held handle over \\\\wsl.localhost reads a
     frozen cache.
     """
 
-    READ = 48                       # header .. ms; the ring beyond is RE fuel
+    READ = 56                       # header .. ms; the ring beyond is RE fuel
     MAGIC = 0x44434c50              # 'PLCD'
     #: The screen. The store's clips are 240x180; a dedicated window has room
     #: to show them at native size (the in-view strip this replaced halved
@@ -3558,7 +3571,7 @@ class LcdPanel:
         self.img = None
         self.id = None              # asset currently drawn
         self.have = False           # ... and whether that is real art
-        self.state = None           # (asset, first, last, rate, mode)
+        self.state = None           # (asset, aux, rate, verb)
         #: Animation state. None while no clip is on disk (kept retryable);
         #: a dict once the clip's BYTES are read - in one go, so a
         #: \\wsl.localhost hiccup can only fail the whole read (caught,
@@ -3639,16 +3652,17 @@ class LcdPanel:
             return
         if self.win is None:
             self._build()
-        (_m, _v, _g, _dec, asset, first, last, rate, mode,
-         _br, _fd, _ms) = struct.unpack_from("<12I", d)
-        self.state = (asset, first, last, rate, mode)
+        (_m, _v, _g, _dec, asset, aux, rate, verb, _x1, _x2, _x3,
+         _br, _fd, _ms) = struct.unpack_from("<14I", d)
+        self.state = (asset, aux, rate, verb)
         # ONE display (padlcd.h documents why: display count 1, and all 299
-        # LCD call sites pass the same device). A single-asset command names
-        # exactly what to draw; a RANGE command names first..last at a frame
-        # rate, and what the board does with that - a playlist, a per-frame
-        # flipbook, a random pick - is NOT decoded, so the honest thing is
-        # to draw its first asset and let the caption say it is a range.
-        want = asset or first
+        # LCD call sites pass the same device), and ONE asset field. All
+        # three content forms carry the clip in the same slot - the
+        # dispatcher hands that struct field to the one-asset builder as
+        # THE asset - so there is nothing to choose between here any more.
+        # The 14- and 24-byte forms' other numbers are companions to it,
+        # not alternatives, and the caption shows them without naming them.
+        want = asset
         if want != self.id:
             self._show(want)
         elif self._polls % 10 == 0 and want and (
@@ -3663,16 +3677,26 @@ class LcdPanel:
         self._animate()                 # one frame per poll = 10 fps
 
     def _caption(self):
-        asset, first, last, rate, mode = self.state
-        how = {1: "loop", 2: "one-shot"}.get(mode, "")
-        if asset:
-            what = "asset %d" % asset
-        elif first:
-            what = "range %d-%d%s" % (first, last,
-                                      " @ %d fps" % rate if rate else "")
-        else:
-            what = "idle"
-        txt = " · ".join(x for x in (what, how) if x)
+        asset, aux, rate, verb = self.state
+        # THE VERB IS PRINTED, NOT INTERPRETED, past 1 and 2. Five dispatch
+        # kinds send this byte and only two of them are known (they precede
+        # content, so they read as looping / once). 3, 4 and 5 arrive alone
+        # and are almost certainly stop / pause / clear - showing "" for
+        # them, as the previous cut did, made a stop look exactly like
+        # "carry on playing", which is half of why the panel could seem to
+        # lag the game.
+        how = {1: "loop", 2: "once"}.get(verb, "verb %d" % verb if verb else "")
+        what = "asset %d" % asset if asset else "idle"
+        # `aux` had a name here once - this caption used to read
+        # "range 54-928 @ 12 fps" - and the name was invented. It is a
+        # number the game sends alongside the clip; until a call site says
+        # what it is, it is shown as one.
+        extra = []
+        if aux:
+            extra.append("aux %d" % aux)
+        if rate:
+            extra.append("%d fps" % rate)
+        txt = " · ".join(x for x in [what, how] + extra if x)
         if self.cap["text"] != txt:
             self.cap.configure(text=txt)
 

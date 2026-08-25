@@ -4,19 +4,22 @@ Queue item 83. batman's lcdnode drives the "3 LCD INSERT" fixture; the shim
 decodes the game's play commands into dump/padlcd and the panel maps the
 named asset -> <tables>/<game>/lcd/<id>.{png,webp}, extracting art lazily.
 
-★ THE BLOCK IS v2 AND SO ARE THESE TESTS. v1 believed the wire addressed
-three displays; disassembly of the game's frame builders says there is ONE
-(padlcd.h has the addresses), and the "three ids" it drew at game start
-were one play-range command - first asset, last asset, frame-rate code -
-read as three. So the panel is one screen, and the fault these tests exist
-to catch first is any return of per-cell state.
+★ THE BLOCK IS v3 AND SO ARE THESE TESTS, after TWO wrong readings of this
+protocol. v1 believed the wire addressed three displays and drew a single
+command as three ids. v2 fixed the screens but named the payload's second
+u32 "last" and captioned the frame "range 54-928 @ 12 fps" - a name taken
+from one capture. The dispatcher (padlcd.h has the addresses) says every
+content form carries the clip in the SAME struct field, the one the
+single-asset command sends as the asset; the companion u32 is unnamed.
 
-The other faults guarded here: a window that builds on titles with no
-lcdnode (every title would grow a stray black window), a placeholder that
-never upgrades when the art lands (the lazy extraction would be invisible),
-an asset change that keeps showing the previous clip (stale cache
-reference), a close box that kills the window instead of hiding it (item
-44's contract), and a range command drawn as though it named one clip.
+So two faults come first here: any return of per-cell state, and any
+caption that names a field the disassembly has not named. The rest guarded:
+a window that builds on titles with no lcdnode (every title would grow a
+stray black window), a placeholder that never upgrades when the art lands
+(the lazy extraction would be invisible), an asset change that keeps
+showing the previous clip (stale cache reference), a close box that kills
+the window instead of hiding it (item 44's contract), and a bare verb byte
+reaching the caption as silence (a "stop" that looked like "carry on").
 
 REAL Tk, like the hit-test and action-row tests: what is under test is
 Toplevel construction, the WM_DELETE protocol, and PhotoImage lifetime -
@@ -52,11 +55,11 @@ def _root():
     return root
 
 
-def _write_block(path, asset=0, first=0, last=0, rate=0, mode=0, magic=MAGIC):
-    """The v2 page: magic, version, gen, decoded, then the one display's
-    state (asset, first, last, rate, mode, bright, fade, ms)."""
-    d = struct.pack("<12I", magic, 2, 1, 1,
-                    asset, first, last, rate, mode, 0, 0, 0)
+def _write_block(path, asset=0, aux=0, rate=0, verb=0, magic=MAGIC):
+    """The v3 page: magic, version, gen, decoded, then the one display's
+    state (asset, aux, rate, verb, x1, x2, x3, bright, fade, ms)."""
+    d = struct.pack("<14I", magic, 3, 1, 1,
+                    asset, aux, rate, verb, 0, 0, 0, 0, 0, 0)
     with open(path, "wb") as f:
         f.write(d + b"\x00" * (4096 - len(d)))
 
@@ -128,7 +131,7 @@ def test_stamped_block_builds_window_and_requests_art(tmp_path, monkeypatch):
     root = _root()
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
-        _write_block(block, asset=1736, mode=2)
+        _write_block(block, asset=1736, verb=2)
         _poll(p)
         assert p.win is not None, "magic stamped but no window"
         assert "villain vision" in p.win.title()
@@ -149,29 +152,58 @@ def test_stamped_block_builds_window_and_requests_art(tmp_path, monkeypatch):
         root.destroy()
 
 
-def test_range_command_draws_first_asset_and_says_so(tmp_path, monkeypatch):
-    """THE v1 MIS-DECODE, pinned. `play 54..928 @ 12 fps` is ONE command for
-    ONE display; v1 read it as three display ids and drew 54, 928 and 106
-    (a frame-rate code) side by side. The panel must draw the range's FIRST
-    asset, ask for that asset only, and caption the range rather than
-    pretending it named one clip."""
+def test_companion_fields_never_become_assets_or_a_range(tmp_path, monkeypatch):
+    """BOTH MIS-DECODES, pinned in one test.
+
+    v1 read this frame as three display ids and drew 54, 928 and 106 (a
+    frame-rate code) side by side. v2 drew 54 alone but captioned it
+    "range 54-928 @ 12 fps", naming a field nothing in the binary names.
+    The frame carries ONE clip (54) plus companions; the panel must draw
+    54, fetch 54 and nothing else, and show the companion as a bare
+    number.
+    """
     root = _root()
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
-        _write_block(block, first=54, last=928, rate=12, mode=1)
+        _write_block(block, asset=54, aux=928, rate=12, verb=1)
         _poll(p)
-        assert p.id == 54, "range not drawn as its first asset"
+        assert p.id == 54, "the frame's asset was not drawn"
         assert [c[2] for c in p.drv.calls] == ["54"], \
-            "range endpoints/rate fetched as if they were assets: %r" \
+            "companion field / rate fetched as if they were assets: %r" \
             % p.drv.calls
         cap = p.cap["text"]
-        assert "54-928" in cap and "12 fps" in cap and "loop" in cap, cap
-        # ... and a single-asset command afterwards must clear the range.
-        _write_block(block, asset=3004, mode=2)
+        assert "asset 54" in cap and "928" in cap and "12 fps" in cap, cap
+        assert "loop" in cap, cap
+        # THE NAME IS THE REGRESSION. "range" is v2's invented reading and
+        # "54-928" is how it rendered; either returning means a field grew
+        # a meaning again.
+        assert "range" not in cap and "54-928" not in cap, cap
+        # ... and a plain single-asset command must clear the companions.
+        _write_block(block, asset=3004, verb=2)
         _poll(p)
         assert p.id == 3004
-        assert "range" not in p.cap["text"] and "3004" in p.cap["text"]
-        assert "one-shot" in p.cap["text"]
+        cap = p.cap["text"]
+        assert "3004" in cap and "928" not in cap and "once" in cap, cap
+    finally:
+        root.destroy()
+
+
+def test_bare_verb_is_shown_not_swallowed(tmp_path, monkeypatch):
+    """Verbs 3, 4 and 5 arrive with no content and are almost certainly
+    stop / pause / clear. v2 stored the byte in a field whose reader only
+    had words for 1 and 2, so those three reached the caption as an empty
+    string - a stop looked exactly like "carry on playing". The number must
+    survive to the caption even though the word is unknown."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_block(block, asset=1736, verb=4)
+        _poll(p)
+        cap = p.cap["text"]
+        assert "4" in cap.replace("1736", ""), \
+            "a bare verb vanished from the caption: %r" % cap
+        assert "loop" not in cap and "once" not in cap, \
+            "an unknown verb was given a known word: %r" % cap
     finally:
         root.destroy()
 

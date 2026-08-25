@@ -569,9 +569,15 @@ teardown() {
     # of what the game actually asked the villain TVs to do. Deleting it
     # with the run meant every question about WHICH clip played WHEN needed
     # a fresh run to answer, and two mis-decodes shipped for want of exactly
-    # this evidence. lcdring.py reads the copy.
-    cp -f "$LCD_HOST" "$ROOT/dump/padlcd.last" 2>/dev/null
-    [ "$DROP" = 1 ] && chown "$PAD_USER" "$ROOT/dump/padlcd.last" 2>/dev/null
+    # this evidence. lcdring.py reads the copy. Magic-gated: a title with
+    # no lcdnode leaves the block all-zero, and copying THAT would clobber
+    # the last lcdnode run's transcript every time any other title ends.
+    # killgame.sh carries this same stanza for the Stop/app-quit path,
+    # which kills this script before this line can run.
+    if [ -s "$LCD_HOST" ] && head -c 4 "$LCD_HOST" | grep -q PLCD; then
+        cp -f "$LCD_HOST" "$ROOT/dump/padlcd.last" 2>/dev/null
+        [ "$DROP" = 1 ] && chown "$PAD_USER" "$ROOT/dump/padlcd.last" 2>/dev/null
+    fi
     rm -f "$LCD_HOST"
 
     # ...AND THEN VERIFY IT, because "it closes itself" was only ever true of

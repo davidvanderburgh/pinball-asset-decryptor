@@ -75,10 +75,25 @@ def main():
     if len(sys.argv) == 2:
         path = sys.argv[1]
     else:
+        # LIVE FIRST, then the preserved copy. The first cut preferred
+        # padlcd.last, which mid-game shadows the running title's block
+        # with the PREVIOUS run's transcript - plausible output, wrong
+        # run, the exact class of quiet error this tool exists to end.
         dump = padpath.dump() or ""
-        path = os.path.join(dump, "padlcd.last")
+        live = os.path.join(dump, "padlcd")
+        kept = os.path.join(dump, "padlcd.last")
+        path = live if os.path.isfile(live) else kept
         if not os.path.isfile(path):
-            path = os.path.join(dump, "padlcd")
+            # Its debut ended here - "[Errno 2] ... padlcd" with no hint of
+            # why. Both absences have a plain meaning; say them.
+            raise SystemExit(
+                "lcdring.py: nothing to read in %s\n"
+                "  padlcd       - absent: no run is live right now\n"
+                "  padlcd.last  - absent: no lcdnode run has ENDED since the\n"
+                "                 preserve landed (Stop used to delete the\n"
+                "                 block; killgame.sh keeps it now)\n"
+                "Run the title, and read the ring live or after it ends."
+                % (dump or "."))
     try:
         with open(path, "rb") as f:
             d = f.read(4096)

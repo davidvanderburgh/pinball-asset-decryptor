@@ -5296,6 +5296,31 @@ These have each been violated at least once and each cost a run or a window:
       sequencer, but that is a hypothesis, not a measurement — `lcdring.py`
       over a preserved attract run is now the instrument that can settle
       it, and it did not exist until today.
+
+      **UPDATE 8 (2026-08-25) — THE INSTRUMENT'S DEBUT FAILED, David's
+      report: "i tried to run you suggested script and it errored."** He
+      ran batman at 13:31, stopped it ~13:34, ran lcdring.py — `[Errno 2]
+      ... dump/padlcd`. Root cause: **`killgame.sh:132` has its own
+      `rm -f dump/padlcd`**, and Stop/app-quit end a run through
+      killgame.sh, whose pkills take watch.sh down BEFORE its teardown (the
+      only place the preserve lived) can run. The very button David ends
+      runs with deleted the transcript the preserve existed to keep; his
+      13:31 ring is unrecoverable. Three fixes, all desk work (rig lock
+      held only for the killgame test, nothing was live): (1) killgame.sh
+      preserves before removing, magic-gated on the `PLCD` bytes so a
+      non-lcdnode title's all-zero block can never clobber a real
+      transcript; (2) watch.sh's copy gets the same magic gate (it had
+      none — same clobber, different door); (3) lcdring.py's default now
+      prefers the LIVE block over `padlcd.last` (the old order shadowed a
+      running game with the PREVIOUS run's transcript — plausible output
+      off stale evidence, this protocol's signature failure), and the
+      nothing-to-read message explains both absences instead of naming one
+      file. VERIFIED on the real killgame.sh, idle rig: a magic-stamped
+      block survives Stop byte-exact (md5), a zero block does not clobber,
+      and David's exact command now prints the explanation. 12 lcdring
+      tests (2 new: live-first, message), 33 across the three LCD suites.
+      The synthetic padlcd.last from the test was deleted — the first real
+      one appears when David next ends a batman run, through either door.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

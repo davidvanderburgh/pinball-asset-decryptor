@@ -69,6 +69,17 @@ def _run(tmp_path, page, expect_rc=0):
     return out
 
 
+def _run_default(tmp_path, expect_rc=0):
+    """No path argument: the reader resolves dump/ itself, steered here by
+    PAD_ROOT - the same variable watch.sh exports to move the rootfs."""
+    env = dict(os.environ, PAD_ROOT=str(tmp_path))
+    r = subprocess.run([sys.executable, os.path.join(RIG, "lcdring.py")],
+                       capture_output=True, timeout=60, env=env)
+    out = (r.stdout + r.stderr).decode("utf8", "replace")
+    assert r.returncode == expect_rc, out
+    return out
+
+
 def test_every_frame_shape_decodes(tmp_path):
     out = _run(tmp_path, _page([VERB_LOOP, ASSET_54, ASSET_AUX, POLL,
                                 BRIGHT, BIG, VERB_BARE]))
@@ -137,3 +148,32 @@ def test_a_page_without_the_magic_is_refused(tmp_path):
 def test_an_empty_ring_says_so(tmp_path):
     out = _run(tmp_path, _page([]))
     assert "ring empty" in out, out
+
+
+def test_a_live_block_wins_over_the_preserved_one(tmp_path):
+    """Mid-game the previous run's padlcd.last still exists. The first cut
+    preferred it, so reading the ring during a run showed the WRONG run's
+    transcript - plausible output off stale evidence, this protocol's
+    signature failure. Live must win."""
+    dump = tmp_path / "dump"
+    dump.mkdir()
+    (dump / "padlcd").write_bytes(_page([ASSET_54]))
+    (dump / "padlcd.last").write_bytes(_page([BRIGHT]))
+    out = _run_default(tmp_path)
+    header = out.splitlines()[0]
+    assert "padlcd.last" not in header, \
+        "the stale preserved copy shadowed the live block: %r" % header
+    assert "asset 54" in out, out
+    assert "brightness" not in out, \
+        "the stale preserved copy's ring leaked through: %r" % out
+
+
+def test_nothing_to_read_explains_both_absences(tmp_path):
+    """The tool's actual debut: '[Errno 2] ... padlcd', naming only the
+    fallback, from a user who had just been told a transcript would exist.
+    Each absence has a plain meaning and the message must say them."""
+    (tmp_path / "dump").mkdir()
+    out = _run_default(tmp_path, expect_rc=1)
+    assert "no run is live" in out, out
+    assert "padlcd.last" in out and "ENDED" in out, out
+    assert "Errno" not in out, out

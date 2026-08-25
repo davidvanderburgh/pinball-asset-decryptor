@@ -5612,6 +5612,46 @@ These have each been violated at least once and each cost a run or a window:
       panel being on one side only — and the canvas-churn assertion is now
       tag-scoped to "pic" plus a check that the cabinet is not redrawn
       while the clip plays. 23 panel tests.
+      **UPDATE 16 (2026-08-25) — David: "is it right that during attract
+      the scenes are animated? I thought from ground truth they are more
+      like a slideshow" + "still not seeing the green batman logo".**
+      **ANIMATED, and it is MEASURED, not asserted.** Sampling the real
+      TV at 10 fps and cancelling camera shake by per-frame alignment
+      (a ±4 px search, because the naive difference lit up the TV's own
+      bezel — which cannot move — and would have "proved" motion that was
+      really handheld jitter): **TV 13.61 mean frame-to-frame vs 0.92 for
+      a static control region = 14.8x**, and even the TV's QUIETEST
+      interval (3.29) beats the control's worst (1.37) by 2.4x. It reads
+      as a slideshow because the shots are often near-static (a Batmobile
+      idling, a person talking) and each is held ~5 s with a black gap.
+      **THE LOGO, chased properly this time.** It is 1280x720, DXT1, and
+      lives in `assets/lcd/demand_loaded/ec94b9a4…/scene.radium` whose
+      strings are `Batman66` and `IN COLOR` — the press-start screen (the
+      backbox shows exactly that at t=40 s in David's video). NOTE a
+      near-miss: my first sweep filtered on `im.width`/`im.height`, which
+      `parse_radium_images` does not return (it returns dicts with
+      `disp_w`/`disp_h`), so EVERY scene reported "1280x720=0". That was a
+      bug in the search, not a finding, and it was one careless step from
+      being reported as one.
+      **AND THE REAL PRIZE:** decoding the villain scene's own 91 inline
+      textures shows what the display is made of — **a wood-cased TV
+      sprite with a transparent SCREEN HOLE, an antenna, and four frames
+      of TV static**, plus lair backgrounds and font atlases. So the
+      "composite" conclusion is now visible as artwork, and the panel
+      shows the card's OWN TV instead of the one I drew (see UPDATE 15):
+      new `lcdframe.py` finds the sprite with no hard-coded index by
+      flood-filling from the border (a plain alpha bbox returns the whole
+      image, since these are sprites on transparent grounds — that is why
+      the first attempt found nothing), and the clip is composited into
+      the hole KEEPING ITS ASPECT (the hole is squarer than 4:3;
+      stretching would distort every face). watch.sh derives it beside
+      names.txt, cached, ~10 s once; a title without the texture keeps the
+      drawn cabinet. 24 panel tests.
+      **STILL TRUE about the logo:** it is a scene texture on a render
+      path this build disables, so the node-bus mirror cannot show it.
+      What the mirror shows is the VIDEO LAYER, faithfully; the real set
+      draws scene art over that layer, and now we can at least see the
+      set's own artwork around the picture.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

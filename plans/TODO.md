@@ -5402,6 +5402,54 @@ These have each been violated at least once and each cost a run or a window:
       channels survive past 0 frames?), and David's own eyes on the
       villain window. The game ELF is copied to /tmp/game.elf so further
       RE needs no mount.
+
+      **UPDATE 11 (2026-08-25) — GRADED LIVE ON DAVID'S RUN ("rig is up
+      and you can take over"), two of three pass, and the panel learned
+      the block.** Graders, measured off the live rig: **(1) PASS — the
+      250 ms re-send is GONE.** The coalesced ring covered the whole run
+      in one read (its own first live success): one echo-less re-send of
+      asset 2 at boot before the first decode primed the echo, then every
+      play lands exactly once, attract steady at one command per ~5.2 s
+      for 11+ minutes. **(2) PASS — no node-24 alerts**: nbsched shows
+      flags 0x0, gate 0 all run; word0 is not being read as a fault word.
+      Keep the echo. **(3) FAIL — the game's four 137-store channels
+      still stop at 0 frames** (they reach caps/pads, never "streaming"),
+      so the poll reply was necessary but is not sufficient for the
+      game-side villain renderer. Also measured: the game creates exactly
+      ONE EGL surface ever (`[eglshim] surface 1 on display 0`), so
+      batman never even attempts a villain render target on our rig;
+      /dev/spidev1.0 is the SWITCH bus (already shimmed), not a pixel
+      link; /dev/mxc_vpu (i.MX6 hardware H.264) is in the ELF's device
+      list — the second-display-output story fits everything but is
+      UNPROVEN. The 0x381050 "state==4" predicate turned out to be a
+      checksummed settings table, not LCD state — dead end, recorded so
+      nobody re-reads it.
+      **The panel now PLAYS the block.** Attract sent `asset 919 aux 928
+      @ 12 fps` live — ten consecutive clips — and game start sends
+      54..928; with the duration helper (last-first+1) as the consumer,
+      the panel cycles asset..aux clip by clip (each clip through once,
+      verb 1 wraps, verb 2 holds on the last, uncached clips heal lazily
+      via lcdart as the cycle reaches them, a poll never snaps a live
+      cycle back to its start). Caption: `assets 919-928 · showing 921 ·
+      12 fps · loop`. 3 new panel tests (start-at-first, cycle+wrap,
+      once-holds); 37+1skip across the four LCD suites.
+      **Also killed the warning wall** David hit three times: all
+      -Wformat-truncation warnings in hwshim.c/gstvid.c fixed at the
+      format level (%.Ns precision on path arguments) plus two real
+      buffer bugs — segv_handler's register dump was genuinely truncating
+      `pc=` off crash logs (200 → 240), and gstvid's VLOG clipped the
+      pre-arm line's 511-byte asset path (300 → 600). Verified zero
+      format-truncation warnings on both files; the next rebuild prints
+      two lines, not two hundred. lcdring.py's poll caption no longer
+      claims "we answer zeros" (it stopped being true this morning).
+      **NEXT for the villain display, in order of leverage:** (a) find
+      what starts the game-side player behind the four pre-armed
+      channels — the display-object state machine consumes our reply
+      words at +4/+8/+12 and only word0's role is guessed; words 1-2 may
+      carry state/position the player waits on (try PAD_LCD_R sweeps);
+      (b) if the player runs, the combo surface likely needs a second
+      render target (item 44's machinery exists; batman never asks).
+      Worth its own item if (a) does not fall quickly.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

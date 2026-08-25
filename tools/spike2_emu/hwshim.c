@@ -1773,7 +1773,13 @@ static void segv_print_header(unsigned long *uc)
                 if (ispc || islr) {
                     char save = *eol;
                     *eol = 0;
-                    snprintf(b, sizeof b, "[segv] map %s%s\n", line,
+                    /* %.170s: a maps line can be pathological and clipping
+                     * one in a crash log is fine - gcc's format-truncation
+                     * warning here printed as a wall of "errors" in the app
+                     * log on every shim rebuild (tester report, 2026-08-25),
+                     * which is the bug this precision fixes. Same story on
+                     * every other %.Ns in a log line below. */
+                    snprintf(b, sizeof b, "[segv] map %.170s%s\n", line,
                              ispc ? "   <-- PC" : "   <-- LR");
                     logmsg(b);
                     if (ispc) {
@@ -1888,7 +1894,8 @@ static void segv_install(void)
 static void segv_handler(int sig, void *info, void *ucv)
 {
     unsigned long *uc = ucv;
-    char b[200];
+    char b[240];            /* the 16-register dump is 217 bytes - 200 was
+                             * genuinely truncating pc= off the crash log   */
     (void)sig; (void)info;
     scan_guard_check(uc);   /* never returns if the guarded scan faulted */
     if (!uc) { logmsg("[segv] no context\n"); _exit(99); }
@@ -2525,7 +2532,7 @@ static void nv_load(void)
     while (got < SLOTSIZE && (r = real_read(fd, store[0] + got, SLOTSIZE - got)) > 0)
         got += (unsigned long)r;
     real_close(fd);
-    snprintf(m, sizeof m, "[i2c] loaded saved NVRAM from %s%s\n",
+    snprintf(m, sizeof m, "[i2c] loaded saved NVRAM from %.150s%s\n",
              seeded ? NV_PATH : path,
              seeded ? " (seeding this title's own EEPROM; it is per-title now)"
                     : "");
@@ -3569,7 +3576,7 @@ static void nb_fident_load(void)
     if (n > 0) {
         nb_fident_state = 1;
         snprintf(msg, sizeof msg,
-                 "[nbid] %d node identities from %s\n", n, path);
+                 "[nbid] %d node identities from %.120s\n", n, path);
         logmsg(msg);
     }
 }
@@ -5547,7 +5554,8 @@ static int sw_file_table(void)
     f = ropen(path, "r");
     if (!f) {
         snprintf(msg, sizeof msg, "[swfind] no by-shape table and no file "
-                 "table (%s): the playfield stays switchless this run\n", path);
+                 "table (%.140s): the playfield stays switchless this run\n",
+                 path);
         logmsg(msg);
         return 0;
     }
@@ -5585,8 +5593,8 @@ static int sw_file_table(void)
     }
     rclose(f);
     if (n < 16) {   /* a handful of rows is a parse accident, not a table */
-        snprintf(msg, sizeof msg, "[swfind] file table %s parsed to only %u "
-                 "row(s) - not trusted, not installed\n", path, n);
+        snprintf(msg, sizeof msg, "[swfind] file table %.140s parsed to only "
+                 "%u row(s) - not trusted, not installed\n", path, n);
         logmsg(msg);
         return 0;
     }
@@ -5595,8 +5603,8 @@ static int sw_file_table(void)
     sw_shadow_count = maxid + 1;
     sw_ftab_installed = 1;
     snprintf(msg, sizeof msg,
-             "[swfind] switch table loaded from %s: %u switches, ids to %u "
-             "(ELF-derived; the names live in the file)\n", path, n, maxid);
+             "[swfind] switch table loaded from %.140s: %u switches, ids to "
+             "%u (ELF-derived; the names live in the file)\n", path, n, maxid);
     logmsg(msg);
     return 1;
 }

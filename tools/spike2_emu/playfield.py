@@ -3572,6 +3572,7 @@ class LcdPanel:
         self.id = None              # asset currently drawn
         self.have = False           # ... and whether that is real art
         self.state = None           # (asset, aux, rate, verb)
+        self.cycle = None           # (first, last) while a block command is live
         #: Animation state. None while no clip is on disk (kept retryable);
         #: a dict once the clip's BYTES are read - in one go, so a
         #: \\wsl.localhost hiccup can only fail the whole read (caught,
@@ -3654,15 +3655,29 @@ class LcdPanel:
             self._build()
         (_m, _v, _g, _dec, asset, aux, rate, verb, _x1, _x2, _x3,
          _br, _fd, _ms) = struct.unpack_from("<14I", d)
-        self.state = (asset, aux, rate, verb)
+        cmd = (asset, aux, rate, verb)
+        changed = cmd != self.state
+        self.state = cmd
         # ONE display (padlcd.h documents why: display count 1, and all 299
-        # LCD call sites pass the same device), and ONE asset field. All
-        # three content forms carry the clip in the same slot - the
+        # LCD call sites pass the same device), and ONE asset field - the
         # dispatcher hands that struct field to the one-asset builder as
-        # THE asset - so there is nothing to choose between here any more.
-        # The 14- and 24-byte forms' other numbers are companions to it,
-        # not alternatives, and the caption shows them without naming them.
-        want = asset
+        # THE asset. When the companion u32 names a LARGER id, the pair is
+        # treated as the inclusive clip block asset..aux and _animate
+        # cycles it: the game's own duration helper (0x37e2fc) computes
+        # (last - first + 1) x a period for exactly such a pair, and the
+        # pairs seen live are consecutive blocks of real clips (919..928 in
+        # attract, 54..928 at game start). What the BOARD does per clip is
+        # still unverified - the cycle plays each clip through once, which
+        # is the plainest reading of a count-of-clips duration.
+        self.cycle = (asset, aux) if asset and aux > asset else None
+        if changed or not self.cycle:
+            want = asset
+        else:
+            # Mid-block the drawn id has advanced past the first clip ON
+            # PURPOSE; a poll must not snap it back while the command is
+            # unchanged.
+            want = (self.id if self.id and asset <= self.id <= aux
+                    else asset)
         if want != self.id:
             self._show(want)
         elif self._polls % 10 == 0 and want and (
@@ -3686,14 +3701,22 @@ class LcdPanel:
         # "carry on playing", which is half of why the panel could seem to
         # lag the game.
         how = {1: "loop", 2: "once"}.get(verb, "verb %d" % verb if verb else "")
-        what = "asset %d" % asset if asset else "idle"
-        # `aux` had a name here once - this caption used to read
-        # "range 54-928 @ 12 fps" - and the name was invented. It is a
-        # number the game sends alongside the clip; until a call site says
-        # what it is, it is shown as one.
+        # A block command names its whole span and which clip is up. `aux`
+        # was once captioned "range" on no evidence and then a bare number
+        # on principle; the block reading now rests on the game's own
+        # duration helper (see poll), so the caption says what the panel
+        # actually does with it.
+        if self.cycle:
+            what = "assets %d-%d" % self.cycle
+            if self.id and self.cycle[0] <= self.id <= self.cycle[1]:
+                what += " · showing %d" % self.id
+        elif asset:
+            what = "asset %d" % asset
+        else:
+            what = "idle"
         extra = []
-        if aux:
-            extra.append("aux %d" % aux)
+        if aux and not self.cycle:
+            extra.append("aux %d" % aux)  # aux <= asset: NOT a block; shown raw
         if rate:
             extra.append("%d fps" % rate)
         txt = " · ".join(x for x in [what, how] + extra if x)
@@ -3784,6 +3807,23 @@ class LcdPanel:
             a["n"] = idx                # clip honestly ends here
             return None
 
+    def _cycle_next(self):
+        """The clip after this one in a block command, or None when the
+        command names a single clip. A block plays each clip through once
+        (poll documents what that reading rests on): verb 1 wraps to the
+        block's first clip, verb 2 holds on the last (returned as self.id,
+        which _animate reads as 'stay'). An uncached clip along the way
+        stalls the cycle on its placeholder until lcdart lands it - the
+        block heals clip by clip, exactly like every other lazy artifact
+        here."""
+        if not self.cycle:
+            return None
+        first, last = self.cycle
+        verb = self.state[3] if self.state else 0
+        if self.id is None or self.id >= last or self.id < first:
+            return self.id if verb == 2 else first
+        return self.id + 1
+
     def _animate(self):
         """Advance the screen one frame. lcdart.py encodes at 10 fps and
         this runs once per 10 Hz poll, so encode rate = display rate by
@@ -3805,7 +3845,13 @@ class LcdPanel:
             return                      # undecodable clip: keep the still
         idx = a["i"]
         if idx >= a["n"]:
-            idx = a["i"] = 0            # wrap: the clip loops
+            nxt = self._cycle_next()
+            if nxt is not None:
+                if nxt != self.id:
+                    self._show(nxt)     # block command: the next clip's
+                    return              # still paints now, motion next tick
+                return                  # verb 2 at the block's end: hold
+            idx = a["i"] = 0            # single clip: it loops
         if idx < len(a["frames"]):
             frame = a["frames"][idx]
         else:

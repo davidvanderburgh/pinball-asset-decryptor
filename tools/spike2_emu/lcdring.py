@@ -69,7 +69,12 @@ def decode(sel, b, n):
     if (sel & 0xF8) == 0x80:
         return "brightness %d fade %d" % (b[0], b[1]) if n >= 2 else "?"
     if sel == 0x90:
-        return "status poll (wants a 12-byte reply; we answer zeros)"
+        # What the shim ANSWERS is version-dependent (zeros before the
+        # 2026-08-25 echo experiment, word0 = last play asset after it,
+        # PAD_LCD_R overrides) - so this line names only the REQUEST. The
+        # first cut said "we answer zeros" here, which became a lie the
+        # moment the shim changed and this file did not.
+        return "status poll (wants a 12-byte reply)"
     return "? selector"
 
 

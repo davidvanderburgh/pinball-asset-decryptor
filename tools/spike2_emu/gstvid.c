@@ -65,7 +65,10 @@ static int vid_on(void)
 }
 
 #define VLOG(...)                                                       \
-    do { char b_[300]; snprintf(b_, sizeof b_, __VA_ARGS__); pad_say(b_); } while (0)
+    do { char b_[600]; snprintf(b_, sizeof b_, __VA_ARGS__); pad_say(b_); } while (0)
+/* 600, not 300: the pre-arm line carries a full 511-byte asset path, and the
+ * old size made gcc print a format-truncation warning that showed up as a
+ * wall of "errors" in the app log on every shim rebuild (tester, 2026-08-25). */
 
 static struct padvid_shm *vshm;
 static unsigned char *vring;

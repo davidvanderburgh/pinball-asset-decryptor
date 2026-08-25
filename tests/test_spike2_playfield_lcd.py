@@ -4,16 +4,17 @@ Queue item 83. batman's lcdnode drives the "3 LCD INSERT" fixture; the shim
 decodes the game's play commands into dump/padlcd and the panel maps the
 named asset -> <tables>/<game>/lcd/<id>.{png,webp}, extracting art lazily.
 
-★ THE BLOCK IS v3 AND SO ARE THESE TESTS, after TWO wrong readings of this
-protocol. v1 believed the wire addressed three displays and drew a single
-command as three ids. v2 fixed the screens but named the payload's second
-u32 "last" and captioned the frame "range 54-928 @ 12 fps" - a name taken
-from one capture. The dispatcher (padlcd.h has the addresses) says every
-content form carries the clip in the SAME struct field, the one the
-single-asset command sends as the asset; the companion u32 is unnamed.
+★ THE BLOCK IS v4 AND SO ARE THESE TESTS, after two wrong readings and one
+overcorrection. v1 believed the wire addressed three displays and drew a
+single command as three ids. v2 named the payload's second u32 "last" off
+one capture. v3 swung to "unnamed companion" - too hard: the game's own
+duration helper (0x37e2fc, padlcd.h) computes last-first+1 x a period, so
+asset..aux IS consumed as an inclusive clip block somewhere real, and the
+panel now cycles it clip by clip (verb 1 wraps, verb 2 holds on the last).
 
-So two faults come first here: any return of per-cell state, and any
-caption that names a field the disassembly has not named. The rest guarded:
+So two faults come first here: any return of per-cell state, and the block
+degenerating - snapping back to its first clip mid-cycle, or fetching its
+end/rate fields as if they were assets. The rest guarded:
 a window that builds on titles with no lcdnode (every title would grow a
 stray black window), a placeholder that never upgrades when the art lands
 (the lazy extraction would be invisible), an asset change that keeps
@@ -152,38 +153,83 @@ def test_stamped_block_builds_window_and_requests_art(tmp_path, monkeypatch):
         root.destroy()
 
 
-def test_companion_fields_never_become_assets_or_a_range(tmp_path, monkeypatch):
-    """BOTH MIS-DECODES, pinned in one test.
-
-    v1 read this frame as three display ids and drew 54, 928 and 106 (a
-    frame-rate code) side by side. v2 drew 54 alone but captioned it
-    "range 54-928 @ 12 fps", naming a field nothing in the binary names.
-    The frame carries ONE clip (54) plus companions; the panel must draw
-    54, fetch 54 and nothing else, and show the companion as a bare
-    number.
+def test_block_command_starts_at_its_first_clip(tmp_path, monkeypatch):
+    """v1 drew this frame as three display ids (54, 928 and 106 - a rate
+    code - side by side); v2 captioned it "range" off one capture. The
+    reading that SURVIVED the disassembly: asset..aux is an inclusive clip
+    block (the game's duration helper 0x37e2fc computes last-first+1 x a
+    period), the panel starts at its first clip and fetches ONLY that one -
+    928 and 106 must still never be fetched as if they were assets.
     """
     root = _root()
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
         _write_block(block, asset=54, aux=928, rate=12, verb=1)
         _poll(p)
-        assert p.id == 54, "the frame's asset was not drawn"
+        assert p.id == 54, "the block's first clip was not drawn"
+        assert p.cycle == (54, 928)
         assert [c[2] for c in p.drv.calls] == ["54"], \
-            "companion field / rate fetched as if they were assets: %r" \
+            "block end / rate fetched as if they were assets: %r" \
             % p.drv.calls
         cap = p.cap["text"]
-        assert "asset 54" in cap and "928" in cap and "12 fps" in cap, cap
+        assert "assets 54-928" in cap and "12 fps" in cap, cap
         assert "loop" in cap, cap
-        # THE NAME IS THE REGRESSION. "range" is v2's invented reading and
-        # "54-928" is how it rendered; either returning means a field grew
-        # a meaning again.
-        assert "range" not in cap and "54-928" not in cap, cap
-        # ... and a plain single-asset command must clear the companions.
+        # ... and a plain single-asset command must clear the block.
         _write_block(block, asset=3004, verb=2)
         _poll(p)
-        assert p.id == 3004
+        assert p.id == 3004 and p.cycle is None
         cap = p.cap["text"]
         assert "3004" in cap and "928" not in cap and "once" in cap, cap
+    finally:
+        root.destroy()
+
+
+def test_block_cycles_clip_by_clip_and_wraps_on_loop(tmp_path, monkeypatch):
+    """The block's whole point: when a clip ends the NEXT id in the block
+    takes the screen, and verb 1 wraps the block's end back to its first
+    clip. The command stays on the wire unchanged throughout - the panel
+    must advance itself, and a poll must not snap the drawn id back to the
+    block's start mid-cycle."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        for i in (54, 55, 56):
+            _write_png(p._art, "%d.png" % i)
+            _write_clip(p._art, "%d.webp" % i, ["red", "green"])
+        _write_block(block, asset=54, aux=56, rate=12, verb=1)
+        seen = []
+        for _ in range(24):             # 3 clips x 2 frames, several laps
+            _poll(p)
+            seen.append(p.id)
+        assert set(seen) == {54, 55, 56}, seen
+        # order: each id holds for its clip, then hands over - never jumps
+        changes = [i for k, i in enumerate(seen) if k and i != seen[k - 1]]
+        assert changes[:4] == [55, 56, 54, 55], (seen, changes)
+        cap = p.cap["text"]
+        assert "assets 54-56" in cap and "showing" in cap, cap
+    finally:
+        root.destroy()
+
+
+def test_block_verb_once_holds_on_the_last_clip(tmp_path, monkeypatch):
+    """verb 2 played the block through once: the screen must HOLD on the
+    final clip's last frame, not wrap - a wrap here would loop footage the
+    game asked to see exactly once."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        for i in (54, 55):
+            _write_png(p._art, "%d.png" % i)
+            _write_clip(p._art, "%d.webp" % i, ["red", "green"])
+        _write_block(block, asset=54, aux=55, rate=12, verb=2)
+        for _ in range(12):
+            _poll(p)
+        assert p.id == 55, "the block did not reach (or hold) its last clip"
+        before = p.cap["text"]
+        for _ in range(6):
+            _poll(p)
+        assert p.id == 55 and p.cap["text"] == before, \
+            "verb 2 wrapped instead of holding"
     finally:
         root.destroy()
 

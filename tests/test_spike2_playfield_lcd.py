@@ -369,8 +369,15 @@ def test_art_landing_upgrades_the_placeholder(tmp_path, monkeypatch):
         # the suite green (review mutation test).
         assert (p.img.width(), p.img.height()) == (240, 180), \
             "art no longer drawn at native size"
-        assert int(p.cv["width"]) == playfield.LcdPanel.CW
-        assert int(p.cv["height"]) == playfield.LcdPanel.CH
+        # The canvas now carries the TV cabinet as well as the screen, so it
+        # is screen + padding - but the SCREEN must stay native, and the
+        # picture must sit in it rather than in the middle of the case (the
+        # knob panel is on one side only, so those differ).
+        L = playfield.LcdPanel
+        assert int(p.cv["width"]) == L.CW + L.PAD_L + L.PAD_R
+        assert int(p.cv["height"]) == L.CH + L.PAD_T + L.PAD_B
+        assert p.cv.coords(p.item) == list(p._screen_mid()), \
+            "the picture is not centred in the screen"
     finally:
         root.destroy()
 
@@ -446,10 +453,16 @@ def test_clip_landing_animates_and_wraps(tmp_path, monkeypatch):
         assert seen[3] is seen[0] and seen[4] is seen[1], \
             "the clip did not loop in order: %r" % [id(s) for s in seen]
         assert seen[0] is not seen[1], "the drawn frame never advanced"
-        # One PERSISTENT canvas item, reconfigured per frame - a
+        # One PERSISTENT picture item, reconfigured per frame - a
         # delete/create pair per tick leaks an item per frame at 10 Hz.
-        assert len(p.cv.find_all()) == 1, \
-            "%d canvas items after 7 draws" % len(p.cv.find_all())
+        # Tag-scoped since the canvas also carries the TV cabinet: the
+        # cabinet must be drawn ONCE and the picture must not multiply.
+        pics = p.cv.find_withtag("pic")
+        assert len(pics) == 1, "%d picture items after 7 draws" % len(pics)
+        case = len(p.cv.find_withtag("case"))
+        _poll(p, times=4)
+        assert len(p.cv.find_withtag("case")) == case, \
+            "the cabinet was redrawn while the clip played"
     finally:
         root.destroy()
 

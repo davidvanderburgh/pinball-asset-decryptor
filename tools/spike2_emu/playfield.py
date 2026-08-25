@@ -3561,6 +3561,16 @@ class LcdPanel:
     #: to show them at native size (the in-view strip this replaced halved
     #: them).
     CW, CH = 244, 184
+    #: THE CABINET. The real Villain Vision is a wood-cased 1960s portable
+    #: with a chrome bezel, two knobs on a right-hand panel and "Villain
+    #: Vision" in script under the screen - David's video of the machine
+    #: (2026-08-25) is the reference. Drawing it costs one canvas and makes
+    #: the window instantly recognisable as THAT device rather than a black
+    #: rectangle floating on the desktop, which is the whole point of a
+    #: mirror. The screen keeps its native size; the case is padding
+    #: around it, so nothing about the picture changes.
+    PAD_L, PAD_T = 16, 14           # case around the screen
+    PAD_R, PAD_B = 62, 34           # right: knob panel; bottom: the script
     #: Re-ask backoff for lcdart, seconds. One subprocess per minute per id
     #: whose art is still missing - see _show.
     ASK_S = 60.0
@@ -3621,9 +3631,12 @@ class LcdPanel:
         pos = load_state().get("villain_pos")
         if pos and _onscreen(self.win, *pos):
             self.win.geometry("+%d+%d" % (pos[0], pos[1]))
-        self.cv = tk.Canvas(self.win, width=self.CW, height=self.CH, bg="#000",
-                            highlightthickness=1, highlightbackground="#333")
+        self.cv = tk.Canvas(self.win,
+                            width=self.CW + self.PAD_L + self.PAD_R,
+                            height=self.CH + self.PAD_T + self.PAD_B,
+                            bg="#000", highlightthickness=0)
         self.cv.pack(padx=4, pady=(4, 2))
+        self._cabinet()
         # The caption is not decoration: what the game sent is either ONE
         # asset or a RANGE at a frame rate, and only one of those can be
         # drawn faithfully today (see poll()). Saying which is on the wire
@@ -3640,6 +3653,49 @@ class LcdPanel:
         self.nm = tk.Label(self.win, text="", bg="#111", fg="#7a8",
                            font=("Consolas", 8))
         self.nm.pack(pady=(0, 4))
+
+    def _cabinet(self):
+        """Draw the TV around the screen, once, under everything else.
+
+        Tagged "case" and drawn before the picture, so _draw's image item
+        and the placeholder text both land on top without any explicit
+        raise/lower bookkeeping - canvas items stack in creation order.
+        Colours are eyeballed off the machine (warm walnut case, chrome
+        bezel, cream knob panel); the geometry is the PAD_* constants, so
+        the screen keeps its native 240x180 and only the case moves.
+        """
+        w = self.CW + self.PAD_L + self.PAD_R
+        h = self.CH + self.PAD_T + self.PAD_B
+        sx0, sy0 = self.PAD_L, self.PAD_T
+        sx1, sy1 = sx0 + self.CW, sy0 + self.CH
+        c = self.cv
+        c.create_rectangle(0, 0, w, h, fill="#4a3222", outline="", tags="case")
+        c.create_rectangle(2, 2, w - 3, h - 3, fill="#5d4130",
+                           outline="#2b1c12", tags="case")
+        # Chrome bezel: a light ring with a darker inner lip, which is what
+        # actually reads as "metal" at this size.
+        c.create_rectangle(sx0 - 8, sy0 - 8, sx1 + 8, sy1 + 8,
+                           fill="#b9b6ad", outline="#6f6c64", tags="case")
+        c.create_rectangle(sx0 - 3, sy0 - 3, sx1 + 3, sy1 + 3,
+                           fill="#2a2a2a", outline="#8d8a82", tags="case")
+        c.create_rectangle(sx0, sy0, sx1, sy1, fill="#000", outline="",
+                           tags="case")
+        # Right-hand knob panel: two tuning dials and the speaker slot.
+        px0 = sx1 + 12
+        c.create_rectangle(px0, sy0 - 8, w - 8, sy1 + 8, fill="#cfc9b8",
+                           outline="#6f6c64", tags="case")
+        for cy in (sy0 + 26, sy0 + 74):
+            c.create_oval(px0 + 8, cy - 15, px0 + 38, cy + 15,
+                          fill="#2b2b2b", outline="#111", tags="case")
+            c.create_oval(px0 + 15, cy - 8, px0 + 31, cy + 8,
+                          fill="#565656", outline="", tags="case")
+        c.create_rectangle(px0 + 8, sy1 - 34, w - 16, sy1 - 12,
+                           fill="#8c8579", outline="#6f6c64", tags="case")
+        # The script under the screen. Italic because the real one is, and
+        # it is the label that names the thing on David's playfield.
+        c.create_text((sx0 + sx1) // 2, sy1 + 18, text="Villain Vision",
+                      fill="#e8dfc8", font=("Georgia", 11, "italic"),
+                      tags="case")
 
     def _hide(self):
         # Item 44's contract for a second display's close box: hide, don't
@@ -3794,12 +3850,20 @@ class LcdPanel:
         10 Hz for nothing."""
         self.img = img                  # keep the reference: a PhotoImage
         if self.item is None:           # nobody holds goes blank
-            self.cv.delete("all")
+            # "case", not "all": the cabinet is drawn once and must survive
+            # every clip change. Deleting everything here is what would
+            # quietly erase the TV the first time an asset landed.
+            self.cv.delete("pic")
             self.item = self.cv.create_image(
-                self.CW // 2, self.CH // 2, image=img,
+                *self._screen_mid(), image=img, tags="pic",
                 state="hidden" if self.bright < 128 else "normal")
         else:
             self.cv.itemconfig(self.item, image=img)
+
+    def _screen_mid(self):
+        """Centre of the SCREEN, which is not the centre of the canvas once
+        the cabinet is around it (the knob panel is on one side only)."""
+        return (self.PAD_L + self.CW // 2, self.PAD_T + self.CH // 2)
 
     def _show(self, i):
         # Ask lcdart.py for whatever this id is missing, at most once per
@@ -3829,11 +3893,11 @@ class LcdPanel:
                 self.id, self.have = i, True
                 return
         if self.id != i:                    # placeholder, once per change
-            self.cv.delete("all")
+            self.cv.delete("pic")           # NOT "all" - the cabinet stays
             self.item = None
-            self.cv.create_text(self.CW // 2, self.CH // 2,
+            self.cv.create_text(*self._screen_mid(),
                                 text=("asset %d" % i) if i else "—",
-                                fill="#888", font=("Consolas", 9))
+                                fill="#888", font=("Consolas", 9), tags="pic")
         self.id, self.have = i, not i       # nothing named = nothing to fetch
 
     def _open_clip(self, i):

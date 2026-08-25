@@ -249,6 +249,15 @@ if [ -n "$LCD_NODE" ]; then
             echo "[watch] villain set: TV artwork pulled from the card's scene textures"
         fi
     fi
+    # THE ATTRACT CARD (item 83): the green BATMAN logo the real set opens
+    # attract with is the card's only 1280x720 lcd texture; lcdlogo.py
+    # derives it once and the panel interposes it when the wire's shape
+    # says a game just ended. Failure is not fatal - no card, no interlude.
+    if [ ! -s "$PAD_TABLES/$GAME/lcd/logo.png" ]; then
+        if python3 "$RIG/lcdlogo.py" "$GAME" >/dev/null 2>&1; then
+            echo "[watch] villain card: attract logo pulled from the card's scene textures"
+        fi
+    fi
 fi
 #
 # THE SWITCH LIST IS PASSED TOO, as the fallback for a title whose device table

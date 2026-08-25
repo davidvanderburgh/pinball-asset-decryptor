@@ -75,6 +75,25 @@
  * mirror does show - the commanded clip, the cadence, the fade, the
  * one-shot hold - is now verified against the machine itself.
  *
+ * ★ THE ANCHOR + WALK (2026-08-25, the same video pinned frame-level).
+ * David's machine had just ended a game, and its attract TV walks the
+ * PLAYED EPISODE: the Riddler talking is store id 46 and the Batmobile
+ * passing the "Gotham City 14 MILES" sign is store id 27 frames 45..67
+ * (normalized correlation 0.84 on the sign - one clip covering both,
+ * ~10 s, which is why that segment holds longer than the others). Neither
+ * id is in the fixed 11-clip boot-attract rotation (2, 54, 720, 591, 601,
+ * 1605, 1736, 2066, 2359, 3004, 3026 - full cycle 62.7 s, read off the
+ * item-82 lcdcap capture), but both are S1E001 - the same episode as
+ * asset 54, the ONE id the wire re-commands every ~5.2 s through a game
+ * and after it. So the wire names an ANCHOR and the real display WALKS
+ * the anchor's episode; the advance is internal (the game-side player on
+ * the disabled render path - its completion callback is what steps the
+ * playlist), which is why this rig's wire can only ever repeat the
+ * anchor. The panel reconstructs the walk from the anchor + names.txt
+ * families (playfield.py LcdPanel, "the reel"); the real machine's exact
+ * walk ORDER is NOT established (the video shows 46 then 27, not
+ * ascending) and ascending family order is the recorded approximation. */
+ *
  * ★ VERSION 3 STOPS NAMING FIELDS WE HAVE NOT PROVEN. v1 invented three
  * displays. v2 fixed that but replaced one guess with another: it read the
  * 14-byte payload as "first asset .. last asset @ rate" and captioned it

@@ -3583,6 +3583,42 @@ class LcdPanel:
     #: Re-ask backoff for lcdart, seconds. One subprocess per minute per id
     #: whose art is still missing - see _show.
     ASK_S = 60.0
+    #: THE REEL (2026-08-25, from David's video of the real machine). While
+    #: a game is on, the wire re-commands ONE anchor clip every ~5.2 s
+    #: (verb 2, byte-identical) - and the real Villain Vision does NOT sit
+    #: on that clip: the video shows it walking on through the anchor's own
+    #: episode (S1E001: the Riddler talking = id 46, then the Batmobile
+    #: passing the "Gotham City 14 MILES" sign = id 27, matched frame-level
+    #: at 0.84 against the card's own clips). The game-side player that
+    #: would advance that playlist internally is the disabled secondary
+    #: render path (padlcd.h), so on this rig the anchor is all the wire
+    #: ever says. The panel reconstructs the walk: when a re-command BEAT
+    #: arrives (decoded counter moved, command unchanged) and the current
+    #: clip has PLAYED THROUGH, it advances to the next clip in the
+    #: anchor's episode family (names.txt order, wrapping). The
+    #: finished-clip guard is what reproduces the real machine's variable
+    #: 5-10 s holds - a long clip skips a beat, exactly as the video shows
+    #: id 27 holding ~10 s - and it is also what makes the 250 ms
+    #: double-issue harmless (the new clip has never finished 250 ms in).
+    #: The wire stays authoritative: any CHANGED command drops the reel on
+    #: the spot. The exact episode order the real machine uses is not
+    #: established (the video walked 46 then 27, which is not ascending);
+    #: ascending family order is the admitted approximation.
+    #:
+    #: THE LOGO CARD is the same video's other lesson: at attract entry the
+    #: real set holds the green BATMAN card ~5 s before the first clip
+    #: (t=3-7 s, right after Game Over + a black beat). The card is a SCENE
+    #: TEXTURE (David found it: radimg_Shape_1280x720, the card's only
+    #: 1280x720 lcd texture - lcdlogo.py derives it), drawn by the same
+    #: disabled render path, so the wire never names it. The panel shows it
+    #: for one beat when a long same-command hammer BREAKS to a new single
+    #: asset - the wire shape of leaving a game for attract. Admitted
+    #: approximation: a mid-game clip change after >=HAMMER_BEATS quiet
+    #: beats gets the card too; the wire alone cannot tell those apart
+    #: (recorded in TODO; a synced real-machine capture is the instrument
+    #: that would).
+    LOGO_S = 5.2                    # one attract beat, the video's hold
+    HAMMER_BEATS = 3                # ~16 s of re-commands = "a game is on"
 
     def __init__(self, root, game):
         self.root, self.game = root, game
@@ -3596,6 +3632,13 @@ class LcdPanel:
         self.state = None           # (asset, aux, rate, verb)
         self.cycle = None           # (first, last) while a block command is live
         self.bright = 255           # last 0x80 brightness; <128 blanks the screen
+        self.reel = None            # reconstruction: the clip the reel walked to
+        self._dec = None            # decoded counter last poll (the beat detector)
+        self._beats = 0             # consecutive re-command beats (the hammer)
+        self._fams = None           # id -> its family's sorted ids, from names
+        self._logo_img = None       # the composed green BATMAN card, if derived
+        self._logo_tried = False
+        self._logo_until = 0.0      # while now < this, the logo card is up
         self.names = None           # {id: name} from lcdnames.py, loaded once
         self._named = False         # ... and whether the load has been tried
         self.strip = None           # the filmstrip canvas
@@ -3810,6 +3853,14 @@ class LcdPanel:
         cmd = (asset, aux, rate, verb)
         changed = cmd != self.state
         self.state = cmd
+        # THE BEAT DETECTOR: the shim bumps `decoded` only for play-family
+        # frames (never the 60 Hz poll), so "decoded moved, command
+        # unchanged" is exactly the game re-commanding the display - the
+        # ~5.2 s hammer a game holds the anchor clip with. The class
+        # docstring (LOGO_S) carries what the reel and the logo card do
+        # with it and which video measurement each rests on.
+        beat = (not changed and self._dec is not None and _dec != self._dec)
+        self._dec = _dec
         # ONE display (padlcd.h documents why: display count 1, and all 299
         # LCD call sites pass the same device), and ONE asset field - the
         # dispatcher hands that struct field to the one-asset builder as
@@ -3822,7 +3873,33 @@ class LcdPanel:
         # still unverified - the cycle plays each clip through once, which
         # is the plainest reading of a count-of-clips duration.
         self.cycle = (asset, aux) if asset and aux > asset else None
-        if changed or not self.cycle:
+        if changed:
+            if (self._beats >= self.HAMMER_BEATS and asset
+                    and not self.cycle):
+                # Leaving a hammer for a new single clip: the wire shape of
+                # game -> attract. The card first, like the real set.
+                self._load_logo()
+                if self._logo_img is not None:
+                    self._logo_until = now + self.LOGO_S
+            self._beats = 0
+            self.reel = None        # a new command always wins
+        elif beat:
+            self._beats += 1
+            if verb == 2 and asset and not self.cycle and self._reel_done():
+                nxt = self._reel_next(self.reel or asset)
+                if nxt is not None:
+                    self.reel = nxt
+        if self._logo_until:
+            if now < self._logo_until:
+                self._draw(self._logo_img)
+                self._caption()
+                return              # the card holds; the wire keeps ticking
+            self._logo_until = 0.0
+            if self.id:             # repaint what the card was covering
+                self._show(self.id)
+        if self.reel is not None and not changed:
+            want = self.reel
+        elif changed or not self.cycle:
             want = asset
         else:
             # Mid-block the drawn id has advanced past the first clip ON
@@ -3864,6 +3941,11 @@ class LcdPanel:
                 what += " · showing %d" % self.id
         elif asset:
             what = "asset %d" % asset
+            # The wire half stays the wire's truth; the reel is the
+            # panel's reconstruction and is NAMED as its own thing, so a
+            # photo of this caption can still catch a wrong reading.
+            if self.reel is not None and self.reel != asset:
+                what += " · reel: %d" % self.reel
         else:
             what = "idle"
         extra = []
@@ -3874,7 +3956,12 @@ class LcdPanel:
         txt = " · ".join(x for x in [what, how] + extra if x)
         if self.cap["text"] != txt:
             self.cap.configure(text=txt)
-        nm = self._name_for(self.id) if self.id else ""
+        # The name label names what is ON SCREEN - during the attract-entry
+        # interlude that is the card, not the commanded clip.
+        if self._logo_until:
+            nm = "logo card"
+        else:
+            nm = self._name_for(self.id) if self.id else ""
         if self.nm is not None and self.nm["text"] != nm:
             self.nm.configure(text=nm)
 
@@ -4079,6 +4166,72 @@ class LcdPanel:
         if self.id is None or self.id >= last or self.id < first:
             return self.id if verb == 2 else first
         return self.id + 1
+
+    def _reel_done(self):
+        """Has the clip on screen played through? The reel only ever steps
+        past a FINISHED clip - that guard is what turns the game's rigid
+        5.2 s hammer into the real machine's variable holds (a 10 s clip
+        rides through one beat un-advanced), and what makes the 250 ms
+        double-issue a no-op. A clip that has not landed stalls the reel
+        on its anchor - it heals through lcdart like everything else here.
+        A dead (undecodable) clip counts as finished, so one bad file
+        cannot wedge the walk."""
+        a = self.anim
+        if a is None:
+            return False
+        return bool(a.get("dead")) or a["i"] >= a["n"]
+
+    def _reel_next(self, i):
+        """The clip after i in its own episode family, wrapping - "family"
+        is the name's prefix before the first dot (S1E001_Clips...), which
+        is the card's own grouping of the store into episodes. None when
+        there is no names table or i is not in it: without the card's own
+        grouping there is nothing honest to walk."""
+        fam = self._families().get(i)
+        if not fam or len(fam) < 2:
+            return None
+        return fam[(fam.index(i) + 1) % len(fam)]
+
+    def _families(self):
+        """id -> the sorted id list of its family, built once from the
+        names table (names.txt ids are the store's, so family order is the
+        episode's own timecode order)."""
+        if self._fams is None:
+            self._name_for(0)               # ensures names.txt is loaded
+            by = {}
+            for i, nm in (self.names or {}).items():
+                by.setdefault(nm.partition(".")[0], []).append(i)
+            self._fams = {}
+            for ids in by.values():
+                ids.sort()
+                for i in ids:
+                    self._fams[i] = ids
+        return self._fams
+
+    def _load_logo(self):
+        """The green BATMAN attract card, composed for the screen, once.
+        lcdlogo.py derives <art>/logo.png from the card's own unique
+        1280x720 lcd texture at run start; absent (any other title, or no
+        PIL to fit it with) is normal and means no interlude is drawn."""
+        if self._logo_tried:
+            return
+        self._logo_tried = True
+        if _PILImage is None:
+            return
+        try:
+            pil = _PILImage.open(os.path.join(self._art, "logo.png"))
+        except OSError:
+            return
+        if self.tv is not None:
+            self._logo_img = self._compose(pil)
+            return
+        # No TV sprite: fit to the bare screen, aspect kept, like _compose.
+        s = min(self.CW / pil.width, self.CH / pil.height)
+        nw, nh = max(1, int(pil.width * s)), max(1, int(pil.height * s))
+        out = _PILImage.new("RGB", (self.CW, self.CH), (0, 0, 0))
+        out.paste(pil.convert("RGB").resize((nw, nh)),
+                  ((self.CW - nw) // 2, (self.CH - nh) // 2))
+        self._logo_img = _PILImageTk.PhotoImage(out)
 
     def _animate(self):
         """Advance the screen one frame. lcdart.py encodes at 10 fps and

@@ -5689,6 +5689,59 @@ These have each been violated at least once and each cost a run or a window:
       (17,625× per game) that does NOT gate the display ids; f9/fc zeros
       gate nothing; cmd 0x11 and the 0x14/44/46/48/72 burst are generic
       all-node traffic.
+
+      **UPDATE 18 (2026-08-25) — THE MISMATCH DAVID KEPT REPORTING IS
+      SOLVED: the wire names an ANCHOR and the real display WALKS the
+      anchor's episode. David ("still not seeing the villain vision
+      matching the actual game video... make it work now") had a live
+      batman run up; its wire, like every capture, hammers `asset 54 ·
+      verb 2` every 5.2 s while his video's TV keeps changing — and the
+      video is now pinned FRAME-LEVEL to the store:** the talking Riddler
+      is id 46/47 and the Batmobile-then-"Gotham City 14 MILES"-sign
+      segment is ONE clip, id 27 frames 45..67 (normalized correlation
+      0.84 on the sign; full-frame extraction of ids 3..121 off the live
+      run's ro card mount — the first scan missed them by sampling only
+      each clip's first 48 frames). Both are S1E001 — the same episode as
+      the hammered anchor 54. So the real display's advance is INTERNAL
+      (the game-side player on the disabled render path steps the
+      playlist on clip completion; dead on our rig = the hammer), and no
+      wire mirror that sits on the anchor can ever match the machine.
+      **Also measured:** the boot-attract rotation is a fixed 11-clip
+      cycle — 2, 54, 720, 591, 601, 1605, 1736, 2066, 2359, 3004, 3026,
+      62.7 s — read whole off the item-82 lcdcap capture (the capture's
+      asset field is at payload+1: leading display byte, then LE32; the
+      first read of that log multiplied every id by 256).
+      **BUILT, tested, live-verified standalone (vv_reel/vv_logo shots):**
+      (a) THE REEL — a re-command beat (decoded counter moved, command
+      unchanged — the shim bumps decoded only for play frames, never the
+      60 Hz poll) past a FINISHED clip steps the panel to the next id in
+      the anchor's names.txt family, wrapping; caption
+      `asset 54 · reel: 55 · once` keeps wire truth and reconstruction
+      separate; the finished-guard reproduces the real machine's variable
+      5-10 s holds (a long clip rides through beats un-advanced) and
+      makes the 250 ms double-issue a no-op; any CHANGED command drops
+      the reel instantly; no names.txt = no reel (nothing honest to
+      walk). (b) THE GREEN LOGO CARD — new `lcdlogo.py` derives it from
+      the card's ONLY 1280x720 lcd texture (uniqueness measured
+      card-wide, exactly 1 hit; no name hashes, refuses on any other
+      count), watch.sh caches it beside names/tvframe, and the panel
+      holds it one 5.2 s beat when a hammer >= 3 beats breaks to a new
+      single asset — the wire shape of game -> attract, where the video
+      shows the card (t=3-7 s). Name label says `logo card` while it is
+      up. S1E001 art (ids 3-61) pre-warmed into the cache so the walk
+      heals instantly. 38 panel tests (7 new), 20 lcdring/lcdart, all
+      green.
+      **ADMITTED APPROXIMATIONS (the honest residue, both need a synced
+      real-machine capture):** the real walk ORDER is unknown — the video
+      walked 46 then 27, not ascending; ascending family order is the
+      recorded stand-in. And a mid-game clip change arriving after a long
+      hammer would get the card too — the wire alone cannot separate that
+      from attract entry. **NOT yet observed anywhere: the wire at a real
+      game-over** (every capture ends mid-game or stuck in play; David's
+      live run has hammered 54 for 40+ min without an end) — the ring
+      will catch the first one now that runs preserve it, and its shape
+      is what would turn the logo trigger from inference into
+      measurement.
       **BUILT (padled's conventions throughout):** padlcd.h (one page:
       magic/gen/id[4]/ms[4] + a 64-entry raw ring for RE); hwshim.c
       lcd_publish() beside led_publish, gated on PAD_LCD_NODE; watch.sh

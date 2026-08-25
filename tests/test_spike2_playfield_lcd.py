@@ -56,13 +56,16 @@ def _root():
     return root
 
 
-def _write_block(path, asset=0, aux=0, rate=0, verb=0, bright=255, magic=MAGIC):
+def _write_block(path, asset=0, aux=0, rate=0, verb=0, bright=255, magic=MAGIC,
+                 dec=1):
     """The v4 page: magic, version, gen, decoded, then the one display's
     state (asset, aux, rate, verb, x1, x2, x3, bright, fade, ms). bright
     defaults to 255 exactly as the shim stamps it at map time - 0 means
     "the game commanded dark" and blanks the panel, so a helper defaulting
-    to 0 would run every test in the dark."""
-    d = struct.pack("<14I", magic, 4, 1, 1,
+    to 0 would run every test in the dark. `dec` is the decoded counter:
+    bumping it with the SAME command is a re-command BEAT (the ~5.2 s
+    hammer), which is what the reel and the attract-entry card key off."""
+    d = struct.pack("<14I", magic, 4, 1, dec,
                     asset, aux, rate, verb, 0, 0, 0, bright, 15, 0)
     with open(path, "wb") as f:
         f.write(d + b"\x00" * (4096 - len(d)))
@@ -738,5 +741,191 @@ def test_poll_chain_survives_an_exception(tmp_path, monkeypatch):
         assert pending, "the poll chain did not re-arm past the exception"
         for aid in pending.split():
             root.after_cancel(aid)
+    finally:
+        root.destroy()
+
+
+# --- THE REEL + THE ATTRACT CARD (David's video of the real machine) ------
+#
+# The wire re-commands ONE anchor clip every ~5.2 s through a game, and the
+# real Villain Vision does not sit on it - it walks on through the anchor's
+# own episode (video: Riddler = id 46, then Batmobile + Gotham sign = id 27,
+# both S1E001 like the hammered anchor 54). The advance is internal to the
+# game (a player on the disabled render path), so the panel reconstructs it:
+# a re-command BEAT (decoded counter moved, command unchanged) past a
+# FINISHED clip steps to the next id in the anchor's names.txt family.
+
+
+def _names(art, rows):
+    os.makedirs(art, exist_ok=True)
+    with open(os.path.join(art, "names.txt"), "w", encoding="utf8") as f:
+        for i, nm in rows:
+            f.write("%d\t%s\n" % (i, nm))
+
+
+def _reel_fixture(p, ids=(54, 55, 56)):
+    _names(p._art, [(i, "S1E001_Clips.S1E001_00-0%d-00-00" % k)
+                    for k, i in enumerate(ids)])
+    for i in ids:
+        _write_png(p._art, "%d.png" % i)
+        _write_clip(p._art, "%d.webp" % i, ["red", "green"])
+
+
+def test_reel_walks_the_episode_on_hammer_beats(tmp_path, monkeypatch):
+    """Anchor 54 hammered: each beat past a finished clip steps to the next
+    family id, the caption names the reconstruction as its own thing, and
+    the wire's asset stays the caption's first word - a photo of the window
+    must still show what the wire actually said."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _reel_fixture(p)
+        _write_block(block, asset=54, verb=2, dec=1)
+        _poll(p, times=5)                   # 54 plays through and holds
+        assert p.id == 54 and p.anim["i"] >= p.anim["n"]
+        _write_block(block, asset=54, verb=2, dec=2)    # the next beat
+        _poll(p)
+        assert p.reel == 55 and p.id == 55, (p.reel, p.id)
+        assert "asset 54" in p.cap["text"] and "reel: 55" in p.cap["text"], \
+            p.cap["text"]
+        _poll(p, times=5)                   # 55 plays through and holds
+        _write_block(block, asset=54, verb=2, dec=3)
+        _poll(p)
+        assert p.reel == 56 and p.id == 56
+    finally:
+        root.destroy()
+
+
+def test_reel_does_not_advance_mid_clip(tmp_path, monkeypatch):
+    """The 250 ms double-issue: a beat lands right after the previous one,
+    while the new clip has barely started. The finished-clip guard must eat
+    it - it is also what gives long clips their longer real-machine holds."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _reel_fixture(p)
+        _write_block(block, asset=54, verb=2, dec=1)
+        _poll(p, times=5)
+        _write_block(block, asset=54, verb=2, dec=2)
+        _poll(p)                            # beat: steps to 55, clip fresh
+        assert p.reel == 55
+        _write_block(block, asset=54, verb=2, dec=3)    # the double-issue
+        _poll(p)
+        assert p.reel == 55, "advanced past a clip that never finished"
+    finally:
+        root.destroy()
+
+
+def test_reel_wraps_and_a_new_command_drops_it(tmp_path, monkeypatch):
+    """The family wraps at its end, and the wire stays authoritative: any
+    CHANGED command kills the reconstruction on the spot."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _reel_fixture(p, ids=(54, 55))
+        _write_png(p._art, "601.png")
+        _write_block(block, asset=54, verb=2, dec=1)
+        _poll(p, times=5)
+        _write_block(block, asset=54, verb=2, dec=2)
+        _poll(p, times=5)                   # -> 55, plays through
+        _write_block(block, asset=54, verb=2, dec=3)
+        _poll(p)
+        assert p.reel == 54, "a two-clip family did not wrap"
+        _write_block(block, asset=601, verb=2, dec=4)   # attract moves on
+        _poll(p)
+        assert p.reel is None and p.id == 601
+    finally:
+        root.destroy()
+
+
+def test_no_names_table_means_no_reel(tmp_path, monkeypatch):
+    """Without the card's own family grouping there is nothing honest to
+    walk: the panel holds the anchor exactly as before the reel existed."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_png(p._art, "54.png")
+        _write_clip(p._art, "54.webp", ["red", "green"])
+        _write_block(block, asset=54, verb=2, dec=1)
+        _poll(p, times=5)
+        _write_block(block, asset=54, verb=2, dec=2)
+        _poll(p, times=3)
+        assert p.reel is None and p.id == 54
+    finally:
+        root.destroy()
+
+
+def _write_logo(art):
+    Image = pytest.importorskip("PIL.Image")
+    os.makedirs(art, exist_ok=True)
+    Image.new("RGB", (64, 36), (0, 160, 60)).save(
+        os.path.join(art, "logo.png"))
+
+
+def test_attract_entry_shows_the_logo_card_then_the_clip(tmp_path,
+                                                         monkeypatch):
+    """A long hammer breaking to a new single asset is the wire shape of
+    game -> attract, where the real set holds the green BATMAN card ~5 s
+    before the first clip. The card must show for the interlude - named as
+    what it is - and the commanded clip must take over when it expires."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _reel_fixture(p, ids=(54,))
+        _write_png(p._art, "601.png")
+        _write_logo(p._art)
+        _write_block(block, asset=54, verb=2, dec=1)
+        _poll(p, times=5)
+        for dec in (2, 3, 4):               # >= HAMMER_BEATS quiet beats
+            _write_block(block, asset=54, verb=2, dec=dec)
+            _poll(p)
+        _write_block(block, asset=601, verb=2, dec=5)   # attract entry
+        _poll(p)
+        assert p._logo_until and p.img is p._logo_img
+        assert p.nm["text"] == "logo card", p.nm["text"]
+        import time as _t
+        p._logo_until = _t.monotonic() - 0.01           # the beat expires
+        _poll(p)
+        assert p.id == 601 and p.img is not p._logo_img
+        assert p.nm["text"] != "logo card"
+    finally:
+        root.destroy()
+
+
+def test_no_logo_file_means_no_interlude(tmp_path, monkeypatch):
+    """A title with no derived card (every non-batman title today) goes
+    straight to the commanded clip - nothing is invented."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _reel_fixture(p, ids=(54,))
+        _write_png(p._art, "601.png")
+        _write_block(block, asset=54, verb=2, dec=1)
+        _poll(p, times=5)
+        for dec in (2, 3, 4):
+            _write_block(block, asset=54, verb=2, dec=dec)
+            _poll(p)
+        _write_block(block, asset=601, verb=2, dec=5)
+        _poll(p)
+        assert not p._logo_until and p.id == 601
+    finally:
+        root.destroy()
+
+
+def test_mid_game_change_without_hammer_gets_no_card(tmp_path, monkeypatch):
+    """Attract's own rotation changes the asset every beat - each change
+    arrives with _beats short of the threshold and must never interpose
+    the card between rotation clips."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_png(p._art, "54.png")
+        _write_png(p._art, "601.png")
+        _write_logo(p._art)
+        _write_block(block, asset=54, verb=2, dec=1)
+        _poll(p, times=2)
+        _write_block(block, asset=601, verb=2, dec=2)   # rotation step
+        _poll(p)
+        assert not p._logo_until and p.id == 601
     finally:
         root.destroy()

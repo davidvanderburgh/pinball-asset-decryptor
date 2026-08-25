@@ -8590,10 +8590,14 @@ ringed:
         lcd_shm->gen++;
     }
     /* 0x90 (status poll, wants a 12-byte reply) and the never-called 0x88 /
-     * 0xb8 builders are ringed and left alone: answering the poll is a
-     * SEPARATE question - the game only clears a command's pending bit on a
-     * reply (0x37e504), which is the likely reason attract re-sends the same
-     * asset every 250 ms. */
+     * 0xb8 builders are ringed and left alone. (An earlier note here blamed
+     * the 250 ms re-send on the unanswered poll; measured WITH the echo on,
+     * every command is still double-issued 250 ms apart - pending clears on
+     * SEND (0x37e484), it is the game's own habit. The echo stays only
+     * because a correct-length reply keeps a raw bus dump readable.)
+     * NOTE decoded++ fires ONLY for the play family above - never the 60 Hz
+     * poll - which is what lets the panel read "decoded moved, command
+     * unchanged" as a re-command BEAT (playfield.py: the reel). */
 }
 
 /* Budgeted like the skip log, and off unless PAD_LED_DEC_LOG is set. A run

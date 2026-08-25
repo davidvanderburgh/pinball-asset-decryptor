@@ -13,6 +13,43 @@
  * (assets/lcd/auto_loaded/<sha1>/scene.assets/137.asset/<id>.asset, 3,069
  * QuickTime H.264 assets, all 240x180).
  *
+ * ★ WHERE THE PIXELS ACTUALLY COME FROM (RE 2026-08-25, 10-agent pass,
+ * adversarially verified - this closes the mystery). Node 24 is a CONTROL
+ * channel, not a pixel channel: it is an LPC1113 (24KB flash, 8KB RAM,
+ * cannot decode H.264) and the bus frame builder 0x515f8c hard-caps every
+ * frame at 200 bytes (no bulk path exists; the only large transfer in the
+ * whole binary is the one-time node FLASH PROGRAMMER at 0x51cb54, 128 B a
+ * frame). The villain TVs' VIDEO is drawn by the MAINBOARD GPU: the game
+ * has a full "secondary display" render-to-texture subsystem (rodata
+ * 0x554d28 "Attempting to render to secondary display, but no secondary
+ * display enabled.", 0x665ab4 "...secondary_render_to_texture->get_id()")
+ * that composites the VillainTvsCombo scene (element-name tree at
+ * 0x59e3c8: TV1_Instance.TV1_Animation.VideoSurface, per TV) onto a second
+ * EGL surface from fbGetDisplayByIndex(2).
+ *
+ * ★ AND THAT SUBSYSTEM IS COMPILED-IN BUT HARD-DISABLED IN THIS BUILD.
+ * The second EGL surface is created only at 0x412a14 (fbGetDisplayByIndex
+ * index 2), gated at 0x4129fc on renderer-context field +0xf0 (the
+ * second-display object) being non-null. That field is written ONLY by the
+ * context ctor 0x4126c0 (str r6,[r4,#0xf0] @0x41275c) from its 3rd arg, and
+ * the ctor's SOLE caller 0x1e79d0 passes r2=#0 (@0x1e79c8) - unconditional
+ * NULL. So batman never calls fbGetDisplayByIndex(2), never makes a second
+ * surface, and the four villain gst channels (137.asset, pre-armed at
+ * game/attract) die at 0 frames because there is no target to composite
+ * onto. Making the game itself draw the villain combo would mean
+ * INSTANTIATING that whole second-display object (valid geometry at +16/
+ * +20 and more) - a subsystem the binary deliberately never builds, not a
+ * flag - and is out of scope for a live mirror. The host side (padglhost
+ * item 44 second window, eglshim PAD_GL2_W/H) already exists if that is
+ * ever taken on.
+ *
+ * So THIS block - the node-bus command stream - is the faithful, complete
+ * record of what node 24 (the villain display's controller) is told to
+ * show, and the panel that renders it is the truthful live mirror. It can
+ * never BE the game's own composite (that is a separate, disabled render
+ * target) but it shows the same clips, by the same ids, on the same live
+ * commands.
+ *
  * ★ VERSION 3 STOPS NAMING FIELDS WE HAVE NOT PROVEN. v1 invented three
  * displays. v2 fixed that but replaced one guess with another: it read the
  * 14-byte payload as "first asset .. last asset @ rate" and captioned it

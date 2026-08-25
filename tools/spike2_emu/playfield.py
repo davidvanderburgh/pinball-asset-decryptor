@@ -3573,6 +3573,7 @@ class LcdPanel:
         self.have = False           # ... and whether that is real art
         self.state = None           # (asset, aux, rate, verb)
         self.cycle = None           # (first, last) while a block command is live
+        self.bright = 255           # last 0x80 brightness; <128 blanks the screen
         #: Animation state. None while no clip is on disk (kept retryable);
         #: a dict once the clip's BYTES are read - in one go, so a
         #: \\wsl.localhost hiccup can only fail the whole read (caught,
@@ -3654,7 +3655,20 @@ class LcdPanel:
         if self.win is None:
             self._build()
         (_m, _v, _g, _dec, asset, aux, rate, verb, _x1, _x2, _x3,
-         _br, _fd, _ms) = struct.unpack_from("<14I", d)
+         br, _fd, _ms) = struct.unpack_from("<14I", d)
+        # BRIGHTNESS IS PART OF THE PICTURE (0x80|d family, 132 call
+        # sites): the game drops the TVs to 0 for ~250 ms around every
+        # clip swap and restores 255. The wire only ever carries those two
+        # values, so this renders as a hard blank rather than a ramp - the
+        # fade code (15 throughout) is the board's own transition and its
+        # curve is not decoded. Ignoring brightness showed footage during
+        # moments the real TVs are black, which is exactly the class of
+        # infidelity this window exists to not have.
+        if br != self.bright:
+            self.bright = br
+            if self.item is not None:
+                self.cv.itemconfig(self.item,
+                                   state="hidden" if br < 128 else "normal")
         cmd = (asset, aux, rate, verb)
         changed = cmd != self.state
         self.state = cmd
@@ -3731,7 +3745,8 @@ class LcdPanel:
         if self.item is None:           # nobody holds goes blank
             self.cv.delete("all")
             self.item = self.cv.create_image(
-                self.CW // 2, self.CH // 2, image=img)
+                self.CW // 2, self.CH // 2, image=img,
+                state="hidden" if self.bright < 128 else "normal")
         else:
             self.cv.itemconfig(self.item, image=img)
 
@@ -3851,7 +3866,13 @@ class LcdPanel:
                     self._show(nxt)     # block command: the next clip's
                     return              # still paints now, motion next tick
                 return                  # verb 2 at the block's end: hold
-            idx = a["i"] = 0            # single clip: it loops
+            # SINGLE clip: the verb decides. 2 = play ONCE - the wire said
+            # so, and looping it anyway was the panel's own last act of
+            # unfaithfulness (the game re-commands the display every
+            # attract beat precisely because a one-shot ENDS). 1 = loop.
+            if self.state and self.state[3] == 2:
+                return                  # hold the last frame
+            idx = a["i"] = 0            # verb 1 (or unknown): it loops
         if idx < len(a["frames"]):
             frame = a["frames"][idx]
         else:

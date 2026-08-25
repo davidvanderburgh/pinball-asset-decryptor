@@ -2532,7 +2532,7 @@ static void nv_load(void)
     while (got < SLOTSIZE && (r = real_read(fd, store[0] + got, SLOTSIZE - got)) > 0)
         got += (unsigned long)r;
     real_close(fd);
-    snprintf(m, sizeof m, "[i2c] loaded saved NVRAM from %.150s%s\n",
+    snprintf(m, sizeof m, "[i2c] loaded saved NVRAM from %.130s%s\n",
              seeded ? NV_PATH : path,
              seeded ? " (seeding this title's own EEPROM; it is per-title now)"
                     : "");
@@ -3576,7 +3576,7 @@ static void nb_fident_load(void)
     if (n > 0) {
         nb_fident_state = 1;
         snprintf(msg, sizeof msg,
-                 "[nbid] %d node identities from %.120s\n", n, path);
+                 "[nbid] %d node identities from %.110s\n", n, path);
         logmsg(msg);
     }
 }
@@ -5603,7 +5603,7 @@ static int sw_file_table(void)
     sw_shadow_count = maxid + 1;
     sw_ftab_installed = 1;
     snprintf(msg, sizeof msg,
-             "[swfind] switch table loaded from %.140s: %u switches, ids to "
+             "[swfind] switch table loaded from %.120s: %u switches, ids to "
              "%u (ELF-derived; the names live in the file)\n", path, n, maxid);
     logmsg(msg);
     return 1;
@@ -8454,6 +8454,12 @@ static void lcd_map(void)
     close(fd);
     if (!m || m == (void *)-1) return;
     lcd_shm = (struct padlcd_shm *)m;
+    /* Brightness BEFORE the magic: the panel blanks the screen when
+     * bright < 128 (the game really does command 0 around clip swaps),
+     * so a zero-initialised field would read as "the game said dark"
+     * from the first poll until the first 0x80 frame. 255 here means 0
+     * below only ever appears because the wire carried it. */
+    lcd_shm->bright = 255;
     lcd_shm->magic = PADLCD_MAGIC;
     lcd_shm->version = PADLCD_VERSION;
 }
@@ -9655,28 +9661,32 @@ long shim_read(int fd, void *b, unsigned long n)
             }
             /* ---- VILLAIN VISION 0x90 STATUS (item 83) -----------------
              * The lcdnode's cmd f2 selector 0x90 wants a 12-byte payload.
-             * The game's poll loop (0x37e5ec, 60 Hz measured) stores it
-             * verbatim as three u32s in the display object (+4/+8/+12),
-             * and get_status (0x37e6d4) hands those words to whoever asks.
-             * Every play command takes a global sequence token (0x37dc20)
-             * that its caller keeps - and an all-zero reply means the
-             * status words never change, which is the standing suspect for
-             * the 250 ms byte-identical re-sends (measured live) and for
-             * the game tearing down its own villain-TV clip renders at 0
-             * frames (padvid, 4 channels, game start).
+             * The game's poll loop (0x37e5ec, 60 Hz) stores it verbatim as
+             * three u32s in the display object (+4/+8/+12).
              *
-             * WHAT THE WORDS MEAN IS NOT KNOWN - the token never crosses
-             * the wire, so the board cannot echo it; the most plausible
-             * story is that a board that is handed asset numbers reports
-             * the asset number it is playing. So: word0 = the last decoded
-             * play asset, words 1-2 = 0. This is an EXPERIMENT with a
-             * one-env rollback, not a decoded fact, and the caption/ring
-             * instruments are what grade it:
-             *   PAD_LCD_R=<24 hex chars>  exact 12-byte payload
-             *   PAD_LCD_R=0               zeros (the old behaviour)
-             * If the screen grows node-board alerts for the lcdnode, that
-             * is word0 read as a fault word - flip to PAD_LCD_R=0 and say
-             * so in the item. */
+             * ★ THE CONTENT IS INERT, and this comment is the correction
+             * of two claims I shipped before the RE (10-agent pass,
+             * 2026-08-25, verified). (1) get_status (0x37e6d4) is the ONLY
+             * reader of +4/+8/+12 and it is DEAD CODE - its address occurs
+             * zero times in the 7.4 MB image (no bl, no fn-ptr table, no
+             * literal). Nothing runtime consumes these words. (2) The 250
+             * ms "re-send" is NOT caused by a missing reply and this echo
+             * does NOT stop it: measured live WITH the echo active, every
+             * attract clip is still commanded twice 250 ms apart. It is the
+             * game's own double-issue, and the play command's pending bit
+             * is cleared by the SEND succeeding (0x37e484/0x37e504), not by
+             * any reply. So answering 0x90 changes nothing the game does.
+             *
+             * WHY ANSWER IT AT ALL, then: a real board replies, and a
+             * correct-LENGTH 12-byte reply is never worse than a short read
+             * (which an addressed node uses to mean "absent"). node 24
+             * stays present with no fault (nbsched flags 0x0 all run). The
+             * word0=asset content below is HUMAN-FACING telemetry only - it
+             * makes a raw bus dump readable - not something the game reads.
+             *   PAD_LCD_R=<24 hex chars>  force an exact 12-byte payload
+             *   PAD_LCD_R=0               all-zero reply (same game effect)
+             * Nothing here can revive the villain-TV renderer: those pixels
+             * are a SECOND EGL display the binary hard-disables (padlcd.h). */
             if (nb_req_len > 3 && nb_req[2] == 0xf2 && nb_req[3] == 0x90 &&
                 lcd_node() && (unsigned)(nb_req[0] & 0x3f) == lcd_node() &&
                 plen >= 12) {

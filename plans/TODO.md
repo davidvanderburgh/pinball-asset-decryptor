@@ -5450,6 +5450,57 @@ These have each been violated at least once and each cost a run or a window:
       (b) if the player runs, the combo surface likely needs a second
       render target (item 44's machinery exists; batman never asks).
       Worth its own item if (a) does not fall quickly.
+
+      **UPDATE 12 (2026-08-25) — SOLVED. Claude solo on the rig ("rig is
+      for you... solve the rest... be faithful to what is being sent to
+      the display, live"). A 10-agent verified RE pass + instrumented
+      live runs closed every open thread, and two of my own earlier
+      claims are CORRECTED here.**
+      **THE ARCHITECTURE, now fully proven (addresses in padlcd.h):** the
+      villain TVs' VIDEO is drawn by the MAINBOARD GPU, not the node bus.
+      The game has a complete "secondary display" render-to-texture
+      subsystem (rodata 0x554d28 "Attempting to render to secondary
+      display, but no secondary display enabled.", 0x665ab4
+      "secondary_render_to_texture->get_id()") that composites the
+      VillainTvsCombo scene (0x59e3c8) onto a 2nd EGL surface from
+      fbGetDisplayByIndex(2). That surface is created only at 0x412a14,
+      gated at 0x4129fc on renderer-ctx +0xf0 (the 2nd-display object)
+      being non-null; +0xf0 is written ONLY by ctor 0x4126c0 (@0x41275c)
+      from arg3, and the ctor's SOLE caller 0x1e79d0 passes r2=#0
+      (@0x1e79c8) — unconditional NULL. **batman's binary hard-disables
+      its own villain render target.** That is why the 4 villain gst
+      channels (137.asset) pre-arm and die at 0 frames: nothing to
+      composite onto. The node bus (LPC1113, 200-byte frame cap, cannot
+      decode video) is CONTROL-only. Enabling the real render would mean
+      instantiating a subsystem the binary never builds (a fabricated
+      2nd-display object w/ valid geometry) — out of scope for a live
+      mirror, host side already exists (padglhost item 44) if ever taken.
+      **TWO OF MY CLAIMS, CORRECTED (both were plausible-unverified, the
+      exact failure mode this item keeps hitting):** (1) the 0x90 status
+      echo does NOT stop the 250 ms re-sends — measured live WITH the echo,
+      every attract clip is STILL commanded twice 250 ms apart; it is the
+      game's own double-issue, pending clears on SEND (0x37e484) not on any
+      reply. (2) Nothing consumes the reply: get_status (0x37e6d4, the only
+      reader of +4/+8/+12) is DEAD CODE, zero references in the image. The
+      echo is kept only because a correct-length reply beats a short read
+      and makes a raw bus dump readable — inert to the game.
+      **WHAT FAITHFUL MEANS HERE, and it is DONE + graded live:** the node
+      bus IS the villain display's control channel; the panel that mirrors
+      it is the truthful live representation (it can never be the game's own
+      composite — that is a separate disabled target — but it shows the
+      same clips by the same ids on the same live commands). The real
+      per-beat sequence, measured: `brightness 0` (fade dark) → `asset X` +
+      `brightness 255` (swap + reveal) → `verb 2` (play once, hold) → ~5.2 s
+      → repeat. The panel now renders exactly that: brightness < 128 blanks
+      the screen, verb 2 holds the last frame instead of looping, and a
+      block command (asset..aux) cycles its clips. VERIFIED on the live
+      window (C:\tmp\vv_live_strip.png): caption `asset 3026 · once` then
+      `asset 2 · once` (the Batphone), moving video, swapping with the wire.
+      Fixes: playfield.py (brightness blank, verb-2 hold, block cycle),
+      hwshim.c (bright init 255, honest 0x90 comment), gststub.c (set_state
+      RA logging — the instrument that would have found the gate, kept),
+      all -Wformat-truncation warnings gone (David hit that wall 3x). 40
+      LCD-suite tests.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

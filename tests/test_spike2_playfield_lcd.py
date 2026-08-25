@@ -56,11 +56,14 @@ def _root():
     return root
 
 
-def _write_block(path, asset=0, aux=0, rate=0, verb=0, magic=MAGIC):
-    """The v3 page: magic, version, gen, decoded, then the one display's
-    state (asset, aux, rate, verb, x1, x2, x3, bright, fade, ms)."""
+def _write_block(path, asset=0, aux=0, rate=0, verb=0, bright=255, magic=MAGIC):
+    """The v4 page: magic, version, gen, decoded, then the one display's
+    state (asset, aux, rate, verb, x1, x2, x3, bright, fade, ms). bright
+    defaults to 255 exactly as the shim stamps it at map time - 0 means
+    "the game commanded dark" and blanks the panel, so a helper defaulting
+    to 0 would run every test in the dark."""
     d = struct.pack("<14I", magic, 4, 1, 1,
-                    asset, aux, rate, verb, 0, 0, 0, 0, 0, 0)
+                    asset, aux, rate, verb, 0, 0, 0, bright, 15, 0)
     with open(path, "wb") as f:
         f.write(d + b"\x00" * (4096 - len(d)))
 
@@ -207,6 +210,57 @@ def test_block_cycles_clip_by_clip_and_wraps_on_loop(tmp_path, monkeypatch):
         assert changes[:4] == [55, 56, 54, 55], (seen, changes)
         cap = p.cap["text"]
         assert "assets 54-56" in cap and "showing" in cap, cap
+    finally:
+        root.destroy()
+
+
+def test_single_clip_verb_once_holds_not_loops(tmp_path, monkeypatch):
+    """verb 2 = play ONCE. The panel looped every single clip regardless,
+    which showed motion during the long tail the real TV spends holding a
+    one-shot's last frame - the game re-commands the display each attract
+    beat precisely because one-shots END. verb 1 must still loop."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_png(p._art, "54.png")
+        _write_clip(p._art, "54.webp", ["red", "green"])
+        _write_block(block, asset=54, verb=2)
+        for _ in range(3):
+            _poll(p)                        # plays through the 2 frames
+        frozen = p.anim["i"]
+        for _ in range(5):
+            _poll(p)
+        assert p.anim["i"] == frozen, "a one-shot clip wrapped"
+        # ... and the same clip under verb 1 loops again.
+        _write_block(block, asset=54, verb=1)
+        for _ in range(4):
+            _poll(p)
+        assert p.anim["i"] != frozen or p.anim["i"] <= 2, \
+            "verb 1 did not resume looping"
+    finally:
+        root.destroy()
+
+
+def test_brightness_zero_blanks_the_screen(tmp_path, monkeypatch):
+    """The 0x80 family (132 call sites): the game drops the TVs to 0 for
+    ~250 ms around every clip swap. A panel that keeps showing footage
+    while the wire says dark is unfaithful in the exact way this window
+    exists to not be. 255 must bring the picture back."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_png(p._art, "54.png")
+        _write_block(block, asset=54, verb=2)
+        _poll(p)
+        assert p.cv.itemcget(p.item, "state") in ("", "normal")
+        _write_block(block, asset=54, verb=2, bright=0)
+        _poll(p)
+        assert p.cv.itemcget(p.item, "state") == "hidden", \
+            "wire says dark, panel still shows footage"
+        _write_block(block, asset=54, verb=2, bright=255)
+        _poll(p)
+        assert p.cv.itemcget(p.item, "state") == "normal", \
+            "brightness 255 did not restore the picture"
     finally:
         root.destroy()
 

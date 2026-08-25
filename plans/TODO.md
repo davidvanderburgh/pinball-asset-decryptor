@@ -5501,6 +5501,52 @@ These have each been violated at least once and each cost a run or a window:
       RA logging — the instrument that would have found the gate, kept),
       all -Wformat-truncation warnings gone (David hit that wall 3x). 40
       LCD-suite tests.
+      **UPDATE 13 (2026-08-25) — GROUND TRUTH from David's video of the
+      REAL machine (`PXL_20260825_184517746.mp4`, 63 s, attract then a
+      game, both displays). It CONFIRMS the composite finding and kills
+      one more inherited invention.**
+      **Measured from the video:** (a) **ONE physical TV**, bezel-printed
+      "Villain Vision", showing ONE full-screen image — so the old "three
+      physical TVs fed from one logical display, the node board splits or
+      mirrors them" line (in padlcd.h AND playfield.py) was INVENTED, to
+      rescue the fixture name after v1's three-screen decode died. Deleted
+      from both. The display count of 1 was always the real fact.
+      (b) Each item holds **~5-7 s** (ours: 5.2 s ✓). (c) A **fully black
+      frame sits between items** (t=2 s) — the 0x80 brightness dip,
+      exactly what UPDATE 12's blank-on-bright<128 now renders ✓.
+      (d) Content is motion video, one clip at a time ✓.
+      (e) **...and it includes GAME-RENDERED CARDS** — a "Game Over" card
+      and **the BATMAN logo on green**, i.e. the very thing David has been
+      asking for since the first report. **Neither exists anywhere in the
+      3,069-clip store**: three independent scans (first-frame green
+      dominance, mid-frame green dominance after fixing a fade-in blind
+      spot, and flat-graphic colour-count) all come back empty; the only
+      flat cards in the store are the '66 fight-words and some near-black
+      explosion clips.
+      **That is the proof FROM THE MACHINE** (not just the ELF) that the
+      real Villain Vision is COMPOSITED by the game — rendered UI over
+      video on the disabled secondary render target — and not merely
+      "play stored clip N". So the node-bus mirror can never show those
+      cards, and saying otherwise would be the fourth invented story on
+      this protocol. Everything the bus DOES carry is now verified against
+      the machine: commanded clip, cadence, fade-to-black, one-shot hold.
+      **Not established (and not claimed):** the exact id↔clip
+      correspondence at any given moment. Correlating the video's TV
+      against all 3,069 assets, and against every frame of the assets our
+      wire commanded, both top out at 0.39-0.74 — a photo of a glossy
+      convex TV under playfield floods is not a reliable matcher, and the
+      two machines were at different points in the attract cycle (his had
+      just ended a game). Recorded as an admitted gap rather than a number
+      dressed up as a match. A synced wire capture on the real machine is
+      the only thing that would close it.
+      **Also corrected here:** SpiVideoPlayer / SpiVideoStreamDecoder are
+      real classes and the villain gst channels' handoff+bus callbacks ARE
+      SpiVideoStreamDecoderBase methods (0x539574 / 0x539598) — an SPI
+      video path to the panel genuinely exists. But it never carries
+      anything on our rig: the four channels only ever open 137.asset/**0**
+      (a pre-arm placeholder), no SPI video ioctl ever reaches the shim
+      (the faked-ioctl census shows only class=V VPU reqs), and no "CPU SPI
+      open failed" is logged. Worth knowing before someone re-derives it.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

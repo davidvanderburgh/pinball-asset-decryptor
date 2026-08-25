@@ -50,6 +50,25 @@
  * target) but it shows the same clips, by the same ids, on the same live
  * commands.
  *
+ * ★ GROUND TRUTH, and it CONFIRMS the composite finding (David's video of
+ * the real machine, 2026-08-25, attract then a game). Measured from it:
+ *   - ONE TV, bezel-printed "Villain Vision", one full-screen image.
+ *   - Each item holds ~5-7 s, and a FULLY BLACK frame sits between items -
+ *     the 0x80 brightness dip, which is why the panel now blanks on
+ *     bright < 128 rather than showing footage through the gap.
+ *   - The content is motion video, one clip at a time.
+ *   - ...AND it includes GAME-RENDERED CARDS: a "Game Over" card and the
+ *     BATMAN logo on green (the one David kept asking for). Neither exists
+ *     anywhere in the 3,069-clip store - three independent scans (first
+ *     frame green-dominance, mid-frame green-dominance, flat-graphic
+ *     colour-count) all come back empty.
+ * That last point is the proof, from the machine rather than the ELF, that
+ * the real display is COMPOSITED by the game and not merely "play stored
+ * clip N". A node-bus mirror can never show those cards, and pretending
+ * otherwise would be the fourth invented story on this protocol. What the
+ * mirror does show - the commanded clip, the cadence, the fade, the
+ * one-shot hold - is now verified against the machine itself.
+ *
  * ★ VERSION 3 STOPS NAMING FIELDS WE HAVE NOT PROVEN. v1 invented three
  * displays. v2 fixed that but replaced one guess with another: it read the
  * 14-byte payload as "first asset .. last asset @ rate" and captioned it
@@ -132,9 +151,17 @@
  * "VILLAIN VISION", fixture 1, display number 0) and bounds it against the
  * fixture table at 0x717ed4, whose DISPLAY COUNT is 1. All 299 LCD call
  * sites in the binary pass the same device index, so no code path can
- * emit 0x99 or 0x9a. The three physical TVs are fed from one logical
- * display - the node board splits or mirrors them, which is board
- * firmware we cannot see from here.
+ * emit 0x99 or 0x9a.
+ *
+ * ★ AND THERE IS ONLY ONE PHYSICAL TV. Earlier versions of this comment
+ * said "the three physical TVs are fed from one logical display - the
+ * node board splits or mirrors them", which was invented to rescue the
+ * fixture NAME ("3 LCD INSERT") after v1's three-screen decode died.
+ * David's 2026-08-25 video of the real machine settles it: the playfield
+ * carries ONE retro TV with "Villain Vision" printed on its bezel, showing
+ * ONE full-screen image. Nothing splits or mirrors anything. (The fixture
+ * name is not three displays - a 3-inch insert is the likelier reading -
+ * and the display count of 1 above was always the load-bearing fact.)
  *
  * WHY THE SHIM AND NOT A LOG READER: same reason as padled.h - the shim
  * already serves every node-bus frame, and PAD_NB_LOG quadruples the boot.

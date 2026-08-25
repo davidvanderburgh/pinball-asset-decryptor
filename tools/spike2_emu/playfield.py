@@ -3488,7 +3488,9 @@ class LcdPanel:
     ★ ONE SCREEN HERE, NOT THREE, and the correction is worth stating plainly
     because this window shipped with three. The game addresses ONE logical
     display (fixture display count 1; all 299 LCD call sites pass the same
-    device), and the node board feeds the three physical TVs from it. The
+    device) driving ONE physical TV - David's video of the real machine
+    shows a single set with "Villain Vision" on its bezel, so the old
+    "three TVs fed from one display" line here was invented too. The
     first cut read one command as three display ids and drew 54, 928 and 106
     side by side, which looked convincing and was wrong: 106 is a frame-rate
     code, and 928 is a companion field. David spotted the shape of it live

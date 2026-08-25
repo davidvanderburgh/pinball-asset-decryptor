@@ -9645,6 +9645,48 @@ long shim_read(int fd, void *b, unsigned long n)
                     }
                 }
             }
+            /* ---- VILLAIN VISION 0x90 STATUS (item 83) -----------------
+             * The lcdnode's cmd f2 selector 0x90 wants a 12-byte payload.
+             * The game's poll loop (0x37e5ec, 60 Hz measured) stores it
+             * verbatim as three u32s in the display object (+4/+8/+12),
+             * and get_status (0x37e6d4) hands those words to whoever asks.
+             * Every play command takes a global sequence token (0x37dc20)
+             * that its caller keeps - and an all-zero reply means the
+             * status words never change, which is the standing suspect for
+             * the 250 ms byte-identical re-sends (measured live) and for
+             * the game tearing down its own villain-TV clip renders at 0
+             * frames (padvid, 4 channels, game start).
+             *
+             * WHAT THE WORDS MEAN IS NOT KNOWN - the token never crosses
+             * the wire, so the board cannot echo it; the most plausible
+             * story is that a board that is handed asset numbers reports
+             * the asset number it is playing. So: word0 = the last decoded
+             * play asset, words 1-2 = 0. This is an EXPERIMENT with a
+             * one-env rollback, not a decoded fact, and the caption/ring
+             * instruments are what grade it:
+             *   PAD_LCD_R=<24 hex chars>  exact 12-byte payload
+             *   PAD_LCD_R=0               zeros (the old behaviour)
+             * If the screen grows node-board alerts for the lcdnode, that
+             * is word0 read as a fault word - flip to PAD_LCD_R=0 and say
+             * so in the item. */
+            if (nb_req_len > 3 && nb_req[2] == 0xf2 && nb_req[3] == 0x90 &&
+                lcd_node() && (unsigned)(nb_req[0] & 0x3f) == lcd_node() &&
+                plen >= 12) {
+                static char *spec = (char *)-1;
+                if (spec == (char *)-1) spec = getenv("PAD_LCD_R");
+                if (spec && *spec) {
+                    char *q = spec;
+                    for (i = 0; i < 12 && ishex(q[0]) && ishex(q[1]); i++) {
+                        p[i] = (unsigned char)(hexval(q[0]) * 16 + hexval(q[1]));
+                        q += 2;
+                    }                       /* "0" = fewer than 2 digits: zeros */
+                } else if (lcd_shm && lcd_shm->asset) {
+                    p[0] = (unsigned char)lcd_shm->asset;
+                    p[1] = (unsigned char)(lcd_shm->asset >> 8);
+                    p[2] = (unsigned char)(lcd_shm->asset >> 16);
+                    p[3] = (unsigned char)(lcd_shm->asset >> 24);
+                }
+            }
             /* ---- COMMAND 0x11: THE SWITCH SCAN ------------------------
              * 0x59ef60 builds { 0x80|node, 01, 11, 0a } and reads 10 payload
              * bytes: [0..7] switch bits, [8..9] a u16 the caller may want.

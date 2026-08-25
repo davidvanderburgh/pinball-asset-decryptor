@@ -5351,6 +5351,57 @@ These have each been violated at least once and each cost a run or a window:
       12→16 lcdring tests, 36 across the LCD suites. David's LIVE run is
       still on the v3 shim — his next launch rebuilds to v4 and the ring
       starts covering whole attract cycles.
+
+      **UPDATE 10 (2026-08-25) — DAVID'S APP LOG REWRITES THE ARCHITECTURE,
+      and the "errors" in it are neither errors nor new.** The walls of
+      `[build]` text are pre-existing gcc -Wformat-truncation warnings
+      (nb_fident_load, nv_load, the segv dumper, sw_file_table, VLOG) that
+      only print when the shim rebuilds — which today it did twice, both
+      ending `built ok`. Filed separately; not this item's code.
+      **The real find is four [padvid] lines at game start:** the game
+      opened `137.asset/0.asset` — the villain-TV store, 240x180 — through
+      its OWN video pipeline on channels 1-4, then stopped every one at 0
+      frames. Which forces the correction: **the lcdnode is an LPC1113 —
+      24 KB flash, 8 KB RAM. It cannot store 3,069 H.264 clips and cannot
+      decode one.** "The board plays the clips locally" (v3's story, and
+      UPDATE 9's) is physically impossible. On real hardware the villain-TV
+      pixels must be RENDERED BY THE GAME (the scene is literally named
+      VillainTvsCombo); the node board plausibly owns panel control —
+      which is exactly the observed brightness/fade bracket. So the right
+      emulation is likely: let the game's own villain render path run and
+      show THAT — three TVs with genuinely different content, green logo
+      cards included — and the asset-number window becomes the diagnostic,
+      not the display. Today that path aborts at 0 frames, four times, at
+      game start. WHY it aborts is the question that matters now.
+      **RE nailed this pass (from /tmp/game.elf, card mounted read-only,
+      rig idle, lock taken+released):** every play command takes a global
+      sequence token — 0x37dc20 bumps *(0x7af908), stores it at
+      entry[+16], sets pending bits 0+1, and lcd_play_asset (0x37de58)
+      RETURNS it to the caller (it also indexes the 0x5c9340 period table
+      directly — the fps connection is now instruction-level, arg is an
+      index 0-7, out-of-range defaults to 3 = 16 fps). The 60 Hz poll loop
+      is 0x37e5ec (called from the main tick 0x265678): per display, gated
+      on board-present (board[+4] bit 1), sends 0x90, and on a good reply
+      stores the 12 payload bytes VERBATIM as three u32s at entry[+4/8/12];
+      get_status (0x37e6d4) copies those three words to any caller.
+      0x37e294 = set_brightness (entry[+49]/[+52], flags bit 2 — matches
+      the dispatcher). **And 0x37e2fc partially rehabilitates the range:**
+      it computes (last-first+1) x period(rateidx) — a range-DURATION
+      helper, so an inclusive-range consumer exists; v3's "not a range"
+      was an overcorrection. Whether the 14-byte payload's fields feed it
+      is still untraced, so the caption keeps saying `aux`.
+      **THE EXPERIMENT NOW IN THE SHIM:** answer the 0x90 poll's 12 bytes
+      with word0 = last decoded play asset (words 1-2 zero) instead of
+      zeros — the most plausible board story ("I am playing what you named"),
+      and the game demonstrably copies whatever we answer into the display
+      object. PAD_LCD_R=<24 hex> hand-sets the payload for experiments;
+      PAD_LCD_R=0 restores zeros. Marked in-code as an experiment, not a
+      decoded fact; if node 24 grows on-screen alerts, word0 is being read
+      as a fault word — roll back and record it. The graders are the ring
+      (does the 250 ms re-send stop?), padvid (do the four 137-store
+      channels survive past 0 frames?), and David's own eyes on the
+      villain window. The game ELF is copied to /tmp/game.elf so further
+      RE needs no mount.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

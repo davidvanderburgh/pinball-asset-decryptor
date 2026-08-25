@@ -65,11 +65,15 @@
  *
  * WHAT IS *NOT* PROVEN, and is therefore not named: struct+12 (`aux`).
  * v2 called it the range's LAST asset on the strength of one capture
- * where it read 928. Nothing in the builders or the dispatcher says
- * "range", nothing iterates A..D, and the struct's other fields (+4, +8,
- * +16) are plainly not endpoints of anything. It is recorded and shown as
- * a number. Do not caption it as a range again without a call site that
- * fills it.
+ * where it read 928; v3 swung to "not a range" - and that was TOO HARD.
+ * 0x37e2fc is a range-DURATION helper: (first, last, rateidx) ->
+ * (last - first + 1) x the 0x5c9340 period, so an inclusive-range
+ * consumer exists in this very family. What remains untraced is whether
+ * THESE two payload fields feed it, and what the board does with the
+ * range (playlist / flipbook / pick). So `aux` stays a number in the
+ * caption - a name needs the caller that connects the fields to the
+ * helper, nothing less. Both mis-namings of this protocol came from
+ * skipping exactly that step.
  *
  * THE VERB is also not a "mode". 0x51a9e0 sends a single payload byte and
  * FIVE dispatch kinds call it with five different values - 1 and 2 from

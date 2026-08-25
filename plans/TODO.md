@@ -5652,6 +5652,26 @@ These have each been violated at least once and each cost a run or a window:
       What the mirror shows is the VIDEO LAYER, faithfully; the real set
       draws scene art over that layer, and now we can at least see the
       set's own artwork around the picture.
+      **UPDATE 17 (2026-08-25) — PLAY-TESTED the villain display, not
+      just attract, on a live run I drove myself.** Coin (sw 42) + Start
+      (sw 39) start a game — the main display reaches BALL 1 with the
+      skill-shot prompt — but **the ball has to be hand-served**: batman
+      ships no device table, so ballfeed reports "eject coil NOT IN THE
+      DEVICE TABLE" and the trough never feeds the shooter lane. Opening
+      TROUGH 1 (sw 76) then closing SHOOTER LANE (sw 67) serves it, and
+      opening 67 plunges. Worth knowing for the sweep: a batman game can
+      be started and played from scripts, but not fed automatically.
+      **WHAT THE VILLAIN DISPLAY DOES IN A GAME:** it keeps being
+      commanded `asset 54 · verb 2` on the SAME ~5.2 s attract cadence,
+      through ball-in-play. It is NOT deaf, though — hitting the three TV
+      TARGETS (sw 61/62/66) produced an out-of-cadence command at
+      283033 ms (1.5 s early) with its own `brightness 255`, so the game
+      does react to playfield events; it just does not change the clip.
+      Consistent with the composite model: mode/award graphics are drawn
+      by the scene over the video layer, and only the video layer crosses
+      the bus. NOT established: whether a real machine's Villain Vision
+      changes clip at that moment (it plausibly stays on the current
+      villain too) — that needs a synced capture, same gap as before.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

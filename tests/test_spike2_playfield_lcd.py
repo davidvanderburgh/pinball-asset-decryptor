@@ -241,6 +241,41 @@ def test_single_clip_verb_once_holds_not_loops(tmp_path, monkeypatch):
         root.destroy()
 
 
+def test_filmstrip_records_the_sequence_without_duplicates(tmp_path, monkeypatch):
+    """The strip answers the question one frame never can: WHAT PLAYED, in
+    order. Two rules it must hold - the game re-issues every attract
+    command ~250 ms later, so a re-send must NOT add a second entry; and a
+    clip with no art must not enter the history as a placeholder."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        for i in (54, 55, 56):
+            _write_png(p._art, "%d.png" % i)
+        _write_block(block, asset=54, verb=2)
+        _poll(p)
+        _write_block(block, asset=54, verb=2)   # the 250 ms re-send
+        _poll(p, times=3)
+        assert [i for i, _ in p._recent] == [54], p._recent
+        _write_block(block, asset=55, verb=2)
+        _poll(p)
+        _write_block(block, asset=56, verb=2)
+        _poll(p)
+        assert [i for i, _ in p._recent] == [54, 55, 56], p._recent
+        # An id with NO art must not land in the history.
+        _write_block(block, asset=999, verb=2)
+        _poll(p)
+        assert [i for i, _ in p._recent] == [54, 55, 56], p._recent
+        # ... and the strip is bounded, oldest dropping off the left.
+        for i in (57, 58):
+            _write_png(p._art, "%d.png" % i)
+            _write_block(block, asset=i, verb=2)
+            _poll(p)
+        assert len(p._recent) == playfield.LcdPanel.STRIP_N
+        assert [i for i, _ in p._recent][-1] == 58
+    finally:
+        root.destroy()
+
+
 def test_clip_name_is_shown_and_formatted(tmp_path, monkeypatch):
     """The card's own scene file names every villain clip by episode and
     timecode (lcdnames.py). Showing it is the only independent check on the

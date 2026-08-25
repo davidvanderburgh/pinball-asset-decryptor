@@ -3571,6 +3571,15 @@ class LcdPanel:
     #: around it, so nothing about the picture changes.
     PAD_L, PAD_T = 16, 14           # case around the screen
     PAD_R, PAD_B = 62, 34           # right: knob panel; bottom: the script
+    #: THE FILMSTRIP: the last few clips the game asked for, oldest left,
+    #: current right. David's first report on this display was "it doesn't
+    #: feel like the right animations are showing up at the right times" -
+    #: a question about the SEQUENCE, which a window showing one frame can
+    #: never answer. Four thumbnails do, at a glance, without reading a log.
+    #: 60x45 is exactly subsample(4) of the native 240x180 still, so a
+    #: thumbnail costs no resampling and no extra file.
+    STRIP_N = 4
+    TW, TH = 60, 45
     #: Re-ask backoff for lcdart, seconds. One subprocess per minute per id
     #: whose art is still missing - see _show.
     ASK_S = 60.0
@@ -3589,6 +3598,12 @@ class LcdPanel:
         self.bright = 255           # last 0x80 brightness; <128 blanks the screen
         self.names = None           # {id: name} from lcdnames.py, loaded once
         self._named = False         # ... and whether the load has been tried
+        self.strip = None           # the filmstrip canvas
+        #: [(id, PhotoImage)] oldest first. The PhotoImages are held HERE and
+        #: nowhere else - a canvas image item does not own its image, so
+        #: dropping the reference blanks the thumbnail (the same rule the
+        #: main picture obeys via self.img).
+        self._recent = []
         #: Animation state. None while no clip is on disk (kept retryable);
         #: a dict once the clip's BYTES are read - in one go, so a
         #: \\wsl.localhost hiccup can only fail the whole read (caught,
@@ -3652,7 +3667,13 @@ class LcdPanel:
         # a picture of the Batphone.
         self.nm = tk.Label(self.win, text="", bg="#111", fg="#7a8",
                            font=("Consolas", 8))
-        self.nm.pack(pady=(0, 4))
+        self.nm.pack()
+        self.strip = tk.Canvas(
+            self.win, bg="#111", highlightthickness=0,
+            width=self.CW + self.PAD_L + self.PAD_R,
+            height=self.TH + 14)
+        self.strip.pack(pady=(2, 4))
+        self._redraw_strip()
 
     def _cabinet(self):
         """Draw the TV around the screen, once, under everything else.
@@ -3865,6 +3886,44 @@ class LcdPanel:
         the cabinet is around it (the knob panel is on one side only)."""
         return (self.PAD_L + self.CW // 2, self.PAD_T + self.CH // 2)
 
+    def _push_recent(self, i, img):
+        """Remember a clip in the filmstrip. Called only when the DRAWN id
+        changes and real art exists, so a placeholder never enters the
+        history and a re-send of the same asset never duplicates an entry
+        (the game re-issues every attract command ~250 ms later - see
+        padlcd.h - and a strip that showed each twice would be a lie about
+        the sequence)."""
+        try:
+            thumb = img.subsample(4, 4)     # 240x180 -> 60x45, no resample
+        except tk.TclError:
+            return
+        self._recent.append((i, thumb))
+        del self._recent[:-self.STRIP_N]
+        self._redraw_strip()
+
+    def _redraw_strip(self):
+        if self.strip is None:
+            return
+        self.strip.delete("all")
+        n = self.STRIP_N
+        w = self.CW + self.PAD_L + self.PAD_R
+        gap = (w - n * self.TW) // (n + 1)
+        for k in range(n):
+            x = gap + k * (self.TW + gap)
+            # Oldest LEFT, current RIGHT: right-align the history so the
+            # newest entry is always in the same place rather than sliding.
+            idx = len(self._recent) - n + k
+            self.strip.create_rectangle(x - 1, 0, x + self.TW, self.TH + 1,
+                                        outline="#333")
+            if 0 <= idx < len(self._recent):
+                i, thumb = self._recent[idx]
+                self.strip.create_image(x + self.TW // 2, self.TH // 2 + 1,
+                                        image=thumb)
+                self.strip.create_text(x + self.TW // 2, self.TH + 8,
+                                       text=str(i), fill="#7ecbff" if
+                                       idx == len(self._recent) - 1 else "#666",
+                                       font=("Consolas", 7))
+
     def _show(self, i):
         # Ask lcdart.py for whatever this id is missing, at most once per
         # ASK_S per id. Checked against BOTH artifacts: a cache from before
@@ -3889,6 +3948,8 @@ class LcdPanel:
             except tk.TclError:
                 img = None
             if img is not None:
+                if self.id != i:
+                    self._push_recent(i, img)
                 self._draw(img)
                 self.id, self.have = i, True
                 return

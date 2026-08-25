@@ -29,20 +29,34 @@ RIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 pytestmark = pytest.mark.skipif(not os.path.isdir(RIG), reason="rig not present")
 
 MAGIC = 0x44434C50
-HDR, RAW, STRIDE = 60, 22, 28
+HDR, RAW = 60, 22
+STRIDE = {3: 28, 4: 36}     # v3: one slot per frame. v4: coalesced (rep/last)
 
 
-def _page(frames, version=3, state=None):
-    """The shim's page: a 14-word header, ring_head at 56, ring at 60."""
+def _page(frames, version=4, state=None):
+    """The shim's page: a 14-word header, ring_head at 56, ring at 60.
+
+    A frame is ``(sel, payload)`` or, for a v4 coalesced slot,
+    ``(sel, payload, rep, span_ms)``.
+    """
     d = bytearray(4096)
     st = state or (2994, 0, 30, 4, 7, 8, 9, 0x80, 0x10, 12345)
     struct.pack_into("<14I", d, 0, MAGIC, version, 9, 6, *st)
     struct.pack_into("<I", d, 56, len(frames))
-    for i, (sel, b) in enumerate(frames):
-        off = HDR + i * STRIDE
+    for i, f in enumerate(frames):
+        sel, b = f[0], f[1]
+        rep, span = (f[2], f[3]) if len(f) > 2 else (1, 0)
+        # Unknown versions borrow the v3 stride: the reader must refuse
+        # them before the ring layout can matter.
+        off = HDR + i * STRIDE.get(version, 28)
         ln = min(len(b), RAW)
-        struct.pack_into("<IBB", d, off, 1000 + i * 250, sel, ln)
-        d[off + 6:off + 6 + ln] = b[:ln]
+        t = 1000 + i * 250
+        if version >= 4:
+            struct.pack_into("<IIHBB", d, off, t, t + span, rep, sel, ln)
+            d[off + 12:off + 12 + ln] = b[:ln]
+        else:
+            struct.pack_into("<IBB", d, off, t, sel, ln)
+            d[off + 6:off + 6 + ln] = b[:ln]
     return bytes(d)
 
 
@@ -117,7 +131,7 @@ def test_unknown_verb_keeps_its_number(tmp_path):
 
 
 def test_a_wrapped_ring_reads_oldest_first(tmp_path):
-    """ring_head counts frames EVER, so past 64 the slots wrap and the oldest
+    """ring_head counts slots EVER, so past 64 the slots wrap and the oldest
     live entry is head-64. Getting this backwards silently reverses the
     transcript, which is worse than not having one."""
     frames = [(0x98, bytes([0]) + struct.pack("<I", i)) for i in range(1, 65)]
@@ -131,11 +145,42 @@ def test_a_wrapped_ring_reads_oldest_first(tmp_path):
     assert "asset 3" in rows[-1], rows[-1]
 
 
+def test_a_coalesced_slot_prints_its_count_and_span(tmp_path):
+    """The 60 Hz poll flood, as one honest line. The first live reading
+    showed 0x90 arriving every 17 ms with a constant payload - a raw ring
+    held ~1 s and every play command was flushed within a second. A v4
+    slot carries the count and the span, and both must reach the output:
+    '421 polls over 7 s' IS the cadence measurement."""
+    out = _run(tmp_path, _page([(0x90, bytes([0, 0xEA, 0x41, 0]), 421, 7157),
+                                ASSET_54]))
+    assert "x421 over 7157 ms" in out, out
+    assert "asset 54" in out, out
+    # A rep-1 slot must NOT grow the suffix - most slots are single.
+    row = [l for l in out.splitlines() if "asset 54" in l][0]
+    assert " over " not in row, row
+
+
+def test_a_saturated_count_admits_it(tmp_path):
+    """rep is u16 and the shim saturates rather than wraps. 65535 exactly
+    means 'at least' - printing it as an exact count would be one more
+    number posing as a measurement."""
+    out = _run(tmp_path, _page([(0x90, bytes([0, 0, 0, 0]), 0xFFFF, 60000)]))
+    assert "x65535+ over 60000 ms" in out, out
+
+
+def test_a_v3_preserved_block_still_reads(tmp_path):
+    """padlcd.last files written before the coalesce exist on disk. The
+    reader keeps the old stride for them rather than shifting every field
+    and printing confident nonsense."""
+    out = _run(tmp_path, _page([ASSET_AUX, VERB_BARE], version=3))
+    assert "asset 54" in out and "aux 928" in out and "verb 4" in out, out
+
+
 def test_a_version_mismatch_is_announced_not_hidden(tmp_path):
-    """Reading a v2 page with a v3 reader shifts every field. It must say so
-    rather than print confident nonsense."""
-    out = _run(tmp_path, _page([ASSET_54], version=2))
-    assert "version 2" in out and "padlcd.h is 3" in out, out
+    """Reading a page whose ring layout this reader does not know must be a
+    refusal, not a guess - a wrong stride shifts every field."""
+    out = _run(tmp_path, _page([ASSET_54], version=2), expect_rc=1)
+    assert "no known ring layout" in out, out
 
 
 def test_a_page_without_the_magic_is_refused(tmp_path):

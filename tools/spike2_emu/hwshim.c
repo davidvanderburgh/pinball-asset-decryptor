@@ -8408,10 +8408,14 @@ struct padlcd_shm {
     unsigned magic, version, gen, decoded;
     unsigned asset, aux, rate, verb, x1, x2, x3, bright, fade, ms;
     unsigned ring_head;
-    struct { unsigned ms; unsigned char sel, len, b[22]; } ring[64];
+    struct {
+        unsigned ms, last;
+        unsigned short rep;
+        unsigned char sel, len, b[22], pad[2];
+    } ring[64];
 };
 #define PADLCD_MAGIC 0x44434c50u
-#define PADLCD_VERSION 3u
+#define PADLCD_VERSION 4u
 
 static struct padlcd_shm *lcd_shm;
 
@@ -8500,15 +8504,39 @@ static void lcd_publish(const unsigned char *p, int n)
     lcd_map();
     if (!lcd_shm) return;
 
-    /* THE RAW RING FIRST, so a mis-parse below is still on record. */
+    /* THE RAW RING FIRST, so a mis-parse below is still on record - but
+     * COALESCED (v4): a frame identical to the previous slot bumps that
+     * slot's count instead of taking a new one. The first live reading
+     * showed why this is not optional: the 0x90 poll arrives at 60 Hz
+     * with a constant payload, so a raw ring held ~1 s of history and
+     * every play command was flushed within a second of arriving. A 60 Hz
+     * constant IS a count; recording it 64 times over is what destroyed
+     * the evidence, not what kept it. */
     plen = ilen - 3;              /* bytes after the selector, before cksum */
     if (plen > 22) plen = 22;
+    if (lcd_shm->ring_head) {
+        slot = (lcd_shm->ring_head - 1u) % 64u;
+        if (lcd_shm->ring[slot].sel == (unsigned char)sel
+                && lcd_shm->ring[slot].len == (unsigned char)plen) {
+            for (k = 0; k < plen; k++)
+                if (lcd_shm->ring[slot].b[k] != p[4 + k]) break;
+            if (k == plen) {
+                lcd_shm->ring[slot].last = (unsigned)pad_ms();
+                if (lcd_shm->ring[slot].rep < 0xffffu)
+                    lcd_shm->ring[slot].rep++;
+                goto ringed;
+            }
+        }
+    }
     slot = lcd_shm->ring_head % 64u;
-    lcd_shm->ring[slot].ms  = (unsigned)pad_ms();
-    lcd_shm->ring[slot].sel = (unsigned char)sel;
-    lcd_shm->ring[slot].len = (unsigned char)plen;
+    lcd_shm->ring[slot].ms   = (unsigned)pad_ms();
+    lcd_shm->ring[slot].last = lcd_shm->ring[slot].ms;
+    lcd_shm->ring[slot].rep  = 1;
+    lcd_shm->ring[slot].sel  = (unsigned char)sel;
+    lcd_shm->ring[slot].len  = (unsigned char)plen;
     for (k = 0; k < plen; k++) lcd_shm->ring[slot].b[k] = p[4 + k];
     lcd_shm->ring_head++;
+ringed:
 
     if ((sel & 0xf8u) == 0x98u) {           /* the play family              */
         if (ilen == 4) {

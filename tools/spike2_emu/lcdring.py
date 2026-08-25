@@ -29,7 +29,11 @@ MAGIC = 0x44434C50
 HDR = 60                    # magic..ms, then ring_head at 56, ring at 60
 RING = 64
 RAW = 22
-STRIDE = 4 + 1 + 1 + RAW    # ms, sel, len, bytes
+#: Ring entry stride per block version. v4 coalesces identical consecutive
+#: frames (ms, last, rep u16, sel, len, payload, pad to 36); v3 - still met
+#: in preserved padlcd.last files - was one slot per frame (ms, sel, len,
+#: payload). The header layout is identical in both.
+STRIDE = {3: 4 + 1 + 1 + RAW, 4: 4 + 4 + 2 + 1 + 1 + RAW + 2}
 
 #: Frame periods at 0x5c9340, in 1/1280 s. A rate byte carries the PERIOD,
 #: not an fps, which is why 106 (= 12 fps) can never be an asset id.
@@ -107,20 +111,23 @@ def main():
     (_m, ver, gen, dec, asset, aux, rate, verb,
      x1, x2, x3, bright, fade, ms) = struct.unpack_from("<14I", d)
     head = struct.unpack_from("<I", d, 56)[0]
-    print("%s  version %d  gen %d  decoded %d  frames seen %d"
+    print("%s  version %d  gen %d  decoded %d  ring slots %d"
           % (path, ver, gen, dec, head))
     print("last state: asset %d  aux %d  rate %d  verb %d  x %d/%d/%d  "
           "bright %d  fade %d  at %d ms"
           % (asset, aux, rate, verb, x1, x2, x3, bright, fade, ms))
-    if ver != 3:
-        print("!! this block is version %d; padlcd.h is 3 - fields below "
-              "may be misread" % ver)
+    if ver not in STRIDE:
+        raise SystemExit("lcdring.py: block version %d has no known ring "
+                         "layout (this reader knows %s) - the shim moved on;"
+                         " update this file from padlcd.h"
+                         % (ver, sorted(STRIDE)))
     if not head:
         print("(ring empty - the node was never sent a cmd-f2 frame)")
         return 0
 
     # Oldest first, so the sequence reads downward like a transcript. A ring
     # that has not wrapped has entries only in slots 0..head-1.
+    stride = STRIDE[ver]
     n = min(head, RING)
     start = head - n
     print()
@@ -133,16 +140,28 @@ def main():
     prev = None
     for k in range(n):
         slot = (start + k) % RING
-        off = HDR + slot * STRIDE
-        if off + STRIDE > len(d):
+        off = HDR + slot * stride
+        if off + stride > len(d):
             break
-        fms, sel, ln = struct.unpack_from("<IBB", d, off)
+        if ver >= 4:
+            fms, last, rep, sel, ln = struct.unpack_from("<IIHBB", d, off)
+            b = d[off + 12:off + 12 + min(ln, RAW)]
+        else:
+            fms, sel, ln = struct.unpack_from("<IBB", d, off)
+            last, rep = fms, 1
+            b = d[off + 6:off + 6 + min(ln, RAW)]
         ln = min(ln, RAW)
-        b = d[off + 6:off + 6 + ln]
+        what = decode(sel, b, ln)
+        if rep > 1:
+            # A coalesced slot IS a measurement: 421 polls over 7 s names
+            # the cadence without eating 421 lines. Saturated counts say so
+            # rather than pose as exact.
+            what += "  x%s over %d ms" % \
+                ("65535+" if rep == 0xFFFF else rep, last - fms)
         gap = "" if prev is None else "+%d" % (fms - prev)
-        prev = fms
+        prev = last
         print("%10d %7s  %-3s  %-44s %s"
-              % (fms, gap, "%02x" % sel, decode(sel, b, ln),
+              % (fms, gap, "%02x" % sel, what,
                  " ".join("%02x" % c for c in b)))
     return 0
 

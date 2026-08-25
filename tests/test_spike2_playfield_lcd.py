@@ -58,7 +58,7 @@ def _root():
 def _write_block(path, asset=0, aux=0, rate=0, verb=0, magic=MAGIC):
     """The v3 page: magic, version, gen, decoded, then the one display's
     state (asset, aux, rate, verb, x1, x2, x3, bright, fade, ms)."""
-    d = struct.pack("<14I", magic, 3, 1, 1,
+    d = struct.pack("<14I", magic, 4, 1, 1,
                     asset, aux, rate, verb, 0, 0, 0, 0, 0, 0)
     with open(path, "wb") as f:
         f.write(d + b"\x00" * (4096 - len(d)))

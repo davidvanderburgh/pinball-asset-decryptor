@@ -5321,6 +5321,36 @@ These have each been violated at least once and each cost a run or a window:
       tests (2 new: live-first, message), 33 across the three LCD suites.
       The synthetic padlcd.last from the test was deleted — the first real
       one appears when David next ends a batman run, through either door.
+
+      **UPDATE 9 (2026-08-25) — FIRST LIVE READINGS off David's mid-game
+      run, and a ring redesign they forced.** What the instrument measured
+      (read-only polls of the live block; the game was David's, untouched):
+      **(a) the 0x90 status poll runs at 60 Hz** — every 17 ms, payload
+      constant `00 ea 41 00` — so 64 raw slots held ~1.1 s of history and
+      every play command was flushed out of the ring within a second. The
+      "attract re-sends every 250 ms" number in the OPEN note was really
+      the poll+command mix; the real cadences are now separated. **(b) The
+      pending-bit re-queue is directly observed:** `asset 601 · verb 2`
+      sent at 168907 ms and re-sent BYTE-IDENTICAL at 169158 (+251 ms) —
+      no reply, command stays pending, re-queued. The 0x90-reply item's
+      evidence is no longer inferential. **(c) Attract plays one-shots
+      (verb 2), ~5.2–5.45 s apart, and brackets each clip swap with a
+      brightness dip:** `bright 0` then `bright 255` 249 ms later, right
+      at the asset change (fade byte 15 throughout, trailing constant
+      `aa 2a` — unnamed, like the poll's `ea 41`). **(d)** assets seen
+      live: 591, 601, 3004 — all inside the known 17.
+      **The redesign (padlcd v4):** the ring COALESCES identical
+      consecutive frames — same selector, same payload → bump the slot's
+      u16 `rep` (saturating) and refresh `last` instead of taking a new
+      slot. A 60 Hz constant IS a count; recording it 64 times over is
+      what destroyed the evidence. Entry is now ms/last/rep/sel/len/b,
+      stride 36, ring spans minutes instead of one second, every frame
+      still on record. lcdring.py reads BOTH strides (v3 blocks live on in
+      preserved padlcd.last files; an unknown version is refused, not
+      guessed at) and prints coalesced slots as `x421 over 7157 ms`.
+      12→16 lcdring tests, 36 across the LCD suites. David's LIVE run is
+      still on the v3 shim — his next launch rebuilds to v4 and the ring
+      starts covering whole attract cycles.
       **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
       capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
       plunge, TV-target shots, 760k points):** no pixels cross the bus —

@@ -100,14 +100,17 @@
  *
  * OFFSETS, since the Python reader hard-codes them: magic 0, version 4,
  * gen 8, decoded 12, asset 16, aux 20, rate 24, verb 28, x1 32, x2 36,
- * x3 40, bright 44, fade 48, ms 52, ring_head 56, ring at 60, stride 28,
- * PADLCD_RING 64.
+ * x3 40, bright 44, fade 48, ms 52, ring_head 56, ring at 60. Ring entry:
+ * ms 0, last 4, rep 8 (u16), sel 10, len 11, b 12, stride 36 (v3 rings,
+ * still readable in preserved blocks, were ms 0, sel 4, len 5, b 6,
+ * stride 28). PADLCD_RING 64.
  */
 #ifndef PADLCD_H
 #define PADLCD_H
 
 #define PADLCD_MAGIC    0x44434c50u     /* 'PLCD' */
-#define PADLCD_VERSION  3               /* v1: 3 displays. v2: a fake range */
+#define PADLCD_VERSION  4               /* v1: 3 displays. v2: a fake range.
+                                         * v3: 60 Hz polls ate the ring     */
 #define PADLCD_RING     64
 #define PADLCD_RAW      22              /* the 24-byte form's payload is 21 */
 #define PADLCD_BYTES    4096
@@ -131,15 +134,29 @@ struct padlcd_shm {
     unsigned ms;                        /* guest CLOCK_MONOTONIC ms at change*/
     /* Raw payloads for EVERY cmd-f2 selector this node sees, a lossy ring
      * for RE - v1 ringed only what it already understood, which is exactly
-     * why its mis-decode survived a live capture. watch.sh preserves this
-     * page at run end (dump/padlcd.last) because a ring that dies with the
-     * run cannot settle an argument about what the game sent. */
-    unsigned ring_head;                 /* frames written, ever; index = %64*/
+     * why its mis-decode survived a live capture. watch.sh AND killgame.sh
+     * preserve this page at run end (dump/padlcd.last) because a ring that
+     * dies with the run cannot settle an argument about what the game sent.
+     *
+     * ★ v4 COALESCES IDENTICAL CONSECUTIVE FRAMES, because the first live
+     * reading (2026-08-25) showed the 0x90 status poll arriving at 60 Hz -
+     * every 17 ms, constant payload - which made 64 raw slots hold barely
+     * ONE SECOND of history and flushed every play command out of the ring
+     * within a second of it happening. A frame that matches the previous
+     * slot's selector and payload bumps that slot's `rep` and refreshes
+     * `last` instead of taking a new slot; a quiet poll stretch is one
+     * line, and the ring spans minutes of play. Every frame is still on
+     * record - as a count, which is what a 60 Hz constant IS. ring_head
+     * counts SLOTS, not frames; sum rep for frames. */
+    unsigned ring_head;                 /* slots written, ever; index = %64 */
     struct padlcd_raw {
-        unsigned ms;
+        unsigned ms;                    /* first time this frame arrived    */
+        unsigned last;                  /* latest time (== ms when rep 1)   */
+        unsigned short rep;             /* arrivals coalesced here, sat.max */
         unsigned char sel;              /* the selector byte after 0xf2     */
         unsigned char len;              /* payload bytes captured           */
         unsigned char b[PADLCD_RAW];    /* from the byte after the selector */
+        unsigned char pad[2];           /* explicit: stride is 36, say so   */
     } ring[PADLCD_RING];
 };
 

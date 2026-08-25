@@ -3599,6 +3599,15 @@ class LcdPanel:
         self.names = None           # {id: name} from lcdnames.py, loaded once
         self._named = False         # ... and whether the load has been tried
         self.strip = None           # the filmstrip canvas
+        #: THE GAME'S OWN TV, if lcdframe.py pulled it off the card: a PIL
+        #: RGBA sprite with a transparent screen hole, plus that hole's
+        #: rect. When present the picture is composited INTO it and the
+        #: hand-drawn cabinet is not used - card artwork beats a drawing,
+        #: and this one is the actual Villain Vision set. None = the
+        #: drawing, which is also what every non-batman title would get.
+        self.tv = None
+        self.tv_hole = None
+        self._tv_tried = False
         #: [(id, PhotoImage)] oldest first. The PhotoImages are held HERE and
         #: nowhere else - a canvas image item does not own its image, so
         #: dropping the reference blanks the thumbnail (the same rule the
@@ -3646,12 +3655,14 @@ class LcdPanel:
         pos = load_state().get("villain_pos")
         if pos and _onscreen(self.win, *pos):
             self.win.geometry("+%d+%d" % (pos[0], pos[1]))
-        self.cv = tk.Canvas(self.win,
-                            width=self.CW + self.PAD_L + self.PAD_R,
-                            height=self.CH + self.PAD_T + self.PAD_B,
+        self._load_tv()
+        cw = self.tv.width if self.tv else self.CW + self.PAD_L + self.PAD_R
+        ch = self.tv.height if self.tv else self.CH + self.PAD_T + self.PAD_B
+        self.cv = tk.Canvas(self.win, width=cw, height=ch,
                             bg="#000", highlightthickness=0)
         self.cv.pack(padx=4, pady=(4, 2))
-        self._cabinet()
+        if self.tv is None:
+            self._cabinet()             # no card art: draw one instead
         # The caption is not decoration: what the game sent is either ONE
         # asset or a RANGE at a frame rate, and only one of those can be
         # drawn faithfully today (see poll()). Saying which is on the wire
@@ -3674,6 +3685,42 @@ class LcdPanel:
             height=self.TH + 14)
         self.strip.pack(pady=(2, 4))
         self._redraw_strip()
+
+    def _load_tv(self):
+        """The card's own TV sprite + screen rect, once. Absent is normal
+        (no card mounted, a title with no such texture, PIL missing) and
+        silently leaves the drawn cabinet in place."""
+        if self._tv_tried:
+            return
+        self._tv_tried = True
+        if _PILImage is None:
+            return
+        png = os.path.join(self._art, "tvframe.png")
+        txt = os.path.join(self._art, "tvframe.txt")
+        try:
+            with open(txt, encoding="utf8") as f:
+                x, y, w, h = (int(v) for v in f.read().split()[:4])
+            tv = _PILImage.open(png).convert("RGBA")
+        except (OSError, ValueError):
+            return
+        if w <= 0 or h <= 0 or x + w > tv.width or y + h > tv.height:
+            return                      # a rect that is not inside its own
+        self.tv, self.tv_hole = tv, (x, y, w, h)   # sprite is not usable
+
+    def _compose(self, pil):
+        """Put a clip frame behind the TV's screen hole and return the
+        whole set as one image. The clip is fitted to the hole KEEPING ITS
+        ASPECT - the hole is squarer than 4:3, and stretching 240x180 to
+        fill it would make every face on the Villain Vision subtly wrong,
+        which is the opposite of the point."""
+        x, y, w, h = self.tv_hole
+        s = min(w / pil.width, h / pil.height)
+        nw, nh = max(1, int(pil.width * s)), max(1, int(pil.height * s))
+        out = _PILImage.new("RGBA", self.tv.size, (0, 0, 0, 255))
+        out.paste(pil.convert("RGB").resize((nw, nh)),
+                  (x + (w - nw) // 2, y + (h - nh) // 2))
+        out.alpha_composite(self.tv)    # the set, over the picture
+        return _PILImageTk.PhotoImage(out)
 
     def _cabinet(self):
         """Draw the TV around the screen, once, under everything else.
@@ -3876,15 +3923,25 @@ class LcdPanel:
             # quietly erase the TV the first time an asset landed.
             self.cv.delete("pic")
             self.item = self.cv.create_image(
-                *self._screen_mid(), image=img, tags="pic",
+                *self._mid(), image=img, tags="pic",
                 state="hidden" if self.bright < 128 else "normal")
         else:
             self.cv.itemconfig(self.item, image=img)
 
     def _screen_mid(self):
         """Centre of the SCREEN, which is not the centre of the canvas once
-        the cabinet is around it (the knob panel is on one side only)."""
+        a TV is around it (the knob panel is on one side only)."""
+        if self.tv_hole:
+            x, y, w, h = self.tv_hole
+            return (x + w // 2, y + h // 2)
         return (self.PAD_L + self.CW // 2, self.PAD_T + self.CH // 2)
+
+    def _mid(self):
+        """Centre of the CANVAS - where a composed image (which already
+        contains the set) is placed, as opposed to a bare clip frame."""
+        if self.tv:
+            return (self.tv.width // 2, self.tv.height // 2)
+        return self._screen_mid()
 
     def _push_recent(self, i, img):
         """Remember a clip in the filmstrip. Called only when the DRAWN id
@@ -3943,13 +4000,19 @@ class LcdPanel:
             self.anim = None            # new asset: the old clip's frames drop
         png = os.path.join(self._art, "%d.png" % i)
         if i and os.path.isfile(png):
+            img = thumb_src = None
             try:
-                img = tk.PhotoImage(file=png)   # native 240x180
-            except tk.TclError:
+                # The THUMBNAIL always comes from the bare still (a
+                # filmstrip of TV sets would be unreadable at 60x45); the
+                # SCREEN gets the composed set when the card art is there.
+                thumb_src = tk.PhotoImage(file=png)
+                img = (self._compose(_PILImage.open(png))
+                       if self.tv is not None else thumb_src)
+            except (tk.TclError, OSError, ValueError):
                 img = None
             if img is not None:
-                if self.id != i:
-                    self._push_recent(i, img)
+                if self.id != i and thumb_src is not None:
+                    self._push_recent(i, thumb_src)
                 self._draw(img)
                 self.id, self.have = i, True
                 return
@@ -3993,6 +4056,8 @@ class LcdPanel:
         """Frame idx as a PhotoImage, or None if the clip ends early."""
         try:
             a["pil"].seek(idx)          # sequential: PIL steps ONE frame
+            if self.tv is not None:
+                return self._compose(a["pil"])
             return _PILImageTk.PhotoImage(a["pil"].convert("RGB"))
         except Exception:               # noqa: BLE001 - corrupt tail: the
             a["n"] = idx                # clip honestly ends here

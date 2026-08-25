@@ -239,6 +239,16 @@ if [ -n "$LCD_NODE" ]; then
             echo "[watch] villain clips: $(wc -l < "$PAD_TABLES/$GAME/lcd/names.txt") named from the card's own scene file"
         fi
     fi
+    # THE SET ITSELF (item 83): the same scene carries the TV sprite the
+    # game draws around the clip, screen hole and all, so the panel can
+    # show the card's own artwork instead of a drawn approximation.
+    # ~10 s the first time (it decodes candidate textures), cached after;
+    # failure is not fatal - the panel falls back to its drawing.
+    if [ ! -s "$PAD_TABLES/$GAME/lcd/tvframe.png" ]; then
+        if python3 "$RIG/lcdframe.py" "$GAME" >/dev/null 2>&1; then
+            echo "[watch] villain set: TV artwork pulled from the card's scene textures"
+        fi
+    fi
 fi
 #
 # THE SWITCH LIST IS PASSED TOO, as the fallback for a title whose device table

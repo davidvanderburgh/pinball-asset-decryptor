@@ -241,6 +241,68 @@ def test_single_clip_verb_once_holds_not_loops(tmp_path, monkeypatch):
         root.destroy()
 
 
+def _write_tv(art_dir, w=120, h=100, hole=(20, 15, 60, 45)):
+    """A stand-in for the card's TV sprite: opaque, with a transparent
+    rectangular screen hole - the shape lcdframe.py pulls off the card."""
+    Image = pytest.importorskip("PIL.Image")
+    os.makedirs(art_dir, exist_ok=True)
+    tv = Image.new("RGBA", (w, h), (90, 60, 40, 255))
+    x, y, hw, hh = hole
+    tv.paste((0, 0, 0, 0), (x, y, x + hw, y + hh))
+    tv.save(os.path.join(art_dir, "tvframe.png"))
+    with open(os.path.join(art_dir, "tvframe.txt"), "w", encoding="utf8") as f:
+        f.write("%d %d %d %d\n" % hole)
+
+
+def test_card_tv_art_is_used_and_the_clip_keeps_its_aspect(tmp_path, monkeypatch):
+    """When lcdframe.py has pulled the game's own TV off the card, the
+    panel composites the picture INTO its screen hole rather than drawing
+    a cabinet. The clip must keep its aspect - the hole is squarer than
+    4:3 and stretching to fill would distort every face on the TV."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_tv(p._art)
+        _write_png(p._art, "54.png")
+        _write_block(block, asset=54, verb=2)
+        _poll(p)
+        assert p.tv is not None and p.tv_hole == (20, 15, 60, 45)
+        # The canvas is the SET's size, and the composed image fills it.
+        assert int(p.cv["width"]) == 120 and int(p.cv["height"]) == 100
+        assert (p.img.width(), p.img.height()) == (120, 100)
+        # No hand-drawn cabinet when real art exists.
+        assert not p.cv.find_withtag("case"), "drew a cabinet over card art"
+        # Aspect kept: a 240x180 clip into a 60x45 hole fits exactly; make
+        # the hole square and the clip must letterbox, not stretch.
+        p2 = playfield.LcdPanel(root, "batman")
+        p2._art = p._art
+        p2._load_tv()
+        p2.tv_hole = (20, 15, 60, 60)
+        composed = p2._compose(_PILImage_new(240, 180))
+        assert (composed.width(), composed.height()) == (120, 100)
+    finally:
+        root.destroy()
+
+
+def _PILImage_new(w, h):
+    Image = pytest.importorskip("PIL.Image")
+    return Image.new("RGB", (w, h), "red")
+
+
+def test_no_card_art_falls_back_to_the_drawn_cabinet(tmp_path, monkeypatch):
+    """Every title without the texture - and any run with no card mounted -
+    must still get a TV, not a bare rectangle."""
+    root = _root()
+    try:
+        playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
+        _write_block(block, asset=54, verb=2)
+        _poll(p)
+        assert p.tv is None
+        assert p.cv.find_withtag("case"), "no card art and no drawn cabinet"
+    finally:
+        root.destroy()
+
+
 def test_filmstrip_records_the_sequence_without_duplicates(tmp_path, monkeypatch):
     """The strip answers the question one frame never can: WHAT PLAYED, in
     order. Two rules it must hold - the game re-issues every attract

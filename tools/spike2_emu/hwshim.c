@@ -3317,7 +3317,43 @@ static unsigned nb_env_hex(const char *name, unsigned def)
  * entry opens the registry gate; this one is only a plausible small node-board
  * MCU. PAD_NB_PART sweeps the rest. */
 #define NB_PART_DEFAULT 0x00020023u
-#define NB_HWID_DEFAULT 0x0001u
+/* ★ IDENTITY [8..9] IS A PERCENT, NOT ONLY AN ID, AND 1 MADE EVERY LAMP BLACK.
+ *
+ * The comment above calls this the board id, which is how 0x5a2f44 uses it
+ * (cache it, re-ask while it reads zero) - and that reading is not wrong, it is
+ * INCOMPLETE. The swelf-generation lamp library reads the SAME two bytes as a
+ * per-node BRIGHTNESS PERCENT and scales every lamp value it sends by it:
+ *
+ *   0x51b558  parses the 11-byte 0xfe reply and stores [8..9] as a u16 into
+ *             the per-node config record at 0x816dac + node*12 + 8
+ *   0x51b68c  returns that u16 (ldrh [0x816da8 + node*12, #12] - the same
+ *             address), re-fetching once while it reads 0
+ *   0x51c2b4  the cmd 0x70 single-lamp builder: bl 0x51b68c, then
+ *               A' = min(255, chA * scale / 100)     (mul, umull by the
+ *               0x10624dd3 /100 magic, lsr #6, movcs #255)
+ *               B' = min(255, chB * scale / 100)
+ *             and it RETURNS WITHOUT SENDING when the scale reads 0.
+ * Eleven builders in 0x51b79c..0x51c510 - the whole 0x70 family - do this.
+ *
+ * So a claimed 1 means every lamp goes out at chA/100: anything the game
+ * computes below 100 lands on the wire as EXACTLY ZERO. Measured on David's
+ * live batman run (2026-08-26): 479,553 LED writes decoded, ~95/s sustained,
+ * and every one of the 1536 val[] bytes zero the whole time - not one nonzero
+ * value in 12 samples over 5 s. The frames were arriving and decoding
+ * perfectly; they carried black.
+ *
+ * 100 IS THE UNITY VALUE, and that is the whole argument for it: it is the
+ * scale at which the wire carries the game's OWN computed lamp values
+ * unmodified, so the playfield window shows what the game intends rather than
+ * what our identity did to it. It stays non-zero, so 0x5a2f44's id consumer is
+ * unaffected. What a REAL board reports here is NOT known - nothing in this
+ * rig has ever seen one - so this is chosen for its arithmetic, not measured;
+ * PAD_NB_HWID still overrides for a sweep.
+ *
+ * The newer (godzilla) generation drives its show through the a2/a6 indexed
+ * builders, which never call 0x51b68c - which is why this went unnoticed:
+ * godzilla speaks 0x70 only 27-81 times per RUN, batman ~109 times per SECOND. */
+#define NB_HWID_DEFAULT 0x0064u
 #define NB_FW_DEFAULT   0x000100u      /* 0.1.0, as major<<16 | minor<<8 | patch */
 
 /* PER-NODE IDENTITY. A single global identity cannot work, because the game
@@ -8276,10 +8312,15 @@ struct padled_shm {
     struct { unsigned ms;
              unsigned char node, start, end, from, to, rise, fall, pad;
     } fade[96];
+    /* Version 4, the ADDRESSED plane - the twin of padled.h, which carries the
+     * meaning; keep the two in step. */
+    unsigned char seen[16][96];
+    unsigned wide_decoded, wide_skipped;
 };
 #define PADLED_MAGIC 0x44454c50u
 
 static struct padled_shm *led_shm;
+static unsigned led_shm_len;                 /* 4096 (v3 file) or 8192 (v4)  */
 static unsigned char led_known[16][96];      /* seen in the boot enumeration */
 /* The same enumeration IN ORDER, which is what a bitmap frame indexes into:
  * led_order[node][k] is the LED index the board announced k-th. */
@@ -8303,6 +8344,10 @@ static int led_insert_node(unsigned node) { return node == 1 || node == 8 || nod
  * different pointer here than it is inside shim_close. */
 extern int open(const char *, int, int);
 extern int close(int);
+/* Same GCC 14 reason, and the same "the shim's own" note. off_t is long on
+ * this 32-bit ARM target, which is what makes the plain `long` spelling
+ * right; it is only ever asked for a file this shim's own watch.sh created. */
+extern long lseek(int, long, int);
 
 static void led_map(void)
 {
@@ -8316,12 +8361,31 @@ static void led_map(void)
     if (!path || !*path) return;
     fd = open(path, 2 /*O_RDWR*/, 0);
     if (fd < 0) return;
-    m = mmap(0, 4096, 3, 1, fd, 0);
+    /* 8192, not 4096: version 4's `seen` plane crossed the page. An OLD
+     * watch.sh creates a 4096-byte file, and mmap of two pages over it would
+     * fault on the second the moment `seen` is written - so the size is taken
+     * from the file rather than assumed, and the extra plane is simply not
+     * published when the mapping is too small (see led_seen). */
+    {
+        long sz = lseek(fd, 0, 2 /*SEEK_END*/);
+        led_shm_len = (sz >= 8192) ? 8192u : 4096u;
+    }
+    m = mmap(0, led_shm_len, 3, 1, fd, 0);
     close(fd);
     if (!m || m == (void *)-1) return;
     led_shm = (struct padled_shm *)m;
     led_shm->magic = PADLED_MAGIC;
-    led_shm->version = 3;             /* 3 adds the fade ring; see padled.h  */
+    /* 4 adds the addressed plane; see padled.h. A reader tells the two apart
+     * by this number, so it must not claim 4 over a one-page mapping. */
+    led_shm->version = (led_shm_len >= 8192) ? 4 : 3;
+}
+
+/* One bit of the version-4 roster. Silently a no-op on a short mapping, which
+ * is what keeps a new shim safe under an old watch.sh. */
+static void led_seen(unsigned node, unsigned idx)
+{
+    if (!led_shm || led_shm_len < 8192) return;
+    if (node < 16 && idx < 96) led_shm->seen[node][idx] = 1;
 }
 
 /* ---- COILS (padled.h, and the C twin of coildecode.py) ------------------
@@ -8389,6 +8453,273 @@ static int led_dec_log(void)
     }
     if (budget > 0 && used < budget) { used++; return 1; }
     return 0;
+}
+
+/* ---- THE SWELF-GENERATION LAMP DIALECT (batman) -------------------------
+ *
+ * WHY THERE IS A SECOND DECODER AT ALL. The three shapes above are godzilla's.
+ * batman's light show speaks a different family entirely - 88 89 8a 8e 95 96
+ * 98 9a 9e a0 a1 a2 a4 a5 a6 b4 b5 b7, ~109 frames/s through attract - and
+ * every one of them comes out of ONE builder at 0x51896c in the game's own
+ * ELF. There is no per-command builder to read, and no literal opcode byte
+ * anywhere in the binary: the command IS a bitfield, assembled at 0x518ac4 as
+ *
+ *     cmd = 0x80 | f278 | f312 | f310
+ *            bit5 ^      ^ bits4-2   ^ bits1-0
+ *
+ * and the same three fields then choose which blocks the body carries. So the
+ * command byte is not a name to look up - it is the frame's own grammar,
+ * and that is what makes this decodable at all.
+ *
+ *   A = cmd & 0x03   how the LEVEL is carried:
+ *                    0 = every addressed lamp is 0x00   (no bytes spent)
+ *                    1 = every addressed lamp is 0xff   (no bytes spent)
+ *                    2 = one byte per addressed lamp    (0x518c1c)
+ *                    3 = ONE byte shared by all of them (0x518af4)
+ *   B = cmd & 0x1c   how channel B is carried (bitmap / uniform / two-value /
+ *                    exception list). Channel B is NOT published - see the
+ *                    note at the end of this comment. B == 0x10 is not this
+ *                    body at all: it is the bank form, refused below.
+ *   M = cmd & 0x20   picks the index-LIST body over the single-index one.
+ *
+ * A == 0 and A == 1 are the reason this decodes a light show rather than a
+ * third of one, and they are invisible from a capture: the planner branches on
+ * the shared level's VALUE at 0x51667c - 0x00 goes to 0x5169f8 and stores mode
+ * 0, 0xff goes to 0x5169f4 and stores mode 1 - so all-off and all-on cost no
+ * payload at all. Read as "carries no level" they lose every lamp the game
+ * turns fully on, which on batman's node 8 is most of them.
+ *
+ * THE BODY, transcribed from 0x518aa4 (head), 0x518ad4 (short) and 0x518bb0
+ * (value-block), with the branch that emits each part:
+ *
+ *   body[0] bit7 SET -> the index-bitmap form (0x518bb0):
+ *     [0] flags   bit7 selected this form; bit6 is the FILL (see below);
+ *                 bits5-0 say which middle bitmap bytes were transmitted
+ *     [1] (first_group << 4) | last_group      0x518bd8, groups of 8 lamps
+ *     [ ] the transmitted bitmap bytes                         0x518bf0
+ *         bit k of the byte for group g = lamp g * 8 + k
+ *     [ ] a channel-B selector bitmap, ceil(count/8) bytes, if B & 8  0x518c0c
+ *     [ ] channel A: count bytes (A==2) or one byte (A==3), nothing for 0/1
+ *     [ ] channel B tail: a full count-byte plane when B == 0, else an
+ *         optional base byte (B & 0x10) and either one more byte
+ *         (B & 0x0c == 8) or one per selector bit (B & 0x0c == 12)
+ *
+ *   THE BITMAP IS SPARSE, which is the part no capture would have shown. Only
+ *   the first byte, the last byte, and the middles whose flag bit is set are
+ *   on the wire; every other byte in the span is the FILL, all-ones or
+ *   all-zeros by bit 6. A long run of identical bytes therefore costs nothing,
+ *   which is how a frame addressing 45 lamps fits in 59 bytes.
+ *
+ *   body[0] bit7 CLEAR -> the short form (0x518ad4):
+ *     [first index][middle indices...][last index | 0x80]  when M == 0x20
+ *     [single index]                                       otherwise
+ *     then channel A and the same channel-B tail.
+ *
+ * ★ THE EXACT-CLOSE RULE IS THE WHOLE SAFETY ARGUMENT. Nothing above is a
+ * length the wire states outright; every block's size is derived from the
+ * command bits and the bytes already read. So the walk must land EXACTLY on
+ * the end of the body or the frame is refused - a mis-parse fails that test by
+ * itself. It is the same trick the a6 bitmap split above uses, and it is what
+ * makes this safe to run on boards the older decoder was never allowed near.
+ *
+ * Measured against the 20 commands of batman's own census (one real frame of
+ * each, tests/test_spike2_led_wide.py): 19 close exactly. The twentieth is cmd
+ * 70, which is not this family at all - bit 7 is clear and its own builder at
+ * 0x51c2b4 owns it.
+ *
+ * NO NODE GATE, deliberately - it is the one real difference from the decoder
+ * above. That decoder needs its nodes 1/8/9 restriction because its shapes are
+ * loose enough to eat a strip frame and produce confident nonsense. This one
+ * refuses anything that does not close exactly, so nodes 10 and 13 - a whole
+ * LED-only board that carries no switches and had never appeared in the
+ * window at all - can be read without inventing a rule about which boards are
+ * allowed to be lamps. Frames that do not close are counted in wide_skipped.
+ *
+ * CHANNEL B IS DECODED BUT NOT PUBLISHED. Every lamp on this generation
+ * carries two bytes (the cmd 0x70 builder at 0x51c2b4 scales and sends both).
+ * What the second one MEANS is not established: the values seen on the wire
+ * come from a small repeating alphabet (0x08, 0x0f, 0x1e) that looks like a
+ * rate or a curve id beside channel A's plain 0x00/0x10/0xff levels, and
+ * "looks like" is not a finding. Its bytes are walked so the frame can be
+ * length-checked, and then dropped. When somebody reads the board firmware or
+ * runs the service LED test against it, it gets a name and a plane of its own.
+ */
+static unsigned popcount8(unsigned v)
+{
+    unsigned n = 0;
+    for (v &= 0xff; v; v >>= 1) n += v & 1;
+    return n;
+}
+
+static int led_wide_walk(const unsigned char *body, unsigned blen, unsigned cmd,
+                         unsigned char *idx, unsigned char *val, unsigned *nout)
+{
+    unsigned A = cmd & 0x03, B = cmd & 0x1c, M = cmd & 0x20;
+    unsigned p = 0, cnt = 0, i, k, sel = 0, sl = 0;
+
+    if (!blen) return 0;
+    /* Path B (0x518b78) prefixes a BANK byte and addresses lamp bank*96+index,
+     * which does not fit a [16][96] plane at all. Its commands are exactly the
+     * ones with B == 0x10, so refusing them here is what stops a bank-4 lamp
+     * being written over a bank-0 one. */
+    if (B == 0x10) return 0;
+
+    if (body[0] & 0x80) {                    /* the index-BITMAP body        */
+        unsigned first_g, last_g, span, blk, t = 0, fill, flags;
+        unsigned char win[12];
+        /* M would put a further flags byte at body[2] whose bit base is not
+         * established. Refused rather than stepped over. */
+        if (blen < 2 || M) return 0;
+        first_g = body[1] >> 4;
+        last_g  = body[1] & 0x0f;
+        if (last_g < first_g || last_g > 11) return 0;
+        span = last_g - first_g + 1;
+        if (span > 8) return 0;              /* would need >6 flag bits      */
+        /* ★ THE BITMAP IS SPARSE: body[0]'s low bits say which of the MIDDLE
+         * bytes were transmitted and bit 6 says what the omitted ones are, so
+         * a run of identical bytes costs nothing. It is how a 45-lamp frame
+         * fits in 59 bytes. First and last are always sent. */
+        fill  = (body[0] & 0x40) ? 0xff : 0x00;
+        flags = body[0] & 0x3f;
+        blk = (span == 1) ? 1 : 2 + popcount8(flags);
+        if (2 + blk > blen) return 0;
+        for (i = 0; i < span; i++)
+            win[i] = (i == 0 || i == span - 1 || (flags >> (i - 1) & 1))
+                     ? body[2 + t++] : (unsigned char)fill;
+        if (t != blk) return 0;
+        p = 2 + blk;
+        for (i = 0; i < span; i++)
+            for (k = 0; k < 8; k++)
+                if (win[i] >> k & 1) {
+                    unsigned e = (first_g + i) * 8 + k;
+                    if (e >= 96 || cnt >= 96) return 0;
+                    idx[cnt++] = (unsigned char)e;
+                }
+        if (!cnt) return 0;
+        /* The window must really be the span it claims, or the nibbles and the
+         * bitmap disagree and one of them was misread. */
+        if ((idx[0] >> 3) != first_g || (idx[cnt - 1] >> 3) != last_g) return 0;
+    } else if (M) {                          /* [first][middles][last|0x80]  */
+        for (;;) {
+            if (p >= blen || cnt >= 96) return 0;
+            idx[cnt++] = body[p] & 0x7f;
+            if (body[p++] & 0x80) break;
+        }
+        if (cnt < 2) return 0;
+    } else {                                 /* a single index, no terminator */
+        if (body[0] > 95) return 0;
+        idx[cnt++] = body[0];
+        p = 1;
+    }
+    for (i = 1; i < cnt; i++)                /* the planner splits, never
+                                              * reorders (0x516794)          */
+        if (idx[i] <= idx[i - 1]) return 0;
+
+    if (B & 0x08) {                          /* channel-B selector bitmap    */
+        sl = (cnt + 7) / 8;
+        if (p + sl > blen) return 0;
+        sel = p;
+        for (k = cnt; k < sl * 8; k++)       /* padding bits must be clear   */
+            if (body[sel + (k >> 3)] >> (k & 7) & 1) return 0;
+        p += sl;
+    }
+
+    /* ★ A == 0 AND A == 1 CARRY A LEVEL WITHOUT SPENDING A BYTE ON IT, and
+     * this is the single most valuable line in the grammar. At 0x51667c the
+     * planner reads the shared level and branches on its VALUE: 0x00 takes
+     * 0x5169f8 and stores mode 0, 0xff takes 0x5169f4 and stores mode 1,
+     * anything else keeps mode 3 and sends the byte. All-off and all-on - much
+     * the commonest two states in a light show - are compressed into the
+     * command byte itself. Reading 0 and 1 as "says nothing about brightness"
+     * costs every lamp the game turns fully ON with one, which on batman's
+     * node 8 is most of them. */
+    if (A == 0) {
+        for (i = 0; i < cnt; i++) val[i] = 0x00;
+    } else if (A == 1) {
+        for (i = 0; i < cnt; i++) val[i] = 0xff;
+    } else if (A == 2) {                     /* one byte each (0x518c1c)     */
+        if (p + cnt > blen) return 0;
+        for (i = 0; i < cnt; i++) val[i] = body[p + i];
+        p += cnt;
+    } else {                                 /* one byte shared (0x518af4)   */
+        if (p + 1 > blen) return 0;
+        for (i = 0; i < cnt; i++) val[i] = body[p];
+        p++;
+    }
+
+    /* Channel B is walked for its LENGTH and then dropped - see the header. */
+    if (B == 0) {
+        if (p + cnt > blen) return 0;
+        p += cnt;
+    } else {
+        if (B & 0x10) p++;
+        if ((B & 0x0c) == 0x08) {
+            p++;
+        } else if ((B & 0x0c) == 0x0c) {
+            if (!sl) return 0;
+            for (k = 0; k < cnt; k++)
+                p += body[sel + (k >> 3)] >> (k & 7) & 1;
+        }
+    }
+    if (p != blen) return 0;                 /* ★ the whole safety net       */
+    *nout = cnt;
+    return 1;
+}
+
+/* Returns 1 ONLY when the frame was actually published. A refusal returns 0, so
+ * the caller carries on exactly as it did before this function existed - the
+ * old `skipped` counter and PAD_LED_SKIP_LOG keep seeing every frame that
+ * nothing decoded, which is what keeps them comparable with older runs.
+ * wide_decoded/wide_skipped answer the separate question "how did THIS decoder
+ * do", and a frame can honestly appear in both. */
+static int led_wide_publish(unsigned node, unsigned cmd,
+                            const unsigned char *body, unsigned blen)
+{
+    unsigned char idx[96], val[96];
+    unsigned cnt = 0, i;
+
+    if (!(cmd & 0x80) || blen < 1) return 0;
+
+    if (!led_wide_walk(body, blen, cmd, idx, val, &cnt)) {
+        led_map();
+        if (led_shm && led_shm_len >= 8192) led_shm->wide_skipped++;
+        return 0;
+    }
+
+    /* An index the board itself never announced is a parse that landed on a
+     * lamp that does not exist. Only checked when the board DID enumerate -
+     * several of these boards never send the 6-byte walk at all, and a gate
+     * that fails closed on them would put the whole generation back in the
+     * dark for no gain. */
+    if (led_count[node])
+        for (i = 0; i < cnt; i++)
+            if (!led_known[node][idx[i]]) {
+                led_map();
+                if (led_shm && led_shm_len >= 8192) led_shm->wide_skipped++;
+                return 0;
+            }
+
+    led_map();
+    if (!led_shm) return 0;
+    for (i = 0; i < cnt; i++) {
+        led_seen(node, idx[i]);
+        led_shm->val[node][idx[i]] = val[i];
+    }
+    led_shm->decoded += cnt;
+    led_shm->gen++;
+    if (led_shm_len >= 8192) led_shm->wide_decoded++;
+    if (led_dec_log()) {
+        char l[256];
+        int q = 0;
+        q += snprintf(l + q, sizeof l - q,
+                      "[ledwide] node=%u cmd=%02x blen=%u leds=%u v0=%02x idx=",
+                      node, cmd, blen, cnt, val[0]);
+        for (i = 0; i < cnt && q < (int)sizeof l - 8; i++)
+            q += snprintf(l + q, sizeof l - q, "%u,", idx[i]);
+        snprintf(l + q, sizeof l - q, "\n");
+        logmsg(l);
+    }
+    return 1;
 }
 
 static void led_publish(const unsigned char *p, int n)
@@ -8466,8 +8797,6 @@ static void led_publish(const unsigned char *p, int n)
         }
     }
 
-    if (!led_insert_node(node)) return;
-
     /* The boot enumeration: remember which indices this board really has.
      *
      * ORDER IS RECORDED, not just membership. The a6 fade frames carry a
@@ -8476,15 +8805,56 @@ static void led_publish(const unsigned char *p, int n)
      * them in. led_known is a bitmap and cannot answer that; led_order can.
      * Measured: node 9 announces 71 LEDs and a 9-byte bitmap is exactly
      * ceil(71/8), which is the observation that made the bitmap reading
-     * credible in the first place. */
+     * credible in the first place.
+     *
+     * ★ MOVED ABOVE THE INSERT-NODE GATE. It used to sit below it, so a board
+     * outside 1/8/9 could announce its whole lamp list and this recorded none
+     * of it - batman sends 0x84 to node 10 and the very first one was dropped.
+     * The enumeration is the ONLY per-board fact that can contradict a parse,
+     * and led_wide_publish below leans on it for exactly that, so it has to be
+     * collected for every board that offers it. Recording it changes nothing
+     * on its own: led_known is only ever read as a gate. */
+    /* ★ AND IT IS NOT CERTAIN THESE ARE ENUMERATION ON EVERY GENERATION. The
+     * swelf grammar below parses this exact frame - blen 3, one body byte -
+     * as a single-lamp write (0x84 sets it to 0x00, 0x85 to 0xff), and it
+     * consumes the body exactly, so one frame cannot tell the two readings
+     * apart. Enumeration WINS here because it is the reading godzilla's boards
+     * were verified against and the one led_known exists for; the cost if
+     * batman means the other thing is one lamp's level, and the benefit either
+     * way is the same index. So the index is recorded in BOTH places - the
+     * enumeration, and the addressed roster - which is true under either
+     * reading and is what makes the board appear in the window. */
     if (n == 6 && (cmd == 0x84 || cmd == 0x85)) {
         if (p[3] < 96) {
             if (!led_known[node][p[3]] && led_count[node] < 96)
                 led_order[node][led_count[node]++] = p[3];
             led_known[node][p[3]] = 1;
+            led_map();
+            led_seen(node, p[3]);
         }
         return;
     }
+
+    /* THE SWELF-GENERATION DIALECT, tried on every board and BEFORE the
+     * insert-node gate below - see led_wide_publish's header for why it needs
+     * no such gate. It is tried second on nodes 1/8/9, though: the godzilla
+     * shapes below own those boards and keeping their order untouched is what
+     * makes this change a no-op for every title that already worked.
+     *
+     * PAD_LED_WIDE=0 turns it off, which is the one-flag A/B if a title that
+     * was fine before is not. */
+    {
+        static int wide = -1;
+        if (wide < 0) {
+            const char *e = getenv("PAD_LED_WIDE");
+            wide = (e && *e == '0') ? 0 : 1;
+        }
+        if (wide && !led_insert_node(node) && n >= 6 &&
+            led_wide_publish(node, cmd, p + 3, (unsigned)n - 5))
+            return;
+    }
+
+    if (!led_insert_node(node)) return;
     /* ---- THE SERVICE MENU'S OWN SHAPES (cmd 94/95 set, cmd 70 clear) ------
      *
      * Measured on turtles_pro's Diagnostics -> LED Tests -> Single LED Test,
@@ -8847,6 +9217,22 @@ static void led_publish(const unsigned char *p, int n)
         led_shm->fade_head++;     /* AFTER the entry, single writer */
         return;
     }
+    /* LAST, on the insert boards only: the swelf dialect. Everything above is
+     * godzilla's and gets first refusal, so a title that already decoded keeps
+     * decoding exactly as it did - this only ever sees frames that were about
+     * to be counted as skipped anyway. batman's nodes 1, 8 and 9 speak the
+     * same bit-packed family as its nodes 10 and 13, and without this they
+     * would be the one part of its playfield still dark. */
+    {
+        static int wide = -1;
+        if (wide < 0) {
+            const char *e = getenv("PAD_LED_WIDE");
+            wide = (e && *e == '0') ? 0 : 1;
+        }
+        if (wide && led_wide_publish(node, cmd, body, blen))
+            return;
+    }
+
     {
         int is_range = blen == 2
             && body[0] < 96 && led_known[node][body[0]]

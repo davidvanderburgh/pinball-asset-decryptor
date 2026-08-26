@@ -300,7 +300,19 @@ COIL_GEN_OFF = coilmap.GEN_OFF
 #: (u32 guest ms, node, start, end, from, to, rise, fall, pad).
 FADE_HEAD_OFF = COIL_GEN_OFF + 8
 FADE_ENT_OFF, FADE_STRIDE, FADE_RING = FADE_HEAD_OFF + 4, 12, 96
-PADLED_READ = FADE_ENT_OFF + FADE_RING * FADE_STRIDE
+#: Version 4, the ADDRESSED plane (padled.h): one byte per (node, index) the
+#: wire has spoken to, whether or not that frame carried a level. It answers
+#: the membership question `val` only ever answered by accident - a lamp had to
+#: be LIT while somebody was watching to earn a cell - and on the swelf
+#: generation half the lamp commands carry no level at all, so without this
+#: whole boards stay invisible however long the run.
+SEEN_OFF = FADE_ENT_OFF + FADE_RING * FADE_STRIDE
+WIDE_DECODED_OFF = SEEN_OFF + 16 * LED_IDX
+WIDE_SKIPPED_OFF = WIDE_DECODED_OFF + 4
+#: What a version-3 shim publishes, and the most a version-3 FILE can hold.
+#: Kept as its own number because the reader must still work against one.
+PADLED_READ_V3 = SEEN_OFF
+PADLED_READ = WIDE_SKIPPED_OFF + 4
 
 #: How long a coil marker stays lit after its fire counter moves. A coil pulse
 #: is ~30 ms and a 50 ms poll would show it for one frame or miss it; this is a
@@ -3257,17 +3269,27 @@ class LedGrid(LedRing):
         insert boards are decoded today - this deliberately does NOT hard-code
         which those are, so a shim that starts decoding another board shows up
         here with no change.
+
+        ★ `seen` IS SCANNED TOO, AND IT IS THE HALF THAT MAKES A BOARD APPEAR.
+        `val` only ever shows a lamp that is LIT RIGHT NOW, so the roster it
+        builds is really "lamps that happened to be on while somebody was
+        watching" - and on the swelf generation (batman) that is not a roster
+        at all: half its lamp commands address a set of LEDs and carry no level
+        byte, and its brightest boards spend most of attract at zero. Version 4
+        publishes the membership answer directly, so a board earns its cells
+        from being SPOKEN TO. Missing on a version-3 block, which is why the
+        slice is length-checked rather than assumed.
         """
         grew = False
         for node in range(coilmap.NODES):
-            base = LED_HDR + node * LED_IDX
-            s = d[base:base + LED_IDX]
-            if len(s) < LED_IDX or s.count(0) == LED_IDX:
-                continue
-            for idx, v in enumerate(s):
-                if v and (node, idx) not in self.seen:
-                    self.seen.add((node, idx))
-                    grew = True
+            for base in (LED_HDR + node * LED_IDX, SEEN_OFF + node * LED_IDX):
+                s = d[base:base + LED_IDX]
+                if len(s) < LED_IDX or s.count(0) == LED_IDX:
+                    continue
+                for idx, v in enumerate(s):
+                    if v and (node, idx) not in self.seen:
+                        self.seen.add((node, idx))
+                        grew = True
         return grew
 
     def _rebuild(self):
@@ -3391,9 +3413,18 @@ class LedGrid(LedRing):
             if key not in self.seen:
                 self.seen.add(key)
                 grew = True
-        # Discovery over val[] is gated on the block's own write counter, so an
-        # idle rig costs one unpack per tick instead of a scan of every board.
+        # Discovery is gated on the block's own write counters, so an idle rig
+        # costs two unpacks per tick instead of a scan of every board. BOTH
+        # counters, because they move independently: a swelf frame that
+        # addresses lamps without setting a level grows `seen` and leaves
+        # `decoded` exactly where it was, and gating on `decoded` alone would
+        # leave those cells undiscovered until some other frame happened to
+        # move it. wide_decoded is absent on a version-3 block - hence the
+        # length check rather than a version test, which is the same shape the
+        # rest of this reader uses.
         dec = struct.unpack_from("<I", d, LED_DECODED_OFF)[0]
+        if len(d) >= PADLED_READ:
+            dec += struct.unpack_from("<I", d, WIDE_DECODED_OFF)[0]
         if dec != self._decoded:
             self._decoded = dec
             grew = self._discover(d) or grew

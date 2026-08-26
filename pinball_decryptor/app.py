@@ -76,6 +76,91 @@ def _resolve_startup_manufacturer(manufacturers, settings):
                  if getattr(m, "key", None) == last), None)
 
 
+#: Title for both "assignments belong to another folder" warnings (Build and
+#: Export Mod Pack).  Deliberately not "Replacements won't be applied": the
+#: folder being built usually has recorded replacements of its own that DO get
+#: applied, and the old title called that build unmodified.
+MISMATCH_TITLE = "Replacements from another folder"
+
+
+def recorded_replacement_counts(assets_dir, kinds):
+    """``{kind: n}`` of replacements *assets_dir* has recorded in its own
+    ``.staged_changes.json``, for each of *kinds* that has any.
+
+    The Build / Export flows fall back to that sidecar whenever the Replace
+    tabs' in-memory assignments belong to a different folder
+    (``App._sidecar_pending``), so this is what will actually be applied when
+    the folder-mismatch warning fires.  Counts the recorded entries rather than
+    the live ones: resolving "live" means re-scanning every slot, far too slow
+    for a warning the user is waiting on.
+    """
+    from .core import staged_changes
+    saved = staged_changes.load(assets_dir)
+    out = {}
+    for kind in kinds:
+        entries = saved.get(kind)
+        if not isinstance(entries, dict):
+            continue
+        n = sum(1 for path in entries.values()
+                if isinstance(path, str) and path)
+        if n:
+            out[kind] = n
+    return out
+
+
+def replacement_mismatch_message(assets_dir, mismatches, recorded,
+                                 action="build"):
+    """Body text for the Build / Export "these assignments were made against
+    another folder" warning.
+
+    *mismatches* is ``MainWindow.replacement_folder_mismatches()`` output —
+    ``[(kind, count, folder), ...]``; *recorded* is
+    :func:`recorded_replacement_counts` for *assets_dir*.
+
+    Three things the first version of this dialog got wrong, all of which put a
+    user in front of a modal he could not act on (PAD-89, screenshot):
+
+    - it named the folder the assignments belong to but NOT the one being
+      built, so the two paths could not be compared — which is the only thing
+      the dialog is about;
+    - it told him to "point the assets folder at the path above", but no tab
+      has an editable assets folder.  Every tab's row is a read-only mirror of
+      the Extract tab's "Project Folder" (batch 19), so that is the field to
+      name; and
+    - it said the build "produces an image WITHOUT those changes" even when the
+      folder being built has its own recorded replacements, which the build
+      does apply from the sidecar.
+    """
+    is_build = action == "build"
+    verb = "building" if is_build else "exporting"
+    doing = "Building" if is_build else "Exporting"
+    applies = "the build applies" if is_build else "the export includes"
+    left_out = "applied" if is_build else "included"
+    lines = "\n".join(
+        f"  • {n} {kind} replacement(s) — assigned for:\n        {folder}"
+        for kind, n, folder in mismatches)
+    own = ", ".join("%d %s" % (recorded[kind], kind)
+                    for kind, _n, _f in mismatches if kind in recorded)
+    if own:
+        verdict = (f"The folder you're {verb} has replacements of its own "
+                   f"recorded ({own}) and {applies} those.  The ones listed "
+                   f"above are not {left_out}.")
+    else:
+        product = "an image" if is_build else "a mod pack"
+        verdict = f"{doing} now produces {product} WITHOUT those changes."
+    n_folders = len({folder for _k, _n, folder in mismatches})
+    that_one = ("that folder" if n_folders == 1 else "one of those folders")
+    return (f"Your Replace-tab assignments were made against a different "
+            f"project folder than the one you're {verb}.\n\n"
+            f"{doing} from:\n        {assets_dir}\n\n"
+            f"{lines}\n\n"
+            f"{verdict}\n\n"
+            f"To {'build' if is_build else 'export'} {that_one} instead, set "
+            f"\"Project Folder\" on the Extract tab to it — every other tab "
+            f"follows that field.\n\n"
+            f"{'Build' if is_build else 'Export'} anyway?")
+
+
 class App:
     def __init__(self):
         # Expose the bundled ffmpeg (imageio-ffmpeg, in the frozen Mac/Linux
@@ -1591,19 +1676,12 @@ class App:
         # before we do all the work.
         mismatches = self.window.replacement_folder_mismatches(assets_dir)
         if mismatches:
-            lines = "\n".join(
-                f"  • {n} {label} replacement(s) — assigned for:\n        {folder}"
-                for label, n, folder in mismatches)
+            recorded = recorded_replacement_counts(
+                assets_dir, [kind for kind, _n, _f in mismatches])
             if not messagebox.askyesno(
-                "Replacements won't be applied",
-                "You assigned replacement(s) on the Replace tab(s), but they "
-                "were made against a different folder than the \"Modified "
-                "assets folder\" you're building:\n\n"
-                f"{lines}\n\n"
-                f"Building now produces an image WITHOUT those changes.  To "
-                f"apply them, point the assets folder at the path above (or "
-                f"re-assign for this folder).\n\n"
-                "Build anyway?"):
+                MISMATCH_TITLE,
+                replacement_mismatch_message(assets_dir, mismatches, recorded,
+                                             action="build")):
                 return
 
         # Validate a manual update-version date (BOF, Auto unchecked).
@@ -2056,19 +2134,12 @@ class App:
         # than the one being exported would silently stay out of the pack.
         mismatches = self.window.replacement_folder_mismatches(assets_dir)
         if mismatches:
-            lines = "\n".join(
-                f"  • {n} {label} replacement(s) — assigned for:\n        {folder}"
-                for label, n, folder in mismatches)
+            recorded = recorded_replacement_counts(
+                assets_dir, [kind for kind, _n, _f in mismatches])
             if not messagebox.askyesno(
-                "Replacements won't be included",
-                "You assigned replacement(s) on the Replace tab(s), but they "
-                "were made against a different folder than the \"Modified "
-                "assets folder\" you're exporting:\n\n"
-                f"{lines}\n\n"
-                f"Exporting now produces a mod pack WITHOUT those changes.  "
-                f"To include them, point the assets folder at the path above "
-                f"(or re-assign for this folder).\n\n"
-                "Export anyway?"):
+                MISMATCH_TITLE,
+                replacement_mismatch_message(assets_dir, mismatches, recorded,
+                                             action="export")):
                 return
 
         zip_path = filedialog.asksaveasfilename(

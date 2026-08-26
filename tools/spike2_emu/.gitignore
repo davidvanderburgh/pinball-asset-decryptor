@@ -13,6 +13,10 @@
 # artwork into $PAD_TABLES (under the rootfs, see padpath.py) - so the rule is
 # now true rather than merely unnoticed.
 *.png
+# ...EXCEPT the measured villain-board still sets (lcdstills.py sources
+# them from here): footage-derived images that exist in no card store,
+# curated per title. These are inputs, not build products.
+!stills/*/*.png
 
 # Derived per-title tables, if anyone points PAD_TABLES back in here.
 games/

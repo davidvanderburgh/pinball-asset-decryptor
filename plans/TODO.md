@@ -84,6 +84,58 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **84. Capture the batman VILLAIN VISION board image set + id map from the
+      `UPDATE TV IMAGES` service upload — the byte-exact, card-only source.**
+      `S2 D5` *(Spawned from item 83 on 2026-08-26 — David's architecture
+      call: the board has its own image store, written from the card by the
+      service menu; the wire sends only an id. Item 83 ships a CARD-ONLY
+      approximation, 5 stills mapped from card store frames; this item is the
+      complete, exact set + every id binding.)*
+      **WHY THE EASY PATHS ARE RULED OUT (static RE done this pass, no run):**
+      the board images for the 2 game-rendered cards + 5 signs/portraits are
+      in NO card store that unpacks to disk — exhaustive: all 245,828 frames
+      of all 3,069 `137.asset` clips, all 752 lcd scene textures >=100x60,
+      both `2.asset` stores, the app's whole extraction (`~/Desktop/bm`,
+      7,795 pngs), and `image.bin`'s only 4 decodable embedded JPEGs. The one
+      image blob on the card is `image.bin` (2 GB, the app's master
+      container); the board set is a packed/rendered section of it the normal
+      extractor skips. The service routine can't be located statically: the
+      menu is INDEX-driven — its strings (`UPDATE TV IMAGES` rodata 0x55cb0c,
+      `NO UPDATE AVAILABLE`, `UPDATE STATUS...`, `ELAPSED TIME`, `UPDATE
+      COMPLETE/FAILED`, all confirmed present) are referenced through
+      localization pointer-tables (file 0x6f74a0+), NOT by literal-pool or
+      MOVW/MOVT from `.text` (all scanned, zero hits) and NOT by a stored
+      callback pointer (0x6ff580 is referenced nowhere). No existing capture
+      has the flow — it only appears when the service menu is driven.
+      **THE KEY INSIGHT that makes it feasible: WE EMULATE THE BOARD.**
+      "NO UPDATE AVAILABLE" is a version/checksum gate — the emulated node 24
+      reports its image version, the game compares to `image.bin`'s, they
+      match, upload skipped. Since nodebus.py/hwshim IS node 24, make it
+      report a STALE/zero image version and the game will perform the upload.
+      **THE PLAN (turnkey, needs the rig free + service-menu nav):**
+      (1) find which node-24 query/reply carries the board image version —
+      it reveals itself in the live exchange around the menu (the non-f2
+      node-24 cmds are 11/f0/f1/f9/fc/fe = LCD sub-control, none is obviously
+      it, so watch the service-menu handshake); (2) hook nodebus.py to answer
+      that query stale; (3) drive the service menu to Diagnostics > UPDATE TV
+      IMAGES > PRESS ENTER TO BEGIN via service-button switch inputs
+      (`SERVICE MENU`/`EXIT SERVICE MENU`/`FG_DIAGNOSTICS_DISPLAY` strings
+      confirm the path); (4) log ALL channels during the upload — node bus
+      AND SPI (the ELF has real SpiVideoStreamDecoder classes and
+      `/dev/spidev`; the images may stream over SPI, not the 200-byte node
+      bus); (5) the payload IS the board set + id bindings, byte-exact, from
+      the card. Then lcdstills maps every id from that capture and the panel
+      shows the real board set with zero footage and nothing distributed.
+      **Acceptance:** every attract + game board still on David's videos is
+      reproduced from a card-derived image the rig extracted itself (no
+      footage, no committed asset), each keyed by its wire id.
+      — S2: the display already works (item 83, card-only approximation); this
+      upgrades approximate/absent stills to exact and completes the map, but
+      nobody loses a run without it. D5: live capture, service-menu
+      navigation, an undecoded update protocol possibly spanning node bus +
+      SPI, and a board-version hook across nodebus/shim — budget more than one
+      pass.
+
 - [x] **61. godzilla_le draws the switch list, and it has a complete playfield
       layout the whole time.** `S2 D1` DONE 2026-08-21.
       *(Filed and fixed the same session, from David looking at a live

@@ -75,24 +75,34 @@
  * mirror does show - the commanded clip, the cadence, the fade, the
  * one-shot hold - is now verified against the machine itself.
  *
- * ★ THE ANCHOR + WALK (2026-08-25, the same video pinned frame-level).
- * David's machine had just ended a game, and its attract TV walks the
- * PLAYED EPISODE: the Riddler talking is store id 46 and the Batmobile
- * passing the "Gotham City 14 MILES" sign is store id 27 frames 45..67
- * (normalized correlation 0.84 on the sign - one clip covering both,
- * ~10 s, which is why that segment holds longer than the others). Neither
- * id is in the fixed 11-clip boot-attract rotation (2, 54, 720, 591, 601,
- * 1605, 1736, 2066, 2359, 3004, 3026 - full cycle 62.7 s, read off the
- * item-82 lcdcap capture), but both are S1E001 - the same episode as
- * asset 54, the ONE id the wire re-commands every ~5.2 s through a game
- * and after it. So the wire names an ANCHOR and the real display WALKS
- * the anchor's episode; the advance is internal (the game-side player on
- * the disabled render path - its completion callback is what steps the
- * playlist), which is why this rig's wire can only ever repeat the
- * anchor. The panel reconstructs the walk from the anchor + names.txt
- * families (playfield.py LcdPanel, "the reel"); the real machine's exact
- * walk ORDER is NOT established (the video shows 46 then 27, not
- * ascending) and ascending family order is the recorded approximation. */
+ * ★ THE BOARD IS AN ID -> STILL LOOKUP (2026-08-26, two tripod videos of
+ * the real machine - a full attract cycle and a game - segmented and
+ * matched frame-level; David's own find of the service menu's "update
+ * the images" diagnostic under TV settings is the mechanism). The
+ * display NEVER PLAYS VIDEO: it holds one stored still per command and
+ * FADES between them (~0.3 s, the wire's fade code; every "motion"
+ * reading before this was transition fades + glare, and the one
+ * "clip 27 advanced f45->f67" claim was two adjacent STILLS both
+ * sampled from clip 27). The attract cycle is 11 stills at ~5.3 s on a
+ * 62.7 s loop - the same count and period as the wire's 11-command
+ * rotation (2, 54, 720, 591, 601, 1605, 1736, 2066, 2359, 3004, 3026,
+ * item-82 lcdcap) - and the alignment anchor is the GAME: all of
+ * gameplay rests on the green BATMAN logo card while the wire hammers
+ * asset 54, so 54 = logo and the rest follow in cycle order:
+ * 2=Game Over card, 720=Riddler, 591=Batmobile, 601=Gotham City sign,
+ * 1605=umbrella-shop sign, 1736=Penguin, 2066=Gotham State
+ * Penitentiary, 2359=Joker, 3004=fur-shop sign, 3026=Catwoman; the
+ * game-start block 919..928 = the "IN COLOR" title card, and event
+ * cards (BALL SAVE, seen mid-game) are further ids not yet observed on
+ * this rig's wire. Cross-check: the first attract command after boot is
+ * 2 - the machine opens attract on the Game Over card, exactly as
+ * filmed. lcdstills.py carries the id->still table with per-entry
+ * provenance; the byte-exact uploaded set is capturable by running that
+ * TV-settings diagnostic ON THIS RIG with the wire logged (recorded in
+ * TODO - it would replace the pinned frames wholesale and name every
+ * mapped id, not just the 13 observed). An earlier note here read the
+ * hammer as an anchor+episode-WALK; the walk was this attract cycle
+ * stepping, and the reel it justified is deliberately gone. */
  *
  * ★ VERSION 3 STOPS NAMING FIELDS WE HAVE NOT PROVEN. v1 invented three
  * displays. v2 fixed that but replaced one guess with another: it read the

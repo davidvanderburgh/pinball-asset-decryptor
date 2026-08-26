@@ -258,6 +258,14 @@ if [ -n "$LCD_NODE" ]; then
             echo "[watch] villain card: attract logo pulled from the card's scene textures"
         fi
     fi
+    # THE STILL SET (item 83): the board holds one stored still per
+    # command id and never plays video - measured from machine footage;
+    # lcdstills.py carries the table and each entry's provenance. The
+    # map's existence is what switches the panel to stills mode, so this
+    # runs even when cached (it prints the mapped/pinned count).
+    if python3 "$RIG/lcdstills.py" "$GAME" 2>/dev/null | grep -q mapped; then
+        echo "[watch] villain stills: board still set derived ($GAME)"
+    fi
 fi
 #
 # THE SWITCH LIST IS PASSED TOO, as the fallback for a title whose device table

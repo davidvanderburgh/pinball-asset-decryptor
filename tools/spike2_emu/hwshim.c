@@ -8596,8 +8596,8 @@ ringed:
      * SEND (0x37e484), it is the game's own habit. The echo stays only
      * because a correct-length reply keeps a raw bus dump readable.)
      * NOTE decoded++ fires ONLY for the play family above - never the 60 Hz
-     * poll - which is what lets the panel read "decoded moved, command
-     * unchanged" as a re-command BEAT (playfield.py: the reel). */
+     * poll - so a reader can tell "the game re-commanded the display"
+     * from "the block merely re-read". */
 }
 
 /* Budgeted like the skip log, and off unless PAD_LED_DEC_LOG is set. A run

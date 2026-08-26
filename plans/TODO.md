@@ -5766,6 +5766,57 @@ These have each been violated at least once and each cost a run or a window:
       at the LCD board / CPU node chain) filmed simultaneously, synced
       by aligning the wire's brightness-0 events with the video's black
       frames - that one closes id<->display correspondence for good.
+
+      **UPDATE 20 (2026-08-26) — THE DISPLAY MODEL IS SOLVED: the board
+      is an ID -> STILL LOOKUP, and the panel now replicates David's
+      footage. He delivered both tier-1 videos (bm attract.mp4 90 s /
+      bm gameplay.mp4 35 s, tripod, close) plus the decisive find: a
+      service-menu diagnostic under TV settings that UPDATES THE BOARD'S
+      IMAGES.** Aligned/segmented/matched (template-match per frame vs
+      the set's own bezel, screen crops, ±2 px realigned diffs):
+      **(a) STILLS, David was right** — every attract segment's internal
+      motion sits at the static logo segment's own noise floor; "clip 27
+      advanced f45->f67" (yesterday's motion proof) was two adjacent
+      STILLS both sampled from clip 27. Transitions are ~0.3 s FADES
+      (no full black at 3 fps). **(b) The attract cycle is 11 stills /
+      62.7 s — one-for-one with the wire's 11-command rotation:**
+      Penguin, Penitentiary, Joker, fur sign, Catwoman, GAME OVER card,
+      GREEN LOGO card, Riddler, Batmobile, Gotham sign, umbrella sign.
+      **(c) Gameplay anchors the alignment:** game start = IN COLOR
+      title card (the wire's 919..928 block), the whole game RESTS on
+      the logo (the wire's 54-hammer), BALL SAVE card on the event, back
+      to logo. So 54=logo and every slot follows in cycle order; the
+      PXL video's post-game sequence = wire commands 2,54,720,591,601
+      exactly, and the first attract command after boot is 2 = the Game
+      Over card, as filmed. **DELETED as disproven: the reel (UPDATE 18's
+      episode-walk was this attract cycle misread) and the attract-entry
+      logo interlude (the logo is simply id 54's still).**
+      **BUILT:** `lcdstills.py` derives `<tables>/<game>/lcd/stills/`
+      + `map.txt` (id/file/label; provenance per entry in the script);
+      panel stills mode — the map's existence switches it: id selects a
+      cached still, block selects by FIRST id, nothing animates, name
+      label shows the still's label, filmstrip records swaps once;
+      unmapped ids fall back to the clip's still FRAME (never motion);
+      titles without a map keep the old clip player. Still sources:
+      4 pinned store frames (27.f45 Batmobile / 27.f65 Gotham sign /
+      305.f21 Joker / 503.f0 Catwoman, eyeball-verified), the logo scene
+      texture, and 7 median-stacked footage crops (Game Over + IN COLOR
+      + the five the EXHAUSTIVE sweep proved absent from the store —
+      all ~200k frames of all 3,069 clips top out at wrong-content noise
+      for Penguin/Penitentiary/fur/Riddler/umbrella, so the board's set
+      is authored from footage the store never sampled; David's video
+      pixels are the honest source until the upload is captured).
+      50 tests green across the three LCD suites (5 new stills tests
+      replace 7 reel/logo tests).
+      **THE UPGRADE PATH, not yet run:** David's diagnostic on OUR rig —
+      navigate the emulated game's service menu to TV settings > update
+      images with the nb wire logged; the upload names every mapped id
+      and carries the board's byte-exact stills (run3's "3,416-frame f2
+      update walk" from item 82 is hereby CORRECTED: those frames are
+      the plain 60 Hz 0x90 poll — no upload has ever been captured).
+      That capture would also name the BALL SAVE / event-card ids the
+      footage shows but our wire has not yet sent. Worth its own pass.
+      **Rig state: card unmounted, lock released, no runs.**
       **BUILT (padled's conventions throughout):** padlcd.h (one page:
       magic/gen/id[4]/ms[4] + a 64-entry raw ring for RE); hwshim.c
       lcd_publish() beside led_publish, gated on PAD_LCD_NODE; watch.sh

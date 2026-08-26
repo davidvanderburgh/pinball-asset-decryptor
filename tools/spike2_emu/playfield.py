@@ -3583,42 +3583,27 @@ class LcdPanel:
     #: Re-ask backoff for lcdart, seconds. One subprocess per minute per id
     #: whose art is still missing - see _show.
     ASK_S = 60.0
-    #: THE REEL (2026-08-25, from David's video of the real machine). While
-    #: a game is on, the wire re-commands ONE anchor clip every ~5.2 s
-    #: (verb 2, byte-identical) - and the real Villain Vision does NOT sit
-    #: on that clip: the video shows it walking on through the anchor's own
-    #: episode (S1E001: the Riddler talking = id 46, then the Batmobile
-    #: passing the "Gotham City 14 MILES" sign = id 27, matched frame-level
-    #: at 0.84 against the card's own clips). The game-side player that
-    #: would advance that playlist internally is the disabled secondary
-    #: render path (padlcd.h), so on this rig the anchor is all the wire
-    #: ever says. The panel reconstructs the walk: when a re-command BEAT
-    #: arrives (decoded counter moved, command unchanged) and the current
-    #: clip has PLAYED THROUGH, it advances to the next clip in the
-    #: anchor's episode family (names.txt order, wrapping). The
-    #: finished-clip guard is what reproduces the real machine's variable
-    #: 5-10 s holds - a long clip skips a beat, exactly as the video shows
-    #: id 27 holding ~10 s - and it is also what makes the 250 ms
-    #: double-issue harmless (the new clip has never finished 250 ms in).
-    #: The wire stays authoritative: any CHANGED command drops the reel on
-    #: the spot. The exact episode order the real machine uses is not
-    #: established (the video walked 46 then 27, which is not ascending);
-    #: ascending family order is the admitted approximation.
-    #:
-    #: THE LOGO CARD is the same video's other lesson: at attract entry the
-    #: real set holds the green BATMAN card ~5 s before the first clip
-    #: (t=3-7 s, right after Game Over + a black beat). The card is a SCENE
-    #: TEXTURE (David found it: radimg_Shape_1280x720, the card's only
-    #: 1280x720 lcd texture - lcdlogo.py derives it), drawn by the same
-    #: disabled render path, so the wire never names it. The panel shows it
-    #: for one beat when a long same-command hammer BREAKS to a new single
-    #: asset - the wire shape of leaving a game for attract. Admitted
-    #: approximation: a mid-game clip change after >=HAMMER_BEATS quiet
-    #: beats gets the card too; the wire alone cannot tell those apart
-    #: (recorded in TODO; a synced real-machine capture is the instrument
-    #: that would).
-    LOGO_S = 5.2                    # one attract beat, the video's hold
-    HAMMER_BEATS = 3                # ~16 s of re-commands = "a game is on"
+    #: THE BOARD IS AN ID -> STILL LOOKUP (2026-08-26, David's two tripod
+    #: videos of the real machine, segmented and matched frame-level; his
+    #: own find of the service menu's "update the images" diagnostic under
+    #: TV settings is the mechanism). The Villain Vision never plays
+    #: video: it holds ONE STILL per command, fading between them. The
+    #: attract cycle is 11 stills at ~5.3 s on a 62.7 s loop - the same
+    #: count and period as the wire's 11-command rotation - and the
+    #: alignment is anchored by the GAME: the whole of gameplay rests on
+    #: the green BATMAN logo card while the wire hammers asset 54, so
+    #: 54 = logo, and every other slot follows in cycle order (map.txt in
+    #: <art>/stills, derived by lcdstills.py, carries the table and each
+    #: entry's provenance). Two of yesterday's reconstructions died to
+    #: this measurement and are deliberately gone: the episode-walk "reel"
+    #: (the walk WAS the attract cycle stepping) and the attract-entry
+    #: logo interlude (the logo is simply id 54's still - the map shows
+    #: it wherever the wire commands 54, game and attract both, which is
+    #: exactly what the machine does). The stills themselves are frames
+    #: of the card's own clip store / scene textures, pinned by match
+    #: score against the footage; the board's byte-exact uploaded set is
+    #: capturable via that diagnostic on this rig and would replace the
+    #: pins wholesale (recorded in TODO).
     #: THE DISSOLVE. Every brightness swap on the wire carries fade code 15
     #: and the real set visibly FADES through clip changes - David watched
     #: both and called ours out ("still frames with a slideshow fade
@@ -3643,13 +3628,9 @@ class LcdPanel:
         self.state = None           # (asset, aux, rate, verb)
         self.cycle = None           # (first, last) while a block command is live
         self.bright = 255           # last 0x80 brightness; <128 blanks the screen
-        self.reel = None            # reconstruction: the clip the reel walked to
-        self._dec = None            # decoded counter last poll (the beat detector)
-        self._beats = 0             # consecutive re-command beats (the hammer)
-        self._fams = None           # id -> its family's sorted ids, from names
-        self._logo_img = None       # the composed green BATMAN card, if derived
-        self._logo_tried = False
-        self._logo_until = 0.0      # while now < this, the logo card is up
+        self.stillmap = None        # {id: (file, label)} from stills/map.txt;
+        self._map_tried = False     # non-empty = this display is a stills board
+        self._still_imgs = {}       # id -> composed PhotoImage, loaded once
         self._scr_pil = None        # PIL of the picture on screen (for _fade)
         self._fadeq = []            # pending dissolve steps, one per poll
         self._fade_ref = None       # current step's PhotoImage (keep-alive)
@@ -3898,53 +3879,20 @@ class LcdPanel:
         cmd = (asset, aux, rate, verb)
         changed = cmd != self.state
         self.state = cmd
-        # THE BEAT DETECTOR: the shim bumps `decoded` only for play-family
-        # frames (never the 60 Hz poll), so "decoded moved, command
-        # unchanged" is exactly the game re-commanding the display - the
-        # ~5.2 s hammer a game holds the anchor clip with. The class
-        # docstring (LOGO_S) carries what the reel and the logo card do
-        # with it and which video measurement each rests on.
-        beat = (not changed and self._dec is not None and _dec != self._dec)
-        self._dec = _dec
         # ONE display (padlcd.h documents why: display count 1, and all 299
         # LCD call sites pass the same device), and ONE asset field - the
         # dispatcher hands that struct field to the one-asset builder as
-        # THE asset. When the companion u32 names a LARGER id, the pair is
-        # treated as the inclusive clip block asset..aux and _animate
-        # cycles it: the game's own duration helper (0x37e2fc) computes
-        # (last - first + 1) x a period for exactly such a pair, and the
-        # pairs seen live are consecutive blocks of real clips (919..928 in
-        # attract, 54..928 at game start). What the BOARD does per clip is
-        # still unverified - the cycle plays each clip through once, which
-        # is the plainest reading of a count-of-clips duration.
-        self.cycle = (asset, aux) if asset and aux > asset else None
-        if changed:
-            if (self._beats >= self.HAMMER_BEATS and asset
-                    and not self.cycle):
-                # Leaving a hammer for a new single clip: the wire shape of
-                # game -> attract. The card first, like the real set.
-                self._load_logo()
-                if self._logo_img is not None:
-                    self._logo_until = now + self.LOGO_S
-            self._beats = 0
-            self.reel = None        # a new command always wins
-        elif beat:
-            self._beats += 1
-            if verb == 2 and asset and not self.cycle and self._reel_done():
-                nxt = self._reel_next(self.reel or asset)
-                if nxt is not None:
-                    self.reel = nxt
-        if self._logo_until:
-            if now < self._logo_until:
-                self._draw(self._logo_img)
-                self._caption()
-                return              # the card holds; the wire keeps ticking
-            self._logo_until = 0.0
-            if self.id:             # repaint what the card was covering
-                self._show(self.id)
-        if self.reel is not None and not changed:
-            want = self.reel
-        elif changed or not self.cycle:
+        # THE asset. On a STILLS board (the map exists - see the class
+        # docstring) the id selects a stored still and nothing cycles; a
+        # block command selects by its FIRST id, which is measured: the
+        # game-start block 919..928 is the "IN COLOR" title card on the
+        # machine. Without a map, a companion u32 naming a LARGER id is
+        # still treated as the inclusive clip block asset..aux and
+        # _animate cycles it (the game's own duration helper 0x37e2fc
+        # computes (last - first + 1) x a period for exactly such a pair).
+        self.cycle = ((asset, aux) if asset and aux > asset
+                      and not self._map() else None)
+        if changed or not self.cycle:
             want = asset
         else:
             # Mid-block the drawn id has advanced past the first clip ON
@@ -3986,11 +3934,6 @@ class LcdPanel:
                 what += " · showing %d" % self.id
         elif asset:
             what = "asset %d" % asset
-            # The wire half stays the wire's truth; the reel is the
-            # panel's reconstruction and is NAMED as its own thing, so a
-            # photo of this caption can still catch a wrong reading.
-            if self.reel is not None and self.reel != asset:
-                what += " · reel: %d" % self.reel
         else:
             what = "idle"
         extra = []
@@ -4001,12 +3944,13 @@ class LcdPanel:
         txt = " · ".join(x for x in [what, how] + extra if x)
         if self.cap["text"] != txt:
             self.cap.configure(text=txt)
-        # The name label names what is ON SCREEN - during the attract-entry
-        # interlude that is the card, not the commanded clip.
-        if self._logo_until:
-            nm = "logo card"
-        else:
-            nm = self._name_for(self.id) if self.id else ""
+        # The name label names what is ON SCREEN: the board still's own
+        # label when the map has the id, the clip's episode+timecode when
+        # it does not.
+        nm = ""
+        if self.id:
+            hit = self._map().get(self.id)
+            nm = hit[1] if hit else self._name_for(self.id)
         if self.nm is not None and self.nm["text"] != nm:
             self.nm.configure(text=nm)
 
@@ -4114,6 +4058,11 @@ class LcdPanel:
                                        font=("Consolas", 7))
 
     def _show(self, i):
+        # A stills board first: the mapped still IS the display for this
+        # id (measured - see the class docstring). Only an unreadable
+        # still file falls through to the clip-art path below.
+        if i and i in self._map() and self._show_still(i):
+            return
         # Ask lcdart.py for whatever this id is missing, at most once per
         # ASK_S per id. Checked against BOTH artifacts: a cache from before
         # the GIF stage existed has the still but not the motion, and the
@@ -4214,71 +4163,73 @@ class LcdPanel:
             return self.id if verb == 2 else first
         return self.id + 1
 
-    def _reel_done(self):
-        """Has the clip on screen played through? The reel only ever steps
-        past a FINISHED clip - that guard is what turns the game's rigid
-        5.2 s hammer into the real machine's variable holds (a 10 s clip
-        rides through one beat un-advanced), and what makes the 250 ms
-        double-issue a no-op. A clip that has not landed stalls the reel
-        on its anchor - it heals through lcdart like everything else here.
-        A dead (undecodable) clip counts as finished, so one bad file
-        cannot wedge the walk."""
-        a = self.anim
-        if a is None:
-            return False
-        return bool(a.get("dead")) or a["i"] >= a["n"]
+    def _map(self):
+        """{id: (path, label)} from <art>/stills/map.txt, loaded once.
+        Non-empty means this display is a STILLS BOARD (the class
+        docstring carries the measurement) and the panel selects stored
+        stills instead of playing clips. Absent is every other title, and
+        the panel behaves exactly as before the map existed."""
+        if not self._map_tried:
+            self._map_tried = True
+            self.stillmap = {}
+            path = os.path.join(self._art, "stills", "map.txt")
+            try:
+                with open(path, encoding="utf8") as f:
+                    for ln in f:
+                        if ln.startswith("#") or not ln.strip():
+                            continue
+                        parts = ln.rstrip("\n").split("\t")
+                        if len(parts) >= 3 and parts[0].isdigit():
+                            self.stillmap[int(parts[0])] = (parts[1], parts[2])
+            except OSError:
+                pass
+        return self.stillmap
 
-    def _reel_next(self, i):
-        """The clip after i in its own episode family, wrapping - "family"
-        is the name's prefix before the first dot (S1E001_Clips...), which
-        is the card's own grouping of the store into episodes. None when
-        there is no names table or i is not in it: without the card's own
-        grouping there is nothing honest to walk."""
-        fam = self._families().get(i)
-        if not fam or len(fam) < 2:
-            return None
-        return fam[(fam.index(i) + 1) % len(fam)]
-
-    def _families(self):
-        """id -> the sorted id list of its family, built once from the
-        names table (names.txt ids are the store's, so family order is the
-        episode's own timecode order)."""
-        if self._fams is None:
-            self._name_for(0)               # ensures names.txt is loaded
-            by = {}
-            for i, nm in (self.names or {}).items():
-                by.setdefault(nm.partition(".")[0], []).append(i)
-            self._fams = {}
-            for ids in by.values():
-                ids.sort()
-                for i in ids:
-                    self._fams[i] = ids
-        return self._fams
-
-    def _load_logo(self):
-        """The green BATMAN attract card, composed for the screen, once.
-        lcdlogo.py derives <art>/logo.png from the card's own unique
-        1280x720 lcd texture at run start; absent (any other title, or no
-        PIL to fit it with) is normal and means no interlude is drawn."""
-        if self._logo_tried:
-            return
-        self._logo_tried = True
-        if _PILImage is None:
-            return
-        try:
-            pil = _PILImage.open(os.path.join(self._art, "logo.png"))
-        except OSError:
-            return
-        if self.tv is not None:
-            self._logo_img = self._compose(pil)
-            return
-        # No TV sprite: fit to the bare screen, aspect kept, like _compose.
-        s = min(self.CW / pil.width, self.CH / pil.height)
-        nw, nh = max(1, int(pil.width * s)), max(1, int(pil.height * s))
-        out = _PILImage.new("RGB", (self.CW, self.CH), (0, 0, 0))
-        out.paste(pil.convert("RGB").resize((nw, nh)),
-                  ((self.CW - nw) // 2, (self.CH - nh) // 2))
-        self._logo_img = _PILImageTk.PhotoImage(out)
+    def _show_still(self, i):
+        """Draw the board still the map holds for id i. The PhotoImage is
+        composed once and cached - stills swap every ~5 s and re-reading
+        a 1280x720 card per swap would be pure waste. Returns False when
+        the mapped file is unreadable, so the caller can fall back to the
+        clip art rather than leave the placeholder up."""
+        img = self._still_imgs.get(i)
+        if img is None:
+            path = os.path.join(self._art, "stills", self._map()[i][0])
+            if _PILImage is not None:
+                try:
+                    pil = _PILImage.open(path)
+                except OSError:
+                    return False
+                if self.tv is not None:
+                    img = self._compose(pil)
+                else:
+                    s = min(self.CW / pil.width, self.CH / pil.height)
+                    nw = max(1, int(pil.width * s))
+                    nh = max(1, int(pil.height * s))
+                    out = _PILImage.new("RGB", (self.CW, self.CH), (0,)*3)
+                    out.paste(pil.convert("RGB").resize((nw, nh)),
+                              ((self.CW - nw) // 2, (self.CH - nh) // 2))
+                    self._scr_pil = out
+                    img = _PILImageTk.PhotoImage(out)
+                thumb = _PILImageTk.PhotoImage(
+                    pil.convert("RGB").resize((self.TW, self.TH)))
+            else:
+                try:
+                    img = tk.PhotoImage(file=path)
+                except tk.TclError:
+                    return False
+                thumb = None
+            self._still_imgs[i] = img
+            self._still_imgs[(i, "t")] = thumb
+        if self.id != i:
+            thumb = self._still_imgs.get((i, "t"))
+            if thumb is not None:
+                self._recent.append((i, thumb))
+                del self._recent[:-self.STRIP_N]
+                self._redraw_strip()
+        self._draw(img)
+        self.id, self.have = i, True
+        self.anim = None                # a stills board never animates
+        return True
 
     def _animate(self):
         """Advance the screen one frame. lcdart.py encodes at 10 fps and
@@ -4290,8 +4241,13 @@ class LcdPanel:
             return
         if self._fadeq:
             return                      # a dissolve is mid-flight: one tick
-        i, a = self.id, self.anim       # of held frame beats a fight over
+                                        # of held frame beats a fight over
                                         # the canvas item
+        if self._map():
+            return                      # a stills board NEVER animates -
+                                        # that is the measurement this whole
+                                        # mode rests on
+        i, a = self.id, self.anim
         # NOT gated on `have` (motion review finding 5): a corrupt still
         # must not block a perfectly good clip from playing.
         if not i:

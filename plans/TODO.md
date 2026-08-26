@@ -5742,6 +5742,30 @@ These have each been violated at least once and each cost a run or a window:
       will catch the first one now that runs preserve it, and its shape
       is what would turn the logo trigger from inference into
       measurement.
+
+      **UPDATE 19 (2026-08-25) — David's first look at the reel build,
+      three questions answered + one fix on the spot.** His screenshot
+      shows the boot rotation walking 2, 54, 720, 591 - the measured
+      cycle, in order, live. (a) The logo card is NOT clip 55 and not in
+      boot attract: it shows only at the game->attract transition, the
+      one place his video shows it; whether the real boot attract ever
+      shows the card is UNKNOWN (his footage starts at a Game Over) and
+      it is deliberately not drawn there. (b) "Attract should be stills
+      with a slideshow fade" - the stills half is disproven by his own
+      footage (clip 27 advances f45->f67 between t=17 and t=21; a still
+      cannot), but the FADE half was a real infidelity: the wire carries
+      fade code 15 on every brightness swap and the panel hard-cut.
+      FIXED: brightness 0 now DISSOLVES (FADE_STEPS darkened frames at
+      poll rate, ~300 ms, then dark; restore stays instant since the
+      reveal rides in with the asset swap; no screen PIL = the old hard
+      blank). 33 panel tests (1 new). (c) Synced-capture-on-the-real-
+      machine options recorded in the reply: tier 1 = tripod footage of
+      a full boot-attract cycle + a game start->game over (no hardware,
+      pins the display sequence frame-level like ids 46/27); tier 2 =
+      RS-485 tap on the node bus (FT232H-class dongle or logic analyzer
+      at the LCD board / CPU node chain) filmed simultaneously, synced
+      by aligning the wire's brightness-0 events with the video's black
+      frames - that one closes id<->display correspondence for good.
       **BUILT (padled's conventions throughout):** padlcd.h (one page:
       magic/gen/id[4]/ms[4] + a 64-entry raw ring for RE); hwshim.c
       lcd_publish() beside led_publish, gated on PAD_LCD_NODE; watch.sh

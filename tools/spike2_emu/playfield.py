@@ -3619,6 +3619,17 @@ class LcdPanel:
     #: that would).
     LOGO_S = 5.2                    # one attract beat, the video's hold
     HAMMER_BEATS = 3                # ~16 s of re-commands = "a game is on"
+    #: THE DISSOLVE. Every brightness swap on the wire carries fade code 15
+    #: and the real set visibly FADES through clip changes - David watched
+    #: both and called ours out ("still frames with a slideshow fade
+    #: effect"): the hard cut was the panel's approximation, not the
+    #: machine's behaviour. Two darkened steps at poll rate ~= the 250 ms
+    #: the wire leaves before the swap. Fade-OUT only: the reveal rides in
+    #: with the asset change and an instant restore there is what the old
+    #: behaviour already did (ramping it would fight _show over the item).
+    #: The board's actual curve is still not decoded; this renders "it
+    #: dissolves", not a measured ramp.
+    FADE_STEPS = (0.62, 0.28)       # fraction of the picture per step
 
     def __init__(self, root, game):
         self.root, self.game = root, game
@@ -3639,6 +3650,9 @@ class LcdPanel:
         self._logo_img = None       # the composed green BATMAN card, if derived
         self._logo_tried = False
         self._logo_until = 0.0      # while now < this, the logo card is up
+        self._scr_pil = None        # PIL of the picture on screen (for _fade)
+        self._fadeq = []            # pending dissolve steps, one per poll
+        self._fade_ref = None       # current step's PhotoImage (keep-alive)
         self.names = None           # {id: name} from lcdnames.py, loaded once
         self._named = False         # ... and whether the load has been tried
         self.strip = None           # the filmstrip canvas
@@ -3763,6 +3777,7 @@ class LcdPanel:
         out.paste(pil.convert("RGB").resize((nw, nh)),
                   (x + (w - nw) // 2, y + (h - nh) // 2))
         out.alpha_composite(self.tv)    # the set, over the picture
+        self._scr_pil = out.convert("RGB")   # what _fade dissolves from
         return _PILImageTk.PhotoImage(out)
 
     def _cabinet(self):
@@ -3808,6 +3823,36 @@ class LcdPanel:
                       fill="#e8dfc8", font=("Georgia", 11, "italic"),
                       tags="case")
 
+    def _fade(self, br):
+        """Start (or cut short) the brightness transition. Dark builds the
+        dissolve queue - FADE_STEPS darkened frames, then hidden - applied
+        one per poll starting NOW; bright clears it and restores instantly
+        (the reveal rides in with the asset swap). No picture PIL on hand
+        (a bare tk still, or no PIL at all) falls back to the old hard
+        blank rather than inventing frames."""
+        self._fadeq = []
+        if self.item is None:
+            return
+        if br >= 128:
+            self.cv.itemconfig(self.item, image=self.img, state="normal")
+            return
+        if _PILImage is None or self._scr_pil is None:
+            self.cv.itemconfig(self.item, state="hidden")
+            return
+        black = _PILImage.new("RGB", self._scr_pil.size, (0, 0, 0))
+        self._fadeq = [
+            _PILImageTk.PhotoImage(_PILImage.blend(black, self._scr_pil, a))
+            for a in self.FADE_STEPS] + [None]
+        self._fade_step()
+
+    def _fade_step(self):
+        step = self._fadeq.pop(0)
+        if step is None:
+            self.cv.itemconfig(self.item, state="hidden")
+        else:
+            self._fade_ref = step       # keep-alive, like every PhotoImage
+            self.cv.itemconfig(self.item, image=step, state="normal")
+
     def _hide(self):
         # Item 44's contract for a second display's close box: hide, don't
         # die. The ids keep updating behind it, so nothing is stale if a
@@ -3840,16 +3885,16 @@ class LcdPanel:
         # BRIGHTNESS IS PART OF THE PICTURE (0x80|d family, 132 call
         # sites): the game drops the TVs to 0 for ~250 ms around every
         # clip swap and restores 255. The wire only ever carries those two
-        # values, so this renders as a hard blank rather than a ramp - the
-        # fade code (15 throughout) is the board's own transition and its
-        # curve is not decoded. Ignoring brightness showed footage during
-        # moments the real TVs are black, which is exactly the class of
-        # infidelity this window exists to not have.
+        # values; going dark DISSOLVES (FADE_STEPS - the real set fades,
+        # David called out the hard cut) and 255 restores instantly with
+        # the swap. Ignoring brightness showed footage during moments the
+        # real TVs are black, which is exactly the class of infidelity
+        # this window exists to not have.
         if br != self.bright:
             self.bright = br
-            if self.item is not None:
-                self.cv.itemconfig(self.item,
-                                   state="hidden" if br < 128 else "normal")
+            self._fade(br)
+        elif self._fadeq:
+            self._fade_step()
         cmd = (asset, aux, rate, verb)
         changed = cmd != self.state
         self.state = cmd
@@ -4145,7 +4190,9 @@ class LcdPanel:
             a["pil"].seek(idx)          # sequential: PIL steps ONE frame
             if self.tv is not None:
                 return self._compose(a["pil"])
-            return _PILImageTk.PhotoImage(a["pil"].convert("RGB"))
+            rgb = a["pil"].convert("RGB")
+            self._scr_pil = rgb         # what _fade dissolves from
+            return _PILImageTk.PhotoImage(rgb)
         except Exception:               # noqa: BLE001 - corrupt tail: the
             a["n"] = idx                # clip honestly ends here
             return None
@@ -4241,7 +4288,10 @@ class LcdPanel:
         a real per-tick cost."""
         if self._hidden:
             return
-        i, a = self.id, self.anim
+        if self._fadeq:
+            return                      # a dissolve is mid-flight: one tick
+        i, a = self.id, self.anim       # of held frame beats a fight over
+                                        # the canvas item
         # NOT gated on `have` (motion review finding 5): a corrupt still
         # must not block a perfectly good clip from playing.
         if not i:

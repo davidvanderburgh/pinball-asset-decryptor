@@ -127,7 +127,11 @@ def wide_decode(b):
     if len(b) < 6 or not b[0] & 0x80:
         return None
     cmd, body = b[2], b[3:-2]
-    if not cmd & 0x80 or not body:
+    #: 0x80..0xbf and nothing else, a bound the builder proves rather than one
+    #: chosen to be safe: cmd = 0x80 | ((M|B) & 0x7f) | A with M <= 0x20,
+    #: B <= 0x1c and A <= 3, so bit 6 can never be set. Everything at 0xc0 and
+    #: up is link, identity or config and must never reach this walk.
+    if cmd & 0xC0 != 0x80 or not body:
         return None
     A, B, M = cmd & 0x03, cmd & 0x1C, cmd & 0x20
     #: Path B of the builder (0x518b78) prefixes a BANK byte and addresses

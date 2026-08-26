@@ -4896,7 +4896,8 @@ These have each been violated at least once and each cost a run or a window:
 
 - [x] **85. batman's playfield LEDs: only 25 channels on two boards, and
       every one of them dark.** `S2 D3` DONE 2026-08-26, `item/85`,
-      awaiting `/finish`. **DESK WORK COMPLETE — NOT YET RUN ON THE RIG.**
+      awaiting `/finish`. **LIVE-VERIFIED on batman, regression-verified on
+      godzilla_pro.**
       *(David, mid item-80 sweep, on his own live batman run: "i'm only
       seeing board 8 and 9 here and i'm not seeing all the leds coming
       through — are we missing some node boards?" The boards were all
@@ -4950,13 +4951,38 @@ These have each been violated at least once and each cost a run or a window:
       passed. Channel B is walked for its length and DROPPED — its values
       come from a small alphabet (0x08/0x0f/0x1e) that looks like a rate
       beside channel A's levels, and "looks like" is not a finding.
-      **STILL OWED, and it is the acceptance:** a live batman boot on the
-      rig, which was busy with David's own session all day. Expect nodes
-      1/8/9/10/13 in the LED panel, `val[]` non-zero, and `[ledwide]`
-      lines under `PAD_LED_DEC_LOG`. **Regression godzilla_pro and one
-      ws2812 title before this merges** — the wide decoder now sees nodes
-      7/12/14 that nothing looked at before, and while it refuses what it
-      cannot consume exactly, that claim is desk-tested, not rig-tested.
+      **VERIFIED LIVE, batman off the card, 200 s:** six boards where two
+      had been — nodes **1, 8, 9, 10, 12, 13**, **108 addressed channels
+      against the 25 David could see**, and the wire's own values on the
+      glass. The brightness fix shows in one byte: the node-1 lamp whose
+      first frame read `81 05 70 08 00 00` on his run reads `81 05 70 08
+      02 02` on this one. Nodes 8 and 9 register but sit at zero, which is
+      the game holding its inserts dark in attract, not us failing to read
+      them.
+      **★ AND THE GODZILLA REGRESSION FOUND A REAL FAULT, which is what it
+      was for.** First run: the wide grammar accepted **7 of ~1532** frames
+      on godzilla's node-7 strip board — 0.5%, every one a coincidence, and
+      every one about to write a confident lamp value onto a board this
+      codebase has refused to guess at since it was written. The
+      exact-close test is strong but not perfect, and over a whole run
+      "not perfect" shows. **Fixed with a per-RUN dialect gate:** the two
+      populations are nowhere near each other (batman parses ~83% of what
+      it offers the grammar, godzilla 0.5%), so nothing is published until
+      200 frames have voted and a title that says no says no for the rest
+      of the run. Same reasoning as the light-show announcer — a rate, not
+      a count. **Re-run godzilla_pro: `[ledwide] dialect REFUSED - this
+      title is not the swelf generation: 0 of 200 frames parsed exactly`,
+      `wide_decoded 0`, nodes 1/8/9 only and nodes 7/12/14 gone from the
+      roster.** `PAD_LED_WIDE=2` forces it on for a title whose rate lands
+      somewhere nobody has seen; `=0` turns it off.
+      **Also backed out on that evidence:** the enumeration walk briefly
+      marked the addressed roster too, which gave godzilla's nodes 12 and
+      14 ninety-six dark cells each for boards nothing ever drove. `seen`
+      means "the game wrote to this lamp"; a boot-time inventory is a
+      different claim.
+      **Still owed:** one ws2812-heavy title (stranger_things_le) through
+      the same gate, and David's own eyes on the batman playfield window
+      rather than the block underneath it.
       — S2: a whole subsystem reads as broken on an unknown number of
       titles (every swelf-generation card), but nothing is blocked and the
       games play. D3: the RE was deep but is done and written down; what is

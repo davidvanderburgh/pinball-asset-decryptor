@@ -8381,7 +8381,16 @@ static void led_map(void)
 }
 
 /* One bit of the version-4 roster. Silently a no-op on a short mapping, which
- * is what keeps a new shim safe under an old watch.sh. */
+ * is what keeps a new shim safe under an old watch.sh.
+ *
+ * CALLED FROM EVERY DECODE PATH, not just the new one, and the first live run
+ * is why. batman's nodes 8 and 9 stayed missing from the window even with the
+ * wide decoder working, because their lamps arrive on the OLD cmd-0x70 path and
+ * were all sitting at zero - so val[] never went non-zero, nothing marked them
+ * addressed, and two boards the game talks to constantly did not exist as far
+ * as a reader was concerned. That is exactly the fault this plane was added
+ * for, so every path that resolves a lamp index calls it, whichever decoder
+ * resolved it. */
 static void led_seen(unsigned node, unsigned idx)
 {
     if (!led_shm || led_shm_len < 8192) return;
@@ -8666,6 +8675,51 @@ static int led_wide_walk(const unsigned char *body, unsigned blen, unsigned cmd,
     return 1;
 }
 
+/* Does this TITLE speak the swelf dialect? Fed one bit per frame that reached
+ * the walk; answers "not yet / no / yes".
+ *
+ * The window is deliberately small and the threshold deliberately far from
+ * both observed populations - measured over 200 frames, batman 200/200 and
+ * godzilla_pro 0/200 - because the point is not to draw a fine line, it is to
+ * refuse to draw one at all until the answer is obvious.
+ * Until the sample fills, frames are walked and counted but NOTHING is
+ * published: a title that turns out to be godzilla must never have written a
+ * lamp value in the meantime, and 200 frames is well under a second of attract
+ * on either generation.
+ *
+ * PAD_LED_WIDE=2 forces it on, for a title whose rate sits somewhere nobody
+ * has seen yet; PAD_LED_WIDE=0 turns the whole decoder off. */
+static int led_wide_dialect(int accepted)
+{
+    enum { SAMPLE = 200 };
+    static unsigned seen, ok;
+    static int verdict = -1;                  /* -1 undecided, 0 no, 1 yes   */
+    static int forced = -1;
+
+    if (forced < 0) {
+        const char *e = getenv("PAD_LED_WIDE");
+        forced = (e && *e == '2') ? 1 : 0;
+    }
+    if (forced) return 1;
+    if (verdict >= 0) return verdict;
+
+    seen++;
+    ok += (unsigned)(accepted != 0);
+    if (seen < SAMPLE) return 0;
+
+    verdict = (ok * 100 >= seen * 50);
+    {
+        char m[160];
+        snprintf(m, sizeof m,
+                 "[ledwide] dialect %s: %u of %u frames parsed exactly\n",
+                 verdict ? "ACCEPTED - publishing lamps"
+                         : "REFUSED - this title is not the swelf generation",
+                 ok, seen);
+        logmsg(m);
+    }
+    return verdict;
+}
+
 /* Returns 1 ONLY when the frame was actually published. A refusal returns 0, so
  * the caller carries on exactly as it did before this function existed - the
  * old `skipped` counter and PAD_LED_SKIP_LOG keep seeing every frame that
@@ -8678,13 +8732,39 @@ static int led_wide_publish(unsigned node, unsigned cmd,
     unsigned char idx[96], val[96];
     unsigned cnt = 0, i;
 
-    if (!(cmd & 0x80) || blen < 1) return 0;
+    /* 0x80..0xbf AND NOTHING ELSE, which is a bound the builder proves rather
+     * than one chosen to be safe: cmd = 0x80 | ((M|B) & 0x7f) | A with M <=
+     * 0x20, B <= 0x1c and A <= 3, so bit 6 can never be set (path B's 0x90|...
+     * lands inside the same range). Everything at 0xc0 and up is link,
+     * identity or config - 0xfe alone arrives ~200 times per node per five
+     * minutes - and letting those reach the walk cost nothing but made
+     * wide_skipped read 8381 against 267 on the first live run, which is a
+     * counter measuring protocol chatter rather than lamp frames we failed. */
+    if ((cmd & 0xc0) != 0x80 || blen < 1) return 0;
 
     if (!led_wide_walk(body, blen, cmd, idx, val, &cnt)) {
+        led_wide_dialect(0);
         led_map();
         if (led_shm && led_shm_len >= 8192) led_shm->wide_skipped++;
         return 0;
     }
+    /* ★ THE TITLE HAS TO PROVE IT SPEAKS THIS DIALECT BEFORE ANY OF IT IS
+     * PUBLISHED, and the first godzilla regression run is why this is here.
+     *
+     * The exact-close test is a strong filter but not a perfect one, and over
+     * a whole run "not perfect" shows: godzilla's node-7 strip board threw
+     * 1532 frames at this grammar and SEVEN closed exactly - 0.5%, every one a
+     * coincidence, and every one about to write a confident lamp value onto a
+     * board whose encoding this file has refused to guess at since it was
+     * written.
+     *
+     * No per-frame test can separate those seven from the real thing. A
+     * per-RUN one can, because the two populations are nowhere near each
+     * other: batman accepts 83% of what it offers this grammar, godzilla 0.5%.
+     * So nothing is published until the rate is in evidence, and once it says
+     * no it says no for the rest of the run. Same reasoning as the light-show
+     * announcer above - a rate, not a count. */
+    if (!led_wide_dialect(1)) return 0;
 
     /* An index the board itself never announced is a parse that landed on a
      * lamp that does not exist. Only checked when the board DID enumerate -
@@ -8820,17 +8900,18 @@ static void led_publish(const unsigned char *p, int n)
      * consumes the body exactly, so one frame cannot tell the two readings
      * apart. Enumeration WINS here because it is the reading godzilla's boards
      * were verified against and the one led_known exists for; the cost if
-     * batman means the other thing is one lamp's level, and the benefit either
-     * way is the same index. So the index is recorded in BOTH places - the
-     * enumeration, and the addressed roster - which is true under either
-     * reading and is what makes the board appear in the window. */
+     * batman means the other thing is one lamp's level.
+     *
+     * It does NOT mark the addressed roster, and that was tried and backed out
+     * the same afternoon: `seen` means "the game wrote to this lamp", and a
+     * boot-time inventory is a different claim. Marking it gave godzilla's
+     * nodes 12 and 14 ninety-six dark cells each - boards nothing in the run
+     * ever drove - which is clutter dressed up as coverage. */
     if (n == 6 && (cmd == 0x84 || cmd == 0x85)) {
         if (p[3] < 96) {
             if (!led_known[node][p[3]] && led_count[node] < 96)
                 led_order[node][led_count[node]++] = p[3];
             led_known[node][p[3]] = 1;
-            led_map();
-            led_seen(node, p[3]);
         }
         return;
     }
@@ -8841,8 +8922,8 @@ static void led_publish(const unsigned char *p, int n)
      * shapes below own those boards and keeping their order untouched is what
      * makes this change a no-op for every title that already worked.
      *
-     * PAD_LED_WIDE=0 turns it off, which is the one-flag A/B if a title that
-     * was fine before is not. */
+     * PAD_LED_WIDE=0 turns it off and =2 forces it past the dialect gate,
+     * which is the one-flag A/B in either direction. */
     {
         static int wide = -1;
         if (wide < 0) {
@@ -8910,6 +8991,7 @@ static void led_publish(const unsigned char *p, int n)
             led_shm->fade[slot].fall  = 33;
             led_shm->fade[slot].pad   = 0;
             led_shm->fade_head++;
+            led_seen(node, p[3]);
             led_shm->decoded++;
             led_shm->gen++;
         }
@@ -8920,6 +9002,7 @@ static void led_publish(const unsigned char *p, int n)
             led_map();
             if (!led_shm) return;
             led_shm->val[node][p[3]] = p[4];
+            led_seen(node, p[3]);
             led_shm->decoded++;
             led_shm->gen++;
         }
@@ -8963,8 +9046,10 @@ static void led_publish(const unsigned char *p, int n)
             unsigned char to = (cmd == 0xb4) ? 0xff : 0x00;
             unsigned slot = led_shm->fade_head % 96u;
             for (k = s0; k <= e0; k++)
-                if (led_known[node][k])
+                if (led_known[node][k]) {
                     led_shm->val[node][k] = to;
+                    led_seen(node, k);
+                }
             led_shm->decoded += (e0 - s0 + 1);
             led_shm->gen++;
             led_shm->fade[slot].ms    = (unsigned)pad_ms();
@@ -8998,8 +9083,10 @@ static void led_publish(const unsigned char *p, int n)
         for (i = 0; i < cnt; i++)
             if (body[i] >= 96 || !led_known[node][body[i]]) break;
         if (i != cnt) continue;              /* not all valid indices */
-        for (i = 0; i < cnt; i++)
+        for (i = 0; i < cnt; i++) {
             led_shm->val[node][body[i]] = body[cnt + gap + i];
+            led_seen(node, body[i]);
+        }
         led_shm->decoded += cnt;
         led_shm->gen++;
         /* The lamps the WORKING path addresses, under the same env var. The
@@ -9082,9 +9169,11 @@ static void led_publish(const unsigned char *p, int n)
             if (!ok) break;
             for (j = 0; j < mlen; j++)
                 for (k = 0; k < 8; k++)
-                    if ((body[3 + j] >> k) & 1)
-                        led_shm->val[node][led_order[node][j * 8 + k]] =
-                            body[3 + mlen + wrote++];
+                    if ((body[3 + j] >> k) & 1) {
+                        unsigned e = led_order[node][j * 8 + k];
+                        led_shm->val[node][e] = body[3 + mlen + wrote++];
+                        led_seen(node, e);
+                    }
             led_shm->decoded += wrote;
             led_shm->gen++;
             return;
@@ -9182,6 +9271,7 @@ static void led_publish(const unsigned char *p, int n)
                 unsigned lamp = body[k] & 0x7f;
                 unsigned slot = led_shm->fade_head % 96u;
                 led_shm->val[node][lamp] = to[k];
+                led_seen(node, lamp);
                 led_shm->fade[slot].ms    = (unsigned)pad_ms();
                 led_shm->fade[slot].node  = (unsigned char)node;
                 led_shm->fade[slot].start = (unsigned char)lamp;

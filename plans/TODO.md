@@ -136,6 +136,44 @@ These have each been violated at least once and each cost a run or a window:
       SPI, and a board-version hook across nodebus/shim — budget more than one
       pass.
 
+      **PROGRESS (2026-08-26, live capture on David's guidance — he drove
+      the service menu to trigger the update while I logged; rig now free,
+      card unmounted, lock released):**
+      **(1) The routine was reached and triggered.** Service menu (coin
+      door open, Service Select/Plus/Minus/Back = padsw ids 28/29/30/31)
+      -> Diagnostics -> Game-Specific Tests -> UPDATE TV IMAGES. It reports
+      "NO UPDATE AVAILABLE" and — measured — sends NOTHING to node 24 (no
+      [nb] TX, no image.bin write). The gate is PURELY LOCAL: the game
+      renders/checks the card's scenes vs a stored version and decides no
+      update, without ever querying the board. So forcing it needs the
+      local "last-uploaded" version marker cleared, not a board-version
+      hook (the plan above assumed a board query; corrected).
+      **(2) The trigger loads the demand_loaded scene trees bc0792d8 (9
+      scenes) and f1b332a3 (11), ALL 1360x768 (backbox res, NOT the
+      villain TV's 240x180).** I rendered them CARD-ONLY with the app's
+      own compositor (scene_render.render_scene + fontrender.load_fonts
+      off David's extraction manifests — 75 fonts, 45 layouts, 20 scenes
+      rendered clean). They are the SERVICE/SYSTEM UI cards: "VERIFYING
+      IMAGE", "Player 1 Enter Initials", "CLOCK NOT SET", "Learn More About
+      Stern Pinball"+QR, the Stern logo — the menu's own screens, NOT the
+      villain board image set.
+      **(3) CONCLUSION — the villain board's rendered CARDS are not
+      standalone-extractable card-only.** The video clips (137.asset, the
+      MAJORITY of villain content) I already have and show. The logo I have
+      (scene texture). But the rendered cards as they appear ON THE 240x180
+      VILLAIN TV (Game Over on green, IN COLOR) are produced by the game's
+      DISABLED secondary-render path (item 83's proven finding) —
+      composited at runtime, stored nowhere, and in no standalone 240x180
+      scene. So the only card-only routes to those two cards are: (a) force
+      the local update gate so the game renders + uploads and capture the
+      wire, or (b) enable the disabled second render target (item 83 ruled
+      out of scope). Neither is a quick win.
+      **NET:** the panel's current card-only set (logo + 4 clip-frame
+      stills + video-clip fallbacks, zero footage) is the honest best
+      available without (a) or (b). The render pipeline is proven and
+      reusable (scene_render works off an extraction) if a 240x180 villain
+      scene is ever located. Scenes preserved at /home/david/tvscenes.
+
 - [x] **61. godzilla_le draws the switch list, and it has a complete playfield
       layout the whole time.** `S2 D1` DONE 2026-08-21.
       *(Filed and fixed the same session, from David looking at a live

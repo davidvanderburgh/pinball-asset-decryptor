@@ -1364,12 +1364,132 @@ These have each been violated at least once and each cost a run or a window:
       into a multiball, and its first dependency (the eject coil index) is
       itself an unfinished item.
 
-- [ ] **46. On turtles_pro the ACTION BUTTON is FINICKY, not dead: it works
+- [x] **46. On turtles_pro the ACTION BUTTON is FINICKY, not dead: it works
       occasionally in attract and never selects a character during a game.**
-      `S2 D4` ← WORKING ON *(D3 → D4, 2026-08-21: the fault does not appear on
+      `S2 D4` DONE 2026-08-26, `item/46`, `a803135`. **The button was never
+      broken.** It is the LAUNCH button, not the character selector, and the
+      game gates the character lock-in on having a ball to launch — David's
+      own mechanism claim, confirmed. Delivery measured on the game's own
+      `entry[+24]` (1 ms to `pend`, 5 ms to `lvl`, every press); the press
+      fires coil offset 132 3/3 against two silent 15 s controls; and the
+      moment the feeder answered one eject the carousel stopped and the glass
+      read `DONATELLO` locked with `BALL 1 / SKILL 16 SHOT`. Serving the ball
+      properly on a 0-device-record title is item 21b. Two recorded
+      suspicions died here: nothing eats credits (a coin is a quarter, 4 buy
+      a game) and the boot no longer blocks a start (item 59's fix works).
+      Getting there needed the shim fix in `a803135` — `[swpend]` had been
+      silently dead on every title but Godzilla Pro. *(D3 → D4, 2026-08-21: the fault does not appear on
       demand — five of six runs this pass never reached a state where it could
       be tested at all, because the boot tech-alerts screen blocks starting a
       game and the ball model will not feed this title. That is the D4 line.)*
+      **★★★★★ CLOSED 2026-08-26, run 9 on turtles_pro. THE ACTION BUTTON WAS
+      NEVER BROKEN. It is not the character selector — it is the LAUNCH
+      button, exactly as David said the real machine works, and the game gates
+      the character lock-in on HAVING A BALL TO LAUNCH.**
+      **(1) DELIVERY IS PERFECT, measured on the GAME'S OWN COUNTER for the
+      first time on this title.** `[swpend]` id=34 across every press: the wire
+      edge at `[sw] 178074 ms +34p`, `pend` 0→1→0 at 178075–178079 ms and
+      `lvl` 1→0 — **1 ms to the pending counter, 5 ms to the recorded level**,
+      and the mirror image on release. Every press, every time. **Item 17's
+      "the closure is being LOST" class is dead for switch 34 on turtles_pro**,
+      and it is dead on `entry[+24]` rather than by inference from a screen.
+      **(2) THE PRESS FIRES A COIL, 3/3, AGAINST A CLEAN CONTROL — the
+      carousel-proof oracle this item has wanted since it opened.** Three
+      presses spaced 15 s apart, coil-region **offset 132** bumped at 15.10 s,
+      30.29 s and 45.49 s, each within 0.5 s of its press; **two 15-second
+      no-input control windows fired it zero times.** The only other counter
+      moving was 129, the ~5.8 s metronome (13 bumps in 75 s, as expected).
+      A counter cannot step on its own, so this is the game ACTING on the
+      press — "reached and ignored" is refuted too.
+      **(3) THE CHARACTER LOCKS IN THE MOMENT A BALL IS SERVED, AND NOT
+      BEFORE.** The carousel had cycled freely for **380 s** of guest time
+      across many presses — a 6-frame no-input control read MICHELANGELO,
+      MICHELANGELO, MICHELANGELO, LEONARDO, LEONARDO, DONATELLO and a 6-frame
+      post-press run read DONATELLO, RAPHAEL, RAPHAEL, MICHELANGELO,
+      MICHELANGELO, MICHELANGELO, i.e. **identical free-running behaviour
+      either side of a press.** Then the feeder answered one eject (trough
+      switch 72 opened, lane closed) and the very next glass read
+      **`DONATELLO` locked into the player panel with `BALL 1` and `SKILL 16
+      SHOT` armed** — the carousel gone. **David's mechanism claim is
+      confirmed in full**, and the item's primary acceptance is met.
+      **(4) SO THE RESIDUE IS ITEM 21b's, exactly as this item predicted.**
+      The game re-pulses offset 132 every **1.29 s** and **holding BOTH lanes
+      closed does not stop it** (28 consecutive refusals with 66 AND 68 held,
+      via `--also`) — so the leading hypothesis below, "turtles feeds the
+      UPPER lane, close 66 instead of 68", is **REFUTED**: the lane switch is
+      not what the retry is waiting for. Serving turtles_pro a ball properly
+      is the ball model on a title with **0 device records**, which is item
+      21b, not this one.
+      **▼ TWO RECORDED SUSPICIONS THAT TURN OUT TO BE WRONG, both worth
+      deleting from other items:**
+      **(a) NOTHING EATS CREDITS ON turtles_pro — a coin is a QUARTER.** The
+      glass reads `1/1.00 3/2.00` and one `plunge.py coin` moves it to
+      `CREDITS 1/4`. Four coins buy one credit. Runs 3–5's "five coins in and
+      the glass read CREDITS 1, so at least four went somewhere" was **four
+      coins buying that credit**, and item 59's "it may eat credits" suspicion
+      — which this item strengthened to "much stronger than a suspicion" — has
+      no evidence behind it at all. **A game needs 4 coins, then START.**
+      **(b) AND THE BOOT NO LONGER BLOCKS A GAME.** Finding (D) below said the
+      tech-alerts screen stops a game being started on this title. Item 59
+      closed on main since; with main merged in, autoattract cleared turtles
+      unattended on both boots this pass (`past Tech Alerts after 1
+      press(es)`, and once `already past Tech Alerts; nothing to do`), the
+      glass showed the lair attract with `CREDITS 0`, and coin + START began a
+      game. **(D) is fixed, not outstanding.**
+      **▼ A METHOD TRAP THIS PASS FELL INTO AND ALMOST REPORTED AS A FINDING
+      — the same shape as the wall-clock one below.** Run 7 grepped
+      `~/gzwatch.log` moments after launch and read `[swfind] switch table
+      loaded from /dump/tables/**batman**/switch_list.txt` — which would have
+      been a spectacular cross-title bug, and was **another session's leftover
+      log content**, not this run's. watch.sh truncates the eight fixed
+      `$HOME` logs when the GUEST starts, not when the script does. **Never
+      read one of those logs without checking it is this run's**; run 7 also
+      ran its whole sequence against a machine it never looked at.
+      **The instrument that made all of this cheap is `glshot.sh`** — the
+      guest's own framebuffer as a PNG, on a live run, no rebuild. Run 7 spent
+      a whole run guessing where the machine was; run 9 read the glass at every
+      step and was never wrong about it once. **Use it before driving a title
+      you have not looked at.**
+      **★★★★ 2026-08-26, AT THE DESK, NO RUN: THE DEAD `[swpend]` ORACLE IS
+      EXPLAINED, AND ONE OF THIS ITEM'S OWN RESUME CANDIDATES IS RETIRED BY
+      IT.** The last pass set `PAD_SW_PEND=34`, verified it in the guest's own
+      `/proc/<pid>/environ`, got **zero** `[swpend]` lines all run, and had to
+      write its named discriminator down as "currently dead, unexplained".
+      The cause is one clause in `hwshim.c`'s `sw_pend_trace()`:
+      `if (!sw_ok(st) || !sw_ok(raw) || cnt > 4096) return;`. `raw` is
+      `tread_at(SW_STRUCT, 4)` — the game's raw state array — and on any title
+      whose table is resolved through `sw_shadow[]` that word IS `sw_shadow[1]`,
+      which **both** finder routes set to 0 (`sw_find_table()` at the by-shape
+      find, `sw_file_table()` at the `switch_list.txt` fallback). Its own
+      declaration says so: `[1] raw[] (0 = none)`. `sw_ok(0)` is false, so the
+      trace returned on its first guard, every tick, forever — **on every title
+      that is not Godzilla Pro 1.15.0**, the only one whose CONFIGURED address
+      checks out. Silently: no line, no hint, no way to tell a lost press from a
+      missing instrument.
+      **FIXED, `a803135`:** `raw[]` and the NodeRec reads are optional now and
+      print `?` rather than a plausible `0`, and `sw_pend_say()` states once per
+      change of answer which of the four table routes this title got. **Note
+      `?` and not `0` is the load-bearing half:** `SW_NODEREC(n)` is an offset
+      from the switch STRUCT and a shadow only records the entry[] ARRAY, so
+      under a shadow those reads land in the shim's own `.bss` — neither the
+      game's values nor obviously wrong, which is exactly the class of instrument
+      failure this rig keeps losing passes to.
+      **▲ AND THE RUN OVERTURNED WHAT THIS PARAGRAPH FIRST SAID.** It was
+      written predicting turtles_pro would take the FILE route, which would
+      have made `pend`/`lvl` synthetic zeros and killed resume candidate (b)
+      outright. **It takes the BY-SHAPE route instead** — the shim finds the
+      game's real table — so `pend` and `lvl` ARE the game's own `entry[+22]`
+      and `entry[+24]`, and candidate (b) is not refuted, it is DONE: the
+      oracle worked on the first run and is what closed this item. Only
+      `prev`/`cur`/`raw` stay unavailable, and they were never the oracle.
+      Measured, run 9: `[swpend] FOUND-BY-SHAPE TABLE, entry[] at 0x00764828,
+      94 switches`.
+      **A rig trap cleared in passing:** `~/spike2root/lib/hwshim.srcs` was owned
+      by **root** from some earlier root-run build, so `build.sh`'s last line
+      (`pad_shim_hash > $PAD_SHIM_STAMP`) died `Permission denied` **after a
+      completely successful compile** — exit 1, and `pad_ensure_shim` reports
+      "build FAILED, and the game has no hardware without it" over a good `.so`.
+      Removed; the stamp is david-owned again.
       **★★ DAVID, 2026-08-21, GROUPING THIS INTO ITEM 60's PASS — AND IT IS A
       MECHANISM CLAIM, NOT A FEATURE REQUEST:** *"i should be able to press the
       action button to pick a character and launch a ball at the same time.

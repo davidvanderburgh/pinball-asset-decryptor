@@ -11,59 +11,65 @@ alignment), and the machine's own service menu carries an "update the
 images" diagnostic under TV settings - the board's set is UPLOADED, the
 ids are keys into it. No clip ever plays on it.
 
-THE TABLE BELOW IS A MEASUREMENT, NOT A DERIVATION. The id -> image
-pairing cannot be read off the card (the board's set is authored from
-the same footage bank as the clip store, but the keys are the game's
-own); each entry's provenance is one of:
+★ CARD-ONLY, NOTHING DISTRIBUTED (David's rule, 2026-08-26: "run
+everything off the card and not distribute any assets from the image
+ourselves"). Every still this writes is EXTRACTED AT RUNTIME from the
+mounted card on the user's own machine - no image ships in the repo. An
+earlier cut median-stacked David's phone footage for the images no card
+store holds and committed the PNGs; that violated the rule twice (video
+screenshots, and shipped assets) and is gone.
 
-  clip  - the still equals frame N of store clip C, pinned by aligned
-          normalized correlation against the footage and verified by eye
-          (the frame number is 0-based, ffmpeg's n).
+★ THE BOARD HAS ITS OWN IMAGE STORE, id-mapped INDEPENDENTLY of the clip
+store - the architecture David deduced. The Villain Vision is a node-24
+LCD with local image storage; the service menu's UPDATE TV IMAGES routine
+writes that store from the card, and in-game the wire sends only an id
+which the board renders from its store. The mapping is NOT the clip
+store's: the board image for wire-id 591 (Batmobile) is a frame of clip
+27, and 601 (Gotham sign) is another frame of that SAME clip 27 - wire
+ids 591/601 and clip id 27 are unrelated numbers. So the board set cannot
+be derived by "extract clip <wire-id>"; the id->image binding lives in
+the upload, not in any file the card unpacks to disk. Byte-exact board
+images AND their ids both surface in ONE place: the UPDATE TV IMAGES
+routine run on the rig with the node bus logged (it no-ops "NO UPDATE
+AVAILABLE" when the board is current, so the capture must force a
+stale-board state). That is the recorded path to a complete card-only
+set - TODO item.
+
+Provenance of the entries below, all CARD-SOURCED at runtime:
+  clip  - the still equals frame N of store clip C (content matched, eye
+          verified); extracted from the mounted card. Which frame was
+          found with footage's help, but the shipped pixels are the
+          card's.
   logo  - the card's own unique 1280x720 scene texture (lcdlogo.py).
-  photo - a median-stack of the footage itself (game-rendered cards that
-          exist in no store; the diagnostic upload, once captured, is
-          the byte-exact replacement - recorded in TODO).
+The seven ids whose board image is in NO card store (the two
+game-rendered cards + Penguin / Penitentiary / Riddler / fur sign /
+umbrella sign) are intentionally OMITTED until the upload capture names
+them; the panel falls back to the clip still for those rather than
+showing footage.
 
 Writes <PAD_TABLES>/<game>/lcd/stills/{<name>.png, map.txt}. A title
 with no table here gets nothing, and the panel keeps playing clips -
 the map's existence is what tells it the display is a stills board.
 """
 import os
-import shutil
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import padpath
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 STORE_GLOB = "~/card/*/%s/assets/lcd/auto_loaded/*/scene.assets/137.asset"
 
-#: id -> (file, label, source...). Sources: ("clip", store_id, frame_n),
-#: ("logo",), ("photo", repo_basename). Wire ids from the item-82 lcdcap
-#: capture (attract rotation + game start); display contents from the
-#: 2026-08-26 footage. 919 is the game-start block's FIRST id - a block
-#: command selects by it (the machine shows the IN COLOR title card).
-#: Five of the photographic stills exist in NO store clip - the exhaustive
-#: sweep (all ~200k frames of all 3,069 clips vs the footage) topped out
-#: at wrong-content noise for penguin / penitentiary / fur-sign / riddler /
-#: umbrella-sign, while the four clip-pinned entries scored 0.62-0.77 with
-#: the right content. The board's set is authored from footage the clip
-#: store never sampled, so those five are median-stacks of the footage
-#: itself until the diagnostic upload is captured.
+#: id -> (file, label, source). Sources: ("clip", store_id, frame_n) or
+#: ("logo",) - both CARD-derived at runtime. Wire ids from the item-82
+#: lcdcap capture; the clip+frame each still equals was content-matched
+#: against David's footage and eye-verified.
 BATMAN = {
-    2:    ("gameover.png",     "Game Over card",            ("photo", "batman_gameover.png")),
-    54:   ("logo.png",         "BATMAN logo card",          ("logo",)),
-    720:  ("riddler.png",      "the Riddler",               ("photo", "batman_riddler.png")),
-    591:  ("batmobile.png",    "the Batmobile",             ("clip", 27, 45)),
-    601:  ("gotham_sign.png",  "Gotham City 14 Miles",      ("clip", 27, 65)),
-    1605: ("umbrella_sign.png", "K.G. Bird & Co.",          ("photo", "batman_umbrella.png")),
-    1736: ("penguin.png",      "the Penguin",               ("photo", "batman_penguin.png")),
-    2066: ("penitentiary.png", "Gotham State Penitentiary", ("photo", "batman_penitentiary.png")),
-    2359: ("joker.png",        "the Joker",                 ("clip", 305, 21)),
-    3004: ("fur_sign.png",     "Gato & Chat Fur Co.",       ("photo", "batman_fursign.png")),
-    3026: ("catwoman.png",     "Catwoman",                  ("clip", 503, 0)),
-    919:  ("incolor.png",      "BATMAN IN COLOR card",      ("photo", "batman_incolor.png")),
+    54:   ("logo.png",        "BATMAN logo card",     ("logo",)),
+    591:  ("batmobile.png",   "the Batmobile",        ("clip", 27, 45)),
+    601:  ("gotham_sign.png", "Gotham City 14 Miles", ("clip", 27, 65)),
+    2359: ("joker.png",       "the Joker",            ("clip", 305, 21)),
+    3026: ("catwoman.png",    "Catwoman",             ("clip", 503, 0)),
 }
 TABLES = {"batman": BATMAN}
 
@@ -112,19 +118,13 @@ def main():
             made.append((i, fn, label))
             continue
         ok = False
-        if src is None:
-            pass                        # not pinned yet: honest absence
-        elif src[0] == "clip":
+        if src[0] == "clip":
             ok = store and _extract_clip_frame(store, src[1], src[2], dst)
         elif src[0] == "logo":
             logo = os.path.join(lcd_dir, "logo.png")
             if os.path.isfile(logo):
+                import shutil
                 shutil.copyfile(logo, dst)
-                ok = True
-        elif src[0] == "photo":
-            repo = os.path.join(HERE, "stills", game, src[1])
-            if os.path.isfile(repo):
-                shutil.copyfile(repo, dst)
                 ok = True
         if ok:
             made.append((i, fn, label))
@@ -133,12 +133,13 @@ def main():
 
     tmp = os.path.join(out_dir, "map.txt.tmp")
     with open(tmp, "w", encoding="utf8") as f:
-        f.write("# villain board still map - MEASURED from machine footage"
-                " (2026-08-26), see lcdstills.py\n")
+        f.write("# villain board still map - CARD-derived (see lcdstills.py);"
+                " ids without a card-store image await the UPDATE TV IMAGES"
+                " capture\n")
         for i, fn, label in made:
             f.write("%d\t%s\t%s\n" % (i, fn, label))
     os.replace(tmp, os.path.join(out_dir, "map.txt"))
-    print("stills: %d mapped, %d not yet pinned%s"
+    print("stills: %d mapped from the card, %d await the upload capture%s"
           % (len(made), len(missing),
              " (%s)" % ", ".join(l for _, l in missing) if missing else ""))
     return 0

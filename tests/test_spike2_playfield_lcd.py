@@ -868,34 +868,31 @@ def test_a_missing_still_file_falls_back_to_clip_art(tmp_path, monkeypatch):
         root.destroy()
 
 
-def test_brightness_drop_dissolves_then_hides(tmp_path, monkeypatch):
-    """The real set FADES through clip swaps (the wire's fade code 15;
-    David called out the hard cut: "still frames with a slideshow fade
-    effect"). With a PIL picture on screen, brightness 0 must step through
-    darkened frames - item still visible - before hiding; 255 restores the
-    picture instantly (the reveal rides in with the asset swap)."""
+def test_brightness_drop_dissolves_only_the_screen(tmp_path, monkeypatch):
+    """The real set FADES through clip swaps (the wire's fade code 15) -
+    but the SET ITSELF is a physical cabinet and must never dim or
+    vanish: only the screen goes dark (tester report: "the TV outline
+    should not be fading in and out"). With the card's TV composed into
+    the image, every dissolve step keeps the item VISIBLE - end state is
+    a black screen in a lit set - and 255 restores the picture."""
     root = _root()
     try:
         playfield, p, block = _panel(root, str(tmp_path), monkeypatch)
         _write_tv(p._art)                   # PIL path: _compose stashes
-        _write_png(p._art, "54.png")        # the screen PIL to fade from
+        _write_png(p._art, "54.png")        # the picture to fade from
         _write_block(block, asset=54, verb=2)
         _poll(p)
-        assert p._scr_pil is not None
+        assert p._pic_pil is not None
         held = p.img
         _write_block(block, asset=54, verb=2, bright=0)
-        _poll(p)                            # step 1: darkened, NOT hidden
-        assert p.cv.itemcget(p.item, "state") == "normal"
+        for k in range(4):                  # steps + dark end state
+            _poll(p)
+            assert p.cv.itemcget(p.item, "state") == "normal",                 "the set vanished at dissolve step %d" % k
+        assert not p._fadeq
         assert p._fade_ref is not None and p._fade_ref is not held
-        _poll(p)                            # step 2: darker still
-        assert p.cv.itemcget(p.item, "state") == "normal"
-        _poll(p)                            # the queue's end: dark
-        assert p.cv.itemcget(p.item, "state") == "hidden"
         _write_block(block, asset=54, verb=2, bright=255)
         _poll(p)                            # instant reveal, real picture
         assert p.cv.itemcget(p.item, "state") == "normal"
         assert not p._fadeq
     finally:
         root.destroy()
-
-

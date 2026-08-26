@@ -5817,6 +5817,58 @@ These have each been violated at least once and each cost a run or a window:
       That capture would also name the BALL SAVE / event-card ids the
       footage shows but our wire has not yet sent. Worth its own pass.
       **Rig state: card unmounted, lock released, no runs.**
+
+      **UPDATE 21 (2026-08-26) — DAVID REDIRECTS TO THE REAL
+      ARCHITECTURE, and he is right: the board has its OWN image store,
+      updated from the card, and the game sends only an id.** His three
+      points, all addressed: **(1) stop using footage.** He found the
+      service menu's UPDATE TV IMAGES diagnostic and correctly reasoned
+      the board stores images written from the SD card. RULE: run
+      everything off the card, distribute NO assets ourselves. The 7
+      median-stacked footage PNGs I committed (2 game cards + 5
+      signs/portraits) are DELETED, the .gitignore *.png exception
+      reverted, lcdstills.py's "photo" provenance removed. lcdstills now
+      ships nothing and extracts only CARD-derived stills at runtime:
+      5 mapped (logo scene texture + 4 clip frames 27.f45/27.f65/305.f21/
+      503.f0), the other 7 ids deliberately UNMAPPED (they fall back to
+      the clip still, not footage). **(2) the TV outline must not fade.**
+      Fixed: the dissolve blended the whole COMPOSED image so the cabinet
+      dimmed with the screen; now only the picture inside the hole fades
+      (re-composed into the fully-lit set each step, end state = black
+      screen in a visible set), and a composed image is never hidden.
+      **(3) the diagnostic 'does nothing' on his machine and mine** —
+      confirmed it is a real, WIRED routine that no-ops. RE: rodata
+      0x55cb0c UPDATE TV IMAGES with a full sibling string set (UPDATE
+      AVAILABLE / NO UPDATE AVAILABLE / UPDATE STATUS.../ELAPSED TIME/
+      UPDATE COMPLETE/UPDATE FAILED/PRESS ENTER TO BEGIN), screen
+      descriptor at file 0x6ec1ac. "NO UPDATE AVAILABLE" is a
+      version/checksum gate - the board is already current vs the card's
+      image.bin, so the upload is skipped. It WAS wired to push images;
+      it just has nothing to do when versions match.
+      **THE ARCHITECTURE, now settled:** node 24 (LPC1113, control-only)
+      is the bus interface to an LCD that has LOCAL IMAGE STORAGE; UPDATE
+      TV IMAGES writes that store from the card; in-game the wire carries
+      only an id + brightness, and the board renders its stored image.
+      The id->image map is INDEPENDENT of the clip store (wire 591 ->
+      a frame of clip 27; wire 601 -> another frame of clip 27 - the
+      numbers are unrelated), which is why the board set can't be
+      derived by "extract clip <wire-id>". The images for the game cards
+      and 5 signs/portraits are in NO card store that unpacks to disk
+      (exhaustive: 245,828 frames of all 3,069 clips, 752 lcd textures,
+      both 2.asset stores, image.bin's 4 decodable JPEGs) - they live in
+      the UPLOAD.
+      **THE ONE RIGHT NEXT STEP (its own item's worth):** capture the
+      UPDATE TV IMAGES upload on the rig - drive the emulated service
+      menu to TV settings > update images with the node bus + file reads
+      logged, FORCING a stale-board state so the routine actually pushes
+      (blank the board's version, or fault the checksum). That upload
+      names every board id AND carries the byte-exact images, straight
+      from the card - the complete, correct, card-only set, no footage,
+      nothing distributed. image.bin is the app's master container
+      (engine.py) and the likely source the routine reads; its TV-image
+      section is packed, not plain, so the routine (or the app's Radium
+      unpacker pointed at the right offset) is the decoder.
+      50 tests green. Rig: card unmounted, lock released, no runs.
       **BUILT (padled's conventions throughout):** padlcd.h (one page:
       magic/gen/id[4]/ms[4] + a 64-entry raw ring for RE); hwshim.c
       lcd_publish() beside led_publish, gated on PAD_LCD_NODE; watch.sh

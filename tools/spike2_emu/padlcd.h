@@ -96,13 +96,35 @@
  * cards (BALL SAVE, seen mid-game) are further ids not yet observed on
  * this rig's wire. Cross-check: the first attract command after boot is
  * 2 - the machine opens attract on the Game Over card, exactly as
- * filmed. lcdstills.py carries the id->still table with per-entry
- * provenance; the byte-exact uploaded set is capturable by running that
- * TV-settings diagnostic ON THIS RIG with the wire logged (recorded in
- * TODO - it would replace the pinned frames wholesale and name every
- * mapped id, not just the 13 observed). An earlier note here read the
- * hammer as an anchor+episode-WALK; the walk was this attract cycle
- * stepping, and the reel it justified is deliberately gone. */
+ * filmed. lcdstills.py carries the id->still table. An earlier note here
+ * read the hammer as an anchor+episode-WALK; the walk was this attract
+ * cycle stepping, and the reel it justified is deliberately gone.
+ *
+ * ★ THE BOARD HAS ITS OWN IMAGE STORE, id-mapped INDEPENDENTLY of the
+ * clip store (David's architecture, 2026-08-26, and the correct model).
+ * The Villain Vision is a node-24 LCD with local image storage; the
+ * service menu's UPDATE TV IMAGES routine (rodata 0x55cb0c, screen
+ * descriptor at file 0x6ec1ac; sibling strings UPDATE AVAILABLE / NO
+ * UPDATE AVAILABLE / UPDATE STATUS.../ELAPSED TIME/UPDATE COMPLETE|
+ * FAILED) WRITES that store from the card, and in-game the wire sends
+ * only an id the board renders locally. The mapping is NOT the clip
+ * store's: the board image for wire-id 591 (Batmobile) is a frame of
+ * clip 27, and 601 (Gotham sign) is another frame of that SAME clip 27 -
+ * the wire ids and clip ids are unrelated numbers, so the set cannot be
+ * derived by "extract clip <wire-id>". The board images for the two
+ * game-rendered cards and the five signs/portraits are in NO card store
+ * that unpacks to disk (exhaustive: all 245,828 frames of all 3,069
+ * clips, all 752 lcd scene textures >=100x60, both 2.asset stores, and
+ * image.bin's only 4 decodable embedded JPEGs). They live in the UPLOAD
+ * - a packed section or composed at upload time - so both the byte-exact
+ * board images AND their id bindings surface in ONE place: that UPDATE
+ * TV IMAGES routine, run on the rig with the node bus logged. It no-ops
+ * "NO UPDATE AVAILABLE" (a version/checksum gate: the board vs the
+ * card's image.bin) so a capture must force a stale-board state. This is
+ * the recorded path to a complete card-only set; until then lcdstills
+ * maps only the ids whose board image IS a card store frame and ships
+ * NOTHING. NB item 82's "3,416-frame f2 update walk" was the plain
+ * 60 Hz 0x90 poll - no image upload has ever been captured. */
  *
  * ★ VERSION 3 STOPS NAMING FIELDS WE HAVE NOT PROVEN. v1 invented three
  * displays. v2 fixed that but replaced one guess with another: it read the

@@ -3631,7 +3631,7 @@ class LcdPanel:
         self.stillmap = None        # {id: (file, label)} from stills/map.txt;
         self._map_tried = False     # non-empty = this display is a stills board
         self._still_imgs = {}       # id -> composed PhotoImage, loaded once
-        self._scr_pil = None        # PIL of the picture on screen (for _fade)
+        self._pic_pil = None        # PIL of the PICTURE on screen (for _fade)
         self._fadeq = []            # pending dissolve steps, one per poll
         self._fade_ref = None       # current step's PhotoImage (keep-alive)
         self.names = None           # {id: name} from lcdnames.py, loaded once
@@ -3745,12 +3745,14 @@ class LcdPanel:
             return                      # a rect that is not inside its own
         self.tv, self.tv_hole = tv, (x, y, w, h)   # sprite is not usable
 
-    def _compose(self, pil):
+    def _compose(self, pil, stash=True):
         """Put a clip frame behind the TV's screen hole and return the
         whole set as one image. The clip is fitted to the hole KEEPING ITS
         ASPECT - the hole is squarer than 4:3, and stretching 240x180 to
         fill it would make every face on the Villain Vision subtly wrong,
-        which is the opposite of the point."""
+        which is the opposite of the point. `stash=False` is for _fade's
+        own darkened frames, which must not overwrite the record of what
+        the screen is showing."""
         x, y, w, h = self.tv_hole
         s = min(w / pil.width, h / pil.height)
         nw, nh = max(1, int(pil.width * s)), max(1, int(pil.height * s))
@@ -3758,8 +3760,10 @@ class LcdPanel:
         out.paste(pil.convert("RGB").resize((nw, nh)),
                   (x + (w - nw) // 2, y + (h - nh) // 2))
         out.alpha_composite(self.tv)    # the set, over the picture
-        self._scr_pil = out.convert("RGB")   # what _fade dissolves from
-        return _PILImageTk.PhotoImage(out)
+        if stash:
+            self._pic_pil = pil.convert("RGB")   # the PICTURE, pre-set,
+        return _PILImageTk.PhotoImage(out)       # for _fade's screen-only
+                                                 # dissolve
 
     def _cabinet(self):
         """Draw the TV around the screen, once, under everything else.
@@ -3806,24 +3810,37 @@ class LcdPanel:
 
     def _fade(self, br):
         """Start (or cut short) the brightness transition. Dark builds the
-        dissolve queue - FADE_STEPS darkened frames, then hidden - applied
+        dissolve queue - FADE_STEPS darkened frames, then dark - applied
         one per poll starting NOW; bright clears it and restores instantly
-        (the reveal rides in with the asset swap). No picture PIL on hand
-        (a bare tk still, or no PIL at all) falls back to the old hard
-        blank rather than inventing frames."""
+        (the reveal rides in with the asset swap).
+
+        ★ THE SET NEVER DIMS. It is a physical cabinet on the machine and
+        only the SCREEN goes dark - the first cut of this dissolve blended
+        the whole composed image, so the wood and knobs faded with every
+        clip swap (David: "the TV outline should not be fading in and
+        out"). With the card's TV each step re-composes the darkened
+        PICTURE into the fully-lit set, and end-state "dark" is a black
+        screen in a visible set, never a hidden item. Without the TV
+        sprite the drawn cabinet lives in its own canvas items, so hiding
+        the picture item was always safe there and still is."""
         self._fadeq = []
         if self.item is None:
             return
         if br >= 128:
             self.cv.itemconfig(self.item, image=self.img, state="normal")
             return
-        if _PILImage is None or self._scr_pil is None:
-            self.cv.itemconfig(self.item, state="hidden")
-            return
-        black = _PILImage.new("RGB", self._scr_pil.size, (0, 0, 0))
-        self._fadeq = [
-            _PILImageTk.PhotoImage(_PILImage.blend(black, self._scr_pil, a))
-            for a in self.FADE_STEPS] + [None]
+        if _PILImage is None or self._pic_pil is None:
+            if self.tv is None:
+                self.cv.itemconfig(self.item, state="hidden")
+            return                      # composed set, no frame record:
+        black = _PILImage.new("RGB", self._pic_pil.size, (0, 0, 0))
+        steps = [_PILImage.blend(black, self._pic_pil, a)
+                 for a in self.FADE_STEPS]
+        if self.tv is not None:
+            self._fadeq = [self._compose(s, stash=False) for s in steps]
+            self._fadeq.append(self._compose(black, stash=False))
+        else:
+            self._fadeq = [_PILImageTk.PhotoImage(s) for s in steps] + [None]
         self._fade_step()
 
     def _fade_step(self):
@@ -4000,7 +4017,10 @@ class LcdPanel:
             self.cv.delete("pic")
             self.item = self.cv.create_image(
                 *self._mid(), image=img, tags="pic",
-                state="hidden" if self.bright < 128 else "normal")
+                # a composed image CONTAINS the set: never hide it (the
+                # cabinet must not blink out with the screen)
+                state="hidden" if (self.bright < 128 and self.tv is None)
+                else "normal")
         else:
             self.cv.itemconfig(self.item, image=img)
 
@@ -4140,7 +4160,7 @@ class LcdPanel:
             if self.tv is not None:
                 return self._compose(a["pil"])
             rgb = a["pil"].convert("RGB")
-            self._scr_pil = rgb         # what _fade dissolves from
+            self._pic_pil = rgb         # what _fade dissolves from
             return _PILImageTk.PhotoImage(rgb)
         except Exception:               # noqa: BLE001 - corrupt tail: the
             a["n"] = idx                # clip honestly ends here
@@ -4208,7 +4228,7 @@ class LcdPanel:
                     out = _PILImage.new("RGB", (self.CW, self.CH), (0,)*3)
                     out.paste(pil.convert("RGB").resize((nw, nh)),
                               ((self.CW - nw) // 2, (self.CH - nh) // 2))
-                    self._scr_pil = out
+                    self._pic_pil = out
                     img = _PILImageTk.PhotoImage(out)
                 thumb = _PILImageTk.PhotoImage(
                     pil.convert("RGB").resize((self.TW, self.TH)))

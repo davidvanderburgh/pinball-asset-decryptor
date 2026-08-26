@@ -7641,6 +7641,54 @@ static void sw_changes(void)
  * fields moves. A run of `pend=2` immediately before a wrong `lvl` proves the
  * parity story; `pend=0` with a wrong `lvl` disproves it and points at cur[].
  */
+/* WHAT THIS TRACE CAN ACTUALLY SEE, said out loud, once per change of answer.
+ *
+ * Item 46's pass set PAD_SW_PEND=34 on turtles_pro, verified it in the guest's
+ * own /proc/<pid>/environ, and got ZERO lines all run - then had to record its
+ * own named discriminator as "dead, unexplained" and could not tell a lost
+ * press from a missing instrument. Both readings were available and the trace
+ * said nothing, which is the one thing an instrument must never do.
+ *
+ * The category is re-evaluated rather than latched, because the table does not
+ * exist at the first bus write: "no table" at 2 s followed by "configured
+ * table" at 9 s is two true statements, not a contradiction. */
+static void sw_pend_say(unsigned st, unsigned cnt)
+{
+    static int said = -1;
+    int cat;
+    char m[300];
+
+    if (!sw_ok(st) || cnt > 4096)   cat = 0;
+    else if (sw_ftab_installed)     cat = 1;
+    else if (sw_shadow[0])          cat = 2;
+    else                            cat = 3;
+    if (cat == said) return;
+    said = cat;
+
+    if (cat == 0)
+        snprintf(m, sizeof m,
+                 "[swpend] NO TABLE YET: entry[]=0x%08x count=%u. Nothing to "
+                 "watch; the trace prints nothing until a table is found.\n",
+                 st, cnt);
+    else if (cat == 1)
+        snprintf(m, sizeof m,
+                 "[swpend] SYNTHETIC TABLE (switch_list.txt, %u switches): "
+                 "pend/lvl/prev/cur are the shim's own zeros, NOT the game's "
+                 "counters. THIS ORACLE DOES NOT EXIST ON THIS TITLE - a quiet "
+                 "trace here does not mean a press was lost.\n", cnt);
+    else if (cat == 2)
+        snprintf(m, sizeof m,
+                 "[swpend] FOUND-BY-SHAPE TABLE, entry[] at 0x%08x, %u "
+                 "switches: pend/lvl are the game's own, but the struct base "
+                 "is unknown, so prev/cur/raw cannot be read and print '?'.\n",
+                 sw_shadow[0], cnt);
+    else
+        snprintf(m, sizeof m,
+                 "[swpend] configured table at 0x%08x, %u switches - every "
+                 "field is live.\n", st, cnt);
+    logmsg(m);
+}
+
 static void sw_pend_trace(void)
 {
     static char *list = (char *)-1;
@@ -7650,6 +7698,7 @@ static void sw_pend_trace(void)
     static unsigned char primed[256];
     unsigned long now;
     unsigned st, raw, cnt;
+    int have_raw, have_rec;
     char *p;
 
     if (list == (char *)-1) list = getenv("PAD_SW_PEND");
@@ -7660,7 +7709,23 @@ static void sw_pend_trace(void)
     st  = tread(SW_STRUCT);
     raw = tread_at(SW_STRUCT, 4);
     cnt = tread(SW_COUNT);
-    if (!sw_ok(st) || !sw_ok(raw) || cnt > 4096) return;
+    /* A SILENT INSTRUMENT IS THE WORST ONE. This guard used to include
+     * !sw_ok(raw) and return, which muted the whole trace on EVERY title that
+     * resolves its table through sw_shadow[] - both finder routes set
+     * sw_shadow[1] = 0 (see its declaration: "[1] raw[] (0 = none)"), so raw
+     * is 0 unless the CONFIGURED address checked out, i.e. unless the title is
+     * Godzilla Pro 1.15.0. Item 46 spent a whole turtles_pro run with
+     * PAD_SW_PEND=34 verified present in the guest's own environ and got zero
+     * lines and no message, and the item recorded its own named discriminator
+     * as "currently dead, unexplained". It was this line.
+     *
+     * raw[] feeds exactly ONE printed field. It is now optional, and the two
+     * things that genuinely cannot be read under a shadow say so once rather
+     * than by going quiet. */
+    sw_pend_say(st, cnt);
+    if (!sw_ok(st) || cnt > 4096) return;
+    have_raw = sw_ok(raw);
+    have_rec = !sw_shadow[0];
 
     for (p = list; *p; ) {
         unsigned id = 0;
@@ -7675,8 +7740,14 @@ static void sw_pend_trace(void)
         pend = *(const unsigned short *)(e + 22);
         lvl  = e[24];
         e26  = e[26];
-        rw   = ((const unsigned char *)(unsigned long)raw)[id];
-        if (node < 32 && bit < 64) {
+        /* Both optional, and UNAVAILABLE IS NOT ZERO - printed as '?' below.
+         * A shadow table gives the entry[] array but not the struct it hangs
+         * off, and SW_NODEREC() is an offset from that struct: under a shadow
+         * it addresses the shim's own .bss, so prev/cur would be neither the
+         * game's nor obviously wrong. That is the shape of finding this rig
+         * loses passes to, so it is not read at all rather than read badly. */
+        rw = have_raw ? ((const unsigned char *)(unsigned long)raw)[id] : 0;
+        if (have_rec && node < 32 && bit < 64) {
             const unsigned char *rec =
                 (const unsigned char *)(unsigned long)SW_NODEREC(node);
             cur = (rec[20 + (bit >> 3)] >> (bit & 7)) & 1;
@@ -7692,13 +7763,18 @@ static void sw_pend_trace(void)
         cv[id] = (unsigned char)cur;  rv[id] = (unsigned char)rw;
         sv[id] = sw_sent[id];         ev[id] = (unsigned char)prv;
         if (budget > 0) {
-            char line[240];
+            char line[240], rs[8], ps[8], cs[8];
             budget--;
+            if (have_raw) snprintf(rs, sizeof rs, "%u", rw);
+            else          { rs[0] = '?'; rs[1] = 0; }
+            if (have_rec) { snprintf(ps, sizeof ps, "%u", prv);
+                            snprintf(cs, sizeof cs, "%u", cur); }
+            else          { ps[0] = '?'; ps[1] = 0; cs[0] = '?'; cs[1] = 0; }
             snprintf(line, sizeof line,
                      "[swpend] %lu ms id=%-3u node=%-2u bit=%-2u sent=%u"
-                     " prev=%u cur=%u pend=%u lvl=%u raw=%u e26=%u\n",
-                     now, id, node, bit, sw_sent[id], prv, cur,
-                     pend, lvl, rw, e26);
+                     " prev=%s cur=%s pend=%u lvl=%u raw=%s e26=%u\n",
+                     now, id, node, bit, sw_sent[id], ps, cs,
+                     pend, lvl, rs, e26);
             logmsg(line);
         }
     }

@@ -741,9 +741,14 @@ rm -f "$RING_HOST" "$SW_HOST"
 # expects and polls through; wrong is the state nothing would notice.
 rm -f "$ROOT/dump/padbinds"
 # The guest opens the LED block O_RDWR and will NOT create it, so make it here.
-# One page, zeroed: the shim stamps the magic once it maps it.
+# TWO pages, zeroed: the shim stamps the magic once it maps it. It was one page
+# until version 4 (padled.h), whose `seen` plane crossed 4096. The shim takes
+# the size from the FILE rather than trusting this number - an old watch.sh
+# against a new shim gets a version-3 block instead of a SIGBUS on the second
+# page - but the plane only exists when the file is big enough, so this line is
+# what turns it on.
 rm -f "$LED_HOST"
-dd if=/dev/zero of="$LED_HOST" bs=4096 count=1 status=none
+dd if=/dev/zero of="$LED_HOST" bs=8192 count=1 status=none
 # This session's identity. savestate copies it into the slot; restorestate
 # compares to tell a SAME-SESSION load (renderer already holds the guest's GL
 # world) from a CROSS-SESSION one (it holds none of it - the game plays but

@@ -4894,6 +4894,100 @@ These have each been violated at least once and each cost a run or a window:
       S1 because play works. D4: mechanism unknown, needs instrumented
       runs, and the second-screen half is not yet even characterised.
 
+- [x] **85. batman's playfield LEDs: only 25 channels on two boards, and
+      every one of them dark.** `S2 D3` DONE 2026-08-26, `item/85`,
+      awaiting `/finish`. **LIVE-VERIFIED on batman, regression-verified on
+      godzilla_pro.**
+      *(David, mid item-80 sweep, on his own live batman run: "i'm only
+      seeing board 8 and 9 here and i'm not seeing all the leds coming
+      through — are we missing some node boards?" The boards were all
+      there. TWO INDEPENDENT FAULTS, both measured on that run.)*
+      **FAULT 1 — every lamp was being commanded to ~1% and landing on
+      ZERO.** Read live off his running game: `decoded` 479,553 and
+      climbing ~95/s, and all 1536 `val[]` bytes zero across 12 samples
+      over 5 s — not one non-zero value, ever. The frames were arriving
+      and decoding perfectly; they carried black. Mechanism, read out of
+      the ELF and not guessed: identity reply bytes `[8..9]` are stored
+      per node (`0x51b558` → `0x816dac+node*12+8`), returned by
+      `0x51b68c`, and the cmd-0x70 builder `0x51c2b4` computes
+      `A' = min(255, chA * that / 100)` — so the field this shim's own
+      comment called "board id" is ALSO a brightness PERCENT, and we
+      answered **1**. Anything the game computed below 100 floored to 0.
+      Fixed by claiming **100** (`NB_HWID_DEFAULT`), the value at which
+      the wire carries the game's own numbers unmodified; still non-zero,
+      so `0x5a2f44`'s id consumer is unaffected. Godzilla never showed it
+      because its show speaks 0x70 27–81 times per RUN against batman's
+      ~109 per SECOND.
+      **FAULT 2 — the whole swelf lamp dialect was undecoded.** batman
+      drives lamps with `88 89 8a 8e 95 96 98 9a 9e a0 a1 a2 a4 a5 a6 b4
+      b5 b7` out of ONE builder (`0x51896c`), whose command byte is a
+      BITFIELD, not an opcode: `cmd = 0x80 | M | B | A` assembled at
+      `0x518ac4`, where the same three fields choose which blocks the body
+      carries. Shipped as `led_wide_publish`/`led_wide_walk` in hwshim.c
+      with its Python twin `leddecode.wide_decode`. Two findings inside it
+      that no capture could have produced: the index bitmap is **sparse**
+      (`body[0]` bit 6 is a fill, bits 5-0 say which middle bytes were
+      sent — how 45 lamps fit in 59 bytes), and `A == 0`/`A == 1` **carry
+      a level without spending a byte** (`0x51667c` branches on the shared
+      value: 0x00 → mode 0, 0xff → mode 1), so half the show is all-on and
+      all-off frames that a naive reading scores as "says nothing".
+      **NO NODE GATE, and it does not need one:** the block walk must
+      consume the body EXACTLY or the frame is refused, so a mis-parse
+      fails by itself — which is what makes node 13, an LED-only board
+      carrying no switches that had never appeared in the window at all,
+      safe to read. `PAD_LED_WIDE=0` is the one-flag A/B.
+      **Also:** `padled.h` v4 adds a `seen[16][96]` ADDRESSED plane, because
+      a roster built from `val[]` only ever contained lamps that were lit
+      while somebody was watching; the enumeration walk now runs on every
+      board (it sat below the node gate, so node 10 announced its lamp
+      list and none of it was recorded); and the 0x70 path's "16-bit
+      [lo][hi]" comment was wrong — `0x51c2ec`/`0x51c2f4` scale and clamp
+      the two bytes independently, so they are two channels.
+      **Verified at the desk:** 19 of the 20 commands in batman's own
+      `[nbcmd]` census decode byte-exactly (the 20th is cmd 0x70, which is
+      a different builder and correctly refused); the C is compiled out of
+      hwshim.c and checked against the Python twin on every frame plus
+      100+ mutations (`test_spike2_led_wide_twins.py`); full suite 3180
+      passed. Channel B is walked for its length and DROPPED — its values
+      come from a small alphabet (0x08/0x0f/0x1e) that looks like a rate
+      beside channel A's levels, and "looks like" is not a finding.
+      **VERIFIED LIVE, batman off the card, 200 s:** six boards where two
+      had been — nodes **1, 8, 9, 10, 12, 13**, **108 addressed channels
+      against the 25 David could see**, and the wire's own values on the
+      glass. The brightness fix shows in one byte: the node-1 lamp whose
+      first frame read `81 05 70 08 00 00` on his run reads `81 05 70 08
+      02 02` on this one. Nodes 8 and 9 register but sit at zero, which is
+      the game holding its inserts dark in attract, not us failing to read
+      them.
+      **★ AND THE GODZILLA REGRESSION FOUND A REAL FAULT, which is what it
+      was for.** First run: the wide grammar accepted **7 of ~1532** frames
+      on godzilla's node-7 strip board — 0.5%, every one a coincidence, and
+      every one about to write a confident lamp value onto a board this
+      codebase has refused to guess at since it was written. The
+      exact-close test is strong but not perfect, and over a whole run
+      "not perfect" shows. **Fixed with a per-RUN dialect gate:** the two
+      populations are nowhere near each other (batman parses ~83% of what
+      it offers the grammar, godzilla 0.5%), so nothing is published until
+      200 frames have voted and a title that says no says no for the rest
+      of the run. Same reasoning as the light-show announcer — a rate, not
+      a count. **Re-run godzilla_pro: `[ledwide] dialect REFUSED - this
+      title is not the swelf generation: 0 of 200 frames parsed exactly`,
+      `wide_decoded 0`, nodes 1/8/9 only and nodes 7/12/14 gone from the
+      roster.** `PAD_LED_WIDE=2` forces it on for a title whose rate lands
+      somewhere nobody has seen; `=0` turns it off.
+      **Also backed out on that evidence:** the enumeration walk briefly
+      marked the addressed roster too, which gave godzilla's nodes 12 and
+      14 ninety-six dark cells each for boards nothing ever drove. `seen`
+      means "the game wrote to this lamp"; a boot-time inventory is a
+      different claim.
+      **Still owed:** one ws2812-heavy title (stranger_things_le) through
+      the same gate, and David's own eyes on the batman playfield window
+      rather than the block underneath it.
+      — S2: a whole subsystem reads as broken on an unknown number of
+      titles (every swelf-generation card), but nothing is blocked and the
+      games play. D3: the RE was deep but is done and written down; what is
+      left is one boot and a regression.
+
 - [x] **81. `Schematic`'s switch-row hover zone is not perfectly aligned with
       its text.** `S3 D2` DONE 2026-08-24, `item/81`, awaiting `/finish`.
       *(Filed 2026-08-24, spotted by David during item 80's sweep on

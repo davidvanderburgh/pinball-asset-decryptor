@@ -715,7 +715,14 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    go actions (Extract, Build), red for the live Cancel and Revert all
    changes — with neutral buttons (Browse, Refresh) left plain.
    Any Replace Audio / Video assignments are applied automatically
-   here — no extra step. The **Modified Files** list sorts on any
+   here — no extra step. If those picks were made against a *different*
+   project folder, the warning before the build now shows both paths
+   together — the folder being built and the folder each set of
+   assignments belongs to — says which field to change (**Project
+   Folder** on the Extract tab, the only editable copy of that path),
+   and, when the folder being built has replacements recorded of its
+   own, says the build applies those instead of calling the image
+   unmodified. The **Modified Files** list sorts on any
    column header (File, Type, Status — click again to flip, a third
    time to restore the scan's own Pending-above-Modified order) and an
    **Export CSV** button saves the whole list, so two projects that

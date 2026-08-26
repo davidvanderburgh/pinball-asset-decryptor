@@ -61,8 +61,13 @@ import os
 import re
 import sys
 
-#: hwshim.c:5953 led_insert_node() - the ONLY definition in C, and it is
-#: godzilla's board numbering. leddecode.py:52 is its twin.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import leddecode                                              # noqa: E402
+
+#: hwshim.c led_insert_node() - the ONLY definition in C, and it is godzilla's
+#: board numbering. leddecode.py's INSERT_NODES is its twin. It gates the
+#: godzilla shapes ONLY; the swelf grammar (leddecode.wide_decode) runs on every
+#: board, because it refuses anything it cannot consume exactly.
 INSERT_NODES = (1, 8, 9)
 
 #: hwshim.c:6139-6140 / leddecode.py:44. A frame whose command is not one of
@@ -109,7 +114,7 @@ def replay(fr):
     """Walk the accept path. Returns a dict of stage counts and evidence."""
     st = dict(total=len(fr), short=0, broadcast=0, lamp_any_node=0,
               off_node=0, enum=0, lamp_on_insert=0, would_decode=0,
-              would_skip=0)
+              would_skip=0, wide_decode=0, wide_refuse=0)
     known = collections.defaultdict(set)        # node -> {index}
     lamp_by_node = collections.Counter()
     lamp_examples = {}
@@ -132,16 +137,30 @@ def replay(fr):
         if cmd in LAMP_CMDS:
             st["lamp_any_node"] += 1
 
-        if node not in INSERT_NODES:
-            if cmd in LAMP_CMDS:
-                st["off_node"] += 1
-            continue
-
+        # ENUMERATION IS READ ON EVERY BOARD SINCE ITEM 85, not just the
+        # insert ones - it used to sit below the node gate, so batman's node 10
+        # announced its whole lamp list and none of it was recorded.
         if n == ENUM_LEN and cmd in ENUM_CMDS:
             if p[3] < 96:
                 known[node].add(p[3])
             st["enum"] += 1
             enum_by_node[node] += 1
+            continue
+
+        # THE SWELF DIALECT, tried on the boards the older shapes are not
+        # allowed near (item 85). It needs no node gate because it refuses
+        # anything whose block walk does not consume the body exactly - see
+        # led_wide_publish in hwshim.c. Counted separately so a title that
+        # decodes on THIS path can be told from one that decodes on the old
+        # one; `off_node` keeps meaning what it meant, which is "a lamp frame
+        # the godzilla decoder would never have looked at".
+        if node not in INSERT_NODES:
+            if cmd in LAMP_CMDS:
+                st["off_node"] += 1
+            if leddecode.wide_decode(p) is not None:
+                st["wide_decode"] += 1
+            elif cmd & 0x80:
+                st["wide_refuse"] += 1
             continue
 
         # The service menu's own shapes (hwshim.c, item 50): exact cmd+length,
@@ -163,6 +182,11 @@ def replay(fr):
         st["lamp_on_insert"] += 1
         lamp_by_node[(node, cmd)] += 1
         lamp_examples.setdefault((node, cmd), p.hex())
+
+        # ...and if none of the godzilla shapes take it, the swelf grammar
+        # gets it last, exactly as hwshim.c orders them.
+        if leddecode.wide_decode(p) is not None:
+            st["wide_decode"] += 1
 
         # The index checks all reduce to "is this byte an announced index on
         # this node" (hwshim.c:6168-6170, 6209-6211, 6292, 6386, 6414-6416).
@@ -263,6 +287,8 @@ def main(argv):
                   % (node, cmd, c, ex[(node, cmd)]))
         print("  would decode      : %d      would skip: %d"
               % (st["would_decode"], st["would_skip"]))
+        print("  swelf dialect     : %d decode, %d refused"
+              % (st["wide_decode"], st["wide_refuse"]))
         print()
         print("  VERDICT: %s" % verdict(st, known))
         if show_frames:

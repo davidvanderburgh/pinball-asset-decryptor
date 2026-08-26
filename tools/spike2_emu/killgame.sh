@@ -51,6 +51,14 @@ pkill -9 -f 'ballfeed[.]py'
 # has artwork. It waits in a poll loop for the guest's switch table, so
 # it outlives a run that ends first. alive.sh counts it.
 pkill -9 -f 'mktables[.]py'
+# The switch exerciser (item 59), both halves. The shell half sleeps in a poll
+# loop for the guest's switch table and would outlive a run that ends first;
+# the python half drives ~44 switch ids over ~10 s, so a stop asked for mid
+# exercise must not leave it pressing switches into whatever runs next. Killed
+# BEFORE the shell half's own `up()` check could notice, deliberately - the
+# same argument as the ball feeder above. alive.sh counts both.
+pkill -9 -f 'swexercise[.]sh'
+pkill -9 -f 'swexercise[.]py'
 # The event feed. An orphaned `tail -F` never exits by itself.
 #
 # $PAD_HOME AND NOT $HOME, and padpath.sh's own header carries the full story:
@@ -101,7 +109,13 @@ pkill -9 -f 'padplay\.py'
 # mount reference dies with the namespace. The pattern is run_game.sh's exact
 # shape (`unshare $USERNS -m -p -f ...`, -r absent for a root PIVOT run);
 # restorestate.sh's `unshare -m bash` is deliberately NOT matched.
-pkill -9 -f '^bash .*(watch|runbridge|nbrun|run_game)\.sh'
+# cardmount.sh joined the list at item 74: its sync cache_wait can be looping
+# for minutes under a boot, holding watch.sh's merged output pipe - a Stop
+# that leaves it running keeps wsl.exe from reaching EOF, so the GUI sat out
+# its full 20 s wait timeout on every mid-copy Stop. The DETACHED copier is
+# deliberately not matched: it survives a Stop on purpose, so the copy is not
+# lost, and its output goes to the cardcache log, not the pipe.
+pkill -9 -f '^bash .*(watch|runbridge|nbrun|run_game|cardmount)\.sh'
 pkill -9 -f '^unshare (-r )?-m -p -f'
 # longplay.sh is started BESIDE a run rather than by one, so it is not in the
 # group above - and watch.sh's own teardown was the only thing that ever killed

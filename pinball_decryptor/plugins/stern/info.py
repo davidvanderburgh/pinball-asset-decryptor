@@ -1,8 +1,9 @@
 """Read-only technical probe of a Spike 2 card for the Image Info tab.
 
 Everything here is derived from sources the app already understands, without
-extracting anything: the vendor filename and the on-card ``.sidx`` name (both
-carry the firmware version), the MBR partition table, the ``.sidx`` validation
+extracting anything: the on-card ``.sidx`` name (which carries the firmware
+version, and outranks the vendor filename — see :func:`resolve_version`), the
+MBR partition table, the ``.sidx`` validation
 manifest (game folder, indexed-file count, record format, ``image.bin`` size),
 the plaintext count words in the ``image.bin`` container header (sounds +
 sound fragments), the game ELF's objective namespace (the title's three-letter
@@ -50,6 +51,47 @@ def version_from_filename(path):
     return version, edition
 
 
+def edition_from_folder(folder):
+    """The edition named by the card's own game folder (``"turtles_le"`` ->
+    ``"LE"``), or ``None``.  Every Spike 2 card keeps its assets under a
+    folder named for the model, so this survives any renaming of the file."""
+    words = (folder or "").lower().split("_")
+    return _EDITIONS.get(words[-1]) if words else None
+
+
+def resolve_version(path, sidx_name="", game_folder=""):
+    """``(version, edition, source, name_version)`` — which build this card
+    actually is.
+
+    The card's own ``/spk/index/<title>_<edition>-<version>.sidx`` is the
+    authority, NOT the user's filename.  A tester pointed out that the version
+    lives inside the image and so survives a rename, and he is right: across
+    the 40 vendor cards on hand the two agree 38 times, and both exceptions
+    are cases where trusting the name is wrong —
+    ``godzilla_pro-1_15_0_spike2...`` has no parsable version in its name at
+    all (the trailing ``_spike2`` breaks the pattern), and
+    ``turtles_le-1_58_1.1987`` is a MODDED card whose name claims 1.58.1 while
+    the card is really Stern's 1.58.0.  The filename is now only the fallback
+    for a card whose index can't be read.
+
+    *name_version* is the filename's own claim, returned only when it parsed
+    AND disagrees with the card, so the caller can show both instead of
+    silently overruling what the user sees in Explorer.
+    """
+    f_version, f_edition = version_from_filename(path)
+    c_version, c_edition = ((None, None) if not sidx_name
+                            else version_from_filename(sidx_name))
+    version = c_version or f_version
+    if not version:
+        source = ""
+    else:
+        source = "the card's update index" if c_version else "the filename"
+    name_version = (f_version if c_version and f_version
+                    and f_version != c_version else None)
+    edition = c_edition or edition_from_folder(game_folder) or f_edition
+    return version, edition, source, name_version
+
+
 def container_counts(head):
     """``(sound_fragments, sounds)`` from the ``image.bin`` header, else
     ``(None, None)``.
@@ -65,9 +107,10 @@ def container_counts(head):
         (see sfx_names for the chain).  This is NOT the game-code *sound
         request* count — requests sit a level above and chain/share
         fragments, so a tester comparing counts on Venom caught the old
-        "Sound requests" label as wrong.  The request tally itself is not a
-        header word; counting it would mean mining the request tables out of
-        the game ELF.
+        "Sound requests" label as wrong.  The request tally is not a header
+        word at all; it is mined out of the game ELF's own request table by
+        :mod:`spike2.sound_requests`, which takes the fragment count from
+        here as its sid ceiling.
       * ``u32 @ 0x60`` — the packed cat-0 sounds.  Equals
         ``len(derive_params())`` (the Extract decode count) on every card
         with a cached derive (LZ 1.22 both editions = 549, Elvira 3 = 5597).
@@ -234,8 +277,8 @@ def _adjustment_rows(fw):
 
 
 def _data_partition_probe(card):
-    """``(firmware_rows, asset_rows, sidx_name, title_code)`` from the card's
-    data partition.
+    """``(firmware_rows, asset_rows, sidx_name, title_code, game_folder)``
+    from the card's data partition.
 
     Walks browsable partitions largest-first (the data partition carrying the
     sidx + assets is the largest ext partition) and stops at the first one
@@ -252,7 +295,7 @@ def _data_partition_probe(card):
             best = (reader, found)
             break
     if best is None:
-        return [], [], "", None
+        return [], [], "", None, ""
     reader, found = best
     sidx_path, sidx_node = found["sidx_path"], found["sidx_node"]
     image_bin = found["image_bin"]
@@ -269,8 +312,9 @@ def _data_partition_probe(card):
     # leading folder is the firmware's own game identifier, reliable even
     # on a renamed card.
     folders = {r.split("/", 1)[0] for r in recs if "/" in r}
-    if len(folders) == 1:
-        rows.append(("Game folder", next(iter(folders))))
+    game_folder = next(iter(folders)) if len(folders) == 1 else ""
+    if game_folder:
+        rows.append(("Game folder", game_folder))
     if recs:
         rows.append(("Validated files", "%s (%s manifest)"
                      % (format(len(recs), ","), fmt)))
@@ -292,6 +336,23 @@ def _data_partition_probe(card):
             fragments, sounds = container_counts(reader.peek(image_bin, 0x68))
         except Exception:
             fragments = sounds = None
+
+    # One ELF read serves the title code, the adjustment/high-score counts and
+    # the sound-request tally, so the extra rows cost a parse rather than
+    # another pass over the card.  Read before the asset rows are assembled:
+    # the request count belongs beside the other two sound tallies.
+    try:
+        fw = _game_elf_bytes(reader, found)
+    except Exception:
+        fw = b""
+    requests = None
+    if fw and fragments:
+        try:
+            from .spike2.sound_requests import count_sound_requests
+            requests = count_sound_requests(fw, fragments)
+        except Exception:
+            requests = None
+
     asset_rows = [
         ("Videos", format(found["videos"], ",")),
         ("Images", format(found["images"], ",")),
@@ -306,6 +367,13 @@ def _data_partition_probe(card):
                                 "resolve and play (the game's sound "
                                 "requests chain and share them)"
              % format(fragments, ",")))
+        if requests is not None:
+            asset_rows.append(
+                ("Sound requests", "%s — the calls the game code can make to "
+                                   "play audio; each one chains one or more "
+                                   "fragments (from the game's own request "
+                                   "table, not a header count)"
+                 % format(requests, ",")))
     else:
         asset_rows.append(
             ("Sounds", "packed inside image.bin — run Extract to decode "
@@ -315,31 +383,26 @@ def _data_partition_probe(card):
             ("Music banks", "%d (per-category image-scNN.bin song banks)"
              % found["music_banks"]))
 
-    # One ELF read serves both the title code and the adjustment/high-score
-    # counts, so the extra rows cost a parse rather than another pass over the
-    # card.
     title_code = None
     try:
-        fw = _game_elf_bytes(reader, found)
         if fw:
             title_code = title_code_from_firmware(fw)
             rows.extend(_adjustment_rows(fw))
     except Exception:
         title_code = None
-    return rows, asset_rows, os.path.basename(sidx_path), title_code
+    return (rows, asset_rows, os.path.basename(sidx_path), title_code,
+            game_folder)
 
 
 def card_info(path):
     """Image-Info sections for a Spike 2 card image."""
     firmware = [("System", "Stern Spike 2")]
-    version, edition = version_from_filename(path)
-    version_src = "the filename"
     partitions = []
     asset_rows = []
-    sidx_name, title_code = "", None
+    sidx_name, title_code, game_folder = "", None, ""
     try:
         with CardImage(path) as card:
-            fw_rows, asset_rows, sidx_name, title_code = \
+            fw_rows, asset_rows, sidx_name, title_code, game_folder = \
                 _data_partition_probe(card)
             for p in card.partitions():
                 partitions.append(
@@ -347,16 +410,20 @@ def card_info(path):
                      "%s — %s" % (p.label, human_size(p.size))))
     except Exception as e:
         fw_rows = [("Card read", "Could not open: %s" % e)]
-    # A renamed card has no version in its filename, but the on-card
-    # ``/spk/index/<title>_<edition>-<version>.sidx`` still names it.
-    if sidx_name:
-        s_version, s_edition = version_from_filename(sidx_name)
-        if version is None and s_version is not None:
-            version, version_src = s_version, "the card's update index"
-        if edition is None:
-            edition = s_edition
+    # The card's own update index outranks the filename entirely — the build
+    # is a fact about the image, not about what the file happens to be called
+    # (a tester).  The name is only the fallback, and a name that disagrees
+    # gets said out loud rather than silently dropped.
+    version, edition, version_src, name_version = \
+        resolve_version(path, sidx_name, game_folder)
     if version:
         firmware.append(("Version", "%s  (from %s)" % (version, version_src)))
+    if name_version:
+        firmware.append(
+            ("Filename version",
+             "%s — the file name disagrees with the card; this image was "
+             "renamed or relabelled, and the version above is the one the "
+             "machine reports" % name_version))
     if edition:
         firmware.append(("Edition", edition))
     vid = version_id(title_code, version, edition)

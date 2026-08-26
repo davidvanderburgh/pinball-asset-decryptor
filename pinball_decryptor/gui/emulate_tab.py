@@ -123,25 +123,36 @@ def _write_audio_ctl(gain, muted):
 _STATE_TEXT = {
     "off": ("Not running", ""),
     "booting": ("Starting…", "Loading scenes and bringing up the node bus."),
-    "techalerts": ("Waiting at Tech Alerts",
+    # "At", not "Waiting at": since item 63 a boot steps past this screen on
+    # its own, so the waiting word was a lie in the common case (David,
+    # 2026-08-24) — state_text swaps in "Passing Tech Alerts…" while the
+    # helper is actually pressing.
+    "techalerts": ("At Tech Alerts",
                    "Press a switch in the game window to carry on — this is "
-                   "what the real machine does, not a fault."),
-    "attract": ("In attract mode", "Playing its attract loop, or in the "
-                                   "operator menu."),
+                   "the machine's operator screen, not a fault."),
+    # "Game running", not "In attract mode": the rig deliberately does not
+    # tell attract from the operator menu or from a game in play (see
+    # gamestate.sh), and calling a game you are PLAYING "attract" was the
+    # misleading half of that honesty (David, 2026-08-24).
+    "attract": ("Game running", "Attract loop, operator menu, or a game "
+                                "in play."),
     # Kept: what status.sh emitted before it learned to say `attract`, so an
     # older rig against a newer app still reads as something rather than as a
     # bare word.  The rename happened because the old word was reached by a
     # test that had quietly stopped working - see gamestate.sh.
-    "running": ("Running", "Attract mode or the operator menu."),
+    "running": ("Game running", "Attract loop, operator menu, or a game "
+                                "in play."),
 }
 
 #: Replaces the Tech Alerts hint while the rig's own auto-advance helper is
 #: still working.  The default hint tells the user to press something; saying
 #: that while something else is already pressing invites two operators fighting
 #: over the same screen.
-_ADVANCING_HINT = ("Skipping to attract mode on its own — it waits for the "
-                   "node bus to finish bringing up, then presses Service Back "
-                   "once. Untick “Skip to attract mode” to do it by hand.")
+_ADVANCING_HINT = ("The game is checking its node boards and stops on its "
+                   "Tech Alerts readout; the emulator waits for the bus to "
+                   "finish bringing up, then presses past it to attract on "
+                   "its own. Nothing to do here; scripted runs can set "
+                   "PAD_AUTO_ATTRACT=0 to drive the boot by hand.")
 
 #: Shown when the auto-advance helper ran out of presses and stopped.  It names
 #: the service menu because that is the failure this cannot see: the menu opens
@@ -180,6 +191,86 @@ _NEEDS_WSL_RESTART = "PAD_STOP_NEEDS_WSL_RESTART"
 #: tkinter (it is drawing its own window with it), so it opens the playfield
 #: and watch.sh gets on with the run.
 _PLAYFIELD_LAUNCH = "PAD_PLAYFIELD_WINDOWS_LAUNCH"
+
+#: Why a first boot says "Copying card": the state label's hover tip and the
+#: hint line under the status grid both carry this while a copy narrates
+#: (item 78 follow-up — David asked for the why, the where, and the
+#: only-once, next to the words).
+_COPY_EXPLAIN = (
+    "First boot of this card: it is being copied to the fast local cache "
+    "(~/cardcache on the WSL disk), because reading it straight off the "
+    "Windows drive makes every boot minutes-slow. This happens once per "
+    "card build — later boots start from the copy in seconds, and "
+    "rebuilding the image (a changed video, a new export) re-copies it "
+    "once, replacing the old copy. The Cache… button beside Browse shows "
+    "and manages what is kept.")
+
+#: Item 74: cardmount.sh narrates a first-boot copy one line every 2 s —
+#: ``[card] copying <name>: 3121 / 7497 MB (41%)``.  Parsed off the drain so
+#: the state label can show the copy instead of "Not running" while the guest
+#: deliberately waits for it.  Groups: name, done-MB, total-MB, percent.
+_CARD_COPY_RE = re.compile(
+    r"^\[card\] copying (.+): (\d+) / (\d+) MB \((\d+)%\)$")
+
+
+def card_copy_progress(line):
+    """The state-label text for a card-copy progress line, or None.
+
+    Pure, like :func:`playfield_launch`, and for the same reason: the format
+    can be tested without a WSL, a Tk root or a 7 GB card.
+    """
+    m = _CARD_COPY_RE.match(line)
+    if not m:
+        return None
+    name, done, total, pct = m.groups()
+    return "Copying card: %s / %s MB (%s%%)" % (done, total, pct)
+
+
+def parse_cache_list(text):
+    """Parse ``cardmount.sh --cache-list`` into ``(entries, disk)`` (item 77).
+
+    ``entries``: dicts of ``label / real_kb / apparent_kb / boot / src``,
+    sorted by real size descending — the what-is-eating-my-disk order the
+    dialog opens in.  ``disk``: ``(avail_kb, size_kb)`` or None.  Lines are
+    tab-separated with the source LAST because labels and source paths may
+    carry spaces.  Pure, like :func:`playfield_launch`, so the format is
+    testable without a WSL or a 7 GB card.
+    """
+    entries, disk = [], None
+    for line in (text or "").splitlines():
+        parts = line.split("\t")
+        if parts[0] == "entry" and len(parts) >= 6:
+            try:
+                entries.append({
+                    "label": parts[1],
+                    "real_kb": int(parts[2]),
+                    "apparent_kb": int(parts[3]),
+                    "boot": int(parts[4]),
+                    "src": "\t".join(parts[5:]),
+                })
+            except ValueError:
+                continue
+        elif parts[0] == "disk" and len(parts) >= 3:
+            try:
+                disk = (int(parts[1]), int(parts[2]))
+            except ValueError:
+                pass
+    entries.sort(key=lambda e: e["real_kb"], reverse=True)
+    return entries, disk
+
+
+def human_size(kb):
+    """KiB -> "6.3 GB" / "890 MB".  One decimal only where it earns it."""
+    if kb >= 1048576:
+        return "%.1f GB" % (kb / 1048576.0)
+    return "%d MB" % round(kb / 1024.0)
+
+
+def cache_boot_text(epoch):
+    """The Last-booted cell: "never" for 0 (no sidecar yet), else local time."""
+    if not epoch:
+        return "never"
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(epoch))
 
 
 def playfield_launch(line):
@@ -502,7 +593,11 @@ def state_text(info):
                                   (info.get("state", ""), ""))
     if info.get("state") == "techalerts":
         if info.get("auto", "0") != "0":
-            return label, _ADVANCING_HINT
+            # The helper is on the job - name the WORK (the node bus
+            # bring-up, matching the footer's "Node boards" chip), not the
+            # readout screen it ends on (David, 2026-08-24: with the chip
+            # renamed, "Passing Tech Alerts" beside it was misleading).
+            return "Bringing up node boards…", _ADVANCING_HINT
         if info.get("auto_result") == "gaveup":
             return "Stuck at Tech Alerts", _GAVEUP_HINT
     return label, hint
@@ -1406,9 +1501,15 @@ class EmulatePanel:
     POLL_IDLE_MS = 10000
 
     def __init__(self, parent, log=None, card_var=None, savestates_var=None,
-                 theme_fn=None, badge_fn=None, resize_fn=None):
+                 theme_fn=None, badge_fn=None, resize_fn=None,
+                 footer_cb=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
+        #: Item 78: MainWindow.set_emulate_progress, injected like the log -
+        #: the footer bar under the notebook shows the EMULATION's loading
+        #: state while this tab is the visible one (the window ignores calls
+        #: from a hidden tab or under a running pipeline job).
+        self._footer_cb = footer_cb
         #: "This tab is taller than it was" - MainWindow._resize_notebook_to_
         #: current_tab, injected the same way the log and the theme are.
         #:
@@ -1445,6 +1546,28 @@ class EmulatePanel:
         self._launch_slot = None
         self._loading = False
         self._proc = None            # the watch.sh child, while we own one
+        #: Item 74: the card-copy progress line to show in the state label, or
+        #: None when no copy is narrating. WRITTEN by the drain thread (a bare
+        #: attribute set, which is atomic), READ by _apply on the main loop —
+        #: the status poll would otherwise write "Not running" over minutes of
+        #: copy, because the guest deliberately does not start until the copy
+        #: lands.
+        self._copying = None
+        #: The copy's percent (int), alongside _copying, for the footer bar
+        #: (item 78) - the one determinate phase of an emulator start.
+        self._copying_pct = None
+        #: The card path already handed to `cardmount.sh --precache`, so the
+        #: entry's write-trace (which fires per keystroke) starts one copy per
+        #: picked card, not one per character.
+        self._precached = None
+        #: The Card cache manager window (item 77), while one is open, and
+        #: its widget handles.  One window, reused - a second click lifts it.
+        self._cache_win = None
+        self._cache_ui = None
+        #: Worker -> main-loop handoffs for the manager, same split as
+        #: _docker_result: a worker thread never touches Tk.
+        self._cache_result = None
+        self._cache_drop_done = False
         #: The virtual playfield window, ON THE MACHINES WHERE PAD HAS TO OPEN
         #: IT ITSELF (see _open_playfield).  Normally watch.sh launches it
         #: through WSL interop and this stays None; when interop is off it
@@ -1679,52 +1802,24 @@ class EmulatePanel:
                                      command=self._setup_recheck_now, width=14)
         self._check_btn.pack(side=tk.LEFT, padx=(6, 0))
 
-        # BOTH tickboxes are read ONCE, when Start builds the environment for
-        # watch.sh, so they are start-time options and not live controls.  They
-        # are therefore disabled while the emulator is up: leaving them
-        # clickable invites unticking one mid-run and concluding the option is
-        # broken when nothing happens, which is exactly what a tester reported.
-        self._audio_var = tk.BooleanVar(value=True)
-        self._audio_chk = ttk.Checkbutton(btns, text="Sound",
-                                          variable=self._audio_var)
-        self._audio_chk.pack(side=tk.LEFT, padx=(16, 0))
-
-        # On by default: the game boots to Tech Alerts and waits for an
-        # operator, which means sitting through ~15 s of bring-up and then
-        # pressing Escape twice, every single start.  There is no state to save
-        # instead — see autoattract.sh for why NVRAM is not the lever.
-        self._auto_var = tk.BooleanVar(value=True)
-        self._auto_chk = ttk.Checkbutton(btns, text="Skip to attract mode",
-                                         variable=self._auto_var)
-        self._auto_chk.pack(side=tk.LEFT, padx=(12, 0))
-
-        # ITS OWN ROW, not crowded into btns above: btns already re-packs
-        # _docker_btn/_setup_btn at the end of ITS OWN pack order whenever
-        # docker/setup state changes (pack_forget() then a bare pack() with
-        # no before=/after= always appends), and Tk's packer UNMAPS a slave
-        # it cannot fit rather than shrinking it - so a wider btns row was
-        # putting those two buttons at real risk of losing their mapping on
-        # a narrower/CI-sized window. Confirmed live: adding these three
-        # widgets to btns itself made test_a_ready_docker_leaves_no_notice_
-        # behind and test_a_wsl_restart_re_probes_what_it_left_behind fail
-        # winfo_ismapped() twice running on macOS CI, on a commit that
-        # changed nothing else about either button.
-        audio_row = ttk.Frame(frame)
-        audio_row.pack(fill=tk.X, **pad)
-        # Item 56: the emulator's OWN volume to the PC speakers, not the
-        # game's in-game adjustment (that stays on the coin door, per title,
-        # untouched by this).  Deliberately LIVE, unlike Sound/Auto-attract
-        # above: those are read once when Start builds watch.sh's
-        # environment, so David asked for a knob that moves the sound
-        # WITHOUT a restart, which is the opposite of that shape — so these
-        # two are never added to the up/busy disable block in _apply.
-        ttk.Label(audio_row, text="Volume:").pack(side=tk.LEFT)
-        self._vol_scale = ttk.Scale(audio_row, from_=0, to=100, length=110,
+        # Item 56's volume trio, IN this row since 2026-08-24 (David: "move
+        # the volume controls to be to the right of check setup") — safe now
+        # where it once was not: the Sound / Skip-to-attract tickboxes that
+        # used to fill this exact stretch are gone (same day, same ask), so
+        # the row is no wider than it was, and the old CI-window unmapping
+        # of the re-packed _docker_btn/_setup_btn (which always append LAST
+        # and so lose first when the row overflows) stays history.  The
+        # knob is the emulator's OWN volume to the PC speakers, not the
+        # game's in-game adjustment (that stays on the coin door, per
+        # title) — deliberately LIVE, never in _apply's up/busy disable
+        # block, because moving the sound WITHOUT a restart is its point.
+        ttk.Label(btns, text="Volume:").pack(side=tk.LEFT, padx=(16, 0))
+        self._vol_scale = ttk.Scale(btns, from_=0, to=100, length=110,
                                     orient=tk.HORIZONTAL,
                                     variable=self._volume_var,
                                     command=self._on_volume_change)
         self._vol_scale.pack(side=tk.LEFT, padx=(4, 0))
-        self._mute_chk = ttk.Checkbutton(audio_row, text="Mute",
+        self._mute_chk = ttk.Checkbutton(btns, text="Mute",
                                          variable=self._mute_var,
                                          command=self._on_volume_change)
         self._mute_chk.pack(side=tk.LEFT, padx=(6, 0))
@@ -1749,8 +1844,20 @@ class EmulatePanel:
         for r, (key, label) in enumerate(rows):
             ttk.Label(grid, text=label, width=22, anchor=tk.W).grid(
                 row=r, column=0, sticky=tk.W, padx=8, pady=2)
-            v = ttk.Label(grid, text="—", anchor=tk.W)
-            v.grid(row=r, column=1, sticky=tk.W, padx=4, pady=2)
+            if key == "state":
+                # The state's value cell is a small frame, because the
+                # "Copying card: …" state carries the app's blue ⓘ right
+                # beside the words (David: "put that next to 'Copying
+                # card'") — the badge packs in while a copy narrates and
+                # unpacks after, so every other state shows plain text.
+                cell = ttk.Frame(grid)
+                cell.grid(row=r, column=1, sticky=tk.W, padx=4, pady=2)
+                v = ttk.Label(cell, text="—", anchor=tk.W)
+                v.pack(side=tk.LEFT)
+                self._copy_badge = self._info_badge(cell, _COPY_EXPLAIN)
+            else:
+                v = ttk.Label(grid, text="—", anchor=tk.W)
+                v.grid(row=r, column=1, sticky=tk.W, padx=4, pady=2)
             self._vals[key] = v
         grid.columnconfigure(1, weight=1)
 
@@ -2622,7 +2729,7 @@ class EmulatePanel:
         "emulator is already running, the slot loads into it right away — "
         "a load takes about 10–15 seconds either way.")
 
-    def _states_badge(self, parent):
+    def _info_badge(self, parent, tip):
         """The app's round blue ⓘ badge, or a plain marker without the app.
 
         Same shape as scene_browser's ``_info``: the badge is the window's
@@ -2633,14 +2740,19 @@ class EmulatePanel:
         """
         if self._badge_fn is None:
             lbl = ttk.Label(parent, text="(i)", foreground="#2f80ed")
-            _Tooltip(lbl, self._STATES_TIP, self._theme_fn, place="side")
+            # Same attribute the real badge exposes, so _state_badge_set can
+            # retext either shape without asking which it got.
+            lbl.icon_tip = _Tooltip(lbl, tip, self._theme_fn, place="side")
             return lbl
         badge = self._badge_fn(parent, "i", "#2f80ed", "#5296f2",
-                               self._STATES_TIP, lambda: None, size=18,
+                               tip, lambda: None, size=18,
                                font=("Georgia", 10, "bold italic"),
                                tooltip_place="side")
         badge.bind("<Button-1>", lambda _e: badge.icon_tip.show(), add="+")
         return badge
+
+    def _states_badge(self, parent):
+        return self._info_badge(parent, self._STATES_TIP)
 
     def _build_states(self, frame, pad):
         """The save-states section: the slot manager, and what it costs.
@@ -3051,12 +3163,23 @@ class EmulatePanel:
                 if hasattr(self, "_slots_tree") else None)
         except (AttributeError, tk.TclError):
             pass
+        # Item 74: the moment a card is PICKED, start caching it — the copy
+        # runs detached on the Linux side, so by the time Start is pressed it
+        # is done or well along and the boot's own wait collects the rest.
+        try:
+            self._src_path.trace_add(
+                "write", lambda *_a: self._precache_kick())
+        except (AttributeError, tk.TclError):
+            pass
         row = ttk.Frame(box)
         row.pack(fill=tk.X, padx=8, pady=6)
         self._src_entry = ttk.Entry(row, textvariable=self._src_path)
         self._src_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(row, text="Browse…", width=10,
                    command=self._browse).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(row, text="Cache…", width=8,
+                   command=self._open_cache_manager).pack(
+            side=tk.LEFT, padx=(6, 0))
 
     def _browse(self):
         from tkinter import filedialog
@@ -3065,6 +3188,265 @@ class EmulatePanel:
             filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
         if path:
             self._src_path.set(path)
+
+    def _precache_kick(self):
+        """Start the background card copy the moment a card is picked (item 74).
+
+        Fired by the entry's write-trace, which runs per KEYSTROKE on the Tk
+        MAIN thread — so only string comparisons happen here.  The card-path
+        ``isfile`` and the spawn go to a worker, because a card path can be
+        UNC to a sleeping NAS and a synchronous stat there is this app's
+        known UI-freeze class (the OneDrive stat, the wsl_home build).  The
+        worker's ``isfile`` also rejects every partial path while typing,
+        and ``_precached`` keeps a full one from firing twice.
+
+        The run-is-up guard here is best-effort only (``_last_up`` is blind
+        at startup, before the first status poll answers, and blind to
+        terminal-started runs) — the AUTHORITATIVE guard is in cardmount.sh
+        itself, which refuses to pre-cache beside a live game process.
+        ``--precache`` is idempotent on the rig side (a valid cache is a
+        no-op), so firing it for an already-cached card costs one
+        short-lived wsl process.  macOS is skipped: there the rig lives in
+        a container and the card's host path is not the container's, so
+        the boot's own sync wait is the whole story.
+        """
+        if sys.platform == "darwin" or not rig_available():
+            return
+        path = self._src_path.get().strip().strip('"')
+        if not path or path == self._precached:
+            return
+        if self._proc is not None or self._last_up or self._starting:
+            return
+
+        def run():
+            if not os.path.isfile(path) or path == self._precached:
+                return
+            self._precached = path
+            cmd = rig_cmd("cardmount.sh", _wsl_path(path), "--precache")
+            try:
+                subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL,
+                                 creationflags=_CREATE_FLAGS)
+                self._log("[emulate] pre-caching %s in the background"
+                          % os.path.basename(path))
+            except Exception as exc:                    # noqa: BLE001
+                self._log("[emulate] pre-cache failed to start: %s" % exc)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # Card cache manager (item 77).  The local card cache was measured at
+    # 125 GB real - half the WSL disk - with nothing showing it and nothing
+    # pruning it.  This window is the showing; cardmount.sh's eviction is
+    # the pruning; deleting here is the manual override between the two.
+
+    def _open_cache_manager(self):
+        """Open (or lift) the Card cache window.
+
+        All rig I/O happens off the UI thread: the list is one
+        ``cardmount.sh --cache-list`` call, deletes are one
+        ``--cache-drop`` per selected card, and both marshal back through
+        the Tk main loop.  Rows are sorted biggest-first, because the
+        question this window answers is "what is eating my disk"."""
+        if not rig_available():
+            self._hint.configure(
+                text="No emulator rig on this machine — there is no card "
+                     "cache to manage.")
+            return
+        if self._cache_win is not None:
+            try:
+                if self._cache_win.winfo_exists():
+                    self._cache_win.lift()
+                    return
+            except tk.TclError:
+                pass
+        top = self._parent.winfo_toplevel()
+        win = tk.Toplevel(top)
+        self._cache_win = win
+        win.title("Card cache — Spike 2 emulator")
+        win.transient(top)
+        win.geometry("780x430")
+        head = ttk.Label(win, text="Reading the cache…", anchor="w")
+        head.pack(fill=tk.X, padx=10, pady=(10, 4))
+        body = ttk.Frame(win)
+        body.pack(fill=tk.BOTH, expand=True, padx=10)
+        cols = ("size", "booted", "src")
+        tree = ttk.Treeview(body, columns=cols, show="tree headings",
+                            selectmode="extended")
+        tree.heading("#0", text="Card")
+        tree.column("#0", width=250, anchor="w")
+        tree.heading("size", text="On disk")
+        tree.column("size", width=90, anchor="e")
+        tree.heading("booted", text="Last booted")
+        tree.column("booted", width=130, anchor="w")
+        tree.heading("src", text="Source image")
+        tree.column("src", width=270, anchor="w")
+        sb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.LEFT, fill=tk.Y)
+        foot = ttk.Frame(win)
+        foot.pack(fill=tk.X, padx=10, pady=8)
+        hint = ttk.Label(
+            foot, anchor="w",
+            text="Deleting frees the space now; the card re-copies on its "
+                 "next boot.")
+        btn_close = ttk.Button(foot, text="Close", command=win.destroy)
+        btn_refresh = ttk.Button(foot, text="Refresh", state=tk.DISABLED,
+                                 command=self._cache_reload)
+        btn_delete = ttk.Button(foot, text="Delete selected",
+                                state=tk.DISABLED,
+                                command=self._cache_delete)
+        btn_close.pack(side=tk.RIGHT)
+        btn_refresh.pack(side=tk.RIGHT, padx=(0, 6))
+        btn_delete.pack(side=tk.RIGHT, padx=(0, 6))
+        hint.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._cache_ui = {"win": win, "head": head, "tree": tree,
+                          "hint": hint, "delete": btn_delete,
+                          "refresh": btn_refresh, "entries": {}}
+        # Delete only lights up over a selection - an enabled button beside
+        # an empty selection is an invitation to delete by accident.
+        tree.bind("<<TreeviewSelect>>", lambda _e: self._cache_selection())
+        self._cache_reload()
+
+    def _cache_alive(self):
+        ui = self._cache_ui
+        if not ui:
+            return None
+        try:
+            if ui["win"].winfo_exists():
+                return ui
+        except tk.TclError:
+            pass
+        return None
+
+    def _cache_selection(self):
+        ui = self._cache_alive()
+        if not ui:
+            return
+        state = tk.NORMAL if ui["tree"].selection() else tk.DISABLED
+        ui["delete"].configure(state=state)
+
+    def _cache_reload(self):
+        ui = self._cache_alive()
+        if not ui:
+            return
+        ui["head"].configure(text="Reading the cache…")
+        ui["refresh"].configure(state=tk.DISABLED)
+        ui["delete"].configure(state=tk.DISABLED)
+        self._cache_result = None
+
+        def run():
+            try:
+                out = subprocess.run(
+                    rig_cmd("cardmount.sh", "--cache-list"),
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    timeout=30, creationflags=_CREATE_FLAGS)
+                text = out.stdout.decode("utf-8", "replace")
+            except Exception:                            # noqa: BLE001
+                text = ""
+            # A plain attribute set - the worker must not touch Tk, and an
+            # after() scheduled FROM a worker is silently dropped whenever
+            # the main thread is not inside mainloop (the test harness pumps
+            # update() instead). Same split as _docker_drain, same reason.
+            self._cache_result = parse_cache_list(text)
+
+        threading.Thread(target=run, daemon=True).start()
+        self._cache_drain()
+
+    def _cache_drain(self):
+        """Main-loop poller that applies the list worker's answer."""
+        ui = self._cache_alive()
+        if not ui:
+            return
+        if self._cache_result is None:
+            try:
+                self._timer().after(100, self._cache_drain)
+            except (tk.TclError, RuntimeError):
+                pass
+            return
+        entries, disk = self._cache_result
+        self._cache_result = None
+        tree = ui["tree"]
+        tree.delete(*tree.get_children())
+        ui["entries"] = {e["label"]: e for e in entries}
+        for e in entries:
+            tree.insert(
+                "", tk.END, iid=e["label"], text=e["label"],
+                values=(human_size(e["real_kb"]),
+                        cache_boot_text(e["boot"]),
+                        e["src"]))
+        total = sum(e["real_kb"] for e in entries)
+        if disk:
+            ui["head"].configure(text=(
+                "%d cached cards — %s on disk · %s free of %s (WSL disk)"
+                % (len(entries), human_size(total),
+                   human_size(disk[0]), human_size(disk[1]))))
+        elif entries:
+            ui["head"].configure(text="%d cached cards — %s on disk"
+                                 % (len(entries), human_size(total)))
+        else:
+            ui["head"].configure(
+                text="The card cache is empty — cards land here on their "
+                     "first boot.")
+        ui["refresh"].configure(state=tk.NORMAL)
+
+    def _cache_delete(self):
+        ui = self._cache_alive()
+        if not ui:
+            return
+        labels = list(ui["tree"].selection())
+        if not labels:
+            return
+        freed = sum(ui["entries"].get(l, {}).get("real_kb", 0)
+                    for l in labels)
+        if not messagebox.askyesno(
+                "Delete cached cards",
+                "Delete %d cached card%s, freeing about %s?\n\n"
+                "Each re-copies on its next boot — nothing is lost."
+                % (len(labels), "" if len(labels) == 1 else "s",
+                   human_size(freed)),
+                parent=ui["win"]):
+            return
+        ui["delete"].configure(state=tk.DISABLED)
+        ui["refresh"].configure(state=tk.DISABLED)
+        ui["hint"].configure(text="Deleting…")
+        self._cache_drop_done = False
+
+        def run():
+            for label in labels:
+                try:
+                    out = subprocess.run(
+                        rig_cmd("cardmount.sh", "--cache-drop", label),
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        timeout=30, creationflags=_CREATE_FLAGS)
+                    for line in out.stdout.decode(
+                            "utf-8", "replace").splitlines():
+                        self._log("[emulate] " + line)
+                except Exception as exc:                 # noqa: BLE001
+                    self._log("[emulate] cache drop %s failed: %s"
+                              % (label, exc))
+            self._cache_drop_done = True     # plain attr; Tk stays untouched
+
+        threading.Thread(target=run, daemon=True).start()
+        self._cache_drop_drain()
+
+    def _cache_drop_drain(self):
+        """Main-loop poller for the delete worker; ends in a reload."""
+        ui = self._cache_alive()
+        if not ui:
+            return
+        if not self._cache_drop_done:
+            try:
+                self._timer().after(100, self._cache_drop_drain)
+            except (tk.TclError, RuntimeError):
+                pass
+            return
+        self._cache_drop_done = False
+        ui["hint"].configure(
+            text="Deleting frees the space now; the card re-copies on its "
+                 "next boot.")
+        self._cache_reload()
 
     def _source_env(self):
         """The environment for watch.sh, or None with a reason already shown.
@@ -3165,14 +3547,13 @@ class EmulatePanel:
         # Item 56: padplay.py polls this file live (see its poll_gain()), so
         # naming it here is what lets the volume/mute knob reach a run this
         # tab starts - build() already wrote the file itself, this only
-        # tells the rig where it is.  Unconditional, unlike Sound/Auto-attract
-        # below: a muted or half-volume run is still worth having the file
-        # for, in case Mute gets unticked mid-run.
+        # tells the rig where it is.  A muted or half-volume run is still
+        # worth having the file for, in case Mute gets unticked mid-run.
+        # (Sound and auto-attract are always on since 2026-08-24 - the
+        # volume slider owns loudness, and boots land in attract on their
+        # own; PAD_AUDIO=0 / PAD_AUTO_ATTRACT=0 stay available to scripted
+        # runs.)
         env = ["PAD_AUDIO_DUMP=30", "PAD_AUDIO_CTL=" + AUDIO_CTL_FILE] + src
-        if not self._audio_var.get():
-            env.append("PAD_AUDIO=0")
-        if not self._auto_var.get():
-            env.append("PAD_AUTO_ATTRACT=0")
         # ALWAYS THE CHECKPOINTABLE SHAPE (root, PAD_PIVOT) since the enable
         # checkbox was removed on 2026-08-10. It used to be the toggle's
         # answer, with a pending launch-from-slot forcing it anyway because
@@ -3238,6 +3619,28 @@ class EmulatePanel:
                 for raw in self._proc.stdout:
                     line = raw.decode("utf-8", "replace").rstrip()
                     self._log("[emulate] " + line)
+                    # Item 74: a first boot COPIES the card before the guest
+                    # starts, and these lines are the only sign of life while
+                    # it does.  The label write goes back to the main loop
+                    # (Tk is not thread safe); the attribute is what _apply
+                    # reads so the 2 s status poll cannot overwrite the copy
+                    # with "Not running".
+                    prog = card_copy_progress(line)
+                    if prog is not None and not self._stopping:
+                        self._copying = prog
+                        m = _CARD_COPY_RE.match(line)
+                        self._copying_pct = int(m.group(4)) if m else None
+                        try:
+                            self._timer().after(
+                                0, lambda p=prog, c=self._copying_pct:
+                                self._push_copy(p, c))
+                        except (tk.TclError, RuntimeError):
+                            pass
+                    elif self._copying is not None and line.startswith("[card]"):
+                        # The next [card] line after progress is the verdict
+                        # ("local cache ready" / "cache not usable") — either
+                        # way the copy stopped narrating, so stop showing it.
+                        self._copying = None
                     # ...and one line in it is addressed to US: the run cannot
                     # start a Windows program on this machine and is asking
                     # PAD to open the playfield window.  Done on THIS thread,
@@ -3251,6 +3654,7 @@ class EmulatePanel:
                 pass                                    # pipe closed under us
             finally:
                 self._proc = None
+                self._copying = None
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -3343,6 +3747,12 @@ class EmulatePanel:
         # A manual stop cancels any launch-from-slot still waiting for the
         # boot — the load must not fire into the NEXT run the user starts.
         self._launch_slot = None
+        # ...and cancels the copy narration (item 74): the user asked to
+        # stop, so "Copying card: …" must not be written back over
+        # "Stopping…" by _apply or by a straggling progress line — the drain
+        # and _apply both check _stopping before touching _copying again.
+        self._copying = None
+        self._copying_pct = None
         self._run_label(True, True)
         self._set("state", "Stopping…")
 
@@ -3827,11 +4237,73 @@ class EmulatePanel:
         threading.Thread(target=run, daemon=True).start()
         self._schedule_poll()
 
+    def _state_badge_set(self, tip_text):
+        """Show the ⓘ beside the state with ``tip_text`` on it, or hide it
+        when there is nothing to explain — idempotent, main loop only.
+        EVERY long state explanation lives here now, not just the copy's
+        (David: the gray hint line duplicated the footer text and got cut
+        off — "put all the text under the progress bar instead", with the
+        long form behind the ⓘ)."""
+        try:
+            self._copy_badge.icon_tip.text = tip_text or ""
+            mapped = bool(self._copy_badge.winfo_ismapped())
+            if tip_text and not mapped:
+                self._copy_badge.pack(side=tk.LEFT, padx=(6, 0))
+            elif not tip_text and mapped:
+                self._copy_badge.pack_forget()
+        except (AttributeError, tk.TclError):
+            pass
+
+    def _push_copy(self, text, pct):
+        """Main-loop half of a drain-thread copy line: the tab's state label
+        plus the footer bar (item 78) - both Tk, neither touchable from the
+        drain itself.  The blue ⓘ beside the state carries the why/where/
+        once explanation for as long as the copy narrates."""
+        self._set("state", text)
+        self._state_badge_set(_COPY_EXPLAIN)
+        if self._footer_cb is not None:
+            try:
+                self._footer_cb("copy", pct, text)
+            except tk.TclError:
+                pass
+
     def _apply(self, info):
         try:
             label, hint = state_text(info)
+            st_label = label
+            # Item 74: while a first boot is copying the card, the guest is
+            # deliberately not running yet — status.sh's honest "Not running"
+            # would read as a hang, and the copy narration is the truth.
+            # Except during a Stop, when "Stopping…" is.
+            copying = self._copying is not None and not self._stopping
+            if copying:
+                label = self._copying
+            self._state_badge_set(_COPY_EXPLAIN if copying else hint)
             self._set("state", label)
-            self._hint.configure(text=hint)
+            # The gray hint line no longer narrates states — the ⓘ beside
+            # the state carries the long explanation and the footer line
+            # under the bar carries the short one (David: the gray line
+            # duplicated the footer and got cut off).  Cleared rather than
+            # left alone, so action feedback (_source_env's "pick a card"
+            # etc.) still expires on the next poll exactly as it always did.
+            self._hint.configure(text="")
+            # Item 78: the footer under the notebook mirrors the loading
+            # state while this tab is showing (the window ignores the call
+            # otherwise): the emulate chip ladder plus a bar that never
+            # bounces — real copy percent, then a fixed value per stage.
+            if self._footer_cb is not None:
+                if copying:
+                    self._footer_cb("copy", self._copying_pct, self._copying)
+                elif info.get("running") == "1":
+                    st = info.get("state")
+                    if st in ("attract", "running"):
+                        self._footer_cb("run", None, st_label)
+                    elif st == "techalerts":
+                        self._footer_cb("techalerts", None, st_label)
+                    else:
+                        self._footer_cb("boot", None, st_label)
+                else:
+                    self._footer_cb("idle")
 
             procs = info.get("procs", "0")
             self._set("procs", "%s running%s" % (
@@ -3918,11 +4390,6 @@ class EmulatePanel:
             self._winreset_btn.configure(
                 state=tk.DISABLED if (up or busy or self._winresetting
                                       or not rig_available()) else tk.NORMAL)
-            # Start-time options: they follow the Start button, because that is
-            # the only moment they are read.
-            opts = tk.DISABLED if (up or busy) else tk.NORMAL
-            self._audio_chk.configure(state=opts)
-            self._auto_chk.configure(state=opts)
         except tk.TclError:
             pass        # the tab went away between the poll and its result
 

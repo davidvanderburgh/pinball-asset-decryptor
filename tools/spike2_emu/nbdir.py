@@ -97,9 +97,36 @@ CLASS_NAMES = {1: "LPC1112_101", 2: "LPC1112_201", 3: "LPC1113_302",
                4: "LPC1124_303", 5: "LPC1313", 6: "LPC812", 7: "RP235x"}
 CLASS_BY_NAME = {v: k for k, v in CLASS_NAMES.items()}
 
-# Measured variants per type (godzilla [nbhex] dump, via hwshim nb_idents[]).
+# Measured variants per type - tmc5041node and node4 read 2026-08-22 with
+# hexreg.py off the LIVE game's registry on the Heisei card, pinnode/ws2812
+# from godzilla's [nbhex] dump (header and buffer agree for those).
+#
+# ★ node4 is 0x03, NOT the 0x98 this table carried: 0x98 was the image
+# BUFFER's byte at flash 0x1008, but the game's version reader 0x5a8644
+# grades node4 images against their parsed HEADER (node[+32] selector set ->
+# variant at node+26), which says 0x03. The 0x98 claim held slot 4 at
+# status 7 = Checksum on every boot; see the node4 comment in derive().
+# tmc5041node's 0x01 guess before 2026-08-22 cost godzilla_le ~80 s of
+# failed "UPDATING NODE BOARD RUNTIME" retries per boot.
+#
+# ★ coil4node is 0x04, measured 2026-08-23 with hexreg.py off a LIVE
+# turtles_pro game (item 55). It was absent from this table, so it took
+# VARIANT_DEFAULT = 0x01 and turtles' node 12 sat at status 7 = Checksum on
+# every boot while all seven other slots graded 2 - the "UPDATING NODE BOARD
+# RUNTIME / UPDATE FAILED" banner David reported. All three coil4node classes
+# in the registry (1, 2 and 5) report 0x04; node 12 uses class 5.
+# The same scan reproduced ws2812node 0x05, node4 0x03 and pinnode 0x01
+# unchanged, which is what makes the new row trustworthy rather than another
+# guess - three known-correct answers came back correct in the same pass.
+#
+# NOTE hwshim's nb_hexreg_answer() is supposed to correct a wrong guess at
+# runtime and did NOT fire for turtles' node 12: the run that measured this
+# logged no hexreg correction at all. That gap is real and is recorded in
+# item 55; this prior fixes the symptom, not that.
+#
 # Everything else is a GUESS the output marks as one.
-VARIANT_PRIOR = {"pinnode": 0x01, "ws2812node": 0x05, "node4": 0x98}
+VARIANT_PRIOR = {"pinnode": 0x01, "ws2812node": 0x05, "node4": 0x03,
+                 "tmc5041node": 0x0d, "coil4node": 0x04}
 VARIANT_DEFAULT = 0x01
 
 # Class preference PER TYPE, measured pair first: the variant byte lives
@@ -115,11 +142,12 @@ CLASS_PREF = {
 }
 CLASS_PREF_DEFAULT = (5, 1, 4)
 
-# node4's image reports a version that is not the filename's (124.107.0 for
-# LPC1124_303 on godzilla, reproduced not corrected in hwshim). Claim the
-# measured internal version for node4 boards; the refusal detector will say
-# if another title's node4 image disagrees.
-NODE4_FW_AS_READ = 0x7C6B00
+# TOMBSTONE: NODE4_FW_AS_READ = 0x7C6B00 ("124.107.0, the version the node4
+# image reports") lived here until 2026-08-22 and was a MISREAD - that number
+# is the image buffer's bytes at flash 0x1008, which on node4 images is not a
+# version block at all. The game grades node4 against the parsed HEADER
+# (1.35.0, i.e. the filename), so node4 takes the same filename rule as every
+# other type now. See derive()'s node4 comment for the measurement.
 
 # THE FLAGS WORD IS A STATIC PER-NODE ATTRIBUTE, AND IT IS THE SAME ON A TITLE
 # THAT BOOTS AND ONE THAT WEDGES (item 52, 2026-08-16). That is a negative
@@ -366,8 +394,19 @@ def derive(elf_path, hexdir):
                             (typ, [CLASS_NAMES.get(c, c) for c in have])))
             continue
         fw_word, fw_str, fname = inv[(typ, pick)]
-        if typ == "node4":
-            fw_word, fw_str = NODE4_FW_AS_READ, "as-read(124.107.0)"
+        # node4 used to be forced to NODE4_FW_AS_READ here. WRONG, and the
+        # misread stood for the rig's whole life: 124.107.0 was read off the
+        # image BUFFER at flash 0x1008 ([nbhex]'s only path), but the game's
+        # version reader 0x5a8644 takes a DIFFERENT branch when the image
+        # node's [+32] selector is set - which it is on BOTH node4 images -
+        # and grades against the parsed HEADER (the encrypted 06/07 records:
+        # maj/min/patch at node+16/18/20, variant at node+26). Measured live
+        # on the Heisei card 2026-08-22: header says 1.35.0 variant 0x03,
+        # matching the FILENAME, and the 124.107.0 claim is why slot 4 has
+        # graded status 7 = Checksum on every godzilla boot ever dumped -
+        # which this LE build punishes with an endless "UPDATING NODE BOARD
+        # RUNTIME" walk over attract. The filename rule is right for node4
+        # too; nothing special-cases it any more.
         var = VARIANT_PRIOR.get(typ, VARIANT_DEFAULT)
         guess = typ not in VARIANT_PRIOR
         rows.append((nid, typ, code, PART_BY_CLASS[pick], pick, var,
@@ -403,7 +442,10 @@ def check_godzilla(rows):
         7:  ("ws2812node", 0x2C40102B, 0x05, 0x012300),
         12: ("ws2812node", 0x2C40102B, 0x05, 0x012300),
         14: ("ws2812node", 0x2C40102B, 0x05, 0x012300),
-        4:  ("node4",      0x00140040, 0x98, 0x7C6B00),
+        # node4: HEADER values (1.35.0 / 0x03), not the buffer misread
+        # (124.107.0 / 0x98) hwshim's runtime table carried until 2026-08-22 -
+        # so this check now pins the CORRECTED claim, not the historical one.
+        4:  ("node4",      0x00140040, 0x03, 0x012300),
     }
     got = {r[0]: (r[1], r[3], r[5], r[6]) for r in rows}
     for nid, (typ, part, var, fw) in want.items():

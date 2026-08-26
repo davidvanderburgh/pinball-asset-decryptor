@@ -52,8 +52,26 @@ def facts(**over):
 
 @pytest.fixture(autouse=True)
 def _no_real_setup_probe(monkeypatch):
-    """Same rule as test_emulate_tab: building a panel must not shell out."""
+    """Same rule as test_emulate_tab: building a panel must not shell out.
+
+    BOTH probes, and the second one is why v0.151.0's CI went red on macOS
+    while Windows and Linux passed.  Only ``setup_state`` was stubbed here, so
+    ``docker_state`` still asked the real machine - and on a macOS runner with
+    no Docker but a usable install route the panel CORRECTLY packs “Set up
+    emulator…”, which is exactly what ``test_check_setup_is_always_there``
+    asserts does not happen.  The code was right and the test's premise was
+    false: on that machine there IS something to fix.  It passed on Windows and
+    Linux because the Docker notice is a macOS path, and it had passed on macOS
+    before only because whether the probe answers inside the single
+    ``root.update()`` is a race.
+
+    "ok" rather than None: None is "could not ask", which leaves the panel
+    saying nothing, while "ok" is the healthy machine these tests mean when
+    they say there is nothing to fix.  The two tests that are ABOUT the Docker
+    notice patch this again with states of their own.
+    """
     monkeypatch.setattr(emulate_tab, "setup_state", lambda: None)
+    monkeypatch.setattr(emulate_tab, "docker_state", lambda: "ok")
 
 
 # --------------------------------------------------------------------------

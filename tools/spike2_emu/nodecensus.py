@@ -5,6 +5,8 @@
     nodecensus.py --game jaws_le
     nodecensus.py --elf ~/card/jaws_le-1_02_0/jaws_le/game
     nodecensus.py --silent           # just the PAD_NB_SILENT value, for watch.sh
+    nodecensus.py --silent-ff        # the PAD_NB_SILENT_FF value: the silenced
+                                     # nodes that still answer the ff status poll
 
 WHAT THIS IS FOR. The shim answers the node bus for all 64 addresses, so every
 address the game polls looks populated - including boards the machine does not
@@ -224,12 +226,16 @@ def optional_node4_nodes(elf_path):
     THE MECHANISM, measured on stranger_things_le with a PAD_PEEK of the
     title's own board array (0x8239c8 stride 0x98):
 
-      * The shim's identity reply for a node4 board claims firmware
-        124.107.0 - a value MEASURED ON GODZILLA (nbdir.NODE4_FW_AS_READ),
-        because the node4 hex image is encrypted end to end and the
-        per-title truth cannot be read out of the file. nbdir's own comment
-        promised "the refusal detector will say if another title's node4
-        image disagrees"; stranger_things is that title.
+      * The shim's identity reply for a node4 board claimed firmware
+        124.107.0 - a value MEASURED ON GODZILLA (nbdir's old
+        NODE4_FW_AS_READ). ★ 2026-08-22 found even that was a MISREAD of
+        the image buffer; the game grades node4 against its parsed HEADER
+        (1.35.0 / variant 0x03 - the filename version), so godzilla's own
+        slot 4 sat at status 7 too, and this LE-era game code answers a
+        Checksum grade with an endless "UPDATING NODE BOARD RUNTIME" walk.
+        The claim is header-derived per title now (nbdir + hwshim's
+        nb_hexreg), which may make THIS silencing unnecessary on ST as
+        well - untested, so it stands until a run says otherwise.
       * A version that does not match the game's decrypted hex-image list
         grades the board status 7 = Checksum. Every other ST board grades 2.
       * ST's readiness gate (0x205328) then wedges: an OPTIONAL board that
@@ -348,6 +354,15 @@ def main():
                                       "against light-only boards (item 51)")
     ap.add_argument("--silent", action="store_true",
                     help="print only the PAD_NB_SILENT value (may be empty)")
+    ap.add_argument("--silent-ff", action="store_true",
+                    help="print only the PAD_NB_SILENT_FF value (may be "
+                         "empty): the silenced nodes that should still answer "
+                         "the game's ff status poll - the optional node4 "
+                         "boards, whose refused status cost stranger_things "
+                         "~3.3 s per service pass (item 52). Every OTHER "
+                         "silenced node stays totally silent: answering ff on "
+                         "godzilla_le's node 2 kept bring-up re-probing its "
+                         "identity until t=100 s (measured 2026-08-22)")
     a = ap.parse_args()
 
     try:
@@ -362,7 +377,8 @@ def main():
 
     sw = switch_nodes(a.game, a.switches)
     nodes, why = silent_nodes(counts, sw, dir_nodes(a.nodedir))
-    n4 = sorted(optional_node4_nodes(a.elf) - set(nodes))
+    opt4 = optional_node4_nodes(a.elf)
+    n4 = sorted(opt4 - set(nodes))
     if n4:
         nodes = sorted(set(nodes) | set(n4))
         n4txt = ("%s is an OPTIONAL node4-type board whose identity claim "
@@ -372,9 +388,19 @@ def main():
                  "passes - see nodecensus.optional_node4_nodes()"
                  % ", ".join("node %d" % n for n in n4))
         why = ("%s; and %s" % (why, n4txt)) if nodes != n4 else n4txt
+    # WHICH SILENCED NODES STILL ANSWER THE ff STATUS POLL, for the shim's
+    # nb_silent_ff(). Only the optional node4 boards: their refused status is
+    # what cost stranger_things ~3.3 s per service pass (item 52), where a
+    # status answer on any OTHER silenced node reads as alive-but-unidentified
+    # and keeps bring-up re-probing its identity - godzilla_le's node 2 was
+    # re-probed in 90-probe bursts every ~15 s until t=100 s (2026-08-22).
+    ff = sorted(opt4 & set(nodes))
 
     if a.silent:
         print(",".join(str(n) for n in nodes))
+        return 0
+    if a.silent_ff:
+        print(",".join(str(n) for n in ff))
         return 0
 
     print("%d device records" % total)
@@ -401,6 +427,7 @@ def main():
                   len(unattributed),
                   sum(c["total"] for c in unattributed.values())))
     print("silence: %s" % (",".join(str(n) for n in nodes) or "nothing"))
+    print("silence-ff: %s" % (",".join(str(n) for n in ff) or "none"))
     print("because: %s" % why)
     return 0
 

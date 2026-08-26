@@ -257,7 +257,12 @@ def coarse_timers():
 SW_PATH = (os.environ.get("PAD_SW_FILE")
            or os.path.join(padpath.dump() or "", "padsw"))
 PADSW_MAGIC = padsw.MAGIC
+#: 33 is the door's id on the GODZILLA generation only - the wire (node 0,
+#: bit 23) is universal across every derived list, the id is a table index
+#: (item 73: 34 on aerosmith, 36 on batman). SwitchWatch resolves the real
+#: id from the title's own rows; this constant is the no-table fallback.
 SW_HELD, SW_COIN_DOOR = padsw.OFF_MRG, 33
+DOOR_NODE, DOOR_BIT = 0, 23
 
 #: The key binds padglhost exports at startup (item 39) - the content of the
 #: retired Controls window, drawn by THIS window's key panel instead. Same
@@ -295,7 +300,19 @@ COIL_GEN_OFF = coilmap.GEN_OFF
 #: (u32 guest ms, node, start, end, from, to, rise, fall, pad).
 FADE_HEAD_OFF = COIL_GEN_OFF + 8
 FADE_ENT_OFF, FADE_STRIDE, FADE_RING = FADE_HEAD_OFF + 4, 12, 96
-PADLED_READ = FADE_ENT_OFF + FADE_RING * FADE_STRIDE
+#: Version 4, the ADDRESSED plane (padled.h): one byte per (node, index) the
+#: wire has spoken to, whether or not that frame carried a level. It answers
+#: the membership question `val` only ever answered by accident - a lamp had to
+#: be LIT while somebody was watching to earn a cell - and on the swelf
+#: generation half the lamp commands carry no level at all, so without this
+#: whole boards stay invisible however long the run.
+SEEN_OFF = FADE_ENT_OFF + FADE_RING * FADE_STRIDE
+WIDE_DECODED_OFF = SEEN_OFF + 16 * LED_IDX
+WIDE_SKIPPED_OFF = WIDE_DECODED_OFF + 4
+#: What a version-3 shim publishes, and the most a version-3 FILE can hold.
+#: Kept as its own number because the reader must still work against one.
+PADLED_READ_V3 = SEEN_OFF
+PADLED_READ = WIDE_SKIPPED_OFF + 4
 
 #: How long a coil marker stays lit after its fire counter moves. A coil pulse
 #: is ~30 ms and a 50 ms poll would show it for one frame or miss it; this is a
@@ -377,15 +394,31 @@ SW_EVERY = max(1, int(round(TARGET_FPS / max(1.0, SW_HZ))))
 #: seen, so there is nothing to close with.
 GONE_POLLS = 2 * TARGET_FPS
 
-#: The action row: label, and the `plunge.py` verb it runs. ONE list for BOTH
-#: views (item 60). The artwork view draws these as canvas widgets beside the
-#: plunger and the schematic packs them on its top bar - different placements,
-#: argued separately and both kept - but WHICH actions the window offers is one
-#: fact, and it was two: `Field._place_actions()` had the row, `Schematic` never
-#: had an equivalent, so on a title that ships no device table nothing in the
-#: window reached plunge.py at all. A verb added here appears in both windows.
-PLUNGE_ACTIONS = (("Start", "start"), ("Plunge", "plunge"),
-                  ("Reset balls", "reset"))
+#: The action row: label, the script it runs, and its argument (None for a
+#: script that takes none). ONE list for BOTH views (item 60). The artwork view
+#: draws these as canvas widgets beside the plunger and the schematic packs them
+#: on its top bar - different placements, argued separately and both kept - but
+#: WHICH actions the window offers is one fact, and it was two:
+#: `Field._place_actions()` had the row, `Schematic` never had an equivalent, so
+#: on a title that ships no device table nothing in the window reached plunge.py
+#: at all. An action added here appears in both windows.
+#:
+#: IT CARRIES THE SCRIPT NAME as of item 59, and that is exactly what "Clear
+#: alerts" needed: the row used to be three plunge.py verbs, so a fourth button
+#: running a different helper could not be expressed without either a second
+#: list or a special case - and a second list is the thing item 60 collapsed.
+#:
+#: "Clear alerts" is David's ask (2026-08-21, watching turtles_pro still list
+#: twelve CHECK SWITCH rows after a boot-time exercise had already run: "maybe
+#: we need an 'opt-in' button that clears them?"). It works every safe switch
+#: once so the game's own no-usage audit sees usage. swexercise.py's header has
+#: the argument, including WHY the boot-time pass can be too early on some
+#: titles - which is what earns this button its place rather than making it a
+#: duplicate of something automatic.
+WINDOW_ACTIONS = (("Start", "plunge.py", "start"),
+                  ("Plunge", "plunge.py", "plunge"),
+                  ("Reset balls", "plunge.py", "reset"),
+                  ("Clear alerts", "swexercise.py", None))
 
 
 def emu_gone(view, readable):
@@ -694,7 +727,7 @@ def load_switches():
     """
     rows = [dict(id=int(p[0]), node=int(p[1]), bit=int(p[2]),
                  name=" ".join(p[3:-2]), x=int(p[-2]), y=int(p[-1]))
-            for p in _rows(os.path.join(TDIR, "switch_xy.txt"), 6)]
+            for p in _rows(os.path.join(TDIR or "", "switch_xy.txt"), 6)]
     if rows:
         return rows
     live = {r["name"].strip().upper(): r for r in load_switch_list()
@@ -873,7 +906,7 @@ def load_coils():
     read `h` as the group for a whole release and every coil tooltip said
     "group 20 index 6".
     """
-    return [c for c in coilmap.load(os.path.join(TDIR, "device_xy.txt"))
+    return [c for c in coilmap.load(os.path.join(TDIR or "", "device_xy.txt"))
             if LAYOUT_IMAGE and c.get("image") == LAYOUT_IMAGE]
 
 
@@ -889,6 +922,12 @@ def load_switch_list():
     THE PARSE ITSELF IS IN trough.py, because swshow.py needs the same file and
     cannot import this module (no tkinter inside WSL). One parser, two callers.
     """
+    if not TDIR:
+        # No table dir at all: no card has been prepared on this machine
+        # (a bare CI runner is the honest case).  Every reader below is
+        # already silent about a MISSING file; only the join minded, and
+        # item 73 made this call unconditional, so it minded on import.
+        return []
     return trough.load_list(os.path.join(TDIR, "switch_list.txt"))
 
 
@@ -967,6 +1006,7 @@ class SwitchWatch:
     def __init__(self, rows, every=None):
         self.mrg = None
         self.door = False
+        self.door_id = SW_COIN_DOOR
         self.balls = trough.Balls()
         self.positions, self.how = [], None
         self.set_rows(rows)
@@ -984,8 +1024,22 @@ class SwitchWatch:
         switch list on the heap, so a first run of a title has no table for
         the first minute (Field._pick_up_switches), and a trough that could
         not be identified at window open usually can be a minute later.
+
+        The door id re-resolves here too (item 73): the wire (0,23) is
+        universal, the id is the title's own. The ARTWORK view feeds this
+        POSITIONED rows only (load_switches()), and the cabinet has no
+        playfield position, so when the given rows carry no (0,23) the full
+        switch list is consulted directly - otherwise the 48V banner would
+        keep reading godzilla's 33 on every artwork window.
         """
         self.positions, self.how = trough.find(rows)
+        for source in (rows or [], load_switch_list()):
+            hit = next((r for r in source
+                        if r.get("node") == DOOR_NODE
+                        and r.get("bit") == DOOR_BIT), None)
+            if hit is not None:
+                self.door_id = hit["id"]
+                break
         return bool(self.positions)
 
     def poll(self):
@@ -995,7 +1049,7 @@ class SwitchWatch:
             return False
         self._n = self.every
         self.mrg = read_merged()
-        self.door = bool(self.mrg) and not self.mrg[SW_COIN_DOOR]
+        self.door = bool(self.mrg) and not self.mrg[self.door_id]
         self.balls.update(self.closed())
         return True
 
@@ -2659,9 +2713,10 @@ class Field(StateOps, LedRing):
         rather than assumed, so a different theme or DPI still lines up.
         """
         self._acts = []
-        for label, arg in PLUNGE_ACTIONS:
-            self._acts.append(tk.Button(self.cv, text=label, width=11,
-                                        command=lambda a=arg: self.run_plunge(a)))
+        for label, script, arg in WINDOW_ACTIONS:
+            self._acts.append(tk.Button(
+                self.cv, text=label, width=11,
+                command=lambda s=script, a=arg: self.run_action(s, a)))
         x, y = w - self.ACT_PAD, h - self.ACT_PAD
         # Right to left, so "Reset balls" is the one against the corner and the
         # reading order left to right is the order the toolbar had.
@@ -2717,16 +2772,40 @@ class Field(StateOps, LedRing):
     def run_plunge(self, what):
         self.drv.run_script("plunge.py", what)
 
+    def run_action(self, script, arg=None):
+        """One action row entry (item 59). `arg` is None for a helper that
+        takes none, which is what keeps WINDOW_ACTIONS a plain table rather
+        than a table with a special case in it.
+
+        The driver already runs these on their own thread because "these take
+        seconds" - and "Clear alerts" takes about twelve, working ~50 switches
+        at 150+80 ms, so it would freeze the window if it did not.
+        """
+        if arg is None:
+            self.drv.run_script(script)
+        else:
+            self.drv.run_script(script, arg)
+
     # ---- live LED and coil state -----------------------------------------
     def read_leds(self):
+        """(raw, d): `raw` is the block's bytes whenever dump/padled could be
+        READ at all - the emulator is there - and `d` is those same bytes only
+        once the shim has stamped its magic, i.e. once LED data has actually
+        been decoded. The Schematic learned this distinction on item 50; this
+        view folding "readable but unstamped" into "no emulator" is what had
+        the status bar calling a live run down for the whole boot (David,
+        2026-08-22: the shim stamps the block at the FIRST lamp write it
+        decodes, which on a normal boot is the attract light show - so the
+        window read "no emulator" across Tech Alerts, exactly when a human is
+        watching for signs of life)."""
         try:
             with open(LED_PATH, "rb") as f:
-                d = f.read(PADLED_READ)
+                raw = f.read(PADLED_READ)
         except OSError:
-            return None
-        if len(d) < LED_HDR or struct.unpack_from("<I", d, 0)[0] != PADLED_MAGIC:
-            return None
-        return d
+            return None, None
+        if len(raw) < LED_HDR or struct.unpack_from("<I", raw, 0)[0] != PADLED_MAGIC:
+            return raw, None
+        return raw, raw
 
     def door_open(self):
         """True when the coin door is open, so 48V is off and coils are dead.
@@ -2943,10 +3022,14 @@ class Field(StateOps, LedRing):
         poll_switches(self)
 
         t_read = time.perf_counter()
-        d = self.read_leds()
+        raw, d = self.read_leds()
         self._read_ms = (time.perf_counter() - t_read) * 1000.0
         self.last = d
-        if emu_gone(self, d is not None):
+        # `raw is not None`, NOT the stamped block: the emulator is "there"
+        # when its ring file can be read (watch.sh removes it at teardown
+        # precisely so this can tell), same as the Schematic's test. Keying
+        # this on the magic made an unstamped boot look like a torn-down run.
+        if emu_gone(self, raw is not None):
             # SAVE FIRST. Leaving with the run is the COMMON way this window
             # closes - the human closes the emulator, not the playfield - so a
             # destroy without this meant the remembered position only ever came
@@ -2958,7 +3041,11 @@ class Field(StateOps, LedRing):
         state_msg = self._state_status()
         if d is None:
             self.status.config(text=state_msg
-                               or "no emulator (dump/padled not readable)")
+                               or ("emulator up, no LED writes decoded yet"
+                                   " (normal through boot and Tech Alerts:"
+                                   " the attract light show is the first)"
+                                   if raw is not None else
+                                   "no emulator (dump/padled not readable)"))
         else:
             decoded = struct.unpack_from("<I", d, LED_DECODED_OFF)[0]
             skipped = struct.unpack_from("<I", d, LED_SKIPPED_OFF)[0]
@@ -3182,17 +3269,27 @@ class LedGrid(LedRing):
         insert boards are decoded today - this deliberately does NOT hard-code
         which those are, so a shim that starts decoding another board shows up
         here with no change.
+
+        ★ `seen` IS SCANNED TOO, AND IT IS THE HALF THAT MAKES A BOARD APPEAR.
+        `val` only ever shows a lamp that is LIT RIGHT NOW, so the roster it
+        builds is really "lamps that happened to be on while somebody was
+        watching" - and on the swelf generation (batman) that is not a roster
+        at all: half its lamp commands address a set of LEDs and carry no level
+        byte, and its brightest boards spend most of attract at zero. Version 4
+        publishes the membership answer directly, so a board earns its cells
+        from being SPOKEN TO. Missing on a version-3 block, which is why the
+        slice is length-checked rather than assumed.
         """
         grew = False
         for node in range(coilmap.NODES):
-            base = LED_HDR + node * LED_IDX
-            s = d[base:base + LED_IDX]
-            if len(s) < LED_IDX or s.count(0) == LED_IDX:
-                continue
-            for idx, v in enumerate(s):
-                if v and (node, idx) not in self.seen:
-                    self.seen.add((node, idx))
-                    grew = True
+            for base in (LED_HDR + node * LED_IDX, SEEN_OFF + node * LED_IDX):
+                s = d[base:base + LED_IDX]
+                if len(s) < LED_IDX or s.count(0) == LED_IDX:
+                    continue
+                for idx, v in enumerate(s):
+                    if v and (node, idx) not in self.seen:
+                        self.seen.add((node, idx))
+                        grew = True
         return grew
 
     def _rebuild(self):
@@ -3316,9 +3413,18 @@ class LedGrid(LedRing):
             if key not in self.seen:
                 self.seen.add(key)
                 grew = True
-        # Discovery over val[] is gated on the block's own write counter, so an
-        # idle rig costs one unpack per tick instead of a scan of every board.
+        # Discovery is gated on the block's own write counters, so an idle rig
+        # costs two unpacks per tick instead of a scan of every board. BOTH
+        # counters, because they move independently: a swelf frame that
+        # addresses lamps without setting a level grows `seen` and leaves
+        # `decoded` exactly where it was, and gating on `decoded` alone would
+        # leave those cells undiscovered until some other frame happened to
+        # move it. wide_decoded is absent on a version-3 block - hence the
+        # length check rather than a version test, which is the same shape the
+        # rest of this reader uses.
         dec = struct.unpack_from("<I", d, LED_DECODED_OFF)[0]
+        if len(d) >= PADLED_READ:
+            dec += struct.unpack_from("<I", d, WIDE_DECODED_OFF)[0]
         if dec != self._decoded:
             self._decoded = dec
             grew = self._discover(d) or grew
@@ -3441,9 +3547,9 @@ class Schematic(StateOps):
         # reason the trough got its own strip - the switch columns already fill
         # the window, so anything placed over them lands on a node's rows.
         self._acts = []
-        for label, arg in PLUNGE_ACTIONS:
+        for label, script, arg in WINDOW_ACTIONS:
             b = tk.Button(bar, text=label,
-                          command=lambda a=arg: self.run_plunge(a))
+                          command=lambda s=script, a=arg: self.run_action(s, a))
             b.pack(side="left", padx=(0, 4), pady=2)
             self._acts.append(b)
 
@@ -3594,16 +3700,47 @@ class Schematic(StateOps):
     def run_plunge(self, what):
         self.drv.run_script("plunge.py", what)
 
+    def run_action(self, script, arg=None):
+        """One action row entry (item 59). `arg` is None for a helper that
+        takes none, which is what keeps WINDOW_ACTIONS a plain table rather
+        than a table with a special case in it.
+
+        The driver already runs these on their own thread because "these take
+        seconds" - and "Clear alerts" takes about twelve, working ~50 switches
+        at 150+80 ms, so it would freeze the window if it did not.
+        """
+        if arg is None:
+            self.drv.run_script(script)
+        else:
+            self.drv.run_script(script, arg)
+
     def _hit(self, ev):
         # canvasx, because the scroll backstop makes window x and canvas x
         # different things the moment the view is scrolled. canvasy for
         # symmetry; this view never scrolls vertically today.
+        #
+        # ★ ITEM 81 (David, live on avengers_infinity_le's list): the ±8 px
+        # search window plus the text's OWN bbox (~15 px for Consolas 9) is
+        # taller than ROW_H = 17, so most cursor positions overlap TWO rows'
+        # text - and reversed() resolved every such tie to the LOWER row,
+        # because canvas ids ascend down a column. Net effect: each row's
+        # hover/click zone sat shifted UP from its glyphs, and the lower half
+        # of a row's own text belonged to the row BELOW - a press there
+        # closed the wrong switch. Keep the generous window (no dead gaps
+        # between rows), but resolve the tie by GEOMETRY: the row whose text
+        # centre is nearest the cursor. The zone boundary then falls at the
+        # midpoint between rows, aligned with the text by construction
+        # rather than by whichever item Tk happened to create last.
         x, y = self.cv.canvasx(ev.x), self.cv.canvasy(ev.y)
-        for i in reversed(self.cv.find_overlapping(x - 2, y - 8,
-                                                   x + 2, y + 8)):
-            if i in self.info:
-                return i
-        return None
+        best, best_d = None, None
+        for i in self.cv.find_overlapping(x - 2, y - 8, x + 2, y + 8):
+            if i not in self.info:
+                continue
+            bb = self.cv.bbox(i)
+            d = abs((bb[1] + bb[3]) / 2.0 - y)
+            if best is None or d < best_d:
+                best, best_d = i, d
+        return best
 
     def _hit_led(self, ev):
         """The swatch under the cursor, or None. SEPARATE from _hit(), so a

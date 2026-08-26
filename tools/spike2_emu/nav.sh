@@ -2,7 +2,10 @@
 # nav.sh <id> [<id> ...] - walk the operator menu through the shared-memory
 # switch channel, then repack the next host frame into now.png.
 #
-# ids: 25 Select, 26 Plus/down, 27 Minus/up, 28 Back.
+# ids are PER TITLE (item 73) - read them from dump/tables/<game>/
+# switch_list.txt: Select is the (node 0, bit 8) row, Plus/down (0,9),
+# Minus/up (0,10), Back (0,11). On the godzilla generation that is 25/26/27/
+# 28; on aerosmith it is 26/27/28/29, on batman 28/29/30/31.
 #
 # The gap matters. Four presses 0.6 s apart moved the cursor two rows - the
 # game debounces and the menu itself has a repeat delay - so this uses a 400 ms

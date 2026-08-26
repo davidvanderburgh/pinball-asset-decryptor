@@ -95,6 +95,37 @@ def normalize_update_interval(value):
     return hours if hours in {h for h, _ in UPDATE_INTERVAL_CHOICES} \
         else UPDATE_INTERVAL_DEFAULT
 
+# Compare tab, "Rows per list": how many entries of one change list (Modified
+# images, Moved sounds, …) the report tree shows before it offers the rest.
+# The report itself is never truncated, so this is a repaint, not a re-read —
+# and the leftover row expands on double-click whatever this is set to.  A
+# tester on a build that renumbered 3,968 sounds: "would it be possible to
+# display more than the first 12 entries for each asset category? (Having 25
+# or 50 entries would be much more comfortable)."  So 50 is the default, and
+# "All" is on the menu for the times a dozen was never going to be enough.
+COMPARE_ROW_LIMIT_CHOICES = ("12", "25", "50", "100", "All")
+COMPARE_ROW_LIMIT_DEFAULT = "50"
+
+
+def normalize_compare_row_limit(value):
+    """A stored "Rows per list" choice as one of
+    :data:`COMPARE_ROW_LIMIT_CHOICES`.
+
+    Anything missing or off the menu falls back to
+    :data:`COMPARE_ROW_LIMIT_DEFAULT`: a hand-edited settings.json must not
+    leave the Compare tab showing a number its own dropdown can't display."""
+    text = str(value or "").strip()
+    for choice in COMPARE_ROW_LIMIT_CHOICES:
+        if text.lower() == choice.lower():
+            return choice
+    return COMPARE_ROW_LIMIT_DEFAULT
+
+
+def compare_row_limit_value(choice):
+    """The "Rows per list" choice as a row count, or ``None`` for "All"."""
+    choice = normalize_compare_row_limit(choice)
+    return None if choice == "All" else int(choice)
+
 # Replace-Image "Group by scene" parent-row iid prefix.  Image-row iids are
 # the slot rel_path (relative, so it can never start with a colon); this
 # prefix guarantees a group header's iid can't collide with any slot.
@@ -1243,6 +1274,7 @@ class MainWindow:
                  on_audio_profile=None,
                  on_partition_image_opened=None,
                  on_compare_run=None,
+                 on_extract_both=None,
                  initial_default_presets=None,
                  on_default_presets_change=None,
                  initial_flash_choices=None,
@@ -1259,7 +1291,9 @@ class MainWindow:
                  on_project_folder_picked=None,
                  on_folder_state_written=None,
                  initial_show_log_history=True,
-                 on_show_log_history_change=None):
+                 on_show_log_history_change=None,
+                 initial_compare_row_limit=None,
+                 on_compare_row_limit_change=None):
         self.root = root
         self._install_callback_error_logger(root)
         # Default Settings presets: {"presets": {name: {AD_name: value}},
@@ -1387,6 +1421,9 @@ class MainWindow:
         # Fired with (path_a, path_b) when a Compare run starts — the App
         # records both into recent-paths history and persists them.
         self._on_compare_run = on_compare_run
+        # Fired with (path_a, path_b) by the Compare tab's Extract Both — the
+        # App picks the output folders and queues the two Extract runs.
+        self._on_extract_both = on_extract_both
         # Seed each log pane with the previous sessions' history (dimmed,
         # above a cut line)?  ⚙-menu checkbutton; OFF = a clean per-session
         # log for users who don't want the past in view.  Persisted in
@@ -1503,6 +1540,20 @@ class MainWindow:
         self.compare_b_var = tk.StringVar()
         self._compare_seq = 0        # bump-counter, same shape as _info_seq
         self._compare_sections = []  # last rendered sections (Copy Report)
+        # tree iid -> the plugin's ref for the file that row lists, so a
+        # double-click can pull it off the card (see _compare_open_row).
+        self._compare_refs = {}
+        self._compare_open_busy = False   # one on-demand extract at a time
+        # How many entries of one change list the tree shows, and which lists
+        # the user has since asked to see in full.  Both are display state:
+        # _compare_sections always holds the WHOLE report, so changing either
+        # is a repaint (_compare_paint), never another card read.
+        self.compare_limit_var = tk.StringVar(
+            value=normalize_compare_row_limit(initial_compare_row_limit))
+        self._on_compare_row_limit_change = on_compare_row_limit_change
+        self._compare_expanded = set()  # (section index, group index)
+        self._compare_more = {}         # tree iid -> that key, for the click
+        self._compare_row_count = 0     # rows painted, for scroll restore
         # Replace-Audio tab state (capabilities.replace_audio plugins).
         # The tab scans the assets folder for .wav/.ogg slots and lets the
         # user assign a replacement track per slot; staging writes the
@@ -2283,6 +2334,12 @@ class MainWindow:
         self._extract_phases_frame = ttk.Frame(status_frame)
         self._extract_phases_frame.pack(fill=tk.X)
         self._write_phases_frame = ttk.Frame(status_frame)
+        # Item 78: the Emulate tab's OWN chip row (Copy card / Boot / Tech
+        # Alerts / Attract), a third sibling rather than a borrowed extract
+        # row — manufacturer switches rebuild the other two and must not
+        # fight the emulation for labels.  Packed only while an Emulate tab
+        # shows; set_emulate_progress drives it.
+        self._emulate_phases_frame = ttk.Frame(status_frame)
 
         self._progress_bar = ttk.Progressbar(status_frame, mode="determinate",
                                              maximum=100)
@@ -13265,8 +13322,11 @@ class MainWindow:
             for title, rows in self._info_sections:
                 parent = tree.insert("", tk.END, text=title, open=True,
                                      tags=("section",))
-                for name, value in rows:
-                    tree.insert(parent, tk.END, text=name, values=(value,))
+                # row[0]/row[1], not an unpack: a section row may carry a
+                # third element (see Manufacturer.compare_images).
+                for row in rows:
+                    tree.insert(parent, tk.END, text=row[0],
+                                values=(row[1],))
             self._info_copy_btn.configure(
                 state=tk.NORMAL if self._info_sections else tk.DISABLED)
             self._info_status.configure(text="")
@@ -13345,7 +13405,11 @@ class MainWindow:
             # sitting on this tab (a WSL restart re-probes), and the notebook
             # pane is pinned to the height it was measured at — so the panel
             # has to be able to say "I am taller now".
-            resize_fn=self._resize_notebook_to_current_tab)
+            resize_fn=self._resize_notebook_to_current_tab,
+            # Item 78: the footer bar under the notebook is the panel's to
+            # drive while its tab is showing - copy percent, boot marquee,
+            # full at attract.
+            footer_cb=self.set_emulate_progress)
         self._emulate_panel.build(self._tab_emulate)
 
     def _build_jjp_emulate_tab(self):
@@ -13404,10 +13468,14 @@ class MainWindow:
         intro = ttk.Label(
             f, text="Compare two card images of the same game — two "
                     "releases, or a modded card against its stock base. "
-                    "Everything is read straight off the cards (no Extract): "
-                    "files are diffed by the cards' own validation digests, "
+                    "Files are diffed by the cards' own validation digests "
                     "and the adjustment / high-score defaults come from each "
-                    "card's game firmware.",
+                    "card's game firmware, so the report needs no Extract. "
+                    "The packed sounds are the exception: run Extract Both "
+                    "and compare again, and every changed sound is listed "
+                    "by name. Double-click a listed file to open it — it is "
+                    "pulled off the card and handed to whatever you normally "
+                    "view or play it with.",
             font=(_SANS_FONT, 9, "italic"), justify=tk.LEFT)
         intro.pack(anchor=tk.W, fill=tk.X, padx=10, pady=4)
         intro.bind("<Configure>", lambda e: intro.configure(
@@ -13432,10 +13500,53 @@ class MainWindow:
         self._compare_btn = ttk.Button(arow, text="Compare",
                                        command=self._compare_run)
         self._compare_btn.pack(side=tk.LEFT)
+        # EXTRACT BOTH, next to Compare, because it answers the question this
+        # report raises and cannot answer: the digests say a sound or a scene
+        # changed, and hearing/seeing the difference needs both cards
+        # extracted.  A tester: "adding an Extract Both button for the two
+        # images would be very useful in order to have a complete comparison
+        # in one action."  Two full Extract runs back to back, into one
+        # parent folder, using the Extract tab's own progress and log.
+        self._compare_extract_btn = ttk.Button(
+            arow, text="Extract Both", command=self._compare_extract_both)
+        self._compare_extract_btn.pack(side=tk.LEFT, padx=(6, 0))
+        _Tooltip(
+            self._compare_extract_btn,
+            "Extract image A and then image B into one folder you pick — a "
+            "sub-folder per card, named after the card.\n\nThe report above "
+            "diffs the cards' own digests, which is instant but cannot play "
+            "you a sound or show you a scene. Two extracts can, and this "
+            "queues both without you re-picking anything.\n\nWhen they "
+            "finish, press Compare again: the Sounds section then lists the "
+            "sounds that actually changed, and double-clicking one plays it.",
+            lambda: self._current_theme)
         self._compare_copy_btn = ttk.Button(
             arow, text="Copy Report", command=self._compare_copy_report,
             state=tk.DISABLED)
         self._compare_copy_btn.pack(side=tk.LEFT, padx=(6, 0))
+        # ROWS PER LIST, next to Copy Report because they answer the same
+        # question: a build that renumbers thousands of sounds fills a change
+        # list with thousands of entries, and a dozen of them was not enough
+        # to see what had happened (a tester: "having 25 or 50 entries would
+        # be much more comfortable").  The report in memory is complete, so
+        # this only repaints the tree.
+        ttk.Label(arow, text="Rows per list:").pack(side=tk.LEFT, padx=(14, 4))
+        self._compare_limit_box = ttk.Combobox(
+            arow, textvariable=self.compare_limit_var, state="readonly",
+            width=5, values=COMPARE_ROW_LIMIT_CHOICES)
+        self._compare_limit_box.pack(side=tk.LEFT)
+        self._compare_limit_box.bind("<<ComboboxSelected>>",
+                                     self._compare_limit_changed)
+        _Tooltip(
+            self._compare_limit_box,
+            "How many entries of each change list (modified images, moved "
+            "sounds, …) the report shows before the rest are folded into "
+            "one line.\n\nNothing is thrown away: double-click that line to "
+            "list "
+            "the rest of THAT group, or press Copy Report, which always "
+            "copies every row.\n\nChanging this re-draws the report you are "
+            "looking at — the cards are not read again.",
+            lambda: self._current_theme)
         self._compare_status = ttk.Label(arow, text="", font=(_SANS_FONT, 9))
         self._compare_status.pack(side=tk.LEFT, padx=(10, 0))
 
@@ -13450,6 +13561,10 @@ class MainWindow:
         self._compare_tree.column("value", width=640, minwidth=240)
         self._compare_tree.tag_configure("section",
                                          font=(_SANS_FONT, 9, "bold"))
+        # A listed file opens on double-click — the report knows exactly which
+        # file on which card each row came from, so getting a look/listen at
+        # one no longer means extracting a whole card first (a tester).
+        self._compare_tree.bind("<Double-1>", self._compare_open_row)
         vs = ttk.Scrollbar(body, orient="vertical",
                            command=self._compare_tree.yview)
         self._compare_tree.configure(yscrollcommand=vs.set)
@@ -13475,6 +13590,10 @@ class MainWindow:
         switch — a previous manufacturer's diff must not survive)."""
         self._compare_seq += 1
         self._compare_sections = []
+        self._compare_refs = {}
+        self._compare_more = {}
+        self._compare_expanded = set()
+        self._compare_row_count = 0
         if hasattr(self, "_compare_tree"):
             try:
                 self._compare_tree.delete(
@@ -13485,6 +13604,38 @@ class MainWindow:
                 self._compare_status.configure(text="")
             except tk.TclError:
                 pass
+
+    def _compare_extract_roots(self, a, b):
+        """Where to look for the two cards' extract folders.
+
+        A card's packed audio can only be diffed sound-by-sound once both
+        cards have been extracted, so the report needs to FIND those extracts
+        — a tester ran Extract Both, pressed Compare, and got back the same
+        "extract both cards" sentence he had just acted on.  Each folder here
+        is checked itself and one level down (extract_source.find_extract_for),
+        which covers every place an extract normally lands:
+
+        * the parent folder Extract Both put the pair in;
+        * the Extract tab's own output folder, and its parent;
+        * the project folder the Replace/Write tabs are pointed at;
+        * the folder each card image itself sits in — cards are commonly kept
+          inside the project extracted from them.
+
+        Nothing is searched or guessed: the folders' own ``.extract_source``
+        sidecars have to name the picked card.
+        """
+        cands = [self.last_browse_dir("extract_both"),
+                 (self.extract_output_var.get() or "").strip(),
+                 (self.write_assets_var.get() or "").strip()]
+        cands += [os.path.dirname(os.path.abspath(p)) for p in (a, b) if p]
+        roots = []
+        for cand in cands:
+            if not cand:
+                continue
+            for d in (cand, os.path.dirname(cand)):
+                if d and os.path.isdir(d) and d not in roots:
+                    roots.append(d)
+        return roots
 
     def _compare_run(self):
         """Diff the two picked card images on a worker thread and render the
@@ -13514,9 +13665,17 @@ class MainWindow:
         seq = self._compare_seq
         holder = {}
 
+        roots = self._compare_extract_roots(a, b)
+
         def _worker():
+            from ..core import extract_source
             try:
-                holder["sections"] = mfr.compare_images(a, b) or []
+                # Resolved here, not on the Tk thread: it is a handful of
+                # listdirs + sidecar reads, and the roots can sit on a NAS.
+                holder["sections"] = mfr.compare_images(
+                    a, b,
+                    assets_a=extract_source.find_extract_for(a, roots),
+                    assets_b=extract_source.find_extract_for(b, roots)) or []
             except Exception as e:  # never leave the tab on "Comparing…"
                 holder["sections"] = [
                     ("Error", [("Could not compare", str(e))])]
@@ -13526,6 +13685,9 @@ class MainWindow:
         tree = self._compare_tree
         tree.delete(*tree.get_children())
         self._compare_sections = []
+        self._compare_refs = {}
+        self._compare_more = {}
+        self._compare_expanded = set()
         self._compare_btn.configure(state=tk.DISABLED)
         self._compare_copy_btn.configure(state=tk.DISABLED)
         self._compare_status.configure(text="Comparing images…")
@@ -13547,28 +13709,260 @@ class MainWindow:
                 self._compare_empty.place_forget()
             except tk.TclError:
                 return
-            self._compare_sections = holder.get("sections") or []
-            tree.delete(*tree.get_children())
-            for title, rows in self._compare_sections:
-                parent = tree.insert("", tk.END, text=title, open=True,
-                                     tags=("section",))
-                for name, value in rows:
-                    tree.insert(parent, tk.END, text=name, values=(value,))
-            self._compare_btn.configure(state=tk.NORMAL)
-            self._compare_copy_btn.configure(
-                state=tk.NORMAL if self._compare_sections else tk.DISABLED)
-            self._compare_status.configure(text="")
+            self._compare_render(holder.get("sections") or [])
 
         self.root.after(120, _poll)
 
+    def _compare_render(self, sections):
+        """Take a finished report and put it on the tree.
+
+        The report is kept WHOLE (``_compare_sections``); how much of it is
+        drawn is :meth:`_compare_paint`'s business.  A new report starts with
+        nothing expanded — the groups a user opened on the last pair of cards
+        say nothing about this one."""
+        self._compare_sections = sections
+        self._compare_expanded = set()
+        self._compare_paint()
+        self._compare_btn.configure(state=tk.NORMAL)
+        self._compare_copy_btn.configure(
+            state=tk.NORMAL if sections else tk.DISABLED)
+        self._compare_status.configure(text="")
+
+    def _compare_paint(self):
+        """Draw the stored report at the current "Rows per list" setting.
+
+        Each section is split into its listed groups — a named row plus the
+        blank-named rows under it (``image_info.group_rows``) — and only the
+        first N items of a group are inserted, with the remainder collapsed
+        into one "… and N more" line that expands on double-click.  Sections
+        are re-drawn from data already in memory, so the setting (and the
+        expansion) cost a repaint rather than two multi-GB card reads."""
+        from ..core.image_info import group_rows
+
+        tree = self._compare_tree
+        tree.delete(*tree.get_children())
+        self._compare_refs = {}
+        self._compare_more = {}
+        limit = compare_row_limit_value(self.compare_limit_var.get())
+        painted = 0
+
+        def _insert(parent, row):
+            openable = len(row) > 2
+            iid = tree.insert(parent, tk.END, text=row[0], values=(row[1],),
+                              tags=("openable",) if openable else ())
+            if openable:
+                # The plugin's own token for that file — kept beside the tree
+                # rather than inside it: Tk item values are strings, and
+                # round-tripping a dict through one is how a "path" ends up
+                # being parsed back out of display text.
+                self._compare_refs[iid] = row[2]
+            return iid
+
+        for s_i, (title, rows) in enumerate(self._compare_sections):
+            parent = tree.insert("", tk.END, text=title, open=True,
+                                 tags=("section",))
+            painted += 1
+            for g_i, (head, items) in enumerate(group_rows(rows)):
+                key = (s_i, g_i)
+                _insert(parent, head)
+                full = limit is None or key in self._compare_expanded
+                shown = items if full else items[:limit]
+                for row in shown:
+                    _insert(parent, row)
+                painted += 1 + len(shown)
+                hidden = len(items) - len(shown)
+                if hidden:
+                    iid = tree.insert(
+                        parent, tk.END, text="",
+                        values=("… and %s more — double-click to list them"
+                                % format(hidden, ","),))
+                    self._compare_more[iid] = key
+                    painted += 1
+        self._compare_row_count = painted
+
+    def _compare_limit_changed(self, _event=None):
+        """"Rows per list" picked: repaint and remember the choice."""
+        choice = normalize_compare_row_limit(self.compare_limit_var.get())
+        self.compare_limit_var.set(choice)
+        if self._compare_sections:
+            self._compare_paint()
+        if self._on_compare_row_limit_change:
+            self._on_compare_row_limit_change(choice)
+
+    def _compare_expand_group(self, iid):
+        """Double-click a "… and N more" line: list the rest of THAT group.
+
+        Only that one — a report can hold several thousand-entry lists, and
+        opening all of them because the user wanted to read one is how the row
+        he was looking at ends up somewhere else entirely.  Which is also why
+        the scroll position is put back: every row ABOVE this line is
+        unchanged by the expansion, so the top row's index is too."""
+        key = self._compare_more.get(iid)
+        if key is None:
+            return
+        tree = self._compare_tree
+        before = self._compare_row_count
+        top = tree.yview()[0] * before
+        self._compare_expanded.add(key)
+        self._compare_paint()
+        if self._compare_row_count:
+            tree.yview_moveto(top / self._compare_row_count)
+
     def _compare_copy_report(self):
+        """Copy the WHOLE report — every entry of every change list, not just
+        the rows the tree is currently showing."""
         from ..core import image_info as _info_mod
         if not self._compare_sections:
             return
         self.root.clipboard_clear()
         self.root.clipboard_append(_info_mod.as_text(
             self._compare_sections, title="Compare Report"))
-        self._compare_status.configure(text="Report copied to clipboard.")
+        self._compare_status.configure(
+            text="Report copied to clipboard — every row, not just the ones "
+                 "shown.")
+
+    def _compare_open_row(self, event):
+        """Double-click in the report tree: open the file that row lists —
+        or, on the "… and N more" line, list the rest of that group."""
+        iid = self._compare_tree.identify_row(event.y)
+        if not iid:
+            return
+        if iid in self._compare_more:
+            self._compare_expand_group(iid)
+            return
+        self._compare_open_iid(iid)
+
+    def _compare_open_target(self, iid):
+        """``(side, image_path, ref)`` for the row *iid*, or ``None``.
+
+        WHICH CARD IS THE DECISION HERE, and it is the plugin's: a Deleted row
+        only exists on image A, so sending it to image B would open nothing,
+        every time — indistinguishable from a broken reader.  The ref carries
+        the side; this maps it to the path in that picker and checks the file
+        is still there.  A row with no ref (a section header, a count row, the
+        "… and N more" line) says why nothing happened rather than swallowing
+        the click.
+        """
+        ref = self._compare_refs.get(iid)
+        if ref is None:
+            self._compare_status.configure(
+                text="Only the listed files open — double-click one of the "
+                     "file rows.")
+            return None
+        side = (ref.get("side") or "B").upper()
+        image = ((self.compare_a_var.get() if side == "A"
+                  else self.compare_b_var.get()) or "").strip()
+        if not image or not os.path.isfile(image):
+            messagebox.showerror(
+                "Open %s" % (ref.get("name") or "file"),
+                "Image %s is no longer at:\n\n%s" % (side, image))
+            return None
+        return side, image, ref
+
+    def _compare_open_iid(self, iid):
+        """Pull the file row *iid* lists off its card and open it.
+
+        A tester, once the report existed: "being able to open/play modified,
+        added, or deleted assets via double-click would be awesome."  The
+        report already knows which card and which on-card path every listed
+        file came from, so this is one bounded read, not an Extract — a few MB
+        out of an 8 GB card in about a second, on a worker thread.
+
+        The copy lands in a TEMP folder, not in a project: the file is being
+        looked at, not edited, and dropping it into an extract folder would
+        make it look like an asset the next Build should write.
+        """
+        if self._compare_open_busy:
+            return
+        mfr = self._current_mfr
+        target = self._compare_open_target(iid) if mfr is not None else None
+        if target is None:
+            return
+        side, image, ref = target
+        name = ref.get("name") or "file"
+
+        import tempfile
+        import threading
+
+        self._compare_open_busy = True
+        self._compare_status.configure(text="Opening %s from image %s…"
+                                            % (name, side))
+        holder = {}
+
+        def _worker():
+            try:
+                out = tempfile.mkdtemp(prefix="spike2_compare_")
+                holder["path"] = mfr.extract_report_file(image, ref, out)
+            except Exception as e:      # missing file, unreadable card…
+                holder["error"] = e
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
+        def _poll():
+            if t.is_alive():
+                self.root.after(150, _poll)
+                return
+            self._compare_open_finished(name, side, holder.get("path"),
+                                        holder.get("error"))
+
+        self.root.after(150, _poll)
+
+    def _compare_open_finished(self, name, side, path, err):
+        """Main thread: hand the extracted copy to the desktop, or say why
+        not.  A failure that reports nothing is the one outcome this must
+        never produce — the user double-clicked and is owed an answer."""
+        from ..core import desktop
+        self._compare_open_busy = False
+        if err is not None:
+            self._compare_status.configure(text="")
+            messagebox.showerror(
+                "Open %s" % name,
+                "That file couldn't be read off image %s:\n\n%s" % (side, err))
+            return
+        ok, why = desktop.open_path(path)
+        if ok:
+            self._compare_status.configure(
+                text="Opened %s from image %s." % (name, side))
+        else:
+            self._compare_status.configure(text="")
+            messagebox.showinfo(
+                "Open %s" % name,
+                "The file was copied here, but the desktop wouldn't open "
+                "it:\n\n%s\n\n%s" % (path, why))
+
+    def _compare_extract_both(self):
+        """Run a full Extract on image A and then on image B.
+
+        The report is digests only, on purpose — it never opens a sound or a
+        scene.  When the answer needs the assets themselves, both cards have
+        to be extracted, and doing that by hand means visiting the Extract tab
+        twice and inventing two output folders (a tester: "in order to have a
+        complete comparison in one action").  The App owns the run itself; the
+        tab only checks it has two real, different images to hand over.
+        """
+        a = (self.compare_a_var.get() or "").strip()
+        b = (self.compare_b_var.get() or "").strip()
+        if not a or not b:
+            messagebox.showinfo(
+                "Pick two images",
+                "Pick both card images first — Extract Both extracts the "
+                "pair.")
+            return
+        for side, p in (("A", a), ("B", b)):
+            if not os.path.isfile(p):
+                messagebox.showerror(
+                    "File not found", "Image %s:\n\n%s" % (side, p))
+                return
+        if os.path.normcase(os.path.abspath(a)) == os.path.normcase(
+                os.path.abspath(b)):
+            messagebox.showinfo(
+                "Same image twice",
+                "Images A and B are the same file, so there is only one "
+                "extract to run — use the Extract tab.")
+            return
+        if self._on_extract_both:
+            self._on_extract_both(a, b)
 
     def _build_text_tab(self):
         """Build the 'Replace Text' tab: a searchable list of the editable
@@ -14514,8 +14908,22 @@ class MainWindow:
             labels.append(lbl)
         if mode == "extract":
             self._extract_phase_labels = labels
+        elif mode == "emulate":
+            self._emulate_phase_labels = labels
         else:
             self._write_phase_labels = labels
+
+    #: The Emulate tab's boot stages (item 78).  Fixed, unlike the extract/
+    #: write tuples: every Spike 2 boot walks this exact ladder, and a card
+    #: that is already cached simply starts with "Copy card" ticked off.
+    #: "Node boards", not "Tech Alerts" (David, 2026-08-24): what the stage
+    #: actually spends its time on is the node bus bringing every board up -
+    #: the alerts screen is the readout at the end of it, and the helper
+    #: waits for the bring-up before pressing past it.
+    #: ...and "Ready", not "Attract" (same day): the last chip is the
+    #: user's answer ("can I play now?"), not the machine's word for the
+    #: screen it happens to be showing.
+    EMULATE_PHASES = ("Copy card", "Boot", "Node boards", "Ready")
 
     def _init_phase_steps(self):
         # Initial labels — apply_manufacturer rebuilds them per-mfr later.
@@ -14525,6 +14933,9 @@ class MainWindow:
                                 self._extract_phases, "extract")
         self._build_phase_steps(self._write_phases_frame,
                                 self._write_phases, "write")
+        self._emulate_phases = self.EMULATE_PHASES
+        self._build_phase_steps(self._emulate_phases_frame,
+                                self._emulate_phases, "emulate")
 
     def _rebuild_phase_steps(self, extract_phases, write_phases):
         """Tear down + rebuild the phase indicator widgets when the
@@ -14542,6 +14953,18 @@ class MainWindow:
 
     def _on_tab_changed(self, _event=None):
         text = self._current_tab_key()   # stable key, not the short label
+        # Item 78: leaving an Emulate tab hands the footer back to the
+        # pipeline - without this the bar stays wherever the emulation left
+        # it (full after a boot) underneath the freshly repacked chips.
+        if text not in ("Emulate", "Emulate JJP"):
+            self._emulate_phases_frame.pack_forget()
+            if getattr(self, "_footer_owner", "pipeline") == "emulate" \
+                    and not getattr(self, "_running", False):
+                self._footer_owner = "pipeline"
+                self._progress_bar.stop()
+                self._progress_bar.configure(mode="determinate")
+                self._progress_bar["value"] = 0
+                self.set_status("Ready")
         # Switching tabs means leaving whatever preview was playing.  Each tab
         # owns its own player (Replace Audio's spectrogram transport, Replace
         # Video's embedded clip); an ffplay child keeps the sound going under
@@ -14597,6 +15020,19 @@ class MainWindow:
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
             self._pex_default_from_extract()
+        elif text in ("Emulate", "Emulate JJP"):
+            # Item 78 (David, 2026-08-24: "why are we showing this progress
+            # bar on the emulate tab?"): the extract/write chips swap for
+            # the emulation's OWN ladder (Copy card / Boot / Tech Alerts /
+            # Attract), and the bar belongs to its loading state — the
+            # Stern panel drives both through set_emulate_progress; its
+            # next status poll repaints within a couple of seconds, so
+            # entry just shows idle.
+            self._extract_phases_frame.pack_forget()
+            self._write_phases_frame.pack_forget()
+            self._emulate_phases_frame.pack(
+                fill=tk.X, before=self._progress_bar)
+            self.set_emulate_progress("idle")
         elif text == "Default Settings":
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
@@ -19783,6 +20219,7 @@ class MainWindow:
 
     def set_phase(self, index, mode="extract"):
         labels = (self._extract_phase_labels if mode == "extract"
+                  else self._emulate_phase_labels if mode == "emulate"
                   else self._write_phase_labels)
         c = THEMES[self._current_theme]
         for i, lbl in enumerate(labels):
@@ -19797,8 +20234,10 @@ class MainWindow:
 
     def reset_steps(self, mode="extract"):
         phases = (self._extract_phases if mode == "extract"
+                  else self._emulate_phases if mode == "emulate"
                   else self._write_phases)
         labels = (self._extract_phase_labels if mode == "extract"
+                  else self._emulate_phase_labels if mode == "emulate"
                   else self._write_phase_labels)
         c = THEMES[self._current_theme]
         for lbl, name in zip(labels, phases):
@@ -19829,6 +20268,8 @@ class MainWindow:
         self.reset_steps(mode="extract")
 
     def set_progress(self, current, total, desc="", mode="extract"):
+        self._footer_owner = "pipeline"
+        self._footer_kind = None
         if total > 0:
             self._progress_bar.stop()
             self._progress_bar.configure(mode="determinate")
@@ -19838,6 +20279,50 @@ class MainWindow:
             self._progress_bar.start(12)
         if desc:
             self.set_status(desc)
+
+    #: kind -> (chip index into EMULATE_PHASES, bar value).  The bar NEVER
+    #: bounces (David, 2026-08-24: an endless marquee "is very distracting"
+    #: - and item 79's stuck-state bug made it literally endless): each
+    #: stage holds a fixed, monotonic value, and the copy substitutes its
+    #: REAL percent scaled into the 0-40 slice.  "run" indexes past the
+    #: last chip on purpose - set_phase paints every chip < index as done,
+    #: so 4 means the whole ladder is green.
+    _EMULATE_KINDS = {"copy": (0, None), "boot": (1, 55),
+                      "techalerts": (2, 80), "run": (4, 100)}
+
+    def set_emulate_progress(self, kind, pct=None, text=""):
+        """Item 78 (David: "why are we showing this progress bar on the
+        emulate tab?"): while an Emulate tab is showing, the footer carries
+        the EMULATION's loading state - the bespoke chip row (Copy card /
+        Boot / Tech Alerts / Attract, David: "like on the mod pack tab, but
+        bespoke") plus a determinate bar: the copy's real percent in its
+        slice, then a fixed value per stage, full at attract, empty when
+        nothing runs.  The pipeline stays the owner while one of its jobs
+        runs (this is a no-op then), and switching back to a pipeline tab
+        hands the footer back - see _on_tab_changed.
+        ``kind``: copy / boot / techalerts / run / idle.
+        """
+        if getattr(self, "_running", False):
+            return
+        if self._current_tab_key() not in ("Emulate", "Emulate JJP"):
+            return
+        bar = self._progress_bar
+        bar.stop()
+        bar.configure(mode="determinate")
+        if kind in self._EMULATE_KINDS:
+            index, value = self._EMULATE_KINDS[kind]
+            if kind == "copy":
+                value = int((pct or 0) * 0.4)
+            self.set_phase(index, mode="emulate")
+            bar["value"] = value
+        else:                                            # idle
+            self.reset_steps(mode="emulate")
+            bar["value"] = 0
+        self._footer_owner = "pipeline" if kind == "idle" else "emulate"
+        if text:
+            self.set_status(text)
+        elif kind == "idle":
+            self.set_status("Ready")
 
     def set_status(self, text):
         self._status_label.configure(text=text)
@@ -20617,6 +21102,11 @@ class MainWindow:
             _cv = getattr(self, _attr, None)
             if _cv is not None:
                 _cv.configure(highlightbackground=c["border"])
+
+        if hasattr(self, "_compare_tree"):
+            # The rows a double-click can open, in the same hue every other
+            # tree uses for "this row leads somewhere".
+            self._compare_tree.tag_configure("openable", foreground=c["link"])
 
         if hasattr(self, "_text_tree"):
             self._text_tree.tag_configure("assigned", foreground=c["success"])

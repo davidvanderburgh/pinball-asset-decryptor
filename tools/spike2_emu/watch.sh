@@ -237,9 +237,31 @@ NB_WHY=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
     --switches "$PAD_TABLES/$GAME/switch_list.txt" \
     --nodedir "$NBID" 2>/dev/null \
     | sed -n 's/^because: //p')
+# WHICH SILENCED NODES STILL ANSWER THE ff STATUS POLL - PER NODE, not the
+# item-52 everywhere. Measured 2026-08-22 on the Heisei card (godzilla_le):
+# with its silenced node 2 answering `ff`, bring-up re-probed node 2's
+# identity in 90-probe bursts every ~15 s until t=100 s, and the game sat on
+# Tech Alerts - presses swallowed, no attract light show, the playfield
+# saying "no emulator" - until the last burst gave up. Item 17's run 12
+# (before the carve-out existed) is the control: every [nbsilent] train sat
+# inside the first 20 s. So the census hands the shim only the nodes the
+# carve-out was built for (the optional node4 class, stranger_things), and
+# every other silenced node is totally silent again. 0 = none; 1 = every
+# silenced node, kept as the A/B knob for exactly this comparison.
+NB_FF_DEFAULT=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
+    --switches "$PAD_TABLES/$GAME/switch_list.txt" \
+    --nodedir "$NBID" --silent-ff 2>/dev/null)
+export PAD_NB_SILENT_FF=${PAD_NB_SILENT_FF:-${NB_FF_DEFAULT:-0}}
 if [ -n "${PAD_NB_SILENT:-}" ]; then
     echo "[watch] node census: silencing node(s) $PAD_NB_SILENT on $GAME -" \
          "${NB_WHY:-reason unavailable}"
+    case "$PAD_NB_SILENT_FF" in
+        0) ;;
+        1) echo "[watch] node census: ff status polls answered on EVERY" \
+                "silenced node (PAD_NB_SILENT_FF=1, the A/B knob)" ;;
+        *) echo "[watch] node census: ff status polls still answered on" \
+                "node(s) $PAD_NB_SILENT_FF (optional node4 - item 52)" ;;
+    esac
 else
     echo "[watch] node census: silencing nothing on $GAME -" \
          "${NB_WHY:-reason unavailable}"
@@ -439,7 +461,7 @@ if [ "$DROP" = 1 ]; then
     # single PAD_PIVOT one, which is a nasty thing to leave behind.
     for f in "$LOG" "$HOSTLOG" "$HOME/padvid.log" "$HOME/padauto.log" \
              "$HOME/padball.log" "$HOME/padaudio.log" "$HOME/padtables.log" \
-             "$PFLOG"; do
+             "$HOME/padswx.log" "$PFLOG"; do
         [ -e "$f" ] || : > "$f" 2>/dev/null
         chown "$PAD_USER" "$f" 2>/dev/null
     done
@@ -719,9 +741,14 @@ rm -f "$RING_HOST" "$SW_HOST"
 # expects and polls through; wrong is the state nothing would notice.
 rm -f "$ROOT/dump/padbinds"
 # The guest opens the LED block O_RDWR and will NOT create it, so make it here.
-# One page, zeroed: the shim stamps the magic once it maps it.
+# TWO pages, zeroed: the shim stamps the magic once it maps it. It was one page
+# until version 4 (padled.h), whose `seen` plane crossed 4096. The shim takes
+# the size from the FILE rather than trusting this number - an old watch.sh
+# against a new shim gets a version-3 block instead of a SIGBUS on the second
+# page - but the plane only exists when the file is big enough, so this line is
+# what turns it on.
 rm -f "$LED_HOST"
-dd if=/dev/zero of="$LED_HOST" bs=4096 count=1 status=none
+dd if=/dev/zero of="$LED_HOST" bs=8192 count=1 status=none
 # This session's identity. savestate copies it into the slot; restorestate
 # compares to tell a SAME-SESSION load (renderer already holds the guest's GL
 # world) from a CROSS-SESSION one (it holds none of it - the game plays but
@@ -1247,6 +1274,35 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
     echo "[watch] leaves Tech Alerts (PAD_AUTO_ATTRACT=0 to do it yourself)."
 fi
 
+# THE SWITCH EXERCISER (item 59). The `CHECK SWITCH #n` rows on Tech Alerts are
+# the game's own NO-USAGE audit, not a fault in this rig - on a machine nobody
+# plays, the trough, the slingshots, the EOS switches and the shooter lane
+# genuinely never move. A real machine clears them by being played; this works
+# every safe switch once instead. MEASURED on godzilla_pro 2026-08-21: the
+# switch-alert provider read `active=37`, an exercise took it to 0 and the glass
+# said "No Technician Alerts", and the NEXT BOOT read 37 again - so it belongs
+# here, on every boot, rather than being done once by hand.
+#
+# Backgrounded like autoattract, and for the same reason: it spends its first
+# ~15 s asleep waiting on the boot, and this script must stay responsive to the
+# window closing. It cannot disturb autoattract - swexercise.sh's header has
+# that argument checked against all three of that script's predicates.
+#
+# ★ OPT-IN as of 2026-08-22, off by default - David: "we no longer need the
+# 'clear alerts' function to automatically run every start up." The CHECK
+# SWITCH rows are cosmetic (autoattract walks past them regardless), the
+# playfield window's own "Clear alerts" button covers the case where they
+# matter, and the boot-time pass costs every run ~100 tagged edges and a
+# 12 s burst of switch pokes that lands mid-play on an attended boot -
+# autoattract stands down for an operator, this could not. PAD_SW_EXERCISE=1
+# brings the per-boot pass back; its edges carry source letter `x`, so
+# `grep -v 'ms [+-][0-9]*x'` removes them from a measurement.
+if [ "${PAD_SW_EXERCISE:-0}" = 1 ]; then
+    setsid_as_user bash "$S/swexercise.sh" "$LOG" > "$HOME/padswx.log" 2>&1 &
+    echo "[watch] switch exerciser on: it clears the CHECK SWITCH tech alerts"
+    echo "[watch] once the game's switch table is up (PAD_SW_EXERCISE=0 off)."
+fi
+
 # THE BALL FEEDER (item 21b). The game fires its trough eject coil and waits
 # for a trough switch to change; until this existed nothing answered, so a
 # ball only ever moved when a human ran plunge.py and multiball could not
@@ -1275,7 +1331,12 @@ fi
 # service buttons are unlocked the moment the game is up. One early swhold is
 # not enough: the rest-state writer forces the door shut once at guest start
 # and the merge is last-edge-wins, so this loop re-asserts through the boot
-# window. Close the door (click switch 33, or swhold.py 33 1) when done.
+# window. Close the door (click the door switch, or swhold.py <door-id> 1)
+# when done - the id is PER TITLE (item 73): the wire is always node 0
+# bit 23, the id is the title's own table index (godzilla 33, aerosmith 34,
+# batman 36, munsters 198), so the loop below re-resolves it from the
+# derived list on every pass and falls back to 33 only while no list
+# exists yet.
 if [ "${PAD_DOOR_OPEN:-0}" = 1 ]; then
     (
         # The gate only trusts an EDGE-established door state (see
@@ -1283,22 +1344,30 @@ if [ "${PAD_DOOR_OPEN:-0}" = 1 ]; then
         # transition is what makes "open" a known fact rather than a fresh
         # block's meaningless zeros. Re-asserted through the boot window
         # because the writers are last-edge-wins and the playfield stamps
-        # its own rest state when it comes up.
+        # its own rest state when it comes up. Re-resolved per pass because
+        # a first run's list arrives mid-loop, and an edge on a stale id
+        # would hold some other switch (item 73).
         first=1
         for _i in $(seq 1 30); do
             if [ -f "$ROOT/dump/padsw" ]; then
+                DOOR=33
+                if [ -f "$TABLES/$GAME/switch_list.txt" ]; then
+                    d=$(awk '!/^#/ && $3 == 0 && $4 == 23 { print $1; exit }' \
+                        "$TABLES/$GAME/switch_list.txt")
+                    [ -n "$d" ] && DOOR=$d
+                fi
                 if [ -n "$first" ]; then
-                    setsid_as_user python3 "$S/swhold.py" 33 1 >/dev/null 2>&1
+                    setsid_as_user python3 "$S/swhold.py" "$DOOR" 1 >/dev/null 2>&1
                     first=
                 fi
-                setsid_as_user python3 "$S/swhold.py" 33 0 >/dev/null 2>&1
+                setsid_as_user python3 "$S/swhold.py" "$DOOR" 0 >/dev/null 2>&1
             fi
             sleep 2
         done
     ) &
     echo "[watch] coin door held OPEN through boot (PAD_DOOR_OPEN=1):"
-    echo "[watch] service buttons unlocked; close the door (swhold.py 33 1)"
-    echo "[watch] when done."
+    echo "[watch] service buttons unlocked; close the door when done"
+    echo "[watch] (swhold.py <id> 1 - the id is the title's node-0-bit-23 row)."
 fi
 
 # KEY EVENTS, on THIS script's stdout. The app's Emulate tab drains watch.sh's

@@ -2978,9 +2978,32 @@ int shim_ioctl(int fd, unsigned long req, ...)
          * strictly better than handing it nothing, because "nothing" is not
          * neutral here - it is the all-made word.
          *
-         * Cannot affect a title whose table resolves: this runs only when
-         * sw_scan_bytes() returned 0. PAD_CAB_IDLE=0 disables it for an A/B. */
-        if (!have && sw_table_hopeless()) {
+         * ★ ITEM 63, 2026-08-21: THIS USED TO BE GATED ON sw_table_hopeless(),
+         * AND THAT GATE IS WHY EVERY BOOT LANDED ON THE TECH ALERTS SCREEN.
+         * hopeless() is `sw_find_fails >= 4` - it only becomes true after four
+         * failed find attempts, i.e. for a title whose table NEVER resolves.
+         * But a normal title (godzilla) has an EARLY-BOOT WINDOW - from the
+         * first SPI transfer until its switch table resolves at ~3.5 s
+         * (measured: first [cabspi] ff0f0f... at line ~2107 of a clean boot,
+         * right after [swrest]) - during which sw_scan_bytes() ALSO returns 0,
+         * hopeless() is still false, so this fallback did NOT fire and the RX
+         * buffer was left untouched = the all-made word. Active low, all-made =
+         * every cabinet switch pressed, INCLUDING the service/MENU button. The
+         * game's input decoder (QrOfflineListener) reads that as a MENU press
+         * and opens the operator menu (MenuPageLandingPage = the "Tech Alerts"
+         * screen) - the game's boot default is attract, so a spurious
+         * service-button press at power-up is the whole reason we land on Tech
+         * Alerts. A 6-agent RE workflow proved the menu's bit 0x100 has exactly
+         * one setter, reachable at boot only via that opcode-19 MENU event.
+         * FIRING ON `!have` ALONE presents the at-rest word (service buttons
+         * OPEN) through that window too, so the game never sees the phantom
+         * press and boots straight to attract. The word is the correct at-rest
+         * state (nothing is pressed at power-up), so it is strictly better than
+         * the all-made buffer for the early window exactly as it is for a
+         * hopeless title. Priming is still skipped (cab_synth), which is what
+         * the old crash-at-6.5s was about. PAD_CAB_IDLE=0 disables it for an
+         * A/B and restores the old land-on-Tech-Alerts behaviour. */
+        if (!have) {
             static int on = -1;
             if (on == -1) {
                 char *q = getenv("PAD_CAB_IDLE");
@@ -3294,7 +3317,43 @@ static unsigned nb_env_hex(const char *name, unsigned def)
  * entry opens the registry gate; this one is only a plausible small node-board
  * MCU. PAD_NB_PART sweeps the rest. */
 #define NB_PART_DEFAULT 0x00020023u
-#define NB_HWID_DEFAULT 0x0001u
+/* ★ IDENTITY [8..9] IS A PERCENT, NOT ONLY AN ID, AND 1 MADE EVERY LAMP BLACK.
+ *
+ * The comment above calls this the board id, which is how 0x5a2f44 uses it
+ * (cache it, re-ask while it reads zero) - and that reading is not wrong, it is
+ * INCOMPLETE. The swelf-generation lamp library reads the SAME two bytes as a
+ * per-node BRIGHTNESS PERCENT and scales every lamp value it sends by it:
+ *
+ *   0x51b558  parses the 11-byte 0xfe reply and stores [8..9] as a u16 into
+ *             the per-node config record at 0x816dac + node*12 + 8
+ *   0x51b68c  returns that u16 (ldrh [0x816da8 + node*12, #12] - the same
+ *             address), re-fetching once while it reads 0
+ *   0x51c2b4  the cmd 0x70 single-lamp builder: bl 0x51b68c, then
+ *               A' = min(255, chA * scale / 100)     (mul, umull by the
+ *               0x10624dd3 /100 magic, lsr #6, movcs #255)
+ *               B' = min(255, chB * scale / 100)
+ *             and it RETURNS WITHOUT SENDING when the scale reads 0.
+ * Eleven builders in 0x51b79c..0x51c510 - the whole 0x70 family - do this.
+ *
+ * So a claimed 1 means every lamp goes out at chA/100: anything the game
+ * computes below 100 lands on the wire as EXACTLY ZERO. Measured on David's
+ * live batman run (2026-08-26): 479,553 LED writes decoded, ~95/s sustained,
+ * and every one of the 1536 val[] bytes zero the whole time - not one nonzero
+ * value in 12 samples over 5 s. The frames were arriving and decoding
+ * perfectly; they carried black.
+ *
+ * 100 IS THE UNITY VALUE, and that is the whole argument for it: it is the
+ * scale at which the wire carries the game's OWN computed lamp values
+ * unmodified, so the playfield window shows what the game intends rather than
+ * what our identity did to it. It stays non-zero, so 0x5a2f44's id consumer is
+ * unaffected. What a REAL board reports here is NOT known - nothing in this
+ * rig has ever seen one - so this is chosen for its arithmetic, not measured;
+ * PAD_NB_HWID still overrides for a sweep.
+ *
+ * The newer (godzilla) generation drives its show through the a2/a6 indexed
+ * builders, which never call 0x51b68c - which is why this went unnoticed:
+ * godzilla speaks 0x70 only 27-81 times per RUN, batman ~109 times per SECOND. */
+#define NB_HWID_DEFAULT 0x0064u
 #define NB_FW_DEFAULT   0x000100u      /* 0.1.0, as major<<16 | minor<<8 | patch */
 
 /* PER-NODE IDENTITY. A single global identity cannot work, because the game
@@ -3317,11 +3376,23 @@ static unsigned nb_env_hex(const char *name, unsigned def)
  *     byte against the ones inside that decrypted .hex. Those are printed by
  *     the [nbhex] dump, and the values below are copied straight from it.
  *
- * node4's two images report a version that does not look like 1.35.0 even
- * after decryption (LPC1124_303 -> 124.107.0, LPC812 -> 146.13.128). That is
- * reproduced here rather than "corrected", because what matters is matching
- * what 0x5a8644 actually reads. Worth revisiting if node 4 misbehaves. */
-struct nb_ident { unsigned char id; unsigned part; unsigned char variant; unsigned fw; };
+ * node4 misbehaved, and the 2026-08-22 revisit found the misread (the old
+ * note here reproduced "what 0x5a8644 actually reads" - 124.107.0 - off the
+ * image BUFFER at flash 0x1008). 0x5a8644 has TWO paths: when the image
+ * node's [+32] selector is set - true on BOTH node4 images, false on every
+ * other type - it grades against the parsed HEADER (the encrypted 06/07 hex
+ * records: maj/min/patch at node+16/18/20, variant at node+26), and node4's
+ * header says 1.35.0 variant 0x03, same as the FILENAME. The buffer bytes on
+ * a node4 image are simply not a version block. The 0x98/124.107.0 claim is
+ * why every [nbobj] dump ever taken shows slot 4 at status 7 = Checksum,
+ * and why godzilla_le (whose build answers a Checksum grade with an endless
+ * "UPDATING NODE BOARD RUNTIME" walk over attract) crawled. Measured live
+ * with hexreg.py on the Heisei card; nb_hexreg below reads both paths. */
+/* `tcrc` is CRC32 of the board's TYPE NAME - the key the game's own hex-image
+ * registry is indexed by (see nb_hexreg below). File-derived entries carry it
+ * from node_ident.txt's type= field; the built-in rows leave it 0 (positional
+ * initializers), which just means the registry cannot correct them. */
+struct nb_ident { unsigned char id; unsigned part; unsigned char variant; unsigned fw; unsigned tcrc; };
 static const struct nb_ident nb_idents[] = {
     /* id   part id      variant  fw (maj<<16|min<<8|patch)   type / firmware  */
     {  1, 0x00020023u, 0x01, 0x012300u },  /* pinnode    LPC1112_101  1.35.0 */
@@ -3331,7 +3402,8 @@ static const struct nb_ident nb_idents[] = {
     {  7, 0x2c40102bu, 0x05, 0x012300u },
     { 12, 0x2c40102bu, 0x05, 0x012300u },
     { 14, 0x2c40102bu, 0x05, 0x012300u },
-    {  4, 0x00140040u, 0x98, 0x7c6b00u },  /* node4      LPC1124_303  as read */
+    {  4, 0x00140040u, 0x03, 0x012300u },  /* node4      LPC1124_303  1.35.0
+                                              (HEADER values - see above)   */
 };
 
 /* THE FIRMWARE VERSION IS THE TITLE'S, AND IT IS WRITTEN ON THE TIN.
@@ -3500,6 +3572,7 @@ static void nb_fident_load(void)
     if (!f) return;
     while (rgets(line, sizeof line, f)) {
         unsigned id, part, var, fw;
+        const char *t;
         if (line[0] == '#') continue;
         if (!nb_field_dec(line, "node=", &id) || id >= 64) continue;
         if (!nb_field_hex(line, "part=0x", &part)) continue;
@@ -3509,6 +3582,22 @@ static void nb_fident_load(void)
         nb_fident[id].part = part;
         nb_fident[id].variant = (unsigned char)var;
         nb_fident[id].fw = fw;
+        /* The TYPE NAME, as its CRC32 - the key into the game's own hex-image
+         * registry (nb_hexreg below), so a derived claim can be corrected
+         * against what the game actually decrypted. Absent field = 0 = never
+         * corrected, which is exactly the old behaviour. */
+        nb_fident[id].tcrc = 0;
+        t = strstr(line, "type=");
+        if (t) {
+            unsigned c = 0xffffffffu;
+            int k;
+            for (t += 5; *t && *t != ' ' && *t != '\n'; t++) {
+                c ^= (unsigned char)*t;
+                for (k = 0; k < 8; k++)
+                    c = (c >> 1) ^ (0xedb88320u & (0u - (c & 1u)));
+            }
+            nb_fident[id].tcrc = c ^ 0xffffffffu;
+        }
         nb_fident_have[id] = 1;
         n++;
     }
@@ -3541,6 +3630,322 @@ static const struct nb_ident *nb_ident_for(unsigned id)
     for (i = 0; i < sizeof nb_idents / sizeof nb_idents[0]; i++)
         if (nb_idents[i].id == id) return &nb_idents[i];
     return 0;
+}
+
+/* ---- THE GAME'S OWN HEX-IMAGE EXPECTATIONS, READ BACK OUT OF ITS MEMORY --
+ *
+ * The game grades every board's claimed identity against the DECRYPTED
+ * <type>-<class>-*.hex image: variant at flash 0x1008, version at
+ * 0x1009..0x100b (0x1d5780 / 0x5a8644, and nb_dump_hexlist's annotations).
+ * A claim it rejects starts the RUNTIME UPDATE walk - "UPDATING NODE BOARD
+ * RUNTIME / UPDATE FAILED / PLEASE WAIT" retried every ~15 s, and the game
+ * sits on it before attract. MEASURED 2026-08-22 on the Heisei card
+ * (godzilla_le): nbdir.py had to GUESS the tmc5041node variant (0x01, the
+ * hex body is encrypted so the file cannot say), the game's decrypted image
+ * carries 0x0d, and that one byte cost every boot ~80 s of failed updates
+ * on node 10 before the game gave up and went to attract at t=104 s.
+ *
+ * The fix is to stop inventing what the game already knows: the decrypted
+ * images are IN ITS MEMORY, in the hex-image registry (a linked list keyed
+ * by CRC32 of the type name - zlib polynomial, verified against the keys at
+ * the top of this file - and LPC class). The registry HEAD is a per-title
+ * global (0x7e1b98 is godzilla_pro 1.15.0's, and walking that literal on
+ * another title is the segfault item 52 recorded), but the NODES have a
+ * rigid 64-byte shape, so they are found per title BY SHAPE, the same move
+ * as nb_objs_addr():
+ *
+ *     w[0]  CRC32(type name)  - must be one of the 14 known type names
+ *     w[1]  LPC class 1..7
+ *     w[2]  char* path        - must point at readable memory ending .hex
+ *     w[7]  decrypted image buffer (indexed by absolute flash address)
+ *     w[10] image-kind flag == 1
+ *     w[11] min flash address == 0x1000
+ *     w[12] span > 11
+ *
+ * SAFE BY CONSTRUCTION, unlike the pro-literal walk: every candidate and
+ * every pointer it carries is range-checked against /proc/self/maps (the
+ * guest view - qemu-user serves the guest's own mappings there) before it
+ * is dereferenced, so a false positive costs a skipped candidate, never a
+ * fault. host-side twin: hexreg.py, which read the live game's registry
+ * through /proc/<pid>/mem and produced the 0x0d measurement above.
+ *
+ * COST, because item 52's lesson was our own heap scan on the game's bus
+ * thread: the scan runs on the fe (identity) path, at most once every 2 s
+ * of RUN TIME and NB_HEXREG_TRIES attempts in total, only until it
+ * succeeds, over rw regions capped at 16 MB each / 32 MB per attempt - the
+ * registry lives in the low heap (found at guest 0x85xxxx), well inside the
+ * caps. TIME-paced rather than per-N-requests on purpose: the update walk
+ * hammers fe at ~18/s, and the first shape of this throttle (every 64th fe,
+ * 20 tries) spent its whole budget inside the first minute of a boot -
+ * "[nbexp] no hex-image registry found" on the very run whose walk was
+ * using that registry to flash from. Bring-up is also when the bus thread
+ * spends its time sleeping on probe timeouts, so a bounded scan there is
+ * invisible next to the traffic.
+ *
+ * PAD_NB_HEXREG=0 disables the whole thing for an A/B; claims then come
+ * from node_ident.txt / the built-in table exactly as before. */
+#define NB_HEXREG_MAX   24
+#define NB_HEXREG_TRIES 40
+
+static struct { unsigned tcrc, klass, fw; unsigned char variant; }
+    nb_hexreg[NB_HEXREG_MAX];
+static int nb_hexreg_n;                 /* entries found; -1 = given up      */
+
+static const char *const nb_hexreg_types[] = {
+    "pinnode", "ws2812pinnode", "ws2812node", "coil4_lednode", "coil4node",
+    "lcdnode", "hdminode", "hdmi_ws2812node", "afnode", "magsensornode",
+    "node4", "tmc2590node", "tmc5041node", "netbridge",
+};
+
+static unsigned nb_hexreg_crc(const char *s)
+{
+    unsigned c = 0xffffffffu;
+    int k;
+    for (; *s; s++) {
+        c ^= (unsigned char)*s;
+        for (k = 0; k < 8; k++)
+            c = (c >> 1) ^ (0xedb88320u & (0u - (c & 1u)));
+    }
+    return c ^ 0xffffffffu;
+}
+
+static int nb_hexreg_type_known(unsigned crc)
+{
+    static unsigned crcs[sizeof nb_hexreg_types / sizeof *nb_hexreg_types];
+    static int done;
+    unsigned i;
+    if (!done) {
+        for (i = 0; i < sizeof crcs / sizeof *crcs; i++)
+            crcs[i] = nb_hexreg_crc(nb_hexreg_types[i]);
+        done = 1;
+    }
+    for (i = 0; i < sizeof crcs / sizeof *crcs; i++)
+        if (crcs[i] == crc) return 1;
+    return 0;
+}
+
+/* /proc/self/maps, guest view. `rd` collects every readable region (for
+ * pointer validation), the return value is how many; `rw` marks which are
+ * also writable (scan candidates). Read through RTLD_NEXT like every other
+ * shim-side file read, so it cannot recurse into our own hooks. */
+#define NB_HEXREG_REGIONS 128
+static int nb_hexreg_maps(unsigned lo[], unsigned hi[], unsigned char rw[])
+{
+    typedef void *FILEP;
+    FILEP (*ropen)(const char *, const char *);
+    char *(*rgets)(char *, int, FILEP);
+    int (*rclose)(FILEP);
+    FILEP f;
+    /* 512, not a small buffer: a maps line longer than the buffer makes
+     * fgets hand back the TAIL of the line as a second read, and a path
+     * fragment that happens to parse as hex-dash-hex would put a fabricated
+     * region into a list the scanner dereferences. The perms-shape check
+     * below is the second lock on the same door. */
+    char line[512];
+    int n = 0;
+
+    ropen  = dlsym(RTLD_NEXT, "fopen");
+    rgets  = dlsym(RTLD_NEXT, "fgets");
+    rclose = dlsym(RTLD_NEXT, "fclose");
+    if (!ropen || !rgets || !rclose) return 0;
+    f = ropen("/proc/self/maps", "r");
+    if (!f) return 0;
+    while (n < NB_HEXREG_REGIONS && rgets(line, sizeof line, f)) {
+        unsigned a = 0, b = 0;
+        const char *s = line;
+        int any = 0;
+        for (; (*s >= '0' && *s <= '9') || (*s >= 'a' && *s <= 'f'); s++) {
+            a = a * 16 + (unsigned)(*s <= '9' ? *s - '0' : *s - 'a' + 10);
+            any = 1;
+        }
+        if (!any || *s != '-') continue;
+        for (s++; (*s >= '0' && *s <= '9') || (*s >= 'a' && *s <= 'f'); s++)
+            b = b * 16 + (unsigned)(*s <= '9' ? *s - '0' : *s - 'a' + 10);
+        if (*s != ' ' || b <= a || (a & 0xfff)) continue;
+        /* the whole rwxp column has to look like one, not just its first
+         * letter - see the buffer comment above */
+        if (s[1] != 'r') continue;
+        if (s[2] != 'w' && s[2] != '-') continue;
+        if (s[3] != 'x' && s[3] != '-') continue;
+        if (s[4] != 'p' && s[4] != 's') continue;
+        lo[n] = a;
+        hi[n] = b;
+        rw[n] = s[2] == 'w';
+        n++;
+    }
+    rclose(f);
+    return n;
+}
+
+static int nb_hexreg_readable(const unsigned lo[], const unsigned hi[],
+                              int n, unsigned addr, unsigned len)
+{
+    int i;
+    if (!addr || addr + len < addr) return 0;
+    for (i = 0; i < n; i++)
+        if (addr >= lo[i] && addr + len <= hi[i]) return 1;
+    return 0;
+}
+
+/* Last-scan facts for the give-up line: a scan that fails on some future
+ * title must say what it looked at, or "not found" cannot be told apart from
+ * "never really looked" (an empty maps parse, a giant heap skipped by the
+ * caps) without another instrumented run. */
+static unsigned nb_hexreg_stat_maps, nb_hexreg_stat_rw;
+static unsigned long nb_hexreg_stat_bytes;
+
+static void nb_hexreg_scan(void)
+{
+    static unsigned lo[NB_HEXREG_REGIONS], hi[NB_HEXREG_REGIONS];
+    static unsigned char rw[NB_HEXREG_REGIONS];
+    unsigned long scanned = 0;
+    char m[200];
+    int nmaps, r;
+
+    nmaps = nb_hexreg_maps(lo, hi, rw);
+    nb_hexreg_stat_maps = (unsigned)nmaps;
+    nb_hexreg_stat_rw = 0;
+    for (r = 0; r < nmaps; r++) nb_hexreg_stat_rw += rw[r];
+    /* CAPS, and they are about the bus thread, not memory: this runs inside
+     * an fe exchange, and the game's serial read timeout is ~10 ms - a scan
+     * that stalls the reply for long enough reads as an absent board, on
+     * EVERY title including the ones whose claims were already right. The
+     * registry sits in the first MBs of the guest heap (measured at
+     * 0x85xxxx), and maps come back in address order, so a 16 MB per-region
+     * / 32 MB per-attempt budget reaches it with room to spare while keeping
+     * one attempt to tens of emulated milliseconds. */
+    for (r = 0; r < nmaps && nb_hexreg_n < NB_HEXREG_MAX; r++) {
+        const unsigned *p, *end;
+        if (!rw[r] || hi[r] - lo[r] > 16u * 1024 * 1024) continue;
+        if (lo[r] >= 0xf0000000u) continue;
+        if (scanned > 32u * 1024 * 1024) break;
+        scanned += hi[r] - lo[r];
+        p = (const unsigned *)(unsigned long)((lo[r] + 3u) & ~3u);
+        end = (const unsigned *)(unsigned long)(hi[r] - 64u);
+        for (; p <= end && nb_hexreg_n < NB_HEXREG_MAX; p++) {
+            const unsigned char *buf, *path;
+            int i;
+            if (p[11] != 0x1000u) continue;     /* min flash addr, rarest    */
+            if (p[10] != 1u) continue;          /* image-kind flag           */
+            if ((int)p[12] <= 11) continue;     /* span                      */
+            if (p[1] < 1u || p[1] > 7u) continue;
+            if (!nb_hexreg_type_known(p[0])) continue;
+            /* validated for the WHOLE walk below, not the first byte - a
+             * string that runs to the very end of its mapping must not take
+             * the walk over the edge */
+            if (!nb_hexreg_readable(lo, hi, nmaps, p[2], 200)) continue;
+            path = (const unsigned char *)(unsigned long)p[2];
+            for (i = 0; i < 200 && path[i]; i++) ;
+            if (i < 4 || i >= 200) continue;
+            if (path[i-4] != '.' || path[i-3] != 'h'
+                    || path[i-2] != 'e' || path[i-1] != 'x') continue;
+            /* ★ TWO VERSION SOURCES, and the game's reader 0x5a8644 picks:
+             * with the node's [+32] selector SET it grades against the
+             * parsed HEADER (the encrypted 06/07 records - maj/min/patch at
+             * node+16/18/20, variant at node+26); only with it clear does it
+             * read the decrypted buffer at flash 0x1008. Both node4 images
+             * carry the selector, and reading only the buffer is exactly the
+             * misread that had node 4 claiming 124.107.0/0x98 against a
+             * header saying 1.35.0/0x03 - status 7 on every boot ever
+             * dumped. Mirror the game's choice, not one of its inputs. */
+            {
+                const unsigned char *nb = (const unsigned char *)p;
+                unsigned char var, v0, v1, v2;
+                const char *src;
+                if (p[8]) {
+                    var = nb[26]; v0 = nb[16]; v1 = nb[18]; v2 = nb[20];
+                    src = "header";
+                } else {
+                    if (!nb_hexreg_readable(lo, hi, nmaps, p[7] + p[11], 12))
+                        continue;
+                    buf = (const unsigned char *)(unsigned long)(p[7] + p[11]);
+                    var = buf[8]; v0 = buf[9]; v1 = buf[10]; v2 = buf[11];
+                    src = "image";
+                }
+                nb_hexreg[nb_hexreg_n].tcrc = p[0];
+                nb_hexreg[nb_hexreg_n].klass = p[1];
+                nb_hexreg[nb_hexreg_n].variant = var;
+                nb_hexreg[nb_hexreg_n].fw = ((unsigned)v0 << 16)
+                                          | ((unsigned)v1 << 8) | v2;
+                nb_hexreg_n++;
+                snprintf(m, sizeof m,
+                         "[nbexp] %s class=%u variant=0x%02x version=%u.%u.%u  %s\n",
+                         src, p[1], var, v0, v1, v2, (const char *)path);
+                logmsg(m);
+            }
+        }
+    }
+    nb_hexreg_stat_bytes = scanned;
+}
+
+/* The board's MCU part id names its LPC class (the game's own table at
+ * 0x69cc24); only the three classes hwshim has measured part ids for are
+ * ever claimed, so three entries is the whole mapping. */
+static unsigned nb_hexreg_class(unsigned part)
+{
+    if (part == 0x00020023u) return 1;          /* LPC1112_101 */
+    if (part == 0x00140040u) return 4;          /* LPC1124_303 */
+    if (part == 0x2c40102bu) return 5;          /* LPC1313     */
+    return 0;
+}
+
+/* Correct a claim's (variant, fw) from the game's own registry, when the
+ * registry has been found and carries this (type, class). Says so in the log
+ * once per node when it actually changed something - the update overlay and
+ * these lines are the oracle pair. */
+static void nb_hexreg_answer(unsigned nid, unsigned tcrc, unsigned part,
+                             unsigned *var, unsigned *fw)
+{
+    static int on = -1, tries;
+    static unsigned long last_try;
+    static unsigned long long said;
+    int i;
+
+    if (on == -1) { char *q = getenv("PAD_NB_HEXREG"); on = !(q && *q == '0'); }
+    if (!on || !tcrc) return;
+    if (nb_hexreg_n <= 0) {
+        unsigned long now;
+        if (tries < 0) return;                  /* given up                  */
+        now = pad_ms();
+        if (last_try && now - last_try < 2000) return;
+        last_try = now;
+        nb_hexreg_scan();
+        if (nb_hexreg_n > 0) {
+            char m[120];
+            snprintf(m, sizeof m, "[nbexp] the game's hex-image registry: "
+                     "%d decrypted image(s) found by shape\n", nb_hexreg_n);
+            logmsg(m);
+        } else if (++tries >= NB_HEXREG_TRIES) {
+            char m[200];
+            tries = -1;
+            snprintf(m, sizeof m, "[nbexp] no hex-image registry found by "
+                     "shape after %d scans (last: %u map lines, %u rw, "
+                     "%lu bytes walked); claims stay file/table-derived\n",
+                     NB_HEXREG_TRIES, nb_hexreg_stat_maps,
+                     nb_hexreg_stat_rw, nb_hexreg_stat_bytes);
+            logmsg(m);
+            return;
+        }
+    }
+    for (i = 0; i < nb_hexreg_n; i++) {
+        if (nb_hexreg[i].tcrc != tcrc) continue;
+        if (nb_hexreg[i].klass != nb_hexreg_class(part)) continue;
+        if ((*var != nb_hexreg[i].variant || *fw != nb_hexreg[i].fw)
+                && nid < 64 && !(said & (1ull << nid))) {
+            char m[160];
+            said |= 1ull << nid;
+            snprintf(m, sizeof m, "[nbexp] node %u claim corrected from the "
+                     "game's own image: variant 0x%02x->0x%02x fw %u.%u.%u->"
+                     "%u.%u.%u\n", nid, *var, nb_hexreg[i].variant,
+                     (*fw >> 16) & 0xff, (*fw >> 8) & 0xff, *fw & 0xff,
+                     (nb_hexreg[i].fw >> 16) & 0xff,
+                     (nb_hexreg[i].fw >> 8) & 0xff, nb_hexreg[i].fw & 0xff);
+            logmsg(m);
+        }
+        *var = nb_hexreg[i].variant;
+        *fw = nb_hexreg[i].fw;
+        return;
+    }
 }
 
 /* PAD_NB_DUMP=<n> - every n node bus writes, dump the node board registry.
@@ -4622,12 +5027,32 @@ static void alert_maybe_dump(void)
  *
  * The module's own status line calls the three tracks GE (+42), CE (+43) and
  * ZK (+44) and names the states from 0x66d9d8: 0 "S", 1 "P", 2 "F", 3 "E".
+ *
+ * ALL THREE TRACKS ARE INITIALISED TO 1 ("P"), NOT 3 ("E") - the module init
+ * writes 1 to +42/+43/+44, on BOTH titles, instruction for instruction. A
+ * track is set to 3 when its handler STARTS and to 1 or 2 when it finishes,
+ * so on this screen "E" means IN PROGRESS at least as often as it means
+ * failed. That is why godzilla's #2 "cleared itself" at ~70 s: CE was simply
+ * running. Anything that stops the state machine ticking therefore leaves
+ * every track reading "P" and SILENCES the banner rather than raising it.
+ *
+ * ONE OVERRIDE MOVES ALL FOUR, because V, the state byte and the worker
+ * context are FIXED OFFSETS from the module base - +0xc0, +0xc5, +0xc8 - and
+ * that layout was confirmed identical on a second title (item 62, 2026-08-23).
+ * turtles_pro 1.59.0 puts the module at 0x681994 and godzilla_pro 1.15.0 at
+ * 0x7b7b70; every landmark in between maps at a constant +0x970f8, and the
+ * module's init, provider, decryptor and grade-setters are the same code. So
+ * `PAD_VAL_MOD=0x681994` is the whole of what turtles needs, rather than four
+ * addresses that could be given inconsistently.
  * ------------------------------------------------------------------------ */
-#define VAL_MOD  0x7b7b70u      /* module globals                            */
-#define VAL_V    0x7b7c30u      /* MOD+0xc0, the state object                */
-#define VAL_ST   0x7b7c35u      /* MOD+0xc5, the state-machine state         */
-#define VAL_CTX  0x7b7c38u      /* MOD+0xc8, the worker context              */
-#define VAL_AUD  0x7b9308u      /* the #4 term, inside the audio state block */
+TITLE_ADDR(a_val_mod, "PAD_VAL_MOD", 0x7b7b70u)  /* module globals           */
+TITLE_ADDR(a_val_aud, "PAD_VAL_AUD", 0x7b9308u)  /* #4 term, audio block     */
+
+#define VAL_MOD  a_val_mod()    /* module globals                            */
+#define VAL_V    (VAL_MOD + 0xc0u)  /* the state object (a pointer to MOD)   */
+#define VAL_ST   (VAL_MOD + 0xc5u)  /* the state-machine state               */
+#define VAL_CTX  (VAL_MOD + 0xc8u)  /* the worker context                    */
+#define VAL_AUD  a_val_aud()    /* the #4 term, inside the audio state block */
 
 static const char *val_state(unsigned s)
 {
@@ -5544,8 +5969,13 @@ static void swwalk_tick(void)
 #define NB_GATE   0x7a908cu     /* +276+node = per-node scan enable          */
 
 /* Ids held ACTIVE right now: PAD_SW_HOLD plus whatever the tap sequence has
- * pressed. Bit per id, 128 ids is more than the 88 this machine has. */
-static unsigned char sw_active[128];
+ * pressed. Byte per id. 128 was "more than the 88 this machine has" - but an
+ * id is the TITLE'S table index and munsters/sword_of_rage index their whole
+ * cabinet past 190 (door 198/201, trough 234..240), so 128 silently dropped
+ * every one of their rows in sw_rest_resolve's guard (item 73's review
+ * caught it). 256 = PADSW_MAX_ID, the shm held[] bound; every use is
+ * sizeof-checked so this is the only line that names the size. */
+static unsigned char sw_active[256];
 static int sw_scan_on = -1;
 
 /* The level the shim put on the wire for each id on the last word it built.
@@ -5607,9 +6037,19 @@ static int sw_rest_on;   /* the set is wanted at all (PAD_SW_REST != 0) */
  *
  * Resolution is by NAME from the derived table the guest can already see at
  * /dump/tables/$PAD_GAME/switch_list.txt (mktables writes it before the
- * guest starts; /dump is bound into the pivot). The door stays 33 - a
- * platform switch, identical on every title measured. No file, or no
- * PAD_GAME, keeps the compiled Godzilla ids: exactly the old behaviour. */
+ * guest starts; /dump is bound into the pivot). No file, or no PAD_GAME,
+ * keeps the compiled Godzilla ids: exactly the old behaviour.
+ *
+ * ★ ITEM 73: THE DOOR RESOLVES TOO, BY WIRE. "The door stays 33 - a
+ * platform switch, identical on every title measured" was true of the
+ * WIRE (node 0 bit 23 on all 29 derived lists) and false of the ID, which
+ * is a table index: 34 on aerosmith/avengers, 36 on batman, 198/201 on
+ * munsters/sword_of_rage. Holding id 33 on those titles holds some other
+ * switch while the interlock bit the game latches during bring-up
+ * (0x5a9e50(23), the sixty-second stall above) is only covered by the
+ * synthetic at-rest word for as long as no table has resolved. So the door
+ * takes the id its (node,bit) = (0,23) has in the title's own list; the
+ * name is not used because five titles' lists are all-'?'. */
 extern long read(int, void *, unsigned long);   /* self-interposed; unknown
                                                  * fds pass through, same as
                                                  * open/close in the LED
@@ -5647,16 +6087,31 @@ static void sw_rest_resolve(void)
     buf[n] = 0;
 
     /* Lines are `id num node bit NAME...`; find TROUGH 1..6 by name, case-
-     * insensitively, taking the id from the front of that line. */
-    sw_rest_n = 1;                                /* keep the door at 33 */
+     * insensitively, taking the id from the front of that line - and the
+     * door by wire, (node,bit) == (0,23) (item 73). */
+    sw_rest_n = 1;                     /* slot 0 = the door, 33 until found */
     for (p = buf; *p; p = e) {
-        unsigned id = 0, t;
+        unsigned id = 0, t, f;
+        unsigned num[3] = { 0, 0, 0 }; /* num, node, bit */
+        int seen[3] = { 0, 0, 0 };
         char *q = p;
         for (e = p; *e && *e != '\n'; e++) ;
         if (*e) e++;
         if (*q == '#') continue;
         while (*q >= '0' && *q <= '9') id = id * 10 + (unsigned)(*q++ - '0');
         if (!id || id >= sizeof sw_active) continue;
+        for (f = 0; f < 3; f++) {
+            while (*q == ' ' || *q == '\t') q++;
+            while (*q >= '0' && *q <= '9') {
+                num[f] = num[f] * 10 + (unsigned)(*q++ - '0');
+                seen[f] = 1;
+            }
+            if (!seen[f]) break;
+        }
+        if (seen[1] && seen[2] && num[1] == 0 && num[2] == 23) {
+            sw_rest_set[0] = (unsigned char)id;   /* the door, per title */
+            continue;
+        }
         for (; q < e - 8; q++) {
             if ((q[0] == 'T' || q[0] == 't') &&
                 (q[1] == 'R' || q[1] == 'r') &&
@@ -5684,12 +6139,20 @@ static void sw_rest_resolve(void)
         snprintf(m + o, sizeof m - (unsigned)o, "\n");
         logmsg(m);
     } else {
-        /* a list with no TROUGH rows: keep Godzilla's, but say so */
-        for (i = 0; i < sizeof sw_rest_ids; i++)
+        /* a list with no TROUGH rows: keep Godzilla's TROUGH ids, but say
+         * so. The door slot is NOT reset - its wire resolution above stands
+         * whatever the trough names look like (item 73). */
+        for (i = 1; i < sizeof sw_rest_ids; i++)
             sw_rest_set[i] = sw_rest_ids[i];
         sw_rest_n = sizeof sw_rest_ids;
         logmsg("[swrest] no TROUGH rows in the switch list; "
-               "rest set stays Godzilla's\n");
+               "trough rest set stays Godzilla's\n");
+    }
+    if (sw_rest_set[0] != sw_rest_ids[0]) {
+        char m[96];
+        snprintf(m, sizeof m, "[swrest] door resolved for %s: id %u "
+                 "(node 0 bit 23), not 33\n", game, sw_rest_set[0]);
+        logmsg(m);
     }
 }
 
@@ -5791,6 +6254,48 @@ static int nb_is_silent(unsigned node)
     if (silent == (const char *)-1) silent = getenv("PAD_NB_SILENT");
     if (!silent) return 0;
     for (s = silent; *s; ) {
+        unsigned v = 0;
+        int any = 0;
+        while (*s >= '0' && *s <= '9') { v = v * 10 + (unsigned)(*s++ - '0'); any = 1; }
+        if (any && v == node) return 1;
+        if (*s) s++;
+    }
+    return 0;
+}
+
+/* Does a SILENCED node still answer the `ff` status poll (item 52's
+ * "silent for identity, present for status" carve-out)? PER NODE now, because
+ * the global carve-out turned out to hold godzilla_le's whole boot hostage:
+ *
+ * MEASURED 2026-08-22 on the Heisei card (godzilla_le, node 2 silenced by the
+ * census): with every silenced node answering `ff`, bring-up re-probed node
+ * 2's identity in 90-probe bursts every ~15 s until t=100.4 s - 1530 refusals
+ * in all - and the attract light show (and with it the playfield's LED block,
+ * autoattract's `past` signal, everything) waited on the last burst. Item 17's
+ * run 12, taken BEFORE the carve-out existed, is the control: "every
+ * [nbsilent] train sits in the first 20 s". A board that answers status but
+ * refuses identity reads as alive-but-unidentified, and the game keeps trying
+ * to identify it; a board that answers nothing is written off at the first
+ * storm's end, which is what a real absent board looks like and is the whole
+ * point of the silence. So total silence is again the default, and the
+ * carve-out applies only where its benefit was actually measured: the
+ * OPTIONAL node4-class boards on stranger_things' coil/switch service path,
+ * whose refused `ff` cost every service pass ~3.3 s (item 52).
+ *
+ * PAD_NB_SILENT_FF: a comma/space list of node ids = answer `ff` on exactly
+ * those silenced nodes (watch.sh computes it from nodecensus.py, the same
+ * place the silence list comes from); "0" = none, the pre-item-52 total
+ * silence; "1" or unset = every silenced node, item 52's original shape, kept
+ * as the A/B knob. Node ids 0 and 1 are the CPU bridge and the cabinet board,
+ * never silenced, so the two flag values collide with no real list. */
+static int nb_silent_ff(unsigned node)
+{
+    static const char *ff = (const char *)-1;
+    const char *s;
+    if (ff == (const char *)-1) ff = getenv("PAD_NB_SILENT_FF");
+    if (!ff || !*ff || (ff[0] == '1' && !ff[1])) return 1;
+    if (ff[0] == '0' && !ff[1]) return 0;
+    for (s = ff; *s; ) {
         unsigned v = 0;
         int any = 0;
         while (*s >= '0' && *s <= '9') { v = v * 10 + (unsigned)(*s++ - '0'); any = 1; }
@@ -7228,10 +7733,16 @@ static void sw_maybe_dump(void)
 static void val_dump(void)
 {
     char line[420];
-    const unsigned char *m = (const unsigned char *)(unsigned long)VAL_MOD;
-    unsigned v   = *(const unsigned *)(unsigned long)VAL_V;
-    unsigned ctx = *(const unsigned *)(unsigned long)VAL_CTX;
+    const unsigned char *m;
+    unsigned v, ctx;
     int i, k;
+
+    /* 0 means this title's module base is unknown or not mapped. Every other
+     * TITLE_ADDR reader bails the same way rather than dereferencing it. */
+    if (!VAL_MOD || !VAL_AUD) return;
+    m   = (const unsigned char *)(unsigned long)VAL_MOD;
+    v   = *(const unsigned *)(unsigned long)VAL_V;
+    ctx = *(const unsigned *)(unsigned long)VAL_CTX;
 
     snprintf(line, sizeof line,
              "[val] state=%u V=0x%08x ctx=0x%08x tick=%u ge_s=%u ce_s=%u zk_s=%u"
@@ -7304,9 +7815,13 @@ static void val_dump_changed(void)
     static unsigned char last[52];
     static int primed;
     unsigned char cur[52];
-    const unsigned char *m = (const unsigned char *)(unsigned long)VAL_MOD;
-    unsigned ctx = *(const unsigned *)(unsigned long)VAL_CTX;
+    const unsigned char *m;
+    unsigned ctx;
     int i;
+
+    if (!VAL_MOD) return;
+    m   = (const unsigned char *)(unsigned long)VAL_MOD;
+    ctx = *(const unsigned *)(unsigned long)VAL_CTX;
     for (i = 0; i < 48; i++) cur[i] = m[i];
     cur[48] = m[0xc5];
     cur[49] = (unsigned char)(ctx >> 24);
@@ -7323,8 +7838,16 @@ static void val_dump_changed(void)
     val_dump();
 }
 
-#define VAL_LO 0x249e00u
-#define VAL_HI 0x24c2c0u
+/* The caller filter: only stdio coming from inside the validation module is
+ * interesting, and everything else during boot is scene loading. Both bounds
+ * are TITLE addresses - on turtles the same module sits at +0x970f8, so a
+ * godzilla-shaped filter rejects every one of its calls and the probe reads a
+ * confident silence over a module that is working perfectly. */
+TITLE_ADDR(a_val_lo, "PAD_VAL_TEXT_LO", 0x249e00u)
+TITLE_ADDR(a_val_hi, "PAD_VAL_TEXT_HI", 0x24c2c0u)
+
+#define VAL_LO a_val_lo()
+#define VAL_HI a_val_hi()
 
 static void val_probe(const char *what, unsigned long ra,
                       unsigned long a, unsigned long b, unsigned long c)
@@ -7789,10 +8312,15 @@ struct padled_shm {
     struct { unsigned ms;
              unsigned char node, start, end, from, to, rise, fall, pad;
     } fade[96];
+    /* Version 4, the ADDRESSED plane - the twin of padled.h, which carries the
+     * meaning; keep the two in step. */
+    unsigned char seen[16][96];
+    unsigned wide_decoded, wide_skipped;
 };
 #define PADLED_MAGIC 0x44454c50u
 
 static struct padled_shm *led_shm;
+static unsigned led_shm_len;                 /* 4096 (v3 file) or 8192 (v4)  */
 static unsigned char led_known[16][96];      /* seen in the boot enumeration */
 /* The same enumeration IN ORDER, which is what a bitmap frame indexes into:
  * led_order[node][k] is the LED index the board announced k-th. */
@@ -7816,6 +8344,10 @@ static int led_insert_node(unsigned node) { return node == 1 || node == 8 || nod
  * different pointer here than it is inside shim_close. */
 extern int open(const char *, int, int);
 extern int close(int);
+/* Same GCC 14 reason, and the same "the shim's own" note. off_t is long on
+ * this 32-bit ARM target, which is what makes the plain `long` spelling
+ * right; it is only ever asked for a file this shim's own watch.sh created. */
+extern long lseek(int, long, int);
 
 static void led_map(void)
 {
@@ -7829,12 +8361,40 @@ static void led_map(void)
     if (!path || !*path) return;
     fd = open(path, 2 /*O_RDWR*/, 0);
     if (fd < 0) return;
-    m = mmap(0, 4096, 3, 1, fd, 0);
+    /* 8192, not 4096: version 4's `seen` plane crossed the page. An OLD
+     * watch.sh creates a 4096-byte file, and mmap of two pages over it would
+     * fault on the second the moment `seen` is written - so the size is taken
+     * from the file rather than assumed, and the extra plane is simply not
+     * published when the mapping is too small (see led_seen). */
+    {
+        long sz = lseek(fd, 0, 2 /*SEEK_END*/);
+        led_shm_len = (sz >= 8192) ? 8192u : 4096u;
+    }
+    m = mmap(0, led_shm_len, 3, 1, fd, 0);
     close(fd);
     if (!m || m == (void *)-1) return;
     led_shm = (struct padled_shm *)m;
     led_shm->magic = PADLED_MAGIC;
-    led_shm->version = 3;             /* 3 adds the fade ring; see padled.h  */
+    /* 4 adds the addressed plane; see padled.h. A reader tells the two apart
+     * by this number, so it must not claim 4 over a one-page mapping. */
+    led_shm->version = (led_shm_len >= 8192) ? 4 : 3;
+}
+
+/* One bit of the version-4 roster. Silently a no-op on a short mapping, which
+ * is what keeps a new shim safe under an old watch.sh.
+ *
+ * CALLED FROM EVERY DECODE PATH, not just the new one, and the first live run
+ * is why. batman's nodes 8 and 9 stayed missing from the window even with the
+ * wide decoder working, because their lamps arrive on the OLD cmd-0x70 path and
+ * were all sitting at zero - so val[] never went non-zero, nothing marked them
+ * addressed, and two boards the game talks to constantly did not exist as far
+ * as a reader was concerned. That is exactly the fault this plane was added
+ * for, so every path that resolves a lamp index calls it, whichever decoder
+ * resolved it. */
+static void led_seen(unsigned node, unsigned idx)
+{
+    if (!led_shm || led_shm_len < 8192) return;
+    if (node < 16 && idx < 96) led_shm->seen[node][idx] = 1;
 }
 
 /* ---- COILS (padled.h, and the C twin of coildecode.py) ------------------
@@ -7904,6 +8464,344 @@ static int led_dec_log(void)
     return 0;
 }
 
+/* ---- THE SWELF-GENERATION LAMP DIALECT (batman) -------------------------
+ *
+ * WHY THERE IS A SECOND DECODER AT ALL. The three shapes above are godzilla's.
+ * batman's light show speaks a different family entirely - 88 89 8a 8e 95 96
+ * 98 9a 9e a0 a1 a2 a4 a5 a6 b4 b5 b7, ~109 frames/s through attract - and
+ * every one of them comes out of ONE builder at 0x51896c in the game's own
+ * ELF. There is no per-command builder to read, and no literal opcode byte
+ * anywhere in the binary: the command IS a bitfield, assembled at 0x518ac4 as
+ *
+ *     cmd = 0x80 | f278 | f312 | f310
+ *            bit5 ^      ^ bits4-2   ^ bits1-0
+ *
+ * and the same three fields then choose which blocks the body carries. So the
+ * command byte is not a name to look up - it is the frame's own grammar,
+ * and that is what makes this decodable at all.
+ *
+ *   A = cmd & 0x03   how the LEVEL is carried:
+ *                    0 = every addressed lamp is 0x00   (no bytes spent)
+ *                    1 = every addressed lamp is 0xff   (no bytes spent)
+ *                    2 = one byte per addressed lamp    (0x518c1c)
+ *                    3 = ONE byte shared by all of them (0x518af4)
+ *   B = cmd & 0x1c   how channel B is carried (bitmap / uniform / two-value /
+ *                    exception list). Channel B is NOT published - see the
+ *                    note at the end of this comment. B == 0x10 is not this
+ *                    body at all: it is the bank form, refused below.
+ *   M = cmd & 0x20   picks the index-LIST body over the single-index one.
+ *
+ * A == 0 and A == 1 are the reason this decodes a light show rather than a
+ * third of one, and they are invisible from a capture: the planner branches on
+ * the shared level's VALUE at 0x51667c - 0x00 goes to 0x5169f8 and stores mode
+ * 0, 0xff goes to 0x5169f4 and stores mode 1 - so all-off and all-on cost no
+ * payload at all. Read as "carries no level" they lose every lamp the game
+ * turns fully on, which on batman's node 8 is most of them.
+ *
+ * THE BODY, transcribed from 0x518aa4 (head), 0x518ad4 (short) and 0x518bb0
+ * (value-block), with the branch that emits each part:
+ *
+ *   body[0] bit7 SET -> the index-bitmap form (0x518bb0):
+ *     [0] flags   bit7 selected this form; bit6 is the FILL (see below);
+ *                 bits5-0 say which middle bitmap bytes were transmitted
+ *     [1] (first_group << 4) | last_group      0x518bd8, groups of 8 lamps
+ *     [ ] the transmitted bitmap bytes                         0x518bf0
+ *         bit k of the byte for group g = lamp g * 8 + k
+ *     [ ] a channel-B selector bitmap, ceil(count/8) bytes, if B & 8  0x518c0c
+ *     [ ] channel A: count bytes (A==2) or one byte (A==3), nothing for 0/1
+ *     [ ] channel B tail: a full count-byte plane when B == 0, else an
+ *         optional base byte (B & 0x10) and either one more byte
+ *         (B & 0x0c == 8) or one per selector bit (B & 0x0c == 12)
+ *
+ *   THE BITMAP IS SPARSE, which is the part no capture would have shown. Only
+ *   the first byte, the last byte, and the middles whose flag bit is set are
+ *   on the wire; every other byte in the span is the FILL, all-ones or
+ *   all-zeros by bit 6. A long run of identical bytes therefore costs nothing,
+ *   which is how a frame addressing 45 lamps fits in 59 bytes.
+ *
+ *   body[0] bit7 CLEAR -> the short form (0x518ad4):
+ *     [first index][middle indices...][last index | 0x80]  when M == 0x20
+ *     [single index]                                       otherwise
+ *     then channel A and the same channel-B tail.
+ *
+ * ★ THE EXACT-CLOSE RULE IS THE WHOLE SAFETY ARGUMENT. Nothing above is a
+ * length the wire states outright; every block's size is derived from the
+ * command bits and the bytes already read. So the walk must land EXACTLY on
+ * the end of the body or the frame is refused - a mis-parse fails that test by
+ * itself. It is the same trick the a6 bitmap split above uses, and it is what
+ * makes this safe to run on boards the older decoder was never allowed near.
+ *
+ * Measured against the 20 commands of batman's own census (one real frame of
+ * each, tests/test_spike2_led_wide.py): 19 close exactly. The twentieth is cmd
+ * 70, which is not this family at all - bit 7 is clear and its own builder at
+ * 0x51c2b4 owns it.
+ *
+ * NO NODE GATE, deliberately - it is the one real difference from the decoder
+ * above. That decoder needs its nodes 1/8/9 restriction because its shapes are
+ * loose enough to eat a strip frame and produce confident nonsense. This one
+ * refuses anything that does not close exactly, so nodes 10 and 13 - a whole
+ * LED-only board that carries no switches and had never appeared in the
+ * window at all - can be read without inventing a rule about which boards are
+ * allowed to be lamps. Frames that do not close are counted in wide_skipped.
+ *
+ * CHANNEL B IS DECODED BUT NOT PUBLISHED. Every lamp on this generation
+ * carries two bytes (the cmd 0x70 builder at 0x51c2b4 scales and sends both).
+ * What the second one MEANS is not established: the values seen on the wire
+ * come from a small repeating alphabet (0x08, 0x0f, 0x1e) that looks like a
+ * rate or a curve id beside channel A's plain 0x00/0x10/0xff levels, and
+ * "looks like" is not a finding. Its bytes are walked so the frame can be
+ * length-checked, and then dropped. When somebody reads the board firmware or
+ * runs the service LED test against it, it gets a name and a plane of its own.
+ */
+static unsigned popcount8(unsigned v)
+{
+    unsigned n = 0;
+    for (v &= 0xff; v; v >>= 1) n += v & 1;
+    return n;
+}
+
+static int led_wide_walk(const unsigned char *body, unsigned blen, unsigned cmd,
+                         unsigned char *idx, unsigned char *val, unsigned *nout)
+{
+    unsigned A = cmd & 0x03, B = cmd & 0x1c, M = cmd & 0x20;
+    unsigned p = 0, cnt = 0, i, k, sel = 0, sl = 0;
+
+    if (!blen) return 0;
+    /* Path B (0x518b78) prefixes a BANK byte and addresses lamp bank*96+index,
+     * which does not fit a [16][96] plane at all. Its commands are exactly the
+     * ones with B == 0x10, so refusing them here is what stops a bank-4 lamp
+     * being written over a bank-0 one. */
+    if (B == 0x10) return 0;
+
+    if (body[0] & 0x80) {                    /* the index-BITMAP body        */
+        unsigned first_g, last_g, span, blk, t = 0, fill, flags;
+        unsigned char win[12];
+        /* M would put a further flags byte at body[2] whose bit base is not
+         * established. Refused rather than stepped over. */
+        if (blen < 2 || M) return 0;
+        first_g = body[1] >> 4;
+        last_g  = body[1] & 0x0f;
+        if (last_g < first_g || last_g > 11) return 0;
+        span = last_g - first_g + 1;
+        if (span > 8) return 0;              /* would need >6 flag bits      */
+        /* ★ THE BITMAP IS SPARSE: body[0]'s low bits say which of the MIDDLE
+         * bytes were transmitted and bit 6 says what the omitted ones are, so
+         * a run of identical bytes costs nothing. It is how a 45-lamp frame
+         * fits in 59 bytes. First and last are always sent. */
+        fill  = (body[0] & 0x40) ? 0xff : 0x00;
+        flags = body[0] & 0x3f;
+        blk = (span == 1) ? 1 : 2 + popcount8(flags);
+        if (2 + blk > blen) return 0;
+        for (i = 0; i < span; i++)
+            win[i] = (i == 0 || i == span - 1 || (flags >> (i - 1) & 1))
+                     ? body[2 + t++] : (unsigned char)fill;
+        if (t != blk) return 0;
+        p = 2 + blk;
+        for (i = 0; i < span; i++)
+            for (k = 0; k < 8; k++)
+                if (win[i] >> k & 1) {
+                    unsigned e = (first_g + i) * 8 + k;
+                    if (e >= 96 || cnt >= 96) return 0;
+                    idx[cnt++] = (unsigned char)e;
+                }
+        if (!cnt) return 0;
+        /* The window must really be the span it claims, or the nibbles and the
+         * bitmap disagree and one of them was misread. */
+        if ((idx[0] >> 3) != first_g || (idx[cnt - 1] >> 3) != last_g) return 0;
+    } else if (M) {                          /* [first][middles][last|0x80]  */
+        for (;;) {
+            if (p >= blen || cnt >= 96) return 0;
+            idx[cnt++] = body[p] & 0x7f;
+            if (body[p++] & 0x80) break;
+        }
+        if (cnt < 2) return 0;
+    } else {                                 /* a single index, no terminator */
+        if (body[0] > 95) return 0;
+        idx[cnt++] = body[0];
+        p = 1;
+    }
+    for (i = 1; i < cnt; i++)                /* the planner splits, never
+                                              * reorders (0x516794)          */
+        if (idx[i] <= idx[i - 1]) return 0;
+
+    if (B & 0x08) {                          /* channel-B selector bitmap    */
+        sl = (cnt + 7) / 8;
+        if (p + sl > blen) return 0;
+        sel = p;
+        for (k = cnt; k < sl * 8; k++)       /* padding bits must be clear   */
+            if (body[sel + (k >> 3)] >> (k & 7) & 1) return 0;
+        p += sl;
+    }
+
+    /* ★ A == 0 AND A == 1 CARRY A LEVEL WITHOUT SPENDING A BYTE ON IT, and
+     * this is the single most valuable line in the grammar. At 0x51667c the
+     * planner reads the shared level and branches on its VALUE: 0x00 takes
+     * 0x5169f8 and stores mode 0, 0xff takes 0x5169f4 and stores mode 1,
+     * anything else keeps mode 3 and sends the byte. All-off and all-on - much
+     * the commonest two states in a light show - are compressed into the
+     * command byte itself. Reading 0 and 1 as "says nothing about brightness"
+     * costs every lamp the game turns fully ON with one, which on batman's
+     * node 8 is most of them. */
+    if (A == 0) {
+        for (i = 0; i < cnt; i++) val[i] = 0x00;
+    } else if (A == 1) {
+        for (i = 0; i < cnt; i++) val[i] = 0xff;
+    } else if (A == 2) {                     /* one byte each (0x518c1c)     */
+        if (p + cnt > blen) return 0;
+        for (i = 0; i < cnt; i++) val[i] = body[p + i];
+        p += cnt;
+    } else {                                 /* one byte shared (0x518af4)   */
+        if (p + 1 > blen) return 0;
+        for (i = 0; i < cnt; i++) val[i] = body[p];
+        p++;
+    }
+
+    /* Channel B is walked for its LENGTH and then dropped - see the header. */
+    if (B == 0) {
+        if (p + cnt > blen) return 0;
+        p += cnt;
+    } else {
+        if (B & 0x10) p++;
+        if ((B & 0x0c) == 0x08) {
+            p++;
+        } else if ((B & 0x0c) == 0x0c) {
+            if (!sl) return 0;
+            for (k = 0; k < cnt; k++)
+                p += body[sel + (k >> 3)] >> (k & 7) & 1;
+        }
+    }
+    if (p != blen) return 0;                 /* ★ the whole safety net       */
+    *nout = cnt;
+    return 1;
+}
+
+/* Does this TITLE speak the swelf dialect? Fed one bit per frame that reached
+ * the walk; answers "not yet / no / yes".
+ *
+ * The window is deliberately small and the threshold deliberately far from
+ * both observed populations - measured over 200 frames, batman 200/200 and
+ * godzilla_pro 0/200 - because the point is not to draw a fine line, it is to
+ * refuse to draw one at all until the answer is obvious.
+ * Until the sample fills, frames are walked and counted but NOTHING is
+ * published: a title that turns out to be godzilla must never have written a
+ * lamp value in the meantime, and 200 frames is well under a second of attract
+ * on either generation.
+ *
+ * PAD_LED_WIDE=2 forces it on, for a title whose rate sits somewhere nobody
+ * has seen yet; PAD_LED_WIDE=0 turns the whole decoder off. */
+static int led_wide_dialect(int accepted)
+{
+    enum { SAMPLE = 200 };
+    static unsigned seen, ok;
+    static int verdict = -1;                  /* -1 undecided, 0 no, 1 yes   */
+    static int forced = -1;
+
+    if (forced < 0) {
+        const char *e = getenv("PAD_LED_WIDE");
+        forced = (e && *e == '2') ? 1 : 0;
+    }
+    if (forced) return 1;
+    if (verdict >= 0) return verdict;
+
+    seen++;
+    ok += (unsigned)(accepted != 0);
+    if (seen < SAMPLE) return 0;
+
+    verdict = (ok * 100 >= seen * 50);
+    {
+        char m[160];
+        snprintf(m, sizeof m,
+                 "[ledwide] dialect %s: %u of %u frames parsed exactly\n",
+                 verdict ? "ACCEPTED - publishing lamps"
+                         : "REFUSED - this title is not the swelf generation",
+                 ok, seen);
+        logmsg(m);
+    }
+    return verdict;
+}
+
+/* Returns 1 ONLY when the frame was actually published. A refusal returns 0, so
+ * the caller carries on exactly as it did before this function existed - the
+ * old `skipped` counter and PAD_LED_SKIP_LOG keep seeing every frame that
+ * nothing decoded, which is what keeps them comparable with older runs.
+ * wide_decoded/wide_skipped answer the separate question "how did THIS decoder
+ * do", and a frame can honestly appear in both. */
+static int led_wide_publish(unsigned node, unsigned cmd,
+                            const unsigned char *body, unsigned blen)
+{
+    unsigned char idx[96], val[96];
+    unsigned cnt = 0, i;
+
+    /* 0x80..0xbf AND NOTHING ELSE, which is a bound the builder proves rather
+     * than one chosen to be safe: cmd = 0x80 | ((M|B) & 0x7f) | A with M <=
+     * 0x20, B <= 0x1c and A <= 3, so bit 6 can never be set (path B's 0x90|...
+     * lands inside the same range). Everything at 0xc0 and up is link,
+     * identity or config - 0xfe alone arrives ~200 times per node per five
+     * minutes - and letting those reach the walk cost nothing but made
+     * wide_skipped read 8381 against 267 on the first live run, which is a
+     * counter measuring protocol chatter rather than lamp frames we failed. */
+    if ((cmd & 0xc0) != 0x80 || blen < 1) return 0;
+
+    if (!led_wide_walk(body, blen, cmd, idx, val, &cnt)) {
+        led_wide_dialect(0);
+        led_map();
+        if (led_shm && led_shm_len >= 8192) led_shm->wide_skipped++;
+        return 0;
+    }
+    /* ★ THE TITLE HAS TO PROVE IT SPEAKS THIS DIALECT BEFORE ANY OF IT IS
+     * PUBLISHED, and the first godzilla regression run is why this is here.
+     *
+     * The exact-close test is a strong filter but not a perfect one, and over
+     * a whole run "not perfect" shows: godzilla's node-7 strip board threw
+     * 1532 frames at this grammar and SEVEN closed exactly - 0.5%, every one a
+     * coincidence, and every one about to write a confident lamp value onto a
+     * board whose encoding this file has refused to guess at since it was
+     * written.
+     *
+     * No per-frame test can separate those seven from the real thing. A
+     * per-RUN one can, because the two populations are nowhere near each
+     * other: batman accepts 83% of what it offers this grammar, godzilla 0.5%.
+     * So nothing is published until the rate is in evidence, and once it says
+     * no it says no for the rest of the run. Same reasoning as the light-show
+     * announcer above - a rate, not a count. */
+    if (!led_wide_dialect(1)) return 0;
+
+    /* An index the board itself never announced is a parse that landed on a
+     * lamp that does not exist. Only checked when the board DID enumerate -
+     * several of these boards never send the 6-byte walk at all, and a gate
+     * that fails closed on them would put the whole generation back in the
+     * dark for no gain. */
+    if (led_count[node])
+        for (i = 0; i < cnt; i++)
+            if (!led_known[node][idx[i]]) {
+                led_map();
+                if (led_shm && led_shm_len >= 8192) led_shm->wide_skipped++;
+                return 0;
+            }
+
+    led_map();
+    if (!led_shm) return 0;
+    for (i = 0; i < cnt; i++) {
+        led_seen(node, idx[i]);
+        led_shm->val[node][idx[i]] = val[i];
+    }
+    led_shm->decoded += cnt;
+    led_shm->gen++;
+    if (led_shm_len >= 8192) led_shm->wide_decoded++;
+    if (led_dec_log()) {
+        char l[256];
+        int q = 0;
+        q += snprintf(l + q, sizeof l - q,
+                      "[ledwide] node=%u cmd=%02x blen=%u leds=%u v0=%02x idx=",
+                      node, cmd, blen, cnt, val[0]);
+        for (i = 0; i < cnt && q < (int)sizeof l - 8; i++)
+            q += snprintf(l + q, sizeof l - q, "%u,", idx[i]);
+        snprintf(l + q, sizeof l - q, "\n");
+        logmsg(l);
+    }
+    return 1;
+}
+
 static void led_publish(const unsigned char *p, int n)
 {
     unsigned node, cmd, blen, i;
@@ -7932,7 +8830,20 @@ static void led_publish(const unsigned char *p, int n)
      * is Godzilla's node numbering, and a title whose insert boards sit
      * elsewhere (the group->node mapping shifts per title - see nodecensus.py)
      * must still trip this line. One line per run; gamestate.sh greps it. */
-    if (cmd == 0x97 || cmd == 0xa2 || cmd == 0xa3 || cmd == 0xa4 ||
+    /* 0x70 joined the set for the OLDER (swelf) generation - item 79.
+     * batman sat visibly in attract while this announcer stayed silent,
+     * because that generation's show never speaks the a2-family. The
+     * command census (PAD_CMD_CENSUS=1, batman 2026-08-24) measured cmd 70
+     * - the base-layer lamp write this file already decodes - at ~109/s
+     * sustained through attract against ZERO occurrences in the whole
+     * boot-plus-Tech-Alerts window, a wider margin than godzilla's own
+     * signal has. The show families this file does NOT decode (72/52/8a,
+     * ~35-40/s each) are deliberately not counted: nothing is known about
+     * their semantics, and guessed lamp commands are how this detector
+     * went wrong twice before. The 30-in-3s rate gate below still guards
+     * the star_wars service-menu-entry trap. */
+    if (cmd == 0x70 ||
+        cmd == 0x97 || cmd == 0xa2 || cmd == 0xa3 || cmd == 0xa4 ||
         cmd == 0xa5 || cmd == 0xa6 || cmd == 0xb4 || cmd == 0xb5) {
         /* RATE-QUALIFIED, not a bare count. The first version announced at
          * the 10th lamp command ever, and star_wars_le promptly showed why
@@ -7966,8 +8877,6 @@ static void led_publish(const unsigned char *p, int n)
         }
     }
 
-    if (!led_insert_node(node)) return;
-
     /* The boot enumeration: remember which indices this board really has.
      *
      * ORDER IS RECORDED, not just membership. The a6 fade frames carry a
@@ -7976,7 +8885,28 @@ static void led_publish(const unsigned char *p, int n)
      * them in. led_known is a bitmap and cannot answer that; led_order can.
      * Measured: node 9 announces 71 LEDs and a 9-byte bitmap is exactly
      * ceil(71/8), which is the observation that made the bitmap reading
-     * credible in the first place. */
+     * credible in the first place.
+     *
+     * ★ MOVED ABOVE THE INSERT-NODE GATE. It used to sit below it, so a board
+     * outside 1/8/9 could announce its whole lamp list and this recorded none
+     * of it - batman sends 0x84 to node 10 and the very first one was dropped.
+     * The enumeration is the ONLY per-board fact that can contradict a parse,
+     * and led_wide_publish below leans on it for exactly that, so it has to be
+     * collected for every board that offers it. Recording it changes nothing
+     * on its own: led_known is only ever read as a gate. */
+    /* ★ AND IT IS NOT CERTAIN THESE ARE ENUMERATION ON EVERY GENERATION. The
+     * swelf grammar below parses this exact frame - blen 3, one body byte -
+     * as a single-lamp write (0x84 sets it to 0x00, 0x85 to 0xff), and it
+     * consumes the body exactly, so one frame cannot tell the two readings
+     * apart. Enumeration WINS here because it is the reading godzilla's boards
+     * were verified against and the one led_known exists for; the cost if
+     * batman means the other thing is one lamp's level.
+     *
+     * It does NOT mark the addressed roster, and that was tried and backed out
+     * the same afternoon: `seen` means "the game wrote to this lamp", and a
+     * boot-time inventory is a different claim. Marking it gave godzilla's
+     * nodes 12 and 14 ninety-six dark cells each - boards nothing in the run
+     * ever drove - which is clutter dressed up as coverage. */
     if (n == 6 && (cmd == 0x84 || cmd == 0x85)) {
         if (p[3] < 96) {
             if (!led_known[node][p[3]] && led_count[node] < 96)
@@ -7985,6 +8915,27 @@ static void led_publish(const unsigned char *p, int n)
         }
         return;
     }
+
+    /* THE SWELF-GENERATION DIALECT, tried on every board and BEFORE the
+     * insert-node gate below - see led_wide_publish's header for why it needs
+     * no such gate. It is tried second on nodes 1/8/9, though: the godzilla
+     * shapes below own those boards and keeping their order untouched is what
+     * makes this change a no-op for every title that already worked.
+     *
+     * PAD_LED_WIDE=0 turns it off and =2 forces it past the dialect gate,
+     * which is the one-flag A/B in either direction. */
+    {
+        static int wide = -1;
+        if (wide < 0) {
+            const char *e = getenv("PAD_LED_WIDE");
+            wide = (e && *e == '0') ? 0 : 1;
+        }
+        if (wide && !led_insert_node(node) && n >= 6 &&
+            led_wide_publish(node, cmd, p + 3, (unsigned)n - 5))
+            return;
+    }
+
+    if (!led_insert_node(node)) return;
     /* ---- THE SERVICE MENU'S OWN SHAPES (cmd 94/95 set, cmd 70 clear) ------
      *
      * Measured on turtles_pro's Diagnostics -> LED Tests -> Single LED Test,
@@ -8040,6 +8991,7 @@ static void led_publish(const unsigned char *p, int n)
             led_shm->fade[slot].fall  = 33;
             led_shm->fade[slot].pad   = 0;
             led_shm->fade_head++;
+            led_seen(node, p[3]);
             led_shm->decoded++;
             led_shm->gen++;
         }
@@ -8050,6 +9002,7 @@ static void led_publish(const unsigned char *p, int n)
             led_map();
             if (!led_shm) return;
             led_shm->val[node][p[3]] = p[4];
+            led_seen(node, p[3]);
             led_shm->decoded++;
             led_shm->gen++;
         }
@@ -8093,8 +9046,10 @@ static void led_publish(const unsigned char *p, int n)
             unsigned char to = (cmd == 0xb4) ? 0xff : 0x00;
             unsigned slot = led_shm->fade_head % 96u;
             for (k = s0; k <= e0; k++)
-                if (led_known[node][k])
+                if (led_known[node][k]) {
                     led_shm->val[node][k] = to;
+                    led_seen(node, k);
+                }
             led_shm->decoded += (e0 - s0 + 1);
             led_shm->gen++;
             led_shm->fade[slot].ms    = (unsigned)pad_ms();
@@ -8128,8 +9083,10 @@ static void led_publish(const unsigned char *p, int n)
         for (i = 0; i < cnt; i++)
             if (body[i] >= 96 || !led_known[node][body[i]]) break;
         if (i != cnt) continue;              /* not all valid indices */
-        for (i = 0; i < cnt; i++)
+        for (i = 0; i < cnt; i++) {
             led_shm->val[node][body[i]] = body[cnt + gap + i];
+            led_seen(node, body[i]);
+        }
         led_shm->decoded += cnt;
         led_shm->gen++;
         /* The lamps the WORKING path addresses, under the same env var. The
@@ -8212,9 +9169,11 @@ static void led_publish(const unsigned char *p, int n)
             if (!ok) break;
             for (j = 0; j < mlen; j++)
                 for (k = 0; k < 8; k++)
-                    if ((body[3 + j] >> k) & 1)
-                        led_shm->val[node][led_order[node][j * 8 + k]] =
-                            body[3 + mlen + wrote++];
+                    if ((body[3 + j] >> k) & 1) {
+                        unsigned e = led_order[node][j * 8 + k];
+                        led_shm->val[node][e] = body[3 + mlen + wrote++];
+                        led_seen(node, e);
+                    }
             led_shm->decoded += wrote;
             led_shm->gen++;
             return;
@@ -8312,6 +9271,7 @@ static void led_publish(const unsigned char *p, int n)
                 unsigned lamp = body[k] & 0x7f;
                 unsigned slot = led_shm->fade_head % 96u;
                 led_shm->val[node][lamp] = to[k];
+                led_seen(node, lamp);
                 led_shm->fade[slot].ms    = (unsigned)pad_ms();
                 led_shm->fade[slot].node  = (unsigned char)node;
                 led_shm->fade[slot].start = (unsigned char)lamp;
@@ -8347,6 +9307,22 @@ static void led_publish(const unsigned char *p, int n)
         led_shm->fade_head++;     /* AFTER the entry, single writer */
         return;
     }
+    /* LAST, on the insert boards only: the swelf dialect. Everything above is
+     * godzilla's and gets first refusal, so a title that already decoded keeps
+     * decoding exactly as it did - this only ever sees frames that were about
+     * to be counted as skipped anyway. batman's nodes 1, 8 and 9 speak the
+     * same bit-packed family as its nodes 10 and 13, and without this they
+     * would be the one part of its playfield still dark. */
+    {
+        static int wide = -1;
+        if (wide < 0) {
+            const char *e = getenv("PAD_LED_WIDE");
+            wide = (e && *e == '0') ? 0 : 1;
+        }
+        if (wide && led_wide_publish(node, cmd, body, blen))
+            return;
+    }
+
     {
         int is_range = blen == 2
             && body[0] < 96 && led_known[node][body[0]]
@@ -8699,12 +9675,16 @@ long shim_read(int fd, void *b, unsigned long n)
              * words, no fault bits, no input-changed flag. It is what a bus
              * with no board on that address and a master that does not wait
              * on it would look like - which is the machine we are modelling.
-             * PAD_NB_SILENT_FF=0 restores the old total silence for A/B. */
-            if (nb_is_silent(want) && nb_req_len > 2 && nb_req[2] == 0xff) {
-                static int on = -1;
-                if (on == -1) { char *q = getenv("PAD_NB_SILENT_FF"); on = !(q && *q == '0'); }
-                if (on) goto silent_status_ok;
-            }
+             *
+             * ★ PER NODE as of 2026-08-22, and nb_silent_ff() has the
+             * measurement: answering `ff` for godzilla_le's silenced node 2
+             * kept bring-up re-probing its identity until t=100 s, so the
+             * carve-out now applies only to the nodes watch.sh names in
+             * PAD_NB_SILENT_FF (the optional node4 class it was built for).
+             * PAD_NB_SILENT_FF=0 is total silence, =1 the old everywhere. */
+            if (nb_is_silent(want) && nb_req_len > 2 && nb_req[2] == 0xff
+                    && nb_silent_ff(want))
+                goto silent_status_ok;
             if (nb_is_silent(want)) {
                 /* ITEM 17: timestamp every refusal. Run 11 showed the cabinet
                  * poll stops for ~690 ms at a time (~138 x the game's 5 ms
@@ -9042,9 +10022,19 @@ long shim_read(int fd, void *b, unsigned long n)
                 unsigned part = nb_env_hex("PAD_NB_PART",
                                            ident ? ident->part : NB_PART_DEFAULT);
                 unsigned hwid = nb_env_hex("PAD_NB_HWID", NB_HWID_DEFAULT);
-                unsigned fw   = nb_env_hex("PAD_NB_FW", nb_ident_fw(ident));
-                unsigned var  = nb_env_hex("PAD_NB_VARIANT",
-                                           ident ? ident->variant : 0);
+                unsigned fwd  = nb_ident_fw(ident);
+                unsigned vard = ident ? ident->variant : 0;
+                unsigned fw, var;
+                /* THE GAME'S OWN DECRYPTED IMAGE OUTRANKS the derived table:
+                 * a variant nbdir could only guess (the hex bodies are
+                 * encrypted) is exactly what put godzilla_le through ~80 s
+                 * of failed RUNTIME UPDATEs on node 10 every boot - see
+                 * nb_hexreg_answer(). Env overrides still win below, so a
+                 * sweep can bypass both layers at once. */
+                nb_hexreg_answer(nid, ident ? ident->tcrc : 0, part,
+                                 &vard, &fwd);
+                fw  = nb_env_hex("PAD_NB_FW", fwd);
+                var = nb_env_hex("PAD_NB_VARIANT", vard);
                 /* ★ ITEM 51's INSTRUMENT: say what each node claims, once.
                  * A re-ask-count "refusal detector" lived here for one run
                  * and is deliberately GONE: ~200 fe per node in five
@@ -9157,6 +10147,44 @@ long shim_write(int fd, const void *b, unsigned long n)
                 hex64(h, nb_req, nb_req_len);
                 snprintf(m, sizeof m, "[nbcmd] %02x first frame %s\n", cmd, h);
                 logmsg(m);
+            }
+        }
+        /* ---- THE COMMAND CENSUS (PAD_CMD_CENSUS=1) --------------------
+         * Item 79: batman's attract never trips the light-show announcer,
+         * because its show speaks an older command dialect the lamp-class
+         * set does not count - and nothing had measured WHICH commands the
+         * show is made of, at what rate. PAD_NB_LOG is the wrong instrument
+         * (quadruples the boot and buries the answer - see the coil probe's
+         * header below); this prints ONE line per 10 s window carrying that
+         * window's per-command TX counts, phase-attributable from the
+         * surrounding log, and costs nothing while the env is unset. */
+        {
+            static int census = -1;
+            static unsigned long win_start;
+            static unsigned cmix[256];
+            if (census < 0)
+                census = getenv("PAD_CMD_CENSUS") ? 1 : 0;
+            if (census) {
+                unsigned char c2 = nb_req_len > 2 && (nb_req[0] & 0x80)
+                                   ? nb_req[2] : nb_req[0];
+                unsigned long now = pad_ms();
+                int c, k;
+                cmix[c2]++;
+                if (!win_start) win_start = now;
+                if (now - win_start >= 10000) {
+                    char m[640];
+                    k = snprintf(m, sizeof m, "[cmdmix] %lu ms window %lu ms:",
+                                 now, now - win_start);
+                    for (c = 0; c < 256; c++)
+                        if (cmix[c] && k < (int)sizeof m - 16)
+                            k += snprintf(m + k, sizeof m - k, " %02x=%u",
+                                          c, cmix[c]);
+                    snprintf(m + k, sizeof m - k, "\n");
+                    logmsg(m);
+                    for (c = 0; c < 256; c++)   /* no memset: string.h is */
+                        cmix[c] = 0;            /* not included here      */
+                    win_start = now;
+                }
             }
         }
         nb_log("TX", nb_req, nb_req_len, 0);

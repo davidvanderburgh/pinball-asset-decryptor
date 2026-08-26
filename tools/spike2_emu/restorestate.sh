@@ -41,6 +41,22 @@ card_live() {
     esac
     return 1
 }
+# /proc/*/mountinfo OCTAL-ESCAPES space, tab and backslash in paths (\040,
+# \011, \134), and savestate.sh writes those fields into restore.env VERBATIM
+# - deliberately, because restore.env is itself space-separated and a raw
+# space would shear the field in two. So the escapes are undone HERE, at use
+# time, on every path that came through mountinfo. The Heisei card is why
+# this exists (2026-08-22): "Heisei Custom Image Premium V1.raw" mounts at a
+# path with spaces, the card external was recorded as ...Heisei\040Custom...,
+# card_live tested that LITERAL string as a directory, and the pre-flight
+# pronounced a perfectly mounted card gone - which refused every load of
+# every slot of every card whose filename has a space. David's "save states
+# don't work anymore" was this: the failure arrived with the card, not with
+# any change to the save machinery.
+# printf %b IS the inverse: mountinfo emits \040 / \011 / \134, and %b reads
+# backslash + up to three octal digits - a literal backslash in a real path
+# arrives here as \134, so every backslash %b sees is an escape it should eat.
+unesc() { printf '%b' "$1"; }
 # A tty external recorded as "(deleted)" is a save of a DEAD pty - the old
 # nodebus had exited and taken the pty with it before the save was made.
 # criu dumps that without complaint and then dies restoring it ("tty:
@@ -56,6 +72,7 @@ if grep -q '^tty .*(deleted)' "$DDIR/restore.env"; then
 fi
 while read -r kind a b c; do
     [ "$kind" = card ] || continue
+    c=$(unesc "$c")
     if ! card_live "$c"; then
         echo "[restore] the card mount behind $b is gone ($c)."
         echo "[restore] mount it and retry:  cardmount.sh <the card image>"
@@ -76,12 +93,27 @@ done < "$DDIR/restore.env"
 # Slots from before this check carry no `lib` lines and are simply not
 # checked here - they still fail, but the FAILURE now explains itself (see
 # the bad build-ID translation at the end of this script).
+# A changed library no longer dooms a slot that carries its own copy (the
+# savestate libs/ stash, 2026-08-22): the slot's build is INSTALLED back
+# into the rootfs below, after any live guest is killed - never before,
+# because overwriting a mapped .so under a running guest is the truncation
+# horror this check was born from. Only a slot that predates the stash (or
+# whose stash does not match its own recorded hash) still gets refused.
 LIB_STALE=""
+LIB_INSTALL=()
 while read -r kind sum path; do
     [ "$kind" = lib ] || continue
-    [ -f "$R$path" ] || { LIB_STALE="$path (missing now)"; break; }
-    now=$(sha1sum "$R$path" 2>/dev/null | cut -d' ' -f1)
-    [ "$now" = "$sum" ] || { LIB_STALE="$path"; break; }
+    now=""
+    [ -f "$R$path" ] && now=$(sha1sum "$R$path" 2>/dev/null | cut -d' ' -f1)
+    [ "$now" = "$sum" ] && continue
+    if [ -f "$DDIR/libs$path" ] && \
+       [ "$(sha1sum "$DDIR/libs$path" 2>/dev/null | cut -d' ' -f1)" = "$sum" ]; then
+        LIB_INSTALL+=("$path")
+        continue
+    fi
+    LIB_STALE="$path"
+    [ -f "$R$path" ] || LIB_STALE="$path (missing now)"
+    break
 done < "$DDIR/restore.env"
 if [ -n "$LIB_STALE" ]; then
     echo "[restore] this save cannot be loaded on this build: the guest file"
@@ -89,7 +121,8 @@ if [ -n "$LIB_STALE" ]; then
     echo "[restore] has changed since the save was taken (a rebuild of the shim"
     echo "[restore] or the GL bridge does this - ensurebuild.sh rebuilds on any"
     echo "[restore] source change). criu maps that file back by size and"
-    echo "[restore] build-ID, so no slot from before the rebuild can load."
+    echo "[restore] build-ID, and this slot is too old to carry its own copy"
+    echo "[restore] (saves made from now on do, and survive rebuilds)."
     echo "[restore] Save again on this build. The running game is untouched."
     exit 1
 fi
@@ -119,6 +152,32 @@ if pgrep -x game >/dev/null; then
         echo "[restore] a guest (comm=game) is already running; set PAD_RESTORE_KILL=1 to replace it"
         exit 1
     fi
+fi
+
+# --- install the slot's own libraries where this build's differ -----------
+# Planned by the pre-flight above, executed HERE - after the kill, before
+# criu - so no live guest has the old file mapped while it is swapped, and
+# the swap itself is copy-then-rename so no reader can ever see a half
+# file. The build stamps are cleared so the NEXT fresh session's
+# ensurebuild rebuilds the current sources instead of trusting a stamp
+# that no longer describes what is on disk; THIS session runs the slot's
+# build, which is exactly what the restored guest needs.
+if [ "${#LIB_INSTALL[@]}" -gt 0 ]; then
+    for p in "${LIB_INSTALL[@]}"; do
+        tmp="$R$p.slot.$$"
+        if cp -f "$DDIR/libs$p" "$tmp" 2>/dev/null && mv -f "$tmp" "$R$p"; then
+            echo "[restore] installed the slot's own build of $p"
+        else
+            rm -f "$tmp" 2>/dev/null
+            echo "[restore] could not install $p from the slot"
+            exit 1
+        fi
+    done
+    rm -f "${PAD_SHIM_STAMP:-$R/lib/hwshim.srcs}" \
+          "${PAD_GLGUEST_STAMP:-$R/usr/lib/glbridge.srcs}" 2>/dev/null
+    echo "[restore] NOTE: the guest's libraries now match this SLOT's build;"
+    echo "[restore] the next fresh session rebuilds the current ones (build"
+    echo "[restore] stamps cleared so ensurebuild notices)."
 fi
 
 # --- the node bus and a pty for the restored guest -----------------------
@@ -227,8 +286,9 @@ REST_EXT=(); INHERIT=(); TTYFD=""
 while read -r kind a b c; do
     case "$kind" in
     mnt)
-        # a=key b=mountpoint c=source (@PTY@/@CARD@ resolved here)
-        src=$c
+        # a=key b=mountpoint c=source (@PTY@/@CARD@ resolved here; mountinfo
+        # escapes undone - see unesc above)
+        src=$(unesc "$c")
         [ "$src" = '@PTY@' ]  && src=$NEWPTY
         [ "$src" = '@CARD@' ] && { echo "[restore] a card mount is needed but re-mounting the card is not automated yet"; exit 1; }
         REST_EXT+=(--external "mnt[$a]:$src")
@@ -242,7 +302,7 @@ while read -r kind a b c; do
         # killed); re-checked here only because the kill takes real seconds.
         # A cold load (card unmounted, e.g. after a reboot) stays manual:
         # cardmount.sh the image first, then retry.
-        src=$c
+        src=$(unesc "$c")
         if ! card_live "$src"; then
             echo "[restore] the card mount behind $b VANISHED mid-restore ($src)"
             exit 1
@@ -309,6 +369,24 @@ while read -r kind a b c; do
         if [ "$R$a" = "$R/dump/padsw" ] && [ -f "$R$a" ] && [ -f "$DDIR/rings/$b" ]; then
             dd if="$DDIR/rings/$b" of="$R$a" bs=4k conv=notrunc status=none
             echo "[restore] rewound the switch state to the save (in place)"
+        elif [ "$R$a" = "$R/dump/padled" ] && [ -f "$R$a" ] && [ -f "$DDIR/rings/$b" ]; then
+            # THE LED BLOCK, ALWAYS - the third rewind, and item 49 is why.
+            # hwshim stamps the block's magic ONCE, at the first LED frame it
+            # decodes (led_map's static one-shot); a criu-restored guest
+            # already holds the mapping, so it never stamps again. A
+            # cross-session load therefore inherited the fresh session's
+            # ZEROED file (watch.sh recreates it at start) and wrote LED
+            # frames into a header whose magic read 0 forever - the playfield
+            # called a live run "no emulator" and the LED half stayed dark
+            # for the rest of the run (David, 2026-08-11). The stash carries
+            # the save-time block - magic, decoded/skipped counters, coil
+            # counters, fade ring - which is the exact state the restored
+            # guest's memory is consistent with; a same-session rewind is
+            # equally right, since the guest is the block's only writer and
+            # resumes from save-time counts anyway. In place like the video
+            # ring: the playfield reads this file across the load.
+            dd if="$DDIR/rings/$b" of="$R$a" bs=4k conv=notrunc status=none
+            echo "[restore] rewound the LED block to the save (in place)"
         elif [ "$VID_RESTART" = 1 ] && [ "$R$a" = "$VID_RING" ] && [ -f "$DDIR/rings/$b" ]; then
             # IN PLACE, NEVER TRUNCATING. cp -f truncates the file to zero
             # and rewrites all 95 MB - and PADGLHOST HAS THIS RING MMAPPED
@@ -328,6 +406,12 @@ while read -r kind a b c; do
         elif [ ! -f "$R$a" ] && [ -f "$DDIR/rings/$b" ]; then
             mkdir -p "$(dirname "$R$a")"
             cp -f "$DDIR/rings/$b" "$R$a"
+            # OWNED BY THE DESKTOP USER, like watch.sh creates them: this
+            # script runs as root, and a root-owned ring is exactly what once
+            # had the playfield reporting "dump/padled not readable" (the
+            # item 13 root/helpers split - watch.sh's own comment). The
+            # rootfs owner IS that user, so ask the rootfs.
+            chown --reference="$R" "$R$a" 2>/dev/null
             echo "[restore] put back the missing ring $a"
         fi
         ;;
@@ -398,15 +482,26 @@ fi
 # /proc and a re-bind of the rootfs for --root. See criuladder.sh for the full
 # story of why each of these is here.
 NSCLEAN=$DDIR/nsclean.sh
-# The card's mountpoint (when a card external was recorded above) joins the
-# keep list, expanded NOW into the generated script - everything else here is
-# escaped to expand inside nsclean instead.
-KEEPCOND=""
-[ -n "${CARD_KEEP:-}" ] && KEEPCOND=" && \$5 != \"$CARD_KEEP\""
+# The card's mountpoint (when a card external was recorded above) is kept,
+# handed in through the environment rather than expanded into an awk string:
+# mountinfo's $5 is OCTAL-ESCAPED (\040 for space) and an awk string literal
+# would decode "\040" a second time, so escaped-vs-decoded could never match
+# a spaced path like the Heisei card's. The generated script decodes each
+# mountpoint in shell (space and backslash - the escapes that occur in real
+# paths) and compares decoded-to-decoded; the umount gets the DECODED path
+# too, which is the one the kernel knows. Before this, a spaced mountpoint's
+# umount failed on the escaped name - which happened to protect the card by
+# accident, two bugs cancelling.
+PAD_NS_KEEP=${CARD_KEEP:-}
+export PAD_NS_KEEP
 cat > "$NSCLEAN" <<EOF
 mount --make-rprivate /
-awk '\$5 != "/" && \$5 != "/proc" && \$5 != "/dev" && \$5 != "/dev/pts"$KEEPCOND { print \$5 }' \
-    /proc/self/mountinfo | sort -r | while read -r mp; do umount -l "\$mp" 2>/dev/null; done
+awk '\$5 != "/" && \$5 != "/proc" && \$5 != "/dev" && \$5 != "/dev/pts" { print \$5 }' \
+    /proc/self/mountinfo | sort -r | while IFS= read -r mp; do
+    mp=\$(printf '%b' "\$mp")
+    [ -n "\$PAD_NS_KEEP" ] && [ "\$mp" = "\$PAD_NS_KEEP" ] && continue
+    umount -l "\$mp" 2>/dev/null
+done
 umount -l /proc 2>/dev/null
 mount -t proc proc /proc
 mount --bind "$R" "$R"

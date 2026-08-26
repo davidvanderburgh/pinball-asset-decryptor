@@ -85,7 +85,23 @@ S=$(dirname "$0")
 . "$S/gamestate.sh"
 SW=$ROOT/dump/padsw
 
-BACK=28                              # Service Back == Esc in the legend window
+# Service Back == Esc in the legend window. 28 is GODZILLA's id for it; the
+# id is a per-title table index (item 73: on batman 28 is Service SELECT, so
+# the compiled constant would walk INTO the menu). The wire is universal -
+# node 0 bit 11 on all 29 derived lists - so resolve the title's own id from
+# its switch list, and keep 28 only as the no-list fallback. Re-resolved
+# BEFORE EVERY PRESS, not once at start: on a genuine first run the list is
+# derived from this very run's dump about a minute in, and this script's
+# retry loop (45 s gaps) spans that arrival.
+SWLIST="${PAD_TABLES:-$ROOT/dump/tables}/${PAD_GAME:-}/switch_list.txt"
+resolve_back() {
+    BACK=28
+    if [ -n "${PAD_GAME:-}" ] && [ -f "$SWLIST" ]; then
+        BACK=$(awk '!/^#/ && $3 == 0 && $4 == 11 { print $1; exit }' "$SWLIST")
+        [ -n "$BACK" ] || BACK=28
+    fi
+}
+resolve_back
 HOLD=${PAD_AUTO_HOLD:-2000}          # ms to press; see the table above
 QUIET=${PAD_AUTO_QUIET:-2}           # s of bus silence that means "ready"
 TRIES=${PAD_AUTO_TRIES:-5}           # presses before giving up and saying so
@@ -142,7 +158,7 @@ operator() { grep -aqE '\[sw\] [0-9]+ ms [+-][0-9]+[fkp]' "$LOG"; }
 # itself, so a replay that re-delivers it fights the new run's own autoattract
 # and can walk the game into the service menu - which is exactly what an extra
 # press does, as the header above records. Same swpoke.py, retagged.
-press()   { PAD_SW_SRC=a python3 "$S/swpoke.py" "$BACK" "$1" >/dev/null 2>&1; }
+press()   { resolve_back; PAD_SW_SRC=a python3 "$S/swpoke.py" "$BACK" "$1" >/dev/null 2>&1; }
 
 echo "[auto] waiting for the game to reach its boot screen"
 

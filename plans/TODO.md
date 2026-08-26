@@ -956,10 +956,32 @@ These have each been violated at least once and each cost a run or a window:
       **With (1) and (2) both closed this session, the only remaining gap
       in the entire 26-title catalogue is `munsters_le`'s BRD table.**
 
-- [ ] **58. A second-display window opens and stays BLACK on titles that
-      have no real second physical display.** `S2 D3` — **NO CONFIRMED
-      REPRODUCTION CASE YET; a fix was written, live-tested, and then
-      REVERTED this same session — read to the end before touching this.**
+- [x] **58. A second-display window opens and stays BLACK on titles that
+      have no real second physical display.** `S2 D3` **CLOSED 2026-08-21 at
+      David's ask** ("let's close the ones that are no longer necessary. like
+      4, 58, 3"), as NOT DEMONSTRATED rather than as fixed. Awaiting
+      `/finish`.
+      **What closing costs is nothing, and that is the argument.** This item
+      never had a reproduction case. Its one candidate, `mando_le`, turned
+      out to have a real $1999 Stern topper with a real second display, so
+      the game's content for that channel is wanted; the fix written against
+      that premise was reverted the same session because the premise was
+      false and the mechanism (hide after N never-lit frames) could have
+      hidden a legitimate slow-starting topper. Two false starts, no title
+      confirmed to lack the hardware, and the fault is cosmetic — an open
+      item whose first job is "find out whether this happens at all" is a
+      research question, not queued work.
+      **THE INSTRUMENT SURVIVES THE CLOSE, which is why reopening is cheap.**
+      `pic2_check()` (`padglhost.c` ~3592-3625) ALREADY measures and logs
+      "STILL BLACK after N frames" with nothing downstream reading it, and
+      `PADGL_TARGET` (~4014) still opens the window purely on `d != 0`. So
+      the day a title is confirmed to have no second-display hardware and
+      still opens a permanently black window, the measurement is already
+      there and only the policy has to be written. **Reopen on a title, not
+      on a hypothesis** — that is the whole lesson of the two false starts,
+      and it is the same "a wrong table is worse than none" rule item 57
+      learned three times.
+      **The original entry, kept because the two dead ends are expensive:**
       *(Filed 2026-08-19, David live-watching item 57's runs: "many games
       don't have a second display. make sure we are not bringing up a
       second display window if they don't have one.")*
@@ -1626,10 +1648,30 @@ These have each been violated at least once and each cost a run or a window:
       instrument (`swladder.py`, `PAD_SW_PEND`, `[swlatch]`, padglhost's
       `[key]`) already exists.
 
-- [ ] **3. The coil map.** `S3 D3` — S3: nothing is broken, this is a map that
-      is half confirmed. D3 — one run; the instrument exists and is validated,
-      but the Coil Test menu has not been reached yet so the navigation is
-      unknown.
+- [x] **3. The coil map.** `S3 D3` **CLOSED 2026-08-21 at David's ask**
+      ("let's close the ones that are no longer necessary. like 4, 58, 3"),
+      as SUPERSEDED rather than as finished. Awaiting `/finish`.
+      **What made it unnecessary was item 21b, which answered the question
+      this item was going to spend a run on — at the desk.** The blocker
+      recorded below ("the Coil Test menu has still never been reached", and
+      it is the one-at-a-time oracle) turned out not to be on the path at
+      all: the device table names every coil against the (group, index) the
+      fire frame already carries, so `TROUGH` is godzilla_pro group 6 index 1
+      = node 8 index 1 and jaws_le group 7 index 1 = node 9 index 1, with no
+      run needed and nothing hard-coding the node. That mapping is confirmed
+      **5 positive and 4 negative** against this item's own labelled ball
+      search, which is a stronger check than the menu would have been.
+      **WHAT IS GENUINELY LEFT UNDONE, stated rather than quietly dropped:**
+      (a) byte 7 is still not decoded (0xff slingshots/pop, 0x00
+      plunger/scoop, 0x32 magnet — on/off, hold power and board-self-fire all
+      still fit); (b) five coils (three flippers, trough eject, coin enable,
+      magnet) have no labelled experiment of their own. Neither has a
+      consumer: the ball feeder addresses the eject by (group, index), the
+      coil probe decodes what it sees, and nothing in the rig asks what byte
+      7 means. **An item whose remaining work has no consumer is curiosity,
+      not queue.** Everything needed to pick it up again — `coil_publish()`,
+      `coildecode.py`, `PAD_COIL_PROBE=1`, `coilread.py`, and the 48 V
+      door-closed prerequisite — is written below and unchanged.
       **★ THIS ENTRY WAS STALE UNTIL 2026-08-06 AND SAID "a map that does not
       exist yet". Half of it exists and is confirmed by a labelled experiment.**
       `313bb53` (2026-08-04) decoded the fire frame: `cmd 0x40` on nodes 8/9
@@ -2054,8 +2096,37 @@ These have each been violated at least once and each cost a run or a window:
       but the UI half wants a windowed session to verify, which is what keeps
       it off D1.
 
-- [ ] **34. Booting the same card from a different path re-copies the whole
-      image, so "first run only" slowness comes back.** `S3 D2`
+- [x] **34. Booting the same card from a different path re-copies the whole
+      image, so "first run only" slowness comes back.** `S2 D2` DONE
+      2026-08-23, `item/34`, `e5a54ec`, awaiting `/finish`.
+      **CLOSED 2026-08-23 — cache identity narrowed to SIZE+MTIME; the path
+      stays in the stamp for debugging but no longer invalidates.** The
+      mandated pre-code question answered first: the 2026-08-23 triple-copy
+      session WAS stamp thrash, NOT retention — `~/cardcache` still held
+      every entry back to Aug 6, and aerosmith/avengers/batman each sit
+      byte-identical (same size+mtime) at BOTH repo `images/` and
+      `D:\Pinball\images`; godzilla_pro at THREE paths (those plus OneDrive
+      Desktop), matching its 15 lifetime "complete" lines. Fix:
+      `cardmount.sh` `cache_pick()` compares only the stamp's last two
+      fields (`stamp_key()`, taken from the right so spaced paths cannot
+      shift them); the stamp WRITE keeps full path+size+mtime, so every
+      pre-fix stamp stayed valid — nothing re-copies on upgrade.
+      `getboot.sh` already used size+mtime and cites this item.
+      **Acceptance MET live, three bounded runs under the lock (runlim.sh +
+      boottime.sh):** control boot from the stamped OneDrive path — "using
+      local cache", PAST TECH ALERTS 9.22 s; PATH-SWITCHED boot from repo
+      `images/` — "using local cache", NO copier, lifetime copies stayed 15,
+      PAST TECH ALERTS **9.21 s** (this exact case was 177 s to first frame
+      before); touched-mtime boot — copier started and completed (16th
+      "complete" line). Cleanup: image mtime restored to 1785257111 and the
+      stamp realigned; desk-proven VALID from all three paths after.
+      **Trade (stated in e5a54ec):** two DIFFERENT cards sharing a label AND
+      coincidentally identical size+mtime would wrongly share a cache.
+      **Loose end for the record:** run C's fuse2fs survived runlim in a
+      dead mount namespace and killgame.sh claimed
+      PAD_STOP_NEEDS_WSL_RESTART — but the process was plain S-state on a
+      futex and a direct `kill -9` by pid cleared it; killgame's "cannot be
+      cleared from inside WSL" was wrong for this case.
       **Observed 2026-08-09 (David's godzilla_pro session):** "Startup In
       Progress" for ~3 min — first frame at 177 s against the ~15 s a cached
       boot takes — with input laggy while the copy competed with the boot's own
@@ -2087,9 +2158,60 @@ These have each been violated at least once and each cost a run or a window:
       comparison, established from the source above; the acceptance needs one
       confirming session of two boots plus the negative case, which is what
       keeps it off D1.
+      **★ WIDENED + S3 → S2, 2026-08-23. David's own test notes, three titles
+      in one evening session: "first-time boot for games takes a very long
+      time... Aerosmith, Avengers, and Batman", and "blocking me on a lot of
+      diagnosis."** The cardcache logs put the copies on the clock: all three
+      logs carry today's mtime (18:10–18:21) and their "local cache of <card>
+      complete" line counts are **aerosmith_le ×2, avengers_infinity_le ×1,
+      batman ×3** — each line is one finished full-image copy, so batman
+      copied three times for bytes that never changed. All three titles
+      already ran live during item 57's sweep (~2026-08-19), so today's
+      copies were either this item's stamp thrash or a cleared/renamed
+      `~/cardcache` — **the next pass should read the stamp files and say
+      which before touching code**, because a cleared cache would point at
+      retention (item 33's visibility gap) rather than the stamp. S2 on
+      David's word: this now costs runs across the whole title sweep, not
+      friction on one card. The "looks like a hang" half — no progress
+      feedback while a copy runs — is item 74, filed the same day.
 
-- [ ] **40. After a save-state LOAD the playfield's LEDs never come back, and
+- [x] **40. After a save-state LOAD the playfield's LEDs never come back, and
       the window says "no emulator" over a run that is plainly alive.** `S2 D2`
+      ← CLOSED 2026-08-22, acceptance met live on a cross-session load;
+      shipped direct on main at David's ask (with the save-state stability
+      pass), not via an item branch. See the ★★★ close block.
+      **★★★ CLOSED 2026-08-22 — the guessed mechanism was the real one, and
+      the acceptance ran in full.** (iv) confirmed: watch.sh zeroes
+      dump/padled at session start, `led_map()` stamps the magic exactly
+      once at the first decoded lamp frame, and a criu-restored guest
+      already holds the mapping so it never stamps again — the restored
+      guest wrote LED frames into a header reading 00000000 for the rest of
+      the run. **The fix is the cheap host-side shape this item asked for:**
+      dump/padled is now the THIRD always-rewound ring in restorestate.sh
+      (with padsw and padvid, dd in place, never truncating) — the stash is
+      freeze-exact, so magic, decoded/skipped, coil counters and the fade
+      ring come back as exactly the state the restored guest's memory is
+      consistent with; same-session rewinds are equally right because the
+      guest is the block's only writer. The OTHER candidate (ownership) is
+      handled too: missing-ring put-backs chown to the rootfs owner.
+      **What the diagnosis ALSO turned up:** David's "saves don't work
+      anymore" (2026-08-22) was not this item at all — /proc mountinfo
+      octal-escapes spaces, so the Heisei card's mount source was recorded
+      as `...Heisei\040Custom...`, card_live() tested the literal string,
+      and the pre-flight refused EVERY load of every slot of any card whose
+      filename has a space. `unesc() { printf '%b' "$1"; }` at read time
+      (restore.env stays escaped — it is space-separated); the nsclean
+      keep-path now compares decoded via PAD_NS_KEEP. And slots now carry
+      their own guest libraries (savestate libs/ stash; restorestate
+      installs them after the guest kill and clears the build stamps), so
+      a shim rebuild no longer kills every existing slot.
+      **Acceptance, run live 2026-08-22:** save → full killgame teardown →
+      fresh 16 s boot → loadgame: padled magic present, decoded counter
+      +~370 writes/s (the attract show painting the LED half), switch poke
+      +60p/-60p landed in the restored timeline, video 30.0/s, and the bar
+      reads the honest state — playfield.py's artwork view now splits
+      "emulator up, no LED writes decoded yet" from "no emulator
+      (dump/padled not readable)" the way the Schematic already did.
       **★ DAVID, 2026-08-11: "load state doesn't seem to get the LEDs loaded up
       on the virtual playfield and it says that there is 'no emulator' but there
       is."** godzilla_pro card run, `PAD_PIVOT=1`, the load asked for before the
@@ -2713,9 +2835,60 @@ These have each been violated at least once and each cost a run or a window:
       and reading (i) vs (ii) has to be settled before the instrument is
       chosen.
 
-- [ ] **55. turtles_pro flashes "UPDATING NODE BOARD RUNTIME / UPDATE FAILED"
-      for nodes 4 and 12 at game start — the title's OWN node table carries
-      two mis-derived rows, and the shim serves them verbatim.** `S3 D2`
+- [x] **55. turtles_pro flashes "UPDATING NODE BOARD RUNTIME / UPDATE FAILED"
+      for nodes 4 and 12 at game start.** `S3 D2` **★★★ FIXED 2026-08-23. The
+      diagnosis in this entry was half right and half wrong, and the wrong half
+      is the interesting one: the shim was NOT "serving the title's table
+      verbatim" — it was never reading that table at all.**
+      **ROOT CAUSE, two independent faults stacked:**
+      1. **`run_game.sh` never exported `PAD_GAME` on a CARD run.**
+         `nb_fident_load()` builds `/dump/tables/$PAD_GAME/node_ident.txt` and
+         returns early when it is unset, so every card boot of every title fell
+         back to the built-in `nb_idents[]`, which is **godzilla's** node set.
+         The log said so all along, once looked at: `[nbid] node 12 claims
+         part=0x2c40102b variant=0x05 fw=1.33.0 (built-in)`. The built-in
+         claims variant 0x05 for everything on part 0x2c40102b because on
+         godzilla every board on it is a ws2812node — which is why turtles'
+         nodes 2 and 14 (genuinely ws2812node) graded clean and only node 12
+         looked broken. One `export PAD_GAME="$GAME"` fixes it, for every card
+         run of every title.
+      2. **`coil4node`'s variant was a GUESS.** It was absent from
+         `nbdir.py`'s `VARIANT_PRIOR`, so it took `VARIANT_DEFAULT = 0x01`.
+         Measured 2026-08-23 with `hexreg.py` off the live turtles registry:
+         **0x04**, on all three classes. The same scan reproduced ws2812node
+         0x05, node4 0x03 and pinnode 0x01 unchanged, which is what makes the
+         new row a measurement and not another guess.
+      **ACCEPTANCE, on a plain card boot with NO overrides:** the shim logs
+      `7 node identities from /dump/tables/turtles_pro/node_ident.txt`, every
+      row reads `(derived)`, node 12 claims `variant=0x04`, and **no slot is at
+      anything but status 2** — where before, slot 12 sat at `status=7
+      Checksum` while all seven others graded 2. Boot healthy at
+      `nb=431 fb=60 ifs=250`.
+      **Honest gap:** this item's stated acceptance was the GAME-START glass,
+      and I verified the mechanism (every board graded clean) at boot, not a
+      started game. With no board at status 7 there is nothing left to trigger
+      a runtime update, but the literal screenshot was not taken.
+      **Follow-up, not done:** thirteen other titles still carry
+      `variant_guess=1` rows in tables generated before this fix —
+      aerosmith_le, deadpool_le/pro, dungeons_and_dragons_le, elvira3,
+      foo_fighters_le, guardians_le, metallica_spike, munsters_le, rush_le,
+      star_wars_le, sword_of_rage_le, turtles_le. They pick the fix up when
+      their tables are regenerated; nobody has done that yet.
+      **Also noted:** `nb_hexreg_answer()`, which is supposed to correct a bad
+      guess at runtime from the game's own decrypted images, did NOT fire for
+      turtles' node 12 — no hexreg line appeared in any run. That safety net is
+      not working here and is worth its own look.
+      **And a correction to this entry's own sibling claim:** the 2026-08-22
+      note below says the banner's centre number is "the RETRY COUNTDOWN, not a
+      node id". That is unsupported, and the evidence is now two titles deep
+      against it — godzilla_le banner-ed 4 and 10 with slots 4 and 10 at status
+      7, turtles_pro banner-ed 12 with slot 12 at status 7 and every other slot
+      at 2. Four numbers, four matching failing nodes. **It is the node id.**
+      Diagnose from `PAD_NB_DUMP` regardless: on turtles the number was right
+      and this entry's stated CAUSE was still wrong.
+      *(The original 2026-08-18 analysis follows. Its node-4 half was already
+      solved on godzilla; its node-12 half pointed at the derived table, which
+      was the right file and the wrong reason.)* `S3 D2`
       *(Filed 2026-08-18 from David's live report, mid-game screenshot in
       hand. Same SCREEN as item 51 but not the same fault: 51 was godzilla's
       table claimed at every title; this is the per-title derivation being
@@ -2776,6 +2949,31 @@ These have each been violated at least once and each cost a run or a window:
       corrected from measurement rather than another guess. Until then,
       do not touch `VARIANT_DEFAULT`/`VARIANT_PRIOR` blind — same rule as
       item 57's tables: a wrong guess is worse than a flagged one.
+      **★★ 2026-08-22: THE MECHANISM IS ROOT-CAUSED AND THE FIX IS SHIPPED
+      (on main, with the godzilla_le node-board work) — only this item's
+      own turtles glass check remains.** godzilla_le hit the identical
+      walk (its banner's center number is the RETRY COUNTDOWN, not a node
+      id) and the chase found both flagged row classes at once:
+      • `as-read(124.107.0)` was a MISREAD. The game's version reader
+        0x5a8644 has TWO paths — with the image node's [+32] selector set
+        (true on both node4 images) it grades the parsed HEADER, which is
+        the FILENAME version, exactly what this item prescribed serving.
+        nbdir.py now applies the filename rule to node4 (NODE4_FW_AS_READ
+        tombstoned) with measured variant 0x03; every [nbobj] dump ever
+        taken had slot 4 at status 7 because of this.
+      • The guessed-variant class is closed GENERICALLY, not per prior:
+        hwshim's nb_hexreg_answer() shape-scans the game's own decrypted
+        hex-image registry in-process and corrects any claim's variant/fw
+        from it (both 5a8644 paths mirrored; hexreg.py is the desk-side
+        twin that reads a live game via /proc/<pid>/mem — it measured
+        tmc5041node 0x0d, now a prior). The 2026-08-19 latent gap on
+        coil4node/hdmi_ws2812node/tmc5041node self-heals at grading time.
+      Verified on godzilla_le: no banner, slots 4 and 10 grade status 2,
+      attract at 16 s. STILL OPEN because this item's acceptance is
+      turtles_pro's own game-start glass; note turtles' node 4 has been
+      census-SILENCED since item 52 (its banner path is node 12's
+      coil4node guess), and the card is in the cache — one boot plus a
+      game start observes it.
 
 - [ ] **53. The device-table GROUP → bus NODE map is ONE TITLE'S measurement,
       so most titles' lamps and coils have a position and no wire address.**
@@ -2820,11 +3018,208 @@ These have each been violated at least once and each cost a run or a window:
       poor instrument for every other item. D3: one run to capture the wire
       side (or a live ring read), the instrument exists and is validated, and
       the fault is on demand.
+      **★ 2026-08-23, first tester sighting CONSISTENT with this item, plus a
+      census of what the trio he reported actually is.** Sam (external tester,
+      emailed David) reports attract-mode playfield inserts dark on The
+      Beatles, Batman '66 and James Bond 60th. Only ONE is this item.
+      (1) **james_bond_60th_le — THIS ITEM, seen on real glass at last**
+      (consistent with it, not confirming — see the attract warning below).
+      Fresh desk census: 426 LED rows in its device table, groups
+      {5:5, 7:24, 8:37, 9:45, 10:314}; only the 29 rows in groups 5/7 can be
+      addressed today — they ARE the whole of its led_io.txt — and every
+      artwork-view insert sits in groups 8/9: the 0 of 73 above stands.
+      (2) **batman — NOT this item.** Its card ships no device table at all
+      (README's 29-card "genuinely ship none" list;
+      `dump/tables/batman/device_xy.txt` says `0 records`, led_io.txt is
+      header-only, no playfield art), so no inserts EXIST to light, mapped or
+      not — the `0 records` class item 57's sweep explicitly ruled "NOT the
+      same bug as item 53", whose device-position RE still has no owning
+      item. (3) **beatles — RESOLVED 2026-08-23 the same day, and NOT this
+      item either.** David added beatles-1_29_0 (zip on the OneDrive
+      Desktop; not yet in the card library) and its device table parses
+      CLEANLY — 180 records (16 coil / 102 led / 62 switch), LED groups
+      ONLY 6 and 7, both INSIDE GROUP_NODE — so every beatles insert is
+      addressable TODAY and its dark attract has some OTHER cause (genuine
+      attract behavior, a decode gap — star_wars's class — or something
+      new; one PAD_NB_TRACE run once the card is in the library says
+      which). It also ships `Test/beatles_playfield.png` 336x710 with 168
+      of 180 records on it, 0 outside — full artwork-view material, no
+      item-71 rename trap. Note swelf.py has no beatles ROOTS entry, so
+      switch-id numbering needs the runtime shape-hunt. **And a warning
+      for this item's own acceptance: judge
+      "show its playfield lighting" IN A STARTED GAME, not attract.** Item 50
+      measured turtles driving NO playfield lamp frames in attract (only node
+      1's `0485` heartbeat; nodes 8/9 receive nothing until coins+Start), so
+      even a correct derived map could show a dark attract — and Bond's
+      attract lamp traffic has never been captured, nor whether its frames
+      decode at all (star_wars's missing-0x84/0x85 class). One PAD_NB_TRACE
+      capture on Bond answers both before the derivation is attempted. See
+      also item 70: Bond's group-8/9 devices may live on the very board the
+      bus never discovers.
 
-- [ ] **59. Every boot lands on the game's TECH ALERTS screen with `CHECK
+- [x] **59. Every boot lands on the game's TECH ALERTS screen with `CHECK
       SWITCH #n` rows, and nobody has ever established what puts them there.**
-      `S2 D3` *(Filed 2026-08-21 from David: "why do we always start into the
-      'tech alerts check switch' screen?")*
+      `S2 D2` *(Filed 2026-08-21 from David: "why do we
+      always start into the 'tech alerts check switch' screen?")*
+      **★★★★★ RE-CLOSED 2026-08-21, VERIFIED ON turtles_pro — the title that
+      broke the first close. Awaiting `/finish`.**
+      David's own boot from the app, `padswx.log`: switch table at 3 s, waited
+      for auto-advance (88 s), settled 5 s, exercised all 50. His screenshot of
+      that boot has **no `CHECK SWITCH` rows at all** — only `GAME VALIDATION
+      ERROR #3`, `Check Node Board 2` and `Check Node Board 14`, which are
+      three other providers and are now items 62 and 63. His verdict: *"that
+      seems to have worked."*
+      **★ A HOLE THAT RUN EXPOSED, AND IT IS FIXED RATHER THAN NOTED.** The
+      gate is "autoattract.sh has exited", and that script has THREE ways out:
+      past Tech Alerts, gave up, and STOOD DOWN because an operator is driving.
+      Only the first implies the audit is built — and this very run took the
+      THIRD (`[auto] an operator took over mid-gap; standing down`), which was
+      late enough only by luck. A key pressed at 10 s would have stood it down
+      at 10 s and fired the exercise at 15 s: the same too-early failure,
+      reached by a different door. `PAD_SW_EXERCISE_MIN` (60 s) is now a floor
+      under all three exits. Nobody waits on it — the run continues regardless.
+      **★★★★ REOPENED THE SAME DAY, HOURS AFTER BEING CLOSED, AND THE CLOSE
+      WAS THE MISTAKE — NOT THE FIX.** The box is UNTICKED again: the question
+      this item asks is answered, but the shipped behaviour is not finished,
+      and below 100% means unchecked. Item 50's entry already carries this
+      exact lesson ("THE CLOSE WAS TOO GENEROUS AND THIS IS THE LESSON"), and
+      this is the same mistake in the same week: **the acceptance was met on
+      the machinery and not on the ask.**
+      **WHAT HAPPENED.** David launched turtles_pro from the app minutes after
+      the close and sent a screenshot of twelve `CHECK SWITCH` rows still on
+      the glass: `#80 LOCKDOWN BUTTON`, `#91 TILT PENDULUM`, `#41`, `#55`,
+      `#36`, `#37`, `#29`, `#46`, `#47`, `#48`, `#23`, `#43`, and `[more]`.
+      His question was whether switches were MISSING from the exercise list.
+      **They were not** — every one of those twelve is in turtles_pro's
+      50-switch WOULD list. And the exerciser had run: `padswx.log` shows all
+      50 exercised, and the guest log carried **99 `x`-tagged edges**, so the
+      game was handed every one of them.
+      **THE FAULT IS TIMING, AND DAVID CALLED IT:** *"or maybe we need to
+      exercise these switches once the game boots?"* The trigger was "switch
+      table seen, plus 5 s" = **boot+8 s**, and on turtles_pro the audit is
+      not built by then, so the edges cleared nothing. Running the IDENTICAL
+      exercise by hand on that same live run, minutes later, **cleared every
+      one of the twelve rows** — what remained on the glass was `GAME
+      VALIDATION ERROR #3` and `Check Node Board 2 : Not Registered`, which
+      are different providers and different items. **godzilla_pro hid this**
+      because its audit is already populated by boot+14 s (`active=37` on the
+      first dump), so the early exercise happened to land after it.
+      **WHAT CHANGED IN RESPONSE (written, NOT yet verified on a run):**
+      (a) `swexercise.sh` now waits for the game to be **past Tech Alerts**
+      rather than for the switch table — that is the one moment the audit is
+      provably built, because the game has just rendered it. It waits for
+      `autoattract.sh` to EXIT rather than re-implementing that script's
+      bus-quiet predicate, since two copies of one fact is how this rig has
+      been bitten before; with auto-advance off it falls back to a blind
+      `PAD_SW_EXERCISE_BLIND` (60 s) wait. **The accepted cost:** the rows are
+      now on screen during the boot that clears them.
+      (b) A **"Clear alerts" button** in the playfield window, both views —
+      David's ask: *"if that's the case, maybe we need an 'opt-in' button
+      that clears them?"* Item 60's `PLUNGE_ACTIONS` was three plunge.py
+      verbs, so it is now `WINDOW_ACTIONS` of `(label, script, arg)`: a fourth
+      button running a different helper could not be expressed otherwise
+      without a second list, and a second list is what item 60 collapsed.
+      **Resume:** boot turtles_pro from the app and confirm on the glass that
+      a normal boot ends with no `CHECK SWITCH` rows, and that the "Clear
+      alerts" button clears them when pressed. THEN re-close. 338 spike2
+      tests green; nothing below this line has been invalidated.
+      **★★★ The original close block follows. Everything it states was
+      measured and is still true — what it got wrong was calling it finished
+      on the strength of one title.**
+      **★★★ CLOSED 2026-08-21 (item/59) — acceptance met on godzilla_pro
+      across four runs. SUPERSEDED BY THE REOPEN ABOVE.**
+      *(D3 → D2 on the way out: the alert-provider walk turned out to be an
+      instrument that already existed and was already validated, and the
+      switch-alert provider is now named, so anything left here is a small
+      change plus one confirming run.)*
+      **THE ANSWER, AND IT IS DAVID'S.** Mid-pass, unprompted: *"the 'check
+      switch' is real. if we don't trigger a switch in multiple games, then
+      the game thinks there's a problem with them. we probably need to
+      simulate the switches going on and off with each game boot to help
+      clear these tech alerts."* He was right, and the acceptance's SECOND
+      branch is the one that applies: this is correct machine behaviour, now
+      written down, not a fault in this rig.
+      **(1) THE PROVIDER IS NAMED FROM MEASUREMENT, not inferred.**
+      `PAD_ALERT_DUMP=5000 PAD_ALERT_PROBE=1` walks the game's own alert list
+      (`hwshim.c:4535`). Every one of the **37** live Tech Alerts entries came
+      from ONE provider — `fn=0x1e698c  msgid=759  fn2=0x48fd54` — whose
+      action jumps to Switch Test. Nothing else contributed a single row. The
+      other ten providers all read `active=0`, including the node-board one
+      (`0x39c6b8`) this item warned not to confuse it with.
+      **(2) THE SET IT FLAGS IS THE SET NOBODY PLAYS, provable at the desk
+      with no run at all.** The `num` column of the title's own
+      `switch_list.txt` is what the screen prints: turtles_pro's `#80`/`#91`
+      are LOCKDOWN BUTTON and TILT PENDULUM; stranger_things' `#7..#22` is
+      both slingshots, both flipper buttons, both EOS, the shooter lane, the
+      six trough switches and TROUGH JAM. Exactly the switches a machine
+      nobody plays never moves, and nothing else in either list is flagged.
+      **(3) WORKING THE SWITCHES CLEARS IT, on the glass.** `swexercise.py`
+      drives every safe switch away from its resting value and back. Run 1:
+      `active=37` → exercise → `active=0`, and the game window read **"Tech
+      Alerts / No Technician Alerts"**. Run 3, a completely normal boot with
+      it wired into `watch.sh` and nothing done by hand: `37, 37, 0, 0` across
+      four dumps, attract with full artwork on the glass.
+      **(4) IT PERSISTS — AND THIS PASS GOT THAT WRONG ONCE, so the evidence
+      is here rather than the conclusion alone.** Run 2 (a fresh boot after
+      run 1) read `active=37` again, which was written up mid-pass, and in
+      `a9bd18a`'s commit message, as "the audit is rebuilt every boot".
+      **Run 4 refutes that**: booted with `PAD_SW_EXERCISE=0`, zero `x`-tagged
+      edges in its log and `padswx.log` untouched from the previous run, it
+      read `active=0` on all **16** of its dumps. So the audit IS persisted.
+      **The likely reason run 1 did not save, stated as the guess it is:**
+      run 1 ran `PAD_AUTO_ATTRACT=0` and never left Tech Alerts, where the
+      game appears not to commit the audit; run 3 reached attract and lived
+      there. NOT ISOLATED — one variable was never held fixed — so do not
+      build on it without an A/B.
+      **(5) COINS ARE AWARDED once the rows are gone.** Two `LEFT COIN`
+      pokes in run 3's attract took the glass from `CREDITS 0` to
+      `CREDITS 1/2` at `1/1.00 3/2.00` pricing. **The other half of the coin
+      question is NOT answered and is now harder to answer:** run 4 came up
+      already clear, so there was no flagged machine left to coin into. Item
+      57's "eats coins until the flagged switch sees usage" and item 46's
+      five-coins-one-credit on turtles_pro are still the only evidence for
+      the flagged side, and both are observations rather than an A/B.
+      **WHAT SHIPPED.** `swexercise.py` (resolves switches BY NAME from the
+      title's own `switch_list.txt`, so the policy travels — desk-checked on
+      turtles_pro 50/43, godzilla_pro 44/43, stranger_things_le 56/43),
+      `swexercise.sh` (waits for the guest's switch table, then a settle),
+      wired into `watch.sh` DEFAULT ON with `PAD_SW_EXERCISE=0` to disable,
+      and counted by `alive.sh` / killed by `killgame.sh` per the standing
+      non-negotiable. 8 new tests, all on the SAFETY POLICY rather than the
+      machine: a run proves switches moved, it cannot prove the coin switches
+      stayed still. 336 spike2 tests green.
+      **THE REFUSALS ARE THE LOAD-BEARING PART.** DIP is configuration,
+      SERVICE walks the operator menu, the coin door interlock is latched
+      state gating 48 V, the coins award credits and move the money audits,
+      SLAM TILT ends a game and writes an audit, START would begin one, QR
+      SCANNER STATUS are status bits, HEADPHONE/VOLUME ENCODER are neither.
+      Each prints its own reason, because a row this never clears has to be
+      explainable or it reads exactly like a genuinely broken switch.
+      **TROUGH SWITCHES REST CLOSED** and are opened-then-closed; press-and-
+      release there would produce no edge at all — the same shape as the bug
+      item 20 was.
+      **★ IT CANNOT DISTURB `autoattract.sh`, checked against all three of
+      that script's predicates rather than assumed:** `probes()` counts
+      `ExchangeData: read failed`, `past()` keys on the attract light show,
+      and `operator()` matches source letters `f`/`k`/`p` only. The exerciser
+      tags its edges **`x`**, so an unattended boot does not stand down.
+      Runs 3 and 4 both reported `past Tech Alerts after 2 press(es)` — with
+      the exerciser ON and OFF respectively, which is the A/B — and two is
+      the documented normal for godzilla ("two Escape presses, one off Tech
+      Alerts, one off the screen after it").
+      **★ WHAT IS NOT ESTABLISHED, so nobody reads this as more than it is:**
+      (a) whether the audit ever RE-flags after N games with a switch still
+      unused — a real machine's audit usually does, and if so the per-boot
+      exercise is what keeps it clear, which is the argument for leaving it
+      default on; (b) the flagged-machine coin behaviour, per (5); (c) any
+      title but godzilla_pro for the ALERT MEASUREMENT specifically —
+      `PAD_ALERT_HEAD` and friends are godzilla_pro 1.15.0 addresses and
+      resolve to 0 elsewhere (`TITLE_ADDR`), so on turtles_pro the dump says
+      "no provider-list address known for this title" and the oracle is the
+      glass. The EXERCISER itself is title-independent and desk-checked on
+      three titles; only the instrument that measures it is not.
+      **The original entry follows, kept because its three settled facts and
+      its `board[+24]` warning are all still true.**
       **Observed, on more than one title:** turtles_pro shows `Check Switch #80
       LOCKDOWN BUTTON` / `#91 TILT PENDULUM` and runs no light show while it
       sits there (item 50); stranger_things shows `CHECK SWITCH #7..#22` —
@@ -2979,13 +3374,1867 @@ These have each been violated at least once and each cost a run or a window:
       this view opens, the call sites are located, and item 25's test harness
       already exists — but confirming a real plunge costs one run.
 
-- [ ] **4. Boot buzz — PARKED, deliberately.** `S3 D3` (not in the pool; the
-      numbers are here for whenever it is reopened.) ~20 Hz stutter in the
-      first ~10 s.
+- [x] **62. `GAME VALIDATION ERROR #3` is a STALE FAILED GRADE IN NVRAM that a
+      nopped validation tick can never clear — SOLVED, PROVEN, FLEET-FIXED
+      AND GLASS-VERIFIED.** `S2 D2` DONE 2026-08-24, `item/62`, `bf15c19`,
+      awaiting `/finish`.
+      **★★★ CLOSED 2026-08-24 — THE GLASS VERIFICATION THIS ITEM OWED SINCE
+      2026-08-23 IS DONE, by David's own eyes in the item-80 sweep:**
+      avengers_infinity_le showed the red `Game validation error, Update SD
+      card` banner (screenshot on record, the BEFORE), `nvgrades.py --fix`
+      zeroed its stale slot-B grade, and David's relaunch shows **the banner
+      is gone**. The product decision was his "let's fix item 62 now": the
+      one-shot fleet fix (`--fix-all`, verified `0 of 29 carry a stored F or
+      E`), NOT a shim auto-zero — the shared seed is clean so new files are
+      born clean, and auto-zeroing would mask an honest future failure. If a
+      stored F ever reappears, the census names it and `--fix` clears it.
+      *(▲ from 70%. D3 → D2: the mechanism is proven end to end and the fix is
+      applied and verified; what remains is deciding what the rig should do
+      about it automatically, which is desk work plus one confirming boot.)*
+      **★★★★★★ 2026-08-24, INDEPENDENT LIVE CONFIRMATION AND ONE MORE FIXED
+      FILE, from item 80's alphabetical sweep — David playing the app, not
+      desk work.** Going alphabetically he hit `aerosmith_le` (clean, green
+      check) then `avengers_infinity_le` (glass showed the red `Game
+      validation error, Update SD card` banner over language-select — see
+      item 80's log) **before either of us had looked at `nvgrades.py`'s
+      census for this session**, and the census then printed exactly what
+      that predicts: `aerosmith_le` is one of only 4 titles reading clean
+      (`P/P/P` both slots — the others are `elvira3`, `godzilla_le`,
+      `turtles_pro`), and `avengers_infinity_le` was STUCK (`slot B P/P/F`).
+      Two independent methods (an EEPROM read and a human looking at the
+      glass) now agree on which titles carry the banner. **Also new: the
+      census now shows 24 of 29 stuck, not "25 of 28" — `godzilla_pro` reads
+      stuck too**, which the 2026-08-23 pass did not report (either it was
+      clean then and a later boot poisoned it, or it was missed; not chased,
+      not urgent since its own tick is healthy and slot A stays clean).
+      **Fix applied:** `nvgrades.py --fix avengers_infinity_le`
+      (`nvram-avengers_infinity_le.bin` slot B `P/P/F` → `S/S/S`, zeroed
+      `0x214..0x293`, backup `.bak-prevalfix` beside it, rig lock held for
+      the write and released after — see `killgame.sh`/lock rules). **NOT
+      YET RE-VERIFIED ON THE GLASS** — same gap the 2026-08-23 pass left
+      open ("the banner was never captured on the glass BEFORE and AFTER").
+      This time the BEFORE shot exists (David's screenshot). Resume: David
+      relaunches `avengers_infinity_le` in his own already-open app and says
+      whether the banner is gone — closes this item's oldest open question
+      for free, using the sweep instead of a scripted boot.
+      **★★ 2026-08-24, LATER THE SAME SESSION — DAVID MADE THE PRODUCT
+      DECISION ("let's fix item 62 now") AND THE WHOLE FLEET IS CLEAN:
+      `nvgrades.py --fix-all`, verified `0 of 29 carry a stored F or E`.**
+      The decision taken is option (b)'s spirit — a one-shot fleet fix with
+      the tool, NOT option (c)'s shim auto-zero: the shared seed is already
+      clean so new per-title files are born clean, and a FUTURE stored F on
+      a healthy-tick card would be an honest live failure that auto-zeroing
+      would mask. Recurrence is therefore not expected; if one appears, the
+      census names it and `--fix` clears it.
+      **A real tool bug found and fixed on the way (rig lock held
+      throughout):** the first `--fix-all` DIED at file 20 of 24 —
+      `PermissionError` on `nvram-stranger_things_le.bin`, which is
+      ROOT-owned because the GUI's PAD_PIVOT runs write their title's nvram
+      as root (same root/user split as the `dump/boot.id` loose end). A
+      fleet tool that aborts mid-fleet leaves the fleet in an unknown
+      state, so `fix()` now catches OSError, prints `NOT FIXED: ... rerun
+      as root`, and continues; the remaining 5 root-owned files were then
+      fixed with `wsl -u root` (`HOME=/home/david` so padpath resolves).
+      `valtick.py` was already in the repo, so the old "move pad62_tick.py
+      into the repo" note is satisfied.
+      **Resume (the one thing left):** David's relaunch of
+      `avengers_infinity_le` — or any previously-stuck title in his item-80
+      sweep — shows no banner; that is the glass BEFORE/AFTER this item has
+      owed since 2026-08-23, and the box gets checked on his word.
+      **★★★★★ THE MECHANISM, PROVEN 2026-08-23 BY THREE RUNS WITH A CONTROL.**
+      All three booted the Heisei image identically, reading the grades live
+      through `PAD_VAL_DUMP` (now title-portable, `PAD_VAL_MOD=0x7f16bc`):
+
+      | run | change | GE | CE | ZK | V |
+      |---|---|---|---|---|---|
+      | A | none (control) | P | P | **F** | `0x7f16ec` = MOD+0x30, slot B |
+      | B | `nvram-godzilla_le.bin` deleted | P | P | **F** | `0x7f16ec` |
+      | C | validation area zeroed | P | P | **P** | `0x7f16bc` = MOD+0, slot A |
+
+      Run A is what makes the rest mean anything: without it, "no banner after
+      deleting something" could equally have meant the banner was never going to
+      show. Run C's two readouts moved TOGETHER and both matched a prediction
+      written down before the run.
+      **The chain, every link measured:**
+      • The module's start function restores a 532-byte blob (area 80) over its
+        own globals and only initialises when that restore FAILS. The grades at
+        +42/+43/+44 are inside the restored range, so a restore overwrites them
+        and the init never runs.
+      • That blob lives in the emulated EEPROM at **`/data/nvram.bin` offset
+        `0x214`**, as an A/B pair — slot A at `0x214`, slot B at `0x244`. Found
+        by searching the file for the live struct's own bytes, not by guessing
+        from file sizes.
+      • Slot A is clean `P/P/P`; **slot B carried `ZK=2 (F)`**. The game selects
+        slot B because the stored build stamp at +34 does not match this build's
+        (`memcmp` → `movne r0,#48`).
+      • The Heisei card's validation tick is nopped to `bx lr`, so nothing can
+        ever re-grade ZK back to P. **On a healthy card this self-heals on the
+        next boot; on a nopped card the banner is permanent and unclearable.**
+        That is the whole difference, and it is why the fault looked card-specific.
+      **★★ IT IS RIG-WIDE, NOT A HEISEI PROBLEM: 25 of 28 per-title NVRAMs carry
+      the same stale `ZK=F` at `0x244`.** `hwshim.c` `nv_path()` seeds a missing
+      per-title file from the shared `/data/nvram.bin`, and that shared file
+      carried a failed ZK — so every title minted from it inherited one. Only
+      `aerosmith_le` reads `P/P/P` in both slots. This also RETROSPECTIVELY
+      VINDICATES the item's original turtles report: `nvram-turtles_pro.bin`
+      carries `ZK=F` and the upscaled turtles card is nopped, so it would indeed
+      show the banner — my 2026-08-23 claim that it "cannot raise it" was wrong
+      for exactly the reason now proven.
+      **Why deleting the per-title nvram did nothing (run B):** `nv_path()`
+      re-seeds a missing per-title file *from the poisoned shared one*. The
+      obvious fix was a no-op, and only the control run made that legible.
+      **★ FIX APPLIED AND VERIFIED, surgically.** `PAD_NV_POKE=214-427:00` zeroes
+      only the validation module's own area, so identity, settings, audits and
+      high scores are untouched — `rm nvram.bin` would have thrown those away.
+      The same range is now zeroed on disk in `data/nvram.bin` and
+      `data/nvram-godzilla_le.bin`; backups are in `~/item62/`
+      (`nvram.bin.BACKUP`, `nvram-godzilla_le.BACKUP.bin`). The other 24
+      poisoned files are LEFT ALONE deliberately — they self-heal on any healthy
+      card, and the shared seed is now clean so new ones are born clean.
+      **Resume — the product decision, which is David's:** should the rig detect
+      this and fix it, or stay manual? Options, cheapest first: (a) nothing —
+      the shared seed is clean now, so this decays on its own; (b) a one-shot
+      `nvfix.sh` that zeroes the area in any nvram carrying F/E, for the two
+      known nopped cards (turtles_pro is the other one); (c) have the shim zero
+      the area at load when the tick is nopped — `valtick.py`'s signature makes
+      that detectable — which is self-maintaining but is the emulator quietly
+      editing the machine's EEPROM, and that deserves a deliberate yes.
+      **Still unverified, and honestly so:** the banner was never captured on
+      the glass BEFORE and AFTER, because an unattended boot parks on Guided
+      Setup within 25 s and never reaches the language-select or Tech Alerts
+      screens where David saw it. The grade bytes are the evidence, and they are
+      ground truth for what the provider tests — but a screenshot pair would
+      close it properly and needs someone to navigate there.
+      **★ 2026-08-23, turtles_pro also fixed at David's ask** ("fix tmnt... it
+      still shows the sd validation error"). `nvgrades.py --fix turtles_pro`
+      applied; its slot B went `P/P/F` → cleared, and the shared `nvram.bin`
+      now reads `P/P/P` in both slots because godzilla_le's own boot rewrote it
+      clean. **NOT confirmed on turtles' glass**, because turtles_pro no longer
+      boots at all — that is now item 69, and it blocks this item's turtles
+      acceptance as well as item 55's.
+      **A constant was wrong and is corrected:** the restore is
+      `eeprom_read(devsel=80, addr=0x214, dst=MOD, len=128)` — 532 is the
+      ADDRESS and 128 is the LENGTH. I first read 532 as a length and zeroed
+      `0x214..0x427`, four times too much. It did no damage (verified against
+      the backups: every byte of `0x294..0x427` was already zero) but
+      `nvgrades.py` carried the wrong `BLOB_LEN` and now does not.
+      **▼▼ MY OWN 2026-08-23 REVERSAL IS ITSELF PARTLY WRONG — REFUTED BY
+      OBSERVATION, which outranks every disassembly in this entry.** David's
+      Heisei boot shows `GAME VALIDATION ERROR - #3 UPDATE SD CARD` on Tech
+      Alerts AND a red `Game validation error, Update SD card` over the
+      language-select screen. The Heisei ELF's tick **is nopped** — verified —
+      so "a nopped tick SILENCES the banner" is false as a complete statement.
+      Finding what raises it anyway IS the item now.
+      **What survives the second reversal (verified; do not re-derive):**
+      • The 4-byte `bx lr` patch on the upscaled turtles card is real, and the
+        function it kills IS the state-machine tick, not a single hash checker.
+      • The module init writes **1 ("P")** to GE/CE/ZK, confirmed on FOUR
+        builds — turtles 1.59.0 `0x2e0fc4`, godzilla_pro 1.15.0 `0x249ecc`,
+        godzilla_le 1.13.0 `0x248234`, Heisei `0x4778ac` — so "maybe a newer
+        build inits to E" is closed too.
+      • Every card's kernel is byte-identical, Heisei included. The zImage
+        theory is dead for every card this rig owns.
+      • `turtles = godzilla_pro + 0x970f8` for the module text.
+      **★ NEW INSTRUMENT, validated on four known-answer binaries
+      (`c:\tmp\pad62_tick.py` — MOVE IT INTO THE REPO):** finds the validation
+      tick in ANY build with no addresses known, by the signature
+      `ldrb rX,[rY,#197]` + `cmp rX,#8`, then walks back to the prologue and
+      reports push-with-lr vs `bx lr`. Calls stock turtles healthy, upscaled
+      turtles NOPPED, godzilla_pro healthy (rediscovering its tick at
+      `0x24a4cc`, which the `+0x970f8` mapping predicts), stock godzilla_le
+      healthy, and **Heisei NOPPED at `0x477eac`, module base `0x7f16bc`**.
+      Exactly one candidate site per ELF.
+      **THE LIVE HYPOTHESIS — mechanism located, NOT proven:** the module does
+      not always initialise, it **RESTORES PERSISTED STATE**. Its start
+      function (`0x2e1420` turtles) calls `0x4d2214(area=80, 532, MOD, 128)`
+      FIRST and only falls through to reset-and-init-to-P when that returns 0.
+      `0x4d2214` is a storage dispatcher: r0 picks an area (80→0, 81→1, 82→2)
+      into a 16-byte descriptor table at `0x59c6f4`, then tail-calls the reader
+      `0x4d1f44`. 532 bytes landing at MOD covers +42/+43/+44, so a restore
+      overwrites the grades wholesale and the init NEVER RUNS. **If a stored
+      grade is 2 or 3 and the tick is dead, the banner is frozen on forever** —
+      nothing alive can grade it back to P. That fits the observation, and it
+      predicts the banner is UNCLEARABLE, which matches Heisei.
+      **Where the store is: the i2c NVRAM, and it is PER-TITLE** —
+      `hwshim.c:2353` `NV_PATH "/data/nvram.bin"`, split per title so one file
+      did not mix godzilla, TMNT and the rest; `$PAD_ROOT/data/nvram-<title>.bin`,
+      64 KB each. **The Heisei image runs as title `godzilla_le`**, so it
+      inherits `nvram-godzilla_le.bin` — which already existed from the STOCK
+      godzilla_le 1.13.0 card booted 2026-08-19, whose tick IS healthy and could
+      have written a failed grade into it. Heisei then cannot undo it.
+      **NOT proven, and the shortcut that FAILED:** scanning the nvram images
+      for the struct by SHAPE (two 48-byte A/B structs, grades 0..3, trailing
+      bytes zero) is worthless — ~780 hits per file, and the candidate offsets
+      are identical across godzilla_le, godzilla_pro, turtles_pro and
+      turtles_le, i.e. it finds common structure, not per-title state. The
+      offset must come from tracing `0x4d1f44`.
+      **Resume, cheapest first:** (1) trace `0x4d1f44` and the descriptor at
+      `0x59c6f4` for the nvram OFFSET of area 80, then read the grades straight
+      out of `data/nvram-godzilla_le.bin` — confirms or kills the hypothesis
+      with NO run. (2) The reversible one-run experiment, needing no code: back
+      up and remove `data/nvram-godzilla_le.bin`, boot Heisei, see whether the
+      banner goes. If it does, the mechanism is proven and what remains is a
+      policy call about when the rig resets a title's nvram — note it also
+      holds scores and settings, so deleting is not free. (3) Only then decide
+      what the emulator should do about it.
+      **Also on the same screenshot and NOT part of this item:** the Heisei boot
+      is on Tech Alerts at all, which item 63 was meant to prevent, and it shows
+      `SHIELD MOTOR - CHECK SW. 41 (Shield Motor Open)`. Either David entered
+      service deliberately or item 63's fix does not hold for this title/card —
+      worth one look before assuming the former.
+      **▼ THE EARLIER 2026-08-23 REVERSAL, now itself corrected above. The
+      4-byte patch is real, but the claim that it SILENCES this banner is
+      refuted by the Heisei observation.**
+      Everything below the reversal is kept because the evidence is expensive
+      and most of it still stands; what changed is what it MEANS.
+      **The true reference existed all along and nobody had used it: David
+      already owns a STOCK `turtles_pro-1_59_0` Release card**, cached at
+      `~/cardcache/turtles_pro-1_59_0.raw` (from
+      `/mnt/d/Pinball/images/Stern/spike2/turtles_pro-1_59_0.Release.8G.sdcard.raw`),
+      beside the `.1987-upscaled` one he boots. So the diff is stock-vs-modified
+      at the same version, not rootfs-vs-card with the provenance assumed.
+      `debugfs` pulls `./game` out of either card with no mount and no root, so
+      this is desk work: `parts.py --games`, then `debugfs -R "dump …"`.
+      **Established, all reproducible at the desk:**
+      • The rootfs `games/turtles_pro/game` IS the stock card's, byte for byte
+        (md5 `2a12ebe1144fcadcb7a5b6732044020d`). The upscaled card's is
+        `adb50ca387cf6c26f7d5baf140c6e8dc`, same 6,457,552 bytes.
+      • **Exactly 4 bytes differ in the whole 6.4 MB ELF**, at vaddr
+        `0x2e15c4`: `e92d47f0` (`push {r4-r10, lr}`) → `e12fff1e` (`bx lr`).
+        The 20-byte GE trailer at `size-20` is UNTOUCHED, so it is stale.
+      • **`0x2e15c4` is not "the integrity checker" — it is the validation
+        STATE MACHINE's tick.** It dispatches an 8-entry jump table on the
+        state byte at `MOD+0xc5` and carries the work budget at `MOD+0xe0`
+        with the 15/31 unit values the handoff already documents for godzilla.
+        Every other writer of that state byte is inside its dispatch tree; the
+        only one outside is the module's start function `0x2e1420`, which sets
+        `V := MOD` and `state := 1` once.
+      • **The module init `0x2e0f20` sets GE, CE and ZK all to 1 = "P".** A
+        track goes to 3 ("E") when its handler STARTS and to 1/2 when it ends.
+        Godzilla's init is instruction-for-instruction the same and also
+        writes 1 — so the handoff's "the tracks start in state 3 (E)" is
+        WRONG, and "E" on that screen means IN PROGRESS as much as it means
+        failed. (That is the real reason godzilla's `#2` "cleared itself" at
+        ~70 s: CE was merely running.)
+      • **Therefore `bx lr` on the tick freezes state at 1 forever, no track
+        ever runs, all three read "P", and the provider raises NOTHING.** The
+        patch is an alert-SUPPRESSION patch — which is exactly what an
+        upscaled card needs, since the asset sweep would fail on rebuilt
+        assets and re-signing them is not an option.
+      **Ruled out, and this one is now beyond doubt:** the wrong-zImage theory.
+      All four cards — both turtles_pro, turtles_le, godzilla_pro — ship a
+      byte-identical `zImage` (`5bffdb676ba17b44248f2ad3621e6647`, 6,041,256 B)
+      and `stern-spike2.dtb` (`ef9c01fa…`), and the rootfs already stages those
+      exact bytes. No card this rig owns can break on the kernel.
+      **Ruled out: that turtles' addresses, track order or #N numbering differ.
+      They do not.** turtles' obfuscated descriptor table is at `0x563710`
+      (blob at +128), same 16-byte layout, and decodes to the same eight
+      strings with the same `n = 2..7 → #1..#6` mapping. The provider
+      `0x2e1110` tests `V[+42]→#1`, `V[+43]→#2`, `V[+44]→#3` exactly as
+      godzilla's does. **Nine independently-located landmarks map at a constant
+      `turtles = godzilla + 0x970f8`** (init `0x249e28`→`0x2e0f20`, provider
+      `0x24a018`→`0x2e1110`, decryptor `0x249f60`→`0x2e1058`, ZK:=1
+      `0x24b8cc`→`0x2e29c4`, CE:=1 `0x24b918`→`0x2e2a10`, GE:=1
+      `0x24b928`→`0x2e2a20`, ZK:=2 `0x24b61c`→`0x2e2714`, ZK:=3
+      `0x24b6f8`→`0x2e27f0`, budget `0x24a668`→`0x2e1760`). The module is the
+      same code in both titles.
+      **THE INSTRUMENT WAS NEVER POINTED AT TURTLES, so the item never had an
+      observation to stand on.** All three turtles runs of 2026-08-21
+      (`t63.log`, `t63_run1.log`, `t63k.log`, all on the upscaled card) have
+      `strwatch=0` — the string watcher was OFF, so their zero
+      `GAME VALIDATION ERROR` hits prove nothing either way. The ONLY logs
+      anywhere that ever caught the string are `gz211/212/213.log`, which are
+      **godzilla**. The item's title — "every title but the one the rootfs was
+      built from raises #3" — was a theory, never a turtles measurement.
+      **★★ BUILT AND COMPILES THIS PASS: `PAD_VAL_DUMP` is no longer
+      godzilla-locked** (`hwshim.c`). `VAL_MOD/V/ST/CTX` were four hard-coded
+      godzilla addresses; V, the state byte and the worker context are fixed
+      offsets (+0xc0/+0xc5/+0xc8) from the module base on BOTH titles, so one
+      `TITLE_ADDR` moves all four — `PAD_VAL_MOD=0x681994` is the whole of what
+      turtles needs. The caller filter `VAL_LO/VAL_HI` is now
+      `PAD_VAL_TEXT_LO/HI` too: a godzilla-shaped filter rejects every turtles
+      call and the probe reads a confident silence over a working module, which
+      is the exact trap that would have wasted the confirming run.
+      `-fsyntax-only` clean; NOT yet run.
+      **★★ ALSO BUILT: `obfcrib.py`**, which is how turtles' table was found and
+      is the general answer to "this title's obfuscated strings are unreadable".
+      `obfstr.py` needs the TABLE address and `obfstr2.py` needs the BLOB
+      address, and on a new title neither is known. But
+      `x[i] = c[i]^c[i-1]` gives `x[i] = key[i&3] ^ out[i]`, so two indices in
+      the same class mod 4 cancel the key and `x[i]^x[i+4]` is a signature of
+      the PLAINTEXT ALONE — a message already known from another title finds
+      its own ciphertext by a plain scan, and the key falls out of the match.
+      Validated against godzilla: it recovers five of the seven keys
+      `obfstr2.py` hard-codes, from ciphertext alone. Takes `--elf` because
+      `gameinfo.elf()` prefers a stale published path after a card run ends.
+      **Resume — one run decides it, and it is cheap now:** boot the upscaled
+      turtles card with `PAD_VAL_DUMP=1 PAD_VAL_MOD=0x681994
+      PAD_VAL_TEXT_LO=0x2e0ef8 PAD_VAL_TEXT_HI=0x2e33b8` and read `[val]`. The
+      PREDICTION is `state=1` never moving and `GE=CE=ZK=P` for the whole
+      boot — i.e. no banner is possible. **Inject the positive control:** the
+      same probe on godzilla (no env overrides) must show the tracks marching
+      P→E→P, or the instrument is not seeing anything on either title and the
+      turtles zero is worthless — which is precisely how this item got its
+      wrong answer the first time. If turtles reads as predicted, the honest
+      close is that the banner was never a turtles fault and item 63 already
+      removed the screen it lived on; if it somehow shows E, the module is
+      running despite the nop and the whole reversal above is wrong.
+      **▼ SUPERSEDED 2026-08-23 — read the reversal above first. This block got
+      the 4-byte patch RIGHT and what it does WRONG.** It called `0x2e15c4` "the
+      game's ONLY whole-file keyed-hash integrity checker"; it is the state
+      machine's tick, and nopping it disables ALL THREE tracks rather than
+      defeating one hash. The consequence it drew — that #3 is a true positive
+      about a modified card — is backwards: with the tick dead the provider has
+      nothing to report. Kept for the disassembly, which was sound, and as the
+      standing example of a 7-agent workflow agreeing on a wrong conclusion
+      because every agent was handed the same framing ("find the integrity
+      checker") and none was asked what the function actually WAS.
+      **★★★★★ VERIFIED 2026-08-21 BY A 7-AGENT ADVERSARIAL RE WORKFLOW — the
+      diagnosis is now proven and my earlier “digest mismatch” wording is
+      CORRECTED.** Two independent disassembly traces plus two skeptics who
+      re-ran every measurement on the two ELFs:
+      • The 4-byte patch at vaddr 0x2e15c4 nops the PROLOGUE of the game's
+        ONLY whole-file keyed-hash integrity checker (fopen “rb” / fread the
+        body [0,size-20) / memcmp against the 20-byte trailer digest). Proven
+        by compiler semantics: the rootfs epilogue at 0x2e1758 pops exactly
+        the 8 registers the prologue pushed, so `bx lr` is a deliberate
+        nop-out and the ROOTFS is the untouched original. Not an emulation
+        artifact — the 4 bytes are on-disk in the card binary.
+      • CONSEQUENCE: the nop DISABLES the check (it returns on entry), so the
+        digest mismatch is NEVER COMPUTED at runtime. #3 is NOT the memcmp
+        firing — it is the fingerprint of a self-integrity check that was
+        deliberately defeated, with the 20-byte trailer left stale rather than
+        re-signed. Self-referential: the hash covers the checker's own bytes,
+        so nop-ing the checker is the only way to ship a modified body.
+      • The exact provider that prints the literal “GAME VALIDATION ERROR #3”
+        stayed UNLOCATED (that agent errored on its output cap); most likely a
+        separate watchdog noticing the check never reached its “validated”
+        terminal state. This does not change the verdict.
+      **▼ THIS VERDICT IS WITHDRAWN 2026-08-23 — see the reversal at the top.
+        The card IS modified (that half stands, and the diff is now against
+        the stock Release card rather than an assumed-clean rootfs copy), but
+        the modification makes the banner IMPOSSIBLE rather than deserved, so
+        there is no whitelist decision for David to make and no clean-card
+        decision either. Kept because the "do not suppress a real check"
+        reasoning is right in general and will be wanted again.**
+      **THE VERDICT, and it is DAVID'S CALL, not an emulator bug:** turtles'
+        #3 is a TRUE POSITIVE about a genuinely modified card. There is no
+        honest emulator fix — suppressing or spoofing it would re-defeat a
+        real shipped check and could hide OTHER modifications riding under the
+        nopped self-hash (only ./game was diffed; the rest of the card was
+        not). Options: (a) accept/whitelist THIS card knowingly; (b) use an
+        unmodified turtles card. **NEITHER is something to do without David
+        saying so.** Note item 63's zero-visibility work, if it lands, would
+        also hide this banner by skipping the whole Tech Alerts screen — which
+        may make the choice moot for the upscaled card.
+      **★★ BUILT AND DESK-VERIFIED THIS PASS (branch item/62): per-card
+      zImage staging.** `getboot.sh` now carries a size+mtime stamp
+      (`/mnt/boot/.pad_card_stamp`, item 34's lesson: not the path) and
+      `cardmount.sh` calls it on BOTH its exits — fresh mount and rejoin —
+      from `$IMG`, not `$SRC`, because the cache copier's dd does not
+      preserve mtime, so the copy is a different identity and the stamp
+      would thrash between the two paths. Tested four ways at the desk
+      against a throwaway rootfs: stages turtles' partition, skips on the
+      stamp, restages on a different card, failure is a warning not a die.
+      **★★★ AND THEN THE DIAGNOSIS FAILED ITS OWN MEASUREMENT, which is why
+      this is 40% and not closed:** turtles_pro's card and godzilla_pro's
+      card ship the BYTE-IDENTICAL kernel — zImage md5
+      `5bffdb676ba17b44248f2ad3621e6647`, dtb `ef9c01fa…`, both 6,041,256
+      bytes — and the rootfs' staged copy is that same file. So turtles
+      raises `GAME VALIDATION ERROR #3` WITH THE CORRECT KERNEL ALREADY IN
+      PLACE, and the wrong-zImage theory cannot be why. The staging is still
+      right (a future card with a different kernel would break exactly as
+      diagnosed, and the fix costs a stamp check per mount), but it will NOT
+      clear turtles' banner.
+      **What #3 means on turtles is therefore UNKNOWN.** The godzilla mapping
+      (`V[+44]` in {2,3}, the ZK kernel track) is godzilla-ELF knowledge; the
+      addresses, the track order and even the #N numbering may differ in
+      turtles 1.59. Both ELFs encrypt the `/mnt/boot/zImage` string (0 hits
+      for `mnt/boot|zImage` in either), so this is the encrypted-blob module
+      and the godzilla instruments (`PAD_VAL_DUMP`'s 0x249e00..0x24c2c0
+      caller filter, `obfstr.py`'s 0x6438bc table) are all title-locked.
+      **Resume:** cheapest first — boot turtles_pro with `PAD_OPEN_LOG=1`
+      and see whether the game even opens `/mnt/boot/zImage` and what else
+      the validation sweep touches; that decides between "a different track
+      is failing" (likely: the asset sweep, or `./game`'s own GE trailer on
+      an UPSCALED card whose game file was modified — David's card is
+      `turtles_pro-1_59_0.1987-upscaled`, and a retrofitted card is exactly
+      what a validation module exists to catch) and "the module is
+      different". THE UPSCALED-CARD THEORY FITS THE EVIDENCE AND THE KERNEL
+      THEORY DOES NOT: the kernel is stock, but if the upscale rebuilt
+      assets or the ELF, GE/asset tracks would fail on real corruption —
+      i.e. the banner may be TRUE and the fix is a whitelist decision for
+      David, not a staging bug. Then, if needed, find turtles' descriptor
+      table with `obfstr2.py` (it recovers keys from ciphertext alone).
+      *(Filed 2026-08-21 from David, looking at
+      a turtles_pro boot: "how do we fix these errors though?")*
+      **DIAGNOSED AT THE DESK, no run needed, and it is a one-line-shaped
+      fault with a general blast radius.** The ZK track validates the KERNEL:
+      it mounts the boot partition, `fopen`s `/mnt/boot/zImage`, hashes the
+      WHOLE file and grades it — `ZK = 3 (E)` when the file is missing, `2 (F)`
+      on a digest mismatch — and provider `0x24a018` raises `#3` when
+      `V[+44]` is **2 OR 3**, so a WRONG zImage reads exactly like a missing
+      one. `getboot.sh` puts the card's real zImage there and nothing is
+      faked; the guest hashes the same bytes the machine has.
+      **THE BUG IS WHEN IT RUNS.** `getboot.sh` is called from ONE place,
+      `rootfs.sh:196`, i.e. at ROOTFS BUILD time. The rootfs is built once and
+      shared by every title, so `/home/david/spike2root/mnt/boot/zImage` is
+      dated **Aug 3** and is godzilla_pro's. Every other card therefore
+      hash-MISMATCHES and shows the banner — which is why this looked like a
+      godzilla-only success for weeks: godzilla is the title the rootfs was
+      built from.
+      **Fix:** re-run `getboot.sh` for the card actually being started when it
+      differs from the one staged, the same shape as the card cache's stamp
+      (item 34 is the cautionary tale about what to key that stamp on — do not
+      key it on the PATH). Stamp the staged card's identity beside the zImage
+      so a re-run is skipped when it already matches.
+      **Acceptance:** boot turtles_pro and godzilla_pro back to back and state
+      that neither shows `GAME VALIDATION ERROR` on the glass, with the second
+      boot logging that it re-staged rather than silently reusing.
+      — S2: play is not blocked (David played turtles with it on screen), but
+      it is a scary red banner on the first screen of every non-godzilla run
+      and it makes every other item's screenshots harder to read. D2: the
+      mechanism is fully established above and `getboot.sh` already exists and
+      works; what it costs is the staging logic plus one confirming pair of
+      boots.
+
+- [x] **69. turtles_pro DOES NOT BOOT any more: the guest dies during asset
+      loading, silently, before the framebuffer or the node bus ever start.**
+      `S1 D3` **★★★ CLOSED 2026-08-23 — it was a corrupt per-title FILE STORE,
+      not code.** Moving `$PAD_ROOT/data/nv/turtles_pro/` aside and letting the
+      game recreate it restored a full boot immediately: `nb=431 fb=60 ifs=250`,
+      1598 frames, against `nb=0 fb=0 eglshim=4` before. The parked copy is at
+      `~/item62/nv-turtles_pro.parked` if anyone wants to work out what in it
+      was fatal.
+      **The bisect was the wrong instinct and is worth remembering as such.**
+      Only ONE commit touched `tools/spike2_emu` in the whole window
+      (`7fbc01a`, v0.153.0), so there was nothing to bisect BETWEEN — and a
+      build from **v0.152.2**, the last release before it, stalled exactly the
+      same way. That one run is what proved the fault was not in the repository
+      at all and turned the search towards machine state. Without it I would
+      have spent the afternoon reverting shim hunks.
+      **Still open as a question, not as work:** how the store got into that
+      state. Its `.crc32` companions and data files are written separately, and
+      a run always ends in SIGKILL, so a half-finished record is easy to
+      imagine — but orphaned `.crc32` files turn out to be NORMAL (godzilla_le
+      has them and boots), so that is not by itself the fault. Whether the rig
+      should detect an unloadable store and reset it, rather than leaving a
+      title permanently unbootable, is a design call for David.
+      *(Filed 2026-08-23 while trying to verify items 62 and 55 on
+      turtles at David's ask — it blocked both, and was worse than either.)*
+      **The signature:** every boot reaches ~190-244 `[ifs]` scene opens, 4
+      `[eglshim]` lines, and then the guest process is simply GONE — thread
+      samples at 75 s, 95 s and 115 s all report no `game` process. A healthy
+      turtles boot (`~/t63k.log`, 2026-08-21) reaches `[fb]` after 228 `[ifs]`
+      and goes on to 437 `[nb]` and 362 `[eglshim]`. **No crash line of any
+      kind** — zero hits for `signal 11` / `segv` / `uncaught target` across
+      eight logs — so it exits silently rather than faulting, which is NOT the
+      item-41 crash shape.
+      **RULED OUT, each by its own run (D,E,F,G,I,J,K + a desk check):**
+      • not the rig — Heisei/godzilla_le boots perfectly throughout, 431 `[nb]`,
+        5095 frames at 42 fps, immediately before and after the turtles runs;
+      • not the card — `./game` still hashes `adb50ca387cf6c26f7d5baf140c6e8dc`
+        and the partition table reads clean;
+      • not the nvram edit from item 62 — run G restored the original and it
+        stalls identically;
+      • not the instruments — run F with nothing but frame capture stalls too;
+      • not item 63's cabinet at-rest word — `PAD_CAB_IDLE=0` changes nothing;
+      • not the stale fuse mount run D left behind — a fresh mount stalls too;
+      • not disk or memory — 30 GB free, 28 GiB RAM free.
+      **It is a REGRESSION and the window is narrow.** turtles last ran
+      healthily on 2026-08-21 (`t63k.log`), and `data/nvram-turtles_pro.bin` is
+      stamped 2026-08-22 14:39, which is David's own last turtles session. Main
+      has since taken v0.153.0, v0.154.0, v0.155.0 and the PAD-80/81 work.
+      **Resume:** bisect main across that window, rebuilding the shim each step
+      — `git -C <main> log --oneline v0.152.2..HEAD -- tools/spike2_emu/` is the
+      short list, and the shim is the only thing that could kill a guest
+      silently. Then re-check with the thread sampler in `c:\tmp\pad62_runL.sh`,
+      which is what proved the process is dead rather than hung.
+      — S1: the title cannot be played at all, and it blocks items 55 and 62's
+      turtles acceptance. D3: needs a run per bisect step and the fault appears
+      on every single boot, so it is reproducible on demand.
+
+- [x] **63. Straight from the game's own Stern splash to attract, with NO Tech
+      Alerts screen.** `S2 D3` **★★★ CLOSED 2026-08-21 — acceptance MET and
+      confirmed on the glass; David: “no this is perfect. let's /finish it.”
+      Awaiting `/finish`.** The stated acceptance was no Tech Alerts screen and
+      a boot straight to attract; both are met (godzilla, zero input, boots
+      Stern-splash → attract, proven). Root cause + one-line `hwshim.c` fix are
+      in the detail below. **David DECLINED the Guided-Setup follow-on** when
+      offered — it is preserved as item 64 so the finding is not lost, not
+      because it is being worked. The reframe history (node-board readiness,
+      the reverted STARTING UP overlay) is kept below because its dead ends
+      were expensive.
+      *(Filed 2026-08-21 from David; REFRAMED 2026-08-21 by David after the
+      first approach was built and rejected — see the revert below.)*
+      **★★★ DAVID REFRAMED THIS, and the reframe IS the item now:** *"i don't
+      want a 'loading screen' overlay. i wanted the stern loading screen to be
+      shown instead... it goes from the loading splash screen straight to tech
+      alerts too early (before all the node boards are ready). can't we make
+      the 'node boards' ready earlier during the loading screen? ideally, we
+      go straight from loading splash to attract without seeing any tech
+      alerts screens and we do not have our own loading overlay."*
+      **★★★★★ MEASURED 2026-08-21, AND IT REFUTES THE PREMISE — David's AND my
+      own reframe. “Make the node boards ready → straight to attract” DOES NOT
+      WORK, because the wait is NOT caused by alerts.** Clean experiment on
+      godzilla (unmodified card, `PAD_AUTO_ATTRACT=0`, `PAD_SW_EXERCISE=0`,
+      ZERO input of any kind): the alert probe read **live entries: 0 on all
+      101 dumps** across the whole boot — no provider ever active — and the
+      glass sat on **“Tech Alerts / No Technician Alerts” from 12 s to 140 s
+      with no change** (`seq_12..seq_140.png`). The game NEVER advanced to
+      attract on its own. So the Tech Alerts screen is an UNCONDITIONAL boot
+      checkpoint that waits for an operator acknowledgement (a button press),
+      independent of whether any alert is active. This is the handoff's old
+      conclusion — “no state to save, only waiting to skip... the honest way
+      to skip waiting for an operator is to BE the operator” — now proven on a
+      genuinely zero-alert boot, which had never been isolated before.
+      **A trap this experiment cleared:** with the switch exerciser ON, the
+      SAME boot advanced off Tech Alerts to the SERVICE MENU at ~57 s — not an
+      auto-advance, but the exerciser's switch activity walking the game one
+      screen forward (handoff 2400: “a press after Tech Alerts walks INTO the
+      service menu”). Only the zero-input run tells the truth.
+      **SO THE NODE-BOARD FIX IS NECESSARY-BUT-NOT-SUFFICIENT AT BEST, AND NOT
+      THE LEVER.** Node 2 on turtles not registering is a real defect worth
+      fixing on its own (it makes Tech Alerts show a red row rather than
+      “No Technician Alerts”), but clearing every alert still leaves the game
+      parked on the screen. What actually gets past it is the operator ack,
+      which `autoattract.sh` already supplies — just ~19 s in, after it waits
+      for the node bus to go quiet, which is WHY the screen is visible.
+      **THE REAL QUESTION, and it is DAVID'S to answer because he knows the
+      hardware:** does a REAL machine stop on “Tech Alerts / No Technician
+      Alerts” and wait for a button, or go straight to attract? If it WAITS,
+      then “no Tech Alerts at all” is not how the real machine works either,
+      and the best honest outcome is a FAST auto-ack (press as early as the
+      game will accept it — the timing window in the handoff's “when the game
+      becomes willing” work — so the screen flashes rather than lingers). If
+      it ADVANCES on its own, then our parking is an ARTIFACT and the lever is
+      whatever the game waits on that we are not satisfying — the Insider
+      “No Connection” state in the corner and the coin-door/boot-complete
+      state are the first suspects. Not yet investigated; needs David's answer
+      to know which path is even real.
+      **★★★★★ THE EXIT MECHANISM IS NOW REVERSE-ENGINEERED (6-agent RE workflow,
+      3 tracks + 2 skeptics, all HIGH confidence and mutually consistent).**
+      The parked “Tech Alerts / No Technician Alerts” screen is the C++ class
+      **`MenuPageLandingPage`** (vtable 0x6952c0); “No Technician Alerts” is
+      just what it renders when its alert vector is empty. Its per-frame update
+      (`0x4e29bc`) advances the boot ONLY by draining a single-slot event
+      MAILBOX at global **`0x7ac9c8`**: when that mailbox holds a pending event
+      with **code==1**, the update stores the value and calls `0x25c040`
+      (posts internal msg 0x3d) — the sole state-advance trigger.
+      **PROVEN CLEAN NEGATIVE, so nobody re-hunts it:** that mailbox has
+      EXACTLY ONE writer (`0x21b9a4`), reached from EXACTLY ONE caller
+      (`0x521a08`) inside a HARDWARE-INPUT decoder (`QrOfflineListener`,
+      0x521940) that posts code==1 only for a decoded input event (a button).
+      Zero pointer refs to the writer, so it is not a timer/callback. **No
+      timer, no boot-complete flag, no connectivity/“connected” read, no
+      coin-door, no node-bus signal writes that mailbox.** The offline “No
+      Connection” and the OTP/VERSION polling are cosmetic and are NEVER read
+      by the exit. So there is NO environment condition our emulator fails to
+      satisfy on this screen — it genuinely advances only on an input event,
+      which is exactly why it parked 12s→140s with zero alerts and zero input.
+      **THE CONCRETE FIX THIS HANDS US:** the shim shares the address space,
+      so it can POST THE ADVANCE EVENT ITSELF — write code=1 into mailbox
+      `0x7ac9c8` (set +4=code, +8=value, +0xc=pending) the instant
+      `MenuPageLandingPage` is up. The screen would drain it on its very first
+      update and advance BEFORE it is ever presented — potentially true
+      zero-visibility, done at the event level, cleaner than a physical
+      SERVICE BACK press (no ~19 s bus-quiet wait, no service-menu timing
+      trap). This is buildable in `hwshim.c`.
+      **TWO THINGS TO CONFIRM BEFORE TRUSTING IT (RE + one run):** (1) where
+      internal msg 0x3d actually goes — it must lead to ATTRACT, not into the
+      service menu (`0x25c040` handles msgs 0x3c/0x3d/0x3e; not fully traced).
+      (2) the ENTRY-SIDE question, which is the real “why does a real machine
+      differ”: what SELECTS `MenuPageLandingPage` as the boot screen instead
+      of driving attract directly? Both Track A and Track C flag a possible
+      PARENT layer (a MenuSystem / attract-starter) that a real machine may
+      use to go straight to attract, gated on a boot/subsystem-ready condition
+      our emulator never asserts. NOT traced — if a removable artifact exists
+      for TRUE hands-off zero-visibility, it lives here, one layer up from the
+      exit. That is the next probe.
+      **★★★★★ ROOT CAUSE FOUND AND VERIFIED (a second 6-agent workflow: 3 tracks
+      + 3 skeptics, all reproducing the disassembly independently). THE BOOT
+      DEFAULT IS ATTRACT; WE ARE PUSHED INTO THE MENU BY A SPURIOUS SERVICE
+      INPUT.**
+      • `main` (0x1c2d0) writes the top-level mode bitfield 0x7aba5a := 0x10
+        UNCONDITIONALLY (bit4 = attract/idle; menu bit 0x100 CLEAR). No
+        readiness / config / identity / connectivity flag is read before it.
+        So the code-level boot default is ATTRACT, not the menu. Every named
+        ready-flag (node-bus-ready registry 0x7e1800, version globals,
+        0x706464, 0x6fc236, 0x6c5d38) is RULED OUT as the boot gate. The
+        “removable ready-flag a real machine asserts” hypothesis is REFUTED.
+      • The operator menu (MenuPageLandingPage = the parked “Tech Alerts”
+        screen) is shown ONLY when menu bit 0x100 is set, and bit 0x100 has
+        EXACTLY ONE setter in the whole binary: `MenuSystem::open` 0x23b21c,
+        reachable at boot ONLY via the service-button toggle 0x417a70 ←
+        0x521a60, inside the hardware-input decoder `QrOfflineListener`
+        0x521940, on **event OPCODE 19 (the MENU / service button)**. Zero
+        boot/timer/event-bus/callback path opens it; the listener has no tick.
+      • CONCLUSION (adversarially verified): a real cabinet — coin door
+        closed, no service button pressed — never receives opcode 19 and runs
+        attract. **WE LAND ON THE MENU BECAUSE OUR SWITCH/NODE INPUT LAYER
+        DELIVERS A SPURIOUS SERVICE-BUTTON (opcode 19) EVENT AT POWER-UP.**
+        The fix is in the INPUT layer, not any game flag — exactly David's
+        “it’s an artifact” instinct, now proven.
+      **★ THE LIKELY CULPRIT, from the clean-boot switch-table dump
+      (crux2.log): every service button reads `raw=0 logical=1` at boot —
+      Service Select/Plus/Minus/Back (ids 25–28, node 0 bits 8–11).** They
+      are active-low, so raw=0 presents as PRESSED. If the game reads a
+      service button as pressed at power-up (before the real node scans
+      settle it open), that IS the opcode-19 menu-open. STRONG LEAD, NOT YET
+      PROVEN LIVE — the dump is the shim’s table enumeration, not a captured
+      live read; opcode 19 must be caught being delivered.
+      **Resume (the confirming experiment + fix):** (1) hook `QrOfflineListener`
+      0x521940 in `hwshim.c` to log every call with its opcode and the source
+      switch, boot godzilla, and confirm opcode 19 fires at power-up and which
+      switch/bit produces it. (2) Fix the input layer so service buttons
+      (ids 25–28 / the opcode 13–22 range) read OPEN/not-pressed from the
+      first node scan — likely the shim’s initial node-0 switch state, or an
+      edge synthesized before the real scan. (3) Verify: godzilla boots
+      Stern-splash → attract with NO Tech Alerts screen, zero input, on the
+      glass. This is also the general fix (all titles, all cards — including
+      the upscaled turtles, whose validation banner would then never be shown
+      either, since the whole screen is skipped). D5 → D4: the mechanism is
+      known and the fix is a bounded input-layer change plus one run.
+      **★★★★★ FIXED AND CONFIRMED ON THE GLASS 2026-08-21 (`hwshim.c`).** The
+      cabinet SPI at-rest fallback (`ff0f0f...`, service buttons OPEN) was
+      gated on `sw_table_hopeless()` (= `sw_find_fails>=4`, true only for a
+      title whose table NEVER resolves). During a NORMAL title's early-boot
+      window — first SPI transfer until the switch table resolves ~3.5 s —
+      `sw_scan_bytes()` also returns 0 but hopeless() is still false, so the
+      fallback did not fire and the RX buffer was left untouched = the
+      all-made word. Active-low: all-made = every cabinet switch pressed,
+      INCLUDING the MENU button → the game opened the operator menu (the Tech
+      Alerts landing page). The fix fires the at-rest word on `!have` alone.
+      **PROOF:** godzilla, ZERO input (autoattract OFF, exerciser OFF), now
+      boots Stern-splash → ATTRACT (PLAYER 1 / high-score reel) on its own,
+      NO Tech Alerts screen ever (fix_0..fix_40.png). Previously it parked on
+      Tech Alerts 12s→140s. General fix: every title/card, and it makes the
+      upscaled-turtles validation banner moot too (whole screen skipped).
+      **★ TWO DOWNSTREAM SCREENS REVEALED (hidden behind the Tech Alerts park
+      before; NOT caused by this fix) — the remaining work for a fully clean
+      “splash → attract and STAY”:**
+      (1) a node-4 **“UPDATING NODE BOARD RUNTIME / UPDATE FAILED”** banner
+      over attract for ~40 s — this is **item 55** (a mis-derived node
+      firmware version; godzilla node 4 here, turtles nodes 4/12 there).
+      (2) a first-boot **“Guided Setup”** wizard (~70 s in): Language/Country/
+      Pricing/Volume, and **“Stern Insider Connected: this machine has an
+      invalid [key] — contact your distributor”.** The machine is unconfigured
+      / Insider-unregistered, so it prompts setup. On a real machine the
+      operator completes it once (Save & Exit) and it persists; OUR open
+      question is whether our config/NVRAM persists it so a second boot skips
+      it — if the invalid-Insider state forces it every boot, that is its own
+      layer. autoattract used to walk past BOTH Tech Alerts and this wizard
+      with its two presses, which is why item-59-era godzilla runs reached a
+      clean attract; with the phantom press gone, the wizard is what is left.
+      **Resume:** (a) the CORE ask — no Tech Alerts, boots to attract — is
+      DONE and proven; (b) decide with David whether “attract and STAY” needs
+      the Guided-Setup layer chased (test config persistence: complete Save &
+      Exit, reboot, does it skip?), which ties to the Insider-registration
+      state; (c) node-4 banner is item 55, now visible. This item’s own
+      acceptance (Tech Alerts gone, splash→attract) is met; whether to fold
+      the wizard in or split it is David’s call. D3 now the mechanism and fix
+      are known and shipped.
+      **Resume:** (a) build the shim mailbox-post and test on a godzilla run —
+      does the boot go splash→attract with the Tech Alerts screen never (or
+      sub-frame) visible, landing in ATTRACT not the service menu; (b) if it
+      lands wrong, trace msg 0x3d; (c) for true hands-off, RE the entry-side
+      boot-screen selection (the parent attract-starter). D5 stands; the
+      mechanism is cracked but the entry-side and a run remain.
+      **THE OVERLAY WAS BUILT, VERIFIED ON THE GLASS, THEN REVERTED — wrong
+      approach, and the lesson is mine.** A STARTING UP cover in `padglhost.c`
+      passed all four of its own acceptance points on turtles (the captures
+      are in the item/63 history at `5938acc`/`5452986`), and it was still the
+      wrong thing: David wants the game's OWN splash, not ours, and he wants
+      the Tech Alerts screen to not HAPPEN rather than be hidden. `5938acc`'s
+      `padglhost.c` + `watch.sh` changes are reverted to `d11fde7`; item 59's
+      switch exerciser on the same branch is untouched.
+      **THE GOAL, restated as a mechanism:** the game shows its Stern splash
+      while it brings the node bus up, and leaves the splash for Tech Alerts
+      the moment it evaluates its alert providers. If every alert is clear by
+      that instant, the game has nothing to show and (David's model, to be
+      confirmed — see THE CRUX) goes straight to attract. So the work is to
+      make every provider quiet BEFORE that evaluation, on its own boot.
+      **THE CRUX, and it decides whether this is even the right mechanism —
+      MUST be answered on the rig before building anything:** does the game
+      show the Tech Alerts screen UNCONDITIONALLY (and wait for an operator
+      ack, which `autoattract.sh` currently supplies with a Service Back), or
+      ONLY when at least one alert is active? The handoff's "waits on Tech
+      Alerts for an operator, exactly as a real machine does" was written when
+      alerts WERE active, and godzilla still takes 2 Service-Back presses even
+      with its switch audit and node boards clear — which HINTS the screen is
+      unconditional, but a second screen after Tech Alerts also needs one
+      press, so the count does not settle it. The clean experiment is a
+      godzilla boot (unmodified card, node fix already makes its boards ready,
+      switch audit persisted-clear from item 59): if it still shows Tech
+      Alerts, the screen is unconditional and the fix is to make the game SKIP
+      it, not to clear alerts; if it goes straight to attract, clearing alerts
+      is the whole job.
+      **THREE PROVIDERS FEED THAT SCREEN, and they are NOT one problem:**
+      **(1) NODE BOARDS.** On godzilla the existing `nb_nodes_add_boards()`
+      (`hwshim.c`, `PAD_NB_SCHED_BOARDS`) already makes the LED boards ready by
+      ~12 s and the screen reads `No Technician Alerts`. On TURTLES it does
+      not: node 2 (a real `ws2812node` LED board in turtles’ own table) shows
+      **Not Registered** — `(flags&1)==0`, i.e. it never REGISTERED, which is
+      a deeper failure than godzilla's LED boards (those registered but were
+      not SERVICED = `Not Responding`, `(flags&2)==0`). Registration is
+      `0x5a2e10`: it sends `0xfe`, reads the board's part id `[4..7]`, and
+      linear-scans it against the 28-entry LPC part table at `0x69cc24`; a
+      MISS stores the "Unknown" descriptor whose `+20` is 0, and `+20` is
+      what `0x59ec1c` tests before sending any subcommand ≤ 0xef — so an
+      unrecognised part id means the board is never registered. turtles’
+      `node_ident.txt` gives node 2 `part=0x2c40102b`; the open question is
+      whether that part id is in the `0x69cc24` table or is being answered
+      wrong by the shim. Node 14 (also `ws2812node`) was seen CLEARING, so
+      whatever ails node 2 is not all `ws2812node` boards. **This overlaps
+      items 51/52/53/55 (node identity / directory / group map) and should
+      borrow their instruments, not re-derive them.**
+      **(2) THE VALIDATION ERROR — THE HARD CONSTRAINT, and it is why “straight
+      to attract” is IMPOSSIBLE ON DAVID’S SPECIFIC CARD.** `GAME VALIDATION
+      ERROR #3` on turtles is item 62: the `1987-upscaled` card’s `game`
+      binary is deliberately code-patched (one function nopped to `bx lr`, 4
+      bytes in `.text`) with a stale validation trailer, so the game’s own
+      check correctly flags it. No node fix clears this, and no honest
+      emulator change can (silencing it is the wrong-table mistake of items
+      55/57). So: UNMODIFIED cards can reach zero-alerts; the upscaled turtles
+      card cannot, unless David uses an unmodified turtles card or makes a
+      deliberate operator whitelist decision. **This must be said to David
+      plainly — the node work will not clear his turtles banner.**
+      **(3) THE SWITCH AUDIT** (`CHECK SWITCH #n`) is item 59, done: the
+      exerciser clears it and the verdict PERSISTS, so a second boot has no
+      switch alerts. Not a blocker after the first exercise.
+      **Resume, in rig order:** (a) the CRUX experiment on godzilla — does
+      zero-alerts skip Tech Alerts or park on it; (b) if clearing works,
+      instrument a turtles boot for node 2’s registration: is `0x2c40102b` in
+      the `0x69cc24` part table, and what does the shim answer for node 2’s
+      `0xfe` identify; (c) make node 2 register in time (likely a part-table
+      or identity fix, shared with items 51/55), measured by `flags=3` before
+      the game’s Tech-Alerts evaluation; (d) confirm on the glass an
+      UNMODIFIED card goes splash→attract with no Tech Alerts. Do NOT touch
+      the validation provider.
+      — S2: play is not blocked (the errors clear or are walked past), but the
+      first screen of every boot looks broken, which is what David is asking
+      to end. D4: needs several runs, the mechanism for turtles’ node 2 is not
+      yet known and may reach into the node-identity RE of items 51/55 (which
+      would make it D5), and the CRUX may turn the whole approach from
+      “clear alerts” into “make the game skip the screen”.
+- [ ] **64. First-boot “Guided Setup” wizard appears after attract, because the
+      machine is unconfigured / Insider-unregistered.** `S3 D3` ← DEFERRED
+      *(Filed 2026-08-21, revealed by item 63's fix; David declined to chase
+      it — “no this is perfect” — so this is a PARKED record, not active work.)*
+      Once item 63 stopped the phantom service-button press, godzilla boots
+      Stern-splash → ATTRACT (proven), runs attract for ~40 s (with the node-4
+      banner, item 55), then drops into the game's own **Guided Setup** wizard:
+      Language English / Country U.S.A. / Free Play No / Pricing / Volume, and
+      **“Stern Insider Connected: this machine has an invalid [key] — contact
+      your distributor.”** This is the real machine's first-boot operator
+      config; a registered, configured cabinet completes it once (Save & Exit)
+      and it persists. autoattract used to walk past BOTH Tech Alerts and this
+      wizard with its two Service Back presses, which is why item-59-era
+      godzilla runs reached a clean attract; with the phantom press gone, the
+      wizard is what is left on a hands-off boot.
+      **The open question when/if reopened:** does our config/NVRAM persist a
+      completed Guided Setup so a second boot skips it, or does the invalid
+      Insider key force it every boot? If it persists, the fix is “complete it
+      once” (or seed the config). If the invalid-Insider state forces it, that
+      ties to the QrOffline / Insider-registration layer (item 63's RE named
+      `QrOfflineListener` and the “re-scan to register game” strings). Do NOT
+      spoof a registration blindly — same wrong-table caution as items 55/57.
+      — S3: nothing is blocked (the machine reaches attract; a real operator
+      would do this setup once), it is friction on a hands-off boot. D3:
+      reproduces every boot, one run to test persistence; deeper if it turns
+      out the Insider state forces it.
+
+- [ ] **65. The second-display window is sized from the BACKBOX, so four
+      titles come up stretched or ringed in black — and Venom's is on its
+      side.** `S3 D2`
+      *(Filed 2026-08-23 from PAD-81, the tester who asked for the Compare
+      tab. Four separate reports, one cause plus one gap: Venom — "the
+      secondary screen needs to be set to portrait mode (90 degrees clockwise
+      rotation)" and "should match the native content size (800x480) to avoid
+      stretching"; Stranger Things — "much larger than its asset resolution
+      (368x214), causing large black borders"; The Mandalorian — "needs to be
+      set to 1280x800"; Star Wars — "needs to be set to 480x272".)*
+      **THE CAUSE IS ALREADY WRITTEN DOWN IN THE SHIM'S OWN COMMENT.**
+      `eglshim.c`'s `fbGetDisplayGeometry()` (item 44) answers per display,
+      but its ONLY per-display answer is the pair of env vars `PAD_GL2_W` /
+      `PAD_GL2_H`; with neither set it falls through to `pad_fb_width()` /
+      `pad_fb_height()` — the backbox LCD's size — for every display. The host
+      copies the same default on purpose (`padglhost.c`'s `PADGL_TARGET`:
+      `fb2_w = fb_w; fb2_h = fb_h;` then the same two env vars), so the two
+      sides cannot disagree. Nothing on the machine ever sets them, so **every
+      title's second display is opened at the FIRST display's size**, and
+      `win2_present()` then letterboxes the real content inside it — which is
+      exactly "large black borders" on a 368x214 asset and a stretch on
+      anything whose aspect differs.
+      **So the size half is a MISSING TABLE, not a broken renderer**, and the
+      four numbers above are four of its rows. Where they come FROM is the
+      open question and the reason this is not a five-minute change: a
+      hand-typed per-title list is the "a wrong table is worse than none" trap
+      items 55, 57 and 61 each fell into once. Look first for the geometry on
+      the CARD — the game must know it, it drives the panel — and only fall
+      back to a table if it genuinely is not there.
+      **The rotation half has no mechanism at all.** Item 51's note is the
+      standing warning: "a mirror is not a rotation — `PAD_GL_FLIP` is
+      `uv.y -> 1-uv.y` and could never have fixed this". A portrait second
+      display needs a real 90° step in the `blit_prog` shader `win2_present()`
+      uses, plus a swapped window aspect, and the same "where does the value
+      come from" question as the size.
+      **Acceptance:** venom_le's second window opens 800x480, portrait, with
+      readable (not mirrored) text; stranger_things_le's opens 368x214 with no
+      border; mando_le 1280x800; star_wars_le 480x272 — screenshots of all
+      four, judged ON THE TEXT.
+      — S3: cosmetic, nothing is blocked. D2: the size half is a table plus
+      two env vars that already work end to end; the rotation half is a shader
+      change plus one live run per title to photograph.
+      **★ 2026-08-23, Sam's report (emailed to David) ADDS A FIFTH ROW AND
+      WIDENS THIS ITEM TO THE MAIN WINDOW: james_bond_60th_le — "content is
+      scaled for 800x480 pixels, making the window too large" — and Bond's is
+      DISPLAY 0.** Bond has never targeted a second display (item 44:
+      single-display titles emit zero PADGL_TARGETs; the two-display list is
+      star_wars_le / stranger_things_le / venom_le / mando_le), so this is
+      the SAME missing table one branch earlier in the same function: display
+      0's answer is the fall-through `pad_fb_width()`/`pad_fb_height()`
+      (eglshim.c:346-347) = `PAD_GL_W`/`PAD_GL_H` (glbridge.c:173-174), which
+      watch.sh:98-99 hardcodes to 1360x768 for EVERY title; `win_open()`
+      sizes the main window from the same numbers (padglhost.c:1644; Bond's
+      item-45 run log: "window opened 1445x827" — a remembered winpos size
+      over a 1360x768 fb, oracle frame 1044480 px = 1360x768). The guest
+      scales its scene to whatever it is told, so Bond's 800x480-authored art
+      comes up ~1.7x and ~6% aspect-stretched.
+      **And the first concrete answer to "where do the numbers come FROM":
+      the CARD carries the main-display size as the title's own art.**
+      `assets/lcd/GameLogo.png` IHDR, read off three cardcache images with
+      debugfs: james_bond_60th_le = **800x480**; star_wars_le AND
+      stranger_things_le = **1360x768** — Stern authors standard backbox
+      content at exactly the rig default, which is why nothing else ever
+      looked wrong on display 0. The u-boot env is NOT the table: `videoargs`
+      is byte-identical on every card checked (a generic hardware probe — the
+      real machine asks its panel), so it says nothing per-title. A second
+      candidate source, unmeasured: `fbCreateWindow` (eglshim.c:350-356)
+      DISCARDS the w/h the game asks for — log them on one Bond run before
+      hand-building any table row. No card source is known yet for the
+      SECOND-display rows above.
+      **Added acceptance row:** james_bond_60th_le's MAIN window opens
+      800x480 with the art 1:1, judged on the text. Two cautions for the fix:
+      `PAD_GL_W/H` sizes the guest's whole pipeline before it starts (screen
+      texture padglhost.c:4537, ring header padglhost.c:4738), so a per-title
+      value may orphan Bond's existing save slots (item 36a's class); and a
+      remembered winpos size survives the fix (padglhost.c:1654-1655) — the
+      letterbox keeps the aspect honest but the window stays big until Reset
+      windows.
+      **★ 2026-08-24, Sam again (PAD-84) — THREE CORRECTIONS TO THE ROWS
+      ABOVE, one of which invalidates a shipped census row.**
+      1. **His resolutions are INFERRED, not measured panel specs**: "Regarding
+         the resolutions for the different screens I gave you yesterday, I
+         based them on the size of the videos displayed on them." So
+         368x214 / 1280x800 / 480x272 / 800x480 are the sizes of the CONTENT
+         Stern authored, not necessarily the panel's mode. They are still the
+         right target for "no stretch, no borders" (the guest scales its scene
+         to whatever it is told), but they must NOT be presented as hardware
+         facts, and a title whose art is authored smaller than its panel would
+         break the equivalence. This is the "a wrong table is worse than none"
+         warning above, now with a named mechanism.
+      2. **james_bond_60th_le HAS EXACTLY ONE SCREEN**: "there is only one
+         screen: it's under the playfield and is very small. The backbox
+         doesn't have an LCD screen." That confirms the 800x480 GameLogo.png
+         read and the item-44 observation that Bond emits zero PADGL_TARGETs —
+         Bond is a genuine single-display title, and the small under-playfield
+         panel IS display 0. **CAUTION FOR `ticket/PAD-83` (not yet merged):**
+         `tools/spike2_emu/gl2geom.py`'s census assigns Bond a SECONDARY at
+         800x480, because Bond is the one title carrying `SternLogo` at two
+         sizes and the "smallest other sane size" rule then invents a second
+         display it does not have. Bond must come back with a primary of
+         800x480 and NO secondary. Re-check that row before or right after
+         that branch merges.
+      3. **batman DOES have a second screen, "on the carousel"** — so the
+         240x180 `VideoClipPlayerDisplayElement_240x180` row is real hardware,
+         and PAD-83's finding stands as the open question: our two full runs
+         logged only `fbGetDisplayByIndex(0)`, i.e. the GUEST never asked. Both
+         runs stalled in the service menu (item 64) and never reached attract,
+         so "the TV is only asked for in attract" is still untested — reaching
+         attract on batman is the next measurement, not a shim change.
+
+- [ ] **66. Deadpool and Avengers: Infinity Quest boot on a WHITE
+      background.** `S3 D2`
+      *(Filed 2026-08-23 from PAD-81: "Deadpool: the white background
+      displayed during the 'Startup in progress' boot state is unexpected
+      behaviour", and the same sentence again for Avengers: Infinity Quest.)*
+      Two titles, one symptom, and the real machine's boot screen is black —
+      so this is ours, not the game's. Unmeasured: whether the white is a
+      surface cleared to white under a transparent boot scene (a
+      `glClearColor` nobody set on that title's boot path) or real content the
+      boot scene draws and the machine covers.
+      **Start with `glshot.sh`** (item 51 built it): it writes the screen FBO
+      with no window, letterbox or RAIL proxy in the path, so one shot
+      separates "the pixels handed to GL are already white" from "the draw is
+      wrong" — the same split item 51's own note argues for.
+      **Two titles is the lever.** deadpool_pro and deadpool_le are both on
+      hand and both known-good otherwise (item 57's catalogue audit), and
+      avengers_infinity_le is a third; any title that boots BLACK on the same
+      build is the control.
+      **Acceptance:** deadpool and avengers_infinity boot on black, a
+      before/after shot each, and a black-booting control title unchanged.
+      — S3: cosmetic, the game plays. D2: two titles reproduce it on demand
+      and the instrument already exists.
+      **★ CENSUS WIDENED 2026-08-23, a second external tester (Sam, emailed
+      David), the day v0.156.0 shipped: Iron Maiden, Jurassic Park, TMNT,
+      Rush and Munsters (PARTIAL white) all show the white "Startup in
+      progress" background — seven titles of ~26 now, two independent
+      testers, symptom current.** (TMNT joining says nothing about Sam's
+      build age: its no-boot spell was rig-local machine state, item 69, not
+      shared code.)
+      **Seven titles retire the per-title framing** — "Startup in progress"
+      is engine-common UI, so read the white as ONE mechanism. Desk facts
+      (read 2026-08-23) bound where it hides: the window present clears
+      BLACK before the blit (win_present padglhost.c:2206-2208, win2
+      2455-2457), guest clears pass through verbatim (4076-4084 — the host
+      injects no white anywhere), the blit DISCARDS guest alpha (`o_col =
+      vec4(rgb, 1.0)`, BLIT_FS ~667), and `tex_screen` is created with NULL
+      data and never cleared (4807-4818). Two live hypotheses, and the
+      second now leads: (a) undefined tex_screen ground showing through a
+      transparent boot scene — but drivers commonly hand back ZEROED memory,
+      which this blit would show as black; (b) the guest paints white RGB
+      with transparent alpha that the real machine's display chain
+      multiplies away and our alpha-discarding blit does not — which fits
+      the SAME white on seven titles far better. **Munsters' PARTIAL white
+      is the discriminating datapoint**: whatever its boot scene paints
+      shows over the mechanism's ground.
+      **Instrument caveat found at the desk:** glshot READS the FBO as RGBA
+      (jgl_poll, padglhost.c:3426) but write_png then DROPS alpha (truecolor
+      PNG, ihdr[9]=2 at 2548, bytes 0-2 only at 2556) — so today's
+      glshot.png CANNOT split (a) from (b). The fix session's first move is
+      a small instrument change (RGBA PNG or raw dump), then one mid-boot
+      shot per this item's own prescription.
+      **Acceptance widened:** all seven reported titles boot black (measure
+      deadpool + avengers + one of Sam's five if the mechanism is shared;
+      all seven if not), before/after shots, and a black-booting control on
+      the same build unchanged.
+
+- [ ] **67. The Mandalorian's second display stays blank through attract.**
+      `S3 D3`
+      *(Filed 2026-08-23 from PAD-81: "The Mandalorian: the secondary screen
+      remains blank during attract mode, which is unexpected behaviour.")*
+      **This is item 58's case, with an owner at last.** That item was closed
+      as NOT DEMONSTRATED because nobody could show a title whose
+      second-display window stays dark for a whole run; mando_le was its
+      candidate and was ruled out when a rerun showed real content from frame
+      2. A second person now reports the same title dark, which is the
+      reproduction case item 58's acceptance asked for — with the OPPOSITE
+      conclusion to draw from it: mando has a real (accessory) second display,
+      so the answer is to make it draw, not to hide the window.
+      **The instrument is still there and still read by nobody**:
+      `pic2_check()` (`padglhost.c`, around line 3595) already logs "d2 STILL
+      BLACK after N presented frames" and "d2 FIRST at frame N". Run mando_le
+      to attract and read that line before touching anything — item 58's whole
+      history is two fixes written against a premise no measurement supported.
+      **Ask first whether it is intermittent**: the same title gave both
+      answers on two runs in one session (2026-08-19), which points at
+      attract-cycle timing rather than a dead feed. Bound the run long enough
+      to cover a full attract cycle before calling it blank.
+      **Acceptance:** mando_le's second window shows its content during
+      attract on three consecutive runs, with the `pic2_check` line quoted for
+      each.
+      — S3: cosmetic, does not block play. D3: mostly measurement, and this is
+      the third pass at the same window; the fix cannot be designed until a
+      run says which of "never fed" or "fed late" it is.
+
+- [ ] **68. Neither playfield window says how many switches and lights the
+      title actually has.** `S3 D1`
+      *(Filed 2026-08-23 from PAD-81: "displaying the total count of switches
+      and lights on all virtual playfield windows would be a great feature
+      (even on models with playfield artwork)".)*
+      Half of it exists, and neither half is complete. `Schematic`'s top bar
+      says "`GAME`: N switches, no playfield artwork in this title" — switches
+      only, and worded as a complaint about the artwork. `Field` has no top
+      bar at all; its status strip reports "`%d of %d` inserts lit", so the
+      lamp total appears only ONCE THE GAME HAS WRITTEN A LAMP FRAME, and the
+      switch count never appears. Through boot — which is exactly when someone
+      is asking "did this title's tables load?" — both windows are silent
+      about their own inventory.
+      **One readout, both windows, from tables that are already loaded**
+      (`load_switches()` / `load_leds()` / `load_coils()` in `playfield.py`).
+      Coils cost nothing to add and answer the same question. Single-sourced:
+      two windows spelling one fact differently is the failure this file names
+      on its first page.
+      **The trap to avoid** is `LedGrid`'s roster, which comes from the WIRE
+      and not from a table (item 50) — so on a schematic-view title the honest
+      lamp number before the first LED write may be "not known yet", and
+      printing a table's count beside a grid built from something else would
+      be two numbers for one thing.
+      **Acceptance:** both window shapes show switch / lamp / coil totals from
+      the first frame, before the game writes anything — before/after shots of
+      a title with artwork (godzilla_le) and one without (turtles_pro).
+      — S3: friction, nothing is blocked. D1: the tables are already parsed and
+      both windows already build a bar; `Field` needs one packed above its
+      canvas (mind `pick_scale`'s chrome budget).
+
+- [ ] **70. Tester report (Sam, 2026-08-23): "Node board 10 not found" on
+      Iron Maiden, "Node board 7 not found" on James Bond 60th.** `S2 D3`
+      *(Emailed to David 2026-08-23, on "the latest game code versions". His
+      build is unknown — ask for a run log; its `[nbid]` line says in one
+      grep whether his identities came from the derived table or the
+      built-in godzilla one. But do not close this as item 55 by proxy: NOT
+      FOUND is the DISCOVERY family — a graded board was already found — and
+      no commit between 22e5823 and v0.156.0 touches nb_nodes_init /
+      nb_nodes_add_boards / nb_next_node, so the hole below is in current
+      main.)*
+      **The tell: both reported nodes are SWITCHLESS boards of their
+      titles.** iron_maiden_le's switches sit on nodes [0,1,4,8,9]; its node
+      10 is a ws2812node. james_bond_60th_le's sit on [0,1,4,6,8,9]; its
+      node 7 is a pinnode (code 18). Both carry full measured rows in their
+      own derived node_ident.txt, hexes shipped on card — the roster FILES
+      are fine. (The switchless sets are larger — maiden also 2/12/13, bond
+      also 2/12/14 — and why exactly ONE per title is reported is
+      unexplained: required-board flags? PAD_NB_SILENT census? The boot
+      below answers it.)
+      **The mechanism: the game can only discover what the shim's `00`-poll
+      schedule names** (nb_next_node, hwshim.c:6391-6414), and nb_nodes_init
+      (6305-6388) seeds that schedule from the SWITCH table, so a switchless
+      board enters only by conditional routes, each with holes: the
+      node-directory merge (6335-6343) runs ONLY on a FILE-installed switch
+      table and only for loaded nb_fident_have ids; a MEMORY-found table —
+      bond, on record: `[swfind] found the switch table: entry[] at
+      0x007d2680` — skips the merge BY DESIGN on the godzilla-measured
+      assumption that nb_nodes_add_boards() (6278-6293) covers it, which
+      needs the by-shape board array to resolve AND the game to have already
+      registered the board: the chicken-and-egg the stranger_things comment
+      records at 6350-6364 ("no board object is ever created ... NODES NOT
+      FOUND"). Even godzilla's switchless boards registered by "some slower
+      path" (6262) nobody has explained. Which route each REPORTED title
+      actually dies on is for the boot to say, not this entry.
+      **Instrument, one card boot per title, GUI path, no overrides — the
+      log already names every link:** `[nbsched] playfield nodes: ... (from
+      <source>)`, `[nbid] N node identities from ...` vs per-node
+      `(built-in)`, `[watch] node identity: N boards derived` vs `derivation
+      failed` (Sam runs LATEST game code; our tables derive from
+      1.19.0/1.30.0-era cards), `[nbobj] board objects found by shape` vs
+      `no self-labelling board array after 3 scans`. Then the glass.
+      **Likely fix, to be confirmed by the boot, not assumed:** seed the
+      schedule from the title's own node directory on EVERY route — merge
+      nb_fident_have into the memory-table branch too — instead of only when
+      sw_ftab_installed. On godzilla the added ids are boards add_boards
+      already names, so the change is a no-op where the assumption held.
+      **Cross-link:** bond's not-found node 7 is plausibly the board its
+      GROUP-8 devices live on (the trough-coil loose end below; item 53's
+      groups 8/9) — the PAD_COIL_PROBE capture that closes that loose end
+      and this item's bond half may be the same run.
+      **Acceptance:** iron_maiden_le and james_bond_60th_le each boot from
+      card with the reported node in the `[nbsched]` roster (or registered
+      via add_boards), no NOT FOUND on the glass, the log stating which
+      route seeded it; godzilla_pro and turtles_pro unchanged.
+      — S2: the titles play, but a real board's devices are dead, the fault
+      is on the glass for every tester, and item 53's bond work may sit
+      behind it; on game code that gates bring-up on a required board it
+      would be a wedge. D3: two instrumented boots, a one-branch schedule
+      change, regression boots on two known-good titles — graded from the
+      desk; neither title's failure has been reproduced on this rig yet.
+
+- [ ] **71. dungeons_and_dragons_le draws its 255-device map on a BLANK
+      field while the card ships the exact drawing the map names.** `S3 D2`
+      *(Filed 2026-08-23 from Sam's report: "playfield artwork doesn't
+      display (though the map is present)" — Dungeons & Dragons, X-Men,
+      Jurassic Park. Only the first is a bug; the census below answers the
+      other two.)*
+      The device table names its layout image `TestMode/Rope_LE-Premium-X8-
+      X9_TOP_rotated_edit_cropped` (229 of 255 records on it) and the card
+      ships exactly that file at 313x710 with every coordinate inside it
+      ("229 playfield records, 0 outside the 313x710 artwork" — cardaudit;
+      max x=303, y=654). It never reaches the window because
+      `gameinfo.find_playfield_art()` keeps only filenames containing
+      "playfield" (gameinfo.py:248) and D&D names its drawing after the
+      codename Rope; king_kong_le survives the identical TestMode pattern
+      only because Stern spelled "Playfield" inside the Rodeo filename. So
+      the art is not REFUSED — `layout_art()`'s size gate never sees it, and
+      it would pass — it is never FOUND, and layout_art()'s docstring
+      already names the disease: the table name and the file lookup "are
+      found by two unrelated pieces of code" (playfield.py:2146-2152).
+      **The fix is to stop guessing when the guess fails:** if the token
+      match finds nothing, resolve `devicexy.layout_image()`'s own name
+      against `assets/nuk/images/<image>.png` — the table says which picture
+      it was authored on. Mirror it in cardaudit.py:111 (a whole-word
+      variant of the same filter; they agree on every filename at issue),
+      which is why README.md's table calls this card "none shipped" about a
+      drawing it ships. elvira3's `System/TestMode/universal_topper_scaled`
+      is a candidate the fallback may start finding — harmless
+      (layout_is_usable() still routes elvira3 to Schematic), but check it
+      in the sweep.
+      **This corrects item 57's close note** (~line 863: "genuinely ship no
+      CAD drawing at all (confirmed: no `Test` or `TestMode` folder
+      exists)" — the DnD card HAS TestMode with three drawings; the
+      `games/<title>/` stub dir is just empty outside a run,
+      gameinfo.py:74-78) and README.md's D&D rows.
+      **Census for Sam's other two, answered not chased:** uncanny_xmen_le
+      0.97.0 and jurassic_park_le 1.15.0 carry ZERO device records and their
+      cards ship NO `Test/` or `TestMode/` directory at all (read directly
+      off both cards: images/ holds only Connectivity/System) — their "map"
+      is item 50's designed schematic/LED-grid view; nothing on those builds
+      exists to draw. Known behavior, not this item — and per-build: a newer
+      Stern release could start shipping both (README.md:79-83 makes exactly
+      this point for godzilla_le).
+      **Acceptance:** a bounded dungeons_and_dragons_le run opens the
+      artwork view with the Rope drawing behind its markers (screenshot);
+      cardaudit.py over all card images changes ONLY the D&D row (plus
+      possibly elvira3's art column); mktables caches
+      `tables/dungeons_and_dragons_le/playfield.png`; README.md's D&D row
+      and the "genuinely ship none" list corrected.
+      — S3: cosmetic — the map, the switches (104 live) and the game work
+      today. D2: the failing filter and the table-side name are both
+      located; the catalogue-wide regression control is a desk run of
+      cardaudit; one bounded run to see the window.
+      **★ 2026-08-23, David challenged the X-Men/JP half of the census and
+      the recheck both CONFIRMS it and CORRECTS two claims under it.**
+      Full-card sweeps this time (every partition, IHDR of every image,
+      magic-sniff of every extensionless blob, raw PNG-signature scan of
+      jurassic_park_le's whole 7.86GB and uncanny_xmen_le's 1.88GB
+      image.bin): NO playfield drawing exists anywhere on uncanny_xmen_le
+      0.97.0 or jurassic_park_le 1.15.0 — the census stands, now on
+      exhaustive evidence, but it is a property of THOSE BUILDS (ask any
+      tester on newer code for their version). The corrections: (1) "ZERO
+      device records" was the PARSER, not the card — both titles show the
+      documented aerosmith parser-gap signature (X-Men: 810 seeds → 17
+      garbage validations; JP: 1164 → 17, 'image' strings like
+      `/spine/src/Slot.cpp`), so absent POSITIONS are not proven, only
+      absent ART is; the 0-records class RE (batman/aerosmith, still
+      unowned) now has two more confirmed members. (2) **NEWER BUILDS
+      MOVED THE ART DIRS**: uncanny_xmen_le 0.97.0 has NO `images/Test/`
+      or `images/TestMode/` AT ALL — service art now lives under
+      `images/System/TestMode/` (beatles 1.29 ships BOTH trees) — so
+      find_playfield_art() and cardaudit's ART_DIRS would MISS playfield
+      art a future build ships in the new location. The fix this item
+      already prescribes (resolve the table's OWN layout_image name
+      against `assets/nuk/images/<name>.png`) handles that generically —
+      the name carries its own relative path — and the sweep control
+      should include an X-Men-class card so no-art rows stay no-art.
+      Counterexample now on hand: beatles-1_29_0 parses 180 records with
+      `Test/beatles_playfield.png` found by the CURRENT filter — art:yes
+      with no change. Also noted: JP's card is NOT in the WSL cardcache;
+      it lives in the repo library `images/Stern/spike2/`.
+
+- [ ] **72. "0 device records" is the PARSER on at least three titles, not
+      the card — the Godzilla-family 0x30 struct is one generation's shape,
+      and nobody owns the RE for the others.** `S3 D3`
+      *(Filed 2026-08-23 at David's ask, after Sam's batman dark-inserts
+      report put a tester's face on the class and the X-Men/JP recheck
+      proved its signature twice more. Item 57's sweep named it and closed
+      without filing it; items 53 and 71 both lean on it.)*
+      **The proven tell is the funnel, reproducible at the desk:**
+      devicexy.seeds() resolves hundreds of candidate record pointers on
+      these binaries — the string/pointer machinery works — then _one()'s
+      0x30-byte validator keeps a handful of GARBAGE rows (service text as
+      'image names') and the >=4-run filter keeps zero. Measured members:
+      aerosmith_le (1104 seeds → 2 garbage, the first sighting, item 57
+      notes ~line 261-269), uncanny_xmen_le 0.97.0 (810 → 17),
+      jurassic_park_le 1.15.0 (1164 → 17, image strings like
+      `/spine/src/Slot.cpp`). batman reads `0 records` but its funnel has
+      NOT been run — the census below says which side it falls on, and it
+      is the payoff title if positions exist (Sam reported its inserts).
+      **The standing misread this item exists to end:** "0 records" has
+      been read as "ships no device table" twice — item 57's close said it
+      of dungeons_and_dragons_le (falsified: 255 records, its fault was
+      item 71's art FILENAME) and the 2026-08-23 census said it of X-Men/
+      JP until the funnel was run. Absence of a PARSE is not absence of a
+      TABLE. (DnD is NOT this class — it parses clean and is a positive
+      control, with beatles-1_29_0: 180 records, self-checks 48/48 sides
+      correct, 0/8 RGB stems misaligned.)
+      **First move is a census, not RE:** run the funnel over every ELF in
+      the card library and split README's "0 records" rows into parser-gap
+      (many seeds, garbage validations) vs genuinely-empty (few/no seeds)
+      — that names the generations and picks the RE target. Then crack ONE
+      title's layout. The oracles already exist: devicexy's own
+      self-checks (left/right switch names on the correct side, RGB stem
+      alignment) and XY plausibility against the layout image the records
+      name. With positions, a title gets item 50's positional view and
+      item 53's map can light its inserts on a blank field even where no
+      artwork ships.
+      **Acceptance:** batman's device table parses with sane rows
+      (self-checks pass, funnel numbers stated before/after) and its
+      playfield window shows positioned devices — OR the census proves its
+      build genuinely ships none, stated with the funnel numbers, and the
+      RE target becomes the largest parser-gap title instead. Either way:
+      cardaudit over the whole library changes only rows the RE claims,
+      beatles / DnD / godzilla rows unchanged, and every genuinely
+      table-less title is recorded per-BUILD with its numbers, so the next
+      reader inherits a measurement instead of a guess.
+      — S3: friction — affected titles play fine and fall back to the
+      schematic/grid view; nothing is blocked. D3: the census is desk work
+      with the instrument in hand, but the RE itself is an unknown struct
+      across possibly several generations — grade is from the armchair
+      until the census sizes it.
+
+- [x] **73. The FIXED cabinet keys are compiled to GODZILLA's switch ids, so
+      on the swelf-generation titles Enter lands on a DIP switch instead of
+      Service Select — mechanism CONFIRMED at the desk on all three reported
+      titles.** `S2 D2` DONE 2026-08-23, `item/73`, `9327708`..`0e1bec9`,
+      awaiting `/finish`.
+      **★★★ CLOSED 2026-08-23 — resolve by WIRE, in NINE copies, desk-oracled
+      over all 30 titles and live-verified on two.** The law: the cabinet's
+      (node,bit) layout is universal (all 29 lists agree), the ID is the
+      title's table index and drifts — TWELVE titles were wrong, not three
+      (the eight id-26 titles + batman + munsters/sword_of_rage at 190+, and
+      bond60th's Ticket Notch quietly shifting Tilt/Left Coin by one).
+      Fixed: padglhost binds_cabinet() (want[0] stays NULL, item-49 gate
+      untouched, compiled ids stand until a list parses); hwshim
+      sw_rest_resolve door by (0,23) + sw_active[128→256] (the old guard
+      silently dropped every munsters/sword row before the wire check —
+      found by the adversarial review, invisible to the oracle and both live
+      runs); watch.sh PAD_DOOR_OPEN (a seventh compiled 33, re-resolved per
+      pass); swinit.py headless rest set (desk-proven: munsters
+      [198,234-239], batman [36,71-76], godzilla unchanged); playfield 48V
+      door id (+ artwork-view fallback to the full list); plunge door;
+      swshow at-rest rows (assign, not setdefault — batman's door 36
+      collided with godzilla's "Start" label); autoattract BACK (re-resolved
+      before every press for first-run arrival); swexercise wire-refusal
+      backstop (the name globs failed OPEN on the five all-'?' titles).
+      **Evidence:** --binds desk oracle before/after under the rig lock — 18
+      titles byte-identical (godzilla family + ?-five), 12 remapped,
+      **330/330 exported cabinet rows match each title's own list**,
+      godzilla_pro byte-identical control. 341 spike2 tests green. **LIVE:
+      batman and avengers** — real xdotool Enter flipped the cabinet SPI
+      word at node 0 bit 8 ([cabchg] ff0f0f→ff0e0f, ~700 ms held) =
+      SERVICE SELECT on the game's own wiring, where the old build pressed
+      DIP 6 / DIP 8; [swrest] logged "door resolved: id 36 / 34, not 33";
+      autoattract's resolved Back visible as bit-11 pulses. **Aerosmith's
+      live half is the stated exception:** its guest exits under scripted
+      watch.sh on MAIN too (control-proven, filed as item 75), so it rests
+      on the desk oracle plus its own run's renderer log (all 11 remaps,
+      Enter→26, logged live before the guest died). Long form: handoff
+      "CLOSED item 73".
+      *(Filed 2026-08-23 from David's own test notes: "Switches are not
+      mapped correctly. Enter does 'Dip 8' for example" — Aerosmith and
+      Avengers; Batman reads "Dip 6". Together with item 34's re-copies:
+      "These two items are blocking me on a lot of diagnosis.")*
+      **Confirmed symptom-for-symptom without a run.** padglhost.c:801-811
+      hard-codes the cabinet rows as switch IDS on godzilla's numbering —
+      Enter/KP Ent `{25,0}` Service Select, `=`/`-` 26/27, Bksp/Esc 28,
+      Start 36, Left Coin 39, Action 34, Tilt 38, Coin Door 33. The comment
+      above them (padglhost.c:791-793, item 48) says cabinet rows "stay
+      compiled always — their (node,bit) layout measured identical on every
+      title 2017-2024" — and the (node,bit) layout IS universal, but the row
+      payload is an ID, and the swelf generation numbers ids from the
+      title's own table (DIP 1..8 at num 1..8, swelf.py:61). The derived
+      lists on disk close the case: **aerosmith_le id 25 = node 0 bit 7
+      DIP 8; avengers_infinity_le id 25 = DIP 8; batman id 25 = node 0
+      bit 5 DIP 6** — David's report exactly, title for title. SERVICE
+      SELECT sits at id 26/26/28 on those lists, so `=` does Select on two
+      of them; on avengers id 34 (the compiled Action Button) is COIN DOOR
+      INTERLOCK. Every compiled cabinet row is off-by-N on this whole
+      generation. The playfield tail is NOT implicated: item 48's
+      binds_playfield() already re-derives it per title by NAME; the cabinet
+      rows were deliberately left compiled and are exactly the rows now
+      wrong.
+      **Fix shape (a guess, unlike the mechanism):** resolve the cabinet
+      rows by NAME against the title's own switch_list.txt at binds build —
+      the machinery item 48 built — or by the universal (node,bit) directly;
+      compiled ids stay as the no-rig-env fallback.
+      **Oracle:** dump/tables/<title>/switch_list.txt at the desk, then each
+      game's service-menu Switch Test naming the pressed switch live.
+      **Acceptance:** on aerosmith_le, avengers_infinity_le and batman,
+      Enter registers as SERVICE SELECT in the game's own switch test (or
+      the service menu navigates where the test is unreachable), Start and
+      coin do what their labels say, and godzilla_pro is the unchanged
+      control.
+      — S2, not S1: these titles reached attract and play in item 57's live
+      runs, but wrong service keys tax every diagnosis pass on this whole
+      generation — David's words above. D2: the mechanism is desk-confirmed
+      and the name-resolving machinery exists; what is left is plumbing plus
+      a three-title confirming run.
+      **Established (2026-08-23 pass, desk sweep of all 29 switch lists on
+      disk):** (1) the cabinet **(node,bit) layout is UNIVERSAL** — every
+      list that names its rows agrees (Service Select 0/8, Plus 0/9, Minus
+      0/10, Back 0/11, Coin Door Interlock 0/23, Lockdown/Action 1/2, Start
+      1/11, Tournament Start 1/12, Tilt Pendulum 1/14, coins 1/16..21), so
+      padglhost.c:791-793's premise was right about the wires and wrong only
+      about the ids. (2) The id for Service Select (0,8) by title: **25** =
+      godzilla-family + the five ?-name titles (elvira3, james_bond_le,
+      king_kong_le, led_zeppelin_le, metallica_spike — compiled ids already
+      CORRECT there); **26** = aerosmith, avengers, foo_fighters, guardians,
+      iron_maiden, jurassic_park, mando, rush; **28** = batman; **190/193** =
+      munsters, sword_of_rage. **ELEVEN titles are broken today, not three.**
+      (3) Resolution key must be **(node,bit), NOT name**: names vary
+      ("LOCKDOWN BUTTON" vs "Action Button", "(OPTIONAL)" suffixes, trailing
+      spaces, "Coin Door Power Interlock" vs "COIN DOOR INTERLOCK") and are
+      all "?" on five titles where (node,bit) still resolves.
+      **IMPLEMENTED (2026-08-23, item/73 `9327708`+`2d80977`) in SIX copies:**
+      padglhost binds_cabinet() (by wire at binds_resolve, want[0] stays NULL
+      so the item-49 gate is untouched), hwshim sw_rest door (0,23), playfield
+      48V-banner door id, swshow at-rest door/Start, plunge door (its _WANT
+      name misses this family), autoattract BACK (compiled 28 = batman's
+      Service SELECT — it would walk INTO the menu). nav.sh doc fixed;
+      ringwatch.py deliberately kept godzilla-wide (godzilla-addressed RE
+      instrument). gstvid's "switch 33" is a tombstone comment, no code.
+      **DESK ORACLE PASSED, all 30 titles:** --binds before/after under the
+      rig lock — 18 titles byte-identical (godzilla family + the five
+      ?-name titles), 12 remapped, and a cross-check of every exported
+      cabinet row against its own list = **330/330 correct, 0 mismatches**.
+      godzilla_pro export byte-identical (the control). Bonus catch:
+      james_bond_60th_le is a TWELFTH broken title — its Ticket Notch shifts
+      Tilt/Left Coin ids by one, so T pressed Left Coin there; nobody had
+      noticed. Live renderer log on a real aerosmith run shows all 11
+      remaps + Enter=26.
+      **LIVE HALF BLOCKED ON A RUN ANOMALY, being bisected:** aerosmith's
+      GUEST exits ~1-2 min into boot on this session's non-interactive
+      watch.sh runs (three runs: with/without GL_RAISE, with/without
+      autoattract+ballfeed — all exited; no SEGV, log ends after the scene
+      enumeration at [sleep] #1500). David's own GUI runs of the same card
+      today reached the switch-report state on main. My shim edit is
+      provably inert pre-table (no [swrest] line = silent no-file/early
+      return; pre-table cabinet word is the synthetic constant either way).
+      **CONTROL VERDICT: MAIN'S CODE EXITS IDENTICALLY** (same env, same
+      card, same silent death after scene enumeration, [gst] 3 factories
+      up) — **this branch is exonerated**; the aerosmith guest-exit is a
+      pre-existing anomaly of scripted runs on the current state (item 57
+      booted aerosmith via watch.sh ~Aug 18, so it is also recent — David's
+      GUI runs today are the last known-good). To be filed as its own item
+      with the control evidence, not chased inside this one.
+      **Resume:** batman + avengers live runs (in flight): at attract,
+      xdotool Enter into "<game> - Stern Spike 2 emulator", read [swchg]
+      naming SERVICE SELECT; then file the aerosmith-exit item and close
+      per the acceptance (state plainly that aerosmith's live half rests on
+      the desk oracle + the live renderer remap log until its boot anomaly
+      is fixed).
+
+- [x] **74. A boot that is copying the card shows NOTHING about the copy —
+      minutes of "Startup In Progress" with no hint that a ~7 GB dd is
+      running, so every copying boot reads as a hang.** `S3 D3` DONE
+      2026-08-23, `item/74`, `54575f3`..`77841de`, awaiting `/finish`.
+      **CLOSED 2026-08-23 — copy-then-boot with progress, three surfaces,
+      acceptance met live end to end on the final code: PAST TECH ALERTS
+      at 48.9 s from launch on an uncached card (copy narrated
+      `[card] copying ...: N / 7497 MB (P%)` to completion, then
+      `local cache ready - booting from it`, guest only after) against
+      177 s for the old copy-fights-boot hybrid; cached control 8.7 s,
+      one line, undelayed.** `cardmount.sh` `cache_pick()` sync mode
+      waits on the existing detached copier with 2 s progress lines
+      (watch.sh needed no change — it already blocks on cardmount before
+      renderer/guest, and stderr streams through `$(...)`); the Emulate
+      tab drains the lines into the state label (`card_copy_progress()`,
+      pure + tested) and fires `--precache` at card pick from a worker
+      thread. Adversarial review (3 lenses) confirmed 7 defects, all
+      fixed (`b1bd678`): copier_alive() /proc identity (pid-reuse wedge +
+      root/user EPERM duplicate-dd), full-size publish gate, rig-side
+      precache run guard, card stat off the UI thread, Stop wins the
+      label + cardmount in killgame/alive sweeps, PAD_CARD_PRECOPY=0
+      default in runlim/runbridge/nbrun, stall 90→240 s. Then two live
+      collisions taught two more (`663d722`, `77841de`): repo `images/`
+      is a JUNCTION to `D:\Pinball\images` — one spinning disk — and two
+      concurrent copiers seek-thrash it to ~6 MB/s combined, so
+      other_copier() now enforces ONE COPIER MACHINE-WIDE (precache
+      yields, boot warns); and a SIGKILLed fuse2fs leaves a DEAD
+      endpoint that fails stat, which the stale-mount healer now clears
+      via /proc/self/mounts (\040-escaped for spaced labels).
+      **GUI label not eyeballed in a live window** — unit-proven
+      (154 emulate_tab tests) and the drain provably receives the lines;
+      David's pre-/finish validation is that launch. 19 lifetime copies
+      on godzilla's log tell this item's whole story. Escape hatch:
+      PAD_CARD_PRECOPY=0 restores the old hybrid everywhere.
+      *(Filed 2026-08-23 alongside item 34's widening: David read three
+      copying boots in one session as "first-time startup took an
+      excessively long time", and item 34's original godzilla sighting
+      records the same confusion. This is the VISIBILITY half; item 34 is
+      the copies that should not happen at all. A genuine first boot of any
+      new card pays this even after 34 is fixed.)*
+      cardmount.sh backgrounds the copy into `~/cardcache` and logs one line
+      per copy — "local cache of <card> complete", at the END
+      (`~/cardcache/<label>.log`). Nothing on screen or in the GUI says a
+      copy is running, how far along it is, or that a first boot is expected
+      to be slow. Known numbers from item 34: 177 s to first picture vs
+      ~15 s cached, input laggy while the copy competes with the boot's own
+      9p reads.
+      **★ WIDENED 2026-08-23, David's pick ("do both, widen 74 and add the
+      batch pre-cache item"): the PRE-COPY is no longer a design choice, it
+      is the direction.** A first boot of an uncached card copies FIRST,
+      with visible progress, then boots from the cache — at the measured
+      ~120-150 MB/s that is ~60-70 s of copy plus a ~10-15 s cached boot,
+      roughly 80 s to attract against the 177 s laggy hybrid, and input is
+      never degraded. Also in scope: start the copy the moment a card is
+      PICKED on the Emulate tab (validation time is copy time), so the
+      pre-boot wait shrinks further. Item 34's stamp semantics must not
+      change, and PAD_CARD_CACHE=0 must still mean no copy and a straight
+      9p boot.
+      **Acceptance:** boot an uncached card — the GUI names the copy and
+      shows its progress (source size is known, bytes-done/total is cheap),
+      the game does not start until the copy lands, total time-to-attract
+      is stated and well under the old hybrid's, and a cached boot shows
+      nothing new and is not delayed.
+      — S3: friction — the run completes, and once 34 is fixed each card
+      pays it once; what it costs is testers reading a working boot as a
+      hang. D2 → D3 at the widening: still one provokable confirming run,
+      but the pre-copy touches boot ordering in watch.sh/run_game.sh plus
+      GUI progress plus the pick-time start — three surfaces, not one.
+      **Measured at item 34's close (2026-08-23):** the copier alone runs
+      ~120-150 MB/s on this machine (`.partial` growth watched live, no
+      renderer up) — a full 7.3 GB copy is ~60-70 s uncontended, so David's
+      3-4 minute copying boots were mostly the copy COMPETING with the
+      boot's 9p reads, which strengthens the pre-copy option above.
+
+- [ ] **75. aerosmith_le's GUEST exits silently ~1-2 min into a scripted
+      watch.sh boot — and MAIN'S CODE does it identically, control-proven.**
+      `S3 D3`
+      *(Filed 2026-08-23 out of item 73's live verification, which hit it
+      three times and bisected it off that branch with a fourth run.)*
+      **Measured, four runs, one evening, same card
+      (images/Stern/spike2/aerosmith_le-1_15_0.Release.8G.sdcard.raw, the
+      cached copy):** item/73 code with defaults; with PAD_GL_RAISE=0; with
+      autoattract AND ballfeed disabled; and MAIN's checkout with the
+      identical env — every run: video bring-up completes ([gst] 3
+      factories), the scene enumeration walks ~103 scene.radium paths, then
+      the guest is GONE — no SEGV, no qemu signal report, no exit line;
+      the log's last line is the [sleep] #1500 cap so the death is not even
+      timestamped. watch.sh reports "the game exited" and tears down.
+      **What makes it strange:** batman and avengers_infinity_le boot fine
+      in the SAME session with the SAME flow (batman confirmed up 5+ min,
+      table loaded, keys pressed); item 57 live-verified aerosmith via
+      watch.sh ~2026-08-18; and David's own GUI runs of this exact card
+      earlier on 2026-08-23 reached a state where key presses drew switch
+      names. So it is aerosmith-specific AND recent AND possibly
+      script-flow-specific (env: PAD_SW_CHANGES=1 PAD_GL_RAISE=0 set in
+      all four runs — both were also absent from David's GUI flow, so they
+      are NOT excluded as the trigger; a run without them is the first
+      thing to try).
+      **Also on the suspect list:** whatever state David's session wrote
+      today (his Enter presses on this title landed on DIP 8 pre-item-73,
+      i.e. REAL dip toggles on the setup screen — if the game persisted a
+      half-applied config, every boot since may be tripping on it; the
+      title's writable state vs the card's read-only mount is where to
+      look).
+      **Acceptance:** aerosmith_le boots to attract under plain scripted
+      watch.sh again, the cause is named, and whichever of the suspects
+      above was innocent is written down as ruled out with its run.
+      — S3: one title, and the GUI flow may still work (unverified today);
+      nothing else is blocked. D3: needs runs, reproduces on demand (4/4),
+      instruments exist — the missing piece is an exit-reason hook on the
+      guest (item 23's) wired into this flow.
+
+- [ ] **76. Batch pre-cache: copy a chosen set of cards into `~/cardcache`
+      ahead of time, so a title sweep's first boots are all cached boots.**
+      `S3 D2`
+      *(Filed 2026-08-23 at David's ask — "do both, widen 74 and add the
+      batch pre-cache item" — after item 34's close measured the copier at
+      ~120-150 MB/s standalone: ~60-70 s per 7.3 GB card, so the whole
+      Stern folder pre-caches in well under an hour, unattended.)*
+      The copier already exists and runs detached: `cardmount.sh`
+      `cache_pick()` starts it per card and item 34's size+mtime stamp
+      decides validity. Missing is a way to run it for MANY cards without
+      booting each: point it at a folder (or a picked set) and it copies
+      every card not already cached, one at a time, with per-card progress
+      and a clean stop. Plausible shape (a guess, not established): a small
+      CLI (`precache.sh <folder>`) as the cheap half, a button on the
+      Emulate tab wrapping it later. Constraints: one card copying at a
+      time against the one disk (the per-label pid lock only guards one
+      card), NEVER while a run is live (rig-lock rules apply when a
+      session runs it), and PAD_CARD_CACHE=0 skips it.
+      **Acceptance:** run the batch tool over a folder holding at least one
+      uncached and one cached card — the cached one is skipped and says so,
+      the uncached one lands in `~/cardcache` with a stamp `cache_pick()`
+      accepts: a following boot of it logs "using local cache" and starts
+      no copier.
+      — S3: convenience — any card can already be cached by booting it
+      once, and item 74's pre-copy makes even that first boot honest; what
+      this buys is sweep sessions that never wait. D2: desk work — the copy
+      path exists and is proven — plus one confirming boot of a pre-cached
+      card.
+
+- [x] **77. The card cache is unmanaged: 125 GB real across 25 entries on a
+      251 GB WSL disk at 89%, nothing prunes it, and version updates orphan
+      old entries forever.** `S2 D2` DONE 2026-08-23, `item/74` (folded),
+      `3202da0`, awaiting `/finish`.
+      **CLOSED 2026-08-23, same night it was filed.** Shipped: a `.boot`
+      sidecar stamps every sync cache hit (a --precache hit deliberately
+      does not count as a boot); `cache_make_room()` evicts
+      least-recently-booted entries before any copy that would push free
+      space under PAD_CACHE_KEEP_FREE_GB (default 8) — never the label
+      being copied, a mounted label, or a live copier's — and refuses to
+      cache at all when nothing is evictable; `--cache-list` /
+      `--cache-drop` for the GUI (tab-separated, source last, spaced
+      labels proven); and the Card cache manager off the Emulate tab's
+      Cache… button — biggest-first entries with real size / last booted /
+      source, totals + disk free in the header, multi-select delete behind
+      a confirm that names the space freed, all rig I/O on workers with
+      main-loop drain pollers. Help tip added. Tests: eviction order,
+      exhaustion refusal, drop refusals, manager end to end against a
+      canned rig — 158/158 emulate_tab, full suite 2959 passed / 0 failed
+      in the worktree. The pytest leak is fixed at the root: conftest
+      points PAD_EMU_DIR/PAD_JJP_EMU_DIR at an empty dir for every test,
+      and the LIVE cache verified untouched (24 entries, no debris) after
+      a full suite run. **Not eyeballed in a live window** — the dialog,
+      like item 74's copy label, awaits David's morning launch.
+      *(Filed 2026-08-23 late, folded onto item/74's BRANCH at David's ask —
+      "fold it in here and do it now. make a nice GUI for it. I'm going to
+      bed" — after measuring the cache at half the WSL disk with 29 GB
+      free. Includes the pytest isolation leak found the same hour: the
+      suite writes 16-byte cards into the LIVE ~/cardcache because tests
+      never isolate the rig home.)*
+      Scope: (a) last-boot tracking — cardmount touches a `.boot` sidecar
+      per cache hit, because atime proved useless (every entry read today);
+      (b) eviction at copy time — when free space would drop below
+      PAD_CACHE_KEEP_FREE_GB (default 8), evict least-recently-booted
+      entries (never the one being copied, never a mounted or copying
+      label) until the new card fits, else skip caching with a warning;
+      (c) `--cache-list` / `--cache-drop <label>` modes for the GUI;
+      (d) a Card cache manager dialog on the Emulate tab: entries with
+      real size and last-booted, totals + disk free, delete selected;
+      (e) tests stop touching the live cache.
+      **Acceptance:** the dialog lists the real cache with sizes/dates and
+      deletes an entry end to end; a forced-low-space desk test evicts
+      oldest-booted first and skips uncachable copies; the test suite
+      leaves ~/cardcache byte-identical.
+      — S2 on the numbers: 29 GB free means a handful of new cards away
+      from a full WSL disk, which fails copies and worse. D2: desk work,
+      the copy path is proven, one dialog; no emulator run needed.
+
+- [x] **78. The Emulate tab shows the extract pipeline's footer — Detect/
+      Locate-partitions chips and a bar that never moves — instead of the
+      emulation's own loading state; and the Sound / Skip-to-attract
+      tickboxes are dead weight.** `S3 D1` DONE 2026-08-24, `item/74`
+      (folded), `b897402` + `52379f0`, awaiting `/finish`.
+      **CLOSED 2026-08-24, same morning.** Entering an Emulate tab hides
+      both chip rows; the Stern panel drives the footer bar through
+      MainWindow.set_emulate_progress — determinate card-copy percent,
+      marquee through booting/techalerts, full at attract, empty idle —
+      with a _footer_owner handshake so a running pipeline job keeps its
+      footer and leaving the tab hands it back. Both tickboxes removed
+      (volume slider owns loudness, boots land in attract since item 63;
+      PAD_AUDIO=0 / PAD_AUTO_ATTRACT=0 stay for scripted runs). Mid-pass
+      follow-ups from David, all in: "Copying card" explains its
+      why/where/once-per-build in the hint line AND a hover tip on the
+      state label (a rebuilt image re-copies once, replacing the old
+      entry); "Waiting at Tech Alerts" → "Passing Tech Alerts…" while the
+      helper presses / "At Tech Alerts" when a human must / "Stuck"
+      unchanged; "In attract mode" → "Game running" (the rig deliberately
+      cannot tell attract from play — gamestate.sh — so the label claims
+      only what it knows). Help tips reworked to match. Full suite 2962
+      passed / 0 failed; wording tests updated with their points intact.
+      **Not eyeballed live** — same caveat as 74/77, one launch shows all
+      three items at once.
+      *(Filed 2026-08-24 from David's morning screenshot + follow-up,
+      folded onto item/74's branch like item 77: "why are we showing this
+      progress bar on the emulate tab? let's use the progress bar for
+      loading state of the emulation instead" and "we don't need the sound
+      or skip to attract checkboxes anymore".)*
+      Scope: entering an Emulate tab hides both chip rows; the Stern panel
+      drives the footer bar via a new MainWindow.set_emulate_progress —
+      determinate card-copy percent (item 74's narration), marquee through
+      booting/techalerts, full at attract, empty idle; ownership handshake
+      so a running pipeline job keeps its footer and leaving the tab hands
+      it back. Both tickboxes removed (volume slider owns loudness since
+      item 56; boots land in attract since item 63); PAD_AUDIO=0 /
+      PAD_AUTO_ATTRACT=0 stay for scripted runs; help tips merged.
+      **Acceptance:** on the Emulate tab the chips are gone and the bar
+      tracks copy→boot→attract; pipeline tabs unchanged; toggles absent;
+      suite green.
+
+- [x] **79. batman reports `state=techalerts` through a whole attract —
+      gamestate.sh's attract detector misses this title, so the footer
+      marquee bounces forever, the label says "Passing Tech Alerts…", and
+      the auto helper's count never clears.** `S2 D3` DONE 2026-08-24,
+      `item/74` (folded), `2c7aa58`, awaiting `/finish`.
+      **CLOSED 2026-08-24 — cmd 0x70 joined hwshim's lamp-class set, and
+      both generations now announce their show.** Measured before fixing
+      (this detector's own law) with a NEW budgeted instrument,
+      `PAD_CMD_CENSUS=1` — one `[cmdmix]` line per 10 s window of
+      per-command TX counts: batman's attract carries cmd 70 (the
+      base-layer lamp write, already decoded) at ~109/s against ZERO in
+      the whole boot+alerts window; the undecoded 72/52/8a families
+      (~35-40/s) are deliberately NOT counted — guessed lamp commands
+      are how this detector went wrong twice. The 30-in-3s rate gate
+      stays. **Verified live, both generations:** batman — announce
+      6.6 s after the helper's first press, gs_state=attract, helper
+      pressed EXACTLY ONCE (the 45 s loop is gone); godzilla_pro control
+      — announce at 14.2 s in attract (also via 70 — that dialect flows
+      there too), nothing early, no presses. The helper stays: the
+      census proved batman parks at the alerts screen until the press
+      (zero show traffic before it), so the press IS the boot-to-attract
+      promise on that generation — David's removal question answered
+      with the measurement. Build notes: memset needs string.h hwshim
+      does not include (loop instead); a user-mode scripted run cannot
+      rebuild the root-owned shim — instrument runs use the GUI's root
+      PIVOT shape.
+      *(Filed 2026-08-24 from David's live launch (item/74 validation,
+      v0.158.0 badge): batman visibly in attract — BEST COMBO CHAMPION
+      high-score screen, CREDITS 1 — while the tab showed "Passing Tech
+      Alerts…", 26 processes, renderer 59.0 fps, 87800 audio frames
+      played / 0 dropped, and item 78's footer marquee bounced on. The
+      2026-08-05 status/autoattract disagreement was fixed by gamestate.sh
+      for godzilla-family titles; batman is a NEW miss of the same shape.)*
+      gamestate.sh declares attract by a video-output-rate proxy ("~40/s
+      sustained in attract... its attract clip set is a superset") —
+      batman is a no-playfield-artwork title whose attract holds long
+      static high-score screens, which is exactly the input that proxy
+      cannot see. The state word is wrong, so everything honest built on
+      it (item 78's footer, the label, `auto=`) inherits the lie; the
+      helper may also keep pressing Service Back into a live attract.
+      **Established 2026-08-24 morning, desk-only, against David's LIVE
+      batman run (game screenshot-confirmed in attract):** the attract
+      signal is hwshim's `[led] light show running`, announced at 30
+      lamp-class commands in 3 s where lamp-class = {97, a2..a6, b4, b5}
+      — the godzilla generation's dialect. Batman's log carries ZERO
+      `[led]` lines in 20+ min of attract and exactly 3 `factory_make`
+      (attract opens no clips), so both proxies are structurally blind.
+      Batman's lamp traffic is real but different: the ring's `decoded`
+      counter (fed only by cmds 70/94/95 — the service-LED vocab) counted
+      2142 writes ≈ 1.5/s, far under the 10/s the rate gate needs, and
+      the attract-only `[nbcmd] first frame` lines name an UNDECODED
+      command family — 0x72 (12 bytes of ff), 0x46, 0x48, 0x14 — as the
+      likely bulk of the show. David's "I still have to press Start"
+      confirms the shape: a GAME's heavier lamp burst finally trips the
+      godzilla-tuned counter; attract alone never does.
+      **Ruled out at the desk:** any gamestate.sh-only fix — no signal in
+      the run log separates batman's techalerts from its attract
+      ([nbsched] spans both; [throw]/[swscan] are unvetted one-title
+      proxies of exactly the class this file's header warns about).
+      **Resume:** one instrumented batman run (PAD_NB_LOG or a temporary
+      per-cmd counter) to measure the attract command mix — then teach
+      led_publish the older generation's show (candidate: count
+      0x72/0x46/0x48-family, or a per-generation rate window), verify on
+      batman AND a godzilla-family control (the star_wars service-menu
+      trap must stay caught), rebuild under the lock.
+      **Acceptance:** a batman GUI boot reaches "Game running" on the tab
+      (and the footer bar fills) within ~15 s of the attract screen
+      appearing; godzilla-family titles unchanged; the auto count clears.
+      — S2: misleads on every boot of the affected titles and can
+      over-press into attract; play itself works. D3: needs a run, shows
+      up when you look, instrument = the run log + gamestate.sh sourced
+      standalone.
+
+- [x] **4. Boot buzz.** `S3 D3` **CLOSED 2026-08-21 at David's ask** ("let's
+      close the ones that are no longer necessary. like 4, 58, 3"), as WON'T
+      FIX rather than as fixed — which is what it has actually been since the
+      day it was parked. Awaiting `/finish`.
+      **Why closing beats staying parked:** the remaining distance is inside
+      the measurement's own error. The metric is a race (0.1 s = 118 voice
+      restarts, 1.0 s = 3, 2.0 s = 17), the knob sits at 5 against a bar of 3,
+      and 3 vs 5 was always noise rather than a trend — so no pass could ever
+      have moved this honestly. Parked, it stayed a line in the queue that
+      least-progress ranking had to keep stepping over. **The knob and its
+      numbers stay written down below**, so reopening costs a `git log` and
+      not a re-derivation, if the buzz ever becomes something a player
+      notices rather than something an instrument does.
+      ~20 Hz stutter in the first ~10 s.
       Balanced rather than fixed: `PAD_NB_RESET_US=1000000` takes it from 118
       voice restarts to 3 at no cost in boot time. Now sits at 5, at the bar.
       **The metric is a race** (0.1 s = 118, 1.0 s = 3, 2.0 s = 17), so treat
       3 vs 5 as noise, not a trend. Do not reopen without a reason.
+
+- [ ] **80. Live, alphabetical, game-by-game E2E compatibility pass — David
+      plays, this session triages.** `S2 D4` *(Filed 2026-08-24 at David's ask,
+      in place of picking a queue item: "i want to go game by game instead and
+      confirm e2e compatibility one-by-one. we're going to go alphabetically
+      and I will tell you when we are starting each game and what issues we
+      are seeing.")*
+      **Same shape as item 57's "alphabetical, one title at a time" sweep**
+      (closed 2026-08-19, `S1 D3`) — but 57 was desk work, reading logs beside
+      David's own runs, and its standing record — `tools/spike2_emu/
+      README.md`'s "Titles" table — only checked switches / artwork /
+      positions / 2nd-display, most rows last-checked 2026-08-19/08-21. **This
+      is different: David plays each title himself in the app, alphabetically,
+      and reports what he sees per title** — a real E2E pass (ball serve,
+      video, audio, coils, in a played game, not just boot-to-attract) — and
+      this session triages what he reports live, in real time, the same way
+      items 65-76 were triaged from tester (PAD-81/Sam) email reports.
+      **Expect this to spawn per-title sub-items**, the same pattern as
+      53/55/58 splitting from 50/57 — this entry is the LOG of the sweep
+      itself, not a fix, and should be rewritten as the sweep's own findings
+      accumulate rather than treated as one bug.
+      **Acceptance:** every title in the card library gets a fresh
+      `last checked` row in README's Titles table dated from this pass —
+      either confirmed E2E-clean by David's own play, or with a filed
+      follow-up item number recording what was wrong.
+      — S2: play already works on most titles; this finds and orders what is
+      still broken rather than blocking anyone itself by existing. D4:
+      unbounded until the sweep says otherwise — many live runs David has to
+      drive personally, and each finding's own difficulty is unknown until it
+      is filed.
+
+- [ ] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
+      and identified; node 4 polled forever while we silence it; board 24
+      RUNTIME INFO from no table we derive; and the carousel's overlay
+      screen never appears.** `S2 D4`
+      *(Filed 2026-08-24 from David's live item-80 sweep run — glass
+      screenshots on record: red `LOCATING NODE BOARDS / NODE NOT FOUND`
+      over the batman logo, then Tech Alerts `CHECK NODE BOARD 2 : NOT
+      REGISTERED` (red) + `CHECK NODE BOARD 24 : RUNTIME INFO` (white),
+      plus "we are not seeing the second screen that appears over the
+      carousel". All evidence below is READ-ONLY off his run's own logs.)*
+      **Established, and it rules item 70's mechanism OUT for batman:** the
+      discovery schedule INCLUDES node 2 — `[nbsched] playfield nodes: 255
+      1 8 9 10 2 12 13 (from switch table + node directory)` — and
+      `[nbid] node 2 claims part=0x2c40102b variant=0x05 fw=1.19.0
+      (derived)` loads from the derived 8-node `node_ident.txt` (nodes
+      1,2,4,8,9,10,12,13; node 2 = ws2812node code 22). Scheduled AND
+      identified, yet the game refuses to REGISTER it — so the hole is
+      DOWNSTREAM of everything item 70 suspects: the registration/grading
+      exchange for the swelf-generation ws2812 dialect. (Do not conflate
+      with ST's item 52 — its LED boards registered fine once merged into
+      the schedule; batman's is merged and still refuses.)
+      **Lead suspect for the red NOT FOUND screen: our own silencing of
+      node 4.** `[nbsilent] node=4 want=13/3/12 ctr=0` repeats forever from
+      t≈18 s — the game asking silenced node 4 for the runtime-update walk
+      (13 = 0x0d, the tmc5041 variant command) and never being satisfied.
+      The silence comes from nodecensus's optional-node4 rule (built for
+      stranger_things: optional+ABSENT passes). **Check at the desk whether
+      batman's ELF actually flags node 4 optional** — if it is REQUIRED on
+      this generation, the ST rule misfires here and the wedge is ours.
+      **Board 24 is in NO derived table** (ELF node directory = 8 nodes,
+      no 24) — informational grade, lowest priority, unexplained.
+      **The overlay screen: the game never ASKED for a second display**
+      (0 `PADGL_TARGET` lines all run — consistent with item 44's census,
+      batman was never in the two-display list), while its video pipeline
+      is alive (ch0/ch6 streaming scene assets). One anomaly worth
+      chasing: the game consumes first frames **2.3–5.7 s after serve**
+      against a healthy 58 ms. AWAITING DAVID: what the second screen
+      shows on the real machine, and whether it is a separate physical
+      display or a window drawn on the main screen — that answer decides
+      whether this half is item 44's family, a video-channel fault, or
+      gated behind the unregistered boards.
+      **Instrument, first move once the rig is free:** one `PAD_NB_LOG`
+      boot (GUI/root PIVOT shape — a user-mode scripted run cannot rebuild
+      the root-owned shim, item 79's note) to capture what the game
+      actually sends node 2 and node 4; the wire says what registration
+      wants. No shim change before that capture.
+      **Acceptance:** a batman boot from card shows NO red node-board
+      alert on Tech Alerts (board 24's white RUNTIME INFO may stay,
+      stated); the node-4 poll loop is explained — answered, or proven
+      optional-and-ignorable with the ELF flag quoted; godzilla_pro and
+      stranger_things_le regression boots unchanged. The overlay-screen
+      half gets its own acceptance once David describes the real
+      machine's behaviour.
+      — S2: the title plays (item 79 verified attract + play) but a red
+      alert stands on every boot and a real board's devices are dead; not
+      S1 because play works. D4: mechanism unknown, needs instrumented
+      runs, and the second-screen half is not yet even characterised.
+
+- [x] **85. batman's playfield LEDs: only 25 channels on two boards, and
+      every one of them dark.** `S2 D3` DONE 2026-08-26, `item/85`,
+      awaiting `/finish`. **LIVE-VERIFIED on batman, regression-verified on
+      godzilla_pro.**
+      *(David, mid item-80 sweep, on his own live batman run: "i'm only
+      seeing board 8 and 9 here and i'm not seeing all the leds coming
+      through — are we missing some node boards?" The boards were all
+      there. TWO INDEPENDENT FAULTS, both measured on that run.)*
+      **FAULT 1 — every lamp was being commanded to ~1% and landing on
+      ZERO.** Read live off his running game: `decoded` 479,553 and
+      climbing ~95/s, and all 1536 `val[]` bytes zero across 12 samples
+      over 5 s — not one non-zero value, ever. The frames were arriving
+      and decoding perfectly; they carried black. Mechanism, read out of
+      the ELF and not guessed: identity reply bytes `[8..9]` are stored
+      per node (`0x51b558` → `0x816dac+node*12+8`), returned by
+      `0x51b68c`, and the cmd-0x70 builder `0x51c2b4` computes
+      `A' = min(255, chA * that / 100)` — so the field this shim's own
+      comment called "board id" is ALSO a brightness PERCENT, and we
+      answered **1**. Anything the game computed below 100 floored to 0.
+      Fixed by claiming **100** (`NB_HWID_DEFAULT`), the value at which
+      the wire carries the game's own numbers unmodified; still non-zero,
+      so `0x5a2f44`'s id consumer is unaffected. Godzilla never showed it
+      because its show speaks 0x70 27–81 times per RUN against batman's
+      ~109 per SECOND.
+      **FAULT 2 — the whole swelf lamp dialect was undecoded.** batman
+      drives lamps with `88 89 8a 8e 95 96 98 9a 9e a0 a1 a2 a4 a5 a6 b4
+      b5 b7` out of ONE builder (`0x51896c`), whose command byte is a
+      BITFIELD, not an opcode: `cmd = 0x80 | M | B | A` assembled at
+      `0x518ac4`, where the same three fields choose which blocks the body
+      carries. Shipped as `led_wide_publish`/`led_wide_walk` in hwshim.c
+      with its Python twin `leddecode.wide_decode`. Two findings inside it
+      that no capture could have produced: the index bitmap is **sparse**
+      (`body[0]` bit 6 is a fill, bits 5-0 say which middle bytes were
+      sent — how 45 lamps fit in 59 bytes), and `A == 0`/`A == 1` **carry
+      a level without spending a byte** (`0x51667c` branches on the shared
+      value: 0x00 → mode 0, 0xff → mode 1), so half the show is all-on and
+      all-off frames that a naive reading scores as "says nothing".
+      **NO NODE GATE, and it does not need one:** the block walk must
+      consume the body EXACTLY or the frame is refused, so a mis-parse
+      fails by itself — which is what makes node 13, an LED-only board
+      carrying no switches that had never appeared in the window at all,
+      safe to read. `PAD_LED_WIDE=0` is the one-flag A/B.
+      **Also:** `padled.h` v4 adds a `seen[16][96]` ADDRESSED plane, because
+      a roster built from `val[]` only ever contained lamps that were lit
+      while somebody was watching; the enumeration walk now runs on every
+      board (it sat below the node gate, so node 10 announced its lamp
+      list and none of it was recorded); and the 0x70 path's "16-bit
+      [lo][hi]" comment was wrong — `0x51c2ec`/`0x51c2f4` scale and clamp
+      the two bytes independently, so they are two channels.
+      **Verified at the desk:** 19 of the 20 commands in batman's own
+      `[nbcmd]` census decode byte-exactly (the 20th is cmd 0x70, which is
+      a different builder and correctly refused); the C is compiled out of
+      hwshim.c and checked against the Python twin on every frame plus
+      100+ mutations (`test_spike2_led_wide_twins.py`); full suite 3180
+      passed. Channel B is walked for its length and DROPPED — its values
+      come from a small alphabet (0x08/0x0f/0x1e) that looks like a rate
+      beside channel A's levels, and "looks like" is not a finding.
+      **VERIFIED LIVE, batman off the card, 200 s:** six boards where two
+      had been — nodes **1, 8, 9, 10, 12, 13**, **108 addressed channels
+      against the 25 David could see**, and the wire's own values on the
+      glass. The brightness fix shows in one byte: the node-1 lamp whose
+      first frame read `81 05 70 08 00 00` on his run reads `81 05 70 08
+      02 02` on this one. Nodes 8 and 9 register but sit at zero, which is
+      the game holding its inserts dark in attract, not us failing to read
+      them.
+      **★ AND THE GODZILLA REGRESSION FOUND A REAL FAULT, which is what it
+      was for.** First run: the wide grammar accepted **7 of ~1532** frames
+      on godzilla's node-7 strip board — 0.5%, every one a coincidence, and
+      every one about to write a confident lamp value onto a board this
+      codebase has refused to guess at since it was written. The
+      exact-close test is strong but not perfect, and over a whole run
+      "not perfect" shows. **Fixed with a per-RUN dialect gate:** the two
+      populations are nowhere near each other (batman parses ~83% of what
+      it offers the grammar, godzilla 0.5%), so nothing is published until
+      200 frames have voted and a title that says no says no for the rest
+      of the run. Same reasoning as the light-show announcer — a rate, not
+      a count. **Re-run godzilla_pro: `[ledwide] dialect REFUSED - this
+      title is not the swelf generation: 0 of 200 frames parsed exactly`,
+      `wide_decoded 0`, nodes 1/8/9 only and nodes 7/12/14 gone from the
+      roster.** `PAD_LED_WIDE=2` forces it on for a title whose rate lands
+      somewhere nobody has seen; `=0` turns it off.
+      **Also backed out on that evidence:** the enumeration walk briefly
+      marked the addressed roster too, which gave godzilla's nodes 12 and
+      14 ninety-six dark cells each for boards nothing ever drove. `seen`
+      means "the game wrote to this lamp"; a boot-time inventory is a
+      different claim.
+      **Still owed:** one ws2812-heavy title (stranger_things_le) through
+      the same gate, and David's own eyes on the batman playfield window
+      rather than the block underneath it.
+      — S2: a whole subsystem reads as broken on an unknown number of
+      titles (every swelf-generation card), but nothing is blocked and the
+      games play. D3: the RE was deep but is done and written down; what is
+      left is one boot and a regression.
+
+- [x] **81. `Schematic`'s switch-row hover zone is not perfectly aligned with
+      its text.** `S3 D2` DONE 2026-08-24, `item/81`, awaiting `/finish`.
+      *(Filed 2026-08-24, spotted by David during item 80's sweep on
+      `avengers_infinity_le`'s switch list.)*
+      **CLOSED same day — the mechanism was found at the desk, proven with a
+      labelled instrument, and it was WORSE than a tooltip bug.**
+      `Schematic._hit()` searched `find_overlapping(x-2, y-8, x+2, y+8)`:
+      that ±8 px window PLUS the text's own bbox (measured: 14 px for
+      Consolas 9) spans nearly two `ROW_H = 17` rows at most cursor
+      positions, and `reversed()` resolved every two-row overlap to the
+      LOWER row (canvas ids ascend down a column). Measured on real Tk at
+      the view's exact geometry: **5 of 13 points INSIDE each row's own
+      glyph box resolved to the row below** — the bottom ~38 % of every
+      row's text belonged to its neighbour (the last row alone read clean,
+      having no neighbour below to steal the hit, which is exactly why
+      casual testing on a short list missed it). **And `on_press()` /
+      `on_rip()` share `_hit()`, so a click in the lower half of a row's
+      own text CLOSED THE WRONG SWITCH** — the item was filed S3 on the
+      tooltip and the click half is the real payload.
+      **The fix keeps the generous window and resolves ties by GEOMETRY:**
+      among overlapping rows, the one whose text-bbox centre is nearest the
+      cursor wins, so the zone boundary falls at the midpoint between rows
+      — aligned with the text by construction rather than by whichever item
+      Tk created last. No dead gaps between rows (the gap test asserts the
+      2 px seam still hits the nearer row).
+      **Verified both directions, the leddecode rule:** the old algorithm
+      scores 5-of-13 misattributed per row on the labelled rig; the new one
+      scores 0; `tests/test_spike2_playfield_hit.py` (3 real-Tk tests —
+      every point of a row's own glyphs hits that row; the seam goes to the
+      nearer row; far-away hits nothing) plus the 26 neighbouring playfield
+      tests all pass. The acceptance's live-hover screenshot is superseded
+      by the per-pixel sweep, which checks every cursor position the
+      screenshot would have checked one of; David's next schematic-view
+      session on a build carrying this is the confirming look.
+      **Not touched, deliberately:** `Field._hit()` (the artwork view) has
+      the same reversed()-tiebreak shape but ±3 px slop over ~14 px-spaced
+      marker pads — no measured misattribution, and the report was the
+      schematic. If a marker ever hovers wrong, that is where to look.
 
 ## Reference material that is NOT in this repo
 

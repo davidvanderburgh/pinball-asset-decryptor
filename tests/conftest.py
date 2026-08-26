@@ -44,6 +44,25 @@ HAS_WSL = _wsl_usable()
 HAS_DOCKER = shutil.which("docker") is not None
 
 
+@pytest.fixture(autouse=True)
+def _isolate_rig_dirs(tmp_path_factory, monkeypatch):
+    """Point both emulator rigs at an empty directory, for every test.
+
+    The Emulate tab shells the REAL rig on a card pick (item 74's
+    ``cardmount.sh --precache``), and a test that set a card path while the
+    repo's rig was reachable fired a real wsl.exe that wrote a 16-byte
+    pytest card into the developer's LIVE ``~/cardcache`` (found 2026-08-23,
+    item 77).  With these pointed at an empty dir, ``rig_available()`` is
+    False by default and nothing can reach the real rig or its cache; tests
+    that want a rig monkeypatch ``rig_available`` or build their own
+    directory, exactly as they already do.  Source-reading tests are
+    unaffected — they use the ``DEFAULT_RIG_DIR`` constant, not the env.
+    """
+    d = tmp_path_factory.mktemp("no-rig")
+    monkeypatch.setenv("PAD_EMU_DIR", str(d))
+    monkeypatch.setenv("PAD_JJP_EMU_DIR", str(d))
+
+
 def _tk_works():
     """Return True if we can instantiate a hidden Tk root.
 

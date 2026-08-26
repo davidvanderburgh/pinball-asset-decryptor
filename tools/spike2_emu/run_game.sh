@@ -60,6 +60,28 @@ if [ -z "$CARD_SRC" ]; then
     echo "[run] title: $GAME"
 fi
 
+# THE SHIM NEEDS THE TITLE BY NAME, not just the directory it is told to run
+# from, and until 2026-08-23 a CARD run never gave it one.
+#
+# nb_fident_load() builds `/dump/tables/$PAD_GAME/node_ident.txt` and RETURNS
+# EARLY when PAD_GAME is unset, leaving every board to be answered from the
+# built-in nb_idents[] - which is godzilla's node set, measured once. chroot
+# inherits this environment, so exporting it here is the whole fix.
+#
+# What it cost: the built-in table claims part 0x2c40102b / variant 0x05 for
+# every board on that part, because on godzilla they are all ws2812node.
+# turtles' node 12 is a coil4node whose real variant is 0x04, so it graded
+# status 7 = Checksum on every card boot and the game answered with the
+# "UPDATING NODE BOARD RUNTIME / UPDATE FAILED" banner (item 55). Nodes 2 and
+# 14 ARE ws2812node, which is why they graded clean and only one board looked
+# broken. This affects every card run of every title, not just turtles - a card
+# run is exactly the case where no title name was ever in the environment.
+#
+# PAD_GAME is also what the derived-table path uses everywhere else, so setting
+# it here makes a card run agree with an extracted one instead of quietly
+# taking a different code path.
+export PAD_GAME="$GAME"
+
 mkdir -p "$R"/dev "$R"/proc "$R"/sys "$R"/data "$R"/dump/log/connectivity "$R"/tmp "$R"/run
 
 # PAD_MEMTOTAL_KB=1048576 makes the guest see a machine with 1 GB, which is

@@ -15,6 +15,7 @@ skip rather than fail when Tk is unusable.
 import json
 import os
 import pathlib
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -66,10 +67,13 @@ def test_values_containing_equals_are_not_truncated():
     assert parse_status("log=/home/x/a=b.log")["log"] == "/home/x/a=b.log"
 
 
-def test_tech_alerts_is_described_as_waiting_not_as_a_fault():
+def test_tech_alerts_is_described_as_a_place_not_a_fault():
+    # ("Waiting at Tech Alerts" until 2026-08-24 — but since item 63 a boot
+    # steps past the screen on its own, so "waiting" was itself misleading;
+    # David called it. The point stands: at a glance it must not read as a
+    # defect.)
     label, hint = state_text({"state": "techalerts"})
-    # The LABEL is the bit read at a glance, so it must not sound like a defect.
-    assert "Waiting" in label
+    assert label == "At Tech Alerts"
     for wrong in ("stuck", "hung", "fault", "error", "failed", "parked"):
         assert wrong not in label.lower(), wrong
     # The hint has to say what to do about it, and say it is normal.
@@ -79,9 +83,11 @@ def test_tech_alerts_is_described_as_waiting_not_as_a_fault():
 
 def test_tech_alerts_hint_changes_while_auto_advance_is_working():
     # Telling the user to press something while autoattract.sh is pressing it
-    # gets two operators fighting over the same screen.
+    # gets two operators fighting over the same screen — and the label names
+    # the WORK (the node-bus bring-up, matching the footer's "Node boards"
+    # chip), not the readout screen it ends on.
     label, hint = state_text({"state": "techalerts", "auto": "1"})
-    assert "Waiting" in label            # the label is still the honest one
+    assert "node boards" in label.lower()
     assert "press a switch" not in hint.lower()
     assert "attract" in hint.lower()
 
@@ -90,7 +96,7 @@ def test_auto_advance_wording_only_applies_at_tech_alerts():
     # auto= lingers for a poll or two after the game has moved on; the hint for
     # a running game must not turn into "skipping to attract mode".
     _, hint = state_text({"state": "running", "auto": "1"})
-    assert "Attract mode or the operator menu." == hint
+    assert hint == "Attract loop, operator menu, or a game in play."
     # auto=0 is the rig saying the helper has finished or was never started.
     _, hint = state_text({"state": "techalerts", "auto": "0"})
     assert "press a switch" in hint.lower()
@@ -104,14 +110,19 @@ def test_every_state_the_rig_can_emit_has_wording():
         assert label and label != state
 
 
-def test_attract_is_named_as_attract():
-    # The app said "Waiting at Tech Alerts" for a whole run while the game sat
-    # in attract mode on its high-score screen, because status.sh and
-    # autoattract.sh disagreed about what "past Tech Alerts" meant. The word
-    # the user reads has to be the one that matches the screen.
-    label, _ = state_text({"state": "attract"})
-    assert "attract" in label.lower()
+def test_a_running_game_is_not_called_attract_or_tech_alerts():
+    # Two generations of the same lie. 2026-08-05: the app said "Waiting at
+    # Tech Alerts" while the game sat in attract (status.sh and
+    # autoattract.sh disagreed). 2026-08-24, David: "when i start a game,
+    # it's no longer in attract mode" — the rig deliberately cannot tell
+    # attract from a game in play (gamestate.sh), so the label must claim
+    # neither.  "Game running" is what it can stand behind.
+    label, hint = state_text({"state": "attract"})
+    assert "running" in label.lower()
+    assert "attract" not in label.lower()
     assert "tech alert" not in label.lower()
+    # ...the honest breakdown lives in the hint instead.
+    assert "attract" in hint.lower() and "in play" in hint.lower()
 
 
 def test_auto_advance_giving_up_is_not_shown_as_ordinary_waiting():
@@ -124,11 +135,17 @@ def test_auto_advance_giving_up_is_not_shown_as_ordinary_waiting():
     assert "stuck" in label.lower()
     assert "service menu" in hint.lower()
     assert "esc" in hint.lower()
-    # ...and a helper that simply finished still reads as the ordinary wait.
+    # ...a helper that simply finished reads as being AT the screen — not
+    # "Waiting", which was a lie in the common case once item 63 made boots
+    # step past it on their own (David, 2026-08-24).
     label, hint = state_text({"state": "techalerts", "auto": "0",
                               "auto_result": "ok"})
-    assert "Waiting" in label
+    assert label == "At Tech Alerts"
     assert "press a switch" in hint.lower()
+    # ...and while the helper is actually on the job, the label names the
+    # node-bus work, matching the footer chip.
+    label, _ = state_text({"state": "techalerts", "auto": "1"})
+    assert "node boards" in label.lower()
 
 
 def test_unknown_state_falls_back_to_the_raw_word():
@@ -518,17 +535,17 @@ def test_building_the_panel_seeds_the_file_on_a_fresh_machine(monkeypatch,
 
 
 def test_volume_and_mute_are_never_disabled_by_a_run(monkeypatch, tmp_path):
-    """The opposite of Sound/Auto-attract just beside them: those are
-    start-time-only and grey out while a run is up (see _apply's own
-    comment); the whole point of item 56's slider is that it works WITHOUT a
+    """The whole point of item 56's slider is that it works WITHOUT a
     restart, so it must stay live through exactly the state that disables
-    its neighbours."""
+    its neighbours (Reset windows is the sanity probe for "a run disables
+    things" — the Sound/Auto-attract tickboxes that used to be it were
+    removed on 2026-08-24: both behaviours are simply always on)."""
     _isolated_ctl(monkeypatch, tmp_path)
     monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
     root, panel = _panel(tmp_path)
     try:
         panel._apply({"state": "running", "running": "1", "procs": "5"})
-        assert str(panel._audio_chk.cget("state")) == "disabled"      # sanity
+        assert str(panel._winreset_btn.cget("state")) == "disabled"   # sanity
         assert str(panel._vol_scale.cget("state")) != "disabled"
         assert str(panel._mute_chk.cget("state")) != "disabled"
     finally:
@@ -1177,6 +1194,27 @@ def test_start_builds_the_launch_off_the_ui_thread(tmp_path, monkeypatch):
         SimpleNamespace(stdout=iter(()), wait=lambda timeout=None: 0))
     try:
         panel._src_path.set(str(img))
+        # Item 74: picking a card fires ONE `cardmount.sh --precache` spawn —
+        # from a worker thread, because the card-path stat must stay off the
+        # UI thread (a UNC path to a sleeping NAS blocks for seconds).  It is
+        # not a launch, so it comes off the ledger before Start is policed.
+        # macOS is the one platform _precache_kick deliberately skips (the
+        # rig lives in a container there and the card's host path is not
+        # the container's — see its own docstring), so nothing to wait for
+        # on that platform: this branch is what a real macOS CI run needs,
+        # not a hypothetical (found 2026-08-24 when v0.160.0's release CI
+        # failed here — the assertion below had never been exercised on
+        # Darwin at all).
+        if sys.platform == "darwin":
+            time.sleep(0.2)
+            assert not launched, "macOS must not pre-cache (see _precache_kick)"
+        else:
+            deadline = time.time() + 5
+            while not launched and time.time() < deadline:
+                time.sleep(0.01)
+            assert launched and launched[0][-1] == "--precache", \
+                "picking a card should start the background pre-cache"
+        launched.clear()
         panel.start()        # must come back with the "boot" still running
         assert not launched, "start() sat through the WSL boot on the UI thread"
         boot.set()
@@ -2208,6 +2246,178 @@ def test_an_ordinary_log_line_is_not_a_launch_request():
     # ...and neither is the token with nothing to launch.
     assert emulate_tab.playfield_launch(
         "PAD_PLAYFIELD_WINDOWS_LAUNCH savestates=1") is None
+
+
+# ----------------------------------------------------------------------
+# Item 74: a first boot copies the card BEFORE the guest starts, and
+# cardmount.sh narrates it one line every 2 s.  The drain thread turns those
+# lines into the state label, because status.sh's honest "Not running" during
+# the copy is exactly the looks-like-a-hang this item exists to remove.
+# ----------------------------------------------------------------------
+
+def test_a_copy_progress_line_becomes_a_state_label():
+    got = emulate_tab.card_copy_progress(
+        "[card] copying godzilla_pro-1_15_0_spike2.Release.8G.sdcard.raw: "
+        "3121 / 7497 MB (41%)")
+    assert got == "Copying card: 3121 / 7497 MB (41%)"
+
+
+def test_a_card_name_with_spaces_survives_the_parse():
+    """'Heisei Custom Image Premium V1.raw' is a real card on the desk."""
+    got = emulate_tab.card_copy_progress(
+        "[card] copying Heisei Custom Image Premium V1.raw: 0 / 7497 MB (0%)")
+    assert got == "Copying card: 0 / 7497 MB (0%)"
+
+
+def test_ordinary_card_lines_are_not_copy_progress():
+    """The verdict lines that FOLLOW the progress must parse as None — the
+    drain uses that edge to stop showing a copy that has finished."""
+    for line in ("[card] using local cache /home/david/cardcache/x.raw",
+                 "[card] local cache ready - booting from it",
+                 "[card] cache not usable - booting from the original",
+                 "[card] caching x.raw to the WSL disk in the background",
+                 "[card] copy stalled - booting from the original instead "
+                 "(copy continues)",
+                 "", "state=attract"):
+        assert emulate_tab.card_copy_progress(line) is None
+
+
+# ----------------------------------------------------------------------
+# Item 77: the Card cache manager.  The list format is cardmount.sh's
+# --cache-list — tab separated, source LAST, because labels and source
+# paths are entitled to spaces ("Heisei Custom Image Premium V1" is real).
+# ----------------------------------------------------------------------
+
+_CACHE_LIST = (
+    "entry\talpha\t3072\t7168\t1787000000\t/mnt/d/cards/alpha.raw\n"
+    "entry\tbeta card\t5242880\t7761920\t0\t/mnt/c/spaced dir/beta card.raw\n"
+    "entry\tgamma\t2048\t2048\t1786000000\t\n"
+    "disk\t29355388\t263114392\n")
+
+
+def test_cache_list_parses_and_sorts_biggest_first():
+    entries, disk = emulate_tab.parse_cache_list(_CACHE_LIST)
+    assert [e["label"] for e in entries] == ["beta card", "alpha", "gamma"]
+    assert entries[0]["real_kb"] == 5242880
+    assert entries[0]["src"] == "/mnt/c/spaced dir/beta card.raw"
+    # boot 0 means no sidecar yet — rendered as "never", never as 1970.
+    assert entries[0]["boot"] == 0
+    assert disk == (29355388, 263114392)
+
+
+def test_cache_list_survives_garbage_and_emptiness():
+    assert emulate_tab.parse_cache_list("") == ([], None)
+    entries, disk = emulate_tab.parse_cache_list(
+        "noise\nentry\tbad\tNaN\t1\t2\tx\ndisk\ta\tb\n" + _CACHE_LIST)
+    assert len(entries) == 3 and disk is not None
+
+
+def test_cache_sizes_and_boot_render_for_humans():
+    assert emulate_tab.human_size(5242880) == "5.0 GB"
+    assert emulate_tab.human_size(2048) == "2 MB"
+    assert emulate_tab.cache_boot_text(0) == "never"
+    assert emulate_tab.cache_boot_text(1787000000).startswith("20")
+
+
+# ----------------------------------------------------------------------
+# Item 78: the footer bar under the notebook carries the EMULATION's
+# loading state while the Emulate tab is showing — the panel dispatches
+# semantic kinds and the window renders them.  These test the dispatch.
+# ----------------------------------------------------------------------
+
+def test_the_footer_follows_the_emulation_state(monkeypatch, tmp_path):
+    _isolated_ctl(monkeypatch, tmp_path)
+    root, panel = _panel(tmp_path)
+    pushes = []
+    panel._footer_cb = lambda kind, pct=None, text="": \
+        pushes.append((kind, pct, text))
+    try:
+        panel._apply({"state": "off", "running": "0", "procs": "0"})
+        assert pushes[-1][0] == "idle"
+        panel._apply({"state": "booting", "running": "1", "procs": "5"})
+        assert pushes[-1][0] == "boot"
+        assert "Starting" in pushes[-1][2]
+        # Tech Alerts is its OWN chip on the ladder — still loading, never
+        # done, and never the same chip as the boot.
+        panel._apply({"state": "techalerts", "running": "1", "procs": "5"})
+        assert pushes[-1][0] == "techalerts"
+        panel._apply({"state": "attract", "running": "1", "procs": "5"})
+        assert pushes[-1][0] == "run"
+        # A copy in flight outranks everything the poll says (the guest is
+        # deliberately not running yet) — and carries its real percent.
+        panel._copying = "Copying card: 3121 / 7497 MB (41%)"
+        panel._copying_pct = 41
+        panel._apply({"state": "off", "running": "0", "procs": "0"})
+        assert pushes[-1] == ("copy", 41, "Copying card: 3121 / 7497 MB (41%)")
+        # ...except during a Stop, when the copy stops narrating.
+        panel._stopping = True
+        panel._apply({"state": "off", "running": "0", "procs": "0"})
+        assert pushes[-1][0] == "idle"
+    finally:
+        root.destroy()
+
+
+def test_the_sound_and_skip_toggles_are_gone_and_env_is_clean(
+        monkeypatch, tmp_path):
+    """David, 2026-08-24: the volume slider owns loudness and boots land in
+    attract on their own — the two start-time tickboxes are removed, and
+    Start's environment no longer carries either override."""
+    root, panel = _panel(tmp_path)
+    try:
+        assert not hasattr(panel, "_audio_chk")
+        assert not hasattr(panel, "_auto_chk")
+    finally:
+        root.destroy()
+
+
+def test_cache_manager_lists_and_drops(tmp_path, monkeypatch):
+    """The dialog end to end against a canned rig: rows land biggest-first,
+    Delete confirms and shells one --cache-drop per selected label, then
+    reloads.  All rig calls are captured — nothing reaches a real WSL."""
+    import time as _time
+    root, panel = _panel(tmp_path)
+    panel._on_destroy(None)
+    monkeypatch.setattr(emulate_tab, "rig_available", lambda: True)
+    calls = []
+
+    def fake_run(cmd, **_kw):
+        calls.append(cmd)
+        text = _CACHE_LIST if "--cache-list" in cmd else "[card] dropped\n"
+        return SimpleNamespace(stdout=text.encode())
+
+    monkeypatch.setattr(emulate_tab.subprocess, "run", fake_run)
+    monkeypatch.setattr(emulate_tab.messagebox, "askyesno",
+                        lambda *a, **k: True)
+    try:
+        panel._open_cache_manager()
+        tree = panel._cache_ui["tree"]
+        deadline = _time.time() + 5
+        while not tree.get_children() and _time.time() < deadline:
+            root.update()
+        assert list(tree.get_children()) == ["beta card", "alpha", "gamma"]
+        assert "5.0 GB" in panel._cache_ui["head"].cget("text")
+        # A second open LIFTS the same window instead of stacking another.
+        win = panel._cache_win
+        panel._open_cache_manager()
+        assert panel._cache_win is win
+        # Drop the spaced-label entry.
+        tree.selection_set("beta card")
+        root.update()
+        panel._cache_delete()
+        deadline = _time.time() + 5
+        while not any("--cache-drop" in c for c in calls) \
+                and _time.time() < deadline:
+            root.update()
+        drops = [c for c in calls if "--cache-drop" in c]
+        assert len(drops) == 1 and drops[0][-1] == "beta card"
+        # ...and the reload after the drop asked for a fresh list.
+        deadline = _time.time() + 5
+        while sum("--cache-list" in c for c in calls) < 2 \
+                and _time.time() < deadline:
+            root.update()
+        assert sum("--cache-list" in c for c in calls) >= 2
+    finally:
+        root.destroy()
 
 
 def test_the_interpreter_is_never_the_frozen_app_itself(monkeypatch):

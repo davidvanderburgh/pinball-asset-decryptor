@@ -52,6 +52,7 @@ import gameinfo
 import ledio
 import padpath
 import swelf
+import swnames
 import swtable
 import switchxy
 
@@ -122,6 +123,24 @@ def _stale(dest, source):
         return os.path.getmtime(dest) < os.path.getmtime(source)
     except OSError:
         return True
+
+
+def _read_list(path):
+    """[(id, num, node, bit, name)] from an on-disk switch_list.txt, or []."""
+    rows = []
+    try:
+        with open(path) as f:
+            for line in f:
+                if line.startswith("#"):
+                    continue
+                fields = line.split(None, 4)
+                if len(fields) >= 5:
+                    rows.append((int(fields[0]), int(fields[1]),
+                                 int(fields[2]), int(fields[3]),
+                                 fields[4].strip()))
+    except (OSError, ValueError):
+        return []
+    return rows
 
 
 #: The header devicexy.text() writes naming the binary a table came from.
@@ -305,8 +324,41 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
     # --- the switch table, which is the only part that needs a run -------
     sw_list = os.path.join(tdir, "switch_list.txt")
     sw_xy = os.path.join(tdir, "switch_xy.txt")
+    repaired = False
     if os.path.exists(sw_list) and not force:
-        say("  switches     (cached)")
+        # ★ REPAIR A CACHED LIST WHOSE NAMES ARE STILL `?`. The dump branch
+        # below used to write the shim's rows as-is, and on a title whose
+        # message-table address resolves wrong (item 29) that is every name -
+        # beatles' first run cached 92/92 `?`, so binds_resolve matched no
+        # flipper, switchxy joined nothing, and the miss was PERMANENT: an
+        # existing file is exactly what this branch trusts. So a cached list
+        # is re-asked here through the same swnames fill the write path now
+        # uses; a list it cannot improve is left alone, and a list with the
+        # game's own names never has one replaced (swnames' own rule).
+        rows = _read_list(sw_list)
+        if any(r[4] == "?" for r in rows):
+            filled, _report = swnames.fill(rows, game, elf)
+            if filled != rows:
+                try:
+                    _write(sw_list, swtable.text(game, filled))
+                    repaired = True
+                    made["switch_list.txt"] = sw_list
+                    # "filled", not "from the device table": on a title whose
+                    # device table cannot be read the fill is platform labels
+                    # alone, and a log line naming the wrong source is worse
+                    # than one naming none (the NB_WHY lesson in watch.sh).
+                    say("  switches     (cached) - filled %d of its %d `?` "
+                        "names (swnames: device table + platform labels)"
+                        % (sum(1 for a, b in zip(rows, filled)
+                               if a[4] != b[4]), len(rows)))
+                except OSError as exc:
+                    say("  switches     FAILED to repair %s: %s"
+                        % (sw_list, exc))
+            else:
+                say("  switches     (cached; %d `?` names the device table "
+                    "cannot fill)" % sum(1 for r in rows if r[4] == "?"))
+        else:
+            say("  switches     (cached)")
     else:
         if log_path and not switch_dump_complete(log_path):
             wait_for_switches(log_path, wait_s,
@@ -339,6 +391,22 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
             if not live_rows:
                 say("  switches     the dump is there but held no rows")
                 return made
+        # FILL THE `?` NAMES BEFORE THE LIST EVER TOUCHES DISK. The shim
+        # reads names through a per-title message-table address that resolves
+        # wrong on most titles (item 29), and this writer used to publish
+        # those `?`s as the cache - swnames.fill was only ever wired into
+        # swtable.py's own CLI, which nothing in the run path calls. Every
+        # consumer of this file matches on the NAME (padglhost's key binds,
+        # plunge.py's trough, switchxy's join), so a nameless list parses
+        # fine and disables all of them at once, silently - beatles' guided
+        # setup with dead flipper keys is what that looks like. fill never
+        # overwrites a name the game itself supplied and refuses over
+        # guessing, so this is safe on every branch above, the ELF walk's
+        # already-named rows included.
+        live_rows, fill_report = swnames.fill(live_rows, game, elf)
+        for line in fill_report:
+            if not line.startswith("every switch already has"):
+                say("               %s" % line)
         # ★ ITEM 49: NAME a failed write instead of dying in a log nobody
         # reads. The background pass runs as the desktop user and pass one
         # (root, on a pivot run) creates this directory - before watch.sh
@@ -371,7 +439,11 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
     # jaws, led_zeppelin, elvira - which is precisely why swnames.py fills
     # switch_list.txt from the DEVICE table instead. So join from the on-disk
     # list swnames has already named, and no run is involved at all.
-    if (force or not os.path.exists(sw_xy)) and os.path.exists(sw_list):
+    # `repaired` forces the join: the positions are keyed on the names the
+    # repair just filled in, so a switch_xy.txt from before the repair (or a
+    # join the nameless list made impossible) is stale by construction.
+    if (force or repaired or not os.path.exists(sw_xy)) \
+            and os.path.exists(sw_list):
         if recs is None and os.path.exists(dev_dest):
             try:
                 recs = devicexy.build(game)

@@ -129,13 +129,13 @@ still come from running it.
 | john_wick_le | ✅ live, 106 | ✅ | ✅ | n/a | 2026-08-19 |
 | james_bond_60th_le | ✅ live, 118 | ✅ | ✅ | n/a | 2026-08-19 |
 | james_bond_le | ✅ live, 108 | ✅ bond_le_playfield.png | ✅ | n/a | 2026-08-19 |
-| deadpool_pro | ✅ live, 104 | ✅ deadpool_pro_playfield.png | ✅ | n/a | 2026-08-19 |
+| deadpool_pro | ✅ live, E2E-played, 103 | ✅ deadpool_pro_playfield.png | ✅ 41 placed | n/a | 2026-08-27 |
 | king_kong_le | ✅ live, 105 | ✅ Rodeo…Wireframe.png (item 57 fix) | ✅ 489/517 inside, 0 outside (item 57 fix) | n/a | 2026-08-19 |
 | dungeons_and_dragons_le | ✅ live, 104 | ❌ none shipped | ✅ 255 records | n/a | 2026-08-19 |
 | venom_le | ✅ live, 107 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
 | turtles_le | ✅ live, 96 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
 | uncanny_xmen_le | ✅ live, 110 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
-| deadpool_le | ✅ live, 104 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
+| deadpool_le | ✅ live, E2E-played, 103 | ❌ none shipped | ❌ 0 device records (title ships no device table at all, not a parser gap — measured 2026-08-27) | n/a | 2026-08-27 |
 | godzilla_le **V1.14.0** | ✅ live, 98 | ✅ scaled_godzilla_le_playfield.png 313x710 | ✅ 177/593 inside, 0 outside; 30/30 left-right; 48 switches, 14 coils, 115 lamps placed | n/a | 2026-08-21 |
 | godzilla_le 1.13.0 | not run | — no device test data in this build | — 0 records (measured off the card) | n/a | 2026-08-21 |
 | metallica_spike | ✅ live, 106 | ✅ metallica_playfield…png (item 57 fix) | ✅ 502/664 inside, 0 outside (item 57 fix) | n/a | 2026-08-19 |
@@ -155,6 +155,7 @@ still come from running it.
 | stranger_things_le | ✅ static (swelf.py, item 52) | ❌ none found | not re-measured | ✅ real (projector, item 44) | 2026-08-19 |
 | sword_of_rage_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 98 | ❌ none shipped | ❌ no device table | n/a | 2026-08-19 |
 | munsters_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 103 | ❌ none shipped | ❌ no device table | n/a | 2026-08-19 |
+| beatles | ✅ live, 92 (item 80 sweep fix: all-`?` message-table title, names now filled from the device table) | ✅ Test/beatles_playfield.png 336x710 | ✅ 50 placed (item 80 sweep: `layout_image()` join fix, was hard-coded to the literal "playfield") | not re-measured | 2026-08-27 |
 
 **CORRECTION, same session, right after this table's first version shipped:**
 the first pass checked the CONSOLE pane for the live switch dump

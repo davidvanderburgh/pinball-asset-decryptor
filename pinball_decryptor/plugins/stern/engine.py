@@ -26,6 +26,7 @@ import pickle
 import re
 import struct
 import tempfile
+import time
 import wave
 
 # Glyph slices sit 120+ characters below the project folder and the build
@@ -2145,12 +2146,41 @@ def _pad_isobmff(data, target):
     return pad_isobmff_to_size(data, target)
 
 
+# The write-side change scan used to md5 every asset on every Write — minutes
+# of re-hashing a big mod even when nothing changed since the last build
+# (Godzilla Heisei 1.16: 3 min 12 s of a 9.5-minute write, and a multiple of
+# that on a slower rig).  The GUI's change scan and the mod-pack export
+# already share a size+mtime sidecar (core.hashcache, ".hashcache.json");
+# this routes the engine's scans through the same file, so all three walks
+# feed one cache and any of them warms the others.
+_HASHCACHES = {}      # assets_dir -> loaded hashcache dict (process lifetime)
+
+
+def _scan_md5(assets_dir, path):
+    """MD5 of *path* through *assets_dir*'s size+mtime hash cache.  ``None``
+    on read failure — callers already treat that as "changed", exactly as
+    they treated ``md5_file`` raising ``OSError``."""
+    from ...core import hashcache
+    hc = _HASHCACHES.get(assets_dir)
+    if hc is None:
+        hc = _HASHCACHES[assets_dir] = hashcache.load(assets_dir)
+    rel = os.path.relpath(path, assets_dir).replace(os.sep, "/")
+    return hashcache.md5_for(path, rel, hc)
+
+
+def _save_hashcache(assets_dir):
+    """Persist the scan's hash cache (best-effort, like the sidecar itself)."""
+    from ...core import hashcache
+    hc = _HASHCACHES.get(assets_dir)
+    if hc is not None:
+        hashcache.save(assets_dir, hc)
+
+
 def _changed_videos(assets_dir, baseline):
     """Return ``[(fname, card_path, staged_path), ...]`` for the videos under
     ``assets_dir/video`` whose current bytes differ from the Extract baseline
     (``.checksums.md5``).  Empty when there's no ``video/manifest.txt`` (an
     audio-only extract, or Write pointed at a subfolder)."""
-    from ...core.checksums import md5_file
     vid_dir = os.path.join(assets_dir, "video")
     manifest = os.path.join(vid_dir, _VIDEO_MANIFEST)
     if not os.path.isfile(manifest):
@@ -2169,11 +2199,8 @@ def _changed_videos(assets_dir, baseline):
             if not os.path.isfile(staged):
                 continue
             base = baseline.get("video/" + fname)
-            try:
-                if base is not None and md5_file(staged) == base:
-                    continue           # untouched since extract
-            except OSError:
-                pass
+            if base is not None and _scan_md5(assets_dir, staged) == base:
+                continue               # untouched since extract
             out.append((fname, card_path, staged))
     return out
 
@@ -2483,7 +2510,6 @@ def _changed_images(assets_dir, baseline):
     ``assets_dir/images`` whose current bytes differ from the Extract baseline
     (``.checksums.md5``).  Empty when there's no ``images/manifest.txt``.
     *output* is the forward-slash path under ``images/`` (mirrors the card)."""
-    from ...core.checksums import md5_file
     img_dir = os.path.join(assets_dir, "images")
     manifest = os.path.join(img_dir, _IMAGE_MANIFEST)
     if not os.path.isfile(manifest):
@@ -2502,11 +2528,8 @@ def _changed_images(assets_dir, baseline):
             if not os.path.isfile(staged):
                 continue
             base = baseline.get("images/" + output)
-            try:
-                if base is not None and md5_file(staged) == base:
-                    continue           # untouched since extract
-            except OSError:
-                pass
+            if base is not None and _scan_md5(assets_dir, staged) == base:
+                continue               # untouched since extract
             out.append((output, card_path, staged))
     return out
 
@@ -2519,7 +2542,6 @@ def _changed_music_banks(assets_dir, baseline):
     skipped there with a warning rather than written blind.  The
     ``music_catNN_MMMM`` prefix survives an Auto-transcribe / Music-ID rename, so
     it's the stable per-song key.  Empty when there's no baseline."""
-    from ...core.checksums import md5_file
     base = {}
     for rel in baseline:
         mm = _MUSIC_WAV_RE.match(os.path.splitext(os.path.basename(rel))[0])
@@ -2536,10 +2558,7 @@ def _changed_music_banks(assets_dir, baseline):
             if not mm:
                 continue
             path = os.path.join(root, fn)
-            try:
-                if md5_file(path) != base.get(mm.group(1).lower()):
-                    changed.append(path)
-            except OSError:
+            if _scan_md5(assets_dir, path) != base.get(mm.group(1).lower()):
                 changed.append(path)
     return changed
 
@@ -2557,7 +2576,6 @@ def _select_changed_idx_wavs(assets_dir, baseline):
     differ from the ``.checksums.md5`` baseline; an idx with no differing twin
     is unchanged and skipped.
     """
-    from ...core.checksums import md5_file
     by_idx = {}  # idx -> [path, ...]
     for root, _dirs, files in os.walk(assets_dir):
         # Never walk the .orig snapshot mirror — it holds pristine copies of
@@ -2585,11 +2603,7 @@ def _select_changed_idx_wavs(assets_dir, baseline):
             edits[idx] = paths[-1]
             continue
         for path in paths:
-            try:
-                changed = md5_file(path) != base
-            except OSError:
-                changed = True
-            if changed:
+            if _scan_md5(assets_dir, path) != base:
                 edits[idx] = path
                 break
     return edits
@@ -2914,7 +2928,6 @@ def _changed_scene_textures(assets_dir, baseline):
     """Return ``[(output, card_path, staged_png, w, h, fmt), ...]`` for the scene
     textures under ``images/scene_textures`` whose PNG bytes differ from the
     Extract baseline.  Empty when there's no texture manifest."""
-    from ...core.checksums import md5_file
     tex_dir = os.path.join(assets_dir, *_TEXTURE_DIR)
     manifest = os.path.join(tex_dir, _TEXTURE_MANIFEST)
     if not os.path.isfile(manifest):
@@ -2937,11 +2950,8 @@ def _changed_scene_textures(assets_dir, baseline):
             if not os.path.isfile(staged):
                 continue
             base = baseline.get("images/" + output)
-            try:
-                if base is not None and md5_file(staged) == base:
-                    continue                   # untouched since extract
-            except OSError:
-                pass
+            if base is not None and _scan_md5(assets_dir, staged) == base:
+                continue                       # untouched since extract
             out.append((output, card_path, staged, w, h, fmt))
     return out
 
@@ -3006,7 +3016,6 @@ def _changed_glyph_images(assets_dir, baseline):
     the font-glyph slice PNGs whose bytes differ from the Extract baseline,
     grouped by the atlas PNG they belong to.  Empty when there's no
     ``glyph_images.txt`` manifest (see :func:`extract_radium_images`)."""
-    from ...core.checksums import md5_file
     tex_dir = os.path.join(assets_dir, *_TEXTURE_DIR)
     manifest = os.path.join(tex_dir, _GLYPH_MANIFEST)
     if not os.path.isfile(manifest):
@@ -3038,11 +3047,8 @@ def _changed_glyph_images(assets_dir, baseline):
             if not os.path.isfile(staged):
                 continue
             base = baseline.get("images/" + g_rel)
-            try:
-                if base is not None and md5_file(staged) == base:
-                    continue                   # untouched since extract
-            except OSError:
-                pass
+            if base is not None and _scan_md5(assets_dir, staged) == base:
+                continue                       # untouched since extract
             out.setdefault(atlas_rel, []).append((g_rel, staged, x, y, w, h))
     return out
 
@@ -3091,18 +3097,14 @@ def _glyph_atlas_overrides(assets_dir, baseline, log):
     return overrides
 
 
-def _atlas_png_changed(staged, baseline, output):
+def _atlas_png_changed(assets_dir, staged, baseline, output):
     """True when the atlas PNG itself differs from the Extract baseline (as
     opposed to only its glyph slices) -- decides whole re-encode vs the
     surgical block splice in :func:`_radium_image_writes`."""
-    from ...core.checksums import md5_file
     base = baseline.get("images/" + output)
     if base is None:
         return True
-    try:
-        return md5_file(staged) != base
-    except OSError:
-        return True
+    return _scan_md5(assets_dir, staged) != base
 
 
 def _splice_changed_blocks(raw, target, pad_w, pad_h, fmt):
@@ -3188,7 +3190,6 @@ def _changed_radium_images(assets_dir, baseline, extra_changed=(), scope=None):
     outline atlases with an empty 512x512 PNG, and 900 of their 913 on-card
     occurrences were silently dropped by scopes an earlier import had left
     behind, so his machine kept the old outlines on every screen but one."""
-    from ...core.checksums import md5_file
     tex_dir = os.path.join(assets_dir, *_TEXTURE_DIR)
     manifest = os.path.join(tex_dir, _RADIUM_IMAGE_MANIFEST)
     if not os.path.isfile(manifest):
@@ -3218,16 +3219,13 @@ def _changed_radium_images(assets_dir, baseline, extra_changed=(), scope=None):
             if allowed is not None and radium_path not in allowed:
                 if output not in png_edited:
                     png_edited[output] = _atlas_png_changed(
-                        staged, baseline, output)
+                        assets_dir, staged, baseline, output)
                 if not png_edited[output]:
                     continue                   # narrowed to other scenes
             if output not in extra_changed:
                 base = baseline.get("images/" + output)
-                try:
-                    if base is not None and md5_file(staged) == base:
-                        continue               # untouched since extract
-                except OSError:
-                    pass
+                if base is not None and _scan_md5(assets_dir, staged) == base:
+                    continue                   # untouched since extract
             out.append((output, radium_path, staged, data_off, length,
                         pad_w, pad_h, fmt))
     return out
@@ -3322,7 +3320,8 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel):
                 continue
             arr = np.asarray(im, dtype=np.uint8)
             if (override is not None
-                    and not _atlas_png_changed(staged, baseline, output)):
+                    and not _atlas_png_changed(assets_dir, staged, baseline,
+                                               output)):
                 # Glyph-only edit: splice just the changed BC blocks into the
                 # stock atlas bytes so every character the user didn't touch
                 # stays bit-identical (occurrences share one content, so the
@@ -3490,6 +3489,25 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
     return out
 
 
+def _fmt_dur(secs):
+    """``4 min 32 s`` / ``52 s`` for the write-timing log lines."""
+    secs = int(round(secs))
+    return ("%d min %d s" % divmod(secs, 60)) if secs >= 60 else "%d s" % secs
+
+
+def _stage_done(log, name, t0):
+    """Log how long a Write stage took.  Quiet under 5 s so a small write
+    stays a small log.
+
+    "Where did my write go?" has to be answerable from the build log alone:
+    a modder reporting a slow write can't rerun it under a profiler, and the
+    stage mix varies wildly with the mod (Godzilla Heisei 1.16, 2026-08-26:
+    ~110 minutes per image on the modder's rig, unattributable from afar)."""
+    dt = time.monotonic() - t0
+    if dt >= 5.0:
+        log("Write timing: %s took %s." % (name, _fmt_dur(dt)), "info")
+
+
 def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                      phase=None, label=None, dest_is_device=False):
     """Diff *assets_dir* against the Extract baseline, re-encode / size-fit the
@@ -3529,6 +3547,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     # an untouched (or merely Auto-transcribe-renamed) sound/clip is skipped.
     # The leading index survives a rename ("idx0651 - text.wav"); the walk is
     # recursive so Write works from the extract root or its audio/ subdir.
+    t_scan = time.monotonic()
     baseline = read_checksums(assets_dir)
     audio_edits = _select_changed_idx_wavs(assets_dir, baseline)
 
@@ -3549,6 +3568,9 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     # Recoloured display text (text/colors.tsv) — the colour lives in the scene,
     # not in the font, so this is a radium patch too.
     color_edits = _changed_radium_text_colors(assets_dir)
+    _save_hashcache(assets_dir)
+    _stage_done(log, "scanning the assets for changes (checksumming every "
+                "sound and video against the Extract baseline)", t_scan)
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
@@ -3693,8 +3715,11 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         gr_path = img_path = None
         if audio_edits or music_edits:
             phase(1)  # Re-encode audio (Direct-SD phase index; no-op for file Write)
+            t0 = time.monotonic()
             gr_path, img_path, reader, fw_node, img_node = _extract_inputs(
                 disk_f, parts, work, log, _read_prog)
+            _stage_done(log, "reading the firmware and audio image out of "
+                        "the card", t0)
             if cancel():
                 return None, None, None, None
             if not audio_decode_supported(gr_path):
@@ -3719,11 +3744,14 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     # a single-process fallback.  Params come from the
                     # Extract-time cache; only a cold cache boots an emulator here.
                     params = _params_for(gr_path, img_path, log, progress)
+                    t0 = time.monotonic()
                     audio_patches, _askip = _encode_cat0_sounds(
                         gr_path, img_path, params, audio_edits, np, log,
-                        progress, cancel)
+                        progress, cancel, assets_dir=assets_dir)
                     if audio_patches is None:
                         return None, None, None, None
+                    _stage_done(log, "re-encoding %d replaced sound(s)"
+                                % len(audio_edits), t0)
                     # Keep the firmware's master-directory forward-chain intact.
                     # Blip-free (default): patch game_real so the boot-derive reads
                     # STOCK window bytes for the replaced sounds -- fully-stock
@@ -3782,6 +3810,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     if (audio_patches and not pathA_applied
                             and os.environ.get(
                                 "PAD_STERN_SKIP_MASTERDIR_FIX") != "1"):
+                        t0 = time.monotonic()
                         audio_patches = _restore_masterdir_consumed(
                             gr_path, img_path, audio_patches, log, progress,
                             cancel)
@@ -3789,6 +3818,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             return None, None, None, None
                         _assert_param_integrity(gr_path, img_path, audio_patches,
                                                 params, np, log, work, progress)
+                        _stage_done(log, "the master-directory restore and "
+                                    "firmware integrity check", t0)
                     if audio_patches:
                         why = pathA_why or "see the build log"
                         if os.environ.get(
@@ -3807,6 +3838,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                         # scrap).
                         if os.environ.get(
                                 "PAD_STERN_SKIP_FINAL_VERIFY") != "1":
+                            t0 = time.monotonic()
                             try:
                                 _verify_final_patches(
                                     gr_path, img_path, audio_patches, params,
@@ -3814,17 +3846,24 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                             except Exception as e:
                                 log("Final-bytes check skipped (%s)." % e,
                                     "info")
+                            _stage_done(log, "the final decode check of every "
+                                        "replaced sound "
+                                        "(PAD_STERN_SKIP_FINAL_VERIFY=1 skips "
+                                        "it)", t0)
 
                 # Per-song music banks (image-scNN.bin) — re-encode each edited
                 # song back into its bank (own fresh CatEmu per bank).
                 if music_edits:
                     if progress:
                         progress(80, 100, "Re-encoding music bank(s)...")
+                    t0 = time.monotonic()
                     music_patches = _compute_music_patches(
                         reader, gr_path, img_path, music_edits, work, log,
                         progress, cancel, np)
                     if cancel():
                         return None, None, None, None
+                    _stage_done(log, "re-encoding %d music-bank song(s)"
+                                % len(music_edits), t0)
 
         # A video / image / text-only write (or one whose audio turned out
         # unsupported) still needs a reader to resolve the loose-file inodes.
@@ -3887,21 +3926,27 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
             # oversized ones grow their slot instead of being crushed to fit.
             from ...core import staged_changes as _sc
             _saved = _sc.load(assets_dir)
+            t0 = time.monotonic()
             video_patches, _vskip, video_grow_jobs = _prepare_video_patches(
                 reader, video_edits, work, log, cancel,
                 originals=_saved.get("video") or {},
                 dest_is_device=dest_is_device)
             if cancel():
                 return None, None, None, None
+            _stage_done(log, "preparing %d replaced video(s)"
+                        % len(video_edits), t0)
 
         image_patches = []     # (inode, payload bytes == inode size)
         if image_edits:
             if progress:
                 progress(92, 100, "Preparing images...")
+            t0 = time.monotonic()
             image_patches, _iskip = _prepare_image_patches(
                 reader, image_edits, work, log, cancel)
             if cancel():
                 return None, None, None, None
+            _stage_done(log, "preparing %d replaced image(s)"
+                        % len(image_edits), t0)
 
         texture_patches = []   # (inode, payload bytes == inode size)
         if texture_edits:
@@ -3949,6 +3994,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         # unrecognised manifest never fails the Write — it just leaves the card
         # needing re-validation, exactly as before this step existed.
         full_repl = list(video_patches) + list(image_patches) + list(texture_patches)
+        t0 = time.monotonic()
         try:
             writes += _compute_sidx_writes(
                 reader, disk_f, img_node, audio_patches, music_patches,
@@ -3957,6 +4003,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
         except Exception as e:
             log("SD-validation manifest update failed (%s); the card may report "
                 "a validation error until re-validated." % e, "warning")
+        _stage_done(log, "refreshing the SD-validation manifest", t0)
 
         # Auto-disable Stern's game self/asset validator (validation_exec) so the
         # modded card boots without the "#N UPDATE SD CARD" tamper errors.  The
@@ -4038,6 +4085,7 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     entirely."""
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
+    t_write = time.monotonic()
     import shutil
     import threading
 
@@ -4089,7 +4137,11 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     finally:
         disk_f.close()
 
+    t0 = time.monotonic()
     copier.join()
+    _stage_done(log, "waiting for the card-image copy to finish (the copy "
+                "outlived the edit computation - a faster build drive would "
+                "shorten this)", t0)
     if copy_err:                            # the background copy itself failed
         _safe_remove(output_path)
         # Say what was being done and where — the raw error is an errno and a
@@ -4104,15 +4156,20 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
 
     try:
         # the copy is already on disk; patch the changed bytes in place
+        t0 = time.monotonic()
         with open(_lp(output_path), "r+b") as out:
             _apply_writes(out, writes)
             out.flush()
             os.fsync(out.fileno())
+        _stage_done(log, "writing the patched bytes into the image", t0)
         # Grow the files that outgrew their slots (oversized videos kept at full
         # quality, and the rebuilt firmware when a blip-free build is on) by
         # copying them in through the ext4 driver — done AFTER the in-place
         # writes so the filesystem it mounts is already consistent.
+        t0 = time.monotonic()
         n_grown = _grow_video_slots(output_path, grow_plan, log)
+        _stage_done(log, "copying the full-size (grown) videos into the card",
+                    t0)
     finally:
         # The rebuilt firmware has been copied onto the card (or has failed to
         # be); either way its scratch dir is ours to remove now.
@@ -4145,9 +4202,10 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
             log("%d of %d replaced video(s) could NOT be written — those slots "
                 "still hold the game's stock videos. Fix the issue above and "
                 "run the Write again." % (n_vid_failed, n_vid_jobs), "error")
-    log("Wrote patched image: %s (%d sound(s), %d video(s), %d image(s), "
-        "%d display string(s))."
-        % (output_path, n_audio, n_video, n_image, n_text), "success")
+    log("Wrote patched image in %s: %s (%d sound(s), %d video(s), "
+        "%d image(s), %d display string(s))."
+        % (_fmt_dur(time.monotonic() - t_write), output_path,
+           n_audio, n_video, n_image, n_text), "success")
     # Return the per-type breakdown (not just the total) so the completion
     # dialog can name what actually changed instead of always saying "sound(s)",
     # plus the audio build mode so it can say whether the card is blip-free or
@@ -4973,7 +5031,7 @@ def audio_profile_report(assets_dir, log, progress=None):
     import numpy as np
 
     from ...core import staged_originals
-    from ...core.checksums import md5_file, read_checksums
+    from ...core.checksums import read_checksums
 
     baseline = read_checksums(assets_dir)
     base_by_idx = {}
@@ -4998,10 +5056,7 @@ def audio_profile_report(assets_dir, log, progress=None):
         base = base_by_idx.get(idx)
         changed = True
         if base is not None:
-            try:
-                changed = md5_file(path) != base
-            except OSError:
-                pass
+            changed = _scan_md5(assets_dir, path) != base
         prev = by_idx.get(idx)
         if prev is None or (changed and not prev[1]):
             by_idx[idx] = (path, changed)
@@ -5697,21 +5752,155 @@ def _params_for(gr_path, img_path, log, progress):
         emu.close()
 
 
+class _AudioBodyCache:
+    """Persistent per-sound encode-result cache under
+    ``<assets>/.write_cache/audio``.
+
+    A Write re-encodes every replaced sound on every build even though almost
+    none of them changed since the LAST build, and on a big mod that stage is
+    minutes of emulator time per iteration (Godzilla Heisei 1.16: 123 sounds,
+    2 min 21 s on a 16-core box, a multiple of that on the modder's rig).
+
+    An entry replays only when EVERYTHING the encode depends on is unchanged;
+    the key is an md5 over:
+
+      * the card's identity — md5 of ``game_real`` plus ``image.bin``'s size
+        and the md5 of its first and last 4 MB (the emulator the encode runs
+        on boots from exactly these two files);
+      * the sound's own param record AND its layout-predecessor's (the
+        shared-boundary word settles against the predecessor's stock tail);
+      * the replacement WAV's content (via the change scan's size+mtime hash
+        cache, so it usually costs a stat);
+      * every ``PAD_STERN_*`` env var that shapes the encode — toggles that
+        only pick a path through the write (verify passes, blip-free
+        composition, serial-vs-parallel) are excluded so flipping them does
+        not dump the cache;
+      * the app version (an encoder change must never replay old bodies).
+
+    The value is the encode's ``(write_off, body)`` — or the skip verdict for
+    a codec that can't re-encode bit-exact, which otherwise costs a full
+    failed encode attempt every single build.  One entry per idx: storing a
+    new key removes the idx's old file, so the cache never outgrows one body
+    per replaced sound.  ``PAD_STERN_AUDIO_CACHE=0`` disables it entirely.
+    """
+
+    _PATH_ONLY = frozenset((
+        "PAD_STERN_AUDIO_CACHE", "PAD_STERN_BLIP_FREE",
+        "PAD_STERN_SERIAL_ENCODE", "PAD_STERN_SKIP_FINAL_VERIFY",
+        "PAD_STERN_SKIP_KEYPATCH", "PAD_STERN_SKIP_MASTERDIR_FIX"))
+
+    _MAGIC_BODY = b"PADAC1\n"
+    _MAGIC_SKIP = b"PADAC0\n"
+
+    def __init__(self, assets_dir, gr_path, img_path, byidx, ends):
+        from ... import __version__
+        self.assets_dir = assets_dir
+        self.dir = os.path.join(assets_dir, ".write_cache", "audio")
+        os.makedirs(self.dir, exist_ok=True)
+        self.byidx = byidx
+        self.ends = ends
+        h = hashlib.md5()
+        with open(_lp(gr_path), "rb") as f:
+            h.update(f.read())
+        sz = os.path.getsize(_lp(img_path))
+        h.update(b"%d" % sz)
+        with open(_lp(img_path), "rb") as f:
+            h.update(f.read(4 << 20))
+            if sz > (8 << 20):
+                f.seek(-(4 << 20), 2)
+                h.update(f.read(4 << 20))
+        env = sorted((k, v) for k, v in os.environ.items()
+                     if k.startswith("PAD_STERN_")
+                     and k not in self._PATH_ONLY)
+        h.update(repr(env).encode())
+        h.update(__version__.encode())
+        self.base_key = h.hexdigest()
+
+    @staticmethod
+    def _fp_param(p):
+        if p is None:
+            return b"-"
+        return pickle.dumps(sorted(p.items(), key=lambda kv: str(kv[0])), 4)
+
+    def _key(self, idx, wav_path):
+        wav_md5 = _scan_md5(self.assets_dir, wav_path)
+        if wav_md5 is None:
+            return None
+        p = self.byidx.get(idx)
+        if p is None:
+            return None
+        h = hashlib.md5()
+        h.update(self.base_key.encode())
+        h.update(self._fp_param(p))
+        h.update(self._fp_param(self.ends.get(p["body_off"])))
+        h.update(wav_md5.encode())
+        return h.hexdigest()
+
+    def _path(self, idx, key):
+        return os.path.join(self.dir, "idx%05d-%s.bin" % (idx, key[:16]))
+
+    def lookup(self, idx, wav_path):
+        """``("body", off, bytes)`` | ``("skip",)`` | ``None`` (no entry)."""
+        key = self._key(idx, wav_path)
+        if key is None:
+            return None
+        try:
+            with open(self._path(idx, key), "rb") as f:
+                magic = f.read(len(self._MAGIC_BODY))
+                if magic == self._MAGIC_SKIP:
+                    return ("skip",)
+                if magic != self._MAGIC_BODY:
+                    return None
+                off = struct.unpack("<Q", f.read(8))[0]
+                body = f.read()
+            return ("body", off, body) if body else None
+        except OSError:
+            return None
+
+    def store(self, idx, wav_path, off, body):
+        """Record *idx*'s fresh encode result (*body* None = skip verdict)."""
+        key = self._key(idx, wav_path)
+        if key is None:
+            return
+        target = self._path(idx, key)
+        prefix = "idx%05d-" % idx
+        try:
+            for fn in os.listdir(self.dir):
+                if fn.startswith(prefix) and fn != os.path.basename(target):
+                    try:
+                        os.remove(os.path.join(self.dir, fn))
+                    except OSError:
+                        pass
+            tmp = target + ".tmp"
+            with open(tmp, "wb") as f:
+                if body is None:
+                    f.write(self._MAGIC_SKIP)
+                else:
+                    f.write(self._MAGIC_BODY)
+                    f.write(struct.pack("<Q", off))
+                    f.write(body)
+            os.replace(tmp, target)
+        except OSError:
+            pass                       # advisory, like the hash cache
+
+
 def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
                         cancel):
-    """Single-process cat-0 re-encode (the fallback + correctness reference)."""
+    """Single-process cat-0 re-encode (the fallback + correctness reference).
+    Returns ``(patches, skipped, results)`` — *results* maps each freshly
+    encoded idx to its ``(off, body)`` so the caller can cache it."""
     from .spike2.codec import GenRecover, StereoRecover
     from .spike2.emulator import Spike2Emu
     log("Booting firmware codec engine...", "info")
     emu = Spike2Emu(gr_path, img_path)
     emu.boot()
-    patches, skipped = {}, []
+    patches, skipped, results = {}, [], {}
     gr = sr = None
     ends = _slot_end_map(byidx.values())
     try:
         for n, (idx, wav) in enumerate(edits):
             if cancel():
-                return None, None
+                return None, None, None
             p = byidx[idx]
             pred = ends.get(p["body_off"])
             if progress:
@@ -5738,26 +5927,29 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
                     "warning")
                 continue
             patches[off] = body
+            results[idx] = (off, bytes(body))
             log("Re-encoded idx %d (%s, %d samples)."
                 % (idx, "stereo" if p["chan"] == 2 else "mono", p["length"]),
                 "info")
     finally:
         emu.close()
-    return patches, sorted(skipped)
+    return patches, sorted(skipped), results
 
 
 def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
                           log, progress, cancel):
     """Re-encode across ``nworkers`` spawned emulator processes (each boots once).
 
-    Returns ``(patches, skipped, remaining)``: ``remaining`` is the list of edits
-    that did NOT complete (empty on full success).  A pool that never boots a
-    worker raises (so the caller does a full single-process pass).  But a pool
-    that dies *part way* (e.g. a worker is killed) does NOT raise -- it returns
-    what already finished plus the leftover edits, so the caller can finish just
-    those in a single process instead of throwing away all the parallel work and
-    re-encoding everything serially (the failure that turned a ~minutes job into
-    hours).  Returns ``(None, None, None)`` if cancelled."""
+    Returns ``(patches, skipped, remaining, results)``: ``remaining`` is the
+    list of edits that did NOT complete (empty on full success), *results*
+    maps each freshly encoded idx to its ``(off, body)`` so the caller can
+    cache it.  A pool that never boots a worker raises (so the caller does a
+    full single-process pass).  But a pool that dies *part way* (e.g. a worker
+    is killed) does NOT raise -- it returns what already finished plus the
+    leftover edits, so the caller can finish just those in a single process
+    instead of throwing away all the parallel work and re-encoding everything
+    serially (the failure that turned a ~minutes job into hours).  Returns
+    ``(None, None, None, None)`` if cancelled."""
     import multiprocessing as mp
 
     from .spike2.parallel import encode_one, encode_probe, init_encode_worker
@@ -5766,7 +5958,7 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
     ctx = mp.get_context("spawn")
     pool = ctx.Pool(nworkers, initializer=init_encode_worker,
                     initargs=(gr_path, img_path, params))
-    patches, skipped, done_idx = {}, [], set()
+    patches, skipped, done_idx, results = {}, [], set(), {}
     try:
         # Confirm a worker actually booted (a stalled/unguarded pool raises here
         # and the caller falls back to the serial path).
@@ -5791,11 +5983,12 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
                     "process." % (e, len(done_idx), len(edits), len(remaining)),
                     "warning")
                 pool.terminate()
-                return patches, sorted(skipped), remaining
+                return patches, sorted(skipped), remaining, results
             done += 1
             done_idx.add(idx)
             if valid and body is not None:
                 patches[body_off] = body
+                results[idx] = (body_off, body)
                 log("Re-encoded idx %d." % idx, "info")
             elif body_off is not None:
                 skipped.append(idx)
@@ -5806,11 +5999,11 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
                          "Re-encoding %d/%d" % (done, len(edits)))
             if cancel():
                 pool.terminate()
-                return None, None, None
+                return None, None, None, None
         pool.close()
     finally:
         pool.join()
-    return patches, sorted(skipped), []
+    return patches, sorted(skipped), [], results
 
 
 # --------------------------------------------------------------------------
@@ -6955,10 +7148,13 @@ def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
 
 
 def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
-                        progress, cancel):
+                        progress, cancel, assets_dir=None):
     """Re-encode every edited cat-0 sound to its body bytes — parallel across
     processes with a single-process fallback.  Returns ``({body_off: body},
-    [skipped_idx])`` or ``(None, None)`` if cancelled."""
+    [skipped_idx])`` or ``(None, None)`` if cancelled.
+
+    With *assets_dir*, sounds unchanged since their last encode replay from
+    that folder's :class:`_AudioBodyCache` instead of re-encoding."""
     byidx = {p["idx"]: p for p in params}
     for idx in sorted(set(audio_edits) - set(byidx)):
         log("idx %d not a known sound; skipping." % idx, "warning")
@@ -6974,35 +7170,83 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
     if not edits:
         return {}, []
 
+    cache = None
+    if assets_dir and os.environ.get("PAD_STERN_AUDIO_CACHE") != "0":
+        try:
+            cache = _AudioBodyCache(assets_dir, gr_path, img_path, byidx,
+                                    _slot_end_map(params))
+        except Exception as e:
+            log("Audio encode cache unavailable (%s); encoding everything "
+                "fresh." % e, "info")
+    patches, skipped = {}, []
+    todo = edits
+    if cache is not None:
+        todo, hits, skip_hits = [], 0, 0
+        for idx, wav in edits:
+            ent = cache.lookup(idx, wav)
+            if ent is None:
+                todo.append((idx, wav))
+            elif ent[0] == "skip":
+                skipped.append(idx)
+                skip_hits += 1
+            else:
+                patches[ent[1]] = ent[2]
+                hits += 1
+        if hits or skip_hits:
+            log("Audio cache: %d of %d sound(s) unchanged since their last "
+                "encode — reused their encoded bodies%s. "
+                "(PAD_STERN_AUDIO_CACHE=0 rebuilds everything.)"
+                % (hits + skip_hits, len(edits),
+                   "; %d known-unencodable stay skipped" % skip_hits
+                   if skip_hits else ""), "info")
+    if not todo:
+        skipped = sorted(set(skipped))
+        if skipped:
+            log("%d sound(s) skipped (re-encode unsupported for their codec): "
+                "%s" % (len(skipped), ", ".join(map(str, skipped))), "warning")
+        return patches, skipped
+
     nworkers = max(1, min((os.cpu_count() or 2) - 2, 8))
-    nworkers = max(1, min(nworkers, len(edits)))
-    patches, skipped, remaining = {}, [], edits
+    nworkers = max(1, min(nworkers, len(todo)))
+    fresh, remaining, results = {}, todo, {}
     if not _FORCE_SERIAL_ENCODE and nworkers > 1 and not cancel():
         try:
             # Full params, not just the edited sounds': the workers also need
             # each edit's layout-predecessor for the shared-boundary word.
-            patches, skipped, remaining = _encode_cat0_parallel(
-                gr_path, img_path, params, edits, nworkers, np, log, progress,
+            fresh, psk, remaining, results = _encode_cat0_parallel(
+                gr_path, img_path, params, todo, nworkers, np, log, progress,
                 cancel)
-            if patches is None:
+            if fresh is None:
                 return None, None
+            skipped.extend(psk)
         except Exception as e:
             # The pool never started -- fall back to a full single-process pass.
             log("Parallel re-encode unavailable (%s); using a single process."
                 % e, "warning")
-            patches, skipped, remaining = {}, [], edits
+            fresh, remaining, results = {}, todo, {}
     # Finish any edits the parallel path didn't complete (all of them if it was
     # skipped/unavailable; just the leftovers if a worker died mid-run).  Keeping
     # the parallel results avoids re-encoding everything serially on a partial
     # failure -- the slow path that made a quick job take hours.
     if remaining:
-        sp, sk = _encode_cat0_serial(
+        sp, sk, sres = _encode_cat0_serial(
             gr_path, img_path, byidx, remaining, np, log, progress, cancel)
         if sp is None:
             return None, None
-        patches.update(sp)
+        fresh.update(sp)
         skipped.extend(sk)
+        results.update(sres)
+    patches.update(fresh)
     skipped = sorted(set(skipped))
+    if cache is not None:
+        # Remember this build's fresh outcomes — bodies and skip verdicts both
+        # (a skip otherwise costs a full failed encode attempt every build).
+        wav_by_idx = dict(todo)
+        for idx, (off, body) in results.items():
+            cache.store(idx, wav_by_idx[idx], off, body)
+        for idx in skipped:
+            if idx in wav_by_idx:
+                cache.store(idx, wav_by_idx[idx], None, None)
     if skipped:
         log("%d sound(s) skipped (re-encode unsupported for their codec): %s"
             % (len(skipped), ", ".join(map(str, skipped))), "warning")

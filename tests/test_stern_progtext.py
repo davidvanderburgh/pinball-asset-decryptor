@@ -192,3 +192,125 @@ def test_not_an_elf_yields_nothing():
     msgs, log = _logs()
     writes, n = progtext.plan_writes(b"garbage" * 100, {"A B": "C"}, log)
     assert writes == [] and n == 0
+
+
+# ---------------------------------------------------------------------------
+# The settings-caption boot guard.  The firmware hashes every adjustment's
+# menu caption at boot; a duplicate is ** FATAL: error 249 (NVMigration:
+# ADJUSTMENT hash is NOT UNIQUE) and the machine boot-loops (Godzilla 1.16
+# Heisei retheme, 2026-08-26).  These fixtures add the adjustment shapes from
+# test_stern_adjustments (AD_ names[], 44-byte descriptors with the caption
+# pointer at +0x18, the section record) on top of editable display strings so
+# plan_writes can see its edits through the settings table.
+# ---------------------------------------------------------------------------
+
+CAP_MEGA = "GZ VS. MEGALON DEFAULT CHAMP SCORE"
+CAP_GIGAN = "GZ VS. MEGALON AND GIGAN DEFAULT CHAMP SCORE"
+CAP_TIMER = "BATTLE VS EBIRAH TIMER"
+CAP_GHIDRA = "BATTLE VS GHIDRA TIMER"
+AWARD_1 = "MEGALON AWARD!"
+AWARD_2 = "GIGAN AWARD!"
+
+
+def _build_settings():
+    """(raw, offsets dict): four adjustments whose captions are editable
+    display strings, two mergeable plain awards, and a five-language group
+    pointing INTO the timer caption (its "EBIRAH TIMER" tail)."""
+    ads = ["AD_GODZILLA_VS_MEGALON_CHAMPION",
+           "AD_GODZILLA_VS_MEGALON_AND_GIGAN_CHAMPION",
+           "AD_BATTLE_VS_EBIRAH_TIMER",
+           "AD_BATTLE_VS_GHIDRA_TIMER"]
+    caps = [CAP_MEGA, CAP_GIGAN, CAP_TIMER, CAP_GHIDRA]
+    body = bytearray(b"\x00")
+    offs = {}
+    for s in caps + [AWARD_1, AWARD_2] + ads + ["SYS"]:
+        offs[s] = BODY_OFF + len(body)
+        body += s.encode() + b"\x00"
+    while (BODY_OFF + len(body)) % 4:
+        body += b"\x00"
+    va = lambda k, d=0: VBASE + offs[k] + d
+    # five-language group -> the timer caption's "EBIRAH TIMER" tail (+10)
+    offs["grp_timer"] = BODY_OFF + len(body)
+    body += struct.pack("<5I", *([va(CAP_TIMER, 10)] * 5)) + b"\x00" * 4
+    # names[]: the packed char*[] of AD_ strings the decoder hunts for
+    body += struct.pack("<%dI" % len(ads), *[va(a) for a in ads])
+    # descriptors: 44 bytes, caption pointer at +0x18
+    desc_off = BODY_OFF + len(body)
+    for cap in caps:
+        e = bytearray(44)
+        struct.pack_into("<iii", e, 0x04, 0, 0, 10)     # default, min, max
+        struct.pack_into("<i", e, 0x10, 1)              # step
+        struct.pack_into("<I", e, 0x18, va(cap))
+        body += e
+    # section record {live, table, count, elem, node}
+    body += struct.pack("<IIIII", 0, VBASE + desc_off, len(ads), 44,
+                        va("SYS"))
+    return _elf(bytes(body)), offs
+
+
+@pytest.fixture()
+def settings_elf():
+    return _build_settings()
+
+
+def test_two_edits_to_one_caption_keep_first(settings_elf):
+    raw, offs = settings_elf
+    msgs, log = _logs()
+    new = "GZ VS. SPACE G DEFAULT CHAMP SCORE"
+    writes, n = progtext.plan_writes(raw, {CAP_MEGA: new, CAP_GIGAN: new},
+                                     log)
+    # the first setting in menu order keeps the name; the second is skipped
+    assert n == 1
+    by_off = dict(writes)
+    assert by_off[offs[CAP_MEGA]] == new.encode().ljust(len(CAP_MEGA), b"\x00")
+    assert offs[CAP_GIGAN] not in by_off
+    warn = [m for lvl, m in msgs if lvl == "warning"]
+    assert len(warn) == 1
+    assert "REFUSES TO BOOT" in warn[0] and CAP_GIGAN in warn[0]
+    assert CAP_MEGA in warn[0]          # names the edit that took the name
+
+
+def test_caption_rename_onto_existing_setting_skipped(settings_elf):
+    raw, offs = settings_elf
+    msgs, log = _logs()
+    writes, n = progtext.plan_writes(raw, {CAP_MEGA: CAP_GHIDRA}, log)
+    assert writes == [] and n == 0
+    warn = [m for lvl, m in msgs if lvl == "warning"]
+    assert len(warn) == 1
+    assert "already named" in warn[0] and "REFUSES TO BOOT" in warn[0]
+
+
+def test_unique_caption_rename_applies(settings_elf):
+    raw, offs = settings_elf
+    msgs, log = _logs()
+    new = "GZ VS. MEGAGUIRUS DEFAULT CHAMP SCORE"
+    writes, n = progtext.plan_writes(raw, {CAP_GIGAN: new}, log)
+    assert n == 1
+    assert dict(writes)[offs[CAP_GIGAN]] == new.encode().ljust(
+        len(CAP_GIGAN), b"\x00")
+    assert not [m for lvl, m in msgs if lvl == "warning"]
+
+
+def test_display_strings_may_still_merge(settings_elf):
+    # KAIJU AWARD x3 is a deliberate merge in the very mod that found the
+    # fatal — plain display text is none of the caption guard's business.
+    raw, offs = settings_elf
+    msgs, log = _logs()
+    writes, n = progtext.plan_writes(
+        raw, {AWARD_1: "KAIJU AWARD!", AWARD_2: "KAIJU AWARD!"}, log)
+    assert n == 2
+    assert not [m for lvl, m in msgs if lvl == "warning"]
+
+
+def test_tail_edit_collision_withholds_the_plan(settings_elf):
+    # A standalone-name rename rewrites its HOST caption: the edit's key is
+    # never a caption text, so only the post-plan backstop can see that
+    # "BATTLE VS EBIRAH TIMER" just became "BATTLE VS GHIDRA TIMER" — a name
+    # another setting already has.  Nothing may ship.
+    raw, offs = settings_elf
+    msgs, log = _logs()
+    writes, n = progtext.plan_writes(raw, {"EBIRAH TIMER": "GHIDRA TIMER"},
+                                     log)
+    assert writes == [] and n == 0
+    warn = [m for lvl, m in msgs if lvl == "warning"]
+    assert any("REFUSES TO BOOT" in m and CAP_GHIDRA in m for m in warn)

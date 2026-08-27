@@ -24,9 +24,9 @@ def _noop(*a, **k):
 def test_cat0_empty_edits_is_noop(monkeypatch):
     called = []
     monkeypatch.setattr(E, "_encode_cat0_serial",
-                        lambda *a, **k: called.append("s") or ({}, []))
+                        lambda *a, **k: called.append("s") or ({}, [], {}))
     monkeypatch.setattr(E, "_encode_cat0_parallel",
-                        lambda *a, **k: called.append("p") or ({}, [], []))
+                        lambda *a, **k: called.append("p") or ({}, [], [], {}))
     patches, skipped = E._encode_cat0_sounds(
         "g", "i", _params(1, 2), {}, None, _noop, None, lambda: False)
     assert patches == {} and skipped == []
@@ -38,7 +38,7 @@ def test_cat0_unknown_idx_is_dropped(monkeypatch):
 
     def fake_serial(gr, img, byidx, edits, np, log, progress, cancel):
         seen["edits"] = edits
-        return ({}, [])
+        return ({}, [], {})
     monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
     monkeypatch.setattr(E, "_encode_cat0_serial", fake_serial)
     # idx 99 isn't in params -> filtered out before dispatch.
@@ -51,9 +51,9 @@ def test_cat0_force_serial_skips_pool(monkeypatch):
     calls = []
     monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
     monkeypatch.setattr(E, "_encode_cat0_serial",
-                        lambda *a, **k: calls.append("s") or ({0: b"x"}, []))
+                        lambda *a, **k: calls.append("s") or ({0: b"x"}, [], {}))
     monkeypatch.setattr(E, "_encode_cat0_parallel",
-                        lambda *a, **k: calls.append("p") or ({}, [], []))
+                        lambda *a, **k: calls.append("p") or ({}, [], [], {}))
     E._encode_cat0_sounds("g", "i", _params(1, 2, 3),
                           {1: "a", 2: "b", 3: "c"}, None, _noop, None,
                           lambda: False)
@@ -74,7 +74,7 @@ def test_cat0_parallel_failure_falls_back_to_serial(monkeypatch):
     monkeypatch.setattr(E.os, "cpu_count", lambda: 8)
     monkeypatch.setattr(E, "_encode_cat0_parallel", boom)
     monkeypatch.setattr(E, "_encode_cat0_serial",
-                        lambda *a, **k: calls.append("s") or ({0: b"x"}, []))
+                        lambda *a, **k: calls.append("s") or ({0: b"x"}, [], {}))
     patches, _ = E._encode_cat0_sounds(
         "g", "i", _params(1, 2), {1: "a", 2: "b"}, None, _noop, None,
         lambda: False)
@@ -91,12 +91,13 @@ def test_cat0_parallel_partial_resume_keeps_done_work(monkeypatch):
 
     # idx 1 finished in parallel; idx 2 + 3 were left over.
     def partial(gr, img, needed, edits, nworkers, np, log, progress, cancel):
-        return ({1000: b"one"}, [], [(2, "b"), (3, "c")])
+        return ({1000: b"one"}, [], [(2, "b"), (3, "c")], {1: (1000, b"one")})
     seen = {}
 
     def fake_serial(gr, img, byidx, edits, np, log, progress, cancel):
         seen["edits"] = [idx for idx, _ in edits]
-        return ({2000: b"two", 3000: b"three"}, [])
+        return ({2000: b"two", 3000: b"three"}, [],
+                {2: (2000, b"two"), 3: (3000, b"three")})
     monkeypatch.setattr(E, "_encode_cat0_parallel", partial)
     monkeypatch.setattr(E, "_encode_cat0_serial", fake_serial)
     patches, skipped = E._encode_cat0_sounds(
@@ -106,6 +107,100 @@ def test_cat0_parallel_partial_resume_keeps_done_work(monkeypatch):
     assert seen["edits"] == [2, 3]
     assert patches == {1000: b"one", 2000: b"two", 3000: b"three"}
     assert skipped == []
+
+
+# ---- the audio encode-result cache ---------------------------------------
+
+def _cache_rig(tmp_path):
+    """(assets_dir, gr, img, wav) file scaffolding for the cache tests."""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    wav = assets / "idx0001.wav"
+    wav.write_bytes(b"RIFF-fake-wav-1")
+    gr = tmp_path / "gr.bin"
+    gr.write_bytes(b"G" * 64)
+    img = tmp_path / "img.bin"
+    img.write_bytes(b"I" * 64)
+    return assets, gr, img, wav
+
+
+def test_cat0_cache_replays_unchanged_sounds(monkeypatch, tmp_path):
+    assets, gr, img, wav = _cache_rig(tmp_path)
+    calls = []
+
+    def fake_serial(g, i, byidx, edits, np, log, progress, cancel):
+        calls.append([idx for idx, _ in edits])
+        return ({1000: b"body1"}, [], {1: (1000, b"body1")})
+    monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
+    monkeypatch.setattr(E, "_encode_cat0_serial", fake_serial)
+    args = (str(gr), str(img), _params(1), {1: str(wav)}, None, _noop, None,
+            lambda: False)
+    p1, _s = E._encode_cat0_sounds(*args, assets_dir=str(assets))
+    p2, _s = E._encode_cat0_sounds(*args, assets_dir=str(assets))
+    assert p1 == p2 == {1000: b"body1"}
+    assert calls == [[1]]              # the second build never re-encoded
+    # editing the WAV invalidates its entry
+    wav.write_bytes(b"RIFF-fake-wav-2-edited")
+    E._encode_cat0_sounds(*args, assets_dir=str(assets))
+    assert calls == [[1], [1]]
+
+
+def test_cat0_cache_skip_verdict_replays(monkeypatch, tmp_path):
+    assets, gr, img, wav = _cache_rig(tmp_path)
+    calls = []
+
+    def fake_serial(g, i, byidx, edits, np, log, progress, cancel):
+        calls.append([idx for idx, _ in edits])
+        return ({}, [1], {})           # codec can't re-encode idx 1
+    monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
+    monkeypatch.setattr(E, "_encode_cat0_serial", fake_serial)
+    args = (str(gr), str(img), _params(1), {1: str(wav)}, None, _noop, None,
+            lambda: False)
+    p1, s1 = E._encode_cat0_sounds(*args, assets_dir=str(assets))
+    p2, s2 = E._encode_cat0_sounds(*args, assets_dir=str(assets))
+    assert (p1, s1) == (p2, s2) == ({}, [1])
+    assert calls == [[1]]              # the failed encode isn't re-attempted
+
+
+def test_cat0_cache_env_and_kill_switch(monkeypatch, tmp_path):
+    assets, gr, img, wav = _cache_rig(tmp_path)
+    calls = []
+
+    def fake_serial(g, i, byidx, edits, np, log, progress, cancel):
+        calls.append(1)
+        return ({1000: b"b"}, [], {1: (1000, b"b")})
+    monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
+    monkeypatch.setattr(E, "_encode_cat0_serial", fake_serial)
+    args = (str(gr), str(img), _params(1), {1: str(wav)}, None, _noop, None,
+            lambda: False)
+    E._encode_cat0_sounds(*args, assets_dir=str(assets))
+    # a PATH-ONLY toggle (verify skip) must NOT dump the cache...
+    monkeypatch.setenv("PAD_STERN_SKIP_FINAL_VERIFY", "1")
+    E._encode_cat0_sounds(*args, assets_dir=str(assets))
+    assert len(calls) == 1
+    # ...an encode-shaping knob MUST...
+    monkeypatch.setenv("PAD_STERN_HEADROOM", "0.5")
+    E._encode_cat0_sounds(*args, assets_dir=str(assets))
+    assert len(calls) == 2
+    # ...and the kill switch bypasses the cache entirely.
+    monkeypatch.setenv("PAD_STERN_AUDIO_CACHE", "0")
+    E._encode_cat0_sounds(*args, assets_dir=str(assets))
+    assert len(calls) == 3
+
+
+def test_cat0_cache_dir_is_never_baselined(tmp_path):
+    # generate_checksums must not hash the cache into the Extract baseline —
+    # else every re-extract would flag it as a modified asset.
+    from pinball_decryptor.core.checksums import (generate_checksums,
+                                                  read_checksums)
+    assets = tmp_path / "assets"
+    (assets / ".write_cache" / "audio").mkdir(parents=True)
+    (assets / ".write_cache" / "audio" / "idx00001-abc.bin").write_bytes(b"x")
+    (assets / "audio").mkdir()
+    (assets / "audio" / "idx0001.wav").write_bytes(b"RIFF")
+    generate_checksums(str(assets))
+    rels = set(read_checksums(str(assets)))
+    assert rels == {"audio/idx0001.wav"}
 
 
 # ---- music-bank runner ---------------------------------------------------

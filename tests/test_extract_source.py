@@ -5,8 +5,9 @@ import json
 import os
 
 from pinball_decryptor.core.extract_source import (
-    SIDE_CAR, find_extract_for, read_extract_source, stale_source_message,
-    version_hint_for_dir, version_hint_from_name, write_extract_source)
+    SIDE_CAR, amend_extract_source, find_extract_for, read_extract_source,
+    stale_source_message, version_for_dir, version_hint_for_dir,
+    version_hint_from_name, write_extract_source)
 
 
 def _make_image(path, data=b"\x00" * 4096):
@@ -203,3 +204,33 @@ def test_a_stale_extract_is_still_this_card_s_extract(tmp_path):
     os.utime(str(img), (0, 0))
     assert stale_source_message(out) is not None
     assert find_extract_for(str(img), [str(tmp_path / "both")]) == out
+
+
+def test_card_version_stamp_outranks_the_filename_guess(tmp_path):
+    """The card's own index is the version authority (it survives renames);
+    the stamped ``card_version`` shows exact, the filename parse stays a
+    ~-marked hint for extracts that predate the stamp."""
+    img = tmp_path / "godzilla_pro-1_15_0_spike2.Release.8G.sdcard.raw"
+    _make_image(str(img))
+    out = tmp_path / "extract"
+    out.mkdir()
+    write_extract_source(str(out), str(img))
+
+    # No stamp yet: the filename hint, marked inexact (this name's trailing
+    # _spike2 also blocks the channel tag — the exact quirk resolve_version
+    # documents about it).
+    ver, exact = version_for_dir(str(out))
+    assert exact is False and ver == "1.15.0"
+
+    # The off-thread probe stamps what the card itself reported.
+    amend_extract_source(str(out), card_version="1.15.0")
+    ver, exact = version_for_dir(str(out))
+    assert (ver, exact) == ("1.15.0", True)
+    # ...without disturbing the staleness signature.
+    assert stale_source_message(str(out)) is None
+
+
+def test_amend_without_a_sidecar_is_a_noop(tmp_path):
+    amend_extract_source(str(tmp_path), card_version="9.9.9")
+    assert read_extract_source(str(tmp_path)) is None
+    assert version_for_dir(str(tmp_path)) == (None, False)

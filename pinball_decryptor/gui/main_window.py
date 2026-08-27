@@ -13,6 +13,7 @@ import base64
 import os
 import re
 import sys
+import threading
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -1249,6 +1250,7 @@ class MainWindow:
                  on_write, on_write_cancel,
                  on_export, on_import,
                  on_transfer_mods=None,
+                 on_port_mods=None,
                  on_apply_delta=None,
                  on_revert_all=None,
                  on_flash_image=None,
@@ -1335,6 +1337,7 @@ class MainWindow:
         self._on_export = on_export
         self._on_import = on_import
         self._on_transfer_mods = on_transfer_mods
+        self._on_port_mods = on_port_mods
         self._on_theme_change = on_theme_change
         self._on_check_updates = on_check_updates
         # In-app "Install update" (Windows): app.py downloads the setup
@@ -3313,19 +3316,79 @@ class MainWindow:
         # Gated per-plugin (caps.mod_transfer) in apply_manufacturer — this tab
         # is shared, but the feature (and its wording) only fits plugins whose
         # vendor re-lays-out the card across versions, e.g. Stern Spike 2.
+        # Two flows share this section and used to share one undivided frame,
+        # which read as one confusing form (a screenshot review, 2026-08-27):
+        # the one-click port sat wedged between the manual flow's intro and
+        # its numbered fields.  Now each flow is its own titled box with a
+        # little drawn diagram of what goes in and what comes out, and the
+        # one-click route — the one most users want — comes first.
         self._modpack_transfer_frame = ttk.LabelFrame(
-            f, text="Transfer Mods to New Version")
-        _transfer_intro = ttk.Label(
+            f, text="Move Your Mods to Another Card")
+
+        # --- Route 1: the one-click port --------------------------------
+        # The whole extract -> transfer -> build chain from a single button,
+        # per target card image.  Shipping a mod for a new release (or as
+        # both a Pro and a Premium build, in several flavors) used to mean
+        # walking Extract, this section, and Write BY HAND once per target;
+        # a modder doing four variants asked for one button.  The heading
+        # names the two jobs this does, not the mechanism — and the prose
+        # that used to sit here lives on ⓘ badges now (screenshot review,
+        # 2026-08-27: two intros + three italic hints read as a wall of
+        # text; the diagrams and headings carry the flow, hover carries the
+        # detail).
+        flow_a = ttk.LabelFrame(
             self._modpack_transfer_frame,
-            text="New game code shipped? Pull your mods from your old extract "
-                 "onto a fresh extract of the new version, then build the new "
-                 "version's card with your mods on it. Fill the two required "
-                 "folders (and, if you have it, the optional one for a more "
-                 "accurate transfer). Works even for code modded outside this "
-                 "app.",
-            font=(_SANS_FONT, 9), justify=tk.LEFT)
-        _transfer_intro.pack(anchor=tk.W, fill=tk.X, padx=8, pady=(4, 2))
-        self._register_responsive_wrap(_transfer_intro)
+            text="New game version, or the other model (Pro ↔ Premium) — "
+                 "build my modded card(s) automatically")
+        flow_a.pack(fill=tk.X, padx=8, pady=(4, 6))
+        # One row: diagram left, button right — a button row of its own under
+        # the diagram left a band of dead space (screenshot review,
+        # 2026-08-27).  The button rides at the diagram's box height.
+        prow = ttk.Frame(flow_a)
+        prow.pack(fill=tk.X, padx=8, pady=(6, 6))
+        self._port_flow_canvas = tk.Canvas(prow, highlightthickness=0,
+                                           height=44)
+        self._port_flow_canvas._flow_spec = (
+            ["This project's mods", "Stock card image(s) you pick",
+             "Finished modded card(s)"],
+            ["transfer", "build"])
+        self._port_flow_canvas.pack(side=tk.LEFT)
+        self._draw_flow(self._port_flow_canvas)
+        _port_btn = ttk.Button(
+            prow, text="Port + build onto card image(s)...",
+            command=(self._on_port_mods
+                     if self._on_port_mods else lambda: None),
+            style="Go.TButton")
+        _port_btn.pack(side=tk.RIGHT, anchor=tk.N, pady=(6, 0))
+        # A tooltip about a button belongs ON the button — a ⓘ beside it was
+        # tried and read as clutter (screenshot review, 2026-08-27).
+        _Tooltip(_port_btn,
+                 "Pick one or more stock card images (the new version, the "
+                 "other model, or both) and everything else is automatic: "
+                 "each card is extracted, this project's mods are "
+                 "transferred onto it, and its modded card is built — "
+                 "unattended, one after another.\n\nEach card's extract "
+                 "lands beside the builds and is reused next time, so "
+                 "re-shipping after a change is fast. Audio slots whose "
+                 "index now holds a different sound are skipped (the safe "
+                 "default); everything skipped is named in the log.",
+                 lambda: self._current_theme)
+
+        # --- Route 2: the step-by-step transfer -------------------------
+        flow_b = ttk.LabelFrame(
+            self._modpack_transfer_frame,
+            text="Advanced — do each step myself (also the route for cards "
+                 "modded outside this app)")
+        flow_b.pack(fill=tk.X, padx=8, pady=(0, 6))
+        self._transfer_flow_canvas = tk.Canvas(flow_b, highlightthickness=0,
+                                               height=44)
+        self._transfer_flow_canvas._flow_spec = (
+            ["1  Old extract (your mods)", "2  New stock extract",
+             "Write tab", "Modded card"],
+            ["transfer", "", "build"])
+        self._transfer_flow_canvas.pack(anchor=tk.W, padx=8, pady=(6, 2))
+        self._draw_flow(self._transfer_flow_canvas)
+
         self.transfer_src_var = tk.StringVar()
         self.transfer_dst_var = tk.StringVar()
         # Optional stock extract of the OLD version — its presence (not a
@@ -3343,7 +3406,7 @@ class MainWindow:
         self.transfer_output_var = tk.StringVar()
         self.transfer_next_var = tk.StringVar()
 
-        tf = ttk.Frame(self._modpack_transfer_frame)
+        tf = ttk.Frame(flow_b)
         tf.pack(fill=tk.X, padx=8, pady=(2, 2))
         tf.columnconfigure(1, weight=1)
 
@@ -3353,21 +3416,30 @@ class MainWindow:
         # that field 2 and field 4 are the SAME new version — so they stay, but
         # as a compact chip that can't stretch the grid (the entry column owns
         # the slack), with a tooltip saying where the number comes from.
-        def _picker(row, label, var, browse, ver_var=None, tip=None):
+        def _picker(row, label, var, browse, ver_var=None, tip=None,
+                    badge_tip=None):
             lbl = ttk.Label(tf, text=label)
             lbl.grid(row=row, column=0, sticky=tk.W, pady=2)
             if tip:
                 _Tooltip(lbl, tip, lambda: self._current_theme)
             ttk.Entry(tf, textvariable=var).grid(
                 row=row, column=1, sticky=tk.EW, padx=6, pady=2)
-            ttk.Button(tf, text="Browse...", command=browse).grid(
-                row=row, column=2, pady=2)
+            btn = ttk.Button(tf, text="Browse...", command=browse)
+            btn.grid(row=row, column=2, pady=2)
+            if badge_tip:
+                # The row's full explanation rides the row's own Browse
+                # button, like the action buttons carry theirs — the interim
+                # ⓘ badges read as clutter (2026-08-27 screenshot reviews:
+                # first the inline italic paragraphs, then the badges).
+                _Tooltip(btn, badge_tip, lambda: self._current_theme)
             if ver_var is not None:
                 vl = ttk.Label(tf, textvariable=ver_var, foreground="#4a90d9",
                                font=(_SANS_FONT, 8), anchor=tk.W, width=22)
                 vl.grid(row=row, column=3, sticky=tk.W, padx=(6, 0))
-                _Tooltip(vl, "Version guessed from this item's own file name "
-                             "— a cross-check, not something the card stores. "
+                _Tooltip(vl, "The build this item really is, read from the "
+                             "card's own update index (it survives renamed "
+                             "files). A ~ marks a filename guess — an older "
+                             "extract, or a card whose index can't be read. "
                              "Fields 2 and 4 should show the SAME version.",
                          lambda: self._current_theme)
 
@@ -3381,68 +3453,71 @@ class MainWindow:
                     "moving ONTO. It can be the other model of the same "
                     "title as well as a newer version — a Pro extract's mods "
                     "transfer onto the Premium/LE code, and the reverse.")
+        # The two long italic hints that used to follow fields 3 and 4 (born
+        # of feedback batches 22/24 — fields misread as alternatives) now
+        # live on each row's ⓘ badge: same words, hover instead of
+        # wall-of-text (screenshot review, 2026-08-27).
         _picker(2, "3. Stock extract of the OLD version (optional):",
                 self.transfer_oldstock_var, self._browse_transfer_oldstock,
                 tip="Not an alternative to field 1, and never in conflict "
                     "with it: field 1 is where your mods come FROM; this is "
                     "an unmodified twin of that same version, used only as "
-                    "the reference your old extract is compared against.")
-        # Full-width hint (feedback batch 22: it was capped at 560px inside a
-        # much wider tab) — the responsive wrap tracks the content width.
-        # Batch 24: he read fields 1 and 3 as two ways to provide the same
-        # thing and asked which wins — so the hint now leads with the ROLE
-        # (a clean reference copy), not with what happens when it's empty.
-        _oldstock_hint = ttk.Label(
-            tf,
-            text="A clean, unmodified extract of the SAME old version as "
-                 "field 1 — used only as a reference to compare field 1 "
-                 "against, so the factory's own between-version changes "
-                 "aren't mistaken for your mods, and AUDIO and TEXT mods "
-                 "can be carried too. Leave empty to compare your old "
-                 "extract straight against the new one (finds image + "
-                 "video mods).",
-            font=(_SANS_FONT, 8, "italic"), justify=tk.LEFT)
-        _oldstock_hint.grid(row=3, column=1, columnspan=3,
-                            sticky=tk.EW, padx=6, pady=(0, 4))
-        self._register_responsive_wrap(_oldstock_hint, margin=330)
+                    "the reference your old extract is compared against.",
+                badge_tip="A clean, unmodified extract of the SAME old "
+                          "version as field 1 — used only as a reference to "
+                          "compare field 1 against, so the factory's own "
+                          "between-version changes aren't mistaken for your "
+                          "mods, and AUDIO and TEXT mods can be carried "
+                          "too.\n\nLeave empty to compare your old extract "
+                          "straight against the new one (finds image + "
+                          "video mods).")
         # Field 4 is NOT an alternative to field 2 — feedback batch 22 read
         # the folder and the .raw as two ways to say the same thing and asked
         # which won.  Both are required and they do different jobs, so the
         # label says which one it is derived from.
-        _picker(4, "4. New version card image (.raw) to build onto:",
+        _picker(3, "4. New version card image (.raw) to build onto:",
                 self.transfer_newimg_var, self._browse_transfer_newimg,
                 self.transfer_img_ver_var,
                 tip="The stock image the new extract came from — the base the "
                     "build patches your transferred mods onto. Auto-filled "
                     "from field 2's extract; it is needed as well as field 2, "
-                    "not instead of it.")
-        _newimg_hint = ttk.Label(
-            tf,
-            text="Auto-filled from field 2 (the new extract records the image "
-                 "it came from). Both fields are required.",
-            font=(_SANS_FONT, 8, "italic"), justify=tk.LEFT)
-        _newimg_hint.grid(row=5, column=1, columnspan=3, sticky=tk.EW,
-                          padx=6, pady=(0, 2))
-        self._register_responsive_wrap(_newimg_hint, margin=330)
+                    "not instead of it.",
+                badge_tip="Auto-filled from field 2 (the new extract records "
+                          "the image it came from). Both fields are "
+                          "required: the folder is where your mods land, "
+                          "this image is what the build patches them onto.")
 
         # Action row: button right-aligned like every other tab, with the
         # output-name preview on its left.  That preview answers "what am I
         # about to end up with" (feedback batch 22 asked if it was still
         # relevant — it is the only place the built file's NAME appears before
         # the build), so it stays, beside the button that causes it.
-        arow = ttk.Frame(self._modpack_transfer_frame)
+        arow = ttk.Frame(flow_b)
         arow.pack(fill=tk.X, padx=8, pady=(4, 2))
-        ttk.Button(arow, text="Transfer mods → new version...",
-                   command=(self._on_transfer_mods
-                            if self._on_transfer_mods else lambda: None),
-                   style="Go.TButton").pack(side=tk.RIGHT)
+        _transfer_btn = ttk.Button(
+            arow, text="Transfer mods → new version...",
+            command=(self._on_transfer_mods
+                     if self._on_transfer_mods else lambda: None),
+            style="Go.TButton")
+        _transfer_btn.pack(side=tk.RIGHT)
+        _Tooltip(_transfer_btn,
+                 "The same move as the one-click port, with you driving "
+                 "each stage: pick the two extract folders above, run the "
+                 "transfer, then build the card on the Write tab (the "
+                 "output-name preview on the left shows what it will "
+                 "build).\n\nThis is also the route for a card that was "
+                 "modded OUTSIDE this app: extract the modded card as "
+                 "field 1 and fill field 3 with a stock extract of that "
+                 "same version, so your mods can be told apart from the "
+                 "factory's own changes.",
+                 lambda: self._current_theme)
         ttk.Label(arow, textvariable=self.transfer_output_var,
                   font=(_SANS_FONT, 8, "italic"),
                   justify=tk.LEFT).pack(side=tk.LEFT)
         # Filled after a successful transfer with the exact next step (also
         # written to the log, so it survives once this panel scrolls away).
         _next_lbl = ttk.Label(
-            self._modpack_transfer_frame,
+            flow_b,
             textvariable=self.transfer_next_var, foreground="#3aa76d",
             font=(_SANS_FONT, 9, "bold"), justify=tk.LEFT)
         _next_lbl.pack(anchor=tk.W, fill=tk.X, padx=8, pady=(0, 6))
@@ -3453,6 +3528,47 @@ class MainWindow:
         for _v in (self.transfer_src_var, self.transfer_dst_var,
                    self.transfer_newimg_var):
             _v.trace_add("write", lambda *_a: self._transfer_refresh_meta())
+
+    def _draw_flow(self, canvas):
+        """(Re)draw one of the Mod Pack tab's little what-goes-in / what-
+        comes-out flow diagrams on *canvas*, in the current theme's palette.
+
+        The spec rides on the canvas itself (``canvas._flow_spec`` =
+        ``(boxes, arrow_labels)``) so a theme switch can redraw every diagram
+        without re-plumbing the text through: plain boxes, the final box
+        picked out by an accent OUTLINE (green fill was tried and read as a
+        button — the go-green is reserved for the key action buttons), and
+        short verb labels on the arrows.  Sizing comes from font
+        measurement, so translations or reworded steps never clip."""
+        from tkinter import font as tkfont
+        boxes, arrows = canvas._flow_spec
+        c = THEMES[self._current_theme]
+        canvas.delete("all")
+        canvas.configure(bg=c["bg"])
+        f = tkfont.Font(family=_SANS_FONT, size=9)
+        fs = tkfont.Font(family=_SANS_FONT, size=8)
+        x, y0, h = 2, 6, 28
+        for i, label in enumerate(boxes):
+            if i:
+                alabel = arrows[i - 1] if i - 1 < len(arrows) else ""
+                aw = max(30, fs.measure(alabel) + 10)
+                canvas.create_line(x + 2, y0 + h / 2, x + aw - 2, y0 + h / 2,
+                                   fill=c["accent"], width=2, arrow=tk.LAST)
+                if alabel:
+                    canvas.create_text(x + aw / 2, y0 + h + 8, text=alabel,
+                                       fill=c["gray"], font=fs)
+                x += aw
+            w = f.measure(label) + 18
+            last = i == len(boxes) - 1
+            canvas.create_rectangle(
+                x, y0, x + w, y0 + h, fill=c["field_bg"],
+                outline=(c["accent"] if last else c["border"]),
+                width=(2 if last else 1))
+            canvas.create_text(x + w / 2, y0 + h / 2, text=label,
+                               fill=(c["accent"] if last else c["fg"]),
+                               font=f)
+            x += w
+        canvas.configure(width=x + 2, height=y0 + h + 16)
 
     # ------------------------------------------------------------------
     # Replace Audio tab (capabilities.replace_audio plugins)
@@ -18524,23 +18640,31 @@ class MainWindow:
         self._transfer_refresh_meta()
 
     def _transfer_refresh_meta(self):
-        """Recompute the read-only version hints and the output-name preview
+        """Recompute the read-only version chips and the output-name preview
         from the current field values, and auto-fill the base card image (row
         4) from the new extract's recorded source.
 
-        The card stores no game-version string, so every version hint is parsed
-        from a source FILENAME (shown as a hint, not ground truth).  Auto-
-        filling the base image from the NEW extract's ``.extract_source.json``
-        is what keeps the build on the new version — the old-version image can
-        never sneak in as the base."""
+        The chips prefer the version the CARD itself reports (its update
+        index survives renames — stern info.resolve_version): an extract
+        carries it in its recorded-source sidecar since 2026-08-27, and a
+        card image is probed off-thread (debounced + cached, because the
+        probe opens the multi-GB image).  A ``~`` marks the filename-parse
+        fallback — an older extract, or an image whose index can't be read.
+        Auto-filling the base image from the NEW extract's
+        ``.extract_source.json`` is what keeps the build on the new version —
+        the old-version image can never sneak in as the base."""
         from ..core import extract_source
 
         src = (self.transfer_src_var.get() or "").strip()
         dst = (self.transfer_dst_var.get() or "").strip()
 
         def _dir_ver(d):
-            v = extract_source.version_hint_for_dir(d) if d else None
-            return ("version ~ " + v) if v else ""
+            if not d:
+                return ""
+            v, exact = extract_source.version_for_dir(d)
+            if not v:
+                return ""
+            return ("version " + v) if exact else ("version ~ " + v)
         self.transfer_src_ver_var.set(_dir_ver(src))
         self.transfer_dst_ver_var.set(_dir_ver(dst))
 
@@ -18560,6 +18684,7 @@ class MainWindow:
                    if img else None)
         self.transfer_img_ver_var.set(("version ~ " + img_ver)
                                       if img_ver else "")
+        self._transfer_probe_img_version(img)
         if img:
             suffix = getattr(self._current_mfr, "write_output_suffix",
                              "-modified") or "-modified"
@@ -18569,6 +18694,58 @@ class MainWindow:
                 % (stem, suffix, ext))
         else:
             self.transfer_output_var.set("")
+
+    def _transfer_probe_img_version(self, img):
+        """Upgrade field 4's version chip from the instant filename guess to
+        the version the card ITSELF reports, off the UI thread.
+
+        Debounced (the chip recomputes per keystroke while a path is typed)
+        and cached by the file's identity, because the probe opens the
+        multi-GB image — the freeze-class rule is that the UI thread never
+        touches a big file.  The result only lands if the field still shows
+        the same path by the time it arrives."""
+        self._transfer_img_probe_path = img
+        if not img or not os.path.isfile(img):
+            return
+        mfr = self._current_mfr
+        if not hasattr(mfr, "card_version"):
+            return
+        try:
+            st = os.stat(img)
+            key = (os.path.normcase(img), st.st_size, st.st_mtime_ns)
+        except OSError:
+            return
+        cache = getattr(self, "_transfer_img_ver_cache", None)
+        if cache is None:
+            cache = self._transfer_img_ver_cache = {}
+        hit = cache.get(key)
+        if hit is not None:
+            if hit:
+                self.transfer_img_ver_var.set("version " + hit)
+            return
+        pending = getattr(self, "_transfer_img_probe_after", None)
+        if pending is not None:
+            self.root.after_cancel(pending)
+
+        def _start():
+            self._transfer_img_probe_after = None
+
+            def _work(img=img, key=key, mfr=mfr):
+                try:
+                    ver, exact = mfr.card_version(img)
+                except Exception:
+                    ver, exact = None, False
+                def _land():
+                    cache[key] = ver if (ver and exact) else ""
+                    if (ver and exact
+                            and self._transfer_img_probe_path == img
+                            and (self.transfer_newimg_var.get() or "")
+                            .strip() == img):
+                        self.transfer_img_ver_var.set("version " + ver)
+                self.root.after(0, _land)
+            threading.Thread(target=_work, daemon=True).start()
+
+        self._transfer_img_probe_after = self.root.after(500, _start)
 
     # (_browse_write_upd / _browse_write_assets removed in batch 19 — the
     # Write Original and every assets row are read-only mirrors of the
@@ -21013,6 +21190,13 @@ class MainWindow:
         self.root.option_add("*TCombobox*Listbox.foreground",      c["fg"])
         self.root.option_add("*TCombobox*Listbox.selectBackground", c["select_bg"])
         self.root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
+        # The Mod Pack tab's little flow diagrams are raw tk.Canvas drawings —
+        # redraw them in the new palette (their content spec rides on the
+        # canvas itself; see _draw_flow).
+        for _attr in ("_port_flow_canvas", "_transfer_flow_canvas"):
+            _cv = getattr(self, _attr, None)
+            if _cv is not None:
+                self._draw_flow(_cv)
         # The round icon buttons (ⓘ badges, header home/?/⚙) are plain
         # Canvases, invisible to ttk styling — keep their backdrops on the
         # theme's panel color AND re-blend their anti-aliased disc images

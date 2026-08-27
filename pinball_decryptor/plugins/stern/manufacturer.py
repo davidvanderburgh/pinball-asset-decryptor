@@ -447,6 +447,13 @@ class SternManufacturer(Manufacturer):
         from .info import card_info
         return card_info(path)
 
+    def card_version(self, path):
+        """``(version, exact)`` — the build a card image really is, read
+        from its own update index (see info.card_version_probe).  Opens the
+        image: call off the UI thread."""
+        from .info import card_version_probe
+        return card_version_probe(path)
+
     def compare_images(self, path_a, path_b, assets_a=None, assets_b=None):
         # Spike 2 cards only — a Whitestar MAME zip has no manifest/firmware
         # to diff, so refuse with a plain explanation instead of a stack.

@@ -639,6 +639,20 @@ HELP_CONTENT = {
          "project's card_files folder under the same on-card path, so it is "
          "one right-click Replace on the Partitions tab. If that file has "
          "moved since, Import can only name it for you to redo."),
+        ("Port + build (one click)",
+         "\"Port + build onto card image(s)...\" runs the whole chain for "
+         "you: pick one or more STOCK card images — the new firmware "
+         "version, the other model of the same title (Pro to Premium/LE or "
+         "back), or several at once — and for each one the app extracts the "
+         "card, transfers this project's mods onto it, and builds its "
+         "modded image, unattended, one after another. Each card's extract "
+         "folder is created next to the built images and reused on the next "
+         "port, so re-shipping after a small change skips straight to the "
+         "transfer and build (which the Write's own caches make fast). "
+         "Audio slots whose index now holds a different sound are skipped "
+         "automatically (the safe choice); everything skipped or dropped is "
+         "named in the log, per target, exactly like the step-by-step "
+         "transfer below."),
         ("Transfer mods",
          "\"Transfer mods from another extract\" (where available) carries "
          "your Replace edits from an older firmware's extract onto a new "

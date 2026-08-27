@@ -333,6 +333,7 @@ class App:
             on_export=self._start_export,
             on_import=self._start_import,
             on_transfer_mods=self._start_transfer_mods,
+            on_port_mods=self._start_port_mods,
             on_theme_change=self._on_theme_change,
             initial_theme=saved_theme,
             on_check_updates=self._check_for_update_now,
@@ -2828,6 +2829,176 @@ class App:
             "case — the per-file error(s) above say what actually went "
             "wrong.")
 
+    # ------------------------------------------------------------------
+    # One-click port: project + stock card image(s) -> built modded card(s)
+    # ------------------------------------------------------------------
+
+    def _start_port_mods(self):
+        """Port the current project's mods onto one or more stock card images
+        and build each, from a single confirmation — extract, transfer,
+        stage, write, per target, unattended.  The manual version of this is
+        four tabs of steps PER TARGET; a modder shipping a Pro and a Premium
+        build in two soundtrack flavors walks it four times over."""
+        if not getattr(self._current_mfr.capabilities, "mod_transfer", False):
+            return
+        project = ((self.window.write_assets_var.get() or "").strip()
+                   or (self.window.transfer_src_var.get() or "").strip())
+        if not project or not os.path.isdir(project):
+            messagebox.showwarning(
+                "No project folder",
+                "Point the Write tab's assets folder (or the Transfer "
+                "section's field 1) at the extract folder that holds your "
+                "mods first.")
+            return
+        project = os.path.normpath(project)
+        from .core import staged_changes, text_manifest
+        saved = staged_changes.load(project)
+        n_assign = sum(len(saved.get(k) or {})
+                       for k in ("audio", "video", "image"))
+        n_text = text_manifest.count_changed(project)
+        # Direct file edits (no sidecar entry) still transfer — the matching
+        # reads content, not just assignments — so this only warns when
+        # NOTHING recorded is visible at all.
+        if not n_assign and not n_text:
+            if not messagebox.askyesno(
+                    "No staged mods found",
+                    "This folder has no recorded Replace assignments and no "
+                    "text edits. Edits made directly to the files still "
+                    "transfer (they are found by content), but if this is "
+                    "the wrong folder the port will build unmodified "
+                    "cards.\n\nContinue with this folder?\n\n%s" % project):
+                return
+        raws = filedialog.askopenfilenames(
+            title="Stock card image(s) to port onto — pick one or several",
+            filetypes=[("Card images", "*.raw *.img *.bin"),
+                       ("All files", "*.*")])
+        if not raws:
+            return
+        raws = [os.path.normpath(r) for r in raws]
+        out_dir = filedialog.askdirectory(
+            title="Folder for the built card image(s) — the per-card "
+                  "extracts land here too",
+            initialdir=((self.window.write_output_var.get() or "").strip()
+                        or os.path.dirname(raws[0])))
+        if not out_dir:
+            return
+        out_dir = os.path.normpath(out_dir)
+        from .core import mod_port
+        jobs = mod_port.plan_ports(project, raws, out_dir)
+        lines = []
+        for job in jobs:
+            fresh = ("" if mod_port.has_baseline(job["workspace"])
+                     else "  (extracted first)")
+            lines.append("%s%s\n    -> %s"
+                         % (os.path.basename(job["raw"]), fresh,
+                            os.path.basename(job["output"])))
+        if not messagebox.askyesno(
+                "Port + build %d card(s)?" % len(jobs),
+                "Your mods in:\n    %s\n\nwill be transferred onto and "
+                "built for:\n\n%s\n\nEverything lands in:\n    %s\n\nEach "
+                "target is extracted once (an existing extract is reused), "
+                "the transfer applies automatically (audio slots whose index "
+                "now holds a different sound are skipped — the safe "
+                "default), and every card builds unattended. Progress is in "
+                "the log; Cancel stops after the current step.\n\nStart?"
+                % (project, "\n".join(lines), out_dir)):
+            return
+        self._record_path_history(write_output=out_dir)
+        self._save_settings()
+        self._active_mode = "write"
+        self._port_active = True
+        self._cancel_requested = False
+        self._chain_flash_after_build = None
+        self._staging_failures = []
+        self.window.set_running(True, mode="write")
+        self.window.reset_steps(mode="write")
+        threading.Thread(target=self._run_port_chain, args=(project, jobs),
+                         daemon=True).start()
+
+    def _run_port_chain(self, project, jobs):
+        """Worker-thread body of the one-click port: bind the app's extract /
+        transfer / stage / write services and hand the sequencing to
+        :func:`core.mod_port.run_ports`.  Every sub-pipeline is installed as
+        ``self.pipeline`` while it runs, so the ordinary Stop button cancels
+        the live step and the chain stops at the next boundary."""
+        from .core import mod_port, mod_transfer
+
+        log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
+        progress_cb = (lambda c, t, d="":
+                       self.msg_queue.put(ProgressMsg(c, t, d)))
+        phase_cb = lambda i: None
+        box = {}
+
+        def step_done(success, summary):
+            box["ok"], box["summary"] = success, summary
+
+        def run_sub(pipeline):
+            self.pipeline = pipeline
+            box.clear()
+            pipeline.run()
+            if not box.get("ok"):
+                raise RuntimeError(box.get("summary") or "step failed")
+            return box.get("summary")
+
+        def extract(raw, ws):
+            os.makedirs(ws, exist_ok=True)
+            p = self._current_mfr.make_extract_pipeline(
+                raw, ws, log_cb, phase_cb, progress_cb, step_done)
+            if hasattr(p, "set_log_line_cb"):
+                p.set_log_line_cb(self._post_log_line)
+            run_sub(p)
+
+        def transfer(ws):
+            plan = mod_transfer.plan_transfer(project, ws, log_cb=log_cb)
+            for level, line in mod_transfer.plan_detail_lines(plan):
+                log_cb(line, level)
+            totals = plan["totals"]
+            if totals["transfer"] == 0:
+                raise mod_port.PortSkip(
+                    "none of the project's mods have a matching slot or "
+                    "text on this card")
+            if totals["flagged"]:
+                log_cb("%d audio slot(s) whose index now holds a DIFFERENT "
+                       "sound were skipped (the safe default; assign those "
+                       "by hand on the Replace tab if you want them)."
+                       % totals["flagged"], "warning")
+            res = mod_transfer.apply_transfer(project, ws, plan,
+                                              include_flagged=False)
+            return ("%d audio, %d video, %d image, %d text transferred"
+                    % (res["audio"], res["video"], res["image"],
+                       res["text"]))
+
+        def stage(ws):
+            pend_a = self._stage_pending_audio(ws)
+            pend_v = self._stage_pending_video(
+                ws, cancel_cb=lambda: self._cancel_requested)
+            pend_i = self._stage_pending_image(ws)
+            pending = pend_a[0] + pend_v[0] + pend_i[0]
+            staged = pend_a[1] + pend_v[1] + pend_i[1]
+            failures = pend_a[2] + pend_v[2] + pend_i[2]
+            if pending and not staged:
+                raise RuntimeError(
+                    "none of the %d transferred replacement(s) could be "
+                    "applied, so this build would be an unmodified copy.\n%s"
+                    % (pending, self._failure_lines(failures)))
+            if failures:
+                log_cb("%d transferred replacement(s) could not be applied "
+                       "on this target — the build carries the rest (see "
+                       "above)." % len(failures), "warning")
+
+        def write(raw, ws, out):
+            err = build_output.ensure_dir_for(out)
+            if err:
+                raise RuntimeError(err)
+            run_sub(self._current_mfr.make_write_pipeline(
+                raw, ws, out, log_cb, phase_cb, progress_cb, step_done))
+
+        results = mod_port.run_ports(
+            jobs, extract, transfer, stage, write, log_cb,
+            lambda: self._cancel_requested)
+        ok = bool(results) and all(s == "ok" for _j, s, _d in results)
+        self.msg_queue.put(DoneMsg(ok, mod_port.summarize(results)))
+
     def _run_pipeline_with_audio(self, assets_dir):
         """Worker-thread entry for a Write run: apply any Replace-Audio,
         Replace-Video and Replace-Image assignments into the assets folder
@@ -3275,6 +3446,26 @@ class App:
         # one armed for whatever run finishes next.
         chain_extract = self._chain_extract_next
         self._chain_extract_next = None
+        # Port runs (one-click project -> other cards) borrow the write
+        # run-state too; their summary is the per-target report and none of
+        # the write-completion chaining applies.
+        if getattr(self, "_port_active", False):
+            self._port_active = False
+            self.window.set_running(False, mode="write")
+            if self._cancel_requested:
+                self._cancel_requested = False
+                self.window.set_status("Cancelled")
+                self.window.append_log(summary, "info")
+            elif success:
+                self.window.set_status("Ported")
+                self.window.append_log(summary, "success")
+                messagebox.showinfo("Port Complete", summary)
+            else:
+                self.window.set_status("Port finished with problems")
+                self.window.append_log(summary, "error")
+                messagebox.showwarning("Port finished with problems", summary)
+            return
+
         # Revert runs reuse the write run-state but have their own messaging +
         # a post-run rescan (on-disk asset bytes changed under the tabs).
         if getattr(self, "_revert_active", False):
@@ -3391,6 +3582,22 @@ class App:
         if is_extract and success and self._last_extract_io:
             in_path, out_path = self._last_extract_io
             write_extract_source(out_path, in_path)
+            # Stamp the card's OWN version into the sidecar (read from its
+            # update index — survives renamed files), so version chips built
+            # on this extract are fact, not filename guesses.  Off-thread:
+            # the probe opens the multi-GB image, and this is the UI thread.
+            mfr = self._current_mfr
+            if hasattr(mfr, "card_version") and os.path.isfile(in_path):
+                def _stamp(in_path=in_path, out_path=out_path, mfr=mfr):
+                    try:
+                        ver, exact = mfr.card_version(in_path)
+                        if ver and exact:
+                            from .core.extract_source import (
+                                amend_extract_source)
+                            amend_extract_source(out_path, card_version=ver)
+                    except Exception:
+                        pass
+                threading.Thread(target=_stamp, daemon=True).start()
             # The assets folder was pointed at this output dir at extract START
             # (before it held any files), so any Replace-tab scan triggered in
             # the meantime stamped a stale/empty cache for this exact path.

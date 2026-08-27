@@ -39,10 +39,12 @@ from typing import Optional
 SIDE_CAR = ".extract_source.json"
 
 # Stern names its card images ``<game>-<maj>_<min>_<patch>.<channel>.<size>...``
-# (e.g. ``turtles_pro-1_59_0.Release.8G.sdcard.raw``).  The firmware itself
-# stores no game-version string on the card (``/…/VERSION.txt`` is the SPIKE OS
-# version, identical across game builds), so the source FILENAME is the only
-# reliable version signal — parse it rather than trusting the user to read it.
+# (e.g. ``turtles_pro-1_59_0.Release.8G.sdcard.raw``).  The card's own
+# ``/spk/index/<...>.sidx`` name is the version AUTHORITY (it survives a
+# renamed file — see stern info.resolve_version); reading it costs opening
+# the image, so the extract stamps it into this sidecar as ``card_version``
+# (via amend_extract_source, probed off-thread after the extract) and this
+# filename parse is the fallback hint for extracts that predate the stamp.
 _VER_RE = re.compile(r"-(\d+)_(\d+)_(\d+)(?:\.([A-Za-z0-9]+))?")
 # Channel-position tokens that are media-size markers, not a build tag.
 _SIZE_TOKENS = frozenset({"8g", "4g", "16g", "2g", "32g"})
@@ -191,6 +193,38 @@ def version_hint_for_dir(assets_dir: str) -> Optional[str]:
     if not rec:
         return None
     return version_hint_from_name(rec.get("input_name"))
+
+
+def amend_extract_source(assets_dir: str, **extra) -> None:
+    """Merge *extra* keys into *assets_dir*'s recorded source sidecar.
+
+    Best-effort like the writer.  Used to stamp facts that take a real read
+    of the source image to learn — e.g. ``card_version``, probed off-thread
+    after the extract finishes — without disturbing the signature fields."""
+    rec = read_extract_source(assets_dir)
+    if rec is None:
+        return
+    rec.update(extra)
+    try:
+        with open(os.path.join(assets_dir, SIDE_CAR), "w",
+                  encoding="utf-8") as f:
+            json.dump(rec, f, indent=2)
+    except OSError:
+        pass
+
+
+def version_for_dir(assets_dir: str):
+    """``(version_label, exact)`` for *assets_dir* — the recorded
+    ``card_version`` (read from the source card's own update index at extract
+    time, so it survives any renaming) when the extract carries one, else the
+    filename hint with ``exact=False``, else ``(None, False)``."""
+    rec = read_extract_source(assets_dir)
+    if not rec:
+        return None, False
+    exact = rec.get("card_version")
+    if exact:
+        return exact, True
+    return version_hint_from_name(rec.get("input_name")), False
 
 
 def stale_source_message(assets_dir: str) -> Optional[str]:

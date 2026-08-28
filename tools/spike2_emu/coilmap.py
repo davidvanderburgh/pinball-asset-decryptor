@@ -30,12 +30,28 @@ is the eject, on a mapping that scored 9 of 9 against a labelled run.
 
 THE NODE IS PER TITLE, so nothing here hard-codes 8. godzilla_pro keeps its
 playfield coils in group 6 (node 8) and its magnet in group 7 (node 9);
-jaws_le uses group 7 for the same set and group 8 for its toys, and group 8 is
-not a board the boot enumeration named, so those rows come back with node
-None rather than with a guess.
+jaws_le uses group 7 for the same set (node 8) and group 8 for its toys
+(node 9); james_bond_60th_le uses groups 8 and 9, which godzilla's map has no
+key for at all. group_node() derives the mapping per title and says how.
+
+A GROUP NOTHING CAN RESOLVE STILL COMES BACK None RATHER THAN A GUESS, and
+that has not changed - it is now rarer and better evidenced, not softer.
 """
+import collections
 import os
+import re
 import struct
+
+#: A connector cell that NAMES ITS NODE: "8", "8b", "9a". The device table
+#: writes the board number into the connector for the devices that are wired
+#: to a numbered node board, and swnames.py and nodecensus.py already read it
+#: exactly this way - "the node comes from the CONNECTOR string, never from
+#: arithmetic on `group`". This is the third copy of the pattern and the two
+#: existing ones are unchanged; see connector_group_node() for what it buys.
+CONN_NODE = re.compile(r"^(\d+)[a-z]?$")
+
+#: Written into every derived table; LF on Windows too, like _write() does.
+NEWLINE = chr(10)
 
 #: Device-table group -> node on the bus. Verified by ledio.py against the
 #: boot enumeration, and now stated ONCE - playfield.py and coildecode.py
@@ -51,7 +67,120 @@ GROUP_NODE = {4: 0, 5: 1, 6: 8, 7: 9}
 FIXED_GROUPS = {4: 0, 5: 1}
 
 
-def group_node(rows, nodedir_path=None):
+def parse_rows(lines):
+    """EVERY device_xy.txt row, not just the coils, as dicts.
+
+    The group -> node derivations below need the SWITCH and LED rows too - the
+    switches because the running game names their node, the connectors because
+    a lamp row carries one where a coil row never does (every coil connector on
+    this disk is "-"). parse() below still returns coils alone; this is the
+    shared reader underneath it, so the field-counting rule that has already
+    cost one release lives in exactly one place.
+    """
+    out = []
+    for line in lines:
+        if line.startswith("#") or not line.strip():
+            continue
+        p = line.split()
+        if len(p) < 10:
+            continue
+        try:
+            row = dict(kind=p[0], name=" ".join(p[1:-8]), x=int(p[-8]),
+                       y=int(p[-7]), group=int(p[-4]), index=int(p[-3]),
+                       conn=p[-2], image=p[-1], node=None)
+        except ValueError:
+            continue
+        out.append(row)
+    return out
+
+
+def switch_group_node(dev_rows, switch_lines):
+    """{group: node} measured by joining SWITCH NAMES to the running game.
+
+    THE STRONGEST EVIDENCE AVAILABLE, because it is the game answering. The
+    device table gives a switch a NAME and a GROUP; the title's own switch
+    table - which the shim reads out of the running game and mktables.py
+    writes to switch_list.txt - gives the same name a NODE. Joining on the
+    name therefore says which node a group is on without assuming anything
+    about the numbering, which is the whole fault this module had.
+
+    IT IS THE SAME JOIN switchxy.py ALREADY MAKES, for positions, and for the
+    same stated reason: the device table's `index` is not the hardware bit, so
+    a numeric join "produces a map that looks right and presses the wrong
+    switch". Names are matched upper-cased and trimmed, like by_name() above.
+
+    NOT CIRCULAR, and it was worth checking before relying on it: swnames.py
+    fills a `?` switch list from the device table, so a filled name joined back
+    could in principle just re-derive whatever it assumed. It does not - it
+    resolves the node from the CONNECTOR string, "never from arithmetic on
+    `group`" (swnames.device_switches) - so the two derivations here rest on
+    the same independent column rather than on this module's constant.
+
+    Rows whose name is `?` are skipped: an unnamed switch cannot be joined, and
+    the titles that have them (elvira3, 109/109) simply get no answer here.
+    A group whose switches disagree about their node takes the majority, which
+    on every title on this disk is unanimous.
+    """
+    live = {}
+    for line in switch_lines or []:
+        if line.startswith("#"):
+            continue
+        p = line.split()
+        if len(p) < 5:
+            continue
+        try:
+            node = int(p[2])
+        except ValueError:
+            continue
+        name = " ".join(p[4:]).strip().upper()
+        if name and name != "?":
+            live[name] = node
+    if not live:
+        return {}
+    votes = collections.defaultdict(collections.Counter)
+    for r in dev_rows or []:
+        if r.get("kind") != "switch":
+            continue
+        node = live.get((r.get("name") or "").upper().strip())
+        if node is not None:
+            votes[r["group"]][node] += 1
+    return {g: c.most_common(1)[0][0] for g, c in votes.items()}
+
+
+def connector_group_node(dev_rows):
+    """{group: node} from the device table's own CONNECTOR column.
+
+    The second derivation, and it is INDEPENDENT of the first: it needs no run,
+    no switch table and no live game, so it answers on the titles whose switch
+    names come back `?` and which the join above cannot touch at all
+    (king_kong_le, metallica_spike, james_bond_le on this disk).
+
+    A GROUP THAT NAMES TWO NODES IS DROPPED, NOT GUESSED. On
+    dungeons_and_dragons_le groups 7 and 8 each carry connectors for BOTH node
+    8 and node 9, so this returns nothing for them and the switch join - which
+    answers 7 -> 8, the value that title's own Single Coil Test page prints -
+    is what decides. That is the ambiguity this rule exists to admit to.
+
+    PLAYFIELD GROUPS ONLY (>= 6). Groups 4 and 5 are the CPU and the cabinet on
+    every title measured, FIXED_GROUPS pins them, and the connector column
+    disagrees on three titles here - john_wick_le, king_kong_le and
+    metallica_spike all put a connector "2" on a group-5 row, against a switch
+    join that says node 1 on every title it can answer for. Reading connectors
+    for those groups would import that error for the two titles where nothing
+    contradicts it.
+    """
+    seen = collections.defaultdict(set)
+    for r in dev_rows or []:
+        if r["group"] < 6:
+            continue
+        m = CONN_NODE.match(r.get("conn") or "")
+        if m:
+            seen[r["group"]].add(int(m.group(1)))
+    return {g: next(iter(n)) for g, n in seen.items() if len(n) == 1}
+
+
+def group_node(rows, nodedir_path=None, dev_rows=None,
+               switch_lines=None):
     """Build this TITLE's group -> node map, falling back to GROUP_NODE.
 
     WHY THIS IS NOT A CONSTANT, measured 2026-08-27 on dungeons_and_dragons_le.
@@ -77,13 +206,71 @@ def group_node(rows, nodedir_path=None):
     Anything the rule cannot decide - no directory, no coil rows, or a count
     mismatch between groups and boards - keeps GROUP_NODE, so a title that
     worked before this existed still resolves exactly as it did.
+
+    ---- ITEM 53: TWO MEASURED SOURCES ABOVE THE RULE ------------------------
+
+    The ascending rule is an INFERENCE, and it cannot answer at all for a title
+    whose group count and board count differ - james_bond_60th_le has playfield
+    coil groups {8, 9} against three playfield pinnodes {7, 8, 9}, so it fell
+    straight back to godzilla's constant, which knows neither group. The result
+    was 0 of its 73 playfield lamps and 0 of its 16 coils having a wire
+    address, drawn dark on a complete piece of artwork, while the shim decoded
+    36351 lamp writes on exactly the nodes those devices are on.
+
+    So two sources that MEASURE the mapping are consulted first:
+
+      1. switch_group_node() - the running game's own switch table, joined on
+         the name. The game is the authority and this wins on disagreement.
+      2. connector_group_node() - the device table's connector column. Needs
+         no run, so it answers where (1) cannot.
+
+    THEY AGREE, and that is the argument for trusting either. On every title on
+    this disk where both can answer - beatles, deadpool_pro, godzilla_pro,
+    godzilla_le, james_bond_60th_le, jaws_le, john_wick_le - the two derivations
+    return the SAME node for every playfield group they share. Two derivations
+    from unrelated columns agreeing is the same standard ledio.py already holds
+    the boot enumeration to, and it is why this ships without a wire capture.
+
+    WHAT THEY DERIVE, measured 2026-08-28 at the desk:
+
+        godzilla_pro / godzilla_le : 6 -> 8, 7 -> 9   IDENTICAL to GROUP_NODE
+        james_bond_60th_le         : 8 -> 8, 9 -> 9, 10 -> 12
+        jaws_le / deadpool_pro     : 7 -> 8, 8 -> 9
+        dungeons_and_dragons_le    : 7 -> 8, 8 -> 9, 9 -> 10
+
+    ★ WHEN A TITLE MEASURES ITS OWN MAP, GODZILLA'S IS DROPPED RATHER THAN
+    USED TO FILL THE GAPS, and Bond is why. Its group 7 is 24 BACKBOX lamps;
+    GROUP_NODE reads group 7 as node 9, which on Bond is a PLAYFIELD board - so
+    every backbox swatch was rendering playfield values under backbox labels.
+    A wrong address is worse than a known-missing one: this item exists because
+    one title's answer stood in for every title's, and filling holes from that
+    same constant is the same mistake one layer down. Only FIXED_GROUPS
+    survives, because groups 4 and 5 are the CPU and the cabinet on every title
+    measured and the switch join confirms 4 -> 0 and 5 -> 1 wherever it can
+    answer.
+
+    A title neither source can speak for is untouched: elvira3 names none of
+    its 109 switches and writes no numeric connector, and it resolves exactly
+    as it did before this existed.
     """
-    mapping = dict(GROUP_NODE)
+    inferred = {}
     groups = sorted({r["group"] for r in rows or [] if r.get("group", 0) >= 6})
     nodes = _playfield_nodes(nodedir_path)
     if groups and nodes and len(groups) == len(nodes):
-        mapping = dict(FIXED_GROUPS)
-        mapping.update(dict(zip(groups, nodes)))
+        inferred = dict(zip(groups, nodes))
+
+    dev_rows = dev_rows if dev_rows is not None else rows
+    measured = dict(connector_group_node(dev_rows))
+    measured.update(switch_group_node(dev_rows, switch_lines))
+
+    # The ladder, weakest first. GROUP_NODE is the only rung that is ANOTHER
+    # title's answer, so it is the only one dropped the moment this title says
+    # anything about itself; the ascending rule is this title's own inference
+    # and stays underneath, covering groups the measured sources are silent on.
+    mapping = dict(FIXED_GROUPS if (inferred or measured) else GROUP_NODE)
+    mapping.update(inferred)
+    mapping.update(measured)
+    mapping.update(FIXED_GROUPS)
     return mapping
 
 
@@ -173,7 +360,7 @@ TROUGH = "TROUGH"
 AUTO_PLUNGER = "AUTO PLUNGER"
 
 
-def parse(lines, nodedir_path=None):
+def parse(lines, nodedir_path=None, switch_lines=None):
     """device_xy.txt coil rows -> dicts with name, x, y, group, index, node.
 
     THE FIELDS ARE COUNTED FROM THE RIGHT because the NAME is the multi-word
@@ -187,28 +374,39 @@ def parse(lines, nodedir_path=None):
     "no directory available" (bare synthetic rows, GROUP_NODE fallback - see
     group_node()). It is never auto-discovered here; see _playfield_nodes()'s
     docstring for why guessing which title's directory to read is the bug.
+    `switch_lines` is this table's own switch_list.txt, under the same rule and
+    for the same reason - load() names it as a sibling, nothing discovers it.
     """
-    out = []
-    for line in lines:
-        if line.startswith("#") or not line.strip():
-            continue
-        p = line.split()
-        if len(p) < 10 or p[0] != "coil":
-            continue
-        try:
-            group, index = int(p[-4]), int(p[-3])
-            row = dict(name=" ".join(p[1:-8]), x=int(p[-8]), y=int(p[-7]),
-                       group=group, index=index, image=p[-1], node=None)
-        except ValueError:
-            continue
-        out.append(row)
+    dev_rows = parse_rows(lines)
+    out = [dict(r) for r in dev_rows if r["kind"] == "coil"]
+    for row in out:
+        del row["kind"], row["conn"]
     # The node is filled in AFTER the whole table is read, because the map is
-    # derived from the set of groups the table uses - see group_node().
-    mapping = group_node(out, nodedir_path)
+    # derived from the set of groups the table uses - see group_node(). It is
+    # passed the WHOLE table, not just the coils: item 53's two measured
+    # sources live on the switch and lamp rows, and every coil connector on
+    # this disk is "-".
+    mapping = group_node(out, nodedir_path, dev_rows=dev_rows,
+                         switch_lines=switch_lines)
     for row in out:
         if row["index"] < COIL_N:
             row["node"] = mapping.get(row["group"])
     return out
+
+
+def _maybe_lines(path):
+    """A file's lines, or None when it is not there.
+
+    None rather than [] because "no switch table" and "an empty switch table"
+    are the same thing to every caller here, and a missing sibling is normal:
+    mktables.py writes switch_list.txt on the first boot of a title, so a
+    device table can exist for a run or two before one does.
+    """
+    try:
+        with open(path) as f:
+            return f.readlines()
+    except OSError:
+        return None
 
 
 def load(path):
@@ -232,7 +430,77 @@ def load(path):
     except OSError:
         return []
     nodedir = os.path.join(os.path.dirname(path), "node_ident.txt")
-    return parse(lines, nodedir if os.path.exists(nodedir) else None)
+    swlist = os.path.join(os.path.dirname(path), "switch_list.txt")
+    return parse(lines, nodedir if os.path.exists(nodedir) else None,
+                 switch_lines=_maybe_lines(swlist))
+
+
+def group_node_for(table_path, dev_rows=None):
+    """This title's derived group -> node map, from a device_xy.txt PATH.
+
+    THE ONE PLACE THAT KNOWS THE SIBLING FILENAMES. group_node() takes already-
+    read rows and lines because it must stay callable on synthetic data and
+    from inside WSL; this wraps it for every caller that has a real table on
+    disk - playfield.py, ledio.py, mktables.py - so "node_ident.txt and
+    switch_list.txt live beside device_xy.txt" is written down once.
+
+    IT IS STILL NOT DISCOVERY. The path NAMES the title, exactly as load()
+    does, and _playfield_nodes()'s docstring has the bug that rule exists to
+    prevent: a synthetic jaws_le test picked up a live rig's real
+    dungeons_and_dragons_le node directory when the lookup was implicit.
+
+    `dev_rows` is the already-parsed table when the caller has one (playfield.py
+    reads it through devicexy.read_table for its own reasons), so the file is
+    not parsed twice.
+    """
+    d = os.path.dirname(table_path or "")
+    if dev_rows is None:
+        dev_rows = parse_rows(_maybe_lines(table_path) or [])
+    nodedir = os.path.join(d, "node_ident.txt")
+    return group_node([r for r in dev_rows if r.get("kind") == "coil"],
+                      nodedir if os.path.exists(nodedir) else None,
+                      dev_rows=dev_rows,
+                      switch_lines=_maybe_lines(os.path.join(
+                          d, "switch_list.txt")))
+
+
+def group_node_text(game, mapping, dev_rows=None):
+    """group_node.txt, as a string: this title's derived map, with its support.
+
+    ITEM 53 ASKED FOR THE RESULT TO BE WRITTEN PER TITLE "rather than editing
+    the constant, because the whole fault is one title's answer standing in for
+    every title's". This is that file. Nothing reads it back - every consumer
+    derives the map from the device table in one call - so it is EVIDENCE, not
+    a cache: it is what lets someone check a map without running Python, and
+    what a future wire capture would be diffed against.
+
+    The counts are the point of it. A group with a node has devices that can be
+    addressed; a group without one has devices with a POSITION and no wire
+    address, which is a real state the playfield window draws and explains, and
+    it should be countable here rather than inferred from a dark playfield.
+    """
+    by_group = collections.defaultdict(collections.Counter)
+    for r in dev_rows or []:
+        by_group[r["group"]][r.get("kind") or "?"] += 1
+    out = ["# %s device-table group -> bus node map." % game,
+           "# Derived per title (coilmap.group_node): the running game's own",
+           "# switch table joined on NAME, then the device table's connector",
+           "# column, then this title's node directory. NOT godzilla's map,",
+           "# which is what item 53 was about.",
+           "# group node devices"]
+    for group in sorted(set(by_group) | set(mapping)):
+        node = mapping.get(group)
+        kinds = by_group.get(group) or {}
+        out.append("%-5s %-4s %s" % (
+            group, "-" if node is None else node,
+            " ".join("%s=%d" % kv for kv in sorted(kinds.items())) or "-"))
+    unmapped = sorted(g for g in by_group if mapping.get(g) is None)
+    if unmapped:
+        out.append("# groups with devices and NO node: %s"
+                   % " ".join(str(g) for g in unmapped))
+        out.append("# (position known, wire address not - drawn dark, see"
+                   " playfield.load_leds)")
+    return NEWLINE.join(out) + NEWLINE
 
 
 def by_name(coils, name):

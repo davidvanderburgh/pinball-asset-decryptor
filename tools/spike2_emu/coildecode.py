@@ -101,12 +101,24 @@ def coil_names():
     its own; see _playfield_nodes()'s docstring for the bug that fixed.
     """
     d, cs = devicexy.load()
-    coils = [r for r in devicexy.records(d, cs) if r["kind"] == "coil"]
+    recs = devicexy.records(d, cs)
+    coils = [r for r in recs if r["kind"] == "coil"]
     try:
         nodedir = gameinfo.table("node_ident.txt")
     except Exception:                          # noqa: BLE001 - never fatal here
         nodedir = None
-    mapping = coilmap.group_node(coils, nodedir)
+    try:
+        swlist = coilmap._maybe_lines(gameinfo.table("switch_list.txt"))
+    except Exception:                          # noqa: BLE001 - never fatal here
+        swlist = None
+    # THE WHOLE RECORD SET, not just the coils (item 53): both derivations read
+    # rows this tool does not otherwise care about - the switch names the
+    # running game can confirm, and the connector column, which is "-" on every
+    # coil row on this disk. Passing coils alone left the derivation blind and
+    # silently back on godzilla's constant, which is the fault this function's
+    # docstring already describes one layer up.
+    mapping = coilmap.group_node(coils, nodedir, dev_rows=recs,
+                                 switch_lines=swlist)
     out = {}
     for r in coils:
         node = mapping.get(r["group"])

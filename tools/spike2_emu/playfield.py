@@ -722,6 +722,23 @@ def _rows(path, at_least):
 DEV_ROWS = devicexy.read_table(os.path.join(TDIR or "", "device_xy.txt"))
 LAYOUT_IMAGE = devicexy.layout_image(DEV_ROWS)
 
+#: THIS TITLE'S device-table group -> bus node map, derived (item 53), with
+#: godzilla's old constant as the last rung of coilmap.group_node()'s ladder.
+#:
+#: It used to be `coilmap.GROUP_NODE` itself - one title's measurement, used
+#: for every title - and what that cost was the whole of item 53: on
+#: james_bond_60th_le the playfield devices are groups 8 and 9, which that dict
+#: has no key for, so all 73 lamps and all 16 coils were drawn dark with a
+#: position and no wire address while the shim decoded 36351 lamp writes on
+#: precisely those boards. coilmap.py's group_node() carries the derivation and
+#: the evidence; this is where the artwork view picks it up.
+#:
+#: DERIVED ONCE, HERE, beside the rows it is derived FROM. Every consumer below
+#: reads this name, so the window cannot end up with two answers - and the
+#: tables are read once at import for the same reason they always were.
+GROUP_NODE = coilmap.group_node_for(
+    os.path.join(TDIR or "", "device_xy.txt"), dev_rows=DEV_ROWS)
+
 
 def layout_rows(kind):
     """The title's positioned devices of one class, on the layout image."""
@@ -769,16 +786,22 @@ def load_leds():
     """The layout's LEDs: name, position, and the (node, index) on the wire.
 
     ★ READ FROM device_xy.txt RATHER THAN led_io.txt SINCE ITEM 50, and the
-    reason is that led_io.txt cannot carry these rows at all on some titles.
-    ledio.py writes only the four groups coilmap.GROUP_NODE can turn into a
-    node, so a title whose playfield lamps sit in groups it does not know -
-    Bond's are groups 8 and 9 - loses every one of them before the file is
-    written. The device table has them, with their positions.
+    reason WAS that led_io.txt could not carry these rows at all on some
+    titles: ledio.py wrote only the four groups godzilla's constant could turn
+    into a node, so james_bond_60th_le - whose playfield lamps are groups 8 and
+    9 - lost every one of them before the file was written. Item 53 fixed that
+    at the source (ledio.py takes this title's derived map now, so the file
+    carries them too), and this still reads the device table, because it is
+    where the POSITIONS are and there is no reason to go through a second file
+    to reach them.
 
-    `node` is therefore None for exactly those lamps: a POSITION is known and a
-    WIRE ADDRESS is not. Drawn dark, and the tooltip says which of the two is
-    missing rather than leaving a lamp that never lights unexplained. See the
-    queue item on the group -> node map being one title's measurement.
+    `node` is None only for a lamp whose group NOTHING could resolve - a
+    POSITION is known and a WIRE ADDRESS is not. Drawn dark, and the tooltip
+    says which of the two is missing rather than leaving a lamp that never
+    lights unexplained. Bond's group 7, its 24 backbox lamps, is the live
+    example: it is not on the layout image, and the derivation deliberately
+    leaves it unresolved rather than let godzilla's map call it node 9, which
+    on that title is a playfield board.
     """
     out = []
     for r in layout_rows("led"):
@@ -911,12 +934,6 @@ def blend(rgb, bg, alpha):
     return "#%02x%02x%02x" % tuple(
         min(255, max(0, int(c * alpha + b * (1.0 - alpha))))
         for c, b in zip(rgb, bg))
-
-
-#: Device-table group -> node on the bus, the same lookup ledio.py verified
-#: against the boot enumeration. coilmap.py owns it now; the alias stays so
-#: nothing that reads this module has to know that.
-GROUP_NODE = coilmap.GROUP_NODE
 
 
 def load_coils():

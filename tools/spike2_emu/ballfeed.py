@@ -40,6 +40,7 @@ inside that window and LOGS that it did, so the number is visible and tunable
 rather than silently deciding how many balls a multiball gets.
 """
 import os
+import struct
 import sys
 import time
 
@@ -70,6 +71,46 @@ def _num(name, default):
 HZ = _num("PAD_BALL_HZ", 50.0)
 FLIGHT_S = _num("PAD_BALL_LANE_MS", 350) / 1000.0
 MIN_GAP_S = _num("PAD_BALL_MIN_GAP_MS", 600) / 1000.0
+
+#: ANSWER THE AUTO PLUNGER? ON - and the launched ball COMES HOME (below),
+#: which is the piece whose absence broke this knob in BOTH positions.
+#:
+#: MEASURED 2026-08-27 on dungeons_and_dragons_le, which auto-plunges where
+#: godzilla waits for a hand plunge, in two acts:
+#:
+#: ON without a way home (the original behaviour): the game ejects, this
+#: feeder lands the ball in the lane, the game fires the AUTO PLUNGER,
+#: answering it opened the lane - and the ball left for a playfield that does
+#: not exist and simply vanished. The game asked again ~7 s later and the loop
+#: emptied the whole trough inside a minute; a machine with no balls refuses
+#: Start entirely.
+#:
+#: OFF (the first fix, same day): the ball stays in the lane, and the game
+#: fires the plunger again and again at a switch that never moves - until it
+#: declares **Device Malfunction: Auto Plunger** (visible under Diagnostics >
+#: Technician Alerts), stops firing the plunger at all, falls into a
+#: trough+diverter search pulse every ~8 s, and REFUSES START in attract for
+#: ever. The one observed "STANDARD GAME MODE" success was this race caught
+#: before the malfunction latched; it did not reproduce.
+#:
+#: So the launch must be answered - the game is watching the lane switch to
+#: confirm its coil works - and the ball must then come home unless a human
+#: is actually playing it. PAD_BALL_AUTOPLUNGE=0 restores the dead-plunger
+#: behaviour for measurement.
+AUTO_PLUNGE = _num("PAD_BALL_AUTOPLUNGE", 1)
+
+#: THE WAY HOME. A real machine's launched ball rolls the playfield and, with
+#: nobody at the flippers, drains to the trough a few seconds later. This rig
+#: has no playfield, so that return is an action here: PAD_BALL_HOME_MS
+#: (default 5000) after an answered launch, the ball drains home - UNLESS the
+#: KEYBOARD generation moved since the launch. The keyboard array is written
+#: only by padglhost on real key events (padsw.py), flippers are keys, so a
+#: moved generation means a human is playing that ball and the playfield
+#: window's own drain click is the way it ends. Attract/ball-search cycles
+#: have no human at the keys, so their balls always come home - which is
+#: exactly what the game's search is waiting to see, and what clears (and
+#: never re-raises) the malfunction above. 0 disables the way home.
+HOME_S = _num("PAD_BALL_HOME_MS", 5000) / 1000.0
 
 #: How long the padled block may stay unreadable before this decides the run is
 #: over. watch.sh's teardown removes dump/padled precisely so a reader can tell
@@ -127,6 +168,11 @@ class Feeder:
         self.said = {}
         self.shape = None
         self.fed = 0
+        #: (launch time, keyboard generation at launch) while a feeder-answered
+        #: launch is out with no human claim on it yet; None otherwise. Only
+        #: launches THIS feeder answered are candidates for the way home -
+        #: plunge.py and the playfield window manage their own balls.
+        self.pending_home = None
 
     @staticmethod
     def _switch(rows, name):
@@ -234,12 +280,44 @@ class Feeder:
                     mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
                     say("trough %d/%d after the feed"
                         % (self.trough.count(mrg), len(self.trough.positions)))
-        if self.fired(d, self.plunge_coil):
+        if self.fired(d, self.plunge_coil) and AUTO_PLUNGE:
             lane_made = (self.lane is not None
                          and bool(padsw.merged(m, self.lane)))
-            self.run_plan(m, ballmodel.plan_launch(self.lane, lane_made),
-                          "auto plunger:")
+            if self.run_plan(m, ballmodel.plan_launch(self.lane, lane_made),
+                             "auto plunger:"):
+                self.pending_home = (now, self._kbd_gen(m))
+        self._way_home(m, now)
         return fed
+
+    @staticmethod
+    def _kbd_gen(m):
+        """padglhost's keyboard generation - moves only on real key events."""
+        return struct.unpack_from("<I", m, padsw.OFF_GEN)[0]
+
+    def _way_home(self, m, now):
+        """A launched ball nobody is playing drains back to the trough.
+
+        See the HOME_S comment at the top for why this exists and why the
+        KEYBOARD generation is the human test. Cancelling on a key event is
+        one-way on purpose: once a human has touched the ball it is theirs,
+        even if they then go quiet - the playfield window's drain click is
+        how that ball ends.
+        """
+        if self.pending_home is None or not HOME_S:
+            return
+        t0, gen0 = self.pending_home
+        if self._kbd_gen(m) != gen0:
+            self.pending_home = None
+            say("launched ball claimed by the keyboard - it stays in play")
+            return
+        if now - t0 < HOME_S:
+            return
+        self.pending_home = None
+        mrg = m[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
+        if self.run_plan(m, ballmodel.plan_drain(self.trough, mrg),
+                         "way home:"):
+            say("launched ball came home untouched (%.1f s, no key events)"
+                % (now - t0))
 
 
 def main():

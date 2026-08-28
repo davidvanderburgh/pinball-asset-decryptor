@@ -30,7 +30,10 @@ TRACKING_SIDECARS = frozenset({"callouts.csv", "music_titles.csv"})
 # — written by the app into the project it is working on, so like "build" it is
 # ours, not the card's, and must never be baselined, scanned as a slot, or
 # packed into a mod pack.
-NON_ASSET_DIRS = frozenset({"build", ".hydrate", "card_files", "logs"})
+# ".write_cache" holds the Write's encode-result cache (stern engine's
+# _AudioBodyCache) — derived from the assets, never an asset itself.
+NON_ASSET_DIRS = frozenset({"build", ".hydrate", "card_files", "logs",
+                            ".write_cache"})
 
 
 def md5_file(path):

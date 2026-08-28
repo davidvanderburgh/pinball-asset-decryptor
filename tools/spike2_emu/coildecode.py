@@ -56,6 +56,7 @@ import sys
 
 import coilmap
 import devicexy
+import gameinfo
 
 LINE = re.compile(r"\[coil\] node (\d+) cmd ([0-9a-f]{2}) ([0-9a-f]+)")
 STAMP = re.compile(r"\[(\d+\.\d+)\]")
@@ -86,13 +87,41 @@ def read(path):
 
 
 def coil_names():
-    """{(node, index): name} for every coil in the device table."""
+    """{(node, index): name} for every coil in the device table.
+
+    The group -> node map is DERIVED per title (coilmap.group_node): the groups
+    shift between titles, so the constant above is only the fallback. Reading it
+    directly here is what had this tool naming dungeons_and_dragons_le's node-8
+    coils as node 9.
+
+    THIS tool has no device_xy.txt path at all - devicexy.load() reads the
+    ELF of whatever title is active, the same "active" gameinfo already
+    resolves for it - so asking gameinfo for that title's node_ident.txt
+    HERE, explicitly, is correct. coilmap.py itself no longer guesses this on
+    its own; see _playfield_nodes()'s docstring for the bug that fixed.
+    """
     d, cs = devicexy.load()
+    recs = devicexy.records(d, cs)
+    coils = [r for r in recs if r["kind"] == "coil"]
+    try:
+        nodedir = gameinfo.table("node_ident.txt")
+    except Exception:                          # noqa: BLE001 - never fatal here
+        nodedir = None
+    try:
+        swlist = coilmap._maybe_lines(gameinfo.table("switch_list.txt"))
+    except Exception:                          # noqa: BLE001 - never fatal here
+        swlist = None
+    # THE WHOLE RECORD SET, not just the coils (item 53): both derivations read
+    # rows this tool does not otherwise care about - the switch names the
+    # running game can confirm, and the connector column, which is "-" on every
+    # coil row on this disk. Passing coils alone left the derivation blind and
+    # silently back on godzilla's constant, which is the fault this function's
+    # docstring already describes one layer up.
+    mapping = coilmap.group_node(coils, nodedir, dev_rows=recs,
+                                 switch_lines=swlist)
     out = {}
-    for r in devicexy.records(d, cs):
-        if r["kind"] != "coil":
-            continue
-        node = GROUP_NODE.get(r["group"])
+    for r in coils:
+        node = mapping.get(r["group"])
         if node is not None:
             out[(node, r["index"])] = r["name"]
     return out

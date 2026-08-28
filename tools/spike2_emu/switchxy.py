@@ -73,8 +73,16 @@ def join(live, recs):
     a deliberately-instrumented run rather than on any run at all.
     """
     rows = []
+    # The LAYOUT image, not the literal "playfield" - that literal is one
+    # title family's spelling (item 50: bond says `Test/scaled_playfield`,
+    # beatles `Test/beatles_playfield`), and hard-coding it here made this
+    # join return zero rows on every such title while their 50-odd named
+    # switches sat one filter away. devicexy.layout_image() owns the choice,
+    # and it is the same call playfield.py draws with, so a position joined
+    # here is by construction on the image the window shows.
+    img = devicexy.layout_image(recs)
     for r in recs:
-        if r["kind"] != "switch" or r["image"] != "playfield":
+        if r["kind"] != "switch" or r["image"] != img:
             continue
         hit = live.get(r["name"].upper())
         if hit:

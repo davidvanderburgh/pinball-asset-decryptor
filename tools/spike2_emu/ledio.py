@@ -47,13 +47,23 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import coilmap
 import devicexy
 import gameinfo
 import ledframes
 
 #: group in the device table -> node on the bus. Verified with devjoin.py
 #: against the live switch table; it is a lookup, not arithmetic.
-GROUP_NODE = {4: 0, 5: 1, 6: 8, 7: 9}
+#:
+#: ★ THE FALLBACK NOW, NOT THE ANSWER (item 53). This is godzilla's map, and
+#: writing every title's led_io.txt through it is what made the file unable to
+#: carry a title whose lamps sit elsewhere: james_bond_60th_le's playfield
+#: lamps are groups 8 and 9, so its led_io.txt held 29 cabinet and backbox rows
+#: and NONE of its 73 playfield inserts. build() takes a derived map now -
+#: coilmap.group_node() owns the derivation - and keeps this only for a caller
+#: that has no table to derive from. It is a fourth copy of the constant
+#: otherwise, which is what coilmap.py exists to prevent.
+GROUP_NODE = coilmap.GROUP_NODE
 
 ENUM_CMDS = (0x84, 0x85)
 
@@ -67,16 +77,22 @@ def wire_enumeration(path):
     return out
 
 
-def build(recs, wire=None):
+def build(recs, wire=None, mapping=None):
     """([(node, record)], problems, report) for a title's LEDs.
 
     `wire` is the boot enumeration when a log was captured, and None when there
     is no run to read - see the header. With no wire there is nothing to
     disagree with, so `problems` is empty and the rows are exactly what the
     binary says.
+
+    `mapping` is THIS TITLE'S group -> node map from coilmap.group_node(), or
+    None to fall back to the module constant. Passing it is what lets a title
+    whose lamps are not in godzilla's four groups appear in this file at all
+    (item 53); the join and the verification below are unchanged, because they
+    never depended on WHICH groups were in the map, only on there being one.
     """
     rows, problems, report = [], [], []
-    for group, node in sorted(GROUP_NODE.items()):
+    for group, node in sorted((mapping or GROUP_NODE).items()):
         leds = [r for r in recs if r["kind"] == "led" and r["group"] == group]
         if not leds:
             continue

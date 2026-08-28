@@ -226,6 +226,116 @@ def enumerate_program_strings(raw):
     return rows
 
 
+def _settings_captions(table, mode, buf):
+    """``{adjustment_id: caption text}`` read through *buf* (the ELF bytes,
+    possibly with pending writes applied) at the descriptor offsets *table*
+    found in the pristine bytes.
+
+    Mirrors :func:`adjustments._caption_at` / :func:`adjustments.menu_label`,
+    but takes the bytes to read TEXT from as a parameter so a planned edit
+    shows the caption it would leave on the card.  The descriptor and pointer
+    layout always comes from the pristine *table* — a text edit never moves a
+    descriptor — except the five-language indirection word, which IS a name
+    group and can be repointed by the very writes being checked, so it is
+    re-read from *buf*."""
+    from .adjustments import OFF_MENU_LABEL, _is_caption
+
+    def cstr(va):
+        o = table._off(va)
+        if o is None:
+            return None
+        e = buf.find(b"\x00", o, o + 96)
+        if e < 0:
+            return None
+        try:
+            s = bytes(buf[o:e]).decode("latin1")
+        except Exception:
+            return None
+        return s if s.isprintable() else None
+
+    out = {}
+    for idx in range(table.count):
+        doff = table._off(table.table_va + idx * table.elem)
+        if doff is None or OFF_MENU_LABEL + 4 > table.elem:
+            continue
+        va = struct.unpack_from("<I", buf, doff + OFF_MENU_LABEL)[0]
+        if not va:
+            continue
+        direct = cstr(va)
+        indirect = None
+        inner = table._off(va)
+        if inner is not None and inner + 4 <= len(buf):
+            w = struct.unpack_from("<I", buf, inner)[0]
+            if w:
+                indirect = cstr(w)
+        order = (indirect, direct) if mode == "indirect" else (direct, indirect)
+        for c in order:
+            if _is_caption(c):
+                out[idx] = c
+                break
+    return out
+
+
+def _drop_caption_collisions(captions, edits, log):
+    """Remove every edit that would leave two operator settings with the SAME
+    caption, and say why.  Returns the pruned copy of *edits*.
+
+    The firmware hashes each adjustment's menu caption when it builds its
+    settings store; two captions with the same text is ``** FATAL: error 249
+    (NVMigration: ADJUSTMENT hash is NOT UNIQUE)`` at every boot — on a
+    machine an endless flash between the loading screen and "initializing"
+    (Godzilla 1.16 Heisei retheme, 2026-08-26: two champ-score captions were
+    renamed to the same text and the write boot-looped real hardware).
+    Display-string duplicates stay allowed — that same mod merges three award
+    lines into one on purpose, and a card fixed ONLY in its captions boots —
+    so this prunes nothing outside the settings captions, and tolerates
+    whatever caption sharing the stock build itself carries (its boot is the
+    proof the firmware accepts it).
+
+    When two EDITS claim one name, the first setting in the operator menu's
+    own order keeps it and the rest are skipped."""
+    new = {idx: edits.get(text, text) for idx, text in captions.items()}
+    groups = {}
+    for idx in sorted(new):
+        groups.setdefault(new[idx], []).append(idx)
+    pruned = dict(edits)
+    for txt, idxs in groups.items():
+        if len(idxs) < 2 or len({captions[i] for i in idxs}) < 2:
+            continue
+        unedited = [i for i in idxs if captions[i] == txt]
+        keep = unedited or [idxs[0]]
+        for i in idxs:
+            orig = captions[i]
+            if i in keep or orig == txt or orig not in pruned:
+                continue
+            if unedited:
+                why = ('another operator setting is already named "%s"'
+                       % encode_text(txt))
+            else:
+                why = ('the edit renaming "%s" already takes that name'
+                       % encode_text(captions[keep[0]]))
+            log('Program text: "%s" -> "%s" is skipped: %s, and a machine '
+                "with two identically-named settings REFUSES TO BOOT (it "
+                "flashes between the loading screen and initializing "
+                "forever). Pick a name no other setting uses."
+                % (encode_text(orig), encode_text(txt), why), "warning")
+            del pruned[orig]
+    return pruned
+
+
+def _new_caption_collisions(captions, final):
+    """Caption texts that *final* (post-edit) duplicates across settings whose
+    pristine captions in *captions* were distinct.  Settings that already
+    shared one caption (or one caption string) in the pristine build stay
+    exempt — see :func:`_drop_caption_collisions`."""
+    groups = {}
+    for idx, txt in final.items():
+        if idx in captions:
+            groups.setdefault(txt, []).append(idx)
+    return sorted(txt for txt, idxs in groups.items()
+                  if len(idxs) > 1 and len({captions[i] for i in idxs}) > 1)
+
+
 def plan_writes(raw, edits, log=None):
     """Resolve *edits* (``{original: replacement}``) against the ELF *raw*
     and return ``(writes, n_applied)`` where *writes* is a flat
@@ -240,6 +350,11 @@ def plan_writes(raw, edits, log=None):
         ``prefix + new_tail`` when that fits.
       * any conflict (too long, tail not a suffix, '%'-tokens changed) skips
         the whole span with a warning — never a partial patch.
+      * an edit that would leave two operator settings with the same caption
+        is skipped (:func:`_drop_caption_collisions` — the machine refuses to
+        boot such a card), and if a collision still arrives sideways (e.g. a
+        standalone-name rename inside a caption) the WHOLE plan is withheld
+        rather than shipped.
     """
     log = log or (lambda *a, **k: None)
     ranges = _load_ranges(raw)
@@ -249,6 +364,21 @@ def plan_writes(raw, edits, log=None):
         return [], 0
     # Manifest rows arrive in encoded form (\n escapes); resolve raw-vs-raw.
     edits = {decode_text(k): decode_text(v) for k, v in edits.items()}
+    # The settings-caption census, for the duplicate-name boot guard.  Builds
+    # that don't parse (no AD_ table) simply aren't checked — same best-effort
+    # stance as the rest of this module.
+    table = mode = None
+    captions = {}
+    if edits:
+        try:
+            from .adjustments import AdjustmentTable, _caption_mode
+            table = AdjustmentTable(raw)
+            mode = _caption_mode(table)
+            captions = _settings_captions(table, mode, raw)
+        except Exception:
+            captions = {}
+    if captions:
+        edits = _drop_caption_collisions(captions, edits, log)
     spans = _display_spans(raw, ranges)
     tails = _tail_map(raw, spans)
     try:
@@ -354,4 +484,27 @@ def plan_writes(raw, edits, log=None):
         if original not in applied:
             log('Program text: "%s" wasn\'t found in the game program; '
                 "skipped." % original, "warning")
+
+    # Backstop for the caption guard: a collision can arrive SIDEWAYS — a
+    # standalone-name (tail) rename rewrites its host string, and when that
+    # host is a settings caption the pre-plan check above never saw the
+    # caption's text in the edit keys.  Re-read every caption through the
+    # planned writes; if two settings would end up sharing a name, withhold
+    # the whole plan rather than ship a card the machine refuses to boot.
+    if writes and captions:
+        buf = bytearray(raw)
+        for off, b in writes:
+            buf[off:off + len(b)] = b
+        clashes = _new_caption_collisions(
+            captions, _settings_captions(table, mode, buf))
+        if clashes:
+            log("Program text: these edits would leave two operator settings "
+                'named "%s", and a machine with two identically-named '
+                "settings REFUSES TO BOOT (it flashes between the loading "
+                "screen and initializing forever). The collision comes from "
+                "a standalone-name rename inside a setting caption, so NO "
+                "program-text edit was applied. Rename one of the colliding "
+                "settings and Write again." % encode_text(clashes[0]),
+                "warning")
+            return [], 0
     return writes, len(applied)

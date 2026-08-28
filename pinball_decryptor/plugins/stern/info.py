@@ -92,6 +92,54 @@ def resolve_version(path, sidx_name="", game_folder=""):
     return version, edition, source, name_version
 
 
+def card_version_probe(path):
+    """``(version_label, exact)`` — the version this card image actually is.
+
+    The full Image-Info probe reads the game ELF and walks every asset
+    directory; a version chip needs none of that.  This looks straight at
+    ``/spk/index`` on the (largest-first) browsable partitions for the
+    ``.sidx`` whose name carries the build — the same authority
+    :func:`resolve_version` documents — plus one root listing for the game
+    folder (the edition).  Sub-second on a multi-GB image, but it still
+    opens the image, so call it off the UI thread and cache the answer.
+
+    *exact* is True when the version came from the card's own index (it
+    survives any renaming); False means the filename parse was the only
+    signal, and callers should mark it as a guess.  ``(None, False)`` when
+    neither says anything."""
+    sidx_name = game_folder = ""
+    try:
+        with CardImage(path) as card:
+            parts = [p for p in card.partitions() if p.browsable]
+            parts.sort(key=lambda p: p.size, reverse=True)
+            for p in parts:
+                try:
+                    entries = card.list_dir(p.index, "/spk/index")
+                except Exception:
+                    continue
+                names = [e.name for e in entries if not e.is_dir
+                         and e.name.lower().endswith(".sidx")]
+                if not names:
+                    continue
+                sidx_name = names[0]
+                try:
+                    dirs = [e.name for e in card.list_dir(p.index, "/")
+                            if e.is_dir and e.name not in ("spk",
+                                                           "lost+found")]
+                    if len(dirs) == 1:
+                        game_folder = dirs[0]
+                except Exception:
+                    pass
+                break
+    except Exception:
+        pass
+    version, _edition, source, _namev = resolve_version(path, sidx_name,
+                                                        game_folder)
+    if not version:
+        return None, False
+    return version, source == "the card's update index"
+
+
 def container_counts(head):
     """``(sound_fragments, sounds)`` from the ``image.bin`` header, else
     ``(None, None)``.

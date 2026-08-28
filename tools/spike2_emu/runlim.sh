@@ -31,10 +31,15 @@ LEADER=$!
 # group id, and a negative pid kills the entire group.
 sleep "$SECS"
 kill -9 -"$LEADER" 2>/dev/null
+# Two comm shapes for the guest: a plain run is <title>/game, but a
+# PAD_PIVOT run re-roots and shows as /.padqemu/game — a pivoted guest
+# dodged the old single-pattern sweep and spun at 140% CPU until a manual
+# killgame.sh (2026-08-27).
 pkill -9 -f 'godzilla_pro/game' 2>/dev/null
+pkill -9 -f '\.padqemu/game' 2>/dev/null
 sleep 1
 
-LEFT=$(ps -eo args | grep -c '[g]odzilla_pro/game')
+LEFT=$(ps -eo args | grep -cE '[g]odzilla_pro/game|[.]padqemu/game')
 echo "runlim: ${SECS}s elapsed, log=$LOG, survivors=$LEFT"
 if [ "$LEFT" -ne 0 ]; then
     echo "runlim: WARNING - $LEFT game process(es) still alive, run killgame.sh"

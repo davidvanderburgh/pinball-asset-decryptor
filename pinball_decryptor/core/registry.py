@@ -516,15 +516,29 @@ class Manufacturer(ABC):
         """
         return []
 
-    def compare_images(self, path_a, path_b):
+    def compare_images(self, path_a, path_b, assets_a=None, assets_b=None):
         """What changed from image *path_a* to image *path_b*, in the same
         section shape as :meth:`image_info`.
+
+        *assets_a* / *assets_b* are the extract folders the two images were
+        extracted to, when the Compare tab could find them (it matches each
+        folder's ``.extract_source.json`` against the picked card).  A plugin
+        that can say more once a card has been extracted than it can from the
+        card alone — Stern's packed audio is the case — uses them; the rest
+        may ignore them, and both are ``None`` when no extract was found.
 
         A row may carry a THIRD element — ``(name, value, ref)`` — an opaque,
         plugin-private token naming one file on one of the two images.  The
         Compare tab hands it straight back to :meth:`extract_report_file` when
         the user double-clicks that row; nothing else reads it, and renderers
         take ``row[0]``/``row[1]`` so a two-element row stays valid.
+
+        LIST EVERYTHING; DO NOT TRUNCATE.  A row whose name is blank is an
+        item of the named row above it (``image_info.group_rows``), and the
+        tab shows the first N of each such run with the rest one double-click
+        away.  A plugin that caps its own lists makes that setting cost two
+        card reads instead of a repaint, and makes Copy Report a copy of the
+        truncation.
 
         Called on a worker thread by the Compare tab; must stay read-only.
         Only meaningful for plugins advertising ``capabilities.compare`` —

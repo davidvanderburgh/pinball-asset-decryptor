@@ -39,10 +39,12 @@ from typing import Optional
 SIDE_CAR = ".extract_source.json"
 
 # Stern names its card images ``<game>-<maj>_<min>_<patch>.<channel>.<size>...``
-# (e.g. ``turtles_pro-1_59_0.Release.8G.sdcard.raw``).  The firmware itself
-# stores no game-version string on the card (``/…/VERSION.txt`` is the SPIKE OS
-# version, identical across game builds), so the source FILENAME is the only
-# reliable version signal — parse it rather than trusting the user to read it.
+# (e.g. ``turtles_pro-1_59_0.Release.8G.sdcard.raw``).  The card's own
+# ``/spk/index/<...>.sidx`` name is the version AUTHORITY (it survives a
+# renamed file — see stern info.resolve_version); reading it costs opening
+# the image, so the extract stamps it into this sidecar as ``card_version``
+# (via amend_extract_source, probed off-thread after the extract) and this
+# filename parse is the fallback hint for extracts that predate the stamp.
 _VER_RE = re.compile(r"-(\d+)_(\d+)_(\d+)(?:\.([A-Za-z0-9]+))?")
 # Channel-position tokens that are media-size markers, not a build tag.
 _SIZE_TOKENS = frozenset({"8g", "4g", "16g", "2g", "32g"})
@@ -105,6 +107,67 @@ def read_extract_source(assets_dir: str) -> Optional[dict]:
     return recorded if isinstance(recorded, dict) else None
 
 
+def _names_this_image(rec: dict, image_path: str) -> bool:
+    """Does the sidecar *rec* describe an extract of *image_path*?
+
+    The recorded absolute path is the strong answer.  The weak one — same file
+    NAME and same byte size — exists because a card gets moved or copied far
+    more often than it gets rebuilt, and refusing to pair a folder with the
+    card it plainly came from would put the report back on "run an Extract"
+    for a user who already has.  The mtime is deliberately NOT part of this:
+    that is :func:`stale_source_message`'s job, and a stale extract is still
+    the extract of this card.
+    """
+    if not rec:
+        return False
+    recorded = rec.get("input_path") or ""
+    if recorded and os.path.normcase(os.path.abspath(recorded)) == \
+            os.path.normcase(os.path.abspath(image_path)):
+        return True
+    if os.path.normcase(rec.get("input_name") or "") != \
+            os.path.normcase(os.path.basename(image_path)):
+        return False
+    try:
+        return rec.get("size") == os.path.getsize(image_path)
+    except OSError:
+        return False
+
+
+def find_extract_for(image_path: str, roots) -> Optional[str]:
+    """The extract folder *image_path* was extracted to, or ``None``.
+
+    *roots* are folders to look in; each is checked itself and one level down,
+    which is exactly the shape "Extract Both" leaves behind (one parent folder,
+    a sub-folder per card).  Only the sidecars are read — no walking, no
+    hashing — so this stays cheap enough to run on every Compare click.
+
+    Deliberately NOT a filesystem search.  Guessing at an extract folder from
+    a name would eventually pair a report with the wrong card's sounds, and a
+    confidently wrong audio diff is worse than the honest "extract both, then
+    compare again" the caller falls back to.
+    """
+    if not image_path:
+        return None
+    seen = set()
+    for root in roots or ():
+        if not root or not os.path.isdir(root):
+            continue
+        candidates = [root]
+        try:
+            candidates += [os.path.join(root, n)
+                           for n in sorted(os.listdir(root))]
+        except OSError:
+            pass
+        for cand in candidates:
+            key = os.path.normcase(os.path.abspath(cand))
+            if key in seen or not os.path.isdir(cand):
+                continue
+            seen.add(key)
+            if _names_this_image(read_extract_source(cand), image_path):
+                return cand
+    return None
+
+
 def version_hint_from_name(name: Optional[str]) -> Optional[str]:
     """A human version label parsed from a card-image filename, or ``None``.
 
@@ -130,6 +193,38 @@ def version_hint_for_dir(assets_dir: str) -> Optional[str]:
     if not rec:
         return None
     return version_hint_from_name(rec.get("input_name"))
+
+
+def amend_extract_source(assets_dir: str, **extra) -> None:
+    """Merge *extra* keys into *assets_dir*'s recorded source sidecar.
+
+    Best-effort like the writer.  Used to stamp facts that take a real read
+    of the source image to learn — e.g. ``card_version``, probed off-thread
+    after the extract finishes — without disturbing the signature fields."""
+    rec = read_extract_source(assets_dir)
+    if rec is None:
+        return
+    rec.update(extra)
+    try:
+        with open(os.path.join(assets_dir, SIDE_CAR), "w",
+                  encoding="utf-8") as f:
+            json.dump(rec, f, indent=2)
+    except OSError:
+        pass
+
+
+def version_for_dir(assets_dir: str):
+    """``(version_label, exact)`` for *assets_dir* — the recorded
+    ``card_version`` (read from the source card's own update index at extract
+    time, so it survives any renaming) when the extract carries one, else the
+    filename hint with ``exact=False``, else ``(None, False)``."""
+    rec = read_extract_source(assets_dir)
+    if not rec:
+        return None, False
+    exact = rec.get("card_version")
+    if exact:
+        return exact, True
+    return version_hint_from_name(rec.get("input_name")), False
 
 
 def stale_source_message(assets_dir: str) -> Optional[str]:

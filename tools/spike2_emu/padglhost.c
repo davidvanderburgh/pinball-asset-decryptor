@@ -25,6 +25,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <signal.h>
 
 #include "padgl.h"
@@ -187,7 +188,6 @@ static int  uni_loc[MAXPROG][MAXUNI];
 static char uni_name[MAXPROG][MAXUNI][40];
 static int  attr_loc[MAXPROG][PADGL_ATTR_PER_PROG];
 static char attr_name[MAXPROG][PADGL_ATTR_PER_PROG][40];
-static void (*p_glGetAttribLocation_fwd)(void);
 
 /* Below the token base the value is a real index the shader fixed with a
  * layout qualifier; at or above it, it is (program, slot) to resolve by name. */
@@ -988,10 +988,17 @@ static void binds_playfield(int n)
                      strcmp(sw_nm[k], gen_fixed[i].nm[1])))
                     continue;
             } else {
+                /* The side can be abbreviated: beatles says "UP LT FLIPPER
+                 * BUTTON" / "UP RT FLIPPER BUTTON". Safe as a substring only
+                 * under the FLIP+BUTTON+UP/MID gate already applied here -
+                 * "LT"/"RT" appear all over drop-target names, but none of
+                 * those carry BUTTON. */
                 const char *side =
                     gen_fixed[i].sym == 0xff52 ? "LEFT" : "RIGHT";
+                const char *abbr =
+                    gen_fixed[i].sym == 0xff52 ? "LT" : "RT";
                 if (!strstr(sw_nm[k], "FLIP") || !strstr(sw_nm[k], "BUTTON") ||
-                    !strstr(sw_nm[k], side) ||
+                    (!strstr(sw_nm[k], side) && !strstr(sw_nm[k], abbr)) ||
                     (strncmp(sw_nm[k], "UP", 2) != 0 &&
                      strncmp(sw_nm[k], "MID", 3) != 0))
                     continue;
@@ -1145,10 +1152,23 @@ static void binds_cabinet(int n)
  * for titles that merely have not published their table yet. */
 static int binds_resolved;      /* gate for sw_publish(); set by main/poll */
 
+/* ★ WHICH FILE THE LAST SUCCESSFUL RESOLVE PARSED, so win_pump() can see it
+ * CHANGE. A resolve used to be permanent, and mktables repairing a cached
+ * all-`?` list (beatles) races the first poll here: parse the stale list
+ * one second early and every flipper key stayed dead for the whole run,
+ * with the repaired file sitting on disk the entire time. The mtim is
+ * fstat()ed from the very fd that was parsed - mktables replaces the file
+ * atomically, so the fd's identity is the parsed content's identity even if
+ * the path is swapped mid-parse, and the swapped-in file then differs and
+ * re-resolves on the next poll. */
+static char binds_list_path[512];
+static struct timespec binds_list_mtim;
+
 static int binds_resolve(void)
 {
     const char *tab = getenv("PAD_TABLES"), *game = getenv("PAD_GAME");
     char path[512], line[256];
+    struct stat lst;
     FILE *f;
     int n = 0, k;
 
@@ -1162,6 +1182,8 @@ static int binds_resolve(void)
          * the log with a fact that has not changed. */
         return 0;
     }
+    if (fstat(fileno(f), &lst) != 0)
+        memset(&lst, 0, sizeof lst);
     while (n < (int)(sizeof sw_id / sizeof sw_id[0]) &&
            fgets(line, sizeof line, f)) {
         /* `id num node bit name...`; the name is the rest of the line. */
@@ -1211,6 +1233,8 @@ static int binds_resolve(void)
     /* ★ ITEM 48: no more per-row candidate matching against a compiled menu
      * - the playfield tail is REBUILT from what the title actually has. */
     binds_playfield(n);
+    memcpy(binds_list_path, path, sizeof binds_list_path);
+    binds_list_mtim = lst.st_mtim;
     return 1;
 }
 
@@ -1962,19 +1986,47 @@ static void win_pump(void)
      * ids. A 2 s stat is nothing next to the wasted first run this
      * replaces. Own timestamp, because win_pump runs per frame AND from the
      * idle loop. */
-    if (!binds_resolved) {
+    {
         static double binds_next_s;
         double t = now_s();
         if (t >= binds_next_s) {
             binds_next_s = t + 2.0;
-            if (binds_resolve() == 1) {
-                binds_resolved = 1;
-                binds_export();
-                sw_src_tag = 'w';
-                sw_publish();
-                sw_src_tag = 'k';
-                fprintf(stderr, "[padglhost] switch list arrived; binds "
-                        "resolved, trough latched on this title's own ids\n");
+            if (!binds_resolved) {
+                if (binds_resolve() == 1) {
+                    binds_resolved = 1;
+                    binds_export();
+                    sw_src_tag = 'w';
+                    sw_publish();
+                    sw_src_tag = 'k';
+                    fprintf(stderr, "[padglhost] switch list arrived; binds "
+                            "resolved, trough latched on this title's own "
+                            "ids\n");
+                }
+            } else if (binds_list_path[0]) {
+                /* ★ RESOLVED IS NO LONGER FOREVER: mktables can REPAIR the
+                 * list after this poll first parses it - a cached all-`?`
+                 * table gets its names filled from the device table about a
+                 * second into the run, and losing that race used to cost the
+                 * whole run its flipper keys (beatles' guided setup,
+                 * 2026-08-27). binds_playfield() is idempotent and carries
+                 * the trough latch by design, so re-resolving is the same
+                 * act as resolving late; the 'w' republish is the same one
+                 * the arrival branch above has always done. A change that
+                 * parses to nothing leaves the resolved state standing (and
+                 * the recorded mtim unchanged, so a later good write still
+                 * re-resolves). */
+                struct stat st;
+                if (stat(binds_list_path, &st) == 0 &&
+                    (st.st_mtim.tv_sec != binds_list_mtim.tv_sec ||
+                     st.st_mtim.tv_nsec != binds_list_mtim.tv_nsec) &&
+                    binds_resolve() == 1) {
+                    binds_export();
+                    sw_src_tag = 'w';
+                    sw_publish();
+                    sw_src_tag = 'k';
+                    fprintf(stderr, "[padglhost] switch list CHANGED on "
+                            "disk; binds re-resolved on the new table\n");
+                }
             }
         }
     }

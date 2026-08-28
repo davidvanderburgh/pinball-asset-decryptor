@@ -639,6 +639,20 @@ HELP_CONTENT = {
          "project's card_files folder under the same on-card path, so it is "
          "one right-click Replace on the Partitions tab. If that file has "
          "moved since, Import can only name it for you to redo."),
+        ("Port + build (one click)",
+         "\"Port + build onto card image(s)...\" runs the whole chain for "
+         "you: pick one or more STOCK card images — the new firmware "
+         "version, the other model of the same title (Pro to Premium/LE or "
+         "back), or several at once — and for each one the app extracts the "
+         "card, transfers this project's mods onto it, and builds its "
+         "modded image, unattended, one after another. Each card's extract "
+         "folder is created next to the built images and reused on the next "
+         "port, so re-shipping after a small change skips straight to the "
+         "transfer and build (which the Write's own caches make fast). "
+         "Audio slots whose index now holds a different sound are skipped "
+         "automatically (the safe choice); everything skipped or dropped is "
+         "named in the log, per target, exactly like the step-by-step "
+         "transfer below."),
         ("Transfer mods",
          "\"Transfer mods from another extract\" (where available) carries "
          "your Replace edits from an older firmware's extract onto a new "
@@ -1181,6 +1195,17 @@ HELP_CONTENT = {
          "(videos, images, scenes, music banks), the sound counts, "
          "adjustment defaults and the high-score board. Copy Report puts "
          "the whole diff on the clipboard as plain text."),
+        ("How much of each list you see",
+         "Every change list in the report is complete — a version that "
+         "renumbers four thousand sounds produces four thousand rows. "
+         "\"Rows per list\" (12 / 25 / 50 / 100 / All, next to Copy Report) "
+         "sets how many of each you see at once; the rest fold into a "
+         "single \"… and N more\" line. DOUBLE-CLICK that line to list the "
+         "rest of THAT group and nothing else, with your place on the "
+         "screen kept. Changing the setting only re-draws the report "
+         "already in memory — the cards are never read again — and it "
+         "is remembered the next time you open the app. Copy Report "
+         "ignores it entirely and writes every row."),
         ("Open a file the report lists",
          "DOUBLE-CLICK any file row in the report to look at the file "
          "itself — it is pulled off the card it belongs to (image A for a "
@@ -1208,11 +1233,35 @@ HELP_CONTENT = {
          "with its size and a digest, so \"modified\" means Stern's own "
          "stored digest changed — comparing two multi-GB cards takes "
          "seconds, not a full read. A scene counts as modified when any "
-         "file in its folder changed. Sounds are packed inside image.bin "
-         "and can't be listed one by one here: the report shows the sound "
-         "and fragment counts and whether the audio container changed at "
-         "all — for a sound-by-sound diff, extract both cards and compare "
-         "the WAVs (the length-prefix naming option helps line them up)."),
+         "file in its folder changed. Sounds are the exception — see "
+         "\"Sounds\" below."),
+        ("Sounds",
+         "The sounds are packed inside one container file (image.bin) whose "
+         "per-sound layout only exists once a card has been extracted, so "
+         "from the cards alone the report can show the container's sound "
+         "and fragment counts and its size, and nothing more. It "
+         "deliberately does NOT judge the sounds by that container's "
+         "digest: Stern repacks and re-keys image.bin on every build, so "
+         "two releases carrying identical sounds still have completely "
+         "different container bytes.\n\n"
+         "For the real answer, press Extract Both and then Compare again. "
+         "Once both cards have been extracted the Sounds section lists the "
+         "sounds that changed, moved to a new slot, were added or were "
+         "removed — matched by content first, so one inserted sound doesn't "
+         "read as a thousand changed ones. Double-click a listed sound to "
+         "play it."
+         "\n\n"
+         "The match is on the AUDIO, not on the raw file. The first frame "
+         "a Spike 2 sound decodes to is read out of whatever image.bin "
+         "packs in front of it, so a version that repacks its audio "
+         "changes that one frame on every sound at once and nothing "
+         "after it. The report steps over that frame and prints a "
+         "\"Codec lead-in\" row saying how many pairs needed it, rather "
+         "than calling an untouched catalog rewritten."
+         "\n\n"
+         "The extracts are found by the source card each one "
+         "records, so it does not matter which naming options they were "
+         "made with or in what order."),
         ("Adjustments and high scores",
          "Both game firmwares are decoded with the same parsers the "
          "Defaults tab uses, then diffed: settings added or removed, "

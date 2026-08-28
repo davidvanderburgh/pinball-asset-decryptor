@@ -166,3 +166,83 @@ def test_assignment_without_matching_slot_not_flagged():
     # A stale assignment whose rel isn't in the current slots isn't "live".
     w = _make_window(_DIR_A, {"snd/gone.wav": "rep.wav"}, {})
     assert w.replacement_folder_mismatches(_DIR_B) == []
+
+
+# --- the warning's own text (PAD-89: a user could not act on this dialog) ---
+
+def _msg(assets_dir=_DIR_B, mismatches=None, recorded=None, action="build"):
+    return appmod.replacement_mismatch_message(
+        assets_dir,
+        mismatches if mismatches is not None else [("video", 527, _DIR_A)],
+        recorded or {}, action=action)
+
+
+def test_message_names_the_folder_being_built():
+    # The old dialog named ONLY the folder the assignments belong to, so the
+    # two paths could not be compared -- which is the whole point of it.
+    body = _msg()
+    assert _DIR_B in body
+    assert _DIR_A in body
+
+
+def test_message_points_at_the_field_that_exists():
+    # "point the assets folder at the path above" named no real control: every
+    # tab's row is a read-only mirror of the Extract tab's Project Folder.
+    body = _msg()
+    assert '"Project Folder" on the Extract tab' in body
+    assert "assets folder" not in body
+
+
+def test_recorded_replacements_are_not_called_missing():
+    # The build falls back to the built folder's own sidecar, so claiming an
+    # image "WITHOUT those changes" is false whenever that folder has some.
+    body = _msg(recorded={"video": 512})
+    assert "WITHOUT" not in body
+    assert "512 video" in body
+    assert "the build applies those" in body
+
+
+def test_no_recorded_replacements_still_warns_plainly():
+    body = _msg(recorded={})
+    assert "produces an image WITHOUT those changes" in body
+
+
+def test_recorded_count_for_another_kind_does_not_soften_the_warning():
+    # Only the kinds that actually mismatch count: audio recorded in the
+    # target says nothing about the dropped video assignments.
+    body = _msg(mismatches=[("video", 5, _DIR_A)], recorded={"audio": 3})
+    assert "produces an image WITHOUT those changes" in body
+
+
+def test_export_wording():
+    body = _msg(action="export", recorded={"video": 512})
+    assert "the export includes those" in body
+    assert "are not included" in body
+    assert body.endswith("Export anyway?")
+
+
+def test_export_wording_without_recorded():
+    body = _msg(action="export")
+    assert "produces a mod pack WITHOUT those changes" in body
+
+
+def test_two_mismatched_folders_read_as_plural():
+    body = _msg(mismatches=[("audio", 3, _DIR_A), ("video", 5, _DIR_B)])
+    assert "one of those folders" in body
+
+
+def test_recorded_replacement_counts_reads_the_sidecar(tmp_path):
+    from pinball_decryptor.core import staged_changes
+    staged_changes.save(str(tmp_path), {
+        "video": {"v/1.mov": "a.mov", "v/2.mov": "b.mov", "v/3.mov": ""},
+        "audio": {"s/1.wav": "x.wav"},
+        "image": {},
+    })
+    counts = appmod.recorded_replacement_counts(
+        str(tmp_path), ["video", "audio", "image"])
+    # The empty value isn't a replacement, and a kind with none is left out.
+    assert counts == {"video": 2, "audio": 1}
+
+
+def test_recorded_replacement_counts_without_a_sidecar(tmp_path):
+    assert appmod.recorded_replacement_counts(str(tmp_path), ["video"]) == {}

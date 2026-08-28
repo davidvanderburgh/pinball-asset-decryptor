@@ -352,6 +352,19 @@ def main():
                                       "title's own node directory, which "
                                       "guards the switch-list fallback "
                                       "against light-only boards (item 51)")
+    ap.add_argument("--nodedir-fresh", default="0",
+                    help="1 when --nodedir was derived THIS run from the "
+                         "title's own hexdir (watch.sh knows). An optional "
+                         "node4 whose identity row is in a FRESH table is "
+                         "ANSWERED rather than silenced (item 82: batman's "
+                         "swelf-generation game never stops asking a silent "
+                         "board - the red LOCATING NODE BOARDS / NODE NOT "
+                         "FOUND screen - and its node4 hexes parse, so the "
+                         "shim can answer honestly). A stale table proves "
+                         "nothing: stranger_things keeps a previous run's "
+                         "table because its games dir is a bare ELF symlink, "
+                         "and ITS node4 image is encrypted - the case the "
+                         "silence exists for.")
     ap.add_argument("--silent", action="store_true",
                     help="print only the PAD_NB_SILENT value (may be empty)")
     ap.add_argument("--silent-ff", action="store_true",
@@ -376,9 +389,18 @@ def main():
             print("no device table: %s" % e, file=sys.stderr)
 
     sw = switch_nodes(a.game, a.switches)
-    nodes, why = silent_nodes(counts, sw, dir_nodes(a.nodedir))
+    dnodes = dir_nodes(a.nodedir)
+    nodes, why = silent_nodes(counts, sw, dnodes)
     opt4 = optional_node4_nodes(a.elf)
-    n4 = sorted(opt4 - set(nodes))
+    # item 82: an optional node4 the rig can ANSWER is not silenced. The
+    # evidence is a FRESH nodedir row - derived this run from this title's
+    # own hexes, so the shim's identity claim will match what the game
+    # grades against. batman proved the cost of silencing an answerable
+    # one (the game re-asks a silent board forever, red LOCATING screen);
+    # stranger_things proves the silence is still needed when the row is
+    # stale or absent (encrypted node4 image, no fresh derivation).
+    answerable = (opt4 & dnodes) if a.nodedir_fresh == "1" else set()
+    n4 = sorted((opt4 - answerable) - set(nodes))
     if n4:
         nodes = sorted(set(nodes) | set(n4))
         n4txt = ("%s is an OPTIONAL node4-type board whose identity claim "
@@ -388,6 +410,12 @@ def main():
                  "passes - see nodecensus.optional_node4_nodes()"
                  % ", ".join("node %d" % n for n in n4))
         why = ("%s; and %s" % (why, n4txt)) if nodes != n4 else n4txt
+    elif answerable:
+        atxt = ("%s is optional node4 whose identity derives FRESH from "
+                "this title's own hexes, so it is answered rather than "
+                "silenced (item 82)"
+                % ", ".join("node %d" % n for n in sorted(answerable)))
+        why = ("%s; %s" % (why, atxt)) if why else atxt
     # WHICH SILENCED NODES STILL ANSWER THE ff STATUS POLL, for the shim's
     # nb_silent_ff(). Only the optional node4 boards: their refused status is
     # what cost stranger_things ~3.3 s per service pass (item 52), where a

@@ -137,19 +137,19 @@ per-title follow-up items it spawns.
 | john_wick_le | ✅ live, 106 | ✅ | ✅ | n/a | not yet | 2026-08-19 |
 | james_bond_60th_le | ✅ live, 118 | ✅ | ✅ | n/a | not yet | 2026-08-19 |
 | james_bond_le | ✅ live, 108 | ✅ bond_le_playfield.png | ✅ | n/a | not yet | 2026-08-19 |
-| deadpool_pro | ✅ live, 104 | ✅ deadpool_pro_playfield.png | ✅ | n/a | not yet | 2026-08-19 |
+| deadpool_pro | ✅ live, E2E-played, 103 | ✅ deadpool_pro_playfield.png | ✅ 41 placed | n/a | ✅ played, 2026-08-27 (David) | 2026-08-27 |
 | king_kong_le | ✅ live, 105 | ✅ Rodeo…Wireframe.png (item 57 fix) | ✅ 489/517 inside, 0 outside (item 57 fix) | n/a | not yet | 2026-08-19 |
-| dungeons_and_dragons_le | ✅ live, 104 | ❌ none shipped | ✅ 255 records | n/a | not yet | 2026-08-19 |
+| dungeons_and_dragons_le | ✅ live, E2E-played to Player 1 Select a Character, 104 | ✅ `TestMode/Rope_LE-Premium-X8-X9_TOP_rotated_edit_cropped.png` (fixed 2026-08-28 — see note below) | ✅ 229/255 on the layout | n/a | ✅ played to Player 1 — Select a Character, 2026-08-28 (David; needs the Device Enables adjustment noted below) | 2026-08-28 |
 | venom_le | ✅ live, 107 | ❌ none shipped | not re-measured | n/a | not yet | 2026-08-19 |
 | turtles_le | ✅ live, 96 | ❌ none shipped | not re-measured | n/a | not yet | 2026-08-19 |
 | uncanny_xmen_le | ✅ live, 110 | ❌ none shipped | not re-measured | n/a | not yet | 2026-08-19 |
-| deadpool_le | ✅ live, 104 | ❌ none shipped | not re-measured | n/a | not yet | 2026-08-19 |
+| deadpool_le | ✅ live, E2E-played, 103 | ❌ none shipped | ❌ 0 device records (title ships no device table at all, not a parser gap — measured 2026-08-27) | n/a | ✅ played, 2026-08-27 (David) | 2026-08-27 |
 | godzilla_le **V1.14.0** | ✅ live, 98 | ✅ scaled_godzilla_le_playfield.png 313x710 | ✅ 177/593 inside, 0 outside; 30/30 left-right; 48 switches, 14 coils, 115 lamps placed | n/a | not yet | 2026-08-21 |
 | godzilla_le 1.13.0 | not run | — no device test data in this build | — 0 records (measured off the card) | n/a | not yet | 2026-08-21 |
 | metallica_spike | ✅ live, 106 | ✅ metallica_playfield…png (item 57 fix) | ✅ 502/664 inside, 0 outside (item 57 fix) | n/a | not yet | 2026-08-19 |
 | aerosmith_le | ✅ static (swelf.py), live-verified | — no device table shipped | — | n/a | ✅ clean, 2026-08-24 (David) | 2026-08-19 |
 | avengers_infinity_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-24 (David; validation banner was item 62's stale NVRAM grade, fixed + relaunch-verified same day) | 2026-08-19 |
-| batman | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
+| batman | ✅ static (swelf.py), live-verified | — | — | ✅ VILLAIN VISION window — SOLVED & live-faithful: own `[villain vision]` window mirrors node 24's control stream exactly — clips PLAY by commanded id (lossless webp), block commands CYCLE clip-by-clip, brightness 0 BLANKS the screen and 255 reveals (the per-beat fade the game sends), verb 2 holds the last frame (play-once). `lcdring.py` reads the transcript live or from `padlcd.last`. **RE-verified architecture (10-agent pass) + GROUND TRUTH (video of the real machine, 2026-08-25):** ONE physical TV, bezel-printed "Villain Vision" (the old "three TVs" line was invented — deleted). The node bus is CONTROL-only (LPC1113, can't decode video); the real display is COMPOSITED by the game on a GPU "secondary display" render target (`fbGetDisplayByIndex(2)`) that batman's binary HARD-DISABLES (renderer-ctx +0xf0 = NULL, 0x1e79c8) — which is why the 4 villain gst channels die at 0 frames. **Proof from the machine:** the real attract shows game-RENDERED cards (a "Game Over" card, the BATMAN-on-green logo) that exist nowhere in the 3,069-clip store (3 independent scans) — so a bus mirror can never show those. Verified against the video and matching: ~5-7 s per item, a fully black frame between items, one full-screen motion clip. **The window shows the CARD'S OWN TV artwork** (`lcdframe.py` pulls the villain scene's wood-cased TV sprite — screen hole and all — off the card; the clip is composited into it keeping its aspect, falling back to a drawn cabinet when a title has no such texture) with a **filmstrip of the last four clips** under it, so the SEQUENCE is visible at a glance rather than one frame at a time. **Clips are NAMED**: `lcdnames.py` parses the title's scene.radium at run start into `<tables>/<game>/lcd/names.txt` (3,069/3,069 for batman, 0.15 s) and the window shows e.g. `asset 54 - once` / `S1E001 00:18:32` - which is also the first independent verification of the id-to-clip mapping (asset 2 is named `PhoneScenes...` and shows the Batphone). **THE BOARD IS AN ID→STILL LOOKUP (2026-08-26, two tripod videos of the real machine + the TV-settings "update the images" diagnostic tester-found in the service menu):** the display NEVER plays video - it holds one stored still per command id and fades (~0.3 s) between them. The attract cycle is 11 stills at ~5.3 s on a 62.7 s loop - one-for-one with the wire's 11-command rotation - and gameplay rests on the green logo card while the wire hammers asset 54, which anchors the whole mapping: 2=Game Over card, 54=logo, 720=Riddler, 591=Batmobile, 601=Gotham City sign, 1605=umbrella sign, 1736=Penguin, 2066=Penitentiary, 2359=Joker, 3004=fur-shop sign, 3026=Catwoman, 919-block=IN COLOR title card. `lcdstills.py` derives a CARD-ONLY still set - it extracts stills from the mounted card at runtime and ships NO asset (the board has its own image store, id-mapped independently of the clip store: wire 591=a frame of clip 27, wire 601=another frame of clip 27, so the set can't be derived by clip id). Five ids whose board image is a card store frame are mapped (logo scene texture + Batmobile/Gotham sign/Joker/Catwoman clip frames); the game-rendered cards and villain/sign stills exist in NO unpacked card store and are left unmapped (fall back to the clip still, never footage) until the UPDATE TV IMAGES service upload is captured - the one place the byte-exact board images and their ids both surface. The panel selects stills by id, fading only the SCREEN (the cabinet never dims), no clip playback. Event cards (BALL SAVE) are further unmapped ids; the board's byte-exact uploaded set is capturable by running the TV-settings diagnostic on this rig with the wire logged. Exact id↔clip correspondence at a given real-machine moment beyond those pins is still not claimed. The 0x90 poll is answered (present board) but its content is inert — nothing reads it (get_status is dead code) and it does NOT stop the game's own 250 ms double-command (items 82/83) | not yet | 2026-08-25 |
 | foo_fighters_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-19 |
 | guardians_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-19 |
 | iron_maiden_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-19 |
@@ -163,6 +163,37 @@ per-title follow-up items it spawns.
 | stranger_things_le | ✅ static (swelf.py, item 52) | ❌ none found | not re-measured | ✅ real (projector, item 44) | not yet | 2026-08-19 |
 | sword_of_rage_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 98 | ❌ none shipped | ❌ no device table | n/a | not yet | 2026-08-19 |
 | munsters_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 103 | ❌ none shipped | ❌ no device table | n/a | not yet | 2026-08-19 |
+| beatles | ✅ live, 92 (item 80 sweep fix: all-`?` message-table title, names now filled from the device table) | ✅ Test/beatles_playfield.png 336x710 | ✅ 50 placed (item 80 sweep: `layout_image()` join fix, was hard-coded to the literal "playfield") | not re-measured | ✅ played, 2026-08-27 (David) | 2026-08-27 |
+
+**dungeons_and_dragons_le, 2026-08-28 — Start was refused, and it was BALL
+ACCOUNTING, not switches, wiring or NVRAM corruption.** Three real code
+fixes landed on the way here and now ship for every title, not just this
+one: `gameinfo.py` now falls back to a `TOP`-named art file when a card ships
+no file with "playfield" in its name (this is why the artwork column above
+flips from ❌ to ✅ — the card was never art-less, the finder just only knew
+one naming convention); `nbobjs.py` (new) derives each title's node-board
+array base from its own ELF indexing idiom instead of a hard-coded address,
+and `coilmap.py`'s `group_node()` derives the coil-group → node map per
+title from `node_ident.txt` instead of one constant tuned for godzilla_pro
+(this DnD's TROUGH resolves to node 8 idx 1, which the old constant got
+wrong); `ballfeed.py` now answers the auto-plunger AND drains the launched
+ball home after `PAD_BALL_HOME_MS` (default 5000 ms) unless a keyboard event
+claims it — titles that auto-plunge (DnD is the first one seen) were
+declaring **Device Malfunction: Auto Plunger** and emptying their own trough
+under the old always-refuse behavior.
+**The actual Start-refusal root cause was DATA, not code, and does not ship
+in this repo**: DnD LE's factory ball count is **8** — 6 in the trough plus
+**2 captive in the dragon** — and the game disarms its own Start/Tournament
+buttons while it believes balls are missing. Our rig models 6. **A fresh or
+factory-reset DnD card needs its own operator adjustment, every time**,
+before Start will do anything:
+`Adjustments → Machine Settings → Device Enables` — set **Disable Dragon =
+Yes**, **Disable Diverter = Yes**, **Number of Balls Installed = 6** (the
+page's own help text says the same). This is exactly the setting a real
+operator makes on a dragon-less machine; the emulator does not (yet) seed it
+automatically, so the artwork/positions ✅ above is unconditional but the
+"live, E2E-played" claim depends on that adjustment having been made on the
+card's saved NVRAM.
 
 **CORRECTION, same session, right after this table's first version shipped:**
 the first pass checked the CONSOLE pane for the live switch dump

@@ -4894,6 +4894,60 @@ These have each been violated at least once and each cost a run or a window:
       S1 because play works. D4: mechanism unknown, needs instrumented
       runs, and the second-screen half is not yet even characterised.
 
+- [ ] **86. james_bond_60th_le's ODDJOB DISC cannot be spun: it is an absolute
+      ANGLE SENSOR the shim answers with zeros, not a switch anyone can
+      press.** `S2 D3` *(Reported by David 2026-08-28 during the item 80 sweep:
+      "You have to hit the odd job rotating spinner mechanism a lot of times,
+      and I don't see the optos on the playfield or the switch matrix for me to
+      interact with." He is right, and it is not a missing position - there is
+      nothing to press at all.)*
+      **WHAT THE MECHANISM IS**, from the game's own binary:
+      `SPIN TO UPDATE ANGLE`, `ANGLE: %s`, `ANGLE SENSOR XYZ0` / `XYZ1` / `FS` /
+      `ENABLE`, `ANGLE SENSOR 0`..`9`, plus the adjustments **DISC SPIN
+      DIFFICULTY** ("How much does it take the disc to spin to count as a
+      step") and **DISC SENSITIVITY THRESHOLD** ("How many steps the disc will
+      hold before reporting the value to the game. Use to filter out playfield
+      vibration movements"). That is a magnet-over-die absolute rotary sensor
+      (AS5600 class): an angle word plus magnet-strength status, differentiated
+      by the game into steps. Not a spinner, not a switch closure.
+      **★ RULED OUT, and this is the pass's main result: the twelve `Angle
+      Sensor` SWITCH entries are NOT the input path.** ids 98..107 (ANGLE
+      SENSOR 0..9, node 9 bits 32..41) plus 108 `Weak` and 109 `Threshold` are
+      the only playfield-board switches with no artwork position, so they
+      looked like the way in. `tools/spike2_emu/disc.py` (written this pass)
+      drives them as a 10-bit word and the plumbing is PROVEN - writing 256
+      lands on id 106 and `mrg` shows the game is handed it. The game does not
+      care:
+        - a 6 s spin changes lamp activity not at all (gen +426 spinning vs
+          +438 idle, the same single pop-flash pulse either way);
+        - and the title's own **Spinning Disc Test** - Device Tests, 7th entry -
+          reads `Raw Position: 0`, `Angle: 0.00`, `Rpm: 0.00`, `Field Strength:
+          0(Normal)` with the angle word held at 300. Every field stays zero.
+      So those switch rows are STATUS MIRRORS the game publishes, which is what
+      their `0x0024` flag said all along - the same flag DnD's `... Virtual`
+      rows and the QR scanner status rows carry.
+      **WHERE IT ACTUALLY COMES FROM, and the next step.** The angle must
+      arrive over the node bus, and `hwshim.c` has NO angle handling anywhere -
+      unknown node commands fall to `nb_reply` (hwshim.c:3226), *"0 = stay
+      silent, 1 = answer with zeros"*. Zeros is exactly what the test screen
+      shows. So: **one `PAD_NB_TRACE=1` run, find the node-9 command that is
+      not the 0x11 switch scan or a lamp write, and answer it with a synthetic
+      angle** - after which disc.py's angle walk drives the real path and the
+      game counts steps.
+      **Acceptance:** with the disc driven, `Spinning Disc Test` shows Raw
+      Position and Angle tracking what was asked for and Rpm non-zero; then, in
+      a game, `%d OddJob Hits` counts up and ODDJOB DISC modes are completable.
+      **Useful by-products of this pass, worth keeping:**
+        - `swpoke.py --tap 25` with the DEFAULT 1 transfer does NOT open the
+          service menu; **40 transfers does**. The coin door must be open
+          first (`padsw` id 33 to 0); closing it again restores 48V.
+        - Menu path: Service Select x2 -> Device Tests (down 2) -> Spinning
+          Disc Test (down 6). That screen is the oracle for this whole item.
+      — S2: Bond plays, but every disc-counting mode is uncompletable, and the
+      disc is a headline toy. D3: the instrument (the test screen) exists and
+      is validated, the read path is narrowed to one bus command, and one
+      traced run should name it.
+
 - [x] **85. batman's playfield LEDs: only 25 channels on two boards, and
       every one of them dark.** `S2 D3` DONE 2026-08-26, `item/85`,
       awaiting `/finish`. **LIVE-VERIFIED on batman, regression-verified on

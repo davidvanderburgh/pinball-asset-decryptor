@@ -84,6 +84,96 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **84. Capture the batman VILLAIN VISION board image set + id map from the
+      `UPDATE TV IMAGES` service upload — the byte-exact, card-only source.**
+      `S2 D5` *(Spawned from item 83 on 2026-08-26 — David's architecture
+      call: the board has its own image store, written from the card by the
+      service menu; the wire sends only an id. Item 83 ships a CARD-ONLY
+      approximation, 5 stills mapped from card store frames; this item is the
+      complete, exact set + every id binding.)*
+      **WHY THE EASY PATHS ARE RULED OUT (static RE done this pass, no run):**
+      the board images for the 2 game-rendered cards + 5 signs/portraits are
+      in NO card store that unpacks to disk — exhaustive: all 245,828 frames
+      of all 3,069 `137.asset` clips, all 752 lcd scene textures >=100x60,
+      both `2.asset` stores, the app's whole extraction (`~/Desktop/bm`,
+      7,795 pngs), and `image.bin`'s only 4 decodable embedded JPEGs. The one
+      image blob on the card is `image.bin` (2 GB, the app's master
+      container); the board set is a packed/rendered section of it the normal
+      extractor skips. The service routine can't be located statically: the
+      menu is INDEX-driven — its strings (`UPDATE TV IMAGES` rodata 0x55cb0c,
+      `NO UPDATE AVAILABLE`, `UPDATE STATUS...`, `ELAPSED TIME`, `UPDATE
+      COMPLETE/FAILED`, all confirmed present) are referenced through
+      localization pointer-tables (file 0x6f74a0+), NOT by literal-pool or
+      MOVW/MOVT from `.text` (all scanned, zero hits) and NOT by a stored
+      callback pointer (0x6ff580 is referenced nowhere). No existing capture
+      has the flow — it only appears when the service menu is driven.
+      **THE KEY INSIGHT that makes it feasible: WE EMULATE THE BOARD.**
+      "NO UPDATE AVAILABLE" is a version/checksum gate — the emulated node 24
+      reports its image version, the game compares to `image.bin`'s, they
+      match, upload skipped. Since nodebus.py/hwshim IS node 24, make it
+      report a STALE/zero image version and the game will perform the upload.
+      **THE PLAN (turnkey, needs the rig free + service-menu nav):**
+      (1) find which node-24 query/reply carries the board image version —
+      it reveals itself in the live exchange around the menu (the non-f2
+      node-24 cmds are 11/f0/f1/f9/fc/fe = LCD sub-control, none is obviously
+      it, so watch the service-menu handshake); (2) hook nodebus.py to answer
+      that query stale; (3) drive the service menu to Diagnostics > UPDATE TV
+      IMAGES > PRESS ENTER TO BEGIN via service-button switch inputs
+      (`SERVICE MENU`/`EXIT SERVICE MENU`/`FG_DIAGNOSTICS_DISPLAY` strings
+      confirm the path); (4) log ALL channels during the upload — node bus
+      AND SPI (the ELF has real SpiVideoStreamDecoder classes and
+      `/dev/spidev`; the images may stream over SPI, not the 200-byte node
+      bus); (5) the payload IS the board set + id bindings, byte-exact, from
+      the card. Then lcdstills maps every id from that capture and the panel
+      shows the real board set with zero footage and nothing distributed.
+      **Acceptance:** every attract + game board still on David's videos is
+      reproduced from a card-derived image the rig extracted itself (no
+      footage, no committed asset), each keyed by its wire id.
+      — S2: the display already works (item 83, card-only approximation); this
+      upgrades approximate/absent stills to exact and completes the map, but
+      nobody loses a run without it. D5: live capture, service-menu
+      navigation, an undecoded update protocol possibly spanning node bus +
+      SPI, and a board-version hook across nodebus/shim — budget more than one
+      pass.
+
+      **PROGRESS (2026-08-26, live capture on David's guidance — he drove
+      the service menu to trigger the update while I logged; rig now free,
+      card unmounted, lock released):**
+      **(1) The routine was reached and triggered.** Service menu (coin
+      door open, Service Select/Plus/Minus/Back = padsw ids 28/29/30/31)
+      -> Diagnostics -> Game-Specific Tests -> UPDATE TV IMAGES. It reports
+      "NO UPDATE AVAILABLE" and — measured — sends NOTHING to node 24 (no
+      [nb] TX, no image.bin write). The gate is PURELY LOCAL: the game
+      renders/checks the card's scenes vs a stored version and decides no
+      update, without ever querying the board. So forcing it needs the
+      local "last-uploaded" version marker cleared, not a board-version
+      hook (the plan above assumed a board query; corrected).
+      **(2) The trigger loads the demand_loaded scene trees bc0792d8 (9
+      scenes) and f1b332a3 (11), ALL 1360x768 (backbox res, NOT the
+      villain TV's 240x180).** I rendered them CARD-ONLY with the app's
+      own compositor (scene_render.render_scene + fontrender.load_fonts
+      off David's extraction manifests — 75 fonts, 45 layouts, 20 scenes
+      rendered clean). They are the SERVICE/SYSTEM UI cards: "VERIFYING
+      IMAGE", "Player 1 Enter Initials", "CLOCK NOT SET", "Learn More About
+      Stern Pinball"+QR, the Stern logo — the menu's own screens, NOT the
+      villain board image set.
+      **(3) CONCLUSION — the villain board's rendered CARDS are not
+      standalone-extractable card-only.** The video clips (137.asset, the
+      MAJORITY of villain content) I already have and show. The logo I have
+      (scene texture). But the rendered cards as they appear ON THE 240x180
+      VILLAIN TV (Game Over on green, IN COLOR) are produced by the game's
+      DISABLED secondary-render path (item 83's proven finding) —
+      composited at runtime, stored nowhere, and in no standalone 240x180
+      scene. So the only card-only routes to those two cards are: (a) force
+      the local update gate so the game renders + uploads and capture the
+      wire, or (b) enable the disabled second render target (item 83 ruled
+      out of scope). Neither is a quick win.
+      **NET:** the panel's current card-only set (logo + 4 clip-frame
+      stills + video-clip fallbacks, zero footage) is the honest best
+      available without (a) or (b). The render pipeline is proven and
+      reusable (scene_render works off an extraction) if a 240x180 villain
+      scene is ever located. Scenes preserved at /home/david/tvscenes.
+
 - [x] **61. godzilla_le draws the switch list, and it has a complete playfield
       layout the whole time.** `S2 D1` DONE 2026-08-21.
       *(Filed and fixed the same session, from David looking at a live
@@ -5168,13 +5258,185 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
       and identified; node 4 polled forever while we silence it; board 24
       RUNTIME INFO from no table we derive; and the carousel's overlay
-      screen never appears.** `S2 D4`
+      screen never appears.** `S3 D2` 90% ← WORKING ON *(S2 → S3 and D4 →
+      D2 at pass end, 2026-08-24: everything that broke the BOOT is fixed
+      and regression-proven — what remains is a cosmetic menu row plus one
+      instrumented dump with a known method, and the mechanism is fully
+      established.)*
       *(Filed 2026-08-24 from David's live item-80 sweep run — glass
       screenshots on record: red `LOCATING NODE BOARDS / NODE NOT FOUND`
       over the batman logo, then Tech Alerts `CHECK NODE BOARD 2 : NOT
       REGISTERED` (red) + `CHECK NODE BOARD 24 : RUNTIME INFO` (white),
       plus "we are not seeing the second screen that appears over the
       carousel". All evidence below is READ-ONLY off his run's own logs.)*
+      **★★★★ 2026-08-24 PASS (4-agent desk workflow + instrumented boot,
+      rig handed over by David). ESTABLISHED, each with the receipt:**
+      **(1) THE SECOND SCREEN IS NAMED BY THE ELF: node 24 = "VILLAIN
+      VISION", an lcdnode (code 16, part 520-6976-XX, "LCD 320X240" /
+      "3 LCD INSERT"), declared REQUIRED (flags 0x0) in batman's OWN
+      10-record node directory** (file 0x707268; the directory is nodes
+      0,1,2,4,8,9,10,12,13,24 — names CABINET, CABINET LIGHTS, QR
+      SCANNER, PLAYFIELD 1/2, TURNTABLE, two OPTIONAL TOPPERs, VILLAIN
+      VISION). nbdir DROPPED it (lcdnode ships only LPC1113_302 = class
+      3, absent from PART_BY_CLASS), so the shim answered its identity
+      poll with the DEFAULT pinnode claim (`[nbid] node 24 claims
+      part=0x00020023 fw=0.1.0 (default)`) — the white RUNTIME INFO
+      grade is MANUFACTURED BY OUR DEFAULT ANSWER. Board 24 and the
+      missing overlay are ONE fault. Note: even registered, the rig has
+      NO lcdnode renderer — drawing Villain Vision content is follow-on
+      work; registration + alert-clearing comes first.
+      **(2) NODE 4 IS GENUINELY OPTIONAL (flags 0x4 at 0x7071e8 — and
+      batman corroborates the bit-2 decode: its OPTIONAL-named toppers
+      12/13 carry 0x4, required boards 0x0), so the ST census rule fired
+      as designed — and it is STILL the wedge on this generation:**
+      silenced nodes short-read NOTHING, and the game re-asks forever
+      (the `[nbsilent] node=4 want=13/3/12` lines are READ LENGTHS —
+      13=fe, 3=fa, 12=0x11 — NOT the 0x0d variant walk; the item's
+      original "want=13 = 0x0d" reading is CORRECTED). Instrumented boot
+      with `PAD_NB_SILENT=62` (nothing silenced): the shim answered node
+      4's identity from the derived row (`claims part=0x00140040
+      variant=0x03 fw=1.19.0 (derived)`), ZERO nbsilent lines all run,
+      attract light show by t=35.7s, glass shot clean attract
+      (`/home/david/item82/run2_glass.png`). The durable census rule
+      (silence an optional node4 only when its hex header cannot be
+      derived — ST keeps silence, batman answers) is DESIGNED but NOT
+      yet written; boot #3 must confirm the alert state first.
+      **(3) ▼ THE f0 THEORY IS DEAD — RULED OUT BY DISASSEMBLY + 14,988
+      FRAMES, do not build an f0 handler, ever:** cmd f0 is a
+      FIRE-AND-FORGET WRITE. The game reads NO reply (zero RX with an f0
+      last-tx across two full runs; the sender `nb_exchange` 0x515f8c
+      skips its read loop at reply_len==0). The "6,824× hammer" is the
+      normal per-node service-cadence broadcast (f0 goes to EVERY node:
+      pinnodes get sub 0x11, ws2812-class 0x20/0x10; optional boards 36×
+      then give up, required boards forever). Zeros are already the
+      correct answer.
+      **(3b) THE REAL REGISTRATION MECHANISM, disassembled (batman VAs —
+      the shim's 0x59xxxx notes are godzilla's and do NOT map):**
+      registered = `board[+0x14] != 0`, per-node table at 0x6e9808
+      stride 4, gate code 0x517390-0x5173b4 — and every command ≤0xef
+      is GATED on it (the game refuses to send application commands to
+      an unregistered board; >0xef system cmds bypass). Set by the
+      fe-identity + hex-image-grading + runtime-info path. The grade
+      table (file 0x701fc0, 9 cells) decodes: 0 NO ERRORS, 1 NOT
+      RESPONDING, 2 NOT REGISTERED, 3 COLLISION, 4 NOT INITIALIZED,
+      5 VERSION MISMATCH, 6 HEX IMAGE VERSION NOT FOUND, 7 CHECKSUM,
+      8 RUNTIME INFO *(corrects the earlier "RUNTIME INFO = status 4"
+      desk note)*. Node 2's fe identity is answered CORRECTLY and it
+      still never registers — and the whole bus sits in fe re-probe
+      bursts (~301/node per 8 min) while any required board is
+      unregistered, which is also why attract takes ~72 s.
+      **▼ The runtime-info-contents theory is ALSO dead: PAD_NB_RT=1
+      changed nothing** (fe re-probe bursts identical, flags unchanged).
+      **★★★ THE COMPLETE REGISTRATION MECHANISM, disassembled (second
+      RE pass) — TWO separate concepts, do not conflate:**
+      **(A) the app-command GATE `board[+0x14]`** — sole writer
+      0x51b65c in nb_register_identity 0x51b558: the fe reply's PART ID
+      bytes [4..7] linear-scanned against the 27-entry descriptor
+      table; a match stores that descriptor (its static [+0x14]≠0 =
+      gate OPEN for all ≤0xef app commands). **Node 2 PASSES this** —
+      our fe claim 0x2c40102b matches — so the game DOES send it LED
+      frames. **THEREFORE: NEVER nodecensus-silence node 2 on batman**
+      — silence kills the cabinet-lights traffic that is already
+      flowing; the star_wars silence was right because ITS node 2 is
+      absent. **(B) the Tech-Alerts GRADE `node_record[+0x18]`** —
+      written only by the grading state machine 0x261548-0x261750:
+      registry image missing → 4 RUNTIME INFO (board 24's old white
+      row, i.e. OUR default-identity claim caused it); version/variant
+      MISMATCH → 7 CHECKSUM + the update walk (board 24 under the
+      variant 0x01 guess); version AND variant MATCH → **grade 2 "NOT
+      REGISTERED" = known, correctly-versioned board that has not
+      completed RUNTIME REGISTRATION**. Only grades {1,2} alert red.
+      **Node 2's variant claim 0x05 MATCHES batman's decrypted image
+      (hexreg, live)** — so node 2 sits in matched-but-runtime-
+      unregistered, and the ONE remaining unknown is what moves grade
+      2 → 0 (the runtime-registration completion step). Third RE pass
+      is tracing the grade-0 writer now.
+      **Why only node 2 shows on the boot screen: directory flags bit
+      3 = screen-inclusion** (node 2 is batman's only bit-3 board; the
+      optional toppers grade invisibly). No install adjustment exists —
+      both writers are driven purely by bus evidence.
+      **★★ VERIFIED SO FAR (boots 6-7 + two regressions, all with the
+      fixes live and the census deciding):** batman boot #7 with
+      AUTOATTRACT OFF reaches full attract at t=32 with NOBODY pressing
+      anything — no LOCATING screen, no Tech Alerts parking, no
+      failed-update dialog (glass shots run6_t40/run7_t32); fe
+      re-probe bursts 301→6 per node (the bus settles); attract 72s →
+      20s. The census line reads "silencing nothing on batman ... node
+      4 ... answered rather than silenced (item 82)". REGRESSIONS:
+      godzilla_pro — 8 boards derived, node 2 still silenced by the
+      strong-evidence branch, roster unchanged, light show at 9.7s;
+      stranger_things_le — derivation fails (bare symlink) → not fresh
+      → node 4 STAYS silenced with the original reason, ff-answering
+      intact. Both green.
+      **★★★ THE FINAL RE ANSWER (third pass), AND IT IS AN EXPENSIVE
+      NEGATIVE — do not hunt a bus-side fix for the alert rows again:
+      THERE IS NO GRADE-0 WRITER IN THE BINARY.** A whole-RX-segment
+      scan finds zero stores of 0 to `node_record[+0x18]`; grade 0 is
+      only the constructor default. Both graders (0x2614f8 via fe,
+      0x261754 via cmd 0x03) can only assign nonzero codes, and a
+      STABLE, VERSION-AND-VARIANT-MATCHED present board is assigned
+      grade 2 terminally. **No reply on any command clears it** — fe,
+      f9, fc, ff, gated app commands all traced; PAD_NB_RT confirmed
+      inert live. The row is suppressed only by a game-side
+      CONFIG-DERIVED registration field (godzilla's `board[+144]`
+      analogue — nodecensus's own header said this: "this title's own
+      config is what decides the board's registered bit; no bus reply
+      can change that"). **Corrected screen-inclusion rule:** a row
+      shows when graded-alerting AND `(flags & 0x0c) != 0x04` — node 2
+      (0x0c) and board 24 (0x00) show, nodes 4/12/13 (0x04) never do;
+      bit 3 means "force-check even though optional", reconciling
+      David's photo showing board 24. **Caveat: board 24, now
+      image-matched, lands in the same grade-2 state as node 2** — the
+      Tech Alerts page (unvisited since the fixes; the boot no longer
+      parks there) likely still lists both rows, as cosmetic,
+      non-blocking entries. The game already sends node 2 its
+      LED-layer traffic (gate open, 0x44/46/48/14/72 on the wire), so
+      the rows cost nothing functional.
+      **WHAT REMAINS (one measurement + one decision), the Resume:**
+      batman's board-object array has a DIFFERENT layout from
+      godzilla's (status +0x18, flags +0x04, fw +0x1c, desc +0x20 —
+      the [nbobj] self-labelling scan fails on it: "no self-labelling
+      board array after 3 scans"). Teach the scanner batman's shape,
+      dump node 2's config/registration field live, and decide:
+      config-EMPTY → the row is a fact of this build under emulation,
+      document it in README and close; config-populated-but-fill-
+      stalled → find the boot step that copies config→board and why it
+      stalls. EITHER WAY the boot/play experience is already clean.
+      **The VILLAIN VISION RENDERER is split out as item 83** — a new
+      capability (decode the LCD data path, draw the 320x240 panel),
+      not a fault fix; this item's screen half closes at "the board
+      registers and the game engages it".
+      **(4) The video-latency theory is DEAD: the 2.3-5.7 s first-frame
+      delays are the attract's double-buffered clip schedule (each delay
+      = the alternate channel's clip duration), healthy over 35 min.**
+      And the game NEVER asks for a GL display 2 (0 PADGL_TARGET; one
+      fbGetDisplayByIndex(0) + one surface all run) — the overlay is
+      node-bus hardware, not a second GL window, so item 44's family is
+      ruled out.
+      **(5) Item 72's batman half ANSWERED (true negative): funnel 2441
+      seeds → 6 garbage → 0 kept; the swelf dev array (308 records, 178
+      kind==4 LEDs) carries NO XY anywhere; no separate position struct
+      exists (ENT +38/+40 fails the left/right oracle). batman is
+      genuinely position-less on 1.13.0. Sam's dark inserts = CABINET
+      LIGHTS (node 2) unregistered + attract behavior, NOT a parser gap.**
+      **FIXES APPLIED (this branch, pending boot #3 verification):**
+      nbdir.py `PART_BY_CLASS[3]=0x00030030` — MEASURED off batman's own
+      28-byte MCU descriptor table (record at file 0x6736c4:
+      `part=0x00030030 class=3 name="LPC1113FBD48/303"`), plus
+      `CLASS_PREF["lcdnode"]=(3,)` + `VARIANT_PRIOR["lcdnode"]=0x02` (measured live, hexreg, mid-update-walk); hwshim.c `nb_hexreg_class` knows
+      class 3; hwshim.c `nb_nodes_init` skips swelf's node-0xff poison
+      rows (the roster's bogus 255). Desk-verified: nbdir on batman's
+      ELF+hexes now derives 9 nodes including
+      `node=24 type=lcdnode class=3 part=0x00030030 fw=1.19.0
+      (variant_guess)`.
+      **Preserved evidence:** /home/david/item82/ — David's full run
+      logs, game.elf, all 15 card hexes, run2 glass shot.
+      **Resume:** boot #3 with the fixes built (fresh node_ident gets 9
+      rows automatically): confirm roster carries 24 and not 255, node
+      24 claims the lcdnode identity, zero nbsilent; then the alert
+      state on the glass (service menu or David's eyes); then the f0
+      answer once the RE lands; then the census rule for node 4; then
+      godzilla_pro + stranger_things regression boots.
       **Established, and it rules item 70's mechanism OUT for batman:** the
       discovery schedule INCLUDES node 2 — `[nbsched] playfield nodes: 255
       1 8 9 10 2 12 13 (from switch table + node directory)` — and
@@ -5222,6 +5484,857 @@ These have each been violated at least once and each cost a run or a window:
       alert stands on every boot and a real board's devices are dead; not
       S1 because play works. D4: mechanism unknown, needs instrumented
       runs, and the second-screen half is not yet even characterised.
+      *(Both gradings superseded at pass end — see the title line.)*
+
+- [x] **83. VILLAIN VISION renderer: draw batman's 320x240 playfield LCD
+      (node 24, lcdnode) the way the rig draws second displays.** `S3 D4`
+      DONE 2026-08-24, `item/83` (the branch carries item/82's fixes — cut
+      from it), awaiting `/finish`.
+      **CLOSED same day, live-verified with a screenshot: the playfield
+      window's new VILLAIN VISION panel draws all three LCD inserts with
+      the real '66 episode art the game names, updating live off the
+      wire** (`C:/tmp/item83_panel.png` — Robin in the Batmobile + two
+      more; padlcd carried 21 decoded frames in attract, then the
+      game-start trio 54/928/106 across the three displays; the lazy art
+      cache extracted 8 PNGs by itself during one boot).
+      **UPDATE same day, David's consistency ask ("make it a separate
+      emulator window like the other separate-display games"): the panel
+      is now its OWN WINDOW, not a strip in the playfield view.** LcdPanel
+      builds a Toplevel titled `batman [villain vision] - Stern Spike 2
+      emulator` — inside item 44's title family so screenrec's backbox
+      default skips it (record it on purpose with
+      PAD_REC_TITLE="[villain vision]"). Close box HIDES it (item 44's
+      contract), ids keep tracking behind it. main() owns the panel now,
+      so BOTH view shapes get it — the "Schematic view only" residual
+      below is RESOLVED — and the cells show the art at native 240x180
+      (the strip halved it). Position persistence is NATIVE:
+      "villain_pos" beside "playfield_pos" in the state file, restored in
+      _build, recorded by save_state and at close. (The first cut of this
+      UPDATE credited padwinpos's "game2" row with persistence — FALSE,
+      caught by the adversarial review: padwinpos is a passive diagnostic
+      recorder, nothing restores from ~/.pad_windows_win.json.)
+      **UPDATE 2 same day, David: "they should be animated (video like)
+      scenes, right?" — THE TVS PLAY THE CLIPS NOW.** lcdart.py gained a
+      second stage: a looping 10 fps GIF excerpt (≤15 s, palette pass,
+      atomic .tmp+rename so the panel can never read a half-written clip),
+      still-first so the PNG paints while the GIF encodes. The panel
+      advances one frame per 10 Hz poll (encode rate = display rate, no
+      timer math), decodes frames LAZILY one per tick (first loop is the
+      decode pass, later loops are cache hits), drops a clip's frames on id
+      change (memory ≤3 active clips), and asks lcdart for ids whose cache
+      predates the GIF stage (the old png-only check left those frozen
+      forever). **The trap found on the way: ffmpeg's GIF encoder
+      delta-encodes by default and Tk's `gif -index N` decodes frames
+      STANDALONE, never compositing — the first extraction played as
+      speckle over black. `-gifflags -offsetting-transdiff` (full frames)
+      fixed it; the lcdart comment carries the why.** Verified against the
+      real card store: 54/928/106 re-extracted, 20 polls = 20
+      pixel-distinct captures, short clip 54 wrapped its loop
+      (C:/tmp/item83_motion.gif). The "stills not video" residual below is
+      RESOLVED. **Why 3 displays, David's question, answered from the ELF:
+      the game's own device vocabulary names the fixture "3 LCD INSERT"
+      (with "LCD 320X240", "Node board LCD display number out of range") —
+      one lcdnode, three screens multiplexed by display number, and the
+      live game-start frame set all three ids at once (54/928/106).**
+      **UPDATE 3 same day: adversarial review (15-agent workflow, mutation
+      testing) confirmed 9 findings on the window conversion; all fixed.**
+      The real ones: position persistence was a FALSE CLAIM (see UPDATE 1's
+      correction — now implemented natively); the villain title matched
+      padwinpos's AND zorder's "game2" needles, so a stranded villain
+      window could steal the [display N] slot in diagnostics and an
+      item-22 buried-window verdict would blame padglhost raise machinery
+      that cannot see a Tk window (both tools now key "[villain vision]"
+      first — padwinpos "villain", zorder "VILLAIN" in EMU_ROLES); start()
+      rescheduled AFTER poll with no guard, so one uncaught exception
+      permanently killed the panel (now try/finally). Test-honesty holes
+      the review mutation-proved (deleting _asked, the WM_DELETE
+      registration, the drv-None guard, or the native-size draw each left
+      the suite green): all pinned — 12 real-Tk tests now, including a
+      close driven through the registered handler, a driverless first-boot
+      deferred-ask test, a position round-trip, a poll-chain-survives
+      test, and a role-disambiguation test.
+      **UPDATE 4 same day: the motion commit's own adversarial review
+      (16 agents) confirmed 12 findings; all fixed — the decode was
+      REDESIGNED, not patched.** The mechanism findings: (1) drv-None +
+      cached-still froze the gif upgrade forever (the `not have[k]` retry
+      gate stopped once a still painted — deterministic on a mid-run
+      window relaunch; the retry now also fires while anim is None);
+      (2+3) per-frame `gif -index N` decode re-parsed the file from byte
+      0 over \\wsl.localhost on the UI thread — MEASURED at up to ~139 ms
+      per frame at a 150-frame tail, three cells saturating the tick
+      budget for ~30 s (the documented UI-freeze class) — and TclError
+      conflated end-of-clip with a 9P hiccup, permanently truncating
+      clips. Now: the clip's BYTES are read ONCE (OSError = wire =
+      retried; decode failure = the file = honest dead-latch), PIL's
+      incremental seek decodes one frame per tick flat (n_frames exact,
+      no EOF guessing; Tk in-memory fallback without PIL), the wrap draws
+      same-tick (hitch gone), and a hidden window skips decode entirely;
+      (4) png write made atomic like the gif (a torn still passed every
+      isfile check forever) and a corrupt still no longer vetoes a good
+      clip (_animate ungated from have); (5) lcdart diagnostics went into
+      run_script's discarded pipe and its "panel retries" docstring was
+      false — failures now land in lcd/lcdart.log, gif-failure exits 2
+      not 0, and the panel re-asks with a 60 s backoff (dict, not a
+      once-per-session set), making the no-store heal real. Test holes
+      (wrap assertion vacuous under freeze-on-last-frame, _asked/ask
+      guards unpinned, persistent-canvas-item leak unasserted, lcdart
+      entirely uncovered incl. the -gifflags trap): 15 panel tests + a
+      new 6-test lcdart suite, whose real-ffmpeg tier standalone-decodes
+      a late frame and fails if the transdiff guard is ever "tidied".
+      Live re-verified: 20 polls = 20 distinct captures off the real
+      card clips, PIL fast path, no hitch tick.
+      **UPDATE 5 same day, David on a LIVE run: "the gif color looks off
+      somehow (like it's not rendering the correct bit depth)" — he was
+      reading it exactly right, and the clips are LOSSLESS WEBP now.** GIF
+      is an 8-bit PALETTE format; 256 colours plus error-diffusion
+      dithering scattered bright confetti over dark 1966 footage. Measured
+      against true-colour reference frames of the very clip he was looking
+      at (id 3004, 30 frames): current GIF 981 KB / MAE 2.88 / 0.167% of
+      pixels off by >30; full-palette no-dither GIF 896 KB / 2.40 /
+      0.088%; APNG 2436 KB / 0.00 / 0%; **webp lossless + `-pix_fmt bgra`
+      1233 KB / 0.00 / 0% — bit-exact, and 1.0 ms/frame to decode, faster
+      than the GIF it replaces.** `-pix_fmt bgra` is load-bearing: without
+      it libwebp takes ffmpeg's default yuv420p and "lossless" still costs
+      1.56 MAE on the YUV round trip (worst channel error 182 on the test
+      fixture, 0 with it). Sampled clip durations are 0.7-3.8 s with a
+      couple near 13 s, so typical cache entries are ~0.5-2 MB. Tk cannot
+      read WebP, so the decode is PIL-only now — Pillow is already a hard
+      app dependency (requirements.txt; Field.__init__ imports it
+      unguarded) and the guard only decides whether the TVs MOVE.
+      lcdart sweeps up each id's superseded .gif when it writes the .webp.
+      Tests: the delta-encode trap guard is replaced by a real-ffmpeg
+      BIT-EXACTNESS test over a yuv420p source (a PIL-authored RGB source
+      makes the flag a no-op and the test vacuous — that trap was found
+      while writing it), plus a stale-gif sweep test. 21 tests green;
+      re-recorded live off the real cache, colour clean.
+      **UPDATE 6 same day — THE PROTOCOL WAS MIS-DECODED, and David's "why
+      is the villain display showing 3 images?" is what exposed it.** He
+      asked because two of the three cells sat empty on a live attract.
+      Reading the ring off his running game showed 327 id-frames since
+      boot, ALL addressed to what v1 called display 0 — so I disassembled
+      the game's own frame builders (agent pass over `game.elf`). The
+      finding, with addresses in padlcd.h: **there is exactly ONE
+      addressable display.** `lcd_init` (0x37dcf0) reads the device-LCD
+      table at 0x717e94 (entry 1 = "VILLAIN VISION", display number 0)
+      and bounds it against the fixture table at 0x717ed4 whose DISPLAY
+      COUNT is 1; all 299 LCD call sites pass the same device, so no code
+      path can emit a second display selector. The three physical TVs are
+      fed from one logical display by the node board. **And the "game
+      start sets all three inserts to 54/928/106" result — screenshotted,
+      eyeball-"verified", written into this item — was one PLAY-RANGE
+      command read as three ids: 54 is the range's first asset, 928 its
+      last, and 106 is a frame-PERIOD code (table 0x5c9340) meaning 12
+      fps.** An asset id can never be one of eight fixed values; that was
+      checkable and I did not check it.
+      **What the wire actually is** (padlcd.h now carries the full table):
+      selector = `0x98|display`, and the payload shape is disambiguated by
+      LENGTH — ilen 4 `[mode]` (1 loop / 2 one-shot, which is what the
+      constant `02 d8` frames were, NOT a "commit marker"), ilen 8
+      `[0][u32 asset]` (the asset is a **u32**, not u16), ilen 14
+      `[flags][u32 first][u32 last][u16 rate]`. Also real and previously
+      DROPPED by the `start >= 4` gate: `0x80|d` brightness/fade (132 call
+      sites) and `0x90` status poll, which wants a **12-byte reply**.
+      **FIXED:** padlcd.h + hwshim rewritten to v2 — one display, u32
+      assets, length-dispatched decode, fps decoded from the period table,
+      brightness/fade captured, and EVERY cmd-f2 selector ringed whether
+      understood or not (v1 ringed only frames it already believed in,
+      which is exactly how the mis-parse survived a live capture holding
+      the evidence against it). The window is ONE screen with a caption
+      naming what is on the wire (`asset 1736 · one-shot`, `range 54-928 @
+      12 fps · loop`); a range draws its FIRST asset and says it is a
+      range, because what the board does with first..last@rate —
+      playlist, flipbook, random pick — is NOT decoded, and inventing one
+      is how the three-screen error happened. 15 panel tests (v2 block,
+      plus a range-command test that fails if the old three-id reading
+      ever returns).
+      **OPEN, with evidence, worth its own item:** the game only clears a
+      command's pending bit on a reply (0x37e504) and we never answer, so
+      attract re-sending the same asset every 250 ms is probably OUR
+      fault; worse, `lcd_play_range`'s 27 call sites block until a field
+      only the 12-byte 0x90 poll reply fills. Answering that poll
+      plausibly may be what makes the display advance like the real
+      machine.
+
+      **UPDATE 7 (2026-08-25) — v2 REPLACED ONE INVENTED READING WITH
+      ANOTHER, and David's "it doesn't feel like the right animations are
+      showing up at the right times" is what sent me back.** He also asked
+      whether the clips are live-fed, and reported never seeing the
+      green-background card he expects in attract. Desk work only — no run,
+      card mounted READ-ONLY (`cardmount.sh`), rig lock held, nothing on
+      the rig touched.
+      **Measured before theorising.** (a) Only **17 distinct assets have
+      ever been requested** across every batman run — 17 cached artifacts
+      in `<tables>/batman/lcd`, and `lcdart.log` does not exist, i.e.
+      lcdart has never once failed to find an id. Nothing is being lost at
+      the art stage; the vocabulary really is that narrow. (b) The v2 shim
+      has been live since the 16:04 rebuild on 08-24 and David's 4-minute
+      run on 08-25 (12:54–12:58) added **zero** new ids. (c) A full scan of
+      all 3,069 clips for a green-dominant first frame finds 19, and the
+      strong ones are the '66 fight-word cards — **2994 KAPOW!, 2997
+      CRUNCH!, 3034 POW!!, 3038 ZAP!!!, 2992 POW!!** — none of which the
+      game has ever named on the wire. (d) The store is right: `137.asset`
+      is 240x180 (the playfield TVs); the parallel `2.asset` bundle with
+      3,139 files is 800x600, a different display, and is correctly not
+      used.
+      **The RE, from the game's own dispatcher this time, not a capture.**
+      Every play command comes from one per-display service routine
+      (0x37e49c) switching on a command KIND at `display[+20]` through the
+      jump table at 0x37e4b4. Kind 4 hands **`*(display+24)`** — the u32 at
+      the request struct's offset 0 — to the one-asset builder (0x51a968)
+      as THE asset. Kinds 2 and 3 hand the SAME struct to 0x51a7c0 and
+      0x51a86c, which put that same field at payload offset 1. **So the
+      clip is one field, in every form, and v2's "first asset .. last
+      asset" was a name taken from a single capture that happened to read
+      54 and 928.** Nothing iterates; nothing says range. The companion
+      u32 (struct+12) is now published and captioned as `aux N`.
+      Two more corrections fell out: **the 1-byte command is a VERB, not a
+      mode** — five dispatch kinds call 0x51a9e0 with 1, 2, 3, 4 and 5, and
+      3/4/5 arrive with no content (kinds 7/5/6), so they are almost
+      certainly stop/pause/clear; v2 stored the byte in a field whose
+      reader only had words for 1 and 2, **so a "stop" reached the panel as
+      an empty caption, indistinguishable from "carry on playing"**. And
+      the **24-byte form has a call site after all** (kind 3 → 0x51a86c);
+      v2's own header called it dead and dropped it.
+      **The ilen question, settled properly:** the builders write 3/7/13/23
+      but the transmit path at 0x516188–0x516190 does `add r2,r2,#1` on the
+      length byte before the frame goes out, so the wire carries 4/8/14/24.
+      v2 had the right numbers from a capture; now they are derived.
+      **FIXED:** padlcd.h + hwshim to v3 (asset/aux/rate/verb/x1..x3, the
+      24-byte form decoded, RAW ring 18→22 so its 21-byte payload fits);
+      the caption prints `asset 54 · loop · aux 928 · 12 fps` and
+      `asset 3004 · verb 4` instead of inventing words; **`watch.sh` now
+      preserves the block as `dump/padlcd.last` instead of deleting it**,
+      and new **`lcdring.py`** prints the ring as a transcript with gaps —
+      two mis-decodes shipped because nothing could show what the wire
+      actually carried, and the ring died with every run. 23 panel/lcdart
+      tests + 8 new lcdring tests, all green.
+      **STILL NOT ANSWERED, and this is the honest state of David's
+      question:** *which* clip should play *when* is unverified against a
+      real machine. The narrowness above (17 ids ever, 0 new in 4 minutes)
+      is consistent with the unanswered 0x90 poll stalling the game's LCD
+      sequencer, but that is a hypothesis, not a measurement — `lcdring.py`
+      over a preserved attract run is now the instrument that can settle
+      it, and it did not exist until today.
+
+      **UPDATE 8 (2026-08-25) — THE INSTRUMENT'S DEBUT FAILED, David's
+      report: "i tried to run you suggested script and it errored."** He
+      ran batman at 13:31, stopped it ~13:34, ran lcdring.py — `[Errno 2]
+      ... dump/padlcd`. Root cause: **`killgame.sh:132` has its own
+      `rm -f dump/padlcd`**, and Stop/app-quit end a run through
+      killgame.sh, whose pkills take watch.sh down BEFORE its teardown (the
+      only place the preserve lived) can run. The very button David ends
+      runs with deleted the transcript the preserve existed to keep; his
+      13:31 ring is unrecoverable. Three fixes, all desk work (rig lock
+      held only for the killgame test, nothing was live): (1) killgame.sh
+      preserves before removing, magic-gated on the `PLCD` bytes so a
+      non-lcdnode title's all-zero block can never clobber a real
+      transcript; (2) watch.sh's copy gets the same magic gate (it had
+      none — same clobber, different door); (3) lcdring.py's default now
+      prefers the LIVE block over `padlcd.last` (the old order shadowed a
+      running game with the PREVIOUS run's transcript — plausible output
+      off stale evidence, this protocol's signature failure), and the
+      nothing-to-read message explains both absences instead of naming one
+      file. VERIFIED on the real killgame.sh, idle rig: a magic-stamped
+      block survives Stop byte-exact (md5), a zero block does not clobber,
+      and David's exact command now prints the explanation. 12 lcdring
+      tests (2 new: live-first, message), 33 across the three LCD suites.
+      The synthetic padlcd.last from the test was deleted — the first real
+      one appears when David next ends a batman run, through either door.
+
+      **UPDATE 9 (2026-08-25) — FIRST LIVE READINGS off David's mid-game
+      run, and a ring redesign they forced.** What the instrument measured
+      (read-only polls of the live block; the game was David's, untouched):
+      **(a) the 0x90 status poll runs at 60 Hz** — every 17 ms, payload
+      constant `00 ea 41 00` — so 64 raw slots held ~1.1 s of history and
+      every play command was flushed out of the ring within a second. The
+      "attract re-sends every 250 ms" number in the OPEN note was really
+      the poll+command mix; the real cadences are now separated. **(b) The
+      pending-bit re-queue is directly observed:** `asset 601 · verb 2`
+      sent at 168907 ms and re-sent BYTE-IDENTICAL at 169158 (+251 ms) —
+      no reply, command stays pending, re-queued. The 0x90-reply item's
+      evidence is no longer inferential. **(c) Attract plays one-shots
+      (verb 2), ~5.2–5.45 s apart, and brackets each clip swap with a
+      brightness dip:** `bright 0` then `bright 255` 249 ms later, right
+      at the asset change (fade byte 15 throughout, trailing constant
+      `aa 2a` — unnamed, like the poll's `ea 41`). **(d)** assets seen
+      live: 591, 601, 3004 — all inside the known 17.
+      **The redesign (padlcd v4):** the ring COALESCES identical
+      consecutive frames — same selector, same payload → bump the slot's
+      u16 `rep` (saturating) and refresh `last` instead of taking a new
+      slot. A 60 Hz constant IS a count; recording it 64 times over is
+      what destroyed the evidence. Entry is now ms/last/rep/sel/len/b,
+      stride 36, ring spans minutes instead of one second, every frame
+      still on record. lcdring.py reads BOTH strides (v3 blocks live on in
+      preserved padlcd.last files; an unknown version is refused, not
+      guessed at) and prints coalesced slots as `x421 over 7157 ms`.
+      12→16 lcdring tests, 36 across the LCD suites. David's LIVE run is
+      still on the v3 shim — his next launch rebuilds to v4 and the ring
+      starts covering whole attract cycles.
+
+      **UPDATE 10 (2026-08-25) — DAVID'S APP LOG REWRITES THE ARCHITECTURE,
+      and the "errors" in it are neither errors nor new.** The walls of
+      `[build]` text are pre-existing gcc -Wformat-truncation warnings
+      (nb_fident_load, nv_load, the segv dumper, sw_file_table, VLOG) that
+      only print when the shim rebuilds — which today it did twice, both
+      ending `built ok`. Filed separately; not this item's code.
+      **The real find is four [padvid] lines at game start:** the game
+      opened `137.asset/0.asset` — the villain-TV store, 240x180 — through
+      its OWN video pipeline on channels 1-4, then stopped every one at 0
+      frames. Which forces the correction: **the lcdnode is an LPC1113 —
+      24 KB flash, 8 KB RAM. It cannot store 3,069 H.264 clips and cannot
+      decode one.** "The board plays the clips locally" (v3's story, and
+      UPDATE 9's) is physically impossible. On real hardware the villain-TV
+      pixels must be RENDERED BY THE GAME (the scene is literally named
+      VillainTvsCombo); the node board plausibly owns panel control —
+      which is exactly the observed brightness/fade bracket. So the right
+      emulation is likely: let the game's own villain render path run and
+      show THAT — three TVs with genuinely different content, green logo
+      cards included — and the asset-number window becomes the diagnostic,
+      not the display. Today that path aborts at 0 frames, four times, at
+      game start. WHY it aborts is the question that matters now.
+      **RE nailed this pass (from /tmp/game.elf, card mounted read-only,
+      rig idle, lock taken+released):** every play command takes a global
+      sequence token — 0x37dc20 bumps *(0x7af908), stores it at
+      entry[+16], sets pending bits 0+1, and lcd_play_asset (0x37de58)
+      RETURNS it to the caller (it also indexes the 0x5c9340 period table
+      directly — the fps connection is now instruction-level, arg is an
+      index 0-7, out-of-range defaults to 3 = 16 fps). The 60 Hz poll loop
+      is 0x37e5ec (called from the main tick 0x265678): per display, gated
+      on board-present (board[+4] bit 1), sends 0x90, and on a good reply
+      stores the 12 payload bytes VERBATIM as three u32s at entry[+4/8/12];
+      get_status (0x37e6d4) copies those three words to any caller.
+      0x37e294 = set_brightness (entry[+49]/[+52], flags bit 2 — matches
+      the dispatcher). **And 0x37e2fc partially rehabilitates the range:**
+      it computes (last-first+1) x period(rateidx) — a range-DURATION
+      helper, so an inclusive-range consumer exists; v3's "not a range"
+      was an overcorrection. Whether the 14-byte payload's fields feed it
+      is still untraced, so the caption keeps saying `aux`.
+      **THE EXPERIMENT NOW IN THE SHIM:** answer the 0x90 poll's 12 bytes
+      with word0 = last decoded play asset (words 1-2 zero) instead of
+      zeros — the most plausible board story ("I am playing what you named"),
+      and the game demonstrably copies whatever we answer into the display
+      object. PAD_LCD_R=<24 hex> hand-sets the payload for experiments;
+      PAD_LCD_R=0 restores zeros. Marked in-code as an experiment, not a
+      decoded fact; if node 24 grows on-screen alerts, word0 is being read
+      as a fault word — roll back and record it. The graders are the ring
+      (does the 250 ms re-send stop?), padvid (do the four 137-store
+      channels survive past 0 frames?), and David's own eyes on the
+      villain window. The game ELF is copied to /tmp/game.elf so further
+      RE needs no mount.
+
+      **UPDATE 11 (2026-08-25) — GRADED LIVE ON DAVID'S RUN ("rig is up
+      and you can take over"), two of three pass, and the panel learned
+      the block.** Graders, measured off the live rig: **(1) PASS — the
+      250 ms re-send is GONE.** The coalesced ring covered the whole run
+      in one read (its own first live success): one echo-less re-send of
+      asset 2 at boot before the first decode primed the echo, then every
+      play lands exactly once, attract steady at one command per ~5.2 s
+      for 11+ minutes. **(2) PASS — no node-24 alerts**: nbsched shows
+      flags 0x0, gate 0 all run; word0 is not being read as a fault word.
+      Keep the echo. **(3) FAIL — the game's four 137-store channels
+      still stop at 0 frames** (they reach caps/pads, never "streaming"),
+      so the poll reply was necessary but is not sufficient for the
+      game-side villain renderer. Also measured: the game creates exactly
+      ONE EGL surface ever (`[eglshim] surface 1 on display 0`), so
+      batman never even attempts a villain render target on our rig;
+      /dev/spidev1.0 is the SWITCH bus (already shimmed), not a pixel
+      link; /dev/mxc_vpu (i.MX6 hardware H.264) is in the ELF's device
+      list — the second-display-output story fits everything but is
+      UNPROVEN. The 0x381050 "state==4" predicate turned out to be a
+      checksummed settings table, not LCD state — dead end, recorded so
+      nobody re-reads it.
+      **The panel now PLAYS the block.** Attract sent `asset 919 aux 928
+      @ 12 fps` live — ten consecutive clips — and game start sends
+      54..928; with the duration helper (last-first+1) as the consumer,
+      the panel cycles asset..aux clip by clip (each clip through once,
+      verb 1 wraps, verb 2 holds on the last, uncached clips heal lazily
+      via lcdart as the cycle reaches them, a poll never snaps a live
+      cycle back to its start). Caption: `assets 919-928 · showing 921 ·
+      12 fps · loop`. 3 new panel tests (start-at-first, cycle+wrap,
+      once-holds); 37+1skip across the four LCD suites.
+      **Also killed the warning wall** David hit three times: all
+      -Wformat-truncation warnings in hwshim.c/gstvid.c fixed at the
+      format level (%.Ns precision on path arguments) plus two real
+      buffer bugs — segv_handler's register dump was genuinely truncating
+      `pc=` off crash logs (200 → 240), and gstvid's VLOG clipped the
+      pre-arm line's 511-byte asset path (300 → 600). Verified zero
+      format-truncation warnings on both files; the next rebuild prints
+      two lines, not two hundred. lcdring.py's poll caption no longer
+      claims "we answer zeros" (it stopped being true this morning).
+      **NEXT for the villain display, in order of leverage:** (a) find
+      what starts the game-side player behind the four pre-armed
+      channels — the display-object state machine consumes our reply
+      words at +4/+8/+12 and only word0's role is guessed; words 1-2 may
+      carry state/position the player waits on (try PAD_LCD_R sweeps);
+      (b) if the player runs, the combo surface likely needs a second
+      render target (item 44's machinery exists; batman never asks).
+      Worth its own item if (a) does not fall quickly.
+
+      **UPDATE 12 (2026-08-25) — SOLVED. Claude solo on the rig ("rig is
+      for you... solve the rest... be faithful to what is being sent to
+      the display, live"). A 10-agent verified RE pass + instrumented
+      live runs closed every open thread, and two of my own earlier
+      claims are CORRECTED here.**
+      **THE ARCHITECTURE, now fully proven (addresses in padlcd.h):** the
+      villain TVs' VIDEO is drawn by the MAINBOARD GPU, not the node bus.
+      The game has a complete "secondary display" render-to-texture
+      subsystem (rodata 0x554d28 "Attempting to render to secondary
+      display, but no secondary display enabled.", 0x665ab4
+      "secondary_render_to_texture->get_id()") that composites the
+      VillainTvsCombo scene (0x59e3c8) onto a 2nd EGL surface from
+      fbGetDisplayByIndex(2). That surface is created only at 0x412a14,
+      gated at 0x4129fc on renderer-ctx +0xf0 (the 2nd-display object)
+      being non-null; +0xf0 is written ONLY by ctor 0x4126c0 (@0x41275c)
+      from arg3, and the ctor's SOLE caller 0x1e79d0 passes r2=#0
+      (@0x1e79c8) — unconditional NULL. **batman's binary hard-disables
+      its own villain render target.** That is why the 4 villain gst
+      channels (137.asset) pre-arm and die at 0 frames: nothing to
+      composite onto. The node bus (LPC1113, 200-byte frame cap, cannot
+      decode video) is CONTROL-only. Enabling the real render would mean
+      instantiating a subsystem the binary never builds (a fabricated
+      2nd-display object w/ valid geometry) — out of scope for a live
+      mirror, host side already exists (padglhost item 44) if ever taken.
+      **TWO OF MY CLAIMS, CORRECTED (both were plausible-unverified, the
+      exact failure mode this item keeps hitting):** (1) the 0x90 status
+      echo does NOT stop the 250 ms re-sends — measured live WITH the echo,
+      every attract clip is STILL commanded twice 250 ms apart; it is the
+      game's own double-issue, pending clears on SEND (0x37e484) not on any
+      reply. (2) Nothing consumes the reply: get_status (0x37e6d4, the only
+      reader of +4/+8/+12) is DEAD CODE, zero references in the image. The
+      echo is kept only because a correct-length reply beats a short read
+      and makes a raw bus dump readable — inert to the game.
+      **WHAT FAITHFUL MEANS HERE, and it is DONE + graded live:** the node
+      bus IS the villain display's control channel; the panel that mirrors
+      it is the truthful live representation (it can never be the game's own
+      composite — that is a separate disabled target — but it shows the
+      same clips by the same ids on the same live commands). The real
+      per-beat sequence, measured: `brightness 0` (fade dark) → `asset X` +
+      `brightness 255` (swap + reveal) → `verb 2` (play once, hold) → ~5.2 s
+      → repeat. The panel now renders exactly that: brightness < 128 blanks
+      the screen, verb 2 holds the last frame instead of looping, and a
+      block command (asset..aux) cycles its clips. VERIFIED on the live
+      window (C:\tmp\vv_live_strip.png): caption `asset 3026 · once` then
+      `asset 2 · once` (the Batphone), moving video, swapping with the wire.
+      Fixes: playfield.py (brightness blank, verb-2 hold, block cycle),
+      hwshim.c (bright init 255, honest 0x90 comment), gststub.c (set_state
+      RA logging — the instrument that would have found the gate, kept),
+      all -Wformat-truncation warnings gone (David hit that wall 3x). 40
+      LCD-suite tests.
+      **UPDATE 13 (2026-08-25) — GROUND TRUTH from David's video of the
+      REAL machine (`PXL_20260825_184517746.mp4`, 63 s, attract then a
+      game, both displays). It CONFIRMS the composite finding and kills
+      one more inherited invention.**
+      **Measured from the video:** (a) **ONE physical TV**, bezel-printed
+      "Villain Vision", showing ONE full-screen image — so the old "three
+      physical TVs fed from one logical display, the node board splits or
+      mirrors them" line (in padlcd.h AND playfield.py) was INVENTED, to
+      rescue the fixture name after v1's three-screen decode died. Deleted
+      from both. The display count of 1 was always the real fact.
+      (b) Each item holds **~5-7 s** (ours: 5.2 s ✓). (c) A **fully black
+      frame sits between items** (t=2 s) — the 0x80 brightness dip,
+      exactly what UPDATE 12's blank-on-bright<128 now renders ✓.
+      (d) Content is motion video, one clip at a time ✓.
+      (e) **...and it includes GAME-RENDERED CARDS** — a "Game Over" card
+      and **the BATMAN logo on green**, i.e. the very thing David has been
+      asking for since the first report. **Neither exists anywhere in the
+      3,069-clip store**: three independent scans (first-frame green
+      dominance, mid-frame green dominance after fixing a fade-in blind
+      spot, and flat-graphic colour-count) all come back empty; the only
+      flat cards in the store are the '66 fight-words and some near-black
+      explosion clips.
+      **That is the proof FROM THE MACHINE** (not just the ELF) that the
+      real Villain Vision is COMPOSITED by the game — rendered UI over
+      video on the disabled secondary render target — and not merely
+      "play stored clip N". So the node-bus mirror can never show those
+      cards, and saying otherwise would be the fourth invented story on
+      this protocol. Everything the bus DOES carry is now verified against
+      the machine: commanded clip, cadence, fade-to-black, one-shot hold.
+      **Not established (and not claimed):** the exact id↔clip
+      correspondence at any given moment. Correlating the video's TV
+      against all 3,069 assets, and against every frame of the assets our
+      wire commanded, both top out at 0.39-0.74 — a photo of a glossy
+      convex TV under playfield floods is not a reliable matcher, and the
+      two machines were at different points in the attract cycle (his had
+      just ended a game). Recorded as an admitted gap rather than a number
+      dressed up as a match. A synced wire capture on the real machine is
+      the only thing that would close it.
+      **Also corrected here:** SpiVideoPlayer / SpiVideoStreamDecoder are
+      real classes and the villain gst channels' handoff+bus callbacks ARE
+      SpiVideoStreamDecoderBase methods (0x539574 / 0x539598) — an SPI
+      video path to the panel genuinely exists. But it never carries
+      anything on our rig: the four channels only ever open 137.asset/**0**
+      (a pre-arm placeholder), no SPI video ioctl ever reaches the shim
+      (the faked-ioctl census shows only class=V VPU reqs), and no "CPU SPI
+      open failed" is logged. Worth knowing before someone re-derives it.
+      **UPDATE 14 (2026-08-25) — DAVID FOUND THE GREEN BATMAN LOGO, and my
+      "it is nowhere on the card" was WRONG in a way that matters.** He
+      pointed at `images/scene_textures/radimg_Shape_1280x720_7da3f132.png`
+      in his own extraction (`~/Desktop/bm`): the logo is a **SCENE
+      TEXTURE**, a whole asset class I never searched. My three scans were
+      all of the VIDEO CLIP store (137.asset) only, so the correct
+      statement is "not a video clip", not "not on the card". Corrected
+      everywhere. It does not change the architecture conclusion — it
+      sharpens it: the villain display composites **scene textures + video
+      surfaces**, and now both halves are known to be present on the card.
+      **AND HIS FOLDER PAID OFF TWICE MORE.** (a) The extraction holds
+      **3,058 clips at 240x180** — the villain store — with REAL NAMES:
+      `S1E001_Clips.S1E001_00-18-32-21` (season, episode, timecode).
+      (b) "Select Your Villain" lives in the demand_loaded scene that owns
+      the 155.asset store, which independently explains the `tv_1/tv_2/
+      tv_3` element names the RE found — that is the villain SELECTION
+      screen on the main LCD, **not** three physical TVs. Two independent
+      routes now kill the three-TV story.
+      **THE MAPPING IS FINALLY VERIFIED.** A radium video record is
+      `<u64 len><name><u32 id><u64 len><"137.asset/<n>.asset">`, so the
+      element name ends exactly 12 bytes before the reference (the app's
+      own `_parse_radium` documents this). New rig script **`lcdnames.py`**
+      parses the title's scene.radium and writes
+      `<tables>/<game>/lcd/names.txt` — **3,069 of 3,069 named, in 0.15 s**.
+      That is the FIRST independent check on the id->clip mapping, which
+      until now rested on eyeballing two frames and calling it
+      "eyeball-verified": asset 2 is named `PhoneScenes.S1E005_...` and
+      asset 2's picture is the red Batphone. It holds.
+      **Shipped:** watch.sh derives the table at run start (beside the
+      other per-title tables, not on the panel's lazy lcdart path — the
+      tests caught that design error by failing on the call shape), and
+      the panel shows the clip's name under the caption. Live-verified on
+      a real boot: `[watch] villain clips: 3069 named from the card's own
+      scene file`, window reading `asset 54 · once` / `S1E001 00:18:32`.
+      41 LCD-suite tests (2 new: name formatting + a title with no table
+      staying silent and reading once).
+      **UPDATE 15 (2026-08-25) — VISIBLE IN THE EMULATOR, David's ask
+      ("make changes that i can view in the emulator").** Two changes to
+      the villain window, both live-verified on a real boot:
+      **(a) IT LOOKS LIKE THE MACHINE'S TV.** The mirror was a black
+      rectangle floating on the desktop; the thing it mirrors is a
+      wood-cased 1960s portable with a chrome bezel, two knobs on a
+      right-hand panel and "Villain Vision" in script under the screen
+      (David's video is the reference). The window draws that now. The
+      screen keeps its native 240x180 — the case is padding — and the
+      cabinet is tagged "case" while the picture is tagged "pic", because
+      the draw path used to `delete("all")` on every asset change and with
+      a cabinet present that would have erased the TV the first time a
+      clip landed.
+      **(b) A FILMSTRIP of the last four clips**, oldest left, current
+      right and highlighted, under the TV. This answers David's ORIGINAL
+      complaint on this display — "it doesn't feel like the right
+      animations are showing up at the right times" is a question about
+      the SEQUENCE, which a window showing one frame can never answer.
+      Two rules it holds, both tested: a 250 ms re-send must not add a
+      second entry (or the strip lies about the sequence), and a clip with
+      no art must not enter the history as a placeholder. Thumbnails are
+      `subsample(4)` of the native still — no resampling, no extra file.
+      **Two tests needed updating for the cabinet and both got SHARPER:**
+      the canvas-size assertion (which existed to pin "native size, no
+      subsample") now checks the SCREEN geometry and that the picture is
+      centred in the screen rather than the case — those differ, the knob
+      panel being on one side only — and the canvas-churn assertion is now
+      tag-scoped to "pic" plus a check that the cabinet is not redrawn
+      while the clip plays. 23 panel tests.
+      **UPDATE 16 (2026-08-25) — David: "is it right that during attract
+      the scenes are animated? I thought from ground truth they are more
+      like a slideshow" + "still not seeing the green batman logo".**
+      **ANIMATED, and it is MEASURED, not asserted.** Sampling the real
+      TV at 10 fps and cancelling camera shake by per-frame alignment
+      (a ±4 px search, because the naive difference lit up the TV's own
+      bezel — which cannot move — and would have "proved" motion that was
+      really handheld jitter): **TV 13.61 mean frame-to-frame vs 0.92 for
+      a static control region = 14.8x**, and even the TV's QUIETEST
+      interval (3.29) beats the control's worst (1.37) by 2.4x. It reads
+      as a slideshow because the shots are often near-static (a Batmobile
+      idling, a person talking) and each is held ~5 s with a black gap.
+      **THE LOGO, chased properly this time.** It is 1280x720, DXT1, and
+      lives in `assets/lcd/demand_loaded/ec94b9a4…/scene.radium` whose
+      strings are `Batman66` and `IN COLOR` — the press-start screen (the
+      backbox shows exactly that at t=40 s in David's video). NOTE a
+      near-miss: my first sweep filtered on `im.width`/`im.height`, which
+      `parse_radium_images` does not return (it returns dicts with
+      `disp_w`/`disp_h`), so EVERY scene reported "1280x720=0". That was a
+      bug in the search, not a finding, and it was one careless step from
+      being reported as one.
+      **AND THE REAL PRIZE:** decoding the villain scene's own 91 inline
+      textures shows what the display is made of — **a wood-cased TV
+      sprite with a transparent SCREEN HOLE, an antenna, and four frames
+      of TV static**, plus lair backgrounds and font atlases. So the
+      "composite" conclusion is now visible as artwork, and the panel
+      shows the card's OWN TV instead of the one I drew (see UPDATE 15):
+      new `lcdframe.py` finds the sprite with no hard-coded index by
+      flood-filling from the border (a plain alpha bbox returns the whole
+      image, since these are sprites on transparent grounds — that is why
+      the first attempt found nothing), and the clip is composited into
+      the hole KEEPING ITS ASPECT (the hole is squarer than 4:3;
+      stretching would distort every face). watch.sh derives it beside
+      names.txt, cached, ~10 s once; a title without the texture keeps the
+      drawn cabinet. 24 panel tests.
+      **STILL TRUE about the logo:** it is a scene texture on a render
+      path this build disables, so the node-bus mirror cannot show it.
+      What the mirror shows is the VIDEO LAYER, faithfully; the real set
+      draws scene art over that layer, and now we can at least see the
+      set's own artwork around the picture.
+      **UPDATE 17 (2026-08-25) — PLAY-TESTED the villain display, not
+      just attract, on a live run I drove myself.** Coin (sw 42) + Start
+      (sw 39) start a game — the main display reaches BALL 1 with the
+      skill-shot prompt — but **the ball has to be hand-served**: batman
+      ships no device table, so ballfeed reports "eject coil NOT IN THE
+      DEVICE TABLE" and the trough never feeds the shooter lane. Opening
+      TROUGH 1 (sw 76) then closing SHOOTER LANE (sw 67) serves it, and
+      opening 67 plunges. Worth knowing for the sweep: a batman game can
+      be started and played from scripts, but not fed automatically.
+      **WHAT THE VILLAIN DISPLAY DOES IN A GAME:** it keeps being
+      commanded `asset 54 · verb 2` on the SAME ~5.2 s attract cadence,
+      through ball-in-play. It is NOT deaf, though — hitting the three TV
+      TARGETS (sw 61/62/66) produced an out-of-cadence command at
+      283033 ms (1.5 s early) with its own `brightness 255`, so the game
+      does react to playfield events; it just does not change the clip.
+      Consistent with the composite model: mode/award graphics are drawn
+      by the scene over the video layer, and only the video layer crosses
+      the bus. NOT established: whether a real machine's Villain Vision
+      changes clip at that moment (it plausibly stays on the current
+      villain too) — that needs a synced capture, same gap as before.
+      **THE MECHANISM (4-agent desk workflow + a PLAYED game's wire
+      capture, `/home/david/item82/gzwatch.lcdcap.log` — coin, start,
+      plunge, TV-target shots, 760k points):** no pixels cross the bus —
+      the game renders its lcd Radium scenes host-side
+      (DisplayRenderer/SceneCache) and sends DISPLAY-ID frames, cmd f2
+      sub 0x98, ids LE16 at stride 4, N ids setting displays
+      start..start+N-1 (attract: single-id frames every 5.2 s; game
+      start: one 3-id frame). **The id is the asset number in the card's
+      villain-TV store** (`assets/lcd/auto_loaded/<sha1>/scene.assets/
+      137.asset/<id>.asset` — 3,069 H.264 assets, all 240x180,
+      radium-labeled "VillainTvsCombo"); mapping EYEBALL-VERIFIED (id 54
+      = Robin in the Batmobile, 919 = wall-climb cameo, 3047+ = villain
+      portraits). **Ruled out on the way (do not re-derive):** the f2
+      sub-0x90 59 Hz frame is a status poll repeated on our zero answers
+      (17,625× per game) that does NOT gate the display ids; f9/fc zeros
+      gate nothing; cmd 0x11 and the 0x14/44/46/48/72 burst are generic
+      all-node traffic.
+
+      **UPDATE 18 (2026-08-25) — THE MISMATCH DAVID KEPT REPORTING IS
+      SOLVED: the wire names an ANCHOR and the real display WALKS the
+      anchor's episode. David ("still not seeing the villain vision
+      matching the actual game video... make it work now") had a live
+      batman run up; its wire, like every capture, hammers `asset 54 ·
+      verb 2` every 5.2 s while his video's TV keeps changing — and the
+      video is now pinned FRAME-LEVEL to the store:** the talking Riddler
+      is id 46/47 and the Batmobile-then-"Gotham City 14 MILES"-sign
+      segment is ONE clip, id 27 frames 45..67 (normalized correlation
+      0.84 on the sign; full-frame extraction of ids 3..121 off the live
+      run's ro card mount — the first scan missed them by sampling only
+      each clip's first 48 frames). Both are S1E001 — the same episode as
+      the hammered anchor 54. So the real display's advance is INTERNAL
+      (the game-side player on the disabled render path steps the
+      playlist on clip completion; dead on our rig = the hammer), and no
+      wire mirror that sits on the anchor can ever match the machine.
+      **Also measured:** the boot-attract rotation is a fixed 11-clip
+      cycle — 2, 54, 720, 591, 601, 1605, 1736, 2066, 2359, 3004, 3026,
+      62.7 s — read whole off the item-82 lcdcap capture (the capture's
+      asset field is at payload+1: leading display byte, then LE32; the
+      first read of that log multiplied every id by 256).
+      **BUILT, tested, live-verified standalone (vv_reel/vv_logo shots):**
+      (a) THE REEL — a re-command beat (decoded counter moved, command
+      unchanged — the shim bumps decoded only for play frames, never the
+      60 Hz poll) past a FINISHED clip steps the panel to the next id in
+      the anchor's names.txt family, wrapping; caption
+      `asset 54 · reel: 55 · once` keeps wire truth and reconstruction
+      separate; the finished-guard reproduces the real machine's variable
+      5-10 s holds (a long clip rides through beats un-advanced) and
+      makes the 250 ms double-issue a no-op; any CHANGED command drops
+      the reel instantly; no names.txt = no reel (nothing honest to
+      walk). (b) THE GREEN LOGO CARD — new `lcdlogo.py` derives it from
+      the card's ONLY 1280x720 lcd texture (uniqueness measured
+      card-wide, exactly 1 hit; no name hashes, refuses on any other
+      count), watch.sh caches it beside names/tvframe, and the panel
+      holds it one 5.2 s beat when a hammer >= 3 beats breaks to a new
+      single asset — the wire shape of game -> attract, where the video
+      shows the card (t=3-7 s). Name label says `logo card` while it is
+      up. S1E001 art (ids 3-61) pre-warmed into the cache so the walk
+      heals instantly. 38 panel tests (7 new), 20 lcdring/lcdart, all
+      green.
+      **ADMITTED APPROXIMATIONS (the honest residue, both need a synced
+      real-machine capture):** the real walk ORDER is unknown — the video
+      walked 46 then 27, not ascending; ascending family order is the
+      recorded stand-in. And a mid-game clip change arriving after a long
+      hammer would get the card too — the wire alone cannot separate that
+      from attract entry. **NOT yet observed anywhere: the wire at a real
+      game-over** (every capture ends mid-game or stuck in play; David's
+      live run has hammered 54 for 40+ min without an end) — the ring
+      will catch the first one now that runs preserve it, and its shape
+      is what would turn the logo trigger from inference into
+      measurement.
+
+      **UPDATE 19 (2026-08-25) — David's first look at the reel build,
+      three questions answered + one fix on the spot.** His screenshot
+      shows the boot rotation walking 2, 54, 720, 591 - the measured
+      cycle, in order, live. (a) The logo card is NOT clip 55 and not in
+      boot attract: it shows only at the game->attract transition, the
+      one place his video shows it; whether the real boot attract ever
+      shows the card is UNKNOWN (his footage starts at a Game Over) and
+      it is deliberately not drawn there. (b) "Attract should be stills
+      with a slideshow fade" - the stills half is disproven by his own
+      footage (clip 27 advances f45->f67 between t=17 and t=21; a still
+      cannot), but the FADE half was a real infidelity: the wire carries
+      fade code 15 on every brightness swap and the panel hard-cut.
+      FIXED: brightness 0 now DISSOLVES (FADE_STEPS darkened frames at
+      poll rate, ~300 ms, then dark; restore stays instant since the
+      reveal rides in with the asset swap; no screen PIL = the old hard
+      blank). 33 panel tests (1 new). (c) Synced-capture-on-the-real-
+      machine options recorded in the reply: tier 1 = tripod footage of
+      a full boot-attract cycle + a game start->game over (no hardware,
+      pins the display sequence frame-level like ids 46/27); tier 2 =
+      RS-485 tap on the node bus (FT232H-class dongle or logic analyzer
+      at the LCD board / CPU node chain) filmed simultaneously, synced
+      by aligning the wire's brightness-0 events with the video's black
+      frames - that one closes id<->display correspondence for good.
+
+      **UPDATE 20 (2026-08-26) — THE DISPLAY MODEL IS SOLVED: the board
+      is an ID -> STILL LOOKUP, and the panel now replicates David's
+      footage. He delivered both tier-1 videos (bm attract.mp4 90 s /
+      bm gameplay.mp4 35 s, tripod, close) plus the decisive find: a
+      service-menu diagnostic under TV settings that UPDATES THE BOARD'S
+      IMAGES.** Aligned/segmented/matched (template-match per frame vs
+      the set's own bezel, screen crops, ±2 px realigned diffs):
+      **(a) STILLS, David was right** — every attract segment's internal
+      motion sits at the static logo segment's own noise floor; "clip 27
+      advanced f45->f67" (yesterday's motion proof) was two adjacent
+      STILLS both sampled from clip 27. Transitions are ~0.3 s FADES
+      (no full black at 3 fps). **(b) The attract cycle is 11 stills /
+      62.7 s — one-for-one with the wire's 11-command rotation:**
+      Penguin, Penitentiary, Joker, fur sign, Catwoman, GAME OVER card,
+      GREEN LOGO card, Riddler, Batmobile, Gotham sign, umbrella sign.
+      **(c) Gameplay anchors the alignment:** game start = IN COLOR
+      title card (the wire's 919..928 block), the whole game RESTS on
+      the logo (the wire's 54-hammer), BALL SAVE card on the event, back
+      to logo. So 54=logo and every slot follows in cycle order; the
+      PXL video's post-game sequence = wire commands 2,54,720,591,601
+      exactly, and the first attract command after boot is 2 = the Game
+      Over card, as filmed. **DELETED as disproven: the reel (UPDATE 18's
+      episode-walk was this attract cycle misread) and the attract-entry
+      logo interlude (the logo is simply id 54's still).**
+      **BUILT:** `lcdstills.py` derives `<tables>/<game>/lcd/stills/`
+      + `map.txt` (id/file/label; provenance per entry in the script);
+      panel stills mode — the map's existence switches it: id selects a
+      cached still, block selects by FIRST id, nothing animates, name
+      label shows the still's label, filmstrip records swaps once;
+      unmapped ids fall back to the clip's still FRAME (never motion);
+      titles without a map keep the old clip player. Still sources:
+      4 pinned store frames (27.f45 Batmobile / 27.f65 Gotham sign /
+      305.f21 Joker / 503.f0 Catwoman, eyeball-verified), the logo scene
+      texture, and 7 median-stacked footage crops (Game Over + IN COLOR
+      + the five the EXHAUSTIVE sweep proved absent from the store —
+      all ~200k frames of all 3,069 clips top out at wrong-content noise
+      for Penguin/Penitentiary/fur/Riddler/umbrella, so the board's set
+      is authored from footage the store never sampled; David's video
+      pixels are the honest source until the upload is captured).
+      50 tests green across the three LCD suites (5 new stills tests
+      replace 7 reel/logo tests).
+      **THE UPGRADE PATH, not yet run:** David's diagnostic on OUR rig —
+      navigate the emulated game's service menu to TV settings > update
+      images with the nb wire logged; the upload names every mapped id
+      and carries the board's byte-exact stills (run3's "3,416-frame f2
+      update walk" from item 82 is hereby CORRECTED: those frames are
+      the plain 60 Hz 0x90 poll — no upload has ever been captured).
+      That capture would also name the BALL SAVE / event-card ids the
+      footage shows but our wire has not yet sent. Worth its own pass.
+      **Rig state: card unmounted, lock released, no runs.**
+
+      **UPDATE 21 (2026-08-26) — DAVID REDIRECTS TO THE REAL
+      ARCHITECTURE, and he is right: the board has its OWN image store,
+      updated from the card, and the game sends only an id.** His three
+      points, all addressed: **(1) stop using footage.** He found the
+      service menu's UPDATE TV IMAGES diagnostic and correctly reasoned
+      the board stores images written from the SD card. RULE: run
+      everything off the card, distribute NO assets ourselves. The 7
+      median-stacked footage PNGs I committed (2 game cards + 5
+      signs/portraits) are DELETED, the .gitignore *.png exception
+      reverted, lcdstills.py's "photo" provenance removed. lcdstills now
+      ships nothing and extracts only CARD-derived stills at runtime:
+      5 mapped (logo scene texture + 4 clip frames 27.f45/27.f65/305.f21/
+      503.f0), the other 7 ids deliberately UNMAPPED (they fall back to
+      the clip still, not footage). **(2) the TV outline must not fade.**
+      Fixed: the dissolve blended the whole COMPOSED image so the cabinet
+      dimmed with the screen; now only the picture inside the hole fades
+      (re-composed into the fully-lit set each step, end state = black
+      screen in a visible set), and a composed image is never hidden.
+      **(3) the diagnostic 'does nothing' on his machine and mine** —
+      confirmed it is a real, WIRED routine that no-ops. RE: rodata
+      0x55cb0c UPDATE TV IMAGES with a full sibling string set (UPDATE
+      AVAILABLE / NO UPDATE AVAILABLE / UPDATE STATUS.../ELAPSED TIME/
+      UPDATE COMPLETE/UPDATE FAILED/PRESS ENTER TO BEGIN), screen
+      descriptor at file 0x6ec1ac. "NO UPDATE AVAILABLE" is a
+      version/checksum gate - the board is already current vs the card's
+      image.bin, so the upload is skipped. It WAS wired to push images;
+      it just has nothing to do when versions match.
+      **THE ARCHITECTURE, now settled:** node 24 (LPC1113, control-only)
+      is the bus interface to an LCD that has LOCAL IMAGE STORAGE; UPDATE
+      TV IMAGES writes that store from the card; in-game the wire carries
+      only an id + brightness, and the board renders its stored image.
+      The id->image map is INDEPENDENT of the clip store (wire 591 ->
+      a frame of clip 27; wire 601 -> another frame of clip 27 - the
+      numbers are unrelated), which is why the board set can't be
+      derived by "extract clip <wire-id>". The images for the game cards
+      and 5 signs/portraits are in NO card store that unpacks to disk
+      (exhaustive: 245,828 frames of all 3,069 clips, 752 lcd textures,
+      both 2.asset stores, image.bin's 4 decodable JPEGs) - they live in
+      the UPLOAD.
+      **THE ONE RIGHT NEXT STEP (its own item's worth):** capture the
+      UPDATE TV IMAGES upload on the rig - drive the emulated service
+      menu to TV settings > update images with the node bus + file reads
+      logged, FORCING a stale-board state so the routine actually pushes
+      (blank the board's version, or fault the checksum). That upload
+      names every board id AND carries the byte-exact images, straight
+      from the card - the complete, correct, card-only set, no footage,
+      nothing distributed. image.bin is the app's master container
+      (engine.py) and the likely source the routine reads; its TV-image
+      section is packed, not plain, so the routine (or the app's Radium
+      unpacker pointed at the right offset) is the decoder.
+      50 tests green. Rig: card unmounted, lock released, no runs.
+      **BUILT (padled's conventions throughout):** padlcd.h (one page:
+      magic/gen/id[4]/ms[4] + a 64-entry raw ring for RE); hwshim.c
+      lcd_publish() beside led_publish, gated on PAD_LCD_NODE; watch.sh
+      derives PAD_LCD_NODE from node_ident's `type=lcdnode` row (empty =
+      publish nothing — every other title untouched) and pre-creates/
+      chowns/tears down the block; killgame.sh rm; restorestate.sh
+      always-rewind elif (the padled one-shot-magic lesson); lcdart.py
+      extracts a first frame per id to `<tables>/<game>/lcd/<id>.png`
+      lazily (~200 ms, once); playfield.py LcdPanel — its own lazy
+      Toplevel on first magic stamp (see UPDATE above), 10 Hz
+      reopen-reads, "TV <id>" placeholder until art lands, PhotoImage
+      reference kept. 8 real-Tk regression tests
+      (tests/test_spike2_playfield_lcd.py) green.
+      **Honest residuals, none blocking:** the `137.asset`
+      store number is a batman constant with a comment — a second lcdnode
+      title is the cue to derive it per title. (The "stills not video" and
+      "Schematic view only" residuals were both resolved by the two
+      UPDATEs above.)
+      *(Split out of item 82 on 2026-08-24, which fixed the board's
+      identity/registration so the game now ENGAGES it — this is the
+      capability half: actually showing the villain content David asked
+      about ("the second screen that appears over the carousel"). The
+      rig has NO lcdnode renderer at all; this is new feature work, not
+      a fault fix.)*
+      **What item 82 established, do not re-derive:** the screen is
+      node-bus hardware, not a GL display-2 (batman emits 0
+      PADGL_TARGETs, provably never calls fbGetDisplayByIndex(>0));
+      the board is node 24, lcdnode, class 3, part 0x00030030, fw
+      1.19.0, variant 0x02 (all measured); the ELF names a "Node board
+      LCD command/display number" API with LCD NODE UPDATE / LCD FLASH
+      strings, and run 3's 3,416-frame cmd-f2 burst to node 24 was the
+      firmware UPDATE walk, not display content — the actual display
+      data path is UNDECODED. Wire captures with the board engaging:
+      /home/david/item82/gzwatch.run[36].log.
+      **Plausible shape (a guess, not established):** decode the LCD
+      command family the game sends a registered node 24 (a capture on
+      a build where its grade settles is the first instrument), publish
+      frames to a ring like padled/padvid do, and draw a small window
+      the way the second-display window works. "3 LCD INSERT" suggests
+      up to three panels multiplexed by display number.
+      **Acceptance: not yet defined** beyond "the villain art shows
+      where the real machine shows it" — needs the data-path decode
+      before an honest test can be stated.
+      — S3: cosmetic-plus — the game plays fine without it; what it
+      costs is a real machine feature the sweep noticed missing. D4:
+      the command family is undecoded, a renderer must be built AND
+      validated, and it spans shim + host + window.
 
 - [x] **85. batman's playfield LEDs: only 25 channels on two boards, and
       every one of them dark.** `S2 D3` DONE 2026-08-26, `item/85`,

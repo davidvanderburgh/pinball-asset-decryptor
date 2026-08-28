@@ -129,6 +129,18 @@ pkill -9 -f '^bash [^ ]*longplay\.sh'
 # The LED block doubles as the virtual playfield's liveness signal; removing
 # it lets that window close itself instead of surviving the kill.
 rm -f "$ROOT/dump/padled"
+# The LCD block is PRESERVED before it is removed (item 83), exactly as
+# watch.sh's own teardown does - and this copy matters MORE than that one,
+# because Stop and app-quit come through here, and the pkills above take
+# watch.sh down before its teardown can run. The first run after the ring
+# existed ended through this line and lost its transcript, which was the
+# ring's whole reason to exist. lcdring.py reads the copy. -s, not -f: a
+# title with no lcdnode leaves the block all-zero, and clobbering a real
+# padlcd.last with an empty page would erase the last lcdnode run's
+# evidence every time some OTHER title is stopped.
+[ -s "$ROOT/dump/padlcd" ] && head -c 4 "$ROOT/dump/padlcd" | grep -q PLCD \
+    && cp -f "$ROOT/dump/padlcd" "$ROOT/dump/padlcd.last" 2>/dev/null
+rm -f "$ROOT/dump/padlcd"
 for _ in 1 2 3 4 5 6; do
     pgrep -f '^(/init|python3?) .*playfield\.py' >/dev/null || break
     sleep 0.5

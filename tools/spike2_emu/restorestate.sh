@@ -387,6 +387,11 @@ while read -r kind a b c; do
             # ring: the playfield reads this file across the load.
             dd if="$DDIR/rings/$b" of="$R$a" bs=4k conv=notrunc status=none
             echo "[restore] rewound the LED block to the save (in place)"
+        elif [ "$R$a" = "$R/dump/padlcd" ] && [ -f "$R$a" ] && [ -f "$DDIR/rings/$b" ]; then
+            # THE LCD BLOCK, ALWAYS - same one-shot-magic reasoning as the LED
+            # block above (lcd_map is the same static one-shot), item 83.
+            dd if="$DDIR/rings/$b" of="$R$a" bs=4k conv=notrunc status=none
+            echo "[restore] rewound the LCD block to the save (in place)"
         elif [ "$VID_RESTART" = 1 ] && [ "$R$a" = "$VID_RING" ] && [ -f "$DDIR/rings/$b" ]; then
             # IN PLACE, NEVER TRUNCATING. cp -f truncates the file to zero
             # and rewrites all 95 MB - and PADGLHOST HAS THIS RING MMAPPED

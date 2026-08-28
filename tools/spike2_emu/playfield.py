@@ -111,9 +111,11 @@ on this picture. 113 channels (53 on node 8, 60 on node 9) join into 81
 fixtures: 13 RGB, 6 red+green (the BUILDING FIRE pairs), 62 single. All covered.
 """
 import collections
+import io
 import json
 import os
 import queue
+import re
 import struct
 import subprocess
 import sys
@@ -190,6 +192,27 @@ WINDOW_TITLE = "%s - virtual playfield" % GAME
 #: passes PAD_ROOT across interop already translated (WSLENV's `/p`), so in the
 #: normal case this costs nothing at all.
 LED_PATH = os.path.join(padpath.dump() or "", "padled")
+
+#: VILLAIN VISION (padlcd.h, item 83): the lcdnode's display-id state. Same
+#: reopen-per-poll rule as LED_PATH - a held handle reads a frozen cache over
+#: \\wsl.localhost.
+LCD_PATH = os.path.join(padpath.dump() or "", "padlcd")
+
+#: The LCD clip decoder. PIL, not Tk, for two measured reasons: Tk's
+#: "gif -index N" has no frame cursor, so every call re-parsed the clip from
+#: byte 0 (~139 ms per frame at a 150-frame tail - the documented UI-freeze
+#: class), while PIL seeks INCREMENTALLY at ~1 ms/frame flat; and the clips
+#: are lossless WEBP now (David, 2026-08-24: GIF's 8-bit palette "looks off
+#: ... like it's not rendering the correct bit depth" - it was), which Tk
+#: cannot read at all. Pillow is a hard app dependency (requirements.txt,
+#: and Field.__init__ imports it unguarded for the playfield artwork); this
+#: guard only decides whether the TVs MOVE or stay on their stills, so a
+#: stripped environment degrades instead of crashing the window.
+try:
+    from PIL import Image as _PILImage
+    from PIL import ImageTk as _PILImageTk
+except Exception:                                           # noqa: BLE001
+    _PILImage = _PILImageTk = None
 
 #: PAD_PF_LOG=<path> turns on the once-a-second loop report (see Field._log).
 #: Unset in normal use; this is the instrument the frame-rate claim rests on.
@@ -3160,16 +3183,30 @@ def load_state():
         return {}
 
 
-def save_state(root):
-    """Remember where the window was, so it opens there next time.
+#: The live LcdPanel, set by main() - save_state() records its window's
+#: position alongside the root's without every call site having to know the
+#: panel exists. (The item-83 review caught the docstring PROMISING position
+#: persistence via padwinpos, which is a passive diagnostic recorder nothing
+#: restores from - this is the mechanism that actually delivers it.)
+LCD_PANEL = None
+
+
+def save_state(root, lcd=None):
+    """Remember where the windows were, so they open there next time.
 
     Position only, not size: the canvas is sized from the artwork and the
     screen, so restoring a stale WxH would letterbox or clip it after a
-    resolution change.
+    resolution change. The villain vision window rides along under its own
+    key whenever it exists - callers that don't know about it (the views'
+    death paths, bye()) get it through LCD_PANEL; the panel itself passes
+    `lcd` so its close box works without the global.
     """
     try:
         st = load_state()
         st["playfield_pos"] = [root.winfo_x(), root.winfo_y()]
+        p = lcd if lcd is not None else LCD_PANEL
+        if p is not None and p.win is not None:
+            st["villain_pos"] = [p.win.winfo_x(), p.win.winfo_y()]
         with open(STATE, "w") as f:
             json.dump(st, f, indent=1)
     except Exception:
@@ -3470,6 +3507,840 @@ class LedGrid(LedRing):
                 % (C["name"], where,
                    "named by the title's device table" if C["named"]
                    else "no name in this title's table - shown by wire address"))
+
+
+class LcdPanel:
+    """VILLAIN VISION - the lcdnode's LCD inserts, in their OWN window.
+
+    batman's node 24 drives the fixture the ELF calls "3 LCD INSERT" - three
+    320x240 playfield TVs (item 83). Nothing crosses the bus but ASSET
+    NUMBERS naming stored clips; padlcd.h carries the frame table and the
+    disassembly addresses it was read off.
+
+    ★ ONE SCREEN HERE, NOT THREE, and the correction is worth stating plainly
+    because this window shipped with three. The game addresses ONE logical
+    display (fixture display count 1; all 299 LCD call sites pass the same
+    device) driving ONE physical TV - David's video of the real machine
+    shows a single set with "Villain Vision" on its bezel, so the old
+    "three TVs fed from one display" line here was invented too. The
+    first cut read one command as three display ids and drew 54, 928 and 106
+    side by side, which looked convincing and was wrong: 106 is a frame-rate
+    code, and 928 is a companion field. David spotted the shape of it live
+    ("there are still two empty slots to the right") before the disassembly
+    confirmed it.
+
+    ★ AND THE SECOND CUT INVENTED A RANGE. Having stopped believing in three
+    screens, it started captioning that command "range 54-928 @ 12 fps" -
+    which is the same mistake wearing a different hat, a name for a field
+    read off one capture. The dispatcher settles it: every content form
+    carries the clip in the SAME struct field, the one the single-asset
+    command sends as the asset. So `asset` is always what to draw, and the
+    companion number is now shown as "aux N" because that is all anybody has
+    earned the right to call it.
+
+    So this draws what the one display was told to show: a looping 10 fps
+    LOSSLESS WEBP excerpt of the named clip, advanced one frame per poll so
+    encode rate = display rate. The art is extracted LAZILY by lcdart.py into
+    <tables>/<game>/lcd/<id>.{png,webp} the first time an asset is seen
+    (3,069 assets up front would be minutes of mktables for art most runs
+    never show), cheap-first: the still paints the moment it lands, the
+    motion takes over when the encode finishes behind it. Until either lands
+    the cell says "asset <id>", which is honest - the id is live data off the
+    wire, the art is a cache filling in behind it. (The clips were GIF for
+    one afternoon; David spotted the 8-bit palette immediately - "the gif
+    color looks off ... like it's not rendering the correct bit depth" - and
+    lcdart.py's docstring carries the measurement that replaced it.)
+
+    THE CAPTION IS AN INSTRUMENT, not decoration. It names the asset, the
+    verb the game sent (printed as a number past the two that are known -
+    a bare 3, 4 or 5 arrives with no content and is almost certainly stop,
+    pause or clear, and showing nothing for those made a stop look identical
+    to "carry on playing"), and any companion fields. Twice now this display
+    has been drawn from a confident reading of a payload nobody had traced
+    to a filler; printing the raw numbers is what lets the next wrong
+    reading be caught from a photograph.
+
+    A SEPARATE WINDOW, not a strip in the playfield view - David's ask,
+    2026-08-24: every other second-display title already gets its screen as
+    its own desktop window (item 44's "<game> [display N] - Stern Spike 2
+    emulator"), and this IS batman's second display, the game just drives it
+    by asset number instead of by pixels. The title deliberately joins that
+    family so screenrec.py's backbox default skips it like any second display
+    (record it on purpose with PAD_REC_TITLE="[villain vision]"); padwinpos
+    and zorder each key "[villain vision]" AHEAD of their generic "] -" game2
+    row, so this Tk window can never claim a padglhost display window's slot
+    in a diagnostic. Position persistence is NATIVE, not the needle's doing -
+    "villain_pos" in the same state file as the root's "playfield_pos",
+    restored in _build(), recorded by save_state() and on close (an earlier
+    docstring credited padwinpos with this; padwinpos is a passive recorder
+    nothing restores from - the item-83 review caught the false claim).
+    Closing it HIDES it for the run, which is item 44's close behaviour too.
+    Owning a window instead of a slot in a view's layout is also what puts it
+    on BOTH playfield shapes - Field and Schematic - instead of only the one
+    that had room for a strip.
+
+    LAZY BY CONSTRUCTION: no window exists until the padlcd block's magic
+    stamps, which only an lcdnode title's shim ever does - every other title
+    pays one 56-byte read per poll and shows nothing. The reopen-per-poll
+    read matches LED_PATH's rule: a held handle over \\\\wsl.localhost reads a
+    frozen cache.
+    """
+
+    READ = 56                       # header .. ms; the ring beyond is RE fuel
+    MAGIC = 0x44434c50              # 'PLCD'
+    #: The screen. The store's clips are 240x180; a dedicated window has room
+    #: to show them at native size (the in-view strip this replaced halved
+    #: them).
+    CW, CH = 244, 184
+    #: THE CABINET. The real Villain Vision is a wood-cased 1960s portable
+    #: with a chrome bezel, two knobs on a right-hand panel and "Villain
+    #: Vision" in script under the screen - David's video of the machine
+    #: (2026-08-25) is the reference. Drawing it costs one canvas and makes
+    #: the window instantly recognisable as THAT device rather than a black
+    #: rectangle floating on the desktop, which is the whole point of a
+    #: mirror. The screen keeps its native size; the case is padding
+    #: around it, so nothing about the picture changes.
+    PAD_L, PAD_T = 16, 14           # case around the screen
+    PAD_R, PAD_B = 62, 34           # right: knob panel; bottom: the script
+    #: THE FILMSTRIP: the last few clips the game asked for, oldest left,
+    #: current right. David's first report on this display was "it doesn't
+    #: feel like the right animations are showing up at the right times" -
+    #: a question about the SEQUENCE, which a window showing one frame can
+    #: never answer. Four thumbnails do, at a glance, without reading a log.
+    #: 60x45 is exactly subsample(4) of the native 240x180 still, so a
+    #: thumbnail costs no resampling and no extra file.
+    STRIP_N = 4
+    TW, TH = 60, 45
+    #: Re-ask backoff for lcdart, seconds. One subprocess per minute per id
+    #: whose art is still missing - see _show.
+    ASK_S = 60.0
+    #: THE BOARD IS AN ID -> STILL LOOKUP (2026-08-26, David's two tripod
+    #: videos of the real machine, segmented and matched frame-level; his
+    #: own find of the service menu's "update the images" diagnostic under
+    #: TV settings is the mechanism). The Villain Vision never plays
+    #: video: it holds ONE STILL per command, fading between them. The
+    #: attract cycle is 11 stills at ~5.3 s on a 62.7 s loop - the same
+    #: count and period as the wire's 11-command rotation - and the
+    #: alignment is anchored by the GAME: the whole of gameplay rests on
+    #: the green BATMAN logo card while the wire hammers asset 54, so
+    #: 54 = logo, and every other slot follows in cycle order (map.txt in
+    #: <art>/stills, derived by lcdstills.py, carries the table and each
+    #: entry's provenance). Two of yesterday's reconstructions died to
+    #: this measurement and are deliberately gone: the episode-walk "reel"
+    #: (the walk WAS the attract cycle stepping) and the attract-entry
+    #: logo interlude (the logo is simply id 54's still - the map shows
+    #: it wherever the wire commands 54, game and attract both, which is
+    #: exactly what the machine does). The stills themselves are frames
+    #: of the card's own clip store / scene textures, pinned by match
+    #: score against the footage; the board's byte-exact uploaded set is
+    #: capturable via that diagnostic on this rig and would replace the
+    #: pins wholesale (recorded in TODO).
+    #: THE DISSOLVE. Every brightness swap on the wire carries fade code 15
+    #: and the real set visibly FADES through clip changes - David watched
+    #: both and called ours out ("still frames with a slideshow fade
+    #: effect"): the hard cut was the panel's approximation, not the
+    #: machine's behaviour. Two darkened steps at poll rate ~= the 250 ms
+    #: the wire leaves before the swap. Fade-OUT only: the reveal rides in
+    #: with the asset change and an instant restore there is what the old
+    #: behaviour already did (ramping it would fight _show over the item).
+    #: The board's actual curve is still not decoded; this renders "it
+    #: dissolves", not a measured ramp.
+    FADE_STEPS = (0.62, 0.28)       # fraction of the picture per step
+
+    def __init__(self, root, game):
+        self.root, self.game = root, game
+        self.drv = None             # assigned once the view's SwitchDriver exists
+        self.win = None
+        self.cv = self.cap = self.nm = None
+        self.item = None            # the persistent canvas image item
+        self.img = None
+        self.id = None              # asset currently drawn
+        self.have = False           # ... and whether that is real art
+        self.state = None           # (asset, aux, rate, verb)
+        self.cycle = None           # (first, last) while a block command is live
+        self.bright = 255           # last 0x80 brightness; <128 blanks the screen
+        self.stillmap = None        # {id: (file, label)} from stills/map.txt;
+        self._map_tried = False     # non-empty = this display is a stills board
+        self._still_imgs = {}       # id -> composed PhotoImage, loaded once
+        self._pic_pil = None        # PIL of the PICTURE on screen (for _fade)
+        self._fadeq = []            # pending dissolve steps, one per poll
+        self._fade_ref = None       # current step's PhotoImage (keep-alive)
+        self.names = None           # {id: name} from lcdnames.py, loaded once
+        self._named = False         # ... and whether the load has been tried
+        self.strip = None           # the filmstrip canvas
+        #: THE GAME'S OWN TV, if lcdframe.py pulled it off the card: a PIL
+        #: RGBA sprite with a transparent screen hole, plus that hole's
+        #: rect. When present the picture is composited INTO it and the
+        #: hand-drawn cabinet is not used - card artwork beats a drawing,
+        #: and this one is the actual Villain Vision set. None = the
+        #: drawing, which is also what every non-batman title would get.
+        self.tv = None
+        self.tv_hole = None
+        self._tv_tried = False
+        #: [(id, PhotoImage)] oldest first. The PhotoImages are held HERE and
+        #: nowhere else - a canvas image item does not own its image, so
+        #: dropping the reference blanks the thumbnail (the same rule the
+        #: main picture obeys via self.img).
+        self._recent = []
+        #: Animation state. None while no clip is on disk (kept retryable);
+        #: a dict once the clip's BYTES are read - in one go, so a
+        #: \\wsl.localhost hiccup can only fail the whole read (caught,
+        #: retried next tick) and never masquerade as end-of-clip. "n" is
+        #: the frame count; "dead": True marks an undecodable clip - honest,
+        #: because the bytes are complete in memory, so a decode failure is
+        #: the file, not the wire. Frames decode one per poll and cache; the
+        #: dict drops on asset change.
+        self.anim = None
+        #: id -> monotonic time of the last lcdart ask. A dict, not a set
+        #: (motion review): lcdart's contract says a missing store heals on
+        #: retry, so an id whose art is STILL missing re-asks after ASK_S -
+        #: bounded at one subprocess per minute per id, instead of a
+        #: once-per-session set that made that promise false.
+        self._asked = {}
+        self._hidden = False        # close box used; skip draw/decode work
+        self._next = 0.0
+        self._polls = 0
+        self._art = os.path.join(padpath.tables() or "", game, "lcd")
+
+    def start(self):
+        """Self-paced off root.after - the panel belongs to no view's tick.
+        50 ms so the timer never beats against poll()'s own 0.1 s gate.
+        The reschedule is in a finally on purpose: poll() crossing a live
+        run can always meet a surprise (a torn read, a broken pipe under
+        run_script), and one uncaught exception must cost one tick, not the
+        whole panel for the rest of the run."""
+        try:
+            self.poll()
+        finally:
+            self.root.after(50, self.start)
+
+    def _build(self):
+        self.win = tk.Toplevel(self.root)
+        self.win.title("%s [villain vision] - Stern Spike 2 emulator"
+                       % self.game)
+        self.win.configure(bg="#111")
+        self.win.resizable(False, False)
+        self.win.protocol("WM_DELETE_WINDOW", self._hide)
+        pos = load_state().get("villain_pos")
+        if pos and _onscreen(self.win, *pos):
+            self.win.geometry("+%d+%d" % (pos[0], pos[1]))
+        self._load_tv()
+        cw = self.tv.width if self.tv else self.CW + self.PAD_L + self.PAD_R
+        ch = self.tv.height if self.tv else self.CH + self.PAD_T + self.PAD_B
+        self.cv = tk.Canvas(self.win, width=cw, height=ch,
+                            bg="#000", highlightthickness=0)
+        self.cv.pack(padx=4, pady=(4, 2))
+        if self.tv is None:
+            self._cabinet()             # no card art: draw one instead
+        # The caption is not decoration: what the game sent is either ONE
+        # asset or a RANGE at a frame rate, and only one of those can be
+        # drawn faithfully today (see poll()). Saying which is on the wire
+        # is the difference between a picture and a measurement.
+        self.cap = tk.Label(self.win, text="", bg="#111", fg="#7ecbff",
+                            font=("Consolas", 8))
+        self.cap.pack()
+        # THE CLIP'S OWN NAME, from the card's scene file (lcdnames.py).
+        # "asset 54" is a number nobody can check; "S1E001 00:18:32" can be
+        # held up against a real Villain Vision, or against the episode.
+        # It is also the only independent check on the id->clip mapping
+        # there has ever been - asset 2 is named PhoneScenes and asset 2 is
+        # a picture of the Batphone.
+        self.nm = tk.Label(self.win, text="", bg="#111", fg="#7a8",
+                           font=("Consolas", 8))
+        self.nm.pack()
+        self.strip = tk.Canvas(
+            self.win, bg="#111", highlightthickness=0,
+            width=self.CW + self.PAD_L + self.PAD_R,
+            height=self.TH + 14)
+        self.strip.pack(pady=(2, 4))
+        self._redraw_strip()
+
+    def _load_tv(self):
+        """The card's own TV sprite + screen rect, once. Absent is normal
+        (no card mounted, a title with no such texture, PIL missing) and
+        silently leaves the drawn cabinet in place."""
+        if self._tv_tried:
+            return
+        self._tv_tried = True
+        if _PILImage is None:
+            return
+        png = os.path.join(self._art, "tvframe.png")
+        txt = os.path.join(self._art, "tvframe.txt")
+        try:
+            with open(txt, encoding="utf8") as f:
+                x, y, w, h = (int(v) for v in f.read().split()[:4])
+            tv = _PILImage.open(png).convert("RGBA")
+        except (OSError, ValueError):
+            return
+        if w <= 0 or h <= 0 or x + w > tv.width or y + h > tv.height:
+            return                      # a rect that is not inside its own
+        self.tv, self.tv_hole = tv, (x, y, w, h)   # sprite is not usable
+
+    def _compose(self, pil, stash=True):
+        """Put a clip frame behind the TV's screen hole and return the
+        whole set as one image. The clip is fitted to the hole KEEPING ITS
+        ASPECT - the hole is squarer than 4:3, and stretching 240x180 to
+        fill it would make every face on the Villain Vision subtly wrong,
+        which is the opposite of the point. `stash=False` is for _fade's
+        own darkened frames, which must not overwrite the record of what
+        the screen is showing."""
+        x, y, w, h = self.tv_hole
+        s = min(w / pil.width, h / pil.height)
+        nw, nh = max(1, int(pil.width * s)), max(1, int(pil.height * s))
+        out = _PILImage.new("RGBA", self.tv.size, (0, 0, 0, 255))
+        out.paste(pil.convert("RGB").resize((nw, nh)),
+                  (x + (w - nw) // 2, y + (h - nh) // 2))
+        out.alpha_composite(self.tv)    # the set, over the picture
+        if stash:
+            self._pic_pil = pil.convert("RGB")   # the PICTURE, pre-set,
+        return _PILImageTk.PhotoImage(out)       # for _fade's screen-only
+                                                 # dissolve
+
+    def _cabinet(self):
+        """Draw the TV around the screen, once, under everything else.
+
+        Tagged "case" and drawn before the picture, so _draw's image item
+        and the placeholder text both land on top without any explicit
+        raise/lower bookkeeping - canvas items stack in creation order.
+        Colours are eyeballed off the machine (warm walnut case, chrome
+        bezel, cream knob panel); the geometry is the PAD_* constants, so
+        the screen keeps its native 240x180 and only the case moves.
+        """
+        w = self.CW + self.PAD_L + self.PAD_R
+        h = self.CH + self.PAD_T + self.PAD_B
+        sx0, sy0 = self.PAD_L, self.PAD_T
+        sx1, sy1 = sx0 + self.CW, sy0 + self.CH
+        c = self.cv
+        c.create_rectangle(0, 0, w, h, fill="#4a3222", outline="", tags="case")
+        c.create_rectangle(2, 2, w - 3, h - 3, fill="#5d4130",
+                           outline="#2b1c12", tags="case")
+        # Chrome bezel: a light ring with a darker inner lip, which is what
+        # actually reads as "metal" at this size.
+        c.create_rectangle(sx0 - 8, sy0 - 8, sx1 + 8, sy1 + 8,
+                           fill="#b9b6ad", outline="#6f6c64", tags="case")
+        c.create_rectangle(sx0 - 3, sy0 - 3, sx1 + 3, sy1 + 3,
+                           fill="#2a2a2a", outline="#8d8a82", tags="case")
+        c.create_rectangle(sx0, sy0, sx1, sy1, fill="#000", outline="",
+                           tags="case")
+        # Right-hand knob panel: two tuning dials and the speaker slot.
+        px0 = sx1 + 12
+        c.create_rectangle(px0, sy0 - 8, w - 8, sy1 + 8, fill="#cfc9b8",
+                           outline="#6f6c64", tags="case")
+        for cy in (sy0 + 26, sy0 + 74):
+            c.create_oval(px0 + 8, cy - 15, px0 + 38, cy + 15,
+                          fill="#2b2b2b", outline="#111", tags="case")
+            c.create_oval(px0 + 15, cy - 8, px0 + 31, cy + 8,
+                          fill="#565656", outline="", tags="case")
+        c.create_rectangle(px0 + 8, sy1 - 34, w - 16, sy1 - 12,
+                           fill="#8c8579", outline="#6f6c64", tags="case")
+        # The script under the screen. Italic because the real one is, and
+        # it is the label that names the thing on David's playfield.
+        c.create_text((sx0 + sx1) // 2, sy1 + 18, text="Villain Vision",
+                      fill="#e8dfc8", font=("Georgia", 11, "italic"),
+                      tags="case")
+
+    def _fade(self, br):
+        """Start (or cut short) the brightness transition. Dark builds the
+        dissolve queue - FADE_STEPS darkened frames, then dark - applied
+        one per poll starting NOW; bright clears it and restores instantly
+        (the reveal rides in with the asset swap).
+
+        ★ THE SET NEVER DIMS. It is a physical cabinet on the machine and
+        only the SCREEN goes dark - the first cut of this dissolve blended
+        the whole composed image, so the wood and knobs faded with every
+        clip swap (David: "the TV outline should not be fading in and
+        out"). With the card's TV each step re-composes the darkened
+        PICTURE into the fully-lit set, and end-state "dark" is a black
+        screen in a visible set, never a hidden item. Without the TV
+        sprite the drawn cabinet lives in its own canvas items, so hiding
+        the picture item was always safe there and still is."""
+        self._fadeq = []
+        if self.item is None:
+            return
+        if br >= 128:
+            self.cv.itemconfig(self.item, image=self.img, state="normal")
+            return
+        if _PILImage is None or self._pic_pil is None:
+            if self.tv is None:
+                self.cv.itemconfig(self.item, state="hidden")
+            return                      # composed set, no frame record:
+        black = _PILImage.new("RGB", self._pic_pil.size, (0, 0, 0))
+        steps = [_PILImage.blend(black, self._pic_pil, a)
+                 for a in self.FADE_STEPS]
+        if self.tv is not None:
+            self._fadeq = [self._compose(s, stash=False) for s in steps]
+            self._fadeq.append(self._compose(black, stash=False))
+        else:
+            self._fadeq = [_PILImageTk.PhotoImage(s) for s in steps] + [None]
+        self._fade_step()
+
+    def _fade_step(self):
+        step = self._fadeq.pop(0)
+        if step is None:
+            self.cv.itemconfig(self.item, state="hidden")
+        else:
+            self._fade_ref = step       # keep-alive, like every PhotoImage
+            self.cv.itemconfig(self.item, image=step, state="normal")
+
+    def _hide(self):
+        # Item 44's contract for a second display's close box: hide, don't
+        # die. The ids keep updating behind it, so nothing is stale if a
+        # future change re-shows it. Record the position FIRST - a close is
+        # the one deliberate placement signal that must survive even a run
+        # that later dies without reaching save_state. _hidden stops the
+        # decode/draw work too - ids keep tracking (cheap), frames do not
+        # advance for a window nobody can see.
+        save_state(self.root, self)
+        self._hidden = True
+        self.win.withdraw()
+
+    def poll(self):
+        now = time.monotonic()
+        if now < self._next:
+            return
+        self._next = now + 0.1      # 10 Hz: one 48-byte reopen-read
+        self._polls += 1
+        try:
+            with open(LCD_PATH, "rb") as f:
+                d = f.read(self.READ)
+        except OSError:
+            return
+        if len(d) < self.READ or struct.unpack_from("<I", d)[0] != self.MAGIC:
+            return
+        if self.win is None:
+            self._build()
+        (_m, _v, _g, _dec, asset, aux, rate, verb, _x1, _x2, _x3,
+         br, _fd, _ms) = struct.unpack_from("<14I", d)
+        # BRIGHTNESS IS PART OF THE PICTURE (0x80|d family, 132 call
+        # sites): the game drops the TVs to 0 for ~250 ms around every
+        # clip swap and restores 255. The wire only ever carries those two
+        # values; going dark DISSOLVES (FADE_STEPS - the real set fades,
+        # David called out the hard cut) and 255 restores instantly with
+        # the swap. Ignoring brightness showed footage during moments the
+        # real TVs are black, which is exactly the class of infidelity
+        # this window exists to not have.
+        if br != self.bright:
+            self.bright = br
+            self._fade(br)
+        elif self._fadeq:
+            self._fade_step()
+        cmd = (asset, aux, rate, verb)
+        changed = cmd != self.state
+        self.state = cmd
+        # ONE display (padlcd.h documents why: display count 1, and all 299
+        # LCD call sites pass the same device), and ONE asset field - the
+        # dispatcher hands that struct field to the one-asset builder as
+        # THE asset. On a STILLS board (the map exists - see the class
+        # docstring) the id selects a stored still and nothing cycles; a
+        # block command selects by its FIRST id, which is measured: the
+        # game-start block 919..928 is the "IN COLOR" title card on the
+        # machine. Without a map, a companion u32 naming a LARGER id is
+        # still treated as the inclusive clip block asset..aux and
+        # _animate cycles it (the game's own duration helper 0x37e2fc
+        # computes (last - first + 1) x a period for exactly such a pair).
+        self.cycle = ((asset, aux) if asset and aux > asset
+                      and not self._map() else None)
+        if changed or not self.cycle:
+            want = asset
+        else:
+            # Mid-block the drawn id has advanced past the first clip ON
+            # PURPOSE; a poll must not snap it back while the command is
+            # unchanged.
+            want = (self.id if self.id and asset <= self.id <= aux
+                    else asset)
+        if want != self.id:
+            self._show(want)
+        elif self._polls % 10 == 0 and want and (
+                not self.have or self.anim is None):
+            # ~1 Hz retry while EITHER artifact is missing. A `not have`
+            # test alone stopped the moment a cached still painted, which
+            # froze the clip upgrade forever when the first sighting
+            # happened before drv existed (motion review finding 1); anim
+            # is None exactly while the clip has not landed.
+            self._show(want)
+        self._caption()
+        self._animate()                 # one frame per poll = 10 fps
+
+    def _caption(self):
+        asset, aux, rate, verb = self.state
+        # THE VERB IS PRINTED, NOT INTERPRETED, past 1 and 2. Five dispatch
+        # kinds send this byte and only two of them are known (they precede
+        # content, so they read as looping / once). 3, 4 and 5 arrive alone
+        # and are almost certainly stop / pause / clear - showing "" for
+        # them, as the previous cut did, made a stop look exactly like
+        # "carry on playing", which is half of why the panel could seem to
+        # lag the game.
+        how = {1: "loop", 2: "once"}.get(verb, "verb %d" % verb if verb else "")
+        # A block command names its whole span and which clip is up. `aux`
+        # was once captioned "range" on no evidence and then a bare number
+        # on principle; the block reading now rests on the game's own
+        # duration helper (see poll), so the caption says what the panel
+        # actually does with it.
+        if self.cycle:
+            what = "assets %d-%d" % self.cycle
+            if self.id and self.cycle[0] <= self.id <= self.cycle[1]:
+                what += " · showing %d" % self.id
+        elif asset:
+            what = "asset %d" % asset
+        else:
+            what = "idle"
+        extra = []
+        if aux and not self.cycle:
+            extra.append("aux %d" % aux)  # aux <= asset: NOT a block; shown raw
+        if rate:
+            extra.append("%d fps" % rate)
+        txt = " · ".join(x for x in [what, how] + extra if x)
+        if self.cap["text"] != txt:
+            self.cap.configure(text=txt)
+        # The name label names what is ON SCREEN: the board still's own
+        # label when the map has the id, the clip's episode+timecode when
+        # it does not.
+        nm = ""
+        if self.id:
+            hit = self._map().get(self.id)
+            nm = hit[1] if hit else self._name_for(self.id)
+        if self.nm is not None and self.nm["text"] != nm:
+            self.nm.configure(text=nm)
+
+    def _name_for(self, i):
+        """The clip's episode+timecode, e.g. "S1E001 00:18:32", or "".
+
+        Loaded once from <art>/names.txt, which lcdnames.py writes from the
+        card's own scene file at run start (watch.sh, beside the other
+        derived tables - it is a per-title TABLE, not a per-asset artifact,
+        so it does not belong on the panel's lazy lcdart path). Read at
+        most ONCE per run; absent is normal and silent, which is every
+        title without an lcdnode.
+        """
+        if not self._named:
+            self._named = True
+            path = os.path.join(self._art, "names.txt")
+            try:
+                with open(path, encoding="utf8") as f:
+                    self.names = dict(
+                        (int(a), b) for a, _, b in
+                        (ln.rstrip("\n").partition("\t") for ln in f)
+                        if a.isdigit() and b)
+            except (OSError, ValueError):
+                self.names = None
+        if not self.names:
+            return ""
+        raw = self.names.get(i, "")
+        # "S1E001_Clips.S1E001_00-18-32-21" -> "S1E001 00:18:32". The tail
+        # after the last dot is the useful part and the frame count is
+        # noise at this size; anything that does not fit the shape is shown
+        # as-is rather than mangled.
+        tail = raw.rsplit(".", 1)[-1]
+        m = re.match(r"^(S\d+E\d+)_(\d\d)-(\d\d)-(\d\d)-\d\d$", tail)
+        if m:
+            return "%s %s:%s:%s" % m.groups()
+        return tail[:34]
+
+    def _draw(self, img):
+        """One persistent image item, reconfigured per frame - a
+        delete/create pair per animation frame would churn canvas ids at
+        10 Hz for nothing."""
+        self.img = img                  # keep the reference: a PhotoImage
+        if self.item is None:           # nobody holds goes blank
+            # "case", not "all": the cabinet is drawn once and must survive
+            # every clip change. Deleting everything here is what would
+            # quietly erase the TV the first time an asset landed.
+            self.cv.delete("pic")
+            self.item = self.cv.create_image(
+                *self._mid(), image=img, tags="pic",
+                # a composed image CONTAINS the set: never hide it (the
+                # cabinet must not blink out with the screen)
+                state="hidden" if (self.bright < 128 and self.tv is None)
+                else "normal")
+        else:
+            self.cv.itemconfig(self.item, image=img)
+
+    def _screen_mid(self):
+        """Centre of the SCREEN, which is not the centre of the canvas once
+        a TV is around it (the knob panel is on one side only)."""
+        if self.tv_hole:
+            x, y, w, h = self.tv_hole
+            return (x + w // 2, y + h // 2)
+        return (self.PAD_L + self.CW // 2, self.PAD_T + self.CH // 2)
+
+    def _mid(self):
+        """Centre of the CANVAS - where a composed image (which already
+        contains the set) is placed, as opposed to a bare clip frame."""
+        if self.tv:
+            return (self.tv.width // 2, self.tv.height // 2)
+        return self._screen_mid()
+
+    def _push_recent(self, i, img):
+        """Remember a clip in the filmstrip. Called only when the DRAWN id
+        changes and real art exists, so a placeholder never enters the
+        history and a re-send of the same asset never duplicates an entry
+        (the game re-issues every attract command ~250 ms later - see
+        padlcd.h - and a strip that showed each twice would be a lie about
+        the sequence)."""
+        try:
+            thumb = img.subsample(4, 4)     # 240x180 -> 60x45, no resample
+        except tk.TclError:
+            return
+        self._recent.append((i, thumb))
+        del self._recent[:-self.STRIP_N]
+        self._redraw_strip()
+
+    def _redraw_strip(self):
+        if self.strip is None:
+            return
+        self.strip.delete("all")
+        n = self.STRIP_N
+        w = self.CW + self.PAD_L + self.PAD_R
+        gap = (w - n * self.TW) // (n + 1)
+        for k in range(n):
+            x = gap + k * (self.TW + gap)
+            # Oldest LEFT, current RIGHT: right-align the history so the
+            # newest entry is always in the same place rather than sliding.
+            idx = len(self._recent) - n + k
+            self.strip.create_rectangle(x - 1, 0, x + self.TW, self.TH + 1,
+                                        outline="#333")
+            if 0 <= idx < len(self._recent):
+                i, thumb = self._recent[idx]
+                self.strip.create_image(x + self.TW // 2, self.TH // 2 + 1,
+                                        image=thumb)
+                self.strip.create_text(x + self.TW // 2, self.TH + 8,
+                                       text=str(i), fill="#7ecbff" if
+                                       idx == len(self._recent) - 1 else "#666",
+                                       font=("Consolas", 7))
+
+    def _show(self, i):
+        # A stills board first: the mapped still IS the display for this
+        # id (measured - see the class docstring). Only an unreadable
+        # still file falls through to the clip-art path below.
+        if i and i in self._map() and self._show_still(i):
+            return
+        # Ask lcdart.py for whatever this id is missing, at most once per
+        # ASK_S per id. Checked against BOTH artifacts: a cache from before
+        # the GIF stage existed has the still but not the motion, and the
+        # old png-only test here silently left such an id frozen for ever.
+        # The backoff (not a once-per-session set) is what makes lcdart's
+        # "the panel retries" contract true: a 'no store' race heals once
+        # the card mounts, at one bounded subprocess per minute per id.
+        if (i and self.drv is not None
+                and time.monotonic() - self._asked.get(i, -1e9) > self.ASK_S
+                and not (
+                    os.path.isfile(os.path.join(self._art, "%d.png" % i))
+                    and os.path.isfile(os.path.join(self._art, "%d.webp" % i)))):
+            self._asked[i] = time.monotonic()
+            self.drv.run_script("lcdart.py", self.game, str(i))
+        if self.id != i:
+            self.anim = None            # new asset: the old clip's frames drop
+        png = os.path.join(self._art, "%d.png" % i)
+        if i and os.path.isfile(png):
+            img = thumb_src = None
+            try:
+                # The THUMBNAIL always comes from the bare still (a
+                # filmstrip of TV sets would be unreadable at 60x45); the
+                # SCREEN gets the composed set when the card art is there.
+                thumb_src = tk.PhotoImage(file=png)
+                img = (self._compose(_PILImage.open(png))
+                       if self.tv is not None else thumb_src)
+            except (tk.TclError, OSError, ValueError):
+                img = None
+            if img is not None:
+                if self.id != i and thumb_src is not None:
+                    self._push_recent(i, thumb_src)
+                self._draw(img)
+                self.id, self.have = i, True
+                return
+        if self.id != i:                    # placeholder, once per change
+            self.cv.delete("pic")           # NOT "all" - the cabinet stays
+            self.item = None
+            self.cv.create_text(*self._screen_mid(),
+                                text=("asset %d" % i) if i else "—",
+                                fill="#888", font=("Consolas", 9), tags="pic")
+        self.id, self.have = i, not i       # nothing named = nothing to fetch
+
+    def _open_clip(self, i):
+        """Read the id's WHOLE clip into memory and open a decoder over it.
+
+        One read, deliberately (motion review findings 2-4): the per-frame
+        decode used to re-open and re-parse the file from byte 0 over
+        \\\\wsl.localhost on every tick - measured at up to ~139 ms per frame
+        at a 150-frame clip's tail, on the UI thread. Reading once also
+        splits the failure modes honestly: an OSError here is the wire
+        (return None, the caller retries next tick); a decode failure PAST
+        this point is the file itself, and may be latched for good.
+
+        Returns the anim dict, {"dead": True} for undecodable bytes, or
+        None to retry.
+        """
+        if _PILImage is None:
+            return {"dead": True}       # stills only; see the import guard
+        try:
+            with open(os.path.join(self._art, "%d.webp" % i), "rb") as f:
+                data = f.read()
+        except OSError:
+            return None                 # not encoded yet, or a 9P hiccup
+        try:
+            im = _PILImage.open(io.BytesIO(data))
+            return {"pil": im, "n": getattr(im, "n_frames", 1),
+                    "i": 0, "frames": []}
+        except Exception:               # noqa: BLE001 - complete bytes, so
+            return {"dead": True}       # this is the clip, not the wire
+
+    def _decode(self, a, idx):
+        """Frame idx as a PhotoImage, or None if the clip ends early."""
+        try:
+            a["pil"].seek(idx)          # sequential: PIL steps ONE frame
+            if self.tv is not None:
+                return self._compose(a["pil"])
+            rgb = a["pil"].convert("RGB")
+            self._pic_pil = rgb         # what _fade dissolves from
+            return _PILImageTk.PhotoImage(rgb)
+        except Exception:               # noqa: BLE001 - corrupt tail: the
+            a["n"] = idx                # clip honestly ends here
+            return None
+
+    def _cycle_next(self):
+        """The clip after this one in a block command, or None when the
+        command names a single clip. A block plays each clip through once
+        (poll documents what that reading rests on): verb 1 wraps to the
+        block's first clip, verb 2 holds on the last (returned as self.id,
+        which _animate reads as 'stay'). An uncached clip along the way
+        stalls the cycle on its placeholder until lcdart lands it - the
+        block heals clip by clip, exactly like every other lazy artifact
+        here."""
+        if not self.cycle:
+            return None
+        first, last = self.cycle
+        verb = self.state[3] if self.state else 0
+        if self.id is None or self.id >= last or self.id < first:
+            return self.id if verb == 2 else first
+        return self.id + 1
+
+    def _map(self):
+        """{id: (path, label)} from <art>/stills/map.txt, loaded once.
+        Non-empty means this display is a STILLS BOARD (the class
+        docstring carries the measurement) and the panel selects stored
+        stills instead of playing clips. Absent is every other title, and
+        the panel behaves exactly as before the map existed."""
+        if not self._map_tried:
+            self._map_tried = True
+            self.stillmap = {}
+            path = os.path.join(self._art, "stills", "map.txt")
+            try:
+                with open(path, encoding="utf8") as f:
+                    for ln in f:
+                        if ln.startswith("#") or not ln.strip():
+                            continue
+                        parts = ln.rstrip("\n").split("\t")
+                        if len(parts) >= 3 and parts[0].isdigit():
+                            self.stillmap[int(parts[0])] = (parts[1], parts[2])
+            except OSError:
+                pass
+        return self.stillmap
+
+    def _show_still(self, i):
+        """Draw the board still the map holds for id i. The PhotoImage is
+        composed once and cached - stills swap every ~5 s and re-reading
+        a 1280x720 card per swap would be pure waste. Returns False when
+        the mapped file is unreadable, so the caller can fall back to the
+        clip art rather than leave the placeholder up."""
+        img = self._still_imgs.get(i)
+        if img is None:
+            path = os.path.join(self._art, "stills", self._map()[i][0])
+            if _PILImage is not None:
+                try:
+                    pil = _PILImage.open(path)
+                except OSError:
+                    return False
+                if self.tv is not None:
+                    img = self._compose(pil)
+                else:
+                    s = min(self.CW / pil.width, self.CH / pil.height)
+                    nw = max(1, int(pil.width * s))
+                    nh = max(1, int(pil.height * s))
+                    out = _PILImage.new("RGB", (self.CW, self.CH), (0,)*3)
+                    out.paste(pil.convert("RGB").resize((nw, nh)),
+                              ((self.CW - nw) // 2, (self.CH - nh) // 2))
+                    self._pic_pil = out
+                    img = _PILImageTk.PhotoImage(out)
+                thumb = _PILImageTk.PhotoImage(
+                    pil.convert("RGB").resize((self.TW, self.TH)))
+            else:
+                try:
+                    img = tk.PhotoImage(file=path)
+                except tk.TclError:
+                    return False
+                thumb = None
+            self._still_imgs[i] = img
+            self._still_imgs[(i, "t")] = thumb
+        if self.id != i:
+            thumb = self._still_imgs.get((i, "t"))
+            if thumb is not None:
+                self._recent.append((i, thumb))
+                del self._recent[:-self.STRIP_N]
+                self._redraw_strip()
+        self._draw(img)
+        self.id, self.have = i, True
+        self.anim = None                # a stills board never animates
+        return True
+
+    def _animate(self):
+        """Advance the screen one frame. lcdart.py encodes at 10 fps and
+        this runs once per 10 Hz poll, so encode rate = display rate by
+        construction. Skipped entirely while the window is hidden - nobody
+        is watching, and the decode pass is the one part of this panel with
+        a real per-tick cost."""
+        if self._hidden:
+            return
+        if self._fadeq:
+            return                      # a dissolve is mid-flight: one tick
+                                        # of held frame beats a fight over
+                                        # the canvas item
+        if self._map():
+            return                      # a stills board NEVER animates -
+                                        # that is the measurement this whole
+                                        # mode rests on
+        i, a = self.id, self.anim
+        # NOT gated on `have` (motion review finding 5): a corrupt still
+        # must not block a perfectly good clip from playing.
+        if not i:
+            return
+        if a is None:
+            a = self.anim = self._open_clip(i)
+            if a is None:
+                return                  # not encoded yet: retried next tick
+        if a.get("dead"):
+            return                      # undecodable clip: keep the still
+        idx = a["i"]
+        if idx >= a["n"]:
+            nxt = self._cycle_next()
+            if nxt is not None:
+                if nxt != self.id:
+                    self._show(nxt)     # block command: the next clip's
+                    return              # still paints now, motion next tick
+                return                  # verb 2 at the block's end: hold
+            # SINGLE clip: the verb decides. 2 = play ONCE - the wire said
+            # so, and looping it anyway was the panel's own last act of
+            # unfaithfulness (the game re-commands the display every
+            # attract beat precisely because a one-shot ENDS). 1 = loop.
+            if self.state and self.state[3] == 2:
+                return                  # hold the last frame
+            idx = a["i"] = 0            # verb 1 (or unknown): it loops
+        if idx < len(a["frames"]):
+            frame = a["frames"][idx]
+        else:
+            frame = self._decode(a, idx)
+            if frame is None:           # corrupt tail: _decode shortened n
+                if not a["frames"]:
+                    self.anim = {"dead": True}
+                    return
+                idx = a["i"] = 0
+                frame = a["frames"][0]  # wrap and draw THIS tick, so the
+            else:                       # seam costs no blank frame
+                a["frames"].append(frame)
+                if len(a["frames"]) >= a["n"]:
+                    a.pop("pil", None)  # decode pass over: drop the reader
+                                        # and its buffered bytes
+        self._draw(frame)
+        a["i"] = idx + 1
 
 
 class Schematic(StateOps):
@@ -3949,6 +4820,15 @@ def main():
         return
     root = tk.Tk()
     root.title(WINDOW_TITLE)
+    # VILLAIN VISION (item 83): the lcdnode's TVs, as their OWN window beside
+    # this one - main owns it because it belongs to the TITLE, not to
+    # whichever view shape the title happens to get. Lazy: no window until
+    # the padlcd block stamps, which only an lcdnode title's shim ever does,
+    # so every other title pays one 48-byte read per poll and shows nothing.
+    # Registered as LCD_PANEL so save_state() records its position.
+    global LCD_PANEL
+    lcd = LCD_PANEL = LcdPanel(root, GAME)
+    lcd.start()
     # ARTWORK IF THE TITLE HAS IT, THE SWITCH LIST IF IT DOES NOT. Both are
     # real answers; which one applies is a property of the game, not of this
     # window. See load_switch_list() for why most titles are the second case.
@@ -4015,10 +4895,13 @@ def main():
                     view = Field(root)
                 else:
                     view = Schematic(root, fresh)
+                lcd.drv = view.drv      # the panel's art fetches ride it
 
             poll_for_tables(root, load_switch_list, _swap_in)
         else:
             view = Schematic(root, rows)
+    if view is not None:
+        lcd.drv = view.drv              # the panel's art fetches ride it
     pos = load_state().get("playfield_pos")
     if pos and _onscreen(root, *pos):
         root.geometry("+%d+%d" % (pos[0], pos[1]))

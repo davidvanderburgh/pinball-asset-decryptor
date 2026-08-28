@@ -98,7 +98,8 @@ void *gst_pipeline_new(const char *name)
     if (!real) real = dlsym(RTLD_NEXT, "gst_pipeline_new");
     r = real ? real(name) : 0;
     pad_vid_note_pipeline(r);
-    GSTLOG("[gst] pipeline_new(\"%s\") -> %p\n", name ? name : "(null)", r);
+    GSTLOG("[gst] pipeline_new(\"%s\") -> %p ra=%p\n", name ? name : "(null)",
+           r, __builtin_return_address(0));
     return r;
 }
 
@@ -222,14 +223,21 @@ int gst_element_set_state(void *element, int state)
             pad_vid_announce(element, 3, 4);          /* PAUSED -> PLAYING */
             r = 1;
         }
-        GSTLOG("[gst] set_state(%p, %s) -> %d  [bridge]\n", element,
-               (state >= 0 && state < 5) ? nm[state] : "?", r);
+        /* ra: WHO asked, because "the game stopped the villain channels at
+         * 0 frames" (item 83) was undiagnosable without it - the four
+         * 137-store pipelines get set up and then torn down and nothing
+         * named the code path. qemu-user guest addresses: subtract
+         * guest_base 0x10000 to land in the ELF. */
+        GSTLOG("[gst] set_state(%p, %s) -> %d  [bridge] ra=%p\n", element,
+               (state >= 0 && state < 5) ? nm[state] : "?", r,
+               __builtin_return_address(0));
         return r;
     }
 
     r = real ? real(element, state) : 0;
-    GSTLOG("[gst] set_state(%p, %s) -> %d\n", element,
-           (state >= 0 && state < 5) ? nm[state] : "?", r);
+    GSTLOG("[gst] set_state(%p, %s) -> %d ra=%p\n", element,
+           (state >= 0 && state < 5) ? nm[state] : "?", r,
+           __builtin_return_address(0));
     return r;
 }
 

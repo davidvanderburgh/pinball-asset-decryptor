@@ -1773,7 +1773,13 @@ static void segv_print_header(unsigned long *uc)
                 if (ispc || islr) {
                     char save = *eol;
                     *eol = 0;
-                    snprintf(b, sizeof b, "[segv] map %s%s\n", line,
+                    /* %.170s: a maps line can be pathological and clipping
+                     * one in a crash log is fine - gcc's format-truncation
+                     * warning here printed as a wall of "errors" in the app
+                     * log on every shim rebuild (tester report, 2026-08-25),
+                     * which is the bug this precision fixes. Same story on
+                     * every other %.Ns in a log line below. */
+                    snprintf(b, sizeof b, "[segv] map %.170s%s\n", line,
                              ispc ? "   <-- PC" : "   <-- LR");
                     logmsg(b);
                     if (ispc) {
@@ -1888,7 +1894,8 @@ static void segv_install(void)
 static void segv_handler(int sig, void *info, void *ucv)
 {
     unsigned long *uc = ucv;
-    char b[200];
+    char b[240];            /* the 16-register dump is 217 bytes - 200 was
+                             * genuinely truncating pc= off the crash log   */
     (void)sig; (void)info;
     scan_guard_check(uc);   /* never returns if the guarded scan faulted */
     if (!uc) { logmsg("[segv] no context\n"); _exit(99); }
@@ -2525,7 +2532,7 @@ static void nv_load(void)
     while (got < SLOTSIZE && (r = real_read(fd, store[0] + got, SLOTSIZE - got)) > 0)
         got += (unsigned long)r;
     real_close(fd);
-    snprintf(m, sizeof m, "[i2c] loaded saved NVRAM from %s%s\n",
+    snprintf(m, sizeof m, "[i2c] loaded saved NVRAM from %.130s%s\n",
              seeded ? NV_PATH : path,
              seeded ? " (seeding this title's own EEPROM; it is per-title now)"
                     : "");
@@ -3605,7 +3612,7 @@ static void nb_fident_load(void)
     if (n > 0) {
         nb_fident_state = 1;
         snprintf(msg, sizeof msg,
-                 "[nbid] %d node identities from %s\n", n, path);
+                 "[nbid] %d node identities from %.110s\n", n, path);
         logmsg(msg);
     }
 }
@@ -3879,11 +3886,14 @@ static void nb_hexreg_scan(void)
 }
 
 /* The board's MCU part id names its LPC class (the game's own table at
- * 0x69cc24); only the three classes hwshim has measured part ids for are
- * ever claimed, so three entries is the whole mapping. */
+ * 0x69cc24); only the classes hwshim has measured part ids for are
+ * ever claimed, so these entries are the whole mapping. */
 static unsigned nb_hexreg_class(unsigned part)
 {
     if (part == 0x00020023u) return 1;          /* LPC1112_101 */
+    if (part == 0x00030030u) return 3;          /* LPC1113_302 (lcdnode) -
+                                                 * measured off batman's own
+                                                 * descriptor table, item 82 */
     if (part == 0x00140040u) return 4;          /* LPC1124_303 */
     if (part == 0x2c40102bu) return 5;          /* LPC1313     */
     return 0;
@@ -5585,7 +5595,8 @@ static int sw_file_table(void)
     f = ropen(path, "r");
     if (!f) {
         snprintf(msg, sizeof msg, "[swfind] no by-shape table and no file "
-                 "table (%s): the playfield stays switchless this run\n", path);
+                 "table (%.140s): the playfield stays switchless this run\n",
+                 path);
         logmsg(msg);
         return 0;
     }
@@ -5623,8 +5634,8 @@ static int sw_file_table(void)
     }
     rclose(f);
     if (n < 16) {   /* a handful of rows is a parse accident, not a table */
-        snprintf(msg, sizeof msg, "[swfind] file table %s parsed to only %u "
-                 "row(s) - not trusted, not installed\n", path, n);
+        snprintf(msg, sizeof msg, "[swfind] file table %.140s parsed to only "
+                 "%u row(s) - not trusted, not installed\n", path, n);
         logmsg(msg);
         return 0;
     }
@@ -5633,8 +5644,8 @@ static int sw_file_table(void)
     sw_shadow_count = maxid + 1;
     sw_ftab_installed = 1;
     snprintf(msg, sizeof msg,
-             "[swfind] switch table loaded from %s: %u switches, ids to %u "
-             "(ELF-derived; the names live in the file)\n", path, n, maxid);
+             "[swfind] switch table loaded from %.120s: %u switches, ids to "
+             "%u (ELF-derived; the names live in the file)\n", path, n, maxid);
     logmsg(msg);
     return 1;
 }
@@ -6484,6 +6495,12 @@ static void nb_nodes_init(void)
         for (id = 1; id < n && nb_nnodes < (int)sizeof nb_nodes; id++) {
             unsigned node = ((const unsigned char *)(unsigned long)(st + id * 32))[20];
             if (!node) continue;                 /* 0 is the cabinet, over SPI */
+            if (node == 0xffu) continue;         /* swelf poisons the ids its
+                                                  * file table does not carry
+                                                  * with node 0xff - a marker,
+                                                  * not a board. batman seeded
+                                                  * a bogus node 255 into the
+                                                  * schedule off it (item 82) */
             if (nb_is_silent(node)) continue;    /* the machine does not have it
                                                   * - same fact, same filter as
                                                   * the fallback below */
@@ -8635,6 +8652,212 @@ static void coil_publish(const unsigned char *p, int n)
 
 extern int atoi(const char *);           /* same GCC 14 reason as open/close */
 
+/* ---- VILLAIN VISION (padlcd.h, item 83) --------------------------------
+ *
+ *     98 <ilen> f2 <sel> <payload...> <cksum> <replylen>
+ *
+ * The lcdnode's three playfield LCDs are driven by ASSET NUMBERS, not
+ * pixels: the game names a stored clip in the card's villain-TV store and
+ * the board plays it locally, so nothing image-shaped ever crosses this
+ * bus. ONE logical display (fixture display count 1; 299/299 call sites on
+ * the same device) feeds all three TVs.
+ *
+ * The payload's shape is chosen BY LENGTH - 4 a verb, 8 an asset, 14 and 24
+ * an asset plus fields nobody has named yet. padlcd.h owns that table, the
+ * addresses behind it, and the reason `aux` is not called a range end; this
+ * struct is its C twin - keep them in step.
+ *
+ * Which node is the lcdnode differs per title, so PAD_LCD_NODE names it
+ * (watch.sh derives it from node_ident.txt's type=lcdnode row); unset or 0
+ * publishes nothing, which is every title without one. */
+struct padlcd_shm {
+    unsigned magic, version, gen, decoded;
+    unsigned asset, aux, rate, verb, x1, x2, x3, bright, fade, ms;
+    unsigned ring_head;
+    struct {
+        unsigned ms, last;
+        unsigned short rep;
+        unsigned char sel, len, b[22], pad[2];
+    } ring[64];
+};
+#define PADLCD_MAGIC 0x44434c50u
+#define PADLCD_VERSION 4u
+
+static struct padlcd_shm *lcd_shm;
+
+static unsigned lcd_node(void)
+{
+    static int n = -1;
+    if (n < 0) {
+        const char *e = getenv("PAD_LCD_NODE");
+        n = (e && *e) ? atoi(e) : 0;
+        if (n < 0 || n > 63) n = 0;
+    }
+    return (unsigned)n;
+}
+
+static void lcd_map(void)
+{
+    static int tried;
+    const char *path;
+    int fd;
+    void *m;
+    if (lcd_shm || tried) return;
+    tried = 1;
+    path = getenv("PAD_LCD_SHM");
+    if (!path || !*path) return;
+    fd = open(path, 2 /*O_RDWR*/, 0);
+    if (fd < 0) return;
+    m = mmap(0, 4096, 3, 1, fd, 0);
+    close(fd);
+    if (!m || m == (void *)-1) return;
+    lcd_shm = (struct padlcd_shm *)m;
+    /* Brightness BEFORE the magic: the panel blanks the screen when
+     * bright < 128 (the game really does command 0 around clip swaps),
+     * so a zero-initialised field would read as "the game said dark"
+     * from the first poll until the first 0x80 frame. 255 here means 0
+     * below only ever appears because the wire carried it. */
+    lcd_shm->bright = 255;
+    lcd_shm->magic = PADLCD_MAGIC;
+    lcd_shm->version = PADLCD_VERSION;
+}
+
+/* Frame periods at 0x5c9340, in 1/1280 s -> fps. A range command carries the
+ * INDEX's value, not an fps, and it is decoded here so no reader has to know
+ * the table. An unknown value passes through as 0 rather than a wrong fps. */
+static unsigned lcd_fps(unsigned period)
+{
+    static const unsigned char per[8] = { 43, 53, 64, 80, 84, 106, 128, 160 };
+    static const unsigned char fps[8] = { 30, 24, 20, 16, 15, 12, 10, 8 };
+    unsigned i;
+    for (i = 0; i < 8; i++) if (per[i] == period) return fps[i];
+    return 0;
+}
+
+static unsigned lcd_le32(const unsigned char *q)
+{
+    return (unsigned)q[0] | ((unsigned)q[1] << 8)
+         | ((unsigned)q[2] << 16) | ((unsigned)q[3] << 24);
+}
+
+/* ★ WRITTEN AGAINST THE GAME'S OWN FRAME BUILDERS AND ITS DISPATCHER
+ * (padlcd.h documents the table, the addresses, and what is still unnamed).
+ *
+ * Two mis-decodes are buried under this function and both are worth keeping
+ * in view. v1 read the payload as u16 ids at stride 4 behind a display
+ * index, inventing two screens and turning one command into three bogus
+ * asset ids. v2 fixed the screens but kept inventing meaning: it named the
+ * 14-byte form's two u32s "first" and "last" and called it a range, from a
+ * single capture that happened to contain 54 and 928. The dispatcher at
+ * 0x37e49c settles it - the u32 at payload offset 1 is the SAME struct
+ * field the one-asset command sends as the asset, so it is the clip; the
+ * other u32 is a field nobody has traced to a filler yet, and it is
+ * published under a name that admits that.
+ *
+ * The 24-byte form is decoded here too. v2 dropped it as unknown while its
+ * own header claimed it had no call sites; kind 3 of the dispatcher
+ * (0x37e578 -> 0x51a86c) is that call site, and it carries the asset in the
+ * same slot as the other two.
+ *
+ * Every cmd-f2 selector is ringed, decoded or not - v1 ringed only the
+ * frames it already believed in, which is precisely how its mis-parse
+ * survived a live capture that contained the evidence against it. */
+static void lcd_publish(const unsigned char *p, int n)
+{
+    unsigned node, sel, ilen, slot, k, plen;
+    if (n < 6 || !(p[0] & 0x80)) return;
+    node = p[0] & 0x3f;
+    if (!lcd_node() || node != lcd_node()) return;
+    if (p[2] != 0xf2) return;
+    sel = p[3];
+    if (sel < 0x80u) return;      /* every LCD selector is >= 0x80          */
+    ilen = p[1];                  /* cmd..cksum, so payload ends at p[1+ilen]*/
+    if (ilen < 3 || (unsigned)n < ilen + 2) return;
+    lcd_map();
+    if (!lcd_shm) return;
+
+    /* THE RAW RING FIRST, so a mis-parse below is still on record - but
+     * COALESCED (v4): a frame identical to the previous slot bumps that
+     * slot's count instead of taking a new one. The first live reading
+     * showed why this is not optional: the 0x90 poll arrives at 60 Hz
+     * with a constant payload, so a raw ring held ~1 s of history and
+     * every play command was flushed within a second of arriving. A 60 Hz
+     * constant IS a count; recording it 64 times over is what destroyed
+     * the evidence, not what kept it. */
+    plen = ilen - 3;              /* bytes after the selector, before cksum */
+    if (plen > 22) plen = 22;
+    if (lcd_shm->ring_head) {
+        slot = (lcd_shm->ring_head - 1u) % 64u;
+        if (lcd_shm->ring[slot].sel == (unsigned char)sel
+                && lcd_shm->ring[slot].len == (unsigned char)plen) {
+            for (k = 0; k < plen; k++)
+                if (lcd_shm->ring[slot].b[k] != p[4 + k]) break;
+            if (k == plen) {
+                lcd_shm->ring[slot].last = (unsigned)pad_ms();
+                if (lcd_shm->ring[slot].rep < 0xffffu)
+                    lcd_shm->ring[slot].rep++;
+                goto ringed;
+            }
+        }
+    }
+    slot = lcd_shm->ring_head % 64u;
+    lcd_shm->ring[slot].ms   = (unsigned)pad_ms();
+    lcd_shm->ring[slot].last = lcd_shm->ring[slot].ms;
+    lcd_shm->ring[slot].rep  = 1;
+    lcd_shm->ring[slot].sel  = (unsigned char)sel;
+    lcd_shm->ring[slot].len  = (unsigned char)plen;
+    for (k = 0; k < plen; k++) lcd_shm->ring[slot].b[k] = p[4 + k];
+    lcd_shm->ring_head++;
+ringed:
+
+    if ((sel & 0xf8u) == 0x98u) {           /* the play family              */
+        if (ilen == 4) {
+            /* [verb]. 1 and 2 precede content (play looping / play once);
+             * 3, 4 and 5 arrive alone from dispatch kinds 7, 5 and 6. The
+             * NUMBER is published: v2 stored these in a field called `mode`
+             * whose reader only had words for 1 and 2, so a bare 3/4/5 -
+             * every candidate for "stop" - reached the panel as silence. */
+            lcd_shm->verb = p[4];
+        } else if (ilen == 8) {             /* [0] [u32 A]                  */
+            lcd_shm->asset = lcd_le32(p + 5);
+            lcd_shm->aux = lcd_shm->rate = 0;
+            lcd_shm->x1 = lcd_shm->x2 = lcd_shm->x3 = 0;
+        } else if (ilen == 14 || ilen == 24) {
+            /* [flags][u32 A][u32 D][u16 rate], and for 24 three more
+             * fields after it. A is the clip either way. */
+            lcd_shm->asset = lcd_le32(p + 5);
+            lcd_shm->aux   = lcd_le32(p + 9);
+            lcd_shm->rate  = lcd_fps((unsigned)p[13]
+                                     | ((unsigned)p[14] << 8));
+            if (ilen == 24) {
+                lcd_shm->x1 = lcd_le32(p + 15);
+                lcd_shm->x2 = lcd_le32(p + 19);
+                lcd_shm->x3 = (unsigned)p[23] | ((unsigned)p[24] << 8);
+            } else {
+                lcd_shm->x1 = lcd_shm->x2 = lcd_shm->x3 = 0;
+            }
+        } else {
+            return;                         /* ringed, not understood       */
+        }
+        lcd_shm->ms = (unsigned)pad_ms();
+        lcd_shm->decoded++;
+        lcd_shm->gen++;
+    } else if ((sel & 0xf8u) == 0x80u && ilen >= 5) {
+        lcd_shm->bright = p[4];             /* [brightness][fade]           */
+        lcd_shm->fade   = p[5];
+        lcd_shm->gen++;
+    }
+    /* 0x90 (status poll, wants a 12-byte reply) and the never-called 0x88 /
+     * 0xb8 builders are ringed and left alone. (An earlier note here blamed
+     * the 250 ms re-send on the unanswered poll; measured WITH the echo on,
+     * every command is still double-issued 250 ms apart - pending clears on
+     * SEND (0x37e484), it is the game's own habit. The echo stays only
+     * because a correct-length reply keeps a raw bus dump readable.)
+     * NOTE decoded++ fires ONLY for the play family above - never the 60 Hz
+     * poll - so a reader can tell "the game re-commanded the display"
+     * from "the block merely re-read". */
+}
+
 /* Budgeted like the skip log, and off unless PAD_LED_DEC_LOG is set. A run
  * decodes thousands of these; the point is a SAMPLE to compare against the
  * dropped frames, not a transcript. */
@@ -10137,6 +10360,52 @@ long shim_read(int fd, void *b, unsigned long n)
                     }
                 }
             }
+            /* ---- VILLAIN VISION 0x90 STATUS (item 83) -----------------
+             * The lcdnode's cmd f2 selector 0x90 wants a 12-byte payload.
+             * The game's poll loop (0x37e5ec, 60 Hz) stores it verbatim as
+             * three u32s in the display object (+4/+8/+12).
+             *
+             * ★ THE CONTENT IS INERT, and this comment is the correction
+             * of two claims I shipped before the RE (10-agent pass,
+             * 2026-08-25, verified). (1) get_status (0x37e6d4) is the ONLY
+             * reader of +4/+8/+12 and it is DEAD CODE - its address occurs
+             * zero times in the 7.4 MB image (no bl, no fn-ptr table, no
+             * literal). Nothing runtime consumes these words. (2) The 250
+             * ms "re-send" is NOT caused by a missing reply and this echo
+             * does NOT stop it: measured live WITH the echo active, every
+             * attract clip is still commanded twice 250 ms apart. It is the
+             * game's own double-issue, and the play command's pending bit
+             * is cleared by the SEND succeeding (0x37e484/0x37e504), not by
+             * any reply. So answering 0x90 changes nothing the game does.
+             *
+             * WHY ANSWER IT AT ALL, then: a real board replies, and a
+             * correct-LENGTH 12-byte reply is never worse than a short read
+             * (which an addressed node uses to mean "absent"). node 24
+             * stays present with no fault (nbsched flags 0x0 all run). The
+             * word0=asset content below is HUMAN-FACING telemetry only - it
+             * makes a raw bus dump readable - not something the game reads.
+             *   PAD_LCD_R=<24 hex chars>  force an exact 12-byte payload
+             *   PAD_LCD_R=0               all-zero reply (same game effect)
+             * Nothing here can revive the villain-TV renderer: those pixels
+             * are a SECOND EGL display the binary hard-disables (padlcd.h). */
+            if (nb_req_len > 3 && nb_req[2] == 0xf2 && nb_req[3] == 0x90 &&
+                lcd_node() && (unsigned)(nb_req[0] & 0x3f) == lcd_node() &&
+                plen >= 12) {
+                static char *spec = (char *)-1;
+                if (spec == (char *)-1) spec = getenv("PAD_LCD_R");
+                if (spec && *spec) {
+                    char *q = spec;
+                    for (i = 0; i < 12 && ishex(q[0]) && ishex(q[1]); i++) {
+                        p[i] = (unsigned char)(hexval(q[0]) * 16 + hexval(q[1]));
+                        q += 2;
+                    }                       /* "0" = fewer than 2 digits: zeros */
+                } else if (lcd_shm && lcd_shm->asset) {
+                    p[0] = (unsigned char)lcd_shm->asset;
+                    p[1] = (unsigned char)(lcd_shm->asset >> 8);
+                    p[2] = (unsigned char)(lcd_shm->asset >> 16);
+                    p[3] = (unsigned char)(lcd_shm->asset >> 24);
+                }
+            }
             /* ---- COMMAND 0x11: THE SWITCH SCAN ------------------------
              * 0x59ef60 builds { 0x80|node, 01, 11, 0a } and reads 10 payload
              * bytes: [0..7] switch bits, [8..9] a u16 the caller may want.
@@ -10412,6 +10681,7 @@ long shim_write(int fd, const void *b, unsigned long n)
         sw_find_maybe();
         led_publish(nb_req, nb_req_len);
         coil_publish(nb_req, nb_req_len);
+        lcd_publish(nb_req, nb_req_len);        /* item 83: VILLAIN VISION */
         coil_probe(nb_req, nb_req_len);
         nb_trace();
         nb_maybe_poke();

@@ -79,6 +79,12 @@ SW_HOST=$ROOT/dump/padsw
 # PAD_NB_LOG - raising that quadruples the boot.
 LED_HOST=$ROOT/dump/padled
 LED_GUEST=/dump/padled
+# VILLAIN VISION (padlcd.h, item 83): the lcdnode's display-id frames, decoded
+# by the shim into a one-page block so the playfield's LCD panel needs no log.
+# Only a title whose node directory declares an lcdnode gets a node id (below),
+# so on every other title the shim publishes nothing.
+LCD_HOST=$ROOT/dump/padlcd
+LCD_GUEST=/dump/padlcd
 SW_GUEST=/dump/padsw
 # Audio: the guest writes PCM into a FIFO, a native ffmpeg drains it into WSLg's
 # PulseAudio. Same host-path/guest-path split as the GL ring and the keyboard.
@@ -195,9 +201,11 @@ else GAME_ELF="$ROOT/games/$GAME/game"; fi
 # the shim's built-in fallback, which is exactly the pre-item-51 behaviour.
 NBID="$PAD_TABLES/$GAME/node_ident.txt"
 mkdir -p "$PAD_TABLES/$GAME" 2>/dev/null
+NBID_FRESH=0
 if python3 "$RIG/nbdir.py" "$GAME_ELF" --hexdir "${GAME_ELF%/*}" \
         --out "$NBID.tmp" 2>/dev/null && grep -q '^node=' "$NBID.tmp"; then
     mv -f "$NBID.tmp" "$NBID"
+    NBID_FRESH=1
     echo "[watch] node identity: $(grep -c '^node=' "$NBID") boards derived" \
          "from $GAME's own node directory"
 else
@@ -208,6 +216,55 @@ else
     else
         echo "[watch] node identity: derivation failed; the shim keeps its" \
              "built-in (godzilla) table"
+    fi
+fi
+# WHICH NODE IS THE lcdnode (item 83, batman's VILLAIN VISION = node 24).
+# From the derived table so it is per-title and empty on titles without one -
+# the shim publishes nothing when PAD_LCD_NODE is unset/0.
+LCD_NODE=$(sed -n 's/^node=\([0-9]*\) type=lcdnode .*/\1/p' "$NBID" 2>/dev/null | head -1)
+if [ -n "$LCD_NODE" ]; then
+    echo "[watch] lcdnode: node $LCD_NODE drives this title's LCD insert"
+    # NAME THE CLIPS (item 83). The bus names them by number; the card's own
+    # scene file names them by episode and timecode, which is the only
+    # independent check on the id->clip mapping there has ever been and the
+    # only form a person can compare against a real Villain Vision. A table,
+    # so it is derived here with the others rather than lazily by the panel.
+    # ~0.2 s, skipped when it already exists; failure is not fatal - the
+    # panel just shows ids, exactly as before this existed.
+    # No chown: lcdnames writes 0644, and the panel only ever READS it.
+    # ($DROP is not defined this early - it is set ~200 lines below, and
+    # `set -u` would abort the run on it.)
+    if [ ! -s "$PAD_TABLES/$GAME/lcd/names.txt" ]; then
+        if python3 "$RIG/lcdnames.py" "$GAME" >/dev/null 2>&1; then
+            echo "[watch] villain clips: $(wc -l < "$PAD_TABLES/$GAME/lcd/names.txt") named from the card's own scene file"
+        fi
+    fi
+    # THE SET ITSELF (item 83): the same scene carries the TV sprite the
+    # game draws around the clip, screen hole and all, so the panel can
+    # show the card's own artwork instead of a drawn approximation.
+    # ~10 s the first time (it decodes candidate textures), cached after;
+    # failure is not fatal - the panel falls back to its drawing.
+    if [ ! -s "$PAD_TABLES/$GAME/lcd/tvframe.png" ]; then
+        if python3 "$RIG/lcdframe.py" "$GAME" >/dev/null 2>&1; then
+            echo "[watch] villain set: TV artwork pulled from the card's scene textures"
+        fi
+    fi
+    # THE ATTRACT CARD (item 83): the green BATMAN logo the real set opens
+    # attract with is the card's only 1280x720 lcd texture; lcdlogo.py
+    # derives it once and the panel interposes it when the wire's shape
+    # says a game just ended. Failure is not fatal - no card, no interlude.
+    if [ ! -s "$PAD_TABLES/$GAME/lcd/logo.png" ]; then
+        if python3 "$RIG/lcdlogo.py" "$GAME" >/dev/null 2>&1; then
+            echo "[watch] villain card: attract logo pulled from the card's scene textures"
+        fi
+    fi
+    # THE STILL SET (item 83): the board holds one stored still per
+    # command id and never plays video - measured from machine footage;
+    # lcdstills.py carries the table and each entry's provenance. The
+    # map's existence is what switches the panel to stills mode, so this
+    # runs even when cached (it prints the mapped/pinned count).
+    if python3 "$RIG/lcdstills.py" "$GAME" 2>/dev/null | grep -q mapped; then
+        echo "[watch] villain stills: board still set derived ($GAME)"
     fi
 fi
 #
@@ -239,7 +296,7 @@ fi
 # wrong and why no known title trips it.
 NB_SILENT_DEFAULT=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
     --switches "$PAD_TABLES/$GAME/switch_list.txt" \
-    --nodedir "$NBID" --silent 2>/dev/null)
+    --nodedir "$NBID" --nodedir-fresh "$NBID_FRESH" --silent 2>/dev/null)
 export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 # WHY, in the run's own log. The item that asked for this asked for the evidence
 # as well as the decision, and a silenced board is invisible by construction -
@@ -253,7 +310,7 @@ export PAD_NB_SILENT=${PAD_NB_SILENT:-$NB_SILENT_DEFAULT}
 # point of printing it is that a silenced board is otherwise invisible.
 NB_WHY=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
     --switches "$PAD_TABLES/$GAME/switch_list.txt" \
-    --nodedir "$NBID" 2>/dev/null \
+    --nodedir "$NBID" --nodedir-fresh "$NBID_FRESH" 2>/dev/null \
     | sed -n 's/^because: //p')
 # WHICH SILENCED NODES STILL ANSWER THE ff STATUS POLL - PER NODE, not the
 # item-52 everywhere. Measured 2026-08-22 on the Heisei card (godzilla_le):
@@ -268,7 +325,7 @@ NB_WHY=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
 # silenced node, kept as the A/B knob for exactly this comparison.
 NB_FF_DEFAULT=$(python3 "$RIG/nodecensus.py" --elf "$GAME_ELF" \
     --switches "$PAD_TABLES/$GAME/switch_list.txt" \
-    --nodedir "$NBID" --silent-ff 2>/dev/null)
+    --nodedir "$NBID" --nodedir-fresh "$NBID_FRESH" --silent-ff 2>/dev/null)
 export PAD_NB_SILENT_FF=${PAD_NB_SILENT_FF:-${NB_FF_DEFAULT:-0}}
 if [ -n "${PAD_NB_SILENT:-}" ]; then
     echo "[watch] node census: silencing node(s) $PAD_NB_SILENT on $GAME -" \
@@ -569,6 +626,21 @@ teardown() {
     # emu_gone). Removing it here is what makes closing the emulator window
     # close the playfield too. A new run recreates it before launching one.
     rm -f "$LED_HOST"
+    # KEEP THE LCD RING (item 83). The block carries the last 64 cmd-f2
+    # frames this node was sent, decoded or not, and it is the only record
+    # of what the game actually asked the villain TVs to do. Deleting it
+    # with the run meant every question about WHICH clip played WHEN needed
+    # a fresh run to answer, and two mis-decodes shipped for want of exactly
+    # this evidence. lcdring.py reads the copy. Magic-gated: a title with
+    # no lcdnode leaves the block all-zero, and copying THAT would clobber
+    # the last lcdnode run's transcript every time any other title ends.
+    # killgame.sh carries this same stanza for the Stop/app-quit path,
+    # which kills this script before this line can run.
+    if [ -s "$LCD_HOST" ] && head -c 4 "$LCD_HOST" | grep -q PLCD; then
+        cp -f "$LCD_HOST" "$ROOT/dump/padlcd.last" 2>/dev/null
+        [ "$DROP" = 1 ] && chown "$PAD_USER" "$ROOT/dump/padlcd.last" 2>/dev/null
+    fi
+    rm -f "$LCD_HOST"
 
     # ...AND THEN VERIFY IT, because "it closes itself" was only ever true of
     # the WINDOW. The playfield is a Windows process reached through interop,
@@ -767,6 +839,9 @@ rm -f "$ROOT/dump/padbinds"
 # what turns it on.
 rm -f "$LED_HOST"
 dd if=/dev/zero of="$LED_HOST" bs=8192 count=1 status=none
+# The LCD block, same contract (item 83).
+rm -f "$LCD_HOST"
+dd if=/dev/zero of="$LCD_HOST" bs=4096 count=1 status=none
 # This session's identity. savestate copies it into the slot; restorestate
 # compares to tell a SAME-SESSION load (renderer already holds the guest's GL
 # world) from a CROSS-SESSION one (it holds none of it - the game plays but
@@ -780,6 +855,7 @@ cat /proc/sys/kernel/random/uuid > "$ROOT/dump/boot.id" 2>/dev/null || \
 # "dump/padled not readable". The guest is root and ignores the permissions.
 if [ "$DROP" = 1 ]; then
     chown "$PAD_USER" "$LED_HOST" 2>/dev/null
+    chown "$PAD_USER" "$LCD_HOST" 2>/dev/null
     chown "$PAD_USER" "$ROOT/dump" 2>/dev/null
 fi
 
@@ -991,6 +1067,7 @@ echo "[watch] starting $GAME (boot to the first picture takes ~15 s)"
 [ -n "${PAD_PIVOT:-}" ] && rm -f "$ROOT/dump/game.out"
 setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_SW_SHM="$SW_GUEST" PAD_LED_SHM="$LED_GUEST" \
+           PAD_LCD_SHM="$LCD_GUEST" PAD_LCD_NODE="${PAD_LCD_NODE:-$LCD_NODE}" \
            PAD_AUDIO_PLAY="${PAD_AUDIO_PLAY:-}" \
            PAD_AUDIO_FMT="${PAD_AUDIO_FMT:-}" \
            PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \

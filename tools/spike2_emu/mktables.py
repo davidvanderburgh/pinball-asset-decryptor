@@ -47,6 +47,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import coilmap
 import devicexy
 import gameinfo
 import ledio
@@ -264,9 +265,16 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
     # --- device positions, and the LED map derived from them -------------
     dev_dest = os.path.join(tdir, "device_xy.txt")
     led_dest = os.path.join(tdir, "led_io.txt")
+    gn_dest = os.path.join(tdir, "group_node.txt")
     recs = None
+    # `_stale(gn_dest, elf)` is what rebuilds a title whose tables were cached
+    # BEFORE item 53 existed. Every other clause here compares against the game
+    # BINARY, which does not change when the rig's derivation does, so a card
+    # cached last week would have kept its godzilla-mapped led_io.txt for ever
+    # and never grown a group_node.txt at all. A missing derived file is the
+    # honest trigger for re-deriving, and it fires exactly once per title.
     if (force or _stale(dev_dest, elf) or _stale(led_dest, elf)
-            or not _built_from(dev_dest, elf)):
+            or _stale(gn_dest, elf) or not _built_from(dev_dest, elf)):
         if not elf or not os.path.exists(elf):
             say("  devices      no game binary at %s" % elf)
         else:
@@ -309,7 +317,24 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
             for line in devicexy.checks(recs, pf_w, pf_h):
                 say("               %s" % line)
 
-        rows, _problems, _report = ledio.build(recs, None)
+        # ITEM 53: this title's OWN group -> node map, derived beside the
+        # table it is derived from, and written down so the next reader does
+        # not have to re-derive it (or, as every reader did until now, use
+        # godzilla's). group_node_for reads node_ident.txt and switch_list.txt
+        # as siblings of dev_dest; on a first boot the switch list may not be
+        # written yet, and the connector half answers without it.
+        mapping = coilmap.group_node_for(dev_dest, dev_rows=recs)
+        try:
+            _write(gn_dest, coilmap.group_node_text(game, mapping, recs))
+            made["group_node.txt"] = gn_dest
+        except OSError as exc:
+            say("  group map    FAILED to write %s: %s" % (gn_dest, exc))
+        pf = {g: n for g, n in sorted(mapping.items()) if g >= 6}
+        say("  group map    %s" % (", ".join("group %d -> node %d" % (g, n)
+                                             for g, n in pf.items())
+                                   or "no playfield group resolves"))
+
+        rows, _problems, _report = ledio.build(recs, None, mapping)
         try:
             _write(led_dest, ledio.text(game, rows, False))
             made["led_io.txt"] = led_dest

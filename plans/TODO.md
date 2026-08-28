@@ -2783,6 +2783,99 @@ These have each been violated at least once and each cost a run or a window:
       game start observes it.
 
 - [ ] **53. The device-table GROUP → bus NODE map is ONE TITLE'S measurement, ← WORKING ON
+      ★★ IN PROGRESS 2026-08-28, branch `item/53`, ~85% — derived, shipped,
+      offline-verified on 12 titles; awaiting ONE live confirmation on Bond in
+      a STARTED GAME (this item's own acceptance warning). Committed, clean.
+      **Established, and the first one retires this item's biggest unknown:**
+      **(1) BOND'S LAMPS DECODE PERFECTLY — the wire was never the problem.**
+      Read straight out of `dump/padled` during David's own live Bond run
+      (2026-08-28 09:48, his item-80 sweep): `decoded=36351 gen=35969`,
+      **node 8 33 lamps addressed / 3 lit**, **node 9 29 addressed / 4 lit**,
+      and coils firing on both (node 8 index 1 = TROUGH, 93 fires). So this
+      entry's "nor whether its frames decode at all (star_wars's
+      missing-0x84/0x85 class)" is ANSWERED: they do, at volume, on exactly
+      the boards its device table names. The fault was only ever the lookup.
+      **(2) THE DERIVATION NEEDS NO WIRE CAPTURE.** This entry assumed "one
+      PAD_NB_TRACE capture on Bond answers both before the derivation is
+      attempted". It is not needed: **two independent columns already on disk
+      each derive the map, and they AGREE.**
+        - **the switch-name join** — the device table gives a switch a NAME and
+          a GROUP; the running game's own switch table gives that name a NODE.
+          The same join `switchxy.py` already makes for positions. Strongest
+          evidence (it is the game answering) so it wins on conflict.
+        - **the connector column** — `^(\d+)[a-z]?$` on the device table's own
+          `conn` cell, the rule `swnames.py` and `nodecensus.py` already read
+          it by ("the node comes from the CONNECTOR string, never from
+          arithmetic on `group`"). Needs no run, so it answers on the titles
+          whose switch names are all `?`.
+        - **NOT CIRCULAR** — checked before relying on it: `swnames.py` fills a
+          `?` switch list from the device table, but resolves the node from the
+          CONNECTOR, not from `GROUP_NODE`, so neither source rests on the
+          constant being replaced.
+        - **They agree on EVERY playfield group of EVERY title where both can
+          answer** (beatles, deadpool_pro, godzilla_pro, godzilla_le,
+          james_bond_60th_le, jaws_le, john_wick_le) — the same
+          two-derivations-agreeing standard `ledio.py` already holds the boot
+          enumeration to.
+      **(3) RULED OUT — THIS ITEM'S OWN PROPOSED INSTRUMENT DOES NOT
+      DISCRIMINATE ON BOND, and it is worth knowing before someone builds it.**
+      The plan above was to match each node's wire index set against each
+      group's table index set ("an irregular set of ~70 values matching is a
+      fingerprint"). Measured on the live run: Bond's **group 10 is the topper,
+      314 CONTIGUOUS indices 0..313**, so it is a superset of every node's set
+      and scores an EXACT match against nodes 1, 8 AND 9 simultaneously. The
+      real answers (8→8, 9→9) score WORSE than the wrong one. The fingerprint
+      argument needs sparse, irregular sets on both sides; godzilla has them
+      and Bond does not.
+      **What it derives, and what that buys (measured at the desk, 12 titles):**
+      | title | derived | layout LEDs | layout coils |
+      |---|---|---|---|
+      | godzilla_pro / godzilla_le | `6→8, 7→9` — **identical to today** | 113/113, 115/115 | 10/10, 14/14 |
+      | **james_bond_60th_le** | `8→8, 9→9, 10→12` | **0/73 → 73/73** | **0/16 → 16/16** |
+      | jaws_le | `7→8, 8→9` | 67/143 → 143/143 | 8/14 → 14/14 |
+      | dungeons_and_dragons_le | `7→8, 8→9, 9→10` | 88/161 → 161/161 | 9/16 → 16/16 |
+      | deadpool_pro | `7→8, 8→9` | 54/95 → 95/95 | 9/14 → 14/14 |
+      | james_bond_le | `7→8, 8→9, 9→12` | 60/106 → 106/106 | 9/17 → 17/17 |
+      | john_wick_le | `7→8, 8→9` | 57/406 → 118/406 | 9/16 → 16/16 |
+      | king_kong_le | `7→8, 8→9` | 62/412 → 124/412 | 9/21 → 18/21 |
+      | metallica_spike | `7→8, 8→9, 10→11` | 52/425 → 136/425 | 9/22 → 20/22 |
+      | beatles | `6→8, 7→9` | 102/102 (unchanged) | 16/16 |
+      | elvira3 | nothing resolves | 0/275 (unchanged) | no coils |
+      Bond's `led_io.txt` goes **29 → 401 rows**; godzilla_pro's is unchanged
+      at 128, which is the control this had to pass.
+      **★ A WRONG ADDRESS IS WORSE THAN A MISSING ONE, and Bond is the case
+      that forced the rule.** Once a title measures its own map, godzilla's
+      constant is DROPPED rather than used to fill the gaps: Bond's group 7 is
+      24 **backbox** lamps, `GROUP_NODE` reads group 7 as node 9, and on Bond
+      node 9 is a **playfield** board — so every backbox swatch has been
+      rendering playfield values under backbox labels. It now resolves to
+      nothing and draws dark, which is honest. Only `FIXED_GROUPS` (4→0, 5→1,
+      the CPU and the cabinet) survives, confirmed by the switch join on every
+      title that can answer.
+      **Open sub-question, NOT guessed at:** Bond's group 7 may share node 1
+      with group 5 — the live ring shows node 1 addressing indices
+      {2,8,11,14,16..22}, which fits group 7's 0..23 span but not group 5's
+      {1,2,4,5,7}. A one-group-one-node dict cannot express that, and index 2
+      would collide. Left unresolved rather than guessed; it is the backbox
+      swatch view, not the artwork this item is about.
+      **Shipped on `item/53`:** `coilmap.group_node()` gains the two
+      derivations and a stated ladder (measured → this title's ascending-pinnode
+      inference → godzilla's constant); `coilmap.group_node_for()` is the one
+      place that knows the sibling filenames; `group_node.txt` is written per
+      title beside the other derived tables, as this entry asked, carrying the
+      map AND the device counts AND the groups that resolve to nothing;
+      `playfield.py` derives its own map instead of aliasing the constant;
+      `ledio.py` and `coildecode.py` take it too. A missing `group_node.txt` is
+      what re-derives a card cached before this existed — every other
+      staleness clause compares against the game BINARY, which a rig-code
+      change does not touch. 12 new tests in
+      `tests/test_spike2_group_node.py`, godzilla-must-not-move first.
+      **Resume:** the one thing left is this entry's own acceptance — boot
+      james_bond_60th_le, **start a game** (not attract: item 50 measured
+      turtles driving no playfield lamp frames until coins+Start), and show the
+      artwork lighting. Cross-check against `dump/padled` directly, which is
+      independent of the window. The rig was DAVID'S during this pass (his
+      item-80 sweep, Bond live), so no run was taken.
       so most titles' lamps and coils have a position and no wire address.**
       `S2 D3` *(Split out of item 50 on 2026-08-16, which found it while
       giving Bond a playfield. Item 50's grid does not need this — it reads the

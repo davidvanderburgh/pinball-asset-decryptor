@@ -107,11 +107,80 @@ PLATFORM = {
 }
 
 
-def device_switches(game=None, elf_path=None):
+def _fit(recs, bits_by_node, names):
+    """The one (node, shift) a group's device indices ALL land on, or None.
+
+    ★ THE FALLBACK FOR A TABLE WITH NO CONNECTOR COLUMN (2026-08-28). An
+    artwork-less device table - devicexy.BLANK_IMAGE, led_zeppelin_le - carries
+    the class, the (group, index) and the name, and NOTHING else: no image, no
+    position, no part number and no connector. So `device_switches()`'s rule
+    below, which reads the node off the connector and is right to, has nothing
+    to read and every group goes unresolved.
+
+    NOT CIRCULAR, which is the first thing to check because swnames writes the
+    names that other derivations in this rig join back on. The device table
+    supplies (group, index); the SHAPE it is matched against - which bits are
+    live on which node - comes from the shim's reading of the running game's
+    own switch table, and the device table knows nothing about it. Only the
+    NAME column of that table is `?`, and nothing here reads the name column
+    except as a tiebreak among candidates the bits have already admitted.
+
+    WHY NOT coilmap.group_node(), which is this rig's home for group -> node:
+    it answers for COILS, from the node directory's ascending pinnodes, and on
+    this title it cannot answer at all - led_zeppelin_le has three playfield
+    pinnodes {8, 9, 12} against two switch groups {7, 8}, so the ascending rule
+    bails on the count mismatch exactly as it does on Bond and falls back to
+    godzilla's constant, which reads group 7 as node 9. Group 7 is node 8 here.
+    A constant from another title is precisely what must not decide this.
+
+    THE BITS DECIDE, and on this title they are decisive on their own: group 7
+    holds 32 indices and node 8 holds exactly those 32 bits, group 8 holds 18 of
+    node 9's 19. Measured, every group resolves to ONE (node, shift):
+
+        group 2 -> node 4   group 4 -> node 0   group 5 -> node 1
+        group 7 -> node 8   group 8 -> node 9
+
+    Groups 4 and 5 also fit node 8 under a shift, and there the NAME is what
+    separates them - 16 of group 4's names are already on node 0 (DIP 1..8,
+    SERVICE SELECT/PLUS/MINUS/BACK ...), none on node 8. A tie that names
+    cannot break is REFUSED and left `?`, which is this module's standing rule:
+    a wrong name here is a marker that presses the wrong switch.
+    """
+    idx = {r["index"] for r in recs}
+    if not idx:
+        return None
+    fits = []
+    for node, bits in sorted(bits_by_node.items()):
+        for shift in sorted({b - i for b in bits for i in idx}):
+            if not all(i + shift in bits for i in idx):
+                continue
+            # Agreement is scored, not required: on a node the game DID name,
+            # a real pairing agrees on most rows, and the odd disagreement is
+            # a generic PLATFORM label meeting the title's own word for the
+            # same button ("Action Button" / "LOCKDOWN BUTTON").
+            agree = 0
+            for r in recs:
+                have = names.get((node, r["index"] + shift))
+                if have and have != "?":
+                    agree += 1 if have.upper() == r["name"].upper() else -1
+            fits.append((agree, node, shift))
+    if not fits:
+        return None
+    fits.sort(key=lambda f: -f[0])
+    if len(fits) > 1 and fits[0][0] == fits[1][0]:
+        return None                 # nothing separates them - refuse, not guess
+    return fits[0][1], fits[0][2]
+
+
+def device_switches(game=None, elf_path=None, bits_by_node=None, names=None):
     """{node: [device record]} for CLASS-1 (switch) records, sorted by index.
 
     The node comes from the CONNECTOR string, never from arithmetic on `group`:
-    nodecensus.py's header has the measurement that killed `group + 2`.
+    nodecensus.py's header has the measurement that killed `group + 2`. A table
+    that carries no connector at all falls through to `_fit()`, which matches
+    the group's indices against the live wire instead; the connector still wins
+    wherever there is one, so a title that resolved before this existed
+    resolves exactly as it did.
     """
     recs = devicexy.build(game=game, elf_path=elf_path)
     named = collections.defaultdict(set)
@@ -121,10 +190,19 @@ def device_switches(game=None, elf_path=None):
             named[r["group"]].add(int(m.group(1)))
     gnode = {g: (next(iter(n)) if len(n) == 1 else None)
              for g, n in named.items()}
-    out = collections.defaultdict(list)
+    by_group = collections.defaultdict(list)
     for r in recs:
-        if r["cls"] == 1 and gnode.get(r["group"]) is not None:
-            out[gnode[r["group"]]].append(r)
+        if r["cls"] == 1:
+            by_group[r["group"]].append(r)
+    for group, grecs in sorted(by_group.items()):
+        if gnode.get(group) is None and bits_by_node:
+            hit = _fit(grecs, bits_by_node, names or {})
+            if hit:
+                gnode[group] = hit[0]
+    out = collections.defaultdict(list)
+    for group, grecs in by_group.items():
+        if gnode.get(group) is not None:
+            out[gnode[group]].extend(grecs)
     for node in out:
         out[node].sort(key=lambda r: r["index"])
     return out
@@ -166,8 +244,10 @@ def fill(rows, game=None, elf_path=None):
     for _sid, _num, node, bit, _name in rows:
         bits_by_node[node].add(bit)
 
+    names_by_wire = {(node, bit): name
+                     for _sid, _num, node, bit, name in rows}
     try:
-        dev = device_switches(game, elf_path)
+        dev = device_switches(game, elf_path, bits_by_node, names_by_wire)
     except (OSError, SystemExit) as e:
         dev = {}
         report.append("no device table (%s)" % e)

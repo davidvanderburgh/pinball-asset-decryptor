@@ -70,6 +70,8 @@ Nothing here is reachable by findref.sh or litref.py: every reference to this
 table goes through the GOT. It was found structurally, by noticing that a
 0x18-stride scan kept landing on a different field of one repeating record.
 """
+import array
+import collections
 import os
 import re
 import struct
@@ -94,6 +96,36 @@ NAME_OFF = 0x24 - STRIDE
 #: AGAINST, and what seeds the search below. It is NOT the same word in every
 #: title, which is what the comment here used to claim - see layout_image().
 PLAYFIELD_IMAGE = "playfield"
+
+#: ★ ARTWORK-LESS BUILDS SHIP THE SAME TABLE WITH THE DRAWING LEFT OUT, and
+#: until 2026-08-28 this file could not see one at all. led_zeppelin_le 1.22.0
+#: carries all 388 records - class, (group, index) and NAME, every field this
+#: rig actually joins on - with the image name pointing at the shared EMPTY
+#: string and x/y/w/h and the connector and part pointers all zero. Nothing was
+#: subtly wrong with the parse: `seeds()` looks for pointers to an image NAME
+#: and there is none, so the table was never seeded, and `_one()`'s
+#: `0 < w <= 200` would have refused every record even if it had been.
+#:
+#: The cost of that was not the artwork, which this title genuinely does not
+#: have. It was the NAMES. swnames.py fills a title whose own message-table
+#: read comes back `?` from this table, so Led Zeppelin's 51 playfield switches
+#: stayed `?`, and padglhost's binds_playfield() - which matches keys to
+#: switches BY NAME - built no playfield rows at all. The arrow keys were dead
+#: and the trough ids were unknown, which is why no game could be started.
+#:
+#: A blank-image record is therefore accepted, but on TIGHTER terms than a
+#: positioned one, because the image name is the evidence a positioned record
+#: is validated by: every one of x, y, w, h, conn and part must be zero, and
+#: the class must be a real one. A run of four of those at a true 0x30 stride
+#: is not something a data blob produces by accident.
+BLANK_IMAGE = ""
+
+#: How many times a word must appear before it is taken for a candidate shared
+#: empty string. The pointer is repeated once per record and once more per
+#: record from the neighbouring field, so a table worth finding is in the
+#: hundreds; 32 is well below any real table and well above a coincidence.
+#: Candidates that are not really strings cost only a rejected seed.
+BLANK_MIN_REFS = 32
 
 
 def read_table(path):
@@ -128,7 +160,8 @@ def read_table(path):
                     kind=p[0], name=" ".join(p[1:-8]),
                     x=int(p[-8]), y=int(p[-7]), w=int(p[-6]), h=int(p[-5]),
                     group=int(p[-4]), index=int(p[-3]),
-                    conn="" if p[-2] == "-" else p[-2], image=p[-1]))
+                    conn="" if p[-2] == "-" else p[-2],
+                    image="" if p[-1] == "-" else p[-1]))
             except ValueError:
                 continue
     return out
@@ -162,6 +195,12 @@ def layout_image(recs):
     """
     per = {}
     for r in recs:
+        # ★ BLANK_IMAGE is the ABSENCE of a drawing, not a drawing every device
+        # shares. Counted as one it would win this vote outright on an
+        # artwork-less title - every record carries it - and hand the playfield
+        # renderer 388 markers stacked on (0, 0).
+        if r["image"] == BLANK_IMAGE:
+            continue
         per.setdefault(r["image"], []).append(r)
     if not per:
         return None
@@ -212,27 +251,52 @@ def load(path=None):
     return d, cstr
 
 
+def blank_str(d, va):
+    """True if `va` points at an EMPTY C string inside this binary.
+
+    cstr() cannot answer this: it returns None both for "not a string here" and
+    for "a string of length zero", and a blank-image record needs the two told
+    apart. See BLANK_IMAGE.
+    """
+    o = va - VA_BIAS
+    return 0 <= o < len(d) and d[o] == 0
+
+
 def _one(d, cstr, va):
     """Parse a record at `va`, or None if it does not validate."""
     o = va - VA_BIAS
     if o < 0 or o + STRIDE > len(d):
         return None
-    img = cstr(struct.unpack_from("<I", d, o)[0])
-    if img is None or ("/" not in img and img != "playfield"):
+    imgva = struct.unpack_from("<I", d, o)[0]
+    img = cstr(imgva)
+    blank = False
+    if img is None:
+        # ★ The artwork-less variant - see BLANK_IMAGE. Everything a positioned
+        # record proves with its image name, this one has to prove by being
+        # entirely empty where a positioned record is full.
+        if not blank_str(d, imgva):
+            return None
+        img, blank = BLANK_IMAGE, True
+    elif "/" not in img and img != PLAYFIELD_IMAGE:
         return None
     name = cstr(struct.unpack_from("<I", d, o + NAME_OFF)[0])
     if not name:
         return None
     x, y = struct.unpack_from("<hh", d, o + 0x10)
     w, h = struct.unpack_from("<hh", d, o + 0x14)
-    if not (0 <= x <= 4000 and 0 <= y <= 4000 and 0 < w <= 200 and 0 < h <= 200):
+    conn = struct.unpack_from("<I", d, o + 0x18)[0]
+    part = struct.unpack_from("<I", d, o + 0x1C)[0]
+    cls = struct.unpack_from("<h", d, o + 0x08)[0]
+    if blank:
+        if x or y or w or h or conn or part or cls not in (1, 2, 3):
+            return None
+    elif not (0 <= x <= 4000 and 0 <= y <= 4000
+              and 0 < w <= 200 and 0 < h <= 200):
         return None
     grp, idx = struct.unpack_from("<hh", d, o + 0x04)
-    cls = struct.unpack_from("<h", d, o + 0x08)[0]
     return dict(va=va, image=img, x=x, y=y, w=w, h=h, group=grp, index=idx,
                 cls=cls, kind={1: "switch", 2: "coil", 3: "led"}.get(cls, "?"),
-                conn=cstr(struct.unpack_from("<I", d, o + 0x18)[0]) or "",
-                part=cstr(struct.unpack_from("<I", d, o + 0x1C)[0]) or "",
+                conn=cstr(conn) or "", part=cstr(part) or "",
                 name=name)
 
 
@@ -287,7 +351,7 @@ def seeds(d):
     the whole string. Written without slicing (a rfind and an endswith per
     string) because this runs over every printable run in an 8 MB binary.
     """
-    want = set()
+    want = blank_seeds(d)
     pf = PLAYFIELD_IMAGE.encode()
     for m in _STRINGS.finditer(d):
         s, base = m.group(1), m.start(1) + VA_BIAS
@@ -308,6 +372,39 @@ def seeds(d):
         if struct.unpack_from("<I", d, o)[0] in want:
             out.append(o + VA_BIAS)
     return out
+
+
+def blank_seeds(d):
+    """Candidate addresses of a SHARED EMPTY STRING, for the artwork-less table.
+
+    An artwork-less record (BLANK_IMAGE) names no image, so the seeding above
+    has nothing to look for: there is no `playfield`, no path, no `part:` and
+    no connector anywhere in led_zeppelin_le's table. What it does have is one
+    empty string that every record's image field points at, which is a linker
+    artefact rather than a name - so it cannot be found by reading strings, only
+    by noticing that a great many pointers agree on it.
+
+    Hence a frequency pass. Words are counted with `array`, which does the whole
+    binary in well under a second, and a candidate is any repeated word landing
+    on a NUL byte. Most survivors are not strings at all - a run of 0x00FFFF00
+    in a data blob lands on a NUL as readily as a pointer does - and that is
+    fine: a candidate only ever costs a seed that `_one()` rejects, and the
+    run-of-four rule is what actually decides where a table is. Nothing here can
+    invent a record.
+
+    Returned as a SET merged into seeds()' `want`, so both variants are found in
+    the one linear pass that function already makes; a title with a normal
+    positioned table gets the same answer it always did.
+    """
+    n = len(d) // 4
+    if not n:
+        return set()
+    a = array.array("I")
+    a.frombytes(d[:n * 4])
+    if sys.byteorder != "little":
+        a.byteswap()                # the records are little-endian, always
+    return {w for w, refs in collections.Counter(a).items()
+            if refs >= BLANK_MIN_REFS and blank_str(d, w)}
 
 
 def records(d, cstr):
@@ -393,10 +490,21 @@ def checks(keep, pf_w, pf_h):
     self-check's own count was.
     """
     img = layout_image(keep)
-    pf = [r for r in keep if r["image"] == img]
+    pf = [r for r in keep if img is not None and r["image"] == img]
     out = [r for r in pf if not (0 <= r["x"] <= pf_w and 0 <= r["y"] <= pf_h)]
     lines = ["%d playfield records, %d outside the %dx%d artwork"
              % (len(pf), len(out), pf_w, pf_h)]
+    # ★ Say when the positional checks below had nothing to check. All three
+    # PASS vacuously on an artwork-less table (BLANK_IMAGE): every device sits
+    # at (0, 0), so no name is on the wrong side of a centreline and no RGB
+    # stem is split. Reporting "0 WRONG" without this line would read as a
+    # table that had been verified, which is the one thing this function
+    # exists not to do.
+    blank = sum(1 for r in keep if r["image"] == BLANK_IMAGE)
+    if blank:
+        lines.append("%d of %d records carry no artwork (name + wire only) - "
+                     "the position checks below do not apply to them"
+                     % (blank, len(keep)))
 
     mid, ok, wrong = pf_w / 2.0, 0, []
     for r in pf:
@@ -466,9 +574,14 @@ def text(game, keep, art, pf_w, pf_h, elf=None):
         # only reader - which counts fields from the right, because the NAME is
         # the multi-word one - silently read `h` as the group and the group as
         # the index. Every coil tooltip said "group 20 index 6".
+        # The IMAGE gets the same "-" treatment as the connector, and for the
+        # same reason: an artwork-less record (BLANK_IMAGE) names none, and an
+        # empty last column would leave the row one field short for a reader
+        # that counts from the right.
         lines.append("%-9s %-34s %5d %5d %4d %4d %4d %5d  %-6s %s"
                      % (r["kind"], r["name"], r["x"], r["y"], r["w"], r["h"],
-                        r["group"], r["index"], r["conn"] or "-", r["image"]))
+                        r["group"], r["index"], r["conn"] or "-",
+                        r["image"] or "-"))
     return "\n".join(lines) + "\n"
 
 

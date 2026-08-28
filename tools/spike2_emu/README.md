@@ -152,7 +152,7 @@ per-title follow-up items it spawns.
 | batman | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
 | foo_fighters_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-19 |
 | guardians_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-19 |
-| iron_maiden_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
+| iron_maiden_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-19 |
 | jurassic_park_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
 | mando_le | ✅ static (swelf.py), live-verified | — | — | ✅ real (topper accessory, David-confirmed) | not yet | 2026-08-19 |
 | rush_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |

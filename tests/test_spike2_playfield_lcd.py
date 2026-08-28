@@ -710,10 +710,19 @@ def test_position_persists_roundtrip(tmp_path, monkeypatch):
         root.destroy()
 
 
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="zorder/padwinpos bind Win32 at import (ctypes.WinDLL)")
 def test_window_roles_disambiguate_villain_from_game2():
     """The villain window's title contains game2's needle in both window
     diagnostics; each must classify it under its OWN key or a stranded
-    villain window steals the [display N] slot (review findings 2 and 3)."""
+    villain window steals the [display N] slot (review findings 2 and 3).
+
+    WINDOWS ONLY, and importorskip was the wrong tool for saying so.
+    zorder.py and padwinpos.py call ctypes.WinDLL at module scope and import
+    ctypes.wintypes, so on Linux and macOS they raise AttributeError rather
+    than ImportError - which importorskip does not catch. It read as a guard
+    and was not one: this test passed locally and on windows-latest and took
+    down ubuntu-latest and macos-latest on the v0.170.0 release push."""
     zorder = pytest.importorskip("zorder")
     assert zorder.role_of(
         "batman [villain vision] - Stern Spike 2 emulator") == "VILLAIN"

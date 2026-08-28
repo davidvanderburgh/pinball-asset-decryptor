@@ -5368,7 +5368,7 @@ These have each been violated at least once and each cost a run or a window:
       3 vs 5 as noise, not a trend. Do not reopen without a reason.
 
 - [ ] **80. Live, alphabetical, game-by-game E2E compatibility pass — David
-      plays, this session triages.** `S2 D4` *(Filed 2026-08-24 at David's ask,
+      plays, this session triages.** `S2 D4` ← WORKING ON *(Filed 2026-08-24 at David's ask,
       in place of picking a queue item: "i want to go game by game instead and
       confirm e2e compatibility one-by-one. we're going to go alphabetically
       and I will tell you when we are starting each game and what issues we
@@ -5396,6 +5396,67 @@ These have each been violated at least once and each cost a run or a window:
       unbounded until the sweep says otherwise — many live runs David has to
       drive personally, and each finding's own difficulty is unknown until it
       is filed.
+      **Acceptance correction, same day: not `last checked`, a new column.**
+      Overwriting `last checked` would have erased WHEN the other four
+      columns (switches/artwork/positions/2nd display) were last verified,
+      which is a different fact from when David played it. Added
+      `E2E play (item 80)` as its own column instead — same table, same
+      "standing record" idea, nothing lost.
+      **THE LOG, alphabetical, one line per title as David reports it:**
+      - **aerosmith_le — ✅ CLEAN**, David's own green check, 2026-08-24.
+      - **avengers_infinity_le — ✅ CLEAN after a same-day fix, David's
+        relaunch confirming.** First launch showed `Game validation error,
+        Update SD card` (screenshot on record) — item 62's exact mechanism,
+        a stale `F` grade in NVRAM slot B. The census (`nvgrades.py`) had
+        only 4 of 29 titles clean — `aerosmith_le`, `elvira3`,
+        `godzilla_le`, `turtles_pro` — independently matching David's
+        aerosmith result. Fixed (then fleet-wide `--fix-all` at David's
+        ask, 0 of 29 stuck after) and **David's relaunch shows the banner
+        GONE** — which was also item 62's long-owed glass verification, so
+        this sweep closed that item. Also spotted on this title's switch
+        list: **hover/click zones misaligned with the row text** — filed,
+        fixed and closed same day as item 81 (the lower ~38 % of every
+        row's glyphs belonged to the row BELOW, clicks included).
+      - **batman — ❌ two faults, filed as item 82** (2026-08-24, glass
+        screenshots + read-only log forensics off David's live run):
+        (i) `CHECK NODE BOARD 2 : NOT REGISTERED` red on Tech Alerts
+        though node 2 is scheduled AND identified — NOT item 70's hole,
+        the registration exchange itself; lead suspect for the `NODE NOT
+        FOUND` red screen is our own silencing of node 4, which the game
+        polls forever (`want=13/3/12`). Board 24 RUNTIME INFO white,
+        unexplained, lowest priority. (ii) The second screen that appears
+        over the carousel on the real machine never shows — 0
+        `PADGL_TARGET` all run, video pipeline alive but first frames
+        consumed 2.3–5.7 s after serve vs 58 ms healthy; awaiting David's
+        description of the real machine's behaviour. Needs an
+        instrumented boot once the rig is free — see item 82.
+      **★ batman UPDATE, 2026-08-24 (item 82's pass, rig handed over):
+      the boot faults are FIXED and regression-proven** — the red
+      LOCATING screen, the board-24 alert mechanism (it is "VILLAIN
+      VISION", batman's playfield LCD, whose identity our tables
+      dropped), the failed-update walk, and a bus-wide re-probe storm
+      (attract 72s → 20s; boots reach attract unattended). What remains
+      on batman: cosmetic Tech-Alerts menu rows (no bus reply can clear
+      them — game-side config field, one instrumented dump left, item
+      82 at 90%) and the Villain Vision RENDERER (new capability, item
+      83). **NOTE: the fixes live on item/82 — David's main-checkout
+      app re-derives batman's tables with MAIN's code every run, so HIS
+      batman boots keep the old behavior until /finish.**
+      **★ batman UPDATE 2, same day: VILLAIN VISION RENDERS (item 83
+      CLOSED).** The second screen David asked about is batman's
+      three-insert playfield LCD, and the playfield window now draws all
+      three with the real '66 episode art the game names, live
+      (screenshot C:/tmp/item83_panel.png). Item 82 stays open at 90%
+      for the cosmetic alert-row config dump only. Both ride branch
+      item/83 (which contains item/82) awaiting /finish — David's
+      main-checkout app shows none of it until then.
+      **Resume:** next title alphabetically is whatever comes after
+      batman in David's own run. Wait for his report before touching
+      anything; item 82 (90%) holds batman's one open thread.
+      **NOTE for later titles: the 24-title fleet nvram fix (item 62) means
+      NO title should show the validation banner from here on — if one
+      does, that is a NEW, live validation failure, not the stale-grade
+      class, and it earns its own item.**
 
 - [ ] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
       and identified; node 4 polled forever while we silence it; board 24

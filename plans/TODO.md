@@ -2852,12 +2852,32 @@ These have each been violated at least once and each cost a run or a window:
       nothing and draws dark, which is honest. Only `FIXED_GROUPS` (4→0, 5→1,
       the CPU and the cabinet) survives, confirmed by the switch join on every
       title that can answer.
-      **Open sub-question, NOT guessed at:** Bond's group 7 may share node 1
-      with group 5 — the live ring shows node 1 addressing indices
-      {2,8,11,14,16..22}, which fits group 7's 0..23 span but not group 5's
-      {1,2,4,5,7}. A one-group-one-node dict cannot express that, and index 2
-      would collide. Left unresolved rather than guessed; it is the backbox
-      swatch view, not the artwork this item is about.
+      **The wire CORROBORATES 8→8 and 9→9, read off the live ring** (this is
+      the "counts both ways" the acceptance asks for, honestly qualified — see
+      the ruled-out note above for why it cannot be the DERIVATION):
+      `group 8 <-> node 8`: 33 indices addressed, **32 in the table**, the one
+      exception index 1 — and group 8's table STARTS at 3. `group 9 <-> node 9`:
+      29 addressed, **25 in the table**, the four exceptions 8/9/10/11 — and
+      group 9's table has a GAP at exactly 8..11 (it runs 3..7 then 12..51).
+      So every unexplained index falls in a hole in its own group's set, which
+      is the board-channel class `ledio.py` already documents on godzilla ("the
+      wire carries a couple of indices the table does not ... most likely board
+      channels with no playfield fixture behind them"). Nothing lands outside.
+      **Open sub-question, NOT guessed at, and the evidence now cuts both
+      ways.** Bond's group 7 (24 backbox lamps) looks like it is on NODE 1: the
+      live ring has node 1 addressing {2,8,11,14,16,17,18,19,20,21,22}, and
+      8/11/14/16..22 are outside group 5's {1,2,4,5,7} but name exactly the
+      right fixtures in group 7 — GAME OVER, BALL 3, BALL 1, PLAYER UP, BALL IN
+      PLAY, OVER THE TOP, 40,000, 30,000, 20,000. Against it: **group 5 LED
+      index 2 (START BUTTON) and group 7 index 2 (PLAYER 3) would collide on
+      one board index**, and group 5's other indices 1/4/5/7 never appear on
+      the wire at all — so it may be group 5's LEDs that are not on node 1,
+      even though its SWITCHES provably are. A one-group-one-node dict cannot
+      express two groups sharing a board, and nothing here settles which
+      reading is right. Left unresolved; it is the backbox swatch view, not the
+      artwork this item is about. (Beware: group 7's table is a DENSE 0..23, so
+      "the extras fit group 7" is worth nothing on its own — it contains almost
+      any small index, the same superset trap group 10 sets.)
       **Shipped on `item/53`:** `coilmap.group_node()` gains the two
       derivations and a stated ladder (measured → this title's ascending-pinnode
       inference → godzilla's constant); `coilmap.group_node_for()` is the one

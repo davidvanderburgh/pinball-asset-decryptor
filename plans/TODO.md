@@ -2870,6 +2870,14 @@ These have each been violated at least once and each cost a run or a window:
       staleness clause compares against the game BINARY, which a rig-code
       change does not touch. 12 new tests in
       `tests/test_spike2_group_node.py`, godzilla-must-not-move first.
+      **Two lifetime notes, neither a regression:** the window derives its map
+      at IMPORT from `DEV_ROWS`, the same lifetime the device rows have always
+      had (the late-table pickup is the switch table only). And on a title's
+      FIRST boot `mktables.py` writes the device tables before the switch list,
+      so `group_node.txt` is written from the connector half alone that once;
+      nothing reads that file back — every consumer re-derives — so it costs
+      only the evidence file, and on the one title where the connector is
+      ambiguous (DnD) the ascending rule already gives the right answer.
       **Resume:** the one thing left is this entry's own acceptance — boot
       james_bond_60th_le, **start a game** (not attract: item 50 measured
       turtles driving no playfield lamp frames until coins+Start), and show the

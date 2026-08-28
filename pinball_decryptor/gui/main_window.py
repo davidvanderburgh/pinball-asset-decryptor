@@ -264,6 +264,10 @@ class _AudioPreviewPane:
         # Effective stop point (s) when Write will trim this file to its slot
         # length — None when the whole file plays (originals are always None).
         self.limit = None
+        # This clip's own loudness offset (dB), previewed in the picture and
+        # in playback so moving the box on the Audio tab is something you can
+        # see and hear.  0 on the Original pane, always.
+        self.gain_db = 0.0
         self.pos = 0.0            # playhead position (s)
         self.playing = False
         self._start_pos = 0.0     # ffplay -ss offset in flight
@@ -315,9 +319,11 @@ class _AudioPreviewPane:
 
     # ---- loading ------------------------------------------------------
 
-    def load(self, path, dur, limit=None, autoplay=False, label=None):
+    def load(self, path, dur, limit=None, autoplay=False, label=None,
+             gain_db=0.0):
         """Load *path* into the strip.  *dur* is its probed duration (s);
-        *limit* is the trim stop point (s), or None to play the whole file.
+        *limit* is the trim stop point (s), or None to play the whole file;
+        *gain_db* is this clip's loudness offset (see :attr:`gain_db`).
 
         *label* names the file in the title instead of *path*'s own name —
         for the folder's own copy of a slot, whose name is the SLOT's, when
@@ -326,6 +332,7 @@ class _AudioPreviewPane:
         self.path = path
         self.dur = dur or 0.0
         self.limit = limit
+        self.gain_db = float(gain_db or 0.0)
         self.pos = 0.0
         self._hint = ""
         try:
@@ -345,6 +352,7 @@ class _AudioPreviewPane:
         self.path = None
         self.dur = 0.0
         self.limit = None
+        self.gain_db = 0.0
         self.pos = 0.0
         self._render_id += 1  # drop any in-flight render
         self._spec_img = None
@@ -394,7 +402,8 @@ class _AudioPreviewPane:
         from ..core import audio as _audio
 
         def _work():
-            png = _audio.render_spectrogram_png(path, w, h)
+            png = _audio.render_spectrogram_png(path, w, h,
+                                                gain_db=self.gain_db)
             if self._render_id != rid:
                 return
             self._win._tk_root().after(
@@ -420,7 +429,33 @@ class _AudioPreviewPane:
             canvas.create_text(w // 2, h // 2, fill="#888888",
                                text="(preview needs ffmpeg)")
         self._draw_cut_marker()
+        self._draw_gain_badge()
         self._draw_playhead()
+
+    def set_gain_db(self, db):
+        """Re-draw (and re-play) this clip at a different loudness offset.
+
+        The picture is ffmpeg's, so this costs a render — the caller debounces
+        it.  No-op when the number hasn't actually moved."""
+        db = float(db or 0.0)
+        if db == self.gain_db:
+            return
+        self.gain_db = db
+        if self.path:
+            self._render_spectrogram(self.path)
+
+    def _draw_gain_badge(self):
+        """Say on the strip itself that this picture is levelled, and by how
+        much — the brightness change alone is real but easy to miss, and an
+        unlabelled one would look like the file changed."""
+        canvas = self.spec_canvas
+        canvas.delete("gainbadge")
+        if not self.gain_db:
+            return
+        w = max(1, canvas.winfo_width())
+        canvas.create_text(w - 4, 8, anchor=tk.E, fill="#9dd7ff",
+                           text="%+.0f dB" % self.gain_db,
+                           tags=("gainbadge",))
 
     def _draw_cut_marker(self):
         """Mark where a trimmed replacement stops: a dashed line at the slot
@@ -498,7 +533,8 @@ class _AudioPreviewPane:
         if self.sibling is not None:
             self.sibling.stop_playback()  # never talk over the other pane
         _audio.stop_audio(self._proc)
-        proc = _audio.play_audio_file(self.path, start=pos, limit=self.limit)
+        proc = _audio.play_audio_file(self.path, start=pos, limit=self.limit,
+                                      gain_db=self.gain_db)
         if proc is None:
             self.playing = False
             self._set_play_btn(False)
@@ -1605,6 +1641,7 @@ class MainWindow:
         # rel_path -> int dB, this replacement's loudness relative to whatever
         # the build-wide setting does (Stern; audio_level_offset capability).
         self._audio_level_db = {}
+        self._audio_level_render_job = None   # debounced preview re-render
         self._audio_loop_tip = None      # Loop/keep-column hover tooltip Toplevel
         self._audio_scan_id = 0          # bump-counter to drop stale scans
         self._audio_scan_dir = ""        # folder the current slots came from
@@ -5189,7 +5226,11 @@ class MainWindow:
         "rest of the build does.\n\n"
         "Handy for music, which Stern mixes as a bed under the callouts. "
         "Boosts are soft-limited, never hard-clipped, and the build log lists "
-        "every clip you levelled by hand.")
+        "every clip you levelled by hand.\n\n"
+        "The Replacement preview redraws and plays at this offset, so you can "
+        "see and hear it. What the preview can't show is the automatic match "
+        "to the stock sound's own level: that happens inside the encoder, "
+        "against audio only the machine's own decoder can produce.")
 
     def _audio_level_disp(self, rel):
         """The Level column's cell text: blank at 0 so a card full of default
@@ -5237,7 +5278,27 @@ class MainWindow:
         else:
             self._audio_level_db.pop(rel, None)
         self._audio_level_refresh_row(rel)
+        self._audio_level_preview_soon(rel)
         self._save_staged_changes()
+
+    def _audio_level_preview_soon(self, rel):
+        """Redraw the Replacement strip at the new level, a beat after the
+        last keystroke.  The picture is an ffmpeg render, so a spinbox held
+        down would otherwise fire one subprocess per click."""
+        if getattr(self, "_audio_level_render_job", None) is not None:
+            try:
+                self._tk_root().after_cancel(self._audio_level_render_job)
+            except (tk.TclError, ValueError):
+                pass
+            self._audio_level_render_job = None
+
+        def _go():
+            self._audio_level_render_job = None
+            if (self._audio_pane_rep is not None
+                    and self._audio_current_rel == rel):
+                self._audio_pane_rep.set_gain_db(
+                    self._audio_level_db.get(rel, 0))
+        self._audio_level_render_job = self._tk_root().after(350, _go)
 
     def _audio_level_refresh_row(self, rel):
         """Redraw just this row's Level cell (cf. _audio_toggle_loop)."""
@@ -5314,6 +5375,8 @@ class MainWindow:
             else:
                 self._audio_level_db.pop(rel, None)
         self._refresh_audio_list()
+        if self._audio_current_rel in rels:
+            self._audio_level_preview_soon(self._audio_current_rel)
         self._save_staged_changes()
 
     def _audio_on_tree_motion(self, event):
@@ -6081,7 +6144,8 @@ class MainWindow:
             self._audio_pane_rep.base_title = "Replacement"
             self._audio_pane_rep.load(
                 rpath, rdur, self._audio_compute_preview_limit(rel, rdur),
-                autoplay=autoplay)
+                autoplay=autoplay,
+                gain_db=self._audio_level_db.get(rel, 0))
             return
         # No new assignment, but the slot is already changed on disk and the
         # true original is on the left (its .orig snapshot): the on-disk file
@@ -6102,7 +6166,8 @@ class MainWindow:
                 self._audio_pane_rep.load(
                     cur, _audio.probe_duration(cur) or 0.0, None,
                     autoplay=autoplay,
-                    label=self._remembered_rep_name("audio", rel) or None)
+                    label=self._remembered_rep_name("audio", rel) or None,
+                    gain_db=self._audio_level_db.get(rel, 0))
                 return
         self._audio_pane_rep.base_title = "Replacement"
         self._audio_pane_rep.clear(

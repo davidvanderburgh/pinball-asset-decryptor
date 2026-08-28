@@ -192,3 +192,84 @@ def test_the_advanced_dialog_says_it_is_the_build_wide_one(
     assert "WHOLE build" in blob
     assert "Loudness for this clip" in blob
     dlg.destroy()
+
+
+def test_the_preview_is_drawn_and_played_at_the_clips_level(
+        app, manufacturers_by_key, tmp_path, monkeypatch):
+    """"the spectrum image shows the db adjustment? it's hard to tell" — it
+    didn't: the strip was the file exactly as handed over.  Now the offset
+    goes through the render and through playback, so the box is something you
+    can see and hear."""
+    import threading
+
+    from pinball_decryptor.core import audio as _audio
+    folder = tmp_path / "ex"
+    win = _stern_with_slots(app, manufacturers_by_key, folder)
+    rep = folder / "mine.wav"
+    rep.write_bytes(b"RIFF")
+
+    drawn, rendered = [], threading.Event()
+
+    def fake_render(path, width=700, height=90, gain_db=0.0):
+        drawn.append((path, gain_db))
+        rendered.set()
+        return None
+    monkeypatch.setattr(_audio, "render_spectrogram_png", fake_render)
+    monkeypatch.setattr(_audio, "probe_duration", lambda p: 1.0)
+
+    win._audio_assignments[RELS[0]] = str(rep)
+    win._audio_level_db[RELS[0]] = 6
+    win._audio_load_track(RELS[0])
+    assert rendered.wait(5)
+    app.root.update()
+
+    assert win._audio_pane_rep.gain_db == 6
+    assert (str(rep), 6) in drawn
+    # the Original is the card's own sound and is never levelled
+    assert win._audio_pane_orig.gain_db == 0
+    # …and the strip says so, so a brighter picture can't read as a different
+    # file.  The hand-back half is driven directly: outside a mainloop the
+    # render thread's own after() raises "main thread is not in main loop",
+    # so the draw is exercised where it actually runs — on the main thread.
+    pane = win._audio_pane_rep
+    pane._show_spectrogram(None, pane._render_id, 400, 90)
+    app.root.update()
+    assert pane.spec_canvas.find_withtag("gainbadge")
+
+    played = []
+
+    class _Proc:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+    monkeypatch.setattr(_audio, "play_audio_file",
+                        lambda path, start=0.0, limit=None, gain_db=0.0:
+                        played.append(gain_db) or _Proc())
+    win._audio_pane_rep.start_playback(0.0)
+    assert played == [6]
+    win._audio_pane_rep.stop_playback()
+
+
+def test_moving_the_box_redraws_the_loaded_clip(app, manufacturers_by_key,
+                                                tmp_path, monkeypatch):
+    """The redraw is debounced (it is an ffmpeg render per keystroke
+    otherwise), and only re-renders when the number actually moved."""
+    from pinball_decryptor.core import audio as _audio
+    folder = tmp_path / "ex"
+    win = _stern_with_slots(app, manufacturers_by_key, folder)
+    win._audio_current_rel = RELS[0]
+    win._audio_pane_rep.path = str(folder / RELS[0])
+    win._audio_pane_rep.gain_db = 0.0
+    monkeypatch.setattr(_audio, "render_spectrogram_png",
+                        lambda *a, **k: None)
+
+    _select(app, win, RELS[0])
+    win._audio_level_var.set("4")
+    app.root.update()
+    assert win._audio_pane_rep.gain_db == 0.0      # not yet — debounced
+    assert win._audio_level_render_job is not None
+    win.root.after(400, win.root.quit)
+    win.root.mainloop()                            # let the debounce land
+    assert win._audio_pane_rep.gain_db == 4

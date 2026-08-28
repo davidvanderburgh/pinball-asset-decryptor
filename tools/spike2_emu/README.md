@@ -130,40 +130,69 @@ whole machine, not just switches-boot-to-attract. `not yet` means this pass
 has not reached that title. See item 80 in `plans/TODO.md` for the log and the
 per-title follow-up items it spawns.
 
-| title | switches | artwork | positions | 2nd display | E2E play (item 80) | last checked |
-|---|---|---|---|---|---|---|
-| godzilla_pro | ✅ live, 88 | ✅ | ✅ (baseline) | n/a | not yet | 2026-08-19 |
-| jaws_le | ✅ live, 109 | ✅ | ✅ | n/a | not yet | 2026-08-19 |
-| john_wick_le | ✅ live, 106 | ✅ | ✅ | n/a | not yet | 2026-08-19 |
-| james_bond_60th_le | ✅ live, 118 | ✅ | ✅ | n/a | not yet | 2026-08-19 |
-| james_bond_le | ✅ live, 108 | ✅ bond_le_playfield.png | ✅ | n/a | not yet | 2026-08-19 |
-| deadpool_pro | ✅ live, E2E-played, 103 | ✅ deadpool_pro_playfield.png | ✅ 41 placed | n/a | ✅ played, 2026-08-27 (David) | 2026-08-27 |
-| king_kong_le | ✅ live, 105 | ✅ Rodeo…Wireframe.png (item 57 fix) | ✅ 489/517 inside, 0 outside (item 57 fix) | n/a | not yet | 2026-08-19 |
-| dungeons_and_dragons_le | ✅ live, E2E-played to Player 1 Select a Character, 104 | ✅ `TestMode/Rope_LE-Premium-X8-X9_TOP_rotated_edit_cropped.png` (fixed 2026-08-28 — see note below) | ✅ 229/255 on the layout | n/a | ✅ played to Player 1 — Select a Character, 2026-08-28 (David; needs the Device Enables adjustment noted below) | 2026-08-28 |
-| venom_le | ✅ live, 107 | ❌ none shipped | not re-measured | n/a | not yet | 2026-08-19 |
-| turtles_le | ✅ live, 96 | ❌ none shipped | not re-measured | n/a | not yet | 2026-08-19 |
-| uncanny_xmen_le | ✅ live, 110 | ❌ none shipped | not re-measured | n/a | not yet | 2026-08-19 |
-| deadpool_le | ✅ live, E2E-played, 103 | ❌ none shipped | ❌ 0 device records (title ships no device table at all, not a parser gap — measured 2026-08-27) | n/a | ✅ played, 2026-08-27 (David) | 2026-08-27 |
-| godzilla_le **V1.14.0** | ✅ live, 98 | ✅ scaled_godzilla_le_playfield.png 313x710 | ✅ 177/593 inside, 0 outside; 30/30 left-right; 48 switches, 14 coils, 115 lamps placed | n/a | not yet | 2026-08-21 |
-| godzilla_le 1.13.0 | not run | — no device test data in this build | — 0 records (measured off the card) | n/a | not yet | 2026-08-21 |
-| metallica_spike | ✅ live, 106 | ✅ metallica_playfield…png (item 57 fix) | ✅ 502/664 inside, 0 outside (item 57 fix) | n/a | not yet | 2026-08-19 |
-| aerosmith_le | ✅ static (swelf.py), live-verified | — no device table shipped | — | n/a | ✅ clean, 2026-08-24 (David) | 2026-08-19 |
-| avengers_infinity_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-24 (David; validation banner was item 62's stale NVRAM grade, fixed + relaunch-verified same day) | 2026-08-19 |
-| batman | ✅ static (swelf.py), live-verified | — | — | ✅ VILLAIN VISION window — SOLVED & live-faithful: own `[villain vision]` window mirrors node 24's control stream exactly — clips PLAY by commanded id (lossless webp), block commands CYCLE clip-by-clip, brightness 0 BLANKS the screen and 255 reveals (the per-beat fade the game sends), verb 2 holds the last frame (play-once). `lcdring.py` reads the transcript live or from `padlcd.last`. **RE-verified architecture (10-agent pass) + GROUND TRUTH (video of the real machine, 2026-08-25):** ONE physical TV, bezel-printed "Villain Vision" (the old "three TVs" line was invented — deleted). The node bus is CONTROL-only (LPC1113, can't decode video); the real display is COMPOSITED by the game on a GPU "secondary display" render target (`fbGetDisplayByIndex(2)`) that batman's binary HARD-DISABLES (renderer-ctx +0xf0 = NULL, 0x1e79c8) — which is why the 4 villain gst channels die at 0 frames. **Proof from the machine:** the real attract shows game-RENDERED cards (a "Game Over" card, the BATMAN-on-green logo) that exist nowhere in the 3,069-clip store (3 independent scans) — so a bus mirror can never show those. Verified against the video and matching: ~5-7 s per item, a fully black frame between items, one full-screen motion clip. **The window shows the CARD'S OWN TV artwork** (`lcdframe.py` pulls the villain scene's wood-cased TV sprite — screen hole and all — off the card; the clip is composited into it keeping its aspect, falling back to a drawn cabinet when a title has no such texture) with a **filmstrip of the last four clips** under it, so the SEQUENCE is visible at a glance rather than one frame at a time. **Clips are NAMED**: `lcdnames.py` parses the title's scene.radium at run start into `<tables>/<game>/lcd/names.txt` (3,069/3,069 for batman, 0.15 s) and the window shows e.g. `asset 54 - once` / `S1E001 00:18:32` - which is also the first independent verification of the id-to-clip mapping (asset 2 is named `PhoneScenes...` and shows the Batphone). **THE BOARD IS AN ID→STILL LOOKUP (2026-08-26, two tripod videos of the real machine + the TV-settings "update the images" diagnostic tester-found in the service menu):** the display NEVER plays video - it holds one stored still per command id and fades (~0.3 s) between them. The attract cycle is 11 stills at ~5.3 s on a 62.7 s loop - one-for-one with the wire's 11-command rotation - and gameplay rests on the green logo card while the wire hammers asset 54, which anchors the whole mapping: 2=Game Over card, 54=logo, 720=Riddler, 591=Batmobile, 601=Gotham City sign, 1605=umbrella sign, 1736=Penguin, 2066=Penitentiary, 2359=Joker, 3004=fur-shop sign, 3026=Catwoman, 919-block=IN COLOR title card. `lcdstills.py` derives a CARD-ONLY still set - it extracts stills from the mounted card at runtime and ships NO asset (the board has its own image store, id-mapped independently of the clip store: wire 591=a frame of clip 27, wire 601=another frame of clip 27, so the set can't be derived by clip id). Five ids whose board image is a card store frame are mapped (logo scene texture + Batmobile/Gotham sign/Joker/Catwoman clip frames); the game-rendered cards and villain/sign stills exist in NO unpacked card store and are left unmapped (fall back to the clip still, never footage) until the UPDATE TV IMAGES service upload is captured - the one place the byte-exact board images and their ids both surface. The panel selects stills by id, fading only the SCREEN (the cabinet never dims), no clip playback. Event cards (BALL SAVE) are further unmapped ids; the board's byte-exact uploaded set is capturable by running the TV-settings diagnostic on this rig with the wire logged. Exact id↔clip correspondence at a given real-machine moment beyond those pins is still not claimed. The 0x90 poll is answered (present board) but its content is inert — nothing reads it (get_status is dead code) and it does NOT stop the game's own 250 ms double-command (items 82/83) | not yet | 2026-08-25 |
-| foo_fighters_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-19 |
-| guardians_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-19 |
-| iron_maiden_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-19 |
-| jurassic_park_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
-| mando_le | ✅ static (swelf.py), live-verified | — | — | ✅ real (topper accessory, David-confirmed) | not yet | 2026-08-19 |
-| rush_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
-| star_wars_le | ✅ live, 104 | ❌ none found | not re-measured | ✅ real (mini display above the targets, David-confirmed) | not yet | 2026-08-19 |
-| turtles_pro | ✅ live, 94 | ❌ none found | not re-measured | n/a | not yet | 2026-08-19 |
-| elvira3 | ✅ live, 110 | ❌ none found | not re-measured | n/a | not yet | 2026-08-19 |
-| led_zeppelin_le | ✅ live, 97 | ❌ none found | not re-measured | n/a | not yet | 2026-08-19 |
-| stranger_things_le | ✅ static (swelf.py, item 52) | ❌ none found | not re-measured | ✅ real (projector, item 44) | not yet | 2026-08-19 |
-| sword_of_rage_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 98 | ❌ none shipped | ❌ no device table | n/a | not yet | 2026-08-19 |
-| munsters_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 103 | ❌ none shipped | ❌ no device table | n/a | not yet | 2026-08-19 |
-| beatles | ✅ live, 92 (item 80 sweep fix: all-`?` message-table title, names now filled from the device table) | ✅ Test/beatles_playfield.png 336x710 | ✅ 50 placed (item 80 sweep: `layout_image()` join fix, was hard-coded to the literal "playfield") | not re-measured | ✅ played, 2026-08-27 (David) | 2026-08-27 |
+**`build` column, added 2026-08-28, and it is not decoration.** A row that names
+only a TITLE cannot say which card was measured, and the device table is a
+property of the BUILD — the same fact the card-image table above already
+records. `jaws_le` is what forced the column: **1.01.0 ships no device table and
+no service art at all, 1.02.0 ships 439 records and two playfield drawings**, so
+a single `jaws_le | ✅ | ✅` row was true of one card in the library and false of
+the other, and a run of 1.01.0 correctly drew the switch-list view while the row
+promised artwork. Both builds now get their own row, the way `godzilla_le`
+already did for 1.13.0 vs V1.14.0.
+
+**How each build was established**, strongest evidence first: the `# binary: game
+N bytes` line `devicexy.binary_id()` writes into the cached `device_xy.txt`,
+matched against the ELF size `cardaudit.py` reads out of each library image —
+that is what pins `elvira3` to 1.13.0 (8770432) and `turtles_pro` to 1.59.0
+(6457552), the two titles here we hold two builds of and could otherwise only
+guess at; and, where the library holds exactly ONE image for a title, the
+filename. Three rows say **not recorded** rather than guessing: `venom_le`,
+`turtles_le` and `led_zeppelin_le` were measured before `binary_id()` existed,
+we hold more than one build of each, and nothing on disk says which one ran.
+
+**And one row's binary matches NO image in the library**: `godzilla_pro`'s
+cached table was built from a 7912180-byte ELF, while the stock
+`godzilla_pro-1_15_0_spike2` image carries 7884188 bytes. The two produce the
+IDENTICAL 575-record table (coil=10 led=506 switch=59), so the measurements in
+that row stand — but the binary they were taken from is a modified 1.15.0, not
+the stock card, which is worth knowing before anyone treats the baseline row as
+a statement about a factory machine.
+
+| title | build | switches | artwork | positions | 2nd display | E2E play (item 80) | last checked |
+|---|---|---|---|---|---|---|---|
+| godzilla_pro | 1.15.0, but a MODIFIED ELF — see below | ✅ live, 88 | ✅ | ✅ (baseline) | n/a | not yet | 2026-08-19 |
+| jaws_le **1.02.0** | 1.02.0 | ✅ live, 109 | ✅ jaws_le_playfield_scaled.png 312x710 | ✅ 217/439 on the layout, 0 outside; 82/82 RGB stems aligned; 28/29 left-right, and the one flagged name is real geometry, not a misread — `LEFT RAMP ENTER` sits at x=159 against a 156 midline, 3 px the wrong side of centre and right beside `LEFT RAMP MADE OPTO` at x=153, so the ramp straddles the centreline | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-28 |
+| jaws_le 1.01.0 | 1.01.0 | ✅ live | — none shipped (the card has no `images/Test` **or** `TestMode` directory at all) | ❌ 0 records — this build ships no device table; the ELF contains no image-name string to seed one | n/a | ran, but superseded by 1.02.0 | 2026-08-28 |
+| john_wick_le | 1.01.0 | ✅ live, 106 | ✅ | ✅ | n/a | not yet | 2026-08-19 |
+| james_bond_60th_le | 1.10.0 | ✅ live, 118 | ✅ | ✅ | n/a | not yet | 2026-08-19 |
+| james_bond_le | 1.06.0 | ✅ live, 108 | ✅ bond_le_playfield.png | ✅ | n/a | not yet | 2026-08-19 |
+| deadpool_pro | 1.16.0 | ✅ live, E2E-played, 103 | ✅ deadpool_pro_playfield.png | ✅ 41 placed | n/a | ✅ played, 2026-08-27 (David) | 2026-08-27 |
+| king_kong_le | 0.96.0 | ✅ live, 105 | ✅ Rodeo…Wireframe.png (item 57 fix) | ✅ 489/517 inside, 0 outside (item 57 fix) | n/a | not yet | 2026-08-19 |
+| dungeons_and_dragons_le | 1.00.0 | ✅ live, E2E-played to Player 1 Select a Character, 104 | ✅ `TestMode/Rope_LE-Premium-X8-X9_TOP_rotated_edit_cropped.png` (fixed 2026-08-28 — see note below) | ✅ 229/255 on the layout | n/a | ✅ played to Player 1 — Select a Character, 2026-08-28 (David; needs the Device Enables adjustment noted below) | 2026-08-28 |
+| venom_le | 1.06.0 **or** 1.07.0 — not recorded | ✅ live, 107 | ❌ none shipped | not re-measured | n/a | not yet | 2026-08-19 |
+| turtles_le | 1.58.1 **or** 1.59.0 — not recorded | ✅ live, 96 | ❌ none shipped | not re-measured | n/a | not yet | 2026-08-19 |
+| uncanny_xmen_le | 0.97.0 | ✅ live, 110 | ❌ none shipped | not re-measured | n/a | not yet | 2026-08-19 |
+| deadpool_le | 1.14.0 | ✅ live, E2E-played, 103 | ❌ none shipped | ❌ 0 device records (title ships no device table at all, not a parser gap — measured 2026-08-27) | n/a | ✅ played, 2026-08-27 (David) | 2026-08-27 |
+| godzilla_le **V1.14.0** | custom (V1.14.0) | ✅ live, 98 | ✅ scaled_godzilla_le_playfield.png 313x710 | ✅ 177/593 inside, 0 outside; 30/30 left-right; 48 switches, 14 coils, 115 lamps placed | n/a | not yet | 2026-08-21 |
+| godzilla_le 1.13.0 | 1.13.0 | not run | — no device test data in this build | — 0 records (measured off the card) | n/a | not yet | 2026-08-21 |
+| metallica_spike | 1.03.0 | ✅ live, 106 | ✅ metallica_playfield…png (item 57 fix) | ✅ 502/664 inside, 0 outside (item 57 fix) | n/a | not yet | 2026-08-19 |
+| aerosmith_le | 1.15.0 | ✅ static (swelf.py), live-verified | — no device table shipped | — | n/a | ✅ clean, 2026-08-24 (David) | 2026-08-19 |
+| avengers_infinity_le | 1.09.0 | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-24 (David; validation banner was item 62's stale NVRAM grade, fixed + relaunch-verified same day) | 2026-08-19 |
+| batman | 1.13.0 | ✅ static (swelf.py), live-verified | — | — | ✅ VILLAIN VISION window — SOLVED & live-faithful: own `[villain vision]` window mirrors node 24's control stream exactly — clips PLAY by commanded id (lossless webp), block commands CYCLE clip-by-clip, brightness 0 BLANKS the screen and 255 reveals (the per-beat fade the game sends), verb 2 holds the last frame (play-once). `lcdring.py` reads the transcript live or from `padlcd.last`. **RE-verified architecture (10-agent pass) + GROUND TRUTH (video of the real machine, 2026-08-25):** ONE physical TV, bezel-printed "Villain Vision" (the old "three TVs" line was invented — deleted). The node bus is CONTROL-only (LPC1113, can't decode video); the real display is COMPOSITED by the game on a GPU "secondary display" render target (`fbGetDisplayByIndex(2)`) that batman's binary HARD-DISABLES (renderer-ctx +0xf0 = NULL, 0x1e79c8) — which is why the 4 villain gst channels die at 0 frames. **Proof from the machine:** the real attract shows game-RENDERED cards (a "Game Over" card, the BATMAN-on-green logo) that exist nowhere in the 3,069-clip store (3 independent scans) — so a bus mirror can never show those. Verified against the video and matching: ~5-7 s per item, a fully black frame between items, one full-screen motion clip. **The window shows the CARD'S OWN TV artwork** (`lcdframe.py` pulls the villain scene's wood-cased TV sprite — screen hole and all — off the card; the clip is composited into it keeping its aspect, falling back to a drawn cabinet when a title has no such texture) with a **filmstrip of the last four clips** under it, so the SEQUENCE is visible at a glance rather than one frame at a time. **Clips are NAMED**: `lcdnames.py` parses the title's scene.radium at run start into `<tables>/<game>/lcd/names.txt` (3,069/3,069 for batman, 0.15 s) and the window shows e.g. `asset 54 - once` / `S1E001 00:18:32` - which is also the first independent verification of the id-to-clip mapping (asset 2 is named `PhoneScenes...` and shows the Batphone). **THE BOARD IS AN ID→STILL LOOKUP (2026-08-26, two tripod videos of the real machine + the TV-settings "update the images" diagnostic tester-found in the service menu):** the display NEVER plays video - it holds one stored still per command id and fades (~0.3 s) between them. The attract cycle is 11 stills at ~5.3 s on a 62.7 s loop - one-for-one with the wire's 11-command rotation - and gameplay rests on the green logo card while the wire hammers asset 54, which anchors the whole mapping: 2=Game Over card, 54=logo, 720=Riddler, 591=Batmobile, 601=Gotham City sign, 1605=umbrella sign, 1736=Penguin, 2066=Penitentiary, 2359=Joker, 3004=fur-shop sign, 3026=Catwoman, 919-block=IN COLOR title card. `lcdstills.py` derives a CARD-ONLY still set - it extracts stills from the mounted card at runtime and ships NO asset (the board has its own image store, id-mapped independently of the clip store: wire 591=a frame of clip 27, wire 601=another frame of clip 27, so the set can't be derived by clip id). Five ids whose board image is a card store frame are mapped (logo scene texture + Batmobile/Gotham sign/Joker/Catwoman clip frames); the game-rendered cards and villain/sign stills exist in NO unpacked card store and are left unmapped (fall back to the clip still, never footage) until the UPDATE TV IMAGES service upload is captured - the one place the byte-exact board images and their ids both surface. The panel selects stills by id, fading only the SCREEN (the cabinet never dims), no clip playback. Event cards (BALL SAVE) are further unmapped ids; the board's byte-exact uploaded set is capturable by running the TV-settings diagnostic on this rig with the wire logged. Exact id↔clip correspondence at a given real-machine moment beyond those pins is still not claimed. The 0x90 poll is answered (present board) but its content is inert — nothing reads it (get_status is dead code) and it does NOT stop the game's own 250 ms double-command (items 82/83) | not yet | 2026-08-25 |
+| foo_fighters_le | 1.03.0 | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-19 |
+| guardians_le | 1.14.0 | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-19 |
+| iron_maiden_le | 1.16.0 | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-19 |
+| jurassic_park_le | 1.15.0 | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
+| mando_le | 1.44.0 | ✅ static (swelf.py), live-verified | — | — | ✅ real (topper accessory, David-confirmed) | not yet | 2026-08-19 |
+| rush_le | 1.18.0 | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
+| star_wars_le | 1.30.0 | ✅ live, 104 | ❌ none found | not re-measured | ✅ real (mini display above the targets, David-confirmed) | not yet | 2026-08-19 |
+| turtles_pro | 1.59.0 | ✅ live, 94 | ❌ none found | not re-measured | n/a | not yet | 2026-08-19 |
+| elvira3 | 1.13.0 | ✅ live, 110 | ❌ none found | not re-measured | n/a | not yet | 2026-08-19 |
+| led_zeppelin_le | 1.20.0 **or** 1.21.0 **or** 1.22.0 — not recorded | ✅ live, 97 | ❌ none found | not re-measured | n/a | not yet | 2026-08-19 |
+| stranger_things_le | 1.12.0 | ✅ static (swelf.py, item 52) | ❌ none found | not re-measured | ✅ real (projector, item 44) | not yet | 2026-08-19 |
+| sword_of_rage_le | 1.18.0 | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 98 | ❌ none shipped | ❌ no device table | n/a | not yet | 2026-08-19 |
+| munsters_le | 1.27.0 | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 103 | ❌ none shipped | ❌ no device table | n/a | not yet | 2026-08-19 |
+| beatles | 1.29.0 | ✅ live, 92 (item 80 sweep fix: all-`?` message-table title, names now filled from the device table) | ✅ Test/beatles_playfield.png 336x710 | ✅ 50 placed (item 80 sweep: `layout_image()` join fix, was hard-coded to the literal "playfield") | not re-measured | ✅ played, 2026-08-27 (David) | 2026-08-27 |
 
 **dungeons_and_dragons_le, 2026-08-28 — Start was refused, and it was BALL
 ACCOUNTING, not switches, wiring or NVRAM corruption.** Three real code

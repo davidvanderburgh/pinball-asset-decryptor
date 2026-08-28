@@ -22,12 +22,13 @@ press and nothing to send.  “Check setup…” is always there, changes nothin
 way.
 """
 import os
-import shutil
 import subprocess
 import sys
 import time
 
 import pytest
+
+from tests.conftest import HAS_BASH
 
 from pinball_decryptor.gui import emulate_tab
 from pinball_decryptor.gui.emulate_tab import (setup_env_faults, setup_fixable,
@@ -340,12 +341,24 @@ def test_the_windows_python_search_has_one_definition():
     assert "AppData/Local/Programs" not in play, "the copy is back"
 
 
-@pytest.mark.skipif(not (os.path.isdir(RIG) and shutil.which("bash")),
-                    reason="rig or bash not present")
+@pytest.mark.skipif(not (os.path.isdir(RIG) and HAS_BASH),
+                    reason="rig or working bash not present")
 def test_setupcheck_still_parses_as_key_value():
-    """It is read by parse_status, so a line that is not key=value would be
-    dropped in silence."""
-    out = subprocess.run([shutil.which("bash"), "-n",
-                          os.path.join(RIG, "setupcheck.sh")],
-                         capture_output=True, text=True, timeout=60)
-    assert out.returncode == 0, out.stderr
+    r"""It is read by parse_status, so a line that is not key=value would be
+    dropped in silence.
+
+    THE SCRIPT IS FED ON STDIN, NOT NAMED AS A PATH, and that is not a style
+    choice: which("bash") answers with git-bash on one Windows host and with
+    the WSL launcher (C:\Windows\System32\bash.exe) on the next, and the
+    two disagree about what a native Windows path means.  Handing the WSL one
+    `C:\...\setupcheck.sh` loses every backslash - it reported
+    `C:UsersdavidDocuments...: No such file or directory` and exited 127 - so
+    the test failed for a reason that had nothing to do with the script it was
+    checking.  Stdin crosses that boundary unchanged.  test_installer.py's
+    test_shell_script_parses has done it this way since v0.6.1.
+    """
+    with open(os.path.join(RIG, "setupcheck.sh"), "rb") as fh:
+        src = fh.read()
+    out = subprocess.run(["bash", "-n"], input=src,
+                         capture_output=True, timeout=60)
+    assert out.returncode == 0, out.stderr.decode("utf-8", "replace")

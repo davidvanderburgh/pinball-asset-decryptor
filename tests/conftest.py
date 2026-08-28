@@ -40,7 +40,27 @@ def _wsl_usable():
     return result.returncode == 0
 
 
+def _bash_usable():
+    r"""True only if `bash` is present AND can run a command.
+
+    Same trap as _wsl_usable() one level down: on Windows the `bash` on
+    PATH is often the WSL launcher (C:\Windows\System32\bash.exe),
+    which exists on every Windows host and fails every command when no
+    distro is installed.  A plain which("bash") is therefore not enough
+    -- that is what broke the v0.6.1 CI on the Windows runner.
+    """
+    if shutil.which("bash") is None:
+        return False
+    try:
+        return subprocess.run(
+            ["bash", "-c", "exit 0"],
+            capture_output=True, timeout=15).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 HAS_WSL = _wsl_usable()
+HAS_BASH = _bash_usable()
 HAS_DOCKER = shutil.which("docker") is not None
 
 

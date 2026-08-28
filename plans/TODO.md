@@ -2782,7 +2782,7 @@ These have each been violated at least once and each cost a run or a window:
       coil4node guess), and the card is in the cache — one boot plus a
       game start observes it.
 
-- [ ] **53. The device-table GROUP → bus NODE map is ONE TITLE'S measurement,
+- [ ] **53. The device-table GROUP → bus NODE map is ONE TITLE'S measurement, ← WORKING ON
       so most titles' lamps and coils have a position and no wire address.**
       `S2 D3` *(Split out of item 50 on 2026-08-16, which found it while
       giving Bond a playfield. Item 50's grid does not need this — it reads the

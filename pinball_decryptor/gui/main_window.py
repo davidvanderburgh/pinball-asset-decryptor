@@ -9519,8 +9519,12 @@ class MainWindow:
     _AUDIO_ADV_DEFAULTS = {
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
-        "blip_free_optin": False,
+        "blip_free_optin": False, "loudness": "match", "loudness_db": 0,
     }
+    _AUDIO_LOUDNESS_CHOICES = (
+        ("match", "Match the sound being replaced (default)"),
+        ("full", "Normalize each replacement to full scale"),
+    )
     _AUDIO_HEAD_CHOICES = (
         ("encode", "Re-encode from the first sample (default)"),
         ("stock", "Keep the stock head block (experimental, first 4.5 ms)"),
@@ -9553,9 +9557,10 @@ class MainWindow:
 
         ttk.Label(
             dlg, justify=tk.LEFT, wraplength=wrap,
-            text="Experiment levers for how Stern Spike 2 audio replacements "
-                 "are encoded. Defaults match the standard behavior; change "
-                 "one thing at a time when chasing a click on the real "
+            text="How Stern Spike 2 audio replacements are encoded. The "
+                 "loudness setting below is an everyday one; the rest are "
+                 "experiment levers. Defaults match the standard behavior; "
+                 "change one thing at a time when chasing a click on the real "
                  "machine.").pack(anchor=tk.W, padx=12, pady=(12, 8))
 
         # Horizontal rules between the option groups break up the wall of
@@ -9563,6 +9568,44 @@ class MainWindow:
         def _rule():
             ttk.Separator(dlg, orient=tk.HORIZONTAL).pack(
                 fill=tk.X, padx=12, pady=(2, 8))
+
+        _rule()
+
+        # Replacement loudness.  Matching is scale-invariant — the gain lands
+        # the replacement on the stock sound's energy however the source was
+        # mixed — so without this the level a user mixes at is discarded and
+        # remixing louder changes nothing at all (a tester, Godzilla music
+        # imports).  This is the only knob that survives the match.
+        loud_row = ttk.Frame(dlg)
+        loud_row.pack(fill=tk.X, padx=12)
+        loud_var = tk.StringVar(value=dict(self._AUDIO_LOUDNESS_CHOICES)[
+            cfg["loudness"] if cfg.get("loudness") in
+            dict(self._AUDIO_LOUDNESS_CHOICES) else "match"])
+        loud_db_var = tk.StringVar(value=str(cfg.get("loudness_db") or 0))
+        ttk.Label(loud_row, text="Replacement loudness:").pack(side=tk.LEFT)
+        ttk.Combobox(loud_row, textvariable=loud_var, state="readonly",
+                     width=40,
+                     values=[v for _k, v in self._AUDIO_LOUDNESS_CHOICES]).pack(
+            side=tk.LEFT, padx=(8, 0))
+        ttk.Label(loud_row, text="then").pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Spinbox(loud_row, textvariable=loud_db_var, from_=-12, to=12,
+                    increment=1, width=5).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Label(loud_row, text="dB").pack(side=tk.LEFT, padx=(2, 0))
+        ttk.Label(
+            dlg, justify=tk.LEFT, wraplength=wrap,
+            font=(_SANS_FONT, 8, "italic"),
+            text="By default every replacement is gained to the same loudness "
+                 "as the sound it replaces, so it sits with its neighbours "
+                 "instead of jumping out. That match ignores the level you "
+                 "mixed your own file at: exporting the same track louder and "
+                 "rebuilding produces exactly the same card. Use the dB box to "
+                 "sit deliberately above or below stock — handy for music, "
+                 "which Stern mixes as a bed under the callouts. "
+                 "\"Normalize to full scale\" ignores the stock level instead "
+                 "and pushes each replacement as loud as the codec will carry. "
+                 "Boosts are soft-limited, never hard-clipped. The build log "
+                 "records whichever setting built the card.").pack(
+            anchor=tk.W, padx=12, pady=(2, 8))
 
         _rule()
 
@@ -9711,6 +9754,7 @@ class MainWindow:
                 return int(min(max(v, lo), hi))
             keys_h = {v: k for k, v in self._AUDIO_HEAD_CHOICES}
             keys_l = {v: k for k, v in self._AUDIO_LEADOUT_CHOICES}
+            keys_v = {v: k for k, v in self._AUDIO_LOUDNESS_CHOICES}
             idxs = ",".join(t.strip() for t in
                             idxs_var.get().replace(";", ",").split(",")
                             if t.strip().isdigit())
@@ -9722,6 +9766,8 @@ class MainWindow:
                 "slot_seed": bool(seed_var.get()),
                 "slot_seed_db": num(seed_db_var, 40, 90, 65),
                 "blip_free_optin": bool(blip_var.get()),
+                "loudness": keys_v.get(loud_var.get(), "match"),
+                "loudness_db": num(loud_db_var, -12, 12, 0),
             }
 
         def _ok(_e=None):
@@ -9739,6 +9785,8 @@ class MainWindow:
             seed_var.set(False)
             seed_db_var.set("65")
             blip_var.set(False)         # the standard build is the default
+            loud_var.set(dict(self._AUDIO_LOUDNESS_CHOICES)["match"])
+            loud_db_var.set("0")
 
         btns = ttk.Frame(dlg)
         btns.pack(fill=tk.X, padx=12, pady=(4, 12))

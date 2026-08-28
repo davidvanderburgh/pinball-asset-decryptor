@@ -113,7 +113,18 @@ HELP_CONTENT = {
          "stray transient (a lip smack, a desk knock) is the loudest thing in "
          "your recording — normalizing to that peak would leave the voice far "
          "quieter than the callouts around it. It works the other way too, "
-         "bringing a hot music clip down to the level of its neighbours."),
+         "bringing a hot music clip down to the level of its neighbours.\n\n"
+         "The match ignores the level you mixed your own file at — the same "
+         "track exported quietly or hot builds the same card — so if you "
+         "want a replacement louder or quieter than stock, do it in "
+         "Advanced Audio Options rather than in your editor. The "
+         "\"Replacement loudness\" row there keeps the match as the default, "
+         "offers normalizing to full scale instead, and takes a ±12 dB "
+         "offset on top of either; boosts are soft-limited, never "
+         "hard-clipped. Music is the usual reason to reach for it: Stern "
+         "mixes its music as a bed under the callouts, so a matched song "
+         "sits there too. The build log states which setting built the "
+         "card."),
         ("Assets folder + applying",
          "The assets folder is the one Extract produced — the same folder the "
          "Write tab reads. There's no separate \"stage\" step: the "

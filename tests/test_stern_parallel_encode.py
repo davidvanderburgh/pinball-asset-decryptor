@@ -36,7 +36,8 @@ def test_cat0_empty_edits_is_noop(monkeypatch):
 def test_cat0_unknown_idx_is_dropped(monkeypatch):
     seen = {}
 
-    def fake_serial(gr, img, byidx, edits, np, log, progress, cancel):
+    def fake_serial(gr, img, byidx, edits, np, log, progress, cancel,
+                    gains=None):
         seen["edits"] = edits
         return ({}, [], {})
     monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
@@ -90,11 +91,13 @@ def test_cat0_parallel_partial_resume_keeps_done_work(monkeypatch):
     monkeypatch.setattr(E.os, "cpu_count", lambda: 8)
 
     # idx 1 finished in parallel; idx 2 + 3 were left over.
-    def partial(gr, img, needed, edits, nworkers, np, log, progress, cancel):
+    def partial(gr, img, needed, edits, nworkers, np, log, progress, cancel,
+                gains=None):
         return ({1000: b"one"}, [], [(2, "b"), (3, "c")], {1: (1000, b"one")})
     seen = {}
 
-    def fake_serial(gr, img, byidx, edits, np, log, progress, cancel):
+    def fake_serial(gr, img, byidx, edits, np, log, progress, cancel,
+                    gains=None):
         seen["edits"] = [idx for idx, _ in edits]
         return ({2000: b"two", 3000: b"three"}, [],
                 {2: (2000, b"two"), 3: (3000, b"three")})
@@ -128,7 +131,8 @@ def test_cat0_cache_replays_unchanged_sounds(monkeypatch, tmp_path):
     assets, gr, img, wav = _cache_rig(tmp_path)
     calls = []
 
-    def fake_serial(g, i, byidx, edits, np, log, progress, cancel):
+    def fake_serial(g, i, byidx, edits, np, log, progress, cancel,
+                    gains=None):
         calls.append([idx for idx, _ in edits])
         return ({1000: b"body1"}, [], {1: (1000, b"body1")})
     monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
@@ -149,7 +153,8 @@ def test_cat0_cache_skip_verdict_replays(monkeypatch, tmp_path):
     assets, gr, img, wav = _cache_rig(tmp_path)
     calls = []
 
-    def fake_serial(g, i, byidx, edits, np, log, progress, cancel):
+    def fake_serial(g, i, byidx, edits, np, log, progress, cancel,
+                    gains=None):
         calls.append([idx for idx, _ in edits])
         return ({}, [1], {})           # codec can't re-encode idx 1
     monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
@@ -166,7 +171,8 @@ def test_cat0_cache_env_and_kill_switch(monkeypatch, tmp_path):
     assets, gr, img, wav = _cache_rig(tmp_path)
     calls = []
 
-    def fake_serial(g, i, byidx, edits, np, log, progress, cancel):
+    def fake_serial(g, i, byidx, edits, np, log, progress, cancel,
+                    gains=None):
         calls.append(1)
         return ({1000: b"b"}, [], {1: (1000, b"b")})
     monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
@@ -208,12 +214,13 @@ def test_cat0_cache_dir_is_never_baselined(tmp_path):
 def test_run_bank_encode_serial_aggregates(monkeypatch):
     monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
 
-    def fake_bank(gr, img, rev, cid, sc_path, edits, np):
+    def fake_bank(gr, img, rev, cid, sc_path, edits, np, gains=None):
         return ([(cid, idx, idx * 10, b"B" + bytes([idx]))
                  for idx, _ in edits], [])
     monkeypatch.setattr(E, "_derive_encode_bank", fake_bank)
-    tasks = [("g", "i", 1, 1, "sc1", [(0, "w0"), (1, "w1")]),
-             ("g", "i", 1, 2, "sc2", [(0, "w0")])]
+    # 7th element = the bank's per-clip loudness offsets (PAD-91).
+    tasks = [("g", "i", 1, 1, "sc1", [(0, "w0"), (1, "w1")], {}),
+             ("g", "i", 1, 2, "sc2", [(0, "w0")], {})]
     out = E._run_bank_encode(tasks, _noop, None, lambda: False)
     assert out is not None
     allp = [p for bank_p, _ in out for p in bank_p]
@@ -223,7 +230,7 @@ def test_run_bank_encode_serial_aggregates(monkeypatch):
 
 def test_run_bank_encode_cancel_returns_none(monkeypatch):
     monkeypatch.setattr(E, "_FORCE_SERIAL_ENCODE", True)
-    out = E._run_bank_encode([("g", "i", 1, 1, "sc", [(0, "w")])],
+    out = E._run_bank_encode([("g", "i", 1, 1, "sc", [(0, "w")], {})],
                              _noop, None, lambda: True)
     assert out is None
 
@@ -235,6 +242,6 @@ def test_bank_encode_worker_swallows_errors(monkeypatch):
         raise RuntimeError("derive failed")
     monkeypatch.setattr(E, "_derive_encode_bank", boom)
     patches, skipped = E._bank_encode_worker(
-        ("g", "i", 1, 7, "sc7", [(0, "w0"), (3, "w3")]))
+        ("g", "i", 1, 7, "sc7", [(0, "w0"), (3, "w3")], {}))
     assert patches == []
     assert set(skipped) == {(7, 0), (7, 3)}

@@ -324,3 +324,96 @@ def test_loudness_log_phrase_names_the_setting(monkeypatch):
     assert "+6.0 dB" in engine._loudness_log_phrase()
     monkeypatch.setenv("PAD_STERN_MATCH_LOUDNESS", "0")
     assert "full scale" in engine._loudness_log_phrase()
+
+
+# ---- per-clip loudness (PAD-91) -----------------------------------------
+#
+# The offset above is one number for the whole build, which is what the same
+# tester found next: "will the sound boost affect every single clip? It looks
+# like if I change the setting on one, it changed it on another one too."  It
+# did, so the Replace Audio tab grew a per-clip dB box; these pin the two
+# halves of it -- the encoder honouring one clip's own level, and the map that
+# gets from the tab's sidecar to the encoder.
+
+def test_one_clip_can_be_levelled_without_moving_the_rest(monkeypatch):
+    """gain_db overrides the build-wide offset for that sound only."""
+    rng = _MONO_RANGE
+    t = np.linspace(0, 400, 44100)
+    orig = np.round(np.sin(t) * rng * 0.25).astype(np.int64)
+    repl = np.round(np.sin(t) * rng * 0.9).astype(np.int64)
+    rms = lambda v: float(np.sqrt((v.astype(float) ** 2).mean()))
+
+    monkeypatch.setenv("PAD_STERN_MATCH_GAIN_DB", "0")
+    flat = _fit_level(repl, orig, rng, np, headroom=0.97)
+    one_up = _fit_level(repl, orig, rng, np, headroom=0.97, gain_db=6.0)
+    assert rms(one_up) == pytest.approx(rms(flat) * 2.0, rel=0.05)
+    # …and the clips that asked for nothing are untouched by their neighbour.
+    assert np.array_equal(_fit_level(repl, orig, rng, np, headroom=0.97), flat)
+
+    # An explicit 0 dB means 0 dB even when the build-wide offset is +6: that
+    # is how "leave this one where stock had it" is expressed.
+    monkeypatch.setenv("PAD_STERN_MATCH_GAIN_DB", "6")
+    assert np.array_equal(
+        _fit_level(repl, orig, rng, np, headroom=0.97, gain_db=0.0), flat)
+
+
+def test_per_clip_offset_stacks_on_the_build_wide_one(monkeypatch):
+    from pinball_decryptor.plugins.stern import engine
+    monkeypatch.delenv("PAD_STERN_MATCH_GAIN_DB", raising=False)
+    assert engine._slot_gain_db(4) == pytest.approx(4.0)
+    monkeypatch.setenv("PAD_STERN_MATCH_GAIN_DB", "3")
+    assert engine._slot_gain_db(4) == pytest.approx(7.0)
+    assert engine._slot_gain_db(-3) == pytest.approx(0.0)
+    # the total is held to the same ceiling as the build-wide box
+    assert engine._slot_gain_db(11) == engine._MATCH_GAIN_DB_MAX
+    assert engine._slot_gain_db(-40) == -engine._MATCH_GAIN_DB_MAX
+
+
+def test_slot_levels_are_read_off_the_projects_sidecar(tmp_path, monkeypatch):
+    """The Replace Audio tab writes rel -> dB into .staged_changes.json and the
+    write pipeline reads it back, keyed off the idx / music_cat stem so an
+    Auto-transcribe rename between setting a level and building keeps it."""
+    import json
+
+    from pinball_decryptor.plugins.stern import engine
+    monkeypatch.delenv("PAD_STERN_MATCH_GAIN_DB", raising=False)
+    (tmp_path / ".staged_changes.json").write_text(json.dumps({"audio_levels": {
+        "audio/idx0417 - Aburo!.wav": 4,        # renamed since it was set
+        "audio/idx0006.wav": -2,
+        "audio/music_cat07_0003 - Main Theme.wav": 6,
+        "audio/idx0009.wav": 0,                 # 0 = default, not an entry
+        "audio/idx0010.wav": "loud",            # junk is ignored, not fatal
+        "audio/notes.txt": 3,                   # not a sound
+        "audio/idx0011.wav": 99,                # clamped
+    }}), encoding="utf-8")
+
+    by_idx, by_music = engine._slot_gain_maps(str(tmp_path))
+    assert by_idx == {417: 4.0, 6: -2.0, 11: engine._MATCH_GAIN_DB_MAX}
+    assert by_music == {(7, 3): 6.0}
+
+    # A folder that never used the feature costs nothing and changes nothing.
+    assert engine._slot_gain_maps(str(tmp_path / "nope")) == ({}, {})
+
+
+def test_a_clips_level_is_part_of_its_encode_cache_key(tmp_path):
+    """Re-levelling ONE clip has to re-encode that clip -- and only it -- or
+    the next build would replay the old body and nothing would change."""
+    from pinball_decryptor.plugins.stern import engine
+    gr = tmp_path / "game_real"
+    img = tmp_path / "image.bin"
+    gr.write_bytes(b"firmware")
+    img.write_bytes(b"audio image" * 100)
+    wav = tmp_path / "audio" / "idx0006.wav"
+    wav.parent.mkdir()
+    wav.write_bytes(b"RIFFwave")
+    byidx = {6: {"idx": 6, "chan": 1, "length": 100, "body_off": 6000},
+             7: {"idx": 7, "chan": 1, "length": 100, "body_off": 7000}}
+
+    def key(idx, gains):
+        c = engine._AudioBodyCache(str(tmp_path), str(gr), str(img), byidx, {},
+                                   gains=gains)
+        return c._key(idx, str(wav))
+
+    assert key(6, {}) == key(6, {})                    # stable
+    assert key(6, {6: 4.0}) != key(6, {})              # the levelled clip
+    assert key(7, {6: 4.0}) == key(7, {})              # its neighbour

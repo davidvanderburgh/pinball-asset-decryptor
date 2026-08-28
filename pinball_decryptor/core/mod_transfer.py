@@ -76,8 +76,10 @@ from . import checksums, staged_changes, staged_originals, text_manifest
 
 # Slot categories that carry ``rel_path -> replacement`` assignment maps.
 _ASSIGN_KEYS = ("audio", "video", "image")
-# Per-audio-slot flag maps that must follow a remapped audio key.
-_AUDIO_FLAG_KEYS = ("audio_loop", "audio_keep")
+# Per-audio-slot flag maps that must follow a remapped audio key (the loudness
+# offset is a number rather than a flag, but it is per-slot state that belongs
+# to the replacement, so it travels with it).
+_AUDIO_FLAG_KEYS = ("audio_loop", "audio_keep", "audio_levels")
 # Toggle values copied verbatim (not per-slot).
 _TOGGLE_KEYS = ("audio_trim", "video_trim", "video_no_conversion",
                 "menu_expose_through")
@@ -1261,9 +1263,11 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
 
     src_loop = src_saved.get("audio_loop") or {}
     src_keep = src_saved.get("audio_keep") or {}
+    src_levels = src_saved.get("audio_levels") or {}
     tgt_audio = dict(tgt.get("audio") or {})
     tgt_loop = dict(tgt.get("audio_loop") or {})
     tgt_keep = dict(tgt.get("audio_keep") or {})
+    tgt_levels = dict(tgt.get("audio_levels") or {})
 
     def _put_audio(src_rel, tgt_rel, repl):
         tgt_audio[tgt_rel] = repl
@@ -1271,6 +1275,10 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
             tgt_loop[tgt_rel] = src_loop[src_rel]
         if src_rel in src_keep:
             tgt_keep[tgt_rel] = src_keep[src_rel]
+        # A hand-set loudness belongs to the replacement, not to the card: a
+        # song lifted 4 dB on the Pro is the same 4 dB on the Premium.
+        if src_rel in src_levels:
+            tgt_levels[tgt_rel] = src_levels[src_rel]
 
     n_audio = 0
     for e in plan["audio"]["matched"] + plan["audio"]["remapped"]:
@@ -1286,6 +1294,8 @@ def apply_transfer(source_dir, target_dir, plan, include_flagged=False,
         tgt["audio_loop"] = tgt_loop
     if tgt_keep:
         tgt["audio_keep"] = tgt_keep
+    if tgt_levels:
+        tgt["audio_levels"] = tgt_levels
 
     tgt_video = dict(tgt.get("video") or {})
     for e in plan["video"]["matched"]:

@@ -3653,6 +3653,16 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     if music_edits:
         log("Found %d edited music-bank song(s) to re-encode." % len(music_edits),
             "info")
+    # Per-clip loudness offsets (Replace Audio tab -> Level).  Logged next to
+    # the build-wide "Replacement loudness" line and for the same reason: a
+    # level the user set weeks ago is invisible in the audio itself, so the log
+    # has to be able to answer "why is this one song louder than the rest?".
+    slot_gains, music_gains = _slot_gain_maps(assets_dir)
+    if slot_gains or music_gains:
+        both = dict(slot_gains)
+        both.update(music_gains)
+        log("Per-clip loudness set on %d sound(s) (build-wide offset already "
+            "included): %s." % (len(both), _fmt_gain_map(both)), "info")
     if video_edits:
         log("Found %d replaced video(s) to write." % len(video_edits), "info")
     if image_edits:
@@ -3754,7 +3764,8 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     t0 = time.monotonic()
                     audio_patches, _askip = _encode_cat0_sounds(
                         gr_path, img_path, params, audio_edits, np, log,
-                        progress, cancel, assets_dir=assets_dir)
+                        progress, cancel, assets_dir=assets_dir,
+                        gains=slot_gains)
                     if audio_patches is None:
                         return None, None, None, None
                     _stage_done(log, "re-encoding %d replaced sound(s)"
@@ -3866,7 +3877,7 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                     t0 = time.monotonic()
                     music_patches = _compute_music_patches(
                         reader, gr_path, img_path, music_edits, work, log,
-                        progress, cancel, np)
+                        progress, cancel, np, gains=music_gains)
                     if cancel():
                         return None, None, None, None
                     _stage_done(log, "re-encoding %d music-bank song(s)"
@@ -4659,6 +4670,65 @@ def _match_gain_db():
     return max(min(ov, _MATCH_GAIN_DB_MAX), -_MATCH_GAIN_DB_MAX)
 
 
+def _slot_gain_db(offset_db):
+    """Total dB for one slot: the build-wide offset plus that slot's own
+    per-clip offset, clamped to the same ±:data:`_MATCH_GAIN_DB_MAX` ceiling.
+
+    The build-wide number is the everyday setting and moves every replacement
+    together, which is the whole complaint the per-clip column answers ("will
+    the sound boost affect every single clip? it looks like if I change the
+    setting on one, it changed it on another one too" — a tester, Godzilla).
+    Per-clip is a nudge RELATIVE to it, so a project set to +3 overall with one
+    song at +4 lands that song at +7 and everything else stays where it was."""
+    return max(min(_match_gain_db() + float(offset_db), _MATCH_GAIN_DB_MAX),
+               -_MATCH_GAIN_DB_MAX)
+
+
+def _slot_gain_maps(assets_dir):
+    """Per-clip loudness offsets for *assets_dir*, as ``({idx: total_db},
+    {(cid, idx): total_db})`` — cat-0 sounds and music-bank songs.
+
+    Read from the folder's ``.staged_changes.json`` (``"audio_levels"``: ``{rel
+    path -> dB}``, written by the Replace Audio tab's Level column) rather than
+    threaded through the write call, exactly like the video tab's originals
+    map.  Keyed off the ``idxNNNN`` / ``music_catNN_MMMM`` stem so an
+    Auto-transcribe rename between setting the level and building keeps it.
+
+    Only slots that actually asked for something appear: an empty map means
+    every sound takes the untouched :func:`_match_gain_db` path and the build
+    is byte-identical to one from a folder that never saw this feature."""
+    from ...core import staged_changes as _sc
+    levels = (_sc.load(assets_dir) or {}).get("audio_levels") or {}
+    by_idx, by_music = {}, {}
+    for rel, db in levels.items():
+        try:
+            db = float(db)
+        except (TypeError, ValueError):
+            continue
+        if not db:
+            continue
+        stem = os.path.splitext(os.path.basename(str(rel)))[0]
+        m = _MUSIC_NAME_RE.search(stem)
+        if m:
+            by_music[(int(m.group(1)), int(m.group(2)))] = _slot_gain_db(db)
+            continue
+        idx = _wav_idx(stem)
+        if idx is not None:
+            by_idx[idx] = _slot_gain_db(db)
+    return by_idx, by_music
+
+
+def _fmt_gain_map(gains, cap=12):
+    """``idx 6 +3 dB, idx 21 -2 dB, … and N more`` for the build log."""
+    items = sorted(gains.items(), key=lambda kv: str(kv[0]))
+    out = ", ".join("%s %+.0f dB" % ("idx %s" % (k,) if not isinstance(k, tuple)
+                                     else "music_cat%02d_%04d" % k, v)
+                    for k, v in items[:cap])
+    if len(items) > cap:
+        out += ", and %d more" % (len(items) - cap)
+    return out
+
+
 def _loudness_log_phrase():
     """One sentence for the build log describing how replacements are levelled,
     including the "your own mix level is not what comes out" part that a
@@ -4727,7 +4797,7 @@ def _stock_render(emu, p, np, stereo):
     return np.asarray(out[0], np.int64)
 
 
-def _fit_level(a, orig, rng, np, headroom):
+def _fit_level(a, orig, rng, np, headroom, gain_db=None):
     """Level the replacement *a* (int64, mono 1-D or stereo ``(n, 2)``): match
     the ORIGINAL sound's active RMS when a usable reference decoded, else fall
     back to the fixed peak cap.  See the block comment above for why matching
@@ -4735,14 +4805,16 @@ def _fit_level(a, orig, rng, np, headroom):
 
     Whichever mode ran, the user's :func:`_match_gain_db` offset is applied on
     top and the result soft-limited, so "louder than the sound I replaced" is
-    reachable without turning matching off."""
+    reachable without turning matching off.  *gain_db* replaces that global
+    offset for this one sound (already totalled by :func:`_slot_gain_db`) —
+    the per-clip Level column on the Replace Audio tab."""
     pk = int(np.abs(a).max()) if a.size else 0
     if pk <= 0:
         return a
     # Applied AFTER the _MATCH_MAX_GAIN cap, not folded into it: that cap is an
     # anti-noise-floor guard on the automatic part, and an explicit request for
     # +N dB should not be silently swallowed by it.
-    off = 10.0 ** (_match_gain_db() / 20.0)
+    off = 10.0 ** ((_match_gain_db() if gain_db is None else gain_db) / 20.0)
     if orig is not None and orig.size:
         opk = float(np.abs(orig).max())
         orms = _active_rms(orig, np)
@@ -5720,7 +5792,7 @@ def _write_machine_render(p, got, stereo, np):
         pass
 
 
-def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None):
+def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None, gain_db=None):
     # Returns encode_sound's ``(start_off, body)`` — the write offset can sit
     # one word below body_off on delta=-1 codec keys (the start-click fix).
     # Fit to the codec's TRUE emitted sample count (length - BLOCK), not the raw
@@ -5736,7 +5808,7 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None):
     s = _lowpass(s, _declick_lowpass_hz(), np)
     s = _fit_level(np.asarray(s, np.int64),
                    _stock_render(emu, p, np, stereo=False),
-                   _MONO_RANGE, np, headroom)
+                   _MONO_RANGE, np, headroom, gain_db=gain_db)
     tgt = _fit(np.clip(s, -_MONO_RANGE, _MONO_RANGE), n, np, fade_ms=fade_ms)
     seed = _encode_seed_for(p, int(np.abs(tgt).max()))
     tgt = _apply_slot_seed(tgt, np, _MONO_RANGE, seed)
@@ -5750,7 +5822,8 @@ def _encode_mono(emu, gr, p, wav_path, np, pred=None, log=None):
     return start, body
 
 
-def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None):
+def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None,
+                   gain_db=None):
     from .spike2.emulator import emitted_length
     n = emitted_length(p["length"])
     fade_ms, headroom = _declick_params()
@@ -5759,7 +5832,7 @@ def _encode_stereo(emu, sr, p, wav_path, np, pred=None, log=None):
     # Band-limit each channel before the level fit (see _encode_mono).
     a = np.stack([_lowpass(a[:, 0], lp, np), _lowpass(a[:, 1], lp, np)], axis=1)
     a = _fit_level(a, _stock_render(emu, p, np, stereo=True),
-                   _STEREO_RANGE, np, headroom)
+                   _STEREO_RANGE, np, headroom, gain_db=gain_db)
     L = _fit(np.clip(a[:, 0], -_STEREO_RANGE, _STEREO_RANGE), n, np,
              fade_ms=fade_ms)
     R = _fit(np.clip(a[:, 1], -_STEREO_RANGE, _STEREO_RANGE), n, np,
@@ -5839,6 +5912,8 @@ class _AudioBodyCache:
         only pick a path through the write (verify passes, blip-free
         composition, serial-vs-parallel) are excluded so flipping them does
         not dump the cache;
+      * that sound's own per-clip loudness offset, so re-levelling ONE clip
+        re-encodes that clip and replays every other one;
       * the app version (an encoder change must never replay old bodies).
 
     The value is the encode's ``(write_off, body)`` — or the skip verdict for
@@ -5856,13 +5931,14 @@ class _AudioBodyCache:
     _MAGIC_BODY = b"PADAC1\n"
     _MAGIC_SKIP = b"PADAC0\n"
 
-    def __init__(self, assets_dir, gr_path, img_path, byidx, ends):
+    def __init__(self, assets_dir, gr_path, img_path, byidx, ends, gains=None):
         from ... import __version__
         self.assets_dir = assets_dir
         self.dir = os.path.join(assets_dir, ".write_cache", "audio")
         os.makedirs(self.dir, exist_ok=True)
         self.byidx = byidx
         self.ends = ends
+        self.gains = gains or {}
         h = hashlib.md5()
         with open(_lp(gr_path), "rb") as f:
             h.update(f.read())
@@ -5898,6 +5974,7 @@ class _AudioBodyCache:
         h.update(self._fp_param(p))
         h.update(self._fp_param(self.ends.get(p["body_off"])))
         h.update(wav_md5.encode())
+        h.update(b"g%.3f" % self.gains.get(idx, 0.0))
         return h.hexdigest()
 
     def _path(self, idx, key):
@@ -5949,10 +6026,13 @@ class _AudioBodyCache:
 
 
 def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
-                        cancel):
+                        cancel, gains=None):
     """Single-process cat-0 re-encode (the fallback + correctness reference).
     Returns ``(patches, skipped, results)`` — *results* maps each freshly
-    encoded idx to its ``(off, body)`` so the caller can cache it."""
+    encoded idx to its ``(off, body)`` so the caller can cache it.  *gains*
+    maps idx -> that clip's total loudness dB (see :func:`_slot_gain_maps`);
+    an idx it doesn't mention takes the build-wide offset."""
+    gains = gains or {}
     from .spike2.codec import GenRecover, StereoRecover
     from .spike2.emulator import Spike2Emu
     log("Booting firmware codec engine...", "info")
@@ -5980,11 +6060,12 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
                     "(skipped -- left unchanged in the output)." % idx, "warning")
                 continue
             try:
+                gdb = gains.get(idx)
                 off, body = (_encode_stereo(emu, sr, p, wav, np, pred=pred,
-                                            log=log)
+                                            log=log, gain_db=gdb)
                              if p["chan"] == 2
                              else _encode_mono(emu, gr, p, wav, np, pred=pred,
-                                               log=log))
+                                               log=log, gain_db=gdb))
             except _EncodeVerifyError as e:
                 skipped.append(idx)
                 log("%s -- skipped, left unchanged in the output." % e,
@@ -6001,7 +6082,7 @@ def _encode_cat0_serial(gr_path, img_path, byidx, edits, np, log, progress,
 
 
 def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
-                          log, progress, cancel):
+                          log, progress, cancel, gains=None):
     """Re-encode across ``nworkers`` spawned emulator processes (each boots once).
 
     Returns ``(patches, skipped, remaining, results)``: ``remaining`` is the
@@ -6020,8 +6101,11 @@ def _encode_cat0_parallel(gr_path, img_path, params, edits, nworkers, np,
     log("Re-encoding %d sound(s) across %d process(es)..."
         % (len(edits), nworkers), "info")
     ctx = mp.get_context("spawn")
+    # Per-clip loudness rides in the worker's INITARGS rather than in each
+    # task: the task tuple is the cache's edit list too, and one dict per
+    # worker keeps both shapes unchanged.
     pool = ctx.Pool(nworkers, initializer=init_encode_worker,
-                    initargs=(gr_path, img_path, params))
+                    initargs=(gr_path, img_path, params, gains or {}))
     patches, skipped, done_idx, results = {}, [], set(), {}
     try:
         # Confirm a worker actually booted (a stalled/unguarded pool raises here
@@ -7212,13 +7296,15 @@ def _assert_param_integrity(gr_path, img_path, patches, params, np, log,
 
 
 def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
-                        progress, cancel, assets_dir=None):
+                        progress, cancel, assets_dir=None, gains=None):
     """Re-encode every edited cat-0 sound to its body bytes — parallel across
     processes with a single-process fallback.  Returns ``({body_off: body},
     [skipped_idx])`` or ``(None, None)`` if cancelled.
 
     With *assets_dir*, sounds unchanged since their last encode replay from
-    that folder's :class:`_AudioBodyCache` instead of re-encoding."""
+    that folder's :class:`_AudioBodyCache` instead of re-encoding.  *gains*
+    maps idx -> that clip's total loudness dB (:func:`_slot_gain_maps`)."""
+    gains = gains or {}
     byidx = {p["idx"]: p for p in params}
     for idx in sorted(set(audio_edits) - set(byidx)):
         log("idx %d not a known sound; skipping." % idx, "warning")
@@ -7238,7 +7324,7 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
     if assets_dir and os.environ.get("PAD_STERN_AUDIO_CACHE") != "0":
         try:
             cache = _AudioBodyCache(assets_dir, gr_path, img_path, byidx,
-                                    _slot_end_map(params))
+                                    _slot_end_map(params), gains=gains)
         except Exception as e:
             log("Audio encode cache unavailable (%s); encoding everything "
                 "fresh." % e, "info")
@@ -7279,7 +7365,7 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
             # each edit's layout-predecessor for the shared-boundary word.
             fresh, psk, remaining, results = _encode_cat0_parallel(
                 gr_path, img_path, params, todo, nworkers, np, log, progress,
-                cancel)
+                cancel, gains=gains)
             if fresh is None:
                 return None, None
             skipped.extend(psk)
@@ -7294,7 +7380,8 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
     # failure -- the slow path that made a quick job take hours.
     if remaining:
         sp, sk, sres = _encode_cat0_serial(
-            gr_path, img_path, byidx, remaining, np, log, progress, cancel)
+            gr_path, img_path, byidx, remaining, np, log, progress, cancel,
+            gains=gains)
         if sp is None:
             return None, None
         fresh.update(sp)
@@ -7320,15 +7407,18 @@ def _encode_cat0_sounds(gr_path, img_path, params, audio_edits, np, log,
 _MUSIC_NAME_RE = re.compile(r"music_cat(\d+)_(\d+)", re.IGNORECASE)
 
 
-def _derive_encode_bank(gr_path, img_path, rev, cid, sc_path, edits, np):
+def _derive_encode_bank(gr_path, img_path, rev, cid, sc_path, edits, np,
+                        gains=None):
     """Re-encode one bank's edited songs on a FRESH CatEmu (deriving several
     banks on one emu grinds the loader — see ``spike2/category.py``).  *edits* =
-    ``[(idx, wav_path), ...]`` for this bank.  Returns ``(patches, skipped)``
+    ``[(idx, wav_path), ...]`` for this bank, *gains* ``{idx: total dB}`` for
+    the songs the user levelled by hand.  Returns ``(patches, skipped)``
     where ``patches`` = ``[(cid, idx, body_off, body), ...]`` (the parent maps
     cid back to its ext4 inode) and ``skipped`` = ``[(cid, idx), ...]``.
     Bit-identical to the serial inner loop, just per-bank so it parallelises."""
     from .spike2.category import CatEmu
     from .spike2.codec import GenRecover, StereoRecover
+    gains = gains or {}
     patches, skipped = [], []
     emu = CatEmu(gr_path, img_path)
     rows = []
@@ -7357,9 +7447,12 @@ def _derive_encode_bank(gr_path, img_path, rev, cid, sc_path, edits, np):
                 skipped.append((cid, idx))
                 continue
             pred = ends.get(p["body_off"])
-            off, body = (_encode_stereo(emu, sr, p, wav, np, pred=pred)
+            gdb = gains.get(idx)
+            off, body = (_encode_stereo(emu, sr, p, wav, np, pred=pred,
+                                        gain_db=gdb)
                          if p["chan"] == 2
-                         else _encode_mono(emu, gr, p, wav, np, pred=pred))
+                         else _encode_mono(emu, gr, p, wav, np, pred=pred,
+                                           gain_db=gdb))
             patches.append((cid, idx, off, bytes(body)))
     finally:
         emu.close()
@@ -7463,11 +7556,11 @@ def _assert_bank_integrity(gr_path, img_path, rev, cid, sc_path, patches,
 def _bank_encode_worker(args):
     """One task = re-encode a single bank's edited songs on a fresh emu.
     Top-level so it pickles across the spawn boundary."""
-    gr_path, img_path, rev, cid, sc_path, edits = args
+    gr_path, img_path, rev, cid, sc_path, edits, gains = args
     import numpy as np
     try:
         return _derive_encode_bank(gr_path, img_path, rev, cid, sc_path, edits,
-                                   np)
+                                   np, gains=gains)
     except Exception:
         return ([], [(cid, idx) for idx, _ in edits])
 
@@ -7511,10 +7604,10 @@ def _run_bank_encode(tasks, log, progress, cancel):
         if progress:
             progress(80 + int(n * 15 / max(len(tasks), 1)), 100,
                      "Re-encoding music bank %d/%d" % (n + 1, len(tasks)))
-        gr_path, img_path, rev, cid, sc_path, edits = t
+        gr_path, img_path, rev, cid, sc_path, edits, gains = t
         try:
             out.append(_derive_encode_bank(gr_path, img_path, rev, cid, sc_path,
-                                           edits, np))
+                                           edits, np, gains=gains))
         except Exception as e:
             log("music_cat%02d: re-encode failed (%s); skipped." % (cid, e),
                 "warning")
@@ -7523,7 +7616,7 @@ def _run_bank_encode(tasks, log, progress, cancel):
 
 
 def _compute_music_patches(reader, gr_path, img_path, music_edits, work, log,
-                           progress, cancel, np):
+                           progress, cancel, np, gains=None):
     """Re-encode each edited per-song music bank back into its ``image-scNN.bin``
     (size-neutral) and return ``[(sc_node, body_off, body_bytes), ...]`` for the
     songs that re-encode bit-exact.
@@ -7581,7 +7674,12 @@ def _compute_music_patches(reader, gr_path, img_path, music_edits, work, log,
         key=lambda c: (os.path.getsize(sc[c][1])
                        if os.path.exists(sc[c][1]) else 0),
         reverse=True)
-    tasks = [(gr_path, img_path, rev, c, sc[c][1], by_cat[c]) for c in cids]
+    # Each bank task carries only its OWN songs' loudness offsets (keyed by the
+    # index within the bank, which is what _derive_encode_bank looks up).
+    gains = gains or {}
+    tasks = [(gr_path, img_path, rev, c, sc[c][1], by_cat[c],
+              {i: db for (gc, i), db in gains.items() if gc == c})
+             for c in cids]
     results = _run_bank_encode(tasks, log, progress, cancel)
     if results is None:
         return []

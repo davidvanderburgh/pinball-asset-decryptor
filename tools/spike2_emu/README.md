@@ -131,7 +131,7 @@ still come from running it.
 | james_bond_le | ✅ live, 108 | ✅ bond_le_playfield.png | ✅ | n/a | 2026-08-19 |
 | deadpool_pro | ✅ live, E2E-played, 103 | ✅ deadpool_pro_playfield.png | ✅ 41 placed | n/a | 2026-08-27 |
 | king_kong_le | ✅ live, 105 | ✅ Rodeo…Wireframe.png (item 57 fix) | ✅ 489/517 inside, 0 outside (item 57 fix) | n/a | 2026-08-19 |
-| dungeons_and_dragons_le | ✅ live, 104 | ❌ none shipped | ✅ 255 records | n/a | 2026-08-19 |
+| dungeons_and_dragons_le | ✅ live, E2E-played to Player 1 Select a Character, 104 | ✅ `TestMode/Rope_LE-Premium-X8-X9_TOP_rotated_edit_cropped.png` (fixed 2026-08-28 — see note below) | ✅ 229/255 on the layout | n/a | 2026-08-28 |
 | venom_le | ✅ live, 107 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
 | turtles_le | ✅ live, 96 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
 | uncanny_xmen_le | ✅ live, 110 | ❌ none shipped | not re-measured | n/a | 2026-08-19 |
@@ -156,6 +156,36 @@ still come from running it.
 | sword_of_rage_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 98 | ❌ none shipped | ❌ no device table | n/a | 2026-08-19 |
 | munsters_le | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 103 | ❌ none shipped | ❌ no device table | n/a | 2026-08-19 |
 | beatles | ✅ live, 92 (item 80 sweep fix: all-`?` message-table title, names now filled from the device table) | ✅ Test/beatles_playfield.png 336x710 | ✅ 50 placed (item 80 sweep: `layout_image()` join fix, was hard-coded to the literal "playfield") | not re-measured | 2026-08-27 |
+
+**dungeons_and_dragons_le, 2026-08-28 — Start was refused, and it was BALL
+ACCOUNTING, not switches, wiring or NVRAM corruption.** Three real code
+fixes landed on the way here and now ship for every title, not just this
+one: `gameinfo.py` now falls back to a `TOP`-named art file when a card ships
+no file with "playfield" in its name (this is why the artwork column above
+flips from ❌ to ✅ — the card was never art-less, the finder just only knew
+one naming convention); `nbobjs.py` (new) derives each title's node-board
+array base from its own ELF indexing idiom instead of a hard-coded address,
+and `coilmap.py`'s `group_node()` derives the coil-group → node map per
+title from `node_ident.txt` instead of one constant tuned for godzilla_pro
+(this DnD's TROUGH resolves to node 8 idx 1, which the old constant got
+wrong); `ballfeed.py` now answers the auto-plunger AND drains the launched
+ball home after `PAD_BALL_HOME_MS` (default 5000 ms) unless a keyboard event
+claims it — titles that auto-plunge (DnD is the first one seen) were
+declaring **Device Malfunction: Auto Plunger** and emptying their own trough
+under the old always-refuse behavior.
+**The actual Start-refusal root cause was DATA, not code, and does not ship
+in this repo**: DnD LE's factory ball count is **8** — 6 in the trough plus
+**2 captive in the dragon** — and the game disarms its own Start/Tournament
+buttons while it believes balls are missing. Our rig models 6. **A fresh or
+factory-reset DnD card needs its own operator adjustment, every time**,
+before Start will do anything:
+`Adjustments → Machine Settings → Device Enables` — set **Disable Dragon =
+Yes**, **Disable Diverter = Yes**, **Number of Balls Installed = 6** (the
+page's own help text says the same). This is exactly the setting a real
+operator makes on a dragon-less machine; the emulator does not (yet) seed it
+automatically, so the artwork/positions ✅ above is unconditional but the
+"live, E2E-played" claim depends on that adjustment having been made on the
+card's saved NVRAM.
 
 **CORRECTION, same session, right after this table's first version shipped:**
 the first pass checked the CONSOLE pane for the live switch dump

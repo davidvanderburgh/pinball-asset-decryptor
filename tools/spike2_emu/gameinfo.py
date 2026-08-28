@@ -244,10 +244,24 @@ def find_playfield_art(name=None):
     for sub in ("Test", "TestMode"):
         cand = os.path.join(a, "nuk", "images", sub)
         try:
-            hits = [f for f in sorted(os.listdir(cand))
-                    if f.lower().endswith(".png") and "playfield" in f.lower()]
+            names = sorted(os.listdir(cand))
         except OSError:
             continue
+        # The word is not always "playfield" either (2026-08-27, item 80's
+        # dungeons_and_dragons_le): the 2025 generation names the drawing by
+        # dev codename and view - Rope_LE-Premium-X8-X9_TOP_rotated_edit_
+        # cropped.png beside Rope_PRO-X7_TOP_rotated_cropped.png and a
+        # ROPE_BACK_PANEL_cropped.png - so the run reported "this title ships
+        # no playfield drawing" about a title shipping one per model. "TOP"
+        # as a whole word is that generation's marker for the playfield-from-
+        # above view; BACK_PANEL and friends stay excluded because the word
+        # test is exact, not a substring. "playfield" keeps first claim so no
+        # title measured before this changes its pick.
+        hits = [f for f in names
+                if f.lower().endswith(".png") and "playfield" in f.lower()]
+        if not hits:
+            hits = [f for f in names
+                    if f.lower().endswith(".png") and "top" in _tokens(f)]
         if hits:
             found, d = hits, cand
             break

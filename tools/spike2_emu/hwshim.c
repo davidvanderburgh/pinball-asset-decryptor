@@ -4488,6 +4488,10 @@ static unsigned nb_near_base, nb_near_n;
  * a retry, and the near-miss report keeps its data. */
 #define NB_OBJS_RETRY_MS   10000ul   /* one scan is ~2.8 s of the bus thread */
 #define NB_OBJS_MAX_MISSES 3         /* bring-up populates within ~15 s */
+/* "The array will never resolve on this title" as a fact other code can act
+ * on, distinct from nb_objs_addr()'s 0 which also means "between retries".
+ * nb_nodes_add_boards() keys its node-directory fallback on it. */
+static int nb_objs_gave_up;
 static unsigned nb_objs_addr(void)
 {
     static unsigned found;
@@ -4511,6 +4515,7 @@ static unsigned nb_objs_addr(void)
             misses++;
             next_try_ms = pad_ms() + NB_OBJS_RETRY_MS;
             if (misses == NB_OBJS_MAX_MISSES) {
+                nb_objs_gave_up = 1;
                 snprintf(m, sizeof m, "[nbobj] no self-labelling board array "
                          "after %u scans - not scanning again this run (the "
                          "scan runs on the game's bus thread; see "
@@ -6305,15 +6310,15 @@ static int nb_silent_ff(unsigned node)
     return 0;
 }
 
-static void nb_nodes_add(unsigned node)
+static void nb_nodes_add(unsigned node, const char *src)
 {
-    char b[80];
+    char b[96];
     int i;
     if (!node || nb_nnodes < 0) return;
     if (nb_nnodes >= (int)sizeof nb_nodes) return;
     for (i = 0; i < nb_nnodes; i++) if (nb_nodes[i] == node) return;
     nb_nodes[nb_nnodes++] = (unsigned char)node;
-    snprintf(b, sizeof b, "[nbsched] + node %u (board table)\n", node);
+    snprintf(b, sizeof b, "[nbsched] + node %u (%s)\n", node, src);
     logmsg(b);
 }
 
@@ -6354,15 +6359,103 @@ static void nb_nodes_add_boards(void)
     static int on = -1;
     unsigned id;
     if (on == -1) { char *q = getenv("PAD_NB_SCHED_BOARDS"); on = !(q && *q == '0'); }
+    if (!on || nb_nnodes < 0) return;
     /* NB_OBJS is a Godzilla address; without it there is no board table to
-     * scan and this must do nothing rather than walk from 0. */
-    if (!on || nb_nnodes < 0 || !NB_OBJS) return;
+     * scan and this must do nothing rather than walk from 0.
+     *
+     * ...EXCEPT when the by-shape scan has GIVEN UP, which is a different
+     * fact: on such a title (dense, not self-labelling - stranger_things,
+     * and now dungeons_and_dragons_le 1.00) there is no board table to take
+     * boards from, and the LED-only boards the switch table cannot name are
+     * stranded out of the `00`-poll rotation for the whole run. MEASURED
+     * 2026-08-27 on dungeons_and_dragons_le: schedule stayed {4 1 8 9 10 12},
+     * the discovery walk was never told about the directory's 2/7/14, and
+     * node 2 sat at "Check Node Board 2 : Not Registered" on Tech Alerts -
+     * which is the alert class that blocks game start, so Start was handed
+     * to the game ([nbchg] showed the node-1 word flip) and refused. Same
+     * chicken-and-egg the ST fallback in nb_nodes_init() breaks for a title
+     * with no switch table at all; this breaks it for a title whose switch
+     * table DID resolve from game memory, where that fallback is
+     * deliberately unreachable. The directory minus the census silence is
+     * exactly the set the machine really has. */
+    if (!NB_OBJS) {
+        if (nb_objs_gave_up) {
+            nb_fident_load();
+            for (id = 1; id < 64; id++)
+                if (nb_fident_have[id] && !nb_is_silent(id))
+                    nb_nodes_add(id, "node directory - no board array");
+        }
+        return;
+    }
     for (id = 1; id < 32; id++) {
         const unsigned char *o =
             (const unsigned char *)(unsigned long)(NB_OBJS + id * NB_OBJ_SZ);
         if (!*(const unsigned *)(o + 12)) continue;            /* slot unused */
         if (!*(const unsigned short *)(o + 144)) continue;     /* not fitted */
-        nb_nodes_add(o[0]);
+        nb_nodes_add(o[0], "board table");
+    }
+}
+
+/* ★ dungeons_and_dragons_le 1.00 (2026-08-27): REGISTER NODE 2.
+ *
+ * Stern's board registrar hardcodes a node-2 special case (DnD ELF 0x360854:
+ * ldrb the node id, cmp #2). Every other board is marked registered - flags
+ * bit 0 at board[+4] - UNCONDITIONALLY; node 2 only when its device-count
+ * halfword board[+144] is non-zero (0x3608a0). On this build node 2 is
+ * "Cabinet Lights" - declared in the title's own node directory and fitted on
+ * the LE - but its static device config is empty, so board[+144] is 0, bit 0
+ * stays clear, (flags & 3) never reaches 3, and the Tech Alerts provider never
+ * suppresses "Check Node Board 2 : Not Registered". That alert class blocks
+ * game start: MEASURED, a Start press reaches the game (the node-1 cabinet word
+ * flips on the wire) and is refused. Confirmed by dumping the board objects
+ * (PAD_NB_OBJS): node 2 alone carries flags=0x02, every other board 0x03+.
+ *
+ * The board drives cabinet lights and has no gameplay role; a production build
+ * (or the physical board's own reported config) registers it, so the faithful
+ * state for the emulator is node 2 registered. When the title's directory
+ * declares node 2, its board object exists, and its flags bit 0 is clear, set
+ * it - and set board[+144] to 1 so the game's own registrar agrees if bring-up
+ * re-runs. Idempotent: once bit 0 is set this costs one compare per cycle.
+ *
+ * NEEDS THE BOARD-ARRAY BASE (NB_OBJS), which is a per-title guest address the
+ * by-shape scan cannot find under QEMU guest_base (its /proc/self/maps walk
+ * hands host addresses to a guest-address deref - the +0x10000 trap). nbdir
+ * derives it from the ELF and watch.sh passes it as PAD_NB_OBJS; without it
+ * this does nothing, exactly as before. Gated to a declared, non-silenced
+ * node 2 so no other title is touched. PAD_NB_REG2=0 turns it off. */
+static void nb_reg_node2(void)
+{
+    static int on = -1;
+    unsigned id;
+    if (on == -1) { char *q = getenv("PAD_NB_REG2"); on = !(q && *q == '0'); }
+    if (!on || !NB_OBJS) return;
+    nb_fident_load();
+    if (!nb_fident_have[2] || nb_is_silent(2)) return;   /* not this machine */
+    for (id = 0; id < 32; id++) {
+        unsigned char *o =
+            (unsigned char *)(unsigned long)(NB_OBJS + id * NB_OBJ_SZ);
+        unsigned flags;
+        if (o[0] != 2) continue;                    /* the node-2 slot */
+        if (!*(const unsigned *)(o + 12)) return;   /* object not built yet */
+        flags = *(const unsigned *)(o + 4);
+        if (flags & 1) return;                      /* already registered */
+        if (!*(const unsigned short *)(o + 144))
+            *(unsigned short *)(o + 144) = 1;       /* the count it wanted */
+        *(unsigned *)(o + 4) = flags | 1;           /* mark registered */
+        {
+            static int said;
+            if (!said) {
+                char m[140];
+                said = 1;
+                snprintf(m, sizeof m,
+                         "[nbreg] node 2 registered by the shim: flags "
+                         "0x%08x -> 0x%08x (this build ships node 2 with no "
+                         "device config; Stern gates its registration on that)\n",
+                         flags, flags | 1);
+                logmsg(m);
+            }
+        }
+        return;
     }
 }
 
@@ -6404,9 +6497,25 @@ static void nb_nodes_init(void)
          * shape there and can never resolve on ST (its array is dense, not
          * self-labelling). Merge the title's own declared directory, minus
          * the silenced - exactly the set the fallback below would have used.
-         * A title whose table came from GAME MEMORY is untouched: its board
-         * array resolves and add_boards() keeps doing this job. */
-        if (sw_ftab_installed) {
+         *
+         * ALSO for a title whose table came from the BY-SHAPE FINDER
+         * (sw_shadow in use), not only a file table. The old rule left those
+         * to add_boards() on the theory that a game-memory table means a
+         * resolvable board array; dungeons_and_dragons_le 1.00 disproved it
+         * (table found by shape, array dense like ST's). Its directory nodes
+         * 2/7/14 were stranded out of this seed, the discovery walk at
+         * 0x1d6f28 - which runs ONCE, in bring-up's first seconds, and
+         * treats its first zero as "that is the whole bus" - never heard of
+         * them, and node 2 sat on Tech Alerts as "Not Registered", which is
+         * the alert class that refuses game start. Adding the directory to
+         * the schedule AFTER that walk (measured, via the give-up branch in
+         * nb_nodes_add_boards) is too late: the game hammers the new node
+         * with f0-20 at 100 Hz and never runs identity on it, because no
+         * board object can be created outside the walk. The seed is the only
+         * door. Titles whose CONFIGURED table checks out (godzilla pro, the
+         * only one) keep the old shape exactly: array resolves, add_boards()
+         * does this job. */
+        if (sw_ftab_installed || sw_shadow[0]) {
             nb_fident_load();
             for (id = 1; id < 64 && nb_nnodes < (int)sizeof nb_nodes; id++) {
                 if (!nb_fident_have[id] || nb_is_silent(id)) continue;
@@ -6495,7 +6604,7 @@ static unsigned nb_next_node(void)
     /* Pick up boards that registered since the last cycle. Done at the START of
      * a cycle, not mid-list, so the set the service loop walks cannot change
      * under it between the first node and the terminating zero. */
-    if (idx == 0) nb_nodes_add_boards();
+    if (idx == 0) { nb_nodes_add_boards(); nb_reg_node2(); }
     if (nb_nnodes <= 0) return 0;
     /* ★ ITEM 52: THE PRIORITY LANE - a node with unserved switch NEWS is
      * named before the round-robin resumes, every cycle, until its scan is
@@ -9685,6 +9794,42 @@ long shim_read(int fd, void *b, unsigned long n)
             if (nb_is_silent(want) && nb_req_len > 2 && nb_req[2] == 0xff
                     && nb_silent_ff(want))
                 goto silent_status_ok;
+            /* AN ADDRESS THE TITLE'S OWN DIRECTORY DOES NOT DECLARE IS AN
+             * EMPTY ADDRESS, and an empty address answers nothing - the
+             * same fidelity rule as the census silence above, applied to
+             * the 54 addresses no census ever thinks about because no
+             * evidence names them at all.
+             *
+             * MEASURED 2026-08-27 on dungeons_and_dragons_le 1.00 (nodebus
+             * 1.31.0, the first title of its generation here): its game
+             * ADDRESS-SCANS the bus - the service menu's Run Communication
+             * Test painted "Unknown Node 3/5/6/11 : UNEXPECTED NODE
+             * ADDRESS" in red, every one of them an address only this
+             * shim's answer-everything default made look populated ([nbid]
+             * "node 3 claims ... (default)" and friends). Older titles
+             * never probed an address they had no board for, which is why
+             * answering all 64 was harmless for two years. Gated on a
+             * PARSED directory (nb_fident_state == 1): a title with no
+             * derived node_ident.txt keeps the old behaviour, because for
+             * it the directory cannot say which addresses are real. Node 0
+             * is the CPU/bridge - the directory skips it by design, and it
+             * must keep answering. No ff carve-out here on purpose: the
+             * service loop only ff-polls declared nodes, so the only
+             * traffic this silences is the scan that must find silence. */
+            if (want != 0 && want < 64
+                    && (nb_fident_load(), nb_fident_state == 1)
+                    && !nb_fident_have[want]) {
+                static int ubudget = 40;
+                if (ubudget > 0) {
+                    char sm[96];
+                    ubudget--;
+                    snprintf(sm, sizeof sm,
+                             "[nbsilent] t=%lu node=%lu undeclared - refusing"
+                             " (directory)\n", pad_ms(), (unsigned long)want);
+                    logmsg(sm);
+                }
+                return 0;
+            }
             if (nb_is_silent(want)) {
                 /* ITEM 17: timestamp every refusal. Run 11 showed the cabinet
                  * poll stops for ~690 ms at a time (~138 x the game's 5 ms

@@ -211,6 +211,24 @@ else
     fi
 fi
 #
+# THE NODE-BOARD OBJECT ARRAY'S BASE, derived from the game ELF. The shim reads
+# board status and REGISTERS node 2 (dungeons_and_dragons_le ships its Cabinet
+# Lights board with no device config, which Stern's registrar turns into a
+# permanent "Not Registered" alert that blocks game start - see hwshim
+# nb_reg_node2). The shim's own by-shape scan cannot find this array under QEMU
+# guest_base (it hands /proc/self/maps HOST addresses to a guest-address deref,
+# the +0x10000 trap), so the base is derived here from the ELF's own indexing
+# idiom and passed explicitly. Empty for a title with no such array (the shim
+# then behaves exactly as before). PAD_NB_OBJS set in the environment wins.
+if [ -z "${PAD_NB_OBJS:-}" ]; then
+    NB_OBJS_DERIVED=$(python3 "$RIG/nbobjs.py" "$GAME_ELF" 2>/dev/null)
+    if [ -n "$NB_OBJS_DERIVED" ]; then
+        export PAD_NB_OBJS="$NB_OBJS_DERIVED"
+        echo "[watch] node board array: $NB_OBJS_DERIVED (derived from $GAME's" \
+             "own board-indexing code)"
+    fi
+fi
+#
 # THE SWITCH LIST IS PASSED TOO, as the fallback for a title whose device table
 # cannot be parsed at all. star_wars_le is why: it yields ZERO device records,
 # so the census declined and the title kept the fault - David's 2026-08-10

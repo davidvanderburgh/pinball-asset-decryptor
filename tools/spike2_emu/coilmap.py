@@ -40,7 +40,92 @@ import struct
 #: Device-table group -> node on the bus. Verified by ledio.py against the
 #: boot enumeration, and now stated ONCE - playfield.py and coildecode.py
 #: import it from here.
+#:
+#: THIS IS GODZILLA'S MAP AND THE GROUPS SHIFT PER TITLE - it is the fallback
+#: now, not the answer; see group_node() below.
 GROUP_NODE = {4: 0, 5: 1, 6: 8, 7: 9}
+
+#: Groups 4 and 5 are the CPU and the cabinet on every title measured, so only
+#: the playfield groups (>= 6) move. Kept beside GROUP_NODE so the two halves
+#: of the same fact sit together.
+FIXED_GROUPS = {4: 0, 5: 1}
+
+
+def group_node(rows, nodedir_path=None):
+    """Build this TITLE's group -> node map, falling back to GROUP_NODE.
+
+    WHY THIS IS NOT A CONSTANT, measured 2026-08-27 on dungeons_and_dragons_le.
+    Its device table puts the TROUGH in group 7, and the static map above -
+    godzilla's - reads group 7 as node 9. The game itself says otherwise: its
+    Single Coil Test page for that very coil prints "Node: 8 - Lower Playfield"
+    and "Address: 8-DR-1". So ballfeed.py sat watching node 9 index 1 for an
+    eject that can only ever arrive on node 8, which is the coil half of why
+    that title never fed a ball. godzilla is not wrong either - its playfield
+    coils really are group 6 - the GROUPS THEMSELVES SHIFT between titles, and
+    a constant cannot be right for both.
+
+    THE RULE, and it reproduces the labelled example rather than replacing it:
+    the playfield coil groups (>= 6), ascending, map onto the title's own
+    PLAYFIELD node boards, ascending. The node list is the title's declared
+    node directory (node_ident.txt, from nbdir.py) filtered to `pinnode`
+    boards past the cabinet - which is exactly the set that carries coils.
+
+        godzilla_pro : groups {6,7} -> nodes {8,9}   (6->8, 7->9)  = GROUP_NODE
+        dnd 1.00     : groups {7,8} -> nodes {8,9}   (7->8, 8->9)  = the game's
+                                                                     own answer
+
+    Anything the rule cannot decide - no directory, no coil rows, or a count
+    mismatch between groups and boards - keeps GROUP_NODE, so a title that
+    worked before this existed still resolves exactly as it did.
+    """
+    mapping = dict(GROUP_NODE)
+    groups = sorted({r["group"] for r in rows or [] if r.get("group", 0) >= 6})
+    nodes = _playfield_nodes(nodedir_path)
+    if groups and nodes and len(groups) == len(nodes):
+        mapping = dict(FIXED_GROUPS)
+        mapping.update(dict(zip(groups, nodes)))
+    return mapping
+
+
+def _playfield_nodes(path=None):
+    """Ascending pinnode ids past the cabinet, from node_ident.txt, or [].
+
+    NO IMPLICIT DISCOVERY - this module never reaches for "whatever title is
+    active right now" on its own. It used to (via gameinfo.table_dir()), and
+    that is a real bug this test suite caught rather than a theoretical one:
+    parse()/load() are called with an EXPLICIT device_xy.txt path already, so
+    silently re-deriving the node directory from global machine state means
+    the answer depends on which title some OTHER process on the same machine
+    last touched - a synthetic unit test for jaws_le picked up a live rig's
+    real dungeons_and_dragons_le node_ident.txt over \\wsl.localhost\\... and
+    mapped jaws_le's TROUGH onto DnD's nodes, purely because both happened to
+    have 2 playfield groups. The Compare feature reads two different titles'
+    tables in one process for the same reason this cannot be implicit - each
+    load must name its own directory. Callers that DO want "whatever's
+    active" (coildecode.py's log-analysis tools, which have no path at all)
+    resolve that themselves and pass it in; see coildecode.py's coil_names().
+    """
+    if not path:
+        return []
+    out = []
+    try:
+        with open(path) as f:
+            for line in f:
+                if not line.startswith("node="):
+                    continue
+                fields = dict(kv.split("=", 1) for kv in line.split()
+                              if "=" in kv)
+                try:
+                    nid = int(fields.get("node", ""))
+                except ValueError:
+                    continue
+                # The cabinet is a pinnode too and owns group 5, not a
+                # playfield group, so it is excluded by id rather than type.
+                if fields.get("type") == "pinnode" and nid >= 2:
+                    out.append(nid)
+    except OSError:
+        return []
+    return sorted(out)
 
 #: The most a node's coil index can be. The shim publishes fires into a
 #: [16][16] table (padled.h), so an index past it has nowhere to land and the
@@ -88,7 +173,7 @@ TROUGH = "TROUGH"
 AUTO_PLUNGER = "AUTO PLUNGER"
 
 
-def parse(lines):
+def parse(lines, nodedir_path=None):
     """device_xy.txt coil rows -> dicts with name, x, y, group, index, node.
 
     THE FIELDS ARE COUNTED FROM THE RIGHT because the NAME is the multi-word
@@ -97,6 +182,11 @@ def parse(lines):
     field short and `h` was read as the group; every coil tooltip said "group
     20 index 6". devicexy.py writes "-" for a missing connector now, and this
     parse still refuses a row it cannot make sense of instead of placing it.
+
+    `nodedir_path` NAMES this table's own node_ident.txt, or is left None for
+    "no directory available" (bare synthetic rows, GROUP_NODE fallback - see
+    group_node()). It is never auto-discovered here; see _playfield_nodes()'s
+    docstring for why guessing which title's directory to read is the bug.
     """
     out = []
     for line in lines:
@@ -108,11 +198,16 @@ def parse(lines):
         try:
             group, index = int(p[-4]), int(p[-3])
             row = dict(name=" ".join(p[1:-8]), x=int(p[-8]), y=int(p[-7]),
-                       group=group, index=index, image=p[-1],
-                       node=GROUP_NODE.get(group) if index < COIL_N else None)
+                       group=group, index=index, image=p[-1], node=None)
         except ValueError:
             continue
         out.append(row)
+    # The node is filled in AFTER the whole table is read, because the map is
+    # derived from the set of groups the table uses - see group_node().
+    mapping = group_node(out, nodedir_path)
+    for row in out:
+        if row["index"] < COIL_N:
+            row["node"] = mapping.get(row["group"])
     return out
 
 
@@ -123,12 +218,21 @@ def load(path):
     device table at all (star_wars_le has 104 real switch names and no device
     records), and a ball feeder must say "this title has no coil table" in its
     own words rather than die in a library.
+
+    node_ident.txt IS THIS FILE'S OWN SIBLING, not a global lookup: mktables.py
+    writes both into the same <title>/ directory, so the node directory to use
+    is named by `path` itself - no need to ask gameinfo which title is active,
+    and no risk of answering with a DIFFERENT title's if `path` names one this
+    process is not currently running (the Compare tab reads two titles' tables
+    in one process for exactly this reason).
     """
     try:
         with open(path) as f:
-            return parse(f)
+            lines = f.readlines()
     except OSError:
         return []
+    nodedir = os.path.join(os.path.dirname(path), "node_ident.txt")
+    return parse(lines, nodedir if os.path.exists(nodedir) else None)
 
 
 def by_name(coils, name):

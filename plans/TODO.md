@@ -2782,10 +2782,33 @@ These have each been violated at least once and each cost a run or a window:
       coil4node guess), and the card is in the cache — one boot plus a
       game start observes it.
 
-- [ ] **53. The device-table GROUP → bus NODE map is ONE TITLE'S measurement, ← WORKING ON
-      ★★ IN PROGRESS 2026-08-28, branch `item/53`, ~85% — derived, shipped,
-      offline-verified on 12 titles; awaiting ONE live confirmation on Bond in
-      a STARTED GAME (this item's own acceptance warning). Committed, clean.
+- [x] **53. The device-table GROUP → bus NODE map is ONE TITLE'S measurement,
+      ★★★★★ **CLOSED 2026-08-28 on branch `item/53`, acceptance MET LIVE on
+      james_bond_60th_le in a STARTED GAME. Awaiting `/finish`.**
+      **The acceptance, point by point.** Boot from the item/53 worktree, card
+      cache warm, `plunge.py reset` then `plunge.py game`:
+        - **the derived map, printed by the rig itself** — `[watch] group map
+          group 6 -> node 6, group 8 -> node 8, group 9 -> node 9, group 10 ->
+          node 12`, and `inserts 402 LEDs` against **29** before. The
+          `group_node.txt` staleness trigger fired and re-derived a card that
+          was cached before this existed, which is that clause working.
+        - **a STARTED game, not attract** — the drop-target banks reset (LEFT 4
+          BANK DROP, CENTER 3 BANK DROP, 3 BANK INLINE RESET, LEFT CONTROL
+          GATE, one fire each) and AUTO PLUNGER fired; TROUGH 34. Attract does
+          not reset drop targets. Trough read 4/6 with 2 balls in play.
+        - **counts both ways** — **73 of 73** playfield LED channels have a wire
+          address (was **0 of 73**); **48** of them had been driven by the time
+          the shot was taken; **16 of 16** coils addressed (was 0). The 25 not
+          yet driven are modes a short game does not reach.
+        - **the glass** — the window's own status bar: `4 of 73 inserts lit ...
+          49 coils addressed`, lit inserts on the artwork. Cross-checked
+          INDEPENDENTLY against `dump/padled`, which does not go through the
+          window this item changed: node 8 idx 17 = TARGET C, node 8 idx 28 =
+          GADGET 2, node 9 idx 14 = UPPER LEFT SPINNER FLASH, node 9 idx 51 =
+          HAT RIGHT — named inserts at known positions.
+        - **godzilla did not move** — derives `6->8, 7->9`, identical to the
+          constant, and `tests/test_spike2_group_node.py` asserts it first.
+      **Suite: 3224 passed, 40 skipped** on the item/53 tree.
       **Established, and the first one retires this item's biggest unknown:**
       **(1) BOND'S LAMPS DECODE PERFECTLY — the wire was never the problem.**
       Read straight out of `dump/padled` during David's own live Bond run
@@ -2898,12 +2921,10 @@ These have each been violated at least once and each cost a run or a window:
       nothing reads that file back — every consumer re-derives — so it costs
       only the evidence file, and on the one title where the connector is
       ambiguous (DnD) the ascending rule already gives the right answer.
-      **Resume:** the one thing left is this entry's own acceptance — boot
-      james_bond_60th_le, **start a game** (not attract: item 50 measured
-      turtles driving no playfield lamp frames until coins+Start), and show the
-      artwork lighting. Cross-check against `dump/padled` directly, which is
-      independent of the window. The rig was DAVID'S during this pass (his
-      item-80 sweep, Bond live), so no run was taken.
+      **Left for someone else, deliberately:** group 7 (Bond's 24 backbox
+      lamps) still resolves to nothing — see the open sub-question above. It is
+      the swatch view, not the artwork this item was about, and guessing it
+      would collide two groups on one board index.
       so most titles' lamps and coils have a position and no wire address.**
       `S2 D3` *(Split out of item 50 on 2026-08-16, which found it while
       giving Bond a playfield. Item 50's grid does not need this — it reads the

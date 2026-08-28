@@ -3608,11 +3608,18 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
                                 ("PAD_STERN_LOWPASS_HZ", "treble roll-off Hz"),
                                 ("PAD_STERN_HEAD_MODE", "head block"),
                                 ("PAD_STERN_LEADOUT", "tail block"),
+                                ("PAD_STERN_MATCH_LOUDNESS", "loudness match"),
+                                ("PAD_STERN_MATCH_GAIN_DB", "loudness offset dB"),
                                 ("PAD_STERN_SLOT_SEED_DB", "anti-pop seed dBFS"))]
         adv = ["%s=%s" % (lbl, v) for lbl, v in adv if v]
         if adv:
             log("Advanced audio overrides active for this build: %s."
                 % "; ".join(adv), "warning")
+        # Always say how replacements were levelled.  Matching is scale-
+        # invariant, so a user who remixes a track louder and rebuilds gets a
+        # byte-identical result and no clue why (a tester, Godzilla music
+        # imports).  The one place he will look is this log.
+        log("Replacement loudness: %s." % _loudness_log_phrase(), "info")
         if not _pathA_enabled():
             log("Blip-free callouts OFF for this build (the default): a "
                 "re-encoded sound keeps a ~6 ms scrap of the original at the "
@@ -4624,9 +4631,48 @@ _MATCH_KNEE = 0.70             # limiting starts at 70% of the ceiling
 # its own noise floor while leaving every real recording room to reach stock.
 _MATCH_MAX_GAIN = 20.0
 
+# How far the user may push a replacement off the level the mode picked
+# ("Replacement loudness" in Advanced audio options).  Matching is scale-
+# INVARIANT by construction — the gain is orms/arms, so the output lands on
+# stock's energy no matter how the source was mixed — which means remixing a
+# track hotter changes the encoded result by literally nothing (a tester,
+# Godzilla music imports: "I mixed them loud but the edit didn't seem to make a
+# big change").  That is correct for a callout dropped into a bank of callouts
+# and wrong for somebody who wants his music to sit ABOVE the stock bed, so the
+# offset is the one lever that survives the match.  +/-12 dB: beyond that the
+# soft limiter is doing all the work and the result is distortion, not level.
+_MATCH_GAIN_DB_MAX = 12.0
+
 
 def _match_loudness_enabled():
     return os.environ.get("PAD_STERN_MATCH_LOUDNESS") != "0"
+
+
+def _match_gain_db():
+    """User loudness offset in dB (``PAD_STERN_MATCH_GAIN_DB``; GUI: Advanced
+    audio options -> "Replacement loudness"), clamped to
+    ±:data:`_MATCH_GAIN_DB_MAX`.  0.0 = the mode's own level, i.e. the shipped
+    behavior."""
+    ov = _env_float("PAD_STERN_MATCH_GAIN_DB")
+    if ov is None:
+        return 0.0
+    return max(min(ov, _MATCH_GAIN_DB_MAX), -_MATCH_GAIN_DB_MAX)
+
+
+def _loudness_log_phrase():
+    """One sentence for the build log describing how replacements are levelled,
+    including the "your own mix level is not what comes out" part that a
+    scale-invariant match makes invisible."""
+    db = _match_gain_db()
+    off = ("" if not db else
+           ", then %+.1f dB" % db)
+    if _match_loudness_enabled():
+        return ("matched to the level of each sound being replaced%s (the "
+                "level you mixed your file at is not carried over; change "
+                "\"Replacement loudness\" in Advanced Audio Options to sit "
+                "louder or quieter than stock)" % off)
+    return ("each replacement normalized to full scale%s, ignoring the level "
+            "of the sound it replaces" % off)
 
 
 def _active_rms(a, np):
@@ -4685,10 +4731,18 @@ def _fit_level(a, orig, rng, np, headroom):
     """Level the replacement *a* (int64, mono 1-D or stereo ``(n, 2)``): match
     the ORIGINAL sound's active RMS when a usable reference decoded, else fall
     back to the fixed peak cap.  See the block comment above for why matching
-    limits rather than simply capping the gain."""
+    limits rather than simply capping the gain.
+
+    Whichever mode ran, the user's :func:`_match_gain_db` offset is applied on
+    top and the result soft-limited, so "louder than the sound I replaced" is
+    reachable without turning matching off."""
     pk = int(np.abs(a).max()) if a.size else 0
     if pk <= 0:
         return a
+    # Applied AFTER the _MATCH_MAX_GAIN cap, not folded into it: that cap is an
+    # anti-noise-floor guard on the automatic part, and an explicit request for
+    # +N dB should not be silently swallowed by it.
+    off = 10.0 ** (_match_gain_db() / 20.0)
     if orig is not None and orig.size:
         opk = float(np.abs(orig).max())
         orms = _active_rms(orig, np)
@@ -4698,7 +4752,7 @@ def _fit_level(a, orig, rng, np, headroom):
             ceil_frac = ov if (ov is not None and 0.05 <= ov <= 1.0) \
                 else _MATCH_CEILING
             ceiling = rng * ceil_frac
-            gain = min(orms / arms, _MATCH_MAX_GAIN)
+            gain = min(orms / arms, _MATCH_MAX_GAIN) * off
             y = a.astype(np.float64) * gain
             # Limit ONLY when the gain actually pushed peaks past the ceiling.
             # Running the limiter unconditionally would shave the loudest 30%
@@ -4708,7 +4762,17 @@ def _fit_level(a, orig, rng, np, headroom):
             if pk * gain > ceiling:
                 y = _soft_limit(y, ceiling, np)
             return np.round(y).astype(np.int64)
-    return _amplitude_fit(a, rng, np, headroom=headroom)
+    y = _amplitude_fit(a, rng, np, headroom=headroom)
+    if off != 1.0 and y.size:
+        # Peak-normalizing already parked the peak on the cap, so a boost here
+        # can only come from the limiter folding the top down — which is what
+        # makes it louder rather than just clipped.  Cut is a plain scaling.
+        ceiling = rng * headroom
+        y = y.astype(np.float64) * off
+        if float(np.abs(y).max()) > ceiling:
+            y = _soft_limit(y, ceiling, np)
+        y = np.round(y).astype(np.int64)
+    return y
 
 
 _MONO_RANGE = 11147

@@ -433,6 +433,62 @@ def test_audio_advanced_modal_shaper_gone_and_grey_buttons(
     app._on_audio_advanced_change({})
 
 
+def test_audio_advanced_offers_replacement_loudness(app, manufacturers_by_key):
+    """PAD-90: the loudness match is scale-invariant, so a user who remixes a
+    track louder gets a byte-identical card.  The dialog has to expose a way
+    to sit above (or below) the stock level, and OK has to mirror it into the
+    encoder env vars the spawned encode workers read."""
+    import os
+
+    def _descendants(w):
+        out = []
+        for c in w.winfo_children():
+            out.append(c)
+            out += _descendants(c)
+        return out
+
+    win = app.window
+    app._on_manufacturer_change(manufacturers_by_key["stern"])
+    app.root.update()
+    for var in ("PAD_STERN_MATCH_LOUDNESS", "PAD_STERN_MATCH_GAIN_DB"):
+        os.environ.pop(var, None)
+
+    win._open_audio_advanced()
+    app.root.update()
+    dlg = [c for c in win.root.winfo_children()
+           if isinstance(c, _tk_mod.Toplevel)][-1]
+    kids = _descendants(dlg)
+    texts = [str(w.cget("text")) for w in kids if "text" in w.keys()]
+    assert any("Replacement loudness" in t for t in texts)
+    # the explanation has to say the user's own mix level is discarded
+    assert any("level you mixed your own file at" in t for t in texts)
+
+    combo = next(w for w in kids if "values" in w.keys()
+                 and any("Match the sound being replaced" in str(v)
+                         for v in w.cget("values")))
+    spin = next(w for w in kids
+                if "from" in w.keys() and float(w.cget("from")) == -12.0)
+    spin.set("6")
+    ok = next(w for w in kids if "text" in w.keys()
+              and str(w.cget("text")) == "OK")
+    ok.invoke()
+    app.root.update()
+
+    cfg = app._settings["audio_advanced"]
+    assert cfg["loudness"] == "match" and cfg["loudness_db"] == 6
+    # "match" is the engine baseline, so only the offset sets a var
+    assert "PAD_STERN_MATCH_LOUDNESS" not in os.environ
+    assert os.environ["PAD_STERN_MATCH_GAIN_DB"] == "6"
+
+    # Full-scale mode sets the kill switch; defaults clear both again.
+    app._on_audio_advanced_change({"loudness": "full", "loudness_db": -30})
+    assert os.environ["PAD_STERN_MATCH_LOUDNESS"] == "0"
+    assert os.environ["PAD_STERN_MATCH_GAIN_DB"] == "-12"   # clamped
+    app._on_audio_advanced_change({})
+    for var in ("PAD_STERN_MATCH_LOUDNESS", "PAD_STERN_MATCH_GAIN_DB"):
+        assert var not in os.environ
+
+
 def test_audio_group_duplicates_renders_two_level_tree(
         app, manufacturers_by_key):
     """With 'Group duplicates' on and a warm group cache, the audio list

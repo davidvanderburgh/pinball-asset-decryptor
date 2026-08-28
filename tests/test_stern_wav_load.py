@@ -220,3 +220,107 @@ def test_soft_limit_is_monotonic_and_bounded():
     assert np.abs(y).max() < 10000.0        # asymptotic to the ceiling
     small = np.abs(x) <= 0.7 * 10000.0      # under the knee: untouched
     assert np.allclose(y[small], x[small])
+
+
+# ---- the user's own mix level, and the offset that restores it -----------
+#
+# PAD-90 (a tester, Godzilla music imports): "I mixed them loud but the edit
+# didn't seem to make a big change, is PAD adjusting them on import?"  It is,
+# and the match is scale-INVARIANT, so remixing louder is a literal no-op.
+# These pin that (so it stays a documented behavior rather than a surprise)
+# and the "Replacement loudness" offset that lets him sit above stock anyway.
+
+def test_matching_ignores_the_level_the_user_mixed_at():
+    """The reason a hotter re-export changes nothing: gain is orms/arms, so
+    the same track exported at four different levels encodes identically."""
+    rng = _MONO_RANGE
+    t = np.linspace(0, 400, 44100)
+    orig = np.round(np.sin(t) * rng * 0.35).astype(np.int64)
+    base = np.sin(t) + 0.3 * np.sin(3 * t)
+    outs = [_fit_level(np.round(base * rng * s).astype(np.int64), orig, rng,
+                       np, headroom=0.97)
+            for s in (0.2, 0.4, 0.7, 0.95)]
+    for o in outs[1:]:
+        assert np.abs(o - outs[0]).max() <= 2          # rounding only
+
+
+def test_loudness_offset_lifts_the_match(monkeypatch):
+    """+6 dB on top of the match really is ~2x the energy — the lever the
+    scale-invariant match leaves the user."""
+    from pinball_decryptor.plugins.stern import engine
+    rng = _MONO_RANGE
+    t = np.linspace(0, 400, 44100)
+    orig = np.round(np.sin(t) * rng * 0.25).astype(np.int64)
+    repl = np.round(np.sin(t) * rng * 0.9).astype(np.int64)
+    flat = _fit_level(repl, orig, rng, np, headroom=0.97)
+    monkeypatch.setenv("PAD_STERN_MATCH_GAIN_DB", "6")
+    assert engine._match_gain_db() == pytest.approx(6.0)
+    loud = _fit_level(repl, orig, rng, np, headroom=0.97)
+    rms = lambda v: float(np.sqrt((v.astype(float) ** 2).mean()))
+    assert rms(loud) == pytest.approx(rms(flat) * 2.0, rel=0.05)
+    assert int(np.abs(loud).max()) <= int(rng * 0.97) + 1
+
+
+def test_loudness_offset_cuts_and_is_clamped(monkeypatch):
+    from pinball_decryptor.plugins.stern import engine
+    rng = _MONO_RANGE
+    t = np.linspace(0, 400, 44100)
+    orig = np.round(np.sin(t) * rng * 0.25).astype(np.int64)
+    repl = np.round(np.sin(t) * rng * 0.9).astype(np.int64)
+    flat = _fit_level(repl, orig, rng, np, headroom=0.97)
+    monkeypatch.setenv("PAD_STERN_MATCH_GAIN_DB", "-6")
+    quiet = _fit_level(repl, orig, rng, np, headroom=0.97)
+    rms = lambda v: float(np.sqrt((v.astype(float) ** 2).mean()))
+    assert rms(quiet) == pytest.approx(rms(flat) / 2.0, rel=0.05)
+    # clamped both ways, and junk is ignored
+    monkeypatch.setenv("PAD_STERN_MATCH_GAIN_DB", "99")
+    assert engine._match_gain_db() == engine._MATCH_GAIN_DB_MAX
+    monkeypatch.setenv("PAD_STERN_MATCH_GAIN_DB", "-99")
+    assert engine._match_gain_db() == -engine._MATCH_GAIN_DB_MAX
+    monkeypatch.setenv("PAD_STERN_MATCH_GAIN_DB", "loud please")
+    assert engine._match_gain_db() == 0.0
+
+
+def test_loudness_offset_applies_without_a_reference_too(monkeypatch):
+    """"Normalize to full scale" (no reference) also honours the offset, and a
+    boost there limits instead of clipping — peak-normalizing already parked
+    the peak on the cap."""
+    rng = _MONO_RANGE
+    t = np.linspace(0, 400, 44100)
+    repl = np.round(np.sin(t) * 3000).astype(np.int64)
+    monkeypatch.setenv("PAD_STERN_MATCH_GAIN_DB", "-6")
+    out = _fit_level(repl, None, rng, np, headroom=0.97)
+    plain = _amplitude_fit(repl, rng, np, headroom=0.97)
+    rms = lambda v: float(np.sqrt((v.astype(float) ** 2).mean()))
+    assert rms(out) == pytest.approx(rms(plain) / 2.0, rel=0.05)
+    monkeypatch.setenv("PAD_STERN_MATCH_GAIN_DB", "6")
+    up = _fit_level(repl, None, rng, np, headroom=0.97)
+    assert rms(up) > rms(plain)
+    assert int(np.abs(up).max()) <= int(rng * 0.97) + 1
+
+
+def test_default_offset_leaves_the_shipped_behavior_alone():
+    """No env var set = byte-identical to before the offset existed."""
+    rng = _MONO_RANGE
+    t = np.linspace(0, 400, 44100)
+    orig = np.round(np.sin(t) * rng * 0.25).astype(np.int64)
+    repl = np.round(np.sin(t) * rng * 0.9).astype(np.int64)
+    out = _fit_level(repl, orig, rng, np, headroom=0.97)
+    orms = float(np.sqrt((orig.astype(float) ** 2).mean()))
+    assert float(np.sqrt((out.astype(float) ** 2).mean())) == pytest.approx(
+        orms, rel=0.05)
+    # and the no-reference path is still exactly _amplitude_fit
+    assert (_fit_level(repl, None, rng, np, headroom=0.97)
+            == _amplitude_fit(repl, rng, np, headroom=0.97)).all()
+
+
+def test_loudness_log_phrase_names_the_setting(monkeypatch):
+    """The build log has to say the user's own mix level was not carried over
+    — a scale-invariant match is otherwise invisible."""
+    from pinball_decryptor.plugins.stern import engine
+    txt = engine._loudness_log_phrase()
+    assert "matched to the level" in txt and "Replacement loudness" in txt
+    monkeypatch.setenv("PAD_STERN_MATCH_GAIN_DB", "6")
+    assert "+6.0 dB" in engine._loudness_log_phrase()
+    monkeypatch.setenv("PAD_STERN_MATCH_LOUDNESS", "0")
+    assert "full scale" in engine._loudness_log_phrase()

@@ -4893,7 +4893,7 @@ class App:
     _AUDIO_ADV_DEFAULTS = {
         "head_mode": "encode", "leadout": "silence", "previews": False,
         "experiment_idxs": "", "slot_seed": False, "slot_seed_db": 65,
-        "blip_free_optin": False,
+        "blip_free_optin": False, "loudness": "match", "loudness_db": 0,
     }
 
     def _apply_audio_advanced_env(self, cfg):
@@ -4922,6 +4922,16 @@ class App:
                "stock" if d.get("leadout") == "stock" else None)
         idxs = str(d.get("experiment_idxs") or "").strip()
         setenv("PAD_STERN_EXPERIMENT_IDXS", idxs or None)
+        # Replacement loudness.  "match" (the engine baseline) leaves the var
+        # unset so spawned encode workers and headless callers, which never go
+        # through this dialog, keep building what they always built.
+        setenv("PAD_STERN_MATCH_LOUDNESS",
+               "0" if d.get("loudness") == "full" else None)
+        try:
+            ldb = int(d.get("loudness_db") or 0)
+        except (TypeError, ValueError):
+            ldb = 0
+        setenv("PAD_STERN_MATCH_GAIN_DB", max(min(ldb, 12), -12) or None)
         # Anti-pop codec seed: a negative dBFS level enables it; a positive
         # "slot_seed_db" in the config is the magnitude (60 -> -60 dBFS).
         if d.get("slot_seed"):

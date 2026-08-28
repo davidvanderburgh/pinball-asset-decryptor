@@ -5400,7 +5400,7 @@ These have each been violated at least once and each cost a run or a window:
 - [ ] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
       and identified; node 4 polled forever while we silence it; board 24
       RUNTIME INFO from no table we derive; and the carousel's overlay
-      screen never appears.** `S3 D2` 90% ← WORKING ON *(S2 → S3 and D4 →
+      screen never appears.** `S3 D2` 90% *(S2 → S3 and D4 →
       D2 at pass end, 2026-08-24: everything that broke the BOOT is fixed
       and regression-proven — what remains is a cosmetic menu row plus one
       instrumented dump with a known method, and the mechanism is fully

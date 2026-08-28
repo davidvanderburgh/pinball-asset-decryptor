@@ -159,6 +159,11 @@ class SternManufacturer(Manufacturer):
         # WAVs and the Write pipeline re-encodes the changed ones into image.bin
         # (only the changed ones — Write diffs against .checksums.md5).
         replace_audio=True,
+        # …and per slot, a loudness offset for that one replacement: the
+        # encoder gains every replacement to the level of the sound it
+        # replaces, so without this the only lever is build-wide and music
+        # cannot be lifted without lifting the callouts with it.
+        audio_level_offset=True,
         # Video is loose H.264 .asset clips copied out to video/ (named from
         # scene.radium).  The Replace Video tab stages a replacement over each,
         # and Write patches it back into the SD-card image IN PLACE via the

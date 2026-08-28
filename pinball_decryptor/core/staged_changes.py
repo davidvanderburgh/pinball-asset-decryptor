@@ -7,7 +7,12 @@ replacement source file`` — and apply them at Write time; there is no manual
 "stage" step.  Without this, quitting the app loses every assignment and the
 user has to re-pick each replacement folder by folder.  This drops a small JSON
 sidecar (:data:`SIDE_CAR`) at the root of the assets folder recording those
-assignments (plus the per-slot audio Loop flags and the trim toggles).
+assignments (plus the per-slot audio Loop flags, the per-slot audio loudness
+offsets under ``"audio_levels"``, and the trim toggles).
+
+``"audio_levels"`` (``{rel path -> dB}``) is also read by the Stern write
+pipeline itself (``engine._slot_gain_maps``) rather than passed to it, the same
+way the video path reads its originals map back out of here.
 
 The sidecar is keyed implicitly by the folder it lives in: each Replace tab only
 restores it when it scans that same folder, and the assets folder's identity vs

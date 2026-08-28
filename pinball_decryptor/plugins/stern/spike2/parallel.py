@@ -89,12 +89,16 @@ _ENC_BYIDX = None
 _ENC_ENDS = None
 _ENC_GR = None
 _ENC_SR = None
+_ENC_GAINS = None
 
 
-def init_encode_worker(game_real_path, image_path, params):
-    global _ENC_EMU, _ENC_BYIDX, _ENC_ENDS, _ENC_GR, _ENC_SR
+def init_encode_worker(game_real_path, image_path, params, gains=None):
+    global _ENC_EMU, _ENC_BYIDX, _ENC_ENDS, _ENC_GR, _ENC_SR, _ENC_GAINS
     from ..engine import _slot_end_map
     from .emulator import Spike2Emu
+    # Per-clip loudness ({idx: total dB}) travels in the initargs rather than
+    # per task: it is the same dict for every task this worker runs.
+    _ENC_GAINS = dict(gains or {})
     _ENC_EMU = Spike2Emu(game_real_path, image_path)
     _ENC_EMU.boot()
     # ``params`` is the card's FULL table (not just the edited sounds): the
@@ -134,13 +138,14 @@ def encode_one(task):
     pred = _ENC_ENDS.get(p["body_off"]) if _ENC_ENDS else None
     # A body that doesn't decode back to the request is the same class of
     # failure as a codec we can't re-encode: skip it, never write it blind.
+    gdb = (_ENC_GAINS or {}).get(idx)
     try:
         if p["chan"] == 2:
             off, body = _encode_stereo(_ENC_EMU, _ENC_SR, p, wav_path, np,
-                                       pred=pred)
+                                       pred=pred, gain_db=gdb)
         else:
             off, body = _encode_mono(_ENC_EMU, _ENC_GR, p, wav_path, np,
-                                     pred=pred)
+                                     pred=pred, gain_db=gdb)
     except _EncodeVerifyError:
         return (idx, p["body_off"], None, False)
     return (idx, off, bytes(body), True)

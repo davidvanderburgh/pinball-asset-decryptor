@@ -1131,7 +1131,7 @@ def find_ffplay():
     return None
 
 
-def play_audio_file(path, start=0.0, limit=None):
+def play_audio_file(path, start=0.0, limit=None, gain_db=0.0):
     """Start playing *path* in the background, no window.
 
     Prefers ffplay, which honors the *start* seek offset (seconds) used by
@@ -1147,6 +1147,11 @@ def play_audio_file(path, start=0.0, limit=None):
     to its slot length previews the same way (you hear only what lands on the
     machine).  Honored by ffplay via ``-t``; the OS-native fallback can't cap,
     so the caller's playhead tick stops it instead.
+
+    *gain_db* previews a clip's per-clip loudness offset (ffplay ``-af
+    volume``), so pressing play after moving the dB box is audibly different.
+    Like *start* and *limit* it is an ffplay-only capability -- the OS-native
+    fallback plays the file flat.
     """
     if not path or not os.path.isfile(path):
         return None
@@ -1162,6 +1167,8 @@ def play_audio_file(path, start=0.0, limit=None):
             if play_for <= 0:
                 return None
             cmd += ["-t", f"{play_for:.3f}"]
+        if gain_db:
+            cmd += ["-af", f"volume={gain_db:.2f}dB"]
         cmd.append(path)
         try:
             return subprocess.Popen(
@@ -1215,22 +1222,30 @@ def probe_duration(path):
     return _ffmpeg_get_duration(path)
 
 
-def render_spectrogram_png(path, width=700, height=90):
+def render_spectrogram_png(path, width=700, height=90, gain_db=0.0):
     """Render a full-track spectrogram of *path* to PNG bytes via ffmpeg.
 
     Returns the PNG bytes (decodable by Pillow) or ``None`` if ffmpeg is
     unavailable or the render fails.  Used as the seekable preview strip in
     the Replace-Audio tab — the whole track at a glance, no new dependency.
+
+    *gain_db* pre-amplifies the audio before the picture is drawn, for the
+    Replace-Audio tab's per-clip loudness box: ``showspectrumpic`` maps
+    magnitude to colour on a fixed scale (it does not normalize per file), so
+    a levelled clip really does come out brighter or darker.  It shows THAT
+    offset only — the automatic match to the stock sound's own loudness
+    happens inside the encoder, against audio only the emulator can decode.
     """
     ffmpeg = find_ffmpeg()
     if not ffmpeg or not path or not os.path.isfile(path):
         return None
     w = max(100, int(width))
     h = max(40, int(height))
+    pre = "volume=%.2fdB," % gain_db if gain_db else ""
     cmd = [
         ffmpeg, "-v", "error", "-i", path,
         "-lavfi",
-        f"showspectrumpic=s={w}x{h}:legend=0:gain=3:color=intensity",
+        f"{pre}showspectrumpic=s={w}x{h}:legend=0:gain=3:color=intensity",
         "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-",
     ]
     try:

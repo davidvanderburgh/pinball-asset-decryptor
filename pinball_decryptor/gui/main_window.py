@@ -264,6 +264,10 @@ class _AudioPreviewPane:
         # Effective stop point (s) when Write will trim this file to its slot
         # length — None when the whole file plays (originals are always None).
         self.limit = None
+        # This clip's own loudness offset (dB), previewed in the picture and
+        # in playback so moving the box on the Audio tab is something you can
+        # see and hear.  0 on the Original pane, always.
+        self.gain_db = 0.0
         self.pos = 0.0            # playhead position (s)
         self.playing = False
         self._start_pos = 0.0     # ffplay -ss offset in flight
@@ -315,9 +319,11 @@ class _AudioPreviewPane:
 
     # ---- loading ------------------------------------------------------
 
-    def load(self, path, dur, limit=None, autoplay=False, label=None):
+    def load(self, path, dur, limit=None, autoplay=False, label=None,
+             gain_db=0.0):
         """Load *path* into the strip.  *dur* is its probed duration (s);
-        *limit* is the trim stop point (s), or None to play the whole file.
+        *limit* is the trim stop point (s), or None to play the whole file;
+        *gain_db* is this clip's loudness offset (see :attr:`gain_db`).
 
         *label* names the file in the title instead of *path*'s own name —
         for the folder's own copy of a slot, whose name is the SLOT's, when
@@ -326,6 +332,7 @@ class _AudioPreviewPane:
         self.path = path
         self.dur = dur or 0.0
         self.limit = limit
+        self.gain_db = float(gain_db or 0.0)
         self.pos = 0.0
         self._hint = ""
         try:
@@ -345,6 +352,7 @@ class _AudioPreviewPane:
         self.path = None
         self.dur = 0.0
         self.limit = None
+        self.gain_db = 0.0
         self.pos = 0.0
         self._render_id += 1  # drop any in-flight render
         self._spec_img = None
@@ -394,7 +402,8 @@ class _AudioPreviewPane:
         from ..core import audio as _audio
 
         def _work():
-            png = _audio.render_spectrogram_png(path, w, h)
+            png = _audio.render_spectrogram_png(path, w, h,
+                                                gain_db=self.gain_db)
             if self._render_id != rid:
                 return
             self._win._tk_root().after(
@@ -420,7 +429,33 @@ class _AudioPreviewPane:
             canvas.create_text(w // 2, h // 2, fill="#888888",
                                text="(preview needs ffmpeg)")
         self._draw_cut_marker()
+        self._draw_gain_badge()
         self._draw_playhead()
+
+    def set_gain_db(self, db):
+        """Re-draw (and re-play) this clip at a different loudness offset.
+
+        The picture is ffmpeg's, so this costs a render — the caller debounces
+        it.  No-op when the number hasn't actually moved."""
+        db = float(db or 0.0)
+        if db == self.gain_db:
+            return
+        self.gain_db = db
+        if self.path:
+            self._render_spectrogram(self.path)
+
+    def _draw_gain_badge(self):
+        """Say on the strip itself that this picture is levelled, and by how
+        much — the brightness change alone is real but easy to miss, and an
+        unlabelled one would look like the file changed."""
+        canvas = self.spec_canvas
+        canvas.delete("gainbadge")
+        if not self.gain_db:
+            return
+        w = max(1, canvas.winfo_width())
+        canvas.create_text(w - 4, 8, anchor=tk.E, fill="#9dd7ff",
+                           text="%+.0f dB" % self.gain_db,
+                           tags=("gainbadge",))
 
     def _draw_cut_marker(self):
         """Mark where a trimmed replacement stops: a dashed line at the slot
@@ -498,7 +533,8 @@ class _AudioPreviewPane:
         if self.sibling is not None:
             self.sibling.stop_playback()  # never talk over the other pane
         _audio.stop_audio(self._proc)
-        proc = _audio.play_audio_file(self.path, start=pos, limit=self.limit)
+        proc = _audio.play_audio_file(self.path, start=pos, limit=self.limit,
+                                      gain_db=self.gain_db)
         if proc is None:
             self.playing = False
             self._set_play_btn(False)
@@ -1602,6 +1638,10 @@ class MainWindow:
         self._audio_assignments = {}     # rel_path -> replacement file path
         self._audio_loop_flags = {}      # rel_path -> bool (BOF loop-inject)
         self._audio_keep_full_flags = {}  # rel_path -> bool (JJP keep-full-len)
+        # rel_path -> int dB, this replacement's loudness relative to whatever
+        # the build-wide setting does (Stern; audio_level_offset capability).
+        self._audio_level_db = {}
+        self._audio_level_render_job = None   # debounced preview re-render
         self._audio_loop_tip = None      # Loop/keep-column hover tooltip Toplevel
         self._audio_scan_id = 0          # bump-counter to drop stale scans
         self._audio_scan_dir = ""        # folder the current slots came from
@@ -3686,16 +3726,18 @@ class MainWindow:
         # Slot list.
         list_frame = ttk.Frame(f)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
-        # "loop" and "keep" are optional toggle columns shown per capability
+        # "loop", "keep" and "lvl" are optional columns shown per capability
         # (apply_manufacturer sets displaycolumns) — "loop" for
-        # audio_loop_inject (BOF), "keep" for audio_keep_length_override (JJP).
-        # They never show together (different plugins).  displaycolumns places
-        # whichever is active just BEFORE "rep" so the narrow toggle is never
-        # the rightmost (clippable) column; the values tuple still follows this
-        # `columns` order (vals[3]=loop, vals[4]=keep) regardless of display
-        # order.
+        # audio_loop_inject (BOF), "keep" for audio_keep_length_override (JJP),
+        # "lvl" for audio_level_offset (Stern).  loop/keep never show together
+        # (different plugins).  displaycolumns places whichever is active just
+        # BEFORE "rep" so the narrow column is never the rightmost (clippable)
+        # one; the values tuple still follows this `columns` order (vals[3]=
+        # loop, vals[4]=keep, vals[6]=lvl) regardless of display order, which
+        # is why "lvl" is appended rather than inserted.
         self._audio_tree = ttk.Treeview(
-            list_frame, columns=("len", "fmt", "rep", "loop", "keep", "type"),
+            list_frame,
+            columns=("len", "fmt", "rep", "loop", "keep", "type", "lvl"),
             height=12, selectmode="browse")
         self._audio_tree.heading("#0", text="Original Track", anchor=tk.W)
         self._audio_tree.heading("len", text="Length", anchor=tk.W)
@@ -3704,6 +3746,7 @@ class MainWindow:
         self._audio_tree.heading("loop", text="Loop", anchor=tk.CENTER)
         self._audio_tree.heading("keep", text="Full", anchor=tk.CENTER)
         self._audio_tree.heading("type", text="Type", anchor=tk.W)
+        self._audio_tree.heading("lvl", text="Level", anchor=tk.CENTER)
         # ttk has no horizontal scroll: when the total column width exceeds the
         # widget it clips the rightmost column, and stretch only ever *grows*
         # columns, never shrinks them.  Only the track-name (#0) and
@@ -3722,9 +3765,12 @@ class MainWindow:
                                 stretch=False)
         self._audio_tree.column("type", width=78, minwidth=64, anchor=tk.W,
                                 stretch=False)
+        # Wide enough for "+12 dB" with the sort arrow on the heading.
+        self._audio_tree.column("lvl", width=66, minwidth=58, anchor=tk.CENTER,
+                                stretch=False)
         self._persist_tree_columns(
             self._audio_tree, "audio",
-            ("#0", "len", "fmt", "rep", "loop", "keep", "type"))
+            ("#0", "len", "fmt", "rep", "loop", "keep", "type", "lvl"))
         # Click-header sort: (col_id, base heading text, default-descending).
         # Numeric columns default to descending (longest/looped first) the way
         # the old "Longest first" option did; text columns ascending.
@@ -3732,7 +3778,8 @@ class MainWindow:
             ("#0", "Original Track", False), ("len", "Length", True),
             ("fmt", "Format", False), ("type", "Type", False),
             ("rep", "Replacement", False),
-            ("loop", "Loop", True), ("keep", "Full", True)]
+            ("loop", "Loop", True), ("keep", "Full", True),
+            ("lvl", "Level", True)]
         self._wire_sort_headings(self._audio_tree, self._audio_sort_cfg,
                                  "_audio_sort", self._refresh_audio_list)
         audio_scroll = ttk.Scrollbar(
@@ -3799,6 +3846,45 @@ class MainWindow:
         self._audio_pane_rep.frame.grid(row=0, column=1, sticky="ew",
                                         padx=(4, 0))
         self._audio_pane_rep.clear("no replacement assigned")
+
+        # Per-clip loudness, directly under the Replacement pane it belongs to
+        # (Stern only — apply_manufacturer grids/ungrids it).  The build-wide
+        # setting in Advanced Audio Options moves every replacement together,
+        # which is not what somebody replacing a card's MUSIC wants: "will the
+        # sound boost affect every single clip? it looks like if I change the
+        # setting on one, it changed it on another one too" — a tester,
+        # Godzilla.  This is that same offset for the selected clip alone, and
+        # it lives out here rather than behind the Advanced button because it
+        # is an everyday mixing decision, not an experiment lever.
+        self._audio_level_row = ttk.Frame(panes)
+        self._audio_level_var = tk.StringVar(value="0")
+        self._audio_level_loading = False   # suppress the write-trace on load
+        ttk.Label(self._audio_level_row,
+                  text="Loudness for this clip:").pack(side=tk.LEFT)
+        self._audio_level_spin = ttk.Spinbox(
+            self._audio_level_row, textvariable=self._audio_level_var,
+            from_=-12, to=12, increment=1, width=5,
+            command=self._audio_level_changed)
+        self._audio_level_spin.pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Label(self._audio_level_row, text="dB").pack(side=tk.LEFT,
+                                                         padx=(2, 0))
+        self._audio_level_var.trace_add(
+            "write", lambda *_a: self._audio_level_changed())
+        self._audio_level_all_btn = ttk.Button(
+            self._audio_level_row, text="Apply to all shown", width=17,
+            command=self._audio_level_apply_all)
+        self._audio_level_all_btn.pack(side=tk.LEFT, padx=(10, 0))
+        _Tooltip(self._audio_level_spin, self._AUDIO_LEVEL_TIP_TEXT,
+                 lambda: self._current_theme)
+        _Tooltip(self._audio_level_all_btn,
+                 "Give every row the list is currently showing this same "
+                 "offset — the search box, the Type filter and Show: "
+                 "Changed/Unchanged all narrow what \"shown\" means.\n\n"
+                 "So: set Type to Music, type this box to +4, and every song "
+                 "sits 4 dB above stock while the callouts stay where they "
+                 "are.\n\nSetting it back to 0 the same way clears them.",
+                 lambda: self._current_theme)
+        self._audio_level_set_enabled(False)
 
         # Length-matching option + the Stern experiment buttons share one row:
         # the Trim/pad checkbox on the left, Advanced… / Profile vs stock on the
@@ -4004,6 +4090,7 @@ class MainWindow:
         from ..core import staged_changes
         saved_loops = {}
         saved_keep = {}
+        saved_levels = None
         # Trim/pad value to restore when the plugin doesn't force the lock:
         # a new folder restores its saved choice (default off); a same-folder
         # re-scan preserves the current one.
@@ -4017,6 +4104,7 @@ class MainWindow:
                 scan_dir)
             saved_loops = staged.get("audio_loop") or {}
             saved_keep = staged.get("audio_keep") or {}
+            saved_levels = staged.get("audio_levels") or {}
             persisted_trim = bool(staged.get("audio_trim", False))
             self._restore_change_filter("audio", staged)
             # "Group duplicates" is NOT persisted/restored: it's off by
@@ -4046,6 +4134,22 @@ class MainWindow:
                          if s.rel_path in saved_keep
                          else self._audio_keep_full_flags.get(s.rel_path, False))
             for s in slots}
+        # Per-slot loudness offset (Stern): a new folder takes the sidecar's
+        # (dropping any slot that no longer exists), a re-scan of the same
+        # folder keeps what's live.  Stored sparsely — only slots the user
+        # actually levelled — so this never grows to one entry per sound.
+        levels = (self._audio_level_db if saved_levels is None
+                  else saved_levels)
+        self._audio_level_db = {}
+        for rel, db in levels.items():
+            if rel not in self._audio_slots_by_rel:
+                continue
+            try:
+                db = int(db)
+            except (TypeError, ValueError):
+                continue
+            if db:
+                self._audio_level_db[rel] = max(min(db, 12), -12)
         self._audio_scan_dir = scan_dir
         # Now that the real extract folder is known, lock the Trim/pad toggle
         # for plugins whose Write is size-neutral for THIS extract (CGC's Pulp
@@ -4768,6 +4872,8 @@ class MainWindow:
             if col == "keep":
                 return (1 if self._audio_keep_full_flags.get(s.rel_path)
                         else 0,)
+            if col == "lvl":
+                return (self._audio_level_db.get(s.rel_path, 0),)
             if col == "type":
                 return (_cat_disp(s), s.rel_path.lower())
             return (s.rel_path.lower(),)  # "#0" name/path
@@ -4806,7 +4912,8 @@ class MainWindow:
             tree.insert(parent, tk.END, iid=s.rel_path, text=s.rel_path,
                         values=(s.duration_str(), s.format_summary(),
                                 rep_disp, loop_disp, keep_disp,
-                                _cat_disp(s)),
+                                _cat_disp(s),
+                                self._audio_level_disp(s.rel_path)),
                         tags=(tag,) if tag else ())
 
         grouped = (bool(self.audio_group_dups_var.get())
@@ -4844,7 +4951,7 @@ class MainWindow:
                     values=(dur_str, "",
                             ("%d of %d modded" % (touched_n, len(members))
                              if touched_n else ""),
-                            "", "", ""))
+                            "", "", "", ""))
                 for m in visible:
                     _insert(giid, m)
             rest = [s for s in slots if s.rel_path not in in_groups]
@@ -4906,6 +5013,10 @@ class MainWindow:
                 self._audio_empty.place_forget()
         # Fit-to-content column widths (the toggle columns stay fixed).
         self._autosize_tree_columns(tree, "audio", ("#0", "len", "fmt", "rep"))
+        # Keep the per-clip dB box in step with what the list now holds (it is
+        # live as soon as there is anything to level, selection or not — "Apply
+        # to all shown" needs no row picked).
+        self._audio_level_sync_to_selection()
 
     def _maybe_rescan_audio(self):
         """Auto-scan when the Replace Audio tab becomes visible and the
@@ -4976,6 +5087,9 @@ class MainWindow:
             self._audio_select_job = None
 
     def _audio_on_tree_select(self, _event=None):
+        # The dB box follows the selection immediately (see the method) even
+        # though the preview below is debounced.
+        self._audio_level_sync_to_selection()
         # Debounce: render the selected original's seek-bar strip after a
         # short idle, so arrowing through the list doesn't fire ffmpeg per row.
         self._cancel_audio_select_job()
@@ -5099,8 +5213,175 @@ class MainWindow:
         "end-of-game track before attract — since the show may still cut it "
         "short. Test on the machine.")
 
+    _AUDIO_LEVEL_TIP_TEXT = (
+        "How loud THIS replacement lands, in dB.\n\n"
+        "Every replacement is normally gained to the loudness of the sound it "
+        "replaces, so it sits with its neighbours instead of jumping out — "
+        "and that ignores the level you mixed your own file at, so exporting "
+        "the same track louder changes nothing. This is the way to overrule "
+        "it for one clip.\n\n"
+        "It stacks on the build-wide \"Replacement loudness\" offset in "
+        "Advanced Audio Options: that one moves every replacement together, "
+        "this one moves this clip relative to the rest. 0 dB = whatever the "
+        "rest of the build does.\n\n"
+        "Handy for music, which Stern mixes as a bed under the callouts. "
+        "Boosts are soft-limited, never hard-clipped, and the build log lists "
+        "every clip you levelled by hand.\n\n"
+        "The Replacement preview redraws and plays at this offset, so you can "
+        "see and hear it. What the preview can't show is the automatic match "
+        "to the stock sound's own level: that happens inside the encoder, "
+        "against audio only the machine's own decoder can produce.")
+
+    def _audio_level_disp(self, rel):
+        """The Level column's cell text: blank at 0 so a card full of default
+        rows stays quiet to read, and the ones the user touched stand out."""
+        db = self._audio_level_db.get(rel) or 0
+        return "%+d dB" % db if db else ""
+
+    def _audio_level_enabled(self):
+        return bool(getattr(self._current_mfr, "capabilities", None)
+                    and getattr(self._current_mfr.capabilities,
+                                "audio_level_offset", False))
+
+    def _audio_level_set_enabled(self, on):
+        """Enable the dB box + bulk button (there is something to level)."""
+        for w in (getattr(self, "_audio_level_spin", None),
+                  getattr(self, "_audio_level_all_btn", None)):
+            if w is not None:
+                try:
+                    w.state(["!disabled"] if on else ["disabled"])
+                except tk.TclError:
+                    pass
+
+    def _audio_level_value(self):
+        """The dB box as an int, clamped; ``None`` while the text isn't a
+        number yet (mid-typing "-", say) so a half-typed value never lands on
+        a slot."""
+        raw = (self._audio_level_var.get() or "").strip()
+        if not raw:
+            return 0
+        try:
+            return max(min(int(float(raw)), 12), -12)
+        except ValueError:
+            return None
+
+    def _audio_level_changed(self):
+        """dB box edited — record it against the selected slot (0 clears)."""
+        if self._audio_level_loading:
+            return
+        db = self._audio_level_value()
+        rel = self._audio_selected_rel()
+        if db is None or rel is None or rel not in self._audio_slots_by_rel:
+            return
+        if db:
+            self._audio_level_db[rel] = db
+        else:
+            self._audio_level_db.pop(rel, None)
+        self._audio_level_refresh_row(rel)
+        self._audio_level_preview_soon(rel)
+        self._save_staged_changes()
+
+    def _audio_level_preview_soon(self, rel):
+        """Redraw the Replacement strip at the new level, a beat after the
+        last keystroke.  The picture is an ffmpeg render, so a spinbox held
+        down would otherwise fire one subprocess per click."""
+        if getattr(self, "_audio_level_render_job", None) is not None:
+            try:
+                self._tk_root().after_cancel(self._audio_level_render_job)
+            except (tk.TclError, ValueError):
+                pass
+            self._audio_level_render_job = None
+
+        def _go():
+            self._audio_level_render_job = None
+            if (self._audio_pane_rep is not None
+                    and self._audio_current_rel == rel):
+                self._audio_pane_rep.set_gain_db(
+                    self._audio_level_db.get(rel, 0))
+        self._audio_level_render_job = self._tk_root().after(350, _go)
+
+    def _audio_level_refresh_row(self, rel):
+        """Redraw just this row's Level cell (cf. _audio_toggle_loop)."""
+        try:
+            vals = list(self._audio_tree.item(rel, "values"))
+            if len(vals) >= 7:
+                vals[6] = self._audio_level_disp(rel)
+                self._audio_tree.item(rel, values=vals)
+        except tk.TclError:
+            pass
+
+    def _audio_level_sync_to_selection(self, reset=False):
+        """Show the selected slot's own offset in the dB box.  Not debounced
+        like the preview: the box must never sit showing row A's value while
+        row B is selected, or the next keystroke would land on the wrong slot.
+
+        With no row selected the typed value is left alone (it is still what
+        "Apply to all shown" will use) unless *reset* asks for a clean slate —
+        a manufacturer switch, where the previous card's number would be
+        nonsense."""
+        if not hasattr(self, "_audio_level_var"):
+            return
+        rel = self._audio_selected_rel()
+        if rel is not None or reset:
+            self._audio_level_loading = True
+            try:
+                self._audio_level_var.set(
+                    str(self._audio_level_db.get(rel, 0) if rel else 0))
+            finally:
+                self._audio_level_loading = False
+        self._audio_level_set_enabled(bool(self._audio_slots))
+
+    def _audio_visible_rels(self):
+        """Every slot row the list is currently showing, in display order —
+        through the duplicate-grouping parents, and never the parents
+        themselves (their iids aren't slots)."""
+        out = []
+
+        def walk(parent):
+            for iid in self._audio_tree.get_children(parent):
+                if iid in self._audio_slots_by_rel:
+                    out.append(iid)
+                walk(iid)
+        walk("")
+        return out
+
+    def _audio_level_apply_all(self):
+        """Put the dB box's value on every row the list is showing.
+
+        The middle ground between one clip and the whole build: with the Type
+        filter on Music this is "lift every song and leave the callouts
+        alone", which is the actual job somebody rescoring a card has."""
+        db = self._audio_level_value()
+        if db is None:
+            return
+        rels = self._audio_visible_rels()
+        if not rels:
+            messagebox.showinfo(
+                "Replacement loudness",
+                "No sounds are listed to apply that to.")
+            return
+        if not messagebox.askyesno(
+                "Replacement loudness",
+                ("Clear the loudness offset on all %d sound(s) currently "
+                 "listed?" % len(rels)) if not db else
+                ("Set the loudness offset to %+d dB on all %d sound(s) "
+                 "currently listed?\n\nThis affects only what the list is "
+                 "showing right now (search, Type and Show filters "
+                 "included)." % (db, len(rels)))):
+            return
+        for rel in rels:
+            if db:
+                self._audio_level_db[rel] = db
+            else:
+                self._audio_level_db.pop(rel, None)
+        self._refresh_audio_list()
+        if self._audio_current_rel in rels:
+            self._audio_level_preview_soon(self._audio_current_rel)
+        self._save_staged_changes()
+
     def _audio_on_tree_motion(self, event):
-        """Show the Loop- or Full-column explainer tooltip while hovering it."""
+        """Show the Loop-, Full- or Level-column explainer tooltip while
+        hovering it."""
         tree = self._audio_tree
         region = tree.identify_region(event.x, event.y)
         name = (self._audio_tree_col_name(tree.identify_column(event.x))
@@ -5109,6 +5390,8 @@ class MainWindow:
             self._show_audio_loop_tip(event, self._AUDIO_LOOP_TIP_TEXT)
         elif name == "keep":
             self._show_audio_loop_tip(event, self._AUDIO_KEEP_TIP_TEXT)
+        elif name == "lvl":
+            self._show_audio_loop_tip(event, self._AUDIO_LEVEL_TIP_TEXT)
         else:
             self._hide_audio_loop_tip()
 
@@ -5505,7 +5788,8 @@ class MainWindow:
         # on big cards and briefly showed the renamed row at the wrong sort
         # position until the metadata probe caught up (feedback batch 14).
         for d in (self._audio_assignments, self._audio_loop_flags,
-                  self._audio_keep_full_flags, self._audio_categories):
+                  self._audio_keep_full_flags, self._audio_categories,
+                  self._audio_level_db):
             if rel in d:
                 d[new_rel] = d.pop(rel)
         if rel in self._audio_changed_on_disk:
@@ -5602,7 +5886,7 @@ class MainWindow:
                 w = csv.writer(f)
                 w.writerow(["Original Track", "Length", "Format", "Type",
                             "Replacement", "Changed On Disk", "Loop",
-                            "Full Length"])
+                            "Full Length", "Level dB"])
                 for s in sorted(self._audio_slots, key=lambda q: q.rel_path):
                     rel = s.rel_path
                     rep = self._audio_assignments.get(rel, "")
@@ -5613,6 +5897,7 @@ class MainWindow:
                         "yes" if rel in self._audio_changed_on_disk else "",
                         "yes" if self._audio_loop_flags.get(rel) else "",
                         "yes" if self._audio_keep_full_flags.get(rel) else "",
+                        self._audio_level_db.get(rel, "") or "",
                     ])
         except OSError as e:
             messagebox.showerror("Export CSV", "Couldn't write the CSV:\n%s"
@@ -5859,7 +6144,8 @@ class MainWindow:
             self._audio_pane_rep.base_title = "Replacement"
             self._audio_pane_rep.load(
                 rpath, rdur, self._audio_compute_preview_limit(rel, rdur),
-                autoplay=autoplay)
+                autoplay=autoplay,
+                gain_db=self._audio_level_db.get(rel, 0))
             return
         # No new assignment, but the slot is already changed on disk and the
         # true original is on the left (its .orig snapshot): the on-disk file
@@ -5880,7 +6166,8 @@ class MainWindow:
                 self._audio_pane_rep.load(
                     cur, _audio.probe_duration(cur) or 0.0, None,
                     autoplay=autoplay,
-                    label=self._remembered_rep_name("audio", rel) or None)
+                    label=self._remembered_rep_name("audio", rel) or None,
+                    gain_db=self._audio_level_db.get(rel, 0))
                 return
         self._audio_pane_rep.base_title = "Replacement"
         self._audio_pane_rep.clear(
@@ -6006,6 +6293,7 @@ class MainWindow:
             self._audio_pane_orig.clear()
         if self._audio_pane_rep is not None:
             self._audio_pane_rep.clear("no replacement assigned")
+        self._audio_level_sync_to_selection(reset=True)
 
     # ---- Replace Audio: pending assignments (applied at Write time) --
 
@@ -9594,7 +9882,12 @@ class MainWindow:
         ttk.Label(
             dlg, justify=tk.LEFT, wraplength=wrap,
             font=(_SANS_FONT, 8, "italic"),
-            text="By default every replacement is gained to the same loudness "
+            text="This row is the setting for the WHOLE build: it moves every "
+                 "replacement together. For one clip on its own, use the "
+                 "\"Loudness for this clip\" box beside the Replacement "
+                 "preview on the Audio tab (its dB stacks on top of this "
+                 "one).\n"
+                 "By default every replacement is gained to the same loudness "
                  "as the sound it replaces, so it sits with its neighbours "
                  "instead of jumping out. That match ignores the level you "
                  "mixed your own file at: exporting the same track louder and "
@@ -9869,6 +10162,11 @@ class MainWindow:
             data["audio"] = dict(self._audio_assignments)
             data["audio_loop"] = dict(self._audio_loop_flags)
             data["audio_keep"] = dict(self._audio_keep_full_flags)
+            # Sparse on purpose: the Stern write pipeline reads this map back
+            # out of the sidecar, and an entry per sound would mean 5000 zeroes
+            # to walk on every build.
+            data["audio_levels"] = {rel: int(db) for rel, db
+                                    in self._audio_level_db.items() if db}
             data["audio_trim"] = bool(self.audio_trim_var.get())
             data["audio_change_filter"] = self.audio_change_filter_var.get()
         if _live(self._video_scan_dir):
@@ -15652,6 +15950,7 @@ class MainWindow:
         self._audio_assignments = {}
         self._audio_loop_flags = {}
         self._audio_keep_full_flags = {}
+        self._audio_level_db = {}
         self._audio_scan_dir = ""
         self._audio_dup_groups = None
         self._audio_dup_scan_dir = ""
@@ -15674,9 +15973,22 @@ class MainWindow:
             elif getattr(caps, "audio_keep_length_override", False):
                 self._audio_tree["displaycolumns"] = ("len", "fmt", "type",
                                                       "keep", "rep")
+            elif getattr(caps, "audio_level_offset", False):
+                # Same rule as the toggles: narrow column ahead of the
+                # stretchy Replacement one so it can't be the clipped edge.
+                self._audio_tree["displaycolumns"] = ("len", "fmt", "type",
+                                                      "lvl", "rep")
             else:
                 self._audio_tree["displaycolumns"] = ("len", "fmt", "type",
                                                       "rep")
+        # The per-clip dB box under the Replacement pane rides the same
+        # capability — an inert one would be worse than none.
+        if hasattr(self, "_audio_level_row"):
+            if getattr(caps, "audio_level_offset", False):
+                self._audio_level_row.grid(row=1, column=1, sticky="w",
+                                           padx=(4, 0), pady=(6, 0))
+            else:
+                self._audio_level_row.grid_remove()
         # "Group duplicates" checkbox: only for plugins that implement the
         # duplicate scan (CGC).
         if hasattr(self, "_audio_dup_group_cb"):

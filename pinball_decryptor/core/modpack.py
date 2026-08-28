@@ -34,7 +34,11 @@ MANIFEST_NAME = ".modpack.json"
 # project's change history to find out what he had used.  The name is keyed by
 # slot, so it survives a re-extract of the same card the way the other maps do.
 _EXTRA_MAPS = ("settings", "high_scores", "image_group_tags",
-               "replacement_names")
+               "replacement_names",
+               # Per-clip loudness: an encode instruction attached to the WAVs
+               # the pack carries, so a pack built without it would come out
+               # at a different balance than the author's own card.
+               "audio_levels")
 _EXTRA_SCALARS = ("menu_expose_through",)
 
 # Reserved zip folder for the BYTES of the Partitions-tab replaces the manifest

@@ -124,7 +124,15 @@ HELP_CONTENT = {
          "hard-clipped. Music is the usual reason to reach for it: Stern "
          "mixes its music as a bed under the callouts, so a matched song "
          "sits there too. The build log states which setting built the "
-         "card."),
+         "card.\n\n"
+         "That row is one setting for the whole build, so it moves every "
+         "replacement together. To lift one clip on its own, use the "
+         "\"Loudness for this clip\" box beside the Replacement preview on "
+         "the Audio tab — its dB stacks on top of the build-wide one, the "
+         "Level column shows which clips you have levelled, and \"Apply to "
+         "all shown\" puts the same offset on everything the list is "
+         "currently showing (set Type to Music first and only the songs "
+         "move)."),
         ("Assets folder + applying",
          "The assets folder is the one Extract produced — the same folder the "
          "Write tab reads. There's no separate \"stage\" step: the "

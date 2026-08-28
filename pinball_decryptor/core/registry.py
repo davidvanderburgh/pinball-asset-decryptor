@@ -162,6 +162,16 @@ class Capabilities:
     # a longer track.  app.py passes the set of exempt slot paths to the write
     # pipeline as ``keep_full_length_names`` and to staging.
     audio_keep_length_override: bool = False
+    # Per-slot replacement loudness: surfaces a "Level" column plus a dB box
+    # beside the Replacement preview on the Replace-Audio tab, in dB relative
+    # to whatever the build-wide "Replacement loudness" setting does.  Only for
+    # plugins whose encoder actually re-levels replacements (Stern Spike 2
+    # gains each one to the stock sound's own loudness), where a single global
+    # offset moves music and callouts together — a tester replacing a card's
+    # music asked for exactly this after finding the Advanced setting was not
+    # per clip.  The values are persisted per slot in the folder's
+    # .staged_changes.json and read straight off it by the write pipeline.
+    audio_level_offset: bool = False
     # Optional WPC-DMD decode pass: surfaces a "Decode DMD scenes
     # (experimental, extract-only)" checkbox on the Extract tab.
     # When True, app.py passes ``decode_dmd`` to the extract factory.

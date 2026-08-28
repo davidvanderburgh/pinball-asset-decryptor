@@ -5457,6 +5457,52 @@ These have each been violated at least once and each cost a run or a window:
       NO title should show the validation banner from here on — if one
       does, that is a NEW, live validation failure, not the stale-grade
       class, and it earns its own item.**
+      - **jaws_le 1.02.0 — ✅ CLEAN end to end**, David's own green check,
+        2026-08-28. (1.01.0 ran too but is superseded — it ships neither a
+        device table nor service art.) Recorded in the README matrix, which
+        gained a `build` column that pass: a row naming only a TITLE cannot
+        say which card was measured, and jaws proved it by shipping 0 records
+        on 1.01.0 and 439 on 1.02.0.
+      - **led_zeppelin_le 1.22.0 — ✅ CLEAN after a same-day fix, 2026-08-28.**
+        David: "a lot of the switch matrix is coming up as question marks, and
+        I can't seem to start a game ... the left right arrows on the keyboard
+        are not acting as the flipper controls." **One fault, all three
+        symptoms.** 51 of its 96 switch names were `?`, and every one of those
+        complaints keys off a NAME: `binds_playfield()` matches keys to
+        switches by name, so with no `LEFT FLIPPER BUTTON` to match it built no
+        playfield rows at all and the arrows were dead; the trough ids were
+        unknown for the same reason, so the ball tools fell back to godzilla's
+        `66..71` against this title's `71..76` and closed six switches the game
+        does not watch — the exact failure swnames.py's header already
+        describes as "what stopped a game starting on any title but Godzilla".
+        **Why the names were missing, and it is a parser hole, not this
+        title's:** its `msg_row()` address resolves wrong (item 29), so
+        swnames.py fills from the title's own DEVICE TABLE instead — and
+        led_zeppelin_le 1.22.0 ships that table **with the artwork left out**.
+        Image field pointing at the shared empty string, x/y/w/h and the
+        connector and part pointers all zero, but class, (group, index) and
+        the NAME all present. `devicexy.seeds()` finds a table by looking for
+        a pointer to an image NAME; there is none in the binary, so 617
+        records were never seeded, and `_one()`'s `0 < w <= 200` would have
+        refused every one of them anyway. **Fixed** (`devicexy.BLANK_IMAGE`
+        parses the variant on tighter terms — everything a positioned record
+        proves with its image name, a blank one must prove by being empty
+        where a positioned record is full; `swnames._fit()` supplies the
+        group → node join the missing connector column can no longer give, by
+        matching the group's indices against the LIVE wire and refusing a tie
+        it cannot break). **Result: 95 of 96 named** (the holdout is node 9
+        bit 30, a wire bit the device table does not carry — left `?` rather
+        than guessed), arrows/`F`/`A`/`S`/`Z`/`X` all bound, trough resolved
+        `1..6 (named) = 76,75,74,73,72,71`, group map derived from the title
+        itself (`7→8, 8→9, 9→12`) instead of godzilla's constant, 617 device
+        records and 142 inserts. Picked up by the LIVE run without a restart —
+        padglhost re-resolves on the switch list's mtime, which is the beatles
+        guard doing its job. **Scope note this spawned:** the README's
+        "29 titles genuinely ship no device table" list was measured with the
+        blind parser and is now known to overstate itself; `turtles_pro`
+        0 → 259 and `dungeons_and_dragons_le` +41 on the two other ELFs
+        reachable without a card mount, and the 40-image `cardaudit.py` sweep
+        that produced that list has NOT been re-run.
 
 - [ ] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
       and identified; node 4 polled forever while we silence it; board 24

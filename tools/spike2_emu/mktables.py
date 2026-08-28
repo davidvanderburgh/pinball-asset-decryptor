@@ -485,6 +485,16 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
                         % len(joined))
                 except OSError as exc:
                     say("  positions    FAILED to write %s: %s" % (sw_xy, exc))
+            elif devicexy.layout_image(recs) is None:
+                # ★ NOT A FAILED JOIN, and saying so cost an hour on
+                # led_zeppelin_le: every one of its 95 device names matches the
+                # switch list exactly. Its build carries the device table with
+                # the DRAWING left out (devicexy.BLANK_IMAGE) - no image name,
+                # no coordinates - so there is no layout to place anything on
+                # and switchxy.join() correctly returns nothing. The old text
+                # blamed the names, which are the one part that is fine.
+                say("  positions    none - this title's device table carries "
+                    "names and wire addresses but no coordinates")
             else:
                 # Real and worth saying out loud: it means the two tables
                 # share no names - a title whose device table names things

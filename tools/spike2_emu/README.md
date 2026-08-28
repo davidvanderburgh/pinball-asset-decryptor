@@ -99,7 +99,26 @@ build from now on.
 | `king_kong_le-0_96_0.Release.16G.sdcard.raw` | 0.96.0 | **517** (coil=21 led=421 switch=75), 489 on the layout | `TestMode/Rodeo_LE_Service_Playfield_Wireframe_300dpi_cropped` | `Rodeo_LE_Service_Playfield_Wireframe_300dpi_cropped.png` 312x710<br>`Rodeo_PRO_Service_Playfield_Wireframe_300dpi_cropped.png` 313x710 | yes |
 | `metallica_spike-1_03_0.Release.32G.sdcard.raw` | 1.03.0 | **664** (coil=22 led=569 switch=73), 502 on the layout | `TestMode/metallica_playfield_with_handle_cropped` | `metallica_playfield_with_handle_cropped.png` 312x710 | yes |
 
-The other 29 genuinely ship none, on the builds we hold: `aerosmith_le 1.15.0`, `avengers_infinity_le 1.09.0`, `batman 1.13.0`, `deadpool_le 1.14.0`, `elvira3 1.11.0`, `foo_fighters_le 1.03.0`, `godzilla_le 1.13.0`, `guardians_le 1.14.0`, `iron_maiden_le 1.16.0`, `jaws_le 1.01.0`, `jurassic_park_le 1.15.0`, `led_zeppelin_le 1.20.0`, `led_zeppelin_le 1.21.0`, `led_zeppelin_le 1.22.0`, `led_zeppelin_pro 1.20.0`, `led_zeppelin_pro 1.22.0`, `mando_le 1.44.0`, `munsters_le 1.27.0`, `rush_le 1.18.0`, `star_wars_le 1.30.0`, `stranger_things_le 1.12.0`, `sword_of_rage_le 1.18.0`, `turtles_le 1.58.1`, `turtles_le 1.59.0`, `turtles_pro 1.58.0`, `turtles_pro 1.59.0`, `uncanny_xmen_le 0.97.0`, `venom_le 1.06.0`, `venom_le 1.07.0`.
+**★ CORRECTION, 2026-08-28 (item 80, led_zeppelin_le): "ship none" was
+measured with a parser that could not SEE one whole variant of this table, so
+the list below overstates itself and it is not yet known by how much.** A build
+can ship the device table with the ARTWORK left out — the image field points at
+the shared empty string and x/y/w/h, the connector and the part number are all
+zero — while still carrying the class, the (group, index) and the NAME, which is
+everything this rig joins on. `devicexy.seeds()` looks for a pointer to an image
+NAME to find a table at all, and an artwork-less one contains none, so it was
+never seeded and the title read as `0 records`. **`led_zeppelin_le 1.22.0` is in
+the list below and ships 617 of them** (coil=23 led=499 switch=95). The parse
+now handles the variant (`devicexy.BLANK_IMAGE`); what has NOT been redone is
+the 40-image `cardaudit.py` sweep that produced this list, so **every
+`ship none` here is unverified until it is re-run.** The three titles reachable
+without a card mount were re-measured by hand and two of them changed:
+`turtles_pro` 0 → 259 records, `dungeons_and_dragons_le` +41, and
+`godzilla_pro` +17 with all 575 of its existing records byte-for-byte identical
+— which is the control that says the change only adds tables the old seeder
+could not reach and alters nothing it could.
+
+The other 29 were measured as shipping none, on the builds we hold: `aerosmith_le 1.15.0`, `avengers_infinity_le 1.09.0`, `batman 1.13.0`, `deadpool_le 1.14.0`, `elvira3 1.11.0`, `foo_fighters_le 1.03.0`, `godzilla_le 1.13.0`, `guardians_le 1.14.0`, `iron_maiden_le 1.16.0`, `jaws_le 1.01.0`, `jurassic_park_le 1.15.0`, `led_zeppelin_le 1.20.0`, `led_zeppelin_le 1.21.0`, `led_zeppelin_le 1.22.0`, `led_zeppelin_pro 1.20.0`, `led_zeppelin_pro 1.22.0`, `mando_le 1.44.0`, `munsters_le 1.27.0`, `rush_le 1.18.0`, `star_wars_le 1.30.0`, `stranger_things_le 1.12.0`, `sword_of_rage_le 1.18.0`, `turtles_le 1.58.1`, `turtles_le 1.59.0`, `turtles_pro 1.58.0`, `turtles_pro 1.59.0`, `uncanny_xmen_le 0.97.0`, `venom_le 1.06.0`, `venom_le 1.07.0`.
 
 **What the 2026-08-21 seeder fix changed across the whole catalogue: exactly one
 image.** `godzilla_le` V1.14.0 went 477 → 593 records (coil 0 → 14, switch
@@ -188,7 +207,7 @@ a statement about a factory machine.
 | star_wars_le | 1.30.0 | ✅ live, 104 | ❌ none found | not re-measured | ✅ real (mini display above the targets, David-confirmed) | not yet | 2026-08-19 |
 | turtles_pro | 1.59.0 | ✅ live, 94 | ❌ none found | not re-measured | n/a | not yet | 2026-08-19 |
 | elvira3 | 1.13.0 | ✅ live, 110 | ❌ none found | not re-measured | n/a | not yet | 2026-08-19 |
-| led_zeppelin_le | 1.20.0 **or** 1.21.0 **or** 1.22.0 — not recorded | ✅ live, 97 | ❌ none found | not re-measured | n/a | not yet | 2026-08-19 |
+| led_zeppelin_le | **1.22.0** (ELF 69473804 bytes, the mounted card) | ✅ live, 96 — 95 named, 1 `?` (node 9 bit 30, a wire bit the device table does not carry) | ❌ none shipped | ❌ **0 positions, but 617 device records** — this build ships the table with the DRAWING left out: names, class and (group, index) for coil=23 led=499 switch=95, and no coordinates at all | n/a | ✅ clean, 2026-08-28 (David) — after the artwork-less device-table fix below | 2026-08-28 |
 | stranger_things_le | 1.12.0 | ✅ static (swelf.py, item 52) | ❌ none found | not re-measured | ✅ real (projector, item 44) | not yet | 2026-08-19 |
 | sword_of_rage_le | 1.18.0 | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 98 | ❌ none shipped | ❌ no device table | n/a | not yet | 2026-08-19 |
 | munsters_le | 1.27.0 | ✅ static (swelf.py, ROOTS_NONUM), live-verified, 103 | ❌ none shipped | ❌ no device table | n/a | not yet | 2026-08-19 |

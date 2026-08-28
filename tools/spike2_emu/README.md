@@ -150,8 +150,8 @@ per-title follow-up items it spawns.
 | aerosmith_le | ✅ static (swelf.py), live-verified | — no device table shipped | — | n/a | ✅ clean, 2026-08-24 (David) | 2026-08-19 |
 | avengers_infinity_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-24 (David; validation banner was item 62's stale NVRAM grade, fixed + relaunch-verified same day) | 2026-08-19 |
 | batman | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
-| foo_fighters_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
-| guardians_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
+| foo_fighters_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-19 |
+| guardians_le | ✅ static (swelf.py), live-verified | — | — | n/a | ✅ clean, 2026-08-28 (David) | 2026-08-19 |
 | iron_maiden_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
 | jurassic_park_le | ✅ static (swelf.py), live-verified | — | — | n/a | not yet | 2026-08-19 |
 | mando_le | ✅ static (swelf.py), live-verified | — | — | ✅ real (topper accessory, David-confirmed) | not yet | 2026-08-19 |

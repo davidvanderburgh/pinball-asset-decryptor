@@ -8,6 +8,7 @@ was greyed out for the same reason, and the folder holding "ffmpeg.exe" was the
 throwaway temp copy the startup shim makes.
 """
 
+import sys
 import tkinter as tk
 
 import pytest
@@ -26,6 +27,13 @@ pytestmark = [
 
 FAKE_DIR = r"C:\Program Files\Pinball Asset Decryptor\python\Lib" \
            r"\site-packages\imageio_ffmpeg\binaries"
+
+
+# The ⚙ menu's install entry and the dialog's Yes button are Windows/Linux
+# only: a frozen macOS bundle ships its prerequisites and can't pip-install, so
+# main_window deliberately never adds that entry there.
+no_installer = pytest.mark.skipif(sys.platform == "darwin",
+                                  reason="no auto-installer on macOS")
 
 
 def _pick(app, key="stern"):
@@ -51,6 +59,27 @@ def _install_entry(w):
     raise AssertionError("no Install entry in the Prerequisites submenu")
 
 
+def _capture_dialog(monkeypatch):
+    """Grab whichever message box _no_ffplay_dialog puts up.
+
+    It ASKS yes/no where it can run the installer (Windows, Linux) and only
+    WARNS where it can't (macOS) -- so both have to be patched.  Leaving one
+    of them real opens a genuine modal dialog on a CI runner and the test
+    never returns: that wedged the macOS job for 40 minutes."""
+    seen = {}
+
+    def _recorder(answer):
+        def _fake(title, msg):
+            seen["title"], seen["msg"] = title, msg
+            return answer
+        return _fake
+
+    monkeypatch.setattr(mw.messagebox, "askyesno", _recorder(False))
+    monkeypatch.setattr(mw.messagebox, "showwarning", _recorder(None))
+    return seen
+
+
+@no_installer
 def test_installer_entry_stays_live_when_everything_is_green(app):
     """The regression: all probes green greyed the entry out, and the strip's
     button is hidden then too -- so the user needing the full ffmpeg build
@@ -63,6 +92,7 @@ def test_installer_entry_stays_live_when_everything_is_green(app):
     assert label == "Install / repair prerequisites…"
 
 
+@no_installer
 def test_installer_entry_still_says_missing_when_something_is(app):
     w = _pick(app)
     names = list(w._prereq_indicators)
@@ -78,13 +108,7 @@ def test_no_ffplay_dialog_names_the_folder_and_offers_the_installer(
         app, monkeypatch):
     w = _pick(app)
     monkeypatch.setattr(_audio, "ffmpeg_sibling_dirs", lambda: [FAKE_DIR])
-    seen = {}
-
-    def _fake_askyesno(title, msg):
-        seen["title"], seen["msg"] = title, msg
-        return False
-
-    monkeypatch.setattr(mw.messagebox, "askyesno", _fake_askyesno)
+    seen = _capture_dialog(monkeypatch)
     launched = []
     w._on_install_prereqs = lambda: launched.append(1)
 
@@ -96,17 +120,38 @@ def test_no_ffplay_dialog_names_the_folder_and_offers_the_installer(
     assert "Install Missing" not in msg       # the button that isn't there
     assert "where ffmpeg" not in msg          # points at the shim's temp dir
     assert "Preview is optional" in msg       # unchanged reassurance
-    assert not launched                       # the fake answered "no"
+    assert not launched                       # nothing answered "yes"
 
 
+@no_installer
 def test_no_ffplay_dialog_yes_runs_the_installer(app, monkeypatch):
     w = _pick(app)
     monkeypatch.setattr(_audio, "ffmpeg_sibling_dirs", lambda: [FAKE_DIR])
+    _capture_dialog(monkeypatch)
     monkeypatch.setattr(mw.messagebox, "askyesno", lambda *a, **k: True)
     launched = []
     w._on_install_prereqs = lambda: launched.append(1)
     w._no_ffplay_dialog()
     assert launched == [1]
+
+
+def test_no_ffplay_dialog_without_an_installer_just_says_what_to_do(
+        app, monkeypatch):
+    """Where the app can't run the installer for you -- macOS, or any build
+    with no installer wired up -- the dialog is a plain warning with no Yes
+    button, and it still names the folder.  This branch had no test, which is
+    how it reached CI: the macOS job opened the real box and hung."""
+    w = _pick(app)
+    monkeypatch.setattr(_audio, "ffmpeg_sibling_dirs", lambda: [FAKE_DIR])
+    seen = _capture_dialog(monkeypatch)
+    w._on_install_prereqs = None
+
+    w._no_ffplay_dialog()
+
+    assert seen["title"] == "Can't Preview"
+    assert FAKE_DIR in seen["msg"]
+    assert "Press Yes" not in seen["msg"]
+    assert "Preview is optional" in seen["msg"]
 
 
 def test_preview_failure_raises_that_dialog(app, monkeypatch):

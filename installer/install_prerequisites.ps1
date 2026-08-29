@@ -263,7 +263,10 @@ $ManufacturerPrereqs = [ordered]@{
             # preview.  ffmpeg also does the Replace-Audio format-match
             # (resample / channel / bit-depth) at Write time and the
             # optional DMD-scene MP4 assembly.
-            @{ command="ffmpeg"; winget="Gyan.FFmpeg"; label="ffmpeg + ffplay"; manualUrl="https://www.gyan.dev/ffmpeg/builds/ (pick the *full* build, not essentials)"; reason="Replace Audio: format-match replacements on Write + ffplay preview" }
+            # Probed by ffplay, not ffmpeg: an "essentials" build (or the
+            # copy bundled with the app) satisfies `ffmpeg --version` while
+            # leaving Replace-Audio preview with no player at all (PAD-92).
+            @{ command="ffmpeg"; probe="ffplay"; winget="Gyan.FFmpeg"; label="ffmpeg + ffplay"; manualUrl="https://www.gyan.dev/ffmpeg/builds/ (pick the *full* build, not essentials)"; reason="Replace Audio: format-match replacements on Write + ffplay preview" }
         )
         PipPackages  = @(
             @{ probe="faster_whisper"; pkg="faster-whisper"; label="faster-whisper"; reason="Auto-transcribe samples to callouts.csv (Whisper tiny.en on CPU)" }
@@ -344,7 +347,9 @@ $ManufacturerPrereqs = [ordered]@{
                probeCmd="test -f /bin/busybox && ! ldd /bin/busybox 2>&1 | grep -q '=>'" }
         )
         HostPackages = @(
-            @{ command="ffmpeg"; winget="Gyan.FFmpeg"; label="ffmpeg + ffplay"; manualUrl="https://www.gyan.dev/ffmpeg/builds/"; reason="Replace Audio/Video preview (ffplay), spectrogram + format conversion (ffmpeg)" }
+            # Probed by ffplay (see the CGC entry): ffmpeg alone is not
+            # enough for the preview, and ffmpeg alone is what the app bundles.
+            @{ command="ffmpeg"; probe="ffplay"; winget="Gyan.FFmpeg"; label="ffmpeg + ffplay"; manualUrl="https://www.gyan.dev/ffmpeg/builds/ (pick the *full* build, not essentials)"; reason="Replace Audio/Video preview (ffplay), spectrogram + format conversion (ffmpeg)" }
         )
         # The Spike 2 audio ENGINE is pure-Python and needs these pip
         # packages (WSL above is only the ext4 file-growth path, not the
@@ -434,6 +439,13 @@ foreach ($mfr in $selected) {
         $key = $pkg.command
         if ($hostByCmd.ContainsKey($key)) {
             $hostByCmd[$key].for += $mfr
+            # Keyed on the COMMAND so one winget package is installed once,
+            # but the stricter probe wins: the entries needing the FULL build
+            # test for ffplay, and that must not be lost because another
+            # manufacturer contributed the plain-ffmpeg entry first (PAD-92).
+            if ($pkg.probe -and -not $hostByCmd[$key].probe) {
+                $hostByCmd[$key].probe = $pkg.probe
+            }
         } else {
             $copy = $pkg.Clone()
             $copy["for"] = @($mfr)
@@ -508,9 +520,13 @@ if ($hostPlan.Count -gt 0) {
 
     foreach ($p in $hostPlan) {
         Write-Step ("Checking {0} on Windows host (for: {1})" -f $p.label, ($p.for -join ", "))
+        # Optional per-entry probe: what has to answer for the package to
+        # count as installed (defaults to the command itself).
+        $probeCmd = $p.command
+        if ($p.probe) { $probeCmd = $p.probe }
         $found = $false
         try {
-            & $p.command --version 2>&1 | Out-Null
+            & $probeCmd --version 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) { $found = $true; Write-OK $p.label }
         } catch {}
 
@@ -534,7 +550,7 @@ if ($hostPlan.Count -gt 0) {
                 # Re-probe with a fresh PATH lookup
                 $reFound = $false
                 try {
-                    & $p.command --version 2>&1 | Out-Null
+                    & $probeCmd --version 2>&1 | Out-Null
                     if ($LASTEXITCODE -eq 0) { $reFound = $true }
                 } catch {}
 
@@ -550,7 +566,7 @@ if ($hostPlan.Count -gt 0) {
                 if ($reFound) {
                     Write-Installed $p.label
                 } elseif ($wingetSuccess) {
-                    Write-Host ("  Installed, but {0} isn't on PATH for THIS shell - open a new terminal to use it." -f $p.command) -ForegroundColor Yellow
+                    Write-Host ("  Installed, but {0} isn't on PATH for THIS shell - open a new terminal to use it." -f $probeCmd) -ForegroundColor Yellow
                     Write-Installed ("{0} (restart shell to pick up PATH)" -f $p.label)
                 } else {
                     Write-Host ("  winget exited with code {0}." -f $wingetExit) -ForegroundColor Red

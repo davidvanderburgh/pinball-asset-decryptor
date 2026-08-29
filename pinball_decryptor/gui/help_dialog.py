@@ -1356,7 +1356,12 @@ GENERAL_CONTENT = [
      "still being checked or missing, a strip under the title lists them: "
      "[?] = still checking, [✗] = missing (\"Install Missing\" sets them "
      "up), [✓] = ready. Once everything is ready the strip tucks itself "
-     "away — the ⚙ menu keeps the status."),
+     "away — the ⚙ menu keeps the status, and its "
+     "\"Install / repair prerequisites…\" entry stays clickable even "
+     "then. All-green means every PROBE passed, not that there is "
+     "nothing left to install: ffplay, which the audio Preview needs, "
+     "is nobody's probe, and re-running the installer is what brings "
+     "the full ffmpeg build that carries it."),
     ("Recent paths",
      "Every file/folder box keeps a per-manufacturer history — open its "
      "dropdown to reuse a recent path."),

@@ -538,18 +538,7 @@ class _AudioPreviewPane:
         if proc is None:
             self.playing = False
             self._set_play_btn(False)
-            messagebox.showwarning(
-                "Can't Preview",
-                "Audio preview needs ffplay, which ships with the FULL ffmpeg "
-                "build but NOT the \"essentials\" build.\n\n"
-                "Fix it one of these ways:\n"
-                "  • Use \"Install Missing\" above the tabs (installs the full "
-                "build), then restart this app, or\n"
-                "  • Download the full ffmpeg build and drop ffplay.exe in the "
-                "same folder as ffmpeg.exe (run `where ffmpeg` to find it), "
-                "then restart.\n\n"
-                "Preview is optional -- it doesn't affect building the update; "
-                "your replacements still get staged and written.")
+            self._win._no_ffplay_dialog()
             return
         self._proc = proc
         self._self_capping = bool(_audio.find_ffplay())
@@ -19526,12 +19515,18 @@ class MainWindow:
                    else tk.DISABLED))
         # The auto-installer is Windows/Linux-only (frozen macOS bundles
         # everything and can't pip-install anyway) — same rule as the strip.
+        # Never greyed out for "nothing is missing": all-green means every
+        # PROBE passed, not that there is nothing left to install — the
+        # installer also brings the full ffmpeg build (ffplay, which nothing
+        # probes for), and greying it out locked out the one user who needed
+        # it while the strip's button was hidden too (PAD-92).
         if sys.platform != "darwin":
             prereq_menu.add_command(
-                label="Install missing prerequisites…",
+                label=("Install missing prerequisites…" if any_missing
+                       else "Install / repair prerequisites…"),
                 command=lambda: (self._on_install_prereqs()
                                  if self._on_install_prereqs else None),
-                state=(tk.NORMAL if any_missing and self._on_install_prereqs
+                state=(tk.NORMAL if self._on_install_prereqs
                        else tk.DISABLED))
         menu.add_cascade(label=self._cascade_label(summary),
                          menu=prereq_menu)
@@ -19562,6 +19557,56 @@ class MainWindow:
         if self._current_theme == "dark":
             return label + "   ▸"
         return label
+
+    def _no_ffplay_dialog(self):
+        """The Replace-Audio ▶ found no player at all: say why, and offer the
+        one action that fixes it.
+
+        Both halves of the old wording were dead ends on a Windows install
+        (PAD-92).  It sent the user to "Install Missing" above the tabs —
+        but the prerequisite strip hides itself once every probe is green,
+        and ffplay is nobody's probe, so a machine short of ONLY ffplay shows
+        no strip and no button.  And it said "the same folder as ffmpeg.exe
+        (run `where ffmpeg`)" — but with the bundled ffmpeg that folder is
+        the throwaway temp copy the startup shim made, so a user who dropped
+        ffplay.exe next to the real binary saw nothing change.  So: name the
+        folder that actually gets searched, and run the installer from right
+        here."""
+        from ..core import audio as _audio
+        dirs = _audio.ffmpeg_sibling_dirs()
+        exe = "ffplay.exe" if sys.platform == "win32" else "ffplay"
+        can_install = (sys.platform != "darwin"
+                       and self._on_install_prereqs is not None)
+        fixes = []
+        if can_install:
+            fixes.append("  \u2022 Press Yes below to run the prerequisites "
+                         "installer, which installs the full build, then "
+                         "restart this app, or")
+        if dirs:
+            # The folder find_ffplay() actually searches -- spelled out,
+            # because on a bundled install it is nowhere near what
+            # `where ffmpeg` prints.
+            fixes.append("  \u2022 Download the full ffmpeg build and drop "
+                         "%s into this exact folder, then restart this "
+                         "app:\n        %s" % (exe, dirs[0]))
+        else:
+            fixes.append("  \u2022 Install the full ffmpeg build (the one "
+                         "that carries %s), then restart this app." % exe)
+        msg = ("Audio preview needs ffplay, which ships with the FULL ffmpeg "
+               "build but NOT the \"essentials\" build -- and not with the "
+               "ffmpeg bundled inside this app.\n\n"
+               "Fix it %s:\n%s\n\n"
+               "Preview is optional -- it doesn't affect building the update; "
+               "your replacements still get staged and written."
+               % ("one of these ways" if can_install else "this way",
+                  "\n".join(fixes)))
+        if can_install:
+            if messagebox.askyesno(
+                    "Can't Preview",
+                    msg + "\n\nRun the prerequisites installer now?"):
+                self._on_install_prereqs()
+        else:
+            messagebox.showwarning("Can't Preview", msg)
 
     def _prereq_menu_summary(self):
         """(label, any_missing) for the settings menu's prerequisite line."""

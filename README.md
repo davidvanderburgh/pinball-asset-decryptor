@@ -500,6 +500,18 @@ another install. To do it by hand, run `wsl --set-version <name> 2` in an
 admin PowerShell (it runs for a few minutes; close anything using WSL
 first), then click **Re-check** in the app.
 
+If pressing ▶ on the Replace Audio tab says **Audio preview needs
+ffplay**, the ffmpeg it found is an "essentials" build or the copy
+bundled inside the app — neither carries `ffplay.exe`. Answer **Yes** to
+that dialog and it runs **Install Prerequisites** for you (the full
+ffmpeg build includes ffplay), or drop `ffplay.exe` from a full build
+into the exact folder the dialog names, then restart the app. Nothing
+else is affected: previewing is optional, and replacements still get
+staged, converted and written without it. The gear menu's **Install /
+repair prerequisites…** stays clickable even when every prerequisite
+shows green, precisely because ffplay is not one of the things they
+check.
+
 ### macOS
 
 1. Download the DMG matching your Mac from the

@@ -32,6 +32,13 @@ _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 _ffmpeg_path = None
 _ffprobe_path = None
 _ffmpeg_shimmed = False
+# Set by ensure_bundled_ffmpeg_on_path when it exposes a version-stamped
+# binary as a plain "ffmpeg" in a throwaway temp dir: the temp dir it made,
+# and the REAL binary behind that copy.  find_ffmpeg() then resolves to the
+# copy, so anything looking for a sibling tool (ffplay, ffprobe) has to look
+# next to the source instead — the temp dir holds exactly one file (PAD-92).
+_ffmpeg_shim_dir = ""
+_ffmpeg_shim_src = ""
 
 
 def _imageio_ffmpeg_exe():
@@ -51,8 +58,8 @@ def _imageio_ffmpeg_exe():
 
 def _ffmpeg_candidates(name):
     """Common install locations for an ffmpeg-family binary (*name* is
-    ``"ffmpeg"`` or ``"ffprobe"``), searched after PATH and before the
-    bundled-imageio fallback.
+    ``"ffmpeg"``, ``"ffprobe"`` or ``"ffplay"``), searched after PATH and
+    before the bundled-imageio fallback.
 
     Merged from the per-plugin finders so this stays the single source of
     truth.  A Finder-launched macOS .app inherits no shell PATH, so the
@@ -121,6 +128,25 @@ def find_ffmpeg():
     return None
 
 
+def ffmpeg_sibling_dirs():
+    """Folders that can hold a sibling of the ffmpeg we resolved (ffplay,
+    ffprobe), best first -- and the folders the GUI tells a user to drop
+    ffplay.exe into.
+
+    ``find_ffmpeg()`` can resolve to the one-file temp copy
+    :func:`ensure_bundled_ffmpeg_on_path` made, and "next to ffmpeg" is
+    useless (and un-droppable-into) when ffmpeg is that copy.  So the real
+    binary behind the shim comes first (it only exists when nothing better
+    was found), then the resolved ffmpeg's own folder as long as it isn't the
+    shim, then the bundled imageio one (PAD-92)."""
+    dirs = []
+    for exe in (_ffmpeg_shim_src, find_ffmpeg(), _imageio_ffmpeg_exe()):
+        d = os.path.dirname(exe) if exe else ""
+        if d and d not in dirs and d != _ffmpeg_shim_dir:
+            dirs.append(d)
+    return dirs
+
+
 def find_ffprobe():
     """Find the ffprobe executable."""
     global _ffprobe_path
@@ -137,11 +163,10 @@ def find_ffprobe():
             _ffprobe_path = c
             return c
 
-    # Try same directory as ffmpeg
-    ffmpeg = find_ffmpeg()
-    if ffmpeg:
-        d = os.path.dirname(ffmpeg)
-        ext = ".exe" if sys.platform == "win32" else ""
+    # Try the same directory as ffmpeg — the real one, not the temp shim copy
+    # find_ffmpeg() may resolve to (same reason as find_ffplay, PAD-92).
+    ext = ".exe" if sys.platform == "win32" else ""
+    for d in ffmpeg_sibling_dirs():
         probe = os.path.join(d, f"ffprobe{ext}")
         if os.path.isfile(probe):
             _ffprobe_path = probe
@@ -201,6 +226,7 @@ def ensure_bundled_ffmpeg_on_path():
     # A version-stamped imageio binary: symlink (or copy) it to a temp dir as
     # ``ffmpeg`` and prepend that dir, so the plain name resolves.
     import tempfile
+    global _ffmpeg_shim_dir, _ffmpeg_shim_src
     link_dir = tempfile.mkdtemp(prefix="pad-ffmpeg-")
     link = os.path.join(link_dir, plain)
     try:
@@ -211,6 +237,10 @@ def ensure_bundled_ffmpeg_on_path():
             shutil.copy2(exe, link)
         except OSError:
             return
+    # Remember where the real binary lives: this temp dir now WINS every
+    # ffmpeg lookup, and it contains nothing else, so "next to ffmpeg" has to
+    # mean next to *exe* from here on (PAD-92).
+    _ffmpeg_shim_dir, _ffmpeg_shim_src = link_dir, exe
     os.environ["PATH"] = link_dir + os.pathsep + os.environ.get("PATH", "")
 
 
@@ -1107,7 +1137,14 @@ _ffplay_path = None
 
 
 def find_ffplay():
-    """Find the ffplay executable (ships alongside ffmpeg)."""
+    """Find the ffplay executable (ships with the FULL ffmpeg build only).
+
+    Same order as :func:`find_ffmpeg` -- PATH, then the OS install locations
+    (winget / scoop / choco / brew), then next to a known ffmpeg.  That last
+    step goes through :func:`ffmpeg_sibling_dirs`, because the ffmpeg on
+    PATH may be our own temp shim copy: a user who dropped ffplay.exe beside the
+    bundled binary exactly as the preview dialog told them to got nothing,
+    since the only folder searched was the shim's temp dir (PAD-92)."""
     global _ffplay_path
     if _ffplay_path is not None:
         return _ffplay_path if _ffplay_path else None
@@ -1117,11 +1154,13 @@ def find_ffplay():
         _ffplay_path = path
         return path
 
-    # Try the same directory as ffmpeg (the usual case for bundled builds).
-    ffmpeg = find_ffmpeg()
-    if ffmpeg:
-        d = os.path.dirname(ffmpeg)
-        ext = ".exe" if sys.platform == "win32" else ""
+    for c in _ffmpeg_candidates("ffplay"):
+        if os.path.isfile(c):
+            _ffplay_path = c
+            return c
+
+    ext = ".exe" if sys.platform == "win32" else ""
+    for d in ffmpeg_sibling_dirs():
         cand = os.path.join(d, f"ffplay{ext}")
         if os.path.isfile(cand):
             _ffplay_path = cand

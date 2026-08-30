@@ -1100,18 +1100,39 @@ def setup_env_faults(facts):
         out.append((
             "This WSL cannot start Windows programs, so the playfield window "
             "has to be opened from here and the sound takes its poorer route.",
-            "Usually systemd dropping the interop registration at boot; "
-            "`wsl --update` in a Windows terminal is the cure."))
+            "Usually systemd dropping the interop registration at boot. In a "
+            "Windows terminal:\n     wsl --update"))
     elif facts.get("winaudio") == "0":
         # ONLY WHEN INTEROP WORKS.  Every candidate interpreter is a Windows
         # .exe, so a distro that cannot start Windows programs answers "no
         # Windows Python" however many are installed - and telling that user to
         # install one more is advice addressed to the wrong fault.  It was in a
         # reply draft on 2026-08-12 before this branch existed.
-        out.append((
-            "No Windows Python with sounddevice, so the sound goes through "
-            "WSLg's audio, which is measurably damaged.",
-            "`py -m pip install sounddevice` in a Windows terminal, once."))
+        #
+        # ...AND WHICH OF THE TWO FAULTS IT IS (PAD-94).  "No Windows Python
+        # with sounddevice" describes two machines at once - one with no
+        # Python on it at all, one with a Python that is missing a package -
+        # and the user who reported this had the second.  He ran the command,
+        # pip installed it, and the tab went on saying no, because the rig's
+        # search had never looked in the directory his interpreter was in
+        # (pad_win_pythons, which asks the `py` launcher now).  This NAMES what
+        # that search found, so the tab and the machine cannot disagree in
+        # silence again.
+        where = facts.get("winpy", "").strip()
+        if where:
+            out.append((
+                "The Windows Python at %s has no sounddevice, so the sound "
+                "goes through WSLg's audio, which is measurably damaged."
+                % where,
+                "In a Windows terminal, once:\n"
+                "     py -m pip install --user sounddevice"))
+        else:
+            out.append((
+                "There is no Windows Python for the sound to go through, so "
+                "it takes WSLg's audio instead, which is measurably damaged.",
+                "Install Python for Windows from python.org, then, in a "
+                "Windows terminal, once:\n"
+                "     py -m pip install --user sounddevice"))
     return out
 
 
@@ -1150,8 +1171,20 @@ def setup_report(facts):
                         if facts.get("user") == "root" else ""))
         lines.append("  can start Windows programs: "
                      + yes_no("interop", "yes", "NO"))
-        lines.append("  Windows sound player: "
-                     + yes_no("winaudio", "found", "not found"))
+        # NAMED, not just "found", for the reason the Mac's report names its
+        # docker: this is the paste that settles a disagreement between the
+        # tab and the machine, and PAD-94's user could not tell from any line
+        # of it whether the interpreter he had just installed into was the one
+        # being looked at.
+        winpy = facts.get("winpy", "").strip()
+        if facts.get("winaudio") == "1":
+            said = "found" + (" — %s" % winpy if winpy else "")
+        elif facts.get("winaudio") == "0":
+            said = ("%s, but it has no sounddevice" % winpy if winpy
+                    else "no Windows Python that WSL can see")
+        else:
+            said = "unknown"
+        lines.append("  Windows sound player: " + said)
     lines.append("  display: %s" % facts.get("display", "unknown"))
     if facts.get("distro"):
         lines.append("  distro: %s" % facts["distro"])

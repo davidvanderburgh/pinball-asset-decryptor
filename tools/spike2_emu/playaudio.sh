@@ -118,9 +118,13 @@ fi
 if [ "$SINK" = auto ]; then
     [ -n "$WINPY" ] && SINK=win || SINK=pulse
 fi
+# `--user` DELIBERATELY, and the Emulate tab's notice says the same: an
+# all-users Python lives under C:\Program Files, where pip cannot write
+# without an elevated terminal - it fails with WinError 5 and suggests
+# this flag itself. Into a per-user install it changes nothing.
 if [ "$SINK" = win ] && [ -z "$WINPY" ]; then
     echo "[play] PAD_AUDIO_SINK=win but no Windows Python with sounddevice." >&2
-    echo "[play] install it once:  py -m pip install sounddevice" >&2
+    echo "[play] install it once:  py -m pip install --user sounddevice" >&2
     exit 1
 fi
 # Falling back rather than exiting: a degraded speaker beats a silent one, but
@@ -129,7 +133,7 @@ fi
 if [ "$SINK" = pulse ] && is_wsl && [ "${PAD_AUDIO_SINK:-auto}" = auto ]; then
     echo "[play] NOTE: no Windows Python with sounddevice, falling back to WSLg" >&2
     echo "[play] audio, which is measurably damaged. Fix with:" >&2
-    echo "[play]   py -m pip install sounddevice" >&2
+    echo "[play]   py -m pip install --user sounddevice" >&2
 fi
 
 # ---- relay sink: the macOS CONTAINER ---------------------------------------

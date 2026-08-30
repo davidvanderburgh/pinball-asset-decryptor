@@ -1100,6 +1100,16 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    what to change. None of the four is something a button can install,
    so **Set up emulator…** no longer turns up underneath a notice it
    has nothing to do about.
+   The audio one names the interpreter, the way the Mac's line names
+   its docker. A Windows Python that merely lacks the package now
+   reads as that path *with no sounddevice on it*, rather than as no
+   Python at all — two different machines that used to get the same
+   sentence and the same advice, only one of which it fitted — and
+   the cure underneath is the command to paste, on its own line. The
+   search behind that line asks the `py` launcher where Python
+   actually is, including the Program Files installs it used to walk
+   straight past, so the interpreter you installed into is the one
+   being reported on.
    On macOS that button now exists too, and does the one thing a Mac can
    be missing. `docker` there is only a client: a Mac can have it
    installed, on PATH and answering, with nothing behind it that runs a

@@ -294,6 +294,31 @@ def playfield_launch(line):
     return out if out.get("game") else None
 
 
+def _which_on_path(name):
+    """``shutil.which``, minus its dependence on ``sys.platform``.
+
+    Same reason as :func:`windows_python`'s ntpath note: this function is
+    reached from a Linux and a macOS CI runner, by tests that fake
+    ``sys.platform`` to walk the Windows branch.  ``shutil.which`` answers a
+    faked ``"win32"`` by dereferencing ``_winapi`` — which is ``None`` off
+    Windows — and raises ``AttributeError`` from inside the standard library,
+    so the whole Windows launch shape went untested on two of the three
+    runners the moment this call appeared in it.
+
+    Every name asked for here is already spelled with its extension, so
+    PATHEXT never comes into it and a plain walk of PATH is what
+    ``shutil.which`` would have done anyway.  Nothing changes on a real
+    Windows box.
+    """
+    for d in (os.environ.get("PATH") or "").split(os.pathsep):
+        if not d:
+            continue
+        cand = os.path.join(d, name)
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
 def windows_python(console=False):
     """The interpreter to run ``playfield.py`` with, on Windows.
 
@@ -332,7 +357,7 @@ def windows_python(console=False):
         # Frozen: the bundled interpreter sits in `python\` beside the app.
         cands.append(ntpath.join(ntpath.dirname(exe), "python", first))
     for name in (first, second):
-        found = shutil.which(name)
+        found = _which_on_path(name)
         if found:
             cands.append(found)
     for c in cands:

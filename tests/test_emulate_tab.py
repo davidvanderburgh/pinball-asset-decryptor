@@ -2452,6 +2452,36 @@ def test_no_interpreter_at_all_is_said_rather_than_guessed(monkeypatch):
     assert emulate_tab.windows_python() is None
 
 
+def test_the_path_search_does_not_go_through_a_platform_aware_helper(
+        monkeypatch, tmp_path):
+    """shutil.which BRANCHES ON sys.platform, and its win32 branch reaches for
+    a `_winapi` that is None everywhere else - so the moment that call landed
+    in the Windows launch path, every test that walks that path by faking the
+    platform died inside the standard library on the Linux and macOS runners,
+    and the shape went unchecked on two machines out of three.  The lookup
+    walks PATH itself; the names are spelled with their extension, so there is
+    nothing else which() was doing for us."""
+    def boom(_name):
+        raise AttributeError("'NoneType' object has no attribute "
+                             "'NeedCurrentDirectoryForExePath'")
+
+    monkeypatch.setattr(emulate_tab.shutil, "which", boom)
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_tab.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(emulate_tab.sys, "executable", "")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    # Nothing on PATH is an ANSWER, not a crash.
+    assert emulate_tab.windows_python() is None
+    # ...and with the interpreter there, PATH is what finds it.
+    exe = tmp_path / "python.exe"
+    exe.write_text("")
+    assert emulate_tab.windows_python(console=True) == str(exe)
+    # Which is what makes the whole Windows launch shape reachable from any
+    # host again - the thing the fake platform is there to test.
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    assert emulate_tab.rig_cmd("watch.sh", 30)[:2] == ["wsl.exe", "-e"]
+
+
 class _FakeProc:
     """Just enough Popen for the playfield handling: alive until killed."""
 

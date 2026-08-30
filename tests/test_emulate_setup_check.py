@@ -362,3 +362,165 @@ def test_setupcheck_still_parses_as_key_value():
     out = subprocess.run(["bash", "-n"], input=src,
                          capture_output=True, timeout=60)
     assert out.returncode == 0, out.stderr.decode("utf-8", "replace")
+
+
+# --------------------------------------------------------------------------
+# PAD-94: the advice and the check were about two different sets of Pythons
+# --------------------------------------------------------------------------
+
+def test_the_sound_notice_says_which_of_the_two_faults_it_is():
+    """★ PAD-94.  "No Windows Python with sounddevice" describes two machines
+    at once - one with no Python at all, one with a Python that is missing a
+    package - and the user who reported this had the second.  He ran the
+    command the tab gave him, pip installed it, and the tab went on saying the
+    same thing, because the search had never looked in the directory his
+    interpreter was in.  Naming what was found is what makes the two visibly
+    different."""
+    got = setup_notice(facts(winaudio="0",
+                             winpy=r"C:\Program Files\Python313\python.exe"),
+                       can_fix=True)
+    assert r"C:\Program Files\Python313\python.exe" in got, got
+    assert "no sounddevice" in got, got
+    assert "pip install" in got, got
+    # Nothing found is the OTHER machine, and pip cannot help it.
+    none = setup_notice(facts(winaudio="0"), can_fix=True)
+    assert "no Windows Python" in none, none
+    assert "python.org" in none, none
+    # ...and a machine with the good path says neither thing.
+    assert setup_env_faults(
+        facts(winaudio="1", winpy=r"C:\Python313\python.exe")) == []
+
+
+def test_no_command_in_the_notice_is_wrapped_in_backticks():
+    """★ PAD-94, the second half of it.  This notice is a Tk label, not
+    markdown: whatever is in the string is what the user sees and copies.  The
+    advice was a command wrapped in them, and a user copies a line whole:
+    pasted into PowerShell the trailing backtick is a line continuation, so
+    the terminal sits at its >> prompt, and cmd answers that the first word
+    is not a recognized command.
+    "If I type it in the terminal, it don't work."
+
+    Every other command in this notice is already on its own indented line
+    (`wsl --install -d …`), which is the shape that survives a paste.
+    """
+    said = []
+    for bad in (facts(winaudio="0"), facts(interop="0"), facts(user="root"),
+                facts(display="none"),
+                facts(winaudio="0", winpy=r"C:\Python313\python.exe")):
+        said.append(setup_notice(bad, can_fix=True))
+        said.extend(w + " " + c for w, c in setup_env_faults(bad))
+    for text in said:
+        assert "`" not in text, text
+
+
+def test_the_report_names_the_interpreter_it_found():
+    """The same rule the Mac's docker line follows (PAD-74): this is the paste
+    that settles a disagreement between the tab and the machine, so "found" on
+    its own is not enough - which one, and where."""
+    lines = " ".join(setup_report(facts(winaudio="1",
+                                        winpy=r"C:\Python313\python.exe")))
+    assert r"C:\Python313\python.exe" in lines, lines
+    lines = " ".join(setup_report(
+        facts(winaudio="0", winpy=r"C:\Program Files\Python313\python.exe")))
+    assert "no sounddevice" in lines, lines
+    assert r"C:\Program Files\Python313\python.exe" in lines, lines
+    lines = " ".join(setup_report(facts(winaudio="0")))
+    assert "no Windows Python" in lines, lines
+    # An older rig reports neither, and must not be accused of either.
+    old = facts()
+    del old["winaudio"]
+    lines = " ".join(setup_report(old))
+    assert "Windows sound player: unknown" in lines, lines
+
+
+@pytest.mark.skipif(not os.path.isdir(RIG), reason="rig not present")
+def test_setupcheck_reports_the_interpreter_as_well_as_the_verdict():
+    with open(os.path.join(RIG, "setupcheck.sh"), encoding="utf8") as fh:
+        src = fh.read()
+    assert '"winpy=' in src, "setupcheck.sh no longer reports winpy"
+    assert "pad_win_python_any" in src, "the second question is not asked"
+    # A PC with no Windows Python leaves the last test in the file false, and
+    # a non-zero exit makes setup_state() throw away every fact above it.
+    assert src.rstrip().endswith("exit 0"), (
+        "the fact printer can exit non-zero")
+
+
+@pytest.mark.skipif(not (os.path.isdir(RIG) and HAS_BASH),
+                    reason="rig or working bash not present")
+def test_the_windows_python_search_asks_the_launcher_it_recommends():
+    r"""★ PAD-94, the fault itself.
+
+    The tab said "run `py -m pip install sounddevice`" and then looked for the
+    result in two hard-coded directories, neither of which was where `py`
+    lives on the reporter's machine: an all-users install writes
+    ``C:\Program Files\Python313``, and nothing in this rig had ever looked
+    there.  So the advice worked, the check could not see it, and the message
+    never changed.  Asking the launcher makes the set we check and the set the
+    advice changes the same set.
+
+    THE SCRIPT IS FED ON STDIN, whole, for the reason
+    test_setupcheck_still_parses_as_key_value gives: `bash` is git-bash on one
+    Windows host and the WSL launcher on the next, and only one of them can
+    read `C:\...\padpath.sh` as a path.  The fakes are built by the script
+    itself, in its own mktemp, so nothing crosses that boundary either.
+    """
+    with open(os.path.join(RIG, "padpath.sh"), encoding="utf8") as fh:
+        src = fh.read()
+    harness = r"""
+tmp=$(mktemp -d) || exit 1
+cat > "$tmp/pylauncher" <<'LAUNCH'
+#!/bin/sh
+# `py -0p` as a real launcher prints it: CRLF, a tag column, the default
+# starred, and one path with a space in it.
+[ "$1" = "-0p" ] || exit 1
+printf -- '-V:3.13          C:\\Users\\ralf'
+printf -- '\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\r\n'
+printf -- '-V:3.12 *        C:\\Program Files\\Python312\\python.exe\r\n'
+LAUNCH
+cat > "$tmp/wslpath" <<'WSLP'
+#!/bin/sh
+# -u only: C:\a\b -> /mnt/c/a/b, which is all pad_win_pythons asks of it.
+d=$(printf '%s' "${2%%:*}" | tr 'A-Z' 'a-z')
+r=$(printf '%s' "${2#*:}" | tr '\\' '/')
+printf '/mnt/%s%s\n' "$d" "$r"
+WSLP
+chmod +x "$tmp/pylauncher" "$tmp/wslpath"
+echo "--- asked"
+PATH="$tmp:$PATH" PAD_WINPY_LAUNCHER="$tmp/pylauncher" pad_win_pythons
+echo "--- fallback"
+PAD_WINPY_LAUNCHER=/nonexistent pad_win_pythons
+echo "--- usable"
+: > "$tmp/store.exe"
+pad_win_python_usable "$tmp/store.exe" && echo "EMPTY IS RUNNABLE"
+pad_win_python_usable "$tmp/wslpath" && echo "real one is runnable"
+"""
+    out = subprocess.run(["bash", "-s"], input=(src + harness).encode("utf-8"),
+                         capture_output=True, timeout=120)
+    said = out.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+    assert out.returncode == 0, out.stderr.decode("utf-8", "replace")
+    # Every marker, before any split: a probe that runs a WINDOWS child
+    # can swallow this script's own stdin (it is fed on stdin), and the
+    # symptom is simply that the rest of the harness never runs.
+    assert "--- usable" in said, said
+    asked, rest = said.split("--- fallback", 1)
+    fallback, usable = rest.split("--- usable", 1)
+    asked = [ln for ln in asked.splitlines() if ln.startswith("/")]
+    # THE DEFAULT LEADS.  `py -m pip install` installs into the starred one, so
+    # it has to be the first thing checked, or the advice can fix a machine the
+    # check goes on failing.
+    assert asked[0] == "/mnt/c/Program Files/Python312/python.exe", asked
+    assert ("/mnt/c/Users/ralf/AppData/Local/Programs/Python/Python313"
+            "/python.exe") in asked, asked
+    # ...and the space in "Program Files" arrives whole rather than as two
+    # candidates, which is the whole reason these are read a line at a time.
+    assert not any(ln == "/mnt/c/Program" for ln in asked), asked
+    # With no launcher, the directories are still searched - and now include
+    # the one an all-users installer writes to.
+    assert any(ln.startswith("/mnt/c/Program Files/Python3")
+               for ln in fallback.splitlines()), fallback
+    assert any(ln.startswith("/mnt/c/Python3")
+               for ln in fallback.splitlines()), fallback
+    # A Store install's zero-byte app-execution alias is executable to every
+    # test /mnt/c can make and is not a program.
+    assert "EMPTY IS RUNNABLE" not in usable, usable
+    assert "real one is runnable" in usable, usable

@@ -557,6 +557,94 @@ pad_win() {
     wslpath -w "$1"
 }
 
+# WHERE `py` KEEPS ITS PYTHONS - the Windows launcher itself, or "".
+#
+# THE LAUNCHER IS THE AUTHORITY, AND PAD-94 IS WHY. A user was told "no Windows
+# Python with sounddevice, run `py -m pip install sounddevice`", ran exactly
+# that, pip installed it - and this rig went on saying no. His Python was an
+# all-users install in `C:\Program Files\Python313`, which is what the
+# python.org installer writes when "Install for all users" is ticked, and the
+# glob list below had never looked there. The advice and the check were about
+# two different sets of interpreters, so following the advice could not change
+# the answer, and there was nothing in the message to say so.
+#
+# `py -0p` lists the interpreters `py` ITSELF would run, which makes the set we
+# check and the set the advice changes the same set by construction, whatever
+# layout a machine's installer chose.
+#
+# PATH FIRST: with interop on, Windows' PATH is appended to this shell's and
+# carries the all-users launcher (`C:\Windows\py.exe`). The fixed paths are for
+# a distro with `appendWindowsPath=false`, where nothing Windows is on PATH at
+# all.
+pad_win_py_launcher() {
+    local c
+    # PAD_WINPY_LAUNCHER is the same kind of override PAD_WINPYTHON already is,
+    # one level up: it names the launcher when it is somewhere neither PATH nor
+    # the two fixed paths reach - and it is how this search is tested at all,
+    # since there is no Windows on the other side of a test runner.
+    if [ -n "${PAD_WINPY_LAUNCHER:-}" ] && [ -x "$PAD_WINPY_LAUNCHER" ]; then
+        echo "$PAD_WINPY_LAUNCHER"
+        return
+    fi
+    c=$(command -v py.exe 2>/dev/null || true)
+    if [ -n "$c" ]; then echo "$c"; return; fi
+    for c in /mnt/c/Windows/py.exe \
+             /mnt/c/Users/*/AppData/Local/Programs/Python/Launcher/py.exe; do
+        if [ -x "$c" ]; then echo "$c"; return; fi
+    done
+    echo ""
+}
+
+# Every Windows Python worth trying, best first, ONE PER LINE.
+#
+# THE `*` LINE LEADS because that is the interpreter `py -m pip install` puts
+# packages into - so the first candidate tried is the one the advice acts on.
+# `py -0p` prints `-V:3.13 *        C:\...\python.exe`; the path starts at the
+# drive letter and may contain spaces, so it is cut from there to the end of
+# the line rather than picked out as a field. A line that is not a path at all
+# (an old launcher prints a header first) survives that cut and then fails the
+# -x test in pad_win_python_usable, which is where it belongs.
+#
+# ONE PER LINE AND READ WITH `read -r`, never a `for` over a command
+# substitution: `C:\Program Files\...` is a path with a space in it, and word
+# splitting would tear in half the very install this exists to find.
+pad_win_pythons() {
+    local py raw
+    [ -n "${PAD_WINPYTHON:-}" ] && printf '%s\n' "$PAD_WINPYTHON"
+    py=$(pad_win_py_launcher)
+    if [ -n "$py" ] && command -v wslpath >/dev/null 2>&1; then
+        # STDIN CLOSED, and it matters: a Windows child inherits this
+        # shell's stdin across interop and can drain it - which, when the
+        # caller is itself a script being fed on stdin, eats the rest of
+        # that script. A probe must not consume the input of whatever
+        # asked it.
+        raw=$("$py" -0p 2>/dev/null </dev/null | tr -d '\r')
+        { printf '%s\n' "$raw" | grep '\*'
+          printf '%s\n' "$raw" | grep -v '\*'; } \
+            | grep -o '[A-Za-z]:\\.*$' \
+            | while IFS= read -r w; do wslpath -u "$w" 2>/dev/null; done
+    fi
+    # THE OLD FIXED LIST STAYS, as the fallback: the launcher can be left out
+    # at install time, and a distro that cannot see it can still see the
+    # directories. Widened by the two `Program Files` ones - the layout that
+    # started all this - and the quoting is what keeps that space from
+    # splitting the pattern before the glob ever runs.
+    printf '%s\n' /mnt/c/Python3*/python.exe \
+        "/mnt/c/Program Files"/Python3*/python.exe \
+        "/mnt/c/Program Files (x86)"/Python3*/python.exe \
+        /mnt/c/Users/*/AppData/Local/Programs/Python/Python3*/python.exe
+}
+
+# Is this candidate something this shell can actually RUN?
+#
+# -s AS WELL AS -x: a Microsoft Store install leaves a ZERO-BYTE app-execution
+# alias in `WindowsApps`, which is executable to every test /mnt/c can make and
+# is not a program from here. An unmatched glob arrives as its own pattern and
+# fails the same way.
+pad_win_python_usable() {
+    [ -n "${1:-}" ] && [ -x "$1" ] && [ -s "$1" ]
+}
+
 # A WINDOWS Python that can actually open a sound device, or "".
 #
 # BOTH HALVES MATTER: an interpreter without sounddevice is no use, and finding
@@ -577,12 +665,29 @@ pad_win() {
 # interop separately for exactly that reason - otherwise the advice that
 # follows ("install sounddevice") is addressed to the wrong fault.
 pad_win_python() {
-    local c
-    for c in ${PAD_WINPYTHON:+"$PAD_WINPYTHON"} \
-             /mnt/c/Python3*/python.exe \
-             /mnt/c/Users/*/AppData/Local/Programs/Python/Python3*/python.exe; do
-        [ -x "$c" ] || continue
-        "$c" -c "import sounddevice" >/dev/null 2>&1 && { echo "$c"; return; }
+    pad_win_pythons | while IFS= read -r c; do
+        if pad_win_python_usable "$c" \
+           && "$c" -c "import sounddevice" >/dev/null 2>&1 </dev/null
+        then
+            echo "$c"
+            break
+        fi
     done
-    echo ""
+}
+
+# The first Windows Python AT ALL, sounddevice or not, or "".
+#
+# THE MESSAGE NEEDS THE DIFFERENCE, which is the other half of PAD-94. "No
+# Windows Python with sounddevice" is two faults in one sentence - a PC with no
+# Python on it, and a PC with a Python that is missing one package - and they
+# call for different actions. setupcheck.sh reports this as `winpy`, so the
+# Emulate tab can name the interpreter it found instead of leaving a user to
+# work out which of the two he is looking at.
+pad_win_python_any() {
+    pad_win_pythons | while IFS= read -r c; do
+        if pad_win_python_usable "$c"; then
+            echo "$c"
+            break
+        fi
+    done
 }

@@ -609,7 +609,14 @@ pad_win_py_launcher() {
 # substitution: `C:\Program Files\...` is a path with a space in it, and word
 # splitting would tear in half the very install this exists to find.
 pad_win_pythons() {
-    local py raw
+    local py raw w c
+    # PAD'S OWN INTERPRETER LEADS, and on Windows the app always passes it
+    # (emulate_tab.rig_cmd puts it here). EVERY PACKAGED WINDOWS INSTALL SHIPS
+    # ONE: an embeddable Python with pip at `{app}\python\python.exe`, which
+    # WSL runs straight off /mnt/c like any other .exe. PAD-95: the search
+    # below hunts only for a Python the USER installed, so a PC with none was
+    # told to go and install one - while the interpreter this needs was
+    # sitting in the same folder as the program printing the message.
     [ -n "${PAD_WINPYTHON:-}" ] && printf '%s\n' "$PAD_WINPYTHON"
     py=$(pad_win_py_launcher)
     if [ -n "$py" ] && command -v wslpath >/dev/null 2>&1; then
@@ -624,6 +631,18 @@ pad_win_pythons() {
             | grep -o '[A-Za-z]:\\.*$' \
             | while IFS= read -r w; do wslpath -u "$w" 2>/dev/null; done
     fi
+    # THE INTERPRETER WITHOUT THE LAUNCHER IN FRONT OF IT. `py` is an OPTIONAL
+    # tick in the Windows installer, so a machine can carry a perfectly good
+    # python.exe and answer nothing at all above - which is the second half of
+    # PAD-95: the reporter's terminal said `py` wurde nicht als Name eines
+    # Cmdlet erkannt, i.e. the program our advice named was not on his PC.
+    # PATH carries the Windows one into this shell whenever interop is on, and
+    # a Microsoft Store alias arriving this way is a zero-byte stub that
+    # pad_win_python_usable already rejects.
+    for w in python.exe python3.exe; do
+        c=$(command -v "$w" 2>/dev/null || true)
+        [ -n "$c" ] && printf '%s\n' "$c"
+    done
     # THE OLD FIXED LIST STAYS, as the fallback: the launcher can be left out
     # at install time, and a distro that cannot see it can still see the
     # directories. Widened by the two `Program Files` ones - the layout that
@@ -690,4 +709,48 @@ pad_win_python_any() {
             break
         fi
     done
+}
+
+# WHAT TO DO ABOUT A MISSING sounddevice, in the words that fit THIS machine.
+# One or more lines on stdout; the caller prefixes them.
+#
+# NEVER `py`, AND THAT IS PAD-95 ITSELF. The launcher is an optional tick in
+# the Windows installer and the reporter did not have it, so the single line
+# this rig and the Emulate tab both printed answered
+#
+#     "py" wurde nicht als Name eines Cmdlet ... erkannt
+#
+# and carried nothing to say what to do instead. Say the thing that is true
+# HERE: which interpreter, or that PAD's own installer is the whole answer.
+#
+# A FULL PATH IS NOT A COMMAND IN POWERSHELL, which is the same trap one layer
+# down from PAD-94's backticks: a quoted path as the first word of a
+# PowerShell line is a STRING - printed, not run - and the paths that need the
+# quotes are exactly the `C:\Program Files` ones. `cd` there and run
+# `.\python.exe`: two lines that mean the same thing in both of Windows'
+# shells.
+pad_sounddevice_hint() {
+    local py w d
+    py=$(pad_win_python_any)
+    if [ -n "$py" ] && [ -n "${PAD_WINPYTHON:-}" ] \
+       && [ "$py" = "$PAD_WINPYTHON" ]
+    then
+        echo "PAD ships its own Python and that is the one to put it in."
+        echo "In PAD: gear menu -> Install / repair prerequisites...,"
+        echo "and tick Stern Pinball. Nothing to type."
+        return
+    fi
+    if [ -n "$py" ]; then
+        w=$(pad_win "$py" 2>/dev/null) || w=""
+        if [ -n "$w" ]; then
+            d=${w%\\*}
+            echo "in a Windows terminal, once:"
+            echo "cd \"$d\""
+            echo ".\\${w##*\\} -m pip install --user sounddevice"
+            return
+        fi
+    fi
+    echo "this PC has no Windows Python. Install one from python.org"
+    echo "(tick \"Add python.exe to PATH\"), then in a Windows terminal:"
+    echo "python -m pip install --user sounddevice"
 }

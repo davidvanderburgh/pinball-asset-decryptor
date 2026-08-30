@@ -362,6 +362,17 @@ $ManufacturerPrereqs = [ordered]@{
             @{ probe="capstone";       pkg="capstone";       label="capstone";       reason="Locates the codec's companding point when re-encoding replaced audio" }
             @{ probe="numpy";          pkg="numpy";          label="numpy";          reason="Audio sample array math in the decode / re-encode pipeline" }
             @{ probe="faster_whisper"; pkg="faster-whisper"; label="faster-whisper"; reason="Auto-name call-outs: transcribe spoken voice clips to name the WAVs" }
+            # THE EMULATOR'S SPEAKER, and it goes into THIS Python on purpose.
+            # WSLg's audio hop is measurably damaged (+16 dB of error against
+            # -14.8 dB for the direct path), so a WSL run serves the guest's
+            # PCM to a WINDOWS Python that opens the sound device itself.  The
+            # rig used to hunt for one the user had installed and tell him to
+            # run `py -m pip install sounddevice` when it found none - which
+            # on the PC that reported PAD-95 answered that `py` is not a
+            # program on it.  The app already ships an interpreter; this is
+            # what gives that interpreter the one package it lacks, and the
+            # Emulate tab now points here rather than at a terminal.
+            @{ probe="sounddevice";    pkg="sounddevice";    label="sounddevice";    reason="Emulate tab: plays the emulated game's sound out of Windows directly, instead of through WSLg's damaged audio hop" }
         )
     }
 }

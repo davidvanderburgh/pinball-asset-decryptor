@@ -160,9 +160,17 @@ $sitePackages = Join-Path $PythonDir "Lib\site-packages"
 # (Auto-name call-outs) stays an on-demand "Install Missing" item on Windows --
 # it works there (bundled Python + a functional elevated installer), so it's
 # kept out of the base installer for size; Mac/Linux bundle it because their
-# frozen apps can't install it later.
+# frozen apps can't install it later.  sounddevice is the Spike 2 emulator's
+# SPEAKER, and it is here rather than in requirements.txt because only this
+# platform can use it: a WSL run serves the guest's PCM to a Windows Python
+# that opens the sound device directly, because WSLg's own audio hop is
+# measurably damaged (+16 dB of error).  Shipping it means a fresh install has
+# good sound with nothing asked of the user -- PAD-95's reporter had no Python
+# of his own at all, so the pip command the app used to print named a program
+# (`py`) his PC did not have.  Existing installs pick it up through
+# install_prerequisites.ps1's Stern pip list.
 $reqFile = Join-Path $ProjectDir "requirements.txt"
-$pipExtras = @("UnityPy", "fsb5", "pyogg", "imageio-ffmpeg")
+$pipExtras = @("UnityPy", "fsb5", "pyogg", "imageio-ffmpeg", "sounddevice")
 Write-Host "  Installing deps from requirements.txt + extras ($($pipExtras -join ', '))..."
 $ErrorActionPreference = "Continue"
 & $pythonExe -m pip install --no-warn-script-location --target $sitePackages -r $reqFile @pipExtras 2>&1 | ForEach-Object { Write-Host "    $_" }

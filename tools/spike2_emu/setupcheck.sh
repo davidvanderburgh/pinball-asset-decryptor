@@ -354,6 +354,22 @@ if pad_is_wsl; then
         _winpyw=$(pad_win "$_winpy" 2>/dev/null)
         [ -n "$_winpyw" ] && echo "winpy=$_winpyw"
     fi
+    # AND WHETHER THAT ONE IS PAD'S OWN - PAD-95, and it decides what the tab
+    # tells the user to DO. Every packaged Windows install ships an embeddable
+    # Python with pip at `{app}\python\python.exe`, and the app hands it to
+    # this rig as PAD_WINPYTHON, so the common machine is not "no Python
+    # anywhere" (install one, then type a pip command) but "OUR Python is
+    # missing one package" - which is a menu entry in the app itself and
+    # nothing typed at all. The reporter's PC had no `py` to type it with.
+    #
+    # ECHOED SEPARATELY rather than folded into `winpy`, because the two
+    # answer different questions and an older app reading a newer rig must be
+    # able to ignore this one and still be right.
+    if [ -n "${PAD_WINPYTHON:-}" ] && pad_win_python_usable "$PAD_WINPYTHON"
+    then
+        _padpyw=$(pad_win "$PAD_WINPYTHON" 2>/dev/null)
+        [ -n "$_padpyw" ] && echo "padpy=$_padpyw"
+    fi
 else
     echo "winaudio=1"
 fi

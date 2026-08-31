@@ -6720,6 +6720,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **87. Spike 1 save states: the Emulate tab's slot panel is a DEAD STUB —
       wire it to a real checkpoint/restore for the Spike 1 rig.** `S2 D4`
+      ← WORKING ON
       *(Filed 2026-08-31 at David's ask — "let's get save states implemented
       so it's not a dead feature" — the FIRST Spike 1 item on this queue;
       Spike 1 work previously shipped direct on main's tree, and David chose

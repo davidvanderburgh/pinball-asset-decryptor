@@ -26,12 +26,13 @@ echo "[r] rootfs $R  game $G ($GAME_NAME)  pty ${NEWPTY:-none}"
 touch "$S1_WORK/holdoff"
 sleep 1.2
 ls /dev/s1i2c0 >/dev/null 2>&1 || { echo "[r] CUSE devices are gone - is the rig up?"; exit 1; }
-OLD=$(ps -eo pid,comm --sort=-pcpu | awk '$2=="game"{print $1; exit}')
-if [ -n "$OLD" ]; then
+# kill EVERY live guest, not the busiest one — a survivor from an earlier
+# restore (detached from emu_root's tree) plus the fresh boot makes two.
+for OLD in $(ps -eo pid,comm | awk '$2=="game"{print $1}'); do
     kill -9 "$OLD" 2>/dev/null
     for _ in 1 2 3 4 5 6 7 8 9 10; do [ -d "/proc/$OLD" ] || break; sleep 0.2; done
     echo "[r] live guest $OLD killed"
-fi
+done
 
 # --- rebuild the restore externals from restore.env ------------------------
 # Source per mountpoint is deterministic on this rig (emu_root.sh's own table).

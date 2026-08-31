@@ -893,25 +893,36 @@ HELP_CONTENT = {
         ("What it does",
          "Runs a Stern Spike 1 (DMD-era) game on this PC. Spike 1 is the "
          "2015-2016 dot-matrix generation (WrestleMania, KISS, Game of Thrones, "
-         "Ghostbusters). The game is a static ARM program, so it runs under a "
-         "patched emulator with a software model of the machine's boards. Pick a "
-         "Spike 1 card image, press Start, and it boots and shows its attract on "
-         "the dot-matrix display — title, service-menu prompt, credits, replay "
-         "score."),
+         "Ghostbusters, and more). The game is a static ARM program, so it runs "
+         "under a patched emulator with a software model of the machine's "
+         "boards — no CPU it can run natively, unlike JJP. Pick a Spike 1 card "
+         "image, press Start, and it boots the way the machine does, straight "
+         "to its own attract on the dot-matrix display, with sound."),
         ("It needs WSL and runs as root there",
          "The board model needs a privileged host setup, so this tab is "
          "Windows-only and runs the emulator inside WSL with root (which on "
          "Windows needs no password). The first Start builds the emulator once, "
-         "which takes a few minutes; later starts are quick."),
-        ("The DMD and switch/LED windows",
-         "Two small windows open beside the game: the dot-matrix display (the "
-         "picture the machine shows) and a switch/LED matrix. The DMD shows the "
-         "running attract. The switch matrix is still being wired up — it opens, "
-         "but clicking switches does not drive the game yet (the game only reads "
-         "a board's switches once its board type is advertised, a remaining "
-         "step). Nothing you do here is written back to the card."),
+         "which takes a few minutes; later starts are quick, and switching to a "
+         "different card you've already picked before reuses its extraction."),
+        ("Play a game",
+         "The DMD window shows the running display; a switch/LED window opens "
+         "beside it listing every switch by name and position, not a bare grid. "
+         "Play with the keyboard (works in the DMD window) — arrow keys are the "
+         "flippers, 1 starts, 5 coins up, T tilts, and there's a full legend in "
+         "the window — or click a switch to pulse it briefly, the way a ball "
+         "rolling over it would (right-click to hold one closed). The coin door "
+         "and service buttons are drawn as on the real door, and the trough "
+         "shows each ball position; coining up and pressing Start actually "
+         "serves a ball, so you can play a full game start to finish."),
+        ("Volume and Default Settings",
+         "The Volume slider and Mute checkbox are this tab's own speaker "
+         "control (not the game's in-game volume, which is on the coin door "
+         "like the real machine) and take effect immediately on a running game. "
+         "Default Settings — the operator adjustments baked into the card — is "
+         "a separate tab from Emulate and works without the emulator running at "
+         "all."),
         ("If it gets stuck",
-         "\"Fix stuck state\" force-restarts WSL to clear a wedged emulator — a "
+         "\"Restart WSL…\" force-restarts WSL to clear a wedged emulator — a "
          "frozen window or a game that will not stop. It closes all WSL sessions "
          "and takes about 15 seconds; your card and settings are untouched."),
     ],

@@ -543,3 +543,61 @@ def test_dead_keeper_is_named_not_masked():
     label, _ = state_text({"wsl": "1", "game_procs": "1",
                            "nodes_registered": "1"})
     assert label == "Game running"
+
+
+# ------------------------------------------------------------ app speaker --
+# item 87 follow-up (no-sound report): the APP owns the Windows player; the
+# rig's WSL side runs only fifo + relay (PAD_AUDIO_SINK=relay), because a
+# Windows exec from WSL rides an interop socket that dies with start.sh's
+# wsl.exe - the probe hung forever and a fresh app + fresh Start was silent.
+
+def test_player_cmd_is_padplay_via_pads_own_python(panel, monkeypatch):
+    monkeypatch.setattr(spike1_emulate_tab, "windows_python",
+                        lambda console=False: r"C:\Py\python.exe")
+    monkeypatch.setattr(spike1_emulate_tab.os.path, "isfile", lambda p: True)
+    cmd = panel._player_cmd()
+    assert cmd[0] == r"C:\Py\python.exe"
+    assert cmd[1].replace("\\", "/").endswith("tools/spike2_emu/padplay.py")
+    assert cmd[2:] == ["127.0.0.1", "45998", "44100", "2"]
+
+
+def test_player_relaunch_backs_off(panel, monkeypatch):
+    """A dead player is relaunched, but at most once per 5 s - connection
+    refused while the rig boots must not spin."""
+    monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "win32")
+    spawned = []
+
+    class _Proc:
+        def poll(self):
+            return 1                       # exited
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(panel, "_player_cmd", lambda: ["py", "padplay"])
+    monkeypatch.setattr(spike1_emulate_tab.subprocess, "Popen",
+                        lambda *a, **kw: spawned.append(a) or _Proc())
+    t = {"v": 100.0}
+    monkeypatch.setattr(spike1_emulate_tab.time, "monotonic", lambda: t["v"])
+    panel._ensure_player()
+    panel._ensure_player()                 # same instant: backoff holds
+    assert len(spawned) == 1
+    t["v"] += 6.0
+    panel._ensure_player()                 # dead + past backoff: relaunched
+    assert len(spawned) == 2
+
+
+def test_stop_player_kills_and_forgets(panel):
+    killed = {}
+
+    class _Proc:
+        def poll(self):
+            return None
+
+        def kill(self):
+            killed["v"] = True
+
+    panel._player = _Proc()
+    panel._stop_player()
+    assert killed.get("v") is True
+    assert panel._player is None

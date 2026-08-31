@@ -39,6 +39,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -46,7 +47,8 @@ from . import _rig
 # The volume/mute control FILE and its load/store belong to the Spike 2 tab
 # (item 56) and are deliberately shared, not copied: one knob value, one file,
 # read by the one padplay.py speaker implementation both rigs launch.
-from .emulate_tab import AUDIO_CTL_FILE, _load_audio_ctl, _write_audio_ctl
+from .emulate_tab import (AUDIO_CTL_FILE, _load_audio_ctl, _write_audio_ctl,
+                          windows_python)
 from .spike1_windows import Spike1Viewers, wsl_unc
 from .widgets import _Tooltip
 
@@ -204,6 +206,16 @@ class Spike1EmulatePanel:
         self._slots_rows = []
         self._slots_mtime = None
         self._slots_busy = False
+        #: the WINDOWS-side speaker (padplay.py) — owned by the APP, not the
+        #: rig.  The rig's WSL side runs only the fifo + TCP relay
+        #: (PAD_AUDIO_SINK=relay): launching a Windows exe from WSL depends on
+        #: an interop socket that dies with the wsl.exe session that spawned
+        #: start.sh, which is why a fresh app + fresh Start used to come up
+        #: silent (2026-08-31 — the sounddevice probe hung forever).  The app
+        #: is a Windows process, so it spawns the player itself and the audio
+        #: path never crosses interop at all.
+        self._player = None
+        self._player_at = 0.0
 
     # ------------------------------------------------------------------
     # plumbing
@@ -633,6 +645,7 @@ class Spike1EmulatePanel:
             self._poll_job = None
         self._close_viewers()
         self._stop_log_tail()
+        self._stop_player()
 
     # ------------------------------------------------------------------
     # pop-out DMD + switch windows
@@ -779,8 +792,12 @@ class Spike1EmulatePanel:
                 # the pivot prerequisites falls back to the ordinary boot and
                 # says so in the streamed log (save states off, nothing else
                 # changes).
+                # PAD_AUDIO_SINK=relay: the rig runs fifo + TCP relay only;
+                # THIS APP spawns the Windows speaker (see _ensure_player) —
+                # the rig launching one itself needs WSL interop, which dies
+                # with start.sh's wsl.exe and wedged the whole chain silent.
                 env = ["PAD_AUDIO=1", "PAD_AUDIO_CTL=" + AUDIO_CTL_FILE,
-                       "S1_PIVOT=1"]
+                       "PAD_AUDIO_SINK=relay", "S1_PIVOT=1"]
                 rc = self._run_streaming(rig_cmd_root("start.sh", *args,
                                                       env=env),
                                          timeout=1800)
@@ -853,9 +870,64 @@ class Spike1EmulatePanel:
             except Exception as exc:                       # noqa: BLE001
                 self._log("Spike 1: stop failed: %s" % exc)
             finally:
+                self._stop_player()
                 self._release()
 
         threading.Thread(target=work, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # the Windows-side speaker (see the __init__ note for why the app owns it)
+    # ------------------------------------------------------------------
+
+    def _player_cmd(self):
+        """The speaker command: PAD's own console python running padplay.py
+        against the rig's relay.  None when a piece is missing."""
+        py = windows_python(console=True)
+        pp = os.path.join(os.path.dirname(rig_dir()), "spike2_emu",
+                          "padplay.py")
+        if not py or not os.path.isfile(pp):
+            return None
+        return [py, pp, "127.0.0.1", "45998", "44100", "2"]
+
+    def _ensure_player(self):
+        """Keep one Windows player alive while a run is up.  Called from the
+        status poll; a player that exited (relay not up yet, the 25 s no-data
+        watchdog, a crash) is relaunched with a 5 s backoff — connection
+        refused costs one instant exit per attempt, nothing more."""
+        if sys.platform != "win32":
+            return
+        p = self._player
+        if p is not None and p.poll() is None:
+            return
+        now = time.monotonic()
+        if now - self._player_at < 5.0:
+            return
+        cmd = self._player_cmd()
+        if not cmd:
+            return
+        self._player_at = now
+        env = dict(os.environ)
+        env["PAD_AUDIO_CTL"] = AUDIO_CTL_FILE
+        try:
+            self._player = subprocess.Popen(
+                cmd, env=env, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=_rig.CREATE_FLAGS)
+            if p is None:
+                self._log("Spike 1: speaker up (app-side Windows player).")
+        except Exception as exc:                           # noqa: BLE001
+            self._log("Spike 1: could not start the speaker: %s" % exc)
+            self._player = None
+
+    def _stop_player(self):
+        p = self._player
+        self._player = None
+        if p is None:
+            return
+        try:
+            p.kill()
+        except Exception:                                  # noqa: BLE001
+            pass
 
     def _release(self):
         def done():
@@ -1200,6 +1272,14 @@ class Spike1EmulatePanel:
                 self._vals["boards"].configure(
                     text="yes" if info.get("nodes_registered") == "1"
                     else "not yet")
+
+            # the app-side speaker follows the run: alive while a game is up,
+            # gone when it is not (padplay also self-exits when the relay
+            # closes or the PCM stops for 25 s — this is the belt half).
+            if self._last_up:
+                self._ensure_player()
+            else:
+                self._stop_player()
 
             # re-list the save slots when their directory changed (a save, a
             # delete — status.sh reports the saves dir's mtime), and once on

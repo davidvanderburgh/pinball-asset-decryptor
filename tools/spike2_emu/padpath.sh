@@ -625,7 +625,11 @@ pad_win_pythons() {
         # caller is itself a script being fed on stdin, eats the rest of
         # that script. A probe must not consume the input of whatever
         # asked it.
-        raw=$("$py" -0p 2>/dev/null </dev/null | tr -d '\r')
+        # BOUNDED: an interop exec whose owning wsl.exe session has exited
+        # hangs forever (no Windows process ever starts), and a probe that can
+        # hang is a chain that can wedge before its first log line — the
+        # 2026-08-31 no-sound report. 10 s is geological for `py -0p`.
+        raw=$(timeout 10 "$py" -0p 2>/dev/null </dev/null | tr -d '\r')
         { printf '%s\n' "$raw" | grep '\*'
           printf '%s\n' "$raw" | grep -v '\*'; } \
             | grep -o '[A-Za-z]:\\.*$' \
@@ -685,8 +689,11 @@ pad_win_python_usable() {
 # follows ("install sounddevice") is addressed to the wrong fault.
 pad_win_python() {
     pad_win_pythons | while IFS= read -r c; do
+        # timeout: see pad_win_pythons — a dead-interop exec hangs forever,
+        # and this probe is the exact line the 2026-08-31 silent-audio wedge
+        # stood on for 151 s. A healthy import answers in well under 10 s.
         if pad_win_python_usable "$c" \
-           && "$c" -c "import sounddevice" >/dev/null 2>&1 </dev/null
+           && timeout 10 "$c" -c "import sounddevice" >/dev/null 2>&1 </dev/null
         then
             echo "$c"
             break

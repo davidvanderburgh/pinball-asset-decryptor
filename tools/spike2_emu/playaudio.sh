@@ -125,7 +125,16 @@ find_winpython() { pad_win_python; }
 # =pulse forces the old path back, =win forces the bridge and fails loudly.
 SINK=${PAD_AUDIO_SINK:-auto}
 WINPY=""
-if [ "$SINK" != pulse ]; then
+# NO PROBE FOR THE SINKS THAT DO NOT NEED ONE. The Windows-python search runs
+# .exe files through WSL interop, and interop is TIED TO THE wsl.exe SESSION
+# THAT SPAWNED THIS SCRIPT: a launcher that exits right after backgrounding us
+# (the Spike 1 tab's start.sh does, by design — READY is its handshake) takes
+# the interop socket with it, and the probe then hangs FOREVER, before this
+# script has started a relay or printed a word. Measured live 2026-08-31:
+# David's fresh app start, four wedged playaudio processes 151 s old, the
+# probe's python.exe never existing on the Windows side, and no sound. A
+# relay/pulse sink never execs a Windows binary, so it never probes.
+if [ "$SINK" != pulse ] && [ "$SINK" != relay ]; then
     is_wsl && WINPY=$(find_winpython)
 fi
 if [ "$SINK" = auto ]; then

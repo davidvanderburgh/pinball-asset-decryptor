@@ -72,10 +72,15 @@ jobs:
       # remaining 250+ tests still exercise the picker / mfr-switch /
       # log persistence behaviour through their non-GUI entry points,
       # and the GUI smoke suite is run manually before tagging.
+      # --dist loadgroup honours the xdist_group("tk") marker conftest.py
+      # stamps on every tkinter-touching module: all real-Tk tests run
+      # serially on ONE worker (concurrent Tk across workers crashed a
+      # macOS worker and Windows App() fixtures on the first -n auto
+      # runs), while the other workers parallelize the rest.
       - name: Run tests (Linux, under xvfb)
         if: runner.os == 'Linux'
-        run: xvfb-run -a python -m pytest tests -n auto -v --ignore=tests/test_gui_smoke.py
+        run: xvfb-run -a python -m pytest tests -n auto --dist loadgroup -v --ignore=tests/test_gui_smoke.py
 
       - name: Run tests (macOS / Windows)
         if: runner.os != 'Linux'
-        run: python -m pytest tests -n auto -v --ignore=tests/test_gui_smoke.py
+        run: python -m pytest tests -n auto --dist loadgroup -v --ignore=tests/test_gui_smoke.py

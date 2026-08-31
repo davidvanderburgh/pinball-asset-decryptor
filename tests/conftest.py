@@ -145,6 +145,45 @@ def _isolate_audio_ctl(tmp_path_factory):
         tmp_path_factory.mktemp("audio_ctl") / "audio_ctl.json")
 
 
+# ---------------------------------------------------------------------------
+# Real-Tk tests all ride ONE xdist worker (--dist loadgroup in test.yml).
+# ---------------------------------------------------------------------------
+# Under plain pytest the suite builds and destroys its Tk roots serially, and
+# has been stable that way for months.  Several xdist workers doing it
+# concurrently is the regime that crashed a macOS worker mid-Toplevel and
+# killed Windows App() fixture setups under load (2026-08-31, the first
+# -n auto runs).  Pinning every tkinter-touching module into one xdist_group
+# recreates the proven serial regime for Tk while the other workers
+# parallelize the rest of the suite.  Membership is sniffed from the module
+# source rather than hand-marked across 32 files, so a new GUI test file is
+# grouped the day it appears; the marker is inert without xdist.
+
+_TK_SNIFF_CACHE = {}
+
+
+def _touches_tk(path):
+    p = str(path)
+    hit = _TK_SNIFF_CACHE.get(p)
+    if hit is None:
+        try:
+            with open(p, "r", encoding="utf-8", errors="replace") as f:
+                hit = "tkinter" in f.read()
+        except OSError:
+            hit = False
+        _TK_SNIFF_CACHE[p] = hit
+    return hit
+
+
+# tryfirst: xdist's own pytest_collection_modifyitems (remote.py) is what
+# folds the marker into the scheduling id, so this hook must run before it
+# or the marker arrives after the train has left.
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        if _touches_tk(item.path):
+            item.add_marker(pytest.mark.xdist_group("tk"))
+
+
 @pytest.fixture(scope="session")
 def all_manufacturers():
     from pinball_decryptor.core.registry import all_manufacturers as _am

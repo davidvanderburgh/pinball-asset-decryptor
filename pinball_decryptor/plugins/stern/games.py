@@ -82,3 +82,26 @@ GAME_DB = {
     "batman":         {"display": "Batman (Spike 2)",
                        "filename_hints": ["batman"]},
 }
+
+# Every Stern Spike 1 title (2015-2016, the 128x32 DMD generation that
+# preceded Spike 2's LCD).  Same deal as GAME_DB: the Spike 1 engine is
+# title-agnostic — its image.bin master directory is plaintext and every sound
+# is raw 16-bit PCM — so this roster only names known titles; an unlisted card
+# still extracts under the generic key (formats.SPIKE1_GENERIC_KEY).  Stern
+# shipped Spike 1 updates as ``.iso`` files that are raw MBR SD-card images.
+SPIKE1_GAME_DB = {
+    "wwe_wrestlemania": {"display": "WWE WrestleMania (Spike 1)",
+                         "filename_hints": ["wwe", "wrestlemania"]},
+    "kiss":             {"display": "KISS (Spike 1)",
+                         "filename_hints": ["kiss"]},
+    "whoa_nellie":      {"display": "Whoa Nellie! Big Juicy Melons (Spike 1)",
+                         "filename_hints": ["whoa", "nellie", "wnbjm"]},
+    "game_of_thrones":  {"display": "Game of Thrones (Spike 1)",
+                         "filename_hints": ["got_", "got-", "game_of_thrones",
+                                            "gameofthrones",
+                                            "game of thrones"]},
+    "spider_man_ve":    {"display": "Spider-Man Vault Edition (Spike 1)",
+                         "filename_hints": ["spider"]},
+    "ghostbusters":     {"display": "Ghostbusters (Spike 1)",
+                         "filename_hints": ["ghostbusters", "ghost_busters"]},
+}

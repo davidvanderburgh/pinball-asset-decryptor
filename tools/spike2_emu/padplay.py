@@ -235,10 +235,26 @@ def main():
                   # level, not at unity for one poll interval
     with stream:
         last = time.monotonic()
+        # No-data watchdog. The guest streams CONTINUOUSLY (silence included),
+        # so a feed that stops entirely means the transport died under us —
+        # seen live 2026-08-31 as a half-open WSL localhost-proxy connection:
+        # the socket stayed "connected" but never delivered another byte, the
+        # player idled forever, and the run was silent with no line saying so.
+        # Exiting hands recovery to playaudio.sh's restart loop, which spawns
+        # a fresh player and a fresh connection.
+        fed_last = (stats["fed"], time.monotonic())
         while not done.is_set() or len(buf) > 0:
             time.sleep(0.25)
             poll_gain()
             now = time.monotonic()
+            if stats["fed"] != fed_last[0]:
+                fed_last = (stats["fed"], now)
+            elif now - fed_last[1] > 25:
+                print("[padplay] no data for 25 s - transport presumed dead, "
+                      "exiting for a fresh connection", flush=True)
+                done.set()
+                close()
+                sys.exit(1)
             if now - last >= 5:
                 with lock:
                     depth = len(buf)

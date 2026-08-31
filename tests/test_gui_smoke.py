@@ -1523,7 +1523,8 @@ def test_era_switcher_pills_flip_era_and_input_label(app, manufacturers_by_key):
         stern.set_era("spike2")
         win.apply_manufacturer(stern, reset_era=False)
         app.root.update()
-        assert set(win._era_badge_widgets) == {"spike2", "whitestar"}
+        assert set(win._era_badge_widgets) == {"spike2", "spike1",
+                                               "whitestar"}
         assert stern.current_era == "spike2"
         assert win._extract_input_lbl.cget("text") == "Card image:"
 
@@ -4805,3 +4806,46 @@ def test_scene_jumps_from_the_font_and_video_lists(app, tmp_path):
     fs._close()
     sb._close()
     app.root.update()
+
+
+# --- Spike 1 Default Settings tab (operator adjustments from the game ELF) ---
+
+_SPIKE1_CARD = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "images", "Stern", "spike1", "ghostbusters_le-1_17.iso")
+
+
+@pytest.mark.skipif(not os.path.isfile(_SPIKE1_CARD),
+                    reason="Spike 1 sample card not present")
+def test_settings_tab_loads_spike1_card(app, manufacturers_by_key):
+    """The Default Settings tab decodes a Spike 1 card's operator adjustments
+    (from the game ELF) into the all-settings list — the read side of Spike 1
+    settings parity."""
+    a = app
+    a._on_manufacturer_change(manufacturers_by_key["stern"])
+    a.root.update()
+    w = a.window
+    # the REAL workflow: the Stern plugin on its SPIKE 1 era (not the default
+    # Spike 2), so the era badge, tab strip and capabilities are Spike 1's.
+    w._on_era_badge_click("spike1")
+    a.root.update()
+    assert getattr(a._current_mfr, "current_era", "") == "spike1"
+    assert getattr(a._current_mfr.capabilities, "settings_editor", False)
+    w.settings_image_var.set(_SPIKE1_CARD)
+    w._settings_open_image()
+    # the worker is threaded + after()-polled; pump until it lands
+    import time
+    t0 = time.time()
+    while time.time() - t0 < 30 and not getattr(w, "_settings_all_rows", None):
+        a.root.update()
+        time.sleep(0.05)
+    assert w._settings_spike1 is True
+    assert w._settings_table is None
+    rows = w._settings_all_rows
+    assert len(rows) > 100                      # GBLE carries ~175 adjustments
+    r0 = rows[0]
+    assert set(r0) >= {"id", "name", "label", "default", "min", "max", "step"}
+    assert r0["name"].startswith("AD_")         # stable synthetic key
+    # a real firmware label made it through (not a raw AD_ id)
+    assert any("VOLUME" in r["label"].upper() or "COIN" in r["label"].upper()
+               for r in rows)

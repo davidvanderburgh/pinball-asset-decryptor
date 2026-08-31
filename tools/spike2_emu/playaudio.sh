@@ -42,15 +42,28 @@ mkfifo "$FIFO" || exit 1
 # the stream is 44100 plays everything ~9% sharp and sounds like a codec fault.
 # It cannot be sent over the fifo itself: the guest's open is non-blocking and
 # fails until a reader exists, and the reader would be waiting for the rate.
-echo "[play] waiting for the guest to report its PCM format..."
-for i in $(seq 1 240); do [ -s "$FMT" ] && break; sleep 0.25; done
-if [ -s "$FMT" ]; then
-    read -r r c < "$FMT"
-    [ -n "${r:-}" ] && RATE=$r
-    [ -n "${c:-}" ] && CH=$c
-    echo "[play] guest reports ${RATE} Hz x ${CH} ch"
+#
+# UNLESS THE CALLER DECLARES IT. The Spike 1 rig knows its format statically
+# (44100x2, from the game ELF) and passes it as args; PAD_AUDIO_FMT_FIXED=1
+# says "the args ARE the format", skipping this wait. It exists because the
+# obvious alternative - the caller pre-writing $FMT - RACES: the `rm -f $FMT`
+# above runs after this script's WSLg-socket wait, up to 10 s in, and deleted
+# a Spike 1 fmt written 2 s after launch, leaving this poll waiting a full
+# 60 s for a file nobody would write again (sound arrived, but a minute
+# late, which reads as "sound is not working").
+if [ -z "${PAD_AUDIO_FMT_FIXED:-}" ]; then
+    echo "[play] waiting for the guest to report its PCM format..."
+    for i in $(seq 1 240); do [ -s "$FMT" ] && break; sleep 0.25; done
+    if [ -s "$FMT" ]; then
+        read -r r c < "$FMT"
+        [ -n "${r:-}" ] && RATE=$r
+        [ -n "${c:-}" ] && CH=$c
+        echo "[play] guest reports ${RATE} Hz x ${CH} ch"
+    else
+        echo "[play] no format after 60 s, falling back to ${RATE} Hz x ${CH} ch" >&2
+    fi
 else
-    echo "[play] no format after 60 s, falling back to ${RATE} Hz x ${CH} ch" >&2
+    echo "[play] caller-declared format: ${RATE} Hz x ${CH} ch"
 fi
 # -re is deliberately NOT used: the guest already paces itself in real time
 # against snd_pcm_avail(), so the FIFO arrives at wall-clock speed. Adding -re
@@ -179,10 +192,15 @@ if [ "$SINK" = win ]; then
     # would take out whatever else the user is running, and the old version of
     # this that matched ffplay.exe would have killed PAD's own audio preview.
     WINPID=""
+    # `$_.Name -like 'py*'` is LOAD-BEARING: the PowerShell process running
+    # this query has '*padplay.py*' and the port in its OWN command line, so
+    # without the name filter it matches ITSELF and Stop-Process kills the
+    # query mid-pipeline — observed killing the invoking WSL session outright.
     win_kill() {
         /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile \
             -Command "Get-CimInstance Win32_Process |
-                      Where-Object { \$_.CommandLine -like '*padplay.py*' -and
+                      Where-Object { \$_.Name -like 'py*' -and
+                                     \$_.CommandLine -like '*padplay.py*' -and
                                      \$_.CommandLine -like '* $PORT *' } |
                       ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" \
             >/dev/null 2>&1 || true

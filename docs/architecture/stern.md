@@ -1,6 +1,6 @@
 # Stern Pinball (`stern`) — Architecture
 
-> Stern's modern games run on the **Spike** hardware platform and ship their content on an SD card as a raw, MBR-partitioned disk image. The moddable surfaces split three ways by how they're stored: **video** (H.264 clips) and **images** (PNG UI art) sit as ordinary loose files on an unencrypted ext4 partition and extract/patch like any file; **audio** is the hard part — every "category-0" sound is packed into a single `image.bin` container and encoded with a per-sample stream cipher whose keystream is produced by the game firmware itself (and licensed-music titles keep their full songs in additional per-song `image-scNN.bin` banks, decoded and re-encoded by the same codec). There is no static key to recover: the plugin boots the card's own `game_real` firmware in an ARM emulator (unicorn), drives the codec as an oracle to recover each sound's exact keystream, and inverts it analytically — so decode **and** re-encode are bit-exact across all 32 codec "scale" variants, mono and stereo, with nothing title-specific bundled. This document covers **Spike 2** (i.MX6, unencrypted ext4); Spike 1 and Spike 3 are out of scope (see [Scope](#scope--what-spike-2-is-not)).
+> Stern's modern games run on the **Spike** hardware platform and ship their content on an SD card as a raw, MBR-partitioned disk image. The moddable surfaces split three ways by how they're stored: **video** (H.264 clips) and **images** (PNG UI art) sit as ordinary loose files on an unencrypted ext4 partition and extract/patch like any file; **audio** is the hard part — every "category-0" sound is packed into a single `image.bin` container and encoded with a per-sample stream cipher whose keystream is produced by the game firmware itself (and licensed-music titles keep their full songs in additional per-song `image-scNN.bin` banks, decoded and re-encoded by the same codec). There is no static key to recover: the plugin boots the card's own `game_real` firmware in an ARM emulator (unicorn), drives the codec as an oracle to recover each sound's exact keystream, and inverts it analytically — so decode **and** re-encode are bit-exact across all 32 codec "scale" variants, mono and stereo, with nothing title-specific bundled. This document covers **Spike 2** (i.MX6, unencrypted ext4); the far simpler **Spike 1** era (plaintext master directory, raw-PCM sounds — `plugins/stern/spike1.py`) is summarised in [Scope](#scope--what-spike-2-is-not), and Spike 3 is out of scope.
 
 ## At a glance
 
@@ -276,7 +276,16 @@ Two GUI features ride these passes:
 
 ## Scope — what Spike 2 is *not*
 
-- **Spike 1** (older, e.g. early Spike titles) is not implemented here.
+- **Spike 1** (2015-2016 DMD generation: WrestleMania, KISS, Whoa Nellie,
+  Game of Thrones, Spider-Man VE, Ghostbusters) is implemented as its own era
+  in `plugins/stern/spike1.py` — a far simpler scheme than Spike 2: the
+  `image.bin` master directory is **plaintext** and every sound is raw
+  interleaved 16-bit PCM (`u32 frames, u16 channels, u16 rate-divisor`
+  headers; 44100/divisor Hz), so extract+write need no emulator. Stern's
+  Spike 1 update `.iso` files are raw MBR SD-card images whose game-data
+  partition is a **logical** partition (EBR chain — `parse_all_partitions`),
+  and the card's `/spk/index/*.sidx` manifests use the same FINF records and
+  the same global HMAC key as Spike 2, so Write refreshes them the same way.
 - **Spike 3** (RPi CM4) is a *different and harder* scheme entirely: its SD data partitions are **LUKS2 / AES-XTS** keyed by the 256-bit CM4 customer OTP fuse — hardware-bound, so the key isn't on the card. That is out of scope for this plugin (Spike 2's card is unencrypted ext4).
 
 ---

@@ -623,6 +623,27 @@ class App:
                 jjp_iso = str(self._settings.get("jjp_emulate_iso") or "")
             jjp_iso_var.set(_rmd(jjp_iso) if jjp_iso else "")
 
+        # The Spike 1 emulator's card image — the third rider on this rail,
+        # under its OWN key for the same reason as the JJP ISO: one shared
+        # setting across manufacturers is a bug waiting for the first switch.
+        # Same anchor-first / global-fallback shape, same mapped-drive fix.
+        s1_var = getattr(self.window, "spike1_emulate_card_var", None)
+        if s1_var is not None:
+            s1_card = ""
+            if project_folder:
+                from .core import project_file
+                try:
+                    data = project_file.load_anchor(project_folder)
+                    s1_card = str(data.get("spike1_emulate_card") or "")
+                except (OSError, ValueError):
+                    s1_card = ""
+                if not s1_card:
+                    s1_card = str(
+                        self._settings.get("spike1_emulate_card") or "")
+            else:
+                s1_card = str(self._settings.get("spike1_emulate_card") or "")
+            s1_var.set(_rmd(s1_card) if s1_card else "")
+
     # ------------------------------------------------------------------
     # Prerequisite checking
     # ------------------------------------------------------------------
@@ -4261,6 +4282,13 @@ class App:
                 self._settings["jjp_emulate_iso"] = jjp_iso_var.get().strip()
             except tk.TclError:
                 pass
+        # The Spike 1 card image, its own key (see the restore side).
+        s1_var = getattr(self.window, "spike1_emulate_card_var", None)
+        if s1_var is not None:
+            try:
+                self._settings["spike1_emulate_card"] = s1_var.get().strip()
+            except tk.TclError:
+                pass
         states_var = getattr(self.window, "emulate_savestates_var", None)
         if states_var is not None:
             try:
@@ -4352,6 +4380,8 @@ class App:
         # used it.
         jjp_var = getattr(self.window, "jjp_emulate_iso_var", None)
         jjp_emulate_iso = jjp_var.get().strip() if jjp_var else ""
+        s1_var = getattr(self.window, "spike1_emulate_card_var", None)
+        spike1_emulate_card = s1_var.get().strip() if s1_var else ""
         try:
             if project_file.has_anchor(folder):
                 project_file.update_anchor(
@@ -4364,6 +4394,7 @@ class App:
                     emulate_card=emulate_card,
                     emulate_savestates=emulate_savestates,
                     jjp_emulate_iso=jjp_emulate_iso,
+                    spike1_emulate_card=spike1_emulate_card,
                     saved_with=__version__)
             else:
                 # First anchor for this folder.  Compat rule: a custom Build
@@ -4389,7 +4420,8 @@ class App:
                     # readers ignore it.
                     extra={"emulate_card": emulate_card,
                            "emulate_savestates": emulate_savestates,
-                           "jjp_emulate_iso": jjp_emulate_iso})
+                           "jjp_emulate_iso": jjp_emulate_iso,
+                           "spike1_emulate_card": spike1_emulate_card})
                 self.window.append_log(
                     "This folder is now a project — picking it again "
                     "restores this whole setup.", "info")
@@ -4729,6 +4761,37 @@ class App:
         self._settings["default_settings_presets"] = blob
         self._save_settings()
 
+    def _apply_spike1_default_settings(self, out, vals, source):
+        """Bake staged/preset Spike 1 adjustment defaults into the built card's
+        game ELF.  *vals* is ``{AD_<id>: value}`` (the same store both eras
+        stage into); Spike 1 has no high-score board or menu widening, so only
+        the numeric defaults apply.  Returns True when *out* is a Spike 1 card
+        (handled here), False to fall through to the Spike 2 path."""
+        from .plugins.stern.formats import detect_spike1_game
+        if detect_spike1_game(out) is None:
+            return False
+        from .plugins.stern import spike1
+        overrides = {}
+        for name, v in (vals or {}).items():
+            if isinstance(name, str) and name.startswith("AD_"):
+                try:
+                    overrides[int(name[3:])] = int(v)
+                except ValueError:
+                    pass
+        if overrides:
+            try:
+                n = spike1.write_game_elf_defaults(
+                    out, overrides, log=self.window.append_log)
+                self.window.append_log(
+                    "Applied %s (%d setting(s)) to the built Spike 1 image."
+                    % (source, n), "success")
+            except Exception as e:
+                self.window.append_log(
+                    "Couldn't apply %s to the Spike 1 build (%s) — you can "
+                    "still set defaults on the Defaults tab." % (source, e),
+                    "warning")
+        return True
+
     def _apply_active_preset_to_build(self):
         """After a successful Stern build, bake the active Default Settings
         preset into the output card image (only the adjustments that title
@@ -4748,6 +4811,9 @@ class App:
         except Exception:
             out = None
         if not out or not os.path.isfile(out):
+            return
+        if self._apply_spike1_default_settings(
+                out, vals, "Default Settings preset \"%s\"" % active):
             return
         try:
             from .plugins.stern.explorer import CardImage
@@ -4795,6 +4861,9 @@ class App:
         except Exception:
             out = None
         if not out or not os.path.isfile(out):
+            return
+        if self._apply_spike1_default_settings(
+                out, vals, "staged default setting(s)"):
             return
         try:
             from .plugins.stern.explorer import CardImage

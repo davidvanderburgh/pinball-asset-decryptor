@@ -2313,6 +2313,7 @@ class MainWindow:
         self._tab_compare = ttk.Frame(self._notebook)
         self._tab_emulate = ttk.Frame(self._notebook)
         self._tab_jjp_emulate = ttk.Frame(self._notebook)
+        self._tab_spike1_emulate = ttk.Frame(self._notebook)
 
         # Order: Extract → the Replace tabs → Default Settings (set defaults
         # before building) → Write → Mod Pack → Partitions.  Display labels are
@@ -2337,6 +2338,10 @@ class MainWindow:
             # only one is ever visible at a time — so the user just sees
             # "Emulate" for whichever manufacturer they have selected.
             (self._tab_jjp_emulate, "Emulate", "Emulate JJP"),
+            # Third emulate tab (Stern Spike 1). Same cosmetic "Emulate" label
+            # as the other two, gated by its own capability (emulate_spike1),
+            # and only one emulate tab is ever visible for a given selection.
+            (self._tab_spike1_emulate, "Emulate", "Emulate Spike1"),
         ]
         self._tab_keys = {}
         for _frame, _label, _key in _tabs:
@@ -2355,6 +2360,7 @@ class MainWindow:
         self._build_compare_tab()
         self._build_emulate_tab()
         self._build_jjp_emulate_tab()
+        self._build_spike1_emulate_tab()
 
         # Phase indicators + progress bar
         status_frame = ttk.Frame(mv)
@@ -11595,6 +11601,11 @@ class MainWindow:
         self._settings_part = None
         self._settings_fw_path = None
         self._settings_table = None
+        # Spike 1 cards have no AdjustmentTable object (their defaults are
+        # decoded straight from the game ELF by spike1_adjustments), so
+        # `_settings_table` stays None for them — this flag lets the staging /
+        # edit / log paths, which otherwise bail on a None table, run anyway.
+        self._settings_spike1 = False
         self._settings_busy = False
         self._settings_loading = False   # True while the form is being filled
         self._settings_stage_job = None  # debounced auto-stage timer id
@@ -11936,6 +11947,21 @@ class MainWindow:
 
         def _work():
             try:
+                # Spike 1 (DMD era) is a different card + firmware format: the
+                # operator-adjustment defaults live in the game ELF, decoded by
+                # spike1_adjustments.  It has no curated-units / menu-visibility
+                # / factory-volume / high-score layer, so it takes the "all
+                # settings" list only — everything else below is Spike 2.
+                from ..plugins.stern.formats import detect_spike1_game
+                if detect_spike1_game(path) is not None:
+                    from ..plugins.stern import spike1
+                    from ..plugins.stern.formats import spike1_linux_partitions
+                    from ..plugins.stern.spike1_adjustments import (
+                        Spike1Adjustments)
+                    parts = spike1_linux_partitions(path)
+                    adj = Spike1Adjustments(spike1.read_game_elf(path, parts))
+                    state["done"] = ("ok_spike1", adj.rows(), path)
+                    return
                 from ..plugins.stern import factory_volume
                 from ..plugins.stern.explorer import CardImage
                 from ..plugins.stern.adjustments import all_rows, curated_rows
@@ -12022,6 +12048,21 @@ class MainWindow:
                          "decoded yet.)" % res[1])
                 self._settings_empty.grid()
                 return
+            if res[0] == "ok_spike1":
+                # Spike 1: no curated form / high scores / menu widening —
+                # just the full editable list of the firmware's adjustments.
+                _ok, every, ipath = res
+                self._settings_table = None
+                self._settings_spike1 = True
+                self._settings_part = None
+                self._settings_fw_path = None
+                self._settings_image_path = ipath
+                self._settings_hstd = None
+                self._settings_every = every
+                self._settings_menu_plan = None
+                self._settings_build_form([])
+                return
+            self._settings_spike1 = False
             _ok, table, part, fw, rows, ipath, hstd, every, plan = res
             self._settings_table = table
             self._settings_part = part
@@ -12247,7 +12288,8 @@ class MainWindow:
         if _event is not None and getattr(_event, "num", 0) == 1:
             item = tree.identify_row(_event.y)      # the row clicked on
         row = self._settings_all_items.get(item or tree.focus())
-        if row is None or self._settings_table is None:
+        if row is None or (self._settings_table is None
+                           and not self._settings_spike1):
             return
         value = self._settings_ask_value(row)
         if value is None:
@@ -13031,7 +13073,8 @@ class MainWindow:
     def _settings_schedule_autostage(self):
         """Debounce an auto-stage: field edits arrive per keystroke / spinner
         click, so the actual staging write runs once things settle."""
-        if self._settings_loading or self._settings_table is None:
+        if self._settings_loading or (self._settings_table is None
+                                      and not self._settings_spike1):
             return
         job = getattr(self, "_settings_stage_job", None)
         if job is not None:
@@ -13120,7 +13163,8 @@ class MainWindow:
         first, so leaving a field records it AND reports it in one step and
         the log can never describe an edit that isn't staged yet."""
         self._settings_log_job = None
-        if self._settings_loading or self._settings_table is None:
+        if self._settings_loading or (self._settings_table is None
+                                      and not self._settings_spike1):
             return
         if getattr(self, "_settings_stage_job", None) is not None:
             try:
@@ -13166,7 +13210,8 @@ class MainWindow:
         """Record the form's diffs as staged-for-Build (or clear the record
         when the fields are back at the image's defaults)."""
         self._settings_stage_job = None
-        if self._settings_busy or self._settings_table is None:
+        if self._settings_busy or (self._settings_table is None
+                                   and not self._settings_spike1):
             return
         # The all-settings list shows the same pending values in its "New
         # default" column, whichever editor set them.
@@ -13859,8 +13904,11 @@ class MainWindow:
             resize_fn=self._resize_notebook_to_current_tab,
             # Item 78: the footer bar under the notebook is the panel's to
             # drive while its tab is showing - copy percent, boot marquee,
-            # full at attract.
-            footer_cb=self.set_emulate_progress)
+            # full at attract.  Tagged with the tab key: every emulate panel
+            # keeps polling in the background, and two live rigs used to fight
+            # over the one footer ("Game running" / "Running" flapping).
+            footer_cb=lambda k, p=None, t="": self.set_emulate_progress(
+                k, p, t, tab="Emulate"))
         self._emulate_panel.build(self._tab_emulate)
 
     def _build_jjp_emulate_tab(self):
@@ -13891,12 +13939,39 @@ class MainWindow:
             resize_fn=self._resize_notebook_to_current_tab)
         self._jjp_emulate_panel.build(self._tab_jjp_emulate)
 
+    def _build_spike1_emulate_tab(self):
+        """Build the third 'Emulate' tab: run a Stern Spike 1 (DMD-era) game on
+        this PC.
+
+        The seam only.  Everything of substance is in
+        :mod:`..gui.spike1_emulate_tab`, and the launch sequence lives in
+        ``tools/spike1_emu/start.sh``.  A sibling of the Stern (Spike 2) and JJP
+        tabs, not an extension — the Spike 1 rig is a static armel ELF under a
+        patched qemu-user with a CUSE device model, which shares almost nothing
+        with the other two beyond running inside WSL.  Like them it acts on the
+        RIG, taking its own Spike 1 card image."""
+        from .spike1_emulate_tab import Spike1EmulatePanel
+        # A separate card variable from the Spike 2 tab: a Spike 1 card and a
+        # Spike 2 .raw in one key is a bug waiting for the first era switch.
+        self.spike1_emulate_card_var = tk.StringVar()
+        self._spike1_emulate_panel = Spike1EmulatePanel(
+            self._tab_spike1_emulate,
+            log=self.append_log,
+            card_var=self.spike1_emulate_card_var,
+            theme_fn=lambda: self._current_theme,
+            badge_fn=self._make_round_icon,
+            resize_fn=self._resize_notebook_to_current_tab,
+            footer_cb=lambda k, p=None, t="": self.set_emulate_progress(
+                k, p, t, tab="Emulate Spike1"))
+        self._spike1_emulate_panel.build(self._tab_spike1_emulate)
+
     def emulate_shutdown(self):
         """App-quit hook: take the emulators down with the app (blocking,
         bounded).  A quit must not leave the game, Controls and playfield
         windows orphaned behind a vanished control surface — nor, for JJP,
         five CUSE daemons still serving device nodes for a game that is gone."""
-        for attr in ("_emulate_panel", "_jjp_emulate_panel"):
+        for attr in ("_emulate_panel", "_jjp_emulate_panel",
+                     "_spike1_emulate_panel"):
             panel = getattr(self, attr, None)
             if panel is not None:
                 try:
@@ -15407,7 +15482,7 @@ class MainWindow:
         # Item 78: leaving an Emulate tab hands the footer back to the
         # pipeline - without this the bar stays wherever the emulation left
         # it (full after a boot) underneath the freshly repacked chips.
-        if text not in ("Emulate", "Emulate JJP"):
+        if text not in ("Emulate", "Emulate JJP", "Emulate Spike1"):
             self._emulate_phases_frame.pack_forget()
             if getattr(self, "_footer_owner", "pipeline") == "emulate" \
                     and not getattr(self, "_running", False):
@@ -15471,7 +15546,7 @@ class MainWindow:
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
             self._pex_default_from_extract()
-        elif text in ("Emulate", "Emulate JJP"):
+        elif text in ("Emulate", "Emulate JJP", "Emulate Spike1"):
             # Item 78 (David, 2026-08-24: "why are we showing this progress
             # bar on the emulate tab?"): the extract/write chips swap for
             # the emulation's OWN ladder (Copy card / Boot / Tech Alerts /
@@ -15481,6 +15556,16 @@ class MainWindow:
             # entry just shows idle.
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
+            # Spike 1 EXTRACTS the game rather than copying a card, so its first
+            # chip reads "Extract"; the other eras keep the default ladder.
+            phases = (("Extract", "Boot", "Node boards", "Ready")
+                      if text == "Emulate Spike1" else self.EMULATE_PHASES)
+            if getattr(self, "_emulate_phases", None) != phases:
+                self._emulate_phases = phases
+                for w in self._emulate_phases_frame.winfo_children():
+                    w.destroy()
+                self._build_phase_steps(self._emulate_phases_frame, phases,
+                                        "emulate")
             self._emulate_phases_frame.pack(
                 fill=tk.X, before=self._progress_bar)
             self.set_emulate_progress("idle")
@@ -15910,6 +15995,8 @@ class MainWindow:
         self._configure_tab("Compare", getattr(caps, "compare", False))
         self._configure_tab("Emulate", getattr(caps, "emulate", False))
         self._configure_tab("Emulate JJP", getattr(caps, "emulate_jjp", False))
+        self._configure_tab("Emulate Spike1",
+                            getattr(caps, "emulate_spike1", False))
         # The Mod Pack tab is shared, but the "Transfer Mods to New Version"
         # section only fits plugins whose vendor re-lays-out the card across
         # versions (Stern) — show it only for those, hide it for the rest.
@@ -20872,7 +20959,7 @@ class MainWindow:
     _EMULATE_KINDS = {"copy": (0, None), "boot": (1, 55),
                       "techalerts": (2, 80), "run": (4, 100)}
 
-    def set_emulate_progress(self, kind, pct=None, text=""):
+    def set_emulate_progress(self, kind, pct=None, text="", tab=None):
         """Item 78 (David: "why are we showing this progress bar on the
         emulate tab?"): while an Emulate tab is showing, the footer carries
         the EMULATION's loading state - the bespoke chip row (Copy card /
@@ -20883,10 +20970,17 @@ class MainWindow:
         runs (this is a no-op then), and switching back to a pipeline tab
         hands the footer back - see _on_tab_changed.
         ``kind``: copy / boot / techalerts / run / idle.
+        ``tab``: the sender's tab key.  Every emulate panel keeps polling in
+        the background, so with two rigs live the hidden tab's poller used to
+        repaint the footer over the visible one (the "Game running" /
+        "Running" text flapping) — only the SHOWING tab's updates land.
         """
         if getattr(self, "_running", False):
             return
-        if self._current_tab_key() not in ("Emulate", "Emulate JJP"):
+        if self._current_tab_key() not in ("Emulate", "Emulate JJP",
+                                            "Emulate Spike1"):
+            return
+        if tab is not None and self._current_tab_key() != tab:
             return
         bar = self._progress_bar
         bar.stop()

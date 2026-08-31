@@ -399,3 +399,267 @@ def make_partclone_v2(out_path, used_blocks=(0, 2), totalblock=4,
     with open(out_path, "wb") as f:
         f.write(head + body)
     return out_path, bytes(expected)
+
+
+# ---------------------------------------------------------------------------
+# Stern Spike 1 (raw MBR SD-card .iso; plaintext image.bin container)
+# ---------------------------------------------------------------------------
+
+def make_spike1_mbr(out_path, with_logicals=True):
+    """A minimal Spike 1 card image: the fixed partition signature (FAT12 at
+    LBA 35, 0xDA kernel at 7000, Linux rootfs at 14000) plus an extended
+    partition whose EBR chain carries two logical Linux partitions — enough
+    for parse_all_partitions / is_spike1_card_parts / detect_spike1_game;
+    the partitions hold no filesystems."""
+    ext_base = 16384
+    total_sectors = ext_base + 4096
+    img = bytearray(total_sectors * 512)
+
+    def entry(ptype, lba, sectors, boot=0):
+        return bytes([boot, 0, 0, 0, ptype, 0, 0, 0]) + \
+            struct.pack("<II", lba, sectors)
+
+    mbr = bytearray(512)
+    mbr[446:462] = entry(0x01, 35, 6965, boot=0x80)
+    mbr[462:478] = entry(0xda, 7000, 7000)
+    mbr[478:494] = entry(0x83, 14000, 2000)
+    if with_logicals:
+        mbr[494:510] = entry(0x05, ext_base, 4096)
+    mbr[510:512] = b"\x55\xaa"
+    img[0:512] = mbr
+
+    if with_logicals:
+        # EBR 1 at ext_base: logical at +8 (1024 sectors), link to +2048
+        ebr1 = bytearray(512)
+        ebr1[446:462] = entry(0x83, 8, 1024)
+        ebr1[462:478] = entry(0x05, 2048, 2048)
+        ebr1[510:512] = b"\x55\xaa"
+        img[ext_base * 512:ext_base * 512 + 512] = ebr1
+        # EBR 2 at ext_base+2048: logical at +8 (1024 sectors), end of chain
+        ebr2 = bytearray(512)
+        ebr2[446:462] = entry(0x83, 8, 1024)
+        ebr2[510:512] = b"\x55\xaa"
+        img[(ext_base + 2048) * 512:(ext_base + 2048) * 512 + 512] = ebr2
+
+    with open(out_path, "wb") as f:
+        f.write(img)
+    return out_path
+
+
+def make_spike1_image_bin(front_header=True, multi_track=True, h2_at=None):
+    """A tiny but structurally-complete Spike 1 ``image.bin``: front header
+    (or erased front page, exercising the fixed-location fallback), header2,
+    x5-grouped pointer table, PCM bodies, and master records — one single-
+    track mono sound and (optionally) one two-track record whose extra body
+    hangs off an ``0a 00`` tag.  Returns ``(blob, expected)`` where expected
+    is ``[(idx, [(frames, ch, div), ...]), ...]``.  ``h2_at`` overrides the
+    erased-front header2 page (default 0x120000; 0x120038 is the other fixed
+    candidate real cards use)."""
+    frames1, ch1, div1 = 100, 1, 1
+    frames2, ch2, div2 = 60, 2, 2
+    frames3, ch3, div3 = 30, 1, 2
+
+    if front_header:
+        h2_off = 0x78
+        table_off = 0xC0
+        body_base = 0x200
+    else:
+        h2_off = h2_at if h2_at is not None else 0x120000
+        table_off = h2_off + 0x48
+        body_base = h2_off + 0x100
+
+    def body(seed, frames, ch, div):
+        pcm = bytes((seed + i) & 0xff for i in range(2 * ch * frames))
+        return struct.pack("<IHH", frames, ch, div) + pcm
+
+    b1 = body(1, frames1, ch1, div1)
+    b2 = body(2, frames2, ch2, div2)
+    b3 = body(3, frames3, ch3, div3)
+    b1_off = body_base
+    b2_off = (b1_off + len(b1) + 7) & ~7
+    b3_off = (b2_off + len(b2) + 7) & ~7
+    md_start = (b3_off + len(b3) + 15) & ~15
+
+    def rec_header(len_ticks):
+        return bytes([0x05, 0x04, 0x01]) + struct.pack("<I", len_ticks) + \
+            bytes([0x02, 0x00, 0x00, 0x00, 0x00])
+
+    # record 0: single-track, inline pointer at +12
+    rec0 = rec_header((frames1 * div1 + 5) // 6) + \
+        struct.pack("<Q", b1_off) + bytes.fromhex("100100ff")
+    recs = [rec0]
+    if multi_track:
+        # record 1: sentinel inline field + two 0a-tagged body pointers
+        rec1 = rec_header((frames2 * div2 + 5) // 6) + \
+            struct.pack("<Q", 1) + \
+            b"\x0a\x00" + struct.pack("<Q", b2_off) + \
+            b"\x0a\x00" + struct.pack("<Q", b3_off) + \
+            bytes.fromhex("100100ff")
+        recs.append(rec1)
+
+    rec_offs = []
+    pos = md_start
+    for r in recs:
+        rec_offs.append(pos)
+        pos += (len(r) + 7) & ~7
+    size = pos
+
+    blob = bytearray(size)
+    if front_header:
+        struct.pack_into("<7Q", blob, 0, h2_off, size - 36, size - 40,
+                         size - 44, size - 48, table_off, table_off)
+    else:
+        blob[0:0x80] = b"\xff" * 0x80
+    struct.pack_into("<6Q", blob, h2_off, 0, h2_off - 1, 0xEE11FFFF,
+                     table_off, size - 5, 0x12345678)
+    tpos = table_off
+    for ro in rec_offs:
+        for _ in range(5):
+            struct.pack_into("<Q", blob, tpos, ro)
+            tpos += 8
+    for off, data in ((b1_off, b1), (b2_off, b2), (b3_off, b3)):
+        blob[off:off + len(data)] = data
+    for off, r in zip(rec_offs, recs):
+        blob[off:off + len(r)] = r
+
+    expected = [(0, [(frames1, ch1, div1)])]
+    if multi_track:
+        expected.append((1, [(frames2, ch2, div2), (frames3, ch3, div3)]))
+    return bytes(blob), expected
+
+
+def make_ext2_fs(files, fs_blocks=512):
+    """A minimal but real ext2 filesystem image (1 KB blocks, classic direct
+    block pointers) that :class:`Ext4Reader` can walk.
+
+    *files* is ``{path: bytes}`` with ``/``-separated paths; intermediate
+    directories are created.  Small scale only: every file must fit in 12
+    direct blocks (12 KB) and everything in one block group.
+    """
+    BS = 1024
+    INODE_SIZE = 128
+    N_INODES = 64
+    it_blocks = (N_INODES * INODE_SIZE + BS - 1) // BS
+    first_data = 3 + it_blocks          # 0 boot, 1 sb, 2 gdt, 3.. itable
+
+    img = bytearray(fs_blocks * BS)
+
+    # superblock (fields Ext4Reader reads)
+    sb = bytearray(1024)
+    struct.pack_into("<I", sb, 0x00, N_INODES)          # inodes_count
+    struct.pack_into("<I", sb, 0x04, fs_blocks)         # blocks_count
+    struct.pack_into("<I", sb, 0x14, 1)                 # first_data_block
+    struct.pack_into("<I", sb, 0x18, 0)                 # log_block_size
+    struct.pack_into("<I", sb, 0x20, 8192)              # blocks_per_group
+    struct.pack_into("<I", sb, 0x28, N_INODES)          # inodes_per_group
+    struct.pack_into("<H", sb, 0x38, 0xEF53)            # magic
+    struct.pack_into("<H", sb, 0x58, INODE_SIZE)        # inode_size
+    struct.pack_into("<I", sb, 0x60, 0x2)               # incompat: FILETYPE
+    img[1024:2048] = sb
+
+    # group descriptor 0: inode table block
+    struct.pack_into("<I", img, 2 * BS + 8, 3)
+
+    next_block = [first_data]
+    next_ino = [11]                     # first non-reserved inode
+
+    def alloc_blocks(data):
+        n = max(1, (len(data) + BS - 1) // BS)
+        assert n <= 12, "make_ext2_fs: file too big for direct blocks"
+        start = next_block[0]
+        next_block[0] += n
+        img[start * BS:start * BS + len(data)] = data
+        return list(range(start, start + n))
+
+    def write_inode(ino, mode, size, blocks):
+        off = 3 * BS + (ino - 1) * INODE_SIZE
+        struct.pack_into("<H", img, off, mode)
+        struct.pack_into("<I", img, off + 4, size)
+        struct.pack_into("<I", img, off + 0x20, 0)      # flags
+        for i, b in enumerate(blocks):
+            struct.pack_into("<I", img, off + 0x28 + 4 * i, b)
+
+    def dir_block(entries):
+        """entries: [(ino, name, ftype)] -> one directory data block."""
+        out = bytearray()
+        for i, (ino, name, ftype) in enumerate(entries):
+            nb = name.encode()
+            rec = 8 + ((len(nb) + 3) & ~3)
+            if i == len(entries) - 1:
+                rec = BS - len(out)
+            out += struct.pack("<IHBB", ino, rec, len(nb), ftype) + nb
+            out += b"\x00" * (rec - 8 - len(nb))
+        return bytes(out)
+
+    # build the tree: dirs as {name: (ino, entries)}, files appended later
+    tree = {}                           # dir path -> (ino, [(ino,name,ftype)])
+    tree[""] = (2, [(2, ".", 2), (2, "..", 2)])
+
+    def ensure_dir(path):
+        if path in tree:
+            return tree[path][0]
+        parent, _, name = path.rpartition("/")
+        pino = ensure_dir(parent)
+        ino = next_ino[0]
+        next_ino[0] += 1
+        tree[path] = (ino, [(ino, ".", 2), (pino, "..", 2)])
+        tree[parent][1].append((ino, name, 2))
+        return ino
+
+    for path, data in files.items():
+        parent, _, name = path.rpartition("/")
+        ensure_dir(parent)
+        ino = next_ino[0]
+        next_ino[0] += 1
+        write_inode(ino, 0x8000 | 0o644, len(data), alloc_blocks(data))
+        tree[parent][1].append((ino, name, 1))
+
+    for path, (ino, entries) in tree.items():
+        data = dir_block(entries)
+        write_inode(ino, 0x4000 | 0o755, len(data), alloc_blocks(data))
+
+    assert next_block[0] <= fs_blocks, "make_ext2_fs: filesystem full"
+    return bytes(img)
+
+
+def make_spike1_sidx(game_dir, image_bin):
+    """A real FINF ``.sidx`` manifest whose ``<game_dir>/image.bin`` record
+    carries the true HMAC + MD5 of *image_bin* (same key/scheme the shipping
+    sidx module validates)."""
+    import hashlib
+    import hmac as hmac_mod
+
+    from pinball_decryptor.plugins.stern.sidx import SIDX_KEY
+
+    h = hmac_mod.new(SIDX_KEY, image_bin, hashlib.sha1).digest()
+    m = hashlib.md5(image_bin).digest()
+    paths = ("%s/image.bin" % game_dir).encode() + b"\x00"
+    payload = bytearray(57)
+    struct.pack_into("<I", payload, 4, len(image_bin))
+    struct.pack_into("<I", payload, 12, len(image_bin))
+    payload[21:41] = h
+    payload[41:57] = m
+    return (b"SIDX" + b"\x00" * 0x34
+            + b"STRS" + struct.pack("<I", len(paths)) + paths
+            + b"FINF" + struct.pack("<I", len(payload)) + bytes(payload))
+
+
+def make_spike1_card(out_path, game_dir="GAME_LE", **image_kwargs):
+    """A complete synthetic Spike 1 card: the fixed MBR/EBR signature with a
+    real ext2 filesystem on the first logical partition holding
+    ``<game_dir>/image.bin`` (from :func:`make_spike1_image_bin`) and a valid
+    ``/spk/index/<game_dir>-0_1.sidx``.  Returns ``(out_path, expected,
+    image_bin)`` — enough to run extract_all / write_image / revert_assets
+    end to end without a multi-GB fixture."""
+    image_bin, expected = make_spike1_image_bin(**image_kwargs)
+    sidx = make_spike1_sidx(game_dir, image_bin)
+    fs = make_ext2_fs({
+        "%s/image.bin" % game_dir: image_bin,
+        "%s/game" % game_dir: b"\x7fELF" + b"\x00" * 60,
+        "spk/index/%s-0_1.sidx" % game_dir: sidx,
+    })
+    make_spike1_mbr(out_path)
+    with open(out_path, "r+b") as f:
+        f.seek((16384 + 8) * 512)       # first logical partition
+        f.write(fs)
+    return out_path, expected, image_bin

@@ -443,3 +443,181 @@ class SternFlashImagePipeline(BasePipeline):
         self._set_phase(3)  # Flush
         self._done(True, "Flashed %s onto the SD card (%s)."
                    % (format_size(written), self.device_path))
+
+
+# --------------------------------------------------------------------------
+# Spike 1 (2015-2016 DMD generation)
+# --------------------------------------------------------------------------
+# Spike 1 audio needs no codec emulator (its master directory is plaintext and
+# every sound is raw PCM — see spike1.py), so these pipelines depend only on
+# numpy (for the Write's resample/level fit).
+
+class Spike1ExtractPipeline(BasePipeline):
+    """Decode every sound in a Spike 1 card image (.iso) to a per-sound WAV."""
+
+    PHASES = ("Detect", "Locate partitions", "Decode audio", "Checksums")
+
+    def __init__(self, input_path, output_dir,
+                 log_cb, phase_cb, progress_cb, done_cb,
+                 extract_categories=None, duration_names=False):
+        super().__init__(log_cb, phase_cb, progress_cb, done_cb)
+        self.input_path = input_path
+        self.output_dir = output_dir
+        self.duration_names = duration_names
+
+    def _run(self):
+        from . import spike1
+        from .formats import (detect_spike1_game, spike1_display_for_key,
+                              spike1_linux_partitions)
+
+        self._set_phase(0)  # Detect
+        self._log("Detecting Stern Spike 1 card...", "info")
+        key = detect_spike1_game(self.input_path)
+        if key is None:
+            raise PipelineError(
+                "Detect",
+                "Not a recognized Stern Spike 1 card image (need a raw "
+                ".iso/.img with the Spike 1 partition layout).\n\n"
+                "If the file was just copied here, the copy may still have "
+                "been in progress — wait for it to finish, then try again.")
+        self._log("Detected: %s"
+                  % spike1_display_for_key(key, self.input_path), "success")
+        self._check_cancel()
+
+        self._set_phase(1)  # Locate partitions
+        self._log("Reading partition table (incl. logical partitions)...",
+                  "info")
+        parts = spike1_linux_partitions(self.input_path)
+        if not parts:
+            raise PipelineError(
+                "Locate partitions",
+                "No Linux (ext) partition found on the card image.")
+        self._log("Found %d ext partition(s)." % len(parts), "info")
+        self._check_cancel()
+
+        os.makedirs(self.output_dir, exist_ok=True)
+        try:
+            result = spike1.extract_all(
+                self.input_path, parts, self.output_dir,
+                log=lambda msg, level="info": self._log(msg, level),
+                progress=self._progress,
+                cancel=lambda: self._cancelled,
+                phase=self._set_phase,
+                duration_names=self.duration_names)
+        except spike1.Spike1Error as e:
+            raise PipelineError("Decode audio", str(e))
+        self._check_cancel()
+
+        self._set_phase(3)  # Checksums
+        discard_snapshots(self.output_dir)
+        self._log("Generating checksums...", "info")
+        self._progress(0, 0, "Generating checksums...")
+        generate_checksums(self.output_dir, log_cb=self._log,
+                           progress_cb=self._progress,
+                           cancel=lambda: self._cancelled)
+        self._check_cancel()
+        self._done(True,
+                   "Extracted %d Spike 1 sound(s) (%d WAV(s), %.1f minutes "
+                   "of audio) -> %s"
+                   % (result["sounds"], result["tracks"],
+                      result["seconds"] / 60.0, self.output_dir))
+
+
+class Spike1WritePipeline(BasePipeline):
+    """Patch edited WAVs back into a copy of a Spike 1 card image.
+
+    Each changed sound is fit to its slot's exact frame count, loudness-
+    matched to the original, written into the copy as raw PCM through the ext
+    file→disk map, and the card's own /spk/index .sidx validation record for
+    image.bin is refreshed (same manifest scheme + key as Spike 2)."""
+
+    PHASES = ("Detect", "Stage", "Encode audio", "Patch image")
+
+    def __init__(self, original_path, assets_dir, output_path,
+                 log_cb, phase_cb, progress_cb, done_cb):
+        super().__init__(log_cb, phase_cb, progress_cb, done_cb)
+        self.original_path = original_path
+        self.assets_dir = assets_dir
+        self.output_path = output_path
+
+    def _run(self):
+        from . import spike1
+        from .formats import detect_spike1_game
+
+        self._set_phase(0)  # Detect
+        if detect_spike1_game(self.original_path) is None:
+            raise PipelineError(
+                "Detect", "Original is not a Spike 1 card image.")
+        self._check_cancel()
+
+        self._set_phase(1)  # Stage (diff vs baseline happens inside)
+        try:
+            result = spike1.write_image(
+                self.original_path, self.assets_dir, self.output_path,
+                log=lambda msg, level="info": self._log(msg, level),
+                progress=self._progress,
+                cancel=lambda: self._cancelled,
+                phase=self._set_phase)
+        except spike1.Spike1Cancelled:
+            self._check_cancel()   # raises PipelineError("Cancelled", ...)
+            return
+        except spike1.Spike1Error as e:
+            raise PipelineError("Patch image", str(e))
+        skipped = ""
+        if result["skipped"]:
+            skipped = " (%d skipped — see log)" % len(result["skipped"])
+        if result["audio"]:
+            summary = "Wrote %d replaced sound(s)%s to %s" \
+                % (result["audio"], skipped, self.output_path)
+        else:
+            summary = ("No changed audio found — %s is an unmodified copy "
+                       "of the original image%s" % (self.output_path, skipped))
+        self._done(True, summary)
+
+
+class Spike1RevertPipeline(BasePipeline):
+    """Re-decode pristine WAVs for specific slots straight from the source
+    Spike 1 card — the no-``.orig``-snapshot Revert fallback."""
+
+    def __init__(self, source, assets_dir, rels,
+                 log_cb, phase_cb, progress_cb, done_cb,
+                 is_device=False, partition_override=None):
+        super().__init__(log_cb, phase_cb, progress_cb, done_cb)
+        self.source = source
+        self.assets_dir = assets_dir
+        self.rels = list(rels)
+        self.is_device = is_device
+
+    def _run(self):
+        from . import spike1
+        from .formats import detect_spike1_game
+
+        self._set_phase(0)  # Read source
+        if not self.rels:
+            self._done(True, "Nothing to restore from the source card.")
+            return
+        if self.is_device:
+            raise PipelineError(
+                "Read source",
+                "Spike 1 Direct-SD isn't wired up yet — revert from the "
+                "original .iso instead.")
+        if detect_spike1_game(self.source) is None:
+            raise PipelineError(
+                "Read source",
+                "The Original image isn't a Spike 1 card, so the "
+                "pre-snapshot edits can't be restored from it. Re-extract "
+                "to reset those files.")
+        try:
+            reverted, failed = spike1.revert_assets(
+                self.source, self.assets_dir, self.rels,
+                log=lambda msg, level="info": self._log(msg, level),
+                progress=self._progress,
+                cancel=lambda: self._cancelled)
+        except spike1.Spike1Error as e:
+            raise PipelineError("Read source", str(e))
+        self._set_phase(1)  # Restore
+        msg = "Restored %d original file(s) from the card." % len(reverted)
+        if failed:
+            msg += (" %d could not be restored (re-extract to reset those)."
+                    % len(failed))
+        self._done(True, msg)

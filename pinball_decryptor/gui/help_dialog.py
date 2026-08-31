@@ -882,6 +882,32 @@ HELP_CONTENT = {
          "machines need different defaults; tick it when one preset fits "
          "everything you build."),
     ],
+    "Emulate Spike1": [
+        ("What it does",
+         "Runs a Stern Spike 1 (DMD-era) game on this PC. Spike 1 is the "
+         "2015-2016 dot-matrix generation (WrestleMania, KISS, Game of Thrones, "
+         "Ghostbusters). The game is a static ARM program, so it runs under a "
+         "patched emulator with a software model of the machine's boards. Pick a "
+         "Spike 1 card image, press Start, and it boots and shows its attract on "
+         "the dot-matrix display — title, service-menu prompt, credits, replay "
+         "score."),
+        ("It needs WSL and runs as root there",
+         "The board model needs a privileged host setup, so this tab is "
+         "Windows-only and runs the emulator inside WSL with root (which on "
+         "Windows needs no password). The first Start builds the emulator once, "
+         "which takes a few minutes; later starts are quick."),
+        ("The DMD and switch/LED windows",
+         "Two small windows open beside the game: the dot-matrix display (the "
+         "picture the machine shows) and a switch/LED matrix. The DMD shows the "
+         "running attract. The switch matrix is still being wired up — it opens, "
+         "but clicking switches does not drive the game yet (the game only reads "
+         "a board's switches once its board type is advertised, a remaining "
+         "step). Nothing you do here is written back to the card."),
+        ("If it gets stuck",
+         "\"Fix stuck state\" force-restarts WSL to clear a wedged emulator — a "
+         "frozen window or a game that will not stop. It closes all WSL sessions "
+         "and takes about 15 seconds; your card and settings are untouched."),
+    ],
     "Emulate JJP": [
         ("What it does",
          "Runs the real Jersey Jack game on this PC — in its own resizable "

@@ -1,0 +1,102 @@
+"""The Spike 1 invisible-ball keeper: title-map resolution + input packing.
+
+The daemon itself needs a live rig; these tests pin the pure pieces — how the
+keeper resolves its slots from a curated switch map (names + the
+``_trough_coils`` meta key) and that its SwitchInput blocks match the format
+the responder and viewer share.
+"""
+
+import json
+import os
+import sys
+
+_RIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "tools", "spike1_emu")
+if _RIG not in sys.path:
+    sys.path.insert(0, _RIG)
+
+import s1ball  # noqa: E402
+from pinball_decryptor.plugins.stern.spike1_emulate import SwitchInput  # noqa: E402
+
+
+def _write_map(tmp_path, extra=None):
+    m = {
+        "1,11": "START BUTTON",
+        "1,16": "LEFT COIN SLOT",
+        "9,1": "SHOOTER LANE",
+        "8,9": "TROUGH #6 (L)",
+        "8,10": "TROUGH #5 (L)",
+        "8,11": "TROUGH #4 (L)",
+        "8,12": "TROUGH #3",
+        "8,13": "TROUGH #2",
+        "8,14": "TROUGH #1 (R)",
+        "8,15": "TROUGH JAM",
+    }
+    m.update(extra or {})
+    (tmp_path / "s1switches.json").write_text(json.dumps(m), encoding="utf-8")
+
+
+def test_title_map_resolves_slots_from_names(tmp_path):
+    _write_map(tmp_path)
+    (trough, shooter, start, coin, coils, curated,
+     mapped) = s1ball.load_title_map(str(tmp_path))
+    assert trough == [(8, 14), (8, 13), (8, 12), (8, 11), (8, 10), (8, 9)]
+    assert shooter == (9, 1)
+    assert start == (1, 11)
+    assert coin == (1, 16)
+    assert coils == s1ball.TROUGH_COILS          # no meta key -> fallback
+    assert curated is False                      # meta key IS the marker
+    assert mapped is True                        # trough came from THIS map
+
+
+def test_trough_jam_is_not_a_trough_ball_slot(tmp_path):
+    _write_map(tmp_path)
+    trough, *_ = s1ball.load_title_map(str(tmp_path))
+    assert (8, 15) not in trough
+
+
+def test_trough_coils_meta_key_overrides(tmp_path):
+    _write_map(tmp_path, {"_trough_coils": [[9, 2], [4, 0]]})
+    *_, coils, curated, mapped = s1ball.load_title_map(str(tmp_path))
+    assert coils == {(9, 2), (4, 0)}
+    assert curated is True
+    assert mapped is True
+
+
+def test_missing_map_falls_back_to_got_constants(tmp_path):
+    (trough, shooter, start, coin, coils, curated,
+     mapped) = s1ball.load_title_map(str(tmp_path))
+    assert trough == s1ball.TROUGH_SLOTS
+    assert curated is False
+    assert mapped is False                       # fallback slots, NOT held
+    assert (shooter, start, coin) == (s1ball.SHOOTER, s1ball.START,
+                                      s1ball.LEFT_COIN)
+    assert coils == s1ball.TROUGH_COILS
+
+
+def test_mapped_title_preloads_trough_without_coil_reactions(tmp_path):
+    """A title whose map names its trough but has no ``_trough_coils`` yet
+    (Ghostbusters LE at the time of writing) must still hold a FULL trough —
+    otherwise the game sits in "LOCATING PINBALLS" — while its coil-serve
+    reactions stay off (GOT-fallback coil numbers mean other coils there)."""
+    _write_map(tmp_path)
+    keeper = s1ball.Keeper(str(tmp_path))
+    assert keeper.nballs == 6
+    assert keeper.balls == 6
+    assert keeper.trough_coils == set()
+    closed, _ = SwitchInput.unpack((tmp_path / "s1auto.input").read_bytes())
+    assert closed == {8 * 64 + i for i in range(9, 15)}   # the 6 trough bits
+
+
+def test_unknown_title_stays_passive(tmp_path):
+    keeper = s1ball.Keeper(str(tmp_path))                 # no map at all
+    assert keeper.nballs == 0
+    closed, _ = SwitchInput.unpack((tmp_path / "s1auto.input").read_bytes())
+    assert closed == set()
+
+
+def test_pack_input_matches_the_shared_switchinput_format():
+    blob = s1ball.pack_input([(8, 14), (1, 11)], seq=9)
+    closed, seq = SwitchInput.unpack(blob)
+    assert closed == {8 * 64 + 14, 1 * 64 + 11}
+    assert seq == 9

@@ -88,6 +88,12 @@ class Capabilities:
     # purple Sentinel USB key, which supplies the AES key its code is
     # encrypted with.  See gui/jjp_emulate_tab.py and tools/jjp_emu.
     emulate_jjp: bool = False
+    # Emulate tab for Stern **Spike 1** (the DMD era).  Its own flag for the
+    # same reason as ``emulate_jjp``: the rig is a *third* one — a static armel
+    # ELF under a patched qemu-user with a CUSE device model, root-only — and
+    # it is era-gated within the Stern plugin (Spike 2 sets ``emulate``, the
+    # Spike 1 era sets this).  See gui/spike1_emulate_tab.py and tools/spike1_emu.
+    emulate_spike1: bool = False
     # Auto-transcribe path: run faster-whisper across the extracted
     # audio files and emit a ``callouts.csv`` mapping each WAV to its
     # spoken text (non-speech samples are skipped via VAD).  Used by

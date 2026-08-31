@@ -6760,10 +6760,26 @@ These have each been violated at least once and each cost a run or a window:
       fifo+relay (PAD_AUDIO_SINK=relay — pure WSL); playaudio.sh no longer
       probes for relay/pulse sinks and padpath.sh's interop probes are
       timeout-bounded.
+      **Also during validation (3rd find): Whoa Nellie + Primus could not
+      start a game** — no curated switch map, and the broken static decode
+      gave 12 switches with a node-0 trough. FIXED: the WWE live-registry
+      walk is now a reusable tool (s1swmap.py — derives the registry base
+      from the [pc,#imm] literal in sys_node_board_device_switch_update_
+      inputs and the names from the runtime-populated switch tables, all by
+      ELF symbol, no per-title constants) and produced curated maps for
+      WN, primus AND can_crusher (David's add-on ask). All three run the
+      SAME Whoa Nellie platform: identical 58-switch databases (one trough
+      switch (10,3), score reels on node 11, START (1,11)), eject coil
+      (8,5) sweep-verified on each. All three PLAY, verified live: WN
+      scored 04 across a drain→serve cycle; primus scored 02 (needs
+      multiple coins per credit — CREDITS 1/2, use coin 4); can_crusher
+      BALL 1 with the eject answered. Maps shipped in switchmaps/;
+      test_shipped_switchmaps_resolve_for_the_keeper guards all 7.
       **Resume:** David validates the full fresh flow in a RELAUNCHED app
       (the running instance predates the app-side speaker): close app →
       reopen from the worktree → Start → sound in attract → Save now
-      mid-ball → Load → sound continues. Then check the box.
+      mid-ball → Load → sound continues. WN/primus/can_crusher now also
+      startable for his sweep. Then check the box.
       *(Filed 2026-08-31 at David's ask — "let's get save states implemented
       so it's not a dead feature" — the FIRST Spike 1 item on this queue;
       Spike 1 work previously shipped direct on main's tree, and David chose

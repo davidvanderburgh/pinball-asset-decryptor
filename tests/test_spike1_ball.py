@@ -129,3 +129,24 @@ def test_state_command_ignores_bad_json(tmp_path):
     before = (k.balls, k.in_shooter, k.door_closed)
     k.run_cmd("state this-is-not-json")
     assert (k.balls, k.in_shooter, k.door_closed) == before
+
+
+# ------------------------------------------------------------ shipped maps --
+# Every curated switchmap the rig ships must parse, name the switches the
+# keeper resolves by, and carry the sweep-verified eject coils (WN, primus
+# and can_crusher were added 2026-08-31 via the live-registry walk — all
+# three run the Whoa Nellie platform, one trough switch, eject (8,5)).
+
+def test_shipped_switchmaps_resolve_for_the_keeper():
+    import glob
+    maps = glob.glob(os.path.join(_RIG, "switchmaps", "*.json"))
+    assert len(maps) >= 7          # GOT, GBLE, KISS, WWE, WN, primus, can_crusher
+    for p in maps:
+        with open(p, encoding="utf-8") as f:
+            m = json.load(f)
+        names = [str(v).upper() for k, v in m.items()
+                 if not str(k).startswith("_")]
+        assert any(n == "START BUTTON" for n in names), p
+        assert any(n.startswith("TROUGH") for n in names), p
+        coils = m.get("_trough_coils")
+        assert coils and all(len(c) == 2 for c in coils), p

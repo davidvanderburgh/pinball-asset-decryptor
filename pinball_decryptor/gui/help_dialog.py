@@ -921,6 +921,16 @@ HELP_CONTENT = {
          "Default Settings — the operator adjustments baked into the card — is "
          "a separate tab from Emulate and works without the emulator running at "
          "all."),
+        ("Save states",
+         "Save now snapshots the running game — mid-ball, mid-mode — into a "
+         "named slot (the game freezes for a second or two while it writes, "
+         "then keeps playing). Load swaps the running game for the selected "
+         "slot, even in a later session after a full stop and restart: the "
+         "game resumes right where it was, display, switches and sound live. "
+         "Slots are per title (a slot loads only into the title it was saved "
+         "from), take roughly 15-50 MB each on the WSL disk, survive emulator "
+         "rebuilds, and stay until deleted — Rename and Delete manage them "
+         "from the same list."),
         ("If it gets stuck",
          "\"Restart WSL…\" force-restarts WSL to clear a wedged emulator — a "
          "frozen window or a game that will not stop. It closes all WSL sessions "

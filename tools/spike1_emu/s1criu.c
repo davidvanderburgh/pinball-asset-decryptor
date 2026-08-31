@@ -48,7 +48,7 @@ extern int criu_get_image_dir(void) __attribute__((weak));
 
 static struct {
 	dev_t rdev;
-	char path[64];
+	char path[288];
 } devs[MAXDEV];
 static int ndevs = -1;
 
@@ -80,7 +80,7 @@ static void scan_devs(void)
 	if (!d)
 		return;
 	while ((e = readdir(d)) && ndevs < MAXDEV) {
-		char p[80];
+		char p[280];
 		struct stat st;
 
 		if (strncmp(e->d_name, "s1", 2))

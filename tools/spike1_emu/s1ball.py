@@ -315,6 +315,7 @@ class Keeper:
                   % (self.balls, self.in_shooter, self.door_closed),
                   flush=True)
             self.write_state()
+            self.publish()
             self.write_spi(force=True)
         elif parts[0] == "plunge":
             # mirror of the Spike 2 plunge.py semantics: launch the ball in

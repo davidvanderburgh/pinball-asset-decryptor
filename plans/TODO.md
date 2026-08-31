@@ -6719,25 +6719,39 @@ These have each been violated at least once and each cost a run or a window:
       schematic. If a marker ever hovers wrong, that is where to look.
 
 - [ ] **87. Spike 1 save states: the Emulate tab's slot panel is a DEAD STUB —
-      wire it to a real checkpoint/restore for the Spike 1 rig.** `S2 D4`
-      ← WORKING ON ← IN PROGRESS
-      **Established (2026-08-31):** the whole mechanism WORKS same-session on
-      GBLE — pivoted boot (S1_PIVOT=1, emu_root.sh pivot_root branch, comm
-      stays "game", guest is pidns init + session leader), criu 4.1 dump 13MB
-      in ~1s with a 52-mount-external sweep + tty external + the new s1criu.so
-      ext-file plugin catching all 7 CUSE chr fds (dump: rdev→/dev/s1* map;
-      restore: reopen via the GUEST bind name — the hook runs inside the
-      restored mntns), restore via nsclean namespace + --root + inherit-fd
-      fd[9] pty; restored guest plays a REAL GAME (coin→START→BALL 1, serve
-      verified live). Restart loop parks on a holdoff flag during restore
-      (killing emu_root kills the CUSE shims — the EXIT trap — so never pkill
-      it for a load). cpuinfo bind is now STAGED INSIDE the rootfs
-      (.padqemu/cpuinfo) so slots don't tie to a checkout path.
-      **Resume:** cross-session restore next (stop.sh → fresh start.sh →
-      restore old slot: new pty slave, new CUSE majors, game.out size retry),
-      then qemu-rebuild-proofing (stash /.padqemu/game in the slot), then
-      productize s1savestate.sh/s1restorestate.sh + GUI slot panel wiring +
-      tests.
+      wire it to a real checkpoint/restore for the Spike 1 rig.** `S2 D2`
+      ← WORKING ON ← IN PROGRESS — **85%: the whole feature is BUILT, tested
+      (424 spike1+emulate tests green) and live-verified at script level;
+      what remains is David's click-through in the app (the acceptance says
+      "from the app") and an audio-on load listen (all runs were muted, per
+      the office rule).** D4→D2 on the way out: the mechanism is cracked and
+      proven, the remainder is one confirming run.
+      **Established (2026-08-31, all live on GBLE):** pivoted boot (S1_PIVOT=1;
+      GUI Starts always pass it), criu 4.1 + the s1criu.so ext-file plugin
+      (catches all 7 CUSE chr fds; restore reopens by the GUEST bind name —
+      the hook runs inside the restored mntns), generic mount-source
+      resolution (host mount of major:minor + root field), holdoff flag parks
+      the restart loop for a load (never pkill emu_root — its trap kills the
+      CUSE shims), slots carry the qemu copy + game ELF with sha1s
+      (rebuild-proof, reinstalled on mismatch) and the keeper's ball state
+      (fed back via s1ball's new "state" cmd — without it a mid-game load's
+      drain/plunge silently no-op). Mid-game slot survives a FULL rig
+      stop/start: BALL 1 resumed, slings/bumpers scored 9,050, drain→serve
+      loop works. s1slots.sh speaks Spike 2's pipe protocol; the tab's slot
+      manager is live (Save now/Load/Refresh/Rename/Delete + saves_mtime
+      poll); status.sh now counts the guest by comm=game (the old
+      pgrep -f qemu-arm-pad counted the wrapper pair and read a pivoted or
+      restored guest as "Not running"); stop.sh also kills by comm (a
+      restored guest's cmdline has no qemu-arm-pad and one SURVIVED a stop).
+      **Known post-load behavior, not a defect:** an unattended mid-game load
+      eventually ends itself — ball search exhausts on the untouched
+      invisible ball and the game does its orderly NVRAM-commit exit (real
+      hardware's game_monitor would relaunch; the parked loop deliberately
+      does not boot a fresh game over a loaded state). rm the holdoff file or
+      press Start for a fresh boot.
+      **Resume:** David validates in the app — Start (boots pivoted), Save
+      now mid-ball, Load, and an audio-on load with the volume knob at his
+      level. Then check the box.
       *(Filed 2026-08-31 at David's ask — "let's get save states implemented
       so it's not a dead feature" — the FIRST Spike 1 item on this queue;
       Spike 1 work previously shipped direct on main's tree, and David chose

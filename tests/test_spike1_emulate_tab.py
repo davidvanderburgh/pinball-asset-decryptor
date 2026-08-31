@@ -466,3 +466,62 @@ def test_spike1_card_restores_from_global_with_no_project(tmp_path):
     assert _restore_s1(None, {"spike1_emulate_card": "D:/cards/got.iso"}) \
         == "D:/cards/got.iso"
     assert _restore_s1(None, {}) == ""
+
+
+# -------------------------------------------------------------- save states --
+# item 87: the slot manager is live — it lists s1slots.sh's pipe protocol,
+# and Save now refuses politely when no game is running.
+
+def _inline_threads(monkeypatch):
+    """Make the panel's worker threads run inline, so a test sees the result
+    without sleeping."""
+    class _T:
+        def __init__(self, target=None, daemon=None):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread", _T)
+
+
+def test_slots_refresh_parses_the_pipe_protocol(panel, root, monkeypatch):
+    monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(spike1_emulate_tab, "rig_available", lambda: True)
+    _inline_threads(monkeypatch)
+    out = (b"root|/home/d/s1emu/saves\n"
+           b"slot|ghostbusters_le-1_17/quicksave|44362327|"
+           b"ghostbusters_le-1_17|mid-ball test |1788199042\n"
+           b"slot|GOT_LE-1_37/s2|13000000|GOT_LE-1_37||1788100000\n"
+           b"total|57362327\n"
+           b"free|100980350976\n")
+    monkeypatch.setattr(
+        spike1_emulate_tab.subprocess, "run",
+        lambda *a, **kw: SimpleNamespace(stdout=out))
+    panel._slots_refresh()
+    root.update()          # flush the after(0) apply
+    assert [r["ref"] for r in panel._slots_rows] == [
+        "ghostbusters_le-1_17/quicksave", "GOT_LE-1_37/s2"]
+    assert panel._slots_rows[0]["label"] == "mid-ball test"
+    rows = panel._slots_tree.get_children()
+    assert list(rows) == ["ghostbusters_le-1_17/quicksave", "GOT_LE-1_37/s2"]
+    assert "2 slots" in panel._slots_sum.cget("text")
+
+
+def test_save_now_refuses_without_a_running_game(panel, monkeypatch):
+    told = {}
+    monkeypatch.setattr(spike1_emulate_tab.messagebox, "showinfo",
+                        lambda *a, **kw: told.setdefault("msg", a))
+    ran = {}
+    monkeypatch.setattr(spike1_emulate_tab.subprocess, "run",
+                        lambda *a, **kw: ran.setdefault("cmd", a))
+    panel._info = {"game_procs": "0"}
+    panel._slot_save()
+    assert told and not ran     # a message, never a root shell-out
+
+
+def test_slot_size_and_date_formatting():
+    assert Spike1EmulatePanel._fmt_size("44362327") == "42.3 MB"
+    assert Spike1EmulatePanel._fmt_size("512") == "512 B"
+    assert Spike1EmulatePanel._fmt_size("junk") == "?"
+    assert Spike1EmulatePanel._fmt_when("not-a-number") == "?"

@@ -19,13 +19,17 @@ echo "distro=${WSL_DISTRO_NAME:-}"
 [ -x "$S1_WORK/s1hwshim" ] && echo "hwshim_built=1" || echo "hwshim_built=0"
 [ -f "$S1_WORK/game/game" ] && echo "game_ready=1" || echo "game_ready=0"
 
-# the emulated game (patched qemu instances)
-procs=$(pgrep -c -f "qemu-arm-pad" 2>/dev/null || echo 0)
+# the emulated game.  By COMM, not cmdline: pgrep -f qemu-arm-pad counted the
+# restart-loop wrapper pair and never the game itself (the binfmt guest's
+# cmdline is "./game"), and a PIVOTED or criu-RESTORED guest (item 87) says
+# "/.padqemu/game" — no qemu-arm-pad anywhere, so a live restored game read
+# as "Not running".  comm=game is the rig's one stable guest identity.
+procs=$(pgrep -c -x game 2>/dev/null || echo 0)
 echo "game_procs=$procs"
 if [ "$procs" != "0" ]; then
-    # uptime + CPU/RSS of the oldest qemu-arm-pad (the GUI shows these like the
-    # Spike 2 tab's "Game CPU / memory" row)
-    pid=$(pgrep -f "qemu-arm-pad" 2>/dev/null | head -1)
+    # uptime + CPU/RSS of the busiest guest (a slam-tilt restart can briefly
+    # leave two; busiest-by-CPU is the live one)
+    pid=$(ps -eo pid,comm --sort=-pcpu 2>/dev/null | awk '$2=="game"{print $1; exit}')
     if [ -n "$pid" ]; then
         secs=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')
         echo "game_uptime_s=${secs:-0}"
@@ -61,6 +65,14 @@ fi
 # byte pair in the growing capture — making the GUI flap between "Booting…" and
 # "Running".  Match the real frames instead: switch polling (continuous, so it
 # is present and stable the moment the game is scanning) OR a board-id read.
+# save-state slots: the saves dir's mtime, so the GUI re-lists only when
+# something changed (a save, a delete) instead of shelling the lister per poll.
+if [ -d "$S1_WORK/saves" ]; then
+    echo "saves_mtime=$(find "$S1_WORK/saves" -mindepth 2 -maxdepth 2 -printf '%T@\n' 2>/dev/null | sort -rn | head -1)"
+else
+    echo "saves_mtime="
+fi
+
 nbcap="$S1_WORK/ttyS4.cap"
 if [ -f "$nbcap" ]; then
     if grep -qaE $'\x02\x11|\x03\xf9' "$nbcap" 2>/dev/null; then

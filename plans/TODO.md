@@ -6718,94 +6718,6 @@ These have each been violated at least once and each cost a run or a window:
       marker pads — no measured misattribution, and the report was the
       schematic. If a marker ever hovers wrong, that is where to look.
 
-- [ ] **87. Spike 1 save states: the Emulate tab's slot panel is a DEAD STUB —
-      wire it to a real checkpoint/restore for the Spike 1 rig.** `S2 D2`
-      ← WORKING ON ← IN PROGRESS — **85%: the whole feature is BUILT, tested
-      (424 spike1+emulate tests green) and live-verified at script level;
-      what remains is David's click-through in the app (the acceptance says
-      "from the app") and an audio-on load listen (all runs were muted, per
-      the office rule).** D4→D2 on the way out: the mechanism is cracked and
-      proven, the remainder is one confirming run.
-      **Established (2026-08-31, all live on GBLE):** pivoted boot (S1_PIVOT=1;
-      GUI Starts always pass it), criu 4.1 + the s1criu.so ext-file plugin
-      (catches all 7 CUSE chr fds; restore reopens by the GUEST bind name —
-      the hook runs inside the restored mntns), generic mount-source
-      resolution (host mount of major:minor + root field), holdoff flag parks
-      the restart loop for a load (never pkill emu_root — its trap kills the
-      CUSE shims), slots carry the qemu copy + game ELF with sha1s
-      (rebuild-proof, reinstalled on mismatch) and the keeper's ball state
-      (fed back via s1ball's new "state" cmd — without it a mid-game load's
-      drain/plunge silently no-op). Mid-game slot survives a FULL rig
-      stop/start: BALL 1 resumed, slings/bumpers scored 9,050, drain→serve
-      loop works. s1slots.sh speaks Spike 2's pipe protocol; the tab's slot
-      manager is live (Save now/Load/Refresh/Rename/Delete + saves_mtime
-      poll); status.sh now counts the guest by comm=game (the old
-      pgrep -f qemu-arm-pad counted the wrapper pair and read a pivoted or
-      restored guest as "Not running"); stop.sh also kills by comm (a
-      restored guest's cmdline has no qemu-arm-pad and one SURVIVED a stop).
-      **Known post-load behavior, not a defect:** an unattended mid-game load
-      eventually ends itself — ball search exhausts on the untouched
-      invisible ball and the game does its orderly NVRAM-commit exit (real
-      hardware's game_monitor would relaunch; the parked loop deliberately
-      does not boot a fresh game over a loaded state). rm the holdoff file or
-      press Start for a fresh boot.
-      **Also fixed during David's validation (both found live):** (1) a
-      silent ball-keeper death at boot = stuck on LOCATING PINBALLS →
-      start.sh verifies the keeper launch (retry + loud failure), status.sh
-      reports keeper=, the tab names "No ball keeper". (2) fresh app + fresh
-      Start came up SILENT → the audio chain's Windows-python probe rides the
-      interop socket of start.sh's exited wsl.exe and hangs forever;
-      restructured so the APP owns the Windows speaker (padplay spawned by
-      the tab, relaunch backoff, killed at Stop) and the rig runs only
-      fifo+relay (PAD_AUDIO_SINK=relay — pure WSL); playaudio.sh no longer
-      probes for relay/pulse sinks and padpath.sh's interop probes are
-      timeout-bounded.
-      **Also during validation (3rd find): Whoa Nellie + Primus could not
-      start a game** — no curated switch map, and the broken static decode
-      gave 12 switches with a node-0 trough. FIXED: the WWE live-registry
-      walk is now a reusable tool (s1swmap.py — derives the registry base
-      from the [pc,#imm] literal in sys_node_board_device_switch_update_
-      inputs and the names from the runtime-populated switch tables, all by
-      ELF symbol, no per-title constants) and produced curated maps for
-      WN, primus AND can_crusher (David's add-on ask). All three run the
-      SAME Whoa Nellie platform: identical 58-switch databases (one trough
-      switch (10,3), score reels on node 11, START (1,11)), eject coil
-      (8,5) sweep-verified on each. All three PLAY, verified live: WN
-      scored 04 across a drain→serve cycle; primus scored 02 (needs
-      multiple coins per credit — CREDITS 1/2, use coin 4); can_crusher
-      BALL 1 with the eject answered. Maps shipped in switchmaps/;
-      test_shipped_switchmaps_resolve_for_the_keeper guards all 7.
-      **Resume:** David validates the full fresh flow in a RELAUNCHED app
-      (the running instance predates the app-side speaker): close app →
-      reopen from the worktree → Start → sound in attract → Save now
-      mid-ball → Load → sound continues. WN/primus/can_crusher now also
-      startable for his sweep. Then check the box.
-      *(Filed 2026-08-31 at David's ask — "let's get save states implemented
-      so it's not a dead feature" — the FIRST Spike 1 item on this queue;
-      Spike 1 work previously shipped direct on main's tree, and David chose
-      the /next route for this one. Filed as 86, renumbered to 87 the same
-      hour: the unmerged `item/86` branch already holds a DIFFERENT item 86 —
-      Bond's Oddjob disc, filed 3 days earlier on a pre-merge TODO — and
-      numbers are never reused, so the junior filing yielded.)* The panel shipped in v0.174.0 with the
-      same slot-manager UI as Spike 2's and nothing behind it. Spike 2's criu
-      machinery is the model (savestate.sh: slots carry their guest libs,
-      sha1-per-build stale-build refusal, `\040` mountinfo escapes — items
-      13/36a/40/42). The known Spike 1 deltas, none proven in anger: the game
-      is CHROOTED into the per-card cache rootfs, and the qemu process holds
-      ~9 CUSE char-device fds (dmd, spi0/1, adc, backlight, ttyS4, amp, i2s,
-      i2c-0) criu cannot dump natively. Plan A (MARKED AS A GUESS, untested):
-      a criu ext-file plugin — record device path+flags at dump, reopen at
-      the same fd on restore; threads blocked in CUSE reads should resume
-      via kernel syscall restart. Plan B: qemu-side fd drop/reacquire (we
-      already build qemu — patch_qemu.py has 6 patches). criu is built at
-      /var/tmp/criubuild. Deeper notes: `REMAINING item 87` in the Spike 1
-      handoff (`~/.claude/plans/spike1_play_a_game_handoff.md` — local to
-      this machine, not in the repo).
-      **Acceptance:** on a Spike 1 title, save a slot mid-game from the app,
-      stop and restart the rig, load the slot, and the game RESUMES from that
-      point — DMD live, switches drive it, audio plays — verified live on
-      the rig, the same bar item 13's Spike 2 acceptance met.
-
 ## Reference material that is NOT in this repo
 
 - **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own
@@ -7288,6 +7200,88 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **87. Spike 1 save states: the Emulate tab's slot panel is a DEAD STUB —
+      wire it to a real checkpoint/restore for the Spike 1 rig.** `S2 D2`
+      DONE 2026-08-31, `item/87` closing commit `f2b28d6`, merged at
+      David's /finish after his live validation pass (played GBLE with
+      save/load, sound, and the three new titles below).
+      **Established (2026-08-31, all live on GBLE):** pivoted boot (S1_PIVOT=1;
+      GUI Starts always pass it), criu 4.1 + the s1criu.so ext-file plugin
+      (catches all 7 CUSE chr fds; restore reopens by the GUEST bind name —
+      the hook runs inside the restored mntns), generic mount-source
+      resolution (host mount of major:minor + root field), holdoff flag parks
+      the restart loop for a load (never pkill emu_root — its trap kills the
+      CUSE shims), slots carry the qemu copy + game ELF with sha1s
+      (rebuild-proof, reinstalled on mismatch) and the keeper's ball state
+      (fed back via s1ball's new "state" cmd — without it a mid-game load's
+      drain/plunge silently no-op). Mid-game slot survives a FULL rig
+      stop/start: BALL 1 resumed, slings/bumpers scored 9,050, drain→serve
+      loop works. s1slots.sh speaks Spike 2's pipe protocol; the tab's slot
+      manager is live (Save now/Load/Refresh/Rename/Delete + saves_mtime
+      poll); status.sh now counts the guest by comm=game (the old
+      pgrep -f qemu-arm-pad counted the wrapper pair and read a pivoted or
+      restored guest as "Not running"); stop.sh also kills by comm (a
+      restored guest's cmdline has no qemu-arm-pad and one SURVIVED a stop).
+      **Known post-load behavior, not a defect:** an unattended mid-game load
+      eventually ends itself — ball search exhausts on the untouched
+      invisible ball and the game does its orderly NVRAM-commit exit (real
+      hardware's game_monitor would relaunch; the parked loop deliberately
+      does not boot a fresh game over a loaded state). rm the holdoff file or
+      press Start for a fresh boot.
+      **Also fixed during David's validation (both found live):** (1) a
+      silent ball-keeper death at boot = stuck on LOCATING PINBALLS →
+      start.sh verifies the keeper launch (retry + loud failure), status.sh
+      reports keeper=, the tab names "No ball keeper". (2) fresh app + fresh
+      Start came up SILENT → the audio chain's Windows-python probe rides the
+      interop socket of start.sh's exited wsl.exe and hangs forever;
+      restructured so the APP owns the Windows speaker (padplay spawned by
+      the tab, relaunch backoff, killed at Stop) and the rig runs only
+      fifo+relay (PAD_AUDIO_SINK=relay — pure WSL); playaudio.sh no longer
+      probes for relay/pulse sinks and padpath.sh's interop probes are
+      timeout-bounded.
+      **Also during validation (3rd find): Whoa Nellie + Primus could not
+      start a game** — no curated switch map, and the broken static decode
+      gave 12 switches with a node-0 trough. FIXED: the WWE live-registry
+      walk is now a reusable tool (s1swmap.py — derives the registry base
+      from the [pc,#imm] literal in sys_node_board_device_switch_update_
+      inputs and the names from the runtime-populated switch tables, all by
+      ELF symbol, no per-title constants) and produced curated maps for
+      WN, primus AND can_crusher (David's add-on ask). All three run the
+      SAME Whoa Nellie platform: identical 58-switch databases (one trough
+      switch (10,3), score reels on node 11, START (1,11)), eject coil
+      (8,5) sweep-verified on each. All three PLAY, verified live: WN
+      scored 04 across a drain→serve cycle; primus scored 02 (needs
+      multiple coins per credit — CREDITS 1/2, use coin 4); can_crusher
+      BALL 1 with the eject answered. Maps shipped in switchmaps/;
+      test_shipped_switchmaps_resolve_for_the_keeper guards all 7.
+      **Validated by David live (2026-08-31): fresh app + fresh Start with
+      sound, save/load in play, and WN/primus/can_crusher startable.**
+      *(Filed 2026-08-31 at David's ask — "let's get save states implemented
+      so it's not a dead feature" — the FIRST Spike 1 item on this queue;
+      Spike 1 work previously shipped direct on main's tree, and David chose
+      the /next route for this one. Filed as 86, renumbered to 87 the same
+      hour: the unmerged `item/86` branch already holds a DIFFERENT item 86 —
+      Bond's Oddjob disc, filed 3 days earlier on a pre-merge TODO — and
+      numbers are never reused, so the junior filing yielded.)* The panel shipped in v0.174.0 with the
+      same slot-manager UI as Spike 2's and nothing behind it. Spike 2's criu
+      machinery is the model (savestate.sh: slots carry their guest libs,
+      sha1-per-build stale-build refusal, `\040` mountinfo escapes — items
+      13/36a/40/42). The known Spike 1 deltas, none proven in anger: the game
+      is CHROOTED into the per-card cache rootfs, and the qemu process holds
+      ~9 CUSE char-device fds (dmd, spi0/1, adc, backlight, ttyS4, amp, i2s,
+      i2c-0) criu cannot dump natively. Plan A (MARKED AS A GUESS, untested):
+      a criu ext-file plugin — record device path+flags at dump, reopen at
+      the same fd on restore; threads blocked in CUSE reads should resume
+      via kernel syscall restart. Plan B: qemu-side fd drop/reacquire (we
+      already build qemu — patch_qemu.py has 6 patches). criu is built at
+      /var/tmp/criubuild. Deeper notes: `REMAINING item 87` in the Spike 1
+      handoff (`~/.claude/plans/spike1_play_a_game_handoff.md` — local to
+      this machine, not in the repo).
+      **Acceptance:** on a Spike 1 title, save a slot mid-game from the app,
+      stop and restart the rig, load the slot, and the game RESUMES from that
+      point — DMD live, switches drive it, audio plays — verified live on
+      the rig, the same bar item 13's Spike 2 acceptance met.
 
 - [x] **52. stranger_things wedges on LOCATING NODE BOARDS while its
       projector plays. NOT, as this item used to say, "nodes 1, 8 and 9 are

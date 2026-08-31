@@ -6718,12 +6718,15 @@ These have each been violated at least once and each cost a run or a window:
       marker pads — no measured misattribution, and the report was the
       schematic. If a marker ever hovers wrong, that is where to look.
 
-- [ ] **86. Spike 1 save states: the Emulate tab's slot panel is a DEAD STUB —
+- [ ] **87. Spike 1 save states: the Emulate tab's slot panel is a DEAD STUB —
       wire it to a real checkpoint/restore for the Spike 1 rig.** `S2 D4`
       *(Filed 2026-08-31 at David's ask — "let's get save states implemented
       so it's not a dead feature" — the FIRST Spike 1 item on this queue;
       Spike 1 work previously shipped direct on main's tree, and David chose
-      the /next route for this one.)* The panel shipped in v0.174.0 with the
+      the /next route for this one. Filed as 86, renumbered to 87 the same
+      hour: the unmerged `item/86` branch already holds a DIFFERENT item 86 —
+      Bond's Oddjob disc, filed 3 days earlier on a pre-merge TODO — and
+      numbers are never reused, so the junior filing yielded.)* The panel shipped in v0.174.0 with the
       same slot-manager UI as Spike 2's and nothing behind it. Spike 2's criu
       machinery is the model (savestate.sh: slots carry their guest libs,
       sha1-per-build stale-build refusal, `\040` mountinfo escapes — items
@@ -6735,7 +6738,7 @@ These have each been violated at least once and each cost a run or a window:
       the same fd on restore; threads blocked in CUSE reads should resume
       via kernel syscall restart. Plan B: qemu-side fd drop/reacquire (we
       already build qemu — patch_qemu.py has 6 patches). criu is built at
-      /var/tmp/criubuild. Deeper notes: `REMAINING item 86` in the Spike 1
+      /var/tmp/criubuild. Deeper notes: `REMAINING item 87` in the Spike 1
       handoff (`~/.claude/plans/spike1_play_a_game_handoff.md` — local to
       this machine, not in the repo).
       **Acceptance:** on a Spike 1 title, save a slot mid-game from the app,

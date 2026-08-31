@@ -608,6 +608,21 @@ pad_win_py_launcher() {
 # ONE PER LINE AND READ WITH `read -r`, never a `for` over a command
 # substitution: `C:\Program Files\...` is a path with a space in it, and word
 # splitting would tear in half the very install this exists to find.
+# Run a command under a 10 s bound WHERE A BOUND EXISTS. GNU timeout(1) is on
+# every WSL/Linux host — the only place the bound matters, because the hang it
+# guards (a Windows interop exec whose owning wsl.exe session already exited,
+# the 2026-08-31 silent-audio wedge) can only happen there. macOS's BSD
+# userland has no timeout(1), and prefixing it unconditionally broke the whole
+# Windows-python search on the mac CI runner (v0.175.0 was yanked for exactly
+# this) — so fall back to running unbounded where no interop boundary exists.
+pad_bounded() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 10 "$@"
+    else
+        "$@"
+    fi
+}
+
 pad_win_pythons() {
     local py raw w c
     # PAD'S OWN INTERPRETER LEADS, and on Windows the app always passes it
@@ -629,7 +644,7 @@ pad_win_pythons() {
         # hangs forever (no Windows process ever starts), and a probe that can
         # hang is a chain that can wedge before its first log line — the
         # 2026-08-31 no-sound report. 10 s is geological for `py -0p`.
-        raw=$(timeout 10 "$py" -0p 2>/dev/null </dev/null | tr -d '\r')
+        raw=$(pad_bounded "$py" -0p 2>/dev/null </dev/null | tr -d '\r')
         { printf '%s\n' "$raw" | grep '\*'
           printf '%s\n' "$raw" | grep -v '\*'; } \
             | grep -o '[A-Za-z]:\\.*$' \
@@ -689,11 +704,11 @@ pad_win_python_usable() {
 # follows ("install sounddevice") is addressed to the wrong fault.
 pad_win_python() {
     pad_win_pythons | while IFS= read -r c; do
-        # timeout: see pad_win_pythons — a dead-interop exec hangs forever,
+        # bounded: see pad_win_pythons — a dead-interop exec hangs forever,
         # and this probe is the exact line the 2026-08-31 silent-audio wedge
         # stood on for 151 s. A healthy import answers in well under 10 s.
         if pad_win_python_usable "$c" \
-           && timeout 10 "$c" -c "import sounddevice" >/dev/null 2>&1 </dev/null
+           && pad_bounded "$c" -c "import sounddevice" >/dev/null 2>&1 </dev/null
         then
             echo "$c"
             break

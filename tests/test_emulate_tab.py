@@ -2452,6 +2452,36 @@ def test_no_interpreter_at_all_is_said_rather_than_guessed(monkeypatch):
     assert emulate_tab.windows_python() is None
 
 
+def test_the_path_search_does_not_go_through_a_platform_aware_helper(
+        monkeypatch, tmp_path):
+    """shutil.which BRANCHES ON sys.platform, and its win32 branch reaches for
+    a `_winapi` that is None everywhere else - so the moment that call landed
+    in the Windows launch path, every test that walks that path by faking the
+    platform died inside the standard library on the Linux and macOS runners,
+    and the shape went unchecked on two machines out of three.  The lookup
+    walks PATH itself; the names are spelled with their extension, so there is
+    nothing else which() was doing for us."""
+    def boom(_name):
+        raise AttributeError("'NoneType' object has no attribute "
+                             "'NeedCurrentDirectoryForExePath'")
+
+    monkeypatch.setattr(emulate_tab.shutil, "which", boom)
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(emulate_tab.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(emulate_tab.sys, "executable", "")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    # Nothing on PATH is an ANSWER, not a crash.
+    assert emulate_tab.windows_python() is None
+    # ...and with the interpreter there, PATH is what finds it.
+    exe = tmp_path / "python.exe"
+    exe.write_text("")
+    assert emulate_tab.windows_python(console=True) == str(exe)
+    # Which is what makes the whole Windows launch shape reachable from any
+    # host again - the thing the fake platform is there to test.
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    assert emulate_tab.rig_cmd("watch.sh", 30)[:2] == ["wsl.exe", "-e"]
+
+
 class _FakeProc:
     """Just enough Popen for the playfield handling: alive until killed."""
 
@@ -2475,7 +2505,8 @@ def test_the_run_that_asks_gets_a_playfield_window(monkeypatch, tmp_path):
     Popen of playfield.py, with the title, the save-state flag and both paths
     the run worked out."""
     monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
-    monkeypatch.setattr(emulate_tab, "windows_python", lambda: r"C:\py\pw.exe")
+    monkeypatch.setattr(emulate_tab, "windows_python",
+                        lambda console=False: r"C:\py\pw.exe")
     seen = {}
 
     def _popen(cmd, env=None, **kw):
@@ -2504,7 +2535,8 @@ def test_a_run_without_save_states_gets_no_save_buttons(monkeypatch, tmp_path):
     """PF_STATES is watch.sh's answer, not this side's guess - a run whose
     pivot was withdrawn must not show buttons that can only fail."""
     monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
-    monkeypatch.setattr(emulate_tab, "windows_python", lambda: r"C:\py\pw.exe")
+    monkeypatch.setattr(emulate_tab, "windows_python",
+                        lambda console=False: r"C:\py\pw.exe")
     seen = {}
 
     def _popen(cmd, env=None, **kw):
@@ -2883,3 +2915,76 @@ def test_the_window_hands_the_panel_something_to_ask_with():
     assert "_resize_notebook_to_current_tab" in src_
     # ...and it must be the real method, not a name that has moved on.
     assert callable(MainWindow._resize_notebook_to_current_tab)
+
+
+# --- PAD's own Python, handed to the rig (PAD-95) ----------------------------
+#
+# The rig can only find a Python the USER installed, so a PC with none was told
+# there was no Windows Python for the sound to go through and sent to
+# python.org - with a `py` command its terminal did not recognise.  The app is
+# standing on the Windows side already and every packaged install ships an
+# embeddable CPython with pip beside it, so the app says where that is.
+
+
+def test_the_sound_bridge_asks_for_the_console_twin(monkeypatch):
+    """The playfield wants pythonw.exe (no console beside the window); the
+    sound bridge wants python.exe - it is a stdio program with the guest's PCM
+    piped into it, and python.exe is also the spelling the rig's own search
+    produces, so the path handed over and the path reported back match."""
+    monkeypatch.setattr(emulate_tab.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(emulate_tab.sys, "executable", r"C:\Py\pythonw.exe")
+    monkeypatch.setattr(emulate_tab.os.path, "isfile", lambda p: True)
+    assert emulate_tab.windows_python() == r"C:\Py\pythonw.exe"
+    assert emulate_tab.windows_python(console=True) == r"C:\Py\python.exe"
+
+
+def test_the_rig_is_handed_pads_own_python_on_windows(monkeypatch, tmp_path):
+    r"""★ PAD-95.  Two scripts need this interpreter and neither can find it:
+    setupcheck.sh reports whether this PC has a Windows sound player at all,
+    and playaudio.sh plays through one.  It rides every rig call as
+    PAD_WINPYTHON, which padpath.sh has always read first - translated to
+    /mnt/c on the way, spaces and all, because `C:\Program Files` is where it
+    lives on a default install."""
+    ours = r"C:\Program Files\PAD\python\python.exe"
+    said = "PAD_WINPYTHON=/mnt/c/Program Files/PAD/python/python.exe"
+    monkeypatch.setattr(emulate_tab, "windows_python",
+                        lambda console=False: ours)
+    cmd = _cmd_on(monkeypatch, "win32", tmp_path, "setupcheck.sh")
+    assert said in cmd, cmd
+    assert "env" in cmd, cmd
+    # A Windows path never crosses: WSL is handed the POSIX spelling.
+    assert not any("\\" in c for c in cmd), cmd
+    # The caller's own entries follow it and win any argument.
+    cmd = _cmd_on(monkeypatch, "win32", tmp_path, "watch.sh", 30,
+                  env=["PAD_CARD=/mnt/c/x.raw"])
+    assert cmd.index(said) < cmd.index("PAD_CARD=/mnt/c/x.raw"), cmd
+    # ...AND THE CHECKPOINTABLE LAUNCH SAYS IT TOO, because that one is built
+    # here rather than by rig_cmd - a run started without it is a run whose
+    # sound quietly takes the WSLg path.
+    _home(monkeypatch, "/home/somebody")
+    cmd = emulate_tab.watch_cmd(120, ["PAD_CARD=/mnt/c/x.raw"])
+    assert cmd[:3] == ["wsl.exe", "-u", "root"], cmd
+    assert said in cmd, cmd
+    assert cmd[-1] == "120", cmd
+
+
+def test_nothing_of_the_sort_off_windows(monkeypatch, tmp_path):
+    """There is no interop boundary to hand a Windows .exe across, and the
+    container forwards its own variables - so this must not appear at all."""
+    monkeypatch.setattr(emulate_tab, "windows_python",
+                        lambda console=False: r"C:\Py\python.exe")
+    for platform in ("linux", "darwin"):
+        cmd = _cmd_on(monkeypatch, platform, tmp_path, "watch.sh", 30)
+        assert not any(c.startswith("PAD_WINPYTHON") for c in cmd), (
+            platform, cmd)
+
+
+def test_no_interpreter_to_name_leaves_the_rig_as_it_was(monkeypatch,
+                                                         tmp_path):
+    """Running from a checkout with nothing to point at is not a fault: an
+    absent variable is the rig's own search, unchanged."""
+    monkeypatch.setattr(emulate_tab, "windows_python",
+                        lambda console=False: None)
+    cmd = _cmd_on(monkeypatch, "win32", tmp_path, "setupcheck.sh")
+    assert not any(c.startswith("PAD_WINPYTHON") for c in cmd), cmd
+    assert "env" not in cmd, cmd

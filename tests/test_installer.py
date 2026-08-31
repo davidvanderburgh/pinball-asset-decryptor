@@ -549,6 +549,36 @@ def test_both_installers_offer_every_emulator_package_the_tab_names():
                 f"{name} — the Emulate tab needs it.")
 
 
+def test_windows_ships_and_repairs_the_emulator_speaker():
+    """★ PAD-95 — the emulator's Windows sound player.
+
+    A WSL run serves the guest's PCM to a WINDOWS Python that opens the sound
+    device directly, because WSLg's own audio hop is measurably damaged
+    (+16 dB of error against -14.8 dB for this path).  Nothing installed the
+    one package that Python needs, so the app printed a pip command instead -
+    and the PC that reported this had no `py` to run it with and no Python of
+    its own at all.  It ships one: the bundled interpreter beside the app.
+
+    BOTH SCRIPTS, because they answer for different machines.  build.ps1 seeds
+    a FRESH install (the extras list, not requirements.txt: this is the only
+    platform that can use it); install_prerequisites.ps1 is how an EXISTING
+    install picks it up through the gear menu, which is exactly what the
+    Emulate tab's notice now points at.
+    """
+    ps1 = PS1.read_text(encoding="utf-8", errors="replace")
+    ps1_stern = ps1.split('"Stern Pinball" = @{', 1)[-1]
+    assert "sounddevice" in ps1_stern, (
+        "install_prerequisites.ps1's Stern entry never installs sounddevice - "
+        "the Emulate tab sends the user here for it.")
+    if not WINDOWS_BUILD.exists():
+        pytest.skip("build.ps1 not present in this checkout")
+    src = WINDOWS_BUILD.read_text(encoding="utf-8", errors="replace")
+    assert "sounddevice" in src, (
+        "build.ps1 must install sounddevice into the bundled Python so a "
+        "fresh Windows install has good emulator sound with nothing asked of "
+        "the user.")
+
+
 def test_stern_declares_ext4_grow_prereq_per_platform():
     """Regression guard — the blip-free WSL2 dependency was undeclared.
 

@@ -348,6 +348,13 @@ HELP_CONTENT = {
          "Right-click a slot and pick \"Show scene contents…\" to open the "
          "Scenes window on the scene that plays it, with the images, fonts "
          "and text it shares the screen with."),
+        ("Very short clips",
+         "Plenty of Spike 2 slots hold a clip well under a second — a sixth "
+         "of one Batman card's 6331 do, down to one-frame stills — so the "
+         "Length column shows those with their milliseconds (0:00.033) "
+         "instead of rounding them to 0:00, which reads as an empty slot. "
+         "The preview posters the first frame of a clip that short, "
+         "because it is the whole clip."),
     ],
     "Replace Images": [
         ("Scan and assign",
@@ -1185,7 +1192,8 @@ HELP_CONTENT = {
          "present, whether the 32-bit ARM handler is registered and whether "
          "it survives a WSL restart, who this distro logs in as, whether it "
          "can start Windows programs, whether the good sound path is "
-         "available, which display it has, and a last line saying whether "
+         "available and which Windows Python it found for it, which "
+         "display it has, and a last line saying whether "
          "this PC can run the emulator. That is the paste to send when a run "
          "goes wrong. On a Mac it answers the question a Mac has instead — "
          "there are no packages to install there and the container carries "

@@ -131,9 +131,18 @@ fi
 if [ "$SINK" = auto ]; then
     [ -n "$WINPY" ] && SINK=win || SINK=pulse
 fi
+# THE ADVICE IS ASKED OF THIS MACHINE, not written down here - PAD-95.  `py`
+# is an optional tick in the Windows installer, so a fixed line can name a
+# program the reader does not have ("py" wurde nicht als Name eines Cmdlet
+# erkannt), and the answer for a PAD install is not a command at all but its
+# own prerequisite installer.  pad_sounddevice_hint (padpath.sh) is the one
+# definition; the Emulate tab says the same thing from setupcheck.sh's facts.
+# `--user` stays part of it where a command is right: an all-users Python
+# lives under C:\Program Files, where pip cannot write without an elevated
+# terminal - it fails with WinError 5 and suggests this flag itself.
 if [ "$SINK" = win ] && [ -z "$WINPY" ]; then
     echo "[play] PAD_AUDIO_SINK=win but no Windows Python with sounddevice." >&2
-    echo "[play] install it once:  py -m pip install sounddevice" >&2
+    pad_sounddevice_hint | sed 's/^/[play]   /' >&2
     exit 1
 fi
 # Falling back rather than exiting: a degraded speaker beats a silent one, but
@@ -142,7 +151,7 @@ fi
 if [ "$SINK" = pulse ] && is_wsl && [ "${PAD_AUDIO_SINK:-auto}" = auto ]; then
     echo "[play] NOTE: no Windows Python with sounddevice, falling back to WSLg" >&2
     echo "[play] audio, which is measurably damaged. Fix with:" >&2
-    echo "[play]   py -m pip install sounddevice" >&2
+    pad_sounddevice_hint | sed 's/^/[play]   /' >&2
 fi
 
 # ---- relay sink: the macOS CONTAINER ---------------------------------------

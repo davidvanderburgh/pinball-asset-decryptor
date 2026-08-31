@@ -335,7 +335,49 @@ echo "display=$(pad_display_state)"
 # stderr during a run - which is how it has stayed missing on every fresh
 # machine. Skipped entirely off WSL, where the native path is simply correct.
 if pad_is_wsl; then
-    [ -n "$(pad_win_python)" ] && echo "winaudio=1" || echo "winaudio=0"
+    _winpy=$(pad_win_python)
+    if [ -n "$_winpy" ]; then
+        echo "winaudio=1"
+    else
+        echo "winaudio=0"
+        # NOT THE SAME QUESTION AS "is there a Python here". PAD-94: a user was
+        # told to run `py -m pip install sounddevice`, ran it, pip installed it,
+        # and this went on answering 0 - his interpreter lived in a directory
+        # the search had never looked in. The search covers it now, and the
+        # interpreter itself is reported as well, so the tab can tell "no
+        # Python on this PC" from "a Python that is missing one package" and
+        # say which. Absent = none found, in the spelling a Windows terminal
+        # uses because that is where the user is going to type it.
+        _winpy=$(pad_win_python_any)
+    fi
+    if [ -n "$_winpy" ]; then
+        _winpyw=$(pad_win "$_winpy" 2>/dev/null)
+        [ -n "$_winpyw" ] && echo "winpy=$_winpyw"
+    fi
+    # AND WHETHER THAT ONE IS PAD'S OWN - PAD-95, and it decides what the tab
+    # tells the user to DO. Every packaged Windows install ships an embeddable
+    # Python with pip at `{app}\python\python.exe`, and the app hands it to
+    # this rig as PAD_WINPYTHON, so the common machine is not "no Python
+    # anywhere" (install one, then type a pip command) but "OUR Python is
+    # missing one package" - which is a menu entry in the app itself and
+    # nothing typed at all. The reporter's PC had no `py` to type it with.
+    #
+    # ECHOED SEPARATELY rather than folded into `winpy`, because the two
+    # answer different questions and an older app reading a newer rig must be
+    # able to ignore this one and still be right.
+    if [ -n "${PAD_WINPYTHON:-}" ] && pad_win_python_usable "$PAD_WINPYTHON"
+    then
+        _padpyw=$(pad_win "$PAD_WINPYTHON" 2>/dev/null)
+        [ -n "$_padpyw" ] && echo "padpy=$_padpyw"
+    fi
 else
     echo "winaudio=1"
 fi
+
+# AND EXIT 0 DELIBERATELY, because this is the last block in the file and its
+# last test is allowed to be false: a PC with no Windows Python at all would
+# otherwise leave `[ -n "$_winpy" ]`'s failure as the script's exit status, and
+# setup_state() reads a non-zero exit as "no answer from WSL" - which would
+# throw away every fact above over a fact that was correctly reported as
+# absent.
+exit 0

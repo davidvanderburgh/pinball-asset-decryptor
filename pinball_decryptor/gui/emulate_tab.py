@@ -294,7 +294,32 @@ def playfield_launch(line):
     return out if out.get("game") else None
 
 
-def windows_python():
+def _which_on_path(name):
+    """``shutil.which``, minus its dependence on ``sys.platform``.
+
+    Same reason as :func:`windows_python`'s ntpath note: this function is
+    reached from a Linux and a macOS CI runner, by tests that fake
+    ``sys.platform`` to walk the Windows branch.  ``shutil.which`` answers a
+    faked ``"win32"`` by dereferencing ``_winapi`` — which is ``None`` off
+    Windows — and raises ``AttributeError`` from inside the standard library,
+    so the whole Windows launch shape went untested on two of the three
+    runners the moment this call appeared in it.
+
+    Every name asked for here is already spelled with its extension, so
+    PATHEXT never comes into it and a plain walk of PATH is what
+    ``shutil.which`` would have done anyway.  Nothing changes on a real
+    Windows box.
+    """
+    for d in (os.environ.get("PATH") or "").split(os.pathsep):
+        if not d:
+            continue
+        cand = os.path.join(d, name)
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
+def windows_python(console=False):
     """The interpreter to run ``playfield.py`` with, on Windows.
 
     ``sys.executable`` IS THE ANSWER AND IS ALSO A TRAP, so it is not used
@@ -308,6 +333,12 @@ def windows_python():
     beside the playfield), accept the running interpreter itself, and only
     then look for a Python on PATH.  None when there is nothing to run it
     with, and the caller says so rather than launching something wrong.
+
+    ``console`` asks for ``python.exe`` instead, and the SOUND BRIDGE is why
+    (PAD-95).  That one is a stdio program - WSL pipes the guest's PCM into it
+    - and ``python.exe`` is also the spelling every other candidate in the
+    rig's own search carries (``py -0p`` lists python.exe), so the path this
+    hands the rig and the path the rig reports back are the same string.
     """
     # ntpath, NOT os.path, for the path arithmetic: this function reasons
     # about WINDOWS paths by contract (its one caller returns early off
@@ -315,23 +346,49 @@ def windows_python():
     # where dirname(r"C:\Py\python.exe") is "" because a backslash is not a
     # separator there.  On Windows ntpath IS os.path, so this changes nothing
     # where the code runs and unbreaks the test everywhere it is tested.
+    first, second = (("python.exe", "pythonw.exe") if console else
+                     ("pythonw.exe", "python.exe"))
     cands = []
     exe = sys.executable or ""
     if exe and not getattr(sys, "frozen", False):
         base = ntpath.dirname(exe)
-        cands += [ntpath.join(base, "pythonw.exe"), exe]
+        cands += [ntpath.join(base, first), exe]
     elif exe:
         # Frozen: the bundled interpreter sits in `python\` beside the app.
-        cands.append(ntpath.join(ntpath.dirname(exe), "python",
-                                 "pythonw.exe"))
-    for name in ("pythonw.exe", "python.exe"):
-        found = shutil.which(name)
+        cands.append(ntpath.join(ntpath.dirname(exe), "python", first))
+    for name in (first, second):
+        found = _which_on_path(name)
         if found:
             cands.append(found)
     for c in cands:
         if c and os.path.isfile(c):
             return c
     return None
+
+
+def rig_win_python_env():
+    """``("PAD_WINPYTHON=/mnt/c/…",)`` — PAD's own Python, for the rig.
+
+    THE RIG CANNOT FIND THIS ONE BY ITSELF, and PAD-95 is what that costs.  It
+    hunts for a Python the USER installed (the ``py`` launcher's list, then a
+    few known directories); a PC with none is told there is no Windows Python
+    for the sound to go through and sent to python.org — while a perfectly
+    good interpreter sits in the same folder as the app printing the message.
+    Every packaged Windows install ships one: ``{app}\\python\\python.exe``,
+    an embeddable CPython with pip, which WSL runs straight off ``/mnt/c``
+    like any other .exe.
+
+    So the app says where it is, on every rig call.  ``PAD_WINPYTHON`` is the
+    override ``padpath.sh`` has always read first, so nothing in the rig had to
+    learn a new fact — and a hand-run script still gets the old search.
+
+    Empty off Windows, and empty when there is nothing to name: an absent
+    variable leaves the rig exactly as it was.
+    """
+    if sys.platform != "win32":
+        return ()
+    exe = windows_python(console=True)
+    return ("PAD_WINPYTHON=" + _wsl_path(exe),) if exe else ()
 
 
 def rig_dir():
@@ -647,6 +704,12 @@ def rig_cmd(script, *args, env=()):
     if sys.platform == "win32":
         head = ["wsl.exe", "-e"]
         path = "%s/%s" % (_wsl_path(rig_dir()), script)
+        # PAD'S OWN PYTHON RIDES ALONG ON EVERY CALL, because two different
+        # scripts need it and neither can find it: setupcheck.sh reports
+        # whether this PC has a Windows sound player, playaudio.sh uses one.
+        # Cheap (two path lookups) and additive - the caller's own entries
+        # follow it and win any argument.
+        env = list(rig_win_python_env()) + list(env)
     else:
         head = []
         path = os.path.join(rig_dir(), script)
@@ -752,8 +815,13 @@ def watch_cmd(minutes, env, savestates=True):
     if savestates and sys.platform == "win32":
         home = wsl_home()
         if home:
+            # PAD_WINPYTHON too, and this branch has to say it itself: the
+            # checkpointable launch is built here rather than by rig_cmd, and
+            # a run started without it is a run whose sound quietly takes the
+            # WSLg path (PAD-95).
             return (["wsl.exe", "-u", "root", "-e", "env",
-                     "HOME=" + home, "PAD_PIVOT=1"] + list(env)
+                     "HOME=" + home, "PAD_PIVOT=1"]
+                    + list(rig_win_python_env()) + list(env)
                     + ["bash", "%s/watch.sh" % _wsl_path(rig_dir()),
                        str(minutes)])
     return rig_cmd("watch.sh", minutes, env=env)
@@ -1100,18 +1168,68 @@ def setup_env_faults(facts):
         out.append((
             "This WSL cannot start Windows programs, so the playfield window "
             "has to be opened from here and the sound takes its poorer route.",
-            "Usually systemd dropping the interop registration at boot; "
-            "`wsl --update` in a Windows terminal is the cure."))
+            "Usually systemd dropping the interop registration at boot. In a "
+            "Windows terminal:\n     wsl --update"))
     elif facts.get("winaudio") == "0":
         # ONLY WHEN INTEROP WORKS.  Every candidate interpreter is a Windows
         # .exe, so a distro that cannot start Windows programs answers "no
         # Windows Python" however many are installed - and telling that user to
         # install one more is advice addressed to the wrong fault.  It was in a
         # reply draft on 2026-08-12 before this branch existed.
-        out.append((
-            "No Windows Python with sounddevice, so the sound goes through "
-            "WSLg's audio, which is measurably damaged.",
-            "`py -m pip install sounddevice` in a Windows terminal, once."))
+        #
+        # ...AND WHICH OF THE TWO FAULTS IT IS (PAD-94).  "No Windows Python
+        # with sounddevice" describes two machines at once - one with no
+        # Python on it at all, one with a Python that is missing a package -
+        # and the user who reported this had the second.  He ran the command,
+        # pip installed it, and the tab went on saying no, because the rig's
+        # search had never looked in the directory his interpreter was in
+        # (pad_win_pythons, which asks the `py` launcher now).  This NAMES what
+        # that search found, so the tab and the machine cannot disagree in
+        # silence again.
+        #
+        # ...AND WHOSE PYTHON IT IS (PAD-95).  The reporter ran the command
+        # this said and his terminal answered that `py` is not a program on
+        # his PC - it is an optional tick in the Windows installer, and he had
+        # never installed a Python at all.  Meanwhile PAD ships one: every
+        # packaged Windows install carries an embeddable CPython with pip
+        # beside the app, which is the interpreter the rig is now handed
+        # (rig_win_python_env) and the one this normally names.  When it is
+        # ours the answer is a menu entry in this very app - no terminal, no
+        # python.org, nothing typed - so say that instead of a command.
+        where = facts.get("winpy", "").strip()
+        ours = facts.get("padpy", "").strip()
+        if where and where.lower() == ours.lower():
+            out.append((
+                "PAD's own Python has no sounddevice, so the sound goes "
+                "through WSLg's audio, which is measurably damaged.",
+                "Nothing to type. Open the gear menu (top right), "
+                "Prerequisites, “Install / repair prerequisites…”, and "
+                "tick Stern Pinball."))
+        elif where:
+            # A PYTHON OF THE USER'S OWN, AND ITS PATH IS NOT A COMMAND.
+            # PowerShell reads a quoted path in the first word as a STRING and
+            # prints it, and the paths that need quoting are exactly the
+            # `C:\Program Files` ones this ticket's predecessor went looking
+            # for.  cd there and run it from the folder: two lines that mean
+            # the same thing in PowerShell and in cmd.  (Same class of trap as
+            # PAD-94's backticks: what is on this label is what gets pasted.)
+            folder, sep, exe = where.rpartition("\\")
+            said = ("     cd \"%s\"\n     .\\%s" % (folder, exe) if sep
+                    else "     %s" % where)
+            out.append((
+                "The Windows Python at %s has no sounddevice, so the sound "
+                "goes through WSLg's audio, which is measurably damaged."
+                % where,
+                "In a Windows terminal, once:\n"
+                "%s -m pip install --user sounddevice" % said))
+        else:
+            out.append((
+                "There is no Windows Python for the sound to go through, so "
+                "it takes WSLg's audio instead, which is measurably damaged.",
+                "Install Python for Windows from python.org, ticking "
+                "“Add python.exe to PATH”, then in a Windows "
+                "terminal, once:\n"
+                "     python -m pip install --user sounddevice"))
     return out
 
 
@@ -1150,8 +1268,30 @@ def setup_report(facts):
                         if facts.get("user") == "root" else ""))
         lines.append("  can start Windows programs: "
                      + yes_no("interop", "yes", "NO"))
-        lines.append("  Windows sound player: "
-                     + yes_no("winaudio", "found", "not found"))
+        # NAMED, not just "found", for the reason the Mac's report names its
+        # docker: this is the paste that settles a disagreement between the
+        # tab and the machine, and PAD-94's user could not tell from any line
+        # of it whether the interpreter he had just installed into was the one
+        # being looked at.
+        winpy = facts.get("winpy", "").strip()
+        # AND WHETHER IT IS OURS (PAD-95), because that is the difference
+        # between an answer the user types and an answer he presses: PAD's own
+        # bundled interpreter is repaired by its own prerequisite installer,
+        # anyone else's by a pip command.  A paste that cannot tell the two
+        # apart cannot settle which was needed.
+        ours = facts.get("padpy", "").strip()
+        whose = (" (PAD's own)" if winpy and winpy.lower() == ours.lower()
+                 else "")
+        if facts.get("winaudio") == "1":
+            said = "found" + (" — %s%s" % (winpy, whose) if winpy else "")
+        elif facts.get("winaudio") == "0":
+            said = ("%s%s, but it has no sounddevice" % (winpy, whose) if winpy
+                    else "no Windows Python that WSL can see")
+        else:
+            said = "unknown"
+        lines.append("  Windows sound player: " + said)
+        if ours and not whose:
+            lines.append("  PAD's own Python: %s" % ours)
     lines.append("  display: %s" % facts.get("display", "unknown"))
     if facts.get("distro"):
         lines.append("  distro: %s" % facts["distro"])

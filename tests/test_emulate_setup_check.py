@@ -362,3 +362,379 @@ def test_setupcheck_still_parses_as_key_value():
     out = subprocess.run(["bash", "-n"], input=src,
                          capture_output=True, timeout=60)
     assert out.returncode == 0, out.stderr.decode("utf-8", "replace")
+
+
+# --------------------------------------------------------------------------
+# PAD-94: the advice and the check were about two different sets of Pythons
+# --------------------------------------------------------------------------
+
+def test_the_sound_notice_says_which_of_the_two_faults_it_is():
+    """★ PAD-94.  "No Windows Python with sounddevice" describes two machines
+    at once - one with no Python at all, one with a Python that is missing a
+    package - and the user who reported this had the second.  He ran the
+    command the tab gave him, pip installed it, and the tab went on saying the
+    same thing, because the search had never looked in the directory his
+    interpreter was in.  Naming what was found is what makes the two visibly
+    different."""
+    got = setup_notice(facts(winaudio="0",
+                             winpy=r"C:\Program Files\Python313\python.exe"),
+                       can_fix=True)
+    assert r"C:\Program Files\Python313\python.exe" in got, got
+    assert "no sounddevice" in got, got
+    assert "pip install" in got, got
+    # Nothing found is the OTHER machine, and pip cannot help it.
+    none = setup_notice(facts(winaudio="0"), can_fix=True)
+    assert "no Windows Python" in none, none
+    assert "python.org" in none, none
+    # ...and a machine with the good path says neither thing.
+    assert setup_env_faults(
+        facts(winaudio="1", winpy=r"C:\Python313\python.exe")) == []
+
+
+def test_no_command_in_the_notice_is_wrapped_in_backticks():
+    """★ PAD-94, the second half of it.  This notice is a Tk label, not
+    markdown: whatever is in the string is what the user sees and copies.  The
+    advice was a command wrapped in them, and a user copies a line whole:
+    pasted into PowerShell the trailing backtick is a line continuation, so
+    the terminal sits at its >> prompt, and cmd answers that the first word
+    is not a recognized command.
+    "If I type it in the terminal, it don't work."
+
+    Every other command in this notice is already on its own indented line
+    (`wsl --install -d …`), which is the shape that survives a paste.
+    """
+    said = []
+    for bad in (facts(winaudio="0"), facts(interop="0"), facts(user="root"),
+                facts(display="none"),
+                facts(winaudio="0", winpy=r"C:\Python313\python.exe")):
+        said.append(setup_notice(bad, can_fix=True))
+        said.extend(w + " " + c for w, c in setup_env_faults(bad))
+    for text in said:
+        assert "`" not in text, text
+
+
+def test_the_report_names_the_interpreter_it_found():
+    """The same rule the Mac's docker line follows (PAD-74): this is the paste
+    that settles a disagreement between the tab and the machine, so "found" on
+    its own is not enough - which one, and where."""
+    lines = " ".join(setup_report(facts(winaudio="1",
+                                        winpy=r"C:\Python313\python.exe")))
+    assert r"C:\Python313\python.exe" in lines, lines
+    lines = " ".join(setup_report(
+        facts(winaudio="0", winpy=r"C:\Program Files\Python313\python.exe")))
+    assert "no sounddevice" in lines, lines
+    assert r"C:\Program Files\Python313\python.exe" in lines, lines
+    lines = " ".join(setup_report(facts(winaudio="0")))
+    assert "no Windows Python" in lines, lines
+    # An older rig reports neither, and must not be accused of either.
+    old = facts()
+    del old["winaudio"]
+    lines = " ".join(setup_report(old))
+    assert "Windows sound player: unknown" in lines, lines
+
+
+@pytest.mark.skipif(not os.path.isdir(RIG), reason="rig not present")
+def test_setupcheck_reports_the_interpreter_as_well_as_the_verdict():
+    with open(os.path.join(RIG, "setupcheck.sh"), encoding="utf8") as fh:
+        src = fh.read()
+    assert '"winpy=' in src, "setupcheck.sh no longer reports winpy"
+    assert "pad_win_python_any" in src, "the second question is not asked"
+    # A PC with no Windows Python leaves the last test in the file false, and
+    # a non-zero exit makes setup_state() throw away every fact above it.
+    assert src.rstrip().endswith("exit 0"), (
+        "the fact printer can exit non-zero")
+
+
+@pytest.mark.skipif(not (os.path.isdir(RIG) and HAS_BASH),
+                    reason="rig or working bash not present")
+def test_the_windows_python_search_asks_the_launcher_it_recommends():
+    r"""★ PAD-94, the fault itself.
+
+    The tab said "run `py -m pip install sounddevice`" and then looked for the
+    result in two hard-coded directories, neither of which was where `py`
+    lives on the reporter's machine: an all-users install writes
+    ``C:\Program Files\Python313``, and nothing in this rig had ever looked
+    there.  So the advice worked, the check could not see it, and the message
+    never changed.  Asking the launcher makes the set we check and the set the
+    advice changes the same set.
+
+    THE SCRIPT IS FED ON STDIN, whole, for the reason
+    test_setupcheck_still_parses_as_key_value gives: `bash` is git-bash on one
+    Windows host and the WSL launcher on the next, and only one of them can
+    read `C:\...\padpath.sh` as a path.  The fakes are built by the script
+    itself, in its own mktemp, so nothing crosses that boundary either.
+    """
+    with open(os.path.join(RIG, "padpath.sh"), encoding="utf8") as fh:
+        src = fh.read()
+    harness = r"""
+tmp=$(mktemp -d) || exit 1
+cat > "$tmp/pylauncher" <<'LAUNCH'
+#!/bin/sh
+# `py -0p` as a real launcher prints it: CRLF, a tag column, the default
+# starred, and one path with a space in it.
+[ "$1" = "-0p" ] || exit 1
+printf -- '-V:3.13          C:\\Users\\ralf'
+printf -- '\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\r\n'
+printf -- '-V:3.12 *        C:\\Program Files\\Python312\\python.exe\r\n'
+LAUNCH
+cat > "$tmp/wslpath" <<'WSLP'
+#!/bin/sh
+# -u only: C:\a\b -> /mnt/c/a/b, which is all pad_win_pythons asks of it.
+d=$(printf '%s' "${2%%:*}" | tr 'A-Z' 'a-z')
+r=$(printf '%s' "${2#*:}" | tr '\\' '/')
+printf '/mnt/%s%s\n' "$d" "$r"
+WSLP
+chmod +x "$tmp/pylauncher" "$tmp/wslpath"
+echo "--- asked"
+PATH="$tmp:$PATH" PAD_WINPY_LAUNCHER="$tmp/pylauncher" pad_win_pythons
+echo "--- fallback"
+PAD_WINPY_LAUNCHER=/nonexistent pad_win_pythons
+echo "--- usable"
+: > "$tmp/store.exe"
+pad_win_python_usable "$tmp/store.exe" && echo "EMPTY IS RUNNABLE"
+pad_win_python_usable "$tmp/wslpath" && echo "real one is runnable"
+"""
+    out = subprocess.run(["bash", "-s"], input=(src + harness).encode("utf-8"),
+                         capture_output=True, timeout=120)
+    said = out.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+    assert out.returncode == 0, out.stderr.decode("utf-8", "replace")
+    # Every marker, before any split: a probe that runs a WINDOWS child
+    # can swallow this script's own stdin (it is fed on stdin), and the
+    # symptom is simply that the rest of the harness never runs.
+    assert "--- usable" in said, said
+    asked, rest = said.split("--- fallback", 1)
+    fallback, usable = rest.split("--- usable", 1)
+    asked = [ln for ln in asked.splitlines() if ln.startswith("/")]
+    # THE DEFAULT LEADS.  `py -m pip install` installs into the starred one, so
+    # it has to be the first thing checked, or the advice can fix a machine the
+    # check goes on failing.
+    assert asked[0] == "/mnt/c/Program Files/Python312/python.exe", asked
+    assert ("/mnt/c/Users/ralf/AppData/Local/Programs/Python/Python313"
+            "/python.exe") in asked, asked
+    # ...and the space in "Program Files" arrives whole rather than as two
+    # candidates, which is the whole reason these are read a line at a time.
+    assert not any(ln == "/mnt/c/Program" for ln in asked), asked
+    # With no launcher, the directories are still searched - and now include
+    # the one an all-users installer writes to.
+    assert any(ln.startswith("/mnt/c/Program Files/Python3")
+               for ln in fallback.splitlines()), fallback
+    assert any(ln.startswith("/mnt/c/Python3")
+               for ln in fallback.splitlines()), fallback
+    # A Store install's zero-byte app-execution alias is executable to every
+    # test /mnt/c can make and is not a program.
+    assert "EMPTY IS RUNNABLE" not in usable, usable
+    assert "real one is runnable" in usable, usable
+
+
+# --------------------------------------------------------------------------
+# PAD-95: the advice named a program the machine did not have, and PAD was
+# shipping the Python it was telling the user to go and install
+# --------------------------------------------------------------------------
+
+#: What the Windows installer puts beside the app, on every packaged install.
+APP_PY = r"C:\Program Files\Pinball Asset Decryptor\python\python.exe"
+
+
+def test_when_the_python_is_ours_the_answer_is_a_menu_not_a_command():
+    """★ PAD-95.  The reporter ran what the tab told him to and his terminal
+    answered
+
+        "py" wurde nicht als Name eines Cmdlet ... erkannt
+
+    - the launcher is an OPTIONAL tick in the Windows installer and he had
+    never installed a Python at all.  Meanwhile every packaged install ships
+    one: an embeddable CPython with pip, beside the app.  When that is the
+    interpreter missing the package there is nothing to type, so the notice
+    must not hand him a command line for it - the app's own prerequisite
+    installer is the whole answer.
+    """
+    got = setup_notice(facts(winaudio="0", winpy=APP_PY, padpy=APP_PY),
+                       can_fix=True)
+    assert "PAD's own Python" in got, got
+    assert "Install / repair prerequisites" in got, got
+    assert "Stern Pinball" in got, got
+    # Not one word of the old advice, either half of it.
+    assert "py -m pip" not in got, got
+    assert "python.org" not in got, got
+
+
+def test_a_python_of_the_users_own_is_named_and_paste_safe():
+    """The other machine, and its path is not a command.
+
+    PowerShell reads a quoted path in the first word as a STRING - it prints
+    it and runs nothing - and the paths that need the quotes are exactly the
+    ``C:\\Program Files`` ones PAD-94 went looking for.  ``cd`` there and run
+    ``.\\python.exe``: two lines that mean the same thing in PowerShell and in
+    cmd.  Same class of trap as PAD-94's backticks - what is on this label is
+    what gets pasted.
+    """
+    theirs = r"C:\Program Files\Python313\python.exe"
+    got = setup_notice(facts(winaudio="0", winpy=theirs, padpy=APP_PY),
+                       can_fix=True)
+    assert theirs in got, got
+    assert 'cd "C:\\Program Files\\Python313"' in got, got
+    assert ".\\python.exe -m pip install --user sounddevice" in got, got
+    assert "py -m pip" not in got, got
+    # A quoted path is never the first word of a line here.
+    for line in got.splitlines():
+        assert not line.strip().startswith('"'), got
+
+
+def test_no_python_anywhere_still_never_says_py():
+    """The launcher cannot be assumed even on a PC that installs Python next:
+    it is a checkbox, and so is PATH.  Name the checkbox and give the command
+    that ticking it produces."""
+    got = setup_notice(facts(winaudio="0"), can_fix=True)
+    assert "python.org" in got, got
+    assert "python.exe to PATH" in got, got
+    assert "python -m pip install --user sounddevice" in got, got
+    assert "py -m pip" not in got, got
+
+
+def test_the_report_says_whose_python_it_is():
+    """The paste that settles a disagreement has to distinguish the two, since
+    one is repaired by pressing something in this app and the other by typing
+    something in a terminal."""
+    lines = " ".join(setup_report(facts(winaudio="0", winpy=APP_PY,
+                                        padpy=APP_PY)))
+    assert "(PAD's own)" in lines, lines
+    assert "no sounddevice" in lines, lines
+    # A DIFFERENT interpreter: name ours as well, so the paste says both.
+    theirs = r"C:\Python313\python.exe"
+    lines = " ".join(setup_report(facts(winaudio="1", winpy=theirs,
+                                        padpy=APP_PY)))
+    assert theirs in lines, lines
+    assert "PAD's own Python: " + APP_PY in lines, lines
+    assert "(PAD's own)" not in lines, lines
+    # An older rig reports no padpy at all and must not be second-guessed.
+    lines = " ".join(setup_report(facts(winaudio="0", winpy=theirs)))
+    assert "(PAD's own)" not in lines, lines
+    assert "PAD's own Python:" not in lines, lines
+
+
+def test_the_new_notices_carry_no_backtick_either():
+    """PAD-94's rule, over PAD-95's strings: this is a Tk label, so whatever is
+    in it is what the user copies."""
+    for bad in (facts(winaudio="0", winpy=APP_PY, padpy=APP_PY),
+                facts(winaudio="0", winpy=r"C:\Program Files\Py\python.exe",
+                      padpy=APP_PY),
+                facts(winaudio="0", padpy=APP_PY)):
+        said = [setup_notice(bad, can_fix=True)]
+        said.extend(w + " " + c for w, c in setup_env_faults(bad))
+        for text in said:
+            assert "`" not in text, text
+
+
+@pytest.mark.skipif(not os.path.isdir(RIG), reason="rig not present")
+def test_setupcheck_reports_which_python_is_pads_own():
+    with open(os.path.join(RIG, "setupcheck.sh"), encoding="utf8") as fh:
+        src = fh.read()
+    assert '"padpy=' in src, "setupcheck.sh no longer reports padpy"
+    assert "PAD_WINPYTHON" in src, "the app's own interpreter is not asked for"
+    assert src.rstrip().endswith("exit 0"), (
+        "the fact printer can exit non-zero")
+
+
+@pytest.mark.skipif(not os.path.isdir(RIG), reason="rig not present")
+def test_the_run_asks_for_its_advice_rather_than_carrying_a_copy():
+    """playaudio.sh printed the same `py` line the tab did, so fixing one
+    would have left the other saying it during every run."""
+    with open(os.path.join(RIG, "playaudio.sh"), encoding="utf8") as fh:
+        play = fh.read()
+    assert "pad_sounddevice_hint" in play
+    for line in play.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        assert "py -m pip" not in line, line
+
+
+@pytest.mark.skipif(not (os.path.isdir(RIG) and HAS_BASH),
+                    reason="rig or working bash not present")
+def test_the_search_leads_with_pads_own_python_and_asks_path_too():
+    r"""★ PAD-95, the search half.
+
+    Two things the rig could not find before: the interpreter PAD ships (it
+    only ever looked for one the USER had installed) and one installed without
+    the ``py`` launcher (it asked the launcher and three fixed directories).
+    The reporter had no launcher, which is what made the advice unrunnable and
+    the check blind at the same time.
+
+    Fed on stdin, whole, for the reason the other bash tests here give: `bash`
+    is git-bash on one Windows host and the WSL launcher on the next.
+    """
+    with open(os.path.join(RIG, "padpath.sh"), encoding="utf8") as fh:
+        src = fh.read()
+    harness = r"""
+tmp=$(mktemp -d) || exit 1
+printf '#!/bin/sh\nexit 0\n' > "$tmp/python.exe"
+printf '#!/bin/sh\nexit 0\n' > "$tmp/ours.exe"
+chmod +x "$tmp/python.exe" "$tmp/ours.exe"
+export PATH="$tmp:$PATH"
+echo "--- order"
+PAD_WINPY_LAUNCHER=/nonexistent PAD_WINPYTHON="$tmp/ours.exe" pad_win_pythons
+"""
+    out = subprocess.run(["bash", "-s"], input=(src + harness).encode("utf-8"),
+                         capture_output=True, timeout=120)
+    said = out.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+    assert out.returncode == 0, out.stderr.decode("utf-8", "replace")
+    assert "--- order" in said, said
+    order = [ln for ln in said.split("--- order", 1)[1].splitlines() if ln]
+    # OURS FIRST, because it is the one whose missing package the app can fix
+    # by itself - and because a machine with no Python of its own has to stop
+    # being told there is no Windows Python at all.
+    assert order[0].endswith("/ours.exe"), order
+    # ...and a python.exe on PATH counts, launcher or no launcher.
+    assert any(ln.endswith("/python.exe") and "/tmp" in ln
+               for ln in order), order
+
+
+@pytest.mark.skipif(not (os.path.isdir(RIG) and HAS_BASH),
+                    reason="rig or working bash not present")
+def test_the_rigs_own_advice_fits_the_machine_it_is_printed_on():
+    """One definition of what to do about a missing sounddevice, shared by the
+    run's log and (through setupcheck.sh's facts) the tab - and none of its
+    three answers is `py`."""
+    with open(os.path.join(RIG, "padpath.sh"), encoding="utf8") as fh:
+        src = fh.read()
+    harness = r"""
+tmp=$(mktemp -d) || exit 1
+cat > "$tmp/wslpath" <<'WSLP'
+#!/bin/sh
+# -w only: every candidate here is fake, so answer with the layout that
+# carries the space - the one a full-path command cannot survive.
+printf 'C:\\Program Files\\Python313\\python.exe\n'
+WSLP
+printf '#!/bin/sh\nexit 0\n' > "$tmp/ours.exe"
+printf '#!/bin/sh\nexit 0\n' > "$tmp/theirs.exe"
+chmod +x "$tmp/wslpath" "$tmp/ours.exe" "$tmp/theirs.exe"
+export PATH="$tmp:$PATH"
+echo "--- none"
+pad_win_pythons() { :; }
+PAD_WINPYTHON="$tmp/ours.exe" pad_sounddevice_hint
+echo "--- theirs"
+pad_win_pythons() { printf '%s\n' "$tmp/theirs.exe"; }
+PAD_WINPYTHON="$tmp/ours.exe" pad_sounddevice_hint
+echo "--- ours"
+pad_win_pythons() { printf '%s\n' "$tmp/ours.exe"; }
+PAD_WINPYTHON="$tmp/ours.exe" pad_sounddevice_hint
+rm -rf "$tmp"
+"""
+    out = subprocess.run(["bash", "-s"], input=(src + harness).encode("utf-8"),
+                         capture_output=True, timeout=120)
+    said = out.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+    assert out.returncode == 0, out.stderr.decode("utf-8", "replace")
+    assert "--- ours" in said, said
+    none, rest = said.split("--- theirs", 1)
+    theirs, ours = rest.split("--- ours", 1)
+    # No Python at all: name the checkbox, not the launcher.
+    assert "python.org" in none, none
+    assert "python -m pip install --user sounddevice" in none, none
+    # One of the user's: cd to it and run it from there, so a path with a
+    # space in it is still a command in PowerShell.
+    assert 'cd "C:\\Program Files\\Python313"' in theirs, theirs
+    assert ".\\python.exe -m pip install --user sounddevice" in theirs, theirs
+    # Ours: nothing to type at all.
+    assert "Install / repair prerequisites" in ours, ours
+    assert "Stern Pinball" in ours, ours
+    for block in (none, theirs, ours):
+        assert "py -m pip" not in block, block

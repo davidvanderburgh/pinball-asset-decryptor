@@ -82,13 +82,59 @@ sleep 1
 cleanup() { kill "${PIDS[@]}" 2>/dev/null; }
 trap cleanup EXIT
 
-# ---- 3. namespace + chroot + run ----
-export R G GAME_NAME S1_CPUINFO S1_QEMU S1_STRACE S1_EE_FILE S1_RUNS S1_I2C_LOG S1_GDB S1_TTYS4_CAP
-unshare -m -p -f bash -c '
-  set -u
+# ---- 3. namespace + chroot (or pivot) + run ----
+# S1_PIVOT=1 boots a CHECKPOINTABLE guest (item 87, save states) — the Spike 2
+# PAD_PIVOT recipe verbatim: criu CANNOT dump a chroot'd task ("The root task
+# has another root than mntns", criuladder.sh rung), so under S1_PIVOT the
+# guest gets its own root via pivot_root inside the same mount+pid namespace,
+# and qemu is exec'd EXPLICITLY from a copy INSIDE the rootfs — after the pivot
+# detaches the host tree, the binfmt interpreter's host path could not be
+# resolved for criu's mapping walk.  The copy's basename is "game" so comm
+# stays "game" (status.sh, s1ball.py and alive-checks all identify the guest by
+# comm); the real ARM ELF is its argument.  Our qemu is static-pie, so no host
+# libraries leak into its mappings (checked: `file` says statically linked).
+# Fully OPT-IN: with S1_PIVOT unset the boot is semantically the boot it has
+# always been (same mounts, same chroot loop) — a failed pivot prerequisite
+# COSTS THE FEATURE, NOT THE RUN, and says so.
+: "${S1_PIVOT:=0}"
+PIVOTROOT=""
+if [ "$S1_PIVOT" = "1" ]; then
+    PIVOTROOT=$(command -v pivot_root || true)
+    [ -n "$PIVOTROOT" ] || [ ! -x /usr/sbin/pivot_root ] || PIVOTROOT=/usr/sbin/pivot_root
+    BB=$(command -v busybox || true)
+    BB_STATIC=0
+    [ -n "$BB" ] && file -L "$BB" 2>/dev/null | grep -q 'statically linked' && BB_STATIC=1
+    if [ -z "$PIVOTROOT" ] || [ "$BB_STATIC" != 1 ]; then
+        echo "[emu] S1_PIVOT needs pivot_root + a STATIC busybox (apt install busybox-static);"
+        echo "[emu] this machine lacks one, so save states are off for this run."
+        echo "[emu] Starting the ordinary way - nothing else about the run changes."
+        S1_PIVOT=0
+    else
+        # the two binaries that must live INSIDE the rootfs (see header above)
+        mkdir -p "$R/.padqemu"
+        cp -f "$S1_QEMU" "$R/.padqemu/game"
+        cp -f "$BB" "$R/busybox"
+        echo "[emu] S1_PIVOT: checkpointable boot (pivot_root, explicit qemu)"
+    fi
+fi
+
+# The mounts, ONE definition for both boot paths (export -f carries it into
+# the namespace).  Same commands the chroot path has always run.
+s1_mounts() {
   mount --make-rprivate / 2>/dev/null || true
+  # pivot_root needs the new root to BE a mount, and everything mounted below
+  # rides the pivot, so the self-bind of $R comes FIRST (guarded: the chroot
+  # path is untouched).
+  [ "$S1_PIVOT" = "1" ] && mount --bind "$R" "$R" 2>/dev/null
   mount -t proc proc "$R/proc" 2>/dev/null || true
-  mount --bind "$S1_CPUINFO" "$R/proc/cpuinfo" 2>/dev/null || true
+  # the fake i.MX6 cpuinfo is STAGED INSIDE the rootfs and bound from there:
+  # a bind whose source is the repo tree (/mnt/c drvfs) ties a save-state slot
+  # to that checkout's path and to a mount the restore namespace strips - the
+  # copy makes the slot self-contained (same trick as Spike 2's meminfo).
+  mkdir -p "$R/.padqemu"
+  cp -f "$S1_CPUINFO" "$R/.padqemu/cpuinfo" 2>/dev/null || true
+  mount --bind "$R/.padqemu/cpuinfo" "$R/proc/cpuinfo" 2>/dev/null \
+    || mount --bind "$S1_CPUINFO" "$R/proc/cpuinfo" 2>/dev/null || true
   mount -t sysfs sysfs "$R/sys" 2>/dev/null || true
   mkdir -p "$R/data" "$R/dump/log" "$R/games/$GAME_NAME"
   chmod -R 0777 "$R/data" "$R/dump" 2>/dev/null || true
@@ -114,7 +160,7 @@ unshare -m -p -f bash -c '
   for d in $_nulldevs; do
     t="$R/dev/$d"; [ -e "$t" ] || : > "$t"; mount --bind /dev/null "$t" 2>/dev/null || true
   done
-  # node bus capture: bind /dev/ttyS4 to a host file so the game'"'"'s node-bus
+  # node bus capture: bind /dev/ttyS4 to a host file so the game's node-bus
   # writes (lamp/coil frames) land there for decoding into the viewer state.
   if [ -n "${S1_TTYS4_CAP:-}" ]; then
     t="$R/dev/ttyS4"; [ -e "$t" ] || : > "$t"
@@ -122,6 +168,63 @@ unshare -m -p -f bash -c '
   fi
   rm -f "$R/usr/bin/qemu-arm-pad" 2>/dev/null || true
   cp "$S1_QEMU" "$R/usr/bin/qemu-arm-pad" 2>/dev/null || true
+}
+export -f s1_mounts
+export R G GAME_NAME S1_CPUINFO S1_QEMU S1_STRACE S1_EE_FILE S1_RUNS S1_I2C_LOG S1_GDB S1_TTYS4_CAP S1_PIVOT PIVOTROOT
+
+if [ "$S1_PIVOT" = "1" ]; then
+  # Checkpointable boot.  The game_monitor-style restart loop moves OUTSIDE
+  # the namespace (first boot provisions the EEPROM then exits; slam tilt
+  # soft-restarts the same way): under pivot the inner shell EXECS the game so
+  # the guest is the pid-namespace init AND its session leader — both criu
+  # requirements ("A session leader of N(1) is outside of its pid namespace").
+  # Each restart gets a fresh namespace + fresh mounts, which is idempotent.
+  # stdio is reopened INSIDE the rootfs (criu refuses an fd on a mount that
+  # left with the pivot: "Can't lookup mount for fd=1"), so under S1_PIVOT the
+  # game's own output — including qemu's PAD/spike1 dump lines — is at
+  # <rootfs>/dump/game.out, NOT in emu.log.  Stray inherited fds 3..63 (two
+  # /dev/ptmx from the wsl.exe ancestry, measured on the Spike 2 ladder and
+  # re-measured here on WWE's fd table) are closed for the same reason.
+  # S1_HOLDOFF (a flag file): while it exists the loop PARKS — no relaunch,
+  # shims and namespace machinery alive — so a save-state restore can kill the
+  # guest and take its place without the loop racing it, and without tearing
+  # down the CUSE devices the restored guest must reopen (the EXIT trap kills
+  # the shims when THIS script dies, which is exactly what a restore must not
+  # cause).  Removing the flag resumes the loop: a fresh boot, which is also
+  # the recovery path when a restored guest ends.
+  _n=0
+  while [ "$_n" -lt "$S1_RUNS" ]; do
+    if [ -n "${S1_HOLDOFF:-}" ] && [ -e "$S1_HOLDOFF" ]; then
+      sleep 1
+      continue
+    fi
+    _n=$((_n + 1))
+    echo "======== GAME RUN $_n / $S1_RUNS (pivot) ========"
+    unshare -m -p -f setsid bash -c '
+      set -u
+      s1_mounts
+      for fd in $(seq 3 63); do eval "exec $fd>&-" 2>/dev/null; done
+      cd "$R"
+      mkdir -p oldroot
+      if "$PIVOTROOT" . oldroot; then
+        cd /
+        /busybox umount -l /oldroot
+        cd "/games/$GAME_NAME" || exit 1
+        exec /.padqemu/game ./game </dev/null >/dump/game.out 2>&1
+      fi
+      # a pivot that fails here still costs only the feature: fall back to the
+      # chroot exec for THIS run so the boot is not lost.
+      rmdir oldroot 2>/dev/null
+      echo "[emu] pivot_root failed - this run is not checkpointable"
+      exec chroot "$R" /bin/sh -c "cd /games/$GAME_NAME && exec ./game"
+    '
+    echo "======== RUN $_n exited (code $?) ========"
+    sleep 0.5
+  done
+else
+  unshare -m -p -f bash -c '
+  set -u
+  s1_mounts
   # game_monitor-style restart loop: first boot provisions the (now persistent)
   # board EEPROM then exits; relaunch so the next boot sees a valid EEPROM.
   _n=0
@@ -142,3 +245,4 @@ unshare -m -p -f bash -c '
     sleep 0.5
   done
 '
+fi

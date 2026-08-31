@@ -146,7 +146,12 @@ export S1_ROOT="$S1_WORK/rootfs" S1_GAME="$S1_WORK/game" S1_QEMU="$S1_QEMU" \
        S1_EE_FILE=/data/board_eeprom.bin S1_TTYS4_CAP="$SLAVE" \
        S1_SPI0_CAP="$S1_WORK/spi0.cap" S1_DMD_FPS="${S1_DMD_FPS:-60}" \
        PAD_AUDIO="${PAD_AUDIO:-0}" S1_AUDIO_FIFO="$S1_WORK/audio.fifo" \
-       S1_CPUSW_FILE=/data/s1cpusw.input
+       S1_CPUSW_FILE=/data/s1cpusw.input \
+       S1_PIVOT="${S1_PIVOT:-0}" S1_HOLDOFF="$S1_WORK/holdoff"
+rm -f "$S1_WORK/holdoff"    # a stale holdoff would park the loop before run 1
+# S1_PIVOT=1: checkpointable boot (pivot_root instead of chroot), the save-
+# state prerequisite (item 87).  Same game, same devices; that run's game
+# stdout moves to <rootfs>/dump/game.out.  See emu_root.sh.
 # S1_CPUSW_FILE: the CPU I/O-expander injection file (qemu patch 4) that
 # carries the DEDICATED switches — coin-door interlock + the service cluster
 # (BACK/−/+/SELECT).  The path is CHROOT-relative (qemu runs chrooted); the

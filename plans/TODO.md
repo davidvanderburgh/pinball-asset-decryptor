@@ -6720,7 +6720,24 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **87. Spike 1 save states: the Emulate tab's slot panel is a DEAD STUB —
       wire it to a real checkpoint/restore for the Spike 1 rig.** `S2 D4`
-      ← WORKING ON
+      ← WORKING ON ← IN PROGRESS
+      **Established (2026-08-31):** the whole mechanism WORKS same-session on
+      GBLE — pivoted boot (S1_PIVOT=1, emu_root.sh pivot_root branch, comm
+      stays "game", guest is pidns init + session leader), criu 4.1 dump 13MB
+      in ~1s with a 52-mount-external sweep + tty external + the new s1criu.so
+      ext-file plugin catching all 7 CUSE chr fds (dump: rdev→/dev/s1* map;
+      restore: reopen via the GUEST bind name — the hook runs inside the
+      restored mntns), restore via nsclean namespace + --root + inherit-fd
+      fd[9] pty; restored guest plays a REAL GAME (coin→START→BALL 1, serve
+      verified live). Restart loop parks on a holdoff flag during restore
+      (killing emu_root kills the CUSE shims — the EXIT trap — so never pkill
+      it for a load). cpuinfo bind is now STAGED INSIDE the rootfs
+      (.padqemu/cpuinfo) so slots don't tie to a checkout path.
+      **Resume:** cross-session restore next (stop.sh → fresh start.sh →
+      restore old slot: new pty slave, new CUSE majors, game.out size retry),
+      then qemu-rebuild-proofing (stash /.padqemu/game in the slot), then
+      productize s1savestate.sh/s1restorestate.sh + GUI slot panel wiring +
+      tests.
       *(Filed 2026-08-31 at David's ask — "let's get save states implemented
       so it's not a dead feature" — the FIRST Spike 1 item on this queue;
       Spike 1 work previously shipped direct on main's tree, and David chose

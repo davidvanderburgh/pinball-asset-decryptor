@@ -284,6 +284,50 @@ _SPI_BLOCK = """            /* PAD/spike1: SPI_IOC_MESSAGE — the CPU I/O expan
 """ + _SPI_ANCHOR
 
 
+# ---- patch 7: glibc 2.41+ already defines struct sched_attr ----------------
+# glibc 2.41 (Debian 13 / Ubuntu 25.04 era) exposes the kernel's struct
+# sched_attr through <sched.h> -> <linux/sched/types.h>, so qemu 8.2.2's local
+# copy in syscall.c is a redefinition and the build dies before it starts
+# ("error: redefinition of 'struct sched_attr'").  qemu fixed this upstream
+# after 8.2 the same way: keep the local copy only for older glibc.  The two
+# layouts are identical field-for-field, so on new glibc the kernel header's
+# definition serves the same code unchanged; non-glibc libcs keep qemu's copy
+# (stock behaviour).
+OLD_SCHED = """/* sched_attr is not defined in glibc */
+struct sched_attr {
+    uint32_t size;
+    uint32_t sched_policy;
+    uint64_t sched_flags;
+    int32_t sched_nice;
+    uint32_t sched_priority;
+    uint64_t sched_runtime;
+    uint64_t sched_deadline;
+    uint64_t sched_period;
+    uint32_t sched_util_min;
+    uint32_t sched_util_max;
+};"""
+
+NEW_SCHED = """/* PAD/spike1: glibc 2.41+ defines struct sched_attr itself (via
+   <linux/sched/types.h> from <sched.h>) with this exact layout, so keep
+   qemu's local copy only where glibc doesn't provide one. */
+#if !defined(__GLIBC__) || __GLIBC__ < 2 \\
+        || (__GLIBC__ == 2 && __GLIBC_MINOR__ < 41)
+/* sched_attr is not defined in glibc */
+struct sched_attr {
+    uint32_t size;
+    uint32_t sched_policy;
+    uint64_t sched_flags;
+    int32_t sched_nice;
+    uint32_t sched_priority;
+    uint64_t sched_runtime;
+    uint64_t sched_deadline;
+    uint64_t sched_period;
+    uint32_t sched_util_min;
+    uint32_t sched_util_max;
+};
+#endif"""
+
+
 # ---- patch 5: guest CPU-state dump on a fatal fault (signal.c) -------------
 # On an uncaught guest signal, qemu-user prints only "uncaught target signal N"
 # — not WHERE the game faulted.  Dumping the guest CPU state (PC + registers)
@@ -452,6 +496,17 @@ def main():
         src = src.replace(OLD_SIG, NEW_SIG, 1)
         changed = True
         print("sigfpe patch: applied")
+
+    if "PAD/spike1: glibc 2.41+" in src:
+        print("schedattr patch: already patched")
+    elif OLD_SCHED not in src:
+        print("SCHEDATTR PATCH TARGET NOT FOUND (qemu version drift?)",
+              file=sys.stderr)
+        return 1
+    else:
+        src = src.replace(OLD_SCHED, NEW_SCHED, 1)
+        changed = True
+        print("schedattr patch: applied")
 
     if "PAD/spike1: SPI_IOC_MESSAGE" in src:
         print("cpuspi patch: already patched")

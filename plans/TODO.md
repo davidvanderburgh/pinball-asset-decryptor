@@ -6749,9 +6749,21 @@ These have each been violated at least once and each cost a run or a window:
       hardware's game_monitor would relaunch; the parked loop deliberately
       does not boot a fresh game over a loaded state). rm the holdoff file or
       press Start for a fresh boot.
-      **Resume:** David validates in the app — Start (boots pivoted), Save
-      now mid-ball, Load, and an audio-on load with the volume knob at his
-      level. Then check the box.
+      **Also fixed during David's validation (both found live):** (1) a
+      silent ball-keeper death at boot = stuck on LOCATING PINBALLS →
+      start.sh verifies the keeper launch (retry + loud failure), status.sh
+      reports keeper=, the tab names "No ball keeper". (2) fresh app + fresh
+      Start came up SILENT → the audio chain's Windows-python probe rides the
+      interop socket of start.sh's exited wsl.exe and hangs forever;
+      restructured so the APP owns the Windows speaker (padplay spawned by
+      the tab, relaunch backoff, killed at Stop) and the rig runs only
+      fifo+relay (PAD_AUDIO_SINK=relay — pure WSL); playaudio.sh no longer
+      probes for relay/pulse sinks and padpath.sh's interop probes are
+      timeout-bounded.
+      **Resume:** David validates the full fresh flow in a RELAUNCHED app
+      (the running instance predates the app-side speaker): close app →
+      reopen from the worktree → Start → sound in attract → Save now
+      mid-ball → Load → sound continues. Then check the box.
       *(Filed 2026-08-31 at David's ask — "let's get save states implemented
       so it's not a dead feature" — the FIRST Spike 1 item on this queue;
       Spike 1 work previously shipped direct on main's tree, and David chose

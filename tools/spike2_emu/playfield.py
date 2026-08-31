@@ -154,10 +154,19 @@ STATE = os.path.join(os.path.expanduser("~"), ".pad_playfield.json")
 #: command line; gameinfo works it out otherwise.
 GAME = gameinfo.active(sys.argv[1] if len(sys.argv) > 1 else None)
 if not GAME:
-    # Better than a window titled "None" drawing nothing. watch.sh always passes
-    # the title on the command line, so this is the by-hand case.
-    sys.exit("playfield.py: no title - pass one, or set PAD_GAME.\n"
-             "  pythonw playfield.py godzilla_pro")
+    if __name__ == "__main__":
+        # Better than a window titled "None" drawing nothing. watch.sh always
+        # passes the title on the command line, so this is the by-hand case.
+        sys.exit("playfield.py: no title - pass one, or set PAD_GAME.\n"
+                 "  pythonw playfield.py godzilla_pro")
+    # Imported as a library: the window classes take their title explicitly
+    # (LcdPanel(root, "batman")), so a resolvable global is not required.
+    # The tests import this module, and under plain pytest argv[1] happens
+    # to be "tests" and passes for a title; a pytest-xdist worker's argv
+    # carries no such passenger, and a machine with no rig state has
+    # nothing else to answer with - exiting here killed the import and
+    # every test in five modules with it.
+    GAME = "unknown"
 TDIR = gameinfo.table_dir(GAME)
 
 #: Whether the Save/Load state controls exist at all. watch.sh passes

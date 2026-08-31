@@ -1,0 +1,60 @@
+name: Build Intel Mac Installer
+
+# The x86_64 DMG for Intel iMacs, split out of release.yml because it is
+# the slowest build by ~4x (~8 min vs ~3 for everything else -- the
+# macos-15-intel free-tier runner is slow hardware) and it must not sit
+# on the release critical path.  It runs on the same v* tag, attaches
+# its DMG to the same GitHub release when it finishes, and nothing
+# watches or waits for it: the in-app updater gates per-platform
+# (updater._release_ready), so an Intel iMac simply doesn't see the
+# update banner until this asset has attached.
+#
+# macos-15-intel is a standard (free-tier) x64 label, unlike -large.
+# Note the Intel wheel floors: onnxruntime resolves to 1.23.x there
+# (last release with a macOS x86_64 wheel), which needs macOS 13+.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}   # allow manual run for testing without a tag
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-intel:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+
+      - name: Install build dependencies
+        run: |
+          pip install -r requirements.txt pyinstaller UnityPy fsb5 pyogg faster-whisper imageio-ffmpeg
+          brew install create-dmg
+
+      - name: Build DMG
+        run: bash installer/build_macos.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg-x86_64
+          path: installer/Output/*.dmg
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --json id >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
+            || true
+          gh release upload "$GITHUB_REF_NAME" installer/Output/*.dmg --clobber

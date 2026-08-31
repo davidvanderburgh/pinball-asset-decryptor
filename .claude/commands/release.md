@@ -9,15 +9,23 @@ one command that handles every mistake-prone step in the right order
 so we never again ship a tag where `__version__` lags the tag string
 (see v0.3.0 vs v0.3.1).
 
-**Async by design.**  A release carries ~12 minutes of unavoidable
-waiting (local pytest ~2 min, test CI ~2.5 min, installer builds
-~7-8 min) and NONE of it is watched in the foreground:
+**Async by design — and tests + builds run CONCURRENTLY.**  Since
+2026-08-31 the tag goes out in the SAME attended turn as the push:
+LOCAL pytest green (joined in step 6, before the commit) is the ship
+gate, and the Tests CI run is a post-tag TRIPWIRE that runs in
+parallel with the installer builds instead of serializing ~5 minutes
+ahead of them (David chose this trade explicitly: a rare post-tag
+yank beats a 5-minute wait on every release).  The waits that remain
+(local pytest ~2 min, tests CI ~3 min, fast installer builds ~3.5 min,
+Intel mac backfill ~8 min in its own un-watched workflow) are ALL
+backgrounded:
 - The local test suite runs as a background task underneath the
   bump/README work and is joined just before the commit (step 6).
-- Both CI waits (steps 7b and 9b) run as background `gh run watch`
-  tasks; each one re-invokes this session when it finishes, and the
-  tag / publish steps happen in those background-notified turns.
-The attended portion ends at the push in step 7 with the interim
+- Push, tag, and draft release (steps 7-9) all happen in one attended
+  turn; the background `gh run watch` tasks (tests tripwire +
+  installer run) re-invoke this session as they finish, and the
+  publish/report steps happen in those background-notified turns.
+The attended portion ends after step 9's draft with the interim
 report — target well under a minute of foreground waiting.  Never
 foreground-block on pytest or a CI run, and never poll in a sleep
 loop.
@@ -44,7 +52,7 @@ loop.
    `test_gui_smoke.py` Tcl error is pre-existing infrastructure noise —
    ignore it via the `--ignore` flag, NOT by skipping the whole run.
 
-   **Local green is necessary but NOT sufficient.**  Local envs tend to have more installed than CI runners (e.g. Pillow lives in my dev env but wasn't in the CI workflow's pip-install step, which silently broke Williams plugin discovery for the entire v0.4.0 release).  See step 7b below — we don't tag until CI is green on the just-pushed commit.
+   **Local green is the SHIP GATE.**  CI still catches what local can't — CI runners often have less installed than the dev env (Pillow lived in my dev env but not the CI pip-install step, which silently broke Williams plugin discovery for the entire v0.4.0 release) — but since 2026-08-31 that check runs as a post-tag tripwire in PARALLEL with the installer builds, not as a gate ahead of them.  See step 7b: red CI after the tag means an immediate yank, not a shipped regression.
 
 4. **Decide the bump.**
    - Default to **patch** for bugfixes / small tweaks.
@@ -234,10 +242,19 @@ loop.
     Mention what happened (cleaned up / left alone and why / nothing to
     do) in the interim report below.
 
-7b. **Start a background watch on CI — the tag still gates on green,
-    but nobody waits in the foreground.**
+7b. **Start the Tests-CI TRIPWIRE watch — then proceed STRAIGHT to
+    step 8.  The tag does not wait for this run.**
 
-    Local green isn't enough — CI runners often have fewer packages installed than the dev env.  v0.4.0 shipped with a broken Williams plugin because Pillow lived in my local Python but wasn't in the CI workflow's pip-install step; `load_plugins()` swallowed the ImportError and Williams silently disappeared from the registry across all three runner OSes.  Catch this BEFORE the tag goes out — asynchronously.
+    Local green (step 6) already gated the push; from here the tests
+    CI run and the installer builds run in PARALLEL (2026-08-31: David
+    chose this over the old serialize-tests-first flow — a rare
+    post-tag yank beats a 5-minute wait on every release).  What CI
+    still buys us is the environment check local can't do — v0.4.0
+    shipped a broken Williams plugin because Pillow lived in my local
+    Python but wasn't in the CI pip-install step; `load_plugins()`
+    swallowed the ImportError on all three runner OSes.  So the run is
+    still watched — as a tripwire that yanks the release if it fires,
+    not as a gate.
 
     Resolve the run id in the foreground (fast):
     ```bash
@@ -247,24 +264,49 @@ loop.
                        --json databaseId --jq '.[0].databaseId')
     ```
     - If `RUN_ID` is empty, retry the lookup once after a few more
-      seconds; if still empty, either the workflow doesn't run on this
-      branch or GitHub is still processing the push — ask the user
-      whether to proceed without the gate.
+      seconds; if still empty, proceed to step 8 anyway and NAME the
+      missing tripwire in the interim report — a lookup failure is a
+      reporting problem now, not a blocker.
     - Otherwise start `gh run watch "$RUN_ID" --exit-status` **as a
-      background task**, print the interim report (see "What to report
-      back"), and END THE TURN.  Steps 8-10 happen in the turns where
-      the background watches complete — do not sit in a foreground
-      wait, and do not pre-announce results the watch hasn't produced.
+      background task** and continue to step 8 IN THIS SAME TURN —
+      tag `$HEAD_SHA`, draft the release (step 9), start the step-9b
+      watchers, print the interim report (see "What to report back"),
+      and only then end the turn.  Do not pre-announce results the
+      watches haven't produced.
 
-    When the watch completes:
-    - **Green** → proceed to step 8 immediately (tag this commit).
-    - **Red** → do NOT tag.  The push is on main and stays there — fix
-      forward: read the failure (`gh run view $RUN_ID --log-failed`),
-      make the fix, commit + push again, and start a new background
-      watch.  When CI is finally green on a commit, that's the commit
-      you tag.
+    When the tripwire watch completes (a later background turn — by
+    then the tag is out and the first assets may already be live):
+    - **Green** → nothing to do; the final report notes "tests CI
+      green" in one line.
+    - **Red** → read `gh run view $RUN_ID --log-failed` FIRST (fast,
+      and it decides which of two very different responses is right):
+      - **Infrastructure failure** (runner died, pip network error,
+        GitHub 5xx — no test actually failed) → `gh run rerun
+        $RUN_ID --failed`, fresh background watch, release stays live.
+      - **A real test failure** → YANK the release, immediately and
+        without asking — an update banner pointing at a regression is
+        worse than a missing release.  Follow "Yanking a release"
+        below, report the yank LOUDLY, fix forward (commit + push),
+        and start the release over — the re-release derives a FRESH
+        version number.  The yanked number is burned: re-tagging it
+        with different content confuses release caches and any
+        updater that already saw it.
     - **Transient GitHub 503s / watch died** → just start a fresh
       background watch on the same run id.
+
+    **Yanking a release** (the one sanctioned tag deletion).  Order
+    matters: the installer jobs' attach step re-CREATES a deleted
+    release, so cancel the builds first, and kill this session's own
+    step-9b watcher tasks so a stale first-asset poller can't flip a
+    recreated release live.
+    1. Cancel any still-running installer builds for this tag: `gh run
+       list --workflow <wf> --branch vN.N.N --json databaseId,status`
+       for BOTH `release.yml` and `release-intel-mac.yml`, then `gh
+       run cancel <id>` for each run not yet completed.
+    2. Delete the release so update checkers stop seeing it:
+       `gh release delete vN.N.N --yes`
+    3. Delete the tag, on origin (`git push origin :refs/tags/vN.N.N`)
+       and locally (`git tag -d vN.N.N`).
 
 8. **Tag annotated.**  Tag body = a short release-note summary (different from the commit body — these end up as the GitHub release description).
    ```
@@ -278,14 +320,17 @@ loop.
 
 9. **Create the GitHub release as a DRAFT.**  A published release is
    visible to `releases/latest` the instant it's created, but the
-   installer assets upload from the four `Build Release Installers` CI
-   jobs minutes later — apps in the field saw the v0.69.5 update banner
-   while the release page had zero downloads on it.  Draft-first keeps
-   the release invisible to every update checker until at least one
-   asset exists (step 9b flips it live as soon as the FIRST asset
-   attaches, NOT after all four — David wants each platform downloadable
-   the moment its own installer is ready, so Windows users aren't held
-   up by the ~4x-slower Intel Mac build).  Publishing early is safe
+   installer assets upload from the three `Build Release Installers`
+   CI jobs minutes later (and the Intel mac DMG from its own
+   `release-intel-mac.yml` workflow later still) — apps in the field
+   saw the v0.69.5 update banner while the release page had zero
+   downloads on it.  Draft-first keeps the release invisible to every
+   update checker until at least one asset exists (step 9b flips it
+   live as soon as the FIRST asset attaches, NOT after all four —
+   David wants each platform downloadable the moment its own installer
+   is ready, so nobody is held up by the ~4x-slower Intel Mac build,
+   which is why that build now lives outside the watched workflow
+   entirely).  Publishing early is safe
    because the app gates per-platform client-side: `updater._release_ready`
    only surfaces an update to a given OS once THAT OS's asset is present
    (`*_Windows.exe` / `*_macOS_*.dmg` / `*.AppImage`), so a live release
@@ -308,13 +353,15 @@ loop.
 
 9b. **Publish at the FIRST asset, then background-watch the rest.**
     Each platform's installer job attaches its own asset independently
-    (fastest first: Linux + Apple Silicon land ~2 min in, Windows ~5 min,
-    Intel Mac ~6.5 min).  Flip the release live the moment the first
-    asset exists so users on the ready platforms download immediately;
-    the per-platform client gate (step 9) keeps the not-yet-built
-    platforms silent.
+    (fastest first: Linux ~2 min in, Windows + Apple Silicon ~3.5 min;
+    the Intel Mac DMG arrives ~8 min in from its own separate
+    `release-intel-mac.yml` run, which NOTHING gates on).  Flip the
+    release live the moment the first asset exists so users on the
+    ready platforms download immediately; the per-platform client gate
+    (step 9) keeps the not-yet-built platforms silent.
 
-    Start THREE background tasks and END THE TURN:
+    Start FOUR background tasks — in the SAME attended turn as steps
+    7-9 — then print the interim report and END THE TURN:
     1. A "publish at first asset" watcher — polls the release and flips
        it live as soon as one asset is attached, then exits:
        ```bash
@@ -339,25 +386,38 @@ loop.
        (watcher 1 may have already flipped it; if not, flip it now),
        then print the **final report + tester message** in that turn.
     3. The installer-run watch (`gh run watch <id> --exit-status`,
-       `--workflow=release.yml`) so the remaining assets finish
+       `--workflow=release.yml`) so the three fast assets finish
        attaching to the now-live release.
+    4. The Intel backfill watch (`gh run watch <id> --exit-status`,
+       `--workflow=release-intel-mac.yml`) — pure backfill, lowest
+       stakes: it gates NOTHING, and Intel iMac users simply don't see
+       the update banner until this asset lands (the per-platform
+       client gate again).
 
-    When the installer-run watch completes (this is AFTER the tester
-    message has usually gone out — it's a backfill confirmation, not a
-    gate):
+    When the installer-run watch (task 3) completes — this is AFTER
+    the tester message has usually gone out; it's a backfill
+    confirmation, not a gate:
     - If an upload step failed on a transient GitHub error,
       `gh run rerun <id> --failed` — builds are per-job, so only the
       failed uploads redo.  Start a fresh background watch on the rerun.
       (The release is already live with whatever assets DID build; the
       rerun just backfills the missing one — a partial-platform release
       is acceptable per the publish-early policy, but always backfill.)
-    - When green, verify all four assets are attached and print a short
-      all-assets confirmation with the URL:
+    - When green, verify the three fast assets are attached and print a
+      short confirmation with the URL:
     ```
     gh release view vN.N.N --json assets --jq '.assets[].name'
     # expect: *_Windows.exe, *_macOS_AppleSilicon.dmg,
-    #         *_macOS_Intel.dmg, *_Linux_x86_64.AppImage
+    #         *_Linux_x86_64.AppImage  (+ *_macOS_Intel.dmg once
+    #         task 4 finishes)
     ```
+
+    When the Intel backfill watch (task 4) completes:
+    - Green → confirm all FOUR assets are now attached; one line in
+      whatever turn this lands in.
+    - Red → `gh run rerun <id> --failed` and re-watch, same as above.
+      Never treat an Intel-only failure as a release failure — say
+      "Intel DMG still backfilling / failed, rerunning" and move on.
 
 10. **Draft a message for the tester / user.**
 
@@ -432,7 +492,7 @@ loop.
 ## Non-destructive default
 
 - **Do NOT force-push** to main.
-- **Do NOT force-update tags.**  If a tag was already pushed and is wrong, ship a `+0.0.1` patch release with the fix — don't re-point the tag.  (This is exactly how v0.3.1 fixed v0.3.0's missing `__version__` bump.)
+- **Do NOT force-update tags.**  If a tag was already pushed and is wrong, ship a `+0.0.1` patch release with the fix — don't re-point the tag.  (This is exactly how v0.3.1 fixed v0.3.0's missing `__version__` bump.)  The ONE sanctioned tag deletion is step 7b's yank, when the tests-CI tripwire fires red on a just-tagged release — and even then the number is burned and the re-release takes a fresh one; the tag is deleted, never re-pointed.
 - **Do NOT skip hooks** (no `--no-verify`).
 - If the previous tag was pushed within the last hour and only by us, the user can OK a force-update via explicit instruction — but never do it without that instruction.
 
@@ -440,13 +500,16 @@ loop.
 
 Because the command spans background turns, there are two reports.
 
-**Interim report** — printed at the end of the attended turn, right
-after the push in step 7b (this is where the user walks away):
+**Interim report** — printed at the end of the attended turn, after
+the push, tag, and draft release (steps 7-9) have all landed and the
+step-7b/9b watches are running (this is where the user walks away):
 
 - New version + previous version, and the commit count since last tag.
-- Confirmation the release commit is pushed, which CI run is being
-  watched in the background, and what happens next without them
-  ("will tag, draft, and publish when CI is green — no action needed").
+- Confirmation the release commit is pushed and tagged, which runs are
+  being watched in the background, and what happens next without the
+  user ("publishes at the first asset; tests CI is a tripwire — if it
+  goes red the release is yanked and I'll say so loudly; Intel DMG
+  backfills on its own — no action needed").
 - Any item worktree(s) cleaned up in step 7a — or, if none qualified,
   say so in one clause rather than silently skipping it.
 

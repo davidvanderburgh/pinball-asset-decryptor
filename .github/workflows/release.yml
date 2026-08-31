@@ -7,10 +7,16 @@ name: Build Release Installers
 # Each build job attaches its own asset to the release as soon as it
 # finishes -- there is deliberately NO aggregator job.  A single
 # "download everything then publish" job gates every asset on the
-# slowest build (the Intel mac DMG takes ~4x the others) and turns any
-# one job's failure into zero assets published.  With per-job attach,
-# Windows/Linux/Apple Silicon are downloadable ~3 minutes after the
-# tag while Intel catches up.
+# slowest build and turns any one job's failure into zero assets
+# published.  With per-job attach, Windows/Linux/Apple Silicon are
+# downloadable ~3 minutes after the tag.
+#
+# The Intel mac DMG is NOT here: it takes ~4x the other builds (slow
+# free-tier x64 runner), so it lives in release-intel-mac.yml on the
+# same tag trigger and backfills its asset to the same release a few
+# minutes later.  The release flow watches THIS workflow only; the
+# in-app updater gates per-platform (updater._release_ready), so an
+# Intel iMac never sees the update banner until its DMG has attached.
 #
 # Tag a release locally with:
 #   git tag v0.1.0
@@ -66,22 +72,11 @@ jobs:
 
   build-macos:
     # PyInstaller builds for the host arch only and macos-latest has been
-    # an Apple Silicon (arm64) runner since 2024, so a single job would
-    # ship an arm64-only .app that Intel iMacs refuse to launch ("not
-    # supported on this type of Mac" -- Rosetta only goes x86_64->arm64).
-    # Build one DMG per architecture; build_macos.sh names each by arch.
-    # macos-15-intel is a standard (free-tier) x64 label, unlike -large.
-    # Note the Intel wheel floors: onnxruntime resolves to 1.23.x there
-    # (last release with a macOS x86_64 wheel), which needs macOS 13+.
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-latest
-            arch: arm64
-          - runner: macos-15-intel
-            arch: x86_64
-    runs-on: ${{ matrix.runner }}
+    # an Apple Silicon (arm64) runner since 2024, so this job ships the
+    # arm64 DMG only; build_macos.sh names the DMG by host arch.  The
+    # x86_64 DMG for Intel iMacs builds in release-intel-mac.yml (see
+    # the header comment).
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -102,7 +97,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macos-dmg-${{ matrix.arch }}
+          name: macos-dmg-arm64
           path: installer/Output/*.dmg
 
       - name: Attach to release

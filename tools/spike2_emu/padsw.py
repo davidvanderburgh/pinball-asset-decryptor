@@ -38,7 +38,13 @@ import padpath
 
 #: PAD_SW_FILE points the helpers at a block that is not a running game's, which
 #: is the only way to check any of this without one. The rig never sets it.
-PATH = os.environ.get("PAD_SW_FILE", os.path.join(padpath.dump(), "padsw"))
+#: `dump() or ""` (the same guard playfield.py uses): on a machine with no
+#: rig root - a CI runner - dump() is None, and joining None killed this
+#: module at IMPORT, which single-process test runs only dodged because an
+#: alphabetically earlier test had already imported it under a monkeypatched
+#: PAD_ROOT and left it cached in sys.modules.
+PATH = (os.environ.get("PAD_SW_FILE")
+        or os.path.join(padpath.dump() or "", "padsw"))
 MAGIC = 0x53444150
 MAX_ID = 256
 

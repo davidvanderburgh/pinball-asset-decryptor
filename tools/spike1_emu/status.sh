@@ -41,8 +41,9 @@ EOF
     fi
 fi
 
-# the node-bus responder + its viewers
+# the node-bus responder, the ball keeper + the viewers
 pgrep -f "nodebus.py" >/dev/null 2>&1 && echo "responder=1" || echo "responder=0"
+pgrep -f "s1ball.py daemon" >/dev/null 2>&1 && echo "keeper=1" || echo "keeper=0"
 pgrep -f "s1dmd.py" >/dev/null 2>&1 && echo "dmd_view=1" || echo "dmd_view=0"
 pgrep -f "s1view.py" >/dev/null 2>&1 && echo "sw_view=1" || echo "sw_view=0"
 

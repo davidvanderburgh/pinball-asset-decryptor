@@ -196,9 +196,32 @@ fi
 #     runs one-shot commands ("s1ball.py coin/start/press/drain").  S1_BALL=0
 #     opts out (bare-wire behaviour: nothing held, nothing automated).
 if [ "${S1_BALL:-1}" != "0" ]; then
-    setsid python3 "$HERE/s1ball.py" daemon --work "$S1_WORK" \
-        >"$S1_WORK/s1ball.log" 2>&1 &
-    log "Ball keeper up (S1_BALL=0 to disable)."
+    # VERIFIED launch, with one retry.  Seen live (2026-08-31, David's first
+    # app-started pivot run): the keeper died between fork and its first
+    # print — zero log output, no dmesg record — while nodebus, launched the
+    # same setsid way 25 s earlier, survived.  Unreproduced since; the
+    # watchdog turns a silent death into either a healthy retry or a spoken
+    # line, and the game without a keeper is exactly the "stuck on LOCATING
+    # PINBALLS" report.  The proof of life is the keeper's own first act:
+    # writing s1auto.input (its held-trough bitmap).
+    _keeper_up() {
+        setsid python3 "$HERE/s1ball.py" daemon --work "$S1_WORK" \
+            >"$S1_WORK/s1ball.log" 2>&1 < /dev/null &
+        for _i in $(seq 1 25); do
+            [ -s "$S1_WORK/s1auto.input" ] && return 0
+            sleep 0.2
+        done
+        return 1
+    }
+    if _keeper_up; then
+        log "Ball keeper up (S1_BALL=0 to disable)."
+    elif _keeper_up; then
+        log "Ball keeper up (second try — first launch died silently)."
+    else
+        log "WARNING: the ball keeper did not come up — the game will sit on"
+        log "LOCATING PINBALLS. See s1ball.log; relaunch by hand:"
+        log "  wsl -u root python3 $HERE/s1ball.py daemon --work $S1_WORK"
+    fi
 fi
 
 # 7. the DMD and switch/LED viewers are NATIVE windows the Windows app opens

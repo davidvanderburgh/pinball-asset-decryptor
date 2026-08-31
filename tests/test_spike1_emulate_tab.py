@@ -525,3 +525,21 @@ def test_slot_size_and_date_formatting():
     assert Spike1EmulatePanel._fmt_size("512") == "512 B"
     assert Spike1EmulatePanel._fmt_size("junk") == "?"
     assert Spike1EmulatePanel._fmt_when("not-a-number") == "?"
+
+
+def test_dead_keeper_is_named_not_masked():
+    """A game up with no ball keeper sits on LOCATING PINBALLS forever — the
+    state cell must name the keeper, not say "Game running" (2026-08-31,
+    David's first app-started pivot run)."""
+    label, hint = state_text({"wsl": "1", "game_procs": "1", "keeper": "0",
+                              "nodes_registered": "1"})
+    assert label == "No ball keeper"
+    assert "LOCATING PINBALLS" in hint
+    # with the keeper alive the ladder is unchanged
+    label, _ = state_text({"wsl": "1", "game_procs": "1", "keeper": "1",
+                           "nodes_registered": "1"})
+    assert label == "Game running"
+    # a status.sh from before the keeper key existed stays unchanged too
+    label, _ = state_text({"wsl": "1", "game_procs": "1",
+                           "nodes_registered": "1"})
+    assert label == "Game running"

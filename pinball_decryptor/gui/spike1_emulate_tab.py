@@ -100,6 +100,14 @@ def state_text(info):
         return ("WSL not answering",
                 "The emulator is a Linux program and runs inside WSL.")
     if int(info.get("game_procs") or 0) > 0:
+        if info.get("keeper") == "0":
+            # a dead keeper wears the game's own clothes: the machine sits on
+            # "LOCATING PINBALLS. PLEASE WAIT" forever, which reads as a hung
+            # boot (David hit exactly this, 2026-08-31).  Name the real fault.
+            return ("No ball keeper", (
+                "The game is up but the invisible-ball keeper died, so the "
+                "machine cannot find its pinballs (the LOCATING PINBALLS "
+                "screen). Press Stop, then Start."))
         if info.get("nodes_registered") == "1":
             # "Game running", matching the Spike 2 tab's wording (David: the
             # two tabs' texts flapped in the shared footer — "choose one").

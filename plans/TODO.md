@@ -6718,6 +6718,31 @@ These have each been violated at least once and each cost a run or a window:
       marker pads — no measured misattribution, and the report was the
       schematic. If a marker ever hovers wrong, that is where to look.
 
+- [ ] **86. Spike 1 save states: the Emulate tab's slot panel is a DEAD STUB —
+      wire it to a real checkpoint/restore for the Spike 1 rig.** `S2 D4`
+      *(Filed 2026-08-31 at David's ask — "let's get save states implemented
+      so it's not a dead feature" — the FIRST Spike 1 item on this queue;
+      Spike 1 work previously shipped direct on main's tree, and David chose
+      the /next route for this one.)* The panel shipped in v0.174.0 with the
+      same slot-manager UI as Spike 2's and nothing behind it. Spike 2's criu
+      machinery is the model (savestate.sh: slots carry their guest libs,
+      sha1-per-build stale-build refusal, `\040` mountinfo escapes — items
+      13/36a/40/42). The known Spike 1 deltas, none proven in anger: the game
+      is CHROOTED into the per-card cache rootfs, and the qemu process holds
+      ~9 CUSE char-device fds (dmd, spi0/1, adc, backlight, ttyS4, amp, i2s,
+      i2c-0) criu cannot dump natively. Plan A (MARKED AS A GUESS, untested):
+      a criu ext-file plugin — record device path+flags at dump, reopen at
+      the same fd on restore; threads blocked in CUSE reads should resume
+      via kernel syscall restart. Plan B: qemu-side fd drop/reacquire (we
+      already build qemu — patch_qemu.py has 6 patches). criu is built at
+      /var/tmp/criubuild. Deeper notes: `REMAINING item 86` in the Spike 1
+      handoff (`~/.claude/plans/spike1_play_a_game_handoff.md` — local to
+      this machine, not in the repo).
+      **Acceptance:** on a Spike 1 title, save a slot mid-game from the app,
+      stop and restart the rig, load the slot, and the game RESUMES from that
+      point — DMD live, switches drive it, audio plays — verified live on
+      the rig, the same bar item 13's Spike 2 acceptance met.
+
 ## Reference material that is NOT in this repo
 
 - **`C:\tmp\spike2_audio_ref\`** — the audio calibration set, with its own

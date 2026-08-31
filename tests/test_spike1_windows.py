@@ -207,7 +207,13 @@ def test_list_click_is_momentary_not_a_hold(root):
     win._canvas.event_generate("<Button-1>", x=int((x0 + x1) / 2),
                                y=int((y0 + y1) / 2))
     win.update()
-    assert io.writes and addr(1, 11) in io.writes[-1][0]      # closed now…
+    # The press and the timed release are separate writes, and on a slow
+    # machine the first update() can already have run the 10ms release
+    # timer - peeking at "the last write" between the two races the pulse
+    # (it lost on two CI OSes the day the suite went parallel).  The
+    # contract is the SEQUENCE: closed at some point, open on its own at
+    # the end.
+    assert io.writes and any(addr(1, 11) in w[0] for w in io.writes)  # closed…
     for _ in range(50):
         time.sleep(0.01)
         win.update()

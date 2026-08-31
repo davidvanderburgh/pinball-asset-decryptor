@@ -466,3 +466,138 @@ def test_spike1_card_restores_from_global_with_no_project(tmp_path):
     assert _restore_s1(None, {"spike1_emulate_card": "D:/cards/got.iso"}) \
         == "D:/cards/got.iso"
     assert _restore_s1(None, {}) == ""
+
+
+# -------------------------------------------------------------- save states --
+# item 87: the slot manager is live — it lists s1slots.sh's pipe protocol,
+# and Save now refuses politely when no game is running.
+
+def _inline_threads(monkeypatch):
+    """Make the panel's worker threads run inline, so a test sees the result
+    without sleeping."""
+    class _T:
+        def __init__(self, target=None, daemon=None):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr(spike1_emulate_tab.threading, "Thread", _T)
+
+
+def test_slots_refresh_parses_the_pipe_protocol(panel, root, monkeypatch):
+    monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "win32")
+    monkeypatch.setattr(spike1_emulate_tab, "rig_available", lambda: True)
+    _inline_threads(monkeypatch)
+    out = (b"root|/home/d/s1emu/saves\n"
+           b"slot|ghostbusters_le-1_17/quicksave|44362327|"
+           b"ghostbusters_le-1_17|mid-ball test |1788199042\n"
+           b"slot|GOT_LE-1_37/s2|13000000|GOT_LE-1_37||1788100000\n"
+           b"total|57362327\n"
+           b"free|100980350976\n")
+    monkeypatch.setattr(
+        spike1_emulate_tab.subprocess, "run",
+        lambda *a, **kw: SimpleNamespace(stdout=out))
+    panel._slots_refresh()
+    root.update()          # flush the after(0) apply
+    assert [r["ref"] for r in panel._slots_rows] == [
+        "ghostbusters_le-1_17/quicksave", "GOT_LE-1_37/s2"]
+    assert panel._slots_rows[0]["label"] == "mid-ball test"
+    rows = panel._slots_tree.get_children()
+    assert list(rows) == ["ghostbusters_le-1_17/quicksave", "GOT_LE-1_37/s2"]
+    assert "2 slots" in panel._slots_sum.cget("text")
+
+
+def test_save_now_refuses_without_a_running_game(panel, monkeypatch):
+    told = {}
+    monkeypatch.setattr(spike1_emulate_tab.messagebox, "showinfo",
+                        lambda *a, **kw: told.setdefault("msg", a))
+    ran = {}
+    monkeypatch.setattr(spike1_emulate_tab.subprocess, "run",
+                        lambda *a, **kw: ran.setdefault("cmd", a))
+    panel._info = {"game_procs": "0"}
+    panel._slot_save()
+    assert told and not ran     # a message, never a root shell-out
+
+
+def test_slot_size_and_date_formatting():
+    assert Spike1EmulatePanel._fmt_size("44362327") == "42.3 MB"
+    assert Spike1EmulatePanel._fmt_size("512") == "512 B"
+    assert Spike1EmulatePanel._fmt_size("junk") == "?"
+    assert Spike1EmulatePanel._fmt_when("not-a-number") == "?"
+
+
+def test_dead_keeper_is_named_not_masked():
+    """A game up with no ball keeper sits on LOCATING PINBALLS forever — the
+    state cell must name the keeper, not say "Game running" (2026-08-31,
+    David's first app-started pivot run)."""
+    label, hint = state_text({"wsl": "1", "game_procs": "1", "keeper": "0",
+                              "nodes_registered": "1"})
+    assert label == "No ball keeper"
+    assert "LOCATING PINBALLS" in hint
+    # with the keeper alive the ladder is unchanged
+    label, _ = state_text({"wsl": "1", "game_procs": "1", "keeper": "1",
+                           "nodes_registered": "1"})
+    assert label == "Game running"
+    # a status.sh from before the keeper key existed stays unchanged too
+    label, _ = state_text({"wsl": "1", "game_procs": "1",
+                           "nodes_registered": "1"})
+    assert label == "Game running"
+
+
+# ------------------------------------------------------------ app speaker --
+# item 87 follow-up (no-sound report): the APP owns the Windows player; the
+# rig's WSL side runs only fifo + relay (PAD_AUDIO_SINK=relay), because a
+# Windows exec from WSL rides an interop socket that dies with start.sh's
+# wsl.exe - the probe hung forever and a fresh app + fresh Start was silent.
+
+def test_player_cmd_is_padplay_via_pads_own_python(panel, monkeypatch):
+    monkeypatch.setattr(spike1_emulate_tab, "windows_python",
+                        lambda console=False: r"C:\Py\python.exe")
+    monkeypatch.setattr(spike1_emulate_tab.os.path, "isfile", lambda p: True)
+    cmd = panel._player_cmd()
+    assert cmd[0] == r"C:\Py\python.exe"
+    assert cmd[1].replace("\\", "/").endswith("tools/spike2_emu/padplay.py")
+    assert cmd[2:] == ["127.0.0.1", "45998", "44100", "2"]
+
+
+def test_player_relaunch_backs_off(panel, monkeypatch):
+    """A dead player is relaunched, but at most once per 5 s - connection
+    refused while the rig boots must not spin."""
+    monkeypatch.setattr(spike1_emulate_tab.sys, "platform", "win32")
+    spawned = []
+
+    class _Proc:
+        def poll(self):
+            return 1                       # exited
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(panel, "_player_cmd", lambda: ["py", "padplay"])
+    monkeypatch.setattr(spike1_emulate_tab.subprocess, "Popen",
+                        lambda *a, **kw: spawned.append(a) or _Proc())
+    t = {"v": 100.0}
+    monkeypatch.setattr(spike1_emulate_tab.time, "monotonic", lambda: t["v"])
+    panel._ensure_player()
+    panel._ensure_player()                 # same instant: backoff holds
+    assert len(spawned) == 1
+    t["v"] += 6.0
+    panel._ensure_player()                 # dead + past backoff: relaunched
+    assert len(spawned) == 2
+
+
+def test_stop_player_kills_and_forgets(panel):
+    killed = {}
+
+    class _Proc:
+        def poll(self):
+            return None
+
+        def kill(self):
+            killed["v"] = True
+
+    panel._player = _Proc()
+    panel._stop_player()
+    assert killed.get("v") is True
+    assert panel._player is None

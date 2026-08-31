@@ -8,6 +8,11 @@
 BF=/proc/sys/fs/binfmt_misc
 
 pkill -KILL -f qemu-arm-pad  2>/dev/null
+# a PIVOTED or criu-RESTORED guest's cmdline is "/.padqemu/game ./game" — no
+# qemu-arm-pad substring — and a restored guest is detached from emu_root's
+# tree besides, so kill by comm too (the same global -x game Spike 2's
+# killgame.sh uses; found when a restored guest SURVIVED stop.sh, item 87).
+pkill -KILL -x game          2>/dev/null
 pkill -KILL -f emu_root.sh   2>/dev/null
 pkill -KILL -f s1hwshim      2>/dev/null
 pkill -KILL -f nodebus.py    2>/dev/null

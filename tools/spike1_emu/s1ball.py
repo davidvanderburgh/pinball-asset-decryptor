@@ -295,6 +295,28 @@ class Keeper:
             else:
                 self.balls = max(0, min(self.nballs, int(parts[1])))
             self.write_state()
+        elif parts[0] == "state" and len(parts) > 1:
+            # Adopt a published-state JSON (item 87: a save-state slot carries
+            # the keeper's state from the moment of the save, and the restore
+            # feeds it back here — otherwise a mid-game load leaves the game
+            # believing a ball is in play that a freshly-booted keeper does
+            # not model, and drain/plunge silently no-op).
+            try:
+                st = json.loads(line.split(None, 1)[1])
+                self.balls = max(0, min(self.nballs,
+                                        int(st.get("balls", self.balls))))
+                self.in_shooter = bool(st.get("in_shooter", self.in_shooter))
+                self.door_closed = bool(st.get("door_closed",
+                                               self.door_closed))
+            except (ValueError, TypeError, AttributeError):
+                print("state: bad JSON ignored", flush=True)
+                return
+            print("state adopted: trough=%d shooter=%s door=%s"
+                  % (self.balls, self.in_shooter, self.door_closed),
+                  flush=True)
+            self.write_state()
+            self.publish()
+            self.write_spi(force=True)
         elif parts[0] == "plunge":
             # mirror of the Spike 2 plunge.py semantics: launch the ball in
             # the shooter lane; if the lane is empty, serve one first.

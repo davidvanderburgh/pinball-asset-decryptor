@@ -146,7 +146,12 @@ export S1_ROOT="$S1_WORK/rootfs" S1_GAME="$S1_WORK/game" S1_QEMU="$S1_QEMU" \
        S1_EE_FILE=/data/board_eeprom.bin S1_TTYS4_CAP="$SLAVE" \
        S1_SPI0_CAP="$S1_WORK/spi0.cap" S1_DMD_FPS="${S1_DMD_FPS:-60}" \
        PAD_AUDIO="${PAD_AUDIO:-0}" S1_AUDIO_FIFO="$S1_WORK/audio.fifo" \
-       S1_CPUSW_FILE=/data/s1cpusw.input
+       S1_CPUSW_FILE=/data/s1cpusw.input \
+       S1_PIVOT="${S1_PIVOT:-0}" S1_HOLDOFF="$S1_WORK/holdoff"
+rm -f "$S1_WORK/holdoff"    # a stale holdoff would park the loop before run 1
+# S1_PIVOT=1: checkpointable boot (pivot_root instead of chroot), the save-
+# state prerequisite (item 87).  Same game, same devices; that run's game
+# stdout moves to <rootfs>/dump/game.out.  See emu_root.sh.
 # S1_CPUSW_FILE: the CPU I/O-expander injection file (qemu patch 4) that
 # carries the DEDICATED switches — coin-door interlock + the service cluster
 # (BACK/−/+/SELECT).  The path is CHROOT-relative (qemu runs chrooted); the
@@ -191,9 +196,32 @@ fi
 #     runs one-shot commands ("s1ball.py coin/start/press/drain").  S1_BALL=0
 #     opts out (bare-wire behaviour: nothing held, nothing automated).
 if [ "${S1_BALL:-1}" != "0" ]; then
-    setsid python3 "$HERE/s1ball.py" daemon --work "$S1_WORK" \
-        >"$S1_WORK/s1ball.log" 2>&1 &
-    log "Ball keeper up (S1_BALL=0 to disable)."
+    # VERIFIED launch, with one retry.  Seen live (2026-08-31, David's first
+    # app-started pivot run): the keeper died between fork and its first
+    # print — zero log output, no dmesg record — while nodebus, launched the
+    # same setsid way 25 s earlier, survived.  Unreproduced since; the
+    # watchdog turns a silent death into either a healthy retry or a spoken
+    # line, and the game without a keeper is exactly the "stuck on LOCATING
+    # PINBALLS" report.  The proof of life is the keeper's own first act:
+    # writing s1auto.input (its held-trough bitmap).
+    _keeper_up() {
+        setsid python3 "$HERE/s1ball.py" daemon --work "$S1_WORK" \
+            >"$S1_WORK/s1ball.log" 2>&1 < /dev/null &
+        for _i in $(seq 1 25); do
+            [ -s "$S1_WORK/s1auto.input" ] && return 0
+            sleep 0.2
+        done
+        return 1
+    }
+    if _keeper_up; then
+        log "Ball keeper up (S1_BALL=0 to disable)."
+    elif _keeper_up; then
+        log "Ball keeper up (second try — first launch died silently)."
+    else
+        log "WARNING: the ball keeper did not come up — the game will sit on"
+        log "LOCATING PINBALLS. See s1ball.log; relaunch by hand:"
+        log "  wsl -u root python3 $HERE/s1ball.py daemon --work $S1_WORK"
+    fi
 fi
 
 # 7. the DMD and switch/LED viewers are NATIVE windows the Windows app opens

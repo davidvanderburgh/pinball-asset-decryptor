@@ -39,6 +39,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -46,7 +47,8 @@ from . import _rig
 # The volume/mute control FILE and its load/store belong to the Spike 2 tab
 # (item 56) and are deliberately shared, not copied: one knob value, one file,
 # read by the one padplay.py speaker implementation both rigs launch.
-from .emulate_tab import AUDIO_CTL_FILE, _load_audio_ctl, _write_audio_ctl
+from .emulate_tab import (AUDIO_CTL_FILE, _load_audio_ctl, _write_audio_ctl,
+                          windows_python)
 from .spike1_windows import Spike1Viewers, wsl_unc
 from .widgets import _Tooltip
 
@@ -100,6 +102,14 @@ def state_text(info):
         return ("WSL not answering",
                 "The emulator is a Linux program and runs inside WSL.")
     if int(info.get("game_procs") or 0) > 0:
+        if info.get("keeper") == "0":
+            # a dead keeper wears the game's own clothes: the machine sits on
+            # "LOCATING PINBALLS. PLEASE WAIT" forever, which reads as a hung
+            # boot (David hit exactly this, 2026-08-31).  Name the real fault.
+            return ("No ball keeper", (
+                "The game is up but the invisible-ball keeper died, so the "
+                "machine cannot find its pinballs (the LOCATING PINBALLS "
+                "screen). Press Stop, then Start."))
         if info.get("nodes_registered") == "1":
             # "Game running", matching the Spike 2 tab's wording (David: the
             # two tabs' texts flapped in the shared footer — "choose one").
@@ -128,6 +138,12 @@ _EVENT_LOGS = (
     ("s1ball.log", "ball", None),
     ("emu.log", "emu",
      re.compile(r"GAME RUN|RUN \d+ exited|PAD/spike1|FATAL|ERROR|error")),
+    # under a checkpointable boot (S1_PIVOT, item 87) the game's own stdout —
+    # including qemu's PAD/spike1 lines — moves inside the rootfs; the
+    # ``rootfs`` symlink in the run dir reaches it, and on a chroot run the
+    # file simply is not there (the tailer skips absentees).
+    ("rootfs/dump/game.out", "emu",
+     re.compile(r"PAD/spike1|FATAL|Fatal|Segmentation")),
     ("audio.log", "audio",
      re.compile(r"\[play\]|\[padrelay\]|restarting|volume ->|underruns\s+[1-9]")),
 )
@@ -149,10 +165,16 @@ class Spike1EmulatePanel:
     POLL_FIRST_MS = 700
 
     _STATES_TIP = (
-        "Save states let you snapshot a running game and jump back to it "
-        "later. For Spike 1 they need the checkpointable launch (criu over the "
-        "qemu-user process) — that plumbing is still being wired up, so the "
-        "slot manager is present but inactive for now.")
+        "Save states snapshot the running game and jump back to it later — "
+        "mid-ball, across emulator restarts.\n\n"
+        "• Save now freezes the game for a second or two and writes a slot "
+        "(~15-50 MB on the WSL disk)\n"
+        "• Load replaces the running game with the selected slot — the "
+        "emulator must be running the same title\n"
+        "• slots survive rebuilds (each carries the binaries it depends on) "
+        "and stay on disk until deleted\n\n"
+        "A GUI-started run always boots checkpointable (S1_PIVOT); command-"
+        "line runs opt in with S1_PIVOT=1.")
 
     def __init__(self, parent, log=None, card_var=None, theme_fn=None,
                  badge_fn=None, resize_fn=None, footer_cb=None):
@@ -179,6 +201,21 @@ class Spike1EmulatePanel:
         self._viewers = None
         #: the rig-event log tailer: (thread, stop Event) while a run is up.
         self._log_tailer = None
+        #: the slot manager's cached rows + the saves_mtime that produced
+        #: them (status.sh reports it; a change triggers a re-list).
+        self._slots_rows = []
+        self._slots_mtime = None
+        self._slots_busy = False
+        #: the WINDOWS-side speaker (padplay.py) — owned by the APP, not the
+        #: rig.  The rig's WSL side runs only the fifo + TCP relay
+        #: (PAD_AUDIO_SINK=relay): launching a Windows exe from WSL depends on
+        #: an interop socket that dies with the wsl.exe session that spawned
+        #: start.sh, which is why a fresh app + fresh Start used to come up
+        #: silent (2026-08-31 — the sounddevice probe hung forever).  The app
+        #: is a Windows process, so it spawns the player itself and the audio
+        #: path never crosses interop at all.
+        self._player = None
+        self._player_at = 0.0
 
     # ------------------------------------------------------------------
     # plumbing
@@ -392,17 +429,206 @@ class Spike1EmulatePanel:
         side = ttk.Frame(wrap)
         side.pack(side=tk.LEFT, fill=tk.Y, padx=(6, 0))
         self._slots_btns = []
-        for text in ("Launch", "Refresh", "Rename…", "Delete"):
-            b = ttk.Button(side, text=text, width=10, state=tk.DISABLED)
+        for text, cmd in (("Save now", self._slot_save),
+                          ("Load", self._slot_load),
+                          ("Refresh", self._slots_refresh),
+                          ("Rename…", self._slot_rename),
+                          ("Delete", self._slot_delete)):
+            b = ttk.Button(side, text=text, width=10, command=cmd)
             b.pack(fill=tk.X, pady=1)
             self._slots_btns.append(b)
 
-        self._slots_sum = ttk.Label(
-            box, foreground="#888",
-            text="Save states for Spike 1 are coming — they need the "
-                 "checkpointable launch (criu). The manager is here so the tab "
-                 "matches the Spike 2 one; it activates once that lands.")
+        self._slots_sum = ttk.Label(box, foreground="#888",
+                                    text="The slots appear with the next "
+                                         "status poll, or press Refresh.")
         self._slots_sum.pack(anchor=tk.W, padx=8, pady=(0, 6))
+
+        if sys.platform != "win32" or not rig_available():
+            # the slot scripts need root, which only WSL gives for free
+            for b in self._slots_btns:
+                b.configure(state=tk.DISABLED)
+            self._slots_sum.configure(
+                text="Slot management is available on Windows (WSL).")
+
+    # -- slot manager ---------------------------------------------------
+
+    @staticmethod
+    def _fmt_size(n):
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            return "?"
+        for unit in ("B", "KB", "MB", "GB"):
+            if n < 1024 or unit == "GB":
+                return "%d %s" % (n, unit) if unit == "B" else \
+                       "%.1f %s" % (n, unit)
+            n /= 1024.0
+        return "?"
+
+    @staticmethod
+    def _fmt_when(epoch):
+        import datetime
+        try:
+            return datetime.datetime.fromtimestamp(
+                int(epoch)).strftime("%Y-%m-%d %H:%M")
+        except (TypeError, ValueError, OSError, OverflowError):
+            return "?"
+
+    def _slot_selected(self):
+        """The selected row's ``game/slot`` ref, or None."""
+        try:
+            sel = self._slots_tree.selection()
+        except tk.TclError:
+            return None
+        if not sel:
+            return None
+        return sel[0]
+
+    def _slots_refresh(self):
+        """Re-read the slots as root, off the Tk thread, and repaint."""
+        if self._slots_busy or sys.platform != "win32" or not rig_available():
+            return
+        self._slots_busy = True
+
+        def run():
+            rows, total, free = [], None, None
+            try:
+                out = subprocess.run(
+                    rig_cmd_root("s1slots.sh", "list"),
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    timeout=30, creationflags=_rig.CREATE_FLAGS)
+                for line in out.stdout.decode("utf-8", "replace").splitlines():
+                    p = line.strip().split("|", 5)
+                    if p[0] == "slot" and len(p) >= 6:
+                        rows.append({"ref": p[1], "bytes": p[2], "game": p[3],
+                                     "label": p[4].strip(), "epoch": p[5]})
+                    elif p[0] == "total" and len(p) >= 2:
+                        total = p[1]
+                    elif p[0] == "free" and len(p) >= 2:
+                        free = p[1]
+            except Exception:                              # noqa: BLE001
+                pass
+
+            def apply():
+                self._slots_busy = False
+                self._slots_rows = rows
+                self._slots_paint(total, free)
+
+            try:
+                self._timer().after(0, apply)
+            except (tk.TclError, RuntimeError):
+                self._slots_busy = False
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _slots_paint(self, total=None, free=None):
+        try:
+            tree = self._slots_tree
+            tree.delete(*tree.get_children())
+            for row in self._slots_rows:
+                slot = row["ref"].split("/", 1)[-1]
+                tree.insert("", tk.END, iid=row["ref"], values=(
+                    slot, row["label"], row["game"],
+                    self._fmt_size(row["bytes"]),
+                    self._fmt_when(row["epoch"])))
+            if self._slots_rows:
+                text = "%d slot%s — %s on disk" % (
+                    len(self._slots_rows),
+                    "" if len(self._slots_rows) == 1 else "s",
+                    self._fmt_size(total))
+                if free is not None:
+                    text += " · %s free (WSL disk)" % self._fmt_size(free)
+            else:
+                text = ("No save states yet — Save now snapshots the running "
+                        "game.")
+            self._slots_sum.configure(text=text)
+        except tk.TclError:
+            pass
+
+    def _slot_op(self, cmd_args, doing, then_refresh=True):
+        """Run one root slot operation off the Tk thread, log its tagged
+        output, and re-list."""
+
+        def run():
+            try:
+                out = subprocess.run(
+                    rig_cmd_root(*cmd_args),
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    timeout=300, creationflags=_rig.CREATE_FLAGS)
+                for line in out.stdout.decode("utf-8",
+                                              "replace").splitlines():
+                    line = line.strip()
+                    if line:
+                        self._log("Spike 1: " + line)
+            except Exception as exc:                       # noqa: BLE001
+                self._log("Spike 1: %s failed: %s" % (doing, exc))
+            if then_refresh:
+                try:
+                    self._timer().after(0, self._slots_refresh)
+                except (tk.TclError, RuntimeError):
+                    pass
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _slot_save(self):
+        if int(self._info.get("game_procs") or 0) < 1:
+            messagebox.showinfo(
+                "Save state",
+                "No game is running — start the emulator first, then Save "
+                "now snapshots it mid-play.")
+            return
+        from tkinter import simpledialog
+        name = simpledialog.askstring(
+            "Save state", "Slot name (letters, digits, _ . - only):",
+            initialvalue="quicksave", parent=self._parent)
+        if not name:
+            return
+        name = name.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+            messagebox.showerror("Save state",
+                                 "Slot names use letters, digits, _ . - only.")
+            return
+        self._log("Spike 1: saving the game to slot '%s'…" % name)
+        self._slot_op(("s1savestate.sh", name), "save")
+
+    def _slot_load(self):
+        ref = self._slot_selected()
+        if not ref:
+            messagebox.showinfo("Load state", "Pick a slot to load.")
+            return
+        if int(self._info.get("game_procs") or 0) < 1:
+            messagebox.showinfo(
+                "Load state",
+                "The emulator is not running. Start it on the slot's title "
+                "first — Load then swaps the running game for the slot.")
+            return
+        self._log("Spike 1: loading slot '%s'…" % ref)
+        self._slot_op(("s1restorestate.sh", ref), "load")
+
+    def _slot_rename(self):
+        ref = self._slot_selected()
+        if not ref:
+            messagebox.showinfo("Rename", "Pick a slot to rename.")
+            return
+        row = next((r for r in self._slots_rows if r["ref"] == ref), None)
+        from tkinter import simpledialog
+        label = simpledialog.askstring(
+            "Rename slot", "Name for %s:" % ref,
+            initialvalue=(row or {}).get("label", ""), parent=self._parent)
+        if label is None:
+            return
+        self._slot_op(("s1slots.sh", "label", ref, label), "rename")
+
+    def _slot_delete(self):
+        ref = self._slot_selected()
+        if not ref:
+            messagebox.showinfo("Delete", "Pick a slot to delete.")
+            return
+        if not messagebox.askyesno(
+                "Delete slot", "Delete the save state %s?\n\n"
+                "This frees its disk space and cannot be undone." % ref):
+            return
+        self._slot_op(("s1slots.sh", "delete", ref), "delete")
 
     # ------------------------------------------------------------------
 
@@ -419,6 +645,7 @@ class Spike1EmulatePanel:
             self._poll_job = None
         self._close_viewers()
         self._stop_log_tail()
+        self._stop_player()
 
     # ------------------------------------------------------------------
     # pop-out DMD + switch windows
@@ -559,7 +786,18 @@ class Spike1EmulatePanel:
                 # file is a native Windows path, handed over by NAME exactly
                 # as the Spike 2 tab does it; playaudio.sh forwards it to the
                 # Windows padplay.py through WSLENV.
-                env = ["PAD_AUDIO=1", "PAD_AUDIO_CTL=" + AUDIO_CTL_FILE]
+                # S1_PIVOT=1: a GUI-started run always boots CHECKPOINTABLE
+                # (pivot_root) so the save-state controls simply work — the
+                # same stance the Spike 2 tab settled on.  A machine missing
+                # the pivot prerequisites falls back to the ordinary boot and
+                # says so in the streamed log (save states off, nothing else
+                # changes).
+                # PAD_AUDIO_SINK=relay: the rig runs fifo + TCP relay only;
+                # THIS APP spawns the Windows speaker (see _ensure_player) —
+                # the rig launching one itself needs WSL interop, which dies
+                # with start.sh's wsl.exe and wedged the whole chain silent.
+                env = ["PAD_AUDIO=1", "PAD_AUDIO_CTL=" + AUDIO_CTL_FILE,
+                       "PAD_AUDIO_SINK=relay", "S1_PIVOT=1"]
                 rc = self._run_streaming(rig_cmd_root("start.sh", *args,
                                                       env=env),
                                          timeout=1800)
@@ -632,9 +870,64 @@ class Spike1EmulatePanel:
             except Exception as exc:                       # noqa: BLE001
                 self._log("Spike 1: stop failed: %s" % exc)
             finally:
+                self._stop_player()
                 self._release()
 
         threading.Thread(target=work, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # the Windows-side speaker (see the __init__ note for why the app owns it)
+    # ------------------------------------------------------------------
+
+    def _player_cmd(self):
+        """The speaker command: PAD's own console python running padplay.py
+        against the rig's relay.  None when a piece is missing."""
+        py = windows_python(console=True)
+        pp = os.path.join(os.path.dirname(rig_dir()), "spike2_emu",
+                          "padplay.py")
+        if not py or not os.path.isfile(pp):
+            return None
+        return [py, pp, "127.0.0.1", "45998", "44100", "2"]
+
+    def _ensure_player(self):
+        """Keep one Windows player alive while a run is up.  Called from the
+        status poll; a player that exited (relay not up yet, the 25 s no-data
+        watchdog, a crash) is relaunched with a 5 s backoff — connection
+        refused costs one instant exit per attempt, nothing more."""
+        if sys.platform != "win32":
+            return
+        p = self._player
+        if p is not None and p.poll() is None:
+            return
+        now = time.monotonic()
+        if now - self._player_at < 5.0:
+            return
+        cmd = self._player_cmd()
+        if not cmd:
+            return
+        self._player_at = now
+        env = dict(os.environ)
+        env["PAD_AUDIO_CTL"] = AUDIO_CTL_FILE
+        try:
+            self._player = subprocess.Popen(
+                cmd, env=env, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=_rig.CREATE_FLAGS)
+            if p is None:
+                self._log("Spike 1: speaker up (app-side Windows player).")
+        except Exception as exc:                           # noqa: BLE001
+            self._log("Spike 1: could not start the speaker: %s" % exc)
+            self._player = None
+
+    def _stop_player(self):
+        p = self._player
+        self._player = None
+        if p is None:
+            return
+        try:
+            p.kill()
+        except Exception:                                  # noqa: BLE001
+            pass
 
     def _release(self):
         def done():
@@ -979,6 +1272,22 @@ class Spike1EmulatePanel:
                 self._vals["boards"].configure(
                     text="yes" if info.get("nodes_registered") == "1"
                     else "not yet")
+
+            # the app-side speaker follows the run: alive while a game is up,
+            # gone when it is not (padplay also self-exits when the relay
+            # closes or the PCM stops for 25 s — this is the belt half).
+            if self._last_up:
+                self._ensure_player()
+            else:
+                self._stop_player()
+
+            # re-list the save slots when their directory changed (a save, a
+            # delete — status.sh reports the saves dir's mtime), and once on
+            # the first poll so the manager fills without a button press.
+            sm = info.get("saves_mtime")
+            if sm != self._slots_mtime:
+                self._slots_mtime = sm
+                self._slots_refresh()
 
             # drive the shared footer ladder (Extract / Boot / Node boards / Ready)
             if self._busy and self._extracting:

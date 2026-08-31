@@ -851,8 +851,20 @@ class _VideoPreviewPane:
         still."""
         if self.dur > 0.2:
             spots = [self.dur * f for f in self.POSTER_FRACTIONS]
+        elif self.dur > 0:
+            # A clip SHORTER than the blind offset below -- a one-frame still
+            # is 1/30 s, and 463 of Batman's 6331 slots are under 0.2 s.
+            # Seeking 0.5 s into one lands past its last frame, ffmpeg
+            # returns nothing, and the pane accused the file of being
+            # undecodable (a field report).  Its first frame is also its
+            # representative one.
+            spots = [0.0]
         else:
-            spots = [0.5]
+            spots = [0.5]      # duration unknown: a safe guess for any clip
+        if spots[-1] > 0:
+            # Last resort for a duration that overstates the clip: every
+            # offset can miss, frame 0 cannot.
+            spots.append(0.0)
         self._render_poster(spots[0], fallbacks=spots[1:], sampling=True)
 
     def _render_poster(self, pos, fallbacks=None, sampling=False):
@@ -947,6 +959,13 @@ class _VideoPreviewPane:
                     "Couldn't draw this frame: %s\n%s"
                     % (e, _pil_tk_hint()))
         else:
+            if fallbacks:
+                # Nothing came back from THAT offset.  A seek past the end of
+                # a short clip is not a broken file, so try the next sample
+                # spot (the last one is always frame 0) before blaming ffmpeg.
+                self._render_poster(fallbacks[0], fallbacks[1:],
+                                    sampling=sampling)
+                return
             canvas.delete("all")
             self._draw_canvas_note(
                 "Couldn't decode a frame from this clip — check that ffmpeg "
@@ -1189,8 +1208,20 @@ class _VideoPreviewPane:
         self._update_time()
 
     def _update_time(self):
+        # A clip shorter than a second is normal on a Spike 2 card, and
+        # whole-second readouts turned every one of them into "0:00 / 0:00" --
+        # the same "this slot is empty" impression the list's Length column
+        # gave (a field report).  Sub-second clips get their milliseconds,
+        # matching VideoSlot.duration_str.
+        fine = 0 < self.dur < 1
+
         def _fmt(s):
-            s = max(0, int(s))
+            s = max(0.0, float(s))
+            if fine:
+                # The clock runs a little past the end before _tick notices;
+                # never show a playhead longer than the clip.
+                return "0:00.%03d" % int(min(s, self.dur) * 1000)
+            s = int(s)
             return f"{s // 60}:{s % 60:02d}"
         if self.path and self.dur > 0:
             self.time_var.set(f"{_fmt(self.pos)} / {_fmt(self.dur)}")

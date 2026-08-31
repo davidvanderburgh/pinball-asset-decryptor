@@ -82,6 +82,14 @@ class VideoSlot:
         d = self.duration
         if d <= 0:
             return "—"
+        if d < 1:
+            # Sub-second clips are ordinary on a Spike 2 card -- a sixth of
+            # Batman's 6331 slots are, right down to one-frame stills -- and
+            # m:ss rendered every one of them "0:00", which reads as an empty
+            # slot or a failed probe rather than a short clip (a field
+            # report).  Show the milliseconds instead, the same m:ss.mmm the
+            # audio tab's Length column uses.
+            return "0:00.%03d" % int(d * 1000)
         # Floor, don't round: the preview player's readout floors, and the
         # two disagreeing on the same clip (25.5 s showing 0:26 in the list
         # but 0:25 in the player) read as a bug (feedback batch 14).

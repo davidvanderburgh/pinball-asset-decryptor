@@ -88,6 +88,29 @@ def test_duration_property_handles_missing_info():
     assert slot.format_summary() == "MP4"
 
 
+def test_duration_str_keeps_sub_second_clips_off_zero():
+    """Short clips are ordinary on a Spike 2 card -- 1007 of Batman's 6331
+    slots are under a second, 463 of them under 0.2 s -- and m:ss printed
+    every one of them "0:00", which a field report read as zero-length /
+    empty slots.  Under a second the milliseconds show, the same m:ss.mmm
+    the audio tab's Length column uses."""
+    from pinball_decryptor.core.video import VideoInfo
+
+    def mk(dur):
+        return VideoSlot(rel_path="a.mp4", abs_path="a.mp4", ext=".mp4",
+                         info=VideoInfo("a.mp4", duration=dur), size=0)
+
+    assert mk(0.033333).duration_str() == "0:00.033"   # a one-frame still
+    assert mk(0.875875).duration_str() == "0:00.875"
+    assert mk(0.9999).duration_str() == "0:00.999"     # floors, never "0:01"
+    # A second and up is untouched: floored m:ss, matching the player.
+    assert mk(1.0).duration_str() == "0:01"
+    assert mk(4.004).duration_str() == "0:04"
+    assert mk(25.5).duration_str() == "0:25"
+    # Only a clip whose length is genuinely unknown gets the dash.
+    assert mk(0.0).duration_str() == "—"
+
+
 def test_longest_first_sort_uses_duration():
     from pinball_decryptor.core.video import VideoInfo
 

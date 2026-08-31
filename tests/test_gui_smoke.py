@@ -4621,6 +4621,71 @@ def test_video_pane_rewind_reposters_a_representative_frame(app):
     assert asked[-1][0] == pytest.approx(5.0)
 
 
+def test_video_poster_does_not_seek_past_a_short_clip(app):
+    """463 of Batman's 6331 clips are under 0.2 s (a one-frame still is
+    1/30 s).  The blind 0.5 s offset landed past their last frame, ffmpeg
+    returned nothing, and the pane told a field reporter his file couldn't be
+    decoded — for a clip that is perfectly fine, just short."""
+    pytest.importorskip("PIL")
+    pane = _poster_pane(app)
+    asked = []
+    pane._render_poster = (lambda pos, fallbacks=None, sampling=False:
+                           asked.append((pos, tuple(fallbacks or ()))))
+
+    pane.dur = 0.033333                       # one frame at 30 fps
+    pane._render_representative_poster()
+    assert asked[-1] == (0.0, ())             # its first frame IS the clip
+
+    # Duration unknown: still guess 0.5 s in, but frame 0 now backs it up.
+    asked.clear()
+    pane.dur = 0.0
+    pane._render_representative_poster()
+    assert asked[-1] == (0.5, (0.0,))
+
+    # A normal clip keeps its mid-clip sampling, 0.0 as the last resort.
+    asked.clear()
+    pane.dur = 10.0
+    pane._render_representative_poster()
+    assert asked[-1] == (pytest.approx(5.0),
+                         pytest.approx((2.5, 7.5, 0.8, 0.0)))
+
+
+def test_video_poster_tries_the_next_spot_when_a_seek_decodes_nothing(app):
+    """A duration that overstates the clip makes ffmpeg return no frame at
+    all.  That is a bad offset, not a bad file — keep sampling, and only
+    blame ffmpeg once frame 0 itself has come back empty."""
+    pytest.importorskip("PIL")
+    pane = _poster_pane(app)
+    asked = []
+    pane._render_poster = (lambda pos, fallbacks=None, sampling=False:
+                           asked.append((pos, sampling)))
+
+    pane._show_poster(None, pane._render_id, (2.5, 0.0), sampling=True)
+    assert asked == [(2.5, True)]
+    assert pane.canvas.find_withtag("note") == ()
+
+
+def test_video_pane_time_readout_shows_a_sub_second_clip(app):
+    """"0:00 / 0:00" under a clip that plays is the same "this is empty"
+    impression the list's Length column gave (a field report)."""
+    pytest.importorskip("PIL")
+    pane = _poster_pane(app)
+    pane.dur, pane.pos = 0.876, 0.4
+    pane._update_time()
+    assert pane.time_var.get() == "0:00.400 / 0:00.876"
+
+    # The playback clock overruns the end before _tick stops it; the readout
+    # must never claim more than the clip holds.
+    pane.pos = 1.2
+    pane._update_time()
+    assert pane.time_var.get() == "0:00.876 / 0:00.876"
+
+    # A clip of a second or more reads exactly as before.
+    pane.dur, pane.pos = 65.0, 12.9
+    pane._update_time()
+    assert pane.time_var.get() == "0:12 / 1:05"
+
+
 def test_video_poster_explains_a_frame_it_cannot_show(app):
     """Neither a dead decode nor a Pillow/Tk failure may fall through to a
     silent black canvas — each has to name itself on the pane."""

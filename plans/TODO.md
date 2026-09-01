@@ -5418,33 +5418,74 @@ These have each been violated at least once and each cost a run or a window:
         0 → 259 and `dungeons_and_dragons_le` +41 on the two other ELFs
         reachable without a card mount, and the 40-image `cardaudit.py` sweep
         that produced that list has NOT been re-run.
-      - **james_bond_le 1.06.0 — ❌ SEGV, David 2026-09-01 09:32.** "it’s a
-        seg fault when starting the game". The guest takes **qemu signal 11
-        ~12 s into the run**, during boot/attract scene loading, not after a
-        Start press that reached play. Boot is otherwise healthy up to the
-        moment it dies — 8 node identities derived from the title’s own
-        directory, node 2 silenced by census, 543 device records
-        (coil=17 led=431 switch=95), 107 of 108 `?` names filled, picture
-        FIRST at frame 77, ch0 video handing the game 30.9/s then 30.0/s.
-        **The signature, verbatim from David’s log:**
-        ```
-        ExchangeData: read failed (received 0, expected length=1
-        [segv] pc=0x4117cdae lr=0x4114679c r0=0x3f003536 fault=0x0
-        [segv] map 41106000-4122e000 r-xp /lib/libc-2.21.so   <-- PC
-        [segv] pc = mapping + 0x76dae
-        [segv] loader_gate[0x7e1a10]=0 boot_ready[0x7e1974]=152
-                thread_run[0x794af5]=223 scene_opens=318
-        [segv] filebuf::xsgetn=613322 (small=589331) filebuf::underflow=1249
-                __basic_file::xsgetn=1804
-        [segv] event 93 handler[0] = 0x20474f4c prio=73
-        [segv] event 93 handler[1] = 0x921ccb1c prio=108
-        ```
-        **The lead, and it is why this is not just “another clean exit”:
-        `handler[0] = 0x20474f4c` is ASCII — `4c 4f 47 20` little-endian is
-        `"LOG "`.** An event handler slot holding text is memory the game did
-        not write as a pointer, so this is a corruption signature, not a null
-        deref of a slot that was merely empty. Triage in progress this pass.
-
+      - **james_bond_le 1.06.0 — ❌ SEGV, David 2026-09-01 09:32; FIRST BOOT of
+        this title on the rig** (every derived table under
+        `dump/tables/james_bond_le` is stamped 09:32 today; it is not the
+        `james_bond_60th_le` of items 70/53). "it’s a seg fault when starting
+        the game". The guest takes qemu signal 11 ~12 s in. Boot is healthy up
+        to it: 8 node identities from the title’s own directory, node 2
+        silenced by census, 543 device records (coil=17 led=431 switch=95),
+        107 of 108 `?` names filled, picture FIRST at frame 77, ch0 video 30/s.
+        **Established — WHERE IT FAULTED, resolved at the desk against the
+        guest’s own libc** (`/home/david/spike2root/lib/libc-2.21.so`, first
+        PT_LOAD at vaddr 0, so a mapping offset is a vaddr):
+        `pc = libc+0x76dae = strlen+0xad`, `lr = libc+0x4079c = vfprintf+0x36b4`.
+        **That is a printf-family `%s` handed a bad pointer**, and `r0` is that
+        pointer: `0x3f003536`, which is in no mapping this process has.
+        **Ruled out — the node bus, and the one anomaly in it was mine.** The
+        3164 `ExchangeData: read failed` lines are the normal bring-up storm
+        (autoattract.sh uses that storm going quiet as its readiness signal),
+        and the census is regular: 1058 at length 13, 1057 at 3, 1053 at 12.
+        A single apparent `expected length=1` looked like the odd one out and
+        is NOT real — its remainder `2), timed out` continues two lines later
+        (gzwatch.log:5367 and :5369), so it was a length=**12** line split by
+        an interleaved `[vid]` write. Splits like that are routine here.
+        **Which printf, as INFERENCE not proof:** the last stderr text,
+        `ExchangeData: read fail` (gzwatch.log:6079), is the ONLY split in the
+        whole log with no remainder anywhere after it — the process died with
+        that message unfinished. Bond’s binary carries two formats at file
+        offset 7613152: `%s: read failed (received %d, expected length=%d),
+        timed out` and `…, %s`. The leading `%s` had already printed, so the
+        bad pointer is the TRAILING `%s` of the second form — a variant that
+        had not fired once in the 3163 failures before it. Unproven until a
+        register dump names the arguments.
+        **★★ AND THE CRASH REPORT LIED, THEN KILLED THE RUN — that half is
+        OURS, and it is fixed this pass.** `loader_gate=0 boot_ready=152
+        thread_run=223` and `event 93 handler[0] = 0x20474f4c` are GODZILLA PRO
+        1.15.0 addresses read against BOND’s memory; `0x20474f4c` is the ASCII
+        `"LOG "`. The gate on those dumps was `a_sw_struct()`, and
+        `title_addr()` only checks an address is **MAPPED** — true of any
+        binary big enough to cover `0x7a958c`. hwshim.c already records EHOH
+        being caught by exactly that hole; the crash reporter had it too. The
+        event walk then followed one of those invented pointers and **faulted a
+        SECOND time inside the signal handler**, which is why the run ended
+        `qemu: uncaught target signal 11 … core dumped` instead of the
+        handler’s own `_exit(99)` — and why the 16 registers and the stack
+        backtrace, the title-agnostic half that would have named the game’s
+        fault, never printed at all. Compounding it: `run_game.sh:433` and
+        `:457` export `PAD_SEGV_REPORT=1` on EVERY run, though hwshim.c
+        documents FULL mode as opt-in "because the dump below reads Godzilla
+        Pro’s addresses".
+        **Fixed in hwshim.c (compiles; NOT yet validated — see Resume):**
+        `gz_addrs_ok()` is an identity test (`PAD_GAME` names a godzilla build,
+        or `PAD_GZ_ADDRS=1/0` overrides) instead of a mapping test; every
+        dereference in the event walk goes through a new `gz_word()` that
+        checks readability first, so the reporter cannot fault; the registers
+        and the backtrace are hoisted to directly after the header so they
+        print on every title whatever is skipped below. The same
+        mapped-means-identity bug was live in two more places and both are
+        moved to `gz_addrs_ok()`: `aud_dump`’s pool walk (**item 41’s crash,
+        and armed on every run — the app passes `PAD_AUDIO_DUMP=30`**) and the
+        node-poll diagnostic that the comment says Jaws already faulted in.
+        **Resume:** the rig was David’s all pass (his Bond run still up, guest
+        dead), so nothing was built. Next: `build.sh`, then `segvtest.sh` — the
+        labelled-example harness that exists for exactly this change ("run
+        after ANY change to the segv path", 2 s, needs no emulator run, and its
+        B1/B2 control is what proves the reporter still is not changing how a
+        run dies). Then re-run james_bond_le: the report will carry all 16
+        registers and the backtrace, and r1/r2/r3 plus the format-string
+        address settle which `%s` and which argument. The GAME’s fault is still
+        unfixed — only its report is.
 
 - [ ] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
       and identified; node 4 polled forever while we silence it; board 24

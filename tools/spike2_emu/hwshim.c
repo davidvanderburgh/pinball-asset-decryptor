@@ -1891,6 +1891,62 @@ static void segv_install(void)
         segv_guard_ready = 1;   /* sw_find_table's guard can land */
 }
 
+/* IS THIS THE TITLE THE HARDCODED ADDRESSES CAME FROM?
+ *
+ * Everything in the dump below reads addresses read out of GODZILLA PRO
+ * 1.15.0, and until 2026-09-01 the test guarding them was a_sw_struct(), which
+ * does NOT answer that question - title_addr() only checks that 0x7a958c is
+ * MAPPED, which is true of any binary big enough to cover it. The file already
+ * records EHOH being caught by exactly that (a switch table read out of
+ * somebody else's data, no error to see); the crash reporter had the same hole
+ * and it cost a run.
+ *
+ * james_bond_le 1.06.0, David's item-80 sweep: the game faulted for its own
+ * reasons, this handler took the fault, printed Godzilla's loader gate and
+ * event table against BOND's memory as fact - "event 93 handler[0] =
+ * 0x20474f4c", which is the ASCII "LOG " - then followed one of those invented
+ * pointers and FAULTED A SECOND TIME inside the signal handler. That is why
+ * the run ended `qemu: uncaught target signal 11 ... core dumped` instead of
+ * this function's own _exit(99), and why nothing after the event walk (the
+ * registers, the stack backtrace - the title-agnostic half that would have
+ * named the game's fault) ever printed.
+ *
+ * So the gate is now an identity test, not a mapping test:
+ *   PAD_GZ_ADDRS=1  an operator saying "these addresses are right for this
+ *                   title" - the same escape hatch PAD_SW_STRUCT gives;
+ *   PAD_GZ_ADDRS=0  never, whatever the title;
+ *   otherwise       PAD_GAME must name a godzilla build.
+ * The mapping test is kept as well: an address that is right for the title and
+ * still unmapped is unusable either way. */
+static int gz_addrs_ok(void)
+{
+    static int v, done;
+    if (!done) {
+        const char *e = getenv("PAD_GZ_ADDRS");
+        const char *g = getenv("PAD_GAME");
+        done = 1;
+        if (e && (e[0] == '0' || e[0] == '1'))
+            v = (e[0] == '1');
+        else
+            v = (g && g[0] == 'g' && g[1] == 'o' && g[2] == 'd' && g[3] == 'z'
+                 && g[4] == 'i' && g[5] == 'l' && g[6] == 'l' && g[7] == 'a');
+        if (v && !a_sw_struct()) v = 0;
+    }
+    return v;
+}
+
+/* Read a word only if its address is mapped. A crash reporter that faults is
+ * worse than one that says less: the second fault is delivered on a stack that
+ * is already inside a signal handler, so it does not report anything at all -
+ * it just kills the process. Every walk below goes through this. */
+static int gz_word(unsigned long a, unsigned long *out)
+{
+    if (a < 0x1000ul || (a & 3)) return 0;
+    if (!addr_readable((const void *)a)) return 0;
+    *out = *(volatile unsigned long *)a;
+    return 1;
+}
+
 static void segv_handler(int sig, void *info, void *ucv)
 {
     unsigned long *uc = ucv;
@@ -1901,6 +1957,38 @@ static void segv_handler(int sig, void *info, void *ucv)
     if (!uc) { logmsg("[segv] no context\n"); _exit(99); }
 
     segv_print_header(uc);
+
+    /* THE TITLE-AGNOSTIC HALF FIRST, because it is the half that is true on
+     * every title and the half a crash report cannot do without. It used to
+     * sit below the Godzilla-address dumps - the registers inside the audio
+     * block, the backtrace at the very end - so on james_bond_le, where those
+     * dumps faulted, the one crash this rig most needed to read printed a pc
+     * and nothing else. Nothing between here and the header can fault now. */
+    snprintf(b, sizeof b,
+             "[segv] r0=%08lx r1=%08lx r2=%08lx r3=%08lx r4=%08lx r5=%08lx\n"
+             "[segv] r6=%08lx r7=%08lx r8=%08lx r9=%08lx sl=%08lx fp=%08lx\n"
+             "[segv] ip=%08lx sp=%08lx lr=%08lx pc=%08lx\n",
+             uc[8], uc[9], uc[10], uc[11], uc[12], uc[13],
+             uc[14], uc[15], uc[16], uc[17], uc[18], uc[19],
+             uc[20], uc[21], uc[22], uc[23]);
+    logmsg(b);
+
+    /* No frame pointers, so approximate a backtrace by scanning the stack for
+     * words that land inside the game's .text. Noisy but enough to see which
+     * subsystem is on the call chain. */
+    {
+        unsigned long sp = uc[21];
+        int i, shown = 0;
+        for (i = 0; i < 512 && shown < 24; i++) {
+            unsigned long v;
+            if (!gz_word(sp + (unsigned long)i * 4, &v)) break;
+            if (v > 0x16a00 && v < 0x5d3168 && (v & 3) == 0) {
+                snprintf(b, sizeof b, "[segv]   stack[%3d] = 0x%lx\n", i, v);
+                logmsg(b);
+                shown++;
+            }
+        }
+    }
 
     /* The scene loader thread (0x447440) does no work at all unless the gate
      * byte at 0x7e1a10 is set, and the boot step waits on 0x7e1974. The shim
@@ -1914,7 +2002,8 @@ static void segv_handler(int sig, void *info, void *ucv)
         unsigned char *gate  = (unsigned char *)0x7e1a10;
         unsigned char *ready = (unsigned char *)0x7e1974;
         unsigned char *run   = (unsigned char *)0x794af5;
-        if (a_sw_struct())
+        if (gz_addrs_ok() && addr_readable(gate) && addr_readable(ready)
+            && addr_readable(run))
             snprintf(b, sizeof b,
                      "[segv] loader_gate[0x7e1a10]=%d boot_ready[0x7e1974]=%d "
                      "thread_run[0x794af5]=%d scene_opens=%d\n",
@@ -1947,17 +2036,27 @@ static void segv_handler(int sig, void *info, void *ucv)
          * "[segv] event 93 has NO handlers", which is not a finding about that
          * title - it is this shim reading someone else's memory and stating the
          * result. Same rule as the block above. */
-        unsigned long *tbl = (unsigned long *)0x7e4d48;
+        unsigned long tbl = 0x7e4d48;
         int ev;
-        for (ev = 93; a_sw_struct() && ev <= 94; ev++) {
-            unsigned long node = tbl[ev];
+        for (ev = 93; gz_addrs_ok() && ev <= 94; ev++) {
+            unsigned long node, fn, next;
             int k = 0;
+            if (!gz_word(tbl + (unsigned long)ev * 4, &node)) break;
+            /* Every dereference is checked. The walk used to trust the list it
+             * found, which is fine on the title it was written for and fatal
+             * on any other - see gz_addrs_ok() above. */
             while (node && k < 12) {
+                if (!gz_word(node, &fn) || !gz_word(node + 8, &next)) {
+                    snprintf(b, sizeof b,
+                             "[segv] event %d handler[%d]: list node 0x%lx is not"
+                             " readable - stopping the walk\n", ev, k, node);
+                    logmsg(b);
+                    break;
+                }
                 snprintf(b, sizeof b, "[segv] event %d handler[%d] = 0x%lx prio=%d\n",
-                         ev, k, *(unsigned long *)node,
-                         *(unsigned char *)(node + 4));
+                         ev, k, fn, *(unsigned char *)(node + 4));
                 logmsg(b);
-                node = *(unsigned long *)(node + 8);
+                node = next;
                 k++;
             }
             if (!k) {
@@ -1978,7 +2077,11 @@ static void segv_handler(int sig, void *info, void *ucv)
      *
      * so the voice pointer 0x30ed20 kept at [sp,#44] is stack word 28, and its
      * saved lr is word 44 - which is exactly where 0x2a24ac was reported. */
-    {
+    if (!gz_addrs_ok()) {
+        logmsg("[segv] mixer/loader dump skipped: those addresses are Godzilla"
+               " Pro 1.15.0's and this is not that title (PAD_GZ_ADDRS=1"
+               " overrides)\n");
+    } else {
         unsigned long sp = uc[21];
         unsigned long *w = (unsigned long *)sp;
         unsigned long obj = w[28];
@@ -1991,18 +2094,10 @@ static void segv_handler(int sig, void *info, void *ucv)
                  obj, (long)((obj - base) / 64), uc[12], uc[19]);
         logmsg(b);
 
-        /* Don't infer the caller from the stack scan - print the registers and
-         * the raw frame. r5 holds the out descriptor, which each mixer clone
-         * places at a different offset in its own frame, so r5 identifies the
-         * clone exactly. */
-        snprintf(b, sizeof b,
-                 "[audio] r0=%08lx r1=%08lx r2=%08lx r3=%08lx r4=%08lx r5=%08lx\n"
-                 "[audio] r6=%08lx r7=%08lx r8=%08lx r9=%08lx sl=%08lx fp=%08lx\n"
-                 "[audio] ip=%08lx sp=%08lx lr=%08lx pc=%08lx\n",
-                 uc[8], uc[9], uc[10], uc[11], uc[12], uc[13],
-                 uc[14], uc[15], uc[16], uc[17], uc[18], uc[19],
-                 uc[20], uc[21], uc[22], uc[23]);
-        logmsg(b);
+        /* r5 holds the out descriptor, which each mixer clone places at a
+         * different offset in its own frame, so r5 identifies the clone
+         * exactly. The registers themselves are printed above, for every
+         * title. */
         snprintf(b, sizeof b, "[audio] out-desc r5 is at caller_sp + %ld\n",
                  (long)(uc[13] - (sp + 68)));
         logmsg(b);
@@ -2119,22 +2214,9 @@ static void segv_handler(int sig, void *info, void *ucv)
         }
     }
 
-    /* No frame pointers, so approximate a backtrace by scanning the stack for
-     * words that land inside the game's .text. Noisy but enough to see which
-     * subsystem is on the call chain. */
-    {
-        unsigned long sp = uc[21];
-        unsigned long *w = (unsigned long *)sp;
-        int i, shown = 0;
-        for (i = 0; i < 512 && shown < 24; i++) {
-            unsigned long v = w[i];
-            if (v > 0x16a00 && v < 0x5d3168 && (v & 3) == 0) {
-                snprintf(b, sizeof b, "[segv]   stack[%3d] = 0x%lx\n", i, v);
-                logmsg(b);
-                shown++;
-            }
-        }
-    }
+    /* The stack backtrace used to be here. It is printed right after the
+     * header now, so that a title whose dumps above are skipped or stopped
+     * still gets it - see the note there. */
     _exit(99);
 }
 
@@ -7408,11 +7490,14 @@ static void audio_dump(void)
      * screen and it dies": the flipper makes a sound, the sound is an ioctl,
      * and the ioctl walked a stranger's linked list.
      *
-     * a_sw_struct() is the rig's existing test for "this is the title those
-     * addresses came from" - the segv handler uses it for exactly this reason,
-     * and David's crash output proves it answers correctly here ("loader-gate
-     * addresses are Godzilla Pro's; not reported for this title"). */
-    if (!a_sw_struct()) {
+     * THE GATE WAS a_sw_struct() AND THAT WAS NOT GOOD ENOUGH (2026-09-01).
+     * It answers "0x7a958c is mapped", not "this is that title", so on any
+     * title with a big enough binary this dump ran anyway and walked a
+     * stranger's linked list - item 41's crash, re-armed. james_bond_le is
+     * such a title, and the app passes PAD_AUDIO_DUMP=30 on every run, so this
+     * was live during David's Bond run. gz_addrs_ok() is the identity test;
+     * see it for what changed and why. */
+    if (!gz_addrs_ok()) {
         logmsg("[aud] mixer/pool dump skipped: those addresses are Godzilla"
                " Pro's and this is not that title\n");
         return;
@@ -10202,9 +10287,11 @@ long shim_read(int fd, void *b, unsigned long n)
                     /* The two addresses below are Godzilla Pro 1.15.0's and
                      * this is only a diagnostic, so it is skipped entirely on
                      * any other title - Jaws faulted here, in a printf, for the
-                     * third time in this file. a_sw_struct() is the test for
-                     * "the configured addresses are this title's". */
-                    if (budget > 0 && want && a_sw_struct()) {
+                     * third time in this file. The test was a_sw_struct(),
+                     * which only means "mapped" and therefore did NOT skip it
+                     * on another title; gz_addrs_ok() (2026-09-01) is the
+                     * identity test it always meant to be. */
+                    if (budget > 0 && want && gz_addrs_ok()) {
                         /* Print the two things 0x1d7d88 is about to test for
                          * this node, so a poll that leads nowhere says why:
                          *   board[+4] bit 0  (0x7bad88 + node*0xe0 + 4)

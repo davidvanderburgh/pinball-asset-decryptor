@@ -39,6 +39,10 @@ echo "rig processes running: $before"
 
 pkill -9 -x game
 pkill -9 -f 'arm-binfmt|qemu-arm'
+# The boot selector (item 90): the ARM menu run_game.sh runs BEFORE the game
+# on a PAD_SELECT run. Under WSL the binfmt pattern above already reaches it;
+# in the macOS container only its comm does. alive.sh counts it.
+pkill -9 -x codeselect
 pkill -9 -x padglhost
 pkill -9 -f nodebus.py
 pkill -9 -f 'autoattract.sh'

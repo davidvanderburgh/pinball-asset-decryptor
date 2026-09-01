@@ -27,6 +27,42 @@ real root; fuse2fs does not, and `apt-get download` + `dpkg-deb -x` into a
 private prefix gets fuse2fs without a package manager or a password. Extraction
 still works and is still the faster option for a title you run constantly.
 
+## Boot selector (item 90)
+
+```bash
+PAD_CARD=/path/to/tmnt_multi.raw PAD_SELECT=1 watch.sh
+```
+
+A **multi-image card** (`mkmulticard.py`: Stern's p1/p2, the primary's games
+partition as p3, each extra image's games partition appended as p7, p8...)
+boots into a menu on the machine, and `PAD_SELECT=1` runs that same menu
+here: `run_game.sh` mounts every games partition (`cardmount.sh --part N`, one
+`~/card/<label>.pN` per extra, sharing the primary's cache copy), writes the
+menu to `$ROOT/dump/codeselect.conf` (the card's own
+`/usr/local/codeselect/images.conf` names when it carries one), and chroots
+`/usr/local/codeselect/codeselect` - the ARM selector, drawing in the game
+window through the GL bridge, no shim - before the game. Arrow keys are the
+flippers and move the highlight, `1` is START and confirms, and the countdown
+boots the highlighted image by itself. The choice lands in
+`$ROOT/dump/select.choice`, the selector's log in `$ROOT/dump/codeselect.log`,
+the remembered highlight in `$ROOT/data/codeselect.last`; a non-primary choice
+is a second bind over `games/<title>`, and the game then execs exactly as on
+a plain card run. `[select]` lines reach the event pane; `dump/selecting` is
+the flag that keeps `watch.sh` (and autoattract) from reading the menu phase
+as a dead game.
+
+Knobs: `PAD_SELECT=1` turns it on (a plain run is byte-for-byte unchanged
+without it); `PAD_SELECT_TIMEOUT` is the countdown in seconds (30; `0` waits
+for ever); `PAD_CARD_CACHE=0` runs a WSL-local image without the 14 GB cache
+copy. `buildselect.sh` builds the selector into `$ROOT` (`ensurebuild.sh`'s
+`pad_ensure_select` does it on a `PAD_SELECT` start, and refuses the run if it
+cannot); `alive.sh` counts it as `selector (codeselect)`.
+
+The hardware side is the same program installed in p2 and hooked into
+`/etc/init.d/game` by `select.sh`, reading the flippers over the node bus and
+remounting `/games` from the chosen partition - `codeselect/DESIGN.md` has the
+card layout, the file formats and the degrade-to-stock rules.
+
 ## Titles
 
 **Per-title emulation status, one line per title, kept current by `/finish`**

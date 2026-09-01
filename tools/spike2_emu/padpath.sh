@@ -412,6 +412,40 @@ export PAD_GLHOST_BIN PAD_GLHOST_STAMP PAD_GLGUEST_STAMP
 
 pad_glhost_hash()  { pad_src_hash "${1:-$RIG}" $PAD_GLHOST_SRCS; }
 pad_glguest_hash() { pad_src_hash "${1:-$RIG}" $PAD_GLGUEST_SRCS; }
+
+# ---- WHAT THE BOOT SELECTOR IS BUILT FROM, THE SAME WAY (item 90) ---------
+#
+# codeselect is the ARM menu a multi-image card boots into before the game:
+# on the machine it is installed in the rootfs by mkmulticard.py, in the
+# emulator buildselect.sh cross-compiles it into $ROOT and run_game.sh runs
+# it (chroot, no shim) before the game on a PAD_SELECT run. Its sources live
+# in codeselect/ with their own Makefile - the build is `make install`, not a
+# gcc line here - so the list is RIG-relative paths and carries the Makefile
+# and select.sh too: a change to how it is built or hooked is a change to
+# what runs, and the digest has to see it. Same rule as the three lists
+# above: one list, the copy and the staleness check both read it - and
+# buildselect.sh copies ONLY this list into the staging directory, so a
+# source the Makefile needs and this list lacks is a build that fails on a
+# missing file (tests/test_spike2_codeselect_rig.py checks the two agree).
+# images.conf.example is on it because `make install` installs it.
+PAD_SELECT_SRCS="codeselect/codeselect.c codeselect/conf.c codeselect/conf.h codeselect/gfx.c codeselect/gfx.h codeselect/egl_stern.c codeselect/egl_stern.h codeselect/input.c codeselect/input.h codeselect/input_hw.c codeselect/input_padsw.c codeselect/log.c codeselect/log.h codeselect/Makefile codeselect/select.sh codeselect/images.conf.example codeselect/third_party/stb_truetype.h codeselect/third_party/stb_image.h"
+export PAD_SELECT_SRCS
+
+#: The installed selector, and what it was built from - stamped beside it,
+#: in the directory the Makefile's `install` creates.
+PAD_SELECT_BIN=$ROOT/usr/local/codeselect/codeselect
+PAD_SELECT_STAMP=$ROOT/usr/local/codeselect/codeselect.srcs
+export PAD_SELECT_BIN PAD_SELECT_STAMP
+pad_select_hash() { pad_src_hash "${1:-$RIG}" $PAD_SELECT_SRCS; }
+
+#: WHERE THE CHOICE LANDS, as the GUEST spells it: /dump is $ROOT/dump
+#: self-bound, so the host reads the same file at "$ROOT$PAD_SELECT_CHOICE".
+#: One line, '<index>\n', written by codeselect on a confirmed choice and
+#: read by run_game.sh to pick the partition to bind. Defined ONCE, here,
+#: because the selector is told it on its command line and run_game.sh reads
+#: it back - two spellings of that path is how a choice goes unread.
+PAD_SELECT_CHOICE=/dump/select.choice
+export PAD_SELECT_CHOICE
 if pad_is_wsl; then IS_WSL=1; else IS_WSL=0; fi
 
 # ---- IS THERE A DISPLAY TO PUT THE GAME WINDOW ON? -----------------------

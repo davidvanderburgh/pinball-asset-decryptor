@@ -184,6 +184,68 @@ pad_ensure_shim() {
     return 0
 }
 
+# ---------------------------------------------------------------------------
+# The boot selector (item 90)
+# ---------------------------------------------------------------------------
+# Called ONLY on a PAD_SELECT run - watch.sh gates the call - and there the
+# stance is the shim's with one asymmetry sharpened: MISSING is FATAL. A run
+# that asked for the code menu and quietly booted the primary instead would
+# be the silent-fallback fault every gate in this file exists to stop, and
+# unlike the shim there is nothing older to run in its place. STALE rebuilds,
+# never under a live run (the binary is an ARM executable run through binfmt
+# and a rewrite under it is the same SIGBUS the shim's comment describes).
+#
+# The build is `make install` out of codeselect/ (buildselect.sh), not a gcc
+# line here, because the selector links against the card's own glibc 2.21
+# with the rootfs as a hand-built sysroot - a recipe with a dozen flags that
+# belongs in one Makefile, not in a shell script that copies it.
+pad_ensure_select() {
+    local bin=$PAD_SELECT_BIN
+    if [ ! -f "$RIG/codeselect/Makefile" ]; then
+        # No sources in this copy of the rig: an installed app older than the
+        # selector, or a checkout without it. What is built still runs.
+        if [ -x "$bin" ]; then
+            echo "[build] the boot selector's sources are not in this rig;" >&2
+            echo "[build] running the selector already built" >&2
+            return 0
+        fi
+        echo "[build] PAD_SELECT was asked for, but this rig carries no boot" >&2
+        echo "[build] selector: no $RIG/codeselect/Makefile and nothing built" >&2
+        echo "[build] at $bin." >&2
+        return 1
+    fi
+    if [ ! -x "$bin" ]; then
+        if ! command -v arm-linux-gnueabihf-gcc >/dev/null 2>&1; then
+            echo "[build] the boot selector is not built, and there is no" >&2
+            echo "[build] arm-linux-gnueabihf-gcc here to build it (on" >&2
+            echo "[build] Debian/Ubuntu: apt install gcc-arm-linux-gnueabihf)." >&2
+            echo "[build] Expected at: $bin" >&2
+            return 1
+        fi
+        echo "[build] the boot selector is not built yet; building it"
+        _pad_build buildselect.sh && return 0
+        echo "[build]   build FAILED, and a PAD_SELECT run has no menu without it." >&2
+        return 1
+    fi
+    _pad_stale "$bin" "$PAD_SELECT_STAMP" "$(pad_select_hash "$RIG")" $PAD_SELECT_SRCS \
+        || return 0
+    if _pad_run_live; then
+        echo "[build] the boot selector is older than its source, but a run is" >&2
+        echo "[build] still up and it cannot be rewritten underneath it." >&2
+        echo "[build] Stop it (killgame.sh) and start again to pick up the fix." >&2
+        return 0
+    fi
+    if ! command -v arm-linux-gnueabihf-gcc >/dev/null 2>&1; then
+        echo "[build] the boot selector is older than its source, but there is no" >&2
+        echo "[build] arm-linux-gnueabihf-gcc here to rebuild it. Running as built." >&2
+        return 0
+    fi
+    echo "[build] the boot selector is older than its source; rebuilding"
+    _pad_build buildselect.sh \
+        || echo "[build]   rebuild FAILED; running the selector already built" >&2
+    return 0
+}
+
 #: CAN THIS MACHINE BUILD A NATIVE BINARY? Asked by compiling one.
 #:
 #: `command -v gcc` IS THE WRONG QUESTION, and it is the wrong question in both

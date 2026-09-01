@@ -31,6 +31,80 @@ if [ -n "${PAD_CARD:-}" ]; then
     GAME=$(basename "$CARD_SRC")
     mkdir -p "$R/games/$GAME"
     echo "[run] title: $GAME (from the card, not extracted)"
+    # ★ ITEM 90 - THE BOOT SELECTOR (PAD_SELECT=1), for a card that carries
+    # more than one games partition (mkmulticard.py: the stock p3 plus each
+    # extra image's games partition appended as p7, p8...). The machine boots
+    # into a menu drawn by /usr/local/codeselect/codeselect before the game;
+    # the emulator runs the SAME program, chroot'd into this rootfs, in the
+    # INNER namespace below, and binds the partition it chose over
+    # games/$GAME before the game execs. Everything it needs is prepared
+    # here, outside the namespace, where cardmount.sh and parts.py live:
+    #
+    #   * every games partition mounted (the primary is the mount above; the
+    #     others go to $CARDS/<label>.pN through cardmount.sh --part), and
+    #     the index -> directory list handed into INNER as one argument;
+    #   * /dump/codeselect.conf in the selector's own images.conf format,
+    #     with device tokens p<N> (an opaque string to the selector - on the
+    #     machine it is /dev/mmcblk0pN) and the menu text taken from the
+    #     card's own /usr/local/codeselect/images.conf when the card was
+    #     built with one, so the emulator shows the menu the machine shows.
+    #
+    # PAD_GAME stays the PRIMARY's title: the node identity, the census and
+    # the derived tables were all taken from it before this script ran, and
+    # a card whose images share one title directory (the TMNT pair) is the
+    # only kind this design is for. A refusal, not a silent fallback, when
+    # the selector is not built: a run that asked for a menu and got the
+    # primary without a word is the fault every gate in this rig exists for.
+    SEL_DIRS=""
+    if [ -n "${PAD_SELECT:-}" ]; then
+        if [ ! -x "$PAD_SELECT_BIN" ]; then
+            echo "[run] PAD_SELECT is set but the boot selector is not built:" >&2
+            echo "[run]   $PAD_SELECT_BIN is missing" >&2
+            echo "[run]   (buildselect.sh builds it; watch.sh does that itself)" >&2
+            exit 1
+        fi
+        SEL_LIST=$(python3 "$S/parts.py" --list-games "$PAD_CARD" 2>/dev/null)
+        [ -n "$SEL_LIST" ] || { echo "[run] PAD_SELECT: no games partition found on $PAD_CARD" >&2; exit 1; }
+        SEL_CARDCONF=$(python3 "$S/parts.py" --rootfs-file /usr/local/codeselect/images.conf "$PAD_CARD" 2>/dev/null)
+        SEL_N=0; SEL_PRIMARY=""; SEL_IMAGES=""
+        while read -r idx _lba _off titles; do
+            [ -n "$idx" ] || continue
+            if [ -z "$SEL_PRIMARY" ]; then
+                # The first games partition IS the mount above (cardmount's
+                # default is exactly `--games`, the first one): reuse it
+                # rather than mounting p3 a second time under another name.
+                SEL_PRIMARY=$idx; d=$CARD_SRC
+            else
+                d=$(bash "$S/cardmount.sh" "$PAD_CARD" --part "$idx" | tail -1)
+                [ -d "$d" ] || { echo "[run] could not mount partition $idx of $PAD_CARD" >&2; exit 1; }
+            fi
+            # 'image=/dev/mmcblk0pN|<title>|<subtitle>' on the card -> the
+            # same title and subtitle here; else name it after the partition.
+            t=$(printf '%s\n' "$SEL_CARDCONF" | sed -n "s#^image=/dev/mmcblk0p$idx|##p" | head -1 | tr -d '\r')
+            case "$t" in
+                "")    t="p$idx ${titles%%,*}|games partition $idx" ;;
+                *"|"*) ;;
+                *)     t="$t|" ;;
+            esac
+            SEL_IMAGES="${SEL_IMAGES}image=p$idx|$t"$'\n'
+            SEL_DIRS="${SEL_DIRS}$idx"$'\t'"$d"$'\n'
+            echo "[select] menu: $SEL_N = p$idx ${t%%|*} ($d)"
+            SEL_N=$((SEL_N + 1))
+        done <<< "$SEL_LIST"
+        # The card's own default highlight, when it has one and it is in
+        # range; /data/codeselect.last (the selector's own memory, and
+        # $R/data persists across runs here) wins over it inside codeselect.
+        SEL_DEFAULT=$(printf '%s\n' "$SEL_CARDCONF" | sed -n 's/^default=\([0-9][0-9]*\).*/\1/p' | head -1)
+        [ -n "$SEL_DEFAULT" ] && [ "$SEL_DEFAULT" -lt "$SEL_N" ] || SEL_DEFAULT=0
+        {
+            echo "# written by run_game.sh for the boot selector (item 90)"
+            echo "# device tokens are p<N> = partition N of $PAD_CARD"
+            printf '%s' "$SEL_IMAGES"
+            echo "default=$SEL_DEFAULT"
+            echo "timeout=${PAD_SELECT_TIMEOUT:-30}"
+        } > "$R/dump/codeselect.conf"
+        echo "[select] menu: $SEL_N images; default $SEL_DEFAULT; auto-boot after ${PAD_SELECT_TIMEOUT:-30} s"
+    fi
 elif [ -n "${PAD_GAME_DIR:-}" ]; then
     CARD_SRC=${PAD_GAME_DIR%/}
     [ -x "$CARD_SRC/game" ] || {
@@ -247,7 +321,7 @@ SETSID=""
 USERNS="-r"
 [ "$(id -u)" = 0 ] && USERNS=""
 unshare $USERNS -m -p -f $SETSID bash -s "$R" "$NODEBUS_PTY" "$GAME" "$CARD_SRC" "$PIVOT" \
-        "${PIVOTROOT:-}" <<'INNER'
+        "${PIVOTROOT:-}" "${SEL_DIRS:-}" <<'INNER'
 R="$1"
 NODEBUS_PTY="$2"
 GAME="$3"
@@ -258,6 +332,10 @@ PIVOT="$5"
 # belongs to the one function that defines it, and because a namespace is a bad
 # place to discover a missing program.
 PIVOTROOT="$6"
+# The boot selector's menu (item 90): one line per image, in menu order,
+# `<partition idx><TAB><mounted title directory>`. Empty on every run that
+# did not ask for the selector, and then nothing below reads it.
+SEL_DIRS="$7"
 # pivot_root needs the new root to BE a mount, and everything mounted below then
 # rides the pivot, so the self-bind of $R must come FIRST - before proc/sys/tmp.
 # Guarded, so the chroot path is untouched.
@@ -340,6 +418,78 @@ if [ -n "$CARD_SRC" ]; then
         || { echo "[run] could not bind the card at $CARD_SRC" >&2; exit 1; }
 fi
 
+# real host char devices
+for f in null zero urandom random; do mount --bind /dev/$f "$R/dev/$f"; done
+# fakes: opening succeeds, ioctls will fail
+for f in spidev1.0 i2c-1 ttymxc0 rtc mxc_vpu console tty; do
+  mount --bind /dev/null "$R/dev/$f"
+done
+# The node bus needs a real tty underneath: glibc's tcsetattr reaches the
+# kernel through an internal call the shim cannot interpose, and it fails on
+# anything that is not a terminal. Traffic itself is still served by the shim,
+# which sees the byte count passed to read() and so learns the reply length the
+# game expects for each request.
+if [ -n "$NODEBUS_PTY" ] && [ -e "$NODEBUS_PTY" ]; then
+  mount --bind "$NODEBUS_PTY" "$R/dev/ttymxc1"
+else
+  mount --bind /dev/null "$R/dev/ttymxc1"
+fi
+
+# ★ ITEM 90 - THE BOOT SELECTOR RUNS HERE, and exactly here, on a PAD_SELECT
+# run: after every mount the game will see (so it draws through the same
+# /dump/padgl ring and reads the same /dump/padsw keyboard file the game
+# will), and BEFORE `cd "$R"` and the pivot branch - so the PAD_PIVOT path
+# (the app's default, root) and the plain chroot path run it identically and
+# the two exec lines at the foot of this script stay byte for byte what they
+# were. It is an ordinary chroot under binfmt: comm is `codeselect`, which is
+# how alive.sh counts it and how watch.sh tells "the menu is up" from "the
+# game is up" (both paths give the GAME comm=game).
+#
+# NO LD_PRELOAD, deliberately. hwshim.so serves the cabinet word out of the
+# GAME'S OWN heap switch table, found by a by-shape scan, dereferences
+# PAD_NB_OBJS as a game address and hooks the device nodes - none of which is
+# a menu program's process shape. The selector reads the keyboard through
+# the rig's own channel instead (`--input padsw`: PAD_SW_SHM, mapped to the
+# title's switch ids through /dump/tables/$PAD_GAME/switch_list.txt), which
+# is what padglhost writes the keys into; the node-bus backend it uses on the
+# machine has nothing to talk to in here without the shim.
+#
+# </dev/null IS LOAD-BEARING: this whole script is bash reading ITS OWN TEXT
+# from stdin (`bash -s <<'INNER'`), and a child that reads stdin eats the
+# rest of the script. The pivot exec below redirects for the same reason.
+#
+# THE CHOICE is an index into the menu, written to $PAD_SELECT_CHOICE (one
+# line) only on a confirmed or timed-out choice; exit 2 and no file mean no
+# choice, and both fall back to the primary OUT LOUD. A non-primary choice
+# is a second bind stacked over the card bind at games/$GAME: same
+# mountpoint, the chosen image's files win, nothing is unmounted. Then the
+# -invert masking below reads the CHOSEN build's boot_display_cmd.
+if [ -n "$SEL_DIRS" ]; then
+    rm -f "$R$PAD_SELECT_CHOICE"
+    echo "[select] menu up: LEFT/RIGHT flipper (arrows) move, START (1) confirms; auto-boot in ${PAD_SELECT_TIMEOUT:-30} s"
+    chroot "$R" /usr/local/codeselect/codeselect --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log </dev/null
+    SEL_RC=$?
+    SEL_CHOICE=$(head -1 "$R$PAD_SELECT_CHOICE" 2>/dev/null | tr -dc '0-9')
+    SEL_DIR=""; SEL_IDX=""; SEL_PRIMARY_DIR=""; n=0
+    while IFS=$'\t' read -r idx d; do
+        [ -n "$idx" ] || continue
+        [ "$n" = 0 ] && SEL_PRIMARY_DIR=$d
+        [ "$n" = "$SEL_CHOICE" ] && { SEL_IDX=$idx; SEL_DIR=$d; }
+        n=$((n + 1))
+    done <<< "$SEL_DIRS"
+    if [ "$SEL_RC" != 0 ] || [ -z "$SEL_DIR" ]; then
+        echo "[select] fallback: primary (selector exit $SEL_RC, choice '${SEL_CHOICE:-none}')"
+    elif [ "$SEL_DIR" = "$SEL_PRIMARY_DIR" ]; then
+        echo "[select] chose $SEL_CHOICE p$SEL_IDX $(basename "$SEL_DIR") - the primary, already in place"
+    elif mount --bind "$SEL_DIR" "$R/games/$GAME"; then
+        echo "[select] chose $SEL_CHOICE p$SEL_IDX $(basename "$SEL_DIR") - bound over /games/$GAME"
+        [ "$(basename "$SEL_DIR")" = "$GAME" ] || \
+            echo "[select] NOTE: that image's title directory is $(basename "$SEL_DIR"); it runs as /games/$GAME with the primary's tables"
+    else
+        echo "[select] fallback: primary (could not bind $SEL_DIR over /games/$GAME)" >&2
+    fi
+fi
+
 # ★ ITEM 45 - THIS TITLE'S PANEL IS BOLTED IN UPSIDE DOWN AND OUR MONITOR IS NOT.
 #
 # james_bond_60th_le ships an 8-byte /games/data/boot_display_cmd holding exactly
@@ -368,6 +518,9 @@ fi
 # that is known to work on this rig rather than in a novel one. An empty file
 # is a third state nobody has ever booted, and the first attempt here used one:
 # the game read it, its threads returned, and it exited cleanly four frames in.
+#
+# AFTER THE SELECTOR (item 90), so it masks the file of the image that was
+# CHOSEN; it used to sit above the device binds, and only the order moved.
 BDC="$R/games/data/boot_display_cmd"
 if [ "${PAD_DISPLAY_INVERT:-0}" != "1" ] && [ -s "$BDC" ] && grep -qa -- '-invert' "$BDC"; then
     NOINV="$R/dump/data_noinvert"
@@ -385,23 +538,6 @@ if [ "${PAD_DISPLAY_INVERT:-0}" != "1" ] && [ -s "$BDC" ] && grep -qa -- '-inver
     else
         echo "[run] display: could not mask $BDC - expect an upside-down picture" >&2
     fi
-fi
-
-# real host char devices
-for f in null zero urandom random; do mount --bind /dev/$f "$R/dev/$f"; done
-# fakes: opening succeeds, ioctls will fail
-for f in spidev1.0 i2c-1 ttymxc0 rtc mxc_vpu console tty; do
-  mount --bind /dev/null "$R/dev/$f"
-done
-# The node bus needs a real tty underneath: glibc's tcsetattr reaches the
-# kernel through an internal call the shim cannot interpose, and it fails on
-# anything that is not a terminal. Traffic itself is still served by the shim,
-# which sees the byte count passed to read() and so learns the reply length the
-# game expects for each request.
-if [ -n "$NODEBUS_PTY" ] && [ -e "$NODEBUS_PTY" ]; then
-  mount --bind "$NODEBUS_PTY" "$R/dev/ttymxc1"
-else
-  mount --bind /dev/null "$R/dev/ttymxc1"
 fi
 
 cd "$R"

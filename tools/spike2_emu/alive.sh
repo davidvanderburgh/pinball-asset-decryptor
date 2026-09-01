@@ -94,6 +94,14 @@ GAME=$(n -x game)
 # appears (the guest exec'd with no interpreter on its command line), GAME
 # alone carries the count - comm=game holds everywhere measured.
 QEMU=$(n -f 'arm-binfmt|qemu-arm')
+# The boot selector (item 90): an ARM program run_game.sh chroots into the
+# rootfs BEFORE the game on a PAD_SELECT run, so it draws the code menu
+# through the GL bridge and reads the keyboard's switch file. Its comm is
+# the ELF basename, so `-x codeselect` is exact. Under WSL's binfmt it is
+# ALSO inside the QEMU count above (arm-binfmt is on its command line);
+# in the macOS container it is not, and this row is the only thing that
+# sees it. Counted from the day it was written, per this script's rule.
+SEL=$(n -x codeselect)
 HOST=$(n -x padglhost)
 BUS=$(n -f nodebus.py)
 
@@ -252,7 +260,7 @@ CARD=$(n -x fuse2fs)
 ZOMB=$(ps -eo stat,comm --no-headers 2>/dev/null \
        | awk '$1 ~ /^Z/ && $2 ~ /^(game|padglhost|fuse2fs|ffmpeg|pythonw\.exe|python3?)$/' | wc -l)
 
-PROCS=$((GAME + QEMU + HOST + BUS + AUD + VID + HELP + STUB + SCRIPT + UNSH))
+PROCS=$((GAME + QEMU + SEL + HOST + BUS + AUD + VID + HELP + STUB + SCRIPT + UNSH))
 TOTAL=$((PROCS + CARD))
 
 case "$ONLY" in
@@ -262,6 +270,7 @@ esac
 
 printf 'guest (comm=game)      : %s\n' "$GAME"
 printf 'qemu  (arm-binfmt)     : %s\n' "$QEMU"
+printf 'selector (codeselect)  : %s\n' "$SEL"
 printf 'host  (padglhost)      : %s\n' "$HOST"
 printf 'node bus (nodebus.py)  : %s\n' "$BUS"
 printf 'audio player           : %s\n' "$AUD"
@@ -277,7 +286,7 @@ printf 'TOTAL STILL RUNNING    : %s%s\n' "$TOTAL" \
 if [ "$TOTAL" -ne 0 ]; then
   echo '--- what is still up ---'
   ps -eo pid,pcpu,etime,comm,args --sort=-pcpu \
-    | grep -E 'arm-binfmt|qemu-arm-static|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py|padvidhost\.py|autoattract\.sh|longplay\.sh|playfield\.py|mktables\.py|watch\.sh|run_game\.sh|unshare -|fuse2fs|game\.out' \
+    | grep -E 'arm-binfmt|qemu-arm-static|codeselect|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py|padvidhost\.py|autoattract\.sh|longplay\.sh|playfield\.py|mktables\.py|watch\.sh|run_game\.sh|unshare -|fuse2fs|game\.out' \
     | grep -v grep | head -12
   mountpoint -q "$PAD_HOME/card" 2>/dev/null
   mount 2>/dev/null | grep 'fuse.ext4' | sed 's/^/  mount: /'

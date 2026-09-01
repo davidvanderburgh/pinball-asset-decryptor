@@ -1,0 +1,16 @@
+# images.conf - codeselect's menu: one image per line, index = order (0-based).
+#
+#   image=<device>|<title>|<subtitle>
+#     <device>   the games partition on hardware (/dev/mmcblk0p3 = the primary,
+#                /dev/mmcblk0p7, p8 ... = the extra images); an opaque token in
+#                the emulator (p3, p7). Titles and subtitles are free UTF-8 text.
+#   default=N    highlight when there is no usable /data/codeselect.last
+#   timeout=S    seconds before the highlighted image boots by itself; 0 = wait
+#   font=PATH    optional TrueType font (default: /usr/local/codeselect/font.ttf,
+#                then the card's /usr/local/spike/VeraMono.ttf)
+#
+# The card builder writes this file; edit the names as you like.
+image=/dev/mmcblk0p3|STERN STOCK|TMNT Pro 1.59.0 - original Stern code
+image=/dev/mmcblk0p7|TMNT 1987|1.59.0 - upscaled cartoon retheme
+default=0
+timeout=10

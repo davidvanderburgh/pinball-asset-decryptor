@@ -77,6 +77,10 @@ SPI_BITS = {"select": 8, "plus": 9, "minus": 10, "back": 11, "interlock": 16}
 #: switches the keeper HOLDS closed besides the trough: a ball lock's optos,
 #: whose closed state is "no ball here" (filled by load_title_map).
 lock_optos = []
+#: the switch a plunged ball trips on its way OUT of the shooter lane, where a
+#: title has one ("SHOOTER LANE EXIT" on Transformers The Pin); without that
+#: pulse the game kept prompting PLUNGE BALL after the launch.
+lane_exit = [None]
 
 
 def load_title_map(work):
@@ -103,6 +107,7 @@ def load_title_map(work):
         return trough, shooter, start, coin, coils, curated, False
     by_digit = {}
     lock_optos.clear()
+    lane_exit[0] = None
     for key, name in raw.items():
         if key == "_trough_coils":
             try:
@@ -129,7 +134,9 @@ def load_title_map(work):
             # The Pin read three balls locked from attract on, kicked the lock
             # every 3 s and never served (its count was already "full").
             lock_optos.append(slot)
-        elif "SHOOTER" in uname and "EXIT" not in uname:
+        elif "SHOOTER" in uname and "EXIT" in uname:
+            lane_exit[0] = slot
+        elif "SHOOTER" in uname:
             shooter = slot
         elif uname in ("START BUTTON", "START"):     # the early era says START
             start = slot
@@ -170,6 +177,7 @@ class Keeper:
         if not self.curated:
             self.trough_coils = set()
         self.lock_optos = list(lock_optos) if self.mapped else []
+        self.lane_exit = lane_exit[0] if self.mapped else None
         self.seq = 0
         self.balls = self.nballs     # balls sitting in the trough
         self.in_shooter = False
@@ -229,6 +237,7 @@ class Keeper:
         self.trough_coils = coils if curated else set()
         self.curated, self.mapped = curated, mapped
         self.lock_optos = list(lock_optos)
+        self.lane_exit = lane_exit[0]
         self.nballs = len(self.trough_slots)
         self.balls = self.nballs          # fill the trough it can now name
         self.in_shooter = False
@@ -537,6 +546,8 @@ class Keeper:
                 self.in_shooter = False
                 self.launch_at = None
                 self.no_serve_until = now + 5.0
+                if self.lane_exit:              # the ball leaves the lane
+                    self.pulses[self.lane_exit] = now + 0.3
                 print("launch: ball in play", flush=True)
                 changed = True
             spi_changed = False

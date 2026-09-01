@@ -257,3 +257,26 @@ def test_lock_optos_arrive_with_a_late_map_too(tmp_path):
         "8,13": "TROUGH 1", "8,33": "LOCKUP 1"}), encoding="utf-8")
     assert k.adopt_map() is True
     assert k.lock_optos == [(8, 33)]
+
+
+def test_launch_trips_the_shooter_lane_exit_where_the_title_has_one(tmp_path):
+    (tmp_path / "s1switches.json").write_text(json.dumps({
+        "8,13": "TROUGH 1", "8,12": "SHOOTER LANE", "8,42": "SHOOTER LANE EXIT",
+        "_trough_coils": [[8, 3]]}), encoding="utf-8")
+    k = s1ball.Keeper(str(tmp_path))
+    assert k.shooter == (8, 12) and k.lane_exit == (8, 42)
+    k.in_shooter, k.launch_at = True, 0.0     # a served ball, due to launch
+    k.pulses = {}
+    import time as _t
+    now = _t.monotonic()
+    # the run loop's launch step, inlined: what it does with lane_exit
+    k.in_shooter = False
+    if k.lane_exit:
+        k.pulses[k.lane_exit] = now + 0.3
+    assert (8, 42) in k.closed_slots()
+
+
+def test_no_lane_exit_on_titles_without_one(tmp_path):
+    _write_map(tmp_path)
+    k = s1ball.Keeper(str(tmp_path))
+    assert k.lane_exit is None

@@ -995,6 +995,19 @@ on Windows / [launch.vbs](launch.vbs) for a no-console launch.
    window used to be impossible to open on such a machine. The run now
    asks PAD to open it — PAD is already a Windows program with the right
    Python — and PAD closes it again when the run stops.
+   On a machine where Linux *can* start a Windows program, that window is
+   opened with a Windows Python, and which one used to be whatever
+   `pythonw.exe` the PATH answered with. A stock python.org install has
+   the toolkit the window is built from but not the imaging library its
+   artwork is drawn with, so a run came up with a game window, sound and
+   switches and no playfield at all, and nothing anywhere said why. The
+   interpreter is chosen now rather than inherited: every Python the rig
+   knows of is asked whether it can import both, PAD's own bundled one
+   first — it ships with both, because the app draws itself with them —
+   and the run names the one it opened the window with. The tab says it
+   before you press Start as well, beside the sound player: which
+   interpreter opens the playfield, or that the one found has no imaging
+   library, with the single command that adds it.
    A run that comes up with **no game window at all** now says which of
    the two possible things happened, where before both looked the same:
    the playfield opens, the log says the emulator is up, the guest really

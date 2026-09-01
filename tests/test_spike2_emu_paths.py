@@ -391,10 +391,17 @@ def test_the_lint_knows_a_quoted_path_from_a_bare_one():
     assert _splitting_paths('cp "$RIG/a.c" $HOME/emusrc/a.c')
 
 
-def _art_dir(rig, title, names):
+def _art_dir(rig, title, names, sub="Test"):
     """A fake title whose assets hold `names`, so artwork discovery can be
-    checked without a card."""
-    d = rig.root / "games" / title / "assets" / "nuk" / "images" / "Test"
+    checked without a card.
+
+    `sub` is a path under `images`, because the folder holding a title's test
+    art is spelled at least four ways across the library - `Test`, `TestMode`,
+    `test_menu` and `System/TestMode`.
+    """
+    d = rig.root / "games" / title / "assets" / "nuk" / "images"
+    for part in sub.split("/"):
+        d = d / part
     d.mkdir(parents=True)
     for n in names:
         (d / n).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 25)
@@ -436,6 +443,42 @@ def test_a_title_with_no_drawing_is_not_a_failure(rig, monkeypatch):
     playfield is the right answer for them."""
     _art_dir(rig, "elvira3", ["elvira3_topper_scaled.png"])
     monkeypatch.setenv("PAD_GAME", "elvira3")
+    assert rig.gameinfo.find_playfield_art() is None
+
+
+@pytest.mark.parametrize("sub", ["test_menu", "System/TestMode"])
+def test_artwork_is_found_in_a_folder_not_called_Test(rig, monkeypatch, sub):
+    """The folder name is the card's to choose, not ours to list.
+
+    jurassic_park_le 1.16.0 (David's E2E sweep, 2026-09-01) ships
+    `images/test_menu/jp_le_playfield.png` beside `jp_pro_playfield.png`, and
+    a hard-coded `Test`/`TestMode` pair reported "this title ships no
+    playfield drawing" about a title shipping one per model - the third title
+    to hit that, after jaws (suffix) and king_kong/metallica (`TestMode`).
+    `System/TestMode` is the same miss one level down, which is where elvira3
+    keeps its own test art.
+    """
+    _art_dir(rig, "jurassic_park_le",
+             ["jp_le_backpanel.png", "jp_le_playfield.png",
+              "jp_pro_backpanel.png", "jp_pro_playfield.png", "jp_topper.png"],
+             sub=sub)
+    monkeypatch.setenv("PAD_GAME", "jurassic_park_le")
+    got = rig.gameinfo.find_playfield_art()
+    assert got is not None, "no artwork found in images/%s" % sub
+    # And the LE machine gets the LE drawing: the title's own words never
+    # appear in `jp_le_playfield.png`, so the model word alone has to pick.
+    assert os.path.basename(got) == "jp_le_playfield.png"
+
+
+def test_a_test_menu_of_connectivity_icons_is_not_playfield_art(
+        rig, monkeypatch):
+    """jurassic_park_le **1.15.0** ships `images/Connectivity/TestMenu` and no
+    drawing anywhere - so the schematic really is the right answer for that
+    build, and widening the folder search must not invent artwork out of the
+    Insider Connected icons."""
+    _art_dir(rig, "jurassic_park_le",
+             ["qr_scan.png", "login_prompt.png"], sub="Connectivity/TestMenu")
+    monkeypatch.setenv("PAD_GAME", "jurassic_park_le")
     assert rig.gameinfo.find_playfield_art() is None
 
 

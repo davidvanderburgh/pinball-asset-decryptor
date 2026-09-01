@@ -24,6 +24,7 @@ of five 0x30-byte records at a true stride, with the name of each living at the
 PREVIOUS record's +0x24 (devicexy.NAME_OFF is negative, and its header says
 why). Nothing here needs a real ELF or a card.
 """
+import json
 import os
 import struct
 import sys
@@ -216,6 +217,74 @@ def test_no_binary_to_compare_against_keeps_what_is_there(tmp_path):
     assert mktables._built_from(str(tmp_path / "absent.txt"), None)
 
 
+# --- and the SWITCH list, which had no stamp at all until 2026-09-01 -------
+# jurassic_park_le, David's E2E sweep: the tables directory is keyed by title,
+# so 1.15.0's list was still there when 1.16.0 ran, and existence was the whole
+# cache test. Every other table in that directory had been rebuilt for the new
+# build; the switch list was three weeks old and its ids were shifted by one.
+# The window binds by NAME and pokes the id it finds beside it, so Enter poked
+# SERVICE PLUS (volume up in attract), the arrows poked the neighbouring
+# flippers, and the id the rig held for COIN DOOR INTERLOCK belonged to the
+# ACTION BUTTON - a closed door the game saw as open, warning about 48 V.
+
+SW_ROWS = [(26, 9, 0, 8, "SERVICE SELECT"),
+           (34, 25, 0, 23, "COIN DOOR INTERLOCK"),
+           (61, 9, 8, 25, "LEFT FLIPPER BUTTON")]
+
+
+def _sw_list(tmp_path, body):
+    p = tmp_path / "switch_list.txt"
+    p.write_text(body, newline="")
+    return str(p)
+
+
+def test_the_switch_list_records_the_binary_it_came_from(tmp_path):
+    import swtable
+    elf = tmp_path / "game"
+    elf.write_bytes(b"z" * 500)
+    dest = _sw_list(tmp_path, swtable.text("t", SW_ROWS, str(elf)))
+    assert mktables._recorded_binary(dest) == "game 500 bytes"
+    assert mktables._built_from(dest, str(elf))
+    # ...and the extra header line does not cost the readers a row. The C
+    # parser in padglhost skips `#` the same way this one does.
+    assert len(mktables._read_list(dest)) == len(SW_ROWS)
+    assert mktables._read_list(dest)[0][4] == "SERVICE SELECT"
+
+
+def test_a_switch_list_from_another_build_is_refused(tmp_path):
+    """1.15.0's list against 1.16.0's game. The names are all still RIGHT,
+    which is why this was invisible: only the ids moved."""
+    import swtable
+    old = tmp_path / "game_115"
+    old.write_bytes(b"z" * 500)
+    dest = _sw_list(tmp_path, swtable.text("t", SW_ROWS, str(old)))
+    new = tmp_path / "game"
+    new.write_bytes(b"z" * 777)
+    # The replacement card's files carry the IMAGE's timestamps, so the NEWER
+    # build is routinely the OLDER file - which is exactly why mtime cannot
+    # see this swap. jurassic_park_le 1.16.0's ELF reads Aug 30; the list it
+    # was handed was written Aug 19 and looked current.
+    old_time = os.path.getmtime(dest) - 86400
+    os.utime(str(new), (old_time, old_time))
+    assert not mktables._built_from(dest, str(new))
+    assert mktables._stale(dest, str(new)) is False, \
+        "mtime alone still says cached - which is the whole point"
+
+
+def test_a_switch_list_predating_the_stamp_is_rebuilt_once(tmp_path):
+    """Every cached list in the rig on 2026-09-01 names no binary. Re-deriving
+    them costs one run each - the dump the list comes from arrives seconds into
+    every run anyway."""
+    elf = tmp_path / "game"
+    elf.write_bytes(b"z" * 500)
+    dest = _sw_list(tmp_path,
+                    "# t switch list, from the shim's reading of the game's "
+                    "own table.\n# 3 switches on nodes [0, 8].\n"
+                    "26     9     0     8    SERVICE SELECT\n")
+    assert mktables._recorded_binary(dest) is None
+    assert not mktables._built_from(dest, str(elf))
+
+
 # --- cardaudit.py's pure halves ------------------------------------------
 # The card-reading half needs a 8 GB .raw and is exercised by running it; these
 # are the two pieces that can be wrong quietly.
@@ -239,6 +308,55 @@ def test_cardaudit_reads_a_png_size_from_the_header_alone(tmp_path):
             + struct.pack(">II", 313, 710) + b"\x08\x06\x00\x00\x00")
     assert cardaudit._png_size(head) == (313, 710)
     assert cardaudit._png_size(b"not a png at all, no") is None
+
+
+def test_cardaudit_json_refuses_to_write_over_a_card(tmp_path, monkeypatch,
+                                                     capsys):
+    """★ THIS DESTROYED A 7.5 GB CARD IMAGE (2026-09-01).
+
+    `cardaudit.py --json some_card.raw` reads as "audit that card, in JSON".
+    It is not: argparse gives the path to --json, `images` is left empty so
+    the WHOLE LIBRARY is swept, and the report is then written with mode "w"
+    over the card. The sweep printed a perfectly correct library audit while
+    truncating the file it appeared to be reading, and the damage only
+    surfaced later as "no third Linux partition".
+    """
+    import cardaudit
+    card = tmp_path / "jurassic_park_le-1_16_0.Release.8G.sdcard.raw"
+    card.write_bytes(b"\xeb\x63\x90" + b"card bytes" * 100)
+    before = card.read_bytes()
+
+    monkeypatch.setattr(sys, "argv", ["cardaudit.py", "--json", str(card)])
+    assert cardaudit.main() == 2
+    assert card.read_bytes() == before, "the card was written to anyway"
+    # And it fails BEFORE the sweep, which takes minutes over 40 images.
+    assert "card image" in capsys.readouterr().err
+
+
+def test_cardaudit_json_refuses_to_clobber_a_non_json_file(tmp_path,
+                                                           monkeypatch):
+    """The same mistake with any other extension - a log, a note, an ELF."""
+    import cardaudit
+    other = tmp_path / "notes.txt"
+    other.write_text("something the user wanted")
+    monkeypatch.setattr(sys, "argv", ["cardaudit.py", "--json", str(other)])
+    assert cardaudit.main() == 2
+    assert other.read_text() == "something the user wanted"
+
+
+def test_cardaudit_json_still_writes_a_json_report(tmp_path, monkeypatch):
+    """The guard must not cost the feature: a new path, and an existing
+    .json, both still work."""
+    import cardaudit
+    out = tmp_path / "report.json"
+    monkeypatch.setattr(cardaudit, "audit",
+                        lambda raw: {"image": raw, "error": "stub"})
+    monkeypatch.setattr(sys, "argv",
+                        ["cardaudit.py", "--json", str(out), "a.raw"])
+    assert cardaudit.main() == 0
+    assert json.loads(out.read_text())[0]["image"] == "a.raw"
+    # and again, over the report it just wrote
+    assert cardaudit.main() == 0
 
 
 # --- the ARTWORK-LESS table (led_zeppelin_le) ----------------------------

@@ -50,10 +50,13 @@ from pinball_decryptor.plugins.stern.explorer import CardImage      # noqa: E402
 #: Where the card library lives when no image is named on the command line.
 LIBRARY = os.path.join(REPO, "images", "Stern", "spike2")
 
-#: The two directory names a title's service-mode art has been seen under.
-#: gameinfo.find_playfield_art() knows the same pair, and item 57 exists
-#: because an earlier version of it knew only the first.
-ART_DIRS = ("Test", "TestMode")
+#: The directory names a title's service-mode art has been seen under, tried
+#: in this order. gameinfo.find_playfield_art() knows the same ones - item 57
+#: exists because an earlier version of it knew only the first, and
+#: jurassic_park_le 1.16.0 (2026-09-01) added the third: this audit called that
+#: card "no art" while it shipped `images/test_menu/jp_le_playfield.png`.
+#: `_art_subdirs()` also looks one level down, for elvira3's `System/TestMode`.
+ART_DIRS = ("Test", "TestMode", "test_menu")
 
 
 def _tokens(name):
@@ -91,6 +94,31 @@ def pick_firmware(card):
     return (best[1], best[2]) if best else (None, None)
 
 
+def _art_subdirs(card, part, title):
+    """Image folders on `card` that could hold `title`'s service art.
+
+    ART_DIRS first and by name, so a card measured before this existed keeps
+    the folder it was measured from; then anything else the card carries whose
+    name says "test", top level first and one level down after that. Mirrors
+    gameinfo._art_dirs(), which is what the running rig uses - the two must
+    agree or this audit will keep contradicting the rig's own verdict.
+    """
+    images = "/%s/assets/nuk/images" % title
+    subs = list(ART_DIRS)
+    try:
+        entries = sorted(e.name for e in card.list_dir(part, images))
+    except Exception:
+        return subs
+    subs += [n for n in entries if "test" in n.lower() and n not in ART_DIRS]
+    for n in entries:
+        try:
+            kids = sorted(e.name for e in card.list_dir(part, images + "/" + n))
+        except Exception:
+            continue
+        subs += [n + "/" + k for k in kids if "test" in k.lower()]
+    return subs
+
+
 def card_art(card, part, title):
     """Every `*playfield*.png` the card ships for `title`, with its pixel size.
 
@@ -98,7 +126,7 @@ def card_art(card, part, title):
     card carries several of these and some are megabytes.
     """
     out = []
-    for d in ART_DIRS:
+    for d in _art_subdirs(card, part, title):
         base = "/%s/assets/nuk/images/%s" % (title, d)
         try:
             entries = card.list_dir(part, base)
@@ -190,8 +218,32 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("images", nargs="*", help="card .raw files (default: the "
                                               "whole library)")
-    ap.add_argument("--json", help="also write the full rows here")
+    ap.add_argument("--json", help="also write the full rows here (a NEW file, "
+                                   "or an existing .json - never a card)")
     args = ap.parse_args()
+
+    # ★ `--json` TAKES A VALUE, AND A CARD IMAGE IS A PLAUSIBLE-LOOKING ONE
+    # (2026-09-01). `cardaudit.py --json some_card.raw` reads as "audit that
+    # card, in JSON" and is not: argparse hands the path to --json, `images`
+    # is left empty so the WHOLE LIBRARY is audited, and the report is then
+    # written with mode "w" over the card. That destroyed a 7.5 GB
+    # jurassic_park_le 1.16.0 image - the audit ran fine, printed a correct
+    # library sweep, and truncated the file it looked like it was reading.
+    # Checked BEFORE the sweep, because the sweep takes minutes and the whole
+    # point is to fail while the mistake is still cheap.
+    if args.json:
+        low = args.json.lower()
+        if low.endswith((".raw", ".img")):
+            print("--json wants a report path and got a card image (%s).\n"
+                  "To audit ONE card, pass it as a plain argument:\n"
+                  "    cardaudit.py %s" % (args.json, args.json),
+                  file=sys.stderr)
+            return 2
+        if os.path.exists(args.json) and not low.endswith(".json"):
+            print("--json would overwrite an existing non-.json file (%s); "
+                  "refusing.\nName a .json path, or delete that file first."
+                  % args.json, file=sys.stderr)
+            return 2
 
     paths = args.images
     if not paths:

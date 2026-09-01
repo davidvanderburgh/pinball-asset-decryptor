@@ -75,6 +75,19 @@ def app(tmp_path, monkeypatch):
     # that care about indicator state drive set_prereq_result() directly.
     monkeypatch.setattr(app_mod.App, "_kick_off_prereq_check",
                         lambda self, mfr: None)
+    # Don't let the startup update check reach GitHub.  App() arms
+    # after(1500, _check_for_update): any test that keeps the Tk event
+    # loop alive past 1.5s fires a REAL anonymous api.github.com request
+    # (GitHub allows those 60/hour per IP, machine-wide).  Measured
+    # 2026-09-01 with a counting stub over a full `-n auto` run: ZERO
+    # current tests cross the line — teardown's after-cancel sweep wins —
+    # but a 2.5s-mainloop control test fired reliably, so the suite is
+    # one slow test (or one loaded machine) away from spending the
+    # developer's API quota.  Stubbing the app module's reference (the
+    # name App actually calls) keeps the threading/log plumbing live but
+    # offline; a test exercising the update flow overrides this stub.
+    monkeypatch.setattr(app_mod, "check_for_update",
+                        lambda *a, **kw: None)
 
     real_tk, real_toplevel = _tk_mod.Tk, _tk_mod.Toplevel
 

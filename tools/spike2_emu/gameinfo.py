@@ -208,6 +208,37 @@ def _tokens(filename):
     return set(re.split(r"[^a-z0-9]+", filename.lower())) - {""}
 
 
+def _art_dirs(images):
+    """Folders under `assets/nuk/images` that could hold the test artwork.
+
+    `Test` and `TestMode` come first and BY NAME, so every title measured
+    before this function existed keeps the exact folder it was measured from
+    even if the card also carries another one. After them, whatever the card
+    actually ships whose folder name says "test" - top level first
+    (`test_menu`, jurassic_park_le 1.16.0), then one level down, which is
+    where elvira3 keeps its own (`System/TestMode`).
+
+    A substring test, not the whole-word `_tokens()` one: "TestMode" is a
+    single token and would fail a word test against "test".
+    """
+    known = ("Test", "TestMode")
+    out = [os.path.join(images, s) for s in known]
+    try:
+        subs = sorted(os.listdir(images))
+    except OSError:
+        return out
+    out += [os.path.join(images, n) for n in subs
+            if "test" in n.lower() and n not in known]
+    for n in subs:
+        d = os.path.join(images, n)
+        try:
+            kids = sorted(os.listdir(d))
+        except OSError:
+            continue
+        out += [os.path.join(d, k) for k in kids if "test" in k.lower()]
+    return out
+
+
 def find_playfield_art(name=None):
     """The title's playfield drawing inside its own assets, or None.
 
@@ -236,13 +267,20 @@ def find_playfield_art(name=None):
     "this title ships no playfield drawing" about a title that does. Try
     both; `Test` first since every title measured before this fix already
     uses it and nothing should change for them.
+
+    **And a fixed LIST of folder names is the same bug one turn later**
+    (2026-09-01, jurassic_park_le 1.16.0, found during David's E2E sweep):
+    that build keeps its drawings in `assets/nuk/images/test_menu/` -
+    `jp_le_playfield.png` beside `jp_pro_playfield.png` - and a hard-coded
+    `Test`/`TestMode` pair walked past them, reporting "no playfield drawing"
+    about a title shipping one per model, for the third time. `_art_dirs()`
+    reads the folder list off the card instead.
     """
     a = assets(name)
     if not a:
         return None
     found, d = [], None
-    for sub in ("Test", "TestMode"):
-        cand = os.path.join(a, "nuk", "images", sub)
+    for cand in _art_dirs(os.path.join(a, "nuk", "images")):
         try:
             names = sorted(os.listdir(cand))
         except OSError:

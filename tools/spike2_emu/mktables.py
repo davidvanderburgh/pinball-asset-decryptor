@@ -350,7 +350,29 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
     sw_list = os.path.join(tdir, "switch_list.txt")
     sw_xy = os.path.join(tdir, "switch_xy.txt")
     repaired = False
-    if os.path.exists(sw_list) and not force:
+    # ★ A CACHED LIST IS ONLY THIS BUILD'S LIST IF IT SAYS SO (2026-09-01,
+    # jurassic_park_le, David's E2E sweep). Existence was the whole test here,
+    # and the tables directory is keyed by TITLE - so running 1.15.0 and then
+    # 1.16.0 of one title reused the first build's switch list against the
+    # second build's game. Every other table in that directory had been
+    # rebuilt; this one was three weeks old, its ids shifted by one, and the
+    # window binds by NAME and then pokes the id it found beside it: Enter
+    # reached SERVICE PLUS (volume up in attract), the arrows reached the
+    # neighbouring flippers, and COIN DOOR INTERLOCK's id belonged to the
+    # ACTION BUTTON, leaving the door open and the game warning about 48 V.
+    # device_xy.txt has been refusing exactly this since 2026-08-21; the
+    # switch list simply never got wired into the same test. A list naming no
+    # binary predates the stamp and is re-derived once, from the run's own
+    # dump, which is where this file comes from anyway.
+    wrong_build = (os.path.exists(sw_list) and not force
+                   and not _built_from(sw_list, elf))
+    if wrong_build:
+        was = _recorded_binary(sw_list)
+        say("  switches     cached list was built from %s, this run is %s - "
+            "re-deriving from this run's own dump"
+            % (was or "an unrecorded build",
+               devicexy.binary_id(elf) or "(unknown)"))
+    if os.path.exists(sw_list) and not force and not wrong_build:
         # ★ REPAIR A CACHED LIST WHOSE NAMES ARE STILL `?`. The dump branch
         # below used to write the shim's rows as-is, and on a title whose
         # message-table address resolves wrong (item 29) that is every name -
@@ -365,7 +387,7 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
             filled, _report = swnames.fill(rows, game, elf)
             if filled != rows:
                 try:
-                    _write(sw_list, swtable.text(game, filled))
+                    _write(sw_list, swtable.text(game, filled, elf))
                     repaired = True
                     made["switch_list.txt"] = sw_list
                     # "filled", not "from the device table": on a title whose
@@ -441,7 +463,7 @@ def build(game=None, log_path=None, wait_s=0, force=False, say=print):
         # docstring promises it never raises for a missing part; this was
         # the one write that could.
         try:
-            _write(sw_list, swtable.text(game, live_rows))
+            _write(sw_list, swtable.text(game, live_rows, elf))
         except OSError as exc:
             say("  switches     FAILED to write %s: %s" % (sw_list, exc))
             say("  switches     (a root-owned tables dir from an old run? a "

@@ -23,6 +23,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import devicexy
 import gameinfo
 import swnames
 
@@ -56,11 +57,24 @@ def by_name(rows):
             for sid, _num, node, bit, name in rows if name and name != "?"}
 
 
-def text(game, rows):
-    """switch_list.txt, as a string."""
+def text(game, rows, elf=None):
+    """switch_list.txt, as a string.
+
+    ★ THE `# binary:` LINE IS WHAT MAKES THIS CACHE REFUSABLE (2026-09-01,
+    jurassic_park_le). device_xy.txt has carried one since 2026-08-21 and
+    mktables rebuilds when it disagrees; this file carried none, so mktables
+    could only ask whether it EXISTED. Run 1.15.0 of a title and then 1.16.0
+    - same title, same tables directory - and the second run kept the first
+    build's list: ids shifted by one against the running game, so Enter poked
+    SERVICE PLUS (volume up in attract), the arrow keys poked the neighbouring
+    flippers, and the rig held the wrong bit for COIN DOOR INTERLOCK, which
+    reads as a 48 V warning on a closed door. Same identity string and same
+    reader as the device table, so one test answers for both.
+    """
     nodes = sorted({r[2] for r in rows})
     lines = ["# %s switch list, from the shim's reading of the game's own table."
              % game,
+             "# binary: %s" % (devicexy.binary_id(elf) or "(unknown)"),
              "# %d switches on nodes %s." % (len(rows), nodes),
              "# %-4s %-5s %-5s %-4s %s" % ("id", "num", "node", "bit", "name")]
     for sid, num, node, bit, name in rows:

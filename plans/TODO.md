@@ -84,6 +84,63 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
+      build of one title keeps the first build's drawing for ever.** `S3 D1`
+      *(Found 2026-09-01 while answering David's "will our fixes work on
+      someone else's machine?" — the switch-list staleness fix that same day
+      left this one file behind.)*
+      `mktables.py` copies the artwork only `if art_src and (force or not
+      os.path.exists(art_dest))`, so once `<tables>/<game>/playfield.png`
+      exists it is never refreshed, whichever build runs. It is a PNG, so it
+      cannot carry the `# binary:` line that now protects `device_xy.txt` and
+      `switch_list.txt` — the honest test is against the SOURCE art instead
+      (size + bytes, or mtime+size of `art_src`), and re-copy when it differs.
+      **Not reachable on jurassic_park_le** (1.15.0 ships no drawing at all,
+      so 1.16.0's copy was the first one written) — which is exactly why it
+      survived this pass. It bites a title whose two builds ship DIFFERENT
+      drawings: `device_xy.txt` is rebuilt against the new art's dimensions
+      while the window keeps drawing the old picture, so every insert and
+      switch sits slightly wrong. **Cosmetic, not functional** — positions
+      drift, nothing goes dead — which is why it is S3 and did not hold up
+      the release.
+      — S3: wrong-looking, never wrong-behaving. D1: one condition and one
+      comparison, beside code that already does this for two other files.
+
+- [ ] **88. Answer a MOTOR MECH's position switches, so a mech that asks
+      "did you get there?" is not left retrying for ever — john_wick_le's car
+      screeches its tyres from ball start.** `S2 D3` *(Filed 2026-09-01 from
+      David's live E2E sweep — "i'm running john wick in emulation right now.
+      when i start a game, i continually hear car tire screeches. I believe
+      this is because the CarMec is supposed to move into position when the
+      game starts, and it is not getting the feedback that it needs.")*
+      **THE READ, from this title's own switch list (live, 2026-09-01):**
+      john_wick_le carries five car inputs on node 9 — `Car Front Opto`
+      (bit 0), `Car Hold Opto` (bit 1), `Car Back Opto` (bit 2), `Car Motor
+      Away` (bit 3) and `Car Motor Home` (bit 4). At game start the game
+      drives the car motor and waits for those to transition. Nothing in the
+      rig moves them, so the move times out and is retried, and the screech
+      is the mech's own move sound replayed on every retry. **This is the
+      same shape as the DnD dragon and the trough feeder** — a device wanting
+      closed-loop feedback the rig does not yet give — and the rig's ONLY
+      mech emulation today is `ballfeed.py` answering the trough eject.
+      There is no motor-with-position-feedback anything in `nodebus.py`.
+      **THE CHEAP HALF, worth trying first and it also proves the diagnosis:**
+      the DnD precedent — a Device Enables adjustment that disables the mech
+      makes the game route around it (that is what unblocked DnD's Start).
+      Costs the car's shots and modes, but silences it and confirms the
+      mechanism in one move.
+      **THE REAL FIX:** walk `Car Motor Home`/`Car Motor Away` and the three
+      optos in response to the car motor's own coil drive, so the game sees
+      the mech arrive. Needs a `PAD_COIL_PROBE` run FIRST to identify which
+      drive is the car motor — the fire frame names a coil by index and
+      nothing else (`coilmap.py`'s header). **Generalises**: jaws_le has the
+      identical shape in `SHARK POSITION 1..7` + `SHARK UP-MAG SW` /
+      `SHARK DOWN-MAG SW`, which nothing answers either — it just does not
+      complain audibly, so it was never noticed.
+      — S2: john_wick plays, this is loud rather than blocking. D3: the probe
+      run plus a small state machine, on a rig that has done this once before
+      for the trough.
+
 - [ ] **84. Capture the batman VILLAIN VISION board image set + id map from the
       `UPDATE TV IMAGES` service upload — the byte-exact, card-only source.**
       `S2 D5` *(Spawned from item 83 on 2026-08-26 — David's architecture
@@ -7274,6 +7331,82 @@ rewriting it.**
         (/tmp/jb_game, ELF vaddr = file offset + 0x8000), and the frame
         that formats a `%s` from a record field names the wrong-offset
         read. 2/3 repro means a report will not be long in coming.
+        **★ FINAL VERDICT (2026-09-01): David's green check — james_bond_le
+        plays clean end to end.** The 2/3 attract SEGV stays covered by the
+        armed reporter; nothing else open on this title. Same day, David
+        re-confirmed **jaws_le**'s green check from 2026-08-28. Both recorded
+        in the README matrix.
+
+      **★ THE SWEEP CONTINUED PAST THIS ITEM'S CLOSE, 2026-09-01** — David
+      kept going alphabetically after bond, and the log keeps its one line
+      per title:
+      - **john_wick_le 1.01.0 — ⚠️ PLAYS, one open fault: the car mech
+        screeches its tyres continuously from ball start**, David's report.
+        Nothing answers `Car Motor Home`/`Car Motor Away` or the three car
+        optos on node 9, so the game's start-of-ball car move times out and
+        retries for ever, replaying the move sound each time. **Filed as item
+        88** (with the cheap Device-Enables confirmation and the real
+        motor-feedback fix); nothing else wrong on the title.
+      - **jurassic_park_le — TWO builds, and they are not the same machine.**
+        David: "on jurassic park, i'm not seeing the playfield image."
+        **1.15.0 (what he ran first) genuinely ships no drawing** — read
+        read-only off the card image, its `assets/nuk/images` holds only
+        `Connectivity`, and it ships no device table either, so the schematic
+        playfield was the correct answer and there was nothing to fix.
+        **1.16.0 ships both** — 221 device records and
+        `test_menu/jp_le_playfield.png` — and the rig still said "this title
+        ships no playfield drawing", because `find_playfield_art()` scanned a
+        hard-coded `Test`/`TestMode` pair and this build spells the folder
+        `test_menu`. **The third title to hit that same hard-coded list**
+        after jaws (the word is not a suffix) and king_kong/metallica
+        (`TestMode`), so the list is now read off the card instead —
+        `_art_dirs()`, top-level `*test*` folders and one level down for
+        elvira3's `System/TestMode`. `cardaudit.py` had the identical blind
+        spot and called that card "no art"; both agree now. **Live on the
+        next run: `artwork jp_le_playfield.png`, 58 switches placed.**
+        **★ AND THE FAULT THAT FOUND ITSELF: switching builds of one title
+        silently kept the FIRST build's switch list.** David, on 1.16.0:
+        "the key mapping on jurassic park 1.16 is all wrong. says 48v warning
+        when coin door is closed, enter is mapped to volume up, flipper left
+        and right do nothing." One fault, all three symptoms, and not
+        led_zeppelin's `?`-names class — every name was RIGHT. The tables
+        directory is keyed by TITLE, and `mktables` tested the cached
+        `switch_list.txt` for EXISTENCE alone, so 1.16.0 ran against a list
+        dated Aug 19 (every other table in that directory had been rebuilt
+        that minute). Its ids are shifted by one against this build, the
+        window binds by NAME and then pokes the id it found beside it, so:
+        Enter reached `SERVICE PLUS`, which is volume up in attract; the
+        arrows reached the neighbouring flippers; and the id held for
+        `COIN DOOR INTERLOCK` belonged to the `ACTION BUTTON`, leaving the
+        door open and the game warning about 48 V. **`device_xy.txt` has
+        refused exactly this since 2026-08-21** (`_built_from`, the
+        `# binary:` stamp) — the switch list was simply never wired into it.
+        Fixed: `swtable.text()` stamps the binary, `mktables` refuses a list
+        naming another build (or none) and re-derives from the run's own
+        dump, saying so in the log. Every cached list in the rig predates the
+        stamp, so each title re-derives once, from a dump that arrives
+        seconds into every run anyway.
+        **★ VERDICT: ✅ CLEAN, David's green check, 2026-09-01** — "i have
+        verified that jp is good to go completely." Both fixes confirmed on
+        the glass: the playfield draws its own artwork, and the keys, the
+        coin door and the flippers all reach the switches they name.
+        **★ AND THIS SESSION DESTROYED THAT CARD IMAGE MID-SWEEP, with
+        `cardaudit.py --json <card.raw>`.** `--json` takes a REPORT PATH, so
+        argparse took the card as its value, left `images` empty, swept the
+        whole library, and wrote the report with mode `"w"` over the 7.5 GB
+        image. The sweep printed a correct-looking audit while truncating the
+        file it appeared to be reading; the damage only surfaced 15 minutes
+        later as `no third Linux partition` on David's next start, and the
+        card cache faithfully copied the 25 KB wreck. **Restored** from
+        `D:\Pinball\incoming\` (the library path is a junction to
+        `D:\Pinball\images`, so there was exactly one damaged copy) and
+        re-audited identical: 221 records, art:yes. **Guarded**: `--json`
+        now refuses a `.raw`/`.img` value outright and refuses to clobber any
+        existing non-`.json` file, checked BEFORE the sweep so the mistake
+        fails while it is still cheap. Three tests, the first of which
+        replays the exact destroying command.
+        **Resume: the next title alphabetically after jurassic_park_le, once
+        David reports it. Both fixes above are UNCOMMITTED on main.**
 
 - [x] **66. Deadpool and Avengers: Infinity Quest boot on a WHITE
       background.** `S3 D2` **CLOSED 2026-09-01 at David’s call** — "66 is

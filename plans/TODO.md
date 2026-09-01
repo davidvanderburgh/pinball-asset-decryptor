@@ -106,29 +106,36 @@ These have each been violated at least once and each cost a run or a window:
       201006031147`, glibc 2.6.1 and kernel 2.6.30 are identical on GOT LE and
       Whoa Nellie; the first filing of this item called it "a 2010 machine"
       on that evidence and was wrong.
-      **LEFT (a new item's worth, filed as 91):** the game serves no ball
-      because two mechs never report done - see 91.
+      **AND IT SERVES A BALL:** the ramp lock's `LOCKUP 1-3` are optos whose
+      CLOSED state is "no ball"; read open they counted as three locked balls,
+      the game kicked the lock every 3 s from attract on and never fired the
+      trough eject.  The keeper now holds any `LOCKUP` switch closed like the
+      trough, and START -> coil 3 -> `serve: ball -> shooter lane` ->
+      `launch: ball in play`, `PLAYER 1 BALL 1` on the display.  Polish left
+      in 91.
 
-- [ ] **91. Transformers The Pin: answer the DROP TARGET RESET and the ramp
-      BALL LOCK so the game serves a ball.** `S2 D2` *(Filed 2026-09-01 from
-      the PAD-101 work above.)* Measured on the wire: after START the game
-      fires coil 7 (DROP TARGET RESET, `ff600000`) every 2.4 s and coil 4
-      (RIGHT RAMP BALL LOCK, `ff2032c8`) every 2.3 s, for ever, and never
-      coil 3 (TROUGH EJECT) - it is waiting for the targets (switches 16-18)
-      and the lock (LOCKUP 1-3, 32-34) to report, exactly item 88's shape on
-      the 2012 platform.  The ball keeper already holds the trough (13-15)
-      and knows the eject coil; what it needs is a tiny mech model for this
-      title: on coil 7, put DROP TARGET 1-3 in their reset state; on coil 4,
-      whatever the lock's switches should read when it is empty.  Which
-      state is "reset" is a two-boot experiment (hold them, watch whether the
-      retries stop and coil 3 fires).  Then PLUNGE BALL -> the keeper's
-      plunge -> a scoring ball, and the title is playable end to end.
-      Also open on this era: lamp state into `s1hw.state` (s1early sees
-      every lamp frame, cmd 0x80|c, and writes none of it yet), and the
-      audio pacing (`S1_PCM_RATE=24000` is inferred from the WAVs, not
-      measured).
-      - S2: START works and the display talks, but no ball. D2: the keeper
-      has the hook (`on_coil`) and the names; it is one rule per coil.
+- [ ] **91. Transformers The Pin: the drop-target reset, the lamps, and the
+      audio rate.** `S3 D2` *(Filed 2026-09-01 from the PAD-101 work; the
+      serve half of the original filing was solved the same hour and is in
+      item 90.)* What is left on the 2012 platform now that a ball serves and
+      launches:
+      - **DROP TARGET RESET (coil 7, `ff600000`)** retries 7 times after the
+        ball launches and then gives up; the game plays on.  Measured: the
+        targets (switches 16-18) read "up" when OPEN (holding them closed
+        makes the reset retry), yet the post-launch reset still wants a
+        change it never gets - probably a momentary closed-then-open as the
+        bank rises.  A one-line keeper rule once the expected edge is known.
+      - **Lamps into `s1hw.state`**: s1early.py sees every lamp frame
+        (`[0x80|node, n+1, 0x80|c, d0..dn]`, 629 of them per minute) and
+        writes none of it, so the switch window shows no lamp colour on this
+        era.  The DMD generation's decoder in nodebus.py is the model.
+      - **Audio pacing**: `S1_PCM_RATE=24000` is inferred from the game's
+        WAVs (24000/12000 Hz mono s16, 128-frame stereo blocks); measure the
+        DAC handler's real block cadence and confirm before trusting the
+        pitch.
+      - S3: it plays; these are polish. D2: each is a contained rule with
+      the instrumentation already in place (`S1_NB_LOG`, `s1alpha.py` as a
+      display reader).
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

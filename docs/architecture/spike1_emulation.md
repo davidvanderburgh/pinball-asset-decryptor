@@ -458,6 +458,15 @@ persisted in `$S1_WORK/s1eep.bin`), so the next boot validates.
 4. **The audio rate.** The mixer writes 128-frame stereo s16 blocks at 24000
    Hz (`S1_PCM_RATE` for the i2s pacing; the game's WAVs are 24000/12000 Hz).
 
+5. **The ball lock's optos.** `LOCKUP 1-3` (switches 32-34, negative-logic)
+   are optos whose CLOSED state means "no ball". Read open, the game counted
+   three locked balls, kicked the ramp lock (coil 4) every 3 s from attract
+   on and never fired the trough eject — its ball count was already full.
+   The keeper holds every `LOCKUP` switch closed like the trough; with that,
+   START fires coil 3, the keeper serves and launches, and the game is on
+   `PLAYER 1 BALL 1`. (The drop-target reset, coil 7, still retries seven
+   times after launch and gives up — queue item 91.)
+
 ### The display (`s1alpha.py`)
 
 `dmd_update_t` packs a 512-slot buffer into 4 bit-planes of 64 bytes (the

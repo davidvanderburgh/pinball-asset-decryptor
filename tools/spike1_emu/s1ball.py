@@ -74,6 +74,11 @@ ARM_WINDOW = 30.0                # s a start/drain arms the serve reaction
 SPI_BITS = {"select": 8, "plus": 9, "minus": 10, "back": 11, "interlock": 16}
 
 
+#: switches the keeper HOLDS closed besides the trough: a ball lock's optos,
+#: whose closed state is "no ball here" (filled by load_title_map).
+lock_optos = []
+
+
 def load_title_map(work):
     """Resolve the keeper's slots from the title's curated switch map.
 
@@ -97,6 +102,7 @@ def load_title_map(work):
     except (OSError, ValueError):
         return trough, shooter, start, coin, coils, curated, False
     by_digit = {}
+    lock_optos.clear()
     for key, name in raw.items():
         if key == "_trough_coils":
             try:
@@ -118,7 +124,12 @@ def load_title_map(work):
             m = re.search(r"(\d+)", uname)
             if m:
                 by_digit[int(m.group(1))] = slot
-        elif "SHOOTER" in uname:
+        elif uname.startswith("LOCKUP"):
+            # a ball lock's optos: CLOSED means empty.  Left open, Transformers
+            # The Pin read three balls locked from attract on, kicked the lock
+            # every 3 s and never served (its count was already "full").
+            lock_optos.append(slot)
+        elif "SHOOTER" in uname and "EXIT" not in uname:
             shooter = slot
         elif uname in ("START BUTTON", "START"):     # the early era says START
             start = slot
@@ -158,6 +169,7 @@ class Keeper:
                        if (self.curated or self.mapped) else 0)
         if not self.curated:
             self.trough_coils = set()
+        self.lock_optos = list(lock_optos) if self.mapped else []
         self.seq = 0
         self.balls = self.nballs     # balls sitting in the trough
         self.in_shooter = False
@@ -216,19 +228,22 @@ class Keeper:
         self.start, self.coin = start, coin
         self.trough_coils = coils if curated else set()
         self.curated, self.mapped = curated, mapped
+        self.lock_optos = list(lock_optos)
         self.nballs = len(self.trough_slots)
         self.balls = self.nballs          # fill the trough it can now name
         self.in_shooter = False
         self.write_state()
         self.publish()
-        print("title map adopted: %d trough switches, %s"
+        print("title map adopted: %d trough switches, %s%s"
               % (self.nballs, "curated eject coils" if curated
-                 else "serve by plunge (no _trough_coils)"), flush=True)
+                 else "serve by plunge (no _trough_coils)",
+                 ", %d lock optos held (empty lock)" % len(self.lock_optos)
+                 if self.lock_optos else ""), flush=True)
         return True
 
     # -- switch output -------------------------------------------------------
     def closed_slots(self):
-        slots = list(self.trough_slots[:self.balls])
+        slots = list(self.trough_slots[:self.balls]) + list(self.lock_optos)
         if self.in_shooter:
             slots.append(self.shooter)
         slots.extend(self.pulses)

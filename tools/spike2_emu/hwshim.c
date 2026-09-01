@@ -1714,6 +1714,8 @@ static int segv_header_on(void)
  * Linux; slot 132 is sa_flags, and SA_SIGINFO (4) says which shape it is. */
 static void *game_segv_fn;
 static int   game_segv_flags;
+static void *game_bus_fn;       /* SIGBUS, same arrangement - see bus_header_handler */
+static int   game_bus_flags;
 static int   segv_reports;      /* header prints, capped - see below */
 
 /* The universal half: true on any title, invents nothing. Kept separate from
@@ -1839,6 +1841,63 @@ static void scan_guard_check(unsigned long *uc)
  * forever; item 23 measured that shape as a hang. Three reports name the fault
  * without turning a hang into a gigabyte of log.
  */
+/* The second half of HEADER mode, shared by SIGSEGV and SIGBUS: hand the
+ * fault to the handler the game registered (recorded by shim_sigaction /
+ * shim_signal), or let it kill the process the way it would have.
+ *
+ * "THE WAY IT WOULD HAVE" HAS A HOLE UNDER PAD_PIVOT, found on led_zeppelin_le
+ * (item 80, 2026-09-01). run_game.sh puts the guest in its own pid namespace
+ * and exec's qemu as its init - pid 1 in there. Restoring SIG_DFL and
+ * returning re-executes the faulting instruction, qemu sees a guest signal
+ * with no handler and does what qemu does: prints `uncaught target signal N`
+ * and kill()s ITSELF with the host signal. But a pid namespace's init cannot
+ * be killed from inside its own namespace by any signal it has no handler for
+ * - the kernel drops it (SIGNAL_UNKILLABLE) - so the kill is a no-op, qemu
+ * parks the faulting thread in sigsuspend() forever, and the 19 other threads
+ * it had already stopped for the core dump never run again. The game is dead,
+ * the process is alive, `pgrep -x game` says so, and watch.sh waits for a
+ * "game exited" that never comes: David's run sat 20 minutes at a black
+ * screen with no line saying why. (The "core dumped" qemu prints there is
+ * also untrue: RLIMIT_CORE is 0, so it wrote nothing.) So when this guest IS
+ * pid 1 - and only then - the end is an explicit exit, with the signal in the
+ * status the way a shell would report it. Anywhere else the old path stands.
+ */
+static void fault_pass_on(int sig, void *info, void *ucv)
+{
+    void **fn    = sig == 7 ? &game_bus_fn    : &game_segv_fn;
+    int   *flags = sig == 7 ? &game_bus_flags : &game_segv_flags;
+
+    if (*fn) {
+        char d[80];
+        snprintf(d, sizeof d, "[segv] delegating to guest handler %p flags=0x%x\n",
+                 *fn, *flags);
+        logmsg(d);
+        if (*flags & 4)                 /* SA_SIGINFO: three-argument form */
+            ((void (*)(int, void *, void *))*fn)(sig, info, ucv);
+        else
+            ((void (*)(int))*fn)(sig);
+        return;
+    }
+    logmsg("[segv] no guest handler recorded; falling through to SIG_DFL\n");
+
+    if (syscall(20) == 1) {             /* getpid: init of a pid namespace */
+        char d[160];
+        snprintf(d, sizeof d, "[segv] this guest is pid 1 of its pid namespace, "
+                 "where SIG_DFL cannot end it (qemu's own kill() is dropped and "
+                 "the run wedges) - exiting %d instead\n", 128 + sig);
+        logmsg(d);
+        _exit(128 + sig);
+    }
+
+    /* Nobody else wants it: die the way we would have died anyway. */
+    if (real_sigaction) {
+        unsigned char dfl[160];
+        int i;
+        for (i = 0; i < 160; i++) dfl[i] = 0;   /* sa_handler = SIG_DFL (0) */
+        real_sigaction(sig, dfl, 0);
+    }
+}
+
 static void segv_header_handler(int sig, void *info, void *ucv)
 {
     unsigned long *uc = ucv;
@@ -1851,27 +1910,250 @@ static void segv_header_handler(int sig, void *info, void *ucv)
         if (segv_reports == 3)
             logmsg("[segv] (further faults will not be reported)\n");
     }
+    fault_pass_on(sig, info, ucv);
+}
 
-    if (game_segv_fn) {
-        char d[80];
-        snprintf(d, sizeof d, "[segv] delegating to guest handler %p flags=0x%x\n",
-                 game_segv_fn, game_segv_flags);
-        logmsg(d);
-        if (game_segv_flags & 4)        /* SA_SIGINFO: three-argument form */
-            ((void (*)(int, void *, void *))game_segv_fn)(sig, info, ucv);
-        else
-            ((void (*)(int))game_segv_fn)(sig);
+/* ---------------- unaligned LDRD/STRD/LDM/STM: the kernel's fixup, here ----
+ *
+ * led_zeppelin_le 1.22.0, item 80's sweep (2026-09-01): every game start died
+ * `qemu: uncaught target signal 7 (Bus error)` on the sound-preload thread, at
+ *
+ *     20937c:  e18320d7   ldrd r2, r3, [r3, r7]      r3 = 8, r7 = 0x6ce22fca
+ *
+ * r7 points into the game's mmap of image.bin - a sound-bank table of 8-byte
+ * records that the file lays down on a 2-byte boundary - and the compiler
+ * reached for LDRD to fetch a record. The ARMv7 architecture alignment-faults
+ * LDRD/STRD/LDM/STM on any non-word address whatever SCTLR.A says; on the real
+ * machine that fault goes to the kernel, whose alignment handler
+ * (arch/arm/mm/alignment.c, UM_FIXUP - the default on v6+) performs the
+ * access on the program's behalf and resumes it. Nobody at Stern ever saw
+ * this: it costs a trap and works. qemu-user models the architecture and has
+ * no kernel above it, so the same fault reaches the GUEST as
+ * SIGBUS(BUS_ADRALN) and, with no handler, ends the run.
+ *
+ * This is the kernel's half, done from the SIGBUS handler: decode the
+ * instruction, perform the access a byte at a time, write the registers back
+ * into the signal frame, step the pc, return. Exactly the instructions the
+ * kernel fixes for user mode - LDRD/STRD and LDM/STM, ARM and Thumb
+ * encodings - and nothing more: an alignment fault on anything else (VLDR /
+ * VLD1 with an alignment qualifier, LDREX) is one the kernel would kill the
+ * program for too, and it goes to the report like any other fault.
+ *
+ * PAD_ALIGN_FIXUP=0 turns it off, to see the raw fault. The first fixups are
+ * logged with their pc, then every 4096th, so a hot loop cannot fill game.out
+ * (the kernel keeps the same kind of count in /proc/cpu/alignment).
+ */
+static int align_on(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *p = getenv("PAD_ALIGN_FIXUP");
+        v = !(p && p[0] == '0');
+    }
+    return v;
+}
+
+static unsigned long align_fixups;
+static const char *align_what;
+static unsigned long align_ea;
+
+static unsigned long ld32u(unsigned long a)
+{
+    const unsigned char *p = (const unsigned char *)a;
+    return p[0] | (unsigned long)p[1] << 8 | (unsigned long)p[2] << 16
+         | (unsigned long)p[3] << 24;
+}
+static unsigned ld16u(unsigned long a)
+{
+    const unsigned char *p = (const unsigned char *)a;
+    return p[0] | (unsigned)p[1] << 8;
+}
+static void st32u(unsigned long a, unsigned long v)
+{
+    unsigned char *p = (unsigned char *)a;
+    p[0] = (unsigned char)v;         p[1] = (unsigned char)(v >> 8);
+    p[2] = (unsigned char)(v >> 16); p[3] = (unsigned char)(v >> 24);
+}
+
+/* Every page the access touches must be mapped before anything is touched: a
+ * fixup that faults faults INSIDE a signal handler, which is a second death
+ * with no report. addr_readable probes a byte with write(2) to /dev/null. */
+static int align_span_ok(unsigned long a, unsigned long n)
+{
+    unsigned long p;
+    for (p = a; p < a + n; p = (p & ~0xfffUL) + 0x1000)
+        if (!addr_readable((const void *)p)) return 0;
+    return 1;
+}
+
+/* A load INTO the pc (LDM with pc in the list) is an interworking branch:
+ * the T bit follows bit 0. */
+static void align_set_pc(unsigned long *uc, unsigned long v)
+{
+    uc[8 + 15] = v & ~1UL;
+    uc[24] = (uc[24] & ~0x20UL) | ((v & 1) << 5);
+}
+
+/* Returns 0 = not done, 1 = done (step the pc), 2 = done and the pc is set. */
+static int align_ldm_stm(unsigned long *uc, int P, int U, int W, int L, int Rn,
+                         unsigned list, unsigned long pc_stored)
+{
+    unsigned long *r = uc + 8;
+    unsigned long rn = r[Rn], a, n = 0, vals[16];
+    int i;
+    for (i = 0; i < 16; i++) if (list & (1u << i)) n++;
+    if (!n) return 0;
+    a = U ? (P ? rn + 4 : rn) : (P ? rn - 4 * n : rn - 4 * n + 4);
+    align_ea = a;
+    if (!align_span_ok(a, 4 * n)) return 0;
+    if (L) {
+        for (i = 0; i < 16; i++) if (list & (1u << i)) { vals[i] = ld32u(a); a += 4; }
+        for (i = 0; i < 15; i++) if (list & (1u << i)) r[i] = vals[i];
+    } else {
+        for (i = 0; i < 16; i++) if (list & (1u << i)) {
+            st32u(a, i == 15 ? pc_stored : r[i]);
+            a += 4;
+        }
+    }
+    /* LDM with Rn in the list: the loaded value stands (writeback there is
+     * UNPREDICTABLE, and the kernel lets the load win). */
+    if (W && !(L && (list & (1u << Rn)))) r[Rn] = U ? rn + 4 * n : rn - 4 * n;
+    if (L && (list & 0x8000)) { align_set_pc(uc, vals[15]); return 2; }
+    return 1;
+}
+
+static int align_ldrd_strd(unsigned long *uc, int P, int U, int W, int L,
+                           int Rn, int Rt, int Rt2, unsigned long rn,
+                           unsigned long off)
+{
+    unsigned long *r = uc + 8;
+    unsigned long ea = P ? (U ? rn + off : rn - off) : rn;
+    unsigned long v0, v1;
+    if (Rt == 15 || Rt2 == 15) return 0;
+    align_ea = ea;
+    if (!align_span_ok(ea, 8)) return 0;
+    if (L) {
+        v0 = ld32u(ea); v1 = ld32u(ea + 4);   /* both loads before any write */
+        r[Rt] = v0; r[Rt2] = v1;
+    } else {
+        st32u(ea, r[Rt]); st32u(ea + 4, r[Rt2]);
+    }
+    if (!P || W) r[Rn] = U ? rn + off : rn - off;
+    return 1;
+}
+
+/* 1 when the faulting instruction was emulated and the frame stepped past it;
+ * 0 when it is not one the kernel would fix, so the fault is reported. */
+static int align_fixup(unsigned long *uc)
+{
+    unsigned long *r = uc + 8;
+    unsigned long pc = r[15];
+    int thumb = (uc[24] >> 5) & 1;
+    int rc = 0, ilen = 4;
+
+    align_what = 0; align_ea = 0;
+    if (!align_span_ok(pc, 4)) return 0;
+    if (!thumb) {
+        unsigned long insn = ld32u(pc);
+        int P = (insn >> 24) & 1, U = (insn >> 23) & 1, W = (insn >> 21) & 1;
+        int Rn = (insn >> 16) & 15;
+        if ((insn >> 28) == 0xf) return 0;                /* unconditional space */
+        if ((insn & 0x0e1000d0) == 0x000000d0) {          /* LDRD (1101) / STRD (1111) */
+            int L = !((insn >> 5) & 1);
+            int Rt = (insn >> 12) & 15;
+            unsigned long off = (insn & (1UL << 22))
+                ? (((insn >> 4) & 0xf0) | (insn & 0xf))    /* immediate form */
+                : r[insn & 15];                            /* register form  */
+            unsigned long rn = Rn == 15 ? pc + 8 : r[Rn];
+            if (Rt & 1) return 0;                          /* UNPREDICTABLE */
+            align_what = L ? "LDRD" : "STRD";
+            rc = align_ldrd_strd(uc, P, U, W, L, Rn, Rt, Rt + 1, rn, off);
+        } else if ((insn & 0x0e400000) == 0x08000000) {    /* LDM / STM, S=0 */
+            int L = (insn >> 20) & 1;
+            align_what = L ? "LDM" : "STM";
+            rc = align_ldm_stm(uc, P, U, W, L, Rn, insn & 0xffff, pc + 8);
+        }
+    } else {
+        unsigned hw1 = ld16u(pc), hw2;
+        if ((hw1 & 0xf000) == 0xc000) {                    /* 16-bit STMIA / LDMIA */
+            int L = (hw1 >> 11) & 1, Rn = (hw1 >> 8) & 7;
+            unsigned list = hw1 & 0xff;
+            ilen = 2;
+            align_what = L ? "LDM" : "STM";
+            rc = align_ldm_stm(uc, 0, 1, L ? !(list & (1u << Rn)) : 1, L, Rn, list, 0);
+        } else if ((hw1 & 0xe000) == 0xe000 && (hw1 & 0x1800)) {   /* 32-bit */
+            hw2 = ld16u(pc + 2);
+            if ((hw1 & 0xfe40) == 0xe840 && (((hw1 >> 8) & 1) || ((hw1 >> 5) & 1))) {
+                /* LDRD/STRD T1 (P or W set; both clear is the exclusive/TBB space) */
+                int P = (hw1 >> 8) & 1, U = (hw1 >> 7) & 1, W = (hw1 >> 5) & 1;
+                int L = (hw1 >> 4) & 1, Rn = hw1 & 15;
+                int Rt = hw2 >> 12, Rt2 = (hw2 >> 8) & 15;
+                unsigned long off = (hw2 & 0xff) << 2;
+                unsigned long rn = Rn == 15 ? ((pc + 4) & ~3UL) : r[Rn];
+                align_what = L ? "LDRD" : "STRD";
+                rc = align_ldrd_strd(uc, P, U, W, L, Rn, Rt, Rt2, rn, off);
+            } else if ((hw1 & 0xffd0) == 0xe880 || (hw1 & 0xffd0) == 0xe890) {
+                int L = (hw1 >> 4) & 1;                    /* STM.W / LDM.W (IA) */
+                align_what = L ? "LDM" : "STM";
+                rc = align_ldm_stm(uc, 0, 1, (hw1 >> 5) & 1, L, hw1 & 15, hw2, 0);
+            } else if ((hw1 & 0xffd0) == 0xe900 || (hw1 & 0xffd0) == 0xe910) {
+                int L = (hw1 >> 4) & 1;                    /* STMDB / LDMDB */
+                align_what = L ? "LDM" : "STM";
+                rc = align_ldm_stm(uc, 1, 0, (hw1 >> 5) & 1, L, hw1 & 15, hw2, 0);
+            }
+        }
+    }
+    if (!rc) return 0;
+    if (rc == 1) r[15] = pc + ilen;
+    align_fixups++;
+    if (align_fixups <= 8 || (align_fixups & 0xfff) == 0) {
+        char b[200];
+        snprintf(b, sizeof b, "[align] fixup #%lu: %s at pc=0x%lx addr=0x%lx%s "
+                 "(the kernel would do this on the machine)\n",
+                 align_fixups, align_what, pc, align_ea, thumb ? " (thumb)" : "");
+        logmsg(b);
+    }
+    return 1;
+}
+
+/* SIGBUS. An alignment fault (BUS_ADRALN, si_code 1) on an instruction the
+ * kernel fixes up is fixed up and the thread resumes; anything else is a real
+ * fault and gets the same report and the same fate as a SIGSEGV. It is
+ * reported on the [segv] channel deliberately - that is the crash-report
+ * channel the app pane forwards and watch.sh greps at exit - with the signal
+ * named on the first line so nobody reads a bus error as a segfault. */
+static void bus_header_handler(int sig, void *info, void *ucv)
+{
+    unsigned long *uc = ucv;
+    const int *si = info;
+
+    scan_guard_check(uc);   /* never returns if the guarded scan faulted */
+
+    if (uc && si && si[2] == 1 && align_on() && align_fixup(uc))
         return;
-    }
-    logmsg("[segv] no guest handler recorded; falling through to SIG_DFL\n");
 
-    /* Nobody else wants it: die the way we would have died anyway. */
-    if (real_sigaction) {
-        unsigned char dfl[160];
-        int i;
-        for (i = 0; i < 160; i++) dfl[i] = 0;   /* sa_handler = SIG_DFL (0) */
-        real_sigaction(11, dfl, 0);
+    if (uc && segv_reports < 3) {
+        char b[240];
+        segv_reports++;
+        snprintf(b, sizeof b, "[segv] SIGBUS (si_code %d%s)%s\n",
+                 si ? si[2] : -1,
+                 si && si[2] == 1 ? " = BUS_ADRALN, an alignment fault" : "",
+                 si && si[2] == 1 && !align_on() ? " - PAD_ALIGN_FIXUP=0, not fixed up" :
+                 si && si[2] == 1 ? " on an instruction the kernel would not fix either" : "");
+        logmsg(b);
+        segv_print_header(uc);
+        snprintf(b, sizeof b,
+                 "[segv] r0=%08lx r1=%08lx r2=%08lx r3=%08lx r4=%08lx r5=%08lx\n"
+                 "[segv] r6=%08lx r7=%08lx r8=%08lx r9=%08lx sl=%08lx fp=%08lx\n"
+                 "[segv] ip=%08lx sp=%08lx lr=%08lx pc=%08lx\n",
+                 uc[8], uc[9], uc[10], uc[11], uc[12], uc[13],
+                 uc[14], uc[15], uc[16], uc[17], uc[18], uc[19],
+                 uc[20], uc[21], uc[22], uc[23]);
+        logmsg(b);
+        if (segv_reports == 3)
+            logmsg("[segv] (further faults will not be reported)\n");
     }
+    fault_pass_on(sig, info, ucv);
 }
 
 __attribute__((constructor))
@@ -1889,6 +2171,9 @@ static void segv_install(void)
     *(int *)(mine + 132) = 4;              /* SA_SIGINFO */
     if (real_sigaction(11, mine, 0) == 0)
         segv_guard_ready = 1;   /* sw_find_table's guard can land */
+    /* SIGBUS: the alignment fixup above, then the same report. */
+    *(void **)mine = (void *)bus_header_handler;
+    real_sigaction(7, mine, 0);
 }
 
 /* IS THIS THE TITLE THE HARDCODED ADDRESSES CAME FROM?
@@ -2278,16 +2563,18 @@ int shim_sigaction(int sig, const void *act, void *old)
      * would be back to reporting nothing. It still runs, from ours; see
      * segv_header_handler. Reporting an old handler the game never installed
      * would be a lie, so `old` gets what we are holding on its behalf. */
-    if (sig == 11 && act && segv_header_on()) {
+    if ((sig == 11 || sig == 7) && act && segv_header_on()) {
+        void **fn    = sig == 7 ? &game_bus_fn    : &game_segv_fn;
+        int   *flags = sig == 7 ? &game_bus_flags : &game_segv_flags;
         if (old) {
             unsigned char *o = old;
             int i;
             for (i = 0; i < 160; i++) o[i] = 0;
-            *(void **)o = game_segv_fn;
-            *(int *)(o + 132) = game_segv_flags;
+            *(void **)o = *fn;
+            *(int *)(o + 132) = *flags;
         }
-        game_segv_fn    = *(void **)act;
-        game_segv_flags = *(const int *)((const unsigned char *)act + 132);
+        *fn    = *(void **)act;
+        *flags = *(const int *)((const unsigned char *)act + 132);
         return 0;
     }
     return real_sigaction(sig, act, old);
@@ -2298,17 +2585,19 @@ void *shim_signal(int sig, void *h)
 {
     static void *(*real_signal)(int, void *);
     if (!real_signal) real_signal = dlsym(RTLD_NEXT, "signal");
-    if (sig == 11) {
+    if (sig == 11 || sig == 7) {
         /* NOTE, found while building item 41's reporter: this path used to
          * DROP h on the floor - it called sigaction(11, NULL, NULL), which
          * installs nothing, so a game that registers its SIGSEGV handler via
          * signal() rather than sigaction() ended up with no handler at all.
          * That is one way a fault becomes qemu's `uncaught target signal 11`
          * with nothing logged. Record it now so header mode can delegate to
-         * it, exactly as the sigaction path does. */
-        void *prev = game_segv_fn;
-        if (h && segv_header_on()) { game_segv_fn = h; game_segv_flags = 0; }
-        else                       { shim_sigaction(11, 0, 0); }
+         * it, exactly as the sigaction path does. SIGBUS is held the same way. */
+        void **fn    = sig == 7 ? &game_bus_fn    : &game_segv_fn;
+        int   *flags = sig == 7 ? &game_bus_flags : &game_segv_flags;
+        void *prev = *fn;
+        if (h && segv_header_on()) { *fn = h; *flags = 0; }
+        else                       { shim_sigaction(sig, 0, 0); }
         return prev;
     }
     return real_signal(sig, h);

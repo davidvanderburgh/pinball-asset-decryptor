@@ -7213,6 +7213,51 @@ rewriting it.**
         0 → 259 and `dungeons_and_dragons_le` +41 on the two other ELFs
         reachable without a card mount, and the 40-image `cardaudit.py` sweep
         that produced that list has NOT been re-run.
+      - **led_zeppelin_le 1.22.0 — ❌ every game start died, ✅ starts and
+        serves a ball after a same-day fix, 2026-09-01; David's play-through
+        pending.** David: "trying to run led zeppelin and it's crashing on
+        starting a game". The pane: attract clip cycling, a `+36` start
+        press, then nothing but `Windows player exited; restarting it` —
+        20 minutes at a black screen with `pgrep -x game` still true and no
+        "game exited". **Two faults, both the rig's, neither the title's.**
+        (i) THE CRASH. game.out ended `qemu: uncaught target signal 7 (Bus
+        error) - core dumped`, with no core (RLIMIT_CORE is 0; qemu 8.2
+        prints "core dumped" anyway) and a stripped stock qemu, so the guest
+        registers were read straight out of the still-live process: every
+        guest thread's `CPUARMState` is findable by SHAPE in `/proc/<pid>/mem`
+        (16 regs, then 264 zero bytes of unused AArch64 state, user-mode CPSR
+        `0x10` at +0x158), and the one thread whose r7 was not a syscall
+        number was the sound preloader at `20937c: ldrd r2, r3, [r3, r7]`,
+        r3=8, r7=0x6ce22fca — an 8-byte record table inside the game's mmap
+        of `image.bin`, laid down on a 2-byte boundary. ARMv7 alignment-faults
+        LDRD/STRD/LDM/STM on any non-word address whatever SCTLR.A says; on
+        the machine the KERNEL fixes that up for user mode (`alignment.c`,
+        UM_FIXUP, the default on v6+), so Stern never saw it. qemu-user has no
+        kernel above it and hands the guest SIGBUS(BUS_ADRALN). **Fixed in
+        hwshim.c:** a SIGBUS handler that is the kernel's fixup — decodes
+        LDRD/STRD/LDM/STM (ARM and Thumb), performs the access bytewise,
+        writes the frame back, steps the pc; `[align] fixup #N` on the pane
+        (first 8, then every 4096th), `PAD_ALIGN_FIXUP=0` to see the raw
+        fault. Same stock `/usr/bin/qemu-arm-static` — this rig does not build
+        its own qemu (Spike 1's does), so the kernel's half lives in the one
+        file every title runs through. (ii) WHY IT WEDGED INSTEAD OF EXITING.
+        Under PAD_PIVOT the guest is pid 1 of its own pid namespace (`NSpid:
+        2342702 1`), and a pid-namespace init drops every signal it has no
+        handler for when the sender is inside — so qemu's own `kill(getpid(),
+        SIGBUS)` was a no-op, the faulting thread parked in `sigsuspend()` and
+        the other 19, already stopped for the core dump, never ran again.
+        Every fatal guest fault under PAD_PIVOT has been ending this way, as a
+        freeze rather than an exit. **Fixed twice:** the shim's no-handler
+        path `_exit(128+sig)`s when it is pid 1 (after the `[segv]` report),
+        and watch.sh reads `qemu: uncaught target signal` in game.out as the
+        death notice it is and stops a guest that could not stop itself.
+        **Verified live** after the rebuild: `plunge.py game` → `[align]
+        fixup #1: LDRD at pc=0x20937c`, trough eject answered, ball in the
+        shooter lane, 54 fps, no fault for the rest of the run. Not changed,
+        deliberately: making the game pid 2 under a tiny init would mend
+        qemu's own path but the criu save states dump the namespace root
+        (`savegame.sh` targets `pgrep -x game`), and a host bash as init
+        cannot be dumped once the pivot detaches its binary's mount.
       - **james_bond_le 1.06.0 — ❌ SEGV, David 2026-09-01 09:32; FIRST BOOT of
         this title on the rig** (every derived table under
         `dump/tables/james_bond_le` is stamped 09:32 today; it is not the

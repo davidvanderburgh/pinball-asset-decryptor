@@ -1593,6 +1593,11 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         # turtles_pro crashes to that gap - the pane showed qemu s bare
         # "uncaught target signal 11" and nothing that said where.
         /\[segv\]/               { print "[event] " $0; fflush(); next }
+        # [align] is the shim doing the kernel s alignment fixup for an
+        # unaligned LDRD/STRD/LDM/STM (led_zeppelin_le, item 80). Budgeted at
+        # the source - the first eight and every 4096th - so forwarding it is
+        # free, and a title that needs it says so on the pane.
+        /\[align\]/              { print "[event] " $0; fflush(); next }
         /SEGV|Segmentation|FATAL/{ print "[event] " $0; fflush(); next }
     ' &
     EVTPG=$!
@@ -1644,6 +1649,30 @@ while :; do
         echo "[watch] a save-state reload has been in progress for 2 min; giving up on it."
         rm -f "$ROOT/dump/reloading"
     fi
+    # A DEAD GUEST THAT IS STILL A PROCESS (led_zeppelin_le, item 80,
+    # 2026-09-01). Under PAD_PIVOT the guest is pid 1 of its own pid namespace,
+    # and a pid namespace's init cannot be killed from inside by a signal it has
+    # no handler for. qemu ends a fatal guest fault by kill()ing itself - so
+    # when the fault is one the shim did not catch, that kill is dropped, qemu
+    # parks the faulting thread in sigsuspend() and every other thread stays
+    # stopped: `uncaught target signal N` in game.out, `pgrep -x game` still
+    # true, and this loop waiting on an exit that never comes. David watched a
+    # black screen for 20 minutes. The line qemu prints IS the death notice,
+    # so read it as one: stop the guest and fall into the exit report below.
+    # Checked every 2 s on the tail of the file, not every 0.25 s on all of it.
+    if [ $(( ${WEDGE_TICK:=0} % 8 )) = 0 ] && [ -f "$ROOT/dump/game.out" ] \
+       && tail -c 65536 "$ROOT/dump/game.out" 2>/dev/null \
+          | grep -aq 'qemu: uncaught target signal' && pad_guest_up; then
+        echo "[watch] THE GUEST DIED BUT COULD NOT EXIT: qemu reports a fatal" \
+             "signal in game.out, yet the process is still there - it is pid 1" \
+             "of its pid namespace, where its own kill() is dropped. Stopping it."
+        grep -a 'qemu: uncaught target signal' "$ROOT/dump/game.out" | tail -1 \
+            | sed 's/^/[watch]   /'
+        pkill -9 -x game 2>/dev/null
+        pkill -9 -f 'arm-binfmt|qemu-arm' 2>/dev/null
+        sleep 0.5
+    fi
+    WEDGE_TICK=$(( WEDGE_TICK + 1 ))
     if ! pad_guest_up; then
         echo "[watch] the game exited. Last lines of its log:"
         tail -5 "$LOG"

@@ -126,6 +126,26 @@ Root-free, reproducible from a card alone:
    group** after the limit (the `timeout` tool leaks qemu children — the Spike 2
    rig hit this too).
 
+### Whose guest is it? (`s1own.sh`)
+
+The guest's identity is its **comm**, `game` — binfmt keeps qemu off the
+command line, and a pivoted or criu-restored guest shows `/.padqemu/game`. But
+the Spike 2 rig names its guest `game` **on purpose too** (`run_game.sh` copies
+qemu to `.padqemu/game` "so comm stays game"), so `pgrep -x game` answers
+"*some* rig is running a game". Taking that for an answer is what made the app
+open the Spike 1 DMD and switch windows over a running Spike 2 game, and what
+made this rig's `stop.sh` kill that game on app quit (PAD-98).
+
+`s1own.sh game` / `s1own.sh nodebus` are the one place that decides, and
+`status.sh`, `stop.sh` and `s1restorestate.sh` all ask it. A guest is **ours**
+when this rig's work dir is among its mounts — `/proc/<pid>/mountinfo` carries
+the bind sources (`$S1_WORK/rootfs` as the pivot root, the extracted game dir
+at `/games/<TITLE>`, the staged cpuinfo), and that file is readable by the
+ordinary user `status.sh` runs as, across a mount namespace, for a root-owned
+guest. `/proc/<pid>/root` would say it more directly but needs ptrace
+permission; ancestry does not survive a criu restore (it comes back detached);
+the command line cannot tell the two rigs apart at all under pivot.
+
 ## Boot trace — how far it gets, and the wall
 
 With `/dev/null` stand-ins, the real GOT LE 1.37 firmware runs this far (from a

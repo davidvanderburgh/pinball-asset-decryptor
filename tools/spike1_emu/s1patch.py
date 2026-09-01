@@ -299,12 +299,30 @@ def patch_node_ready(path):
     return "patched"
 
 
+#: The four patches all resolve symbols of the 2015-2016 framework.  An EARLY
+#: card's firmware (the 2012 home models, PAD-101) has none of them — no line-
+#: frequency self-test to spoof, no node status gate, no in-game node
+#: flashing — so there is nothing to patch, and saying so beats four
+#: "symbol not found" refusals that read like a broken card.
+_ERA_SYMBOLS = (SYMBOL, NODE_STATUS_SYMBOL, NODE_READY_SYMBOL)
+
+
+def is_early_era(path):
+    with open(path, "rb") as f:
+        elf = _Elf(f.read())
+    return not any(any(sym in n for n in elf.syms) for sym in _ERA_SYMBOLS)
+
+
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
     if not argv:
         print("usage: s1patch.py <game-elf>", file=sys.stderr)
         return 2
     try:
+        if is_early_era(argv[0]):
+            print("early firmware era: none of the DMD-generation boot gates "
+                  "exist in this game, nothing to patch")
+            return 0
         lf = patch_line_frequency(argv[0])
         ns = patch_node_status(argv[0])
         nr = patch_node_ready(argv[0])

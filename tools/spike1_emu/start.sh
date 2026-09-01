@@ -74,11 +74,26 @@ elif [ ! -e "$S1_WORK/game/game" ]; then
     fail "no game extracted yet — pick a Spike 1 card image" 4
 fi
 
+# 3a. which firmware ERA this card is.  build_rootfs.py leaves .game_exe (and
+#     .game_path, .display) beside the game only for an EARLY card — the 2012
+#     home models such as Transformers The Pin (PAD-101) — whose firmware
+#     predates the node-bus framework the rest of this script assumes: the
+#     responder speaks that era's wire format (s1early.py via nodebus.py),
+#     none of the s1patch.py boot patches exist to apply, and the switch map
+#     cannot be walked with the DMD-generation anchor (yet).  Absent = the
+#     2015-2016 titles, and nothing below changes for them.
+S1_ERA=dmd
+if [ -e "$S1_WORK/game/.game_exe" ]; then
+    S1_ERA=early
+    log "Early Spike 1 card: $(cat "$S1_WORK/game/.game_name" 2>/dev/null) launches $(cat "$S1_WORK/game/.game_exe"), $(cat "$S1_WORK/game/.display" 2>/dev/null) display."
+fi
+export S1_ERA
+
 # 3b. mains line-frequency self-test: the emulator has no real AC line, so the
 #     game's factory check sits on "CHECK POWER DISTRIBUTION BOARD" forever.
 #     Patch the extracted game to report a valid 60 Hz (idempotent; see s1patch.py).
 if [ -e "$S1_WORK/game/game" ]; then
-    log "Game patches: $(python3 "$HERE/s1patch.py" "$S1_WORK/game/game" 2>&1)"
+    log "Game patches: $(python3 "$HERE/s1patch.py" "$S1_WORK/game/$(cat "$S1_WORK/game/.game_exe" 2>/dev/null || echo game)" 2>&1)"
     # switch names for the viewer's matrix window: the title's own (node,index)
     # -> name map.  The switch window reads this over the UNC path, labels and
     # lays out its rows from it, binds the play keys through it, and the ball
@@ -106,6 +121,9 @@ if [ -e "$S1_WORK/game/game" ]; then
     if [ -e "$HERE/switchmaps/$_title.json" ]; then
         cp "$HERE/switchmaps/$_title.json" "$S1_WORK/s1switches.json"
         log "Switch names: curated map for $_title."
+    elif [ "$S1_ERA" = "early" ]; then
+        rm -f "$S1_WORK/s1switches.json"
+        log "Switch names: none yet for an early card (the switch window shows the raw matrix)."
     else
         # a map from a PREVIOUS card would name this title's switches wrongly
         rm -f "$S1_WORK/s1switches.json"
@@ -151,9 +169,13 @@ rm -f "$S1_WORK/spi0.cap" "$S1_WORK/ttyS4.cap" "$S1_WORK/ttyS4.slave" \
 # argv[3]) — every REQ + the exact reply bytes, for debugging node registration.
 # S1_SW_AUTO: second SwitchInput bitmap (the s1ball.py ball-keeper daemon);
 # merged with the viewer's s1sw.input by the responder.
+# S1_ERA / S1_EEP_FILE: the early era's responder (s1early.py) and where it
+# keeps that machine's 64-byte settings EEPROM, which lives on the net bridge
+# and is read over this same serial port.
 setsid env S1_SW_INPUT="$S1_WORK/s1sw.input" \
     S1_SW_AUTO="$S1_WORK/s1auto.input" \
     S1_GAME_ELF="$S1_WORK/game/game" \
+    S1_ERA="$S1_ERA" S1_EEP_FILE="$S1_WORK/s1eep.bin" \
     python3 "$HERE/nodebus.py" "$S1_WORK/ttyS4.slave" "$S1_WORK/ttyS4.cap" \
     ${S1_NB_LOG:+"$S1_NB_LOG"} \
     >/dev/null 2>&1 &

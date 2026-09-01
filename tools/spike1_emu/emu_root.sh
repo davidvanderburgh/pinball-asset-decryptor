@@ -23,6 +23,14 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 R="$S1_ROOT"; G="$S1_GAME"
 GAME_NAME="$(tr -d '[:space:]' < "$G/.game_name" 2>/dev/null)"; : "${GAME_NAME:=GAME}"
+# Where the game dir is bound inside the guest and which binary is run.  The
+# 2015-2016 titles live at /games/<TITLE>/game.  An EARLY card (the 2012 home
+# models, PAD-101) keeps its game at /usr/local/games/<title>/ and launches
+# a symlink's target there (`gamer`; the debug build `game` sits beside it) —
+# build_rootfs.py writes both facts as markers, absent on a DMD-generation
+# extraction so that path is byte-for-byte what it always was.
+GAME_PATH="$(tr -d '[:space:]' < "$G/.game_path" 2>/dev/null)"; : "${GAME_PATH:=/games/$GAME_NAME}"
+GAME_EXE="$(tr -d '[:space:]' < "$G/.game_exe" 2>/dev/null)"; : "${GAME_EXE:=game}"
 # persistent board EEPROM (path is inside the chroot) + how many times to
 # (re)launch the game — first boot provisions the EEPROM then exits expecting
 # game_monitor to relaunch it, so we loop like game_monitor.
@@ -35,10 +43,16 @@ GAME_NAME="$(tr -d '[:space:]' < "$G/.game_name" 2>/dev/null)"; : "${GAME_NAME:=
 # ---- 1. binfmt: route ARM ELF through the patched qemu (F flag = works in
 #         chroot; disable the stock qemu-arm so ours wins) ----
 BF=/proc/sys/fs/binfmt_misc
+# S1_NO_BINFMT=1: leave the kernel's ARM handler alone.  The game is then run
+# through the patched qemu EXPLICITLY (the strace/gdb launch lines below do
+# that anyway), so a boot for a trace cannot disturb a Spike 2 run on the same
+# machine — whose next child exec would otherwise pick up our interpreter.
+if [ "${S1_NO_BINFMT:-0}" != "1" ]; then
 [ -e "$BF/qemu-arm" ] && echo 0 > "$BF/qemu-arm" 2>/dev/null || true
 if [ ! -e "$BF/qemu-arm-pad" ]; then
   echo ':qemu-arm-pad:M::\x7f\x45\x4c\x46\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x28\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:'"$S1_QEMU"':POCF' > "$BF/register" 2>/dev/null \
     || echo "warn: could not register binfmt (already set?)"
+fi
 fi
 
 # ---- 2. CUSE device daemons (host side; killed on exit) ----
@@ -136,10 +150,11 @@ s1_mounts() {
   mount --bind "$R/.padqemu/cpuinfo" "$R/proc/cpuinfo" 2>/dev/null \
     || mount --bind "$S1_CPUINFO" "$R/proc/cpuinfo" 2>/dev/null || true
   mount -t sysfs sysfs "$R/sys" 2>/dev/null || true
-  mkdir -p "$R/data" "$R/dump/log" "$R/games/$GAME_NAME"
+  mkdir -p "$R/data" "$R/dump/log" "$R$GAME_PATH"
   chmod -R 0777 "$R/data" "$R/dump" 2>/dev/null || true
-  mount --bind "$G" "$R/games/$GAME_NAME"
-  ln -sf "/games/$GAME_NAME/game" "$R/games/game" 2>/dev/null || true
+  mount --bind "$G" "$R$GAME_PATH"
+  [ "$GAME_PATH" = "/games/$GAME_NAME" ] \
+    && ln -sf "/games/$GAME_NAME/game" "$R/games/game" 2>/dev/null || true
   for d in null zero full random urandom tty; do
     t="$R/dev/$d"; [ -e "$t" ] || : > "$t"; mount --bind "/dev/$d" "$t" 2>/dev/null || true
   done
@@ -170,7 +185,7 @@ s1_mounts() {
   cp "$S1_QEMU" "$R/usr/bin/qemu-arm-pad" 2>/dev/null || true
 }
 export -f s1_mounts
-export R G GAME_NAME S1_CPUINFO S1_QEMU S1_STRACE S1_EE_FILE S1_RUNS S1_I2C_LOG S1_GDB S1_TTYS4_CAP S1_PIVOT PIVOTROOT
+export R G GAME_NAME GAME_PATH GAME_EXE S1_CPUINFO S1_QEMU S1_STRACE S1_EE_FILE S1_RUNS S1_I2C_LOG S1_GDB S1_TTYS4_CAP S1_PIVOT PIVOTROOT
 
 if [ "$S1_PIVOT" = "1" ]; then
   # Checkpointable boot.  The game_monitor-style restart loop moves OUTSIDE
@@ -209,14 +224,14 @@ if [ "$S1_PIVOT" = "1" ]; then
       if "$PIVOTROOT" . oldroot; then
         cd /
         /busybox umount -l /oldroot
-        cd "/games/$GAME_NAME" || exit 1
-        exec /.padqemu/game ./game </dev/null >/dump/game.out 2>&1
+        cd "$GAME_PATH" || exit 1
+        exec /.padqemu/game "./$GAME_EXE" </dev/null >/dump/game.out 2>&1
       fi
       # a pivot that fails here still costs only the feature: fall back to the
       # chroot exec for THIS run so the boot is not lost.
       rmdir oldroot 2>/dev/null
       echo "[emu] pivot_root failed - this run is not checkpointable"
-      exec chroot "$R" /bin/sh -c "cd /games/$GAME_NAME && exec ./game"
+      exec chroot "$R" /bin/sh -c "cd $GAME_PATH && exec ./$GAME_EXE"
     '
     echo "======== RUN $_n exited (code $?) ========"
     sleep 0.5
@@ -235,11 +250,11 @@ else
       # run the MAIN game under the qemu gdb stub; children still use binfmt,
       # no stub; qemu waits for gdb on this TCP port host-localhost, the
       # namespace being mount+pid not net
-      chroot "$R" /bin/sh -c "cd /games/$GAME_NAME && exec /usr/bin/qemu-arm-pad -g $S1_GDB ./game"
+      chroot "$R" /bin/sh -c "cd $GAME_PATH && exec /usr/bin/qemu-arm-pad -g $S1_GDB ./$GAME_EXE"
     elif [ "$S1_STRACE" = "1" ]; then
-      chroot "$R" /bin/sh -c "cd /games/$GAME_NAME && exec /usr/bin/qemu-arm-pad -strace ./game"
+      chroot "$R" /bin/sh -c "cd $GAME_PATH && exec /usr/bin/qemu-arm-pad -strace ./$GAME_EXE"
     else
-      chroot "$R" /bin/sh -c "cd /games/$GAME_NAME && exec ./game"
+      chroot "$R" /bin/sh -c "cd $GAME_PATH && exec ./$GAME_EXE"
     fi
     echo "======== RUN $_n exited (code $?) ========"
     sleep 0.5

@@ -150,3 +150,48 @@ def test_shipped_switchmaps_resolve_for_the_keeper():
         assert any(n.startswith("TROUGH") for n in names), p
         coils = m.get("_trough_coils")
         assert coils and all(len(c) == 2 for c in coils), p
+
+
+# ------------------------------------------- a map that arrives after boot --
+# The keeper starts with the game, and on a title with no curated map the rig
+# only learns the switch names once the game has registered them (s1swmap.py's
+# live walk).  A keeper that read the map once stayed passive for the session,
+# so nothing held the trough and the machine sat on LOCATING PINBALLS on
+# exactly those titles (PAD-101).
+
+def test_keeper_adopts_a_map_written_after_it_started(tmp_path):
+    k = s1ball.Keeper(str(tmp_path))               # no map yet
+    assert (k.mapped, k.curated, k.nballs) == (False, False, 0)
+    _write_map(tmp_path)                           # the live walk lands
+    assert k.adopt_map() is True
+    assert k.mapped is True and k.curated is False
+    assert k.trough_slots == [(8, 14), (8, 13), (8, 12), (8, 11), (8, 10),
+                              (8, 9)]
+    assert k.start == (1, 11) and k.shooter == (9, 1)
+    assert k.balls == k.nballs == 6                # the trough fills at once
+    assert k.trough_coils == set()                 # no _trough_coils: no serve
+    closed, _seq = SwitchInput.unpack(
+        (tmp_path / "s1auto.input").read_bytes())
+    assert len(closed) == 6                        # ... and it is HELD
+
+
+def test_keeper_adopts_a_curated_map_with_its_eject_coils(tmp_path):
+    k = s1ball.Keeper(str(tmp_path))
+    _write_map(tmp_path, {"_trough_coils": [[8, 5]]})
+    assert k.adopt_map() is True
+    assert k.curated is True
+    assert k.trough_coils == {(8, 5)}
+
+
+def test_keeper_does_not_re_adopt_over_a_map_it_already_has(tmp_path):
+    _write_map(tmp_path)
+    k = s1ball.Keeper(str(tmp_path))               # mapped from the start
+    k.balls = 3                                    # ... mid-game state
+    _write_map(tmp_path, {"1,11": "START BUTTON"})
+    assert k.adopt_map() is False                  # caller gates on mapped,
+    assert k.balls == 3                            # and nothing was reset
+
+
+def test_keeper_ignores_an_unchanged_map_file(tmp_path):
+    k = s1ball.Keeper(str(tmp_path))
+    assert k.adopt_map() is False                  # still no file at all

@@ -79,6 +79,30 @@ binds them onto the device paths in a namespace, and runs the game as root
 (which also makes `SCHED_RR` succeed). `run_root.sh` bounds it and **restores
 the stock qemu-arm binfmt** afterward, so the Spike 2 rig is unaffected.
 
+## The title's switch map
+
+Clicks, play keys and the ball keeper all resolve through
+`$S1_WORK/s1switches.json`. `start.sh` installs the curated
+`switchmaps/<CARD>.json` when there is one for the card; otherwise it starts
+the **live registry walk** with the game:
+
+```bash
+# what start.sh runs itself; also usable by hand on a running rig
+python3 s1swmap.py --work ~/s1emu --out ~/s1emu/s1switches.json --wait 600
+```
+
+The walk needs the game booted far enough to have registered its switches, so
+the map appears a minute or two in; the switch window and the keeper both pick
+it up while they run. A curated map is still better — it is sweep-verified and
+carries `_trough_coils`, so the keeper serves a ball on the eject coil instead
+of only on a plunge. To promote a walked map, drop it in `switchmaps/` under
+the card's filename stem and add the eject coils (press START and watch the
+retrying `0x40` coil frames in `ttyS4.cap`).
+
+The static decode (`s1elf.py --switches`) names switches correctly but places
+them wrongly, so it is not used for this file — see
+`docs/architecture/spike1_emulation.md`.
+
 ## Switch-matrix / LED viewer
 
 ```bash

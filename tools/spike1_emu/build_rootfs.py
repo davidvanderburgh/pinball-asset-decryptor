@@ -129,10 +129,62 @@ def find_rootfs_and_game(f, ext):
     return rootfs, game, game_dir
 
 
+# The EARLIEST Spike 1 generation — same system, a firmware era this rig cannot
+# drive, and it reads like a broken card unless you look for it.
+#
+# transformers_pin-1.0.18 is **Transformers The Pin (Stern, 2012)**: one of the
+# first SPIKE machines, three years before SPIKE reached the coin-op line, with
+# two 8-digit LED displays instead of a DMD (which is why its owner said "NO
+# DMD ON this game").  Its card carries the Spike 1 MBR shapes at different
+# LBAs and the SAME base rootfs as GOT LE and Whoa Nellie (`/etc/version`
+# 201006031147, glibc 2.6.1, kernel 2.6.30 — those are constants across Spike 1
+# and say nothing about a card's age; do not read them as one).
+#
+# What actually differs is the FIRMWARE ERA, and it is everything this rig
+# touches: the game lives at `/usr/local/games/<title>/` with its sounds as
+# PLAIN WAV FILES beside it rather than at `/games/<TITLE>/` with an
+# `image.bin`; its node images are `pinnode` / `netbridge` / `alphanumeric` /
+# `dotmatrix` rather than `coil4node` / `accbridgenode`; and its framework
+# symbols are the early short form (`node_poll_t`, `node_coilmsg`,
+# `nodemap_init`, `ALPHANUMERIC_*`) with NOT ONE of the `node_bus_*` /
+# `sys_node_board_device_*` / `sys_line_status_*` names that s1patch.py,
+# nodebus.py and s1swmap.py all key on.  So the rig cannot run it, the audio
+# engine cannot read it, and the point of naming it is that the user is told
+# which Spike 1 era they have instead of being told their card is broken
+# (PAD-101).
+_EARLY_GAMES_DIR = "/usr/local/games"
+
+
+def early_spike1_game_dir(rootfs):
+    """The ``<title>`` of an EARLY-era Spike 1 game on *rootfs*, or None.
+
+    Identified by ``/usr/local/games/<title>/game`` — the 2015-2016 generation
+    keeps its game on its own partition, at ``/games/<TITLE>/``, never here."""
+    if rootfs is None:
+        return None
+    for path, _ino, node in rootfs.iter_regular_files(max_depth=6, min_size=1):
+        if (path.startswith(_EARLY_GAMES_DIR + "/") and path.endswith("/game")
+                and path.count("/") == _EARLY_GAMES_DIR.count("/") + 2):
+            return path.rsplit("/", 2)[-2]
+    return None
+
+
 def main():
     card, rootfs_dir, gamedir = sys.argv[1:4]
     f, ext = _open_partitions(card)
     rootfs, game, game_name = find_rootfs_and_game(f, ext)
+    if rootfs is not None and game is None:
+        early = early_spike1_game_dir(rootfs)
+        if early:
+            sys.exit(
+                "this is an EARLY Spike 1 card (%s): its game and its plain "
+                "WAV sounds live in %s/%s on the rootfs, where the 2015-2016 "
+                "titles keep a /games/<TITLE>/image.bin, and its firmware "
+                "predates the node-bus framework the emulator drives. The "
+                "emulator runs the DMD generation (WrestleMania, KISS, Whoa "
+                "Nellie, Game of Thrones, Spider-Man VE, Ghostbusters, Primus, "
+                "Can Crusher), not the early home models."
+                % (early, _EARLY_GAMES_DIR, early))
     if rootfs is None or game is None:
         sys.exit("could not locate rootfs (busybox) and/or game (image.bin) "
                  "partitions — is this a Spike 1 card?")

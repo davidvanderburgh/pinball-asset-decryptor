@@ -84,6 +84,49 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **90. The EARLY Spike 1 cards (Stern's 2012 home models) — read the
+      assets off a transformers_pin card, and decide whether the rig can ever
+      run one.** `S3 D3` *(Filed 2026-09-01 from PAD-101: a reporter pointed
+      the Spike 1 Emulate tab at `transformers_pin-1.0.18.iso` and got "is this
+      a Spike 1 card?", and added "NO DMD ON this game". He was right on both
+      counts. That ticket made the message name the era; this item is the work
+      behind it.)*
+      **IT IS A SPIKE 1 CARD.** Transformers The Pin (Stern, **2012**) is one
+      of the first SPIKE machines, three years before SPIKE reached the coin-op
+      line, and it has **two 8-digit LED displays instead of a DMD**. Do NOT
+      date these cards by the rootfs: `/etc/version 201006031147`, glibc 2.6.1
+      and kernel 2.6.30 are **identical on GOT LE and Whoa Nellie** — the base
+      rootfs is shared across Spike 1, and reading it as "a 2010 machine" is
+      the mistake this item was first filed with.
+      **MEASURED off the real card** (Stern's SD-card page lists it with the
+      other Spike 1 .isos: `f002.backblazeb2.com/file/gamecode/transformers_pin-1.0.18.iso`,
+      384 MB, no auth). What separates the early era from the 2015-2016 DMD one
+      is everything the rig touches: the game is at
+      **`/usr/local/games/tf-elg/game`** (static armel, unstripped) **on the
+      rootfs** with its **288 sounds as plain `.wav` files** beside it, not
+      `/games/<TITLE>/` + `image.bin`; the node images are `pinnode-0_5_16`,
+      `netbridge-0_0_5`, **`alphanumeric-1_0_4`** and `dotmatrix-0_0_8`, not
+      `coil4node` / `accbridgenode` / `rgbdotmatrix`; the MBR shapes are the
+      same (FAT boot, `STRN` kernel at 0xDA, ext rootfs) at different LBAs
+      (63 / 48195 / 80325, plus an A/B second rootfs at 353430); and the
+      framework symbols are the **early short form** — `node_poll_t`,
+      `node_coilmsg`, `nodemap_init`, `ALPHANUMERIC_*`, `DISPLAY_*` — with
+      **not one** `node_bus_*` / `sys_node_board_device_*` /
+      `sys_line_status_*` name in its 3064. "elg" is Stern's home-edition model
+      code, the same one `star_wars_elg` carries on Spike 2.
+      **THE CHEAP HALF, and probably the whole value:** the assets need no
+      decryption at all — extracting this card is `Ext4Reader` plus a file
+      copy, which the Spike 1 audio engine (image.bin master directory + raw
+      PCM) cannot express. It wants its own small era in `plugins/stern/`
+      rather than a bolt-on.
+      **THE EXPENSIVE HALF:** running it. Every patch in `s1patch.py`, the
+      whole of `nodebus.py` and `s1swmap.py`'s registry walk resolve symbols
+      this firmware does not have, and the display is alphanumeric rather than
+      the 128x32 DMD. Treat it as a second era of the rig, not a port, and only
+      if someone asks for it.
+      — S3: nobody is blocked; the tab now says which era the card is. D3: the
+      read is easy, the era plumbing is the work.
+
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`
       *(Found 2026-09-01 while answering David's "will our fixes work on

@@ -80,21 +80,38 @@ fi
 if [ -e "$S1_WORK/game/game" ]; then
     log "Game patches: $(python3 "$HERE/s1patch.py" "$S1_WORK/game/game" 2>&1)"
     # switch names for the viewer's matrix window: the title's own (node,index)
-    # -> name map, straight from the game ELF (s1elf --switches).  The switch
-    # window reads this over the UNC path and labels each cell.  Best-effort.
-    if python3 "$HERE/s1elf.py" --switches "$S1_WORK/game/game" \
-            > "$S1_WORK/s1switches.json" 2>/dev/null; then
-        log "Switch names: $(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))),"switches")' "$S1_WORK/s1switches.json" 2>/dev/null)"
-    fi
-    # A curated per-title map OVERRIDES the s1elf decode: the static decode's
-    # (node,index) attribution is wrong (its bit/device fields don't match the
-    # game's runtime registration — GOT LE's START is really (1,11), not the
-    # (9,5) it emits).  switchmaps/<TITLE>.json files are sweep-verified live.
+    # -> name map.  The switch window reads this over the UNC path, labels and
+    # lays out its rows from it, binds the play keys through it, and the ball
+    # keeper resolves its trough/shooter/start slots from it — so a map with
+    # the wrong POSITIONS is not a cosmetic problem, it is "the switches do
+    # nothing".
+    #
+    # Two sources, in this order:
+    #   1. a sweep-verified curated map for this card (switchmaps/<CARD>.json),
+    #      which also carries the "_trough_coils" the keeper serves on;
+    #   2. otherwise the LIVE registry walk (s1swmap.py), started with the game
+    #      below and written as soon as the game has registered its switches.
+    #
+    # What is NOT a source any more: the static ELF decode (s1elf --switches).
+    # Its names are right and its (node,index) attribution is wrong — GOT LE's
+    # START is really (1,11), not the (9,5) it emits — because the tables it
+    # reads are populated at RUNTIME and the file's copies are stale.  It used
+    # to be the default, with the 7 curated files as the only correction, so
+    # every other card (including the Pro build of a title whose LE is curated)
+    # played with every click, key and trough slot pointed somewhere else.
+    # That was PAD-101: "switches not working on any spike 1 game".
     _title=$(basename "$(dirname "$(readlink -f "$S1_WORK/game")")")
     _title=${_title%-*}
+    S1_SWMAP_LIVE=0
     if [ -e "$HERE/switchmaps/$_title.json" ]; then
         cp "$HERE/switchmaps/$_title.json" "$S1_WORK/s1switches.json"
         log "Switch names: curated map for $_title."
+    else
+        # a map from a PREVIOUS card would name this title's switches wrongly
+        rm -f "$S1_WORK/s1switches.json"
+        S1_SWMAP_LIVE=1
+        log "Switch names: no curated map for $_title — reading them from the"
+        log "  game itself once it boots (they appear in the switch window)."
     fi
 fi
 
@@ -119,7 +136,14 @@ mkdir -p "$S1_WORK/rootfs/data"
 python3 "$HERE/make_seed.py" "$S1_WORK/rootfs/data/board_eeprom.bin" >/dev/null 2>&1
 
 # 5. node-bus responder (a pty bound at /dev/ttyS4) + fresh captures
-pkill -KILL -f nodebus.py 2>/dev/null
+# The responder is killed BY PID, OURS only — `pkill -f nodebus.py` matches the
+# SPIKE 2 rig's responder too (it has a nodebus.py of its own), so starting
+# Spike 1 killed a running Spike 2 game's node bus.  s1own.sh owns that
+# distinction (PAD-98); status.sh and stop.sh already asked it and this one did
+# not.  (The keeper's name is unique to this rig, so it stays a plain pkill —
+# the same pair stop.sh does.)
+_nb=$(S1_WORK="$S1_WORK" bash "$HERE/s1own.sh" nodebus 2>/dev/null)
+[ -n "$_nb" ] && kill -KILL $_nb 2>/dev/null
 pkill -KILL -f s1ball.py 2>/dev/null
 rm -f "$S1_WORK/spi0.cap" "$S1_WORK/ttyS4.cap" "$S1_WORK/ttyS4.slave" \
       "$S1_WORK/s1sw.input" "$S1_WORK/s1auto.input" "$S1_WORK/s1ball.cmd"
@@ -162,6 +186,19 @@ rm -f "$S1_WORK/holdoff"    # a stale holdoff would park the loop before run 1
 : > "$S1_WORK/emu.log"
 setsid bash "$HERE/emu_root.sh" >"$S1_WORK/emu.log" 2>&1 < /dev/null &
 log "Game starting under the emulator…"
+
+# 6c. the live switch-map walk, for a title with no curated map.  It waits for
+#     the game to register its switches (a couple of minutes on a cold boot),
+#     then writes s1switches.json; the switch window and the ball keeper both
+#     pick the file up while they run, so the names, the play keys and the
+#     trough all start working without a restart.  Best-effort and quiet: a
+#     title it cannot read simply leaves the window on its raw matrix grid.
+if [ "${S1_SWMAP_LIVE:-0}" = "1" ]; then
+    setsid python3 "$HERE/s1swmap.py" --work "$S1_WORK" \
+        --out "$S1_WORK/s1switches.json" --wait "${S1_SWMAP_WAIT:-600}" \
+        >"$S1_WORK/s1swmap.log" 2>&1 &
+    log "Reading this title's switch names from the running game…"
+fi
 
 # 6a. sound: the i2s shim tees the game's paced 44.1 kHz s16 stereo PCM into
 #     $S1_AUDIO_FIFO; the Spike 2 rig's speaker chain (playaudio.sh ->

@@ -20,10 +20,13 @@ no ``wsl.exe`` per frame:
   * ``s1sw.input`` — the :class:`~...spike1_emulate.SwitchInput` block the switch
     window writes on a click and the responder (``nodebus.py``) reads back, so a
     click closes a switch in the running game.
-  * ``s1switches.json`` — the title's ``{"node,index": name}`` switch map, written
-    by ``start.sh`` from the game ELF (``s1elf --switches``).  The switch window
-    outlines the named cells and shows the name under the cursor, so you can find
-    (and click) the start button, the trough, the shooter lane, etc. by name.
+  * ``s1switches.json`` — the title's ``{"node,index": name}`` switch map, put
+    there by ``start.sh``: a curated map straight away, or — on a title without
+    one — the live registry walk's, **minutes into the boot** (``s1swmap.py``
+    has to wait for the game to register its switches).  So this window RE-READS
+    the map while it runs and rebuilds itself when it arrives; without that, a
+    title with no curated map stayed on the nameless matrix grid with dead play
+    keys for the whole session even though the names had shown up (PAD-101).
 
 Live LED/coil colour appears once the node-bus decoder writes it into
 ``s1hw.state`` — until then only the presses you inject light up.
@@ -138,9 +141,9 @@ class _RunDirIO:
             return False
 
     def read_switch_names(self):
-        """The title's ``{(node, index): name}`` switch map (s1switches.json,
-        written by start.sh from the game ELF via s1elf --switches).  ``{}`` if
-        the file is missing/unreadable, so the window still works nameless."""
+        """The title's ``{(node, index): name}`` switch map (s1switches.json —
+        the curated map, or the live registry walk's).  ``{}`` if the file is
+        missing/unreadable, so the window still works nameless."""
         import json
         p = self._unc("s1switches.json")
         if not p:
@@ -284,14 +287,14 @@ class Spike1SwitchWindow(tk.Toplevel):
         self._job = None
         self._closed = False
 
-        # the title's (node, index) -> name map (from the game ELF).  Widen the
-        # grid so every NAMED switch is visible (some sit past the default 16,
-        # e.g. GoT's shooter lane at index 20), but never balloon to a board's
-        # full 64 columns.
+        # the title's (node, index) -> name map, if the rig has it yet — it may
+        # only arrive minutes from now (_refresh_names), so nothing here may
+        # assume a nameless window stays nameless.
         self._names = io.read_switch_names() if io else {}
+        self._base_cols = cols
+        self._names_tick = 0
         if self._names:
-            # cap at 40, not 32: Ghostbusters' trough sits at indexes 32-38.
-            self._cols = max(cols, min(40, max(i for _, i in self._names) + 1))
+            self._cols = self._cols_for(self._names)
 
         # keyboard rows: resolved from the title's own switch names (curated
         # switchmaps), so the bindings follow the game — the same keys the
@@ -362,6 +365,46 @@ class Spike1SwitchWindow(tk.Toplevel):
 
     def _switch_name(self, node, index):
         return self._names.get((node, index))
+
+    def _cols_for(self, names):
+        """Grid width for *names*: wide enough that every NAMED switch is
+        visible (some sit past the default 16, e.g. GoT's shooter lane at index
+        20), capped at 40 — not 32, because Ghostbusters' trough sits at
+        indexes 32-38 — so it never balloons to a board's full 64 columns."""
+        return max(self._base_cols, min(40, max(i for _, i in names) + 1))
+
+    #: how often (in ticks) to look for the switch map.  On a title with no
+    #: curated map the rig walks it out of the running game and drops it in
+    #: minutes after this window opened, so "read it once at __init__" meant
+    #: the names never arrived.  ~2s at the default 20 Hz.
+    NAMES_EVERY = 40
+
+    def _refresh_names(self):
+        """Adopt a switch map that appeared (or changed) since the last look.
+
+        Rebuilds the body — a named title gets the switch LIST, a nameless one
+        the raw grid — and re-resolves the play keys IN PLACE, so the key
+        panel's existing rows light up instead of having to be rebuilt."""
+        names = self._io.read_switch_names() if self._io else {}
+        if names == self._names:
+            return False
+        self._names = names
+        if names:
+            self._cols = self._cols_for(names)
+        for row, fresh in zip(self._key_rows, self._resolve_key_rows()):
+            row["slot"] = fresh["slot"]
+        self._canvas.configure(bg=self.PANEL_BG if names else _tint(BG))
+        self._canvas.delete("all")
+        self._cells = {}
+        if names:
+            self._build_list()
+        else:
+            self._build_grid()
+        self._readout.config(
+            text=("click a switch to hold it, click again to release"
+                  if names
+                  else "(no switch names — start the game to load them)"))
+        return True
 
     # ---- the switch LIST (curated titles) ----------------------------------
     # The Spike 2 key panel's row idiom, applied to every named switch: the
@@ -856,6 +899,10 @@ class Spike1SwitchWindow(tk.Toplevel):
         self._ball_tick += 1
         if self._ball_tick % 3 == 1 and hasattr(self._io, "read_ball_state"):
             self._ball_state = self._io.read_ball_state() or self._ball_state
+        # the map can arrive (or change) long after this window opened
+        self._names_tick += 1
+        if self._names_tick % self.NAMES_EVERY == 0:
+            self._refresh_names()
         if self._names:
             self._paint_list()
         else:

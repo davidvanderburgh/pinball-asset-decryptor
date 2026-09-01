@@ -370,3 +370,52 @@ def test_append_ball_cmd_appends_lines(tmp_path, monkeypatch):
     assert io.append_ball_cmd("coin 3") is True
     assert io.append_ball_cmd("start") is True
     assert (tmp_path / "s1ball.cmd").read_text() == "coin 3\nstart\n"
+
+
+# ------------------------------------------------- a map that arrives late --
+# On a title with no curated map the rig walks the switch names out of the
+# RUNNING game, so s1switches.json shows up minutes after this window opened.
+# Reading it once at __init__ left such a title nameless and its play keys dead
+# for the whole session even though the names were sitting in the run dir
+# (PAD-101).
+
+def test_switch_window_adopts_a_map_that_arrives_later(root):
+    io = _FakeIO()                            # no names yet: the raw grid
+    win = W.Spike1SwitchWindow(root, io, nodes=(1, 8, 9))
+    win.update()
+    assert ("sw", 8, 0) in win._cells
+    assert _row(win, "1")["slot"] is None     # Start is inert without names
+
+    io._names = dict(_PLAY_NAMES)             # the walk lands
+    assert win._refresh_names() is True
+    win.update()
+    assert {r["slot"] for r in win._list_rows} == {
+        addr(n, i) for (n, i) in _PLAY_NAMES}
+    assert _row(win, "1")["slot"] == addr(1, 11)     # ... and the keys work
+    win.press_key("1")
+    assert io.writes[-1][0] == {addr(1, 11)}
+    win.close()
+
+
+def test_switch_window_polls_for_the_map_while_it_runs(root):
+    io = _FakeIO()
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    win.update()
+    io._names = dict(_PLAY_NAMES)
+    if win._job is not None:                  # drive the tick ourselves; the
+        win.after_cancel(win._job)            # scheduled one would outlive us
+    win._names_tick = win.NAMES_EVERY - 1     # the next tick is a look
+    win._tick()
+    assert win._names == _PLAY_NAMES
+    assert _row(win, "Left")["slot"] == addr(8, 2)
+    win.close()
+
+
+def test_switch_window_ignores_an_unchanged_map(root):
+    io = _FakeIO(names=_PLAY_NAMES)
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    win.update()
+    rows = win._list_rows
+    assert win._refresh_names() is False      # same map: no rebuild
+    assert win._list_rows is rows
+    win.close()

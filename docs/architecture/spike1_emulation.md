@@ -332,3 +332,68 @@ parity with the Spike 2 playfield window). It runs standalone over a rig run
 dir (`--run-dir`) or a synthetic feed (`--demo`), and can emit a PNG
 (`--png`). It consumes live data as soon as the node-bus decoder (step 3)
 writes the state block.
+
+## Which switch is which: the title's switch map
+
+Everything a user does with the switches — clicking a row in the switch window,
+the play keys, and the ball keeper's trough/shooter/START slots — resolves
+through one file, `$S1_WORK/s1switches.json`, a `{"node,index": name}` map of
+the title's own switches. A map with the wrong POSITIONS is not a cosmetic
+problem: it is "the switches do nothing".
+
+There are two sources, in this order:
+
+1. **A curated map**, `tools/spike1_emu/switchmaps/<CARD>.json`, matched on the
+   card's filename stem. Sweep-verified, and the only source that carries
+   `_trough_coils` (the eject coils the keeper serves a ball on).
+2. **The live registry walk**, `s1swmap.py`, started by `start.sh` alongside
+   the game on any title WITHOUT a curated map. It waits for the game to
+   register its switches, then walks the runtime registry in guest memory and
+   writes the map. The switch window and the ball keeper both re-read the file
+   while they run, so the names, the play keys and the trough start working
+   without a restart.
+
+The **static ELF decode** (`s1elf --switches`) is deliberately NOT a source.
+Its names are right and its `(node,index)` attribution is wrong — the tables it
+reads are populated at runtime and the file's copies are stale — and it used to
+be the default, with the seven curated files as the only correction. So every
+other card, including the **Pro/base build of a title whose LE is curated**,
+played with every click, key and trough slot pointed somewhere else (PAD-101).
+
+The walk is title-agnostic by construction: the registry is found from the
+`[pc,#imm]` literal in `sys_node_board_device_switch_update_inputs`, and the
+names from `switch_table_data` / `switch_dedicated_table_data` in guest memory.
+**The literal is not always the registry itself** — on GOT LE it points 0xC in
+front of it, which read as "count 0" — so `find_registry` scans a small window
+of offsets for the shape (a node count 1..64 at +0x100 whose entry pointers all
+land in the guest's data range). Measured on GOT LE against the sweep-verified
+curated map: **67 of 72 entries identical and no position disagreed**; the five
+were hand-edited names.
+
+## The EARLY Spike 1 cards (the 2012 home models)
+
+`transformers_pin-1.0.18.iso` is a Spike 1 card — **Transformers The Pin
+(Stern, 2012)**, one of the first SPIKE machines, three years before SPIKE
+reached the coin-op line, with **two 8-digit LED displays instead of a DMD**.
+It is the earliest firmware era, and this rig cannot drive it.
+
+**What does NOT tell the eras apart** (learned the wrong way on PAD-101):
+`/etc/version 201006031147`, glibc 2.6.1 and kernel 2.6.30 are identical on the
+GOT LE and Whoa Nellie cards. The base rootfs is shared across Spike 1 and says
+nothing about a card's age — do not date a card by it.
+
+**What actually differs, and it is everything the rig touches:**
+
+| | early (`transformers_pin`, 384 MB card) | DMD generation (GOT LE, 3.75 GB) |
+| --- | --- | --- |
+| game | `/usr/local/games/<title>/game` on the ROOTFS | `/games/<TITLE>/game` on its own partition |
+| sounds | plain `.wav` files beside the game (288 of them) | `image.bin` master directory, raw PCM |
+| node images | `pinnode`, `netbridge`, `alphanumeric`, `dotmatrix` | `coil4node`, `accbridgenode`, `rgbdotmatrix`, `dmd_1x` |
+| framework symbols | `node_poll_t`, `node_coilmsg`, `nodemap_init`, `ALPHANUMERIC_*` | `node_bus_*`, `sys_node_board_device_*`, `sys_line_status_*` |
+| MBR LBAs | 63 / 48195 / 80325 (+ an A/B rootfs at 353430) | 35 / 7000 / 14000 (+ logicals) |
+
+The symbol row is the blocker: **not one** of the names `s1patch.py`'s four
+patches, `nodebus.py`'s responder and `s1swmap.py`'s registry walk resolve
+exists in its 3064 symbols. `build_rootfs.py` recognises the layout and says
+which era the card is instead of "is this a Spike 1 card?" (PAD-101). Reading
+its assets needs no decryption at all — see queue item 90 in `plans/TODO.md`.

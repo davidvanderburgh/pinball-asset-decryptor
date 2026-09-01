@@ -35,8 +35,10 @@ The daemon publishes its state (trough count, ball position, door) as JSON in
 s1ball.state for the switch window's ball/door widgets.
 
 One-shots append to s1ball.cmd; the daemon consumes it.  Switch slots resolve
-from the title's curated switch map (s1switches.json names + its
-"_trough_coils" meta key); the built-in GOT LE constants are the fallback.
+from the title's switch map (s1switches.json names + its "_trough_coils" meta
+key); the built-in GOT LE constants are the fallback.  The map may show up
+AFTER this daemon does — on an uncurated title the rig walks it out of the
+running game — so the keeper watches for it and adopts it (:meth:`adopt_map`).
 """
 import json
 import os
@@ -48,10 +50,11 @@ import time
 from nodebus import WireParser
 
 # ---- fallback map: GOT LE v1.37 empirical (handoff doc) --------------------
-# The keeper prefers the run dir's s1switches.json (the curated per-title map
-# start.sh installs): trough/shooter/START/coin slots resolve from the switch
-# NAMES, and the trough-fire coils from its "_trough_coils" meta key.  These
-# constants only apply when that map is missing or unparseable.
+# The keeper prefers the run dir's s1switches.json (the per-title map start.sh
+# installs, curated or walked live out of the game): trough/shooter/START/coin
+# slots resolve from the switch NAMES, and the trough-fire coils from its
+# "_trough_coils" meta key.  These constants only apply when that map is
+# missing or unparseable.
 TROUGH_SLOTS = [(8, 14), (8, 13), (8, 12), (8, 11), (8, 10), (8, 9)]  # #1..#6
 SHOOTER = (9, 1)
 START = (1, 11)
@@ -140,6 +143,8 @@ class Keeper:
         self.auto_path = os.path.join(work, "s1auto.input")
         self.cmd_path = os.path.join(work, "s1ball.cmd")
         self.cap_path = os.path.join(work, "ttyS4.cap")
+        self.map_path = os.path.join(work, "s1switches.json")
+        self.map_stamp = self._map_stamp()
         (self.trough_slots, self.shooter, self.start, self.coin,
          self.trough_coils, self.curated, self.mapped) = load_title_map(work)
         # A title-mapped trough is held full even before its eject coils are
@@ -170,6 +175,52 @@ class Keeper:
         self.viewer_start = False    # START bit seen in the viewer's file
         self.write_state()
         self.publish()
+
+    # -- the title map, which can arrive AFTER the keeper does ---------------
+    # On a title with no curated map the rig walks the switch names out of the
+    # running game (s1swmap.py), which cannot happen until the game has
+    # registered its switches — minutes after this daemon starts.  A keeper
+    # that read the map only at startup stayed passive for the whole session,
+    # so the trough was never held and the machine sat on "LOCATING PINBALLS"
+    # forever on exactly the titles the walk exists for (PAD-101).
+    #
+    # Adopted ONCE, and only from unmapped: a keeper that already has its slots
+    # is holding game state, and swapping the trough under it would drop the
+    # ball it is keeping.
+    MAP_POLL_S = 2.0
+
+    def _map_stamp(self):
+        try:
+            st = os.stat(self.map_path)
+        except OSError:
+            return None
+        return (st.st_mtime, st.st_size)
+
+    def adopt_map(self):
+        """Take up a switch map that appeared since startup.  True if adopted."""
+        if self.curated or self.mapped:
+            return False            # already holding this title's slots
+        stamp = self._map_stamp()
+        if stamp is None or stamp == self.map_stamp:
+            return False
+        self.map_stamp = stamp
+        (trough, shooter, start, coin, coils, curated,
+         mapped) = load_title_map(self.work)
+        if not (curated or mapped):
+            return False
+        self.trough_slots, self.shooter = trough, shooter
+        self.start, self.coin = start, coin
+        self.trough_coils = coils if curated else set()
+        self.curated, self.mapped = curated, mapped
+        self.nballs = len(self.trough_slots)
+        self.balls = self.nballs          # fill the trough it can now name
+        self.in_shooter = False
+        self.write_state()
+        self.publish()
+        print("title map adopted: %d trough switches, %s"
+              % (self.nballs, "curated eject coils" if curated
+                 else "serve by plunge (no _trough_coils)"), flush=True)
+        return True
 
     # -- switch output -------------------------------------------------------
     def closed_slots(self):
@@ -393,6 +444,7 @@ class Keeper:
         cap = None
         cap_pos = 0
         serial_release = 0.0
+        map_at = 0.0
         print("s1ball keeper up: %s, trough=%d, watching %s"
               % ("curated map" if self.curated
                  else ("title-mapped trough (no _trough_coils - serve by "
@@ -451,6 +503,9 @@ class Keeper:
             if changed:
                 self.write_state()
             self.write_spi(force=spi_changed)
+            if not (self.curated or self.mapped) and now >= map_at:
+                map_at = now + self.MAP_POLL_S
+                self.adopt_map()
             self.poll_viewer_start()
             self.poll_cmds()
             self.publish()

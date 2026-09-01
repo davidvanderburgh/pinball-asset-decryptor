@@ -192,9 +192,14 @@ def _touches_tk(path):
 # or the marker arrives after the train has left.
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
+    on_ci = bool(os.environ.get("CI"))
     for item in items:
         if _touches_tk(item.path):
-            item.add_marker(pytest.mark.xdist_group("tk"))
+            if on_ci:
+                group = "tk"
+            else:
+                group = "tk-app" if "test_gui" in str(item.path) else "tk-emu"
+            item.add_marker(pytest.mark.xdist_group(group))
 
 
 def make_tk_root(tk_mod, attempts=4):

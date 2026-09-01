@@ -7405,8 +7405,48 @@ rewriting it.**
         existing non-`.json` file, checked BEFORE the sweep so the mistake
         fails while it is still cheap. Three tests, the first of which
         replays the exact destroying command.
-        **Resume: the next title alphabetically after jurassic_park_le, once
-        David reports it. Both fixes above are UNCOMMITTED on main.**
+      - **king_kong_le — ⚠️ node 9 was DARK on the playfield: every ramp
+        opto, both spinners, the drops and the pit targets, 28 switches.**
+        David: "It looks like we are missing a lot of switch input for King
+        Kong I'm expecting, for example, to have ramp optos and other
+        switches that are not being displayed on the playfield right now.
+        probably missing a board or two." **No board is missing.** The
+        game's own table declares 104 switches on nodes 0/1/4/8/9, node 9
+        answers on the wire, and the device table names all 27 of its
+        switches — but the cached list carried all 28 node-9 rows as `?`,
+        and the window places switches by NAME, so it drew node 8 alone
+        (31 on the artwork). The `?`s are item 29's class (the shim's
+        message-table read) and `swnames.py` exists to fill them from the
+        device table — and it REFUSED node 9: "39 device records, but no
+        single index->bit shift covers them all". 27 of those are node 9's;
+        **the other 12 are the CPU board's DIP/service switches, whose
+        device group carries connector `9c` on ONE record, DIP 8**, and
+        `device_switches()` let a connector name the board outright. Fixed:
+        a connector-named node now has to pass the test a `_fit()`
+        candidate already must — the group's indices land on that node's
+        live bits under one shift — and a connector the bits contradict is
+        reported in the fill and the group is placed by its bits, exactly
+        as a connectorless one is. Measured over all 30 cached titles with
+        both tables before shipping: King Kong's group 4 is the ONLY
+        connector-named switch group that fails its own board; nothing else
+        moves (metallica 105→9 `?` before and after, bond/jaws/zeppelin
+        1→1). On the real cached table: **27 of 28 filled** (`RIVER ENTER`
+        … `PIT TARGET-BOT`, the three `RAMP MADE OPTO`s among them) and the
+        position join goes **31 → 56 placed**; the one row left `?` is
+        node 9 bit 39, a virtual switch beside `PUNCHBACK FIRED VIRTUAL`.
+        Five tests in `test_spike2_swnames_fit.py` replay the shape.
+        **Takes effect on the next start of the title, no release needed on
+        this rig**: `mktables` re-asks the fill on a cached list with `?`
+        names and a repair forces the position join, so `padtables.log`
+        should read "filled 27 of its 104" and "56 switches placed" where
+        it read "28 `?` names the device table cannot fill" and 31.
+        **What IS unresolved on King Kong is three COILS, not switches**:
+        `KING KONG SERVO-BODY / L ARM / R ARM` sit in device group 9 with
+        no node (`group_node.txt`), and the node directory lists two more
+        pinnodes, 10 and 13 (code 18), that no switch group names — the
+        Kong servo board, most likely. Not touched here.
+        **Resume: David's verdict on king_kong_le on the glass, then the
+        next title alphabetically.**
 
 - [x] **66. Deadpool and Avengers: Infinity Quest boot on a WHITE
       background.** `S3 D2` **CLOSED 2026-09-01 at David’s call** — "66 is

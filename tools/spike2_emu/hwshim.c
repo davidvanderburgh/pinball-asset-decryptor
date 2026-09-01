@@ -1947,6 +1947,38 @@ static int gz_word(unsigned long a, unsigned long *out)
     return 1;
 }
 
+/* Where does THIS title's .text end? Every Spike 2 game is a fixed-address
+ * EXEC image loaded at 0x8000, so its own ELF header is sitting in memory at
+ * that address and can simply be read: the end of the executable PT_LOAD is
+ * the end of .text. Cached; falls back to Godzilla Pro's known end when the
+ * header does not parse, which keeps the old behaviour rather than inventing
+ * a bound. */
+static unsigned long game_text_end(void)
+{
+    static unsigned long v;
+    if (!v) {
+        unsigned long base = 0x8000ul;
+        unsigned long w, phoff, phnum, phentsz, i;
+        v = 0x5d3168ul;                            /* the old, Godzilla bound */
+        if (gz_word(base, &w) && w == 0x464c457ful /* "\x7fELF" */
+            && gz_word(base + 28, &phoff)
+            && gz_word(base + 40, &w)         /* e_ehsize | e_phentsize<<16 */
+            && gz_word(base + 44, &phnum)) {  /* e_phnum in the low half   */
+            phentsz = (w >> 16) & 0xffff; phnum &= 0xffff;
+            for (i = 0; i < phnum && i < 16; i++) {
+                unsigned long ph = base + phoff + i * phentsz;
+                unsigned long type, vaddr, memsz, flags;
+                if (!gz_word(ph, &type) || !gz_word(ph + 8, &vaddr)
+                    || !gz_word(ph + 20, &memsz) || !gz_word(ph + 24, &flags))
+                    break;
+                if (type == 1 && (flags & 1))      /* PT_LOAD, PF_X */
+                    if (vaddr + memsz > v) v = vaddr + memsz;
+            }
+        }
+    }
+    return v;
+}
+
 static void segv_handler(int sig, void *info, void *ucv)
 {
     unsigned long *uc = ucv;
@@ -1975,14 +2007,23 @@ static void segv_handler(int sig, void *info, void *ucv)
 
     /* No frame pointers, so approximate a backtrace by scanning the stack for
      * words that land inside the game's .text. Noisy but enough to see which
-     * subsystem is on the call chain. */
+     * subsystem is on the call chain.
+     *
+     * THE BOUNDS ARE THE TITLE'S OWN, NOT GODZILLA'S (2026-09-01). This scan
+     * used 0x16a00..0x5d3168, Godzilla Pro's .text - and james_bond_le's
+     * .text runs to 0x79f5b4, so on the first Bond crash every real return
+     * address was EXCLUDED and the "backtrace" was 24 round data words that
+     * happened to fall in the stale window. game_text_end() reads the bound
+     * off the ELF header the game itself is mapped at, so it is right on
+     * every title. */
     {
         unsigned long sp = uc[21];
+        unsigned long tend = game_text_end();
         int i, shown = 0;
         for (i = 0; i < 512 && shown < 24; i++) {
             unsigned long v;
             if (!gz_word(sp + (unsigned long)i * 4, &v)) break;
-            if (v > 0x16a00 && v < 0x5d3168 && (v & 3) == 0) {
+            if (v > 0x8000 && v < tend && (v & 3) == 0) {
                 snprintf(b, sizeof b, "[segv]   stack[%3d] = 0x%lx\n", i, v);
                 logmsg(b);
                 shown++;

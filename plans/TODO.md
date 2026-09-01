@@ -7213,9 +7213,9 @@ rewriting it.**
         0 → 259 and `dungeons_and_dragons_le` +41 on the two other ELFs
         reachable without a card mount, and the 40-image `cardaudit.py` sweep
         that produced that list has NOT been re-run.
-      - **led_zeppelin_le 1.22.0 — ❌ every game start died, ✅ starts and
-        serves a ball after a same-day fix, 2026-09-01; David's play-through
-        pending.** David: "trying to run led zeppelin and it's crashing on
+      - **led_zeppelin_le 1.22.0 — ❌ every game start died, ✅ CLEAN after
+        a same-day fix, David's green check, 2026-09-01.** David: "trying to
+        run led zeppelin and it's crashing on
         starting a game". The pane: attract clip cycling, a `+36` start
         press, then nothing but `Windows player exited; restarting it` —
         20 minutes at a black screen with `pgrep -x game` still true and no
@@ -7258,6 +7258,10 @@ rewriting it.**
         qemu's own path but the criu save states dump the namespace root
         (`savegame.sh` targets `pgrep -x game`), and a host bash as init
         cannot be dumped once the pivot detaches its binary's mount.
+        **★ VERDICT: ✅ CLEAN, David's green check, 2026-09-01** — "ok this
+        is fixed. led zeppelin gets the green check mark." Shipped in the
+        release cut right after. **Resume: the next title alphabetically
+        after led_zeppelin_le, once David reports it.**
       - **james_bond_le 1.06.0 — ❌ SEGV, David 2026-09-01 09:32; FIRST BOOT of
         this title on the rig** (every derived table under
         `dump/tables/james_bond_le` is stamped 09:32 today; it is not the

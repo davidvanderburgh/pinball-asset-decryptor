@@ -84,6 +84,60 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **90. godzilla_le dies ~4 s after start, on a user's card, every time.**
+      `S1 D4` *(Filed 2026-09-01 from a user's log, ticket PAD-102 — a Godzilla
+      Premium 1.16 Heisei Custom "V1.5 Orchestral" image, title folder
+      `godzilla_le`, game ELF 7962924 bytes, app v0.179.0. He sent the log and
+      nothing else; there is no card of his here.)*
+      **What his log establishes.** The run is healthy right up to the fault:
+      card mounts, 9 boards derived, node 2 silenced, renderer up on D3D12,
+      window opened 1360x768, 98 switches dumped with normal Stern numbering,
+      audio negotiated (`[play] guest reports 44100 Hz x 2 ch`). Then the guest
+      takes SIGSEGV, and the two runs in his log fault at the SAME place:
+      `pc=0x000f0660` (`= mapping + 0xe8660`, the game's own text),
+      `lr=0x1c55c`, `r0=6`, `r3=0x000f0fff`, `sp=0x407fe020`, and the faulting
+      address is **0** — a null dereference, not a wild pointer. The shim's own
+      title-agnostic counters put it inside the loading path, not idle:
+      `scene_opens=194`, `filebuf::xsgetn=992864 (small=964864)`,
+      `underflow=1606`/`1610`, `__basic_file::xsgetn=2745`/`2749` — the two runs
+      differ only in those last two, by 4 reads. The stack scan found exactly
+      one text word (`0x1b640`), so there is no useful backtrace yet.
+      **What his log does NOT establish, and this is the trap.** Every line
+      below the registers came from addresses read out of godzilla_pro 1.15.0:
+      `loader_gate[0x7e1a10]=0 boot_ready[0x7e1974]=0 thread_run=1`,
+      `event 93/94 has NO handlers`, and the whole `[audio]` mixer/pool dump —
+      whose words decode to ASCII (`0x65746164` = "date", `0x656a624f` =
+      "Obje") because they are somebody else's data. **None of it is a finding
+      about his machine.** godzilla_le is a different generation of the binary
+      from godzilla_pro (item 60's survey says so in as many words); measured
+      off the two card images at the desk, pro 1.15.0 loads `0x8000..0x6ed2c0`
+      exec + `0x6f52c0..0x842b9c` data while le 1.13.0 loads `0x8000..0x683bc0`
+      + `0x68c000..0x7d856c`, so the event table at `0x7e4d48` is not even
+      inside the le image. On his larger 1.16 build those addresses happen to
+      be mapped, which is why the walk ran. It then faulted a second time
+      inside the signal handler, mid-`[audio] list+94[0]`, so his report stops
+      there and the run ended `qemu: uncaught target signal 11 - core dumped`
+      instead of the handler's own `_exit(99)` — the exact james_bond_le
+      failure from item 80, which `gz_addrs_ok()` was supposed to have closed.
+      **Fixed on this branch (PAD-102): the gate matches the whole title name
+      now, not the first eight characters, and the mixer/pool walk reads
+      through `gz_word()` so it can never take a report down again.** Pinned by
+      `tests/test_spike2_gz_addrs_gate.py`, which compiles the real gate out of
+      `hwshim.c`.
+      **What is left, which is the actual item.** Nobody has yet seen an honest
+      crash report from this title. Next steps, cheapest first: (1) run
+      `godzilla_le-1_13_0` and `Godzilla Premium 1.15 Heisei Custom V1.0.raw`
+      (both in the library) and see whether either reproduces a start SEGV now
+      that the reporter will print the truth — the sweep never played this
+      title, its row has said `not yet` since 2026-08-21; (2) resolve
+      `mapping + 0xe8660` and `lr` against whichever build reproduces, using
+      that title's OWN ELF, not Pro's; (3) if it only bites 1.16 customs, ask
+      him for the run's `game.out`, which will now carry the full register set
+      and the file-buffer counters rather than stopping mid-dump.
+      — S1: the title does not play at all for this user, and boot-crash is the
+      floor. D4: no repro here yet, and the one instrument that would have
+      named the fault was printing another title's memory until today.
+
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`
       *(Found 2026-09-01 while answering David's "will our fixes work on

@@ -2200,21 +2200,52 @@ static void segv_install(void)
  *   PAD_GZ_ADDRS=1  an operator saying "these addresses are right for this
  *                   title" - the same escape hatch PAD_SW_STRUCT gives;
  *   PAD_GZ_ADDRS=0  never, whatever the title;
- *   otherwise       PAD_GAME must name a godzilla build.
+ *   otherwise       PAD_GAME must be godzilla_pro, the title the addresses
+ *                   were read out of.
  * The mapping test is kept as well: an address that is right for the title and
- * still unmapped is unusable either way. */
+ * still unmapped is unusable either way.
+ *
+ * "A GODZILLA BUILD" WAS STILL TOO WIDE, and a user's crash report is what
+ * says so (PAD-102, 2026-09-01, a Godzilla Premium 1.16 Heisei custom card).
+ * The first test matched the first eight characters, so `godzilla_le` passed
+ * it - and godzilla_le is not a variant of godzilla_pro, it is a different
+ * generation of the binary (item 60's survey: "godzilla_le sharing nothing
+ * with working sibling godzilla_pro is the clearest tell"). Measured at the
+ * desk off both card images: godzilla_pro 1.15.0 loads 0x8000..0x6ed2c0 exec
+ * + 0x6f52c0..0x842b9c data, godzilla_le 1.13.0 loads 0x8000..0x683bc0 +
+ * 0x68c000..0x7d856c - so even the event table at 0x7e4d48 falls off the end
+ * of the le image, and on the user's larger 1.16 build every one of these
+ * addresses is simply somebody else's data that happens to be mapped.
+ *
+ * What that cost, in that user's log, is the whole Bond failure again:
+ *   [segv] loader_gate[0x7e1a10]=0 boot_ready[0x7e1974]=0 thread_run=1
+ *   [segv] event 93 has NO handlers            <- read off le's memory
+ *   [audio] pool head[+74]=0x65746164          <- ASCII "date"
+ * and then the pool-list walk faulted a SECOND time inside this handler, so
+ * the run ended `qemu: uncaught target signal 11 - core dumped` instead of
+ * this function's _exit(99), and the report stopped mid-line. The GAME's own
+ * fault on that card is still unexplained - this gate is what makes the next
+ * report of it legible. */
 static int gz_addrs_ok(void)
 {
     static int v, done;
     if (!done) {
         const char *e = getenv("PAD_GZ_ADDRS");
         const char *g = getenv("PAD_GAME");
+        /* No string.h here - this object is built -nostdlib, same as
+         * nv_path() below. The whole name must match: a title that merely
+         * STARTS with it is exactly the bug this replaced. */
+        static const char want[] = "godzilla_pro";
+        int i = 0;
         done = 1;
         if (e && (e[0] == '0' || e[0] == '1'))
             v = (e[0] == '1');
-        else
-            v = (g && g[0] == 'g' && g[1] == 'o' && g[2] == 'd' && g[3] == 'z'
-                 && g[4] == 'i' && g[5] == 'l' && g[6] == 'l' && g[7] == 'a');
+        else {
+            v = (g != 0);
+            for (i = 0; v && want[i]; i++)
+                if (g[i] != want[i]) v = 0;
+            if (v && g[i]) v = 0;
+        }
         if (v && !a_sw_struct()) v = 0;
     }
     return v;
@@ -2409,10 +2440,23 @@ static void segv_handler(int sig, void *info, void *ucv)
                " overrides)\n");
     } else {
         unsigned long sp = uc[21];
-        unsigned long *w = (unsigned long *)sp;
-        unsigned long obj = w[28];
+        unsigned long obj = 0;
         unsigned long base = 0x7b90c0;
         int n;
+
+        /* EVERY READ FROM HERE DOWN GOES THROUGH gz_word(), for the reason
+         * stated at that function: a crash reporter that faults reports
+         * nothing at all, because the second fault arrives on a stack that is
+         * already inside a signal handler. The event walk above was hardened
+         * when Bond hit exactly that; this block was left trusting its own
+         * addresses and took a user's report down mid-line the next time a
+         * wrong title got through the gate (PAD-102). Right title or forced
+         * with PAD_GZ_ADDRS=1, nothing below reads differently - the checks
+         * only decide whether the report STOPS or FINISHES. */
+        if (!gz_word(sp + 28 * 4, &obj)) {
+            logmsg("[audio] stack is not readable at sp+112 - no mixer dump\n");
+            goto mixer_done;
+        }
 
         snprintf(b, sizeof b,
                  "[audio] mixer voice = 0x%lx  index %ld  queue(r4)=0x%lx "
@@ -2428,11 +2472,16 @@ static void segv_handler(int sig, void *info, void *ucv)
                  (long)(uc[13] - (sp + 68)));
         logmsg(b);
         {
-            int i;
+            int i, k, ok;
+            unsigned long q[4];
             for (i = 20; i < 52; i += 4) {
+                for (k = 0, ok = 1; k < 4; k++)
+                    if (!gz_word(sp + (unsigned long)(i + k) * 4, &q[k]))
+                        ok = 0;
+                if (!ok) break;
                 snprintf(b, sizeof b,
                          "[audio] stack[%2d..%2d] = %08lx %08lx %08lx %08lx\n",
-                         i, i + 3, w[i], w[i + 1], w[i + 2], w[i + 3]);
+                         i, i + 3, q[0], q[1], q[2], q[3]);
                 logmsg(b);
             }
         }
@@ -2440,6 +2489,13 @@ static void segv_handler(int sig, void *info, void *ucv)
         for (n = 0; n < 8; n++) {
             unsigned char *v = (unsigned char *)(base + n * 64);
             unsigned long *vw = (unsigned long *)v;
+            if (!addr_readable(v) || !addr_readable(v + 63)) {
+                snprintf(b, sizeof b,
+                         "[audio] voice[%d] at 0x%lx is not readable - "
+                         "stopping the voice dump\n", n, base + n * 64);
+                logmsg(b);
+                break;
+            }
             snprintf(b, sizeof b,
                      "[audio] voice[%d] stream=0x%08lx mixA=0x%08lx mixB=0x%08lx "
                      "pos=%lu queue=0x%08lx en=%d mask=0x%02x vol=%d/%d ch=%d\n",
@@ -2453,23 +2509,41 @@ static void segv_handler(int sig, void *info, void *ucv)
          * mixer compares the cursor against. Print it for whichever voice the
          * mixer was on. */
         if (obj >= base && obj < base + 512) {
-            unsigned long st = *(unsigned long *)obj;
+            unsigned long st;
+            if (!gz_word(obj, &st)) {
+                snprintf(b, sizeof b, "[audio] faulting voice 0x%lx is not "
+                         "readable\n", obj);
+                logmsg(b);
+                goto mixer_pool;
+            }
             snprintf(b, sizeof b, "[audio] faulting voice stream desc = 0x%lx\n", st);
             logmsg(b);
             if (st > 0x10000 && st < 0xb0000000) {
-                unsigned long *s = (unsigned long *)st;
-                snprintf(b, sizeof b,
-                         "[audio]   +00=0x%08lx +04=0x%08lx +08=0x%08lx +0c=0x%08lx\n"
-                         "[audio]   +10=0x%08lx(len) +14=0x%08lx +18=0x%08lx +1c=0x%08lx\n",
-                         s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]);
-                logmsg(b);
+                unsigned long s[8];
+                int i, ok;
+                for (i = 0, ok = 1; i < 8; i++)
+                    if (!gz_word(st + (unsigned long)i * 4, &s[i])) ok = 0;
+                if (ok) {
+                    snprintf(b, sizeof b,
+                             "[audio]   +00=0x%08lx +04=0x%08lx +08=0x%08lx +0c=0x%08lx\n"
+                             "[audio]   +10=0x%08lx(len) +14=0x%08lx +18=0x%08lx +1c=0x%08lx\n",
+                             s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]);
+                    logmsg(b);
+                }
             }
         }
+
+    mixer_pool:
 
         /* 0x7b8990+0x100 is the object the teardown path at 0x2a2044 hands the
          * queue back to, i.e. the queue pool/owner. */
         {
-            unsigned long pool = *(unsigned long *)(0x7b8990 + 0x100);
+            unsigned long pool = 0;
+            if (!gz_word(0x7b8990 + 0x100, &pool)) {
+                logmsg("[audio] no queue pool pointer at 0x7b8a90 in this"
+                       " title\n");
+                goto mixer_done;
+            }
             snprintf(b, sizeof b, "[audio] queue pool [0x7b8a90] = 0x%lx\n", pool);
             logmsg(b);
             /* 0x458e98 returns NULL when the free ring is empty, which it
@@ -2477,7 +2551,18 @@ static void segv_handler(int sig, void *info, void *ucv)
              * as open()ing the sound file. Print the ring so the two NULL
              * paths can be told apart. */
             if (pool > 0x10000 && pool < 0xb0000000) {
-                unsigned long *p = (unsigned long *)pool;
+                unsigned long p[0xc0 / 4];
+                int i, ok;
+                for (i = 0, ok = 1; i < (int)(sizeof p / sizeof p[0]); i++)
+                    if (!gz_word(pool + (unsigned long)i * 4, &p[i])) {
+                        p[i] = 0; ok = 0;
+                    }
+                if (!ok) {
+                    snprintf(b, sizeof b, "[audio] queue pool 0x%lx is not "
+                             "fully readable - stopping the pool dump\n", pool);
+                    logmsg(b);
+                    goto mixer_done;
+                }
                 snprintf(b, sizeof b,
                          "[audio] pool head[+74]=0x%08lx limit[+7c]=0x%08lx "
                          "end[+84]=0x%08lx  free_ring_empty=%d\n",
@@ -2515,29 +2600,43 @@ static void segv_handler(int sig, void *info, void *ucv)
                     off[0] = 0x94; off[1] = 0x9c; off[2] = 0xa4;
                     for (k = 0; k < 3; k++) {
                         unsigned long head = pool + off[k];
-                        unsigned long node = *(unsigned long *)head;
-                        int cnt = 0;
+                        unsigned long node = 0;
+                        int cnt = 0, broke = 0;
+                        if (!gz_word(head, &node)) {
+                            snprintf(b, sizeof b, "[audio] pool list +%02x : head "
+                                     "0x%lx is not readable\n", off[k], head);
+                            logmsg(b);
+                            continue;
+                        }
                         while (node && node != head && cnt < 64) {
-                            unsigned long q = *(unsigned long *)(node + 8);
-                            if (cnt < 4 && q > 0x10000 && q < 0xb0000000) {
-                                unsigned long *qq = (unsigned long *)q;
+                            unsigned long q, qw[4], next;
+                            if (!gz_word(node + 8, &q)) { broke = 1; break; }
+                            if (cnt < 4 && q > 0x10000 && q < 0xb0000000
+                                && gz_word(q + 8, &qw[0])
+                                && gz_word(q + 16, &qw[1])
+                                && gz_word(q + 0x30, &qw[2])
+                                && gz_word(q + 0x44, &qw[3])) {
                                 snprintf(b, sizeof b,
                                          "[audio]   list+%02x[%d] queue=0x%lx fd=%ld "
                                          "total=%lu avail=%ld pops=%lu\n",
-                                         off[k], cnt, q, (long)qq[2], qq[4],
-                                         (long)qq[0x30 / 4], qq[0x44 / 4]);
+                                         off[k], cnt, q, (long)qw[0], qw[1],
+                                         (long)qw[2], qw[3]);
                                 logmsg(b);
                             }
-                            node = *(unsigned long *)node;
+                            if (!gz_word(node, &next)) { broke = 1; break; }
+                            node = next;
                             cnt++;
                         }
-                        snprintf(b, sizeof b, "[audio] pool list +%02x : %d entries\n",
-                                 off[k], cnt);
+                        snprintf(b, sizeof b, "[audio] pool list +%02x : %d entries%s\n",
+                                 off[k], cnt,
+                                 broke ? " (walk stopped: unreadable node)" : "");
                         logmsg(b);
                     }
                 }
             }
         }
+    mixer_done:
+        logmsg("[audio] --- end of the mixer dump ---\n");
     }
 
     /* The stack backtrace used to be here. It is printed right after the

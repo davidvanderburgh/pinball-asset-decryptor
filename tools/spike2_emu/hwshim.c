@@ -6579,7 +6579,9 @@ static void nb_reg_node2(void)
         {
             static int said;
             if (!said) {
-                char m[140];
+                char m[176];    /* the message is 157 bytes; 140 truncated it
+                                 * and splashed a 30-line GCC warning block
+                                 * into the app pane on every rebuild */
                 said = 1;
                 snprintf(m, sizeof m,
                          "[nbreg] node 2 registered by the shim: flags "

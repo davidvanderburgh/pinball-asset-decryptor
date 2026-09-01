@@ -5517,13 +5517,25 @@ These have each been violated at least once and each cost a run or a window:
         (0x7478b4) — no movw/movt or literal-pool xref (anchored
         addressing), so static search cannot name the caller cheaply.
         Extracted for RE: /tmp/jb_game (md5 8967f227…), /tmp/jb_scene.radium.
-        **Resume:** David starts james_bond_le again (from the item-80
-        worktree — his app already points there). The rebuilt shim prints
-        the TRUE backtrace; take the first stack words in 0x8000..0x79f5b4,
-        disassemble the callers, and the one that formats a `%s` from a
-        record field names the wrong-offset read. Then decide the fix side
-        (game-data quirk our tables/answers provoke vs a shim answer the
-        title needs).
+        **★ RUN 3 (David, 10:13): THE CRASH DID NOT FIRE — Bond booted to
+        attract and ran clean** (~70 s of healthy 30 fps video, normal scene
+        changes, autoattract advancing, David stopped it clean). So the
+        fault is deterministic WHEN it fires (identical registers twice) but
+        NOT every boot: 2 of 3. The corrected theory is a race or
+        state-dependent path through the credits-scene load, not a fixed
+        landmine — and the instrument is now armed for whenever it next
+        fires: real backtrace bounds (game_text_end off the mapped ELF
+        header) and watch.sh printing the game.out report into the pane on
+        any exit. Also fixed this run: the nb_reg_node2 snprintf buffer
+        (140 → 176; the 157-byte message truncated and splashed a 30-line
+        GCC warning block into the pane on every rebuild — the “errors”
+        David saw at 10:13:15).
+        **Resume:** keep playing Bond in the sweep. If the SEGV fires
+        again, the pane now carries the full report with a true backtrace —
+        take the stack words in 0x8000..0x79f5b4, disassemble the callers
+        (/tmp/jb_game, ELF vaddr = file offset + 0x8000), and the frame
+        that formats a `%s` from a record field names the wrong-offset
+        read. 2/3 repro means a report will not be long in coming.
 
 - [ ] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
       and identified; node 4 polled forever while we silence it; board 24

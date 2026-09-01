@@ -5486,6 +5486,44 @@ These have each been violated at least once and each cost a run or a window:
         registers and the backtrace, and r1/r2/r3 plus the format-string
         address settle which `%s` and which argument. The GAME’s fault is still
         unfixed — only its report is.
+        **★ RUN 2 (David, 09:58) VALIDATED THE REPORTER and re-aimed the
+        theory.** Same fault, deterministic TO THE BYTE: identical registers
+        AND identical asset counters (filebuf::xsgetn=613322, small=589331,
+        underflow=1249, scene_opens=318) on both runs — this is a fixed point
+        in the game’s own boot script, not a flaky bus error. The report
+        printed clean (registers, no invented data, `_exit(99)` — which is
+        why qemu printed no signal line) but the PANE showed none of it: the
+        tail feeding the app log is killed at stop, so the report sat in
+        game.out unseen — watch.sh now greps game.out for `[segv]` on exit.
+        **Ruled out / corrected:** (a) the ExchangeData printf is NOT the
+        crasher — the `[segv]` bytes landed MID-LINE inside the storm’s
+        output, so the faulting thread is another thread, and the disassembly
+        of the storm’s only `%s` variant (0x5a80e0) shows its arg is
+        `strerror(errno)`, which cannot be this pointer. (b) The first run’s
+        “backtrace” was junk: the scan bounds were GODZILLA’s .text
+        (0x16a00..0x5d3168) and Bond’s runs to 0x79f5b4, so every real
+        return address was excluded — fixed, `game_text_end()` reads the
+        bound off the game’s own mapped ELF header. (c) `segvtest.sh` passes
+        all 4 cases (TMPDIR=/tmp — /var/tmp/segvtest is root-owned).
+        **Established:** the bad `%s` arg (r8=r0=0x3f003536) is 0.50081f
+        read as a char* — bytes `36 35 00 3f` exist NOWHERE in the game
+        image or the scene file, so it is live heap data read at a wrong
+        offset. The crash sits at the exact END of parsing
+        `assets/lcd/demand_loaded/6fb39344…/457dbbe6…/scene.radium`
+        (1217811 bytes; the report counts 1217811 read) — the CREDITS/PRICE
+        text overlay scene (strings: `CREDITS 50 1/4`, `PRICE $000`,
+        TextWrapper, fonts Stern_Montserrat_EX / _Outline_4_black). Prime
+        suspect string in the ELF: `Requested font '%s' was not found`
+        (0x7478b4) — no movw/movt or literal-pool xref (anchored
+        addressing), so static search cannot name the caller cheaply.
+        Extracted for RE: /tmp/jb_game (md5 8967f227…), /tmp/jb_scene.radium.
+        **Resume:** David starts james_bond_le again (from the item-80
+        worktree — his app already points there). The rebuilt shim prints
+        the TRUE backtrace; take the first stack words in 0x8000..0x79f5b4,
+        disassemble the callers, and the one that formats a `%s` from a
+        record field names the wrong-offset read. Then decide the fix side
+        (game-data quirk our tables/answers provoke vs a shim answer the
+        title needs).
 
 - [ ] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
       and identified; node 4 polled forever while we silence it; board 24

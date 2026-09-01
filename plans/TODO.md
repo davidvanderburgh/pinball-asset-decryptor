@@ -84,6 +84,37 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **90. A BOOT-TIME CODE SELECTOR: one SD card, several game images,
+      pick one with the flippers before the game starts — first in the
+      emulator, then on David's machine.** `S2 D4` ← WORKING ON
+      *(David's ask 2026-09-01: "we want to be able to run our own code on
+      the machine … a multi image selector on an SD card that could allow
+      us to play either the original Stern code or our custom 1987 code …
+      a GUI that shows when you boot the game … left or right with flipper
+      button input … extended later to switch between the orchestra and
+      normal versions of the new Godzilla custom code … needs to pass the
+      game validation checks that Stern does, for online play.")*
+      **The shape:** the card keeps Stern's p1 (boot) and p2 (rootfs) where
+      u-boot and fstab expect them, p3 stays the PRIMARY image's games
+      partition, p5/p6 stay /data and /dump, and the extended partition is
+      grown to the end of the card so each EXTRA image's games partition
+      rides verbatim as p7, p8… A selector program installed in the rootfs
+      (`/usr/local/codeselect/`) is hooked into `/etc/init.d/game` right
+      after `pkill boot_display` — it draws through the same libEGL/libGLESv2
+      the game uses, reads the flippers off node 8 (bits 24/25) over the node
+      bus and START off node 1, remounts `/games` from the chosen partition,
+      and falls through to Stern's own launch lines. Nothing Stern validates
+      is touched: `./game`, `./conagent`, the zImage on p1 and the asset tree
+      are the stock image's own bytes on its own partition, and the `.sidx`
+      indexes only `<title>/…` on that partition. First pair = David's TMNT
+      Pro: stock `turtles_pro-1_59_0` + the 1987 upscaled Pro build (same
+      1.59.0 version, so NVRAM identity is not disturbed). Godzilla (stock /
+      Heisei normal / Heisei orchestra) is the same builder with three
+      inputs. Proven in the rig as `PAD_CARD=<multi.raw> PAD_SELECT=1`.
+      — S2: it is the whole point of the emulator work — running our own
+      code on the machine. D4: a new ARM program, a card builder, and rig
+      plumbing, all of which exist in parts already.
+
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`
       *(Found 2026-09-01 while answering David's "will our fixes work on

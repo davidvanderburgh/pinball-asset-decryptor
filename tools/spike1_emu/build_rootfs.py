@@ -15,6 +15,13 @@ Windows drvfs target would drop them and the dynamic busybox would not link.
 
 Reuses the plugin's pure-Python ext4 reader + the Spike 1 partition walk; no
 loop mount, no root.
+
+STDLIB ONLY.  That ``python3`` is the distro's own, with nothing
+pip-installed, so everything this reaches has to import on a bare
+interpreter — including the plugin package ``__init__`` files Python runs on
+the way to a leaf module (see ``pinball_decryptor/plugins/__init__.py``:
+eager entry points made this script die on ``No module named 'Crypto'``
+inside the *Spooky* plugin).  ``tests/test_rig_leaf_imports.py`` checks it.
 """
 
 import os

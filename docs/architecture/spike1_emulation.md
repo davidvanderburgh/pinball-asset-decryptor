@@ -113,7 +113,12 @@ Root-free, reproducible from a card alone:
    partitions`, EBR chain included), the card's **OS rootfs** (the partition
    with `bin/busybox` — needed for the game's `/bin/sh` shell-outs) and the
    **game dir** (`<TITLE>/image.bin` + `game` + node `.hex`). Runs in
-   WSL/Linux python3 so symlinks survive.
+   WSL/Linux python3 so symlinks survive — the *distro's own* interpreter,
+   with nothing pip-installed, so this path is **stdlib-only**. That is why
+   every plugin entry point imports its manufacturer inside `register()`
+   (`pinball_decryptor/plugins/__init__.py`): while they imported it eagerly,
+   reading a card here died on `No module named 'Crypto'` raised inside the
+   *Spooky* plugin. `tests/test_rig_leaf_imports.py` keeps it that way.
 2. **`launch.sh`** — re-execs itself under `unshare -r -m -p -f` (user + mount +
    pid namespaces, no root), then assembles a chroot: the OS rootfs as the
    base, a writable `/data` + `/dump`, the game dir bound at `/games/<TITLE>`,

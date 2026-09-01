@@ -5418,6 +5418,33 @@ These have each been violated at least once and each cost a run or a window:
         0 → 259 and `dungeons_and_dragons_le` +41 on the two other ELFs
         reachable without a card mount, and the 40-image `cardaudit.py` sweep
         that produced that list has NOT been re-run.
+      - **james_bond_le 1.06.0 — ❌ SEGV, David 2026-09-01 09:32.** "it’s a
+        seg fault when starting the game". The guest takes **qemu signal 11
+        ~12 s into the run**, during boot/attract scene loading, not after a
+        Start press that reached play. Boot is otherwise healthy up to the
+        moment it dies — 8 node identities derived from the title’s own
+        directory, node 2 silenced by census, 543 device records
+        (coil=17 led=431 switch=95), 107 of 108 `?` names filled, picture
+        FIRST at frame 77, ch0 video handing the game 30.9/s then 30.0/s.
+        **The signature, verbatim from David’s log:**
+        ```
+        ExchangeData: read failed (received 0, expected length=1
+        [segv] pc=0x4117cdae lr=0x4114679c r0=0x3f003536 fault=0x0
+        [segv] map 41106000-4122e000 r-xp /lib/libc-2.21.so   <-- PC
+        [segv] pc = mapping + 0x76dae
+        [segv] loader_gate[0x7e1a10]=0 boot_ready[0x7e1974]=152
+                thread_run[0x794af5]=223 scene_opens=318
+        [segv] filebuf::xsgetn=613322 (small=589331) filebuf::underflow=1249
+                __basic_file::xsgetn=1804
+        [segv] event 93 handler[0] = 0x20474f4c prio=73
+        [segv] event 93 handler[1] = 0x921ccb1c prio=108
+        ```
+        **The lead, and it is why this is not just “another clean exit”:
+        `handler[0] = 0x20474f4c` is ASCII — `4c 4f 47 20` little-endian is
+        `"LOG "`.** An event handler slot holding text is memory the game did
+        not write as a pointer, so this is a corruption signature, not a null
+        deref of a slot that was merely empty. Triage in progress this pass.
+
 
 - [ ] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
       and identified; node 4 polled forever while we silence it; board 24

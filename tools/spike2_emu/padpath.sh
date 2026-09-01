@@ -733,6 +733,101 @@ pad_win_python_any() {
     done
 }
 
+# ---- AND THE ONE THAT HAS TO DRAW THE PLAYFIELD WINDOW --------------------
+#
+# A DIFFERENT QUESTION FROM THE SOUND ONE, ASKED THE SAME WAY. The window is a
+# Windows process (this WSL has no Tk at all), it is drawn with tkinter AND
+# Pillow, and until PAD-99 nothing chose it: watch.sh ran whatever `pythonw.exe`
+# PATH happened to hand it.
+#
+# WHAT THAT COST. dragonrr's PC had a python.org 3.13 on PATH, so `pythonw.exe`
+# was HIS interpreter - tkinter yes, Pillow no - and playfield.py died on its
+# first artwork import. He got the game window, the sound and the switches, and
+# no playfield, with the fix sitting on the same disk: PAD's own bundled Python
+# has both (it is what the app draws ITSELF with), it is already handed to this
+# rig as PAD_WINPYTHON, and running playfield.py with it by hand opened the
+# window first try. The rig simply never asked for it.
+#
+# So this asks the same list the sound path asks (pad_win_pythons - ours
+# leads), and asks each candidate the question that actually matters: can you
+# import what the window is drawn with. PATH is still in that list; it is no
+# longer the whole of it.
+
+# The GUI-subsystem twin of a Windows python.exe, when one sits beside it.
+#
+# WHY THE TWIN AT ALL: pythonw.exe is what keeps a black console window from
+# sitting beside the playfield for the whole run, and it is also what stops
+# `cmd /c start` hanging on the interop pipe (watch.sh's launch block has the
+# post-mortem). But pythonw.exe cannot be PROBED - a GUI-subsystem binary
+# writes its traceback nowhere - so every question above is asked of the
+# console spelling and only the ANSWER is translated here.
+#
+# Unchanged when there is no twin (an embeddable layout always has one; a
+# python3.exe alias may not), so the caller still gets something to run.
+pad_win_pythonw() {
+    local d
+    case "${1:-}" in
+        */python.exe|*/python3.exe) ;;
+        *) printf '%s\n' "${1:-}"; return ;;
+    esac
+    d=${1%/*}
+    if pad_win_python_usable "$d/pythonw.exe"; then
+        printf '%s\n' "$d/pythonw.exe"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+# A Windows Python that can actually DRAW the playfield window, or "".
+#
+# BOTH IMPORTS, because either one missing is the same blank desktop: tkinter
+# is the window and Pillow is the artwork (playfield.py's Field.__init__ imports
+# it unguarded, and the LCD panel decodes its clips with it). A python.org
+# install has tkinter and no Pillow, which is exactly the machine PAD-99 came
+# from, so probing for tkinter alone would have found the broken one and passed.
+pad_win_pf_python() {
+    pad_win_pythons | while IFS= read -r c; do
+        # bounded and with stdin closed, for the reasons pad_win_python gives:
+        # a dead-interop exec hangs forever, and a Windows child will drain the
+        # stdin of whatever asked it.
+        if pad_win_python_usable "$c" \
+           && pad_bounded "$c" -c "import tkinter, PIL.ImageTk" \
+                >/dev/null 2>&1 </dev/null
+        then
+            pad_win_pythonw "$c"
+            break
+        fi
+    done
+}
+
+# The first Windows Python AT ALL, in the spelling the playfield wants.
+#
+# THE FALLBACK, AND IT IS NOT DECORATION. If no candidate can import both, the
+# window still gets launched with the best one there is - because a launch that
+# fails leaves a traceback in the playfield log, which watch.sh prints, and
+# that names the missing package to the one person who can act on it. Refusing
+# to launch would replace a diagnosable failure with a silent one, which is the
+# state PAD-99 was reported from.
+#
+# "CAN BE RUN", NOT "IS A FILE", and that distinction is the whole difference
+# between this and pad_win_python_any. -x and -s say the .exe is THERE; on a
+# distro with interop switched off, every Windows binary under /mnt/c is there
+# and none of them can be executed. watch.sh has a branch for that machine - it
+# asks PAD to open the window, because the app is already on the Windows side -
+# and handing it a path it cannot exec would swap that working answer for a
+# launch that fails into a log. So ask each candidate to run the emptiest
+# program there is, and believe the ones that answer.
+pad_win_pf_python_any() {
+    pad_win_pythons | while IFS= read -r c; do
+        if pad_win_python_usable "$c" \
+           && pad_bounded "$c" -c "" >/dev/null 2>&1 </dev/null
+        then
+            pad_win_pythonw "$c"
+            break
+        fi
+    done
+}
+
 # WHAT TO DO ABOUT A MISSING sounddevice, in the words that fit THIS machine.
 # One or more lines on stdout; the caller prefixes them.
 #

@@ -370,6 +370,30 @@ if pad_is_wsl; then
         _padpyw=$(pad_win "$PAD_WINPYTHON" 2>/dev/null)
         [ -n "$_padpyw" ] && echo "padpy=$_padpyw"
     fi
+
+    # ★ PAD-99: AND WHICH INTERPRETER OPENS THE PLAYFIELD WINDOW, which is a
+    # SECOND Windows Python question and was never asked. The window is drawn
+    # with tkinter and Pillow; the run used to open it with whatever
+    # `pythonw.exe` PATH held, and a python.org install has the first and not
+    # the second. dragonrr's did, so his runs had a game window, sound and
+    # switches and NO PLAYFIELD - with nothing said here, in the log, or
+    # anywhere else, because nothing had ever looked.
+    #
+    # Same two-fact shape as the sound above and for the same reason: `winpf`
+    # is whether one was found, `pfpy` NAMES it, and a machine with neither is
+    # a different fault from a machine with an interpreter that is missing one
+    # package. The tab decides what to say; this only reports.
+    _pfpy=$(pad_win_pf_python)
+    if [ -n "$_pfpy" ]; then
+        echo "winpf=1"
+    else
+        echo "winpf=0"
+        _pfpy=$(pad_win_pf_python_any)
+    fi
+    if [ -n "$_pfpy" ]; then
+        _pfpyw=$(pad_win "$_pfpy" 2>/dev/null)
+        [ -n "$_pfpyw" ] && echo "pfpy=$_pfpyw"
+    fi
 else
     echo "winaudio=1"
 fi

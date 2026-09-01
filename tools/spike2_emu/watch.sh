@@ -1222,7 +1222,33 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
             echo "[watch]   sudo apt-get install python3-tk   (or python3-tkinter)" >&2
         fi
     else
-        PF_PY=${PAD_PF_PYTHON:-pythonw.exe}
+        # ★ PAD-99: CHOSEN, NOT WHATEVER PATH HANDS OVER.
+        #
+        # This line used to be `PF_PY=${PAD_PF_PYTHON:-pythonw.exe}` and the
+        # launch below asked PATH for it. With interop on, PATH here carries
+        # WINDOWS' PATH, so `pythonw.exe` is whichever Python the user happened
+        # to install - and dragonrr's was a python.org 3.13 with no Pillow, so
+        # playfield.py died on its first artwork import. Game window, sound and
+        # switches all fine; no playfield, and no reason visible anywhere he
+        # was looking. PAD's own bundled Python has tkinter AND Pillow (it is
+        # what the app draws itself with), it has been handed to this rig as
+        # PAD_WINPYTHON since PAD-95, and running playfield.py with it by hand
+        # opened the window first try. Nothing was missing but the CHOICE.
+        #
+        # pad_win_pf_python asks the same candidate list the sound path asks
+        # (ours first, then the `py` launcher's, then PATH) and probes each one
+        # for the two imports the window is drawn with. PAD_PF_PYTHON still
+        # wins outright: an explicit answer is not something to second-guess.
+        PF_PY=${PAD_PF_PYTHON:-$(pad_win_pf_python)}
+        PF_BEST=1
+        if [ -z "$PF_PY" ]; then
+            # NOTHING HERE CAN DRAW IT - so launch the best there is anyway and
+            # let it say why. The traceback lands in $PFLOG and the check after
+            # the guest comes up prints it, which names the missing package to
+            # the person who can install it. Silence is what this ticket was.
+            PF_PY=$(pad_win_pf_python_any)
+            PF_BEST=0
+        fi
         # The rig's own path, as Windows sees it. `wslpath -w` is asked rather
         # than the answer being written down: the literal here named one user's
         # checkout on one machine's C: drive.
@@ -1251,14 +1277,25 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
             export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_FADE_UNIT_MS"
         [ -n "${PAD_PF_FADE_MS:-}" ] && \
             export WSLENV="${WSLENV:+$WSLENV:}PAD_PF_FADE_MS"
-        if command -v "$PF_PY" >/dev/null 2>&1; then
+        if [ -n "$PF_PY" ] && command -v "$PF_PY" >/dev/null 2>&1; then
+            if [ "$PF_BEST" = 0 ]; then
+                echo "[watch] no Windows Python on this PC can import tkinter"
+                echo "[watch]   and Pillow, which is what the playfield window"
+                echo "[watch]   is drawn with. Trying $PF_PY anyway; if no"
+                echo "[watch]   window appears, the reason is below."
+            fi
             # TRUNCATE, then append: one run's log, not every run's. The window
             # is a Windows process here and its traceback would otherwise go
             # nowhere at all - pythonw.exe has no console to print one to.
             : > "$PFLOG" 2>/dev/null
             setsid_as_user "$PF_PY" "$PF_WIN" "$GAME" $PF_STATES </dev/null >>"$PFLOG" 2>&1 &
             PF_LAUNCHED=1
-            echo "[watch] virtual playfield window opening (PAD_PLAYFIELD=0 to skip)"
+            # NAMED, not just announced (PAD-99). Which interpreter opened the
+            # window is the fact that settles "I have no playfield" in one
+            # paste, and the run said nothing about it for as long as the
+            # answer was whatever PATH held.
+            echo "[watch] virtual playfield window opening with $PF_PY"
+            echo "[watch]   (PAD_PLAYFIELD=0 to skip)"
         else
             # ---- ASK THE APP TO OPEN IT, because it is a Windows process too.
             #
@@ -1291,8 +1328,9 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
                  "root=$(pad_win "$ROOT" 2>/dev/null)" \
                  "tables=$(pad_win "$TABLES" 2>/dev/null)"
             echo "[watch] this WSL cannot start a Windows program (interop is"
-            echo "[watch]   off, or pythonw.exe is not on its PATH), so PAD has"
-            echo "[watch]   been asked to open the playfield window instead."
+            echo "[watch]   off, or there is no Windows Python it can reach),"
+            echo "[watch]   so PAD has been asked to open the playfield"
+            echo "[watch]   window instead."
             echo "[watch]   Running watch.sh by hand? Open it yourself with:"
             echo "[watch]   pythonw tools\\spike2_emu\\playfield.py $GAME"
         fi

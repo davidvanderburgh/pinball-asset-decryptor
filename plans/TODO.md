@@ -124,19 +124,50 @@ These have each been violated at least once and each cost a run or a window:
       through `gz_word()` so it can never take a report down again.** Pinned by
       `tests/test_spike2_gz_addrs_gate.py`, which compiles the real gate out of
       `hwshim.c`.
+      **★ IT DOES NOT REPRODUCE ON EITHER CARD WE HOLD** (2026-09-01, at
+      David's ask — "we have the stock card, try it out yourself"; rig lock
+      taken and released, `alive.sh` 0 before and after both runs, cards
+      unmounted, this worktree's rig and shim):
+        - **`godzilla_le-1_13_0` (stock, game ELF 7453652 bytes) — CLEAN.**
+          Booted, 98 switches dumped, `picture: FIRST at frame 4`, attract
+          video ran the whole time at a steady 30 fps (`handed the game 61
+          frames in 2033 ms`, late 0, early 0, repeatedly), full 3-minute
+          backstop, no `[segv]`, clean teardown.
+        - **`Godzilla Premium 1.15 Heisei Custom V1.0.raw` (game ELF 7930828
+          bytes) — CLEAN.** Same: 98 switches, `picture: FIRST at frame 19`,
+          full 3-minute backstop, no `[segv]`, clean teardown. **This is the
+          same FAMILY as his card, not just the same title**: its switch dump
+          carries the 1001-series cabinet numbering (`DIP 1` at `num=1001`,
+          `Service Back` at `1012`) and the Title Case names his log shows,
+          where stock 1.13.0 numbers those `1..12` in upper case.
+      So the fault is not godzilla_le, and not the Heisei retheme either. What
+      is left that we do not hold is **his build**: 1.16-based, ELF 7962924
+      bytes, 32096 more than the 1.15 Heisei that runs fine here.
+      **The reporter half IS reproducible on demand, and is fixed** — same
+      session, no emulator run needed. Forcing the Godzilla block on against a
+      guest that has none of its addresses (`PAD_SEGV_REPORT=1
+      PAD_GZ_ADDRS=1 PAD_SW_STRUCT=0x400000`, segvtest.sh's own B guest under
+      `qemu-arm-static -L ~/spike2root`) puts a shim in exactly godzilla_le's
+      position: **v0.179.0's shim exits 139, its report stopping mid
+      `[audio] stack[48..51]` under `qemu: uncaught target signal 11 - core
+      dumped`; this branch's exits 99** — the handler's own `_exit(99)` —
+      after printing `voice[0] at 0x7b90c0 is not readable`, `no queue pool
+      pointer at 0x7b8a90 in this title` and `--- end of the mixer dump ---`.
+      That is his truncated log reproduced and closed. `segvtest.sh` itself
+      passes all four documented cases on this branch.
       **What is left, which is the actual item.** Nobody has yet seen an honest
-      crash report from this title. Next steps, cheapest first: (1) run
-      `godzilla_le-1_13_0` and `Godzilla Premium 1.15 Heisei Custom V1.0.raw`
-      (both in the library) and see whether either reproduces a start SEGV now
-      that the reporter will print the truth — the sweep never played this
-      title, its row has said `not yet` since 2026-08-21; (2) resolve
-      `mapping + 0xe8660` and `lr` against whichever build reproduces, using
-      that title's OWN ELF, not Pro's; (3) if it only bites 1.16 customs, ask
-      him for the run's `game.out`, which will now carry the full register set
-      and the file-buffer counters rather than stopping mid-dump.
+      crash report from a build that actually faults. Next steps: (1) ask him
+      for `game.out` from one run on the fixed build — it will now carry the
+      full register set, the stack backtrace against his OWN text bounds and
+      the file-buffer counters instead of stopping mid-dump; (2) resolve
+      `mapping + 0xe8660` and `lr=0x1c55c` against HIS ELF, which means getting
+      the 1.16 Heisei image or at least its `game`; (3) worth knowing whether
+      stock `godzilla_le` 1.16 (which we do not hold) faults too — that splits
+      "1.16 regression" from "this retheme".
       — S1: the title does not play at all for this user, and boot-crash is the
-      floor. D4: no repro here yet, and the one instrument that would have
-      named the fault was printing another title's memory until today.
+      floor. D4: does not reproduce on either card here, so it needs his image
+      or his log, and the one instrument that would have named the fault was
+      printing another title's memory until today.
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

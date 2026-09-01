@@ -51,33 +51,33 @@ ZONES = [
                 "pinball_decryptor/plugins/stern/spike1",   # spike1*.py
                 "pinball_decryptor/gui/spike1_emulate_tab.py",
                 "pinball_decryptor/gui/spike1_windows.py"],
-     ["test_spike1_*.py"]),
+     ["test_spike1_*.py", "test_rig_leaf_imports.py"]),
     # -- Stern plugin core: formats, engine, radium, sidx, compare... ------
     # Both rigs sit on it, so its zone pulls their tests in too.
     ("stern", ["pinball_decryptor/plugins/stern/"],
      ["test_stern_*.py", "test_spike1_*.py", "test_spike2_*.py",
-      "test_emulate_*.py", "test_scene_*.py", "test_plugins.py"]),
+      "test_emulate_*.py", "test_scene_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     # -- JJP: plugin, rig, tab --------------------------------------------
     ("jjp", ["pinball_decryptor/plugins/jjp/", "tools/jjp_emu/",
              "pinball_decryptor/gui/jjp_emulate_tab.py"],
-     ["test_jjp_*.py", "test_plugins.py"]),
+     ["test_jjp_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     # -- The small plugins -------------------------------------------------
     ("bof",     ["pinball_decryptor/plugins/bof/"],
-     ["test_bof_*.py", "test_plugins.py"]),
+     ["test_bof_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     ("cgc",     ["pinball_decryptor/plugins/cgc/"],
-     ["test_cgc_*.py", "test_plugins.py"]),
+     ["test_cgc_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     ("spooky",  ["pinball_decryptor/plugins/spooky/"],
-     ["test_spooky_*.py", "test_plugins.py"]),
+     ["test_spooky_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     ("williams", ["pinball_decryptor/plugins/williams/"],
-     ["test_williams_*.py", "test_plugins.py"]),
+     ["test_williams_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     ("dp",      ["pinball_decryptor/plugins/dp/"],
-     ["test_dp_*.py", "test_plugins.py"]),
+     ["test_dp_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     ("ap",      ["pinball_decryptor/plugins/ap/"],
-     ["test_ap_*.py", "test_plugins.py"]),
+     ["test_ap_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     ("pb",      ["pinball_decryptor/plugins/pb/"],
-     ["test_pb_*.py", "test_plugins.py"]),
+     ["test_pb_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     ("pinmame", ["pinball_decryptor/plugins/pinmame_classic/"],
-     ["test_pinmame_*.py", "test_plugins.py"]),
+     ["test_pinmame_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
     # -- Shared GUI: widgets, theme, picker, dialogs... --------------------
     # Every tab imports these, so the zone is honestly wide: the whole Tk
     # lane.  Still far short of FULL (no plugin/pipeline/core tests).

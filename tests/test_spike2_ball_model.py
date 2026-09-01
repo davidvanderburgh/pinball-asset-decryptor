@@ -316,6 +316,11 @@ def _panel(on_ball):
     except tk.TclError as exc:                          # no display / no Tcl
         pytest.skip("Tk unavailable: %s" % exc)
     root.attributes("-alpha", 0)
+    # Off-screen too, not just transparent: a transparent window is still
+    # MAPPED - it takes the foreground and gets a taskbar button, which is
+    # what drags a fullscreen game around on the developer's own machine.
+    # Parking it is the half that actually works.
+    root.geometry("+10000+10000")
     import playfield
     cv = tk.Canvas(root, width=300, height=60)
     cv.pack()

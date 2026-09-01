@@ -1130,6 +1130,25 @@ def setup_ok(facts):
     return not missing and binfmt == "1"
 
 
+def same_windows_python(a, b):
+    """Are these two paths the same interpreter, twin spelling and all?
+
+    ``python.exe`` and ``pythonw.exe`` in one folder are ONE install with two
+    front doors - the second is the GUI-subsystem build, which is what the
+    playfield window is opened with so no console sits beside it for the whole
+    run.  So ``padpy`` names ``…\\python\\python.exe`` and ``pfpy`` names
+    ``…\\python\\pythonw.exe`` for the very same bundled Python, and a plain
+    string compare calls PAD's own interpreter somebody else's.
+
+    Case-insensitive because these are Windows paths and the rig gets them from
+    ``wslpath``, which spells the drive letter however the mount table does.
+    """
+    def norm(p):
+        return (p or "").strip().lower().replace("pythonw.exe", "python.exe")
+
+    return bool(norm(a)) and norm(a) == norm(b)
+
+
 def setup_env_faults(facts):
     """What this WSL will SPOIL, even though the emulator can start on it.
 
@@ -1230,6 +1249,52 @@ def setup_env_faults(facts):
                 "“Add python.exe to PATH”, then in a Windows "
                 "terminal, once:\n"
                 "     python -m pip install --user sounddevice"))
+    # ★ PAD-99: AND THE PLAYFIELD WINDOW HAS ITS OWN WINDOWS PYTHON.
+    #
+    # A SEPARATE `if`, not another arm of the chain above: a machine can be
+    # missing sounddevice AND Pillow, and they are two different repairs.
+    # Suppressed when interop is off only because that branch already covers
+    # the same window from one cause further up - with no way to start a
+    # Windows program there is nothing for this to be about.
+    #
+    # THE FAULT IT NAMES.  The window is a Windows process drawn with tkinter
+    # and Pillow, and the run used to open it with whatever `pythonw.exe` PATH
+    # held.  A python.org install has tkinter and not Pillow, so the reporter
+    # got the game window, the sound and the switches and no playfield, with
+    # nothing anywhere saying why.  The run picks its interpreter properly now;
+    # this is the same fact said BEFORE the run, while nobody is waiting.
+    if facts.get("interop") != "0" and facts.get("winpf") == "0":
+        pf_where = facts.get("pfpy", "").strip()
+        pf_ours = facts.get("padpy", "").strip()
+        if same_windows_python(pf_where, pf_ours):
+            out.append((
+                "PAD's own Python has no Pillow, so the virtual playfield "
+                "window cannot open.",
+                "Reinstall PAD over the top of this one — its installer puts "
+                "Pillow into the Python it ships."))
+        elif pf_where:
+            # THE SAME TWO TRAPS AS THE SOUND ADVICE ABOVE, both of them:
+            # a quoted path is a STRING in PowerShell and not a command, so cd
+            # there and run it from the folder - and the interpreter NAMED here
+            # is the windowed one (pythonw.exe), which has no console to print
+            # pip's own output to.  Type the console twin.
+            folder, sep, exe = pf_where.rpartition("\\")
+            exe = exe.replace("pythonw.exe", "python.exe")
+            said = ("     cd \"%s\"\n     .\\%s" % (folder, exe) if sep
+                    else "     %s" % exe)
+            out.append((
+                "The Windows Python at %s has no Pillow, so the virtual "
+                "playfield window will not open." % pf_where,
+                "In a Windows terminal, once:\n"
+                "%s -m pip install --user Pillow" % said))
+        else:
+            out.append((
+                "There is no Windows Python here that can draw the virtual "
+                "playfield window, so no playfield will open.",
+                "Install Python for Windows from python.org, ticking "
+                "“Add python.exe to PATH”, then in a Windows "
+                "terminal, once:\n"
+                "     python -m pip install --user Pillow"))
     return out
 
 
@@ -1290,6 +1355,25 @@ def setup_report(facts):
         else:
             said = "unknown"
         lines.append("  Windows sound player: " + said)
+        # ★ PAD-99: AND THE OTHER WINDOWS PYTHON, the one that draws the
+        # playfield window.  Not the same interpreter and not the same
+        # question: the sound one needs sounddevice, this one needs tkinter and
+        # Pillow, and a python.org install has the tkinter and not the Pillow.
+        # The reporter's did, so his runs came up with a game
+        # window, sound, switches and no playfield - and this report, the thing
+        # he would have been asked to paste, had no line about it at all.
+        pf = facts.get("pfpy", "").strip()
+        pf_whose = " (PAD's own)" if same_windows_python(pf, ours) else ""
+        if facts.get("winpf") == "1":
+            said = "opens with " + (("%s%s" % (pf, pf_whose)) if pf
+                                    else "a Windows Python")
+        elif facts.get("winpf") == "0":
+            said = ("%s%s, but it has no Pillow, so no window opens"
+                    % (pf, pf_whose) if pf else
+                    "no Windows Python that WSL can see")
+        else:
+            said = "unknown"
+        lines.append("  virtual playfield window: " + said)
         if ours and not whose:
             lines.append("  PAD's own Python: %s" % ours)
     lines.append("  display: %s" % facts.get("display", "unknown"))

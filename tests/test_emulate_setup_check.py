@@ -533,6 +533,9 @@ pad_win_python_usable "$tmp/wslpath" && echo "real one is runnable"
 
 #: What the Windows installer puts beside the app, on every packaged install.
 APP_PY = r"C:\Program Files\Pinball Asset Decryptor\python\python.exe"
+#: ...and the front door the playfield window is opened through (PAD-99):
+#: the same install, in its GUI-subsystem spelling.
+APP_PYW = APP_PY.replace("python.exe", "pythonw.exe")
 
 
 def test_when_the_python_is_ours_the_answer_is_a_menu_not_a_command():
@@ -738,3 +741,218 @@ rm -rf "$tmp"
     assert "Stern Pinball" in ours, ours
     for block in (none, theirs, ours):
         assert "py -m pip" not in block, block
+
+
+# --------------------------------------------------------------------------
+# ★ PAD-99: the OTHER Windows Python - the one that draws the playfield window
+#
+# The window is a Windows process (this WSL has no Tk), drawn with tkinter AND
+# Pillow, and the run used to open it with whatever `pythonw.exe` PATH held.
+# With interop on, PATH here is WINDOWS' PATH, so that is whichever Python the
+# user installed - and a python.org install has tkinter and no Pillow.  The
+# reporter's runs therefore came up with a game window, sound and switches and
+# NO PLAYFIELD, while the interpreter that could draw it (PAD's own, which the
+# app hands the rig as PAD_WINPYTHON) sat unasked on the same disk.
+# --------------------------------------------------------------------------
+
+def _pf_facts(**over):
+    """A healthy WSL plus the two facts this ticket added."""
+    return facts(padpy=APP_PY, winpy=APP_PY, **over)
+
+
+def test_the_report_names_the_interpreter_that_opens_the_playfield():
+    """The paste that settles “I have no playfield window”, which had no line
+    about the playfield in it at all."""
+    line = next(ln for ln in setup_report(
+        _pf_facts(winpf="1", pfpy=APP_PYW)) if "playfield" in ln)
+    assert APP_PYW in line, line
+    # ...AND WHOSE IT IS, through the twin spelling: `padpy` is python.exe and
+    # the window is opened with pythonw.exe, which is the same install by its
+    # other front door.  A plain compare calls PAD's own interpreter
+    # somebody else's, which is the difference between "press this" and "type
+    # this" in every message built on the answer.
+    assert "(PAD's own)" in line, line
+
+
+def test_a_python_without_pillow_is_reported_as_the_reason():
+    """Two faults, not one: no Windows Python at all, and one that is missing
+    the package.  Same split the sound line already makes."""
+    theirs = r"C:\Users\d\AppData\Local\Programs\Python\Python313\pythonw.exe"
+    line = next(ln for ln in setup_report(
+        _pf_facts(winpf="0", pfpy=theirs)) if "playfield" in ln)
+    assert theirs in line and "Pillow" in line, line
+    assert "(PAD's own)" not in line, line
+    line = next(ln for ln in setup_report(
+        _pf_facts(winpf="0")) if "playfield" in ln)
+    assert "no Windows Python" in line, line
+    # An older rig reports neither key, and silence is not a fault.
+    line = next(ln for ln in setup_report(_pf_facts()) if "playfield" in ln)
+    assert "unknown" in line, line
+
+
+def test_the_tab_says_it_before_the_run_rather_than_after():
+    """The reporter's machine passed every package check, so the tab said
+    nothing - and the fault it could not name costs a whole window."""
+    theirs = r"C:\Users\d\AppData\Local\Programs\Python\Python313\pythonw.exe"
+    bad = _pf_facts(winpf="0", pfpy=theirs)
+    said = setup_env_faults(bad)
+    assert len(said) == 1, said
+    what, todo = said[0]
+    assert "Pillow" in what and "playfield" in what, what
+    # THE COMMAND HAS TO BE RUNNABLE, and two traps sit on that line.  A quoted
+    # path is a STRING in PowerShell, so cd to the folder and run it from
+    # there; and pythonw.exe has no console to print pip's output to, so the
+    # console twin is what gets typed.
+    assert 'cd "C:\\Users\\d\\AppData\\Local\\Programs\\Python\\Python313"' \
+        in todo, todo
+    assert ".\\python.exe -m pip install --user Pillow" in todo, todo
+    assert "pythonw.exe -m pip" not in todo, todo
+    # ...and it is not a machine that "cannot run the emulator".
+    assert not setup_settled(bad)
+    assert setup_ok(bad)
+    # Nothing at all from a rig that does not report the fact, and nothing
+    # extra when interop is off - that branch already names this window.
+    assert setup_env_faults(_pf_facts()) == []
+    assert not any("Pillow" in w for w, _ in
+                   setup_env_faults(_pf_facts(winpf="0", pfpy=theirs,
+                                              interop="0")))
+
+
+def test_our_own_python_missing_pillow_is_not_a_pip_command():
+    """It is a reinstall: Pillow goes into the bundled interpreter at build
+    time, so there is no prerequisite tick that puts it back."""
+    what, todo = setup_env_faults(_pf_facts(winpf="0", pfpy=APP_PYW))[0]
+    assert "PAD's own Python" in what, what
+    assert "pip install" not in todo, todo
+    assert "Reinstall PAD" in todo, todo
+
+
+def test_the_playfield_notices_carry_no_backtick_either():
+    """PAD-94's rule, over PAD-99's strings: this is a Tk label, so whatever is
+    in it is what the user copies."""
+    for bad in (_pf_facts(winpf="0", pfpy=APP_PYW),
+                _pf_facts(winpf="0", pfpy=r"C:\Py 3\pythonw.exe"),
+                _pf_facts(winpf="0")):
+        said = [setup_notice(bad, can_fix=False)]
+        said.extend(w + " " + c for w, c in setup_env_faults(bad))
+        for text in said:
+            assert "`" not in text, text
+
+
+@pytest.mark.skipif(not os.path.isdir(RIG), reason="rig not present")
+def test_the_run_no_longer_opens_the_playfield_with_whatever_path_holds():
+    """The regression itself, in one line of watch.sh.
+
+    `PF_PY=${PAD_PF_PYTHON:-pythonw.exe}` followed by `command -v` is what made
+    the choice PATH's, and PATH's answer was a Python with no Pillow.
+    """
+    with open(os.path.join(RIG, "watch.sh"), encoding="utf8") as fh:
+        src = fh.read()
+    # Comments skipped, same as the playaudio check above: the launch block's
+    # own header quotes the line it replaced, which is where that explanation
+    # belongs.
+    for line in src.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        assert "PAD_PF_PYTHON:-pythonw.exe" not in line, (
+            "watch.sh is back to taking the first pythonw.exe on PATH")
+    assert "pad_win_pf_python" in src, "watch.sh chooses no interpreter"
+    # The fallback stays: a launch that fails writes a traceback the run
+    # prints, and that names the missing package to the one person who can
+    # install it.  Refusing to launch would hide it again.
+    assert "pad_win_pf_python_any" in src, "no fallback launch"
+
+
+@pytest.mark.skipif(not os.path.isdir(RIG), reason="rig not present")
+def test_setupcheck_reports_the_playfield_interpreter_too():
+    with open(os.path.join(RIG, "setupcheck.sh"), encoding="utf8") as fh:
+        src = fh.read()
+    assert "winpf=" in src, "setupcheck.sh reports no winpf"
+    assert "pfpy=" in src, "setupcheck.sh names no pfpy"
+    assert src.rstrip().endswith("exit 0"), (
+        "the fact printer can exit non-zero")
+
+
+@pytest.mark.skipif(not (os.path.isdir(RIG) and HAS_BASH),
+                    reason="rig or working bash not present")
+def test_the_playfield_python_is_probed_for_what_it_has_to_import():
+    r"""★ PAD-99, the search itself.
+
+    ``pad_win_pythons`` is stubbed so the candidate list is exactly the one
+    each case is about - the machine underneath this test has a real Windows
+    Python of its own, and the answer must not depend on which.
+
+    Fed on stdin, whole, for the reason the other bash tests here give: `bash`
+    is git-bash on one Windows host and the WSL launcher on the next.
+    """
+    with open(os.path.join(RIG, "padpath.sh"), encoding="utf8") as fh:
+        src = fh.read()
+    harness = r"""
+tmp=$(mktemp -d) || exit 1
+# The import probe is what each case is about, so that is the only question
+# the fakes answer differently: `-c ""` (can this shell run the .exe at all?)
+# always succeeds here, the way it does on any machine with interop on.
+mk() {   # mk <dir> <exit-code-for-the-import-probe>
+    mkdir -p "$tmp/$1"
+    printf '#!/bin/sh\ncase "$2" in *import*) exit %s;; esac\nexit 0\n' "$2" \
+        > "$tmp/$1/python.exe"
+    cp "$tmp/$1/python.exe" "$tmp/$1/pythonw.exe"
+    chmod +x "$tmp/$1/python.exe" "$tmp/$1/pythonw.exe"
+}
+mk ours 0
+mk theirs 0
+echo "--- ours"
+pad_win_pythons() { printf '%s\n' "$tmp/ours/python.exe" \
+                                  "$tmp/theirs/python.exe"; }
+pad_win_pf_python
+echo "--- theirs"
+mk ours 1
+pad_win_pf_python
+echo "--- none"
+mk theirs 1
+echo "pf=[$(pad_win_pf_python)]"
+pad_win_pf_python_any
+echo "--- noexec"
+mkdir -p "$tmp/noexec"
+printf 'MZ a windows binary, not a linux one\n' > "$tmp/noexec/python.exe"
+chmod +x "$tmp/noexec/python.exe"
+pad_win_pythons() { printf '%s\n' "$tmp/noexec/python.exe"; }
+echo "pf=[$(pad_win_pf_python)] any=[$(pad_win_pf_python_any)]"
+echo "--- notwin"
+mkdir -p "$tmp/bare"
+printf '#!/bin/sh\nexit 0\n' > "$tmp/bare/python.exe"
+chmod +x "$tmp/bare/python.exe"
+pad_win_pythons() { printf '%s\n' "$tmp/bare/python.exe"; }
+pad_win_pf_python
+rm -rf "$tmp"
+"""
+    out = subprocess.run(["bash", "-s"], input=(src + harness).encode("utf-8"),
+                         capture_output=True, timeout=180)
+    said = out.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
+    assert out.returncode == 0, out.stderr.decode("utf-8", "replace")
+    blocks = {}
+    for chunk in said.split("--- ")[1:]:
+        name, _, body = chunk.partition("\n")
+        blocks[name.strip()] = [ln for ln in body.splitlines() if ln]
+    # OURS LEADS, and the windowed twin is what gets returned: pythonw.exe is
+    # what keeps a console window from sitting beside the playfield for the
+    # whole run, but it cannot be probed (it has nowhere to print), so the
+    # question is asked of python.exe and only the answer is translated.
+    assert blocks["ours"] == [blocks["ours"][0]], blocks["ours"]
+    assert blocks["ours"][0].endswith("/ours/pythonw.exe"), blocks
+    # A candidate that cannot import both is SKIPPED, not launched.  This is
+    # the whole ticket: PATH's answer was an interpreter with tkinter and no
+    # Pillow, and it was taken without a question being asked.
+    assert blocks["theirs"][0].endswith("/theirs/pythonw.exe"), blocks
+    # Nothing can draw it: no choice, and a fallback so the failure is one the
+    # run can print rather than a window that never appears.
+    assert blocks["none"][0] == "pf=[]", blocks
+    assert blocks["none"][1].endswith("/ours/pythonw.exe"), blocks
+    # A .exe THIS SHELL CANNOT RUN is not a fallback either, and that is the
+    # interop-off machine: every Windows Python under /mnt/c is a file it can
+    # see and none of them can be executed.  watch.sh has an answer for that
+    # one - it asks PAD to open the window, from the Windows side - and it only
+    # gets to give it if nothing here claims to have found an interpreter.
+    assert blocks["noexec"] == ["pf=[] any=[]"], blocks
+    # No twin beside it: run the console one rather than nothing at all.
+    assert blocks["notwin"][0].endswith("/bare/python.exe"), blocks

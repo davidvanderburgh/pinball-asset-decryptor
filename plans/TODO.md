@@ -114,11 +114,23 @@ These have each been violated at least once and each cost a run or a window:
       `launch: ball in play`, `PLAYER 1 BALL 1` on the display.  Polish left
       in 91.
 
-- [ ] **91. Transformers The Pin: the drop-target reset, the lamps, and the
-      audio rate.** `S3 D2` *(Filed 2026-09-01 from the PAD-101 work; the
+- [ ] **91. Transformers The Pin: the launched ball, the drop-target reset,
+      the lamps, and the audio rate.** `S2 D2` *(Filed 2026-09-01 from the PAD-101 work; the
       serve half of the original filing was solved the same hour and is in
       item 90.)* What is left on the 2012 platform now that a ball serves and
       launches:
+      - **THE BALL IS NOT COUNTED IN PLAY.**  After the keeper's launch (lane
+        switch opens, SHOOTER LANE EXIT pulsed 0.3 s) the display keeps
+        cycling PLAYER 1 BALL 1 / PLUNGE BALL, and no playfield hit
+        scores - pops, slings, return lane, top lane, each tried; nor after
+        a flipper press and a second START to confirm the game's side-select
+        prompt ("USE FLIPPERS TO CHOOSE YOUR SIDE, PRESS START TO CONFIRM
+        SELECTION").  So the game still believes the ball sits in the lane.
+        First things to try: hold SHOOTER LANE longer before the launch
+        (the keeper's 2.5 s may be shorter than this title's settle time),
+        pulse SKILL SHOT (41) on the way out, and read what
+        display_state_plunge_func's caller tests.  This is the last gate
+        between "serves" and "plays".
       - **DROP TARGET RESET (coil 7, `ff600000`)** retries 7 times after the
         ball launches and then gives up; the game plays on.  Measured: the
         targets (switches 16-18) read "up" when OPEN (holding them closed

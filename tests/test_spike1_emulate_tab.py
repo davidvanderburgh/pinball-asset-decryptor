@@ -601,3 +601,87 @@ def test_stop_player_kills_and_forgets(panel):
     panel._stop_player()
     assert killed.get("v") is True
     assert panel._player is None
+
+
+# ------------------------------------------------- whose guest is it? (98) --
+# comm=game is the guest's one stable identity, and it is NOT unique on the
+# machine: the Spike 2 rig names its guest `game` too.  A bare `pgrep -x game`
+# in this rig therefore answered "SOME rig is running a game", which opened the
+# Spike 1 DMD/switch windows over a Spike 2 run and, on app quit, let this
+# rig's stop.sh KILL that run.  tools/spike1_emu/s1own.sh is the one place that
+# decides which guests are ours; these keep every caller pointed at it.
+#
+# The live proof is a run (two comm=game processes, one on this rig's mounts
+# and one not); what is checkable in half a second is that no caller has grown
+# its own copy of the rule again.
+
+def _rig_text(name):
+    import os
+    with open(os.path.join(DEFAULT_RIG_DIR, name), encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _rig_code(name):
+    """The script WITHOUT its comments - these scripts explain the mistakes
+    they no longer make, and a naive substring check reads the explanation as
+    the mistake."""
+    return "\n".join(ln for ln in _rig_text(name).splitlines()
+                     if not ln.lstrip().startswith("#"))
+
+
+def test_the_rig_ships_the_ownership_helper():
+    import os
+    assert os.path.isfile(os.path.join(DEFAULT_RIG_DIR, "s1own.sh"))
+
+
+def test_ownership_is_decided_by_this_rigs_mounts():
+    """/proc/<pid>/mountinfo, because it is the only fact that is readable by
+    the ordinary user status.sh runs as AND survives a criu restore (which
+    comes back with no ancestor of ours and a command line identical to the
+    Spike 2 rig's)."""
+    own = _rig_text("s1own.sh")
+    assert "mountinfo" in own
+    assert "S1_WORK" in own
+
+
+def test_status_asks_the_helper_instead_of_counting_every_game():
+    status = _rig_code("status.sh")
+    assert "s1own.sh" in status
+    assert "pgrep -c -x game" not in status
+    assert "pgrep -x game" not in status
+    # the responder key sends the app's quit hook into stop.sh, and the Spike 2
+    # rig has a nodebus.py of its own
+    assert 'pgrep -f "nodebus.py"' not in status
+
+
+def test_stop_kills_our_guest_and_our_responder_only():
+    stop = _rig_code("stop.sh")
+    assert "pkill -KILL -x game" not in stop
+    assert "pkill -KILL -f nodebus.py" not in stop
+    assert stop.count("killours game") == 2      # again after the restart loop
+    assert "killours nodebus" in stop
+
+
+def test_restore_replaces_only_our_guests():
+    restore = _rig_code("s1restorestate.sh")
+    assert "s1own.sh" in restore
+    assert '$2=="game"' not in restore
+
+
+def test_responder_pattern_is_anchored():
+    """alive.sh's rule: every -f pattern is anchored or comm-exact.  Measured
+    unanchored, this matched a shell that merely had the command in its own
+    command line."""
+    own = _rig_code("s1own.sh")
+    assert 'pgrep -f "^' in own
+
+
+@pytest.mark.skipif(not __import__("sys").platform.startswith("linux"),
+                    reason="the helper reads a Linux /proc")
+def test_helper_runs_and_answers_nothing_when_no_guest_is_ours(tmp_path):
+    import os
+    out = subprocess.run(["bash", os.path.join(DEFAULT_RIG_DIR, "s1own.sh"),
+                          "game"], stdout=subprocess.PIPE,
+                         env=dict(os.environ, S1_WORK=str(tmp_path)))
+    assert out.returncode == 0
+    assert out.stdout.decode().strip() == ""

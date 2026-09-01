@@ -24,12 +24,22 @@ echo "distro=${WSL_DISTRO_NAME:-}"
 # cmdline is "./game"), and a PIVOTED or criu-RESTORED guest (item 87) says
 # "/.padqemu/game" — no qemu-arm-pad anywhere, so a live restored game read
 # as "Not running".  comm=game is the rig's one stable guest identity.
-procs=$(pgrep -c -x game 2>/dev/null || echo 0)
+#
+# ...but it is not a UNIQUE one: the Spike 2 rig names its guest `game` too,
+# so a bare `pgrep -x game` here reported ITS run as ours and the app opened
+# the Spike 1 DMD and switch windows over a Spike 2 game (PAD-98).  s1own.sh
+# keeps the guests that are running on THIS rig's mounts; its header has the
+# whole story.
+pids=$(S1_WORK="$S1_WORK" bash "$HERE/s1own.sh" game 2>/dev/null)
+procs=$(printf '%s' "$pids" | grep -c .)
 echo "game_procs=$procs"
 if [ "$procs" != "0" ]; then
     # uptime + CPU/RSS of the busiest guest (a slam-tilt restart can briefly
     # leave two; busiest-by-CPU is the live one)
-    pid=$(ps -eo pid,comm --sort=-pcpu 2>/dev/null | awk '$2=="game"{print $1; exit}')
+    pid=$(for p in $pids; do
+              c=$(ps -o pcpu= -p "$p" 2>/dev/null | tr -d ' ')
+              echo "${c:-0} $p"
+          done | sort -rn | awk 'NR==1{print $2}')
     if [ -n "$pid" ]; then
         secs=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')
         echo "game_uptime_s=${secs:-0}"
@@ -41,8 +51,15 @@ EOF
     fi
 fi
 
-# the node-bus responder, the ball keeper + the viewers
-pgrep -f "nodebus.py" >/dev/null 2>&1 && echo "responder=1" || echo "responder=0"
+# the node-bus responder, the ball keeper + the viewers.  The responder is
+# asked for by ITS OWN path (s1own.sh again): the Spike 2 rig has a nodebus.py
+# too, so a bare `pgrep -f nodebus.py` read a Spike 2 run as this rig's — and
+# this key is what sends the app's quit hook into stop.sh (PAD-98).
+if [ -n "$(S1_WORK="$S1_WORK" bash "$HERE/s1own.sh" nodebus 2>/dev/null)" ]; then
+    echo "responder=1"
+else
+    echo "responder=0"
+fi
 pgrep -f "s1ball.py daemon" >/dev/null 2>&1 && echo "keeper=1" || echo "keeper=0"
 pgrep -f "s1dmd.py" >/dev/null 2>&1 && echo "dmd_view=1" || echo "dmd_view=0"
 pgrep -f "s1view.py" >/dev/null 2>&1 && echo "sw_view=1" || echo "sw_view=0"

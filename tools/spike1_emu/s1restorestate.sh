@@ -45,7 +45,9 @@ ls /dev/s1i2c0 >/dev/null 2>&1 || { echo "[s1restore] the rig is not up (no CUSE
 # --- park the restart loop, then clear every live guest --------------------
 touch "$S1_WORK/holdoff"
 sleep 1.2
-for OLD in $(ps -eo pid,comm | awk '$2=="game"{print $1}'); do
+# OUR guests only (s1own.sh): comm=game is also what the Spike 2 rig calls
+# its guest, and "replace the live guest" must not reach into its run.
+for OLD in $(S1_WORK="$S1_WORK" bash "$HERE/s1own.sh" game 2>/dev/null); do
     kill -9 "$OLD" 2>/dev/null
     for _ in 1 2 3 4 5 6 7 8 9 10; do [ -d "/proc/$OLD" ] || break; sleep 0.2; done
     echo "[s1restore] live guest $OLD replaced"

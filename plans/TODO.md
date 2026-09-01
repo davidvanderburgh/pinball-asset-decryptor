@@ -5282,261 +5282,6 @@ These have each been violated at least once and each cost a run or a window:
       **The metric is a race** (0.1 s = 118, 1.0 s = 3, 2.0 s = 17), so treat
       3 vs 5 as noise, not a trend. Do not reopen without a reason.
 
-- [ ] **80. Live, alphabetical, game-by-game E2E compatibility pass — David
-      plays, this session triages.** `S2 D4` ← WORKING ON *(Filed 2026-08-24 at David's ask,
-      in place of picking a queue item: "i want to go game by game instead and
-      confirm e2e compatibility one-by-one. we're going to go alphabetically
-      and I will tell you when we are starting each game and what issues we
-      are seeing.")*
-      **Same shape as item 57's "alphabetical, one title at a time" sweep**
-      (closed 2026-08-19, `S1 D3`) — but 57 was desk work, reading logs beside
-      David's own runs, and its standing record — `tools/spike2_emu/
-      README.md`'s "Titles" table — only checked switches / artwork /
-      positions / 2nd-display, most rows last-checked 2026-08-19/08-21. **This
-      is different: David plays each title himself in the app, alphabetically,
-      and reports what he sees per title** — a real E2E pass (ball serve,
-      video, audio, coils, in a played game, not just boot-to-attract) — and
-      this session triages what he reports live, in real time, the same way
-      items 65-76 were triaged from tester (PAD-81/Sam) email reports.
-      **Expect this to spawn per-title sub-items**, the same pattern as
-      53/55/58 splitting from 50/57 — this entry is the LOG of the sweep
-      itself, not a fix, and should be rewritten as the sweep's own findings
-      accumulate rather than treated as one bug.
-      **Acceptance:** every title in the card library gets a fresh
-      `last checked` row in README's Titles table dated from this pass —
-      either confirmed E2E-clean by David's own play, or with a filed
-      follow-up item number recording what was wrong.
-      — S2: play already works on most titles; this finds and orders what is
-      still broken rather than blocking anyone itself by existing. D4:
-      unbounded until the sweep says otherwise — many live runs David has to
-      drive personally, and each finding's own difficulty is unknown until it
-      is filed.
-      **Acceptance correction, same day: not `last checked`, a new column.**
-      Overwriting `last checked` would have erased WHEN the other four
-      columns (switches/artwork/positions/2nd display) were last verified,
-      which is a different fact from when David played it. Added
-      `E2E play (item 80)` as its own column instead — same table, same
-      "standing record" idea, nothing lost.
-      **THE LOG, alphabetical, one line per title as David reports it:**
-      - **aerosmith_le — ✅ CLEAN**, David's own green check, 2026-08-24.
-      - **avengers_infinity_le — ✅ CLEAN after a same-day fix, David's
-        relaunch confirming.** First launch showed `Game validation error,
-        Update SD card` (screenshot on record) — item 62's exact mechanism,
-        a stale `F` grade in NVRAM slot B. The census (`nvgrades.py`) had
-        only 4 of 29 titles clean — `aerosmith_le`, `elvira3`,
-        `godzilla_le`, `turtles_pro` — independently matching David's
-        aerosmith result. Fixed (then fleet-wide `--fix-all` at David's
-        ask, 0 of 29 stuck after) and **David's relaunch shows the banner
-        GONE** — which was also item 62's long-owed glass verification, so
-        this sweep closed that item. Also spotted on this title's switch
-        list: **hover/click zones misaligned with the row text** — filed,
-        fixed and closed same day as item 81 (the lower ~38 % of every
-        row's glyphs belonged to the row BELOW, clicks included).
-      - **batman — ❌ two faults, filed as item 82** (2026-08-24, glass
-        screenshots + read-only log forensics off David's live run):
-        (i) `CHECK NODE BOARD 2 : NOT REGISTERED` red on Tech Alerts
-        though node 2 is scheduled AND identified — NOT item 70's hole,
-        the registration exchange itself; lead suspect for the `NODE NOT
-        FOUND` red screen is our own silencing of node 4, which the game
-        polls forever (`want=13/3/12`). Board 24 RUNTIME INFO white,
-        unexplained, lowest priority. (ii) The second screen that appears
-        over the carousel on the real machine never shows — 0
-        `PADGL_TARGET` all run, video pipeline alive but first frames
-        consumed 2.3–5.7 s after serve vs 58 ms healthy; awaiting David's
-        description of the real machine's behaviour. Needs an
-        instrumented boot once the rig is free — see item 82.
-      **★ batman UPDATE, 2026-08-24 (item 82's pass, rig handed over):
-      the boot faults are FIXED and regression-proven** — the red
-      LOCATING screen, the board-24 alert mechanism (it is "VILLAIN
-      VISION", batman's playfield LCD, whose identity our tables
-      dropped), the failed-update walk, and a bus-wide re-probe storm
-      (attract 72s → 20s; boots reach attract unattended). What remains
-      on batman: cosmetic Tech-Alerts menu rows (no bus reply can clear
-      them — game-side config field, one instrumented dump left, item
-      82 at 90%) and the Villain Vision RENDERER (new capability, item
-      83). **NOTE: the fixes live on item/82 — David's main-checkout
-      app re-derives batman's tables with MAIN's code every run, so HIS
-      batman boots keep the old behavior until /finish.**
-      **★ batman UPDATE 2, same day: VILLAIN VISION RENDERS (item 83
-      CLOSED).** The second screen David asked about is batman's
-      three-insert playfield LCD, and the playfield window now draws all
-      three with the real '66 episode art the game names, live
-      (screenshot C:/tmp/item83_panel.png). Item 82 stays open at 90%
-      for the cosmetic alert-row config dump only. Both ride branch
-      item/83 (which contains item/82) awaiting /finish — David's
-      main-checkout app shows none of it until then.
-      **Resume:** next title alphabetically is whatever comes after
-      batman in David's own run. Wait for his report before touching
-      anything; item 82 (90%) holds batman's one open thread.
-      **NOTE for later titles: the 24-title fleet nvram fix (item 62) means
-      NO title should show the validation banner from here on — if one
-      does, that is a NEW, live validation failure, not the stale-grade
-      class, and it earns its own item.**
-      - **jaws_le 1.02.0 — ✅ CLEAN end to end**, David's own green check,
-        2026-08-28. (1.01.0 ran too but is superseded — it ships neither a
-        device table nor service art.) Recorded in the README matrix, which
-        gained a `build` column that pass: a row naming only a TITLE cannot
-        say which card was measured, and jaws proved it by shipping 0 records
-        on 1.01.0 and 439 on 1.02.0.
-      - **led_zeppelin_le 1.22.0 — ✅ CLEAN after a same-day fix, 2026-08-28.**
-        David: "a lot of the switch matrix is coming up as question marks, and
-        I can't seem to start a game ... the left right arrows on the keyboard
-        are not acting as the flipper controls." **One fault, all three
-        symptoms.** 51 of its 96 switch names were `?`, and every one of those
-        complaints keys off a NAME: `binds_playfield()` matches keys to
-        switches by name, so with no `LEFT FLIPPER BUTTON` to match it built no
-        playfield rows at all and the arrows were dead; the trough ids were
-        unknown for the same reason, so the ball tools fell back to godzilla's
-        `66..71` against this title's `71..76` and closed six switches the game
-        does not watch — the exact failure swnames.py's header already
-        describes as "what stopped a game starting on any title but Godzilla".
-        **Why the names were missing, and it is a parser hole, not this
-        title's:** its `msg_row()` address resolves wrong (item 29), so
-        swnames.py fills from the title's own DEVICE TABLE instead — and
-        led_zeppelin_le 1.22.0 ships that table **with the artwork left out**.
-        Image field pointing at the shared empty string, x/y/w/h and the
-        connector and part pointers all zero, but class, (group, index) and
-        the NAME all present. `devicexy.seeds()` finds a table by looking for
-        a pointer to an image NAME; there is none in the binary, so 617
-        records were never seeded, and `_one()`'s `0 < w <= 200` would have
-        refused every one of them anyway. **Fixed** (`devicexy.BLANK_IMAGE`
-        parses the variant on tighter terms — everything a positioned record
-        proves with its image name, a blank one must prove by being empty
-        where a positioned record is full; `swnames._fit()` supplies the
-        group → node join the missing connector column can no longer give, by
-        matching the group's indices against the LIVE wire and refusing a tie
-        it cannot break). **Result: 95 of 96 named** (the holdout is node 9
-        bit 30, a wire bit the device table does not carry — left `?` rather
-        than guessed), arrows/`F`/`A`/`S`/`Z`/`X` all bound, trough resolved
-        `1..6 (named) = 76,75,74,73,72,71`, group map derived from the title
-        itself (`7→8, 8→9, 9→12`) instead of godzilla's constant, 617 device
-        records and 142 inserts. Picked up by the LIVE run without a restart —
-        padglhost re-resolves on the switch list's mtime, which is the beatles
-        guard doing its job. **Scope note this spawned:** the README's
-        "29 titles genuinely ship no device table" list was measured with the
-        blind parser and is now known to overstate itself; `turtles_pro`
-        0 → 259 and `dungeons_and_dragons_le` +41 on the two other ELFs
-        reachable without a card mount, and the 40-image `cardaudit.py` sweep
-        that produced that list has NOT been re-run.
-      - **james_bond_le 1.06.0 — ❌ SEGV, David 2026-09-01 09:32; FIRST BOOT of
-        this title on the rig** (every derived table under
-        `dump/tables/james_bond_le` is stamped 09:32 today; it is not the
-        `james_bond_60th_le` of items 70/53). "it’s a seg fault when starting
-        the game". The guest takes qemu signal 11 ~12 s in. Boot is healthy up
-        to it: 8 node identities from the title’s own directory, node 2
-        silenced by census, 543 device records (coil=17 led=431 switch=95),
-        107 of 108 `?` names filled, picture FIRST at frame 77, ch0 video 30/s.
-        **Established — WHERE IT FAULTED, resolved at the desk against the
-        guest’s own libc** (`/home/david/spike2root/lib/libc-2.21.so`, first
-        PT_LOAD at vaddr 0, so a mapping offset is a vaddr):
-        `pc = libc+0x76dae = strlen+0xad`, `lr = libc+0x4079c = vfprintf+0x36b4`.
-        **That is a printf-family `%s` handed a bad pointer**, and `r0` is that
-        pointer: `0x3f003536`, which is in no mapping this process has.
-        **Ruled out — the node bus, and the one anomaly in it was mine.** The
-        3164 `ExchangeData: read failed` lines are the normal bring-up storm
-        (autoattract.sh uses that storm going quiet as its readiness signal),
-        and the census is regular: 1058 at length 13, 1057 at 3, 1053 at 12.
-        A single apparent `expected length=1` looked like the odd one out and
-        is NOT real — its remainder `2), timed out` continues two lines later
-        (gzwatch.log:5367 and :5369), so it was a length=**12** line split by
-        an interleaved `[vid]` write. Splits like that are routine here.
-        **Which printf, as INFERENCE not proof:** the last stderr text,
-        `ExchangeData: read fail` (gzwatch.log:6079), is the ONLY split in the
-        whole log with no remainder anywhere after it — the process died with
-        that message unfinished. Bond’s binary carries two formats at file
-        offset 7613152: `%s: read failed (received %d, expected length=%d),
-        timed out` and `…, %s`. The leading `%s` had already printed, so the
-        bad pointer is the TRAILING `%s` of the second form — a variant that
-        had not fired once in the 3163 failures before it. Unproven until a
-        register dump names the arguments.
-        **★★ AND THE CRASH REPORT LIED, THEN KILLED THE RUN — that half is
-        OURS, and it is fixed this pass.** `loader_gate=0 boot_ready=152
-        thread_run=223` and `event 93 handler[0] = 0x20474f4c` are GODZILLA PRO
-        1.15.0 addresses read against BOND’s memory; `0x20474f4c` is the ASCII
-        `"LOG "`. The gate on those dumps was `a_sw_struct()`, and
-        `title_addr()` only checks an address is **MAPPED** — true of any
-        binary big enough to cover `0x7a958c`. hwshim.c already records EHOH
-        being caught by exactly that hole; the crash reporter had it too. The
-        event walk then followed one of those invented pointers and **faulted a
-        SECOND time inside the signal handler**, which is why the run ended
-        `qemu: uncaught target signal 11 … core dumped` instead of the
-        handler’s own `_exit(99)` — and why the 16 registers and the stack
-        backtrace, the title-agnostic half that would have named the game’s
-        fault, never printed at all. Compounding it: `run_game.sh:433` and
-        `:457` export `PAD_SEGV_REPORT=1` on EVERY run, though hwshim.c
-        documents FULL mode as opt-in "because the dump below reads Godzilla
-        Pro’s addresses".
-        **Fixed in hwshim.c (compiles; NOT yet validated — see Resume):**
-        `gz_addrs_ok()` is an identity test (`PAD_GAME` names a godzilla build,
-        or `PAD_GZ_ADDRS=1/0` overrides) instead of a mapping test; every
-        dereference in the event walk goes through a new `gz_word()` that
-        checks readability first, so the reporter cannot fault; the registers
-        and the backtrace are hoisted to directly after the header so they
-        print on every title whatever is skipped below. The same
-        mapped-means-identity bug was live in two more places and both are
-        moved to `gz_addrs_ok()`: `aud_dump`’s pool walk (**item 41’s crash,
-        and armed on every run — the app passes `PAD_AUDIO_DUMP=30`**) and the
-        node-poll diagnostic that the comment says Jaws already faulted in.
-        **Resume:** the rig was David’s all pass (his Bond run still up, guest
-        dead), so nothing was built. Next: `build.sh`, then `segvtest.sh` — the
-        labelled-example harness that exists for exactly this change ("run
-        after ANY change to the segv path", 2 s, needs no emulator run, and its
-        B1/B2 control is what proves the reporter still is not changing how a
-        run dies). Then re-run james_bond_le: the report will carry all 16
-        registers and the backtrace, and r1/r2/r3 plus the format-string
-        address settle which `%s` and which argument. The GAME’s fault is still
-        unfixed — only its report is.
-        **★ RUN 2 (David, 09:58) VALIDATED THE REPORTER and re-aimed the
-        theory.** Same fault, deterministic TO THE BYTE: identical registers
-        AND identical asset counters (filebuf::xsgetn=613322, small=589331,
-        underflow=1249, scene_opens=318) on both runs — this is a fixed point
-        in the game’s own boot script, not a flaky bus error. The report
-        printed clean (registers, no invented data, `_exit(99)` — which is
-        why qemu printed no signal line) but the PANE showed none of it: the
-        tail feeding the app log is killed at stop, so the report sat in
-        game.out unseen — watch.sh now greps game.out for `[segv]` on exit.
-        **Ruled out / corrected:** (a) the ExchangeData printf is NOT the
-        crasher — the `[segv]` bytes landed MID-LINE inside the storm’s
-        output, so the faulting thread is another thread, and the disassembly
-        of the storm’s only `%s` variant (0x5a80e0) shows its arg is
-        `strerror(errno)`, which cannot be this pointer. (b) The first run’s
-        “backtrace” was junk: the scan bounds were GODZILLA’s .text
-        (0x16a00..0x5d3168) and Bond’s runs to 0x79f5b4, so every real
-        return address was excluded — fixed, `game_text_end()` reads the
-        bound off the game’s own mapped ELF header. (c) `segvtest.sh` passes
-        all 4 cases (TMPDIR=/tmp — /var/tmp/segvtest is root-owned).
-        **Established:** the bad `%s` arg (r8=r0=0x3f003536) is 0.50081f
-        read as a char* — bytes `36 35 00 3f` exist NOWHERE in the game
-        image or the scene file, so it is live heap data read at a wrong
-        offset. The crash sits at the exact END of parsing
-        `assets/lcd/demand_loaded/6fb39344…/457dbbe6…/scene.radium`
-        (1217811 bytes; the report counts 1217811 read) — the CREDITS/PRICE
-        text overlay scene (strings: `CREDITS 50 1/4`, `PRICE $000`,
-        TextWrapper, fonts Stern_Montserrat_EX / _Outline_4_black). Prime
-        suspect string in the ELF: `Requested font '%s' was not found`
-        (0x7478b4) — no movw/movt or literal-pool xref (anchored
-        addressing), so static search cannot name the caller cheaply.
-        Extracted for RE: /tmp/jb_game (md5 8967f227…), /tmp/jb_scene.radium.
-        **★ RUN 3 (David, 10:13): THE CRASH DID NOT FIRE — Bond booted to
-        attract and ran clean** (~70 s of healthy 30 fps video, normal scene
-        changes, autoattract advancing, David stopped it clean). So the
-        fault is deterministic WHEN it fires (identical registers twice) but
-        NOT every boot: 2 of 3. The corrected theory is a race or
-        state-dependent path through the credits-scene load, not a fixed
-        landmine — and the instrument is now armed for whenever it next
-        fires: real backtrace bounds (game_text_end off the mapped ELF
-        header) and watch.sh printing the game.out report into the pane on
-        any exit. Also fixed this run: the nb_reg_node2 snprintf buffer
-        (140 → 176; the 157-byte message truncated and splashed a 30-line
-        GCC warning block into the pane on every rebuild — the “errors”
-        David saw at 10:13:15).
-        **Resume:** keep playing Bond in the sweep. If the SEGV fires
-        again, the pane now carries the full report with a true backtrace —
-        take the stack words in 0x8000..0x79f5b4, disassemble the callers
-        (/tmp/jb_game, ELF vaddr = file offset + 0x8000), and the frame
-        that formats a `%s` from a record field names the wrong-offset
-        read. 2/3 repro means a report will not be long in coming.
-
 - [ ] **82. batman: NODE BOARD 2 (ws2812) NOT REGISTERED though scheduled
       and identified; node 4 polled forever while we silence it; board 24
       RUNTIME INFO from no table we derive; and the carousel's overlay
@@ -7267,6 +7012,268 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **80. Live, alphabetical, game-by-game E2E compatibility pass — David
+      plays, this session triages.** `S2 D4` *(Filed 2026-08-24 at David's ask,
+      **CLOSED 2026-09-01 at David’s word** — “i have validated this
+      completely for bond and we are ready to merge and release and close
+      this item.” Closing commit ba407a1. The sweep’s per-title verdicts
+      and every fix it spawned are recorded in the log below; the last
+      title standing open from it, the Bond SEGV, is covered by the armed
+      reporter (2/3 repro, full registers + true backtrace on next fire)
+      and Bond plays — David’s live validation, three runs, 2026-09-01.
+      in place of picking a queue item: "i want to go game by game instead and
+      confirm e2e compatibility one-by-one. we're going to go alphabetically
+      and I will tell you when we are starting each game and what issues we
+      are seeing.")*
+      **Same shape as item 57's "alphabetical, one title at a time" sweep**
+      (closed 2026-08-19, `S1 D3`) — but 57 was desk work, reading logs beside
+      David's own runs, and its standing record — `tools/spike2_emu/
+      README.md`'s "Titles" table — only checked switches / artwork /
+      positions / 2nd-display, most rows last-checked 2026-08-19/08-21. **This
+      is different: David plays each title himself in the app, alphabetically,
+      and reports what he sees per title** — a real E2E pass (ball serve,
+      video, audio, coils, in a played game, not just boot-to-attract) — and
+      this session triages what he reports live, in real time, the same way
+      items 65-76 were triaged from tester (PAD-81/Sam) email reports.
+      **Expect this to spawn per-title sub-items**, the same pattern as
+      53/55/58 splitting from 50/57 — this entry is the LOG of the sweep
+      itself, not a fix, and should be rewritten as the sweep's own findings
+      accumulate rather than treated as one bug.
+      **Acceptance:** every title in the card library gets a fresh
+      `last checked` row in README's Titles table dated from this pass —
+      either confirmed E2E-clean by David's own play, or with a filed
+      follow-up item number recording what was wrong.
+      — S2: play already works on most titles; this finds and orders what is
+      still broken rather than blocking anyone itself by existing. D4:
+      unbounded until the sweep says otherwise — many live runs David has to
+      drive personally, and each finding's own difficulty is unknown until it
+      is filed.
+      **Acceptance correction, same day: not `last checked`, a new column.**
+      Overwriting `last checked` would have erased WHEN the other four
+      columns (switches/artwork/positions/2nd display) were last verified,
+      which is a different fact from when David played it. Added
+      `E2E play (item 80)` as its own column instead — same table, same
+      "standing record" idea, nothing lost.
+      **THE LOG, alphabetical, one line per title as David reports it:**
+      - **aerosmith_le — ✅ CLEAN**, David's own green check, 2026-08-24.
+      - **avengers_infinity_le — ✅ CLEAN after a same-day fix, David's
+        relaunch confirming.** First launch showed `Game validation error,
+        Update SD card` (screenshot on record) — item 62's exact mechanism,
+        a stale `F` grade in NVRAM slot B. The census (`nvgrades.py`) had
+        only 4 of 29 titles clean — `aerosmith_le`, `elvira3`,
+        `godzilla_le`, `turtles_pro` — independently matching David's
+        aerosmith result. Fixed (then fleet-wide `--fix-all` at David's
+        ask, 0 of 29 stuck after) and **David's relaunch shows the banner
+        GONE** — which was also item 62's long-owed glass verification, so
+        this sweep closed that item. Also spotted on this title's switch
+        list: **hover/click zones misaligned with the row text** — filed,
+        fixed and closed same day as item 81 (the lower ~38 % of every
+        row's glyphs belonged to the row BELOW, clicks included).
+      - **batman — ❌ two faults, filed as item 82** (2026-08-24, glass
+        screenshots + read-only log forensics off David's live run):
+        (i) `CHECK NODE BOARD 2 : NOT REGISTERED` red on Tech Alerts
+        though node 2 is scheduled AND identified — NOT item 70's hole,
+        the registration exchange itself; lead suspect for the `NODE NOT
+        FOUND` red screen is our own silencing of node 4, which the game
+        polls forever (`want=13/3/12`). Board 24 RUNTIME INFO white,
+        unexplained, lowest priority. (ii) The second screen that appears
+        over the carousel on the real machine never shows — 0
+        `PADGL_TARGET` all run, video pipeline alive but first frames
+        consumed 2.3–5.7 s after serve vs 58 ms healthy; awaiting David's
+        description of the real machine's behaviour. Needs an
+        instrumented boot once the rig is free — see item 82.
+      **★ batman UPDATE, 2026-08-24 (item 82's pass, rig handed over):
+      the boot faults are FIXED and regression-proven** — the red
+      LOCATING screen, the board-24 alert mechanism (it is "VILLAIN
+      VISION", batman's playfield LCD, whose identity our tables
+      dropped), the failed-update walk, and a bus-wide re-probe storm
+      (attract 72s → 20s; boots reach attract unattended). What remains
+      on batman: cosmetic Tech-Alerts menu rows (no bus reply can clear
+      them — game-side config field, one instrumented dump left, item
+      82 at 90%) and the Villain Vision RENDERER (new capability, item
+      83). **NOTE: the fixes live on item/82 — David's main-checkout
+      app re-derives batman's tables with MAIN's code every run, so HIS
+      batman boots keep the old behavior until /finish.**
+      **★ batman UPDATE 2, same day: VILLAIN VISION RENDERS (item 83
+      CLOSED).** The second screen David asked about is batman's
+      three-insert playfield LCD, and the playfield window now draws all
+      three with the real '66 episode art the game names, live
+      (screenshot C:/tmp/item83_panel.png). Item 82 stays open at 90%
+      for the cosmetic alert-row config dump only. Both ride branch
+      item/83 (which contains item/82) awaiting /finish — David's
+      main-checkout app shows none of it until then.
+      **Resume:** next title alphabetically is whatever comes after
+      batman in David's own run. Wait for his report before touching
+      anything; item 82 (90%) holds batman's one open thread.
+      **NOTE for later titles: the 24-title fleet nvram fix (item 62) means
+      NO title should show the validation banner from here on — if one
+      does, that is a NEW, live validation failure, not the stale-grade
+      class, and it earns its own item.**
+      - **jaws_le 1.02.0 — ✅ CLEAN end to end**, David's own green check,
+        2026-08-28. (1.01.0 ran too but is superseded — it ships neither a
+        device table nor service art.) Recorded in the README matrix, which
+        gained a `build` column that pass: a row naming only a TITLE cannot
+        say which card was measured, and jaws proved it by shipping 0 records
+        on 1.01.0 and 439 on 1.02.0.
+      - **led_zeppelin_le 1.22.0 — ✅ CLEAN after a same-day fix, 2026-08-28.**
+        David: "a lot of the switch matrix is coming up as question marks, and
+        I can't seem to start a game ... the left right arrows on the keyboard
+        are not acting as the flipper controls." **One fault, all three
+        symptoms.** 51 of its 96 switch names were `?`, and every one of those
+        complaints keys off a NAME: `binds_playfield()` matches keys to
+        switches by name, so with no `LEFT FLIPPER BUTTON` to match it built no
+        playfield rows at all and the arrows were dead; the trough ids were
+        unknown for the same reason, so the ball tools fell back to godzilla's
+        `66..71` against this title's `71..76` and closed six switches the game
+        does not watch — the exact failure swnames.py's header already
+        describes as "what stopped a game starting on any title but Godzilla".
+        **Why the names were missing, and it is a parser hole, not this
+        title's:** its `msg_row()` address resolves wrong (item 29), so
+        swnames.py fills from the title's own DEVICE TABLE instead — and
+        led_zeppelin_le 1.22.0 ships that table **with the artwork left out**.
+        Image field pointing at the shared empty string, x/y/w/h and the
+        connector and part pointers all zero, but class, (group, index) and
+        the NAME all present. `devicexy.seeds()` finds a table by looking for
+        a pointer to an image NAME; there is none in the binary, so 617
+        records were never seeded, and `_one()`'s `0 < w <= 200` would have
+        refused every one of them anyway. **Fixed** (`devicexy.BLANK_IMAGE`
+        parses the variant on tighter terms — everything a positioned record
+        proves with its image name, a blank one must prove by being empty
+        where a positioned record is full; `swnames._fit()` supplies the
+        group → node join the missing connector column can no longer give, by
+        matching the group's indices against the LIVE wire and refusing a tie
+        it cannot break). **Result: 95 of 96 named** (the holdout is node 9
+        bit 30, a wire bit the device table does not carry — left `?` rather
+        than guessed), arrows/`F`/`A`/`S`/`Z`/`X` all bound, trough resolved
+        `1..6 (named) = 76,75,74,73,72,71`, group map derived from the title
+        itself (`7→8, 8→9, 9→12`) instead of godzilla's constant, 617 device
+        records and 142 inserts. Picked up by the LIVE run without a restart —
+        padglhost re-resolves on the switch list's mtime, which is the beatles
+        guard doing its job. **Scope note this spawned:** the README's
+        "29 titles genuinely ship no device table" list was measured with the
+        blind parser and is now known to overstate itself; `turtles_pro`
+        0 → 259 and `dungeons_and_dragons_le` +41 on the two other ELFs
+        reachable without a card mount, and the 40-image `cardaudit.py` sweep
+        that produced that list has NOT been re-run.
+      - **james_bond_le 1.06.0 — ❌ SEGV, David 2026-09-01 09:32; FIRST BOOT of
+        this title on the rig** (every derived table under
+        `dump/tables/james_bond_le` is stamped 09:32 today; it is not the
+        `james_bond_60th_le` of items 70/53). "it’s a seg fault when starting
+        the game". The guest takes qemu signal 11 ~12 s in. Boot is healthy up
+        to it: 8 node identities from the title’s own directory, node 2
+        silenced by census, 543 device records (coil=17 led=431 switch=95),
+        107 of 108 `?` names filled, picture FIRST at frame 77, ch0 video 30/s.
+        **Established — WHERE IT FAULTED, resolved at the desk against the
+        guest’s own libc** (`/home/david/spike2root/lib/libc-2.21.so`, first
+        PT_LOAD at vaddr 0, so a mapping offset is a vaddr):
+        `pc = libc+0x76dae = strlen+0xad`, `lr = libc+0x4079c = vfprintf+0x36b4`.
+        **That is a printf-family `%s` handed a bad pointer**, and `r0` is that
+        pointer: `0x3f003536`, which is in no mapping this process has.
+        **Ruled out — the node bus, and the one anomaly in it was mine.** The
+        3164 `ExchangeData: read failed` lines are the normal bring-up storm
+        (autoattract.sh uses that storm going quiet as its readiness signal),
+        and the census is regular: 1058 at length 13, 1057 at 3, 1053 at 12.
+        A single apparent `expected length=1` looked like the odd one out and
+        is NOT real — its remainder `2), timed out` continues two lines later
+        (gzwatch.log:5367 and :5369), so it was a length=**12** line split by
+        an interleaved `[vid]` write. Splits like that are routine here.
+        **Which printf, as INFERENCE not proof:** the last stderr text,
+        `ExchangeData: read fail` (gzwatch.log:6079), is the ONLY split in the
+        whole log with no remainder anywhere after it — the process died with
+        that message unfinished. Bond’s binary carries two formats at file
+        offset 7613152: `%s: read failed (received %d, expected length=%d),
+        timed out` and `…, %s`. The leading `%s` had already printed, so the
+        bad pointer is the TRAILING `%s` of the second form — a variant that
+        had not fired once in the 3163 failures before it. Unproven until a
+        register dump names the arguments.
+        **★★ AND THE CRASH REPORT LIED, THEN KILLED THE RUN — that half is
+        OURS, and it is fixed this pass.** `loader_gate=0 boot_ready=152
+        thread_run=223` and `event 93 handler[0] = 0x20474f4c` are GODZILLA PRO
+        1.15.0 addresses read against BOND’s memory; `0x20474f4c` is the ASCII
+        `"LOG "`. The gate on those dumps was `a_sw_struct()`, and
+        `title_addr()` only checks an address is **MAPPED** — true of any
+        binary big enough to cover `0x7a958c`. hwshim.c already records EHOH
+        being caught by exactly that hole; the crash reporter had it too. The
+        event walk then followed one of those invented pointers and **faulted a
+        SECOND time inside the signal handler**, which is why the run ended
+        `qemu: uncaught target signal 11 … core dumped` instead of the
+        handler’s own `_exit(99)` — and why the 16 registers and the stack
+        backtrace, the title-agnostic half that would have named the game’s
+        fault, never printed at all. Compounding it: `run_game.sh:433` and
+        `:457` export `PAD_SEGV_REPORT=1` on EVERY run, though hwshim.c
+        documents FULL mode as opt-in "because the dump below reads Godzilla
+        Pro’s addresses".
+        **Fixed in hwshim.c (compiles; NOT yet validated — see Resume):**
+        `gz_addrs_ok()` is an identity test (`PAD_GAME` names a godzilla build,
+        or `PAD_GZ_ADDRS=1/0` overrides) instead of a mapping test; every
+        dereference in the event walk goes through a new `gz_word()` that
+        checks readability first, so the reporter cannot fault; the registers
+        and the backtrace are hoisted to directly after the header so they
+        print on every title whatever is skipped below. The same
+        mapped-means-identity bug was live in two more places and both are
+        moved to `gz_addrs_ok()`: `aud_dump`’s pool walk (**item 41’s crash,
+        and armed on every run — the app passes `PAD_AUDIO_DUMP=30`**) and the
+        node-poll diagnostic that the comment says Jaws already faulted in.
+        **Resume:** the rig was David’s all pass (his Bond run still up, guest
+        dead), so nothing was built. Next: `build.sh`, then `segvtest.sh` — the
+        labelled-example harness that exists for exactly this change ("run
+        after ANY change to the segv path", 2 s, needs no emulator run, and its
+        B1/B2 control is what proves the reporter still is not changing how a
+        run dies). Then re-run james_bond_le: the report will carry all 16
+        registers and the backtrace, and r1/r2/r3 plus the format-string
+        address settle which `%s` and which argument. The GAME’s fault is still
+        unfixed — only its report is.
+        **★ RUN 2 (David, 09:58) VALIDATED THE REPORTER and re-aimed the
+        theory.** Same fault, deterministic TO THE BYTE: identical registers
+        AND identical asset counters (filebuf::xsgetn=613322, small=589331,
+        underflow=1249, scene_opens=318) on both runs — this is a fixed point
+        in the game’s own boot script, not a flaky bus error. The report
+        printed clean (registers, no invented data, `_exit(99)` — which is
+        why qemu printed no signal line) but the PANE showed none of it: the
+        tail feeding the app log is killed at stop, so the report sat in
+        game.out unseen — watch.sh now greps game.out for `[segv]` on exit.
+        **Ruled out / corrected:** (a) the ExchangeData printf is NOT the
+        crasher — the `[segv]` bytes landed MID-LINE inside the storm’s
+        output, so the faulting thread is another thread, and the disassembly
+        of the storm’s only `%s` variant (0x5a80e0) shows its arg is
+        `strerror(errno)`, which cannot be this pointer. (b) The first run’s
+        “backtrace” was junk: the scan bounds were GODZILLA’s .text
+        (0x16a00..0x5d3168) and Bond’s runs to 0x79f5b4, so every real
+        return address was excluded — fixed, `game_text_end()` reads the
+        bound off the game’s own mapped ELF header. (c) `segvtest.sh` passes
+        all 4 cases (TMPDIR=/tmp — /var/tmp/segvtest is root-owned).
+        **Established:** the bad `%s` arg (r8=r0=0x3f003536) is 0.50081f
+        read as a char* — bytes `36 35 00 3f` exist NOWHERE in the game
+        image or the scene file, so it is live heap data read at a wrong
+        offset. The crash sits at the exact END of parsing
+        `assets/lcd/demand_loaded/6fb39344…/457dbbe6…/scene.radium`
+        (1217811 bytes; the report counts 1217811 read) — the CREDITS/PRICE
+        text overlay scene (strings: `CREDITS 50 1/4`, `PRICE $000`,
+        TextWrapper, fonts Stern_Montserrat_EX / _Outline_4_black). Prime
+        suspect string in the ELF: `Requested font '%s' was not found`
+        (0x7478b4) — no movw/movt or literal-pool xref (anchored
+        addressing), so static search cannot name the caller cheaply.
+        Extracted for RE: /tmp/jb_game (md5 8967f227…), /tmp/jb_scene.radium.
+        **★ RUN 3 (David, 10:13): THE CRASH DID NOT FIRE — Bond booted to
+        attract and ran clean** (~70 s of healthy 30 fps video, normal scene
+        changes, autoattract advancing, David stopped it clean). So the
+        fault is deterministic WHEN it fires (identical registers twice) but
+        NOT every boot: 2 of 3. The corrected theory is a race or
+        state-dependent path through the credits-scene load, not a fixed
+        landmine — and the instrument is now armed for whenever it next
+        fires: real backtrace bounds (game_text_end off the mapped ELF
+        header) and watch.sh printing the game.out report into the pane on
+        any exit. Also fixed this run: the nb_reg_node2 snprintf buffer
+        (140 → 176; the 157-byte message truncated and splashed a 30-line
+        GCC warning block into the pane on every rebuild — the “errors”
+        David saw at 10:13:15).
+        **Resume:** keep playing Bond in the sweep. If the SEGV fires
+        again, the pane now carries the full report with a true backtrace —
+        take the stack words in 0x8000..0x79f5b4, disassemble the callers
+        (/tmp/jb_game, ELF vaddr = file offset + 0x8000), and the frame
+        that formats a `%s` from a record field names the wrong-offset
+        read. 2/3 repro means a report will not be long in coming.
 
 - [x] **66. Deadpool and Avengers: Infinity Quest boot on a WHITE
       background.** `S3 D2` **CLOSED 2026-09-01 at David’s call** — "66 is

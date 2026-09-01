@@ -1647,6 +1647,17 @@ while :; do
     if ! pad_guest_up; then
         echo "[watch] the game exited. Last lines of its log:"
         tail -5 "$LOG"
+        # THE CRASH REPORT LIVES IN game.out AND THE PANE CAN MISS IT: the
+        # tail -F feeding $LOG is killed at stop, so a [segv] report written
+        # in the guest's last moment is on disk but never forwarded - on
+        # 2026-09-01 a james_bond_le crash printed a full register dump and
+        # the pane showed only ExchangeData noise, which read as "no report
+        # at all". The report is small and bounded (3 header prints max),
+        # so on any exit, surface it from the authoritative file directly.
+        if grep -aq '\[segv\]' "$ROOT/dump/game.out" 2>/dev/null; then
+            echo "[watch] the guest left a crash report in game.out:"
+            grep -a '\[segv\]' "$ROOT/dump/game.out" | grep -av scenebytes | head -40
+        fi
         break
     fi
     if [ "$END" != 0 ] && [ "$(date +%s)" -ge "$END" ]; then

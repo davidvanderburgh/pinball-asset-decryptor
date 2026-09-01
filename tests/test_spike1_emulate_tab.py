@@ -131,8 +131,12 @@ def root():
     A second tk.Tk() in one process throws on some hosts, so Tk tests may skip in
     a full local run; CI (Linux) creates one per module cleanly."""
     tk = pytest.importorskip("tkinter")
+    from tests.conftest import make_tk_root
     try:
-        r = tk.Tk()
+        # retried: one transient Tcl-script read miss must not skip the
+        # whole module (pytest caches a module fixture's skip) - see
+        # make_tk_root
+        r = make_tk_root(tk)
     except Exception:                                       # noqa: BLE001
         pytest.skip("no usable Tk display")
     r.withdraw()

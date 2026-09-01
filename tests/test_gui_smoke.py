@@ -93,20 +93,35 @@ def app(tmp_path, monkeypatch):
 
     from pinball_decryptor.app import App
     # NOTE: tk.Tk() can intermittently fail here on Windows with "couldn't
-    # read file .../init.tcl" (antivirus/indexer briefly locking the Tcl
-    # runtime scripts; GitHub's windows-latest runner hits it too).  Don't
-    # retry in-process — a failed create leaves a zombie Tcl interpreter that
-    # poisons every Tk instance created after it in the same run.
+    # read file .../init.tcl" (antivirus/indexer briefly in the way of the
+    # Tcl runtime scripts; GitHub's windows-latest runner hits it too).
+    # RETRY in-process first: this file's old warning that a failed create
+    # "leaves a zombie Tcl interpreter that poisons every Tk instance created
+    # after it" was measured false on 2026-09-01 - a worker whose App() lost
+    # the race passed every later Tk test in the same process, so the failure
+    # is per-attempt.  Retry with a short backoff (same shape as conftest's
+    # make_tk_root) before giving up.
     #
-    # SKIP rather than error: the Tcl runtime failing to load is a property of
-    # the machine, not of the code under test — it lands on a different,
-    # always-unrelated test each time, and it failed two consecutive CI runs of
-    # one release commit whose local runs passed.  A release must not hinge on
-    # whether an indexer happened to hold init.tcl for a moment.  ONLY this
-    # signature skips; any other TclError still fails the test, so a real GUI
+    # SKIP rather than error when it persists: the Tcl runtime failing to
+    # load is a property of the machine, not of the code under test — it
+    # lands on a different, always-unrelated test each time, and it failed
+    # two consecutive CI runs of one release commit whose local runs passed.
+    # A release must not hinge on whether an indexer happened to hold
+    # init.tcl for a moment.  ONLY this signature skips (and only it is
+    # retried); any other TclError still fails the test, so a real GUI
     # regression can't hide behind it.
+    import time as _time_mod
     try:
-        a = App()
+        for _attempt in range(4):
+            try:
+                a = App()
+                break
+            except _tk_mod.TclError as exc:
+                if not _TCL_RUNTIME_UNAVAILABLE.search(str(exc)):
+                    raise
+                if _attempt == 3:
+                    raise
+                _time_mod.sleep(0.1 * (_attempt + 1))
     except _tk_mod.TclError as exc:
         if _TCL_RUNTIME_UNAVAILABLE.search(str(exc)):
             pytest.skip("Tcl runtime transiently unavailable: %s" % exc)

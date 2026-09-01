@@ -24,8 +24,9 @@ from pinball_decryptor.gui.main_window import MainWindow
 
 @pytest.fixture
 def root():
+    from tests.conftest import make_tk_root
     try:
-        r = tk.Tk()
+        r = make_tk_root(tk)   # retried - see make_tk_root
     except tk.TclError:
         pytest.skip("no usable Tk display")
     r.withdraw()

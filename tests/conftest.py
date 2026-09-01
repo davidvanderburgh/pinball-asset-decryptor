@@ -146,16 +146,28 @@ def _isolate_audio_ctl(tmp_path_factory):
 
 
 # ---------------------------------------------------------------------------
-# Real-Tk tests all ride ONE xdist worker (--dist loadgroup in test.yml).
+# Real-Tk tests all ride ONE xdist worker (--dist loadgroup).
 # ---------------------------------------------------------------------------
 # Under plain pytest the suite builds and destroys its Tk roots serially, and
 # has been stable that way for months.  Several xdist workers doing it
-# concurrently is the regime that crashed a macOS worker mid-Toplevel and
-# killed Windows App() fixture setups under load (2026-08-31, the first
-# -n auto runs).  Pinning every tkinter-touching module into one xdist_group
-# recreates the proven serial regime for Tk while the other workers
-# parallelize the rest of the suite.  Membership is sniffed from the module
-# source rather than hand-marked across 32 files, so a new GUI test file is
+# concurrently is the regime that crashed a macOS CI worker mid-Toplevel
+# (2026-08-31, the first -n auto runs) - and, measured 2026-09-01 on the
+# 16-core Windows dev box, it is SLOWER too: the Tk-touching subset ran
+# ~100-130s serial but 172s spread over 8 workers, because window
+# create/map/destroy serializes at the desktop layer whatever the process
+# count.  Spreading Tk work anti-helps everywhere it was tried, so every
+# tkinter-touching module rides ONE xdist_group on every platform, and the
+# other workers parallelize the rest of the suite.
+#
+# MEMBERSHIP IS THE PART THAT WAS WRONG (2026-09-01).  The original sniff
+# looked only for the literal string "tkinter", which missed every file that
+# reaches Tk through the shared `app` fixture (they import it from
+# test_gui_smoke and never say "tkinter") - so the batch17/32/35/36/37
+# family had been racing UNGROUPED across workers since the day the group
+# was added.  That race is where the first -n auto run's one ERROR lived,
+# and racing Tk window churn is also a wall-clock tax on everything else.
+# The sniff now catches both ways a file reaches Tk.  It is still sniffed
+# from module source rather than hand-marked, so a new GUI test file is
 # grouped the day it appears; the marker is inert without xdist.
 
 _TK_SNIFF_CACHE = {}
@@ -167,7 +179,8 @@ def _touches_tk(path):
     if hit is None:
         try:
             with open(p, "r", encoding="utf-8", errors="replace") as f:
-                hit = "tkinter" in f.read()
+                src = f.read()
+            hit = "tkinter" in src or "test_gui_smoke" in src
         except OSError:
             hit = False
         _TK_SNIFF_CACHE[p] = hit
@@ -182,6 +195,31 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if _touches_tk(item.path):
             item.add_marker(pytest.mark.xdist_group("tk"))
+
+
+def make_tk_root(tk_mod, attempts=4):
+    """Create a Tk root, retrying the transient Tcl-script race.
+
+    Under parallel workers, Tk creation sources its runtime scripts from
+    disk every time, and on Windows those reads occasionally fail ENOENT on
+    files that demonstrably exist (the AV/indexer briefly in the way; one
+    2026-09-01 run caught init.tcl, ttk.tcl and vistaTheme.tcl each doing
+    it).  Measured, the failure is per-attempt, NOT poisoning: creates on
+    the same worker succeed immediately afterwards.  Before this helper, a
+    module-scoped root fixture that hit the race once skipped its WHOLE
+    module (pytest caches a module fixture's skip), which is how one
+    transient read miss became 25 silently-lost tests on the release gate.
+    Retry with a short backoff and only give up when it genuinely persists.
+    """
+    import time as _time
+    last = None
+    for i in range(attempts):
+        try:
+            return tk_mod.Tk()
+        except Exception as exc:                            # noqa: BLE001
+            last = exc
+            _time.sleep(0.1 * (i + 1))
+    raise last
 
 
 @pytest.fixture(scope="session")

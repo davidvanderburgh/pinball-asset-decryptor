@@ -5,4 +5,7 @@
 # Install with:  pip install -r requirements-dev.txt
 -r requirements.txt
 pytest>=8
+# pytest.ini runs the suite parallel by default (-n auto --dist loadgroup);
+# without xdist installed that addopts line is an unrecognized-argument error.
+pytest-xdist>=3
 pycryptodome>=3

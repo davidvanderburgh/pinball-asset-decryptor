@@ -62,8 +62,12 @@ def test_read_state_missing_is_empty_not_an_error(tmp_path, monkeypatch):
 def root():
     """ONE Tk root for the whole module (matches tests/test_jjp_emulate_tab.py)."""
     tk = pytest.importorskip("tkinter")
+    from tests.conftest import make_tk_root
     try:
-        r = tk.Tk()
+        # retried: one transient Tcl-script read miss must not skip the
+        # whole module (pytest caches a module fixture's skip) - see
+        # make_tk_root
+        r = make_tk_root(tk)
     except Exception:                                       # noqa: BLE001
         pytest.skip("no usable Tk display")
     r.withdraw()
@@ -130,6 +134,18 @@ def test_switch_window_click_injects_a_switch(root):
     io = _FakeIO()
     win = W.Spike1SwitchWindow(root, io, nodes=(8,))
     win.update()
+    # Window MAPPING goes through the real window manager and is
+    # asynchronous: on a busy desktop (parallel test workers churning
+    # windows) the Toplevel can still be unviewable here, and Tk silently
+    # drops a synthetic <Button-1> aimed at an unviewable canvas - the
+    # 2026-09-01 -n auto runs failed exactly that way, twice.  Wait for
+    # viewability before clicking.
+    import time
+    for _ in range(200):
+        if win._canvas.winfo_viewable():
+            break
+        win.update()
+        time.sleep(0.01)
     # click the first switch cell (kind 'sw', node 8, index 0)
     rid = win._cells[("sw", 8, 0)]
     x0, y0, x1, y1 = win._canvas.coords(rid)

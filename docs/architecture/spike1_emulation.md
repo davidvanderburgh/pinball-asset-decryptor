@@ -158,7 +158,7 @@ With `/dev/null` stand-ins, the real GOT LE 1.37 firmware runs this far (from a
 
 | Stage | What happens |
 |---|---|
-| SoC detect | Shells out `cat /proc/cpuinfo \| grep Hardware`; the fake cpuinfo answers `Freescale i.MX6…`. |
+| SoC detect | Shells out `cat /proc/cpuinfo | grep Hardware`; the fake cpuinfo answers `Freescale i.MX6…`. |
 | Assets | `open("image.bin")` OK; worker threads spawn. |
 | Display probe | `readlink /usr/local/spike/display.hex` (dotmatrix vs rgbdotmatrix), `open("/dev/dmd")`, `ioctl(fd, 0x3d00 /*display reset*/)` → ENOTTY on the stand-in — **non-fatal**, logs "display reset: …" and continues. |
 | NVRAM | Creates the full tree under `/data/nv/GOT_LE/` — `SYS_NVRAM`, `PIN_NVRAM`, `NOV_NVRAM`, `FRRAM`, `LKRAM`, `NVRAM`, `PTRAM`. |
@@ -370,30 +370,104 @@ land in the guest's data range). Measured on GOT LE against the sweep-verified
 curated map: **67 of 72 entries identical and no position disagreed**; the five
 were hand-edited names.
 
-## The EARLY Spike 1 cards (the 2012 home models)
+## The EARLY Spike 1 cards (the 2012 home models) — and they run
 
 `transformers_pin-1.0.18.iso` is a Spike 1 card — **Transformers The Pin
 (Stern, 2012)**, one of the first SPIKE machines, three years before SPIKE
-reached the coin-op line, with **two 8-digit LED displays instead of a DMD**.
-It is the earliest firmware era, and this rig cannot drive it.
+reached the coin-op line, with **two 8-digit 16-segment displays instead of a
+DMD**. It is the earliest firmware era, and as of PAD-101 the rig boots it to
+attract and plays a ball. Everything below was read out of the card and its
+`gamer` binary (the assert strings name the sources: `node_pdi.cpp`,
+`amp_pdi.cpp`, `serial.cpp`).
 
 **What does NOT tell the eras apart** (learned the wrong way on PAD-101):
 `/etc/version 201006031147`, glibc 2.6.1 and kernel 2.6.30 are identical on the
 GOT LE and Whoa Nellie cards. The base rootfs is shared across Spike 1 and says
 nothing about a card's age — do not date a card by it.
 
-**What actually differs, and it is everything the rig touches:**
+**What differs, and what the rig does about each:**
 
 | | early (`transformers_pin`, 384 MB card) | DMD generation (GOT LE, 3.75 GB) |
 | --- | --- | --- |
-| game | `/usr/local/games/<title>/game` on the ROOTFS | `/games/<TITLE>/game` on its own partition |
-| sounds | plain `.wav` files beside the game (288 of them) | `image.bin` master directory, raw PCM |
-| node images | `pinnode`, `netbridge`, `alphanumeric`, `dotmatrix` | `coil4node`, `accbridgenode`, `rgbdotmatrix`, `dmd_1x` |
-| framework symbols | `node_poll_t`, `node_coilmsg`, `nodemap_init`, `ALPHANUMERIC_*` | `node_bus_*`, `sys_node_board_device_*`, `sys_line_status_*` |
+| game | `/usr/local/games/<title>/` on the ROOTFS, launched via the `$DATA_PATH/game` symlink (-> `tf-elg/gamer`; the debug build `game` beside it is NOT what runs) | `/games/<TITLE>/game` on its own partition |
+| sounds | plain `.wav` files beside the game (24000/12000 Hz mono s16) | `image.bin` master directory, raw PCM |
+| display | `$DATA_PATH/display.hex` -> `alphanumeric-…` or `dotmatrix-…`; 256-byte frames on /dev/spi0 | 2048-byte 128x32 frames |
+| node bus | one board (node 8), no checksums, implied reply lengths, **active-high** switches with a negative-logic mask, settings EEPROM on the net bridge | `NODEBUS_TransferMessage` framing, `image.bin`, board-EEPROM on i2c |
+| framework symbols | `node_poll_t`, `node_query_t`, `node_coilmsg`, `ALPHANUMERIC_*` | `node_bus_*`, `sys_node_board_device_*`, `sys_line_status_*` |
 | MBR LBAs | 63 / 48195 / 80325 (+ an A/B rootfs at 353430) | 35 / 7000 / 14000 (+ logicals) |
 
-The symbol row is the blocker: **not one** of the names `s1patch.py`'s four
-patches, `nodebus.py`'s responder and `s1swmap.py`'s registry walk resolve
-exists in its 3064 symbols. `build_rootfs.py` recognises the layout and says
-which era the card is instead of "is this a Spike 1 card?" (PAD-101). Reading
-its assets needs no decryption at all — see queue item 90 in `plans/TODO.md`.
+`build_rootfs.py` recognises the layout, follows the card's own symlinks and
+leaves `.game_path` / `.game_exe` / `.display` beside the extracted game;
+`start.sh` sets `S1_ERA=early` from them and `emu_root.sh` binds and launches
+accordingly. A DMD-generation extraction carries no markers and nothing
+changes for it.
+
+### The early node bus (`s1early.py`, entered from `nodebus.py`)
+
+Read from `gamer` (`node_sar_t` = `serial_write` + `node_read_serial`; no
+checksum, no reply-length byte):
+
+| request | reply | source |
+| --- | --- | --- |
+| `0x00` | 1 byte: the node with switch data, 0 = none | `node_poll_t` |
+| `[0x80|n, 1, 0x11]` | 8 switch bytes | `node_query_t` |
+| `[0x80|n, 1, 0xFF]` | 6 bytes, `[0..1]` = LE16 error mask | `node_status_t` |
+| `[0x80|n, 3, 0x60, a, b]` | 1 byte, signed delta | `node_query_quadrature` |
+| `[0x80|n, 5, 0x40|coil, p1..p4]` | — | `node_coilmsg` |
+| `[0x80|n, len, 0x80|c, …]` | — | `node_ledmsg` |
+| `[0x55, 0x00, 0x02, hi, lo, ck, x]` | `[0xAA, 0x01, data, 0xFF-data]` | `LL_sys_eep_read` (bridge EEPROM, command mode) |
+| `[0x55, 0x01, 0x03, hi, lo, val, ck]` | `[0xAA, 0x00, 0x00]` | `LL_sys_eep_write` |
+
+**Switch polarity is per switch.** `node_switch_update` ORs each raw bit
+straight into the switch state, but the 8 bytes are first XORed with
+`g_switch_negative_logic_bitmask` (`e7 7b fd 01 cf 31 00 00` on Transformers),
+so the all-open reply IS that mask and a closed switch flips its bit. An
+all-zero reply held the volume button: the game booted to `VOLUME: 27%`.
+The mask, and the switch **names** — each entry of the runtime node-8 map
+(`g_nMessagesSent + 0x24 + node*4`, 0x38 bytes per bit) carries its own name,
+`SWITCH_START` at byte 2 bit 5, `SWITCH_TROUGH_1..3`, `SWITCH_SHOOTER_LANE` —
+are read out of guest memory once the game is up (`sync_from_guest`), which
+writes `s1switches.json` with the trough-eject coil from the static
+`__coil_table` (node 8, coil 3). That is this era's whole `s1swmap`.
+
+The 64-byte settings EEPROM lives on the **net bridge** and is read byte by
+byte over the same serial port in "command mode" (a GPIO the game flips —
+`sys_command_mode`). `sys_eep_checksum_check` wants `(3 + sum of all 64) % 256
+== 0`; a blank part fails it and the game writes its defaults (33 writes,
+persisted in `$S1_WORK/s1eep.bin`), so the next boot validates.
+
+### Boot walls (all measured live)
+
+1. **The stock qemu.** With the kernel's ARM binfmt left alone
+   (`S1_NO_BINFMT=1`) a bare `exec ./gamer` lands in the distro's qemu-arm,
+   whose every device ioctl fails; the game asserts at the first one
+   (`amp_power_set_pdi: prevState>=0`). `emu_root.sh` now execs the patched
+   qemu explicitly (as a copy named `game`, so comm stays `game`).
+2. **The sample-rate read-back.** `amp_set_sample_rate` sets the DAC rate with
+   `ioctl(i2s, 0x3e00, &rate)`, reads it back with `ioctl(i2s, 0x3e01,
+   &ridx)` and asserts they agree. Both are legacy ioctls the generic
+   passthrough cannot write back through, so the read-back stays 0.
+   `s1patch.py`'s `patch_amp_rate_assert` turns the `bne <assert>` after the
+   compare into a nop (symbol-resolved, guarded on the assert block's own
+   `GetRate(rate)==` string).
+3. **The GPIO idle level.** `node_gpio_switch_update` reads cabinet pins with
+   `ioctl(gpio, 0x3c02, pin)`. The passive model's 0 read as every button
+   held. `s1hwshim --gpio-file` answers 1 (released) unless a byte-per-pin
+   file says otherwise; on Transformers the GPIO table is empty anyway (all
+   switches are on node 8).
+4. **The audio rate.** The mixer writes 128-frame stereo s16 blocks at 24000
+   Hz (`S1_PCM_RATE` for the i2s pacing; the game's WAVs are 24000/12000 Hz).
+
+### The display (`s1alpha.py`)
+
+`dmd_update_t` packs a 512-slot buffer into 4 bit-planes of 64 bytes (the
+DMD's packing, a quarter the size) and writes it through the same
+begin/commit ioctls. The slot buffer is `[x*16 + segment]`
+(`ALPHANUMERIC_SegmentSet`), so **every 16 slots are one digit**: x 0..7 =
+player 1, 8..15 = player 2. Which bit is which segment was pinned from the
+game's own font (16 bytes per ASCII code at 0xb3160): 8..15 the outer ring
+(f e d1 d2 c b a2 a1), 0/4 the middle bar, 2/6 the verticals, 1/3/5/7 the
+diagonals. Decoding captured frames with that font reads `PRESS START`,
+`VOLUME: 27%`, `PLAYER 1 BALL 1`, `PLUNGE BALL`. The app's display window
+draws them as 16-segment glyphs when the run dir's `s1display` says
+`alphanumeric`.

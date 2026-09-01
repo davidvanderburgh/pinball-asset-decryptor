@@ -84,48 +84,51 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **90. The EARLY Spike 1 cards (Stern's 2012 home models) — read the
-      assets off a transformers_pin card, and decide whether the rig can ever
-      run one.** `S3 D3` *(Filed 2026-09-01 from PAD-101: a reporter pointed
-      the Spike 1 Emulate tab at `transformers_pin-1.0.18.iso` and got "is this
-      a Spike 1 card?", and added "NO DMD ON this game". He was right on both
-      counts. That ticket made the message name the era; this item is the work
-      behind it.)*
-      **IT IS A SPIKE 1 CARD.** Transformers The Pin (Stern, **2012**) is one
-      of the first SPIKE machines, three years before SPIKE reached the coin-op
-      line, and it has **two 8-digit LED displays instead of a DMD**. Do NOT
-      date these cards by the rootfs: `/etc/version 201006031147`, glibc 2.6.1
-      and kernel 2.6.30 are **identical on GOT LE and Whoa Nellie** — the base
-      rootfs is shared across Spike 1, and reading it as "a 2010 machine" is
-      the mistake this item was first filed with.
-      **MEASURED off the real card** (Stern's SD-card page lists it with the
-      other Spike 1 .isos: `f002.backblazeb2.com/file/gamecode/transformers_pin-1.0.18.iso`,
-      384 MB, no auth). What separates the early era from the 2015-2016 DMD one
-      is everything the rig touches: the game is at
-      **`/usr/local/games/tf-elg/game`** (static armel, unstripped) **on the
-      rootfs** with its **288 sounds as plain `.wav` files** beside it, not
-      `/games/<TITLE>/` + `image.bin`; the node images are `pinnode-0_5_16`,
-      `netbridge-0_0_5`, **`alphanumeric-1_0_4`** and `dotmatrix-0_0_8`, not
-      `coil4node` / `accbridgenode` / `rgbdotmatrix`; the MBR shapes are the
-      same (FAT boot, `STRN` kernel at 0xDA, ext rootfs) at different LBAs
-      (63 / 48195 / 80325, plus an A/B second rootfs at 353430); and the
-      framework symbols are the **early short form** — `node_poll_t`,
-      `node_coilmsg`, `nodemap_init`, `ALPHANUMERIC_*`, `DISPLAY_*` — with
-      **not one** `node_bus_*` / `sys_node_board_device_*` /
-      `sys_line_status_*` name in its 3064. "elg" is Stern's home-edition model
-      code, the same one `star_wars_elg` carries on Spike 2.
-      **THE CHEAP HALF, and probably the whole value:** the assets need no
-      decryption at all — extracting this card is `Ext4Reader` plus a file
-      copy, which the Spike 1 audio engine (image.bin master directory + raw
-      PCM) cannot express. It wants its own small era in `plugins/stern/`
-      rather than a bolt-on.
-      **THE EXPENSIVE HALF:** running it. Every patch in `s1patch.py`, the
-      whole of `nodebus.py` and `s1swmap.py`'s registry walk resolve symbols
-      this firmware does not have, and the display is alphanumeric rather than
-      the 128x32 DMD. Treat it as a second era of the rig, not a port, and only
-      if someone asks for it.
-      — S3: nobody is blocked; the tab now says which era the card is. D3: the
-      read is easy, the era plumbing is the work.
+- [x] **90. The EARLY Spike 1 cards (Stern's 2012 home models) run on the
+      rig.** `S3 D3` *(Filed 2026-09-01 from PAD-101 as "read the assets,
+      decide whether the rig can ever run one"; David: "why don't we just make
+      it work instead of kicking the can?" - so it was made to work the same
+      day, on the ticket branch.)*
+      **DONE on `ticket/PAD-101`:** `transformers_pin-1.0.18` extracts
+      (`build_rootfs.py` follows the card's own `game` / `display.hex`
+      symlinks: it launches `gamer`, not the debug build), boots under the
+      rig, reaches attract (`PRESS START`), takes START and starts a game
+      (`PLAYER 1 BALL 1`), on its own node-bus responder (`s1early.py`: the
+      checksum-less 2012 wire, active-high switches behind
+      `g_switch_negative_logic_bitmask`, the settings EEPROM on the net
+      bridge), with the switch NAMES read out of the game's own map, a
+      16-segment display window (`s1alpha.py`, the frame geometry and the
+      bit-to-segment order pinned from the game's font), one boot patch
+      (`amp_set_sample_rate`'s read-back assert), and a `--gpio-file` on the
+      device model.  The whole read is in
+      `docs/architecture/spike1_emulation.md` ("The EARLY Spike 1 cards").
+      **Do NOT date a Spike 1 card by its rootfs**: `/etc/version
+      201006031147`, glibc 2.6.1 and kernel 2.6.30 are identical on GOT LE and
+      Whoa Nellie; the first filing of this item called it "a 2010 machine"
+      on that evidence and was wrong.
+      **LEFT (a new item's worth, filed as 91):** the game serves no ball
+      because two mechs never report done - see 91.
+
+- [ ] **91. Transformers The Pin: answer the DROP TARGET RESET and the ramp
+      BALL LOCK so the game serves a ball.** `S2 D2` *(Filed 2026-09-01 from
+      the PAD-101 work above.)* Measured on the wire: after START the game
+      fires coil 7 (DROP TARGET RESET, `ff600000`) every 2.4 s and coil 4
+      (RIGHT RAMP BALL LOCK, `ff2032c8`) every 2.3 s, for ever, and never
+      coil 3 (TROUGH EJECT) - it is waiting for the targets (switches 16-18)
+      and the lock (LOCKUP 1-3, 32-34) to report, exactly item 88's shape on
+      the 2012 platform.  The ball keeper already holds the trough (13-15)
+      and knows the eject coil; what it needs is a tiny mech model for this
+      title: on coil 7, put DROP TARGET 1-3 in their reset state; on coil 4,
+      whatever the lock's switches should read when it is empty.  Which
+      state is "reset" is a two-boot experiment (hold them, watch whether the
+      retries stop and coil 3 fires).  Then PLUNGE BALL -> the keeper's
+      plunge -> a scoring ball, and the title is playable end to end.
+      Also open on this era: lamp state into `s1hw.state` (s1early sees
+      every lamp frame, cmd 0x80|c, and writes none of it yet), and the
+      audio pacing (`S1_PCM_RATE=24000` is inferred from the WAVs, not
+      measured).
+      - S2: START works and the display talks, but no ball. D2: the keeper
+      has the hook (`on_coil`) and the names; it is one rule per coil.
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

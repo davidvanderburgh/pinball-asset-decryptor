@@ -12,8 +12,11 @@ run-dir files straight off the WSL disk over the ``\\wsl.localhost\<distro>\...`
 UNC path (verified fresh on a growing file), so a poll is a plain file read with
 no ``wsl.exe`` per frame:
 
-  * ``spi0.cap`` — the DMD frame stream (2048-byte frames); the display window
-    tails the last whole frame and renders it.
+  * ``spi0.cap`` — the display frame stream; the display window tails the last
+    whole frame and renders it.  2048-byte frames for the 128x32 DMD, or —
+    when ``s1display`` in the run dir says ``alphanumeric`` (the 2012 home
+    models, PAD-101) — 256-byte frames for two 8-digit 16-segment displays,
+    drawn as such (``tools/spike1_emu/s1alpha.py``).
   * ``s1hw.state`` — the shared :class:`~...spike1_emulate.StateBlock` the
     node-bus decoder writes (switches / lamps / coils); the switch window shows
     it, and OR-s in the presses the user is holding.
@@ -162,6 +165,18 @@ class _RunDirIO:
                 continue
         return out
 
+    def read_text(self, name):
+        """A small text file of the run dir (e.g. ``s1display``), stripped;
+        ``""`` when absent."""
+        p = self._unc(name)
+        if not p:
+            return ""
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except OSError:
+            return ""
+
     def read_ball_state(self):
         """The ball keeper's published state (s1ball.state JSON): trough
         count, ball-in-shooter, coin door.  ``{}`` when absent."""
@@ -177,29 +192,46 @@ class _RunDirIO:
 
 
 class Spike1DisplayWindow(tk.Toplevel):
-    """The DMD, in its own window: tails ``spi0.cap`` and renders the newest
-    128x32x4bit frame at *scale* (amber dot-matrix look)."""
+    """The game's display, in its own window: tails ``spi0.cap`` and renders
+    the newest frame.
+
+    Two shapes.  The DMD generation: 2048-byte 128x32x4bit frames, decoded by
+    *decode_frame* (s1dmd) and drawn as amber dots at *scale*.  The 2012 home
+    models (*alpha* given — ``(decode_frame, render_image)`` from s1alpha):
+    256-byte frames for two 8-digit 16-segment displays, drawn as segments —
+    a DMD window fed those frames showed nothing at all, since 256 bytes is
+    never a whole 2048-byte frame (PAD-101)."""
 
     FRAME_BYTES = 2048
     WIDTH = 128
     HEIGHT = 32
 
     def __init__(self, master, io, decode_frame, scale=7, hz=20,
-                 on_close=None):
+                 on_close=None, alpha=None):
         super().__init__(master)
         self._io = io
         self._decode = decode_frame
+        self._alpha = alpha
         self._scale = scale
         self._delay = max(20, int(1000 / hz))
         self._on_close = on_close
         self._photo = None
         self._job = None
         self._closed = False
+        self._frame_bytes = self.FRAME_BYTES
 
+        cw, ch = self.WIDTH * scale, self.HEIGHT * scale
         self.title("Spike 1 — DMD")
+        if alpha is not None:
+            # size the canvas from a blank frame's rendering, so the window
+            # is right before the first real frame lands
+            decode, render = alpha
+            blank = render(decode(bytes(256)))
+            cw, ch = blank.size
+            self._frame_bytes = 256
+            self.title("Spike 1 — display")
         self.configure(bg="#000000")
         self.geometry("+80+80")
-        cw, ch = self.WIDTH * scale, self.HEIGHT * scale
         self._canvas = tk.Canvas(self, width=cw, height=ch, bg="#000000",
                                  highlightthickness=0)
         self._canvas.pack(padx=8, pady=8)
@@ -214,7 +246,7 @@ class Spike1DisplayWindow(tk.Toplevel):
         self._job = None
         if self._closed:
             return
-        data = self._io.tail_frame("spi0.cap", self.FRAME_BYTES)
+        data = self._io.tail_frame("spi0.cap", self._frame_bytes)
         if data:
             self._render(data)
         try:
@@ -222,12 +254,13 @@ class Spike1DisplayWindow(tk.Toplevel):
         except tk.TclError:
             self._job = None
 
-    def _render(self, frame):
-        try:
-            from PIL import Image, ImageTk
-            grid = self._decode(frame)
-        except Exception:                                      # noqa: BLE001
-            return
+    def _image(self, frame):
+        """The frame as a PIL image, in whichever shape this window draws."""
+        from PIL import Image
+        if self._alpha is not None:
+            decode, render = self._alpha
+            return render(decode(frame))
+        grid = self._decode(frame)
         s = self._scale
         img = Image.new("RGB", (self.WIDTH, self.HEIGHT))
         px = img.load()
@@ -236,7 +269,14 @@ class Spike1DisplayWindow(tk.Toplevel):
             for x in range(self.WIDTH):
                 c = row[x] * 17
                 px[x, y] = (c, int(c * 0.55), 0)
-        img = img.resize((self.WIDTH * s, self.HEIGHT * s), Image.NEAREST)
+        return img.resize((self.WIDTH * s, self.HEIGHT * s), Image.NEAREST)
+
+    def _render(self, frame):
+        try:
+            from PIL import ImageTk
+            img = self._image(frame)
+        except Exception:                                      # noqa: BLE001
+            return
         try:
             self._photo = ImageTk.PhotoImage(img)
             self._canvas.itemconfigure(self._placeholder, state="hidden")
@@ -501,20 +541,24 @@ class Spike1SwitchWindow(tk.Toplevel):
     #: keysym -> (display key, row label, name matcher).  The KEYS are the
     #: Spike 2 playfield's (padglhost.c binds[]); the SWITCH each drives is
     #: resolved by NAME from the title's curated map.
+    # The DMD generation names its flipper switches "L. FLIPPER BUTTON" (and
+    # its end-of-stroke ones "LEFT FLIPPER E.O.S."); the 2012 home models just
+    # "LEFT FLIPPER" / "LEFT FLIPPER EOS", and their start button "START".
     KEY_TABLE = (
         ("Left", "Left", "Left Flipper",
-         lambda u: "FLIPPER BUTTON" in u and "UP" not in u
-         and u.startswith("L")),
+         lambda u: "FLIPPER" in u and "UP" not in u and "EOS" not in
+         u.replace(".", "") and u.startswith("L")),
         ("Right", "Right", "Right Flipper",
-         lambda u: "FLIPPER BUTTON" in u and "UP" not in u
-         and u.startswith("R")),
+         lambda u: "FLIPPER" in u and "UP" not in u and "EOS" not in
+         u.replace(".", "") and u.startswith("R")),
         ("Up", "Up", "Upper Left Flipper",
          lambda u: "FLIPPER BUTTON" in u and "UP" in u and "L" in
          u.split("FLIPPER")[0]),
-        ("1", "1", "Start Button", lambda u: u == "START BUTTON"),
+        ("1", "1", "Start Button", lambda u: u in ("START BUTTON", "START")),
         ("5", "5", "Left Coin", lambda u: "LEFT COIN" in u),
-        ("t", "T", "Tilt Pendulum", lambda u: "TILT PENDULUM" in u),
-        ("f", "F", "Shooter Lane", lambda u: "SHOOTER" in u),
+        ("t", "T", "Tilt Pendulum", lambda u: u.startswith("TILT")),
+        ("f", "F", "Shooter Lane",
+         lambda u: "SHOOTER" in u and "EXIT" not in u),
     )
     #: keysym -> service button name (keeper `svc` command).
     SVC_KEYS = {"Return": "select", "KP_Enter": "select", "equal": "plus",
@@ -945,10 +989,13 @@ class Spike1Viewers:
     the emulator down with it.
     """
 
-    def __init__(self, master_fn, decode_frame, log=None):
+    def __init__(self, master_fn, decode_frame, log=None, alpha=None):
         #: returns the Tk widget the windows parent to (the app toplevel).
         self._master_fn = master_fn
         self._decode = decode_frame
+        #: ``(decode_frame, render_image)`` for the alphanumeric displays of
+        #: the 2012 home models; used when the run dir's ``s1display`` says so.
+        self._alpha = alpha
         self._log = log or (lambda _m: None)
         self._io = None
         self._dmd = None
@@ -973,8 +1020,12 @@ class Spike1Viewers:
             return
         if not self._alive(self._dmd):
             try:
+                alpha = None
+                if self._alpha is not None and hasattr(self._io, "read_text") \
+                        and self._io.read_text("s1display") == "alphanumeric":
+                    alpha = self._alpha
                 self._dmd = Spike1DisplayWindow(
-                    master, self._io, self._decode,
+                    master, self._io, self._decode, alpha=alpha,
                     on_close=lambda _w: setattr(self, "_dmd", None))
             except Exception as exc:                       # noqa: BLE001
                 self._log("Spike 1: could not open the DMD window: %s" % exc)

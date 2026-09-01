@@ -191,6 +191,32 @@ static FILE *g_capfile = NULL;
 static long g_capmax = 256L << 20;
 static long g_capped = 0;
 
+/* --gpio-file PATH: the EARLY firmware era (the 2012 home models, PAD-101)
+ * reads its cabinet switches straight off CPU-board GPIO pins with
+ *     ioctl(gpio, 0x3c02, pin)   -> the pin's level
+ * (node_gpio_switch_update), a scalar ioctl the qemu passthrough hands us
+ * intact.  The pins idle HIGH (active-low buttons): answering 0 for every
+ * pin - the passive default - reads as every button held, and the game sat
+ * on its VOLUME screen at boot.  With this option the level comes from a
+ * byte-per-pin file the switch window / keeper write (missing file or pin
+ * -> 1, released); without it nothing changes for the DMD generation. */
+#define GPIO_READ_IOCTL 0x3c02
+static const char *g_gpio_file = NULL;
+
+static int gpio_level(int pin)
+{
+    int lvl = 1;
+    FILE *f;
+    if (pin < 0 || pin > 255 || !(f = fopen(g_gpio_file, "rb")))
+        return lvl;
+    if (fseek(f, pin, SEEK_SET) == 0) {
+        int c = fgetc(f);
+        if (c != EOF) lvl = c ? 1 : 0;
+    }
+    fclose(f);
+    return lvl;
+}
+
 struct fh {
     int  slave;     /* current I2C_SLAVE address */
     int  off;       /* register pointer within the slave */
@@ -327,6 +353,10 @@ static void s1_ioctl(fuse_req_t req, int cmd, void *arg,
         fuse_reply_ioctl(req, ADC_SAMPLE_RATE, NULL, 0);
         return;
     }
+    if (g_gpio_file && cmd == GPIO_READ_IOCTL) {
+        fuse_reply_ioctl(req, gpio_level((int)(intptr_t)arg), NULL, 0);
+        return;
+    }
     /* DMD frame pacing (only the s1dmd instance sets --dmd-fps): hold the
      * frame-commit ioctl for a real refresh period so the display thread can't
      * free-run.  See dmd_pace() / --dmd-fps above. */
@@ -361,6 +391,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--capture") && i + 1 < argc)
             g_capfile = fopen(argv[++i], "wb");
         else if (!strcmp(argv[i], "--waveform")) g_waveform = 1;
+        else if (!strcmp(argv[i], "--gpio-file") && i + 1 < argc)
+            g_gpio_file = argv[++i];
         else if (!strcmp(argv[i], "--dmd-fps") && i + 1 < argc)
             g_dmd_fps = atof(argv[++i]);
         else if (!strcmp(argv[i], "--pcm-rate") && i + 1 < argc)

@@ -79,15 +79,29 @@ def rig_cmd_root(*args, **kw):
     return _rig.rig_cmd_root(rig_dir(), *args, **kw)
 
 
-def _load_dmd_decoder():
-    """Import ``s1dmd.decode_frame`` from the rig dir — it is a script tree next
-    to the rig, not an installed package, so load it by path."""
+def _load_rig_module(name):
+    """Import a rig module (``s1dmd``, ``s1alpha``) from the rig dir — it is a
+    script tree next to the rig, not an installed package, so load by path."""
     import importlib.util
-    p = os.path.join(rig_dir(), "s1dmd.py")
-    spec = importlib.util.spec_from_file_location("s1dmd_gui", p)
+    p = os.path.join(rig_dir(), name + ".py")
+    spec = importlib.util.spec_from_file_location(name + "_gui", p)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _load_dmd_decoder():
+    return _load_rig_module("s1dmd")
+
+
+def _load_alpha():
+    """``(decode_frame, render_image)`` for the 2012 home models' 16-segment
+    displays (s1alpha), or None if the rig lacks it."""
+    try:
+        mod = _load_rig_module("s1alpha")
+        return mod.decode_frame, mod.render_image
+    except Exception:                                          # noqa: BLE001
+        return None
 
 
 def state_text(info):
@@ -659,7 +673,8 @@ class Spike1EmulatePanel:
                 return None
             self._viewers = Spike1Viewers(
                 master_fn=self._timer,
-                decode_frame=mod.decode_frame, log=self._log)
+                decode_frame=mod.decode_frame, log=self._log,
+                alpha=_load_alpha())
         return self._viewers
 
     def _open_viewers(self):

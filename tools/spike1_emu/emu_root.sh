@@ -77,6 +77,10 @@ for d in dmd i2s amp adc gpio spi0 spi1; do
     start_shim --model passive --name "s1$d" \
         --pcm-rate "${S1_PCM_RATE:-44100}" --pcm-ch "${S1_PCM_CH:-2}" \
         ${S1_AUDIO_FIFO:+--fifo "$S1_AUDIO_FIFO"}
+  elif [ "$d" = gpio ] && [ -n "${S1_GPIO_FILE:-}" ]; then
+    # the early era reads cabinet switches off GPIO pins (see s1hwshim.c
+    # --gpio-file); the file is the injection point for them.
+    start_shim --model passive --name "s1$d" --gpio-file "$S1_GPIO_FILE"
   elif [ "$d" = adc ] && [ -n "${S1_ADC_WAVEFORM:-}" ]; then
     # /dev/adc feeds the mains line-frequency sense (LineSenseThread).  A synthetic
     # 60 Hz AC waveform (s1hwshim --waveform) is available but OFF by default: it
@@ -185,7 +189,7 @@ s1_mounts() {
   cp "$S1_QEMU" "$R/usr/bin/qemu-arm-pad" 2>/dev/null || true
 }
 export -f s1_mounts
-export R G GAME_NAME GAME_PATH GAME_EXE S1_CPUINFO S1_QEMU S1_STRACE S1_EE_FILE S1_RUNS S1_I2C_LOG S1_GDB S1_TTYS4_CAP S1_PIVOT PIVOTROOT
+export R G GAME_NAME GAME_PATH GAME_EXE S1_CPUINFO S1_QEMU S1_STRACE S1_NO_BINFMT S1_EE_FILE S1_RUNS S1_I2C_LOG S1_GDB S1_TTYS4_CAP S1_PIVOT PIVOTROOT
 
 if [ "$S1_PIVOT" = "1" ]; then
   # Checkpointable boot.  The game_monitor-style restart loop moves OUTSIDE
@@ -253,6 +257,15 @@ else
       chroot "$R" /bin/sh -c "cd $GAME_PATH && exec /usr/bin/qemu-arm-pad -g $S1_GDB ./$GAME_EXE"
     elif [ "$S1_STRACE" = "1" ]; then
       chroot "$R" /bin/sh -c "cd $GAME_PATH && exec /usr/bin/qemu-arm-pad -strace ./$GAME_EXE"
+    elif [ "${S1_NO_BINFMT:-0}" = "1" ]; then
+      # binfmt untouched, so a bare exec would land in the STOCK qemu-arm the
+      # kernel has registered (no ioctl passthrough: every device ioctl fails
+      # and the game asserts at its first one) - run the patched qemu here.
+      # (No apostrophes in here: this whole loop is one single-quoted string.)
+      # ... as a copy named game, so comm stays game (status.sh, s1own.sh
+      # and the tab all identify the guest by comm, as the pivot path does).
+      mkdir -p "$R/.padqemu" && cp -f "$R/usr/bin/qemu-arm-pad" "$R/.padqemu/game"
+      chroot "$R" /bin/sh -c "cd $GAME_PATH && exec /.padqemu/game ./$GAME_EXE"
     else
       chroot "$R" /bin/sh -c "cd $GAME_PATH && exec ./$GAME_EXE"
     fi

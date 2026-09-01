@@ -85,6 +85,14 @@ fi
 S1_ERA=dmd
 if [ -e "$S1_WORK/game/.game_exe" ]; then
     S1_ERA=early
+    # the DAC rate this era runs at (its WAVs are 24000/12000 Hz mono s16 and
+    # the mixer writes 128-frame stereo blocks) — the i2s pacing in emu_root
+    # reads it from the environment; the DMD generation stays at 44100.
+    export S1_PCM_RATE="${S1_PCM_RATE:-24000}" S1_PCM_CH="${S1_PCM_CH:-2}"
+    # cabinet switches live on CPU-board GPIO pins in this era; this file is
+    # how the switch window and the keeper press them (byte per pin, 0=held)
+    export S1_GPIO_FILE="$S1_WORK/s1gpio.input"
+    rm -f "$S1_GPIO_FILE"
     log "Early Spike 1 card: $(cat "$S1_WORK/game/.game_name" 2>/dev/null) launches $(cat "$S1_WORK/game/.game_exe"), $(cat "$S1_WORK/game/.display" 2>/dev/null) display."
 fi
 export S1_ERA
@@ -174,8 +182,8 @@ rm -f "$S1_WORK/spi0.cap" "$S1_WORK/ttyS4.cap" "$S1_WORK/ttyS4.slave" \
 # and is read over this same serial port.
 setsid env S1_SW_INPUT="$S1_WORK/s1sw.input" \
     S1_SW_AUTO="$S1_WORK/s1auto.input" \
-    S1_GAME_ELF="$S1_WORK/game/game" \
-    S1_ERA="$S1_ERA" S1_EEP_FILE="$S1_WORK/s1eep.bin" \
+    S1_GAME_ELF="$S1_WORK/game/$(cat "$S1_WORK/game/.game_exe" 2>/dev/null || echo game)" \
+    S1_ERA="$S1_ERA" S1_EEP_FILE="$S1_WORK/s1eep.bin" S1_WORK="$S1_WORK" \
     python3 "$HERE/nodebus.py" "$S1_WORK/ttyS4.slave" "$S1_WORK/ttyS4.cap" \
     ${S1_NB_LOG:+"$S1_NB_LOG"} \
     >/dev/null 2>&1 &
@@ -188,7 +196,7 @@ log "Node-bus responder up."
 #    the DMD).  emu_root.sh owns the namespace/chroot/CUSE/binfmt loop.
 export S1_ROOT="$S1_WORK/rootfs" S1_GAME="$S1_WORK/game" S1_QEMU="$S1_QEMU" \
        S1_HWSHIM="$S1_WORK/s1hwshim" S1_CPUINFO="$HERE/cpuinfo" \
-       S1_STRACE=0 S1_I2C_LOG=0 S1_RUNS=1000 S1_DROP_SIGFPE=1 \
+       S1_STRACE="${S1_STRACE:-0}" S1_I2C_LOG=0 S1_RUNS=1000 S1_DROP_SIGFPE=1 \
        S1_EE_FILE=/data/board_eeprom.bin S1_TTYS4_CAP="$SLAVE" \
        S1_SPI0_CAP="$S1_WORK/spi0.cap" S1_DMD_FPS="${S1_DMD_FPS:-60}" \
        PAD_AUDIO="${PAD_AUDIO:-0}" S1_AUDIO_FIFO="$S1_WORK/audio.fifo" \

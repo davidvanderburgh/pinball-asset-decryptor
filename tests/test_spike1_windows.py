@@ -419,3 +419,98 @@ def test_switch_window_ignores_an_unchanged_map(root):
     assert win._refresh_names() is False      # same map: no rebuild
     assert win._list_rows is rows
     win.close()
+
+
+# ------------------------------------------ the 2012 home models' names --
+# Their switch map names the flippers "LEFT FLIPPER" (with "LEFT FLIPPER
+# EOS" beside them) and the start button "START"; the play keys must resolve
+# on those as well as on the DMD generation's "L. FLIPPER BUTTON" / "START
+# BUTTON" (PAD-101).
+
+_EARLY_NAMES = {(8, 1): "LEFT FLIPPER EOS", (8, 2): "RIGHT FLIPPER EOS",
+                (8, 4): "TILT", (8, 12): "SHOOTER LANE", (8, 21): "START",
+                (8, 26): "LEFT FLIPPER", (8, 39): "RIGHT FLIPPER",
+                (8, 42): "SHOOTER LANE EXIT"}
+
+
+def test_key_rows_resolve_on_the_early_era_names(root):
+    io = _FakeIO(names=_EARLY_NAMES)
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    assert _row(win, "Left")["slot"] == addr(8, 26)      # not the EOS switch
+    assert _row(win, "Right")["slot"] == addr(8, 39)
+    assert _row(win, "1")["slot"] == addr(8, 21)
+    assert _row(win, "t")["slot"] == addr(8, 4)
+    assert _row(win, "f")["slot"] == addr(8, 12)         # not the lane EXIT
+    win.close()
+
+
+def test_key_rows_still_resolve_on_the_dmd_generation_names(root):
+    io = _FakeIO(names={**_PLAY_NAMES, (8, 0): "LEFT FLIPPER E.O.S."})
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    assert _row(win, "Left")["slot"] == addr(8, 2)       # L. FLIPPER BUTTON
+    assert _row(win, "1")["slot"] == addr(1, 11)
+    win.close()
+
+
+# ---------------------------------------------- the alphanumeric display --
+
+class _AlphaIO(_FakeIO):
+    def __init__(self, display, frame):
+        super().__init__(frame=frame)
+        self._display = display
+
+    def read_text(self, name):
+        return self._display if name == "s1display" else ""
+
+
+def _alpha_mod():
+    import importlib.util
+    import os
+    from pinball_decryptor.gui.spike1_emulate_tab import rig_dir
+    p = os.path.join(rig_dir(), "s1alpha.py")
+    spec = importlib.util.spec_from_file_location("s1alpha_probe", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_display_window_draws_16_segment_frames_in_alpha_mode(root):
+    pytest.importorskip("PIL")
+    m = _alpha_mod()
+    fr = bytearray(256)
+    fr[0] = 0x80                          # digit 0, segment 0 (g1), bit 0
+    win = W.Spike1DisplayWindow(root, _AlphaIO("alphanumeric", bytes(fr)),
+                                _decode(), hz=50,
+                                alpha=(m.decode_frame, m.render_image))
+    win.update()
+    assert win._frame_bytes == 256
+    assert win._photo is not None
+    assert "display" in win.title()
+    win.close()
+
+
+def test_viewers_pick_alpha_only_when_the_run_dir_says_so(root, monkeypatch):
+    pytest.importorskip("PIL")
+    m = _alpha_mod()
+    made = []
+    monkeypatch.setattr(W, "Spike1DisplayWindow",
+                        lambda master, io, decode, alpha=None, on_close=None:
+                        made.append(alpha) or _Dummy())
+    monkeypatch.setattr(W, "Spike1SwitchWindow",
+                        lambda master, io, on_close=None: _Dummy())
+    for display, expect in (("alphanumeric", True), ("dotmatrix", False), ("", False)):
+        v = W.Spike1Viewers(lambda: root, _decode(),
+                            alpha=(m.decode_frame, m.render_image))
+        v._io = _AlphaIO(display, None)
+        v.open()
+        assert (made[-1] is not None) is expect, display
+
+
+class _Dummy:
+    _closed = False
+
+    def winfo_exists(self):
+        return True
+
+    def bind_play_keys(self, w):
+        pass

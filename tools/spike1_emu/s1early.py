@@ -43,7 +43,15 @@ round-robin, so a responder that answers for node 8 is the whole machine.
 
 Switch injection reuses the viewer/keeper bitmaps (S1_SW_INPUT / S1_SW_AUTO,
 see nodebus.read_injected_switches) — the same slot = node*64 + index — with
-the polarity flipped for this era.
+this era's polarity: a switch is closed when its raw bit DIFFERS from
+``g_switch_negative_logic_bitmask`` (measured live: an all-zero reply held the
+volume button and the game sat on "VOLUME: 27%"; the mask on Transformers is
+e7 7b fd 01 cf 31 00 00).  The mask, and the switch NAMES — this era keeps
+each switch's name inside its own map entry (``SWITCH_START`` at byte 2 bit 5,
+``SWITCH_TROUGH_1``…) — are read out of guest memory once the game is up
+(:func:`sync_from_guest`), which also writes ``s1switches.json`` for the
+switch window and the ball keeper, with the trough-eject coil taken from the
+game's static coil table.  This is the early era's s1swmap.
 
 Usage (nodebus.py delegates here when S1_ERA=early; same argv):
     python3 nodebus.py <slave-path-out-file> <capture-file> [log-file]
@@ -54,6 +62,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from nodebus import read_injected_switches  # noqa: E402
+from s1elf import _Elf  # noqa: E402
+from s1swmap import Guest, NotReady, game_pid  # noqa: E402
 
 NODE = 8                     # the one node-bus board (nodemap_init)
 EEP_SIZE = 64                # sys_eep_init reads exactly 0x40 bytes
@@ -64,8 +74,89 @@ BRIDGE_ACK = 0xAA
 
 
 def active_high(active_low_bytes):
-    """nodebus's active-low switch bytes -> this era's active-high ones."""
+    """nodebus's active-low switch bytes -> a set-bit-per-closed-switch mask."""
     return bytes((~b) & 0xFF for b in active_low_bytes)
+
+
+def wire_bytes(closed_mask, negmask):
+    """The 8 reply bytes for cmd 0x11: idle is the negative-logic mask itself
+    (every switch open); a closed switch flips its bit."""
+    return bytes(c ^ n for c, n in zip(closed_mask, negmask))
+
+
+# ---- the game's own tables, read live -------------------------------------
+NODE_MAP_ENTRY = 0x38            # per switch bit; 8 bits per byte, 8 bytes
+COIL_ENTRY = 60                  # __coil_table stride (nodemap_init prints it)
+COIL_NAME_OFF = 12
+_NAME_PREFIX = "SWITCH_"
+
+
+def read_negmask(g, syms):
+    return g.read(syms["g_switch_negative_logic_bitmask"], 8)
+
+
+def read_switch_names(g, syms, node=NODE):
+    """{index: name} for *node*, index = byte*8 + bit, from the runtime switch
+    map (node_switch_setdata's per-node pointer table at
+    g_nMessagesSent + 0x24 + node*4; each bit's entry carries its name)."""
+    base = g.u32(syms["g_nMessagesSent"] + 0x24 + node * 4)
+    names = {}
+    if not base:
+        return names
+    for byte in range(8):
+        for bit in range(8):
+            ent = g.read(base + byte * 0x1c0 + bit * NODE_MAP_ENTRY,
+                         NODE_MAP_ENTRY)
+            if not ent[4]:                       # unused position
+                continue
+            raw = ent[6:].split(b"\0")[0].decode("latin1", "replace")
+            if raw.startswith(_NAME_PREFIX):
+                raw = raw[len(_NAME_PREFIX):]
+            name = raw.replace("_", " ").strip()
+            if name:
+                names[byte * 8 + bit] = name
+    return names
+
+
+def trough_coils(elf, syms):
+    """[[node, coil], …] for the trough-eject coil(s), from the game's static
+    coil table (node, index, …, name at +12)."""
+    base = syms.get("__coil_table")
+    out = []
+    if not base:
+        return out
+    for i in range(48):
+        try:
+            ent = elf.read_vaddr(base + i * COIL_ENTRY, COIL_ENTRY)
+        except ValueError:
+            break
+        name = ent[COIL_NAME_OFF:].split(b"\0")[0].decode("latin1", "replace")
+        if "TROUGH" in name.upper() and "EJECT" in name.upper():
+            out.append([int(ent[0]), int(ent[1])])
+    return out
+
+
+def sync_from_guest(work, elf_path, out_path):
+    """Read the negative-logic mask and the switch names from the running
+    game and write *out_path* (the s1switches.json the window and keeper
+    read).  Returns (negmask, names); raises NotReady until the game is up."""
+    with open(elf_path, "rb") as f:
+        elf = _Elf(f.read())
+    syms = elf.syms
+    g = Guest(game_pid(work))
+    negmask = read_negmask(g, syms)
+    names = read_switch_names(g, syms)
+    if not names:
+        raise NotReady("switch map not populated yet")
+    doc = {"%d,%d" % (NODE, i): n for i, n in sorted(names.items())}
+    doc["_trough_coils"] = trough_coils(elf, syms)
+    doc["_negmask"] = negmask.hex()
+    import json
+    tmp = out_path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(doc, f, indent=1)
+    os.replace(tmp, out_path)
+    return negmask, names
 
 
 class Eeprom:
@@ -145,8 +236,10 @@ class EarlyParser:
             yield ("junk", b0)
 
 
-def reply_for(ev, switches, eeprom):
-    """The bytes to send back for parsed event *ev*, or None."""
+def reply_for(ev, switches, eeprom, idle=SW_IDLE_HIGH):
+    """The bytes to send back for parsed event *ev*, or None.  *switches* is
+    {node: wire bytes} for nodes with a closed switch; *idle* is the wire
+    bytes of an all-open node (the negative-logic mask once known)."""
     kind = ev[0]
     if kind == "poll":
         return None                         # the caller decides the node
@@ -163,7 +256,7 @@ def reply_for(ev, switches, eeprom):
     if kind == "frame":
         node, cmd, data = ev[1], ev[2], ev[3]
         if cmd == 0x11:
-            return switches.get(node, SW_IDLE_HIGH)
+            return switches.get(node, idle)
         if cmd == 0xFF and not data:
             return STATUS_OK
         if cmd == 0x60:
@@ -193,14 +286,34 @@ def main(argv=None):
         if log:
             log.write(s + "\n")
 
+    work = os.path.dirname(capture_file)
     eeprom = Eeprom(os.environ.get("S1_EEP_FILE") or
-                    os.path.join(os.path.dirname(capture_file), "s1eep.bin"))
+                    os.path.join(work, "s1eep.bin"))
     sw_input = os.environ.get("S1_SW_INPUT")
     sw_auto = os.environ.get("S1_SW_AUTO")
+    elf_path = os.environ.get("S1_GAME_ELF") or os.path.join(work, "game", "gamer")
+    names_path = os.environ.get("S1_SWITCHES") or os.path.join(work, "s1switches.json")
     logline("early-era responder up: node %d, eeprom %s" % (NODE, eeprom.path))
 
+    state = {"negmask": SW_IDLE_HIGH, "synced": False, "next_sync": 0.0}
+    import time
+
+    def maybe_sync():
+        if state["synced"] or time.monotonic() < state["next_sync"]:
+            return
+        state["next_sync"] = time.monotonic() + 2.0
+        try:
+            negmask, names = sync_from_guest(work, elf_path, names_path)
+        except (NotReady, OSError, KeyError, ValueError) as exc:
+            logline("sync: not yet (%s)" % exc)
+            return
+        state["negmask"] = negmask
+        state["synced"] = True
+        logline("sync: negmask %s, %d switches named -> %s"
+                % (negmask.hex(), len(names), names_path))
+
     def injected_now():
-        """{node: active-high switch bytes} from the viewer + keeper files."""
+        """{node: closed-bit mask} from the viewer + keeper files."""
         out = {}
         for src in (sw_input, sw_auto):
             for node, low in read_injected_switches(src).items():
@@ -219,7 +332,10 @@ def main(argv=None):
             if not data:
                 break
             cap.write(data)
-            switches = injected_now()
+            maybe_sync()
+            switches = {n: wire_bytes(m, state["negmask"])
+                        for n, m in injected_now().items()}
+            idle = wire_bytes(SW_IDLE_HIGH, state["negmask"])
             for ev in parser.feed(data):
                 if ev[0] == "poll":
                     # name a node whose switches changed since the game last
@@ -227,8 +343,7 @@ def main(argv=None):
                     # scan loop polls until it gets 0 (node_serial_update_t)
                     pending = 0
                     for node in sorted(set(switches) | set(delivered)):
-                        if switches.get(node, SW_IDLE_HIGH) != \
-                                delivered.get(node, SW_IDLE_HIGH):
+                        if switches.get(node, idle) != delivered.get(node, idle):
                             pending = node
                             break
                     os.write(master, bytes([pending]))
@@ -238,11 +353,11 @@ def main(argv=None):
                 if ev[0] == "junk":
                     logline("junk byte 0x%02x" % ev[1])
                     continue
-                resp = reply_for(ev, switches, eeprom)
+                resp = reply_for(ev, switches, eeprom, idle)
                 if ev[0] == "frame":
                     node, cmd, body = ev[1], ev[2], ev[3]
                     if cmd == 0x11:
-                        delivered[node] = switches.get(node, SW_IDLE_HIGH)
+                        delivered[node] = switches.get(node, idle)
                     tag = ("COIL" if 0x40 <= cmd < 0x80 else
                            "LAMP" if cmd >= 0x80 and cmd != 0xFF else "REQ")
                     logline("%s node=%d cmd=0x%02x data=%s -> %s"

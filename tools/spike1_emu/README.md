@@ -79,6 +79,17 @@ binds them onto the device paths in a namespace, and runs the game as root
 (which also makes `SCHED_RR` succeed). `run_root.sh` bounds it and **restores
 the stock qemu-arm binfmt** afterward, so the Spike 2 rig is unaffected.
 
+## The early cards (the 2012 home models)
+
+`transformers_pin-1.0.18.iso` and its kin are Spike 1 too — the earliest
+firmware era, with two 8-digit alphanumeric displays.  They extract and boot
+like any other card; the rig picks the era from the markers `build_rootfs.py`
+leaves beside the game and switches its responder (`s1early.py`), its display
+decoder (`s1alpha.py`) and its boot patch (`s1patch.py`) accordingly.
+`S1_NO_BINFMT=1` boots through the patched qemu explicitly without touching
+the kernel's ARM handler.  The full read of the era is in
+`docs/architecture/spike1_emulation.md`.
+
 ## The title's switch map
 
 Clicks, play keys and the ball keeper all resolve through

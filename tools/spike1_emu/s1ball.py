@@ -48,6 +48,7 @@ import sys
 import time
 
 from nodebus import WireParser
+from s1early import EarlyParser
 
 # ---- fallback map: GOT LE v1.37 empirical (handoff doc) --------------------
 # The keeper prefers the run dir's s1switches.json (the per-title map start.sh
@@ -110,13 +111,16 @@ def load_title_map(work):
         except (ValueError, AttributeError):
             continue
         uname = str(name).upper()
-        if uname.startswith("TROUGH") and "JAM" not in uname:
+        # "TROUGH JAM" (2015) and "TROUGH STUCK 2" (the 2012 home models) are
+        # sensors, not ball positions - holding one closed jams the trough.
+        if (uname.startswith("TROUGH") and "JAM" not in uname
+                and "STUCK" not in uname):
             m = re.search(r"(\d+)", uname)
             if m:
                 by_digit[int(m.group(1))] = slot
         elif "SHOOTER" in uname:
             shooter = slot
-        elif uname == "START BUTTON":
+        elif uname in ("START BUTTON", "START"):     # the early era says START
             start = slot
         elif "LEFT COIN" in uname:
             coin = slot
@@ -289,6 +293,30 @@ class Keeper:
         except OSError:
             pass
 
+    # -- the wire, per era ---------------------------------------------------
+    # The 2015 firmware fires a coil with cmd 0x40 [idx, power]; the early era
+    # (S1_ERA=early, the 2012 home models — PAD-101) with cmd 0x40|idx and the
+    # parameters behind it, on a checksum-less wire s1early.EarlyParser reads.
+    @staticmethod
+    def _early():
+        return os.environ.get("S1_ERA") == "early"
+
+    def _parser(self):
+        return EarlyParser() if self._early() else WireParser()
+
+    def _coil_event(self, ev):
+        """(node, coil, power) for a coil-fire event, else (None, None, 0)."""
+        if ev[0] != "frame":
+            return None, None, 0
+        if self._early():
+            node, cmd, data = ev[1], ev[2], ev[3]
+            if 0x40 <= cmd < 0x80 and data:
+                return node, cmd & 0x3F, int(any(data))
+            return None, None, 0
+        if len(ev[2]) >= 3 and ev[2][0] == 0x40:
+            return ev[1] & 0x7F, ev[2][1], ev[2][2]
+        return None, None, 0
+
     # -- coil reactions ------------------------------------------------------
     def arm(self, why):
         self.armed_until = time.monotonic() + ARM_WINDOW
@@ -440,7 +468,7 @@ class Keeper:
 
     # -- main loop -----------------------------------------------------------
     def run(self):
-        parser = WireParser()
+        parser = self._parser()
         cap = None
         cap_pos = 0
         serial_release = 0.0
@@ -459,7 +487,7 @@ class Keeper:
                     cap = open(self.cap_path, "rb")
                     cap.seek(0, 2)
                     cap_pos = cap.tell()
-                    parser = WireParser()
+                    parser = self._parser()
                 except OSError:
                     time.sleep(1.0)
                     continue
@@ -475,8 +503,9 @@ class Keeper:
             if data:
                 cap_pos += len(data)
                 for ev in parser.feed(data):
-                    if ev[0] == "frame" and len(ev[2]) >= 3 and ev[2][0] == 0x40:
-                        self.on_coil(ev[1] & 0x7F, ev[2][1], ev[2][2])
+                    node, idx, power = self._coil_event(ev)
+                    if idx is not None:
+                        self.on_coil(node, idx, power)
             # timed work
             changed = False
             for slot, until in list(self.pulses.items()):

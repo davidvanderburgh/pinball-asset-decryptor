@@ -381,9 +381,25 @@ int glCompressedTexImage2D(unsigned int target, int level, unsigned int ifmt,
     return 0;
 }
 
+/* ★ NOT A STUB ANY MORE (2026-09-01, king_kong_le). This returned 0 and sent
+ * nothing, which is invisible right up until a title animates by patching a
+ * compressed atlas in place: King Kong's intro curtain (ImageSeq_Curtains
+ * Opening, two 512x512 BC3 atlases) stayed closed for the whole 30 s intro
+ * while the film played behind it, and it looked exactly like a frozen video
+ * - the audio ran, the clip channel handed 30 frames/s, and the picture never
+ * changed. Wired through like glTexSubImage2D above; the host applies it with
+ * glCompressedTexSubImage2D and journals it as an overlay on the level. */
 int glCompressedTexSubImage2D(unsigned int t, int l, int x, int y, int w, int h,
                               unsigned int f, int size, const void *d)
-{ (void)t;(void)l;(void)x;(void)y;(void)w;(void)h;(void)f;(void)size;(void)d; return 0; }
+{
+    unsigned int a[7];
+    (void)t;
+    a[0] = (unsigned)l; a[1] = (unsigned)x; a[2] = (unsigned)y;
+    a[3] = (unsigned)w; a[4] = (unsigned)h; a[5] = f;
+    a[6] = (unsigned)(d && size > 0 ? size : 0);
+    emit(PADGL_TEXCOMPRESSEDSUB, a, sizeof a, d, a[6]);
+    return 0;
+}
 
 /* ---- buffers / vertex arrays ---- */
 int glGenBuffers(int n, unsigned int *ids)

@@ -7445,8 +7445,55 @@ rewriting it.**
         no node (`group_node.txt`), and the node directory lists two more
         pinnodes, 10 and 13 (code 18), that no switch group names — the
         Kong servo board, most likely. Not touched here.
-        **Resume: David's verdict on king_kong_le on the glass, then the
-        next title alphabetically.**
+        **★ SECOND FAULT, SAME TITLE, 2026-09-01 — "when starting a game,
+        the first video is freezing on this frame for 10+ seconds. the
+        audio plays just fine though. i haven't seen this kind of issue
+        before. is there a layering issue? or a problem loading
+        something?"** (the frame: the theatre, red curtain closed). David
+        handed me the rig AFK, so every step below was driven with
+        `plunge.py`/`swpoke.py`, seen through `glshot.sh` for menus and
+        `shotwin.py` for the game picture.
+        **THE VIDEO WAS NEVER FROZEN.** Measured on the live run: the intro
+        film streamed on ch1 at 30 frames/s for the whole 30 s (702.asset/
+        10 → 14 → 22, clip changes and EOS as the game asked), the renderer
+        drew 52 fps, no GL error, and the theatre frame is not a frame of
+        ANY clip the game had armed - I pulled the first frames of every
+        one. The jungle clip (137) sat PAUSED on ch0 by design until the
+        intro ended; the "30 s hold" is simply the intro's length. **Two
+        wrong turns, recorded so nobody walks them again:** (1) the shim's
+        own pause-hold `usleep(5000)` at 0x40857647 looked like the game's
+        wait loop - it is OUR loop, in hwshim.so; (2) the Tech Alerts
+        screen says "Kong Mech - Playfield Device - Calibration needed" and
+        the game's three-flag stdout print (`0 1 1` → `1 1 0` → `1 1 1`)
+        flips at the resume, so the john_wick-class mech wait (item 88)
+        fitted - until **Kong Mech Playfield Disabled = Yes** (Adjustments >
+        Machine Settings > Device Enables, driven blind) changed nothing:
+        28.5 s again. The mech is real and uncalibrated, but not this.
+        **THE FAULT: `glCompressedTexSubImage2D` was a STUB in glbridge.c.**
+        The curtain is an IMAGE SEQUENCE (`ImageSeq_CurtainsOpening`, two
+        512x512 BC3 atlases, 77/78.asset) that the game animates by patching
+        blocks of its atlas in place; the guest bridge answered that call by
+        returning 0 and emitting nothing, so the atlas stayed on the frame
+        it was created with - curtain closed - while the film played behind
+        it. Uploads were bridged for `glTexImage2D`, `glTexSubImage2D` and
+        `glCompressedTexImage2D`; this one call was the hole, and the game
+        imports it. **Fixed:** new op `PADGL_TEXCOMPRESSEDSUB` (appended, so
+        every op keeps its number), emitted by the guest exactly like the
+        uncompressed sibling, executed on the host with
+        `glCompressedTexSubImage2D`, size-checked, journaled as a level
+        overlay with its own op so a save state replays it after the level.
+        **Verified on the glass:** `shotwin.py` at 3 s shows the curtains
+        open and the film on the stage; at 12 s the film is still playing.
+        `ensurebuild` rebuilt both halves at the next start. Remaining
+        one-line stubs in the bridge are deletes, detaches, `glDrawBuffers`,
+        `glLineWidth` and `glReadPixels` - nothing that uploads pixels.
+        **Also learned:** menu presses need `swpoke.py <id> 300` and cursor
+        moves `--tap <id> 10` (turtles' recipe holds on King Kong); `-`
+        wraps a list to its last row; `glshot.sh` is honest for menus and
+        NOT for composited scenes (it reads partial texture pages) - use
+        `shotwin.py` for the game picture. Kong Mech Playfield Disabled
+        restored to No. **Resume: David's verdict on both King Kong fixes,
+        then the next title alphabetically.**
 
 - [x] **66. Deadpool and Avengers: Infinity Quest boot on a WHITE
       background.** `S3 D2` **CLOSED 2026-09-01 at David’s call** — "66 is

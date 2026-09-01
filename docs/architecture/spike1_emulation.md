@@ -464,8 +464,19 @@ persisted in `$S1_WORK/s1eep.bin`), so the next boot validates.
    on and never fired the trough eject — its ball count was already full.
    The keeper holds every `LOCKUP` switch closed like the trough; with that,
    START fires coil 3, the keeper serves and launches, and the game is on
-   `PLAYER 1 BALL 1`. (The drop-target reset, coil 7, still retries seven
-   times after launch and gives up — queue item 91.)
+   `PLAYER 1 BALL 1`.
+
+6. **The ball is not yet counted in play.** `ValidPlayfield_Update` (@0xecac)
+   sets the ball valid only after three playfield-switch turn-on edges since
+   the ball-start reset — `SWITCH_IsTurningOn(11)` or the "any playfield
+   switch on" group (`g_switchesBelowAllegiance` 5/6/7/19,
+   `g_switchesMegatron` 41/42/43/44). A plunge trips two of them (SHOOTER
+   LANE EXIT, the SKILL SHOT lane); the keeper pulses the lane-exit sensor on
+   launch. The third edge is a real scoring hit, so forcing the gate would
+   invent an award — reaching it honestly needs a playfield ball model (the
+   item-88 mech-feedback shape). The drop-target reset (coil 7) also retries
+   seven times after launch and gives up. Both are queue item 91; everything
+   up to the plunge is modelled.
 
 ### The display (`s1alpha.py`)
 

@@ -119,18 +119,26 @@ These have each been violated at least once and each cost a run or a window:
       serve half of the original filing was solved the same hour and is in
       item 90.)* What is left on the 2012 platform now that a ball serves and
       launches:
-      - **THE BALL IS NOT COUNTED IN PLAY.**  After the keeper's launch (lane
-        switch opens, SHOOTER LANE EXIT pulsed 0.3 s) the display keeps
-        cycling PLAYER 1 BALL 1 / PLUNGE BALL, and no playfield hit
-        scores - pops, slings, return lane, top lane, each tried; nor after
-        a flipper press and a second START to confirm the game's side-select
-        prompt ("USE FLIPPERS TO CHOOSE YOUR SIDE, PRESS START TO CONFIRM
-        SELECTION").  So the game still believes the ball sits in the lane.
-        First things to try: hold SHOOTER LANE longer before the launch
-        (the keeper's 2.5 s may be shorter than this title's settle time),
-        pulse SKILL SHOT (41) on the way out, and read what
-        display_state_plunge_func's caller tests.  This is the last gate
-        between "serves" and "plays".
+      - **THE BALL IS NOT COUNTED IN PLAY, and the gate is now known exactly.**
+        `ValidPlayfield_Update` (gamer @0xecac) declares the ball in play only
+        after **three** playfield-switch turn-on EDGES since the count was last
+        reset at ball start: it increments `g_nValidPlayfieldSwitches` on
+        `SWITCH_IsTurningOn(11)` (RIGHT OUT LANE) OR the "any playfield switch
+        turning on" group flag (`SwitchGroupsCompute`, from
+        `g_switchesBelowAllegiance` = ids 5/6/7/19 = the pops, cyberlock,
+        Megatron; and `g_switchesMegatron` = 41/42/43/44 = skill shot, shooter
+        lane exit, collect decepticons, autobot top lane), and sets valid on
+        the third.  Until then the display cycles PLAYER 1 BALL 1 / PLUNGE
+        BALL.  A plunge physically trips two of these (SHOOTER LANE EXIT, then
+        the SKILL SHOT lane); the keeper already pulses SHOOTER LANE EXIT on
+        launch (a pure sensor).  **The third edge is a real scoring hit**, and
+        that is the boundary: faking SKILL SHOT or a pop bumper to force the
+        gate would credit the player an award they did not earn, so the keeper
+        must NOT.  Closing this honestly means a playfield BALL MODEL - the
+        ball leaves the lane, enters play, and hits a switch because it
+        physically would - which is item 88's mech-feedback shape generalised
+        to a free ball.  Everything up to and including the plunge is modelled;
+        the autonomous ball is the remaining, larger piece.
       - **DROP TARGET RESET (coil 7, `ff600000`)** retries 7 times after the
         ball launches and then gives up; the game plays on.  Measured: the
         targets (switches 16-18) read "up" when OPEN (holding them closed

@@ -4606,62 +4606,6 @@ These have each been violated at least once and each cost a run or a window:
          so "the TV is only asked for in attract" is still untested — reaching
          attract on batman is the next measurement, not a shim change.
 
-- [ ] **66. Deadpool and Avengers: Infinity Quest boot on a WHITE
-      background.** `S3 D2`
-      *(Filed 2026-08-23 from PAD-81: "Deadpool: the white background
-      displayed during the 'Startup in progress' boot state is unexpected
-      behaviour", and the same sentence again for Avengers: Infinity Quest.)*
-      Two titles, one symptom, and the real machine's boot screen is black —
-      so this is ours, not the game's. Unmeasured: whether the white is a
-      surface cleared to white under a transparent boot scene (a
-      `glClearColor` nobody set on that title's boot path) or real content the
-      boot scene draws and the machine covers.
-      **Start with `glshot.sh`** (item 51 built it): it writes the screen FBO
-      with no window, letterbox or RAIL proxy in the path, so one shot
-      separates "the pixels handed to GL are already white" from "the draw is
-      wrong" — the same split item 51's own note argues for.
-      **Two titles is the lever.** deadpool_pro and deadpool_le are both on
-      hand and both known-good otherwise (item 57's catalogue audit), and
-      avengers_infinity_le is a third; any title that boots BLACK on the same
-      build is the control.
-      **Acceptance:** deadpool and avengers_infinity boot on black, a
-      before/after shot each, and a black-booting control title unchanged.
-      — S3: cosmetic, the game plays. D2: two titles reproduce it on demand
-      and the instrument already exists.
-      **★ CENSUS WIDENED 2026-08-23, a second external tester (Sam, emailed
-      David), the day v0.156.0 shipped: Iron Maiden, Jurassic Park, TMNT,
-      Rush and Munsters (PARTIAL white) all show the white "Startup in
-      progress" background — seven titles of ~26 now, two independent
-      testers, symptom current.** (TMNT joining says nothing about Sam's
-      build age: its no-boot spell was rig-local machine state, item 69, not
-      shared code.)
-      **Seven titles retire the per-title framing** — "Startup in progress"
-      is engine-common UI, so read the white as ONE mechanism. Desk facts
-      (read 2026-08-23) bound where it hides: the window present clears
-      BLACK before the blit (win_present padglhost.c:2206-2208, win2
-      2455-2457), guest clears pass through verbatim (4076-4084 — the host
-      injects no white anywhere), the blit DISCARDS guest alpha (`o_col =
-      vec4(rgb, 1.0)`, BLIT_FS ~667), and `tex_screen` is created with NULL
-      data and never cleared (4807-4818). Two live hypotheses, and the
-      second now leads: (a) undefined tex_screen ground showing through a
-      transparent boot scene — but drivers commonly hand back ZEROED memory,
-      which this blit would show as black; (b) the guest paints white RGB
-      with transparent alpha that the real machine's display chain
-      multiplies away and our alpha-discarding blit does not — which fits
-      the SAME white on seven titles far better. **Munsters' PARTIAL white
-      is the discriminating datapoint**: whatever its boot scene paints
-      shows over the mechanism's ground.
-      **Instrument caveat found at the desk:** glshot READS the FBO as RGBA
-      (jgl_poll, padglhost.c:3426) but write_png then DROPS alpha (truecolor
-      PNG, ihdr[9]=2 at 2548, bytes 0-2 only at 2556) — so today's
-      glshot.png CANNOT split (a) from (b). The fix session's first move is
-      a small instrument change (RGBA PNG or raw dump), then one mid-boot
-      shot per this item's own prescription.
-      **Acceptance widened:** all seven reported titles boot black (measure
-      deadpool + avengers + one of Sam's five if the mechanism is shared;
-      all seven if not), before/after shots, and a black-booting control on
-      the same build unchanged.
-
 - [ ] **67. The Mandalorian's second display stays blank through attract.**
       `S3 D3`
       *(Filed 2026-08-23 from PAD-81: "The Mandalorian: the secondary screen
@@ -5156,35 +5100,6 @@ These have each been violated at least once and each cost a run or a window:
       nothing else is blocked. D3: needs runs, reproduces on demand (4/4),
       instruments exist — the missing piece is an exit-reason hook on the
       guest (item 23's) wired into this flow.
-
-- [ ] **76. Batch pre-cache: copy a chosen set of cards into `~/cardcache`
-      ahead of time, so a title sweep's first boots are all cached boots.**
-      `S3 D2`
-      *(Filed 2026-08-23 at David's ask — "do both, widen 74 and add the
-      batch pre-cache item" — after item 34's close measured the copier at
-      ~120-150 MB/s standalone: ~60-70 s per 7.3 GB card, so the whole
-      Stern folder pre-caches in well under an hour, unattended.)*
-      The copier already exists and runs detached: `cardmount.sh`
-      `cache_pick()` starts it per card and item 34's size+mtime stamp
-      decides validity. Missing is a way to run it for MANY cards without
-      booting each: point it at a folder (or a picked set) and it copies
-      every card not already cached, one at a time, with per-card progress
-      and a clean stop. Plausible shape (a guess, not established): a small
-      CLI (`precache.sh <folder>`) as the cheap half, a button on the
-      Emulate tab wrapping it later. Constraints: one card copying at a
-      time against the one disk (the per-label pid lock only guards one
-      card), NEVER while a run is live (rig-lock rules apply when a
-      session runs it), and PAD_CARD_CACHE=0 skips it.
-      **Acceptance:** run the batch tool over a folder holding at least one
-      uncached and one cached card — the cached one is skipped and says so,
-      the uncached one lands in `~/cardcache` with a stamp `cache_pick()`
-      accepts: a following boot of it logs "using local cache" and starts
-      no copier.
-      — S3: convenience — any card can already be cached by booting it
-      once, and item 74's pre-copy makes even that first boot honest; what
-      this buys is sweep sessions that never wait. D2: desk work — the copy
-      path exists and is proven — plus one confirming boot of a pre-cached
-      card.
 
 - [x] **77. The card cache is unmanaged: 125 GB real across 25 entries on a
       251 GB WSL disk at 89%, nothing prunes it, and version updates orphan
@@ -6902,7 +6817,7 @@ with **19** going too, because its only route was 16's replay engine and it
 cannot be started without one. `/next` does not offer anything in this
 section, and nothing here counts toward the done percentage.
 
-**The numbers stay retired: 16, 19 and 23 are never reused**, and
+**The numbers stay retired: 16, 19, 23 and 76 are never reused**, and
 `plans/spike2_pc_emulation_handoff.md` still keys its `REMAINING item N`
 headings on them.
 
@@ -6915,6 +6830,40 @@ expensive ruled-out results. None of that lives anywhere else in the repo:
 the handoff that would otherwise hold it is gitignored and local to this
 machine. **Reopening one means moving its block back up to the Queue, not
 rewriting it.**
+
+- **DROPPED 2026-09-01 at David’s ask** — *"76 we shouldn’t do (close
+      that)"*. **76. Batch pre-cache: copy a chosen set of cards into
+      `~/cardcache` ahead of time.** `S3 D2` **A scope decision, not a finding:**
+      nothing in this entry was disproven, the copy path still exists and still
+      works as described, and any card can still be cached by booting it once —
+      which is what makes the convenience skippable. **The number 76 is retired
+      and never reused.** The entry is kept below in case a later sweep wants
+      the design.
+      *(Filed 2026-08-23 at David's ask — "do both, widen 74 and add the
+      batch pre-cache item" — after item 34's close measured the copier at
+      ~120-150 MB/s standalone: ~60-70 s per 7.3 GB card, so the whole
+      Stern folder pre-caches in well under an hour, unattended.)*
+      The copier already exists and runs detached: `cardmount.sh`
+      `cache_pick()` starts it per card and item 34's size+mtime stamp
+      decides validity. Missing is a way to run it for MANY cards without
+      booting each: point it at a folder (or a picked set) and it copies
+      every card not already cached, one at a time, with per-card progress
+      and a clean stop. Plausible shape (a guess, not established): a small
+      CLI (`precache.sh <folder>`) as the cheap half, a button on the
+      Emulate tab wrapping it later. Constraints: one card copying at a
+      time against the one disk (the per-label pid lock only guards one
+      card), NEVER while a run is live (rig-lock rules apply when a
+      session runs it), and PAD_CARD_CACHE=0 skips it.
+      **Acceptance:** run the batch tool over a folder holding at least one
+      uncached and one cached card — the cached one is skipped and says so,
+      the uncached one lands in `~/cardcache` with a stamp `cache_pick()`
+      accepts: a following boot of it logs "using local cache" and starts
+      no copier.
+      — S3: convenience — any card can already be cached by booting it
+      once, and item 74's pre-copy makes even that first boot honest; what
+      this buys is sweep sessions that never wait. D2: desk work — the copy
+      path exists and is proven — plus one confirming boot of a pre-cached
+      card.
 
 - **DROPPED 2026-08-11.** **23. The game exits by itself mid-play.** `S1 D2` *(**D4 → D2,
       2026-08-06 evening, off item 11's runs:** a SECOND fault shape now has
@@ -7200,6 +7149,77 @@ rewriting it.**
       in the Controls legend.
 
 ## Done
+
+- [x] **66. Deadpool and Avengers: Infinity Quest boot on a WHITE
+      background.** `S3 D2` **CLOSED 2026-09-01 at David’s call** — "66 is
+      closed (that was already fixed)". **No commit in this repo names the
+      fix, and the mechanism this item suspected is UNCHANGED on main** —
+      `BLIT_FS` still discards guest alpha (`o_col = vec4(...rgb, 1.0)`,
+      padglhost.c:667) and `tex_screen` is still created NULL and never
+      cleared. So the white most likely stopped appearing as a SIDE EFFECT of
+      the boot work since 2026-08-23 — item 62’s fleet-wide NVRAM grade fix
+      and item 63’s Tech-Alerts work both changed what the boot path draws and
+      how long it is on the glass — rather than from a targeted change.
+      **The corroboration on record is item 80’s sweep: avengers_infinity_le
+      came back ✅ CLEAN with David’s own green check**, no white reported.
+      **If it is ever seen again, everything below is the head start**, and
+      none of it is disproven by this close: hypothesis (b) — the guest
+      painting white RGB under transparent alpha that our blit does not
+      multiply away — was never tested, and neither was the glshot RGBA fix
+      that would be needed to test it.
+      *(Filed 2026-08-23 from PAD-81: "Deadpool: the white background
+      displayed during the 'Startup in progress' boot state is unexpected
+      behaviour", and the same sentence again for Avengers: Infinity Quest.)*
+      Two titles, one symptom, and the real machine's boot screen is black —
+      so this is ours, not the game's. Unmeasured: whether the white is a
+      surface cleared to white under a transparent boot scene (a
+      `glClearColor` nobody set on that title's boot path) or real content the
+      boot scene draws and the machine covers.
+      **Start with `glshot.sh`** (item 51 built it): it writes the screen FBO
+      with no window, letterbox or RAIL proxy in the path, so one shot
+      separates "the pixels handed to GL are already white" from "the draw is
+      wrong" — the same split item 51's own note argues for.
+      **Two titles is the lever.** deadpool_pro and deadpool_le are both on
+      hand and both known-good otherwise (item 57's catalogue audit), and
+      avengers_infinity_le is a third; any title that boots BLACK on the same
+      build is the control.
+      **Acceptance:** deadpool and avengers_infinity boot on black, a
+      before/after shot each, and a black-booting control title unchanged.
+      — S3: cosmetic, the game plays. D2: two titles reproduce it on demand
+      and the instrument already exists.
+      **★ CENSUS WIDENED 2026-08-23, a second external tester (Sam, emailed
+      David), the day v0.156.0 shipped: Iron Maiden, Jurassic Park, TMNT,
+      Rush and Munsters (PARTIAL white) all show the white "Startup in
+      progress" background — seven titles of ~26 now, two independent
+      testers, symptom current.** (TMNT joining says nothing about Sam's
+      build age: its no-boot spell was rig-local machine state, item 69, not
+      shared code.)
+      **Seven titles retire the per-title framing** — "Startup in progress"
+      is engine-common UI, so read the white as ONE mechanism. Desk facts
+      (read 2026-08-23) bound where it hides: the window present clears
+      BLACK before the blit (win_present padglhost.c:2206-2208, win2
+      2455-2457), guest clears pass through verbatim (4076-4084 — the host
+      injects no white anywhere), the blit DISCARDS guest alpha (`o_col =
+      vec4(rgb, 1.0)`, BLIT_FS ~667), and `tex_screen` is created with NULL
+      data and never cleared (4807-4818). Two live hypotheses, and the
+      second now leads: (a) undefined tex_screen ground showing through a
+      transparent boot scene — but drivers commonly hand back ZEROED memory,
+      which this blit would show as black; (b) the guest paints white RGB
+      with transparent alpha that the real machine's display chain
+      multiplies away and our alpha-discarding blit does not — which fits
+      the SAME white on seven titles far better. **Munsters' PARTIAL white
+      is the discriminating datapoint**: whatever its boot scene paints
+      shows over the mechanism's ground.
+      **Instrument caveat found at the desk:** glshot READS the FBO as RGBA
+      (jgl_poll, padglhost.c:3426) but write_png then DROPS alpha (truecolor
+      PNG, ihdr[9]=2 at 2548, bytes 0-2 only at 2556) — so today's
+      glshot.png CANNOT split (a) from (b). The fix session's first move is
+      a small instrument change (RGBA PNG or raw dump), then one mid-boot
+      shot per this item's own prescription.
+      **Acceptance widened:** all seven reported titles boot black (measure
+      deadpool + avengers + one of Sam's five if the mechanism is shared;
+      all seven if not), before/after shots, and a black-booting control on
+      the same build unchanged.
 
 - [x] **87. Spike 1 save states: the Emulate tab's slot panel is a DEAD STUB —
       wire it to a real checkpoint/restore for the Spike 1 rig.** `S2 D2`

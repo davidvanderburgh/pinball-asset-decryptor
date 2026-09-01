@@ -7492,8 +7492,11 @@ rewriting it.**
         wraps a list to its last row; `glshot.sh` is honest for menus and
         NOT for composited scenes (it reads partial texture pages) - use
         `shotwin.py` for the game picture. Kong Mech Playfield Disabled
-        restored to No. **Resume: David's verdict on both King Kong fixes,
-        then the next title alphabetically.**
+        restored to No.
+        **★ VERDICT: ✅ CLEAN, David's green check, 2026-09-01** — "ok this
+        is fixed. king kong gets the green check mark." Both fixes shipped
+        in v0.178.0. **Resume: the next title alphabetically after
+        king_kong_le, once David reports it.**
 
 - [x] **66. Deadpool and Avengers: Infinity Quest boot on a WHITE
       background.** `S3 D2` **CLOSED 2026-09-01 at David’s call** — "66 is

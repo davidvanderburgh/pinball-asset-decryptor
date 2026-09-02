@@ -95,6 +95,15 @@ if "--fit" in ARGS:
     i = ARGS.index("--fit")
     FIT_OUT = os.path.abspath(ARGS[i + 1])
     del ARGS[i:i + 2]
+#: ``--warn out.png``: the same card with one image a version behind, so
+#: the version strip is up.  It is the one state a screenshot cannot show
+#: by accident - every card the tab is otherwise driven with is sound.
+WARN_OUT = None
+if "--warn" in ARGS:
+    i = ARGS.index("--warn")
+    WARN_OUT = os.path.abspath(ARGS[i + 1])
+    del ARGS[i:i + 2]
+
 DIALOG_DIR = None
 if "--dialogs" in ARGS:
     i = ARGS.index("--dialogs")
@@ -496,6 +505,10 @@ def s_fill():
     panel._ed_anim_start.set(start)
     panel._ed_anim_seconds.set(seconds)
     panel._ed_anim_fps.set(fps)
+    # ...and it has a confirm sound of its OWN, so the Confirm column shows
+    # both states in one picture: a row's own value plain, and the rows that
+    # fall back to the menu's in brackets.
+    panel._ed_confirm.set("synth")
     panel._default_var.set(str(HIGHLIGHT))
     # The Code column: what a builder that has read the version off each
     # .raw would put there.  Set on the rows, then redrawn.
@@ -555,11 +568,20 @@ def inspect_report():
         {"index": i, "device": devices[i], "title": title,
          "subtitle": sub, "art": "art%d.png" % i,
          "anim": "anim%d.gif" % i if i == HIGHLIGHT else None,
-         "music": None, "art_source": "auto",
+         "art_source": "auto",
          "anim_source": ("auto@%s:%s:%s" % (start, seconds, fps)
                          if i == HIGHLIGHT else "none"),
+         "music": None,
+         # image 1 has a confirm sound of its OWN, so the Confirm column
+         # shows both states at once: its own value plain, and the rows
+         # that fall back to the menu's in brackets
+         "confirm": "confirm%d.wav" % i if i == HIGHLIGHT else None,
+         "confirm_source": "synth" if i == HIGHLIGHT else None,
          "source": src[i], "source_exists": os.path.isfile(path),
-         "title_dir": "turtles", "bypass": "bypassed"}
+         "title_dir": "turtles", "bypass": "bypassed",
+         # the version gate reads this off the image itself
+         "version": VERSIONS[i], "version_source": "sidx",
+         "node_fw_version": "1.33.0"}
         for i, (path, title, sub) in enumerate(IMAGES)]
     return {
         "card": CARD, "size": 15494807552, "layout": "parts",
@@ -590,10 +612,11 @@ def s_load():
     # One change: the countdown. The preview frame above was drawn with the
     # new value, which is what Render preview would show.
     panel._timeout_var.set(str(TIMEOUT_NOW))
-    # The Code column again: a load fills the rows from the card, and the
-    # version is a fact about the .raw, not something the card records.
-    for row, version in zip(panel._rows, VERSIONS):
-        row.version = version
+    # The Code column fills itself here: the report carries each image's
+    # game code version, read off the image by the tool that inspected it.
+    log("versions off the card: %s" % [r.version for r in panel._rows])
+    log("confirm sounds: %s" % [r.confirm or "(the menu's)"
+                                for r in panel._rows])
     panel._refresh_tree(select=HIGHLIGHT)
     panel._tree.selection_set(str(HIGHLIGHT))
     panel._tree.focus(str(HIGHLIGHT))
@@ -628,6 +651,43 @@ def s_snap():
     measure("README window")
     if not MEASURE:
         snap(OUT)
+
+
+@step(700)
+def s_warn():
+    """The loud one: a card whose images are NOT the same game code.  The
+    strip is packed above the picture only while there is something wrong,
+    so this is the only way to see it - and the only way to keep proving it
+    fits."""
+    if not WARN_OUT:
+        return
+    panel = win._multiboot_panel
+    rep = inspect_report()
+    rep["images"][-1]["version"] = "1.58.0"
+    rep["version_mismatch"] = (
+        "Images 0, 1 are 1.59.0 and image 2 is 1.58.0. Two builds of the "
+        "same title share the machine's settings by NAME, so most carry "
+        "over - but a setting only one build has falls back to its default, "
+        "a renamed one reverts, and the store keeps three generations, so "
+        "two boots of the other build erase a build-exclusive value.")
+    rep["node_fw_mismatch"] = (
+        "Images 0, 1 carry node board firmware 1.33.0; image 2 carries "
+        "1.19.0. The machine records the running build's version at every "
+        "boot, so this card can reflash the node boards on every swap.")
+    panel.load_inspect(rep, CARD)
+    panel._refresh_tree(select=HIGHLIGHT)
+    # A load clears the preview (its media dir changed under it); put the
+    # frame back, so the picture shows the banner OVER a drawn menu rather
+    # than over the empty-tab placeholder.
+    frame = FRAME or os.path.join(os.environ.get("TEMP", "."),
+                                  "multiboot_shot_frame.ppm")
+    panel.load_frame(frame, HIGHLIGHT, FRAME_INDEX, FRAMES)
+    root.update()
+    win._resize_notebook_to_current_tab()
+    root.update_idletasks()
+    measure("version warning")
+    log("strip: %r" % panel._alarm.cget("text"))
+    snap(WARN_OUT)
 
 
 @step(800)

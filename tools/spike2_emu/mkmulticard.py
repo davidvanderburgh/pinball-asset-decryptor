@@ -31,18 +31,22 @@ game file); 'validator: bypassed' / 'validator: none on this build' is printed p
 partition's md5 sidecar is rewritten, and verify reports the bypass state per tree.
 
 MEDIA (--media-dir DIR, item 90 v2).  DIR/media.json (written by selectmedia.py) names per image
-an art PNG, an animated GIF and a music WAV (any of them null) plus the move/confirm sounds and
-the volume; only the referenced files are staged into /usr/local/codeselect/media on p2 (flat,
-names ^[A-Za-z0-9._-]+$, PNG <= 1360x768, GIF <= 1.5 MB / 512x288 / 30 frames, WAV pcm_s16le
-44100 Hz 1-2 ch, the whole set <= 20 MB), and images.conf gets the 6-field image lines
-(image=<device>|<title>|<subtitle>|<art>|<anim>|<music>) and the sound_move= / sound_confirm= /
-volume= / mixer_volume= / media= keys.  A 3-field line stays valid.
+an art PNG, an animated GIF, a music WAV and a confirm WAV of its own (any of them null) plus the
+move/confirm sounds and the volume; only the referenced files are staged into
+/usr/local/codeselect/media on p2 (flat, names ^[A-Za-z0-9._-]+$, PNG <= 1360x768, GIF <= 1.5 MB /
+512x288 / 30 frames, WAV pcm_s16le 44100 Hz 1-2 ch, the whole set <= 20 MB), and images.conf gets
+the image lines (image=<device>|<title>|<subtitle>|<art>|<anim>|<music>|<confirm>) and the
+sound_move= / sound_confirm= / volume= / mixer_volume= / media= keys.  The line is written only as
+wide as it needs to be - 3 fields with no media at all, 6 when no image names a confirm of its own -
+and every narrower form stays valid.  An image's own confirm is the sound that plays when THAT image
+is chosen; an empty field falls back to the menu-wide sound_confirm=.
 
 THE TWO JSON SIDECARS (item 90, "load a finished card back into the editor").  Beside
 images.conf - never inside media/, never in the media budget, never opened by the selector
 (it reads images.conf and the files that names) - `build` and `inject` also stage
   build.json  {"tool", "version", "written", "layout",
-               "images": [{"device", "source", "title", "subtitle", "art", "anim", "music"}],
+               "images": [{"device", "source", "title", "subtitle", "art", "anim", "music",
+                           "confirm"}],
                "timeout", "default", "volume", "mixer_volume", "sound_move", "sound_confirm"}
               'source' is the .raw each image came from - the one thing images.conf cannot
               hold and a rebuild needs.  An `inject` given no --primary/--extra reads the
@@ -232,6 +236,13 @@ P2_FREE_MARGIN = 8 << 20                      # never fill p2 to the last block
 MAX_IMAGES = 16
 DEVICE_RE = re.compile(r"^(/dev/mmcblk0p|p)(\d+)(?::([A-Za-z0-9._-]+))?$")
 CONF_KEYS = ("default", "timeout", "font", "sound_move", "sound_confirm", "volume", "mixer_volume", "media")
+
+#: An image's own media, in the order the images.conf line carries it after the device, the title
+#: and the subtitle.  `confirm` is that image's own confirm sound; an empty one falls back to the
+#: menu-wide sound_confirm=.  Everything that builds or reads a media row measures itself against
+#: these two, so widening the line again is one edit here plus the staging.
+MEDIA_FIELDS = ("art", "anim", "music", "confirm")
+MEDIA_ROW = ("",) * len(MEDIA_FIELDS)
 
 # ---- the multi layout ----------------------------------------------------------------------
 MULTI_LABEL = "multi"
@@ -729,9 +740,11 @@ def _int_range(val, key, lo, hi):
 def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=15, font=None,
                        media=None, sound_move=None, sound_confirm=None, volume=None, mixer_volume=None,
                        media_dir=None):
-    """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music) per image (names
-    relative to the media dir, '' = none); the image lines carry the 6 fields only when any media
-    is set, else the 3-field form every older selector reads.  The global keys follow."""
+    """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
+    (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
+    line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
+    own, 6 when some other media is set, else the 3-field form every older selector reads.  The
+    global keys follow."""
     devices = list(devices)
     if not devices:
         raise Refused("images.conf: no images")
@@ -741,21 +754,24 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         parse_device(d)
     titles = list(titles or [])
     subtitles = list(subtitles or [])
-    media = [tuple(m) if m else ("", "", "") for m in (media or [])]
+    media = [tuple(m) if m else MEDIA_ROW for m in (media or [])]
+    # a caller from before the per-image confirm passes 3-tuples; widen them rather than refuse
+    media = [m + ("",) * (len(MEDIA_ROW) - len(m)) if len(m) < len(MEDIA_ROW) else m
+             for m in media]
     if len(titles) > len(devices) or len(subtitles) > len(devices) or len(media) > len(devices):
         raise Refused("images.conf: %d titles / %d subtitles / %d media rows for %d images"
                       % (len(titles), len(subtitles), len(media), len(devices)))
     titles += ["image %d" % i for i in range(len(titles), len(devices))]
     subtitles += [""] * (len(devices) - len(subtitles))
-    media += [("", "", "")] * (len(devices) - len(media))
+    media += [MEDIA_ROW] * (len(devices) - len(media))
     for s in titles + subtitles:
         if "|" in s or "\n" in s or "\r" in s:
             raise Refused("images.conf: title/subtitle %r may not contain '|' or a newline" % s)
     rows = []
     for m in media:
-        if len(m) != 3:
-            raise Refused("images.conf: a media row is (art, anim, music), got %r" % (m,))
-        rows.append(tuple(_media_name_ok(x or "", what) for x, what in zip(m, ("art", "anim", "music"))))
+        if len(m) != len(MEDIA_ROW):
+            raise Refused("images.conf: a media row is (art, anim, music, confirm), got %r" % (m,))
+        rows.append(tuple(_media_name_ok(x or "", what) for x, what in zip(m, MEDIA_FIELDS)))
     sound_move = _media_name_ok(sound_move or "", "sound_move")
     sound_confirm = _media_name_ok(sound_confirm or "", "sound_confirm")
     if not (0 <= int(default) < len(devices)):
@@ -769,12 +785,16 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     if media_dir and ("|" in media_dir or "\n" in media_dir):
         raise Refused("images.conf: media=%r may not contain '|' or a newline" % media_dir)
     any_media = any(any(r) for r in rows)
+    # the seventh field is written only when some image has a confirm sound of its own, so a menu
+    # where every image uses the menu-wide sound reads exactly as it did before this existed
+    width = 4 if any(r[3] for r in rows) else (3 if any_media else 0)
     out = ["# images.conf - codeselect, the boot-time code selector (item 90); written by mkmulticard.py",
-           "# image=<device>|<title>|<subtitle>[|<art>|<anim>|<music>]   index = order (0-based); media names are",
-           "# relative to media= (default /usr/local/codeselect/media); default = highlight when no last choice;",
-           "# timeout = seconds before the highlighted image boots by itself (0 = wait for ever)"]
+           "# image=<device>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]   index = order (0-based);",
+           "# media names are relative to media= (default /usr/local/codeselect/media); <confirm> is that",
+           "# image's own confirm sound and an empty one falls back to sound_confirm=; default = highlight",
+           "# when no last choice; timeout = seconds before the highlighted image boots by itself (0 = for ever)"]
     for d, t, s, r in zip(devices, titles, subtitles, rows):
-        out.append("image=%s|%s|%s" % (d, t, s) + ("|%s|%s|%s" % r if any_media else ""))
+        out.append("image=%s|%s|%s" % (d, t, s) + "".join("|" + x for x in r[:width]))
     out.append("default=%d" % int(default))
     out.append("timeout=%d" % int(timeout))
     if font:
@@ -795,11 +815,12 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
 
 
 def parse_images_conf(text):
-    """-> {'images': [(device, title, subtitle)], 'media': [(art, anim, music)] (aligned, '' = none),
-    'default': int, 'timeout': int, 'font': str|None, 'sound_move': str|None, 'sound_confirm': str|None,
-    'volume': int|None, 'mixer_volume': int|None, 'media_dir': str|None}.  A 3-field image line is
-    valid; more than 6 fields, a bad device, a media name with '|' ':' or '/', or more than 16
-    images is refused.  Unknown keys are ignored (the file may grow)."""
+    """-> {'images': [(device, title, subtitle)], 'media': [(art, anim, music, confirm)] (aligned,
+    '' = none), 'default': int, 'timeout': int, 'font': str|None, 'sound_move': str|None,
+    'sound_confirm': str|None, 'volume': int|None, 'mixer_volume': int|None, 'media_dir': str|None}.
+    3-field and 6-field image lines are valid; more than 7 fields, a bad device, a media name with
+    '|' ':' or '/', or more than 16 images is refused.  Unknown keys are ignored (the file may
+    grow)."""
     if isinstance(text, bytes):
         text = text.decode("utf-8", "replace")
     conf = {"images": [], "media": [], "default": 0, "timeout": 15, "font": None,
@@ -812,12 +833,14 @@ def parse_images_conf(text):
         key = key.strip()
         if key == "image":
             f = [x.strip() for x in val.split("|")]
-            if len(f) > 6:
-                raise Refused("images.conf: image line has %d fields (at most 6): %r" % (len(f), raw))
-            f += [""] * (6 - len(f))
+            if len(f) > 3 + len(MEDIA_ROW):
+                raise Refused("images.conf: image line has %d fields (at most %d): %r"
+                              % (len(f), 3 + len(MEDIA_ROW), raw))
+            f += [""] * (3 + len(MEDIA_ROW) - len(f))
             parse_device(f[0])
             conf["images"].append((f[0], f[1], f[2]))
-            conf["media"].append(tuple(_media_name_ok(x, what) for x, what in zip(f[3:6], ("art", "anim", "music"))))
+            conf["media"].append(tuple(_media_name_ok(x, what)
+                                       for x, what in zip(f[3:3 + len(MEDIA_ROW)], MEDIA_FIELDS)))
             if len(conf["images"]) > MAX_IMAGES:
                 raise Refused("images.conf: more than %d images" % MAX_IMAGES)
         elif key in ("default", "timeout"):
@@ -951,9 +974,11 @@ def check_media_file(path, kind):
 
 def read_media_manifest(media_dir):
     """DIR/media.json -> dict; the shape selectmedia.py writes:
-    {"images": [{"art": "art0.png", "anim": "anim0.gif"|null, "music": "music0.wav"|null}, ...],
+    {"images": [{"art": "art0.png", "anim": "anim0.gif"|null, "music": "music0.wav"|null,
+                 "confirm": "confirm0.wav"|null}, ...],
      "sound_move": "move.wav"|null, "sound_confirm": "confirm.wav"|null, "volume": 50}
-    ("mixer_volume" optional)."""
+    ("mixer_volume" optional; "confirm" is that image's OWN confirm sound, null = the menu-wide
+    one, and the "*_source" keys selectmedia also writes are provenance this tool ignores)."""
     path = os.path.join(media_dir, MEDIA_MANIFEST)
     if not os.path.isdir(media_dir):
         raise Refused("--media-dir %s is not a directory" % media_dir)
@@ -971,7 +996,7 @@ def read_media_manifest(media_dir):
 
 def plan_media(media_dir, n_images):
     """Validate DIR/media.json against a card with `n_images` images and check every referenced
-    file -> {'rows': [(art, anim, music)], 'sound_move', 'sound_confirm', 'volume', 'mixer_volume',
+    file -> {'rows': [(art, anim, music, confirm)], 'sound_move', 'sound_confirm', 'volume', 'mixer_volume',
     'files': OrderedDict name -> source path, 'total': bytes, 'kinds': {name: kind word}}.
     Only referenced files are staged; a missing, misnamed, malformed or over-budget one refuses."""
     man = read_media_manifest(media_dir)
@@ -1003,7 +1028,8 @@ def plan_media(media_dir, n_images):
             raise Refused("%s: images[%d] must be an object" % (MEDIA_MANIFEST, i))
         rows.append((take(e.get("art"), "art", "images[%d].art" % i),
                      take(e.get("anim"), "anim", "images[%d].anim" % i),
-                     take(e.get("music"), "wav", "images[%d].music" % i)))
+                     take(e.get("music"), "wav", "images[%d].music" % i),
+                     take(e.get("confirm"), "wav", "images[%d].confirm" % i)))
     out = {"rows": rows,
            "sound_move": take(man.get("sound_move"), "wav", "sound_move") or None,
            "sound_confirm": take(man.get("sound_confirm"), "wav", "sound_confirm") or None,
@@ -1660,7 +1686,7 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
     sources = list(sources or [])
     rows = []
     for i, (dev, title, sub) in enumerate(conf["images"]):
-        art, anim, music = conf["media"][i] if i < len(conf["media"]) else ("", "", "")
+        art, anim, music, confirm = conf["media"][i] if i < len(conf["media"]) else MEDIA_ROW
         given = sources[i] if i < len(sources) else None
         # only a freshly given path is absolutised; a carried one is already absolute and may
         # be spelled for another OS (a /mnt/d path read on Windows must not be mangled)
@@ -1670,6 +1696,7 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
         rows.append(collections.OrderedDict([
             ("device", dev), ("source", src or None), ("title", title), ("subtitle", sub),
             ("art", art or None), ("anim", anim or None), ("music", music or None),
+            ("confirm", confirm or None),
             ("title_dir", v.get("title") or old.get("title_dir")),
             ("version", v.get("version") or old.get("version")),
             ("node_fw_version", v.get("node_fw_version") or old.get("node_fw_version"))]))
@@ -2604,7 +2631,8 @@ def verify_card(card, plan, selector_dir=None, media_dir=None):
         devs = [d for (d, _t, _s) in conf["images"]]
         check("images.conf devices = %r" % (plan.devices(),), devs == plan.devices(), "got %r" % (devs,))
         for (d, t, s), m in zip(conf["images"], conf["media"]):
-            print("    image %s | %s | %s%s" % (d, t, s, (" | %s | %s | %s" % m) if any(m) else ""))
+            print("    image %s | %s | %s%s"
+                  % (d, t, s, "".join(" | %s" % x for x in m) if any(m) else ""))
         print("    default=%d timeout=%d font=%s" % (conf["default"], conf["timeout"], conf["font"]))
         print("    sound_move=%s sound_confirm=%s volume=%s mixer_volume=%s media=%s"
               % (conf["sound_move"], conf["sound_confirm"], conf["volume"], conf["mixer_volume"], conf["media_dir"]))
@@ -2757,7 +2785,7 @@ def inspect_card(card, media_out=None):
     mrows = (media_man or {}).get("images") or []
     images, treerecs = [], []
     for i, (dev, title, subtitle) in enumerate(conf["images"]):
-        art, anim, music = conf["media"][i] if i < len(conf["media"]) else ("", "", "")
+        art, anim, music, confirm = conf["media"][i] if i < len(conf["media"]) else MEDIA_ROW
         b = prev.get(dev) or {}
         m = mrows[i] if i < len(mrows) and isinstance(mrows[i], dict) else {}
         src = b.get("source") or None
@@ -2784,6 +2812,8 @@ def inspect_card(card, media_out=None):
         images.append(collections.OrderedDict([
             ("index", i), ("device", dev), ("title", title), ("subtitle", subtitle),
             ("art", art or None), ("anim", anim or None), ("music", music or None),
+            # this image's OWN confirm sound; null = it plays the menu-wide one
+            ("confirm", confirm or None), ("confirm_source", m.get("confirm_source")),
             ("art_source", m.get("art_source")), ("anim_source", m.get("anim_source")),
             ("source", src), ("source_exists", exists),
             ("title_dir", title_dir), ("bypass", state),
@@ -2871,9 +2901,12 @@ def print_inspect(rep):
              rep["sound_move"], rep["sound_confirm"], rep["font"]))
     for im in rep["images"]:
         print("image %d    %s  %r / %r" % (im["index"], im["device"], im["title"], im["subtitle"]))
-        print("           art=%s anim=%s music=%s" % (im["art"], im["anim"], im["music"]))
-        if im["art_source"] or im["anim_source"]:
-            print("           art_source=%s anim_source=%s" % (im["art_source"], im["anim_source"]))
+        print("           art=%s anim=%s music=%s confirm=%s"
+              % (im["art"], im["anim"], im["music"],
+                 im["confirm"] or "(the menu's)"))
+        if im["art_source"] or im["anim_source"] or im["confirm_source"]:
+            print("           art_source=%s anim_source=%s confirm_source=%s"
+                  % (im["art_source"], im["anim_source"], im["confirm_source"]))
         print("           source=%s%s" % (im["source"], "" if im["source"] is None else
                                           (" (on this machine)" if im["source_exists"] else " (MISSING here)")))
         print("           title dir=%s  validator=%s" % (im["title_dir"], im["bypass"]))
@@ -3167,7 +3200,11 @@ def synth_media_dir(d, n_images):
     if n_images > 1:
         synth_gif(os.path.join(d, "anim1.gif"))
         synth_wav(os.path.join(d, "music1.wav"))
+        # image 1 gets a confirm sound of its OWN, so the 7-field line, the staging of
+        # confirm1.wav and the fallback for the images without one are all exercised
+        synth_wav(os.path.join(d, "confirm1.wav"))
         imgs[1]["anim"], imgs[1]["music"] = "anim1.gif", "music1.wav"
+        imgs[1]["confirm"] = "confirm1.wav"
     synth_wav(os.path.join(d, "move.wav"), ch=1)
     synth_wav(os.path.join(d, "confirm.wav"))
     synth_wav(os.path.join(d, "wrong_rate.wav"), rate=48000)                # unreferenced, must NOT be staged
@@ -3217,7 +3254,9 @@ def selftest(d, selector_file=None):
     print("== build (parts)")
     build_image(plan, out)
     ms = plan_media(media, 3)
-    ok &= list(ms["files"]) == ["art0.png", "art1.png", "anim1.gif", "music1.wav", "art2.png", "move.wav", "confirm.wav"]
+    ok &= list(ms["files"]) == ["art0.png", "art1.png", "anim1.gif", "music1.wav", "confirm1.wav",
+                                "art2.png", "move.wav", "confirm.wav"]
+    ok &= ms["rows"][1][3] == "confirm1.wav" and ms["rows"][0][3] == ""
     ok &= "wrong_rate.wav" not in ms["files"] and ms["volume"] == 40
     conf = render_images_conf(plan.devices(), ["A stock", "B", "C"], ["synthetic", "", "third"], 1, 7, None,
                               ms["rows"], ms["sound_move"], ms["sound_confirm"], ms["volume"])

@@ -296,7 +296,7 @@ def test_images_conf_defaults_and_refusals(mk):
         mk.render_images_conf(["/dev/mmcblk0p3"], timeout=-1)
 
 
-# ---- images.conf v2 (item 90 media): 6-field image lines + the global keys ---------------
+# ---- images.conf v2 (item 90 media): the image lines + the global keys -------------------
 def test_images_conf_v2_round_trips_media_and_the_keys(mk):
     text = mk.render_images_conf(["/dev/mmcblk0p3", "/dev/mmcblk0p7:img1", "p7:img2"], ["A", "B", "C"], ["a", "", "c"], 1, 0, None,
                                  media=[("art0.png", "", ""), ("art1.png", "anim1.gif", "music1.wav"), None],
@@ -309,7 +309,8 @@ def test_images_conf_v2_round_trips_media_and_the_keys(mk):
                      "volume=35", "mixer_volume=20", "media=/usr/local/codeselect/media"]
     conf = mk.parse_images_conf(text)
     assert conf["images"] == [("/dev/mmcblk0p3", "A", "a"), ("/dev/mmcblk0p7:img1", "B", ""), ("p7:img2", "C", "c")]
-    assert conf["media"] == [("art0.png", "", ""), ("art1.png", "anim1.gif", "music1.wav"), ("", "", "")]
+    assert conf["media"] == [("art0.png", "", "", ""),
+                             ("art1.png", "anim1.gif", "music1.wav", ""), ("", "", "", "")]
     assert (conf["sound_move"], conf["sound_confirm"], conf["volume"], conf["mixer_volume"]) == ("move.wav", "confirm.wav", 35, 20)
     assert conf["media_dir"] == mk.MEDIA_DIR and conf["default"] == 1 and conf["timeout"] == 0
     assert mk.conf_media_names(conf) == ["anim1.gif", "art0.png", "art1.png", "confirm.wav", "move.wav", "music1.wav"]
@@ -320,7 +321,7 @@ def test_a_three_field_image_line_stays_valid_and_unknown_keys_are_ignored(mk):
     conf = mk.parse_images_conf("image=/dev/mmcblk0p3|STERN|stock\nimage=/dev/mmcblk0p7|TMNT 1987\n"
                                 "default=1\ntimeout=15\nanim_fps=12\nfont=/x.ttf\n")
     assert conf["images"] == [("/dev/mmcblk0p3", "STERN", "stock"), ("/dev/mmcblk0p7", "TMNT 1987", "")]
-    assert conf["media"] == [("", "", ""), ("", "", "")]
+    assert conf["media"] == [("", "", "", ""), ("", "", "", "")]
     assert conf["sound_move"] is None and conf["volume"] is None and conf["media_dir"] is None
     assert mk.conf_media_names(conf) == []
     # no media anywhere -> the 3-field form is what gets written, and no media= key
@@ -329,8 +330,35 @@ def test_a_three_field_image_line_stays_valid_and_unknown_keys_are_ignored(mk):
     assert lines == ["image=/dev/mmcblk0p3|A|", "image=/dev/mmcblk0p7|B|", "default=0", "timeout=15"]
 
 
+def test_an_image_can_name_its_own_confirm_sound(mk):
+    """The seventh field: the sound that plays when THAT image is chosen.  It is written only
+    when some image has one - a menu where every image uses the menu-wide sound is byte for byte
+    the file this tool wrote before the field existed - and an image without one leaves it
+    empty, which is how the selector is told to fall back."""
+    text = mk.render_images_conf(
+        ["/dev/mmcblk0p3", "/dev/mmcblk0p7"], ["A", "B"], ["a", "b"],
+        media=[("art0.png", "", "", ""), ("art1.png", "", "", "confirm1.wav")],
+        sound_confirm="confirm.wav")
+    lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
+    assert lines[:2] == ["image=/dev/mmcblk0p3|A|a|art0.png|||",
+                         "image=/dev/mmcblk0p7|B|b|art1.png|||confirm1.wav"]
+    conf = mk.parse_images_conf(text)
+    assert conf["media"] == [("art0.png", "", "", ""), ("art1.png", "", "", "confirm1.wav")]
+    # the per-image sound is staged like any other media name, so it is in the set to copy
+    assert mk.conf_media_names(conf) == ["art0.png", "art1.png", "confirm.wav", "confirm1.wav"]
+
+
+def test_a_media_row_from_before_the_confirm_field_is_still_accepted(mk):
+    """Three-tuples are what every caller wrote until this field existed; they are widened, not
+    refused, and they still produce the 6-field line."""
+    text = mk.render_images_conf(["/dev/mmcblk0p3"], ["A"], media=[("art0.png", "", "")])
+    lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
+    assert lines[0] == "image=/dev/mmcblk0p3|A||art0.png||"
+    assert mk.parse_images_conf(text)["media"] == [("art0.png", "", "", "")]
+
+
 @pytest.mark.parametrize("bad", [
-    "image=/dev/mmcblk0p3|A|a|art.png|anim.gif|music.wav|extra\n",           # 7 fields
+    "image=/dev/mmcblk0p3|A|a|art.png|anim.gif|music.wav|c.wav|extra\n",     # 8 fields
     "image=/dev/mmcblk0p3|A|a|art|anim.gif|../x.wav\n",                        # a slash in a media name
     "image=/dev/mmcblk0p3|A|a|art:png||\n",                                    # a colon in a media name
     "image=/dev/mmcblk0p7:img1:x|A|a\n",                                       # two colons in the device
@@ -366,8 +394,10 @@ def test_media_checks_accept_the_synthetic_set_and_refuse_the_wrong_shapes(mk, t
     d = str(tmp_path / "media")
     mk.synth_media_dir(d, 2)
     ms = mk.plan_media(d, 2)
-    assert list(ms["files"]) == ["art0.png", "art1.png", "anim1.gif", "music1.wav", "move.wav", "confirm.wav"]
-    assert ms["rows"] == [("art0.png", "", ""), ("art1.png", "anim1.gif", "music1.wav")]
+    assert list(ms["files"]) == ["art0.png", "art1.png", "anim1.gif", "music1.wav", "confirm1.wav",
+                                "move.wav", "confirm.wav"]
+    assert ms["rows"] == [("art0.png", "", "", ""),
+                          ("art1.png", "anim1.gif", "music1.wav", "confirm1.wav")]
     assert (ms["sound_move"], ms["sound_confirm"], ms["volume"], ms["mixer_volume"]) == ("move.wav", "confirm.wav", 40, None)
     assert ms["kinds"]["anim1.gif"] == "gif 4x3 2 frames" and ms["kinds"]["move.wav"] == "wav 44100 Hz 1 ch"
     assert ms["kinds"]["art0.png"] == "png 4x3"
@@ -860,9 +890,11 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     assert man["images"] == [
         {"device": "/dev/mmcblk0p3", "source": os.path.abspath("/img/a.raw"), "title": "STERN 1.59.0",
          "subtitle": "Original Stern code", "art": "art0.png", "anim": None, "music": None,
+         "confirm": None,
          "title_dir": "turtles_pro", "version": "1.59.0", "node_fw_version": "1.33.0"},
         {"device": "/dev/mmcblk0p7", "source": os.path.abspath("/img/b.raw"), "title": "TMNT 1987",
          "subtitle": "1987 cartoon upscale", "art": "art1.png", "anim": "anim1.gif", "music": "music1.wav",
+         "confirm": None,
          "title_dir": "turtles_pro", "version": "1.58.0", "node_fw_version": "1.19.0"}]
     # it is JSON, and exactly the keys contract A names
     d = json.loads(json.dumps(man))

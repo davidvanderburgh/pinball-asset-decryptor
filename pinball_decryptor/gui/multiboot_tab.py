@@ -181,7 +181,17 @@ ART_CHOICES = ("auto", "none", "video frame")
 ANIM_CHOICES = ("none", "auto")
 MUSIC_CHOICES = ("none",)
 SOUND_CHOICES = ("auto", "synth", "none")
-_WORDS = frozenset(("auto", "none", "synth", "video frame"))
+#: An IMAGE'S OWN confirm sound.  'menu' is the default and means "whatever
+#: the menu's confirm sound is" - there is no per-image 'none', because the
+#: tools spell 'this image has no confirm of its own' the same way, and a
+#: choice that reads as silence but plays the menu's sound would be a lie.
+IMAGE_CONFIRM_CHOICES = ("menu", "auto", "synth")
+_WORDS = frozenset(("auto", "none", "synth", "video frame", "menu"))
+
+#: ``auto@<index>`` - a specific sound out of that image's own catalogue.
+#: The tab never writes one, but a card prepared by hand may carry it, and a
+#: load must hand it back unchanged rather than mistake it for a path.
+_AUTO_IDX_RE = re.compile(r"(?i)^auto@\d+$")
 
 #: A picture taken from a video: ``--art N=<video>@<seconds>``.
 VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".avi")
@@ -243,6 +253,9 @@ class ImageRow:
     art: str = "auto"        # auto | none | video frame | <png/jpg/video file>
     anim: str = "none"       # none | auto (the attract clip) | <gif/mp4/mov>
     music: str = "none"      # none | <wav file>
+    #: THIS image's own confirm sound: "" or "menu" = the menu's, else
+    #: auto | synth | auto@<index> | <wav file>.
+    confirm: str = ""
     art_video: str = ""      # 'video frame': the clip the picture comes from
     art_time: str = ""       # ...and the second it is taken at (blank = 0)
     anim_start: str = ""     # seconds into the clip (blank = the tool's default)
@@ -257,6 +270,7 @@ class ImageRow:
     art_on_card: bool = False    # the value is a file name already on the
     anim_on_card: bool = False   # card that no source string explains, so
     music_on_card: bool = False  # nothing here can re-render it
+    confirm_on_card: bool = False
 
 
 def on_card_fields(row):
@@ -267,7 +281,8 @@ def on_card_fields(row):
     return [(what, val) for what, val, flag in
             (("art", row.art, row.art_on_card),
              ("animation", row.anim, row.anim_on_card),
-             ("music", row.music, row.music_on_card)) if flag]
+             ("music", row.music, row.music_on_card),
+             ("confirm sound", row.confirm, row.confirm_on_card)) if flag]
 
 
 @dataclass
@@ -628,6 +643,36 @@ def anim_spec(row):
     return base
 
 
+def confirm_spec(row):
+    """The ``--sound-confirm N=`` value for a row.
+
+    A row that uses the menu's sound is written ``none``, which is how
+    selectmedia spells "image N has no confirm of its own": the manifest
+    entry comes back null, the seventh images.conf field is empty, and the
+    selector falls back to ``sound_confirm=``.  It is EXPLICIT rather than
+    left out, so a row that used to have one and no longer does loses it."""
+    v = (row.confirm or "").strip().strip('"')
+    w = v.lower()
+    if not v or w in ("menu", "none"):
+        return "none"
+    if w in ("auto", "synth") or _AUTO_IDX_RE.match(w):
+        return w
+    return wsl(v)
+
+
+def split_confirm_source(spec):
+    """A ``confirm_source`` from the card -> an :class:`ImageRow` value; the
+    reverse of :func:`confirm_spec`, so a load followed by an apply writes
+    back what was read.  ``none`` and a missing source both mean the menu's
+    sound, which the row spells ``""``."""
+    s = (spec or "").strip()
+    if not s or s.lower() in ("none", "menu"):
+        return ""
+    if s.lower() in ("auto", "synth") or _AUTO_IDX_RE.match(s):
+        return s.lower()
+    return host_path(s)
+
+
 def _image_args(form):
     args = ["--primary", wsl(form.images[0].path.strip().strip('"'))]
     for row in form.images[1:]:
@@ -654,6 +699,11 @@ def prepare_args(form, media_dir, visual_only=False):
     if not visual_only:
         args += ["--sound-move", _media_value(form.sound_move),
                  "--sound-confirm", _media_value(form.sound_confirm)]
+        # ...then each image's own, after the menu-wide one: the bare value
+        # and the N= values are one appending option, and the tool tells
+        # them apart by the prefix, not by the order.
+        for i, row in enumerate(form.images):
+            args += ["--sound-confirm", "%d=%s" % (i, confirm_spec(row))]
     args += ["--volume", str(int(form.volume))]
     return args
 
@@ -891,8 +941,9 @@ def media_fingerprint(form):
     costs one snapshot (~80 ms of selector time), and only a media change
     pays for selectmedia's prepare."""
     data = [[((r.path or "").strip(), art_spec(r), anim_spec(r),
-              _media_value(r.music), bool(r.art_on_card),
-              bool(r.anim_on_card), bool(r.music_on_card))
+              _media_value(r.music), confirm_spec(r), bool(r.art_on_card),
+              bool(r.anim_on_card), bool(r.music_on_card),
+              bool(r.confirm_on_card))
              for r in form.images],
             _media_value(form.sound_move), _media_value(form.sound_confirm),
             int(form.volume)]
@@ -1107,6 +1158,36 @@ def split_sound_source(spec, what):
     return host_path(s), ""
 
 
+#: The version gate's findings, worst first.  ``inspect`` writes each of
+#: these as a finished sentence or null, so the tab shows what the tool
+#: decided rather than deciding it again - and a card whose images disagree
+#: about their TITLE is a worse thing to have built than one that disagrees
+#: about the version, which is worse than one that only ships different node
+#: board firmware.
+VERSION_ALARMS = (
+    ("title_mismatch", "These images are not the same game."),
+    ("version_mismatch", "These images are not the same game code version."),
+    ("node_fw_mismatch", "These images carry different node board firmware."),
+    ("unknown_version", "The game code version of an image could not be "
+                        "read."),
+)
+
+
+def version_alarm(info):
+    """``(headline, full text)`` for the loudest thing the version gate found
+    on this card, or ``None`` when its images agree.
+
+    The headline is the one line the strip can hold; the full text is every
+    finding the report carries, in the same order, for the Log and the
+    tooltip.  Nothing here is derived: an image's version is read off the
+    image, and these sentences are written by the tool that read it."""
+    found = [(head, str(info.get(key)).strip())
+             for key, head in VERSION_ALARMS if info.get(key)]
+    if not found:
+        return None
+    return found[0][0], "\n\n".join(t for _h, t in found)
+
+
 def bypass_state(info):
     """``(ticked, armed)`` from the per-image bypass states an inspect
     reported: ticked when no tree is still armed, armed when at least one
@@ -1127,7 +1208,10 @@ def rows_from_inspect(info):
         row = ImageRow(path=host_path(im.get("source") or ""),
                        title=im.get("title") or "",
                        subtitle=im.get("subtitle") or "",
-                       device=im.get("device") or "")
+                       device=im.get("device") or "",
+                       # read off the image itself, never typed and never
+                       # guessed from a file name
+                       version=(im.get("version") or "").strip())
         if im.get("art_source"):
             row.art, row.art_video, row.art_time = \
                 split_art_source(im["art_source"])
@@ -1146,6 +1230,12 @@ def rows_from_inspect(info):
             row.music, row.music_on_card = im["music"], True
         else:
             row.music = "none"
+        if im.get("confirm_source"):
+            row.confirm = split_confirm_source(im["confirm_source"])
+        elif im.get("confirm"):
+            row.confirm, row.confirm_on_card = im["confirm"], True
+        else:
+            row.confirm = ""
         if not row.path:
             warnings.append("Image %d: this card does not record which .raw "
                             "it was built from (%s)."
@@ -1230,6 +1320,9 @@ def _menu_fields(before, after):
         if (_media_value(b.music) != _media_value(a.music)
                 or b.music_on_card != a.music_on_card):
             changed.add("music")
+        if (confirm_spec(b) != confirm_spec(a)
+                or b.confirm_on_card != a.confirm_on_card):
+            changed.add("confirm sound")
     if _media_value(before.sound_move) != _media_value(after.sound_move):
         changed.add("move sound")
     if _media_value(before.sound_confirm) != _media_value(after.sound_confirm):
@@ -1621,18 +1714,25 @@ class ImageEditorDialog(_Modal):
             panel._clip_widgets.append(sp)
         g2.columnconfigure(1, weight=1)
 
-        musicbox = ttk.LabelFrame(b, text="Music")
-        musicbox.pack(fill=tk.X, pady=(10, 0))
-        music = ttk.Frame(musicbox)
-        music.pack(fill=tk.X, padx=8, pady=6)
-        _media_row(music, 0, 0, "Music:", panel._ed_music, MUSIC_CHOICES,
-                   [("WAV audio", "*.wav")])
-        music.columnconfigure(1, weight=1)
+        soundbox = ttk.LabelFrame(b, text="Sounds")
+        soundbox.pack(fill=tk.X, pady=(10, 0))
+        snd = ttk.Frame(soundbox)
+        snd.pack(fill=tk.X, padx=8, pady=6)
+        # 15, not 13: "Confirm sound:" is fourteen characters, the same
+        # measurement Menu settings… already had to make for this label.
+        _media_row(snd, 0, 0, "Music:", panel._ed_music, MUSIC_CHOICES,
+                   [("WAV audio", "*.wav")], label_w=15)
+        _media_row(snd, 1, 0, "Confirm sound:", panel._ed_confirm,
+                   IMAGE_CONFIRM_CHOICES, [("WAV audio", "*.wav")],
+                   label_w=15)
+        snd.columnconfigure(1, weight=1)
         ttk.Label(b, foreground=th["gray"], wraplength=520, justify=tk.LEFT,
                   text="auto = this image's own logo and attract clip, pulled "
                        "off the .raw; none = text only. Clip fields left "
                        "blank use the tool's defaults (from 0 s, 3 s long, "
-                       "10 fps).").pack(anchor=tk.W, pady=(10, 0))
+                       "10 fps). The confirm sound is what plays when THIS "
+                       "image is chosen; menu = the one the whole menu "
+                       "uses.").pack(anchor=tk.W, pady=(10, 0))
 
 
 class MenuSettingsDialog(_Modal):
@@ -1759,7 +1859,13 @@ class MultibootPanel:
                  "primary: its boot files are the card's, and the machine "
                  "falls back to it. The media and the card itself are made "
                  "by the rig's tools under WSL; nothing here touches the "
-                 "images you pick. Press ? for the whole story.")
+                 "images you pick. GIVE EVERY IMAGE THE SAME GAME CODE "
+                 "VERSION: the machine keeps one set of settings, audits and "
+                 "scores for the game, and one set of node board firmware, "
+                 "so images that disagree cost you settings and can reflash "
+                 "the boards on every swap. The version is read off each "
+                 "image and shown in the Code column. Press ? for the whole "
+                 "story.")
 
     # USER-FACING COPY IS GENERIC.  Nothing the tab says names a title, a
     # build or a version as an example (David, 2026-09-02: most people
@@ -1880,15 +1986,17 @@ class MultibootPanel:
         self._ed_art = tk.StringVar(value="auto")
         self._ed_anim = tk.StringVar(value="none")
         self._ed_music = tk.StringVar(value="none")
+        self._ed_confirm = tk.StringVar(value="menu")
         self._ed_art_video = tk.StringVar()
         self._ed_art_time = tk.StringVar()
         self._ed_anim_start = tk.StringVar()
         self._ed_anim_seconds = tk.StringVar()
         self._ed_anim_fps = tk.StringVar()
         for var in (self._ed_title, self._ed_sub, self._ed_art,
-                    self._ed_anim, self._ed_music, self._ed_art_video,
-                    self._ed_art_time, self._ed_anim_start,
-                    self._ed_anim_seconds, self._ed_anim_fps):
+                    self._ed_anim, self._ed_music, self._ed_confirm,
+                    self._ed_art_video, self._ed_art_time,
+                    self._ed_anim_start, self._ed_anim_seconds,
+                    self._ed_anim_fps):
             var.trace_add("write", lambda *_a: self._editor_changed())
         # ...and the menu's own fields, so the 'what would Apply write' line
         # follows every keystroke while a card is loaded.
@@ -1945,10 +2053,11 @@ class MultibootPanel:
                                   lambda *_a: self._frame_changed(typed=True))
         # ...and everything that changes the picture asks for a re-render.
         for var in (self._ed_title, self._ed_sub, self._ed_art, self._ed_anim,
-                    self._ed_music, self._ed_art_video, self._ed_art_time,
-                    self._ed_anim_start, self._ed_anim_seconds,
-                    self._ed_anim_fps, self._move_var, self._confirm_var,
-                    self._volume_var, self._timeout_var, self._default_var,
+                    self._ed_music, self._ed_confirm, self._ed_art_video,
+                    self._ed_art_time, self._ed_anim_start,
+                    self._ed_anim_seconds, self._ed_anim_fps,
+                    self._move_var, self._confirm_var, self._volume_var,
+                    self._timeout_var, self._default_var,
                     self._out_var, self._selector_var):
             var.trace_add("write", lambda *_a: self.schedule_preview())
 
@@ -2030,6 +2139,7 @@ class MultibootPanel:
         outer.pack(fill=tk.BOTH, expand=True, padx=10, pady=(8, 6))
         self._outer = outer
         self._build_source(outer, th)
+        self._build_alarm(outer, th)
         self._build_preview(outer, th)
         self._build_table(outer, th)
         self._build_actions(outer, th)
@@ -2082,6 +2192,84 @@ class MultibootPanel:
         self._out_entry = ttk.Entry(row, textvariable=self._out_var)
         self._out_entry.pack(side=tk.LEFT, fill=tk.X, expand=True,
                              padx=(0, 6))
+
+    #: What the strip says before the sentence the tool wrote.  A card
+    #: whose images disagree still boots and still plays - what it costs is
+    #: settings and, at worst, a node board reflash on every swap - so this
+    #: is a warning in the app's error colour, not a refusal.  The refusal
+    #: is the builder's, and it happens before a byte is written.
+    ALARM_PREFIX = "\u26a0 "
+
+    def _build_alarm(self, parent, th):
+        """The version banner: nothing at all until a card's images
+        disagree, and then a filled bar across the whole tab, directly above
+        the picture.
+
+        A BAR RATHER THAN COLOURED TEXT.  The first version of this was one
+        red line above a large dark picture and it read as a footnote; what
+        this is warning about is a card that costs you settings and can
+        reflash the node boards on every swap, so it gets the weight of the
+        app's destructive-action colour and the full width.
+
+        It takes vertical space only when there is something wrong, which is
+        what lets it be loud - the tab still fits a 768-high desktop in the
+        ordinary case, and a mismatch is not the ordinary case.  Raw tk
+        rather than ttk: a filled background is what makes it a banner, and
+        ttk styles it per style rather than per widget.  The colours are
+        re-read on every raise, so a theme change follows on the next load
+        (the same bargain the preview canvas makes)."""
+        self._alarm_box = tk.Frame(parent, bg=th["danger_btn"])
+        self._alarm = tk.Label(self._alarm_box, text="", bg=th["danger_btn"],
+                               fg="#ffffff", anchor=tk.W, justify=tk.LEFT,
+                               padx=10, pady=5,
+                               font=("Segoe UI", 9, "bold"))
+        self._alarm.pack(fill=tk.X)
+        self._alarm_tip = _Tooltip(self._alarm, "", self._theme_fn)
+        self._alarm_text = ""
+
+    def _show_alarm(self, info):
+        """Put the version gate's finding on the tab, or take it away.
+
+        Called with the report a load read; ``None`` clears it (a new card,
+        or one whose images agree).  The whole finding goes to the Log -
+        the strip is one line by construction and the reasons run long."""
+        found = version_alarm(info or {}) if info else None
+        head, full = found if found else ("", "")
+        if full and full != getattr(self, "_alarm_text", ""):
+            for line in full.splitlines():
+                if line.strip():
+                    self._write("[version] " + line)
+        self._alarm_text = full
+        box, lbl = (getattr(self, "_alarm_box", None),
+                    getattr(self, "_alarm", None))
+        if box is None or lbl is None:                  # pragma: no cover
+            return
+        try:
+            if not full:
+                box.pack_forget()
+                return
+            th = THEMES.get(self._theme_fn()) or THEMES["dark"]
+            box.configure(bg=th["danger_btn"])
+            lbl.configure(text=self._status_line(self.ALARM_PREFIX + head),
+                          bg=th["danger_btn"])
+            self._alarm_tip.text = full
+            if not box.winfo_manager():
+                # BEFORE the preview, not at the end of the tab: pack()
+                # appends, and this belongs between the card and its picture
+                # where the eye goes first.
+                box.pack(fill=tk.X, pady=(6, 0), before=self._pv_wrap)
+        except tk.TclError:                             # pragma: no cover
+            pass
+        self._remeasure()
+
+    def _remeasure(self):
+        """The tab is a different height, so the picture has a different
+        amount of room; re-measure once the new requested sizes settle."""
+        try:
+            self._resize_fn()
+            self._timer().after_idle(self._on_configure)
+        except tk.TclError:                             # pragma: no cover
+            pass
 
     # -- 2. the preview, full width -------------------------------------
 
@@ -2547,6 +2735,13 @@ class MultibootPanel:
         of these depends on the canvas."""
         h = 14 + 8 + 8 + 10 + 8         # the pads between the five rows
         h += 4 + 2                      # the strip's pad, the canvas border
+        # The version banner, ONLY while it is up: it is not part of the
+        # ordinary tab, and when it appears the picture is what pays for it
+        # (the alternative is the tab growing past the desktop it is
+        # designed for, on the one card that most needs reading).
+        alarm = getattr(self, "_alarm_box", None)
+        if alarm is not None and alarm.winfo_manager():
+            h += alarm.winfo_reqheight() + 6            # its own top pad
         for name in ("_src_row", "_pv_strip", "_table_box", "_action_row",
                      "_status_wrap", "_row_lbl"):
             widget = getattr(self, name, None)
@@ -2665,7 +2860,7 @@ class MultibootPanel:
             icons.append(glyph if live else dim)
         return (i, list_title(row, i), (row.subtitle or "").strip(),
                 cell_art(row), cell_anim(row), _cell(row.music),
-                _cell(self._confirm_var.get()), (row.version or "").strip(),
+                self._confirm_cell(row), (row.version or "").strip(),
                 ) + tuple(icons)
 
     def _add_row_values(self):
@@ -2767,6 +2962,7 @@ class MultibootPanel:
             self._ed_art.set(row.art)
             self._ed_anim.set(row.anim)
             self._ed_music.set(row.music)
+            self._ed_confirm.set(row.confirm or "menu")
             self._ed_art_video.set(row.art_video)
             self._ed_art_time.set(row.art_time)
             self._ed_anim_start.set(row.anim_start)
@@ -2789,7 +2985,9 @@ class MultibootPanel:
         # value is a spec again, and the tools may render it.
         for attr, flag, var in (("art", "art_on_card", self._ed_art),
                                 ("anim", "anim_on_card", self._ed_anim),
-                                ("music", "music_on_card", self._ed_music)):
+                                ("music", "music_on_card", self._ed_music),
+                                ("confirm", "confirm_on_card",
+                                 self._ed_confirm)):
             if getattr(row, flag) and getattr(row, attr) != var.get():
                 setattr(row, flag, False)
         row.title = self._ed_title.get()
@@ -2797,6 +2995,10 @@ class MultibootPanel:
         row.art = self._ed_art.get()
         row.anim = self._ed_anim.get()
         row.music = self._ed_music.get()
+        # "menu" is what the box says and "" is what the row keeps, so a row
+        # that inherits compares equal however the dialog spelled it
+        conf_v = self._ed_confirm.get()
+        row.confirm = "" if conf_v.strip().lower() == "menu" else conf_v
         row.art_video = self._ed_art_video.get()
         row.art_time = self._ed_art_time.get()
         row.anim_start = self._ed_anim_start.get()
@@ -2911,6 +3113,7 @@ class MultibootPanel:
         self._armed = False
         self._media_override = ""
         self._out_auto_value = ""
+        self._show_alarm(None)
         self._plan_info = None
         self._plan_text = ""
         self._hl_touched = False
@@ -3057,17 +3260,30 @@ class MultibootPanel:
         except tk.TclError:
             pass
 
+    def _confirm_cell(self, row):
+        """The Confirm column: the sound that actually plays when THAT row
+        is chosen.  A row with one of its own shows it plainly; a row
+        without shows the menu's IN PARENTHESES - the column is worth
+        nothing if it does not say what will be heard, and the brackets are
+        what tells the two apart at a glance (a Treeview colours a row,
+        never one cell of it, so the mark has to be in the text)."""
+        own = (row.confirm or "").strip()
+        if own and own.lower() != "menu":
+            return _cell(own)
+        if getattr(row, "confirm_on_card", False):      # pragma: no cover
+            return _cell(own)
+        return "(%s)" % _cell(self._confirm_var.get())
+
     def _refresh_sound_cells(self):
-        """The Confirm column is a MENU setting shown per row - the sound
-        that plays when THAT row is chosen - so a change to it has to reach
-        every row that is already drawn."""
+        """The menu's confirm sound changed, so every row that INHERITS it
+        now says something else; the rows with one of their own do not
+        move."""
         tree = getattr(self, "_tree", None)
         if tree is None:
             return
-        value = _cell(self._confirm_var.get())
         try:
-            for i in range(len(self._rows)):
-                tree.set(str(i), "sound", value)
+            for i, row in enumerate(self._rows):
+                tree.set(str(i), "sound", self._confirm_cell(row))
         except tk.TclError:                             # pragma: no cover
             pass
 
@@ -3392,6 +3608,11 @@ class MultibootPanel:
         _ticked, self._armed = bypass_state(info)
         self._loaded_card = card
         self._loaded_info = info
+        # THE LOUD ONE.  Everything else a load has to say is a note on the
+        # status line; images that are not the same game code get their own
+        # strip above the picture, because it is the one finding that costs
+        # something after the card is in the machine.
+        self._show_alarm(info)
         # The baseline is read back through form(), not the form built above:
         # what every diff compares is what the widgets now hold.
         self._loaded_form = self.form()

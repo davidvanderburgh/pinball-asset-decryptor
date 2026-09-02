@@ -184,9 +184,19 @@ def test_three_image_form_carries_every_extra_and_the_media(monkeypatch,
     assert anims == ["0=none", "1=auto", "2=none"]
     assert musics == ["0=none", "1=none", "2=none"]
     assert prep[prep.index("--sound-move") + 1] == "synth"
-    assert prep[prep.index("--sound-confirm") + 1] == "none"
     assert prep[prep.index("--volume") + 1] == "35"
     assert "--visual-only" not in prep
+    # --sound-confirm appends: the bare menu-wide value first, then one
+    # N=value per image.  A row with no confirm of its own is written
+    # 'none' EXPLICITLY, so a row that used to have one really loses it.
+    confirms = [prep[i + 1] for i, w in enumerate(prep)
+                if w == "--sound-confirm"]
+    assert confirms == ["none", "0=none", "1=none", "2=none"]
+    form.images[1].confirm = "synth"
+    prep2 = _tool_words(prepare_commands(form, str(media))[0][1])
+    assert [prep2[i + 1] for i, w in enumerate(prep2)
+            if w == "--sound-confirm"] == ["none", "0=none", "1=synth",
+                                           "2=none"]
 
 
 def test_media_files_cross_as_wsl_paths(monkeypatch, tmp_path):
@@ -935,6 +945,38 @@ def test_the_modals_write_on_ok_and_change_nothing_on_cancel(tmp_path):
         root.destroy()
 
 
+def test_an_image_can_have_a_confirm_sound_of_its_own(tmp_path):
+    """David: the confirm sound should be customizable for each entry.  A
+    row without one INHERITS the menu's - and the column says which, because
+    a bracket is the only mark a Treeview cell can carry."""
+    root, panel = _panel()
+    try:
+        a, b = _images(tmp_path, 2)
+        panel.add_image(a)
+        panel.add_image(b)
+        panel._confirm_var.set("auto")
+        # both inherit to start with
+        assert [panel._tree.item(str(i))["values"][6] for i in (0, 1)] == \
+            ["(auto)", "(auto)"]
+        # give row 1 its own through the editor, the way the dialog does
+        panel._tree.selection_set("1")
+        panel._load_editor()
+        assert panel._ed_confirm.get() == "menu"
+        panel._ed_confirm.set("synth")
+        assert panel._rows[1].confirm == "synth"
+        assert panel._tree.item("1")["values"][6] == "synth"
+        # the menu's sound changing moves the inheriting row and not the other
+        panel._confirm_var.set("none")
+        assert [panel._tree.item(str(i))["values"][6] for i in (0, 1)] == \
+            ["(none)", "synth"]
+        # ...and "menu" in the box is "" on the row, so it inherits again
+        panel._ed_confirm.set("menu")
+        assert panel._rows[1].confirm == ""
+        assert panel._tree.item("1")["values"][6] == "(none)"
+    finally:
+        root.destroy()
+
+
 def test_the_table_carries_each_images_settings_in_columns(tmp_path):
     """The table is the full width of the tab, so what an image is SET TO
     is columns rather than one phrase - and the four icons at the right
@@ -946,16 +988,17 @@ def test_the_table_carries_each_images_settings_in_columns(tmp_path):
         panel.add_image(b)
         assert panel._tree.item("0")["values"][:8] == [
             0, "turtles_pro-1_59_0", "Release", "auto", "none", "none",
-            "auto", ""]
+            "(auto)", ""]
         panel._rows[1].anim = "auto"
         panel._rows[1].music = str(tmp_path / "bed.wav")
         panel._rows[1].version = "1.59.0"
         panel._refresh_tree(select=1)
         assert panel._tree.item("1")["values"][3:8] == [
-            "auto", "auto", "bed.wav", "auto", "1.59.0"]
-        # the Confirm column is a MENU setting shown per row, and follows it
+            "auto", "auto", "bed.wav", "(auto)", "1.59.0"]
+        # a row with no confirm of its own shows the MENU's, in brackets,
+        # and follows it
         panel._confirm_var.set("synth")
-        assert panel._tree.item("1")["values"][6] == "synth"
+        assert panel._tree.item("1")["values"][6] == "(synth)"
         # the icons: the first row cannot go up, the last cannot go down,
         # and the arrow says so instead of silently doing nothing
         assert panel._tree.item("0")["values"][8:] == ["✎", "−",
@@ -2928,3 +2971,117 @@ def test_the_screenshot_footer_cannot_drift_from_the_selectors_own():
     assert set(feet) == {"START", "ACTION"}, feet
     assert "LEFT / RIGHT FLIPPER" not in shot,         "the shot script carries its own copy of the selector's footer again"
     assert "def selector_footer(" in shot and "FOOT_(START|ACTION)" in shot
+
+
+def test_an_images_own_confirm_survives_a_card_round_trip(tmp_path):
+    """What an inspect reports comes back as the row that wrote it, so a
+    load followed by an apply writes the same card.  The manifest records
+    the SPEC in confirm_source and the staged file in confirm; only the
+    spec can be rendered again, and a bare file name with no spec is kept
+    as the card's own file - the same rule art, animation and music follow."""
+    rows, _warn = multiboot_tab.rows_from_inspect({"images": [
+        {"device": "/dev/mmcblk0p3", "title": "A"},
+        {"device": "/dev/mmcblk0p7", "title": "B",
+         "confirm": "confirm1.wav", "confirm_source": "synth"},
+        {"device": "/dev/mmcblk0p7:img2", "title": "C",
+         "confirm": "confirm2.wav"},
+    ]})
+    assert [r.confirm for r in rows] == ["", "synth", "confirm2.wav"]
+    assert [r.confirm_on_card for r in rows] == [False, False, True]
+    assert multiboot_tab.on_card_fields(rows[2]) == [
+        ("confirm sound", "confirm2.wav")]
+    assert [multiboot_tab.confirm_spec(r) for r in rows] == [
+        "none", "synth", multiboot_tab.wsl("confirm2.wav")]
+
+
+def test_a_confirm_spec_keeps_a_catalogue_index_and_a_path(tmp_path):
+    """'auto@54' picks a specific sound out of that image's own catalogue.
+    The tab never writes one, but a card prepared by hand carries it, and a
+    load must hand it back rather than mangle it into a path."""
+    assert multiboot_tab.split_confirm_source("auto@54") == "auto@54"
+    assert multiboot_tab.confirm_spec(ImageRow("", confirm="auto@54")) == \
+        "auto@54"
+    assert multiboot_tab.split_confirm_source("none") == ""
+    assert multiboot_tab.split_confirm_source(None) == ""
+    # a path still crosses as a path
+    p = str(tmp_path / "my chime.wav")
+    assert multiboot_tab.confirm_spec(ImageRow("", confirm=p)) == \
+        multiboot_tab.wsl(p)
+
+
+def test_a_per_image_confirm_is_a_media_change(tmp_path):
+    """It is prepared media, so changing one has to make the tools run
+    again - and it is a MENU field, so 'Apply to card' can write it without
+    a rebuild."""
+    before = _form(tmp_path, 2)
+    after = _form(tmp_path, 2)
+    after.images[1].confirm = "synth"
+    menu, rebuild = multiboot_tab.diff_forms(before, after)
+    assert "confirm sound" in menu and not rebuild
+    assert "confirm sound" in multiboot_tab.MEDIA_FIELDS
+    # ...and the prepared set depends on it, so the cache cannot hand back
+    # the old media
+    assert multiboot_tab.media_fingerprint(before) != \
+        multiboot_tab.media_fingerprint(after)
+
+
+def test_the_version_gate_findings_come_back_worst_first():
+    """``inspect`` writes each finding as a finished sentence, so the tab
+    shows what the tool decided rather than deciding it again.  A card whose
+    images are not even the same GAME is worse than one that is a version
+    apart, which is worse than one that only ships different node firmware."""
+    assert multiboot_tab.version_alarm({}) is None
+    assert multiboot_tab.version_alarm(
+        {"version_mismatch": None, "node_fw_mismatch": None}) is None
+    head, full = multiboot_tab.version_alarm({
+        "version_mismatch": "1.59.0 and 1.58.0 are not the same code.",
+        "node_fw_mismatch": "Image 2 carries 1.19.0.",
+    })
+    assert head == "These images are not the same game code version."
+    # every finding is kept, in the same order, for the Log and the tooltip
+    assert full.splitlines()[0] == "1.59.0 and 1.58.0 are not the same code."
+    assert "Image 2 carries 1.19.0." in full
+    worst, _full = multiboot_tab.version_alarm({
+        "title_mismatch": "One is turtles_pro, the other is godzilla.",
+        "version_mismatch": "1.59.0 and 1.13.0.",
+    })
+    assert worst == "These images are not the same game."
+
+
+def test_a_mismatched_card_raises_a_strip_above_the_picture(tmp_path):
+    """David: warn very loudly when the versions do not match.  It is a
+    line of its own in the error colour, not one note among many on the
+    status line - and it costs no vertical space on a card that is fine."""
+    root, panel = _panel()
+    try:
+        report = {
+            "images": [
+                {"device": "/dev/mmcblk0p3", "title": "A", "version": "1.59.0"},
+                {"device": "/dev/mmcblk0p7", "title": "B", "version": "1.58.0"},
+            ],
+            "version_mismatch": "Image 0 is 1.59.0 and image 1 is 1.58.0.",
+        }
+        panel.load_inspect(report, str(tmp_path / "card.raw"),
+                           media_dir=str(tmp_path / "media"))
+        assert panel._alarm_box.winfo_manager() == "pack"
+        assert panel._alarm.cget("text").startswith(panel.ALARM_PREFIX)
+        assert "not the same game code version" in panel._alarm.cget("text")
+        # the whole finding is readable, not just the headline
+        assert report["version_mismatch"] in panel._alarm_tip.text
+        assert any("Image 0 is 1.59.0" in ln for ln in panel.log_lines())
+        # ...and the version the tool read is in the table, never typed
+        assert [panel._tree.item(str(i))["values"][7] for i in (0, 1)] == \
+            ["1.59.0", "1.58.0"]
+        # a card whose images agree takes the strip away again
+        clean = dict(report, version_mismatch=None)
+        panel.load_inspect(clean, str(tmp_path / "ok.raw"),
+                           media_dir=str(tmp_path / "media2"))
+        assert panel._alarm_box.winfo_manager() == ""
+        # ...and so does starting a new card
+        panel.load_inspect(report, str(tmp_path / "card.raw"),
+                           media_dir=str(tmp_path / "media"))
+        assert panel._alarm_box.winfo_manager() == "pack"
+        panel.new_card()
+        assert panel._alarm_box.winfo_manager() == ""
+    finally:
+        root.destroy()

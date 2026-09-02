@@ -129,13 +129,107 @@ def find_rootfs_and_game(f, ext):
     return rootfs, game, game_dir
 
 
+# The EARLIEST Spike 1 generation — same system, a firmware era this rig cannot
+# drive, and it reads like a broken card unless you look for it.
+#
+# transformers_pin-1.0.18 is **Transformers The Pin (Stern, 2012)**: one of the
+# first SPIKE machines, three years before SPIKE reached the coin-op line, with
+# two 8-digit LED displays instead of a DMD (which is why its owner said "NO
+# DMD ON this game").  Its card carries the Spike 1 MBR shapes at different
+# LBAs and the SAME base rootfs as GOT LE and Whoa Nellie (`/etc/version`
+# 201006031147, glibc 2.6.1, kernel 2.6.30 — those are constants across Spike 1
+# and say nothing about a card's age; do not read them as one).
+#
+# What actually differs is the FIRMWARE ERA, and it is everything this rig
+# touches: the game lives at `/usr/local/games/<title>/` with its sounds as
+# PLAIN WAV FILES beside it rather than at `/games/<TITLE>/` with an
+# `image.bin`; its node images are `pinnode` / `netbridge` / `alphanumeric` /
+# `dotmatrix` rather than `coil4node` / `accbridgenode`; and its framework
+# symbols are the early short form (`node_poll_t`, `node_coilmsg`,
+# `nodemap_init`, `ALPHANUMERIC_*`) with NOT ONE of the `node_bus_*` /
+# `sys_node_board_device_*` / `sys_line_status_*` names that s1patch.py,
+# nodebus.py and s1swmap.py key on — the early era needs its own answers in
+# each, and the rig is being taught them (PAD-101).  This reader's part is to
+# find the game where the early card keeps it and record what the card's own
+# init script would have done: which binary it launches (gamer, not the debug
+# build game beside it) and which display it drives.
+_EARLY_GAMES_DIR = "/usr/local/games"
+
+
+def _lookup(reader, path):
+    """Inode number of *path* on *reader*, or None (no symlink following)."""
+    ino = 2
+    for part in path.strip("/").split("/"):
+        node = reader.read_inode(ino)
+        nxt = None
+        for name, child, _ft in reader._iter_dir(node):
+            if name == part:
+                nxt = child
+                break
+        if nxt is None:
+            return None
+        ino = nxt
+    return ino
+
+
+def _readlink(reader, path):
+    """Target of the symlink at *path*, or None if absent / not a link."""
+    ino = _lookup(reader, path)
+    if ino is None:
+        return None
+    node = reader.read_inode(ino)
+    if (node["mode"] & S_IFMT) != S_IFLNK:
+        return None
+    return _symlink_target(reader, node)
+
+
+def early_spike1_layout(rootfs, title):
+    """``(game_exe, display)`` for an early-era card: which binary the card
+    launches and which display it is built for, both read off the symlinks
+    the card's own /etc/init.d/game follows — ``$DATA_PATH/game`` (the
+    launched binary, e.g. ``tf-elg/gamer``: the DEBUG build ``game`` sits
+    beside it and is NOT what runs) and ``$DATA_PATH/display.hex``
+    (``alphanumeric-…`` or ``dotmatrix-…``)."""
+    exe = _readlink(rootfs, _EARLY_GAMES_DIR + "/game") or (title + "/game")
+    exe = exe.rsplit("/", 1)[-1]
+    disp = _readlink(rootfs, _EARLY_GAMES_DIR + "/display.hex") or ""
+    disp = disp.rsplit("/", 1)[-1].split("-")[0] or "unknown"
+    return exe, disp
+
+
+def early_spike1_game_dir(rootfs):
+    """The ``<title>`` of an EARLY-era Spike 1 game on *rootfs*, or None.
+
+    Identified by ``/usr/local/games/<title>/game`` — the 2015-2016 generation
+    keeps its game on its own partition, at ``/games/<TITLE>/``, never here."""
+    if rootfs is None:
+        return None
+    for path, _ino, node in rootfs.iter_regular_files(max_depth=6, min_size=1):
+        if (path.startswith(_EARLY_GAMES_DIR + "/") and path.endswith("/game")
+                and path.count("/") == _EARLY_GAMES_DIR.count("/") + 2):
+            return path.rsplit("/", 2)[-2]
+    return None
+
+
 def main():
     card, rootfs_dir, gamedir = sys.argv[1:4]
     f, ext = _open_partitions(card)
     rootfs, game, game_name = find_rootfs_and_game(f, ext)
-    if rootfs is None or game is None:
+    early = early_spike1_game_dir(rootfs) if game is None else None
+    if rootfs is None or (game is None and early is None):
         sys.exit("could not locate rootfs (busybox) and/or game (image.bin) "
                  "partitions — is this a Spike 1 card?")
+    if early:
+        # The game dir is ON the rootfs partition, one level under
+        # /usr/local/games; it is extracted a second time as the rig's game
+        # dir (bound back over the same path at run time) so the cache layout
+        # and every script that reads <entry>/game/ are unchanged.
+        game, game_name = rootfs, early
+        game_exe, display = early_spike1_layout(rootfs, early)
+        print("early Spike 1 card: game folder %s, launches %s, %s display"
+              % (game_name, game_exe, display), flush=True)
+    else:
+        game_exe, display = "game", "dotmatrix"
     print("game folder:", game_name, flush=True)
     print("extracting OS rootfs (this is the slow part) ->", rootfs_dir,
           flush=True)
@@ -144,18 +238,30 @@ def main():
     print("extracting game files ->", gamedir, flush=True)
     os.makedirs(gamedir, exist_ok=True)
     n = 0
-    for path, _ino, node in game.iter_regular_files(max_depth=2, min_size=0):
-        parts = path.strip("/").split("/")
-        if parts[0] == game_name:
-            out = os.path.join(gamedir, "/".join(parts[1:]))
+    prefix = (_EARLY_GAMES_DIR.strip("/") + "/" if early else "") + game_name
+    depth = prefix.count("/") + 3          # <prefix>/sounds/x.wav
+    for path, _ino, node in game.iter_regular_files(max_depth=depth,
+                                                    min_size=0):
+        rel = path.strip("/")
+        if rel == prefix or rel.startswith(prefix + "/"):
+            out = os.path.join(gamedir, rel[len(prefix) + 1:])
             os.makedirs(os.path.dirname(out) or gamedir, exist_ok=True)
             game.extract_file(node, out)
             os.chmod(out, 0o755)
             n += 1
     print("extracted %d game files -> %s" % (n, gamedir), flush=True)
-    # write the resolved game name so the launcher knows the /games/<TITLE>
+    # write the resolved game name so the launcher knows the /games/<TITLE>,
+    # and for an early card WHERE the game must be mounted and WHAT to run —
+    # emu_root.sh reads these; absent means the DMD-generation defaults.
     with open(os.path.join(gamedir, ".game_name"), "w") as fh:
         fh.write(game_name + "\n")
+    if early:
+        with open(os.path.join(gamedir, ".game_path"), "w") as fh:
+            fh.write("%s/%s\n" % (_EARLY_GAMES_DIR, game_name))
+        with open(os.path.join(gamedir, ".game_exe"), "w") as fh:
+            fh.write(game_exe + "\n")
+        with open(os.path.join(gamedir, ".display"), "w") as fh:
+            fh.write(display + "\n")
     f.close()
 
 

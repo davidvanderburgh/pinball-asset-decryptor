@@ -196,3 +196,107 @@ def test_line_frequency_repatches_a_wrong_stub(tmp_path):
     p.write_bytes(bytes(buf))
     assert s1patch.patch_line_frequency(str(p)) == "patched"
     assert p.read_bytes()[0x1000:0x1000 + 16] == s1patch.STUB_1ARG
+
+
+# ------------------------------------------ early era: the rate assert -----
+# amp_set_sample_rate (the 2012 home models) asserts on a DAC-rate read-back
+# the passthrough cannot deliver; the patch turns its `bne <assert>` into a nop.
+
+def _mini_elf(text, symbols, rodata=b""):
+    """A minimal ELF32-LE: .text at 0x8000 holding *text*, .rodata right
+    after it, and *symbols* = {name: vaddr}."""
+    _EHDR = struct.Struct("<16sHHIIIIIHHHHHH")
+    _SHDR = struct.Struct("<IIIIIIIIII")
+    _SYM = struct.Struct("<IIIBBH")
+    TEXT_VA = 0x8000
+    strtab = b"\x00"
+    symtab = _SYM.pack(0, 0, 0, 0, 0, 0)
+    for name, va in symbols.items():
+        symtab += _SYM.pack(len(strtab), va, 0, 0, 0, 1)
+        strtab += name.encode() + b"\x00"
+    shoff, text_off, ro_off = 0x200, 0x1000, 0x1000 + len(text)
+    strtab_off = 0x3000
+    symtab_off = 0x3100
+    buf = bytearray(symtab_off + len(symtab) + 0x40)
+    _EHDR.pack_into(buf, 0, b"\x7fELF\x01\x01\x01" + b"\x00" * 9,
+                    2, 40, 1, 0, 0, shoff, 0, _EHDR.size, 0, 0,
+                    _SHDR.size, 5, 0)
+    buf[text_off:text_off + len(text)] = text
+    buf[ro_off:ro_off + len(rodata)] = rodata
+    buf[strtab_off:strtab_off + len(strtab)] = strtab
+    buf[symtab_off:symtab_off + len(symtab)] = symtab
+
+    def shdr(typ, addr, off, size, link=0, entsize=0):
+        return _SHDR.pack(0, typ, 0, addr, off, size, link, 0, 1, entsize)
+    sh = shdr(0, 0, 0, 0)
+    sh += shdr(1, TEXT_VA, text_off, len(text))
+    sh += shdr(1, TEXT_VA + len(text), ro_off, len(rodata))
+    sh += shdr(3, 0, strtab_off, len(strtab))
+    sh += shdr(2, 0, symtab_off, len(symtab), link=3, entsize=_SYM.size)
+    buf[shoff:shoff + len(sh)] = sh
+    return bytes(buf)
+
+
+def _amp_rate_text():
+    """The tail of the real function, in shape: cmp r2,r3 ; bne ASSERT ;
+    add sp,sp,#8 ; pop ; ... ASSERT: ldr r0,[pc,#lit] ; bl ...  with the
+    literal pointing at the assert string in .rodata."""
+    words = [
+        0xE1520003,             # 0x8000 cmp r2, r3
+        0x1A000002,             # 0x8004 bne 0x8014  (ASSERT)
+        0xE28DD008,             # 0x8008 add sp, sp, #8
+        0xE8BD8070,             # 0x800c pop {r4, r5, r6, pc}
+        0xE1A00000,             # 0x8010 (filler)
+        0xE59F0004,             # 0x8014 ldr r0, [pc, #4] -> literal @0x8020
+        0xEB000000,             # 0x8018 bl (assert)
+        0xE1A00000,             # 0x801c
+        0x00000000,             # 0x8020 literal: -> string vaddr (filled)
+    ]
+    rodata = b"GetRate(rate)==GetRate(ridx.rateIndex)\x00"
+    string_va = 0x8000 + len(words) * 4
+    words[8] = string_va
+    return struct.pack("<%dI" % len(words), *words), rodata
+
+
+def test_amp_rate_assert_branch_is_nopped(tmp_path):
+    text, ro = _amp_rate_text()
+    p = tmp_path / "early.elf"
+    p.write_bytes(_mini_elf(text, {"_Z19amp_set_sample_ratej": 0x8000}, ro))
+    assert s1patch.patch_amp_rate_assert(str(p)) == "patched"
+    w = struct.unpack("<4I", p.read_bytes()[0x1000:0x1010])
+    assert w == (0xE1520003, 0xE1A00000, 0xE28DD008, 0xE8BD8070)
+
+
+def test_amp_rate_patch_is_idempotent(tmp_path):
+    text, ro = _amp_rate_text()
+    p = tmp_path / "early.elf"
+    p.write_bytes(_mini_elf(text, {"_Z19amp_set_sample_ratej": 0x8000}, ro))
+    assert s1patch.patch_amp_rate_assert(str(p)) == "patched"
+    before = p.read_bytes()
+    assert s1patch.patch_amp_rate_assert(str(p)) == "already"
+    assert p.read_bytes() == before
+
+
+def test_amp_rate_patch_leaves_other_branches_alone(tmp_path):
+    # a bne that does NOT target the assert block must survive
+    text, ro = _amp_rate_text()
+    text = text[:4] + struct.pack("<I", 0x1A000010) + text[8:]   # bne elsewhere
+    p = tmp_path / "early.elf"
+    p.write_bytes(_mini_elf(text, {"_Z19amp_set_sample_ratej": 0x8000}, ro))
+    assert s1patch.patch_amp_rate_assert(str(p)) == "absent"
+    assert p.read_bytes()[0x1004:0x1008] == struct.pack("<I", 0x1A000010)
+
+
+def test_amp_rate_patch_is_absent_on_a_dmd_generation_game(tmp_path):
+    p = tmp_path / "got.elf"
+    p.write_bytes(_mini_elf_with_freq_symbol(
+        "_Z43sys_line_status_get_operating_frequency_pdiRjRb"))
+    assert s1patch.patch_amp_rate_assert(str(p)) == "absent"
+    assert s1patch.is_early_era(str(p)) is False
+
+
+def test_early_era_is_detected_by_the_missing_gates(tmp_path):
+    text, ro = _amp_rate_text()
+    p = tmp_path / "early.elf"
+    p.write_bytes(_mini_elf(text, {"_Z19amp_set_sample_ratej": 0x8000}, ro))
+    assert s1patch.is_early_era(str(p)) is True

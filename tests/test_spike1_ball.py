@@ -150,3 +150,125 @@ def test_shipped_switchmaps_resolve_for_the_keeper():
         assert any(n.startswith("TROUGH") for n in names), p
         coils = m.get("_trough_coils")
         assert coils and all(len(c) == 2 for c in coils), p
+
+
+# ------------------------------------------- a map that arrives after boot --
+# The keeper starts with the game, and on a title with no curated map the rig
+# only learns the switch names once the game has registered them (s1swmap.py's
+# live walk).  A keeper that read the map once stayed passive for the session,
+# so nothing held the trough and the machine sat on LOCATING PINBALLS on
+# exactly those titles (PAD-101).
+
+def test_keeper_adopts_a_map_written_after_it_started(tmp_path):
+    k = s1ball.Keeper(str(tmp_path))               # no map yet
+    assert (k.mapped, k.curated, k.nballs) == (False, False, 0)
+    _write_map(tmp_path)                           # the live walk lands
+    assert k.adopt_map() is True
+    assert k.mapped is True and k.curated is False
+    assert k.trough_slots == [(8, 14), (8, 13), (8, 12), (8, 11), (8, 10),
+                              (8, 9)]
+    assert k.start == (1, 11) and k.shooter == (9, 1)
+    assert k.balls == k.nballs == 6                # the trough fills at once
+    assert k.trough_coils == set()                 # no _trough_coils: no serve
+    closed, _seq = SwitchInput.unpack(
+        (tmp_path / "s1auto.input").read_bytes())
+    assert len(closed) == 6                        # ... and it is HELD
+
+
+def test_keeper_adopts_a_curated_map_with_its_eject_coils(tmp_path):
+    k = s1ball.Keeper(str(tmp_path))
+    _write_map(tmp_path, {"_trough_coils": [[8, 5]]})
+    assert k.adopt_map() is True
+    assert k.curated is True
+    assert k.trough_coils == {(8, 5)}
+
+
+def test_keeper_does_not_re_adopt_over_a_map_it_already_has(tmp_path):
+    _write_map(tmp_path)
+    k = s1ball.Keeper(str(tmp_path))               # mapped from the start
+    k.balls = 3                                    # ... mid-game state
+    _write_map(tmp_path, {"1,11": "START BUTTON"})
+    assert k.adopt_map() is False                  # caller gates on mapped,
+    assert k.balls == 3                            # and nothing was reset
+
+
+def test_keeper_ignores_an_unchanged_map_file(tmp_path):
+    k = s1ball.Keeper(str(tmp_path))
+    assert k.adopt_map() is False                  # still no file at all
+
+
+# ------------------------------------------------------- the early era ----
+# The 2012 home models fire a coil as [0x80|node, len, 0x40|coil, params…]
+# on a checksum-less wire; the keeper must read that shape when start.sh says
+# S1_ERA=early, and its START button is named "START", not "START BUTTON".
+
+def test_keeper_reads_early_era_coil_frames(tmp_path, monkeypatch):
+    monkeypatch.setenv("S1_ERA", "early")
+    k = s1ball.Keeper(str(tmp_path))
+    assert type(k._parser()).__name__ == "EarlyParser"
+    assert k._coil_event(("frame", 8, 0x43, b"\xff\x20\x32\xc8")) == (8, 3, 1)
+    assert k._coil_event(("frame", 8, 0x43, b"\x00\x00\x00\x00")) == (8, 3, 0)
+    assert k._coil_event(("frame", 8, 0x11, b"")) == (None, None, 0)
+    assert k._coil_event(("frame", 8, 0x89, b"\x01\x02")) == (None, None, 0)  # a lamp
+
+
+def test_keeper_reads_dmd_generation_coil_frames_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("S1_ERA", raising=False)
+    k = s1ball.Keeper(str(tmp_path))
+    assert type(k._parser()).__name__ == "WireParser"
+    assert k._coil_event(("frame", 0x89, b"\x40\x02\xff", 0)) == (9, 2, 0xff)
+    assert k._coil_event(("frame", 0x89, b"\x11", 8)) == (None, None, 0)
+
+
+def test_early_era_map_names_resolve_for_the_keeper(tmp_path):
+    (tmp_path / "s1switches.json").write_text(json.dumps({
+        "8,12": "SHOOTER LANE", "8,13": "TROUGH 1", "8,14": "TROUGH 2",
+        "8,15": "TROUGH 3", "8,20": "TROUGH STUCK", "8,40": "TROUGH STUCK 2",
+        "8,21": "START",
+        "8,42": "SHOOTER LANE EXIT", "_trough_coils": [[8, 3]],
+        "_negmask": "e77bfd01cf310000"}), encoding="utf-8")
+    (trough, shooter, start, _coin, coils, curated,
+     mapped) = s1ball.load_title_map(str(tmp_path))
+    assert trough == [(8, 13), (8, 14), (8, 15)]     # not TROUGH STUCK 2
+    assert start == (8, 21)
+    assert shooter in ((8, 12), (8, 42))       # both say SHOOTER; the lane wins live
+    assert coils == {(8, 3)} and curated and mapped
+
+
+def test_a_ball_lock_is_not_held_by_the_keeper(tmp_path):
+    """LOCKUP switches idle OPEN (= no ball locked); the keeper used to hold
+    them closed to compensate for the inverted switch polarity, which claimed
+    three locked balls once that bug was fixed (PAD-101)."""
+    (tmp_path / "s1switches.json").write_text(json.dumps({
+        "8,13": "TROUGH 1", "8,14": "TROUGH 2", "8,15": "TROUGH 3",
+        "8,32": "LOCKUP 2", "8,33": "LOCKUP 1", "8,34": "LOCKUP 3",
+        "8,21": "START", "8,12": "SHOOTER LANE",
+        "_trough_coils": [[8, 3]]}), encoding="utf-8")
+    s1ball.Keeper(str(tmp_path))
+    closed, _seq = SwitchInput.unpack((tmp_path / "s1auto.input").read_bytes())
+    held = {(s // 64, s % 64) for s in closed}
+    assert held == {(8, 13), (8, 14), (8, 15)}      # the trough, nothing else
+    assert not any(i in (32, 33, 34) for _n, i in held)
+
+
+def test_launch_trips_the_shooter_lane_exit_where_the_title_has_one(tmp_path):
+    (tmp_path / "s1switches.json").write_text(json.dumps({
+        "8,13": "TROUGH 1", "8,12": "SHOOTER LANE", "8,42": "SHOOTER LANE EXIT",
+        "_trough_coils": [[8, 3]]}), encoding="utf-8")
+    k = s1ball.Keeper(str(tmp_path))
+    assert k.shooter == (8, 12) and k.lane_exit == (8, 42)
+    k.in_shooter, k.launch_at = True, 0.0     # a served ball, due to launch
+    k.pulses = {}
+    import time as _t
+    now = _t.monotonic()
+    # the run loop's launch step, inlined: what it does with lane_exit
+    k.in_shooter = False
+    if k.lane_exit:
+        k.pulses[k.lane_exit] = now + 0.3
+    assert (8, 42) in k.closed_slots()
+
+
+def test_no_lane_exit_on_titles_without_one(tmp_path):
+    _write_map(tmp_path)
+    k = s1ball.Keeper(str(tmp_path))
+    assert k.lane_exit is None

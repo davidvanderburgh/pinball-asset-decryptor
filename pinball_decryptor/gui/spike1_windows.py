@@ -12,18 +12,24 @@ run-dir files straight off the WSL disk over the ``\\wsl.localhost\<distro>\...`
 UNC path (verified fresh on a growing file), so a poll is a plain file read with
 no ``wsl.exe`` per frame:
 
-  * ``spi0.cap`` — the DMD frame stream (2048-byte frames); the display window
-    tails the last whole frame and renders it.
+  * ``spi0.cap`` — the display frame stream; the display window tails the last
+    whole frame and renders it.  2048-byte frames for the 128x32 DMD, or —
+    when ``s1display`` in the run dir says ``alphanumeric`` (the 2012 home
+    models, PAD-101) — 256-byte frames for two 8-digit 16-segment displays,
+    drawn as such (``tools/spike1_emu/s1alpha.py``).
   * ``s1hw.state`` — the shared :class:`~...spike1_emulate.StateBlock` the
     node-bus decoder writes (switches / lamps / coils); the switch window shows
     it, and OR-s in the presses the user is holding.
   * ``s1sw.input`` — the :class:`~...spike1_emulate.SwitchInput` block the switch
     window writes on a click and the responder (``nodebus.py``) reads back, so a
     click closes a switch in the running game.
-  * ``s1switches.json`` — the title's ``{"node,index": name}`` switch map, written
-    by ``start.sh`` from the game ELF (``s1elf --switches``).  The switch window
-    outlines the named cells and shows the name under the cursor, so you can find
-    (and click) the start button, the trough, the shooter lane, etc. by name.
+  * ``s1switches.json`` — the title's ``{"node,index": name}`` switch map, put
+    there by ``start.sh``: a curated map straight away, or — on a title without
+    one — the live registry walk's, **minutes into the boot** (``s1swmap.py``
+    has to wait for the game to register its switches).  So this window RE-READS
+    the map while it runs and rebuilds itself when it arrives; without that, a
+    title with no curated map stayed on the nameless matrix grid with dead play
+    keys for the whole session even though the names had shown up (PAD-101).
 
 Live LED/coil colour appears once the node-bus decoder writes it into
 ``s1hw.state`` — until then only the presses you inject light up.
@@ -138,9 +144,9 @@ class _RunDirIO:
             return False
 
     def read_switch_names(self):
-        """The title's ``{(node, index): name}`` switch map (s1switches.json,
-        written by start.sh from the game ELF via s1elf --switches).  ``{}`` if
-        the file is missing/unreadable, so the window still works nameless."""
+        """The title's ``{(node, index): name}`` switch map (s1switches.json —
+        the curated map, or the live registry walk's).  ``{}`` if the file is
+        missing/unreadable, so the window still works nameless."""
         import json
         p = self._unc("s1switches.json")
         if not p:
@@ -159,6 +165,30 @@ class _RunDirIO:
                 continue
         return out
 
+    def read_json(self, name):
+        """A small JSON file of the run dir (e.g. ``s1font.json``), or None."""
+        import json
+        p = self._unc(name)
+        if not p:
+            return None
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+
+    def read_text(self, name):
+        """A small text file of the run dir (e.g. ``s1display``), stripped;
+        ``""`` when absent."""
+        p = self._unc(name)
+        if not p:
+            return ""
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except OSError:
+            return ""
+
     def read_ball_state(self):
         """The ball keeper's published state (s1ball.state JSON): trough
         count, ball-in-shooter, coin door.  ``{}`` when absent."""
@@ -174,33 +204,84 @@ class _RunDirIO:
 
 
 class Spike1DisplayWindow(tk.Toplevel):
-    """The DMD, in its own window: tails ``spi0.cap`` and renders the newest
-    128x32x4bit frame at *scale* (amber dot-matrix look)."""
+    """The game's display, in its own window: tails ``spi0.cap`` and renders
+    the newest frame.
+
+    Two shapes.  The DMD generation: 2048-byte 128x32x4bit frames, decoded by
+    *decode_frame* (s1dmd) and drawn as amber dots at *scale*.  The 2012 home
+    models (*alpha* given — ``(decode_frame, render_image)`` from s1alpha):
+    256-byte frames for two 8-digit 16-segment displays, drawn as segments —
+    a DMD window fed those frames showed nothing at all, since 256 bytes is
+    never a whole 2048-byte frame (PAD-101)."""
 
     FRAME_BYTES = 2048
     WIDTH = 128
     HEIGHT = 32
+    #: glyph scale for the 16-segment displays (the default 6 drew a window
+    #: barely 300 px wide, which is what "completely unusable" was about)
+    ALPHA_SCALE = 9
+    #: the machine labels its two displays; so do we, under the right one
+    ALPHA_LABELS = ("PLAYER 1", "PLAYER 2")
+    ALPHA_FG = "#ff4a30"
 
     def __init__(self, master, io, decode_frame, scale=7, hz=20,
-                 on_close=None):
+                 on_close=None, alpha=None):
         super().__init__(master)
         self._io = io
         self._decode = decode_frame
+        self._alpha = alpha
         self._scale = scale
         self._delay = max(20, int(1000 / hz))
         self._on_close = on_close
         self._photo = None
         self._job = None
         self._closed = False
+        self._frame_bytes = self.FRAME_BYTES
 
+        cw, ch = self.WIDTH * scale, self.HEIGHT * scale
         self.title("Spike 1 — DMD")
+        self._font = None
+        self._readouts = []
+        if alpha is not None:
+            # size the canvas from a blank frame's rendering, so the window
+            # is right before the first real frame lands
+            decode, render = alpha
+            blank = render(decode(bytes(256)), scale=self.ALPHA_SCALE)
+            cw, ch = blank.size
+            self._frame_bytes = 256
+            self.title("Spike 1 — display")
+            # the segment DECODER: the game's own font, dumped by the rig, so
+            # the window can show what the machine actually reads (segment art
+            # alone is unusable at this size - David, PAD-101).
+            raw = io.read_json("s1font.json") if hasattr(io, "read_json") else None
+            if raw:
+                self._font = {tuple(int(c) for c in k): v
+                              for k, v in raw.items() if len(k) == 16}
         self.configure(bg="#000000")
         self.geometry("+80+80")
-        cw, ch = self.WIDTH * scale, self.HEIGHT * scale
         self._canvas = tk.Canvas(self, width=cw, height=ch, bg="#000000",
                                  highlightthickness=0)
         self._canvas.pack(padx=8, pady=8)
         self._imgid = self._canvas.create_image(0, 0, anchor="nw")
+        if alpha is not None and self._font:
+            # A readout under EACH display, side by side and labelled the way
+            # the machine labels them (David's photo: PLAYER 1 left, PLAYER 2
+            # right, in the speaker panel).
+            import tkinter.font as tkfont
+            big = tkfont.Font(family="Consolas", size=20, weight="bold")
+            small = tkfont.Font(family="Segoe UI", size=8)
+            row = tk.Frame(self, bg="#000000")
+            row.pack(side="top", fill="x")
+            for i, cap in enumerate(self.ALPHA_LABELS):
+                col = tk.Frame(row, bg="#000000")
+                col.grid(row=0, column=i, sticky="ew", padx=(12, 12))
+                row.grid_columnconfigure(i, weight=1, uniform="disp")
+                lbl = tk.Label(col, text="", font=big, bg="#000000",
+                               fg=self.ALPHA_FG, anchor="w")
+                lbl.pack(side="top", anchor="w")
+                tk.Label(col, text=cap, font=small, bg="#000000",
+                         fg="#8a8a8a", anchor="w").pack(side="top", anchor="w")
+                self._readouts.append(lbl)
         self._placeholder = self._canvas.create_text(
             cw // 2, ch // 2, fill="#6a4718",
             text="waiting for the game to draw…")
@@ -211,7 +292,7 @@ class Spike1DisplayWindow(tk.Toplevel):
         self._job = None
         if self._closed:
             return
-        data = self._io.tail_frame("spi0.cap", self.FRAME_BYTES)
+        data = self._io.tail_frame("spi0.cap", self._frame_bytes)
         if data:
             self._render(data)
         try:
@@ -219,12 +300,16 @@ class Spike1DisplayWindow(tk.Toplevel):
         except tk.TclError:
             self._job = None
 
-    def _render(self, frame):
-        try:
-            from PIL import Image, ImageTk
-            grid = self._decode(frame)
-        except Exception:                                      # noqa: BLE001
-            return
+    def _image(self, frame):
+        """The frame as a PIL image, in whichever shape this window draws."""
+        from PIL import Image
+        if self._alpha is not None:
+            decode, render = self._alpha
+            rows = decode(frame)
+            if self._readouts:
+                self._show_text(rows)
+            return render(rows, scale=self.ALPHA_SCALE)
+        grid = self._decode(frame)
         s = self._scale
         img = Image.new("RGB", (self.WIDTH, self.HEIGHT))
         px = img.load()
@@ -233,7 +318,27 @@ class Spike1DisplayWindow(tk.Toplevel):
             for x in range(self.WIDTH):
                 c = row[x] * 17
                 px[x, y] = (c, int(c * 0.55), 0)
-        img = img.resize((self.WIDTH * s, self.HEIGHT * s), Image.NEAREST)
+        return img.resize((self.WIDTH * s, self.HEIGHT * s), Image.NEAREST)
+
+    def _show_text(self, rows):
+        """Put the decoded characters in the readout labels."""
+        for i, label in enumerate(self._readouts):
+            digits = rows[i * 8:(i + 1) * 8]
+            text = ""
+            for segs in digits:
+                pat = tuple(1 if v else 0 for v in segs)
+                text += " " if not any(pat) else self._font.get(pat, "?")
+            try:
+                label.config(text=text)
+            except tk.TclError:
+                pass
+
+    def _render(self, frame):
+        try:
+            from PIL import ImageTk
+            img = self._image(frame)
+        except Exception:                                      # noqa: BLE001
+            return
         try:
             self._photo = ImageTk.PhotoImage(img)
             self._canvas.itemconfigure(self._placeholder, state="hidden")
@@ -284,14 +389,20 @@ class Spike1SwitchWindow(tk.Toplevel):
         self._job = None
         self._closed = False
 
-        # the title's (node, index) -> name map (from the game ELF).  Widen the
-        # grid so every NAMED switch is visible (some sit past the default 16,
-        # e.g. GoT's shooter lane at index 20), but never balloon to a board's
-        # full 64 columns.
+        # the title's (node, index) -> name map, if the rig has it yet — it may
+        # only arrive minutes from now (_refresh_names), so nothing here may
+        # assume a nameless window stays nameless.
+        #: "early" (the 2012 home models) or "dmd".  The service cluster and
+        #: the coin-door bar drive the CPU-SPI file a qemu patch feeds the
+        #: 2015 firmware; the early era's game never reads it and has no such
+        #: switches, so offering them there is a lie (PAD-101).
+        self._era = (io.read_text("s1era")
+                     if io is not None and hasattr(io, "read_text") else "")
         self._names = io.read_switch_names() if io else {}
+        self._base_cols = cols
+        self._names_tick = 0
         if self._names:
-            # cap at 40, not 32: Ghostbusters' trough sits at indexes 32-38.
-            self._cols = max(cols, min(40, max(i for _, i in self._names) + 1))
+            self._cols = self._cols_for(self._names)
 
         # keyboard rows: resolved from the title's own switch names (curated
         # switchmaps), so the bindings follow the game — the same keys the
@@ -362,6 +473,46 @@ class Spike1SwitchWindow(tk.Toplevel):
 
     def _switch_name(self, node, index):
         return self._names.get((node, index))
+
+    def _cols_for(self, names):
+        """Grid width for *names*: wide enough that every NAMED switch is
+        visible (some sit past the default 16, e.g. GoT's shooter lane at index
+        20), capped at 40 — not 32, because Ghostbusters' trough sits at
+        indexes 32-38 — so it never balloons to a board's full 64 columns."""
+        return max(self._base_cols, min(40, max(i for _, i in names) + 1))
+
+    #: how often (in ticks) to look for the switch map.  On a title with no
+    #: curated map the rig walks it out of the running game and drops it in
+    #: minutes after this window opened, so "read it once at __init__" meant
+    #: the names never arrived.  ~2s at the default 20 Hz.
+    NAMES_EVERY = 40
+
+    def _refresh_names(self):
+        """Adopt a switch map that appeared (or changed) since the last look.
+
+        Rebuilds the body — a named title gets the switch LIST, a nameless one
+        the raw grid — and re-resolves the play keys IN PLACE, so the key
+        panel's existing rows light up instead of having to be rebuilt."""
+        names = self._io.read_switch_names() if self._io else {}
+        if names == self._names:
+            return False
+        self._names = names
+        if names:
+            self._cols = self._cols_for(names)
+        for row, fresh in zip(self._key_rows, self._resolve_key_rows()):
+            row["slot"] = fresh["slot"]
+        self._canvas.configure(bg=self.PANEL_BG if names else _tint(BG))
+        self._canvas.delete("all")
+        self._cells = {}
+        if names:
+            self._build_list()
+        else:
+            self._build_grid()
+        self._readout.config(
+            text=("click a switch to hold it, click again to release"
+                  if names
+                  else "(no switch names — start the game to load them)"))
+        return True
 
     # ---- the switch LIST (curated titles) ----------------------------------
     # The Spike 2 key panel's row idiom, applied to every named switch: the
@@ -458,20 +609,24 @@ class Spike1SwitchWindow(tk.Toplevel):
     #: keysym -> (display key, row label, name matcher).  The KEYS are the
     #: Spike 2 playfield's (padglhost.c binds[]); the SWITCH each drives is
     #: resolved by NAME from the title's curated map.
+    # The DMD generation names its flipper switches "L. FLIPPER BUTTON" (and
+    # its end-of-stroke ones "LEFT FLIPPER E.O.S."); the 2012 home models just
+    # "LEFT FLIPPER" / "LEFT FLIPPER EOS", and their start button "START".
     KEY_TABLE = (
         ("Left", "Left", "Left Flipper",
-         lambda u: "FLIPPER BUTTON" in u and "UP" not in u
-         and u.startswith("L")),
+         lambda u: "FLIPPER" in u and "UP" not in u and "EOS" not in
+         u.replace(".", "") and u.startswith("L")),
         ("Right", "Right", "Right Flipper",
-         lambda u: "FLIPPER BUTTON" in u and "UP" not in u
-         and u.startswith("R")),
+         lambda u: "FLIPPER" in u and "UP" not in u and "EOS" not in
+         u.replace(".", "") and u.startswith("R")),
         ("Up", "Up", "Upper Left Flipper",
          lambda u: "FLIPPER BUTTON" in u and "UP" in u and "L" in
          u.split("FLIPPER")[0]),
-        ("1", "1", "Start Button", lambda u: u == "START BUTTON"),
+        ("1", "1", "Start Button", lambda u: u in ("START BUTTON", "START")),
         ("5", "5", "Left Coin", lambda u: "LEFT COIN" in u),
-        ("t", "T", "Tilt Pendulum", lambda u: "TILT PENDULUM" in u),
-        ("f", "F", "Shooter Lane", lambda u: "SHOOTER" in u),
+        ("t", "T", "Tilt Pendulum", lambda u: u.startswith("TILT")),
+        ("f", "F", "Shooter Lane",
+         lambda u: "SHOOTER" in u and "EXIT" not in u),
     )
     #: keysym -> service button name (keeper `svc` command).
     SVC_KEYS = {"Return": "select", "KP_Enter": "select", "equal": "plus",
@@ -511,12 +666,13 @@ class Spike1SwitchWindow(tk.Toplevel):
         if keysym in self._down:
             return
         self._down.add(keysym)
-        if keysym in self.SVC_KEYS:
-            self._ball_cmd("svc " + self.SVC_KEYS[keysym])
-            return
-        if keysym in ("c", "C"):
-            self._ball_cmd("door toggle")
-            return
+        if self._era != "early":       # that machine has neither
+            if keysym in self.SVC_KEYS:
+                self._ball_cmd("svc " + self.SVC_KEYS[keysym])
+                return
+            if keysym in ("c", "C"):
+                self._ball_cmd("door toggle")
+                return
         if keysym in ("b", "B"):
             self._ball_cmd("trough toggle")
             return
@@ -586,33 +742,48 @@ class Spike1SwitchWindow(tk.Toplevel):
             self._panel_items.append((row, box, key, lab))
             y += self.ROW_H
         # service cluster: clickable buttons, key labels beneath (one control
-        # per action — the keys do not appear in the row list above).
+        # per action — the keys do not appear in the row list above).  On the
+        # 2012 home models the machine HAS no service buttons and no coin-door
+        # switch, so they are drawn dead and the real way in is spelled out.
         y += 8
         bw = (w - 24 - 3 * 6) // 4
         self._svc_items = []
+        dead = self._era == "early"
         for i, (name, text, keylab, color) in enumerate(self.SVC_ORDER):
             x0 = 12 + i * (bw + 6)
-            r = cv.create_rectangle(x0, y, x0 + bw, y + 24, fill=color,
-                                    outline="#444")
-            t = cv.create_text(x0 + bw / 2, y + 12, fill="#fff", font=f8,
-                               text=text)
-            cv.create_text(x0 + bw / 2, y + 33, fill=self.KEY_FG, font=f8,
-                           text=keylab)
-            for item in (r, t):
-                cv.tag_bind(item, "<Button-1>",
-                            lambda _e, n=name: self._ball_cmd("svc " + n))
+            r = cv.create_rectangle(x0, y, x0 + bw, y + 24,
+                                    fill="#2a2a2a" if dead else color,
+                                    outline="#3a3a3a" if dead else "#444")
+            t = cv.create_text(x0 + bw / 2, y + 12,
+                               fill=self.PANEL_DIM if dead else "#fff",
+                               font=f8, text=text)
+            cv.create_text(x0 + bw / 2, y + 33,
+                           fill=self.PANEL_DIM if dead else self.KEY_FG,
+                           font=f8, text="" if dead else keylab)
+            if not dead:
+                for item in (r, t):
+                    cv.tag_bind(item, "<Button-1>",
+                                lambda _e, n=name: self._ball_cmd("svc " + n))
             self._svc_items.append((name, r))
+        if dead:
+            cv.create_text(12, y + 33, anchor="w", fill="#8a8a8a", font=f8,
+                           text="no service buttons on this machine")
         y += svc_h
         # coin door bar: a click toggle, like the real door it stays put.
-        self._door_rect = cv.create_rectangle(12, y, w - 12, y + 20,
-                                              fill="#333", outline="#444")
-        self._door_text = cv.create_text(w / 2, y + 10, fill=self.LAB_FG,
-                                         font=f8, text="COIN DOOR")
-        cv.create_text(w - 16, y + 10, anchor="e", fill=self.KEY_FG, font=f8,
-                       text="C")
-        for item in (self._door_rect, self._door_text):
-            cv.tag_bind(item, "<Button-1>",
-                        lambda _e: self._ball_cmd("door toggle"))
+        # The early era has no coin-door switch at all; the bar becomes the
+        # place that tells you how this machine opens its test mode.
+        self._door_rect = cv.create_rectangle(
+            12, y, w - 12, y + 20, fill="#2a2a2a" if dead else "#333",
+            outline="#3a3a3a" if dead else "#444")
+        self._door_text = cv.create_text(
+            w / 2, y + 10, fill="#8a8a8a" if dead else self.LAB_FG, font=f8,
+            text="TEST MODE: hold both flippers 3s" if dead else "COIN DOOR")
+        if not dead:
+            cv.create_text(w - 16, y + 10, anchor="e", fill=self.KEY_FG,
+                           font=f8, text="C")
+            for item in (self._door_rect, self._door_text):
+                cv.tag_bind(item, "<Button-1>",
+                            lambda _e: self._ball_cmd("door toggle"))
         y += door_h
         # the trough: clickable ball positions, fed by the keeper's state.
         cv.create_text(12, y + 6, anchor="w", fill=self.LAB_FG, font=f9b,
@@ -653,12 +824,14 @@ class Spike1SwitchWindow(tk.Toplevel):
                     self._panel.itemconfig(
                         lab, fill=self.HIT_FG if made else self.LAB_FG)
             st = self._ball_state
-            door_closed = bool(st.get("door_closed", True))
-            self._panel.itemconfig(self._door_rect,
-                                   fill="#2e5e2e" if door_closed else "#5e2e2e")
-            self._panel.itemconfig(
-                self._door_text,
-                text="COIN DOOR CLOSED" if door_closed else "COIN DOOR OPEN")
+            if self._era != "early":       # no coin-door switch on that era
+                door_closed = bool(st.get("door_closed", True))
+                self._panel.itemconfig(
+                    self._door_rect,
+                    fill="#2e5e2e" if door_closed else "#5e2e2e")
+                self._panel.itemconfig(
+                    self._door_text,
+                    text="COIN DOOR CLOSED" if door_closed else "COIN DOOR OPEN")
             balls = int(st.get("balls", 0))
             nballs = int(st.get("nballs", 6)) or 6
             in_shooter = bool(st.get("in_shooter"))
@@ -856,6 +1029,10 @@ class Spike1SwitchWindow(tk.Toplevel):
         self._ball_tick += 1
         if self._ball_tick % 3 == 1 and hasattr(self._io, "read_ball_state"):
             self._ball_state = self._io.read_ball_state() or self._ball_state
+        # the map can arrive (or change) long after this window opened
+        self._names_tick += 1
+        if self._names_tick % self.NAMES_EVERY == 0:
+            self._refresh_names()
         if self._names:
             self._paint_list()
         else:
@@ -898,13 +1075,19 @@ class Spike1Viewers:
     the emulator down with it.
     """
 
-    def __init__(self, master_fn, decode_frame, log=None):
+    def __init__(self, master_fn, decode_frame, log=None, alpha=None):
         #: returns the Tk widget the windows parent to (the app toplevel).
         self._master_fn = master_fn
         self._decode = decode_frame
+        #: ``(decode_frame, render_image)`` for the alphanumeric displays of
+        #: the 2012 home models; used when the run dir's ``s1display`` says so.
+        self._alpha = alpha
         self._log = log or (lambda _m: None)
         self._io = None
         self._dmd = None
+        #: which kind of display window is up ("dmd" / "alpha"), so a change
+        #: of era swaps it instead of leaving the wrong one on screen
+        self._dmd_mode = None
         self._sw = None
 
     def configure(self, run_dir_wsl, distro):
@@ -916,6 +1099,37 @@ class Spike1Viewers:
         except tk.TclError:
             return False
 
+    def display_mode(self):
+        """``"alpha"`` when the run dir says this machine has the 16-segment
+        displays, else ``"dmd"``.  Read on every poll, because the rig only
+        writes ``s1display`` once the game is extracted — which is AFTER this
+        window first opens."""
+        if self._alpha is None or not hasattr(self._io, "read_text"):
+            return "dmd"
+        return "alpha" if self._io.read_text("s1display") == "alphanumeric" \
+            else "dmd"
+
+    def _sweep_orphans(self, master):
+        """Close display/switch windows nobody owns any more.
+
+        The panel is rebuilt when the era badges switch, and the new panel
+        starts with a fresh Spike1Viewers — so the previous one's windows are
+        left on screen with no reference to close them (David saw the stale
+        orange DMD window sitting behind the new red one)."""
+        mine = {id(self._dmd), id(self._sw)}
+        try:
+            children = list(master.winfo_children())
+        except tk.TclError:
+            return
+        for w in children:
+            if id(w) in mine:
+                continue
+            if isinstance(w, (Spike1DisplayWindow, Spike1SwitchWindow)):
+                try:
+                    w.close()
+                except tk.TclError:
+                    pass
+
     def open(self):
         """Open whichever windows are not already up.  Idempotent — a running
         game calls this on every status poll."""
@@ -924,13 +1138,27 @@ class Spike1Viewers:
         master = self._master_fn()
         if master is None:
             return
+        self._sweep_orphans(master)
+        want = self.display_mode()
+        if self._alive(self._dmd) and self._dmd_mode != want:
+            # The machine turned out to be the other kind of display.  A DMD
+            # window fed this era's 256-byte frames reads eight of them as one
+            # 2048-byte frame and draws stripes, so replace it rather than
+            # leaving it up (PAD-101).
+            try:
+                self._dmd.close()
+            except tk.TclError:
+                pass
+            self._dmd = None
         if not self._alive(self._dmd):
             try:
                 self._dmd = Spike1DisplayWindow(
                     master, self._io, self._decode,
+                    alpha=self._alpha if want == "alpha" else None,
                     on_close=lambda _w: setattr(self, "_dmd", None))
+                self._dmd_mode = want
             except Exception as exc:                       # noqa: BLE001
-                self._log("Spike 1: could not open the DMD window: %s" % exc)
+                self._log("Spike 1: could not open the display window: %s" % exc)
                 self._dmd = None
         if not self._alive(self._sw):
             try:

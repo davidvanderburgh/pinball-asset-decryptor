@@ -277,6 +277,79 @@ These have each been violated at least once and each cost a run or a window:
       or his log, and the one instrument that would have named the fault was
       printing another title's memory until today.
 
+- [x] **90. The EARLY Spike 1 cards (Stern's 2012 home models) run on the
+      rig.** `S3 D3` *(Filed 2026-09-01 from PAD-101 as "read the assets,
+      decide whether the rig can ever run one"; David: "why don't we just make
+      it work instead of kicking the can?" - so it was made to work the same
+      day, on the ticket branch.)*
+      **DONE on `ticket/PAD-101`:** `transformers_pin-1.0.18` extracts
+      (`build_rootfs.py` follows the card's own `game` / `display.hex`
+      symlinks: it launches `gamer`, not the debug build), boots under the
+      rig, reaches attract (`PRESS START`), takes START and starts a game
+      (`PLAYER 1 BALL 1`), on its own node-bus responder (`s1early.py`: the
+      checksum-less 2012 wire, active-high switches behind
+      `g_switch_negative_logic_bitmask`, the settings EEPROM on the net
+      bridge), with the switch NAMES read out of the game's own map, a
+      16-segment display window (`s1alpha.py`, the frame geometry and the
+      bit-to-segment order pinned from the game's font), one boot patch
+      (`amp_set_sample_rate`'s read-back assert), and a `--gpio-file` on the
+      device model.  The whole read is in
+      `docs/architecture/spike1_emulation.md` ("The EARLY Spike 1 cards").
+      **Do NOT date a Spike 1 card by its rootfs**: `/etc/version
+      201006031147`, glibc 2.6.1 and kernel 2.6.30 are identical on GOT LE and
+      Whoa Nellie; the first filing of this item called it "a 2010 machine"
+      on that evidence and was wrong.
+      **AND IT SERVES A BALL:** the ramp lock's `LOCKUP 1-3` are optos whose
+      CLOSED state is "no ball"; read open they counted as three locked balls,
+      the game kicked the lock every 3 s from attract on and never fired the
+      trough eject.  The keeper now holds any `LOCKUP` switch closed like the
+      trough, and START -> coil 3 -> `serve: ball -> shooter lane` ->
+      `launch: ball in play`, `PLAYER 1 BALL 1` on the display.  Polish left
+      in 91.
+
+- [ ] **91. Transformers The Pin: the launched ball, the drop-target reset,
+      the lamps, and the audio rate.** `S2 D2` *(Filed 2026-09-01 from the PAD-101 work; the
+      serve half of the original filing was solved the same hour and is in
+      item 90.)* What is left on the 2012 platform now that a ball serves and
+      launches:
+      - **THE BALL IS NOT COUNTED IN PLAY, and the gate is now known exactly.**
+        `ValidPlayfield_Update` (gamer @0xecac) declares the ball in play only
+        after **three** playfield-switch turn-on EDGES since the count was last
+        reset at ball start: it increments `g_nValidPlayfieldSwitches` on
+        `SWITCH_IsTurningOn(11)` (RIGHT OUT LANE) OR the "any playfield switch
+        turning on" group flag (`SwitchGroupsCompute`, from
+        `g_switchesBelowAllegiance` = ids 5/6/7/19 = the pops, cyberlock,
+        Megatron; and `g_switchesMegatron` = 41/42/43/44 = skill shot, shooter
+        lane exit, collect decepticons, autobot top lane), and sets valid on
+        the third.  Until then the display cycles PLAYER 1 BALL 1 / PLUNGE
+        BALL.  A plunge physically trips two of these (SHOOTER LANE EXIT, then
+        the SKILL SHOT lane); the keeper already pulses SHOOTER LANE EXIT on
+        launch (a pure sensor).  **The third edge is a real scoring hit**, and
+        that is the boundary: faking SKILL SHOT or a pop bumper to force the
+        gate would credit the player an award they did not earn, so the keeper
+        must NOT.  Closing this honestly means a playfield BALL MODEL - the
+        ball leaves the lane, enters play, and hits a switch because it
+        physically would - which is item 88's mech-feedback shape generalised
+        to a free ball.  Everything up to and including the plunge is modelled;
+        the autonomous ball is the remaining, larger piece.
+      - **DROP TARGET RESET (coil 7, `ff600000`)** retries 7 times after the
+        ball launches and then gives up; the game plays on.  Measured: the
+        targets (switches 16-18) read "up" when OPEN (holding them closed
+        makes the reset retry), yet the post-launch reset still wants a
+        change it never gets - probably a momentary closed-then-open as the
+        bank rises.  A one-line keeper rule once the expected edge is known.
+      - **Lamps into `s1hw.state`**: s1early.py sees every lamp frame
+        (`[0x80|node, n+1, 0x80|c, d0..dn]`, 629 of them per minute) and
+        writes none of it, so the switch window shows no lamp colour on this
+        era.  The DMD generation's decoder in nodebus.py is the model.
+      - **Audio pacing**: `S1_PCM_RATE=24000` is inferred from the game's
+        WAVs (24000/12000 Hz mono s16, 128-frame stereo blocks); measure the
+        DAC handler's real block cadence and confirm before trusting the
+        pitch.
+      - S3: it plays; these are polish. D2: each is a contained rule with
+      the instrumentation already in place (`S1_NB_LOG`, `s1alpha.py` as a
+      display reader).
+
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`
       *(Found 2026-09-01 while answering David's "will our fixes work on

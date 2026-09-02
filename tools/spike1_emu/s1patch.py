@@ -299,12 +299,110 @@ def patch_node_ready(path):
     return "patched"
 
 
+#: The four patches above all resolve symbols of the 2015-2016 framework.  An
+#: EARLY card's firmware (the 2012 home models, PAD-101) has none of them — no
+#: line-frequency self-test to spoof, no node status gate, no in-game node
+#: flashing.  It has ONE wall of its own instead (below).
+_ERA_SYMBOLS = (SYMBOL, NODE_STATUS_SYMBOL, NODE_READY_SYMBOL)
+
+
+def is_early_era(path):
+    with open(path, "rb") as f:
+        elf = _Elf(f.read())
+    return not any(any(sym in n for n in elf.syms) for sym in _ERA_SYMBOLS)
+
+
+# ---- early era: the sample-rate read-back assert ---------------------------
+# amp_set_sample_rate (amp_pdi.cpp) sets the DAC rate with ioctl(i2s, 0x3e00,
+# &rate), reads it back with ioctl(i2s, 0x3e01, &ridx) and asserts
+#     GetRate(rate) == GetRate(ridx.rateIndex)
+# Both are legacy ioctls (no _IOC size), so the emulator's generic passthrough
+# hands the CUSE model a guest POINTER it cannot write through: the read-back
+# stays 0, the assert fires, and the boot dies at "initializing audio..."
+# (seen live on transformers_pin-1.0.18).  The set itself is fine — the i2s
+# model discards it and paces PCM at the rate start.sh names — so the cheapest
+# honest fix is to let the function return past its own check: the
+#     cmp r2, r3 ; bne <assert block> ; add sp, sp, #8 ; pop {…, pc}
+# tail becomes `cmp ; nop ; add ; pop`.  Symbol-resolved; the branch is found
+# by its TARGET (the block whose first instruction loads the
+# "GetRate(rate)==…" assert string), so any other bne in the function is left
+# alone; exactly one site may match; idempotent.
+AMP_RATE_SYMBOL = "amp_set_sample_rate"
+_AMP_RATE_ASSERT = b"GetRate(rate)=="
+_LDR_R0_PC = 0xE59F0000          # ldr r0, [pc, #imm]
+_LDR_PC_MASK = 0xFFFFF000
+_BNE = 0x1A000000                # bne <imm24>
+_BNE_MASK = 0xFF000000
+_NOP = 0xE1A00000                # mov r0, r0
+_AMP_RATE_WINDOW = 0x200
+
+
+def _amp_rate_assert_block(elf, win, start):
+    """Vaddr of the assert block: the `ldr r0,[pc,#imm]` in *win* whose
+    literal points at the "GetRate(rate)==…" string, or None."""
+    for j in range(0, len(win) - 3, 4):
+        w = struct.unpack_from("<I", win, j)[0]
+        if (w & _LDR_PC_MASK) != _LDR_R0_PC:
+            continue
+        lit = start + j + 8 + (w & 0xFFF)
+        try:
+            ptr = struct.unpack("<I", elf.read_vaddr(lit, 4))[0]
+            if elf.read_vaddr(ptr, len(_AMP_RATE_ASSERT)) == _AMP_RATE_ASSERT:
+                return start + j
+        except ValueError:
+            continue
+    return None
+
+
+def patch_amp_rate_assert(path):
+    """Let ``amp_set_sample_rate`` return past its read-back assert.  Returns
+    'patched', 'already', 'absent' (no such function or no such assert — the
+    DMD-generation games), or raises on ambiguity."""
+    with open(path, "rb") as f:
+        data = bytearray(f.read())
+    elf = _Elf(bytes(data))
+    cands = sorted(v for n, v in elf.syms.items() if AMP_RATE_SYMBOL in n)
+    if not cands:
+        return "absent"
+    va = cands[0]
+    off = _file_offset(elf, va)
+    win = bytes(data[off:off + _AMP_RATE_WINDOW])
+    block = _amp_rate_assert_block(elf, win, va)
+    if block is None:
+        return "absent"
+    sites, nops = [], []
+    for j in range(0, len(win) - 3, 4):
+        w = struct.unpack_from("<I", win, j)[0]
+        if (w & _BNE_MASK) == _BNE:
+            imm = w & 0x00FFFFFF
+            if imm & 0x800000:
+                imm -= 0x1000000
+            if va + j + 8 + imm * 4 == block:
+                sites.append(j)
+        elif w == _NOP and j >= 4 and \
+                struct.unpack_from("<I", win, j - 4)[0] == 0xE1520003:  # cmp r2,r3
+            nops.append(j)
+    if not sites:
+        return "already" if nops else "absent"
+    if len(sites) > 1:
+        raise ValueError("ambiguous sample-rate assert branch — refusing")
+    struct.pack_into("<I", data, off + sites[0], _NOP)
+    with open(path, "wb") as f:
+        f.write(data)
+    return "patched"
+
+
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
     if not argv:
         print("usage: s1patch.py <game-elf>", file=sys.stderr)
         return 2
     try:
+        if is_early_era(argv[0]):
+            ar = patch_amp_rate_assert(argv[0])
+            print("early firmware era (no DMD-generation boot gates): "
+                  "amp-rate-assert=%s" % ar)
+            return 0
         lf = patch_line_frequency(argv[0])
         ns = patch_node_status(argv[0])
         nr = patch_node_ready(argv[0])

@@ -370,3 +370,294 @@ def test_append_ball_cmd_appends_lines(tmp_path, monkeypatch):
     assert io.append_ball_cmd("coin 3") is True
     assert io.append_ball_cmd("start") is True
     assert (tmp_path / "s1ball.cmd").read_text() == "coin 3\nstart\n"
+
+
+# ------------------------------------------------- a map that arrives late --
+# On a title with no curated map the rig walks the switch names out of the
+# RUNNING game, so s1switches.json shows up minutes after this window opened.
+# Reading it once at __init__ left such a title nameless and its play keys dead
+# for the whole session even though the names were sitting in the run dir
+# (PAD-101).
+
+def test_switch_window_adopts_a_map_that_arrives_later(root):
+    io = _FakeIO()                            # no names yet: the raw grid
+    win = W.Spike1SwitchWindow(root, io, nodes=(1, 8, 9))
+    win.update()
+    assert ("sw", 8, 0) in win._cells
+    assert _row(win, "1")["slot"] is None     # Start is inert without names
+
+    io._names = dict(_PLAY_NAMES)             # the walk lands
+    assert win._refresh_names() is True
+    win.update()
+    assert {r["slot"] for r in win._list_rows} == {
+        addr(n, i) for (n, i) in _PLAY_NAMES}
+    assert _row(win, "1")["slot"] == addr(1, 11)     # ... and the keys work
+    win.press_key("1")
+    assert io.writes[-1][0] == {addr(1, 11)}
+    win.close()
+
+
+def test_switch_window_polls_for_the_map_while_it_runs(root):
+    io = _FakeIO()
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    win.update()
+    io._names = dict(_PLAY_NAMES)
+    if win._job is not None:                  # drive the tick ourselves; the
+        win.after_cancel(win._job)            # scheduled one would outlive us
+    win._names_tick = win.NAMES_EVERY - 1     # the next tick is a look
+    win._tick()
+    assert win._names == _PLAY_NAMES
+    assert _row(win, "Left")["slot"] == addr(8, 2)
+    win.close()
+
+
+def test_switch_window_ignores_an_unchanged_map(root):
+    io = _FakeIO(names=_PLAY_NAMES)
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    win.update()
+    rows = win._list_rows
+    assert win._refresh_names() is False      # same map: no rebuild
+    assert win._list_rows is rows
+    win.close()
+
+
+# ------------------------------------------ the 2012 home models' names --
+# Their switch map names the flippers "LEFT FLIPPER" (with "LEFT FLIPPER
+# EOS" beside them) and the start button "START"; the play keys must resolve
+# on those as well as on the DMD generation's "L. FLIPPER BUTTON" / "START
+# BUTTON" (PAD-101).
+
+_EARLY_NAMES = {(8, 1): "LEFT FLIPPER EOS", (8, 2): "RIGHT FLIPPER EOS",
+                (8, 4): "TILT", (8, 12): "SHOOTER LANE", (8, 21): "START",
+                (8, 26): "LEFT FLIPPER", (8, 39): "RIGHT FLIPPER",
+                (8, 42): "SHOOTER LANE EXIT"}
+
+
+def test_key_rows_resolve_on_the_early_era_names(root):
+    io = _FakeIO(names=_EARLY_NAMES)
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    assert _row(win, "Left")["slot"] == addr(8, 26)      # not the EOS switch
+    assert _row(win, "Right")["slot"] == addr(8, 39)
+    assert _row(win, "1")["slot"] == addr(8, 21)
+    assert _row(win, "t")["slot"] == addr(8, 4)
+    assert _row(win, "f")["slot"] == addr(8, 12)         # not the lane EXIT
+    win.close()
+
+
+def test_key_rows_still_resolve_on_the_dmd_generation_names(root):
+    io = _FakeIO(names={**_PLAY_NAMES, (8, 0): "LEFT FLIPPER E.O.S."})
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    assert _row(win, "Left")["slot"] == addr(8, 2)       # L. FLIPPER BUTTON
+    assert _row(win, "1")["slot"] == addr(1, 11)
+    win.close()
+
+
+# ---------------------------------------------- the alphanumeric display --
+
+class _AlphaIO(_FakeIO):
+    def __init__(self, display, frame):
+        super().__init__(frame=frame)
+        self._display = display
+
+    def read_text(self, name):
+        return self._display if name == "s1display" else ""
+
+
+def _alpha_mod():
+    import importlib.util
+    import os
+    from pinball_decryptor.gui.spike1_emulate_tab import rig_dir
+    p = os.path.join(rig_dir(), "s1alpha.py")
+    spec = importlib.util.spec_from_file_location("s1alpha_probe", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_display_window_draws_16_segment_frames_in_alpha_mode(root):
+    pytest.importorskip("PIL")
+    m = _alpha_mod()
+    fr = bytearray(256)
+    fr[0] = 0x80                          # digit 0, segment 0 (g1), bit 0
+    win = W.Spike1DisplayWindow(root, _AlphaIO("alphanumeric", bytes(fr)),
+                                _decode(), hz=50,
+                                alpha=(m.decode_frame, m.render_image))
+    win.update()
+    assert win._frame_bytes == 256
+    assert win._photo is not None
+    assert "display" in win.title()
+    win.close()
+
+
+def test_viewers_pick_alpha_only_when_the_run_dir_says_so(root, monkeypatch):
+    pytest.importorskip("PIL")
+    m = _alpha_mod()
+    made = []
+    monkeypatch.setattr(W, "Spike1DisplayWindow",
+                        lambda master, io, decode, alpha=None, on_close=None:
+                        made.append(alpha) or _Dummy())
+    monkeypatch.setattr(W, "Spike1SwitchWindow",
+                        lambda master, io, on_close=None: _Dummy())
+    for display, expect in (("alphanumeric", True), ("dotmatrix", False), ("", False)):
+        v = W.Spike1Viewers(lambda: root, _decode(),
+                            alpha=(m.decode_frame, m.render_image))
+        v._io = _AlphaIO(display, None)
+        v.open()
+        assert (made[-1] is not None) is expect, display
+
+
+class _Dummy:
+    _closed = False
+
+    def winfo_exists(self):
+        return True
+
+    def bind_play_keys(self, w):
+        pass
+
+
+# ------------------------------------------- the display window's KIND -----
+# The rig only says which display the machine has (s1display) once the game is
+# extracted, which is AFTER the windows first open.  A DMD window fed this
+# era's 256-byte frames reads eight of them as one 2048-byte frame and draws
+# stripes, so the viewers must SWAP it, not leave it up (PAD-101).
+
+class _ModeIO(_FakeIO):
+    def __init__(self, display=""):
+        super().__init__()
+        self.display = display
+
+    def read_text(self, name):
+        return self.display if name == "s1display" else ""
+
+    def read_json(self, name):
+        return None
+
+
+def _viewers(root, io, alpha=("d", "r")):
+    v = W.Spike1Viewers(lambda: root, _decode(), alpha=alpha)
+    v._io = io
+    return v
+
+
+def test_display_mode_follows_the_run_dir(root):
+    io = _ModeIO("")
+    v = _viewers(root, io)
+    assert v.display_mode() == "dmd"
+    io.display = "alphanumeric"
+    assert v.display_mode() == "alpha"
+    io.display = "dotmatrix"
+    assert v.display_mode() == "dmd"
+
+
+def test_a_dmd_window_is_swapped_when_the_marker_arrives(root, monkeypatch):
+    made = []
+
+    class _W:
+        _closed = False
+
+        def __init__(self, master, io, decode, alpha=None, on_close=None):
+            self.alpha = alpha
+            self.closed = False
+            made.append(self)
+
+        def winfo_exists(self):
+            return True
+
+        def close(self):
+            self.closed = self._closed = True
+
+        def bind_play_keys(self, w):
+            pass
+
+    monkeypatch.setattr(W, "Spike1DisplayWindow", _W)
+    monkeypatch.setattr(W, "Spike1SwitchWindow", _W)
+    monkeypatch.setattr(W.sys, "platform", "win32")
+    io = _ModeIO("")                       # the rig has not said yet
+    v = _viewers(root, io)
+    v.open()
+    first = v._dmd
+    assert first.alpha is None and v._dmd_mode == "dmd"
+
+    v.open()                               # same mode: keep the window
+    assert v._dmd is first and not first.closed
+
+    io.display = "alphanumeric"            # the rig writes the marker
+    v.open()
+    assert first.closed, "the stale DMD window must be closed"
+    assert v._dmd is not first and v._dmd.alpha is not None
+    assert v._dmd_mode == "alpha"
+
+
+def test_orphaned_windows_from_a_rebuilt_panel_are_closed(root, monkeypatch):
+    """Switching era badges rebuilds the panel with a fresh Spike1Viewers; the
+    previous one's windows had nothing left to close them."""
+    monkeypatch.setattr(W.sys, "platform", "win32")
+    io = _ModeIO("")
+    old = _viewers(root, io)
+    old.open()                              # real windows, parented to root
+    orphan_dmd, orphan_sw = old._dmd, old._sw
+    assert orphan_dmd is not None and orphan_sw is not None
+
+    fresh = _viewers(root, _ModeIO(""))     # the rebuilt panel's viewers
+    fresh.open()
+    root.update()
+    assert orphan_dmd._closed and orphan_sw._closed
+    assert not fresh._dmd._closed
+    fresh.close()
+
+
+# --------------------------------- service controls the machine really has --
+# The 2012 home models have no coin-door switch and no service buttons (their
+# 46 node-8 switches are all playfield/cabinet), and no operator menu: TestMode
+# is entered by holding BOTH FLIPPERS for 3 s.  Offering the DMD generation's
+# BACK/-/+/SELECT cluster and coin-door bar there sent David hunting for a
+# door-and-SELECT menu that cannot exist (PAD-101).
+
+class _EraIO(_FakeIO):
+    def __init__(self, era, names=None):
+        super().__init__(names=names)
+        self.era = era
+
+    def read_text(self, name):
+        return self.era if name == "s1era" else ""
+
+
+def test_service_keys_are_inert_on_the_early_era(root):
+    io = _EraIO("early", names=_PLAY_NAMES)
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    win.press_key("Return")          # SELECT
+    win.press_key("BackSpace")       # BACK
+    win.press_key("c")               # coin door
+    assert not hasattr(io, "ball_cmds") or io.ball_cmds == []
+    win.close()
+
+
+def test_service_keys_still_work_on_the_dmd_generation(root):
+    io = _EraIO("dmd", names=_PLAY_NAMES)
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    win.press_key("Return")
+    win.press_key("c")
+    assert io.ball_cmds == ["svc select", "door toggle"]
+    win.close()
+
+
+def test_the_early_panel_says_how_to_open_test_mode(root):
+    io = _EraIO("early", names=_PLAY_NAMES)
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    shown = {win._panel.itemcget(i, "text")
+             for i in win._panel.find_all()
+             if win._panel.type(i) == "text"}
+    assert any("hold both flippers" in t.lower() for t in shown)
+    assert not any("COIN DOOR" in t for t in shown)
+    win.close()
+
+
+def test_the_dmd_panel_still_shows_the_coin_door(root):
+    io = _EraIO("dmd", names=_PLAY_NAMES)
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    shown = {win._panel.itemcget(i, "text")
+             for i in win._panel.find_all()
+             if win._panel.type(i) == "text"}
+    assert any("COIN DOOR" in t for t in shown)
+    win.close()

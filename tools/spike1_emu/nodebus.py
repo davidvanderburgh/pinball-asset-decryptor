@@ -290,6 +290,15 @@ class WireParser:
 
 
 def main():
+    # The EARLY firmware era (the 2012 home models, PAD-101) speaks a wire
+    # format five years older than the one below — no checksums, implied reply
+    # lengths, active-HIGH switches, the settings EEPROM on the net bridge.
+    # start.sh names the era; the responder for it lives in s1early.py, and
+    # it is entered from HERE so the process keeps this script's path, which
+    # is how s1own.sh / status.sh / stop.sh recognise the rig's responder.
+    if os.environ.get("S1_ERA") == "early":
+        import s1early
+        return s1early.main(sys.argv[1:])
     import termios
     slave_path_file = sys.argv[1]
     capture_file = sys.argv[2]

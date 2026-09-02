@@ -74,27 +74,82 @@ elif [ ! -e "$S1_WORK/game/game" ]; then
     fail "no game extracted yet — pick a Spike 1 card image" 4
 fi
 
+# 3a. which firmware ERA this card is.  build_rootfs.py leaves .game_exe (and
+#     .game_path, .display) beside the game only for an EARLY card — the 2012
+#     home models such as Transformers The Pin (PAD-101) — whose firmware
+#     predates the node-bus framework the rest of this script assumes: the
+#     responder speaks that era's wire format (s1early.py via nodebus.py),
+#     none of the s1patch.py boot patches exist to apply, and the switch map
+#     cannot be walked with the DMD-generation anchor (yet).  Absent = the
+#     2015-2016 titles, and nothing below changes for them.
+S1_ERA=dmd
+if [ -e "$S1_WORK/game/.game_exe" ]; then
+    S1_ERA=early
+    # the DAC rate this era runs at (its WAVs are 24000/12000 Hz mono s16 and
+    # the mixer writes 128-frame stereo blocks) — the i2s pacing in emu_root
+    # reads it from the environment; the DMD generation stays at 44100.
+    export S1_PCM_RATE="${S1_PCM_RATE:-24000}" S1_PCM_CH="${S1_PCM_CH:-2}"
+    # cabinet switches live on CPU-board GPIO pins in this era; this file is
+    # how the switch window and the keeper press them (byte per pin, 0=held)
+    export S1_GPIO_FILE="$S1_WORK/s1gpio.input"
+    rm -f "$S1_GPIO_FILE"
+    log "Early Spike 1 card: $(cat "$S1_WORK/game/.game_name" 2>/dev/null) launches $(cat "$S1_WORK/game/.game_exe"), $(cat "$S1_WORK/game/.display" 2>/dev/null) display."
+    # What the app's display window needs to draw this machine instead of a
+    # DMD: WHICH display it is, and the game's own font so the window can
+    # decode segments to characters.  Without the first the window falls back
+    # to the 128x32 DMD and reads EIGHT of this era's 256-byte frames as one
+    # 2048-byte frame - solid stripes (PAD-101).
+    cat "$S1_WORK/game/.display" > "$S1_WORK/s1display" 2>/dev/null
+    python3 "$HERE/s1alpha.py" --font \
+        "$S1_WORK/game/$(cat "$S1_WORK/game/.game_exe")" \
+        "$S1_WORK/s1font.json" >/dev/null 2>&1 \
+        || log "  (no font table: the display shows segments without text)"
+else
+    rm -f "$S1_WORK/s1display" "$S1_WORK/s1font.json"
+fi
+export S1_ERA
+
 # 3b. mains line-frequency self-test: the emulator has no real AC line, so the
 #     game's factory check sits on "CHECK POWER DISTRIBUTION BOARD" forever.
 #     Patch the extracted game to report a valid 60 Hz (idempotent; see s1patch.py).
 if [ -e "$S1_WORK/game/game" ]; then
-    log "Game patches: $(python3 "$HERE/s1patch.py" "$S1_WORK/game/game" 2>&1)"
+    log "Game patches: $(python3 "$HERE/s1patch.py" "$S1_WORK/game/$(cat "$S1_WORK/game/.game_exe" 2>/dev/null || echo game)" 2>&1)"
     # switch names for the viewer's matrix window: the title's own (node,index)
-    # -> name map, straight from the game ELF (s1elf --switches).  The switch
-    # window reads this over the UNC path and labels each cell.  Best-effort.
-    if python3 "$HERE/s1elf.py" --switches "$S1_WORK/game/game" \
-            > "$S1_WORK/s1switches.json" 2>/dev/null; then
-        log "Switch names: $(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))),"switches")' "$S1_WORK/s1switches.json" 2>/dev/null)"
-    fi
-    # A curated per-title map OVERRIDES the s1elf decode: the static decode's
-    # (node,index) attribution is wrong (its bit/device fields don't match the
-    # game's runtime registration — GOT LE's START is really (1,11), not the
-    # (9,5) it emits).  switchmaps/<TITLE>.json files are sweep-verified live.
+    # -> name map.  The switch window reads this over the UNC path, labels and
+    # lays out its rows from it, binds the play keys through it, and the ball
+    # keeper resolves its trough/shooter/start slots from it — so a map with
+    # the wrong POSITIONS is not a cosmetic problem, it is "the switches do
+    # nothing".
+    #
+    # Two sources, in this order:
+    #   1. a sweep-verified curated map for this card (switchmaps/<CARD>.json),
+    #      which also carries the "_trough_coils" the keeper serves on;
+    #   2. otherwise the LIVE registry walk (s1swmap.py), started with the game
+    #      below and written as soon as the game has registered its switches.
+    #
+    # What is NOT a source any more: the static ELF decode (s1elf --switches).
+    # Its names are right and its (node,index) attribution is wrong — GOT LE's
+    # START is really (1,11), not the (9,5) it emits — because the tables it
+    # reads are populated at RUNTIME and the file's copies are stale.  It used
+    # to be the default, with the 7 curated files as the only correction, so
+    # every other card (including the Pro build of a title whose LE is curated)
+    # played with every click, key and trough slot pointed somewhere else.
+    # That was PAD-101: "switches not working on any spike 1 game".
     _title=$(basename "$(dirname "$(readlink -f "$S1_WORK/game")")")
     _title=${_title%-*}
+    S1_SWMAP_LIVE=0
     if [ -e "$HERE/switchmaps/$_title.json" ]; then
         cp "$HERE/switchmaps/$_title.json" "$S1_WORK/s1switches.json"
         log "Switch names: curated map for $_title."
+    elif [ "$S1_ERA" = "early" ]; then
+        rm -f "$S1_WORK/s1switches.json"
+        log "Switch names: none yet for an early card (the switch window shows the raw matrix)."
+    else
+        # a map from a PREVIOUS card would name this title's switches wrongly
+        rm -f "$S1_WORK/s1switches.json"
+        S1_SWMAP_LIVE=1
+        log "Switch names: no curated map for $_title — reading them from the"
+        log "  game itself once it boots (they appear in the switch window)."
     fi
 fi
 
@@ -114,12 +169,31 @@ if [ -L "$_dhex" ] || [ -e "$_dhex" ]; then
         && log "Display firmware image hidden from the boot updater."
 fi
 
+# 3d. the PCM format this title's DAC actually runs at, for the app's speaker.
+#     sys_dac_init calls amp_init(3, 70) on the 2012 home models: 3 is the index
+#     into the DAC rate table {1:11025, 2:22050, 3:24000, 4:32000, 5:44100,
+#     6:48000}, so they are 24000 Hz stereo, not the 44100 the chain assumed.
+#     Both ends have to agree or the player starves and you hear nothing.
+printf '%s %s\n' "${S1_PCM_RATE:-44100}" "${S1_PCM_CH:-2}" > "$S1_WORK/s1audio"
+# ...and which firmware era, so the switch window only offers controls this
+# machine actually has.  The 2012 home models carry NO coin-door or service
+# switches (their 46 node-8 switches are all playfield/cabinet), and no
+# operator menu: TestMode() is entered by holding BOTH FLIPPERS for 3 s.
+printf '%s\n' "$S1_ERA" > "$S1_WORK/s1era"
+
 # 4. valid board EEPROM (unlocks the boot; see docs/architecture/spike1_emulation.md)
 mkdir -p "$S1_WORK/rootfs/data"
 python3 "$HERE/make_seed.py" "$S1_WORK/rootfs/data/board_eeprom.bin" >/dev/null 2>&1
 
 # 5. node-bus responder (a pty bound at /dev/ttyS4) + fresh captures
-pkill -KILL -f nodebus.py 2>/dev/null
+# The responder is killed BY PID, OURS only — `pkill -f nodebus.py` matches the
+# SPIKE 2 rig's responder too (it has a nodebus.py of its own), so starting
+# Spike 1 killed a running Spike 2 game's node bus.  s1own.sh owns that
+# distinction (PAD-98); status.sh and stop.sh already asked it and this one did
+# not.  (The keeper's name is unique to this rig, so it stays a plain pkill —
+# the same pair stop.sh does.)
+_nb=$(S1_WORK="$S1_WORK" bash "$HERE/s1own.sh" nodebus 2>/dev/null)
+[ -n "$_nb" ] && kill -KILL $_nb 2>/dev/null
 pkill -KILL -f s1ball.py 2>/dev/null
 rm -f "$S1_WORK/spi0.cap" "$S1_WORK/ttyS4.cap" "$S1_WORK/ttyS4.slave" \
       "$S1_WORK/s1sw.input" "$S1_WORK/s1auto.input" "$S1_WORK/s1ball.cmd"
@@ -127,9 +201,13 @@ rm -f "$S1_WORK/spi0.cap" "$S1_WORK/ttyS4.cap" "$S1_WORK/ttyS4.slave" \
 # argv[3]) — every REQ + the exact reply bytes, for debugging node registration.
 # S1_SW_AUTO: second SwitchInput bitmap (the s1ball.py ball-keeper daemon);
 # merged with the viewer's s1sw.input by the responder.
+# S1_ERA / S1_EEP_FILE: the early era's responder (s1early.py) and where it
+# keeps that machine's 64-byte settings EEPROM, which lives on the net bridge
+# and is read over this same serial port.
 setsid env S1_SW_INPUT="$S1_WORK/s1sw.input" \
     S1_SW_AUTO="$S1_WORK/s1auto.input" \
-    S1_GAME_ELF="$S1_WORK/game/game" \
+    S1_GAME_ELF="$S1_WORK/game/$(cat "$S1_WORK/game/.game_exe" 2>/dev/null || echo game)" \
+    S1_ERA="$S1_ERA" S1_EEP_FILE="$S1_WORK/s1eep.bin" S1_WORK="$S1_WORK" \
     python3 "$HERE/nodebus.py" "$S1_WORK/ttyS4.slave" "$S1_WORK/ttyS4.cap" \
     ${S1_NB_LOG:+"$S1_NB_LOG"} \
     >/dev/null 2>&1 &
@@ -142,10 +220,11 @@ log "Node-bus responder up."
 #    the DMD).  emu_root.sh owns the namespace/chroot/CUSE/binfmt loop.
 export S1_ROOT="$S1_WORK/rootfs" S1_GAME="$S1_WORK/game" S1_QEMU="$S1_QEMU" \
        S1_HWSHIM="$S1_WORK/s1hwshim" S1_CPUINFO="$HERE/cpuinfo" \
-       S1_STRACE=0 S1_I2C_LOG=0 S1_RUNS=1000 S1_DROP_SIGFPE=1 \
+       S1_STRACE="${S1_STRACE:-0}" S1_I2C_LOG=0 S1_RUNS=1000 S1_DROP_SIGFPE=1 \
        S1_EE_FILE=/data/board_eeprom.bin S1_TTYS4_CAP="$SLAVE" \
        S1_SPI0_CAP="$S1_WORK/spi0.cap" S1_DMD_FPS="${S1_DMD_FPS:-60}" \
        PAD_AUDIO="${PAD_AUDIO:-0}" S1_AUDIO_FIFO="$S1_WORK/audio.fifo" \
+       S1_PCM_PACE="${S1_PCM_PACE-1}" \
        S1_CPUSW_FILE=/data/s1cpusw.input \
        S1_PIVOT="${S1_PIVOT:-0}" S1_HOLDOFF="$S1_WORK/holdoff"
 rm -f "$S1_WORK/holdoff"    # a stale holdoff would park the loop before run 1
@@ -163,6 +242,19 @@ rm -f "$S1_WORK/holdoff"    # a stale holdoff would park the loop before run 1
 setsid bash "$HERE/emu_root.sh" >"$S1_WORK/emu.log" 2>&1 < /dev/null &
 log "Game starting under the emulator…"
 
+# 6c. the live switch-map walk, for a title with no curated map.  It waits for
+#     the game to register its switches (a couple of minutes on a cold boot),
+#     then writes s1switches.json; the switch window and the ball keeper both
+#     pick the file up while they run, so the names, the play keys and the
+#     trough all start working without a restart.  Best-effort and quiet: a
+#     title it cannot read simply leaves the window on its raw matrix grid.
+if [ "${S1_SWMAP_LIVE:-0}" = "1" ]; then
+    setsid python3 "$HERE/s1swmap.py" --work "$S1_WORK" \
+        --out "$S1_WORK/s1switches.json" --wait "${S1_SWMAP_WAIT:-600}" \
+        >"$S1_WORK/s1swmap.log" 2>&1 &
+    log "Reading this title's switch names from the running game…"
+fi
+
 # 6a. sound: the i2s shim tees the game's paced 44.1 kHz s16 stereo PCM into
 #     $S1_AUDIO_FIFO; the Spike 2 rig's speaker chain (playaudio.sh ->
 #     padrelay.py -> Windows padplay.py over TCP, bypassing the damaged WSLg
@@ -174,8 +266,10 @@ log "Game starting under the emulator…"
 if [ "${PAD_AUDIO:-0}" = "1" ]; then
     pkill -f "playaudio.sh $S1_AUDIO_FIFO" 2>/dev/null
     pkill -f "padrelay.py $S1_AUDIO_FIFO" 2>/dev/null
-    # PAD_AUDIO_FMT_FIXED: this rig KNOWS its PCM format (44100x2 s16, from
-    # the game ELF), so playaudio.sh takes it from the args instead of
+    # PAD_AUDIO_FMT_FIXED: this rig KNOWS its PCM format (s16, from the game
+    # ELF - 44100x2 on the DMD generation, 24000x2 on the 2012 home models,
+    # whose sys_dac_init asks for rate index 3), so playaudio.sh takes it from
+    # the args instead of
     # polling its fmt file — pre-writing that file RACED playaudio's own
     # rm -f (up to 10 s in, behind its WSLg-socket wait) and cost a boot a
     # 60 s silent stall.
@@ -185,7 +279,8 @@ if [ "${PAD_AUDIO:-0}" = "1" ]; then
     setsid env PAD_GAME="Spike 1" PAD_AUDIO_FMT_FIXED=1 \
         PAD_AUDIO_PORT="${S1_AUDIO_PORT:-45998}" \
         bash "$REPO/tools/spike2_emu/playaudio.sh" \
-        "$S1_AUDIO_FIFO" 44100 2 "$S1_WORK/audio.fmt" \
+        "$S1_AUDIO_FIFO" "${S1_PCM_RATE:-44100}" "${S1_PCM_CH:-2}" \
+        "$S1_WORK/audio.fmt" \
         >"$S1_WORK/audio.log" 2>&1 &
     log "Audio up (PAD_AUDIO=0 to mute)."
 fi

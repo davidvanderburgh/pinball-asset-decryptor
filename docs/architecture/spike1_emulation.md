@@ -158,7 +158,7 @@ With `/dev/null` stand-ins, the real GOT LE 1.37 firmware runs this far (from a
 
 | Stage | What happens |
 |---|---|
-| SoC detect | Shells out `cat /proc/cpuinfo \| grep Hardware`; the fake cpuinfo answers `Freescale i.MX6…`. |
+| SoC detect | Shells out `cat /proc/cpuinfo | grep Hardware`; the fake cpuinfo answers `Freescale i.MX6…`. |
 | Assets | `open("image.bin")` OK; worker threads spawn. |
 | Display probe | `readlink /usr/local/spike/display.hex` (dotmatrix vs rgbdotmatrix), `open("/dev/dmd")`, `ioctl(fd, 0x3d00 /*display reset*/)` → ENOTTY on the stand-in — **non-fatal**, logs "display reset: …" and continues. |
 | NVRAM | Creates the full tree under `/data/nv/GOT_LE/` — `SYS_NVRAM`, `PIN_NVRAM`, `NOV_NVRAM`, `FRRAM`, `LKRAM`, `NVRAM`, `PTRAM`. |
@@ -332,3 +332,186 @@ parity with the Spike 2 playfield window). It runs standalone over a rig run
 dir (`--run-dir`) or a synthetic feed (`--demo`), and can emit a PNG
 (`--png`). It consumes live data as soon as the node-bus decoder (step 3)
 writes the state block.
+
+## Which switch is which: the title's switch map
+
+Everything a user does with the switches — clicking a row in the switch window,
+the play keys, and the ball keeper's trough/shooter/START slots — resolves
+through one file, `$S1_WORK/s1switches.json`, a `{"node,index": name}` map of
+the title's own switches. A map with the wrong POSITIONS is not a cosmetic
+problem: it is "the switches do nothing".
+
+There are two sources, in this order:
+
+1. **A curated map**, `tools/spike1_emu/switchmaps/<CARD>.json`, matched on the
+   card's filename stem. Sweep-verified, and the only source that carries
+   `_trough_coils` (the eject coils the keeper serves a ball on).
+2. **The live registry walk**, `s1swmap.py`, started by `start.sh` alongside
+   the game on any title WITHOUT a curated map. It waits for the game to
+   register its switches, then walks the runtime registry in guest memory and
+   writes the map. The switch window and the ball keeper both re-read the file
+   while they run, so the names, the play keys and the trough start working
+   without a restart.
+
+The **static ELF decode** (`s1elf --switches`) is deliberately NOT a source.
+Its names are right and its `(node,index)` attribution is wrong — the tables it
+reads are populated at runtime and the file's copies are stale — and it used to
+be the default, with the seven curated files as the only correction. So every
+other card, including the **Pro/base build of a title whose LE is curated**,
+played with every click, key and trough slot pointed somewhere else (PAD-101).
+
+The walk is title-agnostic by construction: the registry is found from the
+`[pc,#imm]` literal in `sys_node_board_device_switch_update_inputs`, and the
+names from `switch_table_data` / `switch_dedicated_table_data` in guest memory.
+**The literal is not always the registry itself** — on GOT LE it points 0xC in
+front of it, which read as "count 0" — so `find_registry` scans a small window
+of offsets for the shape (a node count 1..64 at +0x100 whose entry pointers all
+land in the guest's data range). Measured on GOT LE against the sweep-verified
+curated map: **67 of 72 entries identical and no position disagreed**; the five
+were hand-edited names.
+
+## The EARLY Spike 1 cards (the 2012 home models) — and they run
+
+`transformers_pin-1.0.18.iso` is a Spike 1 card — **Transformers The Pin
+(Stern, 2012)**, one of the first SPIKE machines, three years before SPIKE
+reached the coin-op line, with **two 8-digit 16-segment displays instead of a
+DMD**. It is the earliest firmware era, and as of PAD-101 the rig boots it to
+attract and plays a ball. Everything below was read out of the card and its
+`gamer` binary (the assert strings name the sources: `node_pdi.cpp`,
+`amp_pdi.cpp`, `serial.cpp`).
+
+**What does NOT tell the eras apart** (learned the wrong way on PAD-101):
+`/etc/version 201006031147`, glibc 2.6.1 and kernel 2.6.30 are identical on the
+GOT LE and Whoa Nellie cards. The base rootfs is shared across Spike 1 and says
+nothing about a card's age — do not date a card by it.
+
+**What differs, and what the rig does about each:**
+
+| | early (`transformers_pin`, 384 MB card) | DMD generation (GOT LE, 3.75 GB) |
+| --- | --- | --- |
+| game | `/usr/local/games/<title>/` on the ROOTFS, launched via the `$DATA_PATH/game` symlink (-> `tf-elg/gamer`; the debug build `game` beside it is NOT what runs) | `/games/<TITLE>/game` on its own partition |
+| sounds | plain `.wav` files beside the game (24000/12000 Hz mono s16) | `image.bin` master directory, raw PCM |
+| display | `$DATA_PATH/display.hex` -> `alphanumeric-…` or `dotmatrix-…`; 256-byte frames on /dev/spi0 | 2048-byte 128x32 frames |
+| node bus | one board (node 8), no checksums, implied reply lengths, **active-high** switches with a negative-logic mask, settings EEPROM on the net bridge | `NODEBUS_TransferMessage` framing, `image.bin`, board-EEPROM on i2c |
+| framework symbols | `node_poll_t`, `node_query_t`, `node_coilmsg`, `ALPHANUMERIC_*` | `node_bus_*`, `sys_node_board_device_*`, `sys_line_status_*` |
+| MBR LBAs | 63 / 48195 / 80325 (+ an A/B rootfs at 353430) | 35 / 7000 / 14000 (+ logicals) |
+
+`build_rootfs.py` recognises the layout, follows the card's own symlinks and
+leaves `.game_path` / `.game_exe` / `.display` beside the extracted game;
+`start.sh` sets `S1_ERA=early` from them and `emu_root.sh` binds and launches
+accordingly. A DMD-generation extraction carries no markers and nothing
+changes for it.
+
+### The early node bus (`s1early.py`, entered from `nodebus.py`)
+
+Read from `gamer` (`node_sar_t` = `serial_write` + `node_read_serial`; no
+checksum, no reply-length byte):
+
+| request | reply | source |
+| --- | --- | --- |
+| `0x00` | 1 byte: the node with switch data, 0 = none | `node_poll_t` |
+| `[0x80|n, 1, 0x11]` | 8 switch bytes | `node_query_t` |
+| `[0x80|n, 1, 0xFF]` | 6 bytes, `[0..1]` = LE16 error mask | `node_status_t` |
+| `[0x80|n, 3, 0x60, a, b]` | 1 byte, signed delta | `node_query_quadrature` |
+| `[0x80|n, 5, 0x40|coil, p1..p4]` | — | `node_coilmsg` |
+| `[0x80|n, len, 0x80|c, …]` | — | `node_ledmsg` |
+| `[0x55, 0x00, 0x02, hi, lo, ck, x]` | `[0xAA, 0x01, data, 0xFF-data]` | `LL_sys_eep_read` (bridge EEPROM, command mode) |
+| `[0x55, 0x01, 0x03, hi, lo, val, ck]` | `[0xAA, 0x00, 0x00]` | `LL_sys_eep_write` |
+
+**Switch polarity is per switch.** `node_switch_update` ORs each raw bit
+straight into the switch state, but the 8 bytes are first XORed with
+`g_switch_negative_logic_bitmask` (`e7 7b fd 01 cf 31 00 00` on Transformers),
+so the all-open reply IS that mask and a closed switch flips its bit. An
+all-zero reply held the volume button: the game booted to `VOLUME: 27%`.
+The mask, and the switch **names** — each entry of the runtime node-8 map
+(`g_nMessagesSent + 0x24 + node*4`, 0x38 bytes per bit) carries its own name,
+`SWITCH_START` at byte 2 bit 5, `SWITCH_TROUGH_1..3`, `SWITCH_SHOOTER_LANE` —
+are read out of guest memory once the game is up (`sync_from_guest`), which
+writes `s1switches.json` with the trough-eject coil from the static
+`__coil_table` (node 8, coil 3). That is this era's whole `s1swmap`.
+
+The 64-byte settings EEPROM lives on the **net bridge** and is read byte by
+byte over the same serial port in "command mode" (a GPIO the game flips —
+`sys_command_mode`). `sys_eep_checksum_check` wants `(3 + sum of all 64) % 256
+== 0`; a blank part fails it and the game writes its defaults (33 writes,
+persisted in `$S1_WORK/s1eep.bin`), so the next boot validates.
+
+### Boot walls (all measured live)
+
+1. **The stock qemu.** With the kernel's ARM binfmt left alone
+   (`S1_NO_BINFMT=1`) a bare `exec ./gamer` lands in the distro's qemu-arm,
+   whose every device ioctl fails; the game asserts at the first one
+   (`amp_power_set_pdi: prevState>=0`). `emu_root.sh` now execs the patched
+   qemu explicitly (as a copy named `game`, so comm stays `game`).
+2. **The sample-rate read-back.** `amp_set_sample_rate` sets the DAC rate with
+   `ioctl(i2s, 0x3e00, &rate)`, reads it back with `ioctl(i2s, 0x3e01,
+   &ridx)` and asserts they agree. Both are legacy ioctls the generic
+   passthrough cannot write back through, so the read-back stays 0.
+   `s1patch.py`'s `patch_amp_rate_assert` turns the `bne <assert>` after the
+   compare into a nop (symbol-resolved, guarded on the assert block's own
+   `GetRate(rate)==` string).
+3. **The GPIO idle level.** `node_gpio_switch_update` reads cabinet pins with
+   `ioctl(gpio, 0x3c02, pin)`. The passive model's 0 read as every button
+   held. `s1hwshim --gpio-file` answers 1 (released) unless a byte-per-pin
+   file says otherwise; on Transformers the GPIO table is empty anyway (all
+   switches are on node 8).
+4. **The audio rate.** The mixer writes 128-frame stereo s16 blocks at 24000
+   Hz (`S1_PCM_RATE` for the i2s pacing; the game's WAVs are 24000/12000 Hz).
+
+5. **The ball lock's optos.** `LOCKUP 1-3` (switches 32-34, negative-logic)
+   are optos whose CLOSED state means "no ball". Read open, the game counted
+   three locked balls, kicked the ramp lock (coil 4) every 3 s from attract
+   on and never fired the trough eject — its ball count was already full.
+   The keeper holds every `LOCKUP` switch closed like the trough; with that,
+   START fires coil 3, the keeper serves and launches, and the game is on
+   `PLAYER 1 BALL 1`.
+
+6. **The ball is not yet counted in play.** `ValidPlayfield_Update` (@0xecac)
+   sets the ball valid only after three playfield-switch turn-on edges since
+   the ball-start reset — `SWITCH_IsTurningOn(11)` or the "any playfield
+   switch on" group (`g_switchesBelowAllegiance` 5/6/7/19,
+   `g_switchesMegatron` 41/42/43/44). A plunge trips two of them (SHOOTER
+   LANE EXIT, the SKILL SHOT lane); the keeper pulses the lane-exit sensor on
+   launch. The third edge is a real scoring hit, so forcing the gate would
+   invent an award — reaching it honestly needs a playfield ball model (the
+   item-88 mech-feedback shape). The drop-target reset (coil 7) also retries
+   seven times after launch and gives up. Both are queue item 91; everything
+   up to the plunge is modelled.
+
+### Service / test mode on the early era
+
+There is **no coin door and no service button** on these machines: all 46 named
+switches on node 8 are playfield or cabinet, and the game carries no operator
+menu (no audit, replay, credit or free-play text anywhere in it). The card's
+`/usr/local/bin/selftest` is a *CPU* self test that prints to the console and
+never opens the display — not the operator menu.
+
+What it does have is `TestMode()` (@0x1044c), polled twice from `game_proc`:
+
+    SWITCH_IsOn(1) && SWITCH_IsOn(2), held for 0xbb8 = 3000 ms
+
+Game id 1 is LEFT_FLIPPER (physical 26) and id 2 is RIGHT_FLIPPER (physical
+39), so **holding both flipper buttons for three seconds** opens it — verified
+live: the display goes from the attract to `VOLUME: 27%` exactly on the third
+second. The switch window's Left/Right arrow keys drive those two switches, so
+holding both arrows does it. Volume is the only operator setting the game has
+(`VolumeSet` clamps to 150 and persists to EEPROM byte 9).
+
+The window therefore draws the BACK/-/+/SELECT cluster and the coin-door bar
+DEAD on this era, with the flipper hint in the bar's place, and the service
+keys do nothing: those controls write the CPU-SPI file that a qemu patch feeds
+the 2015 firmware, which this game never reads.
+
+### The display (`s1alpha.py`)
+
+`dmd_update_t` packs a 512-slot buffer into 4 bit-planes of 64 bytes (the
+DMD's packing, a quarter the size) and writes it through the same
+begin/commit ioctls. The slot buffer is `[x*16 + segment]`
+(`ALPHANUMERIC_SegmentSet`), so **every 16 slots are one digit**: x 0..7 =
+player 1, 8..15 = player 2. Which bit is which segment was pinned from the
+game's own font (16 bytes per ASCII code at 0xb3160): 8..15 the outer ring
+(f e d1 d2 c b a2 a1), 0/4 the middle bar, 2/6 the verticals, 1/3/5/7 the
+diagonals. Decoding captured frames with that font reads `PRESS START`,
+`VOLUME: 27%`, `PLAYER 1 BALL 1`, `PLUNGE BALL`. The app's display window
+draws them as 16-segment glyphs when the run dir's `s1display` says
+`alphanumeric`.

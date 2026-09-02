@@ -218,6 +218,7 @@ PAD_CARD_CACHE=0 PAD_SELECT=1 PAD_AUDIO=0 watch.sh`, four times:
 | 2 | right, start | 1 TMNT 1987 (`bound over /games/turtles_pro` from p7) | attract; P/P/P; but the host video player still served the primary's clips (fixed: `dump/vidroot`) |
 | 3 | right, start | 0 — the highlight had been remembered at 1, RIGHT wrapped to 0 | attract (the last-choice memory works) |
 | 4 | right, start | 1 TMNT 1987 | `[padvid] clip root overridden by dump/vidroot: .../tmnt_multi.p7/turtles_pro`; attract shows the 1987 cartoon art |
+| 5 (after the review fixes) | right, 95 s dwell, left, start | 1 TMNT 1987 | watch.sh no longer drops the selecting flag on a wall-clock bound (no `giving up` / `the game exited`); the 1987 splash `Back in 1987` was on the glass 1 s after START; attract at 259 s; clean teardown |
 
 The selector attached to the live GL bridge after padglhost was already up,
 drew at ~60 fps, mapped the flipper ids from the title's switch table, and

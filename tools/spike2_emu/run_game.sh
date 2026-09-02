@@ -562,6 +562,35 @@ if [ -n "$SEL_DIRS" ]; then
     echo "[select] menu up: LEFT/RIGHT flipper (arrows) move, START (1) confirms; auto-boot in ${PAD_SELECT_TIMEOUT:-30} s"
     chroot "$R" /usr/local/codeselect/codeselect --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log --media /dump/media $SEL_INV </dev/null
     SEL_RC=$?
+    # ★ A KILLED SELECTOR IS A STOP, NOT A CHOICE (item 90, 2026-09-02).
+    #
+    # This script takes the selector's EXIT STATUS as the answer, so every way
+    # of ending a run while the menu is up looked like "the selector failed" -
+    # and the answer to that, correctly, is to boot the card anyway. Measured
+    # twice on the app's own launch shape: killgame.sh's `pkill -9 -x
+    # codeselect` and watch.sh's teardown (the CLOSE THE WINDOW path) both
+    # arrived here as exit 137, this script printed "[select] fallback:
+    # primary" and exec'd a BRAND NEW guest a moment after the sweep that was
+    # meant to end the run. The window-close path leaves it running with
+    # nothing left to stop it; the app's Stop reported "still running: 2",
+    # STILL NOT CLEAN, and offered to restart WSL over a game it had just
+    # started itself.
+    #
+    # ONLY THE SIGNALS THAT MEAN "SOMEBODY ASKED US TO STOP" abort: HUP (a
+    # vanished terminal), INT (Ctrl-C in the watch terminal, which reaches the
+    # selector's foreground group before watch.sh's own trap runs), TERM and
+    # KILL (every teardown in this rig, and the app's Stop). A selector that
+    # DIED - 139 on a segfault, 134 on an abort - or that refused its
+    # configuration (2) still falls through to the primary below, because on
+    # the real machine the card must always boot: a broken menu must never be
+    # the reason a pinball machine will not start.
+    case "$SEL_RC" in
+        129|130|143|137)
+            echo "[select] the selector was killed (exit $SEL_RC): that is a stop," >&2
+            echo "[select]   not a choice, so this run ends here instead of booting" >&2
+            echo "[select]   the primary." >&2
+            exit "$SEL_RC" ;;
+    esac
     SEL_CHOICE=$(head -1 "$R$PAD_SELECT_CHOICE" 2>/dev/null | tr -dc '0-9')
     SEL_DIR=""; SEL_IDX=""; SEL_PRIMARY_DIR=""; n=0
     while IFS=$'\t' read -r idx d; do

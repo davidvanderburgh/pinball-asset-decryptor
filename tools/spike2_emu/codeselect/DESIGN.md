@@ -8,7 +8,8 @@ authoritative queue entry is item 90 in `plans/TODO.md`.*
 
 One SD card that carries several complete game images for one machine, and a
 menu at power-up that lets the player pick which one boots — flippers move the
-highlight, START confirms — so a machine can run the stock Stern code or a
+highlight, START or the lockdown-bar ACTION button confirms — so a machine can
+run the stock Stern code or a
 custom build (TMNT 1987 today; the Heisei Godzilla builds, normal and
 orchestra, next) without swapping cards. The stock image has to keep passing
 Stern's game validation and keep working with Insider Connected.
@@ -27,7 +28,9 @@ Stern's game validation and keep working with Insider Connected.
      controls and a countdown.
    * LEFT / RIGHT FLIPPER moves the highlight (wraps). Service **-** / **+**
      on the coin door do the same, as a fallback that needs no node bus.
-   * START (or Service Select) confirms. When the countdown reaches zero the
+   * START, the ACTION button on the lockdown bar (the one a thumb is
+     already resting on), or Service Select confirms. When the countdown
+     reaches zero the
      highlighted image boots by itself, so an unattended power-up still
      boots — the default highlight is the image that booted last time
      (`/data/codeselect.last`), falling back to the config's `default`.
@@ -47,8 +50,9 @@ the primary image — the card degrades to a stock card, never to a brick.
 
 `PAD_CARD=<multi-image .raw> watch.sh` — the same rootfs, the
 same chroot, the same GL bridge window: the selector draws in the game window,
-the keyboard flipper keys move the highlight, the START key confirms, and the
-run continues into the chosen image's game exactly as a plain card run does.
+the keyboard flipper keys move the highlight, `1` (START) or Space (ACTION)
+confirms, and the run continues into the chosen image's game exactly as a
+plain card run does.
 The validation oracle is the same one the rig already uses: the Tech Alerts /
 attract screen past 90 s with no `GAME VALIDATION ERROR` line, read by the
 screen oracle and by a screenshot.
@@ -123,7 +127,7 @@ hardware test of that patch is what makes this Insider-safe.
 `image=<device>|<title>|<subtitle>|<art>|<anim>|<music>` one per image
 (index = order, 0-based; fields 4-6 optional media file names in the media
 directory, a 3-field line stays valid; up to 16 images), plus `default=`,
-`timeout=` (0 = wait for START), an optional `font=`, `media=` (default
+`timeout=` (0 = wait for START/ACTION), an optional `font=`, `media=` (default
 `/usr/local/codeselect/media`), `sound_move=`, `sound_confirm=`, `volume=`
 (0-100 software gain, default 50) and the optional hardware-only
 `mixer_volume=` (0-63, the game's codec curve on the ALSA `PCM` control;
@@ -186,8 +190,10 @@ full CLI, the log lines and the test list). What it is:
 * The menu: `SELECT GAME CODE`, one card per image with an `IMAGE n` label,
   the title (shrunk to fit, wrapped to two lines when it must) and the
   subtitle (wrapped to four), the highlighted card framed amber on a lighter
-  fill, a footer `LEFT / RIGHT FLIPPER: choose   START: boot` and `booting
-  <title> in N s` (or `press START to boot <title>` with timeout 0). 2-4
+  fill, a footer `LEFT / RIGHT FLIPPER: choose   START or ACTION: boot` and
+  `booting <title> in N s` (or `press START or ACTION to boot <title>` with
+  timeout 0); both bottom lines shrink to fit rather than clipping a long
+  title. 2-4
   images sit in a row (width scaled); 5-16 become a carousel of three cards
   with the highlighted one in the middle, its neighbours beside it
   (wrap-around), the neighbours-but-one peeking in from the edges and a
@@ -226,12 +232,26 @@ full CLI, the log lines and the test list). What it is:
     first 0x11), then `88 02 11 65 0c` / `81 02 11 6c 0c` every 25 ms with
     per-node back-off when a board is silent; the node-0 cabinet word over
     `/dev/spidev1.0` (100 kHz mode 3, 8 bytes every 10 ms) for Service
-    Select/Plus/Minus. Every ioctl failure is tolerated and the first 40
-    exchanges are hex-logged. Tested against `fakebus.py` on a pty.
+    Select/Plus/Minus. The node-1 reply carries two buttons: START at bit 11
+    (byte 1 bit 3) and the lockdown-bar ACTION button at bit 2 (byte 0 bit 2),
+    so ACTION costs no extra bus traffic. Every ioctl failure is tolerated and
+    the first 40 exchanges are hex-logged. Tested against `fakebus.py` on a
+    pty (which can now press `action` as well as `left`/`right`/`start`).
   * `padsw`: the rig's keyboard file (`PAD_SW_SHM`, 4096 bytes, `held[]` at
     8 / `scr_held[]` at 280) re-read every 20 ms, ids from
-    `/dump/tables/$PAD_GAME/switch_list.txt` by wire position, platform ids
-    (36/25-28) before a title has a table. Tested with a scripted padsw file.
+    `/dump/tables/$PAD_GAME/switch_list.txt` by wire position — the same
+    resolution padglhost's `cab_wire` table does, and for the same reason: an
+    id is a table index that drifts per generation and the names drift too
+    (17 of the 31 title lists on this disk say `LOCKDOWN BUTTON`, two of
+    those with an `(OPTIONAL)` suffix; 12 say `Action Button`; metallica_spike
+    names nothing at all). ACTION also has a whole-name fallback for a list that
+    puts it off (1,2) — whole-name because `START BUTTON` as a substring
+    would also match the `TOURNAMENT START BUTTON` that 26 of those lists
+    carry. Platform ids (36 START / 34 ACTION / 25-28 service) stand before a
+    title has a table; a parsed list that knows neither the wire nor a name
+    leaves ACTION unset rather than aiming id 34 at some other switch (on
+    beatles, the one list with no lockdown row, id 34 IS the START button).
+    Tested with a scripted padsw file and two synthetic tables.
   * `none`: countdown only (tests).
 * `images.conf` v2: `image=<device>|<title>|<subtitle>|<art>|<anim>|<music>`
   lines (index = order; fields 4-6 optional; up to 16), `default=`,
@@ -328,7 +348,8 @@ across the hand-off and `alive.sh` read 0 after every run.
    the app's *Build / flash SD card…* (any card ≥ 14,723,055,616 B) or
    `dd bs=4M conv=fsync`.
 2. Power up. Expect the Stern logo, then within ~2 s of where the game would
-   normally start: the SELECT GAME CODE menu. Flippers move, START boots;
+   normally start: the SELECT GAME CODE menu. Flippers move, START or the
+   lockdown-bar ACTION button boots;
    15 s countdown boots the remembered image. Service **−/+/Select** on the
    coin door do the same without the node bus.
 3. If the menu never appears the card boots the primary (stock) by itself —

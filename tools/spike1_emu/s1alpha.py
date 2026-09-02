@@ -1,7 +1,10 @@
 """The early Spike 1 alphanumeric display (Transformers The Pin — PAD-101):
 decoder + renderer for the 256-byte frames the game streams to /dev/spi0.
 
-The 2012 home models have two 8-digit 16-segment displays instead of a DMD.
+The 2012 home models have two 8-digit 16-segment displays instead of a DMD,
+mounted SIDE BY SIDE in the speaker panel under the translite and labelled
+PLAYER 1 (left) and PLAYER 2 (right) — red LEDs, not the amber of a DMD (from
+David's photo of the machine).  :func:`render_image` draws them that way.
 The game's display thread (``dmd_update_t``) packs a 512-slot buffer into
 **4 bit-planes of 64 bytes** (plane p holds bit p of every slot's 4-bit level,
 slots 8 per byte MSB first — the same packing as the 128x32 DMD's 2048-byte
@@ -140,24 +143,42 @@ def load_font(elf_path, table_vaddr=0xb3160):
     return font
 
 
-def render_image(rows, scale=6, gap=2):
-    """PIL image of both displays: 2 rows of 8 glyphs, amber on black, each
-    segment drawn at its level's brightness."""
-    from PIL import Image, ImageDraw
+#: the machine's LED colour: lit segments are red, unlit ones a dim ghost of
+#: the same (the panel in David's photo, not a DMD's amber).
+LIT = (255, 45, 30)
+UNLIT = (38, 10, 8)
+
+
+def display_origins(scale=9, gap=2):
+    """``(image size, [x offset per display], group size)`` for the layout —
+    the two displays SIDE BY SIDE, as they sit in the machine."""
     cell_w, cell_h = 4 * scale + 3 * gap, 6 * scale + 3 * gap
     pad = scale
-    width = DIGITS * cell_w + (DIGITS + 1) * pad
-    height = DISPLAYS * cell_h + (DISPLAYS + 1) * pad * 2
+    group_w = DIGITS * cell_w + (DIGITS + 1) * pad
+    split = pad * 4                       # the gap between the two displays
+    width = DISPLAYS * group_w + split
+    height = cell_h + pad * 2
+    return (width, height), [d * (group_w + split) for d in range(DISPLAYS)], \
+           (group_w, cell_h)
+
+
+def render_image(rows, scale=9, gap=2):
+    """PIL image of both displays SIDE BY SIDE — player 1 left, player 2
+    right, 8 glyphs each, red on black, every segment at its own level."""
+    from PIL import Image, ImageDraw
+    (width, height), origins, _group = display_origins(scale, gap)
+    cell_w = 4 * scale + 3 * gap
+    pad = scale
     img = Image.new("RGB", (width, height), (0, 0, 0))
     dr = ImageDraw.Draw(img)
     thick = max(2, scale // 2)
     for di, digits in enumerate(display_rows(rows)):
-        oy = pad * 2 + di * (cell_h + pad * 2)
+        ox0, oy = origins[di], pad
         for k, segs in enumerate(digits):
-            ox = pad + k * (cell_w + pad)
+            ox = ox0 + pad + k * (cell_w + pad)
             for seg, ((x0, y0), (x1, y1)) in _SEG_LINES.items():
                 lvl = segs[seg] if seg < len(segs) else 0
-                c = (255 * lvl // 15, 150 * lvl // 15, 0) if lvl else (28, 20, 8)
+                c = (tuple(v * lvl // 15 for v in LIT) if lvl else UNLIT)
                 dr.line([(ox + x0 * scale + gap, oy + y0 * scale + gap),
                          (ox + x1 * scale + gap, oy + y1 * scale + gap)],
                         fill=c, width=thick)

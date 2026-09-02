@@ -219,7 +219,10 @@ class Spike1DisplayWindow(tk.Toplevel):
     HEIGHT = 32
     #: glyph scale for the 16-segment displays (the default 6 drew a window
     #: barely 300 px wide, which is what "completely unusable" was about)
-    ALPHA_SCALE = 11
+    ALPHA_SCALE = 9
+    #: the machine labels its two displays; so do we, under the right one
+    ALPHA_LABELS = ("PLAYER 1", "PLAYER 2")
+    ALPHA_FG = "#ff4a30"
 
     def __init__(self, master, io, decode_frame, scale=7, hz=20,
                  on_close=None, alpha=None):
@@ -261,14 +264,24 @@ class Spike1DisplayWindow(tk.Toplevel):
         self._canvas.pack(padx=8, pady=8)
         self._imgid = self._canvas.create_image(0, 0, anchor="nw")
         if alpha is not None and self._font:
-            # one readout line per physical display, under the glyphs
+            # A readout under EACH display, side by side and labelled the way
+            # the machine labels them (David's photo: PLAYER 1 left, PLAYER 2
+            # right, in the speaker panel).
             import tkinter.font as tkfont
-            f = tkfont.Font(family="Consolas", size=22, weight="bold")
-            for i in range(2):
-                self._readouts.append(tk.Label(
-                    self, text="", font=f, bg="#000000", fg="#ffb000",
-                    anchor="w", padx=10))
-                self._readouts[-1].pack(side="top", fill="x")
+            big = tkfont.Font(family="Consolas", size=20, weight="bold")
+            small = tkfont.Font(family="Segoe UI", size=8)
+            row = tk.Frame(self, bg="#000000")
+            row.pack(side="top", fill="x")
+            for i, cap in enumerate(self.ALPHA_LABELS):
+                col = tk.Frame(row, bg="#000000")
+                col.grid(row=0, column=i, sticky="ew", padx=(12, 12))
+                row.grid_columnconfigure(i, weight=1, uniform="disp")
+                lbl = tk.Label(col, text="", font=big, bg="#000000",
+                               fg=self.ALPHA_FG, anchor="w")
+                lbl.pack(side="top", anchor="w")
+                tk.Label(col, text=cap, font=small, bg="#000000",
+                         fg="#8a8a8a", anchor="w").pack(side="top", anchor="w")
+                self._readouts.append(lbl)
         self._placeholder = self._canvas.create_text(
             cw // 2, ch // 2, fill="#6a4718",
             text="waiting for the game to draw…")

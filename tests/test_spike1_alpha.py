@@ -67,15 +67,39 @@ def test_frame_text_reads_digits_with_a_font():
     assert s1alpha.frame_text(fr) == ["#       ", " #      "]   # no font
 
 
-def test_render_draws_two_rows_of_eight_glyphs():
+def test_render_draws_the_two_displays_side_by_side():
+    """The machine has them side by side in the speaker panel, player 1 left
+    and player 2 right (David's photo) — not stacked."""
     pytest.importorskip("PIL")
     img = s1alpha.render_image(s1alpha.decode_frame(bytes(256)), scale=4)
     w, h = img.size
-    assert w > 8 * 4 * 4 and h > 2 * 6 * 4          # 8 cells wide, 2 rows
-    lit = s1alpha.render_image(s1alpha.decode_frame(_frame({(0, 15): 15})), scale=4)
-    # a lit top-left segment paints amber pixels a blank frame does not
-    blank_px = set(img.getdata())
-    assert any(px[0] > 200 for px in lit.getdata() if px not in blank_px)
+    assert w > 2 * 8 * 4 * 4                       # sixteen glyphs across...
+    assert h < w // 4                              # ...one glyph tall
+    (size, origins, group) = s1alpha.display_origins(scale=4)
+    assert size == (w, h) and len(origins) == 2
+    assert origins[1] > origins[0] + group[0]      # display 2 is to the RIGHT
+
+
+def test_player_2_lights_the_right_hand_half():
+    pytest.importorskip("PIL")
+    # digit 8 is player 2's first digit: it must paint on the right of centre
+    img = s1alpha.render_image(s1alpha.decode_frame(_frame({(8, 15): 15})),
+                               scale=4)
+    w, _h = img.size
+    xs = [x for x, y in ((i % w, i // w) for i, px in enumerate(img.getdata())
+                         if px[0] > 200)]
+    assert xs and min(xs) > w // 2
+
+
+def test_lit_segments_are_the_machines_red():
+    pytest.importorskip("PIL")
+    blank = s1alpha.render_image(s1alpha.decode_frame(bytes(256)), scale=4)
+    lit = s1alpha.render_image(s1alpha.decode_frame(_frame({(0, 15): 15})),
+                               scale=4)
+    new_px = set(lit.getdata()) - set(blank.getdata())
+    assert new_px, "a lit segment must paint something a blank frame does not"
+    r, g, b = max(new_px, key=lambda px: px[0])
+    assert r > 200 and g < 100 and b < 100         # red, not the DMD's amber
 
 
 def test_every_segment_has_a_line_and_bits_are_the_font_order():

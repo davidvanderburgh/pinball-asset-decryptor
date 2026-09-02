@@ -120,7 +120,7 @@ These have each been violated at least once and each cost a run or a window:
       before the game; four runs: stock and 1987 both chosen by flipper
       keys, both boot to attract with NVRAM grades P/P/P, the 1987 run
       serves its own videos (`dump/vidroot`). Production card for David's
-      TMNT Pro at `D:\Pinball\TMNT 1987\multi\` (stock + Insider-clean
+      TMNT Pro at `D:/Pinball/TMNT 1987/multi/` (stock + Insider-clean
       patched 1987). NEXT: David flashes it and reports
       `/dump/log/codeselect.log` — the two unknowns are the node-bus reply
       before the game's own bring-up (service buttons are the no-bus

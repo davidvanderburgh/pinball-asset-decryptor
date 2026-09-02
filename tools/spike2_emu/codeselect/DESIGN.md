@@ -208,7 +208,7 @@ across the hand-off and `alive.sh` read 0 after every run.
 
 ## Testing on the machine (David)
 
-1. Flash `D:\Pinball\TMNT 1987\multi	urtles_pro-1_59_0.multi-stock+1987patched.16G.sdcard.raw`
+1. Flash `D:/Pinball/TMNT 1987/multi/turtles_pro-1_59_0.multi-stock+1987patched.16G.sdcard.raw`
    (stock 1.59.0 + the Insider-clean patched 1987 build) to a 16 GB card with
    the app's *Build / flash SD card…* (any card ≥ 14,723,055,616 B) or
    `dd bs=4M conv=fsync`.

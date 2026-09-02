@@ -209,6 +209,14 @@ These have each been violated at least once and each cost a run or a window:
       own confirm sound - a seventh `image=` field, empty meaning the
       menu-wide one - so a menu of four builds can say four different
       things while the LOADING frame is up.
+      **The tab was rebuilt around the preview** in the same round (one
+      arrangement at every width, the images list a table below the picture
+      with per-row icons, the tool output folded into the app's Log), and it
+      now **reads each image's game code version off the image itself** -
+      Stern's own package name in /spk/index, cross-checked against the game
+      ELF's per-build record - shows it in a column, refuses to build a card
+      whose images disagree unless you say to, and raises a bar across the
+      tab when a card you load has that problem.
       **IN PROGRESS (2026-09-01, `item/90`): PROVEN IN THE EMULATOR.**
       `mkmulticard.py` builds the card (verify PASS), `codeselect` draws
       through the bridge and takes the padsw keys, `PAD_SELECT=1` runs it

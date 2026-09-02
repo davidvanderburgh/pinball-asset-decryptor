@@ -392,6 +392,12 @@ class Spike1SwitchWindow(tk.Toplevel):
         # the title's (node, index) -> name map, if the rig has it yet — it may
         # only arrive minutes from now (_refresh_names), so nothing here may
         # assume a nameless window stays nameless.
+        #: "early" (the 2012 home models) or "dmd".  The service cluster and
+        #: the coin-door bar drive the CPU-SPI file a qemu patch feeds the
+        #: 2015 firmware; the early era's game never reads it and has no such
+        #: switches, so offering them there is a lie (PAD-101).
+        self._era = (io.read_text("s1era")
+                     if io is not None and hasattr(io, "read_text") else "")
         self._names = io.read_switch_names() if io else {}
         self._base_cols = cols
         self._names_tick = 0
@@ -660,12 +666,13 @@ class Spike1SwitchWindow(tk.Toplevel):
         if keysym in self._down:
             return
         self._down.add(keysym)
-        if keysym in self.SVC_KEYS:
-            self._ball_cmd("svc " + self.SVC_KEYS[keysym])
-            return
-        if keysym in ("c", "C"):
-            self._ball_cmd("door toggle")
-            return
+        if self._era != "early":       # that machine has neither
+            if keysym in self.SVC_KEYS:
+                self._ball_cmd("svc " + self.SVC_KEYS[keysym])
+                return
+            if keysym in ("c", "C"):
+                self._ball_cmd("door toggle")
+                return
         if keysym in ("b", "B"):
             self._ball_cmd("trough toggle")
             return
@@ -735,33 +742,48 @@ class Spike1SwitchWindow(tk.Toplevel):
             self._panel_items.append((row, box, key, lab))
             y += self.ROW_H
         # service cluster: clickable buttons, key labels beneath (one control
-        # per action — the keys do not appear in the row list above).
+        # per action — the keys do not appear in the row list above).  On the
+        # 2012 home models the machine HAS no service buttons and no coin-door
+        # switch, so they are drawn dead and the real way in is spelled out.
         y += 8
         bw = (w - 24 - 3 * 6) // 4
         self._svc_items = []
+        dead = self._era == "early"
         for i, (name, text, keylab, color) in enumerate(self.SVC_ORDER):
             x0 = 12 + i * (bw + 6)
-            r = cv.create_rectangle(x0, y, x0 + bw, y + 24, fill=color,
-                                    outline="#444")
-            t = cv.create_text(x0 + bw / 2, y + 12, fill="#fff", font=f8,
-                               text=text)
-            cv.create_text(x0 + bw / 2, y + 33, fill=self.KEY_FG, font=f8,
-                           text=keylab)
-            for item in (r, t):
-                cv.tag_bind(item, "<Button-1>",
-                            lambda _e, n=name: self._ball_cmd("svc " + n))
+            r = cv.create_rectangle(x0, y, x0 + bw, y + 24,
+                                    fill="#2a2a2a" if dead else color,
+                                    outline="#3a3a3a" if dead else "#444")
+            t = cv.create_text(x0 + bw / 2, y + 12,
+                               fill=self.PANEL_DIM if dead else "#fff",
+                               font=f8, text=text)
+            cv.create_text(x0 + bw / 2, y + 33,
+                           fill=self.PANEL_DIM if dead else self.KEY_FG,
+                           font=f8, text="" if dead else keylab)
+            if not dead:
+                for item in (r, t):
+                    cv.tag_bind(item, "<Button-1>",
+                                lambda _e, n=name: self._ball_cmd("svc " + n))
             self._svc_items.append((name, r))
+        if dead:
+            cv.create_text(12, y + 33, anchor="w", fill="#8a8a8a", font=f8,
+                           text="no service buttons on this machine")
         y += svc_h
         # coin door bar: a click toggle, like the real door it stays put.
-        self._door_rect = cv.create_rectangle(12, y, w - 12, y + 20,
-                                              fill="#333", outline="#444")
-        self._door_text = cv.create_text(w / 2, y + 10, fill=self.LAB_FG,
-                                         font=f8, text="COIN DOOR")
-        cv.create_text(w - 16, y + 10, anchor="e", fill=self.KEY_FG, font=f8,
-                       text="C")
-        for item in (self._door_rect, self._door_text):
-            cv.tag_bind(item, "<Button-1>",
-                        lambda _e: self._ball_cmd("door toggle"))
+        # The early era has no coin-door switch at all; the bar becomes the
+        # place that tells you how this machine opens its test mode.
+        self._door_rect = cv.create_rectangle(
+            12, y, w - 12, y + 20, fill="#2a2a2a" if dead else "#333",
+            outline="#3a3a3a" if dead else "#444")
+        self._door_text = cv.create_text(
+            w / 2, y + 10, fill="#8a8a8a" if dead else self.LAB_FG, font=f8,
+            text="TEST MODE: hold both flippers 3s" if dead else "COIN DOOR")
+        if not dead:
+            cv.create_text(w - 16, y + 10, anchor="e", fill=self.KEY_FG,
+                           font=f8, text="C")
+            for item in (self._door_rect, self._door_text):
+                cv.tag_bind(item, "<Button-1>",
+                            lambda _e: self._ball_cmd("door toggle"))
         y += door_h
         # the trough: clickable ball positions, fed by the keeper's state.
         cv.create_text(12, y + 6, anchor="w", fill=self.LAB_FG, font=f9b,
@@ -802,12 +824,14 @@ class Spike1SwitchWindow(tk.Toplevel):
                     self._panel.itemconfig(
                         lab, fill=self.HIT_FG if made else self.LAB_FG)
             st = self._ball_state
-            door_closed = bool(st.get("door_closed", True))
-            self._panel.itemconfig(self._door_rect,
-                                   fill="#2e5e2e" if door_closed else "#5e2e2e")
-            self._panel.itemconfig(
-                self._door_text,
-                text="COIN DOOR CLOSED" if door_closed else "COIN DOOR OPEN")
+            if self._era != "early":       # no coin-door switch on that era
+                door_closed = bool(st.get("door_closed", True))
+                self._panel.itemconfig(
+                    self._door_rect,
+                    fill="#2e5e2e" if door_closed else "#5e2e2e")
+                self._panel.itemconfig(
+                    self._door_text,
+                    text="COIN DOOR CLOSED" if door_closed else "COIN DOOR OPEN")
             balls = int(st.get("balls", 0))
             nballs = int(st.get("nballs", 6)) or 6
             in_shooter = bool(st.get("in_shooter"))

@@ -478,6 +478,30 @@ persisted in `$S1_WORK/s1eep.bin`), so the next boot validates.
    seven times after launch and gives up. Both are queue item 91; everything
    up to the plunge is modelled.
 
+### Service / test mode on the early era
+
+There is **no coin door and no service button** on these machines: all 46 named
+switches on node 8 are playfield or cabinet, and the game carries no operator
+menu (no audit, replay, credit or free-play text anywhere in it). The card's
+`/usr/local/bin/selftest` is a *CPU* self test that prints to the console and
+never opens the display — not the operator menu.
+
+What it does have is `TestMode()` (@0x1044c), polled twice from `game_proc`:
+
+    SWITCH_IsOn(1) && SWITCH_IsOn(2), held for 0xbb8 = 3000 ms
+
+Game id 1 is LEFT_FLIPPER (physical 26) and id 2 is RIGHT_FLIPPER (physical
+39), so **holding both flipper buttons for three seconds** opens it — verified
+live: the display goes from the attract to `VOLUME: 27%` exactly on the third
+second. The switch window's Left/Right arrow keys drive those two switches, so
+holding both arrows does it. Volume is the only operator setting the game has
+(`VolumeSet` clamps to 150 and persists to EEPROM byte 9).
+
+The window therefore draws the BACK/-/+/SELECT cluster and the coin-door bar
+DEAD on this era, with the flipper hint in the bar's place, and the service
+keys do nothing: those controls write the CPU-SPI file that a qemu patch feeds
+the 2015 firmware, which this game never reads.
+
 ### The display (`s1alpha.py`)
 
 `dmd_update_t` packs a 512-slot buffer into 4 bit-planes of 64 bytes (the

@@ -175,6 +175,11 @@ fi
 #     6:48000}, so they are 24000 Hz stereo, not the 44100 the chain assumed.
 #     Both ends have to agree or the player starves and you hear nothing.
 printf '%s %s\n' "${S1_PCM_RATE:-44100}" "${S1_PCM_CH:-2}" > "$S1_WORK/s1audio"
+# ...and which firmware era, so the switch window only offers controls this
+# machine actually has.  The 2012 home models carry NO coin-door or service
+# switches (their 46 node-8 switches are all playfield/cabinet), and no
+# operator menu: TestMode() is entered by holding BOTH FLIPPERS for 3 s.
+printf '%s\n' "$S1_ERA" > "$S1_WORK/s1era"
 
 # 4. valid board EEPROM (unlocks the boot; see docs/architecture/spike1_emulation.md)
 mkdir -p "$S1_WORK/rootfs/data"

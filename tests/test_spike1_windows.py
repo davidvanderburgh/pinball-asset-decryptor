@@ -605,3 +605,59 @@ def test_orphaned_windows_from_a_rebuilt_panel_are_closed(root, monkeypatch):
     assert orphan_dmd._closed and orphan_sw._closed
     assert not fresh._dmd._closed
     fresh.close()
+
+
+# --------------------------------- service controls the machine really has --
+# The 2012 home models have no coin-door switch and no service buttons (their
+# 46 node-8 switches are all playfield/cabinet), and no operator menu: TestMode
+# is entered by holding BOTH FLIPPERS for 3 s.  Offering the DMD generation's
+# BACK/-/+/SELECT cluster and coin-door bar there sent David hunting for a
+# door-and-SELECT menu that cannot exist (PAD-101).
+
+class _EraIO(_FakeIO):
+    def __init__(self, era, names=None):
+        super().__init__(names=names)
+        self.era = era
+
+    def read_text(self, name):
+        return self.era if name == "s1era" else ""
+
+
+def test_service_keys_are_inert_on_the_early_era(root):
+    io = _EraIO("early", names=_PLAY_NAMES)
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    win.press_key("Return")          # SELECT
+    win.press_key("BackSpace")       # BACK
+    win.press_key("c")               # coin door
+    assert not hasattr(io, "ball_cmds") or io.ball_cmds == []
+    win.close()
+
+
+def test_service_keys_still_work_on_the_dmd_generation(root):
+    io = _EraIO("dmd", names=_PLAY_NAMES)
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    win.press_key("Return")
+    win.press_key("c")
+    assert io.ball_cmds == ["svc select", "door toggle"]
+    win.close()
+
+
+def test_the_early_panel_says_how_to_open_test_mode(root):
+    io = _EraIO("early", names=_PLAY_NAMES)
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    shown = {win._panel.itemcget(i, "text")
+             for i in win._panel.find_all()
+             if win._panel.type(i) == "text"}
+    assert any("hold both flippers" in t.lower() for t in shown)
+    assert not any("COIN DOOR" in t for t in shown)
+    win.close()
+
+
+def test_the_dmd_panel_still_shows_the_coin_door(root):
+    io = _EraIO("dmd", names=_PLAY_NAMES)
+    win = W.Spike1SwitchWindow(root, io, nodes=(8,))
+    shown = {win._panel.itemcget(i, "text")
+             for i in win._panel.find_all()
+             if win._panel.type(i) == "text"}
+    assert any("COIN DOOR" in t for t in shown)
+    win.close()

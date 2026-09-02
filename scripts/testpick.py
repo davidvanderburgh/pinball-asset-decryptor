@@ -43,9 +43,12 @@ ZONES = [
     # -- Spike 2 rig: the emulator, its tab, its playfield tooling ---------
     ("spike2", ["tools/spike2_emu/",
                 "pinball_decryptor/plugins/stern/spike2/",
-                "pinball_decryptor/gui/emulate_tab.py"],
+                "pinball_decryptor/gui/emulate_tab.py",
+                "pinball_decryptor/gui/multiboot_tab.py"],
      ["test_spike2_*.py", "test_emulate_tab.py", "test_emulate_poll_storm.py",
-      "test_emulate_setup_check.py"]),
+      "test_emulate_setup_check.py",
+      # item 90: the Multi-boot tab and the two rig tools it drives
+      "test_multiboot_tab.py", "test_mkmulticard.py", "test_selectmedia.py"]),
     # -- Spike 1 rig -------------------------------------------------------
     ("spike1", ["tools/spike1_emu/",
                 "pinball_decryptor/plugins/stern/spike1",   # spike1*.py
@@ -56,7 +59,8 @@ ZONES = [
     # Both rigs sit on it, so its zone pulls their tests in too.
     ("stern", ["pinball_decryptor/plugins/stern/"],
      ["test_stern_*.py", "test_spike1_*.py", "test_spike2_*.py",
-      "test_emulate_*.py", "test_scene_*.py", "test_plugins.py", "test_rig_leaf_imports.py"]),
+      "test_emulate_*.py", "test_scene_*.py", "test_plugins.py", "test_rig_leaf_imports.py",
+      "test_multiboot_tab.py", "test_mkmulticard.py", "test_selectmedia.py"]),
     # -- JJP: plugin, rig, tab --------------------------------------------
     ("jjp", ["pinball_decryptor/plugins/jjp/", "tools/jjp_emu/",
              "pinball_decryptor/gui/jjp_emulate_tab.py"],
@@ -82,7 +86,8 @@ ZONES = [
     # Every tab imports these, so the zone is honestly wide: the whole Tk
     # lane.  Still far short of FULL (no plugin/pipeline/core tests).
     ("gui", ["pinball_decryptor/gui/", "pinball_decryptor/worktree_picker.py"],
-     ["test_gui_*.py", "test_emulate_*.py", "test_jjp_emulate_tab.py",
+     ["test_gui_*.py", "test_emulate_*.py", "test_multiboot_tab.py",
+      "test_jjp_emulate_tab.py",
       "test_jjp_matrix_ui.py", "test_spike1_emulate_tab.py",
       "test_spike1_windows.py", "test_log_pane_freeze.py",
       "test_worktree_*.py", "test_desktop_*.py", "test_placement*.py",
@@ -107,7 +112,7 @@ FULL_TRIGGERS = [
 # Changes here run NOTHING (docs and planning never execute).
 NO_TEST_SUFFIXES = (".md", ".png", ".txt", ".json.example")
 NO_TEST_PREFIXES = ("docs/", "plans/", "images/", "scripts/take_screenshots",
-                    "scripts/testpick")
+                    "scripts/shot_", "scripts/testpick")
 
 
 def changed_files(since):

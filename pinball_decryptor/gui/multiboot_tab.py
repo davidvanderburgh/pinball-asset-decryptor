@@ -647,7 +647,9 @@ class MultibootPanel:
 
     def _media_row(self, parent, row, col, label, var, choices, filetypes):
         """Label + editable combobox (the words, or a typed path) + Browse."""
-        kw = {"width": 10} if col == 0 else {}
+        # 12, not 10: "Move sound:" is eleven characters and a 10-wide ttk
+        # label showed "Move soun" (the first screenshot of the tab).
+        kw = {"width": 12} if col == 0 else {}
         ttk.Label(parent, text=label, **kw).grid(
             row=row, column=col, sticky=tk.W, padx=(0 if col == 0 else 12, 4),
             pady=2)

@@ -86,7 +86,7 @@ These have each been violated at least once and each cost a run or a window:
 
 - [ ] **90. A BOOT-TIME CODE SELECTOR: one SD card, several game images,
       pick one with the flippers before the game starts — first in the
-      emulator, then on David's machine.** `S2 D4` ← WORKING ON
+      emulator, then on David's machine.** `S2 D4`
       *(David's ask 2026-09-01: "we want to be able to run our own code on
       the machine … a multi image selector on an SD card that could allow
       us to play either the original Stern code or our custom 1987 code …

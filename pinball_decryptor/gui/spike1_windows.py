@@ -1061,6 +1061,9 @@ class Spike1Viewers:
         self._log = log or (lambda _m: None)
         self._io = None
         self._dmd = None
+        #: which kind of display window is up ("dmd" / "alpha"), so a change
+        #: of era swaps it instead of leaving the wrong one on screen
+        self._dmd_mode = None
         self._sw = None
 
     def configure(self, run_dir_wsl, distro):
@@ -1072,6 +1075,37 @@ class Spike1Viewers:
         except tk.TclError:
             return False
 
+    def display_mode(self):
+        """``"alpha"`` when the run dir says this machine has the 16-segment
+        displays, else ``"dmd"``.  Read on every poll, because the rig only
+        writes ``s1display`` once the game is extracted — which is AFTER this
+        window first opens."""
+        if self._alpha is None or not hasattr(self._io, "read_text"):
+            return "dmd"
+        return "alpha" if self._io.read_text("s1display") == "alphanumeric" \
+            else "dmd"
+
+    def _sweep_orphans(self, master):
+        """Close display/switch windows nobody owns any more.
+
+        The panel is rebuilt when the era badges switch, and the new panel
+        starts with a fresh Spike1Viewers — so the previous one's windows are
+        left on screen with no reference to close them (David saw the stale
+        orange DMD window sitting behind the new red one)."""
+        mine = {id(self._dmd), id(self._sw)}
+        try:
+            children = list(master.winfo_children())
+        except tk.TclError:
+            return
+        for w in children:
+            if id(w) in mine:
+                continue
+            if isinstance(w, (Spike1DisplayWindow, Spike1SwitchWindow)):
+                try:
+                    w.close()
+                except tk.TclError:
+                    pass
+
     def open(self):
         """Open whichever windows are not already up.  Idempotent — a running
         game calls this on every status poll."""
@@ -1080,17 +1114,27 @@ class Spike1Viewers:
         master = self._master_fn()
         if master is None:
             return
+        self._sweep_orphans(master)
+        want = self.display_mode()
+        if self._alive(self._dmd) and self._dmd_mode != want:
+            # The machine turned out to be the other kind of display.  A DMD
+            # window fed this era's 256-byte frames reads eight of them as one
+            # 2048-byte frame and draws stripes, so replace it rather than
+            # leaving it up (PAD-101).
+            try:
+                self._dmd.close()
+            except tk.TclError:
+                pass
+            self._dmd = None
         if not self._alive(self._dmd):
             try:
-                alpha = None
-                if self._alpha is not None and hasattr(self._io, "read_text") \
-                        and self._io.read_text("s1display") == "alphanumeric":
-                    alpha = self._alpha
                 self._dmd = Spike1DisplayWindow(
-                    master, self._io, self._decode, alpha=alpha,
+                    master, self._io, self._decode,
+                    alpha=self._alpha if want == "alpha" else None,
                     on_close=lambda _w: setattr(self, "_dmd", None))
+                self._dmd_mode = want
             except Exception as exc:                       # noqa: BLE001
-                self._log("Spike 1: could not open the DMD window: %s" % exc)
+                self._log("Spike 1: could not open the display window: %s" % exc)
                 self._dmd = None
         if not self._alive(self._sw):
             try:

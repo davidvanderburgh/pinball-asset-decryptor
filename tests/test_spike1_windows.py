@@ -514,3 +514,94 @@ class _Dummy:
 
     def bind_play_keys(self, w):
         pass
+
+
+# ------------------------------------------- the display window's KIND -----
+# The rig only says which display the machine has (s1display) once the game is
+# extracted, which is AFTER the windows first open.  A DMD window fed this
+# era's 256-byte frames reads eight of them as one 2048-byte frame and draws
+# stripes, so the viewers must SWAP it, not leave it up (PAD-101).
+
+class _ModeIO(_FakeIO):
+    def __init__(self, display=""):
+        super().__init__()
+        self.display = display
+
+    def read_text(self, name):
+        return self.display if name == "s1display" else ""
+
+    def read_json(self, name):
+        return None
+
+
+def _viewers(root, io, alpha=("d", "r")):
+    v = W.Spike1Viewers(lambda: root, _decode(), alpha=alpha)
+    v._io = io
+    return v
+
+
+def test_display_mode_follows_the_run_dir(root):
+    io = _ModeIO("")
+    v = _viewers(root, io)
+    assert v.display_mode() == "dmd"
+    io.display = "alphanumeric"
+    assert v.display_mode() == "alpha"
+    io.display = "dotmatrix"
+    assert v.display_mode() == "dmd"
+
+
+def test_a_dmd_window_is_swapped_when_the_marker_arrives(root, monkeypatch):
+    made = []
+
+    class _W:
+        _closed = False
+
+        def __init__(self, master, io, decode, alpha=None, on_close=None):
+            self.alpha = alpha
+            self.closed = False
+            made.append(self)
+
+        def winfo_exists(self):
+            return True
+
+        def close(self):
+            self.closed = self._closed = True
+
+        def bind_play_keys(self, w):
+            pass
+
+    monkeypatch.setattr(W, "Spike1DisplayWindow", _W)
+    monkeypatch.setattr(W, "Spike1SwitchWindow", _W)
+    monkeypatch.setattr(W.sys, "platform", "win32")
+    io = _ModeIO("")                       # the rig has not said yet
+    v = _viewers(root, io)
+    v.open()
+    first = v._dmd
+    assert first.alpha is None and v._dmd_mode == "dmd"
+
+    v.open()                               # same mode: keep the window
+    assert v._dmd is first and not first.closed
+
+    io.display = "alphanumeric"            # the rig writes the marker
+    v.open()
+    assert first.closed, "the stale DMD window must be closed"
+    assert v._dmd is not first and v._dmd.alpha is not None
+    assert v._dmd_mode == "alpha"
+
+
+def test_orphaned_windows_from_a_rebuilt_panel_are_closed(root, monkeypatch):
+    """Switching era badges rebuilds the panel with a fresh Spike1Viewers; the
+    previous one's windows had nothing left to close them."""
+    monkeypatch.setattr(W.sys, "platform", "win32")
+    io = _ModeIO("")
+    old = _viewers(root, io)
+    old.open()                              # real windows, parented to root
+    orphan_dmd, orphan_sw = old._dmd, old._sw
+    assert orphan_dmd is not None and orphan_sw is not None
+
+    fresh = _viewers(root, _ModeIO(""))     # the rebuilt panel's viewers
+    fresh.open()
+    root.update()
+    assert orphan_dmd._closed and orphan_sw._closed
+    assert not fresh._dmd._closed
+    fresh.close()

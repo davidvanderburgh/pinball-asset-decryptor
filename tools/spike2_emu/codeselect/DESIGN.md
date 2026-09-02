@@ -77,6 +77,18 @@ this layout: `mkmulticard.py` refuses more than one `--extra` unless
 `--allow-unreachable` (emulator use), and a 3-image card needs two images
 inside one partition - a design follow-up.
 
+## The partition-count limit (found in review)
+
+The card's own kernel (i.MX6 3.14, `CONFIG_MMC_BLOCK_MINORS=8`) exposes at
+most `/dev/mmcblk0p7`, so with p1..p6 fixed there is room for exactly ONE
+extra games partition per card. `mkmulticard.py` refuses a second `--extra`
+unless `--allow-unreachable` (emulator experiments only). A three-way card
+(Godzilla stock / Heisei normal / Heisei orchestra) therefore needs the
+follow-up design of carrying two images INSIDE one partition (p7 holding
+`<title>_a/` and `<title>_b/` with the `game`/`conagent`/`data` symlinks and
+`spk/` re-pointed by `select.sh` under a brief rw remount), not a third
+partition.
+
 ## Files on the card
 
 ```

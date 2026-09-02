@@ -110,7 +110,11 @@ These have each been violated at least once and each cost a run or a window:
       Pro: stock `turtles_pro-1_59_0` + the 1987 upscaled Pro build (same
       1.59.0 version, so NVRAM identity is not disturbed). Godzilla (stock /
       Heisei normal / Heisei orchestra) is the same builder with three
-      inputs. Proven in the rig as `PAD_CARD=<multi.raw> PAD_SELECT=1`.
+      inputs — EXCEPT that the card's kernel exposes only p1..p7
+      (`CONFIG_MMC_BLOCK_MINORS=8`, found in review), so a THIRD image
+      needs two images inside one partition, a follow-up design; today's
+      builder refuses it. Proven in the rig as `PAD_CARD=<multi.raw>
+      PAD_SELECT=1`.
       — S2: it is the whole point of the emulator work — running our own
       code on the machine. D4: a new ARM program, a card builder, and rig
       plumbing, all of which exist in parts already.

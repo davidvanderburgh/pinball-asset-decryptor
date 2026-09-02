@@ -22,7 +22,11 @@
  *                         moment the menu appears - as a P6 PPM and exit 0,
  *                         with no display, input, audio, choice or last file:
  *                         the Multi-boot tab's preview. --highlight N picks
- *                         the card, --anim-frame N its animation frame.
+ *                         the card, --anim-frame N its animation frame, and
+ *                         --frames K writes a WHOLE RUN of K frames from the
+ *                         one load (FILE.ppm is then a "%d" pattern) - the
+ *                         preview used to pay a process start, and a re-load
+ *                         of every PNG, GIF and font, for each frame it showed.
  *
  * stdout lines are prefixed '[select] ' for the rig's event pane; stderr
  * (and --log) carry the diagnostics.
@@ -78,6 +82,7 @@ struct opts {
     int volume;       /* -1 = from conf */
     int anim_frame;   /* -1 = animate; else every animation shows this frame */
     int highlight;    /* --snapshot: the highlighted card; -1 = the conf default */
+    int frames;       /* --snapshot: how many frames to write from one load (1) */
 };
 
 static volatile sig_atomic_t g_stop;
@@ -108,6 +113,10 @@ static void usage(FILE *f)
         "                     audio, choice or last file (the preview)\n"
         "  --highlight N      --snapshot only: the highlighted card (default conf default=, else 0;\n"
         "                     the last-choice file is never read)\n"
+        "  --frames K         --snapshot only: write K frames (1-%d) from one load, starting at\n"
+        "                     --anim-frame and stepping by one (wrapping); K > 1 makes the\n"
+        "                     --snapshot value a printf pattern holding exactly one %%d, the\n"
+        "                     frame number (default 1: one frame, the value used as it stands)\n"
         "  --invert / --no-invert  rotate 180 degrees (default: auto from " BOOTDISP_CMD ")\n"
         "  --preamble min|full  node-bus bring-up to replay before scanning (default min)\n"
         "  --font PATH        TrueType font (default conf font=, " DEF_FONT ", " CARD_FONT ")\n"
@@ -116,9 +125,47 @@ static void usage(FILE *f)
         "  --audio-fmt PATH   the rig's fmt file, gets '44100 2' (default $PAD_AUDIO_FMT)\n"
         "  --volume 0-100     software mix gain (overrides conf volume=, default %d)\n"
         "  --anim-frame N     show frame N of every animation instead of animating (headless tests);\n"
-        "                     with --snapshot: the highlighted card's frame (wraps)\n"
+        "                     with --snapshot: the highlighted card's frame (wraps), and the\n"
+        "                     first of the --frames K run\n"
         "  --audio-dump FILE  raw s16le 44100 Hz stereo of everything mixed\n"
-        "exit status: 0 = a choice was written, 2 = no choice\n", DEF_VOLUME);
+        "exit status: 0 = a choice was written, 2 = no choice\n", ANIM_MAX_FRAMES, DEF_VOLUME);
+}
+
+/* With --frames K > 1 the --snapshot value is a printf PATTERN, so the caller
+ * keeps its own file naming (the Multi-boot tab names its cache
+ * frame_<fingerprint>_<highlight>_<n>.ppm). Exactly one conversion is allowed
+ * and it must be a bare %d, the frame number: none would pile every frame into
+ * one file, two would hand snprintf an argument it was never given, and a %s or
+ * a width is a caller that believes this is a richer format than it is. "%%" is
+ * a literal percent and does not count. 0 = usable, -1 = why, in err. */
+static int check_frames_pattern(const char *p, char *err, int errlen)
+{
+    const char *s;
+    int n = 0;
+    for (s = p; *s; s++) {
+        if (*s != '%') continue;
+        if (s[1] == '%') { s++; continue; }
+        if (!s[1]) {
+            snprintf(err, (size_t)errlen, "--snapshot \"%s\" ends in a lone '%%'", p);
+            return -1;
+        }
+        if (s[1] != 'd') {
+            snprintf(err, (size_t)errlen,
+                     "--snapshot \"%s\" holds '%%%c'; with --frames > 1 it is a printf pattern "
+                     "taking exactly one bare '%%d' (the frame number) and '%%%%' for a percent",
+                     p, s[1]);
+            return -1;
+        }
+        n++;
+        s++;
+    }
+    if (n != 1) {
+        snprintf(err, (size_t)errlen,
+                 "--snapshot \"%s\" holds %d '%%d'; with --frames > 1 it is a printf pattern "
+                 "taking exactly one, the frame number", p, n);
+        return -1;
+    }
+    return 0;
 }
 
 static int parse_args(struct opts *o, int argc, char **argv)
@@ -139,6 +186,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
     o->volume = -1;
     o->anim_frame = -1;
     o->highlight = -1;
+    o->frames = 1;
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
         const char *v = i + 1 < argc ? argv[i + 1] : NULL;
@@ -166,6 +214,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
         if (!strcmp(a, "--volume")) { if (!v) goto missing; o->volume = atoi(v); i++; continue; }
         if (!strcmp(a, "--anim-frame")) { if (!v) goto missing; o->anim_frame = atoi(v); i++; continue; }
         if (!strcmp(a, "--highlight")) { if (!v) goto missing; o->highlight = atoi(v); i++; continue; }
+        if (!strcmp(a, "--frames")) { if (!v) goto missing; o->frames = atoi(v); i++; continue; }
         if (!strcmp(a, "--invert")) { o->invert = 1; continue; }
         if (!strcmp(a, "--no-invert")) { o->invert = 0; continue; }
         if (!strcmp(a, "--help") || !strcmp(a, "-h")) { usage(stdout); exit(0); }
@@ -196,6 +245,31 @@ missing:
     if (o->highlight >= 0 && !o->snapshot) {
         fprintf(stderr, "codeselect: --highlight is only used with --snapshot\n");
         return -1;
+    }
+    if (o->frames < 1) {
+        fprintf(stderr, "codeselect: --frames must be at least 1\n");
+        return -1;
+    }
+    /* An animation is cut at ANIM_MAX_FRAMES when it is decoded, so a larger K
+     * could only ask for frames that cannot exist - and every one of them is a
+     * full redraw of the canvas. Refuse it here rather than spin. */
+    if (o->frames > ANIM_MAX_FRAMES) {
+        fprintf(stderr, "codeselect: --frames %d is more than the %d frames an animation can have\n",
+                o->frames, ANIM_MAX_FRAMES);
+        return -1;
+    }
+    if (o->frames > 1) {
+        char perr[600];
+        if (!o->snapshot) {
+            fprintf(stderr, "codeselect: --frames > 1 is only used with --snapshot\n");
+            return -1;
+        }
+        /* refused BEFORE a byte is written: a caller that got the pattern
+         * wrong must not find half a run of files on disk */
+        if (check_frames_pattern(o->snapshot, perr, sizeof perr) < 0) {
+            fprintf(stderr, "codeselect: %s\n", perr);
+            return -1;
+        }
     }
     if (o->volume > 100) o->volume = 100;
     return 0;
@@ -628,21 +702,36 @@ static const char *media_dir(const struct opts *o, const struct conf *c)
     return o->media ? o->media : *c->media ? c->media : DEF_MEDIA;
 }
 
-/* --snapshot: ONE menu frame, the picture the machine shows the moment the
- * menu appears - the countdown at its full value - with the highlighted
- * card's animation at frame --anim-frame (0 when unset; past the end it
- * wraps); every other card shows its still, or frame 0 when it has none,
- * exactly as it does live. No input backend, no audio (the WAVs are not
- * even opened), nothing written but the PPM. Every animation is decoded in
- * full first so the frame asked for exists. Returns the exit status:
- * 0 = written, 2 = could not. */
+/* --snapshot: the menu frame the machine shows the moment the menu appears -
+ * the countdown at its full value - with the highlighted card's animation at
+ * frame --anim-frame (0 when unset; past the end it wraps); every other card
+ * shows its still, or frame 0 when it has none, exactly as it does live. No
+ * input backend, no audio (the WAVs are not even opened), nothing written but
+ * the PPM(s). Every animation is decoded in full first so the frame asked for
+ * exists.
+ *
+ * --frames K writes a WHOLE RUN of K frames - --anim-frame, then the next, and
+ * the next, wrapping - out of that ONE load. The preview used to play an
+ * animation by running this program once per frame, so a 16-frame run cost 16
+ * qemu-user starts and 16 re-decodes of every PNG, GIF and font just to move
+ * one panel; the draw is the only part that differs between them, and it is
+ * the cheap part. K past the animation's length would only rewrite files this
+ * same run has already written, and a card with no animation has nothing to
+ * step at all, so both are trimmed here and said in the log - the caller reads
+ * the real count off the 'frame F of N' it already parses.
+ *
+ * Returns the exit status: 0 = written, 2 = could not. */
 static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx *g,
                           struct gfx_font *font, const struct layout *L, int hl,
                           const char *how, int timeout, int invert, const char *fontpath,
                           int action)
 {
     struct media media;
-    int n = c->n, frame = o->anim_frame > 0 ? o->anim_frame : 0, frames = 0;
+    char path[600];
+    int n = c->n, first = o->anim_frame > 0 ? o->anim_frame : 0, frames = 0;
+    /* K == 1 is the old path to the byte: the --snapshot value is a file NAME,
+     * never a pattern, so a name that happens to hold a '%' still works */
+    int pattern = o->frames > 1, want = o->frames, k;
 
     memset(&media, 0, sizeof media);
     snprintf(media.dir, sizeof media.dir, "%s", media_dir(o, c));
@@ -652,20 +741,40 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
     media_log(&media);
     if (media.anim[hl]) frames = media.anim[hl]->n;
     if (!frames) {
-        frame = 0;
-    } else if (frame >= frames) {
-        sel_log("snapshot: frame %d wraps to %d (image %d has %d frames)", frame, frame % frames, hl, frames);
-        frame %= frames;
+        first = 0;
+        if (want > 1) {
+            sel_log("snapshot: image %d has no animation: 1 frame, not %d", hl, want);
+            want = 1;
+        }
+    } else {
+        if (first >= frames) {
+            sel_log("snapshot: frame %d wraps to %d (image %d has %d frames)", first, first % frames, hl, frames);
+            first %= frames;
+        }
+        if (want > frames) {
+            sel_log("snapshot: %d frames asked for, image %d has %d: %d written", want, hl, frames, frames);
+            want = frames;
+        }
     }
-    draw_menu(g, font, L, c, &media, hl, timeout > 0 ? timeout : -1, frame, 0, action);
-    if (gfx_write_ppm(g, o->snapshot, invert) < 0) {
-        sel_say("error: cannot write %s: %s", o->snapshot, strerror(errno));
-        media_free(&media);
-        return 2;
+    for (k = 0; k < want; k++) {
+        int frame = frames ? (first + k) % frames : 0;
+        int len = pattern ? snprintf(path, sizeof path, o->snapshot, frame)
+                          : snprintf(path, sizeof path, "%s", o->snapshot);
+        if (len < 0 || len >= (int)sizeof path) {
+            sel_say("error: snapshot frame %d does not fit %d bytes of path", frame, (int)sizeof path - 1);
+            media_free(&media);
+            return 2;
+        }
+        draw_menu(g, font, L, c, &media, hl, timeout > 0 ? timeout : -1, frame, 0, action);
+        if (gfx_write_ppm(g, path, invert) < 0) {
+            sel_say("error: cannot write %s: %s", path, strerror(errno));
+            media_free(&media);
+            return 2;
+        }
+        sel_say("snapshot: %s %dx%d, highlight %d (%s) from %s, frame %d of %d, timeout %d s, invert %d, font %s, media %s, footer \"%s\"",
+                path, g->w, g->h, hl, c->img[hl].title, how, frame, frames, timeout, invert,
+                fontpath, media.dir, action ? FOOT_ACTION : FOOT_START);
     }
-    sel_say("snapshot: %s %dx%d, highlight %d (%s) from %s, frame %d of %d, timeout %d s, invert %d, font %s, media %s, footer \"%s\"",
-            o->snapshot, g->w, g->h, hl, c->img[hl].title, how, frame, frames, timeout, invert,
-            fontpath, media.dir, action ? FOOT_ACTION : FOOT_START);
     media_free(&media);
     return 0;
 }

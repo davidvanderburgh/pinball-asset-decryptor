@@ -425,8 +425,12 @@ def measure(label, collect=False):
         % (tab.winfo_reqheight(), budget, root.winfo_height(),
            HEIGHT_BUDGET, tab.winfo_reqwidth()))
     outer = panel._outer
-    names = ["source row", "preview", "images table", "row label",
-             "action bar", "status"]
+    # In the order the panel builds them - the version banner included,
+    # even though it is packed only while a card's images disagree: it is
+    # a CHILD from the start, so leaving it out of this list shifted every
+    # name after it onto the wrong row.
+    names = ["source row", "version banner", "preview", "images table",
+             "row label", "action bar", "status"]
     for name, child in zip(names, outer.winfo_children()):
         log("   %-24s reqh %4d  h %4d  mapped %s"
             % (name, child.winfo_reqheight(), child.winfo_height(),

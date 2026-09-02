@@ -27,10 +27,12 @@ from tests.test_gui_smoke import app  # noqa: F401  (fixture)
 
 from pinball_decryptor.gui import emulate_tab, multiboot_tab
 from pinball_decryptor.gui.multiboot_tab import (
-    DEFAULT_SELECTOR_DIR, FRAME_H, FRAME_W, INSPECT_JSON, PREVIEW_BUILD_DIR,
-    ImageRow, MultibootForm, anim_spec, apply_commands, art_spec,
-    build_commands, bypass_commands, cell_anim, cell_art,
-    default_output_path, diff_forms,
+    ANIM_LABEL, DEFAULT_SELECTOR_DIR, FRAME_H, FRAME_W, INSPECT_JSON,
+    PREVIEW_BUILD_DIR, PREVIEW_MAX_FRAMES,
+    ImageRow, MultibootForm, anim_period_ms, anim_spec, apply_commands,
+    art_spec, build_commands, bypass_commands, cell_anim, cell_art,
+    default_output_path, diff_forms, frame_pattern, manifest_sounds,
+    parse_snapshot_frames,
     edit_status_text, ensure_selector_args, fit_factors, form_from_inspect,
     host_path, inject_commands, inspect_commands, list_title,
     loaded_media_dir, media_fingerprint, media_specs_changed,
@@ -91,6 +93,91 @@ def _tool_words(argv):
 
 def _win(monkeypatch):
     monkeypatch.setattr(multiboot_tab.sys, "platform", "win32")
+
+
+class _FakeAudio:
+    """A :class:`PreviewAudio` that writes down what it was asked to play.
+
+    The real one is tested in tests/test_preview_audio.py, device and all;
+    what matters HERE is which WAV the tab asks for and when, so this
+    records and answers the four read-only properties the tab reads."""
+
+    def __init__(self, volume=50, backend_factory=None, threaded=True,
+                 on_status=None):
+        self.volume = volume
+        self.calls = []
+        self.looping = None
+        self.available = True
+        self.backend_name = "sounddevice"
+        self.why_silent = ""
+        self.status = "Sound plays through sounddevice."
+
+    def loop(self, path):
+        self.calls.append(("loop", path))
+        self.looping = path
+
+    def play(self, path):
+        self.calls.append(("play", path))
+
+    def set_volume(self, volume):
+        self.volume = volume
+        self.calls.append(("volume", volume))
+
+    def stop(self):
+        self.calls.append(("stop", None))
+        self.looping = None
+
+    def played(self, kind):
+        return [p for k, p in self.calls if k == kind]
+
+
+def _fake_audio(monkeypatch):
+    """Every player the tab makes from now on is a :class:`_FakeAudio`."""
+    made = []
+
+    def factory(**kw):
+        made.append(_FakeAudio(**kw))
+        return made[-1]
+    monkeypatch.setattr(multiboot_tab, "PreviewAudio", factory)
+    return made
+
+
+def _media_set(panel, images=2, music=True, sounds=True, own_confirm=None):
+    """A prepared media directory for the panel's output: media.json the
+    way selectmedia writes it, and a file for every name in it.  A
+    ``--visual-only`` prepare (the one the preview runs for itself) is
+    ``sounds=False``: the music is there, the two menu sounds are not."""
+    media = panel.media_dir()
+    os.makedirs(media, exist_ok=True)
+    rows = []
+    for i in range(images):
+        rows.append({"art": "art%d.png" % i, "anim": None,
+                     "music": ("music%d.wav" % i) if music else None,
+                     "confirm": own_confirm if (own_confirm and i == 1)
+                     else None})
+    manifest = {"images": rows,
+                "sound_move": "move.wav" if sounds else None,
+                "sound_confirm": "confirm.wav" if sounds else None,
+                "volume": 50}
+    for row in rows:
+        for name in row.values():
+            if name:
+                open(os.path.join(media, name), "wb").close()
+    for name in (manifest["sound_move"], manifest["sound_confirm"]):
+        if name:
+            open(os.path.join(media, name), "wb").close()
+    with open(os.path.join(media, "media.json"), "w", encoding="utf-8") as f:
+        json.dump(manifest, f)
+    # ...and the FORM agrees with it, the way it does after a prepare or a
+    # load: a row whose Music says 'none' has none, whatever is still
+    # sitting in the directory from the last one.
+    for i, row in enumerate(panel._rows[:images]):
+        row.music = ("music%d.wav" % i) if music else "none"
+        # ...and the same for the confirm, which the form decides too: a
+        # row with a sound of its own says so ('auto' is one way), and ""
+        # is the row that falls back to the menu's.
+        row.confirm = "auto" if (own_confirm and i == 1) else ""
+    return media
 
 
 def _ppm(path, w=136, h=77, rgb=(40, 60, 90)):
@@ -1505,7 +1592,7 @@ def test_load_frame_shows_a_ppm_scaled_into_the_box(tmp_path):
         assert (panel._pv_photo.width(), panel._pv_photo.height()) == box
         assert panel._pv_canvas.find_all()                  # one image item
         assert panel._pv_canvas.type(panel._pv_canvas.find_all()[0]) == "image"
-        assert panel._pv_status.cget("text") == "Image 1: frame 3 of 24"
+        assert panel._pv_status.cget("text") == "Image 2: frame 3 of 24"
         assert panel._hl_var.get() == "1" and panel._frame_var.get() == "3"
         assert panel._hl_touched is False       # programmatic, not typed
         assert int(panel._frame_spin.cget("to")) == 23
@@ -1524,16 +1611,138 @@ def test_load_frame_shows_a_ppm_scaled_into_the_box(tmp_path):
 
 
 def test_highlight_follows_default_until_typed(tmp_path):
+    """...and the flippers follow the number of images: the control's range
+    IS 'is there another card to move to', which is what the Image spinbox's
+    ``to`` used to say."""
     root, panel = _panel()
     try:
-        for p in _images(tmp_path, 2):
-            panel.add_image(p)
-        assert int(panel._hl_spin.cget("to")) == 1
+        assert str(panel._flip_l.cget("state")) == "disabled"
+        assert str(panel._flip_r.cget("state")) == "disabled"
+        images = _images(tmp_path, 2)
+        panel.add_image(images[0])
+        assert str(panel._flip_l.cget("state")) == "disabled"  # one card
+        panel.add_image(images[1])
+        assert str(panel._flip_l.cget("state")) == "normal"
+        assert str(panel._flip_r.cget("state")) == "normal"
         panel._default_var.set("1")
         assert panel._hl_var.get() == "1"
         panel._hl_var.set("0")                    # typed by hand
         panel._default_var.set("1")
         assert panel._hl_var.get() == "0"
+    finally:
+        root.destroy()
+
+
+def test_the_flippers_move_the_highlight_and_wrap_both_ways(tmp_path):
+    """codeselect.c's EV_LEFT / EV_RIGHT, and nothing else: hl = (hl + n -
+    1) % n and hl = (hl + 1) % n.  A press is a hand-typed highlight, so
+    the preview stops following the Default index from then on."""
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 3):
+            panel.add_image(p)
+        panel._tree.selection_set("0")
+        root.update()
+        assert panel._hl_var.get() == "0" and panel._hl_touched is False
+        assert panel.flip_right() is True
+        assert panel._hl_var.get() == "1"
+        assert panel._hl_touched is True         # steered by hand now
+        panel.flip_right()
+        assert panel._hl_var.get() == "2"
+        panel.flip_right()
+        assert panel._hl_var.get() == "0"        # wraps at the end
+        panel.flip_left()
+        assert panel._hl_var.get() == "2"        # ...and at the start
+        # the Default index no longer moves it
+        panel._default_var.set("1")
+        assert panel._hl_var.get() == "2"
+        # ...and the arrow keys are the same two buttons
+        panel._key_flip_right()
+        assert panel._hl_var.get() == "0"
+        panel._key_flip_left()
+        assert panel._hl_var.get() == "2"
+        # a new card restarts its animation, and Play follows the highlight
+        # - both of them the C's own 'if (hl != old_hl)'
+        panel._set_var(panel._frame_var, "7")
+        panel._play_var.set(True)
+        panel._play_hl = 2
+        panel.flip_right()
+        assert panel._frame_var.get() == "0"
+        assert panel._play_hl == int(panel._hl_var.get())
+        panel._play_var.set(False)
+        # one image is a menu with nothing to choose between
+        panel._rows[:] = panel._rows[:1]
+        panel._refresh_tree()
+        assert panel.flip_right() is False
+        assert str(panel._flip_r.cget("state")) == "disabled"
+    finally:
+        root.destroy()
+
+
+def test_a_flipper_press_moves_the_table_and_the_editor_with_it(tmp_path):
+    """The blue row in the table, the fields in the editor and the amber
+    card in the picture are three views of ONE choice.  The flippers are
+    the headline way of making it now, and a press that left the table
+    naming the image the picture had just walked away from put the tab's
+    two answers to 'which image' side by side on screen disagreeing."""
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 3):
+            panel.add_image(p)
+        for i, title in enumerate(("ONE", "TWO", "THREE")):
+            panel._rows[i].title = title
+        panel._refresh_tree()
+        panel._tree.selection_set("0")
+        root.update()
+        assert panel._ed_title.get() == "ONE"
+        panel.flip_right()
+        panel.flip_right()
+        root.update()                   # <<TreeviewSelect>> is a queued event
+        assert panel._hl_var.get() == "2"
+        assert panel._tree.selection() == ("2",)
+        assert panel._ed_title.get() == "THREE"
+        # ...and back the other way, wrapping
+        panel.flip_left()
+        panel.flip_left()
+        panel.flip_left()
+        root.update()
+        assert panel._hl_var.get() == "2"       # 2 -> 1 -> 0 -> 2
+        assert panel._tree.selection() == ("2",)
+        # a press is still a hand-typed highlight, whatever moved the table
+        assert panel._hl_touched is True
+    finally:
+        root.destroy()
+
+
+def test_the_caption_numbers_images_the_way_the_picture_does(tmp_path):
+    """codeselect.c:545 draws every card's label 'IMAGE %d' with i + 1, so
+    the words 20 px under that picture count from one too - the flippers
+    walk IMAGE 1, IMAGE 2, IMAGE 3 and a caption walking Image 0, Image 1,
+    Image 2 under them is the tab's own readout contradicting its frame.
+    The index stays 0-based everywhere a tool reads it."""
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 3):
+            panel.add_image(p)
+        ppm = _ppm(tmp_path / "f.ppm")
+        assert panel.load_frame(ppm, 0, 0, 4) is True
+        assert panel._pv_status.cget("text") == "Image 1: frame 0 of 4"
+        assert panel._hl_var.get() == "0"       # ...and the index is not
+        assert panel.load_frame(ppm, 2, 1, 4) is True
+        assert panel._pv_status.cget("text") == "Image 3: frame 1 of 4"
+        # the cache miss a flipper press finds, and the two sound lines,
+        # count the same way
+        panel.flip_right()                      # to image 0, undrawn
+        assert panel._pv_status.cget("text").startswith("Image 1 frame 0")
+        assert panel.play_confirm() is False
+        assert panel._pv_status.cget("text").startswith("Image 1 has no")
+        # ...and a still that cannot be played
+        fp = preview_fingerprint(panel.form())
+        panel._pv_totals[(fp, 0)] = 1
+        panel._play_var.set(True)
+        panel._play_toggled()
+        assert panel._pv_status.cget("text") == \
+            "Image 1 has no animation to play."
     finally:
         root.destroy()
 
@@ -1551,10 +1760,11 @@ def _tick(root, panel):
 
 def test_play_advances_through_the_cache_and_stops_when_the_form_changes(
         tmp_path):
-    """Play with a fake renderer: frames it asks for land in the cache
-    (keyed by form fingerprint, highlight, frame) with the count the
-    selector would have logged; the ticks walk 0, 1, 2, 0...; a form
-    change stops it with the reason on the status line."""
+    """Play with a fake renderer: ONE run draws the whole animation (the
+    length is not known yet, so the most one can have is asked for and the
+    selector trims it), the ticks then walk 0, 1, 2, 0... out of the cache
+    without rendering again, and a form change stops it with the reason on
+    the status line."""
     root, panel = _panel()
     ppm = _ppm(tmp_path / "f.ppm")
     asked = []
@@ -1564,7 +1774,8 @@ def test_play_advances_through_the_cache_and_stops_when_the_form_changes(
         asked.append((hl, list(frames)))
         panel._pv_totals[(fp, hl)] = 3
         for n in frames:
-            panel._pv_cache[(fp, hl, n)] = ppm
+            if n < 3:              # the selector trims K to the real length
+                panel._pv_cache[(fp, hl, n)] = ppm
         return True
     try:
         for p in _images(tmp_path, 2):
@@ -1574,13 +1785,12 @@ def test_play_advances_through_the_cache_and_stops_when_the_form_changes(
         panel._render_frames = fake_render
         panel._play_var.set(True)
         panel._play_toggled()
-        _tick(root, panel)                      # count unknown: frame 0 first
-        assert asked == [(1, [0])]
-        _tick(root, panel)                      # count known: the rest, in order
-        assert asked[-1] == (1, [1, 2])
+        # ONE run, at once - pressing Play is all pressing Play takes
+        assert asked == [(1, list(range(multiboot_tab.PREVIEW_MAX_FRAMES)))]
         for want in ("1", "2", "0", "1"):
             _tick(root, panel)
             assert panel._frame_var.get() == want
+        assert asked == [(1, list(range(multiboot_tab.PREVIEW_MAX_FRAMES)))]
         assert "frame 1 of 3 - playing" in panel._pv_status.cget("text")
         assert panel._play_var.get() is True
         panel._rows[1].title = "TMNT 1987 (renamed)"
@@ -1600,12 +1810,98 @@ def test_play_advances_through_the_cache_and_stops_when_the_form_changes(
         root.destroy()
 
 
+def test_an_edit_during_a_slow_animation_is_not_thrown_away(tmp_path):
+    """Play re-arms at the CLIP's rate now, which the clamp lets reach 2 s,
+    while the debounce fires at 350 ms and used to refuse - and clear - a
+    render whenever Play was on.  So an edit made during a slow animation
+    was dropped by the debounce and only noticed a whole frame later by the
+    tick, with nothing left queued: the preview stopped following the form
+    and never redrew."""
+    root, panel = _panel(auto=True)
+    ppm = _ppm(tmp_path / "f.ppm")
+    asked = []
+
+    def fake_render(form, hl, frames):
+        fp = preview_fingerprint(form)
+        asked.append((fp, hl, list(frames)))
+        panel._pv_totals[(fp, hl)] = 3
+        for n in frames:
+            if n < 3:
+                panel._pv_cache[(fp, hl, n)] = ppm
+        return True
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._rows[1].anim = "auto"
+        panel._rows[1].anim_fps = "1"           # one frame a second
+        panel._default_var.set("1")
+        panel._render_frames = fake_render
+        panel._play_var.set(True)
+        panel._play_toggled()
+        assert panel._play_var.get() is True
+        before = preview_fingerprint(panel.form())
+        assert asked and asked[-1][0] == before
+        # ...now type a title, and let the DEBOUNCE fire (350 ms), which is
+        # long before the next tick of a 1 fps clip
+        panel._rows[1].title = "TMNT 1987 (renamed)"
+        panel.schedule_preview()
+        job, panel._pv_debounce_job = panel._pv_debounce_job, None
+        root.after_cancel(job)
+        panel._auto_render()
+        after = preview_fingerprint(panel.form())
+        assert after != before
+        # Play is off, the strip says why AND that it is being redrawn -
+        # in the ordinary colour, because editing while an animation runs
+        # is an ordinary thing to do
+        assert panel._play_var.get() is False
+        assert "form changed" in panel._pv_status.cget("text")
+        assert panel._pv_error is False
+        # ...and the render for the NEW form really happened, in the same
+        # pass: nothing was thrown away and nothing is left queued
+        assert asked[-1][0] == after
+        assert panel._pv_debounce_job is None and panel._pv_pending == 0
+        # ...so the picture is following the form again by itself
+        root.update()
+        assert panel._pv_status.cget("text").startswith("Image 2: frame 0")
+        assert panel._pv_cache.get((after, 1, 0)) == ppm
+    finally:
+        root.destroy()
+
+
+def _tool_path(path):
+    """*path* as the selector is really handed it - and therefore as it
+    echoes it back.
+
+    ``snapshot_commands`` puts every path through ``wsl()``, so what the
+    tool prints on Windows is ``/mnt/c/…`` and NOT the ``C:\\…`` the tab
+    must open.  These stand-ins replace ``snapshot_commands`` itself, one
+    level ABOVE that call, so without this they would hand the fake
+    selector a Windows path, have it echo a Windows path, and be blind to
+    a whole class of Windows-only path bug (the animation run cached the
+    echoed path, and Play could not load a single frame of a run it had
+    just drawn correctly).  The mapping is applied whatever the platform,
+    because on a Linux desktop ``wsl()`` is the identity and a test that
+    can only fail on one machine is not a test."""
+    p = multiboot_tab.wsl(path)
+    return p if p != path else "/mnt/wsl" + p.replace("\\", "/")
+
+
 def _stand_ins(monkeypatch, tmp_path, fail=None, frames=3):
     """Python children for the three preview steps.  The snapshot one
     writes a small PPM where the real selector would and prints its
-    'anim: image N F frames' line; *fail* names the step that exits 2."""
+    'anim: image N F frames' line; *fail* names the step that exits 2.
+
+    IT SPEAKS THE REAL CLI, ``--frames K`` included: one run fills the
+    frame number into the pattern it is given, wraps at the animation's
+    length (*frames*), trims K to it, and prints the selector's own
+    'snapshot: <path> WxH … frame F of N' line per file - which is how the
+    tab learns which frames a run actually wrote.  It writes to the HOST
+    path and prints the TOOL's (see :func:`_tool_path`), which is what the
+    real thing does and the only way the tab's own path handling is
+    exercised at all."""
     py = sys.executable
     seen = {"snapshot": []}
+    length = frames
 
     def ensure(form, cwd=None):
         code = ("print('[preview] selector: /fake/codeselect')"
@@ -1625,16 +1921,30 @@ def _stand_ins(monkeypatch, tmp_path, fail=None, frames=3):
                 "print('[media] error: ffmpeg missing'); raise SystemExit(2)")
         return [("prepare", [py, "-c", code, media_dir])]
 
-    def snapshot(binary, conf, media_dir, ppm, hl, n, rootfs="~/r", cwd=None):
-        seen["snapshot"].append((binary, conf, media_dir, ppm, hl, n))
+    def snapshot(binary, conf, media_dir, ppm, hl, n, rootfs="~/r", cwd=None,
+                 frames=1):
+        seen["snapshot"].append((binary, conf, media_dir, ppm, hl, n, frames))
+        label = (multiboot_tab.ANIM_LABEL if frames > 1 else "frame %d" % n)
         if fail == "frame":
             code = "print('[select] error: bad conf'); raise SystemExit(2)"
-        else:
-            code = ("import sys; p = sys.argv[1]; "
-                    "open(p, 'wb').write(b'P6\\n136 77\\n255\\n' + "
-                    "bytes([40, 60, 90]) * (136 * 77)); "
-                    "print('anim: image %d %d frames 200x112')" % (hl, frames))
-        return [("frame %d" % n, [py, "-c", code, ppm])]
+            return [(label, [py, "-c", code])]
+        code = (
+            "import sys\n"
+            "pat, wpat, hl, first, want, total = (sys.argv[1], sys.argv[2], "
+            "int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5]), "
+            "int(sys.argv[6]))\n"
+            "print('anim: image %d %d frames 200x112' % (hl, total))\n"
+            "for k in range(min(want, total or 1)):\n"
+            "    f = (first + k) % total if total else 0\n"
+            "    p = pat % f if '%d' in pat else pat\n"
+            "    w = wpat % f if '%d' in wpat else wpat\n"
+            "    open(p, 'wb').write(b'P6\\n136 77\\n255\\n' + "
+            "bytes([40, 60, 90]) * (136 * 77))\n"
+            "    print('[select] snapshot: %s 136x77, highlight %d (T) from "
+            "--highlight, frame %d of %d, timeout 15 s, invert 0, font f, "
+            "media m, footer \"x\"' % (w, hl, f, total))\n")
+        return [(label, [py, "-c", code, ppm, _tool_path(ppm), str(hl),
+                         str(n), str(frames), str(length)])]
     monkeypatch.setattr(multiboot_tab, "ensure_selector_commands", ensure)
     monkeypatch.setattr(multiboot_tab, "preview_prepare_commands", prepare)
     monkeypatch.setattr(multiboot_tab, "snapshot_commands", snapshot)
@@ -1670,11 +1980,14 @@ def test_render_preview_runs_the_pipeline_and_shows_the_frame(tmp_path,
         assert b"\r" not in conf
         fp = preview_fingerprint(panel.form())
         frame0 = multiboot_tab.frame_path(pv, fp, 1, 0)
+        # ONE frame is asked for as one frame: the --snapshot value is a
+        # file NAME and no --frames rides along (K == 1 is the selector's
+        # own byte-for-byte single-frame path).
         assert seen["snapshot"] == [(
             "/fake/codeselect", os.path.join(pv, "images.conf"), media,
-            frame0, 1, 0)]
+            frame0, 1, 0, 1)]
         assert os.path.isfile(frame0)
-        assert panel._pv_status.cget("text") == "Image 1: frame 0 of 3"
+        assert panel._pv_status.cget("text") == "Image 2: frame 0 of 3"
         assert panel._pv_photo is not None
         assert panel._pv_cache == {(fp, 1, 0): frame0}
         assert panel._pv_totals == {(fp, 1): 3}
@@ -1692,7 +2005,7 @@ def test_render_preview_runs_the_pipeline_and_shows_the_frame(tmp_path,
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert calls == [["frame 2"]]
         assert (fp, 1, 2) in panel._pv_cache
-        assert panel._pv_status.cget("text") == "Image 1: frame 2 of 3"
+        assert panel._pv_status.cget("text") == "Image 2: frame 2 of 3"
         # a spinbox move to a cached frame shows it without a render
         panel._frame_var.set("0")
         assert panel._pv_shown == (1, 0)
@@ -1791,6 +2104,82 @@ def test_a_reverted_form_gets_its_own_picture_back(tmp_path, monkeypatch):
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert not os.path.isfile(ppm_a)
         assert (fp_a, 0, 0) not in panel._pv_cache
+    finally:
+        root.destroy()
+
+
+def test_a_retired_forms_animation_leaves_the_cache_with_its_files(
+        tmp_path, monkeypatch):
+    """The eviction sweep matches a cache VALUE against the file it just
+    deleted, so a run that cached the path the selector echoed - the WSL
+    form of it, on Windows - could never match, and up to thirty dead
+    entries per (retired form, image) piled up for the life of the tab
+    while their files went.  One fault, two symptoms: the cache holds the
+    names this process uses, so the sweep finds them."""
+    root, panel = _panel()
+    _stand_ins(monkeypatch, tmp_path, frames=4)
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._rows[1].anim = "auto"
+        panel._rows[1].title = "one"
+        panel._default_var.set("1")
+        panel._play_var.set(True)
+        panel._play_toggled()
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        panel._play_var.set(False)
+        panel._play_toggled()
+        fp_a = preview_fingerprint(panel.form())
+        pv = multiboot_tab.preview_dir_for(panel._out_var.get())
+        gone = [multiboot_tab.frame_path(pv, fp_a, 1, n) for n in range(4)]
+        assert sorted(panel._pv_cache) == [(fp_a, 1, n) for n in range(4)]
+        assert all(os.path.isfile(p) for p in gone)
+        # ...another form, and nothing of this one is on screen to spare
+        panel._pv_src = None
+        panel._rows[1].title = "two"
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert not any(os.path.isfile(p) for p in gone)
+        assert not any(key[0] == fp_a for key in panel._pv_cache)
+    finally:
+        root.destroy()
+
+
+def test_a_reverted_title_is_redrawn_and_not_left_on_the_other_form(
+        tmp_path, monkeypatch):
+    """THE SAME REVERT, TYPED, DOWN THE AUTO PATH - where the cache is
+    allowed to answer.
+
+    The cache key carries the fingerprint but ``_pv_shown`` carried only
+    (highlight, frame), so the reverted form's own frame - still cached,
+    because the prune spares the file that is on screen - was a hit that
+    redrew nothing, and the canvas went on showing the OTHER title's
+    picture under the reverted row.  A cache hit has to be checked against
+    the FILE the canvas was drawn from."""
+    root, panel = _panel(auto=True)
+    _stand_ins(monkeypatch, tmp_path, frames=1)
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._tree.selection_set("0")
+        root.update()
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+
+        def typed(title):
+            """Type a title into the editor and let the debounce render."""
+            panel._ed_title.set(title)
+            root.update()
+            _fire_debounce(root, panel)
+            _wait(root, lambda: not (panel._busy or panel._pv_busy))
+            return panel._pv_src[0]
+
+        ppm_a = typed("AAA")
+        photo_a = panel._pv_photo
+        ppm_b = typed("BBB")
+        assert ppm_b != ppm_a and panel._pv_photo is not photo_a
+        assert os.path.isfile(ppm_a)        # spared: it was the one shown
+        assert typed("AAA") == ppm_a        # ...and it comes back
+        assert panel._pv_photo is not None
     finally:
         root.destroy()
 
@@ -2011,6 +2400,683 @@ def test_a_failing_preview_step_surfaces_the_error(tmp_path, monkeypatch,
         # redraw, not a run that writes something.
         assert panel._busy is False and panel._pv_busy is False
         assert str(panel._build_btn.cget("state")) == "normal"
+    finally:
+        root.destroy()
+
+
+# --------------------------------------------------------------------------
+# the animation: ONE run, then played from memory
+# --------------------------------------------------------------------------
+
+def test_a_run_of_frames_is_one_command_line():
+    """``--frames K`` and a printf pattern for a run; K == 1 is left
+    exactly as it was - no ``--frames`` at all - because that is the
+    selector's own single-frame path, where the --snapshot value is a file
+    NAME and a '%' in it is a '%'."""
+    pat = frame_pattern("/x/preview", "abc123", 1)
+    assert pat.replace("\\", "/") == "/x/preview/frame_abc123_1_%d.ppm"
+    assert pat % 7 == multiboot_tab.frame_path("/x/preview", "abc123", 1, 7)
+    one = preview_snapshot_args("/bin/cs", "/x/c.conf", "/x/media",
+                                "/x/f.ppm", 1, 3)
+    assert "--frames" not in one
+    run = preview_snapshot_args("/bin/cs", "/x/c.conf", "/x/media", pat, 1, 3,
+                                frames=16)
+    assert run[run.index("--frames") + 1] == "16"
+    assert run[run.index("--anim-frame") + 1] == "3"       # where it starts
+    assert run[run.index("--snapshot") + 1] == multiboot_tab.wsl(pat)
+    assert run[-2:] == ["--input", "none"]
+    # ...and a run is ONE step, under its own name
+    assert snapshot_commands("/bin/cs", "/x/c.conf", "/x/m", pat, 1, 3,
+                             frames=16)[0][0] == ANIM_LABEL
+    assert snapshot_commands("/bin/cs", "/x/c.conf", "/x/m", "/x/f.ppm", 1,
+                             3)[0][0] == "frame 3"
+
+
+def test_a_per_cent_in_the_card_path_does_not_kill_the_whole_run():
+    """codeselect's check_frames_pattern counts EVERY '%' in the --snapshot
+    value, not only the one the tab appended - so a card under
+    'D:/Pinball/100% builds' made it refuse the command outright (exit 2,
+    nothing written) and Play alone died in that folder.  '%%' is the
+    printf spelling of a literal per-cent, which is what the selector asks
+    for and what Python's own %-formatting reads back the same way."""
+    pat = frame_pattern("D:/Pinball/100% builds/preview", "abc123", 1)
+    assert pat.replace("\\", "/") == \
+        "D:/Pinball/100%% builds/preview/frame_abc123_1_%d.ppm"
+    # exactly one bare %d, which is the selector's whole rule
+    assert pat.replace("%%", "").count("%") == 1
+    # ...and it still names the file the cache and the sweep know
+    assert pat % 7 == multiboot_tab.frame_path(
+        "D:/Pinball/100% builds/preview", "abc123", 1, 7)
+    # a literal '%d' in the folder is escaped the same way and stops being
+    # a second conversion
+    odd = frame_pattern("/x/100%d builds/preview", "ab", 0)
+    assert odd.replace("%%", "").count("%") == 1
+    assert odd % 3 == multiboot_tab.frame_path("/x/100%d builds/preview",
+                                               "ab", 0, 3)
+
+
+def test_which_frames_a_run_wrote_is_read_off_the_selectors_own_lines():
+    """A run decides for itself which frames it writes - it starts at
+    --anim-frame, wraps, and trims K to the animation's length - so the
+    files are read back rather than predicted."""
+    log = (
+        "codeselect: anim: image 1 4 frames 512x288\n"
+        "codeselect: snapshot: 8 frames asked for, image 1 has 4: 4 written\n"
+        "[select] snapshot: /p/frame_ab_1_3.ppm 1360x768, highlight 1 (TMNT "
+        "1987) from --highlight, frame 3 of 4, timeout 15 s, invert 0, font "
+        "/f.ttf, media /m, footer \"LEFT / RIGHT FLIPPER: choose\"\n"
+        "[select] snapshot: /p/frame_ab_1_0.ppm 1360x768, highlight 1 (TMNT "
+        "1987) from --highlight, frame 0 of 4, timeout 15 s, invert 0, font "
+        "/f.ttf, media /m, footer \"LEFT / RIGHT FLIPPER: choose\"\n")
+    assert parse_snapshot_frames(log) == [("/p/frame_ab_1_3.ppm", 3, 4),
+                                          ("/p/frame_ab_1_0.ppm", 0, 4)]
+    # a path with spaces in it still comes back whole (the size after it is
+    # what ends it), and a still says 'of 0'
+    still = ("[select] snapshot: /my cards/f_0.ppm 1360x768, highlight 0 (A) "
+             "from --highlight, frame 0 of 0, timeout 15 s, invert 0, font "
+             "/f.ttf, media /m, footer \"x\"")
+    assert parse_snapshot_frames(still) == [("/my cards/f_0.ppm", 0, 0)]
+    assert parse_snapshot_frames("") == []
+    assert parse_snapshot_frames("codeselect: anim: image 1 4 frames") == []
+
+
+def test_play_draws_the_whole_animation_in_one_run(tmp_path, monkeypatch):
+    """THE POINT OF THE WHOLE THING: pressing Play used to start one qemu
+    run per frame, each reloading every PNG, GIF and font.  Now it is ONE
+    run - the most frames an animation can have, trimmed by the selector to
+    what this image really has - and the ticks after it render nothing."""
+    root, panel = _panel()
+    seen = _stand_ins(monkeypatch, tmp_path, frames=4)
+    calls = []
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._rows[1].anim = "auto"
+        panel._default_var.set("1")
+        real = panel._run_commands
+        panel._run_commands = lambda cmds, **kw: calls.append(
+            [label for label, _ in cmds]) or real(cmds, **kw)
+        panel._play_var.set(True)
+        panel._play_toggled()
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert calls == [["selector", "prepare", ANIM_LABEL]]
+        # one snapshot call, a PATTERN, and the whole ceiling asked for
+        assert len(seen["snapshot"]) == 1
+        assert seen["snapshot"][0][6] == PREVIEW_MAX_FRAMES
+        assert seen["snapshot"][0][3].endswith("_%d.ppm")
+        fp = preview_fingerprint(panel.form())
+        pv = multiboot_tab.preview_dir_for(panel._out_var.get())
+        assert panel._pv_totals == {(fp, 1): 4}
+        assert sorted(panel._pv_cache) == [(fp, 1, n) for n in range(4)]
+        # EVERY CACHED PATH IS ONE THIS PROCESS CAN OPEN.  The selector is
+        # handed - and so echoes back - the WSL form of the pattern (see
+        # _tool_path), and caching what it echoed left every frame of Play
+        # pointing at a /mnt/c/… name Image.open cannot read: the picture
+        # froze on frame 0 and the strip repainted 'Cannot load …' at the
+        # clip's rate for as long as Play stayed ticked.
+        for n in range(4):
+            path = multiboot_tab.frame_path(pv, fp, 1, n)
+            assert panel._pv_cache[(fp, 1, n)] == path
+            assert os.path.isfile(path)
+        # ...and the ticks walk it, wrapping, without asking for any more
+        first = int(panel._frame_var.get())
+        for k in range(1, 6):
+            _tick(root, panel)
+            assert panel._frame_var.get() == str((first + k) % 4)
+        assert calls == [["selector", "prepare", ANIM_LABEL]]
+        # stopping leaves the picture on a real frame, and the caption says
+        # which one rather than going on claiming to be playing
+        stopped = int(panel._frame_var.get())
+        panel._play_var.set(False)
+        panel._play_toggled()
+        assert panel._pv_shown == (1, stopped)
+        assert panel._pv_status.cget("text") == \
+            "Image 2: frame %d of 4" % stopped
+        # ...and the SAME names reach the photo cache, so a frame the
+        # selector has just written again is decoded again rather than
+        # drawn from the pixels it had before the run
+        shown = multiboot_tab.frame_path(pv, fp, 1, stopped)
+        assert os.path.abspath(shown) in panel._pv_photos
+        assert panel._render_frames(panel.form(), 1, list(range(4))) is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert os.path.abspath(shown) not in panel._pv_photos
+    finally:
+        root.destroy()
+
+
+def test_playback_decodes_each_frame_once_and_a_resize_drops_them(
+        tmp_path, monkeypatch):
+    """Playback must not touch the disk: a frame is read and scaled ONCE
+    and kept, so the second pass of an animation is pure memory.  A box
+    that changed size drops them all - they are scaled to the old one."""
+    root, panel = _panel()
+    reads = []
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        frames = [_ppm(tmp_path / ("f%d.ppm" % n)) for n in range(3)]
+        real_decode = panel._decode_photo
+
+        def counted(path):
+            reads.append(path)
+            return real_decode(path)
+        panel._decode_photo = counted
+        for _pass in range(2):
+            for n, path in enumerate(frames):
+                assert panel.load_frame(path, 1, n, 3) is True
+        assert sorted(reads) == sorted(frames)          # once each, not twice
+        # the window changed size: what is in memory is the wrong size now
+        panel._pv_w, panel._pv_h = panel._pv_w // 2, panel._pv_h // 2
+        panel._drop_photos()
+        assert panel.load_frame(frames[0], 1, 0, 3) is True
+        assert reads.count(frames[0]) == 2
+        # ...and the cache is bounded: an animation's worth, not a card's
+        for n in range(multiboot_tab.PHOTO_CACHE_MAX + 5):
+            panel._keep_photo(str(tmp_path / ("x%d.ppm" % n)), object())
+        assert len(panel._pv_photos) == multiboot_tab.PHOTO_CACHE_MAX
+        assert len(panel._pv_photo_order) == multiboot_tab.PHOTO_CACHE_MAX
+    finally:
+        root.destroy()
+
+
+def _gif(path, frames=4, delay_ms=100):
+    """A GIF of *frames* solid frames at *delay_ms* each - what selectmedia
+    leaves in the media directory and what codeselect ticks on."""
+    Image = pytest.importorskip("PIL.Image")
+    pics = []
+    for n in range(frames):
+        # every frame really different: the encoder collapses duplicates
+        # into one, summing their delays, and then there is no animation
+        pic = Image.new("RGB", (32, 8), (0, 0, 0))
+        pic.putpixel((n % 32, 0), (255, 0, 0))
+        pics.append(pic.convert("P"))
+    pics[0].save(str(path), save_all=True, append_images=pics[1:],
+                 duration=delay_ms, loop=0)
+    return str(path)
+
+
+def test_an_animation_plays_at_the_rate_it_was_rendered_at(tmp_path):
+    """THE ROW'S FPS FIELD IS A REQUEST, not the rate.  selectmedia clamps
+    it (gif_first_plan drops the frame rate to fit 30 frames) and shrinks
+    it again down gif_ladder to fit the byte budget, so a row asking 25 fps
+    is normally a 10 fps clip - and playing that at 40 ms ran the preview
+    two and a half times too fast against a machine that ticks on the GIF's
+    own delay.  The GIF settles it; the run's frame count over the clip's
+    length is the fallback; the field itself is only a first guess."""
+    # the rendered clip's own delay wins outright
+    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="25"),
+                          frames=30, delay_ms=100) == 100
+    # ...and without one, the frames the selector really wrote over the
+    # length that was asked for: 25 fps for 3 s is 30 frames at 10 fps
+    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="25"),
+                          frames=30) == 100
+    # the ordinary case - only the Length box touched, FPS left blank
+    assert anim_period_ms(ImageRow("", anim="auto", anim_seconds="5"),
+                          frames=30) == 167
+    assert anim_period_ms(ImageRow("", anim="auto", anim_seconds="6"),
+                          frames=30) == 200
+    # ...and the ladder's first rung, 8 fps over the default 3 s
+    assert anim_period_ms(ImageRow("", anim="auto"), frames=24) == 125
+    # nothing rendered yet: the field, clamped, because it is typed
+    assert anim_period_ms(ImageRow("", anim="auto")) == 100        # 10 fps
+    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="25")) == 40
+    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="nonsense")) \
+        == 100
+    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="0")) == 100
+    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="9000")) == 16
+    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="0.1")) == 2000
+    # a one-frame 'run' says nothing about the rate, and neither does a
+    # length of zero
+    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="25"),
+                          frames=1) == 40
+    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="25",
+                                   anim_seconds="0"), frames=30) == 40
+
+
+def test_the_rendered_gif_is_what_the_preview_reads_its_rate_from(tmp_path):
+    """codeselect.c ticks on ``a->delay_ms[frame]``, so the file carrying
+    those delays is the only honest source for how fast Play should run -
+    and it is on disk in the media directory the preview prepared."""
+    assert multiboot_tab.gif_period_ms(str(tmp_path / "nothing.gif")) is None
+    assert multiboot_tab.gif_period_ms(_ppm(tmp_path / "not.gif")) is None
+    assert multiboot_tab.gif_period_ms(_gif(tmp_path / "a.gif",
+                                            delay_ms=100)) == 100
+    assert multiboot_tab.gif_period_ms(_gif(tmp_path / "b.gif", frames=30,
+                                            delay_ms=170)) == 170
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._rows[1].anim = "auto"
+        panel._rows[1].anim_fps = "25"          # the request, not the rate
+        media = panel.media_dir()
+        os.makedirs(media, exist_ok=True)
+        # image 1's clip really was rendered at 10 fps, and the preview
+        # reads that off the file the selector loads (anim<N>.gif, the name
+        # write_preview_conf puts in the conf)
+        _gif(os.path.join(media, "anim1.gif"), frames=30, delay_ms=100)
+        assert panel._play_ms(1) == 100
+        # nothing rendered for image 0, so its own field is all there is
+        assert panel._play_ms(0) == 100
+        assert panel._play_ms(9) == panel.PLAY_MS       # no such row
+        # ...and a re-rendered clip at a new rate is picked up, because the
+        # answer is kept against the file's own stat and not for the session
+        _gif(os.path.join(media, "anim1.gif"), frames=12, delay_ms=250)
+        assert panel._play_ms(1) == 250
+    finally:
+        root.destroy()
+
+
+# --------------------------------------------------------------------------
+# the preview's sound
+# --------------------------------------------------------------------------
+
+def test_the_menus_sounds_come_off_the_manifest(tmp_path):
+    """WHICH WAV the menu plays is media.json's answer, not the form's: the
+    form holds specs ('auto', 'synth', a path here), and what the selector
+    opens is what the tools rendered from them.  An image plays its OWN
+    confirm sound when it has one and the menu's otherwise, which is
+    codeselect.c's own fallback."""
+    manifest = {"images": [{"art": "art0.png", "music": None,
+                            "confirm": None},
+                           {"art": "art1.png", "music": "music1.wav",
+                            "confirm": "confirm1.wav"}],
+                "sound_move": "move.wav", "sound_confirm": "confirm.wav"}
+    d = str(tmp_path / "media")
+    assert manifest_sounds(manifest, d, 0) == {
+        "music": "", "move": os.path.join(d, "move.wav"),
+        "confirm": os.path.join(d, "confirm.wav")}
+    assert manifest_sounds(manifest, d, 1) == {
+        "music": os.path.join(d, "music1.wav"),
+        "move": os.path.join(d, "move.wav"),
+        "confirm": os.path.join(d, "confirm1.wav")}
+    # a highlight past the end, and a media set with nothing prepared
+    assert manifest_sounds(manifest, d, 7)["music"] == ""
+    assert manifest_sounds({}, d, 0) == {"music": "", "move": "",
+                                         "confirm": ""}
+    # THE FORM SAYS WHETHER AN IMAGE HAS MUSIC, the manifest which file: a
+    # row set to 'none' since the last prepare must not play the bed still
+    # sitting in the directory.
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        media = _media_set(panel)
+        assert panel.menu_sounds(1)["music"] == os.path.join(media,
+                                                             "music1.wav")
+        panel._rows[1].music = "none"
+        assert panel.menu_sounds(1)["music"] == ""
+        assert panel.menu_sounds(1)["move"] == os.path.join(media,
+                                                            "move.wav")
+    finally:
+        root.destroy()
+    # ...and a directory with no manifest in it is not an error
+    assert multiboot_tab.read_manifest(str(tmp_path / "nope")) == {}
+    os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, "media.json"), "w").write("{not json")
+    assert multiboot_tab.read_manifest(d) == {}
+
+
+def test_the_preview_starts_silent_and_says_what_is_going_unheard(
+        tmp_path, monkeypatch):
+    """DEFAULT OFF, and said once.  This app is used beside a machine that
+    is running, so nothing here opens a sound device until the box is
+    ticked - and a feature nobody can find is not a feature, so the caption
+    says once that the highlighted image has music."""
+    made = _fake_audio(monkeypatch)
+    root, panel = _panel()
+    try:
+        assert panel._sound_var.get() is False
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        media = _media_set(panel)
+        assert made == [] and panel._audio is None      # nothing opened
+        ppm = _ppm(tmp_path / "f.ppm")
+        panel._set_var(panel._hl_var, 1)
+        assert panel.load_frame(ppm, 1, 0, 1) is True
+        text = panel._pv_status.cget("text")
+        assert text.startswith("Image 2: a still")
+        assert "tick Sound" in text
+        assert "[preview] This image has music" in _pane(panel)
+        # ...once: the second frame says the frame and nothing else
+        assert panel.load_frame(ppm, 1, 0, 1) is True
+        assert panel._pv_status.cget("text") == "Image 2: a still (no " \
+            "animation on this image)"
+        # ONE CLICK, and it plays what the menu plays
+        panel._sound_var.set(True)
+        panel._sound_toggled()
+        assert len(made) == 1
+        assert made[0].looping == os.path.join(media, "music1.wav")
+        assert made[0].volume == 50
+        # ...and unticking it gives the device back
+        panel._sound_var.set(False)
+        panel._sound_toggled()
+        assert made[0].calls[-1] == ("stop", None)
+    finally:
+        root.destroy()
+
+
+def test_a_flipper_press_plays_the_move_sound_over_the_music(tmp_path,
+                                                             monkeypatch):
+    """What the machine does on every EV_LEFT / EV_RIGHT: the move sound
+    fires, and the newly highlighted card's music takes over."""
+    made = _fake_audio(monkeypatch)
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        media = _media_set(panel)
+        panel._sound_var.set(True)
+        panel._sound_toggled()
+        audio = made[0]
+        assert audio.looping == os.path.join(media, "music0.wav")
+        audio.calls[:] = []
+        assert panel.flip_right() is True
+        assert audio.played("play") == [os.path.join(media, "move.wav")]
+        assert audio.looping == os.path.join(media, "music1.wav")
+        # the volume knob is the menu's own
+        panel._volume_var.set("20")
+        assert audio.volume == 20
+        # ...and a media set the PREVIEW prepared has no move sound in it,
+        # which is said rather than swallowed
+        _media_set(panel, sounds=False)
+        panel.load_frame(_ppm(tmp_path / "f.ppm"), 1, 0, 1)
+        audio.calls[:] = []
+        assert panel.flip_left() is True         # the highlight still moves
+        assert audio.played("play") == []
+        assert "No move sound yet" in panel._pv_status.cget("text")
+        # ...and wherever the strip had to cut it, the whole of it is still
+        # reachable: the label's tooltip carries it, and so does the Log.
+        assert "Prepare media" in (panel._pv_status_tip.text
+                                   or panel._pv_status.cget("text"))
+        assert "No move sound yet - More" in _pane(panel)
+    finally:
+        root.destroy()
+
+
+def test_the_confirm_sound_can_be_heard_before_a_card_is_written(
+        tmp_path, monkeypatch):
+    """The one sound with no other way of being heard: it plays when THAT
+    image is chosen, and nothing else in the tab ever chooses one.  It
+    plays whether or not Sound is ticked - picking it IS the asking - and
+    it starts no music."""
+    made = _fake_audio(monkeypatch)
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        media = _media_set(panel, own_confirm="confirm1.wav")
+        panel._set_var(panel._hl_var, 1)
+        # it is on the picture's own menu, at the index the popup greys
+        assert panel._pv_menu.entrycget(panel.PV_MENU_CONFIRM, "label") == \
+            "Play this image's confirm sound"
+        assert panel.play_confirm() is True
+        assert made[0].played("play") == [os.path.join(media,
+                                                       "confirm1.wav")]
+        assert made[0].played("loop") == []             # no music started
+        assert "confirm1.wav" in panel._pv_status.cget("text")
+        # image 0 has none of its own, so it is the menu's
+        panel._set_var(panel._hl_var, 0)
+        assert panel.play_confirm() is True
+        assert made[0].played("play")[-1] == os.path.join(media,
+                                                          "confirm.wav")
+        # ...and with nothing prepared it says so instead of playing
+        _media_set(panel, sounds=False)
+        assert panel.play_confirm() is False
+        assert "no confirm sound" in panel._pv_status.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_the_confirm_sound_is_judged_without_the_music_under_it(
+        tmp_path, monkeypatch):
+    """codeselect.c stops music_voice and THEN plays the confirm, alone,
+    under the LOADING frame - so a confirm auditioned over the bed is
+    auditioned at a loudness the machine will never produce."""
+    made = _fake_audio(monkeypatch)
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        media = _media_set(panel, own_confirm="confirm1.wav")
+        panel._set_var(panel._hl_var, 1)
+        panel._sound_var.set(True)
+        panel._sound_toggled()
+        audio = made[0]
+        assert audio.looping == os.path.join(media, "music1.wav")
+        audio.calls[:] = []
+        assert panel.play_confirm() is True
+        # the machine's order, and nothing left playing under it
+        assert [k for k, _ in audio.calls] == ["volume", "loop", "play"]
+        assert audio.looping is None
+        assert audio.played("play") == [os.path.join(media, "confirm1.wav")]
+        # ...said, so the silence that follows is not a mystery
+        assert "music stops for it" in panel._pv_status.cget("text")
+        # and the next flipper press brings the bed back
+        assert panel.flip_left() is True
+        assert audio.looping == os.path.join(media, "music0.wav")
+    finally:
+        root.destroy()
+
+
+def test_a_machine_with_no_sound_says_so_once_and_goes_on_drawing(
+        tmp_path, monkeypatch):
+    """The hard rule of the whole feature: a preview that cannot make a
+    sound still draws its picture, and says why in words."""
+    made = _fake_audio(monkeypatch)
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        _media_set(panel)
+        panel._sound_var.set(True)
+        panel._sound_toggled()
+        audio = made[0]
+        audio.available = False
+        audio.why_silent = ("No sound: sounddevice is not installed, and "
+                            "winsound is a Windows module and this is "
+                            "darwin.")
+        audio.status = audio.why_silent
+        panel._sound_poll()
+        assert "sounddevice is not installed" in panel._pv_status.cget("text")
+        assert "[preview] No sound:" in _pane(panel)
+        # the picture still draws, and says it once
+        assert panel.load_frame(_ppm(tmp_path / "f.ppm"), 1, 0, 1) is True
+        assert panel._pv_status.cget("text") == "Image 2: a still (no " \
+            "animation on this image)"
+    finally:
+        root.destroy()
+
+
+def test_a_confirm_the_form_has_turned_off_is_not_offered_or_played(
+        tmp_path, monkeypatch):
+    """THE FORM SAYS WHETHER AN IMAGE HAS A SOUND; the manifest only says
+    which file.  An image whose Confirm is 'the menu's sound' plays the
+    MENU's confirm - so with that set to 'none' the machine plays nothing
+    at all on confirm, whatever confirm<N>.wav an earlier prepare left in
+    the directory.  Offering it, and playing it, described a card nobody
+    was going to build."""
+    made = _fake_audio(monkeypatch)
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        media = _media_set(panel, own_confirm="confirm1.wav")
+        # a full prepare, and image 1 with a confirm of its own: offered
+        assert panel.menu_sounds(1)["confirm"] == os.path.join(
+            media, "confirm1.wav")
+        # the row goes back to the menu's sound, and the menu keeps one
+        panel._rows[1].confirm = "menu"
+        assert panel.menu_sounds(1)["confirm"] == os.path.join(
+            media, "confirm.wav")
+        # ...and now the menu has none either: there is nothing to play
+        panel._confirm_var.set("none")
+        assert panel.menu_sounds(1)["confirm"] == ""
+        panel._set_var(panel._hl_var, 1)
+        assert panel.play_confirm() is False
+        assert made == []                       # no device opened for it
+        assert "no confirm sound" in panel._pv_status.cget("text")
+        # the right-click entry greys with it, the way it does for a media
+        # set with nothing prepared (asked through the popup's own seam:
+        # tk_popup itself takes a grab and never returns in a test)
+        assert panel.sync_preview_menu() is True
+        assert str(panel._pv_menu.entrycget(panel.PV_MENU_CONFIRM,
+                                            "state")) == "disabled"
+        # an image with a confirm of its OWN still has one, whatever the
+        # menu says - that is the selector's fallback, not a veto
+        panel._rows[1].confirm = os.path.join(media, "confirm1.wav")
+        assert panel.menu_sounds(1)["confirm"] == os.path.join(
+            media, "confirm1.wav")
+    finally:
+        root.destroy()
+
+
+# --------------------------------------------------------------------------
+# the control strip: one line, 30 px, and nothing cut in half
+# --------------------------------------------------------------------------
+
+#: Every window width scripts/shot_multiboot_tab.py measures the tab at.
+#: The strip has to hold at all of them, and the narrowest is where the
+#: caption has least room (the flippers, Frame and the two ticks take a
+#: fixed 424 px out of it).
+SWEEP_WIDTHS = (840, 889, 950, 1024, 1200, 1360)
+
+
+def _sized_panel(width, height=768, **kw):
+    """A panel in a window of a REAL size, so the strip has a measurable
+    width and the caption a real wraplength.  _panel()'s root is sized to
+    the panel's own natural width and never sees a narrow window, which is
+    exactly where a caption runs out of room."""
+    root, panel = _panel(**kw)
+    root.geometry("%dx%d+10000+10000" % (width, height))
+    root.update()
+    panel._on_configure()
+    root.update()
+    return root, panel
+
+
+@pytest.mark.parametrize("width", SWEEP_WIDTHS)
+def test_nothing_the_strip_says_is_cut_in_half_by_its_own_bottom_edge(
+        tmp_path, monkeypatch, width):
+    """The strip is a fixed 30 px with pack_propagate(False), which is ONE
+    line - so a message that wraps is drawn with its second line sliced
+    horizontally by the bottom edge, and the half that goes is always the
+    half that said what to do about it.  Every line the tab can put there
+    fits on one line at every width the layout is measured at, and the one
+    that cannot is cut with an ellipsis and kept whole in the tooltip and
+    the app's Log."""
+    _fake_audio(monkeypatch)
+    root, panel = _sized_panel(width)
+    try:
+        strip_h = panel._pv_strip.winfo_height()
+        assert strip_h == 30            # the room, as _build_preview pins it
+
+        def fits(what):
+            """Nothing on the strip is ever taller than the strip."""
+            root.update_idletasks()
+            assert panel._pv_status.winfo_reqheight() <= strip_h, \
+                "%s needs %d px of a %d px strip at %d wide: %r" % (
+                    what, panel._pv_status.winfo_reqheight(), strip_h, width,
+                    panel._pv_status.cget("text"))
+
+        def whole():
+            """...and the whole of it is still reachable: on the strip when
+            it fits, in the tooltip when it had to be cut."""
+            return panel._pv_status_tip.text or panel._pv_status.cget("text")
+
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        _media_set(panel, sounds=False)
+        # 1. the ONE line that says the Sound tick exists (it rides the
+        #    first caption after a frame is drawn, and is said once)
+        panel._set_var(panel._hl_var, 1)
+        assert panel.load_frame(_ppm(tmp_path / "f.ppm"), 1, 0, 1) is True
+        assert "tick Sound to hear it." in whole()
+        fits("the Sound note")
+        # 2. the move-sound aside a flipper press finds out about
+        panel._sound_var.set(True)
+        panel._sound_toggled()
+        panel.flip_left()
+        assert "No move sound yet" in whole()
+        fits("the move-sound aside")
+        # 3. the confirm sound that has not been rendered
+        assert panel.play_confirm() is False
+        assert "no confirm sound yet" in whole()
+        fits("the confirm-sound line")
+        # ...and each of those said on its own - which is how it is said
+        # once the note that rides the first one has been said - fits the
+        # strip whole, at every width, with nothing cut:
+        for line in ("This image has music - tick Sound to hear it.",
+                     "No move sound yet - More ▾ ▸ Prepare media renders "
+                     "the menu's sounds.",
+                     "Image 2 frame 7 has not been drawn yet - right-click "
+                     "the preview to redraw.",
+                     "Image 2: frame 12 of 24 - playing",
+                     "The form changed - redrawing…"):
+            panel._pv_say(line)
+            fits(repr(line))
+            assert panel._pv_status.cget("text") == line
+        # ...and anything else at all is cut, with the whole of it kept
+        long = ("A preview failure with a very long explanation indeed, of "
+                "the kind a tool prints when a path is wrong: " + "x" * 200)
+        panel._pv_say(long, error=True)
+        fits("an arbitrarily long failure")
+        assert panel._pv_status.cget("text").endswith("…")
+        assert panel._pv_status_tip.text == long
+        assert "[preview] " + long in _pane(panel)
+    finally:
+        root.destroy()
+
+
+def test_the_strip_says_it_once_however_many_times_it_is_asked(tmp_path):
+    """A failure that repeats at the animation's rate used to put a line
+    into the app's Log per tick - sixty a second at the floor - and a
+    flooded Log pane is one of this app's known ways of freezing its own
+    UI thread."""
+    root, panel = _panel()
+    try:
+        for _ in range(20):
+            panel._pv_say("Cannot load x.ppm: no such file", error=True)
+        assert len([ln for ln in panel.log_lines()
+                    if "Cannot load" in ln]) == 1
+        # ...and a different failure is still said
+        panel._pv_say("Cannot load y.ppm: no such file", error=True)
+        assert len([ln for ln in panel.log_lines()
+                    if "Cannot load" in ln]) == 2
+    finally:
+        root.destroy()
+
+
+def test_a_sound_poll_does_not_wipe_what_the_strip_was_saying(tmp_path,
+                                                              monkeypatch):
+    """_recaption is called on every Sound tick and ~400 ms after the first
+    sound (the player picks its backend on a worker, and the poll sees the
+    status change) - so re-issuing the caption of the frame drawn BEFORE
+    whatever is up now threw away cache misses and red failures alike,
+    without the picture having moved."""
+    made = _fake_audio(monkeypatch)
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        _media_set(panel)
+        # a frame is drawn for image 1...
+        assert panel.load_frame(_ppm(tmp_path / "f.ppm"), 1, 0, 1) is True
+        # ...and the flipper walks to image 0, which has not been drawn
+        assert panel.flip_right() is True
+        assert panel._hl_var.get() == "0"
+        assert "has not been drawn yet" in panel._pv_status.cget("text")
+        # now the sound is turned on: the strip must still be describing
+        # the card the flipper left it on
+        panel._sound_var.set(True)
+        panel._sound_toggled()
+        assert "has not been drawn yet" in panel._pv_status.cget("text")
+        # ...and the same for the poll that follows the backend being
+        # chosen, and for a red failure
+        panel._pv_say("Preview failed at animation (exit 2).", error=True)
+        made[0].status = "Sound plays through winsound."
+        panel._sound_poll()
+        assert panel._pv_status.cget("text").startswith("Preview failed")
     finally:
         root.destroy()
 

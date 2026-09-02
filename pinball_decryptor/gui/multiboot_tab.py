@@ -47,12 +47,15 @@ designed around.  The modals bind to the PANEL's own variables, so there
 is one form whether a dialog is open or not, and Cancel restores the
 snapshot taken when it opened.
 
-BUTTONS LIVE IN EXACTLY TWO PLACES: the source row at the top and the
-action bar at the bottom.  The image list has none - right-click a row
-for Add / Edit / Remove / Up / Down (double-click and Return still open
-Edit), and a dim line under the list says so - and the preview has none:
-its right-click menu carries the manual refresh and the 'update
-automatically' toggle.  A tab whose every control is a button reads as
+BUTTONS LIVE IN EXACTLY THREE PLACES: the source row at the top, the
+action bar at the bottom, and the two FLIPPERS under the picture - and
+that third pair is the MACHINE'S controls rather than the tab's, sitting
+under the very menu they move and named by that menu's own footer.  The
+image list has none - right-click a row for Add / Edit / Remove / Up /
+Down (double-click and Return still open Edit), and a dim line under the
+list says so - and the preview has no button of its own: its right-click
+menu carries the manual refresh, the 'update automatically' toggle and
+the two sound entries.  A tab whose every control is a button reads as
 busy, and the two menus lose nothing: every entry is the button that was
 there, and every keyboard path still works.
 
@@ -75,11 +78,30 @@ codeselect --snapshot`` run and nothing else, while art, clips, music and
 the sounds pay for selectmedia's prepare (cached; 0.13 s for a two-image
 set when nothing changed).  The conf the picture is drawn from is written
 under ``<out dir>/preview``, and each snapshot writes a P6 PPM that Tk
-loads natively.  'Play' steps the highlighted card's animation, rendering
-frames as it goes and keeping them per (form, highlight, frame) until the
-form changes.  Because a preview leaves a sound-less media.json behind,
-'Build & verify' runs a full prepare into that dir first whenever a media
-set exists - the card is never built from the preview's half of the media.
+loads natively.  'Play' runs the highlighted card's animation: the WHOLE
+run comes out of ONE selector run (``--snapshot <pattern> --frames K``,
+one media load instead of K) and is then played from memory at the clip's
+own frame rate, so after the first pass nothing touches the disk.
+Because a preview leaves a sound-less media.json behind, 'Build & verify'
+runs a full prepare into that dir first whenever a media set exists - the
+card is never built from the preview's half of the media.
+
+THE FLIPPERS, AND THE SOUND.  The picture's own controls are the
+machine's, in the machine's own words: the footer drawn INSIDE the
+picture says "LEFT / RIGHT FLIPPER: choose", and the two buttons under it
+are those - they move the highlight and WRAP, exactly as codeselect.c's
+EV_LEFT / EV_RIGHT do (``hl = (hl + n - 1) % n`` / ``hl = (hl + 1) % n``),
+and the arrow keys do the same while the picture has the focus.  'Sound'
+plays what the menu plays, through :mod:`.preview_audio`: the highlighted
+image's music bed, the move click on every flipper press, and - from the
+picture's right-click menu - that image's own confirm sound, the one
+sound with no other way of being heard before a card is written.  Every
+WAV is the one media.json names, so what is heard is what the card will
+play.  IT STARTS OFF, and staying off is the point: this app is used in
+the same room as a machine that is running, and a tab that starts playing
+music because someone clicked an image is exactly what that asks us not
+to do.  One click turns it on, and the caption says so once when the
+highlighted image has music nobody is hearing.
 
 READING A CARD BACK.  'Load card…' runs ``mkmulticard.py inspect`` on a card
 that already exists - the tool's table into the pane, the same read as JSON
@@ -120,10 +142,11 @@ import threading
 import time
 import tkinter as tk
 from dataclasses import dataclass, field, replace
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 from . import _rig
 from .emulate_tab import rig_dir
+from .preview_audio import PreviewAudio
 from .theme import THEMES, dark_titlebar
 from .widgets import _Tooltip, center_over
 
@@ -217,6 +240,22 @@ PREVIEW_MIN_H = 150
 PREVIEW_MIN_K = 4
 PREVIEW_FPS = 8
 
+#: The most frames one snapshot run may be asked for - codeselect.c's
+#: ANIM_MAX_FRAMES, which is both the number of frames an animation is
+#: decoded to and the largest ``--frames`` it accepts (a bigger K is
+#: refused, exit 2).  Asking for exactly this is how Play gets a whole
+#: animation of unknown length out of ONE run: the selector trims K to what
+#: the highlighted image really has, and says so in its log.
+PREVIEW_MAX_FRAMES = 30
+
+#: How many DECODED frames the preview keeps in memory.  A frame FILE is
+#: cheap to remember (a path in a dict); a frame scaled into a PhotoImage
+#: is ~1 MB of RGBA at the sizes this tab draws at, so one animation is
+#: ~30 MB and sixteen images' worth would be half a gigabyte.  Play only
+#: ever walks ONE image's animation, so one animation and a still or two
+#: is the whole working set.
+PHOTO_CACHE_MAX = PREVIEW_MAX_FRAMES + 2
+
 #: How long the preview waits after the last keystroke before it re-renders.
 #: Every change inside the window is one render, not N.
 PREVIEW_DEBOUNCE_MS = 350
@@ -237,6 +276,12 @@ APP_CHROME_H = 128
 
 #: What the selector-ensuring step prints in front of the binary it chose.
 SELECTOR_LINE = "[preview] selector:"
+
+#: What the step that draws a WHOLE animation is called - in the log pane,
+#: in 'Preview failed at …', and in the render's own bookkeeping.  A single
+#: frame keeps its own 'frame N' label: they are read back differently
+#: (see :meth:`MultibootPanel._render_frames`).
+ANIM_LABEL = "animation"
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +488,28 @@ def frame_path(preview_dir, fingerprint, highlight, frame):
                         % (fingerprint, highlight, frame))
 
 
+def frame_pattern(preview_dir, fingerprint, highlight):
+    """:func:`frame_path` with the FRAME left for the selector to fill in.
+
+    ``--frames K`` (K > 1) makes the ``--snapshot`` value a printf pattern
+    taking exactly one bare ``%d`` - and the number it fills in is the frame,
+    not the position in the run - so a run that wraps writes exactly the file
+    names a frame-at-a-time render would have written, and the same cache and
+    the same :data:`_FRAME_RE` sweep hold for both.
+
+    THE DIRECTORY IS ESCAPED INTO THE PATTERN, not joined into it.  The
+    selector counts every ``%`` in the value it is given
+    (``check_frames_pattern``), not only the one appended here, so a card
+    written to a folder with a per-cent in its name - ``D:\\Pinball\\100%
+    builds\\card.multi.raw`` - made the whole Play run exit 2 before a byte
+    was written, with an error that named the selector and not the folder.
+    ``%%`` is the printf spelling of a literal per-cent and is what the
+    selector asks for, so ``frame_pattern(d, f, h) % n`` is
+    :func:`frame_path` again whatever *d* holds."""
+    return os.path.join(preview_dir.replace("%", "%%"),
+                        "frame_%s_%d_%%d.ppm" % (fingerprint, highlight))
+
+
 def stale_frames(preview_dir, keep):
     """Every frame file in *preview_dir* that is not *keep*'s - the ones no
     form on the tab can ask for again.  ``preview/`` would otherwise grow a
@@ -467,6 +534,61 @@ def rootfs_for(selector_dir):
     if d.endswith(suffix) and len(d) > len(suffix):
         return d[:-len(suffix)]
     return DEFAULT_ROOTFS
+
+
+# ---------------------------------------------------------------------------
+# what the menu would PLAY (the prepared media's own manifest)
+# ---------------------------------------------------------------------------
+
+#: The file ``selectmedia.py prepare`` leaves in the media directory, and
+#: the only place that says which WAV the menu plays for which image.  The
+#: preview reads it rather than working the sounds out from the form: the
+#: form holds SPECS ('auto', 'synth', a path on this machine), and what the
+#: selector will really open is the file the tools rendered from them.
+MEDIA_MANIFEST = "media.json"
+
+
+def read_manifest(media_dir):
+    """``media.json`` out of a prepared media directory, or ``{}``.
+
+    Everything about it is optional: a directory that has not been prepared,
+    a card built before the manifest existed and a half-written file are all
+    'this media set names no sounds', which is a thing the tab says rather
+    than a thing that raises.  NO directory is one of them: an empty output
+    box must not turn into a relative path and read whatever media.json the
+    app happens to have been started in."""
+    if not media_dir:
+        return {}
+    try:
+        with open(os.path.join(media_dir, MEDIA_MANIFEST),
+                  encoding="utf-8") as f:
+            m = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return m if isinstance(m, dict) else {}
+
+
+def manifest_sounds(manifest, media_dir, highlight):
+    """``{"music", "move", "confirm"}`` - the WAV behind each of the menu's
+    three sounds for image *highlight*, as full paths under *media_dir*, and
+    "" for one this media set has not got.
+
+    The fallbacks are the selector's, not ours: an image plays its OWN
+    confirm sound when it has one (the seventh images.conf field) and the
+    menu-wide one otherwise - codeselect.c's ``own_confirm[i] ? : confirm``.
+    A ``--visual-only`` prepare (the one the preview runs for itself) writes
+    the music but no move or confirm sound at all, which is why "" here is
+    ordinary and has to be said rather than treated as a fault."""
+    images = manifest.get("images") or []
+    row = images[highlight] if 0 <= highlight < len(images) else None
+    row = row if isinstance(row, dict) else {}
+
+    def full(name):
+        return os.path.join(media_dir, name) if name and media_dir else ""
+    return {"music": full(row.get("music")),
+            "move": full(manifest.get("sound_move")),
+            "confirm": full(row.get("confirm")
+                            or manifest.get("sound_confirm"))}
 
 
 # ---------------------------------------------------------------------------
@@ -643,6 +765,77 @@ def anim_spec(row):
     return base
 
 
+def gif_period_ms(path):
+    """How long ONE frame of a rendered animation is on screen, in ms, read
+    off the GIF ITSELF - or None when there is no readable GIF there.
+
+    THE ONLY HONEST SOURCE FOR THE RATE.  codeselect.c ticks on the clip's
+    own per-frame delay (``next_tick = now + a->delay_ms[frame]``), and the
+    file that carries those delays is the one selectmedia rendered - which
+    is very often NOT what the form asked for: ``gif_first_plan`` drops the
+    frame rate to fit 30 frames, and ``gif_ladder`` drops it again (to 8,
+    then 6, then 5) to fit the byte budget.  A row that says 25 fps is
+    normally a 10 fps clip.  The mean of the delays, because the encoder
+    writes one constant rate and Play holds every frame for the same time;
+    a zero delay is the 100 ms art.c gives it (``art.h``: 'n delays; 100
+    when the GIF said 0')."""
+    if not (_HAVE_PIL and path):
+        return None
+    delays = []
+    try:
+        with Image.open(path) as img:
+            # A GIF, or nothing: Pillow will happily open the PPM beside it
+            # and report one frame of no duration, and a made-up 100 ms is
+            # worse than saying the rate is not known.
+            if (img.format or "").upper() != "GIF":
+                return None
+            for n in range(int(getattr(img, "n_frames", 1))):
+                img.seek(n)
+                delays.append(int(img.info.get("duration") or 0) or 100)
+    except Exception:                                   # noqa: BLE001
+        return None                     # not there, not a GIF, half written
+    if not delays:
+        return None
+    return int(round(sum(delays) / float(len(delays))))
+
+
+def anim_period_ms(row, frames=None, delay_ms=None,
+                   floor_ms=16, ceiling_ms=2000):
+    """How long ONE frame of this row's animation is on screen, in ms.
+
+    THREE ANSWERS, BEST FIRST, because the form is the worst of them.  The
+    rendered clip's own delay (*delay_ms*, from :func:`gif_period_ms`) is
+    what the machine ticks on and settles it outright.  Without a GIF to
+    read, the run's own frame count (*frames*, off the selector's ``frame F
+    of N``) over the clip's length is the rate the tool really rendered at,
+    which is what the ladder above left it at.  Only with neither is the
+    row's FPS field believed - and that is the number selectmedia clamps,
+    so it is a first guess for the ticks before the count arrives and not a
+    fact.  Clamped either way, because the fields are typed: 0.4 fps is a
+    slideshow and 300 fps is a busy loop, and neither is worth letting a
+    typo cause."""
+    ms = None
+    if delay_ms and delay_ms > 0:
+        ms = float(delay_ms)
+    elif frames and int(frames) > 1:
+        try:
+            secs = float(_num(getattr(row, "anim_seconds", ""),
+                              ANIM_DEFAULTS[1]))
+        except (TypeError, ValueError):
+            secs = float(ANIM_DEFAULTS[1])
+        if secs > 0:
+            ms = 1000.0 * secs / int(frames)
+    if ms is None:
+        try:
+            fps = float(_num(getattr(row, "anim_fps", ""), ANIM_DEFAULTS[2]))
+        except (TypeError, ValueError):
+            fps = float(ANIM_DEFAULTS[2])
+        if fps <= 0:
+            fps = float(ANIM_DEFAULTS[2])
+        ms = 1000.0 / fps
+    return max(floor_ms, min(ceiling_ms, int(round(ms))))
+
+
 def confirm_spec(row):
     """The ``--sound-confirm N=`` value for a row.
 
@@ -803,17 +996,26 @@ def inspect_args(card, media_out=None, as_json=False):
 
 
 def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
-                          rootfs=DEFAULT_ROOTFS):
+                          rootfs=DEFAULT_ROOTFS, frames=1):
     """``qemu-arm-static -L <rootfs> <codeselect> --snapshot <ppm> ...``:
     ONE menu frame as the machine would show it - the conf, the media,
     highlight N, the animation at frame N, the countdown as if just started,
-    no input, no audio, no choice file - then exit."""
-    return ["qemu-arm-static", "-L", rootfs, binary,
+    no input, no audio, no choice file - then exit.
+
+    ``frames`` > 1 asks for a WHOLE RUN out of that one load: *ppm* is then
+    a :func:`frame_pattern` and the selector writes K files, starting at
+    *frame* and wrapping at the animation's own length.  K == 1 is left
+    alone - no ``--frames`` at all - because that is the byte-for-byte
+    single-frame command line, and the one the selector treats the
+    ``--snapshot`` value as a plain file NAME for."""
+    args = ["qemu-arm-static", "-L", rootfs, binary,
             "--snapshot", wsl(ppm), "--conf", wsl(conf),
             "--media", wsl(media_dir),
             "--highlight", str(int(highlight)),
-            "--anim-frame", str(int(frame)),
-            "--input", "none"]
+            "--anim-frame", str(int(frame))]
+    if int(frames) > 1:
+        args += ["--frames", str(int(frames))]
+    return args + ["--input", "none"]
 
 
 def _q(arg):
@@ -897,6 +1099,34 @@ def parse_anim_frames(text, highlight):
         if m and int(m.group(1)) == highlight:
             return int(m.group(2) or m.group(3))
     return None
+
+
+#: The selector's own line for every PPM it wrote (``sel_say``, so stdout):
+#: ``snapshot: <path> 1360x768, highlight 1 (TMNT 1987) from --highlight,
+#: frame 2 of 4, timeout 15 s, invert 0, font …``.  The path is taken up to
+#: the ``WxH`` that follows it, because an output path may hold spaces; the
+#: frame is anchored on the ``, timeout`` after it, because a menu TITLE
+#: sits in the middle of the same line and is somebody's typing.
+_SNAP_RE = re.compile(
+    r"snapshot: (.+?) \d+x\d+, highlight \d+ .*?, "
+    r"frame (\d+) of (\d+), timeout ")
+
+
+def parse_snapshot_frames(text):
+    """``[(path, frame, total), ...]`` - every PPM a snapshot run says it
+    wrote, in the order it wrote them; *total* is that image's own frame
+    count (0 when it has no animation).
+
+    A ``--frames K`` run decides for ITSELF which frames it writes: it
+    starts at ``--anim-frame``, wraps at the animation's length and trims K
+    to it.  So the run is read back rather than predicted here - the caller
+    knows the pattern, the selector knows what it filled into it."""
+    out = []
+    for line in (text or "").splitlines():
+        m = _SNAP_RE.search(line)
+        if m:
+            out.append((m.group(1), int(m.group(2)), int(m.group(3))))
+    return out
 
 
 def write_preview_conf(form):
@@ -1016,10 +1246,15 @@ def ensure_selector_commands(form, cwd=None):
 
 
 def snapshot_commands(binary, conf, media_dir, ppm, highlight, frame,
-                      rootfs=DEFAULT_ROOTFS, cwd=None):
-    return [("frame %d" % int(frame),
+                      rootfs=DEFAULT_ROOTFS, cwd=None, frames=1):
+    """One snapshot step.  A run of frames is ONE step and is labelled
+    :data:`ANIM_LABEL` - what a failure of it is named after, and what the
+    finished step's own output is read back through."""
+    label = (ANIM_LABEL if int(frames) > 1 else "frame %d" % int(frame))
+    return [(label,
              wsl_command(preview_snapshot_args(binary, conf, media_dir, ppm,
-                                               highlight, frame, rootfs),
+                                               highlight, frame, rootfs,
+                                               frames),
                          cwd, exe=None))]
 
 
@@ -1893,7 +2128,31 @@ class MultibootPanel:
 
     PREVIEW_TIP = ("The boot menu as the machine will draw it. It redraws "
                    "itself about a third of a second after you stop typing; "
-                   "right-click it to redraw now or to turn that off.")
+                   "the flipper buttons under it - and the left and right "
+                   "arrow keys, once you have clicked the picture - move the "
+                   "highlight the way the machine's do. Right-click it to "
+                   "redraw now, to hear the highlighted image's confirm "
+                   "sound, or to turn the automatic redraw off.")
+
+    FLIPPER_TIP = ("The machine's own flipper buttons: they move the "
+                   "highlight one card and wrap round at the ends, exactly "
+                   "as the flippers on the lockdown bar do - and they play "
+                   "the menu's move sound when Sound is ticked. The left "
+                   "and right arrow keys do the same while the picture has "
+                   "the keyboard.")
+
+    #: ...and this is where the long form of everything the 30 px control
+    #: strip has no room for lives: the strip gets one line, this gets the
+    #: paragraph (see :meth:`_one_line`).
+    SOUND_TIP = ("Plays what the menu plays: the highlighted image's music "
+                 "loop, and the move sound on every flipper press. The WAVs "
+                 "are the prepared media's own, so this is what the card "
+                 "will sound like, at the volume in Menu settings. It "
+                 "starts OFF on purpose - nothing here opens a sound device "
+                 "until you tick it - and untick it to give the device "
+                 "back.\n\nThe preview prepares pictures and music only, so "
+                 "a set it rendered for itself has no move or confirm sound "
+                 "in it yet: More ▾ ▸ Prepare media renders those too.")
 
     def __init__(self, parent, log=None, theme_fn=None, badge_fn=None,
                  resize_fn=None, flash_fn=None, emulate_fn=None,
@@ -2023,13 +2282,43 @@ class MultibootPanel:
         #: path does not leave a preview/ and a media/ behind on disk.
         self._pv_made = set()
         self._pv_photo = None           # PhotoImage ref (must stay alive)
+        #: THE DECODED FRAMES, by PPM path - what makes Play smooth.  Every
+        #: step used to re-read the file and re-scale it; these are already
+        #: scaled to the box on screen, so a second pass of an animation
+        #: touches no disk at all.  Bounded (see PHOTO_CACHE_MAX), dropped
+        #: whenever the box changes size (they are the wrong size then) and
+        #: dropped for any frame the selector has just written again.
+        self._pv_photos = {}
+        self._pv_photo_order = []
         self._pv_shown = None           # (highlight, frame) on the canvas
         self._pv_src = None             # (ppm, highlight, frame, total) shown
-        self._pv_loading = False        # a programmatic spinbox write
+        self._pv_caption = ""           # what the strip is saying, and
+        self._pv_error = False          # ...whether it is saying it in red
+        self._pv_logged = ""            # ...and the last line it sent to the Log
+        self._pv_loading = False        # a programmatic write, not a typed one
         self._hl_touched = False        # Highlight typed by hand: stop following Default
         self._play_job = None
         self._play_fp = None
         self._play_hl = 0
+        #: THE PREVIEW'S SOUND, AND IT STARTS OFF.  This app is used beside
+        #: a machine that is running (David's own rule: bring things up
+        #: muted), so nothing here opens an audio device, imports
+        #: sounddevice or makes a noise until the Sound box has been
+        #: ticked.  ``_audio`` is built on the first sound and kept - the
+        #: player releases the device on stop() and takes it again on the
+        #: next loop().
+        self._sound_var = tk.BooleanVar(value=False)
+        self._audio = None
+        self._sound_job = None          # the status poll, only while it is on
+        self._sound_watch_until = 0.0   # ...and a moment after a one-shot
+        self._sound_status = ""         # the last status read off the player
+        self._sound_said = None         # ...and the last note put on the caption
+        #: (stat key, manifest) - media.json, re-read when the file moves.
+        self._manifest_at = (None, {})
+        #: (stat key, ms) - the rendered animation's own per-frame delay,
+        #: re-read when that GIF moves.  Play asks per frame, so the answer
+        #: is kept and only the stat is paid for.
+        self._anim_ms_at = (None, None)
         #: THE PREVIEW FOLLOWS THE FORM.  Every field schedules a re-render
         #: ~350 ms after the last keystroke, coalesced into one run: a text
         #: change costs one snapshot, only a media change pays for a
@@ -2101,7 +2390,8 @@ class MultibootPanel:
         if event is not None and str(event.widget) != str(self._parent):
             return
         self._stopped = True
-        for attr in ("_drain_job", "_play_job", "_pv_debounce_job"):
+        for attr in ("_drain_job", "_play_job", "_pv_debounce_job",
+                     "_sound_job"):
             job = getattr(self, attr, None)
             if job is not None:
                 try:
@@ -2109,6 +2399,9 @@ class MultibootPanel:
                 except (tk.TclError, ValueError):
                     pass
                 setattr(self, attr, None)
+        # The tab is going: the sound device goes with it, and the player's
+        # own thread is joined rather than left playing over the app's exit.
+        self._stop_sound()
 
     # ------------------------------------------------------------------
     # construction
@@ -2296,11 +2589,18 @@ class MultibootPanel:
         strip.pack(fill=tk.X, pady=(4, 0))
         strip.pack_propagate(False)
         self._pv_strip = strip
-        ttk.Label(strip, text="Image:").pack(side=tk.LEFT, padx=(0, 3))
-        self._hl_spin = ttk.Spinbox(strip, from_=0, to=0, width=4,
-                                    textvariable=self._hl_var,
-                                    command=self._hl_changed)
-        self._hl_spin.pack(side=tk.LEFT)
+        # THE MACHINE'S OWN CONTROL, in the machine's own words: the footer
+        # drawn INSIDE the picture directly above these says "LEFT / RIGHT
+        # FLIPPER: choose", and this is that.  A spinbox was here first,
+        # and a number box is not what anyone presses at a pinball machine.
+        self._flip_l = ttk.Button(strip, text="◀ Left flipper", width=14,
+                                  command=self.flip_left)
+        self._flip_l.pack(side=tk.LEFT)
+        self._flip_r = ttk.Button(strip, text="Right flipper ▶", width=15,
+                                  command=self.flip_right)
+        self._flip_r.pack(side=tk.LEFT, padx=(4, 0))
+        for btn in (self._flip_l, self._flip_r):
+            btn.tip = _Tooltip(btn, self.FLIPPER_TIP, self._theme_fn)
         ttk.Label(strip, text="Frame:").pack(side=tk.LEFT, padx=(10, 3))
         self._frame_spin = ttk.Spinbox(strip, from_=0, to=999, width=4,
                                        textvariable=self._frame_var,
@@ -2310,37 +2610,107 @@ class MultibootPanel:
                                          variable=self._play_var,
                                          command=self._play_toggled)
         self._play_chk.pack(side=tk.LEFT, padx=(8, 0))
+        self._sound_chk = ttk.Checkbutton(strip, text="Sound",
+                                          variable=self._sound_var,
+                                          command=self._sound_toggled)
+        self._sound_chk.pack(side=tk.LEFT, padx=(8, 0))
+        self._sound_chk.tip = _Tooltip(self._sound_chk, self.SOUND_TIP,
+                                       self._theme_fn)
         self._pv_status = ttk.Label(strip, text="", width=1,
                                     justify=tk.LEFT, anchor=tk.W)
         self._pv_status.pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
                              padx=(12, 0))
+        # ...and where a sentence too long for this ONE line goes.  The
+        # strip cannot grow - it is 30 px with pack_propagate off - so what
+        # will not fit is cut with an ellipsis (:meth:`_one_line`) and
+        # hangs here whole.  Empty while the whole line is on show: a
+        # tooltip that only repeats what is already readable is one nobody
+        # hovers again.
+        self._pv_status_tip = _Tooltip(self._pv_status, "", self._theme_fn)
         self._pv_tip = _Tooltip(self._pv_canvas, self.PREVIEW_TIP,
                                 self._theme_fn)
+        # ...AND THE ARROW KEYS ARE THE FLIPPERS TOO, bound on the picture
+        # and on the two buttons and NOWHERE ELSE: the table walks its rows
+        # with them and every text field walks its characters with them, so
+        # a binding on the toplevel would take one of those away.
+        self._pv_canvas.bind("<Button-1>", self._focus_preview, add="+")
+        for widget in (self._pv_canvas, self._flip_l, self._flip_r):
+            widget.bind("<Left>", self._key_flip_left)
+            widget.bind("<Right>", self._key_flip_right)
         self._build_preview_menu()
+        self._sync_flippers()
+
+    def _focus_preview(self, _event=None):
+        """A click on the picture gives it the keyboard, so the arrow keys
+        reach the flippers rather than whatever was focused before."""
+        try:
+            self._pv_canvas.focus_set()
+        except tk.TclError:                             # pragma: no cover
+            pass
+
+    def _key_flip_left(self, _event=None):
+        self.flip_left()
+        return "break"
+
+    def _key_flip_right(self, _event=None):
+        self.flip_right()
+        return "break"
+
+    #: The picture's right-click menu, by index: the redraw, the automatic
+    #: update, and the two sound entries.  There is no Render now BUTTON -
+    #: the preview follows the form by itself, and a manual redraw is a
+    #: once-a-session thing - and the confirm sound is here because it is
+    #: the ONE sound that has no other way of being heard: an image's own
+    #: confirm plays when that image is CHOSEN and at no other time.
+    PV_MENU_REDRAW, PV_MENU_CONFIRM = 0, 4
 
     def _build_preview_menu(self):
-        """'Redraw now' and 'Update automatically', on the picture itself.
-        There is no Render now BUTTON: the preview follows the form by
-        itself, and a manual redraw is a once-a-session thing."""
         menu = tk.Menu(self._pv_canvas, tearoff=0)
         menu.add_command(label="Redraw the preview now",
                          command=self.render_preview)
         menu.add_checkbutton(label="Update the preview automatically",
                              variable=self._auto_preview,
                              command=self.schedule_preview)
+        menu.add_separator()
+        menu.add_checkbutton(label="Play the menu's sounds",
+                             variable=self._sound_var,
+                             command=self._sound_toggled)
+        menu.add_command(label="Play this image's confirm sound",
+                         command=self.play_confirm)
         self._pv_menu = menu
         for widget in (self._pv_canvas, self._pv_strip):
             widget.bind("<Button-3>", self._popup_preview_menu)
+
+    def sync_preview_menu(self):
+        """Which of the picture's right-click entries are live right now.
+
+        Its own method rather than three lines inside the popup, because
+        ``tk_popup`` takes a grab and does not come back until somebody
+        dismisses the menu - so this is the only part of it a test can ask
+        about at all."""
+        menu = getattr(self, "_pv_menu", None)
+        if menu is None:
+            return False
+        try:
+            menu.entryconfigure(self.PV_MENU_REDRAW,
+                                state=tk.DISABLED if self._busy
+                                else tk.NORMAL)
+            # Greyed rather than hidden when this media set has no confirm
+            # sound in it yet: the entry is where it always is, and what is
+            # missing is said on the caption when it is pressed.
+            menu.entryconfigure(self.PV_MENU_CONFIRM,
+                                state=tk.NORMAL
+                                if self.menu_sounds()["confirm"]
+                                else tk.DISABLED)
+        except tk.TclError:                             # pragma: no cover
+            return False
+        return True
 
     def _popup_preview_menu(self, event=None):
         menu = getattr(self, "_pv_menu", None)
         if menu is None:
             return None
-        try:
-            menu.entryconfigure(0, state=tk.DISABLED if self._busy
-                                else tk.NORMAL)
-        except tk.TclError:                             # pragma: no cover
-            pass
+        self.sync_preview_menu()
         x = getattr(event, "x_root", self._pv_canvas.winfo_rootx() + 20)
         y = getattr(event, "y_root", self._pv_canvas.winfo_rooty() + 20)
         try:
@@ -2537,6 +2907,12 @@ class MultibootPanel:
         return ""
 
     def _select_row(self, i):
+        """Point the table at image *i*.
+
+        The blue row here, the fields in the editor below it and the amber
+        card in the picture are three views of ONE choice, so everything
+        that moves that choice comes through here - the flippers included.
+        Quiet when the row is not there (a mid-rebuild tree)."""
         try:
             self._tree.selection_set(str(i))
             self._tree.focus(str(i))
@@ -2783,6 +3159,9 @@ class MultibootPanel:
                 self._pv_canvas.configure(width=w, height=h)
             except tk.TclError:
                 pass
+            # Every frame in memory was scaled to the OLD box: keeping them
+            # would draw a resized window at the size before it moved.
+            self._drop_photos()
             self._redraw_shown()
             self._resize_fn()
         self._fit_status_height()
@@ -2808,9 +3187,9 @@ class MultibootPanel:
                     used += child.winfo_reqwidth()
         except tk.TclError:                             # pragma: no cover
             return 330
-        # the padx between them: Image: (0,3), Frame: (10,3), Play (8,0),
-        # and the status label's own (12,0)
-        return used + 3 + 13 + 8 + 12
+        # the padx between them: the right flipper (4,0), Frame: (10,3),
+        # Play (8,0), Sound (8,0) and the status label's own (12,0)
+        return used + 4 + 13 + 8 + 8 + 12
 
     def _info_badge(self, parent, tip):
         """The app's round blue (i) badge, or a plain marker without the
@@ -2900,9 +3279,9 @@ class MultibootPanel:
             top = max(0, len(self._rows) - 1)
             if self._default_spin is not None:
                 self._default_spin.configure(to=top)
-            self._hl_spin.configure(to=top)
         except tk.TclError:
             pass
+        self._sync_flippers()
         self._load_editor()
         self._update_edit_status()
         self._update_menu_summary()
@@ -2935,6 +3314,10 @@ class MultibootPanel:
         i = self._selected()
         if i is not None:
             self._set_var(self._hl_var, i)
+            # ...and the music follows the highlight however the highlight
+            # moved: a programmatic write skips the 'typed' trace, so the
+            # sound is asked for here rather than left to it.
+            self._sound_follow()
             self._show_cached()
             self.schedule_preview()
 
@@ -3134,9 +3517,12 @@ class MultibootPanel:
         self._pv_src = None
         self._pv_ready = None
         self._pv_photo = None
+        self._drop_photos()
         self._stop_play(None)
         self._set_var(self._hl_var, 0)
         self._set_var(self._frame_var, 0)
+        # There is no card any more, so there is nothing to be playing.
+        self._sound_follow()
         self._update_edit_status()
         self._pv_placeholder()
         self._pv_say("")
@@ -3245,6 +3631,7 @@ class MultibootPanel:
         self._update_edit_status()
         self._update_menu_summary()
         self._refresh_sound_cells()
+        self._push_volume()
 
     def _update_menu_summary(self):
         """What Menu settings… holds, beside its button.  Clipped to the
@@ -3623,10 +4010,14 @@ class MultibootPanel:
         self._pv_shown = None
         self._pv_src = None
         self._pv_ready = None
+        self._drop_photos()
         self._set_var(self._hl_var, int(form.default))
         self._stop_play(None)
         self._pv_photo = None
         self._pv_placeholder()
+        # A different card, a different media directory: whatever was
+        # looping belonged to the last one.
+        self._sound_follow()
         self._pv_say("Drawing THIS card's menu - its own media is in %s, so "
                      "nothing is prepared first." % media_dir)
         # The card's OWN default is the row to land on: it is the image the
@@ -3831,6 +4222,9 @@ class MultibootPanel:
     # ------------------------------------------------------------------
 
     def _pv_placeholder(self):
+        # There is no frame to describe, so there is nothing for a later
+        # _recaption to say again either.
+        self._pv_caption, self._pv_error = "", False
         c = self._pv_canvas
         try:
             c.delete("all")
@@ -3842,37 +4236,184 @@ class MultibootPanel:
         except tk.TclError:
             pass
 
-    def _pv_say(self, msg, error=False):
-        """The preview's status line; an error also goes to the tool pane
-        and the app log, so 'paste what it said' is still one paste."""
+    def _status_font(self):
+        """The font the strip's caption is drawn in, BY NAME - so this is
+        the interpreter's own font object and not a new one made (and left
+        behind) on every measurement."""
+        try:
+            name = str(self._pv_status.cget("font") or "") or "TkDefaultFont"
+            return tkfont.Font(root=self._pv_status, name=name, exists=True)
+        except (tk.TclError, ValueError, AttributeError):   # pragma: no cover
+            return None
+
+    def _one_line(self, text):
+        """*text* cut to the ONE line the control strip can draw.
+
+        The strip is a fixed 30 px with ``pack_propagate(False)`` (see
+        :meth:`_build_preview`) and one line of this font is 15, so a
+        caption that wraps is drawn with its second line sliced in half by
+        the strip's bottom edge - and the half that goes is always the half
+        that said what to do about it.  Measured against the label's own
+        font and its own wraplength rather than guessed at a character
+        count, because the room depends on the window's width; nothing is
+        lost by the cut - the whole sentence is in the label's tooltip and
+        in the app's Log."""
+        if not text:
+            return text
+        fnt = self._status_font()
+        try:
+            room = int(self._pv_status.cget("wraplength") or 0)
+        except (tk.TclError, ValueError):               # pragma: no cover
+            room = 0
+        # Before the first <Configure> the label has no wraplength and so
+        # no room to measure against: it is not on screen yet either.
+        if fnt is None or room <= 0 or fnt.measure(text) <= room:
+            return text
+        cut = text
+        while cut and fnt.measure(cut + "…") > room:
+            cut = cut[:-1]
+        return (cut.rstrip() + "…") if cut.strip() else text
+
+    def _pv_say(self, msg, error=False, note="", log=True):
+        """The preview's status line: ONE line of it on the strip, and the
+        whole of it everywhere a whole sentence fits.
+
+        WHAT IT SAYS IS REMEMBERED, because the strip carries more than
+        captions - a cache miss saying a frame has not been drawn, a red
+        failure - and :meth:`_recaption` re-issues THIS line when the sound
+        changes under it.  (Re-issuing the last frame's caption instead
+        wiped both of those, ~400 ms after the first sound, without the
+        picture having moved.)  *note* is the sound aside riding this one
+        line: said once, so never remembered.
+
+        An error still goes to the app's Log, and so does anything the
+        strip could only show half of, so 'paste what it said' is one
+        paste either way - but never the same line twice running: a
+        failure that repeats at the animation's rate would otherwise pour
+        sixty lines a second into the Log pane, which is one of this app's
+        known ways of freezing its own UI thread."""
+        self._pv_caption, self._pv_error = msg, bool(error)
+        text = (msg + (note or "")).strip()
+        shown = self._one_line(text)
         th = THEMES.get(self._theme_fn()) or THEMES["dark"]
         try:
             self._pv_status.configure(
-                text=msg, foreground=th["error"] if error else th["fg"])
+                text=shown, foreground=th["error"] if error else th["fg"])
         except tk.TclError:
             pass
-        if error and msg:
-            self._write("[preview] " + msg)
+        tip = getattr(self, "_pv_status_tip", None)
+        if tip is not None:
+            tip.text = text if text != shown else ""
+        if not log or not text:
+            return
+        # The note half is already in the Log in full (see _say_sound), so
+        # a cut line only owes the Log the caption half.
+        line = text if error else (msg if text != shown else "")
+        if line and line != self._pv_logged:
+            self._pv_logged = line
+            self._write("[preview] " + line)
 
     def _follow_default(self):
         """Highlight follows the Default index until it is typed by hand."""
         if self._hl_touched or self._pv_loading:
             return
         self._set_var(self._hl_var, self._default_var.get())
+        self._sound_follow()
 
     def _set_var(self, var, value):
-        """A programmatic spinbox write, without the 'typed' trace."""
+        """A programmatic write to one of the preview's own variables,
+        without the 'typed' trace."""
         self._pv_loading = True
         try:
             var.set(str(value))
         finally:
             self._pv_loading = False
 
+    # -- the flippers ----------------------------------------------------
+
+    @staticmethod
+    def _image_label(highlight):
+        """An image as THE PICTURE names it.
+
+        codeselect.c draws every card's label ``"IMAGE %d", i + 1``
+        (codeselect.c:545), so the words 20 px under that picture count
+        from one as well: the flippers walk IMAGE 1, IMAGE 2, IMAGE 3 and a
+        caption walking Image 0, Image 1, Image 2 under them is the tab's
+        own readout contradicting its own frame.  The INDEX stays 0-based
+        everywhere it is a number the tools read (the conf's ``default=``,
+        the cache key, the frame file name) - this is the one place it is
+        read by a person, beside the picture that numbers it."""
+        return "Image %d" % (int(highlight) + 1)
+
+    def flip(self, step):
+        """A FLIPPER PRESS: the highlight moves one card and WRAPS, and the
+        move sound plays over the music.
+
+        codeselect.c's EV_LEFT / EV_RIGHT and nothing else - ``hl = (hl + n
+        - 1) % n`` and ``hl = (hl + 1) % n``, plus ``audio_play(move)`` on
+        every press - because the whole point of this preview is that it is
+        the machine's own behaviour and not an imitation of it.  The press
+        counts as a HAND-TYPED highlight, so from here on the picture stays
+        on the card the person chose instead of following the Default
+        index.  False when there is nothing to move between."""
+        n = len(self._rows)
+        if n < 2:
+            return False
+        hl = _int(self._hl_var, _int(self._default_var, 0))
+        if not 0 <= hl < n:
+            hl = 0
+        # + n before the modulo, the way the C does it: a left press off
+        # image 0 lands on the last card and not on -1.
+        nxt = (hl + int(step) + n) % n
+        # 'a new card: its animation restarts' - the C sets frame = 0 on
+        # every highlight change, and a preview that carried frame 7 across
+        # to a card with four frames would be showing a frame the machine
+        # never shows at that moment.
+        self._set_var(self._frame_var, 0)
+        if self._play_var.get():
+            self._play_hl = nxt         # ...and Play follows the highlight
+        # AND THE TABLE FOLLOWS THE PICTURE.  The flippers are the headline
+        # way of choosing a card now, and a press that left the blue row and
+        # the editor fields on the image the picture had just walked away
+        # from put the tab's two answers to 'which image' side by side on
+        # screen disagreeing.  First, so its own selection handler writes
+        # the highlight before the typed write below marks it chosen by hand.
+        self._select_row(nxt)
+        self._hl_var.set(str(nxt))                          # a typed write
+        self._sound_click()
+        return True
+
+    def flip_left(self):
+        """The left flipper: the previous card, wrapping to the last."""
+        return self.flip(-1)
+
+    def flip_right(self):
+        """The right flipper: the next card, wrapping to the first."""
+        return self.flip(1)
+
+    def _sync_flippers(self):
+        """The flippers are live only while there is somewhere to move TO.
+
+        One image is a menu with nothing to choose between; a button that
+        does nothing when pressed is worse than one that says it cannot, and
+        the machine has these same two buttons whatever is on the card - so
+        they stay where they are and go grey."""
+        live = len(self._rows) >= 2
+        for name in ("_flip_l", "_flip_r"):
+            btn = getattr(self, name, None)
+            if btn is None:
+                continue
+            try:
+                btn.configure(state=tk.NORMAL if live else tk.DISABLED)
+            except tk.TclError:                         # pragma: no cover
+                pass
+
     def _hl_changed(self, typed=False):
         if self._pv_loading:
             return
         if typed:
             self._hl_touched = True
+        self._sound_follow()
         self._show_cached()
 
     def _frame_changed(self, typed=False):
@@ -3880,8 +4421,300 @@ class MultibootPanel:
             return
         self._show_cached()
 
+    # -- the sound -------------------------------------------------------
+    #
+    # THE PICTURE IS THE SELECTOR'S OWN; THE SOUND CANNOT BE.  A --snapshot
+    # run draws one frame and exits, and its ALSA sink is on the far side of
+    # WSL, so the WAVs are played here - by preview_audio, which is written
+    # to match audio.c sample for sample.  Everything below is about WHICH
+    # file, and the answer is always the one media.json names: the form
+    # holds specs ('auto', 'synth', a path on this machine), and what the
+    # machine will really open is what the tools rendered from them.
+
+    #: How often the tab reads the player's own status while Sound is on.
+    #: The backend is chosen on the player's worker thread, so what it has
+    #: to say - which device answered, a WAV it would not play, that this
+    #: machine has no sound at all - is not known when loop() returns.  The
+    #: player would call back, but on THAT thread, and nothing but the main
+    #: loop may touch a widget here (see _drain) - so the main loop asks
+    #: instead.  It costs a string compare while the sound is on, and
+    #: nothing at all while it is off.
+    SOUND_POLL_MS = 400
+
+    #: ...and how long it keeps going after a sound was asked for while
+    #: Sound itself is off (the confirm sound, which plays either way):
+    #: the answer to a one-shot - a WAV that will not play, a device that
+    #: would not open - reaches the player a moment after the call that
+    #: asked for it has returned.
+    SOUND_POLL_AFTER_S = 2.0
+
+    def _manifest(self, media_dir):
+        """``media.json`` out of *media_dir*, re-read when the file moves.
+
+        Asked for on every highlight change, and rewritten under us by every
+        prepare - so it is keyed on the file's own mtime and size rather
+        than read once and trusted for the session."""
+        if not media_dir:
+            return {}                   # never a relative 'media.json'
+        try:
+            st = os.stat(os.path.join(media_dir, MEDIA_MANIFEST))
+            key = (media_dir, st.st_mtime, st.st_size)
+        except OSError:
+            self._manifest_at = ((media_dir, None, None), {})
+            return {}
+        if self._manifest_at[0] != key:
+            self._manifest_at = (key, read_manifest(media_dir))
+        return self._manifest_at[1]
+
+    def menu_sounds(self, highlight=None):
+        """What the menu would play for the highlighted image right now -
+        ``{"music", "move", "confirm"}``, full paths, "" for a sound this
+        media set has not got (see :func:`manifest_sounds`).  The seam the
+        preview's own sound, the right-click menu and the tests read."""
+        media = self.media_dir()
+        hl = (_int(self._hl_var, _int(self._default_var, 0))
+              if highlight is None else int(highlight))
+        manifest = self._manifest(media)
+        sounds = manifest_sounds(manifest, media, hl)
+        # THE FORM SAYS WHETHER AN IMAGE HAS A SOUND; the manifest only says
+        # which file.  A row set to 'none' since the last prepare still has
+        # its old bed - and its old confirm - sitting in that directory, and
+        # playing one, or saying it is there, would be describing a card
+        # nobody is going to build.  BOTH sounds the form can turn off get
+        # the same guard: the confirm was left to the manifest alone, so an
+        # image whose Confirm said 'the menu's sound' still offered - and
+        # played - the confirm<N>.wav an earlier prepare had left for it.
+        row = self._rows[hl] if 0 <= hl < len(self._rows) else None
+        if row is not None and _media_value(row.music) in ("", "none"):
+            sounds["music"] = ""
+        if row is not None and confirm_spec(row) == "none":
+            # ...and this is the selector's own fallback re-read off the
+            # form: 'none' is how selectmedia spells 'image N has no confirm
+            # of its own', so the MENU's confirm is what would play - and
+            # when the menu has none either, nothing does.
+            name = manifest.get("sound_confirm")
+            sounds["confirm"] = os.path.join(media, name) \
+                if name and media and self._menu_confirm() != "none" else ""
+        return sounds
+
+    def _menu_confirm(self):
+        """The menu-wide confirm sound as the form spells it - the value
+        :meth:`form` would put in ``sound_confirm``, without building the
+        whole form to ask."""
+        return _media_value(self._confirm_var.get().strip() or "none")
+
+    def _audio_player(self):
+        """The preview's player, made on the FIRST sound and not before.
+
+        preview_audio imports neither sounddevice nor numpy and opens no
+        device until it is asked to play something, and this tab does not
+        ask until someone has ticked Sound - so a session that never wants
+        sound never touches an audio device at all."""
+        if self._audio is None:
+            self._audio = PreviewAudio(volume=_int(self._volume_var, 50))
+        # A sound is about to be asked for: watch for what the player makes
+        # of it, whether or not Sound itself is on.
+        self._sound_watch_until = time.time() + self.SOUND_POLL_AFTER_S
+        self._sound_poll()
+        return self._audio
+
+    def _sound_toggled(self):
+        """The Sound tick: on plays what the menu plays, off is silence and
+        the device handed back."""
+        if not self._sound_var.get():
+            self._stop_sound()
+        else:
+            self._sound_follow()
+        self._recaption()
+
+    def _sound_follow(self):
+        """Play what the menu would be playing NOW: the highlighted image's
+        music bed, or silence when it has none.
+
+        A new card's bed takes over at once, and a card whose music is the
+        same clip does not restart it - the player keeps codeselect.c's own
+        rule for that.  Free and silent while Sound is off, which is why
+        every highlight change may call it."""
+        if not self._sound_var.get():
+            return False
+        audio = self._audio_player()
+        audio.set_volume(_int(self._volume_var, 50))
+        audio.loop(self.menu_sounds()["music"])
+        return True
+
+    def _sound_click(self):
+        """The move sound a flipper press makes, over the music - what the
+        machine does on every EV_LEFT / EV_RIGHT.
+
+        A media set prepared by the PREVIEW has no move sound in it (a
+        ``--visual-only`` prepare renders the pictures and the music and
+        skips the two menu sounds), so this is the one place that has to say
+        'there is no click to play, and here is how to get one'."""
+        if not self._sound_var.get():
+            return False
+        move = self.menu_sounds()["move"]
+        if not move:
+            # SHORT ENOUGH FOR THE STRIP.  It is one line of 30 px (see
+            # :meth:`_one_line`), and this sentence had to say the whole of
+            # itself there rather than be cut in half at every window width
+            # the tab supports; the long version of why lives in the Sound
+            # tooltip, where there is room for it.
+            self._sound_aside("No move sound yet - More ▾ ▸ Prepare media "
+                              "renders the menu's sounds.")
+            return False
+        self._audio_player().play(move)
+        return True
+
+    def play_confirm(self):
+        """'Play this image's confirm sound' - the picture's right-click
+        menu, and the only way to hear that sound before a card is written:
+        it plays when THAT image is chosen and at no other time.
+
+        It plays whether or not Sound is ticked - choosing it IS the asking
+        - and it starts no music: one sound, because one sound is what was
+        asked for."""
+        hl = _int(self._hl_var, _int(self._default_var, 0))
+        confirm = self.menu_sounds(hl)["confirm"]
+        if not confirm:
+            # The media DIRECTORY is not in this line any more: it is a full
+            # path on a loaded card, and the strip is one line - the whole
+            # of it went to the Log and the half left on screen named the
+            # selector's folder instead of saying what to do.
+            self._pv_say("%s has no confirm sound yet - More ▾ ▸ Prepare "
+                         "media renders the menu's sounds."
+                         % self._image_label(hl))
+            return False
+        audio = self._audio_player()
+        audio.set_volume(_int(self._volume_var, 50))
+        # AND THE BED GOES FIRST, because it does on the machine:
+        # codeselect.c stops music_voice and only then plays the confirm,
+        # which runs alone under the LOADING frame.  Judging this sound over
+        # a loop that will not be there is judging the wrong loudness.  Only
+        # when Sound is on - with it off there is no bed to stop.
+        stopped = bool(self._sound_var.get())
+        if stopped:
+            audio.loop(None)
+        audio.play(confirm)
+        self._pv_say("%s's confirm sound: %s%s"
+                     % (self._image_label(hl), os.path.basename(confirm),
+                        " - the music stops for it, as it does on the "
+                        "machine; a flipper press brings it back."
+                        if stopped else ""))
+        return True
+
+    def _push_volume(self):
+        """The menu's volume IS the preview's: media.json's 0-100 means the
+        same loudness in the player as it does on the machine (the mixer is
+        audio.c's, gain and all).  Only while something is playing - reading
+        the box must not be what opens a device."""
+        if self._audio is not None and self._sound_var.get():
+            self._audio.set_volume(_int(self._volume_var, 50))
+
+    def _stop_sound(self):
+        """Silence, and the device given back.  The player is kept: a later
+        loop() opens it all again."""
+        self._sound_watch_until = 0.0
+        self._cancel_sound_poll()
+        if self._audio is not None:
+            self._audio.stop()
+
+    def _cancel_sound_poll(self):
+        """Take back the pending poll, if any.
+
+        It is cancelled rather than forgotten because :meth:`_sound_poll`
+        is called from outside the timer too (the first player makes one
+        happen at once): dropping the id would leave an ``after`` armed on
+        a tab that has gone, which fires into a dead interpreter."""
+        job, self._sound_job = self._sound_job, None
+        if job is not None:
+            try:
+                self._timer().after_cancel(job)
+            except (tk.TclError, ValueError):           # pragma: no cover
+                pass
+
+    def _sound_poll(self):
+        """Read the player's own status, on the main loop (see
+        :data:`SOUND_POLL_MS`), and put anything new on the caption."""
+        self._cancel_sound_poll()
+        if self._stopped or self._audio is None:
+            return
+        status = self._audio.status
+        if status != self._sound_status:
+            self._sound_status = status
+            self._recaption()
+        if self._sound_var.get() or time.time() < self._sound_watch_until:
+            try:
+                self._sound_job = self._timer().after(self.SOUND_POLL_MS,
+                                                      self._sound_poll)
+            except tk.TclError:                         # pragma: no cover
+                pass
+
+    def _sound_note(self):
+        """The one thing worth saying about sound right now, or "".
+
+        Two things are worth saying, and both are said ONCE (see
+        :meth:`_sound_suffix`): that the highlighted image has music nobody
+        is hearing, because a feature nobody finds is not a feature; and
+        that the sound is on but cannot come out, in the player's own
+        words, because a tick that does nothing has to explain itself."""
+        if not self._sound_var.get():
+            if self.menu_sounds()["music"]:
+                # SHORT, because this is the ONE line that says the Sound
+                # tick exists and it rides a caption on a 30 px strip: the
+                # longer wording was cut in half at every window width
+                # below 1024, said once, and never said again.
+                return "This image has music - tick Sound to hear it."
+            return ""
+        if self._audio is None or not self._audio.backend_name:
+            return ""                   # not chosen yet; the poll comes back
+        if not self._audio.available:
+            return self._audio.why_silent
+        return ""
+
+    def _sound_suffix(self):
+        """What the caption adds about sound - said once, then dropped.
+
+        A sentence repeated on every redraw is noise; a sentence never said
+        is a silent feature.  So it rides the FIRST caption after the thing
+        it is about changes, and goes to the app's Log in full."""
+        return self._say_sound(self._sound_note())
+
+    def _say_sound(self, note):
+        """Remember *note* as what has been said about sound and hand it
+        back the first time; "" when it is what was said last."""
+        if note == self._sound_said:
+            return ""
+        self._sound_said = note
+        if not note:
+            return ""
+        self._write("[preview] " + note)
+        return "  " + note
+
+    def _sound_aside(self, note):
+        """Say *note* about the sound NOW, beside whatever the strip
+        already says - for the things only a press can find out."""
+        text = self._say_sound(note)
+        if text:
+            self._pv_say(self._pv_caption, error=self._pv_error, note=text,
+                         log=False)
+
+    def _recaption(self):
+        """Say the line that is UP again, with what the sound has just
+        changed about it, and without re-drawing the picture.
+
+        Whatever is up - not the last frame's caption.  The strip carries
+        more than captions: 'image N frame M has not been drawn yet' after
+        a flipper press, and a red 'Preview failed at …'.  This is called
+        on every Sound tick and ~400 ms after the first sound (the player
+        picks its backend on a worker and the poll sees the status change),
+        so re-issuing an older caption threw both of those away without the
+        picture having moved - and with them the instruction the person was
+        reading."""
+        self._pv_say(self._pv_caption, error=self._pv_error,
+                     note=self._sound_suffix(), log=False)
+
     def _current_key(self, form=None):
-        """(fingerprint, highlight, frame) the spinboxes point at, or None
+        """(fingerprint, highlight, frame) the preview points at, or None
         when the form has nothing to draw."""
         form = form or self.form()
         if not form.images:
@@ -3890,31 +4723,51 @@ class MultibootPanel:
         n = _int(self._frame_var, 0)
         return preview_fingerprint(form), hl, n
 
+    def _on_screen(self, key):
+        """Whether the cached frame *key* names is the very picture the
+        canvas is holding.
+
+        THE FILE IS THE TEST, not ``_pv_shown``.  That pair is only
+        (highlight, frame); the fingerprint - the part of the key that says
+        WHICH FORM drew the picture - is not in it.  So: type a title, let
+        it draw; type another, let it draw (the first form's frame is spared
+        by :meth:`_prune_frames`, because it was the one on screen, so its
+        cache entry lives on); then type the first title back, and the key
+        hits the cache at the same image and the same frame number while the
+        canvas is still holding the OTHER form's picture - and nothing is
+        redrawn, silently.  The file name carries the fingerprint (see
+        :func:`frame_path`), so comparing it with what :attr:`_pv_src` was
+        drawn from settles all three parts of the key at once."""
+        path = self._pv_cache.get(key)
+        return bool(path and self._pv_src
+                    and os.path.abspath(self._pv_src[0])
+                    == os.path.abspath(path))
+
     def _show_cached(self):
-        """A spinbox moved: show that frame if it is already rendered, and
-        if it is not, SAY SO and ask for it.
+        """The highlight or the frame moved: show that frame if it is
+        already rendered, and if it is not, SAY SO and ask for it.
 
         Doing nothing (which is what a cache miss used to do) left the
-        stepper looking broken and the caption describing the frame still
-        on screen - which was not the one the boxes now named."""
+        control looking broken and the caption describing the frame still
+        on screen - which was not the one the tab now named."""
         key = self._current_key()
         if key is None:
             return
         path = self._pv_cache.get(key)
         if path:
-            if self._pv_shown != key[1:]:
+            if not self._on_screen(key):
                 self.load_frame(path, key[1], key[2],
                                 self._pv_totals.get(key[:2]))
             return
         if self._play_var.get():
             return                          # Play draws its own frames
-        self._pv_say("Image %d frame %d has not been drawn yet - %s"
-                     % (key[1], key[2],
+        self._pv_say("%s frame %d has not been drawn yet - %s"
+                     % (self._image_label(key[1]), key[2],
                         "drawing it…" if self.schedule_preview() else
                         "right-click the preview to redraw."))
 
     def _highlight(self, form):
-        """The Highlight spinbox as an index into the form, or None (said)."""
+        """The highlighted image as an index into the form, or None (said)."""
         hl = _int(self._hl_var, int(form.default))
         if not 0 <= hl < len(form.images):
             self._pv_say("The image to highlight must be one of 0..%d."
@@ -3927,11 +4780,58 @@ class MultibootPanel:
         its aspect ratio kept - Pillow, the way the DMD preview and the
         scene browser do it.  None when the file cannot be read.
 
+        KEPT ONCE DECODED, which is what makes Play smooth: every step used
+        to re-read the PPM and re-scale it, so a 10 fps animation was ten
+        file reads and ten LANCZOS resizes a second for as long as it ran.
+        The cache is by path - the file NAME carries the form, the image and
+        the frame (see :func:`frame_path`), so two forms can never share an
+        entry - and it is emptied whenever the box changes size (they are
+        the wrong size then) or the selector writes that frame again.
+
         Tk's own PhotoImage halves and thirds and nothing between, which is
         why the box used to be a whole fraction of the selector's frame;
         with Pillow the picture simply takes the width the window gives it.
         The fallback below is that older path, for a machine with no
         Pillow."""
+        hit = self._pv_photos.get(os.path.abspath(path))
+        if hit is not None:
+            return hit
+        photo = self._decode_photo(path)
+        if photo is not None:
+            self._keep_photo(path, photo)
+        return photo
+
+    def _keep_photo(self, path, photo):
+        """Remember a decoded frame, oldest out first past
+        :data:`PHOTO_CACHE_MAX` - one animation's worth, which is the whole
+        working set (Play only ever walks one image's)."""
+        key = os.path.abspath(path)
+        if key not in self._pv_photos:
+            self._pv_photo_order.append(key)
+        self._pv_photos[key] = photo
+        while len(self._pv_photo_order) > PHOTO_CACHE_MAX:
+            self._pv_photos.pop(self._pv_photo_order.pop(0), None)
+
+    def _drop_photo(self, path):
+        """Forget one decoded frame - its file has just been written again
+        (or taken away), so what is in memory is no longer what is on
+        disk."""
+        key = os.path.abspath(path)
+        if self._pv_photos.pop(key, None) is not None:
+            try:
+                self._pv_photo_order.remove(key)
+            except ValueError:                          # pragma: no cover
+                pass
+
+    def _drop_photos(self):
+        """Forget every decoded frame - the box is a different size, so all
+        of them are scaled wrong."""
+        self._pv_photos = {}
+        self._pv_photo_order = []
+
+    def _decode_photo(self, path):
+        """Read one P6 PPM off disk and scale it into the box.  The slow
+        half of :meth:`_scaled_photo`, and the half that is done once."""
         if _HAVE_PIL:
             try:
                 with Image.open(path) as img:
@@ -3993,8 +4893,17 @@ class MultibootPanel:
         else:
             what = "frame %d of %d%s" % (
                 frame, total, " - playing" if self._play_var.get() else "")
-        self._pv_say("Image %s: %s" % (
-            "?" if highlight is None else highlight, what))
+        # ...and the card in the picture is the card in the words: the
+        # amber frame above says IMAGE 2, so this says Image 2 (see
+        # :meth:`_image_label`).
+        caption = "Image ?: %s" % what if highlight is None \
+            else "%s: %s" % (self._image_label(highlight), what)
+        # Not while Play is running: the caption is rewritten at the clip's
+        # own rate there, a note riding one of those frames would flash past
+        # unread, and working out whether there is one to say costs a look
+        # at media.json.  It waits for the animation to stop.
+        self._pv_say(caption, note=("" if self._play_var.get()
+                                    else self._sound_suffix()))
         return True
 
     def _redraw_shown(self):
@@ -4045,7 +4954,18 @@ class MultibootPanel:
         if self._stopped or not self._auto_preview.get():
             return False
         if self._play_var.get():
-            return False            # Play is driving its own frames
+            # PLAY DRAWS ITS OWN FRAMES - unless the form has moved out from
+            # under them, and then this is where that is noticed.  The tick
+            # notices it too, but the tick now waits a whole frame of the
+            # clip (up to 2 s), while this debounce has already fired at 350
+            # ms and used to THROW THE RENDER AWAY: an edit made during a
+            # slow animation left the preview stopped on the old picture,
+            # with nothing queued and nothing coming.
+            if preview_fingerprint(self.form()) == self._play_fp:
+                return False
+            # Stopped here rather than through _form_moved_under_play: this
+            # IS the redraw that method would have to ask for.
+            self._stop_play("The form changed - redrawing…", error=False)
         if self._busy or self._pv_busy:
             # Try again once the run in flight is done - a build takes
             # minutes and the preview must not queue behind every keystroke.
@@ -4086,7 +5006,7 @@ class MultibootPanel:
         n = _int(self._frame_var, 0)
         key = (preview_fingerprint(form), hl, n)
         if key in self._pv_cache:
-            if self._pv_shown != key[1:]:
+            if not self._on_screen(key):
                 self.load_frame(self._pv_cache[key], hl, n,
                                 self._pv_totals.get(key[:2]))
             return False
@@ -4119,7 +5039,7 @@ class MultibootPanel:
 
     def render_preview(self):
         """'Redraw the preview now' (the preview's right-click menu): the
-        frame the spinboxes point at, whether or not it is cached."""
+        frame the preview points at, whether or not it is cached."""
         # A loaded card whose media has not been touched draws from the card
         # itself, so the .raw files it was built from need not be here.
         form = self._validated_form(sources=self.needs_prepare())
@@ -4134,10 +5054,20 @@ class MultibootPanel:
 
     def _render_frames(self, form, hl, frames):
         """Render *frames* of the menu with image *hl* highlighted, on the
-        worker: ensure a selector, prepare the media, then one snapshot per
-        frame.  Each finished frame lands in the cache; the one the
-        spinboxes point at is shown at once (Play shows its own from the
-        tick).  False when the busy guard refused.
+        worker: ensure a selector, prepare the media, then draw.  Each
+        finished frame lands in the cache; the one the controls point at is
+        shown at once (Play shows its own from the tick).  False when the
+        busy guard refused.
+
+        ONE FRAME IS ONE RUN; SEVERAL ARE STILL ONE RUN.  A snapshot spends
+        its time LOADING - every PNG, every GIF, the font, the media
+        directory - and almost none of it drawing, so a frame-at-a-time
+        animation paid that load once per frame: 16 frames measured 1334 ms
+        as sixteen runs and 243 ms as one ``--frames 16``, for byte-identical
+        PPMs.  So a run of frames is asked for as a run, the selector fills
+        the frame number into a :func:`frame_pattern`, and which frames it
+        actually wrote is read back off its own log (it wraps at the
+        animation's length and trims K to it).
 
         WHAT MAKES THIS CHEAP ENOUGH TO RUN ON EVERY KEYSTROKE: the two
         expensive steps are skipped by their own tests, not by the frame's.
@@ -4188,19 +5118,45 @@ class MultibootPanel:
                 # The card's own media, straight out of the extraction: it
                 # matches the form because the form came out of the card.
                 self._pv_ready = (mfp, media)
-        paths = {}
-        for n in frames:
-            ppm = frame_path(pv, fp, hl, n)
-            paths[n] = ppm
+        wanted = [int(n) for n in frames] or [0]
+        # A run of more than one is ONE step, and never longer than the most
+        # an animation can hold: past that the selector refuses the whole
+        # command (exit 2) rather than trimming, and a refusal draws nothing.
+        run = min(len(wanted), PREVIEW_MAX_FRAMES) if len(wanted) > 1 else 1
+        first = wanted[0]
+        ppm = (frame_pattern(pv, fp, hl) if run > 1
+               else frame_path(pv, fp, hl, first))
 
-            def argv(texts, n=n, ppm=ppm):
-                binary = parse_selector_path(texts.get("selector", "")) \
-                    or self._pv_bin
-                if not binary:
-                    raise RuntimeError("the selector step named no binary")
-                return snapshot_commands(binary, conf, media, ppm, hl, n,
-                                         rootfs)[0][1]
-            cmds.append(("frame %d" % n, argv))
+        def argv(texts):
+            binary = parse_selector_path(texts.get("selector", "")) \
+                or self._pv_bin
+            if not binary:
+                raise RuntimeError("the selector step named no binary")
+            return snapshot_commands(binary, conf, media, ppm, hl, first,
+                                     rootfs, frames=run)[0][1]
+        draw = ANIM_LABEL if run > 1 else "frame %d" % first
+        cmds.append((draw, argv))
+
+        def keep(n, total):
+            """One drawn frame: cached under this form, and the picture in
+            memory dropped - that file has just been written again.
+
+            THE FRAME NUMBER NAMES THE FILE, never the path the selector
+            echoed.  ``preview_snapshot_args`` hands the tool ``wsl(ppm)``,
+            so on Windows every ``snapshot: …`` line it prints back reads
+            ``/mnt/c/…`` - a path no Windows call can open.  Caching those
+            left Play unable to load a single frame of a run it had just
+            drawn correctly, keyed the photo cache and the eviction sweep
+            on names nothing else in the tab uses, and it did none of it on
+            a Linux desktop, where ``wsl()`` is the identity.  So the run
+            is still READ BACK for which frames it wrote (the selector
+            decides that, and says so per file) and the name is built here
+            out of the same rule the pattern carries."""
+            path = frame_path(pv, fp, hl, n)
+            self._pv_totals[(fp, hl)] = total or 1
+            self._pv_cache[(fp, hl, n)] = path
+            self._drop_photo(path)
+            return path
 
         def step(label, rc, text):
             if rc != 0:
@@ -4210,22 +5166,29 @@ class MultibootPanel:
                 self._pv_bin_at = time.time()
             elif label == "prepare":
                 self._pv_ready = (mfp, media)
+            elif label == ANIM_LABEL:
+                # WHICH frames a run wrote is the selector's decision, and
+                # it says so once per file: the caller knows the pattern,
+                # the selector knows what it filled into it.  Only the
+                # NUMBER is taken from it - see keep().
+                for _echoed, n, total in parse_snapshot_frames(text):
+                    keep(n, total)
             elif label.startswith("frame "):
-                n = int(label.split()[1])
                 total = parse_anim_frames(text, hl)
-                self._pv_totals[(fp, hl)] = total or 1
-                self._pv_cache[(fp, hl, n)] = paths[n]
+                keep(first, total)
                 key = self._current_key()
-                if not self._play_var.get() and key == (fp, hl, n):
-                    self.load_frame(paths[n], hl, n, total or 1)
+                if not self._play_var.get() and key == (fp, hl, first):
+                    self.load_frame(ppm, hl, first, total or 1)
 
         def done(rc, failed, _texts):
             if rc == 0:
                 if not self._play_var.get():
                     key = self._current_key()
-                    if key in self._pv_cache and self._pv_shown != key[1:]:
+                    if key in self._pv_cache and not self._on_screen(key):
                         self.load_frame(self._pv_cache[key], key[1], key[2],
                                         self._pv_totals.get(key[:2]))
+                # A prepare may just have put this image's music there.
+                self._sound_follow()
                 return
             # ANY failed step forgets the prepared media, a frame render
             # included: a snapshot that failed on broken media would
@@ -4295,6 +5258,7 @@ class MultibootPanel:
                 os.remove(path)
             except OSError:
                 continue
+            self._drop_photo(path)
             for key, cached in list(self._pv_cache.items()):
                 if cached == path:
                     self._pv_cache.pop(key, None)
@@ -4316,10 +5280,66 @@ class MultibootPanel:
         fp = preview_fingerprint(form)
         total = self._pv_totals.get((fp, hl))
         if total is not None and total < 2:
-            self._stop_play("Image %d has no animation to play." % hl)
+            self._stop_play("%s has no animation to play."
+                            % self._image_label(hl))
             return
         self._play_fp, self._play_hl = fp, hl
+        # THE WHOLE RUN, NOW, so pressing Play is all pressing Play takes:
+        # the frames are drawn in one selector run and the ticks below only
+        # ever show what is already in hand.
+        self._play_run(form, fp, hl, total)
         self._schedule_tick(0)
+
+    def _play_run(self, form, fp, hl, total):
+        """Make sure this image's WHOLE animation is drawn, in ONE run.
+
+        The count is not known before the first one - so ask for the most an
+        animation can have (:data:`PREVIEW_MAX_FRAMES`) and let the selector
+        trim it to what this image really has; it says which frames it wrote
+        and how many there were.  False when there was nothing to ask for,
+        or when something else has the worker."""
+        want = int(total) if total else PREVIEW_MAX_FRAMES
+        if all((fp, hl, n) in self._pv_cache for n in range(want)):
+            return False
+        if self._busy or self._pv_busy:
+            return False                # the next tick asks again
+        return self._render_frames(form, hl, list(range(want)))
+
+    def _anim_delay_ms(self, hl):
+        """The rendered clip's own per-frame delay for image *hl*, or None.
+
+        ``anim<N>.gif`` in the media directory is the file the preview's
+        own conf names (:func:`write_preview_conf`) and therefore the file
+        the selector loads, so it is the one whose delays the picture is
+        ticking on.  Kept against its stat the way media.json is: Play asks
+        once a frame and must not re-read a GIF ten times a second."""
+        media = self.media_dir()
+        if not media:
+            return None
+        path = os.path.join(media, "anim%d.gif" % int(hl))
+        try:
+            st = os.stat(path)
+            key = (path, st.st_mtime, st.st_size)
+        except OSError:
+            self._anim_ms_at = ((path, None, None), None)
+            return None
+        if self._anim_ms_at[0] != key:
+            self._anim_ms_at = (key, gif_period_ms(path))
+        return self._anim_ms_at[1]
+
+    def _play_ms(self, hl, total=None):
+        """How long one frame stays up: THE RENDERED CLIP'S OWN RATE.
+
+        Not the row's FPS field, which is a REQUEST: selectmedia clamps it
+        to fit 30 frames and shrinks it again to fit the byte budget, so a
+        row asking 25 fps is normally a 10 fps clip and playing it at 40 ms
+        runs the preview two and a half times too fast.  The GIF's own
+        delay settles it, and the run's frame count is the fallback (see
+        :func:`anim_period_ms`)."""
+        if not 0 <= hl < len(self._rows):
+            return self.PLAY_MS
+        return anim_period_ms(self._rows[hl], frames=total,
+                              delay_ms=self._anim_delay_ms(hl))
 
     def _schedule_tick(self, ms=None):
         if self._play_job is not None:
@@ -4331,39 +5351,53 @@ class MultibootPanel:
             pass
 
     def _play_tick(self):
-        """One step of Play: the next cached frame, or a render of the
-        frames still missing (in play order, one run) while this one stays
-        up.  Stops when the form no longer matches the frames or a render
-        fails."""
+        """One step of Play: the next frame, out of memory, at the clip's
+        own rate.  Stops when the form no longer matches the frames or a
+        render fails; asks for the run again when a frame is missing (the
+        first ticks after Play, while the selector is still drawing)."""
         self._play_job = None
         if self._stopped or not self._play_var.get():
             return
         form = self.form()
         fp = preview_fingerprint(form)
         if fp != self._play_fp:
-            self._stop_play("The form changed - press Render preview.")
+            self._form_moved_under_play()
             return
         hl = self._play_hl
         total = self._pv_totals.get((fp, hl))
-        if total is not None and total < 2:
-            self._stop_play("Image %d has no animation to play." % hl)
+        if total is None:
+            # Nothing drawn yet: the run is on the worker, or waiting for it.
+            self._play_run(form, fp, hl, None)
+            self._schedule_tick()
+            return
+        if total < 2:
+            self._stop_play("%s has no animation to play."
+                            % self._image_label(hl))
             return
         cur = _int(self._frame_var, 0)
-        nxt = (cur + 1) % total if total else cur
+        nxt = (cur + 1) % total
         key = (fp, hl, nxt)
         if key in self._pv_cache:
             self.load_frame(self._pv_cache[key], hl, nxt, total)
-        elif not (self._busy or self._pv_busy):
-            if total is None:
-                missing = [cur]
-            else:
-                missing = [(nxt + k) % total for k in range(total)
-                           if (fp, hl, (nxt + k) % total) not in self._pv_cache]
-            if missing:
-                self._render_frames(form, hl, missing)
-        self._schedule_tick()
+        else:
+            self._play_run(form, fp, hl, total)     # a gap: fill the run
+        self._schedule_tick(self._play_ms(hl, total))
 
-    def _stop_play(self, msg):
+    def _form_moved_under_play(self):
+        """The form no longer matches the frames Play is showing: stop, and
+        SAY WHAT HAPPENS NEXT.
+
+        Not an error - editing while an animation runs is an ordinary thing
+        to do - and never a dead end: the redraw is asked for here, so the
+        picture follows the form again by itself.  (It used to name a
+        'Render preview' button that does not exist; the redraw is on the
+        picture's right-click menu.)"""
+        self._stop_play("The form changed - %s"
+                        % ("redrawing…" if self.schedule_preview()
+                           else "right-click the preview to redraw."),
+                        error=False)
+
+    def _stop_play(self, msg, error=True):
         self._play_var.set(False)
         if self._play_job is not None:
             try:
@@ -4372,7 +5406,12 @@ class MultibootPanel:
                 pass
             self._play_job = None
         if msg:
-            self._pv_say(msg, error=True)
+            self._pv_say(msg, error=error)
+        elif self._pv_src:
+            # The picture stopped on a real frame, so the caption says
+            # which one instead of going on claiming to be playing.  Out of
+            # memory: the frame it is describing is the one already up.
+            self.load_frame(*self._pv_src)
 
     # ------------------------------------------------------------------
     # running the tools

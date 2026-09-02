@@ -1399,11 +1399,26 @@ HELP_CONTENT = {
          "change costs one snapshot; only a media change makes the media "
          "be rendered again, and that is cached. It scales with the "
          "window, and it never greys the tab while it is drawing. "
-         "Selecting a row in the table points it at that image. Frame "
-         "steps through the highlighted image's animation and Play runs "
-         "it. It is the same media the build will use, so the card carries "
-         "exactly what you previewed. Right-click the picture to redraw it "
-         "now, or to stop it following the form."),
+         "Selecting a row in the table points it at that image. It is the "
+         "same media the build will use, so the card carries exactly what "
+         "you previewed. Right-click the picture to redraw it now, or to "
+         "stop it following the form."),
+        ("The flippers, the animation and the sound",
+         "The two flipper buttons under the picture are the machine's: "
+         "they move the highlight one card and wrap round at the ends, "
+         "exactly as the flippers on the lockdown bar do, and the left and "
+         "right arrow keys do the same once you have clicked the picture. "
+         "Frame steps through the highlighted image's animation and Play "
+         "runs it — the whole animation is drawn in one go and then played "
+         "from memory at the clip's own frame rate. Sound plays what the "
+         "menu plays: the highlighted image's music loop, and the move "
+         "sound on every flipper press, at the volume in Menu settings. It "
+         "starts off — nothing opens a sound device until you tick it — "
+         "and the sounds are the prepared media's own, so a menu sound "
+         "that has not been rendered yet says so instead of playing "
+         "something else. The picture's right-click menu also plays the "
+         "highlighted image's own confirm sound, which is the one sound "
+         "you cannot otherwise hear before the card is written."),
         ("Bypass game validation",
          "Ticked by default, and leave it so: with more than one image on "
          "a card the machine's validator can fail them (GAME VALIDATION "

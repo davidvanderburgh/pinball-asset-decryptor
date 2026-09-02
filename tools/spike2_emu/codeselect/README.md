@@ -79,7 +79,7 @@ codeselect [--conf PATH] [--out PATH] [--input hw|padsw|none] [--nodebus DEV]
            [--invert|--no-invert] [--preamble min|full] [--font PATH]
            [--media DIR] [--audio auto|alsa|fifo:PATH|none] [--audio-fmt PATH]
            [--volume 0-100] [--anim-frame N] [--audio-dump FILE]
-           [--snapshot FILE.ppm] [--highlight N]
+           [--snapshot FILE.ppm] [--highlight N] [--frames K]
 ```
 
 | option | default | meaning |
@@ -98,6 +98,7 @@ codeselect [--conf PATH] [--out PATH] [--input hw|padsw|none] [--nodebus DEV]
 | `--headless` | off | no EGL; the loop runs (1360x768) and the last menu frame is written as P6 PPM; the LOADING frame goes to `FILE.loading.ppm` |
 | `--snapshot` | off | render ONE menu frame (1360x768, the moment the menu appears) as a P6 PPM and exit 0 - no EGL, no input backend, no audio, no choice/last file: the preview (below) |
 | `--highlight` | conf `default=`, else 0 | `--snapshot` only: the highlighted card (0-based); the last-choice file is never read; past the last image = exit 2 |
+| `--frames` | 1 | `--snapshot` only: write K frames (1-30) out of ONE load, starting at `--anim-frame` and stepping by one, wrapping; K > 1 makes the `--snapshot` value a printf pattern holding exactly one bare `%d`, the frame number (below) |
 | `--invert` | auto | auto = `/games/data/boot_display_cmd` contains the token `-invert` (rotate 180, as boot_display does) |
 | `--preamble` | `min` | `hw` only: how much of the game's node-bus bring-up to replay first |
 | `--font` | conf `font=`, `/usr/local/codeselect/font.ttf`, `/usr/local/spike/VeraMono.ttf` | first that loads wins |
@@ -105,7 +106,7 @@ codeselect [--conf PATH] [--out PATH] [--input hw|padsw|none] [--nodebus DEV]
 | `--audio` | `auto` | `auto` = ALSA when `snd_pcm_open` succeeds, else `fifo:$PAD_AUDIO_PLAY` when that is set and non-empty, else `none`; `alsa`, `fifo:PATH`, `none` force one |
 | `--audio-fmt` | `$PAD_AUDIO_FMT` | the rig's fmt file; the FIFO sink writes `44100 2` into it first |
 | `--volume` | conf `volume=`, else 50 | software mix gain, 0-100 (50 = -6 dB) |
-| `--anim-frame` | animate | `--headless`: every animation shows frame N and never ticks (the layout tests); `--snapshot`: the highlighted card's frame, wrapping past the end - the other cards show their still, or frame 0, as they do live |
+| `--anim-frame` | animate | `--headless`: every animation shows frame N and never ticks (the layout tests); `--snapshot`: the highlighted card's frame, wrapping past the end (and the FIRST frame of a `--frames` run) - the other cards show their still, or frame 0, as they do live |
 | `--audio-dump` | none | raw s16le 44100 Hz stereo of everything mixed (with `--audio none` the mix still runs, paced to the clock) |
 
 Exit status: `0` = a choice was written to `--out`; `2` = no choice (bad conf,
@@ -194,7 +195,7 @@ frame regardless (the bridge paces to 60 Hz).
 
 ```
 codeselect --snapshot FILE.ppm --conf images.conf --media DIR [--highlight N]
-           [--anim-frame N] [--timeout SEC] [--font PATH] [--invert]
+           [--anim-frame N] [--frames K] [--timeout SEC] [--font PATH] [--invert]
 ```
 
 draws the frame the machine shows the moment the menu appears - card N (or
@@ -205,7 +206,8 @@ card its still or frame 0, the countdown at its full `timeout=` value
 0. Nothing else runs: no EGL, no input backend, no audio (the WAVs are not
 opened), no choice or last-choice file, no LOADING frame. Every animation
 is decoded in full first, so the run is the decode plus one draw (71-87 ms
-under qemu for the test media, measured 2026-09-02). `-invert` is NOT
+under qemu for the test media, measured 2026-09-02) - and `--frames K`
+(below) buys K frames for that one decode. `-invert` is NOT
 auto-detected: that
 rotation compensates for an LCD mounted upside down and the preview shows
 what the player sees; `--invert` forces it. Errors - an unreadable conf, no
@@ -220,8 +222,50 @@ parse:
 ```
 
 `frame F of N` is the frame shown and the highlighted card's frame count
-(`0 of 0` when it has no animation), so a caller can step `--anim-frame`
-through 0..N-1 to play it.
+(`0 of 0` when it has no animation), so a caller can learn the length of the
+animation from the first frame it asks for.
+
+#### `--frames K`: a whole run out of one load
+
+Stepping `--anim-frame` a frame at a time means one process per frame, and
+each of those re-decodes every PNG, every GIF and the font to move one panel.
+`--frames K` writes K frames out of the ONE load instead - `--anim-frame`,
+then the next, and the next, wrapping at the end of the animation:
+
+```
+codeselect --snapshot 'frame_%d.ppm' --frames 16 --highlight 1 --anim-frame 0 ...
+```
+
+Sixteen frames of a 16-frame GIF, measured 2026-09-02 under qemu-arm-static
+against the test media: **1334 / 1313 / 1346 ms as sixteen runs, 243 / 228 /
+240 ms as one** - five to six times faster, and the sixteen PPMs are
+byte-identical to the sixteen the old way produced. A one-frame run of that
+set is 84 ms and a two-frame run 91 ms, so the load is ~84 ms of it and each
+further frame costs about 8 ms: the draw was never the expensive part, the
+process start and the re-decode were.
+
+* **K = 1 (the default) is the old path to the byte** - same one file, same
+  single `snapshot:` line, and the `--snapshot` value used exactly as given,
+  so a file name that happens to hold a `%` still works.
+* **K > 1 makes the `--snapshot` value a printf PATTERN** holding exactly one
+  bare `%d`, which is filled with the FRAME NUMBER (not the position in the
+  run), so the caller keeps its own naming - the Multi-boot tab's cache is
+  `frame_<fingerprint>_<highlight>_<n>.ppm`. `%%` is a literal percent. No
+  `%d`, two of them, a `%s`, a width like `%03d` or a trailing lone `%` are
+  refused on stderr (`codeselect: --snapshot "..." holds ...`) with exit 2,
+  BEFORE a byte is written: a caller that got the pattern wrong must not find
+  half a run on disk. So is a K below 1 or above 30 (the most frames an
+  animation can have), and a K above 1 without `--snapshot`.
+* One `snapshot:` line per frame, unchanged in shape, each naming its own
+  file - so a caller parsing `frame F of N` keeps working.
+* Frames the run cannot use are trimmed rather than written twice: **K past
+  the animation's length** writes only its length (`snapshot: 8 frames asked
+  for, image 1 has 4: 4 written` in the log), and a card with **no animation
+  at all** writes ONE frame (`snapshot: image 0 has no animation: 1 frame, not
+  4`) - its `frame 0 of 0` already tells the caller to stop asking.
+
+Nothing else changes: the same load, the same draw, the same PPM. The frames
+of a run are the frames sixteen separate runs would have written.
 
 **Paths under qemu.** The GUI runs the snapshot as `qemu-arm-static -L
 /home/david/spike2root codeselect ...`. The font and every media file are
@@ -345,7 +389,7 @@ to 16 images (`CONF_MAX_IMAGES`). `volume` is clamped to 0-100,
 [select] key: left|right|start|action|select|plus|minus|back
 [select] chose 1 TMNT 1987
 [select] error: <what>
-[select] snapshot: FILE.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 10 s, invert 0, font ..., media ...   (--snapshot only)
+[select] snapshot: FILE.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 10 s, invert 0, font ..., media ...   (--snapshot only; once per --frames frame, each naming its own file)
 ```
 
 ### log lines (stderr and --log)
@@ -587,8 +631,21 @@ down.
    default with a last-choice file present and untouched, a timeout-0 conf
    (`press START` line), a missing media directory (exit 0, `art: cannot
    load`), and `--highlight` past the end / an empty conf / `--snapshot`
-   with `--headless` refused (exit 2, no PPM). PNGs in
-   `$BUILD/t/codeselect_*.png` for eyes.
+   with `--headless` refused (exit 2, no PPM).
+
+   Then `--frames`: `--frames 1` gives the same PPM and the same stdout line
+   as no `--frames` at all (byte for byte, the file name masked) and a `%` in
+   the name stays a name; `--frames 4` writes four files carrying the GIF's
+   four colours in turn at the highlighted panel centre, with card 0's still
+   unmoved in each and no two of the four alike; `--anim-frame 3 --frames 3`
+   wraps to `wrap_3`, `wrap_0`, `wrap_1` (named for the FRAME, not the place
+   in the run, and no `wrap_2`); `--frames 8` on the 4-frame GIF writes 4 and
+   logs the trim; `--highlight 0 --frames 4` on the card with no animation
+   writes ONE file and logs why; `--frames 0`, `--frames 31`, a pattern with
+   no `%d` / two `%d` / a `%s` / `%03d` / a trailing `%`, and `--frames 4`
+   without `--snapshot` are all refused with a `codeselect:` line on stderr
+   and leave nothing on disk; `%%` in a pattern comes out as one percent.
+   PNGs in `$BUILD/t/codeselect_*.png` for eyes.
 3. `test/padsw_test.py` - a padsw file, RIGHT (id 64 on turtles_pro) held
    100 ms then START (36), with the test holding the read end of a FIFO the
    selector writes into (`--audio fifo:... --audio-fmt ... --audio-dump`):

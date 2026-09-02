@@ -4,8 +4,8 @@
 # files, the PPM shape, the default/last-choice precedence, the -invert
 # rotation, the art panels (stills, a pinned GIF frame, a missing picture),
 # the 5- and 9-image carousels, the --snapshot frame (the preview: one frame,
-# nothing else started or written), and convert every frame to PNG in $T for
-# eyes.
+# nothing else started or written), the --frames K run (a whole animation out
+# of ONE load), and convert every frame to PNG in $T for eyes.
 # The emulator comes from the ENVIRONMENT, not argv: the rig's teardown does
 # pkill -f 'arm-binfmt|qemu-arm', and this script's own command line must
 # not match it (see the Makefile).
@@ -251,6 +251,108 @@ grep -qF "error: " "$T/snap.out" || { echo "headless: FAIL no error line for the
 if snap "$T/snap_bad.ppm" "$T/media.conf" --headless "$T/x.ppm" 2>/dev/null; then echo "headless: FAIL --snapshot with --headless accepted"; exit 1; fi
 [ ! -f "$T/snap_bad.ppm" ] || { echo "headless: FAIL a refused snapshot wrote a PPM"; exit 1; }
 
+# 12. --frames K: a WHOLE RUN of frames out of ONE load, which is the whole
+#     point - the preview used to pay a process start and a re-decode of every
+#     PNG, GIF and font for each frame it showed. K > 1 turns the --snapshot
+#     value into a printf pattern holding the frame number, so the caller keeps
+#     its own file names.
+# K = 1 is the old path to the byte: the same picture and the same stdout line
+# as no --frames at all (the file name is the only difference, so it is masked)
+rm -f "$T/f1.ppm" "$T/f1n.ppm"
+snap "$T/f1.ppm" "$T/media.conf" --media "$T/media" --highlight 1 --anim-frame 2
+sed 's#/f1\.ppm#/FRAME#' "$T/snap.out" > "$T/f1.out"
+snap "$T/f1n.ppm" "$T/media.conf" --media "$T/media" --highlight 1 --anim-frame 2 --frames 1
+sed 's#/f1n\.ppm#/FRAME#' "$T/snap.out" > "$T/f1n.out"
+cmp -s "$T/f1.ppm" "$T/f1n.ppm" || { echo "headless: FAIL --frames 1 is not the single-frame picture"; exit 1; }
+cmp -s "$T/f1.out" "$T/f1n.out" || { echo "headless: FAIL --frames 1 changed the stdout line"; diff "$T/f1.out" "$T/f1n.out"; exit 1; }
+# a '%' in the name is a NAME with K = 1, never a pattern
+rm -f "$T/100%_f1.ppm"
+snap "$T/100%_f1.ppm" "$T/media.conf" --media "$T/media" --highlight 1
+[ -f "$T/100%_f1.ppm" ] || { echo "headless: FAIL K=1 expanded a '%' in the file name"; exit 1; }
+
+# four frames, one run: the GIF's four colours in turn at the highlighted
+# panel centre, card 0's still unmoved in every one, four DIFFERENT files
+rm -f "$T"/run_*.ppm
+snap "$T/run_%d.ppm" "$T/media.conf" --media "$T/media" --highlight 1 --frames 4
+i=0
+for want in FF0000 00C000 0000FF FFFF00; do
+    [ -f "$T/run_$i.ppm" ] || { echo "headless: FAIL --frames 4 wrote no run_$i.ppm"; exit 1; }
+    pix "$T/run_$i.ppm" 999 262 "$want"      # the animation moves
+    pix "$T/run_$i.ppm" 361 262 C03040       # and only the animation moves
+    grep -qF "snapshot: $T/run_$i.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame $i of 4," "$T/snap.out" || {
+        echo "headless: FAIL no snapshot line for frame $i"; cat "$T/snap.out"; exit 1; }
+    i=$((i + 1))
+done
+[ "$(ls "$T"/run_*.ppm | wc -l)" = 4 ] || { echo "headless: FAIL --frames 4 wrote $(ls "$T"/run_*.ppm | wc -l) files"; exit 1; }
+for a in 0 1 2 3; do
+    for b in 0 1 2 3; do
+        if [ "$a" -lt "$b" ] && cmp -s "$T/run_$a.ppm" "$T/run_$b.ppm"; then
+            echo "headless: FAIL --frames 4: frames $a and $b are the same picture"; exit 1
+        fi
+    done
+done
+
+# the run wraps at the end of the animation, and each file is named for the
+# FRAME it holds, not for its place in the run: 3, 0, 1
+rm -f "$T"/wrap_*.ppm
+snap "$T/wrap_%d.ppm" "$T/media.conf" --media "$T/media" --highlight 1 --anim-frame 3 --frames 3
+pix "$T/wrap_3.ppm" 999 262 FFFF00
+pix "$T/wrap_0.ppm" 999 262 FF0000
+pix "$T/wrap_1.ppm" 999 262 00C000
+[ ! -f "$T/wrap_2.ppm" ] || { echo "headless: FAIL --anim-frame 3 --frames 3 wrote frame 2"; exit 1; }
+for f in 3 0 1; do
+    grep -qF "snapshot: $T/wrap_$f.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame $f of 4," "$T/snap.out" || {
+        echo "headless: FAIL no wrapped snapshot line for frame $f"; cat "$T/snap.out"; exit 1; }
+done
+
+# more frames than the animation has would only rewrite files this same run
+# has already written: trimmed, and said in the log
+rm -f "$T"/cap_*.ppm "$T/cap.log"
+snap "$T/cap_%d.ppm" "$T/media.conf" --media "$T/media" --highlight 1 --frames 8 --log "$T/cap.log"
+[ "$(ls "$T"/cap_*.ppm | wc -l)" = 4 ] || { echo "headless: FAIL --frames 8 on a 4-frame GIF wrote $(ls "$T"/cap_*.ppm | wc -l) files"; exit 1; }
+grep -q "snapshot: 8 frames asked for, image 1 has 4: 4 written" "$T/cap.log" || {
+    echo "headless: FAIL no cap line in the log"; grep snapshot "$T/cap.log"; exit 1; }
+
+# a card with NO animation has nothing to step: ONE file, and the log says so
+# (its 'frame 0 of 0' already tells a caller to stop asking)
+rm -f "$T"/still_*.ppm "$T/still.log"
+snap "$T/still_%d.ppm" "$T/media.conf" --media "$T/media" --highlight 0 --frames 4 --log "$T/still.log"
+[ "$(ls "$T"/still_*.ppm | wc -l)" = 1 ] || { echo "headless: FAIL a still card wrote $(ls "$T"/still_*.ppm | wc -l) files"; exit 1; }
+[ -f "$T/still_0.ppm" ] || { echo "headless: FAIL the one still frame is not still_0.ppm"; exit 1; }
+grep -q "snapshot: image 0 has no animation: 1 frame, not 4" "$T/still.log" || {
+    echo "headless: FAIL no 'no animation' line in the log"; grep snapshot "$T/still.log"; exit 1; }
+grep -qF "frame 0 of 0," "$T/snap.out" || { echo "headless: FAIL still frame count"; cat "$T/snap.out"; exit 1; }
+
+# refused BEFORE a byte is written: K out of range, and every pattern that is
+# not exactly one bare %d. The message goes to stderr, like the other argument
+# refusals, and nothing is left on disk.
+rm -f "$T"/bad_* "$T/bad.ppm"
+refuse() {   # refuse WHAT SNAPSHOT-VALUE [extra args...]
+    local what=$1 val=$2; shift 2
+    if "$QEMU" -L "$ROOT" "$BIN" --snapshot "$val" --conf "$T/media.conf" --media "$T/media" \
+        --font "$FONT" "$@" > "$T/snap.out" 2> "$T/snap.err"; then
+        echo "headless: FAIL $what accepted"; cat "$T/snap.out"; exit 1
+    fi
+    grep -q "^codeselect: " "$T/snap.err" || {
+        echo "headless: FAIL $what refused without a message"; cat "$T/snap.err"; exit 1; }
+}
+refuse "--frames 0"                "$T/bad_%d.ppm"    --frames 0
+refuse "--frames 31"               "$T/bad_%d.ppm"    --frames 31
+refuse "a pattern with no %d"      "$T/bad.ppm"       --frames 4
+refuse "a pattern with two %d"     "$T/bad_%d_%d.ppm" --frames 4
+refuse "a %s in the pattern"       "$T/bad_%s.ppm"    --frames 4
+refuse "a width in the pattern"    "$T/bad_%03d.ppm"  --frames 4
+refuse "a pattern ending in %"     "$T/bad_%"         --frames 4
+[ -z "$(ls "$T"/bad_* "$T/bad.ppm" 2>/dev/null)" ] || { echo "headless: FAIL a refused --frames run wrote a file"; exit 1; }
+# and K > 1 belongs to --snapshot alone
+if run "$T/x.ppm" "$T/two.conf" --frames 4 2>/dev/null; then echo "headless: FAIL --frames 4 without --snapshot accepted"; exit 1; fi
+# a literal percent survives a pattern
+rm -f "$T"/pc_*
+snap "$T/pc_100%%_%d.ppm" "$T/media.conf" --media "$T/media" --highlight 1 --frames 2
+[ -f "$T/pc_100%_0.ppm" ] && [ -f "$T/pc_100%_1.ppm" ] || { echo "headless: FAIL '%%' in a pattern"; ls "$T"/pc_*; exit 1; }
+
+python3 "$HERE/ppm2png.py" "$T/run_0.ppm" "$T/codeselect_frames_0.png"
+python3 "$HERE/ppm2png.py" "$T/run_3.ppm" "$T/codeselect_frames_3.png"
 python3 "$HERE/ppm2png.py" "$T/snap_1_2.ppm" "$T/codeselect_snapshot.png"
 python3 "$HERE/ppm2png.py" "$T/snap_nomedia.ppm" "$T/codeselect_snapshot_nomedia.png"
 python3 "$HERE/ppm2png.py" "$T/menu.ppm" "$T/codeselect_menu.png"

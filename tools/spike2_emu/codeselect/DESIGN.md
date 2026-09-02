@@ -314,10 +314,20 @@ full CLI, the log lines and the test list). What it is:
   the countdown at its full value, no rotation - as a P6 PPM and exits 0
   with nothing else started: no display, input, audio, choice or last
   file. The Multi-boot tab's preview runs it under `qemu-arm-static -L`
-  against the rootfs copy and steps `--anim-frame` to play the highlighted
-  card's animation; stdout says `frame F of N`. Under qemu an absolute
+  against the rootfs copy to play the highlighted card's animation; stdout
+  says `frame F of N`. Under qemu an absolute
   font/media path is looked up in the `-L` sysroot first, then on the host
   (README.md, "Paths under qemu").
+* `--frames K` writes a WHOLE RUN of K frames - `--anim-frame`, then the
+  next, wrapping - out of that one load, because the preview otherwise pays a
+  process start and a re-decode of every PNG, GIF and font per frame to move
+  one panel: 16 frames measured 1313-1346 ms as 16 runs against 228-243 ms as
+  one, same bytes out. K > 1 makes the `--snapshot` value a printf pattern
+  taking exactly one bare `%d`, the frame number, so the caller keeps its own
+  file naming; anything else is refused before a byte is written. K = 1 (the
+  default) is the single-frame path untouched. A K past the animation's
+  length, or any K on a card with no animation, is trimmed rather than
+  writing the same file twice, and the trim is logged.
 * `select.sh` is the hardware hook: after `/etc/init.d/game`'s own
   `pkill boot_display ` it waits up to 3 s for boot_display to be gone, runs
   the selector, reads the index and looks the device up in images.conf

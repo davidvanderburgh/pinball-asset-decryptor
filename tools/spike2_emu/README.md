@@ -123,6 +123,51 @@ FIFO chain and nothing out of the speakers (the `[padplay] fed/played`
 counters and the `[select]`/`audio:` lines are the oracle); flip `muted` to
 `false` in the file to hear it, no restart needed.
 
+### Loading a finished card back
+
+A card carries what it takes to re-open its own menu in an editor. Beside
+`images.conf` - **never** inside `media/`, never in the media budget, never
+opened by the selector - `build` and `inject` stage two small JSON files into
+`/usr/local/codeselect/`:
+
+- **`build.json`** `{"tool", "version", "written", "layout", "images":
+  [{"device", "source", "title", "subtitle", "art", "anim", "music"}],
+  "timeout", "default", "volume", "mixer_volume", "sound_move",
+  "sound_confirm"}`. `source` is the absolute path of the `.raw` that image was
+  built from - the one thing `images.conf` cannot hold and a rebuild needs. An
+  `inject` given no `--primary`/`--extra` reads the card's own `build.json`
+  first and carries the old sources through, **by device**: an inject must
+  never lose provenance. (`inject --primary P --extra E` RECORDS those paths
+  and reads nothing from them.)
+- **`media.json`** - the manifest `selectmedia.py prepare` wrote for the staged
+  set, **verbatim**, so the art/animation *spec strings* (`auto@20:2:8`,
+  `/x/clip.mov@21`) survive on the card. `inject` with `--media-dir` restages it
+  from that directory; without it the card's own is carried through byte for
+  byte. A card with no media carries no `media.json`.
+
+```bash
+mkmulticard.py inspect --card CARD [--json] [--media-out DIR]
+```
+
+reads it all back with no mounts and no writes: the table, the menu, the
+provenance, the media list and every games tree's `title_dir` and validator
+state. The default is a human table; `--json` prints ONE object on stdout
+(`card`, `size`, `layout`, `partitions`, `images[]` with `art_source` /
+`anim_source` / `source` / `source_exists` / `title_dir` / `bypass`, the
+globals, `media[]`, `has_build_json`, `has_media_json`, `selector`,
+`warnings`), and `--media-out DIR` extracts the card's media directory +
+`media.json` into `DIR` - the flat shape `--media-dir` reads back, so a loaded
+menu can be previewed and re-injected without a rebuild. A card written before
+the sidecars existed still loads: the unknown fields degrade to `null` with a
+warning. Exit 0 with the report; exit 2 only when the file is not a Spike 2
+card or carries no selector.
+
+That is the loop the app's Multi-boot tab runs on: `inspect --json --media-out`
+fills the fields, then `inject` (seconds) writes back anything the menu owns -
+titles, subtitles, art/animation/music, sounds, volume, countdown, default.
+Adding, removing, reordering or replacing an image is a partition change and
+still needs a full `build`.
+
 ### The validator bypass
 
 A modified image trips Stern's game self/asset validator (`GAME VALIDATION

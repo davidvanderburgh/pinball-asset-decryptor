@@ -16,7 +16,8 @@ answers the wire protocol the way the boards + netbridge do (read_nodebus.md):
                11  -> 8 switch bytes (node 8 at rest 00 ff 1f fb 40 00 00 00,
                       node 1 at rest ff x8; pressed buttons named in the
                       control file clear their bit: left = node 8 bit 25,
-                      right = node 8 bit 24, start = node 1 bit 11) + u16 0
+                      right = node 8 bit 24, start = node 1 bit 11,
+                      action = node 1 bit 2, the lockdown-bar button) + u16 0
                       + ck + STATUS 0
 
 Every frame is logged ('TX' = what the client sent, 'RX' = the reply).
@@ -80,8 +81,11 @@ class FakeBus:
             return bytes(sw)
         if node == 1:
             sw = bytearray(REST1)
-            if "start" in self.pressed():
-                sw[1] &= ~0x08
+            p = self.pressed()
+            if "start" in p:
+                sw[1] &= ~0x08          # bit 11
+            if "action" in p:
+                sw[0] &= ~0x04          # bit 2 = Action / LOCKDOWN BUTTON
             return bytes(sw)
         return bytes([0xff] * 8)
 
@@ -189,7 +193,8 @@ class FakeBus:
 
 def main():
     ap = argparse.ArgumentParser(description="fake Spike 2 node bus on a pty")
-    ap.add_argument("--control", default="fakebus.ctl", help="file naming pressed buttons: left right start")
+    ap.add_argument("--control", default="fakebus.ctl",
+                    help="file naming pressed buttons: left right start action")
     ap.add_argument("--log", default=None, help="frame log (default stdout)")
     ap.add_argument("--path-file", default=None, help="also write the slave path here")
     ap.add_argument("--idle", type=float, default=0, help="exit after SEC without traffic (0 = never)")

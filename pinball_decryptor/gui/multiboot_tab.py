@@ -49,6 +49,27 @@ media.json behind, 'Build & verify' runs a full prepare into that dir first
 whenever a media set exists - the card is never built from the preview's
 half of the media.
 
+READING A CARD BACK.  'Load card…' runs ``mkmulticard.py inspect`` on a card
+that already exists - the tool's table into the pane, the same read as JSON
+for the form, and the card's own media extracted into ``<card dir>/media-
+<stem>`` - and fills EVERY field from it: the images and where they came
+from, the titles and subtitles, the art / animation / music (as the spec
+strings the card records, so the tools can render them again), the sounds,
+volume, countdown, default and the bypass state of every games tree.  The
+tab is then in EDITING MODE: the loaded card and the form as it was read are
+remembered, every keystroke is diffed against that baseline, and one line
+says which of the two things can happen.  'Apply to card' writes the menu
+back with ``inject`` (plus a ``prepare`` when a media field changed, plus
+``bypass`` when it is ticked and a tree is still armed) - seconds, no copy.
+The image LIST - how many images, in what order, from which files - is the
+one thing an inject cannot change, so changing it disables Apply and says
+so; and because the output box now holds the loaded card, 'Build & verify'
+refuses until a different output path is set rather than copying ~7 GB over
+the card being edited.  A card whose media has no source recorded (a v1
+card, or a music bed) keeps its file names: they can be kept and drawn, but
+not re-rendered, and the tab says which field to re-point before a media
+change can be applied.
+
 WHAT IS NOT HERE.  No probe runs when the tab is built, no path is guessed
 from the Input box, and no two tool runs overlap: a build copies ~7 GB per
 image and the tab is busy until the run has said PASS or FAIL.
@@ -150,6 +171,22 @@ class ImageRow:
     anim_start: str = ""     # seconds into the clip (blank = the tool's default)
     anim_seconds: str = ""   # the clip's length
     anim_fps: str = ""
+    # Filled by a LOAD (see 'reading a card back'), never typed.
+    device: str = ""             # the card device this row was read from
+    art_on_card: bool = False    # the value is a file name already on the
+    anim_on_card: bool = False   # card that no source string explains, so
+    music_on_card: bool = False  # nothing here can re-render it
+
+
+def on_card_fields(row):
+    """The row's media fields that came off a card with no source recorded -
+    ``[(what, value), ...]``.  They can be kept (the file is on the card, and
+    in the media dir a load extracted) but not re-rendered: selectmedia would
+    have to read them out of the very directory it writes."""
+    return [(what, val) for what, val, flag in
+            (("art", row.art, row.art_on_card),
+             ("animation", row.anim, row.anim_on_card),
+             ("music", row.music, row.music_on_card)) if flag]
 
 
 @dataclass
@@ -203,6 +240,18 @@ def suggest_title(path):
 def wsl(path):
     """A form path as the tools see it (``D:\\x`` -> ``/mnt/d/x``)."""
     return _rig.wsl_path(path)
+
+
+def host_path(path):
+    """The reverse of :func:`wsl`, for what a card recorded: ``/mnt/d/x`` ->
+    ``D:/x`` on Windows, unchanged on a Linux desktop (and unchanged for a
+    path that is not under /mnt/<drive>, a WSL home for one)."""
+    p = (path or "").strip().replace("\\", "/")
+    if sys.platform == "win32":
+        m = re.match(r"^/mnt/([a-zA-Z])(?=/|$)", p)
+        if m:
+            return m.group(1).upper() + ":" + p[len(m.group(0)):]
+    return p
 
 
 def repo_dir():
@@ -261,6 +310,20 @@ def media_dir_for(out):
         if out else ""
 
 
+def loaded_media_dir(card):
+    """Where a LOADED card's media is extracted: ``<card dir>/media-<stem>``.
+
+    Per card, not the plain ``media`` of :func:`media_dir_for`: David keeps
+    several multi cards in one folder, and loading the second one must not
+    write over the media the first one was built from."""
+    card = (card or "").strip().strip('"')
+    if not card:
+        return ""
+    stem = re.sub(r"\.(raw|img)$", "", os.path.basename(card), flags=re.I)
+    return os.path.join(os.path.dirname(os.path.abspath(card)),
+                        "media-" + stem)
+
+
 def preview_dir_for(out):
     """Where the preview's conf and frames go: ``<out dir>/preview``."""
     out = (out or "").strip()
@@ -307,21 +370,30 @@ def _bad_number(value, what, integer=False, positive=False):
     return None
 
 
-def validate_form(form):
+def validate_form(form, sources=True):
     """Every reason the form cannot be built, as sentences for the tab.
     Empty = build it.  The tool re-checks all of it; this is so a bad form is
-    a line on the tab and not a traceback in the log pane."""
+    a line on the tab and not a traceback in the log pane.
+
+    ``sources=False`` drops the checks that are about the .raw files the
+    images were copied from - a card read back with 'Load card…' names
+    sources that may not be on THIS machine, and neither drawing its menu
+    nor injecting a new one opens them."""
     errs = []
     n = len(form.images)
-    if n < 2:
+    if sources and n < 2:
         errs.append("Add at least two images: the primary (stock) and one "
                     "more.")
+    if not n:
+        errs.append("There are no images.")
     if n > MAX_IMAGES:
         errs.append("At most %d images fit one card." % MAX_IMAGES)
     seen = set()
     for i, row in enumerate(form.images):
         p = (row.path or "").strip().strip('"')
-        if not p:
+        if not sources:
+            pass
+        elif not p:
             errs.append("Image %d has no file." % i)
         elif not os.path.isfile(p):
             errs.append("Image %d: no such file: %s" % (i, p))
@@ -334,8 +406,14 @@ def validate_form(form):
             if _BAD_TEXT.search(text or ""):
                 errs.append("Image %d: the %s must not contain | ; $ or `."
                             % (i, what))
+        on_card = dict(on_card_fields(row))
         for what, val in (("art", row.art), ("animation", row.anim),
                           ("music", row.music)):
+            # A file name a load read off the card is not a path on this
+            # machine and is not looked for: it is already in the media dir
+            # the load extracted, and the preview draws it from there.
+            if what in on_card:
+                continue
             if is_file_choice(val) and not os.path.isfile(val.strip()):
                 errs.append("Image %d: %s file not found: %s"
                             % (i, what, val))
@@ -379,9 +457,24 @@ def validate_form(form):
         if under_library(out):
             errs.append("The output must not be under the card library (%s) "
                         "- pick another folder." % LIBRARY_PREFIXES[0])
-        if any(_norm(out) == _norm(r.path)
-               for r in form.images if (r.path or "").strip()):
+        if sources and any(_norm(out) == _norm(r.path)
+                           for r in form.images if (r.path or "").strip()):
             errs.append("The output is one of the input images.")
+    return errs
+
+
+def rebuild_blockers(form):
+    """Why this form cannot be BUILT into a new card, over and above
+    :func:`validate_form` - the media a load read off a card and nothing can
+    re-render.  Injecting the same form back into the card it came from is
+    fine; writing a fresh card from it is not."""
+    errs = []
+    for i, row in enumerate(form.images):
+        for what, val in on_card_fields(row):
+            errs.append(
+                "Image %d: the %s (%s) is a file on the loaded card, not on "
+                "this machine - choose auto, none or a file for it before "
+                "building a new card." % (i, what, val))
     return errs
 
 
@@ -515,6 +608,40 @@ def bypass_args(card):
     tree of an EXISTING card - what fixes a card already flashed without a
     rebuild."""
     return [MKMULTICARD, "bypass", "--card", wsl(card.strip().strip('"'))]
+
+
+def inject_args(form, card):
+    """``mkmulticard.py inject --card``: the menu alone, rewritten into an
+    EXISTING card's p2 in seconds.  Every field is spelled out (the tool
+    keeps the card's own value for a flag left off, and here the form is the
+    record) - subtitles included, so clearing them clears them."""
+    titles = [(r.title or "").strip() or suggest_title(r.path)[0]
+              for r in form.images]
+    subtitles = [(r.subtitle or "").strip() for r in form.images]
+    args = [MKMULTICARD, "inject",
+            "--card", wsl(card.strip().strip('"')),
+            "--selector-dir", form.selector_dir or DEFAULT_SELECTOR_DIR,
+            "--titles", ";".join(titles),
+            "--subtitles", ";".join(subtitles),
+            "--timeout", str(int(form.timeout)),
+            "--default", str(int(form.default)),
+            "--volume", str(int(form.volume))]
+    if form.media_dir:
+        args += ["--media-dir", wsl(form.media_dir)]
+    return args
+
+
+def inspect_args(card, media_out=None, as_json=False):
+    """``mkmulticard.py inspect --card``: what a card carries.  Plain it
+    prints a table; ``--json`` prints one object for the tab to read, and
+    ``--media-out DIR`` drops the card's media files there so the preview
+    can draw them and an inject can put them back."""
+    args = [MKMULTICARD, "inspect", "--card", wsl(card.strip().strip('"'))]
+    if as_json:
+        args.append("--json")
+    if media_out:
+        args += ["--media-out", wsl(media_out)]
+    return args
 
 
 def preview_snapshot_args(binary, conf, media_dir, ppm, highlight, frame,
@@ -694,6 +821,318 @@ def bypass_commands(card, cwd=None):
     return [("bypass", wsl_command(bypass_args(card), cwd))]
 
 
+#: The label of the inspect run whose stdout is JSON.  Its output is parsed,
+#: not echoed (the pane gets the table the plain run prints instead) - see
+#: MultibootPanel._run_commands' ``quiet``.
+INSPECT_JSON = "inspect json"
+
+
+def inspect_commands(card, media_out=None, cwd=None):
+    """The 'Load card…' run: the tool's own table into the pane, then the
+    same read as JSON (with the media extracted, when asked) for the form.
+    Two reads of a few small files - the card is never written."""
+    return [("inspect", wsl_command(inspect_args(card), cwd)),
+            (INSPECT_JSON, wsl_command(
+                inspect_args(card, media_out, as_json=True), cwd))]
+
+
+def inject_commands(form, card, cwd=None):
+    return [("inject", wsl_command(inject_args(form, card), cwd))]
+
+
+def apply_commands(form, card, media_dir="", prepare=False, bypass=False,
+                   refresh=True, cwd=None):
+    """The 'Apply to card' run: the media first when a media field changed
+    (into the dir the load extracted, so selectmedia's cache keeps the
+    unchanged pictures), the menu injected into the card in place, the
+    validator bypass when it is ticked and some tree is still armed, and a
+    last inspect that reads the card back."""
+    cmds = []
+    if prepare:
+        cmds += prepare_commands(form, media_dir, cwd)
+    cmds += inject_commands(form, card, cwd)
+    if bypass:
+        cmds += bypass_commands(card, cwd)
+    if refresh:
+        cmds += inspect_commands(card, cwd=cwd)
+    return cmds
+
+
+# ---------------------------------------------------------------------------
+# reading a card back (Load card… / Apply to card)
+# ---------------------------------------------------------------------------
+
+def parse_inspect(text):
+    """The JSON object ``inspect --json`` printed, or None.  The object is
+    found rather than assumed to be the whole of stdout: a stray line from
+    the shell profile in front of it must not lose the report."""
+    s = (text or "").strip()
+    start, end = s.find("{"), s.rfind("}")
+    for chunk in (s,
+                  s[start:] if start > 0 else None,
+                  s[start:end + 1] if 0 <= start < end else None):
+        if not chunk:
+            continue
+        try:
+            return json.loads(chunk)
+        except ValueError:
+            pass
+    return None
+
+
+def parse_refusal(text):
+    """The tool's own ``refused: ...`` line, or ''.  What a failed load says
+    on the tab instead of an exit code."""
+    for line in reversed((text or "").splitlines()):
+        s = line.strip()
+        if s.lower().startswith("refused:"):
+            return s
+    return ""
+
+
+_TIME_RE = re.compile(r"^\d+(\.\d+)?$")
+_CLIP_RE = re.compile(r"^\d*(\.\d+)?(:\d*(\.\d+)?){0,2}$")
+
+
+def split_art_source(spec):
+    """An ``art_source`` from the card -> ``(art, art_video, art_time)`` for
+    an :class:`ImageRow`.  A video keeps its seconds (``clip.mov@21`` is the
+    same row the 'video frame' choice builds, typed straight into Art)."""
+    s = (spec or "").strip()
+    if not s:
+        return "auto", "", ""
+    if s.lower() in ("auto", "none"):
+        return s.lower(), "", ""
+    base, sep, tail = s.rpartition("@")
+    if sep and base and is_video(base) and _TIME_RE.match(tail):
+        return host_path(base), "", tail
+    return host_path(s), "", ""
+
+
+def split_anim_source(spec):
+    """An ``anim_source`` -> ``(anim, start, seconds, fps)``; the reverse of
+    :func:`anim_spec`, so a load followed by an apply writes what was read."""
+    s = (spec or "").strip()
+    if not s or s.lower() == "none":
+        return "none", "", "", ""
+    start = seconds = fps = ""
+    base, sep, tail = s.rpartition("@")
+    if sep and base and tail and _CLIP_RE.match(tail):
+        parts = (tail.split(":") + ["", "", ""])[:3]
+        start, seconds, fps = parts
+        s = base
+    return ("auto" if s.lower() == "auto" else host_path(s),
+            start, seconds, fps)
+
+
+def split_sound_source(spec, what):
+    """A ``sound_move`` / ``sound_confirm`` from the card -> ``(value,
+    note)``.
+
+    What a card carries here is the WAV the selector plays (``move.wav``),
+    not the spec that made it - images.conf and build.json both record the
+    file name, and selectmedia's manifest records no source for the sounds.
+    So a bare name means 'this card has a move sound, and which file made it
+    is not written down': the field shows the tab's default and says so.
+    Nothing acts on it until a media change makes the tools run again, and
+    the sound already on the card is untouched until then."""
+    s = (spec or "").strip()
+    if not s:
+        return "none", ""
+    if s.lower() in _WORDS:
+        return s.lower(), ""
+    if "/" not in s and "\\" not in s:
+        return "auto", ("The %s on this card is %s; which file made it is "
+                        "not recorded, so the field shows 'auto'. It is only "
+                        "re-made if you change some media." % (what, s))
+    return host_path(s), ""
+
+
+def bypass_state(info):
+    """``(ticked, armed)`` from the per-image bypass states an inspect
+    reported: ticked when no tree is still armed, armed when at least one
+    is (an inject alone never patches a tree, so Apply runs the bypass)."""
+    states = [(im or {}).get("bypass") for im in (info.get("images") or [])]
+    armed = any(st == "armed" for st in states)
+    return (not armed and any(st == "bypassed" for st in states)), armed
+
+
+def rows_from_inspect(info):
+    """``(rows, warnings)`` - the image list of an inspect report as form
+    rows.  A missing source is kept as a row (its device names it); media
+    with a recorded source becomes a spec the tools can render again, media
+    without one keeps the card's file name (see :func:`on_card_fields`)."""
+    rows, warnings = [], []
+    for i, im in enumerate(info.get("images") or []):
+        im = im or {}
+        row = ImageRow(path=host_path(im.get("source") or ""),
+                       title=im.get("title") or "",
+                       subtitle=im.get("subtitle") or "",
+                       device=im.get("device") or "")
+        if im.get("art_source"):
+            row.art, row.art_video, row.art_time = \
+                split_art_source(im["art_source"])
+        elif im.get("art"):
+            row.art, row.art_on_card = im["art"], True
+        else:
+            row.art = "none"
+        if im.get("anim_source"):
+            (row.anim, row.anim_start, row.anim_seconds, row.anim_fps) = \
+                split_anim_source(im["anim_source"])
+        elif im.get("anim"):
+            row.anim, row.anim_on_card = im["anim"], True
+        else:
+            row.anim = "none"
+        if im.get("music"):
+            row.music, row.music_on_card = im["music"], True
+        else:
+            row.music = "none"
+        if not row.path:
+            warnings.append("Image %d: this card does not record which .raw "
+                            "it was built from (%s)."
+                            % (i, row.device or "no device"))
+        elif im.get("source_exists") is False or not os.path.isfile(row.path):
+            warnings.append("Image %d: %s is not on this machine - the menu "
+                            "can still be changed, but the card cannot be "
+                            "rebuilt here." % (i, row.path))
+        rows.append(row)
+    return rows, warnings
+
+
+def form_from_inspect(info, card, media_dir="", selector_dir=None):
+    """The whole report as a :class:`MultibootForm`, plus its warnings:
+    what 'Load card…' puts in the form and remembers as the baseline the
+    live form is diffed against."""
+    rows, warnings = rows_from_inspect(info)
+    warnings = list(info.get("warnings") or []) + warnings
+    if any(on_card_fields(r) for r in rows):
+        # One line however many fields: the tree marks each of them '(on the
+        # card)', and the point is the same for all - kept and drawn as they
+        # are, replaceable, not re-makeable.
+        warnings.append(
+            "Some media on this card has no source recorded (the rows above "
+            "mark it '(on the card)'): it is kept and drawn as it is, and "
+            "can be replaced - choose auto, none or a file - but not re-made "
+            "from what made it.")
+    move, why = split_sound_source(info.get("sound_move"), "move sound")
+    if why:
+        warnings.append(why)
+    confirm, why = split_sound_source(info.get("sound_confirm"),
+                                      "confirm sound")
+    if why:
+        warnings.append(why)
+    ticked, _armed = bypass_state(info)
+
+    def _int_of(key, default):
+        val = info.get(key)
+        try:
+            return default if val is None else int(val)
+        except (TypeError, ValueError):
+            return default
+    form = MultibootForm(
+        images=rows, out=card, sound_move=move, sound_confirm=confirm,
+        volume=_int_of("volume", 50), timeout=_int_of("timeout", 15),
+        default=_int_of("default", 0), bypass=ticked,
+        media_dir=media_dir if (media_dir and os.path.isfile(
+            os.path.join(media_dir, "media.json"))) else "",
+        selector_dir=selector_dir or DEFAULT_SELECTOR_DIR)
+    return form, warnings
+
+
+#: The menu fields an inject rewrites, in the order the tab names them.
+#: Everything NOT here is the image list, and that needs a full build.
+MENU_FIELD_ORDER = ("title", "subtitle", "art", "animation", "music",
+                    "move sound", "confirm sound", "volume", "countdown",
+                    "default", "bypass")
+
+#: Of those, the ones the media has to be rendered again for.
+MEDIA_FIELDS = ("art", "animation", "music", "move sound", "confirm sound")
+
+
+def _row_key(row):
+    """What makes an image row THE SAME image: its source file, or the card
+    device it came from when this machine does not have the file."""
+    p = (row.path or "").strip().strip('"')
+    return _norm(p) if p else "device:" + (row.device or "?")
+
+
+def _menu_fields(before, after):
+    """The set of menu field names that differ between two forms."""
+    changed = set()
+    for b, a in zip(before.images, after.images):
+        if (b.title or "").strip() != (a.title or "").strip():
+            changed.add("title")
+        if (b.subtitle or "").strip() != (a.subtitle or "").strip():
+            changed.add("subtitle")
+        if art_spec(b) != art_spec(a) or b.art_on_card != a.art_on_card:
+            changed.add("art")
+        if anim_spec(b) != anim_spec(a) or b.anim_on_card != a.anim_on_card:
+            changed.add("animation")
+        if (_media_value(b.music) != _media_value(a.music)
+                or b.music_on_card != a.music_on_card):
+            changed.add("music")
+    if _media_value(before.sound_move) != _media_value(after.sound_move):
+        changed.add("move sound")
+    if _media_value(before.sound_confirm) != _media_value(after.sound_confirm):
+        changed.add("confirm sound")
+    for name, b, a in (("volume", before.volume, after.volume),
+                       ("countdown", before.timeout, after.timeout),
+                       ("default", before.default, after.default)):
+        if int(b) != int(a):
+            changed.add(name)
+    if bool(before.bypass) != bool(after.bypass):
+        changed.add("bypass")
+    return changed
+
+
+def diff_forms(before, after):
+    """``(menu, rebuild)`` - what changed since the card was loaded, in the
+    two buckets the tab acts on: *menu* is what 'Apply to card' writes with
+    an inject, *rebuild* is what only 'Build & verify' can do (the image
+    list: its length, its order, the files themselves)."""
+    rebuild = []
+    b_keys = [_row_key(r) for r in before.images]
+    a_keys = [_row_key(r) for r in after.images]
+    if len(b_keys) != len(a_keys):
+        rebuild.append("%d image%s -> %d" % (len(b_keys),
+                                             "" if len(b_keys) == 1 else "s",
+                                             len(a_keys)))
+    elif b_keys != a_keys:
+        rebuild.append("reordered" if sorted(b_keys) == sorted(a_keys)
+                       else "an image was replaced")
+    menu = [f for f in MENU_FIELD_ORDER if f in _menu_fields(before, after)]
+    return menu, rebuild
+
+
+def media_specs_changed(before, after):
+    """Whether the media has to be rendered again before an inject - the
+    art, animation, music and the two sounds.  The volume is not here: it
+    reaches the card through images.conf, which the inject writes."""
+    if len(before.images) != len(after.images):
+        return True
+    return any(f in MEDIA_FIELDS for f in _menu_fields(before, after))
+
+
+def edit_status_text(card, menu, rebuild):
+    """The tab's one line about a loaded card: what Apply to card would
+    write, or why only a rebuild can."""
+    name = os.path.basename(card) or card
+    if rebuild:
+        msg = ("The image list changed (%s) - Build & verify writes a new "
+               "card; Apply to card only rewrites the menu of %s."
+               % ("; ".join(rebuild), name))
+        if menu:
+            msg += "  %d menu change%s would ride along: %s." % (
+                len(menu), "" if len(menu) == 1 else "s", ", ".join(menu))
+        return msg
+    if not menu:
+        return ("Editing %s: no changes yet. Every field above came off the "
+                "card; change one and Apply to card writes it back in "
+                "seconds." % name)
+    return "Apply to card: %d menu change%s (%s) -> %s, no rebuild." % (
+        len(menu), "" if len(menu) == 1 else "s", ", ".join(menu), name)
+
+
 # ---------------------------------------------------------------------------
 # the size plan
 # ---------------------------------------------------------------------------
@@ -794,6 +1233,16 @@ class MultibootPanel:
         self._loading = False           # editor <- row, not row <- editor
         self._out_auto_value = ""       # the last output path WE filled in
         self._plan_info = None
+        #: EDITING MODE.  Set by a load: the card the form came off, the
+        #: directory its media was extracted into, the form as it was read
+        #: (the baseline every diff is against), the report itself, and
+        #: whether any games tree is still un-bypassed.  ``_loaded_card`` is
+        #: "" for the ordinary build-a-new-card flow.
+        self._loaded_card = ""
+        self._loaded_form = None
+        self._loaded_info = None
+        self._armed = False
+        self._media_override = ""       # the loaded card's media dir
         self._out_var = tk.StringVar()
         self._move_var = tk.StringVar(value="auto")
         self._confirm_var = tk.StringVar(value="auto")
@@ -817,6 +1266,11 @@ class MultibootPanel:
                     self._ed_art_time, self._ed_anim_start,
                     self._ed_anim_seconds, self._ed_anim_fps):
             var.trace_add("write", lambda *_a: self._editor_changed())
+        # ...and the menu's own fields, so the 'what would Apply write' line
+        # follows every keystroke while a card is loaded.
+        for var in (self._move_var, self._confirm_var, self._volume_var,
+                    self._timeout_var, self._default_var, self._bypass_var):
+            var.trace_add("write", lambda *_a: self._update_edit_status())
         # The preview.  Frames are cached per (form fingerprint, highlight,
         # frame index) -> PPM path; the frame counts per (fingerprint,
         # highlight), learned from the selector's own log line.
@@ -908,6 +1362,7 @@ class MultibootPanel:
         self._build_menu(frame, pad)
         self._build_output(frame, pad)
         self._build_actions(frame, pad)
+        self._build_edit_row(frame, pad)
         self._plan_lbl = ttk.Label(frame, justify=tk.LEFT, wraplength=820,
                                    text="")
         self._plan_lbl.pack(anchor=tk.W, **pad)
@@ -1143,6 +1598,36 @@ class MultibootPanel:
                              self._bypass_btn, self._add_btn,
                              self._remove_btn, self._up_btn, self._down_btn]
 
+    def _build_edit_row(self, frame, pad):
+        """A card that already exists: read it back into the form, and write
+        the menu changes into it without building anything.
+
+        Its own row, NOT the action row above: this app unmaps the last
+        widgets packed into a row that overflows, and the action row is
+        already six buttons wide on a 1024-pixel desktop."""
+        row = ttk.Frame(frame)
+        row.pack(fill=tk.X, padx=10, pady=(0, 2))
+        ttk.Label(row, text="A card you already built:").pack(side=tk.LEFT)
+        self._load_btn = ttk.Button(row, text="Load card…", width=12,
+                                    command=self._load_card_dialog)
+        self._load_btn.pack(side=tk.LEFT, padx=(8, 0))
+        self._apply_btn = ttk.Button(row, text="Apply to card", width=14,
+                                     command=self.apply_to_card)
+        self._apply_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._action_btns += [self._load_btn, self._apply_btn]
+        ttk.Label(frame, justify=tk.LEFT, wraplength=820, foreground="#888",
+                  text="Load fills every field above from the card - images, "
+                       "titles, subtitles, art, animation, music, sounds, "
+                       "volume, countdown, default, bypass - and the preview "
+                       "then draws that card's own menu. Apply writes those "
+                       "back into it with one inject, in seconds: adding, "
+                       "removing, reordering or replacing an IMAGE is the "
+                       "one thing it cannot do, and needs Build & verify."
+                  ).pack(anchor=tk.W, padx=10)
+        self._edit_lbl = ttk.Label(frame, justify=tk.LEFT, wraplength=820,
+                                   text="")
+        self._edit_lbl.pack(anchor=tk.W, padx=10, pady=(2, 0))
+
     def _build_preview(self, frame, pad):
         box = ttk.LabelFrame(frame, text="Preview - the boot menu as the "
                                          "machine will draw it")
@@ -1241,9 +1726,24 @@ class MultibootPanel:
         return v if v.lower() in _WORDS or not v else os.path.basename(v)
 
     @staticmethod
+    def _cell_image(row):
+        """The Image column: the .raw the image was copied from, said plainly
+        when this machine does not have it (a loaded card names sources that
+        may live on another disk) and when the card names none at all."""
+        p = (row.path or "").strip()
+        if not p:
+            return "(no source recorded%s)" % (
+                " - " + row.device if row.device else "")
+        if not os.path.isfile(p):
+            return p + "   [not on this machine]"
+        return p
+
+    @staticmethod
     def _cell_art(row):
         """The Art column: the word, a picture's name, or ``<video> @3s``."""
         v = (row.art or "").strip()
+        if row.art_on_card:
+            return v + " (on the card)"
         if v.lower() == "video frame":
             name = os.path.basename((row.art_video or "").strip()) or "video?"
             return "%s @%ss" % (name, _num(row.art_time, "0"))
@@ -1256,6 +1756,8 @@ class MultibootPanel:
         """The Animation column: the word or the clip's name, and the clip
         parameters when any is set (``auto @20s 2s 8fps``)."""
         v = MultibootPanel._cell(row.anim)
+        if row.anim_on_card:
+            return v + " (on the card)"
         if v and v.lower() != "none":
             start, secs, fps = (_num(row.anim_start), _num(row.anim_seconds),
                                 _num(row.anim_fps))
@@ -1266,8 +1768,10 @@ class MultibootPanel:
         return v
 
     def _values(self, i, row):
-        return (i, row.path, row.title, row.subtitle, self._cell_art(row),
-                self._cell_anim(row), self._cell(row.music))
+        music = self._cell(row.music) + (" (on the card)"
+                                         if row.music_on_card else "")
+        return (i, self._cell_image(row), row.title, row.subtitle,
+                self._cell_art(row), self._cell_anim(row), music)
 
     def _refresh_tree(self, select=None):
         try:
@@ -1285,6 +1789,7 @@ class MultibootPanel:
         except tk.TclError:
             pass
         self._load_editor()
+        self._update_edit_status()
 
     def _selected(self):
         try:
@@ -1328,6 +1833,13 @@ class MultibootPanel:
         if i is None:
             return
         row = self._rows[i]
+        # A media field typed over is no longer the card's own file: the
+        # value is a spec again, and the tools may render it.
+        for attr, flag, var in (("art", "art_on_card", self._ed_art),
+                                ("anim", "anim_on_card", self._ed_anim),
+                                ("music", "music_on_card", self._ed_music)):
+            if getattr(row, flag) and getattr(row, attr) != var.get():
+                setattr(row, flag, False)
         row.title = self._ed_title.get()
         row.subtitle = self._ed_sub.get()
         row.art = self._ed_art.get()
@@ -1342,6 +1854,7 @@ class MultibootPanel:
             self._tree.item(str(i), values=self._values(i, row))
         except tk.TclError:
             pass
+        self._update_edit_status()
 
     def _sync_editor_states(self):
         """The video-frame fields live only for the 'video frame' art (the
@@ -1413,6 +1926,8 @@ class MultibootPanel:
     def _maybe_default_output(self):
         """Fill the output from the primary unless the user typed their own
         (a path we filled in earlier counts as ours and is replaced)."""
+        if self._loaded_card:
+            return          # a loaded card owns the output box
         cur = self._out_var.get().strip()
         if cur and cur != self._out_auto_value:
             return
@@ -1444,13 +1959,21 @@ class MultibootPanel:
     # the form
     # ------------------------------------------------------------------
 
+    def media_dir(self):
+        """Where this tab's media set lives: the directory a load extracted
+        the card's own media into while a card is loaded, else ``<out
+        dir>/media``.  One answer for the prepare, the build, the preview
+        and the inject - they must never disagree about it."""
+        return self._media_override or media_dir_for(
+            self._out_var.get().strip().strip('"'))
+
     def form(self):
         """The form as a :class:`MultibootForm` - what every command line is
         built from.  ``media_dir`` is set only when a prepared media set is
         actually there (media.json), so a build never names a dir the tool
         would refuse."""
         out = self._out_var.get().strip().strip('"')
-        media = media_dir_for(out)
+        media = self.media_dir()
         return MultibootForm(
             images=[replace(r) for r in self._rows],
             out=out,
@@ -1465,9 +1988,9 @@ class MultibootPanel:
             selector_dir=self._selector_var.get().strip()
             or DEFAULT_SELECTOR_DIR)
 
-    def _validated_form(self):
+    def _validated_form(self, sources=True):
         form = self.form()
-        errs = validate_form(form)
+        errs = validate_form(form, sources=sources)
         if errs:
             self._error("\n".join(errs))
             return None
@@ -1512,10 +2035,12 @@ class MultibootPanel:
             self._plan_lbl.configure(text="")
 
     def _prepare_media(self):
-        form = self._validated_form()
-        if form is None:
+        form = self.form()
+        errs = validate_form(form) + rebuild_blockers(form)
+        if errs:
+            self._error("\n".join(errs))
             return
-        media = media_dir_for(form.out)
+        media = self.media_dir()
         try:
             os.makedirs(media, exist_ok=True)
         except OSError as exc:
@@ -1530,8 +2055,24 @@ class MultibootPanel:
                 "Media preparation failed - see the tool output."))
 
     def _build_card(self):
-        form = self._validated_form()
-        if form is None:
+        form = self.form()
+        # A LOADED CARD IS NOT AN OUTPUT.  After a load the output box holds
+        # the card that was read, so that Apply and the preview name the
+        # same file; a build into it would copy ~7 GB per image over the
+        # very card being edited.  The way out is explicit, not a dialog:
+        # type a different output path (Browse… writes it), or press Apply.
+        if self._loaded_card and _norm(form.out) == _norm(self._loaded_card):
+            self._error(
+                "Build & verify writes a NEW card, and the output is the "
+                "card you loaded (%s). Set 'Card image' to a different path "
+                "to build a copy - or press Apply to card, which rewrites "
+                "the menu of this one in seconds." % self._loaded_card)
+            return
+        # Every reason at once: the form's own, and the media a loaded card
+        # carries that nothing here can render into a new one.
+        errs = validate_form(form) + rebuild_blockers(form)
+        if errs:
+            self._error("\n".join(errs))
             return
         if os.path.exists(form.out):
             if not self._confirm_overwrite(form.out):
@@ -1625,6 +2166,281 @@ class MultibootPanel:
             on_done=lambda rc, failed, _t: self._ok(
                 "Validator bypassed on %s - flash it again." % path
                 if rc == 0 else "The bypass failed - see the tool output."))
+
+    # ------------------------------------------------------------------
+    # loading a card, and writing the menu back into it
+    # ------------------------------------------------------------------
+
+    def _load_card_dialog(self):
+        if self._busy:
+            self._error("Wait for the current run to finish first.")
+            return
+        path = filedialog.askopenfilename(
+            title="Pick the multi-image card to read into the form",
+            filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
+        if path:
+            self.load_card(path)
+
+    def load_card(self, path):
+        """Read an existing multi-image card into the form: two inspects on
+        the worker (the tool's table into the pane, the same read as JSON
+        for the fields), the card's media extracted beside it, and then
+        :meth:`load_inspect`.  False when the tab refused to start."""
+        path = (path or "").strip().strip('"')
+        if not os.path.isfile(path):
+            self._error("No such card image: %s" % path)
+            return False
+        if under_library(path):
+            self._error("That card is in the library (%s); copy it out "
+                        "first - Apply to card writes into the card it "
+                        "read." % LIBRARY_PREFIXES[0])
+            return False
+        if self._busy:
+            self._error("A run is already in progress.")
+            return False
+        media = loaded_media_dir(path)
+        try:
+            os.makedirs(media, exist_ok=True)
+        except OSError as exc:
+            self._error("Cannot create %s: %s" % (media, exc))
+            return False
+        self._ok("Reading %s…" % path)
+        seen = {}
+
+        def step(label, rc, text):
+            if label == INSPECT_JSON and rc == 0:
+                seen["info"] = parse_inspect(text)
+
+        def done(rc, failed, texts):
+            if rc != 0:
+                why = parse_refusal(texts.get(failed, "")) or \
+                    "%s failed (exit %d) - see the tool output." % (failed, rc)
+                self._error("Cannot read %s: %s" % (path, why))
+                return
+            info = seen.get("info")
+            if not isinstance(info, dict):
+                self._error("Cannot read %s: the inspect printed no JSON "
+                            "report - see the tool output." % path)
+                return
+            self.load_inspect(info, path, media)
+        return self._run_commands(inspect_commands(path, media), on_step=step,
+                                  on_done=done, quiet=(INSPECT_JSON,))
+
+    def load_inspect(self, info, card, media_dir=None):
+        """Fill the whole form from an inspect report and go into EDITING
+        mode.  The public seam: the loader above, the tests and the
+        screenshot script all come through here, so none of them needs WSL.
+        Returns the warnings it put on the tab."""
+        card = (card or "").strip().strip('"')
+        media_dir = media_dir if media_dir is not None \
+            else loaded_media_dir(card)
+        form, warnings = form_from_inspect(
+            info, card, media_dir, self._selector_var.get().strip())
+        self._rows = list(form.images)
+        self._media_override = media_dir
+        self._loading = True
+        try:
+            self._out_var.set(card)
+            self._out_auto_value = ""
+            self._move_var.set(form.sound_move)
+            self._confirm_var.set(form.sound_confirm)
+            self._volume_var.set(str(int(form.volume)))
+            self._timeout_var.set(str(int(form.timeout)))
+            self._default_var.set(str(int(form.default)))
+            self._bypass_var.set(bool(form.bypass))
+        finally:
+            self._loading = False
+        _ticked, self._armed = bypass_state(info)
+        self._loaded_card = card
+        self._loaded_info = info
+        # The baseline is read back through form(), not the form built above:
+        # what every diff compares is what the widgets now hold.
+        self._loaded_form = self.form()
+        # The preview's frames were drawn for the form that was there before;
+        # the media dir has changed under them, so none of them is this card.
+        self._pv_cache.clear()
+        self._pv_totals.clear()
+        self._pv_shown = None
+        self._pv_ready = None
+        self._hl_touched = False
+        self._stop_play(None)
+        self._pv_photo = None
+        self._pv_placeholder()
+        self._pv_say("Render preview draws THIS card's menu - its own media "
+                     "is in %s, so nothing is prepared first." % media_dir)
+        self._refresh_tree(select=0)
+        self._update_edit_status()
+        head = "Loaded %s: %d image%s." % (
+            os.path.basename(card), len(self._rows),
+            "" if len(self._rows) == 1 else "s")
+        # Notes, not failures: a card that loads with things worth saying
+        # (an image whose .raw is elsewhere, a sound with no provenance) has
+        # still loaded, so the line stays the ordinary colour and says them.
+        self._ok(head + ("\n" + "\n".join(warnings) if warnings
+                         else " Edit the menu, then Apply to card."))
+        for line in warnings:
+            self._write("[load] " + line)
+        return warnings
+
+    def _apply_blockers(self, form, prepare):
+        """Why the loaded card cannot be injected with this form.  Not
+        :func:`validate_form`: an inject opens none of the .raw sources, so
+        a source that is not on this machine is no reason to refuse."""
+        errs = []
+        if not os.path.isfile(self._loaded_card):
+            errs.append("The card is gone: %s" % self._loaded_card)
+        for i, row in enumerate(form.images):
+            for what, text in (("title", row.title),
+                               ("subtitle", row.subtitle)):
+                if _BAD_TEXT.search(text or ""):
+                    errs.append("Image %d: the %s must not contain | ; $ "
+                                "or `." % (i, what))
+            on_card = dict(on_card_fields(row))
+            for what, val in (("art", row.art), ("animation", row.anim),
+                              ("music", row.music)):
+                if what in on_card:
+                    if prepare:
+                        errs.append(
+                            "Image %d: the %s (%s) is the card's own file, "
+                            "with no source recorded - choose auto, none or "
+                            "a file for it before changing any media."
+                            % (i, what, val))
+                elif is_file_choice(val) and not os.path.isfile(val.strip()):
+                    errs.append("Image %d: %s file not found: %s"
+                                % (i, what, val))
+            if prepare and not os.path.isfile((row.path or "").strip()):
+                for what, spec in (("art", art_spec(row)),
+                                   ("animation", anim_spec(row))):
+                    if spec == "auto" or spec.startswith("auto@"):
+                        errs.append(
+                            "Image %d: the %s is 'auto', which is rendered "
+                            "from %s - and that file is not on this machine. "
+                            "Point it at a file, or make the change where "
+                            "the image is." % (i, what, row.path or
+                                               row.device or "its image"))
+        primary = (form.images[0].path or "").strip() if form.images else ""
+        for what, val in (("move sound", form.sound_move),
+                          ("confirm sound", form.sound_confirm)):
+            if is_file_choice(val) and not os.path.isfile(val.strip()):
+                errs.append("The %s file was not found: %s" % (what, val))
+            elif (prepare and (val or "").strip().lower() == "auto"
+                  and not os.path.isfile(primary)):
+                # 'auto' decodes the sound off the PRIMARY image.
+                errs.append(
+                    "The %s is 'auto', which is decoded from the primary "
+                    "image (%s) - and that file is not on this machine. Pick "
+                    "'synth', 'none' or a WAV before changing any media."
+                    % (what, primary or "not recorded"))
+        n = len(form.images)
+        if not 0 <= int(form.volume) <= 100:
+            errs.append("Volume is 0-100.")
+        if int(form.timeout) < 0:
+            errs.append("The countdown cannot be negative (0 = wait for "
+                        "START).")
+        if n and not 0 <= int(form.default) < n:
+            errs.append("The default image must be one of 0..%d." % (n - 1))
+        return errs
+
+    def apply_to_card(self):
+        """'Apply to card': the menu changes into the loaded card with an
+        inject (plus a prepare when a media field changed, plus the bypass
+        when it is ticked and a tree is still armed), then a last inspect
+        that reads the card back.  Seconds, not a rebuild.  False when the
+        tab refused."""
+        if not self._loaded_card:
+            self._error("Load a card first - Apply to card writes into the "
+                        "card the form was read from.")
+            return False
+        if self._busy:
+            self._error("A run is already in progress.")
+            return False
+        form = self.form()
+        menu, rebuild = diff_forms(self._loaded_form, form)
+        if rebuild:
+            self._error(
+                "The image list changed (%s). Apply to card only rewrites "
+                "the menu of %s; adding, removing, reordering or replacing "
+                "an image means copying the images again - set 'Card image' "
+                "to a new path and press Build & verify."
+                % ("; ".join(rebuild), os.path.basename(self._loaded_card)))
+            return False
+        prepare = media_specs_changed(self._loaded_form, form)
+        errs = self._apply_blockers(form, prepare)
+        if errs:
+            self._error("\n".join(errs))
+            return False
+        media = self.media_dir()
+        if prepare:
+            try:
+                os.makedirs(media, exist_ok=True)
+            except OSError as exc:
+                self._error("Cannot create %s: %s" % (media, exc))
+                return False
+            # The prepare writes media.json into that dir; the inject must
+            # name it even when the card carried no media before.
+            form = replace(form, media_dir=media)
+        bypass = bool(form.bypass) and self._armed
+        cmds = apply_commands(form, self._loaded_card, media,
+                              prepare=prepare, bypass=bypass)
+        self._ok("Writing the menu into %s%s…" % (
+            self._loaded_card, " (media first)" if prepare else ""))
+
+        def step(label, rc, text):
+            if label == INSPECT_JSON and rc == 0:
+                info = parse_inspect(text)
+                if isinstance(info, dict):
+                    self._loaded_info = info
+                    _ticked, self._armed = bypass_state(info)
+
+        def done(rc, failed, _texts):
+            if rc != 0:
+                self._error("Apply to card failed at %s (exit %d) - see the "
+                            "tool output." % (failed or "the start", rc))
+                self._update_edit_status()
+                return
+            # The card now says what the form says: the tools wrote it and
+            # the inject printed the conf.  So the baseline becomes the form
+            # that was applied - re-deriving it from the card would show
+            # phantom changes for the media it cannot describe (a music bed
+            # is a file name on the card, whatever file it came from).
+            self._loaded_form = form
+            if prepare:
+                self._pv_ready = preview_fingerprint(form)
+            self._ok("Card updated: %s (%s)%s" % (
+                self._loaded_card,
+                ", ".join(menu) if menu else "no menu change",
+                " - flash it again" if bypass else ""))
+            self._update_edit_status()
+        return self._run_commands(cmds, on_step=step, on_done=done,
+                                  quiet=(INSPECT_JSON,))
+
+    def _update_edit_status(self):
+        """The one line that says what Apply to card would do, and whether
+        the button can do it.  Called after every keystroke."""
+        lbl = getattr(self, "_edit_lbl", None)
+        btn = getattr(self, "_apply_btn", None)
+        if lbl is None or btn is None:
+            return
+        if not self._loaded_card or self._loaded_form is None:
+            try:
+                lbl.configure(text="", foreground="#888")
+                btn.configure(state=tk.DISABLED)
+            except tk.TclError:
+                pass
+            return
+        menu, rebuild = diff_forms(self._loaded_form, self.form())
+        th = THEMES.get(self._theme_fn()) or THEMES["dark"]
+        text = edit_status_text(self._loaded_card, menu, rebuild)
+        if self._loaded_form.bypass and not self.form().bypass:
+            text += ("  (Unticking the bypass cannot un-patch a card - "
+                     "build a fresh one for that.)")
+        try:
+            lbl.configure(text=text,
+                          foreground=th["error"] if rebuild else th["fg"])
+            btn.configure(state=tk.DISABLED
+                          if (rebuild or self._busy) else tk.NORMAL)
+        except tk.TclError:
+            pass
 
     # ------------------------------------------------------------------
     # the preview
@@ -1756,9 +2572,24 @@ class MultibootPanel:
             "?" if highlight is None else highlight, what))
         return True
 
+    def needs_prepare(self, form=None):
+        """Whether the preview has to render the media before it can draw.
+
+        NO for a card just loaded whose media fields are still the card's
+        own: those files are already in the dir the load extracted, and a
+        prepare would only copy them over themselves (a 'file' spec pointing
+        into the directory selectmedia writes).  YES the moment one of them
+        is changed, and always outside editing mode."""
+        if not self._loaded_card or self._loaded_form is None:
+            return True
+        form = self.form() if form is None else form
+        return media_specs_changed(self._loaded_form, form)
+
     def render_preview(self):
         """The Render preview button: the frame the spinboxes point at."""
-        form = self._validated_form()
+        # A loaded card whose media has not been touched draws from the card
+        # itself, so the .raw files it was built from need not be here.
+        form = self._validated_form(sources=self.needs_prepare())
         if form is None:
             self._pv_say("Fix the form first - see the line above.",
                          error=True)
@@ -1771,13 +2602,15 @@ class MultibootPanel:
     def _render_frames(self, form, hl, frames):
         """Render *frames* of the menu with image *hl* highlighted, on the
         worker: ensure a selector, prepare the media (both skipped while
-        the form's fingerprint is the one already prepared), then one
-        snapshot per frame.  Each finished frame lands in the cache; the
-        one the spinboxes point at is shown at once (Play shows its own
-        from the tick).  False when the busy guard refused."""
+        the form's fingerprint is the one already prepared, and the prepare
+        also skipped for a loaded card's own media - see
+        :meth:`needs_prepare`), then one snapshot per frame.  Each finished
+        frame lands in the cache; the one the spinboxes point at is shown at
+        once (Play shows its own from the tick).  False when the busy guard
+        refused."""
         fp = preview_fingerprint(form)
         pv = preview_dir_for(form.out)
-        media = media_dir_for(form.out)
+        media = self.media_dir()
         conf = os.path.join(pv, "images.conf")
         try:
             os.makedirs(pv, exist_ok=True)
@@ -1793,7 +2626,12 @@ class MultibootPanel:
         fresh = self._pv_ready != fp or not self._pv_bin
         if fresh:
             cmds += ensure_selector_commands(form)
-            cmds += preview_prepare_commands(form, media)
+            if self.needs_prepare(form):
+                cmds += preview_prepare_commands(form, media)
+            else:
+                # The card's own media, straight out of the extraction: it
+                # matches the form because the form came out of the card.
+                self._pv_ready = fp
         paths = {}
         for n in frames:
             ppm = frame_path(pv, hl, n)
@@ -1855,7 +2693,7 @@ class MultibootPanel:
             self._stop_play(None)
             return
         form = self.form()
-        errs = validate_form(form)
+        errs = validate_form(form, sources=self.needs_prepare(form))
         if errs:
             self._stop_play("Fix the form first - see the line above.")
             self._error("\n".join(errs))
@@ -1949,8 +2787,11 @@ class MultibootPanel:
                         btn.configure(state=tk.DISABLED)
                     except tk.TclError:
                         pass
+        # ...and Apply to card is only ever live for a loaded card whose
+        # image list still matches it.
+        self._update_edit_status()
 
-    def _run_commands(self, cmds, on_step=None, on_done=None):
+    def _run_commands(self, cmds, on_step=None, on_done=None, quiet=()):
         """Run ``[(label, argv), ...]`` in order on a worker, streaming every
         line into the pane; stop at the first failure.  An *argv* may be a
         callable ``fn(texts)`` - evaluated on the worker just before its
@@ -1959,10 +2800,16 @@ class MultibootPanel:
         text)`` and ``on_done(rc, failed_label, {label: text})`` are called
         on the main loop.  False when a run is already in flight - the busy
         guard, and the only one: two builds into one file is a corrupt card.
+
+        A label in *quiet* is still run and still captured, but its lines
+        do not go into the pane while it succeeds: the load's JSON report is
+        for the form, and the table beside it is what a person reads.  A
+        quiet step that FAILS prints everything it said.
         """
         if self._busy:
             self._error("A run is already in progress.")
             return False
+        quiet = frozenset(quiet)
         self._set_busy(True)
 
         def run():
@@ -1989,16 +2836,21 @@ class MultibootPanel:
                     break
                 self._proc = proc
                 lines = []
+                echo = label not in quiet
                 try:
                     for raw in proc.stdout:
                         line = raw.decode("utf-8", "replace").rstrip()
                         lines.append(line)
-                        self._append(line)
+                        if echo:
+                            self._append(line)
                 except Exception:                       # noqa: BLE001
                     pass                                # pipe closed under us
                 rc = proc.wait()
                 self._proc = None
                 texts[label] = "\n".join(lines)
+                if not echo and rc != 0:
+                    for line in lines:                  # it failed: say why
+                        self._append(line)
                 self._append("[multiboot] %s: exit %d" % (label, rc))
                 if on_step is not None:
                     self._ui(lambda l=label, r=rc, t=texts[label]:

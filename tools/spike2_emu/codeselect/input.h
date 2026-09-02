@@ -1,21 +1,27 @@
 /* input.h - the menu's buttons, from one of two backends.
  *
  *   hw     the machine: node bus 0x11 scans of node 8 (flippers) and node 1
- *          (START) over /dev/ttymxc1, plus the node-0 cabinet word over
- *          /dev/spidev1.0 (Service Select/Plus/Minus/Back).
+ *          (START, bit 11, and the lockdown-bar Action button, bit 2 - one
+ *          reply carries both) over /dev/ttymxc1, plus the node-0 cabinet
+ *          word over /dev/spidev1.0 (Service Select/Plus/Minus/Back).
  *   padsw  the emulator: the rig's keyboard channel file (PAD_SW_SHM),
  *          switch ids resolved from the title's switch_list.txt.
  *
  * Both backends sample raw levels and feed input_sample(); the shared
  * debouncer turns two agreeing samples into a state and each press edge into
  * one event. Releases produce no event.
+ *
+ * EV_ACTION is the button on the lockdown bar ("Action Button" on the newer
+ * lists, "LOCKDOWN BUTTON" on the older ones). It is its own event so the
+ * '[select] key:' line names the button that was actually pressed; the menu
+ * treats it exactly as EV_START.
  */
 #ifndef CODESELECT_INPUT_H
 #define CODESELECT_INPUT_H
 
 enum sel_event {
     EV_NONE = 0,
-    EV_LEFT, EV_RIGHT, EV_START, EV_SELECT, EV_PLUS, EV_MINUS, EV_BACK,
+    EV_LEFT, EV_RIGHT, EV_START, EV_ACTION, EV_SELECT, EV_PLUS, EV_MINUS, EV_BACK,
     EV_COUNT
 };
 #define KEY_COUNT (EV_COUNT - 1)      /* keys are events minus EV_NONE */

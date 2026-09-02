@@ -68,8 +68,20 @@ if [ -n "${PAD_CARD:-}" ]; then
     # only kind this design is for. A refusal, not a silent fallback, when
     # the selector is not built: a run that asked for a menu and got the
     # primary without a word is the fault every gate in this rig exists for.
+    #
+    # PAD_SELECT=1 IS THE ANSWER HERE, NOT THE QUESTION (2026-09-02). Whether
+    # a menu is wanted is decided ONCE, by watch.sh, from the card itself
+    # (pad_select_wanted -> parts.py --multiboot, the one definition of a
+    # multi-boot card) and handed down as a plain 1 or 0 in this script's
+    # environment - so a run that mounted the extra partitions cannot then
+    # decide against a menu, and a run that did not cannot decide for one.
+    # `= 1` rather than `-n` for exactly that reason: 0 is a real answer now
+    # and it means no. Started by hand instead of through watch.sh
+    # (runbridge.sh, runlim.sh, savetest*.sh), an unset PAD_SELECT still means
+    # no menu - the behaviour those measurement scripts have always had, and
+    # they have no selector built to run one with.
     SEL_DIRS=""
-    if [ -n "${PAD_SELECT:-}" ]; then
+    if [ "${PAD_SELECT:-}" = 1 ]; then
         # Every refusal below leaves through `rmdir "$R/games/$GAME"`: the
         # stub the mkdir above made is the bind mountpoint, and the EXIT
         # trap that removes it is not installed until further down - so an

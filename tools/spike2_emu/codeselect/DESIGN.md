@@ -45,13 +45,23 @@ the primary image — the card degrades to a stock card, never to a brick.
 
 ## Behaviour in the emulator (the proof of concept)
 
-`PAD_CARD=<multi-image .raw> PAD_SELECT=1 watch.sh` — the same rootfs, the
+`PAD_CARD=<multi-image .raw> watch.sh` — the same rootfs, the
 same chroot, the same GL bridge window: the selector draws in the game window,
 the keyboard flipper keys move the highlight, the START key confirms, and the
 run continues into the chosen image's game exactly as a plain card run does.
 The validation oracle is the same one the rig already uses: the Tech Alerts /
 attract screen past 90 s with no `GAME VALIDATION ERROR` line, read by the
 screen oracle and by a screenshot.
+
+`PAD_SELECT` NEED NOT BE SET (2026-09-02). It is a three-way switch: UNSET
+asks the CARD — `parts.py --multiboot`, the one definition of a multi-boot
+card (the rootfs holds `/usr/local/codeselect/codeselect` and its
+`images.conf` names two or more images) — `1` forces the menu on whatever the
+card looks like, and `0` forces it off. watch.sh decides once, at the top of
+the run, says what it decided and why, and exports the resolved `1`/`0` to
+run_game.sh so the two cannot disagree; the app's Boot selector tickbox shows
+the same answer and is the override. David asked for it in those words: "if it
+has multi-boot, i expect to see the multi-boot screen."
 
 ## Card layout
 

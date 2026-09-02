@@ -84,6 +84,26 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **91. A run started as the ORDINARY USER leaves a card mount root's
+      `killgame.sh` cannot clear, so its Stop ends in
+      `PAD_STOP_NEEDS_WSL_RESTART`.** `S3 D2` *(Found 2026-09-02 while
+      proving item 90's Stop fix; pre-existing, off the app's path.)*
+      `cardmount.sh` adds `allow_other` only for a root mount, and
+      `/etc/fuse.conf`'s `user_allow_other` is commented out, so a user
+      run's FUSE mount is readable by that user alone. `killgame.sh` then
+      enumerates mounts with the glob `"$PAD_HOME/card/"*/`, which cannot
+      stat the mountpoint as root, matches nothing, and skips the unmount
+      pass entirely - the sweep ends "still running: 2" and offers a WSL
+      restart. **Not on the app's path today**: save states have been on
+      since 2026-08-10, so the app always launches root + `PAD_PIVOT`; it
+      bites a hand-run `watch.sh` and the container. The fix is to
+      enumerate from `/proc/self/mounts` (which lists every mount whatever
+      its permissions - the same source `cardmount.sh`'s own stale-mount
+      test already trusts) instead of the glob.
+      — S3: a workaround exists (run as root) and the app never hits it.
+      D2: one loop in one script, plus the escaped-space parse
+      `/proc/self/mounts` needs ( ), which cardmount.sh already does.
+
 - [ ] **90. A BOOT-TIME CODE SELECTOR: one SD card, several game images,
       pick one with the flippers before the game starts — first in the
       emulator, then on David's machine.** `S2 D4`

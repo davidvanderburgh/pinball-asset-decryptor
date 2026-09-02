@@ -2,8 +2,9 @@
  *
  * Shows one card per game image on the LCD (a row of up to four, a carousel
  * beyond that), moves the highlight with the flippers (or Service -/+),
- * confirms with START (or Service Select), boots the highlighted image when
- * the countdown runs out, and writes the chosen index to --out (and --last).
+ * confirms with START, with the lockdown-bar ACTION button or with Service
+ * Select, boots the highlighted image when the countdown runs out, and writes
+ * the chosen index to --out (and --last).
  * Exit 0 = a choice was written, 2 = no choice.
  *
  * Each card can carry a still picture (PNG), an animation (GIF, ticking only
@@ -506,7 +507,7 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
 {
     float s = L->s;
     int W = g->w, slot;
-    char buf[300];
+    char buf[300], widest[300];
 
     gfx_fill(g, C_BG);
     gfx_text_center(g, f, 60 * s, W / 2, (int)(96 * s), "SELECT GAME CODE", C_TITLE);
@@ -525,13 +526,23 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
         gfx_text_center(g, f, 26 * s, W / 2, (int)(602 * s), buf, C_FOOT);
     }
 
-    gfx_text_center(g, f, 30 * s, W / 2, (int)(648 * s),
-                    "LEFT / RIGHT FLIPPER: choose      START: boot", C_FOOT);
-    if (remain >= 0)
-        snprintf(buf, sizeof buf, "booting %s in %d s", c->img[hl].title, remain);
-    else
-        snprintf(buf, sizeof buf, "press START to boot %s", c->img[hl].title);
-    gfx_text_center(g, f, 38 * s, W / 2, (int)(718 * s), buf, C_COUNT);
+    /* Both bottom lines are fitted to the glass: a 199-character title (the
+     * conf's limit) must shrink, never run off the edge. The countdown line is
+     * sized from its LONGEST form, the 'press ...' one, so the size does not
+     * wobble as the digits drop from 10 to 9. */
+    {
+        static const char foot[] = "LEFT / RIGHT FLIPPER: choose      START or ACTION: boot";
+        const int wmax = W - (int)(80 * s);
+        gfx_text_center(g, f, gfx_fit_px(f, foot, wmax, 30 * s, 20 * s), W / 2,
+                        (int)(648 * s), foot, C_FOOT);
+        snprintf(widest, sizeof widest, "press START or ACTION to boot %s", c->img[hl].title);
+        if (remain >= 0)
+            snprintf(buf, sizeof buf, "booting %s in %d s", c->img[hl].title, remain);
+        else
+            snprintf(buf, sizeof buf, "%s", widest);
+        gfx_text_center(g, f, gfx_fit_px(f, widest, wmax, 38 * s, 24 * s), W / 2,
+                        (int)(718 * s), buf, C_COUNT);
+    }
 }
 
 /* the LOADING frame: the chosen card's picture (when it has one) above the
@@ -787,8 +798,8 @@ int main(int argc, char **argv)
                 dirty = 1;
                 audio_play(au, media.move, 0);
                 break;
-            case EV_START: case EV_SELECT:
-                chosen = hl;
+            case EV_START: case EV_ACTION: case EV_SELECT:
+                chosen = hl;                        /* ACTION = the lockdown-bar button */
                 break;
             default:
                 break;                          /* BACK: ignored */

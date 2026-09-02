@@ -3,8 +3,9 @@
  * Everything here is what the game itself does on the wire (godzilla_pro
  * 1.15.0 ELF, read_nodebus sections A-F): the tty setup, the RTS pulse, the
  * frame format, the unaddressed bring-up, the enumeration, the identity reads
- * and the 0x11 switch scan of node 8 (flippers) and node 1 (START). The
- * cabinet word (Service Select/Plus/Minus/Back) is the 8-byte SPI transfer.
+ * and the 0x11 switch scan of node 8 (flippers) and node 1 (START and the
+ * lockdown-bar Action button - two bits of the SAME reply, no extra traffic).
+ * The cabinet word (Service Select/Plus/Minus/Back) is the 8-byte SPI transfer.
  *
  * Every ioctl/termios failure is logged and tolerated so the program still
  * runs on a pty (fakebus.py) or /dev/null. The first exchanges are logged in
@@ -26,7 +27,7 @@
 #include "log.h"
 
 #define NODE_FLIPPERS 8
-#define NODE_START    1
+#define NODE_START    1        /* START (bit 11) and the Action button (bit 2) */
 #define SCAN_MS       25
 #define SPI_MS        10
 #define LOG_EXCHANGES 40       /* hex-log this many exchanges, then only changes */
@@ -373,7 +374,11 @@ static void scan_node(struct hw *h, int slot, long long now)
         input_sample(&h->base, KEY_OF(EV_RIGHT), !((r[3] >> 0) & 1));   /* bit 24 */
         input_sample(&h->base, KEY_OF(EV_LEFT),  !((r[3] >> 1) & 1));   /* bit 25 */
     } else {
-        input_sample(&h->base, KEY_OF(EV_START), !((r[1] >> 3) & 1));   /* bit 11 */
+        input_sample(&h->base, KEY_OF(EV_START),  !((r[1] >> 3) & 1));  /* bit 11 */
+        /* the lockdown-bar button, node 1 bit 2 on every Spike 2 list on this
+         * disk (30 of 31; the beatles list has no such row) - padglhost's
+         * cab_wire table resolves it the same way */
+        input_sample(&h->base, KEY_OF(EV_ACTION), !((r[0] >> 2) & 1));  /* bit 2 */
     }
 }
 

@@ -4,8 +4,16 @@ A multi-image Spike 2 card carries the primary's games partition as p3 and
 each extra image's games partition as a LOGICAL partition (p7, p8...) inside
 the grown extended p4 - the only room a fixed four-primary MBR has. The rig
 runs the card's own selector (an ARM program, chroot'd into the rootfs before
-the game) on ``PAD_SELECT=1``, mounts the partition it chose over
-``games/<title>`` and execs the game exactly as a plain card run does.
+the game), mounts the partition it chose over ``games/<title>`` and execs the
+game exactly as a plain card run does.
+
+WHETHER IT RUNS IS THE CARD'S ANSWER, not a flag someone has to remember
+(2026-09-02, David: "i shouldn't have to check off 'boot selector' in the
+emulate tab. if it has multi-boot, i expect to see the multi-boot screen").
+``PAD_SELECT`` is a three-way switch - unset asks the card, 1 forces the menu
+on, 0 forces it off - with ONE definition of the question (``parts.py
+--multiboot``) and ONE reader of the variable (padpath.sh's
+``pad_select_wanted``), which watch.sh calls once and exports the answer of.
 
 TWO KINDS OF TEST, both without a card, a rootfs or WSL:
 
@@ -405,6 +413,105 @@ def test_rootfs_file_reads_through_debugfs_and_treats_empty_as_absent(
     assert parts.mod.rootfs_file(parts.img, "/nope") is None
 
 
+# ---- --multiboot: the ONE definition of "this card boots into a menu" ------
+# 2026-09-02. The tickbox, watch.sh and run_game.sh each used to have their
+# own idea of when a menu was wanted; now they all ask here. The test is what
+# the MACHINE does at power-up - the rootfs holds the selector AND its
+# images.conf names two or more images - and not what this PC could be made
+# to do, or a rig with codeselect built would call every stock card
+# multi-boot.
+
+SEL_DIR_ENTS = [("codeselect", REG), ("images.conf", REG), ("font.ttf", REG),
+                ("media", DIR)]
+TWO_IMAGES = ("# written by mkmulticard.py\n"
+              "image=/dev/mmcblk0p3|STERN STOCK|1.59.0\n"
+              "image=/dev/mmcblk0p7|TMNT 1987|upscaled\n"
+              "default=0\ntimeout=30\n")
+
+
+def test_multiboot_is_yes_only_with_the_selector_and_two_images(parts, monkeypatch):
+    monkeypatch.setattr(parts.mod, "_cat", lambda *a: TWO_IMAGES)
+    parts.fs[P2 * SECTOR]["/usr/local/codeselect"] = list(SEL_DIR_ENTS)
+    assert parts.mod.multiboot(parts.img) == (
+        "yes", "selector installed, 2 images in images.conf", 2)
+
+
+def test_multiboot_is_no_without_the_selector_binary(parts, monkeypatch):
+    """A stock card. The directory is not there at all - and `no` names the
+    exact path that is missing, so the answer can be checked by hand."""
+    monkeypatch.setattr(parts.mod, "_cat", lambda *a: TWO_IMAGES)
+    state, why, n = parts.mod.multiboot(parts.img)
+    assert (state, n) == ("no", 0)
+    assert "/usr/local/codeselect/codeselect" in why
+    # ...and a directory that exists without the binary in it is the same no.
+    parts.fs[P2 * SECTOR]["/usr/local/codeselect"] = [("images.conf", REG)]
+    assert parts.mod.multiboot(parts.img)[0] == "no"
+
+
+def test_multiboot_is_no_when_the_menu_would_have_one_entry(parts, monkeypatch):
+    parts.fs[P2 * SECTOR]["/usr/local/codeselect"] = list(SEL_DIR_ENTS)
+    monkeypatch.setattr(parts.mod, "_cat",
+                        lambda *a: "image=/dev/mmcblk0p3|STERN|1.59.0\n")
+    state, why, n = parts.mod.multiboot(parts.img)
+    assert (state, n) == ("no", 1)
+    assert "only one games tree" in why
+    # An images.conf that is missing entirely (debugfs answers None) is a no
+    # too, and a different sentence - the two are different card faults.
+    monkeypatch.setattr(parts.mod, "_cat", lambda *a: None)
+    state, why, n = parts.mod.multiboot(parts.img)
+    assert (state, n) == ("no", 0) and "no images" in why
+
+
+def test_multiboot_counts_image_lines_and_ignores_everything_else(parts):
+    """The selector's own parser reads one image per `image=` line, so
+    counting them is counting the entries the MENU would show - a commented
+    line is not one of them."""
+    count = parts.mod.images_conf_count
+    assert count("") == 0
+    assert count(None) == 0
+    assert count("# image=commented out\nimage=a|A|1\n  image=b|B|2  \n"
+                 "default=1\nsound_move=move.wav\n") == 2
+
+
+def test_multiboot_says_unknown_rather_than_no_when_it_cannot_tell(parts, monkeypatch, tmp_path):
+    """'unknown' is a third answer on purpose: the rig prints it and boots the
+    primary, the app leaves its tickbox alone. Calling any of these 'no' is
+    how a machine without debugfs would start reporting every multi-boot card
+    as a plain one."""
+    # not a card at all
+    junk = tmp_path / "notes.txt"
+    junk.write_text("hello", encoding="utf-8")
+    state, why, _n = parts.mod.multiboot(str(junk))
+    assert state == "unknown" and "MBR" in why
+    # missing file
+    assert parts.mod.multiboot(str(tmp_path / "nope.raw"))[0] == "unknown"
+    # no debugfs: every listing answers None
+    monkeypatch.setattr(parts.mod, "_entries", lambda *a, **k: None)
+    state, why, _n = parts.mod.multiboot(parts.img)
+    assert state == "unknown" and "debugfs" in why
+
+
+def test_cli_multiboot_is_one_line_and_an_exit_status(parts, monkeypatch, capsys):
+    """One line on stdout whatever happens, and the exit status is the
+    verdict: 0 yes, 1 no, 2 cannot tell. Both halves are contract - watch.sh
+    reads the status, the app reads the line."""
+    monkeypatch.setattr(parts.mod, "_cat", lambda *a: TWO_IMAGES)
+    parts.fs[P2 * SECTOR]["/usr/local/codeselect"] = list(SEL_DIR_ENTS)
+    rc, out, err = _cli(parts, monkeypatch, capsys, "--multiboot")
+    assert rc == 0 and err == ""
+    assert out == "multiboot: yes - selector installed, 2 images in images.conf\n"
+
+    del parts.fs[P2 * SECTOR]["/usr/local/codeselect"]
+    rc, out, _err = _cli(parts, monkeypatch, capsys, "--multiboot")
+    assert rc == 1 and out.startswith("multiboot: no - ")
+
+    monkeypatch.setattr(sys, "argv", ["parts.py", "--multiboot", "/no/such.raw"])
+    rc = parts.mod.main()
+    out = capsys.readouterr().out
+    assert rc == 2 and out.startswith("multiboot: unknown - "), \
+        "a missing file is answered, not raised: the caller reads exit 2"
+
+
 # ==========================================================================
 # run_game.sh: where the selector runs, and that the exec lines did not move
 # ==========================================================================
@@ -460,9 +567,15 @@ def test_the_selector_runs_without_the_shim_and_with_stdin_closed():
 
 # ---- item 90 v2: N images (the multi layout's tokens) and the media --------
 
+#: The guard every item-90 block sits under, in both scripts. `= 1` and not
+#: `-n` since 2026-09-02: PAD_SELECT is a three-way switch now (unset = ask
+#: the card, 1 = menu, 0 = no menu) and `-n` reads a deliberate 0 as yes.
+SEL_GUARD = 'if [ "${PAD_SELECT:-}" = 1 ]; then'
+
+
 def _select_outer():
     code = _code(_read("run_game.sh"))
-    outer = code[code.index('if [ -n "${PAD_SELECT:-}" ]; then'):]
+    outer = code[code.index(SEL_GUARD):]
     return outer[:outer.index("elif [ -n \"${PAD_GAME_DIR:-}\" ]")]
 
 
@@ -518,7 +631,7 @@ def test_everything_new_in_run_game_is_gated_on_pad_select():
     """A plain run must be byte-for-byte the launch it always was."""
     code = _code(_read("run_game.sh"))
     # The outer preparation sits under the PAD_SELECT test...
-    outer = code[code.index('if [ -n "${PAD_SELECT:-}" ]; then'):]
+    outer = code[code.index(SEL_GUARD):]
     outer = outer[:outer.index("elif [ -n \"${PAD_GAME_DIR:-}\" ]")]
     for needed in ("parts.py\" --list-games", "cardmount.sh\" \"$PAD_CARD\" --part",
                    "codeselect.conf", "--rootfs-file /usr/local/codeselect/images.conf",
@@ -563,14 +676,14 @@ def test_the_choice_file_is_defined_once_and_reused():
 
 def test_the_selecting_flag_exists_only_on_a_pad_select_run():
     text = _read("watch.sh")
-    assert ('if [ -n "${PAD_SELECT:-}" ]; then' in text)
+    assert SEL_GUARD in text
     raise_ = _line_of(text, ': > "$ROOT/dump/selecting"')
     launch = _line_of(text, 'bash "$RIG/run_game.sh" > "$LOG" 2>&1 &')
     assert raise_ < launch, "raised BEFORE the launch, or the menu can be up unflagged"
     # ...and torn down on a plain run, so a stale flag cannot leak forward.
     block = text.split("\n")[raise_ - 8: raise_ + 3]
     assert any('rm -f "$ROOT/dump/selecting"' in ln for ln in block)
-    assert any('if [ -n "${PAD_SELECT:-}" ]; then' in ln for ln in block)
+    assert any(SEL_GUARD in ln for ln in block)
 
 
 def test_the_start_wait_and_the_poll_loop_ride_the_flag_under_a_guard():
@@ -594,7 +707,7 @@ def test_the_start_wait_and_the_poll_loop_ride_the_flag_under_a_guard():
     assert "SEL_WAIT" in wait
     # The poll loop: the same shape as the reloading flag, checked BEFORE the
     # guest-exit test.
-    poll = _line_of(text, 'if [ -n "${PAD_SELECT:-}" ] && [ -f "$ROOT/dump/selecting" ]')
+    poll = _line_of(text, 'if [ "${PAD_SELECT:-}" = 1 ] && [ -f "$ROOT/dump/selecting" ]')
     exit_test = [n for n, ln in enumerate(text.split("\n"), 1)
                  if "if ! pad_guest_up; then" in ln]
     assert any(n > poll for n in exit_test)
@@ -618,7 +731,7 @@ def test_autoattract_is_held_back_until_the_menu_has_chosen():
     assert plain in code
     block = code[code.index('if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then'):]
     block = block[:block.index("PAD_SW_EXERCISE")]
-    assert 'if [ -n "${PAD_SELECT:-}" ]; then' in block
+    assert SEL_GUARD in block
     held = block[:block.index("else")]
     assert 'while [ -f "$f" ]' in held and 'exec bash "$@"' in held
     assert '"$ROOT/dump/selecting" "$SEL_WAIT"' in held
@@ -634,7 +747,7 @@ def test_the_extra_mounts_are_owned_and_torn_down_by_the_run():
     text = _read("watch.sh")
     code = _code(text)
     assert "CARD_MNTS=()" in code
-    mount = code[code.index('if [ -n "${PAD_SELECT:-}" ]; then\n        SEL_PARTS='):]
+    mount = code[code.index(SEL_GUARD + '\n        SEL_PARTS='):]
     mount = mount[:mount.index("elif [ -n \"${PAD_GAME_DIR:-}\" ]")]
     assert 'cardmount.sh" "$PAD_CARD" --part "$_p"' in mount
     assert '*"already mounted"*) ;;' in mount, "only mounts THIS run created"
@@ -650,8 +763,96 @@ def test_the_extra_mounts_are_owned_and_torn_down_by_the_run():
 
 def test_watch_builds_the_selector_only_when_asked_and_fatally():
     code = _code(_read("watch.sh"))
-    assert 'if [ -n "${PAD_SELECT:-}" ]; then pad_ensure_select || exit 1; fi' in code
+    assert 'if [ "${PAD_SELECT:-}" = 1 ]; then pad_ensure_select || exit 1; fi' in code
     assert code.index("pad_ensure_bridge || exit 1") < code.index("pad_ensure_select")
+
+
+# ==========================================================================
+# 2026-09-02: THE CARD DECIDES.  David: "i shouldn't have to check off 'boot
+# selector' in the emulate tab. if it has multi-boot, i expect to see the
+# multi-boot screen."  PAD_SELECT became a three-way switch - unset asks the
+# card, 1 forces the menu on, 0 forces it off - with ONE definition of the
+# question (parts.py --multiboot) and ONE reader of the variable
+# (padpath.sh's pad_select_wanted).
+# ==========================================================================
+
+def test_pad_select_is_read_in_exactly_one_place():
+    """Every guard in the rig tests the RESOLVED value; the tri-state itself
+    is decoded once, in padpath.sh. Two decoders is how a run mounts the
+    extra partitions and then boots the primary without a menu."""
+    readers = []
+    for name in sorted(os.listdir(RIG)):
+        if not name.endswith(".sh"):
+            continue
+        for n, ln in enumerate(_code(_read(name)).splitlines(), 1):
+            if re.search(r'\$\{?PAD_SELECT[:}\s"]', ln) and "PAD_SELECT_" not in ln:
+                readers.append("%s:%d:%s" % (name, n, ln.strip()))
+    # padpath.sh's case block, and nothing else, looks at anything but "= 1".
+    loose = [r for r in readers
+             if not r.startswith("padpath.sh:")
+             and '"${PAD_SELECT:-}" = 1' not in r
+             and 'PAD_SELECT="${PAD_SELECT:-0}"' not in r]
+    assert not loose, "these read PAD_SELECT for themselves: %s" % loose
+    assert '-n "${PAD_SELECT:-}"' not in _read("watch.sh")
+    assert '-n "${PAD_SELECT:-}"' not in _read("run_game.sh")
+
+
+def test_padpath_holds_the_three_way_switch():
+    pp = _read("padpath.sh")
+    body = pp[pp.index("pad_select_wanted() {"):]
+    body = body[:body.index("\n}")]
+    # unset -> ask the card, through the ONE definition
+    assert 'python3 "$RIG/parts.py" --multiboot "$card"' in body
+    # 1 (or any other truthy spelling) -> on; 0 -> off; and both say so
+    assert "0|no|off|false" in body
+    assert "return 1 ;;" in body and "return 0 ;;" in body
+    # no card -> never auto-on: an extracted title has nothing to choose
+    assert 'if [ -z "$card" ]; then' in body
+    # the verdict is the exit status, the reason is stdout, so a caller can
+    # print what was decided instead of a bare 1
+    assert '[ "$rc" = 0 ]' in body
+
+
+def test_watch_decides_once_early_and_exports_the_answer():
+    text = _read("watch.sh")
+    code = _code(text)
+    decide = _line_of(text, 'SEL_WHY=$(pad_select_wanted "${PAD_CARD:-}")')
+    assert code.count("pad_select_wanted") == 1, "one probe per run, not two"
+    # ...before anything is built for it, and before every use of the flag.
+    assert decide < _line_of(text, "pad_ensure_select")
+    assert decide < _line_of(text, ': > "$ROOT/dump/selecting"')
+    assert decide < _line_of(text, 'SEL_PARTS=')
+    # resolved to a plain 1/0 and EXPORTED, and handed to run_game.sh by name
+    assert "export PAD_SELECT" in code
+    assert 'PAD_SELECT="${PAD_SELECT:-0}" \\' in code
+    launch = code[code.index("setsid env PAD_THREAD_ENTRY=1"):]
+    launch = launch[:launch.index('bash "$RIG/run_game.sh"')]
+    assert "PAD_SELECT=" in launch, "run_game.sh is told, not left to guess"
+    # ...and it SAYS what it decided, in pad_select_wanted's own words - the
+    # only thing that knows whether the CARD or the caller decided.
+    assert 'echo "[watch] boot selector: $SEL_WHY"' in code
+    pp = _read("padpath.sh")
+    assert "this card carries a menu ($line) - showing it; PAD_SELECT=0 skips it" in pp
+    assert "no menu on this card ($line); PAD_SELECT=1 forces one" in pp
+
+
+def test_run_game_never_decides_for_itself():
+    """The probe must not run twice, and the two scripts must not be able to
+    disagree: run_game.sh is HANDED the answer."""
+    code = _code(_read("run_game.sh"))
+    assert "pad_select_wanted" not in code
+    assert "--multiboot" not in code
+
+
+def test_a_plain_run_still_pays_nothing_for_the_probe():
+    """No PAD_CARD means no python3, no debugfs and no menu - the launch a
+    title under games/ has always had."""
+    pp = _read("padpath.sh")
+    body = pp[pp.index("pad_select_wanted() {"):]
+    body = body[:body.index("\n}")]
+    nocard = body.index('if [ -z "$card" ]; then')
+    assert nocard < body.index("parts.py"), \
+        "the empty-card refusal has to come BEFORE the probe, or it pays for it"
 
 
 def test_the_savestate_guard_literals_keep_their_order():

@@ -6,6 +6,11 @@ file (magic 'PADS', gen at 4, held[] at 8), RIGHT held for 100 ms then
 released, then START held. Expects '[select] key: right', '[select] chose 1'
 and a choice file holding 1 (highlight started at 0).
 
+A second, silent run presses the ACTION button (the one on the lockdown bar,
+node 1 bit 2 - Space in the rig) instead of START and must reach the same
+place: RIGHT moves the highlight to 1, ACTION confirms it, the log line reads
+'[select] key: action' (never 'key: start'), and the choice file holds 1.
+
 The sound path is exercised the way the rig's player would see it: the test
 creates the FIFO and holds its read end open (non-blocking) before the
 selector starts, and the selector runs with --audio fifo:<that> and
@@ -130,9 +135,10 @@ def main():
     ids = table_ids(tables)
     right = ids.get((8, 24))
     start = ids.get((1, 11))
-    if right is None or start is None:
-        raise SystemExit("padsw_test: %s has no (8,24)/(1,11) rows" % tables)
-    print("padsw_test: ids from %s: right %d start %d" % (tables, right, start))
+    action = ids.get((1, 2))            # the lockdown-bar button, whatever it is named
+    if right is None or start is None or action is None:
+        raise SystemExit("padsw_test: %s has no (8,24)/(1,11)/(1,2) rows" % tables)
+    print("padsw_test: ids from %s: right %d start %d action %d" % (tables, right, start, action))
 
     padsw = os.path.join(t, "padsw")
     with open(padsw, "wb") as f:
@@ -225,7 +231,7 @@ def main():
         print("padsw_test: FAIL the mix dump is missing, short or silent (%d bytes)" % len(mix))
         ok = False
     for want in ("audio: fifo %s open" % fifo, "media: 2 art, 1 anim (4 frames), 0 music, move=y confirm=y",
-                 " frames written, "):
+                 " frames written, ", "start %d action %d" % (start, action)):
         if want not in err:
             print("padsw_test: FAIL log lacks %r" % want)
             ok = False
@@ -237,6 +243,113 @@ def main():
         raise SystemExit(1)
     print("padsw_test: OK (right -> highlight 1, start -> chose 1, confirm held exit %.2f s, "
           "%d FIFO bytes, %.1f s, exit 0)" % (confirm_wait, reader.total(), dt))
+
+    # --- the ACTION button confirms exactly as START does ---
+    # The lockdown-bar button (node 1 bit 2, Space in the rig). Same move, same
+    # confirm, a different name in the log: RIGHT then ACTION must land on
+    # image 1, and 'key: start' must never appear.
+    for p in (choice, last):
+        if os.path.exists(p):
+            os.unlink(p)
+    with open(padsw, "wb") as f:
+        f.write(struct.pack("<II", MAGIC, 1) + bytes(4096 - 8))
+    cmd = [qemu, "-L", root, binp, "--headless", os.path.join(t, "padsw_action.ppm"), "--conf", conf,
+           "--input", "padsw", "--padsw", padsw, "--tables", tables, "--timeout", "8",
+           "--out", choice, "--last", last, "--log", os.path.join(t, "padsw_action.log"),
+           "--font", font, "--no-invert", "--media", media, "--audio", "none", "--default", "0"]
+    t0 = time.monotonic()
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    time.sleep(1.0)
+    set_held(padsw, right, 1)
+    time.sleep(0.1)
+    set_held(padsw, right, 0)
+    time.sleep(0.4)
+    set_held(padsw, action, 1)          # press and hold, as a thumb does
+    try:
+        out, err = proc.communicate(timeout=15)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, err = proc.communicate()
+        raise SystemExit("padsw_test: FAIL (action) codeselect did not exit\n%s\n%s" % (out, err))
+    dt = time.monotonic() - t0
+    sys.stdout.write(out)
+    ok = True
+    if proc.returncode != 0:
+        print("padsw_test: FAIL (action) exit %d" % proc.returncode)
+        ok = False
+    got = open(choice).read().strip() if os.path.exists(choice) else None
+    if got != "1":
+        print("padsw_test: FAIL (action) choice file holds %r, expected '1'" % got)
+        ok = False
+    for want in ("[select] key: right", "[select] key: action", "[select] chose 1"):
+        if want not in out:
+            print("padsw_test: FAIL (action) stdout lacks %r" % want)
+            ok = False
+    if "[select] key: start" in out:
+        print("padsw_test: FAIL (action) the action press was reported as start")
+        ok = False
+    if dt > 7.0:
+        print("padsw_test: FAIL (action) took %.1f s: the countdown expired instead of the button" % dt)
+        ok = False
+    if not ok:
+        sys.stderr.write(err)
+        raise SystemExit(1)
+    print("padsw_test: OK (action id %d: right -> highlight 1, action -> chose 1, %.1f s, exit 0)"
+          % (action, dt))
+
+    # --- how the action id is resolved when the wire is not in the list ---
+    # Every switch list on this disk puts the button on node 1 bit 2, so these
+    # two are synthetic. First: the wire is absent but the NAME is there, in a
+    # spelling no list uses (lower case, collapsed blanks, an '(OPTIONAL)'
+    # suffix) - it must resolve, and be marked '(by name)'. The decoys must NOT
+    # win: 'TOURNAMENT START BUTTON' (26 real lists carry one) must not become
+    # START, and 'ACTION BUTTON TARGET' must not become ACTION - both would
+    # match a substring rule. Second: no wire and no name at all (the beatles
+    # case) leaves the id at -1 rather than at the platform 34, which on that
+    # very title is the START button.
+    def ids_line(name, rows, timeout="1"):
+        path = os.path.join(t, name)
+        with open(path, "w") as f:
+            f.write("# id   num   node  bit  name\n" + rows)
+        p = subprocess.Popen([qemu, "-L", root, binp, "--headless", os.path.join(t, name + ".ppm"),
+                              "--conf", conf, "--input", "padsw",
+                              "--padsw", os.path.join(t, "no_such_padsw"), "--tables", path,
+                              "--timeout", timeout, "--out", choice, "--last", last,
+                              "--log", os.path.join(t, name + ".log"), "--font", font,
+                              "--no-invert", "--media", media, "--audio", "none"],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        o, e = p.communicate(timeout=20)
+        marker = "padsw: ids from %s:" % path
+        for line in e.splitlines():
+            i = line.find(marker)
+            if i >= 0:
+                return line[i + len(marker):].strip()
+        raise SystemExit("padsw_test: FAIL (%s) no ids line\n%s" % (name, e))
+
+    got = ids_line("byname.txt",
+                   "1    0    8   25   LEFT FLIPPER BUTTON\n"
+                   "2    0    8   24   RIGHT FLIPPER BUTTON\n"
+                   "3    0    1   11   START BUTTON\n"
+                   "4    0    1   12   TOURNAMENT START BUTTON\n"
+                   "5    0    1   13   ACTION BUTTON TARGET\n"
+                   "7    0    1   30   lockdown   button   (OPTIONAL)\n"
+                   "8    0    0    8   SERVICE SELECT\n")
+    want = "left 1 right 2 start 3 action 7 (by name) select 8 plus 26 minus 27 back 28"
+    if got != want:
+        raise SystemExit("padsw_test: FAIL (by name) ids line is %r,\n"
+                         "                              expected %r" % (got, want))
+    print("padsw_test: OK (a list without the wire resolves the action button by name: %s)" % got)
+
+    got = ids_line("noaction.txt",
+                   "1    0    8   25   LEFT FLIPPER BUTTON\n"
+                   "3    0    1   11   START BUTTON\n"
+                   "4    0    1   12   TOURNAMENT START BUTTON\n")
+    if " action -1 " not in got + " ":
+        raise SystemExit("padsw_test: FAIL (no action) ids line is %r; a list with no lockdown "
+                         "row must leave the action id unset, not at the platform 34" % got)
+    if "start 3" not in got:
+        raise SystemExit("padsw_test: FAIL (no action) START was lost: %r" % got)
+    print("padsw_test: OK (a list with no lockdown row leaves it unset: %s)" % got)
 
     # --- a FIFO that does not exist: still exits 0 on the countdown ---
     for p in (choice, last):

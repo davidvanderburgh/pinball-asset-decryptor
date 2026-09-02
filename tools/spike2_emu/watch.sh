@@ -51,10 +51,36 @@ pad_ensure_rootfs || exit 1
 pad_ensure_guest_exec || exit 1
 pad_ensure_shim || exit 1
 pad_ensure_bridge || exit 1
+# ★ ITEM 90 - IS THERE A MENU ON THIS CARD? DECIDED HERE, ONCE, AND EXPORTED.
+#
+# David, 2026-09-02: "i shouldn't have to check off 'boot selector' in the
+# emulate tab. if it has multi-boot, i expect to see the multi-boot screen."
+# So PAD_SELECT stopped being a flag someone has to set and became a
+# three-way switch: UNSET asks the CARD, 1 forces the menu on, 0 forces it
+# off. pad_select_wanted (padpath.sh) is the only reader of it and
+# parts.py --multiboot is the only definition of "this card boots into a
+# menu"; the answer is resolved to a plain 1 or 0 HERE and exported, so
+# run_game.sh is handed the decision rather than making a second one.
+#
+# EARLY, AND ONCE. The probe is a handful of debugfs reads on the card's
+# rootfs - a few hundred milliseconds - and it runs before anything is built,
+# so a menu run has its selector gate below and a plain run never pays for
+# one. No PAD_CARD means no probe at all (an extracted title under games/ has
+# nothing to choose between).
+SEL_WHY=$(pad_select_wanted "${PAD_CARD:-}") && PAD_SELECT=1 || PAD_SELECT=0
+export PAD_SELECT
+# WHAT IT DECIDED AND WHY, in one line, because "the menu did not come up" and
+# "the menu came up and I did not want it" are both answered here. The words
+# are pad_select_wanted's own - it is the only thing that knows whether the
+# CARD or the caller decided, and a sentence rebuilt out here from the 1/0
+# would eventually say "this card carries a menu" about an override.
+if [ -n "${PAD_CARD:-}" ] || [ "${PAD_SELECT:-}" = 1 ]; then
+    echo "[watch] boot selector: $SEL_WHY"
+fi
 # ITEM 90: the boot selector, ONLY on a run that asked for it. MISSING is
 # fatal for such a run - it was asked for a menu, and booting the primary
 # without one is the silent-fallback fault every gate above exists to stop.
-if [ -n "${PAD_SELECT:-}" ]; then pad_ensure_select || exit 1; fi
+if [ "${PAD_SELECT:-}" = 1 ]; then pad_ensure_select || exit 1; fi
 
 MINS=${1:-30}
 LOG=${LOG:-$HOME/gzwatch.log}
@@ -167,7 +193,7 @@ if [ -n "${PAD_CARD:-}" ]; then
     # - parts.py's --games and the head of its --list-games are the same
     # partition (p3) by construction - so it is skipped rather than mounted
     # twice under a second name.
-    if [ -n "${PAD_SELECT:-}" ]; then
+    if [ "${PAD_SELECT:-}" = 1 ]; then
         SEL_PARTS=$(python3 "$S/parts.py" --list-games "$PAD_CARD" 2>/dev/null | awk '{print $1}')
         [ -n "$SEL_PARTS" ] || { echo "[watch] PAD_SELECT: no games partition on $PAD_CARD" >&2; exit 1; }
         _first=1
@@ -1136,7 +1162,7 @@ echo "[watch] starting $GAME (boot to the first picture takes ~15 s)"
 # SEL_WAIT still bounds the phase BEFORE the selector has ever been seen (a
 # run_game.sh that never reaches it), and 0 still means wait for ever there;
 # sel_flag_stale() below is the one place that says all this.
-if [ -n "${PAD_SELECT:-}" ]; then
+if [ "${PAD_SELECT:-}" = 1 ]; then
     SEL_TO=${PAD_SELECT_TIMEOUT:-30}
     case "$SEL_TO" in ''|*[!0-9]*) SEL_TO=30 ;; esac
     if [ "$SEL_TO" = 0 ]; then SEL_WAIT=0; else SEL_WAIT=$((SEL_TO + 60)); fi
@@ -1167,7 +1193,7 @@ setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_AUDIO_FMT="${PAD_AUDIO_FMT:-}" \
            PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \
            PAD_GAME="$GAME" PAD_CARD="${PAD_CARD:-}" PAD_GAME_DIR="${PAD_GAME_DIR:-}" \
-           PAD_PIVOT="${PAD_PIVOT:-}" \
+           PAD_PIVOT="${PAD_PIVOT:-}" PAD_SELECT="${PAD_SELECT:-0}" \
            bash "$RIG/run_game.sh" > "$LOG" 2>&1 &
 GAMEPG=$!
 if [ -n "${PAD_PIVOT:-}" ]; then
@@ -1254,7 +1280,7 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     # window by a minute on every first run of a title; never blocking would
     # open an empty window for a title that has no artwork and no device table,
     # which is exactly what Led Zeppelin and Elvira are.
-    if [ -n "${PAD_SELECT:-}" ]; then
+    if [ "${PAD_SELECT:-}" = 1 ]; then
         # ★ ITEM 90: HELD BACK until the boot selector has chosen, the same
         # shape as autoattract below. --wait is measured from mktables' own
         # start, and a menu phase longer than PF_WAIT ate the whole budget on
@@ -1481,7 +1507,7 @@ fi
 # the macOS container (no arm-binfmt on the command line) behave the same,
 # and what puts the selector's progress in this log. The loop below is
 # untouched: once the flag is down it finds the game immediately.
-if [ -n "${PAD_SELECT:-}" ]; then
+if [ "${PAD_SELECT:-}" = 1 ]; then
     echo "[watch] boot selector: waiting for the choice (LEFT/RIGHT flipper" \
          "= arrows move, START = 1 boots; auto-boot after $SEL_TO s)"
     while [ -f "$ROOT/dump/selecting" ]; do
@@ -1562,7 +1588,7 @@ fi
 # asleep waiting on the boot, and this loop must stay responsive to the window
 # closing. It exits by itself when the game gets there, or when the game dies.
 if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
-    if [ -n "${PAD_SELECT:-}" ]; then
+    if [ "${PAD_SELECT:-}" = 1 ]; then
         # ★ ITEM 90: HELD BACK until the boot selector has chosen. autoattract
         # reads "the bus has gone quiet" as "the game is ready" and presses
         # Service Back - and while the menu is up the log IS quiet, so it
@@ -1841,7 +1867,7 @@ while :; do
     # gave up - until comm=game exists, while run_game.sh is alive, for as
     # long as the selector lives and SEL_GAP s past it (sel_flag_stale(),
     # which refreshes the flag while `pgrep -x codeselect` finds it).
-    if [ -n "${PAD_SELECT:-}" ] && [ -f "$ROOT/dump/selecting" ]; then
+    if [ "${PAD_SELECT:-}" = 1 ] && [ -f "$ROOT/dump/selecting" ]; then
         if pgrep -x game >/dev/null 2>&1; then
             rm -f "$ROOT/dump/selecting"
             echo "[watch] boot selector: done; the game is up"

@@ -14,6 +14,7 @@ test_gui_smoke's ``app`` fixture, which is also what conftest's Tk sniff keys
 on to keep this file in the Tk group.
 """
 
+import json
 import os
 import shlex
 import sys
@@ -26,13 +27,16 @@ from tests.test_gui_smoke import app  # noqa: F401  (fixture)
 
 from pinball_decryptor.gui import emulate_tab, multiboot_tab
 from pinball_decryptor.gui.multiboot_tab import (
-    DEFAULT_SELECTOR_DIR, PREVIEW_BUILD_DIR, ImageRow, MultibootForm,
-    anim_spec, art_spec, build_commands, bypass_commands,
-    default_output_path, ensure_selector_args, fit_factors, parse_anim_frames,
-    parse_plan, parse_selector_path, plan_commands, prepare_commands,
-    preview_fingerprint, preview_prepare_args, preview_snapshot_args,
-    size_plan_text, snapshot_commands, suggest_title, under_library,
-    validate_form, write_preview_conf)
+    DEFAULT_SELECTOR_DIR, INSPECT_JSON, PREVIEW_BUILD_DIR, ImageRow,
+    MultibootForm, anim_spec, apply_commands, art_spec, build_commands,
+    bypass_commands, default_output_path, diff_forms, edit_status_text,
+    ensure_selector_args, fit_factors, form_from_inspect, host_path,
+    inject_commands, inspect_commands, loaded_media_dir, media_specs_changed,
+    parse_anim_frames, parse_inspect, parse_plan, parse_refusal,
+    parse_selector_path, plan_commands, prepare_commands, preview_fingerprint,
+    preview_prepare_args, preview_snapshot_args, rebuild_blockers,
+    size_plan_text, snapshot_commands, split_anim_source, split_art_source,
+    suggest_title, under_library, validate_form, write_preview_conf)
 
 
 @pytest.fixture(autouse=True)
@@ -611,7 +615,7 @@ def _recorder(panel):
     """Replace the worker with a recorder: (cmds, on_step, on_done)."""
     calls = []
 
-    def fake(cmds, on_step=None, on_done=None):
+    def fake(cmds, on_step=None, on_done=None, quiet=()):
         calls.append(cmds)
         return True
     panel._run_commands = fake
@@ -1216,6 +1220,682 @@ def test_a_failing_preview_step_surfaces_the_error(tmp_path, monkeypatch,
         assert panel._play_var.get() is False          # Play stops on error
         assert panel._pv_ready is None
         assert str(panel._render_btn.cget("state")) == "normal"
+    finally:
+        root.destroy()
+
+
+# --------------------------------------------------------------------------
+# loading a card back into the form (Load card… / Apply to card)
+# --------------------------------------------------------------------------
+
+def _rich_report(tmp_path, clip=None):
+    """What ``inspect --json`` prints for a v2 card built by this tab: two
+    images whose .raw sources are on this machine, art from a source spec
+    (one 'auto', one a frame of a video), a clip with its own start / length
+    / fps, no music, and a second tree still waiting for the bypass."""
+    a, b = _images(tmp_path, 2)
+    clip = clip or str(tmp_path / "attract.mov")
+    if not os.path.isfile(clip):
+        open(clip, "wb").write(bytes(4))
+    return {
+        "card": str(tmp_path / "multi" / "card.multi.raw"),
+        "size": 15494807552, "layout": "parts",
+        "partitions": [{"index": 3, "device": "/dev/mmcblk0p3"},
+                       {"index": 7, "device": "/dev/mmcblk0p7"}],
+        "images": [
+            {"index": 0, "device": "/dev/mmcblk0p3", "title": "STERN 1.59.0",
+             "subtitle": "Original Stern code", "art": "art0.png",
+             "anim": None, "music": None, "art_source": "auto",
+             "anim_source": "none", "source": multiboot_tab.wsl(a),
+             "source_exists": True, "title_dir": "turtles",
+             "bypass": "bypassed"},
+            {"index": 1, "device": "/dev/mmcblk0p7", "title": "TMNT 1987",
+             "subtitle": "1987 cartoon upscale", "art": "art1.png",
+             "anim": "anim1.gif", "music": None,
+             "art_source": multiboot_tab.wsl(clip) + "@21",
+             "anim_source": "auto@20:2:8", "source": multiboot_tab.wsl(b),
+             "source_exists": True, "title_dir": "turtles",
+             "bypass": "armed"}],
+        "timeout": 20, "default": 1, "volume": 35, "mixer_volume": None,
+        "sound_move": "synth", "sound_confirm": "none",
+        "font": "/usr/local/codeselect/font.ttf",
+        "media": [{"name": "art0.png", "bytes": 4096},
+                  {"name": "art1.png", "bytes": 4096},
+                  {"name": "anim1.gif", "bytes": 90112}],
+        "has_media_json": True, "has_build_json": True,
+        "selector": {"bytes": 41272, "version": "codeselect 1.0"},
+        "warnings": []}
+
+
+def _degraded_report(tmp_path):
+    """...and for a card an older mkmulticard wrote: no build.json (no
+    sources, no timeout, no sounds), media the manifest cannot explain, and
+    one image whose .raw is not on this machine."""
+    gone = str(tmp_path / "gone" / "turtles_pro-1_59_0.1987.8G.sdcard.raw")
+    return {
+        "card": str(tmp_path / "v1.multi.raw"), "size": 15494807552,
+        "layout": "parts",
+        "partitions": [{"index": 3, "device": "/dev/mmcblk0p3"}],
+        "images": [
+            {"index": 0, "device": "/dev/mmcblk0p3", "title": "STERN",
+             "subtitle": "", "art": "art0.png", "anim": None,
+             "music": "music0.wav", "art_source": None, "anim_source": None,
+             "source": None, "source_exists": False, "title_dir": "turtles",
+             "bypass": "bypassed"},
+            {"index": 1, "device": "/dev/mmcblk0p7", "title": "1987",
+             "subtitle": "", "art": None, "anim": None, "music": None,
+             "art_source": None, "anim_source": None,
+             "source": multiboot_tab.wsl(gone), "source_exists": False,
+             "title_dir": "turtles", "bypass": "bypassed"}],
+        "timeout": None, "default": None, "volume": None,
+        "mixer_volume": None, "sound_move": None,
+        "sound_confirm": "confirm.wav", "font": None,
+        "media": [{"name": "art0.png", "bytes": 4096},
+                  {"name": "music0.wav", "bytes": 176400}],
+        "has_media_json": False, "has_build_json": False,
+        "selector": {"bytes": 41272, "version": None},
+        "warnings": ["no build.json: this card was written by an older "
+                     "mkmulticard - the images it was built from are not "
+                     "recorded"]}
+
+
+def _card_file(tmp_path, name="card.multi.raw"):
+    """An existing (empty) card file to load, outside the library."""
+    d = tmp_path / "multi"
+    d.mkdir(exist_ok=True)
+    p = d / name
+    p.write_bytes(bytes(16))
+    return str(p)
+
+
+def _loaded(tmp_path, report=None, media_json=True):
+    """A panel in editing mode: the report loaded, its media dir made (with
+    a media.json when the card carries media)."""
+    card = _card_file(tmp_path)
+    media = loaded_media_dir(card)
+    os.makedirs(media, exist_ok=True)
+    if media_json:
+        with open(os.path.join(media, "media.json"), "w") as f:
+            f.write("{}")
+    root, panel = _panel()
+    panel.load_inspect(report if report is not None
+                       else _rich_report(tmp_path), card, media)
+    return root, panel, card, media
+
+
+def test_inspect_commands_read_the_card_and_extract_its_media(monkeypatch,
+                                                              tmp_path):
+    """The load's two steps: the tool's own table for the pane, then the
+    same read as JSON with the card's media dropped where the tab can draw
+    it.  Neither writes the card."""
+    _win(monkeypatch)
+    card = str(tmp_path / "multi" / "card.multi.raw")
+    media = loaded_media_dir(card)
+    cmds = inspect_commands(card, media, cwd="/mnt/c/repo")
+    assert [label for label, _ in cmds] == ["inspect", INSPECT_JSON]
+    table = _tool_words(cmds[0][1])
+    assert table[:4] == ["tools/spike2_emu/mkmulticard.py", "inspect",
+                         "--card", multiboot_tab.wsl(card)]
+    assert "--json" not in table and "--media-out" not in table
+    js = _tool_words(cmds[1][1])
+    assert js[1:4] == ["inspect", "--card", multiboot_tab.wsl(card)]
+    assert "--json" in js
+    assert js[js.index("--media-out") + 1] == multiboot_tab.wsl(media)
+    assert "\\" not in _line(cmds[1][1])
+    # the media dir is per card, beside it - two cards in one folder do not
+    # write over each other
+    other = str(tmp_path / "multi" / "other.multi.raw")
+    assert loaded_media_dir(other) != media
+    assert os.path.basename(media) == "media-card.multi"
+
+
+def test_inject_argv_spells_out_every_menu_field(monkeypatch, tmp_path):
+    """An inject keeps the card's own value for a flag left off, so the tab
+    passes them all - subtitles included, or clearing one would not clear
+    it.  No image is named: nothing is copied."""
+    _win(monkeypatch)
+    media = tmp_path / "media-card.multi"
+    form = _form(tmp_path, 2, timeout=0, default=1, volume=35,
+                 media_dir=str(media))
+    form.images[1].subtitle = "1987 cartoon"
+    card = str(tmp_path / "multi" / "card.multi.raw")
+    cmds = inject_commands(form, card, cwd="/mnt/c/repo")
+    assert [label for label, _ in cmds] == ["inject"]
+    words = _tool_words(cmds[0][1])
+    assert words[1:4] == ["inject", "--card", multiboot_tab.wsl(card)]
+    assert words[words.index("--selector-dir") + 1] == DEFAULT_SELECTOR_DIR
+    assert words[words.index("--titles") + 1] == "IMG 0;IMG 1"
+    assert words[words.index("--subtitles") + 1] == ";1987 cartoon"
+    assert words[words.index("--timeout") + 1] == "0"
+    assert words[words.index("--default") + 1] == "1"
+    assert words[words.index("--volume") + 1] == "35"
+    assert words[words.index("--media-dir") + 1] == multiboot_tab.wsl(
+        str(media))
+    for flag in ("--primary", "--extra", "--out", "--bypass-validation",
+                 "--layout", "--force"):
+        assert flag not in words, flag
+    # subtitles are passed even when every one is empty (that is the clear)
+    form.images[1].subtitle = ""
+    words = _tool_words(inject_commands(form, card)[0][1])
+    assert words[words.index("--subtitles") + 1] == ";"
+
+
+def test_apply_commands_add_the_prepare_and_the_bypass_only_when_asked(
+        monkeypatch, tmp_path):
+    _win(monkeypatch)
+    media = str(tmp_path / "media-card.multi")
+    form = _form(tmp_path, 2, media_dir=media)
+    card = str(tmp_path / "multi" / "card.multi.raw")
+    assert [n for n, _ in apply_commands(form, card, media)] == [
+        "inject", "inspect", INSPECT_JSON]
+    labels = [n for n, _ in apply_commands(form, card, media, prepare=True,
+                                           bypass=True)]
+    assert labels == ["prepare", "inject", "bypass", "inspect", INSPECT_JSON]
+    cmds = apply_commands(form, card, media, prepare=True, bypass=True,
+                          refresh=False)
+    prep = _tool_words(cmds[0][1])
+    assert prep[1] == "prepare"
+    assert prep[prep.index("--out") + 1] == multiboot_tab.wsl(media)
+    assert "--visual-only" not in prep
+    byp = _tool_words(cmds[2][1])
+    assert byp[1:4] == ["bypass", "--card", multiboot_tab.wsl(card)]
+
+
+def test_parse_inspect_finds_the_report_and_the_refusal():
+    assert parse_inspect('{"layout": "parts"}') == {"layout": "parts"}
+    # a profile line in front of it must not lose the report
+    assert parse_inspect('hello\n{"a": [1, 2]}\n') == {"a": [1, 2]}
+    assert parse_inspect("not json at all") is None
+    assert parse_inspect("") is None
+    assert parse_refusal("reading\nrefused: not a multi card\n") == \
+        "refused: not a multi card"
+    assert parse_refusal("all fine") == ""
+
+
+def test_media_specs_come_back_as_the_specs_that_made_them(monkeypatch,
+                                                           tmp_path):
+    """art_source / anim_source round-trip: what a load puts in the row
+    builds the very spec the card recorded, so an apply writes it back
+    unchanged."""
+    _win(monkeypatch)
+    assert host_path("/mnt/d/Pinball/x.mov") == "D:/Pinball/x.mov"
+    assert host_path("/home/david/x.png") == "/home/david/x.png"
+    assert split_art_source("auto") == ("auto", "", "")
+    assert split_art_source(None) == ("auto", "", "")
+    assert split_art_source("/mnt/d/a.png") == ("D:/a.png", "", "")
+    assert split_art_source("/mnt/d/clip.mov@21") == ("D:/clip.mov", "", "21")
+    assert split_anim_source("none") == ("none", "", "", "")
+    assert split_anim_source("auto@20:2:8") == ("auto", "20", "2", "8")
+    assert split_anim_source("/mnt/d/x.gif") == ("D:/x.gif", "", "", "")
+    for spec in ("auto", "none", "/mnt/d/clip.mov@21"):
+        art, video, at = split_art_source(spec)
+        row = ImageRow(path="x.raw", art=art, art_video=video, art_time=at)
+        assert art_spec(row) == spec
+    for spec in ("none", "auto", "auto@20:2:8", "/mnt/d/x.gif"):
+        anim, start, secs, fps = split_anim_source(spec)
+        row = ImageRow(path="x.raw", anim=anim, anim_start=start,
+                       anim_seconds=secs, anim_fps=fps)
+        assert anim_spec(row) == spec
+
+
+def test_a_rich_report_becomes_the_whole_form(monkeypatch, tmp_path):
+    _win(monkeypatch)
+    info = _rich_report(tmp_path)
+    card = str(tmp_path / "multi" / "card.multi.raw")
+    form, warnings = form_from_inspect(info, card, "")
+    assert warnings == []
+    assert form.out == card
+    assert (form.timeout, form.default, form.volume) == (20, 1, 35)
+    assert (form.sound_move, form.sound_confirm) == ("synth", "none")
+    assert form.bypass is False              # image 1 is still armed
+    a, b = _images(tmp_path, 2)
+    assert [multiboot_tab._norm(r.path) for r in form.images] == \
+        [multiboot_tab._norm(a), multiboot_tab._norm(b)]
+    assert [r.title for r in form.images] == ["STERN 1.59.0", "TMNT 1987"]
+    assert form.images[1].subtitle == "1987 cartoon upscale"
+    assert form.images[0].art == "auto" and form.images[0].anim == "none"
+    assert form.images[1].art_time == "21"
+    assert art_spec(form.images[1]) == info["images"][1]["art_source"]
+    assert anim_spec(form.images[1]) == "auto@20:2:8"
+    assert not any(multiboot_tab.on_card_fields(r) for r in form.images)
+    assert rebuild_blockers(form) == []
+
+
+def test_a_degraded_report_keeps_the_cards_own_files_and_says_so(monkeypatch,
+                                                                 tmp_path):
+    """A card with no build.json: nulls become the tab's defaults, the media
+    the manifest cannot explain stays as the card's file names, and every
+    gap is a warning rather than an error."""
+    _win(monkeypatch)
+    info = _degraded_report(tmp_path)
+    form, warnings = form_from_inspect(info, str(tmp_path / "v1.multi.raw"),
+                                       "")
+    assert (form.timeout, form.default, form.volume) == (15, 0, 50)
+    # no sound_move on the card at all -> none; a confirm.wav whose source
+    # nothing records -> the tab's default, said out loud
+    assert form.sound_move == "none" and form.sound_confirm == "auto"
+    assert form.bypass is True               # every tree is bypassed
+    row0, row1 = form.images
+    assert (row0.art, row0.art_on_card) == ("art0.png", True)
+    assert (row0.music, row0.music_on_card) == ("music0.wav", True)
+    assert row0.anim == "none" and row0.anim_on_card is False
+    assert row0.path == "" and row0.device == "/dev/mmcblk0p3"
+    assert row1.art == "none" and multiboot_tab.on_card_fields(row1) == []
+    assert row1.path.endswith("1987.8G.sdcard.raw")
+    assert multiboot_tab.on_card_fields(row0) == [
+        ("art", "art0.png"), ("music", "music0.wav")]
+    text = "\n".join(warnings)
+    assert "older mkmulticard" in text            # the tool's own warning
+    assert "does not record which .raw" in text   # image 0 has no source
+    assert "not on this machine" in text          # image 1's is gone
+    assert "confirm sound" in text and "confirm.wav" in text
+    assert "no source recorded" in text and "(on the card)" in text
+    # the card's own files are not paths on this machine, and are not
+    # looked for - but they do stop a NEW card being built from this form
+    assert not [e for e in validate_form(form, sources=False)
+                if "not found" in e]
+    blockers = "\n".join(rebuild_blockers(form))
+    assert "art0.png" in blockers and "music0.wav" in blockers
+
+
+def test_diff_forms_splits_menu_changes_from_image_list_changes(tmp_path):
+    """The two buckets: everything an inject can write, and the image list,
+    which only a rebuild can change."""
+    before = _form(tmp_path, 3)
+    after = _form(tmp_path, 3)
+    assert diff_forms(before, after) == ([], [])
+    assert media_specs_changed(before, after) is False
+
+    def changed(**kw):
+        f = _form(tmp_path, 3)
+        for k, v in kw.items():
+            setattr(f, k, v)
+        return diff_forms(before, f)
+    after.images[1].title = "TMNT 1987"
+    after.images[2].subtitle = "orchestral"
+    after.images[0].anim = "auto"
+    assert diff_forms(before, after) == (
+        ["title", "subtitle", "animation"], [])
+    assert media_specs_changed(before, after) is True
+    assert changed(volume=35) == (["volume"], [])
+    assert changed(timeout=0) == (["countdown"], [])
+    assert changed(default=2) == (["default"], [])
+    assert changed(bypass=False) == (["bypass"], [])
+    assert changed(sound_move="synth") == (["move sound"], [])
+    assert media_specs_changed(before, _form(tmp_path, 3, volume=35)) is False
+    # ...and the image list, every way it can change
+    fewer = _form(tmp_path, 2)
+    assert diff_forms(before, fewer)[1] == ["3 images -> 2"]
+    more = _form(tmp_path, 4)
+    assert diff_forms(before, more)[1] == ["3 images -> 4"]
+    swapped = _form(tmp_path, 3)
+    swapped.images[0], swapped.images[1] = swapped.images[1], swapped.images[0]
+    assert diff_forms(before, swapped)[1] == ["reordered"]
+    replaced = _form(tmp_path, 3)
+    replaced.images[2].path = _images(tmp_path, 4)[3]
+    assert diff_forms(before, replaced)[1] == ["an image was replaced"]
+    assert media_specs_changed(before, fewer) is True
+    # a row with no source is still the same row: its device says so
+    b2 = _form(tmp_path, 2)
+    a2 = _form(tmp_path, 2)
+    for f in (b2, a2):
+        f.images[0].path, f.images[0].device = "", "/dev/mmcblk0p3"
+    assert diff_forms(b2, a2) == ([], [])
+
+
+def test_the_status_line_names_what_will_happen(tmp_path):
+    card = "D:/Pinball/multi/card.multi.raw"
+    assert "no changes yet" in edit_status_text(card, [], [])
+    one = edit_status_text(card, ["title"], [])
+    assert one.startswith("Apply to card: 1 menu change (title)")
+    assert "card.multi.raw" in one and "no rebuild" in one
+    three = edit_status_text(card, ["title", "art", "volume"], [])
+    assert "3 menu changes (title, art, volume)" in three
+    listed = edit_status_text(card, ["title"], ["3 images -> 2"])
+    assert listed.startswith("The image list changed (3 images -> 2)")
+    assert "Build & verify" in listed and "1 menu change would ride" in listed
+
+
+def _inspect_stand_in(monkeypatch, tmp_path, report,
+                      table="== card\nimages: 2", refusal=None,
+                      refuse_at="inspect"):
+    """A python child for each inspect step: the table, then the JSON.
+
+    Both read their output out of a FILE, so nothing a step prints is also
+    in the command line the pane echoes - that is what makes 'the JSON is
+    not in the pane' a real assertion."""
+    py = sys.executable
+    blob = tmp_path / "report.json"
+    blob.write_text(json.dumps(report), encoding="utf-8")
+    msg = tmp_path / "refusal.txt"
+    msg.write_text(refusal or "", encoding="utf-8")
+    cat = "import sys; sys.stdout.write(open(sys.argv[1]).read())"
+    seen = {}
+
+    def fake(card, media_out=None, cwd=None):
+        seen["card"], seen["media_out"] = card, media_out
+        seen.setdefault("runs", []).append(card)
+
+        def step(label, path):
+            if refusal is not None and label == refuse_at:
+                return [py, "-c", cat + "; raise SystemExit(2)", str(msg)]
+            if label == "inspect":
+                return [py, "-c", "print(%r)" % table]
+            return [py, "-c", cat, str(path)]
+        return [("inspect", step("inspect", None)),
+                (INSPECT_JSON, step(INSPECT_JSON, blob))]
+    monkeypatch.setattr(multiboot_tab, "inspect_commands", fake)
+    return seen
+
+
+def test_load_card_runs_inspect_and_fills_every_field(tmp_path, monkeypatch):
+    """The whole load through the worker: the tool's table lands in the
+    pane, its JSON does NOT (it is for the form), and every widget comes
+    back holding what the card carries."""
+    card = _card_file(tmp_path)
+    info = _rich_report(tmp_path)
+    seen = _inspect_stand_in(monkeypatch, tmp_path, info)
+    root, panel = _panel()
+    try:
+        assert panel.load_card(card) is True
+        _wait(root, lambda: not panel._busy)
+        assert seen["card"] == card
+        assert os.path.normpath(seen["media_out"]) == os.path.normpath(
+            loaded_media_dir(card))
+        assert os.path.isdir(loaded_media_dir(card))
+        pane = panel._log_text.get("1.0", "end")
+        assert "images: 2" in pane                       # the table
+        assert '"art_source"' not in pane                # not the JSON
+        assert "%s: exit 0" % INSPECT_JSON in pane
+        form = panel.form()
+        assert [r.title for r in form.images] == ["STERN 1.59.0", "TMNT 1987"]
+        assert panel._out_var.get() == card
+        assert panel._timeout_var.get() == "20"
+        assert panel._default_var.get() == "1"
+        assert panel._volume_var.get() == "35"
+        assert panel._move_var.get() == "synth"
+        assert panel._bypass_var.get() is False          # image 1 is armed
+        assert panel._armed is True
+        assert panel._loaded_card == card
+        assert len(panel._tree.get_children()) == 2
+        assert panel._tree.item("1")["values"][5] == "auto @20s 2s 8fps"
+        assert str(panel._apply_btn.cget("state")) == "normal"
+        assert "no changes yet" in panel._edit_lbl.cget("text")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.parametrize("refuse_at", ["inspect", INSPECT_JSON])
+def test_a_refused_inspect_says_why_and_leaves_the_form_alone(tmp_path,
+                                                              monkeypatch,
+                                                              refuse_at):
+    card = _card_file(tmp_path)
+    _inspect_stand_in(monkeypatch, tmp_path, _rich_report(tmp_path),
+                      refusal="refused: p2 holds no /usr/local/codeselect",
+                      refuse_at=refuse_at)
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        before = panel.form()
+        assert panel.load_card(card) is True
+        _wait(root, lambda: not panel._busy)
+        hint = panel._hint.cget("text")
+        assert "refused: p2 holds no /usr/local/codeselect" in hint
+        assert os.path.basename(card) in hint
+        assert panel._loaded_card == ""
+        assert panel._loaded_form is None
+        assert [r.path for r in panel.form().images] == \
+            [r.path for r in before.images]
+        assert panel._out_var.get() == before.out
+        assert str(panel._apply_btn.cget("state")) == "disabled"
+        assert panel._edit_lbl.cget("text") == ""
+        # ...and what the tool said is in the pane either way: a quiet step
+        # that FAILS prints everything it printed.
+        assert "refused: p2 holds no" in panel._log_text.get("1.0", "end")
+    finally:
+        root.destroy()
+
+
+def test_the_busy_guard_covers_a_load_and_an_apply(tmp_path, monkeypatch):
+    monkeypatch.setattr(multiboot_tab.subprocess, "Popen",
+                        lambda *a, **kw: pytest.fail("a tool was started"))
+    root, panel, card, _media = _loaded(tmp_path)
+    try:
+        panel._set_busy(True)
+        assert str(panel._load_btn.cget("state")) == "disabled"
+        assert str(panel._apply_btn.cget("state")) == "disabled"
+        assert panel.load_card(card) is False
+        assert "already in progress" in panel._hint.cget("text")
+        assert panel.apply_to_card() is False
+        assert "already in progress" in panel._hint.cget("text")
+        panel._set_busy(False)
+        assert str(panel._apply_btn.cget("state")) == "normal"
+    finally:
+        root.destroy()
+
+
+def test_a_menu_change_is_injected_into_the_loaded_card(tmp_path):
+    """The common case: retype a title, press Apply, and the card is
+    rewritten in place - an inject and a read-back, no prepare (no media
+    field moved) and no copy."""
+    root, panel, card, media = _loaded(tmp_path)
+    calls = _recorder(panel)
+    try:
+        panel._tree.selection_set("1")
+        root.update()
+        panel._ed_sub.set("1987 cartoon, upscaled")
+        panel._timeout_var.set("8")
+        text = panel._edit_lbl.cget("text")
+        assert "Apply to card: 2 menu changes (subtitle, countdown)" in text
+        assert str(panel._apply_btn.cget("state")) == "normal"
+        assert panel.apply_to_card() is True
+        labels = [label for label, _ in calls[0]]
+        assert labels == ["inject", "inspect", INSPECT_JSON]
+        words = _tool_words(calls[0][0][1])
+        assert words[1:4] == ["inject", "--card", multiboot_tab.wsl(card)]
+        assert words[words.index("--subtitles") + 1] == \
+            "Original Stern code;1987 cartoon, upscaled"
+        assert words[words.index("--timeout") + 1] == "8"
+        assert words[words.index("--media-dir") + 1] == multiboot_tab.wsl(
+            media)
+        assert "Writing the menu into" in panel._hint.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_a_media_change_prepares_into_the_loaded_cards_media_dir(tmp_path):
+    root, panel, card, media = _loaded(tmp_path)
+    calls = _recorder(panel)
+    try:
+        panel._tree.selection_set("0")
+        root.update()
+        panel._ed_anim.set("auto")
+        assert "1 menu change (animation)" in panel._edit_lbl.cget("text")
+        assert panel.apply_to_card() is True
+        assert [label for label, _ in calls[0]] == [
+            "prepare", "inject", "inspect", INSPECT_JSON]
+        prep = _tool_words(calls[0][0][1])
+        assert prep[prep.index("--out") + 1] == multiboot_tab.wsl(media)
+        assert "0=auto" in prep and "1=auto@20:2:8" in prep
+        assert "--visual-only" not in prep
+        assert "(media first)" in panel._hint.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_the_bypass_rides_along_while_a_tree_is_still_armed(tmp_path):
+    root, panel, card, _media = _loaded(tmp_path)
+    calls = _recorder(panel)
+    try:
+        assert panel._armed is True and panel._bypass_var.get() is False
+        panel._bypass_var.set(True)
+        assert "1 menu change (bypass)" in panel._edit_lbl.cget("text")
+        assert panel.apply_to_card() is True
+        assert [label for label, _ in calls[0]] == [
+            "inject", "bypass", "inspect", INSPECT_JSON]
+        byp = _tool_words(calls[0][1][1])
+        assert byp[1:4] == ["bypass", "--card", multiboot_tab.wsl(card)]
+        # untick it again and the tab says what unticking cannot do
+        panel._bypass_var.set(False)
+        panel._loaded_form = multiboot_tab.replace(panel._loaded_form,
+                                                   bypass=True)
+        panel._update_edit_status()
+        assert "cannot un-patch" in panel._edit_lbl.cget("text")
+    finally:
+        root.destroy()
+
+
+@pytest.mark.parametrize("how", ["add", "remove", "reorder", "replace"])
+def test_an_image_list_change_refuses_the_apply(tmp_path, how):
+    """Adding, removing, reordering or replacing an image is a rebuild:
+    Apply goes grey, says why, and starts nothing."""
+    root, panel, card, _media = _loaded(tmp_path)
+    calls = _recorder(panel)
+    try:
+        if how == "add":
+            panel.add_image(_images(tmp_path, 3)[2])
+        elif how == "remove":
+            panel._tree.selection_set("1")
+            root.update()
+            panel._remove_image()
+        elif how == "reorder":
+            panel._tree.selection_set("1")
+            root.update()
+            panel._move_image(-1)
+        else:
+            panel._rows[1].path = _images(tmp_path, 3)[2]
+            panel._refresh_tree(select=1)
+        text = panel._edit_lbl.cget("text")
+        assert text.startswith("The image list changed")
+        assert "Build & verify writes a new card" in text
+        assert str(panel._apply_btn.cget("state")) == "disabled"
+        assert panel.apply_to_card() is False
+        assert calls == []
+        assert "image list changed" in panel._hint.cget("text")
+        assert "Build & verify" in panel._hint.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_build_and_verify_will_not_write_over_the_loaded_card(tmp_path,
+                                                              monkeypatch):
+    """A load points the output at the card it read.  Build & verify must
+    not copy ~7 GB per image over it on the strength of that: it refuses
+    until a different output path is set, and says which two things it
+    could do instead."""
+    monkeypatch.setattr(multiboot_tab.subprocess, "Popen",
+                        lambda *a, **kw: pytest.fail("a tool was started"))
+    root, panel, card, _media = _loaded(tmp_path)
+    calls = _recorder(panel)
+    try:
+        assert panel._out_var.get() == card
+        panel._build_card()
+        assert calls == []
+        hint = panel._hint.cget("text")
+        assert "writes a NEW card" in hint and card in hint
+        assert "Apply to card" in hint
+        # a different path builds as usual (the loaded card is untouched)
+        out = str(tmp_path / "multi" / "copy.multi.raw")
+        panel._out_var.set(out)
+        panel._build_card()
+        # the media set the load extracted is prepared again first, from the
+        # source specs the card recorded - the same rule as any other build
+        assert [label for label, _ in calls[0]] == [
+            "prepare", "plan", "build", "verify"]
+        assert multiboot_tab.wsl(out) in _line(calls[0][2][1])
+        assert panel._loaded_card == card       # still editing that one
+    finally:
+        root.destroy()
+
+
+def test_a_rebuild_is_blocked_by_media_only_the_card_has(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(multiboot_tab.subprocess, "Popen",
+                        lambda *a, **kw: pytest.fail("a tool was started"))
+    root, panel, card, _media = _loaded(
+        tmp_path, _degraded_report(tmp_path), media_json=False)
+    calls = _recorder(panel)
+    try:
+        panel._out_var.set(str(tmp_path / "multi" / "copy.multi.raw"))
+        panel._build_card()
+        assert calls == []
+        hint = panel._hint.cget("text")
+        # every reason at once: the sources that are not here AND the media
+        # only the card has
+        assert "no such file" in hint.lower()
+        assert "art0.png" in hint and "on the loaded card" in hint
+        # the tree says which fields those are, and which image is missing
+        assert panel._tree.item("0")["values"][4] == "art0.png (on the card)"
+        assert panel._tree.item("0")["values"][6] == "music0.wav (on the card)"
+        assert panel._tree.item("0")["values"][1].startswith(
+            "(no source recorded")
+        assert "not on this machine" in panel._tree.item("1")["values"][1]
+        # ...and an apply that would have to re-render them says so too
+        panel._tree.selection_set("0")
+        root.update()
+        panel._ed_anim.set("auto")
+        assert panel.apply_to_card() is False
+        hint = panel._hint.cget("text")
+        assert "music0.wav" in hint and "no source recorded" in hint
+        # ...and the confirm sound, which 'auto' would decode off a primary
+        # image that is not here either
+        assert "confirm sound is 'auto'" in hint
+        assert calls == []
+    finally:
+        root.destroy()
+
+
+def test_a_menu_only_apply_is_fine_on_a_card_with_no_sources(tmp_path):
+    """The point of the whole feature: a card whose .raw sources are not on
+    this machine can still have its menu rewritten."""
+    root, panel, card, _media = _loaded(
+        tmp_path, _degraded_report(tmp_path), media_json=False)
+    calls = _recorder(panel)
+    try:
+        panel._tree.selection_set("0")
+        root.update()
+        panel._ed_title.set("STERN 1.59.0")
+        assert panel.apply_to_card() is True
+        assert [label for label, _ in calls[0]] == [
+            "inject", "inspect", INSPECT_JSON]
+        words = _tool_words(calls[0][0][1])
+        assert words[words.index("--titles") + 1] == "STERN 1.59.0;1987"
+        assert "--media-dir" not in words          # the card carries no
+        # media.json, so the inject leaves the media it has alone
+    finally:
+        root.destroy()
+
+
+def test_the_preview_after_a_load_draws_the_cards_own_media(tmp_path,
+                                                            monkeypatch):
+    """Requirement 4: the media is already in the extracted dir, so the
+    preview renders straight from it - no prepare, and no need for the .raw
+    files the card was built from.  Touch a media field and the prepare
+    comes back."""
+    seen = _stand_ins(monkeypatch, tmp_path, frames=3)
+    root, panel, card, media = _loaded(
+        tmp_path, _degraded_report(tmp_path), media_json=False)
+    calls = []
+    try:
+        real = panel._run_commands
+        panel._run_commands = lambda cmds, **kw: calls.append(
+            [label for label, _ in cmds]) or real(cmds, **kw)
+        assert panel.needs_prepare() is False
+        assert panel.render_preview() is True
+        _wait(root, lambda: not panel._busy)
+        assert calls == [["selector", "frame 0"]]
+        assert "media" not in seen                   # no prepare ran at all
+        assert seen["snapshot"][0][2] == media       # drawn from the card's
+        assert panel._pv_photo is not None
+        conf = os.path.join(multiboot_tab.preview_dir_for(card), "images.conf")
+        with open(conf, "rb") as f:
+            assert b"art0.png" in f.read()
+        # change the art and the media must be rendered again
+        panel._tree.selection_set("0")
+        root.update()
+        panel._ed_art.set("auto")
+        assert panel.needs_prepare() is True
     finally:
         root.destroy()
 

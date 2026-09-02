@@ -38,6 +38,22 @@ names ^[A-Za-z0-9._-]+$, PNG <= 1360x768, GIF <= 1.5 MB / 512x288 / 30 frames, W
 (image=<device>|<title>|<subtitle>|<art>|<anim>|<music>) and the sound_move= / sound_confirm= /
 volume= / mixer_volume= / media= keys.  A 3-field line stays valid.
 
+THE TWO JSON SIDECARS (item 90, "load a finished card back into the editor").  Beside
+images.conf - never inside media/, never in the media budget, never opened by the selector
+(it reads images.conf and the files that names) - `build` and `inject` also stage
+  build.json  {"tool", "version", "written", "layout",
+               "images": [{"device", "source", "title", "subtitle", "art", "anim", "music"}],
+               "timeout", "default", "volume", "mixer_volume", "sound_move", "sound_confirm"}
+              'source' is the .raw each image came from - the one thing images.conf cannot
+              hold and a rebuild needs.  An `inject` given no --primary/--extra reads the
+              card's build.json first and carries the old sources through: an inject must
+              never lose provenance.
+  media.json  the manifest selectmedia.py wrote for the staged set, VERBATIM (absent when the
+              card carries no media); an `inject` without --media-dir carries the card's own
+              through byte for byte.
+`inspect` reads both back; a card written by an older version (no sidecars) degrades to nulls
+and a warning rather than an error.
+
 Run under WSL/Linux (needs debugfs, e2fsck, mke2fs, sfdisk, fdisk from e2fsprogs/util-linux);
 the pure-python parts (layout, MBR/EBR bytes, hook, images.conf, media checks) are tested on
 Windows.
@@ -56,10 +72,21 @@ Windows.
         [,font.ttf]} + the media + a generated images.conf + the hooked /etc/init.d/game into
         p2, record md5 sidecars (OUT.p2.md5, and OUT.pN.md5 for every partition the bypass or
         the multi build wrote), and apply the bypass when asked
-  mkmulticard.py inject      --card OUT --selector-dir DIR [--media-dir DIR] [--conf FILE] [...]
+  mkmulticard.py inject      --card OUT --selector-dir DIR [--media-dir DIR] [--conf FILE]
+                             [--primary P] [--extra E ...] [...]
         redo only the p2 injection on an existing multi card (idempotent: re-extract, rm+write,
-        verify); without --media-dir the card's media directory and the conf's media fields are
-        carried through; the p2 sidecar is rewritten
+        verify); without --media-dir the card's media directory, its media.json and the conf's
+        media fields are carried through; --primary/--extra are RECORDED in build.json and
+        nothing is read from them (without them the card's own provenance is carried through);
+        the p2 sidecar is rewritten
+  mkmulticard.py inspect     --card X [--json] [--media-out DIR]
+        read a finished card back with no mounts and no writes: the table, the menu (images.conf),
+        the provenance (build.json), the media (media.json + the files on p2) and every games
+        tree's validator state.  A human table by default; --json prints ONE object on stdout
+        (the GUI's 'Load card' fills its fields from it) and --media-out DIR extracts the card's
+        media directory + media.json into DIR (the flat layout --media-dir reads back), so the
+        menu can be previewed and re-injected without a rebuild.  Exit 0 with the report, 2 when
+        the file is not a Spike 2 card or carries no selector
   mkmulticard.py bypass      --card OUT
         apply the validator bypass to every games tree on an existing card (this is what fixes
         a card that shows GAME VALIDATION ERROR without a rebuild); sidecars rewritten
@@ -114,6 +141,10 @@ import time
 #: app's own plugins/stern modules, imported lazily so the pure parts need no package.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+#: This tool's own version, stamped into build.json so a card says what wrote it.  Bump it when
+#: the sidecar's SHAPE changes; a reader must accept an older (or missing) one.
+VERSION = "1.0"
+
 SECTOR = 512
 HEADS, SPT = 4, 32          # geometry the stock CHS bytes decode with (p1: 64/0/1 .. 191/3/32)
 ALIGN = 2048                # every stock partition start is 1 MiB aligned
@@ -154,6 +185,14 @@ FORBIDDEN_OUTPUT_PREFIXES = ("/mnt/d/Pinball/images", "D:/Pinball/images", "D:\\
 # ---- media (item 90 v2) --------------------------------------------------------------------
 MEDIA_DIR = SELECT_DIR + "/media"
 MEDIA_MANIFEST = "media.json"                 # selectmedia.py writes it; --media-dir reads it
+#: The two JSON files staged BESIDE images.conf (item 90, loading a card back).  They are not
+#: media: they never go into MEDIA_DIR (where the selector scans), never count against
+#: MEDIA_BUDGET and are never subject to the "only what media.json names is staged" rule.
+BUILD_MANIFEST = "build.json"
+SIDECAR_MANIFESTS = (BUILD_MANIFEST, MEDIA_MANIFEST)
+#: 'codeselect 2.1 - Spike 2 boot-time code selector' lives in the binary's .rodata
+SELECTOR_VERSION_RE = re.compile(rb"codeselect (\d+(?:\.\d+)+)")
+SELECTOR_VERSION_MAX = 8 << 20                # do not read a huge file just to sniff a version
 MEDIA_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 MEDIA_BUDGET = 20 << 20                       # the whole set on p2 (194 MB free on a stock rootfs)
 PNG_MAX = (1360, 768)                         # the panel; the tools pre-scale
@@ -954,8 +993,8 @@ def _norm(p):
     return os.path.normpath(r).replace("\\", "/").lower()
 
 
-def check_output_path(path, inputs, force=False, must_exist=False):
-    """Refuse an output the tool must never write.  Raises Refused with the reason."""
+def check_library_path(path):
+    """Refuse ANY output - a file or a directory - inside David's card library."""
     if not path:
         raise Refused("no output path")
     n = _norm(path)
@@ -963,6 +1002,12 @@ def check_output_path(path, inputs, force=False, must_exist=False):
         pn = _norm(pre)
         if n == pn or n.startswith(pn + "/"):
             raise Refused("refusing to write under %s (David's card library): %s" % (pre, path))
+    return path
+
+
+def check_output_path(path, inputs, force=False, must_exist=False):
+    """Refuse an output the tool must never write.  Raises Refused with the reason."""
+    n = _norm(check_library_path(path))
     for inp in inputs:
         if not inp:
             continue
@@ -1303,10 +1348,12 @@ def debugfs_walk(ref, sub="/"):
 
 
 # ============================================================================= injection
-def stage_selector(selector_dir, stage, conf_text, hooked_game, media_files=None):
+def stage_selector(selector_dir, stage, conf_text, hooked_game, media_files=None, manifests=None):
     """Copy the selector files into `stage` with their FINAL modes (debugfs write copies the source
     mode).  `media_files` ({name: source path}, from plan_media) go to stage/media/<name> and
-    MEDIA_DIR/<name> on the card, 0644.  -> [(staged path, card path, mode)]."""
+    MEDIA_DIR/<name> on the card, 0644.  `manifests` ({name: text or bytes}, from
+    selector_manifests) are the JSON sidecars and land BESIDE images.conf - in SELECT_DIR, never
+    in MEDIA_DIR, so the selector's media scan never sees them.  -> [(staged path, card path, mode)]."""
     if not os.path.isdir(selector_dir):
         raise Refused("selector dir %s is not a directory" % selector_dir)
     items = []
@@ -1329,6 +1376,14 @@ def stage_selector(selector_dir, stage, conf_text, hooked_game, media_files=None
         f.write(conf_text)
     os.chmod(conf, 0o644)
     items.append((conf, SELECT_DIR + "/images.conf", 0o644))
+    for name, text in (manifests or {}).items():
+        if name not in SIDECAR_MANIFESTS:
+            raise Refused("%r is not one of the selector's JSON sidecars %r" % (name, list(SIDECAR_MANIFESTS)))
+        dst = os.path.join(stage, name)
+        with open(dst, "wb") as f:                       # bytes: a carried-through media.json is verbatim
+            f.write(text if isinstance(text, bytes) else text.encode("utf-8"))
+        os.chmod(dst, 0o644)
+        items.append((dst, SELECT_DIR + "/" + name, 0o644))
     if media_files:
         mdir = os.path.join(stage, "media")
         os.makedirs(mdir, exist_ok=True)
@@ -1392,9 +1447,11 @@ def inject_commands(items, existing, times, existing_media=None):
     return cmds
 
 
-def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=None, replace_media=False):
-    """Modify an extracted rootfs image in place: /usr/local/codeselect/* (+ media/) and the hooked
-    game script.  Idempotent (existing files are removed first; an existing media directory is
+def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=None, replace_media=False,
+                   manifests=None):
+    """Modify an extracted rootfs image in place: /usr/local/codeselect/* (+ media/, + the JSON
+    sidecars `manifests` names) and the hooked game script.  Idempotent (existing files are
+    removed first; an existing media directory is
     replaced when media is staged or `replace_media` asks, else left alone).  Refuses to fill p2
     past its free space.  Verifies by e2fsck -fn and full read-back."""
     need_tools("debugfs", "e2fsck")
@@ -1410,7 +1467,7 @@ def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=Non
         raise Refused("%s is empty or missing in p2" % GAME_SCRIPT)
     times = debugfs_stat(p2_image, GAME_SCRIPT)
     hooked = hook_game_script(orig)
-    items = stage_selector(selector_dir, stage_dir, conf_text, hooked, media_files)
+    items = stage_selector(selector_dir, stage_dir, conf_text, hooked, media_files, manifests)
     existing = existing_media = None
     reclaim = len(orig)                                    # the game script is rm'd and rewritten
     if debugfs_exists(p2_image, SELECT_DIR):
@@ -1446,7 +1503,8 @@ def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=Non
     return [card for (_s, card, _m) in items]
 
 
-def inject_card(card, selector_dir, conf_text, workdir=None, media_files=None, replace_media=False):
+def inject_card(card, selector_dir, conf_text, workdir=None, media_files=None, replace_media=False,
+                manifests=None):
     """Extract p2 from the card, inject, e2fsck, write it back.  -> list of card paths written."""
     geom = Geometry.from_file(card)
     t, st, cnt = geom.part(2)
@@ -1461,7 +1519,7 @@ def inject_card(card, selector_dir, conf_text, workdir=None, media_files=None, r
         copy_range(card, st * SECTOR, p2, 0, cnt * SECTOR, "p2 extract", sparse=False, progress=None)
         stage = os.path.join(tmp, "stage")
         os.mkdir(stage)
-        written = inject_into_p2(p2, selector_dir, conf_text, stage, media_files, replace_media)
+        written = inject_into_p2(p2, selector_dir, conf_text, stage, media_files, replace_media, manifests)
         say("writing the patched p2 back to %s @LBA %d" % (card, st))
         copy_range(p2, 0, card, st * SECTOR, cnt * SECTOR, "p2 write-back", sparse=False, progress=None)
         a, b = md5_file(p2), md5_range(card, st * SECTOR, cnt * SECTOR)
@@ -1528,14 +1586,107 @@ def conf_for_plan(plan, args, existing=None, media=None):
                               rows, move, confirm, volume, mixer)
 
 
-def card_conf(card):
-    """The images.conf already on a card's p2, parsed, or None."""
-    geom = Geometry.from_file(card)
-    _t, st, _cnt = geom.part(2)
-    ref = fs_ref(card, st * SECTOR)
-    if not debugfs_exists(ref, SELECT_DIR + "/images.conf"):
+# ============================================================================= the JSON sidecars
+def build_manifest(plan, conf, sources=None, existing=None, written=None):
+    """build.json: what the card's menu says, plus WHERE each image came from - the provenance a
+    reload needs and images.conf cannot hold.  Pure.
+
+    plan      the card's Plan (for the layout), or None
+    conf      the images.conf about to be written, PARSED (parse_images_conf)
+    sources   the build's --primary/--extra in image order; an empty or missing entry falls
+              back to `existing`
+    existing  the build.json already on the card - its sources are carried through BY DEVICE,
+              so an inject that is given no source paths never loses provenance
+    """
+    prev = {}
+    for im in (existing or {}).get("images") or []:
+        if isinstance(im, dict) and im.get("device"):
+            prev[im["device"]] = im.get("source")
+    sources = list(sources or [])
+    rows = []
+    for i, (dev, title, sub) in enumerate(conf["images"]):
+        art, anim, music = conf["media"][i] if i < len(conf["media"]) else ("", "", "")
+        given = sources[i] if i < len(sources) else None
+        # only a freshly given path is absolutised; a carried one is already absolute and may
+        # be spelled for another OS (a /mnt/d path read on Windows must not be mangled)
+        src = os.path.abspath(given) if given else prev.get(dev)
+        rows.append(collections.OrderedDict([
+            ("device", dev), ("source", src or None), ("title", title), ("subtitle", sub),
+            ("art", art or None), ("anim", anim or None), ("music", music or None)]))
+    return collections.OrderedDict([
+        ("tool", "mkmulticard"),
+        ("version", VERSION),
+        ("written", written or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
+        ("layout", getattr(plan, "layout", None)),
+        ("images", rows),
+        ("timeout", conf["timeout"]),
+        ("default", conf["default"]),
+        ("volume", conf["volume"]),
+        ("mixer_volume", conf["mixer_volume"]),
+        ("sound_move", conf["sound_move"]),
+        ("sound_confirm", conf["sound_confirm"])])
+
+
+def selector_manifests(plan, conf_text, media_dir=None, sources=None, existing_build=None,
+                       existing_media=None, written=None):
+    """The JSON sidecars to stage beside images.conf -> OrderedDict {name: text or bytes}.
+    build.json is always written (from `conf_text` + `sources`, carrying `existing_build`'s
+    sources through); media.json is --media-dir's file verbatim when one was given, else the
+    card's own `existing_media` bytes carried through unchanged, else absent."""
+    out = collections.OrderedDict()
+    out[BUILD_MANIFEST] = json.dumps(
+        build_manifest(plan, parse_images_conf(conf_text), sources, existing_build, written),
+        indent=1) + "\n"
+    if media_dir:
+        with open(os.path.join(media_dir, MEDIA_MANIFEST), "rb") as f:
+            out[MEDIA_MANIFEST] = f.read()
+    elif existing_media:
+        out[MEDIA_MANIFEST] = existing_media
+    return out
+
+
+def parse_manifest(raw, what, warnings=None):
+    """A staged JSON sidecar's bytes -> dict, or None.  A malformed one is a warning (a card
+    written by a broken run must still load), or a Refusal when no warning list is offered."""
+    if raw is None:
         return None
-    return parse_images_conf(debugfs_cat(ref, SELECT_DIR + "/images.conf"))
+    try:
+        obj = json.loads(raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw)
+        why = None if isinstance(obj, dict) else "top level is %s, not an object" % type(obj).__name__
+    except ValueError as exc:                            # 'as' names die with the except block
+        why = str(exc)
+    if why is None:
+        return obj
+    msg = "%s on the card is not a JSON object (%s); ignored" % (what, why)
+    if warnings is None:
+        raise Refused(msg)
+    warnings.append(msg)
+    return None
+
+
+# ============================================================================= reading a card back
+def select_ref(card):
+    """The debugfs reference for the card's p2 - where the selector, its images.conf and the two
+    JSON sidecars live.  The same read path verify uses."""
+    geom = Geometry.from_file(card)
+    t, st, _cnt = geom.part(2)
+    if t != 0x83:
+        raise Refused("%s: p2 is type 0x%02x, not Linux (not a Spike 2 card)" % (card, t))
+    return fs_ref(card, st * SECTOR)
+
+
+def read_select_file(ref, name):
+    """SELECT_DIR/<name> as bytes, or None when the card does not carry it."""
+    path = SELECT_DIR + "/" + name
+    if not debugfs_exists(ref, path):
+        return None
+    return debugfs_cat(ref, path)
+
+
+def card_conf(card, ref=None):
+    """The images.conf already on a card's p2, parsed, or None."""
+    raw = read_select_file(ref or select_ref(card), "images.conf")
+    return None if raw is None else parse_images_conf(raw)
 
 
 def multi_subdirs_on(card, part_num=7):
@@ -1945,6 +2096,9 @@ def verify_card(card, plan, selector_dir=None, media_dir=None):
             print("    %s/%-14s mode %o uid %d gid %d %d bytes" % (SELECT_DIR, name, mode & 0o7777, uid, gid, size))
         names = {e[4] for e in ents}
         check("%s holds codeselect, select.sh, images.conf" % SELECT_DIR, {"codeselect", "select.sh", "images.conf"} <= names)
+        print("    JSON sidecars: %s" % ", ".join(
+            "%s %s" % (n, ("%d bytes" % dict((e[4], e[5]) for e in ents)[n]) if n in names else "absent")
+            for n in SIDECAR_MANIFESTS))
         conf = parse_images_conf(debugfs_cat(ref, SELECT_DIR + "/images.conf"))
         devs = [d for (d, _t, _s) in conf["images"]]
         check("images.conf devices = %r" % (plan.devices(),), devs == plan.devices(), "got %r" % (devs,))
@@ -1970,6 +2124,9 @@ def verify_card(card, plan, selector_dir=None, media_dir=None):
                 print("    %s/%-24s mode %o uid %d gid %d %d bytes" % (MEDIA_DIR, name, mode & 0o7777, uid, gid, size))
             print("    media: %d files, %s (budget %s)" % (len(on_card), _gb(sum(on_card.values())), _gb(MEDIA_BUDGET)))
             check("%s total <= budget" % MEDIA_DIR, sum(on_card.values()) <= MEDIA_BUDGET)
+            # the JSON sidecars live beside images.conf; the selector scans this directory
+            check("no JSON sidecar inside %s" % MEDIA_DIR, not (set(SIDECAR_MANIFESTS) & set(on_card)),
+                  "found %r" % sorted(set(SIDECAR_MANIFESTS) & set(on_card)))
         else:
             print("    (no %s)" % MEDIA_DIR)
         missing = [n for n in wanted if n not in on_card]
@@ -2018,6 +2175,189 @@ def verify_card(card, plan, selector_dir=None, media_dir=None):
         print("allocated %s of %s apparent (sparse)" % (_gb(alloc), _gb(os.path.getsize(card))))
     print("VERIFY %s %s" % (card, "PASS" if ok else "FAIL"))
     return ok
+
+
+# ============================================================================= inspect
+def extract_card_media(ref, out_dir, names, media_json=None):
+    """Write the card's media directory (and its media.json when it carries one) into `out_dir`,
+    flat - the exact shape selectmedia.py writes and --media-dir reads back, so a loaded card can
+    be previewed and re-injected without a rebuild.  -> (names written, names skipped).
+
+    Nothing in `out_dir` is ever deleted (it may be a media set of your own), so give it a
+    per-card scratch directory: a file left there by an earlier load is still there afterwards,
+    and --media-dir would stage what media.json names, not what the card carries."""
+    check_library_path(out_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    written, skipped = [], []
+    for name in names:
+        if not MEDIA_NAME_RE.match(name):
+            skipped.append(name)                 # never came from this tool; never write it out
+            continue
+        with open(os.path.join(out_dir, name), "wb") as f:
+            f.write(debugfs_cat(ref, MEDIA_DIR + "/" + name))
+        written.append(name)
+    if media_json is not None:
+        with open(os.path.join(out_dir, MEDIA_MANIFEST), "wb") as f:
+            f.write(media_json)
+        written.append(MEDIA_MANIFEST)
+    return written, skipped
+
+
+def inspect_card(card, media_out=None):
+    """Read a finished multi card back: everything a loader needs to fill an editor's fields,
+    with no mounts and no writes.  -> the report dict (contract B of "load a card back").
+
+    The menu comes from images.conf, the provenance from build.json, the art/animation SPECS
+    from media.json, the file list from the media directory and each image's validator state
+    from its games tree.  A card written by an older version carries no JSON sidecars: those
+    fields degrade to null with a warning - never an error.  Refused only when the file is not
+    a Spike 2 card or carries no selector.  `media_out` also extracts the media directory.
+    """
+    need_tools("debugfs")
+    warnings = []
+    path = os.path.abspath(card)
+    size = os.path.getsize(path)
+    geom = Geometry.from_file(path)
+    ref = select_ref(path)
+    if not debugfs_exists(ref, SELECT_DIR):
+        raise Refused("%s: no %s on its p2 - no boot selector is installed (a stock card, or one "
+                      "built without --selector-dir)" % (path, SELECT_DIR))
+    ents = [e for e in debugfs_ls(ref, SELECT_DIR) if e[4] not in (".", "..")]
+    sizes = {e[4]: e[5] for e in ents}
+    isdir = {e[4]: statmod.S_ISDIR(e[1]) for e in ents}
+    raw_conf = read_select_file(ref, "images.conf")
+    if raw_conf is None:
+        raise Refused("%s: %s is on the card but holds no images.conf - there is no menu to read"
+                      % (path, SELECT_DIR))
+    conf = parse_images_conf(raw_conf)
+    build = parse_manifest(read_select_file(ref, BUILD_MANIFEST), BUILD_MANIFEST, warnings)
+    media_json = read_select_file(ref, MEDIA_MANIFEST)
+    media_man = parse_manifest(media_json, MEDIA_MANIFEST, warnings)
+    if build is None:
+        warnings.append("no %s on this card (it predates the sidecar, or another tool wrote it): "
+                        "the images' source .raw paths are unknown - re-inject with --primary/"
+                        "--extra to record them" % BUILD_MANIFEST)
+    if media_man is None and any(any(m) for m in conf["media"]):
+        warnings.append("no %s on this card: the art/animation SPECS are unknown (the staged file "
+                        "names are still in images.conf)" % MEDIA_MANIFEST)
+    plan = None
+    try:
+        plan = plan_from_card(path)
+    except Refused as e:
+        warnings.append("the partition table does not read as a multi card (%s); the images below "
+                        "come from images.conf alone" % e)
+    trees = {device_name(p.num, s): (p, s) for (p, s) in (plan.trees if plan else [])}
+    prev = {im["device"]: im for im in ((build or {}).get("images") or [])
+            if isinstance(im, dict) and im.get("device")}
+    mrows = (media_man or {}).get("images") or []
+    images = []
+    for i, (dev, title, subtitle) in enumerate(conf["images"]):
+        art, anim, music = conf["media"][i] if i < len(conf["media"]) else ("", "", "")
+        b = prev.get(dev) or {}
+        m = mrows[i] if i < len(mrows) and isinstance(mrows[i], dict) else {}
+        src = b.get("source") or None
+        exists = bool(src) and os.path.isfile(src)
+        if src and not exists:
+            warnings.append("image %d: its source %s is not on this machine - the menu can still "
+                            "be edited and re-injected, only a rebuild needs it" % (i, src))
+        state = title_dir = None
+        if dev in trees:
+            p, s = trees[dev]
+            try:
+                st, title_dir, _gpath = tree_state(path, p, s)
+                state = "none" if st == "absent" else st
+            except Refused as e:
+                warnings.append("image %d (%s): its games tree could not be read (%s)" % (i, dev, e))
+        else:
+            warnings.append("image %d: images.conf names %s but the card carries no such games tree" % (i, dev))
+        images.append(collections.OrderedDict([
+            ("index", i), ("device", dev), ("title", title), ("subtitle", subtitle),
+            ("art", art or None), ("anim", anim or None), ("music", music or None),
+            ("art_source", m.get("art_source")), ("anim_source", m.get("anim_source")),
+            ("source", src), ("source_exists", exists),
+            ("title_dir", title_dir), ("bypass", state)]))
+    media = []
+    if isdir.get("media"):
+        for _ino, _mode, _uid, _gid, name, msize in debugfs_ls(ref, MEDIA_DIR):
+            if name not in (".", ".."):
+                media.append(collections.OrderedDict([("name", name), ("bytes", msize)]))
+        media.sort(key=lambda x: x["name"])
+    have = {x["name"] for x in media}
+    missing = [n for n in conf_media_names(conf) if n not in have]
+    if missing:
+        warnings.append("images.conf names %d media file(s) the card does not carry: %s"
+                        % (len(missing), ", ".join(missing)))
+    sel = collections.OrderedDict([("bytes", sizes.get("codeselect")), ("version", None)])
+    if "codeselect" not in sizes:
+        warnings.append("no codeselect binary in %s: this card will not show a menu" % SELECT_DIR)
+    elif sizes["codeselect"] <= SELECTOR_VERSION_MAX:
+        m = SELECTOR_VERSION_RE.search(read_select_file(ref, "codeselect") or b"")
+        if m:
+            sel["version"] = m.group(1).decode("ascii", "replace")
+    out = None
+    if media_out:
+        written, skipped = extract_card_media(ref, media_out, [x["name"] for x in media], media_json)
+        out = collections.OrderedDict([("dir", os.path.abspath(media_out)), ("files", len(written))])
+        if skipped:
+            warnings.append("%d media file(s) with names this tool never writes were left on the "
+                            "card: %s" % (len(skipped), ", ".join(skipped)))
+        if media_json is None and os.path.isfile(os.path.join(media_out, MEDIA_MANIFEST)):
+            warnings.append("%s already held a %s and this card carries none - it is an EARLIER "
+                            "load's, not this card's; use a fresh directory before re-injecting "
+                            "from it" % (media_out, MEDIA_MANIFEST))
+    parts = [collections.OrderedDict([("num", n), ("type", t), ("start", st), ("count", cnt),
+                                      ("bytes", cnt * SECTOR)])
+             for (n, t, st, cnt) in ([(x[0], x[1], x[2], x[3]) for x in geom.prim]
+                                     + [(5 + i, t, st, cnt) for i, (_e, t, st, cnt) in enumerate(geom.logical)])]
+    return collections.OrderedDict([
+        ("card", path), ("size", size),
+        ("layout", plan.layout if plan else ("multi" if any(":" in d for (d, _t, _s) in conf["images"]) else "parts")),
+        ("partitions", parts), ("images", images),
+        ("timeout", conf["timeout"]), ("default", conf["default"]),
+        ("volume", conf["volume"]), ("mixer_volume", conf["mixer_volume"]),
+        ("sound_move", conf["sound_move"]), ("sound_confirm", conf["sound_confirm"]),
+        ("font", conf["font"]), ("media_dir", conf["media_dir"]),
+        ("media", media), ("media_out", out),
+        ("has_media_json", media_json is not None), ("has_build_json", build is not None),
+        ("build", None if build is None else collections.OrderedDict(
+            [(k, build.get(k)) for k in ("tool", "version", "written")])),
+        ("selector", sel), ("warnings", warnings)])
+
+
+def print_inspect(rep):
+    """The human table `inspect` prints without --json."""
+    print("card       %s" % rep["card"])
+    print("size       %s (%d bytes)" % (_gb(rep["size"]), rep["size"]))
+    print("layout     %s" % rep["layout"])
+    print("table      %s" % ", ".join("p%d %s %s" % (p["num"], "0x%02x" % p["type"], _gb(p["bytes"]))
+                                      for p in rep["partitions"]))
+    sel = rep["selector"]
+    print("selector   codeselect %s, %s; build.json %s, media.json %s"
+          % (sel["version"] or "(version unknown)",
+             "%d bytes" % sel["bytes"] if sel["bytes"] else "MISSING",
+             "yes" if rep["has_build_json"] else "no", "yes" if rep["has_media_json"] else "no"))
+    if rep.get("build"):
+        print("built      %s by %s %s" % (rep["build"].get("written"), rep["build"].get("tool"),
+                                          rep["build"].get("version")))
+    print("menu       default=%s timeout=%s volume=%s mixer_volume=%s sound_move=%s sound_confirm=%s font=%s"
+          % (rep["default"], rep["timeout"], rep["volume"], rep["mixer_volume"],
+             rep["sound_move"], rep["sound_confirm"], rep["font"]))
+    for im in rep["images"]:
+        print("image %d    %s  %r / %r" % (im["index"], im["device"], im["title"], im["subtitle"]))
+        print("           art=%s anim=%s music=%s" % (im["art"], im["anim"], im["music"]))
+        if im["art_source"] or im["anim_source"]:
+            print("           art_source=%s anim_source=%s" % (im["art_source"], im["anim_source"]))
+        print("           source=%s%s" % (im["source"], "" if im["source"] is None else
+                                          (" (on this machine)" if im["source_exists"] else " (MISSING here)")))
+        print("           title dir=%s  validator=%s" % (im["title_dir"], im["bypass"]))
+    print("media      %d file(s), %d KB of the %d KB budget"
+          % (len(rep["media"]), sum(m["bytes"] for m in rep["media"]) >> 10, MEDIA_BUDGET >> 10))
+    for m in rep["media"]:
+        print("           %-28s %d bytes" % (m["name"], m["bytes"]))
+    if rep.get("media_out"):
+        print("extracted  %d file(s) into %s" % (rep["media_out"]["files"], rep["media_out"]["dir"]))
+    for w in rep["warnings"]:
+        print("WARNING: %s" % w)
 
 
 def check_stock(path):
@@ -2289,16 +2629,27 @@ def selftest(d, selector_file=None):
     ok &= "wrong_rate.wav" not in ms["files"] and ms["volume"] == 40
     conf = render_images_conf(plan.devices(), ["A stock", "B", "C"], ["synthetic", "", "third"], 1, 7, None,
                               ms["rows"], ms["sound_move"], ms["sound_confirm"], ms["volume"])
-    inject_card(out, sel, conf, workdir=d, media_files=ms["files"])
+    mans = selector_manifests(plan, conf, media, [A, B, C])
+    inject_card(out, sel, conf, workdir=d, media_files=ms["files"], manifests=mans)
     print("== verify")
     ok &= verify_card(out, plan, sel, media)
     print("== inject again with the media directory present (idempotence)")
-    inject_card(out, sel, conf, workdir=d, media_files=ms["files"])
+    inject_card(out, sel, conf, workdir=d, media_files=ms["files"], manifests=mans)
     ok &= verify_card(out, plan, sel, media)
-    print("== inject without media: the media directory and the conf's media fields are carried through")
-    carried = conf_for_plan(plan, argparse.Namespace(), existing=card_conf(out))
-    inject_card(out, sel, carried, workdir=d)
+    print("== inject without media: the media directory, media.json and the conf's media fields are carried through")
+    ref0 = select_ref(out)
+    old_build = parse_manifest(read_select_file(ref0, BUILD_MANIFEST), BUILD_MANIFEST)
+    old_media = read_select_file(ref0, MEDIA_MANIFEST)
+    carried = conf_for_plan(plan, argparse.Namespace(), existing=card_conf(out, ref0))
+    inject_card(out, sel, carried, workdir=d,
+                manifests=selector_manifests(plan, carried, None, None, old_build, old_media))
     ok &= verify_card(out, plan, sel, media)
+    ref0 = select_ref(out)
+    now = parse_manifest(read_select_file(ref0, BUILD_MANIFEST), BUILD_MANIFEST)
+    ok &= [im["source"] for im in now["images"]] == [os.path.abspath(x) for x in (A, B, C)]
+    ok &= read_select_file(ref0, MEDIA_MANIFEST) == old_media
+    print("provenance carried through an inject with no sources: %s"
+          % ", ".join(os.path.basename(im["source"] or "?") for im in now["images"]))
     print("== p2 corrupted outside the injected files: verify must FAIL on the sidecar")
     p2off, p2len = p2_range(out)
     spot = p2off + p2len - 3 * 1024            # the last blocks of a 1 MiB ext4: free, so e2fsck stays clean
@@ -2326,6 +2677,20 @@ def selftest(d, selector_file=None):
     names = sorted(e[4] for e in debugfs_ls(ref, MEDIA_DIR) if e[4] not in (".", ".."))
     ok &= names == sorted(ms["files"])
     print("media on the card: %s" % ", ".join(names))
+    print("== inspect (the card read back) + --media-out")
+    mout = os.path.join(d, "loaded media")
+    rep = inspect_card(out, mout)
+    print_inspect(rep)
+    ok &= rep["has_build_json"] and rep["has_media_json"] and rep["layout"] == "parts"
+    ok &= [im["device"] for im in rep["images"]] == plan.devices()
+    ok &= [im["title"] for im in rep["images"]] == ["A stock", "B", "C"]
+    ok &= [im["source"] for im in rep["images"]] == [os.path.abspath(x) for x in (A, B, C)]
+    ok &= [im["source_exists"] for im in rep["images"]] == [True, True, True]
+    ok &= (rep["default"], rep["timeout"], rep["volume"]) == (1, 7, 40)
+    ok &= sorted(m["name"] for m in rep["media"]) == names
+    ok &= sorted(os.listdir(mout)) == sorted(names + [MEDIA_MANIFEST])
+    # the extracted directory is a --media-dir again: the round trip a GUI reload needs
+    ok &= list(plan_media(mout, 3)["files"]) == list(ms["files"])
     for n in (7, 8):
         _t, st, _c = Geometry.from_file(out).part(n)
         link = debugfs_stat(fs_ref(out, st * SECTOR), "/game").get("link")     # a fast symlink has no blocks to cat
@@ -2372,7 +2737,7 @@ def selftest(d, selector_file=None):
         shutil.rmtree(tmp, ignore_errors=True)
     say("p7 md5 %s recorded in %s" % (write_part_sidecar(out2, 7), sidecar_path(out2, 7)))
     conf2 = conf_for_plan(plan2, argparse.Namespace(titles="A stock;B;C", subtitles="synthetic;;third", timeout=9))
-    inject_card(out2, sel, conf2, workdir=d)
+    inject_card(out2, sel, conf2, workdir=d, manifests=selector_manifests(plan2, conf2, None, [A, B, C]))
     print("== the card reads back as a multi card")
     back2 = plan_from_card(out2)
     ok &= back2.layout == "multi" and back2.devices() == plan2.devices() and back2.table() == plan2.table()
@@ -2399,6 +2764,13 @@ def selftest(d, selector_file=None):
     cb = parse_images_conf(debugfs_cat(ref2, SELECT_DIR + "/images.conf"))
     ok &= [dv for (dv, _t, _s) in cb["images"]] == plan2.devices() and cb["timeout"] == 9
     ok &= [t for (_d, t, _s) in cb["images"]] == ["A stock", "B", "C"]
+    print("== inspect (multi): the subdirectory devices and the provenance of each tree")
+    rep2 = inspect_card(out2)
+    print_inspect(rep2)
+    ok &= rep2["layout"] == "multi" and [im["device"] for im in rep2["images"]] == plan2.devices()
+    ok &= [im["source"] for im in rep2["images"]] == [os.path.abspath(x) for x in (A, B, C)]
+    ok &= [im["title_dir"] for im in rep2["images"]] == ["A_title", "B_title", "C_title"]
+    ok &= rep2["has_build_json"] and not rep2["has_media_json"] and rep2["media"] == []
     print("SELFTEST", "PASS" if ok else "FAIL")
     return ok
 
@@ -2460,7 +2832,17 @@ def main(argv=None):
     s = sub.add_parser("inject", help="redo only the p2 injection on an existing multi card (idempotent)")
     s.add_argument("--card", required=True, help="the multi card to modify IN PLACE")
     _add_conf_flags(s)
+    s.add_argument("--primary", help="RECORD this path as image 0's source in build.json; nothing is read "
+                                     "from it (without it the card's own build.json is carried through)")
+    s.add_argument("--extra", action="append", default=[], metavar="IMG",
+                   help="RECORD this path as the next image's source in build.json (repeatable); nothing is read from it")
     _add_reach_flag(s)
+    s = sub.add_parser("inspect", help="read a finished card back: table, menu, provenance, media, validator state")
+    s.add_argument("--card", required=True, help="the card to read (READ-ONLY; nothing is written to it)")
+    s.add_argument("--json", action="store_true", dest="as_json",
+                   help="print ONE JSON object on stdout instead of the table (the GUI's 'Load card' reads it)")
+    s.add_argument("--media-out", help="also extract the card's media directory + media.json into this directory "
+                                       "(give it a per-card scratch directory: nothing there is deleted)")
     s = sub.add_parser("bypass", help="apply the validator bypass to every games tree on an existing card (in place)")
     s.add_argument("--card", required=True, help="the card to modify IN PLACE")
     s.add_argument("--dry-run", action="store_true", help="report every tree's state; write nothing")
@@ -2491,7 +2873,7 @@ def main(argv=None):
                 say("WARNING: no --extra given; building a one-image card")
             workdir = a.workdir or os.path.dirname(os.path.abspath(a.out))
             os.makedirs(workdir, exist_ok=True)
-            conf = media = None
+            conf = media = manifests = None
             if not a.no_inject:
                 if a.media_dir:
                     media = plan_media(a.media_dir, len(plan.trees))
@@ -2499,9 +2881,11 @@ def main(argv=None):
                         say("media %s: %s" % (name, media["kinds"][name]))
                     say("media: %d files, %s" % (len(media["files"]), _gb(media["total"])))
                 conf = conf_for_plan(plan, a, media=media)          # generated (and validated) before the long copy
+                manifests = selector_manifests(plan, conf, a.media_dir, [a.primary] + list(a.extra))
                 stage_selector(a.selector_dir, tempfile.mkdtemp(prefix="mkmulticard.chk."), conf, hook_game_script(SYNTH_GAME),
-                               media["files"] if media else None)
+                               media["files"] if media else None, manifests)
                 print("== images.conf to inject\n" + conf.rstrip())
+                print("== %s\n%s" % (BUILD_MANIFEST, manifests[BUILD_MANIFEST].rstrip()))
             if a.bypass_validation:
                 _stern_plugins()                                  # refuse up front, not after the copy
             for x, g in zip(plan.extras, plan.extra_geoms):
@@ -2527,7 +2911,7 @@ def main(argv=None):
             if not a.no_inject:
                 t1 = time.monotonic()
                 inject_card(a.out, a.selector_dir, conf, workdir=workdir, media_files=media["files"] if media else None,
-                            replace_media=bool(a.media_dir))
+                            replace_media=bool(a.media_dir), manifests=manifests)
                 say("injection took %.0f s" % (time.monotonic() - t1))
             else:
                 # stock p2, still recorded: verify then has something to hold p2 against
@@ -2540,7 +2924,7 @@ def main(argv=None):
             if conf:
                 print(conf.rstrip())
         elif a.cmd == "inject":
-            check_output_path(a.card, [a.conf, a.selector_dir, a.media_dir], must_exist=True)
+            check_output_path(a.card, [a.conf, a.selector_dir, a.media_dir, a.primary] + list(a.extra), must_exist=True)
             if not a.selector_dir:
                 raise Refused("inject needs --selector-dir")
             plan = plan_from_card(a.card)
@@ -2552,11 +2936,40 @@ def main(argv=None):
                 media = plan_media(a.media_dir, len(plan.trees))
                 for name in media["files"]:
                     say("media %s: %s" % (name, media["kinds"][name]))
-            conf = conf_for_plan(plan, a, existing=card_conf(a.card), media=media)
+            # read the card's own sidecars BEFORE touching it: an inject that is given no source
+            # paths carries the old provenance through, and one without --media-dir carries the
+            # card's media.json through byte for byte
+            ref = select_ref(a.card)
+            warns = []
+            old_build = parse_manifest(read_select_file(ref, BUILD_MANIFEST), BUILD_MANIFEST, warns)
+            old_media = None if a.media_dir else read_select_file(ref, MEDIA_MANIFEST)
+            for w in warns:
+                say("WARNING: " + w)
+            conf = conf_for_plan(plan, a, existing=card_conf(a.card, ref), media=media)
+            sources = [a.primary] + list(a.extra) if (a.primary or a.extra) else None
+            manifests = selector_manifests(plan, conf, a.media_dir, sources, old_build, old_media)
+            say("%s: %s; %s: %s" % (
+                BUILD_MANIFEST,
+                "sources given" if sources else ("sources carried through from the card" if old_build
+                                                 else "no sources known (pass --primary/--extra to record them)"),
+                MEDIA_MANIFEST,
+                "from --media-dir" if a.media_dir else ("carried through (%d bytes)" % len(old_media) if old_media
+                                                        else "absent")))
             print("== images.conf to inject\n" + conf.rstrip())
+            print("== %s\n%s" % (BUILD_MANIFEST, manifests[BUILD_MANIFEST].rstrip()))
             written = inject_card(a.card, a.selector_dir, conf, workdir=os.path.dirname(os.path.abspath(a.card)),
-                                  media_files=media["files"] if media else None, replace_media=bool(a.media_dir))
+                                  media_files=media["files"] if media else None, replace_media=bool(a.media_dir),
+                                  manifests=manifests)
             say("injected into %s: %s" % (a.card, ", ".join(written)))
+        elif a.cmd == "inspect":
+            if not os.path.isfile(a.card):
+                raise Refused("%s does not exist" % a.card)
+            rep = inspect_card(a.card, a.media_out)
+            if a.as_json:
+                json.dump(rep, sys.stdout, indent=1)
+                sys.stdout.write("\n")
+            else:
+                print_inspect(rep)
         elif a.cmd == "bypass":
             check_output_path(a.card, [], must_exist=True)
             plan = plan_from_card(a.card)

@@ -10,6 +10,8 @@
     parts.py --rootfs-file /etc/x card.raw   # a file out of the rootfs, via debugfs
     parts.py --rootfs-dir /usr/local/codeselect/media DEST card.raw
                                       # a directory out of the rootfs -> DEST/<name> (debugfs rdump)
+    parts.py --multiboot card.raw     # does this card boot into a MENU? one line,
+                                      # exit 0 = yes, 1 = no, 2 = cannot tell
 
 WHY THIS EXISTS. Every script here that reached into a card image carried the
 offsets of ONE card as constants - `?offset=12582912` for the rootfs,
@@ -52,6 +54,19 @@ down: `--list-games` prints one line per imgN that passes it, with the
 subdirectory as a fifth field (`7 15353856 7861174272 turtles_pro img1`), and
 the selector's device token for it is `p7:img1`. A plain games partition
 prints four fields, as before.
+
+**`--multiboot` IS THE ONE DEFINITION OF "THIS CARD BOOTS INTO A MENU"**, and
+it exists because that question had grown three answers. David, 2026-09-02:
+"i shouldn't have to check off 'boot selector' in the emulate tab. if it has
+multi-boot, i expect to see the multi-boot screen." The tickbox, watch.sh and
+run_game.sh each had their own idea of when a menu was wanted; now they all
+ask here. The test is what the MACHINE does at power-up, not what the emulator
+could be made to do: the rootfs holds `/usr/local/codeselect/codeselect` AND
+its `/usr/local/codeselect/images.conf` names two or more images. One line on
+stdout - `multiboot: yes|no|unknown - <why>` - and the exit status says which:
+0 the card carries a menu, 1 it does not, 2 nobody could tell (not a card, no
+rootfs, no debugfs). The LINE is the structured output; there is no second
+spelling of it to drift.
 """
 import argparse
 import os
@@ -248,6 +263,25 @@ def part_offset(path, n):
     return None
 
 
+def _cat(path, offset, name):
+    """The content of file `name` in the ext4 filesystem at `offset`, or None.
+
+    Split out of rootfs_file() so multiboot() can read a second file out of a
+    rootfs it has ALREADY identified - identify() is two or three debugfs
+    listings, and asking it once per file is how a "few hundred milliseconds"
+    probe turns into a second."""
+    try:
+        r = subprocess.run(["debugfs", "-R", "cat %s" % name,
+                            "%s?offset=%d" % (path, offset)],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0 or not r.stdout:
+        return None
+    return r.stdout.decode("utf-8", "replace")
+
+
 def rootfs_file(path, name):
     """The content of file `name` in the rootfs partition, or None.
 
@@ -258,16 +292,7 @@ def rootfs_file(path, name):
     found = identify(path)
     if "rootfs" not in found:
         return None
-    try:
-        r = subprocess.run(["debugfs", "-R", "cat %s" % name,
-                            "%s?offset=%d" % (path, found["rootfs"])],
-                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                           timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if r.returncode != 0 or not r.stdout:
-        return None
-    return r.stdout.decode("utf-8", "replace")
+    return _cat(path, found["rootfs"], name)
 
 
 def rootfs_dir(path, name, dest):
@@ -344,6 +369,82 @@ def identify(path):
     return out
 
 
+#: Where a multi-boot card keeps its menu, on the machine and in the emulator
+#: alike (mkmulticard.py installs it, buildselect.sh builds the same tree into
+#: the rig's rootfs). Spelled ONCE: the probe below and the reason it prints
+#: must name the same path, or a "no" sends someone looking in the wrong place.
+SELECTOR_DIR = "/usr/local/codeselect"
+SELECTOR_BIN = SELECTOR_DIR + "/codeselect"
+SELECTOR_CONF = SELECTOR_DIR + "/images.conf"
+
+
+def images_conf_count(text):
+    """How many images an images.conf names - `image=` lines and nothing else.
+
+    The selector's own parser (conf.c) reads one image per `image=` line and
+    ignores everything it does not know, so counting them here is counting the
+    entries the MENU would show. Comments start with '#' and are not counted
+    because they do not start with `image=` once stripped."""
+    n = 0
+    for line in (text or "").splitlines():
+        if line.strip().startswith("image="):
+            n += 1
+    return n
+
+
+def multiboot(path):
+    """Does this card boot into a MENU? ``(state, why, images)`` where state
+    is 'yes', 'no' or 'unknown' - the one definition, asked by the rig
+    (watch.sh, through padpath.sh's pad_select_wanted) and by the app's
+    Emulate tab, so the tickbox and the run cannot disagree.
+
+    THE TEST IS THE MACHINE'S, not the emulator's: the rootfs carries the
+    selector binary AND its images.conf names two or more images. That is
+    exactly what a card built by mkmulticard.py has and what a stock card has
+    not, and it is decided by the CARD rather than by what this PC happens to
+    have built - a rig with codeselect compiled must not start calling every
+    stock card multi-boot.
+
+    'unknown' is a third answer on purpose. A file that is not a card, a card
+    whose rootfs cannot be read, a machine with no debugfs: none of those is
+    "no", and the callers treat them differently (the rig boots the primary
+    and says why; the app leaves its tickbox alone rather than lying about
+    the card).
+
+    Cheap by construction, because the app runs this on every card pick:
+    identify() is two or three debugfs listings, then ONE listing of the
+    selector directory, then ONE cat of images.conf - and it stops at the
+    first of those that answers."""
+    try:
+        found = identify(path)
+    except SystemExit as exc:                 # table(): no MBR signature
+        return ("unknown", str(exc), 0)
+    except OSError as exc:                    # missing, unreadable, a directory
+        return ("unknown", "cannot read %s: %s" % (path, exc), 0)
+    if "rootfs" not in found:
+        return ("unknown", "no Linux partition on this image to hold a rootfs", 0)
+    off = found["rootfs"]
+    names = _ls(path, off, SELECTOR_DIR)
+    if names is None:
+        # No such directory, or no debugfs at all - and those are different
+        # answers. The root listing tells them apart with one more call, only
+        # on the path that is already going to say no.
+        if _ls(path, off) is None:
+            return ("unknown",
+                    "the rootfs could not be read (is debugfs installed?)", 0)
+        return ("no", "no %s in the rootfs" % SELECTOR_BIN, 0)
+    if "codeselect" not in names:
+        return ("no", "no %s in the rootfs" % SELECTOR_BIN, 0)
+    n = images_conf_count(_cat(path, off, SELECTOR_CONF))
+    if n >= 2:
+        return ("yes", "selector installed, %d images in images.conf" % n, n)
+    if n == 0:
+        return ("no", "the selector is installed but %s names no images"
+                % SELECTOR_CONF, 0)
+    return ("no", "the selector is installed but %s names only one games tree"
+            % SELECTOR_CONF, 1)
+
+
 def _ordinal(n):
     if 10 <= n % 100 <= 20:
         return "%dth" % n
@@ -353,7 +454,7 @@ def _ordinal(n):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("image")
-    for flag in ("rootfs", "games", "fat", "list-games"):
+    for flag in ("rootfs", "games", "fat", "list-games", "multiboot"):
         ap.add_argument("--" + flag, action="store_true")
     ap.add_argument("--part", type=int, metavar="N",
                     help="byte offset of partition N (kernel numbering)")
@@ -363,6 +464,17 @@ def main():
                     help="copy directory PATH of the rootfs into DEST/ (debugfs rdump); "
                          "prints the created path, nothing when the rootfs has no such directory")
     a = ap.parse_args()
+
+    # ★ ITEM 90 - "DOES THIS CARD BOOT INTO A MENU", asked ABOVE the existence
+    # check because a missing or unreadable file is one of this question's own
+    # answers (unknown, exit 2) and not a different kind of failure. One line
+    # on stdout whatever happens, so a caller that only has the text still
+    # knows what was decided and why.
+    if a.multiboot:
+        state, why, _n = multiboot(a.image)
+        print("multiboot: %s - %s" % (state, why))
+        return {"yes": 0, "no": 1}.get(state, 2)
+
     if not os.path.exists(a.image):
         raise SystemExit("no such image: %s" % a.image)
 

@@ -90,8 +90,8 @@ codeselect [--conf PATH] [--out PATH] [--input hw|padsw|none] [--nodebus DEV]
 | `--nodebus` | `/dev/ttymxc1` | 460800 8N2, VMIN 0 / VTIME 3, ASYNC_LOW_LATENCY, RTS pulse - what the game does |
 | `--spi` | `/dev/spidev1.0` | 100 kHz mode 3, 8-byte transfers every 10 ms; `none` disables |
 | `--padsw` | `$PAD_SW_SHM` or `/dump/padsw` | the 4096-byte padsw file, re-read every 20 ms |
-| `--tables` | `/dump/tables/$PAD_GAME/switch_list.txt` | `id num node bit name` rows; maps (8,25)/(8,24)/(1,11)/(0,8..11) to ids |
-| `--timeout` | conf `timeout=`, else 10 | seconds; 0 = wait for START; a key press restarts it |
+| `--tables` | `/dump/tables/$PAD_GAME/switch_list.txt` | `id num node bit name` rows; maps (8,25)/(8,24)/(1,11)/(1,2)/(0,8..11) to ids by WIRE, with a whole-name fallback for the action button (1,2) |
+| `--timeout` | conf `timeout=`, else 10 | seconds; 0 = wait for START/ACTION; a key press restarts it |
 | `--last` | `/data/codeselect.last` | read for the initial highlight, written on confirm |
 | `--default` | conf `default=`, else 0 | highlight when the last-choice file is missing/invalid |
 | `--log` | none | appended; stderr always carries the same lines |
@@ -118,16 +118,26 @@ reader - is logged and the menu carries on without that piece; the card never
 fails to boot over media.
 
 Keys: LEFT FLIPPER / Service Minus = highlight left (wraps), RIGHT FLIPPER /
-Service Plus = right, START / Service Select = confirm; Service Back is
-ignored (autoattract.sh presses it in the rig). Two agreeing samples make a
+Service Plus = right, START / ACTION / Service Select = confirm; Service Back
+is ignored (autoattract.sh presses it in the rig). Two agreeing samples make a
 state, a press edge makes one event, releases make none.
+
+ACTION is the button on the lockdown bar - the one a player's thumb is already
+on. It confirms exactly as START does; only the `[select] key:` line tells them
+apart (`key: action` vs `key: start`). In the rig it is the Space key
+(padglhost's bind); on the machine it is node 1 bit 2, another bit of the same
+0x11 reply that already carries START, so it costs no extra bus traffic.
 
 ### The picture
 
 A dark 1360x768 (or whatever `fbGetDisplayGeometry` says) menu: `SELECT GAME
 CODE`, one card per image, the highlighted card framed amber on a lighter
-fill, a footer `LEFT / RIGHT FLIPPER: choose   START: boot` and `booting
-<title> in N s` (or `press START to boot <title>` with timeout 0).
+fill, a footer `LEFT / RIGHT FLIPPER: choose   START or ACTION: boot` and
+`booting <title> in N s` (or `press START or ACTION to boot <title>` with
+timeout 0). Both bottom lines are fitted to the glass - a conf may carry a
+199-character title, and it shrinks rather than running off the edge. The
+countdown line is sized from its longest form (the `press ...` one) so its
+size does not change as the digits drop from 10 to 9.
 
 * **2-4 images**: a row, card width scaled to fit (602 / 389 / 283 px).
 * **5-16 images**: a carousel of three cards at the 3-card width, the
@@ -170,7 +180,7 @@ draws the frame the machine shows the moment the menu appears - card N (or
 the conf's `default=`; the last-choice file is never read) highlighted, that
 card's GIF at frame N (0 when unset, wrapping past the end), every other
 card its still or frame 0, the countdown at its full `timeout=` value
-(`press START to boot ...` for 0) - writes it as a binary P6 PPM and exits
+(`press START or ACTION to boot ...` for 0) - writes it as a binary P6 PPM and exits
 0. Nothing else runs: no EGL, no input backend, no audio (the WAVs are not
 opened), no choice or last-choice file, no LOADING frame. Every animation
 is decoded in full first, so the run is the decode plus one draw (71-87 ms
@@ -298,7 +308,7 @@ to 16 images (`CONF_MAX_IMAGES`). `volume` is clamped to 0-100,
 
 ```
 [select] menu: 2 images, highlight 1 (TMNT 1987) from last choice, timeout 10 s, input hw, invert 0, 1360x768, font ..., audio alsa, media /usr/local/codeselect/media
-[select] key: left|right|start|select|plus|minus|back
+[select] key: left|right|start|action|select|plus|minus|back
 [select] chose 1 TMNT 1987
 [select] error: <what>
 [select] snapshot: FILE.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 10 s, invert 0, font ..., media ...   (--snapshot only)
@@ -374,8 +384,10 @@ What the game does, from the godzilla_pro 1.15.0 ELF (read_nodebus.md A-F):
   (`46 <mask>` / `40 <i>` / `72` / `85` / `84`) was never captured verbatim
   and is NOT replayed.
 * then `88 02 11 65 0c` (node 8) and `81 02 11 6c 0c` (node 1) every 25 ms:
-  RIGHT = byte 3 bit 0, LEFT = byte 3 bit 1, START = byte 1 bit 3, released
-  = 1 / pressed = 0. A silent node backs off 500 / 1000 / 2000 ms so the
+  RIGHT = byte 3 bit 0, LEFT = byte 3 bit 1, START = byte 1 bit 3, ACTION
+  (the lockdown bar) = byte 0 bit 2, released = 1 / pressed = 0. START and
+  ACTION are two bits of the SAME node-1 reply, so the button costs no extra
+  frame. A silent node backs off 500 / 1000 / 2000 ms so the
   menu stays responsive when a board does not answer (and the audio sink's
   0.5 s buffer rides through such a stall; a longer one is a gap, not a crash).
 * SPI: `SPI_IOC_WR_MAX_SPEED_HZ 100000`, `SPI_IOC_WR_MODE 3`, an 8-byte
@@ -438,10 +450,16 @@ PAD_GL_W=1360 PAD_GL_H=768 PAD_AUDIO_PLAY=/dump/audio.fifo
 PAD_AUDIO_FMT=/dump/audio.fmt` inherited from watch.sh (the audio variables
 are empty on a `PAD_AUDIO=0` run, which `--audio auto` reports as `audio:
 none (... PAD_AUDIO_PLAY unset)`). The keyboard flippers (Left/Right
-arrows), `1` (START) and Enter/`=`/`-` (Service Select/Plus/Minus) arrive
-through padsw; ids come from `/dump/tables/$PAD_GAME/switch_list.txt`, or
-the platform ids (36/25/26/27/28) before a title has a table (then the
-flippers are unknown - use `-`/`=`/`1`). The rig copies the card's
+arrows), `1` (START), Space (ACTION, the lockdown-bar button) and
+Enter/`=`/`-` (Service Select/Plus/Minus) arrive through padsw; ids come from
+`/dump/tables/$PAD_GAME/switch_list.txt` by wire - (1,2) for ACTION, with a
+whole-name fallback (`ACTION BUTTON` / `LOCKDOWN BUTTON`, case-insensitive,
+an `(OPTIONAL)` suffix tolerated) for a list that puts it elsewhere - or the
+platform ids (36/34/25/26/27/28) before a title has a table (then the
+flippers are unknown - use `-`/`=`/`1`). A list that names no lockdown button
+at all (beatles is the one such list here) leaves ACTION unset rather than
+letting the platform id 34 point at some other switch; Space then does
+nothing and `1` still boots. The rig copies the card's
 `/usr/local/codeselect/media` (or `PAD_SELECT_MEDIA=<host dir>`) to
 `$ROOT/dump/media` and forwards the conf's `sound_move`/`sound_confirm`/
 `volume`/`mixer_volume` keys.
@@ -484,10 +502,17 @@ down.
    100 ms then START (36), with the test holding the read end of a FIFO the
    selector writes into (`--audio fifo:... --audio-fmt ... --audio-dump`):
    expects `key: right`, `key: start`, `chose 1`, choice file `1`, exit 0,
-   `audio.fmt` = `44100 2`, silence streaming before the first key, sound
-   after RIGHT and after START, an exit >= 0.9 s after START (the 1.0 s
-   confirm WAV plays out first), a non-silent dump; then a run against a
-   FIFO that does not exist still exits 0 on the countdown.
+   the ids line naming `start 36 action 34`, `audio.fmt` = `44100 2`, silence
+   streaming before the first key, sound after RIGHT and after START, an exit
+   >= 0.9 s after START (the 1.0 s confirm WAV plays out first), a non-silent
+   dump. Then: the same RIGHT with ACTION (34) instead of START - `key:
+   action`, never `key: start`, `chose 1`; two synthetic tables for the
+   name fallback - one whose (1,2) row is missing but which spells the button
+   `lockdown   button   (OPTIONAL)` on another wire (resolved, logged `(by
+   name)`, while the `TOURNAMENT START BUTTON` and `ACTION BUTTON TARGET`
+   decoys are refused), and one naming no lockdown button at all (`action
+   -1`, and START unharmed); and a run against a FIFO that does not exist
+   still exits 0 on the countdown.
 4. `bash -n select.sh` + `test/select_sh_test.sh` - the images.conf lookups
    (`--lookup`, `--lookup-sub`, six-field lines, the `:<sub>` form) with the
    host awk AND the card's busybox awk under qemu, then the whole hook with
@@ -502,7 +527,10 @@ down.
 via the control file; expects `chose 0`, the exact frames `88 02 11 65 0c`,
 `81 02 11 6c 0c`, `88 02 fe 78 0d`, `81 02 fe 7f 0d`, the `0a 00 -> 03 00`
 exchange, the enumeration frames, the pressed-LEFT reply
-`00 ff 1f f9 40 00 00 00 00 00 a9 00`, and no `BAD CK`.
+`00 ff 1f f9 40 00 00 00 00 00 a9 00`, and no `BAD CK`. A second run presses
+`action` instead (node 1 bit 2: the node-1 reply becomes
+`fb ff ff ff ff ff ff ff 00 00 0c 00`) and expects `key: action` with no
+`key: start`, `chose 1` (the untouched default) and no `countdown expired`.
 
 ## What to look for on hardware
 

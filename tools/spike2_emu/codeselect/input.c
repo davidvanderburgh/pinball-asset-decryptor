@@ -62,7 +62,7 @@ void input_close(struct input *in)
 const char *input_event_name(int ev)
 {
     static const char *names[EV_COUNT] = {
-        "none", "left", "right", "start", "select", "plus", "minus", "back"
+        "none", "left", "right", "start", "action", "select", "plus", "minus", "back"
     };
     if (ev < 0 || ev >= EV_COUNT) return "?";
     return names[ev];

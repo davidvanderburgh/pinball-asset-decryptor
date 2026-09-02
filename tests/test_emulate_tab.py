@@ -2993,3 +2993,257 @@ def test_no_interpreter_to_name_leaves_the_rig_as_it_was(monkeypatch,
     cmd = _cmd_on(monkeypatch, "win32", tmp_path, "setupcheck.sh")
     assert not any(c.startswith("PAD_WINPYTHON") for c in cmd), cmd
     assert "env" not in cmd, cmd
+
+
+# --------------------------------------------------------------------------
+# Item 90, 2026-09-02: the card ticks the Boot selector box, not the user.
+#
+# David: "i shouldn't have to check off 'boot selector' in the emulate tab. if
+# it has multi-boot, i expect to see the multi-boot screen."  So the tickbox
+# stopped being the switch and became the OVERRIDE: the card is asked (one
+# `parts.py --multiboot`, off the main thread), the box shows the answer, and
+# PAD_SELECT is only sent when the tab has something to say that the rig would
+# not work out for itself.
+# --------------------------------------------------------------------------
+
+def test_multiboot_cmd_asks_the_rigs_own_tool(monkeypatch, tmp_path):
+    """The one definition lives in parts.py; the tab shells it rather than
+    re-implementing the test, so the tickbox and the run cannot disagree."""
+    monkeypatch.setenv("PAD_EMU_DIR", str(tmp_path))
+    monkeypatch.setattr(emulate_tab.sys, "platform", "win32")
+    cmd = emulate_tab.multiboot_cmd("D:\\cards\\multi.raw")
+    assert cmd[:3] == ["wsl.exe", "-e", "python3"], cmd
+    assert cmd[3].endswith("/parts.py"), cmd
+    assert cmd[-2] == "--multiboot"
+    # A Windows path never crosses: WSL is handed the POSIX spelling.
+    assert not any("\\" in c for c in cmd), cmd
+    monkeypatch.setattr(emulate_tab.sys, "platform", "linux")
+    cmd = emulate_tab.multiboot_cmd("/cards/multi.raw")
+    assert cmd[0] == "python3" and cmd[1].endswith("parts.py")
+    assert cmd[-2:] == ["--multiboot", "/cards/multi.raw"]
+    # macOS: the rig is in a container whose filesystem is not this one, so
+    # the card's host path is not a path the probe could open.
+    monkeypatch.setattr(emulate_tab.sys, "platform", "darwin")
+    assert emulate_tab.multiboot_cmd("/cards/multi.raw") is None
+
+
+def test_parse_multiboot_reads_the_line_and_nothing_else():
+    """wsl.exe is entitled to prepend its own warnings to stdout (see
+    parse_status); one of those turning a yes into an unknown would switch a
+    menu off silently."""
+    p = emulate_tab.parse_multiboot
+    assert p("your 131072x1 screen size is bogus\n"
+             "multiboot: yes - selector installed, 2 images in images.conf\n") \
+        == ("yes", "selector installed, 2 images in images.conf")
+    assert p("multiboot: no - no /usr/local/codeselect/codeselect in the "
+             "rootfs\n")[0] == "no"
+    assert p("multiboot: unknown - x.raw: no MBR signature - not a card "
+             "image?")[0] == "unknown"
+    # Anything else at all is 'unknown', never 'no'.
+    for junk in ("", None, "bash: parts.py: No such file", "multiboot: maybe"):
+        assert p(junk)[0] == "unknown", junk
+
+
+class _InlineThread:
+    """A ``threading.Thread`` stand-in that runs its target on the spot.
+
+    THE PROBE'S ANSWER COMES BACK THROUGH ``after()``, and Tk refuses an
+    ``after()`` from a worker thread unless a main loop is actually running
+    ("main thread is not in main loop") - in the app one always is, in a test
+    one never is.  Driving the worker inline instead keeps the whole path
+    under test on the one thread the test owns, with no ``mainloop()`` to
+    hang on and no leftover timers to fire into a later test.  That the work
+    really does happen OFF the UI thread is a separate test below, where it
+    is the only thing being asked.
+    """
+
+    def __init__(self, target=None, daemon=None, **_kw):
+        self._target = target
+
+    def start(self):
+        self._target()
+
+
+def _select_panel(tmp_path, monkeypatch, answer=None, inline=True):
+    """A built panel over a rig that answers *answer* to --multiboot."""
+    rig = tmp_path / "rig"
+    rig.mkdir()
+    for name in ("watch.sh", "killgame.sh", "status.sh", "parts.py"):
+        (rig / name).write_text("", encoding="utf-8")
+    monkeypatch.setenv("PAD_EMU_DIR", str(rig))
+    calls = []
+
+    def fake_run(cmd, **_kw):
+        calls.append(cmd)
+        return SimpleNamespace(returncode=0,
+                               stdout=(answer or "").encode("utf-8"))
+
+    monkeypatch.setattr(emulate_tab.subprocess, "run", fake_run)
+    # Picking a card also fires the item 74 pre-cache; it must not reach a
+    # real wsl.exe from a unit test.
+    monkeypatch.setattr(emulate_tab.subprocess, "Popen",
+                        lambda *_a, **_kw: SimpleNamespace(
+                            stdout=iter(()), wait=lambda timeout=None: 0))
+    root, panel = _panel(tmp_path)
+    # Patched AFTER the build, so building the panel is the ordinary thing it
+    # always was and only what the test drives afterwards runs inline.
+    if inline:
+        monkeypatch.setattr(emulate_tab.threading, "Thread", _InlineThread)
+    return root, panel, calls
+
+
+def test_a_card_with_a_menu_ticks_the_box_itself(tmp_path, monkeypatch):
+    img = tmp_path / "multi.raw"
+    img.write_bytes(bytes(16))
+    root, panel, calls = _select_panel(
+        tmp_path, monkeypatch,
+        "multiboot: yes - selector installed, 2 images in images.conf\n")
+    try:
+        panel._src_path.set(str(img))
+        root.update()          # the after() the worker queued
+        assert any("--multiboot" in c for c in calls), calls
+        assert panel._select_var.get(), "a multi-boot card ticks the box"
+        assert str(panel._select_chk.cget("state")) != "disabled"
+        # The hint says why, and it is the CARD's reason, not a guess.
+        assert "carries a boot menu" in panel._select_tip.text
+        assert "2 images" in panel._select_tip.text
+        # ...and Start asks for the menu.
+        assert "PAD_SELECT=1" in panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
+        # Unticking it is the OVERRIDE, and has to be said out loud: without
+        # the 0 the rig's own probe would put the menu back up.
+        panel._select_var.set(False)
+        panel._select_touch()
+        assert "PAD_SELECT=0" in panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
+    finally:
+        root.destroy()
+
+
+def test_a_card_without_a_menu_leaves_the_box_off_and_says_nothing(tmp_path,
+                                                                   monkeypatch):
+    """A plain card must send no PAD_SELECT at all: 0 and unset behave the
+    same on the rig today, and the silence is what keeps the decision in one
+    place if that ever changes."""
+    img = tmp_path / "stock.raw"
+    img.write_bytes(bytes(16))
+    root, panel, _calls = _select_panel(
+        tmp_path, monkeypatch,
+        "multiboot: no - no /usr/local/codeselect/codeselect in the rootfs\n")
+    try:
+        panel._src_path.set(str(img))
+        root.update()
+        assert not panel._select_var.get()
+        assert str(panel._select_chk.cget("state")) == "disabled"
+        assert "no boot menu" in panel._select_tip.text
+        env = panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
+        assert not any(e.startswith("PAD_SELECT") for e in env), env
+    finally:
+        root.destroy()
+
+
+def test_a_card_nobody_could_ask_about_leaves_the_box_alone(tmp_path,
+                                                            monkeypatch):
+    """No rig, no WSL, macOS, an unreadable image: 'unknown' is not 'no'.
+    The tab says nothing and watch.sh decides for itself."""
+    img = tmp_path / "who.raw"
+    img.write_bytes(bytes(16))
+    root, panel, _calls = _select_panel(
+        tmp_path, monkeypatch,
+        "multiboot: unknown - who.raw: no MBR signature - not a card image?\n")
+    try:
+        panel._src_path.set(str(img))
+        root.update()
+        assert panel._select_menu is None
+        assert not panel._select_var.get()
+        assert str(panel._select_chk.cget("state")) != "disabled"
+        env = panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
+        assert not any(e.startswith("PAD_SELECT") for e in env), env
+    finally:
+        root.destroy()
+
+
+def test_a_hand_on_the_box_outranks_a_late_answer(tmp_path, monkeypatch):
+    """The probe takes a moment; a tick made in that moment must survive it."""
+    root, panel, _calls = _select_panel(tmp_path, monkeypatch, "")
+    try:
+        panel._select_probed = "/cards/multi.raw"
+        panel._select_var.set(True)
+        panel._select_touch()
+        panel._select_apply("/cards/multi.raw", "no", "no selector")
+        assert panel._select_var.get(), "the probe overrode a deliberate tick"
+        # A reply about a card that is no longer in the box is dropped too.
+        panel._select_touched = False
+        panel._select_apply("/cards/other.raw", "no", "no selector")
+        assert panel._select_var.get()
+    finally:
+        root.destroy()
+
+
+def test_changing_the_card_forgets_the_previous_answer(tmp_path, monkeypatch):
+    """The old card's verdict must not ride along on the next Start."""
+    root, panel, _calls = _select_panel(tmp_path, monkeypatch, "")
+    try:
+        panel._select_probed = "/cards/multi.raw"
+        panel._select_apply("/cards/multi.raw", "yes", "2 images")
+        assert panel._select_var.get() and panel._select_menu is True
+        panel._src_path.set("/cards/another.raw")
+        root.update()
+        assert panel._select_menu is None
+        assert not panel._select_var.get()
+        assert str(panel._select_chk.cget("state")) != "disabled"
+    finally:
+        root.destroy()
+
+
+def test_the_multiboot_tabs_run_button_still_asks_for_the_menu(tmp_path,
+                                                               monkeypatch):
+    """'Run in emulator' names the menu explicitly, and the probe it kicks
+    off on the way must not untick it a moment later."""
+    root, panel, _calls = _select_panel(tmp_path, monkeypatch, "")
+    started = []
+    try:
+        panel.start = lambda: started.append(True)
+        panel.launch_card("/cards/multi.raw", select=True)
+        assert started and panel._select_var.get()
+        panel._select_apply("/cards/multi.raw", "no", "no selector")
+        assert panel._select_var.get()
+        assert "PAD_SELECT=1" in panel._launch_env(["PAD_CARD=/x"])
+    finally:
+        root.destroy()
+
+
+def test_the_probe_never_blocks_the_tab(tmp_path, monkeypatch):
+    """It shells wsl.exe, so it may NOT run where the UI does.
+
+    A card path can be UNC to a sleeping NAS and this app's known freeze
+    class is exactly that stat done on the Tk thread (see _precache_kick).
+    So: with the probe wedged, setting the card path still comes straight
+    back, and the call that is wedged is on a thread of its own."""
+    import threading as _th
+    import time
+    img = tmp_path / "slow.raw"
+    img.write_bytes(bytes(16))
+    gate = _th.Event()
+    seen = {}
+
+    def wedged_run(_cmd, **_kw):
+        seen["thread"] = _th.current_thread()
+        gate.wait(10)
+        # Leave without an answer, so nothing is marshalled back into a Tk
+        # widget this test is about to destroy.
+        raise OSError("the test is over")
+
+    root, panel, _calls = _select_panel(tmp_path, monkeypatch, inline=False)
+    monkeypatch.setattr(emulate_tab.subprocess, "run", wedged_run)
+    try:
+        t0 = time.time()
+        panel._src_path.set(str(img))
+        assert time.time() - t0 < 2, "picking a card sat on the UI thread"
+        deadline = time.time() + 5
+        while "thread" not in seen and time.time() < deadline:
+            time.sleep(0.01)
+        assert seen.get("thread") is not None, "the probe never ran"
+        assert seen["thread"] is not _th.main_thread(), \
+            "the probe ran on the UI thread"
+    finally:
+        gate.set()
+        root.destroy()

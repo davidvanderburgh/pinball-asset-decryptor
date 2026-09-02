@@ -718,6 +718,61 @@ def rig_cmd(script, *args, env=()):
     return head + ["bash", path] + [str(a) for a in args]
 
 
+#: How long the multi-boot probe gets.  It is a handful of debugfs reads on
+#: the card's rootfs — measured at 0.03–0.35 s on this machine, including the
+#: 16 GB images on the D: drive — so this bound is only so that a card on a
+#: sleeping NAS cannot leave a worker thread parked for ever.
+_MULTIBOOT_PROBE_S = 30
+
+
+def multiboot_cmd(path):
+    """The argv that asks the rig whether *path* boots into a MENU, or None
+    when this machine cannot be asked.
+
+    ``parts.py --multiboot`` is the ONE definition (see its docstring): the
+    card's rootfs holds ``/usr/local/codeselect/codeselect`` and its
+    ``images.conf`` names two or more images.  The tab does not re-implement
+    any part of that test — it shells the same tool the rig itself asks, so
+    the tickbox and the run can never disagree about a card.
+
+    NOT ``rig_cmd``, which runs the rig's shell scripts: this is a python3
+    program and the only thing the two would share is the ``wsl.exe -e``
+    prefix.  macOS answers None deliberately — there the rig lives in a
+    container whose filesystem is not this one, so the card's host path is
+    not a path the probe could open, and the rig's own decision (watch.sh,
+    inside the container) is left to speak for itself.
+    """
+    if sys.platform == "darwin":
+        return None
+    if sys.platform == "win32":
+        return ["wsl.exe", "-e", "python3",
+                "%s/parts.py" % _wsl_path(rig_dir()), "--multiboot",
+                _wsl_path(path)]
+    return ["python3", os.path.join(rig_dir(), "parts.py"), "--multiboot",
+            path]
+
+
+def parse_multiboot(text):
+    """``('yes'|'no'|'unknown', why)`` out of ``parts.py --multiboot``'s line.
+
+    Scanned line by line rather than parsed as a whole, for the reason
+    :func:`parse_status` is: ``wsl.exe`` is entitled to prepend its own
+    warnings ("your 131072x1 screen size is bogus") to the output, and one of
+    those turning a yes into an unknown would silently switch the menu off.
+    Anything else at all is 'unknown', which the caller treats as "leave the
+    tickbox alone" — never as "no".
+    """
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line.startswith("multiboot:"):
+            continue
+        state, _sep, why = line[len("multiboot:"):].strip().partition(" - ")
+        state = state.strip().lower()
+        if state in ("yes", "no", "unknown"):
+            return state, why.strip()
+    return "unknown", ""
+
+
 def rig_cmd_root(script, *args):
     """The same script, as root.  WINDOWS ONLY, and that is not a limitation
     that was settled for - it is the only platform where it is honest.
@@ -1892,11 +1947,31 @@ class EmulatePanel:
         self._mute_var = tk.BooleanVar(value=mute0)
         #: Item 90: run the boot-time code selector before the game.  A
         #: multi-image card (mkmulticard.py) carries a menu the machine shows
-        #: at power-up; ticked, the rig shows that same menu in the game
-        #: window (PAD_SELECT=1) and boots whichever image the flipper keys
-        #: pick.  Off by default: a plain card has nothing to choose, and the
-        #: run is then byte-for-byte what it was before item 90.
+        #: at power-up; the rig shows that same menu in the game window and
+        #: boots whichever image the flipper keys pick.
+        #:
+        #: THE TICKBOX IS THE OVERRIDE, NOT THE SWITCH, since 2026-09-02.
+        #: David: "i shouldn't have to check off 'boot selector' in the
+        #: emulate tab. if it has multi-boot, i expect to see the multi-boot
+        #: screen."  So the CARD decides (``parts.py --multiboot``, asked off
+        #: the main thread the moment one is picked) and this box shows what
+        #: was decided; changing it is how you say otherwise.
         self._select_var = tk.BooleanVar(value=False)
+        #: What the probe found for the card now in the box: True it carries a
+        #: menu, False it does not, None nobody could tell (no rig, no WSL,
+        #: macOS, an unreadable file, or the answer has not come back yet).
+        #: None is NOT False - it is what makes the tab keep quiet and let the
+        #: rig decide for itself.
+        self._select_menu = None
+        #: The reason parts.py gave, verbatim, for the tooltip to quote.
+        self._select_why = ""
+        #: The card path the probe last answered for, so a reply that arrives
+        #: after the box has moved on is dropped instead of applied.
+        self._select_probed = ""
+        #: Whether the human has touched the box for THIS card.  A hand on the
+        #: control outranks the probe: a reply landing a second later must not
+        #: undo a deliberate tick.  Cleared whenever the card changes.
+        self._select_touched = False
 
     def _timer(self):
         """The widget every ``after`` job on this panel is hung off.
@@ -3428,9 +3503,160 @@ class EmulatePanel:
         # like the card path: read once at Start (_launch_env), so flipping
         # it under a live run changes the NEXT start and nothing else, which
         # is why it needs no place in _apply's up/busy disable block.
+        #
+        # THE CARD TICKS IT (2026-09-02).  What it says is now the answer the
+        # probe brought back, and the WHY rides on a tooltip rather than on a
+        # label beside it: this row is already an entry, two buttons and this
+        # box, and David's desktop is 1024x768 — a fourth widget here would be
+        # the one that gets unmapped.  ``command=`` fires on a human click and
+        # not on ``var.set``, which is exactly the difference between "the
+        # user chose" and "the probe filled it in".
         self._select_chk = ttk.Checkbutton(row, text="Boot selector",
-                                           variable=self._select_var)
+                                           variable=self._select_var,
+                                           command=self._select_touch)
         self._select_chk.pack(side=tk.LEFT, padx=(6, 0))
+        self._select_tip = _Tooltip(self._select_chk, self._SELECT_TIP_IDLE,
+                                    self._theme_fn, place="side")
+        # The probe: on every card change, and once now for a card the project
+        # remembered.  Registered AFTER the widgets it fills in, so an early
+        # trace cannot reach a half-built row.
+        try:
+            self._src_path.trace_add(
+                "write", lambda *_a: self._select_probe_kick())
+        except (AttributeError, tk.TclError):
+            pass
+        self._select_probe_kick()
+
+    # ------------------------------------------------------------------
+    # Item 90: does this card boot into a menu?  The tickbox answers, the
+    # CARD decides, and parts.py --multiboot is the one place that knows.
+
+    #: What the box says before any card has been looked at — the same
+    #: sentence it carried when it was a plain switch.
+    _SELECT_TIP_IDLE = (
+        "A multi-image card carries a boot menu: the machine shows it at "
+        "power-up and you pick which build to boot with the flipper "
+        "buttons.\n\nPick a card and this box fills itself in — ticked when "
+        "the card carries a menu, and left alone when it does not.")
+    #: While the answer is on its way.  Said out loud because the box is
+    #: showing the PREVIOUS card's answer until it lands.
+    _SELECT_TIP_BUSY = "Looking at the card for a boot menu…"
+
+    def _select_touch(self):
+        """The human moved the box.  From here on their answer wins for this
+        card: a probe reply that lands afterwards is dropped."""
+        self._select_touched = True
+        self._select_hint()
+
+    def _select_hint(self):
+        """Retext the tooltip from the current state.  One place, so the box
+        and its explanation cannot describe different cards."""
+        tip = self._SELECT_TIP_IDLE
+        if self._select_menu is True:
+            tip = ("This card carries a boot menu"
+                   + (" (%s)" % self._select_why if self._select_why else "")
+                   + ".\n\nThe emulator shows it before the game, exactly as "
+                     "the machine does. Untick to skip it and boot the first "
+                     "image straight away.")
+        elif self._select_menu is False:
+            tip = ("This card has no boot menu"
+                   + (" - %s" % self._select_why if self._select_why else "")
+                   + ".\n\nThere is nothing to choose between, so the game "
+                     "boots straight away.")
+        try:
+            self._select_tip.text = tip
+        except AttributeError:
+            pass
+
+    def _select_probe_kick(self):
+        """Ask the card whether it boots into a menu (item 90, 2026-09-02).
+
+        Fired by the card entry's write-trace, so this runs per KEYSTROKE on
+        the Tk MAIN thread and does string work only — the ``isfile`` and the
+        wsl.exe hop go to a worker, for the reason ``_precache_kick`` explains
+        (a card path can be UNC to a sleeping NAS, and a synchronous stat
+        there is this app's known UI-freeze class).
+
+        A CHANGED CARD IS AN UNKNOWN CARD, immediately: the box goes back to
+        auto (unticked, enabled, no verdict) the moment the path differs, so
+        the previous card's answer cannot ride along on the next Start while
+        the new one is still being looked at.  A machine that cannot be asked
+        — no rig, macOS, no WSL — simply stays there, which is what "leaves
+        the box alone" means: no PAD_SELECT at all is sent and watch.sh makes
+        its own decision.
+        """
+        path = self._src_path.get().strip().strip('"')
+        if path == self._select_probed:
+            return
+        self._select_probed = path
+        self._select_menu = None
+        self._select_why = ""
+        self._select_touched = False
+        try:
+            self._select_var.set(False)
+            self._select_chk.configure(state=tk.NORMAL)
+        except (AttributeError, tk.TclError):
+            pass
+        self._select_hint()
+        # The tool has to be THERE to be asked. rig_available() answers for
+        # the three scripts the tab drives; parts.py is a fourth file and an
+        # older rig beside a newer app has every right not to have it.
+        cmd = None
+        if path and rig_available() and \
+                os.path.isfile(os.path.join(rig_dir(), "parts.py")):
+            cmd = multiboot_cmd(path)
+        if cmd is None:
+            return
+        try:
+            self._select_tip.text = self._SELECT_TIP_BUSY
+        except AttributeError:
+            pass
+
+        def run():
+            if not os.path.isfile(path):
+                return
+            try:
+                r = subprocess.run(cmd, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL,
+                                   timeout=_MULTIBOOT_PROBE_S,
+                                   creationflags=_CREATE_FLAGS)
+                out = (r.stdout or b"").decode("utf-8", "replace")
+            except Exception:                               # noqa: BLE001
+                return          # unaskable is not "no" — leave the box alone
+            state, why = parse_multiboot(out)
+            try:
+                self._timer().after(
+                    0, lambda: self._select_apply(path, state, why))
+            except (tk.TclError, RuntimeError):
+                pass            # main loop gone
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _select_apply(self, path, state, why):
+        """The probe's answer, back on the main thread.
+
+        Dropped unless it is still about the card in the box and the human has
+        not answered for themselves in the meantime.  'unknown' changes
+        nothing at all: the tab has learnt nothing about this card, and
+        pretending it learnt "no" would switch a menu off behind the user's
+        back."""
+        if path != self._select_probed or self._select_touched:
+            return
+        if state == "yes":
+            self._select_menu, self._select_why = True, why
+        elif state == "no":
+            self._select_menu, self._select_why = False, why
+        else:
+            self._select_menu, self._select_why = None, why
+            self._select_hint()
+            return
+        try:
+            self._select_var.set(self._select_menu)
+            self._select_chk.configure(
+                state=tk.NORMAL if self._select_menu else tk.DISABLED)
+        except (AttributeError, tk.TclError):
+            pass
+        self._select_hint()
 
     def _browse(self):
         from tkinter import filedialog
@@ -3782,23 +4008,45 @@ class EmulatePanel:
 
     def _launch_env(self, src):
         """The Start environment beyond the card: the audio control file, and
-        (item 90) ``PAD_SELECT=1`` when Boot selector is ticked.  Its own
-        method so the tests can read the list without launching anything -
-        and NOT folded into _source_env, which a test pins to exactly the one
-        PAD_CARD entry."""
+        (item 90) the boot selector's THREE-WAY answer.  Its own method so the
+        tests can read the list without launching anything - and NOT folded
+        into _source_env, which a test pins to exactly the one PAD_CARD entry.
+
+        WHAT EACH ANSWER MEANS TO THE RIG (padpath.sh's pad_select_wanted):
+        ``PAD_SELECT=1`` show the menu, ``PAD_SELECT=0`` do not, and NOTHING
+        AT ALL means "ask the card" - which is what watch.sh does for itself,
+        with the same tool this tab asked.  So:
+
+        * ticked -> 1.  Either the card carries a menu, or the user asked for
+          one anyway.
+        * unticked over a card this tab KNOWS carries a menu -> 0.  That is a
+          deliberate override and has to be said out loud, or the rig's own
+          probe would put the menu back up.
+        * unticked otherwise -> silence.  The tab has learnt nothing about
+          this card (no rig to ask, macOS, a probe still in flight, an
+          unreadable image), and a 0 there would be this tab overruling the
+          rig with a guess.
+        """
         env = ["PAD_AUDIO_DUMP=30", "PAD_AUDIO_CTL=" + AUDIO_CTL_FILE] + \
             list(src)
         if self._select_var.get():
             env.append("PAD_SELECT=1")
+        elif self._select_menu:
+            env.append("PAD_SELECT=0")
         return env
 
     def launch_card(self, path, select=False):
         """Start the emulator on *path* - the Multi-boot tab's 'Run in
         emulator': the card box takes the path, Boot selector follows
         *select*, then the ordinary Start (same validation, same launch, same
-        status), so the two buttons cannot start two different rigs."""
+        status), so the two buttons cannot start two different rigs.
+
+        The tick is marked as the CALLER'S choice (``_select_touched``), so
+        the probe the new path just kicked off cannot land a moment later and
+        untick a menu that was asked for by name."""
         self._src_path.set(path or "")
         self._select_var.set(bool(select))
+        self._select_touched = True
         self.start()
 
     def start(self):

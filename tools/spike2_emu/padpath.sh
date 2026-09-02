@@ -448,6 +448,70 @@ pad_select_hash() { pad_src_hash "${1:-$RIG}" $PAD_SELECT_SRCS; }
 #: it back - two spellings of that path is how a choice goes unread.
 PAD_SELECT_CHOICE=/dump/select.choice
 export PAD_SELECT_CHOICE
+
+# ---- IS THE MENU WANTED ON THIS RUN? (item 90, 2026-09-02) ----------------
+#
+# PAD_SELECT IS A THREE-WAY SWITCH, AND THIS IS THE ONLY PLACE THAT READS IT:
+#
+#   unset  ->  ASK THE CARD. parts.py --multiboot is the one definition of
+#              "this card boots into a menu" (the rootfs holds the selector
+#              and its images.conf names two or more images).
+#   1      ->  show the menu, whatever the card looks like.
+#   0      ->  do not, whatever the card looks like.
+#
+# WHY THE DEFAULT MOVED. David, 2026-09-02: "i shouldn't have to check off
+# 'boot selector' in the emulate tab. if it has multi-boot, i expect to see
+# the multi-boot screen." A tickbox that has to be found and ticked is a
+# second place where the answer lives, and it was wrong by default on every
+# multi-boot card.
+#
+# THE ANSWER IS A SENTENCE ON STDOUT AND A VERDICT IN THE EXIT STATUS (0 =
+# show the menu, 1 = do not), so the caller can SAY what was decided instead
+# of printing a bare 1 - and the sentence is written HERE, beside the branch
+# that chose it, because "this card carries a menu" and "the menu was asked
+# for" are different facts and a caller that re-worded them from the exit
+# status alone would eventually claim the first while doing the second.
+# watch.sh calls this once, at the top of a run, and exports the resolved 1/0
+# - run_game.sh is handed the answer and never re-asks, which is why a menu
+# that is up can never disagree with a menu that was decided against.
+#
+# NEVER AUTO-ON WITHOUT A CARD. An extracted title under games/ has nothing
+# to choose between, and probing an empty path would be a python3 start for
+# nothing; an explicit PAD_SELECT=1 is still honoured there, exactly as it
+# was. A card that cannot be read (no debugfs, not a card, exit 2) is a "no"
+# with its reason said out loud - the safe direction, since the alternative
+# is a menu with nothing on it in front of a game that was asked for.
+pad_select_wanted() {
+    local card line rc
+    card=${1:-}
+    case "${PAD_SELECT:-}" in
+        0|no|off|false|NO|OFF|FALSE)
+            echo "PAD_SELECT=$PAD_SELECT - the menu is switched off for this run"
+            return 1 ;;
+        "") ;;
+        *)
+            echo "PAD_SELECT=$PAD_SELECT - the menu was asked for"
+            return 0 ;;
+    esac
+    if [ -z "$card" ]; then
+        echo "no card image on this run - nothing to choose between"
+        return 1
+    fi
+    line=$(python3 "$RIG/parts.py" --multiboot "$card" 2>/dev/null)
+    rc=$?
+    case "$line" in
+        "multiboot: "*) line=${line#multiboot: } ;;
+        *) line="parts.py could not be asked about $card" ;;
+    esac
+    line=${line#yes - }; line=${line#no - }; line=${line#unknown - }
+    if [ "$rc" = 0 ]; then
+        echo "this card carries a menu ($line) - showing it; PAD_SELECT=0 skips it"
+        return 0
+    fi
+    echo "no menu on this card ($line); PAD_SELECT=1 forces one"
+    return 1
+}
+
 if pad_is_wsl; then IS_WSL=1; else IS_WSL=0; fi
 
 # ---- IS THERE A DISPLAY TO PUT THE GAME WINDOW ON? -----------------------

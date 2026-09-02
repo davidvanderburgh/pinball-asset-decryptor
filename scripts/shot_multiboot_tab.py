@@ -27,6 +27,14 @@ one, otherwise a stand-in drawn here with PIL in the menu's own layout
 (dark ground, SELECT GAME CODE, one card per image, the highlighted one
 framed amber) so the shot shows the whole tab at work without a tool
 having run.
+
+AND THE TAB IS SHOWN AFTER A LOAD.  The last thing the shot does is hand
+the panel a synthetic ``inspect --json`` report through its public loader
+(``load_inspect``) - the same report the tool prints for David's v2 card,
+made up here so no card is opened and WSL is never called - and then makes
+one pending change to the menu.  So the picture is of the tab in editing
+mode: the fields all came off a card, and the line under the buttons says
+what 'Apply to card' would write into it.
 """
 import ctypes
 import os
@@ -69,6 +77,17 @@ CLIP = ("auto", "20", "2", "8")
 #: The preview: image 1 highlighted, frame 3 of the 16-frame clip.
 HIGHLIGHT, FRAME_INDEX, FRAMES = 1, 3, 16
 
+#: The card the shot then LOADS - David's v2 multi card.  It is never
+#: opened: the report below is made up, and load_inspect takes it as if
+#: the tool had printed it.
+CARD = (r"D:\Pinball\TMNT 1987\multi"
+        r"\turtles_pro-1_59_0.multi-v2-stock+1987patched.16G.sdcard.raw")
+
+#: The countdown on that card, and the one typed after the load - the one
+#: pending change the status line reports (the preview shows the new one,
+#: which is what Render preview would draw).
+TIMEOUT_ON_CARD, TIMEOUT_NOW = 15, 20
+
 #: mkmulticard.py plan, as it reports two 8G images side by side - the
 #: lines the tab's parser reads.  Fed to the same _plan_step the Check size
 #: button's worker calls, so the sentence in the shot is the real one.
@@ -96,6 +115,7 @@ if os.path.isfile(SETTINGS):
 from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 
 from pinball_decryptor.app import App  # noqa: E402
+from pinball_decryptor.gui import multiboot_tab  # noqa: E402
 
 app = App()
 root = app.root
@@ -253,8 +273,8 @@ def stand_in_frame(path):
                fill=(225, 230, 240) if hi else (120, 130, 150))
     centred(626, "LEFT / RIGHT FLIPPER: choose      START: boot", 26,
             (150, 160, 180))
-    centred(690, "booting %s in 15 s" % IMAGES[HIGHLIGHT][1], 30,
-            (250, 190, 40))
+    centred(690, "booting %s in %d s" % (IMAGES[HIGHLIGHT][1], TIMEOUT_NOW),
+            30, (250, 190, 40))
     img.save(path)           # .ppm -> binary P6, what --snapshot writes
     return path
 
@@ -279,7 +299,7 @@ def s_geometry():
     # 1024x768 virtual desktop where the clamp cut the tab off under the
     # Menu box.  Tk's default maxsize is the screen, so it is lifted first
     # or the geometry is silently capped.
-    w, h = 1360, 1640
+    w, h = 1360, 1730
     root.maxsize(max(w, root.winfo_screenwidth()) + 100,
                  max(h, root.winfo_screenheight()) + 100)
     log("screen %dx%d -> window %dx%d"
@@ -365,6 +385,76 @@ def s_fill():
            root.winfo_width(), root.winfo_height()))
     log("tool pane mapped=%s h=%s"
         % (panel._log_text.winfo_ismapped(), panel._log_text.winfo_height()))
+
+
+def inspect_report():
+    """The report ``mkmulticard.py inspect --card <CARD> --json`` prints for
+    David's v2 card - made up here, with the same two images the form above
+    was filled with, so nothing is opened and WSL is never called.  Its
+    shape is the tool's contract; the tab reads no more of it than this."""
+    src = [multiboot_tab.wsl(path) for path, _t, _s in IMAGES]
+    _anim, start, seconds, fps = CLIP
+    return {
+        "card": CARD, "size": 15494807552, "layout": "parts",
+        "partitions": [{"index": 3, "device": "/dev/mmcblk0p3"},
+                       {"index": 7, "device": "/dev/mmcblk0p7"}],
+        "images": [
+            {"index": 0, "device": "/dev/mmcblk0p3", "title": IMAGES[0][1],
+             "subtitle": IMAGES[0][2], "art": "art0.png", "anim": None,
+             "music": None, "art_source": "auto", "anim_source": "none",
+             "source": src[0], "source_exists": os.path.isfile(IMAGES[0][0]),
+             "title_dir": "turtles", "bypass": "bypassed"},
+            {"index": 1, "device": "/dev/mmcblk0p7", "title": IMAGES[1][1],
+             "subtitle": IMAGES[1][2], "art": "art1.png",
+             "anim": "anim1.gif", "music": None, "art_source": "auto",
+             "anim_source": "auto@%s:%s:%s" % (start, seconds, fps),
+             "source": src[1], "source_exists": os.path.isfile(IMAGES[1][0]),
+             "title_dir": "turtles", "bypass": "bypassed"}],
+        "timeout": TIMEOUT_ON_CARD, "default": HIGHLIGHT, "volume": 50,
+        "mixer_volume": None, "sound_move": "auto", "sound_confirm": "auto",
+        "font": "/usr/local/codeselect/font.ttf",
+        "media": [{"name": "art0.png", "bytes": 178_432},
+                  {"name": "art1.png", "bytes": 191_204},
+                  {"name": "anim1.gif", "bytes": 1_402_880}],
+        "has_media_json": True, "has_build_json": True,
+        "selector": {"bytes": 41272, "version": "codeselect 1.0"},
+        "warnings": []}
+
+
+@step(2500)
+def s_load():
+    """...and now the tab in EDITING mode: the same form, but read back off
+    a card with 'Load card…' (through load_inspect, the loader's public
+    seam - no tool runs), with one pending change so the line under the
+    buttons says what Apply to card would write."""
+    panel = win._multiboot_panel
+    warnings = panel.load_inspect(inspect_report(), CARD)
+    log("load warnings: %s" % (warnings or "none"))
+    # One change: the countdown. The preview frame above was drawn with the
+    # new value, which is what Render preview would show.
+    panel._timeout_var.set(str(TIMEOUT_NOW))
+    panel._tree.selection_set("1")
+    panel._tree.focus("1")
+    root.update()
+    # The load cleared the preview (its media dir changed under it); put the
+    # frame back through the same public seam.
+    frame = FRAME or os.path.join(os.environ.get("TEMP", "."),
+                                  "multiboot_shot_frame.ppm")
+    log("load_frame -> %s" % panel.load_frame(frame, HIGHLIGHT, FRAME_INDEX,
+                                              FRAMES))
+    win._resize_notebook_to_current_tab()
+    root.update_idletasks()
+    log("editing %s" % panel._loaded_card)
+    log("status: %r" % panel._edit_lbl.cget("text"))
+    log("Apply to card: %s" % panel._apply_btn.cget("state"))
+    log("Load card… mapped=%s  Apply mapped=%s"
+        % (panel._load_btn.winfo_ismapped(),
+           panel._apply_btn.winfo_ismapped()))
+    log("output: %s" % panel._out_var.get())
+    log("hint: %r" % panel._hint.cget("text"))
+    log("tab reqheight=%s window=%sx%s"
+        % (win._tab_multiboot.winfo_reqheight(), root.winfo_width(),
+           root.winfo_height()))
 
 
 @step(2000)

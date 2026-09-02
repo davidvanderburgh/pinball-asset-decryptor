@@ -9,6 +9,7 @@ bytes in tmp_path, and the ext4 injection (which needs debugfs) is exercised by
 the tool's own `selftest` subcommand under WSL instead.
 """
 import hashlib
+import json
 import os
 import re
 import sys
@@ -737,7 +738,7 @@ def test_build_cli_refuses_before_reading_anything(mk, tmp_path, capsys):
     assert not (tmp_path / "nope.raw").exists()
 
 
-@pytest.mark.parametrize("cmd", ["plan", "check-stock", "build", "inject", "bypass", "verify", "selftest"])
+@pytest.mark.parametrize("cmd", ["plan", "check-stock", "build", "inject", "inspect", "bypass", "verify", "selftest"])
 def test_every_subcommand_has_help(mk, cmd, capsys):
     with pytest.raises(SystemExit) as e:
         mk.main([cmd, "--help"])
@@ -750,6 +751,10 @@ def test_every_subcommand_has_help(mk, cmd, capsys):
         assert "--layout" in out and "--bypass-validation" in out and "--workdir" in out
     if cmd == "bypass":
         assert "--card" in out and "--dry-run" in out
+    if cmd == "inject":
+        assert "--primary" in out and "--extra" in out       # provenance for build.json
+    if cmd == "inspect":
+        assert "--card" in out and "--json" in out and "--media-out" in out
 
 
 def test_sidecars_are_per_partition_and_stale_ones_are_dropped(mk, tmp_path):
@@ -820,3 +825,360 @@ def test_copy_range_skips_zero_chunks_and_keeps_data(mk, tmp_path):
     mk.copy_range(str(src), 0, str(out), 4096, len(data), progress=None)
     assert out.read_bytes() == b"\x00" * 4096 + data
     assert hashlib.md5(out.read_bytes()[4096:]).hexdigest() == mk.md5_range(str(src), 0, len(data))
+
+
+# ============================================================ the JSON sidecars (item 90: load a card back)
+def _two_image_plan(mk):
+    return mk.Plan(stock_8g(mk), [extra_8g(mk, "b.raw")], "a.raw", ["b.raw"])
+
+
+def _menu_conf(mk, plan, **kw):
+    kw.setdefault("titles", ["STERN 1.59.0", "TMNT 1987"])
+    kw.setdefault("subtitles", ["Original Stern code", "1987 cartoon upscale"])
+    kw.setdefault("default", 1)
+    kw.setdefault("timeout", 20)
+    return mk.render_images_conf(plan.devices(), **kw)
+
+
+def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
+    """build.json holds what images.conf holds PLUS the one thing it cannot: the .raw each
+    image was built from."""
+    plan = _two_image_plan(mk)
+    text = _menu_conf(mk, plan, media=[("art0.png", "", ""), ("art1.png", "anim1.gif", "music1.wav")],
+                      sound_move="move.wav", sound_confirm="confirm.wav", volume=35, mixer_volume=20)
+    man = mk.build_manifest(plan, mk.parse_images_conf(text), ["/img/a.raw", "/img/b.raw"],
+                            written="2026-09-02T00:00:00Z")
+    assert man["tool"] == "mkmulticard" and man["version"] == mk.VERSION
+    assert man["written"] == "2026-09-02T00:00:00Z" and man["layout"] == "parts"
+    assert (man["timeout"], man["default"]) == (20, 1)
+    assert (man["volume"], man["mixer_volume"]) == (35, 20)
+    assert (man["sound_move"], man["sound_confirm"]) == ("move.wav", "confirm.wav")
+    assert man["images"] == [
+        {"device": "/dev/mmcblk0p3", "source": os.path.abspath("/img/a.raw"), "title": "STERN 1.59.0",
+         "subtitle": "Original Stern code", "art": "art0.png", "anim": None, "music": None},
+        {"device": "/dev/mmcblk0p7", "source": os.path.abspath("/img/b.raw"), "title": "TMNT 1987",
+         "subtitle": "1987 cartoon upscale", "art": "art1.png", "anim": "anim1.gif", "music": "music1.wav"}]
+    # it is JSON, and exactly the keys contract A names
+    d = json.loads(json.dumps(man))
+    assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "default",
+                      "volume", "mixer_volume", "sound_move", "sound_confirm"}
+    # a card with no media at all: the fields are null, not absent
+    plain = mk.build_manifest(plan, mk.parse_images_conf(_menu_conf(mk, plan)), None)
+    assert [im["art"] for im in plain["images"]] == [None, None]
+    assert plain["volume"] is None and plain["sound_move"] is None and plain["images"][0]["source"] is None
+
+
+def test_an_inject_with_no_sources_carries_the_previous_provenance_through(mk):
+    """The rule that keeps a menu edit from destroying a card's history: an inject given no
+    --primary/--extra reads the card's build.json and keeps its 'source' values, BY DEVICE."""
+    plan = _two_image_plan(mk)
+    conf = mk.parse_images_conf(_menu_conf(mk, plan))
+    on_card = mk.build_manifest(plan, conf, None)
+    for im, p in zip(on_card["images"], ["/mnt/d/Pinball/a.raw", "/mnt/d/Pinball/b.raw"]):
+        im["source"] = p                                  # as a Linux-built card spells them
+    again = mk.build_manifest(plan, conf, None, existing=on_card)
+    assert [im["source"] for im in again["images"]] == ["/mnt/d/Pinball/a.raw", "/mnt/d/Pinball/b.raw"]
+    # a carried path is used VERBATIM - re-absolutising a /mnt/d path on Windows would mangle it
+    assert again["images"][0]["source"] == "/mnt/d/Pinball/a.raw"
+    # one path given replaces just that image; the other is still carried
+    mixed = mk.build_manifest(plan, conf, ["", "/new/b.raw"], existing=on_card)
+    assert [im["source"] for im in mixed["images"]] == ["/mnt/d/Pinball/a.raw", os.path.abspath("/new/b.raw")]
+    # the menu can change freely: the sources follow the DEVICE, not the title
+    renamed = mk.parse_images_conf(_menu_conf(mk, plan, titles=["swapped", "names"]))
+    assert [im["source"] for im in mk.build_manifest(plan, renamed, None, existing=on_card)["images"]] \
+        == ["/mnt/d/Pinball/a.raw", "/mnt/d/Pinball/b.raw"]
+    # an image the old manifest never knew has no source (and does not steal another's)
+    three = mk.Plan(stock_8g(mk), [extra_8g(mk, "b.raw"), extra_8g(mk, "c.raw")], "a.raw", ["b.raw", "c.raw"])
+    grown = mk.build_manifest(three, mk.parse_images_conf(
+        mk.render_images_conf(three.devices(), ["A", "B", "C"])), None, existing=on_card)
+    assert [im["source"] for im in grown["images"]] == ["/mnt/d/Pinball/a.raw", "/mnt/d/Pinball/b.raw", None]
+
+
+def test_selector_manifests_writes_build_json_always_and_media_json_verbatim(mk, tmp_path):
+    plan = _two_image_plan(mk)
+    text = _menu_conf(mk, plan)
+    d = tmp_path / "media set"
+    d.mkdir()
+    raw = b'{ "images" : [ {"art": "a.png", "art_source": "auto@20:2:8"} ], "volume":41 }'
+    (d / "media.json").write_bytes(raw)
+    mans = mk.selector_manifests(plan, text, str(d), ["/x/a.raw", "/x/b.raw"])
+    assert list(mans) == ["build.json", "media.json"]
+    assert mans["media.json"] == raw, "the manifest selectmedia wrote goes on the card verbatim"
+    assert json.loads(mans["build.json"])["images"][0]["title"] == "STERN 1.59.0"
+    # no --media-dir: the card's own media.json is carried through byte for byte
+    carried = mk.selector_manifests(plan, text, None, None, existing_media=raw)
+    assert carried["media.json"] == raw
+    # neither: build.json alone (a card with no media carries no media.json)
+    assert list(mk.selector_manifests(plan, text)) == ["build.json"]
+
+
+def test_stage_selector_puts_the_sidecars_beside_images_conf_never_in_media(mk, tmp_path):
+    """They are not media: they must never land in the directory the selector scans."""
+    sel = tmp_path / "sel"
+    sel.mkdir()
+    (sel / "codeselect").write_bytes(b"#!/bin/sh\nexit 0\n")
+    (sel / "select.sh").write_bytes(b"#!/bin/sh\nexit 0\n")
+    art = tmp_path / "art0.png"
+    art.write_bytes(b"not really a png")
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    items = mk.stage_selector(str(sel), str(stage), "image=/dev/mmcblk0p3|A|\ndefault=0\ntimeout=1\n",
+                              "#!/bin/sh\n", {"art0.png": str(art)},
+                              {"build.json": '{"tool": "mkmulticard"}\n', "media.json": b'{"images": []}'})
+    cards = [c for (_s, c, _m) in items]
+    modes = {c: m for (_s, c, m) in items}
+    assert mk.SELECT_DIR + "/build.json" in cards and mk.SELECT_DIR + "/media.json" in cards
+    assert modes[mk.SELECT_DIR + "/build.json"] == 0o644 and modes[mk.SELECT_DIR + "/media.json"] == 0o644
+    assert [c for c in cards if c.startswith(mk.MEDIA_DIR + "/")] == [mk.MEDIA_DIR + "/art0.png"]
+    assert (stage / "media.json").read_bytes() == b'{"images": []}'          # bytes stay bytes
+    assert not (stage / "media" / "media.json").exists()
+    with pytest.raises(mk.Refused):
+        mk.stage_selector(str(sel), str(stage), "x\n", "#!/bin/sh\n", None, {"notes.json": "{}"})
+
+
+def test_inject_commands_remove_and_rewrite_the_sidecars(mk):
+    items = [("/s/images.conf", "/usr/local/codeselect/images.conf", 0o644),
+             ("/s/build.json", "/usr/local/codeselect/build.json", 0o644),
+             ("/s/media.json", "/usr/local/codeselect/media.json", 0o644),
+             ("/s/game", "/etc/init.d/game", 0o755)]
+    cmds = mk.inject_commands(items, ["images.conf", "build.json", "media.json"], {})
+    for name in ("build.json", "media.json"):
+        rm = 'rm "/usr/local/codeselect/%s"' % name
+        write = 'write "/s/%s" "/usr/local/codeselect/%s"' % (name, name)
+        assert rm in cmds and write in cmds and cmds.index(rm) < cmds.index(write)
+        assert 'set_inode_field "/usr/local/codeselect/%s" mode 0100644' % name in cmds
+    assert not [c for c in cmds if "/codeselect/media/" in c]   # never inside the media directory
+
+
+def test_parse_manifest_degrades_on_a_broken_sidecar(mk):
+    warns = []
+    assert mk.parse_manifest(None, "build.json", warns) is None and warns == []
+    assert mk.parse_manifest(b'{"a": 1}', "build.json", warns) == {"a": 1}
+    assert mk.parse_manifest(b"not json at all", "build.json", warns) is None
+    assert mk.parse_manifest(b'["a list"]', "media.json", warns) is None
+    assert len(warns) == 2 and "build.json" in warns[0] and "media.json" in warns[1]
+    with pytest.raises(mk.Refused):
+        mk.parse_manifest(b"{", "build.json")
+
+
+# ============================================================ inspect (item 90: contract B)
+REG, DIRM = 0o100644, 0o040755
+
+
+def _synth_card(mk, tmp_path, n_extra=1):
+    """A real (pure-python) multi card plus its sources; the ext4 side is faked below."""
+    srcs = [mk.make_synthetic_card(str(tmp_path / ("S%d.img" % i)), "S%d" % i, 0x0A0B0C00 + i)
+            for i in range(n_extra + 1)]
+    plan = mk.make_plan(srcs[0], srcs[1:], "parts")
+    out = str(tmp_path / "multi.img")
+    mk.build_image(plan, out)
+    return out, srcs, plan
+
+
+def _fake_p2(mk, monkeypatch, files, dirs, trees=None):
+    """Stand in for the debugfs read layer: `files` {card path: bytes}, `dirs` {dir path:
+    [(name, mode, size)]}, `trees` {device: (validator state, title dir)}."""
+    monkeypatch.setattr(mk, "need_tools", lambda *a: None)
+    monkeypatch.setattr(mk, "debugfs_exists", lambda ref, p: p in files or p in dirs)
+
+    def cat(ref, p):
+        if p not in files:
+            raise mk.Refused("no such file %s" % p)
+        return files[p]
+
+    def ls(ref, p):
+        if p not in dirs:
+            raise mk.Refused("no such directory %s" % p)
+        return [(100 + i, mode, 0, 0, name, size) for i, (name, mode, size) in enumerate(dirs[p])]
+
+    def state(card, part, sub):
+        got = (trees or {}).get(mk.device_name(part.num, sub))
+        if got is None:
+            raise mk.Refused("no title directory with a game file in this tree")
+        return got[0], got[1], got[1] + "/game"
+
+    monkeypatch.setattr(mk, "debugfs_cat", cat)
+    monkeypatch.setattr(mk, "debugfs_ls", ls)
+    monkeypatch.setattr(mk, "tree_state", state)
+
+
+def _loaded_card(mk, tmp_path, monkeypatch, with_build=True, with_media_json=True, sources=None):
+    out, srcs, plan = _synth_card(mk, tmp_path)
+    conf = mk.render_images_conf(plan.devices(), ["STERN 1.59.0", "TMNT 1987"],
+                                 ["Original Stern code", "1987 cartoon upscale"], 1, 20,
+                                 mk.SELECT_DIR + "/font.ttf",
+                                 media=[("art0.png", "", ""), ("art1.png", "anim1.gif", "music1.wav")],
+                                 sound_move="move.wav", sound_confirm="confirm.wav", volume=35)
+    media_json = json.dumps({"images": [{"art": "art0.png", "anim": None, "music": None,
+                                         "art_source": "auto@20", "anim_source": None},
+                                        {"art": "art1.png", "anim": "anim1.gif", "music": "music1.wav",
+                                         "art_source": "/x/clip.mov@21", "anim_source": "auto@20:2:8"}],
+                             "sound_move": "move.wav", "sound_confirm": "confirm.wav",
+                             "volume": 35}, indent=2).encode()
+    mans = mk.selector_manifests(plan, conf, None, srcs if sources is None else sources)
+    files = {mk.SELECT_DIR + "/images.conf": conf.encode(),
+             mk.SELECT_DIR + "/codeselect": b"\x7fELF..codeselect 2.1 - Spike 2 boot-time code selector\n",
+             mk.SELECT_DIR + "/select.sh": b"#!/bin/sh\n",
+             mk.MEDIA_DIR + "/art0.png": b"png-zero",
+             mk.MEDIA_DIR + "/art1.png": b"png-one",
+             mk.MEDIA_DIR + "/anim1.gif": b"gif-one",
+             mk.MEDIA_DIR + "/music1.wav": b"wav-one",
+             mk.MEDIA_DIR + "/move.wav": b"mv",
+             mk.MEDIA_DIR + "/confirm.wav": b"ok"}
+    sel_dir = [("codeselect", REG, len(files[mk.SELECT_DIR + "/codeselect"])), ("select.sh", REG, 10),
+               ("images.conf", REG, len(conf)), ("media", DIRM, 4096)]
+    if with_build:
+        files[mk.SELECT_DIR + "/build.json"] = mans["build.json"].encode()
+        sel_dir.append(("build.json", REG, len(mans["build.json"])))
+    if with_media_json:
+        files[mk.SELECT_DIR + "/media.json"] = media_json
+        sel_dir.append(("media.json", REG, len(media_json)))
+    dirs = {mk.SELECT_DIR: sel_dir,
+            mk.MEDIA_DIR: [(n.rsplit("/", 1)[1], REG, len(b))
+                           for n, b in files.items() if n.startswith(mk.MEDIA_DIR + "/")]}
+    _fake_p2(mk, monkeypatch, files, dirs,
+             {"/dev/mmcblk0p3": ("armed", "turtles_pro"), "/dev/mmcblk0p7": ("bypassed", "turtles_pro")})
+    return out, srcs, plan
+
+
+def test_inspect_reads_back_every_field_a_loader_needs(mk, tmp_path, monkeypatch):
+    out, srcs, _plan = _loaded_card(mk, tmp_path, monkeypatch)
+    rep = mk.inspect_card(out, str(tmp_path / "loaded"))
+    assert rep["card"] == os.path.abspath(out) and rep["size"] == os.path.getsize(out)
+    assert rep["layout"] == "parts"
+    assert [p["num"] for p in rep["partitions"]] == [1, 2, 3, 4, 5, 6, 7]
+    assert [(im["index"], im["device"]) for im in rep["images"]] == [(0, "/dev/mmcblk0p3"), (1, "/dev/mmcblk0p7")]
+    assert [im["title"] for im in rep["images"]] == ["STERN 1.59.0", "TMNT 1987"]
+    assert [im["subtitle"] for im in rep["images"]] == ["Original Stern code", "1987 cartoon upscale"]
+    assert [(im["art"], im["anim"], im["music"]) for im in rep["images"]] == [
+        ("art0.png", None, None), ("art1.png", "anim1.gif", "music1.wav")]
+    assert [(im["art_source"], im["anim_source"]) for im in rep["images"]] == [
+        ("auto@20", None), ("/x/clip.mov@21", "auto@20:2:8")]
+    assert [im["source"] for im in rep["images"]] == [os.path.abspath(s) for s in srcs]
+    assert [im["source_exists"] for im in rep["images"]] == [True, True]
+    assert [im["title_dir"] for im in rep["images"]] == ["turtles_pro", "turtles_pro"]
+    assert [im["bypass"] for im in rep["images"]] == ["armed", "bypassed"]
+    assert (rep["timeout"], rep["default"], rep["volume"], rep["mixer_volume"]) == (20, 1, 35, None)
+    assert (rep["sound_move"], rep["sound_confirm"]) == ("move.wav", "confirm.wav")
+    assert rep["font"] == mk.SELECT_DIR + "/font.ttf" and rep["media_dir"] == mk.MEDIA_DIR
+    assert sorted(m["name"] for m in rep["media"]) == ["anim1.gif", "art0.png", "art1.png", "confirm.wav",
+                                                       "move.wav", "music1.wav"]
+    assert [m for m in rep["media"] if m["name"] == "art0.png"][0]["bytes"] == len(b"png-zero")
+    assert rep["has_build_json"] and rep["has_media_json"]
+    assert rep["build"]["tool"] == "mkmulticard" and rep["build"]["version"] == mk.VERSION
+    assert rep["selector"]["version"] == "2.1" and rep["selector"]["bytes"] > 0
+    assert rep["warnings"] == []
+    # every key contract B names, and the whole report is JSON
+    assert set(rep) >= {"card", "size", "layout", "partitions", "images", "timeout", "default", "volume",
+                        "mixer_volume", "sound_move", "sound_confirm", "font", "media", "has_media_json",
+                        "has_build_json", "selector", "warnings"}
+    assert json.loads(json.dumps(rep))["images"][1]["title"] == "TMNT 1987"
+    # --media-out gives back a directory that IS a --media-dir again
+    d = tmp_path / "loaded"
+    assert sorted(p.name for p in d.iterdir()) == ["anim1.gif", "art0.png", "art1.png", "confirm.wav",
+                                                   "media.json", "move.wav", "music1.wav"]
+    assert (d / "art0.png").read_bytes() == b"png-zero"
+    assert json.loads((d / "media.json").read_bytes())["images"][1]["anim_source"] == "auto@20:2:8"
+    assert rep["media_out"]["files"] == 7
+
+
+def test_inspect_degrades_when_the_card_carries_no_json_sidecars(mk, tmp_path, monkeypatch):
+    """A card built before the sidecars existed (David's v1 card) still loads: the menu is read
+    off images.conf, the unknown fields are null, and the report SAYS what is missing."""
+    out, _srcs, _plan = _loaded_card(mk, tmp_path, monkeypatch, with_build=False, with_media_json=False)
+    rep = mk.inspect_card(out)
+    assert rep["has_build_json"] is False and rep["has_media_json"] is False and rep["build"] is None
+    assert [im["source"] for im in rep["images"]] == [None, None]
+    assert [im["source_exists"] for im in rep["images"]] == [False, False]
+    assert [im["art_source"] for im in rep["images"]] == [None, None]
+    assert [im["title"] for im in rep["images"]] == ["STERN 1.59.0", "TMNT 1987"]   # the menu still loads
+    assert [im["art"] for im in rep["images"]] == ["art0.png", "art1.png"]
+    assert [im["bypass"] for im in rep["images"]] == ["armed", "bypassed"]
+    assert any("build.json" in w for w in rep["warnings"]) and any("media.json" in w for w in rep["warnings"])
+    assert rep["media_out"] is None
+    # extracting into a directory that already holds an EARLIER load's media.json says so: this
+    # card carries none, and re-injecting from that directory would stage the wrong set
+    d = tmp_path / "stale"
+    d.mkdir()
+    (d / "media.json").write_bytes(b'{"images": []}')
+    rep = mk.inspect_card(out, str(d))
+    assert any("EARLIER load" in w for w in rep["warnings"])
+    assert (d / "art0.png").read_bytes() == b"png-zero"        # the files still come out
+
+
+def test_inspect_says_when_a_source_is_not_on_this_machine(mk, tmp_path, monkeypatch):
+    out, _srcs, _plan = _loaded_card(mk, tmp_path, monkeypatch,
+                                     sources=["/mnt/d/Pinball/gone.raw", "/mnt/d/Pinball/also_gone.raw"])
+    rep = mk.inspect_card(out)
+    assert [im["source_exists"] for im in rep["images"]] == [False, False]
+    assert [im["source"] for im in rep["images"]] != [None, None]
+    assert len([w for w in rep["warnings"] if "not on this machine" in w]) == 2
+
+
+def test_inspect_reads_a_multi_layout_cards_subdirectory_devices(mk, tmp_path, monkeypatch):
+    out, srcs, _plan = _synth_card(mk, tmp_path)
+    monkeypatch.setattr(mk, "multi_subdirs_on", lambda card, part_num=7: ["img1", "img2"])
+    plan = mk.plan_from_card(out)
+    devs = ["/dev/mmcblk0p3", "/dev/mmcblk0p7:img1", "/dev/mmcblk0p7:img2"]
+    assert plan.layout == "multi" and plan.devices() == devs
+    conf = mk.render_images_conf(devs, ["A", "B", "C"], ["", "", ""], 0, 15)
+    mans = mk.selector_manifests(plan, conf, None, list(srcs) + ["/x/c.raw"])
+    files = {mk.SELECT_DIR + "/images.conf": conf.encode(),
+             mk.SELECT_DIR + "/build.json": mans["build.json"].encode(),
+             mk.SELECT_DIR + "/codeselect": b"codeselect 2.1 - Spike 2 boot-time code selector"}
+    dirs = {mk.SELECT_DIR: [("codeselect", REG, 46), ("select.sh", REG, 10),
+                            ("images.conf", REG, len(conf)), ("build.json", REG, len(mans["build.json"]))]}
+    _fake_p2(mk, monkeypatch, files, dirs, {d: ("bypassed", "turtles_pro") for d in devs})
+    rep = mk.inspect_card(out)
+    assert rep["layout"] == "multi"
+    assert [im["device"] for im in rep["images"]] == devs
+    assert [im["bypass"] for im in rep["images"]] == ["bypassed"] * 3
+    assert [im["title_dir"] for im in rep["images"]] == ["turtles_pro"] * 3
+    assert json.loads(mans["build.json"])["layout"] == "multi"
+    assert rep["media"] == [] and rep["has_media_json"] is False
+
+
+def test_inspect_refuses_what_is_not_a_multi_boot_card(mk, tmp_path, monkeypatch):
+    out, _srcs, _plan = _synth_card(mk, tmp_path)
+    # a Spike 2 card with no selector installed (a stock card)
+    _fake_p2(mk, monkeypatch, {}, {})
+    with pytest.raises(mk.Refused) as e:
+        mk.inspect_card(out)
+    assert "no boot selector" in str(e.value)
+    # the directory is there but holds no menu
+    _fake_p2(mk, monkeypatch, {}, {mk.SELECT_DIR: [("codeselect", REG, 4)]})
+    with pytest.raises(mk.Refused) as e:
+        mk.inspect_card(out)
+    assert "images.conf" in str(e.value)
+    # not a card at all
+    junk = tmp_path / "junk.raw"
+    junk.write_bytes(b"\x00" * 4096)
+    with pytest.raises(mk.Refused):
+        mk.inspect_card(str(junk))
+
+
+def test_inspect_cli_prints_one_json_object_and_exits_2_on_a_refusal(mk, tmp_path, monkeypatch, capsys):
+    out, srcs, _plan = _loaded_card(mk, tmp_path, monkeypatch)
+    capsys.readouterr()                                   # drop what building the card printed
+    assert mk.main(["inspect", "--card", out, "--json"]) == 0
+    rep = json.loads(capsys.readouterr().out)
+    assert rep["card"] == os.path.abspath(out)
+    assert [im["source"] for im in rep["images"]] == [os.path.abspath(s) for s in srcs]
+    assert mk.main(["inspect", "--card", out]) == 0
+    table = capsys.readouterr().out
+    assert "STERN 1.59.0" in table and "validator=armed" in table and "codeselect 2.1" in table
+    assert mk.main(["inspect", "--card", str(tmp_path / "nope.raw")]) == 2
+    assert "does not exist" in capsys.readouterr().err
+
+
+def test_extract_card_media_writes_a_media_dir_and_refuses_the_card_library(mk, tmp_path, monkeypatch):
+    files = {mk.MEDIA_DIR + "/art0.png": b"png", mk.MEDIA_DIR + "/move.wav": b"wav"}
+    _fake_p2(mk, monkeypatch, files, {})
+    d = tmp_path / "out"
+    written, skipped = mk.extract_card_media("ref", str(d), ["art0.png", "move.wav", "../escape"], b"{}")
+    assert written == ["art0.png", "move.wav", "media.json"] and skipped == ["../escape"]
+    assert (d / "art0.png").read_bytes() == b"png" and (d / "media.json").read_bytes() == b"{}"
+    assert not (tmp_path / "escape").exists()
+    monkeypatch.setattr(mk, "FORBIDDEN_OUTPUT_PREFIXES", (str(tmp_path / "library"),))
+    with pytest.raises(mk.Refused):
+        mk.extract_card_media("ref", str(tmp_path / "library" / "media"), [], None)

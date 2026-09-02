@@ -170,6 +170,66 @@ def elf(name=None):
     return os.path.join(d, "game") if d else None
 
 
+def firmware_provenance(path=None, name=None):
+    """Has this title's ``game`` been patched by PAD, or is it as Stern shipped?
+
+    WHY A RUN SHOULD SAY THIS OUT LOUD.  PAD-102 was triaged for a day against
+    a user's *rethemed* card on the assumption that custom content was in the
+    picture; it was not, and the stock factory image crashed identically.  The
+    reverse mistake is the expensive one though: a log from a card whose
+    firmware PAD itself rewrote, read as if it were stock, sends the next
+    investigation looking for a bug in Stern's code that we put there.
+
+    The mark is structural and needs no addresses.  The blip-free callout patch
+    (``docs/architecture/stern.md``) rewrites the ELF's ``PT_GNU_STACK`` header
+    into a third ``PT_LOAD`` so it can append an executable cave page and branch
+    into it.  Stock Spike 2 firmware is exactly two ``PT_LOAD``s - one RX, one
+    RW - plus a ``PT_GNU_STACK``.  So: no GNU_STACK, or a third LOAD, and the
+    firmware is not what Stern shipped.
+
+    Returns ``(verdict, detail)``; ``verdict`` is "stock", "patched" or
+    "unknown", and never guesses from a file it could not parse."""
+    import struct
+    p = path or elf(name)
+    if not p or not os.path.isfile(p):
+        return "unknown", "no game ELF to read"
+    try:
+        with open(p, "rb") as fh:
+            head = fh.read(64)
+            if head[:4] != b"\x7fELF" or len(head) < 64:
+                return "unknown", "not an ELF"
+            e_phoff, = struct.unpack_from("<I", head, 28)
+            e_phentsize, e_phnum = struct.unpack_from("<HH", head, 42)
+            if not e_phnum or e_phentsize < 32 or e_phnum > 128:
+                return "unknown", "unreadable program headers"
+            fh.seek(e_phoff)
+            raw = fh.read(e_phentsize * e_phnum)
+    except OSError as e:
+        return "unknown", "could not read %s (%s)" % (p, e)
+    if len(raw) < e_phentsize * e_phnum:
+        return "unknown", "truncated program headers"
+
+    loads, gnu_stack = [], 0
+    for i in range(e_phnum):
+        o = i * e_phentsize
+        p_type, p_off, p_vaddr, _pa, p_filesz, p_memsz, p_flags, _al = \
+            struct.unpack_from("<8I", raw, o)
+        if p_type == 1:                       # PT_LOAD
+            loads.append((p_vaddr, p_memsz, p_flags))
+        elif p_type == 0x6474e551:            # PT_GNU_STACK
+            gnu_stack += 1
+
+    if gnu_stack and len(loads) == 2:
+        return "stock", "2 PT_LOAD + PT_GNU_STACK, as Stern ships it"
+    if not gnu_stack and len(loads) >= 3:
+        cave = loads[-1]
+        return "patched", ("PT_GNU_STACK rewritten into a %d-byte executable "
+                           "PT_LOAD at 0x%08x - PAD's blip-free callout patch"
+                           % (cave[1], cave[0]))
+    return "unknown", ("%d PT_LOAD, %d PT_GNU_STACK - neither shape this knows"
+                       % (len(loads), gnu_stack))
+
+
 def assets(name=None):
     d = game_dir(name)
     return os.path.join(d, "assets") if d else None
@@ -335,11 +395,22 @@ def main():
     if argv and argv[0].startswith("--"):
         what, argv = argv[0], argv[1:]
         name = argv[0] if argv else None
+        if what == "--provenance":
+            # A PATH OR A TITLE. watch.sh asks this before the card's title
+            # directory is resolvable through the rootfs but while it already
+            # holds $GAME_ELF, and a check that answers "unknown" exactly when
+            # it is wanted is no check at all.
+            if name and os.path.isfile(name):
+                verdict, detail = firmware_provenance(path=name)
+            else:
+                verdict, detail = firmware_provenance(name=name)
+            print("%s: %s" % (verdict, detail))
+            return 0 if verdict != "unknown" else 1
         value = {"--elf": elf, "--dir": game_dir, "--tables": table_dir,
                  "--art": playfield_png, "--game": active}.get(what)
         if not value:
-            print("usage: gameinfo.py [--elf|--dir|--tables|--art|--game] [title]",
-                  file=sys.stderr)
+            print("usage: gameinfo.py [--elf|--dir|--tables|--art|--game"
+                  "|--provenance] [title]", file=sys.stderr)
             return 2
         v = value(name)
         if not v:

@@ -689,3 +689,33 @@ def test_helper_runs_and_answers_nothing_when_no_guest_is_ours(tmp_path):
                          env=dict(os.environ, S1_WORK=str(tmp_path)))
     assert out.returncode == 0
     assert out.stdout.decode().strip() == ""
+
+
+# ------------------------------------------------- the speaker's PCM rate --
+# The DMD generation is 44100x2; the 2012 home models run their DAC at 24000
+# (sys_dac_init asks for rate index 3).  Opening the speaker at the wrong rate
+# starves it - the player wants 176400 B/s while the game makes 96000 - so
+# nothing is heard at all (PAD-101).
+
+def test_audio_format_comes_from_the_run_dir(panel, tmp_path, monkeypatch):
+    (tmp_path / "s1audio").write_text("24000 2\n", encoding="utf-8")
+    panel._info = {"work": "/home/david/s1emu", "distro": "Ubuntu"}
+    monkeypatch.setattr(spike1_emulate_tab, "wsl_unc",
+                        lambda distro, p: str(tmp_path / p.rsplit("/", 1)[-1]))
+    assert panel._audio_format() == ("24000", "2")
+
+
+def test_audio_format_falls_back_when_the_rig_has_not_said(panel, tmp_path,
+                                                           monkeypatch):
+    panel._info = {"work": "/home/david/s1emu", "distro": "Ubuntu"}
+    monkeypatch.setattr(spike1_emulate_tab, "wsl_unc",
+                        lambda distro, p: str(tmp_path / "missing"))
+    assert panel._audio_format() == panel.DEFAULT_AUDIO == ("44100", "2")
+
+
+def test_audio_format_ignores_a_malformed_marker(panel, tmp_path, monkeypatch):
+    (tmp_path / "s1audio").write_text("garbage\n", encoding="utf-8")
+    panel._info = {"work": "/home/david/s1emu", "distro": "Ubuntu"}
+    monkeypatch.setattr(spike1_emulate_tab, "wsl_unc",
+                        lambda distro, p: str(tmp_path / p.rsplit("/", 1)[-1]))
+    assert panel._audio_format() == ("44100", "2")

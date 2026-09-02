@@ -74,8 +74,12 @@ ARM_WINDOW = 30.0                # s a start/drain arms the serve reaction
 SPI_BITS = {"select": 8, "plus": 9, "minus": 10, "back": 11, "interlock": 16}
 
 
-#: switches the keeper HOLDS closed besides the trough: a ball lock's optos,
-#: whose closed state is "no ball here" (filled by load_title_map).
+#: A ball lock's optos used to be HELD closed here, because that was what made
+#: Transformers The Pin serve.  That was an artifact of the switch polarity
+#: being applied in the wrong index space (PAD-101): with the wire idle built
+#: per physical position, LOCKUP 1-3 idle OPEN, which already means "no ball
+#: locked".  Holding them now claims three locked balls and the game will not
+#: serve.  Kept as an empty list so the shape of load_title_map is unchanged.
 lock_optos = []
 #: the switch a plunged ball trips on its way OUT of the shooter lane, where a
 #: title has one ("SHOOTER LANE EXIT" on Transformers The Pin); without that
@@ -129,11 +133,6 @@ def load_title_map(work):
             m = re.search(r"(\d+)", uname)
             if m:
                 by_digit[int(m.group(1))] = slot
-        elif uname.startswith("LOCKUP"):
-            # a ball lock's optos: CLOSED means empty.  Left open, Transformers
-            # The Pin read three balls locked from attract on, kicked the lock
-            # every 3 s and never served (its count was already "full").
-            lock_optos.append(slot)
         elif "SHOOTER" in uname and "EXIT" in uname:
             lane_exit[0] = slot
         elif "SHOOTER" in uname:
@@ -176,7 +175,6 @@ class Keeper:
                        if (self.curated or self.mapped) else 0)
         if not self.curated:
             self.trough_coils = set()
-        self.lock_optos = list(lock_optos) if self.mapped else []
         self.lane_exit = lane_exit[0] if self.mapped else None
         self.seq = 0
         self.balls = self.nballs     # balls sitting in the trough
@@ -236,23 +234,20 @@ class Keeper:
         self.start, self.coin = start, coin
         self.trough_coils = coils if curated else set()
         self.curated, self.mapped = curated, mapped
-        self.lock_optos = list(lock_optos)
         self.lane_exit = lane_exit[0]
         self.nballs = len(self.trough_slots)
         self.balls = self.nballs          # fill the trough it can now name
         self.in_shooter = False
         self.write_state()
         self.publish()
-        print("title map adopted: %d trough switches, %s%s"
+        print("title map adopted: %d trough switches, %s"
               % (self.nballs, "curated eject coils" if curated
-                 else "serve by plunge (no _trough_coils)",
-                 ", %d lock optos held (empty lock)" % len(self.lock_optos)
-                 if self.lock_optos else ""), flush=True)
+                 else "serve by plunge (no _trough_coils)"), flush=True)
         return True
 
     # -- switch output -------------------------------------------------------
     def closed_slots(self):
-        slots = list(self.trough_slots[:self.balls]) + list(self.lock_optos)
+        slots = list(self.trough_slots[:self.balls])
         if self.in_shooter:
             slots.append(self.shooter)
         slots.extend(self.pulses)

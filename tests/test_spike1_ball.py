@@ -235,28 +235,20 @@ def test_early_era_map_names_resolve_for_the_keeper(tmp_path):
     assert coils == {(8, 3)} and curated and mapped
 
 
-def test_lock_optos_are_held_closed_as_an_empty_lock(tmp_path):
-    # Transformers The Pin: LOCKUP 1-3 are optos, closed == no ball; left
-    # open the game counted three locked balls and never served.
+def test_a_ball_lock_is_not_held_by_the_keeper(tmp_path):
+    """LOCKUP switches idle OPEN (= no ball locked); the keeper used to hold
+    them closed to compensate for the inverted switch polarity, which claimed
+    three locked balls once that bug was fixed (PAD-101)."""
     (tmp_path / "s1switches.json").write_text(json.dumps({
         "8,13": "TROUGH 1", "8,14": "TROUGH 2", "8,15": "TROUGH 3",
         "8,32": "LOCKUP 2", "8,33": "LOCKUP 1", "8,34": "LOCKUP 3",
         "8,21": "START", "8,12": "SHOOTER LANE",
         "_trough_coils": [[8, 3]]}), encoding="utf-8")
-    k = s1ball.Keeper(str(tmp_path))
-    assert sorted(k.lock_optos) == [(8, 32), (8, 33), (8, 34)]
+    s1ball.Keeper(str(tmp_path))
     closed, _seq = SwitchInput.unpack((tmp_path / "s1auto.input").read_bytes())
-    assert {(s // 64, s % 64) for s in closed} == {
-        (8, 13), (8, 14), (8, 15), (8, 32), (8, 33), (8, 34)}
-
-
-def test_lock_optos_arrive_with_a_late_map_too(tmp_path):
-    k = s1ball.Keeper(str(tmp_path))
-    assert k.lock_optos == []
-    (tmp_path / "s1switches.json").write_text(json.dumps({
-        "8,13": "TROUGH 1", "8,33": "LOCKUP 1"}), encoding="utf-8")
-    assert k.adopt_map() is True
-    assert k.lock_optos == [(8, 33)]
+    held = {(s // 64, s % 64) for s in closed}
+    assert held == {(8, 13), (8, 14), (8, 15)}      # the trough, nothing else
+    assert not any(i in (32, 33, 34) for _n, i in held)
 
 
 def test_launch_trips_the_shooter_lane_exit_where_the_title_has_one(tmp_path):

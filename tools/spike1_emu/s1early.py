@@ -43,10 +43,23 @@ round-robin, so a responder that answers for node 8 is the whole machine.
 
 Switch injection reuses the viewer/keeper bitmaps (S1_SW_INPUT / S1_SW_AUTO,
 see nodebus.read_injected_switches) — the same slot = node*64 + index — with
-this era's polarity: a switch is closed when its raw bit DIFFERS from
-``g_switch_negative_logic_bitmask`` (measured live: an all-zero reply held the
-volume button and the game sat on "VOLUME: 27%"; the mask on Transformers is
-e7 7b fd 01 cf 31 00 00).  The mask, and the switch NAMES — this era keeps
+this era's polarity: a switch is closed when its raw bit DIFFERS from the
+wire's IDLE state (an all-zero reply held the volume button and the game sat on
+"VOLUME: 27%").
+
+**The idle state is per switch, and it must be read in PHYSICAL WIRE ORDER.**
+The node map is laid out physically, but every entry names its DESTINATION —
+``{u32 game-id byte, u8 game-id bit, u8 negative-logic flag, char name[48]}`` at
+stride 0x38 — and ``g_switch_negative_logic_bitmask`` is indexed by GAME ID, not
+by wire position.  Rebuilding that global from the entries' flags proves it:
+game-id order reproduces the live ``e7 7b fd 01 cf 31 00 00`` exactly, physical
+order is 30 bits out.  Reading the global and XORing it against the physical
+bytes we put on the wire therefore INVERTED every switch whose two indexes
+disagree — including SHOOTER LANE (physical 12, game id 10, true idle 0), which
+the game then saw as permanently closed: a ball forever sitting in the shooter
+lane, so it prompted PLUNGE BALL for ever (PAD-101).  So the idle mask is built
+here from each entry's own flag, at its own physical position.  The switch
+NAMES — this era keeps
 each switch's name inside its own map entry (``SWITCH_START`` at byte 2 bit 5,
 ``SWITCH_TROUGH_1``…) — are read out of guest memory once the game is up
 (:func:`sync_from_guest`), which also writes ``s1switches.json`` for the
@@ -78,10 +91,10 @@ def active_high(active_low_bytes):
     return bytes((~b) & 0xFF for b in active_low_bytes)
 
 
-def wire_bytes(closed_mask, negmask):
-    """The 8 reply bytes for cmd 0x11: idle is the negative-logic mask itself
-    (every switch open); a closed switch flips its bit."""
-    return bytes(c ^ n for c, n in zip(closed_mask, negmask))
+def wire_bytes(closed_mask, wire_idle):
+    """The 8 reply bytes for cmd 0x11: with nothing pressed the wire reads the
+    idle mask; a closed switch flips its own bit."""
+    return bytes(c ^ n for c, n in zip(closed_mask, wire_idle))
 
 
 # ---- the game's own tables, read live -------------------------------------
@@ -91,8 +104,29 @@ COIL_NAME_OFF = 12
 _NAME_PREFIX = "SWITCH_"
 
 
-def read_negmask(g, syms):
-    return g.read(syms["g_switch_negative_logic_bitmask"], 8)
+#: offsets inside a node-map entry (stride NODE_MAP_ENTRY, physical order)
+_ENT_GID_BIT = 4          # u8: the destination bit within the game-id byte
+_ENT_NEG = 5              # u8: 1 = this switch idles HIGH on the wire
+_ENT_NAME = 6
+
+
+def read_wire_idle(g, syms, node=NODE):
+    """The 8 switch bytes meaning "nothing pressed", in PHYSICAL wire order.
+
+    Built from each map entry's own negative-logic flag at its own physical
+    position — NOT from g_switch_negative_logic_bitmask, which is indexed by
+    game id and inverts every switch whose two indexes disagree (see above)."""
+    base = g.u32(syms["g_nMessagesSent"] + 0x24 + node * 4)
+    idle = bytearray(8)
+    if not base:
+        return bytes(idle)
+    for phys in range(64):
+        ent = g.read(base + phys * NODE_MAP_ENTRY, NODE_MAP_ENTRY)
+        if not ent[_ENT_GID_BIT]:          # no destination: unused position
+            continue
+        if ent[_ENT_NEG]:
+            idle[phys >> 3] |= 1 << (phys & 7)
+    return bytes(idle)
 
 
 def read_switch_names(g, syms, node=NODE):
@@ -105,11 +139,11 @@ def read_switch_names(g, syms, node=NODE):
         return names
     for byte in range(8):
         for bit in range(8):
-            ent = g.read(base + byte * 0x1c0 + bit * NODE_MAP_ENTRY,
+            ent = g.read(base + (byte * 8 + bit) * NODE_MAP_ENTRY,
                          NODE_MAP_ENTRY)
-            if not ent[4]:                       # unused position
+            if not ent[_ENT_GID_BIT]:            # unused position
                 continue
-            raw = ent[6:].split(b"\0")[0].decode("latin1", "replace")
+            raw = ent[_ENT_NAME:].split(b"\0")[0].decode("latin1", "replace")
             if raw.startswith(_NAME_PREFIX):
                 raw = raw[len(_NAME_PREFIX):]
             name = raw.replace("_", " ").strip()
@@ -144,13 +178,13 @@ def sync_from_guest(work, elf_path, out_path):
         elf = _Elf(f.read())
     syms = elf.syms
     g = Guest(game_pid(work))
-    negmask = read_negmask(g, syms)
+    negmask = read_wire_idle(g, syms)
     names = read_switch_names(g, syms)
     if not names:
         raise NotReady("switch map not populated yet")
     doc = {"%d,%d" % (NODE, i): n for i, n in sorted(names.items())}
     doc["_trough_coils"] = trough_coils(elf, syms)
-    doc["_negmask"] = negmask.hex()
+    doc["_wire_idle"] = negmask.hex()
     import json
     tmp = out_path + ".tmp"
     with open(tmp, "w") as f:
@@ -295,7 +329,7 @@ def main(argv=None):
     names_path = os.environ.get("S1_SWITCHES") or os.path.join(work, "s1switches.json")
     logline("early-era responder up: node %d, eeprom %s" % (NODE, eeprom.path))
 
-    state = {"negmask": SW_IDLE_HIGH, "synced": False, "next_sync": 0.0}
+    state = {"idle": SW_IDLE_HIGH, "synced": False, "next_sync": 0.0}
     import time
 
     def maybe_sync():
@@ -303,14 +337,14 @@ def main(argv=None):
             return
         state["next_sync"] = time.monotonic() + 2.0
         try:
-            negmask, names = sync_from_guest(work, elf_path, names_path)
+            wire_idle, names = sync_from_guest(work, elf_path, names_path)
         except (NotReady, OSError, KeyError, ValueError) as exc:
             logline("sync: not yet (%s)" % exc)
             return
-        state["negmask"] = negmask
+        state["idle"] = wire_idle
         state["synced"] = True
-        logline("sync: negmask %s, %d switches named -> %s"
-                % (negmask.hex(), len(names), names_path))
+        logline("sync: wire idle %s (physical order), %d switches named -> %s"
+                % (wire_idle.hex(), len(names), names_path))
 
     def injected_now():
         """{node: closed-bit mask} from the viewer + keeper files."""
@@ -333,9 +367,9 @@ def main(argv=None):
                 break
             cap.write(data)
             maybe_sync()
-            switches = {n: wire_bytes(m, state["negmask"])
+            switches = {n: wire_bytes(m, state["idle"])
                         for n, m in injected_now().items()}
-            idle = wire_bytes(SW_IDLE_HIGH, state["negmask"])
+            idle = wire_bytes(SW_IDLE_HIGH, state["idle"])
             for ev in parser.feed(data):
                 if ev[0] == "poll":
                     # name a node whose switches changed since the game last

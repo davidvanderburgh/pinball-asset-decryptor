@@ -902,7 +902,32 @@ class Spike1EmulatePanel:
                           "padplay.py")
         if not py or not os.path.isfile(pp):
             return None
-        return [py, pp, "127.0.0.1", "45998", "44100", "2"]
+        rate, ch = self._audio_format()
+        return [py, pp, "127.0.0.1", "45998", rate, ch]
+
+    #: the PCM format to open the speaker at when the rig has not said.
+    DEFAULT_AUDIO = ("44100", "2")
+
+    def _audio_format(self):
+        """``(rate, channels)`` for this title, from the run dir's ``s1audio``.
+
+        The DMD generation is 44100x2; the 2012 home models run their DAC at
+        24000 Hz (sys_dac_init asks for rate index 3).  Opening the speaker at
+        the wrong rate does not just shift the pitch - the player consumes
+        176400 B/s while the game produces 96000, so it starves and you hear
+        nothing at all (PAD-101)."""
+        work = self._info.get("work")
+        distro = self._info.get("distro")
+        if work and distro:
+            path = wsl_unc(distro, work.rstrip("/") + "/s1audio")
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    parts = f.read().split()
+                if len(parts) == 2 and all(p.isdigit() for p in parts):
+                    return parts[0], parts[1]
+            except OSError:
+                pass
+        return self.DEFAULT_AUDIO
 
     def _ensure_player(self):
         """Keep one Windows player alive while a run is up.  Called from the

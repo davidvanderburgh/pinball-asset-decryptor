@@ -169,6 +169,13 @@ if [ -L "$_dhex" ] || [ -e "$_dhex" ]; then
         && log "Display firmware image hidden from the boot updater."
 fi
 
+# 3d. the PCM format this title's DAC actually runs at, for the app's speaker.
+#     sys_dac_init calls amp_init(3, 70) on the 2012 home models: 3 is the index
+#     into the DAC rate table {1:11025, 2:22050, 3:24000, 4:32000, 5:44100,
+#     6:48000}, so they are 24000 Hz stereo, not the 44100 the chain assumed.
+#     Both ends have to agree or the player starves and you hear nothing.
+printf '%s %s\n' "${S1_PCM_RATE:-44100}" "${S1_PCM_CH:-2}" > "$S1_WORK/s1audio"
+
 # 4. valid board EEPROM (unlocks the boot; see docs/architecture/spike1_emulation.md)
 mkdir -p "$S1_WORK/rootfs/data"
 python3 "$HERE/make_seed.py" "$S1_WORK/rootfs/data/board_eeprom.bin" >/dev/null 2>&1
@@ -253,8 +260,10 @@ fi
 if [ "${PAD_AUDIO:-0}" = "1" ]; then
     pkill -f "playaudio.sh $S1_AUDIO_FIFO" 2>/dev/null
     pkill -f "padrelay.py $S1_AUDIO_FIFO" 2>/dev/null
-    # PAD_AUDIO_FMT_FIXED: this rig KNOWS its PCM format (44100x2 s16, from
-    # the game ELF), so playaudio.sh takes it from the args instead of
+    # PAD_AUDIO_FMT_FIXED: this rig KNOWS its PCM format (s16, from the game
+    # ELF - 44100x2 on the DMD generation, 24000x2 on the 2012 home models,
+    # whose sys_dac_init asks for rate index 3), so playaudio.sh takes it from
+    # the args instead of
     # polling its fmt file — pre-writing that file RACED playaudio's own
     # rm -f (up to 10 s in, behind its WSLg-socket wait) and cost a boot a
     # 60 s silent stall.
@@ -264,7 +273,8 @@ if [ "${PAD_AUDIO:-0}" = "1" ]; then
     setsid env PAD_GAME="Spike 1" PAD_AUDIO_FMT_FIXED=1 \
         PAD_AUDIO_PORT="${S1_AUDIO_PORT:-45998}" \
         bash "$REPO/tools/spike2_emu/playaudio.sh" \
-        "$S1_AUDIO_FIFO" 44100 2 "$S1_WORK/audio.fmt" \
+        "$S1_AUDIO_FIFO" "${S1_PCM_RATE:-44100}" "${S1_PCM_CH:-2}" \
+        "$S1_WORK/audio.fmt" \
         >"$S1_WORK/audio.log" 2>&1 &
     log "Audio up (PAD_AUDIO=0 to mute)."
 fi

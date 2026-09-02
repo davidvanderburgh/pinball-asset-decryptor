@@ -1023,10 +1023,27 @@ HELP_CONTENT = {
          "This is the one tab that ignores the Input box: point it at a card "
          "image of its own. That image is mounted READ ONLY and run in place — "
          "nothing is extracted and nothing can write to it — so a stock card "
-         "and your own build both work, and replacing an asset on the Replace "
-         "tabs does not change what the emulator plays until you build a card "
-         "and pick it here. The path is remembered per project, so it comes "
-         "back on the next launch without another Browse."),
+         "and your own build both work. The path is remembered per project, so "
+         "it comes back on the next launch without another Browse. Replacing "
+         "an asset on the Replace tabs still does not change that card — but "
+         "you no longer have to build a new one to hear it, which is what the "
+         "tick box under the path is for."),
+        ("Apply my replaced assets on top, without rebuilding the card",
+         "Tick it and a run plays the card you picked PLUS the edits sitting "
+         "in your assets folder, with no card built and nothing written to the "
+         "card image. The app patches copies of just the card files those "
+         "edits live in — image.bin and its .sidx record, for a replaced "
+         "sound — and the emulator reads those over the same read-only "
+         "mount. Start prepares them before it launches, which takes as long "
+         "as your edits need to be re-encoded; a set that is already current "
+         "is reused where it stands, and one that has only partly changed is "
+         "patched where it changed, so a second run costs only what you have "
+         "edited since. The folder beside the box is the Write tab's Assets "
+         "Folder, shown here read only — the project has one extract folder "
+         "and one place to set it. And if the edits cannot be delivered (no "
+         "assets folder, no baseline to compare them against, or an edit that "
+         "cannot be traced back to a file on the card) the run says so and "
+         "does not start, rather than quietly playing the stock card."),
         ("First boots copy the card — and Cache… shows where that space went",
          "The first boot of a card copies it to a local cache so every "
          "later boot starts in seconds instead of minutes. That copy is "

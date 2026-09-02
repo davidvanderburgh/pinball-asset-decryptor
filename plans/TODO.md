@@ -136,6 +136,14 @@ These have each been violated at least once and each cost a run or a window:
       (v2: media + bypass), both verify PASS. Open: the rig's audio FIFO
       reader drops ~31 s into the menu (emulator only; hardware uses
       ALSA), and the v2 selector's ALSA path is unproven on the machine.**
+      **v3 2026-09-02: the tab PREVIEWS the boot screen** - the selector
+      gained `--snapshot` (one frame, no input/audio/writes, ~80 ms under
+      qemu) and the tab renders it with Highlight / Animation frame /
+      Play; each picture is customisable (art `auto|none|file|VIDEO@T`,
+      animation `auto|file` with start, length and fps), and
+      `selectmedia.py` caches by source+params so a re-render of an
+      unchanged picture costs 0.13 s. The preview and the build share one
+      media directory, so the card matches the picture.
       **IN PROGRESS (2026-09-01, `item/90`): PROVEN IN THE EMULATOR.**
       `mkmulticard.py` builds the card (verify PASS), `codeselect` draws
       through the bridge and takes the padsw keys, `PAD_SELECT=1` runs it

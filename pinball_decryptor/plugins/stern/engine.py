@@ -4238,6 +4238,12 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
 #: therefore never bound over a card), and the only thing that lets
 #: :func:`write_overrides` clear a folder it is about to rewrite.
 OVERRIDE_MANIFEST = "overrides.json"
+# Beside it, and read by the rig rather than by this app: the shopping list
+# for staging one build's changes onto a stage that holds the one before it.
+OVERRIDE_DELTA = "overrides.delta"
+# Bumped when either file's shape changes: a set written by an older PAD is
+# rebuilt from scratch rather than half-understood.
+OVERRIDE_VERSION = 2
 
 
 def _writes_by_file(reader, writes):
@@ -4317,11 +4323,21 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     the same bytes, a fraction of the I/O, and the stock card's cache stays
     valid because the stock card was never touched.
 
-    *out_dir* is emptied first, and only if it is empty or already an override
-    set (it carries :data:`OVERRIDE_MANIFEST`) — a stale file left behind would
-    still be bound over the card, so "what is in the folder" has to mean
-    "what the current edits say", and a folder that is somebody's documents is
-    not ours to clear.
+    A SECOND BUILD PATCHES THE FIRST rather than laying it down again, when
+    the card is the same one and every file the manifest names is still there
+    as it was left: the card's own bytes go back over what the last build
+    wrote, this build's writes go on top, and a file the edits no longer touch
+    is deleted.  Rebuilding whole would mean re-extracting a 1.4 GB
+    ``image.bin`` because one callout changed, and then handing the rig 1.4 GB
+    to copy over 9p, on every Start.  :data:`OVERRIDE_DELTA` is written beside
+    the manifest so the staging script can be just as narrow
+    (``tools/spike2_emu/overrides.sh``).
+
+    *out_dir* is emptied first when it cannot be patched, and only if it is
+    empty or already an override set (it carries :data:`OVERRIDE_MANIFEST`)
+    — a stale file left behind would still be bound over the card, so "what is
+    in the folder" has to mean "what the current edits say", and a folder that
+    is somebody's documents is not ours to clear.
 
     Returns ``(counts, audio_mode, valpatch_mode, files)`` — the first three
     exactly as :func:`write_image` returns them, *files* being
@@ -4341,6 +4357,12 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
             "The override folder\n\n    %s\n\nalready holds files that were "
             "not put there by this app, and building the set would delete "
             "them. Point it at an empty folder." % out_dir)
+
+    # WHAT IS ALREADY THERE, and may it be patched instead of rebuilt?  Asked
+    # before anything is written, because the question is whether the folder
+    # on disk is still exactly the set this manifest describes.
+    previous = read_override_manifest(out_dir)
+    have = _override_reuse(out_dir, previous, original_path)
 
     parts = _linux_partitions(original_path)
     disk_f = open(_lp(original_path), "rb")
@@ -4370,15 +4392,25 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
             _stage_done(log, "tracing the edits back to the card files they "
                         "live in", t0)
 
-            _rmtree(out_dir)
-            if os.path.isdir(_lp(out_dir)) and os.listdir(_lp(out_dir)):
-                # Silent-by-design rmtree: say so rather than building a set
-                # ON TOP of a previous one, where the leftovers would be bound
-                # over the card alongside the current edits.
-                raise OSError(
-                    "The override folder\n\n    %s\n\ncould not be emptied — "
-                    "something else has a file in it open." % out_dir)
-            os.makedirs(_lp(out_dir), exist_ok=True)
+            # UPDATE WHAT IS THERE, or lay a new set down.  Building whole
+            # means re-extracting a 1.4 GB image.bin because one callout
+            # changed, and then handing the rig 1.4 GB to copy over 9p, on
+            # every Start; neither has anything to do with what the user
+            # changed since the last run.
+            fresh = have is None
+            parent = "" if fresh else str(previous.get("generation") or "")
+            if fresh:
+                _rmtree(out_dir)
+                if os.path.isdir(_lp(out_dir)) and os.listdir(_lp(out_dir)):
+                    # Silent-by-design rmtree: say so rather than building a
+                    # set ON TOP of a previous one, where the leftovers would
+                    # be bound over the card alongside the current edits.
+                    raise OSError(
+                        "The override folder\n\n    %s\n\ncould not be "
+                        "emptied — something else has a file in it open."
+                        % out_dir)
+                os.makedirs(_lp(out_dir), exist_ok=True)
+                have = {}
             # A STUB MANIFEST BEFORE ANY BYTES, so a build that dies half way
             # (the app killed, the disk full) leaves a folder that is still
             # recognisably OURS.  Without it the guard at the top of this
@@ -4386,29 +4418,59 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
             # it, because it might be somebody's documents — would refuse this
             # folder from then on.  A stub never satisfies the "may I reuse
             # this?" test either: it names no card, so the next Start rebuilds.
-            _write_override_manifest(out_dir, {"version": 1, "building": True})
-            written = []
+            # It is also what makes patching in place safe: a half-patched set
+            # is one no manifest vouches for, so nothing will bind it.
+            _write_override_manifest(out_dir, {"version": OVERRIDE_VERSION,
+                                               "building": True})
+            written, records, delta = [], [], []
             t0 = time.monotonic()
             total = len(by_file) + len((grow_plan or {}).get("jobs", ()))
             try:
                 for i, (card_path, (node, file_writes)) in enumerate(
                         sorted(by_file.items())):
                     if cancel():
-                        _rmtree(out_dir)   # the plan is cleaned by the finally
+                        if fresh:
+                            _rmtree(out_dir)   # the plan is cleaned by finally
                         return None, None, None, None
                     if progress:
                         progress(i, max(total, 1),
                                  "Writing %s" % os.path.basename(card_path))
                     dest = _override_path(out_dir, card_path)
-                    os.makedirs(_lp(os.path.dirname(dest)), exist_ok=True)
-                    log("Override: %s (%.1f MB)"
-                        % (card_path, node["size"] / 1e6), "info")
-                    reader.extract_file(node, _lp(dest))
+                    ranges = _merge_ranges(
+                        [(off, len(buf)) for off, buf in file_writes])
+                    rec = have.get(card_path)
+                    if rec is not None and rec.get("size") != node["size"]:
+                        # Under this path in the old set, but not the card's
+                        # own file (a video that outgrew its slot last time),
+                        # so these offsets do not mean anything in it.
+                        rec = None
+                    if rec is None:
+                        os.makedirs(_lp(os.path.dirname(dest)), exist_ok=True)
+                        log("Override: %s (%.1f MB)"
+                            % (card_path, node["size"] / 1e6), "info")
+                        reader.extract_file(node, _lp(dest))
+                        touched = None                  # all of it is new
+                    else:
+                        # PATCHED IN PLACE.  The card's own bytes go back over
+                        # what the last build wrote, so an edit taken back
+                        # since then is really gone, and then this build's
+                        # writes go on top.  Both are bounded by the size of
+                        # the edits and never by the size of the file.
+                        was = [(int(o), int(n))
+                               for o, n in (rec.get("ranges") or [])]
+                        _restore_stock(disk_f, reader, node, dest, was)
+                        touched = _merge_ranges(was + ranges)
+                        log("Override: %s (%.1f MB of it, in place)"
+                            % (card_path,
+                               sum(n for _o, n in touched) / 1e6), "info")
                     with open(_lp(dest), "r+b") as f:
                         for f_off, buf in file_writes:
                             f.seek(f_off)
                             f.write(buf)
                     written.append((card_path, node["size"]))
+                    records.append(_override_record(dest, card_path, ranges))
+                    delta.append(
+                        (card_path, _delta_ranges(touched, node["size"])))
 
                 # The grown files (an oversized replacement video kept at full
                 # quality, and the rebuilt blip-free firmware) are the easy
@@ -4416,6 +4478,9 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                 # no longer fit their slot, and in a set a file is just a file.
                 # AFTER the in-place writes, exactly as write_image orders
                 # them, so a file that is both ends up the same either way.
+                # Always written whole: they are built into a scratch dir on
+                # every run, so there is no earlier version to patch and no
+                # mtime worth believing.
                 for j, (card_rel, source) in enumerate(
                         (grow_plan or {}).get("jobs", ())):
                     card_path = "/" + card_rel.lstrip("/")
@@ -4426,15 +4491,32 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                     log("Override: %s (%.1f MB, full size — it outgrew its "
                         "slot on the card)" % (card_path, size / 1e6), "info")
                     written.append((card_path, size))
+                    records.append(_override_record(dest, card_path, []))
+                    delta.append((card_path, None))
                     if progress:
                         progress(len(by_file) + j, max(total, 1),
                                  "Writing %s" % os.path.basename(card_path))
+
+                # AND WHAT THE LAST BUILD LEFT THAT THIS ONE DOES NOT WANT: a
+                # file the user has reverted is absent from the new set, and a
+                # copy of it left behind would go on being bound over the card.
+                # The run would look like it was testing the current edits
+                # while playing an old one.
+                current = {p for p, _n in written}
+                removed = sorted(p for p in have if p not in current)
+                for card_path in removed:
+                    dead = _override_path(out_dir, card_path)
+                    _safe_remove(dead)
+                    _prune_empty_dirs(out_dir, os.path.dirname(dead))
             except BaseException:
-                # Half a set is not a set.  Leaving one behind would cost the
-                # user their next Start too (the folder would refuse to be
-                # cleared) and could be bound over a card if anything else
-                # decided the folder looked usable.
-                _rmtree(out_dir)
+                # Half a set is not a set.  A fresh one goes entirely, because
+                # leaving it would cost the user their next Start too (the
+                # folder would refuse to be cleared).  An updated one keeps its
+                # files — they are still most of a set, and the next build
+                # lays the stock bytes back over them — but the stub manifest
+                # above stays, so nothing reuses or binds it until one works.
+                if fresh:
+                    _rmtree(out_dir)
                 raise
             _stage_done(log, "writing the override files", t0)
         finally:
@@ -4443,8 +4525,15 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         disk_f.close()
 
     st = os.stat(_lp(original_path))
+    generation = os.urandom(6).hex()
     manifest = {
-        "version": 1,
+        "version": OVERRIDE_VERSION,
+        # WHICH BUILD THIS IS, and which one it was patched out of, so the rig
+        # can be as narrow as this function was: overrides.sh stages the set on
+        # the Linux disk, and a set whose parent it already holds costs it the
+        # bytes in OVERRIDE_DELTA rather than a copy of the whole thing.
+        "generation": generation,
+        "parent": parent,
         # The card these bytes were patched OUT OF.  A set built from one card
         # and bound over another is a corrupt title, so whoever launches has to
         # be able to tell — size+mtime is the same identity cardmount.sh's own
@@ -4457,13 +4546,18 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                    "image": counts[2], "text": counts[3]},
         "audio_mode": audio_mode[0] if audio_mode else "",
         "valpatch": valpatch_mode[0] if valpatch_mode else "",
-        "files": [{"path": p, "size": n} for p, n in written],
+        "files": records,
+        "removed": removed,
     }
     _write_override_manifest(out_dir, manifest)
-    log("Built the emulator override set in %s: %d file(s), %.0f MB (%d "
-        "sound(s), %d video(s), %d image(s), %d display string(s))."
-        % (_fmt_dur(time.monotonic() - t_all), len(written),
-           sum(n for _p, n in written) / 1e6,
+    _write_override_delta(out_dir, generation, parent, delta, removed)
+    patched = sum(n for _p, rs in delta if rs is not None for _o, n in rs)
+    copied = sum(n for (_p, n), (_q, rs) in zip(written, delta) if rs is None)
+    log("%s the emulator override set in %s: %d file(s), %.0f MB written "
+        "(%d sound(s), %d video(s), %d image(s), %d display string(s))."
+        % ("Updated" if parent else "Built",
+           _fmt_dur(time.monotonic() - t_all), len(written),
+           (copied + patched) / 1e6,
            counts[0], counts[1], counts[2], counts[3]), "success")
     return counts, audio_mode, valpatch_mode, written
 
@@ -4493,6 +4587,175 @@ def _write_override_manifest(out_dir, data):
               encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     return data
+
+
+def _override_reuse(out_dir, manifest, original_path):
+    """The files of the set in *out_dir* that may be PATCHED, or ``None``.
+
+    ``{card_path: record}`` when the set was built from this same card image
+    and every file it names is still on disk exactly as the manifest left it
+    (size and mtime); ``None`` when anything at all is off, which sends the
+    caller back to building the set from scratch.
+
+    All-or-nothing on purpose.  A set is only worth patching because nobody
+    has touched it since it was written; the moment one file disagrees, "what
+    is in this folder" is a question this manifest cannot answer, and guessing
+    is how a run ends up playing a sound the user took back.
+    """
+    if not manifest or manifest.get("building"):
+        return None
+    if int(manifest.get("version") or 0) < OVERRIDE_VERSION \
+            or not manifest.get("generation"):
+        return None
+    card = manifest.get("card") or {}
+    try:
+        st = os.stat(_lp(str(original_path)))
+    except OSError:
+        return None
+    if os.path.normcase(str(card.get("path") or "")) \
+            != os.path.normcase(os.path.abspath(str(original_path))) \
+            or card.get("size") != st.st_size \
+            or int(card.get("mtime") or 0) != int(st.st_mtime):
+        return None
+    have = {}
+    for rec in manifest.get("files") or []:
+        path = rec.get("path")
+        if not path:
+            return None
+        try:
+            fst = os.stat(_lp(_override_path(out_dir, path)))
+        except OSError:
+            return None
+        if fst.st_size != rec.get("size") \
+                or int(fst.st_mtime) != int(rec.get("mtime") or 0):
+            return None
+        have[path] = rec
+    return have
+
+
+def _override_record(dest, card_path, ranges):
+    """One file's line in the manifest: what it is, and what was put in it.
+
+    The size and mtime are read back AFTER the writes because they are what
+    the next build checks the file against, and *ranges* is what that build
+    has to lay the card's own bytes back over before it applies its own.
+    """
+    st = os.stat(_lp(dest))
+    return {"path": card_path, "size": st.st_size, "mtime": int(st.st_mtime),
+            "ranges": [[o, n] for o, n in ranges]}
+
+
+def _merge_ranges(ranges, slack=0):
+    """Sorted, non-overlapping ``[(offset, length), ...]``.
+
+    *slack* also joins ranges that are merely CLOSE, which is worth doing for
+    the staging list: every range there costs a ``dd`` of its own, and copying
+    the untouched megabyte between two edited sounds is cheaper than the
+    process that would have avoided it.
+    """
+    out = []
+    for off, n in sorted((int(o), int(x)) for o, x in ranges if int(x) > 0):
+        if out and off <= out[-1][0] + out[-1][1] + slack:
+            end = max(out[-1][0] + out[-1][1], off + n)
+            out[-1] = (out[-1][0], end - out[-1][0])
+        else:
+            out.append((off, n))
+    return out
+
+
+_DELTA_SLACK = 1 << 20                  # "not worth a second dd"
+
+
+def _delta_ranges(touched, size):
+    """What the rig must copy for one file: ranges, or ``None`` for all of it.
+
+    ``None`` when the file is new to the set, and also when so much of it
+    changed that copying it whole is the cheaper instruction — a set rebuilt
+    from a different extract should not be staged as ten thousand seeks.
+    """
+    if touched is None:
+        return None
+    wide = _merge_ranges(touched, slack=_DELTA_SLACK)
+    if sum(n for _o, n in wide) * 2 >= size:
+        return None
+    return wide
+
+
+def _prune_empty_dirs(root, path):
+    """Remove *path* and any parents it leaves empty, stopping at *root*.
+
+    A set that loses its last ``/spk/index`` file should lose the folder too:
+    the rig walks the staged tree, and an empty directory in it is a question
+    the next reader of this code should not have to answer.
+    """
+    root, path = os.path.abspath(str(root)), os.path.abspath(str(path))
+    while path.startswith(root) and path != root:
+        try:
+            os.rmdir(_lp(path))
+        except OSError:
+            return
+        path = os.path.dirname(path)
+
+
+def _restore_stock(disk_f, reader, node, dest, ranges):
+    """Put the card's own bytes back over *ranges* of a staged override file.
+
+    The undo half of patching a set in place: whatever the last build wrote
+    into this file is overwritten with what the card holds there, so an edit
+    the user has since taken back leaves nothing of itself behind.  Read
+    through the same extent map the writes were resolved through, which is
+    what makes it exact rather than a guess.
+    """
+    if not ranges:
+        return
+    with open(_lp(dest), "r+b") as f:
+        for off, length in ranges:
+            pos = off
+            for disk, n in reader.disk_ranges(node, off, length):
+                disk_f.seek(disk)
+                buf = disk_f.read(n)
+                if len(buf) != n:
+                    raise OSError("the card image ended early at 0x%x" % disk)
+                f.seek(pos)
+                f.write(buf)
+                pos += n
+
+
+def _write_override_delta(out_dir, generation, parent, delta, removed):
+    """Write :data:`OVERRIDE_DELTA`: what changed since the parent generation.
+
+    Plain lines rather than JSON because the reader is a shell script
+    (``tools/spike2_emu/overrides.sh``), and the path goes LAST on every line
+    so a card path with a space in it still parses there::
+
+        generation <id>
+        parent <id, or - when this set was built from scratch>
+        remove <path>
+        whole <path>
+        range <offset> <length> <path>
+
+    Paths are relative to the set, which mirrors the games partition, so the
+    script joins them to either side with nothing to translate.
+    """
+    lines = ["# PAD override set: what changed since the parent generation.",
+             "# tools/spike2_emu/overrides.sh stages only this much of it.",
+             "generation %s" % generation,
+             "parent %s" % (parent or "-")]
+    for card_path in removed:
+        lines.append("remove %s" % card_path.strip("/"))
+    for card_path, ranges in delta:
+        rel = card_path.strip("/")
+        if ranges is None:
+            lines.append("whole %s" % rel)
+        else:
+            for off, n in ranges:
+                lines.append("range %d %d %s" % (off, n, rel))
+    # LF, always: a shell inside WSL reads this, and a CR at the end of a line
+    # there is part of the path.
+    with open(_lp(os.path.join(str(out_dir), OVERRIDE_DELTA)), "w",
+              encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    return lines
 
 
 def stamp_override_manifest(out_dir, **fields):

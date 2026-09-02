@@ -225,8 +225,9 @@ _OVERRIDE_EXPLAIN = (
     "they live in, so the emulator can read them without a new card image "
     "being built. It is the same work a Write does, minus the copy of the "
     "card itself: a replaced sound has to be re-encoded, which is where the "
-    "time goes. The set is kept and reused until the card or the assets "
-    "folder changes, so a second run of the same edits starts straight away.")
+    "time goes. The set is kept: an unchanged one is reused where it "
+    "stands, and a changed one is patched where it changed rather than "
+    "built again, so a second run only costs what you have edited since.")
 
 #: Item 74: cardmount.sh narrates a first-boot copy one line every 2 s —
 #: ``[card] copying <name>: 3121 / 7497 MB (41%)``.  Parsed off the drain so

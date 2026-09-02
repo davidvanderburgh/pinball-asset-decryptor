@@ -23,7 +23,7 @@ import pathlib
 
 import pytest
 
-from tests._ext4_fake import FakeExt4Reader
+from tests._ext4_fake import FakeExt4Reader, materialize_files
 
 from pinball_decryptor.gui import emulate_tab
 from pinball_decryptor.plugins.stern import engine
@@ -66,6 +66,11 @@ def card(monkeypatch, tmp_path):
     reader = _Reader(CARD_TREE)
     img = tmp_path / "turtles_pro-1_59_0.Release.8G.sdcard.raw"
     img.write_bytes(bytes(4096))
+    # The card's OWN bytes, at the offsets this reader maps the files to.
+    # Patching a set in place reads them back out of the image to undo what
+    # the previous build wrote, so the stub image the first tests got away
+    # with is not enough any more.
+    materialize_files(str(img), CARD_TREE)
 
     state = {"writes": [], "grow": None,
              "counts": (1, 0, 0, 0), "audio": None, "val": None}
@@ -83,6 +88,32 @@ def card(monkeypatch, tmp_path):
 
 def _disk(reader, path, off):
     return reader.disk_ranges(reader.node(path), off, 1)[0][0]
+
+
+def _no_extracts(card, monkeypatch):
+    """Count calls to the reader's extract_file, which is the whole file.
+
+    The number that says whether a build patched the set it found or laid a
+    new one down: extracting is what costs 1.4 GB of I/O for a changed
+    callout, and not extracting is the point of the second build.
+    """
+    calls = []
+    real = card.reader.extract_file
+
+    def counted(node, dest, progress=None):
+        calls.append(dest)
+        return real(node, dest)
+
+    monkeypatch.setattr(card.reader, "extract_file", counted)
+    return calls
+
+
+def _delta(out):
+    """The staging list as ``[(kind, rest), ...]``, header lines included."""
+    raw = (out / engine.OVERRIDE_DELTA).read_bytes()
+    assert b"\r" not in raw          # a shell in WSL reads this
+    lines = raw.decode("utf-8").splitlines()
+    return [tuple(ln.split(" ", 1)) for ln in lines if not ln.startswith("#")]
 
 
 # --------------------------------------------------------------------------
@@ -153,6 +184,140 @@ def test_an_untraceable_write_refuses_the_whole_set(card, tmp_path):
     assert not (tmp_path / "ovr" / engine.OVERRIDE_MANIFEST).exists()
 
 
+def test_a_second_build_patches_the_set_it_finds(card, tmp_path, monkeypatch):
+    """The whole point: changing an edit must not re-extract the sound bank.
+
+    A card file is 1.4 GB on a real Spike 2 card, and re-extracting it is
+    both halves of the cost this feature exists to avoid - the write here,
+    and the copy the rig would then have to make across 9p.
+    """
+    r = card.reader
+    out = tmp_path / "ovr"
+    card.state["writes"] = [(_disk(r, "/turtles_pro/image.bin", 6), b"MINE!")]
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+    first = engine.read_override_manifest(str(out))
+
+    calls = _no_extracts(card, monkeypatch)
+    card.state["writes"] = [(_disk(r, "/turtles_pro/image.bin", 6), b"OTHR!")]
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+
+    assert calls == []
+    assert (out / "turtles_pro" / "image.bin").read_bytes() \
+        == b"STOCK-OTHR!-BANK-" + b"." * 64
+    second = engine.read_override_manifest(str(out))
+    assert second["parent"] == first["generation"]
+    assert second["generation"] != first["generation"]
+
+
+def test_an_edit_taken_back_gets_the_card_bytes_back(card, tmp_path,
+                                                     monkeypatch):
+    """Patching in place has to be able to UNDO, or a set only ever grows.
+
+    The file is not rewritten from the card, so the bytes of an edit the user
+    has since dropped would otherwise stay in it for ever - and be bound over
+    the card on every run after that.
+    """
+    r = card.reader
+    out = tmp_path / "ovr"
+    card.state["writes"] = [
+        (_disk(r, "/turtles_pro/image.bin", 0), b"XX"),
+        (_disk(r, "/turtles_pro/image.bin", 6), b"MINE!"),
+    ]
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+    assert (out / "turtles_pro" / "image.bin").read_bytes()[:2] == b"XX"
+
+    calls = _no_extracts(card, monkeypatch)
+    card.state["writes"] = [(_disk(r, "/turtles_pro/image.bin", 6), b"MINE!")]
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+
+    assert calls == []
+    # Stock at the front again, the surviving edit still applied.
+    assert (out / "turtles_pro" / "image.bin").read_bytes() \
+        == b"STOCK-MINE!-BANK-" + b"." * 64
+
+
+def test_a_file_that_leaves_the_set_is_deleted_and_written_down(card, tmp_path,
+                                                                monkeypatch):
+    """The rig has to be told, since it is not re-copying the set either."""
+    r = card.reader
+    out = tmp_path / "ovr"
+    card.state["writes"] = [
+        (_disk(r, "/turtles_pro/image.bin", 0), b"S"),
+        (_disk(r, "/spk/index/turtles_pro.sidx", 0), b"F"),
+    ]
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+
+    calls = _no_extracts(card, monkeypatch)
+    card.state["writes"] = [(_disk(r, "/turtles_pro/image.bin", 0), b"S")]
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+
+    assert calls == []
+    assert not (out / "spk").exists()          # and the folder with it
+    data = engine.read_override_manifest(str(out))
+    assert data["removed"] == ["/spk/index/turtles_pro.sidx"]
+    assert ("remove", "spk/index/turtles_pro.sidx") in _delta(out)
+
+
+def test_the_delta_names_only_the_bytes_that_moved(card, tmp_path):
+    """What the rig copies, and what it must not have to copy."""
+    r = card.reader
+    out = tmp_path / "ovr"
+    card.state["writes"] = [(_disk(r, "/turtles_pro/image.bin", 6), b"MINE!")]
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+    # Built from scratch, so there is nothing to patch it onto: whole files.
+    assert ("parent", "-") in _delta(out)
+    assert ("whole", "turtles_pro/image.bin") in _delta(out)
+
+    card.state["writes"] = [(_disk(r, "/turtles_pro/image.bin", 6), b"OTHR!")]
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+    kinds = _delta(out)
+    assert ("whole", "turtles_pro/image.bin") not in kinds
+    # One range, covering the five bytes this build and the last one wrote,
+    # and the path LAST so a card path with a space in it still parses.
+    ranges = [rest for kind, rest in kinds if kind == "range"]
+    assert len(ranges) == 1
+    off, length, rel = ranges[0].split(" ", 2)
+    assert rel == "turtles_pro/image.bin"
+    assert int(off) == 6 and int(length) == 5
+
+
+def test_a_set_touched_behind_our_back_is_built_again(card, tmp_path,
+                                                      monkeypatch):
+    """Patching assumes the set is what the manifest says it is.
+
+    If it is not - a half-copied file, a temp cleaner part way through, the
+    user poking at it - then nothing in the manifest describes what is in
+    the folder, and the only honest answer is to build it again.
+    """
+    r = card.reader
+    out = tmp_path / "ovr"
+    card.state["writes"] = [(_disk(r, "/turtles_pro/image.bin", 0), b"S")]
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+    with open(out / "turtles_pro" / "image.bin", "ab") as f:
+        f.write(b"?")                          # now the wrong size
+
+    calls = _no_extracts(card, monkeypatch)
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+    assert len(calls) == 1
+    assert (out / "turtles_pro" / "image.bin").read_bytes() \
+        == b"STOCK" + b"-SOUND-BANK-" + b"." * 64
+
+
+def test_another_card_is_never_patched_into_this_set(card, tmp_path,
+                                                     monkeypatch):
+    """A set is only patchable because the bytes under it are the same card."""
+    r = card.reader
+    out = tmp_path / "ovr"
+    card.state["writes"] = [(_disk(r, "/turtles_pro/image.bin", 0), b"S")]
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+
+    os.utime(card.img, (0, 0))                 # a different card image
+    calls = _no_extracts(card, monkeypatch)
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+    assert len(calls) == 1
+    assert engine.read_override_manifest(str(out))["parent"] == ""
+
+
 def test_a_grown_file_is_copied_in_whole(card, tmp_path):
     """An oversized video needs the ext4 driver on a card; here it is a file."""
     src = tmp_path / "big.asset"
@@ -168,6 +333,10 @@ def test_a_grown_file_is_copied_in_whole(card, tmp_path):
     assert [p for p, _n in files] == ["/turtles_pro/assets/lcd/1.asset"]
     assert (out / "turtles_pro" / "assets" / "lcd" / "1.asset").read_bytes() \
         == src.read_bytes()
+    # Always staged whole, too: a grow job is built into a scratch dir on
+    # every run, so there is no older version of it to patch and no mtime
+    # worth believing about the one there is.
+    assert ("whole", "turtles_pro/assets/lcd/1.asset") in _delta(out)
 
 
 def test_the_set_is_rewritten_whole_not_merged(card, tmp_path):
@@ -481,3 +650,24 @@ def test_overrides_sh_refuses_anything_that_is_not_a_set():
     # finds inside it, and one with no card path to land on fails the run.
     assert "STAMP=$PAD_HOME/override.src" in body
     assert "STAGE=$PAD_HOME/override" in body
+    assert "GENF=$PAD_HOME/override.gen" in body
+
+
+def test_overrides_sh_stages_a_delta_rather_than_the_set():
+    body = (RIG / "overrides.sh").read_text(encoding="utf-8", errors="replace")
+    # Only onto the generation the set was patched out of...
+    assert 'sed -n \'s/^parent //p\'' in body
+    assert '[ "$held" = "$par" ] || return 1' in body
+    # ...and in bytes, not blocks: these are offsets into a multi-GB file.
+    assert "iflag=skip_bytes,count_bytes oflag=seek_bytes" in body
+    assert "conv=notrunc" in body
+    # A full copy still has to leave a generation behind, or every build
+    # after one would be a full copy too.
+    assert body.index("cp -rL") < body.rindex('> "$GENF"')
+
+
+def test_run_game_never_binds_the_two_bookkeeping_files():
+    """Neither has a card path to land on, so binding one fails the run."""
+    body = (RIG / "run_game.sh").read_text(encoding="utf-8", errors="replace")
+    assert "! -name overrides.json" in body
+    assert "! -name overrides.delta" in body

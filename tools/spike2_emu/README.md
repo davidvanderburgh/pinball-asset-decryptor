@@ -50,6 +50,22 @@ a fresh build invalidates it. The set for that same edit is 1.4 GB written in
 **9 seconds** (measured, jurassic_park_le 1.16.0), and the stock card's cache
 stays valid because the stock card was never touched.
 
+**And a second edit costs neither.** PAD builds each set by patching the one
+before it — the card's own bytes back over what the last build wrote, then this
+build's writes on top — and writes down what that changed in `overrides.delta`
+beside the manifest: a `generation`, the `parent` it was patched out of, and
+either a byte range or `whole` per file. `overrides.sh` keeps the generation it
+staged in `$PAD_HOME/override.gen`; when that is the parent of the set it is
+handed, it `dd`s those ranges onto the stage instead of copying the set again.
+Change one callout and press Start and nothing copies a 1.4 GB `image.bin`:
+not the app, and not this rig across 9p.
+
+Everything about the delta path is fail-to-the-copy. No delta, a stage of some
+other generation, a file the delta names that the stage has not got, a `dd`
+that fails, a staged file that ends up the wrong size — each of them falls back
+to staging the set whole, because a stage that is part one build and part
+another is a run that plays a sound the user has already taken back.
+
 The set names the card it was built from. A file in it that the booted card
 does not have **fails the run** rather than being skipped: it means the set was
 built against a different card, and half of one build over half of another is

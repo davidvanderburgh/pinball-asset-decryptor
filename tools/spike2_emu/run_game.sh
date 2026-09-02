@@ -433,6 +433,7 @@ if [ -n "$OVERRIDE_SRC" ]; then
     ovr_bad=""
     OLDIFS=$IFS; IFS=$'\n'
     for rel in $(cd "$OVERRIDE_SRC" && find . -type f ! -name overrides.json \
+                                            ! -name overrides.delta \
                                             -printf '%P\n' | LC_ALL=C sort); do
         if [ ! -f "$R/games/$rel" ]; then
             ovr_bad="$rel"; break

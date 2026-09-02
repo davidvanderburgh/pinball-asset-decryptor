@@ -54,9 +54,33 @@ images.conf - never inside media/, never in the media budget, never opened by th
 `inspect` reads both back; a card written by an older version (no sidecars) degrades to nulls
 and a warning rather than an error.
 
+GAME CODE VERSIONS (item 90, the same-version gate).  plan / build / verify / inspect all print
+a VERSION table - one line per image: index, device, title directory, game code version, where
+that answer came from and the node board firmware set.  `build` REFUSES a card whose images are
+not the same game code unless --allow-version-mismatch is given; the refusal itself is the loud
+warning, and it says what the difference costs (VERSION_COST below).  The version is read off
+each image, never guessed from a file name, from up to three places that are cross-checked:
+  sidx  /spk/index/<pkg>-<M_mm_p>.sidx - Stern's own package name ('turtles_pro-1_59_0.sidx'),
+        all three components, and what the code updater speaks.  The AUTHORITY.  (A bare
+        '<pkg>.sidx' symlink sits beside it on some cards; it names no version and is skipped.)
+  ELF   the game's per-build identity record: a run of pointers to the game code, the model
+        name(s), the RELEASE DATE and (on most builds) the title directory, followed by the
+        version as a uint16 - high byte major, low byte minor.  MAJOR.MINOR only: turtles_le
+        1.58.1 and turtles_pro 1.58.0 both hold 0x013a.  The CROSS-CHECK: located on 46 of the
+        46 cards in David's library, agreeing with the .sidx name on 45 (dungeons_and_dragons_le
+        1.00.0's record says 0.01 - a real disagreement, reported, never silently resolved).
+  hex   the title directory's node board firmware ('*-1_33_0.hex' on TMNT 1.59, '*-1_19_0.hex'
+        on 1.58).  A DIFFERENT number from the game code version, so it is reported on its own
+        line and never used as one - but it is the one difference that needs a service call:
+        the machine records the running build's node firmware version at every boot, so images
+        with different sets can reflash the node boards on every swap.
+  NVM   /data's nv/<title>/NVM would carry the machine's own record - but /data is empty on
+        every one of the 49 cards checked (it is written on the machine, not by the factory),
+        so nothing here depends on it.
+
 Run under WSL/Linux (needs debugfs, e2fsck, mke2fs, sfdisk, fdisk from e2fsprogs/util-linux);
-the pure-python parts (layout, MBR/EBR bytes, hook, images.conf, media checks) are tested on
-Windows.
+the pure-python parts (layout, MBR/EBR bytes, hook, images.conf, media checks, the version
+record decoder) are tested on Windows.
 
   mkmulticard.py plan        --primary P --extra E [--extra E2 ...] [--layout L] [--allow-unreachable]
         print the layout, byte totals and whether it fits Stern's 16G / 32G sizes; writes nothing
@@ -64,6 +88,7 @@ Windows.
         regenerate IMG's own MBR entries + EBR chain with this writer and byte-compare them
   mkmulticard.py build       --primary P --extra E [...] --out OUT --selector-dir DIR
                              [--layout auto|parts|multi] [--media-dir DIR] [--bypass-validation]
+                             [--allow-version-mismatch]
                              [--titles "T0;T1;..."] [--subtitles "S0;S1;..."] [--timeout N]
                              [--default N] [--volume V] [--mixer-volume M] [--conf FILE]
                              [--no-inject] [--dd] [--force] [--workdir DIR] [--allow-unreachable]
@@ -143,7 +168,8 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 
 #: This tool's own version, stamped into build.json so a card says what wrote it.  Bump it when
 #: the sidecar's SHAPE changes; a reader must accept an older (or missing) one.
-VERSION = "1.0"
+#: 1.1 added each image's "title_dir" / "version" / "node_fw_version" (item 90's version gate).
+VERSION = "1.1"
 
 SECTOR = 512
 HEADS, SPT = 4, 32          # geometry the stock CHS bytes decode with (p1: 64/0/1 .. 191/3/32)
@@ -219,6 +245,31 @@ MULTI_FEATURES = ("has_journal,ext_attr,resize_inode,dir_index,filetype,extent,f
 MULTI_SLACK = 0.10                            # size = used * (1 + slack) + headroom, MiB-rounded
 MULTI_HEADROOM = 256 << 20
 LAYOUTS = ("auto", "parts", "multi")
+
+# ---- game code versions (item 90: the same-version gate) -----------------------------------
+#: A games tree's package manifest, '/spk/index/<pkg>-<M_mm_p>.sidx' - Stern's own name for the
+#: build ('turtles_pro-1_59_0.sidx').  A card may carry a bare '<pkg>.sidx' SYMLINK beside it;
+#: only the regular file names a version, so the symlink is skipped.
+SIDX_NAME_RE = re.compile(r"^(?P<pkg>[A-Za-z0-9_.+-]+?)-(?P<ver>\d+_\d+_\d+)\.sidx$")
+#: A node board firmware image in the title directory: 'coil4node-LPC1313-1_33_0.hex'.  Every
+#: hex in one tree carries the same <M_mm_p>; that number is what the machine records per boot.
+NODE_FW_RE = re.compile(r"^(?P<base>.+)-(?P<ver>\d+_\d+_\d+)\.hex$", re.I)
+#: The per-build identity record in the game ELF's data segment: a run of consecutive pointers
+#: to short printable strings (the game code, the model name(s), the RELEASE DATE and, on most
+#: builds, the title directory) followed by the version as a uint16 - high byte major, low byte
+#: minor, exactly what the firmware's own '%c%d.%02d.%d' banner prints.  There is no third
+#: (patch) component in this record: turtles_le 1.58.1 and turtles_pro 1.58.0 both hold 0x013a.
+#: Verified against all 46 cards in David's library (see the module docstring's VERSIONS note).
+IDENT_MONTH = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
+IDENT_DATE_RE = re.compile((r"^" + IDENT_MONTH + r"[a-z]*\.?\s{1,2}\d{1,2},?\s\d{4}$").encode(), re.I)
+IDENT_MAX_STR = 80                            # a longer "string" is not one of this record's
+IDENT_MAX_VER = 0x6400                        # major <= 99...
+IDENT_MAX_MINOR = 99                          # ...and minor <= 99, so 0x4cf0 (a pointer) is out
+IDENT_MIN_RUN = 2                             # a lone pointer is a table entry, not this record
+#: The record sat in the LAST PT_LOAD on all 46 cards measured.  A build that put it elsewhere
+#: falls back to scanning the whole file - but only for a game ELF small enough that the scan
+#: costs seconds; the biggest in the library is rush_le's 190 MB, and a tool must not hang.
+IDENT_FULL_SCAN_MAX = 32 << 20
 
 
 class Refused(Exception):
@@ -1587,21 +1638,25 @@ def conf_for_plan(plan, args, existing=None, media=None):
 
 
 # ============================================================================= the JSON sidecars
-def build_manifest(plan, conf, sources=None, existing=None, written=None):
-    """build.json: what the card's menu says, plus WHERE each image came from - the provenance a
-    reload needs and images.conf cannot hold.  Pure.
+def build_manifest(plan, conf, sources=None, existing=None, written=None, versions=None):
+    """build.json: what the card's menu says, plus WHERE each image came from and WHAT GAME CODE
+    it was - the provenance a reload needs and images.conf cannot hold.  Pure.
 
     plan      the card's Plan (for the layout), or None
     conf      the images.conf about to be written, PARSED (parse_images_conf)
     sources   the build's --primary/--extra in image order; an empty or missing entry falls
               back to `existing`
-    existing  the build.json already on the card - its sources are carried through BY DEVICE,
-              so an inject that is given no source paths never loses provenance
+    existing  the build.json already on the card - its sources AND its recorded versions are
+              carried through BY DEVICE, so an inject never loses provenance
+    versions  :func:`plan_identities`' records in image order (title dir + game code version):
+              what the card was BUILT from.  `inspect` re-reads the live truth off the card, so
+              this is a record of the build, not an oracle
     """
     prev = {}
     for im in (existing or {}).get("images") or []:
         if isinstance(im, dict) and im.get("device"):
-            prev[im["device"]] = im.get("source")
+            prev[im["device"]] = im
+    vers = {v["device"]: v for v in (versions or []) if v.get("device")}
     sources = list(sources or [])
     rows = []
     for i, (dev, title, sub) in enumerate(conf["images"]):
@@ -1609,10 +1664,15 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None):
         given = sources[i] if i < len(sources) else None
         # only a freshly given path is absolutised; a carried one is already absolute and may
         # be spelled for another OS (a /mnt/d path read on Windows must not be mangled)
-        src = os.path.abspath(given) if given else prev.get(dev)
+        old = prev.get(dev) or {}
+        src = os.path.abspath(given) if given else old.get("source")
+        v = vers.get(dev) or {}
         rows.append(collections.OrderedDict([
             ("device", dev), ("source", src or None), ("title", title), ("subtitle", sub),
-            ("art", art or None), ("anim", anim or None), ("music", music or None)]))
+            ("art", art or None), ("anim", anim or None), ("music", music or None),
+            ("title_dir", v.get("title") or old.get("title_dir")),
+            ("version", v.get("version") or old.get("version")),
+            ("node_fw_version", v.get("node_fw_version") or old.get("node_fw_version"))]))
     return collections.OrderedDict([
         ("tool", "mkmulticard"),
         ("version", VERSION),
@@ -1628,14 +1688,14 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None):
 
 
 def selector_manifests(plan, conf_text, media_dir=None, sources=None, existing_build=None,
-                       existing_media=None, written=None):
+                       existing_media=None, written=None, versions=None):
     """The JSON sidecars to stage beside images.conf -> OrderedDict {name: text or bytes}.
     build.json is always written (from `conf_text` + `sources`, carrying `existing_build`'s
     sources through); media.json is --media-dir's file verbatim when one was given, else the
     card's own `existing_media` bytes carried through unchanged, else absent."""
     out = collections.OrderedDict()
     out[BUILD_MANIFEST] = json.dumps(
-        build_manifest(plan, parse_images_conf(conf_text), sources, existing_build, written),
+        build_manifest(plan, parse_images_conf(conf_text), sources, existing_build, written, versions),
         indent=1) + "\n"
     if media_dir:
         with open(os.path.join(media_dir, MEDIA_MANIFEST), "rb") as f:
@@ -1694,7 +1754,7 @@ def multi_subdirs_on(card, part_num=7):
     numerically ordered, or [] when that partition is a plain games tree / not there / not ext4.
     Pure python (the ext4 reader), so a card is recognised on Windows too."""
     try:
-        _vp, _sx, ext4 = _stern_plugins()
+        _vp, _sx, ext4, _adj = _stern_plugins()
         off, size = part_range(card, part_num)
         with open(card, "rb") as f:
             r = ext4.Ext4Reader(f, off, size)
@@ -1804,24 +1864,27 @@ def build_multi_partition(plan, workdir=None):
 
 # ============================================================================= the validator bypass
 def _stern_plugins():
-    """(valpatch, sidx, ext4) - the app's own Stern modules, imported when first needed."""
+    """(valpatch, sidx, ext4, adjustments) - the app's own Stern modules, imported when first
+    needed.  `adjustments` is here for its PT_LOAD parser alone: the game ELF's identity record
+    is located exactly the way that module locates the adjustment table, so the two share one
+    program-header reader rather than growing a second copy."""
     try:
-        from pinball_decryptor.plugins.stern import valpatch, sidx, ext4
+        from pinball_decryptor.plugins.stern import valpatch, sidx, ext4, adjustments
     except ImportError:
         if REPO_ROOT not in sys.path:
             sys.path.insert(0, REPO_ROOT)
         try:
-            from pinball_decryptor.plugins.stern import valpatch, sidx, ext4
+            from pinball_decryptor.plugins.stern import valpatch, sidx, ext4, adjustments
         except ImportError as e:
             raise Refused("the validator bypass needs the app's pinball_decryptor package "
                           "(looked beside %s): %s" % (REPO_ROOT, e))
-    return valpatch, sidx, ext4
+    return valpatch, sidx, ext4, adjustments
 
 
 def bypass_state(elf):
     """'bypassed' (the entry already holds bx lr), 'armed' (a live validator was located),
     'absent' (this build carries none) or 'unlocated' (it carries one we cannot pin)."""
-    valpatch, _s, _e = _stern_plugins()
+    valpatch, _s, _e, _adj = _stern_plugins()
     elf = bytes(elf)
     eoff = valpatch.find_validation_exec(elf)
     if eoff is not None:
@@ -1840,7 +1903,7 @@ def _dir_entries(reader, ino):
 
 def tree_root_inode(reader, subdir):
     """The inode of a games tree's root: 2, or the subdir's inode under it (multi layout)."""
-    _v, _s, ext4 = _stern_plugins()
+    _v, _s, ext4, _adj = _stern_plugins()
     if not subdir:
         return 2
     ents = _dir_entries(reader, 2)
@@ -1856,7 +1919,7 @@ def tree_game(reader, root_ino):
     """(title, game path relative to the tree root, inode number, inode) of the tree's game ELF:
     the title directory's game_real when it is an ARM ELF, else its game.  Refused when the tree
     has no title directory holding a game."""
-    _v, _s, ext4 = _stern_plugins()
+    _v, _s, ext4, _adj = _stern_plugins()
     for name, (c, t) in sorted(_dir_entries(reader, root_ino).items()):
         if name in ("lost+found", "spk"):
             continue
@@ -1891,7 +1954,7 @@ def compute_bypass_writes(reader, root_ino):
     compute_writes does for a whole partition - but rooted at `root_ino` so a multi layout's
     imgN tree patches ITS game and ITS manifest.  -> (state before, [(disk offset, bytes)],
     notes).  No writes when the state is not 'armed'."""
-    valpatch, sidx, _e = _stern_plugins()
+    valpatch, sidx, _e, _adj = _stern_plugins()
     title, gpath, gino, gnode = tree_game(reader, root_ino)
     elf = bytearray(reader.read_file_bytes(gnode))
     state = bypass_state(elf)
@@ -1943,18 +2006,456 @@ def card_trees(card, plan=None):
 
 def tree_state(card, part, subdir):
     """(bypass state, title, game path) of one tree on `card` - read-only."""
-    _v, _s, ext4 = _stern_plugins()
+    rec = read_tree(card, part, subdir)
+    return rec["bypass"], rec["title"], rec["game_path"]
+
+
+# ============================================================ game code versions (item 90)
+def version_text(ver):
+    """Stern's '1_59_0' (a .sidx / .hex name) -> '1.59.0'."""
+    return ver.replace("_", ".") if ver else None
+
+
+def game_identity(elf, title_dir=None):
+    """The game ELF's per-build identity record -> {"version", "raw", "strings", "date",
+    "name", "title_dir", "offset"} or None.  Reads bytes only; nothing is written.
+
+    HOW IT IS LOCATED (no fixed address, the same shape as :mod:`plugins.stern.adjustments`):
+    the record is a MAXIMAL run of consecutive 4-byte words that are pointers to short printable
+    C strings, immediately followed by the uint16 version.  The run always holds either the
+    build's RELEASE DATE or the title directory's name (usually both), which is what tells this
+    record apart from the many other pointer tables in .data.  Everything is derived from the
+    ELF's own program headers, so a build that moved the record is found anyway.
+    """
+    _v, _s, _e, adjustments = _stern_plugins()
+    segs = adjustments._load_segments(elf)
+    if not segs:
+        return None
+    want = (title_dir or "").encode()
+
+    def v2o(v):
+        for off, va, sz in segs:
+            if va <= v < va + sz:
+                return off + (v - va)
+        return None
+
+    def cstr(v):
+        o = v2o(v)
+        if o is None:
+            return None
+        end = elf.find(b"\x00", o, o + IDENT_MAX_STR)
+        if end <= o:
+            return None
+        s = elf[o:end]
+        return None if any(c < 0x20 or c > 0x7E for c in s) else s
+
+    # the record lives in the last PT_LOAD (the writable data segment) on every card measured;
+    # a build that put it elsewhere falls back to the whole file rather than going unread
+    scopes = [(segs[-1][0], segs[-1][0] + segs[-1][2])] if len(segs) > 1 else []
+    if not scopes or len(elf) <= IDENT_FULL_SCAN_MAX:
+        scopes.append((0, len(elf)))
+    best = None
+    for lo, hi in scopes:
+        run, run_at, o = [], lo, (lo + 3) & ~3
+        while o + 4 <= hi:
+            s = cstr(struct.unpack_from("<I", elf, o)[0])
+            if s is not None:
+                if not run:
+                    run_at = o
+                run.append(s)
+                o += 4
+                continue
+            if len(run) >= IDENT_MIN_RUN and o + 2 <= len(elf):
+                v = struct.unpack_from("<H", elf, o)[0]
+                dates = [x for x in run if IDENT_DATE_RE.match(x)]
+                named = bool(want) and want in run
+                if 0 < v < IDENT_MAX_VER and (v & 0xFF) <= IDENT_MAX_MINOR and (dates or named):
+                    score = (100 if named else 0) + (50 if dates else 0) + min(len(run), 8)
+                    if best is None or score > best[0]:
+                        best = (score, run_at, list(run), v, dates)
+            run, run_at = [], o
+            o += 4
+        if best is not None:
+            break
+    if best is None:
+        return None
+    _score, at, run, v, dates = best
+    texts = [x.decode("ascii") for x in run]
+    # the model name is the string just BEFORE the release date ('TMNT PRO', 'GODZILLA LE');
+    # with no date in the run (star_wars_le) it is the one before the title directory
+    stop = run.index(dates[-1]) if dates else (len(run) - 1 if want and run[-1] == want else len(run))
+    return collections.OrderedDict([
+        ("version", "%d.%02d" % (v >> 8, v & 0xFF)), ("raw", v), ("offset", at),
+        ("name", texts[stop - 1] if stop else texts[-1]),
+        ("date", dates[-1].decode("ascii") if dates else None),
+        ("title_dir", texts[-1] if want and run[-1] == want else None),
+        ("strings", texts)])
+
+
+def tree_dir_inode(reader, root_ino, *names):
+    """The inode number of `root/names...` when every step is a directory, else None."""
+    _v, _s, ext4, _adj = _stern_plugins()
+    ino = root_ino
+    for name in names:
+        ents = _dir_entries(reader, ino)
+        if name not in ents:
+            return None
+        ino = ents[name][0]
+        if (reader.read_inode(ino)["mode"] & ext4.S_IFMT) != ext4.S_IFDIR:
+            return None
+    return ino
+
+
+def tree_packages(reader, root_ino, title=None):
+    """[(file name, package, '1.59.0')] for every REGULAR /spk/index/<pkg>-<M_mm_p>.sidx in the
+    tree - Stern's own name for the build.  The bare '<pkg>.sidx' symlink beside it names no
+    version and is skipped, and so is anything that is not a .sidx.  A tree carrying more than
+    one puts the package named after the TITLE DIRECTORY first: that is the game's own."""
+    _v, _s, ext4, _adj = _stern_plugins()
+    ino = tree_dir_inode(reader, root_ino, "spk", "index")
+    out = []
+    for name, (child, _t) in (sorted(_dir_entries(reader, ino).items()) if ino else []):
+        m = SIDX_NAME_RE.match(name)
+        if not m:
+            continue
+        try:
+            node = reader.read_inode(child)
+        except Exception:
+            continue
+        if (node["mode"] & ext4.S_IFMT) == ext4.S_IFREG:
+            out.append((name, m.group("pkg"), version_text(m.group("ver"))))
+    return sorted(out, key=lambda r: r[1] != title)
+
+
+def tree_node_firmware(reader, root_ino, title_dir):
+    """(sorted .hex names, the one version they share or None) of the title directory's NODE
+    BOARD firmware.  This is the set the machine flashes into the node boards, and it is
+    recorded per boot: two images whose sets differ can reflash the boards on every swap."""
+    _v, _s, ext4, _adj = _stern_plugins()
+    ino = tree_dir_inode(reader, root_ino, title_dir) if title_dir else None
+    names, vers = [], set()
+    for name, (child, _t) in (sorted(_dir_entries(reader, ino).items()) if ino else []):
+        m = NODE_FW_RE.match(name)
+        if not m:
+            continue
+        try:
+            node = reader.read_inode(child)
+        except Exception:
+            continue
+        if (node["mode"] & ext4.S_IFMT) == ext4.S_IFREG:
+            names.append(name)
+            vers.add(version_text(m.group("ver")))
+    return sorted(names), (vers.pop() if len(vers) == 1 else None)
+
+
+def read_tree(card, part, subdir=None):
+    """Everything one games tree says about ITSELF, read-only and with no mounts: the title
+    directory, the game code version, where each answer came from, the node board firmware set
+    and the validator state.  -> an OrderedDict; :func:`tree_state` is the two-line view of it.
+
+    THE SOURCES, most reliable first (a disagreement between the first two is reported, never
+    silently resolved - it is exactly the kind of thing that means a card was hand-assembled):
+      sidx  /spk/index/<pkg>-<M_mm_p>.sidx, Stern's own package name for the build.  It carries
+            all three components (1.59.0) and is what the code updater and the menu speak.
+      elf   the game ELF's build-identity record (:func:`game_identity`): major.minor only.
+      hex   the title directory's node firmware version - a different number (1.33.0 on TMNT
+            1.59), never the game code version, so it is reported but never used as one.
+    """
+    _v, _s, ext4, _adj = _stern_plugins()
     with open(card, "rb") as f:
         r = ext4.Ext4Reader(f, part.start * SECTOR, part.count * SECTOR)
         root = tree_root_inode(r, subdir)
-        title, gpath, _gi, gnode = tree_game(r, root)
-        return bypass_state(r.read_file_bytes(gnode)), title, gpath
+        title, gpath, _gino, gnode = tree_game(r, root)
+        elf = r.read_file_bytes(gnode)                    # one read: the version AND the state
+        pkgs = tree_packages(r, root, title)
+        fw, fwver = tree_node_firmware(r, root, title)
+    ident = game_identity(elf, title)
+    notes = []
+    sidx_name, package, sidx_ver = pkgs[0] if pkgs else (None, None, None)
+    if len(pkgs) > 1:
+        notes.append("this tree carries %d .sidx packages (%s); %s is used, as the one named "
+                     "after the title directory"
+                     % (len(pkgs), ", ".join(n for (n, _p, _v) in pkgs), sidx_name))
+    elf_ver = ident["version"] if ident else None
+    # compare the NUMBERS, not the text: the ELF holds major.minor as two bytes and the package
+    # name spells them however Stern spelled them ('1_00_0' would never prefix-match '0.01')
+    if ident and _version_pair(sidx_ver) not in (None, (ident["raw"] >> 8, ident["raw"] & 0xFF)):
+        notes.append("the package name says %s but the game ELF's own build record says %s - "
+                     "these two DISAGREE, and the package name is the one the machine installs by"
+                     % (sidx_ver, elf_ver))
+    if sidx_ver and elf_ver:
+        source = "spk index + game ELF"
+    elif sidx_ver:
+        source = "spk index"
+        notes.append("the game ELF carries no build-identity record this tool can locate; the "
+                     "version is the .sidx package name alone")
+    elif elf_ver:
+        source = "game ELF"
+        notes.append("this tree has no /spk/index/<pkg>-<M_mm_p>.sidx; the version is the game "
+                     "ELF's build record alone, which carries no third component")
+    else:
+        source = None
+        notes.append("neither a .sidx package name nor a game ELF build record could be read: "
+                     "this tree's game code version is UNKNOWN")
+    try:
+        state = bypass_state(elf)
+    except Exception as e:                                # a report never dies on one odd ELF
+        state = "error"
+        notes.append("the validator locator could not read %s (%s: %s)"
+                     % (gpath, type(e).__name__, e))
+    return collections.OrderedDict([
+        ("device", device_name(part.num, subdir)), ("title", title), ("game_path", gpath),
+        ("version", sidx_ver or elf_ver), ("version_source", source),
+        ("package", package), ("sidx", sidx_name), ("sidx_version", sidx_ver),
+        ("elf_version", elf_ver), ("elf_name", ident["name"] if ident else None),
+        ("elf_date", ident["date"] if ident else None),
+        ("node_fw", fw), ("node_fw_version", fwver), ("node_fw_digest", _fw_digest(fw)),
+        ("bypass", state), ("notes", notes)])
+
+
+def _version_pair(text):
+    """'1.59.0' -> (1, 59), the two components the game ELF's record carries; None when the
+    text is missing or not a version."""
+    try:
+        a, b = text.split(".")[:2]
+        return int(a), int(b)
+    except (AttributeError, ValueError):
+        return None
+
+
+def _fw_digest(names):
+    """A short stable digest of a node firmware SET, so a JSON reader can compare two images
+    without carrying twenty file names (the names are carried too; this is the cheap key)."""
+    return hashlib.md5("\n".join(sorted(names)).encode("utf-8")).hexdigest()[:12] if names else None
+
+
+def source_part(path, num=3):
+    """The Part of one SOURCE image's games partition - what `plan` and `build` must read
+    versions from, since the card does not exist yet."""
+    t, st, cnt = Geometry.from_file(path).part(num)
+    return Part(num, t, st, cnt, path, st, None)
+
+
+def plan_identities(plan, progress=say):
+    """One :func:`read_tree` record per image, read from the SOURCE images - so `plan` and
+    `build` can refuse before a byte is written.  A tree that cannot be read becomes a record
+    with version None and the reason in its notes; nothing here raises."""
+    out = []
+    for i, (dev, path) in enumerate(zip(plan.devices(), [plan.primary] + list(plan.extras))):
+        rec = collections.OrderedDict([("index", i), ("device", dev), ("source", path)])
+        try:
+            rec.update(read_tree(path, source_part(path)))
+        except Exception as e:                            # a version read never breaks a build
+            rec.update(_unread_tree(dev, "%s could not be read (%s: %s)"
+                                    % (path, type(e).__name__, e)))
+        rec["device"] = dev                               # the card's device, not the source's
+        out.append(rec)
+        if progress:
+            progress("image %d %s: %s %s (%s)" % (i, dev, rec["title"], rec["version"], rec["version_source"]))
+    return out
+
+
+def card_identities(card, plan=None, progress=None):
+    """One :func:`read_tree` record per games tree ON the card (what verify and inspect report)."""
+    out = []
+    for i, part, sub in card_trees(card, plan):
+        dev = device_name(part.num, sub)
+        rec = collections.OrderedDict([("index", i), ("device", dev), ("source", card)])
+        try:
+            rec.update(read_tree(card, part, sub))
+        except Exception as e:                            # a version read never breaks a verify
+            rec.update(_unread_tree(dev, "this tree could not be read (%s: %s)"
+                                    % (type(e).__name__, e)))
+        rec["device"] = dev
+        out.append(rec)
+        if progress:
+            progress("image %d %s: %s %s (%s)" % (i, dev, rec["title"], rec["version"], rec["version_source"]))
+    return out
+
+
+def _unread_tree(dev, why):
+    """The record of a tree that could not be read: everything unknown, the reason kept."""
+    return collections.OrderedDict([
+        ("device", dev), ("title", None), ("game_path", None), ("version", None),
+        ("version_source", None), ("package", None), ("sidx", None), ("sidx_version", None),
+        ("elf_version", None), ("elf_name", None), ("elf_date", None),
+        ("node_fw", []), ("node_fw_version", None), ("node_fw_digest", None),
+        ("bypass", "error"), ("notes", [why])])
+
+
+def _distinct(recs, key):
+    """The distinct non-None values of `key`, in image order."""
+    seen = []
+    for r in recs:
+        v = r.get(key)
+        if v is not None and v not in seen:
+            seen.append(v)
+    return seen
+
+
+def version_findings(recs):
+    """What the version table found -> OrderedDict of PLAIN-ENGLISH sentences (or None).
+
+    title_mismatch     the images are not even the same game - the larger warning
+    version_mismatch   the umbrella 'these images are not the same game code' sentence: it
+                       names the title difference when there is one, so a reader that shows
+                       only this key never misses the louder problem
+    node_fw_mismatch   the images ship different NODE BOARD firmware sets - the one failure
+                       here that needs service, and it can happen with matching versions
+    unknown_version    a tree whose version could not be read at all
+    version_only       the version sentence WITHOUT the title one folded in, so the refusal can
+                       put the two on their own lines; readers want version_mismatch
+    """
+    # only trees that were actually READ can disagree; one that could not be read is its own
+    # finding (unknown_version) and never fabricates a mismatch
+    known = [r for r in recs if r.get("title") is not None]
+    titles, versions = _distinct(known, "title"), _distinct(known, "version")
+    known = [dict(r, node_fw_label=_fw_label(r)) for r in known]
+    fws = _distinct(known, "node_fw_label")
+    unread = [r for r in recs if r.get("version") is None]
+    title_bad = version_bad = fw_bad = unknown = None
+    if len(titles) > 1:
+        title_bad = ("this card mixes DIFFERENT TITLES (%s): %s. Nothing carries between them - "
+                     "settings, audits and high scores are stored per title - and each title "
+                     "wants its own node boards, coils and switch table."
+                     % (", ".join(titles), _image_list(known, "title")))
+    if len(versions) > 1:
+        version_bad = ("the images do not all run the same GAME CODE VERSION (%s): %s."
+                       % (", ".join(versions), _image_list(known, "version")))
+    version_only = version_bad
+    if title_bad:
+        version_bad = title_bad if not version_bad else title_bad + " " + version_bad
+    if len(fws) > 1:
+        fw_bad = ("the images ship DIFFERENT NODE BOARD FIRMWARE: %s. %s The machine records the "
+                  "running build's node firmware version at every boot, so swapping between "
+                  "these images can reflash the node boards on every swap."
+                  % (_image_list(known, "node_fw_label"), _fw_diff(known)))
+    if unread:
+        unknown = ("%d image(s) did not say what game code they run: %s."
+                   % (len(unread), "; ".join("image %d (%s)" % (r["index"], "; ".join(r["notes"]))
+                                             for r in unread)))
+    return collections.OrderedDict([("title_mismatch", title_bad), ("version_mismatch", version_bad),
+                                    ("node_fw_mismatch", fw_bad), ("unknown_version", unknown),
+                                    ("version_only", version_only)])
+
+
+def _fw_label(rec):
+    """What to CALL one image's node firmware set: its shared version, 'no node firmware' when
+    the title directory carries none, or the set's digest when the files disagree among
+    themselves - never 'unknown', which would read as 'we did not look'."""
+    if rec.get("node_fw_version"):
+        return rec["node_fw_version"]
+    return ("mixed set " + rec["node_fw_digest"]) if rec.get("node_fw") else "no node firmware"
+
+
+def _image_list(recs, key, fallback=None):
+    """'image 0 = 1.59.0, image 1 = 1.58.0' for a findings sentence."""
+    return ", ".join("image %d = %s" % (r["index"], r.get(key) or (r.get(fallback) if fallback else None) or "unknown")
+                     for r in recs)
+
+
+def _fw_diff(recs, limit=6):
+    """'images 0, 1 carry a.hex, b.hex; image 2 carries c.hex' - WHICH node firmware files
+    differ, so the reader is told what is about to be reflashed rather than that something is.
+    Images that ship the SAME set are named together: on a three-image card two of them usually
+    agree, and calling either one's files 'only its own' would be a lie."""
+    common = set.intersection(*[set(r["node_fw"]) for r in recs]) if recs else set()
+    groups = collections.OrderedDict()
+    for r in recs:
+        groups.setdefault(tuple(sorted(r["node_fw"])), []).append(r["index"])
+    parts = []
+    for names, idx in groups.items():
+        only = sorted(set(names) - common)
+        if not only:
+            continue
+        parts.append("image%s %s carr%s %s%s"
+                     % ("s" if len(idx) > 1 else "", ", ".join(str(i) for i in idx),
+                        "y" if len(idx) > 1 else "ies", ", ".join(only[:limit]),
+                        " and %d more" % (len(only) - limit) if len(only) > limit else ""))
+    return ("; ".join(parts) + ".") if parts else "(the file names match; only their versions differ.)"
+
+
+def print_version_table(recs, findings=None):
+    """The VERSION table plan / build / verify / inspect all print - one line per image."""
+    print("== game code versions")
+    print("%-3s %-22s %-24s %-9s %-22s %s" % ("idx", "device", "title", "version", "read from", "node firmware"))
+    for r in recs:
+        fw = "%s (%d hex)" % (r["node_fw_version"] or "mixed", len(r["node_fw"])) if r["node_fw"] else "none"
+        print("%-3d %-22s %-24s %-9s %-22s %s"
+              % (r["index"], r["device"], r["title"] or "?", r["version"] or "UNKNOWN",
+                 r["version_source"] or "-", fw))
+        for note in r["notes"]:
+            print("    NOTE image %d: %s" % (r["index"], note))
+    found = version_findings(recs) if findings is None else findings
+    for key in ("version_mismatch", "node_fw_mismatch", "unknown_version"):
+        if found.get(key):                    # title_mismatch is folded into version_mismatch
+            print("WARNING: %s" % found[key])
+
+
+#: What a version difference actually costs, in the operator's own terms.  Measured on a TMNT
+#: 1.59 -> 1.58 -> 1.59 round trip (memory: reference_spike2_settings_are_caption_keyed): the
+#: board NVRAM keys every setting by the SHA1 of its MENU CAPTION, so 11 of 11 settings survived
+#: the trip even though 202 of the 228 shared captions were renumbered between the builds.
+VERSION_COST = """\
+Two builds of the SAME title do share a machine's settings, audits and scores: those live in the
+node board's NVRAM keyed by the SHA1 of each setting's MENU CAPTION, not by its number, so a
+caption both builds spell the same way carries over untouched (11 of 11 measured across a TMNT
+1.59 -> 1.58 -> 1.59 round trip, with 202 of the 228 shared captions renumbered in between).
+
+What a version difference DOES cost is narrower, and all of it is real:
+  * a setting only ONE build has falls back to that build's compiled default whenever you boot
+    the other one (43 settings of TMNT 1.59 and 13 of 1.58 on that measured pair);
+  * a setting Stern RENAMED between the builds REVERTS - the new caption hashes to a slot that
+    has never been written (3 on that pair);
+  * the store keeps only THREE generations, so two boots of the other build erase a
+    build-exclusive value for good.
+
+And the part that needs a service call rather than a settings pass: each image ships its OWN
+NODE BOARD FIRMWARE, and the machine records the running build's node firmware version at every
+boot - so a card whose images disagree can REFLASH the node boards on every single swap.
+
+THE FIX is to give every image on the card the same game code version.  Same title AND same
+version costs nothing at all - a re-skin of a build, paired with that same build, differs only
+in its artwork and shares every setting the machine holds."""
+
+
+def report_versions(recs, allow=False):
+    """Print the VERSION table and apply the gate -> the findings; raises Refused when the images
+    are not the same game code and `allow` is not set.  The table always comes out FIRST, and its
+    per-finding WARNING lines are left out when the refusal is about to say the same thing at
+    length - the reader should meet each sentence once."""
+    try:
+        found = check_versions(recs, allow)
+    except Refused:
+        print_version_table(recs, {"unknown_version": version_findings(recs)["unknown_version"]})
+        raise
+    print_version_table(recs, found)
+    return found
+
+
+def check_versions(recs, allow=False, flag="--allow-version-mismatch"):
+    """Refuse a card whose images are not the same game code, unless `allow`.  A refusal you can
+    override IS the loud warning, so the message says what it costs and how to fix it.  ->
+    the findings (so the caller can report them); raises Refused when it will not proceed."""
+    findings = version_findings(recs)
+    # one paragraph each, loudest first: a different TITLE, then a different VERSION, then a
+    # different NODE FIRMWARE set (which can be the only difference)
+    bad = [findings[k] for k in ("title_mismatch", "version_only", "node_fw_mismatch") if findings[k]]
+    if not bad or allow:
+        return findings
+    rows = "\n".join(
+        "  image %-2d %-22s %-22s game code %-9s node firmware %s"
+        % (r["index"], r["device"], r["title"] or "?", r["version"] or "UNKNOWN",
+           _fw_label(r))
+        for r in recs)
+    raise Refused("%s\n\n%s\n\n%s\n\nIf you know all of that and want this card anyway, pass %s."
+                  % ("\n\n".join(bad), rows, VERSION_COST, flag))
 
 
 def bypass_card(card, plan=None, dry_run=False):
     """Apply the validator bypass to every games tree on `card`, rewrite the sidecar of every
     partition written into, print one line per tree.  -> {index: state after}."""
-    _v, _s, ext4 = _stern_plugins()
+    _v, _s, ext4, _adj = _stern_plugins()
     plan = plan or plan_from_card(card)
     states = {}
     touched = []
@@ -2165,11 +2666,15 @@ def verify_card(card, plan, selector_dir=None, media_dir=None):
                   dirs and has_spk and links.get("game"))
         except Refused as e:
             check("image %d %s root" % (i, dev), False, str(e))
-        try:
-            state, title, gpath = tree_state(card, p, sub)
-            print("image %d %s bypass_status: %s (%s)" % (i, dev, state, gpath))
-        except Refused as e:
-            print("image %d %s bypass_status: unknown (%s)" % (i, dev, e))
+    # every games tree's game code version + node board firmware, read off the CARD (item 90):
+    # the same table plan and build print, so a finished card can be held to what it claims
+    recs = card_identities(card, plan)
+    for r in recs:
+        print("image %d %s bypass_status: %s (%s)"
+              % (r["index"], r["device"], r["bypass"], r["game_path"] or "; ".join(r["notes"])))
+    print_version_table(recs)
+    # a mismatch is REPORTED here, never a FAIL: a card built with --allow-version-mismatch is a
+    # card its owner chose, and verify's job is to say what is on it - build's is to refuse
     alloc = allocated_bytes(card)
     if alloc is not None:
         print("allocated %s of %s apparent (sparse)" % (_gb(alloc), _gb(os.path.getsize(card))))
@@ -2250,7 +2755,7 @@ def inspect_card(card, media_out=None):
     prev = {im["device"]: im for im in ((build or {}).get("images") or [])
             if isinstance(im, dict) and im.get("device")}
     mrows = (media_man or {}).get("images") or []
-    images = []
+    images, treerecs = [], []
     for i, (dev, title, subtitle) in enumerate(conf["images"]):
         art, anim, music = conf["media"][i] if i < len(conf["media"]) else ("", "", "")
         b = prev.get(dev) or {}
@@ -2260,22 +2765,38 @@ def inspect_card(card, media_out=None):
         if src and not exists:
             warnings.append("image %d: its source %s is not on this machine - the menu can still "
                             "be edited and re-injected, only a rebuild needs it" % (i, src))
-        state = title_dir = None
         if dev in trees:
             p, s = trees[dev]
             try:
-                st, title_dir, _gpath = tree_state(path, p, s)
-                state = "none" if st == "absent" else st
-            except Refused as e:
-                warnings.append("image %d (%s): its games tree could not be read (%s)" % (i, dev, e))
+                tree = read_tree(path, p, s)
+            except Exception as e:                        # ...nor an inspect
+                tree = _unread_tree(dev, "its games tree could not be read (%s: %s)"
+                                    % (type(e).__name__, e))
         else:
-            warnings.append("image %d: images.conf names %s but the card carries no such games tree" % (i, dev))
+            tree = _unread_tree(dev, "images.conf names %s but the card carries no such games "
+                                     "tree" % dev)
+        for note in tree["notes"]:
+            warnings.append("image %d (%s): %s" % (i, dev, note))
+        tree["index"] = i
+        treerecs.append(tree)
+        title_dir = tree["title"]
+        state = None if tree["bypass"] == "error" else ("none" if tree["bypass"] == "absent" else tree["bypass"])
         images.append(collections.OrderedDict([
             ("index", i), ("device", dev), ("title", title), ("subtitle", subtitle),
             ("art", art or None), ("anim", anim or None), ("music", music or None),
             ("art_source", m.get("art_source")), ("anim_source", m.get("anim_source")),
             ("source", src), ("source_exists", exists),
-            ("title_dir", title_dir), ("bypass", state)]))
+            ("title_dir", title_dir), ("bypass", state),
+            # what game code this image actually is, read off the card (item 90's version gate);
+            # 'built_version' is what build.json recorded when the card was written
+            ("version", tree.get("version")), ("version_source", tree.get("version_source")),
+            ("sidx", tree.get("sidx")), ("sidx_version", tree.get("sidx_version")),
+            ("elf_version", tree.get("elf_version")), ("elf_name", tree.get("elf_name")),
+            ("elf_date", tree.get("elf_date")),
+            ("node_fw", tree.get("node_fw") or []), ("node_fw_version", tree.get("node_fw_version")),
+            ("node_fw_digest", tree.get("node_fw_digest")),
+            ("built_version", b.get("version")), ("built_title_dir", b.get("title_dir"))]))
+    findings = version_findings(treerecs)
     media = []
     if isdir.get("media"):
         for _ino, _mode, _uid, _gid, name, msize in debugfs_ls(ref, MEDIA_DIR):
@@ -2321,6 +2842,12 @@ def inspect_card(card, media_out=None):
         ("has_media_json", media_json is not None), ("has_build_json", build is not None),
         ("build", None if build is None else collections.OrderedDict(
             [(k, build.get(k)) for k in ("tool", "version", "written")])),
+        # the version gate's answers, ready-made sentences so a GUI shows them without
+        # re-deriving anything (null when the images agree)
+        ("title_mismatch", findings["title_mismatch"]),
+        ("version_mismatch", findings["version_mismatch"]),
+        ("node_fw_mismatch", findings["node_fw_mismatch"]),
+        ("unknown_version", findings["unknown_version"]),
         ("selector", sel), ("warnings", warnings)])
 
 
@@ -2350,6 +2877,15 @@ def print_inspect(rep):
         print("           source=%s%s" % (im["source"], "" if im["source"] is None else
                                           (" (on this machine)" if im["source_exists"] else " (MISSING here)")))
         print("           title dir=%s  validator=%s" % (im["title_dir"], im["bypass"]))
+        print("           game code=%s (%s; sidx=%s, ELF=%s %s)  node firmware=%s (%d hex)"
+              % (im["version"] or "UNKNOWN", im["version_source"] or "-", im["sidx_version"],
+                 im["elf_version"], im["elf_date"], im["node_fw_version"] or "-", len(im["node_fw"])))
+        if im["built_version"] and im["built_version"] != im["version"]:
+            print("           BUILT FROM %s per build.json - the tree on this card says %s"
+                  % (im["built_version"], im["version"]))
+    for key in ("version_mismatch", "node_fw_mismatch", "unknown_version"):
+        if rep.get(key):
+            print("VERSION WARNING: %s" % rep[key])
     print("media      %d file(s), %d KB of the %d KB budget"
           % (len(rep["media"]), sum(m["bytes"] for m in rep["media"]) >> 10, MEDIA_BUDGET >> 10))
     for m in rep["media"]:
@@ -2429,10 +2965,17 @@ def _mkext(path, kib, files, links=()):
         shutil.rmtree(stage, ignore_errors=True)
 
 
-def make_synthetic_card(path, tag, seed, with_fs=False):
+def make_synthetic_card(path, tag, seed, with_fs=False, title=None, version=None, node_fw=None):
     """A stock-shaped card, 10 MiB: p1@8192x2048 p2@10240x2048 p3@12288x2046 ext@14336 p5@16384x2046
     EBR2@18430 p6@18432x2046.  with_fs=False: random payloads (pure python, for the tests);
-    with_fs=True: real ext4 with a stand-in game script in p2 and a title dir + game link in p3."""
+    with_fs=True: real ext4 with a stand-in game script in p2 and a title dir + game link in p3.
+
+    `title` names the games tree's title directory (default '<tag>_title').  `version` ('1_59_0')
+    and `node_fw` ('1_33_0') give that tree a real GAME CODE VERSION to read: the /spk/index
+    manifest is named '<title>-<version>.sidx', the title directory gets '<node>-<fw>.hex' node
+    firmware files, and its `game` becomes a :func:`synth_game_elf` carrying the same version.
+    Without them the tree keeps the older shape (an unversioned .sidx, a text `game`) - which is
+    itself worth a card: it is what "this tree's version is UNKNOWN" looks like."""
     import random
     rnd = random.Random(seed)
     d = os.path.dirname(os.path.abspath(path))
@@ -2459,13 +3002,19 @@ def make_synthetic_card(path, tag, seed, with_fs=False):
             elif n == 3:
                 # a stock games root in miniature: spk/, the title dir (game, conagent, data/),
                 # and the three symlinks the machine boots through
-                _mkext(p, cnt * SECTOR // 1024,
-                       {"/%s_title/game" % tag: ("%s p3 game\n" % tag).encode(),
-                        "/%s_title/conagent" % tag: ("%s p3 conagent\n" % tag).encode(),
-                        "/%s_title/data/marker" % tag: ("%s p3 data\n" % tag).encode(),
-                        "/spk/index/%s_title.sidx" % tag: b"not a manifest\n"},
-                       links=[("/game", "%s_title/game" % tag), ("/conagent", "%s_title/conagent" % tag),
-                              ("/data", "%s_title/data" % tag)])
+                td = title or ("%s_title" % tag)
+                files = {"/%s/game" % td: (synth_game_elf(td, version_text(version) or "1.59.0",
+                                                          model="%s MODEL" % tag)
+                                           if version else ("%s p3 game\n" % tag).encode()),
+                         "/%s/conagent" % td: ("%s p3 conagent\n" % tag).encode(),
+                         "/%s/data/marker" % td: ("%s p3 data\n" % tag).encode(),
+                         "/spk/index/%s%s.sidx" % (td, "-" + version if version else ""): b"not a manifest\n"}
+                for node in ("pinnode-LPC1313", "coil4node-LPC1313", "lcdnode-LPC1113_302"):
+                    if node_fw:
+                        files["/%s/%s-%s.hex" % (td, node, node_fw)] = (":00000001FF\n").encode()
+                _mkext(p, cnt * SECTOR // 1024, files,
+                       links=[("/game", "%s/game" % td), ("/conagent", "%s/conagent" % td),
+                              ("/data", "%s/data" % td)])
             else:
                 _mkext(p, cnt * SECTOR // 1024, {"/MARKER": ("%s p%d\n" % (tag, n)).encode()})
             with open(p, "rb") as f:
@@ -2500,6 +3049,49 @@ def make_synthetic_card(path, tag, seed, with_fs=False):
             o.seek(st * SECTOR)
             o.write(payload[n])
     return path
+
+
+def synth_game_elf(title_dir="turtles_pro", version="1.59.0", model="TMNT PRO", code="TMT",
+                   date="AUGUST 25, 2019", extra_names=(), with_title=True, hi=0):
+    """A tiny 32-bit little-endian ARM ELF carrying ONE build-identity record, exactly the shape
+    :func:`game_identity` reads off a real card: a .rodata segment of C strings and a .data
+    segment holding [code][model...][date][title dir] pointers followed by the uint16 version.
+
+    with_title=False builds the godzilla shape (no title-directory pointer in the record); `hi`
+    puts junk in the version word's high half (the james_bond shape, where the version really is
+    a uint16 and the word above it is another field).  Pure python - no card, no WSL."""
+    major, minor = (int(x) for x in version.split(".")[:2])
+    names = [code, model] + list(extra_names) + [date] + ([title_dir] if with_title else [])
+    ro, offs = bytearray(), []
+    for s in names:
+        offs.append(len(ro))
+        ro += s.encode("ascii") + b"\x00"
+        ro += b"\x00" * (-len(ro) % 4)
+    ehsize, phentsize, shentsize = 0x34, 32, 40
+    text = b"\x00" * 16                                # empty enough that no locator matches it
+    text_off = ehsize + 2 * phentsize
+    ro_off = text_off + len(text)
+    ro_va = 0x8000 + ro_off
+    data = bytearray(b"\x00" * 16)                     # a run of non-pointers before the record
+    for o in offs:
+        data += struct.pack("<I", ro_va + o)
+    data += struct.pack("<HH", (major << 8) | minor, hi)
+    data += b"\x00" * 32
+    data_off = ro_off + len(ro)
+    data_va = 0x100000 + data_off
+    shstr = b"\x00.text\x00.shstrtab\x00"
+    shstr_off = data_off + len(data)
+    sh_off = shstr_off + len(shstr)
+    elf = bytearray(b"\x7fELF\x01\x01\x01" + b"\x00" * 9)
+    elf += struct.pack("<HHIIIIIHHHHHH", 2, 40, 1, ro_va, ehsize, sh_off, 0,
+                       ehsize, phentsize, 2, shentsize, 3, 2)
+    for off, va, blob in ((ro_off, ro_va, ro), (data_off, data_va, data)):
+        elf += struct.pack("<IIIIIIII", 1, off, va, va, len(blob), len(blob), 6, 4)
+    elf += text + ro + data + shstr
+    elf += struct.pack("<10I", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)                       # SHT_NULL
+    elf += struct.pack("<10I", 1, 1, 6, 0x8000, text_off, len(text), 0, 0, 4, 0)    # .text
+    elf += struct.pack("<10I", 7, 3, 0, 0, shstr_off, len(shstr), 0, 0, 1, 0)       # .shstrtab
+    return bytes(elf)
 
 
 def synth_png(path, w=4, h=3, rgb=(0xC0, 0x30, 0x40)):
@@ -2771,6 +3363,45 @@ def selftest(d, selector_file=None):
     ok &= [im["source"] for im in rep2["images"]] == [os.path.abspath(x) for x in (A, B, C)]
     ok &= [im["title_dir"] for im in rep2["images"]] == ["A_title", "B_title", "C_title"]
     ok &= rep2["has_build_json"] and not rep2["has_media_json"] and rep2["media"] == []
+    ok &= all(im["version"] is None for im in rep2["images"])          # no versioned .sidx here
+    ok &= rep2["title_mismatch"] and "DIFFERENT TITLES" in rep2["title_mismatch"]
+    ok &= rep2["unknown_version"] and "did not say what game code" in rep2["unknown_version"]
+    print("SELFTEST part 2 (multi layout)", "PASS" if ok else "FAIL")
+
+    # ------------------------------------------------- part 3: the same-version gate (item 90)
+    print("== the game code version gate")
+    V = [make_synthetic_card(os.path.join(d, "V%d.img" % i), "V%d" % i, 0x0D0D0D00 + i, with_fs=True,
+                             title="turtles_pro", version=v, node_fw=fw)
+         for i, (v, fw) in enumerate([("1_59_0", "1_33_0"), ("1_59_0", "1_33_0"), ("1_58_0", "1_19_0")])]
+    same = plan_identities(make_plan(V[0], [V[1]], "parts"), progress=None)
+    print_version_table(same)
+    ok &= [r["version"] for r in same] == ["1.59.0", "1.59.0"]
+    ok &= [r["version_source"] for r in same] == ["spk index + game ELF"] * 2
+    ok &= [r["node_fw_version"] for r in same] == ["1.33.0", "1.33.0"]
+    ok &= all(v is None for v in check_versions(same).values())        # same version: SILENT
+    diff = plan_identities(make_plan(V[0], [V[2]], "parts"), progress=None)
+    print_version_table(diff)
+    try:
+        check_versions(diff)
+        print("SELFTEST: a mismatched pair was accepted")
+        ok = False
+    except Refused as e:
+        ok &= "GAME CODE VERSION" in str(e) and "NODE BOARD FIRMWARE" in str(e)
+        ok &= "--allow-version-mismatch" in str(e) and "1.59.0" in str(e) and "1.58.0" in str(e)
+        print("refused, as it should be:\n%s" % e)
+    ok &= check_versions(diff, allow=True)["version_mismatch"] is not None
+    out3 = os.path.join(d, "versions.img")
+    args = ["build", "--primary", V[0], "--extra", V[2], "--out", out3, "--selector-dir", sel,
+            "--layout", "parts", "--force"]
+    ok &= main(args) == 2 and not os.path.exists(out3)         # refused BEFORE a byte was written
+    print("build refused and wrote nothing: %s" % (not os.path.exists(out3)))
+    ok &= main(args + ["--allow-version-mismatch"]) == 0 and os.path.isfile(out3)
+    rep3 = inspect_card(out3)
+    print_inspect(rep3)
+    ok &= [im["version"] for im in rep3["images"]] == ["1.59.0", "1.58.0"]
+    ok &= [im["built_version"] for im in rep3["images"]] == ["1.59.0", "1.58.0"]
+    ok &= [im["node_fw_version"] for im in rep3["images"]] == ["1.33.0", "1.19.0"]
+    ok &= rep3["version_mismatch"] and rep3["node_fw_mismatch"] and not rep3["title_mismatch"]
     print("SELFTEST", "PASS" if ok else "FAIL")
     return ok
 
@@ -2825,6 +3456,10 @@ def main(argv=None):
     _add_conf_flags(s)
     s.add_argument("--bypass-validation", action="store_true",
                    help="neuter Stern's game validator in EVERY games tree on the output card (+ refresh its .sidx record)")
+    s.add_argument("--allow-version-mismatch", action="store_true",
+                   help="build a card whose images are NOT the same game code - a different game code version, "
+                        "a different title, or a different node board firmware set. Read the refusal first: it "
+                        "says what each of those costs")
     s.add_argument("--no-inject", action="store_true", help="only copy + tables; leave p2 stock")
     s.add_argument("--dd", action="store_true", help="copy the ranges with dd bs=16M conv=sparse instead of python")
     s.add_argument("--force", action="store_true", help="overwrite an existing --out")
@@ -2860,6 +3495,11 @@ def main(argv=None):
             plan = make_plan(a.primary, a.extra, a.layout)
             print_plan(plan)
             check_reachable(plan, a.allow_unreachable)
+            recs = plan_identities(plan, progress=None)
+            try:                                 # plan writes nothing, so it reports and does
+                report_versions(recs)            # not refuse - but it says what build will do
+            except Refused as e:
+                print("\n== build will REFUSE this card\n%s" % e)
         elif a.cmd == "check-stock":
             return 0 if check_stock(a.image) else 1
         elif a.cmd == "build":
@@ -2871,6 +3511,8 @@ def main(argv=None):
             check_reachable(plan, a.allow_unreachable)       # before a byte is written
             if not a.extra:
                 say("WARNING: no --extra given; building a one-image card")
+            versions = plan_identities(plan)                 # read off the SOURCE images...
+            report_versions(versions, a.allow_version_mismatch)  # ...and refuse before --out exists
             workdir = a.workdir or os.path.dirname(os.path.abspath(a.out))
             os.makedirs(workdir, exist_ok=True)
             conf = media = manifests = None
@@ -2881,7 +3523,8 @@ def main(argv=None):
                         say("media %s: %s" % (name, media["kinds"][name]))
                     say("media: %d files, %s" % (len(media["files"]), _gb(media["total"])))
                 conf = conf_for_plan(plan, a, media=media)          # generated (and validated) before the long copy
-                manifests = selector_manifests(plan, conf, a.media_dir, [a.primary] + list(a.extra))
+                manifests = selector_manifests(plan, conf, a.media_dir, [a.primary] + list(a.extra),
+                                               versions=versions)
                 stage_selector(a.selector_dir, tempfile.mkdtemp(prefix="mkmulticard.chk."), conf, hook_game_script(SYNTH_GAME),
                                media["files"] if media else None, manifests)
                 print("== images.conf to inject\n" + conf.rstrip())

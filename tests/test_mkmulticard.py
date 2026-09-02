@@ -582,7 +582,7 @@ STOCK_CARD = next((p for p in (
 def test_the_stock_card_validator_is_located_and_reported_armed(mk):
     """Read-only, one 6.4 MB file out of the library image: the locator finds validation_exec
     in the stock game and the tree reads as ARMED (the bypass has something to do)."""
-    valpatch, _s, ext4 = mk._stern_plugins()
+    valpatch, _s, ext4, _adj = mk._stern_plugins()
     G = mk.Geometry.from_file(STOCK_CARD)
     _t, st, cnt = G.part(3)
     with open(STOCK_CARD, "rb") as f:
@@ -847,7 +847,11 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     text = _menu_conf(mk, plan, media=[("art0.png", "", ""), ("art1.png", "anim1.gif", "music1.wav")],
                       sound_move="move.wav", sound_confirm="confirm.wav", volume=35, mixer_volume=20)
     man = mk.build_manifest(plan, mk.parse_images_conf(text), ["/img/a.raw", "/img/b.raw"],
-                            written="2026-09-02T00:00:00Z")
+                            written="2026-09-02T00:00:00Z", versions=[
+                                {"device": "/dev/mmcblk0p3", "title": "turtles_pro",
+                                 "version": "1.59.0", "node_fw_version": "1.33.0"},
+                                {"device": "/dev/mmcblk0p7", "title": "turtles_pro",
+                                 "version": "1.58.0", "node_fw_version": "1.19.0"}])
     assert man["tool"] == "mkmulticard" and man["version"] == mk.VERSION
     assert man["written"] == "2026-09-02T00:00:00Z" and man["layout"] == "parts"
     assert (man["timeout"], man["default"]) == (20, 1)
@@ -855,9 +859,11 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     assert (man["sound_move"], man["sound_confirm"]) == ("move.wav", "confirm.wav")
     assert man["images"] == [
         {"device": "/dev/mmcblk0p3", "source": os.path.abspath("/img/a.raw"), "title": "STERN 1.59.0",
-         "subtitle": "Original Stern code", "art": "art0.png", "anim": None, "music": None},
+         "subtitle": "Original Stern code", "art": "art0.png", "anim": None, "music": None,
+         "title_dir": "turtles_pro", "version": "1.59.0", "node_fw_version": "1.33.0"},
         {"device": "/dev/mmcblk0p7", "source": os.path.abspath("/img/b.raw"), "title": "TMNT 1987",
-         "subtitle": "1987 cartoon upscale", "art": "art1.png", "anim": "anim1.gif", "music": "music1.wav"}]
+         "subtitle": "1987 cartoon upscale", "art": "art1.png", "anim": "anim1.gif", "music": "music1.wav",
+         "title_dir": "turtles_pro", "version": "1.58.0", "node_fw_version": "1.19.0"}]
     # it is JSON, and exactly the keys contract A names
     d = json.loads(json.dumps(man))
     assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "default",
@@ -866,6 +872,8 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     plain = mk.build_manifest(plan, mk.parse_images_conf(_menu_conf(mk, plan)), None)
     assert [im["art"] for im in plain["images"]] == [None, None]
     assert plain["volume"] is None and plain["sound_move"] is None and plain["images"][0]["source"] is None
+    # ...and so are the version fields when no version was read
+    assert [im["version"] for im in plain["images"]] == [None, None]
 
 
 def test_an_inject_with_no_sources_carries_the_previous_provenance_through(mk):
@@ -977,7 +985,7 @@ def _synth_card(mk, tmp_path, n_extra=1):
 
 def _fake_p2(mk, monkeypatch, files, dirs, trees=None):
     """Stand in for the debugfs read layer: `files` {card path: bytes}, `dirs` {dir path:
-    [(name, mode, size)]}, `trees` {device: (validator state, title dir)}."""
+    [(name, mode, size)]}, `trees` {device: (validator state, title dir[, version, node fw])}."""
     monkeypatch.setattr(mk, "need_tools", lambda *a: None)
     monkeypatch.setattr(mk, "debugfs_exists", lambda ref, p: p in files or p in dirs)
 
@@ -991,18 +999,29 @@ def _fake_p2(mk, monkeypatch, files, dirs, trees=None):
             raise mk.Refused("no such directory %s" % p)
         return [(100 + i, mode, 0, 0, name, size) for i, (name, mode, size) in enumerate(dirs[p])]
 
-    def state(card, part, sub):
+    def tree(card, part, sub=None):
         got = (trees or {}).get(mk.device_name(part.num, sub))
         if got is None:
             raise mk.Refused("no title directory with a game file in this tree")
-        return got[0], got[1], got[1] + "/game"
+        state, title = got[0], got[1]
+        ver = got[2] if len(got) > 2 else None
+        fw = got[3] if len(got) > 3 else None
+        rec = mk._unread_tree(mk.device_name(part.num, sub), "synthetic")
+        rec.update([("title", title), ("game_path", title + "/game"), ("bypass", state),
+                    ("version", ver), ("version_source", "spk index + game ELF" if ver else None),
+                    ("sidx", "%s-%s.sidx" % (title, (ver or "").replace(".", "_")) if ver else None),
+                    ("sidx_version", ver), ("elf_version", ver.rsplit(".", 1)[0] if ver else None),
+                    ("node_fw", ["pinnode-LPC1313-%s.hex" % (fw or "").replace(".", "_")] if fw else []),
+                    ("node_fw_version", fw), ("node_fw_digest", fw), ("notes", [])])
+        return rec
 
     monkeypatch.setattr(mk, "debugfs_cat", cat)
     monkeypatch.setattr(mk, "debugfs_ls", ls)
-    monkeypatch.setattr(mk, "tree_state", state)
+    monkeypatch.setattr(mk, "read_tree", tree)
 
 
-def _loaded_card(mk, tmp_path, monkeypatch, with_build=True, with_media_json=True, sources=None):
+def _loaded_card(mk, tmp_path, monkeypatch, with_build=True, with_media_json=True, sources=None,
+                 trees=None):
     out, srcs, plan = _synth_card(mk, tmp_path)
     conf = mk.render_images_conf(plan.devices(), ["STERN 1.59.0", "TMNT 1987"],
                                  ["Original Stern code", "1987 cartoon upscale"], 1, 20,
@@ -1036,7 +1055,7 @@ def _loaded_card(mk, tmp_path, monkeypatch, with_build=True, with_media_json=Tru
     dirs = {mk.SELECT_DIR: sel_dir,
             mk.MEDIA_DIR: [(n.rsplit("/", 1)[1], REG, len(b))
                            for n, b in files.items() if n.startswith(mk.MEDIA_DIR + "/")]}
-    _fake_p2(mk, monkeypatch, files, dirs,
+    _fake_p2(mk, monkeypatch, files, dirs, trees or
              {"/dev/mmcblk0p3": ("armed", "turtles_pro"), "/dev/mmcblk0p7": ("bypassed", "turtles_pro")})
     return out, srcs, plan
 
@@ -1182,3 +1201,226 @@ def test_extract_card_media_writes_a_media_dir_and_refuses_the_card_library(mk, 
     monkeypatch.setattr(mk, "FORBIDDEN_OUTPUT_PREFIXES", (str(tmp_path / "library"),))
     with pytest.raises(mk.Refused):
         mk.extract_card_media("ref", str(tmp_path / "library" / "media"), [], None)
+
+
+# ============================================ game code versions (item 90: the same-version gate)
+def _vrec(mk, i, version="1.59.0", title="turtles_pro", fw="1.33.0", fwnames=None, notes=()):
+    """One read_tree-shaped record, as plan_identities / card_identities hand them to the gate."""
+    names = fwnames if fwnames is not None else (
+        ["pinnode-LPC1313-%s.hex" % fw.replace(".", "_")] if fw else [])
+    return {"index": i, "device": mk.device_name(3 if i == 0 else 6 + i), "title": title,
+            "version": version, "version_source": "spk index + game ELF" if version else None,
+            "node_fw": names, "node_fw_version": fw,
+            "node_fw_digest": mk._fw_digest(names), "notes": list(notes)}
+
+
+def test_the_game_elf_identity_record_is_located_and_decoded(mk):
+    """The version is a uint16 - high byte major, low byte minor - after a run of pointers to
+    the game code, the model name(s), the release date and (usually) the title directory."""
+    elf = mk.synth_game_elf("turtles_pro", "1.59.0", model="TMNT PRO", code="TMT",
+                            date="AUGUST 25, 2019")
+    rec = mk.game_identity(elf, "turtles_pro")
+    assert rec["version"] == "1.59" and rec["raw"] == (1 << 8) | 59
+    assert rec["name"] == "TMNT PRO" and rec["date"] == "AUGUST 25, 2019"
+    assert rec["title_dir"] == "turtles_pro"
+    assert rec["strings"] == ["TMT", "TMNT PRO", "AUGUST 25, 2019", "turtles_pro"]
+    # it is found without being told the title directory too (the date anchors it)
+    assert mk.game_identity(elf)["version"] == "1.59"
+
+
+@pytest.mark.parametrize("kw,version,raw", [
+    # every shape the 31 stock cards showed, and the numbers read off them
+    ({"version": "1.58.0"}, "1.58", 314),
+    ({"version": "0.96", "title_dir": "king_kong_le", "model": "KING KONG LE", "code": "SKK",
+      "date": "Mar 31 2026"}, "0.96", 96),                          # __DATE__, two spaces, 0.x
+    ({"version": "1.13", "with_title": False, "model": "GODZILLA LE",
+      "code": "GODZILLA: 70TH ANNIVERSARY", "date": "Oct  6 2025"}, "1.13", 269),  # no title dir
+    ({"version": "1.06", "hi": 0x22}, "1.06", 262),                 # junk above the uint16
+    ({"version": "1.13", "extra_names": ("I4", "I3", "I9", "I0"), "date": "JUL. 5, 2019",
+      "with_title": False}, "1.13", 269),                           # 'Mmm. D, YYYY', six codes
+    ({"version": "1.30", "date": "APR. 20, 2016"}, "1.30", 286),
+])
+def test_the_identity_record_is_read_in_every_shape_the_library_showed(mk, kw, version, raw):
+    rec = mk.game_identity(mk.synth_game_elf(**kw), kw.get("title_dir", "turtles_pro"))
+    assert (rec["version"], rec["raw"]) == (version, raw)
+
+
+def test_the_identity_locator_says_nothing_rather_than_guessing(mk):
+    """No ELF, no record, and no run that holds a date or the title directory -> None.  A wrong
+    version is worse than no version: the gate reports UNKNOWN instead."""
+    assert mk.game_identity(b"not an elf at all") is None
+    assert mk.game_identity(b"") is None
+    # a record whose strings are neither a date nor the title directory is not this record
+    elf = mk.synth_game_elf("turtles_pro", "1.59.0", date="not a date", with_title=False)
+    assert mk.game_identity(elf, "turtles_pro") is None
+
+
+def test_sidx_and_node_firmware_names_carry_the_versions(mk):
+    m = mk.SIDX_NAME_RE.match("turtles_pro-1_59_0.sidx")
+    assert (m.group("pkg"), mk.version_text(m.group("ver"))) == ("turtles_pro", "1.59.0")
+    assert mk.SIDX_NAME_RE.match("turtles_pro.sidx") is None        # the bare symlink: no version
+    m = mk.NODE_FW_RE.match("coil4node-LPC1112_101-1_33_0.hex")
+    assert (m.group("base"), mk.version_text(m.group("ver"))) == ("coil4node-LPC1112_101", "1.33.0")
+    assert mk.NODE_FW_RE.match("image.bin") is None
+    assert mk.version_text(None) is None
+
+
+def test_the_gate_is_silent_when_every_image_is_the_same_code(mk):
+    recs = [_vrec(mk, 0), _vrec(mk, 1)]
+    found = mk.check_versions(recs)                                  # does not raise
+    assert all(v is None for v in found.values())
+    assert mk.version_findings(recs)["version_mismatch"] is None
+
+
+def test_the_gate_names_the_version_the_title_and_the_node_firmware(mk):
+    found = mk.version_findings([_vrec(mk, 0), _vrec(mk, 1, version="1.58.0", fw="1.19.0")])
+    assert "GAME CODE VERSION" in found["version_mismatch"]
+    assert "1.59.0" in found["version_mismatch"] and "1.58.0" in found["version_mismatch"]
+    assert found["title_mismatch"] is None
+    assert "NODE BOARD FIRMWARE" in found["node_fw_mismatch"]
+    assert "reflash the node boards" in found["node_fw_mismatch"]
+    assert "image 0 carries pinnode-LPC1313-1_33_0.hex" in found["node_fw_mismatch"]  # WHICH
+    assert "image 1 carries pinnode-LPC1313-1_19_0.hex" in found["node_fw_mismatch"]  # files
+    # two images that ship the SAME set are named together, never as "only its own"
+    three = mk.version_findings([_vrec(mk, 0), _vrec(mk, 1), _vrec(mk, 2, fw="1.19.0")])
+    assert "images 0, 1 carry pinnode-LPC1313-1_33_0.hex" in three["node_fw_mismatch"]
+    assert "image 2 carries pinnode-LPC1313-1_19_0.hex" in three["node_fw_mismatch"]
+    # a different TITLE is the larger warning, and it is folded into version_mismatch so a
+    # reader that shows only that key never misses it
+    both = mk.version_findings([_vrec(mk, 0), _vrec(mk, 1, title="godzilla_le", version="1.13.0")])
+    assert "DIFFERENT TITLES" in both["title_mismatch"]
+    assert "settings, audits and high scores are stored per title" in both["title_mismatch"]
+    assert both["title_mismatch"] in both["version_mismatch"]
+
+
+def test_the_node_firmware_check_stands_on_its_own(mk):
+    """Same title, same game code version, different node firmware: still refused, and the
+    refusal is about the node boards alone."""
+    recs = [_vrec(mk, 0), _vrec(mk, 1, fw="1.19.0")]
+    found = mk.version_findings(recs)
+    assert found["version_mismatch"] is None and found["node_fw_mismatch"]
+    with pytest.raises(mk.Refused) as e:
+        mk.check_versions(recs)
+    assert "NODE BOARD FIRMWARE" in str(e.value) and "GAME CODE VERSION" not in str(e.value)
+    assert "--allow-version-mismatch" in str(e.value)                # one flag covers all three
+
+
+def test_the_refusal_says_what_it_costs_and_how_to_override(mk):
+    recs = [_vrec(mk, 0), _vrec(mk, 1, version="1.58.0", fw="1.19.0")]
+    with pytest.raises(mk.Refused) as e:
+        mk.check_versions(recs)
+    msg = str(e.value)
+    assert "MENU CAPTION" in msg and "compiled default" in msg      # what does NOT break...
+    assert "RENAMED" in msg and "THREE generations" in msg          # ...and what does
+    assert "REFLASH the node boards" in msg
+    assert "THE FIX is to give every image on the card the same game code version" in msg
+    assert "--allow-version-mismatch" in msg
+    assert "image 0 " in msg and "1.59.0" in msg and "1.58.0" in msg
+    # the override returns the findings instead of raising - nothing is hidden, it just proceeds
+    found = mk.check_versions(recs, allow=True)
+    assert found["version_mismatch"] and found["node_fw_mismatch"]
+
+
+def test_an_unreadable_tree_is_reported_not_guessed(mk):
+    """A tree the reader could not open is its OWN finding; it never fabricates a mismatch
+    against the tree that did read."""
+    recs = [_vrec(mk, 0), _vrec(mk, 1, title=None, version=None, fw=None,
+                                notes=["this tree could not be read"])]
+    found = mk.version_findings(recs)
+    assert found["version_mismatch"] is None                        # one version is not a mismatch
+    assert found["node_fw_mismatch"] is None and found["title_mismatch"] is None
+    assert "did not say what game code" in found["unknown_version"]
+    assert "this tree could not be read" in found["unknown_version"]
+    mk.check_versions(recs)                                         # and it does not refuse
+    # a tree that DID read but carries no node firmware at all is a real difference, and said so
+    half = mk.version_findings([_vrec(mk, 0), _vrec(mk, 1, fw=None)])
+    assert "no node firmware" in half["node_fw_mismatch"]
+
+
+def test_print_version_table_has_one_line_per_image(mk, capsys):
+    mk.print_version_table([_vrec(mk, 0), _vrec(mk, 1, version="1.58.0", fw="1.19.0")])
+    out = capsys.readouterr().out
+    assert "game code versions" in out
+    assert "/dev/mmcblk0p3         turtles_pro              1.59.0" in out
+    assert "/dev/mmcblk0p7         turtles_pro              1.58.0" in out
+    assert "1.33.0 (1 hex)" in out and "1.19.0 (1 hex)" in out
+    assert out.count("WARNING:") == 2                               # version + node firmware
+    mk.print_version_table([_vrec(mk, 0), _vrec(mk, 1)])
+    assert "WARNING:" not in capsys.readouterr().out
+
+
+def test_build_refuses_a_version_mismatch_before_it_writes_anything(mk, tmp_path, monkeypatch, capsys):
+    """The whole point of the gate: --out must not exist when the tool says no."""
+    A = mk.make_synthetic_card(str(tmp_path / "A.img"), "A", 0x0A0A0A0A)
+    B = mk.make_synthetic_card(str(tmp_path / "B.img"), "B", 0x0B0B0B0B)
+    sel = tmp_path / "sel"
+    sel.mkdir()
+    (sel / "codeselect").write_bytes(b"#!/bin/sh\n")
+    (sel / "select.sh").write_bytes(b"#!/bin/sh\n")
+    out = tmp_path / "multi.img"
+    monkeypatch.setattr(mk, "plan_identities", lambda plan, progress=mk.say: [
+        _vrec(mk, 0), _vrec(mk, 1, version="1.58.0", fw="1.19.0")])
+    argv = ["build", "--primary", A, "--extra", B, "--out", str(out), "--selector-dir", str(sel)]
+    assert mk.main(argv) == 2
+    assert not out.exists(), "the gate must refuse before a byte of --out is written"
+    err = capsys.readouterr().err
+    assert "GAME CODE VERSION" in err and "--allow-version-mismatch" in err
+
+
+def test_inspect_reports_each_images_version_and_the_mismatch_sentences(mk, tmp_path, monkeypatch, capsys):
+    out, _srcs, _plan = _loaded_card(
+        mk, tmp_path, monkeypatch,
+        trees={"/dev/mmcblk0p3": ("armed", "turtles_pro", "1.59.0", "1.33.0"),
+               "/dev/mmcblk0p7": ("bypassed", "turtles_pro", "1.58.0", "1.19.0")})
+    rep = mk.inspect_card(out)
+    assert [im["version"] for im in rep["images"]] == ["1.59.0", "1.58.0"]
+    assert [im["version_source"] for im in rep["images"]] == ["spk index + game ELF"] * 2
+    assert [im["sidx"] for im in rep["images"]] == ["turtles_pro-1_59_0.sidx", "turtles_pro-1_58_0.sidx"]
+    assert [im["elf_version"] for im in rep["images"]] == ["1.59", "1.58"]
+    assert [im["node_fw_version"] for im in rep["images"]] == ["1.33.0", "1.19.0"]
+    assert rep["version_mismatch"] and rep["node_fw_mismatch"]
+    assert rep["title_mismatch"] is None and rep["unknown_version"] is None
+    # and the JSON a GUI reads carries the ready-made sentences
+    d = json.loads(json.dumps(rep))
+    assert "GAME CODE VERSION" in d["version_mismatch"]
+    mk.print_inspect(rep)
+    table = capsys.readouterr().out
+    assert "game code=1.59.0" in table and "node firmware=1.19.0" in table
+    assert "VERSION WARNING:" in table
+
+
+def test_inspect_is_silent_about_versions_when_the_images_match(mk, tmp_path, monkeypatch, capsys):
+    out, _srcs, _plan = _loaded_card(
+        mk, tmp_path, monkeypatch,
+        trees={"/dev/mmcblk0p3": ("armed", "turtles_pro", "1.59.0", "1.33.0"),
+               "/dev/mmcblk0p7": ("bypassed", "turtles_pro", "1.59.0", "1.33.0")})
+    rep = mk.inspect_card(out)
+    assert rep["version_mismatch"] is None and rep["node_fw_mismatch"] is None
+    mk.print_inspect(rep)
+    assert "VERSION WARNING:" not in capsys.readouterr().out
+
+
+def test_build_json_carries_a_recorded_version_through_an_inject(mk):
+    """An inject reads nothing off the trees, so the versions the build recorded must survive
+    it BY DEVICE - exactly as the source paths do."""
+    plan = _two_image_plan(mk)
+    conf = mk.parse_images_conf(_menu_conf(mk, plan))
+    built = mk.build_manifest(plan, conf, ["/img/a.raw", "/img/b.raw"], versions=[
+        _vrec(mk, 0), _vrec(mk, 1, version="1.58.0", fw="1.19.0")])
+    assert [im["version"] for im in built["images"]] == ["1.59.0", "1.58.0"]
+    again = mk.build_manifest(plan, conf, None, existing=built)
+    assert [im["version"] for im in again["images"]] == ["1.59.0", "1.58.0"]
+    assert [im["title_dir"] for im in again["images"]] == ["turtles_pro", "turtles_pro"]
+    assert [im["node_fw_version"] for im in again["images"]] == ["1.33.0", "1.19.0"]
+
+
+@pytest.mark.skipif(not os.path.isfile(STOCK_CARD), reason="the stock turtles_pro 1.59 card is not on this machine")
+def test_the_stock_card_reads_1_59_0_from_both_sources(mk):
+    """The real thing, read-only: the package name and the game ELF's own record AGREE."""
+    rec = mk.read_tree(STOCK_CARD, mk.source_part(STOCK_CARD))
+    assert rec["title"] == "turtles_pro"
+    assert (rec["version"], rec["version_source"]) == ("1.59.0", "spk index + game ELF")
+    assert rec["sidx"] == "turtles_pro-1_59_0.sidx" and rec["sidx_version"] == "1.59.0"
+    assert rec["elf_version"] == "1.59" and rec["elf_name"] == "TMNT PRO"
+    assert rec["node_fw_version"] == "1.33.0" and len(rec["node_fw"]) == 17
+    assert rec["notes"] == [] and rec["bypass"] == "armed"

@@ -152,6 +152,72 @@ FIFO chain and nothing out of the speakers (the `[padplay] fed/played`
 counters and the `[select]`/`audio:` lines are the oracle); flip `muted` to
 `false` in the file to hear it, no restart needed.
 
+### Same game code version on every image
+
+**Use the same game code version for every image on the card.** `plan`,
+`build`, `verify` and `inspect` all print a VERSION table - one line per image:
+index, device, title directory, game code version, where that answer came from,
+node board firmware - and `build` **refuses** a card whose images are not the
+same game code. The refusal *is* the warning; it explains the cost and ends
+with the flag that overrides it.
+
+```
+== game code versions
+idx device                 title                    version   read from              node firmware
+0   /dev/mmcblk0p3         turtles_pro              1.59.0    spk index + game ELF   1.33.0 (17 hex)
+1   /dev/mmcblk0p7         turtles_pro              1.58.0    spk index + game ELF   1.19.0 (15 hex)
+```
+
+What each case costs:
+
+- **Same title, same version — nothing.** This is the normal card: David's own
+  is stock TMNT 1.59 plus a 1987 re-skin of that same 1.59, two game ELFs four
+  bytes apart. Nothing is reported and nothing is lost.
+- **Same title, different version — three specific things.** Operator settings,
+  audits and scores are *not* on the card: they live in the node board's NVRAM
+  keyed by the **SHA1 of each setting's menu caption**, not by its number, so a
+  caption both builds spell the same way carries over untouched (11 of 11
+  measured across a TMNT 1.59 → 1.58 → 1.59 round trip, with 202 of the 228
+  shared captions renumbered in between). What *does* break: a setting only one
+  build has falls back to that build's compiled default whenever you boot the
+  other (43 settings of 1.59 and 13 of 1.58 on that pair); a setting Stern
+  **renamed** reverts, because the new caption hashes to a slot never written
+  (3 on that pair); and the store keeps only **three** generations, so two boots
+  of the other build erase a build-exclusive value for good.
+- **Different node board firmware — a service call.** Each image ships its own
+  `*-<M_mm_p>.hex` node firmware set (`-1_33_0.hex` on TMNT 1.59, `-1_19_0.hex`
+  on 1.58) and the machine records the running build's node firmware version at
+  every boot, so a card whose images disagree can **reflash the node boards on
+  every swap**. This is checked on its own line: two images can share a game
+  code version and still differ here, and that alone is refused.
+- **Different titles — everything.** Settings, audits and high scores are stored
+  per title; nothing carries at all, and each title wants its own node boards,
+  coils and switch table. Reported as its own, larger warning.
+
+```bash
+mkmulticard.py build ... --allow-version-mismatch
+```
+
+is the one override, and it covers all three (version, node firmware, title):
+they are the same question - *these images are not the same code, build anyway?*
+`plan` never refuses (it writes nothing); it prints the same table and then
+exactly what `build` would have said. `verify` and `inspect` report a mismatch
+and never fail on it: a card built with the flag is a card its owner chose.
+
+**Where the version comes from** - read off each image, never guessed from a
+file name, cross-checked between:
+
+| source | what it is | notes |
+| --- | --- | --- |
+| `/spk/index/<pkg>-<M_mm_p>.sidx` | Stern's own package name (`turtles_pro-1_59_0.sidx`) | the authority: all three components, and what the code updater speaks. A bare `<pkg>.sidx` symlink sits beside it on some cards; it names no version and is skipped |
+| the game ELF's build-identity record | a run of pointers to the game code, the model name(s), the release date and (on most builds) the title directory, followed by the version as a **uint16** — high byte major, low byte minor | the cross-check. MAJOR.MINOR only: `turtles_le` 1.58.**1** and `turtles_pro` 1.58.**0** both hold `0x013a`. Located on all 46 cards in the library and agreeing with the package name on 45 — `dungeons_and_dragons_le` 1.00.0's record says `0.01`, which is reported as a disagreement rather than resolved |
+| the title directory's `*-<M_mm_p>.hex` | the node board firmware version | a **different** number from the game code version, so it gets its own column and is never used as one |
+| `/data`'s `nv/<title>/NVM` | the machine's own record | `/data` is empty on all 49 cards in the library (it is written on the machine, not by the factory), so nothing here depends on it |
+
+`build.json` records each image's `title_dir`, `version` and `node_fw_version`
+too, so a card loaded back says what it was built from; `inspect` re-reads the
+live truth off the card and flags any disagreement with that record.
+
 ### Loading a finished card back
 
 A card carries what it takes to re-open its own menu in an editor. Beside
@@ -160,9 +226,9 @@ opened by the selector - `build` and `inject` stage two small JSON files into
 `/usr/local/codeselect/`:
 
 - **`build.json`** `{"tool", "version", "written", "layout", "images":
-  [{"device", "source", "title", "subtitle", "art", "anim", "music"}],
-  "timeout", "default", "volume", "mixer_volume", "sound_move",
-  "sound_confirm"}`. `source` is the absolute path of the `.raw` that image was
+  [{"device", "source", "title", "subtitle", "art", "anim", "music",
+  "title_dir", "version", "node_fw_version"}], "timeout", "default", "volume",
+  "mixer_volume", "sound_move", "sound_confirm"}`. `source` is the absolute path of the `.raw` that image was
   built from - the one thing `images.conf` cannot hold and a rebuild needs. An
   `inject` given no `--primary`/`--extra` reads the card's own `build.json`
   first and carries the old sources through, **by device**: an inject must
@@ -182,9 +248,13 @@ reads it all back with no mounts and no writes: the table, the menu, the
 provenance, the media list and every games tree's `title_dir` and validator
 state. The default is a human table; `--json` prints ONE object on stdout
 (`card`, `size`, `layout`, `partitions`, `images[]` with `art_source` /
-`anim_source` / `source` / `source_exists` / `title_dir` / `bypass`, the
-globals, `media[]`, `has_build_json`, `has_media_json`, `selector`,
-`warnings`), and `--media-out DIR` extracts the card's media directory +
+`anim_source` / `source` / `source_exists` / `title_dir` / `bypass` /
+`version` / `version_source` / `sidx` / `sidx_version` / `elf_version` /
+`node_fw` / `node_fw_version` / `built_version`, the globals, `media[]`,
+`has_build_json`, `has_media_json`, `selector`, the ready-made
+`version_mismatch` / `node_fw_mismatch` / `title_mismatch` /
+`unknown_version` sentences (null when the images agree), and `warnings`),
+and `--media-out DIR` extracts the card's media directory +
 `media.json` into `DIR` - the flat shape `--media-dir` reads back, so a loaded
 menu can be previewed and re-injected without a rebuild. A card written before
 the sidecars existed still loads: the unknown fields degrade to `null` with a

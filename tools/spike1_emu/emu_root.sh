@@ -68,14 +68,20 @@ for d in dmd i2s amp adc gpio spi0 spi1; do
   elif [ "$d" = spi0 ] && [ -n "${S1_SPI0_CAP:-}" ]; then
     start_shim --model passive --name "s1$d" --capture "$S1_SPI0_CAP"
   elif [ "$d" = i2s ]; then
-    # pace the audio stream at its real-time PCM rate (the audio twin of the
-    # DMD pacing: unpaced, the audio thread free-runs pumping silence at
-    # thousands of writes/s) and tee it into a FIFO for the host speaker
-    # chain when start.sh names one (S1_AUDIO_FIFO; no FIFO = discard).
-    # 44100 Hz s16 stereo is what the games configure (system_sample_rate in
-    # the game ELF, read live: 44100).
+    # Tee the PCM into a FIFO for the host speaker chain when start.sh names
+    # one (S1_AUDIO_FIFO; no FIFO = discard), and pace the stream at its
+    # real-time rate WHEN THE GAME DOES NOT PACE ITSELF.
+    #
+    # The DMD generation's audio thread free-runs, pumping silence at
+    # thousands of writes/s, so the shim has to hold it to real time.  The
+    # 2012 home models do NOT: sys_dac_c_handler divides sys_time_get_usec()
+    # by 1e6/24000 us per frame, subtracts its own accumulator and only mixes
+    # and writes when it is behind, adding 128.0 per block - a self-paced
+    # loop against a real-time clock.  Sleeping inside their write() as well
+    # just adds a second regulator (and its jitter) on top of the game's own.
+    # S1_PCM_PACE=0 turns the shim's half off; start.sh sets it per era.
     start_shim --model passive --name "s1$d" \
-        --pcm-rate "${S1_PCM_RATE:-44100}" --pcm-ch "${S1_PCM_CH:-2}" \
+        ${S1_PCM_PACE:+--pcm-rate "${S1_PCM_RATE:-44100}" --pcm-ch "${S1_PCM_CH:-2}"} \
         ${S1_AUDIO_FIFO:+--fifo "$S1_AUDIO_FIFO"}
   elif [ "$d" = gpio ] && [ -n "${S1_GPIO_FILE:-}" ]; then
     # the early era reads cabinet switches off GPIO pins (see s1hwshim.c
@@ -189,7 +195,7 @@ s1_mounts() {
   cp "$S1_QEMU" "$R/usr/bin/qemu-arm-pad" 2>/dev/null || true
 }
 export -f s1_mounts
-export R G GAME_NAME GAME_PATH GAME_EXE S1_CPUINFO S1_QEMU S1_STRACE S1_NO_BINFMT S1_EE_FILE S1_RUNS S1_I2C_LOG S1_GDB S1_TTYS4_CAP S1_PIVOT PIVOTROOT
+export R G GAME_NAME GAME_PATH GAME_EXE S1_CPUINFO S1_QEMU S1_STRACE S1_NO_BINFMT S1_PCM_PACE S1_EE_FILE S1_RUNS S1_I2C_LOG S1_GDB S1_TTYS4_CAP S1_PIVOT PIVOTROOT
 
 if [ "$S1_PIVOT" = "1" ]; then
   # Checkpointable boot.  The game_monitor-style restart loop moves OUTSIDE

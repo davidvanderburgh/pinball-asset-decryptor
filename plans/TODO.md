@@ -197,6 +197,18 @@ These have each been violated at least once and each cost a run or a window:
       `selectmedia.py` caches by source+params so a re-render of an
       unchanged picture costs 0.13 s. The preview and the build share one
       media directory, so the card matches the picture.
+      **v4 2026-09-02, from David running the card himself.** The menu is a
+      property of the CARD, not a checkbox: `PAD_SELECT` unset now asks the
+      card (`parts.py --multiboot`), and 1/0 still force it either way.
+      Stopping a run while the menu was up used to look like "no choice",
+      so the rig booted the primary and left a brand-new guest behind - a
+      killed selector is now a stop (129/130/143/137), while one that DIED
+      or refused its configuration still falls through, because a broken
+      menu must never be the reason a pinball machine will not start. The
+      ACTION button confirms alongside START. And each entry can name its
+      own confirm sound - a seventh `image=` field, empty meaning the
+      menu-wide one - so a menu of four builds can say four different
+      things while the LOADING frame is up.
       **IN PROGRESS (2026-09-01, `item/90`): PROVEN IN THE EMULATOR.**
       `mkmulticard.py` builds the card (verify PASS), `codeselect` draws
       through the bridge and takes the padsw keys, `PAD_SELECT=1` runs it
@@ -204,10 +216,9 @@ These have each been violated at least once and each cost a run or a window:
       keys, both boot to attract with NVRAM grades P/P/P, the 1987 run
       serves its own videos (`dump/vidroot`). Production card for David's
       TMNT Pro at `D:/Pinball/TMNT 1987/multi/` (stock + Insider-clean
-      patched 1987). NEXT: David flashes it and reports
-      `/dump/log/codeselect.log` — the two unknowns are the node-bus reply
-      before the game's own bring-up (service buttons are the no-bus
-      fallback) and the Vivante EGL init (it copies boot_display's order).
+      patched 1987). Both unknowns were answered on the machine the same
+      evening: the node bus does reply before the game's own bring-up, and
+      the Vivante EGL init works because it copies boot_display's order.
       Detail: `tools/spike2_emu/codeselect/DESIGN.md`.
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second

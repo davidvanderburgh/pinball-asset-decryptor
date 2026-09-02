@@ -2490,6 +2490,7 @@ def main(argv=None):
             if not a.extra:
                 say("WARNING: no --extra given; building a one-image card")
             workdir = a.workdir or os.path.dirname(os.path.abspath(a.out))
+            os.makedirs(workdir, exist_ok=True)
             conf = media = None
             if not a.no_inject:
                 if a.media_dir:

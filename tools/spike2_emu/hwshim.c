@@ -1691,6 +1691,63 @@ extern char *getenv(const char *);
 
 static int (*real_sigaction)(int, const void *, void *);
 
+/* IS THIS STILL LIBC'S sigaction, OR SOMETHING THAT LANDED ON TOP OF IT?
+ *
+ * PAD-102, godzilla_le 1.16 (stock AND the Heisei retheme; 1.13 and the 1.15
+ * Heisei are clean): about four seconds into boot, this cached pointer stops
+ * being libc's sigaction and reads 0x000f0fff, an address inside the GAME's
+ * own read-only text. game_segv_fn, eight bytes away in the same .bss, goes
+ * the same way in the same window. Measured under gdb through the real rig:
+ * at the game's _start it is 0x40ac1f54, by its first sigaction() call it is
+ * 0x000f0fff, and no signal/sigaction path of ours writes it in between - both
+ * assignments below are guarded by `if (!real_sigaction)`, so a non-NULL value
+ * is never replaced. Whatever does the write is not yet named.
+ *
+ * WHAT IT COSTS IS OUT OF ALL PROPORTION TO A STRAY WORD, and that part IS
+ * ours. GCC tail-calls `return real_sigaction(...)` - `ldr r3,[r3,#208]` then
+ * `bx r3` with lr still holding the GAME's return address - and 0x000f0fff has
+ * BIT 0 SET, so `bx` switches the CPU into THUMB state and starts decoding the
+ * game's ARM text as Thumb. Two instructions later it is executing
+ * `str r4,[r3,r0]` at 0xf0660 and storing into read-only text: SIGSEGV, dead
+ * guest, four seconds after Start, on every run. cpsr=0xb0030 (T bit set) and
+ * r3=0x000f0fff in the crash report are that jump, recorded.
+ *
+ * So: never BRANCH to this pointer on trust. An address inside the game image
+ * is impossible for a libc function - the game is a fixed EXEC at 0x8000 and
+ * libc is mapped high - which makes the test title-agnostic and exact. It
+ * deliberately does NOT test bit 0 on its own: a Thumb libc would set it
+ * legitimately, and rejecting that would break every rootfs that has one. */
+static unsigned long game_text_end(void);   /* defined with the crash reporter */
+
+static int sigaction_ptr_ok(void)
+{
+    unsigned long a = (unsigned long)(void *)real_sigaction;
+    if (!a) return 0;
+    if (a >= 0x8000ul && a < game_text_end()) return 0;   /* the game's image */
+    return addr_readable((const void *)(a & ~1ul));
+}
+
+/* Re-resolve when the cached pointer has stopped being believable, and say so
+ * once. Returns 0 when there is nothing safe to call. */
+static int sigaction_ready(void)
+{
+    static int complained;
+    if (sigaction_ptr_ok()) return 1;
+    if (!complained) {
+        char b[200];
+        complained = 1;
+        snprintf(b, sizeof b,
+                 "[segv] real_sigaction was 0x%lx, which is inside the game's "
+                 "own image - not calling it; re-resolving\n",
+                 (unsigned long)(void *)real_sigaction);
+        logmsg(b);
+    }
+    real_sigaction = dlsym(RTLD_NEXT, "sigaction");
+    if (sigaction_ptr_ok()) return 1;
+    real_sigaction = 0;
+    return 0;
+}
+
 /* FULL mode: take the handler over and dump everything. Off by default,
  * because with the game's own handler left in place the faulting thread spins
  * but the others keep running, which is what you want when watching whether a
@@ -1890,7 +1947,7 @@ static void fault_pass_on(int sig, void *info, void *ucv)
     }
 
     /* Nobody else wants it: die the way we would have died anyway. */
-    if (real_sigaction) {
+    if (sigaction_ready()) {
         unsigned char dfl[160];
         int i;
         for (i = 0; i < 160; i++) dfl[i] = 0;   /* sa_handler = SIG_DFL (0) */
@@ -2164,7 +2221,7 @@ static void segv_install(void)
 
     if (!segv_header_on()) return;
     if (!real_sigaction) real_sigaction = dlsym(RTLD_NEXT, "sigaction");
-    if (!real_sigaction) return;
+    if (!sigaction_ready()) return;
 
     for (i = 0; i < 160; i++) mine[i] = 0;
     *(void **)mine = (void *)segv_header_handler;
@@ -2196,25 +2253,50 @@ static void segv_install(void)
  * registers, the stack backtrace - the title-agnostic half that would have
  * named the game's fault) ever printed.
  *
- * So the gate is now an identity test, not a mapping test:
- *   PAD_GZ_ADDRS=1  an operator saying "these addresses are right for this
- *                   title" - the same escape hatch PAD_SW_STRUCT gives;
- *   PAD_GZ_ADDRS=0  never, whatever the title;
- *   otherwise       PAD_GAME must name a godzilla build.
- * The mapping test is kept as well: an address that is right for the title and
- * still unmapped is unusable either way. */
+ * NO TITLE TEST CAN BE RIGHT HERE, so there is not one. The gate is:
+ *   PAD_GZ_ADDRS=1  an operator saying "I have checked that these addresses
+ *                   are right for what I am running" - the same escape hatch
+ *                   PAD_SW_STRUCT gives;
+ *   anything else   off.
+ * The mapping test is kept as well: an address that is right for the build and
+ * still unmapped is unusable either way.
+ *
+ * WHY NOT MATCH THE TITLE NAME. Two passes tried to. The first matched the
+ * first eight characters of PAD_GAME, so `godzilla_le` passed a test meant for
+ * `godzilla_pro` - and those are not variants, they are different generations
+ * of the binary (item 60's survey: "godzilla_le sharing nothing with working
+ * sibling godzilla_pro is the clearest tell"). Measured off the card images:
+ * godzilla_pro 1.15.0 loads 0x8000..0x6ed2c0 exec + 0x6f52c0..0x842b9c data,
+ * godzilla_le 1.13.0 loads 0x8000..0x683bc0 + 0x68c000..0x7d856c, so the event
+ * table at 0x7e4d48 is not even inside the le image. On a user's larger 1.16
+ * build (PAD-102) every one of these addresses was somebody else's data that
+ * happened to be mapped, and the walk stated what it found as fact:
+ *   [segv] loader_gate[0x7e1a10]=0 boot_ready[0x7e1974]=0 thread_run=1
+ *   [segv] event 93 has NO handlers            <- read off le's memory
+ *   [audio] pool head[+74]=0x65746164          <- ASCII "date"
+ * then faulted a SECOND time inside this handler and truncated the report.
+ *
+ * The obvious repair was to match the WHOLE name, `godzilla_pro`. That is
+ * still wrong, just later: these addresses were reverse-engineered out of
+ * godzilla_pro 1.15.0 SPECIFICALLY, and the day Stern ships godzilla_pro 1.16
+ * the name matches, the addresses do not, and this is the same bug one version
+ * on - with nothing in the log to say so. A name is not a build. There is no
+ * fingerprint here that survives a rebuild either (the .text bound moves, and
+ * the copy this rig has already differs from the library image by 27992
+ * bytes), so the honest gate is an operator assertion and nothing else.
+ *
+ * What is lost is one diagnostic on one title unless somebody asks for it by
+ * name; what is kept is that no run ever again reports another build's memory
+ * as fact. The skip lines below say which addresses were skipped and how to
+ * turn them on. */
 static int gz_addrs_ok(void)
 {
     static int v, done;
     if (!done) {
         const char *e = getenv("PAD_GZ_ADDRS");
-        const char *g = getenv("PAD_GAME");
         done = 1;
-        if (e && (e[0] == '0' || e[0] == '1'))
-            v = (e[0] == '1');
-        else
-            v = (g && g[0] == 'g' && g[1] == 'o' && g[2] == 'd' && g[3] == 'z'
-                 && g[4] == 'i' && g[5] == 'l' && g[6] == 'l' && g[7] == 'a');
+        v = (e && e[0] == '1');
+        /* Right for the title and still unmapped is unusable either way. */
         if (v && !a_sw_struct()) v = 0;
     }
     return v;
@@ -2336,8 +2418,8 @@ static void segv_handler(int sig, void *info, void *ucv)
                      *gate, *ready, *run, scene_opens);
         else
             snprintf(b, sizeof b,
-                     "[segv] scene_opens=%d (loader-gate addresses are Godzilla"
-                     " Pro's; not reported for this title)\n", scene_opens);
+                     "[segv] scene_opens=%d (loader-gate addresses are one"
+                     " build's; PAD_GZ_ADDRS=1 to report them)\n", scene_opens);
         logmsg(b);
         snprintf(b, sizeof b,
                  "[segv] filebuf::xsgetn=%d (small=%d) filebuf::underflow=%d "
@@ -2404,15 +2486,28 @@ static void segv_handler(int sig, void *info, void *ucv)
      * so the voice pointer 0x30ed20 kept at [sp,#44] is stack word 28, and its
      * saved lr is word 44 - which is exactly where 0x2a24ac was reported. */
     if (!gz_addrs_ok()) {
-        logmsg("[segv] mixer/loader dump skipped: those addresses are Godzilla"
-               " Pro 1.15.0's and this is not that title (PAD_GZ_ADDRS=1"
-               " overrides)\n");
+        logmsg("[segv] mixer/loader dump skipped: those addresses were read"
+               " out of godzilla_pro 1.15.0 and hold for no other build"
+               " (PAD_GZ_ADDRS=1 if you have checked they fit)\n");
     } else {
         unsigned long sp = uc[21];
-        unsigned long *w = (unsigned long *)sp;
-        unsigned long obj = w[28];
+        unsigned long obj = 0;
         unsigned long base = 0x7b90c0;
         int n;
+
+        /* EVERY READ FROM HERE DOWN GOES THROUGH gz_word(), for the reason
+         * stated at that function: a crash reporter that faults reports
+         * nothing at all, because the second fault arrives on a stack that is
+         * already inside a signal handler. The event walk above was hardened
+         * when Bond hit exactly that; this block was left trusting its own
+         * addresses and took a user's report down mid-line the next time a
+         * wrong title got through the gate (PAD-102). Right title or forced
+         * with PAD_GZ_ADDRS=1, nothing below reads differently - the checks
+         * only decide whether the report STOPS or FINISHES. */
+        if (!gz_word(sp + 28 * 4, &obj)) {
+            logmsg("[audio] stack is not readable at sp+112 - no mixer dump\n");
+            goto mixer_done;
+        }
 
         snprintf(b, sizeof b,
                  "[audio] mixer voice = 0x%lx  index %ld  queue(r4)=0x%lx "
@@ -2428,11 +2523,16 @@ static void segv_handler(int sig, void *info, void *ucv)
                  (long)(uc[13] - (sp + 68)));
         logmsg(b);
         {
-            int i;
+            int i, k, ok;
+            unsigned long q[4];
             for (i = 20; i < 52; i += 4) {
+                for (k = 0, ok = 1; k < 4; k++)
+                    if (!gz_word(sp + (unsigned long)(i + k) * 4, &q[k]))
+                        ok = 0;
+                if (!ok) break;
                 snprintf(b, sizeof b,
                          "[audio] stack[%2d..%2d] = %08lx %08lx %08lx %08lx\n",
-                         i, i + 3, w[i], w[i + 1], w[i + 2], w[i + 3]);
+                         i, i + 3, q[0], q[1], q[2], q[3]);
                 logmsg(b);
             }
         }
@@ -2440,6 +2540,13 @@ static void segv_handler(int sig, void *info, void *ucv)
         for (n = 0; n < 8; n++) {
             unsigned char *v = (unsigned char *)(base + n * 64);
             unsigned long *vw = (unsigned long *)v;
+            if (!addr_readable(v) || !addr_readable(v + 63)) {
+                snprintf(b, sizeof b,
+                         "[audio] voice[%d] at 0x%lx is not readable - "
+                         "stopping the voice dump\n", n, base + n * 64);
+                logmsg(b);
+                break;
+            }
             snprintf(b, sizeof b,
                      "[audio] voice[%d] stream=0x%08lx mixA=0x%08lx mixB=0x%08lx "
                      "pos=%lu queue=0x%08lx en=%d mask=0x%02x vol=%d/%d ch=%d\n",
@@ -2453,23 +2560,41 @@ static void segv_handler(int sig, void *info, void *ucv)
          * mixer compares the cursor against. Print it for whichever voice the
          * mixer was on. */
         if (obj >= base && obj < base + 512) {
-            unsigned long st = *(unsigned long *)obj;
+            unsigned long st;
+            if (!gz_word(obj, &st)) {
+                snprintf(b, sizeof b, "[audio] faulting voice 0x%lx is not "
+                         "readable\n", obj);
+                logmsg(b);
+                goto mixer_pool;
+            }
             snprintf(b, sizeof b, "[audio] faulting voice stream desc = 0x%lx\n", st);
             logmsg(b);
             if (st > 0x10000 && st < 0xb0000000) {
-                unsigned long *s = (unsigned long *)st;
-                snprintf(b, sizeof b,
-                         "[audio]   +00=0x%08lx +04=0x%08lx +08=0x%08lx +0c=0x%08lx\n"
-                         "[audio]   +10=0x%08lx(len) +14=0x%08lx +18=0x%08lx +1c=0x%08lx\n",
-                         s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]);
-                logmsg(b);
+                unsigned long s[8];
+                int i, ok;
+                for (i = 0, ok = 1; i < 8; i++)
+                    if (!gz_word(st + (unsigned long)i * 4, &s[i])) ok = 0;
+                if (ok) {
+                    snprintf(b, sizeof b,
+                             "[audio]   +00=0x%08lx +04=0x%08lx +08=0x%08lx +0c=0x%08lx\n"
+                             "[audio]   +10=0x%08lx(len) +14=0x%08lx +18=0x%08lx +1c=0x%08lx\n",
+                             s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]);
+                    logmsg(b);
+                }
             }
         }
+
+    mixer_pool:
 
         /* 0x7b8990+0x100 is the object the teardown path at 0x2a2044 hands the
          * queue back to, i.e. the queue pool/owner. */
         {
-            unsigned long pool = *(unsigned long *)(0x7b8990 + 0x100);
+            unsigned long pool = 0;
+            if (!gz_word(0x7b8990 + 0x100, &pool)) {
+                logmsg("[audio] no queue pool pointer at 0x7b8a90 in this"
+                       " title\n");
+                goto mixer_done;
+            }
             snprintf(b, sizeof b, "[audio] queue pool [0x7b8a90] = 0x%lx\n", pool);
             logmsg(b);
             /* 0x458e98 returns NULL when the free ring is empty, which it
@@ -2477,7 +2602,18 @@ static void segv_handler(int sig, void *info, void *ucv)
              * as open()ing the sound file. Print the ring so the two NULL
              * paths can be told apart. */
             if (pool > 0x10000 && pool < 0xb0000000) {
-                unsigned long *p = (unsigned long *)pool;
+                unsigned long p[0xc0 / 4];
+                int i, ok;
+                for (i = 0, ok = 1; i < (int)(sizeof p / sizeof p[0]); i++)
+                    if (!gz_word(pool + (unsigned long)i * 4, &p[i])) {
+                        p[i] = 0; ok = 0;
+                    }
+                if (!ok) {
+                    snprintf(b, sizeof b, "[audio] queue pool 0x%lx is not "
+                             "fully readable - stopping the pool dump\n", pool);
+                    logmsg(b);
+                    goto mixer_done;
+                }
                 snprintf(b, sizeof b,
                          "[audio] pool head[+74]=0x%08lx limit[+7c]=0x%08lx "
                          "end[+84]=0x%08lx  free_ring_empty=%d\n",
@@ -2515,29 +2651,43 @@ static void segv_handler(int sig, void *info, void *ucv)
                     off[0] = 0x94; off[1] = 0x9c; off[2] = 0xa4;
                     for (k = 0; k < 3; k++) {
                         unsigned long head = pool + off[k];
-                        unsigned long node = *(unsigned long *)head;
-                        int cnt = 0;
+                        unsigned long node = 0;
+                        int cnt = 0, broke = 0;
+                        if (!gz_word(head, &node)) {
+                            snprintf(b, sizeof b, "[audio] pool list +%02x : head "
+                                     "0x%lx is not readable\n", off[k], head);
+                            logmsg(b);
+                            continue;
+                        }
                         while (node && node != head && cnt < 64) {
-                            unsigned long q = *(unsigned long *)(node + 8);
-                            if (cnt < 4 && q > 0x10000 && q < 0xb0000000) {
-                                unsigned long *qq = (unsigned long *)q;
+                            unsigned long q, qw[4], next;
+                            if (!gz_word(node + 8, &q)) { broke = 1; break; }
+                            if (cnt < 4 && q > 0x10000 && q < 0xb0000000
+                                && gz_word(q + 8, &qw[0])
+                                && gz_word(q + 16, &qw[1])
+                                && gz_word(q + 0x30, &qw[2])
+                                && gz_word(q + 0x44, &qw[3])) {
                                 snprintf(b, sizeof b,
                                          "[audio]   list+%02x[%d] queue=0x%lx fd=%ld "
                                          "total=%lu avail=%ld pops=%lu\n",
-                                         off[k], cnt, q, (long)qq[2], qq[4],
-                                         (long)qq[0x30 / 4], qq[0x44 / 4]);
+                                         off[k], cnt, q, (long)qw[0], qw[1],
+                                         (long)qw[2], qw[3]);
                                 logmsg(b);
                             }
-                            node = *(unsigned long *)node;
+                            if (!gz_word(node, &next)) { broke = 1; break; }
+                            node = next;
                             cnt++;
                         }
-                        snprintf(b, sizeof b, "[audio] pool list +%02x : %d entries\n",
-                                 off[k], cnt);
+                        snprintf(b, sizeof b, "[audio] pool list +%02x : %d entries%s\n",
+                                 off[k], cnt,
+                                 broke ? " (walk stopped: unreadable node)" : "");
                         logmsg(b);
                     }
                 }
             }
         }
+    mixer_done:
+        logmsg("[audio] --- end of the mixer dump ---\n");
     }
 
     /* The stack backtrace used to be here. It is printed right after the
@@ -2550,6 +2700,13 @@ int shim_sigaction(int sig, const void *act, void *old) __asm__("sigaction");
 int shim_sigaction(int sig, const void *act, void *old)
 {
     if (!real_sigaction) real_sigaction = dlsym(RTLD_NEXT, "sigaction");
+    /* THE TAIL CALL AT THE FOOT OF THIS FUNCTION IS A BRANCH, NOT A CALL, and
+     * on godzilla_le 1.16 the pointer it branches to had been overwritten with
+     * a game-text address whose bit 0 flipped the CPU into Thumb - see
+     * sigaction_ptr_ok(). Check before every path that can reach it. Refusing
+     * the registration costs the guest one handler; taking the branch cost it
+     * the whole run, four seconds after Start, every time. */
+    if (!sigaction_ready()) return -1;
     if (sig == 11 && getenv_pad()) {   /* SIGSEGV */
         unsigned char mine[160];
         int i;
@@ -6396,6 +6553,47 @@ static void swwalk_tick(void)
 #define SW_NODEREC(n)  (SW_STRUCT + 16u + (n) * 160u)
 #define NB_GATE   0x7a908cu     /* +276+node = per-node scan enable          */
 
+/* THE ONLY WAY TO REACH A NODE RECORD, and it can refuse.
+ *
+ * SW_NODEREC() is an offset from the switch STRUCT, and sw_struct_addr()
+ * returns `&sw_shadow[0]` when the table was found by shape instead of
+ * configured - an EIGHT-BYTE array in the shim's own .bss standing in for a
+ * struct that does not exist. SW_NODEREC(0) is already 16 bytes past the end
+ * of it, so anything read or written through it lands on whatever .bss
+ * happens to follow sw_shadow.
+ *
+ * PAD-102 IS THAT WRITE. A user's godzilla_le 1.16 died four seconds into
+ * every boot; the guest fault was our own doing, and this is the origin.
+ * sw_prime() splats an eight-byte at-rest word into rec[12..19] and rec[20..27]
+ * - the same eight bytes twice, eight bytes apart. Under a shadow that is
+ * `&sw_shadow[0] + 28` and `+36`, which in the build that shipped it were
+ * hwshim's own game_segv_fn and real_sigaction. The word is
+ * `{0xff,0x0f,0x0f,0,0,0,0,0}` = {0x000f0fff, 0}, so real_sigaction became
+ * 0x000f0fff - an odd address inside the GAME's text - and the tail call at
+ * the foot of shim_sigaction `bx`ed to it, flipping the CPU into Thumb and
+ * decoding the game's ARM text as Thumb until it stored into read-only memory.
+ * Measured, not deduced: sw_shadow at module 0x200ac in that build, +28 =
+ * 0x200c8 and +36 = 0x200d0, which are exactly the two guest addresses
+ * (0x408610c8 / 0x408610d0) found corrupt under gdb.
+ *
+ * sw_prime() had a guard - `sw_ok(tread(SW_STRUCT))` - and it passed, because
+ * under a shadow that reads sw_shadow[0], a perfectly valid entry[] pointer.
+ * Validity is not the question; WHAT IT IS is. The [swread] path already knew
+ * (`have_rec = !sw_shadow[0]`, and see its comment) and declined to read. It
+ * was the only one of three users that did. So the check lives here now, once,
+ * and every user goes through it - a fourth user cannot reintroduce this by
+ * forgetting, because there is nothing to forget.
+ *
+ * Returns 0 when there is no real node record, and 0 is not "no switches":
+ * the shadow's entry[] still works and every caller has a fallback. */
+static unsigned char *sw_noderec(unsigned node)
+{
+    if (sw_shadow[0]) return 0;      /* a shadow is entry[], never a struct */
+    if (node >= 32) return 0;
+    if (!sw_ok(tread(SW_STRUCT))) return 0;
+    return (unsigned char *)(unsigned long)SW_NODEREC(node);
+}
+
 /* Ids held ACTIVE right now: PAD_SW_HOLD plus whatever the tap sequence has
  * pressed. Byte per id. 128 was "more than the 88 this machine has" - but an
  * id is the TITLE'S table index and munsters/sword_of_rage index their whole
@@ -7117,9 +7315,11 @@ static void sw_prime(unsigned nid, const unsigned char bits[8])
     unsigned char *rec;
     unsigned i;
     if (nid >= 64 || primed[nid]) return;
-    if (!sw_ok(tread(SW_STRUCT))) return;
+    /* NOT marked primed on refusal: a shadow can be replaced by a real table
+     * later in the run, and this node still wants priming when it is. */
+    rec = sw_noderec(nid);
+    if (!rec) return;
     primed[nid] = 1;
-    rec = (unsigned char *)(unsigned long)SW_NODEREC(nid);
     for (i = 0; i < 8; i++) { rec[12 + i] = bits[i]; rec[20 + i] = bits[i]; }
     {
         char m[140];
@@ -7830,8 +8030,8 @@ static void audio_dump(void)
      * was live during David's Bond run. gz_addrs_ok() is the identity test;
      * see it for what changed and why. */
     if (!gz_addrs_ok()) {
-        logmsg("[aud] mixer/pool dump skipped: those addresses are Godzilla"
-               " Pro's and this is not that title\n");
+        logmsg("[aud] mixer/pool dump skipped: those addresses were read out"
+               " of godzilla_pro 1.15.0 (PAD_GZ_ADDRS=1 to use them)\n");
         return;
     }
 
@@ -8092,12 +8292,16 @@ static void sw_map_dump(void)
         unsigned back = 0xffff, cur = 0, gate = 0;
         if (sw_ok(nameobj))
             nm = msg_row(*(const unsigned *)(unsigned long)(nameobj + 16));
-        if (node < 32 && bit < 64) {
-            const unsigned char *rec =
-                (const unsigned char *)(unsigned long)SW_NODEREC(node);
-            back = *(const unsigned short *)(rec + 28 + bit * 2);
-            cur  = (rec[20 + (bit >> 3)] >> (bit & 7)) & 1;
-            gate = *(const unsigned char *)(unsigned long)(NB_GATE + 276 + node);
+        {
+            /* Was unguarded: under a shadow this read `rec + 28 + bit*2` for
+             * bit up to 63, i.e. up to 154 bytes past sw_shadow, and printed
+             * the shim's own .bss as the game's switch map. */
+            const unsigned char *rec = bit < 64 ? sw_noderec(node) : 0;
+            if (rec) {
+                back = *(const unsigned short *)(rec + 28 + bit * 2);
+                cur  = (rec[20 + (bit >> 3)] >> (bit & 7)) & 1;
+                gate = *(const unsigned char *)(unsigned long)(NB_GATE + 276 + node);
+            }
         }
         snprintf(line, sizeof line,
                  "[swmap] id=%-3u node=%-2u bit=%-2u map=%-4u%s cur=%u gate=%u"
@@ -8290,11 +8494,12 @@ static void sw_pend_trace(void)
          * game's nor obviously wrong. That is the shape of finding this rig
          * loses passes to, so it is not read at all rather than read badly. */
         rw = have_raw ? ((const unsigned char *)(unsigned long)raw)[id] : 0;
-        if (have_rec && node < 32 && bit < 64) {
-            const unsigned char *rec =
-                (const unsigned char *)(unsigned long)SW_NODEREC(node);
-            cur = (rec[20 + (bit >> 3)] >> (bit & 7)) & 1;
-            prv = (rec[12 + (bit >> 3)] >> (bit & 7)) & 1;
+        if (have_rec && bit < 64) {
+            const unsigned char *rec = sw_noderec(node);
+            if (rec) {
+                cur = (rec[20 + (bit >> 3)] >> (bit & 7)) & 1;
+                prv = (rec[12 + (bit >> 3)] >> (bit & 7)) & 1;
+            }
         }
         if (primed[id] && pv[id] == (unsigned char)pend &&
             lv[id] == (unsigned char)lvl && cv[id] == (unsigned char)cur &&
@@ -8894,8 +9099,9 @@ static void nb_maybe_dump(void)
         if (!said) {
             said = 1;
             logmsg("[nbtbl] skipped: the registry and hex-list dumps are "
-                   "Godzilla Pro 1.15.0 addresses and this is not that title "
-                   "(walking them here segfaulted stranger_things)\n");
+                   "godzilla_pro 1.15.0 addresses and hold for no other "
+                   "build (walking them segfaulted stranger_things); "
+                   "PAD_GZ_ADDRS=1 to use them anyway\n");
         }
     }
     nb_dump_census();

@@ -430,7 +430,7 @@ if [ -n "$PIVOT" ]; then
         cd /
         /busybox umount -l /oldroot
         cd "/games/$GAME" || exit 1
-        export LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=1
+        export LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1}
         # stdio has to point INSIDE the container. The caller's stdout is a file
         # on a host mount ($HOME/gzwatch.log for watch.sh), and that mount leaves
         # the namespace with the pivot - criu then refuses fd 1 ("Can't lookup
@@ -441,6 +441,10 @@ if [ -n "$PIVOT" ]; then
         # watch.sh must follow when it learns to launch pivot runs.
         # /.padqemu/game IS qemu (see the copy above) - named so comm stays
         # "game"; /games/$GAME/game is the real ELF it runs.
+        # PAD_QEMU_GDB=<port>: hand THIS process, and only this one, to
+        # qemu's gdbstub. Setting QEMU_GDB in the environment instead catches
+        # whichever ARM helper the rig happens to run first.
+        [ -n "${PAD_QEMU_GDB:-}" ] && export QEMU_GDB="$PAD_QEMU_GDB"
         exec /.padqemu/game ./game </dev/null >/dump/game.out 2>&1
     fi
     # Nothing was consumed by the attempt: the mounts are still the ones the
@@ -454,5 +458,5 @@ fi
 # LD_PRELOAD is applied to the game alone: the busybox tools in this rootfs do
 # not link libdl and fail to start with the shim forced on them.
 exec chroot "$R" /bin/sh -c \
-  "cd /games/$GAME && LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=1 exec ./game"
+  "cd /games/$GAME && LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1} exec ./game"
 INNER

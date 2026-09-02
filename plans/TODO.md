@@ -84,6 +84,199 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [x] **93. godzilla_le dies ~4 s after start, on a user's card, every time.
+      SOLVED 2026-09-02 — it was `sw_prime()` splatting the shim's own .bss.**
+      `S1 D4`
+      **★★★★★ ROOT CAUSE, and it is ours.** `SW_NODEREC(n)` is an offset from
+      the switch STRUCT, and `sw_struct_addr()` returns `&sw_shadow[0]` when the
+      table was found by SHAPE rather than configured — an eight-byte array in
+      hwshim's own .bss standing in for a struct that does not exist.
+      `SW_NODEREC(0)` is already 16 bytes past the end of it. `sw_prime()` then
+      writes an at-rest word into `rec[12..19]` and `rec[20..27]`: the same
+      eight bytes twice, eight bytes apart. The word is
+      `{0xff,0x0f,0x0f,0,0,0,0,0}` (hwshim.c:3589) = **{0x000f0fff, 0}**.
+      Measured, not deduced — `sw_shadow` at module 0x200ac in the build that
+      shipped it, so the two splats land at **0x200c8 and 0x200d0**, which are
+      exactly the guest addresses (0x408610c8 / 0x408610d0) found corrupt under
+      gdb, and in that build those were `game_segv_fn` and `real_sigaction`.
+      `real_sigaction` became an odd address inside the GAME's text, and
+      `shim_sigaction`'s tail call `bx`ed to it — Thumb, ARM text decoded as
+      Thumb, store into read-only memory, dead guest, every boot.
+      **Why it passed the guard it had:** `sw_prime` tested
+      `sw_ok(tread(SW_STRUCT))`, and under a shadow that reads `sw_shadow[0]` —
+      a perfectly valid `entry[]` pointer. Validity was never the question;
+      WHAT IT IS was. The `[swread]` path already knew (`have_rec =
+      !sw_shadow[0]`, and its comment says SW_NODEREC "addresses the shim's own
+      .bss" under a shadow) and declined to read. It was the only one of THREE
+      users that did; the `[swmap]` diagnostic read `rec + 28 + bit*2` for bit
+      up to 63, i.e. up to 154 bytes past `sw_shadow`, and printed the shim's
+      own .bss as the game's switch map.
+      **Why 1.16 and not 1.13 / the 1.15 Heisei:** 1.16 resolves its switch
+      table by shape (`entry[]=0x009a9990 raw[]=0x00000000`), i.e. the shadow
+      route. A configured-route title never builds a shadow and never splats.
+      **The fix is structural, not a patch at the site that bit.** One accessor,
+      `sw_noderec()` (hwshim.c, beside the macro), refuses under a shadow and
+      returns 0; all three users go through it and nothing touches `SW_NODEREC`
+      directly, so a fourth user cannot reintroduce this by forgetting.
+      `sw_prime` bails BEFORE marking the node primed, so a shadow later
+      replaced by a real table still gets primed.
+      **Verified live**, stock `godzilla_le-1_16_0`, rig lock held, shim proven
+      built from this source (three marker strings present) before trusting the
+      run: `sw_shadow[0]=0x009a9990` (shadow route, the triggering condition),
+      `+28`/`+36` clean, `sw_rest_set` intact at 33,66,67,68,69,70,71 where its
+      tail used to be clobbered, zero `[swprime]` lines, zero `[segv]`, picture
+      at frame 47, **full 6-minute backstop**, clean teardown, `alive.sh` 0.
+      Pinned by `tests/test_spike2_noderec_guard.py`.
+      **A METHOD NOTE THAT COST HOURS TWICE.** Both times this investigation
+      went wrong it was from reading a STALE hwshim.so: once a stale `nm`, once
+      a whole analysis pass whose address arithmetic used a binary that was not
+      built from this source at all (it still contained wording this branch had
+      already replaced). Before trusting ANY offset: `md5sum` the .so and grep
+      it for a string only the current source has. The rig rebuilds on a source
+      hash, and other sessions can restore an older build underneath you.
+      **Still open, separately:** the `[swmap]` and `[swread]` paths now report
+      `?` rather than garbage under a shadow, which is correct but means a
+      shadow-route title still has no node-record data. Teaching the shadow
+      installers to record the real struct base alongside `entry[]` would give
+      it back — worth its own item, not needed for this fix. *(Filed 2026-09-01 from a user's log, ticket PAD-102 — a Godzilla
+      Premium 1.16 Heisei Custom "V1.5 Orchestral" image, title folder
+      `godzilla_le`, game ELF 7962924 bytes, app v0.179.0. He sent the log and
+      nothing else; there is no card of his here.)*
+      **What his log establishes.** The run is healthy right up to the fault:
+      card mounts, 9 boards derived, node 2 silenced, renderer up on D3D12,
+      window opened 1360x768, 98 switches dumped with normal Stern numbering,
+      audio negotiated (`[play] guest reports 44100 Hz x 2 ch`). Then the guest
+      takes SIGSEGV, and the two runs in his log fault at the SAME place:
+      `pc=0x000f0660` (`= mapping + 0xe8660`, the game's own text),
+      `lr=0x1c55c`, `r0=6`, `r3=0x000f0fff`, `sp=0x407fe020`, and the faulting
+      address is **0** — a null dereference, not a wild pointer. The shim's own
+      title-agnostic counters put it inside the loading path, not idle:
+      `scene_opens=194`, `filebuf::xsgetn=992864 (small=964864)`,
+      `underflow=1606`/`1610`, `__basic_file::xsgetn=2745`/`2749` — the two runs
+      differ only in those last two, by 4 reads. The stack scan found exactly
+      one text word (`0x1b640`), so there is no useful backtrace yet.
+      **What his log does NOT establish, and this is the trap.** Every line
+      below the registers came from addresses read out of godzilla_pro 1.15.0:
+      `loader_gate[0x7e1a10]=0 boot_ready[0x7e1974]=0 thread_run=1`,
+      `event 93/94 has NO handlers`, and the whole `[audio]` mixer/pool dump —
+      whose words decode to ASCII (`0x65746164` = "date", `0x656a624f` =
+      "Obje") because they are somebody else's data. **None of it is a finding
+      about his machine.** godzilla_le is a different generation of the binary
+      from godzilla_pro (item 60's survey says so in as many words); measured
+      off the two card images at the desk, pro 1.15.0 loads `0x8000..0x6ed2c0`
+      exec + `0x6f52c0..0x842b9c` data while le 1.13.0 loads `0x8000..0x683bc0`
+      + `0x68c000..0x7d856c`, so the event table at `0x7e4d48` is not even
+      inside the le image. On his larger 1.16 build those addresses happen to
+      be mapped, which is why the walk ran. It then faulted a second time
+      inside the signal handler, mid-`[audio] list+94[0]`, so his report stops
+      there and the run ended `qemu: uncaught target signal 11 - core dumped`
+      instead of the handler's own `_exit(99)` — the exact james_bond_le
+      failure from item 80, which `gz_addrs_ok()` was supposed to have closed.
+      **Fixed on this branch (PAD-102): the gate matches the whole title name
+      now, not the first eight characters, and the mixer/pool walk reads
+      through `gz_word()` so it can never take a report down again.** Pinned by
+      `tests/test_spike2_gz_addrs_gate.py`, which compiles the real gate out of
+      `hwshim.c`.
+      **★ IT DOES NOT REPRODUCE ON EITHER CARD WE HOLD** (2026-09-01, at
+      David's ask — "we have the stock card, try it out yourself"; rig lock
+      taken and released, `alive.sh` 0 before and after both runs, cards
+      unmounted, this worktree's rig and shim):
+        - **`godzilla_le-1_13_0` (stock, game ELF 7453652 bytes) — CLEAN.**
+          Booted, 98 switches dumped, `picture: FIRST at frame 4`, attract
+          video ran the whole time at a steady 30 fps (`handed the game 61
+          frames in 2033 ms`, late 0, early 0, repeatedly), full 3-minute
+          backstop, no `[segv]`, clean teardown.
+        - **`Godzilla Premium 1.15 Heisei Custom V1.0.raw` (game ELF 7930828
+          bytes) — CLEAN.** Same: 98 switches, `picture: FIRST at frame 19`,
+          full 3-minute backstop, no `[segv]`, clean teardown. **This is the
+          same FAMILY as his card, not just the same title**: its switch dump
+          carries the 1001-series cabinet numbering (`DIP 1` at `num=1001`,
+          `Service Back` at `1012`) and the Title Case names his log shows,
+          where stock 1.13.0 numbers those `1..12` in upper case.
+      So the fault is not godzilla_le, and not the Heisei retheme either. What
+      is left that we do not hold is **his build**: 1.16-based, ELF 7962924
+      bytes, 32096 more than the 1.15 Heisei that runs fine here.
+      **The reporter half IS reproducible on demand, and is fixed** — same
+      session, no emulator run needed. Forcing the Godzilla block on against a
+      guest that has none of its addresses (`PAD_SEGV_REPORT=1
+      PAD_GZ_ADDRS=1 PAD_SW_STRUCT=0x400000`, segvtest.sh's own B guest under
+      `qemu-arm-static -L ~/spike2root`) puts a shim in exactly godzilla_le's
+      position: **v0.179.0's shim exits 139, its report stopping mid
+      `[audio] stack[48..51]` under `qemu: uncaught target signal 11 - core
+      dumped`; this branch's exits 99** — the handler's own `_exit(99)` —
+      after printing `voice[0] at 0x7b90c0 is not readable`, `no queue pool
+      pointer at 0x7b8a90 in this title` and `--- end of the mixer dump ---`.
+      That is his truncated log reproduced and closed. `segvtest.sh` itself
+      passes all four documented cases on this branch.
+      **★★★ SOLVED AS A MECHANISM, 2026-09-02, after David added the 1.16
+      images — and it is OURS, not the game's.** `godzilla_le-1_16_0` (stock)
+      and `Godzilla Premium 1.16 Heisei Custom V1.5 Standard Edition` BOTH
+      reproduce the user's crash exactly: same `pc=0xf0660`, `lr=0x1c55c`,
+      `r0=6`, `r3=0x000f0fff`, `r5=0x005e331c`, `r6=0x1b4f0`, `sl=0x40830000`,
+      `stack[65]=0x1b640`, `scene_opens=194`, `filebuf::xsgetn=992864`. So it
+      is a **1.16 regression, not the retheme** (the two 1.16 ELFs differ in
+      2162 bytes, none of them in the pc or lr page) and not his card.
+      **The death, proven under gdb through the real rig** (`PAD_QEMU_GDB`,
+      `gdb-multiarch`, SIGILL passed through — libcrypto's armcap probe faults
+      on purpose and gdb stops on it otherwise):
+        - `cpsr=0xb0030`: **the T bit is set**. The CPU is decoding the game's
+          ARM text as THUMB. gdb reads `0xf0660` as `str r4,[r3,r0]`, which
+          with `r3=0x000f0fff` stores into `0xf1005` — inside the game's own
+          `r-xp` mapping. Write to read-only text, SIGSEGV, fault address 0.
+        - How it got there: `hwshim.c`'s `sigaction` interposer ends
+          `return real_sigaction(sig, act, old);`, and GCC **tail-calls** it —
+          `ldr r3,[r3,#208]` / `ldmia sp!,{...,lr}` / `bx r3`, with lr still
+          holding the GAME's return address, which is why the crash report
+          shows `lr=0x1c55c` (just past the game's `bl sigaction@plt`) while
+          pc is nowhere near sigaction. **`bx` on an odd value switches to
+          Thumb**, and the cached pointer had been overwritten with
+          `0x000f0fff`.
+        - Measured directly: at the game's `_start` (constructors done)
+          `real_sigaction = 0x40ac1f54`, a good libc pointer; by the game's
+          first `sigaction()` ~4 s later it is `0x000f0fff`. Both assignments
+          in the shim are guarded by `if (!real_sigaction)`, so **no code of
+          ours replaces a non-NULL value** — something else writes it.
+      **The stray write is REAL, address-fixed, and still unexplained.** It
+      puts `0x000f0fff` at guest **0x408610c8 and 0x408610d0** (hwshim.so is
+      loaded at 0x40841000). Rebuilding the shim moved `real_sigaction` off
+      0x200d0 — and the write still lands on those same two addresses, now
+      hitting `sw_rest_set`'s tail and `used.65` instead. So the addresses are
+      the target, not the variables. **Consequence today: the boot survives
+      only because the .bss shuffled**, and `sw_rest_set` now reads
+      `{33,66,67,68,0xf0fff…}` instead of `{33,66,67,68,69,70,71}` — the
+      rest-switch list is quietly wrong, and the next edit that moves .bss can
+      put `real_sigaction` back under the gun.
+      **Shipped on this branch: the shim will not BRANCH to that pointer.**
+      `sigaction_ptr_ok()` / `sigaction_ready()` reject any `real_sigaction`
+      that lands inside the game's own image (impossible for libc: the game is
+      a fixed EXEC at 0x8000, libc is mapped high), re-resolve through `dlsym`
+      and say so once. Deliberately NOT a bit-0 test — a Thumb libc would set
+      it legitimately. **Verified by poisoning the live guest**: `set
+      *(unsigned *)&real_sigaction = 0x000f0fff` under gdb, next call logged
+      `[segv] real_sigaction was 0xf0fff, which is inside the game's own image
+      - not calling it; re-resolving`, recovered `0x40ac1f54`, and the guest
+      ran on. Both 1.16 cards now boot to picture and hold a 3-minute run.
+      **A SECOND, SEPARATE FINDING worth its own item.** The wild
+      `sigaction(11, …)` calls in the trace come from **`gst_plugin_load_file
+      + 1964` in `libgstreamer-0.10.so.0`** — GStreamer 0.10 wraps every
+      plugin load in a SIGSEGV guard so a bad plugin cannot kill the process,
+      and it passes an `act` pointer that is wild and DIFFERENT every run
+      (`0xa543aa0c`, `0xa5334a0c`). Our `PAD_SEGV_REPORT` branch ignores that
+      `act`, installs `segv_handler` instead and returns 0, so GStreamer
+      believes its guard is armed while ours is — and ours `_exit(99)`s rather
+      than recovering. That converts a plugin fault GStreamer is designed to
+      survive into a dead run. Not touched this pass.
+      **What is left.** Name the writer of the 8 bytes at 0x408610c8. gdb
+      hardware watchpoints are not available through qemu-user's gdbstub here
+      (`Could not insert hardware watchpoint`) and a software one would
+      single-step four seconds of guest, so the next pass needs a different
+      instrument — a canary the shim itself checks from a hot interposer, or
+      `QEMU_STRACE` to catch a syscall writing there.
+      — S1: the title does not play at all for this user, and boot-crash is the
+      floor. D4: does not reproduce on either card here, so it needs his image
+      or his log, and the one instrument that would have named the fault was
+      printing another title's memory until today.
+
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`
       *(Found 2026-09-01 while answering David's "will our fixes work on

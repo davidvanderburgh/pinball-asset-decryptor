@@ -199,6 +199,16 @@ else GAME_ELF="$ROOT/games/$GAME/game"; fi
 # 10/11/13/15 claimed as firmware-0.1.0 pinnodes it never had. Written
 # tmp+mv so a failed derivation cannot half-write the file; failure keeps
 # the shim's built-in fallback, which is exactly the pre-item-51 behaviour.
+# IS THIS FIRMWARE STERN'S, OR ONE WE REWROTE? One line, every run, because a
+# log cannot be re-read later for a fact nobody recorded. PAD-102 was chased
+# against a rethemed card on the assumption custom content was involved (it was
+# not - the stock image crashed the same way), and the reverse mistake costs
+# more: a log from a card whose firmware PAD's blip-free patch rewrote, read as
+# stock, sends the next pass hunting a Stern bug we introduced. Structural, no
+# addresses - see gameinfo.firmware_provenance().
+PROV=$(python3 "$RIG/gameinfo.py" --provenance "$GAME_ELF" 2>/dev/null)
+[ -n "$PROV" ] && echo "[watch] firmware: $PROV"
+
 NBID="$PAD_TABLES/$GAME/node_ident.txt"
 mkdir -p "$PAD_TABLES/$GAME" 2>/dev/null
 NBID_FRESH=0

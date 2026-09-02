@@ -278,16 +278,17 @@ void egl_stern_close(struct egl_stern *e)
 {
     if (!e->up) return;
     /* default-looking state for whoever draws next (the bridge host keeps
-     * GL state across guests; Vivante does not care) */
+     * GL state across guests; Vivante does not care). NO clear and NO swap
+     * here: the LOADING frame was swapped in one vsync ago and has to stay
+     * on the LCD until the game's first frame, many seconds later - a
+     * teardown swap of a cleared buffer blanked the panel for all of them.
+     * The resets are state, not pixels; the bridge needs no swap for them. */
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
     glUseProgram(0);
     glDisable(GL_BLEND);
     glViewport(0, 0, e->w, e->h);
-    glClearColor(0.f, 0.f, 0.f, 1.f);
-    glClear(GL_COLOR_DEPTH_BITS);
-    eglSwapBuffers(e->dpy, e->surf);
-    sel_log("egl: %d frames, closing", e->frames);
+    sel_log("egl: %d frames, closing (the LOADING frame stays up)", e->frames);
     egl_drop(e);                                       /* boot_display @0x12628 */
 }

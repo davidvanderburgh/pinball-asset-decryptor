@@ -134,10 +134,12 @@ only (the bridge refuses client-side arrays), ONE RGBA8 texture created with
 (the bridge keeps per-name shadows across guests), never `glPixelStorei` (not
 exported by the bridge). The whole bring-up is retried 6 times 500 ms apart
 because on hardware boot_display may still be releasing the display. Teardown
-leaves default-looking GL state (unbind, `glUseProgram(0)`, blend off, one
-black frame), then `eglMakeCurrent(dpy,0,0,0)`, `eglTerminate`,
-`eglReleaseThread`. No `eglDestroy*` (the shims do not export them). Every
-EGL/GL/fb prototype is hand-written; no Khronos headers exist on the box.
+leaves default-looking GL state (unbind, `glUseProgram(0)`, blend off, the
+viewport reset - and NO clear or swap: the `LOADING` frame just shown has to
+stay on the LCD until the game's first frame, many seconds later), then
+`eglMakeCurrent(dpy,0,0,0)`, `eglTerminate`, `eglReleaseThread`. No
+`eglDestroy*` (the shims do not export them). Every EGL/GL/fb prototype is
+hand-written; no Khronos headers exist on the box.
 
 Proven against the rig's bridge libs on a private ring (ringcat.py as the
 host): attach, `TEXIMAGE 1360x768 RGBA/UNSIGNED_BYTE`, one `TEXSUBIMAGE` per
@@ -219,7 +221,13 @@ flippers are unknown - use `-`/`=`/`1`).
 ## Tests
 
 `make check` (all under qemu-arm-static against the rootfs libs, no chroot,
-no rig):
+no rig). The emulator is handed to the test scripts through the environment
+(`QEMU=...`, exported by the Makefile), never on their command line: a rig
+teardown (`killgame.sh`, `watch.sh`) does `pkill -9 -f 'arm-binfmt|qemu-arm'`,
+and a `bash test/x.sh qemu-arm-static ...` argv matched it, so a concurrent
+teardown killed the tests. Only the short-lived qemu child matches now - so
+still, `make check` / `check-hw` must not run while a rig run is being torn
+down.
 
 1. `test/check_elf.sh` - the readelf ceiling above.
 2. `test/headless.sh` - six headless renders (2/3/4 images, `--default 1`,

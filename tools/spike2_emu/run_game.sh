@@ -57,14 +57,20 @@ if [ -n "${PAD_CARD:-}" ]; then
     # primary without a word is the fault every gate in this rig exists for.
     SEL_DIRS=""
     if [ -n "${PAD_SELECT:-}" ]; then
+        # Every refusal below leaves through `rmdir "$R/games/$GAME"`: the
+        # stub the mkdir above made is the bind mountpoint, and the EXIT
+        # trap that removes it is not installed until further down - so an
+        # early exit used to leave an empty games/<title> behind, which the
+        # Emulate tab then offered as an extracted title (see the trap).
         if [ ! -x "$PAD_SELECT_BIN" ]; then
             echo "[run] PAD_SELECT is set but the boot selector is not built:" >&2
             echo "[run]   $PAD_SELECT_BIN is missing" >&2
             echo "[run]   (buildselect.sh builds it; watch.sh does that itself)" >&2
+            rmdir "$R/games/$GAME" 2>/dev/null
             exit 1
         fi
         SEL_LIST=$(python3 "$S/parts.py" --list-games "$PAD_CARD" 2>/dev/null)
-        [ -n "$SEL_LIST" ] || { echo "[run] PAD_SELECT: no games partition found on $PAD_CARD" >&2; exit 1; }
+        [ -n "$SEL_LIST" ] || { echo "[run] PAD_SELECT: no games partition found on $PAD_CARD" >&2; rmdir "$R/games/$GAME" 2>/dev/null; exit 1; }
         SEL_CARDCONF=$(python3 "$S/parts.py" --rootfs-file /usr/local/codeselect/images.conf "$PAD_CARD" 2>/dev/null)
         SEL_N=0; SEL_PRIMARY=""; SEL_IMAGES=""
         while read -r idx _lba _off titles; do
@@ -76,7 +82,7 @@ if [ -n "${PAD_CARD:-}" ]; then
                 SEL_PRIMARY=$idx; d=$CARD_SRC
             else
                 d=$(bash "$S/cardmount.sh" "$PAD_CARD" --part "$idx" | tail -1)
-                [ -d "$d" ] || { echo "[run] could not mount partition $idx of $PAD_CARD" >&2; exit 1; }
+                [ -d "$d" ] || { echo "[run] could not mount partition $idx of $PAD_CARD" >&2; rmdir "$R/games/$GAME" 2>/dev/null; exit 1; }
             fi
             # 'image=/dev/mmcblk0pN|<title>|<subtitle>' on the card -> the
             # same title and subtitle here; else name it after the partition.
@@ -464,11 +470,22 @@ fi
 # is a second bind stacked over the card bind at games/$GAME: same
 # mountpoint, the chosen image's files win, nothing is unmounted. Then the
 # -invert masking below reads the CHOSEN build's boot_display_cmd.
+#
+# --no-invert, BECAUSE THE MASKING RUNS AFTER THE MENU. The selector's default
+# is boot_display's own rule - rotate 180 when /games/data/boot_display_cmd
+# says -invert - and on the machine that is right. Here the ITEM 45 block
+# below masks that file for the GAME, but only after the selector has run, so
+# a title that ships -invert (james_bond_60th_le) drew its menu upside down
+# while its game came up the right way round. PAD_DISPLAY_INVERT=1 keeps the
+# machine's behaviour for the game, so then the selector is left to auto-detect
+# and the two agree either way.
 if [ -n "$SEL_DIRS" ]; then
     rm -f "$R/dump/vidroot"
     rm -f "$R$PAD_SELECT_CHOICE"
+    SEL_INV="--no-invert"
+    [ "${PAD_DISPLAY_INVERT:-0}" = "1" ] && SEL_INV=""
     echo "[select] menu up: LEFT/RIGHT flipper (arrows) move, START (1) confirms; auto-boot in ${PAD_SELECT_TIMEOUT:-30} s"
-    chroot "$R" /usr/local/codeselect/codeselect --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log </dev/null
+    chroot "$R" /usr/local/codeselect/codeselect --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log $SEL_INV </dev/null
     SEL_RC=$?
     SEL_CHOICE=$(head -1 "$R$PAD_SELECT_CHOICE" 2>/dev/null | tr -dc '0-9')
     SEL_DIR=""; SEL_IDX=""; SEL_PRIMARY_DIR=""; n=0

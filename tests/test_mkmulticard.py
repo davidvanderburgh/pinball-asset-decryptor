@@ -10,6 +10,7 @@ the tool's own `selftest` subcommand under WSL instead.
 """
 import hashlib
 import os
+import re
 import sys
 
 import pytest
@@ -147,12 +148,54 @@ def test_two_image_ebr_chain(mk):
     (3, (9, 42158080, 42158078), 28_446_818_304, False, True),
 ])
 def test_three_and_four_image_plans(mk, n_extra, p_last, total_bytes, fit16, fit32):
+    """The arithmetic past p7 still holds - and the plan names p8/p9 as unreachable and refuses:
+    the card's kernel (CONFIG_MMC_BLOCK_MINORS=8) allocates minors for p1..p7 only, so a third
+    image on /dev/mmcblk0p8 can never be mounted on the machine."""
     plan = mk.Plan(stock_8g(mk), [extra_8g(mk, "x%d.raw" % i) for i in range(n_extra)])
     last = plan.logs[-1]
     assert (last.num, last.start, last.ebr) == p_last
     assert plan.total_bytes == total_bytes
     assert (plan.fits()["16G"] >= 0, plan.fits()["32G"] >= 0) == (fit16, fit32)
     assert len(plan.images) == n_extra + 1
+    beyond = list(range(8, 8 + n_extra - 1))
+    assert [p.num for p in plan.unreachable()] == beyond
+    assert plan.unreachable_note() == "/".join("p%d" % n for n in beyond) + " unreachable on the machine"
+    with pytest.raises(mk.Refused, match="p7 is the last partition"):
+        mk.check_reachable(plan)
+    assert mk.check_reachable(plan, allow=True) is plan
+
+
+def test_two_images_are_reachable_and_the_printout_says_when_more_are_not(mk, capsys):
+    two = mk.Plan(stock_8g(mk), [extra_8g(mk, "b.raw")], "a.raw", ["b.raw"])
+    assert two.unreachable() == [] and two.unreachable_note() == ""
+    assert mk.check_reachable(two) is two
+    mk.print_plan(two)
+    assert "unreachable" not in capsys.readouterr().out
+    three = mk.Plan(stock_8g(mk), [extra_8g(mk, "b.raw"), extra_8g(mk, "c.raw")], "a.raw", ["b.raw", "c.raw"])
+    mk.print_plan(three)
+    out = capsys.readouterr().out
+    assert "fits Stern 32G" in out
+    # the images line, each of the three fits lines, and the warning
+    assert out.count("p8 unreachable on the machine") >= 5
+    assert "CONFIG_MMC_BLOCK_MINORS=8" in out
+
+
+def test_plan_and_build_refuse_a_third_image_unless_told(mk, tmp_path, capsys):
+    A = mk.make_synthetic_card(str(tmp_path / "A.img"), "A", 0x0A0A0A0A)
+    B = mk.make_synthetic_card(str(tmp_path / "B.img"), "B", 0x0B0B0B0B)
+    C = mk.make_synthetic_card(str(tmp_path / "C.img"), "C", 0x0C0C0C0C)
+    assert mk.main(["plan", "--primary", A, "--extra", B]) == 0
+    assert "unreachable" not in capsys.readouterr().out
+    assert mk.main(["plan", "--primary", A, "--extra", B, "--extra", C]) == 2
+    err = capsys.readouterr().err
+    assert "/dev/mmcblk0p8" in err and "CONFIG_MMC_BLOCK_MINORS=8" in err and "--allow-unreachable" in err
+    assert mk.main(["plan", "--primary", A, "--extra", B, "--extra", C, "--allow-unreachable"]) == 0
+    assert "p8 unreachable on the machine" in capsys.readouterr().out
+    # build refuses BEFORE a byte is written
+    out = tmp_path / "multi.img"
+    assert mk.main(["build", "--primary", A, "--extra", B, "--extra", C, "--out", str(out), "--no-inject"]) == 2
+    assert "p7 is the last partition" in capsys.readouterr().err
+    assert not out.exists()
 
 
 def test_plan_refuses_a_primary_without_a_logical_chain(mk):
@@ -282,6 +325,93 @@ def test_output_path_refusals(mk, tmp_path):
     assert mk.check_output_path(str(out), [], must_exist=True) == str(out)
     with pytest.raises(mk.Refused):
         mk.check_output_path("", [])
+
+
+def test_the_library_refusal_follows_symlinks_and_junctions(mk, tmp_path, monkeypatch):
+    """The repo's own images/ is a link into D:\\Pinball\\images - the card library - so a
+    prefix test on the SPELLED path let `images/x.raw` straight through.  Links are resolved
+    (an output that does not exist yet through its parent)."""
+    lib = tmp_path / "Pinball" / "images"
+    lib.mkdir(parents=True)
+    link = tmp_path / "repo" / "images"
+    link.parent.mkdir()
+    try:
+        os.symlink(str(lib), str(link), target_is_directory=True)
+    except (OSError, NotImplementedError) as e:
+        pytest.skip("cannot create a symlink here: %s" % e)
+    monkeypatch.setattr(mk, "FORBIDDEN_OUTPUT_PREFIXES", (str(lib),))
+    with pytest.raises(mk.Refused, match="card library"):
+        mk.check_output_path(str(link / "x.raw"), [])                   # not there yet: the parent resolves
+    (lib / "y.raw").write_bytes(b"y")
+    with pytest.raises(mk.Refused, match="card library"):
+        mk.check_output_path(str(link / "y.raw"), [], force=True)       # exists: resolved itself
+    with pytest.raises(mk.Refused, match="card library"):
+        mk.check_output_path(str(link / "deeper" / "z.raw"), [])        # a new directory under the link
+    # ...and a linked INPUT names the same file as its target (outside the library, where
+    # the library rule would fire first)
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "y.raw").write_bytes(b"y")
+    alias = tmp_path / "alias"
+    os.symlink(str(real), str(alias), target_is_directory=True)
+    with pytest.raises(mk.Refused, match="also an input"):
+        mk.check_output_path(str(alias / "y.raw"), [str(real / "y.raw")], force=True)
+    assert mk.check_output_path(str(alias / "new.raw"), [str(real / "y.raw")]) == str(alias / "new.raw")
+    assert mk.check_output_path(str(tmp_path / "elsewhere.raw"), []) == str(tmp_path / "elsewhere.raw")
+
+
+def test_debugfs_commands_quote_a_staged_path_with_a_space(mk):
+    """debugfs parses its script with libss: `write /tmp/my stage/x /usr/local/x` is three
+    words.  A card under 'D:\\Pinball\\TMNT 1987\\multi' stages exactly there."""
+    items = [("/tmp/my stage/codeselect", "/usr/local/codeselect/codeselect", 0o755),
+             ("/tmp/my stage/game", "/etc/init.d/game", 0o755)]
+    cmds = mk.inject_commands(items, None, {"mtime": 1234, "atime": 1})
+    assert cmds[:2] == ['mkdir "/usr/local/codeselect"', 'rm "/etc/init.d/game"']
+    assert 'write "/tmp/my stage/codeselect" "/usr/local/codeselect/codeselect"' in cmds
+    assert 'write "/tmp/my stage/game" "/etc/init.d/game"' in cmds
+    assert 'set_inode_field "/usr/local/codeselect/codeselect" mode 0100755' in cmds
+    assert 'set_inode_field "/etc/init.d/game" mtime @1234' in cmds
+    assert 'set_inode_field "/etc/init.d/game" atime @1' in cmds
+    assert not [c for c in cmds if re.search(r'(^|\s)/', c)], "a bare (unquoted) path in %r" % cmds
+    # an existing selector directory: its entries go first, by quoted path
+    cmds = mk.inject_commands(items, ["codeselect", "old.ttf"], {})
+    assert cmds[:3] == ['rm "/usr/local/codeselect/codeselect"', 'rm "/usr/local/codeselect/old.ttf"',
+                        'rm "/etc/init.d/game"']
+    assert mk.dq("/plain") == '"/plain"'
+    with pytest.raises(mk.Refused):
+        mk.dq('a"b')
+
+
+def test_p2_sidecar_records_the_whole_range_and_sees_a_flipped_byte(mk, tmp_path):
+    """verify cannot compare p2 to its source (it is patched), so without the sidecar a p2
+    corrupted outside the injected files passed."""
+    A = mk.make_synthetic_card(str(tmp_path / "A.img"), "A", 0x0A0A0A0A)
+    p2_off, p2_len = 10240 * 512, 2048 * 512
+    assert mk.p2_range(A) == (p2_off, p2_len)
+    assert mk.read_p2_sidecar(A) is None and mk.check_p2_sidecar(A)[0] is None
+    h = mk.write_p2_sidecar(A)
+    side = tmp_path / "A.img.p2.md5"
+    assert mk.p2_sidecar_path(A) == str(side) and side.is_file()
+    assert side.read_text().split() == [h, "p2", "@%d+%d" % (p2_off, p2_len)]
+    assert h == mk.md5_range(A, p2_off, p2_len)
+    assert mk.read_p2_sidecar(A) == h and mk.check_p2_sidecar(A) == (h, h)
+
+    def flip(off):
+        with open(A, "r+b") as f:
+            f.seek(off)
+            b = f.read(1)
+            f.seek(off)
+            f.write(bytes([b[0] ^ 1]))
+
+    flip(p2_off + p2_len - 1)                          # p2's last byte
+    want, got = mk.check_p2_sidecar(A)
+    assert want == h and got != h
+    flip(p2_off + p2_len - 1)                          # back
+    flip(p2_off + p2_len)                              # p3's first byte: not p2's business
+    assert mk.check_p2_sidecar(A) == (h, h)
+    side.write_text("garbage\n")
+    with pytest.raises(mk.Refused, match="sidecar"):
+        mk.read_p2_sidecar(A)
 
 
 def test_build_cli_refuses_before_reading_anything(mk, tmp_path, capsys):

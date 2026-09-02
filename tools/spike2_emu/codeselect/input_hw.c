@@ -35,8 +35,8 @@ struct hw {
     struct input base;
     int fd, spi;
     int logged;
-    long next_scan, next_spi;
-    long node_retry[2];            /* [0] node 8, [1] node 1: not before this time */
+    long long next_scan, next_spi;         /* sel_now_ms() deadlines: long long, see log.h */
+    long long node_retry[2];               /* [0] node 8, [1] node 1: not before this time */
     int node_fail[2];
     unsigned char sw[2][8];
     int sw_valid[2];
@@ -73,7 +73,7 @@ static int write_all(int fd, const unsigned char *b, int n)
 static int read_exact(int fd, unsigned char *b, int n)
 {
     int got = 0;
-    long deadline = sel_now_ms() + 1000;
+    long long deadline = sel_now_ms() + 1000;
     while (got < n) {
         struct pollfd p;
         int r;
@@ -343,7 +343,7 @@ static void spi_poll(struct hw *h)
 
 /* ------------------------------------------------------------- scanning */
 
-static void scan_node(struct hw *h, int slot, long now)
+static void scan_node(struct hw *h, int slot, long long now)
 {
     static const unsigned char c11[] = { 0x11 };
     int node = slot == 0 ? NODE_FLIPPERS : NODE_START;
@@ -377,7 +377,7 @@ static void scan_node(struct hw *h, int slot, long now)
     }
 }
 
-static void hw_poll(struct input *in, long now)
+static void hw_poll(struct input *in, long long now)
 {
     struct hw *h = (struct hw *)in;
     if (h->fd >= 0 && now >= h->next_scan) {

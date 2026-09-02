@@ -2,9 +2,11 @@
 # select_sh_test.sh [QEMU ROOT] - select.sh's images.conf lookup against
 # images.conf.example, with the host awk and, when QEMU/ROOT are given (or
 # found), with the card's own busybox awk run under qemu-arm-static.
+# QEMU is taken from the environment when not given (the Makefile exports it;
+# an argv naming qemu is what a rig teardown's pkill matches).
 set -e
 HERE=$(cd "$(dirname "$0")/.." && pwd)
-QEMU=${1:-qemu-arm-static}
+QEMU=${1:-${QEMU:-qemu-arm-static}}
 ROOT=${2:-/home/david/spike2root}
 cd "$HERE"
 

@@ -13,7 +13,11 @@ int  sel_log_open(const char *path);      /* 0 ok, -1 could not open (stderr sti
 void sel_log_close(void);
 void sel_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void sel_say(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-long sel_now_ms(void);                    /* CLOCK_MONOTONIC in milliseconds */
+/* CLOCK_MONOTONIC in milliseconds. long long, NOT long: armhf's long is 32
+ * bits and tv_sec * 1000 wraps after 24.86 days of uptime - a WSL2 VM runs
+ * that long, and every deadline compare would then go backwards. Everything
+ * that holds or compares one of these is long long. */
+long long sel_now_ms(void);
 void sel_sleep_ms(long ms);
 
 #endif

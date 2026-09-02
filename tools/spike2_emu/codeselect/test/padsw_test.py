@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""padsw_test.py QEMU ROOT BIN T TABLES [FONT]
+"""QEMU=qemu-arm-static padsw_test.py ROOT BIN T TABLES [FONT]
 
 Drives codeselect --input padsw the way padglhost does: a 4096-byte padsw
 file (magic 'PADS', gen at 4, held[] at 8), RIGHT held for 100 ms then
 released, then START held. Expects '[select] key: right', '[select] chose 1'
-and a choice file holding 1 (highlight started at 0)."""
+and a choice file holding 1 (highlight started at 0).
+
+The emulator comes from the environment ($QEMU, exported by the Makefile),
+not argv: the rig's teardown does pkill -f 'arm-binfmt|qemu-arm' and this
+script's own command line must not match it."""
 import os
 import struct
 import subprocess
@@ -42,8 +46,9 @@ def set_held(path, sid, value):
 
 
 def main():
-    qemu, root, binp, t, tables = sys.argv[1:6]
-    font = sys.argv[6] if len(sys.argv) > 6 and os.path.isfile(sys.argv[6]) else \
+    root, binp, t, tables = sys.argv[1:5]
+    qemu = os.environ.get("QEMU", "qemu-arm-static")
+    font = sys.argv[5] if len(sys.argv) > 5 and os.path.isfile(sys.argv[5]) else \
         os.path.join(root, "usr/local/spike/VeraMono.ttf")
     os.makedirs(t, exist_ok=True)
     conf = os.path.join(t, "padsw.conf")

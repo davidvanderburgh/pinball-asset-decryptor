@@ -43,7 +43,7 @@ void input_sample(struct input *in, int key, int pressed)
     }
 }
 
-int input_poll(struct input *in, long now_ms)
+int input_poll(struct input *in, long long now_ms)
 {
     int ev;
     if (!in) return EV_NONE;

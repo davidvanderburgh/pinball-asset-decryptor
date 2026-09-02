@@ -268,7 +268,7 @@ int main(int argc, char **argv)
     char err[300], fontpath[300], tables[400], padsw[400];
     int headless, invert, timeout, n, hl, chosen = -1, w, h;
     const char *how;
-    long start, deadline, last_key;
+    long long start, deadline, last_key;      /* sel_now_ms() values: long long, see log.h */
     int remain_shown = -2, dirty;
     int rc = 2;
     const unsigned char *px;
@@ -339,7 +339,7 @@ int main(int argc, char **argv)
 
     start = sel_now_ms();
     last_key = start;
-    deadline = timeout > 0 ? start + (long)timeout * 1000L : 0;
+    deadline = timeout > 0 ? start + (long long)timeout * 1000LL : 0;
     draw_menu(&g, font, &c, hl, deadline ? timeout : -1);
     remain_shown = deadline ? timeout : -1;
     dirty = 0;
@@ -347,7 +347,7 @@ int main(int argc, char **argv)
     if (!headless) egl_stern_texture(&egl, w, h, px);
 
     while (!g_stop) {
-        long now = sel_now_ms();
+        long long now = sel_now_ms();
         int ev, remain;
 
         while ((ev = input_poll(in, now)) != EV_NONE) {
@@ -373,7 +373,7 @@ int main(int argc, char **argv)
         if (chosen >= 0) break;
         if (deadline) {
             /* a key restarts the countdown so a reader is not cut off */
-            if (last_key > start) { deadline = last_key + (long)timeout * 1000L; start = last_key; }
+            if (last_key > start) { deadline = last_key + (long long)timeout * 1000LL; start = last_key; }
             if (now >= deadline) {
                 sel_log("countdown expired: booting image %d", hl);
                 chosen = hl;

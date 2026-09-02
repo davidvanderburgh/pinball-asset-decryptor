@@ -1,10 +1,14 @@
 #!/bin/bash
-# headless.sh QEMU ROOT BIN T DEJAVU - render the menu without EGL under
-# qemu-arm-static against the card rootfs libs, check the choice/last files,
-# the PPM shape, the default/last-choice precedence and the -invert rotation,
-# and convert every frame to PNG in $T for eyes.
+# QEMU=qemu-arm-static headless.sh ROOT BIN T DEJAVU - render the menu without
+# EGL under qemu-arm-static against the card rootfs libs, check the choice/last
+# files, the PPM shape, the default/last-choice precedence and the -invert
+# rotation, and convert every frame to PNG in $T for eyes.
+# The emulator comes from the ENVIRONMENT, not argv: the rig's teardown does
+# pkill -f 'arm-binfmt|qemu-arm', and this script's own command line must
+# not match it (see the Makefile).
 set -e
-QEMU=$1; ROOT=$2; BIN=$3; T=$4; DEJAVU=$5
+QEMU=${QEMU:-qemu-arm-static}
+ROOT=$1; BIN=$2; T=$3; DEJAVU=$4
 HERE=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$T"
 if [ -f "$DEJAVU" ]; then FONT=$DEJAVU; else FONT=$ROOT/usr/local/spike/VeraMono.ttf; fi

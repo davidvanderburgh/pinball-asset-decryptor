@@ -35,7 +35,7 @@ struct ps {
     struct input base;
     char path[512], tables[512];
     int fd;
-    long next_open, next_poll, next_table;
+    long long next_open, next_poll, next_table;    /* sel_now_ms() deadlines: long long, see log.h */
     int id[KEY_COUNT];
     int have_table, open_logged, magic_logged;
     unsigned char buf[PADSW_BYTES];
@@ -87,7 +87,7 @@ static int table_load(struct ps *p)
     return found;
 }
 
-static void ps_poll(struct input *in, long now)
+static void ps_poll(struct input *in, long long now)
 {
     struct ps *p = (struct ps *)in;
     int k;

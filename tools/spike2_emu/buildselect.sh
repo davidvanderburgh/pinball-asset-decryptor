@@ -28,6 +28,24 @@
 set -e
 R=$ROOT
 
+# cardmount.sh's give_back(): what a ROOT run of this script writes (the GUI's
+# PAD_PIVOT start builds the selector as root) is handed to the desktop user
+# afterwards. Without it the installed tree, the staged sources and objects
+# and the stamp are root-owned, the next rebuild as david fails on a
+# permission it does not have, and the STALE selector keeps running. Only as
+# root, and only when that user is not root; recursive, because the build
+# directory is a tree. Never fatal (set -e): a build that could not be given
+# back is still a build.
+give_back() {
+    [ "$(id -u)" = 0 ] || return 0
+    local o
+    o=$(stat -c %U "$HOME" 2>/dev/null)
+    if [ -n "$o" ] && [ "$o" != root ]; then
+        chown -R "$o" "$@" 2>/dev/null || true
+    fi
+    return 0
+}
+
 if [ ! -f "$RIG/codeselect/Makefile" ]; then
     echo "no $RIG/codeselect/Makefile - the boot selector's sources are not in this rig" >&2
     exit 1
@@ -74,6 +92,9 @@ fi
 # WHAT WAS COMPILED, recorded beside what came out of it, and only after a
 # successful build (set -e) so a failed build never claims to be current.
 pad_select_hash "$RIG" > "$PAD_SELECT_STAMP"
+# AFTER the stamp, so the stamp is covered too (it sits inside the installed
+# tree, but it is named so a moved stamp path cannot escape the hand-over).
+give_back "$R/usr/local/codeselect" "$STAGE/codeselect" "$PAD_SELECT_STAMP"
 echo "built ok: $(stat -c%s "$PAD_SELECT_BIN") bytes at $PAD_SELECT_BIN"
 [ -f "$R/usr/local/codeselect/font.ttf" ] && echo "font: $R/usr/local/codeselect/font.ttf" \
     || echo "font: none installed (the selector falls back to the card's VeraMono.ttf)"

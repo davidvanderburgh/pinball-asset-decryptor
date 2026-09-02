@@ -1124,14 +1124,42 @@ echo "[watch] starting $GAME (boot to the first picture takes ~15 s)"
 # wait for ever); SEL_WAIT gives the game a minute on top of it to appear.
 # Removed on a plain run, so a stale flag from an aborted selector run can
 # never leak into the next start.
+#
+# THE BOUND RIDES THE SELECTOR'S LIFE, NOT THE CLOCK. The selector restarts
+# its countdown on every key press, so a player reading the menu can hold it
+# up for longer than any wall-clock figure - and a bound of SEL_WAIT from the
+# flag's own timestamp then called the selector-exit gap "the game exited"
+# and tore the session down under a live menu. So: while `pgrep -x
+# codeselect` finds the selector the flag's mtime is refreshed (touch), and
+# the flag only goes stale once the selector has been GONE for SEL_GAP
+# seconds with no game in its place (the exec gap is tens of milliseconds).
+# SEL_WAIT still bounds the phase BEFORE the selector has ever been seen (a
+# run_game.sh that never reaches it), and 0 still means wait for ever there;
+# sel_flag_stale() below is the one place that says all this.
 if [ -n "${PAD_SELECT:-}" ]; then
     SEL_TO=${PAD_SELECT_TIMEOUT:-30}
     case "$SEL_TO" in ''|*[!0-9]*) SEL_TO=30 ;; esac
     if [ "$SEL_TO" = 0 ]; then SEL_WAIT=0; else SEL_WAIT=$((SEL_TO + 60)); fi
+    SEL_GAP=30; SEL_SEEN=""
     : > "$ROOT/dump/selecting"
 else
     rm -f "$ROOT/dump/selecting" "$ROOT/dump/vidroot"
 fi
+# 0 = the flag has outlived the selector: stop waiting on it. 1 = keep
+# waiting (and the selector is alive, or was seen alive less than SEL_GAP s
+# ago, or has not appeared yet and SEL_WAIT has not run out). Only ever
+# called under PAD_SELECT.
+sel_flag_stale() {
+    local age bound
+    if pgrep -x codeselect >/dev/null 2>&1; then
+        touch "$ROOT/dump/selecting" 2>/dev/null
+        SEL_SEEN=1
+        return 1
+    fi
+    age=$(( $(date +%s) - $(stat -c %Y "$ROOT/dump/selecting" 2>/dev/null || echo 0) ))
+    if [ -n "$SEL_SEEN" ]; then bound=$SEL_GAP; else bound=$SEL_WAIT; fi
+    [ "$bound" != 0 ] && [ "$age" -ge "$bound" ]
+}
 setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_SW_SHM="$SW_GUEST" PAD_LED_SHM="$LED_GUEST" \
            PAD_LCD_SHM="$LCD_GUEST" PAD_LCD_NODE="${PAD_LCD_NODE:-$LCD_NODE}" \
@@ -1226,7 +1254,27 @@ if [ "${PAD_PLAYFIELD:-1}" != 0 ]; then
     # window by a minute on every first run of a title; never blocking would
     # open an empty window for a title that has no artwork and no device table,
     # which is exactly what Led Zeppelin and Elvira are.
-    if grep -q '^drawable=yes' "$TBL_OUT"; then
+    if [ -n "${PAD_SELECT:-}" ]; then
+        # ★ ITEM 90: HELD BACK until the boot selector has chosen, the same
+        # shape as autoattract below. --wait is measured from mktables' own
+        # start, and a menu phase longer than PF_WAIT ate the whole budget on
+        # a title whose switch table is not cached yet. The wrapper waits for
+        # dump/selecting to go (its age, bounded like everything else here),
+        # then BECOMES mktables.py - exec, so $! is what teardown kills and the
+        # 'mktables[.]py' patterns in alive.sh/killgame.sh see it throughout
+        # (the wrapper's own command line carries the name). In the
+        # background whether or not there is a drawing: a foreground wait
+        # here would block this script through the menu phase, and the wait
+        # loop further down is what tracks the selector.
+        echo "[watch]   the switch table follows in the background, once the boot selector has chosen"
+        setsid_as_user bash -c 'f=$1; b=$2; shift 2
+            while [ -f "$f" ] && { [ "$b" = 0 ] || [ $(( $(date +%s) - $(stat -c %Y "$f" 2>/dev/null || echo 0) )) -lt "$b" ]; }; do
+                sleep 1
+            done
+            exec python3 "$@"' _ "$ROOT/dump/selecting" "$SEL_WAIT" \
+            "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" > "$HOME/padtables.log" 2>&1 &
+        TBLPG=$!
+    elif grep -q '^drawable=yes' "$TBL_OUT"; then
         echo "[watch]   opening now; the switch table follows in the background"
         setsid_as_user python3 "$RIG/mktables.py" --log "$LOG" --wait "$PF_WAIT" \
             > "$HOME/padtables.log" 2>&1 &
@@ -1423,7 +1471,11 @@ fi
 # lets the player think, and only then does run_game.sh exec the game. So
 # the wait rides the dump/selecting flag: through the menu while
 # run_game.sh's process is alive, until comm=game exists (the selector's
-# comm is codeselect on both launch paths), for at most SEL_WAIT seconds.
+# comm is codeselect on both launch paths), for as long as the selector
+# LIVES - sel_flag_stale() refreshes the flag while `pgrep -x codeselect`
+# finds it, and gives up only once it has been gone SEL_GAP s with no game
+# (or, before it ever appeared, after SEL_WAIT s; 0 = for ever). A player
+# who keeps pressing keys keeps the countdown, and this wait, going.
 # Under WSL's binfmt the selector itself satisfies pad_guest_up, so the
 # 60 s loop below would break out early anyway; this block is what makes
 # the macOS container (no arm-binfmt on the command line) behave the same,
@@ -1432,7 +1484,6 @@ fi
 if [ -n "${PAD_SELECT:-}" ]; then
     echo "[watch] boot selector: waiting for the choice (LEFT/RIGHT flipper" \
          "= arrows move, START = 1 boots; auto-boot after $SEL_TO s)"
-    SEL_T0=$(date +%s)
     while [ -f "$ROOT/dump/selecting" ]; do
         if pgrep -x game >/dev/null 2>&1; then
             rm -f "$ROOT/dump/selecting"
@@ -1449,8 +1500,12 @@ if [ -n "${PAD_SELECT:-}" ]; then
             tail -20 "$HOSTLOG" >&2
             exit 1
         fi
-        if [ "$SEL_WAIT" != 0 ] && [ $(( $(date +%s) - SEL_T0 )) -ge "$SEL_WAIT" ]; then
-            echo "[watch] boot selector: no game after $SEL_WAIT s; not waiting any longer" >&2
+        if sel_flag_stale; then
+            if [ -n "$SEL_SEEN" ]; then
+                echo "[watch] boot selector: gone $SEL_GAP s and no game in its place; not waiting any longer" >&2
+            else
+                echo "[watch] boot selector: not up after $SEL_WAIT s; not waiting any longer" >&2
+            fi
             break
         fi
         sleep 0.25
@@ -1513,13 +1568,16 @@ if [ "${PAD_AUTO_ATTRACT:-1}" != 0 ]; then
         # Service Back - and while the menu is up the log IS quiet, so it
         # would spend its five presses on a menu that ignores them and have
         # none left for the Tech Alerts screen they exist for. The wrapper
-        # waits for dump/selecting to go (bounded like everything else
-        # here), then BECOMES autoattract.sh - exec, so $! is the process
-        # teardown kills and alive.sh's `autoattract\.sh` pattern sees it
-        # throughout (the wrapper's own command line carries the name).
-        setsid_as_user bash -c 'f=$1; b=$2; shift 2; t=0
-            while [ -f "$f" ] && { [ "$b" = 0 ] || [ "$t" -lt "$b" ]; }; do
-                sleep 1; t=$((t + 1))
+        # waits for dump/selecting to go (by the flag's AGE - this script
+        # refreshes it while the selector lives, so a long read of the menu
+        # does not run the bound out; SEL_WAIT is the backstop for a flag
+        # nobody is refreshing, 0 = for ever), then BECOMES autoattract.sh -
+        # exec, so $! is the process teardown kills and alive.sh's
+        # `autoattract\.sh` pattern sees it throughout (the wrapper's own
+        # command line carries the name).
+        setsid_as_user bash -c 'f=$1; b=$2; shift 2
+            while [ -f "$f" ] && { [ "$b" = 0 ] || [ $(( $(date +%s) - $(stat -c %Y "$f" 2>/dev/null || echo 0) )) -lt "$b" ]; }; do
+                sleep 1
             done
             exec bash "$@"' _ "$ROOT/dump/selecting" "$SEL_WAIT" \
             "$S/autoattract.sh" "$LOG" > "$HOME/padauto.log" 2>&1 &
@@ -1779,19 +1837,19 @@ while :; do
     # macOS container the whole selector phase reads that way, comm being
     # codeselect and no arm-binfmt on its command line). The same flag the
     # start wait rode carries this loop through it - normally the start wait
-    # has already cleared it, and this is the backstop for the timed-out
-    # case - until comm=game exists, while run_game.sh is alive, for at most
-    # SEL_WAIT seconds from the flag's own timestamp.
+    # has already cleared it, and this is the backstop for the case where it
+    # gave up - until comm=game exists, while run_game.sh is alive, for as
+    # long as the selector lives and SEL_GAP s past it (sel_flag_stale(),
+    # which refreshes the flag while `pgrep -x codeselect` finds it).
     if [ -n "${PAD_SELECT:-}" ] && [ -f "$ROOT/dump/selecting" ]; then
         if pgrep -x game >/dev/null 2>&1; then
             rm -f "$ROOT/dump/selecting"
             echo "[watch] boot selector: done; the game is up"
-        elif kill -0 "$GAMEPG" 2>/dev/null && { [ "$SEL_WAIT" = 0 ] || \
-             [ "$(( $(date +%s) - $(stat -c %Y "$ROOT/dump/selecting" 2>/dev/null || echo 0) ))" -lt "$SEL_WAIT" ]; }; then
+        elif kill -0 "$GAMEPG" 2>/dev/null && ! sel_flag_stale; then
             sleep 0.25
             continue
         else
-            echo "[watch] boot selector: giving up on it (run_game.sh gone, or $SEL_WAIT s passed)"
+            echo "[watch] boot selector: giving up on it (run_game.sh gone, or the selector left $SEL_GAP s ago with no game)"
             rm -f "$ROOT/dump/selecting"
         fi
     fi

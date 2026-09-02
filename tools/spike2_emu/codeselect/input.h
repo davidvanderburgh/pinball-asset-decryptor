@@ -31,7 +31,7 @@ struct input_cfg {
 
 struct input;
 struct input_ops {
-    void (*poll)(struct input *in, long now_ms);   /* sample, feed input_sample */
+    void (*poll)(struct input *in, long long now_ms);   /* sample, feed input_sample; now_ms = sel_now_ms() */
     void (*close)(struct input *in);
 };
 
@@ -44,7 +44,7 @@ struct input {
 
 void input_base_init(struct input *in, const struct input_ops *ops);
 void input_sample(struct input *in, int key, int pressed);
-int  input_poll(struct input *in, long now_ms);        /* next event or EV_NONE */
+int  input_poll(struct input *in, long long now_ms);   /* next event or EV_NONE */
 void input_close(struct input *in);
 const char *input_event_name(int ev);
 

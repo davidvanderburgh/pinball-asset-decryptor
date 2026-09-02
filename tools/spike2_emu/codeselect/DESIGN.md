@@ -69,7 +69,13 @@ p1/p2 keep u-boot's `root=/dev/mmcblk0p2` and the FAT load valid; p3/p5/p6
 keep fstab valid; the extra images are only ever reached by `select.sh`.
 
 Sizes: an 8G image's games partition is 13,402,110 sectors (6.86 GB). Two
-images need ≈14.7 GB (a 16 GB card), three ≈21.6 GB (a 32 GB card).
+images need ≈14.7 GB (a 16 GB card), three ≈21.6 GB (a 32 GB card) - but a
+third image lands on p8, and the card's kernel (i.MX6 3.14,
+`CONFIG_MMC_BLOCK_MINORS=8`) allocates minors for mmcblk0 and p1..p7 only,
+so `/dev/mmcblk0p8` never exists on the machine. TWO IMAGES IS THE LIMIT of
+this layout: `mkmulticard.py` refuses more than one `--extra` unless
+`--allow-unreachable` (emulator use), and a 3-image card needs two images
+inside one partition - a design follow-up.
 
 ## Files on the card
 

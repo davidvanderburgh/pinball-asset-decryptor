@@ -31,8 +31,10 @@ int  egl_stern_texture(struct egl_stern *e, int w, int h, const unsigned char *p
  * quad, swap. Call every frame; pass px only when the canvas changed. */
 void egl_stern_frame(struct egl_stern *e, const unsigned char *px);
 
-/* Leave default-looking GL state for the next client, one black frame, then
- * eglMakeCurrent(dpy,0,0,0) / eglTerminate / eglReleaseThread. */
+/* Leave default-looking GL state for the next client - unbind, program 0,
+ * blend off, viewport reset; NO clear and NO swap, so the LOADING frame just
+ * shown stays on the LCD until the game draws - then eglMakeCurrent(dpy,0,0,0)
+ * / eglTerminate / eglReleaseThread. */
 void egl_stern_close(struct egl_stern *e);
 
 #endif

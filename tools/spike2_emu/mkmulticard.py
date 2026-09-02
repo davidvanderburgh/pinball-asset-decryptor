@@ -8,30 +8,41 @@ and p7, p8, ... are each EXTRA image's games partition verbatim.  The selector
 (/usr/local/codeselect/) and its one guarded hook line in /etc/init.d/game are
 injected into p2 with `debugfs -w`; nothing else on the card is touched.
 
+ONE --extra IS THE HARDWARE LIMIT.  The card's own kernel (i.MX6, 3.14, CONFIG_MMC_BLOCK_MINORS=8)
+gives mmcblk0 eight minors: the whole device and p1..p7.  p7 is therefore the last partition
+the machine can open, and a second extra on p8 (a third image) can never be mounted there -
+the layout arithmetic still works and the emulator can run such a card, so plan/build/inject
+refuse it unless --allow-unreachable is given.  A 3-image card needs a different layout (two
+images inside one partition), which is a design follow-up.
+
 Run under WSL/Linux (needs debugfs, e2fsck, sfdisk, fdisk from e2fsprogs/util-linux);
 the pure-python parts (layout, MBR/EBR bytes, hook, images.conf) are tested on Windows.
 
-  mkmulticard.py plan        --primary P --extra E [--extra E2 ...]
+  mkmulticard.py plan        --primary P --extra E [--extra E2 ...] [--allow-unreachable]
         print the layout, byte totals and whether it fits Stern's 16G / 32G sizes; writes nothing
   mkmulticard.py check-stock IMG
         regenerate IMG's own MBR entries + EBR chain with this writer and byte-compare them
   mkmulticard.py build       --primary P --extra E [...] --out OUT --selector-dir DIR
                              [--titles "T0;T1;..."] [--subtitles "S0;S1;..."] [--timeout N]
                              [--default N] [--conf FILE] [--no-inject] [--dd] [--force]
+                             [--allow-unreachable]
         write the sparse OUT (partition ranges copied, MBR entries + EBR chain regenerated),
         then inject DIR/{codeselect,select.sh[,font.ttf]} + a generated images.conf + the
-        hooked /etc/init.d/game into p2
+        hooked /etc/init.d/game into p2, and record md5(p2) in the sidecar OUT.p2.md5
   mkmulticard.py inject      --card OUT --selector-dir DIR [--conf FILE] [--titles ...] [...]
-        redo only the p2 injection on an existing multi card (idempotent: re-extract, rm+write, verify)
+        redo only the p2 injection on an existing multi card (idempotent: re-extract, rm+write, verify);
+        the p2 sidecar is rewritten
   mkmulticard.py verify      --card OUT --primary P --extra E [...] [--selector-dir DIR]
         table parse-back (own parser + sfdisk -d), md5 of every copied range vs its source
-        (p2 reported as 'patched' with the /etc/init.d/game diff and the selector file list),
-        e2fsck -fn of every ext4 partition, root listing of every games partition, PASS/FAIL
+        (p2 vs the OUT.p2.md5 sidecar when there is one, and reported as 'patched' with the
+        /etc/init.d/game diff and the selector file list), e2fsck -fn of every ext4 partition,
+        root listing of every games partition, PASS/FAIL
   mkmulticard.py selftest DIR
         synthetic 10 MiB cards -> 3-image card with injection -> every check above, in DIR
 
 Every OUTPUT path is explicit.  The tool refuses to overwrite an existing output without
---force, refuses any output under /mnt/d/Pinball/images (David's card library) and refuses
+--force, refuses any output under /mnt/d/Pinball/images (David's card library - after
+resolving symlinks and junctions, since the repo's own images/ is a link into it) and refuses
 an output equal to one of its inputs - a flag whose value turned out to be an output has
 destroyed a card image in this project before.
 
@@ -47,7 +58,8 @@ tools/spike2_emu/codeselect/DESIGN.md):
                     boundary (exactly how the stock EBR2/p6 sit after p5), size = the extra's p3
                     sector count verbatim (13402110 for an 8G source)
   image size        last logical end + 1 + 2 tail sectors (every stock card ends 2 sectors after p6)
-  Two 8G images = 28755968 sectors = 14,723,055,616 B (fits a 16G card); three need a 32G card.
+  Two 8G images = 28755968 sectors = 14,723,055,616 B (fits a 16G card); three would need a 32G
+  card AND put the third on p8, which the machine cannot open (see above).
 """
 import argparse
 import collections
@@ -73,6 +85,10 @@ CHUNK = 8 << 20
 STERN_SIZES = collections.OrderedDict([("8G", 7861174272), ("16G", 15494807552), ("32G", 30359420928)])
 STOCK_P1 = (0x0C, 8192, 16384)
 STOCK_P2 = (0x83, 24576, 688128)
+# The card's kernel (i.MX6, 3.14, CONFIG_MMC_BLOCK_MINORS=8): mmcblk0 + p1..p7 are the only
+# minors it allocates, so /dev/mmcblk0p8 never exists on the machine however valid the table.
+MMC_BLOCK_MINORS = 8
+LAST_REACHABLE_PART = MMC_BLOCK_MINORS - 1          # p7
 
 # ---- what goes on the card -----------------------------------------------------------------
 SELECT_DIR = "/usr/local/codeselect"
@@ -281,9 +297,39 @@ class Plan:
     def fits(self):
         return collections.OrderedDict((k, v - self.total_bytes) for k, v in STERN_SIZES.items())
 
+    def unreachable(self):
+        """The image partitions past p7 - present in the table, absent from the machine's /dev."""
+        return [p for p in self.images if p.num > LAST_REACHABLE_PART]
+
+    def unreachable_note(self):
+        """'' or 'p8/p9 unreachable on the machine' for the plan printout."""
+        bad = self.unreachable()
+        return "" if not bad else "%s unreachable on the machine" % "/".join("p%d" % p.num for p in bad)
+
 
 def make_plan(primary, extras):
     return Plan(Geometry.from_file(primary), [Geometry.from_file(x) for x in extras], primary, list(extras))
+
+
+def check_reachable(plan, allow=False):
+    """Refuse a layout the machine cannot boot from: more than one extra puts an image on p8,
+    and the card's kernel exposes minors for p1..p7 only (CONFIG_MMC_BLOCK_MINORS=8).  With
+    allow=True (--allow-unreachable) the layout is built anyway - the emulator mounts partitions
+    by table offset and does not care - but the refusal is the default so a card is never burnt
+    for a machine that will boot the primary and nothing else from it."""
+    bad = plan.unreachable()
+    if not bad or allow:
+        return plan
+    raise Refused(
+        "%d extra images put %s on %s, and p%d is the last partition the card's kernel can open\n"
+        "  (i.MX6 3.14, CONFIG_MMC_BLOCK_MINORS=8: mmcblk0 + p1..p7). The machine could never mount\n"
+        "  %s; only ONE --extra fits this layout. A 3-image card needs a different layout - two\n"
+        "  images inside one partition - which is a design follow-up. --allow-unreachable builds\n"
+        "  it anyway (the emulator can run it; the machine cannot)."
+        % (len(plan.images) - 1,
+           ", ".join("image %d" % i for i, p in enumerate(plan.images) if p in bad),
+           "/".join(DEVICE_FMT % p.num for p in bad), LAST_REACHABLE_PART,
+           "/".join(DEVICE_FMT % p.num for p in bad)))
 
 
 def mbr_entries(plan):
@@ -336,10 +382,16 @@ def print_plan(plan):
         print("p%-3d 0x%02x %-12d %-12d %-12d %-16d %s" % (n, t, st, cnt, st + cnt - 1, cnt * SECTOR, src))
     for p in plan.logs:
         print("  EBR for p%d at LBA %d" % (p.num, p.ebr))
-    print("images: " + ", ".join("%d=%s" % (i, DEVICE_FMT % p.num) for i, p in enumerate(plan.images)))
+    note = plan.unreachable_note()
+    print("images: " + ", ".join("%d=%s" % (i, DEVICE_FMT % p.num) for i, p in enumerate(plan.images))
+          + ("  (%s)" % note if note else ""))
     print("image: %d sectors = %d bytes (%s)" % (plan.total, plan.total_bytes, _gb(plan.total_bytes)))
     for k, spare in plan.fits().items():
-        print("  fits Stern %-3s image size %d: %s (spare %d)" % (k, STERN_SIZES[k], "YES" if spare >= 0 else "NO", spare))
+        print("  fits Stern %-3s image size %d: %s (spare %d)%s" % (k, STERN_SIZES[k], "YES" if spare >= 0 else "NO", spare,
+                                                                 (" - " + note) if note else ""))
+    if note:
+        print("WARNING: %s - the card's kernel exposes p1..p7 only (CONFIG_MMC_BLOCK_MINORS=8); "
+              "the machine boots the primary from such a card and nothing else" % note)
 
 
 # ============================================================================= the hook
@@ -448,7 +500,17 @@ def split_list(s):
 
 # ============================================================================= output safety
 def _norm(p):
-    return os.path.normpath(os.path.abspath(p)).replace("\\", "/").lower()
+    """Absolute, LINK-RESOLVED, forward slashes, lower case.  Symlinks and junctions are followed
+    (os.path.realpath) because the repo's own images/ is a junction into D:\\Pinball\\images -
+    the card library the refusal below exists for - and a prefix test on the spelled path
+    would let `images/x.raw` straight through.  An output that does not exist yet has its
+    PARENT resolved and the basename re-joined."""
+    a = os.path.abspath(p)
+    if os.path.exists(a):
+        r = os.path.realpath(a)
+    else:
+        r = os.path.join(os.path.realpath(os.path.dirname(a)), os.path.basename(a))
+    return os.path.normpath(r).replace("\\", "/").lower()
 
 
 def check_output_path(path, inputs, force=False, must_exist=False):
@@ -546,6 +608,51 @@ def md5_file(path):
     return md5_range(path, 0, os.path.getsize(path))
 
 
+# ---- the p2 sidecar ---------------------------------------------------------------------------
+# verify cannot compare p2 to its source (it is patched), so without this a p2 corrupted
+# anywhere OUTSIDE the injected files passed.  Every write-back of p2 records md5 of the whole
+# range beside the card, and verify compares the card's p2 to it.
+def p2_sidecar_path(card):
+    return card + ".p2.md5"
+
+
+def p2_range(card):
+    """(offset, length) of p2 in bytes."""
+    t, st, cnt = Geometry.from_file(card).part(2)
+    if t != 0x83:
+        raise Refused("%s: p2 is type 0x%02x, not Linux" % (card, t))
+    return st * SECTOR, cnt * SECTOR
+
+
+def write_p2_sidecar(card):
+    """md5 of the card's whole p2 range -> <card>.p2.md5 (one line: '<md5>  p2 @<offset>+<length>').
+    Returns the digest."""
+    off, length = p2_range(card)
+    h = md5_range(card, off, length)
+    with open(p2_sidecar_path(card), "w", newline="\n") as f:
+        f.write("%s  p2 @%d+%d\n" % (h, off, length))
+    return h
+
+
+def read_p2_sidecar(card):
+    """The digest recorded beside the card, or None when there is no sidecar."""
+    side = p2_sidecar_path(card)
+    if not os.path.isfile(side):
+        return None
+    with open(side, "r") as f:
+        tok = f.read().split()
+    if not tok or not re.fullmatch(r"[0-9a-f]{32}", tok[0]):
+        raise Refused("%s: not a p2 sidecar (expected '<md5>  p2 @off+len')" % side)
+    return tok[0]
+
+
+def check_p2_sidecar(card):
+    """-> (recorded, actual): recorded is None without a sidecar; actual is md5 of p2 now."""
+    want = read_p2_sidecar(card)
+    off, length = p2_range(card)
+    return want, md5_range(card, off, length)
+
+
 def write_tables(plan, out):
     """MBR (bootstrap + disk id from the primary, entries regenerated) and the EBR chain."""
     with open(out, "r+b") as o:
@@ -641,6 +748,16 @@ def debugfs_stat(ref, path):
     return info
 
 
+def dq(path):
+    """A path as one debugfs argument.  debugfs parses its requests with libss, which honours
+    double quotes - without them `write /tmp/my stage/x /usr/local/x` is three words, and a
+    card or output under a directory with a space in its name ('D:\\Pinball\\TMNT 1987\\multi')
+    put the staging directory exactly there."""
+    if '"' in path:
+        raise Refused("path %r: debugfs cannot take a double quote inside an argument" % path)
+    return '"%s"' % path
+
+
 def debugfs_write_script(image, commands):
     """Run a debugfs -w script.  debugfs exits 0 whatever happened, so every output line that is not
     the banner or an 'Allocated inode' note is treated as an error."""
@@ -703,6 +820,35 @@ def stage_selector(selector_dir, stage, conf_text, hooked_game):
     return items
 
 
+def inject_commands(items, existing, times):
+    """The debugfs -w script for one injection (pure, so it is testable without debugfs).
+
+    items     [(staged native path, card path, mode)] from stage_selector
+    existing  names already in SELECT_DIR (removed first), or None when the directory is missing
+    times     the game script's {atime, ctime, mtime} to put back
+    Every path is double-quoted (dq): the staged path is a NATIVE path and may hold a space."""
+    cmds = []
+    if existing is None:
+        cmds.append("mkdir " + dq(SELECT_DIR))
+    else:
+        for name in existing:
+            cmds.append("rm " + dq(SELECT_DIR + "/" + name))
+    cmds.append("rm " + dq(GAME_SCRIPT))
+    for staged, card, _mode in items:
+        cmds.append("write %s %s" % (dq(staged), dq(card)))
+    cmds.append("set_inode_field %s mode 040755" % dq(SELECT_DIR))
+    cmds.append("set_inode_field %s uid 0" % dq(SELECT_DIR))
+    cmds.append("set_inode_field %s gid 0" % dq(SELECT_DIR))
+    for _staged, card, mode in items:
+        cmds.append("set_inode_field %s mode 0%o" % (dq(card), statmod.S_IFREG | mode))
+        cmds.append("set_inode_field %s uid 0" % dq(card))
+        cmds.append("set_inode_field %s gid 0" % dq(card))
+    for k in ("atime", "ctime", "mtime"):
+        if k in times:
+            cmds.append("set_inode_field %s %s @%d" % (dq(GAME_SCRIPT), k, times[k]))
+    return cmds
+
+
 def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir):
     """Modify an extracted rootfs image in place: /usr/local/codeselect/* and the hooked game script.
     Idempotent (existing files are removed first).  Verifies by e2fsck -fn and full read-back."""
@@ -716,27 +862,11 @@ def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir):
     times = debugfs_stat(p2_image, GAME_SCRIPT)
     hooked = hook_game_script(orig)
     items = stage_selector(selector_dir, stage_dir, conf_text, hooked)
-    cmds = []
     if debugfs_exists(p2_image, SELECT_DIR):
-        for ent in debugfs_ls(p2_image, SELECT_DIR):
-            if ent[4] not in (".", ".."):
-                cmds.append("rm %s/%s" % (SELECT_DIR, ent[4]))
+        existing = [ent[4] for ent in debugfs_ls(p2_image, SELECT_DIR) if ent[4] not in (".", "..")]
     else:
-        cmds.append("mkdir " + SELECT_DIR)
-    cmds.append("rm " + GAME_SCRIPT)
-    for staged, card, _mode in items:
-        cmds.append("write %s %s" % (staged, card))
-    cmds.append("set_inode_field %s mode 040755" % SELECT_DIR)
-    cmds.append("set_inode_field %s uid 0" % SELECT_DIR)
-    cmds.append("set_inode_field %s gid 0" % SELECT_DIR)
-    for _staged, card, mode in items:
-        cmds.append("set_inode_field %s mode 0%o" % (card, statmod.S_IFREG | mode))
-        cmds.append("set_inode_field %s uid 0" % card)
-        cmds.append("set_inode_field %s gid 0" % card)
-    for k in ("atime", "ctime", "mtime"):
-        if k in times:
-            cmds.append("set_inode_field %s %s @%d" % (GAME_SCRIPT, k, times[k]))
-    debugfs_write_script(p2_image, cmds)
+        existing = None
+    debugfs_write_script(p2_image, inject_commands(items, existing, times))
     rc, txt = e2fsck(p2_image)
     if rc != 0:
         raise Refused("p2 is not clean after injection (e2fsck rc=%d):\n%s" % (rc, txt))
@@ -775,6 +905,8 @@ def inject_card(card, selector_dir, conf_text, workdir=None):
         a, b = md5_file(p2), md5_range(card, st * SECTOR, cnt * SECTOR)
         if a != b:
             raise Refused("p2 write-back mismatch (%s vs %s)" % (a, b))
+        # the sidecar verify compares p2 against (rewritten on every injection)
+        say("p2 md5 %s recorded in %s" % (write_p2_sidecar(card), p2_sidecar_path(card)))
         return written
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -832,12 +964,14 @@ def plan_from_card(card):
 
 # ============================================================================= verify
 def sfdisk_table(image):
-    """[(num, start, count, type)] from `sfdisk -d`."""
+    """[(num, start, count, type)] from `sfdisk -d`.  The device column is the image path plus
+    the partition number, and the path may hold a SPACE ('.../TMNT 1987/multi.img7 : start=...'),
+    so it is matched with .*? rather than \\S+ - the latter parsed such a card to []."""
     r = subprocess.run(["sfdisk", "-d", image], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     out = r.stdout.decode("utf-8", "replace")
     rows = []
     for line in out.splitlines():
-        m = re.match(r"^(\S+?)(\d+)\s*:\s*start=\s*(\d+),\s*size=\s*(\d+),\s*type=\s*([0-9a-fA-F]+)", line)
+        m = re.match(r"^(.*?)(\d+)\s*:\s*start=\s*(\d+),\s*size=\s*(\d+),\s*type=\s*([0-9a-fA-F]+)", line)
         if m:
             rows.append((int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5), 16)))
     return rows, out
@@ -883,6 +1017,17 @@ def verify_card(card, plan, selector_dir=None):
         a = md5_range(p.src, p.src_start * SECTOR, p.count * SECTOR)
         b = md5_range(card, p.start * SECTOR, p.count * SECTOR)
         check("p%d md5 vs %s (%.0f s)" % (p.num, os.path.basename(p.src), time.monotonic() - t0), a == b, a)
+    # p2 is patched, so its source is no oracle: the sidecar written at the last write-back is
+    t0 = time.monotonic()
+    try:
+        want, got = check_p2_sidecar(card)
+        if want is None:
+            print("p2: no sidecar (built before this check)")
+        else:
+            check("p2 sidecar md5 (%s, %.0f s)" % (os.path.basename(p2_sidecar_path(card)), time.monotonic() - t0),
+                  want == got, got if want == got else "card %s sidecar %s" % (got, want))
+    except Refused as e:
+        check("p2 sidecar md5", False, str(e))
     # p2: patched
     p2 = plan.prims[1]
     ref = fs_ref(card, p2.start * SECTOR)
@@ -1005,7 +1150,7 @@ def _mkext(path, kib, files, links=()):
         with open(sp, "wb") as f:
             f.write(data)
         os.chmod(sp, 0o755)
-        cmds.append("write %s %s" % (sp, cardpath))
+        cmds.append("write %s %s" % (dq(sp), dq(cardpath)))
     for name, target in links:
         cmds.append("symlink %s %s" % (name, target))
     try:
@@ -1081,8 +1226,13 @@ def make_synthetic_card(path, tag, seed, with_fs=False):
 
 
 def selftest(d, selector_file=None):
-    """Synthetic A+B+C -> multi card with injection -> verify -> inject again -> verify (idempotence)."""
+    """Synthetic A+B+C -> multi card with injection -> verify -> inject again -> verify (idempotence)
+    -> a byte of p2 flipped outside the injected files -> verify FAILS on the sidecar -> put back.
+    Three images on purpose (p7 AND p8): the layout arithmetic is exercised past the hardware
+    limit; the plan printout says p8 is unreachable, and the build here is what --allow-unreachable
+    would do.  The staging directory has a SPACE in its name so the debugfs quoting is exercised."""
     need_tools("debugfs", "e2fsck", "mke2fs", "sfdisk", "fdisk")
+    d = os.path.join(d, "self test")
     os.makedirs(d, exist_ok=True)
     A = make_synthetic_card(os.path.join(d, "A.img"), "A", 0x0A0A0A0A, with_fs=True)
     B = make_synthetic_card(os.path.join(d, "B.img"), "B", 0x0B0B0B0B, with_fs=True)
@@ -1099,14 +1249,40 @@ def selftest(d, selector_file=None):
     plan = make_plan(A, [B, C])
     print("== plan")
     print_plan(plan)
+    ok = plan.unreachable_note() == "p8 unreachable on the machine"
+    try:
+        check_reachable(plan)
+        print("SELFTEST: check_reachable accepted a p8 image")
+        ok = False
+    except Refused as e:
+        print("refused without --allow-unreachable, as it should be: %s" % str(e).splitlines()[0])
+    check_reachable(plan, allow=True)
     print("== build")
     build_image(plan, out)
     conf = render_images_conf(plan.devices(), ["A stock", "B", "C"], ["synthetic", "", "third"], 1, 7, None)
     inject_card(out, sel, conf, workdir=d)
     print("== verify")
-    ok = verify_card(out, plan, sel)
+    ok &= verify_card(out, plan, sel)
     print("== inject again (idempotence)")
     inject_card(out, sel, conf, workdir=d)
+    ok &= verify_card(out, plan, sel)
+    print("== p2 corrupted outside the injected files: verify must FAIL on the sidecar")
+    p2off, p2len = p2_range(out)
+    spot = p2off + p2len - 3 * 1024            # the last blocks of a 1 MiB ext4: free, so e2fsck stays clean
+    with open(out, "r+b") as f:
+        f.seek(spot)
+        was = f.read(1)
+        f.seek(spot)
+        f.write(bytes([was[0] ^ 0xff]))
+    want, got = check_p2_sidecar(out)
+    ok &= want is not None and want != got
+    ok &= not verify_card(out, plan, sel)
+    with open(out, "r+b") as f:
+        f.seek(spot)
+        f.write(was)
+    want, got = check_p2_sidecar(out)
+    ok &= want == got
+    print("== p2 put back: verify PASS again")
     ok &= verify_card(out, plan, sel)
     ref = fs_ref(out, plan.prims[1].start * SECTOR)
     back = parse_images_conf(debugfs_cat(ref, SELECT_DIR + "/images.conf"))
@@ -1123,11 +1299,19 @@ def selftest(d, selector_file=None):
 
 
 # ============================================================================= CLI
-def _add_images(s, out_flag):
+def _add_images(s, out_flag, reach_flag=True):
     s.add_argument("--primary", required=True, help="the image whose p1/p2/p3/p5/p6 the card gets (index 0)")
     s.add_argument("--extra", action="append", default=[], metavar="IMG", help="an extra image (its games partition becomes p7, p8, ...)")
     if out_flag:
         s.add_argument(out_flag, required=True, help="the multi-image card image")
+    if reach_flag:
+        _add_reach_flag(s)
+
+
+def _add_reach_flag(s):
+    s.add_argument("--allow-unreachable", action="store_true",
+                   help="accept a layout with an image past p7 (the machine's kernel exposes p1..p7 only; "
+                        "the emulator can still run it)")
 
 
 def _add_conf_flags(s):
@@ -1155,9 +1339,10 @@ def main(argv=None):
     s = sub.add_parser("inject", help="redo only the p2 injection on an existing multi card (idempotent)")
     s.add_argument("--card", required=True, help="the multi card to modify IN PLACE")
     _add_conf_flags(s)
+    _add_reach_flag(s)
     s = sub.add_parser("verify", help="check an existing multi card against its sources")
     s.add_argument("--card", required=True)
-    _add_images(s, None)
+    _add_images(s, None, reach_flag=False)
     s.add_argument("--selector-dir", help="also compare the injected files against this directory")
     s = sub.add_parser("selftest", help="synthetic end-to-end test (needs debugfs/mke2fs/e2fsck/sfdisk/fdisk)")
     s.add_argument("dir")
@@ -1165,7 +1350,9 @@ def main(argv=None):
     a = ap.parse_args(argv)
     try:
         if a.cmd == "plan":
-            print_plan(make_plan(a.primary, a.extra))
+            plan = make_plan(a.primary, a.extra)
+            print_plan(plan)
+            check_reachable(plan, a.allow_unreachable)
         elif a.cmd == "check-stock":
             return 0 if check_stock(a.image) else 1
         elif a.cmd == "build":
@@ -1174,6 +1361,7 @@ def main(argv=None):
                 raise Refused("build needs --selector-dir (or --no-inject)")
             plan = make_plan(a.primary, a.extra)
             print_plan(plan)
+            check_reachable(plan, a.allow_unreachable)       # before a byte is written
             if not a.extra:
                 say("WARNING: no --extra given; building a one-image card")
             conf = None
@@ -1193,6 +1381,9 @@ def main(argv=None):
                 t1 = time.monotonic()
                 inject_card(a.out, a.selector_dir, conf, workdir=os.path.dirname(os.path.abspath(a.out)))
                 say("injection took %.0f s" % (time.monotonic() - t1))
+            else:
+                # stock p2, still recorded: verify then has something to hold p2 against
+                say("p2 md5 %s recorded in %s" % (write_p2_sidecar(a.out), p2_sidecar_path(a.out)))
             alloc = allocated_bytes(a.out)
             say("wrote %s: %d bytes apparent%s in %.0f s" % (a.out, plan.total_bytes,
                 (", %s allocated" % _gb(alloc)) if alloc is not None else "", time.monotonic() - t0))
@@ -1205,6 +1396,7 @@ def main(argv=None):
             plan = plan_from_card(a.card)
             if len(plan.images) < 2:
                 say("WARNING: %s holds no extra images (p7...); injecting a one-image selector" % a.card)
+            check_reachable(plan, a.allow_unreachable)       # an images.conf naming p8 is one the machine cannot honour
             conf = conf_for_plan(plan, a, existing=card_conf(a.card))
             print("== images.conf to inject\n" + conf.rstrip())
             written = inject_card(a.card, a.selector_dir, conf, workdir=os.path.dirname(os.path.abspath(a.card)))

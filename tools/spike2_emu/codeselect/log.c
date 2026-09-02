@@ -8,13 +8,13 @@
 #include "log.h"
 
 static FILE *g_logf;
-static long g_t0 = -1;
+static long long g_t0 = -1;
 
-long sel_now_ms(void)
+long long sel_now_ms(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (long)ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
+    return ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
 }
 
 void sel_sleep_ms(long ms)
@@ -48,10 +48,10 @@ void sel_log_close(void)
 
 static void stamp(char *buf, int n)
 {
-    long t;
+    long long t;
     if (g_t0 < 0) g_t0 = sel_now_ms();
     t = sel_now_ms() - g_t0;
-    snprintf(buf, n, "%5ld.%03ld", t / 1000, t % 1000);
+    snprintf(buf, n, "%5lld.%03lld", t / 1000, t % 1000);
 }
 
 static void vline(FILE *f, const char *pfx, const char *fmt, va_list ap)

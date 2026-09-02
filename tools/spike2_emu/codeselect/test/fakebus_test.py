@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""fakebus_test.py QEMU ROOT BIN T [FONT]
+"""QEMU=qemu-arm-static fakebus_test.py ROOT BIN T [FONT]
 
 Runs fakebus.py (a pty node bus) and codeselect --input hw --nodebus <pty>
 --spi none --default 1 under qemu, presses LEFT then START through the
 control file, and expects choice 0, '[select] key: left', '[select] chose 0',
 the exact scan frames '88 02 11 65 0c' / '81 02 11 6c 0c', the identity reads
 '88 02 fe 78 0d' / '81 02 fe 7f 0d', the 0a 00 -> 03 00 exchange, and no
-'BAD CK' in the bus log."""
+'BAD CK' in the bus log.
+
+The emulator comes from the environment ($QEMU, exported by the Makefile),
+not argv: the rig's teardown does pkill -f 'arm-binfmt|qemu-arm' and this
+script's own command line must not match it."""
 import os
 import subprocess
 import sys
@@ -16,8 +20,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def main():
-    qemu, root, binp, t = sys.argv[1:5]
-    font = sys.argv[5] if len(sys.argv) > 5 and os.path.isfile(sys.argv[5]) else \
+    root, binp, t = sys.argv[1:4]
+    qemu = os.environ.get("QEMU", "qemu-arm-static")
+    font = sys.argv[4] if len(sys.argv) > 4 and os.path.isfile(sys.argv[4]) else \
         os.path.join(root, "usr/local/spike/VeraMono.ttf")
     os.makedirs(t, exist_ok=True)
     conf = os.path.join(t, "hw.conf")

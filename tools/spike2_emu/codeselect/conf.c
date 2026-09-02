@@ -17,9 +17,16 @@ static char *trim(char *s)
     return s;
 }
 
+/* bounded copy, truncating at CONF_STR-1. memmove rather than snprintf: dst
+ * and src can both sit inside one struct conf (title <- device), and GCC 13's
+ * -Wrestrict flags snprintf's restrict-qualified dst for that even though the
+ * fields never overlap - this keeps the build warning-free. */
 static void copy_field(char *dst, const char *src)
 {
-    snprintf(dst, CONF_STR, "%s", src);
+    size_t n = strlen(src);
+    if (n >= CONF_STR) n = CONF_STR - 1;
+    memmove(dst, src, n);
+    dst[n] = 0;
 }
 
 int conf_load(struct conf *c, const char *path, char *err, int errlen)

@@ -17,7 +17,13 @@
 ROOT     ?= /home/david/spike2root
 CROSS    ?= arm-linux-gnueabihf-
 CC        = $(CROSS)gcc
+# QEMU reaches the test scripts through the ENVIRONMENT, never their argv:
+# the rig's teardown (killgame.sh, watch.sh) does pkill -9 -f 'arm-binfmt|qemu-arm',
+# and `bash test/headless.sh qemu-arm-static ...` matched it - a run torn down
+# beside `make check` killed the tests. Only the short-lived qemu child's own
+# command line matches now.
 QEMU     ?= qemu-arm-static
+export QEMU
 BUILD    ?= build
 DESTDIR  ?=
 PREFIX   ?= /usr/local/codeselect
@@ -61,13 +67,13 @@ $(BIN): $(OBJS)
 
 check: $(BIN)
 > bash test/check_elf.sh "$(CROSS)" "$(BIN)"
-> bash test/headless.sh "$(QEMU)" "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
-> python3 test/padsw_test.py "$(QEMU)" "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(TABLES)" "$(DEJAVU)"
+> bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
+> python3 test/padsw_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(TABLES)" "$(DEJAVU)"
 > bash -n select.sh && bash test/select_sh_test.sh
 > @echo "check: OK"
 
 check-hw: $(BIN)
-> python3 test/fakebus_test.py "$(QEMU)" "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
+> python3 test/fakebus_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > @echo "check-hw: OK"
 
 install: $(BIN)

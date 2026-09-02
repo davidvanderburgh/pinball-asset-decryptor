@@ -380,7 +380,8 @@ def test_prepare_from_loose_files_without_a_card(sm, tmp_path, capsys):
     assert rc == 0, text
     with open(os.path.join(out, "media.json")) as f:
         m = json.load(f)
-    assert m == {"images": [{"art": None, "anim": None, "music": None}] * 2,
+    assert m == {"images": [{"art": None, "anim": None, "music": None,
+                             "art_source": "none", "anim_source": "none"}] * 2,
                  "sound_move": "move.wav", "sound_confirm": "confirm.wav", "volume": 35}
     assert sm.wav_contract_error(sm.wav_info(os.path.join(out, "move.wav"))) is None
     assert not os.path.exists(os.path.join(out, "art5.png")), "stale media swept"
@@ -447,3 +448,279 @@ def test_normalise_wav_resamples_cuts_and_fades(sm, tmp_path):
         w.setpos(w.getnframes() - 1)
         last = struct.unpack("<hh", w.readframes(1))
     assert max(abs(v) for v in last) < 200, "faded to silence"
+
+
+# ============================================================================ v3: per-image specs
+def test_anim_specs_parse_start_length_and_fps(sm):
+    """'N=auto@START[:SECONDS[:FPS]]' and 'N=PATH@...' per image; the run's --start/
+    --seconds/--fps fill what the spec leaves out; a bare value applies to every image."""
+    vals = sm.parse_index_spec(["1=auto@12:2.5:8", "0=/x/clip.mp4@3"], 3, "none")
+    a = [sm.parse_anim_spec(v, start=0.0, seconds=3.0, fps=10) for v in vals]
+    assert a[0] == {"kind": "file", "source": "/x/clip.mp4", "start": 3.0, "seconds": 3.0, "fps": 10,
+                    "spec": "/x/clip.mp4@3"}
+    assert a[1] == {"kind": "auto", "source": None, "start": 12.0, "seconds": 2.5, "fps": 8,
+                    "spec": "auto@12:2.5:8"}
+    assert a[2] == {"kind": "none", "spec": "none"}
+    bare = [sm.parse_anim_spec(v) for v in sm.parse_index_spec(["auto@1"], 2, "none")]
+    assert [b["start"] for b in bare] == [1.0, 1.0] and [b["kind"] for b in bare] == ["auto", "auto"]
+    assert sm.parse_anim_spec("auto", 4, 2, 6) == {"kind": "auto", "source": None, "start": 4.0,
+                                                   "seconds": 2.0, "fps": 6, "spec": "auto"}
+    card = sm.parse_anim_spec("/d/card.raw:attract@20:2:8")
+    assert card["kind"] == "file" and card["source"] == "/d/card.raw:attract"
+    assert (card["start"], card["seconds"], card["fps"]) == (20.0, 2.0, 8)
+    win = sm.parse_anim_spec("C:\\clips\\a.mp4@1.5")
+    assert win["source"] == "C:\\clips\\a.mp4" and win["start"] == 1.5
+    lit = sm.parse_anim_spec("/x/clip@home.mp4")           # a literal '@' in a name stays a path
+    assert lit["source"] == "/x/clip@home.mp4" and lit["start"] == 0.0
+
+
+@pytest.mark.parametrize("bad", ["auto@", "auto@x", "auto@-1", "auto@1:0", "auto@1:2:0", "none@3", "", "@3",
+                                 "/x/clip.mp4@1:2:3:4"])
+def test_anim_spec_refusals(sm, bad):
+    with pytest.raises(sm.Refused):
+        sm.parse_anim_spec(bad)
+
+
+def test_art_specs_parse_stills_videos_and_frames(sm):
+    vals = sm.parse_index_spec(["0=/x/clip.mp4@3", "2=/y/still.png"], 3, "auto")
+    a = [sm.parse_art_spec(v) for v in vals]
+    assert a[0] == {"kind": "video", "source": "/x/clip.mp4", "at": 3.0, "spec": "/x/clip.mp4@3"}
+    assert a[1] == {"kind": "auto", "spec": "auto"}
+    assert a[2] == {"kind": "file", "source": "/y/still.png", "spec": "/y/still.png"}
+    assert sm.parse_art_spec("none") == {"kind": "none", "spec": "none"}
+    assert sm.parse_art_spec("/x/Clip.MOV")["at"] == 0.0, "a bare video is its first frame"
+    assert sm.parse_art_spec("/x/clip.mkv@0.5")["at"] == 0.5
+    assert sm.parse_art_spec("/x/logo@2x.png") == {"kind": "file", "source": "/x/logo@2x.png", "spec": "/x/logo@2x.png"}
+    for bad in ("/y/still.png@3", "/x/clip.mp4@", "/x/clip.mp4@1:2", "", "@3"):
+        with pytest.raises(sm.Refused):
+            sm.parse_art_spec(bad)
+
+
+def test_still_kind_by_signature(sm, tmp_path):
+    cases = {"p.png": tiny_png(), "j.jpg": b"\xff\xd8\xff\xe0" + b"\x00" * 20, "g.gif": tiny_gif(),
+             "b.bmp": b"BM" + b"\x00" * 20, "t.tif": b"II*\x00" + b"\x00" * 20,
+             "w.webp": b"RIFF\x00\x00\x00\x00WEBPVP8 " + b"\x00" * 8}
+    want = {"p.png": "PNG", "j.jpg": "JPEG", "g.gif": "GIF", "b.bmp": "BMP", "t.tif": "TIFF", "w.webp": "WebP"}
+    for fn, data in cases.items():
+        p = tmp_path / fn
+        p.write_bytes(data)
+        assert sm.still_kind(str(p)) == want[fn]
+    raw = tmp_path / "card.raw"
+    raw.write_bytes(b"\x00" * 4096)                  # a disk image's MBR area
+    assert sm.still_kind(str(raw)) is None
+    mp4 = tmp_path / "c.mp4"
+    mp4.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 16)
+    assert sm.still_kind(str(mp4)) is None
+
+
+def test_prepare_refuses_a_non_image_as_art(sm, tmp_path, capsys):
+    """A card handed in as art (or any non-image) is refused by signature before any
+    decoder touches it - no ffmpeg, no PIL, no card open."""
+    raw = tmp_path / "turtles.raw"
+    raw.write_bytes(b"\x00" * 4096)
+    out = str(tmp_path / "set")
+    rc = sm.main(["prepare", "--visual-only", "--primary", "a.raw", "--out", out,
+                  "--art", "0=" + str(raw), "--anim", "none"])
+    text = capsys.readouterr().out
+    assert rc == 2 and "refused" in text and "not a still image" in text and "VIDEO@T" in text
+    assert not os.path.exists(os.path.join(out, "media.json"))
+    rc = sm.main(["prepare", "--visual-only", "--primary", "a.raw", "--out", out,
+                  "--art", "0=" + str(tmp_path / "missing.png"), "--anim", "none"])
+    assert rc == 2 and "is not a file" in capsys.readouterr().out
+
+
+# ============================================================================ v3: the sidecar cache
+def test_cache_matches_on_source_mtime_size_and_params(sm, tmp_path):
+    src = tmp_path / "src.png"
+    src.write_bytes(tiny_png())
+    stamp = sm.source_stamp(str(src))
+    assert stamp["source"] == os.path.abspath(str(src)) and stamp["size"] == len(tiny_png())
+    params = {"kind": "file", "size": (64, 36)}
+    target = str(tmp_path / "art0.png")
+    assert not sm.is_cached(target, stamp, params), "no target, no sidecar"
+    with open(target, "wb") as f:
+        f.write(tiny_png())
+    assert not sm.is_cached(target, stamp, params), "a target without a sidecar is never trusted"
+    sm.write_sidecar(target, stamp, params)
+    assert os.path.isfile(target + sm.SIDECAR_SUFFIX)
+    assert sm.is_cached(target, stamp, params)
+    side = sm.read_sidecar(target)
+    assert side["params"] == {"kind": "file", "size": [64, 36]}
+    assert sm.cache_matches(side, stamp, {"kind": "file", "size": [64, 36]}), "tuple vs list is no difference"
+    assert not sm.cache_matches(side, dict(stamp, mtime=stamp["mtime"] + 1), params), "mtime"
+    assert not sm.cache_matches(side, dict(stamp, size=stamp["size"] + 1), params), "size"
+    assert not sm.cache_matches(side, dict(stamp, source=stamp["source"] + ".x"), params), "path"
+    assert not sm.cache_matches(side, stamp, {"kind": "file", "size": [32, 18]}), "params"
+    assert not sm.cache_matches(side, stamp, {"kind": "video", "size": [64, 36], "at": 1.0}), "params"
+    assert not sm.cache_matches(None, stamp, params) and not sm.cache_matches("junk", stamp, params)
+    # the source rewritten (a new mtime, same size) -> a fresh stamp misses
+    os.utime(str(src), (1000000000, 1000000000))
+    assert not sm.is_cached(target, sm.source_stamp(str(src)), params)
+    with open(target + sm.SIDECAR_SUFFIX, "w") as f:
+        f.write("{not json")
+    assert sm.read_sidecar(target) is None and not sm.is_cached(target, stamp, params)
+    os.remove(target)
+    sm.write_sidecar(target, stamp, params)
+    assert not sm.is_cached(target, stamp, params), "a sidecar without its file"
+    sm.drop_sidecar(target)
+    sm.drop_sidecar(target)                          # twice is fine
+    assert sm.read_sidecar(target) is None
+
+
+def _fake_encoders(sm, monkeypatch, counts):
+    """scale_png / gif_fit stand-ins that write tiny valid media and count their calls."""
+    def fake_scale(src, out, size, seek=None):
+        counts["art"] += 1
+        with open(out, "wb") as f:
+            f.write(tiny_png(*size))
+        return out
+
+    def fake_gif(src, out, plan, start=0.0, workdir=None, log=None):
+        counts["anim"] += 1
+        counts["last_plan"] = (plan, start)
+        with open(out, "wb") as f:
+            f.write(tiny_gif(frames=plan.frames))
+        return sm.gif_info(open(out, "rb").read()), plan, 1
+
+    monkeypatch.setattr(sm, "scale_png", fake_scale)
+    monkeypatch.setattr(sm, "gif_fit", fake_gif)
+
+
+def test_prepare_caches_art_and_anim_by_sidecar(sm, tmp_path, capsys, monkeypatch):
+    """Run 1 generates and writes sidecars; run 2 (same sources, same specs) says 'cached'
+    and calls no encoder; a touched source or a changed parameter regenerates just that
+    file; media.json round-trips the spec strings."""
+    counts = {"art": 0, "anim": 0}
+    _fake_encoders(sm, monkeypatch, counts)
+    still = tmp_path / "still.png"
+    still.write_bytes(tiny_png())
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 64)
+    out = str(tmp_path / "set")
+    anim_spec = "1=%s@12:2.5:8" % clip
+    base = ["prepare", "--visual-only", "--primary", "a.raw", "--extra", "b.raw", "--out", out,
+            "--art", "none", "--art", "0=" + str(still), "--anim", anim_spec, "--size", "64x36"]
+    assert sm.main(base) == 0
+    text = capsys.readouterr().out
+    assert counts == {"art": 1, "anim": 1, "last_plan": counts["last_plan"]}
+    plan, start = counts["last_plan"]
+    assert (plan.w, plan.h, plan.seconds, plan.fps, start) == (64, 36, 2.5, 8, 12.0)
+    assert "cached" not in text
+    for fn in ("art0.png", "art0.png.src.json", "anim1.gif", "anim1.gif.src.json", "media.json"):
+        assert os.path.isfile(os.path.join(out, fn)), fn
+    with open(os.path.join(out, "anim1.gif.src.json")) as f:
+        side = json.load(f)
+    assert side["source"] == os.path.abspath(str(clip)) and side["size"] == clip.stat().st_size
+    assert side["params"] == {"kind": "file", "clip": None, "size": [64, 36], "start": 12.0, "seconds": 2.5, "fps": 8}
+    with open(os.path.join(out, "media.json")) as f:
+        m = json.load(f)
+    assert m["images"][0] == {"art": "art0.png", "anim": None, "music": None,
+                              "art_source": str(still), "anim_source": "none"}
+    assert m["images"][1] == {"art": None, "anim": "anim1.gif", "music": None,
+                              "art_source": "none", "anim_source": "%s@12:2.5:8" % clip}
+    assert m["sound_move"] is None and m["sound_confirm"] is None
+    assert sm.validate_manifest(m) == m
+    # run 2: everything cached, no encoder called
+    assert sm.main(base) == 0
+    text = capsys.readouterr().out
+    assert counts["art"] == 1 and counts["anim"] == 1
+    assert "art0.png: cached" in text and "anim1.gif: cached" in text
+    # the still rewritten -> only the art regenerates
+    os.utime(str(still), (1000000000, 1000000000))
+    assert sm.main(base) == 0
+    text = capsys.readouterr().out
+    assert counts["art"] == 2 and counts["anim"] == 1
+    assert "art0.png: cached" not in text and "anim1.gif: cached" in text
+    # a parameter change (fps) -> only the anim regenerates
+    assert sm.main(base[:-4] + ["--anim", "1=%s@12:2.5:6" % clip, "--size", "64x36"]) == 0
+    text = capsys.readouterr().out
+    assert counts["art"] == 2 and counts["anim"] == 2
+    assert "art0.png: cached" in text and "anim1.gif: cached" not in text
+    # a panel size change -> both regenerate
+    assert sm.main(base[:-1] + ["96x54"]) == 0
+    assert counts["art"] == 3 and counts["anim"] == 3
+    assert "cached" not in capsys.readouterr().out
+
+
+def test_prepare_visual_only_skips_sounds_but_keeps_music(sm, tmp_path, capsys):
+    out = str(tmp_path / "set")
+    music = write_wav(str(tmp_path / "m.wav"), seconds=0.1)
+    rc = sm.main(["prepare", "--visual-only", "--primary", "a.raw", "--extra", "b.raw", "--out", out,
+                  "--art", "none", "--music", "1=" + music, "--sound-move", "synth", "--sound-confirm", "synth"])
+    text = capsys.readouterr().out
+    assert rc == 0, text
+    assert "sounds: skipped (--visual-only)" in text and "(visual only)" in text
+    with open(os.path.join(out, "media.json")) as f:
+        m = json.load(f)
+    assert m == {"images": [{"art": None, "anim": None, "music": None, "art_source": "none", "anim_source": "none"},
+                            {"art": None, "anim": None, "music": "music1.wav", "art_source": "none", "anim_source": "none"}],
+                 "sound_move": None, "sound_confirm": None, "volume": 50}
+    assert not os.path.exists(os.path.join(out, "move.wav"))
+    assert not os.path.exists(os.path.join(out, "confirm.wav"))
+    assert sm.wav_contract_error(sm.wav_info(os.path.join(out, "music1.wav"))) is None
+
+
+def test_manifest_accepts_sources_and_refuses_bad_ones(sm):
+    m = sm.build_manifest([("art0.png", None, None)], sources=[("auto", "none")])
+    assert m["images"][0] == {"art": "art0.png", "anim": None, "music": None, "art_source": "auto", "anim_source": "none"}
+    assert sm.validate_manifest(m) == m
+    assert sm.manifest_files(m) == ["art0.png"]
+    with pytest.raises(sm.Refused):
+        sm.build_manifest([("art0.png", None, None)], sources=[])
+    with pytest.raises(sm.Refused):
+        sm.validate_manifest({"images": [{"art": None, "anim": None, "music": None, "art_source": 3}]})
+
+
+# ============================================================================ v3: the sweep
+def test_sweep_never_removes_what_the_manifest_names(sm, tmp_path):
+    d = str(tmp_path / "set")
+    os.makedirs(d)
+    present = ["art0.png", "art1.png", "art5.png", "anim1.gif", "anim7.gif", "music1.wav", "music3.wav",
+               "move.wav", "confirm.wav", "art0.png.src.json", "art5.png.src.json", "anim1.gif.src.json",
+               "anim7.gif.src.json", "notes.txt", "media.json"]
+    for fn in present:
+        with open(os.path.join(d, fn), "wb") as f:
+            f.write(b"x")
+    m = sm.build_manifest([("art0.png", None, None), ("art1.png", "anim1.gif", "music1.wav")], "move.wav", "confirm.wav")
+    removed = sm.sweep_stale(d, m, log=lambda s: None)
+    assert sorted(removed) == ["anim7.gif", "anim7.gif.src.json", "art5.png", "art5.png.src.json", "music3.wav"]
+    assert not set(removed) & set(sm.manifest_files(m))
+    left = sorted(os.listdir(d))
+    assert left == sorted(set(present) - set(removed))
+    assert "art0.png.src.json" in left and "anim1.gif.src.json" in left, "a kept file keeps its sidecar"
+    # a visual-only run says nothing about sounds: move/confirm/music stay, only art/anim leftovers go
+    m2 = sm.build_manifest([("art0.png", None, None), (None, None, None)], None, None)
+    removed = sm.sweep_stale(d, m2, visual_only=True, log=lambda s: None)
+    assert sorted(removed) == ["anim1.gif", "anim1.gif.src.json", "art1.png"]
+    for fn in ("move.wav", "confirm.wav", "music1.wav", "art0.png", "art0.png.src.json", "notes.txt", "media.json"):
+        assert os.path.exists(os.path.join(d, fn)), fn
+
+
+def test_check_ignores_sidecars(sm, tmp_path):
+    d = str(tmp_path / "set")
+    m = _valid_set(sm, d)
+    for fn in ("art0.png.src.json", "anim0.gif.src.json", "art9.png.src.json"):
+        with open(os.path.join(d, fn), "w") as f:
+            f.write("{\"source\": \"/x\", \"mtime\": 1, \"size\": 1, \"params\": {}}")
+    lines = []
+    assert sm.check_media_dir(d, log=lines.append) == m
+    assert not any("src.json" in l for l in lines)
+    assert any(l.startswith("3 files,") for l in lines)
+
+
+# ============================================================================ v3: ffmpeg-backed
+@pytest.mark.skipif(not HAS_FFMPEG, reason="no ffmpeg")
+def test_art_from_a_video_frame(sm, tmp_path):
+    """'VIDEO@T' -> the frame T seconds in, letterboxed to the panel; past the end refuses."""
+    import subprocess
+    src = str(tmp_path / "src.mp4")
+    subprocess.run([shutil.which("ffmpeg"), "-y", "-v", "error", "-f", "lavfi", "-i",
+                    "testsrc=duration=2:size=128x72:rate=25", "-pix_fmt", "yuv420p", src], check=True)
+    out = str(tmp_path / "art.png")
+    sm.scale_png(src, out, (64, 36), seek=1.0)
+    with open(out, "rb") as f:
+        data = f.read()
+    assert sm.png_size(data) == (64, 36) and sm.trim_png(data) == data
+    with pytest.raises(sm.Refused):
+        sm.scale_png(src, str(tmp_path / "late.png"), (64, 36), seek=10.0)
+    assert not os.path.exists(str(tmp_path / "late.png"))

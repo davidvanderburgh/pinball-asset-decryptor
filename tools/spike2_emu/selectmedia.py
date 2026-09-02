@@ -36,9 +36,27 @@ codec parameters - a cold card is REFUSED, not derived for minutes):
     wav   <in> <out.wav>
           any audio file -> the selector's WAV format.
     prepare --primary P --extra E... --out DIR [...]
-          the whole set + media.json.
+          the whole set + media.json.  Per-image specs:
+            --art  N=auto | none | PATH (a still) | VIDEO@T (the frame T seconds into
+                   an .mp4/.mov/.mkv/.avi)
+            --anim N=auto | none | PATH | '<card.raw>:attract', each optionally
+                   '@START[:SECONDS[:FPS]]' (START seconds into the clip; the
+                   defaults are --start/--seconds/--fps)
+            --music N=PATH | none
+          --visual-only skips the sounds (sound_move/sound_confirm null, no WAV
+          work; --music entries are still honoured) - the GUI's preview path.
+          Every art<N>.png / anim<N>.gif gets a sidecar '<name>.src.json'
+          {source, mtime, size, params}; when the sidecar still matches the
+          source file and the parameters the file is kept and 'cached' is
+          printed, so a preview after a text-only change costs nothing.
+          media.json records each image's 'art_source' / 'anim_source' (the
+          spec strings) for the GUI to round-trip.  Leftovers of an earlier,
+          bigger set are swept AFTER the targets are decided - a file the run
+          keeps or regenerates is never deleted; a --visual-only run sweeps only
+          art/anim leftovers (it says nothing about the sounds).
     check <DIR>
-          validate a media directory against the contract, print the table.
+          validate a media directory against the contract, print the table
+          (the .src.json sidecars are ignored: only what media.json names counts).
     info  <FILE>...
           dimensions / frames / duration / peak of media files.
 
@@ -90,6 +108,16 @@ LOGO_CANDIDATES = ("assets/lcd/GameLogo.png",
 FORBIDDEN_OUTPUT_PREFIXES = ("/mnt/d/Pinball/images", "D:/Pinball/images", "D:\\Pinball\\images")
 PARAMS_CACHE_DIRNAME = "pinball_spike2_params"
 PARAMS_REV_TAG = ".r2"
+VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".avi")          # an art spec 'PATH@T' grabs a frame of these
+SIDECAR_SUFFIX = ".src.json"                            # art<N>.png.src.json / anim<N>.gif.src.json
+STILL_SIGNATURES = ((b"\x89PNG\r\n\x1a\n", "PNG"), (b"\xff\xd8\xff", "JPEG"), (b"GIF87a", "GIF"),
+                    (b"GIF89a", "GIF"), (b"BM", "BMP"), (b"II*\x00", "TIFF"), (b"MM\x00*", "TIFF"))
+STILL_KINDS = "PNG/JPEG/GIF/BMP/TIFF/WebP"
+_NUM_RE = r"\d+(?:\.\d+)?"
+ANIM_PARAMS_RE = re.compile(r"^(%s)(?::(%s)(?::(\d+))?)?$" % (_NUM_RE, _NUM_RE))   # START[:SECONDS[:FPS]]
+ART_AT_RE = re.compile(r"^%s$" % _NUM_RE)                                             # T
+STALE_FULL_RE = re.compile(r"^(art|anim|music)\d+\.(png|gif|wav)$|^(move|confirm)\.wav$")
+STALE_VISUAL_RE = re.compile(r"^(art|anim)\d+\.(png|gif)$")
 
 
 class Refused(Exception):
@@ -241,6 +269,151 @@ def parse_index_spec(specs, n, default):
     return out
 
 
+# ---- per-image specs (pure: nothing here touches the filesystem) ---------------------------
+def _split_at(spec):
+    """'X@tail' -> ('X', 'tail') when the tail looks like parameters (digits, dots,
+    colons - possibly empty), else (spec, None): a path holding a literal '@'
+    ('clip@home.mp4') stays a path."""
+    if "@" in spec:
+        head, tail = spec.rsplit("@", 1)
+        if re.match(r"^[\d.:]*$", tail):
+            return head, tail
+    return spec, None
+
+
+def is_video_path(path):
+    return (path or "").lower().endswith(VIDEO_EXTS)
+
+
+def parse_anim_spec(spec, start=0.0, seconds=3.0, fps=10):
+    """One --anim value -> {'kind': 'none'} or
+    {'kind': 'auto'|'file', 'source': PATH|'<card>:clip'|None, 'start', 'seconds', 'fps', 'spec'}.
+
+    'auto' / 'auto@START[:SECONDS[:FPS]]' = the card's attract clip; 'PATH' / 'PATH@...'
+    a video file; '<card.raw>:attract' / '...:attract@...' a clip off another card.
+    START is seconds into the source; SECONDS and FPS fall back to the run's
+    --seconds/--fps (the GIF budget ladder clamps them like before)."""
+    spec = (spec or "").strip()
+    if not spec:
+        raise Refused("animation spec is empty (use none, auto, or a path)")
+    if spec == "none":
+        return {"kind": "none", "spec": spec}
+    if spec.startswith(("auto@", "none@")):
+        head, tail = spec.split("@", 1)          # a keyword's '@' is always the separator
+    else:
+        head, tail = _split_at(spec)
+    p = {"start": float(start), "seconds": float(seconds), "fps": int(fps)}
+    if tail is not None:
+        m = ANIM_PARAMS_RE.match(tail)
+        if not m:
+            raise Refused("animation %r: after '@' comes START[:SECONDS[:FPS]], not %r" % (spec, tail))
+        p["start"] = float(m.group(1))
+        if m.group(2):
+            p["seconds"] = float(m.group(2))
+        if m.group(3):
+            p["fps"] = int(m.group(3))
+    if p["seconds"] <= 0 or p["fps"] <= 0:
+        raise Refused("animation %r: seconds and fps must be positive" % (spec,))
+    if p["start"] < 0:
+        raise Refused("animation %r: start must be >= 0" % (spec,))
+    if head == "none":
+        raise Refused("animation %r: 'none' takes no parameters" % (spec,))
+    if head == "auto":
+        return dict(kind="auto", source=None, spec=spec, **p)
+    if not head:
+        raise Refused("animation %r: no source before '@'" % (spec,))
+    return dict(kind="file", source=head, spec=spec, **p)
+
+
+def parse_art_spec(spec):
+    """One --art value -> {'kind': 'none'|'auto'} or {'kind': 'file', 'source': PATH} or
+    {'kind': 'video', 'source': PATH, 'at': T} ('VIDEO@T' = the frame T seconds into an
+    .mp4/.mov/.mkv/.avi; a bare video path is its first frame).  Every dict carries 'spec'."""
+    spec = (spec or "").strip()
+    if not spec:
+        raise Refused("art spec is empty (use none, auto, or a path)")
+    if spec in ("none", "auto"):
+        return {"kind": spec, "spec": spec}
+    head, tail = _split_at(spec)
+    if tail is not None:
+        if not ART_AT_RE.match(tail):
+            raise Refused("art %r: after '@' comes the time in seconds, not %r" % (spec, tail))
+        if not is_video_path(head):
+            raise Refused("art %r: '@T' picks a frame of a video (%s), and %s is not one"
+                          % (spec, "/".join(e[1:] for e in VIDEO_EXTS), head or "''"))
+        return {"kind": "video", "source": head, "at": float(tail), "spec": spec}
+    if is_video_path(head):
+        return {"kind": "video", "source": head, "at": 0.0, "spec": spec}
+    return {"kind": "file", "source": head, "spec": spec}
+
+
+def still_kind(path):
+    """'PNG'/'JPEG'/'GIF'/'BMP'/'TIFF'/'WebP' by signature, or None (a card image, a
+    video, a text file...).  Sniffed BEFORE any decoder sees the file, so a 7.8 GB
+    card handed in as art is refused in microseconds."""
+    with open(path, "rb") as f:
+        head = f.read(16)
+    for sig, kind in STILL_SIGNATURES:
+        if head.startswith(sig):
+            return kind
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "WebP"
+    return None
+
+
+# ---- the sidecar cache ----------------------------------------------------------------------
+def sidecar_path(target):
+    return target + SIDECAR_SUFFIX
+
+
+def source_stamp(path):
+    """{'source': abspath, 'mtime', 'size'} of a source file (a still, a video, or a
+    whole card - stat only, never opened)."""
+    st = os.stat(path)
+    return {"source": os.path.abspath(path), "mtime": st.st_mtime, "size": st.st_size}
+
+
+def _json_norm(params):
+    return json.loads(json.dumps(params))
+
+
+def cache_matches(sidecar, stamp, params):
+    """True when a sidecar dict records exactly this source (path, mtime, size) and
+    these generation parameters (compared after a JSON round trip: tuples == lists)."""
+    if not isinstance(sidecar, dict):
+        return False
+    return (sidecar.get("source") == stamp["source"] and sidecar.get("mtime") == stamp["mtime"]
+            and sidecar.get("size") == stamp["size"] and sidecar.get("params") == _json_norm(params))
+
+
+def read_sidecar(target):
+    try:
+        with open(sidecar_path(target), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def write_sidecar(target, stamp, params):
+    d = dict(stamp)
+    d["params"] = _json_norm(params)
+    with open(sidecar_path(target), "w", encoding="utf-8") as f:
+        json.dump(d, f, indent=1, sort_keys=True)
+        f.write("\n")
+
+
+def drop_sidecar(target):
+    try:
+        os.remove(sidecar_path(target))
+    except OSError:
+        pass
+
+
+def is_cached(target, stamp, params):
+    """The target exists and its sidecar matches: keep it, print 'cached'."""
+    return os.path.isfile(target) and cache_matches(read_sidecar(target), stamp, params)
+
+
 def check_output_dir(path):
     """Refuse an output under David's card library; return the absolute path."""
     a = os.path.abspath(path)
@@ -258,18 +431,25 @@ def check_output_dir(path):
 
 
 # ---- the manifest ---------------------------------------------------------------------------
-def build_manifest(images, sound_move=None, sound_confirm=None, volume=DEFAULT_VOLUME):
-    """images = [(art|None, anim|None, music|None), ...] -> the media.json dict."""
+def build_manifest(images, sound_move=None, sound_confirm=None, volume=DEFAULT_VOLUME, sources=None):
+    """images = [(art|None, anim|None, music|None), ...] -> the media.json dict.
+    sources = [(art_spec, anim_spec), ...] (one per image) adds 'art_source' /
+    'anim_source' - the spec strings the GUI round-trips."""
     vol = int(volume)
     if not (0 <= vol <= 100):
         raise Refused("volume must be 0..100")
     out = {"images": [], "sound_move": sound_move or None,
            "sound_confirm": sound_confirm or None, "volume": vol}
-    for art, anim, music in images:
+    if sources is not None and len(sources) != len(images):
+        raise Refused("build_manifest: %d sources for %d images" % (len(sources), len(images)))
+    for i, (art, anim, music) in enumerate(images):
         for nm in (art, anim, music, sound_move, sound_confirm):
             if nm:
                 check_media_name(nm)
-        out["images"].append({"art": art or None, "anim": anim or None, "music": music or None})
+        row = {"art": art or None, "anim": anim or None, "music": music or None}
+        if sources is not None:
+            row["art_source"], row["anim_source"] = sources[i]
+        out["images"].append(row)
     return out
 
 
@@ -288,7 +468,11 @@ def validate_manifest(m):
                 if not isinstance(v, str):
                     raise Refused("media.json: images[%d].%s must be a name or null" % (i, k))
                 check_media_name(v)
-        extra = set(im) - {"art", "anim", "music"}
+        for k in ("art_source", "anim_source"):
+            v = im.get(k)
+            if v is not None and not isinstance(v, str):
+                raise Refused("media.json: images[%d].%s must be a spec string or null" % (i, k))
+        extra = set(im) - {"art", "anim", "music", "art_source", "anim_source"}
         if extra:
             raise Refused("media.json: images[%d] has unknown keys %s" % (i, sorted(extra)))
     for k in ("sound_move", "sound_confirm"):
@@ -547,16 +731,29 @@ def run(cmd, what):
     return r
 
 
-def scale_png(src, out, size):
+def scale_png(src, out, size, seek=None):
     """Aspect-fit *src* (any image ffmpeg/PIL reads) into an RGBA WxH PNG, letterboxed
-    with transparency.  ffmpeg (lanczos) when present, PIL otherwise."""
+    with transparency.  ffmpeg (lanczos) when present, PIL otherwise.  seek=T grabs
+    the frame T seconds into a video (ffmpeg only; refused past the end)."""
     w, h = size
     ff = find_ffmpeg()
     if ff:
         vf = ("scale=%d:%d:force_original_aspect_ratio=decrease:flags=lanczos,"
               "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=#00000000,format=rgba" % (w, h, w, h))
-        run([ff, "-y", "-v", "error", "-i", src, "-frames:v", "1", "-vf", vf, out], "ffmpeg scale")
+        cmd = [ff, "-y", "-v", "error"]
+        if seek is not None:
+            cmd += ["-ss", "%.3f" % float(seek)]
+        try:
+            os.remove(out)                 # an old file must not pass for a frame ffmpeg never wrote
+        except OSError:
+            pass
+        run(cmd + ["-i", src, "-frames:v", "1", "-vf", vf, out], "ffmpeg scale")
+        if not os.path.isfile(out) or os.path.getsize(out) == 0:
+            raise Refused("ffmpeg wrote no frame from %s%s (past the end of the clip?)"
+                          % (src, " at %.2f s" % float(seek) if seek is not None else ""))
         return out
+    if seek is not None:
+        raise Refused("ffmpeg is required to grab a video frame (%s at %.2f s)" % (src, float(seek)))
     try:
         from PIL import Image
     except ImportError:
@@ -1113,20 +1310,126 @@ def _sound_default(spec, sources, primary, idx, max_seconds, fade_ms, synth_kind
     return os.path.basename(out)
 
 
+def _prepare_art(i, img, spec, size, out, work, card, log=say):
+    """art<i>.png from a parsed --art spec (or None for 'none'): the card's logo, a
+    still, or a video frame; kept when the sidecar cache matches.  Returns the name."""
+    if spec["kind"] == "none":
+        return None
+    target = os.path.join(out, "art%d.png" % i)
+    name = os.path.basename(target)
+    params = {"kind": spec["kind"], "size": list(size)}
+    if spec["kind"] == "auto":
+        src = img
+        if not os.path.isfile(src):
+            raise Refused("card image %s does not exist" % src)
+    else:
+        src = spec["source"]
+        if not os.path.isfile(src):
+            raise Refused("art %d: %s is not a file" % (i, src))
+        if spec["kind"] == "video":
+            params["at"] = float(spec["at"])
+        elif still_kind(src) is None:
+            raise Refused("art %d: %s is not a still image (%s by signature; %s) - a video frame is 'VIDEO@T'"
+                          % (i, src, STILL_KINDS, fmt_bytes(os.path.getsize(src))))
+    stamp = source_stamp(src)
+    if is_cached(target, stamp, params):
+        log("  %s: cached (%s)" % (name, spec["spec"] if spec["kind"] != "auto"
+                                   else "auto, the logo of %s" % os.path.basename(img)))
+        return name
+    drop_sidecar(target)
+    if spec["kind"] == "auto":
+        ci, part, title = card(img)
+        data, path = logo_bytes(ci, part, title)
+        tmp = os.path.join(work, "logo%d.png" % i)
+        with open(tmp, "wb") as f:
+            f.write(data)
+        scale_png(tmp, target, size)
+        log("  %s: %s of %s (%s)" % (name, path, os.path.basename(img), fmt_bytes(len(data))))
+    elif spec["kind"] == "video":
+        scale_png(src, target, size, seek=spec["at"])
+        log("  %s: the frame %.2f s into %s" % (name, spec["at"], src))
+    else:
+        scale_png(src, target, size)
+        log("  %s: %s (%s)" % (name, src, still_kind(src)))
+    write_sidecar(target, stamp, params)
+    return name
+
+
+def _prepare_anim(i, img, spec, size, out, work, log=say):
+    """anim<i>.gif from a parsed --anim spec (or None for 'none'): the card's attract
+    clip, a video file, or a clip off another card, START seconds in, SECONDS long at
+    FPS, down the GIF budget ladder; kept when the sidecar cache matches."""
+    if spec["kind"] == "none":
+        return None
+    target = os.path.join(out, "anim%d.gif" % i)
+    name = os.path.basename(target)
+    plan = gif_first_plan(size, spec["seconds"], spec["fps"])
+    if spec["kind"] == "auto":
+        src_path, clip = img, ATTRACT_CLIP
+        if not os.path.isfile(src_path):
+            raise Refused("card image %s does not exist" % src_path)
+    else:
+        src_path, clip = split_source(spec["source"])
+        if clip == "attract":
+            clip = ATTRACT_CLIP
+    stamp = source_stamp(src_path)
+    params = {"kind": spec["kind"], "clip": clip, "size": list(size), "start": float(spec["start"]),
+              "seconds": float(spec["seconds"]), "fps": int(spec["fps"])}
+    if is_cached(target, stamp, params):
+        log("  %s: cached (%s)" % (name, spec["spec"] if spec["kind"] != "auto"
+                                   else "%s, the %s clip of %s" % (spec["spec"], clip, os.path.basename(img))))
+        return name
+    drop_sidecar(target)
+    if clip:
+        mov = os.path.join(work, "clip%d.mov" % i)
+        path, nbytes = extract_clip(src_path, clip, mov)
+        log("  %s: %s of %s (%s)" % (name, path, os.path.basename(src_path), fmt_bytes(nbytes)))
+        src = mov
+    else:
+        src = src_path
+        log("  %s: %s" % (name, src))
+    if spec["start"] or spec["seconds"] != 3.0 or spec["fps"] != 10:
+        log("  %s: from %.2f s, %.2f s at %d fps" % (name, spec["start"], spec["seconds"], spec["fps"]))
+    gif_fit(src, target, plan, spec["start"], work, log)
+    write_sidecar(target, stamp, params)
+    return name
+
+
+def sweep_stale(out, manifest, visual_only=False, log=say):
+    """Remove media files (and their sidecars) an earlier, bigger run left behind: files
+    matching the media naming that the manifest does not reference.  Called AFTER the
+    targets are decided, so a file this run kept or regenerated is never touched.  A
+    visual-only run sweeps only art/anim leftovers (it says nothing about sounds)."""
+    referenced = set(manifest_files(manifest))
+    pat = STALE_VISUAL_RE if visual_only else STALE_FULL_RE
+    removed = []
+    for fn in sorted(os.listdir(out)):
+        base = fn[:-len(SIDECAR_SUFFIX)] if fn.endswith(SIDECAR_SUFFIX) else fn
+        if base == "media.json" or base in referenced or not pat.match(base):
+            continue
+        os.remove(os.path.join(out, fn))
+        removed.append(fn)
+        log("  removed stale %s" % fn)
+    return removed
+
+
 def cmd_prepare(a):
     images = [a.primary] + list(a.extra or [])
     n = len(images)
     out = check_output_dir(a.out)
     os.makedirs(out, exist_ok=True)
     size = parse_size(a.size) if a.size else panel_size_for(n)
-    arts = parse_index_spec(a.art, n, "auto")
-    anims = parse_index_spec(a.anim, n, "none")
+    arts = [parse_art_spec(s) for s in parse_index_spec(a.art, n, "auto")]
+    anims = [parse_anim_spec(s, a.start, a.seconds, a.fps) for s in parse_index_spec(a.anim, n, "none")]
     musics = parse_index_spec(a.music, n, "none")
-    say("prepare: %d image%s, panel %dx%d, out %s" % (n, "" if n == 1 else "s", size[0], size[1], out))
+    visual_only = bool(getattr(a, "visual_only", False))
+    say("prepare: %d image%s, panel %dx%d, out %s%s"
+        % (n, "" if n == 1 else "s", size[0], size[1], out, " (visual only)" if visual_only else ""))
     work = tempfile.mkdtemp(prefix="selectmedia_prep_", dir=a.work)
     sources = {}
     cards = {}
     rows = []
+    specs = []
 
     def card(path):
         if path not in cards:
@@ -1137,45 +1440,9 @@ def cmd_prepare(a):
 
     try:
         for i, img in enumerate(images):
-            art = anim = music = None
-            spec = arts[i]
-            if spec != "none":
-                art_out = os.path.join(out, "art%d.png" % i)
-                if spec == "auto":
-                    ci, part, title = card(img)
-                    data, path = logo_bytes(ci, part, title)
-                    tmp = os.path.join(work, "logo%d.png" % i)
-                    with open(tmp, "wb") as f:
-                        f.write(data)
-                    scale_png(tmp, art_out, size)
-                    say("  art%d.png: %s of %s (%s)" % (i, path, os.path.basename(img), fmt_bytes(len(data))))
-                else:
-                    if not os.path.isfile(spec):
-                        raise Refused("art %d: %s is not a file" % (i, spec))
-                    scale_png(spec, art_out, size)
-                    say("  art%d.png: %s" % (i, spec))
-                art = os.path.basename(art_out)
-            spec = anims[i]
-            if spec != "none":
-                anim_out = os.path.join(out, "anim%d.gif" % i)
-                plan = gif_first_plan(size, a.seconds, a.fps)
-                if spec == "auto":
-                    mov = os.path.join(work, "clip%d.mov" % i)
-                    path, nbytes = extract_clip(img, ATTRACT_CLIP, mov)
-                    say("  anim%d.gif: %s of %s (%s)" % (i, path, os.path.basename(img), fmt_bytes(nbytes)))
-                    src = mov
-                else:
-                    src, clip = split_source(spec)
-                    if clip:
-                        mov = os.path.join(work, "clip%d.mov" % i)
-                        name = ATTRACT_CLIP if clip == "attract" else clip
-                        path, nbytes = extract_clip(src, name, mov)
-                        say("  anim%d.gif: %s of %s (%s)" % (i, path, os.path.basename(src), fmt_bytes(nbytes)))
-                        src = mov
-                    else:
-                        say("  anim%d.gif: %s" % (i, src))
-                gif_fit(src, anim_out, plan, a.start, work)
-                anim = os.path.basename(anim_out)
+            art = _prepare_art(i, img, arts[i], size, out, work, card)
+            anim = _prepare_anim(i, img, anims[i], size, out, work)
+            music = None
             spec = musics[i]
             if spec != "none":
                 if not os.path.isfile(spec):
@@ -1185,23 +1452,25 @@ def cmd_prepare(a):
                 say("  music%d.wav: %s" % (i, spec))
                 music = os.path.basename(music_out)
             rows.append((art, anim, music))
-        move = _sound_default(a.sound_move, sources, a.primary, MOVE_IDX, MOVE_MAX_SECONDS, 0,
-                              "click", os.path.join(out, "move.wav"), say)
-        confirm = _sound_default(a.sound_confirm, sources, a.primary, CONFIRM_IDX, CONFIRM_SECONDS,
-                                 CONFIRM_FADE_MS, "chime", os.path.join(out, "confirm.wav"), say)
+            specs.append((arts[i]["spec"], anims[i]["spec"]))
+        if visual_only:
+            move = confirm = None
+            say("  sounds: skipped (--visual-only)")
+        else:
+            move = _sound_default(a.sound_move, sources, a.primary, MOVE_IDX, MOVE_MAX_SECONDS, 0,
+                                  "click", os.path.join(out, "move.wav"), say)
+            confirm = _sound_default(a.sound_confirm, sources, a.primary, CONFIRM_IDX, CONFIRM_SECONDS,
+                                     CONFIRM_FADE_MS, "chime", os.path.join(out, "confirm.wav"), say)
     finally:
         for s in sources.values():
             s.close()
         shutil.rmtree(work, ignore_errors=True)
-    m = build_manifest(rows, move, confirm, a.volume)
+    m = build_manifest(rows, move, confirm, a.volume, sources=specs)
     with open(os.path.join(out, "media.json"), "w", encoding="utf-8") as f:
         json.dump(m, f, indent=2)
         f.write("\n")
     # stale files from an earlier run of a bigger set would ride along in the budget
-    for fn in sorted(os.listdir(out)):
-        if fn != "media.json" and fn not in manifest_files(m) and re.match(r"^(art|anim|music)\d+\.(png|gif|wav)$|^(move|confirm)\.wav$", fn):
-            os.remove(os.path.join(out, fn))
-            say("  removed stale %s" % fn)
+    sweep_stale(out, m, visual_only)
     say("media.json: " + json.dumps(m))
     check_media_dir(out)
     return 0
@@ -1262,11 +1531,15 @@ def main(argv=None):
     s.add_argument("--primary", required=True)
     s.add_argument("--extra", action="append", default=[])
     s.add_argument("--out", required=True)
-    s.add_argument("--art", action="append", default=[], metavar="N=PATH|auto|none")
-    s.add_argument("--anim", action="append", default=[], metavar="N=PATH|auto|none")
+    s.add_argument("--art", action="append", default=[], metavar="N=PATH|VIDEO@T|auto|none",
+                   help="still art per image; VIDEO@T = the frame T seconds into an mp4/mov/mkv/avi")
+    s.add_argument("--anim", action="append", default=[], metavar="N=PATH|auto|none[@START[:SECONDS[:FPS]]]",
+                   help="animation per image; '@START[:SECONDS[:FPS]]' overrides --start/--seconds/--fps for it")
     s.add_argument("--music", action="append", default=[], metavar="N=PATH|none")
     s.add_argument("--sound-move", default="auto", metavar="PATH|auto|synth|none")
     s.add_argument("--sound-confirm", default="auto", metavar="PATH|auto|synth|none")
+    s.add_argument("--visual-only", action="store_true",
+                   help="art/anim (+music) only: no move/confirm sounds, none pulled off a card (the GUI preview)")
     s.add_argument("--volume", type=int, default=DEFAULT_VOLUME)
     s.add_argument("--size", default=None, help="panel WxH (default by image count)")
     s.add_argument("--seconds", type=float, default=3.0, help="animation length")

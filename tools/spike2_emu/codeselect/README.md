@@ -9,7 +9,8 @@ side are in `DESIGN.md` and in the rig (`run_game.sh`/`watch.sh`).
 
 ```
 codeselect.c     main loop, CLI, layout (row of 2-4 cards, carousel beyond),
-                 countdown, sounds, the confirm wait, choice/last files
+                 countdown, sounds, the confirm wait, choice/last files,
+                 the --snapshot frame (the Multi-boot tab's preview)
 gfx.c/.h         software RGBA canvas: rectangles, rounded frames, TrueType
                  text (third_party/stb_truetype.h), RGBA blits, DIRTY-RECT
                  tracking + a packed sub-rect for the upload, 180-degree
@@ -78,6 +79,7 @@ codeselect [--conf PATH] [--out PATH] [--input hw|padsw|none] [--nodebus DEV]
            [--invert|--no-invert] [--preamble min|full] [--font PATH]
            [--media DIR] [--audio auto|alsa|fifo:PATH|none] [--audio-fmt PATH]
            [--volume 0-100] [--anim-frame N] [--audio-dump FILE]
+           [--snapshot FILE.ppm] [--highlight N]
 ```
 
 | option | default | meaning |
@@ -94,6 +96,8 @@ codeselect [--conf PATH] [--out PATH] [--input hw|padsw|none] [--nodebus DEV]
 | `--default` | conf `default=`, else 0 | highlight when the last-choice file is missing/invalid |
 | `--log` | none | appended; stderr always carries the same lines |
 | `--headless` | off | no EGL; the loop runs (1360x768) and the last menu frame is written as P6 PPM; the LOADING frame goes to `FILE.loading.ppm` |
+| `--snapshot` | off | render ONE menu frame (1360x768, the moment the menu appears) as a P6 PPM and exit 0 - no EGL, no input backend, no audio, no choice/last file: the preview (below) |
+| `--highlight` | conf `default=`, else 0 | `--snapshot` only: the highlighted card (0-based); the last-choice file is never read; past the last image = exit 2 |
 | `--invert` | auto | auto = `/games/data/boot_display_cmd` contains the token `-invert` (rotate 180, as boot_display does) |
 | `--preamble` | `min` | `hw` only: how much of the game's node-bus bring-up to replay first |
 | `--font` | conf `font=`, `/usr/local/codeselect/font.ttf`, `/usr/local/spike/VeraMono.ttf` | first that loads wins |
@@ -101,11 +105,14 @@ codeselect [--conf PATH] [--out PATH] [--input hw|padsw|none] [--nodebus DEV]
 | `--audio` | `auto` | `auto` = ALSA when `snd_pcm_open` succeeds, else `fifo:$PAD_AUDIO_PLAY` when that is set and non-empty, else `none`; `alsa`, `fifo:PATH`, `none` force one |
 | `--audio-fmt` | `$PAD_AUDIO_FMT` | the rig's fmt file; the FIFO sink writes `44100 2` into it first |
 | `--volume` | conf `volume=`, else 50 | software mix gain, 0-100 (50 = -6 dB) |
-| `--anim-frame` | animate | headless tests: every animation shows frame N and never ticks |
+| `--anim-frame` | animate | `--headless`: every animation shows frame N and never ticks (the layout tests); `--snapshot`: the highlighted card's frame, wrapping past the end - the other cards show their still, or frame 0, as they do live |
 | `--audio-dump` | none | raw s16le 44100 Hz stereo of everything mixed (with `--audio none` the mix still runs, paced to the clock) |
 
 Exit status: `0` = a choice was written to `--out`; `2` = no choice (bad conf,
-no font, display failure, interrupted). Every media failure - a missing or
+no font, display failure, interrupted). With `--snapshot`: `0` = the PPM was
+written, `2` = it was not (bad conf, no font, `--highlight` past the last
+image, a file that cannot be written), always with a `[select] error:`
+line. Every media failure - a missing or
 undecodable picture, a WAV in the wrong format, no sound device, no FIFO
 reader - is logged and the menu carries on without that piece; the card never
 fails to boot over media.
@@ -151,6 +158,55 @@ panel. Every drawing call grows a dirty rectangle, and the frame uploads only
 that rectangle, tightly packed, with one `glTexSubImage2D` (a 546x168 panel
 tick = 367 KB instead of the 4.18 MB canvas); `eglSwapBuffers` runs every
 frame regardless (the bridge paces to 60 Hz).
+
+### Snapshot: one frame for the preview
+
+```
+codeselect --snapshot FILE.ppm --conf images.conf --media DIR [--highlight N]
+           [--anim-frame N] [--timeout SEC] [--font PATH] [--invert]
+```
+
+draws the frame the machine shows the moment the menu appears - card N (or
+the conf's `default=`; the last-choice file is never read) highlighted, that
+card's GIF at frame N (0 when unset, wrapping past the end), every other
+card its still or frame 0, the countdown at its full `timeout=` value
+(`press START to boot ...` for 0) - writes it as a binary P6 PPM and exits
+0. Nothing else runs: no EGL, no input backend, no audio (the WAVs are not
+opened), no choice or last-choice file, no LOADING frame. Every animation
+is decoded in full first, so the run is the decode plus one draw (71-87 ms
+under qemu for the test media, measured 2026-09-02). `-invert` is NOT
+auto-detected: that
+rotation compensates for an LCD mounted upside down and the preview shows
+what the player sees; `--invert` forces it. Errors - an unreadable conf, no
+usable font, a `--highlight` past the last image, a PPM that cannot be
+written - print `[select] error: ...` and exit 2; a missing media directory
+or file is as non-fatal as it is live (`art: cannot load ...` in the log,
+the card renders without its picture). stdout carries one line a caller can
+parse:
+
+```
+[select] snapshot: FILE.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 10 s, invert 0, font /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf, media /some/dir
+```
+
+`frame F of N` is the frame shown and the highlighted card's frame count
+(`0 of 0` when it has no animation), so a caller can step `--anim-frame`
+through 0..N-1 to play it.
+
+**Paths under qemu.** The GUI runs the snapshot as `qemu-arm-static -L
+/home/david/spike2root codeselect ...`. The font and every media file are
+plain `fopen`s, and qemu-user relocates an ABSOLUTE path into the `-L`
+sysroot when the file exists there, falling back to the host path when it
+does not (measured 2026-09-02 with qemu 8.2: `--font
+/usr/local/codeselect/font.ttf` loaded the rootfs copy, which does not exist
+on the host; `/usr/local/spike/VeraMono.ttf` likewise; a host path and a
+path relative to the host cwd both loaded as themselves). So a conf
+`font=/usr/local/codeselect/font.ttf` works once the rig has installed the
+selector into the rootfs, and before that it falls through to the card's
+VeraMono - there is always a font; a caller that wants a KNOWN face passes
+`--font` with a host path (`/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`,
+what `make install` ships as `font.ttf`). The same rule shadows any `--conf`
+or `--media` path that also exists under the sysroot; keep them out of
+`/usr/local/codeselect/`.
 
 ### Media
 
@@ -245,6 +301,7 @@ to 16 images (`CONF_MAX_IMAGES`). `volume` is clamped to 0-100,
 [select] key: left|right|start|select|plus|minus|back
 [select] chose 1 TMNT 1987
 [select] error: <what>
+[select] snapshot: FILE.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 10 s, invert 0, font ..., media ...   (--snapshot only)
 ```
 
 ### log lines (stderr and --log)
@@ -410,8 +467,19 @@ down.
    `media:` line, a confirm wait and a non-silent `--audio-dump`; a missing
    PNG and the bad WAV are non-fatal (exit 0, logged); 5- and 9-image
    carousels (the highlight centred, a neighbour's pinned GIF frame in
-   place); a 17-image conf refused. PNGs in `$BUILD/t/codeselect_*.png` for
-   eyes.
+   place); a 17-image conf refused. Then `--snapshot`: `--highlight 1
+   --anim-frame 2` on the media conf (card 1's GIF at frame 2 = blue at its
+   panel centre, card 0's still, the amber countdown line present on its
+   baseline, `frame 2 of 4` on stdout, no choice/last/LOADING file, no
+   `nb`/`spi`/`audio:` line in the log and `0 music, move=n` - the WAVs are
+   never opened; neither `--input` nor `--audio` is passed), `--highlight
+   0` (card 1 shows its STILL: a card that is not highlighted never
+   animates), a frame past the end wrapping, no `--highlight` = the conf
+   default with a last-choice file present and untouched, a timeout-0 conf
+   (`press START` line), a missing media directory (exit 0, `art: cannot
+   load`), and `--highlight` past the end / an empty conf / `--snapshot`
+   with `--headless` refused (exit 2, no PPM). PNGs in
+   `$BUILD/t/codeselect_*.png` for eyes.
 3. `test/padsw_test.py` - a padsw file, RIGHT (id 64 on turtles_pro) held
    100 ms then START (36), with the test holding the read end of a FIFO the
    selector writes into (`--audio fifo:... --audio-fmt ... --audio-dump`):

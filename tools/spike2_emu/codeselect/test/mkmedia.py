@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """mkmedia.py make DIR        - write the test media set into DIR
    mkmedia.py pix PPM X Y [RRGGBB [TOL]]  - print (or assert) one pixel of a P6 PPM
+   mkmedia.py band PPM X0 Y0 X1 Y1 RRGGBB [TOL]  - assert the rectangle (inclusive)
+                              holds at least one pixel within TOL of RRGGBB (text
+                              in a known colour is somewhere on its baseline)
 
 The media set (no PIL needed: a zlib PNG writer, a hand-rolled GIF89a
 encoder and the wave module):
@@ -129,11 +132,33 @@ def pix(args):
         print(got)
 
 
+def band(args):
+    path = args[0]
+    x0, y0, x1, y1 = (int(a) for a in args[1:5])
+    want = args[5].upper()
+    tol = int(args[6]) if len(args) > 6 else 8
+    wr, wg, wb = int(want[0:2], 16), int(want[2:4], 16), int(want[4:6], 16)
+    w, h, px = read_ppm(path)
+    n = 0
+    for y in range(max(0, y0), min(h - 1, y1) + 1):
+        row = y * w * 3
+        for x in range(max(0, x0), min(w - 1, x1) + 1):
+            o = row + x * 3
+            if max(abs(px[o] - wr), abs(px[o + 1] - wg), abs(px[o + 2] - wb)) <= tol:
+                n += 1
+    where = "[%d,%d]..[%d,%d]" % (x0, y0, x1, y1)
+    if n == 0:
+        raise SystemExit("mkmedia band: %s has no %s pixel in %s" % (path, want, where))
+    print("mkmedia band: %s %s holds %d px of %s ok" % (os.path.basename(path), where, n, want))
+
+
 def main():
     if len(sys.argv) >= 3 and sys.argv[1] == "make":
         make(sys.argv[2])
     elif len(sys.argv) >= 5 and sys.argv[1] == "pix":
         pix(sys.argv[2:])
+    elif len(sys.argv) >= 8 and sys.argv[1] == "band":
+        band(sys.argv[2:])
     else:
         raise SystemExit(__doc__)
 

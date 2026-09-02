@@ -16,6 +16,11 @@
  *                         a binary P6 PPM (and the LOADING frame beside it as
  *                         FILE.loading.ppm); with --input none the countdown
  *                         expires and the highlighted image is chosen.
+ *   --snapshot FILE.ppm   render ONE menu frame - what the machine shows the
+ *                         moment the menu appears - as a P6 PPM and exit 0,
+ *                         with no display, input, audio, choice or last file:
+ *                         the Multi-boot tab's preview. --highlight N picks
+ *                         the card, --anim-frame N its animation frame.
  *
  * stdout lines are prefixed '[select] ' for the rig's event pane; stderr
  * (and --log) carry the diagnostics.
@@ -34,7 +39,7 @@
 #include "audio.h"
 #include "log.h"
 
-#define VERSION "2.0"
+#define VERSION "2.1"
 
 #define DEF_CONF     "/usr/local/codeselect/images.conf"
 #define DEF_OUT      "/var/volatile/codeselect.choice"
@@ -53,12 +58,14 @@
 
 struct opts {
     const char *conf, *out, *input, *nodebus, *spi, *padsw, *tables, *last, *log,
-               *headless, *font, *preamble, *media, *audio, *audio_fmt, *audio_dump;
+               *headless, *font, *preamble, *media, *audio, *audio_fmt, *audio_dump,
+               *snapshot;
     int timeout;      /* -1 = from conf */
     int def;          /* -1 = from conf */
     int invert;       /* -1 = auto */
     int volume;       /* -1 = from conf */
     int anim_frame;   /* -1 = animate; else every animation shows this frame */
+    int highlight;    /* --snapshot: the highlighted card; -1 = the conf default */
 };
 
 static volatile sig_atomic_t g_stop;
@@ -85,6 +92,10 @@ static void usage(FILE *f)
         "  --default N        highlight when there is no last choice (overrides conf)\n"
         "  --log PATH         append diagnostics here (stderr always)\n"
         "  --headless FILE.ppm  no EGL; write the final menu frame as a P6 PPM\n"
+        "  --snapshot FILE.ppm  render ONE menu frame as a P6 PPM and exit: no display, input,\n"
+        "                     audio, choice or last file (the preview)\n"
+        "  --highlight N      --snapshot only: the highlighted card (default conf default=, else 0;\n"
+        "                     the last-choice file is never read)\n"
         "  --invert / --no-invert  rotate 180 degrees (default: auto from " BOOTDISP_CMD ")\n"
         "  --preamble min|full  node-bus bring-up to replay before scanning (default min)\n"
         "  --font PATH        TrueType font (default conf font=, " DEF_FONT ", " CARD_FONT ")\n"
@@ -92,7 +103,8 @@ static void usage(FILE *f)
         "  --audio auto|alsa|fifo:PATH|none  sound sink (default auto: alsa, else $PAD_AUDIO_PLAY, else none)\n"
         "  --audio-fmt PATH   the rig's fmt file, gets '44100 2' (default $PAD_AUDIO_FMT)\n"
         "  --volume 0-100     software mix gain (overrides conf volume=, default %d)\n"
-        "  --anim-frame N     show frame N of every animation instead of animating (headless tests)\n"
+        "  --anim-frame N     show frame N of every animation instead of animating (headless tests);\n"
+        "                     with --snapshot: the highlighted card's frame (wraps)\n"
         "  --audio-dump FILE  raw s16le 44100 Hz stereo of everything mixed\n"
         "exit status: 0 = a choice was written, 2 = no choice\n", DEF_VOLUME);
 }
@@ -114,6 +126,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
     o->invert = -1;
     o->volume = -1;
     o->anim_frame = -1;
+    o->highlight = -1;
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
         const char *v = i + 1 < argc ? argv[i + 1] : NULL;
@@ -128,6 +141,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
         ARG("--last", last)
         ARG("--log", log)
         ARG("--headless", headless)
+        ARG("--snapshot", snapshot)
         ARG("--font", font)
         ARG("--preamble", preamble)
         ARG("--media", media)
@@ -139,6 +153,7 @@ static int parse_args(struct opts *o, int argc, char **argv)
         if (!strcmp(a, "--default")) { if (!v) goto missing; o->def = atoi(v); i++; continue; }
         if (!strcmp(a, "--volume")) { if (!v) goto missing; o->volume = atoi(v); i++; continue; }
         if (!strcmp(a, "--anim-frame")) { if (!v) goto missing; o->anim_frame = atoi(v); i++; continue; }
+        if (!strcmp(a, "--highlight")) { if (!v) goto missing; o->highlight = atoi(v); i++; continue; }
         if (!strcmp(a, "--invert")) { o->invert = 1; continue; }
         if (!strcmp(a, "--no-invert")) { o->invert = 0; continue; }
         if (!strcmp(a, "--help") || !strcmp(a, "-h")) { usage(stdout); exit(0); }
@@ -160,6 +175,14 @@ missing:
     if (strcmp(o->audio, "auto") && strcmp(o->audio, "alsa") && strcmp(o->audio, "none") &&
         strncmp(o->audio, "fifo:", 5)) {
         fprintf(stderr, "codeselect: --audio must be auto, alsa, fifo:PATH or none\n");
+        return -1;
+    }
+    if (o->snapshot && o->headless) {
+        fprintf(stderr, "codeselect: --snapshot and --headless are exclusive\n");
+        return -1;
+    }
+    if (o->highlight >= 0 && !o->snapshot) {
+        fprintf(stderr, "codeselect: --highlight is only used with --snapshot\n");
         return -1;
     }
     if (o->volume > 100) o->volume = 100;
@@ -538,6 +561,54 @@ static int image_slot(const struct layout *L, int hl, int i)
     return -1;
 }
 
+/* -------------------------------------------------------------- snapshot */
+
+static const char *media_dir(const struct opts *o, const struct conf *c)
+{
+    return o->media ? o->media : *c->media ? c->media : DEF_MEDIA;
+}
+
+/* --snapshot: ONE menu frame, the picture the machine shows the moment the
+ * menu appears - the countdown at its full value - with the highlighted
+ * card's animation at frame --anim-frame (0 when unset; past the end it
+ * wraps); every other card shows its still, or frame 0 when it has none,
+ * exactly as it does live. No input backend, no audio (the WAVs are not
+ * even opened), nothing written but the PPM. Every animation is decoded in
+ * full first so the frame asked for exists. Returns the exit status:
+ * 0 = written, 2 = could not. */
+static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx *g,
+                          struct gfx_font *font, const struct layout *L, int hl,
+                          const char *how, int timeout, int invert, const char *fontpath)
+{
+    struct media media;
+    int n = c->n, frame = o->anim_frame > 0 ? o->anim_frame : 0, frames = 0;
+
+    memset(&media, 0, sizeof media);
+    snprintf(media.dir, sizeof media.dir, "%s", media_dir(o, c));
+    media_load(&media, c, L, 0);
+    while (media_step(&media, n) >= 0)
+        ;
+    media_log(&media);
+    if (media.anim[hl]) frames = media.anim[hl]->n;
+    if (!frames) {
+        frame = 0;
+    } else if (frame >= frames) {
+        sel_log("snapshot: frame %d wraps to %d (image %d has %d frames)", frame, frame % frames, hl, frames);
+        frame %= frames;
+    }
+    draw_menu(g, font, L, c, &media, hl, timeout > 0 ? timeout : -1, frame, 0);
+    if (gfx_write_ppm(g, o->snapshot, invert) < 0) {
+        sel_say("error: cannot write %s: %s", o->snapshot, strerror(errno));
+        media_free(&media);
+        return 2;
+    }
+    sel_say("snapshot: %s %dx%d, highlight %d (%s) from %s, frame %d of %d, timeout %d s, invert %d, font %s, media %s",
+            o->snapshot, g->w, g->h, hl, c->img[hl].title, how, frame, frames, timeout, invert,
+            fontpath, media.dir);
+    media_free(&media);
+    return 0;
+}
+
 /* ------------------------------------------------------------------ main */
 
 /* present whatever is dirty: one packed sub-rect upload, then a swap */
@@ -563,7 +634,7 @@ int main(int argc, char **argv)
     struct media media;
     struct audio *au = NULL;
     char err[300], fontpath[300], tables[400], padsw[400];
-    int headless, invert, timeout, n, hl, chosen = -1, w, h, volume, pinned, frame = 0;
+    int headless, snapshot, invert, timeout, n, hl, chosen = -1, w, h, volume, pinned, frame = 0;
     int music_voice = -1;
     const struct audio_clip *music_clip = NULL;
     const char *how, *fmt_path;
@@ -579,7 +650,7 @@ int main(int argc, char **argv)
     signal(SIGPIPE, SIG_IGN);                    /* a FIFO reader may go away mid-write */
     sel_log_open(o.log);
     sel_log("codeselect " VERSION " starting (conf %s, input %s%s)", o.conf, o.input,
-            o.headless ? ", headless" : "");
+            o.snapshot ? ", snapshot" : o.headless ? ", headless" : "");
 
     if (conf_load(&c, o.conf, err, sizeof err) < 0) {
         sel_say("error: %s", err);
@@ -588,15 +659,34 @@ int main(int argc, char **argv)
     n = c.n;
     timeout = o.timeout >= 0 ? o.timeout : c.timeout >= 0 ? c.timeout : DEF_TIMEOUT;
     volume = o.volume >= 0 ? o.volume : c.volume >= 0 ? c.volume : DEF_VOLUME;
-    hl = conf_read_last(o.last);
-    if (hl >= 0 && hl < n) how = "last choice";
-    else if (o.def >= 0 && o.def < n) { hl = o.def; how = "--default"; }
-    else if (c.def >= 0) { hl = c.def; how = "conf default"; }
-    else { hl = 0; how = "first"; }
+    snapshot = o.snapshot != NULL;
+    if (snapshot) {
+        /* the preview never reads the last-choice file: the card asked for,
+         * else the conf's default, is what it shows */
+        if (o.highlight >= 0) {
+            if (o.highlight >= n) {
+                sel_say("error: --highlight %d out of range (%d image%s)", o.highlight, n, n == 1 ? "" : "s");
+                return 2;
+            }
+            hl = o.highlight;
+            how = "--highlight";
+        }
+        else if (o.def >= 0 && o.def < n) { hl = o.def; how = "--default"; }
+        else if (c.def >= 0 && c.def < n) { hl = c.def; how = "conf default"; }
+        else { hl = 0; how = "first"; }
+    } else {
+        hl = conf_read_last(o.last);
+        if (hl >= 0 && hl < n) how = "last choice";
+        else if (o.def >= 0 && o.def < n) { hl = o.def; how = "--default"; }
+        else if (c.def >= 0 && c.def < n) { hl = c.def; how = "conf default"; }
+        else { hl = 0; how = "first"; }
+    }
     headless = o.headless != NULL;
     pinned = o.anim_frame >= 0;
     if (pinned) frame = o.anim_frame;
-    invert = o.invert >= 0 ? o.invert : detect_invert();
+    /* the snapshot is what the PLAYER sees: boot_display's -invert compensates
+     * for an LCD mounted upside down, so it is applied only when asked for */
+    invert = o.invert >= 0 ? o.invert : snapshot ? 0 : detect_invert();
 
     font = load_font(&o, &c, fontpath, sizeof fontpath);
     if (!font) {
@@ -604,7 +694,7 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    if (headless) {
+    if (headless || snapshot) {
         w = HEADLESS_W;
         h = HEADLESS_H;
     } else {
@@ -621,6 +711,14 @@ int main(int argc, char **argv)
         return 2;
     }
     layout_compute(&L, &g, &c);
+    if (snapshot) {
+        rc = snapshot_frame(&o, &c, &g, font, &L, hl, how, timeout, invert, fontpath);
+        gfx_free(&g);
+        gfx_font_free(font);
+        sel_log("exit %d", rc);
+        sel_log_close();
+        return rc;
+    }
 
     /* sound first (the FIFO handshake takes a moment), then the pictures */
     fmt_path = o.audio_fmt ? o.audio_fmt : getenv("PAD_AUDIO_FMT");
@@ -630,7 +728,7 @@ int main(int argc, char **argv)
         else sel_log("audio: mixer_volume=%d ignored (sink %s)", c.mixer_volume, audio_sink_name(au));
     }
     memset(&media, 0, sizeof media);
-    snprintf(media.dir, sizeof media.dir, "%s", o.media ? o.media : *c.media ? c.media : DEF_MEDIA);
+    snprintf(media.dir, sizeof media.dir, "%s", media_dir(&o, &c));
     media_load(&media, &c, &L, audio_active(au));
     /* the highlighted card's animation is complete before the first frame;
      * the others decode one frame per loop iteration */

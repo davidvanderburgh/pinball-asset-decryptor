@@ -1,6 +1,6 @@
 """Capture the Multi-boot tab (item 90) for the README.
 
-    python scripts/shot_multiboot_tab.py [out.png] [emulate-out.png]
+    python scripts/shot_multiboot_tab.py [out.png] [emulate-out.png] [--frame F.ppm]
 
 A variant of take_screenshots.py (same PrintWindow, same DPI-unaware
 capture, same settings backup) for the one tab that rig does not cover.
@@ -9,18 +9,24 @@ path the Emulate tab is snapped there too, straight after - the tab's
 button row gained a 'Boot selector' checkbutton in the same ticket, and
 one launch of the GUI can show both.  One difference from that rig: the
 window is sized for the tab, not for the desktop, and when it overhangs
-the desktop the capture is tiled (see ``snap``) - the tab is 926px tall
+the desktop the capture is tiled (see ``snap``) - the tab is ~1370px tall
 and a 1024x768 desktop cannot show it whole.
 
 WHAT THE FORM SHOWS.  An empty tab proves nothing, so the form is filled
 the way a user would fill it for the card the ticket was written for:
 the stock Turtles image as the primary and the 1987-cartoon upscale
-beside it, with the menu titles typed in.  Nothing is built - Check size,
-Prepare media, Build and Flash all shell out to wsl.exe, and none of them
-is pressed.  The size sentence under the buttons is the one Check size
-would print for two 8G images (the tool's own plan output, fed to the
-same parser the button uses), so the shot shows the whole tab at work
-without a tool having run.
+beside it, with the menu titles typed in and the second image's attract
+clip as its animation (20 s in, 2 s long, 8 fps - the new clip fields).
+Nothing is built - Check size, Prepare media, Build, Flash and Render
+preview all shell out to wsl.exe, and none of them is pressed.  The size
+sentence under the buttons is the one Check size would print for two 8G
+images (the tool's own plan output, fed to the same parser the button
+uses), and the preview box shows a frame through the panel's public
+``load_frame`` seam: a real selector snapshot when ``--frame F.ppm`` names
+one, otherwise a stand-in drawn here with PIL in the menu's own layout
+(dark ground, SELECT GAME CODE, one card per image, the highlighted one
+framed amber) so the shot shows the whole tab at work without a tool
+having run.
 """
 import ctypes
 import os
@@ -34,9 +40,15 @@ if sys.platform != "win32":
     sys.exit("Screenshot capture is Windows-only (PrintWindow/GDI).")
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else os.path.join(
+ARGS = list(sys.argv[1:])
+FRAME = None
+if "--frame" in ARGS:
+    i = ARGS.index("--frame")
+    FRAME = os.path.abspath(ARGS[i + 1])
+    del ARGS[i:i + 2]
+OUT = os.path.abspath(ARGS[0] if ARGS else os.path.join(
     REPO, "docs", "screenshots", "multi-boot.png"))
-EMU_OUT = os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else None
+EMU_OUT = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
 SETTINGS = os.path.join(os.environ["APPDATA"], "pinball_decryptor",
                         "settings.json")
 SETTINGS_BAK = SETTINGS + ".shotbak90"
@@ -50,6 +62,12 @@ IMAGES = [
     (r"D:\Pinball\TMNT 1987\turtles_pro-1_59_0.1987-upscaled.8G.sdcard.raw",
      "TMNT 1987", "1987 cartoon upscale"),
 ]
+
+#: The second image's animation: its attract clip, 20 s in, 2 s at 8 fps.
+CLIP = ("auto", "20", "2", "8")
+
+#: The preview: image 1 highlighted, frame 3 of the 16-frame clip.
+HIGHLIGHT, FRAME_INDEX, FRAMES = 1, 3, 16
 
 #: mkmulticard.py plan, as it reports two 8G images side by side - the
 #: lines the tab's parser reads.  Fed to the same _plan_step the Check size
@@ -75,7 +93,7 @@ sys.path.insert(0, REPO)
 if os.path.isfile(SETTINGS):
     shutil.copy2(SETTINGS, SETTINGS_BAK)
 
-from PIL import Image  # noqa: E402
+from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 
 from pinball_decryptor.app import App  # noqa: E402
 
@@ -164,6 +182,83 @@ def snap(path):
     log("snapped %s (%dx%d)" % (path, img.width, img.height))
 
 
+def _font(size):
+    for name in ("arialbd.ttf", "DejaVuSans-Bold.ttf", "arial.ttf"):
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def stand_in_frame(path):
+    """A 1360x768 P6 PPM in the selector's own layout (see codeselect's
+    README: the dark ground, SELECT GAME CODE, a row of cards with an art
+    panel across the top, the highlighted one framed amber, the footer and
+    the countdown) - what the machine draws, redrawn here with PIL so the
+    README shot needs no WSL.  Pass --frame to use a real snapshot."""
+    W, H = 1360, 768
+    img = Image.new("RGB", (W, H), (11, 14, 20))
+    d = ImageDraw.Draw(img)
+
+    def centred(y, text, size, fill):
+        f = _font(size)
+        tw = d.textlength(text, font=f)
+        d.text(((W - tw) / 2, y), text, font=f, fill=fill)
+        return f
+
+    centred(50, "SELECT GAME CODE", 54, (236, 240, 246))
+    cards = [(60, 152, 662, 568), (698, 152, 1300, 568)]
+    for i, (x0, y0, x1, y1) in enumerate(cards):
+        hi = i == HIGHLIGHT
+        d.rounded_rectangle((x0, y0, x1, y1), radius=18,
+                            fill=(38, 46, 62) if hi else (26, 31, 42),
+                            outline=(250, 190, 40) if hi else (60, 70, 90),
+                            width=6 if hi else 2)
+        # the art panel across the top 40 % of the card
+        px0, py0, px1, py1 = x0 + 28, y0 + 22, x1 - 28, y0 + 190
+        d.rectangle((px0, py0, px1, py1), fill=(18, 22, 30))
+        if i == 0:
+            centred_x = (px0 + px1) / 2
+            f = _font(60)
+            tw = d.textlength("TMNT", font=f)
+            d.text((centred_x - tw / 2, py0 + 40), "TMNT", font=f,
+                   fill=(120, 190, 90))
+            f2 = _font(24)
+            tw = d.textlength("PRO", font=f2)
+            d.text((centred_x - tw / 2, py0 + 112), "PRO", font=f2,
+                   fill=(200, 205, 215))
+        else:
+            # frame 3 of the attract clip: stripes standing in for it
+            for k in range(0, px1 - px0, 40):
+                shade = 70 + (k // 40 + FRAME_INDEX) % 5 * 22
+                d.rectangle((px0 + k, py0, min(px1, px0 + k + 40), py1),
+                            fill=(shade // 3, shade // 2, shade))
+            f = _font(28)
+            d.text((px0 + 16, py1 - 44), "attract clip - frame %d"
+                   % FRAME_INDEX, font=f, fill=(240, 240, 240))
+        f = _font(20)
+        label = "IMAGE %d" % (i + 1)
+        tw = d.textlength(label, font=f)
+        d.text(((x0 + x1) / 2 - tw / 2, y0 + 206), label, font=f,
+               fill=(250, 190, 40) if hi else (110, 120, 140))
+        title, sub = IMAGES[i][1], IMAGES[i][2]
+        f = _font(48)
+        tw = d.textlength(title, font=f)
+        d.text(((x0 + x1) / 2 - tw / 2, y0 + 250), title, font=f,
+               fill=(255, 255, 255) if hi else (160, 170, 190))
+        f = _font(26)
+        tw = d.textlength(sub, font=f)
+        d.text(((x0 + x1) / 2 - tw / 2, y0 + 322), sub, font=f,
+               fill=(225, 230, 240) if hi else (120, 130, 150))
+    centred(626, "LEFT / RIGHT FLIPPER: choose      START: boot", 26,
+            (150, 160, 180))
+    centred(690, "booting %s in 15 s" % IMAGES[HIGHLIGHT][1], 30,
+            (250, 190, 40))
+    img.save(path)           # .ppm -> binary P6, what --snapshot writes
+    return path
+
+
 STEPS = []
 
 
@@ -177,13 +272,14 @@ def step(delay_ms):
 @step(500)
 def s_geometry():
     # Tall enough for the whole tab (image list + editor, Menu, Output, the
-    # button row, the size sentence and the tool pane) at the README's
-    # width.  NOT clamped to the desktop the way take_screenshots.py clamps:
-    # PrintWindow renders the whole window whether or not the screen can
-    # show it, and this rig has run on a 1024x768 virtual desktop where the
-    # clamp cut the tab off under the Menu box.  Tk's default maxsize is
-    # the screen, so it is lifted first or the geometry is silently capped.
-    w, h = 1360, 1180
+    # button row, the size sentence, the preview and the tool pane) at the
+    # README's width.  NOT clamped to the desktop the way
+    # take_screenshots.py clamps: PrintWindow renders the whole window
+    # whether or not the screen can show it, and this rig has run on a
+    # 1024x768 virtual desktop where the clamp cut the tab off under the
+    # Menu box.  Tk's default maxsize is the screen, so it is lifted first
+    # or the geometry is silently capped.
+    w, h = 1360, 1640
     root.maxsize(max(w, root.winfo_screenwidth()) + 100,
                  max(h, root.winfo_screenheight()) + 100)
     log("screen %dx%d -> window %dx%d"
@@ -226,11 +322,31 @@ def s_fill():
         root.update()
         panel._ed_title.set(title)
         panel._ed_sub.set(sub)
+    # The second image animates: its attract clip, through the clip fields.
+    panel._tree.selection_set("1")
+    root.update()
+    anim, start, seconds, fps = CLIP
+    panel._ed_anim.set(anim)
+    panel._ed_anim_start.set(start)
+    panel._ed_anim_seconds.set(seconds)
+    panel._ed_anim_fps.set(fps)
+    panel._default_var.set(str(HIGHLIGHT))
     # Leave the second row selected so the editor shows its text.
     panel._tree.selection_set("1")
     panel._tree.focus("1")
     root.update()
     panel._plan_step("plan", 0, PLAN_TEXT)
+    # The preview: a frame through load_frame, the panel's public seam -
+    # never a render, which would run the selector under WSL.
+    frame = FRAME
+    if frame is None:
+        frame = stand_in_frame(os.path.join(
+            os.environ.get("TEMP", "."), "multiboot_shot_frame.ppm"))
+        log("stand-in frame drawn at %s" % frame)
+    else:
+        log("frame from --frame: %s" % frame)
+    log("load_frame -> %s" % panel.load_frame(frame, HIGHLIGHT, FRAME_INDEX,
+                                             FRAMES))
     # ROOM FOR IT.  The notebook was measured when the tab was selected;
     # the size sentence has since appeared under the buttons, and the
     # tool pane is the LAST widget packed - short of its height the
@@ -239,9 +355,11 @@ def s_fill():
     win._resize_notebook_to_current_tab()
     root.update_idletasks()
     form = panel.form()
-    log("rows: %s" % [(r.title, r.subtitle) for r in form.images])
+    log("rows: %s" % [(r.title, r.subtitle, r.anim, r.anim_start,
+                       r.anim_seconds, r.anim_fps) for r in form.images])
     log("output: %s" % form.out)
     log("size sentence: %r" % panel._plan_lbl.cget("text"))
+    log("preview status: %r" % panel._pv_status.cget("text"))
     log("tab reqheight=%s notebook height=%s window=%sx%s"
         % (win._tab_multiboot.winfo_reqheight(), win._notebook.cget("height"),
            root.winfo_width(), root.winfo_height()))

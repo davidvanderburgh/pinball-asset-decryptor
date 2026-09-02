@@ -3,7 +3,9 @@
 # EGL under qemu-arm-static against the card rootfs libs, check the choice/last
 # files, the PPM shape, the default/last-choice precedence, the -invert
 # rotation, the art panels (stills, a pinned GIF frame, a missing picture),
-# the 5- and 9-image carousels, and convert every frame to PNG in $T for eyes.
+# the 5- and 9-image carousels, the --snapshot frame (the preview: one frame,
+# nothing else started or written), and convert every frame to PNG in $T for
+# eyes.
 # The emulator comes from the ENVIRONMENT, not argv: the rig's teardown does
 # pkill -f 'arm-binfmt|qemu-arm', and this script's own command line must
 # not match it (see the Makefile).
@@ -171,6 +173,86 @@ pix "$T/menu_nine.ppm" $((60 + 28 + 166)) 262 00C000
 rm -f "$T/choice"
 if run "$T/x.ppm" "$T/many.conf"; then echo "headless: FAIL 17 images accepted"; exit 1; fi
 
+# 11. --snapshot: ONE frame, what the machine shows the moment the menu
+#     appears, nothing started or written but the PPM. --highlight 1
+#     --anim-frame 2 on the media conf: card 1's GIF at frame 2 (blue) and
+#     card 0's still at the panel centres; the countdown line (amber, 38 px on
+#     baseline 718) holds the conf's timeout as if just started; the stdout
+#     line names the frame count; no choice/last/LOADING file; no input or
+#     audio opened (no nb/spi/audio line in the log, and the WAVs are not even
+#     loaded: 0 music, move=n). The snap helper passes neither --input nor
+#     --audio: their defaults (hw, auto) must not matter.
+snap() {   # snap PPM CONF [extra args...] -> stdout in $T/snap.out
+    local ppm=$1 conf=$2; shift 2
+    "$QEMU" -L "$ROOT" "$BIN" --snapshot "$ppm" --conf "$conf" --out "$T/choice" --last "$T/last" \
+        --log "$T/snap.log" --font "$FONT" "$@" > "$T/snap.out"
+}
+band() {   # band PPM X0 Y0 X1 Y1 RRGGBB - at least one pixel of that colour in the rectangle
+    python3 "$HERE/mkmedia.py" band "$@"
+}
+rm -f "$T/choice" "$T/last" "$T/snap.log"
+snap "$T/snap_1_2.ppm" "$T/media.conf" --media "$T/media" --highlight 1 --anim-frame 2 || {
+    echo "headless: FAIL snapshot exit $?"; cat "$T/snap.out"; exit 1; }
+[ "$(head -c 16 "$T/snap_1_2.ppm" | tr '\n' ' ')" = "P6 1360 768 255 " ] || { echo "headless: FAIL snapshot PPM header"; exit 1; }
+[ "$(stat -c %s "$T/snap_1_2.ppm")" -eq $((16 + 1360 * 768 * 3)) ] || { echo "headless: FAIL snapshot PPM size"; exit 1; }
+[ ! -f "$T/choice" ] && [ ! -f "$T/last" ] || { echo "headless: FAIL the snapshot wrote a choice/last file"; exit 1; }
+[ ! -f "$T/snap_1_2.ppm.loading.ppm" ] || { echo "headless: FAIL the snapshot wrote a LOADING frame"; exit 1; }
+pix "$T/snap_1_2.ppm" 361 262 C03040                 # card 0: its still
+pix "$T/snap_1_2.ppm" 999 262 0000FF                 # card 1 (highlighted): GIF frame 2
+band "$T/snap_1_2.ppm" 300 684 1060 722 FFC42D       # 'booting TMNT 1987 in 1 s'
+grep -qF "snapshot: $T/snap_1_2.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 1 s, invert 0, font $FONT, media $T/media" "$T/snap.out" || {
+    echo "headless: FAIL snapshot stdout line"; cat "$T/snap.out"; exit 1; }
+grep -q "media: 2 art, 1 anim (4 frames), 0 music, move=n confirm=n" "$T/snap.log" || {
+    echo "headless: FAIL the snapshot touched the sounds"; grep media "$T/snap.log"; exit 1; }
+if grep -qE "(nb|spi|audio): " "$T/snap.log"; then echo "headless: FAIL the snapshot opened input or audio"; exit 1; fi
+# card 1 NOT highlighted shows its still even with --anim-frame 2: a card
+# that is not highlighted never animates live (--headless pins them all, for
+# the layout tests); card 0 has no animation -> 'frame 0 of 0'
+snap "$T/snap_0_2.ppm" "$T/media.conf" --media "$T/media" --highlight 0 --anim-frame 2
+pix "$T/snap_0_2.ppm" 361 262 C03040
+pix "$T/snap_0_2.ppm" 999 262 2060C0
+grep -qF "highlight 0 (STERN STOCK) from --highlight, frame 0 of 0," "$T/snap.out" || {
+    echo "headless: FAIL snapshot frame count without an animation"; cat "$T/snap.out"; exit 1; }
+# a frame past the end wraps (6 of 4 -> 2)
+snap "$T/snap_wrap.ppm" "$T/media.conf" --media "$T/media" --highlight 1 --anim-frame 6
+pix "$T/snap_wrap.ppm" 999 262 0000FF
+grep -qF "frame 2 of 4," "$T/snap.out" || { echo "headless: FAIL snapshot frame wrap"; cat "$T/snap.out"; exit 1; }
+# no --highlight: the conf default (1) - never the last-choice file, which is
+# neither read nor written
+echo 0 > "$T/last"
+snap "$T/snap_def.ppm" "$T/media.conf" --media "$T/media"
+grep -qF "highlight 1 (TMNT 1987) from conf default, frame 0 of 4," "$T/snap.out" || {
+    echo "headless: FAIL snapshot default highlight"; cat "$T/snap.out"; exit 1; }
+pix "$T/snap_def.ppm" 999 262 FF0000                 # frame 0
+expect "$T/last" 0
+rm -f "$T/last"
+# timeout 0: 'press START to boot ...' in the same amber on the same baseline
+snap "$T/snap_wait.ppm" "$T/three.conf"
+band "$T/snap_wait.ppm" 300 684 1060 722 FFC42D
+grep -qF "highlight 1 (GODZILLA HEISEI) from conf default, frame 0 of 0, timeout 0 s," "$T/snap.out" || {
+    echo "headless: FAIL snapshot timeout-0 line"; cat "$T/snap.out"; exit 1; }
+# a missing media directory: every picture fails, the cards render without
+# them, exit 0
+rm -f "$T/snap.log"
+snap "$T/snap_nomedia.ppm" "$T/missing.conf" --media "$T/nonexistent" --highlight 2
+grep -q "art: cannot load art0.png" "$T/snap.log" || { echo "headless: FAIL missing media dir not logged"; exit 1; }
+grep -q "anim: cannot open anim1.gif" "$T/snap.log" || { echo "headless: FAIL missing GIF not logged"; exit 1; }
+grep -q "media: 0 art, 0 anim (0 frames), 0 music, move=n confirm=n" "$T/snap.log" || {
+    echo "headless: FAIL media line without a media dir"; grep media "$T/snap.log"; exit 1; }
+band "$T/snap_nomedia.ppm" 300 684 1060 722 FFC42D
+# refused, exit 2, no PPM: --highlight past the end, an empty conf,
+# --snapshot together with --headless
+rm -f "$T/snap_bad.ppm"
+if snap "$T/snap_bad.ppm" "$T/media.conf" --media "$T/media" --highlight 2; then echo "headless: FAIL --highlight 2 of 2 accepted"; exit 1; fi
+grep -qF "error: --highlight 2 out of range (2 images)" "$T/snap.out" || {
+    echo "headless: FAIL no error line for --highlight 2"; cat "$T/snap.out"; exit 1; }
+if snap "$T/snap_bad.ppm" "$T/empty.conf"; then echo "headless: FAIL snapshot of an empty conf accepted"; exit 1; fi
+grep -qF "error: " "$T/snap.out" || { echo "headless: FAIL no error line for the empty conf"; exit 1; }
+if snap "$T/snap_bad.ppm" "$T/media.conf" --headless "$T/x.ppm" 2>/dev/null; then echo "headless: FAIL --snapshot with --headless accepted"; exit 1; fi
+[ ! -f "$T/snap_bad.ppm" ] || { echo "headless: FAIL a refused snapshot wrote a PPM"; exit 1; }
+
+python3 "$HERE/ppm2png.py" "$T/snap_1_2.ppm" "$T/codeselect_snapshot.png"
+python3 "$HERE/ppm2png.py" "$T/snap_nomedia.ppm" "$T/codeselect_snapshot_nomedia.png"
 python3 "$HERE/ppm2png.py" "$T/menu.ppm" "$T/codeselect_menu.png"
 python3 "$HERE/ppm2png.py" "$T/menu.ppm.loading.ppm" "$T/codeselect_loading.png"
 python3 "$HERE/ppm2png.py" "$T/menu_default1.ppm" "$T/codeselect_menu_default1.png"

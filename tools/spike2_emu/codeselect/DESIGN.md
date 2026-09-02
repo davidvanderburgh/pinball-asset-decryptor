@@ -243,6 +243,17 @@ full CLI, the log lines and the test list). What it is:
   `--invert`/`--no-invert` force it.
 * `--headless FILE.ppm` renders without EGL and writes the last menu frame
   (plus `FILE.loading.ppm`): the offline test, and the screenshots.
+* `--snapshot FILE.ppm [--highlight N] [--anim-frame N]` renders ONE menu
+  frame the way the machine shows it the moment the menu appears - the card
+  asked for (else the conf default; the last-choice file is never read)
+  highlighted, its GIF at frame N, the other cards their still or frame 0,
+  the countdown at its full value, no rotation - as a P6 PPM and exits 0
+  with nothing else started: no display, input, audio, choice or last
+  file. The Multi-boot tab's preview runs it under `qemu-arm-static -L`
+  against the rootfs copy and steps `--anim-frame` to play the highlighted
+  card's animation; stdout says `frame F of N`. Under qemu an absolute
+  font/media path is looked up in the `-L` sysroot first, then on the host
+  (README.md, "Paths under qemu").
 * `select.sh` is the hardware hook: after `/etc/init.d/game`'s own
   `pkill boot_display ` it waits up to 3 s for boot_display to be gone, runs
   the selector, reads the index and looks the device up in images.conf

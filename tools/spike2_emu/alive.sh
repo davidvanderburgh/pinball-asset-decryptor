@@ -241,6 +241,28 @@ SCRIPT=${SCRIPT:-0}
 # this.
 UNSH=$(n -f '^unshare (-r )?-m -p -f')
 
+# The guest's PID-NAMESPACE INIT - the `bash -s "$R" ...` that wrapper forks,
+# which is PID 1 inside the run's own pid namespace (measured 2026-09-02:
+# `NSpid: 42142 1`) and is the whole second half of run_game.sh. It is a
+# SHELL, not the guest, for as long as the boot selector's menu is up; at the
+# foot of that script it execs the game, and from then on comm=game counts it
+# and this pattern no longer matches - one process, counted exactly once
+# whatever it is currently running.
+#
+# Counted because it was invisible, and something invisible got a stop wrong.
+# A stop taken with the menu up killed the selector, that script read the
+# kill as the selector's exit status, fell through to "[select] fallback:
+# primary" and exec'd a BRAND NEW guest a moment after the sweep - and for the
+# whole window between the two, the one process that was about to do it was
+# not in any row here. killgame.sh kills it first now; this is the row that
+# would show it if that ever stopped working.
+#
+# `bash -s` is invoked in exactly one place in this rig, and $ROOT pins it to
+# this rootfs, so it cannot match a shell that merely mentions the path. The
+# optional `setsid ` is for a machine whose setsid forks rather than execs
+# (measured here, it execs: the bash itself is PID 1).
+NSINIT=$(n -f "^(setsid )?bash -s $ROOT ")
+
 # ★ CARD MOUNTS - the other class that leaked. cardmount.sh setsid's fuse2fs on
 # purpose (a run's process-group kill used to take the mount out from under the
 # game it had just started, and the game then hung at "Startup In Progress"
@@ -260,7 +282,7 @@ CARD=$(n -x fuse2fs)
 ZOMB=$(ps -eo stat,comm --no-headers 2>/dev/null \
        | awk '$1 ~ /^Z/ && $2 ~ /^(game|padglhost|fuse2fs|ffmpeg|pythonw\.exe|python3?)$/' | wc -l)
 
-PROCS=$((GAME + QEMU + SEL + HOST + BUS + AUD + VID + HELP + STUB + SCRIPT + UNSH))
+PROCS=$((GAME + QEMU + SEL + HOST + BUS + AUD + VID + HELP + STUB + SCRIPT + UNSH + NSINIT))
 TOTAL=$((PROCS + CARD))
 
 case "$ONLY" in
@@ -279,14 +301,20 @@ printf 'helpers (attract/feed) : %s\n' "$HELP"
 printf 'playfield (win stub)   : %s\n' "$STUB"
 printf 'run scripts (watch.sh) : %s\n' "$SCRIPT"
 printf 'guest wrapper (unshare): %s\n' "$UNSH"
+printf 'guest ns init (bash -s): %s\n' "$NSINIT"
 printf 'card mounts (fuse2fs)  : %s\n' "$CARD"
 printf 'TOTAL STILL RUNNING    : %s%s\n' "$TOTAL" \
   "$( [ "$TOTAL" -eq 0 ] && echo '  (clean)' || echo '  <-- run killgame.sh' )"
 
 if [ "$TOTAL" -ne 0 ]; then
   echo '--- what is still up ---'
+  # `bash -s /` is the guest's ns init and `/.padqemu/` is a PAD_PIVOT guest -
+  # both counted above and NEITHER of them printable by the old list. A
+  # leftover pivot guest showed as a bare "guest (comm=game): 1" with nothing
+  # under this heading at all, which is a row that says something is up and a
+  # list that cannot say what.
   ps -eo pid,pcpu,etime,comm,args --sort=-pcpu \
-    | grep -E 'arm-binfmt|qemu-arm-static|codeselect|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py|padvidhost\.py|autoattract\.sh|longplay\.sh|playfield\.py|mktables\.py|watch\.sh|run_game\.sh|unshare -|fuse2fs|game\.out' \
+    | grep -E 'arm-binfmt|qemu-arm-static|/\.padqemu/|bash -s /|codeselect|padglhost|nodebus\.py|audio\.fifo|padrelay\.py|padplay\.py|padvidhost\.py|autoattract\.sh|longplay\.sh|playfield\.py|mktables\.py|watch\.sh|run_game\.sh|unshare -|fuse2fs|game\.out' \
     | grep -v grep | head -12
   mountpoint -q "$PAD_HOME/card" 2>/dev/null
   mount 2>/dev/null | grep 'fuse.ext4' | sed 's/^/  mount: /'

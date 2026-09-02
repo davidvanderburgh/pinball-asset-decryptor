@@ -37,6 +37,47 @@ before=$(total)
 echo "rig processes running: $before"
 [ "$before" -gt 0 ] && bash "$SELF/alive.sh" | sed -n '/--- what is still up ---/,$p'
 
+# ★ THE GUEST'S PID-NAMESPACE INIT GOES FIRST (item 90), AND IT IS NOT THE
+# unshare WRAPPER. run_game.sh starts the guest as
+#     unshare $USERNS -m -p -f [setsid] bash -s "$R" ...
+# and unshare itself stays in OUR pid namespace - measured, 2026-09-02:
+# /proc/<unshare>/ns/pid is this shell's, and killing it does not kill anything
+# inside. The bash it forks is PID 1 in the NEW namespace (`NSpid: 42142 1`),
+# and that bash is the whole second half of run_game.sh: the big INNER heredoc.
+# It is still a shell for as long as the boot selector's menu is up. Only at
+# the foot of that script does it exec the game, which is why every other
+# teardown here has been able to treat comm=game as "the guest".
+#
+# A STOP WITH THE MENU UP USED TO START A GAME. `pkill -9 -x codeselect` below
+# reads, inside that script, as "the selector exited 137" - and the selector's
+# exit status is what it takes for the CHOICE - so it printed
+# "[select] fallback: primary" and fell through to the exec. Measured in the
+# app's own launch shape (root, PAD_PIVOT, three-image card): the sweep killed
+# 17 processes and PID 42142 - the `bash -s` above - came back a moment later
+# as `game /.padqemu/game ./game`, a BRAND NEW guest, started by the very stop
+# that was meant to end the run. The count then said "still running: 2",
+# STILL NOT CLEAN, and the app offered to restart WSL over a game it had just
+# started itself.
+#
+# Killing the namespace's init first shuts that door for the whole class and
+# not for one shape of it: the kernel SIGKILLs every member of a PID namespace
+# whose init dies, so nothing in there can outlive this sweep or start
+# anything after it, whatever the inner script was in the middle of. The
+# unshare wrapper is deliberately NOT this kill - it is outside the namespace,
+# and it is killed further down with the other run scripts, which is what
+# releases its -m namespace's hold on the card mounts.
+#
+# THE PATTERN IS EXACT. `bash -s` is invoked in exactly one place in this rig
+# (run_game.sh's INNER heredoc) and $ROOT pins it to this rootfs, so it cannot
+# match an ordinary shell that merely mentions the path. Both launch shapes
+# match: a root PAD_PIVOT run's `setsid` EXECs that bash rather than forking it
+# (measured - NSpid says the bash itself is PID 1), so argv[0] is `bash`
+# either way, and the optional `setsid ` covers a machine whose setsid forks.
+# A NON-SELECT RUN IS UNCHANGED BY THIS: by the time its guest is up this same
+# PID has already exec'd the game, its command line is the game's and not a
+# shell's, and the next line is what ends it - the same process, the same
+# signal, in the same order as before.
+pkill -9 -f "^(setsid )?bash -s $ROOT "
 pkill -9 -x game
 pkill -9 -f 'arm-binfmt|qemu-arm'
 # The boot selector (item 90): the ARM menu run_game.sh runs BEFORE the game

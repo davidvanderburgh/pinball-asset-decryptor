@@ -60,6 +60,29 @@ if [ -z "$CARD_SRC" ]; then
     echo "[run] title: $GAME"
 fi
 
+# YOUR OWN EDITS, WITHOUT REBUILDING THE CARD (PAD-103).
+#
+#   PAD_OVERRIDE_DIR=/mnt/c/.../build/emulator-overrides PAD_CARD=... run_game.sh
+#
+# The app writes the card files an edit touches - patched, and only those - into
+# that folder; overrides.sh stages them on the Linux disk and this binds each one
+# over the card's copy inside the namespace below. Nothing is rebuilt, the stock
+# card is untouched, and its local cache stays valid because it still is the
+# stock card.
+#
+# RESOLVED OUT HERE, BOUND IN THERE: the staging is a plain copy that wants
+# $PAD_HOME and can print progress, and neither belongs inside a mount
+# namespace. A set that cannot be staged FAILS THE RUN rather than booting
+# without it - a run that silently plays the stock sounds while the tab says it
+# is testing your edits is worse than one that does not start.
+OVERRIDE_SRC=""
+if [ -n "${PAD_OVERRIDE_DIR:-}" ]; then
+    OVERRIDE_SRC=$(bash "$S/overrides.sh" "$PAD_OVERRIDE_DIR" | tail -1)
+    [ -d "$OVERRIDE_SRC" ] || {
+        echo "[run] could not stage the overrides at $PAD_OVERRIDE_DIR" >&2
+        exit 1; }
+fi
+
 # THE SHIM NEEDS THE TITLE BY NAME, not just the directory it is told to run
 # from, and until 2026-08-23 a CARD run never gave it one.
 #
@@ -247,7 +270,7 @@ SETSID=""
 USERNS="-r"
 [ "$(id -u)" = 0 ] && USERNS=""
 unshare $USERNS -m -p -f $SETSID bash -s "$R" "$NODEBUS_PTY" "$GAME" "$CARD_SRC" "$PIVOT" \
-        "${PIVOTROOT:-}" <<'INNER'
+        "${PIVOTROOT:-}" "$OVERRIDE_SRC" <<'INNER'
 R="$1"
 NODEBUS_PTY="$2"
 GAME="$3"
@@ -258,6 +281,8 @@ PIVOT="$5"
 # belongs to the one function that defines it, and because a namespace is a bad
 # place to discover a missing program.
 PIVOTROOT="$6"
+# The staged override set (PAD-103), already on the Linux disk, or empty.
+OVERRIDE_SRC="$7"
 # pivot_root needs the new root to BE a mount, and everything mounted below then
 # rides the pivot, so the self-bind of $R must come FIRST - before proc/sys/tmp.
 # Guarded, so the chroot path is untouched.
@@ -385,6 +410,46 @@ if [ "${PAD_DISPLAY_INVERT:-0}" != "1" ] && [ -s "$BDC" ] && grep -qa -- '-inver
     else
         echo "[run] display: could not mask $BDC - expect an upside-down picture" >&2
     fi
+fi
+
+# ★ PAD-103 - YOUR EDITS, ON TOP OF THE CARD, WITHOUT A REBUILD.
+#
+# One bind per file, over the card's own copy. It goes HERE, last of the
+# games/ mounts, for a reason: the -invert mask above replaces the whole of
+# games/<title>/data with a copy, so an override under data/ bound before it
+# would be hidden by that copy - and an edit the run silently does not apply is
+# the one outcome this feature must not have.
+#
+# The set MIRRORS THE GAMES PARTITION, not the title directory, because a sound
+# edit also rewrites /spk/index/<title>.sidx, which sits BESIDE the title. Each
+# relative path is therefore bound at $R/games/<rel>, which is where both live.
+#
+# A TARGET THAT IS NOT THERE IS A HARD ERROR, not a skip. It means the set was
+# built from a different card than the one being booted (or a title that does
+# not carry that file), and going ahead would run a card that is part one build
+# and part another.
+if [ -n "$OVERRIDE_SRC" ]; then
+    ovr_n=0
+    ovr_bad=""
+    OLDIFS=$IFS; IFS=$'\n'
+    for rel in $(cd "$OVERRIDE_SRC" && find . -type f ! -name overrides.json \
+                                            -printf '%P\n' | LC_ALL=C sort); do
+        if [ ! -f "$R/games/$rel" ]; then
+            ovr_bad="$rel"; break
+        fi
+        mount --bind "$OVERRIDE_SRC/$rel" "$R/games/$rel" || { ovr_bad="$rel"; break; }
+        ovr_n=$(( ovr_n + 1 ))
+    done
+    IFS=$OLDIFS
+    if [ -n "$ovr_bad" ]; then
+        echo "[run] your edits: could not apply $ovr_bad" >&2
+        echo "[run]   the card being booted does not have that file, so this" >&2
+        echo "[run]   override set was built from a different card. Rebuild it" >&2
+        echo "[run]   against this one." >&2
+        exit 1
+    fi
+    echo "[run] your edits: $ovr_n file(s) applied on top of the card (nothing"
+    echo "[run]   was rebuilt and the card image itself is untouched)"
 fi
 
 # real host char devices

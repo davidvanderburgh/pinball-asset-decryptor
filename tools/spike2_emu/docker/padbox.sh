@@ -220,6 +220,20 @@ if [ -n "${PAD_CARD:-}" ]; then
            exit 1 ;;
     esac
 fi
+# The same prefix swap for an override set (PAD-103), which is a directory on
+# the host the box has no view of either. Its own mount rather than a second
+# use of /pad/cards: the set is built into the app's temp dir, which is not
+# where anybody keeps card images, and read-only because the box only reads it
+# (overrides.sh stages a copy inside the box's own home volume).
+if [ -n "${PAD_OVERRIDE_DIR:-}" ]; then
+    if [ -d "$PAD_OVERRIDE_DIR" ]; then
+        RUN_ARGS+=(-v "${PAD_OVERRIDE_DIR%/}:/pad/overrides:ro"
+                   -e "PAD_OVERRIDE_DIR=/pad/overrides")
+    else
+        echo "[box] no such override folder: $PAD_OVERRIDE_DIR" >&2
+        exit 1
+    fi
+fi
 for v in PAD_GAME PAD_PLAYFIELD PAD_AUDIO PAD_AUTO_ATTRACT LOG; do
     [ -n "${!v:-}" ] && RUN_ARGS+=(-e "$v=${!v}")
 done

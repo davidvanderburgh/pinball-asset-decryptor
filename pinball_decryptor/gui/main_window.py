@@ -13921,11 +13921,20 @@ class MainWindow:
         # true so a project anchor saved under the old default does not turn
         # it back off.
         self.emulate_savestates_var = tk.BooleanVar(value=True)
+        # PAD-103: "apply my replaced assets on top, without rebuilding the
+        # card".  Same rail again, because a testing loop lasts longer than a
+        # session and item 14 is what forgetting one of these costs.  Default
+        # OFF: it changes what the guest reads, so it is opted into.
+        self.emulate_overrides_var = tk.BooleanVar(value=False)
         self._emulate_panel = EmulatePanel(
             self._tab_emulate,
             log=self.append_log,
             card_var=self.emulate_card_var,
             savestates_var=self.emulate_savestates_var,
+            # The Write tab's Assets Folder, SHARED not copied - the project
+            # has one extract folder and that field already owns it.
+            assets_var=self.write_assets_var,
+            overrides_var=self.emulate_overrides_var,
             theme_fn=lambda: self._current_theme,
             badge_fn=self._make_round_icon,
             # The panel's setup notice can appear while the user is already

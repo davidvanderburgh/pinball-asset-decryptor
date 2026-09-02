@@ -27,6 +27,34 @@ real root; fuse2fs does not, and `apt-get download` + `dpkg-deb -x` into a
 private prefix gets fuse2fs without a package manager or a password. Extraction
 still works and is still the faster option for a title you run constantly.
 
+## With your own edits on top, and no card rebuilt
+
+```bash
+PAD_OVERRIDE_DIR=/mnt/c/.../emulator-overrides \
+PAD_CARD=images/Stern/spike2/turtles_pro-1_59_0.Release.8G.sdcard.raw watch.sh
+```
+
+An **override set** is the card files an edit touches, already patched, laid
+out as they sit on the games partition — for a replaced callout that is
+`<title>/image.bin` plus `spk/index/<title>.sidx`, and nothing else. PAD builds
+one from the Emulate tab's "Apply my replaced assets on top" box
+(`stern.engine.write_overrides`, the Write tab's own patch computation without
+the copy of the card); `overrides.sh` stages it on the Linux disk and
+`run_game.sh` bind-mounts each file over the read-only card mount — the same
+trick that masks `boot_display_cmd` for item 45.
+
+**Why it exists** (PAD-103): trying one edited sound on the PC used to cost two
+full-size copies — the build's copy of the 7.3 GB card, then this rig's copy of
+that new card into `~/cardcache`, because the cache is keyed on size+mtime and
+a fresh build invalidates it. The set for that same edit is 1.4 GB written in
+**9 seconds** (measured, jurassic_park_le 1.16.0), and the stock card's cache
+stays valid because the stock card was never touched.
+
+The set names the card it was built from. A file in it that the booted card
+does not have **fails the run** rather than being skipped: it means the set was
+built against a different card, and half of one build over half of another is
+not a card anybody should be listening to.
+
 ## Titles
 
 **Per-title emulation status, one line per title, kept current by `/finish`**

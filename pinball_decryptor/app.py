@@ -452,16 +452,21 @@ class App:
             folder = self._project_path
             card_var = getattr(self.window, "emulate_card_var", None)
             states_var = getattr(self.window, "emulate_savestates_var", None)
+            ovr_var = getattr(self.window, "emulate_overrides_var", None)
             if folder and card_var is not None \
                     and project_file.has_anchor(folder):
                 card = card_var.get().strip()
                 states = bool(states_var.get()) if states_var is not None \
                     else False
+                overrides = bool(ovr_var.get()) if ovr_var is not None \
+                    else False
                 data = project_file.load_anchor(folder)
                 if (data.get("emulate_card") or "") != card or \
-                        bool(data.get("emulate_savestates")) != states:
+                        bool(data.get("emulate_savestates")) != states or \
+                        bool(data.get("emulate_overrides")) != overrides:
                     project_file.update_anchor(folder, emulate_card=card,
-                                               emulate_savestates=states)
+                                               emulate_savestates=states,
+                                               emulate_overrides=overrides)
         except Exception:
             pass
         self._save_settings()
@@ -578,21 +583,25 @@ class App:
         must leave the field empty, never fail the startup that asked for it."""
         card_var = getattr(self.window, "emulate_card_var", None)
         states_var = getattr(self.window, "emulate_savestates_var", None)
+        ovr_var = getattr(self.window, "emulate_overrides_var", None)
         if card_var is None:
             return
         card = ""
         states = False
+        overrides = False
         if project_folder:
             from .core import project_file
             try:
                 data = project_file.load_anchor(project_folder)
                 card = str(data.get("emulate_card") or "")
                 states = bool(data.get("emulate_savestates"))
+                overrides = bool(data.get("emulate_overrides"))
             except (OSError, ValueError):
                 card = ""
         else:
             card = str(self._settings.get("emulate_card") or "")
             states = bool(self._settings.get("emulate_savestates"))
+            overrides = bool(self._settings.get("emulate_overrides"))
         # Same mapped-drive treatment as every other restored path: a card
         # saved as "W:\..." in a normal session stops resolving under an
         # elevated relaunch, so restore its UNC equivalent instead.
@@ -600,6 +609,12 @@ class App:
         card_var.set(_rmd(card) if card else "")
         if states_var is not None:
             states_var.set(states)
+        # PAD-103's opt-in rides the same rail, and defaults OFF for every
+        # anchor written before it existed — which is what `bool(missing)`
+        # already says, and is the right default for something that changes
+        # what the guest reads.
+        if ovr_var is not None:
+            ovr_var.set(overrides)
 
         # The JJP emulator's game ISO, restored the same way and with the same
         # mapped-drive treatment, from its own key.
@@ -4295,6 +4310,12 @@ class App:
                 self._settings["emulate_savestates"] = bool(states_var.get())
             except tk.TclError:
                 pass
+        ovr_var = getattr(self.window, "emulate_overrides_var", None)
+        if ovr_var is not None:
+            try:
+                self._settings["emulate_overrides"] = bool(ovr_var.get())
+            except tk.TclError:
+                pass
         # Remember the window size + position for next launch, and whether it
         # was maximized — a maximized window has to come back maximized, not
         # as a loose window of the same size (a tester, after every auto
@@ -4373,6 +4394,8 @@ class App:
         emulate_card = card_var.get().strip() if card_var else ""
         states_var = getattr(self.window, "emulate_savestates_var", None)
         emulate_savestates = bool(states_var.get()) if states_var else False
+        ovr_var = getattr(self.window, "emulate_overrides_var", None)
+        emulate_overrides = bool(ovr_var.get()) if ovr_var else False
         # The JJP game ISO belongs in the anchor too.  It was saved to
         # settings.json but never written HERE, while the restore reads the
         # anchor first whenever a project is open - so with a project loaded the
@@ -4393,6 +4416,7 @@ class App:
                     extract_options=opts,
                     emulate_card=emulate_card,
                     emulate_savestates=emulate_savestates,
+                    emulate_overrides=emulate_overrides,
                     jjp_emulate_iso=jjp_emulate_iso,
                     spike1_emulate_card=spike1_emulate_card,
                     saved_with=__version__)
@@ -4420,6 +4444,7 @@ class App:
                     # readers ignore it.
                     extra={"emulate_card": emulate_card,
                            "emulate_savestates": emulate_savestates,
+                           "emulate_overrides": emulate_overrides,
                            "jjp_emulate_iso": jjp_emulate_iso,
                            "spike1_emulate_card": spike1_emulate_card})
                 self.window.append_log(

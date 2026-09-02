@@ -4233,6 +4233,268 @@ def write_image(original_path, assets_dir, output_path, log=None, progress=None,
     return counts, audio_mode, valpatch_mode
 
 
+#: The file that makes a folder an override set rather than somebody's
+#: documents.  Written last (so a half-built set has no manifest and is
+#: therefore never bound over a card), and the only thing that lets
+#: :func:`write_overrides` clear a folder it is about to rewrite.
+OVERRIDE_MANIFEST = "overrides.json"
+
+
+def _writes_by_file(reader, writes):
+    """Group absolute-disk *writes* by the CARD FILE each one lands in.
+
+    Returns ``({card_path: (node, [(file_off, bytes), ...])}, unmapped)`` —
+    *unmapped* being the writes no file's extents cover.
+
+    THE WHOLE POINT IS THAT THE WRITE LIST IS ALREADY THE ANSWER.  Every patch
+    :func:`_compute_patches` produces was resolved from a file offset through
+    ``disk_ranges`` on the way out, so mapping it back is exact rather than a
+    second guess at what the edit meant: the override set is the same bytes the
+    built card would carry, in the file the built card would carry them in.
+
+    Cost is a directory walk plus one extent map per regular file — 619 files
+    and 657 runs on a jurassic_park_le 1.16.0 card, measured at well under a
+    tenth of a second, because these cards store their assets in a handful of
+    large extents.
+    """
+    index = []                       # (disk_start, disk_end, path, node, f_off)
+    for path, _ino, node in reader.iter_regular_files(min_size=1):
+        f_off = 0
+        try:
+            runs = reader.disk_ranges(node, 0, node["size"])
+        except Exception:            # a hole, or an inode we can't map
+            continue
+        for disk, n in runs:
+            index.append((disk, disk + n, path, node, f_off))
+            f_off += n
+    index.sort()
+    starts = [r[0] for r in index]
+
+    import bisect
+    by_file, unmapped = {}, []
+    for disk, buf in writes:
+        pos = 0
+        while pos < len(buf):
+            here = disk + pos
+            i = bisect.bisect_right(starts, here) - 1
+            if i < 0:
+                unmapped.append(here)
+                break
+            d_start, d_end, path, node, f_off = index[i]
+            if not (d_start <= here < d_end):
+                unmapped.append(here)
+                break
+            # A single write CAN straddle two extents of the same file (the
+            # producers split on the extent map, but nothing promises that
+            # every one of them did), so take what this run holds and go round
+            # again for the rest.
+            take = min(d_end - here, len(buf) - pos)
+            ent = by_file.setdefault(path, (node, []))
+            ent[1].append((f_off + (here - d_start), buf[pos:pos + take]))
+            pos += take
+    return by_file, unmapped
+
+
+def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
+                    cancel=None, label=None):
+    """Build an OVERRIDE SET: the card files the user's edits touch, patched,
+    and nothing else — so the emulator can run those edits without a rebuild.
+
+    Same edits, same bytes, same code path as :func:`write_image`: this calls
+    ``_compute_patches`` and then, instead of copying the whole card image and
+    patching it, writes each TOUCHED FILE out on its own.  The emulator binds
+    those files over the read-only card mount at run time (``PAD_OVERRIDE_DIR``
+    in ``tools/spike2_emu/run_game.sh``), which is the same trick the rig
+    already uses to mask a title's ``boot_display_cmd``.
+
+    WHY IT EXISTS (PAD-103, DragonRR: "rather than rebuild a raw image using
+    new assets and then emulate … can you make it so that any added assets will
+    override raw image files?").  Trying a replaced callout on the PC costs two
+    full-size copies today — the build's copy of the card, then the emulator's
+    own copy of that new card onto the WSL disk, because its cache is keyed on
+    size+mtime and a fresh build invalidates it.  On a 7.3 GB card with one
+    edited sound the override set is ``image.bin`` plus the ``.sidx`` record:
+    the same bytes, a fraction of the I/O, and the stock card's cache stays
+    valid because the stock card was never touched.
+
+    *out_dir* is emptied first, and only if it is empty or already an override
+    set (it carries :data:`OVERRIDE_MANIFEST`) — a stale file left behind would
+    still be bound over the card, so "what is in the folder" has to mean
+    "what the current edits say", and a folder that is somebody's documents is
+    not ours to clear.
+
+    Returns ``(counts, audio_mode, valpatch_mode, files)`` — the first three
+    exactly as :func:`write_image` returns them, *files* being
+    ``[(card_path, size), ...]`` for what was written.  Everything is ``None``
+    when the caller cancelled.
+    """
+    log = log or (lambda *a, **k: None)
+    cancel = cancel or (lambda: False)
+    t_all = time.monotonic()
+    import json
+    import shutil
+
+    out_dir = os.path.abspath(str(out_dir))
+    if os.path.isdir(_lp(out_dir)) and os.listdir(_lp(out_dir)) \
+            and not os.path.isfile(_lp(os.path.join(out_dir,
+                                                    OVERRIDE_MANIFEST))):
+        raise OSError(
+            "The override folder\n\n    %s\n\nalready holds files that were "
+            "not put there by this app, and building the set would delete "
+            "them. Point it at an empty folder." % out_dir)
+
+    parts = _linux_partitions(original_path)
+    disk_f = open(_lp(original_path), "rb")
+    try:
+        writes, counts, grow_plan, audio_mode, valpatch_mode = _compute_patches(
+            disk_f, parts, assets_dir, log, progress, cancel, label=label)
+        if writes is None:                  # cancelled mid-compute
+            _rmtree_grow_plan(grow_plan)
+            return None, None, None, None
+        try:
+            # A second locate rather than a value threaded out of
+            # _compute_patches: it is a directory scan on an already-open
+            # handle, and one function owning "which partition is the game on"
+            # is worth more here than the milliseconds.
+            reader, _fw_node, _img_node = _locate(disk_f, parts)
+            t0 = time.monotonic()
+            by_file, unmapped = _writes_by_file(reader, writes)
+            if unmapped:
+                # Never write a PARTIAL override set: the run would look like
+                # it was testing the edits while silently dropping some of
+                # them, which is the failure the build path cannot have.
+                raise RuntimeError(
+                    "%d of this build's patches could not be traced back to a "
+                    "file on the card (first at disk offset 0x%x), so an "
+                    "override set would be missing them. Build the card image "
+                    "instead." % (len(unmapped), unmapped[0]))
+            _stage_done(log, "tracing the edits back to the card files they "
+                        "live in", t0)
+
+            _rmtree(out_dir)
+            os.makedirs(_lp(out_dir), exist_ok=True)
+            written = []
+            t0 = time.monotonic()
+            total = len(by_file) + len((grow_plan or {}).get("jobs", ()))
+            for i, (card_path, (node, file_writes)) in enumerate(
+                    sorted(by_file.items())):
+                if cancel():
+                    _rmtree(out_dir)     # the plan is cleaned by the `finally`
+                    return None, None, None, None
+                if progress:
+                    progress(i, max(total, 1),
+                             "Writing %s" % os.path.basename(card_path))
+                dest = _override_path(out_dir, card_path)
+                os.makedirs(_lp(os.path.dirname(dest)), exist_ok=True)
+                log("Override: %s (%.1f MB)"
+                    % (card_path, node["size"] / 1e6), "info")
+                reader.extract_file(node, _lp(dest))
+                with open(_lp(dest), "r+b") as f:
+                    for f_off, buf in file_writes:
+                        f.seek(f_off)
+                        f.write(buf)
+                written.append((card_path, node["size"]))
+
+            # The grown files (an oversized replacement video kept at full
+            # quality, and the rebuilt blip-free firmware) are the easy half
+            # here: on a card they need the ext4 driver because they no longer
+            # fit their slot, and in an override set a file is just a file.
+            for j, (card_rel, source) in enumerate(
+                    (grow_plan or {}).get("jobs", ())):
+                card_path = "/" + card_rel.lstrip("/")
+                dest = _override_path(out_dir, card_path)
+                os.makedirs(_lp(os.path.dirname(dest)), exist_ok=True)
+                shutil.copyfile(_lp(source), _lp(dest))
+                size = _size(_lp(dest))
+                log("Override: %s (%.1f MB, full size — it outgrew its slot on "
+                    "the card)" % (card_path, size / 1e6), "info")
+                written.append((card_path, size))
+                if progress:
+                    progress(len(by_file) + j, max(total, 1),
+                             "Writing %s" % os.path.basename(card_path))
+            _stage_done(log, "writing the override files", t0)
+        finally:
+            _rmtree_grow_plan(grow_plan)
+    finally:
+        disk_f.close()
+
+    st = os.stat(_lp(original_path))
+    manifest = {
+        "version": 1,
+        # The card these bytes were patched OUT OF.  A set built from one card
+        # and bound over another is a corrupt title, so whoever launches has to
+        # be able to tell — size+mtime is the same identity cardmount.sh's own
+        # cache uses (item 34: David keeps byte-identical cards at two paths).
+        "card": {"path": os.path.abspath(str(original_path)),
+                 "size": st.st_size, "mtime": int(st.st_mtime)},
+        "assets": os.path.abspath(str(assets_dir)),
+        "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "counts": {"audio": counts[0], "video": counts[1],
+                   "image": counts[2], "text": counts[3]},
+        "audio_mode": audio_mode[0] if audio_mode else "",
+        "valpatch": valpatch_mode[0] if valpatch_mode else "",
+        "files": [{"path": p, "size": n} for p, n in written],
+    }
+    with open(_lp(os.path.join(out_dir, OVERRIDE_MANIFEST)), "w",
+              encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+    log("Built the emulator override set in %s: %d file(s), %.0f MB (%d "
+        "sound(s), %d video(s), %d image(s), %d display string(s))."
+        % (_fmt_dur(time.monotonic() - t_all), len(written),
+           sum(n for _p, n in written) / 1e6,
+           counts[0], counts[1], counts[2], counts[3]), "success")
+    return counts, audio_mode, valpatch_mode, written
+
+
+def _override_path(out_dir, card_path):
+    """Where a card file lands inside an override set.
+
+    The set MIRRORS THE GAMES PARTITION, not the title directory: the ``.sidx``
+    manifest an edit also rewrites lives at ``/spk/index/<title>.sidx``, beside
+    the title rather than inside it, and a layout that could not express that
+    would quietly drop the one file Stern's validator reads.
+    """
+    rel = card_path.strip("/").split("/")
+    return os.path.join(out_dir, *rel)
+
+
+def stamp_override_manifest(out_dir, **fields):
+    """Merge *fields* into an existing override manifest.
+
+    For the facts only the CALLER can know, and only once the set is built:
+    the app stamps its "have the edits moved since?" fingerprint here, and it
+    has to be taken AFTER the build, because building writes the hash cache
+    back into the assets folder it fingerprints.  Silent no-op when there is
+    no manifest — a set that failed to build has nothing to stamp.
+    """
+    import json
+    data = read_override_manifest(out_dir)
+    if not data:
+        return {}
+    data.update(fields)
+    with open(_lp(os.path.join(str(out_dir), OVERRIDE_MANIFEST)), "w",
+              encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    return data
+
+
+def read_override_manifest(out_dir):
+    """The manifest of the override set in *out_dir*, or ``{}``.
+
+    Best-effort by design: a missing, half-written or unreadable manifest means
+    "there is no usable set here", which every caller treats as "build one",
+    never as an error.
+    """
+    import json
+    try:
+        with open(_lp(os.path.join(str(out_dir), OVERRIDE_MANIFEST)),
+                  encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _rmtree_grow_plan(grow_plan):
     """Remove the scratch dir a grow plan carries (the rebuilt firmware), if any.
 

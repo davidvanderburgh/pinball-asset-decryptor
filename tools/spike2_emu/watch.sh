@@ -1082,7 +1082,7 @@ setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_AUDIO_FMT="${PAD_AUDIO_FMT:-}" \
            PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \
            PAD_GAME="$GAME" PAD_CARD="${PAD_CARD:-}" PAD_GAME_DIR="${PAD_GAME_DIR:-}" \
-           PAD_PIVOT="${PAD_PIVOT:-}" \
+           PAD_PIVOT="${PAD_PIVOT:-}" PAD_OVERRIDE_DIR="${PAD_OVERRIDE_DIR:-}" \
            bash "$RIG/run_game.sh" > "$LOG" 2>&1 &
 GAMEPG=$!
 if [ -n "${PAD_PIVOT:-}" ]; then

@@ -114,6 +114,18 @@ These have each been violated at least once and each cost a run or a window:
       — S2: it is the whole point of the emulator work — running our own
       code on the machine. D4: a new ARM program, a card builder, and rig
       plumbing, all of which exist in parts already.
+      **IN PROGRESS (2026-09-01, `item/90`): PROVEN IN THE EMULATOR.**
+      `mkmulticard.py` builds the card (verify PASS), `codeselect` draws
+      through the bridge and takes the padsw keys, `PAD_SELECT=1` runs it
+      before the game; four runs: stock and 1987 both chosen by flipper
+      keys, both boot to attract with NVRAM grades P/P/P, the 1987 run
+      serves its own videos (`dump/vidroot`). Production card for David's
+      TMNT Pro at `D:\Pinball\TMNT 1987\multi\` (stock + Insider-clean
+      patched 1987). NEXT: David flashes it and reports
+      `/dump/log/codeselect.log` — the two unknowns are the node-bus reply
+      before the game's own bring-up (service buttons are the no-bus
+      fallback) and the Vivante EGL init (it copies boot_display's order).
+      Detail: `tools/spike2_emu/codeselect/DESIGN.md`.
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

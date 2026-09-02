@@ -184,3 +184,46 @@ an existing output.
   image's partition (the `update` script uses `/games`), which is the
   behaviour one would want; the primary's p3 is only updated when it is the
   one selected.
+
+## Proven in the emulator (2026-09-01)
+
+Card: `mkmulticard.py build` of `turtles_pro-1_59_0.Release` (primary) +
+`TMNT 1987/turtles_pro-1_59_0.1987-upscaled` (extra) — 14,723,055,616 B,
+p7 at LBA 15353856, `verify` PASS (every copied range md5-equal to its
+source, every ext4 fsck-clean, p2 differs from stock by exactly the five hook
+lines and `/usr/local/codeselect/`). Runs: `PAD_CARD=<that .raw>
+PAD_CARD_CACHE=0 PAD_SELECT=1 PAD_AUDIO=0 watch.sh`, four times:
+
+| run | keys (swpoke ids 64/65/36 = RIGHT/LEFT/START) | chose | result |
+|---|---|---|---|
+| 1 | right, left, start | 0 STERN 1.59.0 (p3, primary in place) | attract mode ~200 s after hand-off; NVRAM grades GE/CE/ZK = **P/P/P** in both slots (`nvgrades.py`); no validation banner |
+| 2 | right, start | 1 TMNT 1987 (`bound over /games/turtles_pro` from p7) | attract; P/P/P; but the host video player still served the primary's clips (fixed: `dump/vidroot`) |
+| 3 | right, start | 0 — the highlight had been remembered at 1, RIGHT wrapped to 0 | attract (the last-choice memory works) |
+| 4 | right, start | 1 TMNT 1987 | `[padvid] clip root overridden by dump/vidroot: .../tmnt_multi.p7/turtles_pro`; attract shows the 1987 cartoon art |
+
+The selector attached to the live GL bridge after padglhost was already up,
+drew at ~60 fps, mapped the flipper ids from the title's switch table, and
+exited 0 within 30 ms of START; watch.sh rode the `dump/selecting` flag
+across the hand-off and `alive.sh` read 0 after every run.
+
+## Testing on the machine (David)
+
+1. Flash `D:\Pinball\TMNT 1987\multi	urtles_pro-1_59_0.multi-stock+1987patched.16G.sdcard.raw`
+   (stock 1.59.0 + the Insider-clean patched 1987 build) to a 16 GB card with
+   the app's *Build / flash SD card…* (any card ≥ 14,723,055,616 B) or
+   `dd bs=4M conv=fsync`.
+2. Power up. Expect the Stern logo, then within ~2 s of where the game would
+   normally start: the SELECT GAME CODE menu. Flippers move, START boots;
+   15 s countdown boots the remembered image. Service **−/+/Select** on the
+   coin door do the same without the node bus.
+3. If the menu never appears the card boots the primary (stock) by itself —
+   nothing else changes. Pull `/dump/log/codeselect.log` (the card's p6, or
+   through a root shell): look for `egl: up after N attempt(s)`,
+   `nb: node 8 switches 00 ff 1f fb 40 00 00 00` (the first 0x11 answer) and
+   `spi: rx ff 0f 0f …`. `short reply (timed out)` on every frame means the
+   node board wanted more of the game's bring-up: rebuild the card with
+   `--preamble full` in `select.sh`'s codeselect line (opt-in replay of the
+   byte-exact captured frames) and send the log back.
+4. Insider Connected: log in from the stock image first (it grades and
+   persists P/P/P), then from the 1987 image.
+

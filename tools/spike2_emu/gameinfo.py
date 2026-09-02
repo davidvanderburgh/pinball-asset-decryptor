@@ -180,12 +180,25 @@ def firmware_provenance(path=None, name=None):
     firmware PAD itself rewrote, read as if it were stock, sends the next
     investigation looking for a bug in Stern's code that we put there.
 
-    The mark is structural and needs no addresses.  The blip-free callout patch
-    (``docs/architecture/stern.md``) rewrites the ELF's ``PT_GNU_STACK`` header
-    into a third ``PT_LOAD`` so it can append an executable cave page and branch
-    into it.  Stock Spike 2 firmware is exactly two ``PT_LOAD``s - one RX, one
-    RW - plus a ``PT_GNU_STACK``.  So: no GNU_STACK, or a third LOAD, and the
-    firmware is not what Stern shipped.
+    THE TEST IS THE PATCH'S OWN SIGNATURE, NOT A SHAPE WE HAPPEN TO SEE TODAY.
+    An earlier draft called a binary stock when it had "exactly two PT_LOADs
+    plus a PT_GNU_STACK", which is a description of the Spike 2 builds sitting
+    on this desk in 2026 - not of anything Stern promises.  The day a firmware
+    ships with a third segment for its own reasons, that rule calls it patched
+    and accuses us of writing a card we never touched.  So the two halves are
+    tested independently, and neither counts segments:
+
+    * ``PT_GNU_STACK`` present  -> the patch is NOT there.  Every GCC-linked
+      binary gets one, and the blip-free patch's first act is to consume it -
+      it needs a spare program header and takes that one.  Its presence is
+      therefore a positive statement about the patch, at any segment count.
+    * ``PT_GNU_STACK`` gone AND an executable ``PT_LOAD`` starting above every
+      writable one -> the cave.  Linkers put code below data; code mapped past
+      the end of the data segment is something appended after the fact.
+
+    Anything else is "unknown", which is a real answer and never falls through
+    to "stock" - saying "Stern shipped it this way" about a shape this does not
+    recognise is the failure the check exists to prevent.
 
     Returns ``(verdict, detail)``; ``verdict`` is "stock", "patched" or
     "unknown", and never guesses from a file it could not parse."""
@@ -219,15 +232,27 @@ def firmware_provenance(path=None, name=None):
         elif p_type == 0x6474e551:            # PT_GNU_STACK
             gnu_stack += 1
 
-    if gnu_stack and len(loads) == 2:
-        return "stock", "2 PT_LOAD + PT_GNU_STACK, as Stern ships it"
-    if not gnu_stack and len(loads) >= 3:
-        cave = loads[-1]
-        return "patched", ("PT_GNU_STACK rewritten into a %d-byte executable "
-                           "PT_LOAD at 0x%08x - PAD's blip-free callout patch"
-                           % (cave[1], cave[0]))
-    return "unknown", ("%d PT_LOAD, %d PT_GNU_STACK - neither shape this knows"
-                       % (len(loads), gnu_stack))
+    if not loads:
+        return "unknown", "no PT_LOAD segments"
+    if gnu_stack:
+        return "stock", ("PT_GNU_STACK intact over %d PT_LOAD - the blip-free "
+                         "patch consumes that header, so it was never applied"
+                         % len(loads))
+
+    # No GNU_STACK. That alone is not the patch - look for what it spends the
+    # header on: executable code mapped above the end of every writable
+    # segment, which no linker produces and the cave always is.
+    top_rw = max((v + sz for (v, sz, fl) in loads if fl & 2), default=None)
+    if top_rw is not None:
+        caves = [(v, sz) for (v, sz, fl) in loads if fl & 1 and v >= top_rw]
+        if caves:
+            v, sz = caves[0]
+            return "patched", ("no PT_GNU_STACK, and a %d-byte executable "
+                               "PT_LOAD at 0x%08x above the data segment - "
+                               "PAD's blip-free callout cave" % (sz, v))
+    return "unknown", ("no PT_GNU_STACK over %d PT_LOAD, but no executable "
+                       "segment above the data either - not a shape this "
+                       "recognises" % len(loads))
 
 
 def assets(name=None):

@@ -2253,56 +2253,50 @@ static void segv_install(void)
  * registers, the stack backtrace - the title-agnostic half that would have
  * named the game's fault) ever printed.
  *
- * So the gate is now an identity test, not a mapping test:
- *   PAD_GZ_ADDRS=1  an operator saying "these addresses are right for this
- *                   title" - the same escape hatch PAD_SW_STRUCT gives;
- *   PAD_GZ_ADDRS=0  never, whatever the title;
- *   otherwise       PAD_GAME must be godzilla_pro, the title the addresses
- *                   were read out of.
- * The mapping test is kept as well: an address that is right for the title and
+ * NO TITLE TEST CAN BE RIGHT HERE, so there is not one. The gate is:
+ *   PAD_GZ_ADDRS=1  an operator saying "I have checked that these addresses
+ *                   are right for what I am running" - the same escape hatch
+ *                   PAD_SW_STRUCT gives;
+ *   anything else   off.
+ * The mapping test is kept as well: an address that is right for the build and
  * still unmapped is unusable either way.
  *
- * "A GODZILLA BUILD" WAS STILL TOO WIDE, and a user's crash report is what
- * says so (PAD-102, 2026-09-01, a Godzilla Premium 1.16 Heisei custom card).
- * The first test matched the first eight characters, so `godzilla_le` passed
- * it - and godzilla_le is not a variant of godzilla_pro, it is a different
- * generation of the binary (item 60's survey: "godzilla_le sharing nothing
- * with working sibling godzilla_pro is the clearest tell"). Measured at the
- * desk off both card images: godzilla_pro 1.15.0 loads 0x8000..0x6ed2c0 exec
- * + 0x6f52c0..0x842b9c data, godzilla_le 1.13.0 loads 0x8000..0x683bc0 +
- * 0x68c000..0x7d856c - so even the event table at 0x7e4d48 falls off the end
- * of the le image, and on the user's larger 1.16 build every one of these
- * addresses is simply somebody else's data that happens to be mapped.
- *
- * What that cost, in that user's log, is the whole Bond failure again:
+ * WHY NOT MATCH THE TITLE NAME. Two passes tried to. The first matched the
+ * first eight characters of PAD_GAME, so `godzilla_le` passed a test meant for
+ * `godzilla_pro` - and those are not variants, they are different generations
+ * of the binary (item 60's survey: "godzilla_le sharing nothing with working
+ * sibling godzilla_pro is the clearest tell"). Measured off the card images:
+ * godzilla_pro 1.15.0 loads 0x8000..0x6ed2c0 exec + 0x6f52c0..0x842b9c data,
+ * godzilla_le 1.13.0 loads 0x8000..0x683bc0 + 0x68c000..0x7d856c, so the event
+ * table at 0x7e4d48 is not even inside the le image. On a user's larger 1.16
+ * build (PAD-102) every one of these addresses was somebody else's data that
+ * happened to be mapped, and the walk stated what it found as fact:
  *   [segv] loader_gate[0x7e1a10]=0 boot_ready[0x7e1974]=0 thread_run=1
  *   [segv] event 93 has NO handlers            <- read off le's memory
  *   [audio] pool head[+74]=0x65746164          <- ASCII "date"
- * and then the pool-list walk faulted a SECOND time inside this handler, so
- * the run ended `qemu: uncaught target signal 11 - core dumped` instead of
- * this function's _exit(99), and the report stopped mid-line. The GAME's own
- * fault on that card is still unexplained - this gate is what makes the next
- * report of it legible. */
+ * then faulted a SECOND time inside this handler and truncated the report.
+ *
+ * The obvious repair was to match the WHOLE name, `godzilla_pro`. That is
+ * still wrong, just later: these addresses were reverse-engineered out of
+ * godzilla_pro 1.15.0 SPECIFICALLY, and the day Stern ships godzilla_pro 1.16
+ * the name matches, the addresses do not, and this is the same bug one version
+ * on - with nothing in the log to say so. A name is not a build. There is no
+ * fingerprint here that survives a rebuild either (the .text bound moves, and
+ * the copy this rig has already differs from the library image by 27992
+ * bytes), so the honest gate is an operator assertion and nothing else.
+ *
+ * What is lost is one diagnostic on one title unless somebody asks for it by
+ * name; what is kept is that no run ever again reports another build's memory
+ * as fact. The skip lines below say which addresses were skipped and how to
+ * turn them on. */
 static int gz_addrs_ok(void)
 {
     static int v, done;
     if (!done) {
         const char *e = getenv("PAD_GZ_ADDRS");
-        const char *g = getenv("PAD_GAME");
-        /* No string.h here - this object is built -nostdlib, same as
-         * nv_path() below. The whole name must match: a title that merely
-         * STARTS with it is exactly the bug this replaced. */
-        static const char want[] = "godzilla_pro";
-        int i = 0;
         done = 1;
-        if (e && (e[0] == '0' || e[0] == '1'))
-            v = (e[0] == '1');
-        else {
-            v = (g != 0);
-            for (i = 0; v && want[i]; i++)
-                if (g[i] != want[i]) v = 0;
-            if (v && g[i]) v = 0;
-        }
+        v = (e && e[0] == '1');
+        /* Right for the title and still unmapped is unusable either way. */
         if (v && !a_sw_struct()) v = 0;
     }
     return v;
@@ -2424,8 +2418,8 @@ static void segv_handler(int sig, void *info, void *ucv)
                      *gate, *ready, *run, scene_opens);
         else
             snprintf(b, sizeof b,
-                     "[segv] scene_opens=%d (loader-gate addresses are Godzilla"
-                     " Pro's; not reported for this title)\n", scene_opens);
+                     "[segv] scene_opens=%d (loader-gate addresses are one"
+                     " build's; PAD_GZ_ADDRS=1 to report them)\n", scene_opens);
         logmsg(b);
         snprintf(b, sizeof b,
                  "[segv] filebuf::xsgetn=%d (small=%d) filebuf::underflow=%d "
@@ -2492,9 +2486,9 @@ static void segv_handler(int sig, void *info, void *ucv)
      * so the voice pointer 0x30ed20 kept at [sp,#44] is stack word 28, and its
      * saved lr is word 44 - which is exactly where 0x2a24ac was reported. */
     if (!gz_addrs_ok()) {
-        logmsg("[segv] mixer/loader dump skipped: those addresses are Godzilla"
-               " Pro 1.15.0's and this is not that title (PAD_GZ_ADDRS=1"
-               " overrides)\n");
+        logmsg("[segv] mixer/loader dump skipped: those addresses were read"
+               " out of godzilla_pro 1.15.0 and hold for no other build"
+               " (PAD_GZ_ADDRS=1 if you have checked they fit)\n");
     } else {
         unsigned long sp = uc[21];
         unsigned long obj = 0;
@@ -7993,8 +7987,8 @@ static void audio_dump(void)
      * was live during David's Bond run. gz_addrs_ok() is the identity test;
      * see it for what changed and why. */
     if (!gz_addrs_ok()) {
-        logmsg("[aud] mixer/pool dump skipped: those addresses are Godzilla"
-               " Pro's and this is not that title\n");
+        logmsg("[aud] mixer/pool dump skipped: those addresses were read out"
+               " of godzilla_pro 1.15.0 (PAD_GZ_ADDRS=1 to use them)\n");
         return;
     }
 
@@ -9057,8 +9051,9 @@ static void nb_maybe_dump(void)
         if (!said) {
             said = 1;
             logmsg("[nbtbl] skipped: the registry and hex-list dumps are "
-                   "Godzilla Pro 1.15.0 addresses and this is not that title "
-                   "(walking them here segfaulted stranger_things)\n");
+                   "godzilla_pro 1.15.0 addresses and hold for no other "
+                   "build (walking them segfaulted stranger_things); "
+                   "PAD_GZ_ADDRS=1 to use them anyway\n");
         }
     }
     nb_dump_census();

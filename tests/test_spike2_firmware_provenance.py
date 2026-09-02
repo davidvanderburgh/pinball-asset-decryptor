@@ -109,6 +109,54 @@ def test_an_unrecognised_shape_is_unknown_rather_than_stock(tmp_path):
     assert verdict == "unknown"
 
 
+# ---------------------------------------------------------------- version drift
+#
+# The rule this file guards is "no hard-coded logic for a specific game and
+# version". An earlier draft called a binary stock when it had EXACTLY two
+# PT_LOADs plus a PT_GNU_STACK - a description of the builds on this desk in
+# 2026, not of anything Stern promises. These are the futures that rule got
+# wrong, and they are the reason the check now tests the patch's own signature
+# instead of counting segments.
+
+def test_a_future_build_with_an_extra_segment_is_still_stock(tmp_path):
+    """Stern ships a 1.17 with a third PT_LOAD of its own. GNU_STACK is intact,
+    so the patch was never applied and the answer is stock - not "patched",
+    which would accuse us of writing a card we never touched."""
+    verdict, detail = _verdict(tmp_path, [
+        (PT_LOAD, 0x8000, 0x6F6F28, 5),
+        (PT_LOAD, 0x707000, 0x14F26C, 6),
+        (PT_LOAD, 0x860000, 0x2000, 4),      # some new read-only segment
+        (PT_GNU_STACK, 0, 0, 7)])
+    assert verdict == "stock", detail
+
+
+def test_a_future_build_with_only_one_load_is_still_stock(tmp_path):
+    """The count is not the signal in either direction."""
+    verdict, detail = _verdict(tmp_path, [
+        (PT_LOAD, 0x8000, 0x800000, 7), (PT_GNU_STACK, 0, 0, 7)])
+    assert verdict == "stock", detail
+
+
+def test_the_cave_is_found_however_many_segments_precede_it(tmp_path):
+    """A patched build of some future firmware with four of its own segments."""
+    verdict, detail = _verdict(tmp_path, [
+        (PT_LOAD, 0x8000, 0x6F6F28, 5),
+        (PT_LOAD, 0x707000, 0x14F26C, 6),
+        (PT_LOAD, 0x860000, 0x2000, 4),
+        (PT_LOAD, 0x900000, 0x1000, 5)])     # the cave, above the data
+    assert verdict == "patched", detail
+    assert "0x00900000" in detail
+
+
+def test_an_executable_segment_below_the_data_is_not_a_cave(tmp_path):
+    """No GNU_STACK, but the only executable segment is the ordinary text below
+    the data - that is a stripped-header binary, not our patch. Unknown, and
+    emphatically not an accusation."""
+    verdict, detail = _verdict(tmp_path, [
+        (PT_LOAD, 0x8000, 0x6F6F28, 5), (PT_LOAD, 0x707000, 0x14F26C, 6)])
+    assert verdict == "unknown", detail
+
+
 @pytest.mark.skipif(not os.path.isfile(r"C:\tmp\gz116\game"),
                     reason="the extracted 1.16 ELF is not on this machine")
 def test_the_real_godzilla_116_elf_is_stock():

@@ -11,23 +11,27 @@ the handler followed one of its own invented pointers and faulted a second
 time, which killed the process before the title-agnostic half of the report
 had printed anything.
 
-That was fixed by making the gate an identity test - and the identity test
-compared the first EIGHT characters, so ``godzilla_le`` passed it.  A user's
-Godzilla Premium 1.16 Heisei custom card (PAD-102) then produced exactly the
-Bond failure again: ``loader_gate[0x7e1a10]=0``, ``event 93 has NO handlers``,
-an ``[audio] pool`` whose words decode to the ASCII "date"/"Obje", and a run
-that ended ``qemu: uncaught target signal 11 - core dumped`` mid-line instead
-of the handler's own ``_exit(99)``.  godzilla_le is not a variant of
-godzilla_pro; item 60's survey calls the pair the clearest example of two
-different generations of the binary, and the two card images measure
-0x8000..0x683bc0 (le 1.13.0) against 0x8000..0x6ed2c0 (pro 1.15.0) with the
-event table at 0x7e4d48 falling off the end of the le image entirely.
+TWO PASSES TRIED TO FIX THAT WITH A TITLE TEST, AND BOTH WERE WRONG.  The
+first compared the first EIGHT characters of ``PAD_GAME``, so ``godzilla_le``
+passed a test meant for ``godzilla_pro``; a user's Godzilla Premium 1.16 Heisei
+card (PAD-102) then produced the Bond failure again - ``loader_gate=0``,
+``event 93 has NO handlers``, an ``[audio] pool`` decoding to ASCII "date", and
+a run ending ``qemu: uncaught target signal 11`` mid-line instead of the
+handler's own ``_exit(99)``.  The obvious repair, matching the WHOLE name, is
+wrong too, just one firmware version later: these addresses came out of
+godzilla_pro **1.15.0**, and the day Stern ships godzilla_pro 1.16 the name
+matches, the addresses do not, and nothing in the log says so.  A name is not a
+build, and there is no fingerprint that survives a rebuild either.
 
-So this pins the gate itself.  It compiles the REAL ``gz_addrs_ok()`` out of
-hwshim.c - the text is extracted from the source, never copied here, the same
-way tests/test_spike2_led_wide_twins.py does - and asks it about the titles
-that matter.  Skipped where there is no C compiler, which is most Windows
-checkouts; it runs in WSL and in CI, which is where the shim is built anyway.
+So the gate names no title at all: ``PAD_GZ_ADDRS=1`` - an operator asserting
+the addresses fit what they are running - and nothing else.  This pins that.
+It compiles the REAL ``gz_addrs_ok()`` out of hwshim.c (the text is extracted
+from the source, never copied here, the same way
+tests/test_spike2_led_wide_twins.py does), checks that no title opens it -
+including the one the addresses came from - and greps the function so a third
+title test cannot quietly arrive.  Skipped where there is no C compiler, which
+is most Windows checkouts; it runs in WSL and in CI, which is where the shim is
+built anyway.
 """
 import os
 import re
@@ -115,19 +119,18 @@ def _ask(gate, **env):
     return r.stdout.strip() == "1"
 
 
-def test_the_title_the_addresses_came_from_is_allowed(gate):
-    assert _ask(gate, PAD_GAME="godzilla_pro")
-
-
 @pytest.mark.parametrize("game", [
-    "godzilla_le",          # PAD-102: the whole point - a DIFFERENT generation
-    "godzilla",             # the bare family name names no binary
-    "godzilla_pro_test",    # a longer name that starts with the right one
-    "godzilla_p",           # a shorter one that is a prefix of it
-    "james_bond_le",        # the title the gate was introduced for
+    "godzilla_pro",         # the very title the addresses were read out of
+    "godzilla_le",          # PAD-102: a different generation of the binary
+    "godzilla",
+    "godzilla_pro_test",
+    "james_bond_le",
     "led_zeppelin_le",
 ])
-def test_every_other_title_is_refused(gate, game):
+def test_no_title_name_opens_the_gate(gate, game):
+    """THE RULE: no hard-coded logic for a specific game and version. Not even
+    godzilla_pro opens this on its name - see the header for why matching the
+    whole name is still wrong, just one firmware version later."""
     assert not _ask(gate, PAD_GAME=game)
 
 
@@ -135,30 +138,30 @@ def test_no_title_at_all_is_refused(gate):
     assert not _ask(gate)
 
 
-def test_the_operator_override_still_works_both_ways(gate):
-    # An operator saying "these addresses are right for this title" is obeyed
-    # even on a title the name test refuses, and PAD_GZ_ADDRS=0 is obeyed even
-    # on the title it came from.  Both are the escape hatch PAD_SW_STRUCT gives.
-    assert _ask(gate, PAD_GAME="godzilla_le", PAD_GZ_ADDRS="1")
+def test_only_an_operator_opens_it(gate):
+    # PAD_GZ_ADDRS=1 is an operator saying "I have checked these fit what I am
+    # running". It is the only thing that does, on any title.
+    assert _ask(gate, PAD_GZ_ADDRS="1")
+    assert _ask(gate, PAD_GAME="anything_at_all", PAD_GZ_ADDRS="1")
     assert not _ask(gate, PAD_GAME="godzilla_pro", PAD_GZ_ADDRS="0")
 
 
 def test_the_mapping_test_is_still_and_ed_in(gate):
-    # Right title, addresses not mapped: still refused.  An address that is
-    # right for the title and unmapped is unusable either way.
-    assert not _ask(gate, PAD_GAME="godzilla_pro", PAD_TEST_SW_STRUCT="0")
+    # Asserted by the operator, addresses not mapped: still refused. An address
+    # that is right for the build and unmapped is unusable either way.
+    assert not _ask(gate, PAD_GZ_ADDRS="1", PAD_TEST_SW_STRUCT="0")
 
 
-def test_the_gate_reads_the_whole_name(gate):
-    """Belt and braces on the source itself: the bug this file exists for was a
-    character-by-character compare that stopped after eight of them, which no
-    single behavioural case can rule back in on its own."""
+def test_the_gate_names_no_title_in_its_source(gate):
+    """Belt and braces on the source itself. Two passes put a title test in
+    here - an eight-character prefix, then the whole name - and both were
+    wrong. A grep is the only thing that keeps a third from arriving."""
     src = open(SHIM, encoding="utf-8", errors="replace").read()
     body = _extract("gz_addrs_ok")
-    assert "godzilla_pro" in body, "the gate no longer names the title"
-    assert "g[7]" not in body, "the eight-character prefix compare is back"
-    assert src.count("gz_addrs_ok(") >= 4, \
-        "a caller stopped going through the gate"
+    assert "godzilla" not in body, "a title name is back in the gate"
+    assert "PAD_GAME" not in body, "the gate is reading the title again"
+    assert "PAD_GZ_ADDRS" in body, "the operator's escape hatch went missing"
+    assert src.count("gz_addrs_ok(") >= 4, "a caller stopped going through the gate"
 
 
 if __name__ == "__main__":       # pragma: no cover

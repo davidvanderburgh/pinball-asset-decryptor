@@ -197,6 +197,63 @@ def test_a_folder_that_is_not_a_set_is_never_cleared(card, tmp_path):
     assert (out / "tax return.pdf").exists()
 
 
+def test_a_build_that_dies_half_way_leaves_nothing_behind(card, tmp_path,
+                                                          monkeypatch):
+    """A half-written set must not survive, and must not poison the next Start.
+
+    The rig binds whatever is in the folder, so a set that stopped half way
+    would run some of the edits and none of the rest — and the guard above,
+    which refuses to clear a folder this app did not build, would then have to
+    refuse this one for ever.
+    """
+    r = card.reader
+    out = tmp_path / "ovr"
+    card.state["writes"] = [
+        (_disk(r, "/turtles_pro/image.bin", 0), b"S"),
+        (_disk(r, "/spk/index/turtles_pro.sidx", 0), b"F"),
+    ]
+    real = r.extract_file
+    seen = []
+
+    def die(node, dest):
+        seen.append(dest)
+        if len(seen) > 1:
+            raise OSError(28, "No space left on device")
+        return real(node, dest)
+
+    monkeypatch.setattr(r, "extract_file", die)
+    with pytest.raises(OSError):
+        engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+    assert len(seen) == 2                      # it really did get part way in
+    assert not out.exists()
+
+    monkeypatch.setattr(r, "extract_file", real)
+    _c, _m, _v, files = engine.write_overrides(
+        str(card.img), str(tmp_path / "a"), str(out))
+    assert len(files) == 2
+
+
+def test_a_folder_a_killed_build_left_is_still_ours(card, tmp_path):
+    """The stub manifest goes down BEFORE any bytes, so a build that is killed
+    outright (no exception to clean up after) still leaves a folder this app
+    recognises — and one that can never be mistaken for a set to run."""
+    out = tmp_path / "ovr"
+    (out / "turtles_pro").mkdir(parents=True)
+    (out / engine.OVERRIDE_MANIFEST).write_text(
+        '{"version": 1, "building": true}', encoding="utf-8")
+    (out / "turtles_pro" / "image.bin").write_bytes(b"half")
+
+    # It names no card, so the reuse test sends the tab back to building one.
+    assert emulate_tab.overrides_reason(
+        engine.read_override_manifest(str(out)), str(card.img),
+        str(tmp_path / "a"), "1 2.0")
+
+    r = card.reader
+    card.state["writes"] = [(_disk(r, "/turtles_pro/image.bin", 0), b"S")]
+    engine.write_overrides(str(card.img), str(tmp_path / "a"), str(out))
+    assert (out / "turtles_pro" / "image.bin").read_bytes()         == b"STOCK-SOUND-BANK-" + b"." * 64
+
+
 def test_the_manifest_names_the_card_it_was_built_from(card, tmp_path):
     r = card.reader
     out = tmp_path / "ovr"

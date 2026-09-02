@@ -4331,7 +4331,6 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
     t_all = time.monotonic()
-    import json
     import shutil
 
     out_dir = os.path.abspath(str(out_dir))
@@ -4372,46 +4371,71 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
                         "live in", t0)
 
             _rmtree(out_dir)
+            if os.path.isdir(_lp(out_dir)) and os.listdir(_lp(out_dir)):
+                # Silent-by-design rmtree: say so rather than building a set
+                # ON TOP of a previous one, where the leftovers would be bound
+                # over the card alongside the current edits.
+                raise OSError(
+                    "The override folder\n\n    %s\n\ncould not be emptied — "
+                    "something else has a file in it open." % out_dir)
             os.makedirs(_lp(out_dir), exist_ok=True)
+            # A STUB MANIFEST BEFORE ANY BYTES, so a build that dies half way
+            # (the app killed, the disk full) leaves a folder that is still
+            # recognisably OURS.  Without it the guard at the top of this
+            # function — which refuses to clear a folder with no manifest in
+            # it, because it might be somebody's documents — would refuse this
+            # folder from then on.  A stub never satisfies the "may I reuse
+            # this?" test either: it names no card, so the next Start rebuilds.
+            _write_override_manifest(out_dir, {"version": 1, "building": True})
             written = []
             t0 = time.monotonic()
             total = len(by_file) + len((grow_plan or {}).get("jobs", ()))
-            for i, (card_path, (node, file_writes)) in enumerate(
-                    sorted(by_file.items())):
-                if cancel():
-                    _rmtree(out_dir)     # the plan is cleaned by the `finally`
-                    return None, None, None, None
-                if progress:
-                    progress(i, max(total, 1),
-                             "Writing %s" % os.path.basename(card_path))
-                dest = _override_path(out_dir, card_path)
-                os.makedirs(_lp(os.path.dirname(dest)), exist_ok=True)
-                log("Override: %s (%.1f MB)"
-                    % (card_path, node["size"] / 1e6), "info")
-                reader.extract_file(node, _lp(dest))
-                with open(_lp(dest), "r+b") as f:
-                    for f_off, buf in file_writes:
-                        f.seek(f_off)
-                        f.write(buf)
-                written.append((card_path, node["size"]))
+            try:
+                for i, (card_path, (node, file_writes)) in enumerate(
+                        sorted(by_file.items())):
+                    if cancel():
+                        _rmtree(out_dir)   # the plan is cleaned by the finally
+                        return None, None, None, None
+                    if progress:
+                        progress(i, max(total, 1),
+                                 "Writing %s" % os.path.basename(card_path))
+                    dest = _override_path(out_dir, card_path)
+                    os.makedirs(_lp(os.path.dirname(dest)), exist_ok=True)
+                    log("Override: %s (%.1f MB)"
+                        % (card_path, node["size"] / 1e6), "info")
+                    reader.extract_file(node, _lp(dest))
+                    with open(_lp(dest), "r+b") as f:
+                        for f_off, buf in file_writes:
+                            f.seek(f_off)
+                            f.write(buf)
+                    written.append((card_path, node["size"]))
 
-            # The grown files (an oversized replacement video kept at full
-            # quality, and the rebuilt blip-free firmware) are the easy half
-            # here: on a card they need the ext4 driver because they no longer
-            # fit their slot, and in an override set a file is just a file.
-            for j, (card_rel, source) in enumerate(
-                    (grow_plan or {}).get("jobs", ())):
-                card_path = "/" + card_rel.lstrip("/")
-                dest = _override_path(out_dir, card_path)
-                os.makedirs(_lp(os.path.dirname(dest)), exist_ok=True)
-                shutil.copyfile(_lp(source), _lp(dest))
-                size = _size(_lp(dest))
-                log("Override: %s (%.1f MB, full size — it outgrew its slot on "
-                    "the card)" % (card_path, size / 1e6), "info")
-                written.append((card_path, size))
-                if progress:
-                    progress(len(by_file) + j, max(total, 1),
-                             "Writing %s" % os.path.basename(card_path))
+                # The grown files (an oversized replacement video kept at full
+                # quality, and the rebuilt blip-free firmware) are the easy
+                # half here: on a card they need the ext4 driver because they
+                # no longer fit their slot, and in a set a file is just a file.
+                # AFTER the in-place writes, exactly as write_image orders
+                # them, so a file that is both ends up the same either way.
+                for j, (card_rel, source) in enumerate(
+                        (grow_plan or {}).get("jobs", ())):
+                    card_path = "/" + card_rel.lstrip("/")
+                    dest = _override_path(out_dir, card_path)
+                    os.makedirs(_lp(os.path.dirname(dest)), exist_ok=True)
+                    shutil.copyfile(_lp(source), _lp(dest))
+                    size = _size(_lp(dest))
+                    log("Override: %s (%.1f MB, full size — it outgrew its "
+                        "slot on the card)" % (card_path, size / 1e6), "info")
+                    written.append((card_path, size))
+                    if progress:
+                        progress(len(by_file) + j, max(total, 1),
+                                 "Writing %s" % os.path.basename(card_path))
+            except BaseException:
+                # Half a set is not a set.  Leaving one behind would cost the
+                # user their next Start too (the folder would refuse to be
+                # cleared) and could be bound over a card if anything else
+                # decided the folder looked usable.
+                _rmtree(out_dir)
+                raise
             _stage_done(log, "writing the override files", t0)
         finally:
             _rmtree_grow_plan(grow_plan)
@@ -4435,9 +4459,7 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         "valpatch": valpatch_mode[0] if valpatch_mode else "",
         "files": [{"path": p, "size": n} for p, n in written],
     }
-    with open(_lp(os.path.join(out_dir, OVERRIDE_MANIFEST)), "w",
-              encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2)
+    _write_override_manifest(out_dir, manifest)
     log("Built the emulator override set in %s: %d file(s), %.0f MB (%d "
         "sound(s), %d video(s), %d image(s), %d display string(s))."
         % (_fmt_dur(time.monotonic() - t_all), len(written),
@@ -4458,6 +4480,21 @@ def _override_path(out_dir, card_path):
     return os.path.join(out_dir, *rel)
 
 
+def _write_override_manifest(out_dir, data):
+    """Write *data* as the override set's manifest, replacing what is there.
+
+    One writer for all three of them — the stub the build lays down before any
+    bytes, the real manifest at the end, and the app's own stamp on top — so
+    "what makes this folder an override set" is one line of code rather than
+    three that can drift apart.
+    """
+    import json
+    with open(_lp(os.path.join(str(out_dir), OVERRIDE_MANIFEST)), "w",
+              encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    return data
+
+
 def stamp_override_manifest(out_dir, **fields):
     """Merge *fields* into an existing override manifest.
 
@@ -4467,15 +4504,11 @@ def stamp_override_manifest(out_dir, **fields):
     back into the assets folder it fingerprints.  Silent no-op when there is
     no manifest — a set that failed to build has nothing to stamp.
     """
-    import json
     data = read_override_manifest(out_dir)
     if not data:
         return {}
     data.update(fields)
-    with open(_lp(os.path.join(str(out_dir), OVERRIDE_MANIFEST)), "w",
-              encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    return data
+    return _write_override_manifest(out_dir, data)
 
 
 def read_override_manifest(out_dir):

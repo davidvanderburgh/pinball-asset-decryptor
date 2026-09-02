@@ -118,6 +118,15 @@ These have each been violated at least once and each cost a run or a window:
       — S2: it is the whole point of the emulator work — running our own
       code on the machine. D4: a new ARM program, a card builder, and rig
       plumbing, all of which exist in parts already.
+      **WORKED ON DAVID'S MACHINE (2026-09-01 evening): menu on the LCD,
+      flippers, START, remount, both images boot. One fault: a GAME
+      VALIDATION ERROR on BOTH images - the stock image needs the same
+      valpatch bx-lr bypass + sidx refresh the Insider-clean 1987 card
+      carries (shared grade/tamper state per build stamp). v2 in flight:
+      bypass on every image (`mkmulticard.py bypass --card`), per-image
+      art/GIF/sounds on the menu (confirm sound plays to completion), N
+      images via a `multi` p7 holding img1/.. (p7 is the kernel's last
+      partition), and a Multi-boot tab in the app.**
       **IN PROGRESS (2026-09-01, `item/90`): PROVEN IN THE EMULATOR.**
       `mkmulticard.py` builds the card (verify PASS), `codeselect` draws
       through the bridge and takes the padsw keys, `PAD_SELECT=1` runs it

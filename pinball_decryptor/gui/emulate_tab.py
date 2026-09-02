@@ -29,6 +29,16 @@ Three things about it are worth knowing before changing anything here:
   rig on this machine, which is internal state no user can create or reason
   about.
 
+  **The card can be ASKED TO CARRY THE USER'S EDITS, though, and that is not a
+  second source** (PAD-103).  With the opt-in ticked, the app patches the card
+  files those edits live in — ``image.bin`` and its ``.sidx`` record, for a
+  replaced sound — into a small OVERRIDE SET, and the rig bind-mounts those
+  files over the same read-only mount.  Still one card, still opened read only;
+  the rule above is unchanged, and so is the image on disk.  What it replaces
+  is the two full-size copies that trying an edit used to cost: the build's
+  copy of the card, and then this tab's own copy of that new card onto the WSL
+  disk.  Measured on a jurassic_park_le 1.16.0 card, the set is 9 seconds.
+
 * **The LAUNCH is root on Windows now, and that is item 13's doing.**  This
   module's original rule was "normal WSL user, never root - root breaks WSLg
   and the audio path", and that stopped being true when ``watch.sh`` learned
@@ -57,6 +67,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tkinter as tk
@@ -205,6 +216,19 @@ _COPY_EXPLAIN = (
     "once, replacing the old copy. The Cache… button beside Browse shows "
     "and manages what is kept.")
 
+#: PAD-103: what the state says while the app is turning the user's edits into
+#: an override set, before anything is launched.  Its own explanation rather
+#: than the copy's, because it is a different wait for a different reason —
+#: this one is the re-encode, and it is the price of not rebuilding the card.
+_OVERRIDE_EXPLAIN = (
+    "Your replaced assets are being patched into copies of the card files "
+    "they live in, so the emulator can read them without a new card image "
+    "being built. It is the same work a Write does, minus the copy of the "
+    "card itself: a replaced sound has to be re-encoded, which is where the "
+    "time goes. The set is kept: an unchanged one is reused where it "
+    "stands, and a changed one is patched where it changed rather than "
+    "built again, so a second run only costs what you have edited since.")
+
 #: Item 74: cardmount.sh narrates a first-boot copy one line every 2 s —
 #: ``[card] copying <name>: 3121 / 7497 MB (41%)``.  Parsed off the drain so
 #: the state label can show the copy instead of "Not running" while the guest
@@ -271,6 +295,85 @@ def cache_boot_text(epoch):
     if not epoch:
         return "never"
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(epoch))
+
+
+# ----------------------------------------------------------------------
+# PAD-103: running the user's own edits without rebuilding the card.
+#
+# The app builds an OVERRIDE SET - the card files an edit touches, patched,
+# and nothing else (stern.engine.write_overrides) - and the rig binds them
+# over the read-only card mount.  These three are the app's side of the
+# policy: where a set is kept, and when the one that is there can be reused.
+# Pure, like parse_cache_list and playfield_launch above and for the same
+# reason: none of it needs a WSL, a card or a Tk root to be tested.
+# ----------------------------------------------------------------------
+
+def overrides_dir():
+    """Where the override set is staged on THIS side (the rig copies it on).
+
+    The host temp dir, under a ``spike2_`` name, because that is already where
+    this plugin does its host-side build staging and ``core.host_temp`` knows
+    the prefix - so the set shows up in the app's own "what is PAD leaving
+    behind" list and can be deleted from there like any other scratch.  A
+    STABLE name rather than a ``mkdtemp``: the whole point is that a set which
+    is still current does not have to be built again.
+    """
+    return os.path.join(tempfile.gettempdir(), "spike2_overrides")
+
+
+def assets_fingerprint(assets_dir):
+    """``"<files> <newest-mtime>"`` for everything under *assets_dir*.
+
+    Cheap on purpose - a stat walk, no hashing - because it runs on every
+    Start and the folder is a whole extract (thousands of WAVs).  It is the
+    "have the edits moved?" question, not the "what changed?" one; the engine
+    answers that properly, against the .checksums.md5 baseline, when a set is
+    actually built.
+
+    Compared for EQUALITY rather than "is anything newer", because building a
+    set writes back into the assets folder itself (the hash cache), so the
+    recorded value has to be the one taken AFTER that write - and then a file
+    restored from an older copy moves the fingerprint too, where a newest-wins
+    test would call it unchanged.
+    """
+    newest, count = 0, 0
+    for root, _dirs, files in os.walk(assets_dir):
+        for name in files:
+            count += 1
+            try:
+                m = os.stat(os.path.join(root, name)).st_mtime
+            except OSError:
+                continue
+            if m > newest:
+                newest = m
+    return "%d %.6f" % (count, newest)
+
+
+def overrides_reason(manifest, card_path, assets_dir, fingerprint):
+    """Why the staged override set cannot be reused, or ``""`` if it can.
+
+    A sentence rather than a bool: every one of these is worth saying out loud
+    in the log, and "rebuilding your edits" with no reason is what makes a
+    30-second wait look like the app doing nothing.
+    """
+    if not manifest:
+        return "there is no set staged yet"
+    card = manifest.get("card") or {}
+    try:
+        st = os.stat(card_path)
+    except OSError:
+        return "the card image could not be read"
+    if os.path.normcase(str(card.get("path") or "")) \
+            != os.path.normcase(os.path.abspath(card_path)) \
+            or card.get("size") != st.st_size \
+            or int(card.get("mtime") or 0) != int(st.st_mtime):
+        return "it was built from a different card image"
+    if os.path.normcase(str(manifest.get("assets") or "")) \
+            != os.path.normcase(os.path.abspath(assets_dir)):
+        return "it was built from a different assets folder"
+    if str(manifest.get("assets_fingerprint") or "") != fingerprint:
+        return "your assets folder has changed since it was built"
+    return ""
 
 
 def playfield_launch(line):
@@ -1726,7 +1829,7 @@ class EmulatePanel:
 
     def __init__(self, parent, log=None, card_var=None, savestates_var=None,
                  theme_fn=None, badge_fn=None, resize_fn=None,
-                 footer_cb=None):
+                 footer_cb=None, assets_var=None, overrides_var=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
         #: Item 78: MainWindow.set_emulate_progress, injected like the log -
@@ -1755,6 +1858,17 @@ class EmulatePanel:
         # default OFF, persisted with the project. The fallback var keeps the
         # panel testable on its own, same as the card path's.
         self._states_var = savestates_var
+        # PAD-103: the Write tab's Assets Folder, SHARED rather than copied.
+        # It is the project's one extract folder and it already has an owner;
+        # a second field here would be a second way to set one thing, which is
+        # exactly what _build_source's note says this tab does not do.  Shown
+        # read-only beside the opt-in so it is obvious WHICH edits would run.
+        self._assets_var = assets_var
+        # ...and the opt-in itself, window-owned and project-persisted like
+        # the card path, because a testing loop is a session-long state and
+        # item 14 is what forgetting one costs.
+        self._overrides_var = overrides_var if overrides_var is not None \
+            else tk.BooleanVar(value=False)
         self._theme_fn = theme_fn or (lambda: "dark")
         #: The window's round ⓘ badge factory (``MainWindow._make_round_icon``),
         #: passed in rather than reached for: this panel is built standalone in
@@ -1780,6 +1894,12 @@ class EmulatePanel:
         #: The copy's percent (int), alongside _copying, for the footer bar
         #: (item 78) - the one determinate phase of an emulator start.
         self._copying_pct = None
+        #: PAD-103: the same handoff for the stage BEFORE the copy - turning
+        #: the user's edits into an override set. Written by the start worker
+        #: (a bare attribute set, atomic), read by _apply on the main loop,
+        #: for the same reason _copying exists: the 2 s status poll would
+        #: otherwise write "Not running" over a minute of re-encoding.
+        self._preparing = None
         #: The card path already handed to `cardmount.sh --precache`, so the
         #: entry's write-trace (which fires per keystroke) starts one copy per
         #: picked card, not one per character.
@@ -2459,7 +2579,6 @@ class EmulatePanel:
         boot notice exists on the other half of this tab.
         """
         import shlex
-        import tempfile
         self._log("[emulate] %s: %s" % (label, " ".join(argv)))
         if not admin:
             try:
@@ -3372,6 +3491,9 @@ class EmulatePanel:
         picked path IS remembered with the project (the app stores it in the
         anchor and restores it on project load) — remembering a choice is not
         the same as guessing one.
+
+        Under the box sits PAD-103's opt-in — the same card, plus the user's
+        own edits, without a rebuild.  See :meth:`_build_overrides_row`.
         """
         box = ttk.LabelFrame(frame, text="Card image to run")
         box.pack(fill=tk.X, **pad)
@@ -3404,6 +3526,92 @@ class EmulatePanel:
         ttk.Button(row, text="Cache…", width=8,
                    command=self._open_cache_manager).pack(
             side=tk.LEFT, padx=(6, 0))
+        self._build_overrides_row(box)
+
+    def _build_overrides_row(self, box):
+        """The "run my edits without rebuilding the card" opt-in (PAD-103).
+
+        IN THE SOURCE BOX, because that is what it changes: what the guest
+        reads is the card PLUS these files, and a user reading this box should
+        not have to look elsewhere to know that.
+
+        It shows the Write tab's Assets Folder READ ONLY rather than offering
+        its own picker.  The project has one extract folder, the Write tab owns
+        it, and this is the same rule the card entry's own note argues for -
+        remembering a choice is fine, offering a second place to make it is
+        not.
+        """
+        wrap = ttk.Frame(box)
+        wrap.pack(fill=tk.X, padx=8, pady=(0, 6))
+        self._ovr_chk = ttk.Checkbutton(
+            wrap, variable=self._overrides_var, command=self._overrides_paint,
+            text="Apply my replaced assets on top, without rebuilding the card")
+        self._ovr_chk.pack(anchor=tk.W)
+
+        row = ttk.Frame(wrap)
+        row.pack(fill=tk.X, pady=(4, 0))
+        ttk.Label(row, text="Assets folder:", width=14,
+                  anchor=tk.W).pack(side=tk.LEFT)
+        self._ovr_entry = ttk.Entry(
+            row, state="readonly",
+            textvariable=(self._assets_var if self._assets_var is not None
+                          else tk.StringVar()))
+        self._ovr_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self._ovr_hint = ttk.Label(wrap, justify=tk.LEFT, wraplength=780,
+                                   foreground="#888", text="")
+        self._ovr_hint.pack(anchor=tk.W, pady=(4, 0))
+        # The folder is the WRITE tab's, so it moves without this tab being
+        # touched (a project load, an extract landing).  Without the trace the
+        # "no assets folder" sentence would sit there over a folder that had
+        # since arrived.
+        if self._assets_var is not None:
+            try:
+                self._assets_var.trace_add(
+                    "write", lambda *_a: self._overrides_paint())
+            except (AttributeError, tk.TclError):
+                pass
+        self._overrides_paint()
+
+    #: What the opt-in says when it is off, and when it is on.  Two sentences
+    #: each, and the ON one names the cost: preparing the edits happens at
+    #: Start and a re-encode is not instant, so a user who ticks this and then
+    #: waits should have been told that it would happen.
+    _OVR_OFF = ("The card runs exactly as it is. Tick the box to hear and see "
+                "the edits in your assets folder without building a new card "
+                "image first.")
+    _OVR_ON = ("Your edits are patched into copies of just the card files they "
+               "live in, and the emulator reads those instead — the card image "
+               "is never written to and nothing is rebuilt. Start prepares "
+               "them first, which takes as long as the edits need to be "
+               "re-encoded; a set that is already current is reused.")
+    _OVR_NO_ASSETS = ("There is no assets folder set. Extract the card on the "
+                      "Extract tab (or point the Write tab at an existing "
+                      "extract) and the edits in it can be run here.")
+
+    def _overrides_paint(self):
+        """Keep the opt-in's own hint in step with the box and the folder.
+
+        Its OWN label, never ``_hint``: that one belongs to the status poll and
+        is rewritten from the rig's state word every two seconds, so anything
+        put there about the source blinks straight back out (the same reason
+        the prerequisite notices have their own labels).
+        """
+        assets = (self._assets_var.get().strip()
+                  if self._assets_var is not None else "")
+        if not self._overrides_var.get():
+            text = self._OVR_OFF
+        elif not assets:
+            text = self._OVR_NO_ASSETS
+        else:
+            text = self._OVR_ON
+        try:
+            # Back to grey: this label doubles as where a refusal is left
+            # (in orange), and touching the box or the folder is the user
+            # answering it.
+            self._ovr_hint.configure(text=text, foreground="#888")
+        except tk.TclError:
+            pass
 
     def _browse(self):
         from tkinter import filedialog
@@ -3689,6 +3897,124 @@ class EmulatePanel:
             return None
         return ["PAD_CARD=%s" % _wsl_path(path)]
 
+    # ------------------------------------------------------------------
+    # PAD-103: the user's edits, without rebuilding the card
+    # ------------------------------------------------------------------
+
+    def _overrides_wanted(self):
+        """The (card, assets) the opt-in asks for, or ``None``.
+
+        MAIN THREAD ONLY — it reads three Tk variables, and the start worker
+        that acts on the answer may not touch one.
+        """
+        if not self._overrides_var.get() or self._assets_var is None:
+            return None
+        assets = self._assets_var.get().strip()
+        if not assets:
+            return None
+        return (self._src_path.get().strip().strip('"'), assets)
+
+    def _prepare_overrides(self, card, assets):
+        """Build (or reuse) the override set, and return its ``watch.sh`` env.
+
+        ON THE START WORKER, never the main loop: this re-encodes the edited
+        sounds, which is a minutes-long job on a big set — the same job a Write
+        does, minus the copy of the card.
+
+        *card* and *assets* are passed IN, as plain strings, because they live
+        in Tk variables and reading one off the main loop raises "main thread
+        is not in main loop" — the same rule that sends every log line here
+        back through ``after``.
+
+        Returns ``[]`` when there is nothing to apply (a folder with no edits
+        left in it is a stock card, and running it is the right answer), a
+        one-entry env list when a set is ready, and ``None`` when the run must
+        NOT start.  That last case is the one that matters: a run which
+        quietly plays the stock sounds while the tab says it is testing the
+        user's edits is the failure this whole path exists to avoid.
+        """
+        from ..core.checksums import read_checksums
+        # Lazily, and only when the box is ticked: the engine pulls in numpy
+        # and the codec oracle, and this tab is opened by people who never
+        # touch either.
+        from ..plugins.stern import engine as stern_engine
+
+        if not os.path.isdir(assets):
+            self._overrides_refuse(
+                "There is no assets folder to apply: %s" % (assets or "(none)"))
+            return None
+        # NO BASELINE, NO SET.  Without .checksums.md5 the engine cannot tell
+        # an edit from a stock sound and treats EVERY sound as edited — which
+        # on a Write is a deliberate (logged) choice and here would be an
+        # hours-long re-encode nobody asked for, kicked off by pressing Start.
+        if not read_checksums(assets):
+            self._overrides_refuse(
+                "%s has no .checksums.md5 baseline, so nothing there can be "
+                "told apart from the card's own assets. Re-extract the card "
+                "and the edits you make in the new folder can be run here."
+                % assets)
+            return None
+
+        out = overrides_dir()
+        fp = assets_fingerprint(assets)
+        why = overrides_reason(stern_engine.read_override_manifest(out),
+                               card, assets, fp)
+        if not why:
+            self._log("[emulate] your edits are unchanged since the override "
+                      "set in %s was built — reusing it" % out)
+            return ["PAD_OVERRIDE_DIR=%s" % _wsl_path(out)]
+
+        self._log("[emulate] preparing your edits (%s)" % why)
+        self._preparing = "Preparing your edits…"
+        try:
+            counts, _mode, _val, files = stern_engine.write_overrides(
+                card, assets, out,
+                log=lambda msg, level="info": self._log("[emulate] " + msg),
+                cancel=lambda: self._stopping or self._stopped)
+        except FileNotFoundError as exc:
+            # The engine's "nothing to write": every asset still matches the
+            # baseline.  Not a failure — there is nothing to apply, and the
+            # card as it stands IS the state of their edits.
+            self._log("[emulate] nothing to apply: %s" % exc)
+            self._preparing = None
+            return []
+        except Exception as exc:                        # noqa: BLE001
+            self._preparing = None
+            self._overrides_refuse(
+                "Your edits could not be prepared: %s" % exc)
+            return None
+        finally:
+            self._preparing = None
+        if counts is None:                              # cancelled
+            return None
+        stern_engine.stamp_override_manifest(
+            out, assets_fingerprint=assets_fingerprint(assets))
+        self._log("[emulate] %d card file(s) will be applied on top of the "
+                  "card: %s" % (len(files),
+                                ", ".join(p for p, _n in files[:6])))
+        return ["PAD_OVERRIDE_DIR=%s" % _wsl_path(out)]
+
+    def _overrides_refuse(self, message):
+        """Say why the run is not starting — in the log AND beside the box.
+
+        IN THE OPT-IN'S OWN LABEL, not ``_hint``.  ``_hint`` belongs to the
+        status poll, which blanks it every two seconds — fine for "pick a card
+        image", which the user is about to act on anyway, and no use at all for
+        the reason a Start they pressed did nothing.  This one stays until the
+        box or the folder changes, and it is next to the thing it is about.
+        """
+        self._log("[emulate] " + message)
+
+        def _show():
+            try:
+                self._ovr_hint.configure(text=message, foreground="#c07000")
+            except (tk.TclError, AttributeError):
+                pass
+        try:
+            self._timer().after(0, _show)
+        except (tk.TclError, RuntimeError):
+            pass
+
     def _on_destroy(self, event=None):
         # <Destroy> fires for every descendant too; only the frame itself means
         # the tab is really going.  Compared by widget path rather than by
@@ -3778,6 +4104,12 @@ class EmulatePanel:
         # own; PAD_AUDIO=0 / PAD_AUTO_ATTRACT=0 stay available to scripted
         # runs.)
         env = ["PAD_AUDIO_DUMP=30", "PAD_AUDIO_CTL=" + AUDIO_CTL_FILE] + src
+        # PAD-103: asked HERE, on the main loop, and answered as plain strings
+        # the worker can use.  The opt-in and both paths live in Tk variables,
+        # and a worker thread reading one raises "main thread is not in main
+        # loop" - which is the same rule the log lines and the state label
+        # already go through `after` for.
+        ovr_request = self._overrides_wanted()
         # ALWAYS THE CHECKPOINTABLE SHAPE (root, PAD_PIVOT) since the enable
         # checkbox was removed on 2026-08-10. It used to be the toggle's
         # answer, with a pending launch-from-slot forcing it anyway because
@@ -3815,6 +4147,23 @@ class EmulatePanel:
                     finally:
                         self._starting = False
                     return
+            # PAD-103: the user's edits, turned into an override set the rig
+            # binds over the card.  HERE, on this thread, for the same reason
+            # the Docker probe is: it is the slowest thing a Start can do (a
+            # re-encode), and the main loop must stay live while it runs.
+            if ovr_request is not None:
+                extra = self._prepare_overrides(*ovr_request)
+                if extra is None:
+                    try:
+                        self._timer().after(
+                            0, lambda: (self._set("state", "Not running"),
+                                        self._run_label(False, False)))
+                    except (tk.TclError, RuntimeError):
+                        pass
+                    finally:
+                        self._starting = False
+                    return
+                env.extend(extra)
             # THE COMMAND IS BUILT IN HERE, not before the thread.  On
             # Windows watch_cmd() asks WSL for the desktop user's home
             # (wsl_home: two wsl.exe probes, 30 s timeout each), and the
@@ -4500,9 +4849,17 @@ class EmulatePanel:
             # would read as a hang, and the copy narration is the truth.
             # Except during a Stop, when "Stopping…" is.
             copying = self._copying is not None and not self._stopping
-            if copying:
+            # PAD-103: and before the copy, the edits. Checked FIRST because
+            # the two cannot overlap and this one comes first — the set has to
+            # exist before there is anything to mount, let alone boot.
+            preparing = self._preparing is not None and not self._stopping
+            if preparing:
+                label = self._preparing
+            elif copying:
                 label = self._copying
-            self._state_badge_set(_COPY_EXPLAIN if copying else hint)
+            self._state_badge_set(
+                _OVERRIDE_EXPLAIN if preparing else
+                (_COPY_EXPLAIN if copying else hint))
             self._set("state", label)
             # The gray hint line no longer narrates states — the ⓘ beside
             # the state carries the long explanation and the footer line
@@ -4516,7 +4873,12 @@ class EmulatePanel:
             # otherwise): the emulate chip ladder plus a bar that never
             # bounces — real copy percent, then a fixed value per stage.
             if self._footer_cb is not None:
-                if copying:
+                if preparing:
+                    # The first chip, with no percent: preparing the edits is
+                    # the stage before the copy and the re-encode has no
+                    # honest progress number to give the bar.
+                    self._footer_cb("copy", None, self._preparing)
+                elif copying:
                     self._footer_cb("copy", self._copying_pct, self._copying)
                 elif info.get("running") == "1":
                     st = info.get("state")

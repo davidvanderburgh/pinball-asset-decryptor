@@ -891,13 +891,15 @@ HELP_CONTENT = {
     ],
     "Emulate Spike1": [
         ("What it does",
-         "Runs a Stern Spike 1 (DMD-era) game on this PC. Spike 1 is the "
-         "2015-2016 dot-matrix generation (WrestleMania, KISS, Game of Thrones, "
-         "Ghostbusters, and more). The game is a static ARM program, so it runs "
+         "Runs a Stern Spike 1 game on this PC — the 2015-2016 dot-matrix "
+         "generation (WrestleMania, KISS, Game of Thrones, Ghostbusters, and "
+         "more), and the earlier 2012 home models (Transformers The Pin), which "
+         "have no dot matrix at all but two 8-digit 16-segment alphanumeric "
+         "displays. The game is a static ARM program, so it runs "
          "under a patched emulator with a software model of the machine's "
          "boards — no CPU it can run natively, unlike JJP. Pick a Spike 1 card "
          "image, press Start, and it boots the way the machine does, straight "
-         "to its own attract on the dot-matrix display, with sound."),
+         "to its own attract on its own kind of display, with sound."),
         ("It needs WSL and runs as root there",
          "The board model needs a privileged host setup, so this tab is "
          "Windows-only and runs the emulator inside WSL with root (which on "
@@ -905,15 +907,27 @@ HELP_CONTENT = {
          "which takes a few minutes; later starts are quick, and switching to a "
          "different card you've already picked before reuses its extraction."),
         ("Play a game",
-         "The DMD window shows the running display; a switch/LED window opens "
-         "beside it listing every switch by name and position, not a bare grid. "
-         "Play with the keyboard (works in the DMD window) — arrow keys are the "
-         "flippers, 1 starts, 5 coins up, T tilts, and there's a full legend in "
-         "the window — or click a switch to pulse it briefly, the way a ball "
+         "A display window shows what the machine is showing — the dot matrix, "
+         "or, on a 2012 home model, its two 16-segment displays side by side "
+         "with the text they spell out underneath. A switch/LED window opens "
+         "beside it listing every switch by name and position, not a bare grid; "
+         "a title with no built-in map is no longer stuck on the nameless grid, "
+         "because the names are read out of the running game itself, which is "
+         "also why those switches now actually do something. "
+         "Play with the keyboard (works in the display window) — arrow keys are "
+         "the flippers, 1 starts, 5 coins up, T tilts, and there's a full legend "
+         "in the window — or click a switch to pulse it briefly, the way a ball "
          "rolling over it would (right-click to hold one closed). The coin door "
          "and service buttons are drawn as on the real door, and the trough "
          "shows each ball position; coining up and pressing Start actually "
          "serves a ball, so you can play a full game start to finish."),
+        ("The 2012 home models have no coin door",
+         "Transformers The Pin and its siblings have no coin door, no service "
+         "buttons and no operator menu, so on those titles the service cluster "
+         "and the coin-door bar are drawn dead and the bar says what to do "
+         "instead: test mode is both flippers held for three seconds. Their "
+         "sound also runs at the rate the game's own DAC asks for rather than "
+         "CD rate, so the speaker no longer starves into silence."),
         ("Volume and Default Settings",
          "The Volume slider and Mute checkbox are this tab's own speaker "
          "control (not the game's in-game volume, which is on the coin door "

@@ -260,11 +260,15 @@ full CLI, the log lines and the test list). What it is:
     avengers_infinity_le, foo_fighters_le, guardians_le, iron_maiden_le,
     mando_le, rush_le — and a shut coin door holds that switch made, so a
     table-less menu read it as an ACTION press and confirmed itself untouched.
-    The other platform ids were swept too: none of them lands on a switch
-    anything holds made except 36 on batman, which is the same interlock; 36
-    is kept anyway (it is right on 20 lists, and dropping it leaves a
-    table-less menu with no confirm key) and the window is shrunk instead —
-    with no table the list is re-checked every 250 ms. A resolved list is
+    The window is emulator-only: the `hw` backend reads the wire and never
+    sees an id. The other platform ids were swept too: none of them lands on a
+    switch anything holds made except 36 on batman, which is the same
+    interlock. 36 is kept deliberately (2026-09-02) — keeping it risks one
+    wrong boot on one title in an emulator-only window, a restart; dropping it
+    takes the only confirm key a table-less menu has away from the other 30,
+    since the flippers are unresolved there by definition. The window is
+    shrunk instead: with no table the list is re-checked every 250 ms, and
+    every title David runs carries a cached table. A resolved list is
     re-read whenever its mtime moves, the way padglhost re-resolves its own
     binds, because mktables repairs a partly-derived list a minute into a run.
     Tested with a scripted padsw file, the phantom case with a positive

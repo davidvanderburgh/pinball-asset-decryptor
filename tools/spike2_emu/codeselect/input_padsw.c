@@ -92,11 +92,15 @@ static void ids_publish(struct ps *p)
  * guardians_le, iron_maiden_le, mando_le, rush_le. That switch is not a
  * button: a shut coin door holds it MADE, which is the normal state of a
  * machine (padglhost latches it at window open, padglhost.c:1814, "otherwise
- * the game draws * 48V DISABLED *"), and on real hardware nobody opens the
- * door to boot. So on those seven titles a menu that read id 34 read a
- * permanently-made switch as an ACTION press and confirmed the highlighted
- * image instantly, untouched. Id 34 is also VOLUME ENCODER 1 on batman and
- * the START button on beatles.
+ * the game draws * 48V DISABLED *"). So on those seven titles a menu that
+ * read id 34 read a permanently-made switch as an ACTION press and confirmed
+ * the highlighted image instantly, untouched. Id 34 is also VOLUME ENCODER 1
+ * on batman and the START button on beatles.
+ *
+ * Note the blast radius: this whole platform-id window is EMULATOR-ONLY. A
+ * real machine runs the hw backend, which reads node 1 bit 2 straight off the
+ * 0x11 reply and never sees an id at all - there is no ids_platform() in
+ * input_hw.c. Only --input padsw ever guesses.
  *
  * There is no id here that is right often enough to be worth that, so ACTION
  * waits for the table (or for its name); until then EV_ACTION cannot fire at
@@ -110,17 +114,28 @@ static void ids_publish(struct ps *p)
  * made, so the worst they do is move the highlight. 36 is TICKET NOTCH on
  * eight lists and Left Coin on beatles - dead keys, not dangerous ones.
  *
- * ONE residual collision is knowingly left standing: on BATMAN id 36 is that
+ * ONE residual collision is KNOWINGLY LEFT STANDING: on BATMAN id 36 is that
  * same COIN DOOR INTERLOCK, so pre-table START carries the hazard ACTION just
- * lost. It is not dropped because 36 is right on 20 lists and START would
- * otherwise be the only confirm key a table-less menu has - dropping it makes
- * 30 titles unbootable-by-hand to disarm one. What actually fires it is not
- * the door's LEVEL (a switch already made when the first sample lands sets the
- * debouncer's first settled level and raises no edge - input.c) but a RISING
- * edge, i.e. padglhost re-resolving id 36 from 33 to the door while this menu
- * is still on platform ids. So the window is closed from the other end: with
- * no table the list is re-checked every TABLE_WAIT_MS, not TABLE_MS, and a
- * list that exists is picked up within a quarter second of appearing.
+ * lost. Reviewed and kept deliberately (2026-09-02), because the two sides of
+ * the trade are not the same size:
+ *
+ *   - What it costs to keep 36: on one title, in a window that only exists
+ *     under the emulator, a phantom confirm boots the wrong image. That costs
+ *     a restart. It cannot reach a real machine at all (see above).
+ *   - What it costs to drop 36: START is the ONLY confirm key a table-less
+ *     menu has - the flippers are unresolved in that window by definition -
+ *     so all 30 other titles lose their keyboard confirm and can only be
+ *     booted by waiting out the countdown.
+ *
+ * Disarming one title by half-breaking thirty is the worse machine, so 36
+ * stays. What actually fires it is not the door's LEVEL (a switch already
+ * made when the first sample lands sets the debouncer's first settled level
+ * and raises no edge - input.c) but a RISING edge, i.e. padglhost re-resolving
+ * id 36 from 33 to the door while this menu is still on platform ids. So the
+ * window is closed from the other end instead: with no table the list is
+ * re-checked every TABLE_WAIT_MS, not TABLE_MS, so a list that exists is
+ * picked up within a quarter second. Every title David runs carries a cached
+ * table, which makes the window nearly always nil in practice.
  */
 static void ids_platform(struct ps *p)
 {

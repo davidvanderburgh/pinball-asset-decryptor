@@ -494,20 +494,37 @@ own. It is also `VOLUME ENCODER 1` on batman and the START button on beatles.
 ACTION now waits for the table or for its name, and loses least by waiting:
 it is the only key with a name fallback.
 
+Note the blast radius: this whole platform-id window is **emulator-only**. A
+real machine runs the `hw` backend, which reads node 1 bit 2 straight off the
+0x11 reply and never sees a switch id at all. Only `--input padsw` guesses.
+
 The other platform ids were swept too. 25-28 slide onto `DIP 8` / `SERVICE
 SELECT` / `SERVICE PLUS` / `SERVICE MINUS` on the eight older lists, so the
 service cluster is off by one until the table lands; none of those is ever
 held made, so the worst they do is move the highlight. 36 is `TICKET NOTCH`
-on eight lists and `Left Coin` on beatles - dead keys. One collision is
-knowingly left standing: on **batman** id 36 is that same `COIN DOOR
-INTERLOCK`, so pre-table START carries the hazard ACTION just lost. Dropping
-36 would leave a table-less menu with no confirm key at all on the other 30
-titles, so instead the window is closed from the other end - with no table
-the list is re-checked every 250 ms rather than every 2 s. What fires it is
-not the door's level (a switch already made when the first sample lands sets
-the debouncer's first settled level and raises no edge) but a rising edge,
-i.e. padglhost re-resolving id 36 onto the door while this menu is still on
-platform ids.
+on eight lists and `Left Coin` on beatles - dead keys.
+
+One collision is **knowingly left standing**: on **batman** id 36 is that same
+`COIN DOOR INTERLOCK`, so pre-table START carries the hazard ACTION just lost.
+Reviewed and kept deliberately (2026-09-02), because the two sides of the
+trade are not the same size:
+
+* **Keeping 36** costs, on one title, in a window that only exists under the
+  emulator, a phantom confirm that boots the wrong image. That is a restart.
+  It cannot reach a real machine.
+* **Dropping 36** costs all 30 other titles their keyboard confirm in that
+  window - START is the only confirm key a table-less menu has, since the
+  flippers are unresolved there by definition - leaving nothing to do but wait
+  out the countdown.
+
+Disarming one title by half-breaking thirty is the worse machine, so 36 stays
+and the window is closed from the other end: with no table the list is
+re-checked every 250 ms rather than every 2 s, and every title David runs
+carries a cached table, so in practice the window is nearly always nil. What
+fires it is not the door's level (a switch already made when the first sample
+lands sets the debouncer's first settled level and raises no edge) but a
+rising edge, i.e. padglhost re-resolving id 36 onto the door while this menu
+is still on platform ids.
 
 The switch list is also **re-read whenever its mtime moves**, for the reason
 padglhost re-resolves its own binds (`padglhost.c:2008-2030`): mktables

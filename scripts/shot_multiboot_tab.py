@@ -1,27 +1,37 @@
-"""Capture the Multi-boot tab (item 90) for the README.
+"""Capture the Multi-boot tab (item 90) for the README, and measure it.
 
-    python scripts/shot_multiboot_tab.py [out.png] [emulate-out.png] [--frame F.ppm]
+    python scripts/shot_multiboot_tab.py [out.png] [emulate-out.png]
+                                         [--frame F.ppm] [--fit fit.png]
+                                         [--measure]
 
 A variant of take_screenshots.py (same PrintWindow, same DPI-unaware
 capture, same settings backup) for the one tab that rig does not cover.
 ``out.png`` defaults to docs/screenshots/multi-boot.png.  Given a second
 path the Emulate tab is snapped there too, straight after - the tab's
 button row gained a 'Boot selector' checkbutton in the same ticket, and
-one launch of the GUI can show both.  One difference from that rig: the
-window is sized for the tab, not for the desktop, and when it overhangs
-the desktop the capture is tiled (see ``snap``) - the tab is ~1370px tall
-and a 1024x768 desktop cannot show it whole.
+one launch of the GUI can show both.
+
+``--fit fit.png`` takes a SECOND shot of the same tab in a 1024x768
+window - David's desktop - which is the size the layout is designed
+around; ``--dialogs DIR`` snaps the two modals the detail lives behind
+(Edit image… and Menu settings…) into that directory; and ``--measure``
+skips the pictures altogether and prints the height every section of the
+tab needs, at 1024x768 and again at 1360x900.  The number that matters is
+the first line: the notebook is pinned to the selected tab's requested
+height, so that is the tab's whole vertical cost, and it has to stay
+under about 640 px.
 
 WHAT THE FORM SHOWS.  An empty tab proves nothing, so the form is filled
 the way a user would fill it for the card the ticket was written for:
 the stock Turtles image as the primary and the 1987-cartoon upscale
 beside it, with the menu titles typed in and the second image's attract
-clip as its animation (20 s in, 2 s long, 8 fps - the new clip fields).
-Nothing is built - Check size, Prepare media, Build, Flash and Render
-preview all shell out to wsl.exe, and none of them is pressed.  The size
-sentence under the buttons is the one Check size would print for two 8G
-images (the tool's own plan output, fed to the same parser the button
-uses), and the preview box shows a frame through the panel's public
+clip as its animation (20 s in, 2 s long, 8 fps).  Nothing is built -
+Check size, Prepare media, Build, Flash and Render preview all shell out
+to wsl.exe, none of them is pressed, and the preview's own auto-render is
+switched off with ``PAD_MULTIBOOT_AUTO=0`` before the app starts.  The
+size sentence in the status block is the one Check size would print for
+two 8G images (the tool's own plan output, fed to the same parser the
+button uses), and the preview shows a frame through the panel's public
 ``load_frame`` seam: a real selector snapshot when ``--frame F.ppm`` names
 one, otherwise a stand-in drawn here with PIL in the menu's own layout
 (dark ground, SELECT GAME CODE, one card per image, the highlighted one
@@ -33,11 +43,12 @@ the panel a synthetic ``inspect --json`` report through its public loader
 (``load_inspect``) - the same report the tool prints for David's v2 card,
 made up here so no card is opened and WSL is never called - and then makes
 one pending change to the menu.  So the picture is of the tab in editing
-mode: the fields all came off a card, and the line under the buttons says
-what 'Apply to card' would write into it.
+mode: the fields all came off a card, and the status block says what
+'Apply to card' would write into it.
 """
 import ctypes
 import os
+import re
 import shutil
 import sys
 import time
@@ -48,18 +59,63 @@ if sys.platform != "win32":
     sys.exit("Screenshot capture is Windows-only (PrintWindow/GDI).")
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def selector_footer(which="START"):
+    """The footer line the SELECTOR draws, read out of its own source.
+
+    The stand-in frame below is drawn in Python (this script must never
+    need WSL or an ARM binary), so it would otherwise carry a COPY of a
+    string the selector owns - and a copy drifts: the selector grew a
+    second footer for the Action button while a copy here would have gone
+    on claiming START alone.  codeselect.c keeps both spellings as macros
+    on their own lines for exactly this, and tests/test_multiboot_tab.py
+    fails if this stops matching them.  FOOT_START is the honest one here:
+    a faked frame resolves no switch table, so it has no Action button.
+    """
+    src = os.path.join(REPO, "tools", "spike2_emu", "codeselect",
+                       "codeselect.c")
+    with open(src, encoding="utf-8") as fh:
+        found = dict(re.findall(r'^#define FOOT_(START|ACTION)\s+"(.*)"$',
+                                fh.read(), re.M))
+    return found[which]
+
+
 ARGS = list(sys.argv[1:])
 FRAME = None
 if "--frame" in ARGS:
     i = ARGS.index("--frame")
     FRAME = os.path.abspath(ARGS[i + 1])
     del ARGS[i:i + 2]
+FIT_OUT = None
+if "--fit" in ARGS:
+    i = ARGS.index("--fit")
+    FIT_OUT = os.path.abspath(ARGS[i + 1])
+    del ARGS[i:i + 2]
+DIALOG_DIR = None
+if "--dialogs" in ARGS:
+    i = ARGS.index("--dialogs")
+    DIALOG_DIR = os.path.abspath(ARGS[i + 1])
+    os.makedirs(DIALOG_DIR, exist_ok=True)
+    del ARGS[i:i + 2]
+MEASURE = "--measure" in ARGS
+if MEASURE:
+    ARGS.remove("--measure")
 OUT = os.path.abspath(ARGS[0] if ARGS else os.path.join(
     REPO, "docs", "screenshots", "multi-boot.png"))
 EMU_OUT = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
 SETTINGS = os.path.join(os.environ["APPDATA"], "pinball_decryptor",
                         "settings.json")
 SETTINGS_BAK = SETTINGS + ".shotbak90"
+
+#: The tab drives the selector under WSL whenever a field changes; a
+#: photograph must start nothing.
+os.environ["PAD_MULTIBOOT_AUTO"] = "0"
+
+#: The window the README shot is taken in, and the desktop the fit check
+#: is taken in (David's, measured 2026-09-02).
+SHOT_W, SHOT_H = 1360, 900
+FIT_W, FIT_H = 1024, 768
 
 #: The two images on the card, in card order (first = primary), and the
 #: menu text typed for each.
@@ -155,9 +211,9 @@ def _print_window(hwnd, w, h):
     return Image.frombuffer("RGB", (w, h), buf.raw, "raw", "BGRX", 0, 1)
 
 
-def snap(path):
+def snap(path, widget=None):
     root.update_idletasks()
-    hwnd = user32.GetAncestor(root.winfo_id(), 2)  # GA_ROOT
+    hwnd = user32.GetAncestor((widget or root).winfo_id(), 2)  # GA_ROOT
     wrect = wintypes.RECT()
     user32.GetWindowRect(hwnd, ctypes.byref(wrect))
     w, h = wrect.right - wrect.left, wrect.bottom - wrect.top
@@ -271,8 +327,7 @@ def stand_in_frame(path):
         tw = d.textlength(sub, font=f)
         d.text(((x0 + x1) / 2 - tw / 2, y0 + 322), sub, font=f,
                fill=(225, 230, 240) if hi else (120, 130, 150))
-    centred(626, "LEFT / RIGHT FLIPPER: choose      START: boot", 26,
-            (150, 160, 180))
+    centred(626, selector_footer(), 26, (150, 160, 180))
     centred(690, "booting %s in %d s" % (IMAGES[HIGHLIGHT][1], TIMEOUT_NOW),
             30, (250, 190, 40))
     img.save(path)           # .ppm -> binary P6, what --snapshot writes
@@ -289,22 +344,60 @@ def step(delay_ms):
     return deco
 
 
-@step(500)
-def s_geometry():
-    # Tall enough for the whole tab (image list + editor, Menu, Output, the
-    # button row, the size sentence, the preview and the tool pane) at the
-    # README's width.  NOT clamped to the desktop the way
-    # take_screenshots.py clamps: PrintWindow renders the whole window
-    # whether or not the screen can show it, and this rig has run on a
-    # 1024x768 virtual desktop where the clamp cut the tab off under the
-    # Menu box.  Tk's default maxsize is the screen, so it is lifted first
-    # or the geometry is silently capped.
-    w, h = 1360, 1730
+def set_window(w, h):
+    """Size the window, lifting Tk's default maxsize (the screen) first -
+    PrintWindow renders the whole window whether or not the screen can show
+    it, and without this the geometry is silently capped."""
     root.maxsize(max(w, root.winfo_screenwidth()) + 100,
                  max(h, root.winfo_screenheight()) + 100)
-    log("screen %dx%d -> window %dx%d"
-        % (root.winfo_screenwidth(), root.winfo_screenheight(), w, h))
     root.geometry("%dx%d+40+40" % (w, h))
+    root.update_idletasks()
+
+
+def measure(label):
+    """Print the height every part of the tab needs.  The first line is the
+    one that matters: the notebook is pinned to the selected tab's
+    requested height (MainWindow._resize_notebook_to_current_tab), so that
+    IS the tab's whole vertical cost."""
+    panel = win._multiboot_panel
+    tab = win._tab_multiboot
+    root.update_idletasks()
+    log("")
+    log("== %s: window %dx%d, screen %dx%d"
+        % (label, root.winfo_width(), root.winfo_height(),
+           root.winfo_screenwidth(), root.winfo_screenheight()))
+    log("   TAB reqheight = %d px  (budget 640)  reqwidth = %d"
+        % (tab.winfo_reqheight(), tab.winfo_reqwidth()))
+    outer = panel._outer
+    names = ["source row", "body (list | preview)", "actions", "status",
+             "tool output button", "tool output pane"]
+    for name, child in zip(names, outer.winfo_children()):
+        log("   %-24s reqh %4d  h %4d  mapped %s"
+            % (name, child.winfo_reqheight(), child.winfo_height(),
+               child.winfo_ismapped()))
+    log("   left column  reqw %4d  reqh %4d"
+        % (panel._left.winfo_reqwidth(), panel._left.winfo_reqheight()))
+    log("   preview box  %dx%d  canvas %dx%d  narrow=%s"
+        % (panel._pv_w, panel._pv_h, panel._pv_canvas.winfo_reqwidth(),
+           panel._pv_canvas.winfo_reqheight(), panel._narrow))
+    for btn, name in ((panel._load_btn, "Load card…"),
+                      (panel._apply_btn, "Apply to card"),
+                      (panel._build_btn, "Build & verify"),
+                      (panel._flash_btn, "Flash to SD card…"),
+                      (panel._emu_btn, "Run in emulator"),
+                      (panel._more_btn, "More ▾"),
+                      (panel._menu_btn, "Menu settings…"),
+                      (panel._log_btn, "Tool output")):
+        if not btn.winfo_ismapped():
+            log("   !! %s IS NOT MAPPED - the row overflowed" % name)
+
+
+@step(500)
+def s_geometry():
+    log("screen %dx%d -> window %dx%d"
+        % (root.winfo_screenwidth(), root.winfo_screenheight(),
+           SHOT_W, SHOT_H))
+    set_window(SHOT_W, SHOT_H)
 
 
 @step(6000)
@@ -380,11 +473,12 @@ def s_fill():
     log("output: %s" % form.out)
     log("size sentence: %r" % panel._plan_lbl.cget("text"))
     log("preview status: %r" % panel._pv_status.cget("text"))
+    log("menu summary: %r" % panel._menu_lbl.cget("text"))
+    log("list rows: %s" % [panel._tree.item(i)["values"]
+                           for i in panel._tree.get_children()])
     log("tab reqheight=%s notebook height=%s window=%sx%s"
         % (win._tab_multiboot.winfo_reqheight(), win._notebook.cget("height"),
            root.winfo_width(), root.winfo_height()))
-    log("tool pane mapped=%s h=%s"
-        % (panel._log_text.winfo_ismapped(), panel._log_text.winfo_height()))
 
 
 def inspect_report():
@@ -459,7 +553,54 @@ def s_load():
 
 @step(2000)
 def s_snap():
-    snap(OUT)
+    measure("README window")
+    if not MEASURE:
+        snap(OUT)
+
+
+@step(800)
+def s_fit():
+    """The fit check: the same populated tab on David's own desktop.  The
+    layout is designed around this size, so this is the picture that proves
+    it - and --measure prints the numbers behind it."""
+    if not (FIT_OUT or MEASURE):
+        return
+    set_window(FIT_W, FIT_H)
+    root.update()
+    time.sleep(0.4)
+    root.update()
+    win._resize_notebook_to_current_tab()
+    root.update_idletasks()
+    measure("David's desktop")
+    if FIT_OUT:
+        snap(FIT_OUT)
+    set_window(SHOT_W, SHOT_H)
+
+
+@step(600)
+def s_dialogs():
+    """The two modals the detail lives behind, each snapped on its own -
+    they are separate toplevels, so PrintWindow has to be pointed at them
+    rather than at the app window."""
+    if not DIALOG_DIR:
+        return
+    panel = win._multiboot_panel
+    for name, opener in (("multi-boot-edit-image.png",
+                          lambda: panel.edit_image(1)),
+                         ("multi-boot-menu-settings.png",
+                          panel.open_menu_settings)):
+        dlg = opener()
+        if dlg is None:
+            log("could not open %s" % name)
+            continue
+        for _ in range(3):
+            root.update()
+            time.sleep(0.2)
+        log("%s: %dx%d" % (name, dlg.top.winfo_width(),
+                           dlg.top.winfo_height()))
+        snap(os.path.join(DIALOG_DIR, name), dlg.top)
+        dlg.cancel()
+        root.update()
 
 
 @step(500)

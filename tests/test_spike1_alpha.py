@@ -86,3 +86,36 @@ def test_every_segment_has_a_line_and_bits_are_the_font_order():
     for (a, b), (c, d) in zip(ring, ring[1:]):
         assert {a, b} & {c, d}, "ring segments must share an endpoint"
     assert set(ring[0]) & set(ring[-1])                # ...and close the box
+
+
+# ---------------------------------------------------- the segment DECODER --
+# The window shows the CHARACTERS, not just segment art (David: the segment
+# view alone was "completely unusable").  The authority is the game's own font
+# table, which the rig dumps to s1font.json so the window never reads the ELF.
+
+def test_write_font_json_round_trips_through_the_pattern_keys(tmp_path):
+    import json
+    fake = {(1, 0) + (0,) * 14: "A", (0,) * 16: " "}
+    out = tmp_path / "s1font.json"
+    # write_font_json reads an ELF; exercise its serialisation shape directly
+    doc = {"".join(str(b) for b in pat): ch for pat, ch in fake.items()}
+    out.write_text(json.dumps(doc), encoding="utf-8")
+    back = {tuple(int(c) for c in k): v
+            for k, v in json.loads(out.read_text(encoding="utf-8")).items()}
+    assert back == fake
+    assert all(len(k) == 16 for k in doc)
+
+
+def test_frame_text_uses_the_font_for_both_displays():
+    # 'A' in the game's font lights 0,4,8,9,12,13,14,15
+    a = tuple(1 if i in (0, 4, 8, 9, 12, 13, 14, 15) else 0 for i in range(16))
+    font = {a: "A"}
+    lit = {(0, i): 15 for i in (0, 4, 8, 9, 12, 13, 14, 15)}
+    lit.update({(9, i): 15 for i in (0, 4, 8, 9, 12, 13, 14, 15)})
+    fr = _frame(lit)
+    assert s1alpha.frame_text(fr, font) == ["A       ", " A      "]
+
+
+def test_a_pattern_the_font_does_not_know_is_marked_not_guessed():
+    fr = _frame({(0, 1): 15, (0, 3): 15})        # two diagonals: no character
+    assert s1alpha.frame_text(fr, {})[0].startswith("#")

@@ -104,6 +104,26 @@ def frame_text(frame, font=None):
     return out
 
 
+def write_font_json(elf_path, out_path, table_vaddr=0xb3160):
+    """Write ``{segment-pattern: char}`` as JSON for the app's display window.
+
+    The window decodes segments to CHARACTERS, and the authority for which
+    pattern is which character is the game's own font table — but that lives
+    in a 1 MB ELF the window would have to read over the UNC path every time.
+    So the rig dumps it once at startup (96 entries, ~3 KB) beside the run
+    dir's other small state files.  Pattern keys are 16 chars of '0'/'1', bit
+    order as decode_frame returns them."""
+    import json
+    import os
+    font = load_font(elf_path, table_vaddr)
+    doc = {"".join(str(b) for b in pat): ch for pat, ch in font.items()}
+    tmp = out_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(doc, f, indent=0, sort_keys=True)
+    os.replace(tmp, out_path)
+    return len(doc)
+
+
 def load_font(elf_path, table_vaddr=0xb3160):
     """{segment-pattern: char} from the game ELF's own 16-byte-per-character
     font (the alphanumeric build's ``ALPHANUMERIC_DisplayText`` table)."""
@@ -151,6 +171,10 @@ def iter_frames(data):
 
 if __name__ == "__main__":
     import sys
+    if sys.argv[1:2] == ["--font"]:          # --font <game-elf> <out.json>
+        print("%d font entries -> %s"
+              % (write_font_json(sys.argv[2], sys.argv[3]), sys.argv[3]))
+        sys.exit(0)
     data = open(sys.argv[1], "rb").read()
     font = load_font(sys.argv[2]) if len(sys.argv) > 2 else None
     last = None

@@ -94,6 +94,18 @@ if [ -e "$S1_WORK/game/.game_exe" ]; then
     export S1_GPIO_FILE="$S1_WORK/s1gpio.input"
     rm -f "$S1_GPIO_FILE"
     log "Early Spike 1 card: $(cat "$S1_WORK/game/.game_name" 2>/dev/null) launches $(cat "$S1_WORK/game/.game_exe"), $(cat "$S1_WORK/game/.display" 2>/dev/null) display."
+    # What the app's display window needs to draw this machine instead of a
+    # DMD: WHICH display it is, and the game's own font so the window can
+    # decode segments to characters.  Without the first the window falls back
+    # to the 128x32 DMD and reads EIGHT of this era's 256-byte frames as one
+    # 2048-byte frame - solid stripes (PAD-101).
+    cat "$S1_WORK/game/.display" > "$S1_WORK/s1display" 2>/dev/null
+    python3 "$HERE/s1alpha.py" --font \
+        "$S1_WORK/game/$(cat "$S1_WORK/game/.game_exe")" \
+        "$S1_WORK/s1font.json" >/dev/null 2>&1 \
+        || log "  (no font table: the display shows segments without text)"
+else
+    rm -f "$S1_WORK/s1display" "$S1_WORK/s1font.json"
 fi
 export S1_ERA
 

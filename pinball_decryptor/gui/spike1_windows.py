@@ -165,6 +165,18 @@ class _RunDirIO:
                 continue
         return out
 
+    def read_json(self, name):
+        """A small JSON file of the run dir (e.g. ``s1font.json``), or None."""
+        import json
+        p = self._unc(name)
+        if not p:
+            return None
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+
     def read_text(self, name):
         """A small text file of the run dir (e.g. ``s1display``), stripped;
         ``""`` when absent."""
@@ -205,6 +217,9 @@ class Spike1DisplayWindow(tk.Toplevel):
     FRAME_BYTES = 2048
     WIDTH = 128
     HEIGHT = 32
+    #: glyph scale for the 16-segment displays (the default 6 drew a window
+    #: barely 300 px wide, which is what "completely unusable" was about)
+    ALPHA_SCALE = 11
 
     def __init__(self, master, io, decode_frame, scale=7, hz=20,
                  on_close=None, alpha=None):
@@ -222,20 +237,38 @@ class Spike1DisplayWindow(tk.Toplevel):
 
         cw, ch = self.WIDTH * scale, self.HEIGHT * scale
         self.title("Spike 1 — DMD")
+        self._font = None
+        self._readouts = []
         if alpha is not None:
             # size the canvas from a blank frame's rendering, so the window
             # is right before the first real frame lands
             decode, render = alpha
-            blank = render(decode(bytes(256)))
+            blank = render(decode(bytes(256)), scale=self.ALPHA_SCALE)
             cw, ch = blank.size
             self._frame_bytes = 256
             self.title("Spike 1 — display")
+            # the segment DECODER: the game's own font, dumped by the rig, so
+            # the window can show what the machine actually reads (segment art
+            # alone is unusable at this size - David, PAD-101).
+            raw = io.read_json("s1font.json") if hasattr(io, "read_json") else None
+            if raw:
+                self._font = {tuple(int(c) for c in k): v
+                              for k, v in raw.items() if len(k) == 16}
         self.configure(bg="#000000")
         self.geometry("+80+80")
         self._canvas = tk.Canvas(self, width=cw, height=ch, bg="#000000",
                                  highlightthickness=0)
         self._canvas.pack(padx=8, pady=8)
         self._imgid = self._canvas.create_image(0, 0, anchor="nw")
+        if alpha is not None and self._font:
+            # one readout line per physical display, under the glyphs
+            import tkinter.font as tkfont
+            f = tkfont.Font(family="Consolas", size=22, weight="bold")
+            for i in range(2):
+                self._readouts.append(tk.Label(
+                    self, text="", font=f, bg="#000000", fg="#ffb000",
+                    anchor="w", padx=10))
+                self._readouts[-1].pack(side="top", fill="x")
         self._placeholder = self._canvas.create_text(
             cw // 2, ch // 2, fill="#6a4718",
             text="waiting for the game to draw…")
@@ -259,7 +292,10 @@ class Spike1DisplayWindow(tk.Toplevel):
         from PIL import Image
         if self._alpha is not None:
             decode, render = self._alpha
-            return render(decode(frame))
+            rows = decode(frame)
+            if self._readouts:
+                self._show_text(rows)
+            return render(rows, scale=self.ALPHA_SCALE)
         grid = self._decode(frame)
         s = self._scale
         img = Image.new("RGB", (self.WIDTH, self.HEIGHT))
@@ -270,6 +306,19 @@ class Spike1DisplayWindow(tk.Toplevel):
                 c = row[x] * 17
                 px[x, y] = (c, int(c * 0.55), 0)
         return img.resize((self.WIDTH * s, self.HEIGHT * s), Image.NEAREST)
+
+    def _show_text(self, rows):
+        """Put the decoded characters in the readout labels."""
+        for i, label in enumerate(self._readouts):
+            digits = rows[i * 8:(i + 1) * 8]
+            text = ""
+            for segs in digits:
+                pat = tuple(1 if v else 0 for v in segs)
+                text += " " if not any(pat) else self._font.get(pat, "?")
+            try:
+                label.config(text=text)
+            except tk.TclError:
+                pass
 
     def _render(self, frame):
         try:

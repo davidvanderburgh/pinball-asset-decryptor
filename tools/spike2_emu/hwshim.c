@@ -1691,6 +1691,63 @@ extern char *getenv(const char *);
 
 static int (*real_sigaction)(int, const void *, void *);
 
+/* IS THIS STILL LIBC'S sigaction, OR SOMETHING THAT LANDED ON TOP OF IT?
+ *
+ * PAD-102, godzilla_le 1.16 (stock AND the Heisei retheme; 1.13 and the 1.15
+ * Heisei are clean): about four seconds into boot, this cached pointer stops
+ * being libc's sigaction and reads 0x000f0fff, an address inside the GAME's
+ * own read-only text. game_segv_fn, eight bytes away in the same .bss, goes
+ * the same way in the same window. Measured under gdb through the real rig:
+ * at the game's _start it is 0x40ac1f54, by its first sigaction() call it is
+ * 0x000f0fff, and no signal/sigaction path of ours writes it in between - both
+ * assignments below are guarded by `if (!real_sigaction)`, so a non-NULL value
+ * is never replaced. Whatever does the write is not yet named.
+ *
+ * WHAT IT COSTS IS OUT OF ALL PROPORTION TO A STRAY WORD, and that part IS
+ * ours. GCC tail-calls `return real_sigaction(...)` - `ldr r3,[r3,#208]` then
+ * `bx r3` with lr still holding the GAME's return address - and 0x000f0fff has
+ * BIT 0 SET, so `bx` switches the CPU into THUMB state and starts decoding the
+ * game's ARM text as Thumb. Two instructions later it is executing
+ * `str r4,[r3,r0]` at 0xf0660 and storing into read-only text: SIGSEGV, dead
+ * guest, four seconds after Start, on every run. cpsr=0xb0030 (T bit set) and
+ * r3=0x000f0fff in the crash report are that jump, recorded.
+ *
+ * So: never BRANCH to this pointer on trust. An address inside the game image
+ * is impossible for a libc function - the game is a fixed EXEC at 0x8000 and
+ * libc is mapped high - which makes the test title-agnostic and exact. It
+ * deliberately does NOT test bit 0 on its own: a Thumb libc would set it
+ * legitimately, and rejecting that would break every rootfs that has one. */
+static unsigned long game_text_end(void);   /* defined with the crash reporter */
+
+static int sigaction_ptr_ok(void)
+{
+    unsigned long a = (unsigned long)(void *)real_sigaction;
+    if (!a) return 0;
+    if (a >= 0x8000ul && a < game_text_end()) return 0;   /* the game's image */
+    return addr_readable((const void *)(a & ~1ul));
+}
+
+/* Re-resolve when the cached pointer has stopped being believable, and say so
+ * once. Returns 0 when there is nothing safe to call. */
+static int sigaction_ready(void)
+{
+    static int complained;
+    if (sigaction_ptr_ok()) return 1;
+    if (!complained) {
+        char b[200];
+        complained = 1;
+        snprintf(b, sizeof b,
+                 "[segv] real_sigaction was 0x%lx, which is inside the game's "
+                 "own image - not calling it; re-resolving\n",
+                 (unsigned long)(void *)real_sigaction);
+        logmsg(b);
+    }
+    real_sigaction = dlsym(RTLD_NEXT, "sigaction");
+    if (sigaction_ptr_ok()) return 1;
+    real_sigaction = 0;
+    return 0;
+}
+
 /* FULL mode: take the handler over and dump everything. Off by default,
  * because with the game's own handler left in place the faulting thread spins
  * but the others keep running, which is what you want when watching whether a
@@ -1890,7 +1947,7 @@ static void fault_pass_on(int sig, void *info, void *ucv)
     }
 
     /* Nobody else wants it: die the way we would have died anyway. */
-    if (real_sigaction) {
+    if (sigaction_ready()) {
         unsigned char dfl[160];
         int i;
         for (i = 0; i < 160; i++) dfl[i] = 0;   /* sa_handler = SIG_DFL (0) */
@@ -2164,7 +2221,7 @@ static void segv_install(void)
 
     if (!segv_header_on()) return;
     if (!real_sigaction) real_sigaction = dlsym(RTLD_NEXT, "sigaction");
-    if (!real_sigaction) return;
+    if (!sigaction_ready()) return;
 
     for (i = 0; i < 160; i++) mine[i] = 0;
     *(void **)mine = (void *)segv_header_handler;
@@ -2649,6 +2706,13 @@ int shim_sigaction(int sig, const void *act, void *old) __asm__("sigaction");
 int shim_sigaction(int sig, const void *act, void *old)
 {
     if (!real_sigaction) real_sigaction = dlsym(RTLD_NEXT, "sigaction");
+    /* THE TAIL CALL AT THE FOOT OF THIS FUNCTION IS A BRANCH, NOT A CALL, and
+     * on godzilla_le 1.16 the pointer it branches to had been overwritten with
+     * a game-text address whose bit 0 flipped the CPU into Thumb - see
+     * sigaction_ptr_ok(). Check before every path that can reach it. Refusing
+     * the registration costs the guest one handler; taking the branch cost it
+     * the whole run, four seconds after Start, every time. */
+    if (!sigaction_ready()) return -1;
     if (sig == 11 && getenv_pad()) {   /* SIGSEGV */
         unsigned char mine[160];
         int i;

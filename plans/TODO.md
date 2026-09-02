@@ -155,15 +155,70 @@ These have each been violated at least once and each cost a run or a window:
       pointer at 0x7b8a90 in this title` and `--- end of the mixer dump ---`.
       That is his truncated log reproduced and closed. `segvtest.sh` itself
       passes all four documented cases on this branch.
-      **What is left, which is the actual item.** Nobody has yet seen an honest
-      crash report from a build that actually faults. Next steps: (1) ask him
-      for `game.out` from one run on the fixed build — it will now carry the
-      full register set, the stack backtrace against his OWN text bounds and
-      the file-buffer counters instead of stopping mid-dump; (2) resolve
-      `mapping + 0xe8660` and `lr=0x1c55c` against HIS ELF, which means getting
-      the 1.16 Heisei image or at least its `game`; (3) worth knowing whether
-      stock `godzilla_le` 1.16 (which we do not hold) faults too — that splits
-      "1.16 regression" from "this retheme".
+      **★★★ SOLVED AS A MECHANISM, 2026-09-02, after David added the 1.16
+      images — and it is OURS, not the game's.** `godzilla_le-1_16_0` (stock)
+      and `Godzilla Premium 1.16 Heisei Custom V1.5 Standard Edition` BOTH
+      reproduce the user's crash exactly: same `pc=0xf0660`, `lr=0x1c55c`,
+      `r0=6`, `r3=0x000f0fff`, `r5=0x005e331c`, `r6=0x1b4f0`, `sl=0x40830000`,
+      `stack[65]=0x1b640`, `scene_opens=194`, `filebuf::xsgetn=992864`. So it
+      is a **1.16 regression, not the retheme** (the two 1.16 ELFs differ in
+      2162 bytes, none of them in the pc or lr page) and not his card.
+      **The death, proven under gdb through the real rig** (`PAD_QEMU_GDB`,
+      `gdb-multiarch`, SIGILL passed through — libcrypto's armcap probe faults
+      on purpose and gdb stops on it otherwise):
+        - `cpsr=0xb0030`: **the T bit is set**. The CPU is decoding the game's
+          ARM text as THUMB. gdb reads `0xf0660` as `str r4,[r3,r0]`, which
+          with `r3=0x000f0fff` stores into `0xf1005` — inside the game's own
+          `r-xp` mapping. Write to read-only text, SIGSEGV, fault address 0.
+        - How it got there: `hwshim.c`'s `sigaction` interposer ends
+          `return real_sigaction(sig, act, old);`, and GCC **tail-calls** it —
+          `ldr r3,[r3,#208]` / `ldmia sp!,{...,lr}` / `bx r3`, with lr still
+          holding the GAME's return address, which is why the crash report
+          shows `lr=0x1c55c` (just past the game's `bl sigaction@plt`) while
+          pc is nowhere near sigaction. **`bx` on an odd value switches to
+          Thumb**, and the cached pointer had been overwritten with
+          `0x000f0fff`.
+        - Measured directly: at the game's `_start` (constructors done)
+          `real_sigaction = 0x40ac1f54`, a good libc pointer; by the game's
+          first `sigaction()` ~4 s later it is `0x000f0fff`. Both assignments
+          in the shim are guarded by `if (!real_sigaction)`, so **no code of
+          ours replaces a non-NULL value** — something else writes it.
+      **The stray write is REAL, address-fixed, and still unexplained.** It
+      puts `0x000f0fff` at guest **0x408610c8 and 0x408610d0** (hwshim.so is
+      loaded at 0x40841000). Rebuilding the shim moved `real_sigaction` off
+      0x200d0 — and the write still lands on those same two addresses, now
+      hitting `sw_rest_set`'s tail and `used.65` instead. So the addresses are
+      the target, not the variables. **Consequence today: the boot survives
+      only because the .bss shuffled**, and `sw_rest_set` now reads
+      `{33,66,67,68,0xf0fff…}` instead of `{33,66,67,68,69,70,71}` — the
+      rest-switch list is quietly wrong, and the next edit that moves .bss can
+      put `real_sigaction` back under the gun.
+      **Shipped on this branch: the shim will not BRANCH to that pointer.**
+      `sigaction_ptr_ok()` / `sigaction_ready()` reject any `real_sigaction`
+      that lands inside the game's own image (impossible for libc: the game is
+      a fixed EXEC at 0x8000, libc is mapped high), re-resolve through `dlsym`
+      and say so once. Deliberately NOT a bit-0 test — a Thumb libc would set
+      it legitimately. **Verified by poisoning the live guest**: `set
+      *(unsigned *)&real_sigaction = 0x000f0fff` under gdb, next call logged
+      `[segv] real_sigaction was 0xf0fff, which is inside the game's own image
+      - not calling it; re-resolving`, recovered `0x40ac1f54`, and the guest
+      ran on. Both 1.16 cards now boot to picture and hold a 3-minute run.
+      **A SECOND, SEPARATE FINDING worth its own item.** The wild
+      `sigaction(11, …)` calls in the trace come from **`gst_plugin_load_file
+      + 1964` in `libgstreamer-0.10.so.0`** — GStreamer 0.10 wraps every
+      plugin load in a SIGSEGV guard so a bad plugin cannot kill the process,
+      and it passes an `act` pointer that is wild and DIFFERENT every run
+      (`0xa543aa0c`, `0xa5334a0c`). Our `PAD_SEGV_REPORT` branch ignores that
+      `act`, installs `segv_handler` instead and returns 0, so GStreamer
+      believes its guard is armed while ours is — and ours `_exit(99)`s rather
+      than recovering. That converts a plugin fault GStreamer is designed to
+      survive into a dead run. Not touched this pass.
+      **What is left.** Name the writer of the 8 bytes at 0x408610c8. gdb
+      hardware watchpoints are not available through qemu-user's gdbstub here
+      (`Could not insert hardware watchpoint`) and a software one would
+      single-step four seconds of guest, so the next pass needs a different
+      instrument — a canary the shim itself checks from a hot interposer, or
+      `QEMU_STRACE` to catch a syscall writing there.
       — S1: the title does not play at all for this user, and boot-crash is the
       floor. D4: does not reproduce on either card here, so it needs his image
       or his log, and the one instrument that would have named the fault was

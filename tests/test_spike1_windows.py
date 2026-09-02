@@ -493,6 +493,7 @@ def test_viewers_pick_alpha_only_when_the_run_dir_says_so(root, monkeypatch):
     pytest.importorskip("PIL")
     m = _alpha_mod()
     made = []
+    monkeypatch.setattr(W.sys, "platform", "win32")   # open() is a no-op off it
     monkeypatch.setattr(W, "Spike1DisplayWindow",
                         lambda master, io, decode, alpha=None, on_close=None:
                         made.append(alpha) or _Dummy())

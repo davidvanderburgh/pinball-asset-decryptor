@@ -84,6 +84,39 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [ ] **92. A multi-boot card should NAME what a pair costs, and refuse the one
+      pairing that can need service.** `S2 D2` *(From the 2026-09-02
+      settings investigation for Cabal; see
+      `reference_spike2_settings_are_caption_keyed` in memory.)*
+      Settings, audits and scores live in board NVRAM keyed by SHA1 of each
+      setting's MENU CAPTION, so they migrate across versions by themselves
+      - measured 11/11 across a TMNT 1.59 -> 1.58 -> 1.59 round trip in which
+      202 of 228 shared captions were renumbered. So the work is NOT to move
+      state at boot; it is to stop the operator being surprised, and to stop
+      the one thing that is not recoverable in the living room:
+      **(1) a pair classifier in `mkmulticard.py`** - same title+version
+      (David's TMNT pair: two ELFs four bytes apart, nothing is lost), same
+      title+different version (name the settings that carry, the ones that
+      fall back to defaults, and the ones a renamed caption reverts), or
+      different titles (nothing carries) - printed at build time and shown by
+      the menu at select time; **(2) a NODE-FIRMWARE PARITY GATE in the same
+      pass** - the images ship their own `*-N_NN_N.hex` (1.59 carries 1.33.0,
+      1.58 carries 1.19.0) and the EEPROM's node-firmware byte at 0x185 is
+      rewritten to the running build every boot, so a cross-version card can
+      drive node-board reflashing on EVERY swap; warn hard, or refuse without
+      an override; **(3) a read-only settings safe in `select.sh`** - copy
+      `/data/nv/<title>` to `/data/nvsafe/<build stamp>/` before the game
+      starts (two deep, free-space checked, never fatal), because the store's
+      own generation ring is three deep and two boots of the other build
+      erase a build-exclusive value for good; **(4) an `.SPB`/NVM reader and
+      writer in PAD** as the way back - the container is cracked and the
+      import is the only software-only write into board NVRAM proven on
+      David's machine.
+      — S2: it protects the next card (Godzilla normal + orchestra, or a
+      Beatles pair) rather than the one that already works. D2: (1) and (2)
+      are static reads of two ELFs and two directory listings; (3) is a dozen
+      lines; (4) is a format we already decoded.
+
 - [ ] **91. A run started as the ORDINARY USER leaves a card mount root's
       `killgame.sh` cannot clear, so its Stop ends in
       `PAD_STOP_NEEDS_WSL_RESTART`.** `S3 D2` *(Found 2026-09-02 while

@@ -33,21 +33,53 @@ root.  ``$`` and backticks are refused in titles rather than escaped -
 second pass (the JJP executor's lesson), and no quoting from this side
 survives that.
 
-THE PREVIEW.  'Render preview' shows the boot menu as the machine will draw
-it: the selector itself is built from this checkout (``make`` into a scratch
-dir, never installed - the tab's 'Selector build' path is the fallback when
-the cross compiler is missing), the media is prepared ``--visual-only`` into
-the SAME ``<out dir>/media`` the build uses (selectmedia's sidecar cache
-keeps the art and GIFs between the two, so a preview after a text change
-costs nothing and the card carries exactly what was previewed), an
-``images.conf`` for the picture is written under ``<out dir>/preview``, and
-one ``qemu-arm-static -L <rootfs> codeselect --snapshot`` run per frame
-writes a P6 PPM that Tk loads natively.  'Play' steps the highlighted card's
-animation, rendering frames as it goes and keeping them per (form, highlight,
-frame) until the form changes.  Because a preview leaves a sound-less
-media.json behind, 'Build & verify' runs a full prepare into that dir first
-whenever a media set exists - the card is never built from the preview's
-half of the media.
+THE LAYOUT.  ONE arrangement at every width - the structure never changes
+under the window.  Top to bottom, in the order the work happens: 'Load
+card…' / 'New card…' and the card path first (reading a card you already
+built is the usual first move); then a two-column body - a narrow image
+list on the left, the PREVIEW on the right, large and always visible;
+then ONE action bar; then one status block; then the tools' own output,
+folded away.  The detail of one image and of the menu is behind two
+modals (:class:`ImageEditorDialog`, :class:`MenuSettingsDialog`), which
+is what makes the whole tab fit the ~640 px of content height a 1024x768
+desktop leaves for it - David's desktop, and the constraint the layout is
+designed around.  The modals bind to the PANEL's own variables, so there
+is one form whether a dialog is open or not, and Cancel restores the
+snapshot taken when it opened.
+
+BUTTONS LIVE IN EXACTLY TWO PLACES: the source row at the top and the
+action bar at the bottom.  The image list has none - right-click a row
+for Add / Edit / Remove / Up / Down (double-click and Return still open
+Edit), and a dim line under the list says so - and the preview has none:
+its right-click menu carries the manual refresh and the 'update
+automatically' toggle.  A tab whose every control is a button reads as
+busy, and the two menus lose nothing: every entry is the button that was
+there, and every keyboard path still works.
+
+THE PREVIEW'S SIZE.  The canvas is a FIXED height (half the selector's
+768) and takes whatever width its column gives it, so the tab's height
+never moves as the window is dragged.  The picture is scaled smoothly
+into it with Pillow, aspect kept and centred; without Pillow it falls
+back to Tk's PhotoImage, which only scales by whole numbers.
+
+THE PREVIEW.  It shows the boot menu as the machine will draw it, and it
+follows the form by itself: every field schedules a re-render ~350 ms
+after the last keystroke, coalesced into one run.  The selector is built
+from this checkout (``make`` into a scratch dir, never installed - the
+'Selector build' path is the fallback when the cross compiler is missing)
+once per session; the media is prepared ``--visual-only`` into the SAME
+``<out dir>/media`` the build uses, and ONLY when the media fingerprint
+moved (see :func:`media_fingerprint`) - so a title, a subtitle, the
+countdown or the default costs one ``qemu-arm-static -L <rootfs>
+codeselect --snapshot`` run and nothing else, while art, clips, music and
+the sounds pay for selectmedia's prepare (cached; 0.13 s for a two-image
+set when nothing changed).  The conf the picture is drawn from is written
+under ``<out dir>/preview``, and each snapshot writes a P6 PPM that Tk
+loads natively.  'Play' steps the highlighted card's animation, rendering
+frames as it goes and keeping them per (form, highlight, frame) until the
+form changes.  Because a preview leaves a sound-less media.json behind,
+'Build & verify' runs a full prepare into that dir first whenever a media
+set exists - the card is never built from the preview's half of the media.
 
 READING A CARD BACK.  'Load card…' runs ``mkmulticard.py inspect`` on a card
 that already exists - the tool's table into the pane, the same read as JSON
@@ -57,8 +89,9 @@ from, the titles and subtitles, the art / animation / music (as the spec
 strings the card records, so the tools can render them again), the sounds,
 volume, countdown, default and the bypass state of every games tree.  The
 tab is then in EDITING MODE: the loaded card and the form as it was read are
-remembered, every keystroke is diffed against that baseline, and one line
-says which of the two things can happen.  'Apply to card' writes the menu
+remembered, every keystroke is diffed against that baseline, and the status
+block says which of the two things can happen - and which of the two
+writing buttons is the green one.  'Apply to card' writes the menu
 back with ``inject`` (plus a ``prepare`` when a media field changed, plus
 ``bypass`` when it is ticked and a tree is still armed) - seconds, no copy.
 The image LIST - how many images, in what order, from which files - is the
@@ -84,14 +117,25 @@ import shlex
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from dataclasses import dataclass, field, replace
 from tkinter import filedialog, messagebox, ttk
 
 from . import _rig
 from .emulate_tab import rig_dir
-from .theme import THEMES, platform_font
-from .widgets import _Tooltip
+from .theme import THEMES, dark_titlebar
+from .widgets import _Tooltip, center_over
+
+# Pillow scales the preview smoothly (Tk's own PhotoImage only halves and
+# thirds).  It is a hard dependency of the app - the same guarded import
+# main_window.py, scene_browser.py and font_studio.py use - but the
+# fallback below keeps the tab drawing if it is ever missing.
+try:
+    from PIL import Image, ImageTk
+    _HAVE_PIL = True
+except ImportError:                                     # pragma: no cover
+    _HAVE_PIL = False
 
 #: The tools, relative to the checkout root the command line cd's into.
 TOOL_DIR = "tools/spike2_emu"
@@ -127,6 +171,11 @@ LIBRARY_PREFIXES = ("D:/Pinball/images", "/mnt/d/Pinball/images")
 #: images.conf v2 carries up to 16 images.
 MAX_IMAGES = 16
 
+#: The image list is as tall as it has rows, between these two: eight rows
+#: of empty box under two images is a hole in the tab, and a list that
+#: grows for every image would push the tab past its height budget.
+LIST_MIN_ROWS, LIST_MAX_ROWS = 4, 8
+
 #: The non-file choices each media field accepts.  Anything else is a path.
 ART_CHOICES = ("auto", "none", "video frame")
 ANIM_CHOICES = ("none", "auto")
@@ -142,11 +191,39 @@ VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".avi")
 #: three is given all three are spelled out, explicit rather than defaulted.
 ANIM_DEFAULTS = ("0", "3", "10")
 
-#: The selector's frame, and the box the preview shows it in (an integer
-#: subsample of 2 - Tk PhotoImage has no other scaling).
+#: The selector's own frame, and the box the preview draws it in.  The box
+#: is the height the rest of the tab does not need (up to half the
+#: machine's 768) and exactly the width that height's own 16:9 asks for -
+#: so the canvas IS the picture, with no black bars around it, and the
+#: tab's height stays put as the window is dragged sideways.
 FRAME_W, FRAME_H = 1360, 768
-PREVIEW_W, PREVIEW_H = 680, 384
+PREVIEW_W, PREVIEW_H = FRAME_W // 2, FRAME_H // 2
+#: The narrowest and shortest the picture may get: a menu smaller than this
+#: says nothing anyway.
+PREVIEW_MIN_W = 240
+PREVIEW_MIN_H = 150
+#: The smallest whole-number step the PhotoImage fallback may shrink to
+#: (only reached without Pillow - see :func:`preview_box`).
+PREVIEW_MIN_K = 4
 PREVIEW_FPS = 8
+
+#: How long the preview waits after the last keystroke before it re-renders.
+#: Every change inside the window is one render, not N.
+PREVIEW_DEBOUNCE_MS = 350
+
+#: The most height the tab may ask for on a 1024x768 desktop - what is
+#: left inside the notebook once the app's own title bar, header, tab
+#: strip, footer and a line of Log have taken theirs.  The tab is never
+#: taller than this on that desktop, at any width.
+TAB_BUDGET_H = 640
+
+#: ...and what the app takes around the notebook, so a TALLER window can
+#: be measured the same way: the budget is the window's height less this,
+#: which is 640 exactly on a 768-high desktop.  The window's height is set
+#: by the person using it and never by this tab (the notebook is pinned to
+#: the tab's requested height, and nothing resizes the toplevel), so
+#: reading it here is not a loop.
+APP_CHROME_H = 128
 
 #: What the selector-ensuring step prints in front of the binary it chose.
 SELECTOR_LINE = "[preview] selector:"
@@ -171,6 +248,10 @@ class ImageRow:
     anim_start: str = ""     # seconds into the clip (blank = the tool's default)
     anim_seconds: str = ""   # the clip's length
     anim_fps: str = ""
+    #: The game code version of this image, when something has reported one
+    #: - the table shows it in its own column and leaves the cell blank
+    #: until then.  Never typed: it is a fact about the .raw, read off it.
+    version: str = ""
     # Filled by a LOAD (see 'reading a card back'), never typed.
     device: str = ""             # the card device this row was read from
     art_on_card: bool = False    # the value is a file name already on the
@@ -331,9 +412,36 @@ def preview_dir_for(out):
         if out else ""
 
 
-def frame_path(preview_dir, highlight, frame):
-    """The PPM one snapshot writes: ``frame_<highlight>_<frame>.ppm``."""
-    return os.path.join(preview_dir, "frame_%d_%d.ppm" % (highlight, frame))
+#: What a preview frame file is called.  THE FINGERPRINT IS IN THE NAME.
+#: It has to be: the in-memory cache is keyed by (fingerprint, highlight,
+#: frame), so changing a title and changing it back leaves the reverted
+#: form with no cache entry and a render is queued - and if that render
+#: wrote to the same file name the newer form had already written, either
+#: form could be shown the other's picture.  Two forms, two names.
+_FRAME_RE = re.compile(r"^frame_([0-9a-f]+)_(\d+)_(\d+)\.ppm$")
+
+
+def frame_path(preview_dir, fingerprint, highlight, frame):
+    """The PPM one snapshot writes:
+    ``frame_<fingerprint>_<highlight>_<frame>.ppm``."""
+    return os.path.join(preview_dir, "frame_%s_%d_%d.ppm"
+                        % (fingerprint, highlight, frame))
+
+
+def stale_frames(preview_dir, keep):
+    """Every frame file in *preview_dir* that is not *keep*'s - the ones no
+    form on the tab can ask for again.  ``preview/`` would otherwise grow a
+    file per (form, image, frame) for as long as the tab is open."""
+    try:
+        names = os.listdir(preview_dir)
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        m = _FRAME_RE.match(name)
+        if m and m.group(1) != keep:
+            out.append(os.path.join(preview_dir, name))
+    return out
 
 
 def rootfs_for(selector_dir):
@@ -773,15 +881,66 @@ def preview_fingerprint(form):
     return hashlib.sha1(json.dumps(data).encode("utf-8")).hexdigest()[:12]
 
 
+def media_fingerprint(form):
+    """What the PREPARED MEDIA depends on, as a short hash: the images, the
+    art / animation / music specs, the two sounds and the volume.
+
+    Not the titles, the subtitles, the countdown or the default - those
+    reach the picture through images.conf, which the preview rewrites for
+    every snapshot.  This is the whole point of the split: retyping a title
+    costs one snapshot (~80 ms of selector time), and only a media change
+    pays for selectmedia's prepare."""
+    data = [[((r.path or "").strip(), art_spec(r), anim_spec(r),
+              _media_value(r.music), bool(r.art_on_card),
+              bool(r.anim_on_card), bool(r.music_on_card))
+             for r in form.images],
+            _media_value(form.sound_move), _media_value(form.sound_confirm),
+            int(form.volume)]
+    return hashlib.sha1(json.dumps(data).encode("utf-8")).hexdigest()[:12]
+
+
+def scaled_size(w, h, box_w, box_h):
+    """``(w, h)`` - *w* x *h* scaled to fit the box with its aspect ratio
+    kept, up or down.  The smooth path (Pillow); at least 1x1."""
+    if w <= 0 or h <= 0 or box_w <= 0 or box_h <= 0:
+        return max(1, w), max(1, h)
+    k = min(box_w / float(w), box_h / float(h))
+    return max(1, int(round(w * k))), max(1, int(round(h * k)))
+
+
 def fit_factors(w, h, box_w=PREVIEW_W, box_h=PREVIEW_H):
     """``(subsample, zoom)`` - the integer factors (Tk PhotoImage's only
     scaling) that fit a *w* x *h* frame into the box: 1360x768 -> (2, 1) =
-    680x384; a small test frame is zoomed up instead."""
+    680x384; a small test frame is zoomed up instead.  The fallback for a
+    machine with no Pillow; :func:`scaled_size` is what normally runs."""
     if w <= 0 or h <= 0:
         return 1, 1
     if w <= box_w and h <= box_h:
         return 1, max(1, min(box_w // w, box_h // h))
     return max(-(-w // box_w), -(-h // box_h)), 1
+
+
+def preview_box(avail_w, avail_h, frame_w=FRAME_W, frame_h=FRAME_H,
+                max_k=PREVIEW_MIN_K):
+    """``(w, h, k)`` - the biggest whole-number fraction of the selector's
+    frame that fits the room the window has given the preview.  Whole
+    numbers because that is the only scaling Tk's PhotoImage does: half a
+    frame is crisp, 0.62 of one is not available at all.  (The canvas is
+    sized by :meth:`MultibootPanel._on_configure` now; this is what the
+    no-Pillow fallback still measures the PICTURE with.)
+
+    The size is rounded UP (1360 over 3 is 454, not 453): that is what
+    ``subsample`` actually produces - it keeps every third pixel and the
+    last one counts - and a box a pixel short of the picture would clip a
+    column off every frame."""
+    def _step(k):
+        return -(-frame_w // k), -(-frame_h // k)
+    for k in range(1, max_k + 1):
+        w, h = _step(k)
+        if w <= avail_w and h <= avail_h:
+            return w, h, k
+    w, h = _step(max_k)
+    return w, h, max_k
 
 
 def build_commands(form, cwd=None):
@@ -1174,6 +1333,393 @@ def size_plan_text(info):
 
 
 # ---------------------------------------------------------------------------
+# what the compact list and the Menu settings button say
+# ---------------------------------------------------------------------------
+
+def _shorten(text, width=40):
+    """*text* with its middle replaced by ``…`` so it cannot widen a column.
+    The end is what identifies a path, so the end is what is kept."""
+    text = text or ""
+    if len(text) <= width or width < 6:
+        return text
+    head = max(3, width // 3)
+    return text[:head] + "…" + text[-(width - head - 1):]
+
+
+def _cell(value):
+    """A media field as one word or one file name."""
+    v = (value or "").strip()
+    return v if v.lower() in _WORDS or not v else os.path.basename(v)
+
+
+def _cell_image(row):
+    """The .raw the image was copied from, said plainly when this machine
+    does not have it (a loaded card names sources that may live on another
+    disk) and when the card names none at all."""
+    p = (row.path or "").strip()
+    if not p:
+        return "(no source recorded%s)" % (
+            " - " + row.device if row.device else "")
+    if not os.path.isfile(p):
+        return p + "   [not on this machine]"
+    return p
+
+
+def cell_art(row):
+    """The row's art in full: the word, a picture's name, or ``<video> @3s``.
+    What the Edit image… dialog's own summary would say."""
+    v = (row.art or "").strip()
+    if row.art_on_card:
+        return v + " (on the card)"
+    if v.lower() == "video frame":
+        name = os.path.basename((row.art_video or "").strip()) or "video?"
+        return "%s @%ss" % (name, _num(row.art_time, "0"))
+    if is_video(v):
+        return "%s @%ss" % (os.path.basename(v), _num(row.art_time, "0"))
+    return _cell(v)
+
+
+def cell_anim(row):
+    """The row's animation in full: the word or the clip's name, and the clip
+    parameters when any is set (``auto @20s 2s 8fps``)."""
+    v = _cell(row.anim)
+    if row.anim_on_card:
+        return v + " (on the card)"
+    if v and v.lower() != "none":
+        start, secs, fps = (_num(row.anim_start), _num(row.anim_seconds),
+                            _num(row.anim_fps))
+        if start or secs or fps:
+            v += " @%ss %ss %sfps" % (start or ANIM_DEFAULTS[0],
+                                      secs or ANIM_DEFAULTS[1],
+                                      fps or ANIM_DEFAULTS[2])
+    return v
+
+
+def list_title(row, index=0):
+    """The list's Title cell: the menu title (or the name the tab would fall
+    back to), and - because a list with no Image column must still say it -
+    what is wrong with the .raw this image came from."""
+    title = (row.title or "").strip()
+    path = (row.path or "").strip().strip('"')
+    if not title:
+        title = suggest_title(path)[0] if path else "image %d" % index
+    if not path:
+        return "%s  [no source recorded]" % title
+    if not os.path.isfile(path):
+        return "%s  [not on this machine]" % title
+    return title
+
+
+def menu_summary(form):
+    """The one line beside the 'Menu settings…' button: everything behind it,
+    in the order the dialog asks for it."""
+    def sound(v):
+        v = (v or "").strip() or "none"
+        return v if v.lower() in _WORDS else os.path.basename(v)
+    return ("sounds %s / %s  ·  volume %d  ·  %s  ·  default %d  ·  "
+            "bypass %s" % (
+                sound(form.sound_move), sound(form.sound_confirm),
+                int(form.volume),
+                "wait for START" if int(form.timeout) == 0
+                else "%d s countdown" % int(form.timeout),
+                int(form.default), "on" if form.bypass else "off"))
+
+
+# ---------------------------------------------------------------------------
+# the two modals the detail lives behind
+# ---------------------------------------------------------------------------
+
+def _browse_into(var, filetypes, title="Pick a media file"):
+    """A file picker that writes the chosen path into *var*."""
+    path = filedialog.askopenfilename(
+        title=title, filetypes=list(filetypes) + [("All files", "*.*")])
+    if path:
+        var.set(path)
+
+
+def _media_row(parent, row, col, label, var, choices, filetypes,
+               label_w=13, combo_w=26):
+    """Label + editable combobox (the words, or a typed path) + Browse.
+    ``(combobox, browse button)``."""
+    # 13, not 10: "Move sound:" is eleven characters and a 10-wide ttk label
+    # showed "Move soun" (the tab's first screenshot).
+    kw = {"width": label_w} if col == 0 else {}
+    ttk.Label(parent, text=label, **kw).grid(
+        row=row, column=col, sticky=tk.W, padx=(0 if col == 0 else 12, 4),
+        pady=3)
+    cb = ttk.Combobox(parent, textvariable=var, values=list(choices),
+                      width=combo_w)
+    cb.grid(row=row, column=col + 1, sticky=tk.EW, pady=3)
+    btn = ttk.Button(parent, text="Browse…", width=9,
+                     command=lambda: _browse_into(var, filetypes))
+    btn.grid(row=row, column=col + 2, sticky=tk.W, padx=(4, 0), pady=3)
+    return cb, btn
+
+
+class _Modal:
+    """The app's modal shape, in one place: a transient, grabbed Toplevel
+    centred over the window, OK / Cancel at the bottom right, Escape and the
+    window's close box both meaning Cancel.
+
+    The dialogs below edit the panel's OWN variables (the same ones the tab
+    has always carried, so every trace, every diff and every test still sees
+    one source of truth) and hand back a snapshot to restore on Cancel."""
+
+    def __init__(self, parent, title, theme_fn, on_ok=None, on_cancel=None):
+        self._parent = parent
+        self._theme_fn = theme_fn
+        self._on_ok = on_ok
+        self._on_cancel = on_cancel
+        self._closed = False
+        th = THEMES.get(theme_fn()) or THEMES["dark"]
+        top = tk.Toplevel(parent)
+        self.top = top
+        # Hidden until built and positioned, or it flashes at the default
+        # spot first (the app's own rule - see disk_dialog).
+        top.withdraw()
+        top.title(title)
+        try:
+            top.configure(bg=th["bg"])
+        except tk.TclError:
+            pass
+        dark_titlebar(top, th is THEMES.get("dark"))
+        try:
+            top.transient(parent.winfo_toplevel())
+        except tk.TclError:
+            pass
+        top.protocol("WM_DELETE_WINDOW", self.cancel)
+        top.bind("<Escape>", lambda _e: self.cancel())
+        top.resizable(False, False)
+        self.body = ttk.Frame(top, padding=14)
+        self.body.pack(fill=tk.BOTH, expand=True)
+
+    def show(self):
+        """Add the OK / Cancel row, place the window and take the grab."""
+        row = ttk.Frame(self.body)
+        row.pack(fill=tk.X, pady=(14, 0))
+        ttk.Button(row, text="Cancel", width=10,
+                   command=self.cancel).pack(side=tk.RIGHT)
+        self.ok_btn = ttk.Button(row, text="OK", width=10, command=self.ok,
+                                 style="Go.TButton")
+        self.ok_btn.pack(side=tk.RIGHT, padx=(0, 8))
+        self.top.bind("<Return>", lambda _e: self.ok())
+        center_over(self._parent, self.top)
+        try:
+            self.top.deiconify()
+            self.top.grab_set()
+            self.top.focus_set()
+        except tk.TclError:
+            pass
+        # Again, and this time the window exists: DWM ignores the immersive
+        # dark-mode attribute set on a withdrawn Toplevel, and a light title
+        # bar over a dark dialog is exactly the complaint theme.py's
+        # dark_titlebar was written for.
+        th = THEMES.get(self._theme_fn()) or THEMES["dark"]
+        dark_titlebar(self.top, th is THEMES.get("dark"))
+        return self
+
+    def ok(self):
+        self._close(True)
+
+    def cancel(self):
+        self._close(False)
+
+    def _close(self, accepted):
+        if self._closed:
+            return
+        self._closed = True
+        cb = self._on_ok if accepted else self._on_cancel
+        for fn in (self.top.grab_release, self.top.destroy):
+            try:
+                fn()
+            except tk.TclError:
+                pass
+        if cb is not None:
+            cb()
+
+
+class ImageEditorDialog(_Modal):
+    """'Edit image…': one image's menu text and its three media fields.
+
+    Everything that used to be a permanent editor strip under the list -
+    title, subtitle, art (including the 'video frame' pair), animation
+    (including the clip's start / length / fps) and music."""
+
+    def __init__(self, panel, index, row):
+        _Modal.__init__(
+            self, panel._parent,
+            "Edit image %d — %s" % (index, os.path.basename(
+                (row.path or "").strip()) or row.device or "no source"),
+            panel._theme_fn, on_ok=panel._image_editor_ok,
+            on_cancel=panel._image_editor_cancel)
+        b = self.body
+        th = THEMES.get(panel._theme_fn()) or THEMES["dark"]
+        ttk.Label(b, text=_cell_image(row), foreground=th["gray"],
+                  wraplength=520, justify=tk.LEFT).pack(anchor=tk.W,
+                                                        pady=(0, 10))
+        text = ttk.Frame(b)
+        text.pack(fill=tk.X)
+        ttk.Label(text, text="Title:", width=13).grid(row=0, column=0,
+                                                      sticky=tk.W, pady=3)
+        ttk.Entry(text, textvariable=panel._ed_title, width=34).grid(
+            row=0, column=1, sticky=tk.EW, pady=3)
+        ttk.Label(text, text="Subtitle:", width=13).grid(row=1, column=0,
+                                                         sticky=tk.W, pady=3)
+        ttk.Entry(text, textvariable=panel._ed_sub, width=34).grid(
+            row=1, column=1, sticky=tk.EW, pady=3)
+        text.columnconfigure(1, weight=1)
+
+        art = ttk.LabelFrame(b, text="Picture")
+        art.pack(fill=tk.X, pady=(12, 0))
+        g = ttk.Frame(art)
+        g.pack(fill=tk.X, padx=8, pady=6)
+        _media_row(g, 0, 0, "Art:", panel._ed_art, ART_CHOICES,
+                   [("Pictures", "*.png *.jpg *.jpeg"),
+                    ("Videos", "*.mp4 *.mov *.mkv *.avi")])
+        # 13, not 12: "Video frame:" is twelve characters and a 12-wide ttk
+        # label clips the colon.
+        ttk.Label(g, text="Video frame:", width=13).grid(
+            row=1, column=0, sticky=tk.W, pady=3)
+        panel._video_entry = ttk.Entry(g, textvariable=panel._ed_art_video,
+                                       width=26)
+        panel._video_entry.grid(row=1, column=1, sticky=tk.EW, pady=3)
+        panel._video_btn = ttk.Button(
+            g, text="Browse…", width=9,
+            command=lambda: _browse_into(
+                panel._ed_art_video,
+                [("Videos", "*.mp4 *.mov *.mkv *.avi")]))
+        panel._video_btn.grid(row=1, column=2, sticky=tk.W, padx=(4, 0),
+                              pady=3)
+        vt = ttk.Frame(g)
+        vt.grid(row=2, column=1, sticky=tk.W, pady=3)
+        ttk.Label(vt, text="frame at (s):").pack(side=tk.LEFT)
+        panel._video_time = ttk.Spinbox(vt, from_=0, to=36000, increment=0.5,
+                                        width=7,
+                                        textvariable=panel._ed_art_time)
+        panel._video_time.pack(side=tk.LEFT, padx=(6, 0))
+        g.columnconfigure(1, weight=1)
+
+        clipbox = ttk.LabelFrame(b, text="Animation")
+        clipbox.pack(fill=tk.X, pady=(10, 0))
+        g2 = ttk.Frame(clipbox)
+        g2.pack(fill=tk.X, padx=8, pady=6)
+        _media_row(g2, 0, 0, "Animation:", panel._ed_anim, ANIM_CHOICES,
+                   [("Animations", "*.gif *.mp4 *.mov *.mkv *.avi")])
+        ttk.Label(g2, text="Clip:", width=13).grid(row=1, column=0,
+                                                   sticky=tk.W, pady=3)
+        clip = ttk.Frame(g2)
+        clip.grid(row=1, column=1, columnspan=2, sticky=tk.W, pady=3)
+        panel._clip_widgets = []
+        for label, var, width in (("Start (s):", panel._ed_anim_start, 6),
+                                  ("Length (s):", panel._ed_anim_seconds, 5),
+                                  ("FPS:", panel._ed_anim_fps, 4)):
+            ttk.Label(clip, text=label).pack(
+                side=tk.LEFT, padx=(0 if not panel._clip_widgets else 10, 4))
+            sp = ttk.Spinbox(clip, from_=0, to=36000, width=width,
+                             textvariable=var)
+            sp.pack(side=tk.LEFT)
+            panel._clip_widgets.append(sp)
+        g2.columnconfigure(1, weight=1)
+
+        musicbox = ttk.LabelFrame(b, text="Music")
+        musicbox.pack(fill=tk.X, pady=(10, 0))
+        music = ttk.Frame(musicbox)
+        music.pack(fill=tk.X, padx=8, pady=6)
+        _media_row(music, 0, 0, "Music:", panel._ed_music, MUSIC_CHOICES,
+                   [("WAV audio", "*.wav")])
+        music.columnconfigure(1, weight=1)
+        ttk.Label(b, foreground=th["gray"], wraplength=520, justify=tk.LEFT,
+                  text="auto = this image's own logo and attract clip, pulled "
+                       "off the .raw; none = text only. Clip fields left "
+                       "blank use the tool's defaults (from 0 s, 3 s long, "
+                       "10 fps).").pack(anchor=tk.W, pady=(10, 0))
+
+
+class MenuSettingsDialog(_Modal):
+    """'Menu settings…': the sounds, the volume, the countdown, the default
+    image, the validator bypass and the selector build path - everything
+    that belongs to the MENU rather than to one image."""
+
+    def __init__(self, panel, images):
+        _Modal.__init__(self, panel._parent, "Menu settings",
+                        panel._theme_fn, on_ok=panel._menu_settings_ok,
+                        on_cancel=panel._menu_settings_cancel)
+        b = self.body
+        th = THEMES.get(panel._theme_fn()) or THEMES["dark"]
+        sounds = ttk.LabelFrame(b, text="Sounds")
+        sounds.pack(fill=tk.X)
+        g = ttk.Frame(sounds)
+        g.pack(fill=tk.X, padx=8, pady=6)
+        # 15, not 13: "Confirm sound:" is fourteen characters and a 13-wide
+        # ttk label showed "Confirm sounc" (the first shot of this dialog).
+        _media_row(g, 0, 0, "Move sound:", panel._move_var, SOUND_CHOICES,
+                   [("WAV audio", "*.wav")], label_w=15)
+        _media_row(g, 1, 0, "Confirm sound:", panel._confirm_var,
+                   SOUND_CHOICES, [("WAV audio", "*.wav")], label_w=15)
+        ttk.Label(g, text="Volume:", width=15).grid(row=2, column=0,
+                                                    sticky=tk.W, pady=3)
+        vol = ttk.Frame(g)
+        vol.grid(row=2, column=1, sticky=tk.W, pady=3)
+        ttk.Spinbox(vol, from_=0, to=100, width=5,
+                    textvariable=panel._volume_var).pack(side=tk.LEFT)
+        ttk.Label(vol, text="0-100", foreground=th["gray"]).pack(
+            side=tk.LEFT, padx=(6, 0))
+        ttk.Label(g, foreground=th["gray"], wraplength=430, justify=tk.LEFT,
+                  text="auto = a click and a stinger pulled from the primary "
+                       "image; synth = generated tones. The confirm sound "
+                       "plays to the end before the game starts.").grid(
+            row=3, column=0, columnspan=3, sticky=tk.W, pady=(4, 0))
+        g.columnconfigure(1, weight=1)
+
+        boot = ttk.LabelFrame(b, text="At power-up")
+        boot.pack(fill=tk.X, pady=(10, 0))
+        g2 = ttk.Frame(boot)
+        g2.pack(fill=tk.X, padx=8, pady=6)
+        ttk.Label(g2, text="Countdown (s):", width=15).grid(
+            row=0, column=0, sticky=tk.W, pady=3)
+        cd = ttk.Frame(g2)
+        cd.grid(row=0, column=1, sticky=tk.W, pady=3)
+        ttk.Spinbox(cd, from_=0, to=600, width=5,
+                    textvariable=panel._timeout_var).pack(side=tk.LEFT)
+        ttk.Label(cd, text="0 = wait for START",
+                  foreground=th["gray"]).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Label(g2, text="Default image:", width=15).grid(
+            row=1, column=0, sticky=tk.W, pady=3)
+        di = ttk.Frame(g2)
+        di.grid(row=1, column=1, sticky=tk.W, pady=3)
+        panel._default_spin = ttk.Spinbox(
+            di, from_=0, to=max(0, images - 1), width=5,
+            textvariable=panel._default_var)
+        panel._default_spin.pack(side=tk.LEFT)
+        ttk.Label(di, text="highlighted at power-up (the last choice wins "
+                           "once one was made)",
+                  foreground=th["gray"]).pack(side=tk.LEFT, padx=(6, 0))
+        byp = ttk.Frame(g2)
+        byp.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(6, 0))
+        panel._bypass_chk = ttk.Checkbutton(
+            byp, text="Bypass game validation on every image",
+            variable=panel._bypass_var)
+        panel._bypass_chk.pack(side=tk.LEFT)
+        panel._bypass_badge = panel._info_badge(byp, panel.BYPASS_TIP)
+        panel._bypass_badge.pack(side=tk.LEFT, padx=(6, 0))
+        g2.columnconfigure(1, weight=1)
+
+        adv = ttk.LabelFrame(b, text="Advanced")
+        adv.pack(fill=tk.X, pady=(10, 0))
+        g3 = ttk.Frame(adv)
+        g3.pack(fill=tk.X, padx=8, pady=6)
+        ttk.Label(g3, text="Selector build:", width=15).grid(
+            row=0, column=0, sticky=tk.W, pady=3)
+        ttk.Entry(g3, textvariable=panel._selector_var, width=40).grid(
+            row=0, column=1, sticky=tk.EW, pady=3)
+        ttk.Label(g3, foreground=th["gray"], wraplength=430, justify=tk.LEFT,
+                  text="WSL path of the built selector (the rig installs it "
+                       "there on the first Boot-selector run)").grid(
+            row=1, column=1, sticky=tk.W)
+        g3.columnconfigure(1, weight=1)
+
+
+# ---------------------------------------------------------------------------
 # the panel
 # ---------------------------------------------------------------------------
 
@@ -1187,7 +1733,12 @@ def _int(var, default):
 class MultibootPanel:
     """The Multi-boot tab's widgets and its one worker at a time."""
 
-    #: Lines kept in the tab's own pane.  The app log keeps the rest.
+    #: What the tab's lines are tagged with in the app's shared Log, so
+    #: they read beside the other tabs' ("[emulate] …" and the rest).
+    LOG_TAG = "[multi-boot] "
+
+    #: How many of them the panel keeps for itself (:meth:`log_lines`).
+    #: The app's Log keeps its own, longer, history.
     LOG_KEEP = 3000
 
     #: How often the main loop drains the worker's queue while a run is up.
@@ -1196,21 +1747,62 @@ class MultibootPanel:
     #: Play's frame period (~8 fps).
     PLAY_MS = 1000 // PREVIEW_FPS
 
-    BYPASS_TIP = ("Neuters the game's validator in EVERY image on the card "
-                  "(a bx lr at validation_exec, and that image's .sidx "
-                  "record refreshed). Needed so the machine's GAME "
-                  "VALIDATION ERROR stays off: the two images share one "
-                  "grade state, and the stock one fails it once a second "
-                  "image is beside it. The same patch the Insider-clean "
-                  "1987 card carries.")
+    #: How long the selector the preview draws with is taken on trust
+    #: before the ``make`` step is run again (see _render_frames).
+    SELECTOR_TTL_S = 300
+
+    ABOUT_TIP = ("Builds ONE SD card that carries several complete game "
+                 "images and a menu at power-up: the flippers choose, START "
+                 "boots, a countdown boots the remembered choice - stock "
+                 "code and a custom build on the same machine without "
+                 "swapping cards. The first image in the list is the "
+                 "primary: its boot files are the card's, and the machine "
+                 "falls back to it. The media and the card itself are made "
+                 "by the rig's tools under WSL; nothing here touches the "
+                 "images you pick. Press ? for the whole story.")
+
+    # USER-FACING COPY IS GENERIC.  Nothing the tab says names a title, a
+    # build or a version as an example (David, 2026-09-02: most people
+    # using this have never heard of the card it was written for) - what a
+    # control does, and why, in words that hold for any Spike 2 card.
+    BYPASS_TIP = ("Neuters the game's validator in every image on the card "
+                  "(a four-byte patch at the validator's entry, with that "
+                  "image's package index record refreshed). Without it the "
+                  "machine can show GAME VALIDATION ERROR, because the "
+                  "images share one grade state and an unpatched image "
+                  "fails once a second image sits beside it.")
+
+    #: The one quiet line under the table while nothing is selected.  It is
+    #: all the teaching the icons need; the rest is in the tooltip.
+    ROW_HINT = ("The icons on each row edit, remove and reorder it — the "
+                "first image is the primary the machine falls back to.")
+
+    LIST_TIP = ("Each row carries its own icons: ✎ edits the image, − takes "
+                "it off the card, ▲ / ▼ move it in the menu's order (the "
+                "outlined arrow means that row cannot go further). The last "
+                "row adds one. A double-click or Enter opens a row, and a "
+                "right-click - or the menu key - offers the same five "
+                "commands. The first image is the PRIMARY: its boot files "
+                "are the card's, and the machine falls back to it.")
+
+    PREVIEW_TIP = ("The boot menu as the machine will draw it. It redraws "
+                   "itself about a third of a second after you stop typing; "
+                   "right-click it to redraw now or to turn that off.")
 
     def __init__(self, parent, log=None, theme_fn=None, badge_fn=None,
-                 resize_fn=None, flash_fn=None, emulate_fn=None):
+                 resize_fn=None, flash_fn=None, emulate_fn=None,
+                 phase_fn=None):
         self._parent = parent
         self._log_sink = log or (lambda msg: None)
         self._theme_fn = theme_fn or (lambda: "dark")
         self._badge_fn = badge_fn
         self._resize_fn = resize_fn or (lambda: None)
+        #: The app's footer, as far as this tab is concerned: the stage row
+        #: that belongs to THIS tab's buttons and the bar beside it
+        #: (MainWindow.set_multiboot_phase).  A panel built on its own -
+        #: every test - drives nothing.
+        self._phase_fn = phase_fn or (lambda index, total=None, status=None:
+                                      None)
         #: The app's Build / flash flow, handed the finished .raw.  None
         #: (a panel built on its own, every test) greys the button.
         self._flash_fn = flash_fn
@@ -1218,7 +1810,14 @@ class MultibootPanel:
         #: card, ticks Boot selector (PAD_SELECT=1) and starts the rig.
         self._emulate_fn = emulate_fn
         self._rows = []                 # list[ImageRow], card order
+        #: The guard on the runs that WRITE something (build, apply, load,
+        #: bypass): one at a time, and every action control greyed while
+        #: one is up.  The preview has its own, lighter one - see
+        #: ``_pv_busy``: a background redraw must not disable the tab.
         self._busy = False
+        self._pv_busy = False           # a preview render is on the worker
+        self._pv_cancel = False         # ...and an action is waiting for it
+        self._pending_run = None        # the action waiting (_run_commands)
         self._proc = None
         self._stopped = False
         #: Worker -> main-loop handoff.  THE WORKER NEVER TOUCHES TK: it puts
@@ -1233,6 +1832,31 @@ class MultibootPanel:
         self._loading = False           # editor <- row, not row <- editor
         self._out_auto_value = ""       # the last output path WE filled in
         self._plan_info = None
+        #: The size sentence the last plan printed.  It shares the status
+        #: block's second line with 'what Apply to card would write': the
+        #: block is two lines, and both of these are the same question -
+        #: what the button under them would do.
+        self._plan_text = ""
+        #: The two modals.  Their widgets are built on demand and bound to
+        #: the panel's own variables, so the tab has one form whether a
+        #: dialog is open or not (and the tests can drive either).
+        self._image_dialog = None
+        self._menu_dialog = None
+        self._edit_backup = None        # the row a cancelled edit restores
+        self._menu_backup = None
+        #: Widgets that live only while a dialog is up.
+        self._video_entry = self._video_btn = self._video_time = None
+        self._clip_widgets = ()
+        self._default_spin = None
+        self._bypass_chk = None
+        #: Every line the tools print, in the order they printed it.  The
+        #: tab has NO output pane of its own: the lines go to the app's Log
+        #: at the foot of the window, the one log the whole app writes to
+        #: (David, 2026-09-02: "why is the tool output separate from the
+        #: logs section at the bottom?").  This is the same list, kept so a
+        #: message the one-line status block had to clip can still be
+        #: read back - and so the tests can read what was said.
+        self._lines = []
         #: EDITING MODE.  Set by a load: the card the form came off, the
         #: directory its media was extracted into, the form as it was read
         #: (the baseline every diff is against), the report itself, and
@@ -1270,7 +1894,7 @@ class MultibootPanel:
         # follows every keystroke while a card is loaded.
         for var in (self._move_var, self._confirm_var, self._volume_var,
                     self._timeout_var, self._default_var, self._bypass_var):
-            var.trace_add("write", lambda *_a: self._update_edit_status())
+            var.trace_add("write", lambda *_a: self._menu_changed())
         # The preview.  Frames are cached per (form fingerprint, highlight,
         # frame index) -> PPM path; the frame counts per (fingerprint,
         # highlight), learned from the selector's own log line.
@@ -1280,18 +1904,53 @@ class MultibootPanel:
         self._pv_cache = {}
         self._pv_totals = {}
         self._pv_bin = ""               # the selector the last run named
-        self._pv_ready = None           # fingerprint whose media is prepared
+        self._pv_bin_at = 0.0           # ...and when it named it
+        #: (MEDIA fingerprint, media DIR) that is prepared.  The directory
+        #: belongs in the key: it is derived from the output path, which
+        #: media_fingerprint deliberately excludes - so retyping the output
+        #: left the prepared media in the OLD directory and the new one
+        #: empty, and the next build wrote a text-only card.
+        self._pv_ready = None
+        #: Directories the preview made for itself, so a half-typed output
+        #: path does not leave a preview/ and a media/ behind on disk.
+        self._pv_made = set()
         self._pv_photo = None           # PhotoImage ref (must stay alive)
         self._pv_shown = None           # (highlight, frame) on the canvas
+        self._pv_src = None             # (ppm, highlight, frame, total) shown
         self._pv_loading = False        # a programmatic spinbox write
         self._hl_touched = False        # Highlight typed by hand: stop following Default
         self._play_job = None
         self._play_fp = None
         self._play_hl = 0
+        #: THE PREVIEW FOLLOWS THE FORM.  Every field schedules a re-render
+        #: ~350 ms after the last keystroke, coalesced into one run: a text
+        #: change costs one snapshot, only a media change pays for a
+        #: prepare (see :func:`media_fingerprint`).  ``PAD_MULTIBOOT_AUTO=0``
+        #: and the panel flag both turn it off - the screenshot rig and most
+        #: tests want a tab that starts no tools by itself.
+        self._auto_preview = tk.BooleanVar(
+            value=os.environ.get("PAD_MULTIBOOT_AUTO", "1") != "0")
+        self._pv_debounce_job = None
+        self._pv_pending = 0            # renders coalesced by the debounce
+        #: The size of the preview box the window currently has room for.
+        self._pv_w, self._pv_h = PREVIEW_W, PREVIEW_H
+        #: A corrected 'Selector build' path, or one the rig has just
+        #: installed, must be picked up - the binary the last run named is
+        #: not the answer for a different path.
+        self._selector_var.trace_add("write",
+                                     lambda *_a: setattr(self, "_pv_bin", ""))
         self._default_var.trace_add("write", lambda *_a: self._follow_default())
         self._hl_var.trace_add("write", lambda *_a: self._hl_changed(typed=True))
         self._frame_var.trace_add("write",
                                   lambda *_a: self._frame_changed(typed=True))
+        # ...and everything that changes the picture asks for a re-render.
+        for var in (self._ed_title, self._ed_sub, self._ed_art, self._ed_anim,
+                    self._ed_music, self._ed_art_video, self._ed_art_time,
+                    self._ed_anim_start, self._ed_anim_seconds,
+                    self._ed_anim_fps, self._move_var, self._confirm_var,
+                    self._volume_var, self._timeout_var, self._default_var,
+                    self._out_var, self._selector_var):
+            var.trace_add("write", lambda *_a: self.schedule_preview())
 
     # ------------------------------------------------------------------
     # plumbing shared with the Emulate panel
@@ -1322,7 +1981,7 @@ class MultibootPanel:
                 fn()
             except tk.TclError:
                 pass
-        if self._busy or not self._queue.empty():
+        if self._busy or self._pv_busy or not self._queue.empty():
             try:
                 self._drain_job = self._timer().after(self.DRAIN_MS,
                                                       self._drain)
@@ -1333,8 +1992,8 @@ class MultibootPanel:
         if event is not None and str(event.widget) != str(self._parent):
             return
         self._stopped = True
-        for attr in ("_drain_job", "_play_job"):
-            job = getattr(self, attr)
+        for attr in ("_drain_job", "_play_job", "_pv_debounce_job"):
+            job = getattr(self, attr, None)
             if job is not None:
                 try:
                     self._timer().after_cancel(job)
@@ -1347,360 +2006,616 @@ class MultibootPanel:
     # ------------------------------------------------------------------
 
     def build(self, frame):
-        pad = {"padx": 10, "pady": 4}
-        ttk.Label(
-            frame, justify=tk.LEFT, wraplength=820,
-            text=("Builds ONE SD card that carries several complete game "
-                  "images and a menu at power-up: flippers choose, START "
-                  "boots - stock code and a custom build on the same machine "
-                  "without swapping cards.\n"
-                  "The first image is the primary (its boot files are the "
-                  "card's, and the machine falls back to it). Media and the "
-                  "card are made by the rig's tools under WSL; nothing here "
-                  "touches the images you pick.")).pack(anchor=tk.W, **pad)
-        self._build_images(frame, pad)
-        self._build_menu(frame, pad)
-        self._build_output(frame, pad)
-        self._build_actions(frame, pad)
-        self._build_edit_row(frame, pad)
-        self._plan_lbl = ttk.Label(frame, justify=tk.LEFT, wraplength=820,
-                                   text="")
-        self._plan_lbl.pack(anchor=tk.W, **pad)
-        self._hint = ttk.Label(frame, justify=tk.LEFT, wraplength=820,
-                               foreground="#888", text="")
-        self._hint.pack(anchor=tk.W, **pad)
-        self._build_preview(frame, pad)
-        self._build_log(frame, pad)
+        """THE SHAPE OF THE TAB - ONE COLUMN, top to bottom, in the order a
+        person works:
+
+        1. where the card comes from - Load card… / New card… and the path,
+        2. the PREVIEW, the full width of the tab and the centre of it,
+        3. the IMAGES TABLE right underneath, as wide as the tab: one row
+           per image carrying that image's own settings in columns, four
+           icon columns at the right edge that act on the row they sit in,
+           and a dim '+ Add an image…' row at the bottom that adds one,
+        4. one bottom bar - Menu settings… on the left, the actions on the
+           right - and the status under it.
+
+        No side-by-side columns and no reflow: the arrangement is the same
+        at every width, and the width the window gives goes to the picture
+        and to the table's own columns.  The detail the table has no room
+        for is behind two modals, and the tools' own output goes to the
+        app's Log at the foot of the window - the one log the whole app
+        writes to - rather than to a pane of this tab's own."""
+        self._frame = frame
+        th = THEMES.get(self._theme_fn()) or THEMES["dark"]
+        outer = ttk.Frame(frame)
+        outer.pack(fill=tk.BOTH, expand=True, padx=10, pady=(8, 6))
+        self._outer = outer
+        self._build_source(outer, th)
+        self._build_preview(outer, th)
+        self._build_table(outer, th)
+        self._build_actions(outer, th)
+        self._build_status(outer, th)
         frame.bind("<Destroy>", self._on_destroy, add="+")
+        outer.bind("<Configure>", self._on_configure, add="+")
         self._set_busy(False)
         self._sync_editor_states()
+        self._update_menu_summary()
+        self._refresh_tree()
+        self._pv_placeholder()
+        self._ok("Load a card you already built, or press + in the table to "
+                 "add the first image.")
 
-    def _build_images(self, frame, pad):
-        box = ttk.LabelFrame(
-            frame, text="Images on the card (first = primary, the stock one)")
-        box.pack(fill=tk.X, **pad)
-        top = ttk.Frame(box)
-        top.pack(fill=tk.X, padx=8, pady=(6, 2))
-        cols = ("idx", "image", "title", "subtitle", "art", "anim", "music")
-        self._tree = ttk.Treeview(top, columns=cols, show="headings",
-                                  height=4, selectmode="browse")
-        for col, head, width, stretch in (
-                ("idx", "#", 28, False), ("image", "Image", 300, True),
-                ("title", "Title", 130, False),
-                ("subtitle", "Subtitle", 150, True),
-                ("art", "Art", 110, False), ("anim", "Animation", 150, False),
-                ("music", "Music", 80, False)):
-            self._tree.heading(col, text=head)
-            self._tree.column(col, width=width, stretch=stretch,
-                              anchor=tk.W)
-        sb = ttk.Scrollbar(top, orient=tk.VERTICAL, command=self._tree.yview)
-        self._tree.configure(yscrollcommand=sb.set)
-        self._tree.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        sb.pack(side=tk.LEFT, fill=tk.Y)
-        self._tree.bind("<<TreeviewSelect>>", lambda _e: self._load_editor())
+    # -- 1. where the card comes from ----------------------------------
 
-        btns = ttk.Frame(box)
-        btns.pack(fill=tk.X, padx=8, pady=2)
-        self._add_btn = ttk.Button(btns, text="Add image…", width=12,
-                                   command=self._add_image)
-        self._add_btn.pack(side=tk.LEFT)
-        self._remove_btn = ttk.Button(btns, text="Remove", width=9,
-                                      command=self._remove_image)
-        self._remove_btn.pack(side=tk.LEFT, padx=(6, 0))
-        self._up_btn = ttk.Button(btns, text="Up", width=6,
-                                  command=lambda: self._move_image(-1))
-        self._up_btn.pack(side=tk.LEFT, padx=(6, 0))
-        self._down_btn = ttk.Button(btns, text="Down", width=6,
-                                    command=lambda: self._move_image(1))
-        self._down_btn.pack(side=tk.LEFT, padx=(6, 0))
-        ttk.Label(btns, foreground="#888",
-                  text="Select a row to edit its menu text and media below."
-                  ).pack(side=tk.LEFT, padx=(16, 0))
-
-        ed = ttk.Frame(box)
-        ed.pack(fill=tk.X, padx=8, pady=(2, 6))
-        text = ttk.Frame(ed)
-        text.pack(fill=tk.X)
-        ttk.Label(text, text="Title:", width=13).grid(row=0, column=0,
-                                                      sticky=tk.W, pady=2)
-        self._ed_title_entry = ttk.Entry(text, textvariable=self._ed_title,
-                                         width=30)
-        self._ed_title_entry.grid(row=0, column=1, sticky=tk.W, pady=2)
-        ttk.Label(text, text="Subtitle:").grid(row=0, column=2, sticky=tk.W,
-                                               padx=(12, 4), pady=2)
-        ttk.Entry(text, textvariable=self._ed_sub, width=44).grid(
-            row=0, column=3, sticky=tk.EW, pady=2)
-        text.columnconfigure(3, weight=1)
-        # Two independent stacks under the text: the picture on the left,
-        # the clip on the right.  Each grids its own columns, so the video
-        # frame's time field and the clip's three numbers widen nothing
-        # but their own stack.
-        stacks = ttk.Frame(ed)
-        stacks.pack(fill=tk.X)
-        left = ttk.Frame(stacks)
-        left.pack(side=tk.LEFT, anchor=tk.N)
-        right = ttk.Frame(stacks)
-        right.pack(side=tk.LEFT, anchor=tk.N, padx=(24, 0))
-        self._media_row(left, 0, 0, "Art:", self._ed_art, ART_CHOICES,
-                        [("Pictures", "*.png *.jpg *.jpeg"),
-                         ("Videos", "*.mp4 *.mov *.mkv *.avi")])
-        # 13, not 12: "Video frame:" is twelve characters and a 12-wide ttk
-        # label clips the colon (the tab's first screenshot lost "Move
-        # soun" the same way at 10).
-        ttk.Label(left, text="Video frame:", width=13).grid(
-            row=1, column=0, sticky=tk.W, pady=2)
-        self._video_entry = ttk.Entry(left, textvariable=self._ed_art_video,
-                                      width=27)
-        self._video_entry.grid(row=1, column=1, sticky=tk.W, pady=2)
-        self._video_btn = ttk.Button(
-            left, text="Browse…", width=9,
-            command=lambda: self._browse_media(
-                self._ed_art_video, [("Videos", "*.mp4 *.mov *.mkv *.avi")]))
-        self._video_btn.grid(row=1, column=2, sticky=tk.W, padx=(4, 0), pady=2)
-        vt = ttk.Frame(left)
-        vt.grid(row=1, column=3, sticky=tk.W, padx=(8, 0), pady=2)
-        ttk.Label(vt, text="at (s):").pack(side=tk.LEFT)
-        self._video_time = ttk.Spinbox(vt, from_=0, to=36000, increment=0.5,
-                                       width=6, textvariable=self._ed_art_time)
-        self._video_time.pack(side=tk.LEFT, padx=(4, 0))
-        self._media_row(left, 2, 0, "Music:", self._ed_music, MUSIC_CHOICES,
-                        [("WAV audio", "*.wav")])
-        self._media_row(right, 0, 0, "Animation:", self._ed_anim,
-                        ANIM_CHOICES,
-                        [("Animations", "*.gif *.mp4 *.mov *.mkv *.avi")])
-        ttk.Label(right, text="Clip:").grid(row=1, column=0, sticky=tk.W,
-                                            pady=2)
-        clip = ttk.Frame(right)
-        clip.grid(row=1, column=1, columnspan=3, sticky=tk.W, pady=2)
-        self._clip_widgets = []
-        for label, var, width in (("Start (s):", self._ed_anim_start, 6),
-                                  ("Length (s):", self._ed_anim_seconds, 5),
-                                  ("FPS:", self._ed_anim_fps, 4)):
-            ttk.Label(clip, text=label).pack(side=tk.LEFT,
-                                             padx=(0 if not self._clip_widgets
-                                                   else 10, 4))
-            sp = ttk.Spinbox(clip, from_=0, to=36000, width=width,
-                             textvariable=var)
-            sp.pack(side=tk.LEFT)
-            self._clip_widgets.append(sp)
-        ttk.Label(right, foreground="#888", wraplength=560, justify=tk.LEFT,
-                  text="auto = the image's own logo / attract clip; none = "
-                       "text only. Clip fields left blank = the tool's "
-                       "defaults (from 0 s, 3 s long, 10 fps)").grid(
-            row=2, column=0, columnspan=4, sticky=tk.W, pady=2)
-
-    def _media_row(self, parent, row, col, label, var, choices, filetypes):
-        """Label + editable combobox (the words, or a typed path) + Browse."""
-        # 13, not 10: "Move sound:" is eleven characters and a 10-wide ttk
-        # label showed "Move soun" (the first screenshot of the tab).
-        kw = {"width": 13} if col == 0 else {}
-        ttk.Label(parent, text=label, **kw).grid(
-            row=row, column=col, sticky=tk.W, padx=(0 if col == 0 else 12, 4),
-            pady=2)
-        cb = ttk.Combobox(parent, textvariable=var, values=list(choices),
-                          width=24)
-        cb.grid(row=row, column=col + 1, sticky=tk.W, pady=2)
-        ttk.Button(parent, text="Browse…", width=9,
-                   command=lambda: self._browse_media(var, filetypes)).grid(
-            row=row, column=col + 2, sticky=tk.W, padx=(4, 0), pady=2)
-        return cb
-
-    def _build_menu(self, frame, pad):
-        box = ttk.LabelFrame(frame, text="Menu")
-        box.pack(fill=tk.X, **pad)
-        g = ttk.Frame(box)
-        g.pack(fill=tk.X, padx=8, pady=6)
-        self._media_row(g, 0, 0, "Move sound:", self._move_var, SOUND_CHOICES,
-                        [("WAV audio", "*.wav")])
-        self._media_row(g, 0, 3, "Confirm sound:", self._confirm_var,
-                        SOUND_CHOICES, [("WAV audio", "*.wav")])
-        ttk.Label(g, foreground="#888",
-                  text="auto = a click and a stinger pulled from the primary "
-                       "image; synth = generated tones. The confirm sound "
-                       "plays to the end before the game starts.").grid(
-            row=1, column=0, columnspan=6, sticky=tk.W, pady=(0, 4))
-        ttk.Label(g, text="Volume:", width=13).grid(row=2, column=0,
-                                                    sticky=tk.W, pady=2)
-        ttk.Spinbox(g, from_=0, to=100, width=5,
-                    textvariable=self._volume_var).grid(
-            row=2, column=1, sticky=tk.W, pady=2)
-        ttk.Label(g, text="Countdown (s):").grid(row=2, column=3, sticky=tk.W,
-                                                 padx=(12, 4), pady=2)
-        cd = ttk.Frame(g)
-        cd.grid(row=2, column=4, columnspan=2, sticky=tk.W, pady=2)
-        ttk.Spinbox(cd, from_=0, to=600, width=5,
-                    textvariable=self._timeout_var).pack(side=tk.LEFT)
-        ttk.Label(cd, text="0 = wait for START", foreground="#888").pack(
-            side=tk.LEFT, padx=(6, 0))
-        ttk.Label(g, text="Default:", width=13).grid(row=3, column=0,
-                                                     sticky=tk.W, pady=2)
-        di = ttk.Frame(g)
-        di.grid(row=3, column=1, columnspan=2, sticky=tk.W, pady=2)
-        self._default_spin = ttk.Spinbox(di, from_=0, to=0, width=5,
-                                         textvariable=self._default_var)
-        self._default_spin.pack(side=tk.LEFT)
-        ttk.Label(di, text="image index highlighted at power-up (the last "
-                           "choice wins once one was made)",
-                  foreground="#888").pack(side=tk.LEFT, padx=(6, 0))
-        byp = ttk.Frame(g)
-        byp.grid(row=4, column=0, columnspan=6, sticky=tk.W, pady=(4, 0))
-        self._bypass_chk = ttk.Checkbutton(
-            byp, text="Bypass game validation on every image",
-            variable=self._bypass_var)
-        self._bypass_chk.pack(side=tk.LEFT)
-        self._bypass_badge = self._info_badge(byp, self.BYPASS_TIP)
-        self._bypass_badge.pack(side=tk.LEFT, padx=(6, 0))
-
-    def _build_output(self, frame, pad):
-        box = ttk.LabelFrame(frame, text="Output")
-        box.pack(fill=tk.X, **pad)
-        g = ttk.Frame(box)
-        g.pack(fill=tk.X, padx=8, pady=6)
-        ttk.Label(g, text="Card image:", width=14).grid(row=0, column=0,
-                                                        sticky=tk.W, pady=2)
-        self._out_entry = ttk.Entry(g, textvariable=self._out_var)
-        self._out_entry.grid(row=0, column=1, sticky=tk.EW, pady=2)
-        ttk.Button(g, text="Browse…", width=10, command=self._browse_out).grid(
-            row=0, column=2, sticky=tk.W, padx=(6, 0), pady=2)
-        ttk.Label(g, text="Selector build:", width=14).grid(
-            row=1, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(g, textvariable=self._selector_var).grid(
-            row=1, column=1, sticky=tk.EW, pady=2)
-        ttk.Label(g, foreground="#888",
-                  text="WSL path of the built selector (the rig installs it "
-                       "there on the first Boot-selector run)").grid(
-            row=2, column=1, sticky=tk.W)
-        g.columnconfigure(1, weight=1)
-
-    def _build_actions(self, frame, pad):
-        row = ttk.Frame(frame)
-        row.pack(fill=tk.X, **pad)
-        self._plan_btn = ttk.Button(row, text="Check size", width=11,
-                                    command=self._check_size)
-        self._plan_btn.pack(side=tk.LEFT)
-        self._prepare_btn = ttk.Button(row, text="Prepare media", width=14,
-                                       command=self._prepare_media)
-        self._prepare_btn.pack(side=tk.LEFT, padx=(6, 0))
-        self._build_btn = ttk.Button(row, text="Build & verify", width=14,
-                                     command=self._build_card)
-        self._build_btn.pack(side=tk.LEFT, padx=(6, 0))
-        self._flash_btn = ttk.Button(row, text="Flash to SD card…", width=17,
-                                     command=self._flash)
-        self._flash_btn.pack(side=tk.LEFT, padx=(6, 0))
-        self._emu_btn = ttk.Button(row, text="Run in emulator", width=15,
-                                   command=self._run_emulator)
-        self._emu_btn.pack(side=tk.LEFT, padx=(6, 0))
-        self._bypass_btn = ttk.Button(row, text="Bypass an existing card…",
-                                      width=24, command=self._bypass_existing)
-        self._bypass_btn.pack(side=tk.LEFT, padx=(6, 0))
-        self._action_btns = [self._plan_btn, self._prepare_btn,
-                             self._build_btn, self._flash_btn, self._emu_btn,
-                             self._bypass_btn, self._add_btn,
-                             self._remove_btn, self._up_btn, self._down_btn]
-
-    def _build_edit_row(self, frame, pad):
-        """A card that already exists: read it back into the form, and write
-        the menu changes into it without building anything.
-
-        Its own row, NOT the action row above: this app unmaps the last
-        widgets packed into a row that overflows, and the action row is
-        already six buttons wide on a 1024-pixel desktop."""
-        row = ttk.Frame(frame)
-        row.pack(fill=tk.X, padx=10, pady=(0, 2))
-        ttk.Label(row, text="A card you already built:").pack(side=tk.LEFT)
+    def _build_source(self, parent, th):
+        """The first row, because loading a card you already built is the
+        first thing anyone does here."""
+        row = ttk.Frame(parent)
+        row.pack(fill=tk.X)
+        self._src_row = row
         self._load_btn = ttk.Button(row, text="Load card…", width=12,
                                     command=self._load_card_dialog)
-        self._load_btn.pack(side=tk.LEFT, padx=(8, 0))
-        self._apply_btn = ttk.Button(row, text="Apply to card", width=14,
-                                     command=self.apply_to_card)
-        self._apply_btn.pack(side=tk.LEFT, padx=(6, 0))
-        self._action_btns += [self._load_btn, self._apply_btn]
-        ttk.Label(frame, justify=tk.LEFT, wraplength=820, foreground="#888",
-                  text="Load fills every field above from the card - images, "
-                       "titles, subtitles, art, animation, music, sounds, "
-                       "volume, countdown, default, bypass - and the preview "
-                       "then draws that card's own menu. Apply writes those "
-                       "back into it with one inject, in seconds: adding, "
-                       "removing, reordering or replacing an IMAGE is the "
-                       "one thing it cannot do, and needs Build & verify."
-                  ).pack(anchor=tk.W, padx=10)
-        self._edit_lbl = ttk.Label(frame, justify=tk.LEFT, wraplength=820,
-                                   text="")
-        self._edit_lbl.pack(anchor=tk.W, padx=10, pady=(2, 0))
+        self._load_btn.pack(side=tk.LEFT)
+        self._load_tip = _Tooltip(
+            self._load_btn,
+            "Reads a multi-image card you already built and fills every "
+            "field from it - images, titles, subtitles, art, animation, "
+            "music, sounds, volume, countdown, default and bypass. The "
+            "preview then draws THAT card's menu, and Apply to card writes "
+            "your changes back into it in seconds.", self._theme_fn)
+        self._new_btn = ttk.Button(row, text="New card…", width=11,
+                                   command=self._new_card_clicked)
+        self._new_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._new_tip = _Tooltip(
+            self._new_btn,
+            "Starts a fresh card: clears the images and the menu, and "
+            "leaves editing mode so Build & verify writes a new image.",
+            self._theme_fn)
+        ttk.Label(row, text="Card image:").pack(side=tk.LEFT, padx=(16, 6))
+        # The tab's own "what is this" lives here rather than in a
+        # paragraph across the top: the picture below is the subject, and
+        # the ? button carries the rest.
+        self._about_badge = self._info_badge(row, self.ABOUT_TIP)
+        self._about_badge.pack(side=tk.RIGHT, padx=(8, 0))
+        self._browse_btn = ttk.Button(row, text="Browse…", width=10,
+                                      command=self._browse_out)
+        self._browse_btn.pack(side=tk.RIGHT)
+        self._out_entry = ttk.Entry(row, textvariable=self._out_var)
+        self._out_entry.pack(side=tk.LEFT, fill=tk.X, expand=True,
+                             padx=(0, 6))
 
-    def _build_preview(self, frame, pad):
-        box = ttk.LabelFrame(frame, text="Preview - the boot menu as the "
-                                         "machine will draw it")
-        box.pack(fill=tk.X, **pad)
-        th = THEMES.get(self._theme_fn()) or THEMES["dark"]
-        inner = ttk.Frame(box)
-        inner.pack(fill=tk.X, padx=8, pady=6)
+    # -- 2. the preview, full width -------------------------------------
+
+    def _build_preview(self, parent, th):
+        """The preview: the boot menu as the machine will draw it, the
+        whole width of the tab, re-rendered by itself whenever a field
+        changes.  No button of its own - the redraw and the auto-update
+        toggle are on its right-click menu, where a control nobody needs
+        twice a session belongs."""
+        wrap = ttk.Frame(parent)
+        wrap.pack(fill=tk.X, pady=(8, 0))
+        self._pv_wrap = wrap
+        holder = ttk.Frame(wrap)
+        holder.pack(fill=tk.X)
+        self._pv_holder = holder
+        # Not packed with fill: the canvas is sized to the PICTURE (see
+        # _on_configure), so there are no black bars around it, and it is
+        # centred in whatever width is left over.
         self._pv_canvas = tk.Canvas(
-            inner, width=PREVIEW_W, height=PREVIEW_H, bg="#0b0e14",
-            highlightthickness=1, highlightbackground=th["border"])
-        self._pv_canvas.pack(side=tk.LEFT)
-        self._pv_placeholder()
-        side = ttk.Frame(inner)
-        side.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(12, 0))
-        self._render_btn = ttk.Button(side, text="Render preview", width=16,
-                                      command=self.render_preview)
-        self._render_btn.grid(row=0, column=0, columnspan=2, sticky=tk.W,
-                              pady=(0, 8))
-        ttk.Label(side, text="Highlight:").grid(row=1, column=0, sticky=tk.W,
-                                                pady=2)
-        hl = ttk.Frame(side)
-        hl.grid(row=1, column=1, sticky=tk.W, pady=2)
-        self._hl_spin = ttk.Spinbox(hl, from_=0, to=0, width=5,
+            holder, width=self._pv_w, height=self._pv_h, bg="#0b0e14",
+            highlightthickness=1, highlightbackground=th["border"], bd=0)
+        self._pv_canvas.pack()
+        strip = ttk.Frame(wrap, height=30)
+        strip.pack(fill=tk.X, pady=(4, 0))
+        strip.pack_propagate(False)
+        self._pv_strip = strip
+        ttk.Label(strip, text="Image:").pack(side=tk.LEFT, padx=(0, 3))
+        self._hl_spin = ttk.Spinbox(strip, from_=0, to=0, width=4,
                                     textvariable=self._hl_var,
                                     command=self._hl_changed)
         self._hl_spin.pack(side=tk.LEFT)
-        ttk.Label(hl, text="image index (follows Default until typed)",
-                  foreground="#888").pack(side=tk.LEFT, padx=(6, 0))
-        ttk.Label(side, text="Animation frame:").grid(row=2, column=0,
-                                                      sticky=tk.W, pady=2)
-        fr = ttk.Frame(side)
-        fr.grid(row=2, column=1, sticky=tk.W, pady=2)
-        self._frame_spin = ttk.Spinbox(fr, from_=0, to=999, width=5,
+        ttk.Label(strip, text="Frame:").pack(side=tk.LEFT, padx=(10, 3))
+        self._frame_spin = ttk.Spinbox(strip, from_=0, to=999, width=4,
                                        textvariable=self._frame_var,
                                        command=self._frame_changed)
         self._frame_spin.pack(side=tk.LEFT)
-        self._play_chk = ttk.Checkbutton(fr, text="Play",
+        self._play_chk = ttk.Checkbutton(strip, text="Play",
                                          variable=self._play_var,
                                          command=self._play_toggled)
-        self._play_chk.pack(side=tk.LEFT, padx=(10, 0))
-        self._pv_status = ttk.Label(side, text="", wraplength=380,
-                                    justify=tk.LEFT)
-        self._pv_status.grid(row=3, column=0, columnspan=2, sticky=tk.W,
-                             pady=(8, 0))
-        ttk.Label(side, foreground="#888", wraplength=380, justify=tk.LEFT,
-                  text=("Drawn by the selector itself (built from this "
-                        "checkout, run under qemu against the card rootfs) "
-                        "from the form above: the same titles, art and "
-                        "animation the card will carry, the countdown as "
-                        "if the menu had just appeared. Play steps the "
-                        "highlighted card's animation - frames are rendered "
-                        "as it goes and kept until the form changes. The "
-                        "media it prepares is the build's, so the card "
-                        "matches the picture.")).grid(
-            row=4, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+        self._play_chk.pack(side=tk.LEFT, padx=(8, 0))
+        self._pv_status = ttk.Label(strip, text="", width=1,
+                                    justify=tk.LEFT, anchor=tk.W)
+        self._pv_status.pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
+                             padx=(12, 0))
+        self._pv_tip = _Tooltip(self._pv_canvas, self.PREVIEW_TIP,
+                                self._theme_fn)
+        self._build_preview_menu()
 
-    def _build_log(self, frame, pad):
-        box = ttk.LabelFrame(frame, text="Tool output")
-        box.pack(fill=tk.BOTH, expand=True, **pad)
-        th = THEMES.get(self._theme_fn()) or THEMES["dark"]
-        _sans, mono = platform_font()
-        inner = ttk.Frame(box)
-        inner.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
-        self._log_text = tk.Text(
-            inner, height=8, wrap=tk.NONE, state=tk.DISABLED,
-            font=(mono, 9), bg=th["field_bg"], fg=th["fg"],
-            insertbackground=th["fg"], relief=tk.FLAT,
-            highlightthickness=1, highlightbackground=th["border"])
-        sb = ttk.Scrollbar(inner, orient=tk.VERTICAL,
-                           command=self._log_text.yview)
-        self._log_text.configure(yscrollcommand=sb.set)
-        self._log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    def _build_preview_menu(self):
+        """'Redraw now' and 'Update automatically', on the picture itself.
+        There is no Render now BUTTON: the preview follows the form by
+        itself, and a manual redraw is a once-a-session thing."""
+        menu = tk.Menu(self._pv_canvas, tearoff=0)
+        menu.add_command(label="Redraw the preview now",
+                         command=self.render_preview)
+        menu.add_checkbutton(label="Update the preview automatically",
+                             variable=self._auto_preview,
+                             command=self.schedule_preview)
+        self._pv_menu = menu
+        for widget in (self._pv_canvas, self._pv_strip):
+            widget.bind("<Button-3>", self._popup_preview_menu)
+
+    def _popup_preview_menu(self, event=None):
+        menu = getattr(self, "_pv_menu", None)
+        if menu is None:
+            return None
+        try:
+            menu.entryconfigure(0, state=tk.DISABLED if self._busy
+                                else tk.NORMAL)
+        except tk.TclError:                             # pragma: no cover
+            pass
+        x = getattr(event, "x_root", self._pv_canvas.winfo_rootx() + 20)
+        y = getattr(event, "y_root", self._pv_canvas.winfo_rooty() + 20)
+        try:
+            menu.tk_popup(int(x), int(y))
+        finally:
+            try:
+                menu.grab_release()
+            except tk.TclError:                         # pragma: no cover
+                pass
+        return "break"
+
+    # -- 3. the images table --------------------------------------------
+
+    #: The table, left to right: ``(id, heading, width, minwidth,
+    #: stretch)``.  The two text columns stretch and everything else keeps
+    #: its width, so widening the window widens the TITLES - and the four
+    #: icon columns stay pinned to the right edge where the hand expects
+    #: them.  ``code`` is filled by whatever reports the game code version
+    #: of an image; blank until then, and blank for a row that has none.
+    TABLE_COLUMNS = (
+        ("idx", "#", 30, 30, False),
+        ("title", "Title", 150, 70, True),
+        ("sub", "Subtitle", 160, 60, True),
+        ("art", "Picture", 110, 60, True),
+        ("anim", "Animation", 130, 60, True),
+        ("music", "Music", 90, 50, True),
+        ("sound", "Confirm", 80, 50, False),
+        ("code", "Code", 90, 50, False),
+        ("edit", "", 26, 26, False),
+        ("del", "", 26, 26, False),
+        ("up", "", 26, 26, False),
+        ("down", "", 26, 26, False),
+    )
+
+    #: The four icon columns: ``(column id, glyph, dimmed glyph, method)``.
+    #: The dimmed glyph is what the cell shows when the action cannot do
+    #: anything from that row - the first row cannot move up, the last
+    #: cannot move down - so the arrow says so instead of silently doing
+    #: nothing.  Outline / filled rather than colour: a Treeview colours a
+    #: ROW, never one cell of it.
+    #: CHECKED IN THE SCREENSHOT, which is the only place the font fallback
+    #: shows itself: all four draw as ordinary monochrome text on Windows
+    #: (the colour fringing a 4x crop shows on them is ClearType's, and it
+    #: is on the minus sign and the digits too).  The FULL-SIZE triangles,
+    #: not the small ▴ ▾ the 'More ▾' button uses: in a 26 px column the
+    #: small ones are a weak thing to aim at.
+    ROW_ICONS = (("edit", "✎", "✎", "_icon_edit"),
+                 ("del", "−", "−", "_icon_remove"),
+                 ("up", "▲", "△", "_icon_up"),
+                 ("down", "▼", "▽", "_icon_down"))
+
+    #: The iid of the template row - the last row of the table, dim, with a
+    #: '+': an empty card shows just that row, which teaches the control.
+    ADD_ROW = "add"
+
+    def _build_table(self, parent, th):
+        """THE IMAGES TABLE.  Wide, so each image's settings are columns
+        rather than something hidden in a dialog, and the row is where the
+        row is worked on: a pencil, a minus and two arrows at its right
+        edge, acting on that row.  A Treeview holds no widgets, so the
+        icons are narrow glyph columns and one <Button-1> binding that asks
+        which row and which column the click landed in - the standard way,
+        and it reads as icons."""
+        box = ttk.Frame(parent)
+        box.pack(fill=tk.X, pady=(8, 0))
+        self._table_box = box
+        cols = tuple(c[0] for c in self.TABLE_COLUMNS)
+        self._tree = ttk.Treeview(box, columns=cols, show="headings",
+                                  height=LIST_MIN_ROWS, selectmode="browse")
+        for name, head, width, minwidth, stretch in self.TABLE_COLUMNS:
+            self._tree.heading(name, text=head)
+            centred = name == "idx" or not head      # the index, the icons
+            self._tree.column(name, width=width, minwidth=minwidth,
+                              stretch=stretch,
+                              anchor=tk.CENTER if centred else tk.W)
+        self._tree.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        sb = ttk.Scrollbar(box, orient=tk.VERTICAL, command=self._tree.yview)
+        self._list_sb = sb
+        self._tree.configure(yscrollcommand=sb.set)
         sb.pack(side=tk.LEFT, fill=tk.Y)
+        # The template row is dim, so it reads as an invitation rather than
+        # as an image that is already on the card.
+        self._tree.tag_configure("add", foreground=th["gray"])
+        self._tree.bind("<<TreeviewSelect>>", lambda _e: self._row_selected())
+        self._tree.bind("<Button-1>", self._table_click)
+        self._tree.bind("<Double-1>", self._table_double_click)
+        self._tree.bind("<Return>", lambda _e: self.edit_image())
+        self._build_list_menu(th)
+        self._row_lbl = ttk.Label(parent, foreground=th["gray"], text="",
+                                  anchor=tk.W)
+        self._row_lbl.pack(fill=tk.X, pady=(3, 0))
+        self._row_tip = _Tooltip(self._row_lbl, "", self._theme_fn)
+
+    def _build_list_menu(self, th):
+        """The same five commands as the row icons, on a right-click.
+
+        The icons are the way in; this costs nothing, is where a hand
+        trained on every other list looks, and is what a keyboard reaches
+        (the menu key, and Enter on a row)."""
+        menu = tk.Menu(self._tree, tearoff=0)
+        for label, attr, needs_row in self.LIST_ACTIONS:
+            if label is None:
+                menu.add_separator()
+                continue
+            menu.add_command(label=label,
+                             command=lambda a=attr: getattr(self, a)())
+        self._list_menu = menu
+        self._tree.bind("<Button-3>", self._popup_list_menu)
+        for seq in ("<App>", "<Shift-F10>"):
+            try:
+                self._tree.bind(seq, self._popup_list_menu)
+            except tk.TclError:                         # pragma: no cover
+                pass
+
+    #: The right-click menu, in the order the icons are in.  ``needs_row``
+    #: entries are greyed when the click missed every image row, so a
+    #: right-click on the template row or on empty space offers Add… alone.
+    LIST_ACTIONS = (("Add image…", "_add_image", False),
+                    ("Edit image…", "edit_image", True),
+                    ("Remove image", "_remove_image", True),
+                    (None, None, False),
+                    ("Move up", "_move_up", True),
+                    ("Move down", "_move_down", True))
+
+    def _popup_list_menu(self, event=None):
+        """Pop the menu up under the pointer, over the row it landed on."""
+        menu = getattr(self, "_list_menu", None)
+        if menu is None:
+            return None
+        row = None
+        if event is not None and getattr(event, "x_root", None) is not None:
+            item = self._row_at(event)
+            if item is not None:
+                self._select_row(item)
+                row = item
+        if row is None:
+            row = self._selected()
+        i = 0
+        for label, _attr, needs_row in self.LIST_ACTIONS:
+            if label is None:
+                i += 1
+                continue
+            live = (row is not None) if needs_row else True
+            if live and self._busy:
+                live = False        # a run is writing the card being edited
+            try:
+                menu.entryconfigure(i, state=tk.NORMAL if live
+                                    else tk.DISABLED)
+            except tk.TclError:                         # pragma: no cover
+                pass
+            i += 1
+        x = getattr(event, "x_root", None)
+        y = getattr(event, "y_root", None)
+        if x is None or y is None:                      # a keyboard opening
+            x = self._tree.winfo_rootx() + 20
+            y = self._tree.winfo_rooty() + 20
+        try:
+            menu.tk_popup(int(x), int(y))
+        finally:
+            try:
+                menu.grab_release()
+            except tk.TclError:                         # pragma: no cover
+                pass
+        return "break"
+
+    def _row_at(self, event):
+        """The image index the pointer is over, or None (the template row,
+        the heading and empty space are all None)."""
+        try:
+            item = self._tree.identify_row(event.y)
+        except tk.TclError:                             # pragma: no cover
+            return None
+        try:
+            i = int(item)
+        except (TypeError, ValueError):
+            return None
+        return i if 0 <= i < len(self._rows) else None
+
+    def _column_at(self, event):
+        """The id of the column the pointer is over ('title', 'up', …), or
+        '' when it is not over a cell."""
+        try:
+            if self._tree.identify_region(event.x, event.y) != "cell":
+                return ""
+            col = self._tree.identify_column(event.x)
+        except tk.TclError:                             # pragma: no cover
+            return ""
+        try:
+            n = int(str(col).lstrip("#")) - 1
+        except ValueError:
+            return ""
+        if 0 <= n < len(self.TABLE_COLUMNS):
+            return self.TABLE_COLUMNS[n][0]
+        return ""
+
+    def _select_row(self, i):
+        try:
+            self._tree.selection_set(str(i))
+            self._tree.focus(str(i))
+        except tk.TclError:                             # pragma: no cover
+            pass
+
+    def _table_click(self, event):
+        """One click in the table: the template row adds an image, an icon
+        column acts on ITS row, everything else selects as usual."""
+        try:
+            item = self._tree.identify_row(event.y)
+        except tk.TclError:                             # pragma: no cover
+            return None
+        if item == self.ADD_ROW:
+            self._add_image()
+            return "break"
+        i = self._row_at(event)
+        if i is None:
+            return None
+        col = self._column_at(event)
+        for name, _glyph, _dim, attr in self.ROW_ICONS:
+            if name == col:
+                self._select_row(i)
+                getattr(self, attr)(i)
+                return "break"
+        return None
+
+    def _table_double_click(self, event):
+        """A double-click still opens the editor - on a row, and on the
+        template row it is simply a second Add."""
+        try:
+            if self._tree.identify_row(event.y) == self.ADD_ROW:
+                return "break"          # the single click already added one
+        except tk.TclError:                             # pragma: no cover
+            pass
+        if self._column_at(event) in [c[0] for c in self.ROW_ICONS]:
+            return "break"              # the icon already acted, once
+        self.edit_image()
+        return "break"
+
+    def _icon_edit(self, i=None):
+        self.edit_image(self._selected() if i is None else i)
+
+    def _icon_remove(self, i=None):
+        self._remove_image()
+
+    def _icon_up(self, i=None):
+        self._move_image(-1)
+
+    def _icon_down(self, i=None):
+        self._move_image(1)
+
+    def _move_up(self):
+        self._move_image(-1)
+
+    def _move_down(self):
+        self._move_image(1)
+
+    # -- 4. the bottom bar, and the status ------------------------------
+
+    def _build_actions(self, parent, th):
+        """THE ONE ACTION BAR - with the source row at the top, the only
+        place in the tab a button lives.  Menu settings… on the left with
+        what it holds beside it, the two that write a card and the two
+        handoffs on the right (the contextual one green), and the rare
+        things behind one menu button.
+
+        One row, and every widget in it has an expanding neighbour: a row
+        this app overflows loses its last widget without a word."""
+        row = ttk.Frame(parent)
+        row.pack(fill=tk.X, pady=(10, 0))
+        self._action_row = row
+        self._menu_btn = ttk.Button(row, text="Menu settings…", width=16,
+                                    command=self.open_menu_settings)
+        self._menu_btn.pack(side=tk.LEFT)
+        self._more_btn = ttk.Menubutton(row, text="More  ▾", width=9)
+        menu = tk.Menu(self._more_btn, tearoff=0)
+        menu.add_command(label="Check size", command=self._check_size)
+        menu.add_command(label="Prepare media", command=self._prepare_media)
+        menu.add_separator()
+        menu.add_command(label="Bypass an existing card…",
+                         command=self._bypass_existing)
+        menu.add_separator()
+        menu.add_checkbutton(label="Update the preview automatically",
+                             variable=self._auto_preview,
+                             command=self.schedule_preview)
+        self._more_btn.configure(menu=menu)
+        self._more_menu = menu
+        self._more_btn.pack(side=tk.RIGHT)
+        self._emu_btn = ttk.Button(row, text="Run in emulator", width=16,
+                                   command=self._run_emulator)
+        self._emu_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        self._flash_btn = ttk.Button(row, text="Flash to SD card…", width=18,
+                                     command=self._flash)
+        self._flash_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        self._build_btn = ttk.Button(row, text="Build & verify", width=15,
+                                     command=self._build_card,
+                                     style="Go.TButton")
+        self._build_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        self._apply_btn = ttk.Button(row, text="Apply to card", width=14,
+                                     command=self.apply_to_card)
+        self._apply_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        # What Menu settings… holds, in the space between the two groups -
+        # packed LAST and expanding, because this app unmaps the last
+        # widget of a row it cannot fit and the thing that gives way first
+        # has to be the one that can be read elsewhere (its tooltip).
+        self._menu_lbl = ttk.Label(row, foreground=th["gray"], text="",
+                                   width=1, anchor=tk.W)
+        self._menu_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True,
+                            padx=(10, 10))
+        self._menu_tip = _Tooltip(self._menu_lbl, "", self._theme_fn)
+        self._action_btns = [
+            self._apply_btn, self._build_btn, self._flash_btn, self._emu_btn,
+            self._more_btn, self._load_btn, self._new_btn, self._menu_btn,
+            self._browse_btn]
+
+    def _build_status(self, parent, th):
+        """The status under the bar: what just happened, and what the two
+        writing buttons would do about it.
+
+        TWO LINES, of a pinned height.  One is the live message - the state
+        and the errors, which is what the eye wants next to the buttons -
+        and the second is the consequence: what Apply to card would write,
+        or why only a rebuild can, with the card's size beside it.  The
+        height is pinned to what those lines really MEASURE (56 px over
+        three ~19 px labels was a pixel short in every state, and a box a
+        pixel short unmaps the last thing packed into it), and each label
+        is clipped to one line - a message that wrapped used to take its
+        neighbour's row with it and lose 'what Apply to card would write'
+        exactly when there was most to say.  Every word of every message is
+        in the app's Log at the foot of the window."""
+        wrap = ttk.Frame(parent)
+        wrap.pack(fill=tk.X, pady=(8, 0))
+        wrap.pack_propagate(False)
+        self._status_wrap = wrap
+        self._hint = ttk.Label(wrap, justify=tk.LEFT, anchor=tk.W, text="",
+                               foreground=th["gray"])
+        self._hint.pack(fill=tk.X)
+        self._edit_lbl = ttk.Label(wrap, justify=tk.LEFT, anchor=tk.W,
+                                   text="")
+        self._edit_lbl.pack(fill=tk.X)
+        self._status_lines = (self._hint, self._edit_lbl)
+        self._status_h = 0
+        self._fit_status_height()
+
+    #: What one status line is worth when the labels cannot be measured yet
+    #: (a headless build, a font that has not been laid out).
+    STATUS_LINE_H = 20
+
+    def _fit_status_height(self):
+        """Pin the status box to its lines' REAL height.  Measured, not
+        guessed, and re-measured on every <Configure> because the font can
+        change under a theme switch or a DPI change."""
+        wrap = getattr(self, "_status_wrap", None)
+        if wrap is None:
+            return
+        line = 0
+        for lbl in self._status_lines:
+            try:
+                line = max(line, lbl.winfo_reqheight())
+            except tk.TclError:                         # pragma: no cover
+                pass
+        line = max(line, self.STATUS_LINE_H)
+        want = line * len(self._status_lines) + 2       # a hair, not a guess
+        if want != self._status_h:
+            self._status_h = want
+            try:
+                wrap.configure(height=want)
+            except tk.TclError:                         # pragma: no cover
+                pass
+
+    @staticmethod
+    def _status_line(msg):
+        """A message as ONE line for the status block: the first line, and
+        a count of the rest (which are in the app's Log, in full).
+
+        The block is a fixed height, and a label that wraps or carries a
+        newline eats its neighbour's row - so nothing that reaches it is
+        allowed more than one line."""
+        lines = [ln.strip() for ln in (msg or "").splitlines() if ln.strip()]
+        if not lines:
+            return ""
+        if len(lines) == 1:
+            return lines[0]
+        return "%s  (+%d more - see the Log below)" % (lines[0],
+                                                       len(lines) - 1)
+
+    # -- responsive ------------------------------------------------------
+
+    def _chrome_h(self):
+        """Every pixel of the tab that is NOT the picture.
+
+        Measured from the rows themselves, and deliberately not from the
+        tab's own requested height: that is computed FROM the picture, so
+        measuring the picture against it is a loop (it was, twice).  None
+        of these depends on the canvas."""
+        h = 14 + 8 + 8 + 10 + 8         # the pads between the five rows
+        h += 4 + 2                      # the strip's pad, the canvas border
+        for name in ("_src_row", "_pv_strip", "_table_box", "_action_row",
+                     "_status_wrap", "_row_lbl"):
+            widget = getattr(self, name, None)
+            if widget is None:
+                continue
+            try:
+                h += widget.winfo_reqheight()
+            except tk.TclError:                         # pragma: no cover
+                pass
+        return h + 3                    # the row label's own pad
+
+    def _on_configure(self, event=None):
+        """The window changed size.  NOTHING MOVES BUT THE PICTURE: the
+        arrangement is the same at every width, and the preview takes the
+        height the rest of the tab does not need and the width that height
+        allows - so the canvas is exactly the picture, with no black bars
+        around it, and the tab's own height stays where it is."""
+        try:
+            width = self._outer.winfo_width()
+            window_h = self._parent.winfo_toplevel().winfo_height()
+        except tk.TclError:
+            return
+        if width <= 1:
+            return
+        # THE PICTURE TAKES THE ROOM THE REST OF THE TAB DOES NOT NEED, and
+        # the room the tab has is the window's height less the app around
+        # it - 640 px on a 1024x768 desktop, more on a taller window, so
+        # the preview really does grow with the window instead of sitting
+        # at whatever a constant said.  Never past half the machine's own
+        # frame: bigger than that is upscaling.
+        budget = TAB_BUDGET_H if window_h <= 1 else window_h - APP_CHROME_H
+        h = max(PREVIEW_MIN_H, min(PREVIEW_H, budget - self._chrome_h()))
+        # ...and only as wide as that height's own frame: 1360x768 at this
+        # height, or the window when the window is narrower than that.
+        w = min(max(PREVIEW_MIN_W, width), int(round(h * FRAME_W / FRAME_H)))
+        if (w, h) != (self._pv_w, self._pv_h):
+            self._pv_w, self._pv_h = w, h
+            try:
+                self._pv_canvas.configure(width=w, height=h)
+            except tk.TclError:
+                pass
+            self._redraw_shown()
+            self._resize_fn()
+        self._fit_status_height()
+        try:
+            self._pv_status.configure(
+                wraplength=max(120, width - self._strip_w()))
+            # ONE line each, so no message can take its neighbour's row
+            # with it: the block is a fixed height (see _build_status).
+            for lbl in self._status_lines:
+                lbl.configure(wraplength=0)
+        except tk.TclError:
+            pass
+
+    def _strip_w(self):
+        """What the preview's control strip spends on everything that is
+        not the status label - measured, so the label's wraplength is the
+        space it actually gets.  (Assumed, it was 13 px too generous and
+        the caption wrapped a word past the end of the strip.)"""
+        used = 0
+        try:
+            for child in self._pv_strip.winfo_children():
+                if child is not self._pv_status:
+                    used += child.winfo_reqwidth()
+        except tk.TclError:                             # pragma: no cover
+            return 330
+        # the padx between them: Image: (0,3), Frame: (10,3), Play (8,0),
+        # and the status label's own (12,0)
+        return used + 3 + 13 + 8 + 12
 
     def _info_badge(self, parent, tip):
         """The app's round blue (i) badge, or a plain marker without the
@@ -1720,58 +2635,44 @@ class MultibootPanel:
     # the image list
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _cell(value):
-        v = (value or "").strip()
-        return v if v.lower() in _WORDS or not v else os.path.basename(v)
+    #: The full-detail cells, kept as module functions so the Edit image…
+    #: dialog and the tests can read them without a tree.
+    _cell = staticmethod(_cell)
+    _cell_image = staticmethod(_cell_image)
+    _cell_art = staticmethod(cell_art)
+    _cell_anim = staticmethod(cell_anim)
 
-    @staticmethod
-    def _cell_image(row):
-        """The Image column: the .raw the image was copied from, said plainly
-        when this machine does not have it (a loaded card names sources that
-        may live on another disk) and when the card names none at all."""
-        p = (row.path or "").strip()
-        if not p:
-            return "(no source recorded%s)" % (
-                " - " + row.device if row.device else "")
-        if not os.path.isfile(p):
-            return p + "   [not on this machine]"
-        return p
-
-    @staticmethod
-    def _cell_art(row):
-        """The Art column: the word, a picture's name, or ``<video> @3s``."""
-        v = (row.art or "").strip()
-        if row.art_on_card:
-            return v + " (on the card)"
-        if v.lower() == "video frame":
-            name = os.path.basename((row.art_video or "").strip()) or "video?"
-            return "%s @%ss" % (name, _num(row.art_time, "0"))
-        if is_video(v):
-            return "%s @%ss" % (os.path.basename(v), _num(row.art_time, "0"))
-        return MultibootPanel._cell(v)
-
-    @staticmethod
-    def _cell_anim(row):
-        """The Animation column: the word or the clip's name, and the clip
-        parameters when any is set (``auto @20s 2s 8fps``)."""
-        v = MultibootPanel._cell(row.anim)
-        if row.anim_on_card:
-            return v + " (on the card)"
-        if v and v.lower() != "none":
-            start, secs, fps = (_num(row.anim_start), _num(row.anim_seconds),
-                                _num(row.anim_fps))
-            if start or secs or fps:
-                v += " @%ss %ss %sfps" % (start or ANIM_DEFAULTS[0],
-                                          secs or ANIM_DEFAULTS[1],
-                                          fps or ANIM_DEFAULTS[2])
-        return v
+    #: What the last row of the table says.  Dim, with a '+': an empty card
+    #: shows only this, which is both the way in and the lesson.
+    ADD_ROW_TEXT = "Add an image…"
 
     def _values(self, i, row):
-        music = self._cell(row.music) + (" (on the card)"
-                                         if row.music_on_card else "")
-        return (i, self._cell_image(row), row.title, row.subtitle,
-                self._cell_art(row), self._cell_anim(row), music)
+        """ONE ROW OF THE TABLE, in the column order of TABLE_COLUMNS: the
+        index, the title (with what is wrong with its .raw when something
+        is), the subtitle, this image's picture / animation / music, the
+        sound that plays when it is chosen, the game code version if
+        anything has reported one - and then the four icons that act on
+        this row.
+
+        The settings are COLUMNS now rather than a phrase: the table has
+        the whole width of the tab, and what an image is set to is worth
+        more on screen than one word summarising all of it."""
+        last = len(self._rows) - 1
+        icons = []
+        for name, glyph, dim, _attr in self.ROW_ICONS:
+            live = not (name == "up" and i == 0) and \
+                not (name == "down" and i >= last)
+            icons.append(glyph if live else dim)
+        return (i, list_title(row, i), (row.subtitle or "").strip(),
+                cell_art(row), cell_anim(row), _cell(row.music),
+                _cell(self._confirm_var.get()), (row.version or "").strip(),
+                ) + tuple(icons)
+
+    def _add_row_values(self):
+        """The template row: a '+' where the index is and the invitation
+        where the title is, and nothing in the rest."""
+        return ("+", self.ADD_ROW_TEXT) + ("",) * (
+            len(self.TABLE_COLUMNS) - 2)
 
     def _refresh_tree(self, select=None):
         try:
@@ -1780,16 +2681,67 @@ class MultibootPanel:
             for i, row in enumerate(self._rows):
                 self._tree.insert("", tk.END, iid=str(i),
                                   values=self._values(i, row))
+            self._tree.insert("", tk.END, iid=self.ADD_ROW, tags=("add",),
+                              values=self._add_row_values())
+            # As tall as it HAS rows (the template row included), between
+            # LIST_MIN_ROWS and LIST_MAX_ROWS: eight rows of empty box
+            # under two images is a hole in the tab, and sixteen images
+            # would leave the picture nothing.
+            rows = max(LIST_MIN_ROWS,
+                       min(LIST_MAX_ROWS, len(self._rows) + 1))
+            if int(self._tree.cget("height")) != rows:
+                self._tree.configure(height=rows)
+                # The table is a different height, so the picture has a
+                # different amount of room; re-measure once the new
+                # requested sizes have settled.
+                self._resize_fn()
+                try:
+                    self._timer().after_idle(self._on_configure)
+                except tk.TclError:                     # pragma: no cover
+                    pass
             if select is not None and 0 <= select < len(self._rows):
                 self._tree.selection_set(str(select))
                 self._tree.focus(str(select))
             top = max(0, len(self._rows) - 1)
-            self._default_spin.configure(to=top)
+            if self._default_spin is not None:
+                self._default_spin.configure(to=top)
             self._hl_spin.configure(to=top)
         except tk.TclError:
             pass
         self._load_editor()
         self._update_edit_status()
+        self._update_menu_summary()
+        self._update_row_label()
+        self.schedule_preview()
+
+    def _update_row_label(self):
+        """The one dim line under the table.  It has two jobs and never
+        more than one line: which .raw the selected image came from (the
+        table has no room for a path, and it is the one fact a row cannot
+        show), and - when nothing is selected - the quiet sentence that
+        teaches the icons."""
+        lbl = getattr(self, "_row_lbl", None)
+        if lbl is None:
+            return
+        i = self._selected()
+        full = _cell_image(self._rows[i]) if i is not None else ""
+        try:
+            lbl.configure(text=_shorten(full, 90) if full else self.ROW_HINT)
+            self._row_tip.text = full or self.LIST_TIP
+        except tk.TclError:
+            pass
+
+    def _row_selected(self):
+        """A row was picked: load it into the editor variables AND point the
+        preview's highlight at it, so the image being edited is the one on
+        screen."""
+        self._load_editor()
+        self._update_row_label()
+        i = self._selected()
+        if i is not None:
+            self._set_var(self._hl_var, i)
+            self._show_cached()
+            self.schedule_preview()
 
     def _selected(self):
         try:
@@ -1855,6 +2807,7 @@ class MultibootPanel:
         except tk.TclError:
             pass
         self._update_edit_status()
+        self._update_row_label()
 
     def _sync_editor_states(self):
         """The video-frame fields live only for the 'video frame' art (the
@@ -1937,12 +2890,55 @@ class MultibootPanel:
         self._out_auto_value = new
         self._out_var.set(new)
 
-    def _browse_media(self, var, filetypes):
-        path = filedialog.askopenfilename(
-            title="Pick a media file",
-            filetypes=list(filetypes) + [("All files", "*.*")])
-        if path:
-            var.set(path)
+    def _new_card_clicked(self):
+        if self._busy:
+            self._error("Wait for the current run to finish first.")
+            return
+        if self._rows and not messagebox.askyesno(
+                "New card?", "Clear the image list and the menu and start a "
+                             "new card?"):
+            return
+        self.new_card()
+
+    def new_card(self):
+        """'New card…': back to an empty tab - no images, the menu at its
+        defaults, editing mode left behind.  Nothing on disk is touched; the
+        card that was loaded is simply no longer the one being edited."""
+        self._rows = []
+        self._loaded_card = ""
+        self._loaded_form = None
+        self._loaded_info = None
+        self._armed = False
+        self._media_override = ""
+        self._out_auto_value = ""
+        self._plan_info = None
+        self._plan_text = ""
+        self._hl_touched = False
+        self._loading = True
+        try:
+            self._out_var.set("")
+            self._move_var.set("auto")
+            self._confirm_var.set("auto")
+            self._volume_var.set("50")
+            self._timeout_var.set("15")
+            self._default_var.set("0")
+            self._bypass_var.set(True)
+        finally:
+            self._loading = False
+        self._pv_cache.clear()
+        self._pv_totals.clear()
+        self._pv_shown = None
+        self._pv_src = None
+        self._pv_ready = None
+        self._pv_photo = None
+        self._stop_play(None)
+        self._set_var(self._hl_var, 0)
+        self._set_var(self._frame_var, 0)
+        self._update_edit_status()
+        self._pv_placeholder()
+        self._pv_say("")
+        self._refresh_tree()
+        self._ok("A new card: add the primary (stock) image and one more.")
 
     def _browse_out(self):
         cur = self._out_var.get().strip()
@@ -1954,6 +2950,126 @@ class MultibootPanel:
             filetypes=[("Card images", "*.raw"), ("All files", "*.*")])
         if path:
             self._out_var.set(path)
+
+    # ------------------------------------------------------------------
+    # the two modals
+    # ------------------------------------------------------------------
+
+    def edit_image(self, index=None):
+        """'Edit image…' (also a double-click on the row): the selected
+        image's title, subtitle and media in a modal.  Returns the dialog,
+        or None when there is no row to edit.
+
+        The dialog's widgets are bound to the panel's OWN editor variables,
+        so every keystroke still writes through to the row and still moves
+        the preview; Cancel puts the row back the way it was."""
+        if self._image_dialog is not None:
+            return self._image_dialog
+        i = self._selected() if index is None else index
+        if i is None and self._rows:
+            i = 0
+            self._refresh_tree(select=0)
+        if i is None or not 0 <= i < len(self._rows):
+            self._error("Add an image first, then select it to edit.")
+            return None
+        if self._selected() != i:
+            self._refresh_tree(select=i)
+        self._edit_backup = (i, replace(self._rows[i]))
+        self._image_dialog = ImageEditorDialog(self, i, self._rows[i])
+        self._sync_editor_states()
+        return self._image_dialog.show()
+
+    def _image_editor_ok(self):
+        self._forget_image_dialog()
+        self._refresh_tree(select=self._edit_backup[0]
+                           if self._edit_backup else None)
+        self._edit_backup = None
+        self.schedule_preview(now=True)
+
+    def _image_editor_cancel(self):
+        self._forget_image_dialog()
+        if self._edit_backup is not None:
+            i, row = self._edit_backup
+            if 0 <= i < len(self._rows):
+                self._rows[i] = row
+            self._edit_backup = None
+            self._refresh_tree(select=i)
+
+    def _forget_image_dialog(self):
+        self._image_dialog = None
+        self._video_entry = self._video_btn = self._video_time = None
+        self._clip_widgets = ()
+
+    def open_menu_settings(self):
+        """'Menu settings…': the sounds, volume, countdown, default image,
+        the bypass and the selector build path, in a modal.  The button
+        beside it already says what they are (:func:`menu_summary`)."""
+        if self._menu_dialog is not None:
+            return self._menu_dialog
+        self._menu_backup = (self._move_var.get(), self._confirm_var.get(),
+                             self._volume_var.get(), self._timeout_var.get(),
+                             self._default_var.get(), self._bypass_var.get(),
+                             self._selector_var.get())
+        self._menu_dialog = MenuSettingsDialog(self, len(self._rows))
+        return self._menu_dialog.show()
+
+    def _menu_settings_ok(self):
+        self._forget_menu_dialog()
+        self._update_menu_summary()
+        self.schedule_preview(now=True)
+
+    def _menu_settings_cancel(self):
+        self._forget_menu_dialog()
+        if self._menu_backup is not None:
+            (move, confirm, vol, timeout, default, bypass,
+             selector) = self._menu_backup
+            self._menu_backup = None
+            self._move_var.set(move)
+            self._confirm_var.set(confirm)
+            self._volume_var.set(vol)
+            self._timeout_var.set(timeout)
+            self._default_var.set(default)
+            self._bypass_var.set(bypass)
+            self._selector_var.set(selector)
+        self._update_menu_summary()
+
+    def _forget_menu_dialog(self):
+        self._menu_dialog = None
+        self._default_spin = None
+        self._bypass_chk = None
+
+    def _menu_changed(self):
+        self._update_edit_status()
+        self._update_menu_summary()
+        self._refresh_sound_cells()
+
+    def _update_menu_summary(self):
+        """What Menu settings… holds, beside its button.  Clipped to the
+        space between the two groups of the action bar; the whole of it is
+        the label's tooltip, and none of it is anywhere else."""
+        lbl = getattr(self, "_menu_lbl", None)
+        if lbl is None:
+            return
+        text = menu_summary(self.form())
+        try:
+            lbl.configure(text=text)
+            self._menu_tip.text = text
+        except tk.TclError:
+            pass
+
+    def _refresh_sound_cells(self):
+        """The Confirm column is a MENU setting shown per row - the sound
+        that plays when THAT row is chosen - so a change to it has to reach
+        every row that is already drawn."""
+        tree = getattr(self, "_tree", None)
+        if tree is None:
+            return
+        value = _cell(self._confirm_var.get())
+        try:
+            for i in range(len(self._rows)):
+                tree.set(str(i), "sound", value)
+        except tk.TclError:                             # pragma: no cover
+            pass
 
     # ------------------------------------------------------------------
     # the form
@@ -1999,17 +3115,34 @@ class MultibootPanel:
     def _error(self, msg):
         th = THEMES.get(self._theme_fn()) or THEMES["dark"]
         try:
-            self._hint.configure(text=msg, foreground=th["error"])
+            self._hint.configure(text=self._status_line(msg),
+                                 foreground=th["error"])
         except tk.TclError:
             pass
+        # The status block is a fixed height and this label gets ONE of
+        # its two lines, so a long list of reasons is SUMMED there and said
+        # in full here - the app's Log keeps every word, and the line above
+        # says how many there were.
         for line in msg.splitlines():
-            self._log_sink("[multiboot] " + line)
+            self._write(line)
 
-    def _ok(self, msg):
+    def _ok(self, msg, extra=True):
+        """The live line.  One line on the tab (the block cannot hold two
+        without dropping the sentence under it); anything past the first
+        goes to the app's Log, where it is kept in full.
+
+        ``extra=False`` for a caller that has already written the rest
+        itself - a load's warnings, which it echoes with their own tag."""
+        th = THEMES.get(self._theme_fn()) or THEMES["dark"]
         try:
-            self._hint.configure(text=msg, foreground="#888")
+            self._hint.configure(text=self._status_line(msg),
+                                 foreground=th["gray"])
         except tk.TclError:
             pass
+        if extra:
+            for line in (msg or "").splitlines()[1:]:
+                if line.strip():
+                    self._write(line)
 
     # ------------------------------------------------------------------
     # actions
@@ -2030,9 +3163,10 @@ class MultibootPanel:
             return
         if rc == 0:
             self._plan_info = parse_plan(text)
-            self._plan_lbl.configure(text=size_plan_text(self._plan_info))
+            self._plan_text = size_plan_text(self._plan_info)
         else:
-            self._plan_lbl.configure(text="")
+            self._plan_text = ""
+        self._update_edit_status()
 
     def _prepare_media(self):
         form = self.form()
@@ -2078,7 +3212,8 @@ class MultibootPanel:
             if not self._confirm_overwrite(form.out):
                 return
             form.force = True
-        self._plan_lbl.configure(text="")
+        self._plan_text = ""
+        self._update_edit_status()
         cmds = build_commands(form)
         if form.media_dir:
             # A media set exists: prepare it in full first, with THIS form's
@@ -2238,6 +3373,10 @@ class MultibootPanel:
             info, card, media_dir, self._selector_var.get().strip())
         self._rows = list(form.images)
         self._media_override = media_dir
+        # Before the fields are written: Default's trace moves Highlight only
+        # while it has not been typed, and this card's default is the one to
+        # follow whatever was typed for the last one.
+        self._hl_touched = False
         self._loading = True
         try:
             self._out_var.set(card)
@@ -2261,14 +3400,18 @@ class MultibootPanel:
         self._pv_cache.clear()
         self._pv_totals.clear()
         self._pv_shown = None
+        self._pv_src = None
         self._pv_ready = None
-        self._hl_touched = False
+        self._set_var(self._hl_var, int(form.default))
         self._stop_play(None)
         self._pv_photo = None
         self._pv_placeholder()
-        self._pv_say("Render preview draws THIS card's menu - its own media "
-                     "is in %s, so nothing is prepared first." % media_dir)
-        self._refresh_tree(select=0)
+        self._pv_say("Drawing THIS card's menu - its own media is in %s, so "
+                     "nothing is prepared first." % media_dir)
+        # The card's OWN default is the row to land on: it is the image the
+        # machine would boot, and selecting a row points the preview at it.
+        self._refresh_tree(select=min(max(0, int(form.default)),
+                                      max(0, len(self._rows) - 1)))
         self._update_edit_status()
         head = "Loaded %s: %d image%s." % (
             os.path.basename(card), len(self._rows),
@@ -2277,7 +3420,8 @@ class MultibootPanel:
         # (an image whose .raw is elsewhere, a sound with no provenance) has
         # still loaded, so the line stays the ordinary colour and says them.
         self._ok(head + ("\n" + "\n".join(warnings) if warnings
-                         else " Edit the menu, then Apply to card."))
+                         else " Edit the menu, then Apply to card."),
+                 extra=False)
         for line in warnings:
             self._write("[load] " + line)
         return warnings
@@ -2405,7 +3549,7 @@ class MultibootPanel:
             # is a file name on the card, whatever file it came from).
             self._loaded_form = form
             if prepare:
-                self._pv_ready = preview_fingerprint(form)
+                self._pv_ready = (media_fingerprint(form), media)
             self._ok("Card updated: %s (%s)%s" % (
                 self._loaded_card,
                 ", ".join(menu) if menu else "no menu change",
@@ -2415,32 +3559,51 @@ class MultibootPanel:
                                   quiet=(INSPECT_JSON,))
 
     def _update_edit_status(self):
-        """The one line that says what Apply to card would do, and whether
-        the button can do it.  Called after every keystroke."""
+        """THE CONSEQUENCE LINE - the status block's second line: what Apply
+        to card would write (or why only a rebuild can), and how big the
+        card would be.  Called after every keystroke.
+
+        The two share one line because they are one question - what would
+        the button under them do - and the block has room for one line
+        each.  It also decides which of the two writing buttons is THE
+        action right now: while a card is loaded and an inject can carry
+        the changes, Apply to card is the green one; otherwise Build &
+        verify is."""
         lbl = getattr(self, "_edit_lbl", None)
         btn = getattr(self, "_apply_btn", None)
         if lbl is None or btn is None:
             return
-        if not self._loaded_card or self._loaded_form is None:
-            try:
-                lbl.configure(text="", foreground="#888")
-                btn.configure(state=tk.DISABLED)
-            except tk.TclError:
-                pass
-            return
-        menu, rebuild = diff_forms(self._loaded_form, self.form())
         th = THEMES.get(self._theme_fn()) or THEMES["dark"]
-        text = edit_status_text(self._loaded_card, menu, rebuild)
-        if self._loaded_form.bypass and not self.form().bypass:
-            text += ("  (Unticking the bypass cannot un-patch a card - "
-                     "build a fresh one for that.)")
+        rebuild = []
+        text = ""
+        if self._loaded_card and self._loaded_form is not None:
+            menu, rebuild = diff_forms(self._loaded_form, self.form())
+            text = edit_status_text(self._loaded_card, menu, rebuild)
+            if self._loaded_form.bypass and not self.form().bypass:
+                text += ("  (Unticking the bypass cannot un-patch a card - "
+                         "build a fresh one for that.)")
+        line = "  ·  ".join(p for p in (text, self._plan_text) if p)
         try:
-            lbl.configure(text=text,
-                          foreground=th["error"] if rebuild else th["fg"])
+            lbl.configure(text=self._status_line(line),
+                          foreground=th["error"] if rebuild
+                          else th["gray"] if not text else th["fg"])
             btn.configure(state=tk.DISABLED
-                          if (rebuild or self._busy) else tk.NORMAL)
+                          if (rebuild or self._busy or not self._loaded_card
+                              or self._loaded_form is None) else tk.NORMAL)
         except tk.TclError:
             pass
+        self._primary_button(build=bool(rebuild) or not self._loaded_card)
+
+    def _primary_button(self, build):
+        """Exactly one green button: the one that would actually be pressed."""
+        for btn, on in ((getattr(self, "_build_btn", None), build),
+                        (getattr(self, "_apply_btn", None), not build)):
+            if btn is None:
+                continue
+            try:
+                btn.configure(style="Go.TButton" if on else "TButton")
+            except tk.TclError:
+                pass
 
     # ------------------------------------------------------------------
     # the preview
@@ -2450,10 +3613,11 @@ class MultibootPanel:
         c = self._pv_canvas
         try:
             c.delete("all")
-            c.create_text(PREVIEW_W // 2, PREVIEW_H // 2, fill="#667",
+            c.create_text(self._pv_w // 2, self._pv_h // 2, fill="#667",
                           font=("", 11), justify=tk.CENTER,
-                          text="Render preview draws the boot menu here\n"
-                               "(1360x768 shown at half size)")
+                          text="The boot menu is drawn here, by the selector "
+                               "itself.\nAdd two images and it appears; every "
+                               "change redraws it.")
         except tk.TclError:
             pass
 
@@ -2468,7 +3632,6 @@ class MultibootPanel:
             pass
         if error and msg:
             self._write("[preview] " + msg)
-            self._log_sink("[multiboot] preview: " + msg)
 
     def _follow_default(self):
         """Highlight follows the Default index until it is typed by hand."""
@@ -2507,49 +3670,90 @@ class MultibootPanel:
         return preview_fingerprint(form), hl, n
 
     def _show_cached(self):
-        """A spinbox moved: show that frame if it is already rendered."""
+        """A spinbox moved: show that frame if it is already rendered, and
+        if it is not, SAY SO and ask for it.
+
+        Doing nothing (which is what a cache miss used to do) left the
+        stepper looking broken and the caption describing the frame still
+        on screen - which was not the one the boxes now named."""
         key = self._current_key()
         if key is None:
             return
         path = self._pv_cache.get(key)
-        if path and self._pv_shown != key[1:]:
-            self.load_frame(path, key[1], key[2],
-                            self._pv_totals.get(key[:2]))
+        if path:
+            if self._pv_shown != key[1:]:
+                self.load_frame(path, key[1], key[2],
+                                self._pv_totals.get(key[:2]))
+            return
+        if self._play_var.get():
+            return                          # Play draws its own frames
+        self._pv_say("Image %d frame %d has not been drawn yet - %s"
+                     % (key[1], key[2],
+                        "drawing it…" if self.schedule_preview() else
+                        "right-click the preview to redraw."))
 
     def _highlight(self, form):
         """The Highlight spinbox as an index into the form, or None (said)."""
         hl = _int(self._hl_var, int(form.default))
         if not 0 <= hl < len(form.images):
-            self._pv_say("Highlight must be one of 0..%d."
+            self._pv_say("The image to highlight must be one of 0..%d."
                          % (len(form.images) - 1), error=True)
             return None
         return hl
 
-    def load_frame(self, path, highlight=None, frame=0, total=None):
-        """Show one rendered frame: a P6 PPM (Tk reads those natively),
-        subsampled to fit the box.  ``total`` = the animation's frame count
-        when known.  The public seam: the pipeline, the screenshot script
-        and the tests all come through here.  False (and the status says
-        why) when Tk cannot read the file."""
+    def _scaled_photo(self, path):
+        """The frame at *path*, scaled SMOOTHLY into the current box with
+        its aspect ratio kept - Pillow, the way the DMD preview and the
+        scene browser do it.  None when the file cannot be read.
+
+        Tk's own PhotoImage halves and thirds and nothing between, which is
+        why the box used to be a whole fraction of the selector's frame;
+        with Pillow the picture simply takes the width the window gives it.
+        The fallback below is that older path, for a machine with no
+        Pillow."""
+        if _HAVE_PIL:
+            try:
+                with Image.open(path) as img:
+                    img.load()
+                    size = scaled_size(img.width, img.height,
+                                       self._pv_w, self._pv_h)
+                    shown = img.convert("RGB").resize(size, Image.LANCZOS)
+                return ImageTk.PhotoImage(shown)
+            except Exception as exc:                    # noqa: BLE001
+                self._pv_say("Cannot load %s: %s" % (path, exc), error=True)
+                return None
         try:
             photo = tk.PhotoImage(file=path)
         except tk.TclError as exc:
             self._pv_say("Cannot load %s: %s" % (path, exc), error=True)
-            return False
-        sub, zoom = fit_factors(photo.width(), photo.height())
+            return None
+        sub, zoom = fit_factors(photo.width(), photo.height(),
+                                self._pv_w, self._pv_h)
         if sub > 1:
             photo = photo.subsample(sub, sub)
         if zoom > 1:
             photo = photo.zoom(zoom, zoom)
+        return photo
+
+    def load_frame(self, path, highlight=None, frame=0, total=None):
+        """Show one rendered frame: the P6 PPM a snapshot wrote, scaled into
+        the box.  ``total`` = the animation's frame count when known.  The
+        public seam: the pipeline, the screenshot script and the tests all
+        come through here.  False (and the status says why) when the file
+        cannot be read."""
+        photo = self._scaled_photo(path)
+        if photo is None:
+            return False
         self._pv_photo = photo
         c = self._pv_canvas
         try:
             c.delete("all")
-            c.create_image(PREVIEW_W // 2 + 1, PREVIEW_H // 2 + 1,
+            c.create_image(self._pv_w // 2 + 1, self._pv_h // 2 + 1,
                            image=photo, anchor=tk.CENTER)
         except tk.TclError:
             return False
         self._pv_shown = (highlight, frame)
+        self._pv_src = (path, highlight, frame, total)
         if highlight is not None:
             self._set_var(self._hl_var, highlight)
         self._set_var(self._frame_var, frame)
@@ -2568,9 +3772,116 @@ class MultibootPanel:
         else:
             what = "frame %d of %d%s" % (
                 frame, total, " - playing" if self._play_var.get() else "")
-        self._pv_say("Highlight %s: %s" % (
+        self._pv_say("Image %s: %s" % (
             "?" if highlight is None else highlight, what))
         return True
+
+    def _redraw_shown(self):
+        """The box changed size: draw the frame that is up again at the new
+        scale (or the placeholder, when nothing has been rendered yet)."""
+        if not self._pv_src:
+            self._pv_placeholder()
+            return
+        path, highlight, frame, total = self._pv_src
+        if os.path.isfile(path):
+            self.load_frame(path, highlight, frame, total)
+        else:
+            self._pv_placeholder()
+
+    # -- the preview follows the form -----------------------------------
+
+    def schedule_preview(self, now=False):
+        """Ask for a re-render ~350 ms from now, coalescing everything that
+        happens in between into ONE run: typing a title fires this per
+        keystroke, and one snapshot is what it costs.
+
+        ``now=True`` (a modal's OK) still goes through the debounce, so an
+        OK that lands mid-typing does not queue a second run."""
+        if self._stopped:
+            return False
+        if not self._auto_preview.get():
+            return False
+        self._pv_pending += 1
+        job = self._pv_debounce_job
+        if job is not None:
+            try:
+                self._timer().after_cancel(job)
+            except (tk.TclError, ValueError):
+                pass
+            self._pv_debounce_job = None
+        try:
+            self._pv_debounce_job = self._timer().after(
+                1 if now else PREVIEW_DEBOUNCE_MS, self._auto_render)
+        except tk.TclError:
+            return False
+        return True
+
+    def _auto_render(self):
+        """The debounce fired: render the frame the tab is pointing at, if
+        there is anything to draw and nothing else is running."""
+        self._pv_debounce_job = None
+        self._pv_pending = 0
+        if self._stopped or not self._auto_preview.get():
+            return False
+        if self._play_var.get():
+            return False            # Play is driving its own frames
+        if self._busy or self._pv_busy:
+            # Try again once the run in flight is done - a build takes
+            # minutes and the preview must not queue behind every keystroke.
+            self.schedule_preview()
+            return False
+        form = self.form()
+        out = (form.out or "").strip().strip('"')
+        if len(form.images) < 1 or not out:
+            return False
+        # A render writes its conf and its frames under <out dir>/preview.
+        # Half a path, typed on the way to a real one, must not leave a
+        # trail of directories behind it: an output only draws by itself
+        # once it names a card image in a folder that exists (or one folder
+        # below one that does - <out dir> is where the card goes anyway).
+        # Anything else waits for Render now, which creates what it needs.
+        out_dir = os.path.dirname(os.path.abspath(out))
+        if not (out.lower().endswith((".raw", ".img"))
+                and (os.path.isdir(out_dir)
+                     or os.path.isdir(os.path.dirname(out_dir)))):
+            self._pv_stale("the card path is not a .raw in a folder that "
+                           "exists yet")
+            return False
+        # NOT RED, BUT NOT SILENT EITHER.  An unfinished form is the normal
+        # state while someone is typing, so this must not paint the status
+        # block red on every keystroke - but the debounce has already
+        # waited for the typing to STOP, and a preview that quietly stops
+        # following the form from then on is the worst of both.  So the
+        # picture's own caption says it is out of date, and why.
+        errs = validate_form(form, sources=self.needs_prepare(form))
+        if errs:
+            self._pv_stale(errs[0], len(errs) - 1)
+            return False
+        hl = _int(self._hl_var, int(form.default))
+        if not 0 <= hl < len(form.images):
+            self._pv_stale("the image to highlight must be one of 0..%d"
+                           % (len(form.images) - 1))
+            return False
+        n = _int(self._frame_var, 0)
+        key = (preview_fingerprint(form), hl, n)
+        if key in self._pv_cache:
+            if self._pv_shown != key[1:]:
+                self.load_frame(self._pv_cache[key], hl, n,
+                                self._pv_totals.get(key[:2]))
+            return False
+        return self._render_frames(form, hl, [n])
+
+    def _pv_stale(self, why, more=0):
+        """The picture no longer matches the form, and here is why.
+
+        Said on the preview's own caption, in the ordinary colour: this is
+        a normal state (a field being filled in), not a failure - but it is
+        never left unsaid, because a preview that has quietly stopped
+        following the form looks exactly like one that is up to date."""
+        text = "Preview not updated: %s." % why.rstrip(".")
+        if more > 0:
+            text += "  (+%d more)" % more
+        self._pv_say(text)
 
     def needs_prepare(self, form=None):
         """Whether the preview has to render the media before it can draw.
@@ -2586,7 +3897,8 @@ class MultibootPanel:
         return media_specs_changed(self._loaded_form, form)
 
     def render_preview(self):
-        """The Render preview button: the frame the spinboxes point at."""
+        """'Redraw the preview now' (the preview's right-click menu): the
+        frame the spinboxes point at, whether or not it is cached."""
         # A loaded card whose media has not been touched draws from the card
         # itself, so the .raw files it was built from need not be here.
         form = self._validated_form(sources=self.needs_prepare())
@@ -2601,40 +3913,63 @@ class MultibootPanel:
 
     def _render_frames(self, form, hl, frames):
         """Render *frames* of the menu with image *hl* highlighted, on the
-        worker: ensure a selector, prepare the media (both skipped while
-        the form's fingerprint is the one already prepared, and the prepare
-        also skipped for a loaded card's own media - see
-        :meth:`needs_prepare`), then one snapshot per frame.  Each finished
-        frame lands in the cache; the one the spinboxes point at is shown at
-        once (Play shows its own from the tick).  False when the busy guard
-        refused."""
+        worker: ensure a selector, prepare the media, then one snapshot per
+        frame.  Each finished frame lands in the cache; the one the
+        spinboxes point at is shown at once (Play shows its own from the
+        tick).  False when the busy guard refused.
+
+        WHAT MAKES THIS CHEAP ENOUGH TO RUN ON EVERY KEYSTROKE: the two
+        expensive steps are skipped by their own tests, not by the frame's.
+        The selector is built once per session (``make`` is incremental
+        anyway).  The media is prepared only when the MEDIA fingerprint
+        moved - the art, the clips, the music, the two sounds - and never
+        for a loaded card whose media fields are still the card's own (see
+        :meth:`needs_prepare`).  A title, a subtitle, the countdown or the
+        default changes none of that: the conf below is rewritten and one
+        snapshot draws it."""
         fp = preview_fingerprint(form)
+        mfp = media_fingerprint(form)
         pv = preview_dir_for(form.out)
         media = self.media_dir()
         conf = os.path.join(pv, "images.conf")
+        self._forget_old_dirs(pv, media)
         try:
-            os.makedirs(pv, exist_ok=True)
-            os.makedirs(media, exist_ok=True)
+            self._makedirs(pv)
+            self._makedirs(media)
             with open(conf, "w", encoding="utf-8", newline="\n") as f:
                 f.write(write_preview_conf(form))
         except OSError as exc:
             self._pv_say("Cannot write the preview files: %s" % exc,
                          error=True)
             return False
+        self._prune_frames(pv, fp)
         rootfs = rootfs_for(form.selector_dir)
         cmds = []
-        fresh = self._pv_ready != fp or not self._pv_bin
-        if fresh:
+        # THE SELECTOR IS CACHED, BUT NOT FOREVER.  Skipping the make step
+        # is what makes a keystroke render cheap; never running it again
+        # meant a codeselect rebuilt beside the app was not picked up until
+        # the app was restarted.  So it is re-checked when the cached
+        # answer is older than SELECTOR_TTL_S (make is incremental: a
+        # no-op once built), and at once when the build PATH changes.
+        if (not self._pv_bin
+                or time.time() - self._pv_bin_at > self.SELECTOR_TTL_S):
             cmds += ensure_selector_commands(form)
+        # THE DIRECTORY IS PART OF THE KEY.  media_fingerprint leaves the
+        # output path out on purpose (a retyped output does not change what
+        # the media IS), but the directory the media is written into comes
+        # straight off it - so without this a new output path kept the old
+        # dir's 'prepared' answer, left the new one empty, and Build &
+        # verify wrote a text-only card.
+        if self._pv_ready != (mfp, media):
             if self.needs_prepare(form):
                 cmds += preview_prepare_commands(form, media)
             else:
                 # The card's own media, straight out of the extraction: it
                 # matches the form because the form came out of the card.
-                self._pv_ready = fp
+                self._pv_ready = (mfp, media)
         paths = {}
         for n in frames:
-            ppm = frame_path(pv, hl, n)
+            ppm = frame_path(pv, fp, hl, n)
             paths[n] = ppm
 
             def argv(texts, n=n, ppm=ppm):
@@ -2651,8 +3986,9 @@ class MultibootPanel:
                 return
             if label == "selector":
                 self._pv_bin = parse_selector_path(text)
+                self._pv_bin_at = time.time()
             elif label == "prepare":
-                self._pv_ready = fp
+                self._pv_ready = (mfp, media)
             elif label.startswith("frame "):
                 n = int(label.split()[1])
                 total = parse_anim_frames(text, hl)
@@ -2682,11 +4018,65 @@ class MultibootPanel:
                          "output." % (failed or "the start", rc), error=True)
 
         self._pv_say("rendering…")
-        if not self._run_commands(cmds, on_step=step, on_done=done):
+        if not self._run_commands(cmds, on_step=step, on_done=done,
+                                  preview=True):
             self._pv_say("A run is already in progress - wait for it.",
                          error=True)
             return False
         return True
+
+    def _makedirs(self, path):
+        """``os.makedirs``, remembering what WE created - so a directory the
+        preview made for a path that was only half typed can be taken away
+        again (:meth:`_forget_old_dirs`).  A directory that was already
+        there is never remembered and never removed."""
+        if path and not os.path.isdir(path):
+            os.makedirs(path, exist_ok=True)
+            self._pv_made.add(os.path.normcase(os.path.abspath(path)))
+
+    def _forget_old_dirs(self, pv, media):
+        """Take back the preview/ and media/ directories WE made under an
+        output path that is no longer the one in the box.
+
+        Typing ``D:/Pinball/mul`` on the way to ``D:/Pinball/multi`` used to
+        leave a preview/ and a media/ behind under every prefix that
+        happened to render.  Only our own directories, only our own files,
+        and only while they hold nothing else."""
+        keep = {os.path.normcase(os.path.abspath(p)) for p in (pv, media) if p}
+        for made in sorted(self._pv_made - keep, key=len, reverse=True):
+            try:
+                for name in os.listdir(made):
+                    if _FRAME_RE.match(name) or name == "images.conf":
+                        os.remove(os.path.join(made, name))
+                os.rmdir(made)              # refuses a dir with anything in
+            except OSError:
+                pass                        # in use, or not ours to judge
+            self._pv_made.discard(made)
+            parent = os.path.dirname(made)
+            pkey = os.path.normcase(os.path.abspath(parent))
+            if pkey in self._pv_made and pkey not in keep:
+                try:
+                    os.rmdir(parent)
+                    self._pv_made.discard(pkey)
+                except OSError:
+                    pass
+
+    def _prune_frames(self, pv, fp):
+        """Drop the frame files of every form but this one - preview/ would
+        otherwise grow a file per (form, image, frame) for as long as the
+        tab is open.  The picture ON SCREEN is kept whatever form drew it:
+        a resize redraws from that very file."""
+        shown = os.path.abspath(self._pv_src[0]) if self._pv_src else ""
+        for path in stale_frames(pv, fp):
+            if os.path.abspath(path) == shown:
+                continue
+            try:
+                os.remove(path)
+            except OSError:
+                continue
+            for key, cached in list(self._pv_cache.items()):
+                if cached == path:
+                    self._pv_cache.pop(key, None)
 
     def _play_toggled(self):
         if not self._play_var.get():
@@ -2742,7 +4132,7 @@ class MultibootPanel:
         key = (fp, hl, nxt)
         if key in self._pv_cache:
             self.load_frame(self._pv_cache[key], hl, nxt, total)
-        elif not self._busy:
+        elif not (self._busy or self._pv_busy):
             if total is None:
                 missing = [cur]
             else:
@@ -2768,9 +4158,13 @@ class MultibootPanel:
     # ------------------------------------------------------------------
 
     def _set_busy(self, busy):
+        """The guard on the runs that WRITE: every action control greyed
+        while one is up.  A preview render never comes through here - it is
+        a background redraw of a picture, and greying the whole tab once
+        per typing pause (which is what it did) makes Apply, Build, Flash,
+        Run and the two menus swallow clicks while someone types a title."""
         self._busy = busy
-        for btn in list(getattr(self, "_action_btns", ())) + [
-                getattr(self, "_render_btn", None)]:
+        for btn in list(getattr(self, "_action_btns", ())):
             if btn is None:
                 continue
             try:
@@ -2791,37 +4185,112 @@ class MultibootPanel:
         # image list still matches it.
         self._update_edit_status()
 
-    def _run_commands(self, cmds, on_step=None, on_done=None, quiet=()):
+    #: What each tool step means on the tab's OWN stage row (Media, Copy,
+    #: Inject, Verify - MainWindow.MULTIBOOT_PHASES).  Both writing buttons
+    #: read honestly on it: Build & verify walks all four, Apply to card
+    #: only the last two (plus Media when a media field moved).
+    PHASE_OF = {"prepare": 0, "plan": 0, "build": 1, "inject": 2,
+                "bypass": 2, "verify": 3, "inspect": 3, INSPECT_JSON: 3}
+
+    #: ...and what the footer's status line says while it is there.
+    PHASE_STATUS = {
+        "prepare": "Rendering the menu's media…",
+        "plan": "Planning the card's layout…",
+        "build": "Copying the images into the card…",
+        "inject": "Writing the menu into the card…",
+        "bypass": "Patching the game validator…",
+        "verify": "Verifying the card…",
+        "inspect": "Reading the card back…",
+        INSPECT_JSON: "Reading the card back…",
+    }
+
+    def _phase_step(self, label):
+        """A tool step is about to run: light its stage in the footer."""
+        index = self.PHASE_OF.get(label)
+        if index is None:
+            return
+        try:
+            self._phase_fn(index, status=self.PHASE_STATUS.get(label))
+        except Exception:                               # noqa: BLE001
+            pass                        # the window went; the run has not
+
+    def _phase_done(self, rc, failed):
+        try:
+            if rc == 0:
+                self._phase_fn(-1, status="Ready")
+            else:
+                self._phase_fn(None,
+                               status="%s failed" % (failed or "the run"))
+        except Exception:                               # noqa: BLE001
+            pass
+
+    def _run_commands(self, cmds, on_step=None, on_done=None, quiet=(),
+                      preview=False):
         """Run ``[(label, argv), ...]`` in order on a worker, streaming every
         line into the pane; stop at the first failure.  An *argv* may be a
         callable ``fn(texts)`` - evaluated on the worker just before its
         turn, from what the earlier steps printed (the preview's snapshot
         needs the binary the selector step named).  ``on_step(label, rc,
         text)`` and ``on_done(rc, failed_label, {label: text})`` are called
-        on the main loop.  False when a run is already in flight - the busy
-        guard, and the only one: two builds into one file is a corrupt card.
+        on the main loop.
+
+        TWO GUARDS, NOT ONE.  A run that WRITES (build, apply, load,
+        bypass) is one at a time and greys every action control while it is
+        up: two builds into one file is a corrupt card.  ``preview=True``
+        is the background redraw, and takes its own light guard instead -
+        one render at a time, and nothing disabled.  An action asked for
+        while a render is in flight is not refused: the render is told to
+        stop after the step it is on, and the action starts the moment it
+        lets go (the action's own guard is taken now, so a second one is
+        still refused).  False when the guard refused.
 
         A label in *quiet* is still run and still captured, but its lines
         do not go into the pane while it succeeds: the load's JSON report is
         for the form, and the table beside it is what a person reads.  A
         quiet step that FAILS prints everything it said.
         """
-        if self._busy:
-            self._error("A run is already in progress.")
-            return False
-        quiet = frozenset(quiet)
-        self._set_busy(True)
+        if preview:
+            # A render never queues behind anything: it is cheap, and the
+            # next keystroke asks for another one anyway.
+            if self._busy or self._pv_busy:
+                return False
+            self._pv_cancel = False
+            self._pv_busy = True
+        else:
+            if self._busy:
+                self._error("A run is already in progress.")
+                return False
+            self._set_busy(True)
+            if self._pv_busy:
+                self._pv_cancel = True
+                self._pending_run = (cmds, on_step, on_done, frozenset(quiet))
+                self._drain()       # the render's finish starts it
+                return True
+        self._start_worker(cmds, on_step, on_done, frozenset(quiet), preview)
+        return True
 
+    def _start_worker(self, cmds, on_step, on_done, quiet, preview):
+        """The worker itself - see :meth:`_run_commands`, which owns the
+        guards.  Split out so a queued action can be started from the
+        render's own finish without going through them again."""
         def run():
             rc = 0
             failed = None
             texts = {}
             for label, argv in cmds:
+                if preview and self._pv_cancel:
+                    # An action is waiting for the worker: stop between
+                    # steps rather than mid-tool, and say nothing - the
+                    # picture is redrawn once the action is done.
+                    break
+                if not preview:
+                    # The tab's own stage row: this step is starting.
+                    self._ui(lambda lab=label: self._phase_step(lab))
                 if callable(argv):
                     try:
                         argv = argv(texts)
                     except Exception as exc:                # noqa: BLE001
-                        self._append("[multiboot] %s: %s" % (label, exc))
+                        self._append("[multi-boot] %s: %s" % (label, exc))
                         rc, failed = 1, label
                         break
                 self._append("$ " + argv[-1])
@@ -2830,7 +4299,7 @@ class MultibootPanel:
                         argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                         creationflags=_rig.CREATE_FLAGS)
                 except Exception as exc:                # noqa: BLE001
-                    self._append("[multiboot] cannot start %s: %s"
+                    self._append("[multi-boot] cannot start %s: %s"
                                  % (label, exc))
                     rc, failed = 1, label
                     break
@@ -2851,7 +4320,7 @@ class MultibootPanel:
                 if not echo and rc != 0:
                     for line in lines:                  # it failed: say why
                         self._append(line)
-                self._append("[multiboot] %s: exit %d" % (label, rc))
+                self._append("%s: exit %d" % (label, rc))
                 if on_step is not None:
                     self._ui(lambda l=label, r=rc, t=texts[label]:
                              on_step(l, r, t))
@@ -2860,7 +4329,31 @@ class MultibootPanel:
                     break
 
             def finish():
-                self._set_busy(False)
+                if preview:
+                    self._pv_busy = False
+                    cancelled = self._pv_cancel
+                    self._pv_cancel = False
+                    pending = self._pending_run
+                    self._pending_run = None
+                    if pending is not None:
+                        # The action that was waiting: its guard was taken
+                        # when it asked, so nothing else got in.
+                        self._pv_say("")
+                        p_cmds, p_step, p_done, p_quiet = pending
+
+                        def done_then_redraw(r, f, t, _d=p_done):
+                            if _d is not None:
+                                _d(r, f, t)
+                            self.schedule_preview()
+                        self._start_worker(p_cmds, p_step, done_then_redraw,
+                                           p_quiet, False)
+                        return
+                    if cancelled:
+                        self._pv_say("")
+                        return
+                else:
+                    self._set_busy(False)
+                    self._phase_done(rc, failed)
                 if on_done is not None:
                     on_done(rc, failed, texts)
             self._ui(finish)
@@ -2875,22 +4368,29 @@ class MultibootPanel:
                 pass
             self._drain_job = None
         self._drain()
-        return True
 
     def _append(self, line):
-        """A tool line, from the worker: the tab's pane AND the app log (so
-        'paste what it said' is one paste)."""
+        """A tool line, from the worker.  Queued for the main loop, because
+        that is where the app's Log lives."""
         self._ui(lambda: self._write(line))
-        self._ui(lambda: self._log_sink("[multiboot] " + line))
 
     def _write(self, line):
+        """One line into the app's Log at the foot of the window - THE one
+        log, tagged so it reads beside the other tabs' lines.
+
+        This tab used to keep a folded-away 'Tool output' pane of its own,
+        which meant two places to look and one of them hidden.  The pane is
+        gone; the tag is what tells the lines apart."""
+        self._lines.append(line)
+        if len(self._lines) > self.LOG_KEEP:
+            del self._lines[:len(self._lines) - self.LOG_KEEP]
         try:
-            self._log_text.configure(state=tk.NORMAL)
-            self._log_text.insert(tk.END, line + "\n")
-            n = int(self._log_text.index("end-1c").split(".")[0])
-            if n > self.LOG_KEEP:
-                self._log_text.delete("1.0", "%d.0" % (n - self.LOG_KEEP))
-            self._log_text.configure(state=tk.DISABLED)
-            self._log_text.see(tk.END)
-        except tk.TclError:
-            pass
+            self._log_sink(self.LOG_TAG + line)
+        except Exception:                               # noqa: BLE001
+            pass                    # a sink that has gone with its window
+
+    def log_lines(self):
+        """Everything the tools have said, in order - what the status
+        block's one line had to leave out.  The app's Log has the same
+        lines; this is the seam the tests read."""
+        return list(self._lines)

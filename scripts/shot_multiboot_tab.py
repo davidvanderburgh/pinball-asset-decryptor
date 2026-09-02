@@ -16,21 +16,24 @@ window - David's desktop - which is the size the layout is designed
 around; ``--dialogs DIR`` snaps the two modals the detail lives behind
 (Edit image… and Menu settings…) into that directory; and ``--measure``
 skips the pictures altogether and prints the height every section of the
-tab needs, at 1024x768 and again at 1360x900.  The number that matters is
-the first line: the notebook is pinned to the selected tab's requested
-height, so that is the tab's whole vertical cost, and it has to stay
-under about 640 px.
+tab needs, at 1360x900, at 1024x768, and then SWEPT across every width in
+SWEEP_WIDTHS.  The number that matters is the first line of each: the
+notebook is pinned to the selected tab's requested height, so that is the
+tab's whole vertical cost, and it has to stay under about 640 px at every
+one of those widths - and the preview must never grow as the window
+shrinks (the layout does not reflow, so the width can only change the
+size of the picture, and only one way).
 
 WHAT THE FORM SHOWS.  An empty tab proves nothing, so the form is filled
-the way a user would fill it for the card the ticket was written for:
-the stock Turtles image as the primary and the 1987-cartoon upscale
-beside it, with the menu titles typed in and the second image's attract
-clip as its animation (20 s in, 2 s long, 8 fps).  Nothing is built -
-Check size, Prepare media, Build, Flash and Render preview all shell out
-to wsl.exe, none of them is pressed, and the preview's own auto-render is
-switched off with ``PAD_MULTIBOOT_AUTO=0`` before the app starts.  The
-size sentence in the status block is the one Check size would print for
-two 8G images (the tool's own plan output, fed to the same parser the
+with THREE images the way a user would fill it - which is also what puts
+every state of the table's row icons in one picture: the first row's up
+arrow outlined, the last row's down arrow outlined, a middle row with
+both live, and the dim '+ Add an image…' row under them.  Nothing is
+built - Check size, Prepare media, Build, Flash and the preview's own
+redraw all shell out to wsl.exe, none of them is pressed, and the
+auto-render is switched off with ``PAD_MULTIBOOT_AUTO=0`` before the app
+starts.  The size sentence in the status block is the one Check size
+would print (the tool's own plan output, fed to the same parser the
 button uses), and the preview shows a frame through the panel's public
 ``load_frame`` seam: a real selector snapshot when ``--frame F.ppm`` names
 one, otherwise a stand-in drawn here with PIL in the menu's own layout
@@ -40,11 +43,11 @@ having run.
 
 AND THE TAB IS SHOWN AFTER A LOAD.  The last thing the shot does is hand
 the panel a synthetic ``inspect --json`` report through its public loader
-(``load_inspect``) - the same report the tool prints for David's v2 card,
-made up here so no card is opened and WSL is never called - and then makes
-one pending change to the menu.  So the picture is of the tab in editing
-mode: the fields all came off a card, and the status block says what
-'Apply to card' would write into it.
+(``load_inspect``) - the same report the tool prints for a multi-image
+card, made up here so no card is opened and WSL is never called - and
+then makes one pending change to the menu.  So the picture is of the tab
+in editing mode: the fields all came off a card, and the status block
+says what 'Apply to card' would write into it.
 """
 import ctypes
 import os
@@ -117,15 +120,24 @@ os.environ["PAD_MULTIBOOT_AUTO"] = "0"
 SHOT_W, SHOT_H = 1360, 900
 FIT_W, FIT_H = 1024, 768
 
-#: The two images on the card, in card order (first = primary), and the
-#: menu text typed for each.
+#: The images on the card, in card order (first = primary), and the menu
+#: text typed for each.  THREE of them, so the shot shows every state of
+#: the row icons at once: the first row's ▲ outlined, the last row's ▼
+#: outlined, and a middle row with both live - plus the template row under
+#: them.  Sample DATA is allowed to be specific; the tab's own copy is not.
 IMAGES = [
     (r"C:\Users\david\Documents\development\pinball-asset-decryptor\images"
      r"\Stern\spike2\turtles_pro-1_59_0.Release.8G.sdcard.raw",
      "STERN 1.59.0", "Original Stern code"),
     (r"D:\Pinball\TMNT 1987\turtles_pro-1_59_0.1987-upscaled.8G.sdcard.raw",
      "TMNT 1987", "1987 cartoon upscale"),
+    (r"D:\Pinball\TMNT 1987\turtles_le-1_59_0.1987-upscaled.8G.sdcard.raw",
+     "TMNT 1987 LE", "1987 upscale, LE code"),
 ]
+
+#: The game code version each row shows in its Code column - the column a
+#: builder fills in when it has read one off the .raw.
+VERSIONS = ["1.59.0", "1.59.0", "1.59.0"]
 
 #: The second image's animation: its attract clip, 20 s in, 2 s at 8 fps.
 CLIP = ("auto", "20", "2", "8")
@@ -133,15 +145,14 @@ CLIP = ("auto", "20", "2", "8")
 #: The preview: image 1 highlighted, frame 3 of the 16-frame clip.
 HIGHLIGHT, FRAME_INDEX, FRAMES = 1, 3, 16
 
-#: The card the shot then LOADS - David's v2 multi card.  It is never
-#: opened: the report below is made up, and load_inspect takes it as if
-#: the tool had printed it.
+#: The card the shot then LOADS.  It is never opened: the report below is
+#: made up, and load_inspect takes it as if the tool had printed it.
 CARD = (r"D:\Pinball\TMNT 1987\multi"
         r"\turtles_pro-1_59_0.multi-v2-stock+1987patched.16G.sdcard.raw")
 
 #: The countdown on that card, and the one typed after the load - the one
 #: pending change the status line reports (the preview shows the new one,
-#: which is what Render preview would draw).
+#: which is what a redraw would draw).
 TIMEOUT_ON_CARD, TIMEOUT_NOW = 15, 20
 
 #: mkmulticard.py plan, as it reports two 8G images side by side - the
@@ -156,7 +167,14 @@ PLAN_TEXT = (
 
 
 def log(msg):
-    print(msg, flush=True)
+    # The tab's row icons (✎ − ▲ ▼) are outside cp1252, and a console that
+    # cannot encode one must not take the step down with it.
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(str(msg).encode(enc, "backslashreplace").decode(enc),
+              flush=True)
 
 
 os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)
@@ -284,7 +302,14 @@ def stand_in_frame(path):
         return f
 
     centred(50, "SELECT GAME CODE", 54, (236, 240, 246))
-    cards = [(60, 152, 662, 568), (698, 152, 1300, 568)]
+    # One card per image, across the frame - the selector lays them out the
+    # same way however many there are.
+    n = len(IMAGES)
+    margin, gap = 60, 36
+    card_w = (W - 2 * margin - gap * (n - 1)) / float(n)
+    cards = [(int(margin + i * (card_w + gap)), 152,
+              int(margin + i * (card_w + gap) + card_w), 568)
+             for i in range(n)]
     for i, (x0, y0, x1, y1) in enumerate(cards):
         hi = i == HIGHLIGHT
         d.rounded_rectangle((x0, y0, x1, y1), radius=18,
@@ -294,15 +319,16 @@ def stand_in_frame(path):
         # the art panel across the top 40 % of the card
         px0, py0, px1, py1 = x0 + 28, y0 + 22, x1 - 28, y0 + 190
         d.rectangle((px0, py0, px1, py1), fill=(18, 22, 30))
-        if i == 0:
+        if i != HIGHLIGHT:
             centred_x = (px0 + px1) / 2
             f = _font(60)
             tw = d.textlength("TMNT", font=f)
             d.text((centred_x - tw / 2, py0 + 40), "TMNT", font=f,
                    fill=(120, 190, 90))
             f2 = _font(24)
-            tw = d.textlength("PRO", font=f2)
-            d.text((centred_x - tw / 2, py0 + 112), "PRO", font=f2,
+            word = "PRO" if i == 0 else "LE"
+            tw = d.textlength(word, font=f2)
+            d.text((centred_x - tw / 2, py0 + 112), word, font=f2,
                    fill=(200, 205, 215))
         else:
             # frame 3 of the attract clip: stripes standing in for it
@@ -319,11 +345,20 @@ def stand_in_frame(path):
         d.text(((x0 + x1) / 2 - tw / 2, y0 + 206), label, font=f,
                fill=(250, 190, 40) if hi else (110, 120, 140))
         title, sub = IMAGES[i][1], IMAGES[i][2]
-        f = _font(48)
+        # ...at whatever size fits the card the layout gave it
+        size = 48
+        f = _font(size)
+        while size > 20 and d.textlength(title, font=f) > (x1 - x0) - 30:
+            size -= 4
+            f = _font(size)
         tw = d.textlength(title, font=f)
         d.text(((x0 + x1) / 2 - tw / 2, y0 + 250), title, font=f,
                fill=(255, 255, 255) if hi else (160, 170, 190))
-        f = _font(26)
+        size = 26
+        f = _font(size)
+        while size > 14 and d.textlength(sub, font=f) > (x1 - x0) - 24:
+            size -= 2
+            f = _font(size)
         tw = d.textlength(sub, font=f)
         d.text(((x0 + x1) / 2 - tw / 2, y0 + 322), sub, font=f,
                fill=(225, 230, 240) if hi else (120, 130, 150))
@@ -354,7 +389,16 @@ def set_window(w, h):
     root.update_idletasks()
 
 
-def measure(label):
+#: Every window width the sweep measures the tab at, and what it has to
+#: be true at all of them.
+SWEEP_WIDTHS = (840, 889, 950, 1024, 1200, 1360)
+HEIGHT_BUDGET = 640
+
+#: What the sweep found, so s_sweep can judge it once it has walked them.
+SWEEP = []
+
+
+def measure(label, collect=False):
     """Print the height every part of the tab needs.  The first line is the
     one that matters: the notebook is pinned to the selected tab's
     requested height (MainWindow._resize_notebook_to_current_tab), so that
@@ -366,30 +410,39 @@ def measure(label):
     log("== %s: window %dx%d, screen %dx%d"
         % (label, root.winfo_width(), root.winfo_height(),
            root.winfo_screenwidth(), root.winfo_screenheight()))
-    log("   TAB reqheight = %d px  (budget 640)  reqwidth = %d"
-        % (tab.winfo_reqheight(), tab.winfo_reqwidth()))
+    budget = root.winfo_height() - multiboot_tab.APP_CHROME_H
+    log("   TAB reqheight = %d px  (budget %d for this %d-high window; "
+        "%d on a 768-high desktop)  reqwidth = %d"
+        % (tab.winfo_reqheight(), budget, root.winfo_height(),
+           HEIGHT_BUDGET, tab.winfo_reqwidth()))
     outer = panel._outer
-    names = ["source row", "body (list | preview)", "actions", "status",
-             "tool output button", "tool output pane"]
+    names = ["source row", "preview", "images table", "row label",
+             "action bar", "status"]
     for name, child in zip(names, outer.winfo_children()):
         log("   %-24s reqh %4d  h %4d  mapped %s"
             % (name, child.winfo_reqheight(), child.winfo_height(),
                child.winfo_ismapped()))
-    log("   left column  reqw %4d  reqh %4d"
-        % (panel._left.winfo_reqwidth(), panel._left.winfo_reqheight()))
-    log("   preview box  %dx%d  canvas %dx%d  narrow=%s"
-        % (panel._pv_w, panel._pv_h, panel._pv_canvas.winfo_reqwidth(),
-           panel._pv_canvas.winfo_reqheight(), panel._narrow))
+    log("   preview box  %dx%d  (aspect %.3f, the frame's is %.3f)"
+        % (panel._pv_w, panel._pv_h, panel._pv_w / float(panel._pv_h),
+           multiboot_tab.FRAME_W / float(multiboot_tab.FRAME_H)))
+    log("   table        rows %d  reqh %d  reqw %d"
+        % (len(panel._tree.get_children()),
+           panel._table_box.winfo_reqheight(),
+           panel._table_box.winfo_reqwidth()))
     for btn, name in ((panel._load_btn, "Load card…"),
+                      (panel._new_btn, "New card…"),
+                      (panel._browse_btn, "Browse…"),
                       (panel._apply_btn, "Apply to card"),
                       (panel._build_btn, "Build & verify"),
                       (panel._flash_btn, "Flash to SD card…"),
                       (panel._emu_btn, "Run in emulator"),
                       (panel._more_btn, "More ▾"),
-                      (panel._menu_btn, "Menu settings…"),
-                      (panel._log_btn, "Tool output")):
+                      (panel._menu_btn, "Menu settings…")):
         if not btn.winfo_ismapped():
             log("   !! %s IS NOT MAPPED - the row overflowed" % name)
+    if collect:
+        SWEEP.append((root.winfo_width(), tab.winfo_reqheight(),
+                      panel._pv_w, panel._pv_h))
 
 
 @step(500)
@@ -444,9 +497,14 @@ def s_fill():
     panel._ed_anim_seconds.set(seconds)
     panel._ed_anim_fps.set(fps)
     panel._default_var.set(str(HIGHLIGHT))
-    # Leave the second row selected so the editor shows its text.
-    panel._tree.selection_set("1")
-    panel._tree.focus("1")
+    # The Code column: what a builder that has read the version off each
+    # .raw would put there.  Set on the rows, then redrawn.
+    for row, version in zip(panel._rows, VERSIONS):
+        row.version = version
+    panel._refresh_tree(select=HIGHLIGHT)
+    # Leave the highlighted row selected so the editor shows its text.
+    panel._tree.selection_set(str(HIGHLIGHT))
+    panel._tree.focus(str(HIGHLIGHT))
     root.update()
     panel._plan_step("plan", 0, PLAN_TEXT)
     # The preview: a frame through load_frame, the panel's public seam -
@@ -458,24 +516,27 @@ def s_fill():
         log("stand-in frame drawn at %s" % frame)
     else:
         log("frame from --frame: %s" % frame)
-    log("load_frame -> %s" % panel.load_frame(frame, HIGHLIGHT, FRAME_INDEX,
-                                             FRAMES))
-    # ROOM FOR IT.  The notebook was measured when the tab was selected;
-    # the size sentence has since appeared under the buttons, and the
-    # tool pane is the LAST widget packed - short of its height the
-    # notebook clips it.  This is the app's own resize (the panel's
-    # resize_fn), not a lever added for the photograph.
+    log("load_frame -> %s"
+        % panel.load_frame(frame, HIGHLIGHT, FRAME_INDEX, FRAMES))
+    # ROOM FOR IT.  The notebook was measured when the tab was selected
+    # and the table has grown a row since; the status block is the LAST
+    # thing packed, and short of its height the notebook clips it.  This
+    # is the app's own resize (the panel's resize_fn), not a lever added
+    # for the photograph.
     win._resize_notebook_to_current_tab()
     root.update_idletasks()
     form = panel.form()
     log("rows: %s" % [(r.title, r.subtitle, r.anim, r.anim_start,
                        r.anim_seconds, r.anim_fps) for r in form.images])
     log("output: %s" % form.out)
-    log("size sentence: %r" % panel._plan_lbl.cget("text"))
+    log("size sentence: %r" % panel._plan_text)
+    log("consequence: %r" % panel._edit_lbl.cget("text"))
     log("preview status: %r" % panel._pv_status.cget("text"))
     log("menu summary: %r" % panel._menu_lbl.cget("text"))
-    log("list rows: %s" % [panel._tree.item(i)["values"]
-                           for i in panel._tree.get_children()])
+    log("table rows:")
+    for i in panel._tree.get_children():
+        log("   %-4s %s" % (i, panel._tree.item(i)["values"]))
+    log("row label: %r" % panel._row_lbl.cget("text"))
     log("tab reqheight=%s notebook height=%s window=%sx%s"
         % (win._tab_multiboot.winfo_reqheight(), win._notebook.cget("height"),
            root.winfo_width(), root.winfo_height()))
@@ -483,33 +544,35 @@ def s_fill():
 
 def inspect_report():
     """The report ``mkmulticard.py inspect --card <CARD> --json`` prints for
-    David's v2 card - made up here, with the same two images the form above
+    a multi-image card - made up here, with the same images the form above
     was filled with, so nothing is opened and WSL is never called.  Its
     shape is the tool's contract; the tab reads no more of it than this."""
     src = [multiboot_tab.wsl(path) for path, _t, _s in IMAGES]
     _anim, start, seconds, fps = CLIP
+    devices = ["/dev/mmcblk0p3", "/dev/mmcblk0p7"] + [
+        "/dev/mmcblk0p7:img%d" % i for i in range(2, len(IMAGES))]
+    images = [
+        {"index": i, "device": devices[i], "title": title,
+         "subtitle": sub, "art": "art%d.png" % i,
+         "anim": "anim%d.gif" % i if i == HIGHLIGHT else None,
+         "music": None, "art_source": "auto",
+         "anim_source": ("auto@%s:%s:%s" % (start, seconds, fps)
+                         if i == HIGHLIGHT else "none"),
+         "source": src[i], "source_exists": os.path.isfile(path),
+         "title_dir": "turtles", "bypass": "bypassed"}
+        for i, (path, title, sub) in enumerate(IMAGES)]
     return {
         "card": CARD, "size": 15494807552, "layout": "parts",
         "partitions": [{"index": 3, "device": "/dev/mmcblk0p3"},
                        {"index": 7, "device": "/dev/mmcblk0p7"}],
-        "images": [
-            {"index": 0, "device": "/dev/mmcblk0p3", "title": IMAGES[0][1],
-             "subtitle": IMAGES[0][2], "art": "art0.png", "anim": None,
-             "music": None, "art_source": "auto", "anim_source": "none",
-             "source": src[0], "source_exists": os.path.isfile(IMAGES[0][0]),
-             "title_dir": "turtles", "bypass": "bypassed"},
-            {"index": 1, "device": "/dev/mmcblk0p7", "title": IMAGES[1][1],
-             "subtitle": IMAGES[1][2], "art": "art1.png",
-             "anim": "anim1.gif", "music": None, "art_source": "auto",
-             "anim_source": "auto@%s:%s:%s" % (start, seconds, fps),
-             "source": src[1], "source_exists": os.path.isfile(IMAGES[1][0]),
-             "title_dir": "turtles", "bypass": "bypassed"}],
+        "images": images,
         "timeout": TIMEOUT_ON_CARD, "default": HIGHLIGHT, "volume": 50,
         "mixer_volume": None, "sound_move": "auto", "sound_confirm": "auto",
         "font": "/usr/local/codeselect/font.ttf",
-        "media": [{"name": "art0.png", "bytes": 178_432},
-                  {"name": "art1.png", "bytes": 191_204},
-                  {"name": "anim1.gif", "bytes": 1_402_880}],
+        "media": ([{"name": "art%d.png" % i, "bytes": 178_432 + i}
+                   for i in range(len(IMAGES))]
+                  + [{"name": "anim%d.gif" % HIGHLIGHT,
+                      "bytes": 1_402_880}]),
         "has_media_json": True, "has_build_json": True,
         "selector": {"bytes": 41272, "version": "codeselect 1.0"},
         "warnings": []}
@@ -527,8 +590,13 @@ def s_load():
     # One change: the countdown. The preview frame above was drawn with the
     # new value, which is what Render preview would show.
     panel._timeout_var.set(str(TIMEOUT_NOW))
-    panel._tree.selection_set("1")
-    panel._tree.focus("1")
+    # The Code column again: a load fills the rows from the card, and the
+    # version is a fact about the .raw, not something the card records.
+    for row, version in zip(panel._rows, VERSIONS):
+        row.version = version
+    panel._refresh_tree(select=HIGHLIGHT)
+    panel._tree.selection_set(str(HIGHLIGHT))
+    panel._tree.focus(str(HIGHLIGHT))
     root.update()
     # The load cleared the preview (its media dir changed under it); put the
     # frame back through the same public seam.
@@ -546,6 +614,10 @@ def s_load():
            panel._apply_btn.winfo_ismapped()))
     log("output: %s" % panel._out_var.get())
     log("hint: %r" % panel._hint.cget("text"))
+    log("menu summary: %r" % panel._menu_lbl.cget("text"))
+    log("table rows:")
+    for i in panel._tree.get_children():
+        log("   %-4s %s" % (i, panel._tree.item(i)["values"]))
     log("tab reqheight=%s window=%sx%s"
         % (win._tab_multiboot.winfo_reqheight(), root.winfo_width(),
            root.winfo_height()))
@@ -574,6 +646,52 @@ def s_fit():
     measure("David's desktop")
     if FIT_OUT:
         snap(FIT_OUT)
+    set_window(SHOT_W, SHOT_H)
+
+
+@step(400)
+def s_sweep():
+    """THE WIDTH SWEEP.  The layout does not reflow, so the only thing the
+    width may change is the picture - and it may only ever get SMALLER as
+    the window does.  Two things are asserted at every width: the tab never
+    grows past its height budget (the notebook is pinned to it, and past
+    that the rows below the fold are gone), and the preview never grows as
+    the window shrinks (the old layout's worst trick: dragging the window
+    narrower made the picture BIGGER and pushed the actions off the
+    bottom)."""
+    if not MEASURE:
+        return
+    SWEEP[:] = []
+    for width in SWEEP_WIDTHS:
+        set_window(width, FIT_H)
+        root.update()
+        time.sleep(0.25)
+        root.update()
+        win._resize_notebook_to_current_tab()
+        root.update_idletasks()
+        measure("sweep %d" % width, collect=True)
+    log("")
+    log("== SWEEP: width -> tab height, preview")
+    bad = []
+    prev_area = None
+    for width, height, pw, ph in SWEEP:
+        log("   %5d px -> tab %3d px, preview %4dx%-4d" % (width, height,
+                                                           pw, ph))
+        if height > HEIGHT_BUDGET:
+            bad.append("%d px wide: the tab needs %d px (budget %d)"
+                       % (width, height, HEIGHT_BUDGET))
+        # (the sweep runs at 768 high on purpose - that is the desktop the
+        # budget is for, so HEIGHT_BUDGET is the right number here)
+        # walked narrowest first, so the picture must never get SMALLER as
+        # the window gets wider - which is the same statement as 'it never
+        # grows as the window shrinks', read backwards
+        if prev_area is not None and pw * ph < prev_area:
+            bad.append("%d px wide: the preview shrank as the window grew"
+                       % width)
+        prev_area = pw * ph
+    for line in bad:
+        log("   !! " + line)
+    log("   sweep: %s" % ("FAIL" if bad else "OK"))
     set_window(SHOT_W, SHOT_H)
 
 

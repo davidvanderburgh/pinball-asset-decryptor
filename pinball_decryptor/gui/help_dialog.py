@@ -1354,33 +1354,81 @@ HELP_CONTENT = {
          "cards. The first image in the list is the primary — its boot "
          "files are the card's, and the machine falls back to it if the "
          "menu ever fails."),
-        ("Images, text and media",
-         "Add each card image (.raw) in the order the menu should list "
-         "them, then select a row to give it a title and subtitle. Art is "
-         "the picture on that image's card in the menu (auto = the game's "
-         "own logo, pulled off the image), Animation an optional GIF or "
-         "short clip (auto = the attract clip), Music an optional WAV loop "
-         "while it is highlighted. The move and confirm sounds are global; "
-         "auto pulls a click and a stinger from the primary image, synth "
-         "generates tones. Prepare media renders all of that to the sizes "
-         "the selector wants before the build."),
+        ("The tab, top to bottom",
+         "One column, and it never rearranges itself under the window: "
+         "Load card… / New card… and the card path first, because reading "
+         "a card you already built is usually the first thing you do here. "
+         "Then the PREVIEW, the full width of the tab — the boot menu "
+         "drawn by the selector itself. Then the IMAGES TABLE under it, "
+         "one row per image. Then one bar: Menu settings… on the left, the "
+         "actions on the right, and the status under them. Everything the "
+         "tools print goes to the Log at the foot of the window, beside "
+         "the other tabs', and the footer's stages and progress bar are "
+         "this tab's own while you are on it."),
+        ("The images table",
+         "One row per image, in the order the menu will list them, and "
+         "each row carries that image's own settings: its title and "
+         "subtitle, its picture, its animation, its music, the sound that "
+         "plays when it is chosen, and its game code version where that is "
+         "known. The last row is dim and has a +: click it to add an "
+         "image. Every row ends in four icons that act on THAT row — ✎ "
+         "opens it, − takes it off the card, ▲ and ▼ move it (an outlined "
+         "arrow means that row cannot go further that way). A "
+         "double-click or Enter opens a row too, and a right-click offers "
+         "the same five commands. The line under the table names the .raw "
+         "the selected image was copied from."),
+        ("One image's text and media",
+         "✎ (or a double-click on the row) opens that image: title, "
+         "subtitle, Art (the picture on its card in the menu — auto = the "
+         "game's own logo, pulled off the image, or a frame of a video at "
+         "a second you choose), Animation (auto = the attract clip, or a "
+         "GIF or clip of your own, with its start, length and frame rate) "
+         "and Music, an optional WAV loop while it is highlighted."),
+        ("Menu settings",
+         "The button on the action bar opens everything that belongs to "
+         "the MENU rather than to one image, and the line beside it "
+         "already says what those are: the move and confirm sounds (auto "
+         "pulls a click and a stinger from the primary image, synth "
+         "generates tones), the volume, the countdown (0 = wait for "
+         "START), which image is highlighted at power-up, the validator "
+         "bypass and the WSL path of the built selector."),
+        ("The preview",
+         "It redraws itself. Change anything — a title, the countdown, the "
+         "art, the highlighted image — and about a third of a second after "
+         "you stop, the selector draws that frame again under qemu. A text "
+         "change costs one snapshot; only a media change makes the media "
+         "be rendered again, and that is cached. It scales with the "
+         "window, and it never greys the tab while it is drawing. "
+         "Selecting a row in the table points it at that image. Frame "
+         "steps through the highlighted image's animation and Play runs "
+         "it. It is the same media the build will use, so the card carries "
+         "exactly what you previewed. Right-click the picture to redraw it "
+         "now, or to stop it following the form."),
         ("Bypass game validation",
-         "Ticked by default, and leave it so: with two images on one card "
-         "the machine's validator fails BOTH of them (GAME VALIDATION "
-         "ERROR), because the two share one grade state. The bypass "
-         "neuters the validator in every image on the card — the same "
-         "patch the Insider-clean 1987 card carries — and Bypass an "
-         "existing card… applies it to a card already built, without a "
-         "rebuild."),
-        ("Build, flash, run",
-         "Check size shows which Stern card size the image fits before a "
-         "byte is written. Build & verify writes the sparse card image, "
-         "injects the selector, then verifies every copied range and every "
-         "file system. Flash to SD card… opens the app's Build / flash "
-         "dialog on the finished image; Run in emulator starts the Emulate "
-         "tab on it with Boot selector ticked, so the same menu appears in "
-         "the game window here first. The tools run under WSL and report "
-         "into the pane at the bottom of the tab (and the log)."),
+         "Ticked by default, and leave it so: with more than one image on "
+         "a card the machine's validator can fail them (GAME VALIDATION "
+         "ERROR), because the images share one grade state. The bypass "
+         "neuters the validator in every image on the card — a four-byte "
+         "patch at the validator's entry, with that image's package index "
+         "record refreshed — and Bypass an existing card… (under More ▾) "
+         "applies it to a card already built, without a rebuild."),
+        ("Apply to card, or Build & verify",
+         "After Load card… the tab is editing THAT card: every field came "
+         "off it, and the status line says which of the two things can "
+         "happen. Apply to card rewrites the menu in place with one inject "
+         "— seconds, no copy — and is the green button while that is what "
+         "you want. Adding, removing, reordering or replacing an IMAGE is "
+         "the one thing an inject cannot do: that needs Build & verify, "
+         "which writes a whole new card image (set a different card path "
+         "first) and then verifies every copied range, every file system "
+         "and the injected selector. Check size, under More ▾, says which "
+         "Stern card size the image fits before a byte is written."),
+        ("Flash and run",
+         "Flash to SD card… opens the app's Build / flash dialog on the "
+         "finished image; Run in emulator starts the Emulate tab on it "
+         "with Boot selector ticked, so the same menu appears in the game "
+         "window here first. Everything runs under WSL and reports into "
+         "the Log at the foot of the window, tagged [multi-boot]."),
     ],
 }
 

@@ -29,10 +29,11 @@ from pinball_decryptor.gui import emulate_tab, multiboot_tab
 from pinball_decryptor.gui.multiboot_tab import (
     DEFAULT_SELECTOR_DIR, FRAME_H, FRAME_W, INSPECT_JSON, PREVIEW_BUILD_DIR,
     ImageRow, MultibootForm, anim_spec, apply_commands, art_spec,
-    build_commands, bypass_commands, default_output_path, diff_forms,
+    build_commands, bypass_commands, cell_anim, cell_art,
+    default_output_path, diff_forms,
     edit_status_text, ensure_selector_args, fit_factors, form_from_inspect,
     host_path, inject_commands, inspect_commands, list_title,
-    loaded_media_dir, media_fingerprint, media_specs_changed, media_summary,
+    loaded_media_dir, media_fingerprint, media_specs_changed,
     menu_summary, parse_anim_frames, parse_inspect, parse_plan, parse_refusal,
     parse_selector_path, plan_commands, prepare_commands, preview_box,
     preview_fingerprint, preview_prepare_args, preview_snapshot_args,
@@ -395,6 +396,44 @@ def test_fingerprint_changes_with_what_the_frame_shows(tmp_path):
     assert preview_fingerprint(quiet) == fp
 
 
+def test_a_frame_file_is_named_after_the_form_that_drew_it(tmp_path):
+    """THE FINGERPRINT IS IN THE FILE NAME.  Without it, change a title,
+    let it render, change it back: the reverted form has no cache entry, so
+    a render is queued - and it wrote to the very name the newer form had
+    already written, so either form could be shown the other's picture."""
+    pv = str(tmp_path / "preview")
+    a = preview_fingerprint(_form(tmp_path, 2))
+    other = _form(tmp_path, 2)
+    other.images[1].title = "TMNT 1987"
+    b = preview_fingerprint(other)
+    assert a != b
+    assert multiboot_tab.frame_path(pv, a, 1, 0) != \
+        multiboot_tab.frame_path(pv, b, 1, 0)
+    assert os.path.basename(multiboot_tab.frame_path(pv, a, 1, 3)) == \
+        "frame_%s_1_3.ppm" % a
+    # ...and the ones no form can ask for again are found so they can go
+    os.makedirs(pv)
+    for name in ("frame_%s_0_0.ppm" % a, "frame_%s_1_2.ppm" % a,
+                 "frame_%s_0_0.ppm" % b, "images.conf", "notes.txt"):
+        open(os.path.join(pv, name), "w").close()
+    assert sorted(os.path.basename(p) for p in
+                  multiboot_tab.stale_frames(pv, b)) == [
+        "frame_%s_0_0.ppm" % a, "frame_%s_1_2.ppm" % a]
+    assert multiboot_tab.stale_frames(str(tmp_path / "nope"), b) == []
+
+
+def test_scaled_size_keeps_the_aspect_ratio_in_both_directions():
+    """The smooth path: whatever the column's width, the picture fits it
+    with its shape intact (Tk's own PhotoImage only halves and thirds)."""
+    from pinball_decryptor.gui.multiboot_tab import scaled_size
+    assert scaled_size(1360, 768, 680, 384) == (680, 384)
+    assert scaled_size(1360, 768, 500, 384) == (500, 282)   # width-limited
+    assert scaled_size(1360, 768, 900, 384) == (680, 384)   # height-limited
+    assert scaled_size(1360, 768, 431, 384) == (431, 243)   # no whole step
+    assert scaled_size(136, 77, 680, 384) == (678, 384)     # scaled UP
+    assert scaled_size(0, 0, 100, 100) == (1, 1)
+
+
 def test_ensure_selector_builds_from_the_checkout_then_falls_back(
         monkeypatch, tmp_path):
     """The 'selector' step: ``make`` into the scratch build dir (incremental,
@@ -493,22 +532,23 @@ def test_preview_box_is_a_whole_fraction_of_the_selectors_frame():
         assert (w, h) == (-(-FRAME_W // k), -(-FRAME_H // k))
 
 
-def test_the_list_cells_and_the_menu_summary_say_it_in_a_phrase():
-    """What the compact list and the Menu settings… button carry - the
-    detail is in the two modals."""
-    assert media_summary(ImageRow("x.raw")) == "logo"
-    assert media_summary(ImageRow("x.raw", art="none")) == "text only"
-    assert media_summary(ImageRow("x.raw", anim="auto",
-                                  music="D:/bed.wav")) == \
-        "logo + clip + music"
-    assert media_summary(ImageRow("x.raw", art="video frame",
-                                  art_video="D:/a.mov")) == "frame"
-    assert media_summary(ImageRow("x.raw", art="D:/logo.png")) == "art"
+def test_the_table_cells_and_the_menu_summary_say_it_in_a_phrase():
+    """What the images table's own cells carry - the settings are COLUMNS
+    now, not one phrase summarising all of them."""
+    assert cell_art(ImageRow("x.raw")) == "auto"
+    assert cell_art(ImageRow("x.raw", art="none")) == "none"
+    assert cell_art(ImageRow("x.raw", art="video frame",
+                             art_video="D:/a.mov", art_time="21")) == \
+        "a.mov @21s"
+    assert cell_art(ImageRow("x.raw", art="D:/logo.png")) == "logo.png"
+    assert cell_anim(ImageRow("x.raw", anim="auto", anim_start="20",
+                              anim_seconds="2", anim_fps="8")) == \
+        "auto @20s 2s 8fps"
     on_card = ImageRow("", art="art0.png", art_on_card=True,
                        music="music0.wav", music_on_card=True, anim="none")
-    assert media_summary(on_card) == "art0.png + music0.wav (on the card)"
-    # the title cell carries what is wrong with the .raw, since the list has
-    # no room for a column of its own
+    assert cell_art(on_card) == "art0.png (on the card)"
+    # the title cell carries what is wrong with the .raw, since the table
+    # has no room for a column of paths
     assert list_title(ImageRow("", title="STERN"), 0) == \
         "STERN  [no source recorded]"
     assert list_title(ImageRow("D:/gone.raw", title="1987"), 1) == \
@@ -679,16 +719,29 @@ def _panel(auto=False, **kw):
     THE AUTO PREVIEW IS OFF unless a test asks for it: it would otherwise
     fire ~350 ms into any test that pumps the loop and start the real
     selector under WSL.  The tests that are about it turn it on and stub
-    the render."""
+    the render.
+
+    The panel has no output pane of its own any more - its lines go to the
+    app's shared Log at the foot of the window - so the sink is captured
+    here and :func:`_pane` reads it back."""
     import tkinter as tk
     root = _root()
     frame = tk.Frame(root)
     frame.pack()
+    sunk = []
+    kw.setdefault("log", sunk.append)
     panel = multiboot_tab.MultibootPanel(frame, **kw)
     panel.build(frame)
     panel._auto_preview.set(bool(auto))
+    panel.sunk = sunk
     root.update()
     return root, panel
+
+
+def _pane(panel):
+    """Everything the panel has said, as one string - what used to be read
+    out of its own Tool output pane, and is now in the app's Log."""
+    return "\n".join(panel.log_lines())
 
 
 def _fire_debounce(root, panel):
@@ -736,7 +789,8 @@ def test_add_images_fills_title_and_output(tmp_path):
         assert form.timeout == 15 and form.default == 0
         assert form.media_dir == ""                    # nothing prepared
         assert form.selector_dir == DEFAULT_SELECTOR_DIR
-        assert len(panel._tree.get_children()) == 2
+        # two images and the template row that adds a third
+        assert panel._tree.get_children() == ("0", "1", panel.ADD_ROW)
     finally:
         root.destroy()
 
@@ -811,7 +865,8 @@ def test_editor_video_frame_and_clip_fields_write_back(tmp_path):
         # the short version of it
         assert multiboot_tab.cell_art(row) == "intro.mp4 @3s"
         assert multiboot_tab.cell_anim(row) == "auto @20s 2s 8fps"
-        assert panel._tree.item("1")["values"][2] == "frame + clip"
+        assert panel._tree.item("1")["values"][3] == "intro.mp4 @3s"
+        assert panel._tree.item("1")["values"][4] == "auto @20s 2s 8fps"
         assert panel.form().images[0].anim_start == ""        # untouched
         # re-select: row 0 shows blanks, row 1 comes back whole
         panel._tree.selection_set("0")
@@ -880,27 +935,178 @@ def test_the_modals_write_on_ok_and_change_nothing_on_cancel(tmp_path):
         root.destroy()
 
 
-def test_the_list_says_the_title_and_a_short_media_phrase(tmp_path):
-    """The list is narrow now (it shares the tab with the preview), so each
-    row is the index, the title and one phrase for its media."""
+def test_the_table_carries_each_images_settings_in_columns(tmp_path):
+    """The table is the full width of the tab, so what an image is SET TO
+    is columns rather than one phrase - and the four icons at the right
+    edge act on the row they are in."""
     root, panel = _panel()
     try:
         a, b = _images(tmp_path, 2)
         panel.add_image(a)
         panel.add_image(b)
-        assert panel._tree.item("0")["values"] == [
-            0, "turtles_pro-1_59_0", "logo"]
+        assert panel._tree.item("0")["values"][:8] == [
+            0, "turtles_pro-1_59_0", "Release", "auto", "none", "none",
+            "auto", ""]
         panel._rows[1].anim = "auto"
         panel._rows[1].music = str(tmp_path / "bed.wav")
+        panel._rows[1].version = "1.59.0"
         panel._refresh_tree(select=1)
-        assert panel._tree.item("1")["values"][2] == "logo + clip + music"
-        panel._rows[1].art = "none"
-        panel._rows[1].anim = "none"
-        panel._rows[1].music = "none"
-        panel._refresh_tree(select=1)
-        assert panel._tree.item("1")["values"][2] == "text only"
-        # ...and the selected row's own .raw is on the line under the list
+        assert panel._tree.item("1")["values"][3:8] == [
+            "auto", "auto", "bed.wav", "auto", "1.59.0"]
+        # the Confirm column is a MENU setting shown per row, and follows it
+        panel._confirm_var.set("synth")
+        assert panel._tree.item("1")["values"][6] == "synth"
+        # the icons: the first row cannot go up, the last cannot go down,
+        # and the arrow says so instead of silently doing nothing
+        assert panel._tree.item("0")["values"][8:] == ["✎", "−",
+                                                       "△", "▼"]
+        assert panel._tree.item("1")["values"][8:] == ["✎", "−",
+                                                       "▲", "▽"]
+        # ...and the template row is the last one, dim, with the '+'
+        assert panel._tree.get_children()[-1] == panel.ADD_ROW
+        add = panel._tree.item(panel.ADD_ROW)
+        assert add["values"][:2] == ["+", panel.ADD_ROW_TEXT]
+        assert add["tags"] == ["add"]
+        # ...and the selected row's own .raw is on the line under the table
         assert panel._rows[1].path in panel._row_tip.text
+    finally:
+        root.destroy()
+
+
+def _click_cell(root, panel, item, column):
+    """Click the middle of one cell of the table, the way a mouse would -
+    through the same <Button-1> binding, so identify_row / identify_column
+    are what decide which row and which icon was hit."""
+    import tkinter as tk
+    root.update()
+    root.update_idletasks()
+    box = panel._tree.bbox(item, column)
+    assert box, "cell %s/%s is not on screen" % (item, column)
+    x, y, w, h = box
+
+    class _E:
+        pass
+    ev = _E()
+    ev.x, ev.y = x + w // 2, y + h // 2
+    ev.x_root = panel._tree.winfo_rootx() + ev.x
+    ev.y_root = panel._tree.winfo_rooty() + ev.y
+    return panel._table_click(ev), tk
+
+
+def test_the_row_icons_act_on_the_row_they_are_in(tmp_path):
+    """The row IS where the row is worked on: a pencil, a minus and two
+    arrows at its right edge, and a click on one of them acts on THAT row
+    - which is why they are columns and not five buttons under the table."""
+    root, panel = _panel()
+    opened = []
+    panel.edit_image = lambda index=None: opened.append(index)
+    try:
+        a, b, c = _images(tmp_path, 3)
+        for p in (a, b, c):
+            panel.add_image(p)
+        root.update()
+        # ▼ on row 0 moves it down...
+        _click_cell(root, panel, "0", "down")
+        assert [r.path for r in panel._rows] == [b, a, c]
+        # ...and ▲ on row 1 puts it back
+        _click_cell(root, panel, "1", "up")
+        assert [r.path for r in panel._rows] == [a, b, c]
+        # ▲ on the FIRST row is the outlined arrow and does nothing
+        _click_cell(root, panel, "0", "up")
+        assert [r.path for r in panel._rows] == [a, b, c]
+        # ✎ opens that row's editor
+        _click_cell(root, panel, "1", "edit")
+        assert opened == [1]
+        # − takes it off the card
+        _click_cell(root, panel, "1", "del")
+        assert [r.path for r in panel._rows] == [a, c]
+        # ...and a click in a text column is an ordinary selection
+        assert _click_cell(root, panel, "0", "title")[0] is None
+    finally:
+        root.destroy()
+
+
+def test_the_template_row_adds_an_image(tmp_path):
+    """The last row of the table is the '+': an empty card shows only that
+    row, which is both the way in and the lesson."""
+    root, panel = _panel()
+    asked = []
+    panel._add_image = lambda: asked.append(len(panel._rows))
+    try:
+        root.update()
+        assert panel._tree.get_children() == (panel.ADD_ROW,)
+        _click_cell(root, panel, panel.ADD_ROW, "title")
+        assert asked == [0]
+        # ...and a double-click on it does NOT open the editor for a row
+        # that is not there
+        assert panel._table_double_click(_Ev(panel, panel.ADD_ROW)) == "break"
+    finally:
+        root.destroy()
+
+
+class _Ev:
+    """A click event over one row of the table, for the double-click seam."""
+    def __init__(self, panel, item):
+        box = panel._tree.bbox(item) or (0, 0, 10, 10)
+        self.x, self.y = box[0] + 2, box[1] + box[3] // 2
+        self.x_root = panel._tree.winfo_rootx() + self.x
+        self.y_root = panel._tree.winfo_rooty() + self.y
+
+
+def test_the_footer_stages_are_this_tabs_own(tmp_path):
+    """The progress row belongs to THIS tab's buttons: the Extract ladder
+    says nothing about assembling a card.  Build & verify walks all four
+    stages, Apply to card only the ones an inject touches."""
+    seen = []
+    root, panel = _panel(
+        phase_fn=lambda index, total=None, status=None:
+        seen.append((index, status)))
+    try:
+        for label, index in (("prepare", 0), ("build", 1), ("inject", 2),
+                             ("verify", 3), ("bypass", 2), ("inspect", 3)):
+            seen[:] = []
+            panel._phase_step(label)
+            assert seen and seen[0][0] == index, label
+            assert seen[0][1], label            # ...and it says what it is
+        # a step that is not a stage moves nothing
+        seen[:] = []
+        panel._phase_step("frame 0")
+        assert seen == []
+        # done, and failed
+        seen[:] = []
+        panel._phase_done(0, None)
+        assert seen == [(-1, "Ready")]
+        seen[:] = []
+        panel._phase_done(2, "verify")
+        assert seen == [(None, "verify failed")]
+    finally:
+        root.destroy()
+
+
+def test_a_background_render_never_touches_the_footer(tmp_path, monkeypatch):
+    """...and the preview is not one of this tab's buttons: a redraw must
+    not walk the stage row or move the bar."""
+    seen = []
+    root, panel = _panel(
+        phase_fn=lambda index, total=None, status=None: seen.append(index))
+
+    class _Proc:
+        stdout = iter(())
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(multiboot_tab.subprocess, "Popen",
+                        lambda *a, **kw: _Proc())
+    try:
+        assert panel._run_commands([("prepare", ["true"])],
+                                   preview=True) is True
+        _wait(root, lambda: not panel._pv_busy, seconds=10)
+        assert seen == []
+        # ...but a real run does
+        assert panel._run_commands([("prepare", ["true"])]) is True
+        _wait(root, lambda: not panel._busy, seconds=10)
+        assert seen == [0, -1]
     finally:
         root.destroy()
 
@@ -1007,7 +1213,6 @@ def test_busy_guard_refuses_a_second_run(tmp_path, monkeypatch):
         panel._build_card()
         assert "already in progress" in panel._hint.cget("text")
         assert str(panel._build_btn.cget("state")) == "disabled"
-        assert str(panel._render_btn.cget("state")) == "disabled"
         # ...and the preview: refused, said on its own status line, and
         # nothing queued for the worker.
         assert panel.render_preview() is False
@@ -1015,7 +1220,72 @@ def test_busy_guard_refuses_a_second_run(tmp_path, monkeypatch):
         assert panel._pv_cache == {}
         panel._set_busy(False)
         assert str(panel._build_btn.cget("state")) == "normal"
-        assert str(panel._render_btn.cget("state")) == "normal"
+    finally:
+        root.destroy()
+
+
+def test_a_background_render_leaves_every_action_live(tmp_path, monkeypatch):
+    """THE PREVIEW MUST NOT GREY THE TAB.  It renders itself once per
+    typing pause; when that went through the destructive-action guard the
+    whole tab - Apply, Build, Flash, Run, More, Load, New - went dead and
+    swallowed clicks about once a second while someone typed a title."""
+    import threading
+    root, panel = _panel()
+    running = threading.Event()
+
+    class _Proc:
+        """A tool that does not finish until the test says so, so the
+        assertions below are made while the render really is in flight."""
+        stdout = iter(())
+
+        def wait(self):
+            running.wait(10)
+            return 0
+
+    monkeypatch.setattr(multiboot_tab.subprocess, "Popen",
+                        lambda *a, **kw: _Proc())
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        assert panel._run_commands([("frame 0", ["true"])],
+                                   preview=True) is True
+        # the guard the actions share is untouched...
+        assert panel._busy is False
+        # (Apply, Flash and Run in emulator have their own reasons to be
+        # grey on a standalone panel with no card loaded; these are the
+        # ones the busy guard ALONE would have taken away.)
+        for btn in (panel._build_btn, panel._more_btn, panel._load_btn,
+                    panel._new_btn, panel._menu_btn, panel._browse_btn):
+            assert str(btn.cget("state")) != "disabled", str(btn)
+        # ...but a SECOND render is still refused while this one is up
+        assert panel._pv_busy is True
+        assert panel._run_commands([("frame 1", ["true"])],
+                                   preview=True) is False
+        running.set()
+        _wait(root, lambda: panel._pv_busy is False, seconds=10)
+        assert panel._pv_busy is False
+    finally:
+        running.set()
+        root.destroy()
+
+
+def test_an_action_waits_for_the_render_instead_of_being_refused(tmp_path):
+    """A real action asked for while a background render is in flight is
+    not refused: the render is told to stop after the step it is on, and
+    the action starts the moment it lets go - with the action's own guard
+    taken at once, so a second action is still refused."""
+    root, panel = _panel()
+    try:
+        started = []
+        panel._start_worker = lambda *a: started.append(a)
+        panel._pv_busy = True                   # a render is on the worker
+        assert panel._run_commands([("build", ["true"])]) is True
+        assert started == []                    # queued, not started
+        assert panel._busy is True              # ...and the guard is taken
+        assert panel._pv_cancel is True
+        assert panel._run_commands([("verify", ["true"])]) is False
+        cmds = panel._pending_run[0]
+        assert cmds == [("build", ["true"])]
     finally:
         root.destroy()
 
@@ -1121,10 +1391,10 @@ def test_run_commands_streams_the_tool_into_the_pane(tmp_path):
         _wait(root, lambda: done)
         assert done == [(0, None)]
         assert panel._busy is False
-        pane = panel._log_text.get("1.0", "end")
+        pane = _pane(panel)
         assert "[card] hello from the tool" in pane
         assert "plan: exit 0" in pane
-        assert "Fits a 16 GB card" in panel._plan_lbl.cget("text")
+        assert "Fits a 16 GB card" in panel._edit_lbl.cget("text")
     finally:
         root.destroy()
 
@@ -1140,7 +1410,7 @@ def test_run_commands_stops_at_the_first_failure(tmp_path):
                             done.append((rc, failed, sorted(texts))))
         _wait(root, lambda: done)
         assert done == [(2, "build", ["build"])]
-        assert "SHOULD NOT RUN" not in panel._log_text.get("1.0", "end")
+        assert "SHOULD NOT RUN" not in _pane(panel)
     finally:
         root.destroy()
 
@@ -1166,7 +1436,7 @@ def test_run_commands_evaluates_a_lazy_argv_from_earlier_output(tmp_path):
                             done.append((rc, failed, sorted(texts))))
         _wait(root, lambda: done)
         assert done == [(1, "frame 1", ["frame 0", "selector"])]
-        pane = panel._log_text.get("1.0", "end")
+        pane = _pane(panel)
         assert "bin=/the/bin" in pane
         assert "frame 1: nothing to run" in pane
         assert panel._busy is False
@@ -1185,8 +1455,11 @@ def test_load_frame_shows_a_ppm_scaled_into_the_box(tmp_path):
     root, panel = _panel()
     try:
         big = _ppm(tmp_path / "frame_1_3.ppm", 1360, 768)
+        box = (panel._pv_w, panel._pv_h)
         assert panel.load_frame(big, highlight=1, frame=3, total=24) is True
-        assert (panel._pv_photo.width(), panel._pv_photo.height()) == (680, 384)
+        # the picture IS the box: the canvas is sized to the frame's own
+        # 16:9, so a 1360x768 snapshot fills it exactly
+        assert (panel._pv_photo.width(), panel._pv_photo.height()) == box
         assert panel._pv_canvas.find_all()                  # one image item
         assert panel._pv_canvas.type(panel._pv_canvas.find_all()[0]) == "image"
         assert panel._pv_status.cget("text") == "Image 1: frame 3 of 24"
@@ -1195,11 +1468,14 @@ def test_load_frame_shows_a_ppm_scaled_into_the_box(tmp_path):
         assert int(panel._frame_spin.cget("to")) == 23
         small = _ppm(tmp_path / "small.ppm", 136, 77)
         assert panel.load_frame(small, highlight=0, frame=0, total=1)
-        assert (panel._pv_photo.width(), panel._pv_photo.height()) == (544, 308)
+        # SMOOTHLY, not in whole-number steps: a 136x77 frame is scaled to
+        # the box it is given, where PhotoImage's zoom could only quadruple
+        # it and leave a quarter of the box empty.
+        assert (panel._pv_photo.width(), panel._pv_photo.height()) ==             multiboot_tab.scaled_size(136, 77, *box)
         assert "a still" in panel._pv_status.cget("text")
         assert panel.load_frame(str(tmp_path / "missing.ppm")) is False
         assert "Cannot load" in panel._pv_status.cget("text")
-        assert "Cannot load" in panel._log_text.get("1.0", "end")
+        assert "Cannot load" in _pane(panel)
     finally:
         root.destroy()
 
@@ -1296,9 +1572,15 @@ def _stand_ins(monkeypatch, tmp_path, fail=None, frames=3):
 
     def prepare(form, media_dir, cwd=None):
         seen["media"] = media_dir
-        code = ("print('prepare: cached art1.png')" if fail != "prepare" else
+        seen.setdefault("media_dirs", []).append(media_dir)
+        # ...and it leaves a mark in the directory it rendered into, so a
+        # test can tell WHERE the media landed and not only that it ran.
+        code = ("import os, sys; "
+                "open(os.path.join(sys.argv[1], 'prepared'), 'w').close(); "
+                "print('prepare: cached art1.png')"
+                if fail != "prepare" else
                 "print('[media] error: ffmpeg missing'); raise SystemExit(2)")
-        return [("prepare", [py, "-c", code])]
+        return [("prepare", [py, "-c", code, media_dir])]
 
     def snapshot(binary, conf, media_dir, ppm, hl, n, rootfs="~/r", cwd=None):
         seen["snapshot"].append((binary, conf, media_dir, ppm, hl, n))
@@ -1334,7 +1616,7 @@ def test_render_preview_runs_the_pipeline_and_shows_the_frame(tmp_path,
         panel._default_var.set("1")
         assert panel.render_preview() is True
         assert "rendering" in panel._pv_status.cget("text")
-        _wait(root, lambda: not panel._busy)
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
         out = panel._out_var.get()
         pv = multiboot_tab.preview_dir_for(out)
         media = multiboot_tab.media_dir_for(out)
@@ -1343,18 +1625,19 @@ def test_render_preview_runs_the_pipeline_and_shows_the_frame(tmp_path,
             conf = f.read()
         assert b"image=p7|TMNT 1987|1987-upscaled|art1.png|anim1.gif|" in conf
         assert b"\r" not in conf
+        fp = preview_fingerprint(panel.form())
+        frame0 = multiboot_tab.frame_path(pv, fp, 1, 0)
         assert seen["snapshot"] == [(
             "/fake/codeselect", os.path.join(pv, "images.conf"), media,
-            os.path.join(pv, "frame_1_0.ppm"), 1, 0)]
-        assert os.path.isfile(os.path.join(pv, "frame_1_0.ppm"))
+            frame0, 1, 0)]
+        assert os.path.isfile(frame0)
         assert panel._pv_status.cget("text") == "Image 1: frame 0 of 3"
         assert panel._pv_photo is not None
-        fp = preview_fingerprint(panel.form())
-        assert panel._pv_cache == {(fp, 1, 0): os.path.join(pv, "frame_1_0.ppm")}
+        assert panel._pv_cache == {(fp, 1, 0): frame0}
         assert panel._pv_totals == {(fp, 1): 3}
         assert panel._pv_bin == "/fake/codeselect"
-        assert panel._pv_ready == media_fingerprint(panel.form())
-        pane = panel._log_text.get("1.0", "end")
+        assert panel._pv_ready == (media_fingerprint(panel.form()), media)
+        pane = _pane(panel)
         assert "selector: exit 0" in pane and "frame 0: exit 0" in pane
         # the same form again, another frame: straight to the snapshot
         panel._frame_var.set("2")
@@ -1363,7 +1646,7 @@ def test_render_preview_runs_the_pipeline_and_shows_the_frame(tmp_path,
         panel._run_commands = lambda cmds, **kw: calls.append(
             [label for label, _ in cmds]) or real(cmds, **kw)
         assert panel.render_preview() is True
-        _wait(root, lambda: not panel._busy)
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert calls == [["frame 2"]]
         assert (fp, 1, 2) in panel._pv_cache
         assert panel._pv_status.cget("text") == "Image 1: frame 2 of 3"
@@ -1389,34 +1672,197 @@ def test_a_text_change_costs_one_snapshot_and_a_media_change_a_prepare(
         panel._run_commands = lambda cmds, **kw: calls.append(
             [label for label, _ in cmds]) or real(cmds, **kw)
         assert panel.render_preview() is True
-        _wait(root, lambda: not panel._busy)
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert calls == [["selector", "prepare", "frame 0"]]
         # TEXT: no selector (built), no prepare (the media did not move)
         panel._rows[1].subtitle = "1987 cartoon upscale"
         panel._rows[0].title = "STERN 1.59.0"
         assert panel.render_preview() is True
-        _wait(root, lambda: not panel._busy)
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert calls[-1] == ["frame 0"]
         panel._timeout_var.set("8")
         assert panel.render_preview() is True
-        _wait(root, lambda: not panel._busy)
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert calls[-1] == ["frame 0"]
         # MEDIA: the prepare comes back, and once only
         panel._rows[1].anim = "auto"
         assert panel.render_preview() is True
-        _wait(root, lambda: not panel._busy)
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert calls[-1] == ["prepare", "frame 0"]
         panel._frame_var.set("1")
         assert panel.render_preview() is True
-        _wait(root, lambda: not panel._busy)
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert calls[-1] == ["frame 1"]
         # ...and a failed step forgets the prepared media, so the next
         # render prepares again
         panel._pv_ready = None
         panel._frame_var.set("2")
         assert panel.render_preview() is True
-        _wait(root, lambda: not panel._busy)
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert calls[-1] == ["prepare", "frame 2"]
+    finally:
+        root.destroy()
+
+
+def test_a_reverted_form_gets_its_own_picture_back(tmp_path, monkeypatch):
+    """CHANGE A TITLE, RENDER, CHANGE IT BACK.  The cache is keyed by the
+    form, so the reverted form has no entry and a render is queued - and
+    while every snapshot wrote to ``frame_<hl>_<n>.ppm`` that render wrote
+    over (or was shown) the newer form's picture.  Two forms, two files."""
+    root, panel = _panel()
+    seen = _stand_ins(monkeypatch, tmp_path, frames=1)
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._tree.selection_set("0")
+        root.update()                       # let the selection settle first
+        panel._rows[1].title = "one"
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        fp_a = preview_fingerprint(panel.form())
+        ppm_a = seen["snapshot"][-1][3]
+        assert panel._pv_cache[(fp_a, 0, 0)] == ppm_a
+        assert os.path.isfile(ppm_a)
+
+        panel._rows[1].title = "two"
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        fp_b = preview_fingerprint(panel.form())
+        ppm_b = seen["snapshot"][-1][3]
+        assert fp_b != fp_a and ppm_b != ppm_a       # the whole point
+        # the first form's frame is still there: it is the one on screen
+        assert os.path.isfile(ppm_a)
+
+        panel._rows[1].title = "one"
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert seen["snapshot"][-1][3] == ppm_a
+        assert panel._pv_src[0] == ppm_a
+
+        # ...and preview/ does not grow without bound: a frame no form can
+        # ask for again, and that is not on screen, goes
+        panel._pv_src = None
+        panel._rows[1].title = "two"
+        panel._frame_var.set("0")
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert not os.path.isfile(ppm_a)
+        assert (fp_a, 0, 0) not in panel._pv_cache
+    finally:
+        root.destroy()
+
+
+def test_a_changed_output_path_prepares_the_media_again(tmp_path,
+                                                        monkeypatch):
+    """THE MEDIA DIRECTORY COMES OFF THE OUTPUT PATH, and the 'is it
+    prepared' answer has to know that.  media_fingerprint leaves the output
+    out on purpose (retyping it does not change what the media IS) - so
+    keying on it alone left the prepared media in the OLD directory, the
+    new one empty, and Build & verify wrote a text-only card."""
+    root, panel = _panel()
+    seen = _stand_ins(monkeypatch, tmp_path, frames=1)
+    prepares = []
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        real = panel._run_commands
+        panel._run_commands = lambda cmds, **kw: prepares.append(
+            [label for label, _ in cmds]) or real(cmds, **kw)
+        panel._out_var.set(str(tmp_path / "one" / "card.multi.raw"))
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        first = seen["media"]
+        assert "prepare" in prepares[-1]
+        assert panel._pv_ready == (media_fingerprint(panel.form()), first)
+        # the same form, a different output: the media has not changed, but
+        # the DIRECTORY it has to be in has
+        panel._out_var.set(str(tmp_path / "two" / "card.multi.raw"))
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert os.path.normpath(seen["media"]) != os.path.normpath(first)
+        assert "prepare" in prepares[-1], prepares[-1]
+        assert os.path.isfile(os.path.join(seen["media"], "prepared"))
+    finally:
+        root.destroy()
+
+
+def test_a_half_typed_output_path_leaves_nothing_behind(tmp_path):
+    """Typing D:/x/mul on the way to D:/x/multi used to leave a preview/
+    and a media/ under every prefix that happened to render.  Only the
+    directories the preview MADE come back, only its own files go, and a
+    directory with anything else in it is left alone."""
+    root, panel = _panel()
+    try:
+        one, two = tmp_path / "mul", tmp_path / "multi"
+        pv1, media1 = str(one / "preview"), str(one / "media")
+        panel._makedirs(pv1)
+        panel._makedirs(media1)
+        open(os.path.join(pv1, "images.conf"), "w").close()
+        open(os.path.join(pv1, "frame_abc123_0_0.ppm"), "w").close()
+        assert os.path.isdir(pv1) and os.path.isdir(media1)
+        # the output moved: the old pair goes, and so does the folder we
+        # made to hold them
+        pv2, media2 = str(two / "preview"), str(two / "media")
+        panel._makedirs(pv2)
+        panel._makedirs(media2)
+        panel._forget_old_dirs(pv2, media2)
+        assert not os.path.exists(pv1) and not os.path.exists(media1)
+        assert os.path.isdir(pv2) and os.path.isdir(media2)
+        # ...but a directory with something of the user's in it stays
+        pv3 = str(tmp_path / "keep" / "preview")
+        panel._makedirs(pv3)
+        open(os.path.join(pv3, "notes.txt"), "w").close()
+        panel._forget_old_dirs(pv2, media2)
+        assert os.path.isfile(os.path.join(pv3, "notes.txt"))
+        # ...and a directory that was already there is never ours to remove
+        theirs = tmp_path / "theirs"
+        theirs.mkdir()
+        panel._makedirs(str(theirs))
+        panel._forget_old_dirs(pv2, media2)
+        assert os.path.isdir(str(theirs))
+    finally:
+        root.destroy()
+
+
+def test_a_stepper_on_a_frame_that_is_not_drawn_yet_says_so(tmp_path):
+    """The Image / Frame steppers used to do NOTHING on a cache miss, and
+    the caption went on describing the frame still on screen."""
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._out_var.set(str(tmp_path / "out" / "card.multi.raw"))
+        panel._auto_preview.set(False)
+        panel._frame_var.set("4")
+        assert "not been drawn yet" in panel._pv_status.cget("text")
+        assert "right-click" in panel._pv_status.cget("text")
+        panel._auto_preview.set(True)
+        panel._frame_var.set("5")
+        assert "drawing it" in panel._pv_status.cget("text")
+        assert panel._pv_debounce_job is not None
+    finally:
+        root.destroy()
+
+
+def test_a_settled_invalid_form_says_the_preview_is_out_of_date(tmp_path):
+    """Right while a field is half typed, wrong once it settles: the
+    debounce has already waited for the typing to stop, so a preview that
+    quietly stops following the form from then on is the worst of both."""
+    root, panel = _panel(auto=True)
+    started = []
+    panel._render_frames = lambda *a: started.append(a) or True
+    try:
+        a, b = _images(tmp_path, 2)
+        panel.add_image(a)
+        root.update()                   # the row selection, before the debounce
+        _fire_debounce(root, panel)
+        assert started == []
+        # ONE image is not a card, and the tab now says which line to read
+        assert "Preview not updated" in panel._pv_status.cget("text")
+        assert "at least two images" in panel._pv_status.cget("text")
+        panel.add_image(b)
+        _fire_debounce(root, panel)
+        assert started                       # ...and it draws once it can
     finally:
         root.destroy()
 
@@ -1508,17 +1954,20 @@ def test_a_failing_preview_step_surfaces_the_error(tmp_path, monkeypatch,
         panel._play_var.set(True)
         panel._play_fp = preview_fingerprint(panel.form())
         assert panel.render_preview() is True
-        _wait(root, lambda: not panel._busy)
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
         status = panel._pv_status.cget("text")
         label = "frame 0" if fail == "frame" else fail
         assert "Preview failed at %s (exit 2)" % label in status
-        pane = panel._log_text.get("1.0", "end")
+        pane = _pane(panel)
         assert "error:" in pane and "%s: exit 2" % label in pane
         assert "[preview] Preview failed" in pane
         assert panel._pv_cache == {}
         assert panel._play_var.get() is False          # Play stops on error
         assert panel._pv_ready is None
-        assert str(panel._render_btn.cget("state")) == "normal"
+        # ...and the tab was never greyed for it: a preview is a background
+        # redraw, not a run that writes something.
+        assert panel._busy is False and panel._pv_busy is False
+        assert str(panel._build_btn.cget("state")) == "normal"
     finally:
         root.destroy()
 
@@ -1855,10 +2304,10 @@ def test_the_status_line_names_what_will_happen(tmp_path):
     assert "Build & verify" in listed and "1 menu change would ride" in listed
 
 
-def test_the_status_block_carries_the_three_sentences(tmp_path):
-    """The block under the buttons says three things, and each one lands in
-    its own line: what just happened, what Apply / Build would write, and
-    how big the card would be."""
+def test_the_status_block_says_the_state_and_the_consequence(tmp_path):
+    """Two lines under the bar: what just happened, and what the two
+    writing buttons would do about it - with the card's size on the same
+    line, because that is the same question."""
     root, panel, card, _media = _loaded(tmp_path)
     try:
         # 1. the size sentence (Check size / the build's plan step)
@@ -1866,8 +2315,8 @@ def test_the_status_block_carries_the_three_sentences(tmp_path):
                          "image: 28755968 sectors = 14723055616 bytes\n"
                          "  fits Stern 16G image size 15494807552: YES "
                          "(spare 771751936)\n")
-        assert "Fits a 16 GB card" in panel._plan_lbl.cget("text")
-        # 2. what Apply to card would write
+        assert "Fits a 16 GB card" in panel._edit_lbl.cget("text")
+        # 2. what Apply to card would write, beside it
         assert "no changes yet" in panel._edit_lbl.cget("text")
         panel._timeout_var.set("8")
         assert panel._edit_lbl.cget("text").startswith(
@@ -1878,39 +2327,62 @@ def test_the_status_block_carries_the_three_sentences(tmp_path):
         panel._remove_image()
         assert panel._edit_lbl.cget("text").startswith(
             "The image list changed")
-        # 4. and the live line, which an error paints red and the tool
-        # output keeps in full
+        # 4. and the live line, which an error paints red and the app's Log
+        # keeps in full
         panel._ok("Reading the card…")
         assert panel._hint.cget("text") == "Reading the card…"
         panel._error("first reason\nsecond reason")
-        assert panel._hint.cget("text") == "first reason\nsecond reason"
-        pane = panel._log_text.get("1.0", "end")
+        # ONE LINE EACH.  A two-line message used to unmap the label under
+        # it - the consequence line - exactly when there was most to say;
+        # so the block says the first reason and how many more, and the
+        # Log at the foot of the window keeps every word.
+        assert panel._hint.cget("text") == \
+            "first reason  (+1 more - see the Log below)"
+        pane = _pane(panel)
         assert "first reason" in pane and "second reason" in pane
-        # the block's height never moves, however long the message
+        # ...and the line under it is still there, still saying what it said
+        assert panel._edit_lbl.cget("text").startswith("The image list")
+        assert "Fits a 16 GB card" in panel._edit_lbl.cget("text")
+        for lbl in (panel._hint, panel._edit_lbl):
+            assert lbl.winfo_ismapped(), str(lbl)
+            assert "\n" not in lbl.cget("text")
+        # the block is as tall as its lines really are - 56 px over three
+        # ~19 px labels was a pixel short in EVERY state
         h = panel._status_wrap.winfo_reqheight()
+        assert h >= sum(lbl.winfo_reqheight() for lbl in
+                        (panel._hint, panel._edit_lbl))
+        # ...and it never moves, however long the message
         panel._error("\n".join("reason %d" % i for i in range(20)))
         root.update()
         assert panel._status_wrap.winfo_reqheight() == h
+        assert "(+19 more" in panel._hint.cget("text")
     finally:
         root.destroy()
 
 
-def test_the_tool_output_pane_folds_away_and_says_when_it_has_news(tmp_path):
+def test_the_tools_output_goes_to_the_apps_own_log(tmp_path):
+    """THE TAB HAS NO OUTPUT PANE.  Its lines go to the Log at the foot of
+    the window - the one log the whole app writes to - tagged so they read
+    beside the other tabs’, and the panel keeps the same lines so a message
+    the one-line status block had to clip can still be read back."""
     root, panel = _panel()
     try:
-        assert panel._log_open is False
-        assert not panel._log_box.winfo_ismapped()
-        assert panel._log_btn.cget("text") == "▸  Tool output"
+        assert not hasattr(panel, "_log_text")
+        assert not hasattr(panel, "_log_btn")
         panel._write("[card] something happened")
-        assert "•" in panel._log_btn.cget("text")
-        assert panel.toggle_log() is True
-        root.update()
-        assert panel._log_box.winfo_ismapped()
-        assert panel._log_btn.cget("text") == "▾  Tool output"
-        assert "something happened" in panel._log_text.get("1.0", "end")
-        assert panel.toggle_log() is False
-        root.update()
-        assert not panel._log_box.winfo_ismapped()
+        assert panel.sunk == ["[multi-boot] [card] something happened"]
+        assert "something happened" in _pane(panel)
+        # ...and a message too long for the status block reaches it whole
+        panel._error("first reason\nsecond reason\nthird reason")
+        assert panel._hint.cget("text") == \
+            "first reason  (+2 more - see the Log below)"
+        for reason in ("first reason", "second reason", "third reason"):
+            assert "[multi-boot] " + reason in panel.sunk
+        # the panel keeps its own copy, capped
+        panel._lines = ["x"] * (panel.LOG_KEEP + 5)
+        panel._write("last")
+        assert len(panel.log_lines()) == panel.LOG_KEEP
+        assert panel.log_lines()[-1] == "last"
     finally:
         root.destroy()
 
@@ -1927,8 +2399,7 @@ def test_the_rare_actions_moved_into_the_more_menu(tmp_path):
                   if panel._more_menu.type(i) != "separator"]
         assert labels == ["Check size", "Prepare media",
                           "Bypass an existing card…",
-                          "Update the preview automatically",
-                          "Show the tool output"]
+                          "Update the preview automatically"]
         for p in _images(tmp_path, 2):
             panel.add_image(p)
         panel._more_menu.invoke(0)                 # Check size
@@ -1939,11 +2410,13 @@ def test_the_rare_actions_moved_into_the_more_menu(tmp_path):
         assert str(panel._more_btn.cget("state")) == "disabled"
         panel._set_busy(False)
         assert str(panel._more_btn.cget("state")) == "normal"
-        # the last entry is the Tool output fold, and it agrees with it
+        # ...and the last entry is the preview's auto-update, which the
+        # preview’s own right-click menu carries too
+        was = panel._auto_preview.get()
         panel._more_menu.invoke(panel._more_menu.index("end"))
-        assert panel._log_open is True
+        assert panel._auto_preview.get() is not was
         panel._more_menu.invoke(panel._more_menu.index("end"))
-        assert panel._log_open is False
+        assert panel._auto_preview.get() is was
     finally:
         root.destroy()
 
@@ -1961,11 +2434,11 @@ def test_new_card_clears_the_form_and_leaves_editing_mode(tmp_path):
         assert panel._volume_var.get() == "50"
         assert panel._timeout_var.get() == "15"
         assert panel._bypass_var.get() is True
-        assert panel._plan_lbl.cget("text") == ""
+        assert panel._plan_text == ""
         assert panel._edit_lbl.cget("text") == ""
         assert str(panel._apply_btn.cget("state")) == "disabled"
         assert panel._pv_cache == {} and panel._pv_photo is None
-        assert len(panel._tree.get_children()) == 0
+        assert panel._tree.get_children() == (panel.ADD_ROW,)
         # ...and the output box follows the next primary again
         panel.add_image(_images(tmp_path, 1)[0])
         assert panel._out_var.get() == default_output_path(
@@ -1978,9 +2451,9 @@ def test_new_card_clears_the_form_and_leaves_editing_mode(tmp_path):
 def test_the_whole_tab_fits_a_1024x768_desktop(tmp_path):
     """DAVID'S DESKTOP IS 1024x768 and the app window is already larger than
     it.  The tab must fit the notebook's ~640 px of content height with
-    nothing scrolled off - which is what the two-column body and the two
-    modals bought.  Measured on a populated tab, because an empty one
-    proves nothing."""
+    nothing scrolled off - which is what the two modals and a preview
+    sized to what the table leaves it buy.  Measured on a populated tab,
+    because an empty one proves nothing."""
     import tkinter as tk
     root = _root()
     root.geometry("1024x768")
@@ -2006,28 +2479,37 @@ def test_the_whole_tab_fits_a_1024x768_desktop(tmp_path):
         root.update()
         root.update_idletasks()
         height = frame.winfo_reqheight()
-        assert height <= 640, "the tab needs %d px of height" % height
-        # ...and the preview is still a HALF frame, not a quarter one: the
-        # left column is narrow enough to leave 680 px for it.
-        assert (panel._pv_w, panel._pv_h) == (680, 384)
-        assert panel._left.winfo_reqwidth() <= multiboot_tab.LIST_W + 24
-        assert panel._narrow is False
-        # every action is on screen - this app unmaps the last widget of a
+        assert height <= multiboot_tab.TAB_BUDGET_H, \
+            "the tab needs %d px of height" % height
+        # the canvas IS the picture: exactly the 16:9 of the selector's own
+        # frame, so there are no black bars around it
+        assert panel._pv_h <= multiboot_tab.PREVIEW_H
+        assert abs(panel._pv_w - panel._pv_h * multiboot_tab.FRAME_W
+                   / multiboot_tab.FRAME_H) <= 1
+        assert panel._pv_w <= 1024
+        # every button is on screen - this app unmaps the last widget of a
         # row that overflows, without a word
-        for btn in (panel._load_btn, panel._new_btn, panel._apply_btn,
-                    panel._build_btn, panel._flash_btn, panel._emu_btn,
-                    panel._more_btn, panel._add_btn, panel._edit_btn,
-                    panel._remove_btn, panel._up_btn, panel._down_btn,
-                    panel._menu_btn, panel._render_btn, panel._play_chk,
-                    panel._log_btn):
+        for btn in (panel._load_btn, panel._new_btn, panel._browse_btn,
+                    panel._apply_btn, panel._build_btn, panel._flash_btn,
+                    panel._emu_btn, panel._more_btn, panel._menu_btn,
+                    panel._play_chk):
             assert btn.winfo_ismapped(), str(btn)
-        # ...and a window narrow enough stacks the columns instead of
-        # dropping half of them off the side
-        root.geometry("760x768")
-        root.update()
-        root.update_idletasks()
-        assert panel._narrow is True
-        assert panel._right.winfo_y() > panel._left.winfo_y()
+        # ...and the list has NONE: its actions are icons on its rows
+        for gone in ("_add_btn", "_edit_btn", "_remove_btn", "_up_btn",
+                     "_down_btn", "_render_btn", "_log_btn"):
+            assert not hasattr(panel, gone), gone
+        # THE ARRANGEMENT NEVER CHANGES.  Whatever the width, the preview
+        # is above the table, the tab is the same height, and the picture
+        # never grows past the width it is given.
+        for width in (840, 889, 950, 1024, 1200, 1360):
+            root.geometry("%dx768" % width)
+            root.update()
+            root.update_idletasks()
+            assert panel._pv_canvas.winfo_y() < panel._tree.winfo_rooty()
+            assert frame.winfo_reqheight() == height, width
+            assert panel._pv_w <= width, width
+            assert abs(panel._pv_w - panel._pv_h * multiboot_tab.FRAME_W
+                       / multiboot_tab.FRAME_H) <= 1, width
     finally:
         root.destroy()
 
@@ -2074,12 +2556,12 @@ def test_load_card_runs_inspect_and_fills_every_field(tmp_path, monkeypatch):
     root, panel = _panel()
     try:
         assert panel.load_card(card) is True
-        _wait(root, lambda: not panel._busy)
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert seen["card"] == card
         assert os.path.normpath(seen["media_out"]) == os.path.normpath(
             loaded_media_dir(card))
         assert os.path.isdir(loaded_media_dir(card))
-        pane = panel._log_text.get("1.0", "end")
+        pane = _pane(panel)
         assert "images: 2" in pane                       # the table
         assert '"art_source"' not in pane                # not the JSON
         assert "%s: exit 0" % INSPECT_JSON in pane
@@ -2097,9 +2579,10 @@ def test_load_card_runs_inspect_and_fills_every_field(tmp_path, monkeypatch):
         # preview highlights the image the machine would boot
         assert panel._hl_var.get() == "1"
         assert panel._tree.selection() == ("1",)
-        assert len(panel._tree.get_children()) == 2
-        assert panel._tree.item("1")["values"] == [1, "TMNT 1987",
-                                                   "frame + clip"]
+        assert panel._tree.get_children() == ("0", "1", panel.ADD_ROW)
+        assert panel._tree.item("1")["values"][:5] == [
+            1, "TMNT 1987", "1987 cartoon upscale", "attract.mov @21s",
+            "auto @20s 2s 8fps"]
         assert multiboot_tab.cell_anim(panel.form().images[1]) == \
             "auto @20s 2s 8fps"
         assert str(panel._apply_btn.cget("state")) == "normal"
@@ -2122,7 +2605,7 @@ def test_a_refused_inspect_says_why_and_leaves_the_form_alone(tmp_path,
             panel.add_image(p)
         before = panel.form()
         assert panel.load_card(card) is True
-        _wait(root, lambda: not panel._busy)
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
         hint = panel._hint.cget("text")
         assert "refused: p2 holds no /usr/local/codeselect" in hint
         assert os.path.basename(card) in hint
@@ -2135,7 +2618,7 @@ def test_a_refused_inspect_says_why_and_leaves_the_form_alone(tmp_path,
         assert panel._edit_lbl.cget("text") == ""
         # ...and what the tool said is in the pane either way: a quiet step
         # that FAILS prints everything it printed.
-        assert "refused: p2 holds no" in panel._log_text.get("1.0", "end")
+        assert "refused: p2 holds no" in _pane(panel)
     finally:
         root.destroy()
 
@@ -2303,14 +2786,15 @@ def test_a_rebuild_is_blocked_by_media_only_the_card_has(
         panel._out_var.set(str(tmp_path / "multi" / "copy.multi.raw"))
         panel._build_card()
         assert calls == []
-        hint = panel._hint.cget("text")
-        # every reason at once: the sources that are not here AND the media
-        # only the card has
-        assert "no such file" in hint.lower()
-        assert "art0.png" in hint and "on the loaded card" in hint
-        # the list says which fields those are, and which image is missing
-        assert panel._tree.item("0")["values"][2] == \
-            "art0.png + music0.wav (on the card)"
+        # every reason at once - one on the tab, all of them in the tool
+        # output pane (the status block holds one line per label)
+        assert "(+3 more" in panel._hint.cget("text")
+        pane = _pane(panel)
+        assert "no such file" in pane.lower()
+        assert "art0.png" in pane and "on the loaded card" in pane
+        # the table says which fields those are, and which image is missing
+        assert panel._tree.item("0")["values"][3] == "art0.png (on the card)"
+        assert panel._tree.item("0")["values"][5] == "music0.wav"
         assert "no source recorded" in panel._tree.item("0")["values"][1]
         assert "not on this machine" in panel._tree.item("1")["values"][1]
         # ...and an apply that would have to re-render them says so too
@@ -2318,11 +2802,11 @@ def test_a_rebuild_is_blocked_by_media_only_the_card_has(
         root.update()
         panel._ed_anim.set("auto")
         assert panel.apply_to_card() is False
-        hint = panel._hint.cget("text")
-        assert "music0.wav" in hint and "no source recorded" in hint
+        pane = _pane(panel)
+        assert "music0.wav" in pane and "no source recorded" in pane
         # ...and the confirm sound, which 'auto' would decode off a primary
         # image that is not here either
-        assert "confirm sound is 'auto'" in hint
+        assert "confirm sound is 'auto'" in pane
         assert calls == []
     finally:
         root.destroy()
@@ -2365,7 +2849,7 @@ def test_the_preview_after_a_load_draws_the_cards_own_media(tmp_path,
             [label for label, _ in cmds]) or real(cmds, **kw)
         assert panel.needs_prepare() is False
         assert panel.render_preview() is True
-        _wait(root, lambda: not panel._busy)
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert calls == [["selector", "frame 0"]]
         assert "media" not in seen                   # no prepare ran at all
         assert seen["snapshot"][0][2] == media       # drawn from the card's
@@ -2393,6 +2877,11 @@ def test_multiboot_tab_built_for_spike2_and_absent_otherwise(
     w = app.window
     assert isinstance(w._multiboot_panel, multiboot_tab.MultibootPanel)
     assert "Multi-boot" in w._tab_keys.values()
+    # THE FOOTER IS THIS TAB'S OWN while it shows: its stages, not the
+    # Extract pipeline's, and the panel drives them through one seam.
+    assert w.MULTIBOOT_PHASES == ("Media", "Copy", "Inject", "Verify")
+    assert len(w._multiboot_phase_labels) == len(w.MULTIBOOT_PHASES)
+    assert w._multiboot_panel._phase_fn == w.set_multiboot_phase
     stern = manufacturers_by_key["stern"]
     app._on_manufacturer_change(stern)
     w.extract_input_var.set("")

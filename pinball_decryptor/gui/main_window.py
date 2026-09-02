@@ -2416,6 +2416,12 @@ class MainWindow:
         # fight the emulation for labels.  Packed only while an Emulate tab
         # shows; set_emulate_progress drives it.
         self._emulate_phases_frame = ttk.Frame(status_frame)
+        # ...and the Multi-boot tab's own row, the same way and for the same
+        # reason (David, 2026-09-02: "the progress bar on this tab should be
+        # specific to the build or write button on this tab" — the Extract
+        # ladder says nothing about assembling a card).  Packed only while
+        # that tab shows; the panel drives it through set_multiboot_phase.
+        self._multiboot_phases_frame = ttk.Frame(status_frame)
 
         self._progress_bar = ttk.Progressbar(status_frame, mode="determinate",
                                              maximum=100)
@@ -13980,7 +13986,8 @@ class MainWindow:
             badge_fn=self._make_round_icon,
             resize_fn=self._resize_notebook_to_current_tab,
             flash_fn=lambda p: self._open_flash_dialog(initial_image=p),
-            emulate_fn=run_emulator)
+            emulate_fn=run_emulator,
+            phase_fn=self.set_multiboot_phase)
         self._multiboot_panel.build(self._tab_multiboot)
 
     def _build_jjp_emulate_tab(self):
@@ -15508,6 +15515,8 @@ class MainWindow:
             self._extract_phase_labels = labels
         elif mode == "emulate":
             self._emulate_phase_labels = labels
+        elif mode == "multiboot":
+            self._multiboot_phase_labels = labels
         else:
             self._write_phase_labels = labels
 
@@ -15523,6 +15532,15 @@ class MainWindow:
     #: screen it happens to be showing.
     EMULATE_PHASES = ("Copy card", "Boot", "Node boards", "Ready")
 
+    #: The Multi-boot tab's own stages, named so BOTH of its writing buttons
+    #: read honestly on them: Build & verify walks all four (render the
+    #: media, copy each image into the new card, inject the menu, verify),
+    #: Apply to card only the last two (a media change when there is one,
+    #: then the inject, then the read-back).  They are the tools' real
+    #: steps - selectmedia's prepare, mkmulticard's "[card] copying …",
+    #: "[card] injected N files …" and its verify's PASS.
+    MULTIBOOT_PHASES = ("Media", "Copy", "Inject", "Verify")
+
     def _init_phase_steps(self):
         # Initial labels — apply_manufacturer rebuilds them per-mfr later.
         self._extract_phases = tuple(EXTRACT_PHASES)
@@ -15534,6 +15552,9 @@ class MainWindow:
         self._emulate_phases = self.EMULATE_PHASES
         self._build_phase_steps(self._emulate_phases_frame,
                                 self._emulate_phases, "emulate")
+        self._multiboot_phases = self.MULTIBOOT_PHASES
+        self._build_phase_steps(self._multiboot_phases_frame,
+                                self._multiboot_phases, "multiboot")
 
     def _rebuild_phase_steps(self, extract_phases, write_phases):
         """Tear down + rebuild the phase indicator widgets when the
@@ -15561,6 +15582,16 @@ class MainWindow:
                 self._footer_owner = "pipeline"
                 self._progress_bar.stop()
                 self._progress_bar.configure(mode="determinate")
+                self._progress_bar["value"] = 0
+                self.set_status("Ready")
+        # ...and the same for the Multi-boot row (item 90): it belongs to
+        # that tab's own buttons, so it is packed only while that tab shows
+        # and the footer goes back to the pipeline on the way out.
+        if text != "Multi-boot":
+            self._multiboot_phases_frame.pack_forget()
+            if getattr(self, "_footer_owner", "pipeline") == "multiboot" \
+                    and not getattr(self, "_running", False):
+                self._footer_owner = "pipeline"
                 self._progress_bar["value"] = 0
                 self.set_status("Ready")
         # Switching tabs means leaving whatever preview was playing.  Each tab
@@ -15641,6 +15672,14 @@ class MainWindow:
             self._emulate_phases_frame.pack(
                 fill=tk.X, before=self._progress_bar)
             self.set_emulate_progress("idle")
+        elif text == "Multi-boot":
+            # Item 90: this tab's buttons assemble a card; the Extract
+            # ladder (Detect / Locate partitions / Extract video …) says
+            # nothing about that, so it swaps for the tab's own stages.
+            self._extract_phases_frame.pack_forget()
+            self._write_phases_frame.pack_forget()
+            self._multiboot_phases_frame.pack(
+                fill=tk.X, before=self._progress_bar)
         elif text == "Default Settings":
             self._extract_phases_frame.pack_forget()
             self._write_phases_frame.pack_forget()
@@ -20972,6 +21011,7 @@ class MainWindow:
     def set_phase(self, index, mode="extract"):
         labels = (self._extract_phase_labels if mode == "extract"
                   else self._emulate_phase_labels if mode == "emulate"
+                  else self._multiboot_phase_labels if mode == "multiboot"
                   else self._write_phase_labels)
         c = THEMES[self._current_theme]
         for i, lbl in enumerate(labels):
@@ -20987,14 +21027,39 @@ class MainWindow:
     def reset_steps(self, mode="extract"):
         phases = (self._extract_phases if mode == "extract"
                   else self._emulate_phases if mode == "emulate"
+                  else self._multiboot_phases if mode == "multiboot"
                   else self._write_phases)
         labels = (self._extract_phase_labels if mode == "extract"
                   else self._emulate_phase_labels if mode == "emulate"
+                  else self._multiboot_phase_labels if mode == "multiboot"
                   else self._write_phase_labels)
         c = THEMES[self._current_theme]
         for lbl, name in zip(labels, phases):
             lbl.configure(text=f"○ {name}", foreground=c["gray"])
         self._progress_bar["value"] = 0
+
+    def set_multiboot_phase(self, index, total=None, status=None):
+        """The Multi-boot tab's footer: light its stages as a run walks
+        them, and move the bar with them.  ``index`` is the stage now
+        running (``-1`` = idle / done, which resets the row); ``total``
+        overrides how many stages this particular run walks, so 'Apply to
+        card' - which only injects and reads back - fills the bar honestly
+        instead of stopping a quarter of the way along.
+
+        The one seam the panel drives; it holds no widget of the footer's."""
+        self._footer_owner = "multiboot"
+        n = len(self._multiboot_phases)
+        if index is None:
+            self.reset_steps(mode="multiboot")          # nothing has run
+        elif index < 0:
+            self.set_phase(n, mode="multiboot")         # every stage done
+            self._progress_bar["value"] = 100
+        else:
+            self.set_phase(min(index, n - 1), mode="multiboot")
+            span = max(1, total or n)
+            self._progress_bar["value"] = min(100, int(100.0 * index / span))
+        if status:
+            self.set_status(status)
 
     def set_write_phases(self, phases):
         """Swap the Write phase row to an arbitrary ``phases`` tuple and reset

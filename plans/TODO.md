@@ -127,6 +127,15 @@ These have each been violated at least once and each cost a run or a window:
       art/GIF/sounds on the menu (confirm sound plays to completion), N
       images via a `multi` p7 holding img1/.. (p7 is the kernel's last
       partition), and a Multi-boot tab in the app.**
+      **v2 LANDED 2026-09-02 (item/90): every image bypassed, art/GIF/
+      sounds on the menu, N images (`--layout multi`), Multi-boot tab;
+      run 6 in the rig = a three-image card with media, chose
+      `p7:img1`, attract, P/P/P. Cards for David on D:/Pinball/TMNT
+      1987/multi/: `...multi-stock+1987patched...` (v1 menu, now
+      bypassed on both images) and `...multi-v2-stock+1987patched...`
+      (v2: media + bypass), both verify PASS. Open: the rig's audio FIFO
+      reader drops ~31 s into the menu (emulator only; hardware uses
+      ALSA), and the v2 selector's ALSA path is unproven on the machine.**
       **IN PROGRESS (2026-09-01, `item/90`): PROVEN IN THE EMULATOR.**
       `mkmulticard.py` builds the card (verify PASS), `codeselect` draws
       through the bridge and takes the padsw keys, `PAD_SELECT=1` runs it

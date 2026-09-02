@@ -6553,6 +6553,47 @@ static void swwalk_tick(void)
 #define SW_NODEREC(n)  (SW_STRUCT + 16u + (n) * 160u)
 #define NB_GATE   0x7a908cu     /* +276+node = per-node scan enable          */
 
+/* THE ONLY WAY TO REACH A NODE RECORD, and it can refuse.
+ *
+ * SW_NODEREC() is an offset from the switch STRUCT, and sw_struct_addr()
+ * returns `&sw_shadow[0]` when the table was found by shape instead of
+ * configured - an EIGHT-BYTE array in the shim's own .bss standing in for a
+ * struct that does not exist. SW_NODEREC(0) is already 16 bytes past the end
+ * of it, so anything read or written through it lands on whatever .bss
+ * happens to follow sw_shadow.
+ *
+ * PAD-102 IS THAT WRITE. A user's godzilla_le 1.16 died four seconds into
+ * every boot; the guest fault was our own doing, and this is the origin.
+ * sw_prime() splats an eight-byte at-rest word into rec[12..19] and rec[20..27]
+ * - the same eight bytes twice, eight bytes apart. Under a shadow that is
+ * `&sw_shadow[0] + 28` and `+36`, which in the build that shipped it were
+ * hwshim's own game_segv_fn and real_sigaction. The word is
+ * `{0xff,0x0f,0x0f,0,0,0,0,0}` = {0x000f0fff, 0}, so real_sigaction became
+ * 0x000f0fff - an odd address inside the GAME's text - and the tail call at
+ * the foot of shim_sigaction `bx`ed to it, flipping the CPU into Thumb and
+ * decoding the game's ARM text as Thumb until it stored into read-only memory.
+ * Measured, not deduced: sw_shadow at module 0x200ac in that build, +28 =
+ * 0x200c8 and +36 = 0x200d0, which are exactly the two guest addresses
+ * (0x408610c8 / 0x408610d0) found corrupt under gdb.
+ *
+ * sw_prime() had a guard - `sw_ok(tread(SW_STRUCT))` - and it passed, because
+ * under a shadow that reads sw_shadow[0], a perfectly valid entry[] pointer.
+ * Validity is not the question; WHAT IT IS is. The [swread] path already knew
+ * (`have_rec = !sw_shadow[0]`, and see its comment) and declined to read. It
+ * was the only one of three users that did. So the check lives here now, once,
+ * and every user goes through it - a fourth user cannot reintroduce this by
+ * forgetting, because there is nothing to forget.
+ *
+ * Returns 0 when there is no real node record, and 0 is not "no switches":
+ * the shadow's entry[] still works and every caller has a fallback. */
+static unsigned char *sw_noderec(unsigned node)
+{
+    if (sw_shadow[0]) return 0;      /* a shadow is entry[], never a struct */
+    if (node >= 32) return 0;
+    if (!sw_ok(tread(SW_STRUCT))) return 0;
+    return (unsigned char *)(unsigned long)SW_NODEREC(node);
+}
+
 /* Ids held ACTIVE right now: PAD_SW_HOLD plus whatever the tap sequence has
  * pressed. Byte per id. 128 was "more than the 88 this machine has" - but an
  * id is the TITLE'S table index and munsters/sword_of_rage index their whole
@@ -7274,9 +7315,11 @@ static void sw_prime(unsigned nid, const unsigned char bits[8])
     unsigned char *rec;
     unsigned i;
     if (nid >= 64 || primed[nid]) return;
-    if (!sw_ok(tread(SW_STRUCT))) return;
+    /* NOT marked primed on refusal: a shadow can be replaced by a real table
+     * later in the run, and this node still wants priming when it is. */
+    rec = sw_noderec(nid);
+    if (!rec) return;
     primed[nid] = 1;
-    rec = (unsigned char *)(unsigned long)SW_NODEREC(nid);
     for (i = 0; i < 8; i++) { rec[12 + i] = bits[i]; rec[20 + i] = bits[i]; }
     {
         char m[140];
@@ -8249,12 +8292,16 @@ static void sw_map_dump(void)
         unsigned back = 0xffff, cur = 0, gate = 0;
         if (sw_ok(nameobj))
             nm = msg_row(*(const unsigned *)(unsigned long)(nameobj + 16));
-        if (node < 32 && bit < 64) {
-            const unsigned char *rec =
-                (const unsigned char *)(unsigned long)SW_NODEREC(node);
-            back = *(const unsigned short *)(rec + 28 + bit * 2);
-            cur  = (rec[20 + (bit >> 3)] >> (bit & 7)) & 1;
-            gate = *(const unsigned char *)(unsigned long)(NB_GATE + 276 + node);
+        {
+            /* Was unguarded: under a shadow this read `rec + 28 + bit*2` for
+             * bit up to 63, i.e. up to 154 bytes past sw_shadow, and printed
+             * the shim's own .bss as the game's switch map. */
+            const unsigned char *rec = bit < 64 ? sw_noderec(node) : 0;
+            if (rec) {
+                back = *(const unsigned short *)(rec + 28 + bit * 2);
+                cur  = (rec[20 + (bit >> 3)] >> (bit & 7)) & 1;
+                gate = *(const unsigned char *)(unsigned long)(NB_GATE + 276 + node);
+            }
         }
         snprintf(line, sizeof line,
                  "[swmap] id=%-3u node=%-2u bit=%-2u map=%-4u%s cur=%u gate=%u"
@@ -8447,11 +8494,12 @@ static void sw_pend_trace(void)
          * game's nor obviously wrong. That is the shape of finding this rig
          * loses passes to, so it is not read at all rather than read badly. */
         rw = have_raw ? ((const unsigned char *)(unsigned long)raw)[id] : 0;
-        if (have_rec && node < 32 && bit < 64) {
-            const unsigned char *rec =
-                (const unsigned char *)(unsigned long)SW_NODEREC(node);
-            cur = (rec[20 + (bit >> 3)] >> (bit & 7)) & 1;
-            prv = (rec[12 + (bit >> 3)] >> (bit & 7)) & 1;
+        if (have_rec && bit < 64) {
+            const unsigned char *rec = sw_noderec(node);
+            if (rec) {
+                cur = (rec[20 + (bit >> 3)] >> (bit & 7)) & 1;
+                prv = (rec[12 + (bit >> 3)] >> (bit & 7)) & 1;
+            }
         }
         if (primed[id] && pv[id] == (unsigned char)pend &&
             lv[id] == (unsigned char)lvl && cv[id] == (unsigned char)cur &&

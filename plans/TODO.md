@@ -84,8 +84,61 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [ ] **90. godzilla_le dies ~4 s after start, on a user's card, every time.**
-      `S1 D4` *(Filed 2026-09-01 from a user's log, ticket PAD-102 — a Godzilla
+- [x] **90. godzilla_le dies ~4 s after start, on a user's card, every time.
+      SOLVED 2026-09-02 — it was `sw_prime()` splatting the shim's own .bss.**
+      `S1 D4`
+      **★★★★★ ROOT CAUSE, and it is ours.** `SW_NODEREC(n)` is an offset from
+      the switch STRUCT, and `sw_struct_addr()` returns `&sw_shadow[0]` when the
+      table was found by SHAPE rather than configured — an eight-byte array in
+      hwshim's own .bss standing in for a struct that does not exist.
+      `SW_NODEREC(0)` is already 16 bytes past the end of it. `sw_prime()` then
+      writes an at-rest word into `rec[12..19]` and `rec[20..27]`: the same
+      eight bytes twice, eight bytes apart. The word is
+      `{0xff,0x0f,0x0f,0,0,0,0,0}` (hwshim.c:3589) = **{0x000f0fff, 0}**.
+      Measured, not deduced — `sw_shadow` at module 0x200ac in the build that
+      shipped it, so the two splats land at **0x200c8 and 0x200d0**, which are
+      exactly the guest addresses (0x408610c8 / 0x408610d0) found corrupt under
+      gdb, and in that build those were `game_segv_fn` and `real_sigaction`.
+      `real_sigaction` became an odd address inside the GAME's text, and
+      `shim_sigaction`'s tail call `bx`ed to it — Thumb, ARM text decoded as
+      Thumb, store into read-only memory, dead guest, every boot.
+      **Why it passed the guard it had:** `sw_prime` tested
+      `sw_ok(tread(SW_STRUCT))`, and under a shadow that reads `sw_shadow[0]` —
+      a perfectly valid `entry[]` pointer. Validity was never the question;
+      WHAT IT IS was. The `[swread]` path already knew (`have_rec =
+      !sw_shadow[0]`, and its comment says SW_NODEREC "addresses the shim's own
+      .bss" under a shadow) and declined to read. It was the only one of THREE
+      users that did; the `[swmap]` diagnostic read `rec + 28 + bit*2` for bit
+      up to 63, i.e. up to 154 bytes past `sw_shadow`, and printed the shim's
+      own .bss as the game's switch map.
+      **Why 1.16 and not 1.13 / the 1.15 Heisei:** 1.16 resolves its switch
+      table by shape (`entry[]=0x009a9990 raw[]=0x00000000`), i.e. the shadow
+      route. A configured-route title never builds a shadow and never splats.
+      **The fix is structural, not a patch at the site that bit.** One accessor,
+      `sw_noderec()` (hwshim.c, beside the macro), refuses under a shadow and
+      returns 0; all three users go through it and nothing touches `SW_NODEREC`
+      directly, so a fourth user cannot reintroduce this by forgetting.
+      `sw_prime` bails BEFORE marking the node primed, so a shadow later
+      replaced by a real table still gets primed.
+      **Verified live**, stock `godzilla_le-1_16_0`, rig lock held, shim proven
+      built from this source (three marker strings present) before trusting the
+      run: `sw_shadow[0]=0x009a9990` (shadow route, the triggering condition),
+      `+28`/`+36` clean, `sw_rest_set` intact at 33,66,67,68,69,70,71 where its
+      tail used to be clobbered, zero `[swprime]` lines, zero `[segv]`, picture
+      at frame 47, **full 6-minute backstop**, clean teardown, `alive.sh` 0.
+      Pinned by `tests/test_spike2_noderec_guard.py`.
+      **A METHOD NOTE THAT COST HOURS TWICE.** Both times this investigation
+      went wrong it was from reading a STALE hwshim.so: once a stale `nm`, once
+      a whole analysis pass whose address arithmetic used a binary that was not
+      built from this source at all (it still contained wording this branch had
+      already replaced). Before trusting ANY offset: `md5sum` the .so and grep
+      it for a string only the current source has. The rig rebuilds on a source
+      hash, and other sessions can restore an older build underneath you.
+      **Still open, separately:** the `[swmap]` and `[swread]` paths now report
+      `?` rather than garbage under a shadow, which is correct but means a
+      shadow-route title still has no node-record data. Teaching the shadow
+      installers to record the real struct base alongside `entry[]` would give
+      it back — worth its own item, not needed for this fix. *(Filed 2026-09-01 from a user's log, ticket PAD-102 — a Godzilla
       Premium 1.16 Heisei Custom "V1.5 Orchestral" image, title folder
       `godzilla_le`, game ELF 7962924 bytes, app v0.179.0. He sent the log and
       nothing else; there is no card of his here.)*

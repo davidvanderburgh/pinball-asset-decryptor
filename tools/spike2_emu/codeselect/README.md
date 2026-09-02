@@ -190,9 +190,19 @@ iteration and mixes exactly what the sink can take right now - never blocks:
   no reader yet, retried every 100 ms from the loop; a missing FIFO every
   1 s), `F_SETPIPE_SZ` 1 MB, paces to the wall clock 200 ms ahead, writes
   in 4 KB (PIPE_BUF) chunks so a partial write can never desync the stereo
-  frames, drops on EAGAIN (counted), reopens on EPIPE; streams silence while
-  nothing plays so padplay's 25 s no-data watchdog stays quiet; `SIGPIPE`
-  is ignored by `main()`.
+  frames, drops on EAGAIN (counted), reopens on EPIPE (the same 100 ms
+  ENXIO retries until a reader is back; while there is none, the fmt file
+  is rewritten whenever it has been removed - a restarted playaudio.sh
+  deletes it and waits 60 s for a fresh one - and a 3 s gap is logged
+  once); streams silence while nothing plays so padplay's 25 s no-data
+  watchdog stays quiet; `SIGPIPE` is ignored by `main()`. The reader is the
+  rig's padrelay.py, which holds the read end only while a Windows
+  padplay.py is on its socket, and that player dies on its first `print()`
+  after the wsl.exe session that launched the run exits (measured
+  2026-09-02: sound gone 31 s in, at the player's sixth 5-s report, and
+  playaudio.sh's restart loop never sees it because the interop stub never
+  returns) - the selector, like the game's alsastub, can only keep retrying
+  and say so.
 * `none`: with `--audio-dump` the mix still runs into the dump, paced.
 
 Sounds: `sound_move` on every LEFT/RIGHT/-/+ edge; the highlighted card's
@@ -242,6 +252,11 @@ to 16 images (`CONF_MAX_IMAGES`). `volume` is clamped to 0-100,
 ```
 audio: alsa sysdefault:CARD=sgtl5000main ok       the machine sink is up
 audio: fifo /dump/audio.fifo open                 the rig's reader took the FIFO
+audio: fifo reader went away, reopening           EPIPE: the relay closed the read end (its player died)
+audio: no fifo reader for 3 s (it went away; ...) still none 3 s later: dropping, said once
+audio: fifo /dump/audio.fifo open again after 4012 ms without a reader
+audio: fmt /dump/audio.fmt = 44100 2 (rewritten: it had been removed)
+audio: fifo closed without a reader (none for the last 26000 ms; it went away)   at exit
 audio: none (<reason>)                            e.g. no alsa: ... ; PAD_AUDIO_PLAY unset
 audio: <file>: unsupported (format ..., need PCM 16-bit 44100 Hz 1-2 ch)
 art: image 0 art0.png -> 298x168 | art: cannot load <name> (<why>)

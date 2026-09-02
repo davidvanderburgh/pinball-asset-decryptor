@@ -204,8 +204,9 @@ full CLI, the log lines and the test list). What it is:
   `backbox` + `cabinet`), else the rig's FIFO when `PAD_AUDIO_PLAY` is set
   (`44100 2` into the fmt file first, `O_WRONLY|O_NONBLOCK` with ENXIO
   retries, 200 ms lead, silence while idle, EAGAIN dropped and counted,
-  EPIPE reopened, SIGPIPE ignored), else none. Every failure is logged and
-  the menu runs silent.
+  EPIPE reopened through the same retries with the fmt file re-asserted
+  whenever it has been removed and a 3 s gap logged once, SIGPIPE
+  ignored), else none. Every failure is logged and the menu runs silent.
 * Input backends (`--input`), a shared two-sample debouncer, press edges
   only, Service Back ignored (autoattract.sh presses it in the rig):
   * `hw` (default): the game's own tty setup on `/dev/ttymxc1` (460800 8N2,
@@ -292,7 +293,7 @@ PAD_CARD_CACHE=0 PAD_SELECT=1 PAD_AUDIO=0 watch.sh`, four times:
 | 3 | right, start | 0 — the highlight had been remembered at 1, RIGHT wrapped to 0 | attract (the last-choice memory works) |
 | 4 | right, start | 1 TMNT 1987 | `[padvid] clip root overridden by dump/vidroot: .../tmnt_multi.p7/turtles_pro`; attract shows the 1987 cartoon art |
 | 5 (after the review fixes) | right, 95 s dwell, left, start | 1 TMNT 1987 | watch.sh no longer drops the selecting flag on a wall-clock bound (no `giving up` / `the game exited`); the 1987 splash `Back in 1987` was on the glass 1 s after START; attract at 259 s; clean teardown |
-| 6 (v2: three images, media, bypass) | right, left, start | 1 TMNT 1987 from `p7:img1` (multi layout) | three cards with the cards' own logos, the 1987 animation on the highlighted card, move/confirm sounds through the rig's audio FIFO (`guest reports 44100 Hz x 2 ch`, padplay fed/played growing), confirm played 1.7 s under the LOADING frame, videos from `tmnt_multi3.p7/img1`, attract, grades P/P/P; one emulator-only gap: the FIFO reader dropped at 31 s and the menu's later sounds were lost (being fixed) |
+| 6 (v2: three images, media, bypass) | right, left, start | 1 TMNT 1987 from `p7:img1` (multi layout) | three cards with the cards' own logos, the 1987 animation on the highlighted card, move/confirm sounds through the rig's audio FIFO (`guest reports 44100 Hz x 2 ch`, padplay fed/played growing), confirm played 1.7 s under the LOADING frame, videos from `tmnt_multi3.p7/img1`, attract, grades P/P/P; one emulator-only gap: the FIFO reader dropped at 31 s and the menu's later sounds were lost - root-caused 2026-09-02 (reproduced standalone) to the rig's Windows padplay.py dying on its first `print()` after the wsl.exe session that launched the run exited, with playaudio.sh's restart loop blind to it (the interop stub never returns), so no reader ever came back for the game either; the selector had been retrying correctly and now names the gap and re-asserts the fmt file; the rig-side fix (a print-proof player, a restart loop that trusts the relay's "player went away" rather than the stub) is proposed, not applied |
 
 The selector attached to the live GL bridge after padglhost was already up,
 drew at ~60 fps, mapped the flipper ids from the title's switch table, and

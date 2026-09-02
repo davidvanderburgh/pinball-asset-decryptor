@@ -220,7 +220,31 @@ if [ -n "${PAD_CARD:-}" ]; then
            exit 1 ;;
     esac
 fi
-for v in PAD_GAME PAD_PLAYFIELD PAD_AUDIO PAD_AUTO_ATTRACT LOG; do
+# A MEDIA DIRECTORY IS A HOST PATH TOO (item 90), so it needs the same prefix
+# swap the card just had, or the box would be handed a path only the Mac can
+# open and the menu would come up bare. Only $CARD_DIR is mounted, so a
+# directory outside it cannot cross at all - said out loud, because the
+# alternative is quietly showing the card's own art to someone who asked for
+# theirs.
+if [ -n "${PAD_SELECT_MEDIA:-}" ]; then
+    case "$PAD_SELECT_MEDIA" in
+        "$CARD_DIR"/*) PAD_SELECT_MEDIA=/pad/cards/${PAD_SELECT_MEDIA#"$CARD_DIR"/} ;;
+        *) echo "[box] PAD_SELECT_MEDIA is not under $CARD_DIR, so the box cannot" >&2
+           echo "[box] see it; the boot menu will use the card's own media." >&2
+           echo "[box] Set PAD_CARD_DIR to a directory that contains both." >&2
+           PAD_SELECT_MEDIA="" ;;
+    esac
+fi
+
+# THE BOX GETS THE SAME KNOBS THE RIG HAS (item 90). PAD_SELECT is a
+# three-way switch - unset asks the card, 1 forces the boot menu on, 0 forces
+# it off - and without it on this list a Mac could not answer that question at
+# all: the container's watch.sh saw an unset variable and asked the card, so
+# neither an override nor a refusal ever crossed. `[ -n "${!v:-}" ]` passes a
+# literal "0" (it is one character, not empty), which is exactly what the
+# "force it off" answer has to look like on the other side.
+for v in PAD_GAME PAD_PLAYFIELD PAD_AUDIO PAD_AUTO_ATTRACT \
+         PAD_SELECT PAD_SELECT_TIMEOUT PAD_SELECT_MEDIA LOG; do
     [ -n "${!v:-}" ] && RUN_ARGS+=(-e "$v=${!v}")
 done
 

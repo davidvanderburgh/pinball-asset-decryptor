@@ -82,21 +82,50 @@ if [ -n "${PAD_CARD:-}" ]; then
     # they have no selector built to run one with.
     SEL_DIRS=""
     if [ "${PAD_SELECT:-}" = 1 ]; then
-        # Every refusal below leaves through `rmdir "$R/games/$GAME"`: the
-        # stub the mkdir above made is the bind mountpoint, and the EXIT
+        # ★ A MENU THE CARD ASKED FOR MUST NEVER STOP THE RUN (2026-09-02).
+        #
+        # Every refusal in this block was written when PAD_SELECT meant "the
+        # user asked for a menu", and refusing was the right answer: handing
+        # them the primary without a word is the silent-fallback fault every
+        # gate in this rig exists to stop. Since the CARD started answering
+        # that question the same refusals would let a card make the emulator
+        # refuse to START - an unbuilt selector, a partition fuse2fs will not
+        # open - over a menu nobody asked for. PAD_SELECT_AUTO (padpath.sh,
+        # exported by watch.sh) is the provenance: 1 = the card decided.
+        #
+        # SEL_GIVEUP is how an abandoned menu gets past the steps that follow
+        # it - this block is a sequence, and there is nothing left to mount,
+        # write or copy once there is no menu to prepare.
+        SEL_GIVEUP=""
+        # Every refusal that EXITS leaves through `rmdir "$R/games/$GAME"`:
+        # the stub the mkdir above made is the bind mountpoint, and the EXIT
         # trap that removes it is not installed until further down - so an
         # early exit used to leave an empty games/<title> behind, which the
         # Emulate tab then offered as an extracted title (see the trap).
-        if [ ! -x "$PAD_SELECT_BIN" ]; then
-            echo "[run] PAD_SELECT is set but the boot selector is not built:" >&2
-            echo "[run]   $PAD_SELECT_BIN is missing" >&2
-            echo "[run]   (buildselect.sh builds it; watch.sh does that itself)" >&2
+        sel_giveup() {
+            SEL_DIRS=""; SEL_GIVEUP=1
+            if [ "${PAD_SELECT_AUTO:-}" = 1 ]; then
+                echo "[select] no menu on this run: $1" >&2
+                echo "[select]   the CARD asked for the menu, nobody typed" >&2
+                echo "[select]   PAD_SELECT=1, so this run boots the primary" >&2
+                echo "[select]   image rather than refusing to start." >&2
+                return 0
+            fi
+            echo "[run] PAD_SELECT=1 was asked for, but $1" >&2
+            echo "[run]   (buildselect.sh builds the selector; watch.sh does" >&2
+            echo "[run]   that itself. PAD_SELECT=0 boots without a menu.)" >&2
             rmdir "$R/games/$GAME" 2>/dev/null
             exit 1
+        }
+        [ -x "$PAD_SELECT_BIN" ] \
+            || sel_giveup "the boot selector is not built ($PAD_SELECT_BIN is missing)"
+        if [ -z "$SEL_GIVEUP" ]; then
+            SEL_LIST=$(python3 "$S/parts.py" --list-games "$PAD_CARD" 2>/dev/null)
+            [ -n "$SEL_LIST" ] \
+                || sel_giveup "no games partition was found on $PAD_CARD"
         fi
-        SEL_LIST=$(python3 "$S/parts.py" --list-games "$PAD_CARD" 2>/dev/null)
-        [ -n "$SEL_LIST" ] || { echo "[run] PAD_SELECT: no games partition found on $PAD_CARD" >&2; rmdir "$R/games/$GAME" 2>/dev/null; exit 1; }
-        SEL_CARDCONF=$(python3 "$S/parts.py" --rootfs-file /usr/local/codeselect/images.conf "$PAD_CARD" 2>/dev/null)
+        if [ -z "$SEL_GIVEUP" ]; then
+        SEL_CARDCONF=$(python3 "$S/parts.py" --rootfs-file /usr/local/codeselect/images.conf "$PAD_CARD" 2>/dev/null | tr -d '\r')
         SEL_N=0; SEL_PRIMARY=""; SEL_IMAGES=""
         while read -r idx _lba _off titles subdir; do
             [ -n "$idx" ] || continue
@@ -108,13 +137,13 @@ if [ -n "${PAD_CARD:-}" ]; then
                 SEL_PRIMARY=$idx; d=$CARD_SRC
             else
                 m=$(bash "$S/cardmount.sh" "$PAD_CARD" --part "$idx" | tail -1)
-                [ -d "$m" ] || { echo "[run] could not mount partition $idx of $PAD_CARD" >&2; rmdir "$R/games/$GAME" 2>/dev/null; exit 1; }
+                [ -d "$m" ] || { sel_giveup "partition $idx of $PAD_CARD could not be mounted"; break; }
                 if [ -n "$subdir" ]; then
                     # a multi-layout tree: cardmount answered <mount>/imgN for
                     # the FIRST tree; this entry's title dir is one level down
                     # its OWN subdirectory
                     d="$(dirname "$m")/$subdir/${titles%%,*}"
-                    [ -d "$d" ] || { echo "[run] partition $idx of $PAD_CARD holds no $subdir/${titles%%,*}" >&2; rmdir "$R/games/$GAME" 2>/dev/null; exit 1; }
+                    [ -d "$d" ] || { sel_giveup "partition $idx of $PAD_CARD holds no $subdir/${titles%%,*}"; break; }
                 else
                     d=$m
                 fi
@@ -123,7 +152,14 @@ if [ -n "${PAD_CARD:-}" ]; then
             # on the card -> the same fields here (everything after the
             # device is forwarded verbatim, so the media names ride along);
             # else name it after the partition.
-            t=$(printf '%s\n' "$SEL_CARDCONF" | sed -n "s#^image=/dev/mmcblk0$tok|##p" | head -1 | tr -d '\r')
+            #
+            # READ THE KEY THE WAY conf.c READS IT (2026-09-02): trimmed, and
+            # with any spacing around the '=' and the '|'. `^image=` alone
+            # read a hand-spaced `image = /dev/...` - which the machine's own
+            # parser accepts, and which images.conf.example invites - as a
+            # line that names no title, so the menu quietly showed "games
+            # partition 7" instead of the card's own words.
+            t=$(printf '%s\n' "$SEL_CARDCONF" | sed -n "s#^[[:space:]]*image[[:space:]]*=[[:space:]]*/dev/mmcblk0$tok[[:space:]]*|##p" | head -1)
             case "$t" in
                 "")    t="$tok ${titles%%,*}|games partition $idx${subdir:+ $subdir}" ;;
                 *"|"*) ;;
@@ -134,22 +170,51 @@ if [ -n "${PAD_CARD:-}" ]; then
             echo "[select] menu: $SEL_N = $tok ${t%%|*} ($d)"
             SEL_N=$((SEL_N + 1))
         done <<< "$SEL_LIST"
+        fi
+        # ★ THE DECISION AND THE MENU ARE COUNTED FROM DIFFERENT THINGS, so
+        # reconcile them HERE (2026-09-02). "Does this card boot into a menu"
+        # counts `image=` lines in the card's images.conf; the menu itself is
+        # built from what `parts.py --list-games` could actually RESOLVE, and
+        # the two disagree whenever an images.conf names a tree this image no
+        # longer carries. ONE TREE IS NOT A MENU - it is a countdown in front
+        # of the only thing it could boot - so say so and boot it.
+        if [ -z "$SEL_GIVEUP" ] && [ "${SEL_N:-0}" -lt 2 ]; then
+            echo "[select] ${SEL_N:-0} games tree(s) resolved on this card - there is" >&2
+            echo "[select]   nothing to choose between, so no menu is shown." >&2
+            SEL_DIRS=""; SEL_GIVEUP=1
+        fi
+        if [ -z "$SEL_GIVEUP" ]; then
         # The card's own default highlight, when it has one and it is in
         # range; /data/codeselect.last (the selector's own memory, and
         # $R/data persists across runs here) wins over it inside codeselect.
-        SEL_DEFAULT=$(printf '%s\n' "$SEL_CARDCONF" | sed -n 's/^default=\([0-9][0-9]*\).*/\1/p' | head -1)
+        SEL_DEFAULT=$(printf '%s\n' "$SEL_CARDCONF" | sed -n 's/^[[:space:]]*default[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)
         [ -n "$SEL_DEFAULT" ] && [ "$SEL_DEFAULT" -lt "$SEL_N" ] || SEL_DEFAULT=0
+        # ★ THE CARD'S OWN COUNTDOWN, on the same footing as its default and
+        # its sound keys (2026-09-02). `timeout=` was the one key of the
+        # card's images.conf this script overwrote unconditionally, so a
+        # machine set to wait 5 s (or for ever) waited 30 in the emulator.
+        # PAD_SELECT_TIMEOUT still wins - it is the knob for trying a
+        # different countdown without rebuilding a card - and the resolved
+        # answer is EXPORTED, because the selector's own --timeout is written
+        # inside the namespace below from ${PAD_SELECT_TIMEOUT:-30}: a card
+        # timeout that reached the conf and not the command line would be
+        # overridden by the flag it was meant to fill in.
+        SEL_TIMEOUT=$(printf '%s\n' "$SEL_CARDCONF" | sed -n 's/^[[:space:]]*timeout[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)
+        [ -n "${PAD_SELECT_TIMEOUT:-}" ] && SEL_TIMEOUT=$PAD_SELECT_TIMEOUT
+        case "$SEL_TIMEOUT" in ''|*[!0-9]*) SEL_TIMEOUT=30 ;; esac
+        export PAD_SELECT_TIMEOUT="$SEL_TIMEOUT"
         {
             echo "# written by run_game.sh for the boot selector (item 90)"
             echo "# device tokens are p<N>[:imgK] = partition N [tree imgK] of $PAD_CARD"
             printf '%s' "$SEL_IMAGES"
             echo "default=$SEL_DEFAULT"
-            echo "timeout=${PAD_SELECT_TIMEOUT:-30}"
+            echo "timeout=$SEL_TIMEOUT"
             # the card's sound and volume keys, verbatim (media= is NOT
-            # copied: the media directory is handed over with --media below)
-            printf '%s\n' "$SEL_CARDCONF" | tr -d '\r' | grep -E '^(sound_move|sound_confirm|volume|mixer_volume)=' || true
+            # copied: the media directory is handed over with --media below).
+            # Spacing tolerated on the same rule as the image lines above.
+            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|mixer_volume)[[:space:]]*=' || true
         } > "$R/dump/codeselect.conf"
-        echo "[select] menu: $SEL_N images; default $SEL_DEFAULT; auto-boot after ${PAD_SELECT_TIMEOUT:-30} s"
+        echo "[select] menu: $SEL_N images; default $SEL_DEFAULT; auto-boot after $SEL_TIMEOUT s"
         # THE MEDIA (item 90 v2): the card's /usr/local/codeselect/media,
         # pulled out of its rootfs with debugfs (parts.py --rootfs-dir, no
         # mount, no root) into $R/dump/media - /dump is self-bound below, so
@@ -177,6 +242,7 @@ if [ -n "${PAD_CARD:-}" ]; then
         if [ "$(id -u)" = 0 ] && [ -d "$R/dump/media" ]; then
             _o=$(stat -c %U "$PAD_HOME" 2>/dev/null)
             [ -n "$_o" ] && [ "$_o" != root ] && chown -R "$_o" "$R/dump/media" 2>/dev/null
+        fi
         fi
     fi
 elif [ -n "${PAD_GAME_DIR:-}" ]; then
@@ -559,7 +625,11 @@ if [ -n "$SEL_DIRS" ]; then
     rm -f "$R$PAD_SELECT_CHOICE"
     SEL_INV="--no-invert"
     [ "${PAD_DISPLAY_INVERT:-0}" = "1" ] && SEL_INV=""
-    echo "[select] menu up: LEFT/RIGHT flipper (arrows) move, START (1) confirms; auto-boot in ${PAD_SELECT_TIMEOUT:-30} s"
+    # The banner says what the GLASS says. The selector confirms on START and
+    # on the ACTION / lockdown-bar button (node 1 bit 2), which is Space at
+    # this keyboard, and its own on-screen footer names both - a log that
+    # named only "1" sent the person at the PC looking for the wrong key.
+    echo "[select] menu up: LEFT/RIGHT flipper (arrows) move, START (1) or ACTION (Space) confirms; auto-boot in ${PAD_SELECT_TIMEOUT:-30} s"
     chroot "$R" /usr/local/codeselect/codeselect --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log --media /dump/media $SEL_INV </dev/null
     SEL_RC=$?
     # ★ A KILLED SELECTOR IS A STOP, NOT A CHOICE (item 90, 2026-09-02).

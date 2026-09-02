@@ -465,15 +465,31 @@ export PAD_SELECT_CHOICE
 # second place where the answer lives, and it was wrong by default on every
 # multi-boot card.
 #
-# THE ANSWER IS A SENTENCE ON STDOUT AND A VERDICT IN THE EXIT STATUS (0 =
-# show the menu, 1 = do not), so the caller can SAY what was decided instead
-# of printing a bare 1 - and the sentence is written HERE, beside the branch
-# that chose it, because "this card carries a menu" and "the menu was asked
-# for" are different facts and a caller that re-worded them from the exit
-# status alone would eventually claim the first while doing the second.
-# watch.sh calls this once, at the top of a run, and exports the resolved 1/0
-# - run_game.sh is handed the answer and never re-asks, which is why a menu
-# that is up can never disagree with a menu that was decided against.
+# THE ANSWER IS A VERDICT IN THE EXIT STATUS (0 = show the menu, 1 = do not)
+# AND TWO VARIABLES BESIDE IT:
+#
+#   PAD_SELECT_WHY   the sentence to print - written HERE, beside the branch
+#                    that chose it, because "this card carries a menu" and
+#                    "the menu was asked for" are different facts and a caller
+#                    that re-worded them from the exit status alone would
+#                    eventually claim the first while doing the second.
+#   PAD_SELECT_AUTO  1 when THE CARD decided, 0 when a human did.
+#
+# WHY THE PROVENANCE TRAVELS, AND WHY IT IS NOT A SENTENCE ON STDOUT
+# (2026-09-02, the review of the tri-state). Every gate downstream - the
+# selector build, the extra mounts, the menu preparation - was written when
+# PAD_SELECT meant "somebody asked for a menu", and refusing the run when one
+# could not be given was the right answer to that. Now the CARD asks, and the
+# SAME refusals would let a card make the emulator refuse to start: a rig with
+# no cross compiler, a partition that will not mount, and a card that booted
+# yesterday is dead today over a menu nobody wanted. So each gate needs to
+# know WHO asked, and it cannot work that out from a resolved 1 - hence
+# PAD_SELECT_AUTO, set only in the branches below where the card answered, and
+# exported by watch.sh so run_game.sh inherits it.
+#
+# These are plain variables and not stdout because `SEL=$(pad_select_wanted)`
+# runs the function in a SUBSHELL, where anything it learns about provenance
+# dies with the subshell. This function is sourced; it can simply say so.
 #
 # NEVER AUTO-ON WITHOUT A CARD. An extracted title under games/ has nothing
 # to choose between, and probing an empty path would be a python3 start for
@@ -484,17 +500,18 @@ export PAD_SELECT_CHOICE
 pad_select_wanted() {
     local card line rc
     card=${1:-}
+    PAD_SELECT_AUTO=0
     case "${PAD_SELECT:-}" in
         0|no|off|false|NO|OFF|FALSE)
-            echo "PAD_SELECT=$PAD_SELECT - the menu is switched off for this run"
+            PAD_SELECT_WHY="PAD_SELECT=$PAD_SELECT - the menu is switched off for this run"
             return 1 ;;
         "") ;;
         *)
-            echo "PAD_SELECT=$PAD_SELECT - the menu was asked for"
+            PAD_SELECT_WHY="PAD_SELECT=$PAD_SELECT - the menu was asked for"
             return 0 ;;
     esac
     if [ -z "$card" ]; then
-        echo "no card image on this run - nothing to choose between"
+        PAD_SELECT_WHY="no card image on this run - nothing to choose between"
         return 1
     fi
     line=$(python3 "$RIG/parts.py" --multiboot "$card" 2>/dev/null)
@@ -504,11 +521,13 @@ pad_select_wanted() {
         *) line="parts.py could not be asked about $card" ;;
     esac
     line=${line#yes - }; line=${line#no - }; line=${line#unknown - }
+    # From here on the CARD is the one answering, whichever way it answers.
+    PAD_SELECT_AUTO=1
     if [ "$rc" = 0 ]; then
-        echo "this card carries a menu ($line) - showing it; PAD_SELECT=0 skips it"
+        PAD_SELECT_WHY="this card carries a menu ($line) - showing it; PAD_SELECT=0 skips it"
         return 0
     fi
-    echo "no menu on this card ($line); PAD_SELECT=1 forces one"
+    PAD_SELECT_WHY="no menu on this card ($line); PAD_SELECT=1 forces one"
     return 1
 }
 

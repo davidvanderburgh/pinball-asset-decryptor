@@ -67,8 +67,16 @@ pad_ensure_bridge || exit 1
 # so a menu run has its selector gate below and a plain run never pays for
 # one. No PAD_CARD means no probe at all (an extracted title under games/ has
 # nothing to choose between).
-SEL_WHY=$(pad_select_wanted "${PAD_CARD:-}") && PAD_SELECT=1 || PAD_SELECT=0
-export PAD_SELECT
+#
+# NOT `$(pad_select_wanted ...)`: the function answers in PAD_SELECT_WHY and
+# PAD_SELECT_AUTO as well as in its exit status, and a command substitution
+# would run it in a subshell where both of those die. PAD_SELECT_AUTO is the
+# PROVENANCE - 1 when the card decided, 0 when a human did - and every gate
+# below reads it to know whether a menu it cannot give is a refusal or a
+# shrug. Exported, because run_game.sh has the same gates.
+pad_select_wanted "${PAD_CARD:-}" && PAD_SELECT=1 || PAD_SELECT=0
+export PAD_SELECT PAD_SELECT_AUTO
+SEL_WHY=${PAD_SELECT_WHY:-}   # `set -u` is on; the function always sets it
 # WHAT IT DECIDED AND WHY, in one line, because "the menu did not come up" and
 # "the menu came up and I did not want it" are both answered here. The words
 # are pad_select_wanted's own - it is the only thing that knows whether the
@@ -77,10 +85,41 @@ export PAD_SELECT
 if [ -n "${PAD_CARD:-}" ] || [ "${PAD_SELECT:-}" = 1 ]; then
     echo "[watch] boot selector: $SEL_WHY"
 fi
-# ITEM 90: the boot selector, ONLY on a run that asked for it. MISSING is
-# fatal for such a run - it was asked for a menu, and booting the primary
-# without one is the silent-fallback fault every gate above exists to stop.
-if [ "${PAD_SELECT:-}" = 1 ]; then pad_ensure_select || exit 1; fi
+# ★ A CARD MUST NEVER MAKE THE EMULATOR REFUSE TO START (2026-09-02).
+#
+# Every gate under PAD_SELECT below used to be fatal, and while PAD_SELECT
+# meant "the user asked for a menu" that was right: giving them the primary
+# without a word is the silent-fallback fault every gate in this script exists
+# to stop. Since the CARD started answering that question, the same gates
+# would kill a run nobody asked anything of - a rig without a cross compiler,
+# a second games partition that will not mount - and a card that booted
+# yesterday would simply not start today.
+#
+# So the rule became: a menu the CARD asked for degrades to no menu, out
+# loud, and the game still boots; a menu a HUMAN asked for still refuses.
+# PAD_SELECT_AUTO (padpath.sh, set beside the answer) is which. Returns 0
+# when it has switched the menu off and the caller should carry on, 1 when
+# the caller must fail - `pad_select_off "..." || exit 1` at every site.
+pad_select_off() {
+    if [ "${PAD_SELECT_AUTO:-}" = 1 ]; then
+        echo "[watch] boot selector: $1" >&2
+        echo "[watch]   the CARD asked for this menu, nobody typed" >&2
+        echo "[watch]   PAD_SELECT=1, so this run boots the primary image" >&2
+        echo "[watch]   without a menu rather than refusing to start." >&2
+        PAD_SELECT=0
+        export PAD_SELECT
+        return 0
+    fi
+    echo "[watch] PAD_SELECT=1 was asked for, but $1" >&2
+    echo "[watch]   PAD_SELECT=0 boots this card without a menu." >&2
+    return 1
+}
+# ITEM 90: the boot selector, ONLY on a run that asked for it, and MISSING is
+# fatal only for a run that ASKED - see pad_select_off above.
+if [ "${PAD_SELECT:-}" = 1 ] && ! pad_ensure_select; then
+    pad_select_off "this rig has no boot selector built and cannot build one" \
+        || exit 1
+fi
 
 MINS=${1:-30}
 LOG=${LOG:-$HOME/gzwatch.log}
@@ -193,24 +232,38 @@ if [ -n "${PAD_CARD:-}" ]; then
     # - parts.py's --games and the head of its --list-games are the same
     # partition (p3) by construction - so it is skipped rather than mounted
     # twice under a second name.
+    # Both failures here are the CARD's - an images.conf that promises trees
+    # this image does not carry, a partition fuse2fs will not open - so both
+    # go through pad_select_off: a menu that cannot be mounted is no menu,
+    # never a run that will not start. A `break` and not an exit, because the
+    # partitions already mounted are this run's to tear down.
     if [ "${PAD_SELECT:-}" = 1 ]; then
         SEL_PARTS=$(python3 "$S/parts.py" --list-games "$PAD_CARD" 2>/dev/null | awk '{print $1}')
-        [ -n "$SEL_PARTS" ] || { echo "[watch] PAD_SELECT: no games partition on $PAD_CARD" >&2; exit 1; }
+        [ -n "$SEL_PARTS" ] \
+            || pad_select_off "no games partition on $PAD_CARD" || exit 1
+    fi
+    if [ "${PAD_SELECT:-}" = 1 ]; then
         _first=1
         for _p in $SEL_PARTS; do
             if [ -n "$_first" ]; then _first=""; continue; fi
             _out=$(bash "$S/cardmount.sh" "$PAD_CARD" --part "$_p")
             printf '%s\n' "$_out" | grep '^\[card\]'
             _path=$(printf '%s\n' "$_out" | tail -1)
-            [ -d "$_path" ] || { echo "[watch] could not mount partition $_p of $PAD_CARD" >&2; exit 1; }
+            if [ ! -d "$_path" ]; then
+                pad_select_off "partition $_p of $PAD_CARD could not be mounted" \
+                    || exit 1
+                break
+            fi
             case "$_out" in
                 *"already mounted"*) ;;
                 *) CARD_MNTS+=("$(dirname "$_path")") ;;
             esac
         done
+        unset _first _p _out _path
+    fi
+    if [ "${PAD_SELECT:-}" = 1 ]; then
         echo "[watch] boot selector: games partitions on this card:" \
              "$(printf 'p%s ' $SEL_PARTS)"
-        unset _first _p _out _path
     fi
 elif [ -n "${PAD_GAME_DIR:-}" ]; then
     # A title directory anywhere on disk, bind mounted the same way.
@@ -1194,6 +1247,7 @@ setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_VID="${PAD_VID:-0}" PAD_VID_SHM="${PAD_VID_SHM:-}" \
            PAD_GAME="$GAME" PAD_CARD="${PAD_CARD:-}" PAD_GAME_DIR="${PAD_GAME_DIR:-}" \
            PAD_PIVOT="${PAD_PIVOT:-}" PAD_SELECT="${PAD_SELECT:-0}" \
+           PAD_SELECT_AUTO="${PAD_SELECT_AUTO:-0}" \
            bash "$RIG/run_game.sh" > "$LOG" 2>&1 &
 GAMEPG=$!
 if [ -n "${PAD_PIVOT:-}" ]; then
@@ -1508,8 +1562,13 @@ fi
 # and what puts the selector's progress in this log. The loop below is
 # untouched: once the flag is down it finds the game immediately.
 if [ "${PAD_SELECT:-}" = 1 ]; then
+    # The COUNTDOWN is not named here: it is the card's own `timeout=` unless
+    # PAD_SELECT_TIMEOUT overrides it, and only run_game.sh has read the card
+    # by now (its "[select] menu up: ... auto-boot in N s" lands in this same
+    # log a moment later). $SEL_TO is this script's WAIT bound, which is a
+    # different number and used to be printed as if it were the countdown.
     echo "[watch] boot selector: waiting for the choice (LEFT/RIGHT flipper" \
-         "= arrows move, START = 1 boots; auto-boot after $SEL_TO s)"
+         "= arrows move, START = 1 or ACTION = Space boots)"
     while [ -f "$ROOT/dump/selecting" ]; do
         if pgrep -x game >/dev/null 2>&1; then
             rm -f "$ROOT/dump/selecting"

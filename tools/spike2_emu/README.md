@@ -30,20 +30,44 @@ still works and is still the faster option for a title you run constantly.
 ## Boot selector (item 90)
 
 ```bash
-PAD_CARD=/path/to/tmnt_multi.raw PAD_SELECT=1 watch.sh
+PAD_CARD=/path/to/tmnt_multi.raw watch.sh
 ```
 
-A **multi-image card** (`mkmulticard.py`: Stern's p1/p2, the primary's games
-partition as p3, each extra image's games partition appended as p7, p8...)
-boots into a menu on the machine, and `PAD_SELECT=1` runs that same menu
-here: `run_game.sh` mounts every games partition (`cardmount.sh --part N`, one
-`~/card/<label>.pN` per extra, sharing the primary's cache copy), writes the
-menu to `$ROOT/dump/codeselect.conf` (the card's own
-`/usr/local/codeselect/images.conf` names when it carries one), and chroots
+**The card decides, not a flag.** A **multi-image card** (`mkmulticard.py`:
+Stern's p1/p2, the primary's games partition as p3, each extra image's games
+partition appended as p7, p8...) boots into a menu on the machine, and it
+boots into the same menu here without being asked to. `PAD_SELECT` is a
+**three-way switch** and `padpath.sh`'s `pad_select_wanted` is the only thing
+that reads it:
+
+| `PAD_SELECT` | what happens |
+| --- | --- |
+| unset (the default) | **ask the card** - `parts.py --multiboot <card>`, the one definition of "this card boots into a menu": the rootfs holds `/usr/local/codeselect/codeselect` **and** its `images.conf` names two or more images. `yes` = exit 0, `no` = 1, `unknown` (not a card, no debugfs) = 2 and is treated as no, out loud. No `PAD_CARD` at all = no menu and no probe. |
+| `1` | show the menu whatever the card looks like |
+| `0` (also `no`/`off`/`false`) | do not, whatever the card looks like |
+
+`watch.sh` asks once, at the top of the run, prints what was decided and why,
+and exports the resolved `1`/`0` to `run_game.sh` - so the menu that comes up
+and the menu that was decided on can never be two different answers.
+
+**A card can never make the emulator refuse to start.** The provenance travels
+with the answer (`PAD_SELECT_AUTO=1` when the *card* decided), and every gate
+that used to be fatal now reads it: an unbuilt selector, a missing games
+partition, a partition that will not mount, or fewer than two games trees once
+`parts.py --list-games` has resolved them all say so and **boot the primary
+image without a menu**. An explicit `PAD_SELECT=1` still refuses loudly - it
+asked for something it did not get.
+
+What a menu run does: `run_game.sh` mounts every games partition
+(`cardmount.sh --part N`, one `~/card/<label>.pN` per extra, sharing the
+primary's cache copy), writes the menu to `$ROOT/dump/codeselect.conf` (the
+card's own `/usr/local/codeselect/images.conf` names, `default=`, `timeout=`
+and sound keys when it carries them - read the way `conf.c` reads them, so
+`image = /dev/...` with spaces counts), and chroots
 `/usr/local/codeselect/codeselect` - the ARM selector, drawing in the game
 window through the GL bridge, no shim - before the game. Arrow keys are the
-flippers and move the highlight, `1` is START and confirms, and the countdown
-boots the highlighted image by itself. The choice lands in
+flippers and move the highlight, `1` (START) or Space (ACTION) confirms, and
+the countdown boots the highlighted image by itself. The choice lands in
 `$ROOT/dump/select.choice`, the selector's log in `$ROOT/dump/codeselect.log`,
 the remembered highlight in `$ROOT/data/codeselect.last`; a non-primary choice
 is a second bind over `games/<title>`, and the game then execs exactly as on
@@ -51,12 +75,17 @@ a plain card run. `[select]` lines reach the event pane; `dump/selecting` is
 the flag that keeps `watch.sh` (and autoattract) from reading the menu phase
 as a dead game.
 
-Knobs: `PAD_SELECT=1` turns it on (a plain run is byte-for-byte unchanged
-without it); `PAD_SELECT_TIMEOUT` is the countdown in seconds (30; `0` waits
-for ever); `PAD_CARD_CACHE=0` runs a WSL-local image without the 14 GB cache
-copy. `buildselect.sh` builds the selector into `$ROOT` (`ensurebuild.sh`'s
-`pad_ensure_select` does it on a `PAD_SELECT` start, and refuses the run if it
-cannot); `alive.sh` counts it as `selector (codeselect)`.
+Knobs: `PAD_SELECT` as above; `PAD_SELECT_TIMEOUT` is the countdown in seconds
+and **overrides the card's own `timeout=`** (which is what is used when the
+variable is unset; 30 when neither says, `0` waits for ever);
+`PAD_CARD_CACHE=0` runs a WSL-local image without the 14 GB cache copy.
+`buildselect.sh` builds the selector into `$ROOT` (`ensurebuild.sh`'s
+`pad_ensure_select` does it on a menu start; it refuses the run only when the
+menu was *asked* for); `alive.sh` counts it as `selector (codeselect)`. In the
+app, the Emulate tab's **Boot selector** box shows what the card answered and
+is an override: leave it alone and the rig asks the card again at Start, move
+it and the tab says `PAD_SELECT=1`/`0` out loud. A launch from a save slot
+always sends `0` - the save already chose its image.
 
 ### N images: the two card layouts
 

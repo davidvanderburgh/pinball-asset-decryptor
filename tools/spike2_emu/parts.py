@@ -379,15 +379,35 @@ SELECTOR_CONF = SELECTOR_DIR + "/images.conf"
 
 
 def images_conf_count(text):
-    """How many images an images.conf names - `image=` lines and nothing else.
+    r"""How many images an images.conf names - counted the way THE MACHINE'S
+    OWN READERS count them, which is not `startswith("image=")`.
 
-    The selector's own parser (conf.c) reads one image per `image=` line and
-    ignores everything it does not know, so counting them here is counting the
-    entries the MENU would show. Comments start with '#' and are not counted
-    because they do not start with `image=` once stripped."""
+    conf.c (the selector's parser) trims the whole line, drops it if it is
+    empty or starts with '#', splits at the FIRST '=', and trims the KEY
+    before comparing it to "image"; select.sh's awk matches
+    `/^[ \t]*image[ \t]*=/` for the same entries. So
+
+        image = /dev/mmcblk0p7|TMNT 1987|upscaled
+        \timage=/dev/mmcblk0p3|STERN STOCK|1.59.0
+
+    are both images on the machine - and images.conf.example is a file people
+    are invited to hand-edit, where a space around the '=' is the most natural
+    thing in the world to type. Counting only the tight spelling read such a
+    card as "no menu" and booted its primary image without one, which is
+    exactly the disagreement between the deciders that item 90 exists to
+    remove. Comments are dropped before the split, so `# image=...` is still
+    not an image.
+
+    The VALUE is not inspected: an `image=` with an empty device is a file
+    conf.c refuses outright, and that is the selector's error to report, not a
+    reason for this count to disagree with the parser it is modelling."""
     n = 0
     for line in (text or "").splitlines():
-        if line.strip().startswith("image="):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        key, sep, _val = s.partition("=")
+        if sep and key.strip() == "image":
             n += 1
     return n
 

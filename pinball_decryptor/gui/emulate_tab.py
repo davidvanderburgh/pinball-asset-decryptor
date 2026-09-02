@@ -1968,6 +1968,14 @@ class EmulatePanel:
         #: The card path the probe last answered for, so a reply that arrives
         #: after the box has moved on is dropped instead of applied.
         self._select_probed = ""
+        #: ``(st_mtime, st_size)`` of the file that answer was about.  A path
+        #: string is NOT an identity: the Multi-boot tab writes the very cards
+        #: this tab points at, so "already asked about this path" would keep a
+        #: verdict about bytes that no longer exist.  Taken in the worker (a
+        #: stat on the Tk thread is this app's known freeze class) and
+        #: compared there, so a rebuilt card is asked again and an unchanged
+        #: one costs nothing.
+        self._select_stamp = None
         #: Whether the human has touched the box for THIS card.  A hand on the
         #: control outranks the probe: a reply landing a second later must not
         #: undo a deliberate tick.  Cleared whenever the card changes.
@@ -3305,7 +3313,12 @@ class EmulatePanel:
         # Not running: boot the checkpointable shape and let the status
         # poll fire the load once the guest is up (_apply watches
         # _launch_slot).  Launching FROM a save opts this run into save
-        # states by definition, whatever the toggle says.
+        # states by definition, whatever the toggle says — and it opts OUT
+        # of the boot menu, whatever the card says (_launch_env sends
+        # PAD_SELECT=0 while _launch_slot is set).  A save already chose its
+        # image; a menu in front of it stops the run at a screen nobody is
+        # watching for, and a different pick there restores the state into
+        # the wrong image's game binary.
         self._launch_slot = slot
         self._log("[emulate] will load slot '%s' once the game is up" % slot)
         self.start()
@@ -3550,7 +3563,11 @@ class EmulatePanel:
 
     def _select_hint(self):
         """Retext the tooltip from the current state.  One place, so the box
-        and its explanation cannot describe different cards."""
+        and its explanation cannot describe different cards — and the ONLY
+        place that ever leaves ``_SELECT_TIP_BUSY`` behind, which is why every
+        exit path of the probe comes back through ``_select_apply`` to call
+        it.  A tooltip stuck on "Looking at the card…" is a probe that looks
+        like it is still running an hour later."""
         tip = self._SELECT_TIP_IDLE
         if self._select_menu is True:
             tip = ("This card carries a boot menu"
@@ -3562,7 +3579,16 @@ class EmulatePanel:
             tip = ("This card has no boot menu"
                    + (" - %s" % self._select_why if self._select_why else "")
                    + ".\n\nThere is nothing to choose between, so the game "
-                     "boots straight away.")
+                     "boots straight away. Tick it anyway to force a menu.")
+        elif self._select_why:
+            # 'unknown', with a reason: not a card, no debugfs, an unreadable
+            # file.  Said rather than swallowed — it is the difference between
+            # "this card has no menu" and "nobody could look".
+            tip = ("Nobody could tell whether this card carries a boot menu "
+                   "- %s.\n\nThe emulator asks the card again when it starts, "
+                   "so leave this alone unless you want to force the answer: "
+                   "tick it for a menu, untick it for none."
+                   % self._select_why)
         try:
             self._select_tip.text = tip
         except AttributeError:
@@ -3584,20 +3610,29 @@ class EmulatePanel:
         — no rig, macOS, no WSL — simply stays there, which is what "leaves
         the box alone" means: no PAD_SELECT at all is sent and watch.sh makes
         its own decision.
+
+        THE SAME PATH IS NOT THE SAME CARD (2026-09-02).  The Multi-boot tab
+        writes the very files this tab points at, so a verdict cached against
+        a path string outlived the card it was about: build a multi-image card
+        over the one in the box, come back, and the tab still described the
+        old one.  The identity is ``(path, mtime, size)`` and it is taken in
+        the WORKER — a stat here would be the UNC-to-a-sleeping-NAS freeze
+        ``_precache_kick`` explains — so an unchanged card costs one stat and
+        a rebuilt one is asked again.  ``start()`` kicks this too, which is
+        what refreshes the box after a rebuild that changed nothing else.
         """
         path = self._src_path.get().strip().strip('"')
-        if path == self._select_probed:
-            return
-        self._select_probed = path
-        self._select_menu = None
-        self._select_why = ""
-        self._select_touched = False
-        try:
-            self._select_var.set(False)
-            self._select_chk.configure(state=tk.NORMAL)
-        except (AttributeError, tk.TclError):
-            pass
-        self._select_hint()
+        if path != self._select_probed:
+            self._select_probed = path
+            self._select_stamp = None
+            self._select_menu = None
+            self._select_why = ""
+            self._select_touched = False
+            try:
+                self._select_var.set(False)
+            except (AttributeError, tk.TclError):
+                pass
+            self._select_hint()
         # The tool has to be THERE to be asked. rig_available() answers for
         # the three scripts the tab drives; parts.py is a fourth file and an
         # older rig beside a newer app has every right not to have it.
@@ -3613,8 +3648,21 @@ class EmulatePanel:
             pass
 
         def run():
-            if not os.path.isfile(path):
+            # EVERY WAY OUT OF HERE ANSWERS.  The tooltip is saying "Looking
+            # at the card…" from the moment this thread starts, and a silent
+            # return leaves it saying that for ever — which is how "the probe
+            # is slow" and "the probe never happened" came to look the same.
+            try:
+                st = os.stat(path)
+            except OSError as exc:                          # noqa: BLE001
+                self._select_back(path, None, "unknown",
+                                  "cannot read %s: %s"
+                                  % (os.path.basename(path) or path,
+                                     getattr(exc, "strerror", exc)))
                 return
+            stamp = (st.st_mtime, st.st_size)
+            if stamp == self._select_stamp:
+                return self._select_back(path, stamp, None, None)
             try:
                 r = subprocess.run(cmd, stdout=subprocess.PIPE,
                                    stderr=subprocess.DEVNULL,
@@ -3622,40 +3670,65 @@ class EmulatePanel:
                                    creationflags=_CREATE_FLAGS)
                 out = (r.stdout or b"").decode("utf-8", "replace")
             except Exception:                               # noqa: BLE001
-                return          # unaskable is not "no" — leave the box alone
+                # unaskable is not "no" — the verdict stays None and the rig
+                # decides for itself, but the tooltip still stops spinning.
+                self._select_back(path, None, "unknown",
+                                  "the card could not be asked here")
+                return
             state, why = parse_multiboot(out)
-            try:
-                self._timer().after(
-                    0, lambda: self._select_apply(path, state, why))
-            except (tk.TclError, RuntimeError):
-                pass            # main loop gone
+            self._select_back(path, stamp, state, why)
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _select_apply(self, path, state, why):
+    def _select_back(self, path, stamp, state, why):
+        """Hand the worker's answer to the main thread, or drop it if the main
+        loop has already gone.  One place, because every exit path of the
+        probe has to come back through it."""
+        try:
+            self._timer().after(
+                0, lambda: self._select_apply(path, state, why, stamp=stamp))
+        except (tk.TclError, RuntimeError):
+            pass                # main loop gone
+
+    def _select_apply(self, path, state, why, stamp=None):
         """The probe's answer, back on the main thread.
 
-        Dropped unless it is still about the card in the box and the human has
-        not answered for themselves in the meantime.  'unknown' changes
-        nothing at all: the tab has learnt nothing about this card, and
-        pretending it learnt "no" would switch a menu off behind the user's
-        back."""
-        if path != self._select_probed or self._select_touched:
+        THE VERDICT IS ALWAYS RECORDED; only the WIDGET is left alone when
+        somebody has already answered for this card.  Recording it only when
+        the box was untouched is how the Multi-boot tab's "Run in emulator"
+        (which marks the tick as the caller's) left ``_select_menu`` at None:
+        unticking the box afterwards then sent nothing instead of a 0, the
+        rig's own probe put the menu back up, and there was no way to switch
+        it off at all.  A reply about a card that is no longer in the box is
+        still dropped whole — that one is about a different card.
+
+        ``state is None`` means "nothing new, the bytes are the ones already
+        answered for": take the stamp and re-text, which is what gets the
+        tooltip off "Looking at the card…".
+
+        'unknown' sets the verdict back to None rather than to False: the tab
+        has learnt nothing, and pretending it learnt "no" would switch a menu
+        off behind the user's back.
+        """
+        if path != self._select_probed:
             return
-        if state == "yes":
-            self._select_menu, self._select_why = True, why
-        elif state == "no":
-            self._select_menu, self._select_why = False, why
-        else:
-            self._select_menu, self._select_why = None, why
-            self._select_hint()
-            return
-        try:
-            self._select_var.set(self._select_menu)
-            self._select_chk.configure(
-                state=tk.NORMAL if self._select_menu else tk.DISABLED)
-        except (AttributeError, tk.TclError):
-            pass
+        if stamp is not None:
+            self._select_stamp = stamp
+        if state is not None:
+            self._select_menu = {"yes": True, "no": False}.get(state)
+            self._select_why = why or ""
+            # THE BOX IS NEVER DISABLED, on any verdict.  A 'no' used to grey
+            # it out, which made PAD_SELECT=1 unreachable from the tab over a
+            # card the rig would happily show a menu for if asked — and
+            # watch.sh's own log advertises exactly that ("PAD_SELECT=1
+            # forces one").  The tooltip already says there is nothing to
+            # choose between; a control that cannot be moved says something
+            # stronger and untrue.
+            if not self._select_touched and self._select_menu is not None:
+                try:
+                    self._select_var.set(self._select_menu)
+                except (AttributeError, tk.TclError):
+                    pass
         self._select_hint()
 
     def _browse(self):
@@ -4015,24 +4088,32 @@ class EmulatePanel:
         WHAT EACH ANSWER MEANS TO THE RIG (padpath.sh's pad_select_wanted):
         ``PAD_SELECT=1`` show the menu, ``PAD_SELECT=0`` do not, and NOTHING
         AT ALL means "ask the card" - which is what watch.sh does for itself,
-        with the same tool this tab asked.  So:
+        with the same tool this tab asked.
 
-        * ticked -> 1.  Either the card carries a menu, or the user asked for
-          one anyway.
-        * unticked over a card this tab KNOWS carries a menu -> 0.  That is a
-          deliberate override and has to be said out loud, or the rig's own
-          probe would put the menu back up.
-        * unticked otherwise -> silence.  The tab has learnt nothing about
-          this card (no rig to ask, macOS, a probe still in flight, an
-          unreadable image), and a 0 there would be this tab overruling the
-          rig with a guess.
+        SO THE TAB ONLY SPEAKS WHEN IT IS OVERRULING THE CARD.  An
+        auto-ticked box is the card's own answer read back, and repeating it
+        as ``PAD_SELECT=1`` would turn this tab's reading into an ORDER: the
+        rig would stop asking, a card rebuilt since the probe would be
+        answered for by a stale tick, and every gate downstream would treat
+        the run as one a human demanded a menu for - and refuse rather than
+        degrade when it could not give one (see pad_select_off in watch.sh).
+        Silence is not a weaker answer here, it is the accurate one: watch.sh
+        asks the same card with the same tool a moment later.
+
+        * a launch INTO a save slot -> 0, always.  The state is a memory image
+          of one image's game binary; the choice was made when it was saved,
+          and a menu in front of it can only put it back into the wrong one.
+        * the box was touched (a click, or the Multi-boot tab's Run button
+          naming it) -> that answer, 1 or 0.  This is the override.
+        * otherwise -> silence, and the card decides again at Start.
         """
         env = ["PAD_AUDIO_DUMP=30", "PAD_AUDIO_CTL=" + AUDIO_CTL_FILE] + \
             list(src)
-        if self._select_var.get():
-            env.append("PAD_SELECT=1")
-        elif self._select_menu:
+        if self._launch_slot:
             env.append("PAD_SELECT=0")
+        elif self._select_touched:
+            env.append("PAD_SELECT=1" if self._select_var.get()
+                       else "PAD_SELECT=0")
         return env
 
     def launch_card(self, path, select=False):
@@ -4043,7 +4124,9 @@ class EmulatePanel:
 
         The tick is marked as the CALLER'S choice (``_select_touched``), so
         the probe the new path just kicked off cannot land a moment later and
-        untick a menu that was asked for by name."""
+        untick a menu that was asked for by name — and so unticking it by hand
+        afterwards is still an override the rig is told about, which it was
+        not while a touched box also threw the probe's verdict away."""
         self._src_path.set(path or "")
         self._select_var.set(bool(select))
         self._select_touched = True
@@ -4074,6 +4157,13 @@ class EmulatePanel:
         # own; PAD_AUDIO=0 / PAD_AUTO_ATTRACT=0 stay available to scripted
         # runs.)
         env = self._launch_env(src)
+        # Item 90: ask the card again, off-thread, for the box's own sake.
+        # The Multi-boot tab may have REBUILT the file this path names since
+        # the last probe, and the verdict on screen would otherwise describe
+        # a card that no longer exists.  It cannot affect THIS launch - the
+        # environment is already built, and an untouched box says nothing to
+        # the rig anyway - it just leaves the box telling the truth.
+        self._select_probe_kick()
         # ALWAYS THE CHECKPOINTABLE SHAPE (root, PAD_PIVOT) since the enable
         # checkbox was removed on 2026-08-10. It used to be the toggle's
         # answer, with a pending launch-from-slot forcing it anyway because

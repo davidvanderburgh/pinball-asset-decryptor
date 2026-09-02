@@ -473,6 +473,26 @@ def test_multiboot_counts_image_lines_and_ignores_everything_else(parts):
                  "default=1\nsound_move=move.wav\n") == 2
 
 
+def test_the_count_is_conf_cs_shape_and_not_startswith(parts):
+    """2026-09-02. `line.strip().startswith("image=")` was TIGHTER than both
+    of the machine's own readers: conf.c trims the line, splits at the first
+    '=' and trims the KEY; select.sh's awk matches `/^[ \\t]*image[ \\t]*=/`.
+    images.conf.example invites hand-editing, and a hand-spaced card then read
+    as ZERO images - "no menu" - and booted its primary without one."""
+    count = parts.mod.images_conf_count
+    assert count("image = /dev/mmcblk0p3|STERN|1.59.0\n"
+                 "image =/dev/mmcblk0p7|TMNT 1987|upscaled\n") == 2
+    assert count("\timage\t=\t/dev/mmcblk0p3|A|1\n"
+                 "  image  =  /dev/mmcblk0p7|B|2  \n") == 2
+    # ...and nothing that is not that key is counted, however it is spaced.
+    assert count("#image = x|A|1\n  # image = y|B|2\nimagex=z|C|3\n"
+                 "my_image = w|D|4\ndefault = 1\ntimeout = 30\n"
+                 "image_dir=/nope\n\n") == 0
+    # A one-image card is still one image, spacing or not: the yes/no verdict
+    # is what this feeds, and 1 is a no.
+    assert parts.mod.images_conf_count("image = only|One|1\n") == 1
+
+
 def test_multiboot_says_unknown_rather_than_no_when_it_cannot_tell(parts, monkeypatch, tmp_path):
     """'unknown' is a third answer on purpose: the rig prints it and boots the
     primary, the app leaves its tickbox alone. Calling any of these 'no' is
@@ -587,7 +607,8 @@ def test_list_games_is_read_with_the_fifth_field_and_tokens_carry_the_subdir():
     assert "while read -r idx _lba _off titles subdir; do" in outer
     assert 'tok="p$idx"; [ -n "$subdir" ] && tok="p$idx:$subdir"' in outer
     assert 'd="$(dirname "$m")/$subdir/${titles%%,*}"' in outer
-    assert 'sed -n "s#^image=/dev/mmcblk0$tok|##p"' in outer
+    assert 'sed -n "s#^[[:space:]]*image[[:space:]]*=[[:space:]]*' \
+           '/dev/mmcblk0$tok[[:space:]]*|##p"' in outer
     assert 'SEL_IMAGES="${SEL_IMAGES}image=$tok|$t"' in outer
     assert 'SEL_DIRS="${SEL_DIRS}$tok"$\'\\t\'"$d"$\'\\n\'' in outer
     # and the INNER block prints the token as it is (no second 'p')
@@ -599,8 +620,27 @@ def test_list_games_is_read_with_the_fifth_field_and_tokens_carry_the_subdir():
 
 def test_the_cards_sound_and_volume_keys_reach_the_emulator_conf_but_media_does_not():
     outer = _select_outer()
-    assert "grep -E '^(sound_move|sound_confirm|volume|mixer_volume)='" in outer
+    assert ("grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|"
+            "mixer_volume)[[:space:]]*='") in outer
     assert "media=" not in outer.replace("image=", ""), "media= is the card's path; the rig passes --media"
+
+
+def test_the_cards_conf_is_read_the_way_conf_c_reads_it():
+    """2026-09-02. Every one of these keys was matched with `^key=`, which is
+    TIGHTER than the machine's own parser: conf.c trims the line, splits at
+    the first '=' and trims the KEY, and select.sh's awk matches
+    `/^[ \\t]*image[ \\t]*=/`. images.conf.example is a file people are
+    invited to edit, so `default = 1` is a thing that gets typed - and it read
+    as no default, no sounds, and a menu labelled "games partition 7"."""
+    outer = _select_outer()
+    for key in ("default", "timeout"):
+        assert ("sed -n 's/^[[:space:]]*%s[[:space:]]*=[[:space:]]*"
+                "\\([0-9][0-9]*\\).*/\\1/p'" % key) in outer, key
+    # ...and the \r strip happens ONCE, on the way in, so a CRLF conf cannot
+    # defeat the patterns above (it used to be applied after the match).
+    assert '--rootfs-file /usr/local/codeselect/images.conf "$PAD_CARD" ' \
+           '2>/dev/null | tr -d \'\\r\')' in outer
+    assert "| head -1 | tr -d '\\r'" not in outer
 
 
 def test_the_media_directory_is_cleared_pulled_from_the_card_or_overridden():
@@ -635,7 +675,7 @@ def test_everything_new_in_run_game_is_gated_on_pad_select():
     outer = outer[:outer.index("elif [ -n \"${PAD_GAME_DIR:-}\" ]")]
     for needed in ("parts.py\" --list-games", "cardmount.sh\" \"$PAD_CARD\" --part",
                    "codeselect.conf", "--rootfs-file /usr/local/codeselect/images.conf",
-                   "timeout=${PAD_SELECT_TIMEOUT:-30}"):
+                   "timeout=$SEL_TIMEOUT"):
         assert needed in outer, needed
     # ...and the INNER block under the list it produced, which is empty
     # otherwise - so nothing else reads it.
@@ -647,10 +687,135 @@ def test_everything_new_in_run_game_is_gated_on_pad_select():
 
 
 def test_a_pad_select_run_refuses_rather_than_silently_booting_the_primary():
+    """A menu somebody ASKED for and did not get is still a refusal: giving
+    them the primary without a word is the silent-fallback fault every gate in
+    the rig exists to stop. What changed on 2026-09-02 is who is asking - see
+    the card-decided test below."""
+    outer = _select_outer()
+    body = outer[outer.index("sel_giveup() {"):]
+    body = body[:body.index("\n        }")]
+    fatal = body[body.index('echo "[run] PAD_SELECT=1 was asked for'):]
+    assert "exit 1" in fatal
+    assert 'rmdir "$R/games/$GAME"' in fatal, \
+        "the bind mountpoint must not be left behind as a fake extracted title"
+    # ...and every refusal in the block goes through that one function, so a
+    # new gate cannot bring its own bare `exit 1` back.
+    assert "exit 1" not in outer.replace(fatal, ""), \
+        "a refusal outside sel_giveup: it would be fatal for a card-decided run too"
+
+
+def test_a_card_decided_menu_degrades_instead_of_refusing():
+    """★ A CARD MUST NEVER MAKE THE EMULATOR REFUSE TO START (2026-09-02).
+
+    Auto-on inherited the opt-in refusals: an unbuilt selector or a partition
+    that would not mount used to be `exit 1`, which was right while PAD_SELECT
+    meant "the user asked". With the CARD asking, the same lines would kill a
+    run nobody asked anything of. PAD_SELECT_AUTO is the provenance and it
+    rides down from watch.sh."""
+    outer = _select_outer()
+    body = outer[outer.index("sel_giveup() {"):]
+    body = body[:body.index("\n        }")]
+    assert '[ "${PAD_SELECT_AUTO:-}" = 1 ]' in body
+    auto = body[body.index('[ "${PAD_SELECT_AUTO:-}" = 1 ]'):body.index("return 0")]
+    assert "exit" not in auto, "the card-decided branch must not end the run"
+    assert 'SEL_DIRS=""' in body, "no menu means no menu list, so nothing runs one"
+    # every gate that the card can trigger goes through it
+    for gate in ('[ -x "$PAD_SELECT_BIN" ]', '[ -n "$SEL_LIST" ]',
+                 '[ -d "$m" ]', '[ -d "$d" ]'):
+        i = outer.index(gate)
+        assert "sel_giveup" in outer[i:i + 260], gate
+    # ...and once it has given up, nothing further in the block runs.
+    assert outer.count('if [ -z "$SEL_GIVEUP" ]; then') >= 3
+
+
+def test_watch_lets_a_card_decided_menu_go_rather_than_ending_the_run():
+    code = _code(_read("watch.sh"))
+    body = code[code.index("pad_select_off() {"):]
+    body = body[:body.index("\n}")]
+    assert '[ "${PAD_SELECT_AUTO:-}" = 1 ]' in body
+    assert "PAD_SELECT=0" in body and "export PAD_SELECT" in body, \
+        "the degraded answer has to reach run_game.sh, not just this script"
+    assert "return 0" in body and "return 1" in body
+    assert "exit" not in body, "the caller decides; this only reports"
+    # Every fatal gate the CARD can trigger is `pad_select_off ... || exit 1`.
+    for gate in ("pad_ensure_select", "no games partition on $PAD_CARD",
+                 "could not be mounted"):
+        i = code.index(gate)
+        assert "pad_select_off" in code[i - 120:i + 200], gate
+    assert '|| exit 1' in code[code.index("pad_select_off \""):], \
+        "an explicit PAD_SELECT=1 still ends the run"
+    # ...and the provenance reaches run_game.sh by name.
+    assert 'PAD_SELECT_AUTO="${PAD_SELECT_AUTO:-0}"' in code
+    assert "export PAD_SELECT PAD_SELECT_AUTO" in code
+
+
+def test_padpath_answers_who_decided_and_not_through_a_subshell():
+    """`SEL=$(pad_select_wanted)` runs it in a SUBSHELL, where anything it
+    learns about provenance dies. So the answer is variables beside the exit
+    status, and watch.sh calls it without a command substitution."""
+    pp = _read("padpath.sh")
+    body = pp[pp.index("pad_select_wanted() {"):]
+    body = body[:body.index("\n}")]
+    assert "PAD_SELECT_AUTO=0" in body and "PAD_SELECT_AUTO=1" in body
+    # AUTO=1 is set only AFTER the two explicit spellings have returned...
+    assert body.index("PAD_SELECT_AUTO=1") > body.index("the menu was asked for")
+    assert body.index("PAD_SELECT_AUTO=1") > body.index("nothing to choose between")
+    # ...and after the probe, so it means "the card answered", either way.
+    assert body.index("parts.py") < body.index("PAD_SELECT_AUTO=1")
+    assert "echo " not in body, "the sentence is a variable now, not stdout"
+    # one sentence per branch: off, asked for, no card, card yes, card no
+    assert body.count("PAD_SELECT_WHY=") == 5
+    watch = _code(_read("watch.sh"))
+    assert 'pad_select_wanted "${PAD_CARD:-}" && PAD_SELECT=1 || PAD_SELECT=0' in watch
+    assert "SEL_WHY=$(pad_select_wanted" not in watch, "a subshell loses the provenance"
+
+
+def test_the_menu_is_guarded_on_what_it_can_actually_show():
+    """The DECISION counts `image=` lines in the card's images.conf; the MENU
+    is built from what --list-games could resolve. One tree is not a menu - it
+    is a countdown in front of the only thing it could boot."""
+    outer = _select_outer()
+    assert '[ "${SEL_N:-0}" -lt 2 ]' in outer
+    guard = outer[outer.index('[ "${SEL_N:-0}" -lt 2 ]'):]
+    guard = guard[:guard.index("\n        fi")]
+    assert 'SEL_DIRS=""' in guard and "nothing to choose between" in guard
+    # ...and it is decided BEFORE the conf and the media are prepared for a
+    # menu that will not be shown.
+    assert outer.index('[ "${SEL_N:-0}" -lt 2 ]') < outer.index("codeselect.conf")
+
+
+def test_the_cards_own_countdown_reaches_the_menu_and_the_flag_still_wins():
+    """`timeout=` was the one key of the card's images.conf this script
+    overwrote unconditionally, so a machine set to wait 5 s waited 30 here."""
+    outer = _select_outer()
+    assert "SEL_TIMEOUT=$(printf '%s\\n' \"$SEL_CARDCONF\"" in outer
+    assert '[ -n "${PAD_SELECT_TIMEOUT:-}" ] && SEL_TIMEOUT=$PAD_SELECT_TIMEOUT' in outer
+    assert outer.index("SEL_TIMEOUT=$(printf") < outer.index("SEL_TIMEOUT=$PAD_SELECT_TIMEOUT"), \
+        "the flag overrides the card, not the other way round"
+    assert "case \"$SEL_TIMEOUT\" in ''|*[!0-9]*) SEL_TIMEOUT=30 ;; esac" in outer
+    assert "timeout=$SEL_TIMEOUT" in outer
+    # EXPORTED, because the selector's own --timeout is written inside the
+    # namespace from ${PAD_SELECT_TIMEOUT:-30}: a card timeout that reached
+    # the conf and not the command line would be overridden by the flag.
+    assert 'export PAD_SELECT_TIMEOUT="$SEL_TIMEOUT"' in outer
     code = _code(_read("run_game.sh"))
-    block = code[code.index('if [ ! -x "$PAD_SELECT_BIN" ]'):]
-    block = block[:block.index("fi")]
-    assert "exit 1" in block and "not built" in block
+    inner = code[code.index('if [ -n "$SEL_DIRS" ]; then'):]
+    assert '--timeout "${PAD_SELECT_TIMEOUT:-30}"' in inner
+
+
+def test_the_container_forwards_the_selector_knobs():
+    """macOS runs the rig in a container, and only what padbox.sh names in
+    this list crosses. Without PAD_SELECT a Mac could neither force a menu on
+    nor switch one off - the box asked the card and nothing else was heard."""
+    box = _read(os.path.join("docker", "padbox.sh"))
+    fwd = box[box.index("for v in PAD_GAME"):]
+    fwd = fwd[:fwd.index("done")]
+    for v in ("PAD_SELECT", "PAD_SELECT_TIMEOUT", "PAD_SELECT_MEDIA"):
+        assert v in fwd, v
+    # `[ -n "${!v:-}" ]` passes a literal "0", which IS the "no menu" answer.
+    assert '[ -n "${!v:-}" ] && RUN_ARGS+=(-e "$v=${!v}")' in fwd
+    # A media directory is a HOST path and needs the card's prefix swap.
+    assert 'PAD_SELECT_MEDIA=/pad/cards/${PAD_SELECT_MEDIA#"$CARD_DIR"/}' in box
 
 
 def test_the_choice_file_is_defined_once_and_reused():
@@ -761,10 +926,15 @@ def test_the_extra_mounts_are_owned_and_torn_down_by_the_run():
     assert "pkill -9 -x codeselect" in tear
 
 
-def test_watch_builds_the_selector_only_when_asked_and_fatally():
+def test_watch_builds_the_selector_only_when_asked_and_fatally_when_asked_for():
     code = _code(_read("watch.sh"))
-    assert 'if [ "${PAD_SELECT:-}" = 1 ]; then pad_ensure_select || exit 1; fi' in code
+    assert 'if [ "${PAD_SELECT:-}" = 1 ] && ! pad_ensure_select; then' in code
     assert code.index("pad_ensure_bridge || exit 1") < code.index("pad_ensure_select")
+    # Fatal for a run that ASKED for a menu, a shrug for one the card asked
+    # for - which is pad_select_off's whole job.
+    block = code[code.index("! pad_ensure_select"):]
+    block = block[:block.index("\nfi")]
+    assert "pad_select_off" in block and "|| exit 1" in block
 
 
 # ==========================================================================
@@ -816,7 +986,7 @@ def test_padpath_holds_the_three_way_switch():
 def test_watch_decides_once_early_and_exports_the_answer():
     text = _read("watch.sh")
     code = _code(text)
-    decide = _line_of(text, 'SEL_WHY=$(pad_select_wanted "${PAD_CARD:-}")')
+    decide = _line_of(text, 'pad_select_wanted "${PAD_CARD:-}"')
     assert code.count("pad_select_wanted") == 1, "one probe per run, not two"
     # ...before anything is built for it, and before every use of the flag.
     assert decide < _line_of(text, "pad_ensure_select")

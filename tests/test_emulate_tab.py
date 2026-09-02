@@ -3107,13 +3107,22 @@ def test_a_card_with_a_menu_ticks_the_box_itself(tmp_path, monkeypatch):
         # The hint says why, and it is the CARD's reason, not a guess.
         assert "carries a boot menu" in panel._select_tip.text
         assert "2 images" in panel._select_tip.text
-        # ...and Start asks for the menu.
-        assert "PAD_SELECT=1" in panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
+        # ...and Start says NOTHING, because an auto-ticked box is the card's
+        # own answer read back. Repeating it as PAD_SELECT=1 would make this
+        # tab's reading an ORDER: the rig would stop asking the card, and
+        # every gate downstream would refuse rather than degrade when it
+        # could not give the menu (2026-09-02, the review of the tri-state).
+        env = panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
+        assert not any(e.startswith("PAD_SELECT") for e in env), env
         # Unticking it is the OVERRIDE, and has to be said out loud: without
         # the 0 the rig's own probe would put the menu back up.
         panel._select_var.set(False)
         panel._select_touch()
         assert "PAD_SELECT=0" in panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
+        # ...and ticking it again is the other override, out loud too.
+        panel._select_var.set(True)
+        panel._select_touch()
+        assert "PAD_SELECT=1" in panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
     finally:
         root.destroy()
 
@@ -3122,7 +3131,13 @@ def test_a_card_without_a_menu_leaves_the_box_off_and_says_nothing(tmp_path,
                                                                    monkeypatch):
     """A plain card must send no PAD_SELECT at all: 0 and unset behave the
     same on the rig today, and the silence is what keeps the decision in one
-    place if that ever changes."""
+    place if that ever changes.
+
+    THE BOX STAYS ENABLED on a 'no'. Greying it out made PAD_SELECT=1
+    unreachable from the tab over a card the rig would happily show a menu for
+    if asked - and watch.sh's own log advertises exactly that ("PAD_SELECT=1
+    forces one"). The tooltip already says there is nothing to choose
+    between."""
     img = tmp_path / "stock.raw"
     img.write_bytes(bytes(16))
     root, panel, _calls = _select_panel(
@@ -3132,10 +3147,149 @@ def test_a_card_without_a_menu_leaves_the_box_off_and_says_nothing(tmp_path,
         panel._src_path.set(str(img))
         root.update()
         assert not panel._select_var.get()
-        assert str(panel._select_chk.cget("state")) == "disabled"
+        assert str(panel._select_chk.cget("state")) != "disabled"
         assert "no boot menu" in panel._select_tip.text
         env = panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
         assert not any(e.startswith("PAD_SELECT") for e in env), env
+        # ...and it can still be ticked, which the rig honours as an order.
+        panel._select_var.set(True)
+        panel._select_touch()
+        assert "PAD_SELECT=1" in panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
+    finally:
+        root.destroy()
+
+
+def test_a_slot_launch_never_asks_for_the_menu(tmp_path, monkeypatch):
+    """★ A SAVE HAS ALREADY CHOSEN ITS IMAGE (2026-09-02).
+
+    _slot_launch sets _launch_slot and calls start(); on a multi-boot card the
+    auto-ticked box used to send PAD_SELECT=1, so the run stopped at a menu
+    nobody was watching for - and a different pick there restores the state
+    into the WRONG image's game binary."""
+    img = tmp_path / "multi.raw"
+    img.write_bytes(bytes(16))
+    root, panel, _calls = _select_panel(
+        tmp_path, monkeypatch,
+        "multiboot: yes - selector installed, 2 images in images.conf\n")
+    try:
+        panel._src_path.set(str(img))
+        root.update()
+        assert panel._select_var.get(), "the card ticked it, as it should"
+        panel._launch_slot = "slot1"
+        env = panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
+        assert "PAD_SELECT=0" in env, env
+        assert "PAD_SELECT=1" not in env
+        # ...even when the box was deliberately ticked: the save's image is
+        # not a thing the menu can be right about.
+        panel._select_touch()
+        assert "PAD_SELECT=0" in panel._launch_env(["PAD_CARD=/mnt/c/x.raw"])
+        # and an ordinary Start after the slot has been cleared is silent again
+        panel._launch_slot = None
+        panel._select_touched = False
+        assert not any(e.startswith("PAD_SELECT")
+                       for e in panel._launch_env(["PAD_CARD=/mnt/c/x.raw"]))
+    finally:
+        root.destroy()
+
+
+def test_unticking_after_the_multiboot_tabs_run_button_is_heard(tmp_path,
+                                                                monkeypatch):
+    """launch_card marks the tick as the caller's, which used to make
+    _select_apply drop the probe's reply entirely - so _select_menu stayed
+    None, unticking the box sent NOTHING instead of 0, and the rig's own probe
+    put the menu straight back up with no way to switch it off.
+
+    The verdict is recorded always; only the WIDGET is left alone."""
+    root, panel, _calls = _select_panel(tmp_path, monkeypatch, "")
+    started = []
+    try:
+        panel.start = lambda: started.append(True)
+        panel.launch_card("/cards/multi.raw", select=True)
+        assert started and panel._select_var.get()
+        panel._select_apply("/cards/multi.raw", "yes", "2 images")
+        assert panel._select_var.get(), "the caller's tick still wins the widget"
+        assert panel._select_menu is True, "...but the verdict was recorded"
+        assert "2 images" in panel._select_tip.text
+        # Now untick it by hand: that is an override and it is said out loud.
+        panel._select_var.set(False)
+        panel._select_touch()
+        assert "PAD_SELECT=0" in panel._launch_env(["PAD_CARD=/x"])
+    finally:
+        root.destroy()
+
+
+def test_the_tooltip_never_sticks_on_looking_at_the_card(tmp_path, monkeypatch):
+    """Every exit path of the probe re-texts. A silent return left the box
+    saying "Looking at the card for a boot menu…" for ever, which is how "the
+    probe is slow" and "the probe never happened" came to look the same."""
+    img = tmp_path / "who.raw"
+    img.write_bytes(bytes(16))
+    root, panel, _calls = _select_panel(tmp_path, monkeypatch, "")
+    busy = panel._SELECT_TIP_BUSY
+    try:
+        # 1. the card cannot be opened at all
+        panel._src_path.set(str(tmp_path / "gone.raw"))
+        root.update()
+        assert panel._select_tip.text != busy
+        assert panel._select_menu is None
+        # 2. the probe itself blows up
+        def boom(*_a, **_k):
+            raise OSError("wsl.exe is not here")
+        monkeypatch.setattr(emulate_tab.subprocess, "run", boom)
+        panel._src_path.set(str(img))
+        root.update()
+        assert panel._select_tip.text != busy
+        assert panel._select_menu is None, "unaskable is never 'no'"
+        # 3. an answer nobody can read
+        monkeypatch.setattr(emulate_tab.subprocess, "run",
+                            lambda *_a, **_k: SimpleNamespace(
+                                returncode=0, stdout=b"bash: no parts.py"))
+        img.write_bytes(bytes(32))          # new bytes, so it is asked again
+        panel._src_path.set(str(img) + " ")   # same card, a fresh trace
+        root.update()
+        assert panel._select_tip.text != busy
+    finally:
+        root.destroy()
+
+
+def test_a_rebuilt_card_at_the_same_path_is_asked_again(tmp_path, monkeypatch):
+    """The Multi-boot tab writes the very cards this tab points at, so a
+    verdict cached against a PATH outlived the card it was about. The identity
+    is (path, mtime, size) and it is taken in the worker - a stat on the Tk
+    thread is this app's known freeze class."""
+    img = tmp_path / "card.raw"
+    img.write_bytes(bytes(16))
+    answers = ["multiboot: no - no /usr/local/codeselect/codeselect in the rootfs\n",
+               "multiboot: yes - selector installed, 2 images in images.conf\n"]
+    calls = []
+
+    root, panel, _c = _select_panel(tmp_path, monkeypatch, "")
+
+    def fake_run(cmd, **_kw):
+        calls.append(cmd)
+        return SimpleNamespace(returncode=0,
+                               stdout=answers[min(len(calls) - 1,
+                                                  len(answers) - 1)]
+                               .encode("utf-8"))
+
+    monkeypatch.setattr(emulate_tab.subprocess, "run", fake_run)
+    try:
+        panel._src_path.set(str(img))
+        root.update()
+        assert len(calls) == 1 and panel._select_menu is False
+        # The same path again, unchanged: no second probe, and the tooltip
+        # still says what it said.
+        panel._select_probe_kick()
+        root.update()
+        assert len(calls) == 1, "an unchanged card was asked twice"
+        assert panel._select_menu is False
+        # Now REBUILD it in place. Same path, different bytes.
+        img.write_bytes(bytes(4096))
+        panel._select_probe_kick()
+        root.update()
+        assert len(calls) == 2, "a rebuilt card was answered from the cache"
+        assert panel._select_menu is True
+        assert panel._select_var.get(), "and the box caught up"
     finally:
         root.destroy()
 

@@ -58,36 +58,44 @@ screen oracle and by a screenshot.
 | part | type | content | from |
 |---|---|---|---|
 | p1 | FAT (0x0c) | zImage + dtb | primary image, verbatim |
-| p2 | ext4 | rootfs + `/usr/local/codeselect/` + patched `/etc/init.d/game` | primary image, then patched |
-| p3 | ext4 | games partition of image 0 (the primary) | verbatim |
+| p2 | ext4 | rootfs + `/usr/local/codeselect/` (+ `media/`) + patched `/etc/init.d/game` | primary image, then patched |
+| p3 | ext4 | games partition of image 0 (the primary) | verbatim (validator bypassed when asked) |
 | p4 | extended | grown to the end of the card | — |
 | p5 | ext4 | `/data` | primary image, verbatim |
 | p6 | ext4 | `/dump` | primary image, verbatim |
-| p7… | ext4 | games partition of image 1, 2, … | each verbatim |
+| p7 | ext4 | `parts` layout: image 1's games partition verbatim. `multi` layout: one filesystem holding `img1/`, `img2/`, … each a complete games tree | see below |
 
 p1/p2 keep u-boot's `root=/dev/mmcblk0p2` and the FAT load valid; p3/p5/p6
 keep fstab valid; the extra images are only ever reached by `select.sh`.
 
-Sizes: an 8G image's games partition is 13,402,110 sectors (6.86 GB). Two
-images need ≈14.7 GB (a 16 GB card), three ≈21.6 GB (a 32 GB card) - but a
-third image lands on p8, and the card's kernel (i.MX6 3.14,
-`CONFIG_MMC_BLOCK_MINORS=8`) allocates minors for mmcblk0 and p1..p7 only,
-so `/dev/mmcblk0p8` never exists on the machine. TWO IMAGES IS THE LIMIT of
-this layout: `mkmulticard.py` refuses more than one `--extra` unless
-`--allow-unreachable` (emulator use), and a 3-image card needs two images
-inside one partition - a design follow-up.
+**The card's kernel exposes p1..p7 only** (i.MX6 3.14, `CONFIG_MMC_BLOCK_MINORS=8`;
+found in review), so there is room for exactly one extra *partition*. Two
+layouts, chosen by `--layout auto`:
 
-## The partition-count limit (found in review)
+* `parts` (one extra image): p7 = that image's games partition copied verbatim
+  (byte-verified). Two 8G images need ≈14.7 GB, a 16 GB card.
+* `multi` (two or more extras): p7 = one ext4 filesystem built with `mke2fs -d`
+  from `debugfs rdump`s of each extra's games partition, `img1/ … imgK/`, each
+  a complete tree (`spk/`, `<title>/`, the `game`/`conagent`/`data` symlinks,
+  ownership restored). Sized to the used bytes + 10 % + 256 MiB. Device tokens
+  are `/dev/mmcblk0p7:imgN`; `select.sh` mounts p7 under `/mnt/multi` and
+  bind-mounts the chosen subdirectory over `/games` (no rw remount). Three 8G
+  images ≈17.2 GB, a 32 GB card.
 
-The card's own kernel (i.MX6 3.14, `CONFIG_MMC_BLOCK_MINORS=8`) exposes at
-most `/dev/mmcblk0p7`, so with p1..p6 fixed there is room for exactly ONE
-extra games partition per card. `mkmulticard.py` refuses a second `--extra`
-unless `--allow-unreachable` (emulator experiments only). A three-way card
-(Godzilla stock / Heisei normal / Heisei orchestra) therefore needs the
-follow-up design of carrying two images INSIDE one partition (p7 holding
-`<title>_a/` and `<title>_b/` with the `game`/`conagent`/`data` symlinks and
-`spk/` re-pointed by `select.sh` under a brief rw remount), not a third
-partition.
+## Validation on the machine (David's first flash, 2026-09-01)
+
+The card booted and selected perfectly on the TMNT Pro, but a GAME VALIDATION
+ERROR showed on both images. `mkmulticard.py bypass --dry-run` on that card
+read the stock image as ARMED and the 1987 image as already bypassed: the game
+grades itself per build stamp into the board NVRAM, and the two 1.59.0 images
+share that state, so the armed stock image tainted both. Every image on a
+multi card therefore gets the same treatment the Insider-clean 1987 card has:
+`valpatch.find_validation_exec` (a signature match, no fixed address) and a
+4-byte `bx lr` at the validator's entry, with the game's `.sidx` record
+refreshed so `spk` still accepts the file at update time. `build
+--bypass-validation` does it for every games tree, `bypass --card` retrofits a
+built card in seconds, and `verify` reports the state per tree. The July 2026
+hardware test of that patch is what makes this Insider-safe.
 
 ## Files on the card
 
@@ -98,6 +106,7 @@ partition.
 /usr/local/codeselect/font.ttf        DejaVu Sans Bold (Bitstream Vera licence)
 /usr/local/codeselect/media/          art PNGs, animated GIFs, WAVs (flat, <= 20 MB)
 /etc/init.d/game                      stock script + one guarded hook line
+/usr/local/codeselect/media/          art<N>.png, anim<N>.gif, music<N>.wav, move.wav, confirm.wav (optional, <= 20 MB)
 ```
 
 `images.conf` v2 — plain text, `#` comments,

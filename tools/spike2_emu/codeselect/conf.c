@@ -64,9 +64,11 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
         key = trim(s);
         val = trim(eq + 1);
         if (!strcmp(key, "image")) {
-            /* up to six '|'-separated fields: device|title|subtitle|art|anim|music;
-             * a 3-field line is the v1 form and stays valid */
-            char *fld[6];
+            /* up to seven '|'-separated fields:
+             * device|title|subtitle|art|anim|music|confirm. A 3-field line is
+             * the v1 form and a 6-field line the first v2 form; both stay
+             * valid, and anything past the seventh field is ignored. */
+            char *fld[7];
             char *p = val;
             struct conf_image *im;
             int k, nf = 0;
@@ -76,8 +78,8 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                 return -1;
             }
             im = &c->img[c->n];
-            for (k = 0; k < 6; k++) fld[k] = NULL;
-            while (p && nf < 6) {
+            for (k = 0; k < 7; k++) fld[k] = NULL;
+            while (p && nf < 7) {
                 char *bar = strchr(p, '|');
                 if (bar) *bar++ = 0;
                 fld[nf++] = trim(p);
@@ -89,6 +91,7 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             copy_field(im->art, fld[3] ? fld[3] : "");
             copy_field(im->anim, fld[4] ? fld[4] : "");
             copy_field(im->music, fld[5] ? fld[5] : "");
+            copy_field(im->confirm, fld[6] ? fld[6] : "");
             if (!*im->device) {
                 snprintf(err, errlen, "%s:%d: image without a device", path, lineno);
                 fclose(f);

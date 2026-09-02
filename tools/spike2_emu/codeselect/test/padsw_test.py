@@ -34,6 +34,14 @@ Windows player dies, and the fmt file is removed, as a restarted playaudio.sh
 does) and gets it back 4 s later: the loss and the 3 s gap are logged, the
 fmt file is rewritten, the selector reconnects and drops only the gap.
 
+Then the per-card confirm sound (images.conf field 7): three runs against a
+conf where image 1 names confirm1.wav (2.5 s) and image 0 names nothing.
+Confirming image 1 must play THAT clip - the log names it and the program is
+held for its 2.5 s, not the menu-wide 1.0 s; confirming image 0 must fall back
+to the menu-wide confirm.wav and be held only its 1.0 s; and a card whose own
+file is missing logs the fallback exactly once, uses the menu-wide sound, is
+not counted in the `media:` line, and still exits 0 with a choice.
+
 The emulator comes from the environment ($QEMU, exported by the Makefile),
 not argv: the rig's teardown does pkill -f 'arm-binfmt|qemu-arm' and this
 script's own command line must not match it."""
@@ -240,7 +248,8 @@ def main():
     if len(mix) < 4 * 44100 or not any(mix):
         print("padsw_test: FAIL the mix dump is missing, short or silent (%d bytes)" % len(mix))
         ok = False
-    for want in ("audio: fifo %s open" % fifo, "media: 2 art, 1 anim (4 frames), 0 music, move=y confirm=y",
+    for want in ("audio: fifo %s open" % fifo,
+                 "media: 2 art, 1 anim (4 frames), 0 music, 0 card confirm, move=y confirm=y",
                  " frames written, ", "start %d action %d" % (start, action)):
         if want not in err:
             print("padsw_test: FAIL log lacks %r" % want)
@@ -659,6 +668,141 @@ def main():
     print("padsw_test: OK (reader loss: EPIPE at %.1f s, %.1f s without a reader, reconnected, "
           "%d frames dropped = %.2f s, %d bytes after, %.1f s, exit 0)"
           % (t_lost - t0, gap, dropped, dropped / 44100.0, after, time.monotonic() - t0))
+
+    # --- a card's OWN confirm sound (images.conf field 7) -------------------
+    # David, 2026-09-02: "the 'confirm sound' we should be able to customize
+    # for each entry if we want to." Image 1 names confirm1.wav (2.5 s), image
+    # 0 names nothing and falls back to the menu-wide confirm.wav (1.0 s). The
+    # log must name which sound was used, and the program must be held under
+    # the LOADING frame for THAT sound - the two clips are 1.5 s apart, so the
+    # hold tells them apart and a fallback cannot pass for the real thing.
+    def confirm_run(tag, conf_path, to_image_1):
+        """Start a run, press RIGHT when image 1 is wanted, then START. Returns
+        (stdout, stderr, seconds held after the press, exit code, choice)."""
+        for p in (choice, last):
+            if os.path.exists(p):
+                os.unlink(p)
+        with open(padsw, "wb") as f:
+            f.write(struct.pack("<II", MAGIC, 1) + bytes(4096 - 8))
+        cmd = [qemu, "-L", root, binp, "--headless", os.path.join(t, "padsw_%s.ppm" % tag),
+               "--conf", conf_path, "--input", "padsw", "--padsw", padsw, "--tables", tables,
+               "--timeout", "12", "--out", choice, "--last", last, "--default", "0",
+               "--log", os.path.join(t, "padsw_%s.log" % tag), "--font", font, "--no-invert",
+               "--media", media, "--audio", "none",
+               "--audio-dump", os.path.join(t, "padsw_%s.raw" % tag)]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        time.sleep(1.2)
+        if to_image_1:
+            set_held(padsw, right, 1)
+            time.sleep(0.1)
+            set_held(padsw, right, 0)
+            time.sleep(0.5)
+        t_press = time.monotonic()
+        set_held(padsw, start, 1)
+        try:
+            o, e = proc.communicate(timeout=40)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            o, e = proc.communicate()
+            raise SystemExit("padsw_test: FAIL (%s) codeselect did not exit\n%s\n%s" % (tag, o, e))
+        held = time.monotonic() - t_press
+        got = open(choice).read().strip() if os.path.exists(choice) else None
+        return o, e, held, proc.returncode, got
+
+    def confirm_ms(tag, e):
+        m = re.search(r"confirm: (.*?), (\d+) ms under the LOADING frame", e)
+        if not m:
+            sys.stderr.write(e)
+            raise SystemExit("padsw_test: FAIL (%s) no 'confirm: ... ms under the LOADING frame' line" % tag)
+        return m.group(1), int(m.group(2))
+
+    conf7 = os.path.join(t, "padsw_confirm.conf")
+    with open(conf7, "w") as f:
+        f.write("image=p3|STERN STOCK|no confirm of its own|art0.png||music0.wav\n"
+                "image=p7|TMNT 1987|a confirm sound of its own|art1.png|||confirm1.wav\n"
+                "sound_move=move.wav\nsound_confirm=confirm.wav\nvolume=60\n"
+                "default=0\ntimeout=12\n")
+    ok = True
+    out, err, held, rc, got = confirm_run("own", conf7, True)
+    which, ms = confirm_ms("own confirm", err)
+    if rc != 0 or got != "1":
+        print("padsw_test: FAIL (own confirm) exit %d, choice %r\n%s" % (rc, got, out))
+        ok = False
+    if which != "image 1 sound confirm1.wav":
+        print("padsw_test: FAIL (own confirm) the log names %r, expected 'image 1 sound confirm1.wav'" % which)
+        ok = False
+    # 2.5 s of audio cannot be mixed in less than 2.5 s of wall clock
+    if ms < 2400 or held < 2.3:
+        print("padsw_test: FAIL (own confirm) held %d ms (%.2f s wall): the 2.5 s confirm1.wav "
+              "did not play out - the 1.0 s menu-wide sound was used" % (ms, held))
+        ok = False
+    if "media: 2 art, 0 anim (0 frames), 1 music, 1 card confirm, move=y confirm=y" not in err:
+        print("padsw_test: FAIL (own confirm) the media line does not count the card's confirm:",
+              [l for l in err.splitlines() if "media:" in l])
+        ok = False
+    if not ok:
+        sys.stderr.write(err)
+        raise SystemExit(1)
+    print("padsw_test: OK (own confirm: image 1 played confirm1.wav, held %d ms / %.2f s, exit 0)"
+          % (ms, held))
+
+    # image 0 names none: the menu-wide sound, and only its 1.0 s
+    out, err, held, rc, got = confirm_run("menu", conf7, False)
+    which, ms = confirm_ms("menu confirm", err)
+    ok = True
+    if rc != 0 or got != "0":
+        print("padsw_test: FAIL (menu confirm) exit %d, choice %r\n%s" % (rc, got, out))
+        ok = False
+    if which != "menu sound confirm.wav":
+        print("padsw_test: FAIL (menu confirm) the log names %r, expected 'menu sound confirm.wav'" % which)
+        ok = False
+    if ms < 900:
+        print("padsw_test: FAIL (menu confirm) held only %d ms; the 1.0 s confirm.wav must finish" % ms)
+        ok = False
+    if ms > 2200 or held > 2.3:
+        print("padsw_test: FAIL (menu confirm) held %d ms (%.2f s wall): that is image 1's 2.5 s "
+              "sound, not the menu-wide one" % (ms, held))
+        ok = False
+    if not ok:
+        sys.stderr.write(err)
+        raise SystemExit(1)
+    print("padsw_test: OK (menu confirm: image 0 fell back to confirm.wav, held %d ms / %.2f s, exit 0)"
+          % (ms, held))
+
+    # a card whose own confirm file is missing: one log line, the menu-wide
+    # sound instead, and the run still ends in a choice
+    conf8 = os.path.join(t, "padsw_confirm_missing.conf")
+    with open(conf8, "w") as f:
+        f.write("image=p3|STERN STOCK|no confirm of its own|art0.png||music0.wav\n"
+                "image=p7|TMNT 1987|names a confirm that is not there|art1.png|||nope.wav\n"
+                "sound_move=move.wav\nsound_confirm=confirm.wav\nvolume=60\n"
+                "default=0\ntimeout=12\n")
+    out, err, held, rc, got = confirm_run("missing_confirm", conf8, True)
+    which, ms = confirm_ms("missing confirm", err)
+    ok = True
+    if rc != 0 or got != "1":
+        print("padsw_test: FAIL (missing confirm) exit %d, choice %r\n%s" % (rc, got, out))
+        ok = False
+    fallback = "confirm: image 1 cannot use nope.wav: the menu-wide sound is used instead"
+    if err.count(fallback) != 1:
+        print("padsw_test: FAIL (missing confirm) %d fallback lines, expected exactly one"
+              % err.count(fallback))
+        ok = False
+    if which != "menu sound confirm.wav":
+        print("padsw_test: FAIL (missing confirm) the log names %r, expected 'menu sound confirm.wav'" % which)
+        ok = False
+    if ms < 900 or ms > 2200:
+        print("padsw_test: FAIL (missing confirm) held %d ms, expected the 1.0 s menu-wide sound" % ms)
+        ok = False
+    if "media: 2 art, 0 anim (0 frames), 1 music, 0 card confirm, move=y confirm=y" not in err:
+        print("padsw_test: FAIL (missing confirm) a card confirm that did not load was counted:",
+              [l for l in err.splitlines() if "media:" in l])
+        ok = False
+    if not ok:
+        sys.stderr.write(err)
+        raise SystemExit(1)
+    print("padsw_test: OK (missing confirm: nope.wav logged once, fell back to confirm.wav, "
+          "held %d ms, exit 0)" % ms)
 
 
 if __name__ == "__main__":

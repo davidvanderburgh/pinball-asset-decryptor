@@ -112,7 +112,7 @@ run "$T/menu_media.ppm" "$T/media.conf" --no-invert --media "$T/media" --anim-fr
 expect "$T/choice" 1
 pix "$T/menu_media.ppm" 361 262 C03040
 pix "$T/menu_media.ppm" 999 262 0000FF
-grep -q "media: 2 art, 1 anim (4 frames), 1 music, move=y confirm=y" "$T/media.log" || {
+grep -q "media: 2 art, 1 anim (4 frames), 1 music, 0 card confirm, move=y confirm=y" "$T/media.log" || {
     echo "headless: FAIL media log line"; grep media "$T/media.log"; exit 1; }
 grep -q "confirm: " "$T/media.log" || { echo "headless: FAIL no confirm wait logged"; exit 1; }
 [ "$(stat -c %s "$T/media_mix.raw")" -gt $((44100 * 4)) ] || { echo "headless: FAIL the mix dump is too short"; exit 1; }
@@ -144,7 +144,7 @@ run "$T/menu_missing.ppm" "$T/missing.conf" --no-invert --media "$T/media" --ani
 expect "$T/choice" 0
 grep -q "art: cannot load nope.png" "$T/missing.log" || { echo "headless: FAIL missing PNG not logged"; exit 1; }
 grep -q "bad.wav: unsupported" "$T/missing.log" || { echo "headless: FAIL bad WAV not refused"; exit 1; }
-grep -q "media: 2 art, 1 anim (4 frames), 0 music, move=n confirm=n" "$T/missing.log" || {
+grep -q "media: 2 art, 1 anim (4 frames), 0 music, 0 card confirm, move=n confirm=n" "$T/missing.log" || {
     echo "headless: FAIL media line with a missing picture"; grep media "$T/missing.log"; exit 1; }
 # three cards: x = 60 / 449 / 838, cw 389, pad 28 -> panel centres at x+28+333/2
 pix "$T/menu_missing.ppm" $((449 + 28 + 166)) 262 00C000     # frame 1 of the GIF (no still to show)
@@ -202,7 +202,7 @@ pix "$T/snap_1_2.ppm" 999 262 0000FF                 # card 1 (highlighted): GIF
 band "$T/snap_1_2.ppm" 300 684 1060 722 FFC42D       # 'booting TMNT 1987 in 1 s'
 grep -qF "snapshot: $T/snap_1_2.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 1 s, invert 0, font $FONT, media $T/media" "$T/snap.out" || {
     echo "headless: FAIL snapshot stdout line"; cat "$T/snap.out"; exit 1; }
-grep -q "media: 2 art, 1 anim (4 frames), 0 music, move=n confirm=n" "$T/snap.log" || {
+grep -q "media: 2 art, 1 anim (4 frames), 0 music, 0 card confirm, move=n confirm=n" "$T/snap.log" || {
     echo "headless: FAIL the snapshot touched the sounds"; grep media "$T/snap.log"; exit 1; }
 if grep -qE "(nb|spi|audio): " "$T/snap.log"; then echo "headless: FAIL the snapshot opened input or audio"; exit 1; fi
 # card 1 NOT highlighted shows its still even with --anim-frame 2: a card
@@ -237,7 +237,7 @@ rm -f "$T/snap.log"
 snap "$T/snap_nomedia.ppm" "$T/missing.conf" --media "$T/nonexistent" --highlight 2
 grep -q "art: cannot load art0.png" "$T/snap.log" || { echo "headless: FAIL missing media dir not logged"; exit 1; }
 grep -q "anim: cannot open anim1.gif" "$T/snap.log" || { echo "headless: FAIL missing GIF not logged"; exit 1; }
-grep -q "media: 0 art, 0 anim (0 frames), 0 music, move=n confirm=n" "$T/snap.log" || {
+grep -q "media: 0 art, 0 anim (0 frames), 0 music, 0 card confirm, move=n confirm=n" "$T/snap.log" || {
     echo "headless: FAIL media line without a media dir"; grep media "$T/snap.log"; exit 1; }
 band "$T/snap_nomedia.ppm" 300 684 1060 722 FFC42D
 # refused, exit 2, no PPM: --highlight past the end, an empty conf,

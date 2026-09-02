@@ -1,6 +1,8 @@
 #!/bin/bash
 # select_sh_test.sh [QEMU ROOT] - select.sh: the images.conf lookups (device,
-# ':<sub>' form, v2 six-field lines) with the host awk and, when QEMU/ROOT are
+# ':<sub>' form, and v2 lines of every width - three, six and the seven-field
+# form that carries a card's own confirm sound: the lookup reads $1 and must
+# not care how many fields follow) with the host awk and, when QEMU/ROOT are
 # given (or found), with the card's own busybox awk under qemu-arm-static;
 # then the whole hook against a fake selector and fake mount/umount: index 0
 # touches nothing, a plain device is remounted, a '<dev>:<sub>' device is
@@ -30,17 +32,22 @@ bash -n select.sh
 check host 0 /dev/mmcblk0p3
 check host 1 /dev/mmcblk0p7
 check host 2 ""
-# a conf with spaces, a comment, a title containing '=', v2 media fields and
-# the ':<sub>' device form
+# a conf with spaces, a comment, a title containing '=', v2 media fields (six
+# fields, and the seven-field form with a per-card confirm sound - on a plain
+# device and on a ':<sub>' one) and the ':<sub>' device form
 tmp=$(mktemp)
-printf '# x\n  image = /dev/mmcblk0p3 | STOCK | a=b \nimage=/dev/mmcblk0p7|X|y|art1.png|anim1.gif|music1.wav\nimage=/dev/mmcblk0p7:img2|Z|z|a.png||\nsound_move=move.wav\ndefault=1\n' > "$tmp"
+printf '# x\n  image = /dev/mmcblk0p3 | STOCK | a=b \nimage=/dev/mmcblk0p7|X|y|art1.png|anim1.gif|music1.wav\nimage=/dev/mmcblk0p7:img2|Z|z|a.png||\nimage=/dev/mmcblk0p7|W|w|art3.png|anim3.gif|music3.wav|confirm3.wav\nimage=/dev/mmcblk0p7:img4|V|v|art4.png|||confirm4.wav\nsound_move=move.wav\ndefault=1\n' > "$tmp"
 lookups() {   # lookups LABEL
     check "$1" 0 /dev/mmcblk0p3 "$tmp"
     check "$1" 1 /dev/mmcblk0p7 "$tmp"
     check "$1" 2 /dev/mmcblk0p7 "$tmp"
-    check "$1" 3 "" "$tmp"
+    check "$1" 3 /dev/mmcblk0p7 "$tmp"
+    check "$1" 4 /dev/mmcblk0p7 "$tmp"
+    check "$1" 5 "" "$tmp"
     checksub "$1" 1 "" "$tmp"
     checksub "$1" 2 img2 "$tmp"
+    checksub "$1" 3 "" "$tmp"
+    checksub "$1" 4 img4 "$tmp"
 }
 lookups host
 

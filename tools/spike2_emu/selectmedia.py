@@ -12,8 +12,10 @@ images and loose files into the flat media directory the card builder
     music<N>.wav   music bed, RIFF pcm_s16le 44100 Hz stereo
     move.wav       played on every LEFT/RIGHT/-/+ edge
     confirm.wav    played on START/SELECT, to completion, before the game boots
+    confirm<N>.wav image N's OWN confirm sound; an image without one falls back
+                   to confirm.wav
     media.json     the manifest (contract B of the v2 design):
-                   {"images":[{"art":..,"anim":..|null,"music":..|null},...],
+                   {"images":[{"art":..,"anim":..|null,"music":..|null,"confirm":..|null},...],
                     "sound_move":..|null,"sound_confirm":..|null,"volume":50}
 
 Subcommands (every one runs under WSL python3 and Windows python; ffmpeg is
@@ -43,17 +45,27 @@ codec parameters - a cold card is REFUSED, not derived for minutes):
                    '@START[:SECONDS[:FPS]]' (START seconds into the clip; the
                    defaults are --start/--seconds/--fps)
             --music N=PATH | none
+            --sound-confirm  a BARE auto|synth|none|PATH is the menu-wide sound
+                   (confirm.wav); 'N=auto|synth|none|PATH' gives image N its own
+                   confirm<N>.wav.  'auto' there is that IMAGE's own card sound
+                   (not the primary's), 'auto@IDX' another index of the same
+                   catalog, and 'none' means "no sound of its own" - image N
+                   falls back to confirm.wav.  Both forms may be given together.
           --visual-only skips the sounds (sound_move/sound_confirm null, no WAV
           work; --music entries are still honoured) - the GUI's preview path.
-          Every art<N>.png / anim<N>.gif gets a sidecar '<name>.src.json'
-          {source, mtime, size, params}; when the sidecar still matches the
-          source file and the parameters the file is kept and 'cached' is
-          printed, so a preview after a text-only change costs nothing.
-          media.json records each image's 'art_source' / 'anim_source' (the
-          spec strings) for the GUI to round-trip.  Leftovers of an earlier,
-          bigger set are swept AFTER the targets are decided - a file the run
-          keeps or regenerates is never deleted; a --visual-only run sweeps only
-          art/anim leftovers (it says nothing about the sounds).
+          Every art<N>.png / anim<N>.gif / confirm<N>.wav gets a sidecar
+          '<name>.src.json' {source, mtime, size, params}; when the sidecar still
+          matches the source file and the parameters the file is kept and
+          'cached' is printed, so a preview after a text-only change costs
+          nothing (and a per-image confirm never re-boots the emulator).
+          media.json records each image's 'art_source' / 'anim_source' /
+          'confirm_source' (the spec strings) for the GUI to round-trip.  A
+          synthetic sound is never cached: it is the fallback a cold params
+          cache leaves behind, and the next run must try the card again.
+          Leftovers of an earlier, bigger set are swept AFTER the targets are
+          decided - a file the run keeps or regenerates is never deleted; a
+          --visual-only run sweeps only art/anim leftovers (it says nothing
+          about the sounds).
     check <DIR>
           validate a media directory against the contract, print the table
           (the .src.json sidecars are ignored: only what media.json names counts).
@@ -116,7 +128,9 @@ STILL_KINDS = "PNG/JPEG/GIF/BMP/TIFF/WebP"
 _NUM_RE = r"\d+(?:\.\d+)?"
 ANIM_PARAMS_RE = re.compile(r"^(%s)(?::(%s)(?::(\d+))?)?$" % (_NUM_RE, _NUM_RE))   # START[:SECONDS[:FPS]]
 ART_AT_RE = re.compile(r"^%s$" % _NUM_RE)                                             # T
-STALE_FULL_RE = re.compile(r"^(art|anim|music)\d+\.(png|gif|wav)$|^(move|confirm)\.wav$")
+SOUND_AT_RE = re.compile(r"^\d+$")                                                    # auto@IDX
+STALE_FULL_RE = re.compile(r"^(?:(?:art|anim|music)\d+\.(?:png|gif|wav)"
+                           r"|confirm\d+\.wav|(?:move|confirm)\.wav)$")
 STALE_VISUAL_RE = re.compile(r"^(art|anim)\d+\.(png|gif)$")
 
 
@@ -253,20 +267,49 @@ def split_source(s):
     raise Refused("source %r is neither a file nor '<card.raw>:attract'" % (s,))
 
 
+def split_index_spec(spec, n):
+    """The grammar every per-image flag shares: 'N=value' -> (N, 'value'), a bare
+    'value' -> (None, 'value').  Refuses an index outside 0..n-1."""
+    if "=" not in spec:
+        return None, spec
+    idx, val = spec.split("=", 1)
+    idx = idx.strip()
+    if not idx.isdigit() or not (0 <= int(idx) < n):
+        raise Refused("image index in %r must be 0..%d" % (spec, n - 1))
+    return int(idx), val.strip()
+
+
 def parse_index_spec(specs, n, default):
     """['1=auto', '0=none'] (or a bare 'none' for every image) -> a list of n values.
     Refuses an index outside 0..n-1 and a spec without '='."""
     out = [default] * n
     for spec in specs or []:
-        if "=" not in spec:
-            out = [spec] * n
-            continue
-        idx, val = spec.split("=", 1)
-        idx = idx.strip()
-        if not idx.isdigit() or not (0 <= int(idx) < n):
-            raise Refused("image index in %r must be 0..%d" % (spec, n - 1))
-        out[int(idx)] = val.strip()
+        idx, val = split_index_spec(spec, n)
+        if idx is None:
+            out = [val] * n
+        else:
+            out[idx] = val
     return out
+
+
+def parse_sound_specs(specs, n, default):
+    """--sound-confirm's mixed forms -> (menu_wide, [per_image|None, ...]).
+
+    A BARE value ('auto', 'synth', 'none', a path) is the menu-wide sound - the one
+    every image falls back to; 'N=value' is image N's OWN sound.  The two forms may be
+    given together and in any order; the last bare value wins, as does the last entry
+    for an index.  An image nobody named gets None: no sound of its own.  This is the
+    one place the per-image grammar differs from --art/--anim/--music, where a bare
+    value applies to every image - here it names the fallback instead."""
+    wide = default
+    per = [None] * n
+    for spec in specs or []:
+        idx, val = split_index_spec(spec, n)
+        if idx is None:
+            wide = val
+        else:
+            per[idx] = val
+    return wide, per
 
 
 # ---- per-image specs (pure: nothing here touches the filesystem) ---------------------------
@@ -345,6 +388,33 @@ def parse_art_spec(spec):
     if is_video_path(head):
         return {"kind": "video", "source": head, "at": 0.0, "spec": spec}
     return {"kind": "file", "source": head, "spec": spec}
+
+
+def parse_sound_spec(spec, idx=None):
+    """One --sound-move / --sound-confirm value (bare or the right of 'N=') ->
+    {'kind': 'none'|'synth'|'auto'|'file', 'source': PATH|None, 'idx': int|None, 'spec': ...}.
+
+    'none' = no sound, 'synth' = the built-in click/chime, 'auto' = the catalog sound
+    the tool picked for that slot off the card, 'auto@IDX' another index of the same
+    catalog ('selectmedia.py sound <card.raw> IDX out.wav' auditions one), and anything
+    else an audio file.  A path holding a literal '@' stays a path: only digits after
+    it are an index, exactly as --art's '@T' only takes a number."""
+    spec = (spec or "").strip()
+    if not spec:
+        raise Refused("sound spec is empty (use none, synth, auto, or a path)")
+    if spec in ("none", "synth", "auto"):
+        return {"kind": spec, "source": None, "idx": None if spec != "auto" else idx, "spec": spec}
+    if spec.startswith(("auto@", "synth@", "none@")):
+        head, tail = spec.split("@", 1)          # a keyword's '@' is always the separator
+    else:
+        head, tail = _split_at(spec)
+    if tail is None:
+        return {"kind": "file", "source": spec, "idx": None, "spec": spec}
+    if not SOUND_AT_RE.match(tail):
+        raise Refused("sound %r: after '@' comes the catalog index, not %r" % (spec, tail))
+    if head != "auto":
+        raise Refused("sound %r: '@IDX' picks a sound off the card, so it needs 'auto'" % (spec,))
+    return {"kind": "auto", "source": None, "idx": int(tail), "spec": spec}
 
 
 def still_kind(path):
@@ -432,9 +502,12 @@ def check_output_dir(path):
 
 # ---- the manifest ---------------------------------------------------------------------------
 def build_manifest(images, sound_move=None, sound_confirm=None, volume=DEFAULT_VOLUME, sources=None):
-    """images = [(art|None, anim|None, music|None), ...] -> the media.json dict.
-    sources = [(art_spec, anim_spec), ...] (one per image) adds 'art_source' /
-    'anim_source' - the spec strings the GUI round-trips."""
+    """images = [(art|None, anim|None, music|None[, confirm|None]), ...] -> the media.json
+    dict.  A row's fourth field is the image's OWN confirm sound; null (or a 3-field row)
+    means it falls back to the menu-wide sound_confirm.
+    sources = [(art_spec, anim_spec[, confirm_spec]), ...] (one per image) adds
+    'art_source' / 'anim_source' / 'confirm_source' - the spec strings the GUI
+    round-trips; a 2-field row leaves confirm_source null."""
     vol = int(volume)
     if not (0 <= vol <= 100):
         raise Refused("volume must be 0..100")
@@ -442,13 +515,18 @@ def build_manifest(images, sound_move=None, sound_confirm=None, volume=DEFAULT_V
            "sound_confirm": sound_confirm or None, "volume": vol}
     if sources is not None and len(sources) != len(images):
         raise Refused("build_manifest: %d sources for %d images" % (len(sources), len(images)))
-    for i, (art, anim, music) in enumerate(images):
-        for nm in (art, anim, music, sound_move, sound_confirm):
+    for i, row_in in enumerate(images):
+        art, anim, music = row_in[0], row_in[1], row_in[2]
+        confirm = row_in[3] if len(row_in) > 3 else None
+        for nm in (art, anim, music, confirm, sound_move, sound_confirm):
             if nm:
                 check_media_name(nm)
-        row = {"art": art or None, "anim": anim or None, "music": music or None}
+        row = {"art": art or None, "anim": anim or None, "music": music or None,
+               "confirm": confirm or None}
         if sources is not None:
-            row["art_source"], row["anim_source"] = sources[i]
+            src = tuple(sources[i])
+            row["art_source"], row["anim_source"] = src[0], src[1]
+            row["confirm_source"] = src[2] if len(src) > 2 else None
         out["images"].append(row)
     return out
 
@@ -462,17 +540,18 @@ def validate_manifest(m):
     for i, im in enumerate(m["images"]):
         if not isinstance(im, dict):
             raise Refused("media.json: images[%d] is not an object" % i)
-        for k in ("art", "anim", "music"):
+        for k in ("art", "anim", "music", "confirm"):
             v = im.get(k)
             if v is not None:
                 if not isinstance(v, str):
                     raise Refused("media.json: images[%d].%s must be a name or null" % (i, k))
                 check_media_name(v)
-        for k in ("art_source", "anim_source"):
+        for k in ("art_source", "anim_source", "confirm_source"):
             v = im.get(k)
             if v is not None and not isinstance(v, str):
                 raise Refused("media.json: images[%d].%s must be a spec string or null" % (i, k))
-        extra = set(im) - {"art", "anim", "music", "art_source", "anim_source"}
+        extra = set(im) - {"art", "anim", "music", "confirm",
+                           "art_source", "anim_source", "confirm_source"}
         if extra:
             raise Refused("media.json: images[%d] has unknown keys %s" % (i, sorted(extra)))
     for k in ("sound_move", "sound_confirm"):
@@ -491,7 +570,7 @@ def manifest_files(m):
     """Every media name the manifest references, in order, without duplicates."""
     names = []
     for im in m["images"]:
-        for k in ("art", "anim", "music"):
+        for k in ("art", "anim", "music", "confirm"):
             if im.get(k) and im[k] not in names:
                 names.append(im[k])
     for k in ("sound_move", "sound_confirm"):
@@ -1189,9 +1268,11 @@ def check_media_dir(d, log=say):
     total = check_budget(sizes)
     for name in sizes:
         log(describe(os.path.join(d, name)))
-    log("%d files, %s of the %s budget; media.json OK (%d images, move=%s confirm=%s volume=%d)"
+    own = sum(1 for im in m["images"] if im.get("confirm"))
+    log("%d files, %s of the %s budget; media.json OK (%d images, move=%s confirm=%s%s volume=%d)"
         % (len(sizes), fmt_bytes(total), fmt_bytes(MEDIA_BUDGET), len(m["images"]),
-           "y" if m["sound_move"] else "n", "y" if m["sound_confirm"] else "n", m["volume"]))
+           "y" if m["sound_move"] else "n", "y" if m["sound_confirm"] else "n",
+           " +%d own" % own if own else "", m["volume"]))
     return m
 
 
@@ -1273,41 +1354,99 @@ def cmd_info(a):
 
 
 # ---- prepare ----------------------------------------------------------------------------------
-def _sound_default(spec, sources, primary, idx, max_seconds, fade_ms, synth_kind, out, log):
-    """Resolve PATH|auto|synth|none for a global sound into *out*; returns the name or None."""
-    if spec == "none":
-        return None
-    if spec == "synth":
-        synth_wav(synth_kind, out)
-        log("  %s: synthetic %s" % (os.path.basename(out), synth_kind))
-        return os.path.basename(out)
-    if spec == "auto":
-        src = sources.get(primary)
+def _card_sound(card, idx, out, max_seconds, fade_ms, synth_kind, sources, name, log):
+    """One catalog sound off *card* into *out*.  Every refusal on the way - a card that
+    is not there, a cold params cache (this tool NEVER derives: that is minutes), an idx
+    the catalog does not hold - falls back to the built-in synth_kind and says why.
+    Returns True when the card's own sound landed, False when the fallback did."""
+    try:
+        src = sources.get(card)
         if src is None:
-            try:
-                src = sources[primary] = SoundSource(primary, log=log)
-            except Refused as e:
-                log("  %s: %s; synthetic %s instead" % (os.path.basename(out), e, synth_kind))
-                synth_wav(synth_kind, out)
-                return os.path.basename(out)
+            src = sources[card] = SoundSource(card, log=log)
         if not src.warm:
-            log("  %s: params cache is cold for %s; synthetic %s instead"
-                % (os.path.basename(out), os.path.basename(primary), synth_kind))
-            synth_wav(synth_kind, out)
-            return os.path.basename(out)
-        try:
-            render_sound(src, idx, out, max_seconds, fade_ms)
-            log("  %s: idx%04d of %s" % (os.path.basename(out), idx, os.path.basename(primary)))
-            return os.path.basename(out)
-        except Refused as e:
-            log("  %s: %s; synthetic %s instead" % (os.path.basename(out), e, synth_kind))
-            synth_wav(synth_kind, out)
-            return os.path.basename(out)
-    if not os.path.isfile(spec):
-        raise Refused("%s: %s is not a file" % (os.path.basename(out), spec))
-    normalise_wav(spec, out)
-    log("  %s: %s" % (os.path.basename(out), spec))
-    return os.path.basename(out)
+            raise Refused("params cache is cold for %s" % os.path.basename(card))
+        render_sound(src, idx, out, max_seconds, fade_ms)
+    except Refused as e:
+        log("  %s: %s; synthetic %s instead" % (name, e, synth_kind))
+        synth_wav(synth_kind, out)
+        return False
+    log("  %s: idx%04d of %s" % (name, idx, os.path.basename(card)))
+    return True
+
+
+def _sound_default(spec, sources, primary, idx, max_seconds, fade_ms, synth_kind, out, log):
+    """Resolve PATH|auto|auto@IDX|synth|none for a MENU-WIDE sound into *out*; returns
+    the name or None.  'auto' takes it off the primary card - the menu-wide sound is the
+    whole menu's, so it is the primary's catalog that names it."""
+    p = parse_sound_spec(spec, idx)
+    name = os.path.basename(out)
+    if p["kind"] == "none":
+        return None
+    if p["kind"] == "synth":
+        synth_wav(synth_kind, out)
+        log("  %s: synthetic %s" % (name, synth_kind))
+        return name
+    if p["kind"] == "auto":
+        _card_sound(primary, p["idx"], out, max_seconds, fade_ms, synth_kind, sources, name, log)
+        return name
+    if not os.path.isfile(p["source"]):
+        raise Refused("%s: %s is not a file" % (name, p["source"]))
+    normalise_wav(p["source"], out)
+    log("  %s: %s" % (name, p["source"]))
+    return name
+
+
+def _prepare_confirm(i, card, spec, out, sources, log=say):
+    """confirm<i>.wav for one image, or None when the image has no confirm sound of its
+    own and falls back to the menu-wide confirm.wav ('none', or no 'N=' spec at all).
+
+    'auto' pulls CONFIRM_IDX off THIS image's own card - its sounds, not the primary's -
+    and 'auto@IDX' another index of that card's catalog; a cold params cache falls back
+    to the built-in chime rather than deriving for minutes.  Anything else is an audio
+    file.  The sidecar cache keeps a file whose source and parameters have not changed,
+    so a second prepare never re-boots the emulator for a sound it already has; the
+    synthetic fallback is deliberately NOT cached, so the run after an Extract warms the
+    params cache picks the real sound up."""
+    if spec is None:
+        return None
+    p = parse_sound_spec(spec, CONFIRM_IDX)
+    if p["kind"] == "none":
+        return None
+    target = os.path.join(out, "confirm%d.wav" % i)
+    name = os.path.basename(target)
+    if p["kind"] == "synth":
+        drop_sidecar(target)
+        synth_wav("chime", target)
+        log("  %s: synthetic chime" % name)
+        return name
+    if p["kind"] == "auto":
+        params = {"kind": "auto", "idx": int(p["idx"]), "seconds": CONFIRM_SECONDS,
+                  "fade_ms": CONFIRM_FADE_MS}
+        if os.path.isfile(card):
+            stamp = source_stamp(card)
+            if is_cached(target, stamp, params):
+                log("  %s: cached (idx%04d of %s)" % (name, p["idx"], os.path.basename(card)))
+                return name
+        else:
+            stamp = None                          # _card_sound will say what is missing
+        drop_sidecar(target)
+        if _card_sound(card, p["idx"], target, CONFIRM_SECONDS, CONFIRM_FADE_MS,
+                       "chime", sources, name, log) and stamp is not None:
+            write_sidecar(target, stamp, params)
+        return name
+    src = p["source"]
+    if not os.path.isfile(src):
+        raise Refused("%s: %s is not a file" % (name, src))
+    stamp = source_stamp(src)
+    params = {"kind": "file"}
+    if is_cached(target, stamp, params):
+        log("  %s: cached (%s)" % (name, src))
+        return name
+    drop_sidecar(target)
+    normalise_wav(src, target)
+    log("  %s: %s" % (name, src))
+    write_sidecar(target, stamp, params)
+    return name
 
 
 def _prepare_art(i, img, spec, size, out, work, card, log=say):
@@ -1422,6 +1561,11 @@ def cmd_prepare(a):
     arts = [parse_art_spec(s) for s in parse_index_spec(a.art, n, "auto")]
     anims = [parse_anim_spec(s, a.start, a.seconds, a.fps) for s in parse_index_spec(a.anim, n, "none")]
     musics = parse_index_spec(a.music, n, "none")
+    # --sound-confirm's bare value is the menu-wide fallback; 'N=' entries are per image
+    confirm_wide, confirm_each = parse_sound_specs(a.sound_confirm, n, "auto")
+    for spec in confirm_each:
+        if spec is not None:
+            parse_sound_spec(spec, CONFIRM_IDX)          # refuse a bad one before any work
     visual_only = bool(getattr(a, "visual_only", False))
     say("prepare: %d image%s, panel %dx%d, out %s%s"
         % (n, "" if n == 1 else "s", size[0], size[1], out, " (visual only)" if visual_only else ""))
@@ -1451,16 +1595,18 @@ def cmd_prepare(a):
                 normalise_wav(spec, music_out)
                 say("  music%d.wav: %s" % (i, spec))
                 music = os.path.basename(music_out)
-            rows.append((art, anim, music))
-            specs.append((arts[i]["spec"], anims[i]["spec"]))
+            rows.append([art, anim, music, None])
+            specs.append((arts[i]["spec"], anims[i]["spec"], confirm_each[i]))
         if visual_only:
             move = confirm = None
             say("  sounds: skipped (--visual-only)")
         else:
             move = _sound_default(a.sound_move, sources, a.primary, MOVE_IDX, MOVE_MAX_SECONDS, 0,
                                   "click", os.path.join(out, "move.wav"), say)
-            confirm = _sound_default(a.sound_confirm, sources, a.primary, CONFIRM_IDX, CONFIRM_SECONDS,
+            confirm = _sound_default(confirm_wide, sources, a.primary, CONFIRM_IDX, CONFIRM_SECONDS,
                                      CONFIRM_FADE_MS, "chime", os.path.join(out, "confirm.wav"), say)
+            for i, img in enumerate(images):
+                rows[i][3] = _prepare_confirm(i, img, confirm_each[i], out, sources, say)
     finally:
         for s in sources.values():
             s.close()
@@ -1537,7 +1683,11 @@ def main(argv=None):
                    help="animation per image; '@START[:SECONDS[:FPS]]' overrides --start/--seconds/--fps for it")
     s.add_argument("--music", action="append", default=[], metavar="N=PATH|none")
     s.add_argument("--sound-move", default="auto", metavar="PATH|auto|synth|none")
-    s.add_argument("--sound-confirm", default="auto", metavar="PATH|auto|synth|none")
+    s.add_argument("--sound-confirm", action="append", default=[],
+                   metavar="PATH|auto|synth|none | N=PATH|auto|synth|none",
+                   help="the menu-wide confirm sound (a bare value, the default 'auto'); "
+                        "'N=...' gives image N its own confirm<N>.wav ('auto' = that image's "
+                        "own card, 'none' = it falls back to the menu-wide one)")
     s.add_argument("--visual-only", action="store_true",
                    help="art/anim (+music) only: no move/confirm sounds, none pulled off a card (the GUI preview)")
     s.add_argument("--volume", type=int, default=DEFAULT_VOLUME)

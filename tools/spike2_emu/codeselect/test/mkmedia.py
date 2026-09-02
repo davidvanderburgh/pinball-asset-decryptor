@@ -11,7 +11,10 @@ encoder and the wave module):
     art1.png      400x225 solid 2060C0          (card 1's still)
     anim1.gif     4 frames 200x112, 100 ms each: FF0000 00C000 0000FF FFFF00
     move.wav      0.2 s 1 kHz stereo            (sound_move)
-    confirm.wav   1.0 s 440 Hz stereo           (sound_confirm)
+    confirm.wav   1.0 s 440 Hz stereo           (the menu-wide sound_confirm)
+    confirm1.wav  2.5 s 660 Hz stereo           (card 1's OWN confirm sound - long
+                                                 enough that its 2.5 s hold cannot
+                                                 be confused with confirm.wav's 1.0 s)
     music0.wav    0.5 s 220 Hz mono             (card 0's loop; mono -> duplicated)
     bad.wav       0.1 s 22050 Hz                (refused with a log line)
 """
@@ -92,6 +95,7 @@ def make(d):
     gif_solid_frames(os.path.join(d, "anim1.gif"), 200, 112, ANIM1)
     wav_tone(os.path.join(d, "move.wav"), 0.2, 1000)
     wav_tone(os.path.join(d, "confirm.wav"), 1.0, 440)
+    wav_tone(os.path.join(d, "confirm1.wav"), 2.5, 660)
     wav_tone(os.path.join(d, "music0.wav"), 0.5, 220, channels=1)
     wav_tone(os.path.join(d, "bad.wav"), 0.1, 440, rate=22050)
 

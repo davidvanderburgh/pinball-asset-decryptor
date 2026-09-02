@@ -2,8 +2,8 @@
 
 One SD card, several complete game images; at power-up a menu on the LCD lets
 the player pick the one that boots. This directory holds the selector program
-that draws that menu (with a picture, an animation and a music loop per card,
-a click on every move and a confirm sound), reads the buttons, the hook script
+that draws that menu (with a picture, an animation, a music loop and a confirm
+sound per card, plus a click on every move), reads the buttons, the hook script
 that swaps the `/games` mount, and the tests. The card layout and the emulator
 side are in `DESIGN.md` and in the rig (`run_game.sh`/`watch.sh`).
 
@@ -248,7 +248,7 @@ the whole set at most 20 MB - the tools enforce that, the selector only reads):
 |---|---|---|
 | art | PNG (any colour type) | pre-scaled to the panel by the tools; decoded with stb_image, downscaled into the panel, 4 B/px in RAM |
 | anim | animated GIF, <= 512x288, <= 30 frames, <= 1.5 MB | `stb_image`'s per-frame decoder; frame delays from the file; frames beyond 30 are ignored; only the two previous full-size frames are kept while decoding |
-| music, sound_move, sound_confirm | WAV: RIFF PCM (or extensible-PCM) 16-bit 44100 Hz, 1 or 2 channels | mono is duplicated; anything else is refused with `audio: <file>: unsupported (...)`; clips longer than 120 s are cut |
+| music, confirm, sound_move, sound_confirm | WAV: RIFF PCM (or extensible-PCM) 16-bit 44100 Hz, 1 or 2 channels | mono is duplicated; anything else is refused with `audio: <file>: unsupported (...)`; clips longer than 120 s are cut |
 
 Decode order: every still and the highlighted card's GIF before the first
 frame (a 4-frame GIF takes ~4 ms under qemu), the other GIFs one FRAME per
@@ -295,16 +295,26 @@ iteration and mixes exactly what the sink can take right now - never blocks:
 Sounds: `sound_move` on every LEFT/RIGHT/-/+ edge; the highlighted card's
 `music` loops (a hard switch when the highlight moves to a card with a
 different file; the same file keeps playing); on START/Select the music
-fades, `sound_confirm` plays TO COMPLETION (cap 8 s from the press, then the
-sink's lead) under the LOADING frame, the sink is drained and closed, and
-only then are the last-choice and choice files written.
+fades, the confirm sound plays TO COMPLETION (cap 8 s from the press, then
+the sink's lead) under the LOADING frame, the sink is drained and closed,
+and only then are the last-choice and choice files written.
+
+The confirm sound is the CHOSEN CARD'S OWN when its conf line names a
+seventh field and that WAV loaded, and the menu-wide `sound_confirm`
+otherwise. Each card's clip is loaded at startup beside its music, by the
+same rules (PCM 16-bit 44100 Hz, 1-2 channels, mono duplicated) and through
+the same by-name cache, so a file two cards share - or one a card shares
+with `sound_confirm` - is decoded once. A card's confirm that is missing or
+refused is non-fatal: it is logged (`confirm: image 1 cannot use <name>: the
+menu-wide sound is used instead`), it is not counted in the `media:` line,
+and that card confirms with `sound_confirm` like any other.
 
 ### images.conf (v2)
 
 ```
 # '#' comments; one image per line; index = order (0-based)
 image=/dev/mmcblk0p3|STERN STOCK|TMNT Pro 1.59.0 - original Stern code|art0.png||
-image=/dev/mmcblk0p7|TMNT 1987|1.59.0 - upscaled cartoon retheme|art1.png|anim1.gif|music1.wav
+image=/dev/mmcblk0p7|TMNT 1987|1.59.0 - upscaled cartoon retheme|art1.png|anim1.gif|music1.wav|confirm1.wav
 image=/dev/mmcblk0p7:img2|HEISEI|a games tree inside a shared partition
 sound_move=move.wav
 sound_confirm=confirm.wav
@@ -316,10 +326,13 @@ timeout=10         # 0 = wait for ever
 #font=/usr/local/codeselect/font.ttf
 ```
 
-`image=<device>|<title>|<subtitle>|<art>|<anim>|<music>` - fields 4-6 are
-optional media file names (relative to the media directory, empty = none);
-a three-field line is the v1 form and stays valid. `<device>` is the block
-device on hardware - `/dev/mmcblk0p3`, `/dev/mmcblk0p7`, or
+`image=<device>|<title>|<subtitle>|<art>|<anim>|<music>|<confirm>` - fields
+4-7 are optional media file names (relative to the media directory, empty =
+none); a three-field line is the v1 form and a six-field line the first v2
+form, and both stay valid. Field 7 is that card's OWN confirm sound: empty
+or absent means the menu-wide `sound_confirm` is used for it. Anything past
+the seventh field is ignored. `<device>` is the block device on hardware -
+`/dev/mmcblk0p3`, `/dev/mmcblk0p7`, or
 `/dev/mmcblk0p7:img2` for a games tree in a subdirectory of a shared
 partition - and an opaque token in the emulator (`p3`, `p7`, `p7:img2`). Up
 to 16 images (`CONF_MAX_IMAGES`). `volume` is clamped to 0-100,
@@ -349,8 +362,9 @@ audio: none (<reason>)                            e.g. no alsa: ... ; PAD_AUDIO_
 audio: <file>: unsupported (format ..., need PCM 16-bit 44100 Hz 1-2 ch)
 art: image 0 art0.png -> 298x168 | art: cannot load <name> (<why>)
 anim: image 1 4 frames 200x112 | anim: cannot open <name> (<why>)
-media: 2 art, 1 anim (4 frames), 1 music, move=y confirm=y   once every decode is done
-confirm: 1178 ms under the LOADING frame
+media: 2 art, 1 anim (4 frames), 1 music, 1 card confirm, move=y confirm=y   once every decode is done
+confirm: image 1 cannot use boom.wav: the menu-wide sound is used instead
+confirm: image 1 sound confirm1.wav, 2678 ms under the LOADING frame   (or 'menu sound confirm.wav' / 'no sound')
 audio: 105531 frames written, 0 dropped           at exit
 egl: 8487 frames, 1234 KB uploaded, closing (the LOADING frame stays up)
 ```
@@ -536,7 +550,10 @@ write still re-resolves. The footer repaints when the answer changes.
 The rig copies the card's
 `/usr/local/codeselect/media` (or `PAD_SELECT_MEDIA=<host dir>`) to
 `$ROOT/dump/media` and forwards the conf's `sound_move`/`sound_confirm`/
-`volume`/`mixer_volume` keys.
+`volume`/`mixer_volume` keys. A card's own media fields need no forwarding:
+the rig rebuilds each `image=` line by replacing the device with its token
+and keeping the rest of the line, so fields 4-7 - a card's confirm sound
+among them - travel as they were written.
 
 ## Tests
 
@@ -553,9 +570,9 @@ down.
 2. `test/headless.sh` - headless renders: 2/3/4 images, `--default 1`,
    last-choice precedence, `--invert` (the exact 180-degree rotation), the
    PPM shape, an empty conf refused; then media from `test/mkmedia.py` (two
-   solid PNGs, a 4-frame solid-colour GIF, 0.2 s / 1.0 s / 0.5 s tones and a
-   22050 Hz WAV - no PIL needed): `--anim-frame 2` puts the art colours at
-   the panel centres (and at the mirrored coordinates with `--invert`), the
+   solid PNGs, a 4-frame solid-colour GIF, 0.2 s / 1.0 s / 2.5 s / 0.5 s
+   tones and a 22050 Hz WAV - no PIL needed): `--anim-frame 2` puts the art
+   colours at the panel centres (and at the mirrored coordinates with `--invert`), the
    `media:` line, a confirm wait and a non-silent `--audio-dump`; a missing
    PNG and the bad WAV are non-fatal (exit 0, logged); 5- and 9-image
    carousels (the highlight centred, a neighbour's pinned GIF frame in
@@ -604,11 +621,25 @@ down.
    re-resolved`, `action 9`), repaint the footer (`footer: ACTION button
    resolved`) and then accept a press on the id it just learned.
 
-   Finally a run against a FIFO that does not exist still exits 0 on the
-   countdown.
+   Then a run against a FIFO that does not exist still exits 0 on the
+   countdown, and one whose reader goes away mid-menu and comes back 4 s
+   later reconnects and drops only the gap.
+
+   Finally **each card's own confirm sound**: a conf whose image 1 carries a
+   seventh field naming `confirm1.wav` (2.5 s) while image 0 carries none.
+   Confirming image 1 must log `confirm: image 1 sound confirm1.wav` and hold
+   the exit for that clip (>= 2.4 s - 2.5 s of audio cannot be mixed in less
+   wall clock than that), and the `media:` line must read `1 card confirm`;
+   confirming image 0 must log `confirm: menu sound confirm.wav` and be held
+   only the menu-wide 1.0 s (<= 2.2 s, so image 1's clip cannot pass for it);
+   and a card naming a file that is not there logs `cannot use nope.wav`
+   exactly once, is NOT counted in the `media:` line, falls back to the
+   menu-wide sound and still exits 0 with its choice written.
 4. `bash -n select.sh` + `test/select_sh_test.sh` - the images.conf lookups
-   (`--lookup`, `--lookup-sub`, six-field lines, the `:<sub>` form) with the
-   host awk AND the card's busybox awk under qemu, then the whole hook with
+   (`--lookup`, `--lookup-sub`, three-, six- and seven-field lines - the awk
+   reads `$1` and must not care how many fields follow - the `:<sub>` form,
+   and a seven-field line on a `:<sub>` device) with the host awk AND the
+   card's busybox awk under qemu, then the whole hook with
    a fake selector and fake mount/umount: index 0 untouched, the plain
    device remounted, the `:<sub>` form mounted and bound, and the primary
    put back after a missing tree, a bad `<sub>`, a failed mount, a busy
@@ -654,9 +685,9 @@ spi: rx ff 0f 0f 00 00 00 00 00               the cabinet word at rest
 egl: initialised 1.4 / egl: display 1360x768  Vivante came up
 egl: up after N attempt(s)                    N > 1 = boot_display was still releasing the LCD
 audio: alsa sysdefault:CARD=sgtl5000main ok   the codec took the stream (else 'audio: none (no alsa: ...)')
-media: 2 art, 1 anim (30 frames), 1 music, move=y confirm=y
+media: 2 art, 1 anim (30 frames), 1 music, 0 card confirm, move=y confirm=y
 [select] key: left / [select] chose 1 TMNT 1987
-confirm: 1540 ms under the LOADING frame
+confirm: menu sound confirm.wav, 1540 ms under the LOADING frame
 audio: 123456 frames written, 0 dropped
 select.sh: image 1: mounted /dev/mmcblk0p7 at /games
 ```

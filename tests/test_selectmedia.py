@@ -217,14 +217,36 @@ def test_media_names_refused(sm, name):
 def test_manifest_shape_round_trips(sm):
     m = sm.build_manifest([("art0.png", None, None), ("art1.png", "anim1.gif", "music1.wav")],
                           "move.wav", "confirm.wav", 50)
-    assert m == {"images": [{"art": "art0.png", "anim": None, "music": None},
-                            {"art": "art1.png", "anim": "anim1.gif", "music": "music1.wav"}],
+    assert m == {"images": [{"art": "art0.png", "anim": None, "music": None, "confirm": None},
+                            {"art": "art1.png", "anim": "anim1.gif", "music": "music1.wav", "confirm": None}],
                  "sound_move": "move.wav", "sound_confirm": "confirm.wav", "volume": 50}
     assert sm.validate_manifest(json.loads(json.dumps(m))) == m
     assert sm.manifest_files(m) == ["art0.png", "art1.png", "anim1.gif", "music1.wav", "move.wav", "confirm.wav"]
     none = sm.build_manifest([(None, None, None)], None, None, 0)
     assert none["sound_move"] is None and none["images"][0]["art"] is None
     assert sm.manifest_files(none) == []
+
+
+def test_manifest_carries_a_per_image_confirm(sm):
+    """The image row's fourth field is that image's OWN confirm sound; a 3-field row
+    (every older caller) still means 'falls back to the menu-wide one'.  The per-image
+    file is a media name like any other: check_media_dir and the budget see it."""
+    m = sm.build_manifest([("art0.png", None, None, "confirm0.wav"), ("art1.png", None, None)],
+                          "move.wav", "confirm.wav", 50,
+                          sources=[("auto", "none", "auto@350"), ("auto", "none")])
+    assert m["images"][0] == {"art": "art0.png", "anim": None, "music": None, "confirm": "confirm0.wav",
+                              "art_source": "auto", "anim_source": "none", "confirm_source": "auto@350"}
+    assert m["images"][1]["confirm"] is None and m["images"][1]["confirm_source"] is None
+    assert sm.validate_manifest(json.loads(json.dumps(m))) == m
+    assert sm.manifest_files(m) == ["art0.png", "confirm0.wav", "art1.png", "move.wav", "confirm.wav"]
+    with pytest.raises(sm.Refused):
+        sm.build_manifest([("art0.png", None, None, "con firm0.wav")])
+    for bad in ({"images": [{"art": None, "anim": None, "music": None, "confirm": "a/b.wav"}]},
+                {"images": [{"art": None, "anim": None, "music": None, "confirm": 3}]},
+                {"images": [{"art": None, "anim": None, "music": None, "confirm_source": 3}]},
+                {"images": [{"art": None, "anim": None, "music": None, "confirm_wav": "x.wav"}]}):
+        with pytest.raises(sm.Refused):
+            sm.validate_manifest(bad)
 
 
 @pytest.mark.parametrize("bad", [
@@ -380,8 +402,9 @@ def test_prepare_from_loose_files_without_a_card(sm, tmp_path, capsys):
     assert rc == 0, text
     with open(os.path.join(out, "media.json")) as f:
         m = json.load(f)
-    assert m == {"images": [{"art": None, "anim": None, "music": None,
-                             "art_source": "none", "anim_source": "none"}] * 2,
+    assert m == {"images": [{"art": None, "anim": None, "music": None, "confirm": None,
+                             "art_source": "none", "anim_source": "none",
+                             "confirm_source": None}] * 2,
                  "sound_move": "move.wav", "sound_confirm": "confirm.wav", "volume": 35}
     assert sm.wav_contract_error(sm.wav_info(os.path.join(out, "move.wav"))) is None
     assert not os.path.exists(os.path.join(out, "art5.png")), "stale media swept"
@@ -614,10 +637,11 @@ def test_prepare_caches_art_and_anim_by_sidecar(sm, tmp_path, capsys, monkeypatc
     assert side["params"] == {"kind": "file", "clip": None, "size": [64, 36], "start": 12.0, "seconds": 2.5, "fps": 8}
     with open(os.path.join(out, "media.json")) as f:
         m = json.load(f)
-    assert m["images"][0] == {"art": "art0.png", "anim": None, "music": None,
-                              "art_source": str(still), "anim_source": "none"}
-    assert m["images"][1] == {"art": None, "anim": "anim1.gif", "music": None,
-                              "art_source": "none", "anim_source": "%s@12:2.5:8" % clip}
+    assert m["images"][0] == {"art": "art0.png", "anim": None, "music": None, "confirm": None,
+                              "art_source": str(still), "anim_source": "none", "confirm_source": None}
+    assert m["images"][1] == {"art": None, "anim": "anim1.gif", "music": None, "confirm": None,
+                              "art_source": "none", "anim_source": "%s@12:2.5:8" % clip,
+                              "confirm_source": None}
     assert m["sound_move"] is None and m["sound_confirm"] is None
     assert sm.validate_manifest(m) == m
     # run 2: everything cached, no encoder called
@@ -652,8 +676,10 @@ def test_prepare_visual_only_skips_sounds_but_keeps_music(sm, tmp_path, capsys):
     assert "sounds: skipped (--visual-only)" in text and "(visual only)" in text
     with open(os.path.join(out, "media.json")) as f:
         m = json.load(f)
-    assert m == {"images": [{"art": None, "anim": None, "music": None, "art_source": "none", "anim_source": "none"},
-                            {"art": None, "anim": None, "music": "music1.wav", "art_source": "none", "anim_source": "none"}],
+    assert m == {"images": [{"art": None, "anim": None, "music": None, "confirm": None,
+                             "art_source": "none", "anim_source": "none", "confirm_source": None},
+                            {"art": None, "anim": None, "music": "music1.wav", "confirm": None,
+                             "art_source": "none", "anim_source": "none", "confirm_source": None}],
                  "sound_move": None, "sound_confirm": None, "volume": 50}
     assert not os.path.exists(os.path.join(out, "move.wav"))
     assert not os.path.exists(os.path.join(out, "confirm.wav"))
@@ -662,7 +688,8 @@ def test_prepare_visual_only_skips_sounds_but_keeps_music(sm, tmp_path, capsys):
 
 def test_manifest_accepts_sources_and_refuses_bad_ones(sm):
     m = sm.build_manifest([("art0.png", None, None)], sources=[("auto", "none")])
-    assert m["images"][0] == {"art": "art0.png", "anim": None, "music": None, "art_source": "auto", "anim_source": "none"}
+    assert m["images"][0] == {"art": "art0.png", "anim": None, "music": None, "confirm": None,
+                              "art_source": "auto", "anim_source": "none", "confirm_source": None}
     assert sm.validate_manifest(m) == m
     assert sm.manifest_files(m) == ["art0.png"]
     with pytest.raises(sm.Refused):
@@ -706,6 +733,235 @@ def test_check_ignores_sidecars(sm, tmp_path):
     assert sm.check_media_dir(d, log=lines.append) == m
     assert not any("src.json" in l for l in lines)
     assert any(l.startswith("3 files,") for l in lines)
+
+
+# ============================================================================ v4: per-image confirm
+def test_sound_specs_mix_a_menu_wide_value_with_per_image_ones(sm):
+    """--sound-confirm's two forms in one list: a BARE value is the menu-wide sound every
+    image falls back to, 'N=' is image N's own.  This is where the sound flags differ from
+    --art/--anim/--music, whose bare value applies to every image."""
+    assert sm.parse_sound_specs([], 2, "auto") == ("auto", [None, None])
+    assert sm.parse_sound_specs(["synth"], 2, "auto") == ("synth", [None, None])
+    assert sm.parse_sound_specs(["1=/x/a.wav"], 2, "auto") == ("auto", [None, "/x/a.wav"])
+    assert sm.parse_sound_specs(["none", "0=auto@350", "1=synth"], 2, "auto") == ("none", ["auto@350", "synth"])
+    assert sm.parse_sound_specs(["0=a.wav", "synth", "0=b.wav", "none"], 1, "auto") == ("none", ["b.wav"])
+    for bad in (["2=synth"], ["-1=synth"], ["x=synth"]):
+        with pytest.raises(sm.Refused):
+            sm.parse_sound_specs(bad, 2, "auto")
+    # the older flags keep their meaning exactly
+    assert sm.parse_index_spec(["none", "1=x.png"], 2, "auto") == ["none", "x.png"]
+    assert sm.split_index_spec("1= auto ", 2) == (1, "auto")
+    assert sm.split_index_spec("auto", 2) == (None, "auto")
+
+
+def test_sound_spec_grammar(sm):
+    """none | synth | auto | auto@IDX | PATH, with the same '@' rule --art uses: only
+    digits after the '@' are parameters, so a path holding one stays a path."""
+    assert sm.parse_sound_spec("none") == {"kind": "none", "source": None, "idx": None, "spec": "none"}
+    assert sm.parse_sound_spec("synth") == {"kind": "synth", "source": None, "idx": None, "spec": "synth"}
+    assert sm.parse_sound_spec("auto", 350) == {"kind": "auto", "source": None, "idx": 350, "spec": "auto"}
+    assert sm.parse_sound_spec(" auto@1717 ", 350) == {"kind": "auto", "source": None, "idx": 1717,
+                                                       "spec": "auto@1717"}
+    assert sm.parse_sound_spec("/x/a.wav") == {"kind": "file", "source": "/x/a.wav", "idx": None,
+                                               "spec": "/x/a.wav"}
+    assert sm.parse_sound_spec("C:\\sfx\\hit@home.wav")["kind"] == "file"
+    for bad in ("", "auto@", "auto@x", "auto@1.5", "auto@1:2", "synth@3", "none@3", "/x/a@12"):
+        with pytest.raises(sm.Refused):
+            sm.parse_sound_spec(bad)
+
+
+def test_prepare_gives_one_image_its_own_confirm_and_falls_back_for_the_rest(sm, tmp_path, capsys, monkeypatch):
+    """'--sound-confirm synth --sound-confirm 1=FILE': confirm.wav is the menu-wide
+    fallback, confirm1.wav is image 1's own, media.json names both, and `check` (which
+    prepare runs) validates the new file and counts it in the budget."""
+    monkeypatch.setattr(sm, "find_ffmpeg", lambda name="ffmpeg": None)
+    out = str(tmp_path / "set")
+    own = write_wav(str(tmp_path / "own.wav"), seconds=0.3)
+    base = ["prepare", "--primary", "a.raw", "--extra", "b.raw", "--out", out, "--art", "none",
+            "--sound-move", "none"]
+    rc = sm.main(base + ["--sound-confirm", "synth", "--sound-confirm", "1=" + own])
+    text = capsys.readouterr().out
+    assert rc == 0, text
+    with open(os.path.join(out, "media.json")) as f:
+        m = json.load(f)
+    assert m["sound_confirm"] == "confirm.wav"
+    assert m["images"][0]["confirm"] is None and m["images"][0]["confirm_source"] is None
+    assert m["images"][1]["confirm"] == "confirm1.wav" and m["images"][1]["confirm_source"] == own
+    assert sm.validate_manifest(m) == m
+    assert sm.wav_contract_error(sm.wav_info(os.path.join(out, "confirm1.wav"))) is None
+    assert os.path.isfile(os.path.join(out, "confirm1.wav.src.json"))
+    assert "confirm1.wav: %s" % own in text
+    assert "confirm=y +1 own" in text, "check's summary counts the per-image confirms"
+    # 'N=none' means "no sound of its own": the image falls back, and the file it used to
+    # have is swept because the manifest no longer names it
+    rc = sm.main(base + ["--sound-confirm", "synth", "--sound-confirm", "1=none"])
+    text = capsys.readouterr().out
+    assert rc == 0, text
+    with open(os.path.join(out, "media.json")) as f:
+        m = json.load(f)
+    assert m["images"][1] == {"art": None, "anim": None, "music": None, "confirm": None,
+                              "art_source": "none", "anim_source": "none", "confirm_source": "none"}
+    assert "removed stale confirm1.wav" in text and "removed stale confirm1.wav.src.json" in text
+    assert not os.path.exists(os.path.join(out, "confirm1.wav"))
+    assert os.path.isfile(os.path.join(out, "confirm.wav")), "the menu-wide one is untouched"
+
+
+def test_prepare_caches_a_per_image_confirm_from_a_file(sm, tmp_path, capsys, monkeypatch):
+    """Run 2 with the same source and parameters says 'cached' and re-encodes nothing;
+    a touched source or a different file regenerates just that confirm."""
+    monkeypatch.setattr(sm, "find_ffmpeg", lambda name="ffmpeg": None)
+    real = sm.normalise_wav
+    done = []
+
+    def counting(src, out, max_seconds=None, fade_ms=0):
+        done.append(src)
+        return real(src, out, max_seconds, fade_ms)
+
+    monkeypatch.setattr(sm, "normalise_wav", counting)
+    out = str(tmp_path / "set")
+    own = write_wav(str(tmp_path / "own.wav"), seconds=0.2)
+    other = write_wav(str(tmp_path / "other.wav"), seconds=0.25)
+    base = ["prepare", "--primary", "a.raw", "--out", out, "--art", "none", "--sound-move", "none",
+            "--sound-confirm", "none"]
+    assert sm.main(base + ["--sound-confirm", "0=" + own]) == 0, capsys.readouterr().out
+    assert done == [own] and "cached" not in capsys.readouterr().out
+    assert sm.main(base + ["--sound-confirm", "0=" + own]) == 0
+    assert done == [own], "run 2 re-encodes nothing"
+    assert "confirm0.wav: cached (%s)" % own in capsys.readouterr().out
+    os.utime(own, (1000000000, 1000000000))
+    assert sm.main(base + ["--sound-confirm", "0=" + own]) == 0
+    assert done == [own, own], "a touched source regenerates"
+    assert "cached" not in capsys.readouterr().out
+    assert sm.main(base + ["--sound-confirm", "0=" + other]) == 0
+    assert done == [own, own, other], "a different file regenerates"
+    with open(os.path.join(out, "media.json")) as f:
+        m = json.load(f)
+    assert m["images"][0]["confirm_source"] == other and m["images"][0]["confirm"] == "confirm0.wav"
+    assert abs(sm.wav_info(os.path.join(out, "confirm0.wav"))["seconds"] - 0.25) < 0.01
+    capsys.readouterr()
+
+
+def _fake_sound_sources(sm, monkeypatch, warm, opened, rendered):
+    """SoundSource / render_sound stand-ins: no card, no emulator, but the same calls."""
+    class FakeSource(object):
+        def __init__(self, card, workdir=None, params_cache=None, log=None):
+            if not os.path.isfile(card):
+                raise sm.Refused("card image %s does not exist" % card)
+            opened.append(os.path.basename(card))
+            self.card = card
+            self.warm = warm.get(os.path.basename(card), True)
+
+        def close(self):
+            pass
+
+    def fake_render(src, idx, out, max_seconds=None, fade_ms=0):
+        rendered.append((os.path.basename(src.card), idx, max_seconds, fade_ms))
+        sm.synth_wav("click", out)
+        return sm.wav_info(out)
+
+    monkeypatch.setattr(sm, "SoundSource", FakeSource)
+    monkeypatch.setattr(sm, "render_sound", fake_render)
+
+
+def test_per_image_confirm_auto_pulls_that_images_own_card_and_caches_the_boot(sm, tmp_path, capsys, monkeypatch):
+    """'1=auto' is image 1's OWN card, not the primary's (that is the whole point of a
+    per-entry sound), 'auto@IDX' names another index of that card's catalog, and the
+    sidecar keeps it so a second prepare never re-boots the emulator."""
+    warm, opened, rendered = {}, [], []
+    _fake_sound_sources(sm, monkeypatch, warm, opened, rendered)
+    primary = str(tmp_path / "p.raw")
+    extra = str(tmp_path / "e.raw")
+    for p in (primary, extra):
+        with open(p, "wb") as f:
+            f.write(b"\x00" * 64)
+    out = str(tmp_path / "set")
+    base = ["prepare", "--primary", primary, "--extra", extra, "--out", out, "--art", "none",
+            "--sound-move", "none", "--sound-confirm", "auto", "--sound-confirm", "1=auto@777"]
+    assert sm.main(base) == 0, capsys.readouterr().out
+    text = capsys.readouterr().out
+    assert rendered == [("p.raw", sm.CONFIRM_IDX, sm.CONFIRM_SECONDS, sm.CONFIRM_FADE_MS),
+                        ("e.raw", 777, sm.CONFIRM_SECONDS, sm.CONFIRM_FADE_MS)]
+    assert "confirm1.wav: idx0777 of e.raw" in text
+    with open(os.path.join(out, "confirm1.wav.src.json")) as f:
+        side = json.load(f)
+    assert side["source"] == os.path.abspath(extra)
+    assert side["params"] == {"kind": "auto", "idx": 777, "seconds": sm.CONFIRM_SECONDS,
+                              "fade_ms": sm.CONFIRM_FADE_MS}
+    with open(os.path.join(out, "media.json")) as f:
+        m = json.load(f)
+    assert m["images"][1]["confirm"] == "confirm1.wav" and m["images"][1]["confirm_source"] == "auto@777"
+    assert m["sound_confirm"] == "confirm.wav"
+    # run 2: the per-image confirm is cached (no boot); the menu-wide one is not cached
+    assert sm.main(base) == 0
+    text = capsys.readouterr().out
+    assert "confirm1.wav: cached (idx0777 of e.raw)" in text
+    assert rendered[2:] == [("p.raw", sm.CONFIRM_IDX, sm.CONFIRM_SECONDS, sm.CONFIRM_FADE_MS)]
+    assert opened == ["p.raw", "e.raw", "p.raw"], "a cached per-image confirm never opens the card"
+    # a cold params cache falls back to the chime and leaves NO sidecar, so the run after
+    # an Extract warms it picks the card's own sound up
+    warm["e.raw"] = False
+    os.utime(extra, (1000000000, 1000000000))
+    assert sm.main(base) == 0
+    text = capsys.readouterr().out
+    assert "params cache is cold for e.raw; synthetic chime instead" in text
+    assert not os.path.exists(os.path.join(out, "confirm1.wav.src.json"))
+    assert sm.wav_contract_error(sm.wav_info(os.path.join(out, "confirm1.wav"))) is None
+    with open(os.path.join(out, "media.json")) as f:
+        assert json.load(f)["images"][1]["confirm"] == "confirm1.wav"
+
+
+def test_per_image_confirm_refusals(sm, tmp_path, capsys):
+    out = str(tmp_path / "set")
+    base = ["prepare", "--primary", "a.raw", "--extra", "b.raw", "--out", out, "--art", "none",
+            "--sound-move", "none"]
+    rc = sm.main(base + ["--sound-confirm", "1=" + str(tmp_path / "missing.wav")])
+    assert rc == 2 and "is not a file" in capsys.readouterr().out
+    for bad, why in (("5=synth", "must be 0..1"), ("1=auto@", "catalog index"),
+                     ("1=synth@3", "needs 'auto'"), ("1=", "empty")):
+        rc = sm.main(base + ["--sound-confirm", bad])
+        text = capsys.readouterr().out
+        assert rc == 2 and why in text, (bad, text)
+        assert not os.path.exists(os.path.join(out, "media.json")), bad
+
+
+def test_sweep_keeps_a_per_image_confirm_the_manifest_names(sm, tmp_path):
+    d = str(tmp_path / "set")
+    os.makedirs(d)
+    present = ["art0.png", "move.wav", "confirm.wav", "confirm1.wav", "confirm1.wav.src.json",
+               "confirm3.wav", "confirm3.wav.src.json", "media.json"]
+    for fn in present:
+        with open(os.path.join(d, fn), "wb") as f:
+            f.write(b"x")
+    m = sm.build_manifest([("art0.png", None, None), (None, None, None, "confirm1.wav")],
+                          "move.wav", "confirm.wav")
+    removed = sm.sweep_stale(d, m, log=lambda s: None)
+    assert sorted(removed) == ["confirm3.wav", "confirm3.wav.src.json"]
+    assert not set(removed) & set(sm.manifest_files(m))
+    for fn in ("confirm.wav", "confirm1.wav", "confirm1.wav.src.json"):
+        assert os.path.exists(os.path.join(d, fn)), fn
+    # a visual-only run says nothing about the sounds: every confirm stays
+    m2 = sm.build_manifest([("art0.png", None, None), (None, None, None)], None, None)
+    assert sm.sweep_stale(d, m2, visual_only=True, log=lambda s: None) == []
+    assert os.path.exists(os.path.join(d, "confirm1.wav"))
+
+
+def test_check_validates_a_per_image_confirm(sm, tmp_path):
+    d = str(tmp_path / "set")
+    _valid_set(sm, d)
+    sm.synth_wav("chime", os.path.join(d, "confirm1.wav"))
+    m = sm.build_manifest([("art0.png", "anim0.gif", None, "confirm1.wav")], "move.wav", None, 40)
+    with open(os.path.join(d, "media.json"), "w") as f:
+        json.dump(m, f)
+    lines = []
+    assert sm.check_media_dir(d, log=lines.append) == m
+    assert any("confirm1.wav" in l and "44100 Hz 2ch" in l for l in lines)
+    assert any("confirm=n +1 own" in l for l in lines)
+    write_wav(os.path.join(d, "confirm1.wav"), rate=48000)
+    with pytest.raises(sm.Refused):
+        sm.check_media_dir(d, log=lambda s: None)
+    os.remove(os.path.join(d, "confirm1.wav"))
+    with pytest.raises(sm.Refused):
+        sm.check_media_dir(d, log=lambda s: None)
 
 
 # ============================================================================ v3: ffmpeg-backed

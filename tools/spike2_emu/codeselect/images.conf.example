@@ -1,6 +1,6 @@
 # images.conf - codeselect's menu: one image per line, index = order (0-based).
 #
-#   image=<device>|<title>|<subtitle>[|<art>|<anim>|<music>]
+#   image=<device>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]
 #     <device>   the games partition on hardware: /dev/mmcblk0p3 = the primary,
 #                /dev/mmcblk0p7 = one extra image in its own partition, or
 #                /dev/mmcblk0p7:img2 = a subdirectory of a partition that holds
@@ -10,15 +10,18 @@
 #     <anim>     an animated GIF (<= 512x288, <= 30 frames) that plays while the
 #                card is highlighted (the still, or frame 0, otherwise)
 #     <music>    a WAV looped while the card is highlighted
+#     <confirm>  a WAV played when THIS card is confirmed, in place of the
+#                menu-wide sound_confirm (empty or absent = sound_confirm)
 #                Media names are files in the media directory; empty = none;
-#                a three-field line is still valid.
+#                three-field and six-field lines are still valid.
 #   default=N    highlight when there is no usable /data/codeselect.last
 #   timeout=S    seconds before the highlighted image boots by itself; 0 = wait
 #   font=PATH    optional TrueType font (default: /usr/local/codeselect/font.ttf,
 #                then the card's /usr/local/spike/VeraMono.ttf)
 #   media=DIR    where the media names live (default /usr/local/codeselect/media)
 #   sound_move=<wav>     played on every LEFT / RIGHT / - / + press
-#   sound_confirm=<wav>  played to completion on START / Select, under LOADING
+#   sound_confirm=<wav>  played to completion on START / Select, under LOADING,
+#                        for every card that names no <confirm> of its own
 #   volume=0-100         software mix gain (default 50)
 #   mixer_volume=0-63    optional, hardware only: the game's codec volume curve
 #                        on the ALSA 'PCM' control (untouched when absent)
@@ -28,7 +31,7 @@
 #
 # The card builder writes this file; edit the names as you like.
 image=/dev/mmcblk0p3|STERN STOCK|TMNT Pro 1.59.0 - original Stern code|art0.png||
-image=/dev/mmcblk0p7|TMNT 1987|1.59.0 - upscaled cartoon retheme|art1.png|anim1.gif|music1.wav
+image=/dev/mmcblk0p7|TMNT 1987|1.59.0 - upscaled cartoon retheme|art1.png|anim1.gif|music1.wav|confirm1.wav
 sound_move=move.wav
 sound_confirm=confirm.wav
 volume=50

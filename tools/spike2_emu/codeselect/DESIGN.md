@@ -120,15 +120,17 @@ hardware test of that patch is what makes this Insider-safe.
 /usr/local/codeselect/font.ttf        DejaVu Sans Bold (Bitstream Vera licence)
 /usr/local/codeselect/media/          art PNGs, animated GIFs, WAVs (flat, <= 20 MB)
 /etc/init.d/game                      stock script + one guarded hook line
-/usr/local/codeselect/media/          art<N>.png, anim<N>.gif, music<N>.wav, move.wav, confirm.wav (optional, <= 20 MB)
+/usr/local/codeselect/media/          art<N>.png, anim<N>.gif, music<N>.wav, confirm<N>.wav, move.wav, confirm.wav (optional, <= 20 MB)
 ```
 
 `images.conf` v2 — plain text, `#` comments,
-`image=<device>|<title>|<subtitle>|<art>|<anim>|<music>` one per image
-(index = order, 0-based; fields 4-6 optional media file names in the media
-directory, a 3-field line stays valid; up to 16 images), plus `default=`,
-`timeout=` (0 = wait for START/ACTION), an optional `font=`, `media=` (default
-`/usr/local/codeselect/media`), `sound_move=`, `sound_confirm=`, `volume=`
+`image=<device>|<title>|<subtitle>|<art>|<anim>|<music>|<confirm>` one per
+image (index = order, 0-based; fields 4-7 optional media file names in the
+media directory, 3-field and 6-field lines stay valid; up to 16 images),
+plus `default=`, `timeout=` (0 = wait for START/ACTION), an optional
+`font=`, `media=` (default
+`/usr/local/codeselect/media`), `sound_move=`, `sound_confirm=` (the confirm
+sound for every image that names no `<confirm>` of its own), `volume=`
 (0-100 software gain, default 50) and the optional hardware-only
 `mixer_volume=` (0-63, the game's codec curve on the ALSA `PCM` control;
 untouched when absent). `<device>` is `/dev/mmcblk0p3`, `/dev/mmcblk0p7`
@@ -138,7 +140,7 @@ in the emulator. Unknown keys are ignored.
 
 ```
 image=/dev/mmcblk0p3|STERN 1.59.0|Original Stern code|art0.png||
-image=/dev/mmcblk0p7|TMNT 1987|1987 cartoon upscale (1.59.0)|art1.png|anim1.gif|music1.wav
+image=/dev/mmcblk0p7|TMNT 1987|1987 cartoon upscale (1.59.0)|art1.png|anim1.gif|music1.wav|confirm1.wav
 sound_move=move.wav
 sound_confirm=confirm.wav
 volume=50
@@ -212,8 +214,15 @@ full CLI, the log lines and the test list). What it is:
   confirm sound plays to completion (cap 8 s), the sound device is drained
   and closed, and only then the choice is written and the program exits.
 * Sound: `sound_move` on every LEFT/RIGHT/-/+ edge, the highlighted card's
-  `music` looping (hard switch on a highlight change), `sound_confirm` on
-  START/Select. One single-threaded s16 44100 Hz stereo mixer (4 voices,
+  `music` looping (hard switch on a highlight change), and on START/Select
+  the CHOSEN CARD'S own `<confirm>` when it named one that loaded, else the
+  menu-wide `sound_confirm` (David, 2026-09-02: "the 'confirm sound' we
+  should be able to customize for each entry if we want to"). Each card's
+  clip is loaded at startup beside its music, by the same WAV rules and
+  through the same by-name cache, so a file two cards share is decoded once;
+  one that is missing or refused is logged and that card falls back to
+  `sound_confirm`. The log names which sound played and how long the exit
+  waited for it. One single-threaded s16 44100 Hz stereo mixer (4 voices,
   saturating, `volume=` gain) pumped from the main loop into ONE sink:
   `--audio auto` = ALSA when `snd_pcm_open("sysdefault:CARD=sgtl5000main")`
   succeeds (the game's device, `snd_pcm_set_params` S16_LE / interleaved /
@@ -274,9 +283,11 @@ full CLI, the log lines and the test list). What it is:
     Tested with a scripted padsw file, the phantom case with a positive
     control on id 36, five synthetic tables and a list that changes on disk.
   * `none`: countdown only (tests).
-* `images.conf` v2: `image=<device>|<title>|<subtitle>|<art>|<anim>|<music>`
-  lines (index = order; fields 4-6 optional; up to 16), `default=`,
-  `timeout=` (0 = wait), `font=`, `media=`, `sound_move=`, `sound_confirm=`,
+* `images.conf` v2: lines of
+  `image=<device>|<title>|<subtitle>|<art>|<anim>|<music>|<confirm>`
+  (index = order; fields 4-7 optional, field 7 = that card's own confirm
+  sound; up to 16), `default=`, `timeout=` (0 = wait), `font=`, `media=`,
+  `sound_move=`, `sound_confirm=`,
   `volume=`, `mixer_volume=`; `--media DIR` overrides `media=`; `--out` gets
   `<index>\n`, `--last` (`/data/codeselect.last`) is read for the initial
   highlight and written on confirm. Exit 0 = a choice was written, 2 =
@@ -285,8 +296,10 @@ full CLI, the log lines and the test list). What it is:
   where it says 0), WAV RIFF PCM 16-bit 44100 Hz 1-2 ch; a missing or
   unusable file is logged (`art: cannot load ...`, `audio: ...: unsupported
   (...)`) and skipped. Log lines: `media: N art, M anim (F frames), K
-  music, move=y|n confirm=y|n`, `audio: alsa <dev> ok` | `audio: fifo
-  <path> open` | `audio: none (<reason>)`, and at exit `audio: <frames>
+  music, C card confirm, move=y|n confirm=y|n`, `confirm: image N sound
+  <file> | menu sound <file> | no sound, <ms> ms under the LOADING frame`,
+  `audio: alsa <dev> ok` | `audio: fifo <path> open` |
+  `audio: none (<reason>)`, and at exit `audio: <frames>
   frames written, <dropped> dropped`. `--headless` renders pin every
   animation with `--anim-frame N`; `--audio-dump FILE` captures the mix.
 * Honors `-invert` in `/games/data/boot_display_cmd` (parsed exactly as

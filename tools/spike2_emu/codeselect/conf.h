@@ -2,14 +2,15 @@
  *
  * images.conf v2 (one image per line, index = order, 0-based):
  *   # comment
- *   image=<device>|<title>|<subtitle>[|<art>|<anim>|<music>]
+ *   image=<device>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]
  *   default=<index>          highlight when there is no usable last-choice file
  *   timeout=<seconds>        0 = wait for ever
  *   font=<path>              optional TrueType font
  *   media=<dir>              where the media names resolve (default
  *                            /usr/local/codeselect/media; --media overrides)
  *   sound_move=<wav>         played on every LEFT/RIGHT/-/+ edge
- *   sound_confirm=<wav>      played to completion on START/Select
+ *   sound_confirm=<wav>      played to completion on START/Select, for every
+ *                            image that does not name a <confirm> of its own
  *   volume=<0-100>           software mix gain (default 50)
  *   mixer_volume=<0-63>      optional: apply the game's codec curve to the
  *                            ALSA 'PCM' selem (hardware only; untouched when absent)
@@ -17,9 +18,10 @@
  * <device> is the block device on hardware ('/dev/mmcblk0p3', '/dev/mmcblk0p7',
  * or '/dev/mmcblk0p7:img2' = a partition plus a subdirectory holding a whole
  * games tree) and an opaque token in the emulator (p3, p7, p7:img2). Titles
- * and subtitles are free UTF-8 text. Fields 4-6 are media FILE NAMES relative
- * to the media directory (empty = none); a 3-field line stays valid. Unknown
- * keys are ignored so the file can grow.
+ * and subtitles are free UTF-8 text. Fields 4-7 are media FILE NAMES relative
+ * to the media directory (empty = none); 3-field and 6-field lines stay valid.
+ * Field 7 is that image's OWN confirm sound: empty or absent falls back to the
+ * menu-wide sound_confirm=. Unknown keys are ignored so the file can grow.
  */
 #ifndef CODESELECT_CONF_H
 #define CODESELECT_CONF_H
@@ -34,6 +36,8 @@ struct conf_image {
     char art[CONF_STR];       /* still picture (PNG), or "" */
     char anim[CONF_STR];      /* animated GIF, or "" */
     char music[CONF_STR];     /* WAV looped while highlighted, or "" */
+    char confirm[CONF_STR];   /* WAV played when THIS image is confirmed, or
+                               * "" = use the menu-wide sound_confirm */
 };
 
 struct conf {

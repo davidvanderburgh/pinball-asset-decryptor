@@ -8,10 +8,11 @@
  * Exit 0 = a choice was written, 2 = no choice.
  *
  * Each card can carry a still picture (PNG), an animation (GIF, ticking only
- * while its card is highlighted) and a music loop; a move sound plays on
- * every highlight change and a confirm sound plays TO COMPLETION under the
- * LOADING frame before the program exits. Every media failure is non-fatal:
- * the menu runs without the piece that failed.
+ * while its card is highlighted), a music loop and a confirm sound of its
+ * own; a move sound plays on every highlight change and a confirm sound - the
+ * chosen card's when it has one, else the menu-wide one - plays TO COMPLETION
+ * under the LOADING frame before the program exits. Every media failure is
+ * non-fatal: the menu runs without the piece that failed.
  *
  *   --headless FILE.ppm   no EGL: run the loop, write the last menu frame as
  *                         a binary P6 PPM (and the LOADING frame beside it as
@@ -311,10 +312,14 @@ struct media {
     struct art_image *art[CONF_MAX_IMAGES];
     struct art_anim *anim[CONF_MAX_IMAGES];
     struct audio_clip *music[CONF_MAX_IMAGES];
+    /* an image's OWN confirm sound (conf field 7); NULL = use ->confirm */
+    struct audio_clip *own_confirm[CONF_MAX_IMAGES];
     struct audio_clip *move, *confirm;
-    struct clip_cache cache[CONF_MAX_IMAGES + 2];
+    /* every WAV is decoded once and shared by name: at most one music and one
+     * confirm per image, plus the two menu-wide sounds */
+    struct clip_cache cache[CONF_MAX_IMAGES * 2 + 2];
     int ncache;
-    int n_art, n_anim, n_music, pending, logged;
+    int n_art, n_anim, n_music, n_own_confirm, pending, logged;
     char dir[CONF_STR];
 };
 
@@ -367,6 +372,11 @@ static void media_load(struct media *m, const struct conf *c, const struct layou
             m->music[i] = media_clip(m, im->music);
             if (m->music[i]) m->n_music++;
         }
+        if (im->confirm[0] && with_audio) {
+            m->own_confirm[i] = media_clip(m, im->confirm);
+            if (m->own_confirm[i]) m->n_own_confirm++;
+            else sel_log("confirm: image %d cannot use %s: the menu-wide sound is used instead", i, im->confirm);
+        }
     }
     if (with_audio) {
         m->move = media_clip(m, c->sound_move);
@@ -399,8 +409,9 @@ static void media_log(struct media *m)
     if (m->logged) return;
     for (i = 0; i < CONF_MAX_IMAGES; i++)
         if (m->anim[i]) frames += m->anim[i]->n;
-    sel_log("media: %d art, %d anim (%d frames), %d music, move=%s confirm=%s",
-            m->n_art, m->n_anim, frames, m->n_music, m->move ? "y" : "n", m->confirm ? "y" : "n");
+    sel_log("media: %d art, %d anim (%d frames), %d music, %d card confirm, move=%s confirm=%s",
+            m->n_art, m->n_anim, frames, m->n_music, m->n_own_confirm,
+            m->move ? "y" : "n", m->confirm ? "y" : "n");
     m->logged = 1;
 }
 
@@ -934,12 +945,18 @@ int main(int argc, char **argv)
         present(&g, &egl, headless, invert);
         /* the confirm sound plays to completion under the LOADING frame, then
          * the sink is drained and closed - before the choice file, so the
-         * game never finds the device busy */
+         * game never finds the device busy. The chosen image's OWN sound when
+         * it loaded one, else the menu-wide sound_confirm. */
         if (audio_active(au)) {
             long long t0 = sel_now_ms(), cap = t0 + CONFIRM_CAP_MS, done_at = 0;
+            const struct audio_clip *cc = media.own_confirm[chosen];
+            char cwhich[CONF_STR + 40];
             int cv = -1;
+            if (cc) snprintf(cwhich, sizeof cwhich, "image %d sound %s", chosen, c.img[chosen].confirm);
+            else if ((cc = media.confirm) != NULL) snprintf(cwhich, sizeof cwhich, "menu sound %s", c.sound_confirm);
+            else snprintf(cwhich, sizeof cwhich, "no sound");
             if (music_voice >= 0) audio_stop(au, music_voice);
-            if (media.confirm) cv = audio_play(au, media.confirm, 0);
+            if (cc) cv = audio_play(au, cc, 0);
             while (!g_stop) {
                 long long now = sel_now_ms();
                 audio_pump(au, now);
@@ -948,7 +965,7 @@ int main(int argc, char **argv)
                 if (now >= cap) { sel_log("confirm sound capped at %d ms", CONFIRM_CAP_MS); break; }
                 present(&g, &egl, headless, invert);
             }
-            sel_log("confirm: %lld ms under the LOADING frame", sel_now_ms() - t0);
+            sel_log("confirm: %s, %lld ms under the LOADING frame", cwhich, sel_now_ms() - t0);
         }
         audio_close(au);
         au = NULL;

@@ -84,7 +84,7 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
-- [x] **90. godzilla_le dies ~4 s after start, on a user's card, every time.
+- [x] **93. godzilla_le dies ~4 s after start, on a user's card, every time.
       SOLVED 2026-09-02 — it was `sw_prime()` splatting the shim's own .bss.**
       `S1 D4`
       **★★★★★ ROOT CAUSE, and it is ours.** `SW_NODEREC(n)` is an offset from

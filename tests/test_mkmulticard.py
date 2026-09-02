@@ -185,16 +185,22 @@ def test_plan_and_build_refuse_a_third_image_unless_told(mk, tmp_path, capsys):
     B = mk.make_synthetic_card(str(tmp_path / "B.img"), "B", 0x0B0B0B0B)
     C = mk.make_synthetic_card(str(tmp_path / "C.img"), "C", 0x0C0C0C0C)
     assert mk.main(["plan", "--primary", A, "--extra", B]) == 0
-    assert "unreachable" not in capsys.readouterr().out
-    assert mk.main(["plan", "--primary", A, "--extra", B, "--extra", C]) == 2
+    out = capsys.readouterr().out
+    assert "unreachable" not in out and "layout: parts" in out, "auto = parts for one extra"
+    assert mk.main(["plan", "--primary", A, "--extra", B, "--extra", C, "--layout", "parts"]) == 2
     err = capsys.readouterr().err
     assert "/dev/mmcblk0p8" in err and "CONFIG_MMC_BLOCK_MINORS=8" in err and "--allow-unreachable" in err
-    assert mk.main(["plan", "--primary", A, "--extra", B, "--extra", C, "--allow-unreachable"]) == 0
+    assert mk.main(["plan", "--primary", A, "--extra", B, "--extra", C, "--layout", "parts", "--allow-unreachable"]) == 0
     assert "p8 unreachable on the machine" in capsys.readouterr().out
     # build refuses BEFORE a byte is written
     out = tmp_path / "multi.img"
-    assert mk.main(["build", "--primary", A, "--extra", B, "--extra", C, "--out", str(out), "--no-inject"]) == 2
+    assert mk.main(["build", "--primary", A, "--extra", B, "--extra", C, "--out", str(out), "--no-inject", "--layout", "parts"]) == 2
     assert "p7 is the last partition" in capsys.readouterr().err
+    assert not out.exists()
+    # two extras with no --layout = the multi layout, which sizes p7 from the extras' superblocks -
+    # random bytes have none, and that is refused before a byte is written too
+    assert mk.main(["build", "--primary", A, "--extra", B, "--extra", C, "--out", str(out), "--no-inject"]) == 2
+    assert "no ext4 superblock" in capsys.readouterr().err
     assert not out.exists()
 
 
@@ -287,6 +293,309 @@ def test_images_conf_defaults_and_refusals(mk):
         mk.render_images_conf(["/dev/mmcblk0p3"], ["a", "b"])
     with pytest.raises(mk.Refused):
         mk.render_images_conf(["/dev/mmcblk0p3"], timeout=-1)
+
+
+# ---- images.conf v2 (item 90 media): 6-field image lines + the global keys ---------------
+def test_images_conf_v2_round_trips_media_and_the_keys(mk):
+    text = mk.render_images_conf(["/dev/mmcblk0p3", "/dev/mmcblk0p7:img1", "p7:img2"], ["A", "B", "C"], ["a", "", "c"], 1, 0, None,
+                                 media=[("art0.png", "", ""), ("art1.png", "anim1.gif", "music1.wav"), None],
+                                 sound_move="move.wav", sound_confirm="confirm.wav", volume=35, mixer_volume=20)
+    lines = [l for l in text.splitlines() if not l.startswith("#")]
+    assert lines == ["image=/dev/mmcblk0p3|A|a|art0.png||",
+                     "image=/dev/mmcblk0p7:img1|B||art1.png|anim1.gif|music1.wav",
+                     "image=p7:img2|C|c|||",
+                     "default=1", "timeout=0", "sound_move=move.wav", "sound_confirm=confirm.wav",
+                     "volume=35", "mixer_volume=20", "media=/usr/local/codeselect/media"]
+    conf = mk.parse_images_conf(text)
+    assert conf["images"] == [("/dev/mmcblk0p3", "A", "a"), ("/dev/mmcblk0p7:img1", "B", ""), ("p7:img2", "C", "c")]
+    assert conf["media"] == [("art0.png", "", ""), ("art1.png", "anim1.gif", "music1.wav"), ("", "", "")]
+    assert (conf["sound_move"], conf["sound_confirm"], conf["volume"], conf["mixer_volume"]) == ("move.wav", "confirm.wav", 35, 20)
+    assert conf["media_dir"] == mk.MEDIA_DIR and conf["default"] == 1 and conf["timeout"] == 0
+    assert mk.conf_media_names(conf) == ["anim1.gif", "art0.png", "art1.png", "confirm.wav", "move.wav", "music1.wav"]
+    assert [mk.parse_device(d) for (d, _t, _s) in conf["images"]] == [(3, None), (7, "img1"), (7, "img2")]
+
+
+def test_a_three_field_image_line_stays_valid_and_unknown_keys_are_ignored(mk):
+    conf = mk.parse_images_conf("image=/dev/mmcblk0p3|STERN|stock\nimage=/dev/mmcblk0p7|TMNT 1987\n"
+                                "default=1\ntimeout=15\nanim_fps=12\nfont=/x.ttf\n")
+    assert conf["images"] == [("/dev/mmcblk0p3", "STERN", "stock"), ("/dev/mmcblk0p7", "TMNT 1987", "")]
+    assert conf["media"] == [("", "", ""), ("", "", "")]
+    assert conf["sound_move"] is None and conf["volume"] is None and conf["media_dir"] is None
+    assert mk.conf_media_names(conf) == []
+    # no media anywhere -> the 3-field form is what gets written, and no media= key
+    text = mk.render_images_conf(["/dev/mmcblk0p3", "/dev/mmcblk0p7"], ["A", "B"], media=[None, ("", "", "")])
+    lines = [l for l in text.splitlines() if not l.startswith("#")]
+    assert lines == ["image=/dev/mmcblk0p3|A|", "image=/dev/mmcblk0p7|B|", "default=0", "timeout=15"]
+
+
+@pytest.mark.parametrize("bad", [
+    "image=/dev/mmcblk0p3|A|a|art.png|anim.gif|music.wav|extra\n",           # 7 fields
+    "image=/dev/mmcblk0p3|A|a|art|anim.gif|../x.wav\n",                        # a slash in a media name
+    "image=/dev/mmcblk0p3|A|a|art:png||\n",                                    # a colon in a media name
+    "image=/dev/mmcblk0p7:img1:x|A|a\n",                                       # two colons in the device
+    "image=/dev/mmcblk0p7:|A|a\n",                                             # an empty subdirectory
+    "image=/dev/sda7|A|a\n",                                                   # not a Spike device
+    "image=/dev/mmcblk0p3|A|a\nvolume=101\n",
+    "image=/dev/mmcblk0p3|A|a\nmixer_volume=64\n",
+    "image=/dev/mmcblk0p3|A|a\nsound_move=a|b.wav\n",
+    "".join("image=/dev/mmcblk0p%d|x|y\n" % i for i in range(17)),            # 17 images
+])
+def test_parse_refuses_pipe_and_colon_misuse(mk, bad):
+    with pytest.raises(mk.Refused):
+        mk.parse_images_conf(bad)
+
+
+def test_render_refuses_bad_media_and_devices(mk):
+    with pytest.raises(mk.Refused, match="plain media file name"):
+        mk.render_images_conf(["/dev/mmcblk0p3"], media=[("a|b.png", "", "")])
+    with pytest.raises(mk.Refused, match="plain media file name"):
+        mk.render_images_conf(["/dev/mmcblk0p3"], sound_move="dir/x.wav")
+    with pytest.raises(mk.Refused, match="not /dev/mmcblk0pN"):
+        mk.render_images_conf(["/dev/mmcblk0p7:img1:x"])
+    with pytest.raises(mk.Refused, match="outside 0..100"):
+        mk.render_images_conf(["/dev/mmcblk0p3"], volume=101)
+    with pytest.raises(mk.Refused, match="at most 16"):
+        mk.render_images_conf(["/dev/mmcblk0p%d" % i for i in range(17)])
+    with pytest.raises(mk.Refused, match="media rows"):
+        mk.render_images_conf(["/dev/mmcblk0p3"], media=[None, None])
+
+
+# ---- the media checks (pure python, synthetic files) ----------------------------------------
+def test_media_checks_accept_the_synthetic_set_and_refuse_the_wrong_shapes(mk, tmp_path, monkeypatch):
+    d = str(tmp_path / "media")
+    mk.synth_media_dir(d, 2)
+    ms = mk.plan_media(d, 2)
+    assert list(ms["files"]) == ["art0.png", "art1.png", "anim1.gif", "music1.wav", "move.wav", "confirm.wav"]
+    assert ms["rows"] == [("art0.png", "", ""), ("art1.png", "anim1.gif", "music1.wav")]
+    assert (ms["sound_move"], ms["sound_confirm"], ms["volume"], ms["mixer_volume"]) == ("move.wav", "confirm.wav", 40, None)
+    assert ms["kinds"]["anim1.gif"] == "gif 4x3 2 frames" and ms["kinds"]["move.wav"] == "wav 44100 Hz 1 ch"
+    assert ms["kinds"]["art0.png"] == "png 4x3"
+    assert "wrong_rate.wav" not in ms["files"], "only referenced files are staged"
+    # the wrong shapes, one at a time
+    with pytest.raises(mk.Refused, match="48000 Hz"):
+        mk.check_media_file(os.path.join(d, "wrong_rate.wav"), "wav")
+    with pytest.raises(mk.Refused, match="must be a PNG"):
+        mk.check_media_file(os.path.join(d, "move.wav"), "art")
+    with pytest.raises(mk.Refused, match="must be an animated GIF"):
+        mk.check_media_file(os.path.join(d, "art0.png"), "anim")
+    with pytest.raises(mk.Refused, match="does not exist"):
+        mk.check_media_file(os.path.join(d, "nope.png"), "art")
+    big = tmp_path / "media" / "big.png"
+    mk.synth_png(str(big), 1361, 8)
+    with pytest.raises(mk.Refused, match="larger than the 1360x768 panel"):
+        mk.check_media_file(str(big), "art")
+    wide = tmp_path / "media" / "wide.gif"
+    mk.synth_gif(str(wide), 513, 2, 1)
+    with pytest.raises(mk.Refused, match="over 512x288"):
+        mk.check_media_file(str(wide), "anim")
+    many = tmp_path / "media" / "many.gif"
+    mk.synth_gif(str(many), 2, 2, 31)
+    with pytest.raises(mk.Refused, match="31 frames"):
+        mk.check_media_file(str(many), "anim")
+    monkeypatch.setattr(mk, "MEDIA_BUDGET", 100)
+    with pytest.raises(mk.Refused, match="over the 100 byte budget"):
+        mk.plan_media(d, 2)
+    monkeypatch.setattr(mk, "GIF_MAX_BYTES", 10)
+    with pytest.raises(mk.Refused, match="over the 10 byte cap"):
+        mk.check_media_file(os.path.join(d, "anim1.gif"), "anim")
+
+
+def test_media_manifest_refusals(mk, tmp_path):
+    d = str(tmp_path / "m")
+    with pytest.raises(mk.Refused, match="not a directory"):
+        mk.plan_media(d, 1)
+    os.makedirs(d)
+    with pytest.raises(mk.Refused, match="media.json"):
+        mk.plan_media(d, 1)
+    man = tmp_path / "m" / "media.json"
+    man.write_text("{not json")
+    with pytest.raises(mk.Refused, match="not JSON"):
+        mk.plan_media(d, 1)
+    man.write_text('{"images": [{"art": "a.png"}]}')
+    with pytest.raises(mk.Refused, match="does not exist"):
+        mk.plan_media(d, 1)
+    man.write_text('{"images": [{"art": "a.png"}, {}]}')
+    with pytest.raises(mk.Refused, match="lists 2 images; the card holds 1"):
+        mk.plan_media(d, 1)
+    man.write_text('{"images": [{"art": ["a.png"]}]}')
+    with pytest.raises(mk.Refused, match="file name or null"):
+        mk.plan_media(d, 1)
+    man.write_text('{"images": [{}], "volume": 200}')
+    with pytest.raises(mk.Refused, match="outside 0..100"):
+        mk.plan_media(d, 1)
+    man.write_text('{"images": [{}], "sound_move": "a b.wav"}')
+    with pytest.raises(mk.Refused, match="plain media file name"):
+        mk.plan_media(d, 1)
+
+
+def test_wav_png_gif_sniffers(mk, tmp_path):
+    assert mk.png_info(b"GIF89a") is None and mk.gif_info(b"\x89PNG") is None and mk.wav_info(b"RIFX") is None
+    p = str(tmp_path / "x.png")
+    mk.synth_png(p, 7, 5)
+    assert mk.png_info(open(p, "rb").read()) == (7, 5)
+    g = str(tmp_path / "x.gif")
+    mk.synth_gif(g, 6, 2, 3)
+    assert mk.gif_info(open(g, "rb").read()) == (6, 2, 3)
+    w = str(tmp_path / "x.wav")
+    mk.synth_wav(w, rate=22050, ch=1)
+    assert mk.wav_info(open(w, "rb").read()) == (1, 1, 22050, 16)
+    # a Logic-style export: JUNK before fmt
+    data = open(w, "rb").read()
+    junk = b"JUNK" + (28).to_bytes(4, "little") + bytes(28)
+    logic = data[:12] + junk + data[12:]
+    assert mk.wav_info(logic) == (1, 1, 22050, 16)
+
+
+def test_inject_commands_replace_an_existing_media_directory(mk):
+    """debugfs's rm cannot take a directory: the children go first, then rmdir, then a fresh
+    mkdir + 040755 root:root when media is staged; an untouched media dir stays."""
+    items = [("/s/codeselect", "/usr/local/codeselect/codeselect", 0o755),
+             ("/s/media/art0.png", "/usr/local/codeselect/media/art0.png", 0o644),
+             ("/s/game", "/etc/init.d/game", 0o755)]
+    cmds = mk.inject_commands(items, ["codeselect", "images.conf"], {}, existing_media=["old.png", "old.wav"])
+    assert cmds[:6] == ['rm "/usr/local/codeselect/codeselect"', 'rm "/usr/local/codeselect/images.conf"',
+                        'rm "/usr/local/codeselect/media/old.png"', 'rm "/usr/local/codeselect/media/old.wav"',
+                        'rmdir "/usr/local/codeselect/media"', 'rm "/etc/init.d/game"']
+    assert cmds[6] == 'mkdir "/usr/local/codeselect/media"'
+    assert cmds.index('mkdir "/usr/local/codeselect/media"') < cmds.index('write "/s/media/art0.png" "/usr/local/codeselect/media/art0.png"')
+    assert 'set_inode_field "/usr/local/codeselect/media" mode 040755' in cmds
+    assert 'set_inode_field "/usr/local/codeselect/media" uid 0' in cmds
+    assert 'set_inode_field "/usr/local/codeselect/media/art0.png" mode 0100644' in cmds
+    # no media staged and none to replace: exactly the old script shape
+    plain = [items[0], items[2]]
+    cmds = mk.inject_commands(plain, ["codeselect"], {})
+    assert cmds[:2] == ['rm "/usr/local/codeselect/codeselect"', 'rm "/etc/init.d/game"']
+    assert not [c for c in cmds if "media" in c]
+    # media staged into a card with no media dir yet
+    cmds = mk.inject_commands(items, None, {})
+    assert cmds[:3] == ['mkdir "/usr/local/codeselect"', 'rm "/etc/init.d/game"', 'mkdir "/usr/local/codeselect/media"']
+
+
+# ---- the multi layout (pure python parts) --------------------------------------------------
+def _fake_ext4(path, blocks, free, log_bs=2, sixty_four=False, offset=0):
+    """Just enough superblock for ext_used_bytes: magic, counts, block size."""
+    sb = bytearray(1024)
+    sb[0x38:0x3A] = (0xEF53).to_bytes(2, "little")
+    sb[0x4:0x8] = (blocks & 0xffffffff).to_bytes(4, "little")
+    sb[0xC:0x10] = (free & 0xffffffff).to_bytes(4, "little")
+    sb[0x18:0x1C] = log_bs.to_bytes(4, "little")
+    if sixty_four:
+        sb[0x60:0x64] = (0x80).to_bytes(4, "little")
+        sb[0x150:0x154] = (blocks >> 32).to_bytes(4, "little")
+        sb[0x158:0x15C] = (free >> 32).to_bytes(4, "little")
+    with open(path, "r+b" if os.path.exists(path) else "wb") as f:
+        f.seek(offset + 1024)
+        f.write(sb)
+
+
+def test_multi_size_is_used_bytes_plus_slack_and_headroom_rounded_to_a_mib(mk, tmp_path):
+    p = str(tmp_path / "x.img")
+    _fake_ext4(p, 1675263, 760265)                     # the stock 8G p3: 4 KiB blocks
+    used, total = mk.ext_used_bytes(p, 0)
+    assert (used, total) == ((1675263 - 760265) * 4096, 1675263 * 4096)
+    sectors = mk.multi_size_sectors(used)
+    size = sectors * 512
+    assert size % (1 << 20) == 0
+    assert size >= used * 1.10 + (256 << 20) and size < used * 1.10 + (257 << 20)
+    q = str(tmp_path / "y.img")
+    _fake_ext4(q, (1 << 32) + 10, 5, sixty_four=True)
+    assert mk.ext_used_bytes(q, 0)[1] == ((1 << 32) + 10) * 4096
+    with pytest.raises(mk.Refused, match="no ext4 superblock"):
+        mk.ext_used_bytes(str(tmp_path / "A.img"), 0) if (tmp_path / "A.img").exists() else mk.ext_used_bytes(q, 4096)
+
+
+def test_multi_plan_puts_every_extra_inside_one_p7(mk, tmp_path):
+    """Three extras: one logical p7 sized from their superblocks, devices p7:img1..img3, never
+    p8, nothing unreachable; the table is p1..p7."""
+    extras = []
+    for i in range(3):
+        p = str(tmp_path / ("x%d.raw" % i))
+        with open(p, "wb") as f:
+            f.truncate(STOCK_8G_SIZE)
+        _fake_ext4(p, 1675263, 760265, offset=712704 * 512)
+        extras.append(p)
+    plan = mk.Plan(stock_8g(mk), [extra_8g(mk, x) for x in extras], "a.raw", extras, "multi")
+    assert plan.layout == "multi" and plan.multi_subdirs == ["img1", "img2", "img3"]
+    assert plan.devices() == ["/dev/mmcblk0p3", "/dev/mmcblk0p7:img1", "/dev/mmcblk0p7:img2", "/dev/mmcblk0p7:img3"]
+    assert [p.num for p in plan.logs] == [5, 6, 7] and plan.unreachable() == [] and mk.check_reachable(plan) is plan
+    p7 = plan.multi_part
+    assert (p7.num, p7.ptype, p7.start, p7.ebr, p7.src, p7.src_start) == (7, 0x83, 15353856, 15353854, None, 0)
+    used = 3 * (1675263 - 760265) * 4096
+    assert plan.multi_used == used and p7.count == mk.multi_size_sectors(used)
+    assert plan.table()[-1] == (7, 0x83, 15353856, p7.count)
+    assert plan.total == 15353856 + p7.count + 2
+    assert [(p.num, s) for (p, s) in plan.trees] == [(3, None), (7, "img1"), (7, "img2"), (7, "img3")]
+    assert plan.images == [plan.prims[2], p7]
+    # the same plan with the built p7 image as its source
+    with_src = plan.with_multi_src("/tmp/p7.img")
+    assert with_src.multi_part.src == "/tmp/p7.img" and with_src.table() == plan.table() and with_src.multi_used == used
+    # and a card-derived plan (size + subdirs given) needs no extras
+    back = mk.Plan(stock_8g(mk), [], "card.raw", [], "multi", multi_sectors=p7.count, multi_subdirs=["img1", "img2", "img3"])
+    assert back.table() == plan.table() and back.devices() == plan.devices() and back.multi_used is None
+    assert mk.resolve_layout("auto", 1) == "parts" and mk.resolve_layout("auto", 2) == "multi"
+    with pytest.raises(mk.Refused):
+        mk.resolve_layout("bogus", 1)
+    with pytest.raises(mk.Refused, match="not 'parts' or 'multi'"):
+        mk.Plan(stock_8g(mk), [], layout="auto")
+
+
+def test_print_plan_describes_the_multi_partition(mk, tmp_path, capsys):
+    p = str(tmp_path / "x.raw")
+    with open(p, "wb") as f:
+        f.truncate(STOCK_8G_SIZE)
+    _fake_ext4(p, 1675263, 760265, offset=712704 * 512)
+    plan = mk.Plan(stock_8g(mk), [extra_8g(mk, p), extra_8g(mk, p)], "a.raw", [p, p], "multi")
+    mk.print_plan(plan)
+    out = capsys.readouterr().out
+    assert "layout: multi" in out and "multi ext4: img1=x.raw, img2=x.raw" in out
+    assert "p7 (multi layout): 2 trees img1/img2" in out and "+ 10% + 256 MiB" in out
+    assert "images: 0=/dev/mmcblk0p3, 1=/dev/mmcblk0p7:img1, 2=/dev/mmcblk0p7:img2" in out
+    assert "unreachable" not in out
+
+
+def test_device_names_and_titles(mk):
+    assert mk.device_name(7, "img2") == "/dev/mmcblk0p7:img2" and mk.device_name(3) == "/dev/mmcblk0p3"
+    assert mk.parse_device("p7:img2") == (7, "img2") and mk.parse_device("/dev/mmcblk0p3") == (3, None)
+    for bad in ("p7:", "p7:a:b", "/dev/mmcblk0p", "mmcblk0p3", "p7:img 2", ""):
+        with pytest.raises(mk.Refused):
+            mk.parse_device(bad)
+
+
+def test_bypass_words_and_states(mk):
+    assert mk.bypass_words("bypassed") == "validator: bypassed"
+    assert mk.bypass_words("absent") == "validator: none on this build"
+    assert "ARMED" in mk.bypass_words("armed") and "UNLOCATED" in mk.bypass_words("unlocated")
+    assert mk.bypass_state(b"not an elf at all") == "absent"
+
+
+#: The stock turtles_pro 1.59.0 image, wherever this machine keeps it: the repo's images/
+#: junction (absent in a worktree), David's library on D:, or the same through WSL.
+_STOCK_NAME = os.path.join("Stern", "spike2", "turtles_pro-1_59_0.Release.8G.sdcard.raw")
+STOCK_CARD = next((p for p in (
+    os.path.join(os.path.dirname(RIG.rstrip(os.sep)), "..", "images", _STOCK_NAME),
+    os.path.join("D:\\Pinball\\images", _STOCK_NAME),
+    os.path.join("/mnt/d/Pinball/images", _STOCK_NAME)) if os.path.isfile(p)), "")
+
+
+@pytest.mark.skipif(not os.path.isfile(STOCK_CARD), reason="the stock turtles_pro 1.59 card is not on this machine")
+def test_the_stock_card_validator_is_located_and_reported_armed(mk):
+    """Read-only, one 6.4 MB file out of the library image: the locator finds validation_exec
+    in the stock game and the tree reads as ARMED (the bypass has something to do)."""
+    valpatch, _s, ext4 = mk._stern_plugins()
+    G = mk.Geometry.from_file(STOCK_CARD)
+    _t, st, cnt = G.part(3)
+    with open(STOCK_CARD, "rb") as f:
+        r = ext4.Ext4Reader(f, st * 512, cnt * 512)
+        title, gpath, _gi, gnode = mk.tree_game(r, 2)
+        assert (title, gpath) == ("turtles_pro", "turtles_pro/game")
+        elf = r.read_file_bytes(gnode)
+        assert valpatch.find_validation_exec(elf) is not None
+        assert mk.bypass_state(elf) == "armed"
+        assert mk.tree_sidx(r, 2)[0] == "spk/index/turtles_pro-1_59_0.sidx"
+        state, writes, notes = mk.compute_bypass_writes(r, 2)
+        assert state == "armed" and sum(len(b) for (_d, b) in writes) == 4 + 20 + 16, notes
+        assert all(st * 512 <= d < (st + cnt) * 512 for (d, _b) in writes), "every write lands inside p3"
+    assert mk.tree_state(STOCK_CARD, G and mk.Part(3, 0x83, st, cnt, STOCK_CARD, st, None), None)[0] == "armed"
 
 
 def test_default_title_strips_the_card_suffixes(mk):
@@ -428,12 +737,33 @@ def test_build_cli_refuses_before_reading_anything(mk, tmp_path, capsys):
     assert not (tmp_path / "nope.raw").exists()
 
 
-@pytest.mark.parametrize("cmd", ["plan", "check-stock", "build", "inject", "verify", "selftest"])
+@pytest.mark.parametrize("cmd", ["plan", "check-stock", "build", "inject", "bypass", "verify", "selftest"])
 def test_every_subcommand_has_help(mk, cmd, capsys):
     with pytest.raises(SystemExit) as e:
         mk.main([cmd, "--help"])
     assert e.value.code == 0
-    assert "usage:" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "usage:" in out
+    if cmd in ("build", "inject"):
+        assert "--media-dir" in out and "--volume" in out and "--mixer-volume" in out
+    if cmd == "build":
+        assert "--layout" in out and "--bypass-validation" in out and "--workdir" in out
+    if cmd == "bypass":
+        assert "--card" in out and "--dry-run" in out
+
+
+def test_sidecars_are_per_partition_and_stale_ones_are_dropped(mk, tmp_path):
+    A = mk.make_synthetic_card(str(tmp_path / "A.img"), "A", 0x0A0A0A0A)
+    assert mk.sidecar_path(A, 7) == A + ".p7.md5" and mk.p2_sidecar_path(A) == A + ".p2.md5"
+    h3 = mk.write_part_sidecar(A, 3)
+    assert (tmp_path / "A.img.p3.md5").read_text().split() == [h3, "p3", "@%d+%d" % (12288 * 512, 2046 * 512)]
+    assert mk.read_part_sidecar(A, 3) == h3 and mk.check_part_sidecar(A, 3) == (h3, h3)
+    assert mk.read_part_sidecar(A, 7) is None
+    with pytest.raises(mk.Refused, match="not Linux"):
+        mk.write_part_sidecar(A, 1)
+    mk.write_p2_sidecar(A)
+    mk.drop_stale_sidecars(A, keep=(2,))
+    assert (tmp_path / "A.img.p2.md5").is_file() and not (tmp_path / "A.img.p3.md5").exists()
 
 
 # ============================================================================ synthetic end to end (pure python)
@@ -448,7 +778,8 @@ def test_synthetic_cards_build_and_parse_back(mk, tmp_path):
     assert ga.part(1) == (0x0C, 8192, 2048) and ga.part(6) == (0x83, 18432, 2046)
     assert ga.logical[1][0] == 18430 and ga.sectors == 20480
     assert mk.check_stock(A)
-    plan = mk.make_plan(A, [B, C])
+    plan = mk.make_plan(A, [B, C], "parts")
+    assert plan.layout == "parts" and plan.trees == [(p, None) for p in plan.images]
     assert [(p.num, p.start, p.count, p.ebr) for p in plan.logs] == [
         (5, 16384, 2046, 14336), (6, 18432, 2046, 18430), (7, 20480, 2046, 20478), (8, 22528, 2046, 22526)]
     assert plan.total == 24576 and plan.ext_count == 24574 - 14336

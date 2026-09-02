@@ -58,6 +58,91 @@ copy. `buildselect.sh` builds the selector into `$ROOT` (`ensurebuild.sh`'s
 `pad_ensure_select` does it on a `PAD_SELECT` start, and refuses the run if it
 cannot); `alive.sh` counts it as `selector (codeselect)`.
 
+### N images: the two card layouts
+
+The card's own kernel exposes `/dev/mmcblk0p1..p7` only, so one extra games
+partition is all a card can carry as a partition. `mkmulticard.py --layout`
+(default `auto`) chooses:
+
+- **`parts`** (one extra): the extra's games partition is p7 verbatim; the
+  selector's device is `/dev/mmcblk0p7`, the rig's token `p7`.
+- **`--layout multi`** (two or more): p7 is ONE ext4 partition (label
+  `multi`) holding `img1/`, `img2/`, ... `imgK/`, each the complete file tree
+  of that extra's games partition (`spk/`, the title dir, the
+  `game`/`conagent`/`data` symlinks) - built with `debugfs rdump` from the
+  read-only source into a scratch tree, `mke2fs -d` with the stock p3's
+  feature set, sized to the sum of the extras' used bytes + 10% + 256 MiB.
+  The devices are `/dev/mmcblk0p7:img1`, `/dev/mmcblk0p7:img2` ...
+  (`select.sh` mounts p7 at `/mnt/multi` and binds the subdirectory over
+  `/games`); the rig's tokens are `p7:img1`, `p7:img2` ... `parts.py
+  --list-games` prints one line per TREE with the subdirectory as a fifth
+  field (`7 15353856 7861174272 turtles_pro img1`), `cardmount.sh --part 7`
+  answers `<mount>/img1` for the partition (one component, so the teardown
+  still finds the mount), and `run_game.sh` binds `<mount>/imgN/<title>` over
+  `games/<title>` for the chosen tree.
+
+### Media: art, animations, sounds
+
+`mkmulticard.py build ... --media-dir DIR` reads `DIR/media.json` (written
+by `selectmedia.py prepare`: per image an art PNG, an animated GIF and a
+music WAV, any of them null, plus `sound_move`, `sound_confirm`, `volume`)
+and stages only the referenced files into the card's
+`/usr/local/codeselect/media` (flat, `^[A-Za-z0-9._-]+$`, PNG <= 1360x768,
+GIF <= 1.5 MB / 512x288 / 30 frames, WAV pcm_s16le 44100 Hz 1-2 ch, the set
+<= 20 MB - a wrong file refuses the build before a byte is copied). The
+`images.conf` it writes carries the six-field image lines
+(`image=<device>|<title>|<subtitle>|<art>|<anim>|<music>`) and the
+`sound_move=` / `sound_confirm=` / `volume=` / `mixer_volume=` keys; `inject`
+without `--media-dir` carries an existing media directory and those fields
+through, with it the media directory is replaced.
+
+In the rig, `run_game.sh` pulls the card's media out of its rootfs with
+`parts.py --rootfs-dir /usr/local/codeselect/media` (debugfs, no mount) into
+`$ROOT/dump/media` before the selector runs, forwards the card's
+`sound_move`/`sound_confirm`/`volume`/`mixer_volume` keys into
+`dump/codeselect.conf`, and passes `--media /dump/media`.
+**`PAD_SELECT_MEDIA=<host dir>`** hands the selector a directory of your own
+instead (art and sounds without rebuilding a card). Every media failure
+inside the selector is non-fatal: the menu still draws, the card still boots.
+
+**Hearing the selector in the rig: `PAD_AUDIO=1`.** David's default runs
+are muted (`PAD_AUDIO=0`, no player, `PAD_AUDIO_PLAY` unset - the selector
+logs `audio: none`); with `PAD_AUDIO=1` the selector inherits
+`PAD_AUDIO_PLAY`/`PAD_AUDIO_FMT` from `watch.sh`, writes `44100 2` to the
+format file, streams into the FIFO and closes it before the game starts, so
+`~/padaudio.log` shows `guest reports 44100 Hz x 2 ch` before `[select]
+chose`. To run such an E2E with SILENT speakers, mute the Windows player
+rather than the run: `padplay.py` re-reads the JSON named by
+`PAD_AUDIO_CTL` every 250 ms (`{"gain": 0.0-1.0, "muted": true|false}` -
+the app's Emulate-tab knob writes it as
+`%APPDATA%\pinball_decryptor\audio_ctl.json`, `_write_audio_ctl` in
+`pinball_decryptor/gui/emulate_tab.py`), so
+`PAD_AUDIO=1 PAD_AUDIO_CTL=/mnt/c/Users/<you>/AppData/Roaming/pinball_decryptor/audio_ctl.json`
+with `{"gain": 1.0, "muted": true}` in that file plays everything into the
+FIFO chain and nothing out of the speakers (the `[padplay] fed/played`
+counters and the `[select]`/`audio:` lines are the oracle); flip `muted` to
+`false` in the file to hear it, no restart needed.
+
+### The validator bypass
+
+A modified image trips Stern's game self/asset validator (`GAME VALIDATION
+ERROR / UPDATE SD CARD`). `mkmulticard.py build ... --bypass-validation`
+neuters it in EVERY games tree on the output card the way the app's Write
+does (`plugins/stern/valpatch.py`: `validation_exec` found by signature,
+`bx lr` at its entry, that tree's `.sidx` record of the game file refreshed)
+and prints `validator: bypassed` / `validator: none on this build` per tree;
+`mkmulticard.py bypass --card OUT` applies the same to an existing card in
+place (`--dry-run` only reports) - which is what fixes a card that already
+shows the error, no rebuild. Every partition written into gets an
+`OUT.pN.md5` sidecar and `verify` holds it to that instead of the source,
+and reports `bypass_status: armed|bypassed|absent|unlocated` per tree.
+Measured 2026-09-02 on a copy of the stock+1987 card: p3 (stock 1.59.0) was
+ARMED and took 40 bytes (4 + the two digests), p7 (the patched 1987 build)
+was already bypassed; the `.sidx` HMAC and MD5 matched the patched ELF
+afterwards and `verify` PASSed. The tamper *state* lives on the machine's
+board NVRAM, not on the card: a machine that already booted an unpatched
+image may keep its flag until a settings/factory reset.
+
 The hardware side is the same program installed in p2 and hooked into
 `/etc/init.d/game` by `select.sh`, reading the flippers over the node bus and
 remounting `/games` from the chosen partition - `codeselect/DESIGN.md` has the

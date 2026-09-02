@@ -44,9 +44,12 @@ LDPOST    = $(CRTEND) $(ROOT)/usr/lib/crtn.o -L$(ROOT)/lib -L$(ROOT)/usr/lib \
 # -l:libgcc_s.so.1: the rig's bridge shims leave __aeabi_uldivmod undefined
 LIBC      = -l:libc.so.6 $(ROOT)/usr/lib/libc_nonshared.a -l:libm.so.6 -l:libgcc_s.so.1 -lgcc
 GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2
+# the rootfs alsa-lib 1.0.28 (GLIBC_2.4 only; its libdl/libpthread/librt are
+# in the rootfs). Hand prototypes in audio_alsa.c: no headers on the box.
+AUDLIBS   = -l:libasound.so.2
 
-SRCS = codeselect.c conf.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c log.c
-HDRS = conf.h gfx.h egl_stern.h input.h log.h
+SRCS = codeselect.c conf.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c log.c art.c audio.c audio_fifo.c audio_alsa.c
+HDRS = conf.h gfx.h egl_stern.h input.h log.h art.h audio.h
 OBJS = $(SRCS:%.c=$(BUILD)/%.o)
 BIN  = $(BUILD)/codeselect
 
@@ -59,10 +62,11 @@ $(BUILD)/%.o: %.c $(HDRS) | $(BUILD)
 > $(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/gfx.o: third_party/stb_truetype.h
+$(BUILD)/art.o: third_party/stb_image.h
 
 # a failed link deletes its output: never leave a stale binary behind
 $(BIN): $(OBJS)
-> $(CC) $(CFLAGS) $(LDPRE) $(OBJS) $(LDPOST) $(GLLIBS) $(LIBC) -o $@ || { rm -f $@; exit 1; }
+> $(CC) $(CFLAGS) $(LDPRE) $(OBJS) $(LDPOST) $(GLLIBS) $(AUDLIBS) $(LIBC) -o $@ || { rm -f $@; exit 1; }
 > @echo "built $@"
 
 check: $(BIN)
@@ -82,6 +86,7 @@ install: $(BIN)
 > install -m 755 select.sh "$(DESTDIR)$(PREFIX)/select.sh"
 > install -m 644 images.conf.example "$(DESTDIR)$(PREFIX)/images.conf.example"
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the card's VeraMono.ttf will be used"; fi
+> if [ -d media ]; then install -d "$(DESTDIR)$(PREFIX)/media"; for f in media/*; do if [ -f "$$f" ]; then install -m 644 "$$f" "$(DESTDIR)$(PREFIX)/media/"; fi; done; fi
 
 clean:
 > rm -rf "$(BUILD)"

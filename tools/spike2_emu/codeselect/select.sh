@@ -3,27 +3,41 @@
 #
 # Called right after the script's own 'pkill boot_display ' line and before
 # 'if [ -f $GAMES_PATH/game ]; then'. Runs the selector, reads the index it
-# wrote, looks the device up in images.conf and, if it is not what fstab
-# already mounted at /games (p3, the primary), swaps the mount. Stern's own
-# launch lines follow untouched.
+# wrote, looks the device up in images.conf and, unless it is image 0 (the
+# primary, which fstab already mounted at /games), swaps the mount. Stern's
+# own launch lines follow untouched.
 #
-# Every failure boots the primary: the card degrades to a stock card, never
-# to a brick. This script never touches /mnt/boot. Writing the last-choice
-# file is the selector's job, not this script's.
+# Device forms in images.conf:
+#   <dev>         a whole games partition: umount /games; mount -o ro,relatime,exec <dev> /games
+#   <dev>:<sub>   a partition holding several games trees (img1/, img2/ ...):
+#                 umount /games; mount -o ro <dev> /mnt/multi; mount --bind /mnt/multi/<sub> /games
+#                 (/mnt/multi is created when the rootfs allows it; on the
+#                 stock read-only rootfs /var/volatile/multi (tmpfs) is used)
 #
-#   select.sh                 the hook (what /etc/init.d/game calls)
-#   select.sh --lookup N [conf]   print image N's device and exit (for tests)
+# Every failure boots the primary (/dev/mmcblk0p3 is mounted back on /games):
+# the card degrades to a stock card, never to a brick. This script never
+# touches /mnt/boot. Writing the last-choice file is the selector's job.
 #
-# POSIX sh; needs only busybox sed/awk/grep/head/tr/mount/umount + pidof.
+#   select.sh                     the hook (what /etc/init.d/game calls)
+#   select.sh --lookup N [conf]   print image N's device (without :<sub>)
+#   select.sh --lookup-sub N [conf]   print image N's subdirectory ("" when none)
+#
+# POSIX sh; needs only busybox sed/awk/grep/head/tr/mkdir/mount/umount + pidof.
+# The CODESELECT_* variables exist for the tests (a fake selector, fake
+# mount/umount, no block-device check); the hook runs with the defaults.
 
-DIR=/usr/local/codeselect
-CONF="$DIR/images.conf"
-BIN="$DIR/codeselect"
-OUT=/var/volatile/codeselect.choice
-LOGDIR=/dump/log
+DIR=${CODESELECT_DIR:-/usr/local/codeselect}
+CONF=${CODESELECT_CONF:-$DIR/images.conf}
+BIN=${CODESELECT_BIN:-$DIR/codeselect}
+OUT=${CODESELECT_OUT:-/var/volatile/codeselect.choice}
+LOGDIR=${CODESELECT_LOGDIR:-/dump/log}
 LOG="$LOGDIR/codeselect.log"
 PRIMARY=/dev/mmcblk0p3
-GAMES=/games
+GAMES=${CODESELECT_GAMES:-/games}
+MULTI=${CODESELECT_MULTI:-/mnt/multi}
+MULTI_FALLBACK=${CODESELECT_MULTI_FALLBACK:-/var/volatile/multi}
+MOUNT=${CODESELECT_MOUNT:-mount}
+UMOUNT=${CODESELECT_UMOUNT:-umount}
 
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null) select.sh: $*" >> "$LOG" 2>/dev/null
@@ -33,25 +47,45 @@ log() {
 # AWK may name another awk (the tests run the card's busybox awk under qemu)
 AWK=${AWK:-awk}
 
-# image N's device: the N-th (0-based) 'image=<device>|...' line of the conf
+# image N's device field split at ':' - prints "<dev>" or "<dev> <sub>":
+# the N-th (0-based) 'image=<device>|...' line of the conf
 lookup() {
     $AWK -F'|' -v want="$1" '
         /^[ \t]*image[ \t]*=/ {
             if (i == want) {
                 sub(/^[ \t]*image[ \t]*=[ \t]*/, "", $1)
                 gsub(/[ \t]+$/, "", $1)
-                print $1
+                n = split($1, a, ":")
+                if (n > 1) print a[1] " " a[2]
+                else print a[1]
                 exit
             }
             i++
         }' "$2"
 }
 
-if [ "$1" = "--lookup" ]; then
-    [ -n "$2" ] || { echo "usage: select.sh --lookup N [conf]" >&2; exit 1; }
-    lookup "$2" "${3:-$CONF}"
-    exit 0
-fi
+is_blockdev() {
+    [ -n "${CODESELECT_NO_BLKCHECK:-}" ] || [ -b "$1" ]
+}
+
+has_game() {
+    [ -e "$1/game" ] || [ -L "$1/game" ]
+}
+
+case "$1" in
+    --lookup)
+        [ -n "$2" ] || { echo "usage: select.sh --lookup N [conf]" >&2; exit 1; }
+        set -- $(lookup "$2" "${3:-$CONF}")
+        echo "$1"
+        exit 0
+        ;;
+    --lookup-sub)
+        [ -n "$2" ] || { echo "usage: select.sh --lookup-sub N [conf]" >&2; exit 1; }
+        set -- $(lookup "$2" "${3:-$CONF}")
+        echo "$2"
+        exit 0
+        ;;
+esac
 
 mkdir -p "$LOGDIR" 2>/dev/null
 
@@ -73,28 +107,53 @@ rc=$?
 idx=$(head -n 1 "$OUT" 2>/dev/null | tr -cd '0-9')
 [ -n "$idx" ] || { log "no choice in $OUT: booting primary"; exit 0; }
 
-dev=$(lookup "$idx" "$CONF")
-[ -n "$dev" ] || { log "image $idx has no device in $CONF: booting primary"; exit 0; }
-
-cur=$($AWK -v m="$GAMES" '$2 == m { d = $1 } END { print d }' /proc/mounts)
-if [ "$dev" = "$cur" ]; then
-    log "image $idx ($dev) is already mounted at $GAMES"
+if [ "$idx" -eq 0 ]; then
+    log "image 0 is the primary, already mounted at $GAMES"
     exit 0
 fi
-[ -b "$dev" ] || { log "$dev is not a block device: booting primary"; exit 0; }
 
-if ! umount "$GAMES"; then
+set -- $(lookup "$idx" "$CONF")
+dev=$1
+sub=$2
+[ -n "$dev" ] || { log "image $idx has no device in $CONF: booting primary"; exit 0; }
+is_blockdev "$dev" || { log "$dev is not a block device: booting primary"; exit 0; }
+case "$sub" in
+    */*|.*) log "image $idx: bad subdirectory '$sub': booting primary"; exit 0 ;;
+esac
+
+if ! $UMOUNT "$GAMES"; then
     log "umount $GAMES failed: booting primary (still mounted)"
     exit 0
 fi
-if mount -t ext4 -o ro,relatime,exec "$dev" "$GAMES" && { [ -e "$GAMES/game" ] || [ -L "$GAMES/game" ]; }; then
-    log "image $idx: mounted $dev at $GAMES"
-    exit 0
+
+if [ -z "$sub" ]; then
+    if $MOUNT -t ext4 -o ro,relatime,exec "$dev" "$GAMES" && has_game "$GAMES"; then
+        log "image $idx: mounted $dev at $GAMES"
+        exit 0
+    fi
+    log "mount $dev failed or it has no $GAMES/game: remounting the primary $PRIMARY"
+    $UMOUNT "$GAMES" 2>/dev/null
+else
+    mp=$MULTI
+    if ! mkdir -p "$mp" 2>/dev/null; then
+        mp=$MULTI_FALLBACK
+        mkdir -p "$mp" 2>/dev/null
+        log "$MULTI is not creatable (read-only rootfs), using $mp"
+    fi
+    if [ -d "$mp" ] && $MOUNT -t ext4 -o ro,relatime,exec "$dev" "$mp"; then
+        if [ -d "$mp/$sub" ] && $MOUNT --bind "$mp/$sub" "$GAMES" && has_game "$GAMES"; then
+            log "image $idx: mounted $dev at $mp, $sub bound over $GAMES"
+            exit 0
+        fi
+        log "no $mp/$sub/game or the bind failed: remounting the primary $PRIMARY"
+        $UMOUNT "$GAMES" 2>/dev/null
+        $UMOUNT "$mp" 2>/dev/null
+    else
+        log "mount $dev at $mp failed: remounting the primary $PRIMARY"
+    fi
 fi
 
-log "mount $dev failed or it has no $GAMES/game: remounting the primary $PRIMARY"
-umount "$GAMES" 2>/dev/null
-if mount -t ext4 -o ro,relatime,exec "$PRIMARY" "$GAMES"; then
+if $MOUNT -t ext4 -o ro,relatime,exec "$PRIMARY" "$GAMES"; then
     log "primary remounted"
 else
     log "PRIMARY REMOUNT FAILED: $GAMES is empty"

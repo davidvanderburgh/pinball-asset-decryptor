@@ -5,9 +5,11 @@
     parts.py --rootfs card.raw        # byte offset of the OS partition
     parts.py --games  card.raw        # byte offset of the (first) games partition
     parts.py --fat    card.raw        # "<start_lba> <sectors>" of the boot partition
-    parts.py --list-games card.raw    # every games partition: "idx lba offset title"
+    parts.py --list-games card.raw    # every games tree: "idx lba offset title [subdir]"
     parts.py --part N card.raw        # byte offset of partition N (primary or logical)
     parts.py --rootfs-file /etc/x card.raw   # a file out of the rootfs, via debugfs
+    parts.py --rootfs-dir /usr/local/codeselect/media DEST card.raw
+                                      # a directory out of the rootfs -> DEST/<name> (debugfs rdump)
 
 WHY THIS EXISTS. Every script here that reached into a card image carried the
 offsets of ONE card as constants - `?offset=12582912` for the rootfs,
@@ -41,9 +43,19 @@ ext4 (only lost+found), so once logicals are walked that negative branch
 would offer /data and /dump as boot choices. `--list-games` requires /spk AND
 a title directory holding a `game` file, which is what a games partition
 actually is.
+
+THE MULTI LAYOUT (item 90, N images): mkmulticard.py --layout multi makes p7
+ONE ext4 partition whose root holds img1/, img2/, ... imgK/ - each a complete
+games tree (spk/, the title dir, the game/conagent/data symlinks). Such a
+partition has no /spk of its own, so the strict rule is applied one level
+down: `--list-games` prints one line per imgN that passes it, with the
+subdirectory as a fifth field (`7 15353856 7861174272 turtles_pro img1`), and
+the selector's device token for it is `p7:img1`. A plain games partition
+prints four fields, as before.
 """
 import argparse
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -59,6 +71,8 @@ EXT_TYPES = {0x05, 0x0F}
 #: The most logicals a chain is followed for. A corrupt link that loops would
 #: otherwise walk forever; a real card has two (stock) or a handful (multi).
 MAX_LOGICALS = 32
+#: A games tree inside the multi layout's p7: img1, img2, ... (mkmulticard.py).
+MULTI_SUBDIR = re.compile(r"^img(\d+)$")
 
 
 def _entry(sector, i):
@@ -166,26 +180,45 @@ def _dirs(path, offset, sub="/"):
             if n not in (".", "..") and (m & 0o170000) == 0o040000]
 
 
-def _title_dirs(path, offset):
+def _title_dirs(path, offset, sub="/"):
     """Title directories - subdirectories holding a `game` file - of the
-    filesystem at `offset`, in name order. Empty for anything else."""
-    names = _ls(path, offset)
+    games tree rooted at `sub` in the filesystem at `offset`, in name order.
+    Empty for anything else (no /spk beside them = not a games tree)."""
+    names = _ls(path, offset, sub)
     if not names or "spk" not in names:
         return []
+    base = sub.rstrip("/")
     out = []
-    for d in sorted(_dirs(path, offset) or []):
+    for d in sorted(_dirs(path, offset, sub) or []):
         if d in ("lost+found", "spk"):
             continue
-        inside = _ls(path, offset, "/" + d)
+        inside = _ls(path, offset, base + "/" + d)
         if inside and "game" in inside:
             out.append(d)
     return out
 
 
+def _multi_subdirs(path, offset):
+    """The imgN directories at the root of the filesystem at `offset`, in
+    numeric order - the multi layout's marker. Empty for a plain games
+    partition (it has /spk) and for anything without such directories."""
+    names = _ls(path, offset)
+    if not names or "spk" in names:
+        return []
+    subs = []
+    for d in _dirs(path, offset) or []:
+        m = MULTI_SUBDIR.match(d)
+        if m:
+            subs.append((int(m.group(1)), d))
+    return [d for _n, d in sorted(subs)]
+
+
 def games_all(path):
-    """[(index, start_lba, offset, [title, ...])] for EVERY games partition,
-    primaries and logicals, in partition order - the strict rule from the
-    header: /spk AND a title directory holding `game`."""
+    """[(index, start_lba, offset, [title, ...], subdir)] for EVERY games
+    tree, primaries and logicals, in partition order - the strict rule from
+    the header: /spk AND a title directory holding `game`. `subdir` is None
+    for a whole games partition and 'imgN' for a tree inside the multi
+    layout's p7 (one entry per tree, same idx/lba/offset)."""
     parts = [(idx, ptype, start) for idx, ptype, start, _c in table(path)]
     parts += [(idx, ptype, start) for idx, ptype, start, _c, _e in logical(path)]
     out = []
@@ -194,7 +227,12 @@ def games_all(path):
             continue
         titles = _title_dirs(path, start * SECTOR)
         if titles:
-            out.append((idx, start, start * SECTOR, titles))
+            out.append((idx, start, start * SECTOR, titles, None))
+            continue
+        for sub in _multi_subdirs(path, start * SECTOR):
+            titles = _title_dirs(path, start * SECTOR, "/" + sub)
+            if titles:
+                out.append((idx, start, start * SECTOR, titles, sub))
     return out
 
 
@@ -230,6 +268,40 @@ def rootfs_file(path, name):
     if r.returncode != 0 or not r.stdout:
         return None
     return r.stdout.decode("utf-8", "replace")
+
+
+def rootfs_dir(path, name, dest):
+    """Copy directory `name` of the rootfs partition into `dest` with
+    `debugfs rdump` -> the created path (dest/<basename>), or None when the
+    rootfs has no such directory (or debugfs is missing).
+
+    THE ITEM 90 MEDIA DIRECTORY is what this is for: run_game.sh pulls the
+    card's /usr/local/codeselect/media into $ROOT/dump/media before the
+    selector runs, so the emulator shows the art and plays the sounds the
+    machine does. Symlinks come out as symlinks (measured); as an ordinary
+    user debugfs cannot chown what it writes and complains once per entry on
+    stderr - that noise is expected and the files are all there, so only a
+    non-zero exit or a missing result counts as failure."""
+    found = identify(path)
+    if "rootfs" not in found:
+        return None
+    ref = "%s?offset=%d" % (path, found["rootfs"])
+    try:
+        st = subprocess.run(["debugfs", "-R", 'stat "%s"' % name, ref],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                            timeout=60)
+        if st.returncode != 0 or b"Type: directory" not in st.stdout:
+            return None
+        os.makedirs(dest, exist_ok=True)
+        r = subprocess.run(["debugfs", "-R", 'rdump "%s" "%s"' % (name, dest), ref],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=600)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = os.path.join(dest, os.path.basename(name.rstrip("/")))
+    if r.returncode != 0 or not os.path.isdir(out):
+        return None
+    return out
 
 
 def identify(path):
@@ -287,6 +359,9 @@ def main():
                     help="byte offset of partition N (kernel numbering)")
     ap.add_argument("--rootfs-file", metavar="PATH",
                     help="print a file out of the rootfs partition")
+    ap.add_argument("--rootfs-dir", nargs=2, metavar=("PATH", "DEST"),
+                    help="copy directory PATH of the rootfs into DEST/ (debugfs rdump); "
+                         "prints the created path, nothing when the rootfs has no such directory")
     a = ap.parse_args()
     if not os.path.exists(a.image):
         raise SystemExit("no such image: %s" % a.image)
@@ -305,14 +380,22 @@ def main():
         games = games_all(a.image)
         if not games:
             return 1
-        for idx, lba, off, titles in games:
-            print("%d %d %d %s" % (idx, lba, off, ",".join(titles)))
+        for idx, lba, off, titles, sub in games:
+            print("%d %d %d %s%s" % (idx, lba, off, ",".join(titles),
+                                     (" " + sub) if sub else ""))
         return 0
     if a.rootfs_file:
         text = rootfs_file(a.image, a.rootfs_file)
         if text is None:
             return 1
         sys.stdout.write(text)
+        return 0
+    if a.rootfs_dir:
+        # An absent directory is not an error: a card built without media
+        # simply has none, and the caller reads "no DEST/<name>" as that.
+        out = rootfs_dir(a.image, a.rootfs_dir[0], a.rootfs_dir[1])
+        if out:
+            print(out)
         return 0
 
     found = identify(a.image)
@@ -340,7 +423,9 @@ def main():
         print("%d %d" % found["fat"])
         return 0
 
-    games = {idx: n for n, (idx, _l, _o, _t) in enumerate(games_all(a.image), 1)}
+    games = {}
+    for idx, _l, _o, _t, sub in games_all(a.image):
+        games.setdefault(idx, len(games) + 1)
     rows = [(idx, ptype, start, count, None)
             for idx, ptype, start, count in table(a.image)]
     rows += [(idx, ptype, start, count, ebr)
@@ -357,7 +442,10 @@ def main():
         elif found.get("games") == start * SECTOR:
             what = "games" + (" (by order)" if found.get("games_guessed") else "")
         elif idx in games:
+            subs = [s for i, _l, _o, _t, s in games_all(a.image) if i == idx and s]
             what = "games (%s)" % _ordinal(games[idx])
+            if subs:
+                what += " [multi: %s]" % ",".join(subs)
         if ebr is not None:
             what = ("%s  [logical, EBR at %d]" % (what, ebr)).strip()
         print("%-4d 0x%02x   %-12d %-12d %s  offset=%d"

@@ -94,6 +94,15 @@ class Capabilities:
     # it is era-gated within the Stern plugin (Spike 2 sets ``emulate``, the
     # Spike 1 era sets this).  See gui/spike1_emulate_tab.py and tools/spike1_emu.
     emulate_spike1: bool = False
+    # Multi-boot tab (item 90): build ONE SD card that carries several
+    # complete game images and a boot-time menu (the code selector in
+    # tools/spike2_emu/codeselect) - stock code and a custom build on the
+    # same machine without swapping cards.  The tab drives mkmulticard.py and
+    # selectmedia.py under WSL and hands the result to the flash flow and the
+    # Emulate tab.  Its own flag rather than a rider on ``emulate``: the card
+    # builder needs no emulator, and a plugin with an Emulate tab does not
+    # necessarily have a multi-image card layout.  Used by Stern Spike 2.
+    multiboot: bool = False
     # Auto-transcribe path: run faster-whisper across the extracted
     # audio files and emit a ``callouts.csv`` mapping each WAV to its
     # spoken text (non-speech samples are skipped via VAD).  Used by

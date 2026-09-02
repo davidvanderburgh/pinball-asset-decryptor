@@ -29,6 +29,14 @@ static void copy_field(char *dst, const char *src)
     dst[n] = 0;
 }
 
+static int clamp_int(const char *val, int lo, int hi)
+{
+    long v = strtol(val, NULL, 10);
+    if (v < lo) v = lo;
+    if (v > hi) v = hi;
+    return (int)v;
+}
+
 int conf_load(struct conf *c, const char *path, char *err, int errlen)
 {
     FILE *f;
@@ -38,6 +46,8 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     memset(c, 0, sizeof *c);
     c->def = -1;
     c->timeout = -1;
+    c->volume = -1;
+    c->mixer_volume = -1;
     f = fopen(path, "r");
     if (!f) {
         snprintf(err, errlen, "cannot open %s: %s", path, strerror(errno));
@@ -54,20 +64,31 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
         key = trim(s);
         val = trim(eq + 1);
         if (!strcmp(key, "image")) {
-            char *a, *b, *p;
+            /* up to six '|'-separated fields: device|title|subtitle|art|anim|music;
+             * a 3-field line is the v1 form and stays valid */
+            char *fld[6];
+            char *p = val;
             struct conf_image *im;
+            int k, nf = 0;
             if (c->n >= CONF_MAX_IMAGES) {
                 snprintf(err, errlen, "%s:%d: more than %d images", path, lineno, CONF_MAX_IMAGES);
                 fclose(f);
                 return -1;
             }
             im = &c->img[c->n];
-            p = val;
-            a = strchr(p, '|');
-            if (a) { *a++ = 0; b = strchr(a, '|'); if (b) *b++ = 0; } else b = NULL;
-            copy_field(im->device, trim(p));
-            copy_field(im->title, a ? trim(a) : "");
-            copy_field(im->subtitle, b ? trim(b) : "");
+            for (k = 0; k < 6; k++) fld[k] = NULL;
+            while (p && nf < 6) {
+                char *bar = strchr(p, '|');
+                if (bar) *bar++ = 0;
+                fld[nf++] = trim(p);
+                p = bar;
+            }
+            copy_field(im->device, fld[0] ? fld[0] : "");
+            copy_field(im->title, fld[1] ? fld[1] : "");
+            copy_field(im->subtitle, fld[2] ? fld[2] : "");
+            copy_field(im->art, fld[3] ? fld[3] : "");
+            copy_field(im->anim, fld[4] ? fld[4] : "");
+            copy_field(im->music, fld[5] ? fld[5] : "");
             if (!*im->device) {
                 snprintf(err, errlen, "%s:%d: image without a device", path, lineno);
                 fclose(f);
@@ -81,6 +102,16 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             c->timeout = atoi(val);
         } else if (!strcmp(key, "font")) {
             copy_field(c->font, val);
+        } else if (!strcmp(key, "media")) {
+            copy_field(c->media, val);
+        } else if (!strcmp(key, "sound_move")) {
+            copy_field(c->sound_move, val);
+        } else if (!strcmp(key, "sound_confirm")) {
+            copy_field(c->sound_confirm, val);
+        } else if (!strcmp(key, "volume")) {
+            if (*val) c->volume = clamp_int(val, 0, 100);
+        } else if (!strcmp(key, "mixer_volume")) {
+            if (*val) c->mixer_volume = clamp_int(val, 0, 63);
         }
         /* unknown keys are ignored so the file can grow */
     }
@@ -90,6 +121,14 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
         return -1;
     }
     if (c->def >= c->n) c->def = -1;
+    return 0;
+}
+
+int conf_has_art(const struct conf *c)
+{
+    int i;
+    for (i = 0; i < c->n; i++)
+        if (c->img[i].art[0] || c->img[i].anim[0]) return 1;
     return 0;
 }
 

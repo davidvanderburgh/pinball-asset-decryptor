@@ -2345,6 +2345,7 @@ class MainWindow:
         self._tab_emulate = ttk.Frame(self._notebook)
         self._tab_jjp_emulate = ttk.Frame(self._notebook)
         self._tab_spike1_emulate = ttk.Frame(self._notebook)
+        self._tab_multiboot = ttk.Frame(self._notebook)
 
         # Order: Extract → the Replace tabs → Default Settings (set defaults
         # before building) → Write → Mod Pack → Partitions.  Display labels are
@@ -2373,6 +2374,11 @@ class MainWindow:
             # as the other two, gated by its own capability (emulate_spike1),
             # and only one emulate tab is ever visible for a given selection.
             (self._tab_spike1_emulate, "Emulate", "Emulate Spike1"),
+            # Item 90: the multi-image SD card builder (Stern Spike 2 only,
+            # gated by ``multiboot``).  Its own tab rather than a section of
+            # Emulate or Write: it makes a CARD out of several images, and
+            # neither of those tabs is about that.
+            (self._tab_multiboot, "Multi-boot", "Multi-boot"),
         ]
         self._tab_keys = {}
         for _frame, _label, _key in _tabs:
@@ -2390,6 +2396,7 @@ class MainWindow:
         self._build_settings_tab()
         self._build_compare_tab()
         self._build_emulate_tab()
+        self._build_multiboot_tab()
         self._build_jjp_emulate_tab()
         self._build_spike1_emulate_tab()
 
@@ -13942,6 +13949,40 @@ class MainWindow:
                 k, p, t, tab="Emulate"))
         self._emulate_panel.build(self._tab_emulate)
 
+    def _build_multiboot_tab(self):
+        """Build the 'Multi-boot' tab: one SD card carrying several game
+        images and a menu at power-up (item 90).
+
+        The seam only.  Everything of substance is in
+        :mod:`..gui.multiboot_tab`, and the card itself is made by the rig's
+        ``tools/spike2_emu/mkmulticard.py`` (with ``selectmedia.py`` for the
+        menu's art and sounds) - the tab runs those under WSL and streams
+        what they say.  Built AFTER the Emulate tab because its 'Run in
+        emulator' is that panel's launch with the boot selector ticked, and
+        its 'Flash to SD card…' is the Write tab's Build / flash dialog opened
+        flash-only on the finished image."""
+        from .multiboot_tab import MultibootPanel
+
+        def run_emulator(path):
+            # Show the Emulate tab so the start is watched where its status
+            # lives, then launch exactly as its own Start button would, with
+            # PAD_SELECT=1 so the rig shows the card's menu first.
+            try:
+                self._notebook.select(self._tab_emulate)
+            except tk.TclError:
+                pass
+            self._emulate_panel.launch_card(path, select=True)
+
+        self._multiboot_panel = MultibootPanel(
+            self._tab_multiboot,
+            log=self.append_log,
+            theme_fn=lambda: self._current_theme,
+            badge_fn=self._make_round_icon,
+            resize_fn=self._resize_notebook_to_current_tab,
+            flash_fn=lambda p: self._open_flash_dialog(initial_image=p),
+            emulate_fn=run_emulator)
+        self._multiboot_panel.build(self._tab_multiboot)
+
     def _build_jjp_emulate_tab(self):
         """Build the 'Emulate JJP' tab: run a Jersey Jack game on this PC.
 
@@ -16028,6 +16069,7 @@ class MainWindow:
         self._configure_tab("Emulate JJP", getattr(caps, "emulate_jjp", False))
         self._configure_tab("Emulate Spike1",
                             getattr(caps, "emulate_spike1", False))
+        self._configure_tab("Multi-boot", getattr(caps, "multiboot", False))
         # The Mod Pack tab is shared, but the "Transfer Mods to New Version"
         # section only fits plugins whose vendor re-lays-out the card across
         # versions (Stern) — show it only for those, hide it for the rest.
@@ -19793,7 +19835,7 @@ class MainWindow:
         if self._help_window is not None:
             self._help_window.refresh(tab_name)
 
-    def _open_flash_dialog(self):
+    def _open_flash_dialog(self, initial_image=None):
         """Open the two-section Build / flash modal.
 
         Section 1 builds a fresh image (the Write tab's normal Build, path
@@ -19802,7 +19844,10 @@ class MainWindow:
         testing on the machine was always a two-step).  The dialog hands the
         choice to the app's ``on_build_flash`` / ``on_flash_image``
         callbacks, which run the pipelines through the normal status area.
-        Refuses while a run is in flight (the status area is busy)."""
+        Refuses while a run is in flight (the status area is busy).
+
+        ``initial_image``: a finished image handed in by another tab (the
+        Multi-boot tab's card) - the dialog then opens flash-only on it."""
         if self._on_flash_image is None:
             return
         if self._is_running():
@@ -19833,6 +19878,13 @@ class MainWindow:
         # just built is the overwhelmingly common case (feedback batch 8).
         initial = target if (target and os.path.isfile(target)) else None
         mfr_key = getattr(self._current_mfr, "key", "")
+        choices = self._saved_flash_choices.get(mfr_key)
+        if initial_image and os.path.isfile(initial_image):
+            # Item 90: a card handed in by the Multi-boot tab.  Flash THAT
+            # file, and open flash-only - the build section would build the
+            # Write tab's image, which is not the card that was just made.
+            initial = initial_image
+            choices = {"build": False, "write": True}
         from .flash_dialog import FlashImageDialog
         FlashImageDialog(
             self._tk_root(),
@@ -19845,7 +19897,7 @@ class MainWindow:
             can_build=can_build,
             cannot_build_reason=reason,
             has_pending_changes=self._has_pending_write_changes(),
-            initial_choices=self._saved_flash_choices.get(mfr_key),
+            initial_choices=choices,
             on_choices=lambda c, k=mfr_key: self._remember_flash_choices(k, c))
 
     def _open_read_card_dialog(self):

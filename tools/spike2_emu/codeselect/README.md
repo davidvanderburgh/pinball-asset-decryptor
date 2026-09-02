@@ -2,19 +2,32 @@
 
 One SD card, several complete game images; at power-up a menu on the LCD lets
 the player pick the one that boots. This directory holds the selector program
-that draws that menu and reads the buttons, the hook script that swaps the
-`/games` mount, and the tests. The card layout and the emulator side are in
-`DESIGN.md` and in the rig (`run_game.sh`/`watch.sh`).
+that draws that menu (with a picture, an animation and a music loop per card,
+a click on every move and a confirm sound), reads the buttons, the hook script
+that swaps the `/games` mount, and the tests. The card layout and the emulator
+side are in `DESIGN.md` and in the rig (`run_game.sh`/`watch.sh`).
 
 ```
-codeselect.c     main loop, CLI, menu state, countdown, choice/last files
+codeselect.c     main loop, CLI, layout (row of 2-4 cards, carousel beyond),
+                 countdown, sounds, the confirm wait, choice/last files
 gfx.c/.h         software RGBA canvas: rectangles, rounded frames, TrueType
-                 text (third_party/stb_truetype.h), 180-degree rotation, P6 PPM
-egl_stern.c/.h   Stern's exact EGL/GLES2 bring-up + one textured quad
+                 text (third_party/stb_truetype.h), RGBA blits, DIRTY-RECT
+                 tracking + a packed sub-rect for the upload, 180-degree
+                 rotation, P6 PPM
+egl_stern.c/.h   Stern's exact EGL/GLES2 bring-up + one textured quad,
+                 glTexSubImage2D of the changed rectangle only
+art.c/.h         PNG stills and animated GIFs (third_party/stb_image.h, PNG +
+                 GIF only), box-downscaled once into the card's art panel;
+                 GIFs decode one frame per call
+audio.c/.h       WAV loader (PCM 16-bit 44100 Hz 1-2 ch), the 4-voice s16
+                 stereo mixer, sink selection, --audio-dump
+audio_fifo.c     the emulator sink: the rig's audio FIFO (PAD_AUDIO_PLAY)
+audio_alsa.c     the machine sink: the game's ALSA device through the rootfs
+                 libasound (hand prototypes), plus the optional mixer_volume
 input.c/.h       the button events, the shared 2-sample debouncer
 input_hw.c       node bus (/dev/ttymxc1) + cabinet SPI (/dev/spidev1.0)
 input_padsw.c    the emulator's keyboard channel file (PAD_SW_SHM)
-conf.c/.h        images.conf, /data/codeselect.last, the choice file
+conf.c/.h        images.conf v2, /data/codeselect.last, the choice file
 log.c/.h         stderr + --log file; '[select] ' stdout lines
 select.sh        the hardware hook for /etc/init.d/game
 images.conf.example
@@ -40,16 +53,21 @@ sysroot BY HAND (`-nostdinc -isystem $ROOT/usr/include`, the rootfs crt
 objects, `-nostdlib`, `-l:libc.so.6 libc_nonshared.a`, recipe D of the build
 report). `--sysroot` alone silently yields a GLIBC_2.34 binary; the
 `-U_TIME_BITS -U_FILE_OFFSET_BITS -U_FORTIFY_SOURCE -fno-stack-protector
--fno-pie` flags are load-bearing. `check_elf.sh` enforces: max version node
-`GLIBC_2.17`, NEEDED only `libEGL.so.1 libGLESv2.so.2 libc.so.6 libm.so.6
-libgcc_s.so.1`, interpreter `/lib/ld-linux-armhf.so.3`. C only: the rootfs
-libstdc++ tops out at GLIBCXX_3.4.20.
+-fno-pie` flags are load-bearing. The link line adds `AUDLIBS =
+-l:libasound.so.2` (the rootfs alsa-lib 1.0.28, GLIBC_2.4 only; its
+libdl/libpthread/librt are in the rootfs). `check_elf.sh` enforces: max
+version node `GLIBC_2.17`, NEEDED only `libEGL.so.1 libGLESv2.so.2
+libasound.so.2 libc.so.6 libm.so.6 libgcc_s.so.1`, interpreter
+`/lib/ld-linux-armhf.so.3`. C only: the rootfs libstdc++ tops out at
+GLIBCXX_3.4.20. The build is warning-free (`-Wall`); keep it so.
 
 `make install` puts `codeselect`, `select.sh`, `images.conf.example` and
 `font.ttf` (DejaVuSans-Bold from `/usr/share/fonts/truetype/dejavu/`, when the
 build host has it; otherwise the card's own `/usr/local/spike/VeraMono.ttf` is
-used at run time) under `$(DESTDIR)/usr/local/codeselect`. The card builder
-injects that tree into p2 and writes `images.conf`.
+used at run time) under `$(DESTDIR)/usr/local/codeselect`, plus every file of
+a `media/` directory beside the Makefile (when one exists) under
+`$(DESTDIR)/usr/local/codeselect/media/`. The card builder injects that tree
+into p2 and writes `images.conf`.
 
 ## The program
 
@@ -58,6 +76,8 @@ codeselect [--conf PATH] [--out PATH] [--input hw|padsw|none] [--nodebus DEV]
            [--spi DEV|none] [--padsw PATH] [--tables PATH] [--timeout SEC]
            [--last PATH] [--default N] [--log PATH] [--headless FILE.ppm]
            [--invert|--no-invert] [--preamble min|full] [--font PATH]
+           [--media DIR] [--audio auto|alsa|fifo:PATH|none] [--audio-fmt PATH]
+           [--volume 0-100] [--anim-frame N] [--audio-dump FILE]
 ```
 
 | option | default | meaning |
@@ -77,47 +97,159 @@ codeselect [--conf PATH] [--out PATH] [--input hw|padsw|none] [--nodebus DEV]
 | `--invert` | auto | auto = `/games/data/boot_display_cmd` contains the token `-invert` (rotate 180, as boot_display does) |
 | `--preamble` | `min` | `hw` only: how much of the game's node-bus bring-up to replay first |
 | `--font` | conf `font=`, `/usr/local/codeselect/font.ttf`, `/usr/local/spike/VeraMono.ttf` | first that loads wins |
+| `--media` | conf `media=`, else `/usr/local/codeselect/media` | where the conf's media names live (a name starting with `/` is used as is) |
+| `--audio` | `auto` | `auto` = ALSA when `snd_pcm_open` succeeds, else `fifo:$PAD_AUDIO_PLAY` when that is set and non-empty, else `none`; `alsa`, `fifo:PATH`, `none` force one |
+| `--audio-fmt` | `$PAD_AUDIO_FMT` | the rig's fmt file; the FIFO sink writes `44100 2` into it first |
+| `--volume` | conf `volume=`, else 50 | software mix gain, 0-100 (50 = -6 dB) |
+| `--anim-frame` | animate | headless tests: every animation shows frame N and never ticks |
+| `--audio-dump` | none | raw s16le 44100 Hz stereo of everything mixed (with `--audio none` the mix still runs, paced to the clock) |
 
 Exit status: `0` = a choice was written to `--out`; `2` = no choice (bad conf,
-no font, display failure, interrupted).
+no font, display failure, interrupted). Every media failure - a missing or
+undecodable picture, a WAV in the wrong format, no sound device, no FIFO
+reader - is logged and the menu carries on without that piece; the card never
+fails to boot over media.
 
 Keys: LEFT FLIPPER / Service Minus = highlight left (wraps), RIGHT FLIPPER /
 Service Plus = right, START / Service Select = confirm; Service Back is
 ignored (autoattract.sh presses it in the rig). Two agreeing samples make a
 state, a press edge makes one event, releases make none.
 
-Picture: a dark 1360x768 (or whatever `fbGetDisplayGeometry` says) menu -
-`SELECT GAME CODE`, one card per image (2-4, width scaled), the highlighted
-card framed amber on a lighter fill, a footer `LEFT / RIGHT FLIPPER: choose
-START: boot` and `booting <title> in N s` (or `press START to boot <title>`
-with timeout 0). Titles shrink to fit and wrap onto two lines when they must;
-subtitles wrap to four. On confirm one `LOADING <title>...` frame is drawn,
-swapped, and the program exits. The canvas is redrawn only on a state change
-(highlight, countdown second, confirm) and uploaded with one
-`glTexSubImage2D`; `eglSwapBuffers` runs every frame regardless (the bridge
-paces to 60 Hz).
+### The picture
 
-### images.conf
+A dark 1360x768 (or whatever `fbGetDisplayGeometry` says) menu: `SELECT GAME
+CODE`, one card per image, the highlighted card framed amber on a lighter
+fill, a footer `LEFT / RIGHT FLIPPER: choose   START: boot` and `booting
+<title> in N s` (or `press START to boot <title>` with timeout 0).
+
+* **2-4 images**: a row, card width scaled to fit (602 / 389 / 283 px).
+* **5-16 images**: a carousel of three cards at the 3-card width, the
+  highlighted image always in the middle, its neighbours left and right (with
+  wrap-around), the neighbours-but-one peeking in from the screen edges as
+  empty frames, and a `<   n / N   >` line under the cards. LEFT/RIGHT rotate
+  the carousel.
+* **No media configured**: the card is the v1 layout - `IMAGE n` label, the
+  title (shrunk to fit, wrapped to two lines when it must), the subtitle
+  (wrapped to four) - byte for byte (`test/headless.sh`'s first frames are
+  identical to the v1 renders).
+* **Any image with art or an animation**: every card gets an art panel across
+  the top 40 % of the card (546x168 for two cards, 333x168 for three,
+  227x168 for four) above the label; the title shrinks to 48 px and the
+  subtitle to 26 px with the lines that still fit (two or three). A card's
+  picture is aspect-fitted into its panel and centred (never upscaled; the
+  tools pre-scale). The highlighted card plays its GIF on the GIF's own
+  frame delays (100 ms where the file says 0, clamped 20 ms-10 s); the
+  others show their still, or frame 0 when they have no still.
+* **Confirm**: one `LOADING <title>...` frame with the chosen card's picture
+  above the line; it stays up (swapped every frame) while the confirm sound
+  plays to completion, then the program exits and the LCD keeps that frame
+  until the game's first frame.
+
+The canvas is redrawn in full only on a state change (highlight, countdown
+second, carousel move); an animation tick repaints just the highlighted
+panel. Every drawing call grows a dirty rectangle, and the frame uploads only
+that rectangle, tightly packed, with one `glTexSubImage2D` (a 546x168 panel
+tick = 367 KB instead of the 4.18 MB canvas); `eglSwapBuffers` runs every
+frame regardless (the bridge paces to 60 Hz).
+
+### Media
+
+`/usr/local/codeselect/media/` on the card (flat; names `[A-Za-z0-9._-]+`;
+the whole set at most 20 MB - the tools enforce that, the selector only reads):
+
+| kind | format | notes |
+|---|---|---|
+| art | PNG (any colour type) | pre-scaled to the panel by the tools; decoded with stb_image, downscaled into the panel, 4 B/px in RAM |
+| anim | animated GIF, <= 512x288, <= 30 frames, <= 1.5 MB | `stb_image`'s per-frame decoder; frame delays from the file; frames beyond 30 are ignored; only the two previous full-size frames are kept while decoding |
+| music, sound_move, sound_confirm | WAV: RIFF PCM (or extensible-PCM) 16-bit 44100 Hz, 1 or 2 channels | mono is duplicated; anything else is refused with `audio: <file>: unsupported (...)`; clips longer than 120 s are cut |
+
+Decode order: every still and the highlighted card's GIF before the first
+frame (a 4-frame GIF takes ~4 ms under qemu), the other GIFs one FRAME per
+loop iteration afterwards, so the menu appears at once and never stalls.
+
+### Sound
+
+One s16 44100 Hz stereo bus, four voices (music loop + move/confirm + one
+spare, the oldest one-shot is stolen when all are busy), saturating mix,
+master gain from `volume=` (256 * v/100), a 20 ms fade when a voice is
+stopped so nothing clicks. `audio_pump()` runs from the main loop every
+iteration and mixes exactly what the sink can take right now - never blocks:
+
+* `alsa` (the machine): `snd_lib_error_set_handler(quiet)`,
+  `snd_pcm_open("sysdefault:CARD=sgtl5000main", PLAYBACK, 0)` - any failure
+  is "no alsa" (never the `null` device: alsa-lib 1.0.28 asserts on it),
+  `snd_pcm_set_params(S16_LE, RW_INTERLEAVED, 2, 44100, resample 1, 500 ms)`,
+  non-blocking; `snd_pcm_avail_update` says how much fits, `snd_pcm_writei`
+  in <= 1764-frame chunks (the game's period), `-EPIPE` -> `snd_pcm_recover`.
+  The mixer is untouched unless `mixer_volume=` is set: then the game's own
+  recipe puts `192*(v/63)^0.2` into `PCM Playback Volume` on ctl `backbox`
+  and `cabinet`. At exit: blocking `snd_pcm_drain` + close, BEFORE the choice
+  file and before the EGL teardown, so the game finds hw:0 free.
+* `fifo:PATH` (the emulator): writes `44100 2\n` to `--audio-fmt` first
+  (playaudio.sh waits on it), opens the FIFO `O_WRONLY|O_NONBLOCK` (ENXIO =
+  no reader yet, retried every 100 ms from the loop; a missing FIFO every
+  1 s), `F_SETPIPE_SZ` 1 MB, paces to the wall clock 200 ms ahead, writes
+  in 4 KB (PIPE_BUF) chunks so a partial write can never desync the stereo
+  frames, drops on EAGAIN (counted), reopens on EPIPE; streams silence while
+  nothing plays so padplay's 25 s no-data watchdog stays quiet; `SIGPIPE`
+  is ignored by `main()`.
+* `none`: with `--audio-dump` the mix still runs into the dump, paced.
+
+Sounds: `sound_move` on every LEFT/RIGHT/-/+ edge; the highlighted card's
+`music` loops (a hard switch when the highlight moves to a card with a
+different file; the same file keeps playing); on START/Select the music
+fades, `sound_confirm` plays TO COMPLETION (cap 8 s from the press, then the
+sink's lead) under the LOADING frame, the sink is drained and closed, and
+only then are the last-choice and choice files written.
+
+### images.conf (v2)
 
 ```
 # '#' comments; one image per line; index = order (0-based)
-image=/dev/mmcblk0p3|STERN STOCK|TMNT Pro 1.59.0 - original Stern code
-image=/dev/mmcblk0p7|TMNT 1987|1.59.0 - upscaled cartoon retheme
+image=/dev/mmcblk0p3|STERN STOCK|TMNT Pro 1.59.0 - original Stern code|art0.png||
+image=/dev/mmcblk0p7|TMNT 1987|1.59.0 - upscaled cartoon retheme|art1.png|anim1.gif|music1.wav
+image=/dev/mmcblk0p7:img2|HEISEI|a games tree inside a shared partition
+sound_move=move.wav
+sound_confirm=confirm.wav
+volume=50          # software mix gain 0-100 (default 50)
+#mixer_volume=32   # hardware only: the codec 'PCM' volume, game curve, 0-63
+#media=/usr/local/codeselect/media
 default=0          # highlight when there is no usable last-choice file
 timeout=10         # 0 = wait for ever
 #font=/usr/local/codeselect/font.ttf
 ```
 
-`<device>` is the block device on hardware and an opaque token (`p3`, `p7`)
-in the emulator. Up to 8 images; the menu is designed for 2-4.
+`image=<device>|<title>|<subtitle>|<art>|<anim>|<music>` - fields 4-6 are
+optional media file names (relative to the media directory, empty = none);
+a three-field line is the v1 form and stays valid. `<device>` is the block
+device on hardware - `/dev/mmcblk0p3`, `/dev/mmcblk0p7`, or
+`/dev/mmcblk0p7:img2` for a games tree in a subdirectory of a shared
+partition - and an opaque token in the emulator (`p3`, `p7`, `p7:img2`). Up
+to 16 images (`CONF_MAX_IMAGES`). `volume` is clamped to 0-100,
+`mixer_volume` to 0-63. Unknown keys are ignored so the file can grow.
 
 ### stdout lines (the rig forwards `[select]` to its event pane)
 
 ```
-[select] menu: 2 images, highlight 1 (TMNT 1987) from last choice, timeout 10 s, input hw, invert 0, 1360x768, font ...
+[select] menu: 2 images, highlight 1 (TMNT 1987) from last choice, timeout 10 s, input hw, invert 0, 1360x768, font ..., audio alsa, media /usr/local/codeselect/media
 [select] key: left|right|start|select|plus|minus|back
 [select] chose 1 TMNT 1987
 [select] error: <what>
+```
+
+### log lines (stderr and --log)
+
+```
+audio: alsa sysdefault:CARD=sgtl5000main ok       the machine sink is up
+audio: fifo /dump/audio.fifo open                 the rig's reader took the FIFO
+audio: none (<reason>)                            e.g. no alsa: ... ; PAD_AUDIO_PLAY unset
+audio: <file>: unsupported (format ..., need PCM 16-bit 44100 Hz 1-2 ch)
+art: image 0 art0.png -> 298x168 | art: cannot load <name> (<why>)
+anim: image 1 4 frames 200x112 | anim: cannot open <name> (<why>)
+media: 2 art, 1 anim (4 frames), 1 music, move=y confirm=y   once every decode is done
+confirm: 1178 ms under the LOADING frame
+audio: 105531 frames written, 0 dropped           at exit
+egl: 8487 frames, 1234 KB uploaded, closing (the LOADING frame stays up)
 ```
 
 ## The EGL path (egl_stern.c)
@@ -130,21 +262,24 @@ SAMPLES 0, DEPTH 24}`, `fbGetDisplayGeometry`, `fbCreateWindow(0,0,w,h)`,
 {CLIENT_VERSION 2}`, `eglMakeCurrent`, clear + swap, `glViewport`, blend.
 Then `#version 300 es` sprite shaders with `layout(location=0)`, VAO + VBO
 only (the bridge refuses client-side arrays), ONE RGBA8 texture created with
-`glTexImage2D` and updated with `glTexSubImage2D`, LINEAR/CLAMP set explicitly
-(the bridge keeps per-name shadows across guests), never `glPixelStorei` (not
-exported by the bridge). The whole bring-up is retried 6 times 500 ms apart
-because on hardware boot_display may still be releasing the display. Teardown
-leaves default-looking GL state (unbind, `glUseProgram(0)`, blend off, the
-viewport reset - and NO clear or swap: the `LOADING` frame just shown has to
-stay on the LCD until the game's first frame, many seconds later), then
-`eglMakeCurrent(dpy,0,0,0)`, `eglTerminate`, `eglReleaseThread`. No
-`eglDestroy*` (the shims do not export them). Every EGL/GL/fb prototype is
-hand-written; no Khronos headers exist on the box.
+`glTexImage2D` and updated with `glTexSubImage2D` of the dirty rectangle
+(packed rows of w*4 bytes, so the default UNPACK_ALIGNMENT holds),
+LINEAR/CLAMP set explicitly (the bridge keeps per-name shadows across
+guests), never `glPixelStorei` (not exported by the bridge). The whole
+bring-up is retried 6 times 500 ms apart because on hardware boot_display may
+still be releasing the display. Teardown leaves default-looking GL state
+(unbind, `glUseProgram(0)`, blend off, the viewport reset - and NO clear or
+swap: the `LOADING` frame just shown has to stay on the LCD until the game's
+first frame, many seconds later), then `eglMakeCurrent(dpy,0,0,0)`,
+`eglTerminate`, `eglReleaseThread`. No `eglDestroy*` (the shims do not export
+them). Every EGL/GL/fb prototype is hand-written; no Khronos headers exist on
+the box.
 
 Proven against the rig's bridge libs on a private ring (ringcat.py as the
 host): attach, `TEXIMAGE 1360x768 RGBA/UNSIGNED_BYTE`, one `TEXSUBIMAGE` per
-state change, 124 acked swaps at ~61 fps, teardown, exit 0. Not yet run on
-Vivante hardware.
+state change, 124 acked swaps at ~61 fps, teardown, exit 0; and on David's
+machine (2026-09-01: menu on the LCD, flipper selection, START, both images
+boot). The sub-rect upload path is the same call with a smaller rectangle.
 
 ## The node bus (input_hw.c)
 
@@ -169,10 +304,13 @@ What the game does, from the godzilla_pro 1.15.0 ELF (read_nodebus.md A-F):
 * then `88 02 11 65 0c` (node 8) and `81 02 11 6c 0c` (node 1) every 25 ms:
   RIGHT = byte 3 bit 0, LEFT = byte 3 bit 1, START = byte 1 bit 3, released
   = 1 / pressed = 0. A silent node backs off 500 / 1000 / 2000 ms so the
-  menu stays responsive when a board does not answer.
+  menu stays responsive when a board does not answer (and the audio sink's
+  0.5 s buffer rides through such a stall; a longer one is a gap, not a crash).
 * SPI: `SPI_IOC_WR_MAX_SPEED_HZ 100000`, `SPI_IOC_WR_MODE 3`, an 8-byte
   `SPI_IOC_MESSAGE(1)` with tx zeros every 10 ms; rx[1] bits 0-3 = Service
-  Select/Plus/Minus/Back, active low.
+  Select/Plus/Minus/Back, active low. tx[7] = 0 is the game's UNMUTED value
+  for the backbox/cabinet amplifier bits, so the selector's sound is not
+  muted by its own SPI traffic.
 
 The first 40 exchanges are logged in hex (`nb <tag>: tx ... rx ...`), then
 only changes and failures; the SPI logs its first 5 words and every change.
@@ -184,21 +322,33 @@ only changes and failures; the SPI logs its first 5 words and every change.
 /usr/local/codeselect/select.sh        the hook
 /usr/local/codeselect/images.conf      written by the card builder
 /usr/local/codeselect/font.ttf         optional (DejaVu Sans Bold)
+/usr/local/codeselect/media/*          art PNGs, GIFs, WAVs named by images.conf
 /etc/init.d/game                       stock + one guarded line after 'pkill boot_display ':
                                        [ -x /usr/local/codeselect/select.sh ] && /usr/local/codeselect/select.sh
 ```
 
-`select.sh` (POSIX sh, busybox `awk sed head tr mount umount` + `pidof`):
+`select.sh` (POSIX sh, busybox `awk sed head tr mkdir mount umount` + `pidof`):
 waits up to 3 s for boot_display to be gone, runs `codeselect --conf
 images.conf --out /var/volatile/codeselect.choice --log
-/dump/log/codeselect.log`, reads the index, looks the device up, and when it
-differs from what `/proc/mounts` shows at `/games`: `umount /games` then
-`mount -t ext4 -o ro,relatime,exec <dev> /games`; if that fails or the new
-`/games` has no `game`, the primary `/dev/mmcblk0p3` is remounted. Any other
-failure (no binary, no conf, selector exit != 0, no choice, unknown index,
-`umount` busy) boots the primary. It never touches `/mnt/boot`, and it never
-writes the last-choice file (the selector does, on confirm). `select.sh
---lookup N [conf]` prints image N's device (used by the tests).
+/dump/log/codeselect.log`, reads the index and looks the device up. Index 0
+(the primary, fstab's `/dev/mmcblk0p3` at `/games`) touches nothing. Otherwise
+`umount /games` and then, by the device form:
+
+* `<dev>`: `mount -t ext4 -o ro,relatime,exec <dev> /games`
+* `<dev>:<sub>`: `mkdir -p /mnt/multi` (on the stock read-only rootfs that
+  fails and `/var/volatile/multi` on the tmpfs is used instead),
+  `mount -t ext4 -o ro,relatime,exec <dev> /mnt/multi`,
+  `mount --bind /mnt/multi/<sub> /games`
+
+and checks that the new `/games` has `game`. Any failure (no binary, no conf,
+selector exit != 0, no choice, unknown index, a `<sub>` with `/` or a leading
+`.`, `umount` busy, a failed mount, no `game`) undoes what it did and mounts
+`/dev/mmcblk0p3` back on `/games`: the primary boots. It never touches
+`/mnt/boot`, and it never writes the last-choice file (the selector does, on
+confirm). `select.sh --lookup N [conf]` prints image N's device (without the
+`:<sub>`), `--lookup-sub N [conf]` the subdirectory (used by the tests); the
+`CODESELECT_*` environment variables let the tests run the hook against a
+fake selector and fake mount/umount.
 
 ## In the emulator
 
@@ -208,15 +358,21 @@ with no LD_PRELOAD:
 ```
 chroot "$R" /usr/local/codeselect/codeselect --conf /dump/codeselect.conf \
     --out /dump/select.choice --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" \
-    --log /dump/codeselect.log
+    --log /dump/codeselect.log --media /dump/media
 ```
 
 with `PAD_SW_SHM=/dump/padsw PAD_GAME=<primary title> PAD_GL_BRIDGE=/dump/padgl
-PAD_GL_W=1360 PAD_GL_H=768` inherited from watch.sh. The keyboard flippers
-(Left/Right arrows), `1` (START) and Enter/`=`/`-` (Service Select/Plus/Minus)
-arrive through padsw; ids come from `/dump/tables/$PAD_GAME/switch_list.txt`,
-or the platform ids (36/25/26/27/28) before a title has a table (then the
-flippers are unknown - use `-`/`=`/`1`).
+PAD_GL_W=1360 PAD_GL_H=768 PAD_AUDIO_PLAY=/dump/audio.fifo
+PAD_AUDIO_FMT=/dump/audio.fmt` inherited from watch.sh (the audio variables
+are empty on a `PAD_AUDIO=0` run, which `--audio auto` reports as `audio:
+none (... PAD_AUDIO_PLAY unset)`). The keyboard flippers (Left/Right
+arrows), `1` (START) and Enter/`=`/`-` (Service Select/Plus/Minus) arrive
+through padsw; ids come from `/dump/tables/$PAD_GAME/switch_list.txt`, or
+the platform ids (36/25/26/27/28) before a title has a table (then the
+flippers are unknown - use `-`/`=`/`1`). The rig copies the card's
+`/usr/local/codeselect/media` (or `PAD_SELECT_MEDIA=<host dir>`) to
+`$ROOT/dump/media` and forwards the conf's `sound_move`/`sound_confirm`/
+`volume`/`mixer_volume` keys.
 
 ## Tests
 
@@ -230,16 +386,33 @@ still, `make check` / `check-hw` must not run while a rig run is being torn
 down.
 
 1. `test/check_elf.sh` - the readelf ceiling above.
-2. `test/headless.sh` - six headless renders (2/3/4 images, `--default 1`,
-   last-choice precedence, `--invert`), choice/last file contents, the PPM
-   shape (`P6\n1360 768\n255\n` + 1360*768*3 bytes), the invert frame being
-   the exact 180-degree rotation of the plain one, an empty conf refused
-   with exit 2; PNGs in `$BUILD/t/codeselect_*.png` for eyes.
+2. `test/headless.sh` - headless renders: 2/3/4 images, `--default 1`,
+   last-choice precedence, `--invert` (the exact 180-degree rotation), the
+   PPM shape, an empty conf refused; then media from `test/mkmedia.py` (two
+   solid PNGs, a 4-frame solid-colour GIF, 0.2 s / 1.0 s / 0.5 s tones and a
+   22050 Hz WAV - no PIL needed): `--anim-frame 2` puts the art colours at
+   the panel centres (and at the mirrored coordinates with `--invert`), the
+   `media:` line, a confirm wait and a non-silent `--audio-dump`; a missing
+   PNG and the bad WAV are non-fatal (exit 0, logged); 5- and 9-image
+   carousels (the highlight centred, a neighbour's pinned GIF frame in
+   place); a 17-image conf refused. PNGs in `$BUILD/t/codeselect_*.png` for
+   eyes.
 3. `test/padsw_test.py` - a padsw file, RIGHT (id 64 on turtles_pro) held
-   100 ms then START (36): expects `key: right`, `key: start`, `chose 1`,
-   choice file `1`, exit 0.
-4. `bash -n select.sh` + `test/select_sh_test.sh` - the images.conf lookup
-   with the host awk AND the card's busybox awk under qemu.
+   100 ms then START (36), with the test holding the read end of a FIFO the
+   selector writes into (`--audio fifo:... --audio-fmt ... --audio-dump`):
+   expects `key: right`, `key: start`, `chose 1`, choice file `1`, exit 0,
+   `audio.fmt` = `44100 2`, silence streaming before the first key, sound
+   after RIGHT and after START, an exit >= 0.9 s after START (the 1.0 s
+   confirm WAV plays out first), a non-silent dump; then a run against a
+   FIFO that does not exist still exits 0 on the countdown.
+4. `bash -n select.sh` + `test/select_sh_test.sh` - the images.conf lookups
+   (`--lookup`, `--lookup-sub`, six-field lines, the `:<sub>` form) with the
+   host awk AND the card's busybox awk under qemu, then the whole hook with
+   a fake selector and fake mount/umount: index 0 untouched, the plain
+   device remounted, the `:<sub>` form mounted and bound, and the primary
+   put back after a missing tree, a bad `<sub>`, a failed mount, a busy
+   umount, a failed selector, an index past the conf, and the fallback dir
+   when `/mnt/multi` cannot be created (11 cases).
 
 `make check-hw`: `test/fakebus_test.py` starts `fakebus.py` on a pty and runs
 `--input hw --nodebus <pty> --spi none --default 1`; presses LEFT then START
@@ -261,7 +434,11 @@ nb: node 8 switches 00 ff 1f fb 40 00 00 00   the first 0x11 answer (at rest)
 spi: rx ff 0f 0f 00 00 00 00 00               the cabinet word at rest
 egl: initialised 1.4 / egl: display 1360x768  Vivante came up
 egl: up after N attempt(s)                    N > 1 = boot_display was still releasing the LCD
+audio: alsa sysdefault:CARD=sgtl5000main ok   the codec took the stream (else 'audio: none (no alsa: ...)')
+media: 2 art, 1 anim (30 frames), 1 music, move=y confirm=y
 [select] key: left / [select] chose 1 TMNT 1987
+confirm: 1540 ms under the LOADING frame
+audio: 123456 frames written, 0 dropped
 select.sh: image 1: mounted /dev/mmcblk0p7 at /games
 ```
 
@@ -269,4 +446,8 @@ Failure signatures: `nb ...: short reply (timed out)` on every frame = the
 bus is not answering (try `--preamble full`, then a hardware capture);
 `egl: giving up after 6 attempts` = the display never came free (the hook
 boots the primary); `select.sh: umount /games failed` = something held
-`/games` (the primary boots, still mounted).
+`/games` (the primary boots, still mounted); `audio: none (no alsa: ...)` on
+the machine = the codec device could not be opened (the menu is silent, the
+boot is unaffected); a silent machine with `audio: alsa ... ok` = the
+kernel-driven stream does not reach the amplifiers at the boot-time codec
+state (try `mixer_volume=`, then the `aplay` test from the audio report).

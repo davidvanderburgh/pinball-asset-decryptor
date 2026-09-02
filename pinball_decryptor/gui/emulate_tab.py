@@ -1890,6 +1890,13 @@ class EmulatePanel:
         vol0, mute0 = _load_audio_ctl()
         self._volume_var = tk.DoubleVar(value=vol0 * 100)
         self._mute_var = tk.BooleanVar(value=mute0)
+        #: Item 90: run the boot-time code selector before the game.  A
+        #: multi-image card (mkmulticard.py) carries a menu the machine shows
+        #: at power-up; ticked, the rig shows that same menu in the game
+        #: window (PAD_SELECT=1) and boots whichever image the flipper keys
+        #: pick.  Off by default: a plain card has nothing to choose, and the
+        #: run is then byte-for-byte what it was before item 90.
+        self._select_var = tk.BooleanVar(value=False)
 
     def _timer(self):
         """The widget every ``after`` job on this panel is hung off.
@@ -2047,6 +2054,13 @@ class EmulatePanel:
                                          variable=self._mute_var,
                                          command=self._on_volume_change)
         self._mute_chk.pack(side=tk.LEFT, padx=(6, 0))
+        # Item 90: the boot selector, beside Mute.  A per-run choice like the
+        # card path - read once at Start (_launch_env), so flipping it under a
+        # live run changes the NEXT start and nothing else, and it needs no
+        # place in _apply's up/busy disable block.
+        self._select_chk = ttk.Checkbutton(btns, text="Boot selector",
+                                           variable=self._select_var)
+        self._select_chk.pack(side=tk.LEFT, padx=(6, 0))
         # Seed the control file NOW, from whatever was just loaded (or the
         # unity/unmuted default) — so it exists before the first Start even
         # on a machine that has never touched the knob, rather than relying
@@ -3753,6 +3767,27 @@ class EmulatePanel:
         except tk.TclError:
             pass
 
+    def _launch_env(self, src):
+        """The Start environment beyond the card: the audio control file, and
+        (item 90) ``PAD_SELECT=1`` when Boot selector is ticked.  Its own
+        method so the tests can read the list without launching anything -
+        and NOT folded into _source_env, which a test pins to exactly the one
+        PAD_CARD entry."""
+        env = ["PAD_AUDIO_DUMP=30", "PAD_AUDIO_CTL=" + AUDIO_CTL_FILE] + \
+            list(src)
+        if self._select_var.get():
+            env.append("PAD_SELECT=1")
+        return env
+
+    def launch_card(self, path, select=False):
+        """Start the emulator on *path* - the Multi-boot tab's 'Run in
+        emulator': the card box takes the path, Boot selector follows
+        *select*, then the ordinary Start (same validation, same launch, same
+        status), so the two buttons cannot start two different rigs."""
+        self._src_path.set(path or "")
+        self._select_var.set(bool(select))
+        self.start()
+
     def start(self):
         if self._starting or self._stopping or not rig_available():
             return
@@ -3777,7 +3812,7 @@ class EmulatePanel:
         # volume slider owns loudness, and boots land in attract on their
         # own; PAD_AUDIO=0 / PAD_AUTO_ATTRACT=0 stay available to scripted
         # runs.)
-        env = ["PAD_AUDIO_DUMP=30", "PAD_AUDIO_CTL=" + AUDIO_CTL_FILE] + src
+        env = self._launch_env(src)
         # ALWAYS THE CHECKPOINTABLE SHAPE (root, PAD_PIVOT) since the enable
         # checkbox was removed on 2026-08-10. It used to be the toggle's
         # answer, with a pending launch-from-slot forcing it anyway because

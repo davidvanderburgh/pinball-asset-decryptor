@@ -221,6 +221,10 @@ class SternManufacturer(Manufacturer):
         # privileged host setup, so no GUI tab is surfaced yet (a tab that
         # starts nothing is worse than no tab).  Spike 3 remains unwired.
         emulate=True,
+        # Item 90: the Multi-boot tab - one SD card, several images, a menu at
+        # power-up.  Spike 2 only: the layout (the extra images' partition
+        # appended as p7, the selector injected into p2) is this era's.
+        multiboot=True,
         # Audio is loose per-sound idxNNNN.wav in the extract output, so the
         # per-slot Replace Audio tab works: assignments are staged over those
         # WAVs and the Write pipeline re-encodes the changed ones into image.bin

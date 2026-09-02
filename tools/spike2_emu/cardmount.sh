@@ -376,10 +376,24 @@ games_offset() {
 
 # The title directory inside the partition: the one holding a `game` ELF. The
 # card also has spk/ and the three symlinks the machine itself uses.
+#
+# ITEM 90's MULTI LAYOUT (mkmulticard.py --layout multi): p7 is one ext4 whose
+# root holds img1/, img2/ ... - each a COMPLETE games tree, so the title dir
+# sits one level down. For such a partition this prints the FIRST imgN that
+# holds a title (`img1`), never `img1/<title>`: the last line of this script
+# is "$MNT/<that>", and watch.sh takes its dirname to find the mount to tear
+# down - a two-component answer would leave the FUSE mount behind. run_game.sh
+# resolves the subdirectory it actually wants from parts.py --list-games.
 title_dir() {
-    local m="$1" d
+    local m="$1" d s
     for d in "$m"/*; do
         [ -f "$d/game" ] && [ ! -L "$d" ] && { basename "$d"; return 0; }
+    done
+    for d in "$m"/img[0-9]*; do
+        [ -d "$d" ] && [ ! -L "$d" ] || continue
+        for s in "$d"/*; do
+            [ -f "$s/game" ] && [ ! -L "$s" ] && { basename "$d"; return 0; }
+        done
     done
     return 1
 }

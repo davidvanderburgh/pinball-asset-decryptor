@@ -92,26 +92,40 @@ partition.
 ## Files on the card
 
 ```
-/usr/local/codeselect/codeselect      the ARM program (EGL/GLES2 menu + input)
+/usr/local/codeselect/codeselect      the ARM program (EGL/GLES2 menu + input + sound)
 /usr/local/codeselect/select.sh       the hook: run the menu, remount /games
 /usr/local/codeselect/images.conf     one line per image (below)
 /usr/local/codeselect/font.ttf        DejaVu Sans Bold (Bitstream Vera licence)
+/usr/local/codeselect/media/          art PNGs, animated GIFs, WAVs (flat, <= 20 MB)
 /etc/init.d/game                      stock script + one guarded hook line
 ```
 
-`images.conf` — plain text, `#` comments, `image=<device>|<title>|<subtitle>`
-one per image (index = order, 0-based), plus `default=`, `timeout=` (0 = wait
-for START) and an optional `font=`:
+`images.conf` v2 — plain text, `#` comments,
+`image=<device>|<title>|<subtitle>|<art>|<anim>|<music>` one per image
+(index = order, 0-based; fields 4-6 optional media file names in the media
+directory, a 3-field line stays valid; up to 16 images), plus `default=`,
+`timeout=` (0 = wait for START), an optional `font=`, `media=` (default
+`/usr/local/codeselect/media`), `sound_move=`, `sound_confirm=`, `volume=`
+(0-100 software gain, default 50) and the optional hardware-only
+`mixer_volume=` (0-63, the game's codec curve on the ALSA `PCM` control;
+untouched when absent). `<device>` is `/dev/mmcblk0p3`, `/dev/mmcblk0p7`
+(the parts layout) or `/dev/mmcblk0p7:img2` (the multi layout: a partition
+plus the subdirectory holding a complete games tree); `p3`, `p7`, `p7:img2`
+in the emulator. Unknown keys are ignored.
 
 ```
-image=/dev/mmcblk0p3|STERN 1.59.0|Original Stern code
-image=/dev/mmcblk0p7|TMNT 1987|1987 cartoon upscale (1.59.0)
+image=/dev/mmcblk0p3|STERN 1.59.0|Original Stern code|art0.png||
+image=/dev/mmcblk0p7|TMNT 1987|1987 cartoon upscale (1.59.0)|art1.png|anim1.gif|music1.wav
+sound_move=move.wav
+sound_confirm=confirm.wav
+volume=50
 default=0
 timeout=15
 font=/usr/local/codeselect/font.ttf
 ```
 
-The builder writes this file; David can edit the names.
+The builder writes this file (and `media/`, from `selectmedia.py`'s
+`media.json`); David can edit the names.
 
 ## The selector program
 
@@ -126,30 +140,63 @@ full CLI, the log lines and the test list). What it is:
   libGLESv2.so.2 libc.so.6 libm.so.6 libgcc_s.so.1` - the rig's bridge shims
   in the emulator, Vivante's blobs on the machine, same exported names. The
   Makefile's `check` target enforces that ceiling with readelf.
-* Files: `codeselect.c` (loop, CLI, menu state, countdown, choice/last
-  files), `gfx.c` (software RGBA canvas, rounded frames, stb_truetype text
-  with a glyph cache, 180-degree rotation, P6 PPM), `egl_stern.c` (Stern's
-  EGL bring-up), `input.c` + `input_hw.c` + `input_padsw.c` (buttons),
-  `conf.c` (images.conf), `log.c`; `select.sh`, `images.conf.example`,
-  `fakebus.py`, `test/`.
+* Files: `codeselect.c` (loop, CLI, layout, menu state, countdown, sounds,
+  the confirm wait, choice/last files), `gfx.c` (software RGBA canvas,
+  rounded frames, stb_truetype text with a glyph cache, RGBA blits,
+  dirty-rect tracking + a packed sub-rect, 180-degree rotation, P6 PPM),
+  `egl_stern.c` (Stern's EGL bring-up, sub-rect uploads), `art.c` (PNG +
+  animated GIF through the vendored stb_image, box-downscaled into the art
+  panel, GIFs one frame per call), `audio.c` (WAV loader, 4-voice mixer) +
+  `audio_fifo.c` (the rig's FIFO) + `audio_alsa.c` (the card's libasound,
+  hand prototypes), `input.c` + `input_hw.c` + `input_padsw.c` (buttons),
+  `conf.c` (images.conf v2), `log.c`; `select.sh`, `images.conf.example`,
+  `fakebus.py`, `test/` (with `mkmedia.py`, the PIL-free test media).
 * Draws into a software canvas sized from `fbGetDisplayGeometry` (1360x768
   on the bridge and the TMNT LCD) and presents it as ONE full-screen RGBA8
   textured quad: boot_display's exact EGL order and attribute lists,
   `#version 300 es` sprite shaders, VAO + VBO only, `glTexImage2D` once and
-  `glTexSubImage2D` only when the canvas changed, LINEAR/CLAMP set
+  `glTexSubImage2D` of only the DIRTY rectangle (tightly packed, w*4-byte
+  rows) when something changed - an animation tick costs one panel, ~370 KB,
+  not the 4.18 MB canvas - LINEAR/CLAMP set
   explicitly, never `glPixelStorei`, a swap every frame, the bring-up
   retried 6 x 500 ms (boot_display may still hold the LCD), teardown that
   leaves default GL state then `eglMakeCurrent(dpy,0,0,0)` / `eglTerminate` /
   `eglReleaseThread`. Proven against the bridge libs on a private ring
   (attach, TEXIMAGE 1360x768, per-change TEXSUBIMAGE, 124 acked swaps at
   ~61 fps, exit 0); not yet run on Vivante.
-* The menu: `SELECT GAME CODE`, one card per image (2-4, width scaled) with
-  an `IMAGE n` label, the title (shrunk to fit, wrapped to two lines when it
-  must) and the subtitle (wrapped to four), the highlighted card framed
-  amber on a lighter fill, a footer `LEFT / RIGHT FLIPPER: choose   START:
-  boot` and `booting <title> in N s` (or `press START to boot <title>` with
-  timeout 0). Redrawn only on a state change. On confirm one `LOADING
-  <title>...` frame, then exit. A key press restarts the countdown.
+* The menu: `SELECT GAME CODE`, one card per image with an `IMAGE n` label,
+  the title (shrunk to fit, wrapped to two lines when it must) and the
+  subtitle (wrapped to four), the highlighted card framed amber on a lighter
+  fill, a footer `LEFT / RIGHT FLIPPER: choose   START: boot` and `booting
+  <title> in N s` (or `press START to boot <title>` with timeout 0). 2-4
+  images sit in a row (width scaled); 5-16 become a carousel of three cards
+  with the highlighted one in the middle, its neighbours beside it
+  (wrap-around), the neighbours-but-one peeking in from the edges and a
+  `<  n / N  >` line under the cards. When any image has art or an
+  animation every card gets an art panel across its top 40 % (the picture
+  aspect-fitted and centred, never upscaled) above the label, and the text
+  packs below; with no media the picture is the v1 layout byte for byte.
+  The highlighted card's GIF plays on the file's own frame delays, the
+  others show their still (or frame 0). A full redraw happens only on a
+  state change; an animation tick repaints one panel, and only the dirty
+  rectangle is uploaded. A key press restarts the countdown. On confirm one
+  `LOADING <title>...` frame (with the card's picture) stays up while the
+  confirm sound plays to completion (cap 8 s), the sound device is drained
+  and closed, and only then the choice is written and the program exits.
+* Sound: `sound_move` on every LEFT/RIGHT/-/+ edge, the highlighted card's
+  `music` looping (hard switch on a highlight change), `sound_confirm` on
+  START/Select. One single-threaded s16 44100 Hz stereo mixer (4 voices,
+  saturating, `volume=` gain) pumped from the main loop into ONE sink:
+  `--audio auto` = ALSA when `snd_pcm_open("sysdefault:CARD=sgtl5000main")`
+  succeeds (the game's device, `snd_pcm_set_params` S16_LE / interleaved /
+  2 ch / 44100 / 500 ms, non-blocking `writei` in 1764-frame chunks,
+  `snd_pcm_recover` on -EPIPE, drain + close before the choice file; the
+  mixer untouched unless `mixer_volume=` asks for the game's codec curve on
+  `backbox` + `cabinet`), else the rig's FIFO when `PAD_AUDIO_PLAY` is set
+  (`44100 2` into the fmt file first, `O_WRONLY|O_NONBLOCK` with ENXIO
+  retries, 200 ms lead, silence while idle, EAGAIN dropped and counted,
+  EPIPE reopened, SIGPIPE ignored), else none. Every failure is logged and
+  the menu runs silent.
 * Input backends (`--input`), a shared two-sample debouncer, press edges
   only, Service Back ignored (autoattract.sh presses it in the rig):
   * `hw` (default): the game's own tty setup on `/dev/ttymxc1` (460800 8N2,
@@ -166,10 +213,21 @@ full CLI, the log lines and the test list). What it is:
     `/dump/tables/$PAD_GAME/switch_list.txt` by wire position, platform ids
     (36/25-28) before a title has a table. Tested with a scripted padsw file.
   * `none`: countdown only (tests).
-* `images.conf`: `image=<device>|<title>|<subtitle>` lines (index = order),
-  `default=`, `timeout=` (0 = wait), `font=`; `--out` gets `<index>\n`,
-  `--last` (`/data/codeselect.last`) is read for the initial highlight and
-  written on confirm. Exit 0 = a choice was written, 2 = anything else.
+* `images.conf` v2: `image=<device>|<title>|<subtitle>|<art>|<anim>|<music>`
+  lines (index = order; fields 4-6 optional; up to 16), `default=`,
+  `timeout=` (0 = wait), `font=`, `media=`, `sound_move=`, `sound_confirm=`,
+  `volume=`, `mixer_volume=`; `--media DIR` overrides `media=`; `--out` gets
+  `<index>\n`, `--last` (`/data/codeselect.last`) is read for the initial
+  highlight and written on confirm. Exit 0 = a choice was written, 2 =
+  anything else. Media: PNG art (pre-scaled by the tools), animated GIF
+  <= 512x288 / <= 30 frames / <= 1.5 MB (delays from the file, 100 ms
+  where it says 0), WAV RIFF PCM 16-bit 44100 Hz 1-2 ch; a missing or
+  unusable file is logged (`art: cannot load ...`, `audio: ...: unsupported
+  (...)`) and skipped. Log lines: `media: N art, M anim (F frames), K
+  music, move=y|n confirm=y|n`, `audio: alsa <dev> ok` | `audio: fifo
+  <path> open` | `audio: none (<reason>)`, and at exit `audio: <frames>
+  frames written, <dropped> dropped`. `--headless` renders pin every
+  animation with `--anim-frame N`; `--audio-dump FILE` captures the mix.
 * Honors `-invert` in `/games/data/boot_display_cmd` (parsed exactly as
   boot_display parses it) by rotating the presented pixels 180 degrees;
   `--invert`/`--no-invert` force it.
@@ -177,12 +235,18 @@ full CLI, the log lines and the test list). What it is:
   (plus `FILE.loading.ppm`): the offline test, and the screenshots.
 * `select.sh` is the hardware hook: after `/etc/init.d/game`'s own
   `pkill boot_display ` it waits up to 3 s for boot_display to be gone, runs
-  the selector, reads the index, looks up the device in images.conf, and
-  when it is not what `/proc/mounts` shows at `/games`: `umount /games` +
-  `mount -t ext4 -o ro,relatime,exec <dev> /games`, remounting
-  `/dev/mmcblk0p3` if that fails or the new tree has no `game`. Every other
-  failure boots the primary; it never touches `/mnt/boot` and logs to
-  `/dump/log/codeselect.log`.
+  the selector, reads the index and looks the device up in images.conf
+  (busybox awk: split on `|`, then the device on `:`). Index 0 touches
+  nothing (the primary is fstab's mount). Otherwise `umount /games`, then
+  `<dev>` = `mount -t ext4 -o ro,relatime,exec <dev> /games`, and
+  `<dev>:<sub>` = `mkdir -p /mnt/multi` (falling back to
+  `/var/volatile/multi` on the read-only rootfs) + `mount -t ext4 -o
+  ro,relatime,exec <dev> /mnt/multi` + `mount --bind /mnt/multi/<sub>
+  /games`; the new `/games` must have `game`. Any failure undoes the mounts
+  and puts `/dev/mmcblk0p3` back on `/games`: the primary boots. It never
+  touches `/mnt/boot` and logs to `/dump/log/codeselect.log`; the
+  `CODESELECT_*` variables let `test/select_sh_test.sh` run the whole hook
+  against a fake selector and fake mount/umount.
 
 ## Card builder
 

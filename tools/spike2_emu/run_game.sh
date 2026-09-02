@@ -42,12 +42,25 @@ if [ -n "${PAD_CARD:-}" ]; then
     #
     #   * every games partition mounted (the primary is the mount above; the
     #     others go to $CARDS/<label>.pN through cardmount.sh --part), and
-    #     the index -> directory list handed into INNER as one argument;
+    #     the token -> directory list handed into INNER as one argument;
     #   * /dump/codeselect.conf in the selector's own images.conf format,
     #     with device tokens p<N> (an opaque string to the selector - on the
     #     machine it is /dev/mmcblk0pN) and the menu text taken from the
     #     card's own /usr/local/codeselect/images.conf when the card was
-    #     built with one, so the emulator shows the menu the machine shows.
+    #     built with one, so the emulator shows the menu the machine shows;
+    #   * the card's media (art, animations, sounds - item 90 v2) copied out
+    #     of its rootfs into $R/dump/media, so the menu here looks and sounds
+    #     like the machine's.
+    #
+    # N IMAGES, TWO LAYOUTS (mkmulticard.py --layout): `parts` puts one extra
+    # image's games partition on p7 verbatim; `multi` makes p7 ONE ext4 holding
+    # img1/, img2/ ... - each a complete games tree - because the card's kernel
+    # exposes p1..p7 only. parts.py --list-games prints a fifth field for a
+    # tree inside such a partition (`7 <lba> <off> turtles_pro img1`), the
+    # device token is then `p7:img1` (the machine's is /dev/mmcblk0p7:img1),
+    # and the directory bound over games/$GAME is <p7 mount>/img1/<title>.
+    # cardmount.sh mounts p7 once and answers "$MNT/img1" for it (its last
+    # line must stay one component under the mount for watch.sh's teardown).
     #
     # PAD_GAME stays the PRIMARY's title: the node identity, the census and
     # the derived tables were all taken from it before this script ran, and
@@ -73,28 +86,40 @@ if [ -n "${PAD_CARD:-}" ]; then
         [ -n "$SEL_LIST" ] || { echo "[run] PAD_SELECT: no games partition found on $PAD_CARD" >&2; rmdir "$R/games/$GAME" 2>/dev/null; exit 1; }
         SEL_CARDCONF=$(python3 "$S/parts.py" --rootfs-file /usr/local/codeselect/images.conf "$PAD_CARD" 2>/dev/null)
         SEL_N=0; SEL_PRIMARY=""; SEL_IMAGES=""
-        while read -r idx _lba _off titles; do
+        while read -r idx _lba _off titles subdir; do
             [ -n "$idx" ] || continue
+            tok="p$idx"; [ -n "$subdir" ] && tok="p$idx:$subdir"
             if [ -z "$SEL_PRIMARY" ]; then
                 # The first games partition IS the mount above (cardmount's
                 # default is exactly `--games`, the first one): reuse it
                 # rather than mounting p3 a second time under another name.
                 SEL_PRIMARY=$idx; d=$CARD_SRC
             else
-                d=$(bash "$S/cardmount.sh" "$PAD_CARD" --part "$idx" | tail -1)
-                [ -d "$d" ] || { echo "[run] could not mount partition $idx of $PAD_CARD" >&2; rmdir "$R/games/$GAME" 2>/dev/null; exit 1; }
+                m=$(bash "$S/cardmount.sh" "$PAD_CARD" --part "$idx" | tail -1)
+                [ -d "$m" ] || { echo "[run] could not mount partition $idx of $PAD_CARD" >&2; rmdir "$R/games/$GAME" 2>/dev/null; exit 1; }
+                if [ -n "$subdir" ]; then
+                    # a multi-layout tree: cardmount answered <mount>/imgN for
+                    # the FIRST tree; this entry's title dir is one level down
+                    # its OWN subdirectory
+                    d="$(dirname "$m")/$subdir/${titles%%,*}"
+                    [ -d "$d" ] || { echo "[run] partition $idx of $PAD_CARD holds no $subdir/${titles%%,*}" >&2; rmdir "$R/games/$GAME" 2>/dev/null; exit 1; }
+                else
+                    d=$m
+                fi
             fi
-            # 'image=/dev/mmcblk0pN|<title>|<subtitle>' on the card -> the
-            # same title and subtitle here; else name it after the partition.
-            t=$(printf '%s\n' "$SEL_CARDCONF" | sed -n "s#^image=/dev/mmcblk0p$idx|##p" | head -1 | tr -d '\r')
+            # 'image=/dev/mmcblk0pN[:sub]|<title>|<subtitle>[|art|anim|music]'
+            # on the card -> the same fields here (everything after the
+            # device is forwarded verbatim, so the media names ride along);
+            # else name it after the partition.
+            t=$(printf '%s\n' "$SEL_CARDCONF" | sed -n "s#^image=/dev/mmcblk0$tok|##p" | head -1 | tr -d '\r')
             case "$t" in
-                "")    t="p$idx ${titles%%,*}|games partition $idx" ;;
+                "")    t="$tok ${titles%%,*}|games partition $idx${subdir:+ $subdir}" ;;
                 *"|"*) ;;
                 *)     t="$t|" ;;
             esac
-            SEL_IMAGES="${SEL_IMAGES}image=p$idx|$t"$'\n'
-            SEL_DIRS="${SEL_DIRS}$idx"$'\t'"$d"$'\n'
-            echo "[select] menu: $SEL_N = p$idx ${t%%|*} ($d)"
+            SEL_IMAGES="${SEL_IMAGES}image=$tok|$t"$'\n'
+            SEL_DIRS="${SEL_DIRS}$tok"$'\t'"$d"$'\n'
+            echo "[select] menu: $SEL_N = $tok ${t%%|*} ($d)"
             SEL_N=$((SEL_N + 1))
         done <<< "$SEL_LIST"
         # The card's own default highlight, when it has one and it is in
@@ -104,12 +129,43 @@ if [ -n "${PAD_CARD:-}" ]; then
         [ -n "$SEL_DEFAULT" ] && [ "$SEL_DEFAULT" -lt "$SEL_N" ] || SEL_DEFAULT=0
         {
             echo "# written by run_game.sh for the boot selector (item 90)"
-            echo "# device tokens are p<N> = partition N of $PAD_CARD"
+            echo "# device tokens are p<N>[:imgK] = partition N [tree imgK] of $PAD_CARD"
             printf '%s' "$SEL_IMAGES"
             echo "default=$SEL_DEFAULT"
             echo "timeout=${PAD_SELECT_TIMEOUT:-30}"
+            # the card's sound and volume keys, verbatim (media= is NOT
+            # copied: the media directory is handed over with --media below)
+            printf '%s\n' "$SEL_CARDCONF" | tr -d '\r' | grep -E '^(sound_move|sound_confirm|volume|mixer_volume)=' || true
         } > "$R/dump/codeselect.conf"
         echo "[select] menu: $SEL_N images; default $SEL_DEFAULT; auto-boot after ${PAD_SELECT_TIMEOUT:-30} s"
+        # THE MEDIA (item 90 v2): the card's /usr/local/codeselect/media,
+        # pulled out of its rootfs with debugfs (parts.py --rootfs-dir, no
+        # mount, no root) into $R/dump/media - /dump is self-bound below, so
+        # the selector sees it as /dump/media. PAD_SELECT_MEDIA=<host dir>
+        # takes a directory of David's own instead, so art and sounds can be
+        # tried without rebuilding a card. Cleared first: a previous run's
+        # (possibly root-owned, PAD_PIVOT) copy must not masquerade as this
+        # card's, and a root run hands the fresh copy back to the rig's user.
+        rm -rf "$R/dump/media" 2>/dev/null \
+            || echo "[select] WARNING: cannot clear a stale $R/dump/media (another user's?)" >&2
+        if [ -n "${PAD_SELECT_MEDIA:-}" ]; then
+            if [ -d "$PAD_SELECT_MEDIA" ] && cp -r "$PAD_SELECT_MEDIA" "$R/dump/media"; then
+                echo "[select] media: $(ls "$R/dump/media" | wc -l) files from PAD_SELECT_MEDIA=$PAD_SELECT_MEDIA"
+            else
+                echo "[select] media: PAD_SELECT_MEDIA=$PAD_SELECT_MEDIA is not a readable directory - none" >&2
+            fi
+        else
+            python3 "$S/parts.py" --rootfs-dir /usr/local/codeselect/media "$R/dump" "$PAD_CARD" >/dev/null 2>&1
+            if [ -d "$R/dump/media" ]; then
+                echo "[select] media: $(ls "$R/dump/media" | wc -l) files from the card's /usr/local/codeselect/media"
+            else
+                echo "[select] media: none on the card"
+            fi
+        fi
+        if [ "$(id -u)" = 0 ] && [ -d "$R/dump/media" ]; then
+            _o=$(stat -c %U "$PAD_HOME" 2>/dev/null)
+            [ -n "$_o" ] && [ "$_o" != root ] && chown -R "$_o" "$R/dump/media" 2>/dev/null
+        fi
     fi
 elif [ -n "${PAD_GAME_DIR:-}" ]; then
     CARD_SRC=${PAD_GAME_DIR%/}
@@ -471,6 +527,13 @@ fi
 # mountpoint, the chosen image's files win, nothing is unmounted. Then the
 # -invert masking below reads the CHOSEN build's boot_display_cmd.
 #
+# --media /dump/media is the card's media directory (or PAD_SELECT_MEDIA's),
+# staged by the outer script; a missing directory or a broken file in it is
+# NON-FATAL inside the selector (the menu still draws, the card still boots).
+# Audio needs nothing here: PAD_AUDIO_PLAY / PAD_AUDIO_FMT are inherited from
+# watch.sh (empty on a PAD_AUDIO=0 run = silent), and the selector writes the
+# format file and streams into the FIFO itself, then closes it before exit.
+#
 # --no-invert, BECAUSE THE MASKING RUNS AFTER THE MENU. The selector's default
 # is boot_display's own rule - rotate 180 when /games/data/boot_display_cmd
 # says -invert - and on the machine that is right. Here the ITEM 45 block
@@ -485,7 +548,7 @@ if [ -n "$SEL_DIRS" ]; then
     SEL_INV="--no-invert"
     [ "${PAD_DISPLAY_INVERT:-0}" = "1" ] && SEL_INV=""
     echo "[select] menu up: LEFT/RIGHT flipper (arrows) move, START (1) confirms; auto-boot in ${PAD_SELECT_TIMEOUT:-30} s"
-    chroot "$R" /usr/local/codeselect/codeselect --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log $SEL_INV </dev/null
+    chroot "$R" /usr/local/codeselect/codeselect --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log --media /dump/media $SEL_INV </dev/null
     SEL_RC=$?
     SEL_CHOICE=$(head -1 "$R$PAD_SELECT_CHOICE" 2>/dev/null | tr -dc '0-9')
     SEL_DIR=""; SEL_IDX=""; SEL_PRIMARY_DIR=""; n=0
@@ -498,9 +561,9 @@ if [ -n "$SEL_DIRS" ]; then
     if [ "$SEL_RC" != 0 ] || [ -z "$SEL_DIR" ]; then
         echo "[select] fallback: primary (selector exit $SEL_RC, choice '${SEL_CHOICE:-none}')"
     elif [ "$SEL_DIR" = "$SEL_PRIMARY_DIR" ]; then
-        echo "[select] chose $SEL_CHOICE p$SEL_IDX $(basename "$SEL_DIR") - the primary, already in place"
+        echo "[select] chose $SEL_CHOICE $SEL_IDX $(basename "$SEL_DIR") - the primary, already in place"
     elif mount --bind "$SEL_DIR" "$R/games/$GAME"; then
-        echo "[select] chose $SEL_CHOICE p$SEL_IDX $(basename "$SEL_DIR") - bound over /games/$GAME"
+        echo "[select] chose $SEL_CHOICE $SEL_IDX $(basename "$SEL_DIR") - bound over /games/$GAME"
         # The video host runs OUTSIDE this namespace and resolves the game's
         # relative clip paths against PAD_VID_ROOT = the primary's directory;
         # it cannot see this bind. dump/vidroot tells it where the chosen

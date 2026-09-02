@@ -20,7 +20,45 @@ int gfx_init(struct gfx *g, int w, int h)
     g->px = calloc((size_t)w * h, 4);
     g->scratch = calloc((size_t)w * h, 4);
     if (!g->px || !g->scratch) { gfx_free(g); return -1; }
+    gfx_clean(g);
     return 0;
+}
+
+/* grow the dirty union by a rectangle (clipped to the canvas) */
+static void mark(struct gfx *g, int x0, int y0, int x1, int y1)
+{
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > g->w) x1 = g->w;
+    if (y1 > g->h) y1 = g->h;
+    if (x1 <= x0 || y1 <= y0) return;
+    if (g->dx1 <= g->dx0) {                  /* empty so far */
+        g->dx0 = x0; g->dy0 = y0; g->dx1 = x1; g->dy1 = y1;
+        return;
+    }
+    if (x0 < g->dx0) g->dx0 = x0;
+    if (y0 < g->dy0) g->dy0 = y0;
+    if (x1 > g->dx1) g->dx1 = x1;
+    if (y1 > g->dy1) g->dy1 = y1;
+}
+
+int gfx_dirty(const struct gfx *g, int *x, int *y, int *w, int *h)
+{
+    if (g->dx1 <= g->dx0 || g->dy1 <= g->dy0) {
+        *x = *y = *w = *h = 0;
+        return 0;
+    }
+    *x = g->dx0;
+    *y = g->dy0;
+    *w = g->dx1 - g->dx0;
+    *h = g->dy1 - g->dy0;
+    return 1;
+}
+
+void gfx_clean(struct gfx *g)
+{
+    g->dx0 = g->dy0 = 0;
+    g->dx1 = g->dy1 = 0;
 }
 
 void gfx_free(struct gfx *g)
@@ -59,6 +97,8 @@ static void span(struct gfx *g, int y, int x0, int x1, unsigned rgb)
     if (y < 0 || y >= g->h) return;
     if (x0 < 0) x0 = 0;
     if (x1 > g->w) x1 = g->w;
+    if (x1 <= x0) return;
+    mark(g, x0, y, x1, y + 1);
     p = g->px + ((size_t)y * g->w + x0) * 4;
     for (x = x0; x < x1; x++, p += 4) put(p, rgb);
 }
@@ -93,6 +133,27 @@ void gfx_round_frame(struct gfx *g, int x, int y, int w, int h, int r, int t,
     gfx_round_rect(g, x, y, w, h, r, frame_rgb);
     if (w > 2 * t && h > 2 * t)
         gfx_round_rect(g, x + t, y + t, w - 2 * t, h - 2 * t, r > t ? r - t : 0, fill_rgb);
+}
+
+void gfx_blit(struct gfx *g, int x, int y, const unsigned char *rgba, int w, int h)
+{
+    int sx0 = 0, sy0 = 0, sx1 = w, sy1 = h, yy, xx;
+    if (!rgba || w <= 0 || h <= 0) return;
+    if (x < 0) sx0 = -x;
+    if (y < 0) sy0 = -y;
+    if (x + sx1 > g->w) sx1 = g->w - x;
+    if (y + sy1 > g->h) sy1 = g->h - y;
+    if (sx1 <= sx0 || sy1 <= sy0) return;
+    mark(g, x + sx0, y + sy0, x + sx1, y + sy1);
+    for (yy = sy0; yy < sy1; yy++) {
+        const unsigned char *s = rgba + ((size_t)yy * w + sx0) * 4;
+        unsigned char *d = g->px + ((size_t)(y + yy) * g->w + x + sx0) * 4;
+        for (xx = sx0; xx < sx1; xx++, s += 4, d += 4) {
+            unsigned a = s[3];
+            if (a == 255) { d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = 0xff; }
+            else if (a) blend(d, ((unsigned)s[0] << 16) | ((unsigned)s[1] << 8) | s[2], a);
+        }
+    }
 }
 
 /* ------------------------------------------------------------------ font */
@@ -254,6 +315,7 @@ void gfx_text(struct gfx *g, struct gfx_font *f, float pxf, int x, int baseline,
         gx = (int)(pen + 0.5f) + gl->xoff;
         gy = baseline + gl->yoff;
         if (gl->bmp) {
+            mark(g, gx, gy, gx + gl->w, gy + gl->h);
             for (yy = 0; yy < gl->h; yy++) {
                 int y = gy + yy;
                 const unsigned char *row = gl->bmp + (size_t)yy * gl->w;
@@ -332,6 +394,35 @@ const unsigned char *gfx_pixels(struct gfx *g, int invert)
     src = (const unsigned *)g->px;
     dst = (unsigned *)g->scratch;
     for (i = 0; i < n; i++) dst[n - 1 - i] = src[i];
+    return g->scratch;
+}
+
+const unsigned char *gfx_pack(struct gfx *g, int invert, int *x, int *y, int *w, int *h)
+{
+    int rx, ry, rw, rh, yy, xx;
+    if (!gfx_dirty(g, &rx, &ry, &rw, &rh)) {
+        *x = *y = *w = *h = 0;
+        return NULL;
+    }
+    if (!invert) {
+        unsigned char *d = g->scratch;
+        for (yy = 0; yy < rh; yy++, d += (size_t)rw * 4)
+            memcpy(d, g->px + ((size_t)(ry + yy) * g->w + rx) * 4, (size_t)rw * 4);
+        *x = rx;
+        *y = ry;
+    } else {
+        /* the rect's pixels in reverse order = the same rect of the rotated
+         * picture, which sits at the mirrored position */
+        unsigned *d = (unsigned *)g->scratch;
+        for (yy = 0; yy < rh; yy++) {
+            const unsigned *s = (const unsigned *)(g->px + ((size_t)(ry + rh - 1 - yy) * g->w + rx) * 4);
+            for (xx = 0; xx < rw; xx++) d[(size_t)yy * rw + xx] = s[rw - 1 - xx];
+        }
+        *x = g->w - rx - rw;
+        *y = g->h - ry - rh;
+    }
+    *w = rw;
+    *h = rh;
     return g->scratch;
 }
 

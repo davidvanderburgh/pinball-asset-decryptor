@@ -1344,6 +1344,44 @@ HELP_CONTENT = {
          "cards' compiled defaults — a machine's live settings and scores "
          "are in its own memory, not on the card."),
     ],
+    "Multi-boot": [
+        ("What it does",
+         "Builds ONE SD card that carries several complete Spike 2 game "
+         "images and shows a menu at power-up: the flippers move the "
+         "highlight, START boots the highlighted image, and a countdown "
+         "boots the remembered choice by itself. Stock code and a custom "
+         "build (or two builds) live on the same machine without swapping "
+         "cards. The first image in the list is the primary — its boot "
+         "files are the card's, and the machine falls back to it if the "
+         "menu ever fails."),
+        ("Images, text and media",
+         "Add each card image (.raw) in the order the menu should list "
+         "them, then select a row to give it a title and subtitle. Art is "
+         "the picture on that image's card in the menu (auto = the game's "
+         "own logo, pulled off the image), Animation an optional GIF or "
+         "short clip (auto = the attract clip), Music an optional WAV loop "
+         "while it is highlighted. The move and confirm sounds are global; "
+         "auto pulls a click and a stinger from the primary image, synth "
+         "generates tones. Prepare media renders all of that to the sizes "
+         "the selector wants before the build."),
+        ("Bypass game validation",
+         "Ticked by default, and leave it so: with two images on one card "
+         "the machine's validator fails BOTH of them (GAME VALIDATION "
+         "ERROR), because the two share one grade state. The bypass "
+         "neuters the validator in every image on the card — the same "
+         "patch the Insider-clean 1987 card carries — and Bypass an "
+         "existing card… applies it to a card already built, without a "
+         "rebuild."),
+        ("Build, flash, run",
+         "Check size shows which Stern card size the image fits before a "
+         "byte is written. Build & verify writes the sparse card image, "
+         "injects the selector, then verifies every copied range and every "
+         "file system. Flash to SD card… opens the app's Build / flash "
+         "dialog on the finished image; Run in emulator starts the Emulate "
+         "tab on it with Boot selector ticked, so the same menu appears in "
+         "the game window here first. The tools run under WSL and report "
+         "into the pane at the bottom of the tab (and the log)."),
+    ],
 }
 
 # The Image Info WINDOW (the "Info" button beside the Extract / Write image

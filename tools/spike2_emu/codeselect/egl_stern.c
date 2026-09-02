@@ -261,14 +261,19 @@ int egl_stern_texture(struct egl_stern *e, int w, int h, const unsigned char *px
     return 0;
 }
 
-void egl_stern_frame(struct egl_stern *e, const unsigned char *px)
+void egl_stern_frame(struct egl_stern *e, const unsigned char *packed, int x, int y, int w, int h)
 {
     if (!e->up) return;
     glClearColor(0.f, 0.f, 0.f, 1.f);
     glClear(GL_COLOR_DEPTH_BITS);
     glBindTexture(GL_TEXTURE_2D, e->tex);
-    if (px)
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, e->tex_w, e->tex_h, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    if (packed && w > 0 && h > 0) {
+        /* the packed rows are w*4 bytes, so the default UNPACK_ALIGNMENT (4)
+         * and UNPACK_ROW_LENGTH (0 = the rect's width) hold - glPixelStorei,
+         * which the bridge does not export, is never needed */
+        glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, packed);
+        e->uploaded += (long long)w * h * 4;
+    }
     glDrawArrays(GL_TRIANGLES, 0, 6);
     eglSwapBuffers(e->dpy, e->surf);
     e->frames++;
@@ -289,6 +294,7 @@ void egl_stern_close(struct egl_stern *e)
     glUseProgram(0);
     glDisable(GL_BLEND);
     glViewport(0, 0, e->w, e->h);
-    sel_log("egl: %d frames, closing (the LOADING frame stays up)", e->frames);
+    sel_log("egl: %d frames, %lld KB uploaded, closing (the LOADING frame stays up)",
+            e->frames, e->uploaded / 1024);
     egl_drop(e);                                       /* boot_display @0x12628 */
 }

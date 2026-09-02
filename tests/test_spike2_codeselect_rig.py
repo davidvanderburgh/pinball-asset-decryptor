@@ -259,6 +259,100 @@ def test_cli_list_games_one_line_per_partition(parts, monkeypatch, capsys):
         "7 %d %d turtles_pro" % (P7, P7 * SECTOR)]
 
 
+# ---- the multi layout: p7 holds img1/, img2/ ... each a complete games tree --
+MULTI_P7 = {"/": [("lost+found", DIR), ("img1", DIR), ("img2", DIR), ("img10", DIR), ("notes", DIR)],
+            "/img1": [("spk", DIR), ("turtles_pro", DIR), ("game", LNK), ("conagent", LNK), ("data", LNK)],
+            "/img1/turtles_pro": [("game", REG), ("data", DIR)],
+            "/img2": [("spk", DIR), ("turtles_le", DIR), ("game", LNK)],
+            "/img2/turtles_le": [("game", REG)],
+            "/img10": [("spk", DIR), ("godzilla_pro", DIR), ("game", LNK)],
+            "/img10/godzilla_pro": [("game", REG)],
+            "/notes": [("spk", DIR), ("x", DIR)],            # not imgN: never a tree
+            "/notes/x": [("game", REG)]}
+
+
+def test_list_games_walks_the_multi_layout_one_line_per_tree(parts):
+    """A p7 with no /spk of its own but imgN subdirectories that each pass the
+    strict rule is one line PER TREE, numerically ordered (img10 after img2),
+    the subdirectory as the fifth field, the same idx/lba/offset on every one.
+    A directory not named imgN is never offered, whatever it holds."""
+    parts.fs[P7 * SECTOR] = dict(MULTI_P7)
+    games = parts.mod.games_all(parts.img)
+    assert [(g[0], g[3], g[4]) for g in games] == [
+        (3, ["turtles_pro"], None),
+        (7, ["turtles_pro"], "img1"), (7, ["turtles_le"], "img2"), (7, ["godzilla_pro"], "img10")]
+    assert all(g[1] == P7 and g[2] == P7 * SECTOR for g in games[1:])
+
+
+def test_an_imgn_without_spk_or_without_a_title_is_not_a_tree(parts):
+    parts.fs[P7 * SECTOR] = {"/": [("img1", DIR), ("img2", DIR)],
+                             "/img1": [("turtles_pro", DIR)], "/img1/turtles_pro": [("game", REG)],   # no spk
+                             "/img2": [("spk", DIR)]}                                                # no title
+    assert [g[0] for g in parts.mod.games_all(parts.img)] == [3]
+
+
+def test_a_plain_games_partition_is_never_also_walked_for_imgn(parts):
+    """/spk at the root makes it a whole-partition tree; an imgN beside it is
+    just a directory."""
+    parts.fs[P7 * SECTOR] = {"/": [("spk", DIR), ("turtles_pro", DIR), ("img1", DIR)],
+                             "/turtles_pro": [("game", REG)],
+                             "/img1": [("spk", DIR), ("other", DIR)], "/img1/other": [("game", REG)]}
+    assert [(g[0], g[4]) for g in parts.mod.games_all(parts.img)] == [(3, None), (7, None)]
+
+
+def test_cli_list_games_prints_the_subdir_as_a_fifth_field(parts, monkeypatch, capsys):
+    parts.fs[P7 * SECTOR] = dict(MULTI_P7)
+    rc, out, _err = _cli(parts, monkeypatch, capsys, "--list-games")
+    assert rc == 0
+    assert out.splitlines() == [
+        "3 %d %d turtles_pro" % (P3, P3 * SECTOR),
+        "7 %d %d turtles_pro img1" % (P7, P7 * SECTOR),
+        "7 %d %d turtles_le img2" % (P7, P7 * SECTOR),
+        "7 %d %d godzilla_pro img10" % (P7, P7 * SECTOR)]
+    rc, out, _err = _cli(parts, monkeypatch, capsys)
+    row = next(ln for ln in out.splitlines() if ln.startswith("7 "))
+    assert "games (2nd)" in row and "multi: img1,img2,img10" in row
+
+
+def test_rootfs_dir_rdumps_out_of_the_rootfs_and_says_nothing_for_a_missing_one(parts, monkeypatch, tmp_path):
+    """`parts.py --rootfs-dir /usr/local/codeselect/media DEST card` is how
+    run_game.sh pulls the card's media out for the selector: a debugfs rdump
+    against the ROOTFS offset, stat'd first so an absent directory is a quiet
+    None (a card built without media has none) and never an error."""
+    calls = []
+
+    class R:
+        def __init__(self, rc, stdout=b""):
+            self.returncode, self.stdout = rc, stdout
+
+    def fake_run(argv, **kw):
+        calls.append(argv)
+        cmd = argv[2]
+        if cmd.startswith('stat "/usr/local/codeselect/media"'):
+            return R(0, b"Inode: 4500   Type: directory    Mode:  0755\n")
+        if cmd.startswith('rdump "/usr/local/codeselect/media"'):
+            os.makedirs(os.path.join(tmp_path, "media"), exist_ok=True)
+            return R(0)
+        if cmd.startswith("stat "):
+            return R(0, b"")                       # debugfs exits 0 for a missing path too
+        return R(0)
+
+    monkeypatch.setattr(parts.mod.subprocess, "run", fake_run)
+    out = parts.mod.rootfs_dir(parts.img, "/usr/local/codeselect/media", str(tmp_path))
+    assert out == os.path.join(str(tmp_path), "media")
+    assert calls[-1][2] == 'rdump "/usr/local/codeselect/media" "%s"' % tmp_path
+    assert calls[-1][-1] == "%s?offset=%d" % (parts.img, P2 * SECTOR), "out of the ROOTFS"
+    assert parts.mod.rootfs_dir(parts.img, "/usr/local/nothing", str(tmp_path)) is None
+
+
+def test_cli_rootfs_dir_prints_the_path_or_nothing_and_exits_zero(parts, monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(parts.mod, "rootfs_dir", lambda img, name, dest: os.path.join(dest, "media") if "media" in name else None)
+    rc, out, _err = _cli(parts, monkeypatch, capsys, "--rootfs-dir", "/usr/local/codeselect/media", str(tmp_path))
+    assert (rc, out.strip()) == (0, os.path.join(str(tmp_path), "media"))
+    rc, out, _err = _cli(parts, monkeypatch, capsys, "--rootfs-dir", "/usr/local/nothing", str(tmp_path))
+    assert (rc, out) == (0, "")
+
+
 def test_cli_part_prints_the_byte_offset_or_fails(parts, monkeypatch, capsys):
     rc, out, _err = _cli(parts, monkeypatch, capsys, "--part", "7")
     assert (rc, out.strip()) == (0, str(P7 * SECTOR))
@@ -360,6 +454,64 @@ def test_the_selector_runs_without_the_shim_and_with_stdin_closed():
     assert "--conf /dump/codeselect.conf" in line
     assert "--log /dump/codeselect.log" in line
     assert '--timeout "${PAD_SELECT_TIMEOUT:-30}"' in line
+    assert "--media /dump/media" in line, "the card's media directory, as the guest sees /dump"
+    assert "--audio" not in line, "audio is inherited (PAD_AUDIO_PLAY / PAD_AUDIO_FMT), not a rig flag"
+
+
+# ---- item 90 v2: N images (the multi layout's tokens) and the media --------
+
+def _select_outer():
+    code = _code(_read("run_game.sh"))
+    outer = code[code.index('if [ -n "${PAD_SELECT:-}" ]; then'):]
+    return outer[:outer.index("elif [ -n \"${PAD_GAME_DIR:-}\" ]")]
+
+
+def test_list_games_is_read_with_the_fifth_field_and_tokens_carry_the_subdir():
+    """`7 <lba> <off> turtles_pro img1` -> token p7:img1, the directory
+    <p7 mount>/img1/<title>; a four-field line -> p7 and cardmount's answer
+    as it is. The card's conf line is looked up by the same token."""
+    outer = _select_outer()
+    assert "while read -r idx _lba _off titles subdir; do" in outer
+    assert 'tok="p$idx"; [ -n "$subdir" ] && tok="p$idx:$subdir"' in outer
+    assert 'd="$(dirname "$m")/$subdir/${titles%%,*}"' in outer
+    assert 'sed -n "s#^image=/dev/mmcblk0$tok|##p"' in outer
+    assert 'SEL_IMAGES="${SEL_IMAGES}image=$tok|$t"' in outer
+    assert 'SEL_DIRS="${SEL_DIRS}$tok"$\'\\t\'"$d"$\'\\n\'' in outer
+    # and the INNER block prints the token as it is (no second 'p')
+    code = _code(_read("run_game.sh"))
+    inner = code[code.index('if [ -n "$SEL_DIRS" ]; then'):]
+    inner = inner[:inner.index('BDC="$R/games/data/boot_display_cmd"')]
+    assert "chose $SEL_CHOICE $SEL_IDX" in inner and "p$SEL_IDX" not in inner
+
+
+def test_the_cards_sound_and_volume_keys_reach_the_emulator_conf_but_media_does_not():
+    outer = _select_outer()
+    assert "grep -E '^(sound_move|sound_confirm|volume|mixer_volume)='" in outer
+    assert "media=" not in outer.replace("image=", ""), "media= is the card's path; the rig passes --media"
+
+
+def test_the_media_directory_is_cleared_pulled_from_the_card_or_overridden():
+    outer = _select_outer()
+    rm = outer.index('rm -rf "$R/dump/media"')
+    pull = outer.index('parts.py" --rootfs-dir /usr/local/codeselect/media "$R/dump" "$PAD_CARD"')
+    override = outer.index('if [ -n "${PAD_SELECT_MEDIA:-}" ]; then')
+    assert rm < override < pull, "cleared first, the override before the card's own"
+    assert 'cp -r "$PAD_SELECT_MEDIA" "$R/dump/media"' in outer
+    assert "[select] media:" in outer
+    # a root (PAD_PIVOT) run hands the copy back to the rig's user
+    assert 'chown -R "$_o" "$R/dump/media"' in outer and '[ "$(id -u)" = 0 ]' in outer
+
+
+def test_cardmount_title_dir_accepts_a_multi_partition_one_level_down():
+    """p7 of a multi card has img1/, img2/ ... and no title dir of its own;
+    cardmount must answer `imgN` (ONE component, so watch.sh's dirname of the
+    last line is still the mount to tear down), never fail, never `img1/x`."""
+    code = _code(_read("cardmount.sh"))
+    body = code[code.index("title_dir() {"):]
+    body = body[:body.index("\n}")]
+    assert 'for d in "$m"/img[0-9]*; do' in body
+    assert '[ -f "$s/game" ] && [ ! -L "$s" ] && { basename "$d"; return 0; }' in body
+    assert 'basename "$d"/' not in body and 'basename "$s"' not in body
 
 
 def test_everything_new_in_run_game_is_gated_on_pad_select():
@@ -555,10 +707,13 @@ def _srcs(var):
 
 #: What the selector is built and installed from. The contract named the
 #: first eight and the two vendored headers; the selector's own tree added
-#: input.c/h, log.c/h, conf.h and the example conf that `make install` ships.
+#: input.c/h, log.c/h, conf.h and the example conf that `make install` ships;
+#: the media pass (item 90 v2) added art.c/h (PNG + GIF decode, blit) and
+#: audio.c/h + audio_fifo.c + audio_alsa.c (the WAV mixer and its two sinks).
 EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h", "gfx.c", "gfx.h",
                  "egl_stern.c", "egl_stern.h", "input.c", "input.h",
                  "input_hw.c", "input_padsw.c", "log.c", "log.h",
+                 "art.c", "art.h", "audio.c", "audio.h", "audio_fifo.c", "audio_alsa.c",
                  "Makefile", "select.sh", "images.conf.example",
                  "third_party/stb_truetype.h", "third_party/stb_image.h"]
 
@@ -667,7 +822,10 @@ def test_the_readme_names_the_knobs_and_the_files():
     sec = text[text.index("## Boot selector"):text.index("## Titles")]
     for word in ("PAD_SELECT=1", "PAD_SELECT_TIMEOUT", "PAD_CARD_CACHE=0",
                  "select.choice", "codeselect.log", "codeselect.conf",
-                 "codeselect/DESIGN.md", "buildselect.sh"):
+                 "codeselect/DESIGN.md", "buildselect.sh",
+                 # item 90 v2: media, N images, the bypass, hearing the selector
+                 "PAD_SELECT_MEDIA", "--media-dir", "dump/media", "--layout multi", "p7:img1",
+                 "--bypass-validation", "bypass --card", "PAD_AUDIO=1", "audio_ctl.json", "PAD_AUDIO_CTL"):
         assert word in sec, word
 
 

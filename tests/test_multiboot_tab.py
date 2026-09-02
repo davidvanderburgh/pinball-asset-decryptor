@@ -906,8 +906,13 @@ def test_emulate_launch_carries_pad_card_and_pad_select(tmp_path):
         assert "PAD_AUDIO_CTL=" + emulate_tab.AUDIO_CTL_FILE in env
         panel._select_var.set(False)
         assert "PAD_SELECT=1" not in panel._launch_env(src)
-        # The checkbox sits beside Mute, on the button row.
-        assert panel._select_chk.master is panel._mute_chk.master
+        # The checkbox sits with the CARD PATH, never on the button row:
+        # that row unmaps "Set up emulator…" first when it overflows, and
+        # ~100 px of tickbox there cost exactly that (caught twice by the
+        # full parallel suite on 2026-09-02, and David's desktop is 1024x768
+        # - narrow enough to lose the button for real).
+        assert panel._select_chk.master is not panel._mute_chk.master
+        assert panel._select_chk.master is panel._src_entry.master
     finally:
         root.destroy()
 

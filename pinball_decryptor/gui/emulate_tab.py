@@ -2054,13 +2054,15 @@ class EmulatePanel:
                                          variable=self._mute_var,
                                          command=self._on_volume_change)
         self._mute_chk.pack(side=tk.LEFT, padx=(6, 0))
-        # Item 90: the boot selector, beside Mute.  A per-run choice like the
-        # card path - read once at Start (_launch_env), so flipping it under a
-        # live run changes the NEXT start and nothing else, and it needs no
-        # place in _apply's up/busy disable block.
-        self._select_chk = ttk.Checkbutton(btns, text="Boot selector",
-                                           variable=self._select_var)
-        self._select_chk.pack(side=tk.LEFT, padx=(6, 0))
+        # ITEM 90'S "Boot selector" TICKBOX IS DELIBERATELY NOT IN THIS ROW,
+        # and the paragraph above says why: _docker_btn/_setup_btn append LAST
+        # and so unmap FIRST when the row overflows.  Roughly 100 px of new
+        # tickbox brought that back — the full parallel suite caught it twice
+        # on 2026-09-02 as "nothing on the tab offers to put the handler back"
+        # (_setup_btn unmapped), and David's desktop is 1024x768, narrow
+        # enough to lose the button for real.  It sits beside the card path
+        # instead, where the expanding entry absorbs the width — see
+        # _build_source.
         # Seed the control file NOW, from whatever was just loaded (or the
         # unity/unmuted default) — so it exists before the first Start even
         # on a machine that has never touched the knob, rather than relying
@@ -3418,6 +3420,17 @@ class EmulatePanel:
         ttk.Button(row, text="Cache…", width=8,
                    command=self._open_cache_manager).pack(
             side=tk.LEFT, padx=(6, 0))
+        # Item 90: run a multi-image card's boot menu before the game.  It
+        # belongs with the CARD because that is what it is about, and it is
+        # here rather than in the button row because that row unmaps
+        # "Set up emulator…" when it overflows (see _build_controls) — here
+        # the entry beside it simply gives up the width.  A per-run choice
+        # like the card path: read once at Start (_launch_env), so flipping
+        # it under a live run changes the NEXT start and nothing else, which
+        # is why it needs no place in _apply's up/busy disable block.
+        self._select_chk = ttk.Checkbutton(row, text="Boot selector",
+                                           variable=self._select_var)
+        self._select_chk.pack(side=tk.LEFT, padx=(6, 0))
 
     def _browse(self):
         from tkinter import filedialog

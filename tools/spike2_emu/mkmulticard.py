@@ -3213,6 +3213,36 @@ def synth_media_dir(d, n_images):
     return d
 
 
+class Checks:
+    """``ok &= <expression>`` that SAYS WHICH EXPRESSION FAILED.
+
+    The selftest is one long chain of `ok &=`, and a False in the middle of
+    it used to print nothing at all: the run just ended in FAIL, and the
+    only way to find the check was to swap older copies of this file in and
+    bisect.  That happened, once, and one line of output would have saved
+    it - so this stands in for the plain bool and names the line."""
+
+    def __init__(self):
+        self.ok = True
+        self.failed = []
+
+    def __iand__(self, value):
+        if not value:
+            # the CALLER's frame, file and line together: a name taken from
+            # this module and a line taken from the caller would point at a
+            # line that is not the check
+            frame = sys._getframe(1)
+            line = frame.f_lineno
+            print("    CHECK FAILED at %s:%d"
+                  % (os.path.basename(frame.f_code.co_filename), line))
+            self.failed.append(line)
+            self.ok = False
+        return self
+
+    def __bool__(self):
+        return self.ok
+
+
 def selftest(d, selector_file=None):
     """PART 1 (parts layout): synthetic A+B+C -> 3-image card with injection + media -> verify ->
     inject again with the media dir present (idempotence) -> verify -> a byte of p2 flipped
@@ -3243,11 +3273,12 @@ def selftest(d, selector_file=None):
     plan = make_plan(A, [B, C], layout="parts")
     print("== plan (parts)")
     print_plan(plan)
-    ok = plan.unreachable_note() == "p8 unreachable on the machine"
+    ok = Checks()
+    ok &= plan.unreachable_note() == "p8 unreachable on the machine"
     try:
         check_reachable(plan)
         print("SELFTEST: check_reachable accepted a p8 image")
-        ok = False
+        ok &= False
     except Refused as e:
         print("refused without --allow-unreachable, as it should be: %s" % str(e).splitlines()[0])
     check_reachable(plan, allow=True)
@@ -3302,7 +3333,11 @@ def selftest(d, selector_file=None):
     ref = fs_ref(out, plan.prims[1].start * SECTOR)
     back = parse_images_conf(debugfs_cat(ref, SELECT_DIR + "/images.conf"))
     ok &= back["images"] == [("/dev/mmcblk0p3", "A stock", "synthetic"), ("/dev/mmcblk0p7", "B", ""), ("/dev/mmcblk0p8", "C", "third")]
-    ok &= back["media"] == [("art0.png", "", ""), ("art1.png", "anim1.gif", "music1.wav"), ("art2.png", "", "")]
+    ok &= back["media"] == [("art0.png", "", "", ""),
+                            ("art1.png", "anim1.gif", "music1.wav", "confirm1.wav"),
+                            ("art2.png", "", "", "")]
+    # the seventh field survived the write and the read back: image 1 plays its OWN sound
+    ok &= "|art1.png|anim1.gif|music1.wav|confirm1.wav" in conf
     ok &= back["default"] == 1 and back["timeout"] == 7 and back["volume"] == 40
     ok &= (back["sound_move"], back["sound_confirm"], back["media_dir"]) == ("move.wav", "confirm.wav", MEDIA_DIR)
     names = sorted(e[4] for e in debugfs_ls(ref, MEDIA_DIR) if e[4] not in (".", ".."))
@@ -3342,7 +3377,7 @@ def selftest(d, selector_file=None):
         try:
             plan_media(bad, 3)
             print("SELFTEST: a bad media set was accepted (%s)" % want_msg)
-            ok = False
+            ok &= False
         except Refused as e:
             print("refused: %s" % e)
             ok &= want_msg in str(e)
@@ -3423,7 +3458,7 @@ def selftest(d, selector_file=None):
     try:
         check_versions(diff)
         print("SELFTEST: a mismatched pair was accepted")
-        ok = False
+        ok &= False
     except Refused as e:
         ok &= "GAME CODE VERSION" in str(e) and "NODE BOARD FIRMWARE" in str(e)
         ok &= "--allow-version-mismatch" in str(e) and "1.59.0" in str(e) and "1.58.0" in str(e)
@@ -3442,7 +3477,7 @@ def selftest(d, selector_file=None):
     ok &= [im["node_fw_version"] for im in rep3["images"]] == ["1.33.0", "1.19.0"]
     ok &= rep3["version_mismatch"] and rep3["node_fw_mismatch"] and not rep3["title_mismatch"]
     print("SELFTEST", "PASS" if ok else "FAIL")
-    return ok
+    return bool(ok)
 
 
 # ============================================================================= CLI

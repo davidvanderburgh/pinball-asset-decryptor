@@ -1456,3 +1456,25 @@ def test_the_stock_card_reads_1_59_0_from_both_sources(mk):
     assert rec["elf_version"] == "1.59" and rec["elf_name"] == "TMNT PRO"
     assert rec["node_fw_version"] == "1.33.0" and len(rec["node_fw"]) == 17
     assert rec["notes"] == [] and rec["bypass"] == "armed"
+
+
+def test_the_selftests_check_recorder_names_the_line_that_failed(mk, capsys):
+    """`ok &= <expr>` used to fail silently: the run ended in FAIL and the
+    only way to find the check was to swap older copies of the file in and
+    bisect.  That happened once; one line of output saves the next one."""
+    ok = mk.Checks()
+    ok &= True
+    ok &= 1 == 1
+    assert bool(ok) and not ok.failed
+    assert capsys.readouterr().out == ""
+    # the line the failing check is ON is the one it must name
+    line = sys._getframe().f_lineno + 1
+    ok &= False
+    out = capsys.readouterr().out
+    assert not bool(ok)
+    assert ok.failed == [line]
+    assert "CHECK FAILED at test_mkmulticard.py:%d" % line in out
+    # ...and it stays failed, however many pass afterwards
+    ok &= True
+    assert not bool(ok)
+    assert "PASS" if ok else "FAIL" == "FAIL"

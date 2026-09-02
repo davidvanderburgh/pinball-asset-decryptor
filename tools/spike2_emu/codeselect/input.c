@@ -11,6 +11,7 @@ void input_base_init(struct input *in, const struct input_ops *ops)
     for (k = 0; k < KEY_COUNT; k++) {
         in->last[k] = -1;
         in->stable[k] = -1;          /* unknown until two samples agree */
+        in->present[k] = 1;          /* possible until a backend says it is not */
     }
 }
 
@@ -52,6 +53,12 @@ int input_poll(struct input *in, long long now_ms)
     ev = in->evq[in->evr];
     in->evr = (in->evr + 1) % 32;
     return ev;
+}
+
+int input_has(const struct input *in, int ev)
+{
+    if (!in || ev <= EV_NONE || ev >= EV_COUNT) return 0;
+    return in->present[KEY_OF(ev)];
 }
 
 void input_close(struct input *in)

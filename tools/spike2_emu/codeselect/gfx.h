@@ -43,8 +43,17 @@ void gfx_text(struct gfx *g, struct gfx_font *f, float px, int x, int baseline,
               const char *s, unsigned rgb);
 void gfx_text_center(struct gfx *g, struct gfx_font *f, float px, int cx, int baseline,
                      const char *s, unsigned rgb);
-/* the largest size in [min_px, px] at which s fits into max_w pixels */
+/* The largest size in [min_px, px] at which s fits into max_w pixels - or
+ * min_px when nothing in the range fits, so the result is NOT a promise that
+ * s fits. Pair it with gfx_ellipsize() wherever the text is not the caller's
+ * own constant. */
 float gfx_fit_px(struct gfx_font *f, const char *s, int max_w, float px, float min_px);
+/* Copy s into out (outlen bytes), cut on a code-point boundary and ended
+ * "..." if it is wider than max_w at px. What lands in out is always at most
+ * max_w wide, so gfx_text_center() cannot spill it off the panel. Returns 1
+ * when it had to cut. */
+int  gfx_ellipsize(struct gfx_font *f, float px, const char *s, int max_w,
+                   char *out, int outlen);
 /* word-wrap s into lines of at most max_w pixels; returns the line count
  * (at most max_lines; a longer text is cut). Each line is at most line_len-1
  * bytes. */

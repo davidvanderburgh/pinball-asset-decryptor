@@ -140,8 +140,15 @@ def main():
     if "countdown expired" in err:
         print("fakebus_test: FAIL (action) the countdown chose the image, not the button")
         ok = False
-    # node 1 at rest is ff x8; with the action button down bit 2 clears -> fb ...
-    if "RX fb ff ff ff ff ff ff ff" not in log:
+    # Node 1 idles at 04 59 7f 00 00 00 00 00 - fakebus.py records where that
+    # word comes from and why ff x8 was wrong. Both halves are checked here:
+    # the at-rest reply, and the one with the action button down, where bit 2
+    # clears byte 0 to 00. The trailing bytes are the u16 0, the checksum and
+    # STATUS 0.
+    if "RX 04 59 7f 00 00 00 00 00 00 00 24 00" not in log:
+        print("fakebus_test: FAIL (action) the bus never replied with node 1 at rest")
+        ok = False
+    if "RX 00 59 7f 00 00 00 00 00 00 00 28 00" not in log:
         print("fakebus_test: FAIL (action) the bus never replied with node 1 bit 2 low")
         ok = False
     if "BAD CK" in log:

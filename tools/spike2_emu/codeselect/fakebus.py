@@ -13,10 +13,9 @@ answers the wire protocol the way the boards + netbridge do (read_nodebus.md):
                fe  -> 11-byte identity 00 01 21 00 23 00 02 00 64 00 01 + ck + STATUS 0
                f9 / fc -> 16 zero bytes + ck + 0
                ff  -> 8 zero bytes + ck + 0
-               11  -> 8 switch bytes (node 8 at rest 00 ff 1f fb 40 00 00 00,
-                      node 1 at rest ff x8; pressed buttons named in the
-                      control file clear their bit: left = node 8 bit 25,
-                      right = node 8 bit 24, start = node 1 bit 11,
+               11  -> 8 switch bytes (the at-rest words below; pressed buttons
+                      named in the control file clear their bit: left = node 8
+                      bit 25, right = node 8 bit 24, start = node 1 bit 11,
                       action = node 1 bit 2, the lockdown-bar button) + u16 0
                       + ck + STATUS 0
 
@@ -30,8 +29,42 @@ import select
 import sys
 import time
 
+# ---------------------------------------------------------------- at rest
+#
+# Both words are OBSERVED, not invented. They are what the node bus carries
+# with nothing pressed, taken from the `[swprime] node=N cur[]=prev[]=...` and
+# `[nbchg] ... node=N <word>` lines the rig logs on every run (~190 runs on
+# this disk, several titles). What each BIT means is the switch lists' word,
+# not ours - see tools/spike2_emu/dump/tables/*/switch_list.txt.
+#
+# node 8: 00 ff 1f fb 40 00 00 00 - the flippers live in byte 3, released = 1
+#   (bit 25 = 0x02 left, bit 24 = 0x01 right, both set here). Other titles
+#   idle at other words in bytes 0-2 (0f dd ff fb .., 00 bc 7f ff ..) because
+#   their playfields differ; bytes 3-7 are the same everywhere in the logs.
+#
+# node 1: 04 59 7f 00 00 00 00 00 - INFERRED as the platform at-rest word, and
+#   then confirmed three ways:
+#     * it is the word 187 of 190 logged runs prime node 1 with, across
+#       godzilla, dungeons_and_dragons, batman, avengers and stranger_things;
+#     * its set bits are EXACTLY the union of the node-1 bits that appear in
+#       all 31 cached switch lists - {2, 8, 11, 12, 14, 16..22} = the lockdown
+#       button, ticket notch, start, tournament start, tilt pendulum, the six
+#       coins and slam tilt. Every bit with a switch reads 1 (released = 1 for
+#       a button); every bit with no switch reads 0. There is no node-1 switch
+#       above bit 22, which is why bytes 3-7 are zero.
+#     * the press variants in those same logs move only the expected bit:
+#       04 51 7f .. = bit 11 clear = START held, 00 59 7f .. = bit 2 clear =
+#       the ACTION button held, 04 59 7e .. = bit 16 clear = Left Coin.
+#   The previous value here, ff x8, was a guess, and a wrong one in the byte
+#   that matters most: byte 0 carries bit 2, the Action button, so a fake bus
+#   that idles it at 0xff also idles bits 0,1,3-7 made - switches that do not
+#   exist on any list.
 REST8 = bytes([0x00, 0xff, 0x1f, 0xfb, 0x40, 0x00, 0x00, 0x00])
-REST1 = bytes([0xff] * 8)
+REST1 = bytes([0x04, 0x59, 0x7f, 0x00, 0x00, 0x00, 0x00, 0x00])
+# a node with no switch word of its own: all-ones is this fake's own choice,
+# not an observation - no test drives one, and 'nothing pressed' is the only
+# property that matters
+REST_OTHER = bytes([0xff] * 8)
 IDENTITY = bytes([0x00, 0x01, 0x21, 0x00, 0x23, 0x00, 0x02, 0x00, 0x64, 0x00, 0x01])
 POLL_CYCLE = [1, 8, 0]
 
@@ -87,7 +120,7 @@ class FakeBus:
             if "action" in p:
                 sw[0] &= ~0x04          # bit 2 = Action / LOCKDOWN BUTTON
             return bytes(sw)
-        return bytes([0xff] * 8)
+        return REST_OTHER
 
     def reply_addressed(self, node, payload, reply_len):
         if reply_len == 0 or not payload:

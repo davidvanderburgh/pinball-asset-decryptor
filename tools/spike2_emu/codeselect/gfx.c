@@ -346,6 +346,51 @@ float gfx_fit_px(struct gfx_font *f, const char *s, int max_w, float px, float m
     return px < min_px ? min_px : px;
 }
 
+/* The other half of gfx_fit_px: shrinking stops at min_px, and a long enough
+ * string does not fit even there (a 199-character title - conf.h's limit - is
+ * still about twice the glass wide at the smallest size the menu will use).
+ * Drawing it anyway ran it off both edges, because gfx_text_center() centres
+ * whatever it is given. So the caller fits FIRST and then passes the result
+ * through here, which cuts the string on a code-point boundary and ends it
+ * "..." so that what is drawn is never wider than max_w. Returns 1 when it
+ * had to cut. */
+int gfx_ellipsize(struct gfx_font *f, float px, const char *s, int max_w,
+                  char *out, int outlen)
+{
+    static const char ell[] = "...";
+    const int elln = 3;
+    char buf[512];               /* gfx knows nothing of conf.h's CONF_STR: a
+                                  * longer string simply stops growing here,
+                                  * and the last verified prefix still fits */
+    const char *p;
+    int keep = 0;
+
+    if (!out || outlen <= 0) return 0;
+    out[0] = 0;
+    if (!f || !s) return 0;
+    snprintf(out, (size_t)outlen, "%s", s);
+    if (gfx_text_width(f, px, out) <= max_w) return 0;
+    for (p = s; *p; ) {
+        const char *q = p;
+        int n;
+        utf8_next(&q);
+        n = (int)(q - s);
+        if (n + elln >= (int)sizeof buf || n + elln >= outlen) break;
+        memcpy(buf, s, (size_t)n);
+        memcpy(buf + n, ell, (size_t)elln + 1);
+        if (gfx_text_width(f, px, buf) > max_w) break;
+        keep = n;
+        p = q;
+    }
+    if (!keep && gfx_text_width(f, px, ell) > max_w) {
+        out[0] = 0;                  /* nothing at all fits: draw nothing */
+        return 1;
+    }
+    memcpy(out, s, (size_t)keep);
+    memcpy(out + keep, ell, (size_t)elln + 1);
+    return 1;
+}
+
 int gfx_wrap(struct gfx_font *f, float px, const char *s, int max_w,
              char *lines, int line_len, int max_lines)
 {

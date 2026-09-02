@@ -11,6 +11,16 @@ node 1 bit 2 - Space in the rig) instead of START and must reach the same
 place: RIGHT moves the highlight to 1, ACTION confirms it, the log line reads
 '[select] key: action' (never 'key: start'), and the choice file holds 1.
 
+Then the two ways the Action button can be ABSENT, which is where a menu can
+confirm itself. With no switch table the selector has only the platform ids,
+and platform id 34 is COIN DOOR INTERLOCK - a switch a shut door holds MADE -
+on seven of the 31 cached lists. So: a table-less run with id 34 made, and
+then re-made mid-run, must NOT confirm and must sit out its whole countdown,
+while the same edge on id 36 (START's platform id) still does confirm - the
+positive control that keeps the first check from passing vacuously. And the
+footer, which both the live menu and --snapshot now log verbatim, must name
+START alone wherever no Action button is resolved.
+
 The sound path is exercised the way the rig's player would see it: the test
 creates the FIFO and holds its read end open (non-blocking) before the
 selector starts, and the selector runs with --audio fifo:<that> and
@@ -350,6 +360,186 @@ def main():
     if "start 3" not in got:
         raise SystemExit("padsw_test: FAIL (no action) START was lost: %r" % got)
     print("padsw_test: OK (a list with no lockdown row leaves it unset: %s)" % got)
+
+    # --- THE PHANTOM ACTION: a table-less menu must not confirm itself ---
+    # Platform id 34 - what padglhost publishes for the Action button before any
+    # switch list resolves - is COIN DOOR INTERLOCK (node 0 bit 23) on seven of
+    # the 31 cached lists: aerosmith_le, avengers_infinity_le, foo_fighters_le,
+    # guardians_le, iron_maiden_le, mando_le, rush_le. A shut coin door holds
+    # that switch MADE and padglhost latches it at window open, so a menu that
+    # read id 34 with no table read a switch nobody touched as an ACTION press.
+    #
+    # Both ways it can present are driven here: held from before the selector
+    # starts (the latch), and 0 -> 1 while it runs (padglhost re-resolving the
+    # door from platform id 33 onto this title's id 34 mid-menu, which is what
+    # actually fired - a switch already made when the first sample lands sets
+    # the debouncer's first settled level and raises no edge).
+    #
+    # The POSITIVE CONTROL is the same scenario on id 36, START's platform id,
+    # which must still confirm: without it a run that simply ignores the padsw
+    # file would pass this test.
+    def phantom_run(name, sid, timeout="4"):
+        for p in (choice, last):
+            if os.path.exists(p):
+                os.unlink(p)
+        sw = os.path.join(t, name + ".padsw")
+        with open(sw, "wb") as f:
+            f.write(struct.pack("<II", MAGIC, 1) + bytes(4096 - 8))
+        with open(sw, "r+b") as f:            # made before the selector starts
+            f.seek(OFF_HELD + sid)
+            f.write(b"\x01")
+        missing = os.path.join(t, "no_such_table_dir", "switch_list.txt")
+        p = subprocess.Popen([qemu, "-L", root, binp, "--headless",
+                              os.path.join(t, name + ".ppm"), "--conf", conf,
+                              "--input", "padsw", "--padsw", sw, "--tables", missing,
+                              "--timeout", timeout, "--out", choice, "--last", last,
+                              "--log", os.path.join(t, name + ".log"), "--font", font,
+                              "--no-invert", "--media", media, "--audio", "none",
+                              "--default", "0"],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        t0 = time.monotonic()
+        time.sleep(1.2)                       # past the first settled samples
+        set_held(sw, sid, 0)                  # ...and now a rising edge on it
+        time.sleep(0.3)
+        set_held(sw, sid, 1)
+        try:
+            o, e = p.communicate(timeout=25)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            o, e = p.communicate()
+            raise SystemExit("padsw_test: FAIL (%s) codeselect did not exit\n%s\n%s" % (name, o, e))
+        return p.returncode, o, e, time.monotonic() - t0
+
+    rc, o, e, dt = phantom_run("phantom34", 34)
+    if "no switch table" not in e:
+        raise SystemExit("padsw_test: FAIL (phantom) the run found a table after all:\n%s" % e)
+    if "[select] key: action" in o:
+        raise SystemExit("padsw_test: FAIL (phantom) a coin door held closed was read as an "
+                         "ACTION press with no switch table:\n%s" % o)
+    if "[select] key:" in o:
+        raise SystemExit("padsw_test: FAIL (phantom) some key fired off id 34:\n%s" % o)
+    if "countdown expired" not in e:
+        raise SystemExit("padsw_test: FAIL (phantom) the menu ended before its countdown "
+                         "(%.1f s), so something confirmed it:\n%s" % (dt, e))
+    if rc != 0 or "[select] chose 0" not in o:
+        raise SystemExit("padsw_test: FAIL (phantom) exit %d\n%s" % (rc, o))
+    if dt < 3.5:
+        raise SystemExit("padsw_test: FAIL (phantom) exited after only %.1f s of a 4 s "
+                         "countdown" % dt)
+    print("padsw_test: OK (no table + id 34 made and then re-made: no action, the countdown "
+          "chose 0 after %.1f s)" % dt)
+
+    rc, o, e, dt = phantom_run("control36", 36)
+    if "[select] key: start" not in o or "[select] chose 0" not in o:
+        raise SystemExit("padsw_test: FAIL (control) id 36 did NOT confirm with no table, so "
+                         "the phantom test above proves nothing:\n%s\n%s" % (o, e))
+    if "countdown expired" in e:
+        raise SystemExit("padsw_test: FAIL (control) the countdown chose it, not the key:\n%s" % e)
+    print("padsw_test: OK (positive control: the same edge on id 36 DOES confirm, %.1f s)" % dt)
+
+    # --- the footer names only the buttons that exist ---
+    # Both the live menu and --snapshot log the footer they drew, so the string
+    # is checkable without reading pixels. With the Action button unresolved the
+    # footer must say START alone: naming a button nothing is wired to is the
+    # defect, whether it comes from a list that has no lockdown row (beatles) or
+    # from a menu that has no list at all.
+    FOOT_ACTION = "LEFT / RIGHT FLIPPER: choose      START or ACTION: boot"
+    FOOT_START = "LEFT / RIGHT FLIPPER: choose      START: boot"
+
+    def footer_of(name, table, input_="padsw"):
+        p = subprocess.Popen([qemu, "-L", root, binp, "--snapshot",
+                              os.path.join(t, name + ".ppm"), "--conf", conf,
+                              "--input", input_, "--tables", table, "--timeout", "1",
+                              "--log", os.path.join(t, name + ".log"), "--font", font,
+                              "--no-invert", "--media", media],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        o, e = p.communicate(timeout=25)
+        m = re.search(r'footer "([^"]*)"', o + e)
+        if not m:
+            raise SystemExit("padsw_test: FAIL (%s) no footer in the log\n%s\n%s" % (name, o, e))
+        return m.group(1)
+
+    got = footer_of("foot_yes", tables)
+    if got != FOOT_ACTION:
+        raise SystemExit("padsw_test: FAIL (footer) a list WITH a lockdown row drew %r,\n"
+                         "                          expected %r" % (got, FOOT_ACTION))
+    got = footer_of("foot_no", os.path.join(t, "noaction.txt"))
+    if got != FOOT_START:
+        raise SystemExit("padsw_test: FAIL (footer) a list with NO lockdown row drew %r,\n"
+                         "                          expected %r" % (got, FOOT_START))
+    got = footer_of("foot_none", os.path.join(t, "no_such_table_dir", "switch_list.txt"))
+    if got != FOOT_START:
+        raise SystemExit("padsw_test: FAIL (footer) a menu with NO list at all drew %r,\n"
+                         "                          expected %r" % (got, FOOT_START))
+    got = footer_of("foot_hw", os.path.join(t, "no_such_table_dir", "switch_list.txt"), "hw")
+    if got != FOOT_ACTION:
+        raise SystemExit("padsw_test: FAIL (footer) --input hw reads node 1 bit 2 off the wire, "
+                         "so it must still promise ACTION; drew %r" % got)
+    print("padsw_test: OK (footer: named ACTION only where one is resolved, START alone "
+          "otherwise, and always on --input hw)")
+
+    # the LIVE menu logs it too (the '[select] menu: ...' line, on stdout), so
+    # the table-less control run above drew the honest footer as well
+    if 'footer "%s"' % FOOT_START not in o + e:
+        raise SystemExit("padsw_test: FAIL (footer) the live table-less run drew %r" %
+                         (re.search(r'footer "([^"]*)"', o + e),))
+
+    # --- a switch list that CHANGES on disk is re-read ---
+    # The list used to be latched on the first successful parse and never looked
+    # at again, which loses the race padglhost already handles: mktables repairs
+    # a partly-derived list about a second into a run. Here the list starts with
+    # no lockdown row (so the Action button is unresolved and the footer says
+    # START alone) and gains one mid-menu. The selector must notice the new
+    # mtime, re-resolve, repaint the footer - and then actually accept a press
+    # on the id it just learned.
+    for p in (choice, last):
+        if os.path.exists(p):
+            os.unlink(p)
+    live = os.path.join(t, "live_table.txt")
+    with open(live, "w") as f:
+        f.write("# id   num   node  bit  name\n"
+                "1    0    8   25   LEFT FLIPPER BUTTON\n"
+                "2    0    8   24   RIGHT FLIPPER BUTTON\n"
+                "3    0    1   11   START BUTTON\n")
+    sw = os.path.join(t, "live.padsw")
+    with open(sw, "wb") as f:
+        f.write(struct.pack("<II", MAGIC, 1) + bytes(4096 - 8))
+    proc = subprocess.Popen([qemu, "-L", root, binp, "--headless",
+                             os.path.join(t, "live.ppm"), "--conf", conf, "--input", "padsw",
+                             "--padsw", sw, "--tables", live, "--timeout", "12",
+                             "--out", choice, "--last", last,
+                             "--log", os.path.join(t, "live.log"), "--font", font,
+                             "--no-invert", "--media", media, "--audio", "none", "--default", "0"],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    t0 = time.monotonic()
+    time.sleep(1.5)
+    with open(live, "a") as f:          # mktables filling in what it now knows
+        f.write("9    0    1    2   Action Button\n")
+    time.sleep(3.0)                     # the re-stat runs every 2 s
+    set_held(sw, 9, 1)
+    try:
+        o, e = proc.communicate(timeout=25)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        o, e = proc.communicate()
+        raise SystemExit("padsw_test: FAIL (reread) codeselect did not exit\n%s\n%s" % (o, e))
+    dt = time.monotonic() - t0
+    if "changed on disk; ids re-resolved" not in e:
+        raise SystemExit("padsw_test: FAIL (reread) the list grew a lockdown row and the "
+                         "selector never re-read it:\n%s" % e)
+    if "action 9" not in e:
+        raise SystemExit("padsw_test: FAIL (reread) the re-read did not pick up action 9:\n%s" % e)
+    if "footer: ACTION button resolved" not in e:
+        raise SystemExit("padsw_test: FAIL (reread) the footer was not repainted:\n%s" % e)
+    if 'footer "%s"' % FOOT_START not in o + e:
+        raise SystemExit("padsw_test: FAIL (reread) the menu opened promising an ACTION button "
+                         "it had not resolved:\n%s" % o)
+    if "[select] key: action" not in o or "[select] chose 0" not in o:
+        raise SystemExit("padsw_test: FAIL (reread) the re-resolved id did not confirm:\n%s" % o)
+    if "countdown expired" in e:
+        raise SystemExit("padsw_test: FAIL (reread) the countdown chose it, not the button:\n%s" % e)
+    print("padsw_test: OK (a list that gains a lockdown row mid-run is re-read: action 9 "
+          "resolved, footer repainted, press accepted, %.1f s)" % dt)
 
     # --- a FIFO that does not exist: still exits 0 on the countdown ---
     for p in (choice, last):

@@ -192,8 +192,11 @@ full CLI, the log lines and the test list). What it is:
   subtitle (wrapped to four), the highlighted card framed amber on a lighter
   fill, a footer `LEFT / RIGHT FLIPPER: choose   START or ACTION: boot` and
   `booting <title> in N s` (or `press START or ACTION to boot <title>` with
-  timeout 0); both bottom lines shrink to fit rather than clipping a long
-  title. 2-4
+  timeout 0) — both drop the ACTION half wherever no Action button resolved,
+  and the log line quotes whichever was drawn. Every line shrinks to fit and
+  is then ellipsised: `gfx_fit_px()` floors at its minimum size and returns
+  it whether or not the text fits, so a 199-character title (the conf's
+  limit) used to run off both edges of the glass. 2-4
   images sit in a row (width scaled); 5-16 become a carousel of three cards
   with the highlighted one in the middle, its neighbours beside it
   (wrap-around), the neighbours-but-one peeking in from the edges and a
@@ -247,11 +250,25 @@ full CLI, the log lines and the test list). What it is:
     names nothing at all). ACTION also has a whole-name fallback for a list that
     puts it off (1,2) — whole-name because `START BUTTON` as a substring
     would also match the `TOURNAMENT START BUTTON` that 26 of those lists
-    carry. Platform ids (36 START / 34 ACTION / 25-28 service) stand before a
-    title has a table; a parsed list that knows neither the wire nor a name
-    leaves ACTION unset rather than aiming id 34 at some other switch (on
-    beatles, the one list with no lockdown row, id 34 IS the START button).
-    Tested with a scripted padsw file and two synthetic tables.
+    carry. Platform ids (36 START / 25-28 service) stand before a title has a
+    table; a parsed list that knows neither the wire nor a name leaves ACTION
+    unset rather than aiming an id at some other switch (on beatles, the one
+    list with no lockdown row, id 34 IS the START button).
+
+    ACTION has NO platform id, deliberately. Across the 31 cached lists id 34
+    is `COIN DOOR INTERLOCK` (node 0 bit 23) on seven — aerosmith_le,
+    avengers_infinity_le, foo_fighters_le, guardians_le, iron_maiden_le,
+    mando_le, rush_le — and a shut coin door holds that switch made, so a
+    table-less menu read it as an ACTION press and confirmed itself untouched.
+    The other platform ids were swept too: none of them lands on a switch
+    anything holds made except 36 on batman, which is the same interlock; 36
+    is kept anyway (it is right on 20 lists, and dropping it leaves a
+    table-less menu with no confirm key) and the window is shrunk instead —
+    with no table the list is re-checked every 250 ms. A resolved list is
+    re-read whenever its mtime moves, the way padglhost re-resolves its own
+    binds, because mktables repairs a partly-derived list a minute into a run.
+    Tested with a scripted padsw file, the phantom case with a positive
+    control on id 36, five synthetic tables and a list that changes on disk.
   * `none`: countdown only (tests).
 * `images.conf` v2: `image=<device>|<title>|<subtitle>|<art>|<anim>|<music>`
   lines (index = order; fields 4-6 optional; up to 16), `default=`,

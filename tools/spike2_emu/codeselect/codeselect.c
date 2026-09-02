@@ -57,6 +57,16 @@
 #define ANIM_MAX_FRAMES 30
 #define CONFIRM_CAP_MS 8000
 
+/* The two footer lines, and the two long forms of the countdown line. Which
+ * pair is drawn depends on whether this title HAS a lockdown-bar Action
+ * button: see draw_menu(). They are named constants on their own lines so
+ * anything outside this program that has to quote the footer (the GUI's
+ * Multi-boot preview) can lift the text from here instead of retyping it. */
+#define FOOT_START   "LEFT / RIGHT FLIPPER: choose      START: boot"
+#define FOOT_ACTION  "LEFT / RIGHT FLIPPER: choose      START or ACTION: boot"
+#define PRESS_START  "press START to boot "
+#define PRESS_ACTION "press START or ACTION to boot "
+
 struct opts {
     const char *conf, *out, *input, *nodebus, *spi, *padsw, *tables, *last, *log,
                *headless, *font, *preamble, *media, *audio, *audio_fmt, *audio_dump,
@@ -440,7 +450,10 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
     int x = card_x(L, slot), top = L->top, cw = L->cw, ch = L->ch, inner = L->inner;
     float tpx, spx;
     int base, tl, sub_y, nl, k, max_lines, line_h;
-    char tlines[2][CONF_STR], lines[4][CONF_STR], buf[64];
+    /* every line below is drawn through gfx_ellipsize() into cut[]: wrapping
+     * splits on spaces, so ONE long word (or a title with none) is still wider
+     * than the card, and gfx_fit_px() bottoms out before it shrinks that far */
+    char tlines[2][CONF_STR], lines[4][CONF_STR], buf[64], cut[CONF_STR + 8];
 
     gfx_round_frame(g, x, top, cw, ch, (int)(22 * s), (int)((on ? 8 : 3) * s),
                     on ? C_FRAME_HL : C_FRAME, on ? C_CARD_HL : C_CARD);
@@ -458,15 +471,19 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
             for (k = 0; k < tl; k++) tpx = gfx_fit_px(f, tlines[k], inner, tpx, 22 * s);
         }
         base = top + (int)((tl == 2 ? 0.36f : 0.42f) * ch);
-        for (k = 0; k < tl; k++)
-            gfx_text_center(g, f, tpx, x + cw / 2, base + (int)(k * tpx * 1.15f), tlines[k],
+        for (k = 0; k < tl; k++) {
+            gfx_ellipsize(f, tpx, tlines[k], inner, cut, sizeof cut);
+            gfx_text_center(g, f, tpx, x + cw / 2, base + (int)(k * tpx * 1.15f), cut,
                             on ? C_TEXT_HL : C_TEXT);
+        }
         sub_y = base + (int)((tl - 1) * tpx * 1.15f) + (int)(62 * s);
         spx = gfx_fit_px(f, im->subtitle, inner * 2, 30 * s, 22 * s);
         nl = gfx_wrap(f, spx, im->subtitle, inner, &lines[0][0], CONF_STR, 4);
-        for (k = 0; k < nl; k++)
-            gfx_text_center(g, f, spx, x + cw / 2, sub_y + (int)(40 * k * s), lines[k],
+        for (k = 0; k < nl; k++) {
+            gfx_ellipsize(f, spx, lines[k], inner, cut, sizeof cut);
+            gfx_text_center(g, f, spx, x + cw / 2, sub_y + (int)(40 * k * s), cut,
                             on ? C_SUB_HL : C_SUB);
+        }
         return;
     }
 
@@ -485,9 +502,11 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
             for (k = 0; k < tl; k++) tpx = gfx_fit_px(f, tlines[k], inner, tpx, 20 * s);
             base = label_y + (int)(50 * s);
         }
-        for (k = 0; k < tl; k++)
-            gfx_text_center(g, f, tpx, x + cw / 2, base + (int)(k * tpx * 1.15f), tlines[k],
+        for (k = 0; k < tl; k++) {
+            gfx_ellipsize(f, tpx, tlines[k], inner, cut, sizeof cut);
+            gfx_text_center(g, f, tpx, x + cw / 2, base + (int)(k * tpx * 1.15f), cut,
                             on ? C_TEXT_HL : C_TEXT);
+        }
         sub_y = base + (int)((tl - 1) * tpx * 1.15f) + (int)(44 * s);
         spx = gfx_fit_px(f, im->subtitle, inner * 2, 26 * s, 20 * s);
         line_h = (int)(32 * s);
@@ -495,19 +514,23 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
         if (max_lines < 1) max_lines = 1;
         if (max_lines > 4) max_lines = 4;
         nl = gfx_wrap(f, spx, im->subtitle, inner, &lines[0][0], CONF_STR, max_lines);
-        for (k = 0; k < nl; k++)
-            gfx_text_center(g, f, spx, x + cw / 2, sub_y + k * line_h, lines[k],
+        for (k = 0; k < nl; k++) {
+            gfx_ellipsize(f, spx, lines[k], inner, cut, sizeof cut);
+            gfx_text_center(g, f, spx, x + cw / 2, sub_y + k * line_h, cut,
                             on ? C_SUB_HL : C_SUB);
+        }
     }
 }
 
+/* action = this title has a lockdown-bar ACTION button the menu can read; 0
+ * means the footer must not promise one */
 static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
                       const struct conf *c, const struct media *m,
-                      int hl, int remain, int frame, int pinned)
+                      int hl, int remain, int frame, int pinned, int action)
 {
     float s = L->s;
     int W = g->w, slot;
-    char buf[300], widest[300];
+    char buf[300], widest[300], cut[300];
 
     gfx_fill(g, C_BG);
     gfx_text_center(g, f, 60 * s, W / 2, (int)(96 * s), "SELECT GAME CODE", C_TITLE);
@@ -526,22 +549,35 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
         gfx_text_center(g, f, 26 * s, W / 2, (int)(602 * s), buf, C_FOOT);
     }
 
-    /* Both bottom lines are fitted to the glass: a 199-character title (the
-     * conf's limit) must shrink, never run off the edge. The countdown line is
-     * sized from its LONGEST form, the 'press ...' one, so the size does not
-     * wobble as the digits drop from 10 to 9. */
+    /* Both bottom lines are SHRUNK and then CUT to the glass. Shrinking alone
+     * was not enough: gfx_fit_px() floors at min_px and hands back that floor
+     * whether or not the text fits, and a 199-character title (conf.h's limit)
+     * is still about twice the panel wide at 24 px - so the line used to run
+     * off both edges, which is exactly what gfx_text_center() does with
+     * anything too wide. gfx_ellipsize() ends it "..." instead. The countdown
+     * line is SIZED from its longest form, the 'press ...' one, so the size
+     * does not wobble as the digits drop from 10 to 9 - but each form is cut
+     * on its own, since the shorter one may still fit whole.
+     *
+     * The footer names the buttons that EXIST. With no Action button resolved
+     * - beatles has no lockdown row at all, and a menu still waiting for its
+     * switch table has not resolved one either - promising "START or ACTION"
+     * named a button nothing on this machine is wired to. */
     {
-        static const char foot[] = "LEFT / RIGHT FLIPPER: choose      START or ACTION: boot";
+        const char *foot = action ? FOOT_ACTION : FOOT_START;
         const int wmax = W - (int)(80 * s);
-        gfx_text_center(g, f, gfx_fit_px(f, foot, wmax, 30 * s, 20 * s), W / 2,
-                        (int)(648 * s), foot, C_FOOT);
-        snprintf(widest, sizeof widest, "press START or ACTION to boot %s", c->img[hl].title);
+        float fpx = gfx_fit_px(f, foot, wmax, 30 * s, 20 * s), cpx;
+        gfx_ellipsize(f, fpx, foot, wmax, cut, sizeof cut);
+        gfx_text_center(g, f, fpx, W / 2, (int)(648 * s), cut, C_FOOT);
+        snprintf(widest, sizeof widest, "%s%s", action ? PRESS_ACTION : PRESS_START,
+                 c->img[hl].title);
         if (remain >= 0)
             snprintf(buf, sizeof buf, "booting %s in %d s", c->img[hl].title, remain);
         else
             snprintf(buf, sizeof buf, "%s", widest);
-        gfx_text_center(g, f, gfx_fit_px(f, widest, wmax, 38 * s, 24 * s), W / 2,
-                        (int)(718 * s), buf, C_COUNT);
+        cpx = gfx_fit_px(f, widest, wmax, 38 * s, 24 * s);
+        gfx_ellipsize(f, cpx, buf, wmax, cut, sizeof cut);
+        gfx_text_center(g, f, cpx, W / 2, (int)(718 * s), cut, C_COUNT);
     }
 }
 
@@ -551,16 +587,18 @@ static void draw_loading(struct gfx *g, struct gfx_font *f, const char *title,
                          const struct art_image *pic)
 {
     float s = (float)g->h / 768.0f;
-    char buf[300];
-    int y = (int)(400 * s);
+    char buf[300], cut[300];
+    int y = (int)(400 * s), wmax = g->w - (int)(80 * s);
+    float px;
     gfx_fill(g, C_BG);
     if (pic) {
         gfx_blit(g, (g->w - pic->w) / 2, (int)(200 * s), pic->rgba, pic->w, pic->h);
         y = (int)(200 * s) + pic->h + (int)(90 * s);
     }
     snprintf(buf, sizeof buf, "LOADING %s...", title);
-    gfx_text_center(g, f, gfx_fit_px(f, buf, g->w - (int)(80 * s), 64 * s, 30 * s),
-                    g->w / 2, y, buf, C_TEXT_HL);
+    px = gfx_fit_px(f, buf, wmax, 64 * s, 30 * s);
+    gfx_ellipsize(f, px, buf, wmax, cut, sizeof cut);
+    gfx_text_center(g, f, px, g->w / 2, y, cut, C_TEXT_HL);
 }
 
 /* the slot image i is drawn in, or -1 when it is not on screen */
@@ -589,7 +627,8 @@ static const char *media_dir(const struct opts *o, const struct conf *c)
  * 0 = written, 2 = could not. */
 static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx *g,
                           struct gfx_font *font, const struct layout *L, int hl,
-                          const char *how, int timeout, int invert, const char *fontpath)
+                          const char *how, int timeout, int invert, const char *fontpath,
+                          int action)
 {
     struct media media;
     int n = c->n, frame = o->anim_frame > 0 ? o->anim_frame : 0, frames = 0;
@@ -607,15 +646,15 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
         sel_log("snapshot: frame %d wraps to %d (image %d has %d frames)", frame, frame % frames, hl, frames);
         frame %= frames;
     }
-    draw_menu(g, font, L, c, &media, hl, timeout > 0 ? timeout : -1, frame, 0);
+    draw_menu(g, font, L, c, &media, hl, timeout > 0 ? timeout : -1, frame, 0, action);
     if (gfx_write_ppm(g, o->snapshot, invert) < 0) {
         sel_say("error: cannot write %s: %s", o->snapshot, strerror(errno));
         media_free(&media);
         return 2;
     }
-    sel_say("snapshot: %s %dx%d, highlight %d (%s) from %s, frame %d of %d, timeout %d s, invert %d, font %s, media %s",
+    sel_say("snapshot: %s %dx%d, highlight %d (%s) from %s, frame %d of %d, timeout %d s, invert %d, font %s, media %s, footer \"%s\"",
             o->snapshot, g->w, g->h, hl, c->img[hl].title, how, frame, frames, timeout, invert,
-            fontpath, media.dir);
+            fontpath, media.dir, action ? FOOT_ACTION : FOOT_START);
     media_free(&media);
     return 0;
 }
@@ -646,6 +685,7 @@ int main(int argc, char **argv)
     struct audio *au = NULL;
     char err[300], fontpath[300], tables[400], padsw[400];
     int headless, snapshot, invert, timeout, n, hl, chosen = -1, w, h, volume, pinned, frame = 0;
+    int action;                       /* this title has a lockdown-bar ACTION button */
     int music_voice = -1;
     const struct audio_clip *music_clip = NULL;
     const char *how, *fmt_path;
@@ -695,6 +735,15 @@ int main(int argc, char **argv)
     headless = o.headless != NULL;
     pinned = o.anim_frame >= 0;
     if (pinned) frame = o.anim_frame;
+    /* the switch list, resolved here because --snapshot needs it too: it runs
+     * no input backend, but its footer has to name the same buttons the live
+     * menu will */
+    if (o.tables) snprintf(tables, sizeof tables, "%s", o.tables);
+    else snprintf(tables, sizeof tables, "/dump/tables/%s/switch_list.txt",
+                  getenv("PAD_GAME") ? getenv("PAD_GAME") : "");
+    /* hw reads node 1 bit 2 off the wire, so there the button is always
+     * possible; padsw needs the list to name it */
+    action = !strcmp(o.input, "hw") ? 1 : input_padsw_has_action(tables);
     /* the snapshot is what the PLAYER sees: boot_display's -invert compensates
      * for an LCD mounted upside down, so it is applied only when asked for */
     invert = o.invert >= 0 ? o.invert : snapshot ? 0 : detect_invert();
@@ -723,7 +772,7 @@ int main(int argc, char **argv)
     }
     layout_compute(&L, &g, &c);
     if (snapshot) {
-        rc = snapshot_frame(&o, &c, &g, font, &L, hl, how, timeout, invert, fontpath);
+        rc = snapshot_frame(&o, &c, &g, font, &L, hl, how, timeout, invert, fontpath, action);
         gfx_free(&g);
         gfx_font_free(font);
         sel_log("exit %d", rc);
@@ -757,22 +806,22 @@ int main(int argc, char **argv)
     if (o.padsw) snprintf(padsw, sizeof padsw, "%s", o.padsw);
     else snprintf(padsw, sizeof padsw, "%s", getenv("PAD_SW_SHM") ? getenv("PAD_SW_SHM") : "/dump/padsw");
     icfg.padsw = padsw;
-    if (o.tables) snprintf(tables, sizeof tables, "%s", o.tables);
-    else snprintf(tables, sizeof tables, "/dump/tables/%s/switch_list.txt",
-                  getenv("PAD_GAME") ? getenv("PAD_GAME") : "");
     icfg.tables = tables;
     if (!strcmp(o.input, "hw")) in = input_hw_open(&icfg);
     else if (!strcmp(o.input, "padsw")) in = input_padsw_open(&icfg);
+    /* the backend is the authority once it exists: padsw may resolve its table
+     * later than the probe above could, and --input none has no buttons */
+    action = input_has(in, EV_ACTION);
 
-    sel_say("menu: %d image%s, highlight %d (%s) from %s, timeout %d s, input %s, invert %d, %dx%d, font %s, audio %s, media %s",
+    sel_say("menu: %d image%s, highlight %d (%s) from %s, timeout %d s, input %s, invert %d, %dx%d, font %s, audio %s, media %s, footer \"%s\"",
             n, n == 1 ? "" : "s", hl, c.img[hl].title, how, timeout, o.input, invert, w, h, fontpath,
-            audio_sink_name(au), media.dir);
+            audio_sink_name(au), media.dir, action ? FOOT_ACTION : FOOT_START);
     if (L.carousel) sel_log("layout: carousel of %d (3 visible, %d px cards)", n, L.cw);
 
     start = sel_now_ms();
     last_key = start;
     deadline = timeout > 0 ? start + (long long)timeout * 1000LL : 0;
-    draw_menu(&g, font, &L, &c, &media, hl, deadline ? timeout : -1, frame, pinned);
+    draw_menu(&g, font, &L, &c, &media, hl, deadline ? timeout : -1, frame, pinned, action);
     remain_shown = deadline ? timeout : -1;
     dirty = 0;
     if (!headless) egl_stern_texture(&egl, w, h, gfx_pixels(&g, invert));
@@ -831,6 +880,14 @@ int main(int argc, char **argv)
             remain = -1;
         }
         if (remain != remain_shown) { remain_shown = remain; dirty = 1; }
+        /* padsw resolves its switch list a moment into the run, so the Action
+         * button can appear (or, on a list rewritten under us, go away) after
+         * the first frame: repaint the footer when it does */
+        if (input_has(in, EV_ACTION) != action) {
+            action = !action;
+            sel_log("footer: ACTION button %s", action ? "resolved" : "no longer resolved");
+            dirty = 1;
+        }
 
         /* the highlighted card's animation ticks on the GIF's own delays */
         if (next_tick && now >= next_tick) {
@@ -855,7 +912,7 @@ int main(int argc, char **argv)
         audio_pump(au, now);
 
         if (dirty) {
-            draw_menu(&g, font, &L, &c, &media, hl, remain, frame, pinned);
+            draw_menu(&g, font, &L, &c, &media, hl, remain, frame, pinned, action);
             dirty = 0;
         }
         present(&g, &egl, headless, invert);

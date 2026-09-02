@@ -15,6 +15,11 @@
  * lists, "LOCKDOWN BUTTON" on the older ones). It is its own event so the
  * '[select] key:' line names the button that was actually pressed; the menu
  * treats it exactly as EV_START.
+ *
+ * input_has() says whether a key can EVER fire on this backend. hw reads its
+ * wires directly, so every key is possible there; padsw needs a switch id and
+ * has none for a key this title's list does not carry. The menu asks so its
+ * footer promises only the buttons that exist.
  */
 #ifndef CODESELECT_INPUT_H
 #define CODESELECT_INPUT_H
@@ -44,6 +49,10 @@ struct input_ops {
 struct input {
     const struct input_ops *ops;
     int last[KEY_COUNT], count[KEY_COUNT], stable[KEY_COUNT];
+    /* can this key ever fire? 1 for every key until a backend says otherwise
+     * (padsw clears the ones its switch list does not name). May change
+     * mid-run: padsw resolves its table a couple of seconds in. */
+    int present[KEY_COUNT];
     int evq[32];
     int evw, evr;
 };
@@ -51,10 +60,16 @@ struct input {
 void input_base_init(struct input *in, const struct input_ops *ops);
 void input_sample(struct input *in, int key, int pressed);
 int  input_poll(struct input *in, long long now_ms);   /* next event or EV_NONE */
+int  input_has(const struct input *in, int ev);        /* 0 = ev can never arrive */
 void input_close(struct input *in);
 const char *input_event_name(int ev);
 
 struct input *input_hw_open(const struct input_cfg *cfg);
 struct input *input_padsw_open(const struct input_cfg *cfg);
+/* Does this title's switch list give the lockdown-bar Action button an id?
+ * The same resolution input_padsw_open() does, without opening anything else -
+ * --snapshot runs no input backend but must draw the footer the live menu
+ * will. 0 when the list is missing, unreadable, or has no such row. */
+int  input_padsw_has_action(const char *tables);
 
 #endif

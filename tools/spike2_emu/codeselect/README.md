@@ -134,10 +134,27 @@ A dark 1360x768 (or whatever `fbGetDisplayGeometry` says) menu: `SELECT GAME
 CODE`, one card per image, the highlighted card framed amber on a lighter
 fill, a footer `LEFT / RIGHT FLIPPER: choose   START or ACTION: boot` and
 `booting <title> in N s` (or `press START or ACTION to boot <title>` with
-timeout 0). Both bottom lines are fitted to the glass - a conf may carry a
-199-character title, and it shrinks rather than running off the edge. The
-countdown line is sized from its longest form (the `press ...` one) so its
-size does not change as the digits drop from 10 to 9.
+timeout 0).
+
+The footer names the buttons that EXIST. With no Action button resolved -
+beatles has no lockdown row, and a menu still waiting for its switch table
+has not resolved one either - both lines drop it: `LEFT / RIGHT FLIPPER:
+choose   START: boot` and `press START to boot <title>`. Whichever pair was
+drawn is quoted verbatim in the `menu:` and `snapshot:` log lines, so nothing
+outside the program has to guess at it; `FOOT_START` / `FOOT_ACTION` near the
+top of `codeselect.c` are the definitions.
+
+Both bottom lines are SHRUNK and then CUT to the glass. Shrinking alone was
+not enough: `gfx_fit_px()` stops at its minimum size and returns that size
+whether or not the text fits, and a conf may carry a 199-character title,
+which is still about twice the panel wide at 24 px - so the line ran off both
+edges, because `gfx_text_center()` centres whatever it is given.
+`gfx_ellipsize()` now ends anything still too wide with `...`, and what is
+drawn is never wider than the panel. The countdown line is sized from its
+longest form (the `press ...` one) so its size does not change as the digits
+drop from 10 to 9, but each form is cut on its own. Checked by eye at 2 and
+9 images with a 199-character title, and with a 199-character single word,
+which is the case wrapping cannot help with.
 
 * **2-4 images**: a row, card width scaled to fit (602 / 389 / 283 px).
 * **5-16 images**: a carousel of three cards at the 3-card width, the
@@ -148,7 +165,11 @@ size does not change as the digits drop from 10 to 9.
 * **No media configured**: the card is the v1 layout - `IMAGE n` label, the
   title (shrunk to fit, wrapped to two lines when it must), the subtitle
   (wrapped to four) - byte for byte (`test/headless.sh`'s first frames are
-  identical to the v1 renders).
+  identical to the v1 renders). Every card line goes through
+  `gfx_ellipsize()` as well, because wrapping splits on spaces: one long word
+  is still wider than the card. A title too long for its two lines is cut
+  there by the wrap, with no marker - only the over-wide single line gets a
+  visible `...`.
 * **Any image with art or an animation**: every card gets an art panel across
   the top 40 % of the card (546x168 for two cards, 333x168 for three,
   227x168 for four) above the label; the title shrinks to 48 px and the
@@ -455,11 +476,47 @@ Enter/`=`/`-` (Service Select/Plus/Minus) arrive through padsw; ids come from
 `/dump/tables/$PAD_GAME/switch_list.txt` by wire - (1,2) for ACTION, with a
 whole-name fallback (`ACTION BUTTON` / `LOCKDOWN BUTTON`, case-insensitive,
 an `(OPTIONAL)` suffix tolerated) for a list that puts it elsewhere - or the
-platform ids (36/34/25/26/27/28) before a title has a table (then the
+platform ids (36 START / 25-28 service) before a title has a table (then the
 flippers are unknown - use `-`/`=`/`1`). A list that names no lockdown button
 at all (beatles is the one such list here) leaves ACTION unset rather than
-letting the platform id 34 point at some other switch; Space then does
-nothing and `1` still boots. The rig copies the card's
+letting some other switch stand in for it; Space then does nothing, `1` still
+boots, and the footer says `START: boot`.
+
+**ACTION gets no platform id at all**, which is why 34 is missing from that
+list. Swept over the 31 cached lists on this disk, id 34 is the lockdown-bar
+button on 20 - but on SEVEN it is `COIN DOOR INTERLOCK` (node 0 bit 23):
+aerosmith_le, avengers_infinity_le, foo_fighters_le, guardians_le,
+iron_maiden_le, mando_le, rush_le. That switch is not a button; a shut coin
+door holds it made, which is a machine at rest (padglhost latches it at
+window open). A table-less menu that read id 34 therefore read a switch
+nobody had touched as an ACTION press and booted the highlighted image on its
+own. It is also `VOLUME ENCODER 1` on batman and the START button on beatles.
+ACTION now waits for the table or for its name, and loses least by waiting:
+it is the only key with a name fallback.
+
+The other platform ids were swept too. 25-28 slide onto `DIP 8` / `SERVICE
+SELECT` / `SERVICE PLUS` / `SERVICE MINUS` on the eight older lists, so the
+service cluster is off by one until the table lands; none of those is ever
+held made, so the worst they do is move the highlight. 36 is `TICKET NOTCH`
+on eight lists and `Left Coin` on beatles - dead keys. One collision is
+knowingly left standing: on **batman** id 36 is that same `COIN DOOR
+INTERLOCK`, so pre-table START carries the hazard ACTION just lost. Dropping
+36 would leave a table-less menu with no confirm key at all on the other 30
+titles, so instead the window is closed from the other end - with no table
+the list is re-checked every 250 ms rather than every 2 s. What fires it is
+not the door's level (a switch already made when the first sample lands sets
+the debouncer's first settled level and raises no edge) but a rising edge,
+i.e. padglhost re-resolving id 36 onto the door while this menu is still on
+platform ids.
+
+The switch list is also **re-read whenever its mtime moves**, for the reason
+padglhost re-resolves its own binds (`padglhost.c:2008-2030`): mktables
+repairs a partly-derived list about a second into a run, and a menu that
+latched on the first parse kept the poorer answer for its whole life. A
+rewrite that parses to nothing leaves the standing ids alone, so a later good
+write still re-resolves. The footer repaints when the answer changes.
+
+The rig copies the card's
 `/usr/local/codeselect/media` (or `PAD_SELECT_MEDIA=<host dir>`) to
 `$ROOT/dump/media` and forwards the conf's `sound_move`/`sound_confirm`/
 `volume`/`mixer_volume` keys.
@@ -511,8 +568,27 @@ down.
    `lockdown   button   (OPTIONAL)` on another wire (resolved, logged `(by
    name)`, while the `TOURNAMENT START BUTTON` and `ACTION BUTTON TARGET`
    decoys are refused), and one naming no lockdown button at all (`action
-   -1`, and START unharmed); and a run against a FIFO that does not exist
-   still exits 0 on the countdown.
+   -1`, and START unharmed).
+
+   Then **the phantom action**: a run with NO switch table and id 34 made
+   before it starts, released and re-made 1.2 s in (the two ways a latched
+   coin door can present - the level, and padglhost re-resolving the door
+   onto id 34 mid-menu, which is the one that actually fired). It must log no
+   `key:` at all, sit out its whole 4 s countdown and choose 0. The **positive
+   control** is the same edge on id 36, START's platform id, which must still
+   confirm - without it a run that simply ignored the padsw file would pass.
+
+   Then **the footer**: `--snapshot` against a list with a lockdown row, one
+   without, no list at all, and `--input hw`, reading the footer the log line
+   quotes; ACTION is named only where one resolved, and always on hw.
+
+   Then **the re-read**: a list that starts without a lockdown row and gains
+   one mid-menu must be re-read on its new mtime (`changed on disk; ids
+   re-resolved`, `action 9`), repaint the footer (`footer: ACTION button
+   resolved`) and then accept a press on the id it just learned.
+
+   Finally a run against a FIFO that does not exist still exits 0 on the
+   countdown.
 4. `bash -n select.sh` + `test/select_sh_test.sh` - the images.conf lookups
    (`--lookup`, `--lookup-sub`, six-field lines, the `:<sub>` form) with the
    host awk AND the card's busybox awk under qemu, then the whole hook with
@@ -528,9 +604,24 @@ via the control file; expects `chose 0`, the exact frames `88 02 11 65 0c`,
 `81 02 11 6c 0c`, `88 02 fe 78 0d`, `81 02 fe 7f 0d`, the `0a 00 -> 03 00`
 exchange, the enumeration frames, the pressed-LEFT reply
 `00 ff 1f f9 40 00 00 00 00 00 a9 00`, and no `BAD CK`. A second run presses
-`action` instead (node 1 bit 2: the node-1 reply becomes
-`fb ff ff ff ff ff ff ff 00 00 0c 00`) and expects `key: action` with no
-`key: start`, `chose 1` (the untouched default) and no `countdown expired`.
+`action` instead (node 1 bit 2) and expects `key: action` with no `key:
+start`, `chose 1` (the untouched default), no `countdown expired`, and both
+node-1 replies on the wire: `04 59 7f 00 00 00 00 00 00 00 24 00` at rest and
+`00 59 7f 00 00 00 00 00 00 00 28 00` with bit 2 down.
+
+The fake bus's at-rest words are OBSERVED, not invented, and `fakebus.py`
+records which part of each is which. Node 1 used to idle at `ff` x8, a guess,
+and a wrong one in the byte that matters: byte 0 carries bit 2, the Action
+button. The real word is `04 59 7f 00 00 00 00 00` - what 187 of the 190
+logged runs on this disk prime node 1 with, across godzilla,
+dungeons_and_dragons, batman, avengers and stranger_things, and whose set
+bits are exactly the union of the node-1 bits in all 31 cached switch lists
+({2, 8, 11, 12, 14, 16..22}: lockdown button, ticket notch, start, tournament
+start, tilt pendulum, six coins, slam tilt). Every bit with a switch reads 1
+(released = 1 for a button), every bit without one reads 0, and there is no
+node-1 switch above bit 22, which is why bytes 3-7 are zero. The press
+variants in those same logs move only the expected bit (`04 51 7f ..` =
+START held, `00 59 7f ..` = ACTION held, `04 59 7e ..` = Left Coin).
 
 ## What to look for on hardware
 

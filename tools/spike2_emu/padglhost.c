@@ -62,6 +62,7 @@ static void (*p_glActiveTexture)(unsigned);
 static void (*p_glTexImage2D)(unsigned,int,int,int,int,int,unsigned,unsigned,const void*);
 static void (*p_glTexSubImage2D)(unsigned,int,int,int,int,int,unsigned,unsigned,const void*);
 static void (*p_glCompressedTexImage2D)(unsigned,int,unsigned,int,int,int,int,const void*);
+static void (*p_glCompressedTexSubImage2D)(unsigned,int,int,int,int,int,unsigned,int,const void*);
 static void (*p_glTexParameteri)(unsigned,unsigned,int);
 static void (*p_glGenBuffers)(int,unsigned*);
 static void (*p_glDeleteBuffers)(int,const unsigned*);
@@ -121,7 +122,8 @@ static void load_gl(void)
     LOAD(glBlendFuncSeparate); LOAD(glBlendEquation); LOAD(glBlendEquationSeparate);
     LOAD(glGenTextures); LOAD(glDeleteTextures); LOAD(glBindTexture);
     LOAD(glActiveTexture); LOAD(glTexImage2D); LOAD(glTexSubImage2D);
-    LOAD(glCompressedTexImage2D); LOAD(glTexParameteri);
+    LOAD(glCompressedTexImage2D); LOAD(glCompressedTexSubImage2D);
+    LOAD(glTexParameteri);
     LOAD(glGenBuffers); LOAD(glDeleteBuffers); LOAD(glBindBuffer);
     LOAD(glBufferData); LOAD(glBufferSubData);
     LOAD(glGenVertexArrays); LOAD(glBindVertexArray); LOAD(glVertexAttribPointer);
@@ -2755,8 +2757,10 @@ struct jtex {
     unsigned char exists, isvid, over_lost, par_n, over_n, vd_have;
     struct jlevel lv[JLEVELS];
     unsigned par_pn[JPARAMS], par_v[JPARAMS];
-    unsigned char *over[JOVER];   /* raw TEXSUBIMAGE fallbacks (rare)       */
-    unsigned over_len[JOVER];
+    unsigned char *over[JOVER];   /* raw TEXSUBIMAGE fallbacks (rare), and  */
+    unsigned over_len[JOVER];     /* every TEXCOMPRESSEDSUB: a compressed   */
+    unsigned char over_op[JOVER]; /* level is held as one opaque blob, so a */
+                                  /* block patch replays AFTER it, as-is    */
     unsigned vdh[6];              /* last VIDSHM TEXDIRECT header: replayed  */
 };                                /* so a load shows the save-time frame     */
 struct jbuf {
@@ -2961,7 +2965,30 @@ static void jgl_note(unsigned op, const unsigned char *pl, unsigned len)
             unsigned char *c = malloc(len);
             if (c) { memcpy(c, pl, len);
                      t->over[t->over_n] = c;
-                     t->over_len[t->over_n] = len; t->over_n++; }
+                     t->over_len[t->over_n] = len;
+                     t->over_op[t->over_n] = PADGL_TEXSUBIMAGE; t->over_n++; }
+        } else if (!t->over_lost) {
+            t->over_lost = 1;
+            fprintf(stderr, "[padglhost] journal: texture %u has more "
+                    "unappliable subimages than fit - its journaled pixels "
+                    "may be stale\n", jcur_tex);
+        }
+        break;
+    }
+    case PADGL_TEXCOMPRESSEDSUB: {
+        /* A block patch on a level this journal holds only as the opaque
+         * blob TEXCOMPRESSED delivered: kept whole as an overlay and replayed
+         * after the level, exactly like an unappliable TEXSUBIMAGE. */
+        struct jtex *t;
+        if (jcur_tex == 0 || jcur_tex >= MAXNAME || len < 28) break;
+        t = &jtex[jcur_tex];
+        if (t->isvid) break;
+        if (t->over_n < JOVER) {
+            unsigned char *c = malloc(len);
+            if (c) { memcpy(c, pl, len);
+                     t->over[t->over_n] = c;
+                     t->over_len[t->over_n] = len;
+                     t->over_op[t->over_n] = PADGL_TEXCOMPRESSEDSUB; t->over_n++; }
         } else if (!t->over_lost) {
             t->over_lost = 1;
             fprintf(stderr, "[padglhost] journal: texture %u has more "
@@ -3246,7 +3273,8 @@ static int jgl_serialize(const char *path)
                     }
                 }
                 for (k = 0; k < t->over_n; k++)
-                    jput(f, PADGL_TEXSUBIMAGE, t->over[k], t->over_len[k], 0, 0);
+                    jput(f, t->over_op[k] ? t->over_op[k] : PADGL_TEXSUBIMAGE,
+                         t->over[k], t->over_len[k], 0, 0);
             }
             for (k = 0; k < t->par_n; k++) {
                 unsigned q[3];
@@ -3433,6 +3461,7 @@ static int jgl_rec_ok(unsigned op, const unsigned char *pl, unsigned len)
         [PADGL_GENTEX] = 4, [PADGL_BINDTEX] = 8, [PADGL_ACTIVETEX] = 4,
         [PADGL_TEXIMAGE] = 28, [PADGL_TEXSUBIMAGE] = 32,
         [PADGL_TEXCOMPRESSED] = 20, [PADGL_TEXPARAM] = 12, [PADGL_DELTEX] = 4,
+        [PADGL_TEXCOMPRESSEDSUB] = 28,
         [PADGL_GENBUF] = 4, [PADGL_BINDBUF] = 8, [PADGL_BUFDATA] = 12,
         [PADGL_BUFSUBDATA] = 12, [PADGL_DELBUF] = 4,
         [PADGL_GENVAO] = 4, [PADGL_BINDVAO] = 4, [PADGL_VERTEXATTRIB] = 24,
@@ -3452,6 +3481,7 @@ static int jgl_rec_ok(unsigned op, const unsigned char *pl, unsigned len)
     case PADGL_TEXIMAGE:      return u[6] <= len - 28;
     case PADGL_TEXSUBIMAGE:   return u[7] <= len - 32;
     case PADGL_TEXCOMPRESSED: return u[4] <= len - 20;
+    case PADGL_TEXCOMPRESSEDSUB: return u[6] <= len - 28;
     case PADGL_BUFDATA:       return len == 12 || u[2] <= len - 12;
     case PADGL_BUFSUBDATA:    return u[2] <= len - 12;
     case PADGL_SHADERSOURCE:  return u[1] <= len - 8;
@@ -4442,6 +4472,12 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
     case PADGL_TEXCOMPRESSED:
         p_glCompressedTexImage2D(0x0DE1,(int)u[0],u[1],(int)u[2],(int)u[3],0,
                                  (int)u[4], u[4] ? pl + 20 : 0);
+        break;
+    case PADGL_TEXCOMPRESSEDSUB:
+        if (u[6])
+            p_glCompressedTexSubImage2D(0x0DE1,(int)u[0],(int)u[1],(int)u[2],
+                                        (int)u[3],(int)u[4],u[5],(int)u[6],
+                                        pl + 28);
         break;
 
     case PADGL_GENBUF:          if (u[0] < MAXNAME) p_glGenBuffers(1, &map_buf[u[0]]); break;

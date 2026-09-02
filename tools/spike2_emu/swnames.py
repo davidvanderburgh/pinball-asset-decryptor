@@ -172,22 +172,51 @@ def _fit(recs, bits_by_node, names):
     return fits[0][1], fits[0][2]
 
 
-def device_switches(game=None, elf_path=None, bits_by_node=None, names=None):
+def device_switches(game=None, elf_path=None, bits_by_node=None, names=None,
+                    notes=None):
     """{node: [device record]} for CLASS-1 (switch) records, sorted by index.
 
     The node comes from the CONNECTOR string, never from arithmetic on `group`:
     nodecensus.py's header has the measurement that killed `group + 2`. A table
     that carries no connector at all falls through to `_fit()`, which matches
-    the group's indices against the live wire instead; the connector still wins
-    wherever there is one, so a title that resolved before this existed
-    resolves exactly as it did.
+    the group's indices against the live wire instead.
+
+    ★ THE CONNECTOR NAMES THE BOARD; THE BITS CONFIRM IT (2026-09-01,
+    king_kong_le, David's E2E sweep: "missing a lot of switch input ... ramp
+    optos and other switches not being displayed on the playfield"). The
+    connector used to win outright wherever there was one, and on King Kong
+    ONE record of the CPU-board group - DIP 8, group 4 - carries `9c`. That
+    is a connector on some other board, not node 9, but the rule filed all 12
+    CPU switches onto node 9 beside the 27 the board really has; no single
+    shift covers 39 indices that overlap, `_offset()` refused the node, and
+    every one of its 28 live switches - every ramp opto, both spinners, the
+    drops, the pit targets - stayed `?`, so switchxy placed none of them and
+    the window drew node 8 alone. So a connector-named node is now HELD TO
+    THE SAME TEST a `_fit()` candidate must pass: the group's indices land on
+    that node's live bits under one shift. A connector the bits contradict is
+    reported and the group goes back to being placed by its bits, exactly as
+    a connectorless group is - no worse, and `_fit()`'s refuse-a-tie rule
+    still guards it.
+
+    Measured before shipping, over every cached title on this disk (30 with
+    both tables): King Kong's group 4 is the ONLY connector-named switch group
+    that fails its own board's fit. Every other one - beatles, deadpool, DnD,
+    godzilla, bond, bond60, jaws, john wick, jurassic park, metallica and King
+    Kong's own group 7 - fits at shift 0, so nothing that resolved before this
+    resolves differently now. With no `bits_by_node` to check against (the
+    ELF-only CLI path) the connector is trusted as it always was.
+
+    `notes`, if given, is a list that collects one line per contradicted
+    connector, so fill()'s report can say what was overruled and why.
     """
     recs = devicexy.build(game=game, elf_path=elf_path)
     named = collections.defaultdict(set)
+    conns = collections.defaultdict(set)
     for r in recs:
         m = CONN_NODE.match(r["conn"] or "")
         if m:
             named[r["group"]].add(int(m.group(1)))
+            conns[r["group"]].add(r["conn"])
     gnode = {g: (next(iter(n)) if len(n) == 1 else None)
              for g, n in named.items()}
     by_group = collections.defaultdict(list)
@@ -195,7 +224,18 @@ def device_switches(game=None, elf_path=None, bits_by_node=None, names=None):
         if r["cls"] == 1:
             by_group[r["group"]].append(r)
     for group, grecs in sorted(by_group.items()):
-        if gnode.get(group) is None and bits_by_node:
+        node = gnode.get(group)
+        if node is not None and bits_by_node:
+            if _offset(grecs, bits_by_node.get(node, set())) is None:
+                if notes is not None:
+                    notes.append(
+                        "group %d: connector %s names node %d, but its %d "
+                        "indices land on no single shift of that node's live "
+                        "bits - placed by its bits instead"
+                        % (group, "/".join(sorted(conns[group])), node,
+                           len(grecs)))
+                gnode[group] = node = None
+        if node is None and bits_by_node:
             hit = _fit(grecs, bits_by_node, names or {})
             if hit:
                 gnode[group] = hit[0]
@@ -247,7 +287,8 @@ def fill(rows, game=None, elf_path=None):
     names_by_wire = {(node, bit): name
                      for _sid, _num, node, bit, name in rows}
     try:
-        dev = device_switches(game, elf_path, bits_by_node, names_by_wire)
+        dev = device_switches(game, elf_path, bits_by_node, names_by_wire,
+                              notes=report)
     except (OSError, SystemExit) as e:
         dev = {}
         report.append("no device table (%s)" % e)

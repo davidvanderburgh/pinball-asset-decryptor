@@ -170,6 +170,91 @@ def elf(name=None):
     return os.path.join(d, "game") if d else None
 
 
+def firmware_provenance(path=None, name=None):
+    """Has this title's ``game`` been patched by PAD, or is it as Stern shipped?
+
+    WHY A RUN SHOULD SAY THIS OUT LOUD.  PAD-102 was triaged for a day against
+    a user's *rethemed* card on the assumption that custom content was in the
+    picture; it was not, and the stock factory image crashed identically.  The
+    reverse mistake is the expensive one though: a log from a card whose
+    firmware PAD itself rewrote, read as if it were stock, sends the next
+    investigation looking for a bug in Stern's code that we put there.
+
+    THE TEST IS THE PATCH'S OWN SIGNATURE, NOT A SHAPE WE HAPPEN TO SEE TODAY.
+    An earlier draft called a binary stock when it had "exactly two PT_LOADs
+    plus a PT_GNU_STACK", which is a description of the Spike 2 builds sitting
+    on this desk in 2026 - not of anything Stern promises.  The day a firmware
+    ships with a third segment for its own reasons, that rule calls it patched
+    and accuses us of writing a card we never touched.  So the two halves are
+    tested independently, and neither counts segments:
+
+    * ``PT_GNU_STACK`` present  -> the patch is NOT there.  Every GCC-linked
+      binary gets one, and the blip-free patch's first act is to consume it -
+      it needs a spare program header and takes that one.  Its presence is
+      therefore a positive statement about the patch, at any segment count.
+    * ``PT_GNU_STACK`` gone AND an executable ``PT_LOAD`` starting above every
+      writable one -> the cave.  Linkers put code below data; code mapped past
+      the end of the data segment is something appended after the fact.
+
+    Anything else is "unknown", which is a real answer and never falls through
+    to "stock" - saying "Stern shipped it this way" about a shape this does not
+    recognise is the failure the check exists to prevent.
+
+    Returns ``(verdict, detail)``; ``verdict`` is "stock", "patched" or
+    "unknown", and never guesses from a file it could not parse."""
+    import struct
+    p = path or elf(name)
+    if not p or not os.path.isfile(p):
+        return "unknown", "no game ELF to read"
+    try:
+        with open(p, "rb") as fh:
+            head = fh.read(64)
+            if head[:4] != b"\x7fELF" or len(head) < 64:
+                return "unknown", "not an ELF"
+            e_phoff, = struct.unpack_from("<I", head, 28)
+            e_phentsize, e_phnum = struct.unpack_from("<HH", head, 42)
+            if not e_phnum or e_phentsize < 32 or e_phnum > 128:
+                return "unknown", "unreadable program headers"
+            fh.seek(e_phoff)
+            raw = fh.read(e_phentsize * e_phnum)
+    except OSError as e:
+        return "unknown", "could not read %s (%s)" % (p, e)
+    if len(raw) < e_phentsize * e_phnum:
+        return "unknown", "truncated program headers"
+
+    loads, gnu_stack = [], 0
+    for i in range(e_phnum):
+        o = i * e_phentsize
+        p_type, p_off, p_vaddr, _pa, p_filesz, p_memsz, p_flags, _al = \
+            struct.unpack_from("<8I", raw, o)
+        if p_type == 1:                       # PT_LOAD
+            loads.append((p_vaddr, p_memsz, p_flags))
+        elif p_type == 0x6474e551:            # PT_GNU_STACK
+            gnu_stack += 1
+
+    if not loads:
+        return "unknown", "no PT_LOAD segments"
+    if gnu_stack:
+        return "stock", ("PT_GNU_STACK intact over %d PT_LOAD - the blip-free "
+                         "patch consumes that header, so it was never applied"
+                         % len(loads))
+
+    # No GNU_STACK. That alone is not the patch - look for what it spends the
+    # header on: executable code mapped above the end of every writable
+    # segment, which no linker produces and the cave always is.
+    top_rw = max((v + sz for (v, sz, fl) in loads if fl & 2), default=None)
+    if top_rw is not None:
+        caves = [(v, sz) for (v, sz, fl) in loads if fl & 1 and v >= top_rw]
+        if caves:
+            v, sz = caves[0]
+            return "patched", ("no PT_GNU_STACK, and a %d-byte executable "
+                               "PT_LOAD at 0x%08x above the data segment - "
+                               "PAD's blip-free callout cave" % (sz, v))
+    return "unknown", ("no PT_GNU_STACK over %d PT_LOAD, but no executable "
+                       "segment above the data either - not a shape this "
+                       "recognises" % len(loads))
+
+
 def assets(name=None):
     d = game_dir(name)
     return os.path.join(d, "assets") if d else None
@@ -335,11 +420,22 @@ def main():
     if argv and argv[0].startswith("--"):
         what, argv = argv[0], argv[1:]
         name = argv[0] if argv else None
+        if what == "--provenance":
+            # A PATH OR A TITLE. watch.sh asks this before the card's title
+            # directory is resolvable through the rootfs but while it already
+            # holds $GAME_ELF, and a check that answers "unknown" exactly when
+            # it is wanted is no check at all.
+            if name and os.path.isfile(name):
+                verdict, detail = firmware_provenance(path=name)
+            else:
+                verdict, detail = firmware_provenance(name=name)
+            print("%s: %s" % (verdict, detail))
+            return 0 if verdict != "unknown" else 1
         value = {"--elf": elf, "--dir": game_dir, "--tables": table_dir,
                  "--art": playfield_png, "--game": active}.get(what)
         if not value:
-            print("usage: gameinfo.py [--elf|--dir|--tables|--art|--game] [title]",
-                  file=sys.stderr)
+            print("usage: gameinfo.py [--elf|--dir|--tables|--art|--game"
+                  "|--provenance] [title]", file=sys.stderr)
             return 2
         v = value(name)
         if not v:

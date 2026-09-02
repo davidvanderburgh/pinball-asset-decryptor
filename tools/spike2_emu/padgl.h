@@ -137,6 +137,15 @@ enum {
      * u32 display index (0 = backbox LCD, the primary; star_wars and
      * stranger_things both use 2 for the second display). */
     PADGL_TARGET,
+    /* ★ APPENDED 2026-09-01 (king_kong_le, David's E2E sweep): the game's
+     * image sequences - the theatre CURTAIN that opens on the intro film -
+     * patch their BC3 atlases frame by frame with glCompressedTexSubImage2D,
+     * and the guest half of this bridge answered that call with a stub that
+     * returned 0 and emitted nothing. The atlas stayed on the frame it was
+     * created with, so the curtain never moved while the film played behind
+     * it for the whole 30 s intro. Appended, not inserted, so every op above
+     * keeps its number. */
+    PADGL_TEXCOMPRESSEDSUB,     /* u32 lvl,x,y,w,h,fmt,size + data             */
     PADGL_OP_MAX
 };
 

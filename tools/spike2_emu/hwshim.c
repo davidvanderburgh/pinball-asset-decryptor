@@ -1691,6 +1691,63 @@ extern char *getenv(const char *);
 
 static int (*real_sigaction)(int, const void *, void *);
 
+/* IS THIS STILL LIBC'S sigaction, OR SOMETHING THAT LANDED ON TOP OF IT?
+ *
+ * PAD-102, godzilla_le 1.16 (stock AND the Heisei retheme; 1.13 and the 1.15
+ * Heisei are clean): about four seconds into boot, this cached pointer stops
+ * being libc's sigaction and reads 0x000f0fff, an address inside the GAME's
+ * own read-only text. game_segv_fn, eight bytes away in the same .bss, goes
+ * the same way in the same window. Measured under gdb through the real rig:
+ * at the game's _start it is 0x40ac1f54, by its first sigaction() call it is
+ * 0x000f0fff, and no signal/sigaction path of ours writes it in between - both
+ * assignments below are guarded by `if (!real_sigaction)`, so a non-NULL value
+ * is never replaced. Whatever does the write is not yet named.
+ *
+ * WHAT IT COSTS IS OUT OF ALL PROPORTION TO A STRAY WORD, and that part IS
+ * ours. GCC tail-calls `return real_sigaction(...)` - `ldr r3,[r3,#208]` then
+ * `bx r3` with lr still holding the GAME's return address - and 0x000f0fff has
+ * BIT 0 SET, so `bx` switches the CPU into THUMB state and starts decoding the
+ * game's ARM text as Thumb. Two instructions later it is executing
+ * `str r4,[r3,r0]` at 0xf0660 and storing into read-only text: SIGSEGV, dead
+ * guest, four seconds after Start, on every run. cpsr=0xb0030 (T bit set) and
+ * r3=0x000f0fff in the crash report are that jump, recorded.
+ *
+ * So: never BRANCH to this pointer on trust. An address inside the game image
+ * is impossible for a libc function - the game is a fixed EXEC at 0x8000 and
+ * libc is mapped high - which makes the test title-agnostic and exact. It
+ * deliberately does NOT test bit 0 on its own: a Thumb libc would set it
+ * legitimately, and rejecting that would break every rootfs that has one. */
+static unsigned long game_text_end(void);   /* defined with the crash reporter */
+
+static int sigaction_ptr_ok(void)
+{
+    unsigned long a = (unsigned long)(void *)real_sigaction;
+    if (!a) return 0;
+    if (a >= 0x8000ul && a < game_text_end()) return 0;   /* the game's image */
+    return addr_readable((const void *)(a & ~1ul));
+}
+
+/* Re-resolve when the cached pointer has stopped being believable, and say so
+ * once. Returns 0 when there is nothing safe to call. */
+static int sigaction_ready(void)
+{
+    static int complained;
+    if (sigaction_ptr_ok()) return 1;
+    if (!complained) {
+        char b[200];
+        complained = 1;
+        snprintf(b, sizeof b,
+                 "[segv] real_sigaction was 0x%lx, which is inside the game's "
+                 "own image - not calling it; re-resolving\n",
+                 (unsigned long)(void *)real_sigaction);
+        logmsg(b);
+    }
+    real_sigaction = dlsym(RTLD_NEXT, "sigaction");
+    if (sigaction_ptr_ok()) return 1;
+    real_sigaction = 0;
+    return 0;
+}
+
 /* FULL mode: take the handler over and dump everything. Off by default,
  * because with the game's own handler left in place the faulting thread spins
  * but the others keep running, which is what you want when watching whether a
@@ -1714,6 +1771,8 @@ static int segv_header_on(void)
  * Linux; slot 132 is sa_flags, and SA_SIGINFO (4) says which shape it is. */
 static void *game_segv_fn;
 static int   game_segv_flags;
+static void *game_bus_fn;       /* SIGBUS, same arrangement - see bus_header_handler */
+static int   game_bus_flags;
 static int   segv_reports;      /* header prints, capped - see below */
 
 /* The universal half: true on any title, invents nothing. Kept separate from
@@ -1839,6 +1898,63 @@ static void scan_guard_check(unsigned long *uc)
  * forever; item 23 measured that shape as a hang. Three reports name the fault
  * without turning a hang into a gigabyte of log.
  */
+/* The second half of HEADER mode, shared by SIGSEGV and SIGBUS: hand the
+ * fault to the handler the game registered (recorded by shim_sigaction /
+ * shim_signal), or let it kill the process the way it would have.
+ *
+ * "THE WAY IT WOULD HAVE" HAS A HOLE UNDER PAD_PIVOT, found on led_zeppelin_le
+ * (item 80, 2026-09-01). run_game.sh puts the guest in its own pid namespace
+ * and exec's qemu as its init - pid 1 in there. Restoring SIG_DFL and
+ * returning re-executes the faulting instruction, qemu sees a guest signal
+ * with no handler and does what qemu does: prints `uncaught target signal N`
+ * and kill()s ITSELF with the host signal. But a pid namespace's init cannot
+ * be killed from inside its own namespace by any signal it has no handler for
+ * - the kernel drops it (SIGNAL_UNKILLABLE) - so the kill is a no-op, qemu
+ * parks the faulting thread in sigsuspend() forever, and the 19 other threads
+ * it had already stopped for the core dump never run again. The game is dead,
+ * the process is alive, `pgrep -x game` says so, and watch.sh waits for a
+ * "game exited" that never comes: David's run sat 20 minutes at a black
+ * screen with no line saying why. (The "core dumped" qemu prints there is
+ * also untrue: RLIMIT_CORE is 0, so it wrote nothing.) So when this guest IS
+ * pid 1 - and only then - the end is an explicit exit, with the signal in the
+ * status the way a shell would report it. Anywhere else the old path stands.
+ */
+static void fault_pass_on(int sig, void *info, void *ucv)
+{
+    void **fn    = sig == 7 ? &game_bus_fn    : &game_segv_fn;
+    int   *flags = sig == 7 ? &game_bus_flags : &game_segv_flags;
+
+    if (*fn) {
+        char d[80];
+        snprintf(d, sizeof d, "[segv] delegating to guest handler %p flags=0x%x\n",
+                 *fn, *flags);
+        logmsg(d);
+        if (*flags & 4)                 /* SA_SIGINFO: three-argument form */
+            ((void (*)(int, void *, void *))*fn)(sig, info, ucv);
+        else
+            ((void (*)(int))*fn)(sig);
+        return;
+    }
+    logmsg("[segv] no guest handler recorded; falling through to SIG_DFL\n");
+
+    if (syscall(20) == 1) {             /* getpid: init of a pid namespace */
+        char d[160];
+        snprintf(d, sizeof d, "[segv] this guest is pid 1 of its pid namespace, "
+                 "where SIG_DFL cannot end it (qemu's own kill() is dropped and "
+                 "the run wedges) - exiting %d instead\n", 128 + sig);
+        logmsg(d);
+        _exit(128 + sig);
+    }
+
+    /* Nobody else wants it: die the way we would have died anyway. */
+    if (sigaction_ready()) {
+        unsigned char dfl[160];
+        int i;
+        for (i = 0; i < 160; i++) dfl[i] = 0;   /* sa_handler = SIG_DFL (0) */
+        real_sigaction(sig, dfl, 0);
+    }
+}
+
 static void segv_header_handler(int sig, void *info, void *ucv)
 {
     unsigned long *uc = ucv;
@@ -1851,27 +1967,250 @@ static void segv_header_handler(int sig, void *info, void *ucv)
         if (segv_reports == 3)
             logmsg("[segv] (further faults will not be reported)\n");
     }
+    fault_pass_on(sig, info, ucv);
+}
 
-    if (game_segv_fn) {
-        char d[80];
-        snprintf(d, sizeof d, "[segv] delegating to guest handler %p flags=0x%x\n",
-                 game_segv_fn, game_segv_flags);
-        logmsg(d);
-        if (game_segv_flags & 4)        /* SA_SIGINFO: three-argument form */
-            ((void (*)(int, void *, void *))game_segv_fn)(sig, info, ucv);
-        else
-            ((void (*)(int))game_segv_fn)(sig);
+/* ---------------- unaligned LDRD/STRD/LDM/STM: the kernel's fixup, here ----
+ *
+ * led_zeppelin_le 1.22.0, item 80's sweep (2026-09-01): every game start died
+ * `qemu: uncaught target signal 7 (Bus error)` on the sound-preload thread, at
+ *
+ *     20937c:  e18320d7   ldrd r2, r3, [r3, r7]      r3 = 8, r7 = 0x6ce22fca
+ *
+ * r7 points into the game's mmap of image.bin - a sound-bank table of 8-byte
+ * records that the file lays down on a 2-byte boundary - and the compiler
+ * reached for LDRD to fetch a record. The ARMv7 architecture alignment-faults
+ * LDRD/STRD/LDM/STM on any non-word address whatever SCTLR.A says; on the real
+ * machine that fault goes to the kernel, whose alignment handler
+ * (arch/arm/mm/alignment.c, UM_FIXUP - the default on v6+) performs the
+ * access on the program's behalf and resumes it. Nobody at Stern ever saw
+ * this: it costs a trap and works. qemu-user models the architecture and has
+ * no kernel above it, so the same fault reaches the GUEST as
+ * SIGBUS(BUS_ADRALN) and, with no handler, ends the run.
+ *
+ * This is the kernel's half, done from the SIGBUS handler: decode the
+ * instruction, perform the access a byte at a time, write the registers back
+ * into the signal frame, step the pc, return. Exactly the instructions the
+ * kernel fixes for user mode - LDRD/STRD and LDM/STM, ARM and Thumb
+ * encodings - and nothing more: an alignment fault on anything else (VLDR /
+ * VLD1 with an alignment qualifier, LDREX) is one the kernel would kill the
+ * program for too, and it goes to the report like any other fault.
+ *
+ * PAD_ALIGN_FIXUP=0 turns it off, to see the raw fault. The first fixups are
+ * logged with their pc, then every 4096th, so a hot loop cannot fill game.out
+ * (the kernel keeps the same kind of count in /proc/cpu/alignment).
+ */
+static int align_on(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *p = getenv("PAD_ALIGN_FIXUP");
+        v = !(p && p[0] == '0');
+    }
+    return v;
+}
+
+static unsigned long align_fixups;
+static const char *align_what;
+static unsigned long align_ea;
+
+static unsigned long ld32u(unsigned long a)
+{
+    const unsigned char *p = (const unsigned char *)a;
+    return p[0] | (unsigned long)p[1] << 8 | (unsigned long)p[2] << 16
+         | (unsigned long)p[3] << 24;
+}
+static unsigned ld16u(unsigned long a)
+{
+    const unsigned char *p = (const unsigned char *)a;
+    return p[0] | (unsigned)p[1] << 8;
+}
+static void st32u(unsigned long a, unsigned long v)
+{
+    unsigned char *p = (unsigned char *)a;
+    p[0] = (unsigned char)v;         p[1] = (unsigned char)(v >> 8);
+    p[2] = (unsigned char)(v >> 16); p[3] = (unsigned char)(v >> 24);
+}
+
+/* Every page the access touches must be mapped before anything is touched: a
+ * fixup that faults faults INSIDE a signal handler, which is a second death
+ * with no report. addr_readable probes a byte with write(2) to /dev/null. */
+static int align_span_ok(unsigned long a, unsigned long n)
+{
+    unsigned long p;
+    for (p = a; p < a + n; p = (p & ~0xfffUL) + 0x1000)
+        if (!addr_readable((const void *)p)) return 0;
+    return 1;
+}
+
+/* A load INTO the pc (LDM with pc in the list) is an interworking branch:
+ * the T bit follows bit 0. */
+static void align_set_pc(unsigned long *uc, unsigned long v)
+{
+    uc[8 + 15] = v & ~1UL;
+    uc[24] = (uc[24] & ~0x20UL) | ((v & 1) << 5);
+}
+
+/* Returns 0 = not done, 1 = done (step the pc), 2 = done and the pc is set. */
+static int align_ldm_stm(unsigned long *uc, int P, int U, int W, int L, int Rn,
+                         unsigned list, unsigned long pc_stored)
+{
+    unsigned long *r = uc + 8;
+    unsigned long rn = r[Rn], a, n = 0, vals[16];
+    int i;
+    for (i = 0; i < 16; i++) if (list & (1u << i)) n++;
+    if (!n) return 0;
+    a = U ? (P ? rn + 4 : rn) : (P ? rn - 4 * n : rn - 4 * n + 4);
+    align_ea = a;
+    if (!align_span_ok(a, 4 * n)) return 0;
+    if (L) {
+        for (i = 0; i < 16; i++) if (list & (1u << i)) { vals[i] = ld32u(a); a += 4; }
+        for (i = 0; i < 15; i++) if (list & (1u << i)) r[i] = vals[i];
+    } else {
+        for (i = 0; i < 16; i++) if (list & (1u << i)) {
+            st32u(a, i == 15 ? pc_stored : r[i]);
+            a += 4;
+        }
+    }
+    /* LDM with Rn in the list: the loaded value stands (writeback there is
+     * UNPREDICTABLE, and the kernel lets the load win). */
+    if (W && !(L && (list & (1u << Rn)))) r[Rn] = U ? rn + 4 * n : rn - 4 * n;
+    if (L && (list & 0x8000)) { align_set_pc(uc, vals[15]); return 2; }
+    return 1;
+}
+
+static int align_ldrd_strd(unsigned long *uc, int P, int U, int W, int L,
+                           int Rn, int Rt, int Rt2, unsigned long rn,
+                           unsigned long off)
+{
+    unsigned long *r = uc + 8;
+    unsigned long ea = P ? (U ? rn + off : rn - off) : rn;
+    unsigned long v0, v1;
+    if (Rt == 15 || Rt2 == 15) return 0;
+    align_ea = ea;
+    if (!align_span_ok(ea, 8)) return 0;
+    if (L) {
+        v0 = ld32u(ea); v1 = ld32u(ea + 4);   /* both loads before any write */
+        r[Rt] = v0; r[Rt2] = v1;
+    } else {
+        st32u(ea, r[Rt]); st32u(ea + 4, r[Rt2]);
+    }
+    if (!P || W) r[Rn] = U ? rn + off : rn - off;
+    return 1;
+}
+
+/* 1 when the faulting instruction was emulated and the frame stepped past it;
+ * 0 when it is not one the kernel would fix, so the fault is reported. */
+static int align_fixup(unsigned long *uc)
+{
+    unsigned long *r = uc + 8;
+    unsigned long pc = r[15];
+    int thumb = (uc[24] >> 5) & 1;
+    int rc = 0, ilen = 4;
+
+    align_what = 0; align_ea = 0;
+    if (!align_span_ok(pc, 4)) return 0;
+    if (!thumb) {
+        unsigned long insn = ld32u(pc);
+        int P = (insn >> 24) & 1, U = (insn >> 23) & 1, W = (insn >> 21) & 1;
+        int Rn = (insn >> 16) & 15;
+        if ((insn >> 28) == 0xf) return 0;                /* unconditional space */
+        if ((insn & 0x0e1000d0) == 0x000000d0) {          /* LDRD (1101) / STRD (1111) */
+            int L = !((insn >> 5) & 1);
+            int Rt = (insn >> 12) & 15;
+            unsigned long off = (insn & (1UL << 22))
+                ? (((insn >> 4) & 0xf0) | (insn & 0xf))    /* immediate form */
+                : r[insn & 15];                            /* register form  */
+            unsigned long rn = Rn == 15 ? pc + 8 : r[Rn];
+            if (Rt & 1) return 0;                          /* UNPREDICTABLE */
+            align_what = L ? "LDRD" : "STRD";
+            rc = align_ldrd_strd(uc, P, U, W, L, Rn, Rt, Rt + 1, rn, off);
+        } else if ((insn & 0x0e400000) == 0x08000000) {    /* LDM / STM, S=0 */
+            int L = (insn >> 20) & 1;
+            align_what = L ? "LDM" : "STM";
+            rc = align_ldm_stm(uc, P, U, W, L, Rn, insn & 0xffff, pc + 8);
+        }
+    } else {
+        unsigned hw1 = ld16u(pc), hw2;
+        if ((hw1 & 0xf000) == 0xc000) {                    /* 16-bit STMIA / LDMIA */
+            int L = (hw1 >> 11) & 1, Rn = (hw1 >> 8) & 7;
+            unsigned list = hw1 & 0xff;
+            ilen = 2;
+            align_what = L ? "LDM" : "STM";
+            rc = align_ldm_stm(uc, 0, 1, L ? !(list & (1u << Rn)) : 1, L, Rn, list, 0);
+        } else if ((hw1 & 0xe000) == 0xe000 && (hw1 & 0x1800)) {   /* 32-bit */
+            hw2 = ld16u(pc + 2);
+            if ((hw1 & 0xfe40) == 0xe840 && (((hw1 >> 8) & 1) || ((hw1 >> 5) & 1))) {
+                /* LDRD/STRD T1 (P or W set; both clear is the exclusive/TBB space) */
+                int P = (hw1 >> 8) & 1, U = (hw1 >> 7) & 1, W = (hw1 >> 5) & 1;
+                int L = (hw1 >> 4) & 1, Rn = hw1 & 15;
+                int Rt = hw2 >> 12, Rt2 = (hw2 >> 8) & 15;
+                unsigned long off = (hw2 & 0xff) << 2;
+                unsigned long rn = Rn == 15 ? ((pc + 4) & ~3UL) : r[Rn];
+                align_what = L ? "LDRD" : "STRD";
+                rc = align_ldrd_strd(uc, P, U, W, L, Rn, Rt, Rt2, rn, off);
+            } else if ((hw1 & 0xffd0) == 0xe880 || (hw1 & 0xffd0) == 0xe890) {
+                int L = (hw1 >> 4) & 1;                    /* STM.W / LDM.W (IA) */
+                align_what = L ? "LDM" : "STM";
+                rc = align_ldm_stm(uc, 0, 1, (hw1 >> 5) & 1, L, hw1 & 15, hw2, 0);
+            } else if ((hw1 & 0xffd0) == 0xe900 || (hw1 & 0xffd0) == 0xe910) {
+                int L = (hw1 >> 4) & 1;                    /* STMDB / LDMDB */
+                align_what = L ? "LDM" : "STM";
+                rc = align_ldm_stm(uc, 1, 0, (hw1 >> 5) & 1, L, hw1 & 15, hw2, 0);
+            }
+        }
+    }
+    if (!rc) return 0;
+    if (rc == 1) r[15] = pc + ilen;
+    align_fixups++;
+    if (align_fixups <= 8 || (align_fixups & 0xfff) == 0) {
+        char b[200];
+        snprintf(b, sizeof b, "[align] fixup #%lu: %s at pc=0x%lx addr=0x%lx%s "
+                 "(the kernel would do this on the machine)\n",
+                 align_fixups, align_what, pc, align_ea, thumb ? " (thumb)" : "");
+        logmsg(b);
+    }
+    return 1;
+}
+
+/* SIGBUS. An alignment fault (BUS_ADRALN, si_code 1) on an instruction the
+ * kernel fixes up is fixed up and the thread resumes; anything else is a real
+ * fault and gets the same report and the same fate as a SIGSEGV. It is
+ * reported on the [segv] channel deliberately - that is the crash-report
+ * channel the app pane forwards and watch.sh greps at exit - with the signal
+ * named on the first line so nobody reads a bus error as a segfault. */
+static void bus_header_handler(int sig, void *info, void *ucv)
+{
+    unsigned long *uc = ucv;
+    const int *si = info;
+
+    scan_guard_check(uc);   /* never returns if the guarded scan faulted */
+
+    if (uc && si && si[2] == 1 && align_on() && align_fixup(uc))
         return;
-    }
-    logmsg("[segv] no guest handler recorded; falling through to SIG_DFL\n");
 
-    /* Nobody else wants it: die the way we would have died anyway. */
-    if (real_sigaction) {
-        unsigned char dfl[160];
-        int i;
-        for (i = 0; i < 160; i++) dfl[i] = 0;   /* sa_handler = SIG_DFL (0) */
-        real_sigaction(11, dfl, 0);
+    if (uc && segv_reports < 3) {
+        char b[240];
+        segv_reports++;
+        snprintf(b, sizeof b, "[segv] SIGBUS (si_code %d%s)%s\n",
+                 si ? si[2] : -1,
+                 si && si[2] == 1 ? " = BUS_ADRALN, an alignment fault" : "",
+                 si && si[2] == 1 && !align_on() ? " - PAD_ALIGN_FIXUP=0, not fixed up" :
+                 si && si[2] == 1 ? " on an instruction the kernel would not fix either" : "");
+        logmsg(b);
+        segv_print_header(uc);
+        snprintf(b, sizeof b,
+                 "[segv] r0=%08lx r1=%08lx r2=%08lx r3=%08lx r4=%08lx r5=%08lx\n"
+                 "[segv] r6=%08lx r7=%08lx r8=%08lx r9=%08lx sl=%08lx fp=%08lx\n"
+                 "[segv] ip=%08lx sp=%08lx lr=%08lx pc=%08lx\n",
+                 uc[8], uc[9], uc[10], uc[11], uc[12], uc[13],
+                 uc[14], uc[15], uc[16], uc[17], uc[18], uc[19],
+                 uc[20], uc[21], uc[22], uc[23]);
+        logmsg(b);
+        if (segv_reports == 3)
+            logmsg("[segv] (further faults will not be reported)\n");
     }
+    fault_pass_on(sig, info, ucv);
 }
 
 __attribute__((constructor))
@@ -1882,13 +2221,16 @@ static void segv_install(void)
 
     if (!segv_header_on()) return;
     if (!real_sigaction) real_sigaction = dlsym(RTLD_NEXT, "sigaction");
-    if (!real_sigaction) return;
+    if (!sigaction_ready()) return;
 
     for (i = 0; i < 160; i++) mine[i] = 0;
     *(void **)mine = (void *)segv_header_handler;
     *(int *)(mine + 132) = 4;              /* SA_SIGINFO */
     if (real_sigaction(11, mine, 0) == 0)
         segv_guard_ready = 1;   /* sw_find_table's guard can land */
+    /* SIGBUS: the alignment fixup above, then the same report. */
+    *(void **)mine = (void *)bus_header_handler;
+    real_sigaction(7, mine, 0);
 }
 
 /* IS THIS THE TITLE THE HARDCODED ADDRESSES CAME FROM?
@@ -1911,25 +2253,50 @@ static void segv_install(void)
  * registers, the stack backtrace - the title-agnostic half that would have
  * named the game's fault) ever printed.
  *
- * So the gate is now an identity test, not a mapping test:
- *   PAD_GZ_ADDRS=1  an operator saying "these addresses are right for this
- *                   title" - the same escape hatch PAD_SW_STRUCT gives;
- *   PAD_GZ_ADDRS=0  never, whatever the title;
- *   otherwise       PAD_GAME must name a godzilla build.
- * The mapping test is kept as well: an address that is right for the title and
- * still unmapped is unusable either way. */
+ * NO TITLE TEST CAN BE RIGHT HERE, so there is not one. The gate is:
+ *   PAD_GZ_ADDRS=1  an operator saying "I have checked that these addresses
+ *                   are right for what I am running" - the same escape hatch
+ *                   PAD_SW_STRUCT gives;
+ *   anything else   off.
+ * The mapping test is kept as well: an address that is right for the build and
+ * still unmapped is unusable either way.
+ *
+ * WHY NOT MATCH THE TITLE NAME. Two passes tried to. The first matched the
+ * first eight characters of PAD_GAME, so `godzilla_le` passed a test meant for
+ * `godzilla_pro` - and those are not variants, they are different generations
+ * of the binary (item 60's survey: "godzilla_le sharing nothing with working
+ * sibling godzilla_pro is the clearest tell"). Measured off the card images:
+ * godzilla_pro 1.15.0 loads 0x8000..0x6ed2c0 exec + 0x6f52c0..0x842b9c data,
+ * godzilla_le 1.13.0 loads 0x8000..0x683bc0 + 0x68c000..0x7d856c, so the event
+ * table at 0x7e4d48 is not even inside the le image. On a user's larger 1.16
+ * build (PAD-102) every one of these addresses was somebody else's data that
+ * happened to be mapped, and the walk stated what it found as fact:
+ *   [segv] loader_gate[0x7e1a10]=0 boot_ready[0x7e1974]=0 thread_run=1
+ *   [segv] event 93 has NO handlers            <- read off le's memory
+ *   [audio] pool head[+74]=0x65746164          <- ASCII "date"
+ * then faulted a SECOND time inside this handler and truncated the report.
+ *
+ * The obvious repair was to match the WHOLE name, `godzilla_pro`. That is
+ * still wrong, just later: these addresses were reverse-engineered out of
+ * godzilla_pro 1.15.0 SPECIFICALLY, and the day Stern ships godzilla_pro 1.16
+ * the name matches, the addresses do not, and this is the same bug one version
+ * on - with nothing in the log to say so. A name is not a build. There is no
+ * fingerprint here that survives a rebuild either (the .text bound moves, and
+ * the copy this rig has already differs from the library image by 27992
+ * bytes), so the honest gate is an operator assertion and nothing else.
+ *
+ * What is lost is one diagnostic on one title unless somebody asks for it by
+ * name; what is kept is that no run ever again reports another build's memory
+ * as fact. The skip lines below say which addresses were skipped and how to
+ * turn them on. */
 static int gz_addrs_ok(void)
 {
     static int v, done;
     if (!done) {
         const char *e = getenv("PAD_GZ_ADDRS");
-        const char *g = getenv("PAD_GAME");
         done = 1;
-        if (e && (e[0] == '0' || e[0] == '1'))
-            v = (e[0] == '1');
-        else
-            v = (g && g[0] == 'g' && g[1] == 'o' && g[2] == 'd' && g[3] == 'z'
-                 && g[4] == 'i' && g[5] == 'l' && g[6] == 'l' && g[7] == 'a');
+        v = (e && e[0] == '1');
+        /* Right for the title and still unmapped is unusable either way. */
         if (v && !a_sw_struct()) v = 0;
     }
     return v;
@@ -2051,8 +2418,8 @@ static void segv_handler(int sig, void *info, void *ucv)
                      *gate, *ready, *run, scene_opens);
         else
             snprintf(b, sizeof b,
-                     "[segv] scene_opens=%d (loader-gate addresses are Godzilla"
-                     " Pro's; not reported for this title)\n", scene_opens);
+                     "[segv] scene_opens=%d (loader-gate addresses are one"
+                     " build's; PAD_GZ_ADDRS=1 to report them)\n", scene_opens);
         logmsg(b);
         snprintf(b, sizeof b,
                  "[segv] filebuf::xsgetn=%d (small=%d) filebuf::underflow=%d "
@@ -2119,15 +2486,28 @@ static void segv_handler(int sig, void *info, void *ucv)
      * so the voice pointer 0x30ed20 kept at [sp,#44] is stack word 28, and its
      * saved lr is word 44 - which is exactly where 0x2a24ac was reported. */
     if (!gz_addrs_ok()) {
-        logmsg("[segv] mixer/loader dump skipped: those addresses are Godzilla"
-               " Pro 1.15.0's and this is not that title (PAD_GZ_ADDRS=1"
-               " overrides)\n");
+        logmsg("[segv] mixer/loader dump skipped: those addresses were read"
+               " out of godzilla_pro 1.15.0 and hold for no other build"
+               " (PAD_GZ_ADDRS=1 if you have checked they fit)\n");
     } else {
         unsigned long sp = uc[21];
-        unsigned long *w = (unsigned long *)sp;
-        unsigned long obj = w[28];
+        unsigned long obj = 0;
         unsigned long base = 0x7b90c0;
         int n;
+
+        /* EVERY READ FROM HERE DOWN GOES THROUGH gz_word(), for the reason
+         * stated at that function: a crash reporter that faults reports
+         * nothing at all, because the second fault arrives on a stack that is
+         * already inside a signal handler. The event walk above was hardened
+         * when Bond hit exactly that; this block was left trusting its own
+         * addresses and took a user's report down mid-line the next time a
+         * wrong title got through the gate (PAD-102). Right title or forced
+         * with PAD_GZ_ADDRS=1, nothing below reads differently - the checks
+         * only decide whether the report STOPS or FINISHES. */
+        if (!gz_word(sp + 28 * 4, &obj)) {
+            logmsg("[audio] stack is not readable at sp+112 - no mixer dump\n");
+            goto mixer_done;
+        }
 
         snprintf(b, sizeof b,
                  "[audio] mixer voice = 0x%lx  index %ld  queue(r4)=0x%lx "
@@ -2143,11 +2523,16 @@ static void segv_handler(int sig, void *info, void *ucv)
                  (long)(uc[13] - (sp + 68)));
         logmsg(b);
         {
-            int i;
+            int i, k, ok;
+            unsigned long q[4];
             for (i = 20; i < 52; i += 4) {
+                for (k = 0, ok = 1; k < 4; k++)
+                    if (!gz_word(sp + (unsigned long)(i + k) * 4, &q[k]))
+                        ok = 0;
+                if (!ok) break;
                 snprintf(b, sizeof b,
                          "[audio] stack[%2d..%2d] = %08lx %08lx %08lx %08lx\n",
-                         i, i + 3, w[i], w[i + 1], w[i + 2], w[i + 3]);
+                         i, i + 3, q[0], q[1], q[2], q[3]);
                 logmsg(b);
             }
         }
@@ -2155,6 +2540,13 @@ static void segv_handler(int sig, void *info, void *ucv)
         for (n = 0; n < 8; n++) {
             unsigned char *v = (unsigned char *)(base + n * 64);
             unsigned long *vw = (unsigned long *)v;
+            if (!addr_readable(v) || !addr_readable(v + 63)) {
+                snprintf(b, sizeof b,
+                         "[audio] voice[%d] at 0x%lx is not readable - "
+                         "stopping the voice dump\n", n, base + n * 64);
+                logmsg(b);
+                break;
+            }
             snprintf(b, sizeof b,
                      "[audio] voice[%d] stream=0x%08lx mixA=0x%08lx mixB=0x%08lx "
                      "pos=%lu queue=0x%08lx en=%d mask=0x%02x vol=%d/%d ch=%d\n",
@@ -2168,23 +2560,41 @@ static void segv_handler(int sig, void *info, void *ucv)
          * mixer compares the cursor against. Print it for whichever voice the
          * mixer was on. */
         if (obj >= base && obj < base + 512) {
-            unsigned long st = *(unsigned long *)obj;
+            unsigned long st;
+            if (!gz_word(obj, &st)) {
+                snprintf(b, sizeof b, "[audio] faulting voice 0x%lx is not "
+                         "readable\n", obj);
+                logmsg(b);
+                goto mixer_pool;
+            }
             snprintf(b, sizeof b, "[audio] faulting voice stream desc = 0x%lx\n", st);
             logmsg(b);
             if (st > 0x10000 && st < 0xb0000000) {
-                unsigned long *s = (unsigned long *)st;
-                snprintf(b, sizeof b,
-                         "[audio]   +00=0x%08lx +04=0x%08lx +08=0x%08lx +0c=0x%08lx\n"
-                         "[audio]   +10=0x%08lx(len) +14=0x%08lx +18=0x%08lx +1c=0x%08lx\n",
-                         s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]);
-                logmsg(b);
+                unsigned long s[8];
+                int i, ok;
+                for (i = 0, ok = 1; i < 8; i++)
+                    if (!gz_word(st + (unsigned long)i * 4, &s[i])) ok = 0;
+                if (ok) {
+                    snprintf(b, sizeof b,
+                             "[audio]   +00=0x%08lx +04=0x%08lx +08=0x%08lx +0c=0x%08lx\n"
+                             "[audio]   +10=0x%08lx(len) +14=0x%08lx +18=0x%08lx +1c=0x%08lx\n",
+                             s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]);
+                    logmsg(b);
+                }
             }
         }
+
+    mixer_pool:
 
         /* 0x7b8990+0x100 is the object the teardown path at 0x2a2044 hands the
          * queue back to, i.e. the queue pool/owner. */
         {
-            unsigned long pool = *(unsigned long *)(0x7b8990 + 0x100);
+            unsigned long pool = 0;
+            if (!gz_word(0x7b8990 + 0x100, &pool)) {
+                logmsg("[audio] no queue pool pointer at 0x7b8a90 in this"
+                       " title\n");
+                goto mixer_done;
+            }
             snprintf(b, sizeof b, "[audio] queue pool [0x7b8a90] = 0x%lx\n", pool);
             logmsg(b);
             /* 0x458e98 returns NULL when the free ring is empty, which it
@@ -2192,7 +2602,18 @@ static void segv_handler(int sig, void *info, void *ucv)
              * as open()ing the sound file. Print the ring so the two NULL
              * paths can be told apart. */
             if (pool > 0x10000 && pool < 0xb0000000) {
-                unsigned long *p = (unsigned long *)pool;
+                unsigned long p[0xc0 / 4];
+                int i, ok;
+                for (i = 0, ok = 1; i < (int)(sizeof p / sizeof p[0]); i++)
+                    if (!gz_word(pool + (unsigned long)i * 4, &p[i])) {
+                        p[i] = 0; ok = 0;
+                    }
+                if (!ok) {
+                    snprintf(b, sizeof b, "[audio] queue pool 0x%lx is not "
+                             "fully readable - stopping the pool dump\n", pool);
+                    logmsg(b);
+                    goto mixer_done;
+                }
                 snprintf(b, sizeof b,
                          "[audio] pool head[+74]=0x%08lx limit[+7c]=0x%08lx "
                          "end[+84]=0x%08lx  free_ring_empty=%d\n",
@@ -2230,29 +2651,43 @@ static void segv_handler(int sig, void *info, void *ucv)
                     off[0] = 0x94; off[1] = 0x9c; off[2] = 0xa4;
                     for (k = 0; k < 3; k++) {
                         unsigned long head = pool + off[k];
-                        unsigned long node = *(unsigned long *)head;
-                        int cnt = 0;
+                        unsigned long node = 0;
+                        int cnt = 0, broke = 0;
+                        if (!gz_word(head, &node)) {
+                            snprintf(b, sizeof b, "[audio] pool list +%02x : head "
+                                     "0x%lx is not readable\n", off[k], head);
+                            logmsg(b);
+                            continue;
+                        }
                         while (node && node != head && cnt < 64) {
-                            unsigned long q = *(unsigned long *)(node + 8);
-                            if (cnt < 4 && q > 0x10000 && q < 0xb0000000) {
-                                unsigned long *qq = (unsigned long *)q;
+                            unsigned long q, qw[4], next;
+                            if (!gz_word(node + 8, &q)) { broke = 1; break; }
+                            if (cnt < 4 && q > 0x10000 && q < 0xb0000000
+                                && gz_word(q + 8, &qw[0])
+                                && gz_word(q + 16, &qw[1])
+                                && gz_word(q + 0x30, &qw[2])
+                                && gz_word(q + 0x44, &qw[3])) {
                                 snprintf(b, sizeof b,
                                          "[audio]   list+%02x[%d] queue=0x%lx fd=%ld "
                                          "total=%lu avail=%ld pops=%lu\n",
-                                         off[k], cnt, q, (long)qq[2], qq[4],
-                                         (long)qq[0x30 / 4], qq[0x44 / 4]);
+                                         off[k], cnt, q, (long)qw[0], qw[1],
+                                         (long)qw[2], qw[3]);
                                 logmsg(b);
                             }
-                            node = *(unsigned long *)node;
+                            if (!gz_word(node, &next)) { broke = 1; break; }
+                            node = next;
                             cnt++;
                         }
-                        snprintf(b, sizeof b, "[audio] pool list +%02x : %d entries\n",
-                                 off[k], cnt);
+                        snprintf(b, sizeof b, "[audio] pool list +%02x : %d entries%s\n",
+                                 off[k], cnt,
+                                 broke ? " (walk stopped: unreadable node)" : "");
                         logmsg(b);
                     }
                 }
             }
         }
+    mixer_done:
+        logmsg("[audio] --- end of the mixer dump ---\n");
     }
 
     /* The stack backtrace used to be here. It is printed right after the
@@ -2265,6 +2700,13 @@ int shim_sigaction(int sig, const void *act, void *old) __asm__("sigaction");
 int shim_sigaction(int sig, const void *act, void *old)
 {
     if (!real_sigaction) real_sigaction = dlsym(RTLD_NEXT, "sigaction");
+    /* THE TAIL CALL AT THE FOOT OF THIS FUNCTION IS A BRANCH, NOT A CALL, and
+     * on godzilla_le 1.16 the pointer it branches to had been overwritten with
+     * a game-text address whose bit 0 flipped the CPU into Thumb - see
+     * sigaction_ptr_ok(). Check before every path that can reach it. Refusing
+     * the registration costs the guest one handler; taking the branch cost it
+     * the whole run, four seconds after Start, every time. */
+    if (!sigaction_ready()) return -1;
     if (sig == 11 && getenv_pad()) {   /* SIGSEGV */
         unsigned char mine[160];
         int i;
@@ -2278,16 +2720,18 @@ int shim_sigaction(int sig, const void *act, void *old)
      * would be back to reporting nothing. It still runs, from ours; see
      * segv_header_handler. Reporting an old handler the game never installed
      * would be a lie, so `old` gets what we are holding on its behalf. */
-    if (sig == 11 && act && segv_header_on()) {
+    if ((sig == 11 || sig == 7) && act && segv_header_on()) {
+        void **fn    = sig == 7 ? &game_bus_fn    : &game_segv_fn;
+        int   *flags = sig == 7 ? &game_bus_flags : &game_segv_flags;
         if (old) {
             unsigned char *o = old;
             int i;
             for (i = 0; i < 160; i++) o[i] = 0;
-            *(void **)o = game_segv_fn;
-            *(int *)(o + 132) = game_segv_flags;
+            *(void **)o = *fn;
+            *(int *)(o + 132) = *flags;
         }
-        game_segv_fn    = *(void **)act;
-        game_segv_flags = *(const int *)((const unsigned char *)act + 132);
+        *fn    = *(void **)act;
+        *flags = *(const int *)((const unsigned char *)act + 132);
         return 0;
     }
     return real_sigaction(sig, act, old);
@@ -2298,17 +2742,19 @@ void *shim_signal(int sig, void *h)
 {
     static void *(*real_signal)(int, void *);
     if (!real_signal) real_signal = dlsym(RTLD_NEXT, "signal");
-    if (sig == 11) {
+    if (sig == 11 || sig == 7) {
         /* NOTE, found while building item 41's reporter: this path used to
          * DROP h on the floor - it called sigaction(11, NULL, NULL), which
          * installs nothing, so a game that registers its SIGSEGV handler via
          * signal() rather than sigaction() ended up with no handler at all.
          * That is one way a fault becomes qemu's `uncaught target signal 11`
          * with nothing logged. Record it now so header mode can delegate to
-         * it, exactly as the sigaction path does. */
-        void *prev = game_segv_fn;
-        if (h && segv_header_on()) { game_segv_fn = h; game_segv_flags = 0; }
-        else                       { shim_sigaction(11, 0, 0); }
+         * it, exactly as the sigaction path does. SIGBUS is held the same way. */
+        void **fn    = sig == 7 ? &game_bus_fn    : &game_segv_fn;
+        int   *flags = sig == 7 ? &game_bus_flags : &game_segv_flags;
+        void *prev = *fn;
+        if (h && segv_header_on()) { *fn = h; *flags = 0; }
+        else                       { shim_sigaction(sig, 0, 0); }
         return prev;
     }
     return real_signal(sig, h);
@@ -6107,6 +6553,47 @@ static void swwalk_tick(void)
 #define SW_NODEREC(n)  (SW_STRUCT + 16u + (n) * 160u)
 #define NB_GATE   0x7a908cu     /* +276+node = per-node scan enable          */
 
+/* THE ONLY WAY TO REACH A NODE RECORD, and it can refuse.
+ *
+ * SW_NODEREC() is an offset from the switch STRUCT, and sw_struct_addr()
+ * returns `&sw_shadow[0]` when the table was found by shape instead of
+ * configured - an EIGHT-BYTE array in the shim's own .bss standing in for a
+ * struct that does not exist. SW_NODEREC(0) is already 16 bytes past the end
+ * of it, so anything read or written through it lands on whatever .bss
+ * happens to follow sw_shadow.
+ *
+ * PAD-102 IS THAT WRITE. A user's godzilla_le 1.16 died four seconds into
+ * every boot; the guest fault was our own doing, and this is the origin.
+ * sw_prime() splats an eight-byte at-rest word into rec[12..19] and rec[20..27]
+ * - the same eight bytes twice, eight bytes apart. Under a shadow that is
+ * `&sw_shadow[0] + 28` and `+36`, which in the build that shipped it were
+ * hwshim's own game_segv_fn and real_sigaction. The word is
+ * `{0xff,0x0f,0x0f,0,0,0,0,0}` = {0x000f0fff, 0}, so real_sigaction became
+ * 0x000f0fff - an odd address inside the GAME's text - and the tail call at
+ * the foot of shim_sigaction `bx`ed to it, flipping the CPU into Thumb and
+ * decoding the game's ARM text as Thumb until it stored into read-only memory.
+ * Measured, not deduced: sw_shadow at module 0x200ac in that build, +28 =
+ * 0x200c8 and +36 = 0x200d0, which are exactly the two guest addresses
+ * (0x408610c8 / 0x408610d0) found corrupt under gdb.
+ *
+ * sw_prime() had a guard - `sw_ok(tread(SW_STRUCT))` - and it passed, because
+ * under a shadow that reads sw_shadow[0], a perfectly valid entry[] pointer.
+ * Validity is not the question; WHAT IT IS is. The [swread] path already knew
+ * (`have_rec = !sw_shadow[0]`, and see its comment) and declined to read. It
+ * was the only one of three users that did. So the check lives here now, once,
+ * and every user goes through it - a fourth user cannot reintroduce this by
+ * forgetting, because there is nothing to forget.
+ *
+ * Returns 0 when there is no real node record, and 0 is not "no switches":
+ * the shadow's entry[] still works and every caller has a fallback. */
+static unsigned char *sw_noderec(unsigned node)
+{
+    if (sw_shadow[0]) return 0;      /* a shadow is entry[], never a struct */
+    if (node >= 32) return 0;
+    if (!sw_ok(tread(SW_STRUCT))) return 0;
+    return (unsigned char *)(unsigned long)SW_NODEREC(node);
+}
+
 /* Ids held ACTIVE right now: PAD_SW_HOLD plus whatever the tap sequence has
  * pressed. Byte per id. 128 was "more than the 88 this machine has" - but an
  * id is the TITLE'S table index and munsters/sword_of_rage index their whole
@@ -6828,9 +7315,11 @@ static void sw_prime(unsigned nid, const unsigned char bits[8])
     unsigned char *rec;
     unsigned i;
     if (nid >= 64 || primed[nid]) return;
-    if (!sw_ok(tread(SW_STRUCT))) return;
+    /* NOT marked primed on refusal: a shadow can be replaced by a real table
+     * later in the run, and this node still wants priming when it is. */
+    rec = sw_noderec(nid);
+    if (!rec) return;
     primed[nid] = 1;
-    rec = (unsigned char *)(unsigned long)SW_NODEREC(nid);
     for (i = 0; i < 8; i++) { rec[12 + i] = bits[i]; rec[20 + i] = bits[i]; }
     {
         char m[140];
@@ -7541,8 +8030,8 @@ static void audio_dump(void)
      * was live during David's Bond run. gz_addrs_ok() is the identity test;
      * see it for what changed and why. */
     if (!gz_addrs_ok()) {
-        logmsg("[aud] mixer/pool dump skipped: those addresses are Godzilla"
-               " Pro's and this is not that title\n");
+        logmsg("[aud] mixer/pool dump skipped: those addresses were read out"
+               " of godzilla_pro 1.15.0 (PAD_GZ_ADDRS=1 to use them)\n");
         return;
     }
 
@@ -7803,12 +8292,16 @@ static void sw_map_dump(void)
         unsigned back = 0xffff, cur = 0, gate = 0;
         if (sw_ok(nameobj))
             nm = msg_row(*(const unsigned *)(unsigned long)(nameobj + 16));
-        if (node < 32 && bit < 64) {
-            const unsigned char *rec =
-                (const unsigned char *)(unsigned long)SW_NODEREC(node);
-            back = *(const unsigned short *)(rec + 28 + bit * 2);
-            cur  = (rec[20 + (bit >> 3)] >> (bit & 7)) & 1;
-            gate = *(const unsigned char *)(unsigned long)(NB_GATE + 276 + node);
+        {
+            /* Was unguarded: under a shadow this read `rec + 28 + bit*2` for
+             * bit up to 63, i.e. up to 154 bytes past sw_shadow, and printed
+             * the shim's own .bss as the game's switch map. */
+            const unsigned char *rec = bit < 64 ? sw_noderec(node) : 0;
+            if (rec) {
+                back = *(const unsigned short *)(rec + 28 + bit * 2);
+                cur  = (rec[20 + (bit >> 3)] >> (bit & 7)) & 1;
+                gate = *(const unsigned char *)(unsigned long)(NB_GATE + 276 + node);
+            }
         }
         snprintf(line, sizeof line,
                  "[swmap] id=%-3u node=%-2u bit=%-2u map=%-4u%s cur=%u gate=%u"
@@ -8001,11 +8494,12 @@ static void sw_pend_trace(void)
          * game's nor obviously wrong. That is the shape of finding this rig
          * loses passes to, so it is not read at all rather than read badly. */
         rw = have_raw ? ((const unsigned char *)(unsigned long)raw)[id] : 0;
-        if (have_rec && node < 32 && bit < 64) {
-            const unsigned char *rec =
-                (const unsigned char *)(unsigned long)SW_NODEREC(node);
-            cur = (rec[20 + (bit >> 3)] >> (bit & 7)) & 1;
-            prv = (rec[12 + (bit >> 3)] >> (bit & 7)) & 1;
+        if (have_rec && bit < 64) {
+            const unsigned char *rec = sw_noderec(node);
+            if (rec) {
+                cur = (rec[20 + (bit >> 3)] >> (bit & 7)) & 1;
+                prv = (rec[12 + (bit >> 3)] >> (bit & 7)) & 1;
+            }
         }
         if (primed[id] && pv[id] == (unsigned char)pend &&
             lv[id] == (unsigned char)lvl && cv[id] == (unsigned char)cur &&
@@ -8605,8 +9099,9 @@ static void nb_maybe_dump(void)
         if (!said) {
             said = 1;
             logmsg("[nbtbl] skipped: the registry and hex-list dumps are "
-                   "Godzilla Pro 1.15.0 addresses and this is not that title "
-                   "(walking them here segfaulted stranger_things)\n");
+                   "godzilla_pro 1.15.0 addresses and hold for no other "
+                   "build (walking them segfaulted stranger_things); "
+                   "PAD_GZ_ADDRS=1 to use them anyway\n");
         }
     }
     nb_dump_census();

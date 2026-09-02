@@ -84,6 +84,199 @@ These have each been violated at least once and each cost a run or a window:
 
 ## Queue
 
+- [x] **93. godzilla_le dies ~4 s after start, on a user's card, every time.
+      SOLVED 2026-09-02 — it was `sw_prime()` splatting the shim's own .bss.**
+      `S1 D4`
+      **★★★★★ ROOT CAUSE, and it is ours.** `SW_NODEREC(n)` is an offset from
+      the switch STRUCT, and `sw_struct_addr()` returns `&sw_shadow[0]` when the
+      table was found by SHAPE rather than configured — an eight-byte array in
+      hwshim's own .bss standing in for a struct that does not exist.
+      `SW_NODEREC(0)` is already 16 bytes past the end of it. `sw_prime()` then
+      writes an at-rest word into `rec[12..19]` and `rec[20..27]`: the same
+      eight bytes twice, eight bytes apart. The word is
+      `{0xff,0x0f,0x0f,0,0,0,0,0}` (hwshim.c:3589) = **{0x000f0fff, 0}**.
+      Measured, not deduced — `sw_shadow` at module 0x200ac in the build that
+      shipped it, so the two splats land at **0x200c8 and 0x200d0**, which are
+      exactly the guest addresses (0x408610c8 / 0x408610d0) found corrupt under
+      gdb, and in that build those were `game_segv_fn` and `real_sigaction`.
+      `real_sigaction` became an odd address inside the GAME's text, and
+      `shim_sigaction`'s tail call `bx`ed to it — Thumb, ARM text decoded as
+      Thumb, store into read-only memory, dead guest, every boot.
+      **Why it passed the guard it had:** `sw_prime` tested
+      `sw_ok(tread(SW_STRUCT))`, and under a shadow that reads `sw_shadow[0]` —
+      a perfectly valid `entry[]` pointer. Validity was never the question;
+      WHAT IT IS was. The `[swread]` path already knew (`have_rec =
+      !sw_shadow[0]`, and its comment says SW_NODEREC "addresses the shim's own
+      .bss" under a shadow) and declined to read. It was the only one of THREE
+      users that did; the `[swmap]` diagnostic read `rec + 28 + bit*2` for bit
+      up to 63, i.e. up to 154 bytes past `sw_shadow`, and printed the shim's
+      own .bss as the game's switch map.
+      **Why 1.16 and not 1.13 / the 1.15 Heisei:** 1.16 resolves its switch
+      table by shape (`entry[]=0x009a9990 raw[]=0x00000000`), i.e. the shadow
+      route. A configured-route title never builds a shadow and never splats.
+      **The fix is structural, not a patch at the site that bit.** One accessor,
+      `sw_noderec()` (hwshim.c, beside the macro), refuses under a shadow and
+      returns 0; all three users go through it and nothing touches `SW_NODEREC`
+      directly, so a fourth user cannot reintroduce this by forgetting.
+      `sw_prime` bails BEFORE marking the node primed, so a shadow later
+      replaced by a real table still gets primed.
+      **Verified live**, stock `godzilla_le-1_16_0`, rig lock held, shim proven
+      built from this source (three marker strings present) before trusting the
+      run: `sw_shadow[0]=0x009a9990` (shadow route, the triggering condition),
+      `+28`/`+36` clean, `sw_rest_set` intact at 33,66,67,68,69,70,71 where its
+      tail used to be clobbered, zero `[swprime]` lines, zero `[segv]`, picture
+      at frame 47, **full 6-minute backstop**, clean teardown, `alive.sh` 0.
+      Pinned by `tests/test_spike2_noderec_guard.py`.
+      **A METHOD NOTE THAT COST HOURS TWICE.** Both times this investigation
+      went wrong it was from reading a STALE hwshim.so: once a stale `nm`, once
+      a whole analysis pass whose address arithmetic used a binary that was not
+      built from this source at all (it still contained wording this branch had
+      already replaced). Before trusting ANY offset: `md5sum` the .so and grep
+      it for a string only the current source has. The rig rebuilds on a source
+      hash, and other sessions can restore an older build underneath you.
+      **Still open, separately:** the `[swmap]` and `[swread]` paths now report
+      `?` rather than garbage under a shadow, which is correct but means a
+      shadow-route title still has no node-record data. Teaching the shadow
+      installers to record the real struct base alongside `entry[]` would give
+      it back — worth its own item, not needed for this fix. *(Filed 2026-09-01 from a user's log, ticket PAD-102 — a Godzilla
+      Premium 1.16 Heisei Custom "V1.5 Orchestral" image, title folder
+      `godzilla_le`, game ELF 7962924 bytes, app v0.179.0. He sent the log and
+      nothing else; there is no card of his here.)*
+      **What his log establishes.** The run is healthy right up to the fault:
+      card mounts, 9 boards derived, node 2 silenced, renderer up on D3D12,
+      window opened 1360x768, 98 switches dumped with normal Stern numbering,
+      audio negotiated (`[play] guest reports 44100 Hz x 2 ch`). Then the guest
+      takes SIGSEGV, and the two runs in his log fault at the SAME place:
+      `pc=0x000f0660` (`= mapping + 0xe8660`, the game's own text),
+      `lr=0x1c55c`, `r0=6`, `r3=0x000f0fff`, `sp=0x407fe020`, and the faulting
+      address is **0** — a null dereference, not a wild pointer. The shim's own
+      title-agnostic counters put it inside the loading path, not idle:
+      `scene_opens=194`, `filebuf::xsgetn=992864 (small=964864)`,
+      `underflow=1606`/`1610`, `__basic_file::xsgetn=2745`/`2749` — the two runs
+      differ only in those last two, by 4 reads. The stack scan found exactly
+      one text word (`0x1b640`), so there is no useful backtrace yet.
+      **What his log does NOT establish, and this is the trap.** Every line
+      below the registers came from addresses read out of godzilla_pro 1.15.0:
+      `loader_gate[0x7e1a10]=0 boot_ready[0x7e1974]=0 thread_run=1`,
+      `event 93/94 has NO handlers`, and the whole `[audio]` mixer/pool dump —
+      whose words decode to ASCII (`0x65746164` = "date", `0x656a624f` =
+      "Obje") because they are somebody else's data. **None of it is a finding
+      about his machine.** godzilla_le is a different generation of the binary
+      from godzilla_pro (item 60's survey says so in as many words); measured
+      off the two card images at the desk, pro 1.15.0 loads `0x8000..0x6ed2c0`
+      exec + `0x6f52c0..0x842b9c` data while le 1.13.0 loads `0x8000..0x683bc0`
+      + `0x68c000..0x7d856c`, so the event table at `0x7e4d48` is not even
+      inside the le image. On his larger 1.16 build those addresses happen to
+      be mapped, which is why the walk ran. It then faulted a second time
+      inside the signal handler, mid-`[audio] list+94[0]`, so his report stops
+      there and the run ended `qemu: uncaught target signal 11 - core dumped`
+      instead of the handler's own `_exit(99)` — the exact james_bond_le
+      failure from item 80, which `gz_addrs_ok()` was supposed to have closed.
+      **Fixed on this branch (PAD-102): the gate matches the whole title name
+      now, not the first eight characters, and the mixer/pool walk reads
+      through `gz_word()` so it can never take a report down again.** Pinned by
+      `tests/test_spike2_gz_addrs_gate.py`, which compiles the real gate out of
+      `hwshim.c`.
+      **★ IT DOES NOT REPRODUCE ON EITHER CARD WE HOLD** (2026-09-01, at
+      David's ask — "we have the stock card, try it out yourself"; rig lock
+      taken and released, `alive.sh` 0 before and after both runs, cards
+      unmounted, this worktree's rig and shim):
+        - **`godzilla_le-1_13_0` (stock, game ELF 7453652 bytes) — CLEAN.**
+          Booted, 98 switches dumped, `picture: FIRST at frame 4`, attract
+          video ran the whole time at a steady 30 fps (`handed the game 61
+          frames in 2033 ms`, late 0, early 0, repeatedly), full 3-minute
+          backstop, no `[segv]`, clean teardown.
+        - **`Godzilla Premium 1.15 Heisei Custom V1.0.raw` (game ELF 7930828
+          bytes) — CLEAN.** Same: 98 switches, `picture: FIRST at frame 19`,
+          full 3-minute backstop, no `[segv]`, clean teardown. **This is the
+          same FAMILY as his card, not just the same title**: its switch dump
+          carries the 1001-series cabinet numbering (`DIP 1` at `num=1001`,
+          `Service Back` at `1012`) and the Title Case names his log shows,
+          where stock 1.13.0 numbers those `1..12` in upper case.
+      So the fault is not godzilla_le, and not the Heisei retheme either. What
+      is left that we do not hold is **his build**: 1.16-based, ELF 7962924
+      bytes, 32096 more than the 1.15 Heisei that runs fine here.
+      **The reporter half IS reproducible on demand, and is fixed** — same
+      session, no emulator run needed. Forcing the Godzilla block on against a
+      guest that has none of its addresses (`PAD_SEGV_REPORT=1
+      PAD_GZ_ADDRS=1 PAD_SW_STRUCT=0x400000`, segvtest.sh's own B guest under
+      `qemu-arm-static -L ~/spike2root`) puts a shim in exactly godzilla_le's
+      position: **v0.179.0's shim exits 139, its report stopping mid
+      `[audio] stack[48..51]` under `qemu: uncaught target signal 11 - core
+      dumped`; this branch's exits 99** — the handler's own `_exit(99)` —
+      after printing `voice[0] at 0x7b90c0 is not readable`, `no queue pool
+      pointer at 0x7b8a90 in this title` and `--- end of the mixer dump ---`.
+      That is his truncated log reproduced and closed. `segvtest.sh` itself
+      passes all four documented cases on this branch.
+      **★★★ SOLVED AS A MECHANISM, 2026-09-02, after David added the 1.16
+      images — and it is OURS, not the game's.** `godzilla_le-1_16_0` (stock)
+      and `Godzilla Premium 1.16 Heisei Custom V1.5 Standard Edition` BOTH
+      reproduce the user's crash exactly: same `pc=0xf0660`, `lr=0x1c55c`,
+      `r0=6`, `r3=0x000f0fff`, `r5=0x005e331c`, `r6=0x1b4f0`, `sl=0x40830000`,
+      `stack[65]=0x1b640`, `scene_opens=194`, `filebuf::xsgetn=992864`. So it
+      is a **1.16 regression, not the retheme** (the two 1.16 ELFs differ in
+      2162 bytes, none of them in the pc or lr page) and not his card.
+      **The death, proven under gdb through the real rig** (`PAD_QEMU_GDB`,
+      `gdb-multiarch`, SIGILL passed through — libcrypto's armcap probe faults
+      on purpose and gdb stops on it otherwise):
+        - `cpsr=0xb0030`: **the T bit is set**. The CPU is decoding the game's
+          ARM text as THUMB. gdb reads `0xf0660` as `str r4,[r3,r0]`, which
+          with `r3=0x000f0fff` stores into `0xf1005` — inside the game's own
+          `r-xp` mapping. Write to read-only text, SIGSEGV, fault address 0.
+        - How it got there: `hwshim.c`'s `sigaction` interposer ends
+          `return real_sigaction(sig, act, old);`, and GCC **tail-calls** it —
+          `ldr r3,[r3,#208]` / `ldmia sp!,{...,lr}` / `bx r3`, with lr still
+          holding the GAME's return address, which is why the crash report
+          shows `lr=0x1c55c` (just past the game's `bl sigaction@plt`) while
+          pc is nowhere near sigaction. **`bx` on an odd value switches to
+          Thumb**, and the cached pointer had been overwritten with
+          `0x000f0fff`.
+        - Measured directly: at the game's `_start` (constructors done)
+          `real_sigaction = 0x40ac1f54`, a good libc pointer; by the game's
+          first `sigaction()` ~4 s later it is `0x000f0fff`. Both assignments
+          in the shim are guarded by `if (!real_sigaction)`, so **no code of
+          ours replaces a non-NULL value** — something else writes it.
+      **The stray write is REAL, address-fixed, and still unexplained.** It
+      puts `0x000f0fff` at guest **0x408610c8 and 0x408610d0** (hwshim.so is
+      loaded at 0x40841000). Rebuilding the shim moved `real_sigaction` off
+      0x200d0 — and the write still lands on those same two addresses, now
+      hitting `sw_rest_set`'s tail and `used.65` instead. So the addresses are
+      the target, not the variables. **Consequence today: the boot survives
+      only because the .bss shuffled**, and `sw_rest_set` now reads
+      `{33,66,67,68,0xf0fff…}` instead of `{33,66,67,68,69,70,71}` — the
+      rest-switch list is quietly wrong, and the next edit that moves .bss can
+      put `real_sigaction` back under the gun.
+      **Shipped on this branch: the shim will not BRANCH to that pointer.**
+      `sigaction_ptr_ok()` / `sigaction_ready()` reject any `real_sigaction`
+      that lands inside the game's own image (impossible for libc: the game is
+      a fixed EXEC at 0x8000, libc is mapped high), re-resolve through `dlsym`
+      and say so once. Deliberately NOT a bit-0 test — a Thumb libc would set
+      it legitimately. **Verified by poisoning the live guest**: `set
+      *(unsigned *)&real_sigaction = 0x000f0fff` under gdb, next call logged
+      `[segv] real_sigaction was 0xf0fff, which is inside the game's own image
+      - not calling it; re-resolving`, recovered `0x40ac1f54`, and the guest
+      ran on. Both 1.16 cards now boot to picture and hold a 3-minute run.
+      **A SECOND, SEPARATE FINDING worth its own item.** The wild
+      `sigaction(11, …)` calls in the trace come from **`gst_plugin_load_file
+      + 1964` in `libgstreamer-0.10.so.0`** — GStreamer 0.10 wraps every
+      plugin load in a SIGSEGV guard so a bad plugin cannot kill the process,
+      and it passes an `act` pointer that is wild and DIFFERENT every run
+      (`0xa543aa0c`, `0xa5334a0c`). Our `PAD_SEGV_REPORT` branch ignores that
+      `act`, installs `segv_handler` instead and returns 0, so GStreamer
+      believes its guard is armed while ours is — and ours `_exit(99)`s rather
+      than recovering. That converts a plugin fault GStreamer is designed to
+      survive into a dead run. Not touched this pass.
+      **What is left.** Name the writer of the 8 bytes at 0x408610c8. gdb
+      hardware watchpoints are not available through qemu-user's gdbstub here
+      (`Could not insert hardware watchpoint`) and a software one would
+      single-step four seconds of guest, so the next pass needs a different
+      instrument — a canary the shim itself checks from a hot interposer, or
+      `QEMU_STRACE` to catch a syscall writing there.
+      — S1: the title does not play at all for this user, and boot-crash is the
+      floor. D4: does not reproduce on either card here, so it needs his image
+      or his log, and the one instrument that would have named the fault was
+      printing another title's memory until today.
+
 - [x] **90. The EARLY Spike 1 cards (Stern's 2012 home models) run on the
       rig.** `S3 D3` *(Filed 2026-09-01 from PAD-101 as "read the assets,
       decide whether the rig can ever run one"; David: "why don't we just make
@@ -7286,6 +7479,55 @@ rewriting it.**
         0 → 259 and `dungeons_and_dragons_le` +41 on the two other ELFs
         reachable without a card mount, and the 40-image `cardaudit.py` sweep
         that produced that list has NOT been re-run.
+      - **led_zeppelin_le 1.22.0 — ❌ every game start died, ✅ CLEAN after
+        a same-day fix, David's green check, 2026-09-01.** David: "trying to
+        run led zeppelin and it's crashing on
+        starting a game". The pane: attract clip cycling, a `+36` start
+        press, then nothing but `Windows player exited; restarting it` —
+        20 minutes at a black screen with `pgrep -x game` still true and no
+        "game exited". **Two faults, both the rig's, neither the title's.**
+        (i) THE CRASH. game.out ended `qemu: uncaught target signal 7 (Bus
+        error) - core dumped`, with no core (RLIMIT_CORE is 0; qemu 8.2
+        prints "core dumped" anyway) and a stripped stock qemu, so the guest
+        registers were read straight out of the still-live process: every
+        guest thread's `CPUARMState` is findable by SHAPE in `/proc/<pid>/mem`
+        (16 regs, then 264 zero bytes of unused AArch64 state, user-mode CPSR
+        `0x10` at +0x158), and the one thread whose r7 was not a syscall
+        number was the sound preloader at `20937c: ldrd r2, r3, [r3, r7]`,
+        r3=8, r7=0x6ce22fca — an 8-byte record table inside the game's mmap
+        of `image.bin`, laid down on a 2-byte boundary. ARMv7 alignment-faults
+        LDRD/STRD/LDM/STM on any non-word address whatever SCTLR.A says; on
+        the machine the KERNEL fixes that up for user mode (`alignment.c`,
+        UM_FIXUP, the default on v6+), so Stern never saw it. qemu-user has no
+        kernel above it and hands the guest SIGBUS(BUS_ADRALN). **Fixed in
+        hwshim.c:** a SIGBUS handler that is the kernel's fixup — decodes
+        LDRD/STRD/LDM/STM (ARM and Thumb), performs the access bytewise,
+        writes the frame back, steps the pc; `[align] fixup #N` on the pane
+        (first 8, then every 4096th), `PAD_ALIGN_FIXUP=0` to see the raw
+        fault. Same stock `/usr/bin/qemu-arm-static` — this rig does not build
+        its own qemu (Spike 1's does), so the kernel's half lives in the one
+        file every title runs through. (ii) WHY IT WEDGED INSTEAD OF EXITING.
+        Under PAD_PIVOT the guest is pid 1 of its own pid namespace (`NSpid:
+        2342702 1`), and a pid-namespace init drops every signal it has no
+        handler for when the sender is inside — so qemu's own `kill(getpid(),
+        SIGBUS)` was a no-op, the faulting thread parked in `sigsuspend()` and
+        the other 19, already stopped for the core dump, never ran again.
+        Every fatal guest fault under PAD_PIVOT has been ending this way, as a
+        freeze rather than an exit. **Fixed twice:** the shim's no-handler
+        path `_exit(128+sig)`s when it is pid 1 (after the `[segv]` report),
+        and watch.sh reads `qemu: uncaught target signal` in game.out as the
+        death notice it is and stops a guest that could not stop itself.
+        **Verified live** after the rebuild: `plunge.py game` → `[align]
+        fixup #1: LDRD at pc=0x20937c`, trough eject answered, ball in the
+        shooter lane, 54 fps, no fault for the rest of the run. Not changed,
+        deliberately: making the game pid 2 under a tiny init would mend
+        qemu's own path but the criu save states dump the namespace root
+        (`savegame.sh` targets `pgrep -x game`), and a host bash as init
+        cannot be dumped once the pivot detaches its binary's mount.
+        **★ VERDICT: ✅ CLEAN, David's green check, 2026-09-01** — "ok this
+        is fixed. led zeppelin gets the green check mark." Shipped in the
+        release cut right after. **Resume: the next title alphabetically
+        after led_zeppelin_le, once David reports it.**
       - **james_bond_le 1.06.0 — ❌ SEGV, David 2026-09-01 09:32; FIRST BOOT of
         this title on the rig** (every derived table under
         `dump/tables/james_bond_le` is stamped 09:32 today; it is not the
@@ -7478,8 +7720,98 @@ rewriting it.**
         existing non-`.json` file, checked BEFORE the sweep so the mistake
         fails while it is still cheap. Three tests, the first of which
         replays the exact destroying command.
-        **Resume: the next title alphabetically after jurassic_park_le, once
-        David reports it. Both fixes above are UNCOMMITTED on main.**
+      - **king_kong_le — ⚠️ node 9 was DARK on the playfield: every ramp
+        opto, both spinners, the drops and the pit targets, 28 switches.**
+        David: "It looks like we are missing a lot of switch input for King
+        Kong I'm expecting, for example, to have ramp optos and other
+        switches that are not being displayed on the playfield right now.
+        probably missing a board or two." **No board is missing.** The
+        game's own table declares 104 switches on nodes 0/1/4/8/9, node 9
+        answers on the wire, and the device table names all 27 of its
+        switches — but the cached list carried all 28 node-9 rows as `?`,
+        and the window places switches by NAME, so it drew node 8 alone
+        (31 on the artwork). The `?`s are item 29's class (the shim's
+        message-table read) and `swnames.py` exists to fill them from the
+        device table — and it REFUSED node 9: "39 device records, but no
+        single index->bit shift covers them all". 27 of those are node 9's;
+        **the other 12 are the CPU board's DIP/service switches, whose
+        device group carries connector `9c` on ONE record, DIP 8**, and
+        `device_switches()` let a connector name the board outright. Fixed:
+        a connector-named node now has to pass the test a `_fit()`
+        candidate already must — the group's indices land on that node's
+        live bits under one shift — and a connector the bits contradict is
+        reported in the fill and the group is placed by its bits, exactly
+        as a connectorless one is. Measured over all 30 cached titles with
+        both tables before shipping: King Kong's group 4 is the ONLY
+        connector-named switch group that fails its own board; nothing else
+        moves (metallica 105→9 `?` before and after, bond/jaws/zeppelin
+        1→1). On the real cached table: **27 of 28 filled** (`RIVER ENTER`
+        … `PIT TARGET-BOT`, the three `RAMP MADE OPTO`s among them) and the
+        position join goes **31 → 56 placed**; the one row left `?` is
+        node 9 bit 39, a virtual switch beside `PUNCHBACK FIRED VIRTUAL`.
+        Five tests in `test_spike2_swnames_fit.py` replay the shape.
+        **Takes effect on the next start of the title, no release needed on
+        this rig**: `mktables` re-asks the fill on a cached list with `?`
+        names and a repair forces the position join, so `padtables.log`
+        should read "filled 27 of its 104" and "56 switches placed" where
+        it read "28 `?` names the device table cannot fill" and 31.
+        **What IS unresolved on King Kong is three COILS, not switches**:
+        `KING KONG SERVO-BODY / L ARM / R ARM` sit in device group 9 with
+        no node (`group_node.txt`), and the node directory lists two more
+        pinnodes, 10 and 13 (code 18), that no switch group names — the
+        Kong servo board, most likely. Not touched here.
+        **★ SECOND FAULT, SAME TITLE, 2026-09-01 — "when starting a game,
+        the first video is freezing on this frame for 10+ seconds. the
+        audio plays just fine though. i haven't seen this kind of issue
+        before. is there a layering issue? or a problem loading
+        something?"** (the frame: the theatre, red curtain closed). David
+        handed me the rig AFK, so every step below was driven with
+        `plunge.py`/`swpoke.py`, seen through `glshot.sh` for menus and
+        `shotwin.py` for the game picture.
+        **THE VIDEO WAS NEVER FROZEN.** Measured on the live run: the intro
+        film streamed on ch1 at 30 frames/s for the whole 30 s (702.asset/
+        10 → 14 → 22, clip changes and EOS as the game asked), the renderer
+        drew 52 fps, no GL error, and the theatre frame is not a frame of
+        ANY clip the game had armed - I pulled the first frames of every
+        one. The jungle clip (137) sat PAUSED on ch0 by design until the
+        intro ended; the "30 s hold" is simply the intro's length. **Two
+        wrong turns, recorded so nobody walks them again:** (1) the shim's
+        own pause-hold `usleep(5000)` at 0x40857647 looked like the game's
+        wait loop - it is OUR loop, in hwshim.so; (2) the Tech Alerts
+        screen says "Kong Mech - Playfield Device - Calibration needed" and
+        the game's three-flag stdout print (`0 1 1` → `1 1 0` → `1 1 1`)
+        flips at the resume, so the john_wick-class mech wait (item 88)
+        fitted - until **Kong Mech Playfield Disabled = Yes** (Adjustments >
+        Machine Settings > Device Enables, driven blind) changed nothing:
+        28.5 s again. The mech is real and uncalibrated, but not this.
+        **THE FAULT: `glCompressedTexSubImage2D` was a STUB in glbridge.c.**
+        The curtain is an IMAGE SEQUENCE (`ImageSeq_CurtainsOpening`, two
+        512x512 BC3 atlases, 77/78.asset) that the game animates by patching
+        blocks of its atlas in place; the guest bridge answered that call by
+        returning 0 and emitting nothing, so the atlas stayed on the frame
+        it was created with - curtain closed - while the film played behind
+        it. Uploads were bridged for `glTexImage2D`, `glTexSubImage2D` and
+        `glCompressedTexImage2D`; this one call was the hole, and the game
+        imports it. **Fixed:** new op `PADGL_TEXCOMPRESSEDSUB` (appended, so
+        every op keeps its number), emitted by the guest exactly like the
+        uncompressed sibling, executed on the host with
+        `glCompressedTexSubImage2D`, size-checked, journaled as a level
+        overlay with its own op so a save state replays it after the level.
+        **Verified on the glass:** `shotwin.py` at 3 s shows the curtains
+        open and the film on the stage; at 12 s the film is still playing.
+        `ensurebuild` rebuilt both halves at the next start. Remaining
+        one-line stubs in the bridge are deletes, detaches, `glDrawBuffers`,
+        `glLineWidth` and `glReadPixels` - nothing that uploads pixels.
+        **Also learned:** menu presses need `swpoke.py <id> 300` and cursor
+        moves `--tap <id> 10` (turtles' recipe holds on King Kong); `-`
+        wraps a list to its last row; `glshot.sh` is honest for menus and
+        NOT for composited scenes (it reads partial texture pages) - use
+        `shotwin.py` for the game picture. Kong Mech Playfield Disabled
+        restored to No.
+        **★ VERDICT: ✅ CLEAN, David's green check, 2026-09-01** — "ok this
+        is fixed. king kong gets the green check mark." Both fixes shipped
+        in v0.178.0. **Resume: the next title alphabetically after
+        king_kong_le, once David reports it.**
 
 - [x] **66. Deadpool and Avengers: Infinity Quest boot on a WHITE
       background.** `S3 D2` **CLOSED 2026-09-01 at David’s call** — "66 is

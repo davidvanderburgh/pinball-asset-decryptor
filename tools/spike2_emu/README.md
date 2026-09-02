@@ -11,13 +11,13 @@ The rootfs is the OS partition and carries no title of its own; each game is a
 directory under `games/`. `PAD_GAME` picks one:
 
 ```bash
-PAD_GAME=turtles_pro watch.sh
+PAD_GAME=<title> watch.sh          # the directory's name under games/
 ```
 
 ## Straight off the card, with nothing extracted
 
 ```bash
-PAD_CARD=images/Stern/spike2/jaws_le-1_02_0.Release.16G.sdcard.raw watch.sh
+PAD_CARD=/path/to/<card>.sdcard.raw watch.sh
 ```
 
 `cardmount.sh` puts the card's games partition on a **read-only FUSE mount** and
@@ -30,7 +30,7 @@ still works and is still the faster option for a title you run constantly.
 ## Boot selector (item 90)
 
 ```bash
-PAD_CARD=/path/to/tmnt_multi.raw watch.sh
+PAD_CARD=/path/to/<multi-image card>.raw watch.sh
 ```
 
 **The card decides, not a flag.** A **multi-image card** (`mkmulticard.py`:
@@ -105,7 +105,7 @@ partition is all a card can carry as a partition. `mkmulticard.py --layout`
   (`select.sh` mounts p7 at `/mnt/multi` and binds the subdirectory over
   `/games`); the rig's tokens are `p7:img1`, `p7:img2` ... `parts.py
   --list-games` prints one line per TREE with the subdirectory as a fifth
-  field (`7 15353856 7861174272 turtles_pro img1`), `cardmount.sh --part 7`
+  field (`7 15353856 7861174272 <title> img1`), `cardmount.sh --part 7`
   answers `<mount>/img1` for the partition (one component, so the teardown
   still finds the mount), and `run_game.sh` binds `<mount>/imgN/<title>` over
   `games/<title>` for the chosen tree.
@@ -210,12 +210,12 @@ place (`--dry-run` only reports) - which is what fixes a card that already
 shows the error, no rebuild. Every partition written into gets an
 `OUT.pN.md5` sidecar and `verify` holds it to that instead of the source,
 and reports `bypass_status: armed|bypassed|absent|unlocated` per tree.
-Measured 2026-09-02 on a copy of the stock+1987 card: p3 (stock 1.59.0) was
-ARMED and took 40 bytes (4 + the two digests), p7 (the patched 1987 build)
-was already bypassed; the `.sidx` HMAC and MD5 matched the patched ELF
-afterwards and `verify` PASSed. The tamper *state* lives on the machine's
-board NVRAM, not on the card: a machine that already booted an unpatched
-image may keep its flag until a settings/factory reset.
+Measured on a two-image card carrying a stock image and a modified build of
+the same version: the stock tree was ARMED and took 40 bytes (4 + the two
+digests), the modified tree was already bypassed; the `.sidx` HMAC and MD5
+matched the patched ELF afterwards and `verify` PASSed. The tamper *state*
+lives on the machine's board NVRAM, not on the card: a machine that already
+booted an unpatched image may keep its flag until a settings/factory reset.
 
 The hardware side is the same program installed in p2 and hooked into
 `/etc/init.d/game` by `select.sh`, reading the flippers over the node bus and
@@ -830,7 +830,7 @@ that could be written — running the rig there means running Linux there, and
 
 ```bash
 docker/padbox.sh --build                 # once
-PAD_CARD=~/cards/godzilla.raw docker/padbox.sh watch.sh 30
+PAD_CARD=~/cards/<card>.raw docker/padbox.sh watch.sh 30
 open vnc://localhost:5900                # Screen Sharing; nothing to install
 ```
 

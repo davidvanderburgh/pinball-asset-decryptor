@@ -356,7 +356,7 @@ pad_ensure_bridge() {
         # answers "NO-OP (not implemented)" for the VIV upload procs, the
         # window bridge never attaches, and the game plays into a black
         # window with every other counter healthy. Measured 2026-08-10: two
-        # full Jaws runs lost to exactly this before anything named it. The
+        # full runs lost to exactly this before anything named it. The
         # bridge encoder EXPORTS glTexDirectVIV, so its name must appear in
         # the file; the raster build has no such string. grep -a because the
         # file is binary and this must not depend on nm being installed.

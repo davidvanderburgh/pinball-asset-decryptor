@@ -1,7 +1,7 @@
 #!/bin/bash
 # Boot a Stern Spike 2 game binary under qemu-user in an ARM chroot.
 #
-#   PAD_GAME=turtles_pro run_game.sh
+#   PAD_GAME=<title> run_game.sh
 #
 # ANY TITLE, not just the one this was written for. The rootfs is shared - it is
 # the OS partition and carries no title of its own - and each title is a
@@ -13,7 +13,7 @@ S=$RIG
 
 # STRAIGHT OFF THE CARD, with no extraction:
 #
-#   PAD_CARD=.../jaws_le-1_02_0.Release.16G.sdcard.raw run_game.sh
+#   PAD_CARD=/path/to/<card>.sdcard.raw run_game.sh
 #
 # cardmount.sh puts the card's games partition on a read-only FUSE mount (see
 # there for how that is done without root), and the title directory is bind
@@ -56,7 +56,7 @@ if [ -n "${PAD_CARD:-}" ]; then
     # image's games partition on p7 verbatim; `multi` makes p7 ONE ext4 holding
     # img1/, img2/ ... - each a complete games tree - because the card's kernel
     # exposes p1..p7 only. parts.py --list-games prints a fifth field for a
-    # tree inside such a partition (`7 <lba> <off> turtles_pro img1`), the
+    # tree inside such a partition (`7 <lba> <off> <title> img1`), the
     # device token is then `p7:img1` (the machine's is /dev/mmcblk0p7:img1),
     # and the directory bound over games/$GAME is <p7 mount>/img1/<title>.
     # cardmount.sh mounts p7 once and answers "$MNT/img1" for it (its last
@@ -64,10 +64,11 @@ if [ -n "${PAD_CARD:-}" ]; then
     #
     # PAD_GAME stays the PRIMARY's title: the node identity, the census and
     # the derived tables were all taken from it before this script ran, and
-    # a card whose images share one title directory (the TMNT pair) is the
-    # only kind this design is for. A refusal, not a silent fallback, when
-    # the selector is not built: a run that asked for a menu and got the
-    # primary without a word is the fault every gate in this rig exists for.
+    # a card whose images share one title directory (two builds of the same
+    # title) is the only kind this design is for. A refusal, not a silent
+    # fallback, when the selector is not built: a run that asked for a menu
+    # and got the primary without a word is the fault every gate in this rig
+    # exists for.
     #
     # PAD_SELECT=1 IS THE ANSWER HERE, NOT THE QUESTION (2026-09-02). Whether
     # a menu is wanted is decided ONCE, by watch.sh, from the card itself

@@ -15,9 +15,9 @@
 
 WHY THIS EXISTS. Every script here that reached into a card image carried the
 offsets of ONE card as constants - `?offset=12582912` for the rootfs,
-`?offset=364904448` for games, `skip=8192` for boot. Those are Godzilla Pro
-1.15.0 on an 8 GB card and they say nothing about a 16 GB Jaws image. The MBR
-has carried the real numbers all along.
+`?offset=364904448` for games, `skip=8192` for boot. Those came off ONE
+build on an 8 GB card and say nothing about a 16 GB image of another title.
+The MBR has carried the real numbers all along.
 
 **THE PARTITION NUMBER IS NOT THE ANSWER EITHER, which is the part worth being
 careful about.** "p2 is the rootfs and p3 is games" held on the cards this rig
@@ -51,7 +51,7 @@ ONE ext4 partition whose root holds img1/, img2/, ... imgK/ - each a complete
 games tree (spk/, the title dir, the game/conagent/data symlinks). Such a
 partition has no /spk of its own, so the strict rule is applied one level
 down: `--list-games` prints one line per imgN that passes it, with the
-subdirectory as a fifth field (`7 15353856 7861174272 turtles_pro img1`), and
+subdirectory as a fifth field (`7 15353856 7861174272 <title> img1`), and
 the selector's device token for it is `p7:img1`. A plain games partition
 prints four fields, as before.
 
@@ -387,8 +387,8 @@ def images_conf_count(text):
     before comparing it to "image"; select.sh's awk matches
     `/^[ \t]*image[ \t]*=/` for the same entries. So
 
-        image = /dev/mmcblk0p7|TMNT 1987|upscaled
-        \timage=/dev/mmcblk0p3|STERN STOCK|1.59.0
+        image = /dev/mmcblk0p7|CUSTOM BUILD|modified
+        \timage=/dev/mmcblk0p3|STERN STOCK|as shipped
 
     are both images on the machine - and images.conf.example is a file people
     are invited to hand-edit, where a space around the '=' is the most natural

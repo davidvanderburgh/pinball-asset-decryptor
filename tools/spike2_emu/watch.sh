@@ -3,8 +3,8 @@
 #
 #   wsl -e bash $RIG/watch.sh
 #
-# Opens a window on the Windows desktop (via WSLg) showing Godzilla Pro running
-# under emulation at 60 fps on the GPU. Close the window to stop everything.
+# Opens a window on the Windows desktop (via WSLg) showing the emulated game
+# running at 60 fps on the GPU. Close the window to stop everything.
 #
 # WHY THIS SCRIPT EXISTS SEPARATELY FROM runbridge.sh: runbridge.sh is built for
 # timed measurement runs - it sleeps for N seconds and then kills. Watching needs

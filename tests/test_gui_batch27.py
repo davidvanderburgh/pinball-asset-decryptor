@@ -93,9 +93,11 @@ def _apply_mfr(tmp_path, folder):
         _project_folder=lambda: folder,
         _set_loaded_project=lambda p: seen.append(p),
         # These tests are about the TITLE; the Emulate tab's card restore
-        # rides along in the same method and has its own tests in
-        # test_emulate_tab.py.
+        # and the Multi-boot tab's form ride along in the same method and
+        # have their own tests in test_emulate_tab.py and
+        # test_multiboot_tab.py.
         _restore_emulate_card=lambda folder: None,
+        restore_multiboot_state=lambda folder: None,
         window=SimpleNamespace(apply_manufacturer=lambda mfr: None),
     )
     App._apply_manufacturer(stub, SimpleNamespace(key="stern"))

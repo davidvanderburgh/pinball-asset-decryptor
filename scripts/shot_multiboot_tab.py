@@ -29,12 +29,16 @@ with THREE images the way a user would fill it - which is also what puts
 every state of the table's row icons in one picture: the first row's up
 arrow outlined, the last row's down arrow outlined, a middle row with
 both live, and the dim '+ Add an image…' row under them.  Nothing is
-built - Check size, Prepare media, Build, Flash and the preview's own
-redraw all shell out to wsl.exe, none of them is pressed, and the
-auto-render is switched off with ``PAD_MULTIBOOT_AUTO=0`` before the app
-starts.  The size sentence in the status block is the one Check size
-would print (the tool's own plan output, fed to the same parser the
-button uses), and the preview shows a frame through the panel's public
+built - Build, Flash, the preview's own redraw and the two runs the tab
+starts BY ITSELF (the size check when the image list moves, the media
+prepare when Sound is ticked) all shell out to wsl.exe; none of them is
+pressed, and both automatic ones are switched off with
+``PAD_MULTIBOOT_AUTO=0`` and ``PAD_MULTIBOOT_PLAN=0`` before the app
+starts.  The tab is also EMPTIED first (it remembers its form per project
+now, so a developer's own card would otherwise be in the picture).  The
+size sentence in the status block is the one the automatic size check
+prints (the tool's own plan output, fed to the same parser that run's own
+step calls), and the preview shows a frame through the panel's public
 ``load_frame`` seam: a real selector snapshot when ``--frame F.ppm`` names
 one, otherwise a stand-in drawn here with PIL in the menu's own layout
 (dark ground, SELECT GAME CODE, one card per image, the highlighted one
@@ -120,9 +124,11 @@ SETTINGS = os.path.join(os.environ["APPDATA"], "pinball_decryptor",
                         "settings.json")
 SETTINGS_BAK = SETTINGS + ".shotbak90"
 
-#: The tab drives the selector under WSL whenever a field changes; a
-#: photograph must start nothing.
+#: The tab drives the selector under WSL whenever a field changes, and asks
+#: mkmulticard for the card's size whenever the image list does; a
+#: photograph must start neither.
 os.environ["PAD_MULTIBOOT_AUTO"] = "0"
+os.environ["PAD_MULTIBOOT_PLAN"] = "0"
 
 #: The window the README shot is taken in, and the desktop the fit check
 #: is taken in (David's, measured 2026-09-02).
@@ -165,7 +171,7 @@ CARD = (r"D:\Pinball\TMNT 1987\multi"
 TIMEOUT_ON_CARD, TIMEOUT_NOW = 15, 20
 
 #: mkmulticard.py plan, as it reports two 8G images side by side - the
-#: lines the tab's parser reads.  Fed to the same _plan_step the Check size
+#: lines the tab's parser reads.  Fed to the same _plan_step the size check
 #: button's worker calls, so the sentence in the shot is the real one.
 PLAN_TEXT = (
     "images: 0=/dev/mmcblk0p3, 1=/dev/mmcblk0p7\n"
@@ -442,14 +448,14 @@ def measure(label, collect=False):
         % (len(panel._tree.get_children()),
            panel._table_box.winfo_reqheight(),
            panel._table_box.winfo_reqwidth()))
-    for btn, name in ((panel._load_btn, "Load card…"),
-                      (panel._new_btn, "New card…"),
+    for btn, name in ((panel._load_btn, "the card verb"),
+                      (panel._out_entry, "Card image"),
                       (panel._browse_btn, "Browse…"),
+                      (panel._new_btn, "New card"),
                       (panel._apply_btn, "Apply to card"),
                       (panel._build_btn, "Build & verify"),
                       (panel._flash_btn, "Flash to SD card…"),
                       (panel._emu_btn, "Run in emulator"),
-                      (panel._more_btn, "More ▾"),
                       (panel._menu_btn, "Menu settings…")):
         if not btn.winfo_ismapped():
             log("   !! %s IS NOT MAPPED - the row overflowed" % name)
@@ -489,6 +495,16 @@ def s_fill():
     editor variables, exactly as tests/test_multiboot_tab.py does.  No
     action button is pressed: every one of them runs a tool under WSL."""
     panel = win._multiboot_panel
+    # FROM AN EMPTY TAB, ALWAYS.  The tab now remembers its form per project
+    # and falls back to the global settings, so App() and then s_stern's
+    # manufacturer change have each restored whatever THIS developer left in
+    # it - and add_image APPENDS.  Without this the README shot carried
+    # someone's own card path and image list, and --measure was measuring a
+    # taller table than the gate was written for (the table's height follows
+    # the row count), which made "sweep: OK" a statement about one machine.
+    panel.new_card()
+    log("tab cleared: rows=%d card=%r"
+        % (len(panel._rows), panel._out_var.get()))
     for path, _title, _sub in IMAGES:
         if not os.path.isfile(path):
             log("MISSING image %s - the row will show the path only" % path)
@@ -613,6 +629,12 @@ def s_load():
     panel = win._multiboot_panel
     warnings = panel.load_inspect(inspect_report(), CARD)
     log("load warnings: %s" % (warnings or "none"))
+    # The size sentence is about the IMAGE LIST, and the load has just
+    # replaced it - so the tab drops the old answer and asks for a new one
+    # by itself (MultibootPanel._maybe_plan).  That run is off here
+    # (PAD_MULTIBOOT_PLAN=0: a photograph starts no tools), so the answer it
+    # would print is fed to the same parser the run's own step calls.
+    panel._plan_step("plan", 0, PLAN_TEXT)
     # One change: the countdown. The preview frame above was drawn with the
     # new value, which is what Render preview would show.
     panel._timeout_var.set(str(TIMEOUT_NOW))
@@ -636,8 +658,11 @@ def s_load():
     log("editing %s" % panel._loaded_card)
     log("status: %r" % panel._edit_lbl.cget("text"))
     log("Apply to card: %s" % panel._apply_btn.cget("state"))
-    log("Load card… mapped=%s  Apply mapped=%s"
-        % (panel._load_btn.winfo_ismapped(),
+    # The row's one verb: after a load it reads 'Reload card', which is the
+    # whole of how the picture shows that the tab is in editing mode.
+    log("verb %r state=%s mapped=%s  Apply mapped=%s"
+        % (panel._load_btn.cget("text"), panel._load_btn.cget("state"),
+           panel._load_btn.winfo_ismapped(),
            panel._apply_btn.winfo_ismapped()))
     log("output: %s" % panel._out_var.get())
     log("hint: %r" % panel._hint.cget("text"))

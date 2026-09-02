@@ -34,18 +34,34 @@ second pass (the JJP executor's lesson), and no quoting from this side
 survives that.
 
 THE LAYOUT.  ONE arrangement at every width - the structure never changes
-under the window.  Top to bottom, in the order the work happens: 'Load
-card…' / 'New card…' and the card path first (reading a card you already
-built is the usual first move); then a two-column body - a narrow image
-list on the left, the PREVIEW on the right, large and always visible;
-then ONE action bar; then one status block; then the tools' own output,
-folded away.  The detail of one image and of the menu is behind two
-modals (:class:`ImageEditorDialog`, :class:`MenuSettingsDialog`), which
-is what makes the whole tab fit the ~640 px of content height a 1024x768
-desktop leaves for it - David's desktop, and the constraint the layout is
-designed around.  The modals bind to the PANEL's own variables, so there
-is one form whether a dialog is open or not, and Cancel restores the
-snapshot taken when it opened.
+under the window.  Top to bottom, in the order the work happens: ONE card
+path first, with the verb that reads it beside it (reading a card you
+already built is the usual first move); then a two-column body - a narrow
+image list on the left, the PREVIEW on the right, large and always
+visible; then ONE action bar; then one status block; then the tools' own
+output, folded away.  The detail of one image and of the menu is behind
+two modals (:class:`ImageEditorDialog`, :class:`MenuSettingsDialog`),
+which is what makes the whole tab fit the ~640 px of content height a
+1024x768 desktop leaves for it - David's desktop, and the constraint the
+layout is designed around.  The modals bind to the PANEL's own variables,
+so there is one form whether a dialog is open or not, and Cancel restores
+the snapshot taken when it opened.
+
+THE PATH IS THE CARD'S IDENTITY, and the row carries one of them.  It used
+to carry two file pickers and a box: 'Load card…' asked for a card to
+read, 'New card…' cleared the form, and 'Card image' named the output -
+which after a load was also the card being edited.  Two ways to do one
+thing, and a field whose meaning changed with a mode nothing showed
+(David, 2026-09-02: "why do i have a browse and input section when i have
+a 'new card' and 'load card' one?").  Now the box IS the card, the verb
+beside it reads whatever the box names, and EDITING MODE is exactly "the
+file at that path has been read into this form" - so typing the box away
+from the loaded card leaves editing mode, and nothing can be applied to a
+card the box no longer names.  What the path is pointing at, and which of
+the two writing buttons that makes live, is said in words on the status
+block's second line (see :func:`card_path_state`) - the one place the tab
+already had for "what would the button under this do", and the only one
+that costs no height.
 
 BUTTONS LIVE IN EXACTLY THREE PLACES: the source row at the top, the
 action bar at the bottom, and the two FLIPPERS under the picture - and
@@ -103,10 +119,10 @@ music because someone clicked an image is exactly what that asks us not
 to do.  One click turns it on, and the caption says so once when the
 highlighted image has music nobody is hearing.
 
-READING A CARD BACK.  'Load card…' runs ``mkmulticard.py inspect`` on a card
-that already exists - the tool's table into the pane, the same read as JSON
-for the form, and the card's own media extracted into ``<card dir>/media-
-<stem>`` - and fills EVERY field from it: the images and where they came
+READING A CARD BACK.  'Load card' runs ``mkmulticard.py inspect`` on the
+card the path box names - the tool's table into the pane, the same read as
+JSON for the form, and the card's own media extracted into ``<card dir>/
+media-<stem>`` - and fills EVERY field from it: the images and where they came
 from, the titles and subtitles, the art / animation / music (as the spec
 strings the card records, so the tools can render them again), the sounds,
 volume, countdown, default and the bypass state of every games tree.  The
@@ -118,30 +134,51 @@ back with ``inject`` (plus a ``prepare`` when a media field changed, plus
 ``bypass`` when it is ticked and a tree is still armed) - seconds, no copy.
 The image LIST - how many images, in what order, from which files - is the
 one thing an inject cannot change, so changing it disables Apply and says
-so; and because the output box now holds the loaded card, 'Build & verify'
-refuses until a different output path is set rather than copying ~7 GB over
+so; and because the path box now holds the loaded card, 'Build & verify'
+refuses until it is pointed somewhere else rather than copying ~7 GB over
 the card being edited.  A card whose media has no source recorded (a v1
 card, or a music bed) keeps its file names: they can be kept and drawn, but
 not re-rendered, and the tab says which field to re-point before a media
-change can be applied.
+change can be applied.  A load is a CLICK and never a keystroke: it costs a
+WSL round trip, writes a media dir beside the card and replaces every
+field, and on the way to typing ``x.raw.bak`` you pass through ``x.raw``,
+which exists.
 
-WHAT IS NOT HERE.  No probe runs when the tab is built, no path is guessed
-from the Input box, and no two tool runs overlap: a build copies ~7 GB per
-image and the tab is busy until the run has said PASS or FAIL.
+COMING BACK AS YOU LEFT IT.  The form is remembered per project, on the
+rail the Emulate tab's card path already rides: the hidden ``.pinproj``
+anchor, with the global settings as the fallback for having no project
+open (see :meth:`MultibootPanel.state` and ``App.restore_multiboot_state``).
+The FORM only - never the baseline a load left behind, because the card may
+have changed since and Apply's whole legality is decided by that baseline.
+A restarted app therefore comes back with the images, the menu and the
+path, out of editing mode, and one click on the verb earns editing mode
+back honestly.  The preview's Sound box is deliberately not remembered: it
+starts off, every time, because this app is used in the room with a machine
+that is running.
+
+WHAT IS NOT HERE.  No TOOL runs when the tab is built or restored - the
+path box is stat'ed on a worker thread so the row can say what is at it
+(:func:`probe_card_path`), and that is the whole of it: nothing reads the
+card, nothing runs WSL, and no path is guessed from the Input box.  No two
+tool runs overlap either: a build copies ~7 GB per image and the tab is
+busy until the run has said PASS or FAIL.
 """
 
+import errno
 import hashlib
 import json
 import os
 import queue
 import re
 import shlex
+import stat
 import subprocess
 import sys
 import threading
 import time
 import tkinter as tk
-from dataclasses import dataclass, field, replace
+from dataclasses import (asdict, dataclass, field, fields as dc_fields,
+                         replace)
 from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 from . import _rig
@@ -414,14 +451,36 @@ def _norm(p):
     return os.path.normpath(r).replace("\\", "/").lower()
 
 
-def under_library(path):
-    """Whether *path* lies in the card library nothing may write into."""
+def _plain(p):
+    """A path compared WITHOUT touching the disk: absolute, with the
+    platform's own case and separator rules and no link resolution.
+
+    :func:`_norm` is the real answer and every GATE uses it - it resolves
+    links, which is how the library junction is caught - but it stats, and
+    anything that runs on the Tk thread for every keystroke of an arbitrary
+    typed path has to be able to say what it sees without freezing on a
+    drive that is not there (the UI-thread freeze class this tree has
+    already paid for).  A text match is all a SENTENCE about the path
+    needs."""
+    p = (p or "").strip().strip('"')
+    if not p:
+        return ""
+    return os.path.normcase(os.path.normpath(os.path.abspath(p)))
+
+
+def under_library(path, resolve=True):
+    """Whether *path* lies in the card library nothing may write into.
+
+    ``resolve=False`` answers from the text alone (:func:`_plain`), for the
+    callers that must not stat - see there.  The gates leave it True."""
     if not path:
         return False
-    n = _norm(path)
+    norm = _norm if resolve else _plain
+    sep = "/" if resolve else os.sep
+    n = norm(path)
     for pre in LIBRARY_PREFIXES:
-        pn = _norm(pre)
-        if n == pn or n.startswith(pn + "/"):
+        pn = norm(pre)
+        if n == pn or n.startswith(pn + sep):
             return True
     return False
 
@@ -444,8 +503,8 @@ def default_output_path(primary):
 
 
 def media_dir_for(out):
-    """Where 'Prepare media' renders for an output: ``<out dir>/media`` -
-    and where the preview renders too, so the two share one cache."""
+    """Where a prepare renders for an output: ``<out dir>/media`` - and
+    where the preview renders too, so the two share one cache."""
     out = (out or "").strip()
     return os.path.join(os.path.dirname(os.path.abspath(out)), "media") \
         if out else ""
@@ -1602,7 +1661,11 @@ def media_specs_changed(before, after):
 
 def edit_status_text(card, menu, rebuild):
     """The tab's one line about a loaded card: what Apply to card would
-    write, or why only a rebuild can."""
+    write, or why only a rebuild can.
+
+    ONE BRANCH of :func:`card_path_state` rather than a second opinion: the
+    row's verb and the sentence under it are derived from the same call, so
+    they cannot come to disagree about which card is being edited."""
     name = os.path.basename(card) or card
     if rebuild:
         msg = ("The image list changed (%s) - Build & verify writes a new "
@@ -1618,6 +1681,322 @@ def edit_status_text(card, menu, rebuild):
                 "seconds." % name)
     return "Apply to card: %d menu change%s (%s) -> %s, no rebuild." % (
         len(menu), "" if len(menu) == 1 else "s", ", ".join(menu), name)
+
+
+# ---------------------------------------------------------------------------
+# what the card path is pointing at
+# ---------------------------------------------------------------------------
+
+#: The two labels the row's one verb ever wears.  No ellipsis on either:
+#: that is the signal it no longer asks a question - it acts on the path
+#: already in the box.
+LOAD_VERB = "Load card"
+RELOAD_VERB = "Reload card"
+
+
+def path_root(path):
+    """The drive or share *path* hangs off - what a person plugs in.
+
+    ``D:/Pinball/x.raw`` -> ``D:\\``, ``//server/share/x`` ->
+    ``//server/share``.  It is what an 'it is not there' sentence has to
+    name: the file is missing because the whole volume is."""
+    p = (path or "").strip().strip('"')
+    if not p:
+        return ""
+    drive, _rest = os.path.splitdrive(os.path.abspath(p))
+    if len(drive) == 2 and drive[1] == ":":
+        return drive + os.sep
+    return drive or os.sep
+
+
+#: What Windows says when the NAME is the problem rather than the drive:
+#: ERROR_INVALID_NAME (a ``? * | < > "`` in it), ERROR_BAD_PATHNAME and
+#: ERROR_FILENAME_EXCED_RANGE (past MAX_PATH).  None of them is an
+#: unplugged drive, and all three arrive as a plain ``OSError``.
+_BAD_NAME_WINERR = (123, 161, 206)
+
+
+def probe_card_path(path, loaded=""):
+    """What a STAT says about a card path:
+    ``{"kind", "parent", "root", "loaded"}`` - kind being ``missing`` |
+    ``file`` | ``dir`` | ``badname`` | ``unreachable``, *parent* whether the
+    folder it would be written into is there, *root* its volume, and
+    *loaded* whether it is the same file as *loaded* once the links are
+    resolved.
+
+    THE LINK RESOLUTION IS THE REASON *loaded* IS ASKED FOR HERE.  Every
+    GATE compares with :func:`_norm`, which resolves - and D:\\Pinball\\images
+    is a junction on the rig this is written for - while the sentence under
+    the row compares with :func:`_plain`, which must not touch the disk on
+    the Tk thread.  Two spellings of one card therefore disagreed: the row
+    said the path had strayed and greyed Apply, while ``_build_card``'s own
+    ``_norm`` saw the loaded card and refused the build, leaving neither
+    writing button usable.  So the resolving comparison is made HERE, on
+    the worker that is already stat'ing the same file, and handed back for
+    the sentence to use.
+
+    IT STATS, AND IT STOPS.  There is no card-shape sniff here and there
+    must not be one: the only thing that can tell a multi-boot card from a
+    stock single-image card is ``images.conf`` inside the card's ext4, and
+    only the tool under WSL can read that - a sector-0 guess would be a
+    second copy of layout knowledge in the one module whose docstring
+    forbids exactly that, and it would be wrong.  What the tab says about a
+    file that exists is therefore only what a stat can support: something is
+    there, one button reads it and the other would write over it.  When the
+    read then fails, the TOOL's own refusal is what reaches the tab, and it
+    is better than anything this app could invent.
+
+    Nothing here opens the file, creates a directory, writes, or runs WSL.
+    It is called on a WORKER thread - every one of these stats can block for
+    tens of seconds on a dead mapped drive or a sleeping share."""
+    path = (path or "").strip().strip('"')
+    facts = {"kind": "unknown", "parent": False, "root": path_root(path),
+             "loaded": False}
+    if not path:
+        return facts
+    try:
+        st = os.stat(path)
+    except ValueError:
+        # A path Python will not even hand to the OS (an embedded NUL).  It
+        # is a NAME problem, and it is caught because an exception here kills
+        # the worker thread and leaves the row saying 'Looking at…' for ever.
+        facts["kind"] = "badname"
+    except OSError as exc:
+        # A path that is simply not there yet is the ORDINARY case (it is
+        # where a build would write); anything else - a share that is down,
+        # a letter with no mapping behind it, a permission wall - is the
+        # tab's business to say out loud, because no button can help.
+        if isinstance(exc, FileNotFoundError):
+            facts["kind"] = "missing"
+        elif (getattr(exc, "winerror", None) in _BAD_NAME_WINERR
+                or exc.errno in (errno.EINVAL, errno.ENAMETOOLONG)):
+            # ...but a name the file system cannot spell is neither of those,
+            # and it is the one a person is most likely to type: Windows
+            # raises the same class of OSError for a ``?`` in a file name as
+            # for a dead share, and calling it 'unreachable' told David to
+            # plug in a drive that was plainly sitting there.
+            facts["kind"] = "badname"
+        else:
+            facts["kind"] = "unreachable"
+    else:
+        facts["kind"] = "dir" if stat.S_ISDIR(st.st_mode) else "file"
+    if loaded and facts["kind"] != "badname":
+        try:
+            facts["loaded"] = _norm(path) == _norm(loaded)
+        except (OSError, ValueError):                    # pragma: no cover
+            facts["loaded"] = False
+    if facts["kind"] == "missing":
+        parent = os.path.dirname(os.path.abspath(path))
+        try:
+            facts["parent"] = os.path.isdir(parent)
+        except OSError:                                 # pragma: no cover
+            facts["parent"] = False
+        # Windows spells "the drive letter has no mapping" as a plain
+        # ENOENT, the same as a file that is not there - so a missing path
+        # whose own ROOT is missing too is the unplugged case.
+        root = facts["root"]
+        if root:
+            try:
+                if not os.path.isdir(root):
+                    facts["kind"] = "unreachable"
+            except OSError:                             # pragma: no cover
+                facts["kind"] = "unreachable"
+    return facts
+
+
+#: What the tab says with the box empty.  Long, because it is the first
+#: thing a new tab has to teach now that the row has no second button.
+EMPTY_PATH_TEXT = ("No card yet. Add the images below - the path fills "
+                   "itself in from the first one - or type where the card "
+                   "should be written.")
+
+
+def card_path_state(field, facts, rows=(), loaded_card="", menu=(),
+                    rebuild=()):
+    """What the card path is pointing at, in one sentence:
+    ``(kind, sentence, tone, verb_on, verb_text)``.
+
+    PURE, and deliberately so: every word the row can say is decided here,
+    with no Tk and no disk, from the box's text, the facts a
+    :func:`probe_card_path` came back with, the image list and the loaded
+    card.  *tone* is a THEMES key (``gray`` / ``fg`` / ``error``).
+
+    The order matters.  The two checks that need no disk at all come first,
+    because they are refusals :func:`validate_form` already makes and a
+    probe answer must not talk over them; then the loaded card, which
+    outranks the probe absolutely (a load is a fact, a stat is a guess about
+    the same file); and only then what is at the path.
+
+    THIS IS A DESCRIBER, NOT A GATE.  ``validate_form``,
+    ``rebuild_blockers`` and the overwrite confirmation are still the ones
+    that decide anything, and they run at press time on the real
+    :func:`_norm`; this says early, in words, what they would say then."""
+    field = (field or "").strip().strip('"')
+    name = os.path.basename(field) or field
+
+    def strayed():
+        # IT NAMES NO CONTROL.  This used to end in 'More ▾ ▸ Back to the
+        # card being edited', and that menu is gone - a sentence that sends
+        # someone looking for a button which is not there is worse than one
+        # that says only what is true.  What IS true is that nothing was
+        # thrown away and the path is the way back, which is also the only
+        # instruction that keeps working however the row is arranged.
+        n = len(menu or ()) + len(rebuild or ())
+        card = os.path.basename(loaded_card) or loaded_card
+        if n:
+            why = ("The path no longer names %s, the card you are editing "
+                   "(%d unsaved change%s)" % (card, n, "" if n == 1 else "s"))
+        else:
+            why = ("The path no longer names %s, the card you were editing"
+                   % card)
+        return why + " — nothing was lost; type that path back to go on "\
+                     "editing it."
+
+    if not field:
+        if loaded_card:
+            return ("strayed", strayed(), "fg", False, LOAD_VERB)
+        return ("empty", EMPTY_PATH_TEXT, "gray", False, LOAD_VERB)
+    if under_library(field, resolve=False):
+        return ("library",
+                "That path is in the card library, which nothing here may "
+                "write into — copy it out first.", "error", False, LOAD_VERB)
+    here = _plain(field)
+    for i, row in enumerate(rows or ()):
+        if here and _plain(getattr(row, "path", "")) == here:
+            return ("is_image",
+                    "That file is image %d in the list below — the card "
+                    "must be written somewhere else." % i,
+                    "error", False, LOAD_VERB)
+    # TWO SPELLINGS OF ONE CARD ARE ONE CARD.  The text match answers at
+    # once and costs no disk, which is what a per-keystroke sentence needs;
+    # the probe's ``loaded`` is the same question asked with the links
+    # resolved, on the worker, and it arrives a typing pause later - so a
+    # junction spelling of the loaded card lands in editing mode too instead
+    # of leaving both writing buttons refusing (see :func:`probe_card_path`).
+    if loaded_card and (_plain(loaded_card) == here
+                        or (facts or {}).get("loaded")):
+        return ("loaded", edit_status_text(loaded_card, menu, rebuild),
+                "error" if rebuild else "fg", True, RELOAD_VERB)
+
+    kind = (facts or {}).get("kind") or "unknown"
+    if kind == "badname":
+        state = ("badname",
+                 "That is not a name a card can be written to — take the "
+                 "? * | < > \" out of it, or shorten the path.",
+                 "error", False, LOAD_VERB)
+    elif kind == "unreachable":
+        sentence = ("%s is not there right now — plug the drive in, or pick "
+                    "another folder." % ((facts or {}).get("root") or name))
+        state = ("unreachable", sentence, "error", False, LOAD_VERB)
+    elif kind == "looking":
+        state = ("looking", "Looking at %s…" % name, "gray", False, LOAD_VERB)
+    elif kind == "dir":
+        state = ("dir", "That path is a folder, not a card.", "error", False,
+                 LOAD_VERB)
+    elif kind == "file":
+        state = ("file",
+                 "%s is on disk — Load card reads it into the form; Build & "
+                 "verify would write over it." % name, "fg", True, LOAD_VERB)
+    elif kind == "missing":
+        if (facts or {}).get("parent"):
+            sentence = "Build & verify will write a new card at %s." % name
+        else:
+            folder = os.path.basename(
+                os.path.dirname(os.path.abspath(field))) or "the folder"
+            sentence = ("Build & verify will write a new card at %s, "
+                        "creating %s." % (name, folder))
+        state = ("missing", sentence, "gray", False, LOAD_VERB)
+    else:
+        # NOTHING HAS BEEN ASKED YET (the probe is off, or it has not come
+        # back).  Saying nothing is the honest answer, and the verb stays
+        # live: pressing it asks the tool, whose refusal is better than a
+        # guess this app would have to make to grey the button.
+        state = ("unknown", "", "gray", True, LOAD_VERB)
+    if loaded_card:
+        # The box has been typed away from the card in the form.  NOTHING IS
+        # THROWN AWAY by that (see MultibootPanel._update_edit_status) - only
+        # what the tab claims changes - so the sentence is about the way
+        # back, while the verb still describes the path now in the box.
+        return ("strayed", strayed(), "fg", state[3], state[4])
+    return state
+
+
+# ---------------------------------------------------------------------------
+# the tab's saved state
+# ---------------------------------------------------------------------------
+
+#: The version stamped into :meth:`MultibootPanel.state`'s document.  A
+#: newer app may add fields; every reader here IGNORES what it does not
+#: know rather than refusing the document, so an older app opening a
+#: project a newer one wrote comes back with the fields it understands
+#: instead of an empty tab.
+STATE_VERSION = 1
+
+#: A row's fields that hold a PATH when they are not one of the words -
+#: the ones a restore has to run resolve_mapped_drive over.  ``art_video``
+#: is always a path when it is anything.
+_STATE_ROW_PATHS = ("art", "anim", "music", "confirm")
+
+
+def rows_from_state(images, resolve=None):
+    """A saved image list back as :class:`ImageRow`\\ s.
+
+    *resolve* is applied to every value that is a PATH - the source .raw and
+    the media fields that are not one of the words - because a ``W:\\...``
+    saved in an ordinary session stops resolving under an elevated relaunch
+    (core.admin.resolve_mapped_drive, the same treatment every other
+    restored path in this app gets).  ``auto@<index>`` is left alone: it
+    reads as a path to :func:`is_file_choice` and is not one.
+
+    Unknown keys are dropped and a malformed entry is skipped rather than
+    raising - a half-written anchor on a NAS must cost the tab its state,
+    never the startup."""
+    resolve = resolve or (lambda p: p)
+    out = []
+    for entry in images or ():
+        if not isinstance(entry, dict):
+            continue
+        kw = {}
+        for f in dc_fields(ImageRow):
+            if f.name not in entry:
+                continue
+            val = entry[f.name]
+            kw[f.name] = bool(val) if isinstance(f.default, bool) \
+                else str("" if val is None else val)
+        kw.setdefault("path", "")
+        try:
+            row = ImageRow(**kw)
+        except TypeError:                               # pragma: no cover
+            continue
+        if row.path:
+            row.path = resolve(row.path)
+        if row.art_video.strip():
+            row.art_video = resolve(row.art_video)
+        for name in _STATE_ROW_PATHS:
+            val = getattr(row, name)
+            if is_file_choice(val) and not _AUTO_IDX_RE.match(val.strip()):
+                setattr(row, name, resolve(val))
+        out.append(row)
+    return out[:MAX_IMAGES]
+
+
+def menu_from_state(menu):
+    """A saved menu block, sanitised: the two sound specs as strings, the
+    three numbers as ints, the bypass as a bool.  Anything missing or
+    unreadable keeps the tab's own default rather than raising."""
+    menu = menu if isinstance(menu, dict) else {}
+
+    def _as_int(key, default):
+        try:
+            return int(menu[key])
+        except (KeyError, TypeError, ValueError):
+            return default
+    return {"move": str(menu.get("move") or "auto"),
+            "confirm": str(menu.get("confirm") or "auto"),
+            "volume": max(0, min(100, _as_int("volume", 50))),
+            "timeout": max(0, _as_int("timeout", 15)),
+            "default": max(0, _as_int("default", 0)),
+            "bypass": bool(menu.get("bypass", True))}
 
 
 # ---------------------------------------------------------------------------
@@ -2150,9 +2529,11 @@ class MultibootPanel:
                  "will sound like, at the volume in Menu settings. It "
                  "starts OFF on purpose - nothing here opens a sound device "
                  "until you tick it - and untick it to give the device "
-                 "back.\n\nThe preview prepares pictures and music only, so "
-                 "a set it rendered for itself has no move or confirm sound "
-                 "in it yet: More ▾ ▸ Prepare media renders those too.")
+                 "back.\n\nThe preview renders pictures and music only while "
+                 "this is off, so ticking it is also what asks for the move "
+                 "and confirm sounds: the media set is prepared again, in "
+                 "full, and the tick takes effect as soon as that run is "
+                 "done.")
 
     def __init__(self, parent, log=None, theme_fn=None, badge_fn=None,
                  resize_fn=None, flash_fn=None, emulate_fn=None,
@@ -2202,6 +2583,17 @@ class MultibootPanel:
         #: block is two lines, and both of these are the same question -
         #: what the button under them would do.
         self._plan_text = ""
+        #: THE SIZE CHECK RUNS ITSELF (see :meth:`_maybe_plan`).
+        #: ``_plan_for`` is the image list ``_plan_text`` is about, so the
+        #: sentence is blanked the moment the list stops being that one;
+        #: ``_plan_job`` is its debounce.  ``PAD_MULTIBOOT_PLAN=0`` is its
+        #: own off switch, and the panel flag under it is what the tests
+        #: and the screenshot rig set: this is the one thing on the tab
+        #: that starts a TOOL without being pressed.
+        self._plan_for = None
+        self._plan_job = None
+        self._auto_plan = os.environ.get("PAD_MULTIBOOT_PLAN", "1") != "0" \
+            and os.environ.get("PAD_MULTIBOOT_AUTO", "1") != "0"
         #: The two modals.  Their widgets are built on demand and bound to
         #: the panel's own variables, so the tab has one form whether a
         #: dialog is open or not (and the tests can drive either).
@@ -2272,11 +2664,14 @@ class MultibootPanel:
         self._pv_totals = {}
         self._pv_bin = ""               # the selector the last run named
         self._pv_bin_at = 0.0           # ...and when it named it
-        #: (MEDIA fingerprint, media DIR) that is prepared.  The directory
-        #: belongs in the key: it is derived from the output path, which
-        #: media_fingerprint deliberately excludes - so retyping the output
-        #: left the prepared media in the OLD directory and the new one
-        #: empty, and the next build wrote a text-only card.
+        #: (MEDIA fingerprint, media DIR, sounds too?) that is prepared.
+        #: The directory belongs in the key: it is derived from the output
+        #: path, which media_fingerprint deliberately excludes - so retyping
+        #: the output left the prepared media in the OLD directory and the
+        #: new one empty, and the next build wrote a text-only card.  The
+        #: third field is which HALF: the preview prepares --visual-only,
+        #: and a set with no move or confirm sound in it is not the set a
+        #: ticked Sound box is asking for.
         self._pv_ready = None
         #: Directories the preview made for itself, so a half-typed output
         #: path does not leave a preview/ and a media/ behind on disk.
@@ -2329,6 +2724,33 @@ class MultibootPanel:
             value=os.environ.get("PAD_MULTIBOOT_AUTO", "1") != "0")
         self._pv_debounce_job = None
         self._pv_pending = 0            # renders coalesced by the debounce
+        #: ...EXCEPT THE FIRST ONE AFTER A RESTORE.  A restore must start no
+        #: tool at all (see :meth:`restore_state`), and cancelling the
+        #: render it queued is not enough on its own: filling the table
+        #: selects a row, and <<TreeviewSelect>> arrives a turn LATER and
+        #: asks for another.  So the next automatic render is swallowed and
+        #: the flag drops; the first thing the person then does draws.
+        self._pv_idle = False
+        #: THE PATH PROBE.  One stat of the box's text, on a worker, so the
+        #: row can say what is at the path (see :func:`probe_card_path`).
+        #: It is on its own debounce rather than the preview's, and it is
+        #: NOT gated by ``_auto_preview``: the screenshot rig and most tests
+        #: run with the preview off, and a row that then said nothing at
+        #: all would be a dead row in every picture of this tab.
+        #: ``PAD_MULTIBOOT_PROBE=0`` is its own off switch.
+        #: ``_probe_for`` is the exact text ``_probe_facts`` describes, so
+        #: an answer for older text is dropped rather than shown against a
+        #: path it is not about (the discipline ``_pv_src`` already uses).
+        #: The idle re-measure a height change asks for (see _remeasure).
+        self._measure_job = None
+        self._probe_job = None
+        self._probe_busy = False
+        self._probe_gen = 0
+        self._probe_text = None         # the text a probe is out about
+        self._probe_slow_job = None     # ...and the 'say we are looking' timer
+        self._probe_slow = False
+        self._probe_for = None
+        self._probe_facts = {"kind": "unknown"}
         #: The size of the preview box the window currently has room for.
         self._pv_w, self._pv_h = PREVIEW_W, PREVIEW_H
         #: A corrected 'Selector build' path, or one the rig has just
@@ -2349,6 +2771,9 @@ class MultibootPanel:
                     self._timeout_var, self._default_var,
                     self._out_var, self._selector_var):
             var.trace_add("write", lambda *_a: self.schedule_preview())
+        # ...and the path box also moves the row's own verb and the sentence
+        # under it, which is what makes the mode visible at all.
+        self._out_var.trace_add("write", lambda *_a: self._out_changed())
 
     # ------------------------------------------------------------------
     # plumbing shared with the Emulate panel
@@ -2379,19 +2804,35 @@ class MultibootPanel:
                 fn()
             except tk.TclError:
                 pass
-        if self._busy or self._pv_busy or not self._queue.empty():
+        # ``_probe_busy`` belongs here with the other two: the probe hands
+        # its answer back through the same queue, and a drain that stopped
+        # rescheduling while one was out left the row silently never
+        # updating.
+        if (self._busy or self._pv_busy or self._probe_busy
+                or not self._queue.empty()):
             try:
                 self._drain_job = self._timer().after(self.DRAIN_MS,
                                                       self._drain)
             except tk.TclError:
                 pass
 
+    def _kick_drain(self):
+        """Start the drain if it is not already running - for the callers
+        that put work on a thread outside :meth:`_run_commands`."""
+        if self._stopped or self._drain_job is not None:
+            return
+        try:
+            self._drain_job = self._timer().after(self.DRAIN_MS, self._drain)
+        except tk.TclError:                             # pragma: no cover
+            pass
+
     def _on_destroy(self, event=None):
         if event is not None and str(event.widget) != str(self._parent):
             return
         self._stopped = True
         for attr in ("_drain_job", "_play_job", "_pv_debounce_job",
-                     "_sound_job"):
+                     "_probe_job", "_probe_slow_job", "_measure_job",
+                     "_sound_job", "_plan_job"):
             job = getattr(self, attr, None)
             if job is not None:
                 try:
@@ -2411,7 +2852,7 @@ class MultibootPanel:
         """THE SHAPE OF THE TAB - ONE COLUMN, top to bottom, in the order a
         person works:
 
-        1. where the card comes from - Load card… / New card… and the path,
+        1. which card this is - the path, and the one verb that reads it,
         2. the PREVIEW, the full width of the tab and the centre of it,
         3. the IMAGES TABLE right underneath, as wide as the tab: one row
            per image carrying that image's own settings in columns, four
@@ -2439,52 +2880,109 @@ class MultibootPanel:
         self._build_status(outer, th)
         frame.bind("<Destroy>", self._on_destroy, add="+")
         outer.bind("<Configure>", self._on_configure, add="+")
+        # ...and the two moments a person comes BACK to this row expecting it
+        # to have noticed something (see _refresh_facts): the tab being
+        # selected again maps this frame, and clicking into the box is the
+        # other half of "I have plugged the drive in now".
+        outer.bind("<Map>", self._refresh_facts, add="+")
+        self._out_entry.bind("<FocusIn>", self._refresh_facts, add="+")
         self._set_busy(False)
         self._sync_editor_states()
         self._update_menu_summary()
         self._refresh_tree()
         self._pv_placeholder()
-        self._ok("Load a card you already built, or press + in the table to "
-                 "add the first image.")
+        self._ok("Browse… to a card you already built and it is read into "
+                 "this form, or press + in the table to add the first "
+                 "image.")
 
     # -- 1. where the card comes from ----------------------------------
 
+    #: What the path box itself says it is - and it has to carry what the
+    #: two dead buttons' tooltips carried, because it is now the only thing
+    #: in the row that names both of the tab's modes.
+    PATH_TIP = ("The card this tab is pointing at. A path with a card "
+                "already at it is one you can read: Load card fills every "
+                "field from it - images, titles, subtitles, art, animation, "
+                "music, sounds, volume, countdown, default and bypass - and "
+                "Apply to card then writes your changes back into it in "
+                "seconds. A path with nothing at it yet is where Build & "
+                "verify will write a new card. Browse… does both: it takes "
+                "a card that exists and a name that does not. Picking an "
+                "existing card in Browse… reads it; a typed path never "
+                "does, because a half-typed one names the wrong card.")
+
+    VERB_TIP = ("Reads the card at the path above with the tool's own "
+                "inspect: its table into the Log, its menu and images into "
+                "the form, and the card's own media extracted into "
+                "media-<stem> beside it. The card itself is never written.")
+
+    #: No ellipsis: it opens no dialog and asks for no path.  The confirm
+    #: it puts up when there is something to lose is a guard, not a
+    #: question about what to do.
+    NEW_TIP = ("Empties this tab: no images, the menu back at its defaults, "
+               "the path cleared, and the card that was loaded no longer "
+               "the one being edited. Nothing on disk is touched. It is a "
+               "command of its own because clearing the path by hand must "
+               "NOT throw the image list away - a path gets cleared to be "
+               "retyped.")
+
     def _build_source(self, parent, th):
-        """The first row, because loading a card you already built is the
-        first thing anyone does here."""
+        """The first row, because reading a card you already built is the
+        first thing anyone does here.
+
+        ONE PATH AND ONE VERB.  The row used to carry two file pickers and
+        a box - 'Load card…' asking for a card to read, 'New card…'
+        clearing the form, and 'Card image' naming the output that a load
+        then quietly turned into the card being edited - which is two ways
+        to do one thing beside a field whose meaning changed with a hidden
+        mode.  Now the box is the card's identity and the verb acts on
+        whatever it holds.
+
+        AND 'NEW CARD' IS BACK IN IT, from the menu that has gone (see
+        :meth:`_build_actions`).  It belongs HERE and nowhere else: it is
+        the one command that empties this box, and emptying the box by hand
+        must NOT clear the image list (people clear a path to retype it),
+        so the field needs the button that means what clearing it looks
+        like.  It is not a second file picker - it opens no dialog and asks
+        for no path - so the row it makes is one field and three verbs
+        about that field: read it, pick it, start over.  Last in the group,
+        beside the ?, because it is the rarest and the only one that throws
+        anything away.
+
+        The ENTRY IS PACKED LAST so it is the only thing in the row that
+        can give way: this app unmaps the last widget of a row it cannot
+        fit, without a word, and the one that may shrink has to be the one
+        whose content is readable elsewhere."""
         row = ttk.Frame(parent)
         row.pack(fill=tk.X)
         self._src_row = row
-        self._load_btn = ttk.Button(row, text="Load card…", width=12,
-                                    command=self._load_card_dialog)
-        self._load_btn.pack(side=tk.LEFT)
-        self._load_tip = _Tooltip(
-            self._load_btn,
-            "Reads a multi-image card you already built and fills every "
-            "field from it - images, titles, subtitles, art, animation, "
-            "music, sounds, volume, countdown, default and bypass. The "
-            "preview then draws THAT card's menu, and Apply to card writes "
-            "your changes back into it in seconds.", self._theme_fn)
-        self._new_btn = ttk.Button(row, text="New card…", width=11,
-                                   command=self._new_card_clicked)
-        self._new_btn.pack(side=tk.LEFT, padx=(6, 0))
-        self._new_tip = _Tooltip(
-            self._new_btn,
-            "Starts a fresh card: clears the images and the menu, and "
-            "leaves editing mode so Build & verify writes a new image.",
-            self._theme_fn)
-        ttk.Label(row, text="Card image:").pack(side=tk.LEFT, padx=(16, 6))
+        ttk.Label(row, text="Card image:").pack(side=tk.LEFT, padx=(0, 6))
         # The tab's own "what is this" lives here rather than in a
         # paragraph across the top: the picture below is the subject, and
         # the ? button carries the rest.
         self._about_badge = self._info_badge(row, self.ABOUT_TIP)
         self._about_badge.pack(side=tk.RIGHT, padx=(8, 0))
+        self._new_btn = ttk.Button(row, text="New card", width=10,
+                                   command=self._new_card_clicked)
+        self._new_btn.pack(side=tk.RIGHT)
+        self._new_tip = _Tooltip(self._new_btn, self.NEW_TIP, self._theme_fn)
         self._browse_btn = ttk.Button(row, text="Browse…", width=10,
-                                      command=self._browse_out)
-        self._browse_btn.pack(side=tk.RIGHT)
+                                      command=self._browse_card)
+        self._browse_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        # NO ELLIPSIS ON THE VERB: it asks nothing, it acts on the path
+        # already in the box.  The width holds the longer of its two labels
+        # so the row does not twitch when a load turns it into 'Reload
+        # card', and it is never the green one - _primary_button owns that.
+        self._load_btn = ttk.Button(row, text=LOAD_VERB, width=13,
+                                    command=self._load_or_reload)
+        self._load_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        self._load_tip = _Tooltip(self._load_btn, self.VERB_TIP,
+                                  self._theme_fn)
         self._out_entry = ttk.Entry(row, textvariable=self._out_var)
         self._out_entry.pack(side=tk.LEFT, fill=tk.X, expand=True,
                              padx=(0, 6))
+        self._out_tip = _Tooltip(self._out_entry, self.PATH_TIP,
+                                 self._theme_fn)
 
     #: What the strip says before the sentence the tool wrote.  A card
     #: whose images disagree still boots and still plays - what it costs is
@@ -2557,12 +3055,29 @@ class MultibootPanel:
 
     def _remeasure(self):
         """The tab is a different height, so the picture has a different
-        amount of room; re-measure once the new requested sizes settle."""
+        amount of room; re-measure once the new requested sizes settle.
+
+        The idle job is TRACKED, like every other ``after`` this panel
+        holds: an untracked one fires after the toplevel is gone and Tcl
+        writes ``invalid command name …_on_configure`` to stderr from
+        inside a teardown nothing can catch."""
+        self._cancel_remeasure()
+        if self._stopped:
+            return
         try:
             self._resize_fn()
-            self._timer().after_idle(self._on_configure)
+            self._measure_job = self._timer().after_idle(self._on_configure)
         except tk.TclError:                             # pragma: no cover
-            pass
+            self._measure_job = None
+
+    def _cancel_remeasure(self):
+        job = getattr(self, "_measure_job", None)
+        self._measure_job = None
+        if job is not None:
+            try:
+                self._timer().after_cancel(job)
+            except (tk.TclError, ValueError):           # pragma: no cover
+                pass
 
     # -- 2. the preview, full width -------------------------------------
 
@@ -2754,9 +3269,9 @@ class MultibootPanel:
     #: CHECKED IN THE SCREENSHOT, which is the only place the font fallback
     #: shows itself: all four draw as ordinary monochrome text on Windows
     #: (the colour fringing a 4x crop shows on them is ClearType's, and it
-    #: is on the minus sign and the digits too).  The FULL-SIZE triangles,
-    #: not the small ▴ ▾ the 'More ▾' button uses: in a 26 px column the
-    #: small ones are a weak thing to aim at.
+    #: is on the minus sign and the digits too).  The FULL-SIZE triangles
+    #: rather than the small ▴ ▾: in a 26 px column the small ones are a
+    #: weak thing to aim at.
     ROW_ICONS = (("edit", "✎", "✎", "_icon_edit"),
                  ("del", "−", "−", "_icon_remove"),
                  ("up", "▲", "△", "_icon_up"),
@@ -2976,9 +3491,36 @@ class MultibootPanel:
     def _build_actions(self, parent, th):
         """THE ONE ACTION BAR - with the source row at the top, the only
         place in the tab a button lives.  Menu settings… on the left with
-        what it holds beside it, the two that write a card and the two
-        handoffs on the right (the contextual one green), and the rare
-        things behind one menu button.
+        what it holds beside it, and on the right the two that write a card
+        and the two handoffs, the contextual one green.  FOUR ACTIONS AND
+        NOTHING ELSE.
+
+        THE 'MORE ▾' MENU IS GONE, and every one of the six things in it
+        with it (David, in dark mode: "the 'more' button looks awful ... it
+        has two arrows and turns white and illegible. and i don't even
+        understand most of these options").  The rendering was the ONLY
+        ttk.Menubutton in the app - the dark theme styles no TMenubutton,
+        so it fell through to ttk's default colours, and it drew its own
+        indicator on top of the one in its label - but styling it would
+        have kept six controls that had to justify themselves and could
+        not:
+
+        * Check size and Prepare media were work the tab can decide to do
+          by itself, and asking for them is asking someone to know when
+          they are stale (see :meth:`_maybe_plan` and :meth:`_sound_
+          toggled`).
+        * Start a new card is a real command and now sits beside the field
+          it clears (see :meth:`_build_source`).
+        * 'Back to the card being edited' was grey except in a state you
+          reach by typing over the path, and typing the path back does the
+          same thing - so the sentence in the status block says that
+          instead.
+        * 'Bypass an existing card…' duplicated what Apply to card already
+          does with the Bypass box ticked, and does worse: Apply re-reads
+          the card afterwards.  The ``mkmulticard bypass`` subcommand is
+          untouched - it is what Apply calls.
+        * 'Update the preview automatically' is a setting about the
+          picture, and it is on the picture's own right-click menu.
 
         One row, and every widget in it has an expanding neighbour: a row
         this app overflows loses its last widget without a word."""
@@ -2988,20 +3530,6 @@ class MultibootPanel:
         self._menu_btn = ttk.Button(row, text="Menu settings…", width=16,
                                     command=self.open_menu_settings)
         self._menu_btn.pack(side=tk.LEFT)
-        self._more_btn = ttk.Menubutton(row, text="More  ▾", width=9)
-        menu = tk.Menu(self._more_btn, tearoff=0)
-        menu.add_command(label="Check size", command=self._check_size)
-        menu.add_command(label="Prepare media", command=self._prepare_media)
-        menu.add_separator()
-        menu.add_command(label="Bypass an existing card…",
-                         command=self._bypass_existing)
-        menu.add_separator()
-        menu.add_checkbutton(label="Update the preview automatically",
-                             variable=self._auto_preview,
-                             command=self.schedule_preview)
-        self._more_btn.configure(menu=menu)
-        self._more_menu = menu
-        self._more_btn.pack(side=tk.RIGHT)
         self._emu_btn = ttk.Button(row, text="Run in emulator", width=16,
                                    command=self._run_emulator)
         self._emu_btn.pack(side=tk.RIGHT, padx=(0, 6))
@@ -3026,8 +3554,7 @@ class MultibootPanel:
         self._menu_tip = _Tooltip(self._menu_lbl, "", self._theme_fn)
         self._action_btns = [
             self._apply_btn, self._build_btn, self._flash_btn, self._emu_btn,
-            self._more_btn, self._load_btn, self._new_btn, self._menu_btn,
-            self._browse_btn]
+            self._load_btn, self._menu_btn, self._browse_btn, self._new_btn]
 
     def _build_status(self, parent, th):
         """The status under the bar: what just happened, and what the two
@@ -3268,11 +3795,7 @@ class MultibootPanel:
                 # The table is a different height, so the picture has a
                 # different amount of room; re-measure once the new
                 # requested sizes have settled.
-                self._resize_fn()
-                try:
-                    self._timer().after_idle(self._on_configure)
-                except tk.TclError:                     # pragma: no cover
-                    pass
+                self._remeasure()
             if select is not None and 0 <= select < len(self._rows):
                 self._tree.selection_set(str(select))
                 self._tree.focus(str(select))
@@ -3486,9 +4009,15 @@ class MultibootPanel:
         self.new_card()
 
     def new_card(self):
-        """'New card…': back to an empty tab - no images, the menu at its
-        defaults, editing mode left behind.  Nothing on disk is touched; the
-        card that was loaded is simply no longer the one being edited."""
+        """'New card', beside the path box it clears: back to an empty tab -
+        no images, the menu at its defaults, editing mode left behind.
+        Nothing on disk is touched; the card that was loaded is simply no
+        longer the one being edited.
+
+        It is a NAMED COMMAND and not something the path box does, because
+        emptying the path must not throw the image list away: people clear a
+        path to retype it, and there has to be exactly one way to start
+        over."""
         self._rows = []
         self._loaded_card = ""
         self._loaded_form = None
@@ -3517,6 +4046,7 @@ class MultibootPanel:
         self._pv_src = None
         self._pv_ready = None
         self._pv_photo = None
+        self._pv_idle = False           # a press: the hold is a restore's
         self._drop_photos()
         self._stop_play(None)
         self._set_var(self._hl_var, 0)
@@ -3529,16 +4059,250 @@ class MultibootPanel:
         self._refresh_tree()
         self._ok("A new card: add the primary (stock) image and one more.")
 
-    def _browse_out(self):
+    # ------------------------------------------------------------------
+    # the card path: what is at it, and the one verb that acts on it
+    # ------------------------------------------------------------------
+
+    def _on_loaded_path(self):
+        """Whether the path box still names the card the form was read from.
+
+        THE ONE RULE of this row: editing mode is exactly "the file at that
+        path has been read into this form", so everything that decides
+        whether Apply may write asks this and not ``_loaded_card`` alone.
+        Without it, ``Card image: Y`` on screen with Apply injecting into X
+        was three keystrokes away."""
+        if not self._loaded_card:
+            return False
+        field = self._out_var.get().strip().strip('"')
+        return bool(field) and _norm(field) == _norm(self._loaded_card)
+
+    def _out_changed(self):
+        """The path box was typed in (or set): re-say what it points at, and
+        ask a worker what is really there."""
+        # A MEDIA DIR BELONGS TO A CARD, NOT TO THE TAB.  While a card is
+        # LOADED the override is that card's own extract and straying the
+        # path must not touch it (nothing is thrown away by straying).  With
+        # no card loaded the only override there can be is one a restore
+        # brought back, and it belongs to the card path that was saved with
+        # it - so the moment the box names something else it is wrong, and
+        # media_dir() would send a prepare into the old card's extract
+        # directory with nothing on screen explaining why.
+        if self._media_override and not self._loaded_card:
+            field = self._out_var.get().strip().strip('"')
+            if _plain(self._media_override) != _plain(loaded_media_dir(field)):
+                self._media_override = ""
+        self._schedule_probe()
+        self._update_edit_status()
+
+    def _facts_now(self, field):
+        """What is known about *field* right now - the probe's answer for
+        exactly this text, 'looking' once a probe has been out a whole
+        second, and 'unknown' otherwise.
+
+        Never the answer for OTHER text: a stale fact shown against a path
+        it is not about is worse than no fact at all."""
+        if self._probe_for is not None and self._probe_for == field:
+            return self._probe_facts
+        if self._probe_slow and self._probe_text == field:
+            return {"kind": "looking"}
+        return {"kind": "unknown"}
+
+    def _schedule_probe(self, refresh=False):
+        """Debounce the stat the same way the preview debounces its render:
+        one probe per typing pause, not one per keystroke.
+
+        *refresh* asks the same question about the SAME text again - see
+        :meth:`_start_probe`, which otherwise trusts the answer it has."""
+        if self._stopped or os.environ.get("PAD_MULTIBOOT_PROBE", "1") == "0":
+            return
+        job = self._probe_job
+        if job is not None:
+            try:
+                self._timer().after_cancel(job)
+            except (tk.TclError, ValueError):           # pragma: no cover
+                pass
+        try:
+            self._probe_job = self._timer().after(
+                PREVIEW_DEBOUNCE_MS, lambda: self._start_probe(refresh))
+        except tk.TclError:                             # pragma: no cover
+            self._probe_job = None
+
+    def _refresh_facts(self, _event=None):
+        """ASK AGAIN.  The stat is a fact with a shelf life and the row used
+        to keep its first answer for ever: a card the build had just written
+        went on reading 'Build & verify will write a new card' with the verb
+        greyed, and a drive that was asleep when the path was typed stayed
+        'not there right now' however long ago it was plugged back in - the
+        only way out of either was to alter the text.  So it is re-asked at
+        the three moments the answer can have changed under us: a run has
+        finished, the tab has come back on screen, and the box has been
+        clicked into.  Nothing is re-asked about an empty box."""
+        if self._out_var.get().strip():
+            self._schedule_probe(refresh=True)
+
+    def _start_probe(self, refresh=False):
+        """Ask a worker what is at the path.  ALL OF IT IS ON THE WORKER,
+        including the stat: an arbitrary typed path can be a share that
+        blocks ``os.stat`` for tens of seconds, and the app has already paid
+        for freezing the Tk thread on exactly that.
+
+        The answer is kept per text and not asked for twice - one keystroke
+        must not cost one stat - so *refresh* is how the callers that KNOW
+        the disk may have moved get a fresh one (:meth:`_refresh_facts`)."""
+        self._probe_job = None
+        if self._stopped:
+            return
+        text = self._out_var.get().strip().strip('"')
+        if not refresh and self._probe_for == text and not self._probe_busy:
+            return                      # already answered, for this text
+        self._probe_gen += 1
+        gen = self._probe_gen
+        self._probe_text = text
+        self._probe_busy = True
+        self._probe_slow = False
+        self._arm_slow_probe()
+        # Resolved on the worker with the rest of it - see probe_card_path.
+        loaded = self._loaded_card
+
+        def work():
+            facts = probe_card_path(text, loaded)
+            self._ui(lambda: self._probe_done(text, facts, gen))
+        threading.Thread(target=work, daemon=True).start()
+        self._kick_drain()
+
+    def _arm_slow_probe(self):
+        """A probe that answers at once must not make the row flicker
+        through 'Looking at…', so that word waits a whole second."""
+        self._cancel_slow_probe()
+
+        def slow():
+            self._probe_slow_job = None
+            if self._probe_busy:
+                self._probe_slow = True
+                self._update_edit_status()
+        try:
+            self._probe_slow_job = self._timer().after(1000, slow)
+        except tk.TclError:                             # pragma: no cover
+            self._probe_slow_job = None
+
+    def _cancel_slow_probe(self):
+        job = self._probe_slow_job
+        self._probe_slow_job = None
+        if job is not None:
+            try:
+                self._timer().after_cancel(job)
+            except (tk.TclError, ValueError):           # pragma: no cover
+                pass
+
+    def _probe_done(self, path, facts, gen=None):
+        """A probe answered.  THE PUBLIC SEAM: the tests hand it a facts
+        dict and drive the whole row without a disk.
+
+        *gen* is the probe's own sequence number; an answer for a run a
+        later one has overtaken is dropped rather than shown."""
+        if gen is not None:
+            if gen != self._probe_gen:
+                return
+            self._probe_busy = False
+            self._probe_slow = False
+            self._cancel_slow_probe()
+        self._probe_for = path
+        self._probe_facts = dict(facts or {})
+        self._update_edit_status()
+
+    def _unsaved_changes(self):
+        """How many changes the form has that the loaded card has not - the
+        menu bucket and the rebuild bucket together.  Already computed on
+        every keystroke by :meth:`_update_edit_status`; nothing new is
+        kept."""
+        if not self._loaded_card or self._loaded_form is None:
+            return 0
+        menu, rebuild = diff_forms(self._loaded_form, self.form())
+        return len(menu) + len(rebuild)
+
+    def _confirm_discard(self, target):
+        """True to go ahead and read *target*: either nothing would be lost,
+        or the person said so.
+
+        Asked BEFORE the read starts, because a read that fails cannot lose
+        anything - ``load_inspect`` is what replaces the form.  The two-
+        button row used to make it obvious you were leaving; one field is
+        less obvious, so it has to ask."""
+        name = os.path.basename(target) or target
+        n = self._unsaved_changes()
+        if n:
+            return messagebox.askyesno(
+                "Discard your changes?",
+                "You have %d unsaved change%s to %s. Reading %s replaces "
+                "every field." % (n, "" if n == 1 else "s",
+                                  os.path.basename(self._loaded_card), name))
+        if not self._loaded_card and self._rows:
+            return messagebox.askyesno(
+                "Read this card?",
+                "Clear the %d image%s you have set up and read %s instead?"
+                % (len(self._rows), "" if len(self._rows) == 1 else "s",
+                   name))
+        return True
+
+    def _load_or_reload(self):
+        """The row's one verb: read the card the path box names.
+
+        A LOAD IS A CLICK AND NEVER A KEYSTROKE - there is no <Return> and
+        no <FocusOut> binding, and there must not be.  A read costs a WSL
+        round trip, writes ``media-<stem>/`` beside the card and replaces
+        every field, and on the way to typing ``x.raw.bak`` you pass through
+        ``x.raw``, which exists.  The row's sentence describes; this
+        acts."""
+        if self._busy:
+            self._error("Wait for the current run to finish first.")
+            return False
+        path = self._out_var.get().strip().strip('"')
+        if not path:
+            self._error("Type the card to read into 'Card image', or press "
+                        "Browse… to pick one.")
+            return False
+        if not self._confirm_discard(path):
+            return False
+        return self.load_card(path)
+
+    def _browse_card(self):
+        """ONE picker for both meanings of this box: the card to read, and
+        where a new one would be written.
+
+        ``confirmoverwrite=False`` is load-bearing.  An *open* dialog cannot
+        return a name that does not exist, so it could never pick a build
+        target; a save dialog with the confirm left on would ask "overwrite?"
+        while you are picking a card to READ, which is a lie.  The real
+        overwrite gate is still :meth:`_confirm_overwrite`, on the press of
+        Build.  The OS button says "Save" either way - the title carries the
+        meaning, and the button cannot be renamed portably."""
         cur = self._out_var.get().strip()
         path = filedialog.asksaveasfilename(
-            title="Where to write the multi-image card",
-            defaultextension=".raw",
+            title="The card to read, or where to build a new one",
+            defaultextension=".raw", confirmoverwrite=False,
             initialdir=os.path.dirname(cur) if cur else None,
             initialfile=os.path.basename(cur) if cur else None,
-            filetypes=[("Card images", "*.raw"), ("All files", "*.*")])
-        if path:
+            filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
+        if not path:
+            return False
+        # A card that EXISTS is one you meant to read, so read it - unless
+        # that would cost something, and then ask first.  This is the move
+        # David makes most, and it stays one click.
+        #
+        # THE QUESTION COMES BEFORE THE BOX IS TOUCHED.  Setting the path
+        # first and asking afterwards made 'No, keep my edits' do half the
+        # job anyway: the read was skipped, but the box now named the other
+        # card, so the tab left editing mode, Apply went grey and the green
+        # button flipped to Build & verify - the answer was 'keep my
+        # changes' and the tab disabled the only button that could write
+        # them.  A refusal now leaves the row exactly as it was.
+        if os.path.isfile(path):
+            if not self._confirm_discard(path):
+                return False
             self._out_var.set(path)
+            return self.load_card(path)
+        self._out_var.set(path)
+        return False
 
     # ------------------------------------------------------------------
     # the two modals
@@ -3715,6 +4479,207 @@ class MultibootPanel:
             return None
         return form
 
+    # ------------------------------------------------------------------
+    # coming back as it was left
+    # ------------------------------------------------------------------
+
+    def state(self):
+        """The tab's FORM as a plain document, for the project anchor (and
+        the global settings when no project is open).
+
+        What is here is what someone would otherwise have to type again: the
+        card path, the image list with every field of every row, the menu,
+        the selector directory, whether the preview follows the form, and
+        the media directory a load extracted.  It is the same
+        :class:`ImageRow` the builders read, dumped - not a parallel copy
+        that could come to disagree with them - and it carries a version so
+        a newer app can add fields without an older one choking on them.
+
+        WHAT IS DELIBERATELY NOT HERE:
+
+        * Everything transient or derived - the rendered frames, the busy
+          flag, the media fingerprint caches, whether a run was in flight.
+        * ``_loaded_card`` / ``_loaded_form`` / ``_loaded_info``, the
+          editing-mode baseline.  The card may have changed while the app
+          was shut; Apply's whole legality is decided by that baseline, and
+          injecting a diff computed against a stale one is the one mistake
+          this tab must not make.  A restart therefore comes back with the
+          form and out of editing mode, and one click on the row's verb -
+          one real read of the card - earns editing mode back honestly.
+        * The preview's Sound box.  It defaults OFF on purpose and comes
+          back OFF: this app is used in the room with a machine that is
+          running, and "he left it on once" is not a reason to make noise on
+          the next launch.  That is a decision, not an oversight.
+        """
+        return {
+            "v": STATE_VERSION,
+            "card": self._out_var.get().strip(),
+            "images": [asdict(r) for r in self._rows],
+            "menu": {"move": self._move_var.get().strip(),
+                     "confirm": self._confirm_var.get().strip(),
+                     "volume": _int(self._volume_var, 50),
+                     "timeout": _int(self._timeout_var, 15),
+                     "default": _int(self._default_var, 0),
+                     "bypass": bool(self._bypass_var.get())},
+            "selector_dir": self._selector_var.get().strip(),
+            "auto_preview": bool(self._auto_preview.get()),
+            "media_dir": self._media_override,
+        }
+
+    def restore_state(self, doc):
+        """Put the form back from a :meth:`state` document.  True when
+        anything was restored.
+
+        BEST-EFFORT THROUGHOUT.  An unreadable or half-written anchor on a
+        NAS leaves the tab empty; it never fails a startup.  And NO TOOL
+        RUNS: the path is set exactly as if it had been typed, so the row's
+        stat runs and says what is at it, and nothing reads the card - the
+        rig is a mutex between David's sessions and a startup inspect can
+        collide with a live one.
+
+        A restored .raw that has moved, or a drive that is not mounted, is
+        not repaired here either: the row and the table say what they see
+        (``[not on this machine]`` in the Image column, and the tab's own
+        refusals at press time), which is the language this tab already
+        has for it."""
+        # AN EMPTY DOCUMENT IS AN ANSWER, NOT A NO-OP.  "Leaves the tab
+        # empty" above has to MEAN empty: a project's value wins absolutely
+        # including when it is empty (App.restore_multiboot_state), and an
+        # anchor that cannot be READ is handed here as ``{}`` for exactly
+        # that reason.  Returning early instead left the LAST project's card
+        # path and image list standing - the row went on naming a card
+        # belonging to a project that had been closed, Build & verify was
+        # aimed at it, and the next quit wrote it into THIS project's anchor.
+        # So an empty or unreadable document falls through the whole body
+        # below, which clears the form by restoring nothing into it.  False
+        # still means "nothing was restored"; it no longer also means "the
+        # last project is still on screen".
+        try:
+            restored = isinstance(doc, dict) and int(doc.get("v") or 0) >= 1
+        except (TypeError, ValueError):     # a version that isn't a number
+            restored = False
+        if not restored:
+            doc = {}
+        try:
+            from ..core.admin import resolve_mapped_drive as _rmd
+        except ImportError:                             # pragma: no cover
+            def _rmd(p):
+                return p
+        card = _rmd(str(doc.get("card") or "")) if doc.get("card") else ""
+        rows = rows_from_state(doc.get("images"), resolve=_rmd)
+        menu = menu_from_state(doc.get("menu"))
+        # THE MEDIA DIR IS PER CARD (loaded_media_dir), so one saved for a
+        # different card would send a build's prepare into the wrong extract
+        # directory.  When it does not belong to this card, drop it and let
+        # media_dir_for() answer from the path.
+        media = str(doc.get("media_dir") or "")
+        if media:
+            base = os.path.basename(os.path.normpath(media)).lower()
+            if base.startswith("media-") and (
+                    not card or _plain(media) != _plain(
+                        loaded_media_dir(card))):
+                media = ""
+        self._rows = rows
+        self._media_override = media
+        # OUT OF EDITING MODE, SAID OUT LOUD.  :meth:`state` does not carry
+        # the baseline, but "not restored" and "left standing" are not the
+        # same thing on a live window: this also runs when the project is
+        # SWITCHED, and a baseline the last project put there would go on
+        # naming its card - with the media dir above just replaced under it.
+        # The tab would say "the card you are editing" about a card this
+        # project has never heard of, and typing that card's path - which a
+        # project whose own card happens to be spelled the same does by
+        # itself - would be editing mode again with media_dir() now
+        # answering <out dir>/media instead of that card's own extract.
+        self._loaded_card = ""
+        self._loaded_form = None
+        self._loaded_info = None
+        self._armed = False
+        # The alarm strip is the other half of what a load put on screen,
+        # and it is about the card that is no longer loaded.
+        self._show_alarm(None)
+        # ...AND SO IS THE PICTURE.  Everything below is what load_inspect
+        # and new_card already do, for the reason they do it: a restore is
+        # the THIRD way into this state and has to leave the tab somewhere
+        # those two could also have left it.  The frames on the canvas were
+        # drawn for another form (another project's, on a switch); they are
+        # keyed by fingerprint so none of them would be SHOWN again, but
+        # nothing was clearing the canvas either, so the last project's menu
+        # sat there under a caption about this one.
+        self._pv_cache.clear()
+        self._pv_totals.clear()
+        self._pv_shown = None
+        self._pv_src = None
+        self._pv_ready = None
+        self._pv_photo = None
+        self._plan_info = None
+        self._plan_text = ""
+        self._drop_photos()
+        self._stop_play(None)
+        self._pv_placeholder()
+        self._hl_touched = False
+        # Inside the guard so twenty traces do not queue twenty previews and
+        # twenty probes on the way in; one of each is asked for at the end.
+        self._loading = True
+        try:
+            self._out_var.set(card)
+            self._out_auto_value = ""   # a restored path is the USER'S path
+            self._move_var.set(menu["move"])
+            self._confirm_var.set(menu["confirm"])
+            self._volume_var.set(str(menu["volume"]))
+            self._timeout_var.set(str(menu["timeout"]))
+            self._default_var.set(str(menu["default"]))
+            self._bypass_var.set(menu["bypass"])
+            sel = str(doc.get("selector_dir") or "").strip()
+            self._selector_var.set(sel or DEFAULT_SELECTOR_DIR)
+            # Restored in both directions, but never over the environment's
+            # own off switch: the screenshot rig and the tests set it.
+            self._auto_preview.set(
+                bool(doc.get("auto_preview", True))
+                and os.environ.get("PAD_MULTIBOOT_AUTO", "1") != "0")
+        finally:
+            self._loading = False
+        self._set_var(self._hl_var, menu["default"])
+        self._set_var(self._frame_var, 0)
+        self._refresh_tree(select=min(menu["default"],
+                                      max(0, len(self._rows) - 1))
+                           if self._rows else None)
+        self._update_menu_summary()
+        self._update_edit_status()
+        self._schedule_probe()
+        # ...AND NOT THE SIZE CHECK.  _update_edit_status has just seen a
+        # brand-new image list and armed one (_maybe_plan); it is a tool
+        # run like any other and it is taken back here for the same reason.
+        # The sentence stays blank until the person moves the list, which
+        # is honest: nobody has measured this card in this session.
+        self._cancel_plan()
+        # NO RENDER EITHER.  'NO TOOL RUNS' above is the whole point of this
+        # method and the render broke it: with the auto-preview remembered
+        # ON (its default), a restore was a `make` of the selector and a
+        # selectmedia prepare ~350 ms into the launch - the rig is a mutex
+        # between David's sessions, and a startup that reaches for it can
+        # collide with a live one.  It is CANCELLED rather than not asked
+        # for: every field's trace asks for one, and so does _refresh_tree
+        # above.  The picture waits for the first thing the person does, and
+        # says so rather than sitting there looking like a preview that
+        # agrees with the form.
+        self._cancel_preview()
+        self._pv_idle = True
+        # A different media dir, so whatever was looping belonged to the
+        # form that has just gone - the same line load_inspect ends on.
+        self._sound_follow()
+        if self._rows:
+            # The headline does not name a button.  It used to end
+            # 'check the card path, then Build & verify', which is advice to
+            # overwrite whatever is at the restored path - and the restored
+            # path is usually the card that was being EDITED last night,
+            # because the box is that card's identity.  The row's own
+            # sentence, one line below, says what is actually at it.
+            self._ok("%d image%s and the menu came back from last time - "
+                     "nothing has been read from a card yet."
+                     % (len(self._rows), "" if len(self._rows) == 1 else "s"))
+        return restored
+
     def _error(self, msg):
         th = THEMES.get(self._theme_fn()) or THEMES["dark"]
         try:
@@ -3751,15 +4716,116 @@ class MultibootPanel:
     # actions
     # ------------------------------------------------------------------
 
-    def _check_size(self):
-        form = self._validated_form()
-        if form is None:
+    #: How long the image list has to have been still before the size check
+    #: runs itself.  Longer than the preview's debounce on purpose: the
+    #: picture is what someone is watching while they work, and this is a
+    #: second of tool time that must not get in front of it.
+    PLAN_DEBOUNCE_MS = 900
+
+    def _plan_key(self):
+        """WHAT THE SIZE ANSWER DEPENDS ON, and nothing else: the image
+        list, in order.
+
+        :func:`plan_args` takes the images and the layout and no other
+        field of the form, so a title, the countdown, the volume or the
+        output path cannot change the answer - which is exactly what makes
+        it safe to ask this question on every keystroke."""
+        return tuple((r.path or "").strip().strip('"') for r in self._rows)
+
+    def _maybe_plan(self):
+        """Keep the size sentence TRUE, without anyone having to ask.
+
+        'Check size' used to be a menu entry, and a menu entry means the
+        sentence beside it is whatever the last press found: it went on
+        saying a 16 GB card fits after a third image was added, and the
+        only way to find out was to remember to ask again.  It writes
+        nothing and costs about a second, so the tab asks for it itself -
+        when the thing it depends on has moved, and only then.
+
+        THE FOUR RULES, in the order they are enforced.  Not on every
+        keystroke: nothing happens unless :meth:`_plan_key` has changed,
+        and then only once the list has been still for
+        :data:`PLAN_DEBOUNCE_MS`.  Not in front of a real run: it takes the
+        preview's light guard, which a write run refuses outright.  Not
+        behind one either: a refused attempt re-arms instead of queueing,
+        because the answer is only wanted while this list is still the
+        list.  And not at all while there is nothing a plan could be run on
+        (see :meth:`_plan_now`).
+
+        The stale sentence goes the MOMENT the list moves rather than when
+        the new answer arrives - a wrong number is worse than no number."""
+        key = self._plan_key()
+        if key == self._plan_for:
             return
-        self._ok("Planning the layout…")
-        self._run_commands(plan_commands(form), on_step=self._plan_step,
-                           on_done=lambda rc, failed, _t: self._ok(
-                               "" if rc == 0 else "The plan failed - see "
-                               "the tool output."))
+        self._plan_for = key
+        self._plan_info = None
+        self._plan_text = ""
+        self._cancel_plan()
+        if len(key) < 2 or not self._auto_plan:
+            return
+        try:
+            self._plan_job = self._timer().after(self.PLAN_DEBOUNCE_MS,
+                                                 self._plan_now)
+        except tk.TclError:                             # pragma: no cover
+            self._plan_job = None
+
+    def _cancel_plan(self):
+        job, self._plan_job = self._plan_job, None
+        if job is not None:
+            try:
+                self._timer().after_cancel(job)
+            except (tk.TclError, ValueError):           # pragma: no cover
+                pass
+
+    def _plan_now(self):
+        """The debounce fired: ask ``mkmulticard.py plan`` how big this card
+        would be.  True when the run started.
+
+        It CANCELS rather than forgets: this is a public seam the tests
+        drive directly, and dropping the id of a job that is still armed
+        leaves it to fire into a torn-down interpreter."""
+        self._cancel_plan()
+        if self._stopped or not self._auto_plan:
+            return False
+        key = self._plan_key()
+        # THE ONLY READINESS THIS RUN NEEDS.  Not validate_form: the plan
+        # reads the images and nothing else, so a half-typed title or an
+        # output path that is still being typed is no reason to leave the
+        # size unknown - and a missing .raw is, because the tool would only
+        # print a refusal into the Log nobody asked it to.
+        if len(key) < 2 or not all(p and os.path.isfile(p) for p in key):
+            return False
+        form = self.form()
+
+        def step(label, rc, text):
+            # An answer about a list that has since moved is dropped rather
+            # than shown: _maybe_plan has already blanked the sentence and
+            # armed the next one.
+            if label == "plan" and key == self._plan_key():
+                self._plan_step(label, rc, text)
+
+        def done(rc, failed, _texts):
+            if rc != 0:
+                # NOT ON THE STATUS LINE.  Nobody asked for this run, so a
+                # failure of it must not take the line that is saying what
+                # the buttons would do; the whole of the tool's output is in
+                # the Log, where the reason is.
+                self._write("the size check failed (exit %d) - the sentence "
+                            "beside the status line is left blank." % rc)
+        if not self._run_commands(plan_commands(form), on_step=step,
+                                  on_done=done, preview=True):
+            # The worker is busy.  Ask again in a moment rather than queue.
+            try:
+                self._plan_job = self._timer().after(self.PLAN_RETRY_MS,
+                                                     self._plan_now)
+            except tk.TclError:                         # pragma: no cover
+                self._plan_job = None
+            return False
+        return True
+
+    #: ...and how long it waits before asking again when the worker was
+    #: busy.  A build holds it for minutes; this is a poll, so it is slow.
+    PLAN_RETRY_MS = 2000
 
     def _plan_step(self, label, rc, text):
         if label != "plan":
@@ -3769,41 +4835,27 @@ class MultibootPanel:
             self._plan_text = size_plan_text(self._plan_info)
         else:
             self._plan_text = ""
+        # WHAT THE SENTENCE NOW DESCRIBES.  Claimed here rather than when
+        # the run was asked for, so the build's own plan step - the same
+        # answer, about the same images - keeps the tab from asking twice.
+        self._plan_for = self._plan_key()
         self._update_edit_status()
-
-    def _prepare_media(self):
-        form = self.form()
-        errs = validate_form(form) + rebuild_blockers(form)
-        if errs:
-            self._error("\n".join(errs))
-            return
-        media = self.media_dir()
-        try:
-            os.makedirs(media, exist_ok=True)
-        except OSError as exc:
-            self._error("Cannot create %s: %s" % (media, exc))
-            return
-        self._ok("Preparing media into %s…" % media)
-        self._run_commands(
-            prepare_commands(form, media),
-            on_done=lambda rc, failed, _t: self._ok(
-                "Media ready in %s - Build & verify will carry it." % media
-                if rc == 0 else
-                "Media preparation failed - see the tool output."))
 
     def _build_card(self):
         form = self.form()
-        # A LOADED CARD IS NOT AN OUTPUT.  After a load the output box holds
-        # the card that was read, so that Apply and the preview name the
-        # same file; a build into it would copy ~7 GB per image over the
-        # very card being edited.  The way out is explicit, not a dialog:
-        # type a different output path (Browse… writes it), or press Apply.
+        # A LOADED CARD IS NOT AN OUTPUT.  After a load the path box holds
+        # the card that was read - it IS that card's identity, which is how
+        # Apply and the preview name the same file - and a build into it
+        # would copy ~7 GB per image over the very card being edited.  The
+        # way out is explicit, not a dialog: point 'Card image' somewhere
+        # else, or press Apply.
         if self._loaded_card and _norm(form.out) == _norm(self._loaded_card):
             self._error(
-                "Build & verify writes a NEW card, and the output is the "
-                "card you loaded (%s). Set 'Card image' to a different path "
-                "to build a copy - or press Apply to card, which rewrites "
-                "the menu of this one in seconds." % self._loaded_card)
+                "Build & verify writes a NEW card, and 'Card image' names "
+                "the card you loaded (%s). Point it at a different path to "
+                "build a copy - typing this one back goes on editing it - "
+                "or press Apply to card, which rewrites the menu of this "
+                "one in seconds." % self._loaded_card)
             return
         # Every reason at once: the form's own, and the media a loaded card
         # carries that nothing here can render into a new one.
@@ -3839,8 +4891,30 @@ class MultibootPanel:
         self._run_commands(cmds, on_step=self._plan_step, on_done=done)
 
     def _confirm_overwrite(self, path):
+        """The one gate between Build & verify and a card that is already
+        there - and it SAYS WHAT IT WOULD DESTROY.
+
+        A restart puts the path box back on the card the last session was
+        editing while deliberately not restoring the baseline (see
+        :meth:`state`), so 'a loaded card is not an output' cannot fire and
+        Build & verify is the green button on a path that names a finished
+        card.  A bare 'Rebuild over it?' is not enough to stop that; the
+        size and the date of what is at the path are what tell a person
+        this is the card they made last night, and that the run underneath
+        this question copies every image again."""
+        what = ""
+        try:
+            st = os.stat(path)
+            what = " (%.1f GB, written %s)" % (
+                st.st_size / 1e9,
+                time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime)))
+        except OSError:                                 # pragma: no cover
+            pass
         return messagebox.askyesno(
-            "Overwrite?", "%s exists. Rebuild over it?" % path)
+            "Overwrite that card?",
+            "%s already exists%s.\n\nBuild & verify writes a NEW card over "
+            "it - every image is copied again, and whatever is on it now is "
+            "gone. Overwrite it?" % (path, what))
 
     def _finished_card(self, verb):
         """The built card, or None with the reason on the tab."""
@@ -3878,46 +4952,18 @@ class MultibootPanel:
         self._ok("Starting the emulator on %s with the boot selector…" % out)
         self._emulate_fn(out)
 
-    def _bypass_existing(self):
-        if self._busy:
-            self._error("Wait for the current run to finish first.")
-            return
-        path = filedialog.askopenfilename(
-            title="Pick the multi-image card to bypass validation on",
-            filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
-        if path:
-            self.bypass_card(path)
-
-    def bypass_card(self, path):
-        """``mkmulticard.py bypass --card`` on an existing card image."""
-        path = (path or "").strip().strip('"')
-        if not os.path.isfile(path):
-            self._error("No such card image: %s" % path)
-            return
-        if under_library(path):
-            self._error("That card is in the library (%s); copy it out "
-                        "first." % LIBRARY_PREFIXES[0])
-            return
-        self._ok("Bypassing the validator on every image of %s…" % path)
-        self._run_commands(
-            bypass_commands(path),
-            on_done=lambda rc, failed, _t: self._ok(
-                "Validator bypassed on %s - flash it again." % path
-                if rc == 0 else "The bypass failed - see the tool output."))
+    # THERE IS NO 'BYPASS AN EXISTING CARD…' HERE ANY MORE.  It ran
+    # :func:`bypass_commands` on a card picked from a dialog, and Apply to
+    # card already runs the very same commands whenever the Bypass box is
+    # ticked and some image on the loaded card is still unpatched - by the
+    # better road, because Apply re-reads the card afterwards and this did
+    # not.  The mkmulticard subcommand behind it stays exactly where it is:
+    # it is what Apply calls, and it is the cheap repair for a card that has
+    # already been written.
 
     # ------------------------------------------------------------------
     # loading a card, and writing the menu back into it
     # ------------------------------------------------------------------
-
-    def _load_card_dialog(self):
-        if self._busy:
-            self._error("Wait for the current run to finish first.")
-            return
-        path = filedialog.askopenfilename(
-            title="Pick the multi-image card to read into the form",
-            filetypes=[("Card images", "*.raw *.img"), ("All files", "*.*")])
-        if path:
-            self.load_card(path)
 
     def load_card(self, path):
         """Read an existing multi-image card into the form: two inspects on
@@ -3937,6 +4983,15 @@ class MultibootPanel:
             self._error("A run is already in progress.")
             return False
         media = loaded_media_dir(path)
+        # WHO MADE IT MATTERS.  The tool extracts the card's media into this
+        # directory and wants it there, so it is created before the run -
+        # but Browse… now reads any existing card you pick, and the row
+        # cannot tell a multi card from a stock one (probe_card_path stats,
+        # and that is all it may do), so a mis-pick is an ordinary event.
+        # The refusal branch below takes back what WE made, and only that:
+        # a directory that was already there is the last load's, and its
+        # media is what a re-read would reuse.
+        mine = not os.path.isdir(media)
         try:
             os.makedirs(media, exist_ok=True)
         except OSError as exc:
@@ -3954,6 +5009,13 @@ class MultibootPanel:
                 why = parse_refusal(texts.get(failed, "")) or \
                     "%s failed (exit %d) - see the tool output." % (failed, rc)
                 self._error("Cannot read %s: %s" % (path, why))
+                if mine:
+                    # Empty only: a refusal that got as far as writing files
+                    # leaves them for the person to look at.
+                    try:
+                        os.rmdir(media)
+                    except OSError:
+                        pass
                 return
             info = seen.get("info")
             if not isinstance(info, dict):
@@ -3975,7 +5037,6 @@ class MultibootPanel:
         form, warnings = form_from_inspect(
             info, card, media_dir, self._selector_var.get().strip())
         self._rows = list(form.images)
-        self._media_override = media_dir
         # Before the fields are written: Default's trace moves Highlight only
         # while it has not been typed, and this card's default is the one to
         # follow whatever was typed for the last one.
@@ -3992,6 +5053,11 @@ class MultibootPanel:
             self._bypass_var.set(bool(form.bypass))
         finally:
             self._loading = False
+        # AFTER the path box, not before it: setting the box runs
+        # _out_changed, which drops a media dir that does not belong to the
+        # card the box now names - and until _loaded_card is set below, the
+        # dir this load extracted into is exactly that to it.
+        self._media_override = media_dir
         _ticked, self._armed = bypass_state(info)
         self._loaded_card = card
         self._loaded_info = info
@@ -4010,6 +5076,7 @@ class MultibootPanel:
         self._pv_shown = None
         self._pv_src = None
         self._pv_ready = None
+        self._pv_idle = False           # a read: the hold is a restore's
         self._drop_photos()
         self._set_var(self._hl_var, int(form.default))
         self._stop_play(None)
@@ -4025,6 +5092,10 @@ class MultibootPanel:
         self._refresh_tree(select=min(max(0, int(form.default)),
                                       max(0, len(self._rows) - 1)))
         self._update_edit_status()
+        # The probe's answer is keyed on the text AND on which card is
+        # loaded (probe_card_path resolves the links); the card that was
+        # just loaded is a different answer to the one it may already hold.
+        self._schedule_probe(refresh=True)
         head = "Loaded %s: %d image%s." % (
             os.path.basename(card), len(self._rows),
             "" if len(self._rows) == 1 else "s")
@@ -4107,6 +5178,18 @@ class MultibootPanel:
             self._error("Load a card first - Apply to card writes into the "
                         "card the form was read from.")
             return False
+        # THE INVARIANT, ENFORCED AND NOT ONLY DRAWN.  The button is already
+        # grey when the path box has been typed away from the loaded card,
+        # but greying a button is a claim and this is the guarantee behind
+        # it: an inject into X while the box says Y is the one way this tab
+        # could write to a card nothing on screen names.
+        if not self._on_loaded_path():
+            self._error(
+                "'Card image' no longer names %s, the card this form was "
+                "read from, so there is nothing to apply to. Nothing was "
+                "lost: type that path back and Apply to card is live "
+                "again." % self._loaded_card)
+            return False
         if self._busy:
             self._error("A run is already in progress.")
             return False
@@ -4116,8 +5199,9 @@ class MultibootPanel:
             self._error(
                 "The image list changed (%s). Apply to card only rewrites "
                 "the menu of %s; adding, removing, reordering or replacing "
-                "an image means copying the images again - set 'Card image' "
-                "to a new path and press Build & verify."
+                "an image means copying the images again - point 'Card "
+                "image' at a new path (which leaves editing mode) and press "
+                "Build & verify."
                 % ("; ".join(rebuild), os.path.basename(self._loaded_card)))
             return False
         prepare = media_specs_changed(self._loaded_form, form)
@@ -4161,7 +5245,9 @@ class MultibootPanel:
             # is a file name on the card, whatever file it came from).
             self._loaded_form = form
             if prepare:
-                self._pv_ready = (media_fingerprint(form), media)
+                # Apply's prepare is the FULL one (apply_commands), so the
+                # sounds are in that set - see _render_frames' third field.
+                self._pv_ready = (media_fingerprint(form), media, True)
             self._ok("Card updated: %s (%s)%s" % (
                 self._loaded_card,
                 ", ".join(menu) if menu else "no menu change",
@@ -4171,40 +5257,78 @@ class MultibootPanel:
                                   quiet=(INSPECT_JSON,))
 
     def _update_edit_status(self):
-        """THE CONSEQUENCE LINE - the status block's second line: what Apply
-        to card would write (or why only a rebuild can), and how big the
-        card would be.  Called after every keystroke.
+        """THE CONSEQUENCE LINE - the status block's second line: what the
+        card path is pointing at, what Apply to card would write (or why
+        only a rebuild can), and how big the card would be.  Called after
+        every keystroke.
 
-        The two share one line because they are one question - what would
-        the button under them do - and the block has room for one line
-        each.  It also decides which of the two writing buttons is THE
-        action right now: while a card is loaded and an inject can carry
-        the changes, Apply to card is the green one; otherwise Build &
-        verify is."""
+        They share one line because they are one question - what would the
+        button under them do - and the block has room for one line each.
+        THIS IS ALSO WHERE THE MODE IS SHOWN.  The row lost its two labelled
+        buttons, which stated the tab's two modes for free; a sentence here
+        states them instead, and costs no pixels because the line was
+        already there and empty in every state but editing.
+
+        It decides three things besides the words: which of the two writing
+        buttons is THE action (Apply while a card is loaded and an inject
+        can carry the changes, Build & verify otherwise), whether Apply may
+        be pressed at all, and what the row's verb says and whether it is
+        live."""
         lbl = getattr(self, "_edit_lbl", None)
         btn = getattr(self, "_apply_btn", None)
         if lbl is None or btn is None:
             return
+        # FIRST, because the size sentence is half of the line built below
+        # and this is what decides whether it is still true: asking after
+        # the label had been written left the stale number on screen until
+        # something else redrew it.
+        self._maybe_plan()
         th = THEMES.get(self._theme_fn()) or THEMES["dark"]
-        rebuild = []
-        text = ""
+        field = self._out_var.get().strip().strip('"')
+        menu, rebuild = [], []
         if self._loaded_card and self._loaded_form is not None:
             menu, rebuild = diff_forms(self._loaded_form, self.form())
-            text = edit_status_text(self._loaded_card, menu, rebuild)
-            if self._loaded_form.bypass and not self.form().bypass:
-                text += ("  (Unticking the bypass cannot un-patch a card - "
-                         "build a fresh one for that.)")
+        kind, text, tone, verb_on, verb_text = card_path_state(
+            field, self._facts_now(field), self._rows, self._loaded_card,
+            menu, rebuild)
+        editing = kind == "loaded"
+        # THE BASELINE IS TESTED, NOT ASSUMED.  ``editing`` comes from
+        # card_path_state, which decides it from _loaded_card and the path
+        # alone and has never seen _loaded_form - so the pair (a card set,
+        # its baseline not yet) reached ``.bypass`` on None.  It is a narrow
+        # window today (inside load_inspect, which pumps no loop), but the
+        # guard the old expression carried is cheap and this line is called
+        # after every keystroke.
+        if (editing and self._loaded_form is not None
+                and self._loaded_form.bypass and not self.form().bypass):
+            text += ("  (Unticking the bypass cannot un-patch a card - "
+                     "build a fresh one for that.)")
         line = "  ·  ".join(p for p in (text, self._plan_text) if p)
         try:
-            lbl.configure(text=self._status_line(line),
-                          foreground=th["error"] if rebuild
-                          else th["gray"] if not text else th["fg"])
+            lbl.configure(text=self._status_line(line), foreground=th[tone])
+            # Apply writes into ``_loaded_card``, so it is live only while
+            # the box still NAMES that card: the invariant, not a courtesy.
             btn.configure(state=tk.DISABLED
-                          if (rebuild or self._busy or not self._loaded_card
-                              or self._loaded_form is None) else tk.NORMAL)
+                          if (rebuild or self._busy or not editing)
+                          else tk.NORMAL)
         except tk.TclError:
             pass
-        self._primary_button(build=bool(rebuild) or not self._loaded_card)
+        self._verb_button(verb_on, verb_text)
+        self._primary_button(build=bool(rebuild) or not editing)
+
+    def _verb_button(self, on, text):
+        """The row's one verb: 'Load card' for a path that has something at
+        it, 'Reload card' for the card already in the form.  The busy guard
+        still wins - this runs at the end of :meth:`_set_busy` too, and a
+        run in flight greys every action control."""
+        btn = getattr(self, "_load_btn", None)
+        if btn is None:
+            return
+        try:
+            btn.configure(text=text, state=tk.NORMAL
+                          if (on and not self._busy) else tk.DISABLED)
+        except tk.TclError:                             # pragma: no cover
+            pass
 
     def _primary_button(self, build):
         """Exactly one green button: the one that would actually be pressed."""
@@ -4520,12 +5644,83 @@ class MultibootPanel:
 
     def _sound_toggled(self):
         """The Sound tick: on plays what the menu plays, off is silence and
-        the device handed back."""
+        the device handed back.
+
+        AND TICKING IT RENDERS THE SOUNDS.  The preview prepares pictures
+        and music only (``--visual-only``), so a set it rendered for itself
+        has no move and no confirm sound in it - and what the tab used to do
+        about that was tell the person to go and find 'Prepare media' in a
+        menu and press it.  Ticking Sound IS the asking; the run it needs is
+        this tab's business, not a second instruction."""
         if not self._sound_var.get():
             self._stop_sound()
         else:
+            self._prepare_sounds()
             self._sound_follow()
         self._recaption()
+
+    def _prepare_sounds(self):
+        """Render the menu's SOUNDS into the media set, if they are not
+        there already.  True when a run started.
+
+        The same ``selectmedia prepare`` the preview runs, without
+        ``--visual-only`` - so it renders the pictures too, and
+        selectmedia's own sidecar cache makes that nearly free for the ones
+        that have not changed.  It takes the preview's light guard: this is
+        background work about the picture, and it must never grey the tab
+        or get in front of a build.
+
+        ONLY THE TICK ASKS FOR IT.  Not a flipper press and not the confirm
+        entry: those are one press about one sound, and a press that starts
+        a tool nobody asked for is how the old 'Prepare media' entry earned
+        its place in the menu that has gone."""
+        if self._stopped or self._sounds_ready():
+            return False
+        form = self.form()
+        errs = validate_form(form, sources=self.needs_prepare())
+        if errs:
+            self._pv_stale(errs[0], len(errs) - 1)
+            return False
+        media = self.media_dir()          # was already stat'ed by form()
+        mfp = media_fingerprint(form)
+        try:
+            self._makedirs(media)
+        except OSError as exc:
+            self._pv_say("Cannot create %s: %s" % (media, exc), error=True)
+            return False
+
+        def step(label, rc, _text):
+            if label == "prepare" and rc == 0:
+                self._pv_ready = (mfp, media, True)
+
+        def done(rc, _failed, _texts):
+            if rc == 0:
+                self._sound_follow()
+                self.sync_preview_menu()
+                self._say_sound(None)   # ...so the next miss is said again
+                self._pv_say("The menu's sounds are ready.")
+            else:
+                self._pv_say("The menu's sounds could not be rendered (exit "
+                             "%d) - see the tool output." % rc, error=True)
+        if not self._run_commands(prepare_commands(form, media),
+                                  on_step=step, on_done=done, preview=True):
+            return False
+        self._pv_say("Rendering the menu's sounds…")
+        return True
+
+    def _sounds_ready(self):
+        """Whether the media set ON DISK already has the menu's sounds.
+
+        Asked of the manifest rather than of who prepared it: a set a load
+        extracted off a card has them, a set an earlier full prepare left
+        has them, and the half-set the preview renders for itself does not
+        (``--visual-only`` writes no move and no confirm sound).  The FORM
+        says whether there is supposed to be one at all, so a menu whose
+        move sound is 'none' is not missing anything - and the move sound
+        is the marker for the pair, because one prepare writes both."""
+        if _media_value(self._move_var.get().strip() or "none") == "none":
+            return True
+        return bool(self.menu_sounds()["move"])
 
     def _sound_follow(self):
         """Play what the menu would be playing NOW: the highlighted image's
@@ -4558,9 +5753,11 @@ class MultibootPanel:
             # :meth:`_one_line`), and this sentence had to say the whole of
             # itself there rather than be cut in half at every window width
             # the tab supports; the long version of why lives in the Sound
-            # tooltip, where there is room for it.
-            self._sound_aside("No move sound yet - More ▾ ▸ Prepare media "
-                              "renders the menu's sounds.")
+            # tooltip, where there is room for it.  It names no control
+            # either - 'More ▾ ▸ Prepare media' is gone, and what replaced
+            # it is the Sound tick itself, which has already been pressed by
+            # anyone reading this - so it says the fact and stops.
+            self._sound_aside("No move sound in this media set.")
             return False
         self._audio_player().play(move)
         return True
@@ -4579,9 +5776,11 @@ class MultibootPanel:
             # The media DIRECTORY is not in this line any more: it is a full
             # path on a loaded card, and the strip is one line - the whole
             # of it went to the Log and the half left on screen named the
-            # selector's folder instead of saying what to do.
-            self._pv_say("%s has no confirm sound yet - More ▾ ▸ Prepare "
-                         "media renders the menu's sounds."
+            # selector's folder instead of saying what to do.  It names no
+            # control now either: the sounds are rendered by the Sound tick
+            # (see :meth:`_prepare_sounds`), and one press about one sound
+            # is not the place to start a tool.
+            self._pv_say("%s has no confirm sound in this media set."
                          % self._image_label(hl))
             return False
         audio = self._audio_player()
@@ -4761,9 +5960,13 @@ class MultibootPanel:
             return
         if self._play_var.get():
             return                          # Play draws its own frames
+        # ...and it only says 'drawing it' when one really is coming: the
+        # first render after a restore is held (see _pv_idle), so an ask
+        # that is about to be swallowed must not be reported as a promise.
+        coming = self.schedule_preview() and not self._pv_idle
         self._pv_say("%s frame %d has not been drawn yet - %s"
                      % (self._image_label(key[1]), key[2],
-                        "drawing it…" if self.schedule_preview() else
+                        "drawing it…" if coming else
                         "right-click the preview to redraw."))
 
     def _highlight(self, form):
@@ -4946,12 +6149,31 @@ class MultibootPanel:
             return False
         return True
 
+    def _cancel_preview(self):
+        """Take back a queued re-render.  Every field's trace asks for one
+        and so does :meth:`_refresh_tree`, so the callers that must draw
+        NOTHING have to say so after they have filled the form in - see
+        :meth:`restore_state`."""
+        job, self._pv_debounce_job = self._pv_debounce_job, None
+        self._pv_pending = 0
+        if job is not None:
+            try:
+                self._timer().after_cancel(job)
+            except (tk.TclError, ValueError):           # pragma: no cover
+                pass
+
     def _auto_render(self):
         """The debounce fired: render the frame the tab is pointing at, if
-        there is anything to draw and nothing else is running."""
-        self._pv_debounce_job = None
-        self._pv_pending = 0
+        there is anything to draw and nothing else is running.
+
+        It CANCELS rather than forgets, because this is a seam the tests
+        call directly: dropping the id of a job that is still armed leaves
+        it to fire into a torn-down interpreter."""
+        self._cancel_preview()
         if self._stopped or not self._auto_preview.get():
+            return False
+        if self._pv_idle:
+            self._pv_idle = False       # the restore's own echo - see there
             return False
         if self._play_var.get():
             # PLAY DRAWS ITS OWN FRAMES - unless the form has moved out from
@@ -4970,6 +6192,22 @@ class MultibootPanel:
             # Try again once the run in flight is done - a build takes
             # minutes and the preview must not queue behind every keystroke.
             self.schedule_preview()
+            return False
+        # A DEAD DRIVE MUST NOT FREEZE THE TAB, AND THIS IS ABOVE form()
+        # BECAUSE form() IS ONE OF THE STATS.  Every disk call in here runs
+        # on the Tk main loop and can block for tens of seconds on an
+        # unplugged mapped drive or a sleeping share, the debounce fires
+        # them on every typing pause - and form() -> media_dir() ->
+        # isfile(media.json) is the FIRST of them, so a guard underneath it
+        # had already paid the freeze it was written to prevent.  The path
+        # is therefore read straight out of the box here, which is what the
+        # probe's answer is keyed on anyway.  Every other guard below stays
+        # exactly as it is: they already handle a half-typed path correctly.
+        out = self._out_var.get().strip().strip('"')
+        if (self._rows and out
+                and self._facts_now(out).get("kind") == "unreachable"):
+            self._pv_stale("%s is not there right now"
+                           % (path_root(out) or "that drive"))
             return False
         form = self.form()
         out = (form.out or "").strip().strip('"')
@@ -5039,7 +6277,10 @@ class MultibootPanel:
 
     def render_preview(self):
         """'Redraw the preview now' (the preview's right-click menu): the
-        frame the preview points at, whether or not it is cached."""
+        frame the preview points at, whether or not it is cached.
+
+        ASKED FOR, so the restore's one-render hold does not apply."""
+        self._pv_idle = False
         # A loaded card whose media has not been touched draws from the card
         # itself, so the .raw files it was built from need not be here.
         form = self._validated_form(sources=self.needs_prepare())
@@ -5111,13 +6352,22 @@ class MultibootPanel:
         # straight off it - so without this a new output path kept the old
         # dir's 'prepared' answer, left the new one empty, and Build &
         # verify wrote a text-only card.
-        if self._pv_ready != (mfp, media):
+        # ...AND WHETHER THE SOUNDS WERE RENDERED WITH IT.  A preview-only
+        # prepare is half a media set (--visual-only: the pictures and the
+        # music, not the two menu sounds), so 'prepared' is not one answer
+        # but two - and with Sound ticked the whole set is what was asked
+        # for.  Without this third field, ticking Sound after a render left
+        # the tab certain the media was ready and the move sound absent.
+        sound = bool(self._sound_var.get())
+        if self._pv_ready != (mfp, media, sound):
             if self.needs_prepare(form):
-                cmds += preview_prepare_commands(form, media)
+                cmds += (prepare_commands(form, media) if sound
+                         else preview_prepare_commands(form, media))
             else:
                 # The card's own media, straight out of the extraction: it
-                # matches the form because the form came out of the card.
-                self._pv_ready = (mfp, media)
+                # matches the form because the form came out of the card,
+                # sounds and all.
+                self._pv_ready = (mfp, media, True)
         wanted = [int(n) for n in frames] or [0]
         # A run of more than one is ONE step, and never longer than the most
         # an animation can hold: past that the selector refuses the whole
@@ -5165,7 +6415,7 @@ class MultibootPanel:
                 self._pv_bin = parse_selector_path(text)
                 self._pv_bin_at = time.time()
             elif label == "prepare":
-                self._pv_ready = (mfp, media)
+                self._pv_ready = (mfp, media, sound)
             elif label == ANIM_LABEL:
                 # WHICH frames a run wrote is the selector's decision, and
                 # it says so once per file: the caller knows the pattern,
@@ -5441,6 +6691,13 @@ class MultibootPanel:
                         btn.configure(state=tk.DISABLED)
                     except tk.TclError:
                         pass
+        if not busy:
+            # THE RUN MAY HAVE MOVED THE DISK UNDER THE ROW.  A build writes
+            # the card the row was calling missing, an apply changes it, a
+            # load that failed may have taken a directory away - and the row
+            # reads a CACHED stat, so without this it went on describing the
+            # state before the run for ever.
+            self._refresh_facts()
         # ...and Apply to card is only ever live for a loaded card whose
         # image list still matches it.
         self._update_edit_status()

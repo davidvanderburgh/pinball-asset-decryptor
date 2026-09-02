@@ -250,6 +250,11 @@ def _restore(folder, settings=None):
     # site and not the restore.
     stub._restore_emulate_card = (
         lambda folder: App._restore_emulate_card(stub, folder))
+    # The Multi-boot tab's form rides the same rail out of _apply_manufacturer
+    # and has its own tests in test_multiboot_tab.py; the real one is bound
+    # here rather than stubbed, and finds no panel on this window.
+    stub.restore_multiboot_state = (
+        lambda folder: App.restore_multiboot_state(stub, folder))
     App._apply_manufacturer(stub, SimpleNamespace(key="stern"))
     return var.value
 
@@ -327,6 +332,9 @@ def test_the_global_is_written_on_every_settings_save(tmp_path, monkeypatch):
             emulate_card_var=SimpleNamespace(
                 get=lambda: "  D:/cards/last.raw  ")),
     )
+    # The Multi-boot tab's form is saved here too; the real reader is bound
+    # rather than stubbed, and finds no panel on this window.
+    stub.multiboot_state = lambda: App.multiboot_state(stub)
     App._save_settings(stub)
     assert settings["emulate_card"] == "D:/cards/last.raw"
 

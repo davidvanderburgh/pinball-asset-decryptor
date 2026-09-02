@@ -292,6 +292,7 @@ PAD_CARD_CACHE=0 PAD_SELECT=1 PAD_AUDIO=0 watch.sh`, four times:
 | 3 | right, start | 0 — the highlight had been remembered at 1, RIGHT wrapped to 0 | attract (the last-choice memory works) |
 | 4 | right, start | 1 TMNT 1987 | `[padvid] clip root overridden by dump/vidroot: .../tmnt_multi.p7/turtles_pro`; attract shows the 1987 cartoon art |
 | 5 (after the review fixes) | right, 95 s dwell, left, start | 1 TMNT 1987 | watch.sh no longer drops the selecting flag on a wall-clock bound (no `giving up` / `the game exited`); the 1987 splash `Back in 1987` was on the glass 1 s after START; attract at 259 s; clean teardown |
+| 6 (v2: three images, media, bypass) | right, left, start | 1 TMNT 1987 from `p7:img1` (multi layout) | three cards with the cards' own logos, the 1987 animation on the highlighted card, move/confirm sounds through the rig's audio FIFO (`guest reports 44100 Hz x 2 ch`, padplay fed/played growing), confirm played 1.7 s under the LOADING frame, videos from `tmnt_multi3.p7/img1`, attract, grades P/P/P; one emulator-only gap: the FIFO reader dropped at 31 s and the menu's later sounds were lost (being fixed) |
 
 The selector attached to the live GL bridge after padglhost was already up,
 drew at ~60 fps, mapped the flipper ids from the title's switch table, and

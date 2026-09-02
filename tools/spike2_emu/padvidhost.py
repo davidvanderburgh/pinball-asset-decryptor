@@ -84,6 +84,34 @@ GUEST_ROOT = "/games/" + _GAME
 HOST_ROOT = os.environ.get(
     "PAD_VID_ROOT", os.path.join(padpath.root(), "games", _GAME))
 
+# ITEM 90: THE BOOT SELECTOR CAN CHANGE WHICH PARTITION THE GAME RUNS FROM
+# AFTER THIS PROCESS HAS STARTED. PAD_VID_ROOT is exported by watch.sh from
+# the PRIMARY games partition before the menu is even up; when the choice is
+# a different partition, run_game.sh binds that partition's title directory
+# over /games/<title> inside the guest's namespace - invisible from here -
+# and publishes the host path of the chosen directory in dump/vidroot. Read
+# per clip (one stat), never cached: the file appears after the choice and is
+# removed by every plain run, so a stale override cannot outlive its run.
+# Without this the emulator ran the chosen image's game and images while
+# playing the PRIMARY image's videos - measured 2026-09-01, run 2 of item 90.
+_VIDROOT_FILE = os.path.join(padpath.root(), "dump", "vidroot")
+_vidroot_said = [None]
+
+
+def host_root():
+    """The directory the game's relative clip paths resolve against."""
+    try:
+        with open(_VIDROOT_FILE) as f:
+            r = f.read().strip()
+    except OSError:
+        r = ""
+    if r and os.path.isdir(r):
+        if _vidroot_said[0] != r:
+            _vidroot_said[0] = r
+            log("clip root overridden by dump/vidroot: %s" % r)
+        return r
+    return HOST_ROOT
+
 
 _T0 = time.monotonic()
 _LOGLOCK = threading.Lock()
@@ -128,8 +156,9 @@ def host_path(p):
         p = p[len(GUEST_ROOT) + 1:]
     elif p.startswith("/"):
         return None
-    full = os.path.normpath(os.path.join(HOST_ROOT, p))
-    if not full.startswith(os.path.normpath(HOST_ROOT) + os.sep):
+    root = host_root()
+    full = os.path.normpath(os.path.join(root, p))
+    if not full.startswith(os.path.normpath(root) + os.sep):
         log("refusing path outside the game tree: %r" % p)
         return None
     return full if os.path.isfile(full) else None

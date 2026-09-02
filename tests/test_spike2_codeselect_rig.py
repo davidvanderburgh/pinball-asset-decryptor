@@ -669,3 +669,35 @@ def test_the_readme_names_the_knobs_and_the_files():
                  "select.choice", "codeselect.log", "codeselect.conf",
                  "codeselect/DESIGN.md", "buildselect.sh"):
         assert word in sec, word
+
+
+# ---- the video host follows the CHOSEN partition (dump/vidroot) ------------
+# padvidhost runs outside the guest's mount namespace and resolves the game's
+# relative clip paths against PAD_VID_ROOT, which watch.sh exports from the
+# PRIMARY games partition before the menu is up. Run 2 of item 90 (2026-09-01)
+# booted the 1987 image's game while padvidhost served the stock image's
+# clips. run_game.sh now publishes the chosen directory in dump/vidroot after a
+# successful bind; the host reads it per clip; plain runs clear it.
+
+
+def test_run_game_publishes_vidroot_only_after_a_successful_bind():
+    text = _read("run_game.sh")
+    bind = text.index('elif mount --bind "$SEL_DIR" "$R/games/$GAME"; then')
+    publish = text.index('> "$R/dump/vidroot"', bind)
+    nxt = text.index("    else", bind)          # the fallback branch that follows          # the next elif/else branch
+    assert bind < publish < nxt, "vidroot is written inside the bound-over branch"
+    assert 'rm -f "$R/dump/vidroot"' in text, "a stale override is cleared before a new choice"
+
+
+def test_watch_clears_vidroot_on_a_plain_run():
+    text = _read("watch.sh")
+    assert 'rm -f "$ROOT/dump/selecting" "$ROOT/dump/vidroot"' in text
+
+
+def test_padvidhost_reads_the_override_per_clip():
+    text = _read("padvidhost.py")
+    assert 'os.path.join(padpath.root(), "dump", "vidroot")' in text
+    assert "def host_root():" in text
+    body = text[text.index("def host_path(p):"):]
+    assert "root = host_root()" in body
+    assert "os.path.join(HOST_ROOT, p)" not in body, "host_path must not bypass the override"

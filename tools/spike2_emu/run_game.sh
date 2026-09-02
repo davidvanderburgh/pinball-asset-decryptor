@@ -465,6 +465,7 @@ fi
 # mountpoint, the chosen image's files win, nothing is unmounted. Then the
 # -invert masking below reads the CHOSEN build's boot_display_cmd.
 if [ -n "$SEL_DIRS" ]; then
+    rm -f "$R/dump/vidroot"
     rm -f "$R$PAD_SELECT_CHOICE"
     echo "[select] menu up: LEFT/RIGHT flipper (arrows) move, START (1) confirms; auto-boot in ${PAD_SELECT_TIMEOUT:-30} s"
     chroot "$R" /usr/local/codeselect/codeselect --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log </dev/null
@@ -483,6 +484,13 @@ if [ -n "$SEL_DIRS" ]; then
         echo "[select] chose $SEL_CHOICE p$SEL_IDX $(basename "$SEL_DIR") - the primary, already in place"
     elif mount --bind "$SEL_DIR" "$R/games/$GAME"; then
         echo "[select] chose $SEL_CHOICE p$SEL_IDX $(basename "$SEL_DIR") - bound over /games/$GAME"
+        # The video host runs OUTSIDE this namespace and resolves the game's
+        # relative clip paths against PAD_VID_ROOT = the primary's directory;
+        # it cannot see this bind. dump/vidroot tells it where the chosen
+        # image really is (padvidhost.host_root reads it per clip). Removed
+        # again by every plain run and by the fallback paths above.
+        printf '%s
+' "$SEL_DIR" > "$R/dump/vidroot"
         [ "$(basename "$SEL_DIR")" = "$GAME" ] || \
             echo "[select] NOTE: that image's title directory is $(basename "$SEL_DIR"); it runs as /games/$GAME with the primary's tables"
     else

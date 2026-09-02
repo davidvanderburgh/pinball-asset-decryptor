@@ -1130,7 +1130,7 @@ if [ -n "${PAD_SELECT:-}" ]; then
     if [ "$SEL_TO" = 0 ]; then SEL_WAIT=0; else SEL_WAIT=$((SEL_TO + 60)); fi
     : > "$ROOT/dump/selecting"
 else
-    rm -f "$ROOT/dump/selecting"
+    rm -f "$ROOT/dump/selecting" "$ROOT/dump/vidroot"
 fi
 setsid env PAD_THREAD_ENTRY=1 PAD_AUDIO_UNGATE=1 PAD_GL_BRIDGE="$RING_GUEST" \
            PAD_SW_SHM="$SW_GUEST" PAD_LED_SHM="$LED_GUEST" \

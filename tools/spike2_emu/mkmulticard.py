@@ -166,6 +166,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 #: The repo root (tools/spike2_emu/../..): the validator bypass and the ext4 reader are the
@@ -397,6 +398,158 @@ def say(msg):
     print("[card] " + msg, flush=True)
 
 
+# ============================================================================= the work meter
+#: One line no more often than this while a long step runs.  The GUI reads them to move its
+#: bar and never puts them in the log, so they are cheap - but a line per chunk of an 8 MiB
+#: copy is thousands of them, and a pipe that is being read a line at a time is a real cost.
+PROGRESS_EVERY = 1.0
+
+#: How often a metered child's own write counter is sampled (one small /proc read).
+PROGRESS_SAMPLE = 0.5
+
+
+class Progress:
+    """THE BUILD'S ONE WORK METER - bytes moved out of bytes to move, printed as a line the
+    GUI parses and a person can read.
+
+    A build is minutes to an hour and until now said nothing about how far along it was: the
+    copy printed its own MB/s per partition, the debugfs extraction printed one line per image
+    when it FINISHED, and neither knew about the other, so there was no number for the whole
+    run (David: "I have no idea what's going on or when it's supposed to be done").
+
+    The budget is in BYTES, taken from the plan before anything is written - the extraction
+    out of every extra's games partition, the mke2fs that writes them back into p7, and every
+    partition range of the image copy.  Bytes are the only unit all three share.  They do NOT
+    move at the same speed (debugfs onto a Windows drive is slower per byte than a raw copy),
+    so the bar is not linear in TIME; it is honest about work, and the estimate that follows
+    it comes from the rate actually observed, which is what makes it converge.
+
+    `done` is the bytes of finished sub-steps; `live` is the one now running, capped at its
+    own budget so a child that writes more than its size (metadata) cannot run the total past
+    100%.  Nothing ever goes backwards."""
+
+    def __init__(self):
+        self.total = 0
+        self.done = 0
+        self.live = 0
+        self.budget = 0
+        self.stage = ""
+        self._last = 0.0
+        self._shown = -1
+
+    def start(self, total, stage=""):
+        self.total, self.done, self.live, self.budget = max(0, int(total)), 0, 0, 0
+        self.stage = stage
+        self._last, self._shown = 0.0, -1
+        if self.total:
+            self.emit(force=True)
+
+    @property
+    def on(self):
+        return self.total > 0
+
+    @property
+    def at(self):
+        return min(self.total, self.done + min(self.live, self.budget or self.live))
+
+    def step(self, stage, budget=0):
+        """A new sub-step: whatever the last one was still holding is banked first, so a step
+        that ends early or writes less than its budget cannot leave the meter short."""
+        self.done = min(self.total, self.done + self.budget)
+        self.live, self.budget, self.stage = 0, max(0, int(budget)), stage
+        self.emit(force=True)
+
+    def finish(self):
+        """The writing is over: whatever the byte estimates missed, the meter reads 100%.  A
+        bar that stops at 96% and then the run ends is a bar nobody trusts again."""
+        if self.on:
+            self.done, self.live, self.budget = self.total, 0, 0
+            self.stage = "done"
+            self.emit(force=True)
+
+    def add(self, n):
+        """Bytes finished outright (a copy loop counts its own)."""
+        self.done = min(self.total, self.done + max(0, int(n)))
+        self.emit()
+
+    def sample(self, n):
+        """The running sub-step has written `n` bytes in total so far."""
+        if n is not None and n > self.live:
+            self.live = int(n)
+            self.emit()
+
+    def emit(self, force=False):
+        if not self.on:
+            return
+        now = time.monotonic()
+        if not force and now - self._last < PROGRESS_EVERY:
+            return
+        at = self.at
+        pct = 100.0 * at / self.total
+        if not force and int(pct * 10) == self._shown:
+            return
+        self._last, self._shown = now, int(pct * 10)
+        print("[card] progress %d/%d %.1f%% %s" % (at, self.total, pct, self.stage), flush=True)
+
+
+#: The build's meter.  Idle (``total`` 0) unless a build started it, so every other subcommand
+#: and every direct caller of the copy helpers prints exactly what it printed before.
+PROGRESS = Progress()
+
+
+def build_work_bytes(plan):
+    """The bytes a build of `plan` will move: the multi layout's extraction out of the sources
+    and the mke2fs that writes them back, then every range of the image copy."""
+    total = PRE_P1 * SECTOR + sum(p.count * SECTOR for p in plan.prims + plan.logs)
+    if plan.layout == "multi" and plan.multi_used:
+        total += 2 * plan.multi_used
+    return total
+
+
+def proc_written(pid):
+    """Bytes the process has written so far, or None.
+
+    ``wchar`` and not ``write_bytes``: the first counts what the process handed to write(2),
+    the second what reached a block device - and the tree these children write is usually on
+    a Windows drive through DrvFs, where the block counter stays at zero for ever."""
+    try:
+        with open("/proc/%d/io" % pid, "rb") as f:
+            for line in f:
+                if line.startswith(b"wchar:"):
+                    return int(line.split(b":")[1])
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def run_metered(argv, meter=None, tick=PROGRESS_SAMPLE):
+    """``subprocess.run(argv, capture)`` with the meter following the child's own write
+    counter -> (rc, stdout bytes, stderr bytes).
+
+    The pipes are drained by threads rather than at the end: debugfs prints a line per entry
+    it cannot chown, which on a games tree is tens of thousands of them, and a child whose
+    pipe fills while the parent is sleeping in a poll loop deadlocks."""
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out = {}
+
+    def drain(key, pipe):
+        try:
+            out[key] = pipe.read()
+        except Exception:                               # noqa: BLE001  - pipe closed under us
+            out[key] = out.get(key, b"")
+    threads = [threading.Thread(target=drain, args=(k, p), daemon=True)
+               for k, p in (("out", proc.stdout), ("err", proc.stderr))]
+    for t in threads:
+        t.start()
+    while proc.poll() is None:
+        if meter is not None and meter.on:
+            meter.sample(proc_written(proc.pid))
+        time.sleep(tick)
+    for t in threads:
+        t.join()
+    return proc.returncode, out.get("out", b""), out.get("err", b"")
+
+
 # ============================================================================= table bytes
 def chs(lba):
     c, r = divmod(lba, HEADS * SPT)
@@ -559,6 +712,7 @@ class Plan:
         self.multi_part = None
         self.multi_subdirs = []
         self.multi_used = None
+        self.multi_each = None          # the used bytes of each extra inside p7, in order
         if layout == "parts":
             for x, xp in zip(self.extra_geoms, self.extras):
                 t, xs, xc = x.part(3)
@@ -573,7 +727,8 @@ class Plan:
         else:
             subs = list(multi_subdirs) if multi_subdirs else ["img%d" % (i + 1) for i in range(len(self.extra_geoms))]
             if multi_sectors is None:
-                self.multi_used = multi_used_bytes(self.extras, self.extra_geoms)
+                self.multi_each = multi_used_each(self.extras, self.extra_geoms)
+                self.multi_used = sum(self.multi_each)
                 multi_sectors = multi_size_sectors(self.multi_used)
             if subs:
                 ebr = prev_end + 1
@@ -608,6 +763,7 @@ class Plan:
         p = Plan(self.primary_geom, self.extra_geoms, self.primary, self.extras, self.layout,
                  self.multi_part.count if self.multi_part else None, self.multi_subdirs or None, path)
         p.multi_used = self.multi_used
+        p.multi_each = self.multi_each
         return p
 
     def fits(self):
@@ -654,15 +810,22 @@ def ext_used_bytes(path, offset):
     return (blocks - free) * bs, blocks * bs
 
 
-def multi_used_bytes(extras, extra_geoms):
-    """Sum of the used bytes of every extra's games partition (what the multi p7 must hold)."""
-    total = 0
+def multi_used_each(extras, extra_geoms):
+    """The used bytes of EVERY extra's games partition, in order - what each game costs inside
+    p7.  Per image and not just summed, because "which one do I drop" is the question a card
+    that does not fit asks."""
+    out = []
     for x, g in zip(extras, extra_geoms):
         _t, st, _cnt = g.part(3)
         if x is None:
             raise Refused("the multi layout needs the extra images' paths to size p7")
-        total += ext_used_bytes(x, st * SECTOR)[0]
-    return total
+        out.append(ext_used_bytes(x, st * SECTOR)[0])
+    return out
+
+
+def multi_used_bytes(extras, extra_geoms):
+    """Sum of the used bytes of every extra's games partition (what the multi p7 must hold)."""
+    return sum(multi_used_each(extras, extra_geoms))
 
 
 def multi_size_sectors(used_bytes):
@@ -739,6 +902,32 @@ def _gb(n):
     return "%.2f GB" % (n / 1e9)
 
 
+def image_costs(plan):
+    """What each game costs on the finished card -> ([(index, device, bytes or None, source)],
+    overhead bytes).
+
+    The unit differs by layout and that is the point of computing it here rather than in the
+    caller: a `parts` image is a whole partition, a `multi` one is the USED bytes of its tree
+    inside the shared p7.  The overhead is everything the games do not account for - boot,
+    rootfs, /data, /dump and p7's own slack - so the rows and the overhead add up to the image
+    size exactly."""
+    devs = plan.devices()
+    srcs = [plan.primary] + list(plan.extras)
+    rows = []
+    if plan.multi_part is not None:
+        rows.append((0, devs[0], plan.prims[2].count * SECTOR, srcs[0]))
+        each = plan.multi_each
+        for i, sub in enumerate(plan.multi_subdirs):
+            rows.append((i + 1, devs[i + 1] if i + 1 < len(devs) else sub,
+                         each[i] if each is not None and i < len(each) else None,
+                         srcs[i + 1] if i + 1 < len(srcs) else None))
+    else:
+        for i, part in enumerate(plan.images):
+            rows.append((i, devs[i] if i < len(devs) else device_name(part.num),
+                         part.count * SECTOR, srcs[i] if i < len(srcs) else None))
+    return rows, plan.total_bytes - sum(n for _i, _d, n, _s in rows if n)
+
+
 def print_plan(plan):
     print("primary %s (%d bytes)" % (plan.primary, plan.primary_geom.size))
     for x, g in zip(plan.extras, plan.extra_geoms):
@@ -773,6 +962,15 @@ def print_plan(plan):
     note = plan.unreachable_note()
     print("images: " + ", ".join("%d=%s" % (i, d) for i, d in enumerate(plan.devices()))
           + ("  (%s)" % note if note else ""))
+    # WHAT EACH GAME COSTS, in a line of its own.  The GUI draws its size preview off these
+    # (a bar with a band per image, so a card that does not fit says which game to drop) and
+    # they read the same way in a terminal.  The 'image-size' word is there so the parse
+    # cannot pick up a row of the version table, which also starts with an index.
+    costs, overhead = image_costs(plan)
+    for i, dev, n, src in costs:
+        print("image-size %d %s %s %s" % (i, dev, "?" if n is None else n,
+                                          os.path.basename(src or "") or "(no source)"))
+    print("image-size overhead %d boot + rootfs + data + dump + slack" % max(0, overhead))
     print("image: %d sectors = %d bytes (%s)" % (plan.total, plan.total_bytes, _gb(plan.total_bytes)))
     for k, spare in plan.fits().items():
         print("  fits Stern %-3s image size %d: %s (spare %d)%s" % (k, STERN_SIZES[k], "YES" if spare >= 0 else "NO", spare,
@@ -1266,9 +1464,12 @@ def check_output_path(path, inputs, force=False, must_exist=False):
 ZERO = bytes(CHUNK)
 
 
-def copy_range(src, soff, out, doff, length, label="", sparse=True, progress=say):
+def copy_range(src, soff, out, doff, length, label="", sparse=True, progress=say, meter=None):
     """Copy length bytes src@soff -> out@doff in 8 MiB chunks; sparse=True skips all-zero chunks
-    (the output must be a fresh hole there); progress lines every ~2 s."""
+    (the output must be a fresh hole there); progress lines every ~2 s.
+
+    `meter` is the build's :class:`Progress`, counted per chunk - including the all-zero ones,
+    which are work this loop still has to READ."""
     t0 = last = time.monotonic()
     done = skipped = 0
     with open(src, "rb") as s, open(out, "r+b") as o:
@@ -1286,6 +1487,8 @@ def copy_range(src, soff, out, doff, length, label="", sparse=True, progress=say
             pos += len(b)
             left -= len(b)
             done += len(b)
+            if meter is not None:
+                meter.add(len(b))
             now = time.monotonic()
             if progress and label and now - last >= 2.0:
                 last = now
@@ -1298,12 +1501,14 @@ def copy_range(src, soff, out, doff, length, label="", sparse=True, progress=say
     return dt
 
 
-def dd_range(src, soff, out, doff, length, label=""):
+def dd_range(src, soff, out, doff, length, label="", meter=None):
     t0 = time.monotonic()
     cmd = ["dd", "if=" + src, "of=" + out, "bs=16M", "iflag=skip_bytes,count_bytes", "oflag=seek_bytes",
            "skip=%d" % soff, "seek=%d" % doff, "count=%d" % length, "conv=sparse,notrunc", "status=none"]
     subprocess.run(cmd, check=True)
     dt = time.monotonic() - t0
+    if meter is not None:            # dd says nothing as it goes: the range banks in one piece
+        meter.add(length)
     if label:
         say("  %s done (dd): %s in %.1f s (%.0f MB/s)" % (label, _gb(length), dt, length / 1e6 / max(dt, 1e-9)))
     return dt
@@ -1422,14 +1627,23 @@ def build_image(plan, out, use_dd=False):
     with open(out, "wb") as o:
         o.truncate(plan.total_bytes)
     say("output %s: %d bytes apparent (sparse), %d partition ranges to copy" % (out, plan.total_bytes, 3 + len(plan.logs)))
-    copy_range(plan.primary, 0, out, 0, PRE_P1 * SECTOR, "pre-p1 (bootstrap + u-boot)")
+    meter = PROGRESS if PROGRESS.on else None
+    if meter is not None:
+        meter.step("writing the card image")
+    copy_range(plan.primary, 0, out, 0, PRE_P1 * SECTOR, "pre-p1 (bootstrap + u-boot)", meter=meter)
     for p in plan.prims + plan.logs:
         label = "p%d %s" % (p.num, default_title(p.src))
         say("copying %s: %s from %s@LBA %d -> LBA %d" % ("p%d" % p.num, _gb(p.count * SECTOR), os.path.basename(p.src), p.src_start, p.start))
+        if meter is not None:
+            # The multi layout's p7 is sourced from a temp file called p7.img,
+            # whose "title" is the word p7 - so it is named for what it holds.
+            what = ("the games partition" if plan.multi_part is not None and p.num == plan.multi_part.num
+                    else default_title(p.src))
+            meter.step("copying p%d (%s) into the card image" % (p.num, what))
         if use_dd:
-            dd_range(p.src, p.src_start * SECTOR, out, p.start * SECTOR, p.count * SECTOR, label)
+            dd_range(p.src, p.src_start * SECTOR, out, p.start * SECTOR, p.count * SECTOR, label, meter=meter)
         else:
-            copy_range(p.src, p.src_start * SECTOR, out, p.start * SECTOR, p.count * SECTOR, label)
+            copy_range(p.src, p.src_start * SECTOR, out, p.start * SECTOR, p.count * SECTOR, label, meter=meter)
     write_tables(plan, out)
     say("tables written: MBR entries + %d EBR sector(s)" % len(plan.logs))
 
@@ -1553,17 +1767,20 @@ def ext_block_size(path, offset=0):
         return 1024 << struct.unpack("<I", f.read(4))[0]
 
 
-def debugfs_rdump(ref, src, dest):
+def debugfs_rdump(ref, src, dest, meter=None):
     """`rdump <src> <dest>` out of a read-only filesystem (symlinks come out as symlinks -
     measured).  As an ordinary user debugfs cannot chown what it extracts and says so on stderr
-    for every entry; those lines are the expected noise, anything else is an error."""
-    r = subprocess.run(["debugfs", "-R", "rdump %s %s" % (dq(src), dq(dest)), ref],
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    err = r.stderr.decode("utf-8", "replace") + r.stdout.decode("utf-8", "replace")
+    for every entry; those lines are the expected noise, anything else is an error.
+
+    `meter` follows the extraction WHILE IT RUNS - debugfs says nothing about its own progress
+    and a games tree is gigabytes, so without this the longest step of a build is a silent
+    one (see :func:`run_metered`)."""
+    rc, out, err_b = run_metered(["debugfs", "-R", "rdump %s %s" % (dq(src), dq(dest)), ref], meter)
+    err = err_b.decode("utf-8", "replace") + out.decode("utf-8", "replace")
     bad = [l for l in err.splitlines()
            if l.strip() and not l.startswith("debugfs ") and "while changing ownership" not in l]
-    if r.returncode != 0 or bad:
-        raise Refused("debugfs rdump %s -> %s failed: %s" % (src, dest, " | ".join(bad) or "rc=%d" % r.returncode))
+    if rc != 0 or bad:
+        raise Refused("debugfs rdump %s -> %s failed: %s" % (src, dest, " | ".join(bad) or "rc=%d" % rc))
 
 
 def debugfs_walk(ref, sub="/"):
@@ -2083,12 +2300,24 @@ def build_multi_partition(plan, workdir=None):
         ents = [e for e in debugfs_ls(ref, "/") if e[4] not in (".", "..", "lost+found")]
         say("%s <- %s p3: %d root entries (%s)" % (sub, os.path.basename(x), len(ents),
                                                      ", ".join(e[4] for e in ents)))
-        for ino, mode, uid, gid, name, size in ents:
-            debugfs_rdump(ref, "/" + name, dest)
-        for rel, ino, mode, uid, gid, size in debugfs_walk(ref, "/"):
-            if rel == "lost+found" or rel.startswith("lost+found/"):
-                continue
+        # THE WALK COMES BEFORE THE EXTRACTION, not after it.  It is the same walk the
+        # ownership pass has always needed; taken first it also says how big each root entry
+        # is, which is what gives the meter a budget per rdump - and one root entry of a games
+        # tree is most of the card, so "how far into THIS entry" is the whole question.
+        walk = [e for e in debugfs_walk(ref, "/")
+                if not (e[0] == "lost+found" or e[0].startswith("lost+found/"))]
+        for rel, ino, mode, uid, gid, size in walk:
             owners[sub + "/" + rel] = (uid, gid)
+        weigh = {}
+        for rel, ino, mode, uid, gid, size in walk:
+            if not statmod.S_ISDIR(mode) and not statmod.S_ISLNK(mode):
+                top = rel.split("/")[0]
+                weigh[top] = weigh.get(top, 0) + (size or 0)
+        for ino, mode, uid, gid, name, size in ents:
+            if PROGRESS.on:
+                PROGRESS.step("reading %s out of %s" % (name, default_title(x)),
+                              weigh.get(name, 0))
+            debugfs_rdump(ref, "/" + name, dest, PROGRESS if PROGRESS.on else None)
         # the three links the machine boots through must have survived as links
         for name in ("game", "conagent", "data"):
             src_st = debugfs_stat(ref, "/" + name) if any(e[4] == name for e in ents) else None
@@ -2107,9 +2336,14 @@ def build_multi_partition(plan, workdir=None):
     with open(img, "wb") as f:
         f.truncate(mp.count * SECTOR)
     say("mke2fs -d %s -> %s (%d MiB, label %s)" % (tree, img, mp.count * SECTOR >> 20, MULTI_LABEL))
-    r = subprocess.run(["mke2fs", "-q", "-F", "-t", "ext4", "-m", "0", "-L", MULTI_LABEL, "-O", MULTI_FEATURES,
-                        "-E", "lazy_itable_init=0,lazy_journal_init=0", "-d", tree, img, str(mp.count * SECTOR // 1024) + "k"],
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if PROGRESS.on:
+        PROGRESS.step("writing the games into p%d" % mp.num, plan.multi_used or 0)
+    _rc, _so, _se = run_metered(
+        ["mke2fs", "-q", "-F", "-t", "ext4", "-m", "0", "-L", MULTI_LABEL, "-O", MULTI_FEATURES,
+         "-E", "lazy_itable_init=0,lazy_journal_init=0", "-d", tree, img,
+         str(mp.count * SECTOR // 1024) + "k"],
+        PROGRESS if PROGRESS.on else None)
+    r = argparse.Namespace(returncode=_rc, stdout=_so + _se)
     if r.returncode != 0:
         raise Refused("mke2fs failed (rc=%d):\n%s" % (r.returncode, r.stdout.decode("utf-8", "replace")))
     shutil.rmtree(tree, ignore_errors=True)
@@ -3872,6 +4106,10 @@ def main(argv=None):
                     "NO - only its games partition is carried; its rootfs changes are NOT on this card"))
             t0 = time.monotonic()
             tmp = None
+            # THE METER STARTS HERE - the last moment before anything long happens and the
+            # first at which every number it needs is known.  Everything above this line
+            # refuses in seconds; everything below is the hour the GUI had nothing to show for.
+            PROGRESS.start(build_work_bytes(plan), "preparing")
             try:
                 if plan.layout == "multi":
                     p7img, tmp = build_multi_partition(plan, workdir)
@@ -3887,6 +4125,7 @@ def main(argv=None):
                                                   sidecar_path(a.out, plan.multi_part.num)))
             if not a.no_inject:
                 t1 = time.monotonic()
+                PROGRESS.step("writing the menu into the card")
                 inject_card(a.out, a.selector_dir, conf, workdir=workdir, media_files=media["files"] if media else None,
                             replace_media=bool(a.media_dir), manifests=manifests)
                 say("injection took %.0f s" % (time.monotonic() - t1))
@@ -3895,6 +4134,7 @@ def main(argv=None):
                 say("p2 md5 %s recorded in %s" % (write_p2_sidecar(a.out), p2_sidecar_path(a.out)))
             if a.bypass_validation:
                 _bypass_after_build(a.out, plan)
+            PROGRESS.finish()
             alloc = allocated_bytes(a.out)
             say("wrote %s: %d bytes apparent%s in %.0f s" % (a.out, plan.total_bytes,
                 (", %s allocated" % _gb(alloc)) if alloc is not None else "", time.monotonic() - t0))

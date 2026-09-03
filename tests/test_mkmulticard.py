@@ -1647,3 +1647,129 @@ def test_conf_for_plan_keeps_a_machine_following_card_and_the_flag_reads_the_tit
     mv = mk.machine_volume_for(str(tmp_path / "nowhere.raw"), None)
     assert mv["store"] is None and mv["default"] is None and mv["key"] == mk.MACHINE_VOLUME_KEY
     assert mv["notes"] and "could not be read" in mv["notes"][0]
+
+
+# ---- the work meter and what each image costs --------------------------------------------
+def test_image_costs_add_up_to_the_card(mk, tmp_path, capsys):
+    """Every game's own bytes, plus what the card spends on itself, IS the
+    image - so the size strip's bands can never quietly leave one out."""
+    A = mk.make_synthetic_card(str(tmp_path / "A.img"), "A", 0x0A0A0A0A)
+    B = mk.make_synthetic_card(str(tmp_path / "B.img"), "B", 0x0B0B0B0B)
+    plan = mk.make_plan(A, [B], "parts")
+    rows, overhead = mk.image_costs(plan)
+    assert [r[0] for r in rows] == [0, 1]
+    assert [r[1] for r in rows] == ["/dev/mmcblk0p3", "/dev/mmcblk0p7"]
+    assert [r[3] for r in rows] == [A, B]
+    assert sum(r[2] for r in rows) + overhead == plan.total_bytes
+    assert overhead > 0
+    # ...and the plan prints them, one line each, under a word the version
+    # table cannot be mistaken for
+    mk.print_plan(plan)
+    out = capsys.readouterr().out
+    assert "image-size 0 /dev/mmcblk0p3 %d %s" % (rows[0][2], "A.img") in out
+    assert "image-size overhead %d " % overhead in out
+
+
+def test_the_multi_layout_costs_each_game_its_own_used_bytes(mk, tmp_path,
+                                                             monkeypatch):
+    """Inside the shared p7 an image costs what its tree USES, not a whole
+    partition - which is the only number that answers 'which one do I drop'.
+
+    The used bytes come off a real ext4 superblock, which needs mke2fs; the
+    arithmetic on top of them is what this pins, so the two trees are given
+    sizes rather than made."""
+    A = mk.make_synthetic_card(str(tmp_path / "A.img"), "A", 0x0A0A0A0A)
+    B = mk.make_synthetic_card(str(tmp_path / "B.img"), "B", 0x0B0B0B0B)
+    C = mk.make_synthetic_card(str(tmp_path / "C.img"), "C", 0x0C0C0C0C)
+    used = {B: 3_000_000_000, C: 4_000_000_000}
+    monkeypatch.setattr(mk, "ext_used_bytes",
+                        lambda path, off: (used[path], used[path] * 2))
+    plan = mk.make_plan(A, [B, C], "multi")
+    assert plan.multi_each == [3_000_000_000, 4_000_000_000]
+    assert plan.multi_used == 7_000_000_000
+    rows, overhead = mk.image_costs(plan)
+    assert [r[1] for r in rows] == ["/dev/mmcblk0p3", "/dev/mmcblk0p7:img1",
+                                    "/dev/mmcblk0p7:img2"]
+    assert [r[2] for r in rows[1:]] == plan.multi_each
+    assert sum(r[2] for r in rows) + overhead == plan.total_bytes
+    # p7's slack is the card's overhead, not any one game's
+    assert overhead > plan.multi_part.count * mk.SECTOR - plan.multi_used - 1
+
+
+def test_build_work_bytes_counts_the_extraction_and_the_copy(mk, tmp_path,
+                                                             monkeypatch):
+    A = mk.make_synthetic_card(str(tmp_path / "A.img"), "A", 0x0A0A0A0A)
+    B = mk.make_synthetic_card(str(tmp_path / "B.img"), "B", 0x0B0B0B0B)
+    monkeypatch.setattr(mk, "ext_used_bytes",
+                        lambda path, off: (2_000_000_000, 4_000_000_000))
+    parts = mk.make_plan(A, [B], "parts")
+    ranges = mk.PRE_P1 * mk.SECTOR + sum(
+        p.count * mk.SECTOR for p in parts.prims + parts.logs)
+    assert mk.build_work_bytes(parts) == ranges
+    # the multi layout also reads every tree OUT and writes it back IN
+    multi = mk.make_plan(A, [B], "multi")
+    assert mk.build_work_bytes(multi) - 2 * multi.multi_used == \
+        mk.PRE_P1 * mk.SECTOR + sum(p.count * mk.SECTOR
+                                    for p in multi.prims + multi.logs)
+
+
+def test_the_meter_never_goes_backwards_or_past_the_total(mk, capsys):
+    """The one property a progress bar has to have.  A child that writes more
+    than its budget (metadata) and a step that ends early are both normal;
+    neither may move the number the wrong way."""
+    m = mk.Progress()
+    assert m.on is False and m.at == 0
+    m.start(1000, "start")
+    assert m.on and m.at == 0
+    m.step("first", 400)
+    m.sample(100)
+    assert m.at == 100
+    m.sample(50)                        # a late sample from behind: ignored
+    assert m.at == 100
+    m.sample(4000)                      # ...and one past the budget: capped
+    assert m.at == 400
+    m.step("second", 400)               # the first banks in full
+    assert m.at == 400
+    m.add(100)
+    assert m.at == 500
+    m.step("third", 10 ** 9)            # a budget bigger than the whole run
+    m.sample(10 ** 9)
+    assert m.at == 1000                 # ...still cannot pass the total
+    m.finish()
+    assert m.at == 1000
+    lines = [l for l in capsys.readouterr().out.splitlines()
+             if l.startswith("[card] progress")]
+    assert lines and lines[-1].startswith("[card] progress 1000/1000 100.0%")
+    seen = [int(l.split()[2].split("/")[0]) for l in lines]
+    assert seen == sorted(seen)
+
+
+def test_an_idle_meter_prints_nothing(mk, capsys):
+    """Every subcommand but build leaves it idle, and an idle meter must not
+    add a line to output the GUI parses for something else."""
+    m = mk.Progress()
+    m.step("nothing", 10)
+    m.add(5)
+    m.sample(5)
+    m.finish()
+    assert capsys.readouterr().out == ""
+
+
+def test_run_metered_hands_back_what_the_child_said(mk):
+    rc, out, err = mk.run_metered(
+        [sys.executable, "-c",
+         "import sys; sys.stdout.write('hi'); sys.stderr.write('bye'); "
+         "raise SystemExit(3)"], None, tick=0.01)
+    assert (rc, out, err) == (3, b"hi", b"bye")
+
+
+def test_proc_written_is_absent_rather_than_wrong(mk):
+    """It reads /proc/<pid>/io, which is Linux's.  Everywhere else it says it
+    does not know - and the meter then just has no live count, which is the
+    one honest fallback."""
+    assert mk.proc_written(-1) is None
+    got = mk.proc_written(os.getpid())
+    if sys.platform == "win32":
+        assert got is None
+    else:
+        assert got is None or got >= 0

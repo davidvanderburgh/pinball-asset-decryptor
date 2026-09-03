@@ -21055,6 +21055,15 @@ class MainWindow:
         card' - which only injects and reads back - fills the bar honestly
         instead of stopping a quarter of the way along.
 
+        ``index`` MAY BE FRACTIONAL - 1.34 is "a third of the way through
+        stage 1".  The chips light one stage at a time and take the whole
+        number; the BAR takes the fraction, which is what turns a bar that
+        jumped four times an hour into one that moves (David, on a build of
+        three images: "I have no idea what\u2019s going on or when it\u2019s
+        supposed to be done").  A fraction rather than a second argument
+        because this callback is stubbed in several places, and an extra
+        keyword would have had to be threaded through every one of them.
+
         The one seam the panel drives; it holds no widget of the footer's."""
         self._footer_owner = "multiboot"
         n = len(self._multiboot_phases)
@@ -21064,7 +21073,7 @@ class MainWindow:
             self.set_phase(n, mode="multiboot")         # every stage done
             self._progress_bar["value"] = 100
         else:
-            self.set_phase(min(index, n - 1), mode="multiboot")
+            self.set_phase(min(int(index), n - 1), mode="multiboot")
             span = max(1, total or n)
             self._progress_bar["value"] = min(100, int(100.0 * index / span))
         if status:

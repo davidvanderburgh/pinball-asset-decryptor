@@ -31,17 +31,19 @@ from pinball_decryptor.gui.multiboot_tab import (
     ANIM_LABEL, DEFAULT_SELECTOR_DIR, FRAME_H, FRAME_W, INSPECT_JSON,
     PREVIEW_BUILD_DIR, PREVIEW_MAX_FRAMES,
     ImageRow, MultibootForm, anim_period_ms, anim_spec, apply_commands,
-    art_spec, build_commands, bypass_commands, card_path_state, cell_anim,
+    art_spec, build_commands, bypass_commands, card_path_state,
+    card_size_view, cell_anim,
     cell_art, default_output_path, diff_forms, frame_pattern,
     manifest_sounds, menu_from_state, parse_snapshot_frames, path_root,
     probe_card_path, rows_from_state,
     edit_status_text, ensure_selector_args, fit_factors, form_from_inspect,
     host_path, inject_commands, inspect_commands, list_title,
     loaded_media_dir, media_fingerprint, media_specs_changed,
-    menu_summary, parse_anim_frames, parse_inspect, parse_plan, parse_refusal,
+    eta_text, menu_summary, parse_anim_frames, parse_inspect, parse_plan,
+    parse_progress, parse_refusal,
     parse_selector_path, plan_commands, prepare_commands, preview_box,
     preview_fingerprint, preview_prepare_args, preview_snapshot_args,
-    rebuild_blockers, size_plan_text, snapshot_commands, split_anim_source,
+    rebuild_blockers, snapshot_commands, split_anim_source,
     split_art_source, suggest_title, under_library, validate_form,
     write_preview_conf,
     build_args, inject_args)
@@ -760,26 +762,63 @@ def test_library_prefixes_are_the_tools_own(tmp_path):
     assert ours == theirs
 
 
-def test_plan_output_becomes_a_card_size_sentence():
-    text = ("p7   0x83 15353856     13402110     ...\n"
-            "images: 0=/dev/mmcblk0p3, 1=/dev/mmcblk0p7\n"
-            "image: 28755968 sectors = 14723055616 bytes (14.72 GB)\n"
-            "  fits Stern 8G  image size 7861174272: NO (spare -6861881344)\n"
-            "  fits Stern 16G image size 15494807552: YES (spare 771751936)\n"
-            "  fits Stern 32G image size 30359420928: YES (spare 15636365312)\n")
-    info = parse_plan(text)
+PLAN_TEXT = (
+    "p7   0x83 15353856     13402110     ...\n"
+    "images: 0=/dev/mmcblk0p3, 1=/dev/mmcblk0p7\n"
+    "image-size 0 /dev/mmcblk0p3 6861881344 turtles_pro-1_59_0.Release\n"
+    "image-size 1 /dev/mmcblk0p7:img1 6000000000 turtles_pro-1_59_0.1987\n"
+    "image-size overhead 1861174272 boot + rootfs + data + dump + slack\n"
+    "image: 28755968 sectors = 14723055616 bytes (14.72 GB)\n"
+    "  fits Stern 8G  image size 7861174272: NO (spare -6861881344)\n"
+    "  fits Stern 16G image size 15494807552: YES (spare 771751936)\n"
+    "  fits Stern 32G image size 30359420928: YES (spare 15636365312)\n")
+
+
+def test_plan_output_carries_the_size_of_every_image():
+    info = parse_plan(PLAN_TEXT)
     assert info["bytes"] == 14723055616
     assert info["fits"]["8G"] == (False, -6861881344)
     assert info["fits"]["16G"] == (True, 771751936)
-    s = size_plan_text(info)
-    assert "14.72 GB" in s and "Fits a 16 GB card" in s and "0.77 GB" in s
-    text32 = text.replace("16G image size 15494807552: YES (spare 771751936)",
-                          "16G image size 15494807552: NO (spare -1)")
-    assert "Needs a 32 GB card" in size_plan_text(parse_plan(text32))
+    # the per-image block, which is what the strip's bands are drawn from
+    assert info["sizes"] == [
+        (0, "/dev/mmcblk0p3", 6861881344, "turtles_pro-1_59_0.Release"),
+        (1, "/dev/mmcblk0p7:img1", 6000000000, "turtles_pro-1_59_0.1987")]
+    assert info["overhead"] == 1861174272
+    # ...and a size the tool could not measure is None, never a zero band
+    unknown = parse_plan("image-size 2 /dev/mmcblk0p7:img2 ? whatever.raw\n")
+    assert unknown["sizes"] == [(2, "/dev/mmcblk0p7:img2", None, "whatever.raw")]
+
+
+def test_the_size_view_names_the_card_to_buy():
+    view = card_size_view(parse_plan(PLAN_TEXT))
+    assert view["known"] and view["need"] == "16 GB" and not view["over"]
+    assert view["head"] == "16 GB"
+    # the bar is drawn against THE CARD YOU BUY, not the image
+    assert view["scale"] == 14723055616 + 771751936
+    assert "14.72 GB of code" in view["detail"]
+    assert "0.77 GB spare" in view["detail"]
+    # a band per image, then the card's own overhead, and they add up
+    assert [kind for _l, _b, kind in view["bands"]] == \
+        ["image", "image", "overhead"]
+    assert sum(b for _l, b, _k in view["bands"]) == view["total"]
+    assert view["bands"][0][0].endswith("turtles_pro-1_59_0.Release")
+
+
+def test_the_size_view_says_when_nothing_holds_it():
+    text32 = PLAN_TEXT.replace(
+        "16G image size 15494807552: YES (spare 771751936)",
+        "16G image size 15494807552: NO (spare -1)")
+    assert card_size_view(parse_plan(text32))["need"] == "32 GB"
     none = text32.replace("32G image size 30359420928: YES",
                           "32G image size 30359420928: NO")
-    assert "Does not fit" in size_plan_text(parse_plan(none))
-    assert size_plan_text(parse_plan("")) == ""
+    view = card_size_view(parse_plan(none))
+    assert view["over"] and view["head"] == "too big" and view["need"] is None
+    # the overflow is measured from the biggest card there is
+    assert view["cap"] == 14723055616 + 15636365312
+    assert view["scale"] == view["total"]      # the bar runs past the mark
+    assert "Drop an image" in view["detail"]
+    assert card_size_view(parse_plan(""))["known"] is False
+    assert card_size_view(None)["bands"] == []
 
 
 def test_suggest_title_splits_the_card_name():
@@ -1519,12 +1558,15 @@ def test_invalid_form_surfaces_error_and_builds_nothing(tmp_path,
         panel._build_card()
         assert "card library" in panel._hint.cget("text")
         assert calls == []
-        # The two runs the tab now starts by ITSELF refuse this form too:
-        # the size check has only one image to plan, and the sound prepare
-        # would be preparing for the output the library rule just refused.
+        # The other run the tab starts by ITSELF refuses this form too: the
+        # sound prepare would be preparing for the output the library rule
+        # just refused.  (The size check does NOT refuse a single image - one
+        # image is a card, and how big a card it needs is the question.)
         panel._auto_plan = True
         del panel._rows[1:]
-        assert panel._plan_now() is False
+        panel._rows[0].path = str(tmp_path / "not-here.raw")
+        assert panel._plan_now() is False        # ...but a missing file is
+        panel._rows[0].path = a
         assert calls == []
         panel.add_image(b)
         panel._rows[1].title = "TMNT 1987"
@@ -1608,7 +1650,11 @@ def test_busy_guard_refuses_a_second_run(tmp_path, monkeypatch):
         assert panel._run_commands([("plan", ["true"])]) is False
         panel._build_card()
         assert "already in progress" in panel._hint.cget("text")
-        assert str(panel._buildflash_btn.cget("state")) == "disabled"
+        # ...and the green button is the run's CANCEL while it is up - the
+        # one control that stays live, like the Write tab's Build button.
+        assert str(panel._buildflash_btn.cget("state")) == "normal"
+        assert panel._buildflash_btn.cget("text") == panel.CANCEL_TEXT
+        assert str(panel._menu_btn.cget("state")) == "disabled"
         # ...and the preview: refused, said on its own status line, and
         # nothing queued for the worker.
         assert panel.render_preview() is False
@@ -1616,6 +1662,7 @@ def test_busy_guard_refuses_a_second_run(tmp_path, monkeypatch):
         assert panel._pv_cache == {}
         panel._set_busy(False)
         assert str(panel._buildflash_btn.cget("state")) == "normal"
+        assert panel._buildflash_btn.cget("text") == panel.BUILD_FLASH_TEXT
     finally:
         root.destroy()
 
@@ -1803,7 +1850,8 @@ def test_run_commands_streams_the_tool_into_the_pane(tmp_path):
         pane = _pane(panel)
         assert "[card] hello from the tool" in pane
         assert "plan: exit 0" in pane
-        assert "Fits a 16 GB card" in panel._edit_lbl.cget("text")
+        assert panel.size_view()["need"] == "16 GB"
+        assert panel._size_need.cget("text") == "16 GB"
     finally:
         root.destroy()
 
@@ -4256,18 +4304,20 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
 
 
 def test_the_status_block_says_the_state_and_the_consequence(tmp_path):
-    """Two lines under the bar: what just happened, and what the two
-    writing buttons would do about it - with the card's size on the same
-    line, because that is the same question."""
+    """Two lines under the bar: what just happened, and what the writing
+    button would do about it.  The card's SIZE is not one of them any more -
+    it has the strip under the table (see the size tests), because half of a
+    clipped line is where it was missed."""
     root, panel, card, _media = _loaded(tmp_path)
     try:
-        # 1. the size sentence (Check size / the build's plan step)
+        # 1. the size goes to the strip and stays out of this line
         panel._plan_step("plan", 0,
                          "image: 28755968 sectors = 14723055616 bytes\n"
                          "  fits Stern 16G image size 15494807552: YES "
                          "(spare 771751936)\n")
-        assert "Fits a 16 GB card" in panel._edit_lbl.cget("text")
-        # 2. what Apply to card would write, beside it
+        assert panel._size_need.cget("text") == "16 GB"
+        assert "16 GB" not in panel._edit_lbl.cget("text")
+        # 2. what Apply to card would write has the line to itself
         assert "no changes yet" in panel._edit_lbl.cget("text")
         panel._timeout_var.set("8")
         assert panel._edit_lbl.cget("text").startswith(
@@ -4414,13 +4464,13 @@ def test_the_size_sentence_keeps_itself_true(tmp_path):
         panel._plan_step("plan", 0, "image: 1 sectors = 2 bytes\n"
                                     "  fits Stern 16G image size 3: YES "
                                     "(spare 4)\n")
-        assert "Fits a 16 GB card" in panel._plan_text
-        assert panel._plan_text in panel._edit_lbl.cget("text")
-        # A THIRD IMAGE IS A DIFFERENT CARD.  The sentence goes NOW - a
-        # wrong number is worse than none - and another run is armed.
+        assert panel.size_view()["need"] == "16 GB"
+        assert panel._size_need.cget("text") == "16 GB"
+        # A THIRD IMAGE IS A DIFFERENT CARD.  The size goes NOW - a wrong
+        # number is worse than none - and another run is armed.
         panel.add_image(c)
-        assert panel._plan_text == ""
-        assert "Fits a 16 GB card" not in panel._edit_lbl.cget("text")
+        assert panel.size_view() is None
+        assert panel._size_need.cget("text") == panel.SIZE_UNKNOWN
         assert panel._plan_job is not None
         assert len(calls) == 1
     finally:
@@ -4457,10 +4507,14 @@ def test_the_size_check_will_not_run_on_a_list_it_cannot_plan(tmp_path):
     try:
         a, b = _images(tmp_path, 2)
         panel.add_image(a)
-        assert panel._plan_now() is False        # one image is not a card
+        # ONE IMAGE IS A CARD: it has a size, and how big a card it needs is
+        # exactly the question the strip answers (it was gated at two, which
+        # left a single-image card with no size at all).
+        assert panel._plan_now() is True
+        del calls[:]                             # ...and that one really ran
         panel.add_image(b)
         panel._rows[1].path = str(tmp_path / "gone.raw")
-        assert panel._plan_now() is False        # ...nor is a missing file
+        assert panel._plan_now() is False        # a missing file is not
         assert calls == []
         panel._rows[1].path = b
         assert panel._plan_now() is True
@@ -4576,7 +4630,7 @@ def test_new_card_clears_the_form_and_leaves_editing_mode(tmp_path):
         assert panel._volume_var.get() == "50"
         assert panel._timeout_var.get() == "15"
         assert panel._bypass_var.get() is True
-        assert panel._plan_text == ""
+        assert panel._plan_info is None
         # The line under the buttons never goes blank any more: it is where
         # the mode is said now that the row has one control instead of two.
         assert panel._edit_lbl.cget("text") == multiboot_tab.EMPTY_PATH_TEXT
@@ -5644,7 +5698,7 @@ def test_a_restore_leaves_the_previous_projects_card_behind(tmp_path):
         assert panel._alarm_text == ""
         # ...and nothing the last form drew is still on screen or claimed
         assert panel._pv_cache == {} and panel._pv_shown is None
-        assert panel._pv_ready is None and panel._plan_text == ""
+        assert panel._pv_ready is None and panel._plan_info is None
         # ...so there is no way back to it - the row says nothing about a
         # card being edited, and Apply refuses even past the button.
         assert "editing" not in panel._edit_lbl.cget("text")
@@ -6642,5 +6696,202 @@ def test_the_machine_volume_tick_lives_in_the_menu_settings_and_the_state():
         assert panel.form().machine_volume is False
         assert menu_from_state({})["machine_volume"] is True
         assert menu_from_state({"machine_volume": False})["machine_volume"] is False
+    finally:
+        root.destroy()
+
+
+# ---- the size strip, the work meter and the run's Cancel -----------------------------
+def test_the_size_strip_waits_rather_than_showing_a_stale_number(tmp_path):
+    """A number about the LAST list is worse than no number: the strip says
+    what it is waiting for instead."""
+    root, panel = _panel(plan=True)
+    try:
+        assert panel._size_need.cget("text") == panel.SIZE_UNKNOWN
+        assert panel._size_detail.cget("text") == ""      # nothing to measure
+        a, b = _images(tmp_path, 2)
+        panel.add_image(a)
+        panel.add_image(b)
+        root.update()
+        # the debounce is armed, so the strip says the answer is coming
+        assert panel._plan_job is not None
+        assert "Measuring" in panel._size_detail.cget("text")
+        panel._plan_step("plan", 0, PLAN_TEXT)
+        root.update()
+        assert panel._size_need.cget("text") == "16 GB"
+        assert "0.77 GB spare" in panel._size_detail.cget("text")
+        view = panel.size_view()
+        assert len(view["bands"]) == 3
+        # ...and an image whose .raw is not on this machine cannot be measured
+        panel._rows[1].path = str(tmp_path / "elsewhere.raw")
+        panel._update_edit_status()
+        assert panel.size_view() is None
+        assert panel._size_need.cget("text") == panel.SIZE_UNKNOWN
+        assert "on this machine" in panel._size_detail.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_a_card_that_fits_nothing_says_so_in_the_strip(tmp_path):
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        none = PLAN_TEXT.replace(
+            "16G image size 15494807552: YES (spare 771751936)",
+            "16G image size 15494807552: NO (spare -1)").replace(
+            "32G image size 30359420928: YES (spare 15636365312)",
+            "32G image size 30359420928: NO (spare -2000000000)")
+        panel._plan_step("plan", 0, none)
+        root.update()
+        assert panel._size_need.cget("text") == "too big"
+        assert "Drop an image" in panel._size_detail.cget("text")
+        # the warning is coloured, not just worded
+        th = multiboot_tab.THEMES[panel._theme_fn()]
+        assert str(panel._size_need.cget("foreground")) == th["error"]
+    finally:
+        root.destroy()
+
+
+def test_the_work_meter_moves_the_bar_and_stays_out_of_the_log(tmp_path):
+    """The tool's progress lines drive the footer and nothing else: one a
+    second for an hour would bury the lines the Log is for."""
+    root, panel = _panel()
+    seen = []
+    panel._phase_fn = lambda index, total=None, status=None: \
+        seen.append((index, status))
+    argv = [sys.executable, "-c",
+            "print('[card] output x: 3 ranges to copy'); "
+            "print('[card] progress 250/1000 25.0% copying p3 (turtles) "
+            "into the card image'); "
+            "print('[card] progress 500/1000 50.0% copying p7 (games)')"]
+    done = []
+    try:
+        assert panel._run_commands(
+            [("build", argv)],
+            on_done=lambda rc, failed, texts: done.append(rc)) is True
+        _wait(root, lambda: done)
+        assert done == [0]
+        pane = _pane(panel)
+        assert "[card] output x: 3 ranges to copy" in pane
+        # ...and not one meter line (the echoed command line quotes them,
+        # which is why this looks at what parses as one, not at the text)
+        assert [l for l in panel.log_lines() if parse_progress(l)] == []
+        # the stage row was told a FRACTIONAL index - the chips stay on the
+        # Copy stage while the bar moves inside it
+        fracs = [i for i, _s in seen if isinstance(i, float)]
+        assert fracs == [1.25, 1.5]
+        assert "25% - copying p3 (turtles) into the card image" in \
+            [s for _i, s in seen if s]
+        # ...and the tab's own line says it too, where the eye already is
+        assert "50%" in panel._hint.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_the_estimate_comes_from_the_recent_rate(tmp_path):
+    root, panel = _panel()
+    clock = [1000.0]
+    try:
+        panel._prog_clock = lambda: clock[0]
+        panel._phase_index = 1
+        panel._progress_tick(0, 1000, 0.0, "copying")
+        assert "0%" in panel._hint.cget("text")
+        clock[0] += 10.0                        # 100 bytes in 10 s...
+        panel._progress_tick(100, 1000, 0.1, "copying")
+        # ...so 900 left is 90 s, said coarsely
+        assert "about 2 minutes left" in panel._hint.cget("text")
+        # a new step throws the samples away: the last stage's rate says
+        # nothing about the next one's
+        panel._phase_step("verify")
+        assert panel._prog_hist == []
+    finally:
+        root.destroy()
+
+
+def test_eta_text_is_coarse_or_silent():
+    assert eta_text(None) == "" and eta_text(-1) == ""
+    assert eta_text(10 ** 6) == ""              # not an estimate any more
+    assert eta_text(30) == "less than a minute left"
+    assert eta_text(90) == "about 2 minutes left"
+    assert eta_text(60) == "about 1 minute left"
+    assert eta_text(3600) == "about 1 hour left"
+    assert eta_text(3600 + 25 * 60) == "about 1h 25m left"
+
+
+def test_parse_progress_reads_the_meter_and_nothing_else():
+    assert parse_progress("[card] progress 250/1000 25.0% copying p3") == \
+        (250, 1000, 0.25, "copying p3")
+    assert parse_progress("[card] progress 0/0 0.0% preparing") == \
+        (0, 0, 0.0, "preparing")
+    assert parse_progress("[card] copying p3: 6.53 GB from x") is None
+    assert parse_progress("plan: exit 0") is None
+    assert parse_progress("") is None
+
+
+def test_cancel_stops_the_run_and_says_the_card_is_unfinished(tmp_path):
+    """The green button IS the run's Cancel, and pressing it kills the tool
+    where it stands - which is the point: a build copying three images onto
+    a card too small for them is an hour you get back."""
+    root, panel = _panel()
+    done = []
+    slow = [sys.executable, "-c",
+            "import time; print('[card] started', flush=True); time.sleep(60)"]
+    never = [sys.executable, "-c", "print('SHOULD NOT RUN')"]
+    try:
+        assert panel.cancel_run() is False       # nothing to cancel
+        assert panel._run_commands(
+            [("build", slow), ("verify", never)],
+            on_done=lambda rc, failed, texts: done.append((rc, failed))) is True
+        # ...on the PROCESS, not on a line: the echoed command line contains
+        # the tool's own source, so waiting for a word of it is waiting for
+        # nothing (it is already in the pane before Popen is called).
+        _wait(root, lambda: panel._proc is not None)
+        assert panel._buildflash_btn.cget("text") == panel.CANCEL_TEXT
+        proc = panel._proc
+        assert panel.cancel_run() is True
+        assert panel.cancel_run() is False       # one press is enough
+        assert panel._buildflash_btn.cget("text") == panel.CANCELLING_TEXT
+        _wait(root, lambda: done)
+        assert proc.poll() is not None           # the tool really died
+        assert "SHOULD NOT RUN" not in _pane(panel)   # ...and stopped there
+        assert done[0][0] != 0                   # a kill is a non-zero exit
+        assert panel._busy is False
+        assert panel.run_cancelled() is False    # cleared once it is over
+        assert panel._buildflash_btn.cget("text") == panel.BUILD_FLASH_TEXT
+        assert "cancelling" in _pane(panel).lower()
+    finally:
+        root.destroy()
+
+
+def test_a_cancelled_build_names_the_half_written_card(tmp_path):
+    root, panel = _panel()
+    said = []
+    slow = [sys.executable, "-c", "import time; time.sleep(60)"]
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        out = str(tmp_path / "out.multi.raw")
+        panel._out_var.set(out)
+        panel._run_commands = lambda cmds, **kw: (
+            said.append(kw.get("on_done")) or True)
+        panel._build_card()
+        assert said and said[0] is not None
+        panel._cancelled = True                  # as the worker leaves it
+        said[0](137, "build", {})
+        assert out in panel._edit_lbl.cget("text") + panel._hint.cget("text")
+        assert "unfinished" in panel._hint.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_cancel_drops_the_action_that_was_waiting_for_a_render(tmp_path):
+    """A press that STOPS a run must never start the next one."""
+    root, panel = _panel()
+    try:
+        panel._set_busy(True)
+        panel._pv_busy = True
+        panel._pending_run = (["queued"], None, None, frozenset())
+        assert panel.cancel_run() is True
+        assert panel._pending_run is None
     finally:
         root.destroy()

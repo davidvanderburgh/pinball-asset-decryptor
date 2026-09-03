@@ -2433,7 +2433,14 @@ _VERSION_ROW_RE = re.compile(
 
 def parse_plan(text):
     """What ``mkmulticard.py plan`` said: ``{"bytes": N or None, "fits":
-    {"16G": (True, spare), ...}, "versions": {index: "1.59.0", ...}}``.
+    {"16G": (True, spare), ...}, "versions": {index: "1.59.0", ...},
+    "sizes": [(index, device, bytes, source), ...], "overhead": N}``.
+
+    THE SIZES ARE WHAT THE STRIP DRAWS.  The tool prints what each game costs
+    on the finished card - a whole partition in the one-extra layout, the used
+    bytes of its tree inside the shared p7 otherwise - because "which one do I
+    drop" is the question a card that does not fit asks, and only the tool can
+    answer it: the .raw files on disk are all the same size.
 
     THE VERSIONS ARE WHY THE CODE COLUMN CAN BE FILLED AT ALL for images you
     ADD.  A card you LOAD reports each image's game code version through
@@ -2442,8 +2449,20 @@ def parse_plan(text):
     mismatched build, and prints it in a table.  Listening to that costs
     nothing and is the same number by the same route (David: "the code
     column is not being populated for me when i load in images")."""
-    info = {"bytes": None, "fits": {}, "versions": {}}
+    info = {"bytes": None, "fits": {}, "versions": {}, "sizes": [],
+            "overhead": None}
     for line in (text or "").splitlines():
+        m = _SIZE_OVER_RE.match(line.strip())
+        if m:
+            info["overhead"] = int(m.group(1))
+            continue
+        m = _SIZE_ROW_RE.match(line.strip())
+        if m:
+            size = m.group(3)
+            info["sizes"].append((int(m.group(1)), m.group(2),
+                                  None if size == "?" else int(size),
+                                  m.group(4).strip()))
+            continue
         m = _FITS_RE.search(line)
         if m:
             info["fits"][m.group(1)] = (m.group(2) == "YES", int(m.group(3)))
@@ -2458,25 +2477,122 @@ def parse_plan(text):
     return info
 
 
-def size_plan_text(info):
-    """One sentence for the tab: the smallest Stern card size the image fits
-    ('fits a 16 GB card', 'needs a 32 GB card'), or that none does."""
-    fits = (info or {}).get("fits") or {}
-    if not fits:
-        return ""
-    size = (info or {}).get("bytes")
-    head = "Card image %.2f GB. " % (size / 1e9) if size else ""
-    for key, word in (("8G", "Fits an 8 GB card"), ("16G", "Fits a 16 GB card"),
-                      ("32G", "Needs a 32 GB card")):
-        ok, spare = fits.get(key, (False, 0))
-        if ok:
-            return head + "%s (%.2f GB spare)." % (word, spare / 1e9)
-    return head + "Does not fit a 32 GB card - drop an image."
-
-
 # ---------------------------------------------------------------------------
 # what the compact list and the Menu settings button say
 # ---------------------------------------------------------------------------
+
+#: One row of the plan's own per-image size block.  ``image-size`` and not a
+#: bare index because the tool's VERSION table also starts with one, and two
+#: parsers reading each other's rows is how a size preview ends up naming a
+#: game code.
+_SIZE_ROW_RE = re.compile(r"^image-size (\d+) (\S+) (\d+|\?)\s*(.*)$")
+_SIZE_OVER_RE = re.compile(r"^image-size overhead (\d+)")
+
+#: A line of the build's own work meter.  It is the one line the tab reads for
+#: its progress bar and the one line it keeps OUT of the Log: one a second for
+#: an hour is not a record of anything.
+_PROGRESS_RE = re.compile(r"^\[card\] progress (\d+)/(\d+) ([\d.]+)%\s*(.*)$")
+
+
+def parse_progress(line):
+    """A tool progress line -> ``(done, total, fraction, what)``, or None for
+    every other line."""
+    m = _PROGRESS_RE.match((line or "").strip())
+    if not m:
+        return None
+    done, total = int(m.group(1)), int(m.group(2))
+    frac = min(1.0, max(0.0, done / float(total))) if total else 0.0
+    return done, total, frac, m.group(4).strip()
+
+
+def eta_text(seconds):
+    """``'about 12 minutes left'`` - or ``''`` when there is no honest answer.
+
+    Coarse ON PURPOSE.  A build's rate is a copy rate over a card reader and a
+    Windows drive; '11 m 43 s left' claims a precision it does not have, and a
+    number that jitters by minutes reads as a broken clock.  Under a minute it
+    says so instead of counting down to zero."""
+    if seconds is None or seconds != seconds or seconds < 0:    # NaN included
+        return ""
+    if seconds > 24 * 3600:
+        return ""                   # not an estimate by then, a bad sum
+    if seconds < 60:
+        return "less than a minute left"
+    mins = int(round(seconds / 60.0))
+    if mins < 60:
+        return "about %d minute%s left" % (mins, "" if mins == 1 else "s")
+    hours, mins = divmod(mins, 60)
+    if not mins:
+        return "about %d hour%s left" % (hours, "" if hours == 1 else "s")
+    return "about %dh %dm left" % (hours, mins)
+
+
+def _gbytes(n):
+    """Bytes the way an SD card is sold - decimal GB, two places."""
+    return "%.2f GB" % ((n or 0) / 1e9)
+
+
+#: The Stern card sizes in the order the size strip offers them - the same
+#: three the tool measures the image against.  The label is what a person
+#: BUYS; the bytes behind it are Stern's own image size for that card.
+CARD_SIZES = (("8G", "8 GB"), ("16G", "16 GB"), ("32G", "32 GB"))
+
+
+def card_size_view(info):
+    """WHAT THE SIZE STRIP SHOWS, from the plan's numbers and nothing else.
+
+    ``{"known", "need", "over", "total", "scale", "cap", "spare", "bands",
+    "head", "detail"}`` - ``bands`` being ``[(label, bytes, kind), ...]`` with
+    *kind* ``"image"`` or ``"overhead"``, and ``cap`` the biggest card there
+    is (where the overflow starts).
+
+    ``scale`` is the card the bar is drawn against - the smallest one that
+    fits - so the fill means "this much of the card you need is used" rather
+    than a fraction of some arbitrary maximum.  When nothing fits, the scale
+    is the image itself and the part past the biggest card is overflow.
+
+    A pure function of the tool's report: the drawing is the part that cannot
+    be tested, so it is kept down to placing what this decided."""
+    info = info or {}
+    total = info.get("bytes")
+    fits = info.get("fits") or {}
+    view = {"known": bool(total), "need": None, "over": False,
+            "total": total or 0, "scale": total or 1, "spare": None,
+            "cap": None, "bands": [], "head": "", "detail": ""}
+    if not total:
+        return view
+    biggest = fits.get(CARD_SIZES[-1][0])
+    if biggest is not None:
+        view["cap"] = total + biggest[1]
+    for key, label in CARD_SIZES:
+        ok, spare = fits.get(key, (False, 0))
+        if ok:
+            view["need"], view["spare"] = label, spare
+            view["scale"] = total + spare
+            break
+    else:
+        view["over"] = True
+        view["scale"] = total
+    for idx, dev, size, src in info.get("sizes") or ():
+        if size:
+            view["bands"].append(
+                ("Image %d - %s" % (idx, src or dev), size, "image"))
+    over = info.get("overhead")
+    if over:
+        view["bands"].append(
+            ("Boot, rootfs, /data, /dump and slack", over, "overhead"))
+    if view["over"]:
+        key, biggest = CARD_SIZES[-1]
+        short = -(fits.get(key) or (False, 0))[1]
+        view["head"] = "too big"
+        view["detail"] = ("%s of code - %s more than a %s card holds. Drop an "
+                          "image." % (_gbytes(total), _gbytes(short), biggest))
+    else:
+        view["head"] = view["need"]
+        view["detail"] = "%s of code, %s spare on a %s card." % (
+            _gbytes(total), _gbytes(view["spare"] or 0), view["need"])
+    return view
+
 
 def _shorten(text, width=40):
     """*text* with its middle replaced by ``…`` so it cannot widen a column.
@@ -3330,6 +3446,28 @@ class MultibootPanel:
         self._pv_cancel = False         # ...and an action is waiting for it
         self._pending_run = None        # the action waiting (_run_commands)
         self._proc = None
+        self._proc_preview = False      # ...and whose run it belongs to
+        #: CANCELLING A RUN.  ``_cancelled`` is set by :meth:`cancel_run` and
+        #: stays up until the run's own ``on_done`` has seen it, so the
+        #: handler can say 'cancelled' instead of 'failed at build (exit 1)' -
+        #: a killed tool is a non-zero exit like any other.  ``_cancel_pending``
+        #: is the button's state: one press is enough, and the second one has
+        #: nothing left to kill.
+        self._cancelled = False
+        self._cancel_pending = False
+        #: The stage row's index the progress lines belong to, and the recent
+        #: (clock, bytes) samples the estimate is made from.  A deque, not a
+        #: rate carried forward: a build's speed changes by an order of
+        #: magnitude between the debugfs extraction and the raw copy, and an
+        #: average over the whole run would still be quoting the first stage's
+        #: rate an hour later.
+        self._phase_index = 0
+        self._prog_hist = []
+        #: ...and the clock they are stamped with, injectable the way the
+        #: preview's ``_play_clock`` is.  A test that reached into the time
+        #: module instead would leave a frozen clock behind it for every
+        #: other test in the same worker.
+        self._prog_clock = time.monotonic
         self._stopped = False
         #: Worker -> main-loop handoff.  THE WORKER NEVER TOUCHES TK: it puts
         #: callables here and _drain, an ``after`` timer that runs only while
@@ -3342,15 +3480,14 @@ class MultibootPanel:
         self._drain_job = None
         self._loading = False           # editor <- row, not row <- editor
         self._out_auto_value = ""       # the last output path WE filled in
+        #: The last plan's report, which is what the size strip under the
+        #: images table draws (see :meth:`_build_size`).  None means nobody
+        #: has measured THIS list, and the strip says so rather than leaving
+        #: the last card's number up: a stale size is worse than no size.
         self._plan_info = None
-        #: The size sentence the last plan printed.  It shares the status
-        #: block's second line with 'what Apply to card would write': the
-        #: block is two lines, and both of these are the same question -
-        #: what the button under them would do.
-        self._plan_text = ""
         #: THE SIZE CHECK RUNS ITSELF (see :meth:`_maybe_plan`).
-        #: ``_plan_for`` is the image list ``_plan_text`` is about, so the
-        #: sentence is blanked the moment the list stops being that one;
+        #: ``_plan_for`` is the image list ``_plan_info`` is about, so the
+        #: strip is blanked the moment the list stops being that one;
         #: ``_plan_job`` is its debounce.  ``PAD_MULTIBOOT_PLAN=0`` is its
         #: own off switch, and the panel flag under it is what the tests
         #: and the screenshot rig set: this is the one thing on the tab
@@ -3728,6 +3865,8 @@ class MultibootPanel:
            per image carrying that image's own settings in columns, four
            icon columns at the right edge that act on the row they sit in,
            and a dim '+ Add an image…' row at the bottom that adds one,
+        3b. the SIZE STRIP right under it - the SD card these images need,
+           with a band per image showing what each one costs of it,
         4. one bottom bar - Menu settings… on the left, the actions on the
            right - and the status under it.
 
@@ -3754,6 +3893,7 @@ class MultibootPanel:
         # the right side of the thing it names.
         self._build_status(outer, th)
         self._build_table(outer, th)
+        self._build_size(outer, th)
         self._build_actions(outer, th)
         frame.bind("<Destroy>", self._on_destroy, add="+")
         # A notebook maps the selected tab's frame and unmaps the rest,
@@ -4271,6 +4411,150 @@ class MultibootPanel:
 
     # -- 4. the bottom bar, and the status ------------------------------
 
+    #: The bar's height in the strip's one row.
+    SIZE_BAR_H = 20
+
+    #: What the strip says while nobody has measured this list yet.  Never a
+    #: number: a stale size is worse than no size, which is the rule the
+    #: sentence beside the status line already follows.
+    SIZE_UNKNOWN = "\u2014"
+
+    SIZE_TIP = (
+        "How big an SD card these images need - measured by the tool, not "
+        "guessed from the .raw files, which are all the same size whatever "
+        "is inside them. The bar is the card you would have to buy: each "
+        "band is one image's games, and the grey one at the end is what the "
+        "card spends on itself (boot, rootfs, /data, /dump, and the slack "
+        "the shared games partition is built with). It re-measures itself "
+        "whenever the image list changes.")
+
+    def _build_size(self, parent, th):
+        """THE SIZE STRIP - the card these images need, under the images.
+
+        David hit this the hard way: three images onto a 16 GB blank he had
+        already bought, with nothing saying so until the build had run. The
+        size WAS being measured (see :meth:`_maybe_plan`), but it was half of
+        one clipped line in the status block, where it read as a footnote to
+        the sentence beside it.
+
+        A BAR, because the question a card that does not fit asks is not only
+        'does it fit' but 'which one do I drop' - so every image is a band of
+        its own, sized by what the tool says that image really costs on the
+        card, and the bar is drawn against THE CARD YOU WOULD HAVE TO BUY
+        rather than some fixed maximum. A card that fits nothing draws its
+        overflow past the biggest card's mark in the destructive-action
+        colour.
+
+        ONE ROW, so the picture above keeps its pixels: the tab is built to
+        fit a 768-high desktop and every row here is paid for out of the
+        preview (see :meth:`_chrome_h`)."""
+        row = ttk.Frame(parent)
+        row.pack(fill=tk.X, pady=(6, 0))
+        self._size_row = row
+        self._size_lbl = ttk.Label(row, text="SD card needed:")
+        self._size_lbl.pack(side=tk.LEFT)
+        self._size_need = ttk.Label(row, text=self.SIZE_UNKNOWN, width=9,
+                                    anchor=tk.W)
+        self._size_need.pack(side=tk.LEFT, padx=(6, 8))
+        # The sentence is packed BEFORE the canvas and to the right, so the
+        # BAR is the thing in the row that gives way when the tab is narrow -
+        # this app unmaps the last widget of a row it cannot fit, and the
+        # words are the half that has to survive.
+        self._size_detail = ttk.Label(row, text="", foreground=th["gray"],
+                                      anchor=tk.E)
+        self._size_detail.pack(side=tk.RIGHT, padx=(10, 0))
+        self._size_canvas = tk.Canvas(row, height=self.SIZE_BAR_H,
+                                      highlightthickness=0, bd=0,
+                                      bg=th["trough"])
+        self._size_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._size_canvas.bind("<Configure>", lambda _e: self._draw_size())
+        self._size_tip = _Tooltip(self._size_canvas, self.SIZE_TIP,
+                                  self._theme_fn)
+        self._size_need_tip = _Tooltip(self._size_need, self.SIZE_TIP,
+                                       self._theme_fn)
+        self._size_view = None
+
+    def size_view(self):
+        """What the strip is showing - the seam the tests read."""
+        return self._size_view
+
+    def _draw_size(self):
+        """Draw the strip from the last plan, or its unmeasured state.
+
+        Every decision in it is :func:`card_size_view`'s; this only places
+        what that returned."""
+        canvas = getattr(self, "_size_canvas", None)
+        if canvas is None:
+            return
+        view = card_size_view(self._plan_info) if self._plan_info else None
+        self._size_view = view
+        th = THEMES.get(self._theme_fn()) or THEMES["dark"]
+        try:
+            canvas.delete("all")
+            canvas.configure(bg=th["trough"])
+            width = max(1, canvas.winfo_width())
+            height = self.SIZE_BAR_H
+            if not view or not view["known"]:
+                self._size_need.configure(text=self.SIZE_UNKNOWN,
+                                          foreground=th["gray"])
+                self._size_detail.configure(text=self._size_waiting(),
+                                            foreground=th["gray"])
+                self._size_tip.text = self.SIZE_TIP
+                return
+            tone = th["error"] if view["over"] else th["fg"]
+            self._size_need.configure(text=view["head"], foreground=tone)
+            self._size_detail.configure(
+                text=view["detail"],
+                foreground=th["error"] if view["over"] else th["gray"])
+            scale = float(view["scale"] or 1)
+            x = 0.0
+            for label, size, kind in view["bands"]:
+                w = width * size / scale
+                canvas.create_rectangle(
+                    x, 0, x + w, height, width=0,
+                    fill=th["gray"] if kind == "overhead" else th["accent"])
+                if x > 0:               # a hairline, so two bands read as two
+                    canvas.create_line(x, 0, x, height, fill=th["trough"])
+                x += w
+            if view["over"] and view["cap"]:
+                # Everything past the biggest card there is, in the colour
+                # the app uses for what it will not do.
+                mark = width * (view["cap"] / scale)
+                canvas.create_rectangle(mark, 0, width, height, width=0,
+                                        fill=th["error"])
+                canvas.create_line(mark, 0, mark, height, fill=th["fg"])
+            canvas.create_rectangle(0, 0, width - 1, height - 1,
+                                    outline=th["border"])
+            self._size_tip.text = self.SIZE_TIP + "\n\n" + "\n".join(
+                "%s: %s" % (label, _gbytes(size))
+                for label, size, _kind in view["bands"])
+        except tk.TclError:                             # pragma: no cover
+            pass
+
+    def _size_waiting(self):
+        """The strip's line while there is no measurement: what it is waiting
+        for, or nothing at all when there is nothing to measure."""
+        if len(self._rows) < 1:
+            return ""
+        # WHAT IT CANNOT MEASURE COMES FIRST.  A list with a missing .raw
+        # still arms the debounce (the check is _plan_now's, a second later),
+        # so asking about the job first would say "Measuring..." for ever
+        # about a card nothing is going to measure.
+        missing = [r for r in self._rows
+                   if not (r.path or "").strip()
+                   or not os.path.isfile((r.path or "").strip().strip(chr(34)))]
+        if missing:
+            return ("The images have to be on this machine to be measured."
+                    if len(missing) < len(self._rows) else "")
+        if self._plan_job is not None or self._plan_busy():
+            return "Measuring\u2026"
+        return ""
+
+    def _plan_busy(self):
+        """True while the size check itself is on the worker - what tells
+        'nobody has measured this' from 'the answer is on its way'."""
+        return bool(self._pv_busy and self._plan_for != self._plan_key())
+
     def _build_actions(self, parent, th):
         """THE ONE ACTION BAR - with the source row at the top, the only
         place in the tab a button lives.  Menu settings… on the left with
@@ -4331,9 +4615,14 @@ class MultibootPanel:
         # SD card…': the dialog decides Apply-vs-Build for the person, and
         # can flash in the same step.
         self._buildflash_btn = ttk.Button(
-            row, text="Build / flash card…", width=18,
+            row, text=self.BUILD_FLASH_TEXT, width=18,
             command=self._open_build_flash, style="Go.TButton")
         self._buildflash_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        # ...and it says what it is in whichever life it is in: while a run
+        # is up this button IS the Cancel, and what a cancel costs is not
+        # something to find out afterwards.
+        self._buildflash_tip = _Tooltip(self._buildflash_btn,
+                                        self.BUILD_FLASH_TIP, self._theme_fn)
         # What Menu settings… holds, in the space between the two groups -
         # packed LAST and expanding, because this app unmaps the last
         # widget of a row it cannot fit and the thing that gives way first
@@ -4346,6 +4635,92 @@ class MultibootPanel:
         self._action_btns = [
             self._buildflash_btn, self._emu_btn,
             self._menu_btn, self._browse_btn, self._new_btn]
+
+    #: The green button's two lives.  While a run is up it IS the run's
+    #: Cancel - the shape the Write and Extract tabs have had since a tester
+    #: hit a second Cancel widget belonging to somebody else's run.
+    BUILD_FLASH_TEXT = "Build / flash card\u2026"
+    CANCEL_TEXT = "Cancel"
+    CANCELLING_TEXT = "Cancelling\u2026"
+
+    BUILD_FLASH_TIP = (
+        "Write the card. The dialog decides for you whether that is a full "
+        "build (every image copied - the slow one) or an Apply, which "
+        "rewrites the menu of the card you loaded in seconds, and it can "
+        "flash an SD card in the same step. While the run is going this "
+        "button is its Cancel.")
+
+    CANCEL_TIP = (
+        "Stop the run in progress. The tool is killed where it stands, so a "
+        "card being BUILT is left half-written and has to be built again - "
+        "which is the point: a build that is copying three images onto a "
+        "card too small for them is an hour you get back.")
+
+    def cancel_run(self):
+        """Stop the run in flight.  True when there was one to stop.
+
+        WHAT THIS COSTS, said plainly rather than hidden behind a
+        confirmation: the tool is killed where it stands, so a card being
+        built is left partly written - it is not a card, and building again
+        writes over it.  Nothing else is at risk: the images are read, never
+        written, and an Apply that is killed mid-inject leaves the card's own
+        selector files half replaced, which the next Apply redoes from
+        scratch.
+
+        Killing the Windows-side ``wsl.exe`` DOES take the Linux process with
+        it (measured on this machine: the child bash and its debugfs are gone
+        within a second), so there is no orphan copying into the card behind
+        the tab's back.
+
+        The queued action, if one was waiting for a render, is dropped: a
+        press that stops a run must not start the next one."""
+        if not self._busy or self._cancel_pending:
+            return False
+        self._cancel_pending = True
+        self._cancelled = True
+        self._pending_run = None
+        self._write("[multi-boot] cancelling - stopping the tool now.")
+        self._ok("Cancelling\u2026")
+        self._sync_build_button()
+        try:
+            self._phase_fn(None, status="Cancelling\u2026")
+        except Exception:                               # noqa: BLE001
+            pass
+        proc, mine = self._proc, not self._proc_preview
+        if proc is not None and mine:
+            try:
+                proc.kill()
+            except Exception:                           # noqa: BLE001
+                pass            # it finished between the press and the kill
+        return True
+
+    def run_cancelled(self):
+        """True while the run that has just finished was cancelled - what
+        lets a done handler say 'cancelled' instead of 'failed (exit 1)'."""
+        return bool(self._cancelled)
+
+    def _sync_build_button(self):
+        """The green button, in whichever of its two lives it is in."""
+        btn = getattr(self, "_buildflash_btn", None)
+        if btn is None:
+            return
+        if self._busy and self._cancel_pending:
+            cfg = dict(text=self.CANCELLING_TEXT, state=tk.DISABLED,
+                       style="Danger.TButton")
+        elif self._busy:
+            cfg = dict(text=self.CANCEL_TEXT, command=self.cancel_run,
+                       state=tk.NORMAL, style="Danger.TButton")
+        else:
+            cfg = dict(text=self.BUILD_FLASH_TEXT,
+                       command=self._open_build_flash,
+                       state=tk.NORMAL, style="Go.TButton")
+        try:
+            btn.configure(**cfg)
+        except tk.TclError:                             # pragma: no cover
+            pass
+        tip = getattr(self, "_buildflash_tip", None)
+        if tip is not None:
+            tip.text = self.CANCEL_TIP if self._busy else self.BUILD_FLASH_TIP
 
     def _build_status(self, parent, th):
         """The status under the bar: what just happened, and what the two
@@ -4427,7 +4802,7 @@ class MultibootPanel:
         tab's own requested height: that is computed FROM the picture, so
         measuring the picture against it is a loop (it was, twice).  None
         of these depends on the canvas."""
-        h = 14 + 8 + 8 + 10 + 8         # the pads between the five rows
+        h = 14 + 8 + 8 + 10 + 8 + 6     # the pads between the rows
         h += 4 + 2                      # the strip's pad, the canvas border
         # The version banner, ONLY while it is up: it is not part of the
         # ordinary tab, and when it appears the picture is what pays for it
@@ -4437,7 +4812,7 @@ class MultibootPanel:
         if alarm is not None and alarm.winfo_manager():
             h += alarm.winfo_reqheight() + 6            # its own top pad
         for name in ("_src_row", "_pv_strip", "_table_box", "_action_row",
-                     "_status_wrap", "_row_lbl"):
+                     "_status_wrap", "_row_lbl", "_size_row"):
             widget = getattr(self, name, None)
             if widget is None:
                 continue
@@ -4894,7 +5269,6 @@ class MultibootPanel:
         self._out_auto_value = ""
         self._show_alarm(None)
         self._plan_info = None
-        self._plan_text = ""
         self._hl_touched = False
         self._loading = True
         try:
@@ -5695,7 +6069,6 @@ class MultibootPanel:
         self._pv_ready = None
         self._pv_photo = None
         self._plan_info = None
-        self._plan_text = ""
         self._drop_photos()
         self._stop_play(None)
         self._pv_placeholder()
@@ -5851,9 +6224,9 @@ class MultibootPanel:
             return
         self._plan_for = key
         self._plan_info = None
-        self._plan_text = ""
+        self._draw_size()               # the stale number goes NOW, not later
         self._cancel_plan()
-        if len(key) < 2 or not self._auto_plan:
+        if len(key) < 1 or not self._auto_plan:
             return
         try:
             self._plan_job = self._timer().after(self.PLAN_DEBOUNCE_MS,
@@ -5880,12 +6253,13 @@ class MultibootPanel:
         if self._stopped or not self._auto_plan:
             return False
         key = self._plan_key()
+        self._draw_size()               # 'Measuring...' while the tool runs
         # THE ONLY READINESS THIS RUN NEEDS.  Not validate_form: the plan
         # reads the images and nothing else, so a half-typed title or an
         # output path that is still being typed is no reason to leave the
         # size unknown - and a missing .raw is, because the tool would only
         # print a refusal into the Log nobody asked it to.
-        if len(key) < 2 or not all(p and os.path.isfile(p) for p in key):
+        if len(key) < 1 or not all(p and os.path.isfile(p) for p in key):
             return False
         form = self.form()
 
@@ -5924,15 +6298,14 @@ class MultibootPanel:
             return
         if rc == 0:
             self._plan_info = parse_plan(text)
-            self._plan_text = size_plan_text(self._plan_info)
             self._take_versions(self._plan_info.get("versions") or {})
         else:
-            self._plan_text = ""
+            self._plan_info = None
         # WHAT THE SENTENCE NOW DESCRIBES.  Claimed here rather than when
         # the run was asked for, so the build's own plan step - the same
         # answer, about the same images - keeps the tab from asking twice.
         self._plan_for = self._plan_key()
-        self._update_edit_status()
+        self._update_edit_status()          # ...which redraws the size strip
 
     def _take_versions(self, versions):
         """Put the game code versions the tool just read into the table.
@@ -5978,7 +6351,7 @@ class MultibootPanel:
             if not self._confirm_overwrite(form.out):
                 return
             form.force = True
-        self._plan_text = ""
+        self._plan_info = None
         self._update_edit_status()
         cmds = build_commands(form)
         if form.media_dir:
@@ -5998,6 +6371,13 @@ class MultibootPanel:
                     " (no prepared media - text-only menu)"))
                 if after is not None:
                     after()
+            elif self.run_cancelled():
+                # The half-written file is NOT left unmentioned: it is the
+                # size of a card, it is at the path the box names, and the
+                # only thing to do with it is build over it.
+                self._ok("Build cancelled at %s. %s is unfinished - it is "
+                         "not a card; building again writes over it."
+                         % (failed or "the start", form.out))
             else:
                 self._error("%s failed (exit %d) - see the tool output."
                             % (failed or "the build", rc))
@@ -6119,6 +6499,12 @@ class MultibootPanel:
 
         def done(rc, failed, texts):
             if rc != 0:
+                if self.run_cancelled():
+                    # A load only READS the card, so there is nothing to
+                    # warn about and nothing to clean up but the empty dir
+                    # the branch below removes.
+                    self._ok("Reading %s was cancelled." % path)
+                    return
                 why = parse_refusal(texts.get(failed, "")) or \
                     "%s failed (exit %d) - see the tool output." % (failed, rc)
                 self._error("Cannot read %s: %s" % (path, why))
@@ -6357,8 +6743,14 @@ class MultibootPanel:
 
         def done(rc, failed, _texts):
             if rc != 0:
-                self._error("Apply to card failed at %s (exit %d) - see the "
-                            "tool output." % (failed or "the start", rc))
+                if self.run_cancelled():
+                    self._ok("Apply cancelled at %s. The card's menu may be "
+                             "half written - press Build / flash card again "
+                             "to finish it." % (failed or "the start"))
+                else:
+                    self._error("Apply to card failed at %s (exit %d) - see "
+                                "the tool output." % (failed or "the start",
+                                                      rc))
                 self._update_edit_status()
                 return
             # The card now says what the form says: the tools wrote it and
@@ -6383,9 +6775,14 @@ class MultibootPanel:
 
     def _update_edit_status(self):
         """THE CONSEQUENCE LINE - the status block's second line: what the
-        card path is pointing at, what Apply to card would write (or why
-        only a rebuild can), and how big the card would be.  Called after
-        every keystroke.
+        card path is pointing at and what Apply to card would write (or why
+        only a rebuild can).  Called after every keystroke.
+
+        THE SIZE IS NO LONGER HALF OF IT.  It used to share this line, and
+        being half of one clipped sentence is how three images went onto a
+        16 GB card that could not hold them; it has the strip under the
+        table now (:meth:`_build_size`), and this redraws it because this is
+        what runs when the thing it measures may have moved.
 
         They share one line because they are one question - what would the
         button under them do - and the block has room for one line each.
@@ -6402,10 +6799,9 @@ class MultibootPanel:
         lbl = getattr(self, "_edit_lbl", None)
         if lbl is None:
             return
-        # FIRST, because the size sentence is half of the line built below
-        # and this is what decides whether it is still true: asking after
-        # the label had been written left the stale number on screen until
-        # something else redrew it.
+        # FIRST, because it is what decides whether the size on screen is
+        # still about this list: asking after the strip had been drawn left
+        # the stale number up until something else redrew it.
         self._maybe_plan()
         th = THEMES.get(self._theme_fn()) or THEMES["dark"]
         field = self._out_var.get().strip().strip('"')
@@ -6419,9 +6815,9 @@ class MultibootPanel:
         # with the bypass tick itself - the bypass is always on now, so it
         # can never be untied.  The Apply-vs-Build decision that used to
         # live here is _write_plan's now, off the same card_path_state.)
-        line = "  ·  ".join(p for p in (text, self._plan_text) if p)
+        self._draw_size()       # the size the plan found, under the images
         try:
-            lbl.configure(text=self._status_line(line), foreground=th[tone])
+            lbl.configure(text=self._status_line(text), foreground=th[tone])
         except tk.TclError:
             pass
         self._can_read = bool(can_read)
@@ -8263,12 +8659,15 @@ class MultibootPanel:
         if table is not None:
             table.set_busy(busy)        # the row icons must not act mid-run
         for btn in list(getattr(self, "_action_btns", ())):
-            if btn is None:
+            # ...every one but the green one, which becomes the run's Cancel
+            # rather than going grey with the rest (see _sync_build_button).
+            if btn is None or btn is getattr(self, "_buildflash_btn", None):
                 continue
             try:
                 btn.configure(state=tk.DISABLED if busy else tk.NORMAL)
             except tk.TclError:
                 pass
+        self._sync_build_button()
         if not busy:
             # Greyed for good, not just for the run: a panel built without
             # the app has nowhere to run the card.  (Flashing lives in the
@@ -8315,10 +8714,59 @@ class MultibootPanel:
         index = self.PHASE_OF.get(label)
         if index is None:
             return
+        # The stage the progress lines that follow belong to, and a clean
+        # slate for the estimate: the rate of the step that just ended says
+        # nothing about the one starting (a debugfs extraction and a raw
+        # copy are an order of magnitude apart).
+        self._phase_index = index
+        self._prog_hist = []
         try:
             self._phase_fn(index, status=self.PHASE_STATUS.get(label))
         except Exception:                               # noqa: BLE001
             pass                        # the window went; the run has not
+
+    #: How long a window of samples the estimate is made from.  Long enough
+    #: that a chunk boundary does not swing it, short enough that it follows
+    #: a real change of stage within a few lines.
+    PROGRESS_WINDOW_S = 45.0
+
+    def _progress_tick(self, done, total, frac, what):
+        """One line of the build's own work meter: move the bar, and say how
+        far along it is and how long is left.
+
+        THE ESTIMATE COMES FROM THE RECENT RATE and nothing else - no stage
+        weights, no remembered speed from the last build.  The bytes are the
+        tool's; the clock is ours, because the tool's own line is a snapshot
+        and the interval between two of them is what a rate is."""
+        now = self._prog_clock()
+        hist = self._prog_hist
+        hist.append((now, done))
+        while len(hist) > 2 and now - hist[0][0] > self.PROGRESS_WINDOW_S:
+            del hist[0]
+        eta = ""
+        if len(hist) >= 2:
+            span, moved = now - hist[0][0], done - hist[0][1]
+            if span > 0 and moved > 0:
+                eta = eta_text((total - done) / (moved / span))
+        pct = "%d%%" % int(frac * 100)
+        line = " - ".join(p for p in (pct, what, eta) if p)
+        try:
+            # A FRACTIONAL STAGE INDEX: the chips still light one stage at a
+            # time, and the bar moves inside it.  See
+            # MainWindow.set_multiboot_phase, which is where the two are told
+            # apart - a signature with a 'fraction' argument would have had
+            # to be threaded through every stub that stands in for it.
+            self._phase_fn(self._phase_index + min(1.0, max(0.0, frac)),
+                           status=line)
+        except Exception:                               # noqa: BLE001
+            pass
+        self._ok(line, extra=False)
+
+    def _phase_cancelled(self):
+        try:
+            self._phase_fn(None, status="Cancelled")
+        except Exception:                               # noqa: BLE001
+            pass
 
     def _phase_done(self, rc, failed):
         try:
@@ -8366,6 +8814,7 @@ class MultibootPanel:
             if self._busy:
                 self._error("A run is already in progress.")
                 return False
+            self._cancelled = self._cancel_pending = False
             self._set_busy(True)
             if self._pv_busy:
                 self._pv_cancel = True
@@ -8384,6 +8833,10 @@ class MultibootPanel:
             failed = None
             texts = {}
             for label, argv in cmds:
+                if not preview and self._cancelled:
+                    # Cancel was pressed between two steps: stop here rather
+                    # than start the next tool.
+                    break
                 if preview and self._pv_cancel:
                     # An action is waiting for the worker: stop between
                     # steps rather than mid-tool, and say nothing - the
@@ -8409,12 +8862,20 @@ class MultibootPanel:
                                  % (label, exc))
                     rc, failed = 1, label
                     break
-                self._proc = proc
+                self._proc, self._proc_preview = proc, preview
                 lines = []
                 echo = label not in quiet
                 try:
                     for raw in proc.stdout:
                         line = raw.decode("utf-8", "replace").rstrip()
+                        tick = parse_progress(line)
+                        if tick is not None and not preview:
+                            # The work meter: it drives the bar and stops
+                            # there.  One line a second for an hour is not a
+                            # record of anything, and putting it in the Log
+                            # would bury the lines that are.
+                            self._ui(lambda t=tick: self._progress_tick(*t))
+                            continue
                         lines.append(line)
                         if echo:
                             self._append(line)
@@ -8422,6 +8883,12 @@ class MultibootPanel:
                     pass                                # pipe closed under us
                 rc = proc.wait()
                 self._proc = None
+                if not preview and self._cancelled:
+                    # The kill IS the non-zero exit; the run stops here and
+                    # the finish below says cancelled, not failed.
+                    texts[label] = "\n".join(lines)
+                    failed = label
+                    break
                 texts[label] = "\n".join(lines)
                 if not echo and rc != 0:
                     for line in lines:                  # it failed: say why
@@ -8458,10 +8925,18 @@ class MultibootPanel:
                         self._pv_say("")
                         return
                 else:
+                    cancelled = self._cancelled
+                    self._cancel_pending = False
                     self._set_busy(False)
-                    self._phase_done(rc, failed)
+                    if cancelled:
+                        self._phase_cancelled()
+                    else:
+                        self._phase_done(rc, failed)
                 if on_done is not None:
                     on_done(rc, failed, texts)
+                if not preview:
+                    # Held until HERE so the handler above could see it.
+                    self._cancelled = False
             self._ui(finish)
 
         threading.Thread(target=run, daemon=True).start()

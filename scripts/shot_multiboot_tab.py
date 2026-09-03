@@ -170,11 +170,15 @@ CARD = (r"D:\Pinball\TMNT 1987\multi"
 #: which is what a redraw would draw).
 TIMEOUT_ON_CARD, TIMEOUT_NOW = 15, 20
 
-#: mkmulticard.py plan, as it reports two 8G images side by side - the
-#: lines the tab's parser reads.  Fed to the same _plan_step the size check
-#: button's worker calls, so the sentence in the shot is the real one.
+#: mkmulticard.py plan, as it reports three 8G images on one card - the
+#: lines the tab's parser reads.  Fed to the same _plan_step the size check's
+#: own worker calls, so the SIZE STRIP in the shot is drawn from real output.
 PLAN_TEXT = (
-    "images: 0=/dev/mmcblk0p3, 1=/dev/mmcblk0p7\n"
+    "images: 0=/dev/mmcblk0p3, 1=/dev/mmcblk0p7:img1, 2=/dev/mmcblk0p7:img2\n"
+    "image-size 0 /dev/mmcblk0p3 6861881344 turtles_pro-1_59_0.Release\n"
+    "image-size 1 /dev/mmcblk0p7:img1 3400000000 turtles_pro-1_59_0.1987\n"
+    "image-size 2 /dev/mmcblk0p7:img2 2600000000 turtles_pro-1_59_0.arcade\n"
+    "image-size overhead 1861174272 boot + rootfs + data + dump + slack\n"
     "image: 28755968 sectors = 14723055616 bytes (14.72 GB)\n"
     "  fits Stern 8G  image size 7861174272: NO (spare -6861881344)\n"
     "  fits Stern 16G image size 15494807552: YES (spare 771751936)\n"
@@ -433,8 +437,12 @@ def measure(label, collect=False):
     # even though it is packed only while a card's images disagree: it is
     # a CHILD from the start, so leaving it out of this list shifted every
     # name after it onto the wrong row.
-    names = ["source row", "version banner", "preview", "images table",
-             "row label", "action bar", "status"]
+    # ...and the STATUS is fourth, not last (it moved above the table in
+    # d442b71 and this list did not follow, so every name after it named the
+    # row below its own): source, banner, preview, status, table, row label,
+    # size strip, actions.
+    names = ["source row", "version banner", "preview", "status",
+             "images table", "row label", "size strip", "action bar"]
     for name, child in zip(names, outer.winfo_children()):
         log("   %-24s reqh %4d  h %4d  mapped %s"
             % (name, child.winfo_reqheight(), child.winfo_height(),
@@ -558,7 +566,8 @@ def s_fill():
     log("rows: %s" % [(r.title, r.subtitle, r.anim, r.anim_start)
                       for r in form.images])
     log("output: %s" % form.out)
-    log("size sentence: %r" % panel._plan_text)
+    log("card size: %r / %r" % (panel._size_need.cget("text"),
+                                panel._size_detail.cget("text")))
     log("consequence: %r" % panel._edit_lbl.cget("text"))
     log("preview status: %r" % panel._pv_status.cget("text"))
     log("menu summary: %r" % panel._menu_lbl.cget("text"))
@@ -577,7 +586,7 @@ def inspect_report():
     was filled with, so nothing is opened and WSL is never called.  Its
     shape is the tool's contract; the tab reads no more of it than this."""
     src = [multiboot_tab.wsl(path) for path, _t, _s in IMAGES]
-    _anim, start, seconds, fps = CLIP
+    _anim, start = CLIP
     devices = ["/dev/mmcblk0p3", "/dev/mmcblk0p7"] + [
         "/dev/mmcblk0p7:img%d" % i for i in range(2, len(IMAGES))]
     images = [
@@ -585,8 +594,7 @@ def inspect_report():
          "subtitle": sub, "art": "art%d.png" % i,
          "anim": "anim%d.gif" % i if i == HIGHLIGHT else None,
          "art_source": "auto",
-         "anim_source": ("auto@%s:%s:%s" % (start, seconds, fps)
-                         if i == HIGHLIGHT else "none"),
+         "anim_source": "auto@%s" % start if i == HIGHLIGHT else "none",
          "music": None,
          # image 1 has a confirm sound of its OWN, so the Confirm column
          # shows both states at once: its own value plain, and the rows

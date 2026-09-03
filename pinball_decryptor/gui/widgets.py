@@ -19,7 +19,21 @@ _monitor_workarea = placement.monitor_workarea
 
 class _Tooltip:
     """Minimal hover tooltip — shown below the widget while the mouse
-    is over it.  Theme-aware via the ``theme_fn`` callable."""
+    is over it, AT THE CURSOR and moving with it.  Theme-aware via the
+    ``theme_fn`` callable.
+
+    IT FOLLOWS THE POINTER (David: "all tooltips should follow the
+    cursor").  It used to be pinned under, or beside, the widget, which is
+    fine for a button and wrong for anything big: on a wide row of a table
+    the tip appeared under the ROW rather than under the thing the cursor
+    was actually on, so it explained the row while you pointed at one cell
+    of it.  Following the cursor also lets one tooltip serve a whole row of
+    cells and still say where you are.
+
+    The tip is offset down and right of the pointer and never sits under
+    it, so it cannot swallow the click you were lining up; near a screen
+    edge it flips to the other side rather than being clamped over the
+    top."""
 
     def __init__(self, widget, text, theme_fn, bind=True, place="below"):
         self._widget = widget
@@ -32,13 +46,18 @@ class _Tooltip:
         # unusable (David).  Anything hover-explained that you also have to
         # operate wants the side placement — or better, an info button next to
         # it that carries the tip instead.
+        # ``place`` is what the tip does when it has no pointer to follow -
+        # a show() driven by a caller rather than by the mouse.
         self._place = place
+        #: Where the pointer was last seen, in screen coordinates.
+        self._at = None
         # ``bind=False`` lets a caller drive show()/hide() itself — used by the
         # picker rows, which manage one shared tooltip across several child
         # widgets so the cursor can move between them without flicker.
         if bind:
             widget.bind("<Enter>", self._show)
             widget.bind("<Leave>", self._hide)
+            widget.bind("<Motion>", self._moved)
 
     # Public aliases for caller-driven use.
     def show(self, _event=None):
@@ -47,9 +66,18 @@ class _Tooltip:
     def hide(self, _event=None):
         self._hide()
 
-    def _show(self, _event=None):
+    def _moved(self, event=None):
+        """The pointer moved over the widget: carry the tip along with it."""
+        if event is not None:
+            self._at = (event.x_root, event.y_root)
+        if self._tip is not None:
+            self._position()
+
+    def _show(self, event=None):
         # Guard against a double-show leaking the prior Toplevel (caller-driven
         # callers may fire show() more than once before a hide()).
+        if event is not None and getattr(event, "x_root", None) is not None:
+            self._at = (event.x_root, event.y_root)
         if not self.text or self._tip is not None:
             return
         c = THEMES[self._theme_fn()]
@@ -69,6 +97,15 @@ class _Tooltip:
         # a screen edge isn't cut off: centre under the widget, prefer placing
         # below, flip above if it would overflow the bottom, and pin to the top
         # when it's simply taller than the gap (the most content stays visible).
+        self._position()
+        self._tip.wm_overrideredirect(True)       # re-assert (deiconify resets)
+        self._tip.deiconify()
+
+    def _position(self):
+        """Put the tip where it can be read: at the cursor when there is one,
+        else under the widget the way it always was."""
+        if self._tip is None:                             # pragma: no cover
+            return
         self._tip.update_idletasks()
         tw, th = self._tip.winfo_reqwidth(), self._tip.winfo_reqheight()
         wx, wy = self._widget.winfo_rootx(), self._widget.winfo_rooty()
@@ -77,6 +114,20 @@ class _Tooltip:
             wx, wy, self._widget.winfo_screenwidth(),
             self._widget.winfo_screenheight())
         m = 4
+        if self._at is not None:
+            # AT THE CURSOR, never under it: the gap is bigger than a
+            # pointer so the tip cannot eat the click being lined up, and
+            # near an edge it flips rather than being clamped over the top.
+            px, py = self._at
+            gap_x, gap_y = 16, 20
+            x = px + gap_x
+            if x + tw > right - m:
+                x = max(left + m, px - gap_x - tw)
+            y = py + gap_y
+            if y + th > bottom - m:
+                y = max(top + m, py - gap_y - th)
+            self._tip.wm_geometry("+%d+%d" % (int(x), int(y)))
+            return
         if self._place == "side":
             # Beside the widget, top-aligned: to the right when it fits, else
             # to the left, so the widget itself is never covered.
@@ -94,10 +145,9 @@ class _Tooltip:
             else:
                 y = max(top + m, bottom - th - m)  # pin so the bottom fits
         self._tip.wm_geometry(f"+{x}+{y}")
-        self._tip.wm_overrideredirect(True)       # re-assert (deiconify can reset it)
-        self._tip.deiconify()
 
     def _hide(self, _event=None):
+        self._at = None
         if self._tip:
             self._tip.destroy()
             self._tip = None

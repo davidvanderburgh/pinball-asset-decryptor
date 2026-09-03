@@ -3547,6 +3547,48 @@ def test_scene_browser_steps_through_screens(app, tmp_path):
     app.root.update()
 
 
+def test_a_tooltip_follows_the_cursor_and_never_sits_under_it(app):
+    """David: "all tooltips should follow the cursor".  A tip pinned under a
+    wide widget explains the WIDGET while the cursor is on one small part of
+    it; following the pointer is what makes one tooltip able to say where
+    you actually are.  It must never land under the pointer, or it would eat
+    the click being lined up."""
+    import tkinter as tk
+    from tkinter import ttk
+    from pinball_decryptor.gui.widgets import _Tooltip
+
+    top = tk.Toplevel(app.root)
+    top.geometry("500x200+120+120")
+    lbl = ttk.Label(top, text="a wide row of a table")
+    lbl.pack(fill=tk.X)
+    tip = _Tooltip(lbl, "what this cell is", lambda: "dark")
+    app.root.update_idletasks()
+
+    class _Ev:
+        def __init__(self, x, y):
+            self.x_root, self.y_root = x, y
+
+    def where(ev):
+        tip._moved(ev)
+        app.root.update_idletasks()
+        t = tip._tip
+        return t.winfo_rootx(), t.winfo_rooty()
+
+    tip._show(_Ev(300, 300))
+    app.root.update_idletasks()
+    first = (tip._tip.winfo_rootx(), tip._tip.winfo_rooty())
+    # the pointer moves along the row: the tip goes with it
+    second = where(_Ev(420, 300))
+    assert second[0] > first[0]
+    # ...and it is offset clear of the pointer, never on top of it
+    assert second[0] > 420 and second[1] > 300
+    tip.hide()
+    # with no pointer at all (a caller-driven show) it still falls back to
+    # the widget, which is what the "side" placement above relies on
+    assert tip._at is None
+    top.destroy()
+
+
 def test_side_tooltip_does_not_cover_its_row(app):
     """A tooltip bound to a combobox opened exactly where the drop-down does,
     so hovering to read it hid the control being clicked and the picker was

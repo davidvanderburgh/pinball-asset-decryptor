@@ -2011,12 +2011,27 @@ _FITS_RE = re.compile(
     r"fits Stern\s+(\d+G)\s+image size\s+\d+:\s+(YES|NO)\s*\(spare\s+(-?\d+)\)")
 _TOTAL_RE = re.compile(r"^image:\s+\d+\s+sectors\s+=\s+(\d+)\s+bytes")
 
+#: A row of the tool's own VERSION table:
+#:     idx device                 title                    version   read from
+#: The title is free text, so the version is found by SHAPE (three numbers, or
+#: the word the tool prints when it could not read one) rather than by
+#: counting columns.
+_VERSION_ROW_RE = re.compile(
+    r"^\s*(\d+)\s+\S+\s+.*?\s(\d+\.\d+\.\d+|UNKNOWN)(?:\s|$)")
+
 
 def parse_plan(text):
-    """What ``mkmulticard.py plan`` said about size: ``{"bytes": N or None,
-    "fits": {"16G": (True, spare), ...}}``.  Only those lines - everything
-    else the plan prints is for the log pane."""
-    info = {"bytes": None, "fits": {}}
+    """What ``mkmulticard.py plan`` said: ``{"bytes": N or None, "fits":
+    {"16G": (True, spare), ...}, "versions": {index: "1.59.0", ...}}``.
+
+    THE VERSIONS ARE WHY THE CODE COLUMN CAN BE FILLED AT ALL for images you
+    ADD.  A card you LOAD reports each image's game code version through
+    inspect, but a card being assembled has never been read - and the tool
+    reads the version off every .raw anyway, on the way to refusing a
+    mismatched build, and prints it in a table.  Listening to that costs
+    nothing and is the same number by the same route (David: "the code
+    column is not being populated for me when i load in images")."""
+    info = {"bytes": None, "fits": {}, "versions": {}}
     for line in (text or "").splitlines():
         m = _FITS_RE.search(line)
         if m:
@@ -2024,6 +2039,11 @@ def parse_plan(text):
         m = _TOTAL_RE.match(line.strip())
         if m:
             info["bytes"] = int(m.group(1))
+        m = _VERSION_ROW_RE.match(line)
+        if m and not line.lstrip().startswith("NOTE"):
+            version = m.group(2)
+            info["versions"][int(m.group(1))] = (
+                "" if version == "UNKNOWN" else version)
     return info
 
 
@@ -4925,6 +4945,7 @@ class MultibootPanel:
         if rc == 0:
             self._plan_info = parse_plan(text)
             self._plan_text = size_plan_text(self._plan_info)
+            self._take_versions(self._plan_info.get("versions") or {})
         else:
             self._plan_text = ""
         # WHAT THE SENTENCE NOW DESCRIBES.  Claimed here rather than when
@@ -4932,6 +4953,24 @@ class MultibootPanel:
         # answer, about the same images - keeps the tab from asking twice.
         self._plan_for = self._plan_key()
         self._update_edit_status()
+
+    def _take_versions(self, versions):
+        """Put the game code versions the tool just read into the table.
+
+        BY INDEX, which is what the tool keys them by and what the list is
+        ordered by.  A version is a FACT ABOUT THE .raw, never typed and
+        never guessed from a file name, so an answer that does not name a
+        row this tab still has is simply dropped - the list can be edited
+        while a plan is in flight."""
+        if not versions:
+            return
+        changed = False
+        for i, version in versions.items():
+            if 0 <= i < len(self._rows) and self._rows[i].version != version:
+                self._rows[i].version = version
+                changed = True
+        if changed:
+            self._refresh_tree(select=self._selected())
 
     def _build_card(self):
         form = self.form()

@@ -228,6 +228,18 @@ These have each been violated at least once and each cost a run or a window:
       evening: the node bus does reply before the game's own bring-up, and
       the Vivante EGL init works because it copies boot_display's order.
       Detail: `tools/spike2_emu/codeselect/DESIGN.md`.
+      **2026-09-03: animations at the source's own frame rate, 5 s loops**
+      (David: "playing at like 2fps... run at original fps (minimum 30fps
+      would be ideal). we can limit them to 5 second clips"). Contract
+      150 frames / 10 MB / 5 s at up to 30 fps, LENGTH gives before rate;
+      the selector decodes a GIF on demand (one frame per tick, frame 0
+      kept) on the clip's own timeline (was: every frame in RAM, ticks
+      rounded to vsync = 24 fps); clips rendered at the panel's true
+      298x168 (1 ms a frame under qemu, was 20 with a per-tick box
+      filter); the tab's Play lays the GIF over ONE rendered frame at the
+      `picture x,y,w,h` the selector now reports (pixel-identical to its
+      own render, no PPM per frame); the row's stale length/rate fields
+      - the actual cause of the 2 fps - are gone.
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

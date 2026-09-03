@@ -59,7 +59,10 @@
 #define HEADLESS_W   1360
 #define HEADLESS_H   768
 #define MAX_VISIBLE  4              /* cards in a row; more = carousel */
-#define ANIM_MAX_FRAMES 30
+/* the most frames an animation is read for: 5 s at 30 fps (selectmedia.py's
+ * GIF_MAX_FRAMES - the two must agree); frames are decoded on demand, so
+ * this bounds a file walk and a --frames run, not memory */
+#define ANIM_MAX_FRAMES 150
 #define CONFIRM_CAP_MS 8000
 
 /* The two footer lines, and the two long forms of the countdown line. Which
@@ -388,7 +391,7 @@ struct media {
      * confirm per image, plus the two menu-wide sounds */
     struct clip_cache cache[CONF_MAX_IMAGES * 2 + 2];
     int ncache;
-    int n_art, n_anim, n_music, n_own_confirm, pending, logged;
+    int n_art, n_anim, n_music, n_own_confirm, logged;
     char dir[CONF_STR];
 };
 
@@ -418,7 +421,8 @@ static struct audio_clip *media_clip(struct media *m, const char *name)
     return c;
 }
 
-/* the stills and the sounds; animations are opened here and decoded later */
+/* the stills, the sounds, and the animations (frame 0 each; the rest decode
+ * on demand as the menu ticks) */
 static void media_load(struct media *m, const struct conf *c, const struct layout *L, int with_audio)
 {
     int i;
@@ -434,7 +438,14 @@ static void media_load(struct media *m, const struct conf *c, const struct layou
         if (im->anim[0]) {
             media_path(m, im->anim, path, sizeof path);
             m->anim[i] = art_anim_open(path, L->inner, L->art_h, ANIM_MAX_FRAMES, err, sizeof err);
-            if (m->anim[i]) { m->n_anim++; m->pending++; }
+            if (m->anim[i]) {
+                const struct art_anim *a = m->anim[i];
+                int k, ms = 0;
+                for (k = 0; k < a->n; k++) ms += a->delay_ms[k];
+                m->n_anim++;
+                sel_log("anim: image %d %d frames %dx%d, a %.1f s loop, decoded a frame at a time",
+                        i, a->n, a->w, a->h, ms / 1000.0);
+            }
             else sel_log("anim: cannot open %s (%s)", im->anim, err);
         }
         if (im->music[0] && with_audio) {
@@ -453,23 +464,33 @@ static void media_load(struct media *m, const struct conf *c, const struct layou
     }
 }
 
-/* decode one frame of the first animation still pending; returns the image
- * index it advanced or -1 */
-static int media_step(struct media *m, int n)
+/* an animation that turned out shorter than its file said it was: said once */
+static void media_check(const struct media *m, int i)
+{
+    struct art_anim *a = m->anim[i];
+    if (a && a->err[0] && !a->err_said) {
+        sel_log("anim: image %d stopped after %d frame(s): %s", i, a->n, a->err);
+        a->err_said = 1;
+    }
+}
+
+/* how long frame `frame` of an animation stays up: the loop's period for a
+ * constant-rate clip, else that frame's own delay */
+static double anim_step_ms(const struct art_anim *a, int frame)
+{
+    return a->period_ms > 0 ? (double)a->period_ms : (double)a->delay_ms[frame];
+}
+
+/* what the on-demand decoding cost, per animation that was played */
+static void media_stats(const struct media *m)
 {
     int i;
-    for (i = 0; i < n; i++) {
-        struct art_anim *a = m->anim[i];
-        if (!a || a->done) continue;
-        art_anim_step(a);
-        if (a->done) {
-            m->pending--;
-            if (a->err[0]) sel_log("anim: image %d stopped after %d frame(s): %s", i, a->n, a->err);
-            else sel_log("anim: image %d %d frames %dx%d", i, a->n, a->w, a->h);
-        }
-        return i;
+    for (i = 0; i < CONF_MAX_IMAGES; i++) {
+        const struct art_anim *a = m->anim[i];
+        if (a && a->decodes)
+            sel_log("anim: image %d: %d frame decodes, %.2f ms each",
+                    i, a->decodes, a->decode_us / 1000.0 / a->decodes);
     }
-    return -1;
 }
 
 static void media_log(struct media *m)
@@ -495,14 +516,15 @@ static void media_free(struct media *m)
 }
 
 /* the picture image i shows right now: its animation's frame when it is
- * highlighted (or pinned), else its still, else the animation's frame 0 */
+ * highlighted (or pinned), else its still, else the animation's frame 0.
+ * The frame is DECODED HERE if it is not the one in hand (art.h) - the media
+ * set is const to every draw, the decoder inside an animation is not. */
 static const struct art_image *card_picture(const struct media *m, int i, int on, int frame, int pinned)
 {
-    const struct art_anim *a = m->anim[i];
+    struct art_anim *a = m->anim[i];
     if (a && a->n > 0 && (on || pinned || !m->art[i])) {
-        int f = (on || pinned) ? frame : 0;
-        if (f < 0) f = 0;
-        return &a->fr[f % a->n];
+        if (!(on || pinned)) return art_anim_still(a);
+        return art_anim_frame(a, frame < 0 ? 0 : frame % a->n);
     }
     return m->art[i];
 }
@@ -707,8 +729,8 @@ static const char *media_dir(const struct opts *o, const struct conf *c)
  * frame --anim-frame (0 when unset; past the end it wraps); every other card
  * shows its still, or frame 0 when it has none, exactly as it does live. No
  * input backend, no audio (the WAVs are not even opened), nothing written but
- * the PPM(s). Every animation is decoded in full first so the frame asked for
- * exists.
+ * the PPM(s). An animation is decoded up to the frame asked for and no
+ * further (art.h: on demand).
  *
  * --frames K writes a WHOLE RUN of K frames - --anim-frame, then the next, and
  * the next, wrapping - out of that ONE load. The preview used to play an
@@ -728,7 +750,7 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
 {
     struct media media;
     char path[600];
-    int n = c->n, first = o->anim_frame > 0 ? o->anim_frame : 0, frames = 0;
+    int first = o->anim_frame > 0 ? o->anim_frame : 0, frames = 0;
     /* K == 1 is the old path to the byte: the --snapshot value is a file NAME,
      * never a pattern, so a name that happens to hold a '%' still works */
     int pattern = o->frames > 1, want = o->frames, k;
@@ -736,8 +758,6 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
     memset(&media, 0, sizeof media);
     snprintf(media.dir, sizeof media.dir, "%s", media_dir(o, c));
     media_load(&media, c, L, 0);
-    while (media_step(&media, n) >= 0)
-        ;
     media_log(&media);
     if (media.anim[hl]) frames = media.anim[hl]->n;
     if (!frames) {
@@ -765,16 +785,35 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
             media_free(&media);
             return 2;
         }
+        char where[64];
         draw_menu(g, font, L, c, &media, hl, timeout > 0 ? timeout : -1, frame, 0, action);
+        media_check(&media, hl);
         if (gfx_write_ppm(g, path, invert) < 0) {
             sel_say("error: cannot write %s: %s", path, strerror(errno));
             media_free(&media);
             return 2;
         }
-        sel_say("snapshot: %s %dx%d, highlight %d (%s) from %s, frame %d of %d, timeout %d s, invert %d, font %s, media %s, footer \"%s\"",
+        /* WHERE THE HIGHLIGHTED CARD'S PICTURE IS in the PPM, as x,y,w,h of
+         * the frame blitted into its panel - the Multi-boot tab's Play lays
+         * the GIF's own frames over this one picture instead of asking for a
+         * PPM per frame (150 of them at 3 MB each was the alternative) */
+        snprintf(where, sizeof where, "none");
+        {
+            const struct art_image *pic = card_picture(&media, hl, 1, frame, 0);
+            int slot = image_slot(L, hl, hl), px, py, pw, ph, rx, ry;
+            if (pic && L->art_h && slot >= 0) {
+                panel_rect(L, slot, &px, &py, &pw, &ph);
+                rx = px + (pw - pic->w) / 2;
+                ry = py + (ph - pic->h) / 2;
+                if (invert) { rx = g->w - rx - pic->w; ry = g->h - ry - pic->h; }
+                snprintf(where, sizeof where, "%d,%d,%d,%d", rx, ry, pic->w, pic->h);
+            }
+        }
+        sel_say("snapshot: %s %dx%d, highlight %d (%s) from %s, frame %d of %d, timeout %d s, invert %d, font %s, media %s, footer \"%s\", picture %s",
                 path, g->w, g->h, hl, c->img[hl].title, how, frame, frames, timeout, invert,
-                fontpath, media.dir, action ? FOOT_ACTION : FOOT_START);
+                fontpath, media.dir, action ? FOOT_ACTION : FOOT_START, where);
     }
+    media_stats(&media);
     media_free(&media);
     return 0;
 }
@@ -809,7 +848,8 @@ int main(int argc, char **argv)
     int music_voice = -1;
     const struct audio_clip *music_clip = NULL;
     const char *how, *fmt_path;
-    long long start, deadline, last_key, next_tick = 0;   /* sel_now_ms() values: long long, see log.h */
+    long long start, deadline, last_key;   /* sel_now_ms() values: long long, see log.h */
+    double next_tick = 0;                  /* the animation's next frame is due (ms), 0 = none */
     int remain_shown = -2, dirty;
     int rc = 2;
 
@@ -917,14 +957,7 @@ int main(int argc, char **argv)
     memset(&media, 0, sizeof media);
     snprintf(media.dir, sizeof media.dir, "%s", media_dir(&o, &c));
     media_load(&media, &c, &L, audio_active(au));
-    /* the highlighted card's animation is complete before the first frame;
-     * the others decode one frame per loop iteration */
-    if (media.anim[hl]) {
-        long long t0 = sel_now_ms();
-        while (!media.anim[hl]->done) media_step(&media, n);
-        sel_log("anim: image %d decoded before the first frame (%lld ms)", hl, sel_now_ms() - t0);
-    }
-    if (!media.pending) media_log(&media);
+    media_log(&media);
 
     memset(&icfg, 0, sizeof icfg);
     icfg.nodebus = o.nodebus;
@@ -955,11 +988,11 @@ int main(int argc, char **argv)
     gfx_clean(&g);
     music_clip = media.music[hl];
     if (music_clip) music_voice = audio_play(au, music_clip, 1);
-    if (media.anim[hl] && media.anim[hl]->n > 0 && !pinned) next_tick = start + media.anim[hl]->delay_ms[0];
+    if (media.anim[hl] && media.anim[hl]->n > 0 && !pinned) next_tick = start + anim_step_ms(media.anim[hl], 0);
 
     while (!g_stop) {
         long long now = sel_now_ms();
-        int ev, remain, old_hl = hl, stepped;
+        int ev, remain, old_hl = hl;
 
         while ((ev = input_poll(in, now)) != EV_NONE) {
             sel_say("key: %s", input_event_name(ev));
@@ -987,7 +1020,7 @@ int main(int argc, char **argv)
         if (hl != old_hl) {
             /* a new card: its animation restarts and its music takes over (hard switch) */
             frame = pinned ? o.anim_frame : 0;
-            next_tick = (media.anim[hl] && media.anim[hl]->n > 0 && !pinned) ? now + media.anim[hl]->delay_ms[0] : 0;
+            next_tick = (media.anim[hl] && media.anim[hl]->n > 0 && !pinned) ? now + anim_step_ms(media.anim[hl], 0) : 0;
             if (media.music[hl] != music_clip) {
                 if (music_voice >= 0) audio_stop(au, music_voice);
                 music_clip = media.music[hl];
@@ -1016,25 +1049,23 @@ int main(int argc, char **argv)
             dirty = 1;
         }
 
-        /* the highlighted card's animation ticks on the GIF's own delays */
-        if (next_tick && now >= next_tick) {
+        /* the highlighted card's animation ticks on the GIF's own delays; the
+         * next frame is decoded by the draw (art.h: on demand) */
+        if (next_tick > 0 && now >= next_tick) {
             struct art_anim *a = media.anim[hl];
+            double step;
             frame = (frame + 1) % a->n;
-            next_tick = now + a->delay_ms[frame];
+            step = anim_step_ms(a, frame);
+            /* ON THE CLIP'S OWN TIMELINE, not the loop's.  The swap paces
+             * this loop to the LCD's vsync (16.7 ms), so 'now + delay'
+             * rounded EVERY frame up to the next vsync and a 30 fps clip
+             * played at 24.  Due times accumulate instead - late ticks
+             * catch up - and only a stall of more than a frame is forgiven
+             * (the timeline restarts from now rather than bursting). */
+            next_tick += step;
+            if (now - next_tick > step) next_tick = now + step;
             if (!dirty) draw_panel(&g, &L, &media, hl, image_slot(&L, hl, hl), 1, frame, pinned);
-        }
-        /* one frame of a pending animation per iteration, never a stall */
-        stepped = media_step(&media, n);
-        if (stepped >= 0) {
-            struct art_anim *a = media.anim[stepped];
-            /* its first frame just appeared, or (pinned) the pinned frame may
-             * have: repaint that panel */
-            if ((a->n == 1 || (a->done && pinned)) && !dirty) {
-                int slot = image_slot(&L, hl, stepped);
-                if (slot >= 0) draw_panel(&g, &L, &media, stepped, slot, stepped == hl, frame, pinned);
-                if (stepped == hl && !pinned && !next_tick && a->n > 0) next_tick = now + a->delay_ms[0];
-            }
-            if (!media.pending) media_log(&media);
+            media_check(&media, hl);
         }
         audio_pump(au, now);
 
@@ -1099,6 +1130,7 @@ int main(int argc, char **argv)
     }
 
     media_log(&media);
+    media_stats(&media);
     audio_close(au);
     input_close(in);
     if (!headless) egl_stern_close(&egl);

@@ -3,6 +3,12 @@
  * downscaled ONCE into the card's art panel so every later draw is a plain
  * blit and RAM is bounded by the panel size, not the file.
  *
+ * An animation is decoded ON DEMAND: one frame lives in memory (plus frame 0,
+ * kept as the still), and a tick costs one frame's LZW decode.  So a 5 s /
+ * 30 fps loop (150 frames, 10 MB on the card) costs the selector no more RAM
+ * than a 4-frame test GIF did when every frame was kept - two panels' worth
+ * - and the menu is up after ONE frame, not after the whole file.
+ *
  * Every failure is reported through err and is NON-FATAL for the caller: a
  * card without a picture still boots.
  */
@@ -15,13 +21,22 @@ struct art_image {
 };
 
 struct art_anim {
-    int n;                    /* frames decoded so far */
+    int n;                    /* frames in the file (counted at open, at most the cap
+                                 asked for); lowered when decoding stops early */
     int w, h;                 /* fitted frame size (every frame) */
-    int done;                 /* 1 once the whole file is decoded (or decoding failed) */
-    struct art_image *fr;     /* n frames */
-    int *delay_ms;            /* n delays; 100 when the GIF said 0 */
-    void *dec;                /* incremental decoder state while !done */
+    int *delay_ms;            /* n delays; 100 when the GIF said 0, clamped 20 ms..10 s */
+    float period_ms;          /* the loop's frame period when its delays are (near)
+                                 uniform - a constant-rate clip, whose centisecond
+                                 delays alternate 30/40 for 33.3 - else 0: tick on
+                                 delay_ms[] */
+    int cur;                  /* the frame `frame` holds (-1: none) */
+    struct art_image frame;   /* the frame decoded last - the one being shown */
+    struct art_image first;   /* frame 0, kept: the still of a card that is not highlighted */
+    int decodes;              /* frames decoded so far, all told, and... */
+    long long decode_us;      /* ...the time they took (for the log) */
+    void *dec;                /* the file bytes + stb's state */
     char err[200];            /* why decoding stopped early, or "" */
+    int err_said;             /* the caller has logged err */
 };
 
 /* Decode a PNG and fit it into max_w x max_h (aspect kept, never upscaled).
@@ -29,14 +44,22 @@ struct art_anim {
 struct art_image *art_load_png(const char *path, int max_w, int max_h, char *err, int errlen);
 void art_image_free(struct art_image *im);
 
-/* Open an animated GIF: reads the file and prepares the decoder; frames are
- * decoded ONE PER art_anim_step() call so the caller can spread the work
- * across loop iterations. NULL + err when the file cannot be read or is not a
- * GIF. Frames are fitted like art_load_png; delays come from the GIF. */
+/* Open an animated GIF: reads the file, counts its frames and reads their
+ * delays (a walk of the block stream - no decoding), then decodes frame 0.
+ * NULL + err when the file cannot be read, is not a GIF, has no frames or
+ * its first frame does not decode.  Frames are fitted like art_load_png;
+ * at most max_frames are counted (the rest of the file is never read). */
 struct art_anim *art_anim_open(const char *path, int max_w, int max_h, int max_frames,
                                char *err, int errlen);
-/* Decode the next frame. 1 = a frame was added, 0 = nothing more (done). */
-int  art_anim_step(struct art_anim *a);
+/* Frame k (wrapped to n), DECODED ON DEMAND: the frame after the current one
+ * costs one decode, an earlier one a rewind and the decodes up to it.  Never
+ * NULL for an opened animation: when the file holds fewer frames than were
+ * counted, n is lowered, err says so, and the last frame there is comes
+ * back. */
+const struct art_image *art_anim_frame(struct art_anim *a, int k);
+/* Frame 0 without touching the decoder: what a card shows while another is
+ * highlighted. */
+const struct art_image *art_anim_still(const struct art_anim *a);
 void art_anim_free(struct art_anim *a);
 
 #endif

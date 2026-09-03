@@ -386,7 +386,7 @@ refuse() {   # refuse WHAT SNAPSHOT-VALUE [extra args...]
         echo "headless: FAIL $what refused without a message"; cat "$T/snap.err"; exit 1; }
 }
 refuse "--frames 0"                "$T/bad_%d.ppm"    --frames 0
-refuse "--frames 31"               "$T/bad_%d.ppm"    --frames 31
+refuse "--frames 151"              "$T/bad_%d.ppm"    --frames 151
 refuse "a pattern with no %d"      "$T/bad.ppm"       --frames 4
 refuse "a pattern with two %d"     "$T/bad_%d_%d.ppm" --frames 4
 refuse "a %s in the pattern"       "$T/bad_%s.ppm"    --frames 4

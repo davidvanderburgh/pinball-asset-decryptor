@@ -422,8 +422,8 @@ def test_media_checks_accept_the_synthetic_set_and_refuse_the_wrong_shapes(mk, t
     with pytest.raises(mk.Refused, match="over 512x288"):
         mk.check_media_file(str(wide), "anim")
     many = tmp_path / "media" / "many.gif"
-    mk.synth_gif(str(many), 2, 2, 31)
-    with pytest.raises(mk.Refused, match="31 frames"):
+    mk.synth_gif(str(many), 2, 2, mk.GIF_MAX_FRAMES + 1)
+    with pytest.raises(mk.Refused, match="%d frames" % (mk.GIF_MAX_FRAMES + 1)):
         mk.check_media_file(str(many), "anim")
     monkeypatch.setattr(mk, "MEDIA_BUDGET", 100)
     with pytest.raises(mk.Refused, match="over the 100 byte budget"):

@@ -33,8 +33,8 @@ partition's md5 sidecar is rewritten, and verify reports the bypass state per tr
 MEDIA (--media-dir DIR, item 90 v2).  DIR/media.json (written by selectmedia.py) names per image
 an art PNG, an animated GIF, a music WAV and a confirm WAV of its own (any of them null) plus the
 move/confirm sounds and the volume; only the referenced files are staged into
-/usr/local/codeselect/media on p2 (flat, names ^[A-Za-z0-9._-]+$, PNG <= 1360x768, GIF <= 1.5 MB /
-512x288 / 30 frames, WAV pcm_s16le 44100 Hz 1-2 ch, the whole set <= 20 MB), and images.conf gets
+/usr/local/codeselect/media on p2 (flat, names ^[A-Za-z0-9._-]+$, PNG <= 1360x768, GIF <= 10 MB /
+512x288 / 150 frames, WAV pcm_s16le 44100 Hz 1-2 ch, the whole set <= 96 MB), and images.conf gets
 the image lines (image=<device>|<title>|<subtitle>|<art>|<anim>|<music>|<confirm>) and the
 sound_move= / sound_confirm= / volume= / mixer_volume= / media= keys.  The line is written only as
 wide as it needs to be - 3 fields with no media at all, 6 when no image names a confirm of its own -
@@ -226,11 +226,15 @@ SIDECAR_MANIFESTS = (BUILD_MANIFEST, MEDIA_MANIFEST)
 SELECTOR_VERSION_RE = re.compile(rb"codeselect (\d+(?:\.\d+)+)")
 SELECTOR_VERSION_MAX = 8 << 20                # do not read a huge file just to sniff a version
 MEDIA_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
-MEDIA_BUDGET = 20 << 20                       # the whole set on p2 (194 MB free on a stock rootfs)
+#: The whole set on p2 (194 MB free on a stock rootfs; inject_p2 refuses against
+#: the REAL free space).  These four agree with selectmedia.py's contract - a
+#: test pins them together.  5 s at 30 fps is 150 frames, ~7.7 MB for a busy
+#: clip at 512x288 (David, 2026-09-03: original fps, 5 s clips).
+MEDIA_BUDGET = 96 << 20
 PNG_MAX = (1360, 768)                         # the panel; the tools pre-scale
 GIF_MAX = (512, 288)
-GIF_MAX_FRAMES = 30
-GIF_MAX_BYTES = 3 << 19                       # 1.5 MiB
+GIF_MAX_FRAMES = 150
+GIF_MAX_BYTES = 10 << 20                      # 10 MiB
 WAV_RATE = 44100
 P2_FREE_MARGIN = 8 << 20                      # never fill p2 to the last block
 #: images.conf v2: up to 16 images; a device is '/dev/mmcblk0pN' (parts layout),
@@ -1040,7 +1044,7 @@ def wav_info(data):
 
 def check_media_file(path, kind):
     """Refuse a media file the selector could not use; -> (kind word, size).  `kind` is
-    'art' (PNG <= 1360x768), 'anim' (GIF <= 1.5 MB, 512x288, 30 frames) or 'wav' (RIFF
+    'art' (PNG <= 1360x768), 'anim' (GIF <= 10 MB, 512x288, 150 frames) or 'wav' (RIFF
     pcm_s16le 44100 Hz 1-2 ch: music, sound_move, sound_confirm)."""
     name = os.path.basename(path)
     if not MEDIA_NAME_RE.match(name):

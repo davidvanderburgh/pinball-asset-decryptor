@@ -19,7 +19,8 @@ egl_stern.c/.h   Stern's exact EGL/GLES2 bring-up + one textured quad,
                  glTexSubImage2D of the changed rectangle only
 art.c/.h         PNG stills and animated GIFs (third_party/stb_image.h, PNG +
                  GIF only), box-downscaled once into the card's art panel;
-                 GIFs decode one frame per call
+                 a GIF decodes ON DEMAND, one frame per tick (frame 0 kept
+                 as the still; the count and delays from a block walk)
 audio.c/.h       WAV loader (PCM 16-bit 44100 Hz 1-2 ch), the 4-voice s16
                  stereo mixer, sink selection, --audio-dump
 audio_fifo.c     the emulator sink: the rig's audio FIFO (PAD_AUDIO_PLAY)
@@ -98,7 +99,7 @@ codeselect [--conf PATH] [--out PATH] [--input hw|padsw|none] [--nodebus DEV]
 | `--headless` | off | no EGL; the loop runs (1360x768) and the last menu frame is written as P6 PPM; the LOADING frame goes to `FILE.loading.ppm` |
 | `--snapshot` | off | render ONE menu frame (1360x768, the moment the menu appears) as a P6 PPM and exit 0 - no EGL, no input backend, no audio, no choice/last file: the preview (below) |
 | `--highlight` | conf `default=`, else 0 | `--snapshot` only: the highlighted card (0-based); the last-choice file is never read; past the last image = exit 2 |
-| `--frames` | 1 | `--snapshot` only: write K frames (1-30) out of ONE load, starting at `--anim-frame` and stepping by one, wrapping; K > 1 makes the `--snapshot` value a printf pattern holding exactly one bare `%d`, the frame number (below) |
+| `--frames` | 1 | `--snapshot` only: write K frames (1-150) out of ONE load, starting at `--anim-frame` and stepping by one, wrapping; K > 1 makes the `--snapshot` value a printf pattern holding exactly one bare `%d`, the frame number (below) |
 | `--invert` | auto | auto = `/games/data/boot_display_cmd` contains the token `-invert` (rotate 180, as boot_display does) |
 | `--preamble` | `min` | `hw` only: how much of the game's node-bus bring-up to replay first |
 | `--font` | conf `font=`, `/usr/local/codeselect/font.ttf`, `/usr/local/spike/VeraMono.ttf` | first that loads wins |
@@ -178,7 +179,12 @@ which is the case wrapping cannot help with.
   picture is aspect-fitted into its panel and centred (never upscaled; the
   tools pre-scale). The highlighted card plays its GIF on the GIF's own
   frame delays (100 ms where the file says 0, clamped 20 ms-10 s); the
-  others show their still, or frame 0 when they have no still.
+  others show their still, or frame 0 when they have no still. A GIF is
+  up to 150 frames (5 s at 30 fps, the tools' contract) and is decoded
+  ON DEMAND - the tick that shows frame k decodes frame k, a wrap starts
+  the file over - so the menu holds one frame per animation plus frame
+  0, whatever the length, and comes up after one frame's decode
+  (measured under qemu: ~1 ms a frame at 200x112, ~4 ms at 384x216).
 * **Confirm**: one `LOADING <title>...` frame with the chosen card's picture
   above the line; it stays up (swapped every frame) while the confirm sound
   plays to completion, then the program exits and the LCD keeps that frame
@@ -204,10 +210,11 @@ card's GIF at frame N (0 when unset, wrapping past the end), every other
 card its still or frame 0, the countdown at its full `timeout=` value
 (`press START or ACTION to boot ...` for 0) - writes it as a binary P6 PPM and exits
 0. Nothing else runs: no EGL, no input backend, no audio (the WAVs are not
-opened), no choice or last-choice file, no LOADING frame. Every animation
-is decoded in full first, so the run is the decode plus one draw (71-87 ms
-under qemu for the test media, measured 2026-09-02) - and `--frames K`
-(below) buys K frames for that one decode. `-invert` is NOT
+opened), no choice or last-choice file, no LOADING frame. An animation is
+decoded up to the frame asked for and no further, so the run is one load
+plus one draw (71-87 ms under qemu for the test media, measured
+2026-09-02) - and `--frames K` (below) buys K frames for that one load.
+`-invert` is NOT
 auto-detected: that
 rotation compensates for an LCD mounted upside down and the preview shows
 what the player sees; `--invert` forces it. Errors - an unreadable conf, no
@@ -218,12 +225,16 @@ the card renders without its picture). stdout carries one line a caller can
 parse:
 
 ```
-[select] snapshot: FILE.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 10 s, invert 0, font /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf, media /some/dir
+[select] snapshot: FILE.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 10 s, invert 0, font /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf, media /some/dir, footer "LEFT / RIGHT FLIPPER: choose      START: boot", picture 899,206,200,112
 ```
 
 `frame F of N` is the frame shown and the highlighted card's frame count
 (`0 of 0` when it has no animation), so a caller can learn the length of the
-animation from the first frame it asks for.
+animation from the first frame it asks for. `picture x,y,w,h` is where the
+highlighted card's picture (its still, or the GIF frame) was blitted in
+that PPM - `picture none` when the card has neither - so a caller can lay
+the GIF's own frames over ONE rendered frame instead of asking for a PPM
+per frame: that is how the Multi-boot tab's Play runs a 150-frame clip.
 
 #### `--frames K`: a whole run out of one load
 
@@ -254,7 +265,7 @@ process start and the re-decode were.
   `%d`, two of them, a `%s`, a width like `%03d` or a trailing lone `%` are
   refused on stderr (`codeselect: --snapshot "..." holds ...`) with exit 2,
   BEFORE a byte is written: a caller that got the pattern wrong must not find
-  half a run on disk. So is a K below 1 or above 30 (the most frames an
+  half a run on disk. So is a K below 1 or above 150 (the most frames an
   animation can have), and a K above 1 without `--snapshot`.
 * One `snapshot:` line per frame, unchanged in shape, each naming its own
   file - so a caller parsing `frame F of N` keeps working.

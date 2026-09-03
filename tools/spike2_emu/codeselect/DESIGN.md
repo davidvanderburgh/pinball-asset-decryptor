@@ -118,9 +118,9 @@ hardware test of that patch is what makes this Insider-safe.
 /usr/local/codeselect/select.sh       the hook: run the menu, remount /games
 /usr/local/codeselect/images.conf     one line per image (below)
 /usr/local/codeselect/font.ttf        DejaVu Sans Bold (Bitstream Vera licence)
-/usr/local/codeselect/media/          art PNGs, animated GIFs, WAVs (flat, <= 20 MB)
+/usr/local/codeselect/media/          art PNGs, animated GIFs, WAVs (flat, <= 96 MB)
 /etc/init.d/game                      stock script + one guarded hook line
-/usr/local/codeselect/media/          art<N>.png, anim<N>.gif, music<N>.wav, confirm<N>.wav, move.wav, confirm.wav (optional, <= 20 MB)
+/usr/local/codeselect/media/          art<N>.png, anim<N>.gif, music<N>.wav, confirm<N>.wav, move.wav, confirm.wav (optional, <= 96 MB)
 ```
 
 `images.conf` v2 — plain text, `#` comments,
@@ -171,7 +171,10 @@ full CLI, the log lines and the test list). What it is:
   dirty-rect tracking + a packed sub-rect, 180-degree rotation, P6 PPM),
   `egl_stern.c` (Stern's EGL bring-up, sub-rect uploads), `art.c` (PNG +
   animated GIF through the vendored stb_image, box-downscaled into the art
-  panel, GIFs one frame per call), `audio.c` (WAV loader, 4-voice mixer) +
+  panel; a GIF is decoded ON DEMAND, one frame per tick, frame 0 kept as
+  the still, the count and delays from a walk of the block stream - so a
+  150-frame loop costs two panels of RAM and the menu is up after one
+  frame), `audio.c` (WAV loader, 4-voice mixer) +
   `audio_fifo.c` (the rig's FIFO) + `audio_alsa.c` (the card's libasound,
   hand prototypes), `input.c` + `input_hw.c` + `input_padsw.c` (buttons),
   `conf.c` (images.conf v2), `log.c`; `select.sh`, `images.conf.example`,
@@ -292,8 +295,10 @@ full CLI, the log lines and the test list). What it is:
   `<index>\n`, `--last` (`/data/codeselect.last`) is read for the initial
   highlight and written on confirm. Exit 0 = a choice was written, 2 =
   anything else. Media: PNG art (pre-scaled by the tools), animated GIF
-  <= 512x288 / <= 30 frames / <= 1.5 MB (delays from the file, 100 ms
-  where it says 0), WAV RIFF PCM 16-bit 44100 Hz 1-2 ch; a missing or
+  <= 512x288 / <= 150 frames (5 s at 30 fps; ANIM_MAX_FRAMES, which must
+  agree with selectmedia.py's GIF_MAX_FRAMES) / <= 10 MB (delays from the
+  file, 100 ms where it says 0, clamped 20 ms-10 s), WAV RIFF PCM 16-bit
+  44100 Hz 1-2 ch; a missing or
   unusable file is logged (`art: cannot load ...`, `audio: ...: unsupported
   (...)`) and skipped. Log lines: `media: N art, M anim (F frames), K
   music, C card confirm, move=y|n confirm=y|n`, `confirm: image N sound

@@ -304,7 +304,7 @@ def test_media_files_cross_as_wsl_paths(monkeypatch, tmp_path):
 
 def test_art_and_animation_specs_reach_both_prepares(monkeypatch, tmp_path):
     """A 2-image form with the new per-row fields: 'auto' art and an
-    'auto@20:2:8' animation on the primary, a 'video frame' at 3 s on the
+    'auto@20' animation on the primary, a 'video frame' at 3 s on the
     other; a picture file stays a plain path.  The real Prepare media and
     the preview's --visual-only prepare carry the SAME specs into the SAME
     --out, so the selectmedia cache is shared and the card matches the
@@ -315,8 +315,6 @@ def test_art_and_animation_specs_reach_both_prepares(monkeypatch, tmp_path):
     form = _form(tmp_path, 2)
     form.images[0].anim = "auto"
     form.images[0].anim_start = "20"
-    form.images[0].anim_seconds = "2"
-    form.images[0].anim_fps = "8"
     form.images[1].art = "video frame"
     form.images[1].art_video = str(clip)
     form.images[1].art_time = "3"
@@ -324,7 +322,7 @@ def test_art_and_animation_specs_reach_both_prepares(monkeypatch, tmp_path):
     wclip = multiboot_tab.wsl(str(clip))
     assert art_spec(form.images[0]) == "auto"
     assert art_spec(form.images[1]) == wclip + "@3"
-    assert anim_spec(form.images[0]) == "auto@20:2:8"
+    assert anim_spec(form.images[0]) == "auto@20"
     assert anim_spec(form.images[1]) == "none"
     # a picture file is the path; a typed video is a frame at its time (0)
     assert art_spec(ImageRow("x", art=str(tmp_path / "logo.png"))) == \
@@ -332,11 +330,13 @@ def test_art_and_animation_specs_reach_both_prepares(monkeypatch, tmp_path):
     assert art_spec(ImageRow("x", art=str(clip))) == wclip + "@0"
     assert art_spec(ImageRow("x", art=str(clip), art_time="2.5")) == \
         wclip + "@2.5"
-    # a clip with only some fields set spells out the tool's defaults for
-    # the rest (explicit rather than defaulted, like every --art N=)
-    assert anim_spec(ImageRow("x", anim="auto", anim_fps="8")) == "auto@0:3:8"
+    # ONLY A START is ever spelled out: the loop's length and rate are the
+    # tool's own contract (5 s at the source's frame rate), never a request
+    # from the form - a form asking '13 s at 30 fps' was rendered at 2 fps
+    assert anim_spec(ImageRow("x", anim="auto")) == "auto"
     assert anim_spec(ImageRow("x", anim="auto", anim_start="1.5")) == \
-        "auto@1.5:3:10"
+        "auto@1.5"
+    assert anim_spec(ImageRow("x", anim="auto", anim_start="0")) == "auto"
     assert anim_spec(ImageRow("x", anim="none", anim_start="9")) == "none"
     media = str(tmp_path / "multi" / "media")
     full = _tool_words(prepare_commands(form, media)[0][1])
@@ -347,7 +347,7 @@ def test_art_and_animation_specs_reach_both_prepares(monkeypatch, tmp_path):
         arts = [prep[i + 1] for i, w in enumerate(prep) if w == "--art"]
         anims = [prep[i + 1] for i, w in enumerate(prep) if w == "--anim"]
         assert arts == ["0=auto", "1=" + wclip + "@3"]
-        assert anims == ["0=auto@20:2:8", "1=none"]
+        assert anims == ["0=auto@20", "1=none"]
         assert prep[prep.index("--volume") + 1] == "50"
     assert "--visual-only" not in full
     assert full[full.index("--sound-move") + 1] == "auto"
@@ -372,16 +372,15 @@ def test_clip_and_video_frame_fields_are_validated(tmp_path):
     assert any("negative" in e for e in validate_form(form))
     form.images[1].art_time = ""
     form.images[0].anim = "auto"
-    form.images[0].anim_seconds = "0"
-    assert any("animation length" in e for e in validate_form(form))
-    form.images[0].anim_seconds = "2"
-    form.images[0].anim_fps = "7.5"
-    assert any("whole number" in e for e in validate_form(form))
-    form.images[0].anim_fps = "8"
+    form.images[0].anim_start = "soon"
+    assert any("animation start" in e for e in validate_form(form))
+    form.images[0].anim_start = "-2"
+    assert any("animation start" in e for e in validate_form(form))
+    form.images[0].anim_start = "20"
     assert validate_form(form) == []
-    # a 'none' animation ignores stale clip fields
+    # a 'none' animation ignores a stale start
     form.images[0].anim = "none"
-    form.images[0].anim_fps = "x"
+    form.images[0].anim_start = "x"
     assert validate_form(form) == []
 
 
@@ -641,9 +640,9 @@ def test_the_table_cells_and_the_menu_summary_say_it_in_a_phrase():
                              art_video="D:/a.mov", art_time="21")) == \
         "a.mov @21s"
     assert cell_art(ImageRow("x.raw", art="D:/logo.png")) == "logo.png"
-    assert cell_anim(ImageRow("x.raw", anim="auto", anim_start="20",
-                              anim_seconds="2", anim_fps="8")) == \
-        "auto @20s 2s 8fps"
+    assert cell_anim(ImageRow("x.raw", anim="auto", anim_start="20")) == \
+        "auto @20s"
+    assert cell_anim(ImageRow("x.raw", anim="auto")) == "auto"
     on_card = ImageRow("", art="art0.png", art_on_card=True,
                        music="music0.wav", music_on_card=True, anim="none")
     assert cell_art(on_card) == "art0.png (on the card)"
@@ -987,18 +986,20 @@ def test_editor_offers_what_the_image_shows_as_one_choice(tmp_path):
                    for w in panel._media_entries.values())
         # NO clip Start / Length / FPS controls any more (David): the video
         # options carry only a stated note, and the render still reads the
-        # fixed anim vars (set below to prove the spec is built from them)
+        # start var (set below to prove the spec is built from it); a
+        # length and a rate are not even vars now - the loop is the tool's
+        # own 5 s at the source's frame rate
         assert panel._clip_widgets == []
+        assert not hasattr(panel, "_ed_anim_fps")
+        assert not hasattr(panel, "_ed_anim_seconds")
         # the attract clip: the entries stay asleep, the note states the loop
         panel._ed_media.set("attract")
         assert all(str(w.cget("state")) == "disabled"
                    for w in panel._media_entries.values())
         panel._ed_anim_start.set("20")
-        panel._ed_anim_seconds.set("2")
-        panel._ed_anim_fps.set("8")
         row = panel.form().images[1]
         assert (row.art, row.anim) == ("auto", "auto")
-        assert anim_spec(row) == "auto@20:2:8"
+        assert anim_spec(row) == "auto@20"
         # a video file: its entry wakes, and it is the still as well
         panel._ed_media.set("video")
         assert str(panel._media_entries["video"].cget("state")) == "normal"
@@ -1008,11 +1009,10 @@ def test_editor_offers_what_the_image_shows_as_one_choice(tmp_path):
         row = panel.form().images[1]
         assert (row.art, row.art_time, row.anim) == \
             (str(clip), "20", str(clip))
-        assert (row.anim_start, row.anim_seconds, row.anim_fps) == \
-            ("20", "2", "8")
+        assert row.anim_start == "20"
         assert art_spec(row) == multiboot_tab.wsl(str(clip)) + "@20"
-        assert anim_spec(row) == multiboot_tab.wsl(str(clip)) + "@20:2:8"
-        assert multiboot_tab.cell_media(row) == "intro.mp4 @20s 2s 8fps"
+        assert anim_spec(row) == multiboot_tab.wsl(str(clip)) + "@20"
+        assert multiboot_tab.cell_media(row) == "intro.mp4 @20s"
         # a picture file: a still and nothing moving
         panel._ed_media.set("picture")
         assert str(panel._media_entries["picture"].cget("state")) == \
@@ -1031,8 +1031,7 @@ def test_editor_offers_what_the_image_shows_as_one_choice(tmp_path):
         assert panel._image_dialog is None
         assert panel._media_entries == {}         # the widgets went with it
         assert panel._clip_widgets == ()
-        assert panel._table.cell(1, "media") == \
-            "intro.mp4 @20s 2s 8fps"
+        assert panel._table.cell(1, "media") == "intro.mp4 @20s"
         assert panel.form().images[0].anim_start == ""        # untouched
         # re-select: row 0 shows the logo and blanks, row 1 comes back whole
         panel._table.select(0)
@@ -1042,7 +1041,7 @@ def test_editor_offers_what_the_image_shows_as_one_choice(tmp_path):
         panel._table.select(1)
         root.update()
         assert panel._ed_media.get() == "video"
-        assert panel._ed_anim_fps.get() == "8"
+        assert panel._ed_anim_start.get() == "20"
         assert panel._ed_video.get() == str(clip)
     finally:
         root.destroy()
@@ -1090,21 +1089,21 @@ def test_a_title_edit_leaves_a_pair_the_choice_cannot_spell(tmp_path):
         panel.add_image(a)
         panel.add_image(b)
         row = panel._rows[1]
-        row.art, row.anim, row.anim_fps = "D:/art/logo.png", "auto", "8"
+        row.art, row.anim, row.anim_start = "D:/art/logo.png", "auto", "8"
         panel._refresh_tree(select=1)
         root.update()
         assert multiboot_tab.media_kind(row) == "attract"
         assert multiboot_tab.cell_media(row) == \
-            "logo.png + attract video @0s 3s 8fps"
+            "logo.png + attract video @8s"
         assert panel._table.cell(1, "media") == \
-            "logo.png + attract video @0s 3s 8fps"
+            "logo.png + attract video @8s"
         assert panel._ed_media.get() == "attract"
         panel._ed_title.set("Still the same pair")
-        assert (row.art, row.anim, row.anim_fps) == \
+        assert (row.art, row.anim, row.anim_start) == \
             ("D:/art/logo.png", "auto", "8")
-        panel._ed_anim_fps.set("12")
-        assert (row.art, row.anim, row.anim_fps) == ("auto", "auto", "12")
-        assert multiboot_tab.cell_media(row) == "attract video @0s 3s 12fps"
+        panel._ed_anim_start.set("12")
+        assert (row.art, row.anim, row.anim_start) == ("auto", "auto", "12")
+        assert multiboot_tab.cell_media(row) == "attract video @12s"
     finally:
         root.destroy()
 
@@ -1164,17 +1163,16 @@ def test_media_kind_and_cell_media_read_every_row_shape():
     r = Row("x", art="D:/a/logo.png")
     assert (kind(r), cell(r), file_(r)) == \
         ("picture", "logo.png", "D:/a/logo.png")
-    r = Row("x", anim="auto", anim_start="20", anim_seconds="2",
-            anim_fps="8")
+    r = Row("x", anim="auto", anim_start="20")
     assert (kind(r), cell(r), file_(r)) == \
-        ("attract", "attract video @20s 2s 8fps", "")
+        ("attract", "attract video @20s", "")
     r = Row("x", art="D:/c/intro.mp4", art_time="3", anim="D:/c/intro.mp4",
             anim_start="3")
     assert (kind(r), cell(r), file_(r)) == \
-        ("video", "intro.mp4 @3s 3s 10fps", "D:/c/intro.mp4")
+        ("video", "intro.mp4 @3s", "D:/c/intro.mp4")
     # the still at another second than the clip's start: both halves
     r.art_time = "5"
-    assert cell(r) == "intro.mp4 @5s + intro.mp4 @3s 3s 10fps"
+    assert cell(r) == "intro.mp4 @5s + intro.mp4 @3s"
     # a still off a video with no clip yet (an older form): 'video', and
     # the cell says what there is, not what an edit would make of it
     r = Row("x", art="video frame", art_video="D:/c/intro.mp4",
@@ -1202,22 +1200,21 @@ def test_media_kind_and_cell_media_read_every_row_shape():
 
 def test_set_media_writes_the_pair_each_choice_means():
     set_media = multiboot_tab.set_media
-    r = set_media(ImageRow("x", art="D:/a.png", anim="auto", anim_fps="8"),
+    r = set_media(ImageRow("x", art="D:/a.png", anim="auto", anim_start="8"),
                   "logo")
-    assert (r.art, r.anim, r.anim_fps) == ("auto", "none", "")
+    assert (r.art, r.anim, r.anim_start) == ("auto", "none", "")
     r = set_media(ImageRow("x"), "none")
     assert (r.art, r.anim) == ("none", "none")
     r = set_media(ImageRow("x"), "picture", " D:/a.png ")
     assert (r.art, r.anim) == ("D:/a.png", "none")
-    r = set_media(ImageRow("x"), "attract", "D:/ignored.mp4", "20", "2", "8")
-    assert (r.art, r.anim, r.anim_start, r.anim_seconds, r.anim_fps) == \
-        ("auto", "auto", "20", "2", "8")
-    assert anim_spec(r) == "auto@20:2:8"
-    r = set_media(ImageRow("x"), "video", "D:/c/intro.mp4", "3", "", "")
+    r = set_media(ImageRow("x"), "attract", "D:/ignored.mp4", "20")
+    assert (r.art, r.anim, r.anim_start) == ("auto", "auto", "20")
+    assert anim_spec(r) == "auto@20"
+    r = set_media(ImageRow("x"), "video", "D:/c/intro.mp4", "3")
     assert (r.art, r.art_time, r.anim, r.anim_start) == \
         ("D:/c/intro.mp4", "3", "D:/c/intro.mp4", "3")
     assert art_spec(r).endswith("intro.mp4@3")
-    assert anim_spec(r).endswith("intro.mp4@3:3:10")
+    assert anim_spec(r).endswith("intro.mp4@3")
     # the card's own files are left exactly alone...
     r = ImageRow("x", art="art0.png", art_on_card=True, anim="anim0.gif",
                  anim_on_card=True)
@@ -2034,9 +2031,8 @@ def _tick(root, panel):
 
 def test_play_advances_through_the_cache_and_stops_when_the_form_changes(
         tmp_path):
-    """Play with a fake renderer: ONE run draws the whole animation (the
-    length is not known yet, so the most one can have is asked for and the
-    selector trims it), the ticks then walk 0, 1, 2, 0... out of the cache
+    """Play with a fake renderer: ONE frame is drawn (frame 0, the one the
+    clip is laid over), the ticks then walk 1, 2, 0, 1... out of the GIF
     without rendering again, and a form change stops it with the reason on
     the status line."""
     root, panel = _panel()
@@ -2047,24 +2043,26 @@ def test_play_advances_through_the_cache_and_stops_when_the_form_changes(
         fp = preview_fingerprint(form)
         asked.append((hl, list(frames)))
         panel._pv_totals[(fp, hl)] = 3
-        for n in frames:
-            if n < 3:              # the selector trims K to the real length
-                panel._pv_cache[(fp, hl, n)] = ppm
+        panel._pv_rects[(fp, hl)] = (10, 10, 32, 8)
+        panel._pv_cache[(fp, hl, 0)] = ppm
         return True
     try:
         for p in _images(tmp_path, 2):
             panel.add_image(p)
         panel._rows[1].anim = "auto"
         panel._default_var.set("1")
+        media = panel.media_dir()
+        os.makedirs(media, exist_ok=True)
+        _gif(os.path.join(media, "anim1.gif"), frames=3)
         panel._render_frames = fake_render
         panel._play_var.set(True)
         panel._play_toggled()
-        # ONE run, at once - pressing Play is all pressing Play takes
-        assert asked == [(1, list(range(multiboot_tab.PREVIEW_MAX_FRAMES)))]
+        # ONE frame, at once - pressing Play is all pressing Play takes
+        assert asked == [(1, [0])]
         for want in ("1", "2", "0", "1"):
             _tick(root, panel)
             assert panel._frame_var.get() == want
-        assert asked == [(1, list(range(multiboot_tab.PREVIEW_MAX_FRAMES)))]
+        assert asked == [(1, [0])]
         assert "frame 1 of 3 - playing" in panel._pv_status.cget("text")
         assert panel._play_var.get() is True
         panel._rows[1].title = "TMNT 1987 (renamed)"
@@ -2099,15 +2097,16 @@ def test_an_edit_during_a_slow_animation_is_not_thrown_away(tmp_path):
         fp = preview_fingerprint(form)
         asked.append((fp, hl, list(frames)))
         panel._pv_totals[(fp, hl)] = 3
-        for n in frames:
-            if n < 3:
-                panel._pv_cache[(fp, hl, n)] = ppm
+        panel._pv_rects[(fp, hl)] = (10, 10, 32, 8)
+        panel._pv_cache[(fp, hl, 0)] = ppm
         return True
     try:
         for p in _images(tmp_path, 2):
             panel.add_image(p)
         panel._rows[1].anim = "auto"
-        panel._rows[1].anim_fps = "1"           # one frame a second
+        media = panel.media_dir()
+        os.makedirs(media, exist_ok=True)
+        _gif(os.path.join(media, "anim1.gif"), frames=3, delay_ms=1000)
         panel._default_var.set("1")
         panel._render_frames = fake_render
         panel._play_var.set(True)
@@ -2216,7 +2215,7 @@ def _stand_ins(monkeypatch, tmp_path, fail=None, frames=3):
             "bytes([40, 60, 90]) * (136 * 77))\n"
             "    print('[select] snapshot: %s 136x77, highlight %d (T) from "
             "--highlight, frame %d of %d, timeout 15 s, invert 0, font f, "
-            "media m, footer \"x\"' % (w, hl, f, total))\n")
+            "media m, footer \"x\", picture 10,10,32,8' % (w, hl, f, total))\n")
         return [(label, [py, "-c", code, ppm, _tool_path(ppm), str(hl),
                          str(n), str(frames), str(length)])]
     monkeypatch.setattr(multiboot_tab, "ensure_selector_commands", ensure)
@@ -2410,8 +2409,8 @@ def test_a_retired_forms_animation_leaves_the_cache_with_its_files(
         panel._play_toggled()
         fp_a = preview_fingerprint(panel.form())
         pv = multiboot_tab.preview_dir_for(panel._out_var.get())
-        gone = [multiboot_tab.frame_path(pv, fp_a, 1, n) for n in range(4)]
-        assert sorted(panel._pv_cache) == [(fp_a, 1, n) for n in range(4)]
+        gone = [multiboot_tab.frame_path(pv, fp_a, 1, 0)]
+        assert sorted(panel._pv_cache) == [(fp_a, 1, 0)]
         assert all(os.path.isfile(p) for p in gone)
         # ...another form, and nothing of this one is on screen to spare
         panel._pv_src = None
@@ -2762,11 +2761,14 @@ def test_which_frames_a_run_wrote_is_read_off_the_selectors_own_lines():
     assert parse_snapshot_frames("codeselect: anim: image 1 4 frames") == []
 
 
-def test_play_draws_the_whole_animation_in_one_run(tmp_path, monkeypatch):
-    """THE POINT OF THE WHOLE THING: pressing Play used to start one qemu
-    run per frame, each reloading every PNG, GIF and font.  Now it is ONE
-    run - the most frames an animation can have, trimmed by the selector to
-    what this image really has - and the ticks after it render nothing."""
+def test_play_draws_one_frame_and_walks_the_gif(tmp_path, monkeypatch):
+    """THE POINT OF THE WHOLE THING: pressing Play used to render a PPM per
+    frame (one qemu run each, then one run for all of them) - 150 of them,
+    3 MB apiece, for a 5 s clip.  Now it is ONE frame - frame 0, which the
+    preview has usually drawn already - and the ticks lay the rendered
+    GIF's own frames over it where the selector says the picture is
+    (``picture x,y,w,h`` on its snapshot line).  Nothing else is
+    rendered, and the rectangle is remembered per form and image."""
     root, panel = _panel()
     seen = _stand_ins(monkeypatch, tmp_path, frames=4)
     calls = []
@@ -2775,53 +2777,64 @@ def test_play_draws_the_whole_animation_in_one_run(tmp_path, monkeypatch):
             panel.add_image(p)
         panel._rows[1].anim = "auto"
         panel._default_var.set("1")
+        media = panel.media_dir()
+        os.makedirs(media, exist_ok=True)
+        _gif(os.path.join(media, "anim1.gif"), frames=4)
         real = panel._run_commands
         panel._run_commands = lambda cmds, **kw: calls.append(
             [label for label, _ in cmds]) or real(cmds, **kw)
         panel._play_var.set(True)
         panel._play_toggled()
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
-        assert calls == [["selector", "prepare", ANIM_LABEL]]
-        # one snapshot call, a PATTERN, and the whole ceiling asked for
+        assert calls == [["selector", "prepare", "frame 0"]]
+        # one snapshot call, one FILE, frame 0 - never a run
         assert len(seen["snapshot"]) == 1
-        assert seen["snapshot"][0][6] == PREVIEW_MAX_FRAMES
-        assert seen["snapshot"][0][3].endswith("_%d.ppm")
+        assert seen["snapshot"][0][5:] == (0, 1)
+        assert seen["snapshot"][0][3].endswith("_1_0.ppm")
         fp = preview_fingerprint(panel.form())
         pv = multiboot_tab.preview_dir_for(panel._out_var.get())
         assert panel._pv_totals == {(fp, 1): 4}
-        assert sorted(panel._pv_cache) == [(fp, 1, n) for n in range(4)]
-        # EVERY CACHED PATH IS ONE THIS PROCESS CAN OPEN.  The selector is
-        # handed - and so echoes back - the WSL form of the pattern (see
-        # _tool_path), and caching what it echoed left every frame of Play
-        # pointing at a /mnt/c/… name Image.open cannot read: the picture
-        # froze on frame 0 and the strip repainted 'Cannot load …' at the
-        # clip's rate for as long as Play stayed ticked.
-        for n in range(4):
-            path = multiboot_tab.frame_path(pv, fp, 1, n)
-            assert panel._pv_cache[(fp, 1, n)] == path
-            assert os.path.isfile(path)
-        # ...and the ticks walk it, wrapping, without asking for any more
+        assert panel._pv_rects == {(fp, 1): (10, 10, 32, 8)}
+        assert sorted(panel._pv_cache) == [(fp, 1, 0)]
+        # THE CACHED PATH IS ONE THIS PROCESS CAN OPEN.  The selector is
+        # handed - and so echoes back - the WSL form of the name (see
+        # _tool_path), and caching what it echoed left Play pointing at a
+        # /mnt/c/… name Image.open cannot read.
+        path = multiboot_tab.frame_path(pv, fp, 1, 0)
+        assert panel._pv_cache[(fp, 1, 0)] == path
+        assert os.path.isfile(path)
+        # ...and the ticks walk the GIF, wrapping, rendering nothing more
         first = int(panel._frame_var.get())
         for k in range(1, 6):
             _tick(root, panel)
             assert panel._frame_var.get() == str((first + k) % 4)
-        assert calls == [["selector", "prepare", ANIM_LABEL]]
-        # stopping leaves the picture on a real frame, and the caption says
-        # which one rather than going on claiming to be playing
-        stopped = int(panel._frame_var.get())
+            assert panel._pv_shown == (1, (first + k) % 4)
+        assert "frame %d of 4 - playing" % ((first + 5) % 4) in \
+            panel._pv_status.cget("text")
+        assert calls == [["selector", "prepare", "frame 0"]]
+        assert len(seen["snapshot"]) == 1
+        # the clip is read once and kept, scaled to the picture's box
+        key, clip = panel._clip
+        assert key[0] == os.path.join(media, "anim1.gif") and clip.n == 4
+        assert key[3][2:] == clip.size
+        # stopping leaves the picture on the RENDERED frame (frame 0), and
+        # the caption says so rather than going on claiming to be playing
         panel._play_var.set(False)
         panel._play_toggled()
-        assert panel._pv_shown == (1, stopped)
-        assert panel._pv_status.cget("text") == \
-            "Image 2: frame %d of 4" % stopped
-        # ...and the SAME names reach the photo cache, so a frame the
-        # selector has just written again is decoded again rather than
-        # drawn from the pixels it had before the run
-        shown = multiboot_tab.frame_path(pv, fp, 1, stopped)
-        assert os.path.abspath(shown) in panel._pv_photos
-        assert panel._render_frames(panel.form(), 1, list(range(4))) is True
+        assert panel._pv_shown == (1, 0)
+        assert panel._frame_var.get() == "0"
+        assert panel._pv_status.cget("text") == "Image 2: frame 0 of 4"
+        # ...and the SAME name reaches the photo cache, so a frame the
+        # selector has just written again is decoded AGAIN (a single-frame
+        # render shows itself the moment it lands, so the entry is a new
+        # object, not the pixels it had before the run) - and the
+        # composite's base, which nothing re-reads until Play, is dropped
+        before = panel._pv_photos[os.path.abspath(path)]
+        assert panel._pv_base is not None
+        assert panel._render_frames(panel.form(), 1, [0]) is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
-        assert os.path.abspath(shown) not in panel._pv_photos
+        assert panel._pv_photos[os.path.abspath(path)] is not before
+        assert panel._pv_base is None
     finally:
         root.destroy()
 
@@ -2878,41 +2891,19 @@ def _gif(path, frames=4, delay_ms=100):
 
 
 def test_an_animation_plays_at_the_rate_it_was_rendered_at(tmp_path):
-    """THE ROW'S FPS FIELD IS A REQUEST, not the rate.  selectmedia clamps
-    it (gif_first_plan drops the frame rate to fit 30 frames) and shrinks
-    it again down gif_ladder to fit the byte budget, so a row asking 25 fps
-    is normally a 10 fps clip - and playing that at 40 ms ran the preview
-    two and a half times too fast against a machine that ticks on the GIF's
-    own delay.  The GIF settles it; the run's frame count over the clip's
-    length is the fallback; the field itself is only a first guess."""
-    # the rendered clip's own delay wins outright
-    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="25"),
-                          frames=30, delay_ms=100) == 100
-    # ...and without one, the frames the selector really wrote over the
-    # length that was asked for: 25 fps for 3 s is 30 frames at 10 fps
-    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="25"),
-                          frames=30) == 100
-    # the ordinary case - only the Length box touched, FPS left blank
-    assert anim_period_ms(ImageRow("", anim="auto", anim_seconds="5"),
-                          frames=30) == 167
-    assert anim_period_ms(ImageRow("", anim="auto", anim_seconds="6"),
-                          frames=30) == 200
-    # ...and the ladder's first rung, 8 fps over the default 3 s
-    assert anim_period_ms(ImageRow("", anim="auto"), frames=24) == 125
-    # nothing rendered yet: the field, clamped, because it is typed
-    assert anim_period_ms(ImageRow("", anim="auto")) == 100        # 10 fps
-    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="25")) == 40
-    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="nonsense")) \
-        == 100
-    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="0")) == 100
-    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="9000")) == 16
-    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="0.1")) == 2000
-    # a one-frame 'run' says nothing about the rate, and neither does a
-    # length of zero
-    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="25"),
-                          frames=1) == 40
-    assert anim_period_ms(ImageRow("", anim="auto", anim_fps="25",
-                                   anim_seconds="0"), frames=30) == 40
+    """THE GIF'S OWN DELAY IS THE RATE - the machine ticks on
+    ``a->delay_ms[frame]`` - and until the GIF is there, the contract's
+    30 fps (the row has no rate field any more: the one it had was a
+    request selectmedia clamped, and a stale one made a 2 fps clip).
+    Clamped, because a file can say anything."""
+    assert anim_period_ms(ImageRow("", anim="auto"), delay_ms=100) == 100
+    assert anim_period_ms(delay_ms=33) == 33
+    assert anim_period_ms(ImageRow("", anim="auto")) == 33         # 30 fps
+    assert anim_period_ms() == 33
+    assert anim_period_ms(delay_ms=0) == 33
+    assert anim_period_ms(delay_ms=None) == 33
+    assert anim_period_ms(delay_ms=1) == 16
+    assert anim_period_ms(delay_ms=9000) == 2000
 
 
 def test_the_rendered_gif_is_what_the_preview_reads_its_rate_from(tmp_path):
@@ -2930,7 +2921,6 @@ def test_the_rendered_gif_is_what_the_preview_reads_its_rate_from(tmp_path):
         for p in _images(tmp_path, 2):
             panel.add_image(p)
         panel._rows[1].anim = "auto"
-        panel._rows[1].anim_fps = "25"          # the request, not the rate
         media = panel.media_dir()
         os.makedirs(media, exist_ok=True)
         # image 1's clip really was rendered at 10 fps, and the preview
@@ -2938,8 +2928,8 @@ def test_the_rendered_gif_is_what_the_preview_reads_its_rate_from(tmp_path):
         # write_preview_conf puts in the conf)
         _gif(os.path.join(media, "anim1.gif"), frames=30, delay_ms=100)
         assert panel._play_ms(1) == 100
-        # nothing rendered for image 0, so its own field is all there is
-        assert panel._play_ms(0) == 100
+        # nothing rendered for image 0: the contract's 30 fps until there is
+        assert panel._play_ms(0) == 33
         assert panel._play_ms(9) == panel.PLAY_MS       # no such row
         # ...and a re-rendered clip at a new rate is picked up, because the
         # answer is kept against the file's own stat and not for the session
@@ -3616,17 +3606,21 @@ def test_media_specs_come_back_as_the_specs_that_made_them(monkeypatch,
     assert split_art_source(None) == ("auto", "", "")
     assert split_art_source("/mnt/d/a.png") == ("D:/a.png", "", "")
     assert split_art_source("/mnt/d/clip.mov@21") == ("D:/clip.mov", "", "21")
-    assert split_anim_source("none") == ("none", "", "", "")
-    assert split_anim_source("auto@20:2:8") == ("auto", "20", "2", "8")
-    assert split_anim_source("/mnt/d/x.gif") == ("D:/x.gif", "", "", "")
+    assert split_anim_source("none") == ("none", "")
+    assert split_anim_source("auto@20") == ("auto", "20")
+    assert split_anim_source("/mnt/d/x.gif") == ("D:/x.gif", "")
+    # a length and a rate a card recorded are DROPPED on the way in: the
+    # loop is the tool's contract now, so the next apply re-renders that
+    # clip like every other (5 s at the source's own frame rate)
+    assert split_anim_source("auto@20:2:8") == ("auto", "20")
+    assert split_anim_source("/mnt/d/x.mp4@3:3:10") == ("D:/x.mp4", "3")
     for spec in ("auto", "none", "/mnt/d/clip.mov@21"):
         art, video, at = split_art_source(spec)
         row = ImageRow(path="x.raw", art=art, art_video=video, art_time=at)
         assert art_spec(row) == spec
-    for spec in ("none", "auto", "auto@20:2:8", "/mnt/d/x.gif"):
-        anim, start, secs, fps = split_anim_source(spec)
-        row = ImageRow(path="x.raw", anim=anim, anim_start=start,
-                       anim_seconds=secs, anim_fps=fps)
+    for spec in ("none", "auto", "auto@20", "/mnt/d/x.gif"):
+        anim, start = split_anim_source(spec)
+        row = ImageRow(path="x.raw", anim=anim, anim_start=start)
         assert anim_spec(row) == spec
 
 
@@ -3648,7 +3642,9 @@ def test_a_rich_report_becomes_the_whole_form(monkeypatch, tmp_path):
     assert form.images[0].art == "auto" and form.images[0].anim == "none"
     assert form.images[1].art_time == "21"
     assert art_spec(form.images[1]) == info["images"][1]["art_source"]
-    assert anim_spec(form.images[1]) == "auto@20:2:8"
+    # the card's 'auto@20:2:8' loads as the clip from 20 s: its length and
+    # rate are the tool's contract now, not the card's
+    assert anim_spec(form.images[1]) == "auto@20"
     assert not any(multiboot_tab.on_card_fields(r) for r in form.images)
     assert rebuild_blockers(form) == []
 
@@ -4417,9 +4413,9 @@ def test_load_card_runs_inspect_and_fills_every_field(tmp_path, monkeypatch):
         assert [panel._table.cell(1, c)
                 for c in ("title", "sub", "media", "music")] == [
             "TMNT 1987", "1987 cartoon upscale",
-            "attract.mov @21s + attract video @20s 2s 8fps", "none"]
+            "attract.mov @21s + attract video @20s", "none"]
         assert multiboot_tab.cell_anim(panel.form().images[1]) == \
-            "auto @20s 2s 8fps"
+            "auto @20s"
         assert _apply_live(panel)
         assert "no changes yet" in panel._edit_lbl.cget("text")
     finally:
@@ -4591,7 +4587,7 @@ def test_a_media_change_prepares_into_the_loaded_cards_media_dir(tmp_path):
             "prepare", "inject", "inspect", INSPECT_JSON]
         prep = _tool_words(calls[0][0][1])
         assert prep[prep.index("--out") + 1] == multiboot_tab.wsl(media)
-        assert "0=auto" in prep and "1=auto@20:2:8" in prep
+        assert "0=auto" in prep and "1=auto@20" in prep
         assert "--visual-only" not in prep
         assert "(media first)" in panel._hint.cget("text")
     finally:

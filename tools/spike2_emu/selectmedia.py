@@ -8,7 +8,7 @@ images and loose files into the flat media directory the card builder
 (mkmulticard.py --media-dir DIR) injects into /usr/local/codeselect/media/:
 
     art<N>.png     still art, PRE-SCALED to the panel size (RGBA)
-    anim<N>.gif    animated GIF <= 512x288, <= 30 frames, <= 1.5 MB
+    anim<N>.gif    animated GIF <= 512x288, <= 150 frames (5 s at 30 fps), <= 10 MB
     music<N>.wav   music bed, RIFF pcm_s16le 44100 Hz stereo
     move.wav       played on every LEFT/RIGHT/-/+ edge
     confirm.wav    played on START/SELECT, to completion, before the game boots
@@ -26,10 +26,12 @@ codec parameters - a cold card is REFUSED, not derived for minutes):
           the title's own logo off the games partition (GameLogo.png,
           GameLogos/backglass_<model>.png, ALGameLogo.png), trimmed at IEND,
           scaled to the panel size.
-    anim  <source> <out.gif> [--size WxH] [--seconds 3] [--fps 10] [--start 0]
+    anim  <source> <out.gif> [--size WxH] [--seconds 5] [--fps N] [--start 0]
           source = a video file, or '<card.raw>:attract' = the clip the card's
-          scene data names attract_background; ffmpeg two-pass palette GIF,
-          shrunk along a fixed ladder until it fits 1.5 MB / 30 frames.
+          scene data names attract_background; ffmpeg two-pass palette GIF at
+          the source's own frame rate (--fps pins one), shrunk along a fixed
+          ladder - length first, the rate last - until it fits 10 MB / 150
+          frames.
     sound <card.raw> <idx> <out.wav> [--max-seconds 2] [--fade-ms 200]
           ONE sound decoded off the card with the Spike 2 emulator; needs the
           Extract-time params cache for that card (never derives).
@@ -42,8 +44,9 @@ codec parameters - a cold card is REFUSED, not derived for minutes):
             --art  N=auto | none | PATH (a still) | VIDEO@T (the frame T seconds into
                    an .mp4/.mov/.mkv/.avi)
             --anim N=auto | none | PATH | '<card.raw>:attract', each optionally
-                   '@START[:SECONDS[:FPS]]' (START seconds into the clip; the
-                   defaults are --start/--seconds/--fps)
+                   '@START[:SECONDS[:FPS]]' (START seconds into the clip; a
+                   length or rate left out follows --seconds and the source's
+                   OWN frame rate, up to 5 s / 30 fps / 150 frames)
             --music N=PATH | none
             --sound-confirm  a BARE auto|synth|none|PATH is the menu-wide sound
                    (confirm.wav); 'N=auto|synth|none|PATH' gives image N its own
@@ -96,16 +99,48 @@ if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
 # ============================================================================ the contract
-MEDIA_BUDGET = 20 << 20                     # the whole set, bytes
+#: The whole set, bytes.  p2 has ~194 MB free on a stock rootfs and the
+#: builder refuses at inject time against the REAL free space; this is the
+#: number that stops a set from growing past what a card can take before a
+#: byte is copied.  Raised from 20 MB with the 5 s / 30 fps animations (a
+#: two-image card's two clips alone are ~15 MB now).
+MEDIA_BUDGET = 96 << 20
 MEDIA_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
-GIF_MAX_BYTES = 1536 * 1024                 # 1.5 MB
-GIF_MAX_FRAMES = 30
+#: THE ANIMATION CONTRACT (David, 2026-09-03: "we need them to run at
+#: original fps (minimum 30fps would be ideal). we can limit them to 5
+#: second clips to help with storage concerns").  A loop is at most
+#: GIF_MAX_SECONDS long and plays at the source's own rate up to
+#: GIF_MAX_NATIVE_FPS, so the frame cap is the product of the two; the byte
+#: cap leaves room for an explicit --size up to the 512x288 ceiling (a busy
+#: attract loop measures 7.65 MB there, ~2.8 MB at the panel's own
+#: 298x168, which is what prepare renders at).  The selector
+#: decodes a GIF ON DEMAND, one frame per tick, so the count costs it no
+#: memory - only the card's storage, which is why there is a length cap at
+#: all.  (Before: 30 frames / 1.5 MB, which turned a 13 s clip into 2 fps.)
+GIF_MAX_SECONDS = 5.0
+GIF_MAX_NATIVE_FPS = 30
+GIF_MAX_FRAMES = int(GIF_MAX_SECONDS * GIF_MAX_NATIVE_FPS)     # 150
+#: The fastest an EXPLICIT ':FPS' is honoured: the selector's own floor is
+#: 20 ms a frame (art.c DELAY_MIN), and a GIF's centisecond delays alias
+#: above that anyway.  A source's own rate is capped lower (30): a 60 fps
+#: clip halves cleanly to 30, where 50 would drop every sixth frame.
+GIF_MAX_FPS = 50
+GIF_MAX_BYTES = 10 << 20                    # 10 MB
 GIF_MAX_W, GIF_MAX_H = 512, 288
 GIF_DEFAULT_DELAY_MS = 100                  # what the selector uses when a frame says 0
 WAV_RATE = 44100
-PANEL_SIZES = {2: (512, 288), 3: (384, 216)}   # 4+ -> PANEL_SIZE_MANY
-PANEL_SIZE_MANY = (256, 144)
-PANEL_SIZE_ONE = (512, 288)
+#: THE SELECTOR'S OWN PANEL, at the 1360x768 LCD (codeselect.c
+#: layout_compute): cards are 420 px tall with a 40 % art panel = 168 px,
+#: so a 16:9 picture is 299x168 whatever the card count - except FOUR
+#: cards, whose 227 px inner width bounds it to 227x128 (five and more
+#: are a carousel of three).  A picture rendered at or under that size
+#: is blitted 1:1 by art.c's fit_size (it never upscales, only fits a
+#: bigger one down), so nothing is resampled per frame on the machine
+#: and nothing is stored that is never shown: the old 384x216 was 1.65x
+#: the pixels of the same picture, box-filtered on EVERY tick, and
+#: measured 20 ms a frame under qemu.  Even sides, for ffmpeg.
+PANEL_FULL = (298, 168)
+PANEL_FOUR = (226, 128)
 DEFAULT_VOLUME = 50
 # Where the sound defaults come from (turtles_pro 1.59 catalog; the art report):
 MOVE_IDX = 1717                 # 0.079 s stereo transient
@@ -170,10 +205,9 @@ def parse_size(s):
 
 
 def panel_size_for(n_images):
-    """The still-art panel for an n-image menu: 512x288 for 2, 384x216 for 3, 256x144 for 4+."""
-    if n_images <= 1:
-        return PANEL_SIZE_ONE
-    return PANEL_SIZES.get(n_images, PANEL_SIZE_MANY)
+    """The art panel (still and animation) for an n-image menu: the size
+    the selector shows it at, 298x168 for every count but four (226x128)."""
+    return PANEL_FOUR if n_images == 4 else PANEL_FULL
 
 
 def is_png(data):
@@ -342,14 +376,15 @@ def is_video_path(path):
     return (path or "").lower().endswith(VIDEO_EXTS)
 
 
-def parse_anim_spec(spec, start=0.0, seconds=3.0, fps=10):
+def parse_anim_spec(spec, start=0.0, seconds=GIF_MAX_SECONDS, fps=GIF_MAX_NATIVE_FPS):
     """One --anim value -> {'kind': 'none'} or
     {'kind': 'auto'|'file', 'source': PATH|'<card>:clip'|None, 'start', 'seconds', 'fps', 'spec'}.
 
     'auto' / 'auto@START[:SECONDS[:FPS]]' = the card's attract clip; 'PATH' / 'PATH@...'
     a video file; '<card.raw>:attract' / '...:attract@...' a clip off another card.
-    START is seconds into the source; SECONDS and FPS fall back to the run's
-    --seconds/--fps (the GIF budget ladder clamps them like before)."""
+    START is seconds into the source; SECONDS falls back to the run's --seconds
+    and FPS to the source's own rate (the run's --fps only when that cannot be
+    read); the GIF budget ladder clamps them."""
     spec = (spec or "").strip()
     if not spec:
         raise Refused("animation spec is empty (use none, auto, or a path)")
@@ -654,14 +689,6 @@ class GifPlan(object):
 GIF_MIN_W = 256                 # the smallest panel the menu draws (4+ images)
 GIF_MIN_SECONDS = 1.5
 GIF_MIN_FPS = 5
-#: The fastest a boot-menu loop is rendered when it follows the SOURCE's own
-#: frame rate (David, 2026-09-03: "10fps sucks... make it the original fps").
-#: 30 is smooth and the selector honours it (its DELAY_MIN is 20 ms = 50 fps);
-#: a GIF's centisecond delays alias above this anyway.  The whole loop still
-#: fits GIF_MAX_FRAMES, so at the native rate it is SHORT (30 frames / 30 fps
-#: = 1 s) rather than long and choppy - a smooth second beats a stuttering
-#: thirteen.
-GIF_MAX_NATIVE_FPS = 30
 
 
 def _even(x):
@@ -676,62 +703,93 @@ def _scaled(w, h, factor, floor_w):
     return nw, nh
 
 
-def gif_first_plan(size, seconds=3.0, fps=10):
-    """Clamp a request to the contract: <= 512x288 (aspect kept), <= 30 frames
-    (rate first, then length)."""
+def _fit_panel(size):
+    """*size* inside the 512x288 cap, aspect kept, even sides."""
     w, h = size
     if w > GIF_MAX_W or h > GIF_MAX_H:
         f = min(GIF_MAX_W / float(w), GIF_MAX_H / float(h))
         w, h = _even(w * f), _even(h * f)
+    return w, h
+
+
+def _fit_length(seconds, fps, max_seconds=GIF_MAX_SECONDS):
+    """The loop's length at *fps*: at most *max_seconds*, GIF_MAX_SECONDS and
+    GIF_MAX_FRAMES, at least one frame.  LENGTH IS WHAT GIVES, NEVER THE
+    RATE - the old clamp did it the other way round and turned a 13 s ask at
+    30 fps into 13 s at 2 fps (David's clip, 2026-09-03)."""
+    seconds = min(float(seconds), float(max_seconds), GIF_MAX_SECONDS)
+    if round(seconds * fps) > GIF_MAX_FRAMES:
+        seconds = GIF_MAX_FRAMES / float(fps)
+    return max(1.0 / fps, seconds)
+
+
+def gif_first_plan(size, seconds=GIF_MAX_SECONDS, fps=GIF_MAX_NATIVE_FPS):
+    """Clamp an EXPLICIT request to the contract: <= 512x288 (aspect kept),
+    the rate as asked up to GIF_MAX_FPS (the selector's own 20 ms floor), the
+    length cut to fit GIF_MAX_SECONDS / GIF_MAX_FRAMES - length first, rate
+    kept."""
+    w, h = _fit_panel(size)
     seconds = float(seconds)
     fps = int(fps)
     if seconds <= 0 or fps <= 0:
         raise Refused("seconds and fps must be positive")
-    if round(seconds * fps) > GIF_MAX_FRAMES:
-        fps = max(1, int(GIF_MAX_FRAMES // seconds))
-        if round(seconds * fps) > GIF_MAX_FRAMES:
-            seconds = GIF_MAX_FRAMES / float(fps)
-    return GifPlan(w, h, seconds, fps)
+    fps = min(fps, GIF_MAX_FPS)
+    return GifPlan(w, h, _fit_length(seconds, fps), fps)
 
 
-def gif_native_plan(size, fps, max_seconds=3.0):
-    """A plan at the SOURCE's own frame rate, its length cut so the whole
-    thing still fits GIF_MAX_FRAMES - length first, rate KEPT.  The opposite
-    of :func:`gif_first_plan`, which throttles the rate to hold the length
-    (that is what turned a 13 s clip into 2 fps).  David: "10fps sucks...
-    make it the original fps"; a short smooth loop is the trade."""
-    w, h = size
-    if w > GIF_MAX_W or h > GIF_MAX_H:
-        f = min(GIF_MAX_W / float(w), GIF_MAX_H / float(h))
-        w, h = _even(w * f), _even(h * f)
+def gif_native_plan(size, fps, max_seconds=GIF_MAX_SECONDS):
+    """A plan at the SOURCE's own frame rate (GIF_MIN_FPS..GIF_MAX_NATIVE_FPS;
+    a 60 fps clip is rendered at 30), its length cut so the loop fits
+    GIF_MAX_SECONDS / GIF_MAX_FRAMES - the same length-first rule as
+    :func:`gif_first_plan`.  David: "10fps sucks... make it the original
+    fps", then "minimum 30fps would be ideal. we can limit them to 5 second
+    clips"."""
+    w, h = _fit_panel(size)
     fps = max(GIF_MIN_FPS, min(GIF_MAX_NATIVE_FPS, int(round(fps or 0)) or GIF_MIN_FPS))
-    seconds = min(float(max_seconds), GIF_MAX_FRAMES / float(fps))
-    seconds = max(1.0 / fps, seconds)       # at least one frame
-    return GifPlan(w, h, seconds, fps)
+    return GifPlan(w, h, _fit_length(GIF_MAX_SECONDS, fps, max_seconds), fps)
+
+
+#: The rates the byte-budget ladder falls back through, in order - and THE
+#: RATE IS THE LAST THING TO GIVE (David: "minimum 30fps would be ideal"):
+#: only after the loop is down to 2 s and the picture to 320 wide does it
+#: leave 30, and the low steps come after everything else is at its floor.
+LADDER_FPS_HIGH = (24, 20, 15)
+LADDER_FPS_LOW = (10, 8, 6, GIF_MIN_FPS)
 
 
 def gif_shrink(plan):
     """The next cheaper plan, or None at the floor.  Order of the ladder: the
-    frame rate down to 8 (30 -> 24 frames), the picture down in 12.5 % steps to
-    320 wide, the rate to 6, the length to 2 s, the rate to 5, the picture to
-    256 wide, the length to 1.5 s.  Every step strictly lowers cost()."""
+    length down a second at a time to 2 s, the picture down in 12.5 % steps
+    to 320 wide, the rate to 24 / 20 / 15, the picture to 256 wide, the
+    length to 1.5 s, and last the rate to 10 / 8 / 6 / 5.  Every step
+    strictly lowers cost().  A 5 s / 30 fps attract loop at 512x288 measures
+    7.65 MB, so in practice the first step (4 s) is as far as a busy clip
+    falls."""
     w, h, s, f = plan.w, plan.h, plan.seconds, plan.fps
-    if f > 8:
-        return GifPlan(w, h, s, 8)
-    if w > 320:
-        nw, nh = _scaled(w, h, 0.875, 320)
-        return GifPlan(nw, nh, s, f)
-    if f > 6:
-        return GifPlan(w, h, s, 6)
-    if s > 2.0:
-        return GifPlan(w, h, max(2.0, s - 0.5), f)
-    if f > GIF_MIN_FPS:
-        return GifPlan(w, h, s, GIF_MIN_FPS)
-    if w > GIF_MIN_W:
-        nw, nh = _scaled(w, h, 0.875, GIF_MIN_W)
-        return GifPlan(nw, nh, s, f)
-    if s > GIF_MIN_SECONDS:
-        return GifPlan(w, h, GIF_MIN_SECONDS, f)
+
+    def steps():
+        if s > 2.0:
+            yield GifPlan(w, h, max(2.0, s - 1.0), f)
+        if w > 320:
+            nw, nh = _scaled(w, h, 0.875, 320)
+            yield GifPlan(nw, nh, s, f)
+        for rate in LADDER_FPS_HIGH:
+            if f > rate:
+                yield GifPlan(w, h, s, rate)
+        if w > GIF_MIN_W:
+            nw, nh = _scaled(w, h, 0.875, GIF_MIN_W)
+            yield GifPlan(nw, nh, s, f)
+        if s > GIF_MIN_SECONDS:
+            yield GifPlan(w, h, GIF_MIN_SECONDS, f)
+        for rate in LADDER_FPS_LOW:
+            if f > rate:
+                yield GifPlan(w, h, s, rate)
+    # a step that changes nothing the encoder sees (1.7 s and 1.5 s are the
+    # same 8 frames at 5 fps) is skipped for the next, so the ladder never
+    # re-encodes the same picture twice
+    for cand in steps():
+        if cand.cost() < plan.cost():
+            return cand
     return None
 
 
@@ -1470,7 +1528,6 @@ def cmd_logo(a):
 def cmd_anim(a):
     src, clip = split_source(a.source)
     size = parse_size(a.size) if a.size else (GIF_MAX_W, GIF_MAX_H)
-    plan = gif_first_plan(size, a.seconds, a.fps)
     work = tempfile.mkdtemp(prefix="selectmedia_anim_", dir=a.work)
     try:
         if clip:
@@ -1479,6 +1536,11 @@ def cmd_anim(a):
             path, n = extract_clip(src, name, mov)
             say("anim: %s = %s (%s)" % (name, path, fmt_bytes(n)))
             src = mov
+        # the source's own rate unless --fps pinned one (as prepare does)
+        if a.fps:
+            plan = gif_first_plan(size, a.seconds, a.fps)
+        else:
+            plan = gif_native_plan(size, probe_fps(src, default=GIF_MAX_NATIVE_FPS), a.seconds)
         info, used, tries = gif_fit(src, a.out, plan, a.start, work)
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -1715,14 +1777,14 @@ def _prepare_anim(i, img, spec, size, out, work, log=say):
         src = src_path
         log("  %s: %s" % (name, src))
     # THE FRAME RATE FOLLOWS THE SOURCE unless the spec pinned it (David:
-    # "make it the original fps").  Length-first budgeting keeps the loop
-    # smooth and short rather than long and choppy (see gif_native_plan).
+    # "make it the original fps"), and the loop is as long as the source
+    # and the 5 s cap allow at that rate - length-first budgeting either
+    # way (see gif_native_plan / gif_first_plan).
     if spec["fps_explicit"]:
         plan = gif_first_plan(size, spec["seconds"], spec["fps"])
     else:
         native = probe_fps(src, default=spec["fps"])
-        want_secs = spec["seconds"] if spec["seconds_explicit"] else 3.0
-        plan = gif_native_plan(size, native, want_secs)
+        plan = gif_native_plan(size, native, spec["seconds"])
         log("  %s: the source's own %.3g fps, a %.3g s loop (%d frames)"
             % (name, plan.fps, plan.seconds, plan.frames))
     gif_fit(src, target, plan, spec["start"], work, log)
@@ -1852,8 +1914,10 @@ def main(argv=None):
     s.add_argument("source")
     s.add_argument("out")
     s.add_argument("--size", default=None, help="WxH (default 512x288, the contract's cap)")
-    s.add_argument("--seconds", type=float, default=3.0)
-    s.add_argument("--fps", type=int, default=10)
+    s.add_argument("--seconds", type=float, default=GIF_MAX_SECONDS,
+                   help="the loop's length (default and cap %g s)" % GIF_MAX_SECONDS)
+    s.add_argument("--fps", type=int, default=None,
+                   help="pin a rate; default = the source's own, up to %d" % GIF_MAX_NATIVE_FPS)
     s.add_argument("--start", type=float, default=0.0, help="seconds into the source")
     _add_work(s)
     s.set_defaults(fn=cmd_anim)
@@ -1905,8 +1969,10 @@ def main(argv=None):
                    help="art/anim (+music) only: no move/confirm sounds, none pulled off a card (the GUI preview)")
     s.add_argument("--volume", type=int, default=DEFAULT_VOLUME)
     s.add_argument("--size", default=None, help="panel WxH (default by image count)")
-    s.add_argument("--seconds", type=float, default=3.0, help="animation length")
-    s.add_argument("--fps", type=int, default=10)
+    s.add_argument("--seconds", type=float, default=GIF_MAX_SECONDS,
+                   help="animation length (default and cap %g s)" % GIF_MAX_SECONDS)
+    s.add_argument("--fps", type=int, default=GIF_MAX_NATIVE_FPS,
+                   help="the rate when a source's own cannot be read (an --anim ':FPS' pins one)")
     s.add_argument("--start", type=float, default=0.0, help="seconds into the animation source")
     _add_work(s)
     s.set_defaults(fn=cmd_prepare)

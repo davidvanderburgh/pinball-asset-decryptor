@@ -121,46 +121,72 @@ def test_gif_info_zero_delay_reads_as_the_selectors_100ms(sm):
 
 
 def test_gif_fits_reports_every_cap(sm):
-    ok = {"w": 512, "h": 288, "frames": 30, "bytes": sm.GIF_MAX_BYTES, "delays_ms": [], "duration_ms": 0}
+    ok = {"w": 512, "h": 288, "frames": sm.GIF_MAX_FRAMES, "bytes": sm.GIF_MAX_BYTES,
+          "delays_ms": [], "duration_ms": 0}
     assert sm.gif_fits(ok) is None
-    assert "frames" in sm.gif_fits(dict(ok, frames=31))
+    assert "frames" in sm.gif_fits(dict(ok, frames=sm.GIF_MAX_FRAMES + 1))
     assert ">" in sm.gif_fits(dict(ok, bytes=sm.GIF_MAX_BYTES + 1))
     assert "x" in sm.gif_fits(dict(ok, w=640, h=360))
 
 
 # ============================================================================ GIF planner
-def test_gif_first_plan_clamps_size_and_frames(sm):
+def test_the_contract_is_five_seconds_at_thirty(sm):
+    """David, 2026-09-03: 'run at original fps (minimum 30fps would be
+    ideal). we can limit them to 5 second clips' - the frame cap is the
+    product of the two, and the byte cap clears a busy 5 s clip at 512x288
+    (measured 7.65 MB)."""
+    assert sm.GIF_MAX_SECONDS == 5.0 and sm.GIF_MAX_NATIVE_FPS == 30
+    assert sm.GIF_MAX_FRAMES == 150
+    assert sm.GIF_MAX_BYTES >= 8 << 20
+    assert sm.GIF_MAX_FPS >= sm.GIF_MAX_NATIVE_FPS
+
+
+def test_gif_first_plan_keeps_the_rate_and_cuts_the_length(sm):
+    """An EXPLICIT ask past the caps loses LENGTH, never rate: 13 s at 30 fps
+    is 5 s at 30 fps (the old rate-first clamp made it 13 s at 2 fps, which
+    is what David saw)."""
     p = sm.gif_first_plan((512, 288), 3, 10)
     assert (p.w, p.h, p.seconds, p.fps, p.frames) == (512, 288, 3.0, 10, 30)
     big = sm.gif_first_plan((1360, 768), 3, 10)
     assert big.w <= sm.GIF_MAX_W and big.h <= sm.GIF_MAX_H and big.w % 2 == 0
     assert abs(big.w / float(big.h) - 1360 / 768.0) < 0.02
-    long = sm.gif_first_plan((512, 288), 5, 10)       # 50 frames asked
-    assert long.frames <= sm.GIF_MAX_FRAMES and long.seconds == 5.0 and long.fps == 6
-    very = sm.gif_first_plan((512, 288), 60, 10)      # even 1 fps is too many frames
-    assert very.frames <= sm.GIF_MAX_FRAMES
+    davids = sm.gif_first_plan((384, 216), 13, 30)     # 390 frames asked
+    assert (davids.fps, davids.seconds, davids.frames) == (30, 5.0, 150)
+    long = sm.gif_first_plan((512, 288), 5, 10)        # 50 frames: fits whole now
+    assert (long.seconds, long.fps, long.frames) == (5.0, 10, 50)
+    fast = sm.gif_first_plan((512, 288), 5, 50)        # 250 frames asked: 3 s at 50
+    assert fast.fps == 50 and fast.frames == sm.GIF_MAX_FRAMES and abs(fast.seconds - 3.0) < 1e-6
+    assert sm.gif_first_plan((512, 288), 5, 120).fps == sm.GIF_MAX_FPS
+    very = sm.gif_first_plan((512, 288), 60, 10)       # 60 s asked: the 5 s cap
+    assert very.frames <= sm.GIF_MAX_FRAMES and very.seconds == 5.0 and very.fps == 10
     with pytest.raises(sm.Refused):
         sm.gif_first_plan((512, 288), 0, 10)
 
 
 def test_gif_native_plan_keeps_the_rate_and_cuts_the_length(sm):
-    """David: '10fps sucks... make it the original fps'.  The native plan
-    keeps the source's rate and shortens the loop to fit the 30-frame
-    budget - the opposite of gif_first_plan, which throttled the rate."""
-    # a 30 fps source: the rate is kept, the loop cut to 1 s (30 frames)
-    p = sm.gif_native_plan((384, 216), 30, 3.0)
-    assert (p.fps, p.frames) == (30, 30) and abs(p.seconds - 1.0) < 1e-6
-    # 24 fps -> a 1.25 s loop, still 30 frames, still 24 fps (not throttled)
-    q = sm.gif_native_plan((384, 216), 24, 3.0)
-    assert q.fps == 24 and q.frames <= sm.GIF_MAX_FRAMES and q.seconds > 1.0
-    # a slow source keeps its slow rate and the whole 3 s (well under budget)
-    slow = sm.gif_native_plan((384, 216), 8, 3.0)
-    assert slow.fps == 8 and abs(slow.seconds - 3.0) < 1e-6
-    # absurd rates are clamped to the honoured band, never below the floor
-    assert sm.gif_native_plan((384, 216), 240, 3.0).fps == sm.GIF_MAX_NATIVE_FPS
-    assert sm.gif_native_plan((384, 216), 1, 3.0).fps == sm.GIF_MIN_FPS
+    """David: '10fps sucks... make it the original fps', then 'minimum 30fps
+    would be ideal... 5 second clips'.  The native plan keeps the source's
+    rate (up to 30) and gives the loop the whole 5 s."""
+    # a 30 fps source: the rate is kept, the loop is the whole 5 s
+    p = sm.gif_native_plan((384, 216), 30)
+    assert (p.fps, p.frames) == (30, 150) and abs(p.seconds - 5.0) < 1e-6
+    # ...or the source's own length when that is shorter (David's 3.7 s clip)
+    short = sm.gif_native_plan((384, 216), 30, 3.7)
+    assert short.fps == 30 and abs(short.seconds - 3.7) < 1e-6 and short.frames == 111
+    # 24 fps -> 5 s at 24 fps, 120 frames (not throttled, not cut)
+    q = sm.gif_native_plan((384, 216), 24)
+    assert (q.fps, q.frames) == (24, 120)
+    # a slow source keeps its slow rate and the whole 5 s
+    slow = sm.gif_native_plan((384, 216), 8)
+    assert slow.fps == 8 and abs(slow.seconds - 5.0) < 1e-6
+    # a 60 fps source halves cleanly to 30; absurd rates clamp, never below the floor
+    assert sm.gif_native_plan((384, 216), 60).fps == 30
+    assert sm.gif_native_plan((384, 216), 240).fps == sm.GIF_MAX_NATIVE_FPS
+    assert sm.gif_native_plan((384, 216), 1).fps == sm.GIF_MIN_FPS
+    # a longer ask than the cap is the cap
+    assert sm.gif_native_plan((384, 216), 30, 13.0).seconds == 5.0
     # size is clamped like the other planner
-    big = sm.gif_native_plan((1360, 768), 30, 3.0)
+    big = sm.gif_native_plan((1360, 768), 30)
     assert big.w <= sm.GIF_MAX_W and big.h <= sm.GIF_MAX_H
 
 
@@ -177,27 +203,37 @@ def test_probe_fps_reads_the_sources_rate(sm, tmp_path):
     assert sm.probe_fps(str(tmp_path / "nope.mp4"), default=7) == 7
 
 
-@pytest.mark.parametrize("size", [(512, 288), (384, 216), (256, 144), (500, 200)])
-def test_gif_ladder_is_monotonic_bounded_and_finite(sm, size):
-    """Every step strictly lowers cost, never exceeds the caps, ends at the floor."""
-    lad = sm.gif_ladder(sm.gif_first_plan(size, 3, 10))
-    assert lad[0] == sm.gif_first_plan(size, 3, 10)
+@pytest.mark.parametrize("size", [(512, 288), (384, 216), (256, 144), (500, 200), (300, 170)])
+@pytest.mark.parametrize("seconds,fps", [(5, 30), (3, 10), (1.7, 5), (5, 50), (2.5, 24)])
+def test_gif_ladder_is_monotonic_bounded_and_finite(sm, size, seconds, fps):
+    """Every step strictly lowers cost, never exceeds the caps, ends at the
+    floor - including the 1.7 s / 5 fps corner where cutting to 1.5 s is the
+    same 8 frames (that step is skipped, not re-encoded)."""
+    lad = sm.gif_ladder(sm.gif_first_plan(size, seconds, fps))
+    assert lad[0] == sm.gif_first_plan(size, seconds, fps)
     costs = [p.cost() for p in lad]
     assert all(a > b for a, b in zip(costs, costs[1:])), costs
     for p in lad:
         assert p.frames <= sm.GIF_MAX_FRAMES
         assert p.w <= sm.GIF_MAX_W and p.h <= sm.GIF_MAX_H
         assert p.w >= sm.GIF_MIN_W or p.w == lad[0].w
-        assert p.fps >= sm.GIF_MIN_FPS and p.seconds >= sm.GIF_MIN_SECONDS
+        assert p.fps >= sm.GIF_MIN_FPS
+        assert p.seconds >= min(sm.GIF_MIN_SECONDS, lad[0].seconds)
         assert p.w % 2 == 0 and p.h % 2 == 0
     assert sm.gif_shrink(lad[-1]) is None
-    assert 1 <= len(lad) <= 20
+    assert 1 <= len(lad) <= 24
 
 
-def test_gif_ladder_order_rate_then_size_then_length(sm):
-    lad = sm.gif_ladder(sm.gif_first_plan((512, 288), 3, 10))
-    assert (lad[1].fps, lad[1].w) == (8, 512), "the first move is 10 -> 8 fps"
-    assert lad[2].w < 512 and lad[2].fps == 8, "then the picture shrinks"
+def test_gif_ladder_order_length_then_size_then_rate_last(sm):
+    """THE RATE IS THE LAST THING TO GIVE (David: 'minimum 30fps would be
+    ideal'): a 5 s / 30 fps clip that is over the byte cap loses a second
+    first, then picture, and only then frame rate."""
+    lad = sm.gif_ladder(sm.gif_first_plan((512, 288), 5, 30))
+    assert [(p.seconds, p.w, p.fps) for p in lad[:4]] == \
+        [(5.0, 512, 30), (4.0, 512, 30), (3.0, 512, 30), (2.0, 512, 30)]
+    assert lad[4].w < 512 and lad[4].fps == 30, "then the picture shrinks"
+    first_slower = next(i for i, p in enumerate(lad) if p.fps < 30)
+    assert lad[first_slower - 1].w == 320 and lad[first_slower].fps == 24
     assert lad[-1] == sm.GifPlan(256, 144, 1.5, 5)
 
 
@@ -235,11 +271,14 @@ def test_apply_fade_ends_at_silence(sm):
 
 # ============================================================================ names, sizes, manifest
 def test_panel_size_defaults(sm):
-    assert sm.panel_size_for(2) == (512, 288)
-    assert sm.panel_size_for(3) == (384, 216)
-    assert sm.panel_size_for(4) == (256, 144)
-    assert sm.panel_size_for(7) == (256, 144)
-    assert sm.panel_size_for(1) == (512, 288)
+    # the selector's own panel at 1360x768: 168 px tall, 16:9 -> 299 wide
+    # (298 even) for every count but four cards (227 px inner -> 226x128)
+    assert sm.panel_size_for(2) == (298, 168)
+    assert sm.panel_size_for(3) == (298, 168)
+    assert sm.panel_size_for(4) == (226, 128)
+    assert sm.panel_size_for(7) == (298, 168)
+    assert sm.panel_size_for(1) == (298, 168)
+    assert sm.panel_size_for(5) == (298, 168)
 
 
 def test_parse_size(sm):
@@ -405,7 +444,7 @@ def test_check_media_dir_refusals(sm, tmp_path):
         sm.check_media_dir(d, log=lambda s: None)
     _valid_set(sm, d)
     with open(os.path.join(d, "anim0.gif"), "wb") as f:
-        f.write(tiny_gif(frames=31))               # one frame too many
+        f.write(tiny_gif(frames=sm.GIF_MAX_FRAMES + 1))     # one frame too many
     with pytest.raises(sm.Refused):
         sm.check_media_dir(d, log=lambda s: None)
     _valid_set(sm, d)

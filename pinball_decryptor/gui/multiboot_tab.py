@@ -94,10 +94,12 @@ codeselect --snapshot`` run and nothing else, while art, clips, music and
 the sounds pay for selectmedia's prepare (cached; 0.13 s for a two-image
 set when nothing changed).  The conf the picture is drawn from is written
 under ``<out dir>/preview``, and each snapshot writes a P6 PPM that Tk
-loads natively.  'Play' runs the highlighted card's animation: the WHOLE
-run comes out of ONE selector run (``--snapshot <pattern> --frames K``,
-one media load instead of K) and is then played from memory at the clip's
-own frame rate, so after the first pass nothing touches the disk.
+loads natively.  'Play' runs the highlighted card's animation over that
+ONE rendered frame: the selector says where in the frame it blitted the
+card's picture (``picture x,y,w,h`` on its snapshot line), and Play lays
+the rendered GIF's own frames there at the clip's own rate - the GIF is
+what the machine decodes into that very rectangle, so the pixels are the
+machine's, without a 3 MB PPM per frame (a 5 s clip is 150 of them).
 Because a preview leaves a sound-less media.json behind, 'Build & verify'
 runs a full prepare into that dir first whenever a media set exists - the
 card is never built from the preview's half of the media.
@@ -266,10 +268,13 @@ _AUTO_IDX_RE = re.compile(r"(?i)^auto@\d+$")
 #: A picture taken from a video: ``--art N=<video>@<seconds>``.
 VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".avi")
 
-#: selectmedia.py's own clip defaults (its --start / --seconds / --fps).  A
-#: blank field in the editor means "the tool's default"; when any of the
-#: three is given all three are spelled out, explicit rather than defaulted.
-ANIM_DEFAULTS = ("0", "3", "10")
+#: What a loop plays at until its GIF is there to read - selectmedia.py's
+#: GIF_MAX_NATIVE_FPS, the most a source's own rate is rendered at.  The
+#: loop's length and rate are the TOOL's contract (up to 5 s at the
+#: source's own frame rate); the form never asks for either (David,
+#: 2026-09-03: "run at original fps (minimum 30fps would be ideal). we can
+#: limit them to 5 second clips").
+ANIM_FPS = 30
 
 #: The selector's own frame, and the box the preview draws it in.  The box
 #: is the height the rest of the tab does not need (up to half the
@@ -285,23 +290,23 @@ PREVIEW_MIN_H = 150
 #: The smallest whole-number step the PhotoImage fallback may shrink to
 #: (only reached without Pillow - see :func:`preview_box`).
 PREVIEW_MIN_K = 4
-PREVIEW_FPS = 8
+#: Play's fallback rate, before a clip's own delays are read.
+PREVIEW_FPS = ANIM_FPS
 
 #: The most frames one snapshot run may be asked for - codeselect.c's
-#: ANIM_MAX_FRAMES, which is both the number of frames an animation is
-#: decoded to and the largest ``--frames`` it accepts (a bigger K is
-#: refused, exit 2).  Asking for exactly this is how Play gets a whole
-#: animation of unknown length out of ONE run: the selector trims K to what
-#: the highlighted image really has, and says so in its log.
-PREVIEW_MAX_FRAMES = 30
+#: ANIM_MAX_FRAMES (5 s at 30 fps), which is both the number of frames an
+#: animation is read for and the largest ``--frames`` it accepts (a bigger
+#: K is refused, exit 2).  Play no longer asks for a run (it lays the GIF
+#: over frame 0 - see the module docstring); the Frame spinbox and a
+#: caller of :meth:`MultibootPanel._render_frames` still may.
+PREVIEW_MAX_FRAMES = 150
 
 #: How many DECODED frames the preview keeps in memory.  A frame FILE is
 #: cheap to remember (a path in a dict); a frame scaled into a PhotoImage
-#: is ~1 MB of RGBA at the sizes this tab draws at, so one animation is
-#: ~30 MB and sixteen images' worth would be half a gigabyte.  Play only
-#: ever walks ONE image's animation, so one animation and a still or two
-#: is the whole working set.
-PHOTO_CACHE_MAX = PREVIEW_MAX_FRAMES + 2
+#: is ~1 MB of RGBA at the sizes this tab draws at.  Play walks the GIF,
+#: not these, so a few stills and the frames a spinbox visited is the
+#: whole working set.
+PHOTO_CACHE_MAX = 32
 
 #: How long the preview waits after the last keystroke before it re-renders.
 #: Every change inside the window is one render, not N.
@@ -350,9 +355,14 @@ class ImageRow:
     confirm: str = ""
     art_video: str = ""      # 'video frame': the clip the picture comes from
     art_time: str = ""       # ...and the second it is taken at (blank = 0)
-    anim_start: str = ""     # seconds into the clip (blank = the tool's default)
-    anim_seconds: str = ""   # the clip's length
-    anim_fps: str = ""
+    #: Seconds into the clip the loop starts at (blank = 0).  The loop's
+    #: LENGTH and RATE are not fields any more: they are the tool's own
+    #: contract (up to 5 s at the source's own frame rate, 30 fps at
+    #: most), and a row carrying a length and a rate of its own was how a
+    #: 13 s / 30 fps ask reached selectmedia and came back as 2 fps
+    #: (David, 2026-09-03) - long after the controls that set them were
+    #: gone from the dialog.
+    anim_start: str = ""
     #: The game code version of this image, when something has reported one
     #: - the table shows it in its own column and leaves the cell blank
     #: until then.  Never typed: it is a fact about the .raw, read off it.
@@ -906,15 +916,10 @@ def validate_form(form, sources=True):
             if why:
                 errs.append(why)
         if anim_spec(row) != "none":
-            for val, what, kw in (
-                    (row.anim_start, "animation start", {}),
-                    (row.anim_seconds, "animation length",
-                     {"positive": True}),
-                    (row.anim_fps, "animation FPS",
-                     {"integer": True, "positive": True})):
-                why = _bad_number(val, "Image %d: the %s" % (i, what), **kw)
-                if why:
-                    errs.append(why)
+            why = _bad_number(row.anim_start,
+                              "Image %d: the animation start" % i)
+            if why:
+                errs.append(why)
     for what, val in (("move sound", form.sound_move),
                       ("confirm sound", form.sound_confirm)):
         if is_file_choice(val) and not os.path.isfile(val.strip()):
@@ -991,19 +996,38 @@ def art_spec(row):
 
 def anim_spec(row):
     """The ``--anim N=`` value: ``none`` | ``auto`` | ``<file>``, with
-    ``@<start>:<seconds>:<fps>`` appended when any of the three is set."""
+    ``@<start>`` appended when the clip starts into its source.
+
+    NO LENGTH AND NO RATE, EVER.  Those are selectmedia's own contract (the
+    loop is up to 5 s at the source's frame rate, 30 fps at most), and a
+    spec that named them was what the old Start/Length/FPS controls sent -
+    ``@0:13:30`` for a clip David had typed 13 s and 30 fps into, which the
+    rate-first clamp rendered as 13 s at 2 fps, and which the row went on
+    sending after the controls were removed."""
     v = (row.anim or "").strip().strip('"')
     w = v.lower()
     if w in ("none", ""):
         return "none"
     base = "auto" if w == "auto" else wsl(v)
-    start, secs, fps = (_num(row.anim_start), _num(row.anim_seconds),
-                        _num(row.anim_fps))
-    if start or secs or fps:
-        base += "@%s:%s:%s" % (start or ANIM_DEFAULTS[0],
-                               secs or ANIM_DEFAULTS[1],
-                               fps or ANIM_DEFAULTS[2])
+    start = _clip_start(row)
+    if start:
+        base += "@%s" % start
     return base
+
+
+def _clip_start(row):
+    """The row's clip start as typed, or '' when it is blank or zero (the
+    source's own start needs no spelling out; a value that is not a number
+    is passed on for validate_form to name)."""
+    start = _num(getattr(row, "anim_start", ""))
+    if not start:
+        return ""
+    try:
+        if float(start) == 0:
+            return ""
+    except ValueError:
+        pass
+    return start
 
 
 def gif_period_ms(path):
@@ -1040,41 +1064,86 @@ def gif_period_ms(path):
     return int(round(sum(delays) / float(len(delays))))
 
 
-def anim_period_ms(row, frames=None, delay_ms=None,
-                   floor_ms=16, ceiling_ms=2000):
-    """How long ONE frame of this row's animation is on screen, in ms.
-
-    THREE ANSWERS, BEST FIRST, because the form is the worst of them.  The
-    rendered clip's own delay (*delay_ms*, from :func:`gif_period_ms`) is
-    what the machine ticks on and settles it outright.  Without a GIF to
-    read, the run's own frame count (*frames*, off the selector's ``frame F
-    of N``) over the clip's length is the rate the tool really rendered at,
-    which is what the ladder above left it at.  Only with neither is the
-    row's FPS field believed - and that is the number selectmedia clamps,
-    so it is a first guess for the ticks before the count arrives and not a
-    fact.  Clamped either way, because the fields are typed: 0.4 fps is a
-    slideshow and 300 fps is a busy loop, and neither is worth letting a
-    typo cause."""
-    ms = None
-    if delay_ms and delay_ms > 0:
-        ms = float(delay_ms)
-    elif frames and int(frames) > 1:
-        try:
-            secs = float(_num(getattr(row, "anim_seconds", ""),
-                              ANIM_DEFAULTS[1]))
-        except (TypeError, ValueError):
-            secs = float(ANIM_DEFAULTS[1])
-        if secs > 0:
-            ms = 1000.0 * secs / int(frames)
-    if ms is None:
-        try:
-            fps = float(_num(getattr(row, "anim_fps", ""), ANIM_DEFAULTS[2]))
-        except (TypeError, ValueError):
-            fps = float(ANIM_DEFAULTS[2])
-        if fps <= 0:
-            fps = float(ANIM_DEFAULTS[2])
-        ms = 1000.0 / fps
+def anim_period_ms(row=None, delay_ms=None, floor_ms=16, ceiling_ms=2000):
+    """How long ONE frame of an animation is on screen, in ms: the rendered
+    clip's own delay (*delay_ms*, from :func:`gif_period_ms`) - what the
+    machine ticks on - and until the GIF is there to read, the contract's
+    own rate (:data:`ANIM_FPS`).  The row has no say (it carries no rate
+    any more); the argument stays so callers read the same.  Clamped,
+    because a file can say anything: 0.4 fps is a slideshow and 300 fps
+    a busy loop, and neither is worth letting a bad GIF cause."""
+    ms = float(delay_ms) if delay_ms and delay_ms > 0 else 1000.0 / ANIM_FPS
     return max(floor_ms, min(ceiling_ms, int(round(ms))))
+
+
+def gif_frame_delay_ms(img, k):
+    """Seek an open Pillow GIF to frame *k* and read its delay (100 where
+    the file says 0, as the selector's art.c has it)."""
+    img.seek(k)
+    return int(img.info.get("duration") or 0) or 100
+
+
+class ClipFrames(object):
+    """The frames of a rendered ``anim<N>.gif``, read with Pillow as Play
+    asks for them, each scaled ONCE to the size the preview draws the
+    picture at.
+
+    WHY THE GIF AND NOT A PPM PER FRAME.  The selector blits a GIF's frame
+    into the card's panel unchanged when the tools made it at the panel's
+    size (they do), so the GIF's own pixels at the picture's rectangle ARE
+    the machine's frame k; it reports that rectangle on its snapshot line.
+    A 5 s clip is 150 frames, and 150 PPMs at 3 MB each per Play - per
+    highlight change - was the alternative.  Pillow composes each frame
+    onto the last as the file's disposal says, the same way stb does on
+    the machine."""
+
+    def __init__(self, path, size):
+        self.path = path
+        self.size = (max(1, int(size[0])), max(1, int(size[1])))
+        self._img = Image.open(path)
+        self._img.load()
+        self.n = max(1, int(getattr(self._img, "n_frames", 1)))
+        self._frames = {}
+        self._delays = {}
+        self._period = None
+
+    def frame(self, k):
+        """Frame *k* (wrapped) as an RGB image at ``size``."""
+        k %= self.n
+        hit = self._frames.get(k)
+        if hit is None:
+            self._delays[k] = gif_frame_delay_ms(self._img, k)
+            hit = self._img.convert("RGB").resize(self.size, Image.BILINEAR)
+            self._frames[k] = hit
+        return hit
+
+    def delay_ms(self, k):
+        """How long frame *k* is up, per the file (100 where it says 0,
+        as the selector's art.c has it)."""
+        k %= self.n
+        if k not in self._delays:
+            self.frame(k)
+        return self._delays[k]
+
+    def period_ms(self):
+        """The loop's frame period: the MEAN delay when the file's delays
+        are near-uniform (a constant-rate clip - ffmpeg writes 30/40 ms in
+        turn for 33.3), else None (tick on :meth:`delay_ms`).  The same
+        rule as the selector's art.c, so the preview keeps the machine's
+        time."""
+        if self._period is None:
+            delays = [gif_frame_delay_ms(self._img, k) for k in range(self.n)]
+            self._period = 0.0
+            if len(delays) >= 2 and max(delays) <= 2 * min(delays):
+                self._period = sum(delays) / float(len(delays))
+        return self._period or None
+
+    def close(self):
+        try:
+            self._img.close()
+        except Exception:                               # noqa: BLE001
+            pass
+        self._frames = {}
 
 
 def confirm_spec(row):
@@ -1351,6 +1420,27 @@ def parse_anim_frames(text, highlight):
 _SNAP_RE = re.compile(
     r"snapshot: (.+?) \d+x\d+, highlight \d+ .*?, "
     r"frame (\d+) of (\d+), timeout ")
+#: ...and at the end of the same line, WHERE THE HIGHLIGHTED CARD'S PICTURE
+#: IS in that frame (``picture x,y,w,h``, or ``picture none``): the
+#: rectangle the selector blitted the card's still or GIF frame into,
+#: which is where Play lays the clip's frames (see :class:`ClipFrames`).
+#: Anchored on the footer's closing quote so a title cannot forge it.
+_SNAP_PICTURE_RE = re.compile(r'", picture (\d+),(\d+),(\d+),(\d+)\s*$')
+
+
+def parse_snapshot_picture(text):
+    """``(x, y, w, h)`` of the highlighted card's picture in the LAST
+    frame a snapshot run wrote, or None (no picture on that card, or a
+    selector built before it said).  The rectangle is the same for every
+    frame of one run - one card, one panel - so the last line is the
+    run's answer."""
+    rect = None
+    for line in (text or "").splitlines():
+        if not _SNAP_RE.search(line):
+            continue
+        m = _SNAP_PICTURE_RE.search(line)
+        rect = tuple(int(v) for v in m.groups()) if m else None
+    return rect
 
 
 def parse_snapshot_frames(text):
@@ -1597,19 +1687,22 @@ def split_art_source(spec):
 
 
 def split_anim_source(spec):
-    """An ``anim_source`` -> ``(anim, start, seconds, fps)``; the reverse of
-    :func:`anim_spec`, so a load followed by an apply writes what was read."""
+    """An ``anim_source`` -> ``(anim, start)``; the reverse of
+    :func:`anim_spec`, so a load followed by an apply writes what was read.
+
+    A LENGTH OR RATE ON THE CARD IS DROPPED (``auto@20:2:8`` loads as
+    ``auto`` from 20 s): the loop's length and rate are the tool's contract
+    now, so the next apply renders that clip the way every other one is -
+    the whole 5 s at the source's own frame rate."""
     s = (spec or "").strip()
     if not s or s.lower() == "none":
-        return "none", "", "", ""
-    start = seconds = fps = ""
+        return "none", ""
+    start = ""
     base, sep, tail = s.rpartition("@")
     if sep and base and tail and _CLIP_RE.match(tail):
-        parts = (tail.split(":") + ["", "", ""])[:3]
-        start, seconds, fps = parts
+        start = tail.split(":")[0]
         s = base
-    return ("auto" if s.lower() == "auto" else host_path(s),
-            start, seconds, fps)
+    return ("auto" if s.lower() == "auto" else host_path(s)), start
 
 
 def split_sound_source(spec, what):
@@ -1697,8 +1790,7 @@ def rows_from_inspect(info):
         else:
             row.art = "none"
         if im.get("anim_source"):
-            (row.anim, row.anim_start, row.anim_seconds, row.anim_fps) = \
-                split_anim_source(im["anim_source"])
+            row.anim, row.anim_start = split_anim_source(im["anim_source"])
         elif im.get("anim"):
             row.anim, row.anim_on_card = im["anim"], True
         else:
@@ -2303,19 +2395,14 @@ def cell_art(row):
 
 
 def _clip_suffix(row):
-    """`` @20s 2s 8fps`` when any clip field is set, else ''."""
-    start, secs, fps = (_num(row.anim_start), _num(row.anim_seconds),
-                        _num(row.anim_fps))
-    if start or secs or fps:
-        return " @%ss %ss %sfps" % (start or ANIM_DEFAULTS[0],
-                                    secs or ANIM_DEFAULTS[1],
-                                    fps or ANIM_DEFAULTS[2])
-    return ""
+    """`` @20s`` when the clip starts into its source, else ''."""
+    start = _clip_start(row)
+    return " @%ss" % start if start else ""
 
 
 def cell_anim(row):
-    """The row's animation in full: the word or the clip's name, and the clip
-    parameters when any is set (``auto @20s 2s 8fps``)."""
+    """The row's animation in full: the word or the clip's name, and where
+    the clip starts when it is not the source's start (``auto @20s``)."""
     v = _cell(row.anim)
     if row.anim_on_card:
         return v + " (on the card)"
@@ -2387,7 +2474,7 @@ def media_file(row):
     return art
 
 
-def set_media(row, kind, path="", start="", seconds="", fps=""):
+def set_media(row, kind, path="", start=""):
     """The dialog's choice -> the row: only the fields :func:`art_spec` and
     :func:`anim_spec` read.  'card' writes nothing (the row keeps the
     card's own files and the flags that say so); a video is written to
@@ -2398,7 +2485,7 @@ def set_media(row, kind, path="", start="", seconds="", fps=""):
         raise ValueError("not a media kind: %r" % (kind,))
     row.art_on_card = row.anim_on_card = False
     row.art_video = row.art_time = ""
-    row.anim_start = row.anim_seconds = row.anim_fps = ""
+    row.anim_start = ""
     path = (path or "").strip()
     if kind == "logo":
         row.art, row.anim = "auto", "none"
@@ -2408,8 +2495,6 @@ def set_media(row, kind, path="", start="", seconds="", fps=""):
         row.art, row.anim = path, "none"
     else:
         row.anim_start = (start or "").strip()
-        row.anim_seconds = (seconds or "").strip()
-        row.anim_fps = (fps or "").strip()
         if kind == "attract":
             row.art, row.anim = "auto", "auto"
         else:
@@ -2435,10 +2520,10 @@ def _moving_word(row):
 
 def cell_media(row):
     """The table's one Picture cell: what the image shows, in the dialog's
-    own words - ``logo``, ``attract video @20s 2s 8fps``, ``intro.mp4 @3s
-    3s 10fps``, ``logo.png``, ``none`` - and, when the still is not the one
-    its animation implies (a pair an older form made, or a card carries),
-    both halves: ``attract.mov @21s + attract video @20s 2s 8fps``."""
+    own words - ``logo``, ``attract video @20s``, ``intro.mp4 @3s``,
+    ``logo.png``, ``none`` - and, when the still is not the one its
+    animation implies (a pair an older form made, or a card carries), both
+    halves: ``attract.mov @21s + attract video @20s``."""
     kind = media_kind(row)
     if kind == "logo":
         return "logo"
@@ -2641,14 +2726,15 @@ class ImageEditorDialog(_Modal):
 
     #: What a video shows, STATED rather than offered as controls (David:
     #: "remove the 'start', 'Length' and 'FPS' controls... just state [the
-    #: limits]").  It loops a short slice from the start AT THE VIDEO'S OWN
-    #: FRAME RATE (David: "10fps sucks... make it the original fps"), cut to
-    #: about a second so it stays smooth within the menu's frame budget. Any
-    #: common video works - it is re-encoded - so there is no codec to get
-    #: right either.
-    CLIP_NOTE = ("Shown as a short loop from the start, at the video's own "
-                 "frame rate (about a second, kept smooth). Any common video "
-                 "works - it is re-encoded.")
+    #: limits]").  It loops the first 5 s AT THE VIDEO'S OWN FRAME RATE
+    #: (David: "10fps sucks... make it the original fps", then "run at
+    #: original fps (minimum 30fps would be ideal). we can limit them to 5
+    #: second clips") - 30 fps at most, which a 60 fps clip halves to
+    #: cleanly.  Any common video works - it is re-encoded - so there is no
+    #: codec to get right either.
+    CLIP_NOTE = ("Shown as a loop of the first 5 seconds, at the video's "
+                 "own frame rate (up to 30 fps). Any common video works - "
+                 "it is re-encoded.")
 
     def __init__(self, panel, index, row):
         _Modal.__init__(
@@ -2704,9 +2790,10 @@ class ImageEditorDialog(_Modal):
                 # loop drawn frame by frame, so it is a fixed slice at a
                 # fixed rate - the numbers were a request the renderer then
                 # clamped anyway - and it is STATED, not offered.  The
-                # ``_ed_anim_*`` vars stay (a card loaded with an older
-                # custom clip keeps its own values, and the render reads
-                # them), they are simply not editable here any more.
+                # ``_ed_anim_start`` var stays (a clip loaded off a card
+                # keeps where it starts, and the render reads it), it is
+                # simply not editable here any more; the length and the
+                # rate are not even vars now (see ImageRow).
                 ttk.Label(g, foreground=th["gray"], wraplength=440,
                           justify=tk.LEFT, text=self.CLIP_NOTE).grid(
                     row=r, column=1, columnspan=2, sticky=tk.W, pady=(0, 3))
@@ -3216,11 +3303,8 @@ class MultibootPanel:
         self._ed_music = tk.StringVar(value="none")
         self._ed_confirm = tk.StringVar(value="menu")
         self._ed_anim_start = tk.StringVar()
-        self._ed_anim_seconds = tk.StringVar()
-        self._ed_anim_fps = tk.StringVar()
         self._ed_media_vars = (self._ed_media, self._ed_picture,
-                               self._ed_video, self._ed_anim_start,
-                               self._ed_anim_seconds, self._ed_anim_fps)
+                               self._ed_video, self._ed_anim_start)
         for var in (self._ed_title, self._ed_sub, self._ed_music,
                     self._ed_confirm):
             var.trace_add("write", lambda *_a: self._editor_changed())
@@ -3245,6 +3329,23 @@ class MultibootPanel:
         self._play_var = tk.BooleanVar(value=False)
         self._pv_cache = {}
         self._pv_totals = {}
+        #: (fingerprint, highlight) -> (x, y, w, h): where the selector put
+        #: the highlighted card's picture in its frame (the snapshot line's
+        #: ``picture``), which is where Play lays the clip's frames.
+        self._pv_rects = {}
+        #: The frame Play composes on, as a Pillow image at the box's size:
+        #: ((path, box w, box h), image).  One is enough.
+        self._pv_base = None
+        #: The clip Play is walking: (key, ClipFrames), see _play_clip.
+        self._clip = None
+        #: What the canvas holds while Play composes: (base PPM, highlight,
+        #: frame count) - so stopping, or a resize, can go back to the
+        #: rendered frame under it.  None whenever a rendered file is up.
+        self._composite = None
+        #: When Play's next frame is due (time.monotonic seconds), so the
+        #: ticks keep the CLIP's timeline and a late timer does not slow
+        #: the loop - what the selector does against its vsync.
+        self._play_due = None
         self._pv_bin = ""               # the selector the last run named
         self._pv_bin_at = 0.0           # ...and when it named it
         #: (MEDIA fingerprint, media DIR, sounds too?) that is prepared.
@@ -4428,8 +4529,6 @@ class MultibootPanel:
             # keeps its second as the clip's start.
             self._ed_anim_start.set(row.anim_start or (
                 row.art_time if kind == "video" else ""))
-            self._ed_anim_seconds.set(row.anim_seconds)
-            self._ed_anim_fps.set(row.anim_fps)
         finally:
             self._loading = False
         self._sync_editor_states()
@@ -4478,15 +4577,13 @@ class MultibootPanel:
             if self._edit_backup is not None and self._edit_backup[0] == i:
                 was = self._edit_backup[1]
                 for name in ("art", "anim", "art_video", "art_time",
-                             "anim_start", "anim_seconds", "anim_fps",
-                             "art_on_card", "anim_on_card"):
+                             "anim_start", "art_on_card", "anim_on_card"):
                     setattr(row, name, getattr(was, name))
             return
         path = {"picture": self._ed_picture,
                 "video": self._ed_video}.get(kind)
         set_media(row, kind, path.get() if path is not None else "",
-                  self._ed_anim_start.get(), self._ed_anim_seconds.get(),
-                  self._ed_anim_fps.get())
+                  self._ed_anim_start.get())
 
     def _sync_editor_states(self):
         """Each option's fields live only while it is the choice: the
@@ -7023,6 +7120,8 @@ class MultibootPanel:
         (or taken away), so what is in memory is no longer what is on
         disk."""
         key = os.path.abspath(path)
+        if self._pv_base is not None and self._pv_base[0][0] == key:
+            self._pv_base = None
         if self._pv_photos.pop(key, None) is not None:
             try:
                 self._pv_photo_order.remove(key)
@@ -7034,6 +7133,7 @@ class MultibootPanel:
         of them are scaled wrong."""
         self._pv_photos = {}
         self._pv_photo_order = []
+        self._pv_base = None
 
     def _decode_photo(self, path):
         """Read one P6 PPM off disk and scale it into the box.  The slow
@@ -7081,6 +7181,7 @@ class MultibootPanel:
             return False
         self._pv_shown = (highlight, frame)
         self._pv_src = (path, highlight, frame, total)
+        self._composite = None
         if highlight is not None:
             self._set_var(self._hl_var, highlight)
         self._set_var(self._frame_var, frame)
@@ -7114,7 +7215,14 @@ class MultibootPanel:
 
     def _redraw_shown(self):
         """The box changed size: draw the frame that is up again at the new
-        scale (or the placeholder, when nothing has been rendered yet)."""
+        scale (or the placeholder, when nothing has been rendered yet).  A
+        Play composite goes back to its rendered frame; the next tick lays
+        the clip over it again at the new size."""
+        if self._composite:
+            base, hl, total = self._composite
+            if os.path.isfile(base):
+                self.load_frame(base, hl, 0, total)
+                return
         if not self._pv_src:
             self._pv_placeholder()
             return
@@ -7426,9 +7534,11 @@ class MultibootPanel:
                 # NUMBER is taken from it - see keep().
                 for _echoed, n, total in parse_snapshot_frames(text):
                     keep(n, total)
+                self._keep_rect(fp, hl, text)
             elif label.startswith("frame "):
                 total = parse_anim_frames(text, hl)
                 keep(first, total)
+                self._keep_rect(fp, hl, text)
                 key = self._current_key()
                 if not self._play_var.get() and key == (fp, hl, first):
                     self.load_frame(ppm, hl, first, total or 1)
@@ -7516,6 +7626,16 @@ class MultibootPanel:
                 if cached == path:
                     self._pv_cache.pop(key, None)
 
+    def _keep_rect(self, fp, hl, text):
+        """Remember where a run put image *hl*'s picture (its snapshot
+        line's ``picture x,y,w,h``), and forget a rectangle it no longer
+        reports."""
+        rect = parse_snapshot_picture(text)
+        if rect:
+            self._pv_rects[(fp, hl)] = rect
+        else:
+            self._pv_rects.pop((fp, hl), None)
+
     def _play_toggled(self):
         if not self._play_var.get():
             self._stop_play(None)
@@ -7530,6 +7650,9 @@ class MultibootPanel:
         if hl is None:
             self._stop_play(None)
             return
+        if not _HAVE_PIL:
+            self._stop_play("Play needs Pillow (pip install pillow).")
+            return
         fp = preview_fingerprint(form)
         total = self._pv_totals.get((fp, hl))
         if total is not None and total < 2:
@@ -7537,26 +7660,116 @@ class MultibootPanel:
                             % self._image_label(hl))
             return
         self._play_fp, self._play_hl = fp, hl
-        # THE WHOLE RUN, NOW, so pressing Play is all pressing Play takes:
-        # the frames are drawn in one selector run and the ticks below only
-        # ever show what is already in hand.
-        self._play_run(form, fp, hl, total)
+        self._play_due = None
+        # ONE FRAME IS ALL PLAY NEEDS DRAWN - frame 0, which the preview
+        # has usually drawn already.  The clip's own frames go over it at
+        # the ticks below (see ClipFrames).
+        self._play_run(form, fp, hl)
         self._schedule_tick(0)
 
-    def _play_run(self, form, fp, hl, total):
-        """Make sure this image's WHOLE animation is drawn, in ONE run.
-
-        The count is not known before the first one - so ask for the most an
-        animation can have (:data:`PREVIEW_MAX_FRAMES`) and let the selector
-        trim it to what this image really has; it says which frames it wrote
-        and how many there were.  False when there was nothing to ask for,
-        or when something else has the worker."""
-        want = int(total) if total else PREVIEW_MAX_FRAMES
-        if all((fp, hl, n) in self._pv_cache for n in range(want)):
+    def _play_run(self, form, fp, hl):
+        """Make sure frame 0 of image *hl* is drawn - the one picture Play
+        lays the clip over.  False when it is there already, or when
+        something else has the worker (the next tick asks again)."""
+        if (fp, hl, 0) in self._pv_cache:
             return False
         if self._busy or self._pv_busy:
-            return False                # the next tick asks again
-        return self._render_frames(form, hl, list(range(want)))
+            return False
+        return self._render_frames(form, hl, [0])
+
+    def _play_clip(self, fp, hl, scale):
+        """The clip Play lays over image *hl*'s frame 0 - its rendered GIF
+        scaled to where the picture sits at the box's size (*scale* = the
+        base's on-screen width over its own) - as ``(clip, (x, y, w,
+        h))``, or None: no GIF in the media dir, no rectangle reported
+        yet, or a file Pillow cannot read (said).
+
+        ``anim<N>.gif`` in the media directory is the file the preview's
+        own conf names (:func:`write_preview_conf`) and therefore the file
+        the selector decodes into that very rectangle.  Kept against its
+        stat and the box: a re-rendered clip, or a resized window, is a
+        new one."""
+        media = self.media_dir()
+        rect = self._pv_rects.get((fp, hl))
+        if not media or not rect or not _HAVE_PIL:
+            return None
+        path = os.path.join(media, "anim%d.gif" % int(hl))
+        try:
+            st = os.stat(path)
+        except OSError:
+            return None
+        k = float(scale)
+        x, y, w, h = rect
+        box = (int(round(x * k)), int(round(y * k)),
+               max(1, int(round(w * k))), max(1, int(round(h * k))))
+        key = (path, st.st_mtime, st.st_size, box)
+        if self._clip is not None and self._clip[0] == key:
+            return self._clip[1], box
+        if self._clip is not None:
+            self._clip[1].close()
+            self._clip = None
+        try:
+            clip = ClipFrames(path, box[2:])
+        except Exception as exc:                        # noqa: BLE001
+            self._pv_say("Cannot read %s: %s" % (path, exc), error=True)
+            return None
+        self._clip = (key, clip)
+        return clip, box
+
+    def _scaled_image(self, path):
+        """The frame at *path* as a Pillow image scaled into the box - what
+        a Play frame is composed on - and the scale that took it there
+        (its width on screen over the file's): ``(image, scale)``, or
+        None (said).  One is kept, by path and box."""
+        key = (os.path.abspath(path), self._pv_w, self._pv_h)
+        if self._pv_base is not None and self._pv_base[0] == key:
+            return self._pv_base[1], self._pv_base[2]
+        try:
+            with Image.open(path) as img:
+                img.load()
+                size = scaled_size(img.width, img.height,
+                                   self._pv_w, self._pv_h)
+                shown = img.convert("RGB").resize(size, Image.LANCZOS)
+                scale = size[0] / float(img.width)
+        except Exception as exc:                        # noqa: BLE001
+            self._pv_say("Cannot load %s: %s" % (path, exc), error=True)
+            return None
+        self._pv_base = (key, shown, scale)
+        return shown, scale
+
+    def show_clip_frame(self, base_path, hl, k, clip, box, playing=True):
+        """One frame of Play on the canvas: the clip's frame *k* laid over
+        the rendered frame at *base_path*, inside *box* (the picture's
+        rectangle at the box's scale), with the caption.  False when the
+        base cannot be read or the canvas is gone.
+
+        ``_pv_src`` is NOT moved: it names the rendered file on screen,
+        and this picture is that file plus the clip - so a resize redraws
+        the rendered frame and the next tick lays the clip over it again,
+        and stopping Play falls back to the rendered frame it started
+        on."""
+        got = self._scaled_image(base_path)
+        if got is None:
+            return False
+        k %= clip.n
+        shown = got[0].copy()
+        shown.paste(clip.frame(k), (box[0], box[1]))
+        try:
+            photo = ImageTk.PhotoImage(shown)
+            c = self._pv_canvas
+            c.delete("all")
+            c.create_image(self._pv_w // 2 + 1, self._pv_h // 2 + 1,
+                           image=photo, anchor=tk.CENTER)
+        except (tk.TclError, RuntimeError):
+            return False
+        self._pv_photo = photo
+        self._pv_shown = (hl, k)
+        self._composite = (base_path, hl, clip.n)
+        self._set_var(self._frame_var, k)
+        self._pv_say("%s: frame %d of %d%s"
+                     % (self._image_label(hl), k, clip.n,
+                        " - playing" if playing else ""))
+        return True
 
     def _anim_delay_ms(self, hl):
         """The rendered clip's own per-frame delay for image *hl*, or None.
@@ -7581,17 +7794,14 @@ class MultibootPanel:
         return self._anim_ms_at[1]
 
     def _play_ms(self, hl, total=None):
-        """How long one frame stays up: THE RENDERED CLIP'S OWN RATE.
-
-        Not the row's FPS field, which is a REQUEST: selectmedia clamps it
-        to fit 30 frames and shrinks it again to fit the byte budget, so a
-        row asking 25 fps is normally a 10 fps clip and playing it at 40 ms
-        runs the preview two and a half times too fast.  The GIF's own
-        delay settles it, and the run's frame count is the fallback (see
-        :func:`anim_period_ms`)."""
+        """How long one frame stays up, on average: THE RENDERED CLIP'S
+        OWN RATE (the GIF's mean delay, see :func:`anim_period_ms`), the
+        contract's 30 fps until the GIF is there.  The tick itself uses the
+        clip's per-frame delay (a 30 fps GIF alternates 30 and 40 ms);
+        this is the one answer for a caller that wants a number."""
         if not 0 <= hl < len(self._rows):
             return self.PLAY_MS
-        return anim_period_ms(self._rows[hl], frames=total,
+        return anim_period_ms(self._rows[hl],
                               delay_ms=self._anim_delay_ms(hl))
 
     def _schedule_tick(self, ms=None):
@@ -7604,10 +7814,11 @@ class MultibootPanel:
             pass
 
     def _play_tick(self):
-        """One step of Play: the next frame, out of memory, at the clip's
-        own rate.  Stops when the form no longer matches the frames or a
-        render fails; asks for the run again when a frame is missing (the
-        first ticks after Play, while the selector is still drawing)."""
+        """One step of Play: the clip's next frame over the rendered frame
+        0, at that frame's own delay.  Stops when the form no longer matches
+        the picture, when the image turns out to be a still, or when the
+        clip cannot be read; asks for frame 0 again while it is not drawn
+        yet (the first ticks after Play, while the selector is drawing)."""
         self._play_job = None
         if self._stopped or not self._play_var.get():
             return
@@ -7617,24 +7828,49 @@ class MultibootPanel:
             self._form_moved_under_play()
             return
         hl = self._play_hl
+        base = self._pv_cache.get((fp, hl, 0))
         total = self._pv_totals.get((fp, hl))
-        if total is None:
-            # Nothing drawn yet: the run is on the worker, or waiting for it.
-            self._play_run(form, fp, hl, None)
+        if base is None or total is None:
+            # Frame 0 is not drawn yet: the run is on the worker, or
+            # waiting for it.
+            self._play_run(form, fp, hl)
             self._schedule_tick()
             return
         if total < 2:
             self._stop_play("%s has no animation to play."
                             % self._image_label(hl))
             return
-        cur = _int(self._frame_var, 0)
-        nxt = (cur + 1) % total
-        key = (fp, hl, nxt)
-        if key in self._pv_cache:
-            self.load_frame(self._pv_cache[key], hl, nxt, total)
-        else:
-            self._play_run(form, fp, hl, total)     # a gap: fill the run
-        self._schedule_tick(self._play_ms(hl, total))
+        scaled = self._scaled_image(base)
+        if scaled is None:
+            self._stop_play("%s: the picture cannot be drawn."
+                            % self._image_label(hl))
+            return
+        got = self._play_clip(fp, hl, scaled[1])
+        if got is None:
+            self._stop_play("%s: its animation is not there to play."
+                            % self._image_label(hl))
+            return
+        clip, box = got
+        if clip.n < 2:
+            self._stop_play("%s has no animation to play."
+                            % self._image_label(hl))
+            return
+        nxt = (_int(self._frame_var, 0) + 1) % clip.n
+        if not self.show_clip_frame(base, hl, nxt, clip, box):
+            self._stop_play("%s: the picture cannot be drawn."
+                            % self._image_label(hl))
+            return
+        # THE CLIP'S TIMELINE, not the timer's: Tk fires `after` late by
+        # up to its 15 ms tick, and 'delay from now' every frame added that
+        # to every frame (a 30 fps loop ran at ~24).  Due times accumulate
+        # - a late tick shortens the next wait - and only a stall of more
+        # than a frame restarts the timeline from now.
+        step = anim_period_ms(delay_ms=clip.period_ms() or clip.delay_ms(nxt))
+        now = time.monotonic()
+        if self._play_due is None or now - self._play_due > step / 1000.0:
+            self._play_due = now
+        self._play_due += step / 1000.0
+        self._schedule_tick(max(1, int(round((self._play_due - now) * 1000))))
 
     def _form_moved_under_play(self):
         """The form no longer matches the frames Play is showing: stop, and
@@ -7659,6 +7895,13 @@ class MultibootPanel:
             self._play_job = None
         if msg:
             self._pv_say(msg, error=error)
+        elif self._composite:
+            # The clip was up: back to the RENDERED frame it was laid over
+            # (frame 0), so what is on screen is a frame the selector drew
+            # and the caption says which one instead of going on claiming
+            # to be playing.
+            base, hl, total = self._composite
+            self.load_frame(base, hl, 0, total)
         elif self._pv_src:
             # The picture stopped on a real frame, so the caption says
             # which one instead of going on claiming to be playing.  Out of

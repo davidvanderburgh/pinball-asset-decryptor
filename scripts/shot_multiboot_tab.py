@@ -155,7 +155,7 @@ IMAGES = [
 VERSIONS = ["1.59.0", "1.59.0", "1.59.0"]
 
 #: The second image's animation: its attract clip, 20 s in, 2 s at 8 fps.
-CLIP = ("attract", "20", "2", "8")
+CLIP = ("attract", "20")
 
 #: The preview: image 1 highlighted, frame 3 of the 16-frame clip.
 HIGHLIGHT, FRAME_INDEX, FRAMES = 1, 3, 16
@@ -515,11 +515,9 @@ def s_fill():
     # The second image animates: its attract clip, through the clip fields.
     panel._table.select(1)
     root.update()
-    kind, start, seconds, fps = CLIP
+    kind, start = CLIP
     panel._ed_media.set(kind)
     panel._ed_anim_start.set(start)
-    panel._ed_anim_seconds.set(seconds)
-    panel._ed_anim_fps.set(fps)
     # ...and it has a confirm sound of its OWN, so the Confirm column shows
     # both states in one picture: a row's own value plain, and the rows that
     # fall back to the menu's in brackets.
@@ -553,8 +551,8 @@ def s_fill():
     win._resize_notebook_to_current_tab()
     root.update_idletasks()
     form = panel.form()
-    log("rows: %s" % [(r.title, r.subtitle, r.anim, r.anim_start,
-                       r.anim_seconds, r.anim_fps) for r in form.images])
+    log("rows: %s" % [(r.title, r.subtitle, r.anim, r.anim_start)
+                      for r in form.images])
     log("output: %s" % form.out)
     log("size sentence: %r" % panel._plan_text)
     log("consequence: %r" % panel._edit_lbl.cget("text"))

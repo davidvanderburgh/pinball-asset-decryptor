@@ -3,17 +3,20 @@
  * stb_image v2.30 (third_party/) compiled here, PNG + GIF only, memory input
  * only (the files are read whole first; a GIF is decoded ONE FRAME PER CALL
  * through stb's own per-frame entry stbi__gif_load_next, the loop that
- * stbi__load_gif_main runs in one go - so a 30-frame animation costs one
- * frame's decode per menu loop iteration instead of stalling the picture).
- * Every frame is box-downscaled into the art panel as soon as it is decoded
- * and the full-size copy dropped (only the two previous full-size frames are
- * kept, for GIF disposal mode 3).
+ * stbi__load_gif_main runs in one go).  Frames are decoded ON DEMAND as the
+ * menu ticks through them - the frame shown and frame 0 are the only ones
+ * in memory, box-downscaled into the art panel, with the two previous
+ * full-size composites kept for GIF disposal mode 3 - so a 150-frame loop
+ * (5 s at 30 fps) costs what a 4-frame one does, and the menu is up after
+ * one frame's decode.  The frame count and the delays come from a walk of
+ * the block stream at open, which reads no pixels.
  */
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 #include "art.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -169,25 +172,162 @@ struct gifdec {
     unsigned char *buf;
     int len;
     unsigned char *prev, *prevprev;   /* the last two composited frames, full size */
-    int max_w, max_h, max_frames;
+    int max_w, max_h;
 };
+
+static void gifdec_drop_state(struct gifdec *d)
+{
+    STBI_FREE(d->g.out);
+    STBI_FREE(d->g.history);
+    STBI_FREE(d->g.background);
+    memset(&d->g, 0, sizeof d->g);
+    free(d->prev);
+    free(d->prevprev);
+    d->prev = d->prevprev = NULL;
+}
+
+/* back to the first frame: stb's per-file state and the two composites it
+ * disposes against are as they were before the first decode */
+static void gifdec_rewind(struct gifdec *d)
+{
+    gifdec_drop_state(d);
+    stbi__start_mem(&d->s, d->buf, d->len);
+}
 
 static void gifdec_free(struct gifdec *d)
 {
     if (!d) return;
-    STBI_FREE(d->g.out);
-    STBI_FREE(d->g.history);
-    STBI_FREE(d->g.background);
-    free(d->prev);
-    free(d->prevprev);
+    gifdec_drop_state(d);
     free(d->buf);
     free(d);
+}
+
+static int clamp_delay(int ms)
+{
+    if (ms <= 0) ms = DELAY_DEFAULT;
+    if (ms < DELAY_MIN) ms = DELAY_MIN;
+    if (ms > DELAY_MAX) ms = DELAY_MAX;
+    return ms;
+}
+
+/* past the data sub-blocks that start at pos: the position after their 0
+ * terminator (or the end of the file) */
+static int gif_skip_subblocks(const unsigned char *d, int len, int pos)
+{
+    while (pos < len) {
+        int n = d[pos++];
+        if (n == 0) return pos;
+        pos += n;
+    }
+    return len;
+}
+
+/* Count the frames and read their delays by walking the block stream - no
+ * LZW, so it is one pass over the bytes, not a decode (the same walk
+ * selectmedia.py's gif_info and mkmulticard.py's gif_info make).  Stops at
+ * the trailer, at max_frames, or at a block it does not know (what was
+ * counted is what plays).  Returns the count; *delays gets a malloc'd array
+ * of that many (NULL for none). */
+static int gif_walk(const unsigned char *d, int len, int max_frames, int **delays)
+{
+    int pos = 13, n = 0, cap = 0, pending = 0, *dl = NULL;
+    *delays = NULL;
+    if (len < 13) return 0;
+    if (d[10] & 0x80) pos += 3 * (2 << (d[10] & 7));          /* global colour table */
+    while (pos < len) {
+        unsigned char b = d[pos];
+        if (b == 0x3B) break;                                    /* trailer */
+        if (b == 0x21) {                                         /* extension */
+            if (pos + 1 >= len) break;
+            if (d[pos + 1] == 0xF9 && pos + 7 < len)              /* graphic control: delay in cs */
+                pending = (d[pos + 4] | (d[pos + 5] << 8)) * 10;
+            pos = gif_skip_subblocks(d, len, pos + 2);
+        } else if (b == 0x2C) {                                  /* image descriptor */
+            int lp;
+            if (pos + 10 > len) break;
+            lp = d[pos + 9];
+            pos += 10;
+            if (lp & 0x80) pos += 3 * (2 << (lp & 7));            /* local colour table */
+            pos += 1;                                            /* LZW minimum code size */
+            pos = gif_skip_subblocks(d, len, pos);
+            if (n == max_frames) break;
+            if (n == cap) {
+                int want = cap ? cap * 2 : 16;
+                int *t = realloc(dl, (size_t)want * sizeof *dl);
+                if (!t) break;
+                dl = t;
+                cap = want;
+            }
+            dl[n++] = clamp_delay(pending);
+            pending = 0;
+        } else {
+            break;
+        }
+    }
+    *delays = dl;
+    return n;
+}
+
+static long long now_us(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000000LL + ts.tv_nsec / 1000;
+}
+
+/* Decode the file's next frame into a->frame: 1 = done (a->cur advanced),
+ * 0 = no more (a clean end of the file, or an error - a->err says which). */
+static int anim_decode_next(struct art_anim *a)
+{
+    struct gifdec *d = (struct gifdec *)a->dec;
+    stbi_uc *u;
+    int comp = 0, stride;
+    struct art_image *im;
+    long long t0 = now_us();
+
+    u = stbi__gif_load_next(&d->s, &d->g, &comp, 4, d->prevprev);
+    if (u == (stbi_uc *)&d->s) {                          /* end-of-animation marker */
+        snprintf(a->err, sizeof a->err, "the file ends after %d frame(s)", a->cur + 1);
+        return 0;
+    }
+    if (!u) {
+        snprintf(a->err, sizeof a->err, "%s", stbi_failure_reason());
+        return 0;
+    }
+    stride = d->g.w * d->g.h * 4;
+    if (d->g.w <= 0 || d->g.h <= 0 || d->g.w > 4096 || d->g.h > 4096) {
+        snprintf(a->err, sizeof a->err, "frame size out of range");
+        return 0;
+    }
+    /* keep this frame and the one before it full-size for disposal mode 3 */
+    {
+        unsigned char *t = d->prevprev;
+        d->prevprev = d->prev;
+        d->prev = t ? t : malloc((size_t)stride);
+        if (d->prev) memcpy(d->prev, u, (size_t)stride);
+    }
+    im = make_image(u, d->g.w, d->g.h, d->max_w, d->max_h);
+    if (!im) { snprintf(a->err, sizeof a->err, "out of memory"); return 0; }
+    if (!a->first.rgba) { a->w = im->w; a->h = im->h; }  /* the very first decode sets the size */
+    else if (im->w != a->w || im->h != a->h) {   /* cannot happen: one GIF, one size */
+        art_image_free(im);
+        snprintf(a->err, sizeof a->err, "frame size changed");
+        return 0;
+    }
+    free(a->frame.rgba);
+    a->frame = *im;
+    free(im);                                           /* the struct only; rgba moved */
+    a->cur++;
+    a->decodes++;
+    a->decode_us += now_us() - t0;
+    return 1;
 }
 
 struct art_anim *art_anim_open(const char *path, int max_w, int max_h, int max_frames,
                                char *err, int errlen)
 {
     struct art_anim *a;
+    size_t bytes;
     struct gifdec *d = calloc(1, sizeof *d);
     if (!d) { snprintf(err, errlen, "%s: out of memory", path); return NULL; }
     d->buf = read_file(path, &d->len, err, errlen);
@@ -200,85 +340,87 @@ struct art_anim *art_anim_open(const char *path, int max_w, int max_h, int max_f
     }
     d->max_w = max_w;
     d->max_h = max_h;
-    d->max_frames = max_frames > 0 ? max_frames : 30;
     a = calloc(1, sizeof *a);
     if (!a) { gifdec_free(d); snprintf(err, errlen, "%s: out of memory", path); return NULL; }
     a->dec = d;
+    a->cur = -1;
+    a->n = gif_walk(d->buf, d->len, max_frames > 0 ? max_frames : 150, &a->delay_ms);
+    if (a->n <= 0) {
+        snprintf(err, errlen, "%s: no frames", path);
+        art_anim_free(a);
+        return NULL;
+    }
+    /* a constant-rate clip (ffmpeg's GIFs: every delay within 2x of every
+     * other, the centisecond rounding alternating 30/40 for a 30 fps
+     * source) is ticked at its mean period, so the rate is the source's
+     * exactly; anything else keeps its per-frame delays */
+    if (a->n >= 2) {
+        int k, lo = a->delay_ms[0], hi = a->delay_ms[0];
+        long sum = 0;
+        for (k = 0; k < a->n; k++) {
+            if (a->delay_ms[k] < lo) lo = a->delay_ms[k];
+            if (a->delay_ms[k] > hi) hi = a->delay_ms[k];
+            sum += a->delay_ms[k];
+        }
+        if (hi <= 2 * lo) a->period_ms = (float)sum / (float)a->n;
+    }
+    if (!anim_decode_next(a)) {
+        snprintf(err, errlen, "%s: frame 0: %s", path, a->err[0] ? a->err : "cannot decode");
+        art_anim_free(a);
+        return NULL;
+    }
+    /* frame 0 is kept whole: the still of a card that is not highlighted */
+    bytes = (size_t)a->frame.w * (size_t)a->frame.h * 4;
+    a->first.w = a->frame.w;
+    a->first.h = a->frame.h;
+    a->first.rgba = malloc(bytes);
+    if (!a->first.rgba) {
+        snprintf(err, errlen, "%s: out of memory", path);
+        art_anim_free(a);
+        return NULL;
+    }
+    memcpy(a->first.rgba, a->frame.rgba, bytes);
     return a;
 }
 
-static void anim_finish(struct art_anim *a, const char *why)
+const struct art_image *art_anim_still(const struct art_anim *a)
 {
-    if (why && !a->err[0]) snprintf(a->err, sizeof a->err, "%s", why);
-    gifdec_free((struct gifdec *)a->dec);
-    a->dec = NULL;
-    a->done = 1;
+    return a && a->first.rgba ? &a->first : NULL;
 }
 
-int art_anim_step(struct art_anim *a)
+const struct art_image *art_anim_frame(struct art_anim *a, int k)
 {
-    struct gifdec *d;
-    stbi_uc *u;
-    int comp = 0, stride, delay;
-    struct art_image *im, *fr;
-    int *dl;
-
-    if (!a || a->done) return 0;
-    d = (struct gifdec *)a->dec;
-    u = stbi__gif_load_next(&d->s, &d->g, &comp, 4, d->prevprev);
-    if (u == (stbi_uc *)&d->s) u = NULL;                 /* end-of-animation marker */
-    if (!u) {
-        anim_finish(a, a->n == 0 ? stbi_failure_reason() : NULL);
-        return 0;
+    if (!a || a->n <= 0) return NULL;
+    k %= a->n;
+    if (k < 0) k += a->n;
+    if (k == a->cur) return &a->frame;
+    /* an earlier frame (the loop wrapping, usually) means starting the file
+     * over: one decode per tick either way, since frame 0 is the first thing
+     * the fresh decoder produces */
+    if (k < a->cur) {
+        gifdec_rewind((struct gifdec *)a->dec);
+        a->cur = -1;
     }
-    stride = d->g.w * d->g.h * 4;
-    if (d->g.w <= 0 || d->g.h <= 0 || d->g.w > 4096 || d->g.h > 4096) {
-        anim_finish(a, "frame size out of range");
-        return 0;
+    while (a->cur < k) {
+        if (!anim_decode_next(a)) {
+            /* fewer frames than the walk counted (or a bad one): the loop
+             * is what did decode, and the caller's next `% n` wraps there */
+            if (a->cur < 0) {
+                a->n = 1;
+                return &a->first;
+            }
+            a->n = a->cur + 1;
+            return &a->frame;
+        }
     }
-    /* keep this frame and the one before it full-size for disposal mode 3 */
-    {
-        unsigned char *t = d->prevprev;
-        d->prevprev = d->prev;
-        d->prev = t ? t : malloc((size_t)stride);
-        if (d->prev) memcpy(d->prev, u, (size_t)stride);
-    }
-    im = make_image(u, d->g.w, d->g.h, d->max_w, d->max_h);
-    if (!im) { anim_finish(a, "out of memory"); return 0; }
-    if (a->n == 0) { a->w = im->w; a->h = im->h; }
-    else if (im->w != a->w || im->h != a->h) {   /* cannot happen: one GIF, one size */
-        art_image_free(im);
-        anim_finish(a, "frame size changed");
-        return 0;
-    }
-    fr = realloc(a->fr, (size_t)(a->n + 1) * sizeof *fr);
-    dl = realloc(a->delay_ms, (size_t)(a->n + 1) * sizeof *dl);
-    if (!fr || !dl) {
-        if (fr) a->fr = fr;
-        if (dl) a->delay_ms = dl;
-        art_image_free(im);
-        anim_finish(a, "out of memory");
-        return 0;
-    }
-    a->fr = fr;
-    a->delay_ms = dl;
-    a->fr[a->n] = *im;
-    free(im);                                           /* the struct only; rgba moved */
-    delay = d->g.delay > 0 ? d->g.delay : DELAY_DEFAULT;
-    if (delay < DELAY_MIN) delay = DELAY_MIN;
-    if (delay > DELAY_MAX) delay = DELAY_MAX;
-    a->delay_ms[a->n] = delay;
-    a->n++;
-    if (a->n >= d->max_frames) anim_finish(a, NULL);
-    return 1;
+    return &a->frame;
 }
 
 void art_anim_free(struct art_anim *a)
 {
-    int i;
     if (!a) return;
-    for (i = 0; i < a->n; i++) free(a->fr[i].rgba);
-    free(a->fr);
+    free(a->frame.rgba);
+    free(a->first.rgba);
     free(a->delay_ms);
     gifdec_free((struct gifdec *)a->dec);
     free(a);

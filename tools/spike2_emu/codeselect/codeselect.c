@@ -127,7 +127,7 @@ static void usage(FILE *f)
         "  --audio auto|alsa|fifo:PATH|none  sound sink (default auto: alsa, else $PAD_AUDIO_PLAY, else none)\n"
         "  --audio-fmt PATH   the rig's fmt file, gets '44100 2' (default $PAD_AUDIO_FMT)\n"
         "  --volume 0-100     software mix gain (overrides conf volume=, default %d)\n"
-        "  --anim-frame N     show frame N of every animation instead of animating (headless tests);\n"
+        "  --anim-frame N     hold every animation at frame N instead of playing them (headless tests);\n"
         "                     with --snapshot: the highlighted card's frame (wraps), and the\n"
         "                     first of the --frames K run\n"
         "  --audio-dump FILE  raw s16le 44100 Hz stereo of everything mixed\n"
@@ -392,6 +392,13 @@ struct media {
     struct clip_cache cache[CONF_MAX_IMAGES * 2 + 2];
     int ncache;
     int n_art, n_anim, n_music, n_own_confirm, logged;
+    /* EVERY animation plays, all the time (David, 2026-09-03: "all boot
+     * selections should play video at the same time all the time (not
+     * just when hovered)"): each keeps its own frame and the moment its
+     * next one is due (sel_now_ms() values; 0 = not ticking: pinned, or
+     * a still) */
+    int frame[CONF_MAX_IMAGES];
+    double due[CONF_MAX_IMAGES];
     char dir[CONF_STR];
 };
 
@@ -464,6 +471,13 @@ static void media_load(struct media *m, const struct conf *c, const struct layou
     }
 }
 
+/* how long frame `frame` of an animation stays up: the loop's period for a
+ * constant-rate clip, else that frame's own delay */
+static double anim_step_ms(const struct art_anim *a, int frame)
+{
+    return a->period_ms > 0 ? (double)a->period_ms : (double)a->delay_ms[frame];
+}
+
 /* an animation that turned out shorter than its file said it was: said once */
 static void media_check(const struct media *m, int i)
 {
@@ -472,13 +486,6 @@ static void media_check(const struct media *m, int i)
         sel_log("anim: image %d stopped after %d frame(s): %s", i, a->n, a->err);
         a->err_said = 1;
     }
-}
-
-/* how long frame `frame` of an animation stays up: the loop's period for a
- * constant-rate clip, else that frame's own delay */
-static double anim_step_ms(const struct art_anim *a, int frame)
-{
-    return a->period_ms > 0 ? (double)a->period_ms : (double)a->delay_ms[frame];
 }
 
 /* what the on-demand decoding cost, per animation that was played */
@@ -515,37 +522,84 @@ static void media_free(struct media *m)
     for (i = 0; i < m->ncache; i++) audio_clip_free(m->cache[i].clip);
 }
 
-/* the picture image i shows right now: its animation's frame when it is
- * highlighted (or pinned), else its still, else the animation's frame 0.
- * The frame is DECODED HERE if it is not the one in hand (art.h) - the media
- * set is const to every draw, the decoder inside an animation is not. */
-static const struct art_image *card_picture(const struct media *m, int i, int on, int frame, int pinned)
+/* the picture image i shows right now: its animation's current frame
+ * (every card's plays, highlighted or not), else its still.  The frame is
+ * DECODED HERE if it is not the one in hand (art.h) - the media set is
+ * const to every draw, the decoder inside an animation is not. */
+static const struct art_image *card_picture(const struct media *m, int i)
 {
     struct art_anim *a = m->anim[i];
-    if (a && a->n > 0 && (on || pinned || !m->art[i])) {
-        if (!(on || pinned)) return art_anim_still(a);
-        return art_anim_frame(a, frame < 0 ? 0 : frame % a->n);
+    if (a && a->n > 0) {
+        int f = m->frame[i];
+        return art_anim_frame(a, f < 0 ? 0 : f % a->n);
     }
     return m->art[i];
+}
+
+/* set every animation to frame f (wrapped): the pinned modes, and the
+ * snapshot */
+static void media_pin(struct media *m, int n, int f)
+{
+    int i;
+    for (i = 0; i < n; i++) {
+        struct art_anim *a = m->anim[i];
+        m->frame[i] = (a && a->n > 0) ? ((f < 0 ? 0 : f) % a->n) : 0;
+        m->due[i] = 0;
+    }
+}
+
+/* start every animation at frame 0, its first tick a period from now */
+static void media_start(struct media *m, int n, double now)
+{
+    int i;
+    for (i = 0; i < n; i++) {
+        struct art_anim *a = m->anim[i];
+        m->frame[i] = 0;
+        m->due[i] = (a && a->n > 1) ? now + anim_step_ms(a, 0) : 0;
+    }
+}
+
+/* Advance every animation that is due.  Returns a bitmask of the images
+ * that moved (bit i), so the caller can repaint just those panels.  ON THE
+ * CLIP'S OWN TIMELINE, not the loop's: the swap paces this loop to the
+ * LCD's vsync (16.7 ms), so 'now + delay' rounded EVERY frame up to the
+ * next vsync and a 30 fps clip played at 24.  Due times accumulate instead
+ * - late ticks catch up - and only a stall of more than a frame is
+ * forgiven (the timeline restarts from now rather than bursting). */
+static unsigned media_tick(struct media *m, int n, double now)
+{
+    unsigned moved = 0;
+    int i;
+    for (i = 0; i < n; i++) {
+        struct art_anim *a = m->anim[i];
+        double step;
+        if (!a || a->n < 2 || m->due[i] <= 0 || now < m->due[i]) continue;
+        m->frame[i] = (m->frame[i] + 1) % a->n;
+        step = anim_step_ms(a, m->frame[i]);
+        m->due[i] += step;
+        if (now - m->due[i] > step) m->due[i] = now + step;
+        moved |= 1u << i;
+    }
+    return moved;
 }
 
 /* ----------------------------------------------------------------- draw */
 
 static void draw_panel(struct gfx *g, const struct layout *L, const struct media *m,
-                       int i, int slot, int on, int frame, int pinned)
+                       int i, int slot, int on)
 {
     int px, py, pw, ph;
     const struct art_image *pic;
     if (!L->art_h) return;
     panel_rect(L, slot, &px, &py, &pw, &ph);
     gfx_rect(g, px, py, pw, ph, on ? TH(L, CARD_HL) : TH(L, CARD));
-    pic = card_picture(m, i, on, frame, pinned);
+    pic = card_picture(m, i);
     if (pic) gfx_blit(g, px + (pw - pic->w) / 2, py + (ph - pic->h) / 2, pic->rgba, pic->w, pic->h);
 }
 
 static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
                       const struct conf *c, const struct media *m,
-                      int i, int slot, int on, int frame, int pinned)
+                      int i, int slot, int on)
 {
     const struct conf_image *im = &c->img[i];
     float s = L->s;
@@ -593,7 +647,7 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
     }
 
     /* the art layout: the panel on top, the text packed below it */
-    draw_panel(g, L, m, i, slot, on, frame, pinned);
+    draw_panel(g, L, m, i, slot, on);
     {
         /* where the text starts under the art - the 'IMAGE N' caption used
          * to sit here and the title 58 px below it; with the caption gone
@@ -633,7 +687,7 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
  * means the footer must not promise one */
 static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
                       const struct conf *c, const struct media *m,
-                      int hl, int remain, int frame, int pinned, int action)
+                      int hl, int remain, int action)
 {
     float s = L->s;
     int W = g->w, slot;
@@ -649,7 +703,7 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
     }
     for (slot = 0; slot < L->vis; slot++) {
         int i = slot_image(L, hl, slot);
-        draw_card(g, f, L, c, m, i, slot, i == hl, frame, pinned);
+        draw_card(g, f, L, c, m, i, slot, i == hl);
     }
     if (L->carousel) {
         snprintf(buf, sizeof buf, "<   %d / %d   >", hl + 1, L->n);
@@ -725,9 +779,9 @@ static const char *media_dir(const struct opts *o, const struct conf *c)
 }
 
 /* --snapshot: the menu frame the machine shows the moment the menu appears -
- * the countdown at its full value - with the highlighted card's animation at
- * frame --anim-frame (0 when unset; past the end it wraps); every other card
- * shows its still, or frame 0 when it has none, exactly as it does live. No
+ * the countdown at its full value - with EVERY card's animation at frame
+ * --anim-frame (0 when unset; past the end each wraps to its own length),
+ * cards without one showing their still, exactly as it does live. No
  * input backend, no audio (the WAVs are not even opened), nothing written but
  * the PPM(s). An animation is decoded up to the frame asked for and no
  * further (art.h: on demand).
@@ -750,7 +804,7 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
 {
     struct media media;
     char path[600];
-    int first = o->anim_frame > 0 ? o->anim_frame : 0, frames = 0;
+    int n = c->n, first = o->anim_frame > 0 ? o->anim_frame : 0, frames = 0;
     /* K == 1 is the old path to the byte: the --snapshot value is a file NAME,
      * never a pattern, so a name that happens to hold a '%' still works */
     int pattern = o->frames > 1, want = o->frames, k;
@@ -759,25 +813,27 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
     snprintf(media.dir, sizeof media.dir, "%s", media_dir(o, c));
     media_load(&media, c, L, 0);
     media_log(&media);
+    /* the run's length and the 'frame F of N' on the line are the
+     * HIGHLIGHTED card's; every animation is pinned at the frame asked for
+     * (first + k), each wrapping to its own length - a card that is not
+     * highlighted plays too, so it is drawn at that frame too */
     if (media.anim[hl]) frames = media.anim[hl]->n;
     if (!frames) {
-        first = 0;
         if (want > 1) {
             sel_log("snapshot: image %d has no animation: 1 frame, not %d", hl, want);
             want = 1;
         }
     } else {
-        if (first >= frames) {
+        if (first >= frames)
             sel_log("snapshot: frame %d wraps to %d (image %d has %d frames)", first, first % frames, hl, frames);
-            first %= frames;
-        }
         if (want > frames) {
             sel_log("snapshot: %d frames asked for, image %d has %d: %d written", want, hl, frames, frames);
             want = frames;
         }
     }
     for (k = 0; k < want; k++) {
-        int frame = frames ? (first + k) % frames : 0;
+        int pin = first + k;
+        int frame = frames ? pin % frames : 0;
         int len = pattern ? snprintf(path, sizeof path, o->snapshot, frame)
                           : snprintf(path, sizeof path, "%s", o->snapshot);
         if (len < 0 || len >= (int)sizeof path) {
@@ -785,33 +841,40 @@ static int snapshot_frame(const struct opts *o, const struct conf *c, struct gfx
             media_free(&media);
             return 2;
         }
-        char where[64];
-        draw_menu(g, font, L, c, &media, hl, timeout > 0 ? timeout : -1, frame, 0, action);
-        media_check(&media, hl);
+        char where[CONF_MAX_IMAGES * 24 + 8];
+        int wn = 0, i;
+        media_pin(&media, n, pin);
+        draw_menu(g, font, L, c, &media, hl, timeout > 0 ? timeout : -1, action);
+        for (i = 0; i < n; i++) media_check(&media, i);
         if (gfx_write_ppm(g, path, invert) < 0) {
             sel_say("error: cannot write %s: %s", path, strerror(errno));
             media_free(&media);
             return 2;
         }
-        /* WHERE THE HIGHLIGHTED CARD'S PICTURE IS in the PPM, as x,y,w,h of
-         * the frame blitted into its panel - the Multi-boot tab's Play lays
-         * the GIF's own frames over this one picture instead of asking for a
-         * PPM per frame (150 of them at 3 MB each was the alternative) */
-        snprintf(where, sizeof where, "none");
-        {
-            const struct art_image *pic = card_picture(&media, hl, 1, frame, 0);
-            int slot = image_slot(L, hl, hl), px, py, pw, ph, rx, ry;
-            if (pic && L->art_h && slot >= 0) {
-                panel_rect(L, slot, &px, &py, &pw, &ph);
-                rx = px + (pw - pic->w) / 2;
-                ry = py + (ph - pic->h) / 2;
-                if (invert) { rx = g->w - rx - pic->w; ry = g->h - ry - pic->h; }
-                snprintf(where, sizeof where, "%d,%d,%d,%d", rx, ry, pic->w, pic->h);
-            }
+        /* WHERE EVERY ANIMATED CARD'S PICTURE IS in the PPM - `i:x,y,w,h`
+         * per visible card with an animation, `;`-separated, `none` when
+         * there is none - the frame blitted into its panel.  The Multi-boot
+         * tab's Play lays each GIF's own frames over this one picture
+         * instead of asking for a PPM per frame (150 of them at 3 MB each
+         * was the alternative). */
+        where[0] = 0;
+        for (i = 0; i < n; i++) {
+            const struct art_image *pic;
+            int slot = image_slot(L, hl, i), px, py, pw, ph, rx, ry;
+            if (!media.anim[i] || !L->art_h || slot < 0) continue;
+            pic = card_picture(&media, i);
+            if (!pic) continue;
+            panel_rect(L, slot, &px, &py, &pw, &ph);
+            rx = px + (pw - pic->w) / 2;
+            ry = py + (ph - pic->h) / 2;
+            if (invert) { rx = g->w - rx - pic->w; ry = g->h - ry - pic->h; }
+            wn += snprintf(where + wn, sizeof where - wn, "%s%d:%d,%d,%d,%d",
+                           wn ? ";" : "", i, rx, ry, pic->w, pic->h);
+            if (wn >= (int)sizeof where - 1) break;
         }
-        sel_say("snapshot: %s %dx%d, highlight %d (%s) from %s, frame %d of %d, timeout %d s, invert %d, font %s, media %s, footer \"%s\", picture %s",
+        sel_say("snapshot: %s %dx%d, highlight %d (%s) from %s, frame %d of %d, timeout %d s, invert %d, font %s, media %s, footer \"%s\", pictures %s",
                 path, g->w, g->h, hl, c->img[hl].title, how, frame, frames, timeout, invert,
-                fontpath, media.dir, action ? FOOT_ACTION : FOOT_START, where);
+                fontpath, media.dir, action ? FOOT_ACTION : FOOT_START, wn ? where : "none");
     }
     media_stats(&media);
     media_free(&media);
@@ -843,13 +906,12 @@ int main(int argc, char **argv)
     struct media media;
     struct audio *au = NULL;
     char err[300], fontpath[300], tables[400], padsw[400];
-    int headless, snapshot, invert, timeout, n, hl, chosen = -1, w, h, volume, pinned, frame = 0;
+    int headless, snapshot, invert, timeout, n, hl, chosen = -1, w, h, volume, pinned;
     int action;                       /* this title has a lockdown-bar ACTION button */
     int music_voice = -1;
     const struct audio_clip *music_clip = NULL;
     const char *how, *fmt_path;
     long long start, deadline, last_key;   /* sel_now_ms() values: long long, see log.h */
-    double next_tick = 0;                  /* the animation's next frame is due (ms), 0 = none */
     int remain_shown = -2, dirty;
     int rc = 2;
 
@@ -894,7 +956,6 @@ int main(int argc, char **argv)
     }
     headless = o.headless != NULL;
     pinned = o.anim_frame >= 0;
-    if (pinned) frame = o.anim_frame;
     /* the switch list, resolved here because --snapshot needs it too: it runs
      * no input backend, but its footer has to name the same buttons the live
      * menu will */
@@ -981,14 +1042,17 @@ int main(int argc, char **argv)
     start = sel_now_ms();
     last_key = start;
     deadline = timeout > 0 ? start + (long long)timeout * 1000LL : 0;
-    draw_menu(&g, font, &L, &c, &media, hl, deadline ? timeout : -1, frame, pinned, action);
+    /* every card's animation plays from the first frame on - the pinned
+     * modes (--anim-frame) hold them all at that frame instead */
+    if (pinned) media_pin(&media, n, o.anim_frame);
+    else media_start(&media, n, (double)start);
+    draw_menu(&g, font, &L, &c, &media, hl, deadline ? timeout : -1, action);
     remain_shown = deadline ? timeout : -1;
     dirty = 0;
     if (!headless) egl_stern_texture(&egl, w, h, gfx_pixels(&g, invert));
     gfx_clean(&g);
     music_clip = media.music[hl];
     if (music_clip) music_voice = audio_play(au, music_clip, 1);
-    if (media.anim[hl] && media.anim[hl]->n > 0 && !pinned) next_tick = start + anim_step_ms(media.anim[hl], 0);
 
     while (!g_stop) {
         long long now = sel_now_ms();
@@ -1018,9 +1082,8 @@ int main(int argc, char **argv)
         }
         if (chosen >= 0) break;
         if (hl != old_hl) {
-            /* a new card: its animation restarts and its music takes over (hard switch) */
-            frame = pinned ? o.anim_frame : 0;
-            next_tick = (media.anim[hl] && media.anim[hl]->n > 0 && !pinned) ? now + anim_step_ms(media.anim[hl], 0) : 0;
+            /* a new card: its music takes over (hard switch); the
+             * animations all keep running - they were never paused */
             if (media.music[hl] != music_clip) {
                 if (music_voice >= 0) audio_stop(au, music_voice);
                 music_clip = media.music[hl];
@@ -1049,28 +1112,26 @@ int main(int argc, char **argv)
             dirty = 1;
         }
 
-        /* the highlighted card's animation ticks on the GIF's own delays; the
-         * next frame is decoded by the draw (art.h: on demand) */
-        if (next_tick > 0 && now >= next_tick) {
-            struct art_anim *a = media.anim[hl];
-            double step;
-            frame = (frame + 1) % a->n;
-            step = anim_step_ms(a, frame);
-            /* ON THE CLIP'S OWN TIMELINE, not the loop's.  The swap paces
-             * this loop to the LCD's vsync (16.7 ms), so 'now + delay'
-             * rounded EVERY frame up to the next vsync and a 30 fps clip
-             * played at 24.  Due times accumulate instead - late ticks
-             * catch up - and only a stall of more than a frame is forgiven
-             * (the timeline restarts from now rather than bursting). */
-            next_tick += step;
-            if (now - next_tick > step) next_tick = now + step;
-            if (!dirty) draw_panel(&g, &L, &media, hl, image_slot(&L, hl, hl), 1, frame, pinned);
-            media_check(&media, hl);
+        /* EVERY animation ticks on its clip's own timeline (media_tick);
+         * each frame is decoded by the draw (art.h: on demand), and only
+         * the panels that moved are repainted - or none, when the whole
+         * menu is about to be */
+        {
+            unsigned moved = pinned ? 0 : media_tick(&media, n, (double)now);
+            int i;
+            for (i = 0; moved && i < n; i++) {
+                if (!(moved & (1u << i))) continue;
+                if (!dirty) {
+                    int slot = image_slot(&L, hl, i);
+                    if (slot >= 0) draw_panel(&g, &L, &media, i, slot, i == hl);
+                }
+                media_check(&media, i);
+            }
         }
         audio_pump(au, now);
 
         if (dirty) {
-            draw_menu(&g, font, &L, &c, &media, hl, remain, frame, pinned, action);
+            draw_menu(&g, font, &L, &c, &media, hl, remain, action);
             dirty = 0;
         }
         present(&g, &egl, headless, invert);
@@ -1084,7 +1145,7 @@ int main(int argc, char **argv)
                 sel_log("wrote %s (%dx%d)", o.headless, w, h);
         }
         draw_loading(&g, font, &L.th, c.img[chosen].title,
-                     card_picture(&media, chosen, 1, frame, pinned));
+                     card_picture(&media, chosen));
         if (headless) {
             char lp[400];
             snprintf(lp, sizeof lp, "%s.loading.ppm", o.headless);

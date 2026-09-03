@@ -240,6 +240,21 @@ These have each been violated at least once and each cost a run or a window:
       `picture x,y,w,h` the selector now reports (pixel-identical to its
       own render, no PPM per frame); the row's stale length/rate fields
       - the actual cause of the 2 fps - are gone.
+      **Same day, later (David): "all boot selections should play video
+      at the same time all the time (not just when hovered). also, sound
+      and video should always be on for the preview (and we should
+      indicate when the videos / audio are loading separately)".** The
+      selector ticks EVERY visible card's animation on its own timeline
+      (`media_tick`, per-image frame/due in `struct media`; a flipper
+      press restarts nothing) and its snapshot line reports `pictures
+      i:x,y,w,h;...` for every animated card. The tab lost its Play, Sound
+      and Frame controls: the clips play on one shared clock the moment
+      frame 0 lands, the sounds play (David's one exception to
+      bring-it-up-muted), and two strip readouts - `Video:` / `Audio:` -
+      say which half is loading; the pictures render in a `video` run
+      before the frame and the sounds in an `audio` run after it, and a
+      refused audio run (cold params cache) leaves the picture playing
+      with the reason on the readout.
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

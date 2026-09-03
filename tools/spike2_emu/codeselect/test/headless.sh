@@ -202,17 +202,23 @@ pix "$T/snap_1_2.ppm" 999 262 0000FF                 # card 1 (highlighted): GIF
 band "$T/snap_1_2.ppm" 300 684 1060 722 FFC42D       # 'booting TMNT 1987 in 1 s'
 grep -qF "snapshot: $T/snap_1_2.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 1 s, invert 0, font $FONT, media $T/media" "$T/snap.out" || {
     echo "headless: FAIL snapshot stdout line"; cat "$T/snap.out"; exit 1; }
+grep -qF ", pictures 1:899,206,200,112" "$T/snap.out" || {
+    echo "headless: FAIL snapshot pictures field (highlighted)"; cat "$T/snap.out"; exit 1; }
 grep -q "media: 2 art, 1 anim (4 frames), 0 music, 0 card confirm, move=n confirm=n" "$T/snap.log" || {
     echo "headless: FAIL the snapshot touched the sounds"; grep media "$T/snap.log"; exit 1; }
 if grep -qE "(nb|spi|audio): " "$T/snap.log"; then echo "headless: FAIL the snapshot opened input or audio"; exit 1; fi
-# card 1 NOT highlighted shows its still even with --anim-frame 2: a card
-# that is not highlighted never animates live (--headless pins them all, for
-# the layout tests); card 0 has no animation -> 'frame 0 of 0'
+# card 1 NOT highlighted plays its animation too (David, 2026-09-03: every
+# card plays, all the time), so --anim-frame 2 pins IT at frame 2 as well;
+# card 0 has no animation -> its still, and 'frame 0 of 0' for the
+# highlighted card's own count.  The 'pictures' field names every visible
+# animated card's rectangle, highlighted or not.
 snap "$T/snap_0_2.ppm" "$T/media.conf" --media "$T/media" --highlight 0 --anim-frame 2
 pix "$T/snap_0_2.ppm" 361 262 C03040
-pix "$T/snap_0_2.ppm" 999 262 2060C0
+pix "$T/snap_0_2.ppm" 999 262 0000FF
 grep -qF "highlight 0 (STERN STOCK) from --highlight, frame 0 of 0," "$T/snap.out" || {
     echo "headless: FAIL snapshot frame count without an animation"; cat "$T/snap.out"; exit 1; }
+grep -qF ", pictures 1:899,206,200,112" "$T/snap.out" || {
+    echo "headless: FAIL snapshot pictures field"; cat "$T/snap.out"; exit 1; }
 # a frame past the end wraps (6 of 4 -> 2)
 snap "$T/snap_wrap.ppm" "$T/media.conf" --media "$T/media" --highlight 1 --anim-frame 6
 pix "$T/snap_wrap.ppm" 999 262 0000FF

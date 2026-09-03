@@ -1561,7 +1561,7 @@ def test_prepared_media_rides_into_the_build_after_a_fresh_prepare(tmp_path):
         assert panel._prepare_sounds() is True
         media = multiboot_tab.media_dir_for(panel._out_var.get())
         assert os.path.isdir(media)
-        assert [label for label, _ in calls[0]] == ["prepare"]
+        assert [label for label, _ in calls[0]] == ["audio"]
         assert multiboot_tab.wsl(media) in _line(calls[0][0][1])
         assert "--visual-only" not in _line(calls[0][0][1])
         # Not prepared yet (no media.json) -> the build does not name it.
@@ -1863,7 +1863,6 @@ def test_load_frame_shows_a_ppm_scaled_into_the_box(tmp_path):
         assert panel._pv_status.cget("text") == "Image 2: frame 3 of 24"
         assert panel._hl_var.get() == "1" and panel._frame_var.get() == "3"
         assert panel._hl_touched is False       # programmatic, not typed
-        assert int(panel._frame_spin.cget("to")) == 23
         small = _ppm(tmp_path / "small.ppm", 136, 77)
         assert panel.load_frame(small, highlight=0, frame=0, total=1)
         # SMOOTHLY, not in whole-number steps: a 136x77 frame is scaled to
@@ -1930,15 +1929,12 @@ def test_the_flippers_move_the_highlight_and_wrap_both_ways(tmp_path):
         assert panel._hl_var.get() == "0"
         panel._key_flip_left()
         assert panel._hl_var.get() == "2"
-        # a new card restarts its animation, and Play follows the highlight
-        # - both of them the C's own 'if (hl != old_hl)'
+        # a press restarts NOTHING: every card's animation runs all the
+        # time on one clock (the C's media_tick), so the frame counter is
+        # left where the clips are
         panel._set_var(panel._frame_var, "7")
-        panel._play_var.set(True)
-        panel._play_hl = 2
         panel.flip_right()
-        assert panel._frame_var.get() == "0"
-        assert panel._play_hl == int(panel._hl_var.get())
-        panel._play_var.set(False)
+        assert panel._frame_var.get() == "7"
         # one image is a menu with nothing to choose between
         panel._rows[:] = panel._rows[:1]
         panel._refresh_tree()
@@ -2007,13 +2003,13 @@ def test_the_caption_numbers_images_the_way_the_picture_does(tmp_path):
         assert panel._pv_status.cget("text").startswith("Image 1 frame 0")
         assert panel.play_confirm() is False
         assert panel._pv_status.cget("text").startswith("Image 1 has no")
-        # ...and a still that cannot be played
+        # ...and there is no Play to refuse a still any more: the ticks
+        # simply run, and a still stays a still while the others animate
         fp = preview_fingerprint(panel.form())
         panel._pv_totals[(fp, 0)] = 1
-        panel._play_var.set(True)
         panel._play_toggled()
-        assert panel._pv_status.cget("text") == \
-            "Image 1 has no animation to play."
+        assert panel._play_var.get() is True
+        assert panel._pv_status.cget("text").startswith("Image 1 has no")
     finally:
         root.destroy()
 
@@ -2031,21 +2027,13 @@ def _tick(root, panel):
 
 def test_play_advances_through_the_cache_and_stops_when_the_form_changes(
         tmp_path):
-    """Play with a fake renderer: ONE frame is drawn (frame 0, the one the
-    clip is laid over), the ticks then walk 1, 2, 0, 1... out of the GIF
-    without rendering again, and a form change stops it with the reason on
-    the status line."""
+    """The clips play on ONE clock the ticks read (the tests hand in their
+    own): frame 0 drawn, the ticks walk 1, 2, 0, 1... of the GIF over it
+    without rendering anything, and a redraw stops them - the render that
+    lands starts them again."""
     root, panel = _panel()
     ppm = _ppm(tmp_path / "f.ppm")
-    asked = []
-
-    def fake_render(form, hl, frames):
-        fp = preview_fingerprint(form)
-        asked.append((hl, list(frames)))
-        panel._pv_totals[(fp, hl)] = 3
-        panel._pv_rects[(fp, hl)] = (10, 10, 32, 8)
-        panel._pv_cache[(fp, hl, 0)] = ppm
-        return True
+    clock = [100.0]
     try:
         for p in _images(tmp_path, 2):
             panel.add_image(p)
@@ -2053,42 +2041,49 @@ def test_play_advances_through_the_cache_and_stops_when_the_form_changes(
         panel._default_var.set("1")
         media = panel.media_dir()
         os.makedirs(media, exist_ok=True)
-        _gif(os.path.join(media, "anim1.gif"), frames=3)
-        panel._render_frames = fake_render
-        panel._play_var.set(True)
+        _gif(os.path.join(media, "anim1.gif"), frames=3)       # 100 ms each
+        fp = preview_fingerprint(panel.form())
+        panel._pv_fp, panel._pv_media = fp, media
+        panel._pv_totals[(fp, 1)] = 3
+        panel._pv_rects[(fp, 1)] = {1: (10, 10, 32, 8)}
+        panel._pv_cache[(fp, 1, 0)] = ppm
+        panel._play_clock = lambda: clock[0]
+        rendered = []
+        panel._render_frames = lambda *a: rendered.append(a) or True
         panel._play_toggled()
-        # ONE frame, at once - pressing Play is all pressing Play takes
-        assert asked == [(1, [0])]
+        assert panel._play_var.get() is True
+        # the first tick is at the clock's 0: frame 0
+        _tick(root, panel)
+        assert panel._frame_var.get() == "0"
+        assert panel._pv_shown == (1, 0)
         for want in ("1", "2", "0", "1"):
+            clock[0] += 0.1
             _tick(root, panel)
             assert panel._frame_var.get() == want
-        assert asked == [(1, [0])]
-        assert "frame 1 of 3 - playing" in panel._pv_status.cget("text")
-        assert panel._play_var.get() is True
-        panel._rows[1].title = "TMNT 1987 (renamed)"
+        assert rendered == []                    # nothing rendered by the ticks
+        assert "frame 1 of 3" in panel._pv_status.cget("text")
+        # a moment where nothing moves draws nothing
+        drawn = panel._pv_photo
+        clock[0] += 0.01
         _tick(root, panel)
+        assert panel._pv_photo is drawn
+        # a redraw stops the ticks and says so; the clock is not reset
+        panel._form_moved_under_play()
         assert panel._play_var.get() is False
         assert "form changed" in panel._pv_status.cget("text")
         assert panel._play_job is None
-        # a still cannot play: refused at the tick, said why
-        panel._rows[1].title = "back"
-        fp = preview_fingerprint(panel.form())
-        panel._pv_totals[(fp, 1)] = 1
-        panel._play_var.set(True)
-        panel._play_toggled()
-        assert panel._play_var.get() is False
-        assert "no animation" in panel._pv_status.cget("text")
+        t0 = panel._play_t0
+        panel._play_start()
+        assert panel._play_var.get() is True and panel._play_t0 == t0
     finally:
         root.destroy()
 
 
 def test_an_edit_during_a_slow_animation_is_not_thrown_away(tmp_path):
-    """Play re-arms at the CLIP's rate now, which the clamp lets reach 2 s,
-    while the debounce fires at 350 ms and used to refuse - and clear - a
-    render whenever Play was on.  So an edit made during a slow animation
-    was dropped by the debounce and only noticed a whole frame later by the
-    tick, with nothing left queued: the preview stopped following the form
-    and never redrew."""
+    """The debounce fires at 350 ms and used to refuse - and clear - a
+    render whenever the clips were playing.  So an edit made during an
+    animation was dropped by the debounce, with nothing left queued: the
+    preview stopped following the form and never redrew."""
     root, panel = _panel(auto=True)
     ppm = _ppm(tmp_path / "f.ppm")
     asked = []
@@ -2097,8 +2092,9 @@ def test_an_edit_during_a_slow_animation_is_not_thrown_away(tmp_path):
         fp = preview_fingerprint(form)
         asked.append((fp, hl, list(frames)))
         panel._pv_totals[(fp, hl)] = 3
-        panel._pv_rects[(fp, hl)] = (10, 10, 32, 8)
+        panel._pv_rects[(fp, hl)] = {1: (10, 10, 32, 8)}
         panel._pv_cache[(fp, hl, 0)] = ppm
+        panel._pv_fp = fp
         return True
     try:
         for p in _images(tmp_path, 2):
@@ -2109,11 +2105,13 @@ def test_an_edit_during_a_slow_animation_is_not_thrown_away(tmp_path):
         _gif(os.path.join(media, "anim1.gif"), frames=3, delay_ms=1000)
         panel._default_var.set("1")
         panel._render_frames = fake_render
-        panel._play_var.set(True)
+        before = preview_fingerprint(panel.form())
+        panel._pv_fp, panel._pv_media, panel._play_fp = before, media, before
+        panel._pv_totals[(before, 1)] = 3
+        panel._pv_rects[(before, 1)] = {1: (10, 10, 32, 8)}
+        panel._pv_cache[(before, 1, 0)] = ppm
         panel._play_toggled()
         assert panel._play_var.get() is True
-        before = preview_fingerprint(panel.form())
-        assert asked and asked[-1][0] == before
         # ...now type a title, and let the DEBOUNCE fire (350 ms), which is
         # long before the next tick of a 1 fps clip
         panel._rows[1].title = "TMNT 1987 (renamed)"
@@ -2123,9 +2121,9 @@ def test_an_edit_during_a_slow_animation_is_not_thrown_away(tmp_path):
         panel._auto_render()
         after = preview_fingerprint(panel.form())
         assert after != before
-        # Play is off, the strip says why AND that it is being redrawn -
-        # in the ordinary colour, because editing while an animation runs
-        # is an ordinary thing to do
+        # the ticks are off, the strip says why AND that it is being
+        # redrawn - in the ordinary colour, because editing while an
+        # animation runs is an ordinary thing to do
         assert panel._play_var.get() is False
         assert "form changed" in panel._pv_status.cget("text")
         assert panel._pv_error is False
@@ -2133,10 +2131,6 @@ def test_an_edit_during_a_slow_animation_is_not_thrown_away(tmp_path):
         # pass: nothing was thrown away and nothing is left queued
         assert asked[-1][0] == after
         assert panel._pv_debounce_job is None and panel._pv_pending == 0
-        # ...so the picture is following the form again by itself
-        root.update()
-        assert panel._pv_status.cget("text").startswith("Image 2: frame 0")
-        assert panel._pv_cache.get((after, 1, 0)) == ppm
     finally:
         root.destroy()
 
@@ -2192,7 +2186,17 @@ def _stand_ins(monkeypatch, tmp_path, fail=None, frames=3):
                 "print('prepare: cached art1.png')"
                 if fail != "prepare" else
                 "print('[media] error: ffmpeg missing'); raise SystemExit(2)")
-        return [("prepare", [py, "-c", code, media_dir])]
+        return [(multiboot_tab.VIDEO_LABEL, [py, "-c", code, media_dir])]
+
+    def audio(form, media_dir, cwd=None):
+        """The sounds' own run, after the frame: succeeds without writing
+        a WAV (the tests that need one make it themselves), or is refused
+        the way a cold Extract-time cache refuses it."""
+        seen.setdefault("audio", []).append(media_dir)
+        code = ("print('prepare: sounds')" if fail != "audio" else
+                "print('refused: no params cache for this card'); "
+                "raise SystemExit(2)")
+        return [(multiboot_tab.AUDIO_LABEL, [py, "-c", code])]
 
     def snapshot(binary, conf, media_dir, ppm, hl, n, rootfs="~/r", cwd=None,
                  frames=1):
@@ -2215,11 +2219,12 @@ def _stand_ins(monkeypatch, tmp_path, fail=None, frames=3):
             "bytes([40, 60, 90]) * (136 * 77))\n"
             "    print('[select] snapshot: %s 136x77, highlight %d (T) from "
             "--highlight, frame %d of %d, timeout 15 s, invert 0, font f, "
-            "media m, footer \"x\", picture 10,10,32,8' % (w, hl, f, total))\n")
+            "media m, footer \"x\", pictures 1:10,10,32,8' % (w, hl, f, total))\n")
         return [(label, [py, "-c", code, ppm, _tool_path(ppm), str(hl),
                          str(n), str(frames), str(length)])]
     monkeypatch.setattr(multiboot_tab, "ensure_selector_commands", ensure)
     monkeypatch.setattr(multiboot_tab, "preview_prepare_commands", prepare)
+    monkeypatch.setattr(multiboot_tab, "audio_prepare_commands", audio)
     monkeypatch.setattr(multiboot_tab, "snapshot_commands", snapshot)
     return seen
 
@@ -2265,27 +2270,27 @@ def test_render_preview_runs_the_pipeline_and_shows_the_frame(tmp_path,
         assert panel._pv_cache == {(fp, 1, 0): frame0}
         assert panel._pv_totals == {(fp, 1): 3}
         assert panel._pv_bin == "/fake/codeselect"
-        # ...and the third field is WHICH HALF was prepared: the preview
-        # renders --visual-only while Sound is off, and a set with no
-        # move or confirm sound in it is not a prepared set for a ticked
-        # Sound box.
+        # ...and the two halves are prepared as two runs: the VIDEO half
+        # (--visual-only) before the frame, the AUDIO half right after it
+        # lands, and both are remembered as prepared
+        assert panel._pv_visual == (media_fingerprint(panel.form()), media)
         assert panel._pv_ready == (media_fingerprint(panel.form()),
-                                   media, False)
+                                   media, True)
+        assert seen["audio"] == [media]
+        assert panel._media_state["video"] == "ready (1 clip)"
         pane = _pane(panel)
         assert "selector: exit 0" in pane and "frame 0: exit 0" in pane
-        # the same form again, another frame: straight to the snapshot
-        panel._frame_var.set("2")
+        # the same form again: straight to the one snapshot (frame 0 - the
+        # only frame the pipeline draws; the clips are laid over it), and
+        # neither prepare runs again
         calls = []
         real = panel._run_commands
         panel._run_commands = lambda cmds, **kw: calls.append(
             [label for label, _ in cmds]) or real(cmds, **kw)
         assert panel.render_preview() is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
-        assert calls == [["frame 2"]]
-        assert (fp, 1, 2) in panel._pv_cache
-        assert panel._pv_status.cget("text") == "Image 2: frame 2 of 3"
-        # a spinbox move to a cached frame shows it without a render
-        panel._frame_var.set("0")
+        assert calls == [["frame 0"]]
+        assert panel._pv_status.cget("text") == "Image 2: frame 0 of 3"
         assert panel._pv_shown == (1, 0)
     finally:
         root.destroy()
@@ -2307,7 +2312,8 @@ def test_a_text_change_costs_one_snapshot_and_a_media_change_a_prepare(
             [label for label, _ in cmds]) or real(cmds, **kw)
         assert panel.render_preview() is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
-        assert calls == [["selector", "prepare", "frame 0"]]
+        # the pictures, the frame, then the sounds as a run of their own
+        assert calls == [["selector", "video", "frame 0"], ["audio"]]
         # TEXT: no selector (built), no prepare (the media did not move)
         panel._rows[1].subtitle = "1987 cartoon upscale"
         panel._rows[0].title = "STERN 1.59.0"
@@ -2318,22 +2324,21 @@ def test_a_text_change_costs_one_snapshot_and_a_media_change_a_prepare(
         assert panel.render_preview() is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert calls[-1] == ["frame 0"]
-        # MEDIA: the prepare comes back, and once only
+        # MEDIA: the prepare comes back, and once only - both halves
         panel._rows[1].anim = "auto"
         assert panel.render_preview() is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
-        assert calls[-1] == ["prepare", "frame 0"]
-        panel._frame_var.set("1")
+        assert calls[-2:] == [["video", "frame 0"], ["audio"]]
         assert panel.render_preview() is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
-        assert calls[-1] == ["frame 1"]
+        assert calls[-1] == ["frame 0"]
         # ...and a failed step forgets the prepared media, so the next
         # render prepares again
         panel._pv_ready = None
-        panel._frame_var.set("2")
+        panel._pv_visual = None
         assert panel.render_preview() is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
-        assert calls[-1] == ["prepare", "frame 2"]
+        assert calls[-2:] == [["video", "frame 0"], ["audio"]]
     finally:
         root.destroy()
 
@@ -2402,11 +2407,9 @@ def test_a_retired_forms_animation_leaves_the_cache_with_its_files(
         panel._rows[1].anim = "auto"
         panel._rows[1].title = "one"
         panel._default_var.set("1")
-        panel._play_var.set(True)
-        panel._play_toggled()
+        assert panel.render_preview() is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
-        panel._play_var.set(False)
-        panel._play_toggled()
+        panel._stop_play(None)
         fp_a = preview_fingerprint(panel.form())
         pv = multiboot_tab.preview_dir_for(panel._out_var.get())
         gone = [multiboot_tab.frame_path(pv, fp_a, 1, 0)]
@@ -2482,16 +2485,16 @@ def test_a_changed_output_path_prepares_the_media_again(tmp_path,
         assert panel.render_preview() is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
         first = seen["media"]
-        assert "prepare" in prepares[-1]
+        assert "video" in prepares[-2] and prepares[-1] == ["audio"]
         assert panel._pv_ready == (media_fingerprint(panel.form()),
-                                   first, False)
+                                   first, True)
         # the same form, a different output: the media has not changed, but
         # the DIRECTORY it has to be in has
         panel._out_var.set(str(tmp_path / "two" / "card.multi.raw"))
         assert panel.render_preview() is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert os.path.normpath(seen["media"]) != os.path.normpath(first)
-        assert "prepare" in prepares[-1], prepares[-1]
+        assert "video" in prepares[-2], prepares
         assert os.path.isfile(os.path.join(seen["media"], "prepared"))
     finally:
         root.destroy()
@@ -2656,6 +2659,36 @@ def test_selecting_a_row_moves_the_preview_highlight(tmp_path):
         root.destroy()
 
 
+def test_a_refused_audio_half_leaves_the_picture_playing_and_says_why(
+        tmp_path, monkeypatch):
+    """The sounds are pulled off the card through the emulator's params
+    cache, and a cold cache is REFUSED - which must not take the picture
+    down with it (David: indicate when the videos / audio are loading
+    separately).  The frame is drawn and the clips run; the strip's Audio
+    readout carries the tool's own reason."""
+    root, panel = _panel()
+    seen = _stand_ins(monkeypatch, tmp_path, fail="audio", frames=3)
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._rows[1].anim = "auto"
+        panel._default_var.set("1")
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert seen["audio"]                       # it was tried
+        fp = preview_fingerprint(panel.form())
+        assert (fp, 1, 0) in panel._pv_cache
+        assert panel._pv_status.cget("text") == "Image 2: frame 0 of 3"
+        assert panel._pv_error is False
+        assert panel._media_state["video"] == "ready (1 clip)"
+        assert panel._media_state["audio"] == \
+            "unavailable - no params cache for this card"
+        assert panel._play_var.get() is True
+        assert "could not be rendered" in _pane(panel)
+    finally:
+        root.destroy()
+
+
 @pytest.mark.parametrize("fail", ["selector", "prepare", "frame"])
 def test_a_failing_preview_step_surfaces_the_error(tmp_path, monkeypatch,
                                                    fail):
@@ -2669,8 +2702,9 @@ def test_a_failing_preview_step_surfaces_the_error(tmp_path, monkeypatch,
         assert panel.render_preview() is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
         status = panel._pv_status.cget("text")
-        label = "frame 0" if fail == "frame" else fail
+        label = {"frame": "frame 0", "prepare": "video"}.get(fail, fail)
         assert "Preview failed at %s (exit 2)" % label in status
+        assert panel._media_state["video"] == "failed - see the Log"
         pane = _pane(panel)
         assert "error:" in pane and "%s: exit 2" % label in pane
         assert "[preview] Preview failed" in pane
@@ -2762,16 +2796,16 @@ def test_which_frames_a_run_wrote_is_read_off_the_selectors_own_lines():
 
 
 def test_play_draws_one_frame_and_walks_the_gif(tmp_path, monkeypatch):
-    """THE POINT OF THE WHOLE THING: pressing Play used to render a PPM per
-    frame (one qemu run each, then one run for all of them) - 150 of them,
-    3 MB apiece, for a 5 s clip.  Now it is ONE frame - frame 0, which the
-    preview has usually drawn already - and the ticks lay the rendered
-    GIF's own frames over it where the selector says the picture is
-    (``picture x,y,w,h`` on its snapshot line).  Nothing else is
-    rendered, and the rectangle is remembered per form and image."""
+    """THE POINT OF THE WHOLE THING: a render draws ONE frame - frame 0 -
+    and every animated card's clip is laid over it where the selector says
+    the picture is (``pictures i:x,y,w,h`` on its snapshot line), on one
+    clock, with nothing else rendered.  The sounds are a run of their own
+    after the frame, and the strip's two readouts say which half is
+    loading."""
     root, panel = _panel()
     seen = _stand_ins(monkeypatch, tmp_path, frames=4)
     calls = []
+    clock = [50.0]
     try:
         for p in _images(tmp_path, 2):
             panel.add_image(p)
@@ -2780,13 +2814,15 @@ def test_play_draws_one_frame_and_walks_the_gif(tmp_path, monkeypatch):
         media = panel.media_dir()
         os.makedirs(media, exist_ok=True)
         _gif(os.path.join(media, "anim1.gif"), frames=4)
+        panel._play_clock = lambda: clock[0]
         real = panel._run_commands
         panel._run_commands = lambda cmds, **kw: calls.append(
             [label for label, _ in cmds]) or real(cmds, **kw)
-        panel._play_var.set(True)
-        panel._play_toggled()
+        assert panel.render_preview() is True
+        assert panel._media_state["video"] == "loading…"
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
-        assert calls == [["selector", "prepare", "frame 0"]]
+        assert calls == [["selector", "video", "frame 0"], ["audio"]]
+        assert panel._media_state["video"] == "ready (1 clip)"
         # one snapshot call, one FILE, frame 0 - never a run
         assert len(seen["snapshot"]) == 1
         assert seen["snapshot"][0][5:] == (0, 1)
@@ -2794,33 +2830,35 @@ def test_play_draws_one_frame_and_walks_the_gif(tmp_path, monkeypatch):
         fp = preview_fingerprint(panel.form())
         pv = multiboot_tab.preview_dir_for(panel._out_var.get())
         assert panel._pv_totals == {(fp, 1): 4}
-        assert panel._pv_rects == {(fp, 1): (10, 10, 32, 8)}
+        assert panel._pv_rects == {(fp, 1): {1: (10, 10, 32, 8)}}
         assert sorted(panel._pv_cache) == [(fp, 1, 0)]
         # THE CACHED PATH IS ONE THIS PROCESS CAN OPEN.  The selector is
         # handed - and so echoes back - the WSL form of the name (see
-        # _tool_path), and caching what it echoed left Play pointing at a
-        # /mnt/c/… name Image.open cannot read.
+        # _tool_path), and caching what it echoed left the ticks pointing
+        # at a /mnt/c/… name Image.open cannot read.
         path = multiboot_tab.frame_path(pv, fp, 1, 0)
         assert panel._pv_cache[(fp, 1, 0)] == path
         assert os.path.isfile(path)
-        # ...and the ticks walk the GIF, wrapping, rendering nothing more
+        # ...and the ticks are running by themselves - nothing was pressed
+        assert panel._play_var.get() is True
+        _tick(root, panel)
         first = int(panel._frame_var.get())
         for k in range(1, 6):
+            clock[0] += 0.1                          # the GIF's 100 ms
             _tick(root, panel)
             assert panel._frame_var.get() == str((first + k) % 4)
             assert panel._pv_shown == (1, (first + k) % 4)
-        assert "frame %d of 4 - playing" % ((first + 5) % 4) in \
+        assert "frame %d of 4" % ((first + 5) % 4) in \
             panel._pv_status.cget("text")
-        assert calls == [["selector", "prepare", "frame 0"]]
+        assert calls == [["selector", "video", "frame 0"], ["audio"]]
         assert len(seen["snapshot"]) == 1
         # the clip is read once and kept, scaled to the picture's box
-        key, clip = panel._clip
+        key, clip = panel._clips[1]
         assert key[0] == os.path.join(media, "anim1.gif") and clip.n == 4
         assert key[3][2:] == clip.size
-        # stopping leaves the picture on the RENDERED frame (frame 0), and
-        # the caption says so rather than going on claiming to be playing
-        panel._play_var.set(False)
-        panel._play_toggled()
+        # stopping the ticks (a redraw does) leaves the picture on the
+        # RENDERED frame, and the caption says so
+        panel._stop_play(None)
         assert panel._pv_shown == (1, 0)
         assert panel._frame_var.get() == "0"
         assert panel._pv_status.cget("text") == "Image 2: frame 0 of 4"
@@ -2828,13 +2866,17 @@ def test_play_draws_one_frame_and_walks_the_gif(tmp_path, monkeypatch):
         # selector has just written again is decoded AGAIN (a single-frame
         # render shows itself the moment it lands, so the entry is a new
         # object, not the pixels it had before the run) - and the
-        # composite's base, which nothing re-reads until Play, is dropped
+        # composite's base, which nothing re-reads until a tick, is dropped
         before = panel._pv_photos[os.path.abspath(path)]
         assert panel._pv_base is not None
+        panel._play_start = lambda: False     # hold the ticks off to look
         assert panel._render_frames(panel.form(), 1, [0]) is True
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
         assert panel._pv_photos[os.path.abspath(path)] is not before
         assert panel._pv_base is None
+        del panel._play_start
+        # ...and a render is what starts the ticks again
+        assert panel._play_start() is True and panel._play_var.get() is True
     finally:
         root.destroy()
 
@@ -3039,16 +3081,16 @@ def test_the_menus_sounds_come_off_the_manifest(tmp_path):
     assert multiboot_tab.read_manifest(d) == {}
 
 
-def test_the_preview_starts_silent_and_says_what_is_going_unheard(
+def test_the_preview_starts_with_sound_on_and_opens_nothing_until_there_is_a_sound(
         tmp_path, monkeypatch):
-    """DEFAULT OFF, and said once.  This app is used beside a machine that
-    is running, so nothing here opens a sound device until the box is
-    ticked - and a feature nobody can find is not a feature, so the caption
-    says once that the highlighted image has music."""
+    """ALWAYS ON (David, 2026-09-03: "sound and video should always be on
+    for the preview") - and still nothing opens a device until there is a
+    sound to play; the frame's caption no longer has a Sound tick to point
+    at."""
     made = _fake_audio(monkeypatch)
     root, panel = _panel()
     try:
-        assert panel._sound_var.get() is False
+        assert panel._sound_var.get() is True
         for p in _images(tmp_path, 2):
             panel.add_image(p)
         media = _media_set(panel)
@@ -3056,21 +3098,15 @@ def test_the_preview_starts_silent_and_says_what_is_going_unheard(
         ppm = _ppm(tmp_path / "f.ppm")
         panel._set_var(panel._hl_var, 1)
         assert panel.load_frame(ppm, 1, 0, 1) is True
-        text = panel._pv_status.cget("text")
-        assert text.startswith("Image 2: a still")
-        assert "tick Sound" in text
-        assert "[preview] This image has music" in _pane(panel)
-        # ...once: the second frame says the frame and nothing else
-        assert panel.load_frame(ppm, 1, 0, 1) is True
         assert panel._pv_status.cget("text") == "Image 2: a still (no " \
             "animation on this image)"
-        # ONE CLICK, and it plays what the menu plays
-        panel._sound_var.set(True)
+        assert "tick Sound" not in _pane(panel)
+        # what the menu plays, the moment the sound follows the frame
         panel._sound_toggled()
         assert len(made) == 1
         assert made[0].looping == os.path.join(media, "music1.wav")
         assert made[0].volume == 50
-        # ...and unticking it gives the device back
+        # ...and the tests' seam for silence still gives the device back
         panel._sound_var.set(False)
         panel._sound_toggled()
         assert made[0].calls[-1] == ("stop", None)
@@ -3137,7 +3173,9 @@ def test_the_confirm_sound_can_be_heard_before_a_card_is_written(
         assert panel.play_confirm() is True
         assert made[0].played("play") == [os.path.join(media,
                                                        "confirm1.wav")]
-        assert made[0].played("loop") == []             # no music started
+        # the bed is STOPPED for it, as on the machine (sound is always on
+        # now, so there is a bed to stop) - and none is started
+        assert made[0].played("loop") == [None]
         assert "confirm1.wav" in panel._pv_status.cget("text")
         # image 0 has none of its own, so it is the menu's
         panel._set_var(panel._hl_var, 0)
@@ -3310,12 +3348,10 @@ def test_nothing_the_strip_says_is_cut_in_half_by_its_own_bottom_edge(
         # rendered (see MultibootPanel._prepare_sounds); this test is about
         # the STRIP, so the run is recorded rather than started.
         _recorder(panel)
-        # 1. the ONE line that says the Sound tick exists (it rides the
-        #    first caption after a frame is drawn, and is said once)
+        # 1. the frame's own caption
         panel._set_var(panel._hl_var, 1)
         assert panel.load_frame(_ppm(tmp_path / "f.ppm"), 1, 0, 1) is True
-        assert "tick Sound to hear it." in whole()
-        fits("the Sound note")
+        fits("the frame caption")
         # 2. the move-sound aside a flipper press finds out about
         panel._sound_var.set(True)
         panel._sound_toggled()
@@ -3333,7 +3369,7 @@ def test_nothing_the_strip_says_is_cut_in_half_by_its_own_bottom_edge(
                      "No move sound in this media set.",
                      "Rendering the menu's sounds…",
                      "Image 2 frame 7 has not been drawn yet.",
-                     "Image 2: frame 12 of 24 - playing",
+                     "Image 2: frame 12 of 150, 2 other clips playing",
                      "The form changed - redrawing…"):
             panel._pv_say(line)
             fits(repr(line))
@@ -4175,10 +4211,11 @@ def test_ticking_sound_renders_the_menus_sounds(tmp_path, monkeypatch):
         _media_set(panel, sounds=False, music=False)   # --visual-only's half
         panel._sound_var.set(True)
         panel._sound_toggled()
-        assert [label for label, _ in calls[0]] == ["prepare"]
+        assert [label for label, _ in calls[0]] == ["audio"]
         prep = _tool_words(calls[0][0][1])
         assert "--visual-only" not in prep and "--sound-move" in prep
-        assert "Rendering the menu's sounds" in panel._pv_status.cget("text")
+        # said on the strip's Audio readout, not over the frame's caption
+        assert panel._media_state["audio"] == "loading…"
         # ...and a set that HAS them is not prepared again
         calls[:] = []
         _media_set(panel, sounds=True, music=False)
@@ -4219,27 +4256,31 @@ def test_ticking_sound_renders_the_menus_sounds(tmp_path, monkeypatch):
         panel._sound_toggled()
         panel._sound_var.set(True)
         panel._sound_toggled()
-        assert [label for label, _ in calls[0]] == ["prepare"]
+        assert [label for label, _ in calls[0]] == ["audio"]
     finally:
         root.destroy()
 
 
-def test_a_render_with_sound_on_prepares_the_whole_media_set(tmp_path):
-    """The other half of the same rule: while Sound is ticked the preview's
-    own prepare is the FULL one, so the sounds cannot go missing under a
-    tick that is already on."""
+def test_a_render_prepares_the_pictures_then_the_sounds_as_two_runs(tmp_path):
+    """The preview's own prepare is the VIDEO half (--visual-only), and
+    the sounds are a run of their own right after the frame lands - so the
+    sounds cannot go missing under a preview that always plays them, and
+    the strip can say which half is still loading."""
     root, panel = _panel()
     calls = _recorder(panel)
     try:
         for p in _images(tmp_path, 2):
             panel.add_image(p)
         assert panel.render_preview() is True
+        assert [label for label, _ in calls[0]] == ["selector", "video",
+                                                     "frame 0"]
         assert "--visual-only" in _line(calls[0][1][1])
-        panel._pv_ready = None
-        panel._sound_var.set(True)
-        assert panel.render_preview() is True
-        prep = _tool_words(calls[1][1][1])
+        assert panel._media_state["video"] == "loading…"
+        assert panel._prepare_sounds() is True
+        assert [label for label, _ in calls[1]] == ["audio"]
+        prep = _tool_words(calls[1][0][1])
         assert "--visual-only" not in prep and "--sound-move" in prep
+        assert panel._media_state["audio"] == "loading…"
     finally:
         root.destroy()
 
@@ -4320,7 +4361,7 @@ def test_the_whole_tab_fits_a_1024x768_desktop(tmp_path):
                     panel._new_btn, panel._about_badge,
                     panel._buildflash_btn,
                     panel._emu_btn, panel._menu_btn,
-                    panel._play_chk):
+                    panel._video_lbl, panel._audio_lbl):
             assert btn.winfo_ismapped(), str(btn)
         # ...and the list has NONE: its actions are icons on its rows
         for gone in ("_add_btn", "_edit_btn", "_remove_btn", "_up_btn",
@@ -5223,11 +5264,11 @@ def test_the_form_survives_a_restart(tmp_path):
         # click on the verb earns editing mode back honestly.
         assert panel._loaded_card == "" and panel._loaded_form is None
         assert not _apply_live(panel)
-        # THE SOUND STAYS OFF.  This app is used in the room with a machine
-        # that is running; "he left it on once" is not a reason to make a
-        # noise on the next launch.
+        # THE SOUND IS ON, always (David, 2026-09-03: "sound and video
+        # should always be on for the preview") - nothing to save, and
+        # still nothing opens a device until there is a sound to play.
         assert "sound" not in doc
-        assert panel._sound_var.get() is False
+        assert panel._sound_var.get() is True
         assert panel._audio is None
         # a restored path is the USER'S path: adding the first image of the
         # next card must not silently overwrite it

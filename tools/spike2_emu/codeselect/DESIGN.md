@@ -209,9 +209,10 @@ full CLI, the log lines and the test list). What it is:
   animation every card gets an art panel across its top 40 % (the picture
   aspect-fitted and centred, never upscaled) above the label, and the text
   packs below; with no media the picture is the v1 layout byte for byte.
-  The highlighted card's GIF plays on the file's own frame delays, the
-  others show their still (or frame 0). A full redraw happens only on a
-  state change; an animation tick repaints one panel, and only the dirty
+  EVERY card's GIF plays on the file's own frame delays, all the time
+  (David: "all boot selections should play video at the same time"); a
+  card without one shows its still. A full redraw happens only on a
+  state change; an animation tick repaints the panels that moved, and only the dirty
   rectangle is uploaded. A key press restarts the countdown. On confirm one
   `LOADING <title>...` frame (with the card's picture) stays up while the
   confirm sound plays to completion (cap 8 s), the sound device is drained

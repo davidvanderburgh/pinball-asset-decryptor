@@ -94,12 +94,19 @@ codeselect --snapshot`` run and nothing else, while art, clips, music and
 the sounds pay for selectmedia's prepare (cached; 0.13 s for a two-image
 set when nothing changed).  The conf the picture is drawn from is written
 under ``<out dir>/preview``, and each snapshot writes a P6 PPM that Tk
-loads natively.  'Play' runs the highlighted card's animation over that
-ONE rendered frame: the selector says where in the frame it blitted the
-card's picture (``picture x,y,w,h`` on its snapshot line), and Play lays
-the rendered GIF's own frames there at the clip's own rate - the GIF is
-what the machine decodes into that very rectangle, so the pixels are the
-machine's, without a 3 MB PPM per frame (a 5 s clip is 150 of them).
+loads natively.  EVERY card's animation then plays over that ONE rendered
+frame, all the time - there is no Play to press (David, 2026-09-03: "all
+boot selections should play video at the same time all the time", "sound
+and video should always be on for the preview"): the selector says where
+in the frame it blitted each animated card's picture (``pictures
+i:x,y,w,h;...`` on its snapshot line), and the tab lays each rendered
+GIF's own frames there on one shared clock - the GIF is what the machine
+decodes into that very rectangle, so the pixels are the machine's,
+without a 3 MB PPM per frame (a 5 s clip is 150 of them).  The menu's
+sounds play the same way, always: the highlighted card's music, the move
+sound on a flipper, the confirm on Select.  The pictures and the sounds
+are rendered by two separate tool runs, and the strip says which of the
+two is still loading (Video: / Audio:).
 Because a preview leaves a sound-less media.json behind, 'Build & verify'
 runs a full prepare into that dir first whenever a media set exists - the
 card is never built from the preview's half of the media.
@@ -166,6 +173,7 @@ tool runs overlap either: a build copies ~7 GB per image and the tab is
 busy until the run has said PASS or FAIL.
 """
 
+import bisect
 import errno
 import hashlib
 import json
@@ -334,6 +342,13 @@ SELECTOR_LINE = "[preview] selector:"
 #: frame keeps its own 'frame N' label: they are read back differently
 #: (see :meth:`MultibootPanel._render_frames`).
 ANIM_LABEL = "animation"
+
+#: The two halves of the preview's media, as the runs that render them are
+#: labelled in the Log and as the strip names them: the pictures (art +
+#: animations + music beds, ``prepare --visual-only``) and the sounds (the
+#: full prepare, which pulls the move and confirm sounds off the card).
+VIDEO_LABEL = "video"
+AUDIO_LABEL = "audio"
 
 
 # ---------------------------------------------------------------------------
@@ -1106,6 +1121,8 @@ class ClipFrames(object):
         self._frames = {}
         self._delays = {}
         self._period = None
+        self._all = None                # every delay, once read
+        self._cum = None                # ...and their running sum
 
     def frame(self, k):
         """Frame *k* (wrapped) as an RGB image at ``size``."""
@@ -1125,6 +1142,16 @@ class ClipFrames(object):
             self.frame(k)
         return self._delays[k]
 
+    def delays(self):
+        """Every frame's delay, in order (one pass over the file, kept)."""
+        if self._all is None:
+            self._all = [gif_frame_delay_ms(self._img, k) for k in range(self.n)]
+            total, self._cum = 0, []
+            for d in self._all:
+                total += d
+                self._cum.append(total)
+        return self._all
+
     def period_ms(self):
         """The loop's frame period: the MEAN delay when the file's delays
         are near-uniform (a constant-rate clip - ffmpeg writes 30/40 ms in
@@ -1132,11 +1159,40 @@ class ClipFrames(object):
         rule as the selector's art.c, so the preview keeps the machine's
         time."""
         if self._period is None:
-            delays = [gif_frame_delay_ms(self._img, k) for k in range(self.n)]
+            delays = self.delays()
             self._period = 0.0
             if len(delays) >= 2 and max(delays) <= 2 * min(delays):
                 self._period = sum(delays) / float(len(delays))
         return self._period or None
+
+    def loop_ms(self):
+        """How long one loop of the clip takes on the machine's clock."""
+        p = self.period_ms()
+        return p * self.n if p else float(self._cum[-1]) if self.delays() else 100.0
+
+    def frame_at(self, t_ms):
+        """The frame showing *t_ms* into a run that started at 0 - the
+        clip's OWN timeline, so a late or missed tick lands on the frame
+        the machine would be showing, never a frame behind it."""
+        if self.n < 2:
+            return 0
+        p = self.period_ms()
+        if p:
+            return int(t_ms // p) % self.n
+        self.delays()
+        t = t_ms % self._cum[-1]
+        return min(self.n - 1, bisect.bisect_right(self._cum, t))
+
+    def ms_to_next(self, t_ms):
+        """How long, from *t_ms*, until the frame after :meth:`frame_at`."""
+        if self.n < 2:
+            return 1000.0
+        p = self.period_ms()
+        if p:
+            return p - (t_ms % p)
+        self.delays()
+        t = t_ms % self._cum[-1]
+        return self._cum[min(self.n - 1, bisect.bisect_right(self._cum, t))] - t
 
     def close(self):
         try:
@@ -1420,27 +1476,33 @@ def parse_anim_frames(text, highlight):
 _SNAP_RE = re.compile(
     r"snapshot: (.+?) \d+x\d+, highlight \d+ .*?, "
     r"frame (\d+) of (\d+), timeout ")
-#: ...and at the end of the same line, WHERE THE HIGHLIGHTED CARD'S PICTURE
-#: IS in that frame (``picture x,y,w,h``, or ``picture none``): the
-#: rectangle the selector blitted the card's still or GIF frame into,
-#: which is where Play lays the clip's frames (see :class:`ClipFrames`).
+#: ...and at the end of the same line, WHERE EVERY VISIBLE ANIMATED CARD'S
+#: PICTURE IS in that frame (``pictures i:x,y,w,h;j:x,y,w,h``, or
+#: ``pictures none``): the rectangles the selector blitted the GIF frames
+#: into, which is where the clips are laid (see :class:`ClipFrames`).
 #: Anchored on the footer's closing quote so a title cannot forge it.
-_SNAP_PICTURE_RE = re.compile(r'", picture (\d+),(\d+),(\d+),(\d+)\s*$')
+_SNAP_PICTURES_RE = re.compile(r'", pictures (\S+)\s*$')
+_PICTURE_RE = re.compile(r'^(\d+):(\d+),(\d+),(\d+),(\d+)$')
 
 
-def parse_snapshot_picture(text):
-    """``(x, y, w, h)`` of the highlighted card's picture in the LAST
-    frame a snapshot run wrote, or None (no picture on that card, or a
-    selector built before it said).  The rectangle is the same for every
-    frame of one run - one card, one panel - so the last line is the
-    run's answer."""
-    rect = None
+def parse_snapshot_pictures(text):
+    """``{image: (x, y, w, h)}`` for every visible animated card in the
+    LAST frame a snapshot run wrote - ``{}`` when none animates, or the
+    selector was built before it said.  The rectangles are the same for
+    every frame of one run, so the last line is the run's answer."""
+    rects = {}
     for line in (text or "").splitlines():
         if not _SNAP_RE.search(line):
             continue
-        m = _SNAP_PICTURE_RE.search(line)
-        rect = tuple(int(v) for v in m.groups()) if m else None
-    return rect
+        rects = {}
+        m = _SNAP_PICTURES_RE.search(line)
+        if not m or m.group(1) == "none":
+            continue
+        for item in m.group(1).split(";"):
+            p = _PICTURE_RE.match(item)
+            if p:
+                rects[int(p.group(1))] = tuple(int(v) for v in p.groups()[1:])
+    return rects
 
 
 def parse_snapshot_frames(text):
@@ -1569,8 +1631,18 @@ def prepare_commands(form, media_dir, cwd=None):
 
 
 def preview_prepare_commands(form, media_dir, cwd=None):
-    return [("prepare", wsl_command(preview_prepare_args(form, media_dir),
-                                    cwd))]
+    """The preview's VIDEO step: the pictures, the animations and the
+    music beds (``--visual-only``) - what the frame needs to be drawn."""
+    return [(VIDEO_LABEL, wsl_command(preview_prepare_args(form, media_dir),
+                                      cwd))]
+
+
+def audio_prepare_commands(form, media_dir, cwd=None):
+    """The preview's AUDIO step: the full prepare, which adds the move and
+    confirm sounds (pulled off the card through the emulator's params
+    cache - the slow half, and the half that can be refused).  The same
+    run as :func:`prepare_commands`, labelled for the strip."""
+    return [(AUDIO_LABEL, wsl_command(prepare_args(form, media_dir), cwd))]
 
 
 def ensure_selector_commands(form, cwd=None):
@@ -3138,29 +3210,26 @@ class MultibootPanel:
                   "sound, and the screen black for a moment while it plays "
                   "- what the machine does when you choose a card. It is "
                   "the only way to hear that sound, and see that beat, "
-                  "before a card is written, and it plays whether or not "
-                  "Sound is ticked, because pressing it is the asking.")
+                  "before a card is written.")
     FLIPPER_TIP = ("The machine's own flipper buttons: they move the "
                    "highlight one card and wrap round at the ends, exactly "
                    "as the flippers on the lockdown bar do - and they play "
-                   "the menu's move sound when Sound is ticked. The left "
+                   "the menu's move sound. The left "
                    "and right arrow keys do the same while the picture has "
                    "the keyboard.")
 
     #: ...and this is where the long form of everything the 30 px control
     #: strip has no room for lives: the strip gets one line, this gets the
     #: paragraph (see :meth:`_one_line`).
-    SOUND_TIP = ("Plays what the menu plays: the highlighted image's music "
-                 "loop, and the move sound on every flipper press. The WAVs "
-                 "are the prepared media's own, so this is what the card "
-                 "will sound like, at the volume in Menu settings. It "
-                 "starts OFF on purpose - nothing here opens a sound device "
-                 "until you tick it - and untick it to give the device "
-                 "back.\n\nThe preview renders pictures and music only while "
-                 "this is off, so ticking it is also what asks for the move "
-                 "and confirm sounds: the media set is prepared again, in "
-                 "full, and the tick takes effect as soon as that run is "
-                 "done.")
+    MEDIA_TIP = ("What the preview has rendered so far. Video: every "
+                 "card's picture and clip - they play the moment the frame "
+                 "is drawn, all at once, as they do on the machine. Audio: "
+                 "the highlighted image's music, the move sound on a "
+                 "flipper and the confirm on Select, at the volume in Menu "
+                 "settings. The two are rendered by separate tool runs, so "
+                 "one can be ready while the other is still loading; the "
+                 "sounds need the image's Extract-time cache and say so "
+                 "here when they cannot be pulled.")
 
     def __init__(self, parent, log=None, theme_fn=None, badge_fn=None,
                  resize_fn=None, flash_fn=None, emulate_fn=None,
@@ -3326,18 +3395,43 @@ class MultibootPanel:
         # highlight), learned from the selector's own log line.
         self._hl_var = tk.StringVar(value="0")
         self._frame_var = tk.StringVar(value="0")
-        self._play_var = tk.BooleanVar(value=False)
+        #: ALWAYS ON (David, 2026-09-03): there is no Play control any more;
+        #: the flag says whether the ticks are running right now (they stop
+        #: while a redraw is on its way and start again when it lands).
+        self._play_var = tk.BooleanVar(value=True)
         self._pv_cache = {}
         self._pv_totals = {}
-        #: (fingerprint, highlight) -> (x, y, w, h): where the selector put
-        #: the highlighted card's picture in its frame (the snapshot line's
-        #: ``picture``), which is where Play lays the clip's frames.
+        #: (fingerprint, highlight) -> {image: (x, y, w, h)}: where the
+        #: selector put every visible animated card's picture in its frame
+        #: (the snapshot line's ``pictures``), which is where the clips are
+        #: laid.  An empty dict = drawn, and nothing animates.
         self._pv_rects = {}
+        #: (media fingerprint, media dir) whose PICTURES are rendered - the
+        #: video half; ``_pv_ready`` below is the whole set, sounds too.
+        self._pv_visual = None
+        #: What the strip's Video / Audio readouts say.
+        self._media_state = {"video": "", "audio": ""}
         #: The frame Play composes on, as a Pillow image at the box's size:
         #: ((path, box w, box h), image).  One is enough.
         self._pv_base = None
-        #: The clip Play is walking: (key, ClipFrames), see _play_clip.
-        self._clip = None
+        #: The clips playing: {image: (key, ClipFrames)}, see _play_clips.
+        self._clips = {}
+        #: The clips' shared clock (time.monotonic at the first tick): every
+        #: clip's frame is where its own timeline is at, so a redraw, a
+        #: flipper press or a busy moment never restarts them - the
+        #: machine's do not stop either.
+        self._play_t0 = None
+        #: {image: frame} last composed, so a tick that moves nothing draws
+        #: nothing.
+        self._play_frames = None
+        #: The fingerprint and media directory of the LAST render asked
+        #: for - what the ticks read, so that a tick never calls form()
+        #: (form() -> media_dir() -> isfile(media.json) is the blocking
+        #: stat a dead drive turns into a frozen tab).
+        self._pv_fp = None
+        self._pv_media = None
+        #: The clips' clock; the tests hand in one they control.
+        self._play_clock = time.monotonic
         #: What the canvas holds while Play composes: (base PPM, highlight,
         #: frame count) - so stopping, or a resize, can go back to the
         #: rendered frame under it.  None whenever a rendered file is up.
@@ -3379,14 +3473,14 @@ class MultibootPanel:
         self._play_job = None
         self._play_fp = None
         self._play_hl = 0
-        #: THE PREVIEW'S SOUND, AND IT STARTS OFF.  This app is used beside
-        #: a machine that is running (David's own rule: bring things up
-        #: muted), so nothing here opens an audio device, imports
-        #: sounddevice or makes a noise until the Sound box has been
-        #: ticked.  ``_audio`` is built on the first sound and kept - the
-        #: player releases the device on stop() and takes it again on the
-        #: next loop().
-        self._sound_var = tk.BooleanVar(value=False)
+        #: THE PREVIEW'S SOUND, AND IT IS ALWAYS ON (David, 2026-09-03:
+        #: "sound and video should always be on for the preview" - the one
+        #: place his bring-things-up-muted rule does not apply, by his own
+        #: ask).  Nothing opens a device until there is a sound to play;
+        #: ``_audio`` is built on the first one and kept - the player
+        #: releases the device on stop() and takes it again on the next
+        #: loop().  The flag stays as the tests' seam for silence.
+        self._sound_var = tk.BooleanVar(value=True)
         self._audio = None
         self._sound_job = None          # the status poll, only while it is on
         self._sound_watch_until = 0.0   # ...and a moment after a one-shot
@@ -3839,21 +3933,19 @@ class MultibootPanel:
         self._flip_r.pack(side=tk.LEFT, padx=(4, 0))
         for btn in (self._flip_l, self._flip_r):
             btn.tip = _Tooltip(btn, self.FLIPPER_TIP, self._theme_fn)
-        ttk.Label(strip, text="Frame:").pack(side=tk.LEFT, padx=(10, 3))
-        self._frame_spin = ttk.Spinbox(strip, from_=0, to=999, width=4,
-                                       textvariable=self._frame_var,
-                                       command=self._frame_changed)
-        self._frame_spin.pack(side=tk.LEFT)
-        self._play_chk = ttk.Checkbutton(strip, text="Play",
-                                         variable=self._play_var,
-                                         command=self._play_toggled)
-        self._play_chk.pack(side=tk.LEFT, padx=(8, 0))
-        self._sound_chk = ttk.Checkbutton(strip, text="Sound",
-                                          variable=self._sound_var,
-                                          command=self._sound_toggled)
-        self._sound_chk.pack(side=tk.LEFT, padx=(8, 0))
-        self._sound_chk.tip = _Tooltip(self._sound_chk, self.SOUND_TIP,
-                                       self._theme_fn)
+        # NO Frame / Play / Sound controls (David, 2026-09-03: "sound and
+        # video should always be on for the preview"): every card's clip
+        # plays and the menu's sounds play, as they do on the machine.
+        # What is here instead says whether each half is THERE yet - the
+        # pictures render in one tool run and the sounds in another, and
+        # either can be the one still loading ("indicate when the videos /
+        # audio are loading separately").
+        self._video_lbl = ttk.Label(strip, text="", foreground=th["gray"])
+        self._video_lbl.pack(side=tk.LEFT, padx=(12, 0))
+        self._audio_lbl = ttk.Label(strip, text="", foreground=th["gray"])
+        self._audio_lbl.pack(side=tk.LEFT, padx=(8, 0))
+        for lbl in (self._video_lbl, self._audio_lbl):
+            lbl.tip = _Tooltip(lbl, self.MEDIA_TIP, self._theme_fn)
         self._pv_status = ttk.Label(strip, text="", width=1,
                                     justify=tk.LEFT, anchor=tk.W)
         self._pv_status.pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
@@ -6471,13 +6563,10 @@ class MultibootPanel:
         # + n before the modulo, the way the C does it: a left press off
         # image 0 lands on the last card and not on -1.
         nxt = (hl + int(step) + n) % n
-        # 'a new card: its animation restarts' - the C sets frame = 0 on
-        # every highlight change, and a preview that carried frame 7 across
-        # to a card with four frames would be showing a frame the machine
-        # never shows at that moment.
-        self._set_var(self._frame_var, 0)
-        if self._play_var.get():
-            self._play_hl = nxt         # ...and Play follows the highlight
+        # The animations keep running through a press - every card's plays
+        # all the time, on one clock, as on the machine - so no frame is
+        # reset here; the next tick composes them over the new highlight's
+        # frame once it is drawn.
         # AND THE TABLE FOLLOWS THE PICTURE.  The flippers are the headline
         # way of choosing a card now, and a press that left the blue row and
         # the editor fields on the image the picture had just walked away
@@ -6665,6 +6754,8 @@ class MultibootPanel:
             return False
         media = self.media_dir()          # was already stat'ed by form()
         mfp = media_fingerprint(form)
+        if self._pv_ready == (mfp, media, True):
+            return False                  # the whole set is there already
         try:
             self._makedirs(media)
         except OSError as exc:
@@ -6672,21 +6763,33 @@ class MultibootPanel:
             return False
 
         def step(label, rc, _text):
-            if label == "prepare" and rc == 0:
+            if label == AUDIO_LABEL and rc == 0:
+                self._pv_visual = (mfp, media)
                 self._pv_ready = (mfp, media, True)
 
-        def done(rc, _failed, _texts):
+        def done(rc, _failed, texts):
             if rc == 0:
+                # SAID ON THE AUDIO READOUT, not the caption: the caption
+                # is describing the frame that is up and playing.
+                self._media_say("audio", self._audio_state())
                 self._sound_follow()
                 self._say_sound(None)   # ...so the next miss is said again
-                self._pv_say("The menu's sounds are ready.")
+                self._write("[preview] the menu's sounds are ready")
             else:
-                self._pv_say("The menu's sounds could not be rendered (exit "
-                             "%d) - see the tool output." % rc, error=True)
-        if not self._run_commands(prepare_commands(form, media),
+                # NOT a failure of the preview: the picture is up and
+                # playing.  The strip's Audio readout carries the reason
+                # (the tool's own 'refused: ...' when it gave one - a cold
+                # Extract-time cache is the usual one).
+                why = parse_refusal(texts.get(AUDIO_LABEL, ""))
+                self._media_say("audio", "unavailable - %s"
+                                % (why[len("refused:"):].strip()
+                                   if why else "exit %d, see the Log" % rc))
+                self._write("[preview] the menu's sounds could not be "
+                            "rendered (exit %d) - see the lines above" % rc)
+        if not self._run_commands(audio_prepare_commands(form, media),
                                   on_step=step, on_done=done, preview=True):
             return False
-        self._pv_say("Rendering the menu's sounds…")
+        self._media_say("audio", "loading…")
         return True
 
     def _sounds_missing(self):
@@ -6769,9 +6872,12 @@ class MultibootPanel:
         every highlight change may call it."""
         if not self._sound_var.get():
             return False
+        music = self.menu_sounds()["music"]
+        if not music and self._audio is None:
+            return False                # nothing to play: open nothing
         audio = self._audio_player()
         audio.set_volume(_int(self._volume_var, 50))
-        audio.loop(self.menu_sounds()["music"])
+        audio.loop(music)
         return True
 
     def _sound_click(self):
@@ -7016,8 +7122,10 @@ class MultibootPanel:
         if not form.images:
             return None
         hl = _int(self._hl_var, int(form.default))
-        n = _int(self._frame_var, 0)
-        return preview_fingerprint(form), hl, n
+        # FRAME 0, always: the selector draws the menu as it first appears
+        # and every clip is laid over that by the ticks (the frame counter
+        # is the playing clip's readout, not a request)
+        return preview_fingerprint(form), hl, 0
 
     def _on_screen(self, key):
         """Whether the cached frame *key* names is the very picture the
@@ -7055,8 +7163,6 @@ class MultibootPanel:
                 self.load_frame(path, key[1], key[2],
                                 self._pv_totals.get(key[:2]))
             return
-        if self._play_var.get():
-            return                          # Play draws its own frames
         # ...and it only says 'drawing it' when one really is coming: the
         # first render after a restore is held (see _pv_idle), so an ask
         # that is about to be swallowed must not be reported as a promise.
@@ -7189,17 +7295,12 @@ class MultibootPanel:
             key = self._current_key()
             if key is not None:
                 self._pv_totals[key[:2]] = total
-            try:
-                self._frame_spin.configure(to=max(0, total - 1))
-            except tk.TclError:
-                pass
         if total is None:
             what = "frame %d" % frame
         elif total < 2:
             what = "a still (no animation on this image)"
         else:
-            what = "frame %d of %d%s" % (
-                frame, total, " - playing" if self._play_var.get() else "")
+            what = "frame %d of %d" % (frame, total)
         # ...and the card in the picture is the card in the words: the
         # amber frame above says IMAGE 2, so this says Image 2 (see
         # :meth:`_image_label`).
@@ -7286,19 +7387,6 @@ class MultibootPanel:
         if self._pv_idle:
             self._pv_idle = False       # the restore's own echo - see there
             return False
-        if self._play_var.get():
-            # PLAY DRAWS ITS OWN FRAMES - unless the form has moved out from
-            # under them, and then this is where that is noticed.  The tick
-            # notices it too, but the tick now waits a whole frame of the
-            # clip (up to 2 s), while this debounce has already fired at 350
-            # ms and used to THROW THE RENDER AWAY: an edit made during a
-            # slow animation left the preview stopped on the old picture,
-            # with nothing queued and nothing coming.
-            if preview_fingerprint(self.form()) == self._play_fp:
-                return False
-            # Stopped here rather than through _form_moved_under_play: this
-            # IS the redraw that method would have to ask for.
-            self._stop_play("The form changed - redrawing…", error=False)
         if self._busy or self._pv_busy:
             # Try again once the run in flight is done - a build takes
             # minutes and the preview must not queue behind every keystroke.
@@ -7321,6 +7409,16 @@ class MultibootPanel:
                            % (path_root(out) or "that drive"))
             return False
         form = self.form()
+        if self._play_var.get():
+            # THE CLIPS ARE PLAYING over the frame that is up.  An
+            # unchanged form has nothing new to draw; a changed one stops
+            # them here - this IS the redraw _form_moved_under_play would
+            # have to ask for - and the render that lands starts them
+            # again.  UNDER the drive guard above, because form() is the
+            # first stat, and this used to sit above it.
+            if preview_fingerprint(form) == self._play_fp:
+                return False
+            self._stop_play("The form changed - redrawing…", error=False)
         out = (form.out or "").strip().strip('"')
         if len(form.images) < 1 or not out:
             return False
@@ -7352,7 +7450,7 @@ class MultibootPanel:
             self._pv_stale("the image to highlight must be one of 0..%d"
                            % (len(form.images) - 1))
             return False
-        n = _int(self._frame_var, 0)
+        n = 0                           # see _current_key
         key = (preview_fingerprint(form), hl, n)
         if key in self._pv_cache:
             if not self._on_screen(key):
@@ -7402,7 +7500,7 @@ class MultibootPanel:
         hl = self._highlight(form)
         if hl is None:
             return False
-        return self._render_frames(form, hl, [_int(self._frame_var, 0)])
+        return self._render_frames(form, hl, [0])
 
     def _render_frames(self, form, hl, frames):
         """Render *frames* of the menu with image *hl* highlighted, on the
@@ -7435,6 +7533,7 @@ class MultibootPanel:
         pv = preview_dir_for(form.out)
         media = self.media_dir()
         conf = os.path.join(pv, "images.conf")
+        self._pv_fp, self._pv_media, self._play_fp = fp, media, fp
         self._forget_old_dirs(pv, media)
         try:
             self._makedirs(pv)
@@ -7469,15 +7568,18 @@ class MultibootPanel:
         # but two - and with Sound ticked the whole set is what was asked
         # for.  Without this third field, ticking Sound after a render left
         # the tab certain the media was ready and the move sound absent.
-        sound = bool(self._sound_var.get())
-        if self._pv_ready != (mfp, media, sound):
+        # THE VIDEO HALF FIRST, and only that: the frame needs the pictures
+        # and nothing else, so the sounds (the slow half, pulled off the
+        # card) are rendered in a run of their own AFTER the picture is up
+        # (see done() below), and the strip says which is loading.
+        if self._pv_visual != (mfp, media) and self._pv_ready != (mfp, media, True):
             if self.needs_prepare(form):
-                cmds += (prepare_commands(form, media) if sound
-                         else preview_prepare_commands(form, media))
+                cmds += preview_prepare_commands(form, media)
             else:
                 # The card's own media, straight out of the extraction: it
                 # matches the form because the form came out of the card,
                 # sounds and all.
+                self._pv_visual = (mfp, media)
                 self._pv_ready = (mfp, media, True)
         wanted = [int(n) for n in frames] or [0]
         # A run of more than one is ONE step, and never longer than the most
@@ -7525,8 +7627,8 @@ class MultibootPanel:
             if label == "selector":
                 self._pv_bin = parse_selector_path(text)
                 self._pv_bin_at = time.time()
-            elif label == "prepare":
-                self._pv_ready = (mfp, media, sound)
+            elif label == VIDEO_LABEL:
+                self._pv_visual = (mfp, media)
             elif label == ANIM_LABEL:
                 # WHICH frames a run wrote is the selector's decision, and
                 # it says so once per file: the caller knows the pattern,
@@ -7540,18 +7642,26 @@ class MultibootPanel:
                 keep(first, total)
                 self._keep_rect(fp, hl, text)
                 key = self._current_key()
-                if not self._play_var.get() and key == (fp, hl, first):
+                # shown the moment it lands (the clips are laid over it
+                # by the next tick), and the caption names it
+                if key == (fp, hl, first):
                     self.load_frame(ppm, hl, first, total or 1)
 
         def done(rc, failed, _texts):
             if rc == 0:
-                if not self._play_var.get():
-                    key = self._current_key()
-                    if key in self._pv_cache and not self._on_screen(key):
-                        self.load_frame(self._pv_cache[key], key[1], key[2],
-                                        self._pv_totals.get(key[:2]))
+                key = self._current_key()
+                if key in self._pv_cache and not self._on_screen(key):
+                    self.load_frame(self._pv_cache[key], key[1], key[2],
+                                    self._pv_totals.get(key[:2]))
+                self._media_say("video", self._video_state(form))
                 # A prepare may just have put this image's music there.
                 self._sound_follow()
+                # ...and the clips play over the frame from here on.
+                self._play_start()
+                # THE AUDIO HALF, now that the picture is up: the move and
+                # confirm sounds are a run of their own, said as such.
+                if not self._prepare_sounds():
+                    self._media_say("audio", self._audio_state())
                 return
             # ANY failed step forgets the prepared media, a frame render
             # included: a snapshot that failed on broken media would
@@ -7560,10 +7670,13 @@ class MultibootPanel:
             # again costs almost nothing - selectmedia's sidecar cache reuses
             # every unchanged picture (measured 0.13 s for a two-image set).
             self._pv_ready = None
+            self._pv_visual = None
             self._stop_play(None)
+            self._media_say("video", "failed - see the Log")
             self._pv_say("Preview failed at %s (exit %d) - see the tool "
                          "output." % (failed or "the start", rc), error=True)
 
+        self._media_say("video", "loading…")
         self._pv_say("rendering…")
         if not self._run_commands(cmds, on_step=step, on_done=done,
                                   preview=True):
@@ -7627,98 +7740,133 @@ class MultibootPanel:
                     self._pv_cache.pop(key, None)
 
     def _keep_rect(self, fp, hl, text):
-        """Remember where a run put image *hl*'s picture (its snapshot
-        line's ``picture x,y,w,h``), and forget a rectangle it no longer
-        reports."""
-        rect = parse_snapshot_picture(text)
-        if rect:
-            self._pv_rects[(fp, hl)] = rect
-        else:
-            self._pv_rects.pop((fp, hl), None)
+        """Remember where a run put every visible animated card's picture
+        (its snapshot line's ``pictures``) - an empty dict when nothing on
+        that frame animates."""
+        self._pv_rects[(fp, hl)] = parse_snapshot_pictures(text)
+
+    def _media_say(self, kind, state):
+        """The strip's Video / Audio readout: what the preview has of each
+        half right now - loading, ready, none, or why not (David: "indicate
+        when the videos / audio are loading separately for the preview")."""
+        self._media_state[kind] = state
+        lbl = getattr(self, "_%s_lbl" % kind, None)
+        if lbl is None:
+            return
+        try:
+            lbl.configure(text="%s: %s" % (kind.capitalize(), state)
+                          if state else "")
+        except tk.TclError:                             # pragma: no cover
+            pass
+
+    def _video_state(self, form=None):
+        """What Video says once the frame is drawn: how many clips play, or
+        that nothing on this menu animates."""
+        form = form or self.form()
+        n = sum(1 for r in form.images if anim_spec(r) != "none")
+        if not n:
+            return "none"
+        return "ready (%d clip%s)" % (n, "" if n == 1 else "s")
+
+    def _audio_state(self):
+        """What Audio says when no run is up: ready, none asked for, or
+        which sounds are still not rendered."""
+        missing = self._sounds_missing()
+        if missing:
+            return "not rendered (%s)" % ", ".join(missing)
+        wants = (_media_value(self._move_var.get().strip() or "none") != "none"
+                 or self._menu_confirm() != "none"
+                 or any(_media_value(r.music) not in ("", "none")
+                        or confirm_spec(r) != "none" for r in self._rows))
+        return "ready" if wants else "none"
 
     def _play_toggled(self):
-        if not self._play_var.get():
+        """The tests' seam: ``_play_var`` on starts the ticks, off stops
+        them.  Nothing on the strip sets it any more - the clips play
+        whenever the preview has a frame."""
+        if self._play_var.get():
+            self._play_start()
+        else:
             self._stop_play(None)
-            return
-        form = self.form()
-        errs = validate_form(form, sources=self.needs_prepare(form))
-        if errs:
-            self._stop_play("Fix the form first - see the line above.")
-            self._error("\n".join(errs))
-            return
-        hl = self._highlight(form)
-        if hl is None:
-            self._stop_play(None)
-            return
-        if not _HAVE_PIL:
-            self._stop_play("Play needs Pillow (pip install pillow).")
-            return
-        fp = preview_fingerprint(form)
-        total = self._pv_totals.get((fp, hl))
-        if total is not None and total < 2:
-            self._stop_play("%s has no animation to play."
-                            % self._image_label(hl))
-            return
-        self._play_fp, self._play_hl = fp, hl
-        self._play_due = None
-        # ONE FRAME IS ALL PLAY NEEDS DRAWN - frame 0, which the preview
-        # has usually drawn already.  The clip's own frames go over it at
-        # the ticks below (see ClipFrames).
-        self._play_run(form, fp, hl)
+
+    def _play_start(self):
+        """Animate: every visible card's clip over the rendered frame, from
+        now on.  There is nothing to press (David, 2026-09-03: "sound and
+        video should always be on for the preview"); this runs whenever a
+        frame lands, and the ticks wait it out while a redraw is on its
+        way.  The clips' clock starts once and is never reset."""
+        if self._stopped or not _HAVE_PIL:
+            return False
+        self._play_var.set(True)
+        if self._play_t0 is None:
+            self._play_t0 = self._play_clock()
         self._schedule_tick(0)
+        return True
 
-    def _play_run(self, form, fp, hl):
-        """Make sure frame 0 of image *hl* is drawn - the one picture Play
-        lays the clip over.  False when it is there already, or when
-        something else has the worker (the next tick asks again)."""
-        if (fp, hl, 0) in self._pv_cache:
-            return False
-        if self._busy or self._pv_busy:
-            return False
-        return self._render_frames(form, hl, [0])
+    #: How often the ticks look again while there is nothing to draw - no
+    #: frame yet, nothing animates, a Select's black beat, or nobody is
+    #: looking at the tab.
+    PLAY_IDLE_MS = 250
 
-    def _play_clip(self, fp, hl, scale):
-        """The clip Play lays over image *hl*'s frame 0 - its rendered GIF
-        scaled to where the picture sits at the box's size (*scale* = the
-        base's on-screen width over its own) - as ``(clip, (x, y, w,
-        h))``, or None: no GIF in the media dir, no rectangle reported
-        yet, or a file Pillow cannot read (said).
+    def _play_visible(self):
+        """Whether anyone can see the picture: a tab behind another, or an
+        iconified window, is not worth composing 30 frames a second for.
+        The clock keeps running meanwhile, so the clips come back where
+        the machine's would be."""
+        try:
+            return bool(self._pv_canvas.winfo_viewable())
+        except tk.TclError:                             # pragma: no cover
+            return False
+
+    def _play_clips(self, fp, hl, rects, scale):
+        """The clips playing over this frame: ``{image: (clip, (x, y, w,
+        h))}`` for every card the selector reported a picture for - its
+        rendered GIF scaled to where that picture sits at the box's size
+        (*scale* = the base's on-screen width over its own).  A card whose
+        GIF is not there (or not readable) is left out; clips no longer on
+        the frame are closed.
 
         ``anim<N>.gif`` in the media directory is the file the preview's
         own conf names (:func:`write_preview_conf`) and therefore the file
         the selector decodes into that very rectangle.  Kept against its
         stat and the box: a re-rendered clip, or a resized window, is a
         new one."""
-        media = self.media_dir()
-        rect = self._pv_rects.get((fp, hl))
-        if not media or not rect or not _HAVE_PIL:
-            return None
-        path = os.path.join(media, "anim%d.gif" % int(hl))
-        try:
-            st = os.stat(path)
-        except OSError:
-            return None
+        media = self._pv_media
+        out = {}
+        if not media or not _HAVE_PIL:
+            return out
         k = float(scale)
-        x, y, w, h = rect
-        box = (int(round(x * k)), int(round(y * k)),
-               max(1, int(round(w * k))), max(1, int(round(h * k))))
-        key = (path, st.st_mtime, st.st_size, box)
-        if self._clip is not None and self._clip[0] == key:
-            return self._clip[1], box
-        if self._clip is not None:
-            self._clip[1].close()
-            self._clip = None
-        try:
-            clip = ClipFrames(path, box[2:])
-        except Exception as exc:                        # noqa: BLE001
-            self._pv_say("Cannot read %s: %s" % (path, exc), error=True)
-            return None
-        self._clip = (key, clip)
-        return clip, box
+        for i, rect in sorted(rects.items()):
+            path = os.path.join(media, "anim%d.gif" % int(i))
+            try:
+                st = os.stat(path)
+            except OSError:
+                continue
+            x, y, w, h = rect
+            box = (int(round(x * k)), int(round(y * k)),
+                   max(1, int(round(w * k))), max(1, int(round(h * k))))
+            key = (path, st.st_mtime, st.st_size, box)
+            had = self._clips.get(i)
+            if had is not None and had[0] == key:
+                out[i] = (had[1], box)
+                continue
+            if had is not None:
+                had[1].close()
+                self._clips.pop(i, None)
+            try:
+                clip = ClipFrames(path, box[2:])
+            except Exception as exc:                    # noqa: BLE001
+                self._pv_say("Cannot read %s: %s" % (path, exc), error=True)
+                continue
+            self._clips[i] = (key, clip)
+            out[i] = (clip, box)
+        for i in [j for j in self._clips if j not in out]:
+            self._clips.pop(i)[1].close()
+        return out
 
     def _scaled_image(self, path):
         """The frame at *path* as a Pillow image scaled into the box - what
-        a Play frame is composed on - and the scale that took it there
+        a composed frame is built on - and the scale that took it there
         (its width on screen over the file's): ``(image, scale)``, or
         None (said).  One is kept, by path and box."""
         key = (os.path.abspath(path), self._pv_w, self._pv_h)
@@ -7737,23 +7885,22 @@ class MultibootPanel:
         self._pv_base = (key, shown, scale)
         return shown, scale
 
-    def show_clip_frame(self, base_path, hl, k, clip, box, playing=True):
-        """One frame of Play on the canvas: the clip's frame *k* laid over
-        the rendered frame at *base_path*, inside *box* (the picture's
-        rectangle at the box's scale), with the caption.  False when the
-        base cannot be read or the canvas is gone.
+    def show_clip_frames(self, base_path, hl, frames, clips):
+        """One composed frame on the canvas: every clip's frame
+        (``frames[i]``) laid over the rendered frame at *base_path*, each
+        inside its own box (``clips[i][1]``), with the caption for the
+        highlighted card.  False when the base cannot be read or the canvas
+        is gone.
 
-        ``_pv_src`` is NOT moved: it names the rendered file on screen,
-        and this picture is that file plus the clip - so a resize redraws
-        the rendered frame and the next tick lays the clip over it again,
-        and stopping Play falls back to the rendered frame it started
-        on."""
+        ``_pv_src`` is NOT moved: it names the rendered file on screen, and
+        this picture is that file plus the clips - so a resize redraws the
+        rendered frame and the next tick lays the clips over it again."""
         got = self._scaled_image(base_path)
         if got is None:
             return False
-        k %= clip.n
         shown = got[0].copy()
-        shown.paste(clip.frame(k), (box[0], box[1]))
+        for i, (clip, box) in clips.items():
+            shown.paste(clip.frame(frames.get(i, 0)), (box[0], box[1]))
         try:
             photo = ImageTk.PhotoImage(shown)
             c = self._pv_canvas
@@ -7763,23 +7910,27 @@ class MultibootPanel:
         except (tk.TclError, RuntimeError):
             return False
         self._pv_photo = photo
+        self._play_frames = dict(frames)
+        own = clips.get(hl)
+        k = frames.get(hl, 0) if own else 0
         self._pv_shown = (hl, k)
-        self._composite = (base_path, hl, clip.n)
+        self._composite = (base_path, hl, own[0].n if own else 1)
         self._set_var(self._frame_var, k)
-        self._pv_say("%s: frame %d of %d%s"
-                     % (self._image_label(hl), k, clip.n,
-                        " - playing" if playing else ""))
+        if own:
+            what = "frame %d of %d" % (k, own[0].n)
+        else:
+            what = "a still"
+        others = len(clips) - (1 if own else 0)
+        if others:
+            what += ", %d other clip%s playing" % (others, "" if others == 1 else "s")
+        self._pv_say("%s: %s" % (self._image_label(hl), what))
         return True
 
     def _anim_delay_ms(self, hl):
-        """The rendered clip's own per-frame delay for image *hl*, or None.
-
-        ``anim<N>.gif`` in the media directory is the file the preview's
-        own conf names (:func:`write_preview_conf`) and therefore the file
-        the selector loads, so it is the one whose delays the picture is
-        ticking on.  Kept against its stat the way media.json is: Play asks
-        once a frame and must not re-read a GIF ten times a second."""
-        media = self.media_dir()
+        """The rendered clip's own mean per-frame delay for image *hl*, or
+        None - read off ``anim<N>.gif`` in the media directory (the file
+        the selector decodes), kept against its stat."""
+        media = self._pv_media or self.media_dir()
         if not media:
             return None
         path = os.path.join(media, "anim%d.gif" % int(hl))
@@ -7814,63 +7965,48 @@ class MultibootPanel:
             pass
 
     def _play_tick(self):
-        """One step of Play: the clip's next frame over the rendered frame
-        0, at that frame's own delay.  Stops when the form no longer matches
-        the picture, when the image turns out to be a still, or when the
-        clip cannot be read; asks for frame 0 again while it is not drawn
-        yet (the first ticks after Play, while the selector is drawing)."""
+        """One tick: every visible clip's frame for THIS moment of the shared
+        clock, composed over the rendered frame 0 of the highlighted card.
+        Waits (:data:`PLAY_IDLE_MS`) while there is no frame to compose on
+        - a redraw is on its way - or nothing that animates, or a Select's
+        black beat, or nobody looking; stops only when the tab is torn down
+        or a redraw asks it to (and starts again when that lands)."""
         self._play_job = None
         if self._stopped or not self._play_var.get():
             return
-        form = self.form()
-        fp = preview_fingerprint(form)
-        if fp != self._play_fp:
-            self._form_moved_under_play()
-            return
-        hl = self._play_hl
-        base = self._pv_cache.get((fp, hl, 0))
-        total = self._pv_totals.get((fp, hl))
-        if base is None or total is None:
-            # Frame 0 is not drawn yet: the run is on the worker, or
-            # waiting for it.
-            self._play_run(form, fp, hl)
-            self._schedule_tick()
-            return
-        if total < 2:
-            self._stop_play("%s has no animation to play."
-                            % self._image_label(hl))
+        # NOTHING HERE TOUCHES A DISK OR THE FORM: the fingerprint and the
+        # media directory are the last render's (see _pv_fp), so a tick on
+        # an unreachable share is a lookup in two dicts and a wait.
+        fp = self._pv_fp
+        hl = _int(self._hl_var, _int(self._default_var, 0))
+        base = self._pv_cache.get((fp, hl, 0)) if fp else None
+        rects = self._pv_rects.get((fp, hl))
+        black = getattr(self, "_black_job", None) is not None
+        if base is None or not rects or black or not self._play_visible():
+            self._schedule_tick(self.PLAY_IDLE_MS)
             return
         scaled = self._scaled_image(base)
         if scaled is None:
-            self._stop_play("%s: the picture cannot be drawn."
-                            % self._image_label(hl))
+            self._schedule_tick(self.PLAY_IDLE_MS)
             return
-        got = self._play_clip(fp, hl, scaled[1])
-        if got is None:
-            self._stop_play("%s: its animation is not there to play."
-                            % self._image_label(hl))
+        clips = self._play_clips(fp, hl, rects, scaled[1])
+        if not clips:
+            self._schedule_tick(self.PLAY_IDLE_MS)
             return
-        clip, box = got
-        if clip.n < 2:
-            self._stop_play("%s has no animation to play."
-                            % self._image_label(hl))
+        now = self._play_clock()
+        if self._play_t0 is None:
+            self._play_t0 = now
+        t_ms = int(round((now - self._play_t0) * 1000.0))
+        frames = {i: clip.frame_at(t_ms) for i, (clip, _box) in clips.items()}
+        stale = (self._composite is None
+                 or self._composite[:2] != (base, hl)
+                 or frames != self._play_frames)
+        if stale and not self.show_clip_frames(base, hl, frames, clips):
+            self._schedule_tick(self.PLAY_IDLE_MS)
             return
-        nxt = (_int(self._frame_var, 0) + 1) % clip.n
-        if not self.show_clip_frame(base, hl, nxt, clip, box):
-            self._stop_play("%s: the picture cannot be drawn."
-                            % self._image_label(hl))
-            return
-        # THE CLIP'S TIMELINE, not the timer's: Tk fires `after` late by
-        # up to its 15 ms tick, and 'delay from now' every frame added that
-        # to every frame (a 30 fps loop ran at ~24).  Due times accumulate
-        # - a late tick shortens the next wait - and only a stall of more
-        # than a frame restarts the timeline from now.
-        step = anim_period_ms(delay_ms=clip.period_ms() or clip.delay_ms(nxt))
-        now = time.monotonic()
-        if self._play_due is None or now - self._play_due > step / 1000.0:
-            self._play_due = now
-        self._play_due += step / 1000.0
-        self._schedule_tick(max(1, int(round((self._play_due - now) * 1000))))
+        # the soonest any clip moves on, on ITS clock - never a fixed rate
+        wait = min(clip.ms_to_next(t_ms) for clip, _box in clips.values())
+        self._schedule_tick(max(8, int(wait) + 1))
 
     def _form_moved_under_play(self):
         """The form no longer matches the frames Play is showing: stop, and
@@ -7886,7 +8022,11 @@ class MultibootPanel:
                         error=False)
 
     def _stop_play(self, msg, error=True):
+        """Stop the ticks (a redraw is on its way, or the tab is going);
+        the clips' clock keeps running, so they resume where the
+        machine's would be."""
         self._play_var.set(False)
+        self._play_frames = None
         if self._play_job is not None:
             try:
                 self._timer().after_cancel(self._play_job)

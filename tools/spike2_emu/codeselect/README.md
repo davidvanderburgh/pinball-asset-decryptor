@@ -107,7 +107,7 @@ codeselect [--conf PATH] [--out PATH] [--input hw|padsw|none] [--nodebus DEV]
 | `--audio` | `auto` | `auto` = ALSA when `snd_pcm_open` succeeds, else `fifo:$PAD_AUDIO_PLAY` when that is set and non-empty, else `none`; `alsa`, `fifo:PATH`, `none` force one |
 | `--audio-fmt` | `$PAD_AUDIO_FMT` | the rig's fmt file; the FIFO sink writes `44100 2` into it first |
 | `--volume` | conf `volume=`, else 50 | software mix gain, 0-100 (50 = -6 dB) |
-| `--anim-frame` | animate | `--headless`: every animation shows frame N and never ticks (the layout tests); `--snapshot`: the highlighted card's frame, wrapping past the end (and the FIRST frame of a `--frames` run) - the other cards show their still, or frame 0, as they do live |
+| `--anim-frame` | animate | `--headless`: every animation shows frame N and never ticks (the layout tests); `--snapshot`: every animation's frame, each wrapping past its own end (and the FIRST frame of a `--frames` run) |
 | `--audio-dump` | none | raw s16le 44100 Hz stereo of everything mixed (with `--audio none` the mix still runs, paced to the clock) |
 
 Exit status: `0` = a choice was written to `--out`; `2` = no choice (bad conf,
@@ -177,9 +177,11 @@ which is the case wrapping cannot help with.
   227x168 for four) above the label; the title shrinks to 48 px and the
   subtitle to 26 px with the lines that still fit (two or three). A card's
   picture is aspect-fitted into its panel and centred (never upscaled; the
-  tools pre-scale). The highlighted card plays its GIF on the GIF's own
-  frame delays (100 ms where the file says 0, clamped 20 ms-10 s); the
-  others show their still, or frame 0 when they have no still. A GIF is
+  tools pre-scale). EVERY card plays its GIF, all the time, on the GIF's
+  own frame delays (100 ms where the file says 0, clamped 20 ms-10 s) -
+  highlighted or not (David, 2026-09-03: "all boot selections should play
+  video at the same time all the time"); a card without one shows its
+  still. A GIF is
   up to 150 frames (5 s at 30 fps, the tools' contract) and is decoded
   ON DEMAND - the tick that shows frame k decodes frame k, a wrap starts
   the file over - so the menu holds one frame per animation plus frame
@@ -225,16 +227,16 @@ the card renders without its picture). stdout carries one line a caller can
 parse:
 
 ```
-[select] snapshot: FILE.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 10 s, invert 0, font /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf, media /some/dir, footer "LEFT / RIGHT FLIPPER: choose      START: boot", picture 899,206,200,112
+[select] snapshot: FILE.ppm 1360x768, highlight 1 (TMNT 1987) from --highlight, frame 2 of 4, timeout 10 s, invert 0, font /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf, media /some/dir, footer "LEFT / RIGHT FLIPPER: choose      START: boot", pictures 1:899,206,200,112
 ```
 
 `frame F of N` is the frame shown and the highlighted card's frame count
 (`0 of 0` when it has no animation), so a caller can learn the length of the
-animation from the first frame it asks for. `picture x,y,w,h` is where the
-highlighted card's picture (its still, or the GIF frame) was blitted in
-that PPM - `picture none` when the card has neither - so a caller can lay
-the GIF's own frames over ONE rendered frame instead of asking for a PPM
-per frame: that is how the Multi-boot tab's Play runs a 150-frame clip.
+animation from the first frame it asks for. `pictures i:x,y,w,h;j:x,y,w,h`
+is where every visible card WITH AN ANIMATION had its frame blitted in
+that PPM (`pictures none` when no visible card has one), so a caller can
+lay each GIF's own frames over ONE rendered frame instead of asking for a
+PPM per frame: that is how the Multi-boot tab plays every card's clip.
 
 #### `--frames K`: a whole run out of one load
 

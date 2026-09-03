@@ -850,6 +850,36 @@ def _pane(panel):
     return "\n".join(panel.log_lines())
 
 
+# The two writing buttons the tab used to carry (Apply to card / Build &
+# verify) and its Flash button are one green 'Build / flash card…' now,
+# and the modal behind it decides Apply-vs-Build from _write_plan().  These
+# read that plan the way the old tests read a button's state / style.
+def _write_action(panel):
+    """Which write the Build / flash modal would do now: 'apply' or 'build'."""
+    return panel._write_plan()["action"]
+
+
+def _apply_live(panel):
+    """Apply is what the modal would do AND there is something to apply -
+    what the old Apply-to-card button showed by being enabled."""
+    p = panel._write_plan()
+    return p["action"] == "apply" and p["can_write"]
+
+
+def _build_live(panel):
+    """Build is what the modal would do AND it can (rows + a path) - what
+    the old Build & verify button showed by being green and enabled."""
+    p = panel._write_plan()
+    return p["action"] == "build" and p["can_write"]
+
+
+def _can_flash(panel):
+    """The modal's flash tick is offer-able: a finished card on disk, or a
+    write about to make one - what the old Flash button showed."""
+    p = panel._write_plan()
+    return bool(p["have_card"] or p["can_write"])
+
+
 def _fire_debounce(root, panel):
     """Run the pending preview debounce now, instead of in 350 ms."""
     job = panel._pv_debounce_job
@@ -1572,14 +1602,14 @@ def test_busy_guard_refuses_a_second_run(tmp_path, monkeypatch):
         assert panel._run_commands([("plan", ["true"])]) is False
         panel._build_card()
         assert "already in progress" in panel._hint.cget("text")
-        assert str(panel._build_btn.cget("state")) == "disabled"
+        assert str(panel._buildflash_btn.cget("state")) == "disabled"
         # ...and the preview: refused, said on its own status line, and
         # nothing queued for the worker.
         assert panel.render_preview() is False
         assert "already in progress" in panel._pv_status.cget("text")
         assert panel._pv_cache == {}
         panel._set_busy(False)
-        assert str(panel._build_btn.cget("state")) == "normal"
+        assert str(panel._buildflash_btn.cget("state")) == "normal"
     finally:
         root.destroy()
 
@@ -1614,8 +1644,8 @@ def test_a_background_render_leaves_every_action_live(tmp_path, monkeypatch):
         # (Apply, Flash and Run in emulator have their own reasons to be
         # grey on a standalone panel with no card loaded; these are the
         # ones the busy guard ALONE would have taken away.)
-        for btn in (panel._build_btn, panel._new_btn, panel._menu_btn,
-                    panel._browse_btn):
+        for btn in (panel._buildflash_btn, panel._new_btn,
+                    panel._menu_btn, panel._browse_btn):
             assert str(btn.cget("state")) != "disabled", str(btn)
         # The row's verb has its own reason too - there is nothing at the
         # path yet - so it is asked with the probe told there is, which is
@@ -1692,11 +1722,19 @@ def test_run_in_emulator_hands_the_card_to_the_emulate_panel(tmp_path):
         root.destroy()
 
 
-def test_handoff_buttons_are_greyed_without_the_app():
+def test_handoff_is_refused_without_the_app(tmp_path):
+    """A standalone panel has nowhere to hand the card: Run in emulator is
+    greyed, and Flash (inside the Build / flash modal now) refuses in words
+    rather than crashing."""
     root, panel = _panel()
     try:
-        assert str(panel._flash_btn.cget("state")) == "disabled"
         assert str(panel._emu_btn.cget("state")) == "disabled"
+        card = str(tmp_path / "c.raw")
+        with open(card, "wb") as f:
+            f.write(bytes(16))
+        panel._out_var.set(card)
+        panel._flash()
+        assert "not available" in panel._hint.cget("text")
     finally:
         root.destroy()
 
@@ -2643,7 +2681,7 @@ def test_a_failing_preview_step_surfaces_the_error(tmp_path, monkeypatch,
         # ...and the tab was never greyed for it: a preview is a background
         # redraw, not a run that writes something.
         assert panel._busy is False and panel._pv_busy is False
-        assert str(panel._build_btn.cget("state")) == "normal"
+        assert str(panel._buildflash_btn.cget("state")) == "normal"
     finally:
         root.destroy()
 
@@ -3948,7 +3986,7 @@ def test_the_more_menu_is_gone_and_so_is_every_entry_in_it(tmp_path):
     also disposes of the rendering fault, because it was the app's ONLY
     ttk.Menubutton and the dark theme styles no TMenubutton.
 
-    The action row is Menu settings... and the four real actions, and every
+    The action row is Menu settings... and the real actions, and every
     one of the six has somewhere honest to be instead."""
     root, panel = _panel()
     try:
@@ -3959,13 +3997,15 @@ def test_the_more_menu_is_gone_and_so_is_every_entry_in_it(tmp_path):
         for gone in ("_more_entry", "_back_to_card", "_bypass_existing",
                      "bypass_card", "_check_size", "_prepare_media"):
             assert not hasattr(panel, gone), gone
-        # THE ROW: one button on the left, four on the right, and the label
-        # that expands between them.  Nothing else, and no Menubutton.
+        # THE ROW: Menu settings on the left, one green writing button and
+        # Run in emulator on the right, and the label that expands between
+        # them.  The three writing buttons (Apply / Build / Flash) are one
+        # 'Build / flash card\u2026' now.  Nothing else, and no Menubutton.
         kids = [w.cget("text") for w in panel._action_row.winfo_children()
                 if w.winfo_class() == "TButton"]
         assert sorted(kids) == sorted([
-            "Menu settings\u2026", "Apply to card", "Build & verify",
-            "Flash to SD card\u2026", "Run in emulator"])
+            "Menu settings\u2026", "Build / flash card\u2026",
+            "Run in emulator"])
         assert all(w.winfo_class() != "TMenubutton"
                    for w in panel._action_row.winfo_children())
         # 1+2. Check size and Prepare media: the tab decides, not the user.
@@ -4172,7 +4212,7 @@ def test_new_card_clears_the_form_and_leaves_editing_mode(tmp_path):
         # The line under the buttons never goes blank any more: it is where
         # the mode is said now that the row has one control instead of two.
         assert panel._edit_lbl.cget("text") == multiboot_tab.EMPTY_PATH_TEXT
-        assert str(panel._apply_btn.cget("state")) == "disabled"
+        assert not _apply_live(panel)
         assert not panel._can_read
         assert panel._pv_cache == {} and panel._pv_photo is None
         assert panel._table.count() == 0
@@ -4229,7 +4269,7 @@ def test_the_whole_tab_fits_a_1024x768_desktop(tmp_path):
         # too: it is the widget the source row is packed to let shrink.
         for btn in (panel._out_entry, panel._browse_btn,
                     panel._new_btn, panel._about_badge,
-                    panel._apply_btn, panel._build_btn, panel._flash_btn,
+                    panel._buildflash_btn,
                     panel._emu_btn, panel._menu_btn,
                     panel._play_chk):
             assert btn.winfo_ismapped(), str(btn)
@@ -4325,7 +4365,7 @@ def test_load_card_runs_inspect_and_fills_every_field(tmp_path, monkeypatch):
             "attract.mov @21s + attract video @20s 2s 8fps", "none"]
         assert multiboot_tab.cell_anim(panel.form().images[1]) == \
             "auto @20s 2s 8fps"
-        assert str(panel._apply_btn.cget("state")) == "normal"
+        assert _apply_live(panel)
         assert "no changes yet" in panel._edit_lbl.cget("text")
     finally:
         root.destroy()
@@ -4354,7 +4394,7 @@ def test_a_refused_inspect_says_why_and_leaves_the_form_alone(tmp_path,
         assert [r.path for r in panel.form().images] == \
             [r.path for r in before.images]
         assert panel._out_var.get() == before.out
-        assert str(panel._apply_btn.cget("state")) == "disabled"
+        assert not _apply_live(panel)
         # ...and the row is not claiming to be editing anything either: the
         # verb only becomes 'Reload card' once a card really is in the form.
         # ...and what the tool said is in the pane either way: a quiet step
@@ -4373,14 +4413,14 @@ def test_the_busy_guard_covers_a_load_and_an_apply(tmp_path, monkeypatch):
         # _can_read is about the PATH, not about whether a run is in
         # flight; the guard that used to grey a button now lives in the
         # methods themselves, which is what this test is really about.
-        assert str(panel._apply_btn.cget("state")) == "disabled"
+        assert not _apply_live(panel)
         assert panel._load_or_reload() is False
         assert panel.load_card(card) is False
         assert "already in progress" in panel._hint.cget("text")
         assert panel.apply_to_card() is False
         assert "already in progress" in panel._hint.cget("text")
         panel._set_busy(False)
-        assert str(panel._apply_btn.cget("state")) == "normal"
+        assert _apply_live(panel)
     finally:
         root.destroy()
 
@@ -4398,7 +4438,7 @@ def test_a_menu_change_is_injected_into_the_loaded_card(tmp_path):
         panel._timeout_var.set("8")
         text = panel._edit_lbl.cget("text")
         assert "Apply to card: 2 menu changes (subtitle, countdown)" in text
-        assert str(panel._apply_btn.cget("state")) == "normal"
+        assert _apply_live(panel)
         assert panel.apply_to_card() is True
         labels = [label for label, _ in calls[0]]
         assert labels == ["inject", "inspect", INSPECT_JSON]
@@ -4410,6 +4450,75 @@ def test_a_menu_change_is_injected_into_the_loaded_card(tmp_path):
         assert words[words.index("--media-dir") + 1] == multiboot_tab.wsl(
             media)
         assert "Writing the menu into" in panel._hint.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_the_build_flash_modal_updates_in_place_not_a_fresh_merge(tmp_path):
+    """David, 2026-09-03: a small text or sound change to a built card must
+    be performant - "the heavy lifting of merging the images together needs
+    to be one-and-done".  The consolidated Build / flash write is an inject
+    (Apply) whenever the image list is unchanged, so no image is copied; an
+    image-list change is the only thing that turns it into a fresh build."""
+    root, panel, card, media = _loaded(tmp_path)
+    try:
+        # a loaded card, untouched: the write would UPDATE in place, and is
+        # pressable - but is not pre-ticked, there being nothing to write
+        plan = panel._write_plan()
+        assert plan["action"] == "apply" and plan["can_write"]
+        assert plan["default_write"] is False
+        # a text correction: still the in-place update, now worth doing
+        panel._table.select(1)
+        root.update()
+        panel._ed_sub.set("1987 cartoon, upscaled")
+        plan = panel._write_plan()
+        assert plan["action"] == "apply" and plan["default_write"]
+        assert "not a fresh merge" in plan["write_detail"]
+        # ...and the modal's write really is an inject, never a copy
+        calls = _recorder(panel)
+        panel._do_build_flash(True, False)
+        assert [label for label, _ in calls[0]] == [
+            "inject", "inspect", INSPECT_JSON]
+        # only an image-list change makes it a full build
+        panel.add_image(_images(tmp_path, 1)[0])
+        assert panel._write_plan()["action"] == "build"
+    finally:
+        root.destroy()
+
+
+def test_the_build_flash_modal_can_build_then_flash(tmp_path):
+    """Tick both and it writes the card, then flashes what it wrote; a
+    write that fails never reaches an SD card; and flash-only hands the
+    finished card straight to the flash flow."""
+    root, panel, card, media = _loaded(tmp_path)
+    flashed = []
+    panel._flash_fn = lambda p: flashed.append(p)
+    try:
+        # a recorder that reports success, so the after-hook (flash) runs
+        def ok(cmds, on_step=None, on_done=None, quiet=(), preview=False):
+            if on_done is not None:
+                on_done(0, None, {})
+            return True
+        panel._run_commands = ok
+        panel._table.select(1)
+        root.update()
+        panel._ed_sub.set("x")
+        panel._do_build_flash(True, True)          # update, then flash
+        assert flashed == [card]
+        flashed.clear()
+        panel._do_build_flash(False, True)         # flash the card as-is
+        assert flashed == [card]
+        # a write that FAILS does not flash
+        flashed.clear()
+
+        def fail(cmds, on_step=None, on_done=None, quiet=(), preview=False):
+            if on_done is not None:
+                on_done(2, "inject", {})
+            return True
+        panel._run_commands = fail
+        panel._ed_sub.set("y")
+        panel._do_build_flash(True, True)
+        assert flashed == []
     finally:
         root.destroy()
 
@@ -4479,7 +4588,7 @@ def test_an_image_list_change_refuses_the_apply(tmp_path, how):
         text = panel._edit_lbl.cget("text")
         assert text.startswith("The image list changed")
         assert "Build & verify writes a new card" in text
-        assert str(panel._apply_btn.cget("state")) == "disabled"
+        assert not _apply_live(panel)
         assert panel.apply_to_card() is False
         assert calls == []
         assert "image list changed" in panel._hint.cget("text")
@@ -4952,13 +5061,13 @@ def test_the_path_box_is_the_cards_identity(tmp_path):
     root, panel, card, _media = _loaded(tmp_path)
     calls = _recorder(panel)
     try:
-        assert str(panel._apply_btn.cget("state")) == "normal"
+        assert _apply_live(panel)
         panel._out_var.set(str(tmp_path / "multi" / "copy.multi.raw"))
         # ...and now the tab stops claiming to be editing it
-        assert str(panel._apply_btn.cget("state")) == "disabled"
+        assert not _apply_live(panel)
         assert "no longer names" in panel._edit_lbl.cget("text")
         assert "type that path back" in panel._edit_lbl.cget("text")
-        assert str(panel._build_btn.cget("style")) == "Go.TButton"
+        assert _write_action(panel) == "build"
         # the greying is a claim; this is the guarantee behind it
         assert panel.apply_to_card() is False
         assert calls == []
@@ -4968,7 +5077,7 @@ def test_the_path_box_is_the_cards_identity(tmp_path):
         assert panel._loaded_card == card and panel._loaded_form is not None
         assert len(panel._rows) == 2
         panel._out_var.set(card)                # the way back IS the path
-        assert str(panel._apply_btn.cget("state")) == "normal"
+        assert _apply_live(panel)
         assert "no longer names" not in panel._edit_lbl.cget("text")
     finally:
         root.destroy()
@@ -5062,7 +5171,7 @@ def test_the_form_survives_a_restart(tmp_path):
         # Apply cannot inject a diff computed against a stale one.  One
         # click on the verb earns editing mode back honestly.
         assert panel._loaded_card == "" and panel._loaded_form is None
-        assert str(panel._apply_btn.cget("state")) == "disabled"
+        assert not _apply_live(panel)
         # THE SOUND STAYS OFF.  This app is used in the room with a machine
         # that is running; "he left it on once" is not a reason to make a
         # noise on the next launch.
@@ -5342,7 +5451,7 @@ def test_browse_asks_before_it_touches_the_box(tmp_path, monkeypatch):
         assert panel._browse_card() is False
         assert reads == []
         assert panel._out_var.get() == card     # ...and the box is untouched
-        assert str(panel._apply_btn.cget("state")) == "normal"
+        assert _apply_live(panel)
         # ...and 'yes' does both, in that order
         monkeypatch.setattr(multiboot_tab.messagebox, "askyesno",
                             lambda *a, **kw: True)
@@ -5435,10 +5544,10 @@ def test_two_spellings_of_the_loaded_card_are_one_card(tmp_path):
         panel._out_var.set(link)
         panel._probe_done(link, {"kind": "file", "loaded": False})
         assert "no longer names" in panel._edit_lbl.cget("text")
-        assert str(panel._apply_btn.cget("state")) == "disabled"
+        assert not _apply_live(panel)
         panel._probe_done(link, {"kind": "file", "loaded": True})
         assert "Editing card.multi.raw" in panel._edit_lbl.cget("text")
-        assert str(panel._apply_btn.cget("state")) == "normal"
+        assert _apply_live(panel)
         # ...and the worker really does answer that question
         facts = multiboot_tab.probe_card_path(card, card)
         assert facts["loaded"] is True

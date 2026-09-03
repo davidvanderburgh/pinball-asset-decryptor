@@ -2881,6 +2881,98 @@ class MenuSettingsDialog(_Modal):
         g3.columnconfigure(1, weight=1)
 
 
+class BuildFlashDialog(_Modal):
+    """'Build / flash card…': the one modal that writes the card, and then -
+    if you want - flashes it onto an SD card, in the shape the Write tab's
+    own Build / flash dialog has (David: "the build and verify also can
+    handle flashing... update that to be a modal... mimic what we did in
+    the [Write] tab").
+
+    It folds the two writing buttons the tab used to carry - 'Build &
+    verify' and 'Apply to card' - into ONE tick whose words the tab
+    decides: a loaded card that only needs its menu rewritten APPLIES (an
+    inject, seconds); anything else BUILDS a fresh card (every image copied,
+    minutes).  The person no longer has to know which of those two words
+    their change is (David: "how does that differ?  consolidate").
+
+    The flash tick is live only once there is a finished card to write -
+    either one already on disk, or the one this dialog is about to build -
+    and hands off to the app's own flash flow (the same one the Write tab
+    uses), so the SD-card picker and the Administrator prompt have exactly
+    one definition."""
+
+    def __init__(self, panel):
+        _Modal.__init__(self, panel._parent, "Build / flash card",
+                        panel._theme_fn, on_ok=self._start,
+                        on_cancel=panel._forget_build_flash)
+        self._panel = panel
+        plan = panel._write_plan()
+        self._plan = plan
+        b = self.body
+        th = THEMES.get(panel._theme_fn()) or THEMES["dark"]
+
+        self._write_var = tk.BooleanVar(value=bool(plan["default_write"]))
+        self._flash_var = tk.BooleanVar(value=False)
+
+        write = ttk.LabelFrame(b, text="Write the card")
+        write.pack(fill=tk.X)
+        gw = ttk.Frame(write)
+        gw.pack(fill=tk.X, padx=8, pady=6)
+        self._write_chk = ttk.Checkbutton(
+            gw, text=plan["write_label"], variable=self._write_var,
+            command=self._sync)
+        self._write_chk.pack(anchor=tk.W)
+        if not plan["can_write"]:
+            self._write_chk.configure(state=tk.DISABLED)
+        ttk.Label(gw, foreground=th["gray"], wraplength=460,
+                  justify=tk.LEFT, text=plan["write_detail"]).pack(
+            anchor=tk.W, padx=(20, 0), pady=(2, 0))
+
+        flash = ttk.LabelFrame(b, text="Flash to an SD card")
+        flash.pack(fill=tk.X, pady=(10, 0))
+        gf = ttk.Frame(flash)
+        gf.pack(fill=tk.X, padx=8, pady=6)
+        self._flash_chk = ttk.Checkbutton(
+            gf, text="Write the card onto an SD card", variable=self._flash_var,
+            command=self._sync)
+        self._flash_chk.pack(anchor=tk.W)
+        ttk.Label(gf, foreground=th["gray"], wraplength=460, justify=tk.LEFT,
+                  text="Flashing erases and replaces the whole SD card, and "
+                       "needs Administrator (approved when the write starts). "
+                       "Tick this with 'Write the card' above to build and "
+                       "flash in one step.").pack(
+            anchor=tk.W, padx=(20, 0), pady=(2, 0))
+        if not (plan["can_write"] or plan["have_card"]):
+            self._flash_chk.configure(state=tk.DISABLED)
+            ttk.Label(gf, foreground=th["gray"], wraplength=460,
+                      justify=tk.LEFT,
+                      text="There is no finished card to flash yet - build "
+                           "one first.").pack(anchor=tk.W, padx=(20, 0))
+
+    def show(self):
+        _Modal.show(self)
+        # The green button says what it will do, and is dead until at least
+        # one box is ticked.
+        try:
+            self.ok_btn.configure(text="Start")
+        except tk.TclError:                             # pragma: no cover
+            pass
+        self._sync()
+        return self
+
+    def _sync(self, *_a):
+        """The Start button is live only when there is something to do."""
+        on = bool(self._write_var.get() or self._flash_var.get())
+        try:
+            self.ok_btn.configure(state=tk.NORMAL if on else tk.DISABLED)
+        except tk.TclError:                             # pragma: no cover
+            pass
+
+    def _start(self):
+        self._panel._do_build_flash(bool(self._write_var.get()),
+                                    bool(self._flash_var.get()))
+
+
 # ---------------------------------------------------------------------------
 # the panel
 # ---------------------------------------------------------------------------
@@ -3053,6 +3145,7 @@ class MultibootPanel:
         #: dialog is open or not (and the tests can drive either).
         self._image_dialog = None
         self._menu_dialog = None
+        self._buildflash_dialog = None
         self._edit_backup = None        # the row a cancelled edit restores
         self._menu_backup = None
         #: Widgets that live only while a dialog is up: the Edit image…
@@ -3474,10 +3567,6 @@ class MultibootPanel:
         self._browse_btn = ttk.Button(row, text="Browse…", width=10,
                                       command=self._browse_card)
         self._browse_btn.pack(side=tk.RIGHT, padx=(0, 6))
-        # NO ELLIPSIS ON THE VERB: it asks nothing, it acts on the path
-        # already in the box.  The width holds the longer of its two labels
-        # so the row does not twitch when a load turns it into 'Reload
-        # card', and it is never the green one - _primary_button owns that.
         self._out_entry = ttk.Entry(row, textvariable=self._out_var)
         self._out_entry.pack(side=tk.LEFT, fill=tk.X, expand=True,
                              padx=(0, 6))
@@ -3881,9 +3970,17 @@ class MultibootPanel:
     def _build_actions(self, parent, th):
         """THE ONE ACTION BAR - with the source row at the top, the only
         place in the tab a button lives.  Menu settings… on the left with
-        what it holds beside it, and on the right the two that write a card
-        and the two handoffs, the contextual one green.  FOUR ACTIONS AND
-        NOTHING ELSE.
+        what it holds beside it, and on the right ONE green writing button
+        and Run in emulator.  THREE ACTIONS AND NOTHING ELSE.
+
+        'Build / flash card…' is the whole of the writing side now (David:
+        "consolidate to as few buttons as possible... how does [Apply to
+        card] differ [from Build & verify]?").  'Apply to card', 'Build &
+        verify' and 'Flash to SD card…' were three buttons a person had to
+        tell apart; they are one green button and a modal that decides
+        Apply-vs-Build itself and offers the flash in the same place
+        (:class:`BuildFlashDialog`), the shape the Write tab's own Build /
+        flash dialog has.
 
         THE 'MORE ▾' MENU IS GONE, and every one of the six things in it
         with it (David, in dark mode: "the 'more' button looks awful ... it
@@ -3923,16 +4020,16 @@ class MultibootPanel:
         self._emu_btn = ttk.Button(row, text="Run in emulator", width=16,
                                    command=self._run_emulator)
         self._emu_btn.pack(side=tk.RIGHT, padx=(0, 6))
-        self._flash_btn = ttk.Button(row, text="Flash to SD card…", width=18,
-                                     command=self._flash)
-        self._flash_btn.pack(side=tk.RIGHT, padx=(0, 6))
-        self._build_btn = ttk.Button(row, text="Build & verify", width=15,
-                                     command=self._build_card,
-                                     style="Go.TButton")
-        self._build_btn.pack(side=tk.RIGHT, padx=(0, 6))
-        self._apply_btn = ttk.Button(row, text="Apply to card", width=14,
-                                     command=self.apply_to_card)
-        self._apply_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        # ONE writing button, always green, opening the Build / flash modal
+        # (David: "consolidate to as few buttons as possible... build and
+        # verify also can handle flashing... mimic what we did in the [Write]
+        # tab").  It replaces 'Apply to card', 'Build & verify' AND 'Flash to
+        # SD card…': the dialog decides Apply-vs-Build for the person, and
+        # can flash in the same step.
+        self._buildflash_btn = ttk.Button(
+            row, text="Build / flash card…", width=18,
+            command=self._open_build_flash, style="Go.TButton")
+        self._buildflash_btn.pack(side=tk.RIGHT, padx=(0, 6))
         # What Menu settings… holds, in the space between the two groups -
         # packed LAST and expanding, because this app unmaps the last
         # widget of a row it cannot fit and the thing that gives way first
@@ -3943,7 +4040,7 @@ class MultibootPanel:
                             padx=(10, 10))
         self._menu_tip = _Tooltip(self._menu_lbl, "", self._theme_fn)
         self._action_btns = [
-            self._apply_btn, self._build_btn, self._flash_btn, self._emu_btn,
+            self._buildflash_btn, self._emu_btn,
             self._menu_btn, self._browse_btn, self._new_btn]
 
     def _build_status(self, parent, th):
@@ -5538,7 +5635,7 @@ class MultibootPanel:
         if changed:
             self._refresh_tree(select=self._selected())
 
-    def _build_card(self):
+    def _build_card(self, after=None):
         form = self.form()
         # A LOADED CARD IS NOT AN OUTPUT.  After a load the path box holds
         # the card that was read - it IS that card's identity, which is how
@@ -5582,10 +5679,12 @@ class MultibootPanel:
                 self._ok("Card built and verified: %s%s" % (
                     form.out, "" if form.media_dir else
                     " (no prepared media - text-only menu)"))
+                if after is not None:
+                    after()
             else:
                 self._error("%s failed (exit %d) - see the tool output."
                             % (failed or "the build", rc))
-        self._run_commands(cmds, on_step=self._plan_step, on_done=done)
+        return self._run_commands(cmds, on_step=self._plan_step, on_done=done)
 
     def _confirm_overwrite(self, path):
         """The one gate between Build & verify and a card that is already
@@ -5870,7 +5969,7 @@ class MultibootPanel:
             errs.append("The default image must be one of 0..%d." % (n - 1))
         return errs
 
-    def apply_to_card(self):
+    def apply_to_card(self, after=None):
         """'Apply to card': the menu changes into the loaded card with an
         inject (plus a prepare when a media field changed, plus the bypass
         when it is ticked and a tree is still armed), then a last inspect
@@ -5955,6 +6054,8 @@ class MultibootPanel:
                 ", ".join(menu) if menu else "no menu change",
                 " - flash it again" if bypass else ""))
             self._update_edit_status()
+            if after is not None:
+                after()
         return self._run_commands(cmds, on_step=step, on_done=done,
                                   quiet=(INSPECT_JSON,))
 
@@ -5971,14 +6072,13 @@ class MultibootPanel:
         states them instead, and costs no pixels because the line was
         already there and empty in every state but editing.
 
-        It decides three things besides the words: which of the two writing
-        buttons is THE action (Apply while a card is loaded and an inject
-        can carry the changes, Build & verify otherwise), whether Apply may
-        be pressed at all, and what the row's verb says and whether it is
-        live."""
+        It also settles what the row's verb says and whether it is live.
+        The writing side is one green button now (Build / flash card…) whose
+        modal decides Apply-vs-Build for itself (:meth:`_write_plan`), so
+        this no longer greens or greys a pair - it only writes the sentence
+        and keeps ``_can_read`` / ``_row_kind`` current for the path box."""
         lbl = getattr(self, "_edit_lbl", None)
-        btn = getattr(self, "_apply_btn", None)
-        if lbl is None or btn is None:
+        if lbl is None:
             return
         # FIRST, because the size sentence is half of the line built below
         # and this is what decides whether it is still true: asking after
@@ -6008,29 +6108,121 @@ class MultibootPanel:
         line = "  ·  ".join(p for p in (text, self._plan_text) if p)
         try:
             lbl.configure(text=self._status_line(line), foreground=th[tone])
-            # Apply writes into ``_loaded_card``, so it is live only while
-            # the box still NAMES that card: the invariant, not a courtesy.
-            btn.configure(state=tk.DISABLED
-                          if (rebuild or self._busy or not editing)
-                          else tk.NORMAL)
         except tk.TclError:
             pass
         self._can_read = bool(can_read)
         #: What the probe last said about the path, so <Return> can tell
         #: "there is nothing there" from "the answer has not come back".
         self._row_kind = kind
-        self._primary_button(build=bool(rebuild) or not editing)
 
-    def _primary_button(self, build):
-        """Exactly one green button: the one that would actually be pressed."""
-        for btn, on in ((getattr(self, "_build_btn", None), build),
-                        (getattr(self, "_apply_btn", None), not build)):
-            if btn is None:
-                continue
-            try:
-                btn.configure(style="Go.TButton" if on else "TButton")
-            except tk.TclError:
-                pass
+    def _write_plan(self):
+        """What 'Build / flash card…' would do, for the dialog and its own
+        Start button: a dict with the checkbox's LABEL and DETAIL, whether
+        that write has anything to do (``can_write``), the ``action`` it is
+        ('apply' / 'build'), and whether a finished card is already on disk
+        to flash (``have_card``).
+
+        This is the Apply-vs-Build decision, in ONE place - the same one the
+        consequence line describes: a loaded card the box still names, whose
+        only changes an inject can carry, APPLIES; anything else BUILDS."""
+        form = self.form()
+        field = self._out_var.get().strip().strip('"')
+        menu, rebuild = [], []
+        if self._loaded_card and self._loaded_form is not None:
+            menu, rebuild = diff_forms(self._loaded_form, form)
+        # EDITING is decided the SAME WAY the consequence line decides it
+        # (card_path_state, off the probe's facts), not by a bare string
+        # compare: a junction or case spelling of the loaded card the probe
+        # resolved is still that card, and Apply must stay live on it.
+        kind, _t, _tone, _cr = card_path_state(
+            field, self._facts_now(field), self._rows, self._loaded_card,
+            menu, rebuild)
+        editing = kind == "loaded"
+        have_card = bool(field and os.path.isfile(field))
+        if editing and not rebuild:
+            name = os.path.basename(self._loaded_card)
+            # THE FAST, INCREMENTAL UPDATE (David, 2026-09-03: "a small text
+            # correction or different sound selection... the update needs to
+            # be performant. the heavy lifting of merging the images together
+            # needs to be one-and-done").  The image list is unchanged, so
+            # the ~7 GB-per-image merge is NOT redone: only the menu is
+            # rewritten in place, and only the changed media re-rendered -
+            # seconds, not the minutes a fresh build costs.
+            #
+            # ``can_write`` is true whenever a card is loaded and the box
+            # still names it (re-writing the same values is a harmless
+            # second inject, and is how the tab has always let Apply be
+            # pressed); ``default_write`` pre-ticks it only when something
+            # actually changed, so opening the modal on an untouched card
+            # does not offer to re-write it for nothing.
+            if menu:
+                detail = ("%s - the images are untouched, so only the menu "
+                          "is rewritten (and any changed sound re-rendered): "
+                          "seconds, not a fresh merge of every image."
+                          % "; ".join(menu))
+            else:
+                detail = ("No change pending - ticking this re-writes the "
+                          "same menu into %s (the images are never touched)."
+                          % name)
+            return {
+                "action": "apply",
+                "can_write": not self._busy,
+                "default_write": bool(menu),
+                "have_card": have_card,
+                "out": field,
+                "write_label": "Update the loaded card in place",
+                "write_detail": detail,
+            }
+        can = bool(self._rows and field) and not self._busy
+        if can:
+            detail = ("Writes a new card at %s - every image is copied "
+                      "(minutes)." % field)
+        elif not self._rows:
+            detail = "Add at least one image first."
+        else:
+            detail = "Set a card image path first."
+        label = "Build a fresh card"
+        if field:
+            label += " at %s" % os.path.basename(field)
+        return {
+            "action": "build",
+            "can_write": can,
+            "default_write": can,
+            "have_card": have_card,
+            "out": field,
+            "write_label": label,
+            "write_detail": detail,
+        }
+
+    def _open_build_flash(self):
+        """Open the Build / flash modal (:class:`BuildFlashDialog`)."""
+        if self._buildflash_dialog is not None:
+            return self._buildflash_dialog
+        if self._busy:
+            self._error("Wait for the current run to finish first.")
+            return None
+        self._buildflash_dialog = BuildFlashDialog(self)
+        return self._buildflash_dialog.show()
+
+    def _forget_build_flash(self):
+        self._buildflash_dialog = None
+
+    def _do_build_flash(self, do_write, do_flash):
+        """The modal's Start: write the card (apply or build, whichever the
+        plan says), then - if asked, and only on success - flash it.
+
+        A flash asked for WITHOUT a write goes straight to the existing
+        card; a flash asked for WITH one is chained through the write's
+        ``after`` hook, so a failed build never reaches an SD card."""
+        self._forget_build_flash()
+        after = (lambda: self._flash()) if do_flash else None
+        if do_write:
+            if self._write_plan()["action"] == "apply":
+                self.apply_to_card(after=after)
+            else:
+                self._build_card(after=after)
+        elif do_flash:
+            self._flash()
 
     # ------------------------------------------------------------------
     # the preview
@@ -7476,14 +7668,15 @@ class MultibootPanel:
                 pass
         if not busy:
             # Greyed for good, not just for the run: a panel built without
-            # the app has nowhere to hand the card.
-            for fn, btn in ((self._flash_fn, getattr(self, "_flash_btn", None)),
-                            (self._emulate_fn, getattr(self, "_emu_btn", None))):
-                if fn is None and btn is not None:
-                    try:
-                        btn.configure(state=tk.DISABLED)
-                    except tk.TclError:
-                        pass
+            # the app has nowhere to run the card.  (Flashing lives in the
+            # Build / flash modal now, whose flash tick refuses on its own
+            # when _flash_fn is None, so there is no flash BUTTON to grey.)
+            btn = getattr(self, "_emu_btn", None)
+            if self._emulate_fn is None and btn is not None:
+                try:
+                    btn.configure(state=tk.DISABLED)
+                except tk.TclError:
+                    pass
         if not busy:
             # THE RUN MAY HAVE MOVED THE DISK UNDER THE ROW.  A build writes
             # the card the row was calling missing, an apply changes it, a

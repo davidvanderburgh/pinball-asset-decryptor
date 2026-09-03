@@ -451,9 +451,7 @@ def measure(label, collect=False):
     for btn, name in ((panel._out_entry, "Multi-boot card image"),
                       (panel._browse_btn, "Browse…"),
                       (panel._new_btn, "New card"),
-                      (panel._apply_btn, "Apply to card"),
-                      (panel._build_btn, "Build & verify"),
-                      (panel._flash_btn, "Flash to SD card…"),
+                      (panel._buildflash_btn, "Build / flash card…"),
                       (panel._emu_btn, "Run in emulator"),
                       (panel._menu_btn, "Menu settings…")):
         if not btn.winfo_ismapped():
@@ -654,12 +652,14 @@ def s_load():
     root.update_idletasks()
     log("editing %s" % panel._loaded_card)
     log("status: %r" % panel._edit_lbl.cget("text"))
-    log("Apply to card: %s" % panel._apply_btn.cget("state"))
+    plan = panel._write_plan()
+    log("write plan: action=%s can_write=%s -> %r"
+        % (plan["action"], plan["can_write"], plan["write_label"]))
     # The row has no verb button any more (Browse… reads a card it picks,
     # and <Return> reads a typed path), so editing mode shows in the
-    # sentence above and in Apply being live.
-    log("can_read=%s  Apply mapped=%s"
-        % (panel._can_read, panel._apply_btn.winfo_ismapped()))
+    # sentence above and in the write plan the Build / flash modal would use.
+    log("can_read=%s  Build/flash mapped=%s"
+        % (panel._can_read, panel._buildflash_btn.winfo_ismapped()))
     log("output: %s" % panel._out_var.get())
     log("hint: %r" % panel._hint.cget("text"))
     log("menu summary: %r" % panel._menu_lbl.cget("text"))
@@ -791,7 +791,9 @@ def s_dialogs():
     for name, opener in (("multi-boot-edit-image.png",
                           lambda: panel.edit_image(1)),
                          ("multi-boot-menu-settings.png",
-                          panel.open_menu_settings)):
+                          panel.open_menu_settings),
+                         ("multi-boot-build-flash.png",
+                          panel._open_build_flash)):
         dlg = opener()
         if dlg is None:
             log("could not open %s" % name)

@@ -359,7 +359,12 @@ def parse_anim_spec(spec, start=0.0, seconds=3.0, fps=10):
         head, tail = spec.split("@", 1)          # a keyword's '@' is always the separator
     else:
         head, tail = _split_at(spec)
-    p = {"start": float(start), "seconds": float(seconds), "fps": int(fps)}
+    # ``*_explicit`` = the spec pinned this number, so keep it; otherwise the
+    # length and rate are free to follow the source (native fps, see
+    # _prepare_anim).  The app sends a bare 'auto' / '<path>' now (the
+    # Start/Length/FPS controls are gone), so the common case is not explicit.
+    p = {"start": float(start), "seconds": float(seconds), "fps": int(fps),
+         "seconds_explicit": False, "fps_explicit": False}
     if tail is not None:
         m = ANIM_PARAMS_RE.match(tail)
         if not m:
@@ -367,8 +372,10 @@ def parse_anim_spec(spec, start=0.0, seconds=3.0, fps=10):
         p["start"] = float(m.group(1))
         if m.group(2):
             p["seconds"] = float(m.group(2))
+            p["seconds_explicit"] = True
         if m.group(3):
             p["fps"] = int(m.group(3))
+            p["fps_explicit"] = True
     if p["seconds"] <= 0 or p["fps"] <= 0:
         raise Refused("animation %r: seconds and fps must be positive" % (spec,))
     if p["start"] < 0:
@@ -634,6 +641,14 @@ class GifPlan(object):
 GIF_MIN_W = 256                 # the smallest panel the menu draws (4+ images)
 GIF_MIN_SECONDS = 1.5
 GIF_MIN_FPS = 5
+#: The fastest a boot-menu loop is rendered when it follows the SOURCE's own
+#: frame rate (David, 2026-09-03: "10fps sucks... make it the original fps").
+#: 30 is smooth and the selector honours it (its DELAY_MIN is 20 ms = 50 fps);
+#: a GIF's centisecond delays alias above this anyway.  The whole loop still
+#: fits GIF_MAX_FRAMES, so at the native rate it is SHORT (30 frames / 30 fps
+#: = 1 s) rather than long and choppy - a smooth second beats a stuttering
+#: thirteen.
+GIF_MAX_NATIVE_FPS = 30
 
 
 def _even(x):
@@ -663,6 +678,22 @@ def gif_first_plan(size, seconds=3.0, fps=10):
         fps = max(1, int(GIF_MAX_FRAMES // seconds))
         if round(seconds * fps) > GIF_MAX_FRAMES:
             seconds = GIF_MAX_FRAMES / float(fps)
+    return GifPlan(w, h, seconds, fps)
+
+
+def gif_native_plan(size, fps, max_seconds=3.0):
+    """A plan at the SOURCE's own frame rate, its length cut so the whole
+    thing still fits GIF_MAX_FRAMES - length first, rate KEPT.  The opposite
+    of :func:`gif_first_plan`, which throttles the rate to hold the length
+    (that is what turned a 13 s clip into 2 fps).  David: "10fps sucks...
+    make it the original fps"; a short smooth loop is the trade."""
+    w, h = size
+    if w > GIF_MAX_W or h > GIF_MAX_H:
+        f = min(GIF_MAX_W / float(w), GIF_MAX_H / float(h))
+        w, h = _even(w * f), _even(h * f)
+    fps = max(GIF_MIN_FPS, min(GIF_MAX_NATIVE_FPS, int(round(fps or 0)) or GIF_MIN_FPS))
+    seconds = min(float(max_seconds), GIF_MAX_FRAMES / float(fps))
+    seconds = max(1.0 / fps, seconds)       # at least one frame
     return GifPlan(w, h, seconds, fps)
 
 
@@ -968,6 +999,30 @@ def normalise_wav(src, out, max_seconds=None, fade_ms=0):
     return write_wav_s16(out, L, R)
 
 
+def probe_fps(path, default=None):
+    """The video's native frame rate (frames per second), or *default* when
+    it cannot be read (no ffprobe, an audio-only or odd file)."""
+    fp = find_ffmpeg("ffprobe")
+    if not fp:
+        return default
+    r = subprocess.run(
+        [fp, "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", path],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    text = r.stdout.decode("utf-8", "replace").strip().splitlines()
+    if not text:
+        return default
+    num, _, den = text[0].strip().partition("/")
+    try:
+        n = float(num)
+        d = float(den) if den else 1.0
+    except ValueError:
+        return default
+    if d <= 0 or n <= 0:
+        return default
+    return n / d
+
+
 def _duration_of(path):
     try:
         return wav_info(path)["seconds"]
@@ -1081,11 +1136,78 @@ def find_clip(reader, name):
     raise Refused("no video named %r on this card (%d videos, %d scenes)" % (name, len(vids), len(radiums)))
 
 
+#: The scene names a Stern game gives its power-up loop, best first.  Not every
+#: title uses 'attract_background' (Godzilla does not - David, 2026-09-03: "the
+#: game's own attract video errors out"), so :func:`find_attract_clip` tries
+#: each, then any title CONTAINING one of these words, before giving up.
+ATTRACT_NAMES = ("attract_background", "attract", "attractloop", "attract_loop",
+                 "background_attract", "intro")
+
+
+def find_attract_clip(reader):
+    """The card's own attract-loop video, found by trying the known names and
+    then a looser contains-match - or a Refused naming what IS on the card.
+
+    A single hard-coded name does not travel between titles; the whole point
+    of 'the game's own attract video' is that it works without the operator
+    knowing what Stern called it."""
+    from pinball_decryptor.plugins.stern import engine
+    vids = []
+    radiums = {}
+    for path, _ino, node in reader.iter_regular_files(min_size=1):
+        if path.endswith("/scene.radium"):
+            radiums[path[:-len("/scene.radium")]] = node
+        elif node["size"] >= 0x1000:
+            b = reader.peek(node, 12)
+            if len(b) >= 12 and b[4:8] == b"ftyp":
+                vids.append((path, node))
+    titled = []       # (title_lower, path, node), scene-referenced videos only
+    parsed = {}
+    for path, node in vids:
+        if "/scene.assets/" not in path:
+            continue
+        hashdir, ref = path.rsplit("/scene.assets/", 1)
+        rn = radiums.get(hashdir)
+        if rn is None:
+            continue
+        if hashdir not in parsed:
+            try:
+                parsed[hashdir] = (engine._parse_radium(reader.read_file_bytes(rn))
+                                   if rn["size"] <= 0x2000000 else {})
+            except Exception:
+                parsed[hashdir] = {}
+        title = parsed[hashdir].get(ref)
+        if title:
+            titled.append((title.lower(), path, node))
+    for want in ATTRACT_NAMES:                      # an exact name, best first
+        for t, path, node in titled:
+            if t == want:
+                return path, node
+    for want in ATTRACT_NAMES:                      # then a looser contains
+        for t, path, node in titled:
+            if want in t:
+                return path, node
+    sample = ", ".join(sorted({t for t, _p, _n in titled})[:8]) or "none named"
+    raise Refused("no attract-loop video on this card (%d videos, %d scenes; "
+                  "named: %s)" % (len(vids), len(radiums), sample))
+
+
 def extract_clip(card, name, out):
     ci = open_card(card)
     part = games_part(ci)
     reader = ci.reader(part)
     path, node = find_clip(reader, name)
+    reader.extract_file(node, out)
+    return path, node["size"]
+
+
+def extract_attract_clip(card, out):
+    """The card's own attract-loop video (:func:`find_attract_clip`), for
+    ``--anim N=auto`` - it does not know Stern's name for it."""
+    ci = open_card(card)
+    part = games_part(ci)
+    reader = ci.reader(part)
+    path, node = find_attract_clip(reader)
     reader.extract_file(node, out)
     return path, node["size"]
 
@@ -1535,33 +1657,61 @@ def _prepare_anim(i, img, spec, size, out, work, log=say):
         return None
     target = os.path.join(out, "anim%d.gif" % i)
     name = os.path.basename(target)
-    plan = gif_first_plan(size, spec["seconds"], spec["fps"])
     if spec["kind"] == "auto":
-        src_path, clip = img, ATTRACT_CLIP
+        src_path, clip = img, "attract"
         if not os.path.isfile(src_path):
             raise Refused("card image %s does not exist" % src_path)
     else:
         src_path, clip = split_source(spec["source"])
-        if clip == "attract":
-            clip = ATTRACT_CLIP
+    # The cache key is the SPEC's intent, not the resolved numbers: a length
+    # or rate left free reads 'native', so a set rendered before the
+    # native-fps change (which stored fps=10) re-renders, and a re-run with
+    # the same source does not.
+    fps_key = int(spec["fps"]) if spec["fps_explicit"] else "native"
+    secs_key = float(spec["seconds"]) if spec["seconds_explicit"] else "native"
     stamp = source_stamp(src_path)
-    params = {"kind": spec["kind"], "clip": clip, "size": list(size), "start": float(spec["start"]),
-              "seconds": float(spec["seconds"]), "fps": int(spec["fps"])}
+    params = {"kind": spec["kind"], "clip": clip, "size": list(size),
+              "start": float(spec["start"]), "seconds": secs_key, "fps": fps_key}
     if is_cached(target, stamp, params):
         log("  %s: cached (%s)" % (name, spec["spec"] if spec["kind"] != "auto"
-                                   else "%s, the %s clip of %s" % (spec["spec"], clip, os.path.basename(img))))
+                                   else "%s, the attract clip of %s" % (spec["spec"], os.path.basename(img))))
         return name
     drop_sidecar(target)
     if clip:
         mov = os.path.join(work, "clip%d.mov" % i)
-        path, nbytes = extract_clip(src_path, clip, mov)
+        try:
+            if spec["kind"] == "auto":
+                path, nbytes = extract_attract_clip(src_path, mov)
+            else:
+                path, nbytes = extract_clip(src_path, ATTRACT_CLIP, mov)
+        except Refused as exc:
+            # AUTO DEGRADES, it does not crash (David: "the game's own
+            # attract video errors out").  Not every card has a clip the
+            # tool can name; when it has none, the image keeps its still and
+            # simply does not animate, said in words.  An EXPLICIT
+            # '<card>:attract' still fails - the operator asked for that
+            # card's clip by name.
+            if spec["kind"] == "auto":
+                log("  %s: no attract clip on %s, so no animation - %s"
+                    % (name, os.path.basename(src_path), exc))
+                return None
+            raise
         log("  %s: %s of %s (%s)" % (name, path, os.path.basename(src_path), fmt_bytes(nbytes)))
         src = mov
     else:
         src = src_path
         log("  %s: %s" % (name, src))
-    if spec["start"] or spec["seconds"] != 3.0 or spec["fps"] != 10:
-        log("  %s: from %.2f s, %.2f s at %d fps" % (name, spec["start"], spec["seconds"], spec["fps"]))
+    # THE FRAME RATE FOLLOWS THE SOURCE unless the spec pinned it (David:
+    # "make it the original fps").  Length-first budgeting keeps the loop
+    # smooth and short rather than long and choppy (see gif_native_plan).
+    if spec["fps_explicit"]:
+        plan = gif_first_plan(size, spec["seconds"], spec["fps"])
+    else:
+        native = probe_fps(src, default=spec["fps"])
+        want_secs = spec["seconds"] if spec["seconds_explicit"] else 3.0
+        plan = gif_native_plan(size, native, want_secs)
+        log("  %s: the source's own %.3g fps, a %.3g s loop (%d frames)"
+            % (name, plan.fps, plan.seconds, plan.frames))
     gif_fit(src, target, plan, spec["start"], work, log)
     write_sidecar(target, stamp, params)
     return name

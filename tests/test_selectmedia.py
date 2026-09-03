@@ -130,6 +130,40 @@ def test_gif_first_plan_clamps_size_and_frames(sm):
         sm.gif_first_plan((512, 288), 0, 10)
 
 
+def test_gif_native_plan_keeps_the_rate_and_cuts_the_length(sm):
+    """David: '10fps sucks... make it the original fps'.  The native plan
+    keeps the source's rate and shortens the loop to fit the 30-frame
+    budget - the opposite of gif_first_plan, which throttled the rate."""
+    # a 30 fps source: the rate is kept, the loop cut to 1 s (30 frames)
+    p = sm.gif_native_plan((384, 216), 30, 3.0)
+    assert (p.fps, p.frames) == (30, 30) and abs(p.seconds - 1.0) < 1e-6
+    # 24 fps -> a 1.25 s loop, still 30 frames, still 24 fps (not throttled)
+    q = sm.gif_native_plan((384, 216), 24, 3.0)
+    assert q.fps == 24 and q.frames <= sm.GIF_MAX_FRAMES and q.seconds > 1.0
+    # a slow source keeps its slow rate and the whole 3 s (well under budget)
+    slow = sm.gif_native_plan((384, 216), 8, 3.0)
+    assert slow.fps == 8 and abs(slow.seconds - 3.0) < 1e-6
+    # absurd rates are clamped to the honoured band, never below the floor
+    assert sm.gif_native_plan((384, 216), 240, 3.0).fps == sm.GIF_MAX_NATIVE_FPS
+    assert sm.gif_native_plan((384, 216), 1, 3.0).fps == sm.GIF_MIN_FPS
+    # size is clamped like the other planner
+    big = sm.gif_native_plan((1360, 768), 30, 3.0)
+    assert big.w <= sm.GIF_MAX_W and big.h <= sm.GIF_MAX_H
+
+
+@pytest.mark.skipif(not HAS_FFMPEG, reason="no ffmpeg")
+def test_probe_fps_reads_the_sources_rate(sm, tmp_path):
+    """probe_fps reads the real frame rate; a non-video returns the default."""
+    import subprocess
+    ff = shutil.which("ffmpeg")
+    clip = str(tmp_path / "c.mp4")
+    subprocess.run([ff, "-y", "-v", "error", "-f", "lavfi", "-i",
+                    "testsrc=size=64x64:rate=24:duration=1", clip],
+                   check=True)
+    assert abs(sm.probe_fps(clip, default=0) - 24) < 0.5
+    assert sm.probe_fps(str(tmp_path / "nope.mp4"), default=7) == 7
+
+
 @pytest.mark.parametrize("size", [(512, 288), (384, 216), (256, 144), (500, 200)])
 def test_gif_ladder_is_monotonic_bounded_and_finite(sm, size):
     """Every step strictly lowers cost, never exceeds the caps, ends at the floor."""
@@ -479,15 +513,20 @@ def test_anim_specs_parse_start_length_and_fps(sm):
     --seconds/--fps fill what the spec leaves out; a bare value applies to every image."""
     vals = sm.parse_index_spec(["1=auto@12:2.5:8", "0=/x/clip.mp4@3"], 3, "none")
     a = [sm.parse_anim_spec(v, start=0.0, seconds=3.0, fps=10) for v in vals]
+    # only start was pinned, so seconds/fps are free to follow the source
     assert a[0] == {"kind": "file", "source": "/x/clip.mp4", "start": 3.0, "seconds": 3.0, "fps": 10,
-                    "spec": "/x/clip.mp4@3"}
+                    "seconds_explicit": False, "fps_explicit": False, "spec": "/x/clip.mp4@3"}
+    # all three pinned
     assert a[1] == {"kind": "auto", "source": None, "start": 12.0, "seconds": 2.5, "fps": 8,
-                    "spec": "auto@12:2.5:8"}
+                    "seconds_explicit": True, "fps_explicit": True, "spec": "auto@12:2.5:8"}
     assert a[2] == {"kind": "none", "spec": "none"}
     bare = [sm.parse_anim_spec(v) for v in sm.parse_index_spec(["auto@1"], 2, "none")]
     assert [b["start"] for b in bare] == [1.0, 1.0] and [b["kind"] for b in bare] == ["auto", "auto"]
+    assert all(not b["fps_explicit"] and not b["seconds_explicit"] for b in bare)
+    # a bare 'auto' pins nothing: the defaults fill in, and both are free
     assert sm.parse_anim_spec("auto", 4, 2, 6) == {"kind": "auto", "source": None, "start": 4.0,
-                                                   "seconds": 2.0, "fps": 6, "spec": "auto"}
+                                                   "seconds": 2.0, "fps": 6, "seconds_explicit": False,
+                                                   "fps_explicit": False, "spec": "auto"}
     card = sm.parse_anim_spec("/d/card.raw:attract@20:2:8")
     assert card["kind"] == "file" and card["source"] == "/d/card.raw:attract"
     assert (card["start"], card["seconds"], card["fps"]) == (20.0, 2.0, 8)

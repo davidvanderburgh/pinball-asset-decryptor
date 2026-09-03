@@ -1987,11 +1987,13 @@ def test_a_flipper_press_moves_the_table_and_the_editor_with_it(tmp_path):
 
 
 def test_the_caption_numbers_images_the_way_the_picture_does(tmp_path):
-    """codeselect.c:545 draws every card's label 'IMAGE %d' with i + 1, so
-    the words 20 px under that picture count from one too - the flippers
-    walk IMAGE 1, IMAGE 2, IMAGE 3 and a caption walking Image 0, Image 1,
-    Image 2 under them is the tab's own readout contradicting its frame.
-    The index stays 0-based everywhere a tool reads it."""
+    """The selector counts the images from ONE for a person - its
+    '<  n / N  >' counter is `hl + 1` (codeselect.c) - so the tab's own
+    'Image N' readout counts from one too, or the words under the picture
+    would contradict the frame above them. The index stays 0-based
+    everywhere a tool reads it. (The per-card 'IMAGE %d' caption that used
+    to make this point was dropped 2026-09-03; the counter still carries
+    it.)"""
     root, panel = _panel()
     try:
         for p in _images(tmp_path, 3):

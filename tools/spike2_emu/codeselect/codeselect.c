@@ -533,15 +533,18 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
     /* every line below is drawn through gfx_ellipsize() into cut[]: wrapping
      * splits on spaces, so ONE long word (or a title with none) is still wider
      * than the card, and gfx_fit_px() bottoms out before it shrinks that far */
-    char tlines[2][CONF_STR], lines[4][CONF_STR], buf[64], cut[CONF_STR + 8];
+    char tlines[2][CONF_STR], lines[4][CONF_STR], cut[CONF_STR + 8];
 
+    /* NO 'IMAGE N' CAPTION on the card (David, 2026-09-03: "we don't need the
+     * text 'Image 1', 'Image 2', etc. on each of the images. that is just
+     * taking up extra space").  It named the SLOT, which the '< n / N >'
+     * counter under the row and the titles already say; the row that carried
+     * it is given back to the title and subtitle below. */
     gfx_round_frame(g, x, top, cw, ch, (int)(22 * s), (int)((on ? 8 : 3) * s),
                     on ? TH(L, FRAME_HL) : TH(L, FRAME), on ? TH(L, CARD_HL) : TH(L, CARD));
-    snprintf(buf, sizeof buf, "IMAGE %d", i + 1);
 
     if (!L->art_h) {
-        /* the v1 picture, byte for byte */
-        gfx_text_center(g, f, 22 * s, x + cw / 2, top + (int)(50 * s), buf, on ? TH(L, LABEL_HL) : TH(L, LABEL));
+        /* the v1 picture, byte for byte (bar the dropped caption) */
         tpx = gfx_fit_px(f, im->title, inner, 62 * s, 34 * s);
         if (gfx_text_width(f, tpx, im->title) <= inner) {
             tl = 1;
@@ -570,17 +573,19 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
     /* the art layout: the panel on top, the text packed below it */
     draw_panel(g, L, m, i, slot, on, frame, pinned);
     {
-        int label_y = top + L->pad + L->art_h + (int)(30 * s);
-        gfx_text_center(g, f, 22 * s, x + cw / 2, label_y, buf, on ? TH(L, LABEL_HL) : TH(L, LABEL));
+        /* where the text starts under the art - the 'IMAGE N' caption used
+         * to sit here and the title 58 px below it; with the caption gone
+         * the title moves UP into that row (David: reclaim the space). */
+        int text_top = top + L->pad + L->art_h + (int)(30 * s);
         tpx = gfx_fit_px(f, im->title, inner, 48 * s, 26 * s);
         if (gfx_text_width(f, tpx, im->title) <= inner) {
             tl = 1;
             snprintf(tlines[0], CONF_STR, "%s", im->title);
-            base = label_y + (int)(58 * s);
+            base = text_top + (int)(28 * s);
         } else {
             tl = gfx_wrap(f, tpx, im->title, inner, &tlines[0][0], CONF_STR, 2);
             for (k = 0; k < tl; k++) tpx = gfx_fit_px(f, tlines[k], inner, tpx, 20 * s);
-            base = label_y + (int)(50 * s);
+            base = text_top + (int)(20 * s);
         }
         for (k = 0; k < tl; k++) {
             gfx_ellipsize(f, tpx, tlines[k], inner, cut, sizeof cut);

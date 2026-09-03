@@ -354,11 +354,9 @@ def stand_in_frame(path):
             f = _font(28)
             d.text((px0 + 16, py1 - 44), "attract clip - frame %d"
                    % FRAME_INDEX, font=f, fill=(240, 240, 240))
-        f = _font(20)
-        label = "IMAGE %d" % (i + 1)
-        tw = d.textlength(label, font=f)
-        d.text(((x0 + x1) / 2 - tw / 2, y0 + 206), label, font=f,
-               fill=(250, 190, 40) if hi else (110, 120, 140))
+        # NO 'IMAGE N' caption - it is gone from the selector (codeselect.c,
+        # 2026-09-03), and this stand-in draws what the selector draws; the
+        # title and subtitle move UP into the row it vacated.
         title, sub = IMAGES[i][1], IMAGES[i][2]
         # ...at whatever size fits the card the layout gave it
         size = 48
@@ -367,7 +365,7 @@ def stand_in_frame(path):
             size -= 4
             f = _font(size)
         tw = d.textlength(title, font=f)
-        d.text(((x0 + x1) / 2 - tw / 2, y0 + 250), title, font=f,
+        d.text(((x0 + x1) / 2 - tw / 2, y0 + 214), title, font=f,
                fill=(255, 255, 255) if hi else (160, 170, 190))
         size = 26
         f = _font(size)
@@ -375,7 +373,7 @@ def stand_in_frame(path):
             size -= 2
             f = _font(size)
         tw = d.textlength(sub, font=f)
-        d.text(((x0 + x1) / 2 - tw / 2, y0 + 322), sub, font=f,
+        d.text(((x0 + x1) / 2 - tw / 2, y0 + 286), sub, font=f,
                fill=(225, 230, 240) if hi else (120, 130, 150))
     centred(626, selector_footer(), 26, (150, 160, 180))
     centred(690, "booting %s in %d s" % (IMAGES[HIGHLIGHT][1], TIMEOUT_NOW),

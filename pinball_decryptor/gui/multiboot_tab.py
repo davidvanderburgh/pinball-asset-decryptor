@@ -2882,9 +2882,16 @@ class MultibootPanel:
         self._build_source(outer, th)
         self._build_alarm(outer, th)
         self._build_preview(outer, th)
+        # THE STATUS SITS ABOVE THE TABLE, not at the foot of the tab
+        # (David, looking at an empty one: "this text should be above the
+        # table of images").  Both of its lines talk ABOUT the table - an
+        # empty tab's two say "add the images below - the path fills itself
+        # in from the first one", which was printed underneath the images it
+        # was pointing at - and guidance that names a direction has to be on
+        # the right side of the thing it names.
+        self._build_status(outer, th)
         self._build_table(outer, th)
         self._build_actions(outer, th)
-        self._build_status(outer, th)
         frame.bind("<Destroy>", self._on_destroy, add="+")
         outer.bind("<Configure>", self._on_configure, add="+")
         # ...and the two moments a person comes BACK to this row expecting it

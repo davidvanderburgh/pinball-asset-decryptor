@@ -5574,3 +5574,21 @@ def test_a_restored_card_that_is_gone_is_not_read(tmp_path, monkeypatch):
         assert panel._pending_read is False
     finally:
         root.destroy()
+
+
+def test_what_the_tab_says_sits_above_the_images_it_talks_about(tmp_path):
+    """An empty tab's own words are "add the images below - the path fills
+    itself in from the first one", and they used to be printed UNDERNEATH
+    the images they pointed at (David: "this text should be above the table
+    of images").  Guidance that names a direction has to be on the right
+    side of the thing it names."""
+    root, panel = _panel()
+    try:
+        order = [str(w) for w in panel._outer.pack_slaves()]
+        assert order.index(str(panel._status_wrap)) <             order.index(str(panel._table_box))
+        # ...and the sentence really does point downwards from there
+        assert "below" in panel._edit_lbl.cget("text")
+        # the actions stay at the foot, after the table
+        assert order.index(str(panel._table_box)) <             order.index(str(panel._action_row))
+    finally:
+        root.destroy()

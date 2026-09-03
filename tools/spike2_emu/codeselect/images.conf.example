@@ -25,6 +25,11 @@
 #   volume=0-100         software mix gain (default 50)
 #   mixer_volume=0-63    optional, hardware only: the game's codec volume curve
 #                        on the ALSA 'PCM' control (untouched when absent)
+#   theme=NAME           the menu's colours: midnight (the default), arcade, neon,
+#                        emerald, slate or daylight - or custom (themes.json)
+#   color_<role>=RRGGBB  one colour on top of the theme; the roles are background,
+#                        heading, card, card_hl, frame, frame_hl, title, title_hl,
+#                        subtitle, subtitle_hl, label, label_hl, footer, countdown
 #
 # WAVs: RIFF PCM 16-bit 44100 Hz, 1 or 2 channels. Up to 16 images; two to
 # four sit in a row, more become a carousel. Unknown keys are ignored.
@@ -37,3 +42,4 @@ sound_confirm=confirm.wav
 volume=50
 default=0
 timeout=10
+#theme=midnight

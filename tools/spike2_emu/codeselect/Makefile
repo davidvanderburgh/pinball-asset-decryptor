@@ -24,6 +24,7 @@ CC        = $(CROSS)gcc
 # command line matches now.
 QEMU     ?= qemu-arm-static
 export QEMU
+PYTHON   ?= python3
 BUILD    ?= build
 DESTDIR  ?=
 PREFIX   ?= /usr/local/codeselect
@@ -35,7 +36,7 @@ CRTEND   := $(shell $(CC) -print-file-name=crtend.o)
 CFLAGS    = -O2 -Wall -Werror=implicit-function-declaration \
             -U_TIME_BITS -U_FILE_OFFSET_BITS -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
             -fno-stack-protector -fno-pie -no-pie \
-            -nostdinc -isystem $(GCCINC) -isystem $(ROOT)/usr/include
+            -nostdinc -isystem $(GCCINC) -isystem $(ROOT)/usr/include -I$(BUILD)
 LDPRE     = -nostdlib -nostartfiles $(ROOT)/usr/lib/crt1.o $(ROOT)/usr/lib/crti.o $(CRTBEGIN)
 LDPOST    = $(CRTEND) $(ROOT)/usr/lib/crtn.o -L$(ROOT)/lib -L$(ROOT)/usr/lib \
             -Wl,-rpath-link,$(ROOT)/lib -Wl,-rpath-link,$(ROOT)/usr/lib \
@@ -48,8 +49,8 @@ GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2
 # in the rootfs). Hand prototypes in audio_alsa.c: no headers on the box.
 AUDLIBS   = -l:libasound.so.2
 
-SRCS = codeselect.c conf.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c log.c art.c audio.c audio_fifo.c audio_alsa.c
-HDRS = conf.h gfx.h egl_stern.h input.h log.h art.h audio.h
+SRCS = codeselect.c conf.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c log.c art.c audio.c audio_fifo.c audio_alsa.c
+HDRS = conf.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h $(BUILD)/theme_table.h
 OBJS = $(SRCS:%.c=$(BUILD)/%.o)
 BIN  = $(BUILD)/codeselect
 
@@ -57,6 +58,12 @@ all: $(BIN)
 
 $(BUILD):
 > mkdir -p $(BUILD)
+
+# The colour themes: themes.json is the one definition (mkmulticard.py and the
+# app read the same file), turned into a header in the build dir - generated,
+# never committed, and checked by the generator (a bad JSON fails the build).
+$(BUILD)/theme_table.h: themes.json gen_themes.py | $(BUILD)
+> $(PYTHON) gen_themes.py themes.json $@
 
 $(BUILD)/%.o: %.c $(HDRS) | $(BUILD)
 > $(CC) $(CFLAGS) -c $< -o $@

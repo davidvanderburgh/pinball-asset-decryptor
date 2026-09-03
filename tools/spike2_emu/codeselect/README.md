@@ -353,6 +353,23 @@ refused is non-fatal: it is logged (`confirm: image 1 cannot use <name>: the
 menu-wide sound is used instead`), it is not counted in the `media:` line,
 and that card confirms with `sound_confirm` like any other.
 
+### Themes
+
+The menu's colours are a THEME: one colour per role - the background, the
+heading, a card's face and frame plain and highlighted, its title / subtitle
+/ label plain and highlighted, the footer line and the countdown line. The
+built-in themes live in `themes.json` (`midnight`, the look this program
+always had, is the default; `arcade`, `neon`, `emerald`, `slate` and
+`daylight` are the others) and `gen_themes.py` turns that file into
+`theme_table.h` at build time, so the selector, `mkmulticard.py` and the
+app's Multi-boot tab all read ONE definition. `theme=<name>` picks one;
+`color_<role>=RRGGBB` puts one colour on top of it (`theme=custom` = the
+default theme plus the overrides, which is what "make your own theme" in the
+app writes). An unknown name comes up as the default and says so in the log
+(`theme: 'x' is not a theme, using midnight`); a colour value that is not
+RRGGBB is counted and ignored - a typo in a theme must never stop a machine
+from booting.
+
 ### images.conf (v2)
 
 ```
@@ -368,6 +385,8 @@ volume=50          # software mix gain 0-100 (default 50)
 default=0          # highlight when there is no usable last-choice file
 timeout=10         # 0 = wait for ever
 #font=/usr/local/codeselect/font.ttf
+#theme=midnight    # the colours: midnight arcade neon emerald slate daylight, or custom
+#color_frame_hl=ffc42d   # one colour on top of the theme (the roles are in themes.json)
 ```
 
 `image=<device>|<title>|<subtitle>|<art>|<anim>|<music>|<confirm>` - fields
@@ -646,6 +665,14 @@ down.
    without `--snapshot` are all refused with a `codeselect:` line on stderr
    and leave nothing on disk; `%%` in a pattern comes out as one percent.
    PNGs in `$BUILD/t/codeselect_*.png` for eyes.
+
+   Then the themes: `theme=daylight` puts that theme's background at (5,5)
+   and its countdown colour on the countdown line; `theme=custom` with
+   `color_background=#102030` / `color_countdown=00FF00` plus a bad value
+   and an unknown role shows the two overrides and logs `2 of 14 colours
+   set by the conf, 2 colour values ignored`; an unknown theme name falls
+   back to midnight (logged) with the overrides still applied; a conf with
+   no theme key draws the pixels this program always drew.
 3. `test/padsw_test.py` - a padsw file, RIGHT (id 64 on turtles_pro) held
    100 ms then START (36), with the test holding the read end of a FIFO the
    selector writes into (`--audio fifo:... --audio-fmt ... --audio-dump`):

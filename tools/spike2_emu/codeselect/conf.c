@@ -115,6 +115,20 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             if (*val) c->volume = clamp_int(val, 0, 100);
         } else if (!strcmp(key, "mixer_volume")) {
             if (*val) c->mixer_volume = clamp_int(val, 0, 63);
+        } else if (!strcmp(key, "theme")) {
+            copy_field(c->theme, val);
+        } else if (!strncmp(key, "color_", 6)) {
+            /* one colour on top of the theme.  An unknown role or a value
+             * that is not RRGGBB is counted and ignored (main logs the
+             * count): a typo in a colour must never stop a machine booting */
+            int r = theme_role(key + 6);
+            unsigned rgb;
+            if (r < 0 || theme_parse_rgb(val, &rgb) < 0) {
+                c->bad_colors++;
+            } else {
+                c->color[r] = rgb;
+                c->color_set[r] = 1;
+            }
         }
         /* unknown keys are ignored so the file can grow */
     }

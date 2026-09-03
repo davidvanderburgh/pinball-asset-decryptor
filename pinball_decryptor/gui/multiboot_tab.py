@@ -179,7 +179,7 @@ import time
 import tkinter as tk
 from dataclasses import (asdict, dataclass, field, fields as dc_fields,
                          replace)
-from tkinter import filedialog, font as tkfont, messagebox, ttk
+from tkinter import colorchooser, filedialog, font as tkfont, messagebox, ttk
 
 from . import _rig
 from .emulate_tab import rig_dir
@@ -202,6 +202,15 @@ TOOL_DIR = "tools/spike2_emu"
 MKMULTICARD = TOOL_DIR + "/mkmulticard.py"
 SELECTMEDIA = TOOL_DIR + "/selectmedia.py"
 CODESELECT_SRC = TOOL_DIR + "/codeselect"
+#: THE MENU'S COLOUR THEMES: the selector's own themes.json, one definition -
+#: the selector compiles it in, mkmulticard.py writes the keys, this tab shows
+#: the picker and the "make your own" colour grid.  Read once, on first use,
+#: never at import: a checkout without it must not stop the app; the picker
+#: says so and the default theme still draws.
+THEMES_JSON = CODESELECT_SRC + "/themes.json"
+DEFAULT_THEME = "midnight"
+CUSTOM_THEME = "custom"
+CUSTOM_TITLE = "Make your own…"
 
 #: Where the rig installs the ARM selector (buildselect.sh's ``make install
 #: DESTDIR=$ROOT``, ROOT = PAD_ROOT else ~/spike2root).  A WSL path, spelled
@@ -381,6 +390,167 @@ class MultibootForm:
     media_dir: str = ""            # a prepared media dir (holds media.json)
     selector_dir: str = DEFAULT_SELECTOR_DIR
     force: bool = False
+    #: The menu's colours: a built-in theme's name, or ``custom`` with every
+    #: role in ``colors`` (``{role: rrggbb}``; empty for a built-in).
+    theme: str = DEFAULT_THEME
+    colors: dict = field(default_factory=dict)
+
+
+_COLOR_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
+_boot_themes = None
+#: This checkout, from the package's own place in it - the fallback for a
+#: rig that lives elsewhere (or nowhere, on a machine that only browses).
+_PKG_REPO = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
+
+
+def themes_json_paths():
+    """Where themes.json is looked for, in order: the rig's checkout (the
+    selector the preview builds and the cards are written from come from
+    there), then this package's own."""
+    return [os.path.join(repo_dir(), THEMES_JSON),
+            os.path.join(_PKG_REPO, THEMES_JSON)]
+
+
+def boot_themes():
+    """themes.json parsed: ``{'roles': [...], 'labels': {role: text},
+    'default': name, 'themes': [{'name', 'title', 'about', 'colors': {role:
+    rrggbb}}]}``, or None when the file cannot be read.  Read once."""
+    global _boot_themes
+    if _boot_themes is None:
+        try:
+            doc = None
+            for path in themes_json_paths():
+                if os.path.isfile(path):
+                    with open(path, "r", encoding="utf-8") as f:
+                        doc = json.load(f)
+                    break
+            if doc is None:
+                raise OSError("no themes.json")
+            roles = [str(r) for r in doc["roles"]]
+            labels = doc.get("labels") or {}
+            themes = []
+            for t in doc["themes"]:
+                colors = {r: _COLOR_RE.match(str(t["colors"][r])).group(1)
+                          .lower() for r in roles}
+                themes.append({"name": str(t["name"]),
+                               "title": str(t.get("title") or t["name"]),
+                               "about": str(t.get("about") or ""),
+                               "colors": colors})
+            _boot_themes = {
+                "roles": roles,
+                "labels": {r: str(labels.get(r) or r) for r in roles},
+                "default": str(doc.get("default") or DEFAULT_THEME),
+                "themes": themes}
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            _boot_themes = False
+    return _boot_themes or None
+
+
+def theme_roles():
+    """The colour roles, in the selector's order; none without the file."""
+    th = boot_themes()
+    return list(th["roles"]) if th else []
+
+
+def theme_names():
+    """The built-ins' names, the default first; the default alone without
+    the file."""
+    th = boot_themes()
+    return [t["name"] for t in th["themes"]] if th else [DEFAULT_THEME]
+
+
+def theme_title(name):
+    """What the picker shows for a theme name."""
+    name = (name or "").strip().lower()
+    if name == CUSTOM_THEME:
+        return CUSTOM_TITLE
+    for t in (boot_themes() or {}).get("themes", []):
+        if t["name"] == name:
+            return t["title"]
+    return name or DEFAULT_THEME
+
+
+def theme_about(name):
+    """A built-in's one-line description; '' for the rest."""
+    name = (name or "").strip().lower()
+    if name == CUSTOM_THEME:
+        return ("Your own colours: start from the theme shown, then change "
+                "any of them.")
+    for t in (boot_themes() or {}).get("themes", []):
+        if t["name"] == name:
+            return t["about"]
+    return ""
+
+
+def theme_label(role):
+    """A colour role's label ('Card frame, highlighted')."""
+    return (boot_themes() or {}).get("labels", {}).get(role, role)
+
+
+def theme_colors(name):
+    """A built-in's ``{role: rrggbb}`` (a copy), or None."""
+    name = (name or "").strip().lower()
+    for t in (boot_themes() or {}).get("themes", []):
+        if t["name"] == name:
+            return dict(t["colors"])
+    return None
+
+
+def clean_colors(colors):
+    """``{role: rrggbb}`` keeping only the roles the selector knows and the
+    values that are six hex digits (a '#' dropped, lower case)."""
+    roles = theme_roles()
+    out = {}
+    if not isinstance(colors, dict):
+        return out
+    for role, val in colors.items():
+        m = _COLOR_RE.match(str(val).strip())
+        if role in roles and m:
+            out[role] = m.group(1).lower()
+    return out
+
+
+def theme_from_card(theme, colors):
+    """A card's ``theme`` / ``colors`` (inspect's answer) -> the form's
+    ``(theme, colors)``.  A built-in with no overrides is itself.  Overrides
+    on top of anything - the selector allows them on a built-in, this tab
+    offers them only as the custom theme - become the custom theme with
+    every role spelled out (the base's colours under them), so what the tab
+    shows is what the machine draws.  An unknown name is the default."""
+    name = (theme or "").strip().lower()
+    over = clean_colors(colors)
+    base = name if name in theme_names() else DEFAULT_THEME
+    if name != CUSTOM_THEME and not over:
+        return base, {}
+    full = dict(theme_colors(base) or {})
+    full.update(over)
+    return CUSTOM_THEME, full
+
+
+def theme_args(form):
+    """``--theme NAME`` and, for the custom theme, one ``--color
+    ROLE=RRGGBB`` per role in the selector's order - what build and inject
+    both carry, so an explicit theme is the whole answer."""
+    theme = (form.theme or "").strip().lower() or DEFAULT_THEME
+    args = ["--theme", theme]
+    if theme == CUSTOM_THEME:
+        clean = clean_colors(form.colors)
+        for role in theme_roles():
+            if role in clean:
+                args += ["--color", "%s=%s" % (role, clean[role])]
+    return args
+
+
+def theme_conf_lines(form):
+    """The images.conf lines for the form's theme (the preview's conf)."""
+    theme = (form.theme or "").strip().lower() or DEFAULT_THEME
+    lines = ["theme=" + theme]
+    if theme == CUSTOM_THEME:
+        clean = clean_colors(form.colors)
+        lines += ["color_%s=%s" % (r, clean[r]) for r in theme_roles()
+                  if r in clean]
+    return lines
 
 
 def is_file_choice(value):
@@ -753,6 +923,17 @@ def validate_form(form, sources=True):
         errs.append("Volume is 0-100.")
     if int(form.timeout) < 0:
         errs.append("The countdown cannot be negative (0 = wait for START).")
+    theme = (form.theme or "").strip().lower() or DEFAULT_THEME
+    if theme != CUSTOM_THEME and theme not in theme_names():
+        errs.append("The theme %r is not one the selector has." % form.theme)
+    if theme == CUSTOM_THEME:
+        roles = theme_roles()
+        for role, val in sorted((form.colors or {}).items()):
+            if role not in roles:
+                errs.append("%r is not a colour the menu has." % role)
+            elif not _COLOR_RE.match(str(val).strip()):
+                errs.append("The %s colour must be six hex digits (RRGGBB), "
+                            "not %r." % (theme_label(role).lower(), val))
     if n and not 0 <= int(form.default) < n:
         errs.append("The default image must be one of 0..%d." % (n - 1))
     out = (form.out or "").strip().strip('"')
@@ -989,7 +1170,7 @@ def build_args(form):
         # media.json (prepare) and into images.conf here, so a text-only card
         # with no prepared media still carries it.
         "--volume", str(int(form.volume)),
-    ]
+    ] + theme_args(form)
     if any(subtitles):
         args += ["--subtitles", ";".join(subtitles)]
     if form.bypass:
@@ -1036,7 +1217,7 @@ def inject_args(form, card):
             "--subtitles", ";".join(subtitles),
             "--timeout", str(int(form.timeout)),
             "--default", str(int(form.default)),
-            "--volume", str(int(form.volume))]
+            "--volume", str(int(form.volume))] + theme_args(form)
     if form.media_dir:
         args += ["--media-dir", wsl(form.media_dir)]
     return args
@@ -1191,8 +1372,8 @@ def parse_snapshot_frames(text):
 
 def write_preview_conf(form):
     """The images.conf the preview is drawn from, as text: the form's
-    titles, subtitles, media names, default and countdown.  The device
-    tokens are placeholders - a picture boots nothing."""
+    titles, subtitles, media names, default, countdown and theme.  The
+    device tokens are placeholders - a picture boots nothing."""
     lines = ["# written by the Multi-boot tab for its preview; the devices "
              "are placeholders,", "# everything else is the form"]
     for i, row in enumerate(form.images):
@@ -1206,6 +1387,7 @@ def write_preview_conf(form):
               "timeout=%d" % int(form.timeout),
               "volume=%d" % int(form.volume),
               "font=" + CONF_FONT]
+    lines += theme_conf_lines(form)
     return "\n".join(lines) + "\n"
 
 
@@ -1573,10 +1755,12 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None):
             return default if val is None else int(val)
         except (TypeError, ValueError):
             return default
+    theme, colors = theme_from_card(info.get("theme"), info.get("colors"))
     form = MultibootForm(
         images=rows, out=card, sound_move=move, sound_confirm=confirm,
         volume=_int_of("volume", 50), timeout=_int_of("timeout", 15),
         default=_int_of("default", 0), bypass=ticked,
+        theme=theme, colors=colors,
         media_dir=media_dir if (media_dir and os.path.isfile(
             os.path.join(media_dir, "media.json"))) else "",
         selector_dir=selector_dir or DEFAULT_SELECTOR_DIR)
@@ -1587,7 +1771,7 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None):
 #: Everything NOT here is the image list, and that needs a full build.
 MENU_FIELD_ORDER = ("title", "subtitle", "art", "animation", "music",
                     "move sound", "confirm sound", "volume", "countdown",
-                    "default", "bypass")
+                    "default", "bypass", "theme")
 
 #: Of those, the ones the media has to be rendered again for.
 MEDIA_FIELDS = ("art", "animation", "music", "move sound", "confirm sound")
@@ -1629,6 +1813,8 @@ def _menu_fields(before, after):
             changed.add(name)
     if bool(before.bypass) != bool(after.bypass):
         changed.add("bypass")
+    if theme_args(before) != theme_args(after):
+        changed.add("theme")
     return changed
 
 
@@ -1996,12 +2182,17 @@ def menu_from_state(menu):
             return int(menu[key])
         except (KeyError, TypeError, ValueError):
             return default
+    theme = str(menu.get("theme") or DEFAULT_THEME).strip().lower()
+    if theme != CUSTOM_THEME and theme not in theme_names():
+        theme = DEFAULT_THEME
     return {"move": str(menu.get("move") or "auto"),
             "confirm": str(menu.get("confirm") or "auto"),
             "volume": max(0, min(100, _as_int("volume", 50))),
             "timeout": max(0, _as_int("timeout", 15)),
             "default": max(0, _as_int("default", 0)),
-            "bypass": bool(menu.get("bypass", True))}
+            "bypass": bool(menu.get("bypass", True)),
+            "theme": theme,
+            "colors": clean_colors(menu.get("colors"))}
 
 
 # ---------------------------------------------------------------------------
@@ -2297,12 +2488,13 @@ def menu_summary(form):
         v = (v or "").strip() or "none"
         return v if v.lower() in _WORDS else os.path.basename(v)
     return ("sounds %s / %s  ·  volume %d  ·  %s  ·  default %d  ·  "
-            "bypass %s" % (
+            "bypass %s  ·  theme %s" % (
                 sound(form.sound_move), sound(form.sound_confirm),
                 int(form.volume),
                 "wait for START" if int(form.timeout) == 0
                 else "%d s countdown" % int(form.timeout),
-                int(form.default), "on" if form.bypass else "off"))
+                int(form.default), "on" if form.bypass else "off",
+                (form.theme or "").strip().lower() or DEFAULT_THEME))
 
 
 # ---------------------------------------------------------------------------
@@ -2555,9 +2747,10 @@ class ImageEditorDialog(_Modal):
 
 
 class MenuSettingsDialog(_Modal):
-    """'Menu settings…': the sounds, the volume, the countdown, the default
-    image, the validator bypass and the selector build path - everything
-    that belongs to the MENU rather than to one image."""
+    """'Menu settings…': the sounds, the volume, the LOOK (a theme, or your
+    own colours), the countdown, the default image, the validator bypass and
+    the selector build path - everything that belongs to the MENU rather
+    than to one image."""
 
     def __init__(self, panel, images):
         _Modal.__init__(self, panel._parent, "Menu settings",
@@ -2589,6 +2782,56 @@ class MenuSettingsDialog(_Modal):
                        "plays to the end before the game starts.").grid(
             row=3, column=0, columnspan=3, sticky=tk.W, pady=(4, 0))
         g.columnconfigure(1, weight=1)
+
+        look = ttk.LabelFrame(b, text="Look")
+        look.pack(fill=tk.X, pady=(10, 0))
+        g1 = ttk.Frame(look)
+        g1.pack(fill=tk.X, padx=8, pady=6)
+        ttk.Label(g1, text="Theme:", width=15).grid(row=0, column=0,
+                                                    sticky=tk.W, pady=3)
+        names = theme_names() + [CUSTOM_THEME]
+        panel._theme_combo = ttk.Combobox(
+            g1, textvariable=panel._theme_pick, state="readonly",
+            values=[theme_title(n) for n in names], width=18)
+        panel._theme_combo.grid(row=0, column=1, sticky=tk.W, pady=3)
+        panel._theme_combo.bind("<<ComboboxSelected>>",
+                                lambda _e: panel._theme_picked())
+        panel._theme_tip = _Tooltip(panel._theme_combo, "", panel._theme_fn)
+        # The grid: three columns of swatch / role / value, so fourteen
+        # colours cost five rows and the dialog still fits a 768-high
+        # desktop.  The SWATCH is the picker (a click opens the chooser):
+        # a Pick… button per colour was a row of buttons and a taller
+        # dialog than the desktop.
+        roles = theme_roles()
+        grid = ttk.Frame(g1)
+        grid.grid(row=1, column=0, columnspan=2, sticky=tk.EW, pady=(6, 0))
+        rows = max(1, (len(roles) + 2) // 3)
+        for i, role in enumerate(roles):
+            r, c = i % rows, (i // rows) * 3
+            sw = tk.Canvas(grid, width=16, height=16, highlightthickness=1,
+                           highlightbackground=th["gray"], bd=0,
+                           cursor="hand2")
+            sw.grid(row=r, column=c, padx=(0 if c == 0 else 14, 4), pady=1)
+            sw.bind("<Button-1>", lambda _e, k=role: panel._pick_color(k))
+            ttk.Label(grid, text=theme_label(role) + ":").grid(
+                row=r, column=c + 1, sticky=tk.W, pady=1)
+            en = ttk.Entry(grid, textvariable=panel._color_vars[role],
+                           width=7)
+            en.grid(row=r, column=c + 2, sticky=tk.W, padx=(4, 0), pady=1)
+            panel._color_swatches[role] = sw
+            panel._color_entries[role] = en
+        if roles:
+            note = ("Make your own…: start from the theme shown, then "
+                    "change any colour - type it (RRGGBB) or click its "
+                    "swatch to pick one. The preview redraws as you go.")
+        else:
+            note = ("The themes file (%s) could not be read: the menu "
+                    "keeps its default colours." % THEMES_JSON)
+        ttk.Label(g1, foreground=th["gray"], wraplength=560,
+                  justify=tk.LEFT, text=note).grid(
+            row=2, column=0, columnspan=2, sticky=tk.W, pady=(4, 0))
+        g1.columnconfigure(1, weight=1)
+        panel._sync_theme_states()
 
         boot = ttk.LabelFrame(b, text="At power-up")
         boot.pack(fill=tk.X, pady=(10, 0))
@@ -2818,6 +3061,10 @@ class MultibootPanel:
         self._clip_widgets = ()
         self._default_spin = None
         self._bypass_chk = None
+        self._theme_combo = None
+        self._theme_tip = None
+        self._color_entries = {}
+        self._color_swatches = {}
         #: Every line the tools print, in the order they printed it.  The
         #: tab has NO output pane of its own: the lines go to the app's Log
         #: at the foot of the window, the one log the whole app writes to
@@ -2847,6 +3094,17 @@ class MultibootPanel:
         self._default_var = tk.StringVar(value="0")
         self._bypass_var = tk.BooleanVar(value=True)
         self._selector_var = tk.StringVar(value=DEFAULT_SELECTOR_DIR)
+        #: The menu's colours: the theme's name, what the picker shows for
+        #: it, and one var per colour role - the "make your own" grid, which
+        #: also shows a chosen built-in's colours (and is what a custom
+        #: theme starts from).
+        self._theme_var = tk.StringVar(value=DEFAULT_THEME)
+        self._theme_pick = tk.StringVar(value=theme_title(DEFAULT_THEME))
+        self._theme_prev = DEFAULT_THEME
+        self._color_vars = {
+            role: tk.StringVar(
+                value=(theme_colors(DEFAULT_THEME) or {}).get(role, ""))
+            for role in theme_roles()}
         self._ed_title = tk.StringVar()
         self._ed_sub = tk.StringVar()
         #: What the image shows, as the Edit image… dialog asks it: one of
@@ -2877,6 +3135,9 @@ class MultibootPanel:
         for var in (self._move_var, self._confirm_var, self._volume_var,
                     self._timeout_var, self._default_var, self._bypass_var):
             var.trace_add("write", lambda *_a: self._menu_changed())
+        self._theme_var.trace_add("write", lambda *_a: self._theme_changed())
+        for var in self._color_vars.values():
+            var.trace_add("write", lambda *_a: self._color_changed())
         # The preview.  Frames are cached per (form fingerprint, highlight,
         # frame index) -> PPM path; the frame counts per (fingerprint,
         # highlight), learned from the selector's own log line.
@@ -2990,7 +3251,8 @@ class MultibootPanel:
                     self._ed_confirm) + self._ed_media_vars + (
                     self._move_var, self._confirm_var, self._volume_var,
                     self._timeout_var, self._default_var,
-                    self._out_var, self._selector_var):
+                    self._out_var, self._selector_var,
+                    self._theme_var) + tuple(self._color_vars.values()):
             var.trace_add("write", lambda *_a: self.schedule_preview())
         # ...and the path box also moves the row's own verb and the sentence
         # under it, which is what makes the mode visible at all.
@@ -4254,8 +4516,11 @@ class MultibootPanel:
             self._timeout_var.set("15")
             self._default_var.set("0")
             self._bypass_var.set(True)
+            self._theme_var.set(DEFAULT_THEME)
+            self._seed_colors(theme_colors(DEFAULT_THEME) or {})
         finally:
             self._loading = False
+        self._sync_theme_states()
         self._pv_cache.clear()
         self._pv_totals.clear()
         self._pv_shown = None
@@ -4641,7 +4906,9 @@ class MultibootPanel:
         self._menu_backup = (self._move_var.get(), self._confirm_var.get(),
                              self._volume_var.get(), self._timeout_var.get(),
                              self._default_var.get(), self._bypass_var.get(),
-                             self._selector_var.get())
+                             self._selector_var.get(), self._theme_var.get(),
+                             {role: var.get()
+                              for role, var in self._color_vars.items()})
         self._menu_dialog = MenuSettingsDialog(self, len(self._rows))
         return self._menu_dialog.show()
 
@@ -4654,7 +4921,7 @@ class MultibootPanel:
         self._forget_menu_dialog()
         if self._menu_backup is not None:
             (move, confirm, vol, timeout, default, bypass,
-             selector) = self._menu_backup
+             selector, theme, colors) = self._menu_backup
             self._menu_backup = None
             self._move_var.set(move)
             self._confirm_var.set(confirm)
@@ -4663,12 +4930,127 @@ class MultibootPanel:
             self._default_var.set(default)
             self._bypass_var.set(bypass)
             self._selector_var.set(selector)
+            # the theme and the grid together, or the theme's trace would
+            # re-seed the grid from the built-in and lose the colours
+            self._loading = True
+            try:
+                self._theme_var.set(theme)
+                self._seed_colors(colors)
+            finally:
+                self._loading = False
+            self._sync_theme_states()
+            self._menu_changed()
         self._update_menu_summary()
 
     def _forget_menu_dialog(self):
         self._menu_dialog = None
         self._default_spin = None
         self._bypass_chk = None
+        self._theme_combo = None
+        self._theme_tip = None
+        self._color_entries = {}
+        self._color_swatches = {}
+
+    # -- the theme ---------------------------------------------------------
+
+    def _theme_changed(self):
+        """The theme moved.  A built-in puts its colours into the grid (so
+        the grid shows what is on screen, and 'Make your own…' starts from
+        it); 'Make your own…' keeps whatever the grid holds, seeded from
+        the default only when it is empty.  While a load or a restore is
+        filling the form nothing is seeded here - they seed the grid
+        themselves, with what was on the card or saved."""
+        theme = self._theme_var.get().strip().lower()
+        if not self._loading:
+            colors = theme_colors(theme)
+            if colors is not None:
+                self._seed_colors(colors)
+            elif theme == CUSTOM_THEME and not any(
+                    v.get().strip() for v in self._color_vars.values()):
+                self._seed_colors(theme_colors(DEFAULT_THEME) or {})
+            self._menu_changed()
+        self._theme_prev = theme
+        self._sync_theme_states()
+
+    def _seed_colors(self, colors):
+        """The colour grid <- ``{role: rrggbb}``, in one go: the vars' own
+        traces stay quiet, and a role the dict lacks keeps its value."""
+        was = self._loading
+        self._loading = True
+        try:
+            for role, var in self._color_vars.items():
+                if role in (colors or {}):
+                    var.set(str(colors[role]))
+        finally:
+            self._loading = was
+        self._paint_swatches()
+
+    def _color_changed(self):
+        """A colour was typed or picked."""
+        if self._loading:
+            return
+        self._paint_swatches()
+        self._menu_changed()
+
+    def _theme_picked(self):
+        """The picker's title -> the theme's name."""
+        title = self._theme_pick.get()
+        for name in theme_names() + [CUSTOM_THEME]:
+            if theme_title(name) == title:
+                if name != self._theme_var.get().strip().lower():
+                    self._theme_var.set(name)
+                return
+
+    def _pick_color(self, role):
+        """A click on a colour's swatch: the system chooser, seeded with the
+        current value.  Only for 'Make your own…' - a built-in's swatches
+        show, they do not edit."""
+        var = self._color_vars.get(role)
+        if var is None or self._theme_var.get().strip().lower() != \
+                CUSTOM_THEME:
+            return
+        cur = clean_colors({role: var.get()}).get(role, "000000")
+        parent = self._menu_dialog.top if self._menu_dialog is not None \
+            else self._parent
+        try:
+            rgb = colorchooser.askcolor(
+                color="#" + cur, parent=parent,
+                title="%s colour" % theme_label(role))[0]
+        except tk.TclError:
+            rgb = None
+        if rgb:
+            var.set("%02x%02x%02x" % tuple(int(c) for c in rgb))
+
+    def _sync_theme_states(self):
+        """The grid's entries and Pick… buttons live only for 'Make your
+        own…'; the picker shows the theme's title and its tip says what it
+        looks like."""
+        theme = self._theme_var.get().strip().lower()
+        custom = theme == CUSTOM_THEME
+        for w in self._color_entries.values():
+            try:
+                w.configure(state=tk.NORMAL if custom else tk.DISABLED)
+            except tk.TclError:
+                pass
+        title = theme_title(theme)
+        if self._theme_pick.get() != title:
+            self._theme_pick.set(title)
+        if self._theme_tip is not None:
+            self._theme_tip.text = theme_about(theme)
+        self._paint_swatches()
+
+    def _paint_swatches(self):
+        """Each swatch is its var's colour; a value that is not one shows
+        the error colour, so a typo is seen before it is refused."""
+        if not self._color_swatches:
+            return
+        th = THEMES.get(self._theme_fn()) or THEMES["dark"]
+        for role, cv in self._color_swatches.items():
+            val = clean_colors({role: self._color_vars[role].get()}).get(role)
+            try:
+                cv.configure(bg="#" + val if val else th["error"])
+            except tk.TclError:
+                pass
 
     def _menu_changed(self):
         self._update_edit_status()
@@ -4736,6 +5118,12 @@ class MultibootPanel:
         would refuse."""
         out = self._out_var.get().strip().strip('"')
         media = self.media_dir()
+        theme = self._theme_var.get().strip().lower() or DEFAULT_THEME
+        # the custom theme is the grid as typed (validate_form judges it);
+        # a built-in carries no colours of its own
+        colors = ({role: var.get().strip()
+                   for role, var in self._color_vars.items()}
+                  if theme == CUSTOM_THEME else {})
         return MultibootForm(
             images=[replace(r) for r in self._rows],
             out=out,
@@ -4748,7 +5136,8 @@ class MultibootPanel:
             media_dir=media if (media and os.path.isfile(
                 os.path.join(media, "media.json"))) else "",
             selector_dir=self._selector_var.get().strip()
-            or DEFAULT_SELECTOR_DIR)
+            or DEFAULT_SELECTOR_DIR,
+            theme=theme, colors=colors)
 
     def _validated_form(self, sources=True):
         form = self.form()
@@ -4799,7 +5188,11 @@ class MultibootPanel:
                      "volume": _int(self._volume_var, 50),
                      "timeout": _int(self._timeout_var, 15),
                      "default": _int(self._default_var, 0),
-                     "bypass": bool(self._bypass_var.get())},
+                     "bypass": bool(self._bypass_var.get()),
+                     "theme": self._theme_var.get().strip().lower()
+                     or DEFAULT_THEME,
+                     "colors": {role: var.get().strip()
+                                for role, var in self._color_vars.items()}},
             "selector_dir": self._selector_var.get().strip(),
             "auto_preview": bool(self._auto_preview.get()),
             "media_dir": self._media_override,
@@ -4909,6 +5302,11 @@ class MultibootPanel:
             self._timeout_var.set(str(menu["timeout"]))
             self._default_var.set(str(menu["default"]))
             self._bypass_var.set(menu["bypass"])
+            self._theme_var.set(menu["theme"])
+            # a built-in comes back as the file spells it today; a custom
+            # theme as it was saved, the default under any role it lacks
+            self._seed_colors(theme_colors(menu["theme"]) or dict(
+                theme_colors(DEFAULT_THEME) or {}, **menu["colors"]))
             sel = str(doc.get("selector_dir") or "").strip()
             self._selector_var.set(sel or DEFAULT_SELECTOR_DIR)
             # Restored in both directions, but never over the environment's
@@ -5353,8 +5751,12 @@ class MultibootPanel:
             self._timeout_var.set(str(int(form.timeout)))
             self._default_var.set(str(int(form.default)))
             self._bypass_var.set(bool(form.bypass))
+            self._theme_var.set(form.theme)
+            self._seed_colors(form.colors if form.theme == CUSTOM_THEME
+                              else theme_colors(form.theme) or {})
         finally:
             self._loading = False
+        self._sync_theme_states()
         # AFTER the path box, not before it: setting the box runs
         # _out_changed, which drops a media dir that does not belong to the
         # card the box now names - and until _loaded_card is set below, the

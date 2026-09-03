@@ -47,7 +47,8 @@ images.conf - never inside media/, never in the media budget, never opened by th
   build.json  {"tool", "version", "written", "layout",
                "images": [{"device", "source", "title", "subtitle", "art", "anim", "music",
                            "confirm"}],
-               "timeout", "default", "volume", "mixer_volume", "sound_move", "sound_confirm"}
+               "timeout", "default", "volume", "mixer_volume", "sound_move", "sound_confirm",
+               "theme", "colors"}
               'source' is the .raw each image came from - the one thing images.conf cannot
               hold and a rebuild needs.  An `inject` given no --primary/--extra reads the
               card's build.json first and carries the old sources through: an inject must
@@ -95,6 +96,7 @@ record decoder) are tested on Windows.
                              [--allow-version-mismatch]
                              [--titles "T0;T1;..."] [--subtitles "S0;S1;..."] [--timeout N]
                              [--default N] [--volume V] [--mixer-volume M] [--conf FILE]
+                             [--theme NAME] [--color ROLE=RRGGBB ...]
                              [--no-inject] [--dd] [--force] [--workdir DIR] [--allow-unreachable]
         write the sparse OUT (partition ranges copied, MBR entries + EBR chain regenerated; for
         the multi layout the p7 image is built first), then inject DIR/{codeselect,select.sh
@@ -235,7 +237,96 @@ P2_FREE_MARGIN = 8 << 20                      # never fill p2 to the last block
 #: '/dev/mmcblk0pN:<subdir>' (multi layout) or the emulator's 'pN' / 'pN:<subdir>' tokens.
 MAX_IMAGES = 16
 DEVICE_RE = re.compile(r"^(/dev/mmcblk0p|p)(\d+)(?::([A-Za-z0-9._-]+))?$")
-CONF_KEYS = ("default", "timeout", "font", "sound_move", "sound_confirm", "volume", "mixer_volume", "media")
+CONF_KEYS = ("default", "timeout", "font", "sound_move", "sound_confirm", "volume", "mixer_volume", "media",
+             "theme")
+
+#: THE MENU'S COLOUR THEMES: codeselect/themes.json is the one definition - the selector compiles
+#: it in (gen_themes.py -> theme_table.h at build time) and this tool and the app read it as is.
+#: images.conf picks one with theme=<name> and may put single colours on top with
+#: color_<role>=RRGGBB; theme=custom is the default theme plus those overrides, which is what
+#: "make your own theme" in the app writes (every role spelled out).
+THEMES_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "codeselect", "themes.json")
+CUSTOM_THEME = "custom"
+COLOR_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
+_THEMES = None
+
+
+def boot_themes():
+    """themes.json, parsed once -> {'roles': [...], 'labels': {role: text}, 'default': name,
+    'themes': [{'name', 'title', 'about', 'colors': {role: rrggbb}}]}.  Refused when the file
+    is missing or not a themes file: the selector would not build from it either."""
+    global _THEMES
+    if _THEMES is None:
+        try:
+            with open(THEMES_JSON, "r", encoding="utf-8") as f:
+                doc = json.load(f)
+        except (OSError, ValueError) as exc:
+            raise Refused("cannot read the menu themes (%s): %s" % (THEMES_JSON, exc))
+        roles = list(doc.get("roles") or [])
+        themes = list(doc.get("themes") or [])
+        names = [t.get("name") for t in themes]
+        if not roles or not themes or doc.get("default") not in names:
+            raise Refused("%s: no roles, no themes, or a default that is not one of them" % THEMES_JSON)
+        for t in themes:
+            colors = t.get("colors") or {}
+            if sorted(colors) != sorted(roles) or not all(COLOR_RE.match(str(v)) for v in colors.values()):
+                raise Refused("%s: theme %r does not name every role as RRGGBB" % (THEMES_JSON, t.get("name")))
+            t["colors"] = {r: COLOR_RE.match(str(colors[r])).group(1).lower() for r in roles}
+        _THEMES = {"roles": roles, "labels": dict(doc.get("labels") or {}), "default": doc["default"],
+                   "themes": themes}
+    return _THEMES
+
+
+def theme_names():
+    """The built-in themes' names, in the file's order (the default first)."""
+    return [t["name"] for t in boot_themes()["themes"]]
+
+
+def theme_colors(name):
+    """A built-in theme's {role: rrggbb}, or None for a name that is not one ('custom' included)."""
+    for t in boot_themes()["themes"]:
+        if t["name"] == name:
+            return dict(t["colors"])
+    return None
+
+
+def check_theme(theme):
+    """A theme= value for images.conf: a built-in's name or 'custom', lower case; '' / None -> None
+    (no key written, the selector's default).  Anything else is refused - a typo on the command
+    line should be heard here, not read off the machine's log."""
+    t = (theme or "").strip().lower()
+    if not t:
+        return None
+    if t != CUSTOM_THEME and t not in theme_names():
+        raise Refused("theme %r is not one of %s, or %s" % (theme, ", ".join(theme_names()), CUSTOM_THEME))
+    return t
+
+
+def check_colors(colors):
+    """{role: RRGGBB} for images.conf: every role one of themes.json's, every value six hex digits
+    (a leading '#' dropped), lower case; None / {} -> {}."""
+    out = {}
+    roles = boot_themes()["roles"]
+    for role, val in (colors or {}).items():
+        if role not in roles:
+            raise Refused("color_%s: not a colour role (%s)" % (role, ", ".join(roles)))
+        m = COLOR_RE.match(str(val).strip())
+        if not m:
+            raise Refused("color_%s=%r: not RRGGBB" % (role, val))
+        out[role] = m.group(1).lower()
+    return out
+
+
+def parse_color_flags(values):
+    """``--color ROLE=RRGGBB`` values (a list, or None) -> {role: value}, unchecked."""
+    out = {}
+    for v in values or []:
+        role, sep, val = str(v).partition("=")
+        if not sep:
+            raise Refused("--color %r: expected ROLE=RRGGBB" % (v,))
+        out[role.strip()] = val.strip()
+    return out
+
 
 #: An image's own media, in the order the images.conf line carries it after the device, the title
 #: and the subtitle.  `confirm` is that image's own confirm sound; an empty one falls back to the
@@ -739,12 +830,13 @@ def _int_range(val, key, lo, hi):
 
 def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=15, font=None,
                        media=None, sound_move=None, sound_confirm=None, volume=None, mixer_volume=None,
-                       media_dir=None):
+                       media_dir=None, theme=None, colors=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
     own, 6 when some other media is set, else the 3-field form every older selector reads.  The
-    global keys follow."""
+    global keys follow.  `theme` (a built-in's name or 'custom') and `colors` ({role: RRGGBB}) are
+    the menu's colours (see THEMES_JSON); neither is written when not given."""
     devices = list(devices)
     if not devices:
         raise Refused("images.conf: no images")
@@ -784,6 +876,8 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         mixer_volume = _int_range(mixer_volume, "mixer_volume", 0, 63)
     if media_dir and ("|" in media_dir or "\n" in media_dir):
         raise Refused("images.conf: media=%r may not contain '|' or a newline" % media_dir)
+    theme = check_theme(theme)
+    colors = check_colors(colors)
     any_media = any(any(r) for r in rows)
     # the seventh field is written only when some image has a confirm sound of its own, so a menu
     # where every image uses the menu-wide sound reads exactly as it did before this existed
@@ -811,20 +905,30 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         out.append("media=%s" % media_dir)
     elif any_media or sound_move or sound_confirm:
         out.append("media=%s" % MEDIA_DIR)
+    if theme:
+        out.append("theme=%s" % theme)
+    # in the roles' order, so two confs with the same colours are the same bytes
+    for role in boot_themes()["roles"]:
+        if role in colors:
+            out.append("color_%s=%s" % (role, colors[role]))
     return "\n".join(out) + "\n"
 
 
 def parse_images_conf(text):
     """-> {'images': [(device, title, subtitle)], 'media': [(art, anim, music, confirm)] (aligned,
     '' = none), 'default': int, 'timeout': int, 'font': str|None, 'sound_move': str|None,
-    'sound_confirm': str|None, 'volume': int|None, 'mixer_volume': int|None, 'media_dir': str|None}.
+    'sound_confirm': str|None, 'volume': int|None, 'mixer_volume': int|None, 'media_dir': str|None,
+    'theme': str|None, 'colors': {role: rrggbb}}.
     3-field and 6-field image lines are valid; more than 7 fields, a bad device, a media name with
     '|' ':' or '/', or more than 16 images is refused.  Unknown keys are ignored (the file may
-    grow)."""
+    grow).  The theme name is kept as the card spells it (an unknown one is what `inspect` should
+    show, and the selector falls back on its own); a color_ key with an unknown role or a value
+    that is not RRGGBB is dropped, exactly as the selector drops it."""
     if isinstance(text, bytes):
         text = text.decode("utf-8", "replace")
     conf = {"images": [], "media": [], "default": 0, "timeout": 15, "font": None,
-            "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None}
+            "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
+            "theme": None, "colors": {}}
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -858,6 +962,12 @@ def parse_images_conf(text):
             conf["mixer_volume"] = _int_range(val.strip(), key, 0, 63)
         elif key == "media":
             conf["media_dir"] = val.strip() or None
+        elif key == "theme":
+            conf["theme"] = val.strip().lower() or None
+        elif key.startswith("color_"):
+            m = COLOR_RE.match(val.strip())
+            if key[6:] in boot_themes()["roles"] and m:
+                conf["colors"][key[6:]] = m.group(1).lower()
     return conf
 
 
@@ -1622,7 +1732,10 @@ def conf_for_plan(plan, args, existing=None, media=None):
     """images.conf text for the card: --conf verbatim, else generated from the layout with the
     flags, falling back to `existing` (a parsed conf already on the card) then to defaults.
     `media` (plan_media's answer) supplies the per-image media rows, the sounds and the volume;
-    without it an `existing` conf's media fields are carried through unchanged."""
+    without it an `existing` conf's media fields are carried through unchanged.  The theme:
+    --theme is the whole answer for the name (and, given alone, drops the card's old colour
+    overrides); --color alone keeps the card's theme and replaces its overrides; neither flag
+    carries the card's own through; a card with none gets none."""
     if getattr(args, "conf", None):
         with open(args.conf, "r") as f:
             text = f.read()
@@ -1632,7 +1745,8 @@ def conf_for_plan(plan, args, existing=None, media=None):
             raise Refused("--conf %s lists %r but the card holds %r" % (args.conf, devs, plan.devices()))
         return text
     ex = existing or {"images": [], "media": [], "default": None, "timeout": None, "font": None,
-                      "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None}
+                      "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None,
+                      "theme": None, "colors": {}}
     n = len(plan.trees)
     same_n = len(ex["images"]) == n
     titles = split_list(getattr(args, "titles", None))
@@ -1659,8 +1773,17 @@ def conf_for_plan(plan, args, existing=None, media=None):
         volume = args.volume
     if getattr(args, "mixer_volume", None) is not None:
         mixer = args.mixer_volume
+    theme = check_theme(getattr(args, "theme", None))
+    colors = check_colors(parse_color_flags(getattr(args, "color", None)))
+    if theme is None:
+        theme = ex.get("theme")
+        if theme and theme != CUSTOM_THEME and theme not in theme_names():
+            say("note: the card's theme=%s is not a theme this build knows; the default is written" % theme)
+            theme = None
+        if not colors:
+            colors = dict(ex.get("colors") or {})
     return render_images_conf(plan.devices(), titles, subtitles, default, timeout, font,
-                              rows, move, confirm, volume, mixer)
+                              rows, move, confirm, volume, mixer, theme=theme, colors=colors)
 
 
 # ============================================================================= the JSON sidecars
@@ -1711,7 +1834,9 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
         ("volume", conf["volume"]),
         ("mixer_volume", conf["mixer_volume"]),
         ("sound_move", conf["sound_move"]),
-        ("sound_confirm", conf["sound_confirm"])])
+        ("sound_confirm", conf["sound_confirm"]),
+        ("theme", conf.get("theme")),
+        ("colors", dict(conf.get("colors") or {}))])
 
 
 def selector_manifests(plan, conf_text, media_dir=None, sources=None, existing_build=None,
@@ -2868,6 +2993,7 @@ def inspect_card(card, media_out=None):
         ("volume", conf["volume"]), ("mixer_volume", conf["mixer_volume"]),
         ("sound_move", conf["sound_move"]), ("sound_confirm", conf["sound_confirm"]),
         ("font", conf["font"]), ("media_dir", conf["media_dir"]),
+        ("theme", conf.get("theme")), ("colors", dict(conf.get("colors") or {})),
         ("media", media), ("media_out", out),
         ("has_media_json", media_json is not None), ("has_build_json", build is not None),
         ("build", None if build is None else collections.OrderedDict(
@@ -2899,6 +3025,8 @@ def print_inspect(rep):
     print("menu       default=%s timeout=%s volume=%s mixer_volume=%s sound_move=%s sound_confirm=%s font=%s"
           % (rep["default"], rep["timeout"], rep["volume"], rep["mixer_volume"],
              rep["sound_move"], rep["sound_confirm"], rep["font"]))
+    colors = "".join(" color_%s=%s" % kv for kv in sorted((rep.get("colors") or {}).items()))
+    print("theme      %s%s" % (rep.get("theme") or "(the selector's default)", colors))
     for im in rep["images"]:
         print("image %d    %s  %r / %r" % (im["index"], im["device"], im["title"], im["subtitle"]))
         print("           art=%s anim=%s music=%s confirm=%s"
@@ -3290,7 +3418,8 @@ def selftest(d, selector_file=None):
     ok &= ms["rows"][1][3] == "confirm1.wav" and ms["rows"][0][3] == ""
     ok &= "wrong_rate.wav" not in ms["files"] and ms["volume"] == 40
     conf = render_images_conf(plan.devices(), ["A stock", "B", "C"], ["synthetic", "", "third"], 1, 7, None,
-                              ms["rows"], ms["sound_move"], ms["sound_confirm"], ms["volume"])
+                              ms["rows"], ms["sound_move"], ms["sound_confirm"], ms["volume"],
+                              theme="custom", colors={"frame_hl": "00ff00", "background": "#102030"})
     mans = selector_manifests(plan, conf, media, [A, B, C])
     inject_card(out, sel, conf, workdir=d, media_files=ms["files"], manifests=mans)
     print("== verify")
@@ -3332,6 +3461,7 @@ def selftest(d, selector_file=None):
     ok &= verify_card(out, plan, sel)
     ref = fs_ref(out, plan.prims[1].start * SECTOR)
     back = parse_images_conf(debugfs_cat(ref, SELECT_DIR + "/images.conf"))
+    ok &= back["theme"] == "custom" and back["colors"] == {"background": "102030", "frame_hl": "00ff00"}
     ok &= back["images"] == [("/dev/mmcblk0p3", "A stock", "synthetic"), ("/dev/mmcblk0p7", "B", ""), ("/dev/mmcblk0p8", "C", "third")]
     ok &= back["media"] == [("art0.png", "", "", ""),
                             ("art1.png", "anim1.gif", "music1.wav", "confirm1.wav"),
@@ -3510,6 +3640,10 @@ def _add_conf_flags(s):
     s.add_argument("--default", type=int, help="images.conf default index (default 0)")
     s.add_argument("--volume", type=int, help="images.conf volume 0-100 (software mix gain; overrides media.json)")
     s.add_argument("--mixer-volume", type=int, help="images.conf mixer_volume 0-63 (the game's codec curve on selem PCM; only when set)")
+    s.add_argument("--theme", help="the menu's colours: one of codeselect/themes.json's names, or custom "
+                                   "(the default theme plus --color overrides); an existing card's is kept when absent")
+    s.add_argument("--color", action="append", metavar="ROLE=RRGGBB",
+                   help="one colour on top of the theme (repeatable; the roles are in themes.json)")
     s.add_argument("--conf", help="use this images.conf verbatim instead of generating one")
 
 

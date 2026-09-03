@@ -8,10 +8,12 @@ debugfs: geometries are constructed, synthetic cards are a few MiB of random
 bytes in tmp_path, and the ext4 injection (which needs debugfs) is exercised by
 the tool's own `selftest` subcommand under WSL instead.
 """
+import argparse
 import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 
 import pytest
@@ -899,7 +901,7 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     # it is JSON, and exactly the keys contract A names
     d = json.loads(json.dumps(man))
     assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "default",
-                      "volume", "mixer_volume", "sound_move", "sound_confirm"}
+                      "volume", "mixer_volume", "sound_move", "sound_confirm", "theme", "colors"}
     # a card with no media at all: the fields are null, not absent
     plain = mk.build_manifest(plan, mk.parse_images_conf(_menu_conf(mk, plan)), None)
     assert [im["art"] for im in plain["images"]] == [None, None]
@@ -1053,13 +1055,14 @@ def _fake_p2(mk, monkeypatch, files, dirs, trees=None):
 
 
 def _loaded_card(mk, tmp_path, monkeypatch, with_build=True, with_media_json=True, sources=None,
-                 trees=None):
+                 trees=None, theme=None, colors=None):
     out, srcs, plan = _synth_card(mk, tmp_path)
     conf = mk.render_images_conf(plan.devices(), ["STERN 1.59.0", "TMNT 1987"],
                                  ["Original Stern code", "1987 cartoon upscale"], 1, 20,
                                  mk.SELECT_DIR + "/font.ttf",
                                  media=[("art0.png", "", ""), ("art1.png", "anim1.gif", "music1.wav")],
-                                 sound_move="move.wav", sound_confirm="confirm.wav", volume=35)
+                                 sound_move="move.wav", sound_confirm="confirm.wav", volume=35,
+                                 theme=theme, colors=colors)
     media_json = json.dumps({"images": [{"art": "art0.png", "anim": None, "music": None,
                                          "art_source": "auto@20", "anim_source": None},
                                         {"art": "art1.png", "anim": "anim1.gif", "music": "music1.wav",
@@ -1112,6 +1115,7 @@ def test_inspect_reads_back_every_field_a_loader_needs(mk, tmp_path, monkeypatch
     assert (rep["timeout"], rep["default"], rep["volume"], rep["mixer_volume"]) == (20, 1, 35, None)
     assert (rep["sound_move"], rep["sound_confirm"]) == ("move.wav", "confirm.wav")
     assert rep["font"] == mk.SELECT_DIR + "/font.ttf" and rep["media_dir"] == mk.MEDIA_DIR
+    assert rep["theme"] is None and rep["colors"] == {}          # no theme key: the selector's default
     assert sorted(m["name"] for m in rep["media"]) == ["anim1.gif", "art0.png", "art1.png", "confirm.wav",
                                                        "move.wav", "music1.wav"]
     assert [m for m in rep["media"] if m["name"] == "art0.png"][0]["bytes"] == len(b"png-zero")
@@ -1122,7 +1126,7 @@ def test_inspect_reads_back_every_field_a_loader_needs(mk, tmp_path, monkeypatch
     # every key contract B names, and the whole report is JSON
     assert set(rep) >= {"card", "size", "layout", "partitions", "images", "timeout", "default", "volume",
                         "mixer_volume", "sound_move", "sound_confirm", "font", "media", "has_media_json",
-                        "has_build_json", "selector", "warnings"}
+                        "has_build_json", "selector", "warnings", "theme", "colors"}
     assert json.loads(json.dumps(rep))["images"][1]["title"] == "TMNT 1987"
     # --media-out gives back a directory that IS a --media-dir again
     d = tmp_path / "loaded"
@@ -1131,6 +1135,117 @@ def test_inspect_reads_back_every_field_a_loader_needs(mk, tmp_path, monkeypatch
     assert (d / "art0.png").read_bytes() == b"png-zero"
     assert json.loads((d / "media.json").read_bytes())["images"][1]["anim_source"] == "auto@20:2:8"
     assert rep["media_out"]["files"] == 7
+
+
+def test_inspect_reads_the_theme_back(mk, tmp_path, monkeypatch, capsys):
+    """theme= and the colour overrides come back as the card spells them - a loader puts them in
+    its Theme picker - and the human table says them too."""
+    out, _srcs, _plan = _loaded_card(mk, tmp_path, monkeypatch, theme="custom",
+                                     colors={"frame_hl": "#00FF00", "background": "102030"})
+    rep = mk.inspect_card(out, str(tmp_path / "loaded"))
+    assert rep["theme"] == "custom"
+    assert rep["colors"] == {"background": "102030", "frame_hl": "00ff00"}
+    mk.print_inspect(rep)
+    table = capsys.readouterr().out
+    assert "theme      custom color_background=102030 color_frame_hl=00ff00" in table
+    # ...and build.json carried them too, so an inject with no flags writes them back
+    build = json.loads(mk.selector_manifests(_plan_of(mk, rep), mk.render_images_conf(
+        [im["device"] for im in rep["images"]], theme="slate"), None, None)["build.json"])
+    assert build["theme"] == "slate" and build["colors"] == {}
+
+
+def _plan_of(mk, rep):
+    """A plan-shaped stand-in for build_manifest: only .layout is read."""
+    class P(object):
+        layout = rep["layout"]
+    return P()
+
+
+def test_the_themes_file_is_the_one_definition(mk):
+    """codeselect/themes.json, read as is: fourteen roles, a label for each, a default that
+    exists, a handful of built-ins each naming every role as RRGGBB - and the selector's own
+    generator accepts the same file, which is what its build compiles in."""
+    th = mk.boot_themes()
+    assert th["default"] == "midnight"
+    assert th["roles"][0] == "background" and th["roles"][-1] == "countdown" and len(th["roles"]) == 14
+    assert mk.theme_names() == ["midnight", "arcade", "neon", "emerald", "slate", "daylight"]
+    assert set(th["labels"]) == set(th["roles"])
+    for t in th["themes"]:
+        assert set(t["colors"]) == set(th["roles"])
+        assert all(re.match(r"^[0-9a-f]{6}$", v) for v in t["colors"].values()), t["name"]
+        assert t["title"] and t["about"]
+    assert mk.theme_colors("midnight")["background"] == "0b0e13"     # the look before themes existed
+    assert mk.theme_colors("midnight")["frame_hl"] == "ffc42d"
+    assert mk.theme_colors("custom") is None and mk.theme_colors("nosuch") is None
+    gen = os.path.join(os.path.dirname(mk.THEMES_JSON), "gen_themes.py")
+    header = subprocess.run([sys.executable, gen, mk.THEMES_JSON, "-"], check=True,
+                            capture_output=True, text=True).stdout
+    assert "#define TH_N 14" in header and "#define THEME_COUNT 6" in header
+    assert '#define THEME_DEFAULT "midnight"' in header
+    assert "TH_BACKGROUND," in header and "TH_COUNTDOWN\n" in header
+    assert '{ "daylight", { 0xf2f0ea,' in header
+
+
+def test_images_conf_carries_a_theme_and_its_colours(mk):
+    """theme= after the other keys; color_<role>= lines in the roles' order, lower case, no '#';
+    both read back; nothing written when nothing was asked for; a typo refused where it is
+    typed, and a card's unknown name or bad colour tolerated where it is read (the selector
+    tolerates them too)."""
+    devs = ["/dev/mmcblk0p3", "/dev/mmcblk0p7"]
+    text = mk.render_images_conf(devs, ["A", "B"], theme="Slate")
+    lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
+    assert lines == ["image=/dev/mmcblk0p3|A|", "image=/dev/mmcblk0p7|B|", "default=0", "timeout=15",
+                     "theme=slate"]
+    text = mk.render_images_conf(devs, ["A", "B"], theme="custom",
+                                 colors={"countdown": "#00FF00", "background": "102030"})
+    lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
+    assert lines[-3:] == ["theme=custom", "color_background=102030", "color_countdown=00ff00"]
+    conf = mk.parse_images_conf(text)
+    assert conf["theme"] == "custom" and conf["colors"] == {"background": "102030", "countdown": "00ff00"}
+    # colours on a built-in are legal too (the selector puts them on top of it)
+    text = mk.render_images_conf(devs, ["A", "B"], theme="neon", colors={"frame_hl": "ffffff"})
+    assert "theme=neon\ncolor_frame_hl=ffffff\n" in text
+    # nothing asked for: no key, and the parser says so
+    plain = mk.render_images_conf(devs, ["A", "B"])
+    assert "theme" not in plain and "color_" not in plain
+    assert mk.parse_images_conf(plain)["theme"] is None and mk.parse_images_conf(plain)["colors"] == {}
+    # build.json carries both
+    man = mk.build_manifest(None, mk.parse_images_conf(text), None)
+    assert (man["theme"], man["colors"]) == ("neon", {"frame_hl": "ffffff"})
+    # a typo is refused where it is typed...
+    for bad in ({"theme": "nosuch"}, {"colors": {"countdown": "zzz"}}, {"colors": {"nosuchrole": "ffffff"}},
+                {"colors": {"countdown": "#12345"}}):
+        with pytest.raises(mk.Refused):
+            mk.render_images_conf(devs, ["A", "B"], **bad)
+    # ...and tolerated where it is read: the name kept for inspect to show, the bad colours dropped
+    conf = mk.parse_images_conf("image=/dev/mmcblk0p3|A|\ntheme=NoSuch\ncolor_countdown=zzz\n"
+                                "color_nosuchrole=ffffff\ncolor_frame_hl=#ABCDEF\n")
+    assert conf["theme"] == "nosuch" and conf["colors"] == {"frame_hl": "abcdef"}
+    assert mk.parse_color_flags(["frame_hl=abcdef", "countdown = 00ff00 "]) == {"frame_hl": "abcdef",
+                                                                                "countdown": "00ff00"}
+    with pytest.raises(mk.Refused):
+        mk.parse_color_flags(["frame_hl"])
+
+
+def test_conf_for_plan_takes_the_theme_from_the_flags_else_the_card(mk):
+    plan = _two_image_plan(mk)
+    ex = mk.parse_images_conf(_menu_conf(mk, plan, theme="custom", colors={"countdown": "00ff00"}))
+    # no flags: the card's own theme and colours ride through
+    text = mk.conf_for_plan(plan, argparse.Namespace(), existing=ex)
+    assert "theme=custom\ncolor_countdown=00ff00\n" in text
+    # --theme alone: the whole answer - the old overrides go
+    text = mk.conf_for_plan(plan, argparse.Namespace(theme="arcade"), existing=ex)
+    assert text.endswith("theme=arcade\n") and "color_" not in text
+    # --color alone: on top of the card's theme
+    text = mk.conf_for_plan(plan, argparse.Namespace(color=["frame_hl=ffffff"]), existing=ex)
+    assert text.endswith("theme=custom\ncolor_frame_hl=ffffff\n")
+    # a card whose theme this build does not know: noted, the default written
+    odd = dict(ex, theme="nosuch")
+    text = mk.conf_for_plan(plan, argparse.Namespace(), existing=odd)
+    assert "theme=" not in text
+    # a typo in the flag is refused
+    with pytest.raises(mk.Refused):
+        mk.conf_for_plan(plan, argparse.Namespace(theme="nosuch"), existing=ex)
 
 
 def test_inspect_degrades_when_the_card_carries_no_json_sidecars(mk, tmp_path, monkeypatch):

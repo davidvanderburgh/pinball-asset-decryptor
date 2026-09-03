@@ -45,7 +45,7 @@
 #include "audio.h"
 #include "log.h"
 
-#define VERSION "2.1"
+#define VERSION "2.2"
 
 #define DEF_CONF     "/usr/local/codeselect/images.conf"
 #define DEF_OUT      "/var/volatile/codeselect.choice"
@@ -313,26 +313,20 @@ static struct gfx_font *load_font(const struct opts *o, const struct conf *c, ch
 
 /* ------------------------------------------------------------- the layout */
 
-#define C_BG        0x0b0e13
-#define C_TITLE     0xe8ecf1
-#define C_CARD      0x171c24
-#define C_CARD_HL   0x263041
-#define C_FRAME     0x2c3542
-#define C_FRAME_HL  0xffc42d
-#define C_TEXT      0xb8c0cc
-#define C_TEXT_HL   0xffffff
-#define C_SUB       0x8a94a2
-#define C_SUB_HL    0xd6dce4
-#define C_LABEL     0x5d6673
-#define C_LABEL_HL  0xffc42d
-#define C_FOOT      0x7d8794
-#define C_COUNT     0xffc42d
+/* The menu's colours are the THEME the conf picked (theme.h; the built-in
+ * themes are themes.json, and 'midnight' there is the look this program had
+ * before it could be chosen).  Every draw function reads them off the layout
+ * it is handed, by role. */
+#define TH(L, role) ((L)->th.rgb[TH_##role])
 
 struct layout {
     float s;
     int n, vis, carousel;     /* images; visible full cards; n > MAX_VISIBLE */
     int margin, gap, top, ch, cw, pad, inner;
     int art_h;                /* the art panel's height; 0 = no art anywhere (v1 picture) */
+    struct theme th;          /* the colours, resolved from the conf (theme_resolve) */
+    int th_known;             /* the conf's theme name was a theme (else the default is up) */
+    int th_set;               /* how many roles the conf's color_ keys replaced */
 };
 
 static void layout_compute(struct layout *L, const struct gfx *g, const struct conf *c)
@@ -351,6 +345,7 @@ static void layout_compute(struct layout *L, const struct gfx *g, const struct c
     L->pad = (int)(28 * s);
     L->inner = L->cw - 2 * L->pad;
     L->art_h = conf_has_art(c) ? (int)(0.40f * L->ch) : 0;
+    L->th_set = theme_resolve(&L->th, c->theme, c->color, c->color_set, &L->th_known);
 }
 
 /* slot 0..vis-1 = the visible full cards; -1 and vis = the carousel's peeking
@@ -521,7 +516,7 @@ static void draw_panel(struct gfx *g, const struct layout *L, const struct media
     const struct art_image *pic;
     if (!L->art_h) return;
     panel_rect(L, slot, &px, &py, &pw, &ph);
-    gfx_rect(g, px, py, pw, ph, on ? C_CARD_HL : C_CARD);
+    gfx_rect(g, px, py, pw, ph, on ? TH(L, CARD_HL) : TH(L, CARD));
     pic = card_picture(m, i, on, frame, pinned);
     if (pic) gfx_blit(g, px + (pw - pic->w) / 2, py + (ph - pic->h) / 2, pic->rgba, pic->w, pic->h);
 }
@@ -541,12 +536,12 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
     char tlines[2][CONF_STR], lines[4][CONF_STR], buf[64], cut[CONF_STR + 8];
 
     gfx_round_frame(g, x, top, cw, ch, (int)(22 * s), (int)((on ? 8 : 3) * s),
-                    on ? C_FRAME_HL : C_FRAME, on ? C_CARD_HL : C_CARD);
+                    on ? TH(L, FRAME_HL) : TH(L, FRAME), on ? TH(L, CARD_HL) : TH(L, CARD));
     snprintf(buf, sizeof buf, "IMAGE %d", i + 1);
 
     if (!L->art_h) {
         /* the v1 picture, byte for byte */
-        gfx_text_center(g, f, 22 * s, x + cw / 2, top + (int)(50 * s), buf, on ? C_LABEL_HL : C_LABEL);
+        gfx_text_center(g, f, 22 * s, x + cw / 2, top + (int)(50 * s), buf, on ? TH(L, LABEL_HL) : TH(L, LABEL));
         tpx = gfx_fit_px(f, im->title, inner, 62 * s, 34 * s);
         if (gfx_text_width(f, tpx, im->title) <= inner) {
             tl = 1;
@@ -559,7 +554,7 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
         for (k = 0; k < tl; k++) {
             gfx_ellipsize(f, tpx, tlines[k], inner, cut, sizeof cut);
             gfx_text_center(g, f, tpx, x + cw / 2, base + (int)(k * tpx * 1.15f), cut,
-                            on ? C_TEXT_HL : C_TEXT);
+                            on ? TH(L, TITLE_HL) : TH(L, TITLE));
         }
         sub_y = base + (int)((tl - 1) * tpx * 1.15f) + (int)(62 * s);
         spx = gfx_fit_px(f, im->subtitle, inner * 2, 30 * s, 22 * s);
@@ -567,7 +562,7 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
         for (k = 0; k < nl; k++) {
             gfx_ellipsize(f, spx, lines[k], inner, cut, sizeof cut);
             gfx_text_center(g, f, spx, x + cw / 2, sub_y + (int)(40 * k * s), cut,
-                            on ? C_SUB_HL : C_SUB);
+                            on ? TH(L, SUBTITLE_HL) : TH(L, SUBTITLE));
         }
         return;
     }
@@ -576,7 +571,7 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
     draw_panel(g, L, m, i, slot, on, frame, pinned);
     {
         int label_y = top + L->pad + L->art_h + (int)(30 * s);
-        gfx_text_center(g, f, 22 * s, x + cw / 2, label_y, buf, on ? C_LABEL_HL : C_LABEL);
+        gfx_text_center(g, f, 22 * s, x + cw / 2, label_y, buf, on ? TH(L, LABEL_HL) : TH(L, LABEL));
         tpx = gfx_fit_px(f, im->title, inner, 48 * s, 26 * s);
         if (gfx_text_width(f, tpx, im->title) <= inner) {
             tl = 1;
@@ -590,7 +585,7 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
         for (k = 0; k < tl; k++) {
             gfx_ellipsize(f, tpx, tlines[k], inner, cut, sizeof cut);
             gfx_text_center(g, f, tpx, x + cw / 2, base + (int)(k * tpx * 1.15f), cut,
-                            on ? C_TEXT_HL : C_TEXT);
+                            on ? TH(L, TITLE_HL) : TH(L, TITLE));
         }
         sub_y = base + (int)((tl - 1) * tpx * 1.15f) + (int)(44 * s);
         spx = gfx_fit_px(f, im->subtitle, inner * 2, 26 * s, 20 * s);
@@ -602,7 +597,7 @@ static void draw_card(struct gfx *g, struct gfx_font *f, const struct layout *L,
         for (k = 0; k < nl; k++) {
             gfx_ellipsize(f, spx, lines[k], inner, cut, sizeof cut);
             gfx_text_center(g, f, spx, x + cw / 2, sub_y + k * line_h, cut,
-                            on ? C_SUB_HL : C_SUB);
+                            on ? TH(L, SUBTITLE_HL) : TH(L, SUBTITLE));
         }
     }
 }
@@ -617,13 +612,13 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
     int W = g->w, slot;
     char buf[300], widest[300], cut[300];
 
-    gfx_fill(g, C_BG);
-    gfx_text_center(g, f, 60 * s, W / 2, (int)(96 * s), "SELECT GAME CODE", C_TITLE);
+    gfx_fill(g, TH(L, BACKGROUND));
+    gfx_text_center(g, f, 60 * s, W / 2, (int)(96 * s), "SELECT GAME CODE", TH(L, HEADING));
 
     if (L->carousel) {
         /* the neighbours-but-one peek in from the edges: frames only */
-        gfx_round_frame(g, card_x(L, -1), L->top, L->cw, L->ch, (int)(22 * s), (int)(3 * s), C_FRAME, C_CARD);
-        gfx_round_frame(g, card_x(L, L->vis), L->top, L->cw, L->ch, (int)(22 * s), (int)(3 * s), C_FRAME, C_CARD);
+        gfx_round_frame(g, card_x(L, -1), L->top, L->cw, L->ch, (int)(22 * s), (int)(3 * s), TH(L, FRAME), TH(L, CARD));
+        gfx_round_frame(g, card_x(L, L->vis), L->top, L->cw, L->ch, (int)(22 * s), (int)(3 * s), TH(L, FRAME), TH(L, CARD));
     }
     for (slot = 0; slot < L->vis; slot++) {
         int i = slot_image(L, hl, slot);
@@ -631,7 +626,7 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
     }
     if (L->carousel) {
         snprintf(buf, sizeof buf, "<   %d / %d   >", hl + 1, L->n);
-        gfx_text_center(g, f, 26 * s, W / 2, (int)(602 * s), buf, C_FOOT);
+        gfx_text_center(g, f, 26 * s, W / 2, (int)(602 * s), buf, TH(L, FOOTER));
     }
 
     /* Both bottom lines are SHRUNK and then CUT to the glass. Shrinking alone
@@ -653,7 +648,7 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
         const int wmax = W - (int)(80 * s);
         float fpx = gfx_fit_px(f, foot, wmax, 30 * s, 20 * s), cpx;
         gfx_ellipsize(f, fpx, foot, wmax, cut, sizeof cut);
-        gfx_text_center(g, f, fpx, W / 2, (int)(648 * s), cut, C_FOOT);
+        gfx_text_center(g, f, fpx, W / 2, (int)(648 * s), cut, TH(L, FOOTER));
         snprintf(widest, sizeof widest, "%s%s", action ? PRESS_ACTION : PRESS_START,
                  c->img[hl].title);
         if (remain >= 0)
@@ -662,20 +657,20 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
             snprintf(buf, sizeof buf, "%s", widest);
         cpx = gfx_fit_px(f, widest, wmax, 38 * s, 24 * s);
         gfx_ellipsize(f, cpx, buf, wmax, cut, sizeof cut);
-        gfx_text_center(g, f, cpx, W / 2, (int)(718 * s), cut, C_COUNT);
+        gfx_text_center(g, f, cpx, W / 2, (int)(718 * s), cut, TH(L, COUNTDOWN));
     }
 }
 
 /* the LOADING frame: the chosen card's picture (when it has one) above the
  * line; this frame stays on the LCD until the game's first frame */
-static void draw_loading(struct gfx *g, struct gfx_font *f, const char *title,
-                         const struct art_image *pic)
+static void draw_loading(struct gfx *g, struct gfx_font *f, const struct theme *th,
+                         const char *title, const struct art_image *pic)
 {
     float s = (float)g->h / 768.0f;
     char buf[300], cut[300];
     int y = (int)(400 * s), wmax = g->w - (int)(80 * s);
     float px;
-    gfx_fill(g, C_BG);
+    gfx_fill(g, th->rgb[TH_BACKGROUND]);
     if (pic) {
         gfx_blit(g, (g->w - pic->w) / 2, (int)(200 * s), pic->rgba, pic->w, pic->h);
         y = (int)(200 * s) + pic->h + (int)(90 * s);
@@ -683,7 +678,7 @@ static void draw_loading(struct gfx *g, struct gfx_font *f, const char *title,
     snprintf(buf, sizeof buf, "LOADING %s...", title);
     px = gfx_fit_px(f, buf, wmax, 64 * s, 30 * s);
     gfx_ellipsize(f, px, buf, wmax, cut, sizeof cut);
-    gfx_text_center(g, f, px, g->w / 2, y, cut, C_TEXT_HL);
+    gfx_text_center(g, f, px, g->w / 2, y, cut, th->rgb[TH_TITLE_HL]);
 }
 
 /* the slot image i is drawn in, or -1 when it is not on screen */
@@ -891,6 +886,13 @@ int main(int argc, char **argv)
         return 2;
     }
     layout_compute(&L, &g, &c);
+    {
+        char bad[64] = "";
+        if (c.bad_colors)
+            snprintf(bad, sizeof bad, ", %d colour value%s ignored", c.bad_colors, c.bad_colors == 1 ? "" : "s");
+        if (!L.th_known) sel_log("theme: '%s' is not a theme, using %s", c.theme, THEME_DEFAULT);
+        sel_log("theme: %s (%d of %d colours set by the conf%s)", L.th.name, L.th_set, TH_N, bad);
+    }
     if (snapshot) {
         rc = snapshot_frame(&o, &c, &g, font, &L, hl, how, timeout, invert, fontpath, action);
         gfx_free(&g);
@@ -1045,7 +1047,8 @@ int main(int argc, char **argv)
             else
                 sel_log("wrote %s (%dx%d)", o.headless, w, h);
         }
-        draw_loading(&g, font, c.img[chosen].title, card_picture(&media, chosen, 1, frame, pinned));
+        draw_loading(&g, font, &L.th, c.img[chosen].title,
+                     card_picture(&media, chosen, 1, frame, pinned));
         if (headless) {
             char lp[400];
             snprintf(lp, sizeof lp, "%s.loading.ppm", o.headless);

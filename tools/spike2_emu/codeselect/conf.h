@@ -14,6 +14,10 @@
  *   volume=<0-100>           software mix gain (default 50)
  *   mixer_volume=<0-63>      optional: apply the game's codec curve to the
  *                            ALSA 'PCM' selem (hardware only; untouched when absent)
+ *   theme=<name>             the menu's colours: a built-in theme (themes.json;
+ *                            the default is 'midnight') or 'custom'
+ *   color_<role>=RRGGBB      one colour on top of the theme (the roles are in
+ *                            themes.json); a bad value is counted and ignored
  *
  * <device> is the block device on hardware ('/dev/mmcblk0p3', '/dev/mmcblk0p7',
  * or '/dev/mmcblk0p7:img2' = a partition plus a subdirectory holding a whole
@@ -25,6 +29,8 @@
  */
 #ifndef CODESELECT_CONF_H
 #define CODESELECT_CONF_H
+
+#include "theme.h"
 
 #define CONF_MAX_IMAGES 16
 #define CONF_STR 200
@@ -51,6 +57,10 @@ struct conf {
     char sound_confirm[CONF_STR];  /* "" when absent */
     int volume;        /* volume= 0..100 (-1 when absent; the program defaults to 50) */
     int mixer_volume;  /* mixer_volume= 0..63 (-1 when absent = leave the mixer alone) */
+    char theme[CONF_STR];          /* theme= ("" when absent = the default) */
+    unsigned color[TH_N];          /* color_<role>= overrides... */
+    unsigned char color_set[TH_N]; /* ...and which roles the conf set */
+    int bad_colors;    /* color_ keys with an unknown role or a value that is not RRGGBB: ignored, counted */
 };
 
 /* 0 ok (c->n >= 1), -1 error with a message in err. */

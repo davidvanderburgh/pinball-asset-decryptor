@@ -240,6 +240,55 @@ grep -q "anim: cannot open anim1.gif" "$T/snap.log" || { echo "headless: FAIL mi
 grep -q "media: 0 art, 0 anim (0 frames), 0 music, 0 card confirm, move=n confirm=n" "$T/snap.log" || {
     echo "headless: FAIL media line without a media dir"; grep media "$T/snap.log"; exit 1; }
 band "$T/snap_nomedia.ppm" 300 684 1060 722 FFC42D
+# THEMES (theme.h): theme= picks a built-in, color_<role>= puts one colour on
+# top of it, theme=custom is the default plus the overrides, an unknown name
+# falls back to the default and says so, a bad colour value is ignored - and
+# none of it can keep a machine from booting
+cat > "$T/theme.conf" <<'EOF'
+image=/dev/mmcblk0p3|STERN STOCK|original code
+image=/dev/mmcblk0p7|TMNT 1987|retheme
+default=1
+timeout=0
+theme=daylight
+EOF
+rm -f "$T/snap.log"
+snap "$T/snap_theme.ppm" "$T/theme.conf"
+pix "$T/snap_theme.ppm" 5 5 F2F0EA                   # daylight's background...
+band "$T/snap_theme.ppm" 300 684 1060 722 C2410C     # ...and its countdown line
+grep -q "theme: daylight (0 of 14 colours set by the conf)" "$T/snap.log" || {
+    echo "headless: FAIL theme log"; cat "$T/snap.log"; exit 1; }
+cat > "$T/custom.conf" <<'EOF'
+image=/dev/mmcblk0p3|STERN STOCK|original code
+image=/dev/mmcblk0p7|TMNT 1987|retheme
+default=1
+timeout=0
+theme=custom
+color_background=#102030
+color_countdown=00FF00
+color_frame_hl=notacolour
+color_nosuchrole=ffffff
+EOF
+rm -f "$T/snap.log"
+snap "$T/snap_custom.ppm" "$T/custom.conf"
+pix "$T/snap_custom.ppm" 5 5 102030
+band "$T/snap_custom.ppm" 300 684 1060 722 00FF00
+grep -q "theme: custom (2 of 14 colours set by the conf, 2 colour values ignored)" "$T/snap.log" || {
+    echo "headless: FAIL custom theme log"; cat "$T/snap.log"; exit 1; }
+sed 's/^theme=custom$/theme=nosuchtheme/' "$T/custom.conf" > "$T/unknown.conf"
+rm -f "$T/snap.log"
+snap "$T/snap_unknown.ppm" "$T/unknown.conf"
+pix "$T/snap_unknown.ppm" 5 5 102030                 # the overrides still apply on the fallback
+grep -q "theme: 'nosuchtheme' is not a theme, using midnight" "$T/snap.log" || {
+    echo "headless: FAIL unknown theme log"; cat "$T/snap.log"; exit 1; }
+grep -q "theme: midnight (2 of 14 colours set by the conf, 2 colour values ignored)" "$T/snap.log" || {
+    echo "headless: FAIL unknown theme falls back"; cat "$T/snap.log"; exit 1; }
+# no theme key at all: the default, and the pixels this program always drew
+rm -f "$T/snap.log"
+snap "$T/snap_notheme.ppm" "$T/three.conf"
+pix "$T/snap_notheme.ppm" 5 5 0B0E13
+band "$T/snap_notheme.ppm" 300 684 1060 722 FFC42D
+grep -q "theme: midnight (0 of 14 colours set by the conf)" "$T/snap.log" || {
+    echo "headless: FAIL default theme log"; cat "$T/snap.log"; exit 1; }
 # refused, exit 2, no PPM: --highlight past the end, an empty conf,
 # --snapshot together with --headless
 rm -f "$T/snap_bad.ppm"

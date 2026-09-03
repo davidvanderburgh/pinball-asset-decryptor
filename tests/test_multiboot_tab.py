@@ -43,7 +43,8 @@ from pinball_decryptor.gui.multiboot_tab import (
     preview_fingerprint, preview_prepare_args, preview_snapshot_args,
     rebuild_blockers, size_plan_text, snapshot_commands, split_anim_source,
     split_art_source, suggest_title, under_library, validate_form,
-    write_preview_conf)
+    write_preview_conf,
+    build_args, inject_args)
 
 
 @pytest.fixture(autouse=True)
@@ -466,7 +467,7 @@ def test_preview_conf_is_the_form_with_placeholder_devices(tmp_path):
         "image=p7|turtles_pro-1_59_0|1987 cartoon upscale|art1.png|anim1.gif|",
         "image=p7:img2|IMG 2|||anim2.gif|",
         "default=1", "timeout=20", "volume=40",
-        "font=/usr/local/codeselect/font.ttf"]
+        "font=/usr/local/codeselect/font.ttf", "theme=midnight"]
     assert text.endswith("\n") and "\r" not in text
 
 
@@ -658,7 +659,7 @@ def test_the_table_cells_and_the_menu_summary_say_it_in_a_phrase():
                          bypass=False, sound_move="D:/a b/click.wav")
     assert menu_summary(form) == (
         "sounds click.wav / auto  ·  volume 35  ·  wait for START  ·  "
-        "default 1  ·  bypass off")
+        "default 1  ·  bypass off  ·  theme midnight")
     assert "15 s countdown" in menu_summary(MultibootForm(images=[]))
     assert "bypass on" in menu_summary(MultibootForm(images=[]))
 
@@ -3852,7 +3853,8 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
     menu = menu_from_state({"volume": "not a number", "timeout": None,
                             "default": 2, "bypass": False})
     assert menu == {"move": "auto", "confirm": "auto", "volume": 50,
-                    "timeout": 15, "default": 2, "bypass": False}
+                    "timeout": 15, "default": 2, "bypass": False,
+                    "theme": "midnight", "colors": {}}
     assert menu_from_state(None)["bypass"] is True
     assert menu_from_state({"volume": 900})["volume"] == 100
 
@@ -5855,5 +5857,259 @@ def test_select_plays_the_confirm_sound_and_blacks_the_screen(tmp_path,
         # ...and comes back by itself, to the frame that was on it
         panel._blackout_over()
         assert panel._black_job is None
+    finally:
+        root.destroy()
+
+
+# --------------------------------------------------------------------------
+# the menu's colour themes
+# --------------------------------------------------------------------------
+
+def test_the_themes_are_read_off_the_selectors_own_file():
+    """themes.json is the selector's; the tab reads it as is - the names,
+    the titles the picker shows, the roles and their labels."""
+    th = multiboot_tab.boot_themes()
+    assert th is not None and th["default"] == "midnight"
+    assert multiboot_tab.theme_names() == [
+        "midnight", "arcade", "neon", "emerald", "slate", "daylight"]
+    assert len(multiboot_tab.theme_roles()) == 14
+    assert multiboot_tab.theme_title("slate") == "Slate"
+    assert multiboot_tab.theme_title("custom") == "Make your own…"
+    assert multiboot_tab.theme_title("") == "midnight"
+    assert multiboot_tab.theme_label("frame_hl") == "Card frame, highlighted"
+    assert "amber" in multiboot_tab.theme_about("midnight")
+    assert multiboot_tab.theme_colors("midnight")["frame_hl"] == "ffc42d"
+    assert multiboot_tab.theme_colors("custom") is None
+    assert multiboot_tab.clean_colors(
+        {"frame_hl": "#ABCDEF", "countdown": "zzz", "nosuch": "ffffff",
+         "background": " 102030 "}) == {"frame_hl": "abcdef",
+                                        "background": "102030"}
+    assert multiboot_tab.clean_colors("not a dict") == {}
+
+
+def test_theme_from_card_shows_what_the_machine_will_draw():
+    f = multiboot_tab.theme_from_card
+    assert f("slate", {}) == ("slate", {})
+    assert f(None, None) == ("midnight", {})
+    assert f("nosuch", {}) == ("midnight", {})
+    # overrides on top of anything are the custom theme with every role
+    # spelled out - the base's colours under them
+    theme, colors = f("slate", {"countdown": "00ff00"})
+    assert theme == "custom" and colors["countdown"] == "00ff00"
+    assert colors["background"] == multiboot_tab.theme_colors("slate")[
+        "background"] and len(colors) == 14
+    theme, colors = f("custom", {"frame_hl": "#FFFFFF", "bad": "zzz"})
+    assert theme == "custom" and colors["frame_hl"] == "ffffff"
+    assert colors["background"] == "0b0e13" and "bad" not in colors
+    theme, colors = f(None, {"heading": "ff0000"})
+    assert theme == "custom" and colors["heading"] == "ff0000"
+
+
+def test_the_theme_rides_every_command_line_and_the_preview_conf(tmp_path):
+    """--theme on build and inject, --color per role for the custom theme
+    (the selector's order), the same keys in the preview's conf - and a
+    colour that is not one is left out there and refused by validate_form,
+    never handed to a tool."""
+    form = _form(tmp_path, 2, theme="slate")
+    build, inject = build_args(form), inject_args(form, form.out)
+    for argv in (build, inject):
+        assert argv[argv.index("--theme") + 1] == "slate"
+        assert "--color" not in argv
+    assert multiboot_tab.theme_args(form) == ["--theme", "slate"]
+    assert write_preview_conf(form).splitlines()[-1] == "theme=slate"
+    a = preview_fingerprint(form)
+    form.theme = "neon"
+    assert preview_fingerprint(form) != a
+    colors = dict(multiboot_tab.theme_colors("neon"))
+    colors["countdown"] = "#00FF00"
+    form = _form(tmp_path, 2, theme="custom", colors=colors)
+    words = multiboot_tab.theme_args(form)
+    assert words[:2] == ["--theme", "custom"]
+    pairs = [words[i + 1] for i in range(2, len(words), 2)
+             if words[i] == "--color"]
+    assert len(pairs) == 14 and pairs[0].startswith("background=")
+    assert pairs[-1] == "countdown=00ff00"
+    argv = build_args(form)
+    i = argv.index("--theme")
+    assert argv[i:i + len(words)] == words
+    lines = write_preview_conf(form).splitlines()
+    assert lines[-15] == "theme=custom"
+    assert lines[-1] == "color_countdown=00ff00"
+    assert validate_form(form, sources=False) == []
+    form.colors["frame_hl"] = "not a colour"
+    errs = validate_form(form, sources=False)
+    assert any("card frame, highlighted colour must be six hex" in e
+               for e in errs)
+    assert "frame_hl=" not in " ".join(multiboot_tab.theme_args(form))
+    assert "color_frame_hl" not in write_preview_conf(form)
+    form.colors = {"nosuch": "ffffff"}
+    assert any("not a colour the menu has" in e
+               for e in validate_form(form, sources=False))
+    form = _form(tmp_path, 2, theme="nosuch")
+    assert any("not one the selector has" in e
+               for e in validate_form(form, sources=False))
+
+
+def test_form_from_inspect_carries_the_theme(monkeypatch, tmp_path):
+    _win(monkeypatch)
+    info = _rich_report(tmp_path)
+    card = str(tmp_path / "multi" / "card.multi.raw")
+    form, _w = form_from_inspect(info, card, "")
+    assert (form.theme, form.colors) == ("midnight", {})
+    info["theme"], info["colors"] = "neon", {}
+    assert form_from_inspect(info, card, "")[0].theme == "neon"
+    info["theme"], info["colors"] = "custom", {"frame_hl": "00ff00"}
+    form, _w = form_from_inspect(info, card, "")
+    assert form.theme == "custom" and form.colors["frame_hl"] == "00ff00"
+    assert len(form.colors) == 14
+
+
+def test_menu_settings_offers_the_themes_and_a_make_your_own_grid(
+        tmp_path, monkeypatch):
+    """The Look section: a picker of the built-ins plus 'Make your own…',
+    and a grid of every colour that shows a built-in's colours dimmed and
+    comes alive for your own - seeded from the theme that was showing.
+    Cancel puts theme and colours back together; OK keeps them."""
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        dlg = panel.open_menu_settings()
+        root.update()
+        combo = panel._theme_combo
+        assert list(combo["values"]) == ["Midnight", "Arcade", "Neon",
+                                         "Emerald", "Slate", "Daylight",
+                                         "Make your own…"]
+        assert panel._theme_pick.get() == "Midnight"
+        assert sorted(panel._color_entries) == sorted(
+            multiboot_tab.theme_roles())
+        assert all(str(w.cget("state")) == "disabled"
+                   for w in panel._color_entries.values())
+        assert panel._color_vars["frame_hl"].get() == "ffc42d"
+        # the picker: its title lands as the theme's name, and the grid
+        # shows that theme
+        panel._theme_pick.set("Slate")
+        panel._theme_picked()
+        assert panel._theme_var.get() == "slate"
+        assert panel.form().theme == "slate" and panel.form().colors == {}
+        assert panel._color_vars["frame_hl"].get() == "5aa9ff"
+        assert all(str(w.cget("state")) == "disabled"
+                   for w in panel._color_entries.values())
+        assert "theme slate" in panel._menu_lbl.cget("text")
+        assert "blue" in panel._theme_tip.text
+        # make your own: the grid wakes, holding Slate's colours
+        panel._theme_var.set("custom")
+        root.update()
+        assert panel._theme_pick.get() == "Make your own…"
+        assert all(str(w.cget("state")) == "normal"
+                   for w in panel._color_entries.values())
+        assert panel._color_vars["frame_hl"].get() == "5aa9ff"
+        panel._color_vars["countdown"].set("#00FF00")
+        form = panel.form()
+        assert form.theme == "custom"
+        assert form.colors["countdown"] == "#00FF00"
+        assert form.colors["frame_hl"] == "5aa9ff"
+        assert multiboot_tab.theme_args(form)[-1] == "countdown=00ff00"
+        # the swatch follows the value; a typo shows the error colour
+        assert panel._color_swatches["countdown"].cget("bg") == "#00ff00"
+        panel._color_vars["countdown"].set("nope")
+        assert panel._color_swatches["countdown"].cget("bg") != "#00ff00"
+        panel._color_vars["countdown"].set("00ff00")
+        # the swatch is the picker: a click opens the chooser, and what it
+        # answers lands in the value - for your own colours only
+        asked = []
+        monkeypatch.setattr(
+            multiboot_tab.colorchooser, "askcolor",
+            lambda **kw: (asked.append(kw) or ((255, 0, 0), "#ff0000")))
+        panel._pick_color("heading")
+        assert panel._color_vars["heading"].get() == "ff0000"
+        assert asked[-1]["color"] == "#" + multiboot_tab.theme_colors(
+            "slate")["heading"]
+        assert "Heading" in asked[-1]["title"]
+        panel._theme_var.set("slate")
+        panel._pick_color("heading")
+        assert len(asked) == 1                    # a built-in: no chooser
+        panel._theme_var.set("custom")
+        # Cancel: theme and colours back, together
+        dlg.cancel()
+        root.update()
+        assert panel._theme_var.get() == "midnight"
+        assert panel._color_vars["frame_hl"].get() == "ffc42d"
+        assert panel._color_vars["countdown"].get() == "ffc42d"
+        assert panel._theme_combo is None and panel._color_entries == {}
+        # OK keeps
+        dlg = panel.open_menu_settings()
+        root.update()
+        panel._theme_var.set("custom")
+        panel._color_vars["heading"].set("ff0000")
+        dlg.ok()
+        root.update()
+        form = panel.form()
+        assert (form.theme, form.colors["heading"]) == ("custom", "ff0000")
+        assert "theme custom" in panel._menu_lbl.cget("text")
+        # ...and a built-in chosen afterwards drops the custom colours from
+        # the form, though the grid now shows the built-in's
+        panel._theme_var.set("daylight")
+        assert panel.form().colors == {}
+        assert panel._color_vars["heading"].get() == "1e1e1e"
+    finally:
+        root.destroy()
+
+
+def test_the_theme_is_saved_and_restored_with_the_menu(tmp_path):
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        panel._theme_var.set("custom")
+        panel._color_vars["countdown"].set("00ff00")
+        doc = panel.state()
+        assert doc["menu"]["theme"] == "custom"
+        assert doc["menu"]["colors"]["countdown"] == "00ff00"
+        assert doc["menu"]["colors"]["background"] == "0b0e13"
+    finally:
+        root.destroy()
+    root, panel = _panel()
+    try:
+        assert panel.restore_state(doc) is True
+        assert panel._theme_var.get() == "custom"
+        assert panel._color_vars["countdown"].get() == "00ff00"
+        assert panel.form().colors["countdown"] == "00ff00"
+        # a built-in comes back as the file spells it; an unknown one as
+        # the default; a saved colour that is not one is dropped
+        doc["menu"]["theme"], doc["menu"]["colors"] = "slate", {}
+        assert panel.restore_state(doc) is True
+        assert panel._theme_var.get() == "slate"
+        assert panel._color_vars["frame_hl"].get() == "5aa9ff"
+        assert panel.form().colors == {}
+        menu = menu_from_state({"theme": "NoSuch",
+                                "colors": {"countdown": "zzz",
+                                           "heading": "#ABCDEF"}})
+        assert menu["theme"] == "midnight"
+        assert menu["colors"] == {"heading": "abcdef"}
+        assert menu_from_state(None)["theme"] == "midnight"
+        # new card: the default again
+        panel.new_card()
+        assert panel._theme_var.get() == "midnight"
+        assert panel._color_vars["frame_hl"].get() == "ffc42d"
+    finally:
+        root.destroy()
+
+
+def test_a_loaded_cards_theme_change_is_a_menu_change(tmp_path):
+    """On a loaded card a new theme is one menu change - an inject, not a
+    rebuild - and the inject carries it."""
+    root, panel, card, _media = _loaded(tmp_path)
+    calls = _recorder(panel)
+    try:
+        assert panel._theme_var.get() == "midnight"
+        assert "no changes yet" in panel._edit_lbl.cget("text")
+        panel._theme_var.set("arcade")
+        assert "1 menu change (theme)" in panel._edit_lbl.cget("text")
+        assert panel.apply_to_card() is True
+        inject = [c for c in calls[0] if c[0] == "inject"][0][1]
+        words = _tool_words(inject)
+        assert words[words.index("--theme") + 1] == "arcade"
+        assert "--color" not in words
     finally:
         root.destroy()

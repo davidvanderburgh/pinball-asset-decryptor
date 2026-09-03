@@ -191,6 +191,7 @@ from dataclasses import (asdict, dataclass, field, fields as dc_fields,
                          replace)
 from tkinter import colorchooser, filedialog, font as tkfont, messagebox, ttk
 
+from ..core import config
 from . import _rig
 from .emulate_tab import rig_dir
 from .preview_audio import PreviewAudio
@@ -336,6 +337,45 @@ APP_CHROME_H = 128
 
 #: What the selector-ensuring step prints in front of the binary it chose.
 SELECTOR_LINE = "[preview] selector:"
+
+#: THE PREVIEW'S OWN VOLUME AND MUTE (David, 2026-09-03: "a volume slider
+#: with mute button next to the preview tab so I can mute the audio if I
+#: need to. Use the same volume slider interface that we have in the
+#: emulator tab") - the Emulate tab's knob, its own file: this is the
+#: PC-side level of the preview, not the menu's ``volume=`` (which goes on
+#: the card and stays what media.json says).  Shape {"gain": 0-1,
+#: "muted": bool}, beside settings.json like the emulator's audio_ctl.json.
+PREVIEW_AUDIO_CTL_FILE = os.path.join(os.path.dirname(config.SETTINGS_FILE),
+                                      "preview_audio_ctl.json")
+
+
+def load_preview_ctl(path=None):
+    """``(gain, muted)`` as remembered; unity and unmuted for a machine that
+    has never touched the knob."""
+    try:
+        with open(path or PREVIEW_AUDIO_CTL_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        gain = float(data.get("gain", 1.0))
+        muted = bool(data.get("muted", False))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 1.0, False
+    return max(0.0, min(1.0, gain)), muted
+
+
+def write_preview_ctl(gain, muted, path=None):
+    """Remember the knob (atomic: temp + replace).  Never raises - a knob
+    that cannot be remembered still works for the session."""
+    path = path or PREVIEW_AUDIO_CTL_FILE
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"gain": gain, "muted": muted}, f)
+        os.replace(tmp, path)
+    except OSError:
+        return False
+    return True
+
 
 #: What the step that draws a WHOLE animation is called - in the log pane,
 #: in 'Preview failed at …', and in the render's own bookkeeping.  A single
@@ -3221,6 +3261,11 @@ class MultibootPanel:
     #: ...and this is where the long form of everything the 30 px control
     #: strip has no room for lives: the strip gets one line, this gets the
     #: paragraph (see :meth:`_one_line`).
+    VOLUME_TIP = ("The preview's own loudness on this PC, and Mute to "
+                  "silence it - the Emulate tab's knob, for this tab. It "
+                  "scales the menu's volume in Menu settings, which is what "
+                  "goes on the card and does not move with this.")
+
     MEDIA_TIP = ("What the preview has rendered so far. Video: every "
                  "card's picture and clip - they play the moment the frame "
                  "is drawn, all at once, as they do on the machine. Audio: "
@@ -3481,6 +3526,18 @@ class MultibootPanel:
         #: releases the device on stop() and takes it again on the next
         #: loop().  The flag stays as the tests' seam for silence.
         self._sound_var = tk.BooleanVar(value=True)
+        #: ...AND ONLY WHILE THIS TAB IS ON SCREEN (David: "even if I'm not
+        #: in the multiboot tab, the audio of the first selection is
+        #: already playing. It should only be playing when I'm on the
+        #: multiboot tab"): the tab's frame is unmapped behind another tab
+        #: and while the window is minimised, and that is when the sounds
+        #: stop (see _on_hidden / _on_shown, bound in build()).
+        self._pv_hidden = True
+        #: The preview's own volume and mute - the Emulate tab's knob, kept
+        #: in PREVIEW_AUDIO_CTL_FILE.  Scales the menu's volume; 0 muted.
+        gain0, mute0 = load_preview_ctl()
+        self._pv_gain_var = tk.DoubleVar(value=gain0 * 100)
+        self._pv_mute_var = tk.BooleanVar(value=mute0)
         self._audio = None
         self._sound_job = None          # the status poll, only while it is on
         self._sound_watch_until = 0.0   # ...and a moment after a one-shot
@@ -3673,6 +3730,12 @@ class MultibootPanel:
         self._build_table(outer, th)
         self._build_actions(outer, th)
         frame.bind("<Destroy>", self._on_destroy, add="+")
+        # A notebook maps the selected tab's frame and unmaps the rest,
+        # and a minimised window unmaps them all - so these two are the
+        # whole of 'is anyone looking at the preview'.
+        frame.bind("<Map>", self._on_shown, add="+")
+        frame.bind("<Unmap>", self._on_hidden, add="+")
+        self._pv_hidden = not bool(frame.winfo_viewable())
         outer.bind("<Configure>", self._on_configure, add="+")
         # ...and the two moments a person comes BACK to this row expecting it
         # to have noticed something (see _refresh_facts): the tab being
@@ -3946,6 +4009,22 @@ class MultibootPanel:
         self._audio_lbl.pack(side=tk.LEFT, padx=(8, 0))
         for lbl in (self._video_lbl, self._audio_lbl):
             lbl.tip = _Tooltip(lbl, self.MEDIA_TIP, self._theme_fn)
+        # THE PREVIEW'S OWN VOLUME AND MUTE, at the right end - the Emulate
+        # tab's knob (Volume: slider, Mute tick) for this tab's sound.
+        # Packed BEFORE the status label, which is what shrinks when the
+        # row is short of room (packing order is unmapping order).
+        self._mute_chk = ttk.Checkbutton(strip, text="Mute",
+                                         variable=self._pv_mute_var,
+                                         command=self._on_preview_volume)
+        self._mute_chk.pack(side=tk.RIGHT, padx=(6, 0))
+        self._vol_scale = ttk.Scale(strip, from_=0, to=100, length=90,
+                                    orient=tk.HORIZONTAL,
+                                    variable=self._pv_gain_var,
+                                    command=self._on_preview_volume)
+        self._vol_scale.pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Label(strip, text="Volume:").pack(side=tk.RIGHT, padx=(12, 0))
+        for w in (self._mute_chk, self._vol_scale):
+            w.tip = _Tooltip(w, self.VOLUME_TIP, self._theme_fn)
         self._pv_status = ttk.Label(strip, text="", width=1,
                                     justify=tk.LEFT, anchor=tk.W)
         self._pv_status.pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
@@ -6706,7 +6785,7 @@ class MultibootPanel:
         ask until someone has ticked Sound - so a session that never wants
         sound never touches an audio device at all."""
         if self._audio is None:
-            self._audio = PreviewAudio(volume=_int(self._volume_var, 50))
+            self._audio = PreviewAudio(volume=self._effective_volume())
         # A sound is about to be asked for: watch for what the player makes
         # of it, whether or not Sound itself is on.
         self._sound_watch_until = time.time() + self.SOUND_POLL_AFTER_S
@@ -6870,15 +6949,54 @@ class MultibootPanel:
         same clip does not restart it - the player keeps codeselect.c's own
         rule for that.  Free and silent while Sound is off, which is why
         every highlight change may call it."""
-        if not self._sound_var.get():
+        if not self._sound_var.get() or self._pv_hidden:
             return False
         music = self.menu_sounds()["music"]
         if not music and self._audio is None:
             return False                # nothing to play: open nothing
         audio = self._audio_player()
-        audio.set_volume(_int(self._volume_var, 50))
+        audio.set_volume(self._effective_volume())
         audio.loop(music)
         return True
+
+    def _effective_volume(self):
+        """What the player is told: the menu's volume (0-100, the machine's
+        own loudness, media.json's number) scaled by the preview's knob,
+        and 0 while Mute is ticked."""
+        if self._pv_mute_var.get():
+            return 0
+        try:
+            gain = max(0.0, min(1.0, float(self._pv_gain_var.get()) / 100.0))
+        except (tk.TclError, ValueError):
+            gain = 1.0
+        return int(round(_int(self._volume_var, 50) * gain))
+
+    def _on_preview_volume(self, *_args):
+        """The knob moved (a Scale drag calls back per tick with the value;
+        the Mute tick with nothing): remember it, and reach the sound that
+        is playing now."""
+        try:
+            gain = max(0.0, min(1.0, float(self._pv_gain_var.get()) / 100.0))
+        except (tk.TclError, ValueError):
+            gain = 1.0
+        write_preview_ctl(gain, bool(self._pv_mute_var.get()))
+        self._push_volume()
+
+    def _on_shown(self, _event=None):
+        """The tab (or the window) is back on screen: what the menu plays
+        plays again, and the clips tick again."""
+        self._pv_hidden = False
+        if self._stopped:
+            return
+        self._sound_follow()
+        self._play_start()
+
+    def _on_hidden(self, _event=None):
+        """The tab went behind another, or the window was minimised:
+        silence, and the device given back.  The clips' clock keeps
+        running, so they come back where the machine's would be."""
+        self._pv_hidden = True
+        self._stop_sound()
 
     def _sound_click(self):
         """The move sound a flipper press makes, over the music - what the
@@ -6888,7 +7006,7 @@ class MultibootPanel:
         ``--visual-only`` prepare renders the pictures and the music and
         skips the two menu sounds), so this is the one place that has to say
         'there is no click to play, and here is how to get one'."""
-        if not self._sound_var.get():
+        if not self._sound_var.get() or self._pv_hidden:
             return False
         move = self.menu_sounds()["move"]
         if not move:
@@ -6987,7 +7105,7 @@ class MultibootPanel:
                          % self._image_label(hl))
             return False
         audio = self._audio_player()
-        audio.set_volume(_int(self._volume_var, 50))
+        audio.set_volume(self._effective_volume())
         # AND THE BED GOES FIRST, because it does on the machine:
         # codeselect.c stops music_voice and only then plays the confirm,
         # which runs alone under the LOADING frame.  Judging this sound over
@@ -7010,7 +7128,7 @@ class MultibootPanel:
         audio.c's, gain and all).  Only while something is playing - reading
         the box must not be what opens a device."""
         if self._audio is not None and self._sound_var.get():
-            self._audio.set_volume(_int(self._volume_var, 50))
+            self._audio.set_volume(self._effective_volume())
 
     def _stop_sound(self):
         """Silence, and the device given back.  The player is kept: a later
@@ -7409,15 +7527,17 @@ class MultibootPanel:
                            % (path_root(out) or "that drive"))
             return False
         form = self.form()
-        if self._play_var.get():
-            # THE CLIPS ARE PLAYING over the frame that is up.  An
-            # unchanged form has nothing new to draw; a changed one stops
-            # them here - this IS the redraw _form_moved_under_play would
-            # have to ask for - and the render that lands starts them
-            # again.  UNDER the drive guard above, because form() is the
-            # first stat, and this used to sit above it.
-            if preview_fingerprint(form) == self._play_fp:
-                return False
+        if self._play_var.get() and preview_fingerprint(form) != self._play_fp:
+            # THE CLIPS ARE PLAYING over the frame that is up, and the FORM
+            # moved under them: stop them here - this IS the redraw
+            # _form_moved_under_play would have to ask for - and the render
+            # that lands starts them again.  UNDER the drive guard above,
+            # because form() is the first stat.  A HIGHLIGHT change is not
+            # this (the fingerprint has no highlight in it): it falls
+            # through to the cache check below, which draws that card's
+            # frame if it is not there yet - the ticks idle until it lands.
+            # (An early return here on an unchanged fingerprint is what
+            # froze the preview on the first card, David 2026-09-03.)
             self._stop_play("The form changed - redrawing…", error=False)
         out = (form.out or "").strip().strip('"')
         if len(form.images) < 1 or not out:

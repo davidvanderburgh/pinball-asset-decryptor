@@ -2047,7 +2047,10 @@ def test_play_advances_through_the_cache_and_stops_when_the_form_changes(
         panel._pv_totals[(fp, 1)] = 3
         panel._pv_rects[(fp, 1)] = {1: (10, 10, 32, 8)}
         panel._pv_cache[(fp, 1, 0)] = ppm
+        # the tab started its clock when the frame was first shown (the
+        # fixture's update); this test is the clock from here on
         panel._play_clock = lambda: clock[0]
+        panel._play_t0 = None
         rendered = []
         panel._render_frames = lambda *a: rendered.append(a) or True
         panel._play_toggled()
@@ -2659,6 +2662,146 @@ def test_selecting_a_row_moves_the_preview_highlight(tmp_path):
         root.destroy()
 
 
+def test_the_sound_plays_only_while_the_tab_is_on_screen(tmp_path,
+                                                        monkeypatch):
+    """David: 'even if I'm not in the multiboot tab, the audio of the
+    first selection is already playing. It should only be playing when
+    I'm on the multiboot tab.'  The tab's frame is unmapped behind
+    another tab (and while the window is minimised): that stops the
+    sound, and coming back starts it again."""
+    made = _fake_audio(monkeypatch)
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        media = _media_set(panel)
+        panel._set_var(panel._hl_var, 1)
+        root.update()                       # the frame is mapped (shown)
+        assert panel._pv_hidden is False
+        assert panel._sound_follow() is True
+        assert made[0].looping == os.path.join(media, "music1.wav")
+        # behind another tab: silence, and nothing plays until it is back
+        panel._on_hidden()
+        assert panel._pv_hidden is True
+        assert made[0].calls[-1] == ("stop", None)
+        assert panel._sound_follow() is False
+        assert panel._sound_click() is False
+        assert made[0].looping is None
+        # ...and the frame's own <Unmap>/<Map> are what say so
+        panel._on_shown()
+        assert panel._pv_hidden is False
+        assert made[0].looping == os.path.join(media, "music1.wav")
+        panel._frame.event_generate("<Unmap>")
+        root.update()
+        assert panel._pv_hidden is True and made[0].looping is None
+        panel._frame.event_generate("<Map>")
+        root.update()
+        assert panel._pv_hidden is False
+        assert made[0].looping == os.path.join(media, "music1.wav")
+        # a tab built into a frame nobody has shown yet starts hidden
+        import tkinter as tk
+        other = tk.Frame(root)
+        quiet = multiboot_tab.MultibootPanel(other, log=lambda m: None)
+        quiet.build(other)
+        assert quiet._pv_hidden is True
+    finally:
+        root.destroy()
+
+
+def test_a_flipper_press_draws_the_new_highlights_frame(tmp_path,
+                                                        monkeypatch):
+    """David: 'when I go to the second or third selection here, the
+    preview is not updated at all. It is just frozen on the first
+    selection.'  The auto render used to return early whenever the FORM
+    fingerprint had not moved - and a highlight change moves nothing in
+    it - so the frame for the new card was never drawn while the clips
+    played."""
+    root, panel = _panel(auto=True)
+    _stand_ins(monkeypatch, tmp_path, frames=3)
+    calls = []
+    try:
+        for p in _images(tmp_path, 3):
+            panel.add_image(p)
+        panel._rows[0].anim = "auto"
+        panel._default_var.set("0")
+        panel._table.select(0)              # add_image left the last row selected
+        root.update()
+        assert panel._hl_var.get() == "0"
+        real = panel._run_commands
+        panel._run_commands = lambda cmds, **kw: calls.append(
+            [label for label, _ in cmds]) or real(cmds, **kw)
+        assert panel.render_preview() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        fp = preview_fingerprint(panel.form())
+        assert (fp, 0, 0) in panel._pv_cache
+        assert panel._play_var.get() is True       # the clips are running
+        # the right flipper: the debounce fires, and the new card's frame
+        # is DRAWN - not skipped because the form did not change
+        panel.flip_right()
+        assert panel._hl_var.get() == "1"
+        assert "is being drawn" in panel._pv_status.cget("text")
+        job, panel._pv_debounce_job = panel._pv_debounce_job, None
+        root.after_cancel(job)
+        assert panel._auto_render() is True
+        _wait(root, lambda: not (panel._busy or panel._pv_busy))
+        assert (fp, 1, 0) in panel._pv_cache
+        assert calls[-1] == ["frame 0"]
+        assert panel._pv_shown[0] == 1
+        assert panel._pv_status.cget("text").startswith("Image 2: ")
+        # ...and the ticks were never stopped for it: the form stood still
+        assert panel._play_var.get() is True
+        # the same card again: nothing to draw
+        assert panel._auto_render() is False
+    finally:
+        root.destroy()
+
+
+def test_the_previews_volume_and_mute_scale_the_menus_volume(tmp_path,
+                                                             monkeypatch):
+    """The Emulate tab's knob, for this tab (David: 'a volume slider with
+    mute button next to the preview tab so I can mute the audio if I need
+    to'): it scales the menu's own volume - which is what goes on the
+    card and does not move - and Mute is 0; both are remembered in the
+    preview's own file."""
+    ctl = str(tmp_path / "preview_audio_ctl.json")
+    monkeypatch.setattr(multiboot_tab, "PREVIEW_AUDIO_CTL_FILE", ctl)
+    made = _fake_audio(monkeypatch)
+    root, panel = _panel()
+    try:
+        for p in _images(tmp_path, 2):
+            panel.add_image(p)
+        _media_set(panel)
+        panel._set_var(panel._hl_var, 1)
+        root.update()
+        assert panel._vol_scale.winfo_ismapped() and \
+            panel._mute_chk.winfo_ismapped()
+        assert float(panel._pv_gain_var.get()) == 100.0
+        assert panel._pv_mute_var.get() is False
+        assert panel._sound_follow() is True
+        assert made[0].volume == 50                 # the menu's 50, whole
+        panel._pv_gain_var.set(50)
+        panel._on_preview_volume("50")
+        assert made[0].volume == 25
+        panel._pv_mute_var.set(True)
+        panel._on_preview_volume()
+        assert made[0].volume == 0
+        assert multiboot_tab.load_preview_ctl(ctl) == (0.5, True)
+        panel._pv_mute_var.set(False)
+        panel._on_preview_volume()
+        assert made[0].volume == 25
+        # the menu's own volume still reads 50: the knob is this PC's
+        assert panel._volume_var.get() == "50"
+        assert panel.form().volume == 50
+        # ...and a fresh panel comes up with the remembered knob
+        import tkinter as tk
+        other = tk.Frame(root)
+        again = multiboot_tab.MultibootPanel(other, log=lambda m: None)
+        assert float(again._pv_gain_var.get()) == 50.0
+        assert again._pv_mute_var.get() is False
+    finally:
+        root.destroy()
+
+
 def test_a_refused_audio_half_leaves_the_picture_playing_and_says_why(
         tmp_path, monkeypatch):
     """The sounds are pulled off the card through the emulator's params
@@ -2815,6 +2958,7 @@ def test_play_draws_one_frame_and_walks_the_gif(tmp_path, monkeypatch):
         os.makedirs(media, exist_ok=True)
         _gif(os.path.join(media, "anim1.gif"), frames=4)
         panel._play_clock = lambda: clock[0]
+        panel._play_t0 = None               # the fixture's own start, dropped
         real = panel._run_commands
         panel._run_commands = lambda cmds, **kw: calls.append(
             [label for label, _ in cmds]) or real(cmds, **kw)
@@ -4361,7 +4505,8 @@ def test_the_whole_tab_fits_a_1024x768_desktop(tmp_path):
                     panel._new_btn, panel._about_badge,
                     panel._buildflash_btn,
                     panel._emu_btn, panel._menu_btn,
-                    panel._video_lbl, panel._audio_lbl):
+                    panel._video_lbl, panel._audio_lbl,
+                    panel._vol_scale, panel._mute_chk):
             assert btn.winfo_ismapped(), str(btn)
         # ...and the list has NONE: its actions are icons on its rows
         for gone in ("_add_btn", "_edit_btn", "_remove_btn", "_up_btn",

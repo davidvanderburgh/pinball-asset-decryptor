@@ -254,7 +254,16 @@ These have each been violated at least once and each cost a run or a window:
       say which half is loading; the pictures render in a `video` run
       before the frame and the sounds in an `audio` run after it, and a
       refused audio run (cold params cache) leaves the picture playing
-      with the reason on the readout.
+      with the reason on the readout. **Three fixes from David's first
+      look:** the sound plays only while the tab is on screen (the tab
+      frame's `<Map>`/`<Unmap>` - behind another tab or minimised it
+      stops, and it never starts on launch); a flipper press draws the
+      new card's frame (the auto render had returned early on an
+      unchanged form fingerprint, which has no highlight in it - the
+      preview froze on the first card); and the preview has the Emulate
+      tab's Volume slider + Mute at the right of the strip, its own file
+      (`preview_audio_ctl.json`), scaling the menu's volume rather than
+      changing it.
 
 - [ ] **89. `playfield.png` is the LAST unstamped cached table — a second
       build of one title keeps the first build's drawing for ever.** `S3 D1`

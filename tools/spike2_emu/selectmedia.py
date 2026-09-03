@@ -110,6 +110,20 @@ DEFAULT_VOLUME = 50
 # Where the sound defaults come from (turtles_pro 1.59 catalog; the art report):
 MOVE_IDX = 1717                 # 0.079 s stereo transient
 MOVE_MAX_SECONDS = 0.5
+
+#: HOW LONG A MUSIC BED MAY BE, and why it has a limit at all.  The selector
+#: LOOPS this under a menu somebody looks at for a few seconds before pressing
+#: START, so the useful length is a phrase, not a song - and the whole media
+#: set has to fit MEDIA_BUDGET.  A 44100 Hz stereo 16-bit WAV is 176 KB per
+#: second, so one three-minute game track is 31 MB: over the budget by itself,
+#: with nothing left for the pictures.  Picking a track off a card and having
+#: the tool refuse the whole set afterwards is the wrong way round (David,
+#: 2026-09-02: two tracks made 46.38 MB and the preview simply stopped
+#: drawing), so a bed is CUT to this by default and faded out of, which also
+#: stops the loop clicking at the seam.  A spec may ask for a different
+#: length: `--music 1=path.wav@30`.
+MUSIC_MAX_SECONDS = 15.0
+MUSIC_FADE_MS = 400
 CONFIRM_IDX = 350               # 'SOUND: STINGER' 1.54 s
 CONFIRM_SECONDS = 1.5
 CONFIRM_FADE_MS = 200
@@ -891,6 +905,25 @@ def gif_fit(src, out, plan, start=0.0, workdir=None, log=say):
                   % (src, fmt_bytes(GIF_MAX_BYTES), GIF_MAX_FRAMES))
 
 
+def split_music_spec(spec):
+    """``PATH`` or ``PATH@SECONDS`` -> ``(path, seconds)``.
+
+    The length is optional and defaults to :data:`MUSIC_MAX_SECONDS`; a path
+    that really does end in ``@`` and digits keeps working, because the split
+    is only taken when what follows parses as a positive number AND what
+    precedes it is a file that exists."""
+    text = (spec or "").strip()
+    base, sep, tail = text.rpartition("@")
+    if sep and base:
+        try:
+            seconds = float(tail)
+        except ValueError:
+            seconds = 0.0
+        if seconds > 0 and (os.path.isfile(base) or not os.path.isfile(text)):
+            return base, seconds
+    return text, MUSIC_MAX_SECONDS
+
+
 def normalise_wav(src, out, max_seconds=None, fade_ms=0):
     """Any audio -> pcm_s16le 44100 Hz stereo (mono duplicated), optionally cut and faded.
     ffmpeg when present; without it only a 44100 Hz 16-bit PCM WAV can be rewritten."""
@@ -1589,11 +1622,17 @@ def cmd_prepare(a):
             music = None
             spec = musics[i]
             if spec != "none":
-                if not os.path.isfile(spec):
-                    raise Refused("music %d: %s is not a file" % (i, spec))
+                src, seconds = split_music_spec(spec)
+                if not os.path.isfile(src):
+                    raise Refused("music %d: %s is not a file" % (i, src))
                 music_out = os.path.join(out, "music%d.wav" % i)
-                normalise_wav(spec, music_out)
-                say("  music%d.wav: %s" % (i, spec))
+                normalise_wav(src, music_out, seconds, MUSIC_FADE_MS)
+                whole = _duration_of(src)
+                say("  music%d.wav: %s (%s)"
+                    % (i, src,
+                       "the first %.4g s of %.4g s, faded out"
+                       % (seconds, whole) if whole and whole > seconds + 0.05
+                       else "%.4g s" % (whole or seconds)))
                 music = os.path.basename(music_out)
             rows.append([art, anim, music, None])
             specs.append((arts[i]["spec"], anims[i]["spec"], confirm_each[i]))
@@ -1681,7 +1720,12 @@ def main(argv=None):
                    help="still art per image; VIDEO@T = the frame T seconds into an mp4/mov/mkv/avi")
     s.add_argument("--anim", action="append", default=[], metavar="N=PATH|auto|none[@START[:SECONDS[:FPS]]]",
                    help="animation per image; '@START[:SECONDS[:FPS]]' overrides --start/--seconds/--fps for it")
-    s.add_argument("--music", action="append", default=[], metavar="N=PATH|none")
+    s.add_argument("--music", action="append", default=[],
+                   metavar="N=PATH[@SECONDS]|none",
+                   help="a music bed for image N, cut to SECONDS (default %g) "
+                        "and faded out - the selector loops it, and the whole "
+                        "media set must fit the budget"
+                        % MUSIC_MAX_SECONDS)
     s.add_argument("--sound-move", default="auto", metavar="PATH|auto|synth|none")
     s.add_argument("--sound-confirm", action="append", default=[],
                    metavar="PATH|auto|synth|none | N=PATH|auto|synth|none",

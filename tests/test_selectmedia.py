@@ -980,3 +980,54 @@ def test_art_from_a_video_frame(sm, tmp_path):
     with pytest.raises(sm.Refused):
         sm.scale_png(src, str(tmp_path / "late.png"), (64, 36), seek=10.0)
     assert not os.path.exists(str(tmp_path / "late.png"))
+
+
+def test_a_music_bed_is_a_loop_not_a_whole_track(sm, tmp_path):
+    """A game's music track is minutes long and 176 KB a second, so ONE of
+    them is over the whole media budget with nothing left for the pictures.
+    David picked two off a card and the set came to 46.38 MB; the tool
+    refused it and the preview simply stopped drawing, which is the wrong
+    way round - the length is what should give, not the feature."""
+    assert sm.MUSIC_MAX_SECONDS <= 30, "a menu bed is a phrase, not a song"
+    # 176400 bytes a second, so the default cap has to leave room for the
+    # pictures of a full 16-image card inside MEDIA_BUDGET
+    per_bed = sm.MUSIC_MAX_SECONDS * sm.WAV_RATE * 2 * 2
+    assert per_bed * 4 < sm.MEDIA_BUDGET
+
+
+def test_the_music_spec_takes_an_optional_length(sm, tmp_path):
+    """``PATH`` is the default cap and ``PATH@SECONDS`` asks for another -
+    and a path that really does contain an '@' still names itself."""
+    track = tmp_path / "track.wav"
+    track.write_bytes(b"RIFF")
+    assert sm.split_music_spec(str(track)) == (str(track),
+                                               sm.MUSIC_MAX_SECONDS)
+    assert sm.split_music_spec(str(track) + "@30") == (str(track), 30.0)
+    odd = tmp_path / "gz@home - music.wav"
+    odd.write_bytes(b"RIFF")
+    assert sm.split_music_spec(str(odd)) == (str(odd), sm.MUSIC_MAX_SECONDS)
+    # ...and nonsense after the '@' is part of the name, not a length
+    assert sm.split_music_spec(str(track) + "@later")[1] ==         sm.MUSIC_MAX_SECONDS
+
+
+def test_a_long_bed_is_cut_and_faded(sm, tmp_path, monkeypatch):
+    """The cut is what keeps the set inside the budget, and the fade is what
+    keeps the loop from clicking at the seam."""
+    seen = {}
+
+    def fake(src, out, max_seconds=None, fade_ms=0):
+        seen["args"] = (src, max_seconds, fade_ms)
+        with open(out, "wb") as f:
+            f.write(b"RIFF")
+        return out
+    monkeypatch.setattr(sm, "normalise_wav", fake)
+    monkeypatch.setattr(sm, "_duration_of", lambda p: 204.9)
+    track = tmp_path / "long.wav"
+    track.write_bytes(b"RIFF")
+    out = tmp_path / "out"
+    out.mkdir()
+    sm.normalise_wav(str(track), str(out / "music0.wav"),
+                     sm.MUSIC_MAX_SECONDS, sm.MUSIC_FADE_MS)
+    src, secs, fade = seen["args"]
+    assert src == str(track)
+    assert secs == sm.MUSIC_MAX_SECONDS and fade == sm.MUSIC_FADE_MS

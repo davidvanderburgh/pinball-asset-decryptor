@@ -896,7 +896,7 @@ def test_add_images_fills_title_and_output(tmp_path):
         assert form.media_dir == ""                    # nothing prepared
         assert form.selector_dir == DEFAULT_SELECTOR_DIR
         # two images and the template row that adds a third
-        assert panel._tree.get_children() == ("0", "1", panel.ADD_ROW)
+        assert panel._table.count() == 2
     finally:
         root.destroy()
 
@@ -907,7 +907,7 @@ def test_editor_writes_back_to_the_selected_row(tmp_path):
         a, b = _images(tmp_path, 2)
         panel.add_image(a)
         panel.add_image(b)
-        panel._tree.selection_set("1")
+        panel._table.select(1)
         root.update()
         panel._ed_title.set("TMNT 1987")
         panel._ed_media.set("attract")
@@ -944,7 +944,7 @@ def test_editor_offers_what_the_image_shows_as_one_choice(tmp_path):
         still.write_bytes(bytes(4))
         panel.add_image(a)
         panel.add_image(b)
-        panel._tree.selection_set("1")
+        panel._table.select(1)
         root.update()
         dlg = panel.edit_image()
         root.update()
@@ -1003,15 +1003,15 @@ def test_editor_offers_what_the_image_shows_as_one_choice(tmp_path):
         assert panel._image_dialog is None
         assert panel._media_entries == {}         # the widgets went with it
         assert panel._clip_widgets == ()
-        assert panel._tree.item("1")["values"][3] == \
+        assert panel._table.cell(1, "media") == \
             "intro.mp4 @20s 2s 8fps"
         assert panel.form().images[0].anim_start == ""        # untouched
         # re-select: row 0 shows the logo and blanks, row 1 comes back whole
-        panel._tree.selection_set("0")
+        panel._table.select(0)
         root.update()
         assert panel._ed_media.get() == "logo"
         assert panel._ed_anim_start.get() == "" and panel._ed_video.get() == ""
-        panel._tree.selection_set("1")
+        panel._table.select(1)
         root.update()
         assert panel._ed_media.get() == "video"
         assert panel._ed_anim_fps.get() == "8"
@@ -1030,7 +1030,7 @@ def test_browse_picks_the_option_it_browsed_for(tmp_path, monkeypatch):
         clip.write_bytes(bytes(4))
         panel.add_image(a)
         panel.add_image(b)
-        panel._tree.selection_set("1")
+        panel._table.select(1)
         root.update()
         dlg = panel.edit_image()
         root.update()
@@ -1068,7 +1068,7 @@ def test_a_title_edit_leaves_a_pair_the_choice_cannot_spell(tmp_path):
         assert multiboot_tab.media_kind(row) == "attract"
         assert multiboot_tab.cell_media(row) == \
             "logo.png + attract video @0s 3s 8fps"
-        assert panel._tree.item("1")["values"][3] == \
+        assert panel._table.cell(1, "media") == \
             "logo.png + attract video @0s 3s 8fps"
         assert panel._ed_media.get() == "attract"
         panel._ed_title.set("Still the same pair")
@@ -1088,12 +1088,12 @@ def test_a_loaded_rows_own_files_are_an_option_of_their_own(tmp_path):
     root, panel, _card, _media = _loaded(
         tmp_path, _degraded_report(tmp_path), media_json=False)
     try:
-        panel._tree.selection_set("0")
+        panel._table.select(0)
         root.update()
         row = panel._rows[0]
         assert (row.art, row.art_on_card) == ("art0.png", True)
         assert multiboot_tab.media_kind(row) == "card"
-        assert panel._tree.item("0")["values"][3] == "art0.png (on the card)"
+        assert panel._table.cell(0, "media") == "art0.png (on the card)"
         dlg = panel.edit_image()
         root.update()
         assert panel._ed_media.get() == "card"
@@ -1102,16 +1102,16 @@ def test_a_loaded_rows_own_files_are_an_option_of_their_own(tmp_path):
         assert radios[-1].cget("text") == "Keep the card's own art0.png"
         panel._ed_media.set("logo")
         assert (row.art, row.art_on_card, row.anim) == ("auto", False, "none")
-        assert panel._tree.item("0")["values"][3] == "logo"
+        assert panel._table.cell(0, "media") == "logo"
         panel._ed_media.set("card")
         assert (row.art, row.art_on_card) == ("art0.png", True)
         assert multiboot_tab.on_card_fields(row) == [
             ("art", "art0.png"), ("music", "music0.wav")]
-        assert panel._tree.item("0")["values"][3] == "art0.png (on the card)"
+        assert panel._table.cell(0, "media") == "art0.png (on the card)"
         dlg.ok()
         root.update()
         # a row with nothing on the card offers no such option
-        panel._tree.selection_set("1")
+        panel._table.select(1)
         root.update()
         dlg = panel.edit_image()
         root.update()
@@ -1210,7 +1210,7 @@ def test_the_modals_write_on_ok_and_change_nothing_on_cancel(tmp_path):
     try:
         for p in _images(tmp_path, 2):
             panel.add_image(p)
-        panel._tree.selection_set("1")
+        panel._table.select(1)
         root.update()
         before = multiboot_tab.replace(panel.form().images[1])
         dlg = panel.edit_image()
@@ -1228,7 +1228,7 @@ def test_the_modals_write_on_ok_and_change_nothing_on_cancel(tmp_path):
         dlg.ok()
         root.update()
         assert panel.form().images[1].title == "TMNT 1987"
-        assert panel._tree.item("1")["values"][1] == "TMNT 1987"
+        assert panel._table.cell(1, "title") == "TMNT 1987"
         # ...and the same for the menu settings
         menu = panel.open_menu_settings()
         root.update()
@@ -1269,23 +1269,23 @@ def test_an_image_can_have_a_confirm_sound_of_its_own(tmp_path):
         panel.add_image(b)
         panel._confirm_var.set("auto")
         # both inherit to start with
-        assert [panel._tree.item(str(i))["values"][5] for i in (0, 1)] == \
+        assert [panel._table.cell(i, "sound") for i in (0, 1)] == \
             ["(auto)", "(auto)"]
         # give row 1 its own through the editor, the way the dialog does
-        panel._tree.selection_set("1")
+        panel._table.select(1)
         panel._load_editor()
         assert panel._ed_confirm.get() == "menu"
         panel._ed_confirm.set("synth")
         assert panel._rows[1].confirm == "synth"
-        assert panel._tree.item("1")["values"][5] == "synth"
+        assert panel._table.cell(1, "sound") == "synth"
         # the menu's sound changing moves the inheriting row and not the other
         panel._confirm_var.set("none")
-        assert [panel._tree.item(str(i))["values"][5] for i in (0, 1)] == \
+        assert [panel._table.cell(i, "sound") for i in (0, 1)] == \
             ["(none)", "synth"]
         # ...and "menu" in the box is "" on the row, so it inherits again
         panel._ed_confirm.set("menu")
         assert panel._rows[1].confirm == ""
-        assert panel._tree.item("1")["values"][5] == "(none)"
+        assert panel._table.cell(1, "sound") == "(none)"
     finally:
         root.destroy()
 
@@ -1299,29 +1299,32 @@ def test_the_table_carries_each_images_settings_in_columns(tmp_path):
         a, b = _images(tmp_path, 2)
         panel.add_image(a)
         panel.add_image(b)
-        assert panel._tree.item("0")["values"][:7] == [
-            0, "turtles_pro-1_59_0", "Release", "logo", "none", "(auto)", ""]
+        assert panel._table.row_values(0) == {
+            "title": "turtles_pro-1_59_0", "sub": "Release", "media": "logo",
+            "music": "none", "sound": "(auto)", "code": ""}
         panel._rows[1].anim = "auto"
         panel._rows[1].music = str(tmp_path / "bed.wav")
         panel._rows[1].version = "1.59.0"
         panel._refresh_tree(select=1)
-        assert panel._tree.item("1")["values"][3:7] == [
+        assert [panel._table.cell(1, c)
+                for c in ("media", "music", "sound", "code")] == [
             "attract video", "bed.wav", "(auto)", "1.59.0"]
         # a row with no confirm of its own shows the MENU's, in brackets,
         # and follows it
         panel._confirm_var.set("synth")
-        assert panel._tree.item("1")["values"][5] == "(synth)"
+        assert panel._table.cell(1, "sound") == "(synth)"
         # the icons: the first row cannot go up, the last cannot go down,
-        # and the arrow says so instead of silently doing nothing
-        assert panel._tree.item("0")["values"][7:] == ["✎", "−",
-                                                       "△", "▼"]
-        assert panel._tree.item("1")["values"][7:] == ["✎", "−",
-                                                       "▲", "▽"]
-        # ...and the template row is the last one, dim, with the '+'
-        assert panel._tree.get_children()[-1] == panel.ADD_ROW
-        add = panel._tree.item(panel.ADD_ROW)
-        assert add["values"][:2] == ["+", panel.ADD_ROW_TEXT]
-        assert add["tags"] == ["add"]
+        # and the dead arrow is drawn gray and does nothing
+        assert panel._table.icon(0, "up").live is False
+        assert panel._table.icon(0, "down").live is True
+        assert panel._table.icon(1, "up").live is True
+        assert panel._table.icon(1, "down").live is False
+        # ...and the two acting icons are always live
+        assert panel._table.icon(0, "edit").live is True
+        assert panel._table.icon(0, "del").live is True
+        # ...and the template row sits below the two images, with its '+'
+        assert panel._table.count() == 2
+        assert panel._table.add_text == panel.ADD_ROW_TEXT
         # ...and the selected row's own .raw is on the line under the table
         assert panel._rows[1].path in panel._row_tip.text
     finally:
@@ -1329,29 +1332,29 @@ def test_the_table_carries_each_images_settings_in_columns(tmp_path):
 
 
 def _click_cell(root, panel, item, column):
-    """Click the middle of one cell of the table, the way a mouse would -
-    through the same <Button-1> binding, so identify_row / identify_column
-    are what decide which row and which icon was hit."""
+    """Click one cell of the table the way a mouse would - through the
+    ImageTable's own click handlers, so its selection and the panel's
+    callbacks are what run.  *item* is a row index as a string (or the
+    literal ``"add"`` for the template row); *column* is a column id, an
+    action kind, or - for the template row - anything.
+
+    Returns ``(result, tk)`` for the callers that read the handler's
+    return value, keeping the old signature."""
     import tkinter as tk
     root.update()
     root.update_idletasks()
-    box = panel._tree.bbox(item, column)
-    assert box, "cell %s/%s is not on screen" % (item, column)
-    x, y, w, h = box
-
-    class _E:
-        pass
-    ev = _E()
-    ev.x, ev.y = x + w // 2, y + h // 2
-    ev.x_root = panel._tree.winfo_rootx() + ev.x
-    ev.y_root = panel._tree.winfo_rooty() + ev.y
-    return panel._table_click(ev), tk
+    if item == "add":
+        return panel._table.add_clicked(), tk
+    i = int(item)
+    if column in ("edit", "del", "up", "down"):
+        return panel._table.icon_clicked(i, column), tk
+    return panel._table.cell_clicked(i), tk
 
 
 def test_the_row_icons_act_on_the_row_they_are_in(tmp_path):
-    """The row IS where the row is worked on: a pencil, a minus and two
-    arrows at its right edge, and a click on one of them acts on THAT row
-    - which is why they are columns and not five buttons under the table."""
+    """The row IS where the row is worked on: a pencil, a bin and two
+    arrows at its left edge, and a click on one of them acts on THAT row
+    - and a click on the row's TEXT opens that row's editor."""
     root, panel = _panel()
     opened = []
     panel.edit_image = lambda index=None: opened.append(index)
@@ -1360,23 +1363,25 @@ def test_the_row_icons_act_on_the_row_they_are_in(tmp_path):
         for p in (a, b, c):
             panel.add_image(p)
         root.update()
-        # ▼ on row 0 moves it down...
+        # the down arrow on row 0 moves it down...
         _click_cell(root, panel, "0", "down")
         assert [r.path for r in panel._rows] == [b, a, c]
-        # ...and ▲ on row 1 puts it back
+        # ...and the up arrow on row 1 puts it back
         _click_cell(root, panel, "1", "up")
         assert [r.path for r in panel._rows] == [a, b, c]
-        # ▲ on the FIRST row is the outlined arrow and does nothing
+        # the up arrow on the FIRST row is the gray dead one and does nothing
         _click_cell(root, panel, "0", "up")
         assert [r.path for r in panel._rows] == [a, b, c]
-        # ✎ opens that row's editor
+        # the pencil opens that row's editor...
         _click_cell(root, panel, "1", "edit")
         assert opened == [1]
-        # − takes it off the card
+        # ...and so does a click on the row's own text (David: every cell
+        # opens the editor)
+        _click_cell(root, panel, "2", "title")
+        assert opened == [1, 2]
+        # the bin takes the row off the card
         _click_cell(root, panel, "1", "del")
         assert [r.path for r in panel._rows] == [a, c]
-        # ...and a click in a text column is an ordinary selection
-        assert _click_cell(root, panel, "0", "title")[0] is None
     finally:
         root.destroy()
 
@@ -1387,25 +1392,15 @@ def test_the_template_row_adds_an_image(tmp_path):
     root, panel = _panel()
     asked = []
     panel._add_image = lambda: asked.append(len(panel._rows))
+    # the table's on_add is late-bound through the panel, so the stub above
+    # is what a '+' click reaches
     try:
         root.update()
-        assert panel._tree.get_children() == (panel.ADD_ROW,)
-        _click_cell(root, panel, panel.ADD_ROW, "title")
+        assert panel._table.count() == 0
+        _click_cell(root, panel, "add", "title")
         assert asked == [0]
-        # ...and a double-click on it does NOT open the editor for a row
-        # that is not there
-        assert panel._table_double_click(_Ev(panel, panel.ADD_ROW)) == "break"
     finally:
         root.destroy()
-
-
-class _Ev:
-    """A click event over one row of the table, for the double-click seam."""
-    def __init__(self, panel, item):
-        box = panel._tree.bbox(item) or (0, 0, 10, 10)
-        self.x, self.y = box[0] + 2, box[1] + box[3] // 2
-        self.x_root = panel._tree.winfo_rootx() + self.x
-        self.y_root = panel._tree.winfo_rooty() + self.y
 
 
 def test_the_footer_stages_are_this_tabs_own(tmp_path):
@@ -1882,7 +1877,7 @@ def test_the_flippers_move_the_highlight_and_wrap_both_ways(tmp_path):
     try:
         for p in _images(tmp_path, 3):
             panel.add_image(p)
-        panel._tree.selection_set("0")
+        panel._table.select(0)
         root.update()
         assert panel._hl_var.get() == "0" and panel._hl_touched is False
         assert panel.flip_right() is True
@@ -1933,14 +1928,14 @@ def test_a_flipper_press_moves_the_table_and_the_editor_with_it(tmp_path):
         for i, title in enumerate(("ONE", "TWO", "THREE")):
             panel._rows[i].title = title
         panel._refresh_tree()
-        panel._tree.selection_set("0")
+        panel._table.select(0)
         root.update()
         assert panel._ed_title.get() == "ONE"
         panel.flip_right()
         panel.flip_right()
         root.update()                   # <<TreeviewSelect>> is a queued event
         assert panel._hl_var.get() == "2"
-        assert panel._tree.selection() == ("2",)
+        assert panel._table.selected() == 2
         assert panel._ed_title.get() == "THREE"
         # ...and back the other way, wrapping
         panel.flip_left()
@@ -1948,7 +1943,7 @@ def test_a_flipper_press_moves_the_table_and_the_editor_with_it(tmp_path):
         panel.flip_left()
         root.update()
         assert panel._hl_var.get() == "2"       # 2 -> 1 -> 0 -> 2
-        assert panel._tree.selection() == ("2",)
+        assert panel._table.selected() == 2
         # a press is still a hand-typed highlight, whatever moved the table
         assert panel._hl_touched is True
     finally:
@@ -2316,7 +2311,7 @@ def test_a_reverted_form_gets_its_own_picture_back(tmp_path, monkeypatch):
     try:
         for p in _images(tmp_path, 2):
             panel.add_image(p)
-        panel._tree.selection_set("0")
+        panel._table.select(0)
         root.update()                       # let the selection settle first
         panel._rows[1].title = "one"
         assert panel.render_preview() is True
@@ -2407,7 +2402,7 @@ def test_a_reverted_title_is_redrawn_and_not_left_on_the_other_form(
     try:
         for p in _images(tmp_path, 2):
             panel.add_image(p)
-        panel._tree.selection_set("0")
+        panel._table.select(0)
         root.update()
         _wait(root, lambda: not (panel._busy or panel._pv_busy))
 
@@ -2559,7 +2554,7 @@ def test_the_preview_debounce_coalesces_a_burst_into_one_render(tmp_path):
         panel._render_frames = lambda form, hl, frames: asked.append(
             (hl, list(frames))) or True
         panel._auto_preview.set(True)
-        panel._tree.selection_set("1")
+        panel._table.select(1)
         root.update()
         for text in ("T", "TM", "TMN", "TMNT", "TMNT 1987"):
             panel._ed_title.set(text)
@@ -2611,11 +2606,11 @@ def test_selecting_a_row_moves_the_preview_highlight(tmp_path):
     try:
         for p in _images(tmp_path, 3):
             panel.add_image(p)
-        panel._tree.selection_set("2")
+        panel._table.select(2)
         root.update()
         assert panel._hl_var.get() == "2"
         assert panel._hl_touched is False     # programmatic, not typed
-        panel._tree.selection_set("0")
+        panel._table.select(0)
         root.update()
         assert panel._hl_var.get() == "0"
         # ...and the line under the list follows it
@@ -3877,7 +3872,7 @@ def test_the_status_block_says_the_state_and_the_consequence(tmp_path):
         assert panel._edit_lbl.cget("text").startswith(
             "Apply to card: 1 menu change (countdown)")
         # 3. ...and why only a rebuild can, once the image LIST moved
-        panel._tree.selection_set("1")
+        panel._table.select(1)
         root.update()
         panel._remove_image()
         assert panel._edit_lbl.cget("text").startswith(
@@ -4005,7 +4000,7 @@ def test_the_size_sentence_keeps_itself_true(tmp_path):
         assert panel._plan_job is not None
         assert calls == []
         # a title is not an input to the plan, so it arms nothing new
-        panel._tree.selection_set("1")
+        panel._table.select(1)
         root.update()
         armed = panel._plan_job
         panel._ed_title.set("Second")
@@ -4180,7 +4175,7 @@ def test_new_card_clears_the_form_and_leaves_editing_mode(tmp_path):
         assert str(panel._apply_btn.cget("state")) == "disabled"
         assert not panel._can_read
         assert panel._pv_cache == {} and panel._pv_photo is None
-        assert panel._tree.get_children() == (panel.ADD_ROW,)
+        assert panel._table.count() == 0
         # ...and the output box follows the next primary again
         panel.add_image(_images(tmp_path, 1)[0])
         assert panel._out_var.get() == default_output_path(
@@ -4208,7 +4203,7 @@ def test_the_whole_tab_fits_a_1024x768_desktop(tmp_path):
     try:
         for p in _images(tmp_path, 3):
             panel.add_image(p)
-        panel._tree.selection_set("1")
+        panel._table.select(1)
         root.update()
         panel._ed_title.set("TMNT 1987")
         panel._ed_sub.set("1987 cartoon upscale")
@@ -4249,7 +4244,7 @@ def test_the_whole_tab_fits_a_1024x768_desktop(tmp_path):
             root.geometry("%dx768" % width)
             root.update()
             root.update_idletasks()
-            assert panel._pv_canvas.winfo_y() < panel._tree.winfo_rooty()
+            assert panel._pv_canvas.winfo_y() < panel._table.winfo_rooty()
             assert frame.winfo_reqheight() == height, width
             assert panel._pv_w <= width, width
             assert abs(panel._pv_w - panel._pv_h * multiboot_tab.FRAME_W
@@ -4322,10 +4317,11 @@ def test_load_card_runs_inspect_and_fills_every_field(tmp_path, monkeypatch):
         # the card's own default is the row the load lands on, so the
         # preview highlights the image the machine would boot
         assert panel._hl_var.get() == "1"
-        assert panel._tree.selection() == ("1",)
-        assert panel._tree.get_children() == ("0", "1", panel.ADD_ROW)
-        assert panel._tree.item("1")["values"][:5] == [
-            1, "TMNT 1987", "1987 cartoon upscale",
+        assert panel._table.selected() == 1
+        assert panel._table.count() == 2
+        assert [panel._table.cell(1, c)
+                for c in ("title", "sub", "media", "music")] == [
+            "TMNT 1987", "1987 cartoon upscale",
             "attract.mov @21s + attract video @20s 2s 8fps", "none"]
         assert multiboot_tab.cell_anim(panel.form().images[1]) == \
             "auto @20s 2s 8fps"
@@ -4396,7 +4392,7 @@ def test_a_menu_change_is_injected_into_the_loaded_card(tmp_path):
     root, panel, card, media = _loaded(tmp_path)
     calls = _recorder(panel)
     try:
-        panel._tree.selection_set("1")
+        panel._table.select(1)
         root.update()
         panel._ed_sub.set("1987 cartoon, upscaled")
         panel._timeout_var.set("8")
@@ -4422,7 +4418,7 @@ def test_a_media_change_prepares_into_the_loaded_cards_media_dir(tmp_path):
     root, panel, card, media = _loaded(tmp_path)
     calls = _recorder(panel)
     try:
-        panel._tree.selection_set("0")
+        panel._table.select(0)
         root.update()
         panel._ed_media.set("attract")
         assert "1 menu change (animation)" in panel._edit_lbl.cget("text")
@@ -4470,11 +4466,11 @@ def test_an_image_list_change_refuses_the_apply(tmp_path, how):
         if how == "add":
             panel.add_image(_images(tmp_path, 3)[2])
         elif how == "remove":
-            panel._tree.selection_set("1")
+            panel._table.select(1)
             root.update()
             panel._remove_image()
         elif how == "reorder":
-            panel._tree.selection_set("1")
+            panel._table.select(1)
             root.update()
             panel._move_image(-1)
         else:
@@ -4541,16 +4537,16 @@ def test_a_rebuild_is_blocked_by_media_only_the_card_has(
         assert "no such file" in pane.lower()
         assert "art0.png" in pane and "on the loaded card" in pane
         # the table says which fields those are, and which image is missing
-        assert panel._tree.item("0")["values"][3] == "art0.png (on the card)"
-        assert panel._tree.item("0")["values"][4] == "music0.wav"
-        assert "no source recorded" in panel._tree.item("0")["values"][1]
-        assert "not on this machine" in panel._tree.item("1")["values"][1]
+        assert panel._table.cell(0, "media") == "art0.png (on the card)"
+        assert panel._table.cell(0, "music") == "music0.wav"
+        assert "no source recorded" in panel._table.cell(0, "title")
+        assert "not on this machine" in panel._table.cell(1, "title")
         # ...and an apply that would have to re-render them says so too -
         # once the path box names the loaded card again, because Apply only
         # ever writes into the card the box is pointing at.
         panel._out_var.set(panel._loaded_card)
         assert panel._out_var.get() == card
-        panel._tree.selection_set("0")
+        panel._table.select(0)
         root.update()
         panel._ed_media.set("attract")
         assert panel.apply_to_card() is False
@@ -4571,7 +4567,7 @@ def test_a_menu_only_apply_is_fine_on_a_card_with_no_sources(tmp_path):
         tmp_path, _degraded_report(tmp_path), media_json=False)
     calls = _recorder(panel)
     try:
-        panel._tree.selection_set("0")
+        panel._table.select(0)
         root.update()
         panel._ed_title.set("STERN 1.59.0")
         assert panel.apply_to_card() is True
@@ -4610,7 +4606,7 @@ def test_the_preview_after_a_load_draws_the_cards_own_media(tmp_path,
         with open(conf, "rb") as f:
             assert b"art0.png" in f.read()
         # change the art and the media must be rendered again
-        panel._tree.selection_set("0")
+        panel._table.select(0)
         root.update()
         panel._ed_media.set("logo")
         assert panel.needs_prepare() is True
@@ -4780,7 +4776,7 @@ def test_a_mismatched_card_raises_a_strip_above_the_picture(tmp_path):
         assert report["version_mismatch"] in panel._alarm_tip.text
         assert any("Image 0 is 1.59.0" in ln for ln in panel.log_lines())
         # ...and the version the tool read is in the table, never typed
-        assert [panel._tree.item(str(i))["values"][6] for i in (0, 1)] == \
+        assert [panel._table.cell(i, "code") for i in (0, 1)] == \
             ["1.59.0", "1.58.0"]
         # a card whose images agree takes the strip away again
         clean = dict(report, version_mismatch=None)
@@ -5032,7 +5028,7 @@ def test_the_form_survives_a_restart(tmp_path):
     try:
         panel.add_image(a)
         panel.add_image(b)
-        panel._tree.selection_set("1")
+        panel._table.select(1)
         root.update()
         panel._ed_title.set("Second")
         panel._ed_media.set("attract")

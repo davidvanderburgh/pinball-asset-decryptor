@@ -173,6 +173,89 @@ def draw_folder_icon(cv, size):
                       fill="#ffffff", outline="")
 
 
+#: The design grid every icon below is drawn on.  Twenty-four units, scaled
+#: to whatever pixel size the caller asks for, so one set of coordinates
+#: serves a 16 px row icon and a 32 px button.
+ICON_GRID = 24.0
+
+
+def _scaled(pts, s):
+    """A flat coordinate list for ``create_polygon``, scaled by *s*."""
+    return [c * s for p in pts for c in p]
+
+
+def draw_pencil_icon(cv, size, color):
+    """Draw a pencil on canvas *cv*, in *color*, sized to *size*.
+
+    A PENCIL AND NOT A CHARACTER.  The Edit column used to be U+270E (✎),
+    which on this machine's Tk renders in whatever fallback font has it -
+    David read it as a feather, not a pencil ("the edit button is hidden
+    behind the 'feather' icon which doesn't make sense. make it a pencil").
+    That is the same gamble :func:`draw_folder_icon` documents: what a glyph
+    looks like is the font's decision, not ours, and Tk 8.6 draws no colour
+    emoji at all - so an icon that has to be GREEN cannot be a character
+    either way.  Six points are not a gamble.
+
+    The shaft runs corner to corner so the diagonal is long enough to read
+    at 16 px, with the nib as its own triangle: at this size a single
+    polygon's point disappears into the shaft.
+    """
+    s = size / ICON_GRID
+    cv.create_polygon(_scaled([(15.5, 3.5), (20.5, 8.5),
+                               (8.5, 20.5), (3.5, 15.5)], s),
+                      fill=color, outline="")
+    cv.create_polygon(_scaled([(3.5, 15.5), (8.5, 20.5), (2.5, 21.5)], s),
+                      fill=color, outline="")
+
+
+def draw_trash_icon(cv, size, color, bg=None):
+    """Draw a waste bin on canvas *cv*, in *color*, sized to *size*.
+
+    The lid, its handle and the tapered can - and, when *bg* is given, two
+    slots cut out of the can in the row's own background, which is what
+    makes it read as a bin rather than a bucket.  A minus sign used to do
+    this job and said 'less', not 'gone' (David: "the remove should be a
+    trash icon and red").
+    """
+    s = size / ICON_GRID
+    cv.create_rectangle(4.5 * s, 6 * s, 19.5 * s, 8.5 * s,
+                        fill=color, outline="")
+    cv.create_rectangle(9.5 * s, 3 * s, 14.5 * s, 6 * s,
+                        fill=color, outline="")
+    cv.create_polygon(_scaled([(6.5, 9), (17.5, 9), (16, 21), (8, 21)], s),
+                      fill=color, outline="")
+    if bg:
+        for x in (10, 12, 14):
+            cv.create_line(x * s, 11.5 * s, x * s, 18.5 * s,
+                           fill=bg, width=max(1, int(round(s))))
+
+
+def draw_plus_icon(cv, size, color):
+    """Draw a plus on canvas *cv*, in *color*, sized to *size*.
+
+    Two bars and not the ``+`` character: it sits in the same column as the
+    pencil and the trash on the rows above it, and has to be the same green.
+    """
+    s = size / ICON_GRID
+    cv.create_rectangle(11 * s, 4.5 * s, 13 * s, 19.5 * s,
+                        fill=color, outline="")
+    cv.create_rectangle(4.5 * s, 11 * s, 19.5 * s, 13 * s,
+                        fill=color, outline="")
+
+
+def draw_arrow_icon(cv, size, color, down=False):
+    """Draw a solid triangle on canvas *cv*, pointing up or *down*.
+
+    Full-size rather than the small ▴ ▾ this replaces: in an 18 px cell the
+    little ones are a weak thing to aim at, and a filled triangle needs no
+    font to exist.
+    """
+    s = size / ICON_GRID
+    pts = ([(12, 19), (4, 8.5), (20, 8.5)] if down
+           else [(12, 5), (4, 15.5), (20, 15.5)])
+    cv.create_polygon(_scaled(pts, s), fill=color, outline="")
+
+
 def flat_button(parent, text, bg, fg, active_bg, command,
                 padx=10, pady=2):
     """A flat coloured button whose colours survive every platform.

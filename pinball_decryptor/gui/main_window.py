@@ -21943,6 +21943,13 @@ class MainWindow:
             if _cv is not None:
                 _cv.configure(highlightbackground=c["border"])
 
+        # The Multi-boot tab's images table is a grid of raw tk widgets
+        # (item 90's ImageTable, not a ttk.Treeview), so its colours do not
+        # follow the ttk styles above - it must be told.
+        _mb = getattr(self, "_multiboot_panel", None)
+        if _mb is not None and hasattr(_mb, "apply_theme"):
+            _mb.apply_theme(c)
+
         if hasattr(self, "_compare_tree"):
             # The rows a double-click can open, in the same hue every other
             # tree uses for "this row leads somewhere".

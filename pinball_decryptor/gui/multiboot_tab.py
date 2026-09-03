@@ -3208,12 +3208,22 @@ class MultibootPanel:
             value=os.environ.get("PAD_MULTIBOOT_AUTO", "1") != "0")
         self._pv_debounce_job = None
         self._pv_pending = 0            # renders coalesced by the debounce
+        #: THE SELECTION'S OWN LATER TURN.  Filling the table selects a row,
+        #: and the per-selection work (the editor's highlight, the music, a
+        #: cached frame or the 'not drawn yet' caption, a render) runs on
+        #: the NEXT loop turn, not synchronously - which is what the
+        #: ``ttk.Treeview`` this table replaced did through
+        #: ``<<TreeviewSelect>>`` (it "arrives a turn LATER"), and what the
+        #: restore below depends on: a refresh it is about to cancel must
+        #: not leave a premature 'being drawn' caption on the strip.  This
+        #: is that turn's job (see :meth:`_defer_selection`).
+        self._select_job = None
         #: ...EXCEPT THE FIRST ONE AFTER A RESTORE.  A restore must start no
         #: tool at all (see :meth:`restore_state`), and cancelling the
         #: render it queued is not enough on its own: filling the table
-        #: selects a row, and <<TreeviewSelect>> arrives a turn LATER and
-        #: asks for another.  So the next automatic render is swallowed and
-        #: the flag drops; the first thing the person then does draws.
+        #: selects a row, and that later turn asks for another.  So the next
+        #: automatic render is swallowed and the flag drops; the first thing
+        #: the person then does draws.
         self._pv_idle = False
         #: THE PATH PROBE.  One stat of the box's text, on a worker, so the
         #: row can say what is at the path (see :func:`probe_card_path`).
@@ -3315,7 +3325,7 @@ class MultibootPanel:
         self._stopped = True
         for attr in ("_drain_job", "_play_job", "_pv_debounce_job",
                      "_probe_job", "_probe_slow_job", "_measure_job",
-                     "_sound_job", "_plan_job"):
+                     "_sound_job", "_plan_job", "_select_job", "_black_job"):
             job = getattr(self, attr, None)
             if job is not None:
                 try:
@@ -3704,79 +3714,73 @@ class MultibootPanel:
 
     # -- 3. the images table --------------------------------------------
 
-    #: The table, left to right: ``(id, heading, width, minwidth,
-    #: stretch)``.  The two text columns stretch and everything else keeps
-    #: its width, so widening the window widens the TITLES - and the four
-    #: icon columns stay pinned to the right edge where the hand expects
-    #: them.  ``code`` is filled by whatever reports the game code version
-    #: of an image; blank until then, and blank for a row that has none.
+    #: The table's TEXT columns, left to right: ``(id, heading, minwidth,
+    #: stretch)``.  The four actions live in their own icon column to the
+    #: LEFT of these (David: "all of the icons should be on the far left
+    #: side"), drawn by :class:`.image_table.ImageTable`, so they are not
+    #: here.  The text columns that carry a name stretch and the short ones
+    #: keep their width, so widening the window widens the titles.  ``code``
+    #: is filled by whatever reports the game code version of an image;
+    #: blank until then, and blank for a row that has none.  There is no
+    #: ``#`` column - David: "we don't need the '#' column".
+    #: The minwidths sum (with the four icon columns) to a natural table
+    #: width a little OVER the ~904 px the Treeview this replaced asked for
+    #: - deliberately, not by chance.  The tab is laid out at the table's
+    #: natural width (that is how its tests and the fit sweep measure it),
+    #: and the preview strip beside the picture takes its caption's
+    #: wraplength from what is left of that width: a narrower table gives
+    #: the strip less room and cuts a caption that used to fit.  So the
+    #: table stays at least as wide as the one before it.
     TABLE_COLUMNS = (
-        ("idx", "#", 30, 30, False),
-        ("title", "Title", 150, 70, True),
-        ("sub", "Subtitle", 160, 60, True),
-        ("media", "Picture", 200, 60, True),
-        ("music", "Music", 90, 50, True),
-        ("sound", "Confirm", 80, 50, False),
-        ("code", "Code", 90, 50, False),
-        ("edit", "", 26, 26, False),
-        ("del", "", 26, 26, False),
-        ("up", "", 26, 26, False),
-        ("down", "", 26, 26, False),
+        ("title", "Title", 160, True),
+        ("sub", "Subtitle", 170, True),
+        ("media", "Picture", 220, True),
+        ("music", "Music", 95, True),
+        ("sound", "Confirm", 90, False),
+        ("code", "Code", 90, False),
     )
 
-    #: The four icon columns: ``(column id, glyph, dimmed glyph, method)``.
-    #: The dimmed glyph is what the cell shows when the action cannot do
-    #: anything from that row - the first row cannot move up, the last
-    #: cannot move down - so the arrow says so instead of silently doing
-    #: nothing.  Outline / filled rather than colour: a Treeview colours a
-    #: ROW, never one cell of it.
-    #: CHECKED IN THE SCREENSHOT, which is the only place the font fallback
-    #: shows itself: all four draw as ordinary monochrome text on Windows
-    #: (the colour fringing a 4x crop shows on them is ClearType's, and it
-    #: is on the minus sign and the digits too).  The FULL-SIZE triangles
-    #: rather than the small ▴ ▾: in a 26 px column the small ones are a
-    #: weak thing to aim at.
-    ROW_ICONS = (("edit", "✎", "✎", "_icon_edit"),
-                 ("del", "−", "−", "_icon_remove"),
-                 ("up", "▲", "△", "_icon_up"),
-                 ("down", "▼", "▽", "_icon_down"))
-
-    #: The iid of the template row - the last row of the table, dim, with a
-    #: '+': an empty card shows just that row, which teaches the control.
-    ADD_ROW = "add"
+    #: The four per-row actions, in the order they sit at the left edge:
+    #: ``(kind, tooltip)``.  A pencil (green), a bin (red) and two arrows
+    #: (green), each a canvas drawing rather than a character - see
+    #: :func:`.widgets.draw_pencil_icon` for why a glyph would not do.  The
+    #: tips are INSTANT and FOLLOW THE POINTER (the tooltip's own doing);
+    #: an arrow that cannot move (up on the first row, down on the last) is
+    #: drawn gray and does nothing.
+    ROW_ACTIONS = (
+        ("edit", "Edit this image - its title, subtitle, picture and "
+                 "sounds. A click on the row's text opens the same editor."),
+        ("del", "Take this image off the card."),
+        ("up", "Move this image one place earlier in the menu. The first "
+               "image is the PRIMARY the machine falls back to."),
+        ("down", "Move this image one place later in the menu."),
+    )
 
     def _build_table(self, parent, th):
         """THE IMAGES TABLE.  Wide, so each image's settings are columns
         rather than something hidden in a dialog, and the row is where the
-        row is worked on: a pencil, a minus and two arrows at its right
-        edge, acting on that row.  A Treeview holds no widgets, so the
-        icons are narrow glyph columns and one <Button-1> binding that asks
-        which row and which column the click landed in - the standard way,
-        and it reads as icons."""
+        row is worked on: a pencil, a bin and two arrows at its LEFT edge,
+        acting on that row.
+
+        A grid of real widgets (:class:`.image_table.ImageTable`), not a
+        ``ttk.Treeview``: the actions have to be coloured one cell at a
+        time, the row text has to underline under the pointer and open the
+        editor on a single click, and a Treeview can do none of that (David,
+        2026-09-02 - the whole of step 2 in the tab's handoff)."""
+        from .image_table import ImageTable
         box = ttk.Frame(parent)
         box.pack(fill=tk.X, pady=(8, 0))
         self._table_box = box
-        cols = tuple(c[0] for c in self.TABLE_COLUMNS)
-        self._tree = ttk.Treeview(box, columns=cols, show="headings",
-                                  height=LIST_MIN_ROWS, selectmode="browse")
-        for name, head, width, minwidth, stretch in self.TABLE_COLUMNS:
-            self._tree.heading(name, text=head)
-            centred = name == "idx" or not head      # the index, the icons
-            self._tree.column(name, width=width, minwidth=minwidth,
-                              stretch=stretch,
-                              anchor=tk.CENTER if centred else tk.W)
-        self._tree.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        sb = ttk.Scrollbar(box, orient=tk.VERTICAL, command=self._tree.yview)
-        self._list_sb = sb
-        self._tree.configure(yscrollcommand=sb.set)
-        sb.pack(side=tk.LEFT, fill=tk.Y)
-        # The template row is dim, so it reads as an invitation rather than
-        # as an image that is already on the card.
-        self._tree.tag_configure("add", foreground=th["gray"])
-        self._tree.bind("<<TreeviewSelect>>", lambda _e: self._row_selected())
-        self._tree.bind("<Button-1>", self._table_click)
-        self._tree.bind("<Double-1>", self._table_double_click)
-        self._tree.bind("<Return>", lambda _e: self.edit_image())
+        self._table = ImageTable(
+            box, self.TABLE_COLUMNS, self.ROW_ACTIONS, self._theme_fn,
+            on_select=self._on_table_select,
+            on_activate=lambda i: self.edit_image(i),
+            on_action=self._table_action,
+            on_add=lambda: self._add_image(),
+            on_context=self._popup_list_menu,
+            add_text=self.ADD_ROW_TEXT, add_tip=self.LIST_TIP,
+            visible_rows=LIST_MIN_ROWS, max_rows=LIST_MAX_ROWS)
+        self._table.pack(fill=tk.X)
         self._build_list_menu(th)
         self._row_lbl = ttk.Label(parent, foreground=th["gray"], text="",
                                   anchor=tk.W)
@@ -3788,8 +3792,9 @@ class MultibootPanel:
 
         The icons are the way in; this costs nothing, is where a hand
         trained on every other list looks, and is what a keyboard reaches
-        (the menu key, and Enter on a row)."""
-        menu = tk.Menu(self._tree, tearoff=0)
+        (the menu key, and Enter on a row).  The table itself catches the
+        right-click and the menu key and calls :meth:`_popup_list_menu`."""
+        menu = tk.Menu(self._table, tearoff=0)
         for label, attr, needs_row in self.LIST_ACTIONS:
             if label is None:
                 menu.add_separator()
@@ -3797,12 +3802,6 @@ class MultibootPanel:
             menu.add_command(label=label,
                              command=lambda a=attr: getattr(self, a)())
         self._list_menu = menu
-        self._tree.bind("<Button-3>", self._popup_list_menu)
-        for seq in ("<App>", "<Shift-F10>"):
-            try:
-                self._tree.bind(seq, self._popup_list_menu)
-            except tk.TclError:                         # pragma: no cover
-                pass
 
     #: The right-click menu, in the order the icons are in.  ``needs_row``
     #: entries are greyed when the click missed every image row, so a
@@ -3814,19 +3813,16 @@ class MultibootPanel:
                     ("Move up", "_move_up", True),
                     ("Move down", "_move_down", True))
 
-    def _popup_list_menu(self, event=None):
-        """Pop the menu up under the pointer, over the row it landed on."""
+    def _popup_list_menu(self, row, x, y):
+        """Pop the menu up at ``(x, y)``, over the row the table says the
+        click or the menu key landed on (``None`` off any image row).
+
+        The table has already selected that row before calling this, so the
+        greying below only has to decide which commands a row-less opening
+        offers (Add… alone)."""
         menu = getattr(self, "_list_menu", None)
         if menu is None:
             return None
-        row = None
-        if event is not None and getattr(event, "x_root", None) is not None:
-            item = self._row_at(event)
-            if item is not None:
-                self._select_row(item)
-                row = item
-        if row is None:
-            row = self._selected()
         i = 0
         for label, _attr, needs_row in self.LIST_ACTIONS:
             if label is None:
@@ -3841,11 +3837,6 @@ class MultibootPanel:
             except tk.TclError:                         # pragma: no cover
                 pass
             i += 1
-        x = getattr(event, "x_root", None)
-        y = getattr(event, "y_root", None)
-        if x is None or y is None:                      # a keyboard opening
-            x = self._tree.winfo_rootx() + 20
-            y = self._tree.winfo_rooty() + 20
         try:
             menu.tk_popup(int(x), int(y))
         finally:
@@ -3855,94 +3846,29 @@ class MultibootPanel:
                 pass
         return "break"
 
-    def _row_at(self, event):
-        """The image index the pointer is over, or None (the template row,
-        the heading and empty space are all None)."""
-        try:
-            item = self._tree.identify_row(event.y)
-        except tk.TclError:                             # pragma: no cover
-            return None
-        try:
-            i = int(item)
-        except (TypeError, ValueError):
-            return None
-        return i if 0 <= i < len(self._rows) else None
-
-    def _column_at(self, event):
-        """The id of the column the pointer is over ('title', 'up', …), or
-        '' when it is not over a cell."""
-        try:
-            if self._tree.identify_region(event.x, event.y) != "cell":
-                return ""
-            col = self._tree.identify_column(event.x)
-        except tk.TclError:                             # pragma: no cover
-            return ""
-        try:
-            n = int(str(col).lstrip("#")) - 1
-        except ValueError:
-            return ""
-        if 0 <= n < len(self.TABLE_COLUMNS):
-            return self.TABLE_COLUMNS[n][0]
-        return ""
-
     def _select_row(self, i):
         """Point the table at image *i*.
 
         The blue row here, the fields in the editor below it and the amber
         card in the picture are three views of ONE choice, so everything
         that moves that choice comes through here - the flippers included.
-        Quiet when the row is not there (a mid-rebuild tree)."""
-        try:
-            self._tree.selection_set(str(i))
-            self._tree.focus(str(i))
-        except tk.TclError:                             # pragma: no cover
-            pass
+        Quiet when the table is not built yet (a panel under construction)."""
+        table = getattr(self, "_table", None)
+        if table is not None:
+            table.select(i)
 
-    def _table_click(self, event):
-        """One click in the table: the template row adds an image, an icon
-        column acts on ITS row, everything else selects as usual."""
-        try:
-            item = self._tree.identify_row(event.y)
-        except tk.TclError:                             # pragma: no cover
-            return None
-        if item == self.ADD_ROW:
-            self._add_image()
-            return "break"
-        i = self._row_at(event)
-        if i is None:
-            return None
-        col = self._column_at(event)
-        for name, _glyph, _dim, attr in self.ROW_ICONS:
-            if name == col:
-                self._select_row(i)
-                getattr(self, attr)(i)
-                return "break"
-        return None
-
-    def _table_double_click(self, event):
-        """A double-click still opens the editor - on a row, and on the
-        template row it is simply a second Add."""
-        try:
-            if self._tree.identify_row(event.y) == self.ADD_ROW:
-                return "break"          # the single click already added one
-        except tk.TclError:                             # pragma: no cover
-            pass
-        if self._column_at(event) in [c[0] for c in self.ROW_ICONS]:
-            return "break"              # the icon already acted, once
-        self.edit_image()
-        return "break"
-
-    def _icon_edit(self, i=None):
-        self.edit_image(self._selected() if i is None else i)
-
-    def _icon_remove(self, i=None):
-        self._remove_image()
-
-    def _icon_up(self, i=None):
-        self._move_image(-1)
-
-    def _icon_down(self, i=None):
-        self._move_image(1)
+    def _table_action(self, i, kind):
+        """One of a row's icons was clicked (or its context-menu twin):
+        edit / remove / move.  The table has selected the row first, so the
+        remove and the moves read it back through :meth:`_selected`."""
+        if kind == "edit":
+            self.edit_image(i)
+        elif kind == "del":
+            self._remove_image()
+        elif kind == "up":
+            self._move_image(-1)
+        elif kind == "down":
+            self._move_image(1)
 
     def _move_up(self):
         self._move_image(-1)
@@ -4208,95 +4134,160 @@ class MultibootPanel:
     _cell_anim = staticmethod(cell_anim)
     _cell_media = staticmethod(cell_media)
 
-    #: What the last row of the table says.  Dim, with a '+': an empty card
+    #: What the template row says.  Dim, with a green '+': an empty card
     #: shows only this, which is both the way in and the lesson.
     ADD_ROW_TEXT = "Add an image…"
 
     def _values(self, i, row):
-        """ONE ROW OF THE TABLE, in the column order of TABLE_COLUMNS: the
-        index, the title (with what is wrong with its .raw when something
-        is), the subtitle, what this image shows and its music, the
-        sound that plays when it is chosen, the game code version if
-        anything has reported one - and then the four icons that act on
-        this row.
+        """ONE ROW OF THE TABLE, as a dict keyed by column id: the title
+        (with what is wrong with its .raw when something is), the subtitle,
+        what this image shows and its music, the sound that plays when it
+        is chosen, and the game code version if anything has reported one.
 
         The settings are COLUMNS now rather than a phrase: the table has
         the whole width of the tab, and what an image is set to is worth
-        more on screen than one word summarising all of it."""
-        last = len(self._rows) - 1
-        icons = []
-        for name, glyph, dim, _attr in self.ROW_ICONS:
-            live = not (name == "up" and i == 0) and \
-                not (name == "down" and i >= last)
-            icons.append(glyph if live else dim)
-        return (i, list_title(row, i), (row.subtitle or "").strip(),
-                cell_media(row), _cell(row.music),
-                self._confirm_cell(row), (row.version or "").strip(),
-                ) + tuple(icons)
-
-    def _add_row_values(self):
-        """The template row: a '+' where the index is and the invitation
-        where the title is, and nothing in the rest."""
-        return ("+", self.ADD_ROW_TEXT) + ("",) * (
-            len(self.TABLE_COLUMNS) - 2)
+        more on screen than one word summarising all of it.  The actions
+        are drawn by the table itself and are not in here."""
+        return {
+            "title": list_title(row, i),
+            "sub": (row.subtitle or "").strip(),
+            "media": cell_media(row),
+            "music": _cell(row.music),
+            "sound": self._confirm_cell(row),
+            "code": (row.version or "").strip(),
+        }
 
     def _refresh_tree(self, select=None):
+        """Rebuild the table from ``self._rows`` and settle everything that
+        reads off it SYNCHRONOUSLY - the editor, the row label, the flippers,
+        the status and the menu summary - and ask for a redraw.
+
+        ``set_rows`` sets the selection SILENTLY; the per-selection work
+        that touches the PICTURE (the highlight, the music, a cached frame,
+        the caption) runs on the next loop turn (:meth:`_defer_selection`),
+        exactly as the old Treeview's ``<<TreeviewSelect>>`` did, so a
+        rebuild that a caller is about to cancel (a restore) or that no one
+        is watching (a non-interactive test) never leaves a premature
+        'being drawn' caption on the strip."""
+        table = getattr(self, "_table", None)
+        if table is None:
+            return
+        values = [self._values(i, row) for i, row in enumerate(self._rows)]
+        grew = table.count() != len(self._rows)
+        prev = table.selected()
         try:
-            for item in self._tree.get_children():
-                self._tree.delete(item)
-            for i, row in enumerate(self._rows):
-                self._tree.insert("", tk.END, iid=str(i),
-                                  values=self._values(i, row))
-            self._tree.insert("", tk.END, iid=self.ADD_ROW, tags=("add",),
-                              values=self._add_row_values())
-            # As tall as it HAS rows (the template row included), between
-            # LIST_MIN_ROWS and LIST_MAX_ROWS: eight rows of empty box
-            # under two images is a hole in the tab, and sixteen images
-            # would leave the picture nothing.
-            rows = max(LIST_MIN_ROWS,
-                       min(LIST_MAX_ROWS, len(self._rows) + 1))
-            if int(self._tree.cget("height")) != rows:
-                self._tree.configure(height=rows)
-                # The table is a different height, so the picture has a
-                # different amount of room; re-measure once the new
-                # requested sizes have settled.
-                self._remeasure()
-            if select is not None and 0 <= select < len(self._rows):
-                self._tree.selection_set(str(select))
-                self._tree.focus(str(select))
-            top = max(0, len(self._rows) - 1)
-            if self._default_spin is not None:
-                self._default_spin.configure(to=top)
-        except tk.TclError:
+            table.set_rows(values, select=select)
+        except tk.TclError:                             # pragma: no cover
             pass
+        if grew:
+            # The table has a different number of rows, so it is a
+            # different height and the picture has a different amount of
+            # room; re-measure once the new requested sizes have settled.
+            self._remeasure()
+        top = max(0, len(self._rows) - 1)
+        if self._default_spin is not None:
+            try:
+                self._default_spin.configure(to=top)
+            except tk.TclError:                         # pragma: no cover
+                pass
         self._sync_flippers()
         self._load_editor()
         self._update_edit_status()
         self._update_menu_summary()
         self._update_row_label()
         self.schedule_preview()
+        if table.selected() != prev:
+            self._defer_selection()
+
+    def _on_table_select(self, _i):
+        """The table moved the selection by a click, a key or a flipper:
+        take the same later turn a rebuild does, so every path into a new
+        selection reaches the picture the same way and at the same time."""
+        self._defer_selection()
+
+    def _defer_selection(self):
+        """Run :meth:`_apply_selection` on the next loop turn, once.
+
+        This is the old ``<<TreeviewSelect>>``: it arrives a turn later, so
+        a selection made by a rebuild that is then cancelled, or set with
+        ``_pv_idle`` about to go up, does not draw or caption synchronously.
+        Coalesced - a burst of selections is one turn's work."""
+        self._cancel_selection()
+        if self._stopped:
+            return
+        try:
+            self._select_job = self._timer().after_idle(self._apply_selection)
+        except tk.TclError:                             # pragma: no cover
+            self._apply_selection()
+
+    def _cancel_selection(self):
+        job = getattr(self, "_select_job", None)
+        self._select_job = None
+        if job is not None:
+            try:
+                self._timer().after_cancel(job)
+            except (tk.TclError, ValueError):           # pragma: no cover
+                pass
 
     def _update_row_label(self):
         """The one dim line under the table.  It has two jobs and never
         more than one line: which .raw the selected image came from (the
         table has no room for a path, and it is the one fact a row cannot
         show), and - when nothing is selected - the quiet sentence that
-        teaches the icons."""
+        teaches the icons.
+
+        The path is shortened to the WIDTH THE LINE HAS, not a fixed 90
+        (David: the path "should span the whole width"): the middle is
+        dropped only as far as the line's own pixels require, and the whole
+        of it is always in the tooltip."""
         lbl = getattr(self, "_row_lbl", None)
         if lbl is None:
             return
         i = self._selected()
         full = _cell_image(self._rows[i]) if i is not None else ""
         try:
-            lbl.configure(text=_shorten(full, 90) if full else self.ROW_HINT)
+            lbl.configure(text=_shorten(full, self._row_label_chars())
+                          if full else self.ROW_HINT)
             self._row_tip.text = full or self.LIST_TIP
         except tk.TclError:
             pass
 
-    def _row_selected(self):
-        """A row was picked: load it into the editor variables AND point the
-        preview's highlight at it, so the image being edited is the one on
-        screen."""
+    def _row_label_chars(self):
+        """How many characters the row-path line can show, from the pixels
+        it actually has - its own width, or the table's if it has not been
+        laid out yet, in its own font.  Falls back wide so a line not on
+        screen still shows a whole ordinary path."""
+        lbl = getattr(self, "_row_lbl", None)
+        if lbl is None:
+            return 140
+        try:
+            px = lbl.winfo_width()
+            if px <= 1:
+                px = self._table.winfo_width()
+        except (tk.TclError, AttributeError):           # pragma: no cover
+            px = 0
+        if px <= 1:
+            return 140
+        try:
+            ch = max(1, tkfont.Font(font=lbl.cget("font")).measure("0"))
+        except tk.TclError:                             # pragma: no cover
+            return 140
+        return max(40, int(px // ch))
+
+    def _apply_selection(self):
+        """The selection's consequences for the PICTURE, run a turn after
+        the selection moved (see :meth:`_defer_selection`): load the row
+        into the editor, name its .raw under the table, point the preview's
+        highlight at it, follow it with the right music, and draw.
+
+        The one place these live, whichever way the selection moved - a
+        click or a key on the table, a flipper, or a rebuild.  Reads the
+        CURRENT selection rather than a captured index, because the turn
+        between the change and here is a turn in which it could move
+        again."""
+        self._select_job = None
+        if self._stopped:
+            return
         self._load_editor()
         self._update_row_label()
         i = self._selected()
@@ -4310,17 +4301,11 @@ class MultibootPanel:
             self.schedule_preview()
 
     def _selected(self):
-        try:
-            sel = self._tree.selection()
-        except tk.TclError:
+        table = getattr(self, "_table", None)
+        if table is None:
             return None
-        if not sel:
-            return None
-        try:
-            i = int(sel[0])
-        except ValueError:
-            return None
-        return i if 0 <= i < len(self._rows) else None
+        i = table.selected()
+        return i if i is not None and 0 <= i < len(self._rows) else None
 
     def _load_editor(self):
         """Editor <- the selected row (guarded so the traces stay quiet)."""
@@ -4375,10 +4360,9 @@ class MultibootPanel:
         row.confirm = "" if conf_v.strip().lower() == "menu" else conf_v
         if media:
             self._apply_media(i, row)
-        try:
-            self._tree.item(str(i), values=self._values(i, row))
-        except tk.TclError:
-            pass
+        table = getattr(self, "_table", None)
+        if table is not None:
+            table.set_row(i, self._values(i, row))
         self._update_edit_status()
         self._update_row_label()
 
@@ -4897,6 +4881,22 @@ class MultibootPanel:
         self._media_entries = {}
         self._clip_widgets = ()
 
+    def apply_theme(self, colors=None):
+        """The app switched dark/light: re-colour the images table.
+
+        The table is a grid of raw tk widgets (:class:`.image_table.
+        ImageTable`) whose colours the ttk styles do not reach, so
+        MainWindow._apply_theme calls this.  *colors* is the app theme dict
+        it already has; without one the table re-reads it from
+        ``self._theme_fn``.  Nothing else on the tab needs it - the rest is
+        ttk, or the preview canvas which redraws in its own colours."""
+        table = getattr(self, "_table", None)
+        if table is not None:
+            try:
+                table.apply_theme(colors)
+            except tk.TclError:                         # pragma: no cover
+                pass
+
     def open_menu_settings(self):
         """'Menu settings…': the sounds, volume, countdown, default image,
         the bypass and the selector build path, in a modal.  The button
@@ -5090,14 +5090,11 @@ class MultibootPanel:
         """The menu's confirm sound changed, so every row that INHERITS it
         now says something else; the rows with one of their own do not
         move."""
-        tree = getattr(self, "_tree", None)
-        if tree is None:
+        table = getattr(self, "_table", None)
+        if table is None:
             return
-        try:
-            for i, row in enumerate(self._rows):
-                tree.set(str(i), "sound", self._confirm_cell(row))
-        except tk.TclError:                             # pragma: no cover
-            pass
+        for i, row in enumerate(self._rows):
+            table.set_cell(i, "sound", self._confirm_cell(row))
 
     # ------------------------------------------------------------------
     # the form
@@ -7467,6 +7464,9 @@ class MultibootPanel:
         per typing pause (which is what it did) makes Apply, Build, Flash,
         Run and the two menus swallow clicks while someone types a title."""
         self._busy = busy
+        table = getattr(self, "_table", None)
+        if table is not None:
+            table.set_busy(busy)        # the row icons must not act mid-run
         for btn in list(getattr(self, "_action_btns", ())):
             if btn is None:
                 continue

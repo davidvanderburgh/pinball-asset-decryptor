@@ -445,7 +445,7 @@ def measure(label, collect=False):
         % (panel._pv_w, panel._pv_h, panel._pv_w / float(panel._pv_h),
            multiboot_tab.FRAME_W / float(multiboot_tab.FRAME_H)))
     log("   table        rows %d  reqh %d  reqw %d"
-        % (len(panel._tree.get_children()),
+        % (panel._table.count(),
            panel._table_box.winfo_reqheight(),
            panel._table_box.winfo_reqwidth()))
     for btn, name in ((panel._out_entry, "Multi-boot card image"),
@@ -509,15 +509,15 @@ def s_fill():
             log("MISSING image %s - the row will show the path only" % path)
         panel.add_image(path)
     for i, (_path, title, sub) in enumerate(IMAGES):
-        # Select the row, let <<TreeviewSelect>> load the editor, then type
-        # into it: the editor writes back to the selected row on every
-        # keystroke (the trace on _ed_title / _ed_sub).
-        panel._tree.selection_set(str(i))
+        # Select the row, let the table's later turn load the editor,
+        # then type into it: the editor writes back to the selected row on
+        # every keystroke (the trace on _ed_title / _ed_sub).
+        panel._table.select(i)
         root.update()
         panel._ed_title.set(title)
         panel._ed_sub.set(sub)
     # The second image animates: its attract clip, through the clip fields.
-    panel._tree.selection_set("1")
+    panel._table.select(1)
     root.update()
     kind, start, seconds, fps = CLIP
     panel._ed_media.set(kind)
@@ -535,8 +535,7 @@ def s_fill():
         row.version = version
     panel._refresh_tree(select=HIGHLIGHT)
     # Leave the highlighted row selected so the editor shows its text.
-    panel._tree.selection_set(str(HIGHLIGHT))
-    panel._tree.focus(str(HIGHLIGHT))
+    panel._table.select(HIGHLIGHT)
     root.update()
     panel._plan_step("plan", 0, PLAN_TEXT)
     # The preview: a frame through load_frame, the panel's public seam -
@@ -566,8 +565,8 @@ def s_fill():
     log("preview status: %r" % panel._pv_status.cget("text"))
     log("menu summary: %r" % panel._menu_lbl.cget("text"))
     log("table rows:")
-    for i in panel._tree.get_children():
-        log("   %-4s %s" % (i, panel._tree.item(i)["values"]))
+    for i in range(panel._table.count()):
+        log("   %-4s %s" % (i, panel._table.row_values(i)))
     log("row label: %r" % panel._row_lbl.cget("text"))
     log("tab reqheight=%s notebook height=%s window=%sx%s"
         % (win._tab_multiboot.winfo_reqheight(), win._notebook.cget("height"),
@@ -643,8 +642,7 @@ def s_load():
     log("confirm sounds: %s" % [r.confirm or "(the menu's)"
                                 for r in panel._rows])
     panel._refresh_tree(select=HIGHLIGHT)
-    panel._tree.selection_set(str(HIGHLIGHT))
-    panel._tree.focus(str(HIGHLIGHT))
+    panel._table.select(HIGHLIGHT)
     root.update()
     # The load cleared the preview (its media dir changed under it); put the
     # frame back through the same public seam.
@@ -666,8 +664,8 @@ def s_load():
     log("hint: %r" % panel._hint.cget("text"))
     log("menu summary: %r" % panel._menu_lbl.cget("text"))
     log("table rows:")
-    for i in panel._tree.get_children():
-        log("   %-4s %s" % (i, panel._tree.item(i)["values"]))
+    for i in range(panel._table.count()):
+        log("   %-4s %s" % (i, panel._table.row_values(i)))
     log("tab reqheight=%s window=%sx%s"
         % (win._tab_multiboot.winfo_reqheight(), root.winfo_width(),
            root.winfo_height()))
